@@ -49,7 +49,8 @@ bool ConvOclBwdWrW53::IsApplicable(const ExecutionContext& ctx,
 {
     if(env::disabled(MIOPEN_DEBUG_CONV_DIRECT_OCL_WRW53))
         return false;
-    if(ThisSolverIsDeprecatedStatic::IsDisabled(ctx))
+    const std::string name = ctx.GetStream().GetDeviceName();
+    if(!(StartsWith(name, "gfx8") || StartsWith(name, "gfx90") || StartsWith(name, "gfx103")))
         return false;
     if(!ctx.use_opencl_convolutions)
         return false;
@@ -115,7 +116,6 @@ bool ConvOclBwdWrW53::IsApplicable(const ExecutionContext& ctx,
     /// Resolve NaN issue on gfx908, manifested on Jenkins.
     /// Note that there is another solver, ConvOclBwdWrW2, that has very similar
     /// performance and applicable for the affected "popular" configs (7x7 filter, 1x1 padding).
-    const auto name = ctx.GetStream().GetDeviceName();
     workaround =
         workaround || (problem.IsFp16() && (name == "gfx908") && problem.GetWeightsWidth() == 7 &&
                        problem.GetWeightsHeight() == 7 && problem.GetPadW() == 1);
@@ -416,7 +416,8 @@ ConvSolution ConvOclBwdWrW53::GetSolution(const ExecutionContext& ctx,
                           GRP_SZ) != miopenStatusSuccess ||
        out_n_vert_reads <= 0)
     {
-        return {miopenStatusNotInitialized};
+        result = ConvSolution{miopenStatusNotInitialized};
+        return result;
     }
 
     int out_n_vert_read_loops = static_cast<int>(std::ceil(
@@ -440,12 +441,14 @@ ConvSolution ConvOclBwdWrW53::GetSolution(const ExecutionContext& ctx,
     if(out_n_horizon_read_loops > 2 && problem.GetPadW() != 0)
     {
         MIOPEN_LOG_I2("Padding where split is more than 2 ways is not supported.");
-        return {miopenStatusNotInitialized};
+        result = ConvSolution{miopenStatusNotInitialized};
+        return result;
     }
     if(out_n_horizon_read_loops > 1 && problem.GetGroupCount() > 1)
     {
         MIOPEN_LOG_I2("For large images, group support is missing.");
-        return {miopenStatusNotInitialized};
+        result = ConvSolution{miopenStatusNotInitialized};
+        return result;
     }
 
     int out_horizon_last_chunk_valid_read_units = std::ceil(

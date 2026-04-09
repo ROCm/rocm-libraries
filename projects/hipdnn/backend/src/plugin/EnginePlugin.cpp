@@ -69,6 +69,12 @@ void EnginePlugin::resolveSymbols()
     _funcDestroyExecutionContext
         = _lib.getSymbol<decltype(_funcDestroyExecutionContext)>(funcNameDestroyExecutionContext);
 
+    const auto funcNameGetWorkspaceSizeFromExecutionContext
+        = "hipdnnEnginePluginGetWorkspaceSizeFromExecutionContext";
+    _funcGetWorkspaceSizeFromExecutionContext
+        = _lib.getSymbol<decltype(_funcGetWorkspaceSizeFromExecutionContext)>(
+            funcNameGetWorkspaceSizeFromExecutionContext);
+
     const auto funcNameExecuteOpGraph = "hipdnnEnginePluginExecuteOpGraph";
     _funcExecuteOpGraph = _lib.getSymbol<decltype(_funcExecuteOpGraph)>(funcNameExecuteOpGraph);
 
@@ -100,7 +106,7 @@ std::vector<int64_t> EnginePlugin::getAllEngineIds() const
     THROW_IF_NE(numEngines,
                 maxEngines,
                 HIPDNN_STATUS_PLUGIN_ERROR,
-                "Number of engines returned does not match expected count");
+                "Number of engines returned does not match the number reported by the plugin");
 
     std::sort(engineIds.begin(), engineIds.end());
     if(std::adjacent_find(engineIds.begin(), engineIds.end()) != engineIds.end())
@@ -212,6 +218,19 @@ size_t EnginePlugin::getWorkspaceSize(hipdnnEnginePluginHandle_t handle,
     size_t workspaceSize = 0;
     invokePluginFunction(
         "get workspace size", _funcGetWorkspaceSize, handle, engineConfig, opGraph, &workspaceSize);
+    return workspaceSize;
+}
+
+size_t EnginePlugin::getWorkspaceSize(hipdnnEnginePluginHandle_t handle,
+                                      hipdnnEnginePluginExecutionContext_t executionContext) const
+{
+    assert(_initialized);
+    size_t workspaceSize = 0;
+    invokePluginFunction("get workspace size from execution context",
+                         _funcGetWorkspaceSizeFromExecutionContext,
+                         handle,
+                         executionContext,
+                         &workspaceSize);
     return workspaceSize;
 }
 

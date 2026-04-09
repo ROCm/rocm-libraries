@@ -1,30 +1,19 @@
-
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 
 #include <string>
+#include <tuple>
+#include <vector>
 
 #include "ck_tile/core.hpp"
 #include "ck_tile/host/kernel_launch.hpp"
 #include "ck_tile/ops/epilogue.hpp"
 #include "ck_tile/ops/gemm.hpp"
 #include "ck_tile/ops/grouped_convolution.hpp"
-
-struct GemmWarpConfig_Mfma
-{
-    static constexpr ck_tile::index_t M_Warp_Tile = 32;
-    static constexpr ck_tile::index_t N_Warp_Tile = 32;
-    static constexpr ck_tile::index_t K_Warp_Tile = 16;
-};
-
-struct GemmWarpConfig_Wmma
-{
-    static constexpr ck_tile::index_t M_Warp_Tile = 16;
-    static constexpr ck_tile::index_t N_Warp_Tile = 16;
-    static constexpr ck_tile::index_t K_Warp_Tile = 16;
-};
+#include "ck_tile/ops/elementwise/unary_element_wise_operation.hpp"
+#include "conv_configs.hpp"
 
 template <typename InDataType, typename WeiDataType, typename AccDataType, typename OutDataType>
 auto calculate_rtol_atol(const ck_tile::index_t GemmK,
@@ -93,7 +82,10 @@ ck_tile::index_t fill_spatial_dimensions(std::vector<ck_tile::index_t>& filter_s
     return n_dim_sp;
 }
 
-auto create_args(int argc, char* argv[])
+auto create_args(
+    int argc,
+    char* argv[],
+    const std::vector<std::tuple<std::string, std::string, std::string>>& extra_args = {})
 {
     ck_tile::ArgParser arg_parser;
     arg_parser.insert("g", "2", "group dimension")
@@ -137,6 +129,18 @@ auto create_args(int argc, char* argv[])
         .insert("init", "0", "0:random, 1:linear, 2:constant(1)")
         .insert("json", "0", "0: No Json, 1: Dump Results in Json format");
 
+    // Allow per-binary CLI customization (e.g., StreamK adds --streamk_reduction).
+    for(const auto& [key, default_val, help] : extra_args)
+    {
+        arg_parser.insert(key, default_val, help);
+    }
+
     bool result = arg_parser.parse(argc, argv);
     return std::make_tuple(result, arg_parser);
 }
+
+struct InvokerResult
+{
+    float ave_time;
+    ck_tile::index_t split_k;
+};

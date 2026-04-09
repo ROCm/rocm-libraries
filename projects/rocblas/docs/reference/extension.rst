@@ -94,6 +94,16 @@ See the :ref:`ILP64 API` section.
 ``gemm_strided_batched_ex`` functions support the ``_64`` interface.  Only the parameter ``batch_count`` larger than ``(int32_t max value * 16)`` is currently supported.
 See the :ref:`ILP64 API` section.
 
+rocblas_syrk_ex
+============================================
+
+.. doxygenfunction:: rocblas_syrk_ex
+
+rocblas_herk_ex
+============================================
+
+.. doxygenfunction:: rocblas_herk_ex
+
 rocblas_trsm_ex + batched, strided_batched
 ============================================
 

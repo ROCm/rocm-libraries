@@ -418,6 +418,32 @@ nrm2_ex precisions double: &nrm2_ex_precisions_double
   - *double_precision
   - *double_precision_complex_real_in_real_compute
 
+#############################################
+#           Used for syrk_ex                #
+#############################################
+syrk_ex_precisions: &syrk_ex_precisions
+  - &half_precision_real_out_compute_syrk_ex
+    { a_type: f16_r, b_type: f16_r, c_type: f32_r, d_type: f32_r, compute_type: f32_r }
+  - &bfloat_precision_real_out_compute_syrk_ex
+    { a_type: bf16_r, b_type: bf16_r, c_type: f32_r, d_type: f32_r, compute_type: f32_r }
+  - &half_precision_real_compute_syrk_ex
+    { a_type: f16_r, b_type: f16_r, c_type: f16_r, d_type: f16_r, compute_type: f32_r }
+  - &bfloat_precision_real_compute_syrk_ex
+    { a_type: bf16_r, b_type: bf16_r, c_type: bf16_r, d_type: bf16_r, compute_type: f32_r }
+  - &float_precision_double_compute_syrk_ex
+    { a_type: f32_r, b_type: f32_r, c_type: f32_r, d_type: f32_r, compute_type: f64_r }
+  - &float_precision_double_out_compute_syrk_ex
+    { a_type: f32_r, b_type: f32_r, c_type: f64_r, d_type: f64_r, compute_type: f64_r }
+
+#############################################
+#           Used for herk_ex                #
+#############################################
+herk_ex_precisions: &herk_ex_precisions
+  - &float_precision_double_compute_herk_ex
+    { a_type: f32_c, b_type: f32_c, c_type: f32_c, d_type: f32_c, compute_type: f64_c }
+  - &float_precision_double_out_compute_herk_ex
+    { a_type: f32_c, b_type: f32_c, c_type: f64_c, d_type: f64_c, compute_type: f64_c }
+
 Definitions:
 
 # blas1 common test args
@@ -462,6 +488,10 @@ Definitions:
   - &c_scan_value_2
     - [-998]
 
+  # scan extension applied by Arguments class
+  - &c_gemm_test_all_solutions_returned
+    - [-3] # match definitions.hpp
+
   # int64 API testing constants
   - &c_pos_overflow_int32
     - [4294967296]
@@ -477,7 +507,7 @@ Definitions:
     - [67108865] # (67108865 - 1) x 32 will overflow to sign bit
 
   - &c_grid_yz_require_passes
-    - [65539] # force looping over y/z chunks 65536.  TODO track constant c_i64_grid_YZ_chunk in int64_helpers.hpp
+    - [65539] # force looping over y/z chunks near grid limit.  TODO track constant c_i64_grid_YZ_chunk in int64_helpers.hpp
 
   - &c_grid_x_require_passes
     - [268435459] # force looping over x chunks 268435456.  TODO track constant c_i64_grid_X_chunk in int64_helpers.hpp

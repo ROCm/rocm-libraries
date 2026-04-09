@@ -29,11 +29,11 @@ extern "C" {
 #endif
 
 /*! \ingroup conv_module
-*  \brief Convert a sparse GEBSR matrix into a sparse CSR matrix
+*  \brief Convert a sparse GEBSR matrix into a sparse CSR matrix.
 *
 *  \details
-*  \p hipsparseXgebsr2csr converts a GEBSR matrix into a CSR matrix. It is assumed,
-*  that \p csrValC, \p csrColIndC and \p csrRowPtrC are already allocated prior to
+*  \p hipsparseXgebsr2csr converts a GEBSR matrix into a CSR matrix. It is assumed
+*  that \p csrValC, \p csrColIndC, and \p csrRowPtrC are already allocated prior to
 *  calling \p hipsparseXgebsr2csr. Allocation size for \p csrRowPtrC equals
 *  \p m+1 where:
 *
@@ -45,7 +45,7 @@ extern "C" {
 *  \f]
 *
 *  Allocation size for \p csrValC and \p csrColIndC is computed by the the number of blocks in the GEBSR
-*  matrix, \p nnzb, multiplied by the product of the block dimensions, i.e. \p nnz=nnzb*rocBlockDim*colBlockDim.
+*  matrix, \p nnzb, multiplied by the product of the block dimensions, that is, \p nnz=nnzb*rocBlockDim*colBlockDim.
 *
 *  For example, given the GEBSR matrix:
 *  \f[
@@ -87,13 +87,13 @@ extern "C" {
 *  \f]
 *
 *  \note
-*  This function is non blocking and executed asynchronously with respect to the host.
-*  It may return before the actual computation has finished.
+*  This function is non-blocking and executed asynchronously with respect to the host.
+*  It can return before the actual computation has finished.
 *
 *  @param[in]
-*  handle      handle to the hipsparse library context queue.
+*  handle      handle to the hipSPARSE library context queue.
 *  @param[in]
-*  dirA        the storage format of the blocks, \ref HIPSPARSE_DIRECTION_ROW or \ref HIPSPARSE_DIRECTION_COLUMN
+*  dirA        the storage format of the blocks, \ref HIPSPARSE_DIRECTION_ROW or \ref HIPSPARSE_DIRECTION_COLUMN.
 *  @param[in]
 *  mb          number of block rows in the sparse general BSR matrix.
 *  @param[in]
@@ -125,10 +125,7 @@ extern "C" {
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p mb, \p nb, \p block_dim, \p bsrValA,
-*              \p bsrRowPtrA, \p bsrColIndA, \p csrValC, \p csrRowPtrC or \p csrColIndC pointer is invalid.
-*
-*  \par Example
-*  \snippet example_hipsparse_gebsr2csr.cpp doc example
+*              \p bsrRowPtrA, \p bsrColIndA, \p csrValC, \p csrRowPtrC, or \p csrColIndC pointer is invalid.
 */
 /**@{*/
 HIPSPARSE_EXPORT

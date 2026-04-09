@@ -296,6 +296,7 @@ try
     bool        datafile          = hipblaslt_parse_data(argc, argv);
     bool        log_function_name = false;
     bool        any_stride        = false;
+    bool        dump_matrix       = false;
 
     int         api_method      = 0;
     std::string api_method_str  = "";
@@ -430,7 +431,8 @@ try
         ("initialization",
          value<std::string>(&initialization)->default_value("hpl"),
          "Initialize matrix data."
-         "Options: rand_int, trig_float, hpl(floating), special, zero, norm_dist")
+         "Options: rand_int, trig_float, hpl(floating), special, zero, norm_dist, uniform_01, integer_exact, "
+         "fp16_accumulator_probe")
 
         ("transA",
          value<char>(&arg.transA)->default_value('N'),
@@ -506,11 +508,11 @@ try
 
         ("scaleA",
          value<int>(&scaleAFormat)->default_value(0),
-         "Apply scale for A buffer. 0 = None, 1 = scalar, 2 = vector, 3 = block.")
+         "Apply scale for A buffer. 0 = None, 1 = scalar, 2 = vector, 3 = block, 1001 = block_preswizzled_32x8.")
 
         ("scaleB",
          value<int>(&scaleBFormat)->default_value(0),
-         "Apply scale for B buffer. 0 = None, 1 = scalar, 2 = vector, 3 = block.")
+         "Apply scale for B buffer. 0 = None, 1 = scalar, 2 = vector, 3 = block, 1001 = block_preswizzled_32x8.")
 
         ("scaleC",
          value<int>(&scaleCFormat)->default_value(0),
@@ -523,22 +525,6 @@ try
         ("scaleAlpha_vector",
          bool_switch(&arg.scaleAlpha_vector)->default_value(false),
          "Apply scaleAlpha vector")
-
-        ("scaleABlockRowSize",
-         value<uint32_t>(&arg.scaleABlockRowSize)->default_value(32u),
-         "Set the row size of scale block for A")
-
-        ("scaleABlockColSize",
-         value<uint32_t>(&arg.scaleABlockColSize)->default_value(1u),
-         "Set the column size of scale block for A")
-
-        ("scaleBBlockRowSize",
-         value<uint32_t>(&arg.scaleBBlockRowSize)->default_value(1u),
-         "Set the row size of scale block for B")
-
-        ("scaleBBlockColSize",
-         value<uint32_t>(&arg.scaleBBlockColSize)->default_value(32u),
-         "Set the column size of scale block for B")
 
         ("amaxScaleA",
          bool_switch(&arg.amaxScaleA)->default_value(false),
@@ -626,6 +612,10 @@ try
         ("flush",
         value<bool>(&arg.flush)->default_value(tuningEnv ? true : false),
         "Flush icache, only works for gemm.")
+
+        ("dump_matrix",
+        value<bool>(&arg.dump_matrix)->default_value(false),
+        "Dump input and output matrices to a file.")
 
         ("help,h", "produces this help message")
 
@@ -805,8 +795,8 @@ try
         throw std::invalid_argument("Invalid Device ID");
     set_device(device_id);
 
-    EfficiencyMonitor& perf_monitor = getEfficiencyMonitor();
-    perf_monitor.set_device_id(device_id);
+    auto perf_monitor = EfficiencyMonitor::create();
+    perf_monitor->setDeviceId(device_id);
 
     if(datafile)
         return hipblaslt_bench_datafile(filter, any_stride, props);
@@ -900,7 +890,8 @@ try
            || (arg.a_type != string_to_hip_datatype("f16_r")
                && arg.a_type != string_to_hip_datatype("f8_fnuz_r")
                && arg.a_type != string_to_hip_datatype("f8_r")
-               && arg.a_type != string_to_hip_datatype("bf16_r"))))
+               && arg.a_type != string_to_hip_datatype("bf16_r")
+               && arg.b_type != string_to_hip_datatype("f4_r"))))
     {
         hipblaslt_cerr << "For swizzle-A, problem type must be FP16 or BF16 or FP8 TN" << std::endl;
         return 1;
@@ -911,7 +902,8 @@ try
            || (arg.b_type != string_to_hip_datatype("f16_r")
                && arg.b_type != string_to_hip_datatype("f8_fnuz_r")
                && arg.b_type != string_to_hip_datatype("f8_r")
-               && arg.b_type != string_to_hip_datatype("bf16_r"))))
+               && arg.b_type != string_to_hip_datatype("bf16_r")
+               && arg.b_type != string_to_hip_datatype("f4_r"))))
     {
         hipblaslt_cerr << "For swizzle-B, problem type must be FP16 or BF16 or FP8 TN" << std::endl;
         return 1;
@@ -925,8 +917,9 @@ try
         if(s == 2)
             return hipblaslt_scaling_format::Vector;
         if(s == 3)
-            return hipblaslt_scaling_format::Block;
-
+            return hipblaslt_scaling_format::Block_32_UE8M0;
+        if(s == 1001)
+            return hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT;
         return hipblaslt_scaling_format::none;
     };
     arg.scaleA = scaleInt2Enum(scaleAFormat);
@@ -938,18 +931,18 @@ try
     if(arg.a_type == HIP_R_4F_E2M1_EXT || arg.a_type == HIP_R_6F_E2M3_EXT
        || arg.a_type == HIP_R_6F_E3M2_EXT)
     {
-        if(arg.scaleA != hipblaslt_scaling_format::Block)
+        if(!isBlockScaling(arg.scaleA))
             throw std::invalid_argument("scaleA must be block format for F4 and F6 types");
     }
     if(arg.b_type == HIP_R_4F_E2M1_EXT || arg.b_type == HIP_R_6F_E2M3_EXT
        || arg.b_type == HIP_R_6F_E3M2_EXT)
     {
-        if(arg.scaleB != hipblaslt_scaling_format::Block)
+        if(!isBlockScaling(arg.scaleB))
             throw std::invalid_argument("scaleB must be block format for F4 and F6 types");
     }
 
     // Block scaling only allows F8/F6/F4
-    if(arg.scaleA == hipblaslt_scaling_format::Block)
+    if(isBlockScaling(arg.scaleA))
     {
         if(arg.a_type != HIP_R_8F_E4M3 && arg.a_type != HIP_R_8F_E5M2
            && arg.a_type != HIP_R_4F_E2M1_EXT && arg.a_type != HIP_R_6F_E2M3_EXT
@@ -957,7 +950,7 @@ try
             throw std::invalid_argument("Invalid a_type for block scaling format: "s
                                         + hip_datatype_to_string(arg.a_type));
     }
-    if(arg.scaleB == hipblaslt_scaling_format::Block)
+    if(isBlockScaling(arg.scaleB))
     {
         if(arg.b_type != HIP_R_8F_E4M3 && arg.b_type != HIP_R_8F_E5M2
            && arg.b_type != HIP_R_4F_E2M1_EXT && arg.b_type != HIP_R_6F_E2M3_EXT
@@ -965,8 +958,7 @@ try
             throw std::invalid_argument("Invalid b_type for block scaling format: "s
                                         + hip_datatype_to_string(arg.b_type));
     }
-    if(arg.scaleA == hipblaslt_scaling_format::Block
-       || arg.scaleB == hipblaslt_scaling_format::Block)
+    if(isBlockScaling(arg.scaleA) || isBlockScaling(arg.scaleB))
     {
         if(arg.compute_type != HIPBLAS_COMPUTE_32F)
             throw std::invalid_argument("Block scaling only supports f32 as compute type not "s
@@ -1022,9 +1014,7 @@ try
     }
 
     arg.norm_check_assert = false;
-    int status            = run_bench_test(arg, filter, any_stride, props);
-    freeEfficiencyMonitor();
-    return status;
+    return run_bench_test(arg, filter, any_stride, props);
 }
 catch(const std::invalid_argument& exp)
 {

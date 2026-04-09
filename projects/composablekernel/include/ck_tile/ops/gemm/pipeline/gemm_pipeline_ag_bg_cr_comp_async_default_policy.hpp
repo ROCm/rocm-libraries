@@ -1,5 +1,5 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 
@@ -18,26 +18,42 @@ struct GemmPipelineAgBgCrCompAsyncDefaultPolicy
     static constexpr auto ATileAccessPattern = tile_distribution_pattern::warp_raked;
     static constexpr auto BTileAccessPattern = tile_distribution_pattern::warp_raked;
 
-    template <typename Problem>
+    template <typename Problem,
+              typename OverrideADataType = remove_cvref_t<typename Problem::ADataType>>
     CK_TILE_HOST_DEVICE static constexpr auto MakeALdsBlockDescriptor()
     {
         constexpr index_t MPerBlock = Problem::BlockGemmShape::kM;
         constexpr index_t KPerBlock = Problem::BlockGemmShape::kK;
-        constexpr index_t KPack     = GetSmemPackA<Problem>();
+        if constexpr(is_a_load_tr<Problem>)
+        {
+            // TODO: better LDS descriptor for performance
+            // This branch is reusing the logic from
+            // UniversalGemmBasePolicy::MakeALdsBlockDescriptor
+            constexpr auto a_lds_block_desc_0 = make_naive_tensor_descriptor( //
+                make_tuple(number<KPerBlock>{}, number<MPerBlock>{}),
+                make_tuple(number<MPerBlock>{}, number<1>{}),
+                number<MPerBlock>{},
+                number<1>{});
+            return a_lds_block_desc_0;
+        }
+        else
+        {
+            constexpr index_t KPack = GetSmemPackA<Problem>();
 
-        constexpr auto a_lds_block_desc_0 = make_naive_tensor_descriptor(
-            make_tuple(number<KPerBlock / KPack>{}, number<MPerBlock>{}, number<KPack>{}),
-            make_tuple(number<KPack>{}, number<KPerBlock>{}, number<1>{}),
-            number<KPack>{},
-            number<1>{});
+            constexpr auto a_lds_block_desc_0 = make_naive_tensor_descriptor(
+                make_tuple(number<KPerBlock / KPack>{}, number<MPerBlock>{}, number<KPack>{}),
+                make_tuple(number<KPack>{}, number<KPerBlock>{}, number<1>{}),
+                number<KPack>{},
+                number<1>{});
 
-        return transform_tensor_descriptor(
-            a_lds_block_desc_0,
-            make_tuple(
-                make_pass_through_transform(number<MPerBlock>{}),
-                make_merge_transform(make_tuple(number<KPerBlock / KPack>{}, number<KPack>{}))),
-            make_tuple(sequence<1>{}, sequence<0, 2>{}),
-            make_tuple(sequence<0>{}, sequence<1>{}));
+            return transform_tensor_descriptor(
+                a_lds_block_desc_0,
+                make_tuple(
+                    make_pass_through_transform(number<MPerBlock>{}),
+                    make_merge_transform(make_tuple(number<KPerBlock / KPack>{}, number<KPack>{}))),
+                make_tuple(sequence<1>{}, sequence<0, 2>{}),
+                make_tuple(sequence<0>{}, sequence<1>{}));
+        }
     }
 
     template <typename Problem>
@@ -45,21 +61,36 @@ struct GemmPipelineAgBgCrCompAsyncDefaultPolicy
     {
         constexpr index_t NPerBlock = Problem::BlockGemmShape::kN;
         constexpr index_t KPerBlock = Problem::BlockGemmShape::kK;
-        constexpr index_t KPack     = GetSmemPackB<Problem>();
+        if constexpr(is_b_load_tr<Problem>)
+        {
+            // TODO: better LDS descriptor for performance
+            // This branch is reusing the logic from
+            // UniversalGemmBasePolicy::MakeBLdsBlockDescriptor
+            constexpr auto b_lds_block_desc_0 =
+                make_naive_tensor_descriptor(make_tuple(number<KPerBlock>{}, number<NPerBlock>{}),
+                                             make_tuple(number<NPerBlock>{}, number<1>{}),
+                                             number<NPerBlock>{},
+                                             number<1>{});
+            return b_lds_block_desc_0;
+        }
+        else
+        {
+            constexpr index_t KPack = GetSmemPackB<Problem>();
 
-        constexpr auto b_lds_block_desc_0 = make_naive_tensor_descriptor(
-            make_tuple(number<KPerBlock / KPack>{}, number<NPerBlock>{}, number<KPack>{}),
-            make_tuple(number<KPack>{}, number<KPerBlock>{}, number<1>{}),
-            number<KPack>{},
-            number<1>{});
+            constexpr auto b_lds_block_desc_0 = make_naive_tensor_descriptor(
+                make_tuple(number<KPerBlock / KPack>{}, number<NPerBlock>{}, number<KPack>{}),
+                make_tuple(number<KPack>{}, number<KPerBlock>{}, number<1>{}),
+                number<KPack>{},
+                number<1>{});
 
-        return transform_tensor_descriptor(
-            b_lds_block_desc_0,
-            make_tuple(
-                make_pass_through_transform(number<NPerBlock>{}),
-                make_merge_transform(make_tuple(number<KPerBlock / KPack>{}, number<KPack>{}))),
-            make_tuple(sequence<1>{}, sequence<0, 2>{}),
-            make_tuple(sequence<0>{}, sequence<1>{}));
+            return transform_tensor_descriptor(
+                b_lds_block_desc_0,
+                make_tuple(
+                    make_pass_through_transform(number<NPerBlock>{}),
+                    make_merge_transform(make_tuple(number<KPerBlock / KPack>{}, number<KPack>{}))),
+                make_tuple(sequence<1>{}, sequence<0, 2>{}),
+                make_tuple(sequence<0>{}, sequence<1>{}));
+        }
     }
 
     template <typename Problem>

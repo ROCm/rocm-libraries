@@ -67,7 +67,12 @@ namespace TensileLite
         {
             Debug::Instance().markerStart("UnloadCodeObjectFiles");
             for(auto module : m_modules)
-                HIP_CHECK_PRINT(hipModuleUnload(module));
+                HIP_CHECK_PRINT(hipModuleUnload(module),
+                    [&](hipError_t error) {
+                        std::cerr << "hipModuleUnload failed: " << std::endl
+                                << " error: " << hipGetErrorString(error) << std::endl;
+                    }
+                );
             Debug::Instance().markerStop();
         }
 
@@ -86,7 +91,54 @@ namespace TensileLite
             Debug::Instance().markerStart("loadCodeObjectFile", path);
             hipModule_t module;
 
-            HIP_CHECK_RETURN(hipModuleLoad(&module, path.c_str()));
+            hipError_t error = hipModuleLoad(&module, path.c_str());
+            // Large problem sizes may cause global memory to run out of space 
+            // when loading the module, which can lead to hipErrorLaunchFailure or hipErrorNoBinaryForGpu.
+            if(error == hipErrorLaunchFailure || error == hipErrorNoBinaryForGpu)
+            {        
+                // Reset the error code from previous hipModuleLoad failure
+                (void)hipGetLastError();
+                std::cout << "Clearing modules and retrying hipModuleLoad" << std::endl;
+                for(auto m_module : m_modules)
+                {
+                    HIP_CHECK_PRINT(hipModuleUnload(m_module),
+                        [&](hipError_t error_t) {
+                            std::cerr << "hipModuleUnload failed: " << std::endl
+                                      << " error: " << hipGetErrorString(error_t) << std::endl;
+                        }
+                    );
+                }
+                // Need to clean up all these old modules' data structures, otherwise next problem will getKernel failed
+                m_access.lock();
+                m_modules.clear();
+                m_loadedModuleNames.clear();
+                m_loadedCOFiles.clear();
+                m_kernels.clear();
+                m_access.unlock();
+                // Need to re-run lazy-loading for hsaco(helper kernels) module reload
+                std::string lazyArch;
+                std::string lazyDir;
+                lazyArch = m_lazyLoadArchitecture;
+                lazyDir  = m_codeObjectDirectory;
+                HIP_CHECK_RETURN_WITH_LOG(initializeLazyLoading(lazyArch, lazyDir),
+                    [&](hipError_t error_t) {
+                        std::cerr << "initializeLazyLoading after module clear failed: " << std::endl
+                                  << " error: " << hipGetErrorString(error_t) << std::endl;
+                    }
+                );
+                HIP_CHECK_RETURN_WITH_LOG(hipModuleLoad(&module, path.c_str()),
+                    [&](hipError_t error_t) {
+                        std::cerr << "hipModuleLoad failed: " << path.c_str() << std::endl
+                                  << " error: " << hipGetErrorString(error_t) << std::endl;
+                    }
+                );
+            }
+            else if(error)
+            {
+                std::cerr << "hipModuleLoad failed: " << path.c_str() << std::endl
+                          << " error: " << hipGetErrorString(error) << std::endl;
+                return error;
+            }
 
             if(m_debug)
                 std::cout << "loaded code object " << path << std::endl;
@@ -114,7 +166,12 @@ namespace TensileLite
         {
             hipModule_t module;
 
-            HIP_CHECK_RETURN(hipModuleLoadData(&module, image));
+            HIP_CHECK_RETURN_WITH_LOG(hipModuleLoadData(&module, image),
+                [&](hipError_t error) {
+                    std::cerr << "hipModuleLoadData failed: " << std::endl
+                            << " error: " << hipGetErrorString(error) << std::endl;
+                }
+            );
 
             if(m_debug)
                 std::cout << "loaded code object data." << std::endl;
@@ -303,7 +360,10 @@ namespace TensileLite
             std::string helperKernelName = std::string("Kernels.so-000-") + arch;
 
             m_access.lock();
-            m_codeObjectDirectory = codeObjDir;
+
+            // Record for module reload
+            m_lazyLoadArchitecture = arch;
+            m_codeObjectDirectory  = codeObjDir;
 
             //If required code object file hasn't yet been loaded, load it now
             bool loaded = m_loadedCOFiles.find(removeXnack(helperKernelName) + ".hsaco")
@@ -371,7 +431,15 @@ namespace TensileLite
             }
 
             hipFunction_t function;
-            HIP_CHECK_RETURN(getKernel(function, kernel.kernelName));
+            HIP_CHECK_RETURN_WITH_LOG(getKernel(function, kernel.kernelName),
+                [&](hipError_t error) {
+                    std::cerr << "getKernel failed: " << kernel.kernelName << std::endl
+                            << " with workgroup size: " << kernel.workGroupSize << std::endl
+                            << " with numWorkGroups : " << kernel.numWorkGroups << std::endl
+                            << " with numWorkItems : " << kernel.numWorkItems << std::endl
+                            << " error: " << hipGetErrorString(error) << std::endl;
+                }
+            );
 
             void*  kernelArgs = const_cast<void*>(kernel.args.data());
             size_t argsSize   = kernel.args.size();
@@ -384,7 +452,7 @@ namespace TensileLite
 
             if(startEvent != nullptr)
                 HIP_CHECK_RETURN(hipEventRecord(startEvent, stream));
-            HIP_CHECK_RETURN(hipExtModuleLaunchKernel(function,
+            HIP_CHECK_RETURN_WITH_LOG(hipExtModuleLaunchKernel(function,
                                                       kernel.numWorkItems.x,
                                                       kernel.numWorkItems.y,
                                                       kernel.numWorkItems.z,
@@ -397,7 +465,16 @@ namespace TensileLite
                                                       (void**)&hipLaunchParams,
                                                       nullptr, // event
                                                       nullptr // event
-                                                      ));
+                                                      ),
+                [&](hipError_t error) {
+                    std::cerr << "hipExtModuleLaunchKernel failed: " << kernel.kernelName << std::endl
+                            << " with workgroup size: " << kernel.workGroupSize << std::endl
+                            << " with numWorkGroups : " << kernel.numWorkGroups << std::endl
+                            << " with numWorkItems : " << kernel.numWorkItems << std::endl
+                            << " error: " << hipGetErrorString(error) << std::endl;
+                }
+            );
+
             if(stopEvent != nullptr)
                 HIP_CHECK_RETURN(hipEventRecord(stopEvent, stream));
             return hipSuccess;
@@ -407,7 +484,15 @@ namespace TensileLite
         {
             for(auto const& k : kernels)
             {
-                HIP_CHECK_RETURN(launchKernel(k));
+                HIP_CHECK_RETURN_WITH_LOG(launchKernel(k),
+                    [&](hipError_t error) {
+                        std::cerr << "launchKernel failed: " << k.kernelName << std::endl
+                                << " with workgroup size: " << k.workGroupSize << std::endl
+                                << " with numWorkGroups : " << k.numWorkGroups << std::endl
+                                << " with numWorkItems : " << k.numWorkItems << std::endl
+                                << " error: " << hipGetErrorString(error) << std::endl;
+                    }
+                );
             }
             return hipSuccess;
         }
@@ -431,7 +516,15 @@ namespace TensileLite
                 if(iter == last)
                     kStop = stopEvent;
 
-                HIP_CHECK_RETURN(launchKernel(*iter, stream, kStart, kStop, isKernelLoaded));
+                HIP_CHECK_RETURN_WITH_LOG(launchKernel(*iter, stream, kStart, kStop, isKernelLoaded),
+                    [&](hipError_t error) {
+                        std::cerr << "launchKernel failed: " << iter->kernelName << std::endl
+                                << " with workgroup size: " << iter->workGroupSize << std::endl
+                                << " with numWorkGroups : " << iter->numWorkGroups << std::endl
+                                << " with numWorkItems : " << iter->numWorkItems << std::endl
+                                << " error: " << hipGetErrorString(error) << std::endl;
+                    }
+                );
             }
             return hipSuccess;
         }
@@ -452,7 +545,15 @@ namespace TensileLite
 
             for(size_t i = 0; i < kernels.size(); i++)
             {
-                HIP_CHECK_RETURN(launchKernel(kernels[i], stream, startEvents[i], stopEvents[i]));
+                HIP_CHECK_RETURN_WITH_LOG(launchKernel(kernels[i], stream, startEvents[i], stopEvents[i]),
+                    [&](hipError_t error) {
+                        std::cerr << "launchKernel failed: " << kernels[i].kernelName << std::endl
+                                << " with workgroup size: " << kernels[i].workGroupSize << std::endl
+                                << " with numWorkGroups : " << kernels[i].numWorkGroups << std::endl
+                                << " with numWorkItems : " << kernels[i].numWorkItems << std::endl
+                                << " error: " << hipGetErrorString(error) << std::endl;
+                    }
+                );
             }
             return hipSuccess;
         }

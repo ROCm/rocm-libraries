@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -39,6 +39,8 @@
 #include "../../block/block_radix_sort.hpp"
 #include "../../block/block_scan.hpp"
 #include "../../block/block_store_func.hpp"
+
+#include "ordered_block_id.hpp"
 
 BEGIN_ROCPRIM_NAMESPACE
 
@@ -220,9 +222,10 @@ struct radix_digit_count_helper
     }
 };
 
-template<unsigned int BlockSize,
-         unsigned int ItemsPerThread,
-         bool         Descending,
+template<unsigned int            BlockSize,
+         unsigned int            ItemsPerThread,
+         bool                    Descending,
+         arch::wavefront::target TargetWaveSize,
          class Key,
          class Value>
 struct radix_sort_single_helper
@@ -232,7 +235,17 @@ struct radix_sort_single_helper
     using key_type   = Key;
     using value_type = Value;
 
-    using sort_type = ::rocprim::block_radix_sort<key_type, BlockSize, ItemsPerThread, value_type>;
+    using sort_type
+        = ::rocprim::block_radix_sort<key_type,
+                                      BlockSize,
+                                      ItemsPerThread,
+                                      value_type,
+                                      1,
+                                      1,
+                                      0,
+                                      block_radix_rank_algorithm::default_for_radix_sort,
+                                      block_padding_hint::lds_occupancy_bound,
+                                      TargetWaveSize>;
 
     static constexpr bool with_values = !std::is_same<value_type, ::rocprim::empty_type>::value;
 
@@ -337,6 +350,7 @@ template<unsigned int BlockSize,
          class Key,
          class Value,
          class Offset,
+         arch::wavefront::target    TargetWaveSize,
          block_radix_rank_algorithm RadixRankAlgorithm = block_radix_rank_algorithm::match>
 struct radix_sort_and_scatter_helper
 {
@@ -347,7 +361,13 @@ struct radix_sort_and_scatter_helper
 
     using key_codec
         = decltype(::rocprim::traits::get<Key>().template radix_key_codec<Descending>());
-    using radix_rank_type = ::rocprim::block_radix_rank<BlockSize, RadixBits, RadixRankAlgorithm>;
+    using radix_rank_type = ::rocprim::block_radix_rank<BlockSize,
+                                                        RadixBits,
+                                                        RadixRankAlgorithm,
+                                                        1,
+                                                        1,
+                                                        block_padding_hint::avoid_conflicts,
+                                                        TargetWaveSize>;
 
     static constexpr bool load_warp_striped
         = RadixRankAlgorithm == block_radix_rank_algorithm::match;
@@ -569,10 +589,12 @@ struct radix_sort_and_scatter_helper
             ::rocprim::syncthreads();
 
             // Update the digit offsets
+            // Note: exclusive_digit_prefix and digit_counts are arrays of size digits_per_thread (=1),
+            // so we must use index 0, not flat_id, to avoid out-of-bounds access.
             if(flat_id < radix_size)
             {
                 storage.digit_offsets[flat_id]
-                    += exclusive_digit_prefix[flat_id] + digit_counts[flat_id];
+                    += exclusive_digit_prefix[0] + digit_counts[0];
             }
         }
     }
@@ -581,6 +603,7 @@ struct radix_sort_and_scatter_helper
 template<unsigned int BlockSize,
          unsigned int ItemsPerThread,
          bool         Descending,
+         arch::wavefront::target    TargetWaveSize,
          class KeysInputIterator,
          class KeysOutputIterator,
          class ValuesInputIterator,
@@ -598,8 +621,12 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void sort_single(KeysInputIterator    keys_i
     using key_type   = typename std::iterator_traits<KeysInputIterator>::value_type;
     using value_type = typename std::iterator_traits<ValuesInputIterator>::value_type;
 
-    using sort_single_helper
-        = radix_sort_single_helper<BlockSize, ItemsPerThread, Descending, key_type, value_type>;
+    using sort_single_helper = radix_sort_single_helper<BlockSize,
+                                                        ItemsPerThread,
+                                                        Descending,
+                                                        TargetWaveSize,
+                                                        key_type,
+                                                        value_type>;
 
     ROCPRIM_SHARED_MEMORY typename sort_single_helper::storage_type storage;
 
@@ -624,17 +651,57 @@ auto compare_nan_sensitive(const T& a, const T& b) ->
     // when making changes to this function.
 
     static constexpr auto sign_bit = ::rocprim::traits::get<T>().float_bit_mask().sign_bit;
-    using bit_key_type             = decltype(sign_bit);
+    using bit_key_type             = std::remove_cv_t<decltype(sign_bit)>;
 
-    auto a_bits = ::rocprim::detail::bit_cast<bit_key_type>(a);
-    auto b_bits = ::rocprim::detail::bit_cast<bit_key_type>(b);
+#if __HIP_NO_HALF_OPERATORS__ || __HIP_NO_HALF_CONVERSIONS__
+    // There are cases where downstream users compile with '__HIP_NO_HALF_OPERATORS__' or
+    // '__HIP_NO_HALF_CONVERSIONS__' set. This means that '__half::operator+' does not work
+    // and we can't apply our trick to convert -0.0 to +0.0. We must fall back to a potentially
+    // slower bit flipping/masking method.
+    //
+    // Ideally we would use C++20 concepts to check if operator+ is valid for this type.
+    // Alternatively we could use some utility provided by libhipcxx. That way, we can catch
+    // other weird cases.
+    constexpr bool has_operator_plus = !std::is_same_v<T, __half>;
+#else
+    constexpr bool has_operator_plus = true;
+#endif
 
-    // convert -0.0 to +0.0
-    a_bits = a_bits == sign_bit ? 0 : a_bits;
-    b_bits = b_bits == sign_bit ? 0 : b_bits;
+    bit_key_type a_bits;
+    bit_key_type b_bits;
+    if constexpr(has_operator_plus)
+    {
+        // Convert -0.0 to +0.0 using floating point trick.
+        // It was concerned that when the flags -fno-signed-zeros or -funsafe-math-optimizations
+        // (or -ffast-math which controls these two) is enabled then it is optimized away, but
+        // the compiler also seems to correctly model this and does not optimize away the addition
+        // when testing with the compile flags.
+        const T zero{0};
+        const T a_plus = a + zero;
+        const T b_plus = b + zero;
+
+        a_bits = ::rocprim::detail::bit_cast<bit_key_type>(a_plus);
+        b_bits = ::rocprim::detail::bit_cast<bit_key_type>(b_plus);
+    }
+    else
+    {
+        a_bits = ::rocprim::detail::bit_cast<bit_key_type>(a);
+        b_bits = ::rocprim::detail::bit_cast<bit_key_type>(b);
+
+        // Convert -0.0 to +0.0 by flipping the sign bit. If value with the flipped signbit
+        // is all zeroes, then we have to return +0.0.
+        // input           : flipped  : bool : result
+        // 0...0000 : +0.0 : 1...0000 : true : 0...0000 : +0.0
+        // 1...0000 : -0.0 : 0...0000 : false: 0...0000 : +0.0
+        // 0...1111 : +x.y : 1...1111 : true : 0...1111 : +x.y
+        // 1...1111 : -x.y : 0...1111 : true : 0...1111 : -x.y
+        a_bits = a_bits == sign_bit ? 0 : a_bits;
+        b_bits = b_bits == sign_bit ? 0 : b_bits;
+    }
+
     // invert negatives, put 1 into sign bit for positives
-    a_bits ^= (sign_bit & a_bits) == 0 ? sign_bit : bit_key_type(-1);
-    b_bits ^= (sign_bit & b_bits) == 0 ? sign_bit : bit_key_type(-1);
+    a_bits ^= (sign_bit & a_bits ? bit_key_type(-1) : 0) | sign_bit;
+    b_bits ^= (sign_bit & b_bits ? bit_key_type(-1) : 0) | sign_bit;
 
     // sort numbers and NaNs according to their bit representation
     return a_bits > b_bits;
@@ -971,11 +1038,19 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void onesweep_histograms(KeysInputIterator  
     }
 }
 
-template<unsigned int BlockSize, unsigned int RadixBits, class Offset>
+template<unsigned int            BlockSize,
+         unsigned int            RadixBits,
+         arch::wavefront::target TargetWaveSize,
+         class Offset>
 ROCPRIM_DEVICE
 void onesweep_scan_histograms(Offset* global_digit_offsets)
 {
-    using block_scan_type = block_scan<Offset, BlockSize>;
+    using block_scan_type = block_scan<Offset,
+                                       BlockSize,
+                                       block_scan_algorithm::default_algorithm,
+                                       1,
+                                       1,
+                                       TargetWaveSize>;
 
     constexpr unsigned int radix_size       = 1u << RadixBits;
     constexpr unsigned int items_per_thread = ::rocprim::detail::ceiling_div(radix_size, BlockSize);
@@ -1052,7 +1127,9 @@ template<class Key,
          unsigned int               RadixBits,
          bool                       Descending,
          block_radix_rank_algorithm RadixRankAlgorithm,
-         class Decomposer>
+         arch::wavefront::target    TargetWaveSize,
+         class Decomposer,
+         class BlockIdWrapper>
 struct onesweep_iteration_helper
 {
     static constexpr unsigned int radix_size      = 1u << RadixBits;
@@ -1061,14 +1138,43 @@ struct onesweep_iteration_helper
 
     using key_codec
         = decltype(::rocprim::traits::get<Key>().template radix_key_codec<Descending>());
-    using radix_rank_type = ::rocprim::block_radix_rank<BlockSize, RadixBits, RadixRankAlgorithm>;
+    using radix_rank_type = ::rocprim::block_radix_rank<BlockSize,
+                                                        RadixBits,
+                                                        RadixRankAlgorithm,
+                                                        1,
+                                                        1,
+                                                        block_padding_hint::avoid_conflicts,
+                                                        TargetWaveSize>;
 
     static constexpr bool load_warp_striped
         = RadixRankAlgorithm == block_radix_rank_algorithm::match;
 
     static constexpr unsigned int digits_per_thread = radix_rank_type::digits_per_thread;
 
-    union storage_type_
+    // Calculate LDS usages usable for storing keys and values
+    template<class T>
+    struct N
+    {
+        static constexpr unsigned int OffsetSize  = sizeof(Offset) * radix_size;
+        static constexpr unsigned int RankSize    = sizeof(typename radix_rank_type::storage_type);
+        static constexpr unsigned int OrderedSize = sizeof(T) * BlockSize;
+        static constexpr unsigned int Diff        = (RankSize - OffsetSize) / OrderedSize;
+        static constexpr unsigned int value
+            = sizeof(T) <= sizeof(uint16_t) ? ItemsPerThread
+                                            : rocprim::min(rocprim::max(Diff, 1u), ItemsPerThread);
+    };
+
+    static constexpr unsigned int NKey   = N<Key>::value;
+    static constexpr unsigned int NValue = N<Value>::value;
+
+    static constexpr unsigned int KeyLDSSize = BlockSize * NKey + (NKey != ItemsPerThread ? 1 : 0);
+    static constexpr unsigned int ValueLDSSize
+        = BlockSize * NValue + (NValue == ItemsPerThread ? 0 : 1);
+
+    // Compiler had a hard time with non-trivial types.
+    using v_pack = type_wrapper<Value>;
+
+    union data_storage
     {
         typename radix_rank_type::storage_type rank;
         struct
@@ -1076,10 +1182,16 @@ struct onesweep_iteration_helper
             Offset global_digit_offsets[radix_size];
             union
             {
-                Key   ordered_block_keys[items_per_block];
-                Value ordered_block_values[items_per_block];
+                Key    ordered_block_keys[KeyLDSSize];
+                v_pack ordered_block_values[ValueLDSSize];
             };
         };
+    };
+
+    struct storage_type_
+    {
+        data_storage                          data;
+        typename BlockIdWrapper::storage_type ordered_bid;
     };
 
     ROCPRIM_DETAIL_SUPPRESS_DEPRECATION_WITH_PUSH
@@ -1103,10 +1215,11 @@ struct onesweep_iteration_helper
                   const unsigned int       bit,
                   const unsigned int       current_radix_bits,
                   const unsigned int       valid_items,
-                  storage_type_&           storage)
+                  data_storage&            storage,
+                  unsigned int             ordered_bid)
     {
         const unsigned int flat_id      = ::rocprim::detail::block_thread_id<0>();
-        const unsigned int block_id     = ::rocprim::detail::block_id<0>();
+        const unsigned int block_id     = ordered_bid;
         const unsigned int block_offset = block_id * items_per_block;
 
         // Load keys into private memory, and encode them to unsigned integers.
@@ -1172,14 +1285,14 @@ struct onesweep_iteration_helper
 
         ::rocprim::syncthreads();
 
-        // Order keys in shared memory.
-        ROCPRIM_UNROLL
-        for(unsigned int i = 0; i < ItemsPerThread; ++i)
+        if constexpr(NKey == ItemsPerThread)
         {
-            storage.ordered_block_keys[ranks[i]] = keys[i];
+            ROCPRIM_UNROLL
+            for(unsigned int i = 0; i < ItemsPerThread; ++i)
+            {
+                storage.ordered_block_keys[ranks[i]] = keys[i];
+            }
         }
-
-        ::rocprim::syncthreads();
 
         // Compute the global prefix for each histogram.
         // At this point `lookback_states` already hold `onesweep_lookback_state::EMPTY`.
@@ -1230,26 +1343,66 @@ struct onesweep_iteration_helper
             }
         }
 
-        ::rocprim::syncthreads();
-
-        // Scatter the keys to global memory in a sorted fashion.
-        ROCPRIM_UNROLL
-        for(unsigned int i = 0; i < ItemsPerThread; ++i)
+        unsigned int digits[ItemsPerThread];
+        // Unrolling loop will result in bad vgpr usages.
+        ROCPRIM_NO_UNROLL
+        for(unsigned int j = 0, x = 0; j < rocprim::detail::ceiling_div(ItemsPerThread, NKey);
+            ++j, x += (BlockSize * NKey))
         {
-            const unsigned int rank = i * BlockSize + flat_id;
-            if(IsFull || rank < valid_items)
+            if constexpr(NKey != ItemsPerThread)
             {
-                Key                key = storage.ordered_block_keys[rank];
-                const unsigned int digit
-                    = key_codec::extract_digit(key, bit, current_radix_bits, decomposer);
-                key_codec::decode_inplace(key, decomposer);
-                const Offset global_offset        = storage.global_digit_offsets[digit];
-                keys_output[rank + global_offset] = key;
+                // Reuse the LDS memory.
+                ROCPRIM_UNROLL
+                for(unsigned int i = 0; i < ItemsPerThread; ++i)
+                {
+                    // It only seems worse on gfx942 in some cases.
+                    if ROCPRIM_AMDGCN_CONSTEXPR(ROCPRIM_IS_CDNA3())
+                    {
+                        const int offset = ranks[i] - x;
+                        if(offset >= 0 && offset < static_cast<int>(BlockSize * NKey))
+                        {
+                            storage.ordered_block_keys[offset] = keys[i];
+                        }
+                    }
+                    else
+                    {
+                        // No branching, writes to unused LDS memory space.
+                        int offset = ranks[i] - x;
+                        offset = rocprim::min(static_cast<unsigned int>(offset), BlockSize * NKey);
+                        storage.ordered_block_keys[offset] = keys[i];
+                    }
+                }
+            }
+
+            ::rocprim::syncthreads();
+
+            ROCPRIM_UNROLL
+            for(unsigned int n = 0; n < NKey; ++n)
+            {
+                const unsigned int rank = x + n * BlockSize + flat_id;
+                if(((ItemsPerThread % NKey == 0) && IsFull) || rank < valid_items)
+                {
+                    Key                key = storage.ordered_block_keys[rank - x];
+                    const unsigned int digit
+                        = key_codec::extract_digit(key, bit, current_radix_bits, decomposer);
+                    key_codec::decode_inplace(key, decomposer);
+                    const Offset global_offset        = storage.global_digit_offsets[digit];
+                    keys_output[rank + global_offset] = key;
+                    if constexpr(with_values)
+                    {
+                        digits[n + j * NKey] = digit;
+                    }
+                }
+            }
+
+            if constexpr(NKey != ItemsPerThread)
+            {
+                ::rocprim::syncthreads();
             }
         }
 
         // Gather and scatter values if necessary.
-        if(with_values)
+        if constexpr(with_values)
         {
             Value values[ItemsPerThread];
             if constexpr(IsFull)
@@ -1281,41 +1434,57 @@ struct onesweep_iteration_helper
                 }
             }
 
-            // Compute digits up-front so that we can re-use shared memory between ordered_block_keys and
-            // ordered_block_values.
-            unsigned int digits[ItemsPerThread];
-            ROCPRIM_UNROLL
-            for(unsigned int i = 0; i < ItemsPerThread; ++i)
+            if constexpr(NKey == ItemsPerThread)
             {
-                const unsigned int rank = i * BlockSize + flat_id;
-                if(IsFull || rank < valid_items)
-                {
-                    const Key key = storage.ordered_block_keys[rank];
-                    digits[i] = key_codec::extract_digit(key, bit, current_radix_bits, decomposer);
-                }
+                ::rocprim::syncthreads();
             }
-
-            ::rocprim::syncthreads();
-
-            // Order values in shared memory
-            ROCPRIM_UNROLL
-            for(unsigned int i = 0; i < ItemsPerThread; ++i)
-            {
-                storage.ordered_block_values[ranks[i]] = values[i];
-            }
-
-            ::rocprim::syncthreads();
 
             // And scatter the values to global memory.
-            ROCPRIM_UNROLL
-            for(unsigned int i = 0; i < ItemsPerThread; ++i)
+            // Unrolling loop will result in bad vgpr usages.
+            ROCPRIM_NO_UNROLL
+            for(unsigned int j = 0, x = 0; j < rocprim::detail::ceiling_div(ItemsPerThread, NValue);
+                ++j, x += (BlockSize * NValue))
             {
-                const unsigned int rank = i * BlockSize + flat_id;
-                if(IsFull || rank < valid_items)
+                ROCPRIM_UNROLL
+                for(unsigned int i = 0; i < ItemsPerThread; ++i)
                 {
-                    const Value  value                  = storage.ordered_block_values[rank];
-                    const Offset global_offset          = storage.global_digit_offsets[digits[i]];
-                    values_output[rank + global_offset] = value;
+                    // It only seems worse on gfx942 in some cases.
+                    if ROCPRIM_AMDGCN_CONSTEXPR(ROCPRIM_IS_CDNA3())
+                    {
+                        const int offset = ranks[i] - x;
+                        if(offset >= 0 && offset < static_cast<int>(BlockSize * NValue))
+                        {
+                            storage.ordered_block_values[offset] = v_pack::create(values[i]);
+                        }
+                    }
+                    else
+                    {
+                        // No branching, writes to unused LDS memory space.
+                        int offset = ranks[i] - x;
+                        offset
+                            = rocprim::min(static_cast<unsigned int>(offset), BlockSize * NValue);
+                        storage.ordered_block_values[offset] = v_pack::create(values[i]);
+                    }
+                }
+
+                ::rocprim::syncthreads();
+
+                ROCPRIM_UNROLL
+                for(unsigned int n = 0; n < NValue; ++n)
+                {
+                    const unsigned int rank = x + n * BlockSize + flat_id;
+                    if(((ItemsPerThread % NValue == 0) && IsFull) || rank < valid_items)
+                    {
+                        const Value  value = storage.ordered_block_values[rank - x].unpack();
+                        const Offset global_offset
+                            = storage.global_digit_offsets[digits[n + j * NValue]];
+                        values_output[rank + global_offset] = value;
+                    }
+                }
+
+                if constexpr(NValue != ItemsPerThread)
+                {
+                    ::rocprim::syncthreads();
                 }
             }
         }
@@ -1343,12 +1512,14 @@ template<unsigned int               BlockSize,
          unsigned int               RadixBits,
          bool                       Descending,
          block_radix_rank_algorithm RadixRankAlgorithm,
+         arch::wavefront::target    TargetWaveSize,
          class KeysInputIterator,
          class KeysOutputIterator,
          class ValuesInputIterator,
          class ValuesOutputIterator,
          class Offset,
-         class Decomposer>
+         class Decomposer,
+         class BlockIdWrapper>
 ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void
     onesweep_iteration(KeysInputIterator        keys_input,
                        KeysOutputIterator       keys_output,
@@ -1361,7 +1532,8 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void
                        Decomposer               decomposer,
                        const unsigned int       bit,
                        const unsigned int       current_radix_bits,
-                       const unsigned int       full_blocks)
+                       const unsigned int       full_blocks,
+                       BlockIdWrapper           ordered_bid)
 {
     using key_type   = typename std::iterator_traits<KeysInputIterator>::value_type;
     using value_type = typename std::iterator_traits<ValuesInputIterator>::value_type;
@@ -1374,12 +1546,15 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void
                                                                      RadixBits,
                                                                      Descending,
                                                                      RadixRankAlgorithm,
-                                                                     Decomposer>;
-
-    constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
-    const unsigned int block_id = ::rocprim::detail::block_id<0>();
+                                                                     TargetWaveSize,
+                                                                     Decomposer,
+                                                                     BlockIdWrapper>;
 
     ROCPRIM_SHARED_MEMORY typename onesweep_iteration_helper_type::storage_type storage;
+
+    constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
+    const unsigned int     thread_id       = ::rocprim::detail::block_thread_id<0>();
+    const unsigned int     block_id        = ordered_bid.get(thread_id, storage.get().ordered_bid);
 
     if(block_id < full_blocks)
     {
@@ -1394,7 +1569,8 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void
                                                                  bit,
                                                                  current_radix_bits,
                                                                  items_per_block,
-                                                                 storage.get());
+                                                                 storage.get().data,
+                                                                 block_id);
     }
     else
     {
@@ -1410,7 +1586,8 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void
                                                                   bit,
                                                                   current_radix_bits,
                                                                   valid_in_last_block,
-                                                                  storage.get());
+                                                                  storage.get().data,
+                                                                  block_id);
     }
 }
 

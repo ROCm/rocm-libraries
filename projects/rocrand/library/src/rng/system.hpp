@@ -126,7 +126,11 @@ struct host_system
         std::tuple<UserArgs...> user_args;
     };
 
-    template<auto Kernel, size_t... Is, typename... Args>
+    // At the call site, the loops use a variable number of iterations,
+    // so Clang isn't able to unroll them and will (wrongfully) complain about it.
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wpass-failed"
+    template<host::target_arch Arch, typename Kernel, size_t... Is, typename... Args>
     static void invoke_kernel(dim3 block,
                               dim3 thread,
                               dim3 grid_dim,
@@ -134,19 +138,21 @@ struct host_system
                               std::index_sequence<Is...>,
                               const std::tuple<Args...>& args)
     {
-        Kernel(block, thread, grid_dim, block_dim, std::get<Is>(args)...);
+        Kernel::template generate<Arch>(block, thread, grid_dim, block_dim, std::get<Is>(args)...);
     }
+#pragma clang diagnostic pop
 
-    template<auto Kernel,
+    template<typename Kernel,
              typename ConfigProvider
              = host::static_block_size_config_provider<ROCRAND_DEFAULT_MAX_BLOCK_SIZE>,
              typename T     = unsigned int,
              bool IsDynamic = false,
              typename... Args>
-    static rocrand_status launch(dim3                         num_blocks,
-                                 dim3                         num_threads,
-                                 unsigned int                 shared_bytes,
-                                 [[maybe_unused]] hipStream_t stream,
+    static rocrand_status launch([[maybe_unused]] host::target_arch arch,
+                                 dim3                               num_blocks,
+                                 dim3                               num_threads,
+                                 unsigned int                       shared_bytes,
+                                 [[maybe_unused]] hipStream_t       stream,
                                  Args... args)
     {
         (void)IsDynamic; // Not relevant on host launches
@@ -167,12 +173,13 @@ struct host_system
                     {
                         for(uint32_t tx = 0; tx < num_threads.x; ++tx)
                         {
-                            invoke_kernel<Kernel>(block_idx,
-                                                  dim3(tx, ty, tz),
-                                                  num_blocks,
-                                                  num_threads,
-                                                  std::make_index_sequence<sizeof...(Args)>(),
-                                                  kernel_args->user_args);
+                            invoke_kernel<host::target_arch{}, Kernel>(
+                                block_idx,
+                                dim3(tx, ty, tz),
+                                num_blocks,
+                                num_threads,
+                                std::make_index_sequence<sizeof...(Args)>(),
+                                kernel_args->user_args);
                         }
                     }
                 }
@@ -256,11 +263,21 @@ struct host_system
 namespace detail
 {
 
-template<auto Kernel, typename ConfigProvider, typename T, bool IsDynamic, typename... Args>
-__global__ __launch_bounds__(
-    (host::get_block_size<ConfigProvider, T>(IsDynamic))) void kernel_wrapper(Args... args)
+template<typename Kernel,
+         typename ConfigProvider,
+         typename T,
+         bool              IsDynamic,
+         host::target_arch Arch,
+         typename... Args>
+__global__ __launch_bounds__((host::get_block_size<ConfigProvider, T, Arch>(IsDynamic)))
+void trampoline_kernel(Args... args)
 {
-    Kernel(blockIdx, threadIdx, gridDim, blockDim, args...);
+#if !defined(__SPIRV__)
+    if constexpr(Arch == host::get_device_arch())
+#endif
+    {
+        Kernel::template generate<Arch>(blockIdx, threadIdx, gridDim, blockDim, args...);
+    }
 }
 
 } // namespace detail
@@ -299,20 +316,39 @@ struct device_system
         return ROCRAND_STATUS_SUCCESS;
     }
 
-    template<auto Kernel,
+    template<typename Kernel,
              typename ConfigProvider
              = host::static_block_size_config_provider<ROCRAND_DEFAULT_MAX_BLOCK_SIZE>,
              typename T     = unsigned int,
              bool IsDynamic = false,
              typename... Args>
-    static rocrand_status launch(dim3         num_blocks,
-                                 dim3         num_threads,
-                                 unsigned int shared_bytes,
-                                 hipStream_t  stream,
+    static rocrand_status launch(host::target_arch arch,
+                                 dim3              num_blocks,
+                                 dim3              num_threads,
+                                 unsigned int      shared_bytes,
+                                 hipStream_t       stream,
                                  Args... args)
     {
-        detail::kernel_wrapper<Kernel, ConfigProvider, T, IsDynamic>
-            <<<num_blocks, num_threads, shared_bytes, stream>>>(args...);
+        bool launched = false;
+        host::for_each_arch(
+            [&](auto arch_tag)
+            {
+                if(arch_tag != arch)
+                {
+                    return;
+                }
+
+                detail::trampoline_kernel<Kernel, ConfigProvider, T, IsDynamic, arch_tag>
+                    <<<num_blocks, num_threads, shared_bytes, stream>>>(args...);
+
+                launched = true;
+            });
+        if(!launched)
+        {
+            detail::
+                trampoline_kernel<Kernel, ConfigProvider, T, IsDynamic, host::target_arch::unknown>
+                <<<num_blocks, num_threads, shared_bytes, stream>>>(args...);
+        }
         if(hipGetLastError() != hipSuccess)
         {
             return ROCRAND_STATUS_LAUNCH_FAILURE;
@@ -342,7 +378,8 @@ struct syncthreads;
 template<>
 struct syncthreads<true>
 {
-    __device__ void operator()()
+    __device__
+    void operator()()
     {
         __syncthreads();
     }

@@ -1,4 +1,4 @@
-// Copyright (c) 2021-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2021-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -147,6 +147,37 @@ public:
         return bfloat16(std::numeric_limits<float>::signaling_NaN());
     };
 };
+
+template<>
+struct numeric_limits<__hip_bfloat16> : std::numeric_limits<__hip_bfloat16>
+{
+public:
+    static inline __hip_bfloat16 max()
+    {
+        return __hip_bfloat16(std::numeric_limits<float>::max() * 0.998);
+    };
+    static inline __hip_bfloat16 min()
+    {
+        return __hip_bfloat16(std::numeric_limits<float>::min());
+    };
+    static inline __hip_bfloat16 lowest()
+    {
+        return __hip_bfloat16(std::numeric_limits<float>::lowest() * 0.998);
+    };
+    static inline __hip_bfloat16 infinity()
+    {
+        return __hip_bfloat16(std::numeric_limits<float>::infinity());
+    };
+    static inline __hip_bfloat16 quiet_NaN()
+    {
+        return __hip_bfloat16(std::numeric_limits<float>::quiet_NaN());
+    };
+    static inline __hip_bfloat16 signaling_NaN()
+    {
+        return __hip_bfloat16(std::numeric_limits<float>::signaling_NaN());
+    };
+};
+
 // End of extended numeric_limits
 
 END_ROCPRIM_NAMESPACE
@@ -211,7 +242,7 @@ private:
 public:
     static std::vector<T> vector()
     {
-        if(std::is_integral<T>::value)
+        if(rocprim::is_integral<T>::value)
         {
             return std::vector<T>();
         }
@@ -334,8 +365,9 @@ auto make_distribution(U min, V max)
 {
     if constexpr(rocprim::is_floating_point<T>::value)
     {
-        using dis_type = typename std::conditional<std::is_same<rocprim::half, T>::value
-                                                       || std::is_same<rocprim::bfloat16, T>::value,
+        using dis_type = typename std::conditional<std::is_same_v<rocprim::half, T>
+                                                       || std::is_same_v<rocprim::bfloat16, T>
+                                                       || std::is_same_v<__hip_bfloat16, T>,
                                                    float,
                                                    T>::type;
         return std::uniform_real_distribution<dis_type>(static_cast<dis_type>(min),
@@ -439,7 +471,7 @@ inline auto generate_random_data_n(OutputIter                                   
                                    Generator&&                                         gen)
     -> std::enable_if_t<
         is_custom_test_array_type<common::it_value_t<OutputIter>>::value
-            && std::is_integral<typename common::it_value_t<OutputIter>::value_type>::value,
+            && rocprim::is_integral<typename common::it_value_t<OutputIter>::value_type>::value,
         OutputIter>
 {
     using T = typename std::iterator_traits<OutputIter>::value_type;
@@ -510,7 +542,24 @@ inline std::vector<T> get_random_data01(size_t size, float p, seed_type seed_val
 template<class T>
 std::vector<size_t> get_sizes(T seed_value)
 {
-    // clang-format off
+// clang-format off
+#if HAS_VALGRIND_H
+    std::vector<size_t> sizes;
+    //Disable large tests to reduce valgrind run time
+    if(RUNNING_ON_VALGRIND){
+        sizes = {1024, 2048, 1, 10, 53, 211, 500};
+    }
+    else{
+        sizes = {
+                1024, 2048, 4096, 1792,
+                1, 10, 53, 211, 500, 2345,
+                11001, 34567, 100000,
+                (1 << 16) - 1220,
+                (1 << 20) + 123
+            };
+    }
+
+#else
     std::vector<size_t> sizes = {
         1024, 2048, 4096, 1792,
         1, 10, 53, 211, 500, 2345,
@@ -518,7 +567,11 @@ std::vector<size_t> get_sizes(T seed_value)
         (1 << 16) - 1220,
         (1 << 20) + 123
     };
-    // clang-format on
+
+#endif // HAS_VALGRIND_H
+// clang-format on
+
+
     if(!common::use_hmm())
     {
         // hipMallocManaged() currently doesnt support zero byte allocation

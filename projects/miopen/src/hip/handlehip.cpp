@@ -1,33 +1,11 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright (c) 2017-2020 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier:  MIT
 
 #include <miopen/config.h>
 #include <miopen/handle.hpp>
 
 #include <miopen/binary_cache.hpp>
+#include <miopen/config.hpp>
 #include <miopen/env.hpp>
 #include <miopen/errors.hpp>
 #include <miopen/handle_lock.hpp>
@@ -37,10 +15,10 @@
 #include <miopen/stringutils.hpp>
 #include <miopen/target_properties.hpp>
 #include <miopen/timer.hpp>
+#include <miopen/unique_path.hpp>
 
 #if !MIOPEN_ENABLE_SQLITE_KERN_CACHE
 #include <miopen/write_file.hpp>
-#include <boost/filesystem/operations.hpp>
 #endif
 
 #include <miopen/filesystem.hpp>
@@ -142,20 +120,26 @@ void default_deallocator(void*, void* mem)
         MIOPEN_LOG_I2("hipFree " << size << " at " << mem << " Ok");
 }
 
-int get_device_id() // Get random device
+} // namespace
+
+// MIOPEN_INTERNALS_EXPORT set here because the function isn't present in headers
+// but called from test/gtest/handle_hip_device.cpp
+MIOPEN_INTERNALS_EXPORT int get_device_id() // Get random device
 {
     int device;
     auto status = hipGetDevice(&device);
     if(status != hipSuccess)
-        MIOPEN_THROW("No device");
+        MIOPEN_THROW_HIP_STATUS(status, "No device");
     return device;
 }
 
-void set_device(int id)
+// MIOPEN_INTERNALS_EXPORT set here because the function isn't present in headers
+// but called from test/gtest/handle_hip_device.cpp
+MIOPEN_INTERNALS_EXPORT void set_device(int id)
 {
     auto status = hipSetDevice(id);
     if(status != hipSuccess)
-        MIOPEN_THROW("Error setting device");
+        MIOPEN_THROW_HIP_STATUS(status, "Error setting device " + std::to_string(id));
 }
 
 #if MIOPEN_BUILD_DEV
@@ -173,8 +157,6 @@ int set_default_device()
 }
 #endif
 
-} // namespace
-
 // NOLINTNEXTLINE (cppcoreguidelines-avoid-non-const-global-variables)
 static thread_local unsigned int meopenHandle_current_stream_id = 0;
 struct HandleImpl
@@ -182,7 +164,7 @@ struct HandleImpl
     // typedef MIOPEN_MANAGE_PTR(hipStream_t, hipStreamDestroy) StreamPtr;
     using StreamPtr = std::shared_ptr<typename std::remove_pointer<hipStream_t>::type>;
 
-    HandleImpl() { hipInit(0); }
+    HandleImpl() { (void)hipInit(0); }
 
     StreamPtr create_stream()
     {
@@ -207,7 +189,7 @@ struct HandleImpl
     void elapsed_time(hipEvent_t start, hipEvent_t stop)
     {
         if(enable_profiling)
-            hipEventElapsedTime(&this->profiling_result, start, stop);
+            (void)hipEventElapsedTime(&this->profiling_result, start, stop);
     }
 
     std::function<void(hipEvent_t, hipEvent_t)> elapsed_time_handler()
@@ -221,7 +203,7 @@ struct HandleImpl
     std::string get_device_name() const
     {
         hipDeviceProp_t props{};
-        hipGetDeviceProperties(&props, device);
+        (void)hipGetDeviceProperties(&props, device);
         const std::string name(props.gcnArchName);
         MIOPEN_LOG_NQI("Raw device name: " << name);
         return name; // NOLINT (performance-no-automatic-move)
@@ -427,13 +409,17 @@ Allocator::ManageDataPtr Handle::Create(std::size_t sz) const
 Allocator::ManageDataPtr&
 Handle::WriteTo(const void* data, Allocator::ManageDataPtr& ddata, std::size_t sz) const
 {
+    WriteTo(data, ddata.get(), sz);
+    return ddata;
+}
+
+void Handle::WriteTo(const void* data, Data_t ddata, std::size_t sz) const
+{
     MIOPEN_HANDLE_LOCK
     this->Finish();
-    auto status =
-        hipMemcpyWithStream(ddata.get(), data, sz, hipMemcpyHostToDevice, this->GetStream());
+    auto status = hipMemcpyWithStream(ddata, data, sz, hipMemcpyHostToDevice, this->GetStream());
     if(status != hipSuccess)
         MIOPEN_THROW_HIP_STATUS(status, "Hip error writing to buffer: ");
-    return ddata;
 }
 
 void Handle::ReadTo(void* data, const Allocator::ManageDataPtr& ddata, std::size_t sz) const
@@ -611,12 +597,12 @@ Program Handle::LoadProgram(const fs::path& program_name,
 
         p.FreeCodeObjectFileStorage();
 #else
-        boost::filesystem::path cache_path;
+        fs::path cache_path;
 
         // If cache is disabled we don't need to dump binary and move it there
         if(!miopen::IsCacheDisabled())
         {
-            auto path = miopen::GetCachePath(false) / boost::filesystem::unique_path().string();
+            const auto path = miopen::GetCachePath(false) / miopen::unique_path();
             if(p.IsCodeObjectInMemory())
                 miopen::WriteFile(p.GetCodeObjectBlob(), path);
             else
@@ -631,7 +617,7 @@ Program Handle::LoadProgram(const fs::path& program_name,
             if(cache_path.empty())
                 p.AttachBinary(LoadFile(p.GetCodeObjectPathname()));
             else
-                p.AttachBinary(cache_path.string());
+                p.AttachBinary(cache_path);
         }
 
         p.FreeCodeObjectFileStorage();
@@ -685,9 +671,11 @@ void Handle::Finish() const
     }
 #else
     // hipStreamSynchronize is broken, so we use hipEventSynchronize instead
-    auto ev = make_hip_event();
-    hipEventRecord(ev.get(), this->GetStream());
-    auto status = hipEventSynchronize(ev.get());
+    auto ev     = make_hip_event();
+    auto status = hipEventRecord(ev.get(), this->GetStream());
+    if(status != hipSuccess)
+        MIOPEN_THROW_HIP_STATUS(status, "Failed hip event recording");
+    status = hipEventSynchronize(ev.get());
     if(status != hipSuccess)
         MIOPEN_THROW_HIP_STATUS(status, "Failed hip sychronization");
 #endif
@@ -749,7 +737,7 @@ std::size_t Handle::GetImage3dMaxWidth() const
 std::size_t Handle::GetWavefrontWidth() const
 {
     hipDeviceProp_t props{};
-    hipGetDeviceProperties(&props, this->impl->device);
+    (void)hipGetDeviceProperties(&props, this->impl->device);
     auto result = static_cast<size_t>(props.warpSize);
     return result;
 }

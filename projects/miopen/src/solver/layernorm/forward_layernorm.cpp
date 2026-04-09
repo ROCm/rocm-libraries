@@ -24,15 +24,15 @@
  *
  *******************************************************************************/
 
+#include "miopen/layernorm/problem_description.hpp"
 #include <miopen/datatype.hpp>
 #include <miopen/kernel_build_params.hpp>
+#include "miopen/mlo_internal.hpp"
 #include <miopen/layernorm.hpp>
 #include <miopen/layernorm/solvers.hpp>
 #include <miopen/layernorm/invoke_params.hpp>
 #include <miopen/layernorm/utils.hpp>
 #include <miopen/target_properties.hpp>
-
-#define LOCAL_SIZE 256
 
 namespace miopen {
 
@@ -40,25 +40,9 @@ namespace solver {
 
 namespace layernorm {
 
-bool LayernormForward::IsApplicable(const ExecutionContext&,
-                                    const miopen::layernorm::ProblemDescription& problem) const
-{
-    if(!problem.IsSameType())
-        return false;
-    if(!problem.IsSameLength())
-        return false;
-    if(!problem.IsAllPacked())
-        return false;
-    if(!problem.IsRightNormDim())
-        return false;
-    if(!(sizeof_local_memory(problem) <= TargetProperties::GetMaxLocalMemorySize()))
-        return false;
-    return true;
-}
-
-ConvSolution
-LayernormForward::GetSolution(const ExecutionContext& context,
-                              const miopen::layernorm::ProblemDescription& problem) const
+ConvSolution LayernormForward::GetSolution(const ExecutionContext& context,
+                                           const miopen::layernorm::ProblemDescription& problem,
+                                           const PerformanceConfigLayernorm& config) const
 {
     std::ignore = context;
 
@@ -68,16 +52,9 @@ LayernormForward::GetSolution(const ExecutionContext& context,
         auto dtype        = problem.GetXDesc().GetType();
         auto input_dtype  = miopen::GetDataType(problem.GetXDesc().GetType());
         auto output_dtype = miopen::GetDataType(problem.GetYDesc().GetType());
-        auto dims         = problem.GetXDesc().GetLengths();
 
-        size_t outer_size = 1;
-        for(size_t i = 0; i < problem.GetNormalizedDim(); i++)
-        {
-            outer_size *= dims[i];
-        }
-
-        size_t xlocalsize = LOCAL_SIZE;
-        size_t xgridsize  = outer_size * xlocalsize;
+        size_t xlocalsize = config.local_size;
+        size_t xgridsize  = problem.outer_size * problem.stride * xlocalsize;
         size_t ylocalsize = 1;
         size_t ygridsize  = 1;
         size_t zlocalsize = 1;
@@ -86,7 +63,7 @@ LayernormForward::GetSolution(const ExecutionContext& context,
         auto kernel = KernelInfo{};
 
         kernel.kernel_file = "MIOpenLayerNorm.cpp";
-        kernel.kernel_name = "LayernormFwdContiguous";
+        kernel.kernel_name = "LayernormFwd";
 
         const auto build_params = KernelBuildParameters{
             {"MIOPEN_USE_FP16", static_cast<int>(dtype == miopenHalf)},
@@ -94,7 +71,11 @@ LayernormForward::GetSolution(const ExecutionContext& context,
             {"MIOPEN_USE_BFP16", static_cast<int>(dtype == miopenBFloat16)},
             {"INPUT_TYPE", input_dtype == "bfloat16" ? "ushort" : input_dtype},
             {"OUTPUT_TYPE", output_dtype == "bfloat16" ? "ushort" : output_dtype},
-            {"LOCAL_SIZE", LOCAL_SIZE},
+            {"OUTER_SIZE", problem.outer_size},
+            {"INNER_SIZE", problem.inner_size},
+            {"STRIDE", problem.stride},
+            {"PARALLEL_SIZE", 1},
+            {"LOCAL_SIZE", config.local_size},
             {"MIOPEN_ELEMENTWISE_AFFINE", 0},
             {"MIOPEN_WEIGHT_BIAS", 1},
             {"MIOPEN_ELEMENTWISE_AFFINE_FUSED_ADD", 2},
@@ -121,14 +102,6 @@ LayernormForward::GetSolution(const ExecutionContext& context,
             decltype(auto) kernel = handle_.Run(kernels.front());
             decltype(auto) params = raw_params.CastTo<miopen::layernorm::InvokeParams>();
 
-            auto dims         = params.xDesc->GetLengths();
-            size_t inner_size = 1;
-
-            for(size_t i = params.normalized_dim; i < dims.size(); i++)
-            {
-                inner_size *= dims[i];
-            }
-
             kernel(params.x,
                    params.weight,
                    params.bias,
@@ -136,7 +109,6 @@ LayernormForward::GetSolution(const ExecutionContext& context,
                    params.mean,
                    params.rstd,
                    params.epsilon,
-                   inner_size,
                    static_cast<int32_t>(params.mode));
         };
     };

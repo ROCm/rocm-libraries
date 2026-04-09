@@ -21,8 +21,26 @@
 """
 
 import sys
-import pathlib
 import os
+
+# Add the module path for hipblaslt performance modules
+# This script is installed in bin/, modules are in share/hipblaslt/performance/
+script_dir = os.path.dirname(os.path.realpath(__file__))
+install_prefix = os.path.dirname(script_dir)
+module_dir = os.path.join(install_prefix, 'share', 'hipblaslt', 'performance')
+if os.path.exists(module_dir):
+    sys.path.insert(0, module_dir)
+else:
+    # Fallback: support invocation from src-tree for development
+    sys.path.insert(0, script_dir)
+
+try:
+    import specs
+except ImportError:
+    print(f"Error: Cannot find required modules: Set PYTHON_PATH={module_dir}")
+    sys.exit(1)
+
+import pathlib
 import argparse
 import logging
 import bench
@@ -193,19 +211,21 @@ def run_sh_bench(arguments):
     for singleCMD in generator.iterate_cmd():
         # print("singleCMD: " + singleCMD)
         csvKeys, benchResults, success = bench.run_sh_cmd(singleCMD, True)
-        content = extractProblemDescStr(benchResults, csvKeys) + '\n'
-        if writeHeader:
-            header = ','.join([str(key) for key in csvKeys]) + '\n'
-            csv_file.write(header)
-            writeHeader = False
-        csv_file.write(content)
+        for eachResult in benchResults:
+            # data in problem description
+            content = extractProblemDescStr(eachResult, csvKeys) + '\n'
+            if writeHeader:
+                header = ','.join([str(key) for key in csvKeys]) + '\n'
+                csv_file.write(header)
+                writeHeader = False
+            csv_file.write(content)
 
     print(f'\nResults written to {csv_file.name}')
     csv_file.close()
 
     logging.info("Finish bench.")
 
-def run_suite_bench(arguments, probYaml_foler):
+def run_suite_bench(arguments, probYaml_folder):
     """Run suite bench"""
 
     if arguments.workspace:
@@ -224,7 +244,11 @@ def run_suite_bench(arguments, probYaml_foler):
         print("test problems not set, use --suite for testing problems")
         return
     else:
-        generator = SuiteProblemGenerator(arguments.suite)
+        # Pass problems_dir if using custom directory with --suite all
+        if arguments.problems_dir and 'all' in arguments.suite:
+            generator = SuiteProblemGenerator(arguments.suite, problems_dir=probYaml_folder)
+        else:
+            generator = SuiteProblemGenerator(arguments.suite)
 
     out_folder = arguments.workspace
     exec_folder = arguments.execFolder
@@ -253,7 +277,7 @@ def run_suite_bench(arguments, probYaml_foler):
             print(f"\nSampling Iteration: {iter}")
             finalize = (iter == num_samples - 1)
             for p in problemSet.generate_problems():
-                runBenchmark(pTypeName, curProbSet, p.args, exec_folder, probYaml_foler, csv_file, writeCSVHeader, num_samples, finalize)
+                runBenchmark(pTypeName, curProbSet, p.args, exec_folder, probYaml_folder, csv_file, writeCSVHeader, num_samples, finalize)
                 writeCSVHeader = False
 
         if csv_file is not None:
@@ -279,8 +303,7 @@ def main():
     probYaml_folder = pathlib.Path(os.path.join(dir_of_this_script, 'problems/')).resolve()
     executable_folder = pathlib.Path(os.path.join(dir_of_this_repo, "build/release/clients/")).resolve()
     print(f'Info: path of this script = {dir_of_this_script}')
-    print(f'Info: path of this repos = {dir_of_this_repo}')
-    print(f'Info: path of bench yaml problems = {probYaml_folder}')
+    print(f'Info: path of this repo = {dir_of_this_repo}')
 
     parser.add_argument('-w',
                         '--workspace',
@@ -334,9 +357,29 @@ def main():
                         action='store_true',
                         default=False)
 
+    parser.add_argument('-p',
+                        '--problems_dir',
+                        type=str,
+                        help='custom directory containing problem YAML files (only works with --suite all)',
+                        default=None)
+
     arguments = parser.parse_args()
 
     SuiteProblemGenerator.target_arch_static = arguments.targetArch
+
+    # Handle custom problems directory
+    if arguments.problems_dir:
+        custom_prob_dir = pathlib.Path(arguments.problems_dir).resolve()
+        if not custom_prob_dir.exists():
+            print(f'Error: Problems directory {custom_prob_dir} does not exist')
+            sys.exit(1)
+        if not custom_prob_dir.is_dir():
+            print(f'Error: {custom_prob_dir} is not a directory')
+            sys.exit(1)
+        probYaml_folder = custom_prob_dir
+        print(f'Info: Using custom problems directory = {probYaml_folder}')
+    else:
+        print(f'Info: path of bench yaml problems = {probYaml_folder}')
 
     if arguments.run_sh is not None:
         run_sh_bench(arguments)

@@ -26,12 +26,254 @@
 
 #include <miopen/rnn.hpp>
 #include <miopen/rnn_util.hpp>
+#include <miopen/kernel_build_params.hpp>
+#include <miopen/datatype.hpp>
 #include <algorithm>
 #include <miopen/env.hpp>
 
 MIOPEN_DECLARE_ENV_VAR_UINT64(MIOPEN_RNNWRW_REDUCTION)
 
 namespace miopen {
+
+void LSTMForwardHiddenStateUpdate(const Handle& handle,
+                                  miopenDataType_t rnn_data_type,
+                                  bool is_inference,
+                                  bool is_seq_begin,
+                                  int direction,
+                                  int max_batch,
+                                  int cur_batch,
+                                  int use_batch,
+                                  int hy_h,
+                                  int hy_stride,
+                                  ConstData_t cx,
+                                  std::size_t cx_offset,
+                                  Data_t reserve_space,
+                                  std::size_t i_offset,
+                                  std::size_t f_offset,
+                                  std::size_t o_offset,
+                                  std::size_t c_offset,
+                                  std::size_t cell_offset,
+                                  std::size_t cell_offset_pre,
+                                  std::size_t activ_cell_offset,
+                                  std::size_t hidden_offset)
+{
+    std::string program_name = "MIOpenRNNHiddenStateUpdate.cpp";
+    std::string kernel_name  = "LSTMFwdHiddenUpdate";
+
+    size_t max_active_threads = handle.GetMaxComputeUnits() * handle.GetWavefrontWidth() * 32;
+    size_t total_work         = static_cast<size_t>(max_batch) * hy_h;
+    size_t read_block         = (total_work >= 4 * max_active_threads && hy_h % 4 == 0)
+                                    ? 4
+                                    : ((total_work >= 2 * max_active_threads && hy_h % 2 == 0) ? 2 : 1);
+    size_t total_items        = std::max(total_work / read_block, size_t{1});
+    size_t items_per_group    = total_items <= 64 ? 64 : total_items <= 128 ? 128 : 256;
+    size_t global_size        = std::min(total_items, max_active_threads);
+    size_t workgroup_size     = (global_size + items_per_group - 1) / items_per_group;
+    global_size               = workgroup_size * items_per_group;
+
+    bool use_cx = cx != nullptr;
+
+    std::string network_config =
+        "lstmfwdhid-" + std::string(rnn_data_type == miopenHalf ? "fp16-" : "fp32-") +
+        std::to_string(static_cast<int>(is_inference)) + "x" + std::to_string(read_block) + "x" +
+        std::to_string(items_per_group) + "x" + std::to_string(workgroup_size) + "x" +
+        std::to_string(static_cast<int>(use_cx)) + "x" +
+        std::to_string(static_cast<int>(is_seq_begin)) + "x" + std::to_string(direction);
+
+    auto&& kernels = handle.GetKernels(kernel_name, network_config);
+
+    if(!kernels.empty())
+    {
+        auto kernel = kernels.front();
+        kernel(cx,
+               reserve_space,
+               hy_h,
+               hy_stride,
+               static_cast<long long>(cx_offset),
+               static_cast<long long>(i_offset),
+               static_cast<long long>(f_offset),
+               static_cast<long long>(o_offset),
+               static_cast<long long>(c_offset),
+               static_cast<long long>(cell_offset),
+               static_cast<long long>(cell_offset_pre),
+               static_cast<long long>(activ_cell_offset),
+               static_cast<long long>(hidden_offset),
+               cur_batch,
+               use_batch);
+    }
+    else
+    {
+        const auto build_params = KernelBuildParameters{
+            {"READ_BLOCK", static_cast<int>(read_block)},
+            {"DATA_TYPE", miopen::GetDataType(rnn_data_type)},
+            {"MIOPEN_USE_FP32", static_cast<int>(rnn_data_type == miopenFloat)},
+            {"MIOPEN_USE_FP16", static_cast<int>(rnn_data_type == miopenHalf)},
+            {"INFERENCE_MODE", static_cast<int>(is_inference)},
+            {"LOCAL_SIZE", items_per_group},
+            {"GLOBAL_SIZE", global_size},
+            {"USE_CX", static_cast<int>(use_cx)},
+            {"USE_DCY", 0},
+            {"IS_SEQ_BEGIN", static_cast<int>(is_seq_begin)},
+            {"IS_SEQ_END", 0},
+            {"DIRECTION", direction}};
+        const std::string params = build_params.GenerateFor(kbp::HIP{});
+        const std::vector<size_t> vld{items_per_group, 1, 1};
+        const std::vector<size_t> vgd{global_size, 1, 1};
+
+        handle.AddKernel(kernel_name, network_config, program_name, kernel_name, vld, vgd, params)(
+            cx,
+            reserve_space,
+            hy_h,
+            hy_stride,
+            static_cast<long long>(cx_offset),
+            static_cast<long long>(i_offset),
+            static_cast<long long>(f_offset),
+            static_cast<long long>(o_offset),
+            static_cast<long long>(c_offset),
+            static_cast<long long>(cell_offset),
+            static_cast<long long>(cell_offset_pre),
+            static_cast<long long>(activ_cell_offset),
+            static_cast<long long>(hidden_offset),
+            cur_batch,
+            use_batch);
+    }
+}
+
+void LSTMBackwardHiddenStateUpdate(const Handle& handle,
+                                   miopenDataType_t rnn_data_type,
+                                   bool is_seq_begin,
+                                   bool is_seq_end,
+                                   int direction,
+                                   int max_batch,
+                                   int cur_batch,
+                                   int use_batch,
+                                   int use_batch2,
+                                   int hy_h,
+                                   int hy_stride,
+                                   ConstData_t cx,
+                                   std::size_t cx_offset,
+                                   Data_t reserve_space,
+                                   std::size_t i_offset,
+                                   std::size_t f_offset,
+                                   std::size_t o_offset,
+                                   std::size_t c_offset,
+                                   std::size_t activ_cell_offset,
+                                   std::size_t cell_offset_pre,
+                                   ConstData_t dcy,
+                                   std::size_t dcy_offset,
+                                   Data_t work_space,
+                                   std::size_t di_offset,
+                                   std::size_t df_offset,
+                                   std::size_t do_offset,
+                                   std::size_t dc_offset,
+                                   std::size_t dcell_offset,
+                                   std::size_t dcell_offset_pre,
+                                   std::size_t dhidden_offset,
+                                   std::size_t f_offset_pre)
+{
+    std::string program_name = "MIOpenRNNHiddenStateUpdate.cpp";
+    std::string kernel_name  = "LSTMBwdHiddenUpdate";
+
+    size_t max_active_threads = handle.GetMaxComputeUnits() * handle.GetWavefrontWidth() * 32;
+    size_t total_work         = static_cast<size_t>(max_batch) * hy_h;
+    size_t read_block         = (total_work >= 4 * max_active_threads && hy_h % 4 == 0)
+                                    ? 4
+                                    : ((total_work >= 2 * max_active_threads && hy_h % 2 == 0) ? 2 : 1);
+    size_t total_items        = std::max(total_work / read_block, size_t{1});
+    size_t items_per_group    = total_items <= 64 ? 64 : total_items <= 128 ? 128 : 256;
+    size_t global_size        = std::min(total_items, max_active_threads);
+    size_t workgroup_size     = (global_size + items_per_group - 1) / items_per_group;
+    global_size               = workgroup_size * items_per_group;
+
+    bool use_cx  = cx != nullptr;
+    bool use_dcy = dcy != nullptr;
+
+    std::string network_config =
+        "lstmbwdhid-" + std::string(rnn_data_type == miopenHalf ? "fp16-" : "fp32-") +
+        std::to_string(read_block) + "x" + std::to_string(items_per_group) + "x" +
+        std::to_string(workgroup_size) + "x" + std::to_string(static_cast<int>(use_cx)) + "x" +
+        std::to_string(static_cast<int>(use_dcy)) + "x" +
+        std::to_string(static_cast<int>(is_seq_begin)) + "x" +
+        std::to_string(static_cast<int>(is_seq_end)) + "x" + std::to_string(direction);
+
+    auto&& kernels = handle.GetKernels(kernel_name, network_config);
+
+    if(!kernels.empty())
+    {
+        auto kernel = kernels.front();
+        kernel(cx,
+               dcy,
+               reserve_space,
+               work_space,
+               hy_h,
+               hy_stride,
+               static_cast<long long>(cx_offset),
+               static_cast<long long>(dcy_offset),
+               static_cast<long long>(i_offset),
+               static_cast<long long>(f_offset),
+               static_cast<long long>(o_offset),
+               static_cast<long long>(c_offset),
+               static_cast<long long>(activ_cell_offset),
+               static_cast<long long>(cell_offset_pre),
+               static_cast<long long>(di_offset),
+               static_cast<long long>(df_offset),
+               static_cast<long long>(do_offset),
+               static_cast<long long>(dc_offset),
+               static_cast<long long>(dcell_offset),
+               static_cast<long long>(dcell_offset_pre),
+               static_cast<long long>(dhidden_offset),
+               static_cast<long long>(f_offset_pre),
+               cur_batch,
+               use_batch,
+               use_batch2);
+    }
+    else
+    {
+        const auto build_params = KernelBuildParameters{
+            {"READ_BLOCK", static_cast<int>(read_block)},
+            {"DATA_TYPE", miopen::GetDataType(rnn_data_type)},
+            {"MIOPEN_USE_FP32", static_cast<int>(rnn_data_type == miopenFloat)},
+            {"MIOPEN_USE_FP16", static_cast<int>(rnn_data_type == miopenHalf)},
+            {"INFERENCE_MODE", 0},
+            {"LOCAL_SIZE", items_per_group},
+            {"GLOBAL_SIZE", global_size},
+            {"USE_CX", static_cast<int>(use_cx)},
+            {"USE_DCY", static_cast<int>(use_dcy)},
+            {"IS_SEQ_BEGIN", static_cast<int>(is_seq_begin)},
+            {"IS_SEQ_END", static_cast<int>(is_seq_end)},
+            {"DIRECTION", direction}};
+        const std::string params = build_params.GenerateFor(kbp::HIP{});
+        const std::vector<size_t> vld{items_per_group, 1, 1};
+        const std::vector<size_t> vgd{global_size, 1, 1};
+
+        handle.AddKernel(kernel_name, network_config, program_name, kernel_name, vld, vgd, params)(
+            cx,
+            dcy,
+            reserve_space,
+            work_space,
+            hy_h,
+            hy_stride,
+            static_cast<long long>(cx_offset),
+            static_cast<long long>(dcy_offset),
+            static_cast<long long>(i_offset),
+            static_cast<long long>(f_offset),
+            static_cast<long long>(o_offset),
+            static_cast<long long>(c_offset),
+            static_cast<long long>(activ_cell_offset),
+            static_cast<long long>(cell_offset_pre),
+            static_cast<long long>(di_offset),
+            static_cast<long long>(df_offset),
+            static_cast<long long>(do_offset),
+            static_cast<long long>(dc_offset),
+            static_cast<long long>(dcell_offset),
+            static_cast<long long>(dcell_offset_pre),
+            static_cast<long long>(dhidden_offset),
+            static_cast<long long>(f_offset_pre),
+            cur_batch,
+            use_batch,
+            use_batch2);
+    }
+}
 
 int getReductionAlgo() { return env::value_or(MIOPEN_RNNWRW_REDUCTION, 1); }
 
@@ -137,13 +379,13 @@ void ReorderTensorGPUData(const Handle& handle,
     if(tensor_lens[reordering_dim] != sample_order.size())
         MIOPEN_THROW(miopenStatusInternalError, "Wrong tensor lens");
 
-    auto get_single_samlpe_lens = [](const std::vector<size_t>& lens, int reordering_dim) {
+    auto get_single_sample_lens = [](const std::vector<size_t>& lens, int reordering_dim_) {
         std::vector<size_t> new_lens = lens;
-        new_lens[reordering_dim]     = 1;
+        new_lens[reordering_dim_]    = 1;
         return new_lens;
     };
 
-    const std::vector<size_t> copy_size = get_single_samlpe_lens(tensor_lens, reordering_dim);
+    const std::vector<size_t> copy_size = get_single_sample_lens(tensor_lens, reordering_dim);
 
     const auto src_desc = miopen::TensorDescriptor(data_type, copy_size, src_stride);
     const auto dst_desc = miopen::TensorDescriptor(data_type, copy_size, dst_stride);
@@ -169,15 +411,6 @@ void RNNTensorBaseLayoutConverter::ReorderInputTensorGPUData(
     if(!padded_tensor_desc.IsPaddedSeqLayout())
         MIOPEN_THROW(miopenStatusInternalError, "Wrong tensor layout");
 
-    // auto get_single_samlpe_lens = [](const std::vector<size_t>& SeqTensor_lens) {
-    //    std::vector<size_t> new_lens = SeqTensor_lens;
-    //    new_lens[0]                  = 1;
-    //    return new_lens;
-    //};
-    //
-    // const std::vector<size_t> copy_size =
-    // get_single_samlpe_lens(padded_tensor_desc.GetLengths());
-
     const std::vector<size_t> src_stride = padded_tensor_desc.GetPaddedStrides();
     const std::vector<size_t> dst_stride = dst_padded_tensor_desc.GetPaddedStrides();
 
@@ -190,20 +423,6 @@ void RNNTensorBaseLayoutConverter::ReorderInputTensorGPUData(
                          src,
                          dst,
                          padded_tensor_desc.GetType());
-
-    // const auto src_desc =
-    //    miopen::TensorDescriptor(padded_tensor_desc.GetType(), copy_size, src_stride);
-    // const auto dst_desc =
-    //    miopen::TensorDescriptor(padded_tensor_desc.GetType(), copy_size, dst_stride);
-    //
-    // const auto src_sample_stride = src_stride[0];
-    // const auto dst_sample_stride = dst_stride[0];
-    // for(size_t i = 0; i < sample_order.size(); i++)
-    //{
-    //    const auto dst_offset = i * dst_sample_stride;
-    //    const auto src_offset = sample_order[i] * src_sample_stride;
-    //    CopyTensor(handle, src_desc, src, dst_desc, dst, src_offset, dst_offset, true);
-    //}
 }
 
 void RNNTensorBaseLayoutConverter::ReorderHiddenTensorGPUData(const Handle& handle,

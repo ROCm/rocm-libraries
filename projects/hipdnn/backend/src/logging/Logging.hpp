@@ -3,43 +3,91 @@
 
 #pragma once
 
-#include <hipdnn_sdk/logging/CallbackTypes.h>
+#include "EnumFormatters.hpp"
+#include <hip/hip_runtime.h>
+#include <hipdnn_data_sdk/logging/CallbackTypes.h>
+#include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <memory>
-#include <spdlog/spdlog.h>
 
+// Backend-specific logging macros
+// These are separate from HIPDNN_LOG_* used by frontend/plugins to avoid conflicts
 #ifdef HIPDNN_BACKEND_COMPILATION
-#define _HIPDNN_BACKEND_LOG_ACTION(level, ...)                         \
-    do                                                                 \
-    {                                                                  \
-        hipdnn_backend::logging::initialize();                         \
-        if(auto _logger = hipdnn_backend::logging::getBackendLogger()) \
-        {                                                              \
-            _logger->level(__VA_ARGS__);                               \
-        }                                                              \
+#include <hipdnn_data_sdk/logging/LogLevel.hpp>
+
+#define HIPDNN_BACKEND_LOG_INFO(...)                                             \
+    do                                                                           \
+    {                                                                            \
+        hipdnn_backend::logging::initialize();                                   \
+        HIPDNN_SDK_LOG_INFO_WITH_COMPONENT(                                      \
+            hipdnn_backend::logging::detail::K_BACKEND_LOGGER_COMPONENT_NAME,    \
+            hipdnn_backend::logging::detail::formatBackendMessage(__VA_ARGS__)); \
     } while(0)
 
-#define HIPDNN_LOG_INFO(...) _HIPDNN_BACKEND_LOG_ACTION(info, __VA_ARGS__)
-#define HIPDNN_LOG_WARN(...) _HIPDNN_BACKEND_LOG_ACTION(warn, __VA_ARGS__)
-#define HIPDNN_LOG_ERROR(...) _HIPDNN_BACKEND_LOG_ACTION(error, __VA_ARGS__)
-#define HIPDNN_LOG_FATAL(...) _HIPDNN_BACKEND_LOG_ACTION(critical, __VA_ARGS__)
+#define HIPDNN_BACKEND_LOG_WARN(...)                                             \
+    do                                                                           \
+    {                                                                            \
+        hipdnn_backend::logging::initialize();                                   \
+        HIPDNN_SDK_LOG_WARN_WITH_COMPONENT(                                      \
+            hipdnn_backend::logging::detail::K_BACKEND_LOGGER_COMPONENT_NAME,    \
+            hipdnn_backend::logging::detail::formatBackendMessage(__VA_ARGS__)); \
+    } while(0)
+
+#define HIPDNN_BACKEND_LOG_ERROR(...)                                            \
+    do                                                                           \
+    {                                                                            \
+        hipdnn_backend::logging::initialize();                                   \
+        HIPDNN_SDK_LOG_ERROR_WITH_COMPONENT(                                     \
+            hipdnn_backend::logging::detail::K_BACKEND_LOGGER_COMPONENT_NAME,    \
+            hipdnn_backend::logging::detail::formatBackendMessage(__VA_ARGS__)); \
+    } while(0)
+
+#define HIPDNN_BACKEND_LOG_FATAL(...)                                            \
+    do                                                                           \
+    {                                                                            \
+        hipdnn_backend::logging::initialize();                                   \
+        HIPDNN_SDK_LOG_FATAL_WITH_COMPONENT(                                     \
+            hipdnn_backend::logging::detail::K_BACKEND_LOGGER_COMPONENT_NAME,    \
+            hipdnn_backend::logging::detail::formatBackendMessage(__VA_ARGS__)); \
+    } while(0)
 #endif // HIPDNN_BACKEND_COMPILATION
 
-namespace hipdnn_backend
-{
-namespace logging
+namespace hipdnn_backend::logging
 {
 
 void initialize();
 
-void cleanup();
+void loggerShutdown();
 
-void setLogLevel(const std::string& level);
+void backendLoggingCallback(hipdnnSeverity_t severity, const char* msg);
 
-std::shared_ptr<spdlog::logger> getBackendLogger();
+void logHipDeviceInfo(hipStream_t stream);
 
-std::shared_ptr<spdlog::logger> getCallbackReceiverLogger();
+hipdnnStatus_t setUserLogCallback(hipdnnUserLogCallback_t callback,
+                                  hipdnnSeverity_t minLevel,
+                                  hipdnnLogCallbackMode_t mode,
+                                  hipdnnUserLogCallbackHandle_t userHandle);
 
-void hipdnnLoggingCallback(hipdnnSeverity_t severity, const char* msg);
+hipdnnStatus_t setGlobalLogLevel(hipdnnSeverity_t level);
 
-} // namespace logging
-} // namespace hipdnn_backend
+hipdnnStatus_t getGlobalLogLevel(hipdnnSeverity_t& level);
+
+namespace detail
+{
+
+inline constexpr const char* K_BACKEND_LOGGER_COMPONENT_NAME = "hipdnn_backend";
+
+// Overload for log call with a single parameter -- for safety, do not treat as a format string.
+inline std::string formatBackendMessage(const std::string& msg)
+{
+    return msg;
+}
+// Overload log call that has format string + arguments -- typical use.
+template <typename... Args>
+inline std::string formatBackendMessage(const char* fmtStr, Args&&... args)
+{
+    return fmt::format(fmt::runtime(fmtStr), std::forward<Args>(args)...);
+}
+
+} // namespace detail
+
+} // namespace hipdnn_backend::logging

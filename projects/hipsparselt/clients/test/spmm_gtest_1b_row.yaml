@@ -1,7 +1,7 @@
 ---
 include: hipsparselt_common.yaml
 include: known_bugs.yaml
-include: spmm_common_row.yaml
+include: spmm_common_16_row.yaml
 
 Definitions:
   - &alpha_beta_range
@@ -37,7 +37,7 @@ Definitions:
 
 Tests:
 - name: spmm_bad_arg
-  category: pre_checkin
+  category: smoke
   function:
     - spmm_bad_arg: *real_precisions_1b
   transA: N
@@ -599,6 +599,18 @@ Tests:
   activation_arg1 : [-1.0, 0.0, 0.5]
   activation_arg2 : [-1.0, 0.0, 0.5, 1.0, 3.0]
   sparse_b: [ true, false]
+  orderA: [R]
+  orderB: [R]
+  orderC: [R]
+  orderD: [R]
+
+- name: spmm_bert_sizes
+  category: nightly
+  function:
+    spmm: *real_precisions_1b
+  matrix_size: *bert_sizes
+  transA_transB: *transA_transB_range
+  sparse_b: false
   orderA: [R]
   orderB: [R]
   orderC: [R]

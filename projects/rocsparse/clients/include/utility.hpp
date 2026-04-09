@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2019-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -30,6 +30,7 @@
 #ifndef UTILITY_HPP
 #define UTILITY_HPP
 
+#include "rocsparse_clients_float16.hpp"
 #include "rocsparse_clients_routine_trace.hpp"
 #include "rocsparse_matrix.hpp"
 #include "rocsparse_test.hpp"
@@ -191,12 +192,6 @@ inline constexpr size_t rocsparse_datatype_sizeof(rocsparse_datatype datatype_)
     }
     }
     return static_cast<size_t>(0);
-}
-
-inline std::ostream& operator<<(std::ostream& os_, const _Float16& that_)
-{
-    os_ << (float)that_;
-    return os_;
 }
 
 /*! \brief  local handle which is automatically created and destroyed  */
@@ -774,6 +769,76 @@ public:
         }
     }
 
+    template <memory_mode::value_t MODE, typename T, typename I = rocsparse_int>
+    explicit rocsparse_local_spmat(bell_matrix<MODE, T, I>& h)
+        : rocsparse_local_spmat(h.m,
+                                h.n,
+                                h.bdir,
+                                h.bdim,
+                                h.width,
+                                h.ind,
+                                h.val,
+                                get_indextype<I>(),
+                                h.base,
+                                get_datatype<T>())
+    {
+    }
+
+    rocsparse_local_spmat(int64_t              m,
+                          int64_t              n,
+                          int64_t              nnz,
+                          int64_t              sell_slice_size,
+                          int64_t              sell_colval_size,
+                          void*                sell_slice_offsets,
+                          void*                sell_col_ind,
+                          void*                sell_val,
+                          rocsparse_indextype  sell_slice_offsets_type,
+                          rocsparse_indextype  sell_col_ind_type,
+                          rocsparse_index_base idx_base,
+                          rocsparse_datatype   compute_type)
+    {
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE;
+
+        const rocsparse_status status = rocsparse_create_sell_descr(&this->descr,
+                                                                    m,
+                                                                    n,
+                                                                    nnz,
+                                                                    sell_slice_size,
+                                                                    sell_colval_size,
+                                                                    sell_slice_offsets,
+                                                                    sell_col_ind,
+                                                                    sell_val,
+                                                                    sell_slice_offsets_type,
+                                                                    sell_col_ind_type,
+                                                                    idx_base,
+                                                                    compute_type);
+
+        if(status != rocsparse_status_success)
+        {
+            throw(status);
+        }
+    }
+
+    template <memory_mode::value_t MODE,
+              typename T,
+              typename I = rocsparse_int,
+              typename J = rocsparse_int>
+    explicit rocsparse_local_spmat(sell_matrix<MODE, T, I, J>& h)
+        : rocsparse_local_spmat(h.m,
+                                h.n,
+                                h.nnz,
+                                h.sell_slice_size,
+                                h.sell_colval_size,
+                                h.ptr,
+                                h.ind,
+                                h.val,
+                                get_indextype<I>(),
+                                get_indextype<J>(),
+                                h.base,
+                                get_datatype<T>())
+    {
+    }
+
     rocsparse_local_spmat(int64_t              m,
                           int64_t              n,
                           void*                ell_col_ind,
@@ -799,7 +864,7 @@ public:
             h.m, h.n, h.ind, h.val, h.width, get_indextype<I>(), h.base, get_datatype<T>())
     {
     }
-
+    rocsparse_local_spmat() {}
     ~rocsparse_local_spmat()
     {
         ROCSPARSE_CLIENTS_ROUTINE_TRACE;
@@ -825,6 +890,7 @@ class rocsparse_local_dnvec
     rocsparse_dnvec_descr descr{};
 
 public:
+    rocsparse_local_dnvec(){};
     rocsparse_local_dnvec(int64_t size, void* values, rocsparse_datatype compute_type)
     {
         ROCSPARSE_CLIENTS_ROUTINE_TRACE;
@@ -840,6 +906,12 @@ public:
     template <memory_mode::value_t MODE, typename T>
     explicit rocsparse_local_dnvec(dense_matrix<MODE, T>& h)
         : rocsparse_local_dnvec(h.m, (T*)h, get_datatype<T>())
+    {
+    }
+
+    template <memory_mode::value_t MODE, typename T>
+    explicit rocsparse_local_dnvec(dense_vector<MODE, T>& h)
+        : rocsparse_local_dnvec(h.size(), h.data(), get_datatype<T>())
     {
     }
 

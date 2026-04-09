@@ -22,14 +22,20 @@
 #include "device/kernel-generator-embed.h"
 #include "rtc_cache.h"
 
-RTCKernelChirp RTCKernelChirp::generate(const std::string& gpu_arch, rocfft_precision precision)
+std::shared_future<std::unique_ptr<RTCKernel>> RTCKernelChirp::generate(const std::string& gpu_arch,
+                                                                        rocfft_precision precision)
 {
-    auto kernel_name = chirp_rtc_kernel_name(precision);
+    RTCGenerator generator;
+    generator.generate_name = [=]() { return chirp_rtc_kernel_name(precision); };
+    generator.generate_src
+        = [=](const std::string& kernel_name) { return chirp_rtc(kernel_name, precision); };
+    generator.construct_rtckernel = [](const std::string&                       kernel_name,
+                                       std::shared_future<hipModule_wrapper_t>& module,
+                                       dim3                                     gridDim,
+                                       dim3                                     blockDim) {
+        return std::unique_ptr<RTCKernel>(new RTCKernelChirp{kernel_name, module, {}, {}});
+    };
 
-    kernel_src_gen_t generator{
-        [=](const std::string& kernel_name) { return chirp_rtc(kernel_name, precision); }};
-
-    auto code = RTCCache::cached_compile(kernel_name, gpu_arch, generator, generator_sum());
-
-    return RTCKernelChirp{kernel_name, code, {}, {}};
+    std::string kernel_name;
+    return runtime_compile(generator, gpu_arch, kernel_name);
 }

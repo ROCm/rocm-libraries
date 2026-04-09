@@ -7,6 +7,15 @@ def getPrComments(pullRequest) {
   return comments
 }
 
+def truncateLongResults(results, maxLength = 60000) {
+    def truncatedMessage = "\n```\n\n**Results truncated, see full report in workspace**"
+    if (results.length() > maxLength) {
+        def truncateIndex = results.lastIndexOf('\n', maxLength)
+        return results.substring(0, truncateIndex) + truncatedMessage
+    }
+    return results
+}
+
 def withSSH(platform, pipeline) {
     withCredentials(
         [
@@ -33,18 +42,13 @@ def withSSH(platform, pipeline) {
     }
 }
 
-def runCompileCommand(platform, project, jobName, mxDataGeneratorGitURL, mxDataGeneratorGitTag, boolean codeCoverage=false, boolean enableTimers=false, String target='', boolean useYamlCpp=true, boolean staticAnalysis=false)
+def runCompileCommand(platform, project, jobName, boolean codeCoverage=false, boolean enableTimers=false, String target='', boolean useYamlCpp=true, boolean staticAnalysis=false)
 {
     project.paths.construct_build_prefix()
-    String codeCovFlag = codeCoverage ? '-DROCROLLER_ENABLE_COVERAGE=ON -DROCROLLER_BUILD_SHARED_LIBS=OFF -DROCROLLER_ENABLE_LLD=ON' : ''
+    String codeCovFlag = codeCoverage ? '-DROCROLLER_ENABLE_COVERAGE=ON -DROCROLLER_BUILD_SHARED_LIBS=OFF' : ''
     String timerFlag = enableTimers ? '-DROCROLLER_ENABLE_TIMERS=ON' : ''
     String yamlBackendFlag = useYamlCpp ? '' : '-DROCROLLER_ENABLE_YAML_CPP=OFF'
     String useCppCheck = staticAnalysis ? '-DROCROLLER_ENABLE_CPPCHECK=ON' : ''
-
-    mxDataGeneratorGitURL = mxDataGeneratorGitURL?.trim();
-    mxDataGeneratorGitTag = mxDataGeneratorGitTag?.trim();
-    String mxDataGeneratorGitURLFlag = mxDataGeneratorGitURL ? '-DMXDATAGENERATOR_GIT_URL=' + mxDataGeneratorGitURL : ''
-    String mxDataGeneratorGitTagFlag = mxDataGeneratorGitTag ? '-DMXDATAGENERATOR_GIT_TAG=' + mxDataGeneratorGitTag : ''
 
     withSSH(platform) {
         sshBlock ->
@@ -58,13 +62,34 @@ def runCompileCommand(platform, project, jobName, mxDataGeneratorGitURL, mxDataG
                 cd build
                 # Check that all tests are included.
                 ../scripts/check_included_tests.py
+                
+                # Detect pytest installation location
+                echo "Detecting pytest installation..."
+                PYTEST_PATH=""
+                if command -v pytest &>/dev/null; then
+                    echo "pytest found at: \$(which pytest)"
+                    PYTEST_PREFIX=\$(python3 -c "import sys; print(sys.prefix)")
+                    echo "Python prefix: \$PYTEST_PREFIX"
+                    PYTEST_PATH=";\$PYTEST_PREFIX"
+                elif python3 -c "import pytest" &>/dev/null; then
+                    echo "pytest found as Python module"
+                    PYTEST_PREFIX=\$(python3 -c "import sys; print(sys.prefix)")
+                    echo "Python prefix: \$PYTEST_PREFIX"
+                    PYTEST_PATH=";\$PYTEST_PREFIX"
+                else
+                    echo "Warning: pytest not found, searching filesystem..."
+                    echo "Running: find /usr /opt /home -name 'pytest' -type f 2>/dev/null | head -5"
+                    find /usr /opt /home -name 'pytest' -type f 2>/dev/null | head -5 || echo "No pytest found via system search"
+                    echo "Running: find /usr -name '*pytest*' -type d 2>/dev/null | head -5"
+                    find /usr -name '*pytest*' -type d 2>/dev/null | head -5 || echo "No pytest directories found"
+                fi
+                
                 cmake ../ \\
                     ${codeCovFlag} ${timerFlag} ${yamlBackendFlag} ${useCppCheck}\\
-                    ${mxDataGeneratorGitURLFlag} ${mxDataGeneratorGitTagFlag}\\
                     -DCMAKE_CXX_COMPILER=/opt/rocm/bin/amdclang++ \\
                     -DCMAKE_BUILD_TYPE=Release \\
                     -DROCROLLER_ENABLE_FETCH=ON \\
-                    -DCMAKE_PREFIX_PATH="/opt/rocm;/opt/rocm/llvm"
+                    -DCMAKE_PREFIX_PATH="/opt/rocm;/opt/rocm/llvm\$PYTEST_PATH"
                 ccache --print-stats
                 make -j ${target}
                 ccache --print-stats
@@ -76,20 +101,11 @@ def runCompileCommand(platform, project, jobName, mxDataGeneratorGitURL, mxDataG
 
 def runTestCommand (platform, project)
 {
-    String testExclude = platform.jenkinsLabel.contains('compile') ? '-LE GPU' : ''
-
-    def numThreads = 8
-
     def command = """#!/usr/bin/env bash
                 set -ex
                 cd ${project.paths.project_build_prefix}
-
-                pushd build
-                echo Using ${numThreads} out of `nproc` threads for testing.
-                OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=2 ctest -j ${numThreads} --output-on-failure ${testExclude}
-                export ROCROLLER_BUILD_DIR="\$(pwd)"
-                popd
-                scripts/rrperf generate --suite generate_gfx950 --arch gfx950
+                # Run sharded tests (auto-detects ncores/2, respecting cgroups)
+                scripts/run-tests-sharded precheckin-mci build
             """
 
     try
@@ -147,9 +163,9 @@ def runCodeCovTestCommand(platform, project)
         }
         commentString += "## Artifacts\n\n"
         commentString += "* [HTML Coverage Report and Diff](${JOB_URL}/Code_20coverage_20${platform.gpu}_20report) \n"
-        commentString += "* [File Coverage Summary](${JOB_URL}/lastSuccessfulBuild/artifact/${project.paths.src_prefix}/rocRoller/build/code_cov_${platform.gpu}.report/*view*/) \n"
-        commentString += "* [Diff Text File](${JOB_URL}/lastSuccessfulBuild/artifact/${project.paths.src_prefix}/rocRoller/build/code_cov_${platform.gpu}.diff/*view*/) \n"
-        commentString += "* [Full Text Coverage Report](${JOB_URL}/lastSuccessfulBuild/artifact/${project.paths.src_prefix}/rocRoller/build/code_cov_${platform.gpu}.zip) \n"
+        commentString += "* [File Coverage Summary](${JOB_URL}/lastSuccessfulBuild/artifact/${project.paths.src_prefix}/rocroller/shared/rocroller/build/code_cov_${platform.gpu}.report/*view*/) \n"
+        commentString += "* [Diff Text File](${JOB_URL}/lastSuccessfulBuild/artifact/${project.paths.src_prefix}/rocroller/shared/rocroller/build/code_cov_${platform.gpu}.diff/*view*/) \n"
+        commentString += "* [Full Text Coverage Report](${JOB_URL}/lastSuccessfulBuild/artifact/${project.paths.src_prefix}/rocroller/shared/rocroller/build/code_cov_${platform.gpu}.zip) \n"
         commentString += "* [Python Coverage Report](${JOB_URL}/Python_20Code_20coverage_20${platform.gpu}_20report) \n"
         commentString += "\n"
         commentString += "## Commit Hashes\n\n"
@@ -179,7 +195,27 @@ def runBuildDocsCommand(platform, project)
                     set -ex
                     cd ${project.paths.project_build_prefix}
                     ${sshBlock}
-                    cmake --preset docs -B build -S .
+                    # Detect pytest installation location
+                    echo "Detecting pytest installation..."
+                    PYTEST_PATH=""
+                    if command -v pytest &>/dev/null; then
+                        echo "pytest found at: \$(which pytest)"
+                        PYTEST_PREFIX=\$(python3 -c "import sys; print(sys.prefix)")
+                        echo "Python prefix: \$PYTEST_PREFIX"
+                        PYTEST_PATH=";\$PYTEST_PREFIX"
+                    elif python3 -c "import pytest" &>/dev/null; then
+                        echo "pytest found as Python module"
+                        PYTEST_PREFIX=\$(python3 -c "import sys; print(sys.prefix)")
+                        echo "Python prefix: \$PYTEST_PREFIX"
+                        PYTEST_PATH=";\$PYTEST_PREFIX"
+                    else
+                        echo "Warning: pytest not found, searching filesystem..."
+                        echo "Running: find /usr /opt /home -name 'pytest' -type f 2>/dev/null | head -5"
+                        find /usr /opt /home -name 'pytest' -type f 2>/dev/null | head -5 || echo "No pytest found via system search"
+                        echo "Running: find /usr -name '*pytest*' -type d 2>/dev/null | head -5"
+                        find /usr -name '*pytest*' -type d 2>/dev/null | head -5 || echo "No pytest directories found"
+                    fi
+                    cmake --preset docs -B build -S . -DCMAKE_PREFIX_PATH="/opt/rocm;/opt/rocm/llvm\$PYTEST_PATH"
                     cmake --build build --target docs
                     """
         platform.runCommand(this, command)
@@ -213,17 +249,13 @@ def runBuildDocsCommand(platform, project)
     }
 }
 
-def runPerformanceCommand (platform, project, mxDataGeneratorGitURL, mxDataGeneratorGitTag)
+def runPerformanceCommand (platform, project)
 {
     String masterURL = env.CHANGE_ID ? env.JOB_URL.replace("PR-${env.CHANGE_ID}", env.CHANGE_TARGET) : env.JOB_URL
-
-    mxDataGeneratorGitURL = mxDataGeneratorGitURL?.trim() ?: "";
-    mxDataGeneratorGitTag = mxDataGeneratorGitTag?.trim() ?: "";
 
     withSSH(platform){
         sshBlock ->
         def rrperfSuite = platform.jenkinsLabel.contains('gfx12') ? "all_gfx120X" : "all"
-
 
         if (env.CHANGE_ID)
         {
@@ -235,12 +267,11 @@ def runPerformanceCommand (platform, project, mxDataGeneratorGitURL, mxDataGener
             {
                 masterCompare = params."Build target branch for comparison"
             }
+
             String masterCompareCommand
             if (masterCompare)
             {
                 masterCompareCommand = """
-                    export ROCROLLER_MXDATAGENERATOR_GIT_URL=${mxDataGeneratorGitURL}
-                    export ROCROLLER_MXDATAGENERATOR_GIT_TAG=${mxDataGeneratorGitTag}
                     ./scripts/rrperf autoperf \\
                         --suite ${rrperfSuite} \\
                         --clonedir "./performance_build_${platform.gpu}" \\
@@ -255,13 +286,15 @@ def runPerformanceCommand (platform, project, mxDataGeneratorGitURL, mxDataGener
                     ./scripts/rrperf compare \\
                         \$(ls -trd ./performance_build_${platform.gpu}/performance_${platform.gpu}/*) \\
                             > performance_comparison_${platform.gpu}.md
+
+                    ./scripts/rrperf compare --format resource_md \\
+                        \$(ls -trd ./performance_build_${platform.gpu}/performance_${platform.gpu}/*) \\
+                            > resource_comparison_${platform.gpu}.md
                 """
             }
             else
             {
                 masterCompareCommand = """
-                    export ROCROLLER_MXDATAGENERATOR_GIT_URL=${mxDataGeneratorGitURL}
-                    export ROCROLLER_MXDATAGENERATOR_GIT_TAG=${mxDataGeneratorGitTag}
                     mkdir -p performance_build_${platform.gpu}
                     ./scripts/rrperf autoperf \\
                         --suite ${rrperfSuite} \\
@@ -269,8 +302,12 @@ def runPerformanceCommand (platform, project, mxDataGeneratorGitURL, mxDataGener
                     cat ./performance_build_${platform.gpu}/performance_${platform.gpu}/**/*.log >> performance_${platform.gpu}_logs.txt
 
                     #Get Master Results
-                    wget ${masterURL}/lastSuccessfulBuild/artifact/*zip*/archive.zip
-                    unzip archive.zip
+                    ARTIFACT_URL_PREFIX="${masterURL}/lastSuccessfulBuild/artifact"
+                    if wget \${ARTIFACT_URL_PREFIX}/*zip*/archive.zip; then
+                      unzip archive.zip
+                    else
+                      echo "WARNING: No lastSuccessfulBuild found at \${ARTIFACT_URL_PREFIX}"
+                    fi
 
                     if [ -f archive/*/*/performance_${platform.gpu}_last.zip ]; then
 
@@ -294,9 +331,15 @@ def runPerformanceCommand (platform, project, mxDataGeneratorGitURL, mxDataGener
                             ./performance_${platform.gpu}_master/performance_${platform.gpu}/* \\
                             ./performance_build_${platform.gpu}/performance_${platform.gpu}/* \\
                             > performance_comparison_${platform.gpu}.md
+
+                        ./scripts/rrperf compare --format resource_md \\
+                            ./performance_${platform.gpu}_master/performance_${platform.gpu}/* \\
+                            ./performance_build_${platform.gpu}/performance_${platform.gpu}/* \\
+                            > resource_comparison_${platform.gpu}.md
                     else
                         touch performance_comparison_${platform.gpu}.html
                         touch performance_comparison_${platform.gpu}.md
+                        touch resource_comparison_${platform.gpu}.md
                         echo "Skipped ${env.CHANGE_TARGET} compare for ${platform.gpu}, no archived performance_${platform.gpu}_last.zip found."
                     fi
                 """
@@ -333,33 +376,69 @@ def runPerformanceCommand (platform, project, mxDataGeneratorGitURL, mxDataGener
                         reportName: "Performance Report for ${platform.gpu}",
                         reportTitles: "Report"])
 
-            def commentTitle = "# Performance Report for ${platform.gpu}"
-            def commentString = "${commentTitle}\n\n"
-            def results = readFile("${project.paths.project_build_prefix}/performance_comparison_${platform.gpu}.md").trim()
-            def estimateString = masterCompare ? "" : " (estimated due to skipped ${env.CHANGE_TARGET} build)"
-            commentString += "## Results${estimateString}\n\n"
-            commentString += "${results}\n\n"
-            commentString += "<details><summary>Links</summary>\n\n"
-            commentString += "* [HTML Report](${JOB_URL}/Performance_20Report_20for_20${platform.gpu}) \n"
-            commentString += "* [Job Link](${env.BUILD_URL}) \n"
-            commentString += "* [Result Archive](${JOB_URL}/lastSuccessfulBuild/artifact/${project.paths.src_prefix}/rocRoller/performance_${platform.gpu}_archive.zip) \n"
-            commentString += "</details>\n\n"
+            def perfCommentTitle = "# Performance Report for ${platform.gpu}"
+            def perfCommentString = "${perfCommentTitle}\n\n"
+            def perfResults = readFile("${project.paths.project_build_prefix}/performance_comparison_${platform.gpu}.md").trim()
+            perfResults = truncateLongResults(perfResults)
 
-            boolean commentExists = false
+            def estimateString = masterCompare ? "" : " (estimated due to skipped ${env.CHANGE_TARGET} build)"
+            perfCommentString += "## Results${estimateString}\n\n"
+            perfCommentString += "<details open>\n\n${perfResults}\n</details>\n"
+            perfCommentString += "<details><summary>Links</summary>\n\n"
+            perfCommentString += "* [HTML Report](${JOB_URL}/Performance_20Report_20for_20${platform.gpu}) \n"
+            perfCommentString += "* [Job Link](${env.BUILD_URL}) \n"
+            perfCommentString += "* [Result Archive](${JOB_URL}/lastSuccessfulBuild/artifact/${project.paths.src_prefix}/rocroller/shared/rocroller/performance_${platform.gpu}_archive.zip) \n"
+            perfCommentString += "</details>\n\n"
+
+            boolean perfCommentExists = false
             for (prComment in getPrComments(pullRequest)) {
-                if (prComment.body.contains(commentTitle))
+                if (prComment.body.contains(perfCommentTitle))
                 {
-                    commentExists = true
-                    prComment.body = commentString
+                    perfCommentExists = true
+                    prComment.body = perfCommentString
                 }
             }
-            if (!commentExists) {
-                def comment = pullRequest.comment(commentString)
+            if (!perfCommentExists) {
+                def comment = pullRequest.comment(perfCommentString)
+            }
+
+            def resCommentTitle = "# Resource Report for ${platform.gpu}"
+            def resCommentString = "${resCommentTitle}\n\n"
+            def resResults = readFile("${project.paths.project_build_prefix}/resource_comparison_${platform.gpu}.md").trim()
+            resResults = truncateLongResults(resResults)
+
+            resCommentString += "## Results${estimateString}\n\n"
+            resCommentString += "<details open>\n\n${resResults}\n</details>\n"
+            resCommentString += "<details><summary>Links</summary>\n\n"
+            resCommentString += "* [HTML Report](${JOB_URL}/Performance_20Report_20for_20${platform.gpu}) \n"
+            resCommentString += "* [Job Link](${env.BUILD_URL}) \n"
+            resCommentString += "* [Result Archive](${JOB_URL}/lastSuccessfulBuild/artifact/${project.paths.src_prefix}/rocroller/shared/rocroller/performance_${platform.gpu}_archive.zip) \n"
+            resCommentString += "</details>\n\n"
+
+            boolean resCommentExists = false
+            for (prComment in getPrComments(pullRequest)) {
+                if (prComment.body.contains(resCommentTitle))
+                {
+                    resCommentExists = true
+                    prComment.body = resCommentString
+                }
+            }
+            if (!resCommentExists) {
+                def comment = pullRequest.comment(resCommentString)
             }
         }
         else
         {
             def ARCHIVE_LIMIT = "101"
+
+            // a parameter can block comparison to target branch
+            def masterCompare = false
+            if (params?."Build target branch for comparison" != null)
+            {
+                masterCompare = params."Build target branch for comparison"
+            }
+
+            String masterCompareString = masterCompare ? "1" : "0"
 
             def command = """#!/usr/bin/env bash
                         set -ex
@@ -368,8 +447,17 @@ def runPerformanceCommand (platform, project, mxDataGeneratorGitURL, mxDataGener
                         ${sshBlock}
 
                         #Get Master Results
-                        wget ${masterURL}/lastSuccessfulBuild/artifact/*zip*/archive.zip
-                        unzip archive.zip
+                        ARTIFACT_URL_PREFIX="${masterURL}/lastSuccessfulBuild/artifact"
+                        if wget \${ARTIFACT_URL_PREFIX}/*zip*/archive.zip; then
+                          unzip archive.zip
+                        else
+                          if [ "${masterCompareString}" == "1" ]; then
+                            echo "ERROR: No lastSuccessfulBuild found at \${ARTIFACT_URL_PREFIX}"
+                            exit 1
+                          else
+                            echo "WARNING: No lastSuccessfulBuild found at \${ARTIFACT_URL_PREFIX}"
+                          fi
+                        fi
 
                         #Run Performance Test
                         export LD_LIBRARY_PATH="\${LD_LIBRARY_PATH}:${project.paths.project_build_prefix}/build/"
@@ -440,7 +528,7 @@ def runPerformanceCommand (platform, project, mxDataGeneratorGitURL, mxDataGener
                         <ul>
                         <li><a href='${JOB_URL}/Performance_20Report_20for_20${platform.gpu}'>HTML Report</a></li>
                         <li><a href='${env.BUILD_URL}'>Job Link</a></li>
-                        <li><a href='${JOB_URL}/lastSuccessfulBuild/artifact/${project.paths.src_prefix}/rocRoller/performance_${platform.gpu}_archive.zip'>Result Archive</a></li>
+                        <li><a href='${JOB_URL}/lastSuccessfulBuild/artifact/${project.paths.src_prefix}/rocroller/shared/rocroller/performance_${platform.gpu}_archive.zip'>Result Archive</a></li>
                         </ul>
                         ${email_results}""",
                 to: "dl.rocroller@amd.com"
@@ -449,12 +537,9 @@ def runPerformanceCommand (platform, project, mxDataGeneratorGitURL, mxDataGener
     }
 }
 
-def runCodeQLCompileCommand (platform, project, jobName, mxDataGeneratorGitURL, mxDataGeneratorGitTag)
+def runCodeQLCompileCommand (platform, project, jobName)
 {
     project.paths.construct_build_prefix()
-
-    mxDataGeneratorGitURL = mxDataGeneratorGitURL?.trim() ?: "";
-    mxDataGeneratorGitTag = mxDataGeneratorGitTag?.trim() ?: "";
 
     withSSH(platform) {
         sshBlock ->
@@ -464,8 +549,6 @@ def runCodeQLCompileCommand (platform, project, jobName, mxDataGeneratorGitURL, 
 
                     ${sshBlock}
 
-                    export ROCROLLER_MXDATAGENERATOR_GIT_URL=${mxDataGeneratorGitURL}
-                    export ROCROLLER_MXDATAGENERATOR_GIT_TAG=${mxDataGeneratorGitTag}
                     ./codeql/setup_codeql
                     ./codeql/create_database
                     """

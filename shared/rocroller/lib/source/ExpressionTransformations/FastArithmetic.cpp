@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <rocRoller/Expression.hpp>
 #include <rocRoller/ExpressionTransformations.hpp>
@@ -36,6 +13,35 @@ namespace rocRoller
         {
         }
 
+        std::vector<ExpressionTransformType> FastArithmetic::getTransforms() const
+        {
+            std::vector<ExpressionTransformType> transforms = {
+                splitBitfieldCombine,
+                lowerBitfieldCombine,
+                [this](auto e) { return fastDivision(e, m_context); },
+                convertPropagation, // go after fastDivision as it might change data types of denominator and numerator
+                simplify,
+                lowerExponential,
+                fastMultiplication,
+                lowerUnsignedArithmeticShiftR,
+                fuseAssociative,
+                combineShifts,
+                fuseTernary,
+                [this](auto e) { return launchTimeSubExpressions(e, m_context); },
+                convertPropagation,
+                simplify};
+
+            return transforms;
+        }
+
+        ExpressionPtr FastArithmetic::applyTransforms(
+            ExpressionPtr expr, const std::vector<ExpressionTransformType>& transforms) const
+        {
+            for(const auto& transform : transforms)
+                expr = transform(expr);
+            return expr;
+        }
+
         ExpressionPtr FastArithmetic::operator()(ExpressionPtr x) const
         {
             if(!x)
@@ -44,18 +50,8 @@ namespace rocRoller
             }
             ExpressionPtr orig = x;
 
-            x = lowerBitfieldCombine(x);
-            x = convertPropagation(x);
-            x = fastDivision(x, m_context);
-            x = simplify(x);
-            x = lowerExponential(x);
-            x = fastMultiplication(x);
-            x = lowerUnsignedArithmeticShiftR(x);
-            x = fuseAssociative(x);
-            x = combineShifts(x);
-            x = fuseTernary(x);
-            x = launchTimeSubExpressions(x, m_context);
-            x = convertPropagation(x);
+            auto transforms = getTransforms();
+            x               = applyTransforms(x, transforms);
 
             if(!identical(orig, x))
             {

@@ -1,4 +1,7 @@
 #!/bin/bash
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
 # TODO: run this script from CK root or build directory
 set -euo pipefail
 
@@ -73,52 +76,40 @@ run_fp16_bf16_tests() {
     for page_block_size in $PAGE_BLOCK_SIZE ; do
     for cache_batch_idx in $CACHE_BATCH_IDX ; do
 
-    # run_exe -prec=$prec -mode=$mode -b=1 -h=1 -d=$hdim -s=1024 -bias=$bias -p_drop=$p_drop -lse=$lse -iperm=$perm -operm=$perm  -num_splits=$num_splits -page_block_size=$page_block_size -kname=$KNAME $COMMON_ARGS  
-    run_exe -prec=$prec -mode=$mode -b=2 -h=2 -h_k=1 -d=16    -d_v=$hdim -s=55   -s_k=256            -bias=$bias -p_drop=$p_drop -lse=$lse -iperm=$perm -operm=$perm                -num_splits=$num_splits -page_block_size=$page_block_size -cache_batch_idx=$cache_batch_idx -kname=$KNAME $COMMON_ARGS  
-    run_exe -prec=$prec -mode=$mode -b=1 -h=3        -d=$hdim            -s=100  -s_k=51             -bias=$bias -p_drop=$p_drop -lse=$lse -iperm=$perm -operm=$perm                -num_splits=$num_splits -page_block_size=$page_block_size -cache_batch_idx=$cache_batch_idx -kname=$KNAME $COMMON_ARGS  
-    run_exe -prec=$prec -mode=$mode -b=2 -h=1        -d=16    -d_v=$hdim -s=99   -s_k=256            -bias=$bias -p_drop=$p_drop -lse=$lse -iperm=$perm -operm=$perm -mask=1        -num_splits=$num_splits -page_block_size=$page_block_size -cache_batch_idx=$cache_batch_idx -kname=$KNAME $COMMON_ARGS  
-    run_exe -prec=$prec -mode=$mode -b=1 -h=2 -h_k=1 -d=$hdim            -s=1024 -s_k=256            -bias=$bias -p_drop=$p_drop -lse=$lse -iperm=$perm -operm=$perm -mask=2        -num_splits=$num_splits -page_block_size=$page_block_size -cache_batch_idx=$cache_batch_idx -kname=$KNAME $COMMON_ARGS  
-    run_exe -prec=$prec -mode=$mode -b=2 -h=1        -d=$hdim -d_v=24    -s=3    -s_k=99             -bias=$bias -p_drop=$p_drop -lse=$lse -iperm=$perm -operm=$perm -mask=2        -num_splits=$num_splits -page_block_size=$page_block_size -cache_batch_idx=$cache_batch_idx -kname=$KNAME $COMMON_ARGS  
-    run_exe -prec=$prec -mode=$mode -b=3 -h=2 -h_k=1 -d=$hdim            -s=200  -s_k=520            -bias=$bias -p_drop=$p_drop -lse=$lse -iperm=$perm -operm=$perm -mask=t:128,30 -num_splits=$num_splits -page_block_size=$page_block_size -cache_batch_idx=$cache_batch_idx -kname=$KNAME $COMMON_ARGS  
-    run_exe -prec=$prec -mode=$mode -b=2 -h=1        -d=$hdim            -s=99   -s_k=32             -bias=$bias -p_drop=$p_drop -lse=$lse -iperm=$perm -operm=$perm -mask=b:4,35   -num_splits=$num_splits -page_block_size=$page_block_size -cache_batch_idx=$cache_batch_idx -kname=$KNAME $COMMON_ARGS  
-    run_exe -prec=$prec -mode=$mode -b=1 -h=2 -h_k=1 -d=$hdim            -s=33   -s_k=0              -bias=$bias -p_drop=$p_drop -lse=$lse -iperm=$perm -operm=$perm -mask=2        -num_splits=$num_splits -page_block_size=$page_block_size -cache_batch_idx=$cache_batch_idx -kname=$KNAME $COMMON_ARGS  
-    run_exe -prec=$prec -mode=$mode -b=1 -h=2 -h_k=1 -d=$hdim            -s=1    -s_k=10  -s_kpad=32 -bias=$bias -p_drop=$p_drop -lse=$lse -iperm=$perm -operm=$perm -mask=2        -num_splits=$num_splits -page_block_size=$page_block_size -cache_batch_idx=$cache_batch_idx -kname=$KNAME $COMMON_ARGS  
+    # run_exe -prec=$prec -mode=$mode -b=1 -h=1 -d=$hdim -s=1024 -bias=$bias -p_drop=$p_drop -lse=$lse -iperm=$perm -operm=$perm  -num_splits=$num_splits -page_block_size=$page_block_size -kname=$KNAME $COMMON_ARGS
+    run_exe -prec=$prec -mode=$mode -b=2 -h=2 -h_k=1 -d=16    -d_v=$hdim -s=55   -s_k=256            -bias=$bias -p_drop=$p_drop -lse=$lse -iperm=$perm -operm=$perm                -num_splits=$num_splits -page_block_size=$page_block_size -cache_batch_idx=$cache_batch_idx -kname=$KNAME $COMMON_ARGS
+    run_exe -prec=$prec -mode=$mode -b=1 -h=3        -d=$hdim            -s=100  -s_k=51             -bias=$bias -p_drop=$p_drop -lse=$lse -iperm=$perm -operm=$perm                -num_splits=$num_splits -page_block_size=$page_block_size -cache_batch_idx=$cache_batch_idx -kname=$KNAME $COMMON_ARGS
+    run_exe -prec=$prec -mode=$mode -b=2 -h=1        -d=16    -d_v=$hdim -s=99   -s_k=256            -bias=$bias -p_drop=$p_drop -lse=$lse -iperm=$perm -operm=$perm -mask=1        -num_splits=$num_splits -page_block_size=$page_block_size -cache_batch_idx=$cache_batch_idx -kname=$KNAME $COMMON_ARGS
+    run_exe -prec=$prec -mode=$mode -b=1 -h=2 -h_k=1 -d=$hdim            -s=1024 -s_k=256            -bias=$bias -p_drop=$p_drop -lse=$lse -iperm=$perm -operm=$perm -mask=2        -num_splits=$num_splits -page_block_size=$page_block_size -cache_batch_idx=$cache_batch_idx -kname=$KNAME $COMMON_ARGS
+    run_exe -prec=$prec -mode=$mode -b=2 -h=1        -d=$hdim -d_v=24    -s=3    -s_k=99             -bias=$bias -p_drop=$p_drop -lse=$lse -iperm=$perm -operm=$perm -mask=2        -num_splits=$num_splits -page_block_size=$page_block_size -cache_batch_idx=$cache_batch_idx -kname=$KNAME $COMMON_ARGS
+    run_exe -prec=$prec -mode=$mode -b=3 -h=2 -h_k=1 -d=$hdim            -s=200  -s_k=520            -bias=$bias -p_drop=$p_drop -lse=$lse -iperm=$perm -operm=$perm -mask=t:128,30 -num_splits=$num_splits -page_block_size=$page_block_size -cache_batch_idx=$cache_batch_idx -kname=$KNAME $COMMON_ARGS
+    run_exe -prec=$prec -mode=$mode -b=2 -h=1        -d=$hdim            -s=99   -s_k=32             -bias=$bias -p_drop=$p_drop -lse=$lse -iperm=$perm -operm=$perm -mask=b:4,35   -num_splits=$num_splits -page_block_size=$page_block_size -cache_batch_idx=$cache_batch_idx -kname=$KNAME $COMMON_ARGS
+    run_exe -prec=$prec -mode=$mode -b=1 -h=2 -h_k=1 -d=$hdim            -s=33   -s_k=0              -bias=$bias -p_drop=$p_drop -lse=$lse -iperm=$perm -operm=$perm -mask=2        -num_splits=$num_splits -page_block_size=$page_block_size -cache_batch_idx=$cache_batch_idx -kname=$KNAME $COMMON_ARGS
+    run_exe -prec=$prec -mode=$mode -b=1 -h=2 -h_k=1 -d=$hdim            -s=1    -s_k=10  -s_kpad=32 -bias=$bias -p_drop=$p_drop -lse=$lse -iperm=$perm -operm=$perm -mask=2        -num_splits=$num_splits -page_block_size=$page_block_size -cache_batch_idx=$cache_batch_idx -kname=$KNAME $COMMON_ARGS
 
     done ; done ; done ; done ; done
     done ; done ; done ; done ; done
-}
-
-run_fp8_tests() {
-    for perm in 0 1 ; do
-    for bias in "n" "e" "a" ; do
-    for b in 1 2 ; do
-    for hdim in 64 128 256 ; do
-    
-    $EXE -prec=fp8 -init=0 -b=$b -h=1 -d=128 -s=128 -bias=$bias -iperm=$perm -operm=$perm -vlayout=r -squant=1 -kname=$KNAME $COMMON_ARGS
-
-    done ; done ; done ; done
 }
 
 run_fp8bf16_tests() {
     for perm in 0 1 ; do
-    for bias in "n" "e" "a" ; do
     for b in 1 2 ; do
     for hdim in 64 128 256 ; do
+    for scale in 1 2; do
 
-    $EXE -prec=fp8bf16 -init=0 -b=$b -h=1 -d=128 -s=128 -bias=$bias -iperm=$perm -operm=$perm -vlayout=r -squant=1 -kname=$KNAME $COMMON_ARGS
+    $EXE -prec=fp8bf16 -init=3 -b=$b -h=1 -d=$hdim -s=128 -iperm=$perm -operm=$perm -vlayout=r -qscale=$scale -kname=$KNAME $COMMON_ARGS
 
     done ; done ; done ; done
 }
 
 run_fp8fp32_tests() {
     for perm in 0 1 ; do
-    for bias in "n" "e" "a" ; do
     for b in 1 2 ; do
-    for hdim in 64 128 256 ; do
+    for hdim in 128 ; do
 
-    $EXE -prec=fp8fp32 -init=0 -b=$b -h=1 -d=128 -s=128 -bias=$bias -iperm=$perm -operm=$perm -vlayout=r -squant=1 -kname=$KNAME $COMMON_ARGS
+    $EXE -prec=fp8fp32 -init=3 -b=$b -h=1 -d=$hdim -s=128 -iperm=$perm -operm=$perm -vlayout=r -qscale=1 -kname=$KNAME $COMMON_ARGS
 
-    done ; done ; done ; done
+    done ; done ; done
 }
 
 run_fp16_appendkv_tests() {
@@ -133,7 +124,7 @@ run_fp16_appendkv_tests() {
 
     run_exe -prec=fp16 -b=3 -h=3 -d=$hdim -s=$s -s_k=$s_k -s_knew=$s_knew -rotary_dim=$rdim -rotary_interleaved=$ri -page_block_size=$page_block_size -cache_batch_idx=$cache_batch_idx -iperm=1 -operm=1 -kname=1 $COMMON_ARGS
 
-    done ; done ; done ; done ; done 
+    done ; done ; done ; done ; done
     done ; done ; done
 }
 
@@ -244,14 +235,73 @@ run_padding_basic_boundary_tests() {
     done
 }
 
+# Sink-specific mask pattern tests (sliding window + sink token).
+run_sink_mask_tests() {
+    # window_size[2,0], sink_size=2  (top-left causal + sink)
+    #    before:              after:
+    #    1 * * * * * * *      1 * * * * * * *
+    #    1 1 * * * * * *      1 1 * * * * * *
+    #    1 1 1 * * * * *      1 1 1 * * * * *
+    #    * 1 1 1 * * * *      1 1 1 1 * * * *
+    #    * * 1 1 1 * * *      1 1 1 1 1 * * *
+    #    * * * 1 1 1 * *      1 1 * 1 1 1 * *
+    #    * * * * 1 1 1 *      1 1 * * 1 1 1 *
+    #    * * * * * 1 1 1      1 1 * * * 1 1 1
+    run_exe -prec=fp16 -mode=0 -b=1 -h=1 -d=128 -d_v=128 -s=512   -s_k=512   -bias=n -lse=0 -iperm=0 -operm=0 -vlayout=r -num_splits=1 -page_block_size=128 -cache_batch_idx=0 -kname=$KNAME $COMMON_ARGS -mask=t:2,0,2
+    run_exe -prec=bf16 -mode=0 -b=2 -h=2 -d=128 -d_v=128 -s=512   -s_k=512   -bias=n -lse=0 -iperm=1 -operm=1 -vlayout=r -num_splits=1 -page_block_size=128   -cache_batch_idx=0 -kname=$KNAME $COMMON_ARGS -mask=t:2,0,2
+
+    # window_size[0,3], sink_size=2  (top-left + sink)
+    #    before:              after:
+    #    1 1 1 1 * * * *      1 1 1 1 * * * *
+    #    * 1 1 1 1 * * *      1 1 1 1 1 * * *
+    #    * * 1 1 1 1 * *      1 1 1 1 1 1 * *
+    #    * * * 1 1 1 1 *      1 1 * 1 1 1 1 *
+    #    * * * * 1 1 1 1      1 1 * * 1 1 1 1
+    run_exe -prec=fp16 -mode=0 -b=1 -h=1 -d=128 -d_v=128 -s=1024  -s_k=1024  -bias=n -lse=0 -iperm=0 -operm=0 -vlayout=r -num_splits=1 -page_block_size=128 -cache_batch_idx=0 -kname=$KNAME $COMMON_ARGS -mask=t:0,3,2
+    run_exe -prec=bf16 -mode=1 -b=2 -h=2 -d=128 -d_v=128 -s=1024  -s_k=1024  -bias=n -lse=0 -iperm=1 -operm=1 -vlayout=r -num_splits=1 -page_block_size=128   -cache_batch_idx=0 -kname=$KNAME $COMMON_ARGS -mask=t:0,3,2
+
+    # window_size[1,0], sink_size=2  (bottom-right + sink)
+    #    before:              after:
+    #    * * 1 1 * * * *      1 1 1 1 * * * *
+    #    * * * 1 1 * * *      1 1 * 1 1 * * *
+    #    * * * * 1 1 * *      1 1 * * 1 1 * *
+    #    * * * * * 1 1 *      1 1 * * * 1 1 *
+    #    * * * * * * 1 1      1 1 * * * * 1 1
+    run_exe -prec=fp16 -mode=0 -b=1 -h=1 -d=128 -d_v=128 -s=4096  -s_k=4096  -bias=n -lse=0 -iperm=0 -operm=0 -vlayout=r -num_splits=1 -page_block_size=128 -cache_batch_idx=0 -kname=$KNAME $COMMON_ARGS -mask=b:1,0,2
+    run_exe -prec=bf16 -mode=0 -b=2 -h=4 -d=128 -d_v=128 -s=2048  -s_k=2048  -bias=n -lse=0 -iperm=0 -operm=0 -vlayout=r -num_splits=1 -page_block_size=128 -cache_batch_idx=0 -kname=$KNAME $COMMON_ARGS -mask=b:1,0,2
+
+    # window_size[2,0], sink_size=2  (bottom-right, group mode + sink)
+    run_exe -prec=fp16 -mode=1 -b=1 -h=1 -d=128 -d_v=128 -s=8192  -s_k=8192  -bias=n -lse=0 -iperm=0 -operm=0 -vlayout=r -num_splits=1 -page_block_size=128 -cache_batch_idx=0 -kname=$KNAME $COMMON_ARGS -mask=b:2,0,2
+    run_exe -prec=bf16 -mode=1 -b=2 -h=2 -d=128 -d_v=128 -s=4096  -s_k=4096  -bias=n -lse=0 -iperm=1 -operm=1 -vlayout=r -num_splits=1 -page_block_size=128 -cache_batch_idx=0 -kname=$KNAME $COMMON_ARGS -mask=b:2,0,2
+
+    # window_size[-1,1], sink_size=2  (bottom-right, large seqlen + sink)
+    run_exe -prec=fp16 -mode=1 -b=1 -h=1 -d=128 -d_v=128 -s=16384 -s_k=16384 -bias=n -lse=0 -iperm=0 -operm=0 -vlayout=r -num_splits=1 -page_block_size=128 -cache_batch_idx=0 -kname=$KNAME $COMMON_ARGS -mask=b:-1,1,2
+    run_exe -prec=bf16 -mode=1 -b=1 -h=2 -d=128 -d_v=128 -s=8192  -s_k=8192  -bias=n -lse=0 -iperm=0 -operm=0 -vlayout=r -num_splits=1 -page_block_size=128 -cache_batch_idx=0 -kname=$KNAME $COMMON_ARGS -mask=b:-1,1,2
+}
+
+# init_sink tests: validate sink token initialization across prec/hdim/mode.
+run_sink_init_tests() {
+    for prec in "fp16" "bf16" ; do
+    for hdim in 64 128 256 ; do
+    for mode in 0 1 ; do
+    for mask in 0 1 ; do
+        run_exe -prec=$prec -mode=$mode -b=1 -h=2 -d=$hdim -d_v=$hdim -s=512  -s_k=512  -bias=n -lse=0 -iperm=0 -operm=0 -vlayout=r -kname=$KNAME $COMMON_ARGS -init_sink=1 -mask=$mask
+        run_exe -prec=$prec -mode=$mode -b=2 -h=4 -d=$hdim -d_v=$hdim -s=1024 -s_k=1024 -bias=n -lse=0 -iperm=1 -operm=1 -vlayout=r -kname=$KNAME $COMMON_ARGS -init_sink=1 -mask=$mask
+    done
+    done
+    done
+    done
+}
+
 set -x
 
 run_fp16_bf16_tests
 run_padding_smoke_tests
 run_padding_basic_boundary_tests
-run_fp8_tests
 run_fp8bf16_tests
 run_fp8fp32_tests
+run_sink_mask_tests
+run_sink_init_tests
 
 if [ $TEST_APPENDKV -eq 1 ] ; then
     run_fp16_appendkv_tests

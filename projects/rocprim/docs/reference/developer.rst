@@ -11,7 +11,7 @@ rocPRIM Developer guidelines
 Overview
 ========
 
-As explained in :ref:`rocprim-intro`, rocPRIM's operations are part of one of four different hierarchical scopes: *Device/Grid*, :term:`Block`, :term:`Warp`, or *Thread*. This division facilitates re-use in the codebase and provides flexibility for users. Additional developer considerations are:
+rocPRIM's operations are part of one of four different hierarchical scopes: *Device/Grid*, :term:`Block`, :term:`Warp`, or *Thread*. This division facilitates re-use in the codebase and provides flexibility for users. Additional developer considerations are:
 
 * *Device/Grid*: algorithms called from host code, executed on the entire device. The input size is variable and passed as an argument to the function.
 * :term:`Block`: algorithms that are called from device code, executed by one thread block. All threads in a thread block should participate in the function call, and the threads together perform the algorithm. They are defined as structures, to group similar overloads and provide associated types such as the ``storage_type`` defining shared memory storage requirements. The maximum input size is defined by template arguments. Optionally, an actual size can be defined by ``valid_items`` overloads.
@@ -158,13 +158,15 @@ The default configuration depends on the types of the input values of the algori
     }
     const ALGO_config_params params = dispatch_target_arch<config>(target_arch);
 
-In device code the device architecture is known at compile time, and thus the configuration can also be selected at compile time. All that is needed, is the following pattern:
+In device code, when targeting generic AMDGPU architectures, the device architecture is known at compile time, during the host pass. With SPIR-V targets, however, the architecture is only known at runtime, during the device pass. To bridge this, we compile one kernel for each supported architecture during the host pass. That way, the final binary always contains a kernel compiled with the right configuration, and the device pass can select it at runtime. The difference is that for generic targets we compile only the real (matching) kernel; the other per-arch kernels are empty.
+
+The method to access the configuration in device code is as follows:
 
 .. code:: cpp
 
-    constexpr ALGO_CONFIG_PARAMS params = device_params<config>();
+    constexpr ALGO_CONFIG_PARAMS params = Config::template architecture_config<Arch>::params;
 
-The ``device_params`` function selects the configuration based on the predefined compiler macro ``__amdgcn_processor__``. In the example, ``config`` is of type ``wrapped_ALGO_config`` as in the host example.
+In the example, ``config`` is of type ``wrapped_ALGO_config`` as in the host example.
 
 Common patterns
 ===============

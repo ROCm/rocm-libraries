@@ -1,29 +1,7 @@
 #!/usr/bin/env bash
 
-################################################################################
-#
-# MIT License
-#
-# Copyright 2024-2025 AMD ROCm(TM) Software
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell cop-
-# ies of the Software, and to permit persons to whom the Software is furnished
-# to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IM-
-# PLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNE-
-# CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-#
-################################################################################
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
 
 shopt -s globstar
 
@@ -42,7 +20,6 @@ help() {
     echo "-b              Absolute path to build directory"
     echo "-g              GPU Identifier (for output file names)"
     echo "-u              Comparison archive URL"
-    echo "-R              Regular expression to filter tests."
     echo "-h              Print this help message"
     echo
 }
@@ -50,10 +27,8 @@ help() {
 skip_diff=false
 skip_zip=false
 skip_codecov=false
-ctest_re_flag=
-ctest_re=
 
-while getopts R:g:b:u:h:-: flag; do
+while getopts g:b:u:h:-: flag; do
     case "${flag}" in
     -)
       case "${OPTARG}" in
@@ -72,10 +47,6 @@ while getopts R:g:b:u:h:-: flag; do
           exit 1
           ;;
       esac
-      ;;
-    R)
-      ctest_re=${OPTARG}
-      ctest_re_flag="-R"
       ;;
     g) gpu=${OPTARG} ;;
     b) build_path=${OPTARG} ;; # Absolute path required
@@ -111,7 +82,7 @@ fi
 script_path=$(dirname "$(realpath $0)")
 code_cov_path=${build_path}
 profdata_file=${code_cov_path}/rocroller-tests.profdata
-ignore_patterns="(.*googletest-src.*)|(.*/catch2-src/.*)|(.*/catch2-build/.*)|(.*/yaml-cpp-src/.*)|(.*hip/include.*)|(.*/include/llvm/.*)|(.*/spdlog/.*)|(.*/msgpack-src/.*)|(.*/build/.*)|(.*/extern/.*)|(.*/test/.*[Tt]ests?.cpp)"
+ignore_patterns="(.*googletest-src.*)|(.*/catch2-src/.*)|(.*/catch2-build/.*)|(.*/yaml-cpp-src/.*)|(.*hip/include.*)|(.*/include/llvm/.*)|(.*/spdlog/.*)|(.*/msgpack-src/.*)|(.*/build/.*)|(.*/test/.*[Tt]ests?.cpp)"
 
 if $skip_codecov; then
   echo "Skipping code coverage..."
@@ -123,19 +94,17 @@ else
     rm -rf ${build_path}/*.profraw
     rm -rf ${code_cov_path}/*.profraw
 
-    # Add the node install to our PATH.
-    source ${script_path}/../docker/setup-node
-
     # The `%m` creates a different prof file for each object file. So one for
     # rocroller.so and one for rocroller-tests.
-    # Also had to switch to using ctest so seg faults can be handled gracefully.
+    # Using sharded test runner with codecov profile for better parallelization
+    # and centralized test filtering configuration.
+    #
+    # The codecov profile excludes slow/exhaustive tests to reduce execution time
+    # while maintaining good coverage validation (basic tests still run).
 
-    echo Using $(nproc) threads for code coverage tests.
-    OMP_NUM_THREADS=8 LLVM_PROFILE_FILE=${code_cov_path}/rocroller-tests_%m.profraw ctest \
-        -j $(nproc) \
-        --test-dir ${build_path} \
-        --output-on-failure \
-        ${ctest_re_flag} "${ctest_re}"
+    echo Using sharded test runner with codecov profile.
+    LLVM_PROFILE_FILE=${code_cov_path}/rocroller-tests_%m.profraw \
+        ${script_path}/run-tests-sharded codecov-mci ${build_path}
 
     # this combines them back together.
     /opt/rocm/lib/llvm/bin/llvm-profdata merge \
@@ -285,23 +254,19 @@ else
         wc -l ./code_cov_${gpu}.diff
 
         if [ -s ./code_cov_${gpu}.diff ]; then
-            # Add the node install to our PATH.
-            source ../docker/setup-node
-            diff2html -s side -i file -F ./code_cov_diff_${gpu}.html -- ./code_cov_${gpu}.diff
-            wc -l ./code_cov_diff_${gpu}.html
-
             cat ./code_cov_${gpu}.diff | grep -E "^\\+.*-ZERO-\\|" | wc -l > new_uncovered_lines.txt
         else
             mkdir -p ../python_cov_html
             touch ../python_cov_html/index.html
             mkdir -p ./code_cov_${gpu}_html
             touch ./code_cov_${gpu}_html/index.html
-            touch ./code_cov_diff_${gpu}.html
             echo "## Error encountered generating coverage report" > ./code_cov_${gpu}.formatted
             echo "There was an empty ./code_cov_${gpu}.diff." >> ./code_cov_${gpu}.formatted
             echo "0" > new_uncovered_lines.txt
             echo "There was an empty ./code_cov_${gpu}.diff."
         fi
+        # TODO: Temporarily disabling code_cov_diff_*.html generation
+        touch ./code_cov_diff_${gpu}.html
     else
         mkdir -p ../python_cov_html
         touch ../python_cov_html/index.html

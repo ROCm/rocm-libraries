@@ -1,11 +1,12 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2018-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #include "ck_tile/core/config.hpp"
 #include "ck_tile/core/utility/bit_cast.hpp"
 #include "ck_tile/core/numeric/half.hpp"
 #include "ck_tile/core/numeric/integral_constant.hpp"
 #include "ck_tile/core/numeric/numeric.hpp"
+#include "ck_tile/core/numeric/ext_vector_base.hpp"
 #if CK_TILE_USE_LLVM_BUILTIN_BF16
 #include <hip/hip_bfloat16.h>
 #endif
@@ -168,8 +169,12 @@ uint16_t float_to_bf16_rtn_asm(float f)
     static constexpr uint32_t FP32_NAN            = 0x7fff0000;
     static constexpr uint32_t ROUND_BIAS_FOR_BF16 = 0x7fff;
 
+#if defined(__GFX9__)
     using uint32x2_t = uint32_t __attribute__((ext_vector_type(2)));
     uint32x2_t check_nan;
+#else
+    uint32_t check_nan;
+#endif
     uint32_t tmp;
     asm volatile("\n \
             v_cmp_u_f32 %0, %2, %2 \n \
@@ -204,8 +209,12 @@ uint16_t float_to_bf16_rta_asm(float f)
     const uint32_t low_nan = 0x7fff;
     const uint32_t hi_nan  = 0x7fff0000;
 
+#if defined(__GFX9__)
     using uint32x2_t = uint32_t __attribute__((ext_vector_type(2)));
     uint32x2_t check_nan;
+#else
+    uint32_t check_nan;
+#endif
 
     asm volatile("v_cmp_u_f32 %[s_cnan], %[v_x], %[v_x] \n"
                  "v_add3_u32 %[v_x], %[v_x], %[v_blo], 1 \n"
@@ -275,7 +284,10 @@ template <bf16_rounding_mode rounding =
               static_cast<bf16_rounding_mode>(CK_TILE_FLOAT_TO_BFLOAT16_DEFAULT)>
 CK_TILE_HOST_DEVICE constexpr bfloat16_t float_to_bf16(float f, constant<rounding> = {})
 {
-#if CK_TILE_USE_LLVM_BUILTIN_BF16
+// Use builtin bfloat16 conversion only on gfx950 as its predecessors do not support bf16 cvt
+// instructions, resulting in suboptimal performance; Add host side marcro check for consistency
+// during accuracy tests.
+#if CK_TILE_USE_LLVM_BUILTIN_BF16 && (defined(__gfx950__) || defined(CK_GFX950_SUPPORT))
     return static_cast<bfloat16_t>(f);
 #else
     return bit_cast<bfloat16_t>(float_to_bf16_raw(f, constant<rounding>{}));
@@ -418,5 +430,73 @@ bfloat16_t exp2(bfloat16_t x) { return static_cast<bfloat16_t>(exp2f(static_cast
 
 CK_TILE_DEVICE
 bfloat16_t log(bfloat16_t x) { return static_cast<bfloat16_t>(__logf(static_cast<float>(x))); };
+
+using bf16x2_t = bfloat16_t __attribute__((ext_vector_type(2)));
+using fp32x2_t = float __attribute__((ext_vector_type(2)));
+
+template <bf16_rounding_mode rounding =
+              static_cast<bf16_rounding_mode>(CK_TILE_FLOAT_TO_BFLOAT16_DEFAULT)>
+CK_TILE_HOST_DEVICE constexpr bf16x2_t fp32x2_to_bf16x2(const fp32x2_t& x)
+{
+    return bf16x2_t{float_to_bf16<rounding>(x.x), float_to_bf16<rounding>(x.y)};
+}
+
+// Available on gfx94x (gfx942, gfx950) and later
+CK_TILE_DEVICE bf16x2_t cvt_pk_bf16_f32(float a, float b)
+{
+#if defined(__gfx94__) && CK_TILE_USE_LLVM_BUILTIN_BF16
+    return __builtin_convertvector(fp32x2_t{a, b}, bf16x2_t);
+#else
+    return fp32x2_to_bf16x2(fp32x2_t{a, b});
+#endif
+}
+
+// Packed bf16x2 to fp32x2 conversion
+CK_TILE_HOST_DEVICE constexpr fp32x2_t bf16x2_to_fp32x2(bf16x2_t x)
+{
+#if CK_TILE_USE_LLVM_BUILTIN_BF16
+    return __builtin_convertvector(x, fp32x2_t);
+#else
+    uint32_t packed = bit_cast<uint32_t>(x);
+    float f0        = bit_cast<float>(packed << 16);
+    float f1        = bit_cast<float>(packed & 0xFFFF0000u);
+    return fp32x2_t{f0, f1};
+#endif
+}
+
+#ifndef CK_TILE_TF32_USE_PACKED_CVT
+#define CK_TILE_TF32_USE_PACKED_CVT 1
+#endif
+
+template <int VecSize>
+CK_TILE_DEVICE void convert_float_to_bf16_pairs(const ext_vector_t<float, VecSize>& reg_f32,
+                                                ext_vector_t<bfloat16_t, VecSize>& reg_bf16_big,
+                                                ext_vector_t<bfloat16_t, VecSize>& reg_bf16_small)
+{
+#if defined(__gfx94__) && CK_TILE_TF32_USE_PACKED_CVT && CK_TILE_USE_LLVM_BUILTIN_BF16
+    static_assert(VecSize % 2 == 0, "VecSize must be even for packed operations");
+
+#pragma unroll
+    for(int i = 0; i < VecSize; i += 2)
+    {
+        fp32x2_t orig = {reg_f32[i], reg_f32[i + 1]};
+
+        bf16x2_t big_pair   = cvt_pk_bf16_f32(orig[0], orig[1]);
+        fp32x2_t big_f32    = bf16x2_to_fp32x2(big_pair);
+        fp32x2_t diff       = orig - big_f32;
+        bf16x2_t small_pair = cvt_pk_bf16_f32(diff[0], diff[1]);
+
+        reinterpret_cast<bf16x2_t*>(&reg_bf16_big)[i / 2]   = big_pair;
+        reinterpret_cast<bf16x2_t*>(&reg_bf16_small)[i / 2] = small_pair;
+    }
+#else
+#pragma unroll
+    for(int i = 0; i < VecSize; i++)
+    {
+        reg_bf16_big[i]   = float_to_bf16(reg_f32[i]);
+        reg_bf16_small[i] = float_to_bf16(reg_f32[i] - bf16_to_float(reg_bf16_big[i]));
+    }
+#endif
+}
 
 } // namespace ck_tile

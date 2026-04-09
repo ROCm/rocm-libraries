@@ -96,7 +96,7 @@
     CustomKernelName: ''
     DebugStreamK: 0
     DepthU: 16
-    DirectToLds: false
+    DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
     DirectToVgprA: false
@@ -105,9 +105,9 @@
     EdgeType: ShiftPtr
     EnableF32XdlMathOp: true
     EnableMatrixInstruction: true
-    ExpandPointerSwap: 0
+    ExpandPointerSwap: false
     ForceDisableShadowInit: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 2
     GlobalSplitU: 1
@@ -225,10 +225,10 @@
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 0
-    SolutionNameMin: Cijk_Ailk_Bljk_S_MX_B_Bias_HAS_SAV_UserArgs_MT320x192x16_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB2_GSU1_GSUC0_GSUWGMRR0_K1_LBSPPA2560_LBSPPB128_LPA0_LPB2_LRVW2_MIWT10_6_NLCA5_SU8_SUM1_SUS64_SVW2_VWA2_VWB2_WG32_8_1_WGM6_WGMXCC8_WGMXCCG304
-    SourceSwap: 1
+    SolutionNameMin: Cijk_Ailk_Bljk_S_MX_B_Bias_HAS_SAV_UserArgs_MT320x192x16_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB2_GSU1_GSUC0_GSUWGMRR0_K1_LBSPPA2560_LBSPPB128_LPA0_LPB2_LRVW2_MIWT10_6_NLCA5_SU8_SUM0_SUS64_SVW2_VWA2_VWB2_WG32_8_1_WGM6_WGMXCC8_WGMXCCG304
+    SourceSwap: true
     StaggerU: 8
-    StaggerUMapping: 1
+    StaggerUMapping: 0
     StaggerUStride: 64
     StorePriorityOpt: false
     StoreRemapVectorWidth: 0
@@ -249,13 +249,13 @@
     ThreadTileB: 6
     TotalVgprNumber: 512
     TransposeLDS: 1
-    TransposeLDSMetadata: true
+    TransposeLDSMetadata: 1
     ULSGRODoubleG2L: 0
     UnrollLoopSwapGlobalReadOrder: 0
     UnrollMajorLDSA: false
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: true
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseInstOffsetForGRO: 0
     UseSgprForGRO: -1
     Valid: true

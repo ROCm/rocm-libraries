@@ -30,7 +30,7 @@ extern "C" {
 
 /*! \ingroup generic_module
 *  \details
-*  \p hipsparseSpVV_bufferSize computes the required user allocated buffer size needed when computing the
+*  \p hipsparseSpVV_bufferSize computes the required user-allocated buffer size needed when computing the
 *  inner dot product of a sparse vector with a dense vector:
 *  \f[
 *    \text{result} := op(x) \cdot y,
@@ -40,7 +40,7 @@ extern "C" {
 *  listing of all the data type and compute type combinations available.
 *
 *  @param[in]
-*  handle              handle to the hipsparse library context queue.
+*  handle              handle to the hipSPARSE library context queue.
 *  @param[in]
 *  opX                 sparse vector operation type.
 *  @param[in]
@@ -48,17 +48,17 @@ extern "C" {
 *  @param[in]
 *  vecY                dense vector descriptor.
 *  @param[out]
-*  result              pointer to the result, can be host or device memory
+*  result              pointer to the result, which can be in host or device memory.
 *  @param[in]
 *  computeType         floating point precision for the SpVV computation.
 *  @param[out]
 *  pBufferSizeInBytes  number of bytes of the temporary storage buffer.
 *
-*  \retval      HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval      HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p vecX, \p vecY, \p result or \p pBufferSizeInBytes
-*               pointer is invalid.
-*  \retval      HIPSPARSE_STATUS_NOT_SUPPORTED \p computeType is currently not
-*               supported.
+*  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
+*  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p vecX, \p vecY, \p result, or 
+*          \p pBufferSizeInBytes is nullptr.
+*  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p computeType is currently not supported.
 */
 #if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 HIPSPARSE_EXPORT
@@ -81,7 +81,7 @@ hipsparseStatus_t hipsparseSpVV_bufferSize(hipsparseHandle_t     handle,
 #endif
 
 /*! \ingroup generic_module
-*  \brief Compute the inner dot product of a sparse vector with a dense vector
+*  \brief Compute the inner dot product of a sparse vector with a dense vector.
 *
 *  \details
 *  \details
@@ -108,12 +108,12 @@ hipsparseStatus_t hipsparseSpVV_bufferSize(hipsparseHandle_t     handle,
 *      }
 *  \endcode
 *
-*  Performing the above operation involves two steps. First, the user calls \p hipsparseSpVV_bufferSize which will return the
+*  Performing the above operation involves two steps. First, the user calls \p hipsparseSpVV_bufferSize, which will return the
 *  required temporary buffer size. The user then allocates this buffer. Finally, the user then completes the computation by
-*  calling \p hipsparseSpVV with the newly allocated buffer. Once the computation is complete, the user is free to deallocate
+*  calling \p hipsparseSpVV with the newly allocated buffer. After the computation is complete, the user is free to deallocate
 *  the buffer.
 *
-*  \p hipsparseSpVV supports the following uniform and mixed precision data types for the sparse and dense vectors \f$x\f$ and
+*  \p hipsparseSpVV supports the following uniform and mixed-precision data types for the sparse and dense vectors \f$x\f$ and
 *  \f$y\f$ and compute types for the scalar \f$result\f$.
 *
 *  \par Uniform Precisions:
@@ -126,7 +126,7 @@ hipsparseStatus_t hipsparseSpVV_bufferSize(hipsparseHandle_t     handle,
 *  <tr><td>HIP_C_64F
 *  </table>
 *
-*  \par Mixed precisions:
+*  \par Mixed Precisions:
 *  <table>
 *  <caption id="spvv_mixed">Mixed Precisions</caption>
 *  <tr><th>X / Y     <th>compute_type
@@ -137,7 +137,7 @@ hipsparseStatus_t hipsparseSpVV_bufferSize(hipsparseHandle_t     handle,
 *  </table>
 *
 *  @param[in]
-*  handle          handle to the hipsparse library context queue.
+*  handle          handle to the hipSPARSE library context queue.
 *  @param[in]
 *  opX             sparse vector operation type.
 *  @param[in]
@@ -145,20 +145,17 @@ hipsparseStatus_t hipsparseSpVV_bufferSize(hipsparseHandle_t     handle,
 *  @param[in]
 *  vecY            dense vector descriptor.
 *  @param[out]
-*  result          pointer to the result, can be host or device memory
+*  result          pointer to the result, which can be host or device memory.
 *  @param[in]
 *  computeType     floating point precision for the SpVV computation.
 *  @param[out]
 *  externalBuffer  temporary storage buffer allocated by the user.
 *
 *  \retval      HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval      HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p vecX, \p vecY, \p result or \p externalBuffer
+*  \retval      HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p vecX, \p vecY, \p result, or \p externalBuffer
 *               pointer is invalid.
 *  \retval      HIPSPARSE_STATUS_NOT_SUPPORTED \p computeType is currently not
 *               supported.
-*
-*  \par Example
-*  \snippet example_hipsparse_spvv.cpp doc example
 */
 #if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 HIPSPARSE_EXPORT

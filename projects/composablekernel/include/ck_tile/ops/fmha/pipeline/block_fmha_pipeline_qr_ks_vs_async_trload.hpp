@@ -1,5 +1,5 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2018-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 
@@ -37,7 +37,7 @@ struct BlockFmhaPipelineQRKSVSAsyncTrload
     using VLayout                    = remove_cvref_t<typename BlockFmhaShape::VLayout>;
     static constexpr bool kQLoadOnce = true; // if q_tile load whole block length (hdim) at once
     static_assert(kQLoadOnce == Policy::QLoadOnce);
-    static constexpr bool kKLoadOnce = BlockFmhaShape::kM0 >= 64;
+    static constexpr bool kKLoadOnce = BlockFmhaShape::kM0 > 64;
 
     static constexpr index_t kBlockSize = Problem::kBlockSize;
 
@@ -69,6 +69,7 @@ struct BlockFmhaPipelineQRKSVSAsyncTrload
     static constexpr auto BiasEnum          = Problem::BiasEnum;
     static constexpr bool kStoreLSE         = Problem::kStoreLSE;
     static constexpr bool kHasUnevenSplits  = true;
+    static constexpr bool kHasSink          = Problem::kHasSink;
 
     static_assert((CK_TILE_FMHA_FWD_FAST_EXP2 &&
                    (kHasLogitsSoftCap && Problem::BiasEnum == BlockAttentionBiasEnum::NO_BIAS ||
@@ -90,6 +91,8 @@ struct BlockFmhaPipelineQRKSVSAsyncTrload
 
     static constexpr index_t kAlignmentBias =
         kPadSeqLenK ? 1 : Policy::template GetAlignmentBias<Problem>();
+    static constexpr index_t kAlignmentRandVal =
+        kPadSeqLenK ? 1 : Policy::template GetAlignmentRandVal<Problem>();
 
     static constexpr index_t kBlockPerCu = []() {
         if constexpr(Problem::kBlockPerCu != -1)
@@ -145,7 +148,8 @@ struct BlockFmhaPipelineQRKSVSAsyncTrload
                FmhaMask mask,
                PositionEncoding position_encoding,
                float scale_s,
-               void* smem_ptr) const
+               void* smem_ptr,
+               float sink_v) const
     {
         static_assert(
             std::is_same_v<QDataType, remove_cvref_t<typename QDramBlockWindowTmp::DataType>> &&
@@ -190,8 +194,24 @@ struct BlockFmhaPipelineQRKSVSAsyncTrload
         auto l = MLBlockTileType{};
 
         clear_tile(o_acc);
-        set_tile(m, -numeric<SMPLComputeDataType>::infinity());
-        clear_tile(l);
+        if(__builtin_isinf_sign(sink_v) >= 0)
+        {
+#if CK_TILE_FMHA_FWD_FAST_EXP2
+            if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS ||
+                         BiasEnum == BlockAttentionBiasEnum::ALIBI)
+                set_tile(m, sink_v * C_LOG2E * scale_s);
+            else
+                set_tile(m, sink_v * C_LOG2E);
+#else
+            set_tile(m, sink_v);
+#endif
+            set_tile(l, SMPLComputeDataType{1.0f});
+        }
+        else
+        {
+            set_tile(m, -numeric<SMPLComputeDataType>::infinity());
+            clear_tile(l);
+        }
 
         const auto q_origin = q_dram_block_window_tmp.get_window_origin();
         const auto [logical_seqlen_k_start, logical_seqlen_k_end] =
@@ -208,13 +228,8 @@ struct BlockFmhaPipelineQRKSVSAsyncTrload
                 {
                     auto lse_acc =
                         make_static_distributed_tensor<LSEDataType>(m.get_tile_distribution());
-
-                    set_tile(lse_acc, -numeric<SMPLComputeDataType>::infinity());
-
-                    if(get_thread_local_1d_id() < kM0)
-                    {
-                        store_tile(lse_acc_dram_window_tmp, lse_acc);
-                    }
+                    set_tile(lse_acc, SMPLComputeDataType{sink_v * scale_s});
+                    store_tile(lse_acc_dram_window_tmp, lse_acc);
                 }
 
                 // Note: here occ are all cleard, return it
@@ -256,8 +271,10 @@ struct BlockFmhaPipelineQRKSVSAsyncTrload
         // physical_seqlen_k_start, logical_seqlen_k_start <= physical_seqlen_k_start
         const index_t aligned_physical_seqlen_k_start = physical_seqlen_k_start;
 
-        auto k_dram_window = make_tile_window(
-            k_dram_block_window_tmp, Policy::template MakeKDramTileDistribution<Problem>());
+        auto k_dram_window =
+            make_tile_window(k_dram_block_window_tmp,
+                             {physical_seqlen_k_start, 0},
+                             Policy::template MakeKDramTileDistribution<Problem>());
 
         auto k_lds_write_view = make_tensor_view<address_space_enum::lds>(
             static_cast<KDataType*>(smem_ptr), Policy::template MakeKLdsBlockDescriptor<Problem>());
@@ -289,8 +306,10 @@ struct BlockFmhaPipelineQRKSVSAsyncTrload
                              Policy::template MakeSRegTileDistribution<Problem>());
 
         // V tile in LDS
-        auto v_dram_window = make_tile_window(
-            v_dram_block_window_tmp, Policy::template MakeVDramTileDistribution<Problem>());
+        auto v_dram_window =
+            make_tile_window(v_dram_block_window_tmp,
+                             {physical_seqlen_k_start, 0},
+                             Policy::template MakeVDramTileDistribution<Problem>());
 
         auto v_lds_write_view = make_tensor_view<address_space_enum::lds>(
             reinterpret_cast<VDataType*>(static_cast<char*>(smem_ptr) +
@@ -393,7 +412,8 @@ struct BlockFmhaPipelineQRKSVSAsyncTrload
             {
                 if(i_total_loops == (num_total_loop - 1))
                 {
-                    const auto k_origin = make_tuple(kN0 * i_total_loops, 0);
+                    const auto k_origin =
+                        make_tuple(kN0 * i_total_loops + physical_seqlen_k_start, 0);
                     set_tile_if(s_acc,
                                 -numeric<SMPLComputeDataType>::infinity(),
                                 [&,
@@ -410,7 +430,7 @@ struct BlockFmhaPipelineQRKSVSAsyncTrload
 
             if constexpr(kPadSeqLenK || FmhaMask::IsMasking)
             {
-                const auto k_origin = make_tuple(kN0 * i_total_loops, 0);
+                const auto k_origin = make_tuple(kN0 * i_total_loops + physical_seqlen_k_start, 0);
 
                 bool need_perpixel_check =
                     mask.IsEdgeTile(q_origin.at(I0), k_origin.at(I0), number<kM0>{}, number<kN0>{});
@@ -562,7 +582,7 @@ struct BlockFmhaPipelineQRKSVSAsyncTrload
 
                     // loop over along the [V]alue Sequence length
                     move_tile_window(v_lds_read_window, {kK1, 0});
-                    v_tile = load_tile_transpose(v_lds_read_window);
+                    load_tile_transpose(v_tile, v_lds_read_window);
                 });
                 // move back to the origin
                 move_tile_window(v_lds_read_window, {-kK1 * (k1_loops - 1), 0});
@@ -602,10 +622,7 @@ struct BlockFmhaPipelineQRKSVSAsyncTrload
                 }
             });
 
-            if(get_thread_local_1d_id() < kM0)
-            {
-                store_tile(lse_acc_dram_window_tmp, lse_acc);
-            }
+            store_tile(lse_acc_dram_window_tmp, lse_acc);
         }
 
         // finally, O
@@ -647,6 +664,7 @@ struct BlockFmhaPipelineQRKSVSAsyncTrload
                FmhaMask mask,
                PositionEncoding position_encoding,
                float scale_s,
+               float sink_v,
                void* __restrict__ smem_ptrk0,
                void* __restrict__ smem_ptrk1,
                void* __restrict__ smem_ptrv0,
@@ -696,8 +714,24 @@ struct BlockFmhaPipelineQRKSVSAsyncTrload
         auto l = MLBlockTileType{};
 
         clear_tile(o_acc);
-        set_tile(m, -numeric<SMPLComputeDataType>::infinity());
-        clear_tile(l);
+        if(__builtin_isinf_sign(sink_v) >= 0)
+        {
+#if CK_TILE_FMHA_FWD_FAST_EXP2
+            if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS ||
+                         BiasEnum == BlockAttentionBiasEnum::ALIBI)
+                set_tile(m, sink_v * C_LOG2E * scale_s);
+            else
+                set_tile(m, sink_v * C_LOG2E);
+#else
+            set_tile(m, sink_v);
+#endif
+            set_tile(l, SMPLComputeDataType{1.0f});
+        }
+        else
+        {
+            set_tile(m, -numeric<SMPLComputeDataType>::infinity());
+            clear_tile(l);
+        }
 
         const auto q_origin = q_dram_block_window_tmp.get_window_origin();
         const auto [logical_seqlen_k_start, logical_seqlen_k_end] =
@@ -714,13 +748,8 @@ struct BlockFmhaPipelineQRKSVSAsyncTrload
                 {
                     auto lse_acc =
                         make_static_distributed_tensor<LSEDataType>(m.get_tile_distribution());
-
-                    set_tile(lse_acc, -numeric<SMPLComputeDataType>::infinity());
-
-                    if(get_thread_local_1d_id() < kM0)
-                    {
-                        store_tile(lse_acc_dram_window_tmp, lse_acc);
-                    }
+                    set_tile(lse_acc, SMPLComputeDataType{sink_v * scale_s});
+                    store_tile(lse_acc_dram_window_tmp, lse_acc);
                 }
 
                 // Note: here occ are all cleard, return it
@@ -765,8 +794,10 @@ struct BlockFmhaPipelineQRKSVSAsyncTrload
         // physical_seqlen_k_start, logical_seqlen_k_start <= physical_seqlen_k_start
         const index_t aligned_physical_seqlen_k_start = physical_seqlen_k_start;
 
-        auto k_dram_window = make_tile_window(
-            k_dram_block_window_tmp, Policy::template MakeKDramTileDistribution<Problem, true>());
+        auto k_dram_window =
+            make_tile_window(k_dram_block_window_tmp,
+                             {physical_seqlen_k_start, 0},
+                             Policy::template MakeKDramTileDistribution<Problem, true>());
 
         auto k_lds_write_view = make_tensor_view<address_space_enum::lds>(
             static_cast<KDataType* __restrict__>(smem_ptrk0),
@@ -801,8 +832,10 @@ struct BlockFmhaPipelineQRKSVSAsyncTrload
                              Policy::template MakeSRegTileDistribution<Problem>());
 
         // V tile in LDS
-        auto v_dram_window = make_tile_window(
-            v_dram_block_window_tmp, Policy::template MakeVDramTileDistribution<Problem>());
+        auto v_dram_window =
+            make_tile_window(v_dram_block_window_tmp,
+                             {physical_seqlen_k_start, 0},
+                             Policy::template MakeVDramTileDistribution<Problem>());
 
         auto v_lds_write_view = make_tensor_view<address_space_enum::lds>(
             reinterpret_cast<VDataType* __restrict__>(static_cast<char*>(smem_ptrv0)),
@@ -901,7 +934,8 @@ struct BlockFmhaPipelineQRKSVSAsyncTrload
             {
                 if(i_total_loops == (num_total_loop - 1))
                 {
-                    const auto k_origin = make_tuple(kN0 * i_total_loops, 0);
+                    const auto k_origin =
+                        make_tuple(kN0 * i_total_loops + physical_seqlen_k_start, 0);
                     set_tile_if(s_acc,
                                 -numeric<SMPLComputeDataType>::infinity(),
                                 [&,
@@ -918,7 +952,7 @@ struct BlockFmhaPipelineQRKSVSAsyncTrload
 
             if constexpr(kPadSeqLenK || FmhaMask::IsMasking)
             {
-                const auto k_origin = make_tuple(kN0 * i_total_loops, 0);
+                const auto k_origin = make_tuple(kN0 * i_total_loops + physical_seqlen_k_start, 0);
 
                 bool need_perpixel_check =
                     mask.IsEdgeTile(q_origin.at(I0), k_origin.at(I0), number<kM0>{}, number<kN0>{});
@@ -1146,10 +1180,7 @@ struct BlockFmhaPipelineQRKSVSAsyncTrload
                 }
             });
 
-            if(get_thread_local_1d_id() < kM0)
-            {
-                store_tile(lse_acc_dram_window_tmp, lse_acc);
-            }
+            store_tile(lse_acc_dram_window_tmp, lse_acc);
         }
 
         // finally, O

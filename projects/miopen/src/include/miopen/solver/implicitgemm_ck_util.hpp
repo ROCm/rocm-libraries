@@ -42,7 +42,7 @@
 #include <ck/library/tensor_operation_instance/gpu/grouped_convolution_backward_weight_bilinear.hpp>
 #include <ck/library/tensor_operation_instance/gpu/grouped_convolution_backward_weight_scale.hpp>
 #include <ck/library/tensor_operation_instance/gpu/grouped_convolution_backward_data.hpp>
-#endif // MIOPEN_USE_COMPOSABLEKERNEL
+#endif // MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
 
 namespace miopen {
 
@@ -76,7 +76,7 @@ inline static bool NextCKSplitkValue(int& v)
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
 
 namespace conv {
-template <typename DataType>
+template <typename DataType, typename ComputeType = DataType>
 using DeviceOpGWrw = ck::tensor_operation::device::DeviceGroupedConvBwdWeight<
     2,
     ck::tensor_layout::convolution::NHWGC,
@@ -87,12 +87,13 @@ using DeviceOpGWrw = ck::tensor_operation::device::DeviceGroupedConvBwdWeight<
     DataType,
     ck::tensor_operation::element_wise::PassThrough,
     ck::tensor_operation::element_wise::PassThrough,
-    ck::tensor_operation::element_wise::PassThrough>;
-template <typename DataType>
-using DeviceOpGWrwPtrs =
-    ck::tensor_operation::device::instance::DeviceOperationInstanceFactory<DeviceOpGWrw<DataType>>;
+    ck::tensor_operation::element_wise::PassThrough,
+    ComputeType>;
+template <typename DataType, typename ComputeType = DataType>
+using DeviceOpGWrwPtrs = ck::tensor_operation::device::instance::DeviceOperationInstanceFactory<
+    DeviceOpGWrw<DataType, ComputeType>>;
 
-template <typename DataType>
+template <typename DataType, typename ComputeType = DataType>
 using DeviceOpGBwd = ck::tensor_operation::device::DeviceGroupedConvBwdDataMultipleD<
     2,
     ck::tensor_layout::convolution::NHWGK,
@@ -105,11 +106,12 @@ using DeviceOpGBwd = ck::tensor_operation::device::DeviceGroupedConvBwdDataMulti
     DataType,
     ck::tensor_operation::element_wise::PassThrough,
     ck::tensor_operation::element_wise::PassThrough,
-    ck::tensor_operation::element_wise::PassThrough>;
+    ck::tensor_operation::element_wise::PassThrough,
+    ComputeType>;
 
-template <typename DataType>
-using DeviceOpGBwdPtrs =
-    ck::tensor_operation::device::instance::DeviceOperationInstanceFactory<DeviceOpGBwd<DataType>>;
+template <typename DataType, typename ComputeType = DataType>
+using DeviceOpGBwdPtrs = ck::tensor_operation::device::instance::DeviceOperationInstanceFactory<
+    DeviceOpGBwd<DataType, ComputeType>>;
 
 using InLayout    = ck::tensor_layout::convolution::NDHWGC;
 using WeiLayout   = ck::tensor_layout::convolution::GKZYXC;
@@ -118,7 +120,7 @@ using PassThrough = ck::tensor_operation::element_wise::PassThrough;
 using Bilinear    = ck::tensor_operation::element_wise::Bilinear;
 using Scale       = ck::tensor_operation::element_wise::Scale;
 
-template <typename DataType>
+template <typename DataType, typename ComputeType = DataType>
 using DeviceOpGBwdWeightDefault =
     ck::tensor_operation::device::DeviceGroupedConvBwdWeight<3,
                                                              InLayout,
@@ -129,9 +131,10 @@ using DeviceOpGBwdWeightDefault =
                                                              DataType,
                                                              PassThrough,
                                                              PassThrough,
-                                                             PassThrough>;
+                                                             PassThrough,
+                                                             ComputeType>;
 
-template <typename DataType>
+template <typename DataType, typename ComputeType = DataType>
 using DeviceOpGBwdWeightBilinear =
     ck::tensor_operation::device::DeviceGroupedConvBwdWeightMultipleD<3,
                                                                       InLayout,
@@ -144,9 +147,10 @@ using DeviceOpGBwdWeightBilinear =
                                                                       ck::Tuple<DataType>,
                                                                       PassThrough,
                                                                       Bilinear,
-                                                                      PassThrough>;
+                                                                      PassThrough,
+                                                                      ComputeType>;
 
-template <typename DataType>
+template <typename DataType, typename ComputeType = DataType>
 using DeviceOpGBwdWeightScale =
     ck::tensor_operation::device::DeviceGroupedConvBwdWeightMultipleD<3,
                                                                       InLayout,
@@ -159,22 +163,23 @@ using DeviceOpGBwdWeightScale =
                                                                       ck::Tuple<>,
                                                                       PassThrough,
                                                                       Scale,
-                                                                      PassThrough>;
+                                                                      PassThrough,
+                                                                      ComputeType>;
 
-template <typename DataType>
+template <typename DataType, typename ComputeType = DataType>
 using DeviceOpGBwdWeightDefaultPtrs =
     ck::tensor_operation::device::instance::DeviceOperationInstanceFactory<
-        DeviceOpGBwdWeightDefault<DataType>>;
+        DeviceOpGBwdWeightDefault<DataType, ComputeType>>;
 
-template <typename DataType>
+template <typename DataType, typename ComputeType = DataType>
 using DeviceOpGBwdWeightBilinearPtrs =
     ck::tensor_operation::device::instance::DeviceOperationInstanceFactory<
-        DeviceOpGBwdWeightBilinear<DataType>>;
+        DeviceOpGBwdWeightBilinear<DataType, ComputeType>>;
 
-template <typename DataType>
+template <typename DataType, typename ComputeType = DataType>
 using DeviceOpGBwdWeightScalePtrs =
     ck::tensor_operation::device::instance::DeviceOperationInstanceFactory<
-        DeviceOpGBwdWeightScale<DataType>>;
+        DeviceOpGBwdWeightScale<DataType, ComputeType>>;
 
 } // namespace conv
 
@@ -246,22 +251,27 @@ inline constexpr bool IsSplitKNeeded()
 {
     return std::is_same_v<DeviceOpType, conv::DeviceOpGWrwPtrs<ck::half_t>> ||
            std::is_same_v<DeviceOpType, conv::DeviceOpGWrwPtrs<float>> ||
+           std::is_same_v<DeviceOpType, conv::DeviceOpGWrwPtrs<float, ck::tf32_t>> ||
            std::is_same_v<DeviceOpType, conv::DeviceOpGWrwPtrs<int8_t>> ||
            std::is_same_v<DeviceOpType, conv::DeviceOpGWrwPtrs<ck::bhalf_t>> ||
            std::is_same_v<DeviceOpType, conv::DeviceOpGBwdPtrs<ck::half_t>> ||
            std::is_same_v<DeviceOpType, conv::DeviceOpGBwdPtrs<float>> ||
+           std::is_same_v<DeviceOpType, conv::DeviceOpGBwdPtrs<float, ck::tf32_t>> ||
            std::is_same_v<DeviceOpType, conv::DeviceOpGBwdPtrs<int8_t>> ||
            std::is_same_v<DeviceOpType, conv::DeviceOpGBwdPtrs<ck::bhalf_t>> ||
            std::is_same_v<DeviceOpType, conv::DeviceOpGBwdWeightDefaultPtrs<ck::half_t>> ||
            std::is_same_v<DeviceOpType, conv::DeviceOpGBwdWeightDefaultPtrs<float>> ||
+           std::is_same_v<DeviceOpType, conv::DeviceOpGBwdWeightDefaultPtrs<float, ck::tf32_t>> ||
            std::is_same_v<DeviceOpType, conv::DeviceOpGBwdWeightDefaultPtrs<int8_t>> ||
            std::is_same_v<DeviceOpType, conv::DeviceOpGBwdWeightDefaultPtrs<ck::bhalf_t>> ||
            std::is_same_v<DeviceOpType, conv::DeviceOpGBwdWeightBilinearPtrs<ck::half_t>> ||
            std::is_same_v<DeviceOpType, conv::DeviceOpGBwdWeightBilinearPtrs<float>> ||
+           std::is_same_v<DeviceOpType, conv::DeviceOpGBwdWeightBilinearPtrs<float, ck::tf32_t>> ||
            std::is_same_v<DeviceOpType, conv::DeviceOpGBwdWeightBilinearPtrs<int8_t>> ||
            std::is_same_v<DeviceOpType, conv::DeviceOpGBwdWeightBilinearPtrs<ck::bhalf_t>> ||
            std::is_same_v<DeviceOpType, conv::DeviceOpGBwdWeightScalePtrs<ck::half_t>> ||
            std::is_same_v<DeviceOpType, conv::DeviceOpGBwdWeightScalePtrs<float>> ||
+           std::is_same_v<DeviceOpType, conv::DeviceOpGBwdWeightScalePtrs<float, ck::tf32_t>> ||
            std::is_same_v<DeviceOpType, conv::DeviceOpGBwdWeightScalePtrs<int8_t>> ||
            std::is_same_v<DeviceOpType, conv::DeviceOpGBwdWeightScalePtrs<ck::bhalf_t>>;
 }
@@ -335,7 +345,9 @@ size_t GetCKSplitkMaxWorkspaceSize(const ProblemDescriptionType& problem)
     const auto ptrs = DeviceOpType::GetInstances();
     for(auto& ptr : ptrs)
     {
-        auto split_k = CkSplitkAutoDeduce;
+        // Cycle `split_k` over {1,2,4,...,128} then `CkSplitkAutoDeduce`.
+        // The loop then restarts from 1 for the next conv instance.
+        auto split_k = 1;
         do
         {
             if(args.IsSupportedBySplitK(ptr, split_k))
@@ -379,17 +391,29 @@ ConvSolution InitAnyInvokerFactory(const ProblemDescriptionType& problem,
     auto ptr_iter  = FindConvPtrByID(conv_ptrs, kernel_id);
 
     if(ptr_iter == conv_ptrs.end())
+    {
+        MIOPEN_LOG_E("Kernel does not exist.");
         return {miopenStatusInvalidValue};
+    }
 
     ConvSolution result;
+#ifdef CK_EXPERIMENTAL_BUILDER
+    std::string description = (*ptr_iter)->describe()->detailed();
+
+    if(!description.empty())
+    {
+        MIOPEN_LOG_I(description);
+    }
+#endif
+
     result.invoker_factory =
-        [ck_args     = CKArgsType{problem},
-         sh_conv_ptr = std::shared_ptr{std::move(*ptr_iter)}](const std::vector<Kernel>&) mutable {
-            return [ck_args = std::move(ck_args), sh_conv_ptr = std::move(sh_conv_ptr)](
+        [ck_args_     = CKArgsType{problem},
+         sh_conv_ptr_ = std::shared_ptr{std::move(*ptr_iter)}](const std::vector<Kernel>&) mutable {
+            return [ck_args2 = std::move(ck_args_), sh_conv_ptr2 = std::move(sh_conv_ptr_)](
                        const Handle& handle, const AnyInvokeParams& primitive_parameters) {
                 const auto& data_ctx = primitive_parameters.CastTo<CastType>();
-                auto argument_ptr    = ck_args.MakeArgPtr(sh_conv_ptr, data_ctx);
-                auto invoker_ptr     = sh_conv_ptr->MakeInvokerPointer();
+                auto argument_ptr    = ck_args2.MakeArgPtr(sh_conv_ptr2, data_ctx);
+                auto invoker_ptr     = sh_conv_ptr2->MakeInvokerPointer();
                 {
                     WorkAroundHipEventProfiler prf(handle);
                     invoker_ptr->Run(argument_ptr.get(), {handle.GetStream(), false});
@@ -1136,14 +1160,27 @@ ConvSolution InitInvokerFactoryNCHW(const ExecutionContext& ctx,
     if(ptr_iter == conv_ptrs.end())
     {
         MIOPEN_LOG_E("PerformanceConfig kernel '" + kernel_id + "' does not exist.");
-        return {miopenStatusInvalidValue};
+        result = ConvSolution{miopenStatusInvalidValue};
+        return result;
     }
 
-    if constexpr(std::is_same_v<CastType, miopen::conv::WrWInvokeParams>) {
+#ifdef CK_EXPERIMENTAL_BUILDER
+    std::string description = (*ptr_iter)->describe()->detailed();
+
+    if(!description.empty())
+    {
+        MIOPEN_LOG_I(description);
+    }
+#endif
+
+    if constexpr(std::is_same_v<CastType, miopen::conv::WrWInvokeParams>)
+    {
         auto ck_ws_size = ck_args.GetCKSplitkWorkspaceSize(*ptr_iter, split_k.value_or(1));
         _ck_buff_des.emplace(ck_ws_size, 0);
         result.workspace_sz = GetWorkspaceSizeLayoutTransformConv(problem, ck_ws_size);
-    } else {
+    }
+    else
+    {
         result.workspace_sz = GetWorkspaceSizeLayoutTransformConv(problem);
     }
 
@@ -1151,37 +1188,37 @@ ConvSolution InitInvokerFactoryNCHW(const ExecutionContext& ctx,
         internal::MakeTaggedTransposeInstances<CKArgsType>(
             result, ctx, problem, ck_args, input1_op, input2_op, output_op, _ck_buff_des);
 
-    result.invoker_factory = [kernel_id           = kernel_id,
-                              split_k             = split_k,
-                              ck_args             = std::move(ck_args),
-                              sh_conv_ptr         = std::shared_ptr{std::move(*ptr_iter)},
-                              input1_tr_inst      = std::move(_input1_tr_inst),
-                              input2_tr_inst      = std::move(_input2_tr_inst),
-                              output_tr_inst      = std::move(_output_tr_inst),
-                              output_init_tr_inst = std::move(_output_init_tr_inst),
-                              ck_buff_des =
+    result.invoker_factory = [kernel_id_           = &kernel_id,
+                              split_k_             = split_k,
+                              ck_args_             = std::move(ck_args),
+                              sh_conv_ptr_         = std::shared_ptr{std::move(*ptr_iter)},
+                              input1_tr_inst_      = std::move(_input1_tr_inst),
+                              input2_tr_inst_      = std::move(_input2_tr_inst),
+                              output_tr_inst_      = std::move(_output_tr_inst),
+                              output_init_tr_inst_ = std::move(_output_init_tr_inst),
+                              ck_buff_des_ =
                                   _ck_buff_des](const std::vector<Kernel>& kernels) mutable {
-        return [kernel_id = kernel_id,
-                split_k   = split_k,
+        return [kernel_id2 = kernel_id_,
+                split_k2   = split_k_,
                 kernels,
-                ck_args             = std::move(ck_args),
-                sh_conv_ptr         = std::move(sh_conv_ptr),
-                input1_tr_inst      = std::move(input1_tr_inst),
-                input2_tr_inst      = std::move(input2_tr_inst),
-                output_tr_inst      = std::move(output_tr_inst),
-                output_init_tr_inst = std::move(output_init_tr_inst),
-                ck_buff_des         = ck_buff_des](const Handle& handle,
-                                           const AnyInvokeParams& primitive_parameters) mutable {
+                ck_args2             = std::move(ck_args_),
+                sh_conv_ptr2         = std::move(sh_conv_ptr_),
+                input1_tr_inst2      = std::move(input1_tr_inst_),
+                input2_tr_inst2      = std::move(input2_tr_inst_),
+                output_tr_inst2      = std::move(output_tr_inst_),
+                output_init_tr_inst2 = std::move(output_init_tr_inst_),
+                ck_buff_des2         = ck_buff_des_](const Handle& handle,
+                                             const AnyInvokeParams& primitive_parameters) mutable {
             handle.ResetKernelTime();
 
             const auto& data_ctx = primitive_parameters.CastTo<CastType>();
             Data_t workspace_ptr = GetWorkspacePointer<CastType>(data_ctx);
             ValidateWorkspacePointer<CastType>(workspace_ptr);
 
-            input1_tr_inst.AssignBuffer(handle, workspace_ptr);
-            input2_tr_inst.AssignBuffer(handle, workspace_ptr);
-            output_tr_inst.AssignBuffer(handle, workspace_ptr);
-            output_init_tr_inst.AssignBuffer(handle, workspace_ptr);
+            input1_tr_inst2.AssignBuffer(handle, workspace_ptr);
+            input2_tr_inst2.AssignBuffer(handle, workspace_ptr);
+            output_tr_inst2.AssignBuffer(handle, workspace_ptr);
+            output_init_tr_inst2.AssignBuffer(handle, workspace_ptr);
 
             // if FusionInvokeParams extract tensors from the params
             // conversion operator applied here to convert to ConvTensors
@@ -1189,7 +1226,7 @@ ConvSolution InitInvokerFactoryNCHW(const ExecutionContext& ctx,
 
             /// \todo remove this when DataInvokeParams stops swapping
             // "in" and "out" tensors for backward pass
-            if(output_tr_inst.GetConvOperandTag() == internal::ConvOperandTag::Input)
+            if(output_tr_inst2.GetConvOperandTag() == internal::ConvOperandTag::Input)
             {
                 // this is backward pass, swap back input and output
                 std::swap(conv_tensors.x, conv_tensors.y);
@@ -1199,21 +1236,21 @@ ConvSolution InitInvokerFactoryNCHW(const ExecutionContext& ctx,
             float elapsed = 0.0f;
 
             // ConvertFrom automatically keeps kernel time and accumulates
-            input1_tr_inst.ConvertFrom(handle, kernels, conv_tensors);
-            input2_tr_inst.ConvertFrom(handle, kernels, conv_tensors);
-            output_init_tr_inst.ConvertFrom(handle, kernels, conv_tensors);
+            input1_tr_inst2.ConvertFrom(handle, kernels, conv_tensors);
+            input2_tr_inst2.ConvertFrom(handle, kernels, conv_tensors);
+            output_init_tr_inst2.ConvertFrom(handle, kernels, conv_tensors);
             elapsed = handle.IsProfilingEnabled() ? handle.GetKernelTime() : 0.0f;
 
             if constexpr(ZeroOutputs)
             {
                 /// Note: Need to clear buffer memory for output since all values may not be set.
-                output_tr_inst.ZeroOutBuffer(handle);
+                output_tr_inst2.ZeroOutBuffer(handle);
                 if(handle.IsProfilingEnabled())
                     elapsed += handle.GetKernelTime();
             }
 
             std::array<internal::TransposeInstanceTagged*, 3> tr_ptrs = {
-                &input1_tr_inst, &input2_tr_inst, &output_tr_inst};
+                &input1_tr_inst2, &input2_tr_inst2, &output_tr_inst2};
 
             // sort by tag in order: Input, Weights, Output
             std::sort(tr_ptrs.begin(), tr_ptrs.end(), [](const auto& left, const auto& right) {
@@ -1222,23 +1259,23 @@ ConvSolution InitInvokerFactoryNCHW(const ExecutionContext& ctx,
 
             std::unique_ptr<ck::tensor_operation::device::BaseArgument> argument_ptr =
                 MakeNCHWCKArgPtr<IsSplitKNeeded<DeviceOpType>(),
-                                 std::decay_t<decltype(*sh_conv_ptr)>,
+                                 std::decay_t<decltype(*sh_conv_ptr2)>,
                                  CKArgsType,
-                                 CastType>(ck_args, sh_conv_ptr, tr_ptrs, data_ctx, split_k);
+                                 CastType>(ck_args2, sh_conv_ptr2, tr_ptrs, data_ctx, split_k2);
 
             shared<Data_t> buf_handle{};
-            if(ck_buff_des.has_value() && ck_buff_des->ck_size && workspace_ptr)
+            if(ck_buff_des2.has_value() && ck_buff_des2->ck_size && workspace_ptr)
             {
                 buf_handle = handle.CreateSubBuffer(
-                    workspace_ptr, ck_buff_des->ck_offset, ck_buff_des->ck_size);
+                    workspace_ptr, ck_buff_des2->ck_offset, ck_buff_des2->ck_size);
                 assert(buf_handle.get());
-                sh_conv_ptr->SetWorkSpacePointer(argument_ptr.get(), buf_handle.get());
+                sh_conv_ptr2->SetWorkSpacePointer(argument_ptr.get(), buf_handle.get());
             }
 
-            auto invoker_ptr = sh_conv_ptr->MakeInvokerPointer();
+            auto invoker_ptr = sh_conv_ptr2->MakeInvokerPointer();
             {
                 WorkAroundHipEventProfiler prf(handle);
-                MIOPEN_LOG_I2("kernel_name = " << kernel_id);
+                MIOPEN_LOG_I2("kernel_name = " << kernel_id2);
                 invoker_ptr->Run(argument_ptr.get(), {handle.GetStream(), false});
             }
 
@@ -1250,7 +1287,7 @@ ConvSolution InitInvokerFactoryNCHW(const ExecutionContext& ctx,
             }
 
             // ConvertTo automatically keeps kernel time and accumulates
-            output_tr_inst.ConvertTo(handle, kernels, conv_tensors);
+            output_tr_inst2.ConvertTo(handle, kernels, conv_tensors);
         };
     };
 #endif
@@ -1266,6 +1303,7 @@ ConvSolution InitInvokerFactoryNHWC(const ExecutionContext&,
                                     const ProblemDescriptionType& problem,
                                     const std::string& kernel_id)
 {
+    ConvSolution result;
     auto conv_ptrs             = DeviceOpType::GetInstances();
     std::optional<int> split_k = std::nullopt;
     std::string id_string      = kernel_id;
@@ -1281,41 +1319,49 @@ ConvSolution InitInvokerFactoryNHWC(const ExecutionContext&,
     if(ptr_iter == conv_ptrs.end())
     {
         MIOPEN_LOG_E("PerformanceConfig kernel '" + kernel_id + "' does not exist.");
-        return {miopenStatusInvalidValue};
+        result = ConvSolution{miopenStatusInvalidValue};
+        return result;
     }
 
+#ifdef CK_EXPERIMENTAL_BUILDER
+    std::string description = (*ptr_iter)->describe()->detailed();
+
+    if(!description.empty())
+    {
+        MIOPEN_LOG_I(description);
+    }
+#endif
     if constexpr(std::is_same_v<CastType, miopen::conv::WrWInvokeParams>)
     {
-        ConvSolution result;
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
         miopenAlphaBetaCase_t alpha_beta_case = problem.GetAlphaBetaCase();
-        auto ck_args = CKArgsType{problem};
+        auto ck_args                          = CKArgsType{problem};
         auto ck_ws_size = ck_args.GetCKSplitkWorkspaceSize(*ptr_iter, split_k.value_or(1));
         [[maybe_unused]] bool should_allocated_wrw_buffer = ck_ws_size > 0;
 
-        result.invoker_factory = [kernel_id                   = kernel_id,
-                                  split_k                     = split_k,
-                                  ck_args                     = CKArgsType{problem},
-                                  alpha_beta_case             = alpha_beta_case,
-                                  should_allocated_wrw_buffer = should_allocated_wrw_buffer,
-                                  sh_conv_ptr = std::shared_ptr{std::move(*ptr_iter)}](
+        result.invoker_factory = [kernel_id_                   = kernel_id,
+                                  split_k_                     = split_k,
+                                  ck_args_                     = CKArgsType{problem},
+                                  alpha_beta_case_             = alpha_beta_case,
+                                  should_allocated_wrw_buffer_ = should_allocated_wrw_buffer,
+                                  sh_conv_ptr_ = std::shared_ptr{std::move(*ptr_iter)}](
                                      const std::vector<Kernel>&) mutable {
-            return [kernel_id                   = kernel_id,
-                    split_k                     = split_k,
-                    ck_args                     = std::move(ck_args),
-                    alpha_beta_case             = alpha_beta_case,
-                    should_allocated_wrw_buffer = should_allocated_wrw_buffer,
-                    sh_conv_ptr                 = std::move(sh_conv_ptr)](
+            return [&kernel_id2                  = kernel_id_,
+                    split_k2                     = split_k_,
+                    ck_args2                     = std::move(ck_args_),
+                    alpha_beta_case2             = alpha_beta_case_,
+                    should_allocated_wrw_buffer2 = should_allocated_wrw_buffer_,
+                    sh_conv_ptr2                 = std::move(sh_conv_ptr_)](
                        const Handle& handle, const AnyInvokeParams& primitive_parameters) {
                 const auto& data_ctx = primitive_parameters.CastTo<CastType>();
                 std::unique_ptr<ck::tensor_operation::device::BaseArgument> argument_ptr =
                     MakeNHWCCKArgPtr<IsSplitKNeeded<DeviceOpType>(),
-                                     std::decay_t<decltype(*sh_conv_ptr)>,
+                                     std::decay_t<decltype(*sh_conv_ptr2)>,
                                      CKArgsType,
-                                     CastType>(sh_conv_ptr, ck_args, data_ctx, split_k);
+                                     CastType>(sh_conv_ptr2, ck_args2, data_ctx, split_k2);
 
                 float elapsed = 0.0f;
-                if(alpha_beta_case == DEFAULT)
+                if(alpha_beta_case2 == DEFAULT)
                 {
                     if constexpr(ZeroOutputs)
                     {
@@ -1329,18 +1375,18 @@ ConvSolution InitInvokerFactoryNHWC(const ExecutionContext&,
                 }
                 // use captured value, other wise getting warning
                 // "lambda capture is not used" since this variable is only used in assert.
-                (void)should_allocated_wrw_buffer;
-                assert((should_allocated_wrw_buffer && data_ctx.workSpace != nullptr) ||
-                       !(should_allocated_wrw_buffer && data_ctx.workSpace == nullptr));
+                (void)should_allocated_wrw_buffer2;
+                assert((should_allocated_wrw_buffer2 && data_ctx.workSpace != nullptr) ||
+                       !(should_allocated_wrw_buffer2 && data_ctx.workSpace == nullptr));
                 if(data_ctx.workSpace)
                 {
-                    sh_conv_ptr->SetWorkSpacePointer(argument_ptr.get(), data_ctx.workSpace);
+                    sh_conv_ptr2->SetWorkSpacePointer(argument_ptr.get(), data_ctx.workSpace);
                 }
 
-                auto invoker_ptr = sh_conv_ptr->MakeInvokerPointer();
+                auto invoker_ptr = sh_conv_ptr2->MakeInvokerPointer();
                 {
                     WorkAroundHipEventProfiler prf(handle);
-                    MIOPEN_LOG_I2("kernel_name = " << kernel_id);
+                    MIOPEN_LOG_I2("kernel_name = " << kernel_id2);
                     invoker_ptr->Run(argument_ptr.get(), {handle.GetStream(), false});
                 }
 
@@ -1358,27 +1404,26 @@ ConvSolution InitInvokerFactoryNHWC(const ExecutionContext&,
     }
     else
     {
-        ConvSolution result;
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
-        result.invoker_factory = [kernel_id   = kernel_id,
-                                  split_k     = split_k,
-                                  ck_args     = CKArgsType{problem},
-                                  sh_conv_ptr = std::shared_ptr{std::move(*ptr_iter)}](
+        result.invoker_factory = [kernel_id_   = kernel_id,
+                                  split_k_     = split_k,
+                                  ck_args_     = CKArgsType{problem},
+                                  sh_conv_ptr_ = std::shared_ptr{std::move(*ptr_iter)}](
                                      const std::vector<Kernel>&) mutable {
-            return [kernel_id   = kernel_id,
-                    split_k     = split_k,
-                    ck_args     = std::move(ck_args),
-                    sh_conv_ptr = std::move(sh_conv_ptr)](
+            return [kernel_id2   = kernel_id_,
+                    split_k2     = split_k_,
+                    ck_args2     = std::move(ck_args_),
+                    sh_conv_ptr2 = std::move(sh_conv_ptr_)](
                        const Handle& handle, const AnyInvokeParams& primitive_parameters) {
                 const auto& data_ctx = primitive_parameters.CastTo<CastType>();
 
                 std::unique_ptr<ck::tensor_operation::device::BaseArgument> argument_ptr =
                     MakeNHWCCKArgPtr<IsSplitKNeeded<DeviceOpType>(),
-                                     std::decay_t<decltype(*sh_conv_ptr)>,
+                                     std::decay_t<decltype(*sh_conv_ptr2)>,
                                      CKArgsType,
-                                     CastType>(sh_conv_ptr, ck_args, data_ctx, split_k);
+                                     CastType>(sh_conv_ptr2, ck_args2, data_ctx, split_k2);
 
-                auto invoker_ptr = sh_conv_ptr->MakeInvokerPointer();
+                auto invoker_ptr = sh_conv_ptr2->MakeInvokerPointer();
 
                 // Zero out the buffer for output data since it won't always write all output
                 // values.
@@ -1396,7 +1441,7 @@ ConvSolution InitInvokerFactoryNHWC(const ExecutionContext&,
 
                 {
                     WorkAroundHipEventProfiler prf(handle);
-                    MIOPEN_LOG_I2("kernel_name = " << kernel_id);
+                    MIOPEN_LOG_I2("kernel_name = " << kernel_id2);
                     invoker_ptr->Run(argument_ptr.get(), {handle.GetStream(), false});
                 }
 
@@ -1464,7 +1509,8 @@ template <typename InvokerFactoryMakerNCHW, typename InvokerFactoryMakerNHWC>
 ConvSolution
 MakeSolutionGroupConvImplicitGemmXdlops(const miopen::conv::ProblemDescription& problem,
                                         InvokerFactoryMakerNCHW&& invoker_factory_maker_ncdhw,
-                                        InvokerFactoryMakerNHWC&& invoker_factory_maker_ndhwc)
+                                        InvokerFactoryMakerNHWC&& invoker_factory_maker_ndhwc,
+                                        const bool use_tf32 = false)
 {
 
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
@@ -1472,10 +1518,14 @@ MakeSolutionGroupConvImplicitGemmXdlops(const miopen::conv::ProblemDescription& 
     {
         switch(problem.GetInDataType())
         {
-        case miopenInt8: return invoker_factory_maker_ncdhw(int8_t{});
-        case miopenHalf: return invoker_factory_maker_ncdhw(ck::half_t{});
-        case miopenFloat: return invoker_factory_maker_ncdhw(float{});
-        case miopenBFloat16: return invoker_factory_maker_ncdhw(ck::bhalf_t{});
+        case miopenInt8: return invoker_factory_maker_ncdhw(int8_t{}, int8_t{});
+        case miopenHalf: return invoker_factory_maker_ncdhw(ck::half_t{}, ck::half_t{});
+        case miopenFloat:
+            if(use_tf32)
+                return invoker_factory_maker_ncdhw(float{}, ck::tf32_t{});
+            else
+                return invoker_factory_maker_ncdhw(float{}, float{});
+        case miopenBFloat16: return invoker_factory_maker_ncdhw(ck::bhalf_t{}, ck::bhalf_t{});
         case miopenInt64:
         case miopenInt32:
         case miopenDouble:
@@ -1491,10 +1541,14 @@ MakeSolutionGroupConvImplicitGemmXdlops(const miopen::conv::ProblemDescription& 
     {
         switch(problem.GetInDataType())
         {
-        case miopenInt8: return invoker_factory_maker_ndhwc(int8_t{});
-        case miopenHalf: return invoker_factory_maker_ndhwc(ck::half_t{});
-        case miopenFloat: return invoker_factory_maker_ndhwc(float{});
-        case miopenBFloat16: return invoker_factory_maker_ndhwc(ck::bhalf_t{});
+        case miopenInt8: return invoker_factory_maker_ndhwc(int8_t{}, int8_t{});
+        case miopenHalf: return invoker_factory_maker_ndhwc(ck::half_t{}, ck::half_t{});
+        case miopenFloat:
+            if(use_tf32)
+                return invoker_factory_maker_ndhwc(float{}, ck::tf32_t{});
+            else
+                return invoker_factory_maker_ndhwc(float{}, float{});
+        case miopenBFloat16: return invoker_factory_maker_ndhwc(ck::bhalf_t{}, ck::bhalf_t{});
         case miopenInt64:
         case miopenInt32:
         case miopenDouble:

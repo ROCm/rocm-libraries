@@ -1,5 +1,5 @@
 /******************************************************************************
-* Copyright (C) 2016 - 2022 Advanced Micro Devices, Inc. All rights reserved.
+* Copyright (C) 2016 - 2025 Advanced Micro Devices, Inc. All rights reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -28,7 +28,7 @@ static int rocfft_abort_once();
 #include <fcntl.h>
 #include <iostream>
 #include <type_traits>
-#ifdef WIN32
+#ifdef _WIN32
 #include <windows.h>
 #endif
 
@@ -44,7 +44,7 @@ std::unique_ptr<std::recursive_mutex>         rocfft_ostream::worker_map_mutex;
 static int rocfft_abort_once()
 {
     // Make sure the alarm and abort actions are default
-#ifndef WIN32
+#ifndef _WIN32
     signal(SIGALRM, SIG_DFL);
     signal(SIGABRT, SIG_DFL);
 
@@ -105,7 +105,7 @@ std::shared_ptr<rocfft_ostream::worker> rocfft_ostream::get_worker(int fd)
                       && std::is_same<decltype(file_id_t::st_ino), decltype(stat::st_ino)>{},
                   "struct stat and file_id_t are not layout-compatible");
 
-#ifndef WIN32
+#ifndef _WIN32
     // Get the device ID and inode, to detect common files
     if(fstat(fd, &statbuf))
     {
@@ -312,7 +312,7 @@ void rocfft_ostream::worker::send(std::string str)
     cond.notify_one();
 
     // Wait for the task to be completed, to ensure flushed IO
-#ifdef WIN32
+#ifdef _WIN32
     // NOTE: this is a hack to avoid hangs at shutdown
     //
     // cppcheck-suppress accessMoved
@@ -375,7 +375,7 @@ void rocfft_ostream::worker::thread_function()
 rocfft_ostream::worker::worker(int fd)
 {
     // The worker duplicates the file descriptor (RAII)
-#ifdef WIN32
+#ifdef _WIN32
     fd = _dup(fd);
 #else
     fd = fcntl(fd, F_DUPFD_CLOEXEC, 0);
@@ -389,7 +389,7 @@ rocfft_ostream::worker::worker(int fd)
     }
 
     // Create a worker thread, capturing *this
-    thread = std::thread([=] { thread_function(); });
+    thread = std::thread([=, this] { thread_function(); });
 
     // Detatch from the worker thread
     thread.detach();

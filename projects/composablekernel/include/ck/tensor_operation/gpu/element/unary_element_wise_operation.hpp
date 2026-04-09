@@ -1,5 +1,5 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2018-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 
@@ -52,9 +52,9 @@ __device__ inline half4_t i4_to_half4_scale(int q, const ck::half2_t& scale)
     const int EX = 0x64006400;
 
     // Extract the two int4 at low bit and create two fp16 number.
-    int lo = amd_assembly_and_or_b32(q, LO, EX);
+    int lo = (q & LO) | EX;
     // Extract the two int4 at hight bit and create two fp16 number.
-    int hi = amd_assembly_and_or_b32(q, HI, EX);
+    int hi = (q & HI) | EX;
 
     const int SUB = 0xE408E408; // half2 {-1032, -1032}
     const int MUL = 0x2c002c00; // half2 {1 / 16, 1 / 16}
@@ -62,19 +62,15 @@ __device__ inline half4_t i4_to_half4_scale(int q, const ck::half2_t& scale)
 
     vector_type<half_t, 4> res;
 
+    res.template AsType<half2_t>()(Number<0>{}) = bit_cast<half2_t>(lo) + bit_cast<half2_t>(SUB);
+
+    res.template AsType<half2_t>()(Number<1>{}) =
+        bit_cast<half2_t>(hi) * bit_cast<half2_t>(MUL) + bit_cast<half2_t>(ADD);
+
     res.template AsType<half2_t>()(Number<0>{}) =
-        amd_assembly_pk_add_f16(bit_cast<half2_t>(lo), bit_cast<half2_t>(SUB));
-
-    res.template AsType<half2_t>()(Number<1>{}) = amd_assembly_pk_fma_f16(
-        bit_cast<half2_t>(hi), bit_cast<half2_t>(MUL), bit_cast<half2_t>(ADD));
-
-    asm volatile("v_pk_mul_f16 %0, %1, %2"
-                 : "=v"(res.template AsType<half2_t>()(Number<0>{}))
-                 : "v"(res.template AsType<half2_t>()(Number<0>{})), "v"(scale));
-
-    asm volatile("v_pk_mul_f16 %0, %1, %2"
-                 : "=v"(res.template AsType<half2_t>()(Number<1>{}))
-                 : "v"(res.template AsType<half2_t>()(Number<1>{})), "v"(scale));
+        res.template AsType<half2_t>()(Number<0>{}) * scale;
+    res.template AsType<half2_t>()(Number<1>{}) =
+        res.template AsType<half2_t>()(Number<1>{}) * scale;
 
     return res.template AsType<half4_t>()[Number<0>{}];
 }
@@ -157,6 +153,8 @@ namespace element_wise {
 
 struct PassThroughPack8
 {
+    static constexpr const char* name = "PassThroughPack8";
+
     template <typename Y, typename X>
     __host__ __device__ void operator()(Y& y, const X& x) const;
 
@@ -265,6 +263,8 @@ struct PassThroughPack8
 
 struct DequantPack8
 {
+    static constexpr const char* name = "DequantPack8";
+
     template <typename Y, typename X, typename Z>
     __host__ __device__ void operator()(Y& y, const X& x, const Z& z) const;
 
@@ -301,6 +301,8 @@ struct DequantPack8
 
 struct PassThroughPack2
 {
+    static constexpr const char* name = "PassThroughPack2";
+
     template <typename Y, typename X>
     __host__ __device__ void operator()(Y& y, const X& x) const;
 
@@ -332,6 +334,8 @@ struct PassThroughPack2
 
 struct PassThrough
 {
+    static constexpr const char* name = "PassThrough";
+
     template <typename Y, typename X>
     __host__ __device__ void operator()(Y& y, const X& x) const;
 
@@ -556,6 +560,8 @@ struct PassThrough
 
 struct UnaryConvert
 {
+    static constexpr const char* name = "UnaryConvert";
+
     template <typename Y, typename X>
     __host__ __device__ void operator()(Y& y, const X& x) const
     {
@@ -565,6 +571,8 @@ struct UnaryConvert
 
 struct ConvertBF16RTN
 {
+    static constexpr const char* name = "ConvertBF16RTN";
+
     // convert to bf16 using round to nearest (rtn)
     template <typename Y, typename X>
     __host__ __device__ void operator()(Y& y, const X& x) const
@@ -582,6 +590,8 @@ struct ConvertBF16RTN
 
 struct ConvertF8SR
 {
+    static constexpr const char* name = "ConvertF8SR";
+
     // convert to fp8 using stochastic rounding (SR)
     template <typename Y, typename X>
     __host__ __device__ void operator()(Y& y, const X& x) const
@@ -600,6 +610,8 @@ struct ConvertF8SR
 
 struct ConvertF8RNE
 {
+    static constexpr const char* name = "ConvertF8RNE";
+
     // convert to fp8 using rounding to nearest even
     template <typename Y, typename X>
     __host__ __device__ void operator()(Y& y, const X& x) const
@@ -618,6 +630,8 @@ struct ConvertF8RNE
 
 struct Scale
 {
+    static constexpr const char* name = "Scale";
+
     __host__ __device__ Scale(float scale = 1.f) : scale_(scale) {}
 
     template <typename Y, typename X>
@@ -663,6 +677,8 @@ struct Scale
 
 struct ScaleAndResetNaNToMinusInfinity
 {
+    static constexpr const char* name = "ScaleAndResetNaNToMinusInfinity";
+
     __host__ __device__ ScaleAndResetNaNToMinusInfinity(float scale) : scale_(scale) {}
 
     template <typename Y, typename X>
@@ -679,6 +695,8 @@ struct ScaleAndResetNaNToMinusInfinity
 
 struct UnaryDivide
 {
+    static constexpr const char* name = "UnaryDivide";
+
     __host__ __device__ UnaryDivide(const int32_t divider = 1) : divider_(divider) {}
 
     template <typename T>
@@ -723,6 +741,8 @@ struct UnaryDivide
 
 struct UnarySquare
 {
+    static constexpr const char* name = "UnarySquare";
+
     template <typename T>
     __host__ __device__ void operator()(T& y, const T& x) const
     {
@@ -739,6 +759,8 @@ struct UnarySquare
 
 struct UnaryAbs
 {
+    static constexpr const char* name = "UnaryAbs";
+
     template <typename T>
     __host__ __device__ void operator()(T& y, const T& x) const
     {
@@ -765,10 +787,24 @@ struct UnaryAbs
     {
         y = ck::type_convert<bhalf_t>(ck::math::abs(x));
     };
+
+    template <>
+    __host__ __device__ void operator()<int8_t, float>(int8_t& y, const float& x) const
+    {
+        y = ck::type_convert<int8_t>(ck::math::abs(x));
+    };
+
+    template <>
+    __host__ __device__ void operator()<half_t, float>(half_t& y, const float& x) const
+    {
+        y = ck::type_convert<half_t>(ck::math::abs(x));
+    };
 };
 
 struct UnarySqrt
 {
+    static constexpr const char* name = "UnarySqrt";
+
     template <typename T>
     __host__ __device__ void operator()(T& y, const T& x) const
     {
@@ -781,6 +817,8 @@ struct UnarySqrt
 
 struct Clamp
 {
+    static constexpr const char* name = "Clamp";
+
     Clamp(float floor = 0.f, float ceil = NumericLimits<float>::Max())
         : floor_(floor), ceil_(ceil){};
 
@@ -854,6 +892,8 @@ struct Clamp
 
 struct Relu
 {
+    static constexpr const char* name = "Relu";
+
     template <typename T>
     __host__ __device__ void operator()(T& y, const T& x) const
     {
@@ -881,6 +921,20 @@ struct Relu
         float y_f32 = x > 0 ? x : 0;
         y           = type_convert<bhalf_t>(y_f32);
     };
+
+    template <>
+    __host__ __device__ void operator()<int8_t, float>(int8_t& y, const float& x) const
+    {
+        float y_f32 = x > 0 ? x : 0;
+        y           = type_convert<int8_t>(y_f32);
+    };
+
+    template <>
+    __host__ __device__ void operator()<half_t, float>(half_t& y, const float& x) const
+    {
+        float y_f32 = x > 0 ? x : 0;
+        y           = type_convert<half_t>(y_f32);
+    };
 };
 
 // Fast GeLU
@@ -890,6 +944,8 @@ struct Relu
 // gpu code use lower accuracy "_ocml_exp_f32" and "rcp" function
 struct FastGelu
 {
+    static constexpr const char* name = "FastGelu";
+
     template <typename Y, typename X>
     __host__ void operator()(Y& y, const X& x) const;
 
@@ -1005,6 +1061,8 @@ struct FastGelu
 // y = 0.5*x*(1+erf(x/sqrt(2)))
 struct Gelu
 {
+    static constexpr const char* name = "Gelu";
+
     template <typename Y, typename X>
     __host__ __device__ void operator()(Y& y, const X& x) const;
 
@@ -1023,6 +1081,8 @@ struct Gelu
 
 struct Sigmoid
 {
+    static constexpr const char* name = "Sigmoid";
+
     template <typename T>
     __host__ __device__ void operator()(T& y, const T& x) const
     {
@@ -1043,10 +1103,26 @@ struct Sigmoid
         constexpr float one = 1.f;
         y                   = type_convert<bhalf_t>(one / (one + math::exp(-x)));
     };
+
+    template <>
+    __host__ __device__ void operator()<int8_t, float>(int8_t& y, const float& x) const
+    {
+        constexpr float one = 1.f;
+        y                   = type_convert<int8_t>(one / (one + math::exp(-x)));
+    };
+
+    template <>
+    __host__ __device__ void operator()<half_t, float>(half_t& y, const float& x) const
+    {
+        constexpr float one = 1.f;
+        y                   = type_convert<half_t>(one / (one + math::exp(-x)));
+    };
 };
 
 struct Silu
 {
+    static constexpr const char* name = "SiLU";
+
     template <typename T>
     __host__ __device__ void operator()(T& y, const T& x) const
     {
@@ -1060,6 +1136,8 @@ struct Silu
 
 struct TanH
 {
+    static constexpr const char* name = "TanH";
+
     template <typename T>
     __host__ __device__ void operator()(T& y, const T& x) const
     {
@@ -1079,10 +1157,24 @@ struct TanH
     {
         y = type_convert<bhalf_t>(math::tanh(x));
     };
+
+    template <>
+    __host__ __device__ void operator()<int8_t, float>(int8_t& y, const float& x) const
+    {
+        y = type_convert<int8_t>(math::tanh(x));
+    };
+
+    template <>
+    __host__ __device__ void operator()<half_t, float>(half_t& y, const float& x) const
+    {
+        y = type_convert<half_t>(math::tanh(x));
+    };
 };
 
 struct ACos
 {
+    static constexpr const char* name = "ACos";
+
     template <typename T>
     __host__ __device__ void operator()(T& y, const T& x) const
     {
@@ -1097,6 +1189,8 @@ struct ACos
 
 struct Neg
 {
+    static constexpr const char* name = "Neg";
+
     template <typename T>
     __host__ __device__ void operator()(T& y, const T& x) const
     {
@@ -1111,6 +1205,8 @@ struct Neg
 
 struct ATan
 {
+    static constexpr const char* name = "ATan";
+
     template <typename T>
     __host__ __device__ void operator()(T& y, const T& x) const
     {
@@ -1125,6 +1221,8 @@ struct ATan
 
 struct Sin
 {
+    static constexpr const char* name = "Sin";
+
     template <typename T>
     __host__ __device__ void operator()(T& y, const T& x) const
     {
@@ -1139,6 +1237,8 @@ struct Sin
 
 struct ASinH
 {
+    static constexpr const char* name = "ASinH";
+
     template <typename T>
     __host__ __device__ void operator()(T& y, const T& x) const
     {
@@ -1153,6 +1253,8 @@ struct ASinH
 
 struct Cos
 {
+    static constexpr const char* name = "Cos";
+
     template <typename T>
     __host__ __device__ void operator()(T& y, const T& x) const
     {
@@ -1167,6 +1269,8 @@ struct Cos
 
 struct ACosH
 {
+    static constexpr const char* name = "ACosH";
+
     template <typename T>
     __host__ __device__ void operator()(T& y, const T& x) const
     {
@@ -1181,6 +1285,8 @@ struct ACosH
 
 struct Tan
 {
+    static constexpr const char* name = "Tan";
+
     template <typename T>
     __host__ __device__ void operator()(T& y, const T& x) const
     {
@@ -1195,6 +1301,8 @@ struct Tan
 
 struct ATanH
 {
+    static constexpr const char* name = "ATanH";
+
     template <typename T>
     __host__ __device__ void operator()(T& y, const T& x) const
     {
@@ -1209,6 +1317,8 @@ struct ATanH
 
 struct SinH
 {
+    static constexpr const char* name = "SinH";
+
     template <typename T>
     __host__ __device__ void operator()(T& y, const T& x) const
     {
@@ -1223,6 +1333,8 @@ struct SinH
 
 struct Ceil
 {
+    static constexpr const char* name = "Ceil";
+
     template <typename T>
     __host__ __device__ void operator()(T& y, const T& x) const
     {
@@ -1237,6 +1349,8 @@ struct Ceil
 
 struct Exp
 {
+    static constexpr const char* name = "Exp";
+
     template <typename T>
     __host__ __device__ void operator()(T& y, const T& x) const
     {
@@ -1251,6 +1365,8 @@ struct Exp
 
 struct CosH
 {
+    static constexpr const char* name = "CosH";
+
     template <typename T>
     __host__ __device__ void operator()(T& y, const T& x) const
     {
@@ -1265,6 +1381,8 @@ struct CosH
 
 struct Floor
 {
+    static constexpr const char* name = "Floor";
+
     template <typename T>
     __host__ __device__ void operator()(T& y, const T& x) const
     {
@@ -1279,6 +1397,8 @@ struct Floor
 
 struct Log
 {
+    static constexpr const char* name = "Log";
+
     template <typename T>
     __host__ __device__ void operator()(T& y, const T& x) const
     {
@@ -1293,6 +1413,8 @@ struct Log
 
 struct ASin
 {
+    static constexpr const char* name = "ASin";
+
     template <typename T>
     __host__ __device__ void operator()(T& y, const T& x) const
     {
@@ -1307,6 +1429,8 @@ struct ASin
 
 struct Rcp
 {
+    static constexpr const char* name = "Rcp";
+
     template <typename T>
     __host__ __device__ void operator()(T& y, const T& x) const
     {
@@ -1321,6 +1445,8 @@ struct Rcp
 
 struct Swish
 {
+    static constexpr const char* name = "Swish";
+
     Swish(float beta = 1.0f) : beta_(beta) {}
 
     template <typename Y, typename X>
@@ -1350,6 +1476,8 @@ struct Swish
 
 struct SoftRelu
 {
+    static constexpr const char* name = "SoftRelu";
+
     SoftRelu(float alpha = 1.f) : alpha_(alpha){};
 
     template <typename T>
@@ -1373,11 +1501,28 @@ struct SoftRelu
         constexpr float one = 1.f;
         y = type_convert<bhalf_t>(math::log(one + math::exp(x * alpha_)) / alpha_);
     };
+
+    template <>
+    __host__ __device__ void operator()<int8_t, float>(int8_t& y, const float& x) const
+    {
+        constexpr float one = 1.f;
+        y                   = type_convert<int8_t>(math::log(one + math::exp(x * alpha_)) / alpha_);
+    };
+
+    template <>
+    __host__ __device__ void operator()<half_t, float>(half_t& y, const float& x) const
+    {
+        constexpr float one = 1.f;
+        y                   = type_convert<half_t>(math::log(one + math::exp(x * alpha_)) / alpha_);
+    };
+
     const float alpha_;
 };
 
 struct Power
 {
+    static constexpr const char* name = "Power";
+
     Power(float alpha = 0.f, float beta = 1.f, float gamma = 2.f)
         : alpha_(alpha), beta_(beta), gamma_(gamma){};
 
@@ -1405,6 +1550,20 @@ struct Power
         y                            = type_convert<bhalf_t>(math::pow(shifted_scaled_x, gamma_));
     };
 
+    template <>
+    __host__ __device__ void operator()<int8_t, float>(int8_t& y, const float& x) const
+    {
+        const float shifted_scaled_x = alpha_ + beta_ * x;
+        y                            = type_convert<int8_t>(math::pow(shifted_scaled_x, gamma_));
+    };
+
+    template <>
+    __host__ __device__ void operator()<half_t, float>(half_t& y, const float& x) const
+    {
+        const float shifted_scaled_x = alpha_ + beta_ * x;
+        y                            = type_convert<half_t>(math::pow(shifted_scaled_x, gamma_));
+    };
+
     const float alpha_;
     const float beta_;
     const float gamma_;
@@ -1412,6 +1571,8 @@ struct Power
 
 struct ClippedRelu
 {
+    static constexpr const char* name = "ClippedRelu";
+
     ClippedRelu(float alpha = 0.f, float beta = 1.f) : alpha_(alpha), beta_(beta){};
 
     template <typename T>
@@ -1435,12 +1596,26 @@ struct ClippedRelu
         y = type_convert<bhalf_t>(math::min(beta_, math::max(alpha_, x)));
     };
 
+    template <>
+    __host__ __device__ void operator()<int8_t, float>(int8_t& y, const float& x) const
+    {
+        y = type_convert<int8_t>(math::min(beta_, math::max(alpha_, x)));
+    };
+
+    template <>
+    __host__ __device__ void operator()<half_t, float>(half_t& y, const float& x) const
+    {
+        y = type_convert<half_t>(math::min(beta_, math::max(alpha_, x)));
+    };
+
     const float alpha_;
     const float beta_;
 };
 
 struct LeakyRelu
 {
+    static constexpr const char* name = "LeakyRelu";
+
     LeakyRelu(float alpha = 0.01f) : alpha_(alpha){};
 
     template <typename T>
@@ -1463,11 +1638,25 @@ struct LeakyRelu
         y = type_convert<bhalf_t>(x >= 0 ? x : x * alpha_);
     };
 
+    template <>
+    __host__ __device__ void operator()<int8_t, float>(int8_t& y, const float& x) const
+    {
+        y = type_convert<int8_t>(x >= 0 ? x : x * alpha_);
+    };
+
+    template <>
+    __host__ __device__ void operator()<half_t, float>(half_t& y, const float& x) const
+    {
+        y = type_convert<half_t>(x >= 0 ? x : x * alpha_);
+    };
+
     const float alpha_;
 };
 
 struct Elu
 {
+    static constexpr const char* name = "Elu";
+
     Elu(float alpha = 1.f) : alpha_(alpha){};
 
     template <typename T>
@@ -1490,11 +1679,25 @@ struct Elu
         y = type_convert<bhalf_t>(x > 0 ? x : alpha_ * math::expm1(x));
     };
 
+    template <>
+    __host__ __device__ void operator()<int8_t, float>(int8_t& y, const float& x) const
+    {
+        y = type_convert<int8_t>(x > 0 ? x : alpha_ * math::expm1(x));
+    };
+
+    template <>
+    __host__ __device__ void operator()<half_t, float>(half_t& y, const float& x) const
+    {
+        y = type_convert<half_t>(x > 0 ? x : alpha_ * math::expm1(x));
+    };
+
     const float alpha_;
 };
 
 struct Logistic
 {
+    static constexpr const char* name = "Logistic";
+
     Logistic(float alpha = 1.f) : alpha_(alpha){};
 
     template <typename T>
@@ -1518,11 +1721,28 @@ struct Logistic
         constexpr float one = 1.f;
         y                   = type_convert<bhalf_t>(alpha_ / (one + ck::math::exp(-x) * alpha_));
     };
+
+    template <>
+    __host__ __device__ void operator()<int8_t, float>(int8_t& y, const float& x) const
+    {
+        constexpr float one = 1.f;
+        y                   = type_convert<int8_t>(alpha_ / (one + ck::math::exp(-x) * alpha_));
+    };
+
+    template <>
+    __host__ __device__ void operator()<half_t, float>(half_t& y, const float& x) const
+    {
+        constexpr float one = 1.f;
+        y                   = type_convert<half_t>(alpha_ / (one + ck::math::exp(-x) * alpha_));
+    };
+
     const float alpha_;
 };
 
 struct ConvInvscale
 {
+    static constexpr const char* name = "ConvInvscale";
+
     __host__ __device__ ConvInvscale(float scale_in  = 1.f,
                                      float scale_wei = 1.f,
                                      float scale_out = 1.f)
@@ -1539,6 +1759,13 @@ struct ConvInvscale
         e = type_convert<f8_t>(c / scale_in_ / scale_wei_ / scale_out_);
     };
 
+    template <>
+    __host__ __device__ void operator()<f8_t, f8_t>(f8_t& e, const f8_t& c) const
+    {
+        const float c_float = type_convert<float>(c);
+        e                   = type_convert<f8_t>(c_float / scale_in_ / scale_wei_ / scale_out_);
+    };
+
     float scale_in_;
     float scale_wei_;
     float scale_out_;
@@ -1546,6 +1773,8 @@ struct ConvInvscale
 
 struct ConvScale
 {
+    static constexpr const char* name = "ConvScale";
+
     __host__ __device__ ConvScale(float scale_in  = 1.f,
                                   float scale_wei = 1.f,
                                   float scale_out = 1.f)
@@ -1562,6 +1791,13 @@ struct ConvScale
         e = type_convert<f8_t>(c * scale_in_ * scale_wei_ * scale_out_);
     };
 
+    template <>
+    __host__ __device__ void operator()<f8_t, f8_t>(f8_t& e, const f8_t& c) const
+    {
+        const float c_float = type_convert<float>(c);
+        e                   = type_convert<f8_t>(c_float * scale_in_ * scale_wei_ * scale_out_);
+    };
+
     float scale_in_;
     float scale_wei_;
     float scale_out_;
@@ -1569,6 +1805,8 @@ struct ConvScale
 
 struct ConvScaleRelu
 {
+    static constexpr const char* name = "ConvScaleRelu";
+
     __host__ __device__ ConvScaleRelu(float scale_in  = 1.f,
                                       float scale_wei = 1.f,
                                       float scale_out = 1.f)
@@ -1584,6 +1822,15 @@ struct ConvScaleRelu
     {
         float x;
         Relu{}.template operator()<float>(x, c * scale_in_ * scale_wei_);
+        e = type_convert<f8_t>(x * scale_out_);
+    };
+
+    template <>
+    __host__ __device__ void operator()<f8_t, f8_t>(f8_t& e, const f8_t& c) const
+    {
+        const float c_float = type_convert<float>(c);
+        float x;
+        Relu{}.template operator()<float>(x, c_float * scale_in_ * scale_wei_);
         e = type_convert<f8_t>(x * scale_out_);
     };
 
@@ -1664,6 +1911,8 @@ struct FastNumericArrayConverter<uint8_t, half_t, N>
 
 struct DynamicUnaryOp
 {
+    static constexpr const char* name = "DynamicUnaryOp";
+
     __host__ __device__ DynamicUnaryOp() = delete;
 
     __host__ __device__ DynamicUnaryOp(const Swish& swish)

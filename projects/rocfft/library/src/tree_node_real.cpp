@@ -523,7 +523,7 @@ void Real2DEvenNode::BuildTree_internal_2D_SINGLE()
     {
         NodeMetaData cfftPlanData(this);
         cfftPlanData.dimension = dimension;
-        cfftPlanData.length    = {outputLength[1], outputLength[0] / 2};
+        cfftPlanData.length    = {outputLength[0] / 2, outputLength[1]};
 
         auto cfftPlan = NodeFactory::CreateExplicitNode(cfftPlanData, this);
         cfftPlan->RecursiveBuildTree();
@@ -800,8 +800,6 @@ void Real2DEvenNode::AssignParams_internal_2D_SINGLE()
         {
             fused_2d->outStride[i] /= 2;
         }
-        std::swap(fused_2d->inStride[0], fused_2d->inStride[1]);
-        std::swap(fused_2d->outStride[0], fused_2d->outStride[1]);
 
         fused_2d->AssignParams();
     }
@@ -1109,7 +1107,7 @@ void Real3DEvenNode::BuildTree_internal_2D_SINGLE_CC()
         sbccZ->dimension = 1;
 
         auto xyPlan       = NodeFactory::CreateNodeFromScheme(CS_KERNEL_2D_SINGLE, this);
-        xyPlan->length    = {outputLength[1], outputLength[0] / 2, outputLength[2]};
+        xyPlan->length    = {outputLength[0] / 2, outputLength[1], outputLength[2]};
         xyPlan->dimension = 2;
         xyPlan->RecursiveBuildTree();
         xyPlan->ebtype = EmbeddedType::C2Real_PRE;
@@ -1565,8 +1563,6 @@ void Real3DEvenNode::AssignParams_internal_2D_SINGLE_CC()
         {
             fused_2d->outStride[i] /= 2;
         }
-        std::swap(fused_2d->inStride[0], fused_2d->inStride[1]);
-        std::swap(fused_2d->outStride[0], fused_2d->outStride[1]);
 
         fused_2d->iDist = fused_2d->length.back() * fused_2d->inStride.back();
         fused_2d->oDist = fused_2d->length.back() * fused_2d->outStride.back();
@@ -1860,4 +1856,17 @@ size_t PrePostKernelNode::GetTwiddleTableLengthLimit()
 {
     // The kernel only uses 1/4th of the real length twiddle table
     return DivRoundingUp<size_t>(GetTwiddleTableLength(), 4);
+}
+
+std::vector<size_t> PrePostKernelNode::CollapsibleDims()
+{
+    // regular non-transposing kernel can collapse everything but the
+    // fastest dimension where the real-complex processing happens
+    if(scheme != CS_KERNEL_R_TO_CMPLX_TRANSPOSE && scheme != CS_KERNEL_TRANSPOSE_CMPLX_TO_R)
+    {
+        std::vector<size_t> ret(length.size() - 1);
+        std::iota(ret.begin(), ret.end(), 1);
+        return ret;
+    }
+    return {};
 }

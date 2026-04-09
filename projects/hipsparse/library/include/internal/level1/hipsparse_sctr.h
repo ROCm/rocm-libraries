@@ -45,29 +45,38 @@ extern "C" {
 *  \endcode
 *
 *  \note
-*  This function is non blocking and executed asynchronously with respect to the host.
-*  It may return before the actual computation has finished.
+*  This function is non-blocking and executed asynchronously with respect to the host.
+*  It can return before the actual computation has finished.
+*
+*  \note
+*  If \p nnz is zero, the function returns successfully without modifying \p y.
+*  Duplicate indices in \p xInd will result in the last value being written to \p y.
+*
+*  \deprecated
+*  This function is deprecated when using the CUDA backend (CUDA 11.0+) and will be 
+*  removed in CUDA 12.0. This deprecation does not apply to the ROCm backend.
 *
 *  @param[in]
-*  handle      handle to the hipsparse library context queue.
+*  handle      handle to the hipSPARSE library context queue.
 *  @param[in]
-*  nnz         number of non-zero entries of \f$x\f$.
+*  nnz         number of non-zero entries of \f$x\f$. Must be non-negative.
 *  @param[in]
-*  xVal       array of \p nnz elements containing the non-zero values of \f$x\f$.
+*  xVal        array of \p nnz elements containing the non-zero values of \f$x\f$.
 *  @param[in]
-*  xInd       array of \p nnz elements containing the indices of the non-zero
-*              values of x.
+*  xInd        array of \p nnz elements containing the indices of the non-zero
+*              values of \f$x\f$.
 *  @param[inout]
-*  y           array of values in dense format.
+*  y           array of values in dense format. Must be pre-allocated with sufficient
+*              size to accommodate all indices specified in \p xInd.
 *  @param[in]
-*  idxBase    \ref HIPSPARSE_INDEX_BASE_ZERO or \ref HIPSPARSE_INDEX_BASE_ONE.
+*  idxBase     index base. \ref HIPSPARSE_INDEX_BASE_ZERO for zero-based indexing or
+*              \ref HIPSPARSE_INDEX_BASE_ONE for one-based indexing.
 *
-*  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p idxBase, \p nnz, \p xVal, \p xInd
-*              or \p y is invalid.
-*
-*  \par Example
-*  \snippet example_hipsparse_sctr.cpp doc example
+*  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
+*  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle is nullptr, \p nnz is negative,
+*          \p xVal, \p xInd, or \p y is nullptr when \p nnz is greater than zero, or \p idxBase 
+*          is neither \ref HIPSPARSE_INDEX_BASE_ZERO nor \ref HIPSPARSE_INDEX_BASE_ONE.
 */
 /**@{*/
 DEPRECATED_CUDA_11000("The routine will be removed in CUDA 12")

@@ -1,5 +1,5 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2024, Advanced Micro Devices, Inc. All rights reserved.
 
 #include <iostream>
 #include <cstdlib>
@@ -15,6 +15,10 @@
 #include "ck/library/utility/device_memory.hpp"
 #include "ck/library/utility/host_tensor.hpp"
 #include "ck/library/utility/host_tensor_generator.hpp"
+
+using ::ck::DeviceMem;
+using ::ck::HostTensorDescriptor;
+using ::ck::Tensor;
 
 using F16 = ck::half_t;
 using F32 = float;
@@ -49,7 +53,9 @@ using DeviceElementwisePermuteInstance = ck::tensor_operation::device::DeviceEle
 int main(int argc, char* argv[])
 {
     bool do_verification = true;
-    bool time_kernel     = true;
+    bool time_kernel     = false;
+
+    std::vector<std::size_t> nchw = {16, 128, 32, 64};
 
     if(argc == 1)
     {
@@ -60,30 +66,21 @@ int main(int argc, char* argv[])
         do_verification = std::stoi(argv[1]);
         time_kernel     = std::stoi(argv[2]);
     }
+    else if(argc == 7)
+    {
+        do_verification = std::stoi(argv[1]);
+        time_kernel     = std::stoi(argv[2]);
+        nchw[0]         = std::stoi(argv[3]);
+        nchw[1]         = std::stoi(argv[4]);
+        nchw[2]         = std::stoi(argv[5]);
+        nchw[3]         = std::stoi(argv[6]);
+    }
     else
     {
         printf("arg1: verification (0=no, 1=yes)\n");
         printf("arg2: time kernel (0=no, 1=yes)\n");
-        exit(0);
-    }
-
-    std::vector<std::size_t> nchw = {16, 128, 32, 64};
-    if(argc == 1)
-    {
-        // use default case
-    }
-    else if(argc == 5)
-    {
-        nchw[0] = std::stoi(argv[1]);
-        nchw[1] = std::stoi(argv[2]);
-        nchw[2] = std::stoi(argv[3]);
-        nchw[3] = std::stoi(argv[4]);
-    }
-    else
-    {
-        std::cerr << "arg1 to 4: N, C, H, W" << std::endl;
-
-        return 1;
+        printf("arg3-6: N, C, H, W (default 16, 128, 32, 64)\n");
+        exit(1);
     }
 
     std::array<ck::index_t, 4> ab_lengths;

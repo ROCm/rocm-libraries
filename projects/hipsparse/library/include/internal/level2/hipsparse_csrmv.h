@@ -30,7 +30,7 @@ extern "C" {
 
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 11000)
 /*! \ingroup level2_module
-*  \brief Sparse matrix vector multiplication using CSR storage format
+*  \brief Sparse matrix vector multiplication using the CSR storage format.
 *
 *  \details
 *  \p hipsparseXcsrmv multiplies the scalar \f$\alpha\f$ with a sparse \f$m \times n\f$
@@ -64,54 +64,56 @@ extern "C" {
 *  \endcode
 *
 *  \note
-*  This function is non blocking and executed asynchronously with respect to the host.
-*  It may return before the actual computation has finished.
+*  This function is non-blocking and executed asynchronously with respect to the host.
+*  It can return before the actual computation has finished.
 *
 *  \note
 *  Currently, only \p transA == \ref HIPSPARSE_OPERATION_NON_TRANSPOSE is supported.
 *
+*  \deprecated
+*  This function is deprecated when using the CUDA backend (CUDA 10.0+) and will be 
+*  removed in CUDA 11.0. This deprecation does not apply to the ROCm backend.
+*
 *  @param[in]
-*  handle      handle to the hipsparse library context queue.
+*  handle              handle to the hipSPARSE library context queue.
 *  @param[in]
-*  transA      matrix operation type.
+*  transA              matrix operation type.
 *  @param[in]
-*  m           number of rows of the sparse CSR matrix.
+*  m                   number of rows of the sparse CSR matrix. Must be non-negative.
 *  @param[in]
-*  n           number of columns of the sparse CSR matrix.
+*  n                   number of columns of the sparse CSR matrix. Must be non-negative.
 *  @param[in]
-*  nnz         number of non-zero entries of the sparse CSR matrix.
+*  nnz                 number of non-zero entries of the sparse CSR matrix. Must be non-negative.
 *  @param[in]
-*  alpha       scalar \f$\alpha\f$.
+*  alpha               scalar \f$\alpha\f$.
 *  @param[in]
-*  descrA      descriptor of the sparse CSR matrix. Currently, only
-*              \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
+*  descrA              descriptor of the sparse CSR matrix. Currently, only
+*                      \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
 *  @param[in]
-*  csrSortedValA array of \p nnz elements of the sparse CSR matrix.
+*  csrSortedValA       array of \p nnz elements of the sparse CSR matrix.
 *  @param[in]
-*  csrSortedRowPtrA array of \p m+1 elements that point to the start
-*              of every row of the sparse CSR matrix.
+*  csrSortedRowPtrA    array of \p m+1 elements that point to the start
+*                      of every row of the sparse CSR matrix.
 *  @param[in]
-*  csrSortedColIndA array of \p nnz elements containing the column indices of the sparse
-*              CSR matrix.
+*  csrSortedColIndA    array of \p nnz elements containing the column indices of the sparse
+*                      CSR matrix.
 *  @param[in]
-*  x           array of \p n elements (\f$op(A) == A\f$) or \p m elements
-*              (\f$op(A) == A^T\f$ or \f$op(A) == A^H\f$).
+*  x                   array of \p n elements (\f$op(A) == A\f$) or \p m elements
+*                      (\f$op(A) == A^T\f$ or \f$op(A) == A^H\f$).
 *  @param[in]
-*  beta        scalar \f$\beta\f$.
+*  beta                scalar \f$\beta\f$.
 *  @param[inout]
-*  y           array of \p m elements (\f$op(A) == A\f$) or \p n elements
-*              (\f$op(A) == A^T\f$ or \f$op(A) == A^H\f$).
+*  y                   array of \p m elements (\f$op(A) == A\f$) or \p n elements
+*                      (\f$op(A) == A^T\f$ or \f$op(A) == A^H\f$).
 *
-*  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n or \p nnz, \p descr,
-*              \p alpha, \p csrSortedValA, \p csrSortedRowPtrA, \p csrSortedColIndA, \p x,
-*              \p beta or \p y is invalid.
-*  \retval     HIPSPARSE_STATUS_ARCH_MISMATCH the device is not supported.
-*  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED
-*              \ref hipsparseMatrixType_t != \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
-*
-*  \par Example
-*  \snippet example_hipsparse_csrmv.cpp doc example
+*  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
+*  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p descrA, \p alpha, or \p beta is nullptr,
+*          \p m, \p n, or \p nnz is negative, or \p csrSortedValA, \p csrSortedRowPtrA,
+*          \p csrSortedColIndA, \p x, or \p y is nullptr.
+*  \retval HIPSPARSE_STATUS_ARCH_MISMATCH the device is not supported.
+*  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \ref hipsparseMatrixType_t is not 
+*          \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
 */
 /**@{*/
 DEPRECATED_CUDA_10000("The routine will be removed in CUDA 11")

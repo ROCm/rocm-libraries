@@ -43,6 +43,7 @@ from Tensile.Common.Architectures import detectGlobalCurrentISA, isaToGfx
 from Tensile.Common.Capabilities import makeIsaInfoMap
 from Tensile.Common.GlobalParameters import globalParameters, assignGlobalParameters, \
                                             restoreDefaultGlobalParameters
+from Tensile.Common.TimingInstrumentation import timing_context
 from Tensile.Toolchain.Assembly import AssemblyToolchain, makeAssemblyToolchain
 from Tensile.Toolchain.Source import SourceToolchain, makeSourceToolchain
 from Tensile.Toolchain.Validators import validateToolchain, ToolchainDefaults
@@ -74,7 +75,8 @@ def executeStepsInConfig(
         cCompiler: str,
         debugConfig: DebugConfig,
         deviceId: int,
-        probSolDict: dict
+        probSolDict: dict,
+        buildOnly: bool = False,
    ):
     """Conducts the steps in the provided ``config`` according to the Tensile workflow.
 
@@ -92,29 +94,37 @@ def executeStepsInConfig(
         asmToolchain (AssemblyToolchain): The toolchain for making assembly kernels.
         srcToolchain (SourceToolchain): The toolchain for making source kernels.
         cCompiler (str): The C compiler to use.
+        buildOnly (bool): If True, generate and build kernels but skip benchmarking.
     """
 
     buildTmpPath = outputPath / "build_tmp"
+
     ##############################################################################
     # Benchmark Problems
     ##############################################################################
     gfxName = isaToGfx(next(iter(isaInfoMap)))
     if "BenchmarkProblems" in config:
-        BenchmarkProblems.main(
-            config["BenchmarkProblems"],
-            config["UseCache"],
-            asmToolchain,
-            srcToolchain,
-            cCompiler,
-            outputPath,
-            buildTmpPath,
-            debugConfig,
-            deviceId,
-            gfxName,
-            isaInfoMap,
-            probSolDict,
-        )
+        with timing_context("python_benchmark_problems"):
+            BenchmarkProblems.main(
+                config["BenchmarkProblems"],
+                config["UseCache"],
+                asmToolchain,
+                srcToolchain,
+                cCompiler,
+                outputPath,
+                buildTmpPath,
+                debugConfig,
+                deviceId,
+                gfxName,
+                isaInfoMap,
+                probSolDict,
+                buildOnly,
+            )
         print1("")
+
+    if buildOnly:
+        print1("# Build-only mode: skipping LibraryLogic and LibraryClient.")
+        return
 
     ##############################################################################
     # Library Logic
@@ -130,15 +140,16 @@ def executeStepsInConfig(
                 libraryLogicConfig = config["LibraryLogic"]
             else:
                 libraryLogicConfig = {}
-            LibraryLogic.main(
-                libraryLogicConfig,
-                srcToolchain.compiler,
-                outputPath,
-                debugConfig.splitGSU,
-                debugConfig.printSolutionRejectionReason,
-                debugConfig.printIndexAssignmentInfo,
-                isaInfoMap,
-            )
+            with timing_context("python_library_logic"):
+                LibraryLogic.main(
+                    libraryLogicConfig,
+                    srcToolchain.compiler,
+                    outputPath,
+                    debugConfig.splitGSU,
+                    debugConfig.printSolutionRejectionReason,
+                    debugConfig.printIndexAssignmentInfo,
+                    isaInfoMap,
+                )
             print1("")
         else:
             print1("# LibraryLogic already done.")
@@ -152,15 +163,16 @@ def executeStepsInConfig(
             libraryClientConfig = config["LibraryClient"]
         else:
             libraryClientConfig = {}
-        ClientWriter.main(
-            libraryClientConfig,
-            asmToolchain.assembler,
-            cCompiler,
-            isaInfoMap,
-            outputPath,
-            deviceId,
-            gfxName,
-        )
+        with timing_context("python_client_writer"):
+            ClientWriter.main(
+                libraryClientConfig,
+                asmToolchain.assembler,
+                cCompiler,
+                isaInfoMap,
+                outputPath,
+                deviceId,
+                gfxName,
+            )
         print1("")
 
 
@@ -468,7 +480,11 @@ def Tensile(userArgs):
             help="Alternate format for config_file(s): first file is alternate config "
             "and optional second file is size list")
     argParser.add_argument("--use-cache", dest="useCache", action="store_true",
-            help="Ignore cache; redo parameter forking and solution generation")
+            help="Bypass redo parameter forking and solution generation and used existing solutions.")
+    argParser.add_argument("--build-only", dest="buildOnly", action="store_true",
+            help="Generate and compile kernels but skip benchmarking. "
+                 "Useful for splitting compilation and benchmarking across runs/nodes. "
+                 "First run using this flag, then rerun with --use-cache.")
     argParser.add_argument("--restore-from-log", type=str, dest="RestoreLog",
             help="A log file captured in previous tuning. ONLY RELIABLE when configs yaml not changes")
 
@@ -477,6 +493,7 @@ def Tensile(userArgs):
     configPaths = args.ConfigFile
     altFormat = args.AlternateFormat
     useCache = args.useCache
+    buildOnly = args.buildOnly
     outputPath = Path(ensurePath(os.path.abspath(args.OutputPath)))
     print1(f"#  OutputPath: {str(outputPath)}")
 
@@ -607,7 +624,7 @@ def Tensile(userArgs):
     if "MaxFileName" in globalParameters or "MaxFileName" in config:
         printWarning("MaxFileName is no longer configurable, it will be automatically set to 64")
 
-    executeStepsInConfig(config, outputPath, asmToolchain, srcToolchain, isaInfoMap, cCompiler, debugConfig, device_id, prob_sol_map)
+    executeStepsInConfig(config, outputPath, asmToolchain, srcToolchain, isaInfoMap, cCompiler, debugConfig, device_id, prob_sol_map, buildOnly)
 
 def TensileConfigPath(*args):
     return os.path.join(os.path.dirname(os.path.realpath(__file__)), "Configs", *args)

@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
-* Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights Reserved.
+* Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights Reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -42,6 +42,7 @@ rocsparse_arguments_config::rocsparse_arguments_config()
         this->col_block_dimA  = static_cast<rocsparse_int>(0);
         this->row_block_dimB  = static_cast<rocsparse_int>(0);
         this->col_block_dimB  = static_cast<rocsparse_int>(0);
+        this->sell_slice_size = static_cast<rocsparse_int>(1);
         this->dimx            = static_cast<rocsparse_int>(0);
         this->dimy            = static_cast<rocsparse_int>(0);
         this->dimz            = static_cast<rocsparse_int>(0);
@@ -95,8 +96,10 @@ rocsparse_arguments_config::rocsparse_arguments_config()
         this->sddmm_alg            = rocsparse_sddmm_alg_default;
         this->spmv_alg             = rocsparse_spmv_alg_default;
         this->spsv_alg             = rocsparse_spsv_alg_default;
+        this->sptrsv_alg           = rocsparse_sptrsv_alg_default;
         this->spitsv_alg           = rocsparse_spitsv_alg_default;
         this->spsm_alg             = rocsparse_spsm_alg_default;
+        this->sptrsm_alg           = rocsparse_sptrsm_alg_default;
         this->spmm_alg             = rocsparse_spmm_alg_default;
         this->spgemm_alg           = rocsparse_spgemm_alg_default;
         this->spgeam_alg           = rocsparse_spgeam_alg_default;
@@ -105,39 +108,42 @@ rocsparse_arguments_config::rocsparse_arguments_config()
         this->gtsv_interleaved_alg = static_cast<rocsparse_gtsv_interleaved_alg>(0);
         this->gpsv_interleaved_alg = static_cast<rocsparse_gpsv_interleaved_alg>(0);
 
-        this->matrix                      = static_cast<rocsparse_matrix_init>(0);
-        this->matrix_init_kind            = static_cast<rocsparse_matrix_init_kind>(0);
-        this->unit_check                  = static_cast<rocsparse_int>(0);
-        this->timing                      = static_cast<rocsparse_int>(1);
-        this->iters                       = static_cast<rocsparse_int>(0);
-        this->iters_inner                 = static_cast<rocsparse_int>(0);
-        this->nfreeiter                   = static_cast<rocsparse_int>(0);
-        this->nmaxiter                    = static_cast<rocsparse_int>(0);
-        this->denseld                     = static_cast<int64_t>(0);
-        this->batch_count                 = static_cast<rocsparse_int>(0);
-        this->batch_count_A               = static_cast<rocsparse_int>(0);
-        this->batch_count_B               = static_cast<rocsparse_int>(0);
-        this->batch_count_C               = static_cast<rocsparse_int>(0);
-        this->batch_stride                = static_cast<rocsparse_int>(0);
-        this->ld_multiplier_B             = static_cast<rocsparse_int>(2);
-        this->ld_multiplier_C             = static_cast<rocsparse_int>(2);
-        this->algo                        = static_cast<uint32_t>(0);
-        this->numericboost                = static_cast<int>(0);
-        this->boosttol                    = static_cast<double>(0);
-        this->boostval                    = static_cast<double>(0);
-        this->boostvali                   = static_cast<double>(0);
-        this->tolm                        = static_cast<double>(0);
-        this->graph_test                  = false;
-        this->skip_reproducibility        = false;
-        this->sparsity_pattern_statistics = false;
-        this->call_stage_analysis         = true;
-        this->convert_to_int              = false;
-        this->filename[0]                 = '\0';
-        this->function[0]                 = '\0';
-        this->name[0]                     = '\0';
-        this->category[0]                 = '\0';
-        this->hardware[0]                 = '\0';
-        this->skip_hardware[0]            = '\0';
+        this->matrix                              = static_cast<rocsparse_matrix_init>(0);
+        this->matrix_init_kind                    = static_cast<rocsparse_matrix_init_kind>(0);
+        this->unit_check                          = static_cast<rocsparse_int>(0);
+        this->timing                              = static_cast<rocsparse_int>(1);
+        this->iters                               = static_cast<rocsparse_int>(0);
+        this->iters_inner                         = static_cast<rocsparse_int>(0);
+        this->nfreeiter                           = static_cast<rocsparse_int>(0);
+        this->nmaxiter                            = static_cast<rocsparse_int>(0);
+        this->denseld                             = static_cast<int64_t>(0);
+        this->batch_count                         = static_cast<rocsparse_int>(0);
+        this->batch_count_A                       = static_cast<rocsparse_int>(0);
+        this->batch_count_B                       = static_cast<rocsparse_int>(0);
+        this->batch_count_C                       = static_cast<rocsparse_int>(0);
+        this->batch_stride                        = static_cast<rocsparse_int>(0);
+        this->ld_multiplier_B                     = static_cast<rocsparse_int>(2);
+        this->ld_multiplier_C                     = static_cast<rocsparse_int>(2);
+        this->algo                                = static_cast<uint32_t>(0);
+        this->numericboost                        = static_cast<int>(0);
+        this->boosttol                            = static_cast<double>(0);
+        this->boostval                            = static_cast<double>(0);
+        this->boostvali                           = static_cast<double>(0);
+        this->tolm                                = static_cast<double>(0);
+        this->rand_gen_min                        = static_cast<double>(0);
+        this->rand_gen_max                        = static_cast<double>(1);
+        this->graph_test                          = false;
+        this->skip_reproducibility                = false;
+        this->sparsity_pattern_statistics         = false;
+        this->call_stage_analysis                 = true;
+        this->convert_to_int                      = false;
+        this->integer_based_manufactured_solution = false;
+        this->filename[0]                         = '\0';
+        this->function[0]                         = '\0';
+        this->name[0]                             = '\0';
+        this->category[0]                         = '\0';
+        this->hardware[0]                         = '\0';
+        this->skip_hardware[0]                    = '\0';
     }
 
     this->precision = 's';
@@ -187,6 +193,10 @@ void rocsparse_arguments_config::set_description(options_description& desc)
     ("col-blockdimB",
      value<rocsparse_int>(&this->col_block_dimB)->default_value(2),
      "General BSR col block dimension (default: 2)")
+
+    ("slicesize",
+     value<rocsparse_int>(&this->sell_slice_size)->default_value(2),
+     "Sliced ELL format slice size (default: 2)")
 
     ("mtx",
      value<std::string>(&this->b_matrixmarket)->default_value(""), "read from matrix "
@@ -321,7 +331,7 @@ void rocsparse_arguments_config::set_description(options_description& desc)
      value<std::string>(&this->function_name)->default_value("axpyi"),
      "SPARSE function to test. Options:\n"
      "  Level1: axpyi, doti, dotci, gthr, gthrz, roti, sctr\n"
-     "  Level2: bsrmv, bsrxmv, bsrsv, coomv, coomv_aos, csrmv, csrmv_managed, csrsv, csritsv, coosv, ellmv, hybmv, gebsrmv, gemvi\n"
+     "  Level2: bsrmv, bsrxmv, bsrsv, coomv, coomv_aos, csrmv, csrmv_managed, csrsv, csritsv, coosv, ellmv, hybmv, gebsrmv, gemvi, sellmv\n"
      "  Level3: bsrmm, bsrsm, gebsrmm, csrmm, csrmm_batched, coomm, coomm_batched, cscmm, cscmm_batched, csrsm, coosm, gemmi, sddmm\n"
      "  Extra: bsrgeam, bsrgemm, csrgeam, csrgemm, csrgemm_reuse\n"
      "  Preconditioner: bsric0, bsrilu0, csric0, csrilu0, csritilu0, gtsv, gtsv_no_pivot, gtsv_no_pivot_strided_batch, gtsv_interleaved_batch, gpsv_interleaved_batch\n"
@@ -424,7 +434,7 @@ void rocsparse_arguments_config::set_description(options_description& desc)
 
     ("spmv_alg",
       value<rocsparse_int>(&this->b_spmv_alg)->default_value(rocsparse_spmv_alg_default),
-      "Indicates what algorithm to use when running SpMV. Possibly choices are default: 0, COO: 1, CSR adaptive: 2, CSR stream: 3, ELL: 4, COO atomic: 5, BSR: 6, CSR LRB: 7, CSR nnzsplit: 8 (default:0)")
+      "Indicates what algorithm to use when running SpMV. Possibly choices are default: 0, COO: 1, CSR adaptive: 2, CSR stream: 3, ELL: 4, COO atomic: 5, BSR: 6, CSR LRB: 7, CSR nnzsplit: 8, SELL: 9 (default:0)")
 
     ("itilu0_alg",
       value<rocsparse_int>(&this->b_itilu0_alg)->default_value(rocsparse_itilu0_alg_default),
@@ -517,7 +527,8 @@ int rocsparse_arguments_config::parse(int& argc, char**& argv, options_descripti
        && this->b_spmv_alg != rocsparse_spmv_alg_coo_atomic
        && this->b_spmv_alg != rocsparse_spmv_alg_bsr
        && this->b_spmv_alg != rocsparse_spmv_alg_csr_lrb
-       && this->b_spmv_alg != rocsparse_spmv_alg_csr_nnzsplit)
+       && this->b_spmv_alg != rocsparse_spmv_alg_csr_nnzsplit
+       && this->b_spmv_alg != rocsparse_spmv_alg_sell)
     {
         std::cerr << "Invalid value for --spmv_alg" << std::endl;
         return -1;
@@ -772,6 +783,12 @@ int rocsparse_arguments_config::parse(int& argc, char**& argv, options_descripti
     if(this->col_block_dimB < 1)
     {
         std::cerr << "Invalid value for --col-blockdimB" << std::endl;
+        return -1;
+    }
+
+    if(this->sell_slice_size < 1)
+    {
+        std::cerr << "Invalid value for --slicesize. Must be > 0" << std::endl;
         return -1;
     }
 

@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <variant>
 
@@ -49,6 +26,37 @@ namespace rocRoller
 {
     namespace Expression
     {
+        // This function determines the value count of an expression
+        // based on the value counts of its operands.
+        // Note that the value count of each operand in an expression must either be 1
+        // or equal to all other non-1 value counts in the expression.
+        // For example:
+        //     lhs.valueCount = 1, rhs.valueCount = 1: Valid, return 1
+        //     lhs.valueCount = 1, rhs.valueCount = 16: Valid, return 16
+        //     lhs.valueCount = 8, rhs.valueCount = 1: Valid, return 8
+        //     lhs.valueCount = 4, rhs.valueCount = 4: Valid, return 4
+        //     lhs.valueCount = 4, rhs.valueCount = 2: INVALID
+        inline size_t broadcastValueCount(std::vector<ResultType> operands)
+        {
+            size_t valueCount = 1;
+            for(auto operand : operands)
+            {
+                if(operand.valueCount != 1)
+                {
+                    if(valueCount == 1)
+                        return valueCount = operand.valueCount;
+                    else
+                        AssertFatal(valueCount == operand.valueCount,
+                                    "Each operand's value count in an expression must either "
+                                    "be 1 or equal to all other non-1 value counts\n",
+                                    ShowValue(valueCount),
+                                    ShowValue(operand.valueCount));
+                }
+            }
+
+            return valueCount;
+        }
+
         /*
          * result type
          */
@@ -73,6 +81,11 @@ namespace rocRoller
                 {
                     varType = lhsVal.varType;
                 }
+                // A bitfieldCombine's type is the same as the destination type.
+                else if constexpr(std::same_as<T, BitfieldCombine>)
+                {
+                    varType = rhsVal.varType;
+                }
                 else if(std::same_as<T, Subtract> && lhsVal.varType.isPointer()
                         && lhsVal.varType == rhsVal.varType)
                 {
@@ -83,7 +96,9 @@ namespace rocRoller
                     varType = VariableType::Promote(lhsVal.varType, rhsVal.varType);
                 }
 
-                return {regType, varType};
+                auto valueCount = broadcastValueCount({lhsVal, rhsVal});
+
+                return {regType, varType, valueCount};
             }
 
             template <typename T>
@@ -99,29 +114,50 @@ namespace rocRoller
                 auto varType = VariableType::Promote(lhsVal.varType, r1hsVal.varType);
                 varType      = VariableType::Promote(varType, r2hsVal.varType);
 
-                return {regType, varType};
+                size_t valueCount = broadcastValueCount({lhsVal, r1hsVal, r2hsVal});
+
+                return {regType, varType, valueCount};
             }
 
             ResultType operator()(AddShiftL const& expr)
             {
                 auto lhsVal  = call(expr.lhs);
                 auto r1hsVal = call(expr.r1hs);
+                auto r2hsVal = call(expr.r2hs);
 
-                auto regType = Register::PromoteType(lhsVal.regType, r1hsVal.regType);
-                auto varType = VariableType::Promote(lhsVal.varType, r1hsVal.varType);
+                auto regType    = Register::PromoteType(lhsVal.regType, r1hsVal.regType);
+                auto varType    = VariableType::Promote(lhsVal.varType, r1hsVal.varType);
+                auto valueCount = broadcastValueCount({lhsVal, r1hsVal, r2hsVal});
 
-                return {regType, varType};
+                return {regType, varType, valueCount};
             }
 
             ResultType operator()(ShiftLAdd const& expr)
             {
                 auto lhsVal  = call(expr.lhs);
+                auto r1hsVal = call(expr.r1hs);
                 auto r2hsVal = call(expr.r2hs);
 
-                auto regType = Register::PromoteType(lhsVal.regType, r2hsVal.regType);
-                auto varType = VariableType::Promote(lhsVal.varType, r2hsVal.varType);
+                auto regType    = Register::PromoteType(lhsVal.regType, r2hsVal.regType);
+                auto varType    = VariableType::Promote(lhsVal.varType, r2hsVal.varType);
+                auto valueCount = broadcastValueCount({lhsVal, r1hsVal, r2hsVal});
 
-                return {regType, varType};
+                return {regType, varType, valueCount};
+            }
+
+            ResultType operator()(MatrixMultiply const& expr)
+            {
+                auto matAVal = call(expr.lhs);
+                auto matBVal = call(expr.r1hs);
+                auto matCVal = call(expr.r2hs);
+
+                auto regType = Register::PromoteType(matAVal.regType, matBVal.regType);
+                regType      = Register::PromoteType(regType, matCVal.regType);
+
+                auto varType = VariableType::Promote(matAVal.varType, matBVal.varType);
+                varType      = VariableType::Promote(varType, matCVal.varType);
+
+                return {regType, varType, matCVal.valueCount};
             }
 
             ResultType operator()(ScaledMatrixMultiply const& expr)
@@ -136,7 +172,7 @@ namespace rocRoller
                 auto varType = VariableType::Promote(matAVal.varType, matBVal.varType);
                 varType      = VariableType::Promote(varType, matCVal.varType);
 
-                return {regType, varType};
+                return {regType, varType, matCVal.valueCount};
             }
 
             template <typename T>
@@ -145,12 +181,12 @@ namespace rocRoller
                 auto argVal = call(expr.arg);
 
                 if constexpr(std::same_as<T, MagicShifts>)
-                    return {argVal.regType, DataType::Int32};
+                    return {argVal.regType, DataType::Int32, argVal.valueCount};
                 else if constexpr(std::same_as<T, MagicShiftAndSign>)
-                    return {argVal.regType, DataType::UInt32};
+                    return {argVal.regType, DataType::UInt32, argVal.valueCount};
 
                 if constexpr(std::same_as<T, ToScalar>)
-                    return {Register::Type::Scalar, argVal.varType};
+                    return {Register::Type::Scalar, argVal.varType, argVal.valueCount};
 
                 return argVal;
             }
@@ -158,7 +194,13 @@ namespace rocRoller
             ResultType operator()(Convert const& expr)
             {
                 auto argVal = call(expr.arg);
-                return {argVal.regType, expr.destinationType};
+                return {argVal.regType, expr.destinationType, argVal.valueCount};
+            }
+
+            ResultType operator()(Reinterpret const& expr)
+            {
+                auto argVal = call(expr.arg);
+                return {argVal.regType, expr.destinationType, argVal.valueCount};
             }
 
             template <DataType DATATYPE>
@@ -167,13 +209,13 @@ namespace rocRoller
                 // SR conversion currently only supports FP8 and BF8
                 static_assert(DATATYPE == DataType::FP8 || DATATYPE == DataType::BF8);
                 auto argVal = call(expr.lhs);
-                return {argVal.regType, DATATYPE};
+                return {argVal.regType, DATATYPE, argVal.valueCount};
             }
 
             ResultType operator()(BitFieldExtract const& expr)
             {
                 auto argVal = call(expr.arg);
-                return {argVal.regType, expr.outputDataType};
+                return {argVal.regType, expr.outputDataType, argVal.valueCount};
             }
 
             template <typename T>
@@ -181,6 +223,8 @@ namespace rocRoller
             {
                 auto lhsVal = call(expr.lhs);
                 auto rhsVal = call(expr.rhs);
+
+                size_t valueCount = broadcastValueCount({lhsVal, rhsVal});
 
                 // Can't compare between two different types on the GPU.
                 AssertFatal(lhsVal.regType == Register::Type::Literal
@@ -199,27 +243,27 @@ namespace rocRoller
                 {
                     auto varType = VariableType::Promote(lhsVal.varType, rhsVal.varType);
                     if(varType == DataType::None)
-                        return {inputRegType, DataType::None};
+                        return {inputRegType, DataType::None, valueCount};
                 }
 
                 switch(inputRegType)
                 {
                 case Register::Type::Literal:
-                    return {Register::Type::Literal, DataType::Bool};
+                    return {Register::Type::Literal, DataType::Bool, valueCount};
                 case Register::Type::Scalar:
-                    return {Register::Type::Scalar, DataType::Bool};
+                    return {Register::Type::Scalar, DataType::Bool, valueCount};
                 case Register::Type::Vector:
                     if(auto context = m_context.lock(); context)
                     {
                         if(context->kernel()->wavefront_size() == 32)
-                            return {Register::Type::Scalar, DataType::Bool32};
-                        return {Register::Type::Scalar, DataType::Bool64};
+                            return {Register::Type::Scalar, DataType::Bool32, valueCount};
+                        return {Register::Type::Scalar, DataType::Bool64, valueCount};
                     }
                     // If you are reading this, it probably means that this visitor
                     // was called on an expression with registers that didn't have
                     // a context.
                     // Throw<FatalError>("Need context to determine wavefront size", ShowValue(name(expr)));
-                    return {Register::Type::Scalar, DataType::None};
+                    return {Register::Type::Scalar, DataType::None, valueCount};
                 default:
                     break;
                 }
@@ -238,6 +282,8 @@ namespace rocRoller
 
             ResultType logical(ResultType lhsVal, ResultType rhsVal)
             {
+                size_t valueCount = broadcastValueCount({lhsVal, rhsVal});
+
                 if(lhsVal.varType == DataType::Bool
                    && (rhsVal.varType == DataType::Bool32 || rhsVal.varType == DataType::Bool64))
                 {
@@ -264,12 +310,12 @@ namespace rocRoller
                        || inputVarType == DataType::Bool32 //
                        || inputVarType == DataType::Bool64)
                     {
-                        return {Register::Type::Scalar, inputVarType};
+                        return {Register::Type::Scalar, inputVarType, valueCount};
                     }
                 case Register::Type::Literal:
                 {
                     if(inputVarType == DataType::Bool)
-                        return {inputRegType, inputVarType};
+                        return {inputRegType, inputVarType, valueCount};
                 }
                 default:
                     break;
@@ -315,14 +361,16 @@ namespace rocRoller
                             ShowValue(r2hsVal.varType));
                 auto varType = r2hsVal.varType;
 
+                size_t valueCount = broadcastValueCount({lhsVal, r1hsVal, r2hsVal});
+
                 if(lhsVal.varType == DataType::Bool32 || lhsVal.varType == DataType::Bool64
                    || lhsVal.regType == Register::Type::Vector
                    || r1hsVal.regType == Register::Type::Vector
                    || r2hsVal.regType == Register::Type::Vector)
                 {
-                    return {Register::Type::Vector, varType};
+                    return {Register::Type::Vector, varType, valueCount};
                 }
-                return {Register::Type::Scalar, varType};
+                return {Register::Type::Scalar, varType, valueCount};
             }
 
             ResultType operator()(Concatenate const& expr)
@@ -333,9 +381,12 @@ namespace rocRoller
                 auto expectedNumRegister   = DataTypeInfo::Get(expr.destinationType).registerCount;
                 unsigned actualNumRegister = 0;
 
+                size_t valueCount = 1;
+
                 for(auto const& operand : expr.operands)
                 {
-                    auto&& [operandRegisterType, operandVariableType] = call(operand);
+                    auto&& [operandRegisterType, operandVariableType, operandValueCount]
+                        = call(operand);
                     switch(operandRegisterType)
                     {
                     case Register::Type::Literal:
@@ -350,8 +401,11 @@ namespace rocRoller
 
                     registerType = Register::PromoteType(registerType, operandRegisterType);
                     actualNumRegister
-                        = actualNumRegister
-                          + DataTypeInfo::Get(operandVariableType.dataType).registerCount;
+                        = actualNumRegister + DataTypeInfo::Get(operandVariableType).registerCount;
+
+                    AssertFatal(operandValueCount == 1,
+                                "All operands to Concatenate must have value count 1",
+                                ShowValue(operandValueCount));
                 }
 
                 AssertFatal(expectedNumRegister == actualNumRegister,
@@ -359,47 +413,65 @@ namespace rocRoller
                             ShowValue(expectedNumRegister),
                             ShowValue(actualNumRegister));
 
-                return {registerType, variableType};
+                return {registerType, variableType, valueCount};
             }
 
             ResultType operator()(CommandArgumentPtr const& expr)
             {
                 if(expr == nullptr)
-                    return {Register::Type::Count, DataType::Count};
+                    return {Register::Type::Count, DataType::Count, 0};
 
-                return {Register::Type::Literal, expr->variableType()};
+                auto packing = expr->variableType().dataType == DataType::None
+                                   ? 1
+                                   : DataTypeInfo::Get(expr->variableType()).packing;
+                return {Register::Type::Literal, expr->variableType(), packing};
             }
 
             ResultType operator()(AssemblyKernelArgumentPtr const& expr)
             {
                 if(expr == nullptr)
-                    return {Register::Type::Count, DataType::Count};
+                    return {Register::Type::Count, DataType::Count, 0};
 
-                return {Register::Type::Scalar, expr->variableType};
+                auto packing = expr->getVariableType().dataType == DataType::None
+                                   ? 1
+                                   : DataTypeInfo::Get(expr->getVariableType()).packing;
+                return {Register::Type::Scalar, expr->getVariableType(), packing};
             }
 
             ResultType operator()(CommandArgumentValue const& expr)
             {
-                return {Register::Type::Literal, variableType(expr)};
+                auto packing = variableType(expr).dataType == DataType::None
+                                   ? 1
+                                   : DataTypeInfo::Get(variableType(expr)).packing;
+                return {Register::Type::Literal, variableType(expr), packing};
             }
 
             ResultType operator()(Register::ValuePtr const& expr)
             {
                 if(expr == nullptr)
-                    return {Register::Type::Count, DataType::Count};
+                    return {Register::Type::Count, DataType::Count, 0};
 
-                m_context = expr->context();
-                return {expr->regType(), expr->variableType()};
+                m_context    = expr->context();
+                auto packing = expr->variableType().dataType == DataType::None
+                                   ? 1
+                                   : DataTypeInfo::Get(expr->variableType()).packing;
+                return {expr->regType(), expr->variableType(), expr->valueCount() * packing};
             }
 
             ResultType operator()(DataFlowTag const& expr)
             {
-                return {expr.regType, expr.varType};
+                auto packing = expr.varType.dataType == DataType::None
+                                   ? 1
+                                   : DataTypeInfo::Get(expr.varType).packing;
+                return {expr.regType, expr.varType, packing};
             }
 
             ResultType operator()(PositionalArgument const& expr)
             {
-                return {expr.regType, expr.varType};
+                auto packing = expr.varType.dataType == DataType::None
+                                   ? 1
+                                   : DataTypeInfo::Get(expr.varType).packing;
+                return {expr.regType, expr.varType, packing};
             }
 
             ResultType operator()(WaveTilePtr const& expr)
@@ -415,7 +487,7 @@ namespace rocRoller
             ResultType call(ExpressionPtr const& expr)
             {
                 if(expr == nullptr)
-                    return {Register::Type::Count, DataType::Count};
+                    return {Register::Type::Count, DataType::Count, 0};
 
                 return call(*expr);
             }
@@ -443,6 +515,18 @@ namespace rocRoller
         {
             ExpressionResultTypeVisitor v;
             return v.call(expr).regType;
+        }
+
+        size_t resultValueCount(Expression const& expr)
+        {
+            ExpressionResultTypeVisitor v;
+            return v.call(expr).valueCount;
+        }
+
+        size_t resultValueCount(ExpressionPtr const& expr)
+        {
+            ExpressionResultTypeVisitor v;
+            return v.call(expr).valueCount;
         }
 
         ResultType resultType(ExpressionPtr const& expr)

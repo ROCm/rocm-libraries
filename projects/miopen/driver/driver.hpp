@@ -27,7 +27,7 @@
 #define GUARD_MIOPEN_DRIVER_HPP
 
 #include <half/half.hpp>
-#include "random.hpp"
+#include "../driver/random.hpp"
 
 #include "InputFlags.hpp"
 #include <algorithm>
@@ -38,6 +38,7 @@
 #include <miopen/logger.hpp>
 #include <miopen/miopen.h>
 #include <miopen/bfloat16.hpp>
+#include <miopen/handle.hpp>
 #include <../test/tensor_holder.hpp>
 #include "util_driver.hpp"
 #include "rocrand_wrapper.hpp"
@@ -58,6 +59,7 @@ using bfloat8_fnuz = miopen_f8::hip_f8<miopen_f8::hip_f8_type::bf8>;
 #endif
 #elif MIOPEN_BACKEND_HIP
 #include <hip/hip_runtime_api.h>
+#include <functional>
 #endif
 
 #define UNPACK_VEC4(v) (v[0]), (v[1]), (v[2]), (v[3])
@@ -132,7 +134,7 @@ struct GPUMem
     }
     int FromGPU(hipStream_t q, void* p)
     {
-        hipDeviceSynchronize();
+        (void)hipDeviceSynchronize();
         _q = q;
         return static_cast<int>(hipMemcpy(p, buf, GetSize(), hipMemcpyDeviceToHost));
     }
@@ -383,15 +385,14 @@ inline void PadBufferSize(size_t& sz, int datatype_sz)
 {
     printf("Usage: ./driver *base_arg* *other_args*\n");
     printf("Supported Base Arguments: conv[fp16|int8|bfp16], CBAInfer[fp16|bfp16], "
-           "CAInfer[fp16|bfp16], pool[fp16], lrn[fp16], "
-           "activ[fp16], softmax[fp16], bnorm[fp16], rnn[fp16], gemm[fp16], ctc, dropout[fp16], "
-           "tensorop, reduce[fp16|fp64], layernorm[bfp16|fp16], "
-           "groupnorm[bfp16|fp16], cat[bfp16|fp16], addlayernorm[bfp16|fp16], "
-           "t5layernorm[bfp16|fp16], adam[fp16], ampadam, reduceextreme[bfp16|fp16], "
-           "adamw[fp16], ampadamw, transformersadamw[fp16], transformersampadamw, "
-           "getitem[bfp16|fp16], reducecalculation[bfp16|fp16], rope[bfp16|fp16], "
-           "prelu[bfp16|fp16], kthvalue[bfp16|fp16], glu[bfp16|fp16], softmarginloss[bfp16|fp16], "
-           "multimarginloss[bfp16|fp16]\n");
+           "CAInfer[fp16|bfp16], pool[fp16|bfp16], lrn[fp16], activ[fp16], softmax[bfp16|fp16], "
+           "bnorm[fp16|bfp16], rnn[fp16], rnn_seq[fp16], gemm[fp16], ctc, dropout[fp16], tensorop, "
+           "reduce[fp16|fp64], layernorm[bfp16|fp16], groupnorm[bfp16|fp16], cat[bfp16|fp16], "
+           "addlayernorm[bfp16|fp16], t5layernorm[bfp16|fp16], adam[fp16], ampadam, "
+           "reduceextreme[bfp16|fp16], adamw[fp16], ampadamw, transformersadamw[fp16], "
+           "transformersampadamw, getitem[bfp16|fp16], reducecalculation[bfp16|fp16], "
+           "rope[bfp16|fp16], prelu[bfp16|fp16], kthvalue[bfp16|fp16], glu[bfp16|fp16], "
+           "softmarginloss[bfp16|fp16], multimarginloss[bfp16|fp16]\n");
     exit(e); // NOLINT (concurrency-mt-unsafe)
 }
 
@@ -408,6 +409,7 @@ inline std::string ParseBaseArg(int argc, char* argv[])
     // List of valid base arguments
     static const std::vector<std::string> valid_args = {"conv",
                                                         "convfp16",
+                                                        "convfp32",
                                                         "convint8",
                                                         "convbfp16",
                                                         "CBAInfer",
@@ -418,12 +420,14 @@ inline std::string ParseBaseArg(int argc, char* argv[])
                                                         "CAInferbfp16",
                                                         "pool",
                                                         "poolfp16",
+                                                        "poolbfp16",
                                                         "lrn",
                                                         "lrnfp16",
                                                         "activ",
                                                         "activfp16",
                                                         "softmax",
                                                         "softmaxfp16",
+                                                        "softmaxbfp16",
                                                         "bnorm",
                                                         "bnormfp16",
                                                         "bnormbfp16",
@@ -516,7 +520,7 @@ public:
         miopenCreate(&handle);
 #elif MIOPEN_BACKEND_HIP
         hipStream_t s;
-        hipStreamCreate(&s);
+        (void)hipStreamCreate(&s);
         miopenCreateWithStream(&handle, s);
 #endif
 
@@ -530,6 +534,18 @@ public:
     cl_command_queue& GetStream() { return q; }
 #elif MIOPEN_BACKEND_HIP
     hipStream_t& GetStream() { return q; }
+    using hipGraphFuncPtrType   = std::function<int()>;
+    hipGraph_t hipGraph         = nullptr;
+    hipGraphExec_t hipGraphExec = nullptr;
+    hipGraphFuncPtrType hipGraphFuncPtr;
+    hipEvent_t hipGraphStartEvent   = nullptr;
+    hipEvent_t hipGraphStopEvent    = nullptr;
+    float hipGraphLastExecutionTime = 0.0f;
+    int CaptureKernel(hipGraphFuncPtrType functPtr);
+    int CaptureKernelCapturing(hipGraphFuncPtrType functPtr);
+    int ExecuteKernel();
+    void FinalizeKernel();
+    float GetHipGraphExecutionTime() { return hipGraphLastExecutionTime; }
 #endif
     virtual ~Driver() { miopenDestroy(handle); }
 
@@ -544,11 +560,14 @@ public:
     virtual int RunBackwardGPU()                         = 0;
     virtual int VerifyBackward()                         = 0;
 
+    std::string name;
+
 protected:
     template <typename Tgpu>
     void InitDataType();
     void AddGpuBufferCheckFlag(InputFlags& inflags);
     GPUMem::Check GetGpuBufferCheck(const InputFlags& inflags) const;
+    void AddHipGraphFlag(InputFlags& inflags);
     miopenHandle_t handle;
     miopenDataType_t data_type;
 

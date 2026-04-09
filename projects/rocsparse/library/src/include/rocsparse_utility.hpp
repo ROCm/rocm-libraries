@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -33,9 +33,10 @@
 #include "rocsparse_logging.hpp"
 #include "rocsparse_memstat.hpp"
 #include "rocsparse_scalar.hpp"
-
+#include "rocsparse_singularity.hpp"
 namespace rocsparse
 {
+
 // Return the leftmost significant bit position
 #if defined(rocsparse_ILP64)
     static inline rocsparse_int clz(rocsparse_int n)

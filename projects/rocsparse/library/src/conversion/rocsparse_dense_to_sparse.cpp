@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -192,7 +192,9 @@ namespace rocsparse
             return rocsparse_status_success;
         }
 
+        // LCOV_EXCL_START
         RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
+        // LCOV_EXCL_STOP
     }
 
     typedef rocsparse_status (*dense_to_sparse_t)(rocsparse_handle              handle,
@@ -342,6 +344,9 @@ try
                        buffer_size,
                        (buffer_size == nullptr && temp_buffer == nullptr),
                        rocsparse_status_invalid_pointer);
+
+    ROCSPARSE_CHECKARG(1, mat_A, (mat_A->batch_count != 1), rocsparse_status_not_implemented);
+    ROCSPARSE_CHECKARG(2, mat_B, (mat_B->batch_count != 1), rocsparse_status_not_implemented);
 
     rocsparse::dense_to_sparse_t f;
     if(mat_B->format == rocsparse_format_csc)

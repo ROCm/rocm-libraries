@@ -1,28 +1,6 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright (c) 2017 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
 #include <miopen/convolution.hpp>
 
 #include <miopen/any_solver.hpp>
@@ -42,14 +20,13 @@
 
 #include <nlohmann/json.hpp>
 
-#include <cassert>
-#include <cstddef>
 #include <algorithm>
+#include <cassert>
 #include <cmath>
+#include <cstddef>
 #include <ostream>
-
-#include <boost/range/combine.hpp>
-#include <boost/range/adaptors.hpp>
+#include <ranges>
+#include <tuple>
 
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_CONV_DIRECT)
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_CONV_IMPLICIT_GEMM)
@@ -250,17 +227,17 @@ ConvolutionDescriptor::GetForwardOutputTensorWithLayout(const TensorDescriptor& 
     std::size_t in_n, in_c;
     std::tie(in_n, in_c) = miopen::tie_pick<0, 1>{}(xDesc.GetLengths());
 
-    auto in_spatial = boost::adaptors::slice(xDesc.GetLengths(), 2, 2 + spatial_dim);
+    auto in_spatial = xDesc.GetLengths() | std::views::drop(2) | std::views::take(spatial_dim);
 
     std::size_t wei_k, wei_c;
     std::tie(wei_k, wei_c) = miopen::tie_pick<0, 1>{}(wDesc.GetLengths());
 
-    auto wei_spatial = boost::adaptors::slice(wDesc.GetLengths(), 2, 2 + spatial_dim);
+    auto wei_spatial = wDesc.GetLengths() | std::views::drop(2) | std::views::take(spatial_dim);
 
     if(wDesc.GetLayout_str() == "CHWNc")
     {
         std::tie(wei_k, wei_c) = miopen::tie_pick<3, 0>{}(wDesc.GetLengths());
-        wei_spatial            = boost::adaptors::slice(wDesc.GetLengths(), 1, 1 + spatial_dim);
+        wei_spatial = wDesc.GetLengths() | std::views::drop(1) | std::views::take(spatial_dim);
     }
 
     if(mode == miopenConvolution)
@@ -279,9 +256,14 @@ ConvolutionDescriptor::GetForwardOutputTensorWithLayout(const TensorDescriptor& 
             MIOPEN_THROW(miopenStatusBadParm, "Channels do not match for the filter");
         }
 
-        if(miopen::any_of(boost::combine(GetTransposeConvPads(), GetConvStrides()), [](auto v) {
-               auto trans_conv_pad = boost::get<0>(v);
-               auto stride         = boost::get<1>(v);
+        const auto& pads_    = GetTransposeConvPads();
+        const auto& strides_ = GetConvStrides();
+        auto zip_            = std::views::iota(std::size_t(0), pads_.size()) |
+                    std::views::transform(
+                        [&](std::size_t i) { return std::make_tuple(pads_[i], strides_[i]); });
+
+        if(std::ranges::any_of(zip_, [](auto v) {
+               auto [trans_conv_pad, stride] = v;
                return trans_conv_pad >= stride;
            }))
         {
@@ -293,7 +275,7 @@ ConvolutionDescriptor::GetForwardOutputTensorWithLayout(const TensorDescriptor& 
     std::size_t out_c = 0;
     std::vector<std::size_t> out_lens(spatial_dim + 2);
 
-    auto out_spatial = boost::adaptors::slice(out_lens, 2, 2 + spatial_dim);
+    auto out_spatial = out_lens | std::views::drop(2) | std::views::take(spatial_dim);
 
     if(paddingMode == miopenPaddingSame && mode == miopenConvolution &&
        miopen::all_of(GetConvDilations(), [](auto v) { return v == 1; }))
@@ -398,7 +380,8 @@ bool ConvolutionDescriptor::IsWinograd3x3SupportedAndFast(
     if(!(problem.GetOutChannels() >= 16 && problem.GetOutChannels() % 2 == 0))
         return false;
 
-    return solver::conv::ConvBinWinograd3x3U{}.IsApplicable(ctx, problem);
+    return solver::conv::ConvBinWinograd3x3U{}.IsApplicable(ctx, problem) ||
+           solver::conv::TransposedConvBinWinograd3x3U{}.IsApplicable(ctx, problem);
 }
 
 std::size_t ConvolutionDescriptor::GetWorkSpaceSize(ExecutionContext ctx,
@@ -466,6 +449,16 @@ std::size_t ConvolutionDescriptor::GetWorkSpaceSize(ExecutionContext ctx,
 
     MIOPEN_LOG_I(workspace_size);
     return workspace_size;
+}
+
+bool ConvolutionDescriptor::EnableTF32() const
+{
+    // TODO:(LYM) change back to && when TF32 is fully supported
+    if((miopen::EnvEnableTF32() ||
+        (static_cast<miopenMathType_t>(attribute.Get(MIOPEN_CONVOLUTION_ATTRIB_MATH_TYPE)) ==
+         miopenMathDefault)))
+        return true;
+    return false;
 }
 
 std::ostream& operator<<(std::ostream& stream, const ConvolutionDescriptor& c)
@@ -540,6 +533,18 @@ void ConvolutionAttribute::Set(miopenConvolutionAttrib_t attr, int value)
         }
         fp8rounding_mode.rounding_mode = rounding_mode;
     }
+    else if(attr == MIOPEN_CONVOLUTION_ATTRIB_MATH_TYPE)
+    {
+        const auto math_type_ = static_cast<miopenMathType_t>(value);
+        if(math_type_ != miopenMathDefault && math_type_ != miopenMathPedantic)
+        {
+            MIOPEN_THROW(miopenStatusBadParm,
+                         "[Set conv attribute] Error: Attempt to set invalid value for "
+                         "MIOPEN_CONVOLUTION_ATTRIB_MATH_TYPE: " +
+                             std::to_string(value));
+        }
+        math_type.value = math_type_;
+    }
     else
     {
         MIOPEN_THROW(miopenStatusBadParm,
@@ -556,6 +561,8 @@ int ConvolutionAttribute::Get(miopenConvolutionAttrib_t attr) const
         return static_cast<int>(fp8rounding_mode.rounding_mode);
     else if(attr == MIOPEN_CONVOLUTION_ATTRIB_DETERMINISTIC)
         return deterministic.value;
+    else if(attr == MIOPEN_CONVOLUTION_ATTRIB_MATH_TYPE)
+        return math_type.value;
     MIOPEN_THROW(miopenStatusBadParm,
                  "[Get conv attribute] Error: Attribute [" +
                      std::to_string(static_cast<int>(attr)) + "] does not exist.");

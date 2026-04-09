@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,14 +20,13 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "benchmark_device_reduce.parallel.hpp"
-#include "benchmark_utils.hpp"
+#include "benchmark_device_reduce.hpp"
+#include "primbench.hpp"
 
 #ifndef BENCHMARK_CONFIG_TUNING
     #include "../common/utils_custom_type.hpp"
 #endif
 
-// HIP API
 #include <hip/hip_runtime.h>
 
 #ifndef BENCHMARK_CONFIG_TUNING
@@ -42,32 +41,34 @@
     #include <stdint.h>
 #endif
 
-#define CREATE_BENCHMARK(T, REDUCE_OP) \
-    executor.queue_instance(device_reduce_benchmark<T, REDUCE_OP>());
+#define CREATE_BENCHMARK(T) executor.queue<device_reduce_benchmark<T>>();
 
 int main(int argc, char* argv[])
 {
-    benchmark_utils::executor executor(argc, argv, 512 * benchmark_utils::MiB, 10, 5);
+    primbench::settings settings;
+    settings.size = 512 * primbench::MiB;
+    primbench::executor executor(argc, argv, settings);
 
 #ifndef BENCHMARK_CONFIG_TUNING
-    using custom_float2  = common::custom_type<float, float>;
-    using custom_double2 = common::custom_type<double, double>;
+    // Tuned types
+    CREATE_BENCHMARK(rocprim::int128_t)
+    CREATE_BENCHMARK(int64_t)
+    CREATE_BENCHMARK(int32_t)
+    CREATE_BENCHMARK(int16_t)
+    CREATE_BENCHMARK(int8_t)
+    CREATE_BENCHMARK(double)
+    CREATE_BENCHMARK(float)
+    CREATE_BENCHMARK(rocprim::half)
 
-    CREATE_BENCHMARK(int, rocprim::plus<int>)
-    CREATE_BENCHMARK(long long, rocprim::plus<long long>)
+    #ifndef BENCHMARK_AUTOTUNED_TYPES_ONLY
+    // Not tuned types
+    CREATE_BENCHMARK(uint8_t)
+    CREATE_BENCHMARK(rocprim::uint128_t)
 
-    CREATE_BENCHMARK(float, rocprim::plus<float>)
-    CREATE_BENCHMARK(double, rocprim::plus<double>)
-
-    CREATE_BENCHMARK(int8_t, rocprim::plus<int8_t>)
-    CREATE_BENCHMARK(uint8_t, rocprim::plus<uint8_t>)
-    CREATE_BENCHMARK(rocprim::half, rocprim::plus<rocprim::half>)
-
-    CREATE_BENCHMARK(custom_float2, rocprim::plus<custom_float2>)
-    CREATE_BENCHMARK(custom_double2, rocprim::plus<custom_double2>)
-
-    CREATE_BENCHMARK(rocprim::int128_t, rocprim::plus<rocprim::int128_t>)
-    CREATE_BENCHMARK(rocprim::uint128_t, rocprim::plus<rocprim::uint128_t>)
+    // Not tuned custom types
+    CREATE_BENCHMARK(custom_f32_f32)
+    CREATE_BENCHMARK(custom_f64_f64)
+    #endif
 #endif
 
     executor.run();

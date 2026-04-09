@@ -93,7 +93,7 @@ cmake --build _build --target coverage
 
 ### Using CMake variables directly
 
-**Full build for gfx1201**
+**Full build for gfx942**
 
 ```bash
 # configure
@@ -102,7 +102,7 @@ cmake -B build -S .                                  \
       -D CMAKE_CXX_COMPILER=/opt/rocm/bin/amdclang++ \
       -D CMAKE_C_COMPILER=/opt/rocm/bin/amdclang     \
       -D CMAKE_PREFIX_PATH=/opt/rocm                 \
-      -D GPU_TARGETS=gfx1201
+      -D GPU_TARGETS=gfx942
 # build
 cmake --build build --parallel
 ```
@@ -127,8 +127,8 @@ Refer to the available build options using `./install.sh --help`
 
 # build and install all libraries and clients, and fetch dependencies
 ./install.sh -idc
-# build for gfx1201 only without installation
-./install.sh -c -a gfx1201
+# build for gfx942 only without installation
+./install.sh -c -a gfx942
 ```
 
 ### Options
@@ -195,6 +195,7 @@ Refer to the available build options using `./install.sh --help`
       * BFLOAT16 input/output, FP32 Matrix Core accumulate
       * INT8 input/output, INT32 Matrix Core accumulate
       * INT8 input, FP16 output, INT32 Matrix Core accumulate
+      * INT8 input, INT32 output, INT32 Matrix Core accumulate
       * FP8(E4M3) input, FP32 output, FP32 Matrix Core accumulate (LLVM target: gfx950)
       * BF8(E5M2) input, FP32 output, FP32 Matrix Core accumulate (LLVM target: gfx950)
     * Matrix pruning and compression functionalities

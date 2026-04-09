@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -72,40 +72,6 @@ struct transform_op_t
     }
 };
 
-template<class Config,
-         bool Exclusive,
-         class ResultType,
-         class InputIterator,
-         class OutputIterator,
-         class OffsetIterator,
-         class InitValueType,
-         class BinaryFunction>
-inline hipError_t launch_segmented_scan(detail::target_arch arch,
-                                        InputIterator       input,
-                                        OutputIterator      output,
-                                        OffsetIterator      begin_offsets,
-                                        OffsetIterator      end_offsets,
-                                        InitValueType       initial_value,
-                                        BinaryFunction      scan_op,
-                                        dim3                grid,
-                                        dim3                block,
-                                        size_t              shmem,
-                                        hipStream_t         stream)
-{
-    auto kernel = [=](auto arch_config)
-    {
-        segmented_scan<decltype(arch_config), Exclusive, ResultType>(
-            input,
-            output,
-            begin_offsets,
-            end_offsets,
-            static_cast<ResultType>(initial_value),
-            scan_op);
-    };
-
-    return execute_launch_plan<Config>(arch, kernel, grid, block, shmem, stream);
-}
-
 template<bool Exclusive,
          class Config,
          class InputIterator,
@@ -128,15 +94,11 @@ inline hipError_t segmented_scan_impl(void*               temporary_storage,
     using input_type  = typename std::iterator_traits<InputIterator>::value_type;
     using result_type = typename std::conditional<Exclusive, InitValueType, input_type>::type;
 
-    using config = wrapped_scan_config<Config, input_type>;
+    using Selector = detail::scan_config_selector<input_type>;
 
-    detail::target_arch target_arch;
-    hipError_t          result = host_target_arch(stream, target_arch);
-    if(result != hipSuccess)
-    {
-        return result;
-    }
-    const scan_config_params params = dispatch_target_arch<config, false>(target_arch);
+    const target current_target(stream);
+
+    const auto params = get_config<Selector>(Config{}, current_target);
 
     const unsigned int block_size = params.kernel_config.block_size;
 
@@ -153,18 +115,26 @@ inline hipError_t segmented_scan_impl(void*               temporary_storage,
 
     std::chrono::steady_clock::time_point start;
     if(debug_synchronous)
+    {
         start = std::chrono::steady_clock::now();
-    ROCPRIM_RETURN_ON_ERROR(launch_segmented_scan<config, Exclusive, result_type>(target_arch,
-                                                                                  input,
-                                                                                  output,
-                                                                                  begin_offsets,
-                                                                                  end_offsets,
-                                                                                  initial_value,
-                                                                                  scan_op,
-                                                                                  dim3(segments),
-                                                                                  dim3(block_size),
-                                                                                  0,
-                                                                                  stream));
+    }
+    auto segmented_scan_kernel = [=](auto target_config)
+    {
+        segmented_scan<decltype(target_config), Exclusive, result_type>(
+            input,
+            output,
+            begin_offsets,
+            end_offsets,
+            static_cast<result_type>(initial_value),
+            scan_op);
+    };
+
+    ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<Config, Selector>(current_target,
+                                                                  segmented_scan_kernel,
+                                                                  dim3(segments),
+                                                                  dim3(block_size),
+                                                                  0,
+                                                                  stream));
     ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("segmented_scan", segments, start);
     return hipSuccess;
 }
@@ -221,6 +191,8 @@ inline hipError_t segmented_scan_impl(void*               temporary_storage,
 /// In this example a device-level segmented inclusive min-scan operation is performed on
 /// an array of integer values (<tt>short</tt>s are scanned into <tt>int</tt>s) using custom operator.
 ///
+/// The full example is [on GitHub](https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocprim/example/rocprim/device/example_device_segmented_scan.cpp).
+///
 /// \code{.cpp}
 /// #include <rocprim/rocprim.hpp>
 ///
@@ -249,7 +221,7 @@ inline hipError_t segmented_scan_impl(void*               temporary_storage,
 /// hipMalloc(&temporary_storage_ptr, temporary_storage_size_bytes);
 ///
 /// // perform scan
-/// rocprim::inclusive_scan(
+/// rocprim::segmented_inclusive_scan(
 ///     temporary_storage_ptr, temporary_storage_size_bytes,
 ///     input, output, segments, offsets, offsets + 1, min_op
 /// );

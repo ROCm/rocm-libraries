@@ -1,37 +1,16 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <common/CommonGraphs.hpp>
 
 #include <rocRoller/DataTypes/DataTypes.hpp>
 #include <rocRoller/KernelGraph/CoordinateGraph/CoordinateGraph.hpp>
+#include <rocRoller/KernelOptions.hpp>
 #include <rocRoller/Operations/Command.hpp>
 
 namespace rocRollerTest::Graphs
 {
+    namespace SolutionParams = rocRoller::Parameters::Solution;
     using namespace rocRoller;
 
     /*
@@ -130,9 +109,11 @@ namespace rocRollerTest::Graphs
 
     void MatrixMultiply::setUseLDS(bool a, bool b, bool d)
     {
-        m_useLDSA = a;
-        m_useLDSB = b;
-        m_useLDSD = d;
+        m_loadPathA = a ? SolutionParams::LoadPath::BufferToLDSViaVGPR
+                        : SolutionParams::LoadPath::BufferToVGPR;
+        m_loadPathB = b ? SolutionParams::LoadPath::BufferToLDSViaVGPR
+                        : SolutionParams::LoadPath::BufferToVGPR;
+        m_useLDSD   = d;
     }
 
     std::shared_ptr<CommandParameters> MatrixMultiply::getCommandParameters() const
@@ -145,7 +126,7 @@ namespace rocRollerTest::Graphs
             auto macTileA = MacroTile({m_macM, m_macK},
                                       LayoutType::MATRIX_A,
                                       {m_waveM, m_waveN, m_waveK, m_waveB},
-                                      m_useLDSA ? MemoryType::WAVE_LDS : MemoryType::WAVE);
+                                      GetMemoryType(m_loadPathA));
             params->setDimensionInfo(m_tagA, macTileA);
         }
         if(m_aMode == Operations::ScaleMode::Separate)
@@ -153,14 +134,14 @@ namespace rocRollerTest::Graphs
             auto macTileScaleA = MacroTile({m_macM, m_macK / 32},
                                            LayoutType::MATRIX_A,
                                            {m_waveM, m_waveN, m_waveK / 32, m_waveB},
-                                           m_useLDSA ? MemoryType::WAVE_LDS : MemoryType::WAVE);
+                                           GetMemoryType(SolutionParams::LoadPath::BufferToVGPR));
             params->setDimensionInfo(m_tagScaleA, macTileScaleA);
         }
         {
             auto macTileB = MacroTile({m_macK, m_macN},
                                       LayoutType::MATRIX_B,
                                       {m_waveM, m_waveN, m_waveK, m_waveB},
-                                      m_useLDSB ? MemoryType::WAVE_LDS : MemoryType::WAVE);
+                                      GetMemoryType(m_loadPathB));
             params->setDimensionInfo(m_tagB, macTileB);
         }
         if(m_bMode == Operations::ScaleMode::Separate)
@@ -168,7 +149,7 @@ namespace rocRollerTest::Graphs
             auto macTileScaleB = MacroTile({m_macK, m_macN / 32},
                                            LayoutType::MATRIX_B,
                                            {m_waveM, m_waveN, m_waveK / 32, m_waveB},
-                                           m_useLDSB ? MemoryType::WAVE_LDS : MemoryType::WAVE);
+                                           GetMemoryType(SolutionParams::LoadPath::BufferToVGPR));
             params->setDimensionInfo(m_tagScaleB, macTileScaleB);
         }
         {
@@ -226,28 +207,50 @@ namespace rocRollerTest::Graphs
                                               ? std::vector<size_t>({(size_t)0, (size_t)1})
                                               : std::vector<size_t>({});
 
-        auto tagTensorA = m_command->addOperation(rocRoller::Operations::Tensor(
-            2, m_ta, m_problem.transA == "N" ? oneStridesN : oneStridesT)); // A
-        m_tagA          = m_command->addOperation(rocRoller::Operations::T_Load_Tiled(tagTensorA));
+        m_tagTensorA = m_command->addOperation(rocRoller::Operations::Tensor(
+            2, m_ta, {}, m_problem.transA == "N" ? oneStridesN : oneStridesT)); // A
+        m_tagA       = m_command->addOperation(rocRoller::Operations::T_Load_Tiled(m_tagTensorA));
+        auto tagA    = m_tagA;
 
-        auto tagTensorB = m_command->addOperation(rocRoller::Operations::Tensor(
-            2, m_tb, m_problem.transB == "N" ? oneStridesN : oneStridesT)); // B
-        m_tagB          = m_command->addOperation(rocRoller::Operations::T_Load_Tiled(tagTensorB));
+        if(m_problem.scaleAMode == Operations::ScaleMode::Separate)
+        {
+            auto scaleA
+                = m_command->addOperation(rocRoller::Operations::Tensor(2, m_problem.scaleTypeA));
+            m_tagScaleA = m_command->addOperation(rocRoller::Operations::T_Load_Tiled(scaleA));
 
-        auto tagTensorC
-            = m_command->addOperation(rocRoller::Operations::Tensor(2, m_tc, oneStridesN)); // C
-        m_tagC = m_command->addOperation(rocRoller::Operations::T_Load_Tiled(tagTensorC));
+            tagA = m_command->addOperation(rocRoller::Operations::BlockScale(
+                tagA, 2, m_tagScaleA, {1ul, static_cast<size_t>(m_problem.scaleBlockSize)}));
+        }
 
-        auto tagScalarAlpha
+        m_tagTensorB = m_command->addOperation(rocRoller::Operations::Tensor(
+            2, m_tb, {}, m_problem.transB == "N" ? oneStridesN : oneStridesT)); // B
+        m_tagB       = m_command->addOperation(rocRoller::Operations::T_Load_Tiled(m_tagTensorB));
+        auto tagB    = m_tagB;
+
+        if(m_problem.scaleBMode == Operations::ScaleMode::Separate)
+        {
+            auto scaleB
+                = m_command->addOperation(rocRoller::Operations::Tensor(2, m_problem.scaleTypeB));
+            m_tagScaleB = m_command->addOperation(rocRoller::Operations::T_Load_Tiled(scaleB));
+
+            tagB = m_command->addOperation(rocRoller::Operations::BlockScale(
+                tagB, 2, m_tagScaleB, {static_cast<size_t>(m_problem.scaleBlockSize), 1ul}));
+        }
+
+        m_tagTensorC
+            = m_command->addOperation(rocRoller::Operations::Tensor(2, m_tc, {}, oneStridesN)); // C
+        m_tagC = m_command->addOperation(rocRoller::Operations::T_Load_Tiled(m_tagTensorC));
+
+        m_tagScalarAlpha
             = m_command->addOperation(rocRoller::Operations::Scalar(DataType::Float)); // alpha
         auto tagLoadAlpha
-            = m_command->addOperation(rocRoller::Operations::T_Load_Scalar(tagScalarAlpha));
+            = m_command->addOperation(rocRoller::Operations::T_Load_Scalar(m_tagScalarAlpha));
 
-        auto tagScalarBeta = m_command->addOperation(rocRoller::Operations::Scalar(m_tc)); // beta
-        auto tagLoadBeta
-            = m_command->addOperation(rocRoller::Operations::T_Load_Scalar(tagScalarBeta)); // beta
+        m_tagScalarBeta  = m_command->addOperation(rocRoller::Operations::Scalar(m_tc)); // beta
+        auto tagLoadBeta = m_command->addOperation(
+            rocRoller::Operations::T_Load_Scalar(m_tagScalarBeta)); // beta
 
-        auto tagAB = m_command->addOperation(rocRoller::Operations::T_Mul(m_tagA, m_tagB)); // A * B
+        auto tagAB = m_command->addOperation(rocRoller::Operations::T_Mul(tagA, tagB)); // A * B
 
         rocRoller::Operations::T_Execute execute(m_command->getNextTag());
 
@@ -269,9 +272,9 @@ namespace rocRollerTest::Graphs
         }
         m_command->addOperation(std::move(execute));
 
-        auto tagTensorD
-            = m_command->addOperation(rocRoller::Operations::Tensor(2, m_td, oneStridesN)); // D
-        m_command->addOperation(rocRoller::Operations::T_Store_Tiled(m_tagD, tagTensorD)); // D
+        m_tagTensorD
+            = m_command->addOperation(rocRoller::Operations::Tensor(2, m_td, {}, oneStridesN)); // D
+        m_command->addOperation(rocRoller::Operations::T_Store_Tiled(m_tagD, m_tagTensorD)); // D
 
         if(m_problem.streamK)
         {
@@ -283,12 +286,24 @@ namespace rocRollerTest::Graphs
                                                          rocRoller::NUMWGS);
         }
 
-        auto tagScratch = m_command->allocateTag();
+        m_scratchTags[Operations::ScratchPolicy::None] = m_command->allocateTag();
+        m_command->addOperation(rocRoller::Operations::Scratch(
+            m_scratchTags[Operations::ScratchPolicy::None], Operations::ScratchPolicy::None));
         m_command->allocateArgument(VariableType(DataType::UInt32, PointerType::PointerGlobal),
-                                    tagScratch,
+                                    m_scratchTags[Operations::ScratchPolicy::None],
                                     ArgumentType::Value,
                                     DataDirection::ReadWrite,
-                                    rocRoller::SCRATCH);
+                                    getScratchName(Operations::ScratchPolicy::None));
+        m_scratchTags[Operations::ScratchPolicy::ZeroedBeforeAndAfter] = m_command->allocateTag();
+        m_command->addOperation(rocRoller::Operations::Scratch(
+            m_scratchTags[Operations::ScratchPolicy::ZeroedBeforeAndAfter],
+            Operations::ScratchPolicy::ZeroedBeforeAndAfter));
+        m_command->allocateArgument(
+            VariableType(DataType::UInt32, PointerType::PointerGlobal),
+            m_scratchTags[Operations::ScratchPolicy::ZeroedBeforeAndAfter],
+            ArgumentType::Value,
+            DataDirection::ReadWrite,
+            getScratchName(Operations::ScratchPolicy::ZeroedBeforeAndAfter));
     }
 
     CommandPtr GEMM::getCommand()
@@ -321,9 +336,12 @@ namespace rocRollerTest::Graphs
 
     void GEMM::setUseLDS(bool a, bool b, bool d)
     {
-        m_problem.loadLDSA  = a;
-        m_problem.loadLDSB  = b;
-        m_problem.storeLDSD = d;
+        m_problem.loadPathA = a ? SolutionParams::LoadPath::BufferToLDSViaVGPR
+                                : SolutionParams::LoadPath::BufferToVGPR;
+        m_problem.loadPathB = b ? SolutionParams::LoadPath::BufferToLDSViaVGPR
+                                : SolutionParams::LoadPath::BufferToVGPR;
+        m_problem.storePath = d ? SolutionParams::StorePath::VGPRToGlobalMemoryViaLDSWithBuffer
+                                : SolutionParams::StorePath::VGPRToGlobalMemoryWithBuffer;
     }
 
     void GEMM::setPrefetch(bool prefetch,
@@ -339,10 +357,71 @@ namespace rocRollerTest::Graphs
         m_problem.unrollK = std::max(2, prefetchInFlight);
     }
 
-    void GEMM::setUnroll(unsigned int unrollX, unsigned int unrollY)
+    void GEMM::setUnroll(unsigned int unrollK)
     {
-        m_problem.unrollX = unrollX;
-        m_problem.unrollY = unrollY;
+        m_problem.unrollK = unrollK;
+    }
+
+    void GEMM::setStreamK(StreamKMode streamKMode)
+    {
+        m_problem.streamK = streamKMode;
+    }
+
+    void GEMM::setScaling(Operations::ScaleMode aMode,
+                          Operations::ScaleMode bMode,
+                          DataType              scaleTypeA,
+                          DataType              scaleTypeB,
+                          int                   scaleBlockSize)
+    {
+        m_problem.scaleAMode     = aMode;
+        m_problem.scaleBMode     = bMode;
+        m_problem.scaleTypeA     = scaleTypeA;
+        m_problem.scaleTypeB     = scaleTypeB;
+        m_problem.scaleBlockSize = scaleBlockSize;
+    }
+
+    void GEMM::setScaleLoadPaths(SolutionParams::LoadPath scalePathA,
+                                 SolutionParams::LoadPath scalePathB)
+    {
+        m_problem.loadScalePathA = scalePathA;
+        m_problem.loadScalePathB = scalePathB;
+    }
+
+    void GEMM::setSwizzle(int m, int n, int k, int b, bool prefetch)
+    {
+        m_problem.swizzleScale  = true;
+        m_problem.swizzleM      = m;
+        m_problem.swizzleN      = n;
+        m_problem.swizzleK      = k;
+        m_problem.swizzleB      = b;
+        m_problem.prefetchScale = prefetch;
+    }
+
+    void GEMM::setTranspose(std::string const& transA, std::string const& transB)
+    {
+        m_problem.transA = transA;
+        m_problem.transB = transB;
+    }
+
+    void GEMM::setPad(decltype(m_problem.padA) padA, decltype(m_problem.padB) padB)
+    {
+        m_problem.padA = padA;
+        m_problem.padB = padB;
+    }
+
+    std::pair<std::optional<Operations::OperationTag>, std::optional<Operations::OperationTag>>
+        GEMM::getABScaleTags() const
+    {
+        std::optional<Operations::OperationTag> scaleA;
+        std::optional<Operations::OperationTag> scaleB;
+
+        if(m_problem.scaleAMode == Operations::ScaleMode::Separate)
+            scaleA = m_tagScaleA;
+
+        if(m_problem.scaleBMode == Operations::ScaleMode::Separate)
+            scaleB = m_tagScaleB;
+
+        return {scaleA, scaleB};
     }
 
     void GEMM::setProblem(GEMMProblem const& problem)
@@ -350,13 +429,24 @@ namespace rocRollerTest::Graphs
         m_problem = problem;
     }
 
+    int GEMM::getFlattenedWorkgroupSize() const
+    {
+        return m_problem.workgroupSizeX * m_problem.workgroupSizeY;
+    }
+
     CommandParametersPtr GEMM::getCommandParameters() const
     {
         using namespace rocRoller::KernelGraph::CoordinateGraph;
 
+        AssertFatal(!m_tagA.uninitialized() && !m_tagB.uninitialized() && !m_tagC.uninitialized()
+                        && !m_tagD.uninitialized(),
+                    "Command not yet created, call getCommand() first");
+
         auto params = std::make_shared<CommandParameters>();
 
         params->setManualKernelDimension(2);
+        params->ldsPadding[LayoutType::MATRIX_A] = m_problem.padA;
+        params->ldsPadding[LayoutType::MATRIX_B] = m_problem.padB;
 
         AssertFatal(m_problem.workgroupSizeX % m_problem.wavefrontSize == 0,
                     "Workgroup Size X must be multiply of wave front size");
@@ -378,26 +468,124 @@ namespace rocRollerTest::Graphs
             = MacroTile({m_problem.macM, m_problem.macK},
                         LayoutType::MATRIX_A,
                         {m_problem.waveM, m_problem.waveN, m_problem.waveK, m_problem.waveB},
-                        m_problem.loadLDSA ? MemoryType::WAVE_LDS : MemoryType::WAVE);
+                        GetMemoryType(m_problem.loadPathA));
         auto macTileB
             = MacroTile({m_problem.macK, m_problem.macN},
                         LayoutType::MATRIX_B,
                         {m_problem.waveM, m_problem.waveN, m_problem.waveK, m_problem.waveB},
-                        m_problem.loadLDSB ? MemoryType::WAVE_LDS : MemoryType::WAVE);
+                        GetMemoryType(m_problem.loadPathB));
         auto macTileC
             = MacroTile({m_problem.macM, m_problem.macN},
                         LayoutType::MATRIX_ACCUMULATOR,
                         {m_problem.waveM, m_problem.waveN, m_problem.waveK, m_problem.waveB});
-        auto macTileD
-            = MacroTile({m_problem.macM, m_problem.macN},
-                        LayoutType::MATRIX_ACCUMULATOR,
-                        {m_problem.waveM, m_problem.waveN, m_problem.waveK, m_problem.waveB},
-                        m_problem.storeLDSD ? MemoryType::WAVE_LDS : MemoryType::WAVE);
+        auto macTileD = MacroTile(
+            {m_problem.macM, m_problem.macN},
+            LayoutType::MATRIX_ACCUMULATOR,
+            {m_problem.waveM, m_problem.waveN, m_problem.waveK, m_problem.waveB},
+            m_problem.storePath == SolutionParams::StorePath::VGPRToGlobalMemoryViaLDSWithBuffer
+                ? MemoryType::WAVE_LDS
+                : MemoryType::WAVE);
 
         params->setDimensionInfo(m_tagA, macTileA);
+
+        if(m_problem.scaleAMode == Operations::ScaleMode::Separate)
+        {
+            int  blockSize     = m_problem.scaleBlockSize > 0 ? m_problem.scaleBlockSize : 32;
+            auto macTileScaleA = MacroTile(
+                {m_problem.macM, m_problem.macK / blockSize},
+                LayoutType::MATRIX_A,
+                {m_problem.waveM, m_problem.waveN, m_problem.waveK / blockSize, m_problem.waveB},
+                GetMemoryType(SolutionParams::LoadPath::BufferToVGPR));
+            params->setDimensionInfo(m_tagScaleA, macTileScaleA);
+        }
+
         params->setDimensionInfo(m_tagB, macTileB);
+
+        if(m_problem.scaleBMode == Operations::ScaleMode::Separate)
+        {
+            int  blockSize     = m_problem.scaleBlockSize > 0 ? m_problem.scaleBlockSize : 32;
+            auto macTileScaleB = MacroTile(
+                {m_problem.macK, m_problem.macN / blockSize},
+                LayoutType::MATRIX_B,
+                {m_problem.waveM, m_problem.waveN, m_problem.waveK / blockSize, m_problem.waveB},
+                GetMemoryType(SolutionParams::LoadPath::BufferToVGPR));
+            params->setDimensionInfo(m_tagScaleB, macTileScaleB);
+        }
+
         params->setDimensionInfo(m_tagC, macTileC);
         params->setDimensionInfo(m_tagD, macTileD);
+
+        if(m_problem.scaleAMode == Operations::ScaleMode::Separate)
+        {
+            MacroTile macTileScaleA;
+            if(m_problem.swizzleScale)
+            {
+                macTileScaleA
+                    = MacroTile({m_problem.macM, m_problem.macK / m_problem.scaleBlockSize},
+                                LayoutType::MATRIX_A,
+                                {m_problem.waveM,
+                                 m_problem.waveN,
+                                 m_problem.waveK / m_problem.scaleBlockSize,
+                                 m_problem.waveB},
+                                GetMemoryType(m_problem.loadScalePathA),
+                                {m_problem.waveM,
+                                 m_problem.waveN,
+                                 m_problem.waveK / m_problem.scaleBlockSize,
+                                 m_problem.waveB},
+                                {m_problem.swizzleM,
+                                 m_problem.swizzleN,
+                                 m_problem.swizzleK,
+                                 m_problem.swizzleB});
+            }
+            else
+            {
+                macTileScaleA
+                    = MacroTile({m_problem.macM, m_problem.macK / m_problem.scaleBlockSize},
+                                LayoutType::MATRIX_A,
+                                {m_problem.waveM,
+                                 m_problem.waveN,
+                                 m_problem.waveK / m_problem.scaleBlockSize,
+                                 m_problem.waveB},
+                                GetMemoryType(m_problem.loadScalePathA));
+            }
+            params->setDimensionInfo(m_tagScaleA, macTileScaleA);
+        }
+
+        if(m_problem.scaleBMode == Operations::ScaleMode::Separate)
+        {
+            MacroTile macTileScaleB;
+            if(m_problem.swizzleScale)
+            {
+                macTileScaleB
+                    = MacroTile({m_problem.macK / m_problem.scaleBlockSize, m_problem.macN},
+                                LayoutType::MATRIX_B,
+                                {m_problem.waveM,
+                                 m_problem.waveN,
+                                 m_problem.waveK / m_problem.scaleBlockSize,
+                                 m_problem.waveB},
+                                GetMemoryType(m_problem.loadScalePathB),
+                                {m_problem.waveM,
+                                 m_problem.waveN,
+                                 m_problem.waveK / m_problem.scaleBlockSize,
+                                 m_problem.waveB},
+                                {m_problem.swizzleM,
+                                 m_problem.swizzleN,
+                                 m_problem.swizzleK,
+                                 m_problem.swizzleB});
+            }
+            else
+            {
+                macTileScaleB
+                    = MacroTile({m_problem.macK / m_problem.scaleBlockSize, m_problem.macN},
+                                LayoutType::MATRIX_B,
+                                {m_problem.waveM,
+                                 m_problem.waveN,
+                                 m_problem.waveK / m_problem.scaleBlockSize,
+                                 m_problem.waveB},
+                                GetMemoryType(m_problem.loadScalePathB));
+            }
+            params->setDimensionInfo(m_tagScaleB, macTileScaleB);
+        }
 
         // Workgroup size
         // uint wavefrontSize  = 64;
@@ -417,14 +605,14 @@ namespace rocRollerTest::Graphs
         params->fuseLoops                     = m_problem.fuseLoops;
         params->tailLoops                     = m_problem.tailLoops;
         params->allowAmbiguousMemoryNodes     = m_problem.allowAmbiguousMemoryNodes;
-        params->unrollX                       = m_problem.unrollX;
-        params->unrollY                       = m_problem.unrollY;
         params->unrollK                       = m_problem.unrollK;
         params->packMultipleElementsInto1VGPR = m_problem.packMultipleElementsInto1VGPR;
         params->prefetch                      = m_problem.prefetch;
         params->prefetchInFlight              = m_problem.prefetchInFlight;
         params->prefetchLDSFactor             = m_problem.prefetchLDSFactor;
         params->prefetchMixMemOps             = m_problem.prefetchMixMemOps;
+        params->swizzleScale                  = m_problem.swizzleScale;
+        params->prefetchScale                 = m_problem.prefetchScale;
         // params->prefetchMixMemOps             = true;
         params->transposeMemoryAccess.set(LayoutType::MATRIX_A, m_problem.transA == "T");
         params->transposeMemoryAccess.set(LayoutType::MATRIX_B, m_problem.transB == "T");
@@ -438,5 +626,14 @@ namespace rocRollerTest::Graphs
         }
 
         return params;
+    }
+
+    std::tuple<rocRoller::Operations::OperationTag,
+               rocRoller::Operations::OperationTag,
+               rocRoller::Operations::OperationTag,
+               rocRoller::Operations::OperationTag>
+        GEMM::getOperationTags() const
+    {
+        return {m_tagA, m_tagB, m_tagC, m_tagD};
     }
 }

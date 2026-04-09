@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2020 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -30,6 +30,7 @@
 #include <complex>
 #include <hip/hip_runtime_api.h>
 #include <hipsparse/hipsparse.h>
+#include <inttypes.h>
 #include <math.h>
 #include <sstream>
 #include <stdio.h>
@@ -46,7 +47,113 @@
 #ifdef _OPENMP
 #include <omp.h>
 #endif
+
+#include <filesystem>
+namespace fs = std::filesystem;
+
+/*! \brief Return path of this executable */
 std::string hipsparse_exepath();
+/*! \brief Return path where the test data file (hipsparse_test.data) is located */
+std::string hipsparse_datapath();
+
+inline void missing_file_error_message(const char* filename)
+{
+    std::cerr << "#" << std::endl;
+    std::cerr << "# error:" << std::endl;
+    std::cerr << "# cannot open file '" << filename << "'" << std::endl;
+    std::cerr << "#" << std::endl;
+    std::cerr << "# PLEASE READ CAREFULLY !" << std::endl;
+    std::cerr << "#" << std::endl;
+    std::cerr << "# What could be the reason of this error: " << std::endl;
+    std::cerr << "# You are running the testing application and it expects to find the file "
+                 "at the specified location. This means that either you did not download the test "
+                 "matrices, or you did not specify the location of the folder containing your "
+                 "files. If you want to specify the location of the folder containing your files, "
+                 "then you will find the needed information with 'hipsparse-test --help'."
+                 "If you need to download matrices, then a cmake script "
+                 "'hipsparse_clientmatrices.cmake' is available from the hipsparse client package."
+              << std::endl;
+    std::cerr << "#" << std::endl;
+    std::cerr
+        << "# Examples: 'hipsparse_clientmatrices.cmake -DCMAKE_MATRICES_DIR=<path-of-your-folder>'"
+        << std::endl;
+    std::cerr << "#           'hipsparse-test --matrices-dir <path-of-your-folder>'" << std::endl;
+    std::cerr << "# (or        'export "
+                 "HIPSPARSE_CLIENTS_MATRICES_DIR=<path-of-your-folder>;hipsparse-test')"
+              << std::endl;
+    std::cerr << "#" << std::endl;
+}
+
+static const char* s_hipsparse_clients_matrices_dir = nullptr;
+
+inline const char* get_hipsparse_clients_matrices_dir()
+{
+    return s_hipsparse_clients_matrices_dir;
+}
+
+inline std::string get_filename(const std::string& matrix_filename)
+{
+    std::string matrix_filename_with_ext = matrix_filename;
+
+    // Check if file already has extension, keep it, otherwise add .csr extension
+    size_t last_dot_pos = matrix_filename_with_ext.find_last_of('.');
+    if(last_dot_pos == std::string::npos || last_dot_pos == 0)
+    {
+        matrix_filename_with_ext += ".bin";
+    }
+
+    const char* matrices_dir = get_hipsparse_clients_matrices_dir();
+    if(matrices_dir == nullptr)
+    {
+        matrices_dir = getenv("HIPSPARSE_CLIENTS_MATRICES_DIR");
+    }
+
+    fs::path matrix_path;
+    if(matrices_dir != nullptr)
+    {
+        matrix_path = fs::path(matrices_dir) / matrix_filename_with_ext;
+    }
+    else
+    {
+        static constexpr const char* possible_relative_paths[] = {
+            // Development build: executable in build_dir/clients/staging, matrices in build_dir/clients/matrices
+            "../matrices",
+            // TheRock installation: executable in TheRock/bin, matrices in TheRock/clients/matrices
+            "../clients/matrices",
+        };
+
+        for(const auto& rel_path : possible_relative_paths)
+        {
+            fs::path test_path = fs::path(hipsparse_exepath()) / rel_path;
+            if(fs::exists(test_path))
+            {
+                matrix_path = test_path / matrix_filename_with_ext;
+                break;
+            }
+        }
+
+        if(matrix_path.empty())
+        {
+            missing_file_error_message(matrix_path.string().c_str());
+            std::cerr << "exit(HIPSPARSE_STATUS_INTERNAL_ERROR)" << std::endl;
+            exit(HIPSPARSE_STATUS_INTERNAL_ERROR);
+        }
+    }
+
+    FILE* tmpf = fopen(matrix_path.string().c_str(), "r");
+    if(!tmpf)
+    {
+        missing_file_error_message(matrix_path.string().c_str());
+        std::cerr << "exit(HIPSPARSE_STATUS_INTERNAL_ERROR)" << std::endl;
+        exit(HIPSPARSE_STATUS_INTERNAL_ERROR);
+    }
+    else
+    {
+        fclose(tmpf);
+    }
+    return matrix_path.string();
+}
+
 /*!\file
  * \brief provide data initialization and timing utilities.
  */
@@ -57,86 +164,129 @@ std::string hipsparse_exepath();
 #define BSR_IND_R(j, bi, bj) (bsr_dim * bsr_dim * (j) + (bi)*bsr_dim + (bj))
 #define BSR_IND_C(j, bi, bj) (bsr_dim * bsr_dim * (j) + (bi) + (bj)*bsr_dim)
 
-#define CHECK_HIP_ERROR(error)                \
-    if(error != hipSuccess)                   \
-    {                                         \
-        fprintf(stderr,                       \
-                "error: '%s'(%d) at %s:%d\n", \
-                hipGetErrorString(error),     \
-                error,                        \
-                __FILE__,                     \
-                __LINE__);                    \
-        exit(EXIT_FAILURE);                   \
-    }
-
 #if(!defined(CUDART_VERSION) || (CUDART_VERSION >= 11003))
-
-#define CHECK_HIPSPARSE_ERROR_CASE__(token_) \
-    case token_:                             \
-        fprintf(stderr, #token_);            \
-        break
-
-#define CHECK_HIPSPARSE_ERROR(error)                                                      \
-    {                                                                                     \
-        auto local_error = (error);                                                       \
-        if(local_error != HIPSPARSE_STATUS_SUCCESS)                                       \
-        {                                                                                 \
-            fprintf(stderr, "hipSPARSE error: ");                                         \
-            switch(local_error)                                                           \
-            {                                                                             \
-                CHECK_HIPSPARSE_ERROR_CASE__(HIPSPARSE_STATUS_SUCCESS);                   \
-                CHECK_HIPSPARSE_ERROR_CASE__(HIPSPARSE_STATUS_NOT_INITIALIZED);           \
-                CHECK_HIPSPARSE_ERROR_CASE__(HIPSPARSE_STATUS_ALLOC_FAILED);              \
-                CHECK_HIPSPARSE_ERROR_CASE__(HIPSPARSE_STATUS_INVALID_VALUE);             \
-                CHECK_HIPSPARSE_ERROR_CASE__(HIPSPARSE_STATUS_ARCH_MISMATCH);             \
-                CHECK_HIPSPARSE_ERROR_CASE__(HIPSPARSE_STATUS_MAPPING_ERROR);             \
-                CHECK_HIPSPARSE_ERROR_CASE__(HIPSPARSE_STATUS_EXECUTION_FAILED);          \
-                CHECK_HIPSPARSE_ERROR_CASE__(HIPSPARSE_STATUS_INTERNAL_ERROR);            \
-                CHECK_HIPSPARSE_ERROR_CASE__(HIPSPARSE_STATUS_MATRIX_TYPE_NOT_SUPPORTED); \
-                CHECK_HIPSPARSE_ERROR_CASE__(HIPSPARSE_STATUS_ZERO_PIVOT);                \
-                CHECK_HIPSPARSE_ERROR_CASE__(HIPSPARSE_STATUS_NOT_SUPPORTED);             \
-                CHECK_HIPSPARSE_ERROR_CASE__(HIPSPARSE_STATUS_INSUFFICIENT_RESOURCES);    \
-            }                                                                             \
-            fprintf(stderr, "\n");                                                        \
-            return local_error;                                                           \
-        }                                                                                 \
-    }                                                                                     \
-    (void)0
-
+inline const char* hipsparseStatusToString(hipsparseStatus_t status)
+{
+    switch(status)
+    {
+    case HIPSPARSE_STATUS_SUCCESS:
+        return "HIPSPARSE_STATUS_SUCCESS";
+    case HIPSPARSE_STATUS_NOT_INITIALIZED:
+        return "HIPSPARSE_STATUS_NOT_INITIALIZED";
+    case HIPSPARSE_STATUS_ALLOC_FAILED:
+        return "HIPSPARSE_STATUS_ALLOC_FAILED";
+    case HIPSPARSE_STATUS_INVALID_VALUE:
+        return "HIPSPARSE_STATUS_INVALID_VALUE";
+    case HIPSPARSE_STATUS_ARCH_MISMATCH:
+        return "HIPSPARSE_STATUS_ARCH_MISMATCH";
+    case HIPSPARSE_STATUS_MAPPING_ERROR:
+        return "HIPSPARSE_STATUS_MAPPING_ERROR";
+    case HIPSPARSE_STATUS_EXECUTION_FAILED:
+        return "HIPSPARSE_STATUS_EXECUTION_FAILED";
+    case HIPSPARSE_STATUS_INTERNAL_ERROR:
+        return "HIPSPARSE_STATUS_INTERNAL_ERROR";
+    case HIPSPARSE_STATUS_MATRIX_TYPE_NOT_SUPPORTED:
+        return "HIPSPARSE_STATUS_MATRIX_TYPE_NOT_SUPPORTED";
+    case HIPSPARSE_STATUS_ZERO_PIVOT:
+        return "HIPSPARSE_STATUS_ZERO_PIVOT";
+    case HIPSPARSE_STATUS_NOT_SUPPORTED:
+        return "HIPSPARSE_STATUS_NOT_SUPPORTED";
+    case HIPSPARSE_STATUS_INSUFFICIENT_RESOURCES:
+        return "HIPSPARSE_STATUS_INSUFFICIENT_RESOURCES";
+    }
+    return "<undefined HIPSPARSE_STATUS value>";
+}
 #else
-
-#define CHECK_HIPSPARSE_ERROR_CASE__(token_) \
-    case token_:                             \
-        fprintf(stderr, #token_);            \
-        break
-
-#define CHECK_HIPSPARSE_ERROR(error)                                                      \
-    {                                                                                     \
-        auto local_error = (error);                                                       \
-        if(local_error != HIPSPARSE_STATUS_SUCCESS)                                       \
-        {                                                                                 \
-            fprintf(stderr, "hipSPARSE error: ");                                         \
-            switch(local_error)                                                           \
-            {                                                                             \
-                CHECK_HIPSPARSE_ERROR_CASE__(HIPSPARSE_STATUS_SUCCESS);                   \
-                CHECK_HIPSPARSE_ERROR_CASE__(HIPSPARSE_STATUS_NOT_INITIALIZED);           \
-                CHECK_HIPSPARSE_ERROR_CASE__(HIPSPARSE_STATUS_ALLOC_FAILED);              \
-                CHECK_HIPSPARSE_ERROR_CASE__(HIPSPARSE_STATUS_INVALID_VALUE);             \
-                CHECK_HIPSPARSE_ERROR_CASE__(HIPSPARSE_STATUS_ARCH_MISMATCH);             \
-                CHECK_HIPSPARSE_ERROR_CASE__(HIPSPARSE_STATUS_MAPPING_ERROR);             \
-                CHECK_HIPSPARSE_ERROR_CASE__(HIPSPARSE_STATUS_EXECUTION_FAILED);          \
-                CHECK_HIPSPARSE_ERROR_CASE__(HIPSPARSE_STATUS_INTERNAL_ERROR);            \
-                CHECK_HIPSPARSE_ERROR_CASE__(HIPSPARSE_STATUS_MATRIX_TYPE_NOT_SUPPORTED); \
-                CHECK_HIPSPARSE_ERROR_CASE__(HIPSPARSE_STATUS_ZERO_PIVOT);                \
-                CHECK_HIPSPARSE_ERROR_CASE__(HIPSPARSE_STATUS_NOT_SUPPORTED);             \
-            }                                                                             \
-            fprintf(stderr, "\n");                                                        \
-            return local_error;                                                           \
-        }                                                                                 \
-    }                                                                                     \
-    (void)0
-
+inline const char* hipsparseStatusToString(hipsparseStatus_t status)
+{
+    switch(status)
+    {
+    case HIPSPARSE_STATUS_SUCCESS:
+        return "HIPSPARSE_STATUS_SUCCESS";
+    case HIPSPARSE_STATUS_NOT_INITIALIZED:
+        return "HIPSPARSE_STATUS_NOT_INITIALIZED";
+    case HIPSPARSE_STATUS_ALLOC_FAILED:
+        return "HIPSPARSE_STATUS_ALLOC_FAILED";
+    case HIPSPARSE_STATUS_INVALID_VALUE:
+        return "HIPSPARSE_STATUS_INVALID_VALUE";
+    case HIPSPARSE_STATUS_ARCH_MISMATCH:
+        return "HIPSPARSE_STATUS_ARCH_MISMATCH";
+    case HIPSPARSE_STATUS_MAPPING_ERROR:
+        return "HIPSPARSE_STATUS_MAPPING_ERROR";
+    case HIPSPARSE_STATUS_EXECUTION_FAILED:
+        return "HIPSPARSE_STATUS_EXECUTION_FAILED";
+    case HIPSPARSE_STATUS_INTERNAL_ERROR:
+        return "HIPSPARSE_STATUS_INTERNAL_ERROR";
+    case HIPSPARSE_STATUS_MATRIX_TYPE_NOT_SUPPORTED:
+        return "HIPSPARSE_STATUS_MATRIX_TYPE_NOT_SUPPORTED";
+    case HIPSPARSE_STATUS_ZERO_PIVOT:
+        return "HIPSPARSE_STATUS_ZERO_PIVOT";
+    case HIPSPARSE_STATUS_NOT_SUPPORTED:
+        return "HIPSPARSE_STATUS_NOT_SUPPORTED";
+    }
+    return "<undefined HIPSPARSE_STATUS value>";
+}
 #endif
+
+// CHECK_GENERATE_MATRIX_ERROR
+#ifdef GOOGLE_TEST
+#define CHECK_GENERATE_MATRIX_ERROR2(ERROR) ASSERT_EQ(ERROR, true)
+#else
+#define CHECK_GENERATE_MATRIX_ERROR2(ERROR)                                                        \
+    do                                                                                             \
+    {                                                                                              \
+        auto error = ERROR;                                                                        \
+        if(error != true)                                                                          \
+        {                                                                                          \
+            fprintf(                                                                               \
+                stderr, "Error encountered generating matrix data (%s:%d)\n", __FILE__, __LINE__); \
+            exit(EXIT_FAILURE);                                                                    \
+        }                                                                                          \
+    } while(0)
+#endif
+#define CHECK_GENERATE_MATRIX_ERROR(ERROR) CHECK_GENERATE_MATRIX_ERROR2(ERROR)
+
+// CHECK_HIP_ERROR
+#ifdef GOOGLE_TEST
+#define CHECK_HIP_ERROR2(ERROR) ASSERT_EQ(ERROR, hipSuccess)
+#else
+#define CHECK_HIP_ERROR2(ERROR)                   \
+    do                                            \
+    {                                             \
+        auto error = ERROR;                       \
+        if(error != hipSuccess)                   \
+        {                                         \
+            fprintf(stderr,                       \
+                    "error: '%s'(%d) at %s:%d\n", \
+                    hipGetErrorString(error),     \
+                    error,                        \
+                    __FILE__,                     \
+                    __LINE__);                    \
+            exit(EXIT_FAILURE);                   \
+        }                                         \
+    } while(0)
+#endif
+#define CHECK_HIP_ERROR(ERROR) CHECK_HIP_ERROR2(ERROR)
+
+// EXPECT_HIPSPARSE_STATUS
+#ifdef GOOGLE_TEST
+#define EXPECT_HIPSPARSE_STATUS2(STATUS, EXPECT) ASSERT_EQ(STATUS, EXPECT)
+#else
+#define EXPECT_HIPSPARSE_STATUS2(status, expect)                                            \
+    if(status != expect)                                                                    \
+    {                                                                                       \
+        std::cerr << "hipSPARSE status error: Expected " << hipsparseStatusToString(expect) \
+                  << ", received " << hipsparseStatusToString(status) << std::endl;         \
+        if(expect == HIPSPARSE_STATUS_SUCCESS)                                              \
+        {                                                                                   \
+            exit(EXIT_FAILURE);                                                             \
+        }                                                                                   \
+    }
+#endif
+#define EXPECT_HIPSPARSE_STATUS(STATUS, EXPECT) EXPECT_HIPSPARSE_STATUS2(STATUS, EXPECT)
+
+// CHECK_HIPSPARSE_ERROR
+#define CHECK_HIPSPARSE_ERROR(ERROR) EXPECT_HIPSPARSE_STATUS(ERROR, HIPSPARSE_STATUS_SUCCESS)
 
 #ifdef __HIP_PLATFORM_NVIDIA__
 static inline hipComplex operator-(const hipComplex& op)
@@ -439,21 +589,42 @@ void hipsparseInit(std::vector<T>& A, int M, int N)
 /* ============================================================================================ */
 /*! \brief  vector initialization: */
 // initialize sparse index vector with nnz entries ranging from start to end
+// Uses Fisher-Yates shuffle for efficiency
 template <typename I>
 void hipsparseInitIndex(I* x, int nnz, int start, int end)
 {
-    std::vector<bool> check(end - start, false);
-    int               num = 0;
-    while(num < nnz)
+    int range = end - start;
+
+    if(nnz >= range)
     {
-        int val = start + rand() % (end - start);
-        if(!check[val - start])
+        for(int i = 0; i < nnz; ++i)
         {
-            x[num]             = val;
-            check[val - start] = true;
-            ++num;
+            x[i] = start + i;
         }
+
+        return;
     }
+
+    // Create sequential array and shuffle first nnz elements
+    std::vector<int> indices(range);
+    for(int i = 0; i < range; ++i)
+    {
+        indices[i] = start + i;
+    }
+
+    // Partial Fisher-Yates shuffle - only need first nnz elements
+    for(int i = 0; i < nnz; ++i)
+    {
+        int j = i + rand() % (range - i);
+        std::swap(indices[i], indices[j]);
+    }
+
+    // Copy first nnz elements
+    for(int i = 0; i < nnz; ++i)
+    {
+        x[i] = indices[i];
+    }
+
     std::sort(x, x + nnz);
 };
 
@@ -761,13 +932,13 @@ static void sort(std::vector<I>& perm, std::vector<I>& unsorted_row, std::vector
 template <typename I>
 inline void scan(const char* line, I* nrow, I* ncol, int64_t* nnz)
 {
-    sscanf(line, "%d %d %ld", nrow, ncol, nnz);
+    sscanf(line, "%d %d %" PRId64, nrow, ncol, nnz);
 }
 
 template <>
 inline void scan<int64_t>(const char* line, int64_t* nrow, int64_t* ncol, int64_t* nnz)
 {
-    sscanf(line, "%ld %ld %ld", nrow, ncol, nnz);
+    sscanf(line, "%" PRId64 " %" PRId64 " %" PRId64, nrow, ncol, nnz);
 }
 
 template <typename I, typename T>
@@ -987,7 +1158,9 @@ int read_bin_matrix(const char*          filename,
 
     int err;
 
-    int nrowf, ncolf, nnzf;
+    int nrowf = 0;
+    int ncolf = 0;
+    int nnzf  = 0;
 
     err = fread(&nrowf, sizeof(int), 1, f);
     err |= fread(&ncolf, sizeof(int), 1, f);
@@ -1066,7 +1239,7 @@ bool generate_csr_matrix(const std::string    filename,
                          hipsparseIndexBase_t idx_base)
 {
     // If no filename passed, generate matrix
-    if(filename == "")
+    if(filename == "" || filename == "*")
     {
         double scale = 0.02;
         if(nrow > 1000 || ncol > 1000)
@@ -1094,21 +1267,34 @@ bool generate_csr_matrix(const std::string    filename,
     }
     else
     {
-        std::string extension = filename.substr(filename.find_last_of(".") + 1);
+        std::string full_filename_path = get_filename(filename);
+        std::string extension = full_filename_path.substr(full_filename_path.find_last_of(".") + 1);
+
         if(extension == "bin")
         {
-            if(read_bin_matrix(
-                   filename.c_str(), nrow, ncol, nnz, csr_row_ptr, csr_col_ind, csr_val, idx_base)
+            if(read_bin_matrix(full_filename_path.c_str(),
+                               nrow,
+                               ncol,
+                               nnz,
+                               csr_row_ptr,
+                               csr_col_ind,
+                               csr_val,
+                               idx_base)
                == 0)
             {
                 return true;
+            }
+            else
+            {
+                fprintf(stderr, "Cannot open [read] %s\ncol", full_filename_path.c_str());
+                return false;
             }
         }
         else if(extension == "mtx")
         {
             int64_t        nnz_count;
             std::vector<J> coo_row_ind;
-            if(read_mtx_matrix(filename.c_str(),
+            if(read_mtx_matrix(full_filename_path.c_str(),
                                nrow,
                                ncol,
                                nnz_count,
@@ -1137,6 +1323,11 @@ bool generate_csr_matrix(const std::string    filename,
                     return true;
                 }
             }
+            else
+            {
+                fprintf(stderr, "Cannot open [read] %s\ncol", full_filename_path.c_str());
+                return false;
+            }
         }
     }
 
@@ -1156,7 +1347,7 @@ bool generate_coo_matrix(const std::string    filename,
                          hipsparseIndexBase_t idx_base)
 {
     // If no filename passed, generate matrix
-    if(filename == "")
+    if(filename == "" || filename == "*")
     {
         double scale = 0.02;
         if(nrow > 1000 || ncol > 1000)
@@ -1171,12 +1362,20 @@ bool generate_coo_matrix(const std::string    filename,
     }
     else
     {
-        std::string extension = filename.substr(filename.find_last_of(".") + 1);
+        std::string full_filename_path = get_filename(filename);
+        std::string extension = full_filename_path.substr(full_filename_path.find_last_of(".") + 1);
+
         if(extension == "bin")
         {
             std::vector<I> csr_row_ptr;
-            if(read_bin_matrix(
-                   filename.c_str(), nrow, ncol, nnz, csr_row_ptr, coo_col_ind, coo_val, idx_base)
+            if(read_bin_matrix(full_filename_path.c_str(),
+                               nrow,
+                               ncol,
+                               nnz,
+                               csr_row_ptr,
+                               coo_col_ind,
+                               coo_val,
+                               idx_base)
                == 0)
             {
                 coo_row_ind.resize(nnz);
@@ -1197,7 +1396,7 @@ bool generate_coo_matrix(const std::string    filename,
         else if(extension == "mtx")
         {
             int64_t nnz_count;
-            if(read_mtx_matrix(filename.c_str(),
+            if(read_mtx_matrix(full_filename_path.c_str(),
                                nrow,
                                ncol,
                                nnz_count,
@@ -1525,8 +1724,7 @@ inline void host_csr_to_csr_compress(int                     M,
 
         for(int j = start; j < end; j++)
         {
-            if(testing_abs(csr_val_A[j]) > testing_real(tol)
-               && testing_abs(csr_val_A[j]) > (std::numeric_limits<float>::min)())
+            if(testing_abs(csr_val_A[j]) > testing_real(tol))
             {
                 count++;
             }
@@ -1567,8 +1765,7 @@ inline void host_csr_to_csr_compress(int                     M,
 
         for(int j = start; j < end; j++)
         {
-            if(testing_abs(csr_val_A[j]) > testing_real(tol)
-               && testing_abs(csr_val_A[j]) > (std::numeric_limits<float>::min)())
+            if(testing_abs(csr_val_A[j]) > testing_real(tol))
             {
                 csr_col_ind_C[index] = csr_col_ind_A[j];
                 csr_val_C[index]     = csr_val_A[j];
@@ -1902,6 +2099,85 @@ inline void host_csr_to_bsr(hipsparseDirection_t    direction,
                         + colIndex * block_dim * block_dim + blockIndex;
 
             bsr_val[index] = csr_val[j];
+        }
+    }
+}
+
+template <typename I, typename J, typename T>
+void host_csr_to_sell(J                     M,
+                      J                     slice_size,
+                      const std::vector<I>& csr_row_ptr,
+                      const std::vector<J>& csr_col_ind,
+                      const std::vector<T>& csr_val,
+                      std::vector<I>&       sell_slice_offsets,
+                      std::vector<J>&       sell_col_ind,
+                      std::vector<T>&       sell_val,
+                      I&                    sell_colval_size,
+                      hipsparseIndexBase_t  csr_base,
+                      hipsparseIndexBase_t  sell_base)
+{
+    J nslices = (M - 1) / slice_size + 1;
+
+    sell_slice_offsets.resize(nslices + 1, 0);
+    sell_slice_offsets[0] = sell_base;
+
+    sell_colval_size = 0;
+
+    // Determine sell_colval_size
+    for(I slice = 0; slice < nslices; slice++)
+    {
+        J max_row_length_in_slice = 0;
+        for(J s = 0; s < slice_size; s++)
+        {
+            J row = slice_size * slice + s;
+
+            if(row < M)
+            {
+                I start = csr_row_ptr[row] - csr_base;
+                I end   = csr_row_ptr[row + 1] - csr_base;
+
+                max_row_length_in_slice
+                    = std::max(max_row_length_in_slice, static_cast<J>(end - start));
+            }
+        }
+
+        sell_colval_size += slice_size * max_row_length_in_slice;
+
+        sell_slice_offsets[slice + 1] += sell_colval_size + sell_base;
+    }
+
+    sell_col_ind.resize(sell_colval_size);
+    sell_val.resize(sell_colval_size);
+
+    for(I i = 0; i < sell_colval_size; i++)
+    {
+        sell_col_ind[i] = -1;
+        sell_val[i]     = make_DataType<T>(0);
+    }
+
+    // Fill columns and rows
+    for(I slice = 0; slice < nslices; slice++)
+    {
+        I slice_start = sell_slice_offsets[slice] - sell_base;
+
+        for(J s = 0; s < slice_size; s++)
+        {
+            J row = slice_size * slice + s;
+
+            if(row < M)
+            {
+                I start = csr_row_ptr[row] - csr_base;
+                I end   = csr_row_ptr[row + 1] - csr_base;
+
+                for(I j = start; j < end; j++)
+                {
+                    J col = csr_col_ind[j] - csr_base;
+                    T val = csr_val[j];
+
+                    sell_col_ind[slice_start + slice_size * (j - start) + s] = col + sell_base;
+                    sell_val[slice_start + slice_size * (j - start) + s]     = val;
+                }
+            }
         }
     }
 }
@@ -2415,6 +2691,7 @@ inline void host_bsrmv(hipsparseDirection_t dir,
                        int                  nnzb,
                        T                    alpha,
                        const int*           bsr_row_ptr,
+                       const int*           bsr_end_ptr,
                        const int*           bsr_col_ind,
                        const T*             bsr_val,
                        int                  bsr_dim,
@@ -2437,7 +2714,7 @@ inline void host_bsrmv(hipsparseDirection_t dir,
         return;
     }
 
-    int WFSIZE;
+    uint32_t WFSIZE;
 
     if(bsr_dim == 2)
     {
@@ -2483,7 +2760,7 @@ inline void host_bsrmv(hipsparseDirection_t dir,
     for(int row = 0; row < mb; ++row)
     {
         int row_begin = bsr_row_ptr[row] - base;
-        int row_end   = bsr_row_ptr[row + 1] - base;
+        int row_end   = bsr_end_ptr[row] - base;
 
         if(bsr_dim == 2)
         {
@@ -2492,9 +2769,9 @@ inline void host_bsrmv(hipsparseDirection_t dir,
 
             for(int j = row_begin; j < row_end; j += WFSIZE)
             {
-                for(int k = 0; k < WFSIZE; ++k)
+                for(uint32_t k = 0; k < WFSIZE; ++k)
                 {
-                    if(j + k < row_end)
+                    if(j + static_cast<int>(k) < row_end)
                     {
                         int col = bsr_col_ind[j + k] - base;
 
@@ -2532,9 +2809,9 @@ inline void host_bsrmv(hipsparseDirection_t dir,
                 }
             }
 
-            for(int j = 1; j < WFSIZE; j <<= 1)
+            for(uint32_t j = 1; j < WFSIZE; j <<= 1)
             {
-                for(int k = 0; k < WFSIZE - j; ++k)
+                for(uint32_t k = 0; k < WFSIZE - j; ++k)
                 {
                     sum0[k] = sum0[k] + sum0[k + j];
                     sum1[k] = sum1[k] + sum1[k + j];
@@ -2566,9 +2843,9 @@ inline void host_bsrmv(hipsparseDirection_t dir,
 
                     for(int bj = 0; bj < bsr_dim; bj += WFSIZE)
                     {
-                        for(int k = 0; k < WFSIZE; ++k)
+                        for(uint32_t k = 0; k < WFSIZE; ++k)
                         {
-                            if(bj + k < bsr_dim)
+                            if(bj + static_cast<int>(k) < bsr_dim)
                             {
                                 if(dir == HIPSPARSE_DIRECTION_COLUMN)
                                 {
@@ -2589,9 +2866,9 @@ inline void host_bsrmv(hipsparseDirection_t dir,
                     }
                 }
 
-                for(int j = 1; j < WFSIZE; j <<= 1)
+                for(uint32_t j = 1; j < WFSIZE; j <<= 1)
                 {
-                    for(int k = 0; k < WFSIZE - j; ++k)
+                    for(uint32_t k = 0; k < WFSIZE - j; ++k)
                     {
                         sum[k] = sum[k] + sum[k + j];
                     }
@@ -2605,6 +2882,354 @@ inline void host_bsrmv(hipsparseDirection_t dir,
                 else
                 {
                     y[row * bsr_dim + bi] = testing_mult(alpha, sum[0]);
+                }
+            }
+        }
+    }
+}
+
+template <typename T>
+inline void host_bsrmv(hipsparseDirection_t dir,
+                       hipsparseOperation_t trans,
+                       int                  mb,
+                       int                  nb,
+                       int                  nnzb,
+                       T                    alpha,
+                       const int*           bsr_row_ptr,
+                       const int*           bsr_col_ind,
+                       const T*             bsr_val,
+                       int                  bsr_dim,
+                       const T*             x,
+                       T                    beta,
+                       T*                   y,
+                       hipsparseIndexBase_t base)
+{
+    return host_bsrmv(dir,
+                      trans,
+                      mb,
+                      nb,
+                      nnzb,
+                      alpha,
+                      bsr_row_ptr,
+                      bsr_row_ptr + 1,
+                      bsr_col_ind,
+                      bsr_val,
+                      bsr_dim,
+                      x,
+                      beta,
+                      y,
+                      base);
+}
+
+template <typename T>
+void host_bsrxmv(hipsparseDirection_t dir,
+                 hipsparseOperation_t trans,
+                 int                  size_of_mask,
+                 int                  mb,
+                 int                  nb,
+                 int                  nnzb,
+                 T                    alpha,
+                 const int*           bsr_mask_ptr,
+                 const int*           bsr_row_ptr,
+                 const int*           bsr_end_ptr,
+                 const int*           bsr_col_ind,
+                 const T*             bsr_val,
+                 int                  bsr_dim,
+                 const T*             x,
+                 T                    beta,
+                 T*                   y,
+                 hipsparseIndexBase_t base)
+{
+    if(bsr_mask_ptr == nullptr)
+    {
+        return host_bsrmv(dir,
+                          trans,
+                          mb,
+                          nb,
+                          nnzb,
+                          alpha,
+                          bsr_row_ptr,
+                          bsr_end_ptr,
+                          bsr_col_ind,
+                          bsr_val,
+                          bsr_dim,
+                          x,
+                          beta,
+                          y,
+                          base);
+    }
+
+    // Quick return
+    if(alpha == make_DataType<T>(0))
+    {
+        if(beta != make_DataType<T>(1))
+        {
+            for(int i = 0; i < size_of_mask; ++i)
+            {
+                int shift = (bsr_mask_ptr[i] - base) * bsr_dim;
+                for(int j = 0; j < bsr_dim; ++j)
+                {
+                    y[shift + j] = testing_mult(beta, y[shift + j]);
+                }
+            }
+        }
+
+        return;
+    }
+
+    uint32_t WFSIZE;
+
+    if(bsr_dim == 2)
+    {
+        int blocks_per_row = (mb != 0) ? (nnzb / mb) : 0;
+
+        if(blocks_per_row < 8)
+        {
+            WFSIZE = 4;
+        }
+        else if(blocks_per_row < 16)
+        {
+            WFSIZE = 8;
+        }
+        else if(blocks_per_row < 32)
+        {
+            WFSIZE = 16;
+        }
+        else if(blocks_per_row < 64)
+        {
+            WFSIZE = 32;
+        }
+        else
+        {
+            WFSIZE = 64;
+        }
+    }
+    else if(bsr_dim <= 8)
+    {
+        WFSIZE = 8;
+    }
+    else if(bsr_dim <= 16)
+    {
+        WFSIZE = 16;
+    }
+    else
+    {
+        WFSIZE = 32;
+    }
+
+#ifdef _OPENMP
+#pragma omp parallel for schedule(dynamic, 1024)
+#endif
+    for(int mask_idx = 0; mask_idx < size_of_mask; ++mask_idx)
+    {
+        int row       = bsr_mask_ptr[mask_idx] - base;
+        int row_begin = bsr_row_ptr[row] - base;
+        int row_end   = bsr_end_ptr[row] - base;
+
+        if(bsr_dim == 2)
+        {
+            std::vector<T> sum0(WFSIZE, make_DataType<T>(0));
+            std::vector<T> sum1(WFSIZE, make_DataType<T>(0));
+
+            for(int j = row_begin; j < row_end; j += WFSIZE)
+            {
+                for(uint32_t k = 0; k < WFSIZE; ++k)
+                {
+                    if(j + static_cast<int>(k) < row_end)
+                    {
+                        int col = bsr_col_ind[j + k] - base;
+
+                        if(dir == HIPSPARSE_DIRECTION_COLUMN)
+                        {
+                            sum0[k] = testing_fma(bsr_val[bsr_dim * bsr_dim * (j + k) + 0],
+                                                  x[col * bsr_dim + 0],
+                                                  sum0[k]);
+                            sum1[k] = testing_fma(bsr_val[bsr_dim * bsr_dim * (j + k) + 1],
+                                                  x[col * bsr_dim + 0],
+                                                  sum1[k]);
+                            sum0[k] = testing_fma(bsr_val[bsr_dim * bsr_dim * (j + k) + 2],
+                                                  x[col * bsr_dim + 1],
+                                                  sum0[k]);
+                            sum1[k] = testing_fma(bsr_val[bsr_dim * bsr_dim * (j + k) + 3],
+                                                  x[col * bsr_dim + 1],
+                                                  sum1[k]);
+                        }
+                        else
+                        {
+                            sum0[k] = testing_fma(bsr_val[bsr_dim * bsr_dim * (j + k) + 0],
+                                                  x[col * bsr_dim + 0],
+                                                  sum0[k]);
+                            sum0[k] = testing_fma(bsr_val[bsr_dim * bsr_dim * (j + k) + 1],
+                                                  x[col * bsr_dim + 1],
+                                                  sum0[k]);
+                            sum1[k] = testing_fma(bsr_val[bsr_dim * bsr_dim * (j + k) + 2],
+                                                  x[col * bsr_dim + 0],
+                                                  sum1[k]);
+                            sum1[k] = testing_fma(bsr_val[bsr_dim * bsr_dim * (j + k) + 3],
+                                                  x[col * bsr_dim + 1],
+                                                  sum1[k]);
+                        }
+                    }
+                }
+            }
+
+            for(uint32_t j = 1; j < WFSIZE; j <<= 1)
+            {
+                for(uint32_t k = 0; k < WFSIZE - j; ++k)
+                {
+                    sum0[k] = sum0[k] + sum0[k + j];
+                    sum1[k] = sum1[k] + sum1[k + j];
+                }
+            }
+
+            if(beta != make_DataType<T>(0))
+            {
+                y[row * bsr_dim + 0]
+                    = testing_fma(beta, y[row * bsr_dim + 0], testing_mult(alpha, sum0[0]));
+                y[row * bsr_dim + 1]
+                    = testing_fma(beta, y[row * bsr_dim + 1], testing_mult(alpha, sum1[0]));
+            }
+            else
+            {
+                y[row * bsr_dim + 0] = testing_mult(alpha, sum0[0]);
+                y[row * bsr_dim + 1] = testing_mult(alpha, sum1[0]);
+            }
+        }
+        else
+        {
+            for(int bi = 0; bi < bsr_dim; ++bi)
+            {
+                std::vector<T> sum(WFSIZE, make_DataType<T>(0));
+
+                for(int j = row_begin; j < row_end; ++j)
+                {
+                    int col = bsr_col_ind[j] - base;
+
+                    for(int bj = 0; bj < bsr_dim; bj += WFSIZE)
+                    {
+                        for(uint32_t k = 0; k < WFSIZE; ++k)
+                        {
+                            if(bj + static_cast<int>(k) < bsr_dim)
+                            {
+                                if(dir == HIPSPARSE_DIRECTION_COLUMN)
+                                {
+                                    sum[k] = testing_fma(
+                                        bsr_val[bsr_dim * bsr_dim * j + bsr_dim * (bj + k) + bi],
+                                        x[bsr_dim * col + (bj + k)],
+                                        sum[k]);
+                                }
+                                else
+                                {
+                                    sum[k] = testing_fma(
+                                        bsr_val[bsr_dim * bsr_dim * j + bsr_dim * bi + (bj + k)],
+                                        x[bsr_dim * col + (bj + k)],
+                                        sum[k]);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                for(uint32_t j = 1; j < WFSIZE; j <<= 1)
+                {
+                    for(uint32_t k = 0; k < WFSIZE - j; ++k)
+                    {
+                        sum[k] = sum[k] + sum[k + j];
+                    }
+                }
+
+                if(beta != make_DataType<T>(0))
+                {
+                    y[row * bsr_dim + bi]
+                        = testing_fma(beta, y[row * bsr_dim + bi], testing_mult(alpha, sum[0]));
+                }
+                else
+                {
+                    y[row * bsr_dim + bi] = testing_mult(alpha, sum[0]);
+                }
+            }
+        }
+    }
+}
+
+template <typename T, typename I, typename J>
+inline void host_sellmv(hipsparseOperation_t trans,
+                        J                    M,
+                        J                    N,
+                        I                    nnz,
+                        J                    slice_size,
+                        I                    sell_colval_size,
+                        T                    alpha,
+                        const I*             sell_slice_offsets,
+                        const J*             sell_col_ind,
+                        const T*             sell_val,
+                        const T*             x,
+                        T                    beta,
+                        T*                   y,
+                        hipsparseIndexBase_t base)
+{
+    bool conj = (trans == HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE);
+
+    J nslices = (M - 1) / slice_size + 1;
+
+    if(trans == HIPSPARSE_OPERATION_NON_TRANSPOSE)
+    {
+        for(J slice = 0; slice < nslices; slice++)
+        {
+            I slice_start = sell_slice_offsets[slice] - base;
+            I slice_end   = sell_slice_offsets[slice + 1] - base;
+
+            std::vector<T> sums(slice_size, make_DataType<T>(0));
+            for(I j = slice_start; j < slice_end; j++)
+            {
+                J local_row = j % slice_size;
+                J col       = sell_col_ind[j] - base;
+                if(col >= 0)
+                {
+                    sums[local_row] = testing_fma(sell_val[j], x[col], sums[local_row]);
+                }
+            }
+
+            for(J local_row = 0; local_row < slice_size; local_row++)
+            {
+                J row = slice_size * slice + local_row;
+
+                if(row < M)
+                {
+                    if(beta != make_DataType<T>(0))
+                    {
+                        y[row] = testing_fma(beta, y[row], testing_mult(alpha, sums[local_row]));
+                    }
+                    else
+                    {
+                        y[row] = testing_mult(alpha, sums[local_row]);
+                    }
+                }
+            }
+        }
+    }
+    else
+    {
+        // Scale y with beta
+        for(J i = 0; i < N; ++i)
+        {
+            y[i] = testing_mult(y[i], beta);
+        }
+
+        // Transposed SpMV
+        for(J slice = 0; slice < nslices; slice++)
+        {
+            I slice_start = sell_slice_offsets[slice] - base;
+            I slice_end   = sell_slice_offsets[slice + 1] - base;
+
+            for(I j = slice_start; j < slice_end; j++)
+            {
+                J row = slice_size * slice + j % slice_size;
+                J col = sell_col_ind[j] - base;
+                T val = testing_conj(sell_val[j], conj);
+                if(col >= 0)
+                {
+                    y[col] = testing_fma(testing_mult(alpha, val), x[row], y[col]);
                 }
             }
         }
@@ -2655,7 +3280,7 @@ inline void host_csrmv(hipsparseOperation_t trans,
             I row_begin = csr_row_ptr[i] - base;
             I row_end   = csr_row_ptr[i + 1] - base;
 
-            std::vector<T> sum(WF_SIZE, static_cast<T>(0));
+            std::vector<T> sum(WF_SIZE, make_DataType<T>(0));
 
             for(I j = row_begin; j < row_end; j += WF_SIZE)
             {
@@ -2690,10 +3315,21 @@ inline void host_csrmv(hipsparseOperation_t trans,
     }
     else
     {
-        // Scale y with beta
-        for(J i = 0; i < N; ++i)
+        // First apply beta to y
+        if(beta == make_DataType<T>(0.0))
         {
-            y[i] = testing_mult(y[i], beta);
+            for(J i = 0; i < N; ++i)
+            {
+                y[i] = make_DataType<T>(0.0);
+            }
+        }
+        else
+        {
+            // Scale y with beta
+            for(J i = 0; i < N; ++i)
+            {
+                y[i] = testing_mult(beta, y[i]);
+            }
         }
 
         // Transposed SpMV
@@ -2801,11 +3437,11 @@ void host_csrmm(J                    M,
                 const J*             csr_col_ind_A,
                 const T*             csr_val_A,
                 const T*             B,
-                J                    ldb,
+                int64_t              ldb,
                 hipsparseOrder_t     orderB,
                 T                    beta,
                 T*                   C,
-                J                    ldc,
+                int64_t              ldc,
                 hipsparseOrder_t     orderC,
                 hipsparseIndexBase_t base,
                 bool                 force_conj_A)
@@ -2822,15 +3458,15 @@ void host_csrmm(J                    M,
         {
             for(J j = 0; j < N; ++j)
             {
-                I row_begin = csr_row_ptr_A[i] - base;
-                I row_end   = csr_row_ptr_A[i + 1] - base;
-                J idx_C     = orderC == HIPSPARSE_ORDER_COL ? i + j * ldc : i * ldc + j;
+                I       row_begin = csr_row_ptr_A[i] - base;
+                I       row_end   = csr_row_ptr_A[i + 1] - base;
+                int64_t idx_C     = orderC == HIPSPARSE_ORDER_COL ? i + j * ldc : i * ldc + j;
 
                 T sum = make_DataType<T>(0);
 
                 for(I k = row_begin; k < row_end; ++k)
                 {
-                    J idx_B = 0;
+                    int64_t idx_B = 0;
                     if((transB == HIPSPARSE_OPERATION_NON_TRANSPOSE
                         && orderB == HIPSPARSE_ORDER_COL)
                        || (transB == HIPSPARSE_OPERATION_TRANSPOSE && orderB != HIPSPARSE_ORDER_COL)
@@ -2866,8 +3502,8 @@ void host_csrmm(J                    M,
         {
             for(J j = 0; j < N; ++j)
             {
-                J idx_C  = (orderC == HIPSPARSE_ORDER_COL) ? i + j * ldc : i * ldc + j;
-                C[idx_C] = testing_mult(beta, C[idx_C]);
+                int64_t idx_C = (orderC == HIPSPARSE_ORDER_COL) ? i + j * ldc : i * ldc + j;
+                C[idx_C]      = testing_mult(beta, C[idx_C]);
             }
         }
 
@@ -2883,7 +3519,7 @@ void host_csrmm(J                    M,
                     J col = csr_col_ind_A[k] - base;
                     T val = testing_conj(csr_val_A[k], conj_A);
 
-                    J idx_B = 0;
+                    int64_t idx_B = 0;
 
                     if((transB == HIPSPARSE_OPERATION_NON_TRANSPOSE
                         && orderB == HIPSPARSE_ORDER_COL)
@@ -2898,7 +3534,7 @@ void host_csrmm(J                    M,
                         idx_B = (j + i * ldb);
                     }
 
-                    J idx_C = (orderC == HIPSPARSE_ORDER_COL) ? col + j * ldc : col * ldc + j;
+                    int64_t idx_C = (orderC == HIPSPARSE_ORDER_COL) ? col + j * ldc : col * ldc + j;
 
                     C[idx_C]
                         = C[idx_C]
@@ -2914,8 +3550,8 @@ void host_csrmm_batched(J                    M,
                         J                    N,
                         J                    K,
                         J                    batch_count_A,
-                        J                    offsets_batch_stride_A,
-                        I                    columns_values_batch_stride_A,
+                        int64_t              offsets_batch_stride_A,
+                        int64_t              columns_values_batch_stride_A,
                         hipsparseOperation_t transA,
                         hipsparseOperation_t transB,
                         T                    alpha,
@@ -2923,15 +3559,15 @@ void host_csrmm_batched(J                    M,
                         const J*             csr_col_ind_A,
                         const T*             csr_val_A,
                         const T*             B,
-                        J                    ldb,
+                        int64_t              ldb,
                         J                    batch_count_B,
-                        I                    batch_stride_B,
+                        int64_t              batch_stride_B,
                         hipsparseOrder_t     order_B,
                         T                    beta,
                         T*                   C,
-                        J                    ldc,
+                        int64_t              ldc,
                         J                    batch_count_C,
-                        I                    batch_stride_C,
+                        int64_t              batch_stride_C,
                         hipsparseOrder_t     order_C,
                         hipsparseIndexBase_t base,
                         bool                 force_conj_A)
@@ -3030,11 +3666,11 @@ void host_cscmm(J                    M,
                 const J*             csc_row_ind_A,
                 const T*             csc_val_A,
                 const T*             B,
-                J                    ldb,
+                int64_t              ldb,
                 hipsparseOrder_t     order_B,
                 T                    beta,
                 T*                   C,
-                J                    ldc,
+                int64_t              ldc,
                 hipsparseOrder_t     order_C,
                 hipsparseIndexBase_t base)
 {
@@ -3111,8 +3747,8 @@ void host_cscmm_batched(J                    M,
                         J                    N,
                         J                    K,
                         J                    batch_count_A,
-                        I                    offsets_batch_stride_A,
-                        I                    rows_values_batch_stride_A,
+                        int64_t              offsets_batch_stride_A,
+                        int64_t              rows_values_batch_stride_A,
                         hipsparseOperation_t transA,
                         hipsparseOperation_t transB,
                         T                    alpha,
@@ -3120,15 +3756,15 @@ void host_cscmm_batched(J                    M,
                         const J*             csc_row_ind_A,
                         const T*             csc_val_A,
                         const T*             B,
-                        J                    ldb,
+                        int64_t              ldb,
                         J                    batch_count_B,
-                        I                    batch_stride_B,
+                        int64_t              batch_stride_B,
                         hipsparseOrder_t     order_B,
                         T                    beta,
                         T*                   C,
-                        J                    ldc,
+                        int64_t              ldc,
                         J                    batch_count_C,
-                        I                    batch_stride_C,
+                        int64_t              batch_stride_C,
                         hipsparseOrder_t     order_C,
                         hipsparseIndexBase_t base)
 {
@@ -3233,11 +3869,11 @@ void host_coomm(I                    M,
                 const I*             coo_col_ind_A,
                 const T*             coo_val_A,
                 const T*             B,
-                I                    ldb,
+                int64_t              ldb,
                 hipsparseOrder_t     order_B,
                 T                    beta,
                 T*                   C,
-                I                    ldc,
+                int64_t              ldc,
                 hipsparseOrder_t     order_C,
                 hipsparseIndexBase_t base)
 {
@@ -3253,7 +3889,7 @@ void host_coomm(I                    M,
 #endif
             for(I i = 0; i < M; ++i)
             {
-                I idx_C = (order_C == HIPSPARSE_ORDER_COL) ? i + j * ldc : i * ldc + j;
+                int64_t idx_C = (order_C == HIPSPARSE_ORDER_COL) ? i + j * ldc : i * ldc + j;
 
                 C[idx_C] = testing_mult(beta, C[idx_C]);
             }
@@ -3270,9 +3906,9 @@ void host_coomm(I                    M,
                 I col = coo_col_ind_A[i] - base;
                 T val = testing_mult(alpha, coo_val_A[i]);
 
-                I idx_C = (order_C == HIPSPARSE_ORDER_COL) ? row + j * ldc : row * ldc + j;
+                int64_t idx_C = (order_C == HIPSPARSE_ORDER_COL) ? row + j * ldc : row * ldc + j;
 
-                I idx_B = 0;
+                int64_t idx_B = 0;
                 if((transB == HIPSPARSE_OPERATION_NON_TRANSPOSE && order_B == HIPSPARSE_ORDER_COL)
                    || (transB != HIPSPARSE_OPERATION_NON_TRANSPOSE
                        && order_B != HIPSPARSE_ORDER_COL))
@@ -3297,7 +3933,7 @@ void host_coomm(I                    M,
 #endif
             for(I i = 0; i < K; ++i)
             {
-                I idx_C = (order_C == HIPSPARSE_ORDER_COL) ? i + j * ldc : i * ldc + j;
+                int64_t idx_C = (order_C == HIPSPARSE_ORDER_COL) ? i + j * ldc : i * ldc + j;
 
                 C[idx_C] = testing_mult(beta, C[idx_C]);
             }
@@ -3314,9 +3950,9 @@ void host_coomm(I                    M,
                 I col = coo_col_ind_A[i] - base;
                 T val = testing_mult(alpha, testing_conj(coo_val_A[i], conj_A));
 
-                I idx_C = (order_C == HIPSPARSE_ORDER_COL) ? col + j * ldc : col * ldc + j;
+                int64_t idx_C = (order_C == HIPSPARSE_ORDER_COL) ? col + j * ldc : col * ldc + j;
 
-                I idx_B = 0;
+                int64_t idx_B = 0;
                 if((transB == HIPSPARSE_OPERATION_NON_TRANSPOSE && order_B == HIPSPARSE_ORDER_COL)
                    || (transB != HIPSPARSE_OPERATION_NON_TRANSPOSE
                        && order_B != HIPSPARSE_ORDER_COL))
@@ -3340,7 +3976,7 @@ void host_coomm_batched(I                    M,
                         I                    K,
                         I                    nnz,
                         I                    batch_count_A,
-                        I                    batch_stride_A,
+                        int64_t              batch_stride_A,
                         hipsparseOperation_t transA,
                         hipsparseOperation_t transB,
                         T                    alpha,
@@ -3348,15 +3984,15 @@ void host_coomm_batched(I                    M,
                         const I*             coo_col_ind_A,
                         const T*             coo_val_A,
                         const T*             B,
-                        I                    ldb,
+                        int64_t              ldb,
                         I                    batch_count_B,
                         I                    batch_stride_B,
                         hipsparseOrder_t     order_B,
                         T                    beta,
                         T*                   C,
-                        I                    ldc,
+                        int64_t              ldc,
                         I                    batch_count_C,
-                        I                    batch_stride_C,
+                        int64_t              batch_stride_C,
                         hipsparseOrder_t     order_C,
                         hipsparseIndexBase_t base)
 {
@@ -3444,14 +4080,14 @@ void host_coomm_batched(I                    M,
 }
 
 template <typename T>
-int csrilu0(int                  m,
-            const int*           ptr,
-            const int*           col,
-            T*                   val,
-            hipsparseIndexBase_t idx_base,
-            bool                 boost,
-            double               boost_tol,
-            T                    boost_val)
+int host_csrilu0(int                  m,
+                 const int*           ptr,
+                 const int*           col,
+                 T*                   val,
+                 hipsparseIndexBase_t idx_base,
+                 bool                 boost,
+                 double               boost_tol,
+                 T                    boost_val)
 {
     // pointer of upper part of each row
     std::vector<int> diag_offset(m);
@@ -3529,9 +4165,31 @@ int csrilu0(int                  m,
             // Structural zero digonal
             return ai + idx_base;
         }
+        else
+        {
+            // set diagonal pointer to diagonal element
+            diag_offset[ai] = j;
 
-        // set diagonal pointer to diagonal element
-        diag_offset[ai] = j;
+            if(boost)
+            {
+                if(testing_abs(val[j]) <= boost_tol)
+                {
+                    val[j] = boost_val;
+                }
+            }
+            else
+            {
+                const bool is_diag = (j >= 0) && (col[j] == (ai + idx_base));
+
+                const bool is_zero_diag = is_diag && (val[j] == make_DataType<T>(0));
+
+                // check for zero diagonal
+                if(is_zero_diag)
+                {
+                    return ai + idx_base;
+                }
+            }
+        }
 
         // clear nnz entries
         for(j = row_start; j < row_end; ++j)
@@ -6632,73 +7290,6 @@ double get_time_us_sync(hipStream_t stream);
 }
 #endif
 
-inline void missing_file_error_message(const char* filename)
-{
-    std::cerr << "#" << std::endl;
-    std::cerr << "# error:" << std::endl;
-    std::cerr << "# cannot open file '" << filename << "'" << std::endl;
-    std::cerr << "#" << std::endl;
-    std::cerr << "# PLEASE READ CAREFULLY !" << std::endl;
-    std::cerr << "#" << std::endl;
-    std::cerr << "# What could be the reason of this error: " << std::endl;
-    std::cerr << "# You are running the testing application and it expects to find the file "
-                 "at the specified location. This means that either you did not download the test "
-                 "matrices, or you did not specify the location of the folder containing your "
-                 "files. If you want to specify the location of the folder containing your files, "
-                 "then you will find the needed information with 'hipsparse-test --help'."
-                 "If you need to download matrices, then a cmake script "
-                 "'hipsparse_clientmatrices.cmake' is available from the hipsparse client package."
-              << std::endl;
-    std::cerr << "#" << std::endl;
-    std::cerr
-        << "# Examples: 'hipsparse_clientmatrices.cmake -DCMAKE_MATRICES_DIR=<path-of-your-folder>'"
-        << std::endl;
-    std::cerr << "#           'hipsparse-test --matrices-dir <path-of-your-folder>'" << std::endl;
-    std::cerr << "# (or        'export "
-                 "HIPSPARSE_CLIENTS_MATRICES_DIR=<path-of-your-folder>;hipsparse-test')"
-              << std::endl;
-    std::cerr << "#" << std::endl;
-}
-
-static const char* s_hipsparse_clients_matrices_dir = nullptr;
-
-inline const char* get_hipsparse_clients_matrices_dir()
-{
-    return s_hipsparse_clients_matrices_dir;
-}
-
-inline std::string get_filename(const std::string& bin_file)
-{
-    const char* matrices_dir = get_hipsparse_clients_matrices_dir();
-    if(matrices_dir == nullptr)
-    {
-        matrices_dir = getenv("HIPSPARSE_CLIENTS_MATRICES_DIR");
-    }
-
-    std::string r;
-    if(matrices_dir != nullptr)
-    {
-        r = std::string(matrices_dir) + "/" + bin_file;
-    }
-    else
-    {
-        r = hipsparse_exepath() + "../matrices/" + bin_file;
-    }
-
-    FILE* tmpf = fopen(r.c_str(), "r");
-    if(!tmpf)
-    {
-        missing_file_error_message(r.c_str());
-        std::cerr << "exit(HIPSPARSE_STATUS_INTERNAL_ERROR)" << std::endl;
-        exit(HIPSPARSE_STATUS_INTERNAL_ERROR);
-    }
-    else
-    {
-        fclose(tmpf);
-    }
-    return r;
-}
-
 struct testhyb
 {
     int                     m;
@@ -6729,6 +7320,727 @@ hipDataType getDataType()
                : ((typeid(T) == typeid(double))
                       ? HIP_R_64F
                       : ((typeid(T) == typeid(hipComplex) ? HIP_C_32F : HIP_C_64F)));
+}
+
+/* ============================================================================================ */
+/*! \brief  Host hybmv (hybrid ELL+COO matrix-vector multiplication) */
+#define ELL_IND_ROW(i, el, m, width) (el) * (m) + (i)
+#define ELL_IND_EL(i, el, m, width) (el) + (width) * (i)
+#define ELL_IND(i, el, m, width) ELL_IND_ROW(i, el, m, width)
+
+template <typename T>
+void host_hybmv(int                  m,
+                int                  n,
+                T                    alpha,
+                int                  ell_nnz,
+                int                  ell_width,
+                const int*           ell_col_ind,
+                const T*             ell_val,
+                int                  coo_nnz,
+                const int*           coo_row_ind,
+                const int*           coo_col_ind,
+                const T*             coo_val,
+                const T*             x,
+                T                    beta,
+                T*                   y,
+                hipsparseIndexBase_t idx_base)
+{
+    T zero = make_DataType<T>(0.0);
+    T one  = make_DataType<T>(1.0);
+
+    // ELL part
+    if(ell_nnz > 0)
+    {
+        for(int i = 0; i < m; ++i)
+        {
+            T sum = zero;
+            for(int p = 0; p < ell_width; ++p)
+            {
+                int idx = ELL_IND(i, p, m, ell_width);
+                int col = ell_col_ind[idx] - idx_base;
+
+                if(col >= 0 && col < n)
+                {
+                    sum = sum + testing_mult(ell_val[idx], x[col]);
+                }
+                else
+                {
+                    break;
+                }
+            }
+
+            if(beta != zero)
+            {
+                y[i] = testing_mult(beta, y[i]) + testing_mult(alpha, sum);
+            }
+            else
+            {
+                y[i] = testing_mult(alpha, sum);
+            }
+        }
+    }
+
+    // COO part
+    if(coo_nnz >= 0)
+    {
+        T coo_beta = (ell_nnz > 0) ? one : beta;
+
+        for(int i = 0; i < m; ++i)
+        {
+            y[i] = testing_mult(y[i], coo_beta);
+        }
+
+        for(int i = 0; i < coo_nnz; ++i)
+        {
+            int row = coo_row_ind[i] - idx_base;
+            int col = coo_col_ind[i] - idx_base;
+
+            y[row] = y[row] + testing_mult(alpha, testing_mult(coo_val[i], x[col]));
+        }
+    }
+}
+
+/* ============================================================================================ */
+/*! \brief  Host coomv (COO matrix-vector multiplication) */
+template <typename I, typename T>
+void host_coomv(I                    m,
+                I                    nnz,
+                T                    alpha,
+                const I*             coo_row_ind,
+                const I*             coo_col_ind,
+                const T*             coo_val,
+                const T*             x,
+                T                    beta,
+                T*                   y,
+                hipsparseIndexBase_t idx_base)
+{
+#ifdef _OPENMP
+#pragma omp parallel for schedule(dynamic, 1024)
+#endif
+    for(I i = 0; i < m; ++i)
+    {
+        y[i] = testing_mult(beta, y[i]);
+    }
+
+    for(I i = 0; i < nnz; ++i)
+    {
+        y[coo_row_ind[i] - idx_base] = testing_fma(testing_mult(alpha, coo_val[i]),
+                                                   x[coo_col_ind[i] - idx_base],
+                                                   y[coo_row_ind[i] - idx_base]);
+    }
+}
+
+/* ============================================================================================ */
+/*! \brief  Host coomv_aos (COO AoS matrix-vector multiplication) */
+template <typename I, typename T>
+void host_coomv_aos(I                    m,
+                    I                    nnz,
+                    T                    alpha,
+                    const I*             coo_ind,
+                    const T*             coo_val,
+                    const T*             x,
+                    T                    beta,
+                    T*                   y,
+                    hipsparseIndexBase_t idx_base)
+{
+#ifdef _OPENMP
+#pragma omp parallel for schedule(dynamic, 1024)
+#endif
+    for(I i = 0; i < m; ++i)
+    {
+        y[i] = testing_mult(beta, y[i]);
+    }
+
+    for(I i = 0; i < nnz; ++i)
+    {
+        y[coo_ind[2 * i] - idx_base] = testing_fma(testing_mult(alpha, coo_val[i]),
+                                                   x[coo_ind[2 * i + 1] - idx_base],
+                                                   y[coo_ind[2 * i] - idx_base]);
+    }
+}
+
+/* ============================================================================================ */
+/*! \brief  Host spvv (sparse vector-vector dot product) */
+template <typename I, typename T>
+void host_spvv(I                    nnz,
+               const T*             x_val,
+               const I*             x_ind,
+               const T*             y,
+               T*                   result,
+               hipsparseOperation_t op,
+               hipsparseIndexBase_t idx_base)
+{
+    *result = make_DataType<T>(0);
+
+    if(op == HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE)
+    {
+        for(I i = 0; i < nnz; ++i)
+        {
+            *result = *result + testing_mult(testing_conj(x_val[i]), y[x_ind[i] - idx_base]);
+        }
+    }
+    else
+    {
+        for(I i = 0; i < nnz; ++i)
+        {
+            *result = *result + testing_mult(x_val[i], y[x_ind[i] - idx_base]);
+        }
+    }
+}
+
+/* ============================================================================================ */
+/*! \brief  Host sddmm_csr (sampled dense-dense matrix multiplication - CSR format) */
+template <typename I, typename J, typename T>
+void host_sddmm_csr(J                    C_m,
+                    J                    C_n,
+                    J                    k,
+                    I                    nnz,
+                    T                    alpha,
+                    const T*             A,
+                    int64_t              lda,
+                    hipsparseOrder_t     orderA,
+                    hipsparseOperation_t transA,
+                    const T*             B,
+                    int64_t              ldb,
+                    hipsparseOrder_t     orderB,
+                    hipsparseOperation_t transB,
+                    T                    beta,
+                    T*                   csr_val,
+                    const I*             csr_row_ptr,
+                    const J*             csr_col_ind,
+                    hipsparseIndexBase_t idx_base)
+{
+    const int64_t incA = (orderA == HIPSPARSE_ORDER_COL)
+                             ? ((transA == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? lda : 1)
+                             : ((transA == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? 1 : lda);
+    const int64_t incB = (orderB == HIPSPARSE_ORDER_COL)
+                             ? ((transB == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? 1 : ldb)
+                             : ((transB == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? ldb : 1);
+
+    for(J r = 0; r < C_m; r++)
+    {
+        I start = csr_row_ptr[r] - idx_base;
+        I end   = csr_row_ptr[r + 1] - idx_base;
+
+        for(I j = start; j < end; j++)
+        {
+            J c = csr_col_ind[j] - idx_base;
+
+            const T* Aptr
+                = (orderA == HIPSPARSE_ORDER_COL)
+                      ? ((transA == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? &A[r] : &A[lda * r])
+                      : ((transA == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? &A[lda * r] : &A[r]);
+
+            const T* Bptr
+                = (orderB == HIPSPARSE_ORDER_COL)
+                      ? ((transB == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? &B[ldb * c] : &B[c])
+                      : ((transB == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? &B[c] : &B[ldb * c]);
+
+            T sum = make_DataType<T>(0);
+            for(J s = 0; s < k; ++s)
+            {
+                sum = testing_fma(Aptr[incA * s], Bptr[incB * s], sum);
+            }
+            csr_val[j] = testing_mult(csr_val[j], beta) + testing_mult(alpha, sum);
+        }
+    }
+}
+
+/* ============================================================================================ */
+/*! \brief  Host sddmm_csc (sampled dense-dense matrix multiplication - CSC format) */
+template <typename I, typename J, typename T>
+void host_sddmm_csc(J                    C_m,
+                    J                    C_n,
+                    J                    k,
+                    I                    nnz,
+                    T                    alpha,
+                    const T*             A,
+                    int64_t              lda,
+                    hipsparseOrder_t     orderA,
+                    hipsparseOperation_t transA,
+                    const T*             B,
+                    int64_t              ldb,
+                    hipsparseOrder_t     orderB,
+                    hipsparseOperation_t transB,
+                    T                    beta,
+                    T*                   csc_val,
+                    const I*             csc_col_ptr,
+                    const J*             csc_row_ind,
+                    hipsparseIndexBase_t idx_base)
+{
+    const int64_t incA = (orderA == HIPSPARSE_ORDER_COL)
+                             ? ((transA == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? lda : 1)
+                             : ((transA == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? 1 : lda);
+    const int64_t incB = (orderB == HIPSPARSE_ORDER_COL)
+                             ? ((transB == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? 1 : ldb)
+                             : ((transB == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? ldb : 1);
+
+    for(J c = 0; c < C_n; c++)
+    {
+        I start = csc_col_ptr[c] - idx_base;
+        I end   = csc_col_ptr[c + 1] - idx_base;
+
+        for(I j = start; j < end; j++)
+        {
+            J r = csc_row_ind[j] - idx_base;
+
+            const T* Aptr
+                = (orderA == HIPSPARSE_ORDER_COL)
+                      ? ((transA == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? &A[r] : &A[lda * r])
+                      : ((transA == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? &A[lda * r] : &A[r]);
+
+            const T* Bptr
+                = (orderB == HIPSPARSE_ORDER_COL)
+                      ? ((transB == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? &B[ldb * c] : &B[c])
+                      : ((transB == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? &B[c] : &B[ldb * c]);
+
+            T sum = make_DataType<T>(0);
+            for(J s = 0; s < k; ++s)
+            {
+                sum = testing_fma(Aptr[incA * s], Bptr[incB * s], sum);
+            }
+            csc_val[j] = testing_mult(csc_val[j], beta) + testing_mult(alpha, sum);
+        }
+    }
+}
+
+/* ============================================================================================ */
+/*! \brief  Host sddmm_coo (sampled dense-dense matrix multiplication - COO format) */
+template <typename I, typename T>
+void host_sddmm_coo(I                    C_m,
+                    I                    C_n,
+                    I                    k,
+                    I                    nnz,
+                    T                    alpha,
+                    const T*             A,
+                    int64_t              lda,
+                    hipsparseOrder_t     orderA,
+                    hipsparseOperation_t transA,
+                    const T*             B,
+                    int64_t              ldb,
+                    hipsparseOrder_t     orderB,
+                    hipsparseOperation_t transB,
+                    T                    beta,
+                    T*                   coo_val,
+                    const I*             coo_row_ind,
+                    const I*             coo_col_ind,
+                    hipsparseIndexBase_t idx_base)
+{
+    const int64_t incA = (orderA == HIPSPARSE_ORDER_COL)
+                             ? ((transA == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? lda : 1)
+                             : ((transA == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? 1 : lda);
+    const int64_t incB = (orderB == HIPSPARSE_ORDER_COL)
+                             ? ((transB == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? 1 : ldb)
+                             : ((transB == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? ldb : 1);
+
+    for(I i = 0; i < nnz; ++i)
+    {
+        const I r = coo_row_ind[i] - idx_base;
+        const I c = coo_col_ind[i] - idx_base;
+
+        const T* Aptr = (orderA == HIPSPARSE_ORDER_COL)
+                            ? ((transA == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? &A[r] : &A[lda * r])
+                            : ((transA == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? &A[lda * r] : &A[r]);
+
+        const T* Bptr = (orderB == HIPSPARSE_ORDER_COL)
+                            ? ((transB == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? &B[ldb * c] : &B[c])
+                            : ((transB == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? &B[c] : &B[ldb * c]);
+
+        T sum = make_DataType<T>(0);
+        for(I j = 0; j < k; ++j)
+        {
+            sum = testing_fma(Aptr[incA * j], Bptr[incB * j], sum);
+        }
+        coo_val[i] = testing_mult(coo_val[i], beta) + testing_mult(alpha, sum);
+    }
+}
+
+/* ============================================================================================ */
+/*! \brief  Host sddmm_coo_aos (sampled dense-dense matrix multiplication - COO AoS format) */
+template <typename I, typename T>
+void host_sddmm_coo_aos(I                    C_m,
+                        I                    C_n,
+                        I                    k,
+                        I                    nnz,
+                        T                    alpha,
+                        const T*             A,
+                        int64_t              lda,
+                        hipsparseOrder_t     orderA,
+                        hipsparseOperation_t transA,
+                        const T*             B,
+                        int64_t              ldb,
+                        hipsparseOrder_t     orderB,
+                        hipsparseOperation_t transB,
+                        T                    beta,
+                        T*                   coo_val,
+                        const I*             coo_ind,
+                        hipsparseIndexBase_t idx_base)
+{
+    const int64_t incA = (orderA == HIPSPARSE_ORDER_COL)
+                             ? ((transA == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? lda : 1)
+                             : ((transA == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? 1 : lda);
+    const int64_t incB = (orderB == HIPSPARSE_ORDER_COL)
+                             ? ((transB == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? 1 : ldb)
+                             : ((transB == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? ldb : 1);
+
+    for(I i = 0; i < nnz; ++i)
+    {
+        const I r = coo_ind[2 * i] - idx_base;
+        const I c = coo_ind[2 * i + 1] - idx_base;
+
+        const T* Aptr = (orderA == HIPSPARSE_ORDER_COL)
+                            ? ((transA == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? &A[r] : &A[lda * r])
+                            : ((transA == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? &A[lda * r] : &A[r]);
+
+        const T* Bptr = (orderB == HIPSPARSE_ORDER_COL)
+                            ? ((transB == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? &B[ldb * c] : &B[c])
+                            : ((transB == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? &B[c] : &B[ldb * c]);
+
+        T sum = make_DataType<T>(0);
+        for(I j = 0; j < k; ++j)
+        {
+            sum = testing_fma(Aptr[incA * j], Bptr[incB * j], sum);
+        }
+        coo_val[i] = testing_mult(coo_val[i], beta) + testing_mult(alpha, sum);
+    }
+}
+
+/* ============================================================================================ */
+/*! \brief  Host axpby (y = alpha * x + beta * y for sparse vectors) */
+template <typename I, typename T>
+void host_axpby(I                    size,
+                I                    nnz,
+                T                    alpha,
+                const T*             x_val,
+                const I*             x_ind,
+                T                    beta,
+                T*                   y,
+                hipsparseIndexBase_t idx_base)
+{
+    for(I i = 0; i < size; ++i)
+    {
+        y[i] = testing_mult(beta, y[i]);
+    }
+
+    for(I i = 0; i < nnz; ++i)
+    {
+        y[x_ind[i] - idx_base] = testing_fma(alpha, x_val[i], y[x_ind[i] - idx_base]);
+    }
+}
+
+/* ============================================================================================ */
+/*! \brief  Host axpyi (y = y + alpha * x for sparse vectors) */
+template <typename I, typename T>
+void host_axpyi(I nnz, T alpha, const T* x_val, const I* x_ind, T* y, hipsparseIndexBase_t idx_base)
+{
+    for(I i = 0; i < nnz; ++i)
+    {
+        y[x_ind[i] - idx_base] = y[x_ind[i] - idx_base] + testing_mult(alpha, x_val[i]);
+    }
+}
+
+/* ============================================================================================ */
+/*! \brief  Host doti (dot product of sparse and dense vectors) */
+template <typename I, typename T>
+void host_doti(
+    I nnz, const T* x_val, const I* x_ind, const T* y, T* result, hipsparseIndexBase_t idx_base)
+{
+    *result = make_DataType<T>(0.0);
+    for(I i = 0; i < nnz; ++i)
+    {
+        *result = *result + testing_mult(y[x_ind[i] - idx_base], x_val[i]);
+    }
+}
+
+/* ============================================================================================ */
+/*! \brief  Host dotci (conjugate dot product of sparse and dense vectors) */
+template <typename I, typename T>
+void host_dotci(
+    I nnz, const T* x_val, const I* x_ind, const T* y, T* result, hipsparseIndexBase_t idx_base)
+{
+    *result = make_DataType<T>(0.0);
+    for(I i = 0; i < nnz; ++i)
+    {
+        *result = *result + testing_mult(testing_conj(x_val[i]), y[x_ind[i] - idx_base]);
+    }
+}
+
+/* ============================================================================================ */
+/*! \brief  Host gthr (gather: x_val[i] = y[x_ind[i]]) */
+template <typename I, typename T>
+void host_gthr(I nnz, const T* y, T* x_val, const I* x_ind, hipsparseIndexBase_t idx_base)
+{
+    for(I i = 0; i < nnz; ++i)
+    {
+        x_val[i] = y[x_ind[i] - idx_base];
+    }
+}
+
+/* ============================================================================================ */
+/*! \brief  Host gthrz (gather and zero: x_val[i] = y[x_ind[i]], y[x_ind[i]] = 0) */
+template <typename I, typename T>
+void host_gthrz(I nnz, T* y, T* x_val, const I* x_ind, hipsparseIndexBase_t idx_base)
+{
+    for(I i = 0; i < nnz; ++i)
+    {
+        x_val[i]               = y[x_ind[i] - idx_base];
+        y[x_ind[i] - idx_base] = make_DataType<T>(0.0);
+    }
+}
+
+/* ============================================================================================ */
+/*! \brief  Host sctr (scatter: y[x_ind[i]] = x_val[i]) */
+template <typename I, typename T>
+void host_sctr(I nnz, const T* x_val, const I* x_ind, T* y, hipsparseIndexBase_t idx_base)
+{
+    for(I i = 0; i < nnz; ++i)
+    {
+        y[x_ind[i] - idx_base] = x_val[i];
+    }
+}
+
+/* ============================================================================================ */
+/*! \brief  Host roti (Givens rotation for sparse vectors) */
+template <typename I, typename T>
+void host_roti(I nnz, T* x_val, const I* x_ind, T* y, T c, T s, hipsparseIndexBase_t idx_base)
+{
+    for(I i = 0; i < nnz; ++i)
+    {
+        I idx = x_ind[i] - idx_base;
+
+        T x    = x_val[i];
+        T yval = y[idx];
+
+        x_val[i] = testing_fma(c, x, testing_mult(s, yval));
+        y[idx]   = testing_fma(c, yval, testing_mult(-s, x));
+    }
+}
+
+/* ============================================================================================ */
+/*! \brief  Host rot (Givens rotation for sparse vectors - generic API) */
+template <typename I, typename T>
+void host_rot(I nnz, T* x_val, const I* x_ind, T* y, T c, T s, hipsparseIndexBase_t idx_base)
+{
+    for(I i = 0; i < nnz; ++i)
+    {
+        I idx = x_ind[i] - idx_base;
+
+        T x    = x_val[i];
+        T yval = y[idx];
+
+        x_val[i] = testing_fma(c, x, testing_mult(s, yval));
+        y[idx]   = testing_fma(c, yval, testing_mult(-s, x));
+    }
+}
+
+/* ============================================================================================ */
+/*! \brief  Host coo2csr (convert COO row indices to CSR row pointers) */
+template <typename I>
+void host_coo2csr(I m, I nnz, const I* coo_row_ind, I* csr_row_ptr, hipsparseIndexBase_t idx_base)
+{
+    // Initialize row pointers to zero
+    for(I i = 0; i <= m; ++i)
+    {
+        csr_row_ptr[i] = 0;
+    }
+
+    // Count nnz per row
+    for(I i = 0; i < nnz; ++i)
+    {
+        ++csr_row_ptr[coo_row_ind[i] + 1 - idx_base];
+    }
+
+    // Compute row pointers (prefix sum)
+    csr_row_ptr[0] = idx_base;
+    for(I i = 0; i < m; ++i)
+    {
+        csr_row_ptr[i + 1] += csr_row_ptr[i];
+    }
+}
+
+/* ============================================================================================ */
+/*! \brief  Host csr2coo (convert CSR row pointers to COO row indices) */
+template <typename I>
+void host_csr2coo(I m, I nnz, const I* csr_row_ptr, I* coo_row_ind, hipsparseIndexBase_t idx_base)
+{
+    for(I i = 0; i < m; ++i)
+    {
+        I row_begin = csr_row_ptr[i] - idx_base;
+        I row_end   = csr_row_ptr[i + 1] - idx_base;
+
+        for(I j = row_begin; j < row_end; ++j)
+        {
+            coo_row_ind[j] = i + idx_base;
+        }
+    }
+}
+
+/* ============================================================================================ */
+/*! \brief  Host csr2csc (convert CSR to CSC format) */
+template <typename I, typename T>
+void host_csr2csc(I                    m,
+                  I                    n,
+                  I                    nnz,
+                  const I*             csr_row_ptr,
+                  const I*             csr_col_ind,
+                  const T*             csr_val,
+                  I*                   csc_col_ptr,
+                  I*                   csc_row_ind,
+                  T*                   csc_val,
+                  hipsparseIndexBase_t idx_base)
+{
+    // Initialize column pointers to zero
+    for(I i = 0; i <= n; ++i)
+    {
+        csc_col_ptr[i] = 0;
+    }
+
+    // Determine nnz per column
+    for(I i = 0; i < nnz; ++i)
+    {
+        ++csc_col_ptr[csr_col_ind[i] + 1 - idx_base];
+    }
+
+    // Scan (prefix sum)
+    for(I i = 0; i < n; ++i)
+    {
+        csc_col_ptr[i + 1] += csc_col_ptr[i];
+    }
+
+    // Fill row indices and values
+    for(I i = 0; i < m; ++i)
+    {
+        for(I j = csr_row_ptr[i]; j < csr_row_ptr[i + 1]; ++j)
+        {
+            I col = csr_col_ind[j - idx_base] - idx_base;
+            I idx = csc_col_ptr[col];
+
+            csc_row_ind[idx] = i + idx_base;
+            csc_val[idx]     = csr_val[j - idx_base];
+
+            ++csc_col_ptr[col];
+        }
+    }
+
+    // Shift column pointer array
+    for(I i = n; i > 0; --i)
+    {
+        csc_col_ptr[i] = csc_col_ptr[i - 1] + idx_base;
+    }
+
+    csc_col_ptr[0] = idx_base;
+}
+
+/* ============================================================================================ */
+/*! \brief  Host csr2hyb (convert CSR to HYB format) */
+template <typename I, typename T>
+void host_csr2hyb(I                    m,
+                  I                    nnz,
+                  const I*             csr_row_ptr,
+                  const I*             csr_col_ind,
+                  const T*             csr_val,
+                  I                    ell_width,
+                  I*                   ell_col_ind,
+                  T*                   ell_val,
+                  I*                   coo_row_ind,
+                  I*                   coo_col_ind,
+                  T*                   coo_val,
+                  hipsparseIndexBase_t idx_base)
+{
+    I coo_idx = 0;
+    for(I i = 0; i < m; ++i)
+    {
+        I p = 0;
+        for(I j = csr_row_ptr[i] - idx_base; j < csr_row_ptr[i + 1] - idx_base; ++j)
+        {
+            if(p < ell_width)
+            {
+                I idx            = ELL_IND(i, p++, m, ell_width);
+                ell_col_ind[idx] = csr_col_ind[j];
+                ell_val[idx]     = csr_val[j];
+            }
+            else
+            {
+                coo_row_ind[coo_idx] = i + idx_base;
+                coo_col_ind[coo_idx] = csr_col_ind[j];
+                coo_val[coo_idx]     = csr_val[j];
+                ++coo_idx;
+            }
+        }
+        for(I j = csr_row_ptr[i + 1] - csr_row_ptr[i]; j < ell_width; ++j)
+        {
+            I idx            = ELL_IND(i, p++, m, ell_width);
+            ell_col_ind[idx] = -1;
+            ell_val[idx]     = make_DataType<T>(0.0);
+        }
+    }
+}
+
+/* ============================================================================================ */
+/*! \brief  Host gemmi (dense matrix * sparse matrix in CSC format) */
+template <typename I, typename T>
+void host_gemmi(I        m,
+                I        n,
+                I        k,
+                T        alpha,
+                const T* A,
+                I        lda,
+                const I* csc_col_ptr,
+                const I* csc_row_ind,
+                const T* csc_val,
+                T        beta,
+                T*       C,
+                I        ldc)
+{
+    for(I i = 0; i < m; ++i)
+    {
+        for(I j = 0; j < n; ++j)
+        {
+            T sum = make_DataType<T>(0);
+
+            I col_begin = csc_col_ptr[j];
+            I col_end   = csc_col_ptr[j + 1];
+
+            for(I p = col_begin; p < col_end; ++p)
+            {
+                I row_B = csc_row_ind[p];
+                T val_B = csc_val[p];
+                T val_A = A[row_B * lda + i];
+
+                sum = testing_fma(val_A, val_B, sum);
+            }
+
+            C[j * ldc + i] = testing_fma(beta, C[j * ldc + i], testing_mult(alpha, sum));
+        }
+    }
+}
+
+/* ============================================================================================ */
+/*! \brief  Host gemvi (dense matrix * sparse vector) */
+template <typename I, typename T>
+void host_gemvi(I                    m,
+                I                    n,
+                I                    nnz,
+                T                    alpha,
+                const T*             A,
+                I                    lda,
+                const T*             x_val,
+                const I*             x_ind,
+                T                    beta,
+                T*                   y,
+                hipsparseIndexBase_t idx_base)
+{
+    for(I i = 0; i < m; ++i)
+    {
+        T sum = make_DataType<T>(0);
+
+        for(I j = 0; j < nnz; ++j)
+        {
+            sum = testing_fma(x_val[j], A[(x_ind[j] - idx_base) * lda + i], sum);
+        }
+
+        y[i] = testing_fma(alpha, sum, testing_mult(beta, y[i]));
+    }
 }
 
 #endif // TESTING_UTILITY_HPP

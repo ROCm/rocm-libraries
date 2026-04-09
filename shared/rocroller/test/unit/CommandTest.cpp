@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include "SimpleFixture.hpp"
 #include "SourceMatcher.hpp"
@@ -106,7 +83,7 @@ TEST_F(CommandTest, ConvertOp)
     EXPECT_EQ(execute.getOutputs(), std::unordered_set<Operations::OperationTag>({tagConvert}));
 
     constexpr auto result = R"(
-        Tensor.Float.d1 0, (base=&0, lim=&8, sizes={&16 }, strides={&24 })
+        Tensor.Float.d1 0, (base=&0, sizes={&8 }, strides={&16 })
         T_LOAD_LINEAR 1 Source 0
         T_EXECUTE 1
         E_Cvt 2, 1
@@ -133,13 +110,13 @@ TEST_F(CommandTest, VectorAdd)
     command->addOperation(Operations::T_Store_Linear(tagResult, tagTensorResult));
 
     std::string result = R"(
-        Tensor.Float.d1 0, (base=&0, lim=&8, sizes={&16 }, strides={&24 })
+        Tensor.Float.d1 0, (base=&0, sizes={&8 }, strides={&16 })
         T_LOAD_LINEAR 1 Source 0
-        Tensor.Float.d1 2, (base=&32, lim=&40, sizes={&48 }, strides={&56 })
+        Tensor.Float.d1 2, (base=&24, sizes={&32 }, strides={&40 })
         T_LOAD_LINEAR 3 Source 2
         T_EXECUTE 1 3
         E_Add 4, 1, 3
-        Tensor.Float.d1 6, (base=&64, lim=&72, sizes={&80 }, strides={&88 })
+        Tensor.Float.d1 6, (base=&48, sizes={&56 }, strides={&64 })
         T_STORE_LINEAR 7 Source 4 Dest 6
         )";
     EXPECT_EQ(NormalizedSource(command->toString()), NormalizedSource(result));
@@ -147,17 +124,14 @@ TEST_F(CommandTest, VectorAdd)
     {
         std::string expected = R"([
             Tensor_0_pointer: PointerGlobal: Float(offset: 0, size: 8, read_write),
-            Tensor_0_extent: Value: Int64(offset: 8, size: 8, read_only),
-            Tensor_0_size_0: Value: Int64(offset: 16, size: 8, read_only),
-            Tensor_0_stride_0: Value: Int64(offset: 24, size: 8, read_only),
-            Tensor_2_pointer: PointerGlobal: Float(offset: 32, size: 8, read_write),
-            Tensor_2_extent: Value: Int64(offset: 40, size: 8, read_only),
-            Tensor_2_size_0: Value: Int64(offset: 48, size: 8, read_only),
-            Tensor_2_stride_0: Value: Int64(offset: 56, size: 8, read_only),
-            Tensor_6_pointer: PointerGlobal: Float(offset: 64, size: 8, read_write),
-            Tensor_6_extent: Value: Int64(offset: 72, size: 8, read_only),
-            Tensor_6_size_0: Value: Int64(offset: 80, size: 8, read_only),
-            Tensor_6_stride_0: Value: Int64(offset: 88, size: 8, read_only)
+            Tensor_0_size_0: Value: Int64(offset: 8, size: 8, read_only),
+            Tensor_0_stride_0: Value: Int64(offset: 16, size: 8, read_only),
+            Tensor_2_pointer: PointerGlobal: Float(offset: 24, size: 8, read_write),
+            Tensor_2_size_0: Value: Int64(offset: 32, size: 8, read_only),
+            Tensor_2_stride_0: Value: Int64(offset: 40, size: 8, read_only),
+            Tensor_6_pointer: PointerGlobal: Float(offset: 48, size: 8, read_write),
+            Tensor_6_size_0: Value: Int64(offset: 56, size: 8, read_only),
+            Tensor_6_stride_0: Value: Int64(offset: 64, size: 8, read_only)
         ])";
 
         std::ostringstream msg;
@@ -260,14 +234,29 @@ TEST_F(CommandTest, SetCommandArguments)
 
     CommandArguments commandArgs = command->createArguments();
 
-    commandArgs.setArgument(tagTensorA, ArgumentType::Limit, 10);
     EXPECT_THROW({ commandArgs.setArgument(tagTensorA, ArgumentType::Size, 10); }, FatalError);
     commandArgs.setArgument(tagTensorA, ArgumentType::Size, 0, 10);
     EXPECT_THROW({ commandArgs.setArgument(tagTensorA, ArgumentType::Stride, 1); }, FatalError);
     commandArgs.setArgument(tagTensorA, ArgumentType::Stride, 0, 1);
 
     commandArgs.setArgument(tagScalarB, ArgumentType::Value, 2);
-    EXPECT_THROW({ commandArgs.setArgument(tagScalarB, ArgumentType::Limit, 10); }, FatalError);
+}
+
+TEST_F(CommandTest, FindCommandArguments)
+{
+    auto command    = std::make_shared<rocRoller::Command>();
+    auto tagScalarA = command->addOperation(Operations::Scalar(DataType::Float));
+
+    command->allocateArgument(
+        DataType::Float, tagScalarA, ArgumentType::Value, DataDirection::ReadOnly, "ScalarA");
+
+    // Find an existing arg
+    auto scalarArgA = findArgumentByName(command, "ScalarA");
+    EXPECT_NE(scalarArgA, nullptr);
+
+    // Find a nonexistent arg
+    auto scalarArgB = findArgumentByName(command, "ScalarB");
+    EXPECT_EQ(scalarArgB, nullptr);
 }
 
 TEST_F(CommandTest, GPU_TensorDescriptor)
@@ -328,9 +317,9 @@ TEST_F(CommandTest, GetRuntimeArguments)
         CommandArguments commandArgs      = command->createArguments();
         auto             runtimeArguments = commandArgs.runtimeArguments();
 
-        // The total number of bytes required by pointer, extent, size and stride
-        EXPECT_EQ(runtimeArguments.size(), 32);
-        EXPECT_EQ(runtimeArguments.size_bytes(), 32);
+        // The total number of bytes required by pointer, size and stride
+        EXPECT_EQ(runtimeArguments.size(), 24);
+        EXPECT_EQ(runtimeArguments.size_bytes(), 24);
     }
 }
 
@@ -359,6 +348,9 @@ TEST_F(CommandTest, CommandKernelPredicates)
     for(int i = 1; i < 100; i++)
     {
         commandArgs.setArgument(valTag, ArgumentType::Value, i);
+        CommandArgumentValue value(i);
+        commandArgs.setArgument(valTag, ArgumentType::Value, value);
+
         auto runtimeArguments = commandArgs.runtimeArguments();
         EXPECT_EQ(commandKernel.matchesPredicates(runtimeArguments), i % 2 == 0 && i % 5 == 0);
         if(!(i % 2 == 0 && i % 5 == 0))

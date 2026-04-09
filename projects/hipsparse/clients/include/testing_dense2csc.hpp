@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2020 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -27,7 +27,7 @@
 #include "testing_dense2csx.hpp"
 
 template <typename T>
-void testing_dense2csc_bad_arg(void)
+void testing_dense2csc_bad_arg(const Arguments& argus)
 {
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 12000)
     static constexpr hipsparseDirection_t DIRA = HIPSPARSE_DIRECTION_COLUMN;
@@ -36,13 +36,11 @@ void testing_dense2csc_bad_arg(void)
 }
 
 template <typename T>
-hipsparseStatus_t testing_dense2csc(Arguments argus)
+void testing_dense2csc(Arguments argus)
 {
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 12000)
     static constexpr hipsparseDirection_t DIRA = HIPSPARSE_DIRECTION_COLUMN;
     return testing_dense2csx<DIRA, T>(argus, hipsparseXdense2csc<T>);
-#else
-    return HIPSPARSE_STATUS_SUCCESS;
 #endif
 }
 

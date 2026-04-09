@@ -5,7 +5,13 @@ cmake_minimum_required(VERSION 3.25.2)
 
 option(CMAKE_EXPORT_COMPILE_COMMANDS "Generate compile commands json file." ON)
 
-project(hipsparselt VERSION 0.2.6 LANGUAGES CXX)
+project(hipsparselt VERSION 0.2.7 LANGUAGES CXX)
+
+# ROCm libraries root (for shared/ctest and other shared resources)
+# Only set default when not already defined (e.g. by superproject / rocm-libraries).
+if(NOT DEFINED ROCM_LIBRARIES_ROOT)
+  set(ROCM_LIBRARIES_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../..")
+endif()
 
 if(POLICY CMP0135)
     cmake_policy(SET CMP0135 NEW) # FetchContent timestamp handling
@@ -20,9 +26,9 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 # Set cpack license file here to avoid rocm-cmake warning
 set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.md")
 
-include(FetchROCmCMake)
-include(hipSPARSELtSupportedArchitectures)
-include(hipSPARSELtLinkBLASLibraries)
+include(fetch_rocm_cmake)
+include(hipsparselt_supported_architectures)
+include(hipsparselt_link_blas_libraries)
 include(CMakeDependentOption)
 include(CMakePackageConfigHelpers)
 include(GNUInstallDirs)
@@ -55,18 +61,20 @@ option(HIPSPARSELT_BUILD_SHARED_LIBS "Build the hipSPARSELt shared library." ON)
 option(HIPSPARSELT_BUILD_TESTING "Build test client." ON)
 option(HIPSPARSELT_BUILD_COVERAGE "Build tests with coverage enabled." OFF)
 
+option(HIPSPARSELT_ENABLE_DEVICE "Build hipSPARSELt device libraries." ON)
 option(HIPSPARSELT_ENABLE_CLIENT "Build hipSPARSELt clients." ON)
 if(HIPSPARSELT_ENABLE_CLIENT)
     option(HIPSPARSELT_ENABLE_BENCHMARKS "Build benchmark client." ON)
     option(HIPSPARSELT_ENABLE_SAMPLES "Build client samples." ON)
     option(HIPSPARSELT_ENABLE_FORTRAN "Build Fortran clients." OFF)
-    option(HIPSPARSELT_ENABLE_BLIS "Enable BLIS support for reference implementations." ON)
+    option(HIPSPARSELT_ENABLE_BLIS "Enable BLIS support for reference implementations." OFF)
 endif()
 
+cmake_dependent_option(HIPSPARSELT_ENABLE_MARKER "Use the marker library." ON "NOT WIN32" OFF)
 option(HIPSPARSELT_ENABLE_OPENMP "Enable OpenMP support." ON)
-option(HIPSPARSELT_ENABLE_MARKER "Enable rocTracer marker support." ON)
 option(HIPSPARSELT_ENABLE_ASAN "Build with address sanitizer enabled." OFF)
 option(HIPSPARSELT_ENABLE_FETCH "Fetch dependencies." OFF)
+option(HIPSPARSELT_ENABLE_THEROCK "Enable TheRock support." OFF)
 
 set(HIPSPARSELT_HIPBLASLT_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../hipblaslt"
     CACHE PATH "Path to hipblaslt directory."
@@ -74,9 +82,12 @@ set(HIPSPARSELT_HIPBLASLT_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../hipblaslt"
 set(HIPSPARSELT_COVERAGE_GTEST_FILTER "" CACHE STRING "GTest filter for coverage tests.")
 
 if(NOT HIPSPARSELT_ENABLE_CUDA)
-    set(GPU_TARGETS "" CACHE STRING "AMD GFX targets to cross-compile")
+    set(GPU_TARGETS "all" CACHE STRING "AMD GFX targets to cross-compile")
 
-    if(NOT GPU_TARGETS OR GPU_TARGETS STREQUAL "all")
+    if(NOT GPU_TARGETS)
+        set(HIPSPARSELT_ENABLE_DEVICE OFF)
+        message(WARNING "No GPU targets specified, device libraries will not be built.")
+    elseif(GPU_TARGETS STREQUAL "all")
         hipsparselt_get_base_architectures(GPU_TARGETS)
     else()
         hipsparselt_validate_gpu_targets("${GPU_TARGETS}")
@@ -115,6 +126,12 @@ if(HIPSPARSELT_ENABLE_MARKER)
         message(FATAL_ERROR "rocTracer marker is not supported with CUDA backend.")
     else()
         find_library(ROCTX64_LIBRARY REQUIRED HINTS lib NAMES roctx64 libroctx64)
+        get_filename_component(ROCTRACER_LIB_DIR ${ROCTX64_LIBRARY} DIRECTORY)
+        get_filename_component(ROCTRACER_ROOT_DIR ${ROCTRACER_LIB_DIR} DIRECTORY)
+        find_path(ROCTRACER_INCLUDE_DIR "roctracer/roctx.h"
+            HINTS ${ROCTRACER_ROOT_DIR}
+            PATH_SUFFIXES include
+            REQUIRED)
     endif()
 endif()
 
@@ -132,21 +149,21 @@ endif()
 if(HIPSPARSELT_ENABLE_HIP)
     set(HIPBLASLT_PATH "${HIPSPARSELT_HIPBLASLT_PATH}")
     if(NOT EXISTS "${HIPBLASLT_PATH}")
-        message(
-            FATAL_ERROR
-                "hipBLASLt required but no not found at ${HIPBLASLT_PATH}."
-        )
+        message(FATAL_ERROR "hipBLASLt required but no not found at ${HIPBLASLT_PATH}.")
     endif()
 
     block(SCOPE_FOR VARIABLES)
     set(HIPBLASLT_ENABLE_HOST OFF CACHE BOOL "" FORCE)
     set(HIPBLASLT_ENABLE_CLIENT OFF CACHE BOOL "" FORCE)
     # Builds tensilelite's device libraries (.co/.dat)
-    set(HIPBLASLT_ENABLE_DEVICE ON CACHE BOOL "" FORCE)
+    set(HIPBLASLT_ENABLE_DEVICE ${HIPSPARSELT_ENABLE_DEVICE} CACHE BOOL "" FORCE)
     # Builds tensilelite::tensilelite-host target
     set(TENSILELITE_ENABLE_HOST ON CACHE BOOL "" FORCE)
     set(HIPBLASLT_ENABLE_ASAN ${HIPSPARSELT_ENABLE_ASAN} CACHE BOOL "" FORCE)
     set(HIPBLASLT_DEVICE_LIBRARY_PATH "${CMAKE_BINARY_DIR}/Tensile" CACHE PATH "" FORCE)
+    # hipSPARSELt does not use ExtOp or MatrixTransform artifacts
+    set(HIPBLASLT_ENABLE_EXTOPS OFF CACHE BOOL "" FORCE)
+    set(HIPBLASLT_ENABLE_MATRIX_TRANSFORM OFF CACHE BOOL "" FORCE)
     set(HIPBLASLT_LIBLOGIC_PATH
         "${CMAKE_CURRENT_SOURCE_DIR}/library/src/hcc_detail/rocsparselt/src/spmm/Tensile/Logic/asm_full"
         CACHE STRING "" FORCE
@@ -168,39 +185,44 @@ if(HIPSPARSELT_ENABLE_HIP)
 
     set(ORIGAMI_ENABLE_INSTALL OFF)
     add_subdirectory("${HIPBLASLT_PATH}" hipblaslt)
+    # Hide TensileLite symbols to prevent interposition with hipblaslt's copy
+    target_compile_definitions(tensilelite-host PRIVATE TENSILE_STATIC_ONLY)
     endblock()
 endif()
 
 add_subdirectory(library)
 
+if(HIPSPARSELT_BUILD_TESTING)
+  enable_testing()
+endif()
+
 if(HIPSPARSELT_ENABLE_CLIENT)
+    if(NOT HIPSPARSELT_ENABLE_THEROCK)
+        if(NOT DEFINED CMAKE_Fortran_COMPILER AND NOT DEFINED ENV{FC})
+            set(CMAKE_Fortran_COMPILER "gfortran")
+        endif()
+        enable_language(Fortran)
+        find_package(LAPACK)
+        include(fetch_lapack)
+    endif()
     add_subdirectory(clients)
 endif()
 
 # --- Packaging and installation ---
 
 if(HIPSPARSELT_ENABLE_CLIENT)
-    include(ROCmClientPackages)
+    include(rocm_client_prerequisites)
+    rocm_set_client_package_prerequisites()
     rocm_package_setup_component(clients)
     rocm_package_setup_client_component(clients-common)
 endif()
 
 if(HIPSPARSELT_BUILD_TESTING OR BUILD_TESTING)
-    rocm_package_setup_client_component(
-        tests
-        DEPENDS
-        COMPONENT
-        clients-common
-    )
+    rocm_package_setup_client_component(tests DEPENDS COMPONENT clients-common)
 endif()
 
 if(HIPSPARSELT_ENABLE_BENCHMARKS)
-    rocm_package_setup_client_component(
-        benchmarks
-        DEPENDS
-        COMPONENT
-        clients-common
-    )
+    rocm_package_setup_client_component(benchmarks DEPENDS COMPONENT clients-common)
 endif()
 
 if(HIPSPARSELT_ENABLE_SAMPLES)
@@ -219,7 +241,10 @@ find_program(LLVM_STRIP NAMES llvm-strip PATH_SUFFIXES lib/llvm/bin llvm/bin bin
 if(LLVM_STRIP)
     set(CPACK_RPM_SPEC_MORE_DEFINE "%define __strip ${LLVM_STRIP}")
 else()
-    message(WARNING "llvm-strip not found, using default strip tool. This may cause stripping to fail during packaging.")
+    message(
+        WARNING
+            "llvm-strip not found, using default strip tool. This may cause stripping to fail during packaging."
+    )
 endif()
 
 rocm_install(
@@ -306,11 +331,12 @@ if(HIPSPARSELT_ENABLE_CLIENT)
 endif()
 
 if(ROCM_LIBS_SUPERBUILD OR NOT HIPSPARSELT_IS_SUBPROJECT)
-    # rocm_create_package makes decisions on what type of package to produce
-    # based on BUILD_SHARED_LIBS. If we don't set this here we will only get
-    # a dev package.
+    # rocm_create_package makes decisions on what type of package to produce based on
+    # BUILD_SHARED_LIBS. If we don't set this here we will only get a dev package.
     set(BUILD_SHARED_LIBS ${HIPSPARSELT_BUILD_SHARED_LIBS})
-    set(HIPSPARSELT_CONFIG_DIR "\${CPACK_PACKAGING_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}" CACHE PATH "Path placed into ldconfig file")
+    set(HIPSPARSELT_CONFIG_DIR "\${CPACK_PACKAGING_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}"
+        CACHE PATH "Path placed into ldconfig file"
+    )
     rocm_create_package(
         NAME hipsparselt
         DESCRIPTION "ROCm structured sparsity matrix multiplication marshalling library"
@@ -324,7 +350,7 @@ endif()
 
 if(HIPSPARSELT_BUILD_COVERAGE OR BUILD_CODE_COVERAGE)
     message(STATUS "Configuring code coverage target")
-    
+
     # Apply coverage flags to library target
     target_compile_options(hipsparselt PRIVATE -fprofile-instr-generate -fcoverage-mapping)
     target_link_options(hipsparselt PRIVATE -fprofile-instr-generate)

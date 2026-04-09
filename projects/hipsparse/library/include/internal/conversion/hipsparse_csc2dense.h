@@ -31,12 +31,12 @@ extern "C" {
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 12000)
 /*! \ingroup conv_module
 *  \brief
-*  \p hipsparseXcsc2dense function converts the sparse matrix in CSC format into a dense matrix.
+*  \p hipsparseXcsc2dense functions convert the sparse matrix in CSC format into a dense matrix.
 *
 *  \details
 *  Given the input CSC matrix of size \p mxn, the routine writes the matrix to the dense array \p A such
 *  that \p A has leading dimension \p ld and is column ordered. This means that \p A has size \p ldxn where
-*  \p ld>=m. All the parameters are assumed to have been pre-allocated by the user. If the input CSC matrix
+*  \p ld>=m. All the parameters are assumed to have been preallocated by the user. If the input CSC matrix
 *  has index base of one, it must be set in the \ref hipsparseMatDescr_t. See \ref hipsparseSetMatIndexBase()
 *  prior to calling \p hipsparseXcsc2dense.
 *
@@ -64,32 +64,37 @@ extern "C" {
 *  \f]
 *
 *  \note
-*  It is executed asynchronously with respect to the host and may return control to the application
+*  This function is executed asynchronously with respect to the host and can return control to the application
 *  on the host before the entire result is ready.
 *
+*  \deprecated
+*  This function is deprecated when using the CUDA backend (CUDA 11.0+) and will be 
+*  removed in CUDA 12.0. This deprecation does not apply to the ROCm backend.
+*
 *  @param[in]
-*  handle      handle to the hipsparse library context queue.
+*  handle      handle to the hipSPARSE library context queue.
 *  @param[in]
-*  m           number of rows of the dense matrix \p A.
+*  m           number of rows of the dense matrix \p A. Must be non-negative.
 *  @param[in]
-*  n           number of columns of the dense matrix \p A.
+*  n           number of columns of the dense matrix \p A. Must be non-negative.
 *  @param[in]
-*  descr       the descriptor of the dense matrix \p A, the supported matrix type is \ref HIPSPARSE_MATRIX_TYPE_GENERAL and also
+*  descr       the descriptor of the dense matrix \p A. The supported matrix type is \ref HIPSPARSE_MATRIX_TYPE_GENERAL and
 *              any valid value of the \ref hipsparseIndexBase_t.
 *  @param[in]
-*  cscVal      array of nnz ( = \p cscColPtr[n] - \p cscColPtr[0] ) nonzero elements of matrix \p A.
+*  cscVal      array of nnz ( = \p cscColPtr[n] - \p cscColPtr[0] ) non-zero elements of matrix \p A.
 *  @param[in]
 *  cscRowInd   integer array of nnz ( = \p cscColPtr[n] - \p cscColPtr[0] ) column indices of the non-zero elements of matrix \p A.
 *  @param[in]
 *  cscColPtr   integer array of \p n+1 elements that contains the start of every column and the end of the last column plus one.
 *  @param[out]
-*  A           array of dimensions (\p ld, \p n)
-*  @param[out]
-*  ld          leading dimension of dense array \p A.
+*  A           array of dimensions (\p ld, \p n).
+*  @param[in]
+*  ld          leading dimension of dense array \p A. Must be at least \p m.
 *
-*  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p ld, \p A, \p cscVal \p cscColPtr
-*              or \p cscRowInd pointer is invalid.
+*  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
+*  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p descr, \p cscVal, \p cscColPtr,
+*          \p cscRowInd, or \p A is nullptr, \p m or \p n is negative, or \p ld is invalid.
 */
 /**@{*/
 DEPRECATED_CUDA_11000("The routine will be removed in CUDA 12")

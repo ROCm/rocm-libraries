@@ -153,7 +153,7 @@ void testing_iamax_iamin_strided_batched(const Arguments& arg, FUNC func)
     // copy data from CPU to device
     CHECK_HIP_ERROR(dx.transfer_from(hx));
 
-    double gpu_time_used;
+    double gpu_time_used{0};
     R      hipblas_error_host = 0, hipblas_error_device = 0;
 
     if(arg.unit_check || arg.norm_check)

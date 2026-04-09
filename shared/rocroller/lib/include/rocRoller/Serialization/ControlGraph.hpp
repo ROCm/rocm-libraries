@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -268,29 +245,6 @@ namespace rocRoller
         };
 
         template <typename IO, typename Context>
-        struct MappingTraits<KernelGraph::ControlGraph::ComputeIndex, IO, Context>
-        {
-            using iot = IOTraits<IO>;
-            static void mapping(IO& io, KernelGraph::ControlGraph::ComputeIndex& op, Context&)
-            {
-                static_assert(sizeof(op) == 16);
-                iot::mapRequired(io, "forward", op.forward);
-                iot::mapRequired(io, "isDirect2LDS", op.isDirect2LDS);
-                iot::mapRequired(io, "valueType", op.valueType);
-                iot::mapRequired(io, "offsetType", op.offsetType);
-                iot::mapRequired(io, "strideType", op.strideType);
-            }
-
-            static void mapping(IO& io, KernelGraph::ControlGraph::ComputeIndex& op)
-            {
-                AssertFatal((std::same_as<EmptyContext, Context>));
-
-                Context ctx;
-                mapping(io, op, ctx);
-            }
-        };
-
-        template <typename IO, typename Context>
         struct MappingTraits<KernelGraph::ControlGraph::Deallocate, IO, Context>
         {
             using iot = IOTraits<IO>;
@@ -333,13 +287,9 @@ namespace rocRoller
                 {
                     //iot::mapRequired(io, "bufOpts", op.bufOpts);
                 }
-                else if constexpr(CIsAnyOf<Op,
-                                           KernelGraph::ControlGraph::LoadTiled,
-                                           KernelGraph::ControlGraph::LoadLDSTile>)
+                else if constexpr(CIsAnyOf<Op, KernelGraph::ControlGraph::LoadLDSTile>)
                 {
                     iot::mapRequired(io, "isTransposedTile", op.isTransposedTile);
-                    if constexpr(std::same_as<Op, KernelGraph::ControlGraph::LoadTiled>)
-                        iot::mapRequired(io, "isDirect2LDS", op.isDirect2LDS);
                 }
                 else
                 {
@@ -516,11 +466,6 @@ namespace rocRoller
             : public DefaultCustomMappingTraits<CompressedTableEntry, IO, false, false>
         {
         };
-
-#ifdef ROCROLLER_USE_YAML_CPP
-        // LLVM serialization defines traits for vector<int>.
-        ROCROLLER_SERIALIZE_VECTOR(true, int);
-#endif
 
         template <typename IO, typename Context>
         struct MappingTraits<KernelGraph::ControlGraph::ControlGraph, IO, Context>

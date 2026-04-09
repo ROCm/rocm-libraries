@@ -29,7 +29,7 @@ extern "C" {
 #endif
 
 /*! \ingroup conv_module
-*  \brief Sort a sparse COO matrix
+*  \brief Sort a sparse COO matrix.
 *
 *  \details
 *  \p hipsparseXcoosort_bufferSizeExt returns the size of the temporary storage buffer
@@ -37,7 +37,7 @@ extern "C" {
 *  The temporary storage buffer must be allocated by the user.
 *
 *  @param[in]
-*  handle              handle to the hipsparse library context queue.
+*  handle              handle to the hipSPARSE library context queue.
 *  @param[in]
 *  m                   number of rows of the sparse COO matrix.
 *  @param[in]
@@ -56,7 +56,7 @@ extern "C" {
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p nnz, \p cooRows,
-*              \p cooCols or \p pBufferSizeInBytes pointer is invalid.
+*              \p cooCols, or \p pBufferSizeInBytes pointer is invalid.
 *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
 */
 HIPSPARSE_EXPORT
@@ -69,28 +69,28 @@ hipsparseStatus_t hipsparseXcoosort_bufferSizeExt(hipsparseHandle_t handle,
                                                   size_t*           pBufferSizeInBytes);
 
 /*! \ingroup conv_module
-*  \brief Sort a sparse COO matrix by row
+*  \brief Sort a sparse COO matrix by row.
 *
 *  \details
 *  \p hipsparseXcoosortByRow sorts a matrix in COO format by row. The sorted
 *  permutation vector \p P can be used to obtain sorted \p cooVal array. In this
-*  case, \p P must be initialized as the identity permutation, see
+*  case, \p P must be initialized as the identity permutation. See
 *  \ref hipsparseCreateIdentityPermutation(). To apply the permutation vector to the COO
-*  values, see hipsparse \ref hipsparseSgthr "hipsparseXgthr()".
+*  values, see \ref hipsparseSgthr "hipsparseXgthr()".
 *
-*  \p hipsparseXcoosortByRow requires extra temporary storage buffer that has to be
-*  allocated by the user. Storage buffer size can be determined by
+*  \p hipsparseXcoosortByRow requires an extra temporary storage buffer that must be
+*  allocated by the user. The storage buffer size can be determined by
 *  \ref hipsparseXcoosort_bufferSizeExt().
 *
 *  \note
 *  \p P can be \p NULL if a sorted permutation vector is not required.
 *
 *  \note
-*  This function is non blocking and executed asynchronously with respect to the host.
-*  It may return before the actual computation has finished.
+*  This function is non-blocking and executed asynchronously with respect to the host.
+*  It can return before the actual computation has finished.
 *
 *  @param[in]
-*  handle          handle to the hipsparse library context queue.
+*  handle          handle to the hipSPARSE library context queue.
 *  @param[in]
 *  m               number of rows of the sparse COO matrix.
 *  @param[in]
@@ -104,19 +104,16 @@ hipsparseStatus_t hipsparseXcoosort_bufferSizeExt(hipsparseHandle_t handle,
 *  cooCols         array of \p nnz elements containing the column indices of the sparse
 *                  COO matrix.
 *  @param[inout]
-*  P               array of \p nnz integers containing the unsorted map indices, can be
+*  P               array of \p nnz integers containing the unsorted map indices. Can be
 *                  \p NULL.
 *  @param[in]
-*  pBuffer         temporary storage buffer allocated by the user, size is returned by
+*  pBuffer         temporary storage buffer allocated by the user. The size is returned by
 *                  \ref hipsparseXcoosort_bufferSizeExt().
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p nnz, \p cooRows,
-*              \p cooCols or \p pBuffer pointer is invalid.
+*              \p cooCols, or \p pBuffer pointer is invalid.
 *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
-*
-*  \par Example
-*  \snippet example_hipsparse_coosort_by_row.cpp doc example
 */
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseXcoosortByRow(hipsparseHandle_t handle,
@@ -129,28 +126,28 @@ hipsparseStatus_t hipsparseXcoosortByRow(hipsparseHandle_t handle,
                                          void*             pBuffer);
 
 /*! \ingroup conv_module
-*  \brief Sort a sparse COO matrix by column
+*  \brief Sort a sparse COO matrix by column.
 *
 *  \details
 *  \p hipsparseXcoosortByColumn sorts a matrix in COO format by column. The sorted
-*  permutation vector \p P can be used to obtain sorted \p cooVal array. In this
-*  case, \p P must be initialized as the identity permutation, see
+*  permutation vector \p P can be used to obtain the sorted \p cooVal array. In this
+*  case, \p P must be initialized as the identity permutation. See
 *  \ref hipsparseCreateIdentityPermutation(). To apply the permutation vector to the COO
-*  values, see hipsparse \ref hipsparseSgthr "hipsparseXgthr()".
+*  values, see \ref hipsparseSgthr "hipsparseXgthr()".
 *
-*  \p hipsparseXcoosortByColumn requires extra temporary storage buffer that has to be
-*  allocated by the user. Storage buffer size can be determined by
+*  \p hipsparseXcoosortByColumn requires an extra temporary storage buffer that must be
+*  allocated by the user. The storage buffer size can be determined by
 *  \ref hipsparseXcoosort_bufferSizeExt().
 *
 *  \note
 *  \p P can be \p NULL if a sorted permutation vector is not required.
 *
 *  \note
-*  This function is non blocking and executed asynchronously with respect to the host.
-*  It may return before the actual computation has finished.
+*  This function is non-blocking and executed asynchronously with respect to the host.
+*  It can return before the actual computation has finished.
 *
 *  @param[in]
-*  handle          handle to the hipsparse library context queue.
+*  handle          handle to the hipSPARSE library context queue.
 *  @param[in]
 *  m               number of rows of the sparse COO matrix.
 *  @param[in]
@@ -164,19 +161,16 @@ hipsparseStatus_t hipsparseXcoosortByRow(hipsparseHandle_t handle,
 *  cooCols         array of \p nnz elements containing the column indices of the sparse
 *                  COO matrix.
 *  @param[inout]
-*  P               array of \p nnz integers containing the unsorted map indices, can be
+*  P               array of \p nnz integers containing the unsorted map indices. Can be
 *                  \p NULL.
 *  @param[in]
-*  pBuffer         temporary storage buffer allocated by the user, size is returned by
+*  pBuffer         temporary storage buffer allocated by the user. The size is returned by
 *                  \ref hipsparseXcoosort_bufferSizeExt().
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p nnz, \p cooRows,
-*              \p cooCols or \p pBuffer pointer is invalid.
+*              \p cooCols, or \p pBuffer pointer is invalid.
 *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
-*
-*  \par Example
-*  \snippet example_hipsparse_coosort_by_column.cpp doc example
 */
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseXcoosortByColumn(hipsparseHandle_t handle,

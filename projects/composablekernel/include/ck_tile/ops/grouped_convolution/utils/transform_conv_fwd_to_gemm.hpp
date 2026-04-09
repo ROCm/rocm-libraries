@@ -1,22 +1,27 @@
-
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 #include "ck_tile/core.hpp"
 #include "ck_tile/ops/grouped_convolution/utils/convolution_specialization.hpp"
-
 namespace ck_tile {
+
+// ═══════════════════════════════════════════════════════════════════════
+// Split-Image Information Structure
+// ═══════════════════════════════════════════════════════════════════════
+// This structure holds all information needed to perform split-image
+// NOTE: SplitImageInfo struct deleted - was only used by deleted recursive split code
+// Current split-image implementation is in grouped_convolution_forward_invoker.hpp
 
 template <index_t NDimSpatial,
           ConvolutionSpecialization ConvSpecialization,
           index_t VectorSizeA,
           index_t VectorSizeB,
           index_t VectorSizeC,
+          index_t NumGroupsToMerge = 1,
           bool SplitN              = false,
           typename ADataType       = float,
           typename CDataType       = float,
-          index_t NumGroupsToMerge = 1,
           typename IndexType       = index_t>
 struct TransformConvFwdToGemm
 {
@@ -27,6 +32,9 @@ struct TransformConvFwdToGemm
     static constexpr auto I3 = number<3>{};
     static constexpr auto I4 = number<4>{};
     static constexpr auto I5 = number<5>{};
+
+    // Unified memory limit constant for both Split-N and Split-Image
+    static constexpr long_index_t TwoGB = (long_index_t{1} << 31); // 2GB
 
     template <typename ConvDimsType>
     static long_index_t calculate_element_space_size_impl(const ConvDimsType& lengths,
@@ -47,6 +55,7 @@ struct TransformConvFwdToGemm
     static IndexType GetSplitedNSize(const ConvDimsType& a_g_n_c_wis_lengths,
                                      const ConvDimsType& c_g_n_k_wos_lengths)
     {
+
         // Calculate strides internally assuming contiguous memory layout
         ConvDimsType a_g_n_c_wis_strides, c_g_n_k_wos_strides;
         const index_t num_dims = a_g_n_c_wis_lengths.size();
@@ -71,7 +80,6 @@ struct TransformConvFwdToGemm
             calculate_element_space_size_impl(c_g_n_k_wos_lengths, c_g_n_k_wos_strides, I1);
         const long_index_t element_space_size = ck_tile::max(
             a_element_space_size * sizeof(ADataType), c_element_space_size * sizeof(CDataType));
-        constexpr long_index_t TwoGB = (long_index_t{1} << 31); // 2GB
 
         const IndexType N = a_g_n_c_wis_lengths[I1];
 
@@ -109,6 +117,145 @@ struct TransformConvFwdToGemm
             // Split N is not needed.
             return N;
         }
+    }
+
+    public:
+    // Structure to hold split-image decision and factors
+    struct SplitImageInfo
+    {
+        bool should_split;
+        index_t num_d_pieces;
+        index_t num_h_pieces;
+        index_t num_w_pieces;
+    };
+
+    // Calculate split-image factors AFTER considering split-N
+    // Returns: should_split flag and optimal split factors for D, H, W dimensions
+    // Strategy: Hierarchical splitting with priority order D → H → W
+    // Dynamically increases split factors until memory fits below threshold
+    //
+    // NOTE: Layout validation should be done at the invoker level before calling this function
+    //       Split-image only works with specific layouts:
+    //       1D: NWGC (input), GKXC (weight), NWGK (output)
+    //       2D: NHWGC (input), GKYXC (weight), NHWGK (output)
+    //       3D: NDHWGC (input), GKZYXC (weight), NDHWGK (output)
+    CK_TILE_HOST static SplitImageInfo GetSplitImageInfo(
+        index_t G, index_t N, index_t C, index_t K, index_t D_out, index_t H_out, index_t W_out)
+    {
+        SplitImageInfo info{false, 1, 1, 1};
+
+        // Estimate memory (simplified calculation)
+        // Use max of input and output tensor sizes
+        // Cast to long_index_t to prevent overflow during multiplication
+        const long_index_t input_elements =
+            static_cast<long_index_t>(N) * D_out * H_out * W_out * C * G;
+        const long_index_t output_elements =
+            static_cast<long_index_t>(N) * D_out * H_out * W_out * K * G;
+        const long_index_t input_bytes  = input_elements * sizeof(ADataType);
+        const long_index_t output_bytes = output_elements * sizeof(CDataType);
+        const long_index_t max_tensor_bytes =
+            (input_bytes > output_bytes) ? input_bytes : output_bytes;
+
+        // Calculate effective N after split-N (simplified - assume worst case N=1)
+        index_t effective_N = 1;
+        if(max_tensor_bytes > TwoGB && N > 1)
+        {
+            // Split-N will reduce to approximately N=1 per launch
+            effective_N = 1;
+        }
+        else
+        {
+            effective_N = N;
+        }
+
+        // Check if split-image is needed
+        auto calc_memory = [&](index_t d_split, index_t h_split, index_t w_split) -> long_index_t {
+            index_t d_piece = D_out / d_split;
+            index_t h_piece = H_out / h_split;
+            index_t w_piece = W_out / w_split;
+            // Cast to long_index_t to prevent overflow
+            return static_cast<long_index_t>(effective_N) * d_piece * h_piece * w_piece * K * G *
+                   sizeof(CDataType);
+        };
+
+        // Calculate memory after split-N with no spatial split
+        const long_index_t memory_after_split_n = calc_memory(1, 1, 1);
+
+        // Check if split-image is needed
+        if(memory_after_split_n <= TwoGB)
+        {
+            info.should_split = false;
+            return info;
+        }
+
+        // Split-image is needed - use hierarchical priority: D → H → W
+        info.should_split = true;
+
+        // Hierarchical splitting strategy:
+        // 1D: Split W until below threshold
+        // 2D: Split H first, if still too large then split W
+        // 3D: Split D first, then H, then W
+
+        // IMPORTANT: Maximum 64 pieces total (hardcoded array limit in invoker)
+        constexpr index_t MAX_TOTAL_PIECES = 64;
+
+        // Start with no split
+        info.num_d_pieces = 1;
+        info.num_h_pieces = 1;
+        info.num_w_pieces = 1;
+
+        // Try splitting D first (for 3D)
+        if(D_out > 1)
+        {
+            index_t max_d_split = (D_out < MAX_TOTAL_PIECES) ? D_out : MAX_TOTAL_PIECES;
+            for(index_t d_split = 2; d_split <= max_d_split; d_split++)
+            {
+                info.num_d_pieces = d_split;
+                if(calc_memory(d_split, 1, 1) <= TwoGB)
+                {
+                    return info; // D split alone is sufficient
+                }
+            }
+            // D split maxed out, try H next
+        }
+
+        // Try splitting H (for 2D/3D)
+        if(H_out > 1)
+        {
+            index_t max_h_split = MAX_TOTAL_PIECES / info.num_d_pieces;
+            max_h_split         = (H_out < max_h_split) ? H_out : max_h_split;
+
+            for(index_t h_split = 2; h_split <= max_h_split; h_split++)
+            {
+                info.num_h_pieces = h_split;
+                if(calc_memory(info.num_d_pieces, h_split, 1) <= TwoGB)
+                {
+                    return info; // D+H split is sufficient
+                }
+            }
+            // H split maxed out, try W next
+        }
+
+        // Try splitting W (for 1D/2D/3D)
+        index_t max_w_split = MAX_TOTAL_PIECES / (info.num_d_pieces * info.num_h_pieces);
+        max_w_split         = (W_out < max_w_split) ? W_out : max_w_split;
+
+        for(index_t w_split = 2; w_split <= max_w_split; w_split++)
+        {
+            info.num_w_pieces = w_split;
+            if(calc_memory(info.num_d_pieces, info.num_h_pieces, w_split) <= TwoGB)
+            {
+                return info; // D+H+W split is sufficient
+            }
+        }
+
+        // If we reach here, even maximum split doesn't fit
+        // Use maximum allowed split as best effort (capped at 64 total pieces)
+        info.num_d_pieces = (D_out < 4) ? D_out : 4; // Cap at 4
+        info.num_h_pieces = (H_out < 4) ? H_out : 4; // Cap at 4
+        info.num_w_pieces = (W_out < 4) ? W_out : 4; // Cap at 4 (max 4×4×4=64)
+
+        return info;
     }
 
     public:
@@ -192,13 +339,13 @@ struct TransformConvFwdToGemm
                       std::is_same_v<ConvSpatialDimsType, ck_tile::array<IndexType, NDimSpatial>>);
         static_assert(std::is_same_v<ConvDimsType, std::array<IndexType, NDimSpatial + I3>> ||
                       std::is_same_v<ConvDimsType, ck_tile::array<IndexType, NDimSpatial + I3>>);
+
+        // Store original N and initialize N_
+        original_N_ = N_ = c_g_n_k_wos_lengths[I1];
+
         if constexpr(SplitN)
         {
             N_ = GetSplitedNSize(a_g_n_c_wis_lengths, c_g_n_k_wos_lengths);
-        }
-        else
-        {
-            N_ = c_g_n_k_wos_lengths[I1];
         }
     }
 
@@ -244,17 +391,12 @@ struct TransformConvFwdToGemm
         static_assert(std::is_same_v<ConvDimsType, std::array<IndexType, NDimSpatial + I3>> ||
                       std::is_same_v<ConvDimsType, ck_tile::array<IndexType, NDimSpatial + I3>>);
 
-        // Store original N
-        original_N_ = c_g_n_k_wos_lengths[I1];
+        // Store original N and initialize N_
+        original_N_ = N_ = c_g_n_k_wos_lengths[I1];
 
         if constexpr(SplitN)
         {
             N_ = GetSplitedNSize(a_g_n_c_wis_lengths, c_g_n_k_wos_lengths);
-        }
-        else
-        {
-            N_          = c_g_n_k_wos_lengths[I1];
-            original_N_ = N_;
         }
     }
 
@@ -300,136 +442,26 @@ struct TransformConvFwdToGemm
         static_assert(std::is_same_v<ConvDimsType, std::array<IndexType, NDimSpatial + I3>> ||
                       std::is_same_v<ConvDimsType, ck_tile::array<IndexType, NDimSpatial + I3>>);
 
-        // Store original N before potential splitting
-        original_N_ = c_g_n_k_wos_lengths[I1];
+        // Store original N and initialize N_
+        original_N_ = N_ = c_g_n_k_wos_lengths[I1];
 
         if constexpr(SplitN)
         {
             N_ = GetSplitedNSize(a_g_n_c_wis_lengths, c_g_n_k_wos_lengths);
         }
-        else
-        {
-            N_ = original_N_;
-        }
     }
 
-#if 0 // TODO: Enable these functionalities
-    __host__ bool AreDescriptorsSmallerThan2GB() const
+    // Check if descriptors fit within memory threshold
+    // NOTE: Not currently used - split-image uses different approach in invoker
+    CK_TILE_HOST bool AreDescriptorsSmallerThan2GB() const
     {
-        constexpr long_index_t TwoGB = (long_index_t{1} << 31);
+        const long_index_t input_size  = static_cast<long_index_t>(N_) * Di_ * Hi_ * Wi_ * C_;
+        const long_index_t output_size = static_cast<long_index_t>(N_) * Do_ * Ho_ * Wo_ * K_;
 
-        const long_index_t in_desc_space_size =
-            I1 + (N_ - I1) * NStrideTensorA_ + (Di_ - I1) * DiStride_ + (Hi_ - I1) * HiStride_ +
-            (Wi_ - I1) * WiStride_ + (C_ - I1) * CStrideTensorA_;
-        const long_index_t out_desc_space_size =
-            I1 + (N_ - I1) * NStrideTensorC_ + (Do_ - I1) * DoStride_ + (Ho_ - I1) * HoStride_ +
-            (Wo_ - I1) * WoStride_ + (K_ - I1) * KStrideTensorC_;
-
-        bool is_a_descriptor_smaller_than_2GB = (in_desc_space_size * sizeof(ADataType)) <= TwoGB;
-        bool is_c_descriptor_smaller_than_2GB = (out_desc_space_size * sizeof(CDataType)) <= TwoGB;
-
-        return is_a_descriptor_smaller_than_2GB && is_c_descriptor_smaller_than_2GB;
+        const long_index_t threshold = TwoGB / sizeof(ADataType);
+        return (input_size < threshold) && (output_size < threshold);
     }
 
-    __host__ auto SplitConvProblem(const ADataType* a_grid_ptr_base,
-                                   CDataType* c_grid_ptr_base) const
-    {
-        // Create copies
-        auto conv_to_gemm_transformer_left  = *this;
-        auto conv_to_gemm_transformer_right = *this;
-        IndexType a_right_offset            = 0;
-        IndexType c_right_offset            = 0;
-        // Calculate real filter size
-        const IndexType z_eff = (Z_ - 1) * ConvDilationD_ + 1;
-        const IndexType y_eff = (Y_ - 1) * ConvDilationH_ + 1;
-        const IndexType x_eff = (X_ - 1) * ConvDilationW_ + 1;
-        // Calculate start position in input for right tensor
-        const IndexType di_right_transformer_start_idx = (Do_ / 2) * ConvStrideD_;
-        const IndexType hi_right_transformer_start_idx = (Ho_ / 2) * ConvStrideH_;
-        const IndexType wi_right_transformer_start_idx = (Wo_ / 2) * ConvStrideW_;
-        // Calculate last position in input for left tensor
-        const IndexType di_left_transformer_end_idx = (Do_ / 2 - 1) * ConvStrideD_ + z_eff;
-        const IndexType hi_left_transformer_end_idx = (Ho_ / 2 - 1) * ConvStrideH_ + y_eff;
-        const IndexType wi_left_transformer_end_idx = (Wo_ / 2 - 1) * ConvStrideW_ + x_eff;
-        // Allow to split if whole left padding will be in left tensor and right padding in right
-        // tensor
-        const bool is_possible_to_split_d = Do_ != 1 &&
-                                            di_right_transformer_start_idx > InLeftPadD_ &&
-                                            di_left_transformer_end_idx <= (InLeftPadD_ + Di_);
-        const bool is_possible_to_split_h = Ho_ != 1 &&
-                                            hi_right_transformer_start_idx > InLeftPadH_ &&
-                                            hi_left_transformer_end_idx <= (InLeftPadH_ + Hi_);
-        const bool is_possible_to_split_w = Wo_ != 1 &&
-                                            wi_right_transformer_start_idx > InLeftPadW_ &&
-                                            wi_left_transformer_end_idx <= (InLeftPadW_ + Wi_);
-
-        if(is_possible_to_split_d)
-        {
-            // Apply new sizes
-            // Split output on half
-            conv_to_gemm_transformer_left.Do_  = Do_ / 2;
-            conv_to_gemm_transformer_right.Do_ = Do_ - Do_ / 2;
-            // Assign left padding to left convolution
-            conv_to_gemm_transformer_left.InLeftPadD_  = InLeftPadD_;
-            conv_to_gemm_transformer_right.InLeftPadD_ = 0;
-            // Assign right padding to right convolution
-            conv_to_gemm_transformer_left.InRightPadD_  = 0;
-            conv_to_gemm_transformer_right.InRightPadD_ = InRightPadD_;
-            // Calculate new input size
-            conv_to_gemm_transformer_left.Di_ = di_left_transformer_end_idx - InLeftPadD_;
-            conv_to_gemm_transformer_right.Di_ =
-                math::min(Di_ - (di_right_transformer_start_idx - InLeftPadD_),
-                          (conv_to_gemm_transformer_right.Do_ - 1) * ConvStrideD_ + z_eff);
-            ;
-            // Calcualte offsets
-            a_right_offset = ((Do_ / 2) * ConvStrideD_ - InLeftPadD_) * DiStride_;
-            c_right_offset = (Do_ / 2) * DoStride_;
-        }
-        else if(is_possible_to_split_h)
-        {
-            conv_to_gemm_transformer_left.Ho_  = Ho_ / 2;
-            conv_to_gemm_transformer_right.Ho_ = Ho_ - Ho_ / 2;
-
-            conv_to_gemm_transformer_left.InLeftPadH_  = InLeftPadH_;
-            conv_to_gemm_transformer_right.InLeftPadH_ = 0;
-
-            conv_to_gemm_transformer_left.InRightPadH_  = 0;
-            conv_to_gemm_transformer_right.InRightPadH_ = InRightPadH_;
-
-            conv_to_gemm_transformer_left.Hi_ = hi_left_transformer_end_idx - InLeftPadH_;
-            conv_to_gemm_transformer_right.Hi_ =
-                math::min(Hi_ - (hi_right_transformer_start_idx - InLeftPadH_),
-                          (conv_to_gemm_transformer_right.Ho_ - 1) * ConvStrideH_ + y_eff);
-            a_right_offset = ((Ho_ / 2) * ConvStrideH_ - InLeftPadH_) * HiStride_;
-            c_right_offset = (Ho_ / 2) * HoStride_;
-        }
-        else if(is_possible_to_split_w)
-        {
-            conv_to_gemm_transformer_left.Wo_  = Wo_ / 2;
-            conv_to_gemm_transformer_right.Wo_ = Wo_ - Wo_ / 2;
-
-            conv_to_gemm_transformer_left.InLeftPadW_  = InLeftPadW_;
-            conv_to_gemm_transformer_right.InLeftPadW_ = 0;
-
-            conv_to_gemm_transformer_left.InRightPadW_  = 0;
-            conv_to_gemm_transformer_right.InRightPadW_ = InRightPadW_;
-
-            conv_to_gemm_transformer_left.Wi_ = wi_left_transformer_end_idx - InLeftPadW_;
-            conv_to_gemm_transformer_right.Wi_ =
-                math::min(Wi_ - (wi_right_transformer_start_idx - InLeftPadW_),
-                          (conv_to_gemm_transformer_right.Wo_ - 1) * ConvStrideW_ + x_eff);
-
-            a_right_offset = ((Wo_ / 2) * ConvStrideW_ - InLeftPadW_) * WiStride_;
-            c_right_offset = (Wo_ / 2) * WoStride_;
-        }
-        // Return left transform, right transformer, right offset to Input and right offset to
-        // Output
-        return ck_tile::make_tuple(conv_to_gemm_transformer_left,
-                              conv_to_gemm_transformer_right,
-                              a_grid_ptr_base + a_right_offset,
-                              c_grid_ptr_base + c_right_offset);
-    }
-#endif
     // TODO: implement ck_tile::tensor_layout::convolution that describe packed/strided dimemsion as
     // properties
     template <typename ALayout,
@@ -438,10 +470,10 @@ struct TransformConvFwdToGemm
                                       bool>::type = false>
     CK_TILE_HOST auto MakeADescriptor_M_K() const
     {
+        IndexType NStrideTensorA_ = Wi_ * G_ * C_;
         IndexType WiStride_       = G_ * C_;
-        IndexType CStrideTensorA_ = 1;
-        IndexType NStrideTensorA_ = Di_ * Hi_ * Wi_ * G_ * C_;
         IndexType GStrideTensorA_ = C_;
+        IndexType CStrideTensorA_ = 1;
 
         if constexpr(ConvSpecialization == ConvolutionSpecialization::Filter1x1Stride1Pad0)
         {
@@ -628,8 +660,8 @@ struct TransformConvFwdToGemm
             else
             {
                 const auto in_n_wi_c_desc = make_naive_tensor_descriptor(
-                    make_tuple(N_, Wi_, NumGroupsToMerge, C_),
-                    make_tuple(NStrideTensorA_, WiStride_, GStrideTensorA_, CStrideTensorA_),
+                    make_tuple(N_, Wi_, NumGroupsToMerge),
+                    make_tuple(NStrideTensorA_, WiStride_, GStrideTensorA_),
                     number<VectorSizeA>{},
                     I1);
 
@@ -637,26 +669,24 @@ struct TransformConvFwdToGemm
                     in_n_wi_c_desc,
                     make_tuple(make_pass_through_transform(N_),
                                make_pad_transform(Wi_, InLeftPadW_, InRightPadW_),
-                               make_pass_through_transform(NumGroupsToMerge),
-                               make_pass_through_transform(C_)),
-                    make_tuple(sequence<0>{}, sequence<1>{}, sequence<2>{}, sequence<3>{}),
-                    make_tuple(sequence<0>{}, sequence<1>{}, sequence<2>{}, sequence<3>{}));
+                               make_pass_through_transform(NumGroupsToMerge)),
+                    make_tuple(sequence<0>{}, sequence<1>{}, sequence<2>{}),
+                    make_tuple(sequence<0>{}, sequence<1>{}, sequence<2>{}));
 
                 const auto in_n_x_wo_c_desc = transform_tensor_descriptor(
                     in_n_wip_c_desc,
                     make_tuple(make_pass_through_transform(N_),
                                make_embed_transform(make_tuple(X_, Wo_),
                                                     make_tuple(ConvDilationW_, ConvStrideW_)),
-                               make_pass_through_transform(NumGroupsToMerge),
-                               make_pass_through_transform(C_)),
-                    make_tuple(sequence<0>{}, sequence<1>{}, sequence<2>{}, sequence<3>{}),
-                    make_tuple(sequence<0>{}, sequence<1, 2>{}, sequence<3>{}, sequence<4>{}));
+                               make_pass_through_transform(NumGroupsToMerge)),
+                    make_tuple(sequence<0>{}, sequence<1>{}, sequence<2>{}),
+                    make_tuple(sequence<0>{}, sequence<1, 2>{}, sequence<3>{}));
 
                 return transform_tensor_descriptor(
                     in_n_x_wo_c_desc,
                     make_tuple(make_merge_transform(make_tuple(N_, Wo_, NumGroupsToMerge)),
-                               make_merge_transform(make_tuple(X_, C_))),
-                    make_tuple(sequence<0, 2, 3>{}, sequence<1, 4>{}),
+                               make_merge_transform(make_tuple(X_))),
+                    make_tuple(sequence<0, 2, 3>{}, sequence<1>{}),
                     make_tuple(sequence<0>{}, sequence<1>{}));
             }
         }
@@ -669,11 +699,11 @@ struct TransformConvFwdToGemm
     CK_TILE_HOST auto MakeADescriptor_M_K() const
 
     {
+        IndexType NStrideTensorA_ = Hi_ * Wi_ * G_ * C_;
         IndexType HiStride_       = Wi_ * G_ * C_;
         IndexType WiStride_       = G_ * C_;
-        IndexType CStrideTensorA_ = 1;
-        IndexType NStrideTensorA_ = Di_ * Hi_ * Wi_ * G_ * C_;
         IndexType GStrideTensorA_ = C_;
+        IndexType CStrideTensorA_ = 1;
 
         if constexpr(ConvSpecialization == ConvolutionSpecialization::Filter1x1Stride1Pad0)
         {
@@ -874,11 +904,10 @@ struct TransformConvFwdToGemm
             }
             else
             {
-
+                // IsSupported ensures C == 1 to allow reading on G dimension
                 const auto in_n_hi_wi_groups_c_desc = make_naive_tensor_descriptor(
-                    make_tuple(N_, Hi_, Wi_, NumGroupsToMerge, C_),
-                    make_tuple(
-                        NStrideTensorA_, HiStride_, WiStride_, GStrideTensorA_, CStrideTensorA_),
+                    make_tuple(N_, Hi_, Wi_, NumGroupsToMerge),
+                    make_tuple(NStrideTensorA_, HiStride_, WiStride_, GStrideTensorA_),
                     number<VectorSizeA>{},
                     I1);
 
@@ -887,12 +916,9 @@ struct TransformConvFwdToGemm
                     make_tuple(make_pass_through_transform(N_),
                                make_pad_transform(Hi_, InLeftPadH_, InRightPadH_),
                                make_pad_transform(Wi_, InLeftPadW_, InRightPadW_),
-                               make_pass_through_transform(NumGroupsToMerge),
-                               make_pass_through_transform(C_)),
-                    make_tuple(
-                        sequence<0>{}, sequence<1>{}, sequence<2>{}, sequence<3>{}, sequence<4>{}),
-                    make_tuple(
-                        sequence<0>{}, sequence<1>{}, sequence<2>{}, sequence<3>{}, sequence<4>{}));
+                               make_pass_through_transform(NumGroupsToMerge)),
+                    make_tuple(sequence<0>{}, sequence<1>{}, sequence<2>{}, sequence<3>{}),
+                    make_tuple(sequence<0>{}, sequence<1>{}, sequence<2>{}, sequence<3>{}));
 
                 const auto in_n_y_ho_x_wo_groups_c_desc = transform_tensor_descriptor(
                     in_n_hip_wip_groups_c_desc,
@@ -901,21 +927,15 @@ struct TransformConvFwdToGemm
                                                     make_tuple(ConvDilationH_, ConvStrideH_)),
                                make_embed_transform(make_tuple(X_, Wo_),
                                                     make_tuple(ConvDilationW_, ConvStrideW_)),
-                               make_pass_through_transform(NumGroupsToMerge),
-                               make_pass_through_transform(C_)),
-                    make_tuple(
-                        sequence<0>{}, sequence<1>{}, sequence<2>{}, sequence<3>{}, sequence<4>{}),
-                    make_tuple(sequence<0>{},
-                               sequence<1, 2>{},
-                               sequence<3, 4>{},
-                               sequence<5>{},
-                               sequence<6>{}));
+                               make_pass_through_transform(NumGroupsToMerge)),
+                    make_tuple(sequence<0>{}, sequence<1>{}, sequence<2>{}, sequence<3>{}),
+                    make_tuple(sequence<0>{}, sequence<1, 2>{}, sequence<3, 4>{}, sequence<5>{}));
 
                 return transform_tensor_descriptor(
                     in_n_y_ho_x_wo_groups_c_desc,
                     make_tuple(make_merge_transform(make_tuple(N_, Ho_, Wo_, NumGroupsToMerge)),
-                               make_merge_transform(make_tuple(Y_, X_, C_))),
-                    make_tuple(sequence<0, 2, 4, 5>{}, sequence<1, 3, 6>{}),
+                               make_merge_transform(make_tuple(Y_, X_))),
+                    make_tuple(sequence<0, 2, 4, 5>{}, sequence<1, 3>{}),
                     make_tuple(sequence<0>{}, sequence<1>{}));
             }
         }
@@ -928,12 +948,12 @@ struct TransformConvFwdToGemm
     CK_TILE_HOST auto MakeADescriptor_M_K() const
 
     {
+        IndexType NStrideTensorA_ = Di_ * Hi_ * Wi_ * G_ * C_;
         IndexType DiStride_       = Hi_ * Wi_ * G_ * C_;
         IndexType HiStride_       = Wi_ * G_ * C_;
         IndexType WiStride_       = G_ * C_;
-        IndexType CStrideTensorA_ = 1;
-        IndexType NStrideTensorA_ = Di_ * Hi_ * Wi_ * G_ * C_;
         IndexType GStrideTensorA_ = C_;
+        IndexType CStrideTensorA_ = 1;
 
         if constexpr(ConvSpecialization == ConvolutionSpecialization::Filter1x1Stride1Pad0)
         {
@@ -1182,14 +1202,10 @@ struct TransformConvFwdToGemm
             }
             else
             {
+                // IsSupported ensures C == 1 to allow reading on G dimension
                 const auto in_n_di_hi_wi_c_desc = make_naive_tensor_descriptor(
-                    make_tuple(N_, Di_, Hi_, Wi_, NumGroupsToMerge, C_),
-                    make_tuple(NStrideTensorA_,
-                               DiStride_,
-                               HiStride_,
-                               WiStride_,
-                               GStrideTensorA_,
-                               CStrideTensorA_),
+                    make_tuple(N_, Di_, Hi_, Wi_, NumGroupsToMerge),
+                    make_tuple(NStrideTensorA_, DiStride_, HiStride_, WiStride_, GStrideTensorA_),
                     number<VectorSizeA>{},
                     I1);
 
@@ -1199,20 +1215,11 @@ struct TransformConvFwdToGemm
                                make_pad_transform(Di_, InLeftPadD_, InRightPadD_),
                                make_pad_transform(Hi_, InLeftPadH_, InRightPadH_),
                                make_pad_transform(Wi_, InLeftPadW_, InRightPadW_),
-                               make_pass_through_transform(NumGroupsToMerge),
-                               make_pass_through_transform(C_)),
-                    make_tuple(sequence<0>{},
-                               sequence<1>{},
-                               sequence<2>{},
-                               sequence<3>{},
-                               sequence<4>{},
-                               sequence<5>{}),
-                    make_tuple(sequence<0>{},
-                               sequence<1>{},
-                               sequence<2>{},
-                               sequence<3>{},
-                               sequence<4>{},
-                               sequence<5>{}));
+                               make_pass_through_transform(NumGroupsToMerge)),
+                    make_tuple(
+                        sequence<0>{}, sequence<1>{}, sequence<2>{}, sequence<3>{}, sequence<4>{}),
+                    make_tuple(
+                        sequence<0>{}, sequence<1>{}, sequence<2>{}, sequence<3>{}, sequence<4>{}));
 
                 const auto in_n_z_do_y_ho_x_wo_c_desc = transform_tensor_descriptor(
                     in_n_hip_wip_c_desc,
@@ -1223,27 +1230,21 @@ struct TransformConvFwdToGemm
                                                     make_tuple(ConvDilationH_, ConvStrideH_)),
                                make_embed_transform(make_tuple(X_, Wo_),
                                                     make_tuple(ConvDilationW_, ConvStrideW_)),
-                               make_pass_through_transform(NumGroupsToMerge),
-                               make_pass_through_transform(C_)),
-                    make_tuple(sequence<0>{},
-                               sequence<1>{},
-                               sequence<2>{},
-                               sequence<3>{},
-                               sequence<4>{},
-                               sequence<5>{}),
+                               make_pass_through_transform(NumGroupsToMerge)),
+                    make_tuple(
+                        sequence<0>{}, sequence<1>{}, sequence<2>{}, sequence<3>{}, sequence<4>{}),
                     make_tuple(sequence<0>{},
                                sequence<1, 2>{},
                                sequence<3, 4>{},
                                sequence<5, 6>{},
-                               sequence<7>{},
-                               sequence<8>{}));
+                               sequence<7>{}));
 
                 return transform_tensor_descriptor(
                     in_n_z_do_y_ho_x_wo_c_desc,
                     make_tuple(
                         make_merge_transform(make_tuple(N_, Do_, Ho_, Wo_, NumGroupsToMerge)),
-                        make_merge_transform(make_tuple(Z_, Y_, X_, C_))),
-                    make_tuple(sequence<0, 2, 4, 6, 7>{}, sequence<1, 3, 5, 8>{}),
+                        make_merge_transform(make_tuple(Z_, Y_, X_))),
+                    make_tuple(sequence<0, 2, 4, 6, 7>{}, sequence<1, 3, 5>{}),
                     make_tuple(sequence<0>{}, sequence<1>{}));
             }
         }
@@ -1257,9 +1258,9 @@ struct TransformConvFwdToGemm
                                 bool>::type = false>
     CK_TILE_HOST auto MakeBDescriptor_N_K() const
     {
-        IndexType CStrideTensorB_ = 1;
-        IndexType KStrideTensorB_ = Z_ * Y_ * X_ * C_;
         IndexType GStrideTensorB_ = K_ * Z_ * Y_ * X_ * C_;
+        IndexType KStrideTensorB_ = Z_ * Y_ * X_ * C_;
+        IndexType CStrideTensorB_ = 1;
 
         if constexpr(ConvSpecialization == ConvolutionSpecialization::Filter3x3)
         {
@@ -1324,10 +1325,10 @@ struct TransformConvFwdToGemm
                                       bool>::type = false>
     CK_TILE_HOST auto MakeCDescriptor_M_N() const
     {
+        IndexType NStrideTensorC_ = Wo_ * G_ * K_;
         IndexType WoStride_       = G_ * K_;
-        IndexType KStrideTensorC_ = 1;
-        IndexType NStrideTensorC_ = Do_ * Ho_ * Wo_ * G_ * K_;
         IndexType GStrideTensorC_ = K_;
+        IndexType KStrideTensorC_ = 1;
 
         const IndexType NDoHoWo = N_ * Wo_;
         if constexpr(NumGroupsToMerge == 1)
@@ -1362,9 +1363,11 @@ struct TransformConvFwdToGemm
                           NumGroupsToMerge == 32 || NumGroupsToMerge == 64);
             const auto unmerged_padded_desc = transform_tensor_descriptor(
                 padded_desc,
-                make_tuple(make_pass_through_transform(NDoHoWo),
-                           make_xor_transform(make_tuple(NumGroupsToMerge, NumGroupsToMerge)),
-                           make_pass_through_transform(K_)),
+                make_tuple(
+                    make_pass_through_transform(NDoHoWo),
+                    make_xor_transform<decltype(make_tuple(NumGroupsToMerge, NumGroupsToMerge)),
+                                       false>(make_tuple(NumGroupsToMerge, NumGroupsToMerge)),
+                    make_pass_through_transform(K_)),
                 make_tuple(sequence<0>{}, sequence<1, 3>{}, sequence<2>{}),
                 make_tuple(sequence<0>{}, sequence<1, 3>{}, sequence<2>{}));
             // Merge To M, N
@@ -1385,11 +1388,11 @@ struct TransformConvFwdToGemm
                   bool>::type = false>
     CK_TILE_HOST auto MakeCDescriptor_M_N() const
     {
+        IndexType NStrideTensorC_ = Ho_ * Wo_ * G_ * K_;
         IndexType HoStride_       = Wo_ * G_ * K_;
         IndexType WoStride_       = G_ * K_;
-        IndexType KStrideTensorC_ = 1;
-        IndexType NStrideTensorC_ = Do_ * Ho_ * Wo_ * G_ * K_;
         IndexType GStrideTensorC_ = K_;
+        IndexType KStrideTensorC_ = 1;
 
         const IndexType NDoHoWo = N_ * Ho_ * Wo_;
         if constexpr(NumGroupsToMerge == 1)
@@ -1428,9 +1431,11 @@ struct TransformConvFwdToGemm
                           NumGroupsToMerge == 32 || NumGroupsToMerge == 64);
             const auto unmerged_padded_desc = transform_tensor_descriptor(
                 padded_desc,
-                make_tuple(make_pass_through_transform(NDoHoWo),
-                           make_xor_transform(make_tuple(NumGroupsToMerge, NumGroupsToMerge)),
-                           make_pass_through_transform(K_)),
+                make_tuple(
+                    make_pass_through_transform(NDoHoWo),
+                    make_xor_transform<decltype(make_tuple(NumGroupsToMerge, NumGroupsToMerge)),
+                                       false>(make_tuple(NumGroupsToMerge, NumGroupsToMerge)),
+                    make_pass_through_transform(K_)),
                 make_tuple(sequence<0>{}, sequence<1, 3>{}, sequence<2>{}),
                 make_tuple(sequence<0>{}, sequence<1, 3>{}, sequence<2>{}));
             // Merge To M, N
@@ -1450,12 +1455,12 @@ struct TransformConvFwdToGemm
                   bool>::type = false>
     CK_TILE_HOST auto MakeCDescriptor_M_N() const
     {
+        IndexType NStrideTensorC_ = Do_ * Ho_ * Wo_ * G_ * K_;
         IndexType DoStride_       = Ho_ * Wo_ * G_ * K_;
         IndexType HoStride_       = Wo_ * G_ * K_;
         IndexType WoStride_       = G_ * K_;
-        IndexType KStrideTensorC_ = 1;
-        IndexType NStrideTensorC_ = Do_ * Ho_ * Wo_ * G_ * K_;
         IndexType GStrideTensorC_ = K_;
+        IndexType KStrideTensorC_ = 1;
 
         const IndexType NDoHoWo = N_ * Do_ * Ho_ * Wo_;
         if constexpr(NumGroupsToMerge == 1)
@@ -1495,9 +1500,11 @@ struct TransformConvFwdToGemm
                           NumGroupsToMerge == 32 || NumGroupsToMerge == 64);
             const auto unmerged_padded_desc = transform_tensor_descriptor(
                 padded_desc,
-                make_tuple(make_pass_through_transform(NDoHoWo),
-                           make_xor_transform(make_tuple(NumGroupsToMerge, NumGroupsToMerge)),
-                           make_pass_through_transform(K_)),
+                make_tuple(
+                    make_pass_through_transform(NDoHoWo),
+                    make_xor_transform<decltype(make_tuple(NumGroupsToMerge, NumGroupsToMerge)),
+                                       false>(make_tuple(NumGroupsToMerge, NumGroupsToMerge)),
+                    make_pass_through_transform(K_)),
                 make_tuple(sequence<0>{}, sequence<1, 3>{}, sequence<2>{}),
                 make_tuple(sequence<0>{}, sequence<1, 3>{}, sequence<2>{}));
             // Merge To M, N
@@ -1510,6 +1517,18 @@ struct TransformConvFwdToGemm
         }
     }
 
+    // ═══════════════════════════════════════════════════════════════════════
+    // Split-Image Calculation (AFTER Split-N)
+    // ═══════════════════════════════════════════════════════════════════════
+    // This method calculates split-image information using N_ (after Split-N).
+    // This ensures correct offset calculations when both Split-N and Split-Image
+    // are active simultaneously.
+
+    // NOTE: Deleted CalculateSplitImage() and LaunchWithRecursiveSplit() - dead code
+    // Current split-image implementation is in grouped_convolution_forward_invoker.hpp
+
+    public:
+    private:
     IndexType G_, N_, original_N_;
     IndexType Di_, Hi_, Wi_;
     IndexType Do_, Ho_, Wo_;

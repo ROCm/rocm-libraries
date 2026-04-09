@@ -51,13 +51,13 @@ protected:
 
 TEST_F(IntegrationEngineConfigApi, SetEngineConfigEngine)
 {
-    int64_t gidx = hipdnn_tests::plugin_constants::engineId<GoodPlugin>();
+    const int64_t gidx = hipdnn_tests::plugin_constants::engineId<GoodPlugin>();
 
     EXPECT_EQ(hipdnnBackendSetAttribute(_engineConfig,
                                         HIPDNN_ATTR_ENGINECFG_ENGINE,
                                         HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                         1,
-                                        &_engine),
+                                        static_cast<const void*>(&_engine)),
               HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
 
     test_util::createTestEngine(&_engine, &_graph, _handle, gidx, true);
@@ -65,13 +65,13 @@ TEST_F(IntegrationEngineConfigApi, SetEngineConfigEngine)
                                         HIPDNN_ATTR_ENGINECFG_ENGINE,
                                         HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                         1,
-                                        &_engine),
+                                        static_cast<const void*>(&_engine)),
               HIPDNN_STATUS_SUCCESS);
 }
 
 TEST_F(IntegrationEngineConfigApi, Finalize)
 {
-    int64_t gidx = hipdnn_tests::plugin_constants::engineId<GoodPlugin>();
+    const int64_t gidx = hipdnn_tests::plugin_constants::engineId<GoodPlugin>();
 
     EXPECT_EQ(hipdnnBackendFinalize(_engineConfig), HIPDNN_STATUS_BAD_PARAM);
     test_util::populateTestEngineConfig(&_engineConfig, &_engine, &_graph, _handle, gidx);
@@ -80,7 +80,7 @@ TEST_F(IntegrationEngineConfigApi, Finalize)
 
 TEST_F(IntegrationEngineConfigApi, GetMaxWorkspaceSize)
 {
-    int64_t gidx = hipdnn_tests::plugin_constants::engineId<GoodPlugin>();
+    const int64_t gidx = hipdnn_tests::plugin_constants::engineId<GoodPlugin>();
     int64_t maxWorkspaceSize = 0;
 
     test_util::populateTestEngineConfig(&_engineConfig, &_engine, &_graph, _handle, gidx, true);
@@ -92,4 +92,98 @@ TEST_F(IntegrationEngineConfigApi, GetMaxWorkspaceSize)
                                         &maxWorkspaceSize),
               HIPDNN_STATUS_SUCCESS);
     EXPECT_EQ(maxWorkspaceSize, 1024);
+}
+
+TEST_F(IntegrationEngineConfigApi, GetAttributeBeforeFinalization)
+{
+    const int64_t gidx = hipdnn_tests::plugin_constants::engineId<GoodPlugin>();
+    int64_t maxWorkspaceSize = 0;
+
+    test_util::populateTestEngineConfig(&_engineConfig, &_engine, &_graph, _handle, gidx, false);
+
+    EXPECT_EQ(hipdnnBackendGetAttribute(_engineConfig,
+                                        HIPDNN_ATTR_ENGINECFG_WORKSPACE_SIZE,
+                                        HIPDNN_TYPE_INT64,
+                                        1,
+                                        nullptr,
+                                        &maxWorkspaceSize),
+              HIPDNN_STATUS_NOT_INITIALIZED);
+}
+
+TEST_F(IntegrationEngineConfigApi, GetMaxWorkspaceSizeInvalidType)
+{
+    const int64_t gidx = hipdnn_tests::plugin_constants::engineId<GoodPlugin>();
+    int32_t maxWorkspaceSize = 0;
+
+    test_util::populateTestEngineConfig(&_engineConfig, &_engine, &_graph, _handle, gidx, true);
+
+    EXPECT_EQ(hipdnnBackendGetAttribute(_engineConfig,
+                                        HIPDNN_ATTR_ENGINECFG_WORKSPACE_SIZE,
+                                        HIPDNN_TYPE_INT32,
+                                        1,
+                                        nullptr,
+                                        &maxWorkspaceSize),
+              HIPDNN_STATUS_BAD_PARAM);
+}
+
+TEST_F(IntegrationEngineConfigApi, GetMaxWorkspaceSizeInvalidCount)
+{
+    const int64_t gidx = hipdnn_tests::plugin_constants::engineId<GoodPlugin>();
+    int64_t maxWorkspaceSize = 0;
+
+    test_util::populateTestEngineConfig(&_engineConfig, &_engine, &_graph, _handle, gidx, true);
+
+    EXPECT_EQ(hipdnnBackendGetAttribute(_engineConfig,
+                                        HIPDNN_ATTR_ENGINECFG_WORKSPACE_SIZE,
+                                        HIPDNN_TYPE_INT64,
+                                        2,
+                                        nullptr,
+                                        &maxWorkspaceSize),
+              HIPDNN_STATUS_BAD_PARAM);
+}
+
+TEST_F(IntegrationEngineConfigApi, GetMaxWorkspaceSizeNullPointer)
+{
+    const int64_t gidx = hipdnn_tests::plugin_constants::engineId<GoodPlugin>();
+
+    test_util::populateTestEngineConfig(&_engineConfig, &_engine, &_graph, _handle, gidx, true);
+
+    EXPECT_EQ(hipdnnBackendGetAttribute(_engineConfig,
+                                        HIPDNN_ATTR_ENGINECFG_WORKSPACE_SIZE,
+                                        HIPDNN_TYPE_INT64,
+                                        1,
+                                        nullptr,
+                                        nullptr),
+              HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
+}
+
+TEST_F(IntegrationEngineConfigApi, DoubleFinalization)
+{
+    const int64_t gidx = hipdnn_tests::plugin_constants::engineId<GoodPlugin>();
+
+    test_util::populateTestEngineConfig(&_engineConfig, &_engine, &_graph, _handle, gidx, true);
+
+    EXPECT_EQ(hipdnnBackendFinalize(_engineConfig), HIPDNN_STATUS_BAD_PARAM);
+}
+
+TEST_F(IntegrationEngineConfigApi, SetAttributeAfterFinalization)
+{
+    const int64_t gidx = hipdnn_tests::plugin_constants::engineId<GoodPlugin>();
+
+    test_util::populateTestEngineConfig(&_engineConfig, &_engine, &_graph, _handle, gidx, true);
+
+    hipdnnBackendDescriptor_t newEngine = nullptr;
+    test_util::createTestEngine(&newEngine, &_graph, _handle, gidx, true);
+
+    EXPECT_EQ(hipdnnBackendSetAttribute(_engineConfig,
+                                        HIPDNN_ATTR_ENGINECFG_ENGINE,
+                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                        1,
+                                        static_cast<const void*>(&newEngine)),
+              HIPDNN_STATUS_NOT_INITIALIZED);
+
+    if(newEngine != nullptr)
+    {
+        EXPECT_EQ(hipdnnBackendDestroyDescriptor(newEngine), HIPDNN_STATUS_SUCCESS);
+    }
 }

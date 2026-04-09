@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 /**
 @class AddLDS
@@ -56,9 +33,6 @@ namespace rocRoller
 {
     namespace KernelGraph
     {
-        namespace CF = rocRoller::KernelGraph::ControlGraph;
-        namespace CT = rocRoller::KernelGraph::CoordinateGraph;
-
         using GD = rocRoller::Graph::Direction;
         using namespace ControlGraph;
         using namespace CoordinateGraph;
@@ -144,7 +118,7 @@ namespace rocRoller
             {
                 auto tile = *graph.coordinates.get<MacroTile>(tag);
                 if(tile.memoryType == MemoryType::LDS || tile.memoryType == MemoryType::WAVE_LDS
-                   || tile.memoryType == MemoryType::WAVE_Direct2LDS)
+                   || tile.memoryType == MemoryType::WAVE_LDS_FROM_GLOBAL)
                 {
                     retval.combine(false, concatenate("Tile has LDS memory type: ", tag));
                 }
@@ -162,8 +136,9 @@ namespace rocRoller
             auto [userTag, user] = k.getDimension<User>(opTag);
             auto [tileTag, tile] = k.getDimension<MacroTile>(opTag);
 
-            if(!(tile.memoryType == MemoryType::WAVE_LDS || tile.memoryType == MemoryType::LDS
-                 || tile.memoryType == MemoryType::WAVE_Direct2LDS))
+            if(not(tile.memoryType == MemoryType::WAVE_LDS || tile.memoryType == MemoryType::LDS
+                   || tile.memoryType == MemoryType::WAVE_Direct2LDS
+                   || tile.memoryType == MemoryType::WAVE_LDS_FROM_GLOBAL))
                 return;
 
             rocRoller::Log::getLogger()->debug(
@@ -181,12 +156,11 @@ namespace rocRoller
             {
                 Log::debug("KernelGraph::AddLDS()::commit({})", opTag);
 
-                auto isLoad       = k.control.get<LoadTiled>(opTag).has_value();
-                auto tileTag      = k.mapper.get<MacroTile>(opTag);
-                auto userTag      = k.mapper.get<User>(opTag);
-                auto varType      = getVariableType(k, opTag);
-                auto tile         = k.coordinates.getNode<MacroTile>(tileTag);
-                auto isDirect2LDS = tile.memoryType == MemoryType::WAVE_Direct2LDS;
+                auto isLoad  = k.control.get<LoadTiled>(opTag).has_value();
+                auto tileTag = k.mapper.get<MacroTile>(opTag);
+                auto userTag = k.mapper.get<User>(opTag);
+                auto varType = getVariableType(k, opTag);
+                auto tile    = k.coordinates.getNode<MacroTile>(tileTag);
 
                 // TODO: enable SwizzleScale when store D via LDS
                 auto isStoreD = tile.layoutType == LayoutType::MATRIX_ACCUMULATOR;
@@ -195,7 +169,7 @@ namespace rocRoller
                                 "Store D via LDS is not supported by SwizzleScale");
 
                 // Create new coordinates
-                auto              ldsTag      = k.coordinates.addElement(LDS(isDirect2LDS));
+                auto              ldsTag      = k.coordinates.addElement(LDS());
                 std::vector<uint> jammedTiles = {1, 1};
                 bool              splitStore  = false;
 
@@ -217,27 +191,20 @@ namespace rocRoller
                 k.coordinates.addElement(DataFlow(), {ldsTag}, {tileTag});
 
                 // Create new operations and update old operation
-                bool isTransposedTile = false;
-                if(isLoad)
-                {
-                    auto loadTile    = k.control.get<LoadTiled>(opTag).value();
-                    isTransposedTile = loadTile.isTransposedTile;
-                    if(isDirect2LDS)
-                    {
-                        loadTile.isDirect2LDS = isDirect2LDS;
-                        k.control.setElement(opTag, loadTile);
-                    }
-                }
-                auto loadLDSOp  = k.control.addElement(LoadLDSTile(varType, isTransposedTile));
+                auto loadLDSOp  = k.control.addElement(LoadLDSTile(varType));
                 auto storeLDSOp = k.control.addElement(StoreLDSTile(varType.dataType));
 
+                const auto isDirect2LDS = tile.memoryType == MemoryType::WAVE_Direct2LDS;
+
                 // Update tile
-                if(isDirect2LDS)
+                if(tile.memoryType == MemoryType::WAVE_Direct2LDS)
                     tile.memoryType = MemoryType::WAVE;
                 if(tile.memoryType == MemoryType::WAVE_LDS)
                     tile.memoryType = MemoryType::WAVE;
                 if(tile.memoryType == MemoryType::LDS)
                     tile.memoryType = MemoryType::VGPR;
+                if(tile.memoryType == MemoryType::WAVE_LDS_FROM_GLOBAL)
+                    tile.memoryType = MemoryType::WAVE_FROM_GLOBAL;
                 k.coordinates.setElement(tileTag, tile);
 
                 if(!isLoad)
@@ -255,9 +222,15 @@ namespace rocRoller
 
                 k.mapper.purge(opTag);
                 k.mapper.connect<User>(opTag, userTag);
+                k.mapper.connect<User>(storeLDSOp, userTag);
                 k.mapper.connect<LDS>(storeLDSOp, ldsTag);
-                k.mapper.connect<User>(loadLDSOp, userTag); // For F6 Padding
+                k.mapper.connect<User>(loadLDSOp, userTag);
                 k.mapper.connect<LDS>(loadLDSOp, ldsTag);
+                // Connection to LDS is required as LoadTileDirect2LDS acts as both
+                // LoadTile & StoreLDSTile and this connection is used create pre-operation
+                // barriers to syncronize LDS accesses when dependencies are loop-carried.
+                if(isDirect2LDS)
+                    k.mapper.connect<LDS>(opTag, ldsTag, 0);
 
                 if(isLoad)
                 {

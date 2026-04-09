@@ -7,14 +7,14 @@ This document provides a template for recording hipDNN test results. Use this te
 ## Test Run Template
 
 ```
-Name: 
-Operating System: 
-Has GPU: 
-ASIC: 
-MIOpen hash: 
-ROCm version: 
-Run environment: 
-Test results: 
+Name:
+Operating System:
+Has GPU:
+ASIC:
+MIOpen hash:
+ROCm version:
+Run environment:
+Test results:
 ```
 
 ---
@@ -38,7 +38,7 @@ Test results:
   - `make check_ctest`
   - Running installed test artifacts
   - Running built executables directly
-- **Test results**: Summary of tests ran, skipped, and passed/failed
+- **Test results**: Summary of tests run, skipped, and passed/failed
 
 ---
 
@@ -55,7 +55,7 @@ MIOpen hash: 7ae16d1b5
 ROCm version: AMD-SMI 26.0.0+842b9680 amdgpu version: 6.8.5 ROCm version: 7.1.0
 Run environment: ninja check_ctest
 
-Test results:  
+Test results:
     (3 / 4) Test Cases Passed
     (1 / 4) Test Cases Failed
     (0 / 4) Test Cases did not run
@@ -130,15 +130,15 @@ The following tests did not run:
 405 - IntegrationTests/Frontend_e2e_integration_test.IntegrationTest/Default_plugin_with_auto_UIDs # GetParam() = BatchnormTestCase{plugin_path: ../test_plugins/libtest_good_plugin.so, description: Default plugin with auto UIDs, graph_name: DefaultPluginBatchnormTestAutoUID, expected_failure: NONE, use_manual_uids: false} (Skipped)
 406 - IntegrationTests/Frontend_e2e_integration_test.IntegrationTest/Execute_fails_plugin # GetParam() = BatchnormTestCase{plugin_path: ../test_plugins/libtest_execute_fails_plugin.so, description: Execute fails plugin, graph_name: ExecuteFailsPluginBatchnormTest, expected_failure: EXECUTE, use_manual_uids: true} (Skipped)
 407 - IntegrationTests/Frontend_e2e_integration_test.IntegrationTest/No_applicable_engines_plugin # GetParam() = BatchnormTestCase{plugin_path: ../test_plugins/libtest_no_applicable_engines_plugin.so, description: No applicable engines plugin, graph_name: NoEnginesPluginBatchnormTest, expected_failure: CREATE_EXECUTION_PLAN, use_manual_uids: true} (Skipped)
-436 - MiopenLegacyEnginePluginApiTest.EnginePluginCreateAlsoCreatesMIOpenHandleOnSuccess (Skipped)
-437 - MiopenLegacyEnginePluginApiTest.EnginePluginCreateTwiceGivesTheSameContainerHandle (Skipped)
-438 - MiopenLegacyEnginePluginApiTest.EnginePluginCreateNonNullHandlePointer (Skipped)
-441 - MiopenLegacyEnginePluginApiTest.EnginePluginSetStreamNullStream (Skipped)
-442 - MiopenLegacyEnginePluginApiTest.EnginePluginSetStreamValidStream (Skipped)
-444 - MiopenLegacyEnginePluginApiTest.EnginePluginGetApplicableEngineIdsValid (Skipped)
-446 - MiopenLegacyEnginePluginApiTest.EnginePluginGetEngineDetailsValid (Skipped)
-449 - MiopenLegacyEnginePluginApiTest.EnginePluginGetWorkspaceSizeValid (Skipped)
-451 - MiopenLegacyEnginePluginApiTest.EnginePluginCreateExecutionContextValid (Skipped)
+436 - MiopenEnginePluginApiTest.EnginePluginCreateAlsoCreatesMIOpenHandleOnSuccess (Skipped)
+437 - MiopenEnginePluginApiTest.EnginePluginCreateTwiceGivesTheSameContainerHandle (Skipped)
+438 - MiopenEnginePluginApiTest.EnginePluginCreateNonNullHandlePointer (Skipped)
+441 - MiopenEnginePluginApiTest.EnginePluginSetStreamNullStream (Skipped)
+442 - MiopenEnginePluginApiTest.EnginePluginSetStreamValidStream (Skipped)
+444 - MiopenEnginePluginApiTest.EnginePluginGetApplicableEngineIdsValid (Skipped)
+446 - MiopenEnginePluginApiTest.EnginePluginGetEngineDetailsValid (Skipped)
+449 - MiopenEnginePluginApiTest.EnginePluginGetWorkspaceSizeValid (Skipped)
+451 - MiopenEnginePluginApiTest.EnginePluginCreateExecutionContextValid (Skipped)
 453 - Batchnorm_execute_graph_test.RunBfloat16FwdbatchnormGraph (Skipped)
 454 - Batchnorm_execute_graph_test.RunHalfFwdbatchnormGraph (Skipped)
 464 - MiopenHandleFactoryTest.CreatesAndDestroysHandle (Skipped)

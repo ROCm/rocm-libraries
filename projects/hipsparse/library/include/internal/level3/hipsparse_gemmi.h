@@ -30,31 +30,35 @@ extern "C" {
 
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 12000)
 /*! \ingroup level3_module
-*  \brief Dense matrix sparse matrix multiplication using CSC storage format
+*  \brief Dense matrix sparse matrix multiplication using the CSC storage format.
 *
 *  \details
 *  \p hipsparseXgemmi multiplies the scalar \f$\alpha\f$ with a dense column-oriented \f$m \times k\f$
 *  matrix \f$A\f$ and the sparse \f$k \times n\f$ matrix \f$B\f$, defined in CSC
-*  storage format and adds the result to the dense column-oriented \f$m \times n\f$ matrix \f$C\f$ that
+*  storage format, and adds the result to the dense column-oriented \f$m \times n\f$ matrix \f$C\f$ that
 *  is multiplied by the scalar \f$\beta\f$, such that
 *  \f[
 *    C := \alpha \cdot A \cdot B + \beta \cdot C
 *  \f]
 *
 *  \note
-*  This function is non blocking and executed asynchronously with respect to the host.
-*  It may return before the actual computation has finished.
+*  This function is non-blocking and executed asynchronously with respect to the host.
+*  It can return before the actual computation has finished.
+*
+*  \deprecated
+*  This function is deprecated when using the CUDA backend (CUDA 11.0+) and will be 
+*  removed in CUDA 12.0. This deprecation does not apply to the ROCm backend.
 *
 *  @param[in]
-*  handle      handle to the hipsparse library context queue.
+*  handle      handle to the hipSPARSE library context queue.
 *  @param[in]
-*  m           number of rows of the dense matrix \f$A\f$.
+*  m           number of rows of the dense matrix \f$A\f$. Must be non-negative.
 *  @param[in]
-*  n           number of columns of the sparse CSC matrix \f$op(B)\f$ and \f$C\f$.
+*  n           number of columns of the sparse CSC matrix \f$op(B)\f$ and \f$C\f$. Must be non-negative.
 *  @param[in]
-*  k           number of columns of the dense matrix \f$A\f$.
+*  k           number of columns of the dense matrix \f$A\f$. Must be non-negative.
 *  @param[in]
-*  nnz         number of non-zero entries of the sparse CSC matrix \f$B\f$.
+*  nnz         number of non-zero entries of the sparse CSC matrix \f$B\f$. Must be non-negative.
 *  @param[in]
 *  alpha       scalar \f$\alpha\f$.
 *  @param[in]
@@ -79,13 +83,11 @@ extern "C" {
 *  @param[in]
 *  ldc         leading dimension of \f$C\f$, must be at least \f$m\f$.
 *
-*  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p k, \p nnz,
-*              \p lda, \p ldc, \p alpha, \p A, \p cscValB, \p cscColPtrB, \p cscRowIndB,
-*              \p beta or \p C is invalid.
-*
-*  \par Example
-*  \snippet example_hipsparse_gemmi.cpp doc example
+*  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
+*  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p alpha or \p beta is nullptr,
+*          \p m, \p n, \p k, or \p nnz is negative, \p lda or \p ldc is invalid, or
+*          \p A, \p cscValB, \p cscColPtrB, \p cscRowIndB, or \p C is nullptr.
 */
 /**@{*/
 DEPRECATED_CUDA_11000("The routine will be removed in CUDA 12")

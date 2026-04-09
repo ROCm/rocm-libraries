@@ -1,0 +1,158 @@
+operation:
+  name: "Batchnorm"
+  class_name: "BatchnormOperationDescriptor"
+  fbs_table: "BatchnormAttributes"
+  fbs_generated_header: "batchnorm_attributes_generated.h"
+
+  descriptor_type:
+    enum_name: "HIPDNN_BACKEND_OPERATION_BATCHNORM_DESCRIPTOR_EXT"
+
+  operation_attr_prefix: "HIPDNN_ATTR_OPERATION_BATCHNORM"
+
+  frontend:
+    packer_function: "createBatchnormOperation"
+    unpacker_function: "unpackBatchnormOperation"
+    node_class: "BatchnormNode"
+    attributes_class: "BatchnormAttributes"
+
+    inputs:
+      - name: "x"
+        enum_name: "X"
+        required: true
+        getter_name: "get_x"
+        setter_name: "set_x"
+      - name: "scale"
+        enum_name: "SCALE"
+        required: true
+        getter_name: "get_scale"
+        setter_name: "set_scale"
+      - name: "bias"
+        enum_name: "BIAS"
+        required: true
+        getter_name: "get_bias"
+        setter_name: "set_bias"
+    outputs:
+      - name: "y"
+        enum_name: "Y"
+        required: true
+        getter_name: "get_y"
+        setter_name: "set_y"
+    graph_method_name: "batchnorm"
+    graph_method_params:
+      - name: "x"
+        tensor_name: "x"
+      - name: "scale"
+        tensor_name: "scale"
+      - name: "bias"
+        tensor_name: "bias"
+    graph_return_type: "array"
+    graph_return_outputs:
+      - "y"
+
+  tensor_fields:
+    - name: "x"
+      fbs_field: "x_tensor_uid"
+      attr_suffix: "X_EXT"
+      required: true
+      frontend_getter: "get_x()"
+
+    - name: "scale"
+      fbs_field: "scale_tensor_uid"
+      attr_suffix: "SCALE_EXT"
+      required: true
+      frontend_getter: "get_scale()"
+
+    - name: "bias"
+      fbs_field: "bias_tensor_uid"
+      attr_suffix: "BIAS_EXT"
+      required: true
+      frontend_getter: "get_bias()"
+
+    - name: "epsilon"
+      fbs_field: "epsilon_tensor_uid"
+      attr_suffix: "EPSILON_EXT"
+      required: true
+      frontend_getter: "get_epsilon()"
+
+    - name: "y"
+      fbs_field: "y_tensor_uid"
+      attr_suffix: "Y_EXT"
+      required: true
+      frontend_getter: "get_y()"
+
+    - name: "prev_running_mean"
+      fbs_field: "prev_running_mean_tensor_uid"
+      attr_suffix: "PREV_RUNNING_MEAN_EXT"
+      required: false
+      frontend_getter: "get_prev_running_mean()"
+
+    - name: "prev_running_variance"
+      fbs_field: "prev_running_variance_tensor_uid"
+      attr_suffix: "PREV_RUNNING_VARIANCE_EXT"
+      required: false
+      frontend_getter: "get_prev_running_variance()"
+
+    - name: "momentum"
+      fbs_field: "momentum_tensor_uid"
+      attr_suffix: "MOMENTUM_EXT"
+      required: false
+      frontend_getter: "get_momentum()"
+
+    - name: "mean"
+      fbs_field: "mean_tensor_uid"
+      attr_suffix: "MEAN_EXT"
+      required: false
+      frontend_getter: "get_mean()"
+
+    - name: "inv_variance"
+      fbs_field: "inv_variance_tensor_uid"
+      attr_suffix: "INV_VARIANCE_EXT"
+      required: false
+      frontend_getter: "get_inv_variance()"
+
+    - name: "next_running_mean"
+      fbs_field: "next_running_mean_tensor_uid"
+      attr_suffix: "NEXT_RUNNING_MEAN_EXT"
+      required: false
+      frontend_getter: "get_next_running_mean()"
+
+    - name: "next_running_variance"
+      fbs_field: "next_running_variance_tensor_uid"
+      attr_suffix: "NEXT_RUNNING_VARIANCE_EXT"
+      required: false
+      frontend_getter: "get_next_running_variance()"
+
+  data_fields: []
+
+  tensor_array_fields:
+    - name: "peer_stats"
+      fbs_field: "peer_stats_tensor_uid"
+      attr_name: "HIPDNN_ATTR_OPERATION_BATCHNORM_PEER_STATS_EXT"
+      frontend_getter: "get_peer_stats()"
+      required: false
+      test_uids: [515, 516]
+      test_label: "PeerStats"
+
+  has_compute_data_type: true
+  compute_data_type_attr: "HIPDNN_ATTR_BATCHNORM_COMP_TYPE_EXT"
+
+  operation_type_enum: "HIPDNN_OPERATION_TYPE_BATCHNORM_EXT"
+
+  test_data:
+    constants_include: "BatchnormConstants"
+    tensor_const_prefix: "K_BATCHNORM_"
+    tensor_uids: { x: 500, scale: 501, bias: 502, epsilon: 503, y: 504, prev_running_mean: 507, prev_running_variance: 508, momentum: 509, mean: 505, inv_variance: 506, next_running_mean: 510, next_running_variance: 511 }
+    tensor_configs:
+      x: { dims: [1, 64, 32, 32], strides: [65536, 1024, 32, 1] }
+      scale: { dims: [1, 64, 1, 1], strides: [64, 1, 1, 1] }
+      bias: { dims: [1, 64, 1, 1], strides: [64, 1, 1, 1] }
+      epsilon: { dims: [1, 1, 1, 1], strides: [1, 1, 1, 1] }
+      y: { dims: [1, 64, 32, 32], strides: [65536, 1024, 32, 1] }
+      prev_running_mean: { dims: [1], strides: [1] }
+      prev_running_variance: { dims: [1], strides: [1] }
+      momentum: { dims: [1], strides: [1] }
+      mean: { dims: [1], strides: [1] }
+      inv_variance: { dims: [1], strides: [1] }
+      next_running_mean: { dims: [1], strides: [1] }
+      next_running_variance: { dims: [1], strides: [1] }
+    field_values: {}

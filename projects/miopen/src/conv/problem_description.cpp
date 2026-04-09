@@ -135,6 +135,9 @@ void ProblemDescription::HeuristicUpdateLayouts()
 
     // If we have preset layouts that are valid, and they are consistent with each other, then we do
     // not need to change them.
+    // Note: For transposed solvers that modify strides (e.g., NHWC→NCHW), the cached layout string
+    // may not be updated here. This is acceptable for degenerate dimensions (N=1, C=1, etc.) where
+    // strides satisfy multiple layouts, as solvers use actual strides rather than layout strings.
     if(!in_layout.empty() && in_layout == out_layout && in_layout == weights_layout &&
        std::find(supported_layouts.begin(), supported_layouts.end(), in_layout) !=
            supported_layouts.end() &&
@@ -153,6 +156,7 @@ void ProblemDescription::HeuristicUpdateLayouts()
             if(in.IsPossibleLayout4D5D(layout, mode) && out.IsPossibleLayout4D5D(layout, mode) &&
                weights.IsPossibleLayout4D5D(layout, mode))
             {
+                // Update the cached layout strings to match the detected layout
                 in_layout      = layout;
                 weights_layout = layout;
                 out_layout     = layout;
@@ -162,6 +166,35 @@ void ProblemDescription::HeuristicUpdateLayouts()
     }
 
     // If we did not find consistent layout, leave them as-is
+}
+
+template <typename in_desc, typename out_desc, typename wei_desc>
+void SerializeStrides(
+    std::ostringstream& stream, in_desc& in, out_desc& out, wei_desc& wei, const char delim)
+{
+
+    auto join_v = [](std::ostringstream& stream_, const auto& vec, const char delim_) {
+        stream_ << *vec.begin();
+        std::for_each(std::next(vec.begin()), vec.end(), [&](const auto& value) {
+            stream_ << delim_ << value;
+        });
+    };
+
+    if(!in.IsPacked())
+    {
+        stream << "_si_";
+        join_v(stream, in.GetStrides(), delim);
+    }
+    if(!out.IsPacked())
+    {
+        stream << "_so_";
+        join_v(stream, out.GetStrides(), delim);
+    }
+    if(!wei.IsPacked())
+    {
+        stream << "_sw_";
+        join_v(stream, wei.GetStrides(), delim);
+    }
 }
 
 void ProblemDescription::MakeNetworkConfig(std::string& conf_key) const
@@ -186,9 +219,14 @@ void ProblemDescription::MakeNetworkConfig(std::string& conf_key) const
         ss << 'x' << GetWeightsLayout();
         ss << 'x' << GetOutLayout();
     }
-    ss << 'x' << EncodeDataTypesForKey(GetInDataType(), GetWeightsDataType(), GetOutDataType());
+    const auto data_type =
+        EncodeDataTypesForKey(GetInDataType(), GetWeightsDataType(), GetOutDataType());
+    ss << 'x' << data_type;
 
     std::ostringstream optional;
+    if(data_type == "FP32" && UseTF32())
+        optional << "TF32" << 'x';
+
     if(const auto ct = GetInCastType())
         optional << "ci" << GetDataTypeName(*ct);
     if(const auto ct = GetWeightsCastType())
@@ -199,6 +237,9 @@ void ProblemDescription::MakeNetworkConfig(std::string& conf_key) const
     {
         ss << 'x' << optional.str();
     }
+
+    const auto sep = 'x';
+    SerializeStrides(optional, in, out, weights, sep);
 
     ss << 'x' << PrintDHW('x', GetSpatialDims(), GetPadD(), GetPadH(), GetPadW());
     ss << 'x'
@@ -239,10 +280,12 @@ void ProblemDescription::Serialize(std::ostream& stream) const
         stream << sep << GetWeightsLayout();
         stream << sep << GetOutLayout();
     }
-    stream << sep << EncodeDataTypesForKey(GetInDataType(), GetWeightsDataType(), GetOutDataType());
+    // clang-format on
+    const auto data_type =
+        EncodeDataTypesForKey(GetInDataType(), GetWeightsDataType(), GetOutDataType());
+    stream << sep << data_type;
     stream << sep << GetDirectionStr();
 
-    // clang-format on
     // New performance config entries shall come into variable/optional part of db key.
     // This is to support backward compatibility with previous versions of databases.
     std::ostringstream optional;
@@ -257,6 +300,12 @@ void ProblemDescription::Serialize(std::ostream& stream) const
             optional << "_cw" << GetDataTypeName(*ct);
         if(const auto ct = GetOutCastType())
             optional << "_co" << GetDataTypeName(*ct);
+
+        // cx indicates compute datatype
+        if(data_type == "FP32" && UseTF32())
+            optional << "_cxTF32";
+
+        SerializeStrides(optional, in, out, weights, sep);
     }
     if(!optional.str().empty())
     {
@@ -314,6 +363,14 @@ void ProblemDescription::SetupFloats(ExecutionContext& ctx) const
     MIOPEN_LOG_W("Unsupported data types configuration: "
                  << GetDataTypeName(GetInDataType()) << "x" << GetDataTypeName(GetWeightsDataType())
                  << "x" << GetDataTypeName(GetOutDataType()));
+}
+
+void ProblemDescription::SetupComputeType(const ExecutionContext& ctx) const
+{
+    if(miopen::IsTF32Supported(ctx.GetStream().GetDeviceName()) && conv.EnableTF32())
+    {
+        use_tf32 = true;
+    }
 }
 
 std::string ProblemDescription::ComputeLayout(const TensorDescriptor& td) const

@@ -1,5 +1,5 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2018-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 
@@ -7,8 +7,8 @@
 #include "ck_tile/ops/common/tensor_layout.hpp"
 #include "ck_tile/ops/gemm/block/block_gemm_problem.hpp"
 #include "ck_tile/ops/gemm/pipeline/tile_gemm_shape.hpp"
-#include "ck_tile/ops/gemm/warp/warp_gemm.hpp"
 #include "ck_tile/ops/gemm/warp/warp_gemm_dispatcher.hpp"
+#include "ck_tile/ops/gemm/warp/warp_wmma_gemm_gfx11_utils.hpp"
 #include "ck_tile/ops/gemm/block/block_gemm_areg_bsmem_creg_v1_custom_policy.hpp"
 #include "ck_tile/ops/gemm/block/block_gemm_areg_bsmem_creg_v1.hpp"
 #include "ck_tile/ops/gemm/block/block_gemm_areg_breg_creg_v1_custom_policy.hpp"
@@ -683,26 +683,26 @@ struct BlockFmhaBwdPipelineDefaultPolicy
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto MakePostQGradAccDramTileDistribution()
     {
-        using AccDataType = remove_cvref_t<typename Problem::AccDataType>;
-
         constexpr index_t kBlockSize = Problem::kBlockSize;
         constexpr index_t kMPerBlock = Problem::kM0;
         constexpr index_t kKPerBlock = Problem::kQKHeaddim;
 
-        constexpr index_t K1 = 16 / sizeof(AccDataType);
-        constexpr index_t K0 = kKPerBlock / K1;
+        constexpr index_t K2 = GetAlignmentPostQGradAcc<Problem>();
+        constexpr index_t K1 = min(kKPerBlock / K2, get_warp_size());
+        constexpr index_t K0 = kKPerBlock / (K1 * K2);
 
-        constexpr index_t M2 = get_warp_size() / K0;
+        constexpr index_t M2 = get_warp_size() / K1;
         constexpr index_t M1 = kBlockSize / get_warp_size();
         constexpr index_t M0 = kMPerBlock / (M1 * M2);
 
         constexpr auto dstr = make_static_tile_distribution(
-            tile_distribution_encoding<sequence<>,
-                                       tuple<sequence<1>, sequence<M0, M1, M2>, sequence<K0, K1>>,
-                                       tuple<sequence<2>, sequence<2, 3>>,
-                                       tuple<sequence<1>, sequence<2, 0>>,
-                                       sequence<1, 2, 3>,
-                                       sequence<0, 0, 1>>{});
+            tile_distribution_encoding<
+                sequence<>,
+                tuple<sequence<1>, sequence<M0, M1, M2>, sequence<K0, K1, K2>>,
+                tuple<sequence<2>, sequence<2, 3>>,
+                tuple<sequence<1>, sequence<2, 1>>,
+                sequence<1, 2, 3, 3>,
+                sequence<0, 0, 0, 2>>{});
         static_assert(container_reduce(dstr.get_lengths(), std::multiplies<index_t>{}, 1) ==
                       kMPerBlock * kKPerBlock);
         return dstr;
@@ -711,27 +711,25 @@ struct BlockFmhaBwdPipelineDefaultPolicy
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto MakePostQGradDramTileDistribution()
     {
-        using AccDataType = remove_cvref_t<typename Problem::AccDataType>;
-
         constexpr index_t kBlockSize = Problem::kBlockSize;
         constexpr index_t kMPerBlock = Problem::kM0;
         constexpr index_t kKPerBlock = Problem::kQKHeaddim;
 
-        constexpr index_t K1 = 16 / sizeof(AccDataType);
-        constexpr index_t K0 = kKPerBlock / K1;
+        constexpr index_t K2 = GetAlignmentPostQGrad<Problem>();
+        constexpr index_t K1 = min(kKPerBlock / K2, get_warp_size());
+        constexpr index_t K0 = kKPerBlock / (K1 * K2);
 
-        constexpr index_t M2 = get_warp_size() / K0;
+        constexpr index_t M2 = get_warp_size() / K1;
         constexpr index_t M1 = kBlockSize / get_warp_size();
         constexpr index_t M0 = kMPerBlock / (M1 * M2);
 
         constexpr auto dstr = make_static_tile_distribution(
             tile_distribution_encoding<sequence<>,
-                                       tuple<sequence<M0, M1, M2>, sequence<K0, K1>>,
+                                       tuple<sequence<M0, M1, M2>, sequence<K0, K1, K2>>,
                                        tuple<sequence<1>, sequence<1, 2>>,
-                                       tuple<sequence<1>, sequence<2, 0>>,
-                                       sequence<1, 2>,
-                                       sequence<0, 1>>{});
-
+                                       tuple<sequence<1>, sequence<2, 1>>,
+                                       sequence<1, 2, 2>,
+                                       sequence<0, 0, 2>>{});
         static_assert(container_reduce(dstr.get_lengths(), std::multiplies<index_t>{}, 1) ==
                       kMPerBlock * kKPerBlock);
         return dstr;
@@ -1695,8 +1693,10 @@ struct BlockFmhaBwdPipelineDefaultPolicy
 
             using AWarpDstr = typename WarpGemm::AWarpDstr;
             using CWarpDstr = typename WarpGemm::CWarpDstr;
-            auto pt_warp_tensor =
+            auto p_warp_tensor =
                 make_static_distributed_tensor<typename Problem::GemmDataType>(CWarpDstr{});
+            auto pt_warp_tensor =
+                make_static_distributed_tensor<typename Problem::GemmDataType>(AWarpDstr{});
 
             constexpr auto a_warp_y_lengths =
                 to_sequence(AWarpDstr{}.get_ys_to_d_descriptor().get_lengths());
@@ -1706,17 +1706,22 @@ struct BlockFmhaBwdPipelineDefaultPolicy
             constexpr auto a_warp_y_index_zeros = uniform_sequence_gen_t<AWarpDstr::NDimY, 0>{};
             constexpr auto c_warp_y_index_zeros = uniform_sequence_gen_t<CWarpDstr::NDimY, 0>{};
 
-            static_for<0, KIterPerWarp, 1>{}([&](auto kIter) {
-                static_for<0, MIterPerWarp, 1>{}([&](auto mIter) {
-                    pt_warp_tensor.get_thread_buffer() = p_in.get_y_sliced_thread_data(
-                        merge_sequences(sequence<kIter, mIter>{}, c_warp_y_index_zeros),
-                        merge_sequences(sequence<1, 1>{}, c_warp_y_lengths));
+            static_ford<sequence<KIterPerWarp, MIterPerWarp>>{}([&](auto km) {
+                constexpr auto kIter              = number<km[number<0>{}]>{};
+                constexpr auto mIter              = number<km[number<1>{}]>{};
+                p_warp_tensor.get_thread_buffer() = p_in.get_y_sliced_thread_data(
+                    merge_sequences(sequence<kIter, mIter>{}, c_warp_y_index_zeros),
+                    merge_sequences(sequence<1, 1>{}, c_warp_y_lengths));
 
-                    pt_out.set_y_sliced_thread_data(
-                        merge_sequences(sequence<mIter, kIter>{}, a_warp_y_index_zeros),
-                        merge_sequences(sequence<1, 1>{}, a_warp_y_lengths),
-                        pt_warp_tensor.get_thread_buffer());
-                });
+#if defined(__gfx11__)
+                PermuteWarpGemmCToA(pt_warp_tensor, p_warp_tensor);
+#else
+                pt_warp_tensor.get_thread_buffer() = p_warp_tensor.get_thread_buffer();
+#endif
+                pt_out.set_y_sliced_thread_data(
+                    merge_sequences(sequence<mIter, kIter>{}, a_warp_y_index_zeros),
+                    merge_sequences(sequence<1, 1>{}, a_warp_y_lengths),
+                    pt_warp_tensor.get_thread_buffer());
             });
         }
         else
@@ -1745,8 +1750,10 @@ struct BlockFmhaBwdPipelineDefaultPolicy
 
             using AWarpDstr = typename WarpGemm::AWarpDstr;
             using CWarpDstr = typename WarpGemm::CWarpDstr;
-            auto dst_warp_tensor =
+            auto ds_warp_tensor =
                 make_static_distributed_tensor<typename Problem::GemmDataType>(CWarpDstr{});
+            auto dst_warp_tensor =
+                make_static_distributed_tensor<typename Problem::GemmDataType>(AWarpDstr{});
 
             constexpr auto a_warp_y_lengths =
                 to_sequence(AWarpDstr{}.get_ys_to_d_descriptor().get_lengths());
@@ -1756,17 +1763,22 @@ struct BlockFmhaBwdPipelineDefaultPolicy
             constexpr auto a_warp_y_index_zeros = uniform_sequence_gen_t<AWarpDstr::NDimY, 0>{};
             constexpr auto c_warp_y_index_zeros = uniform_sequence_gen_t<CWarpDstr::NDimY, 0>{};
 
-            static_for<0, KIterPerWarp, 1>{}([&](auto kIter) {
-                static_for<0, MIterPerWarp, 1>{}([&](auto mIter) {
-                    dst_warp_tensor.get_thread_buffer() = ds_in.get_y_sliced_thread_data(
-                        merge_sequences(sequence<kIter, mIter>{}, c_warp_y_index_zeros),
-                        merge_sequences(sequence<1, 1>{}, c_warp_y_lengths));
+            static_ford<sequence<KIterPerWarp, MIterPerWarp>>{}([&](auto km) {
+                constexpr auto kIter               = number<km[number<0>{}]>{};
+                constexpr auto mIter               = number<km[number<1>{}]>{};
+                ds_warp_tensor.get_thread_buffer() = ds_in.get_y_sliced_thread_data(
+                    merge_sequences(sequence<kIter, mIter>{}, c_warp_y_index_zeros),
+                    merge_sequences(sequence<1, 1>{}, c_warp_y_lengths));
 
-                    dst_out.set_y_sliced_thread_data(
-                        merge_sequences(sequence<mIter, kIter>{}, a_warp_y_index_zeros),
-                        merge_sequences(sequence<1, 1>{}, a_warp_y_lengths),
-                        dst_warp_tensor.get_thread_buffer());
-                });
+#if defined(__gfx11__)
+                PermuteWarpGemmCToA(dst_warp_tensor, ds_warp_tensor);
+#else
+                dst_warp_tensor.get_thread_buffer() = ds_warp_tensor.get_thread_buffer();
+#endif
+                dst_out.set_y_sliced_thread_data(
+                    merge_sequences(sequence<mIter, kIter>{}, a_warp_y_index_zeros),
+                    merge_sequences(sequence<1, 1>{}, a_warp_y_lengths),
+                    dst_warp_tensor.get_thread_buffer());
             });
         }
         else

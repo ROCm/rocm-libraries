@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2019-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <rocRoller/DataTypes/DataTypes.hpp>
 #include <rocRoller/GPUArchitecture/GPUArchitecture.hpp>
@@ -240,6 +217,10 @@ namespace rocRoller
             return "WAVE_Direct2LDS";
         case MemoryType::WAVE_SWIZZLE:
             return "WAVE_SWIZZLE";
+        case MemoryType::WAVE_FROM_GLOBAL:
+            return "WAVE_FROM_GLOBAL";
+        case MemoryType::WAVE_LDS_FROM_GLOBAL:
+            return "WAVE_LDS_FROM_GLOBAL";
         case MemoryType::Literal:
             return "Literal";
         case MemoryType::None:
@@ -267,12 +248,41 @@ namespace rocRoller
             return "MATRIX_B";
         case LayoutType::MATRIX_ACCUMULATOR:
             return "MATRIX_ACCUMULATOR";
+        case LayoutType::ROW_MAJOR:
+            return "ROW_MAJOR";
+        case LayoutType::COLUMN_MAJOR:
+            return "COLUMN_MAJOR";
         case LayoutType::None:
             return "None";
 
         case LayoutType::Count:;
         }
         return "INVALID";
+    }
+
+    std::string abbrev(LayoutType t)
+    {
+        switch(t)
+        {
+        case LayoutType::SCRATCH:
+            return "SCR";
+        case LayoutType::MATRIX_A:
+            return "A";
+        case LayoutType::MATRIX_B:
+            return "B";
+        case LayoutType::MATRIX_ACCUMULATOR:
+            return "ACC";
+        case LayoutType::ROW_MAJOR:
+            return "ROW";
+        case LayoutType::COLUMN_MAJOR:
+            return "COL";
+        case LayoutType::None:
+            return "N/A";
+        case LayoutType::Count:
+            return "MAX";
+        }
+
+        return "";
     }
 
     std::ostream& operator<<(std::ostream& stream, LayoutType l)

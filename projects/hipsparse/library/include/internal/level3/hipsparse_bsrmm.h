@@ -29,7 +29,7 @@ extern "C" {
 #endif
 
 /*! \ingroup level3_module
- *  \brief Sparse matrix dense matrix multiplication using BSR storage format
+ *  \brief Sparse matrix dense matrix multiplication using the BSR storage format.
  *
  *  \details
  *  \p hipsparseXbsrmm multiplies the scalar \f$\alpha\f$ with a sparse \f$m \times k\f$
@@ -59,14 +59,14 @@ extern "C" {
  *  and where \f$k = blockDim \times kb\f$ and \f$m = blockDim \times mb\f$.
  *
  *  \note
- *  This function is non blocking and executed asynchronously with respect to the host.
- *  It may return before the actual computation has finished.
+ *  This function is non-blocking and executed asynchronously with respect to the host.
+ *  It can return before the actual computation has finished.
  *
  *  \note
  *  Currently, only \p transA == \ref HIPSPARSE_OPERATION_NON_TRANSPOSE is supported.
  *
  *  @param[in]
- *  handle      handle to the hipsparse library context queue.
+ *  handle      handle to the hipSPARSE library context queue.
  *  @param[in]
  *  dirA        the storage format of the blocks. Can be \ref HIPSPARSE_DIRECTION_ROW or \ref HIPSPARSE_DIRECTION_COLUMN.
  *  @param[in]
@@ -75,13 +75,13 @@ extern "C" {
  *  transB      matrix \f$B\f$ operation type. Currently, only \ref HIPSPARSE_OPERATION_NON_TRANSPOSE and \ref HIPSPARSE_OPERATION_TRANSPOSE
  *              are supported.
  *  @param[in]
- *  mb          number of block rows of the sparse BSR matrix \f$A\f$.
+ *  mb          number of block rows of the sparse BSR matrix \f$A\f$. Must be non-negative.
  *  @param[in]
- *  n           number of columns of the dense matrix \f$op(B)\f$ and \f$C\f$.
+ *  n           number of columns of the dense matrix \f$op(B)\f$ and \f$C\f$. Must be non-negative.
  *  @param[in]
- *  kb          number of block columns of the sparse BSR matrix \f$A\f$.
+ *  kb          number of block columns of the sparse BSR matrix \f$A\f$. Must be non-negative.
  *  @param[in]
- *  nnzb        number of non-zero blocks of the sparse BSR matrix \f$A\f$.
+ *  nnzb        number of non-zero blocks of the sparse BSR matrix \f$A\f$. Must be non-negative.
  *  @param[in]
  *  alpha       scalar \f$\alpha\f$.
  *  @param[in]
@@ -96,7 +96,7 @@ extern "C" {
  *  bsrColIndA  array of \p nnzb elements containing the block column indices of the sparse
  *              BSR matrix \f$A\f$.
  *  @param[in]
- *  blockDim    size of the blocks in the sparse BSR matrix.
+ *  blockDim    size of the blocks in the sparse BSR matrix. Must be positive.
  *  @param[in]
  *  B           array of dimension \p ldb*n (\f$op(B) == B\f$),
  *              \p ldb*k otherwise.
@@ -111,18 +111,16 @@ extern "C" {
  *  ldc         leading dimension of \f$C\f$, must be at least \f$\max{(1, m)}\f$ (\f$ op(A) == A\f$) where \p m=blockDim*mb,
  *              \f$\max{(1, k)}\f$ where \p k=blockDim*kb otherwise.
  *
- *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
- *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p mb, \p n, \p kb, \p nnzb, \p ldb,
- *              \p ldc, \p descr, \p alpha, \p bsrValA, \p bsrRowPtrA, \p bsrColIndA,
- *              \p B, \p beta or \p C is invalid.
- *  \retval     HIPSPARSE_STATUS_ARCH_MISMATCH the device is not supported.
- *  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED
- *              \p transA != \ref HIPSPARSE_OPERATION_NON_TRANSPOSE or
- *              \p transB == \ref HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE or
- *              \ref hipsparseMatrixType_t != \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
- *
- *  \par Example
- *  \snippet example_hipsparse_bsrmm.cpp doc example
+ *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
+ *  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
+ *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p descrA, \p alpha, or \p beta is nullptr,
+ *          \p mb, \p n, \p kb, or \p nnzb is negative, \p ldb or \p ldc is invalid,
+ *          \p blockDim is less than or equal to zero, or \p bsrValA, \p bsrRowPtrA, \p bsrColIndA,
+ *          \p B, or \p C is nullptr.
+ *  \retval HIPSPARSE_STATUS_ARCH_MISMATCH the device is not supported.
+ *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p transA is not \ref HIPSPARSE_OPERATION_NON_TRANSPOSE,
+ *          \p transB is \ref HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE, or
+ *          \ref hipsparseMatrixType_t is not \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
  */
 /**@{*/
 HIPSPARSE_EXPORT

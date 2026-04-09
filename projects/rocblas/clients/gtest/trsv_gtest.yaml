@@ -8,7 +8,7 @@ Definitions:
     - { N:    10, lda:    20, stride_a: 300 }
     - { N:   10, lda:   10, stride_a: 100 }
     - { N:   33, lda:   33, stride_a: 1100}
-    - { N:   128, lda:   128, stride_a: 32768 }
+    - { N:   127, lda:   128, stride_a: 32768 }
 
   - &special_case_range
     - { N: 0, lda: 1, incx: 1, batch_count: 1 }
@@ -175,6 +175,14 @@ Tests:
   incx: [ 2 ]
   batch_count: [ 3 ]
 
+- name: trsv_big_batch_kernel
+  category: pre_checkin
+  function: trsv_batched
+  arguments: *common_args
+  matrix_size: *small_matrix_size_range
+  incx: [ 1 ]
+  batch_count: [ 4097 ]
+
 - name: trsv_batched_grid_z_16bit
   category: stress
   arguments:
@@ -230,7 +238,6 @@ Tests:
   category: pre_checkin
   function:
         - trsv
-        - trsv_batched
         - trsv_strided_batched
   arguments: *common_args
   matrix_size:
@@ -239,6 +246,24 @@ Tests:
   stride_scale: [ 1 ]
   batch_count: [ 3 ]
   graph_test: true
+  os_flags: [ LINUX ]
+  # TODO: see above graph test set, merge below when
+  # windows stack up to date and unified
+
+- name: trsv_batched_graph_test
+  category: pre_checkin
+  function:
+        - trsv_batched
+  arguments: *common_args
+  matrix_size:
+    - { N:   192, lda:   192, stride_a: 36864 }
+  incx: [ 1 ]
+  stride_scale: [ 1 ]
+  batch_count: [ 3 ]
+  graph_test: true
+  os_flags: [ LINUX ]
+  # TODO: see above graph test set, merge below when
+  # windows stack up to date and unified
 
 - name: trsv_repeatability_check
   category: stress

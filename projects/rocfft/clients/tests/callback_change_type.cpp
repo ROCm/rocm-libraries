@@ -71,7 +71,7 @@ std::vector<std::vector<size_t>> callback_type_sizes = {{4}, {60}, {122}, {220},
 // because the overwrite will fail.
 const static std::vector<std::vector<size_t>> stride_range = {{1}};
 INSTANTIATE_TEST_SUITE_P(
-#ifdef WIN32
+#ifdef _WIN32
     DISABLED_callback,
 #else
     callback,
@@ -152,7 +152,8 @@ TEST_P(change_type, short_to_float)
                           &callback_host, HIP_SYMBOL(load_callback_short2_dev), sizeof(void*)),
                       hipSuccess);
         }
-        ASSERT_EQ(params.set_callbacks(callback_host, nullptr, nullptr, nullptr),
+        std::vector<void*> callback_host_vec{callback_host};
+        ASSERT_EQ(params.set_callbacks(&callback_host_vec, nullptr, nullptr, nullptr),
                   fft_status_success);
 
         // run rocFFT
@@ -227,8 +228,12 @@ TEST_P(change_type, short_to_float)
     {
         GTEST_SKIP() << "host memory allocation failure";
     }
-    catch(HOSTBUF_MEM_USAGE& e)
+    catch(const HOSTBUF_MEM_USAGE& e)
     {
-        GTEST_SKIP() << e.msg;
+        GTEST_SKIP() << e.what();
+    }
+    catch(const DEVICEBUF_MEM_USAGE& e)
+    {
+        GTEST_SKIP() << e.what();
     }
 }

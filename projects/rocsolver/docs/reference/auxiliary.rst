@@ -12,6 +12,7 @@ These are functions that support more :ref:`advanced LAPACK routines <lapackfunc
 The auxiliary functions are divided into the following categories:
 
 * :ref:`vecmat`: Basic operations with vectors and matrices that are not part of the BLAS standard.
+* :ref:`normcon`: Different matrix norms and condition number estimators.
 * :ref:`householder`: Generation and application of Householder matrices.
 * :ref:`rotations`: Generation and application of Givens (plane) rotations.
 * :ref:`bidiag`: Computations specialized in bidiagonal matrices.
@@ -87,6 +88,56 @@ rocsolver_<type>lauum()
 .. doxygenfunction:: rocsolver_dlauum
    :outline:
 .. doxygenfunction:: rocsolver_slauum
+
+
+.. _normcon:
+
+Norms and condition numbers
+==================================
+
+.. contents:: List of norms and condition number estimators
+   :local:
+   :backlinks: top
+
+.. _lange:
+
+rocsolver_<type>lange()
+---------------------------------------
+.. doxygenfunction:: rocsolver_zlange_64
+   :outline:
+.. doxygenfunction:: rocsolver_clange_64
+   :outline:
+.. doxygenfunction:: rocsolver_dlange_64
+   :outline:
+.. doxygenfunction:: rocsolver_slange_64
+   :outline:
+.. doxygenfunction:: rocsolver_zlange
+   :outline:
+.. doxygenfunction:: rocsolver_clange
+   :outline:
+.. doxygenfunction:: rocsolver_dlange
+   :outline:
+.. doxygenfunction:: rocsolver_slange
+
+.. _gecon:
+
+rocsolver_<type>gecon()
+---------------------------------------
+.. doxygenfunction:: rocsolver_zgecon_64
+   :outline:
+.. doxygenfunction:: rocsolver_cgecon_64
+   :outline:
+.. doxygenfunction:: rocsolver_dgecon_64
+   :outline:
+.. doxygenfunction:: rocsolver_sgecon_64
+   :outline:
+.. doxygenfunction:: rocsolver_zgecon
+   :outline:
+.. doxygenfunction:: rocsolver_cgecon
+   :outline:
+.. doxygenfunction:: rocsolver_dgecon
+   :outline:
+.. doxygenfunction:: rocsolver_sgecon
 
 
 

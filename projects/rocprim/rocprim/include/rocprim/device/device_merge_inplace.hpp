@@ -378,11 +378,11 @@ struct merge_inplace_impl
 
             const offset_t left_index  = left_start + reverse_offset;
             const offset_t right_index = right_end - reverse_offset - 1;
+            const bool     swap        = left_index != right_index;
 
-            if(left_index != right_index)
-            {
-                rocprim::swap(data[left_index], data[right_index]);
-            }
+            ::rocprim::detail::swap_if<rocprim::detail::swap_method::ternary>(swap,
+                                                                              data[left_index],
+                                                                              data[right_index]);
         }
     }
 
@@ -424,11 +424,11 @@ struct merge_inplace_impl
 
             const auto left_index  = pivot.left + work_offset;
             const auto right_index = pivot.right - work_offset - 1;
+            const bool swap        = left_index != right_index;
 
-            if(left_index != right_index)
-            {
-                rocprim::swap(data[left_index], data[right_index]);
-            }
+            ::rocprim::detail::swap_if<rocprim::detail::swap_method::ternary>(swap,
+                                                                              data[left_index],
+                                                                              data[right_index]);
         }
     }
 
@@ -662,6 +662,9 @@ struct merge_inplace_impl
 /// \par Example
 /// \parblock
 /// \code{.cpp}
+///
+/// The full example is [on GitHub](https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocprim/example/rocprim/device/example_device_merge_inplace.cpp).
+///
 /// #include <rocprim/rocprim.hpp>
 ///
 /// size_t left_size;  // e.g. 4

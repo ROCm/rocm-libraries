@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <rocRoller/DataTypes/DataTypes_Utils.hpp>
 #include <rocRoller/KernelGraph/Transforms/AddTransposeLoadCT.hpp>
@@ -71,7 +48,7 @@ namespace rocRoller
                    && hasTransposeInstructionForType(type);
         };
 
-        /** @brief Sets isTransposedTile field of LoadTiled/LoadLDSTile ops
+        /** @brief Sets isTransposedTile field of LoadLDSTile op
          * connected to MacroTile @tileTag in Coordinate Graph @graph.
          */
         void setIsTransposedLoad(int tileTag, KernelGraph& graph)
@@ -83,12 +60,7 @@ namespace rocRoller
                         ") is connected to more than 1 operation in control graph!");
             auto opTag = conns[0].control;
             auto e     = graph.control.getElement(opTag);
-            std::visit(rocRoller::overloaded{[&](LoadTiled& op) {
-                                                 auto newLoadTiled(op);
-                                                 newLoadTiled.isTransposedTile = true;
-                                                 graph.control.setElement(opTag, newLoadTiled);
-                                             },
-                                             [&](LoadLDSTile& op) {
+            std::visit(rocRoller::overloaded{[&](LoadLDSTile& op) {
                                                  auto newLoadLDSTile(op);
                                                  newLoadLDSTile.isTransposedTile = true;
                                                  graph.control.setElement(opTag, newLoadLDSTile);

@@ -29,7 +29,7 @@ extern "C" {
 #endif
 
 /*! \ingroup generic_module
-*  \brief Apply Givens rotation to a dense and a sparse vector.
+*  \brief Apply the Givens rotation to a dense and a sparse vector.
 *
 *  \details
 *  \p hipsparseRot applies the Givens rotation matrix \f$G\f$ to the sparse vector
@@ -62,23 +62,25 @@ extern "C" {
 *  <tr><td>HIP_C_64F
 *  </table>
 *
+*  \deprecated
+*  This function is deprecated when using the CUDA backend (CUDA 12.0+) and will be 
+*  removed in CUDA 13.0. This deprecation does not apply to the ROCm backend.
+*
 *  @param[in]
-*  handle      handle to the hipsparse library context queue.
+*  handle      handle to the hipSPARSE library context queue.
 *  @param[in]
-*  c_coeff     pointer to the cosine element of \f$G\f$, can be on host or device.
+*  c_coeff     pointer to the cosine element of \f$G\f$, which can be on the host or device.
 *  @param[in]
-*  s_coeff     pointer to the sine element of \f$G\f$, can be on host or device.
+*  s_coeff     pointer to the sine element of \f$G\f$, which can be on the host or device.
 *  @param[inout]
 *  vecX        sparse vector descriptor \f$x\f$.
 *  @param[inout]
 *  vecY        dense vector descriptor \f$y\f$.
 *
-*  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p c_coeff, \p s_coeff, \p vecX or \p vecY pointer is
-*              invalid.
-*
-*  \par Example
-*  \snippet example_hipsparse_rot.cpp doc example
+*  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
+*  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p c_coeff, \p s_coeff, \p vecX, or \p vecY is nullptr,
+*          or the vector sizes or data types are incompatible.
 */
 #if(!defined(CUDART_VERSION) || (CUDART_VERSION >= 11000 && CUDART_VERSION < 13000))
 DEPRECATED_CUDA_12000("The routine will be removed in CUDA 13")

@@ -35,6 +35,7 @@ inline bool rocsparse::enum_utils::is_invalid(rocsparse::csrmv_alg value_)
 {
     switch(value_)
     {
+    case rocsparse::csrmv_alg_default:
     case rocsparse::csrmv_alg_rowsplit:
     case rocsparse::csrmv_alg_adaptive:
     case rocsparse::csrmv_alg_lrb:
@@ -45,6 +46,29 @@ inline bool rocsparse::enum_utils::is_invalid(rocsparse::csrmv_alg value_)
     }
     return true;
 };
+
+rocsparse_status rocsparse::csrmv_alg_default2csrmv_alg(rocsparse::csrmv_alg& alg,
+                                                        rocsparse_operation   operation)
+{
+    if(alg != rocsparse::csrmv_alg_default)
+    {
+        // Algorithm is already specific, no dispatch needed
+        return rocsparse_status_success;
+    }
+
+    // Dispatch default algorithm to a specific algorithm based on operation:
+    // - transpose/conjugate_transpose: use rowsplit (adaptive doesn't support transpose)
+    // - none: use adaptive
+    if(operation != rocsparse_operation_none)
+    {
+        alg = rocsparse::csrmv_alg_rowsplit;
+    }
+    else
+    {
+        alg = rocsparse::csrmv_alg_adaptive;
+    }
+    return rocsparse_status_success;
+}
 
 template <typename I, typename J, typename A>
 rocsparse_status rocsparse::csrmv_analysis_template(rocsparse_handle          handle,
@@ -76,6 +100,9 @@ rocsparse_status rocsparse::csrmv_analysis_template(rocsparse_handle          ha
         return rocsparse_status_success;
     }
 
+    // Dispatch default algorithm to specific algorithm based on operation
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrmv_alg_default2csrmv_alg(alg, trans));
+
     switch(alg)
     {
     case rocsparse::csrmv_alg_adaptive:
@@ -102,6 +129,14 @@ rocsparse_status rocsparse::csrmv_analysis_template(rocsparse_handle          ha
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrmv_analysis_nnzsplit_template_dispatch(
             handle, trans, m, n, nnz, descr, csr_val, csr_row_ptr, csr_col_ind, p_csrmv_info));
         return rocsparse_status_success;
+    }
+
+    case rocsparse::csrmv_alg_default:
+    {
+        // LCOV_EXCL_START
+        // Should never reach here as csrmv_alg_default is dispatched above
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_internal_error);
+        // LCOV_EXCL_STOP
     }
     }
 
@@ -130,6 +165,52 @@ rocsparse_status rocsparse::csrmv_template(rocsparse_handle          handle,
                                            bool                      force_conj,
                                            bool                      fallback_algorithm)
 {
+    return rocsparse::csrmv_template<T, I, J, A, X, Y>(handle,
+                                                       trans,
+                                                       alg,
+                                                       m_,
+                                                       n_,
+                                                       nnz_,
+                                                       alpha_device_host_,
+                                                       descr,
+                                                       csr_val_,
+                                                       csr_row_ptr_begin_,
+                                                       csr_row_ptr_end_,
+                                                       csr_col_ind_,
+                                                       csrmv_info,
+                                                       x_,
+                                                       beta_device_host_,
+                                                       y_,
+                                                       0,
+                                                       nullptr,
+                                                       nullptr,
+                                                       force_conj,
+                                                       fallback_algorithm);
+}
+
+template <typename T, typename I, typename J, typename A, typename X, typename Y>
+rocsparse_status rocsparse::csrmv_template(rocsparse_handle             handle,
+                                           rocsparse_operation          trans,
+                                           rocsparse::csrmv_alg         alg,
+                                           int64_t                      m_,
+                                           int64_t                      n_,
+                                           int64_t                      nnz_,
+                                           const void*                  alpha_device_host_,
+                                           const rocsparse_mat_descr    descr,
+                                           const void*                  csr_val_,
+                                           const void*                  csr_row_ptr_begin_,
+                                           const void*                  csr_row_ptr_end_,
+                                           const void*                  csr_col_ind_,
+                                           rocsparse_csrmv_info         csrmv_info,
+                                           const void*                  x_,
+                                           const void*                  beta_device_host_,
+                                           void*                        y_,
+                                           rocsparse_int                num_extra,
+                                           rocsparse_const_dnvec_descr  gamma_vec,
+                                           rocsparse_const_dnvec_descr* z_vecs,
+                                           bool                         force_conj,
+                                           bool                         fallback_algorithm)
+{
     ROCSPARSE_ROUTINE_TRACE;
 
     const J  m                 = static_cast<J>(m_);
@@ -146,18 +227,85 @@ rocsparse_status rocsparse::csrmv_template(rocsparse_handle          handle,
 
     const rocsparse_int ysize = (trans == rocsparse_operation_none) ? m : n;
 
+    // Dispatch default algorithm to specific algorithm based on operation
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrmv_alg_default2csrmv_alg(alg, trans));
+
     // Another quick return.
     if(m == 0 || n == 0 || nnz == 0)
     {
-        // matrix never accessed however still need to update y vector
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::scale_array(handle, ysize, beta_device_host, y));
+        if(num_extra == 0)
+        {
+            // matrix never accessed however still need to update y vector
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse::scale_array(handle, ysize, beta_device_host, y));
+        }
+        else
+        {
+            // Extract gamma arrays and z vectors for batched operation
+            using Z                      = Y;
+            T*        gamma_device_array = nullptr;
+            const Z** z_array            = nullptr;
+
+            size_t buffer_size = num_extra * sizeof(T) + num_extra * sizeof(const Z*);
+
+            bool  temp_alloc       = false;
+            void* temp_storage_ptr = nullptr;
+            if(handle->buffer_size >= buffer_size)
+            {
+                temp_storage_ptr = handle->buffer;
+                temp_alloc       = false;
+            }
+            else
+            {
+                RETURN_IF_HIP_ERROR(
+                    rocsparse_hipMallocAsync(&temp_storage_ptr, buffer_size, handle->stream));
+                temp_alloc = true;
+            }
+
+            gamma_device_array = reinterpret_cast<T*>(temp_storage_ptr);
+            z_array = reinterpret_cast<const Z**>(reinterpret_cast<char*>(temp_storage_ptr)
+                                                  + num_extra * sizeof(T));
+
+            // Fill the preallocated buffers
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrmv_extract_gamma_and_z_arrays(
+                handle, num_extra, gamma_vec, z_vecs, gamma_device_array, z_array));
+
+            // matrix never accessed however still need to update y vector
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse::axpby_array_batched(
+                handle, ysize, num_extra, gamma_device_array, z_array, beta_device_host, y));
+
+            if(temp_alloc)
+            {
+                RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(temp_storage_ptr, handle->stream));
+            }
+        }
+
         return rocsparse_status_success;
     }
 
     if(handle->pointer_mode == rocsparse_pointer_mode_host
        && *alpha_device_host == static_cast<T>(0) && *beta_device_host == static_cast<T>(1))
     {
-        return rocsparse_status_success;
+        if(num_extra == 0)
+        {
+            return rocsparse_status_success;
+        }
+        else
+        {
+            bool all_gamma_zero = true;
+            for(rocsparse_int i = 0; i < num_extra; ++i)
+            {
+                if(reinterpret_cast<const T*>(gamma_vec->const_values)[i] != static_cast<T>(0))
+                {
+                    all_gamma_zero = false;
+                    break;
+                }
+            }
+
+            if(all_gamma_zero)
+            {
+                return rocsparse_status_success;
+            }
+        }
     }
 
     if(fallback_algorithm)
@@ -203,7 +351,11 @@ rocsparse_status rocsparse::csrmv_template(rocsparse_handle          handle,
                                                                               x,
                                                                               beta_device_host,
                                                                               y,
+                                                                              num_extra,
+                                                                              gamma_vec,
+                                                                              z_vecs,
                                                                               force_conj));
+
         return rocsparse_status_success;
     }
 
@@ -233,6 +385,9 @@ rocsparse_status rocsparse::csrmv_template(rocsparse_handle          handle,
                                                                               x,
                                                                               beta_device_host,
                                                                               y,
+                                                                              num_extra,
+                                                                              gamma_vec,
+                                                                              z_vecs,
                                                                               force_conj));
 
         return rocsparse_status_success;
@@ -264,7 +419,11 @@ rocsparse_status rocsparse::csrmv_template(rocsparse_handle          handle,
                                                                          x,
                                                                          beta_device_host,
                                                                          y,
+                                                                         num_extra,
+                                                                         gamma_vec,
+                                                                         z_vecs,
                                                                          force_conj));
+
         return rocsparse_status_success;
     }
 
@@ -294,9 +453,20 @@ rocsparse_status rocsparse::csrmv_template(rocsparse_handle          handle,
                                                                               x,
                                                                               beta_device_host,
                                                                               y,
+                                                                              num_extra,
+                                                                              gamma_vec,
+                                                                              z_vecs,
                                                                               force_conj));
 
         return rocsparse_status_success;
+    }
+
+    case rocsparse::csrmv_alg_default:
+    {
+        // LCOV_EXCL_START
+        // Should never reach here as csrmv_alg_default is dispatched above
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_internal_error);
+        // LCOV_EXCL_STOP
     }
     }
 }
@@ -542,6 +712,28 @@ static rocsparse_status rocsparse_csrmv_impl(rocsparse_handle          handle,
         const void*,                                                       \
         void*,                                                             \
         bool,                                                              \
+        bool);                                                             \
+    template rocsparse_status rocsparse::csrmv_template<T, I, J, T, T, T>( \
+        rocsparse_handle,                                                  \
+        rocsparse_operation,                                               \
+        rocsparse::csrmv_alg,                                              \
+        int64_t,                                                           \
+        int64_t,                                                           \
+        int64_t,                                                           \
+        const void*,                                                       \
+        const rocsparse_mat_descr,                                         \
+        const void*,                                                       \
+        const void*,                                                       \
+        const void*,                                                       \
+        const void*,                                                       \
+        rocsparse_csrmv_info,                                              \
+        const void*,                                                       \
+        const void*,                                                       \
+        void*,                                                             \
+        rocsparse_int,                                                     \
+        rocsparse_const_dnvec_descr,                                       \
+        rocsparse_const_dnvec_descr*,                                      \
+        bool,                                                              \
         bool);
 
 INSTANTIATE(float, int32_t, int32_t);
@@ -602,7 +794,29 @@ INSTANTIATE_MIXED_ANALYSIS(int64_t, int64_t, rocsparse_bfloat16);
         const void*,                                                       \
         void*,                                                             \
         bool,                                                              \
-        bool)
+        bool);                                                             \
+    template rocsparse_status rocsparse::csrmv_template<T, I, J, A, X, Y>( \
+        rocsparse_handle,                                                  \
+        rocsparse_operation,                                               \
+        rocsparse::csrmv_alg,                                              \
+        int64_t,                                                           \
+        int64_t,                                                           \
+        int64_t,                                                           \
+        const void*,                                                       \
+        const rocsparse_mat_descr,                                         \
+        const void*,                                                       \
+        const void*,                                                       \
+        const void*,                                                       \
+        const void*,                                                       \
+        rocsparse_csrmv_info,                                              \
+        const void*,                                                       \
+        const void*,                                                       \
+        void*,                                                             \
+        rocsparse_int,                                                     \
+        rocsparse_const_dnvec_descr,                                       \
+        rocsparse_const_dnvec_descr*,                                      \
+        bool,                                                              \
+        bool);
 
 INSTANTIATE_MIXED(int32_t, int32_t, int32_t, int8_t, int8_t, int32_t);
 INSTANTIATE_MIXED(int32_t, int64_t, int32_t, int8_t, int8_t, int32_t);
@@ -613,9 +827,18 @@ INSTANTIATE_MIXED(float, int64_t, int64_t, int8_t, int8_t, float);
 INSTANTIATE_MIXED(float, int32_t, int32_t, _Float16, _Float16, float);
 INSTANTIATE_MIXED(float, int64_t, int32_t, _Float16, _Float16, float);
 INSTANTIATE_MIXED(float, int64_t, int64_t, _Float16, _Float16, float);
+INSTANTIATE_MIXED(float, int32_t, int32_t, _Float16, _Float16, _Float16);
+INSTANTIATE_MIXED(float, int64_t, int32_t, _Float16, _Float16, _Float16);
+INSTANTIATE_MIXED(float, int64_t, int64_t, _Float16, _Float16, _Float16);
 INSTANTIATE_MIXED(float, int32_t, int32_t, rocsparse_bfloat16, rocsparse_bfloat16, float);
 INSTANTIATE_MIXED(float, int64_t, int32_t, rocsparse_bfloat16, rocsparse_bfloat16, float);
 INSTANTIATE_MIXED(float, int64_t, int64_t, rocsparse_bfloat16, rocsparse_bfloat16, float);
+INSTANTIATE_MIXED(
+    float, int32_t, int32_t, rocsparse_bfloat16, rocsparse_bfloat16, rocsparse_bfloat16);
+INSTANTIATE_MIXED(
+    float, int64_t, int32_t, rocsparse_bfloat16, rocsparse_bfloat16, rocsparse_bfloat16);
+INSTANTIATE_MIXED(
+    float, int64_t, int64_t, rocsparse_bfloat16, rocsparse_bfloat16, rocsparse_bfloat16);
 INSTANTIATE_MIXED(rocsparse_float_complex,
                   int32_t,
                   int32_t,

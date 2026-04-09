@@ -34,6 +34,8 @@
 
 #ifdef __linux__
 #include <dlfcn.h>
+#else
+#include <windows.h>
 #endif
 
 using ::testing::HasSubstr;
@@ -47,8 +49,9 @@ static const std::string BFloat16 = "convbfp16";
 } // namespace conv
 
 namespace pool {
-static const std::string Float = "pool";
-static const std::string Half  = "poolfp16";
+static const std::string Float    = "pool";
+static const std::string Half     = "poolfp16";
+static const std::string BFloat16 = "poolbfp16";
 } // namespace pool
 
 namespace gemm {
@@ -65,23 +68,32 @@ static const std::string Half  = "bnormfp16";
 // Note: Assuming that the MIOpenDriver executable will be beside the testing output location.
 static inline miopen::fs::path MIOpenDriverExePath()
 {
-    static const std::string MIOpenDriverExeName = "MIOpenDriver";
-
 #ifdef __linux__
-    miopen::fs::path path = {""};
-    Dl_info info;
+    static const std::string MIOpenDriverExeName = "MIOpenDriver";
+    miopen::fs::path path                        = miopen::fs::canonical("/proc/self/exe");
 
-    if(dladdr(reinterpret_cast<void*>(miopenCreate), &info) != 0)
+    if(!path.empty())
     {
-        path = miopen::fs::canonical(miopen::fs::path{info.dli_fname});
-        if(path.empty())
-            return path;
-
         path = path.parent_path();
+        path /= MIOpenDriverExeName;
     }
-    return path /= MIOpenDriverExeName;
+    return path;
 #else
-    return {MIOpenDriverExeName};
+    static const std::string MIOpenDriverExeName = "MIOpenDriver.exe";
+
+    // Use dynamic buffer to support long paths (up to 32767 characters)
+    std::wstring modulePath(32767, L'\0');
+    DWORD len =
+        GetModuleFileNameW(nullptr, modulePath.data(), static_cast<DWORD>(modulePath.size()));
+    if(len == 0)
+        return {};
+
+    modulePath.resize(len);
+
+    // miopen::fs::path is std::filesystem::path which supports long paths
+    miopen::fs::path path(modulePath);
+    path = path.parent_path();
+    return path / MIOpenDriverExeName;
 #endif
 }
 

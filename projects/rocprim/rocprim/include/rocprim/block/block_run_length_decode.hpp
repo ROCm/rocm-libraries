@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2010-2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2021-2024, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2021-2026, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -53,6 +53,8 @@ BEGIN_ROCPRIM_NAMESPACE
  * array is runtime-dependent and potentially without any upper bound. To address this, `block_run_length_decode` allows
  * retrieving a "window" from the run-length decoded array. The window's offset can be specified and `BLOCK_THREADS *
  * DECODED_ITEMS_PER_THREAD` (i.e., referred to as `window_size`) decoded items from the specified window will be returned.
+ *
+ * The full example is [on GitHub](https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocprim/example/rocprim/block/example_block_run_length_decode.cpp).
  *
  * \par
  * \code
@@ -127,9 +129,10 @@ template<typename ItemT,
          unsigned int BlockSizeX,
          int          RUNS_PER_THREAD,
          int          DECODED_ITEMS_PER_THREAD,
-         typename DecodedOffsetT = uint32_t,
-         unsigned int BlockSizeY = 1,
-         unsigned int BlockSizeZ = 1>
+         typename DecodedOffsetT                = uint32_t,
+         unsigned int            BlockSizeY     = 1,
+         unsigned int            BlockSizeZ     = 1,
+         arch::wavefront::target TargetWaveSize = arch::wavefront::get_target()>
 class block_run_length_decode
 {
 private:
@@ -144,7 +147,8 @@ private:
                                                 BlockSizeX,
                                                 rocprim::block_scan_algorithm::using_warp_scan,
                                                 BlockSizeY,
-                                                BlockSizeZ>;
+                                                BlockSizeZ,
+                                                TargetWaveSize>;
 
     /// Type used to index into the block's runs
     using RunOffsetT = uint32_t;

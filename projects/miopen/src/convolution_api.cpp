@@ -67,6 +67,7 @@ static inline auto MakeFwdCtxAndProblem(miopenHandle_t handle,
 
     auto ctx = ExecutionContext{&miopen::deref(handle)};
     problem.SetupFloats(ctx);
+    problem.SetupComputeType(ctx);
     return std::make_tuple(std::move(ctx), std::move(problem));
 }
 
@@ -86,6 +87,7 @@ static inline auto MakeBwdCtxAndProblem(miopenHandle_t handle,
 
     auto ctx = ExecutionContext{&miopen::deref(handle)};
     problem.SetupFloats(ctx);
+    problem.SetupComputeType(ctx);
     return std::make_tuple(std::move(ctx), std::move(problem));
 }
 
@@ -111,6 +113,7 @@ static inline auto MakeWrWCtxAndProblem(miopenHandle_t handle,
 
     auto ctx = ExecutionContext{&miopen::deref(handle)};
     problem.SetupFloats(ctx);
+    problem.SetupComputeType(ctx);
     return std::make_tuple(std::move(ctx), std::move(problem));
 }
 
@@ -224,7 +227,9 @@ miopenConvolutionABBackwardWeightsGetWorkSpaceSize(const miopenAlphaBetaCase_t a
                                                    const miopenConvolutionDescriptor_t convDesc,
                                                    size_t* buffer_size)
 {
-    MIOPEN_LOG_FUNCTION(alpha_beta_case, inputTensorDesc, outputTensorDesc, weightsTensorDesc);
+    {
+        MIOPEN_LOG_FUNCTION(alpha_beta_case, inputTensorDesc, outputTensorDesc, weightsTensorDesc);
+    }
 
     return miopen::try_([&] {
         miopenDataType_t data_type = miopen::deref(outputTensorDesc).GetType();
@@ -236,17 +241,17 @@ miopenConvolutionABBackwardWeightsGetWorkSpaceSize(const miopenAlphaBetaCase_t a
         size_t C = std::get<1>(
             miopen::GetNCDHW(spatial_dims, miopen::deref(outputTensorDesc).GetLengths()));
 
-        auto CKWrwRequireWorkspace = [&](size_t G,
-                                         size_t C,
-                                         size_t K,
-                                         miopenDataType_t data_type,
-                                         miopenAlphaBetaCase_t alpha_beta_case) {
+        auto CKWrwRequireWorkspace = [&](size_t G_,
+                                         size_t C_,
+                                         size_t K_,
+                                         miopenDataType_t data_type_,
+                                         miopenAlphaBetaCase_t alpha_beta_case_) {
             auto is_odd        = [](int num) { return num % 2 != 0; };
-            size_t C_per_group = C / G;
-            size_t K_per_group = K / G;
+            size_t C_per_group = C_ / G_;
+            size_t K_per_group = K_ / G_;
 
-            return (alpha_beta_case == BILINEAR || alpha_beta_case == SCALE) ||
-                   ((data_type == miopenHalf || data_type == miopenBFloat16) &&
+            return (alpha_beta_case_ == BILINEAR || alpha_beta_case_ == SCALE) ||
+                   ((data_type_ == miopenHalf || data_type_ == miopenBFloat16) &&
                     (is_odd(C_per_group) || is_odd(K_per_group)));
         };
 

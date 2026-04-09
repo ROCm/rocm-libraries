@@ -37,7 +37,7 @@ Definitions:
 
 Tests:
 - name: spmm_bad_arg
-  category: pre_checkin
+  category: smoke
   function:
     - spmm_bad_arg: *real_precisions_2b
   transA: N
@@ -69,7 +69,7 @@ Tests:
   alpha_beta: *alpha_beta_range
   bias_vector: [true]
   bias_stride: [0, -1, 256]
-  bias_type: [f32_r, f16_r]
+  bias_type: [f32_r, f16_r, bf16_r]
   sparse_b: [true, false]
   alpha_vector_scaling: [true, false]
 
@@ -83,7 +83,7 @@ Tests:
   sparse_b: [true, false]
   bias_vector: [true]
   bias_stride: [0, -1, 256]
-  bias_type: [f32_r, f16_r]
+  bias_type: [f32_r, f16_r, bf16_r]
   sparse_b: [true, false]
   alpha_vector_scaling: [true, false]
   search: [true, false]
@@ -559,7 +559,7 @@ Tests:
   sparse_b: [true, false]
 
 - name: aux_plan_assign
-  category: pre_checkin
+  category: smoke
   function:
     aux_plan_assign: *hpa_int8_precision
   M: 128

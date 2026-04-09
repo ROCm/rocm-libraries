@@ -38,10 +38,6 @@ To install MIOpen, you must first install these prerequisites:
 * [ROCm CMake](https://github.com/ROCm/rocm-cmake): provides CMake modules for common build
   tasks needed for the ROCm software stack
 * [Half](http://half.sourceforge.net/): IEEE 754-based, half-precision floating-point library
-* [Boost](http://www.boost.org/): Version 1.79 is recommended, as older versions may need patches to
-  work on newer systems
-  * MIOpen uses `boost-system` and `boost-filesystem` packages to enable persistent
-    [kernel cache](https://rocm.docs.amd.com/projects/MIOpen/en/latest/cache.html)
 * [SQLite3](https://sqlite.org/index.html): A reading and writing performance database
 * lbzip2: A multi-threaded compress or decompress utility
 * [rocBLAS](https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocblas): AMD's library for Basic Linear Algebra Subprograms
@@ -330,27 +326,54 @@ switch branches or merge changes in Git to ensure any large binaries are kept in
 
 ## Installing the dependencies manually
 
-If you're using Ubuntu v16, you can install the `Boost` packages using:
+If you're using Ubuntu, you can install the `BZip2` packages using:
 
 ```shell
-sudo apt-get install libboost-dev
-sudo apt-get install libboost-system-dev
-sudo apt-get install libboost-filesystem-dev
+sudo apt-get install libbz2-dev
 ```
-
->[!NOTE]
->By default, MIOpen attempts to build with Boost statically linked libraries. If required, you can build
-with dynamically linked Boost libraries using the `-DBoost_USE_STATIC_LIBS=Off` flag during the
-configuration stage. However, this is not recommended.
 
 You must install the `half` header from the [half website](http://half.sourceforge.net/).
 
 ## Using Docker
 
-The easiest way to build MIOpen is via Docker. You can build the top-level Docker file using:
+The easiest way to build MIOpen is via Docker. Building the MIOpen Docker image requires [Docker Buildx](https://docs.docker.com/build/buildx/). Ensure it is available before proceeding:
 
 ```shell
-docker build -t miopen-image .
+docker buildx version
+```
+
+The Dockerfile supports two build modes controlled by the `BUILD_TYPE` build argument:
+
+### Option 1: Using a prebuilt ROCm/TheRock image (default)
+
+This is the standard path for development. It pulls a pre-built `rocm/miopen:therock` base image from Docker Hub and builds the MIOpen environment on top of it, targeting the `miopen` stage:
+
+```shell
+docker buildx build \
+  --load \
+  --target miopen \
+  --tag miopen-image:gfx1101 \
+  --build-arg PREFIX=/opt/rocm \
+  --build-arg THEROCK_ASIC=gfx1101 \
+  -f ../../projects/miopen/Dockerfile \
+  ../../projects/.
+```
+
+### Option 2: Building ROCm/TheRock from source (nightly)
+
+This path clones and builds TheRock from source before building the MIOpen environment in a single step. Use this when you need to build against a specific TheRock commit or when no prebuilt image is available:
+
+```shell
+docker buildx build \
+  --load \
+  --target miopen \
+  --tag miopen-image:gfx1101 \
+  --build-arg BUILD_TYPE=build \
+  --build-arg THEROCK_GIT_HASH=<commit-hash> \
+  --build-arg PREFIX=/opt/rocm \
+  --build-arg THEROCK_ASIC=gfx1101 \
+  -f ../../projects/miopen/Dockerfile \
+  ../../projects/.
 ```
 
 Then, to enter the development environment, use `docker run`. For example:
@@ -359,8 +382,7 @@ Then, to enter the development environment, use `docker run`. For example:
 docker run -it -v $HOME:/data --privileged --rm --device=/dev/kfd --device /dev/dri:/dev/dri:rw  --volume /dev/dri:/dev/dri:rw -v /var/lib/docker/:/var/lib/docker --group-add video --cap-add=SYS_PTRACE --security-opt seccomp=unconfined miopen-image
 ```
 
-You can find prebuilt Docker images on
-[ROCm's public Docker Hub](https://hub.docker.com/r/rocm/miopen/tags).
+You can find prebuilt Docker images on [ROCm's public Docker Hub](https://hub.docker.com/r/rocm/miopen/tags). These images are multi arch CI images.
 
 ## Porting from cuDNN to MIOpen
 

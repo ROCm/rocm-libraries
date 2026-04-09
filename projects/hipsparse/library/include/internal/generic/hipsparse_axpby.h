@@ -64,7 +64,7 @@ extern "C" {
 *  <tr><td>HIP_C_64F
 *  </table>
 *
-*  \par Mixed precisions:
+*  \par Mixed Precisions:
 *  <table>
 *  <caption id="axpby_mixed">Mixed Precisions</caption>
 *  <tr><th>X / Y      <th>compute_type
@@ -73,22 +73,20 @@ extern "C" {
 *  </table>
 *
 *  @param[in]
-*  handle      handle to the hipsparse library context queue.
+*  handle      handle to the hipSPARSE library context queue.
 *  @param[in]
 *  alpha       scalar \f$\alpha\f$.
 *  @param[in]
-*  vecX        sparse matrix descriptor.
+*  vecX        sparse vector descriptor.
 *  @param[in]
 *  beta        scalar \f$\beta\f$.
 *  @param[inout]
-*  vecY        dense matrix descriptor.
+*  vecY        dense vector descriptor.
 *
 *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p alpha, \p vecX, \p beta or \p vecY pointer is
-*          invalid.
-*
-*  \par Example
-*  \snippet example_hipsparse_axpby.cpp doc example
+*  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p alpha, \p vecX, \p beta, or \p vecY is nullptr,
+*          or the vector sizes or data types are incompatible.
 */
 #if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 HIPSPARSE_EXPORT

@@ -36,7 +36,7 @@
 #include <random> // ranlux24_base, uniform_int_distribution
 #include <sstream>
 #include <stdexcept>
-#ifdef WIN32
+#ifdef _WIN32
 #include <synchapi.h> // Sleep
 #else
 #include <unistd.h> // usleep
@@ -140,7 +140,7 @@ public:
             std::vector<size_t> sub_strides(sub_dft.length.size());
             for(int stride_idx = sub_strides.size() - 1; stride_idx >= 0; stride_idx--)
             {
-                if(stride_idx == sub_strides.size() - 1)
+                if(static_cast<size_t>(stride_idx) == sub_strides.size() - 1)
                 {
                     sub_strides[stride_idx] = total_batch_for_step;
                 }
@@ -579,7 +579,7 @@ TEST_P(multiStreamTest, impulseSignalOnOutput)
             }
         }
     }
-    catch(fft_params::work_buffer_alloc_failure& e)
+    catch(const fft_params::work_buffer_alloc_failure& e)
     {
         info.str("");
         info << "Allocation failure detected during the creation of the sub-DFT plans";
@@ -619,11 +619,17 @@ TEST_P(multiStreamTest, impulseSignalOnOutput)
     {
         hostbuffer.alloc(std::max(isize, osize));
     }
-    catch(HOSTBUF_MEM_USAGE& e)
+    catch(const std::bad_alloc& e)
     {
-        info.str("");
-        info << "could not allocate host buffer";
-        GTEST_SKIP() << info.str();
+        GTEST_SKIP() << "host memory allocation failure";
+    }
+    catch(const HOSTBUF_MEM_USAGE& e)
+    {
+        GTEST_SKIP() << e.what();
+    }
+    catch(const DEVICEBUF_MEM_USAGE& e)
+    {
+        GTEST_SKIP() << e.what();
     }
 
     std::vector<size_t> expected_harmonic(parameters.dim());
@@ -735,7 +741,7 @@ TEST_P(multiStreamTest, impulseSignalOnOutput)
                           [](const sub_dft_stream_t& stream) { return !stream.done(); })
               && time_waited_us <= failure_time_threshold_us)
         {
-#ifdef WIN32
+#ifdef _WIN32
             Sleep(sleep_time_us / 1000); // argument in ms
 #else
             usleep(sleep_time_us);

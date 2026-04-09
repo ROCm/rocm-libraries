@@ -419,7 +419,7 @@ class MasterSolutionLibrary:
                 elif d["Library"]["distance"] == "Range":
                     predicate = Properties.Predicate(tag="RangeMatching")
                 else:
-                    predicate = Properties.Predicate(tag="TruePred")
+                    predicate = Properties.Predicate(tag="GridBasedMatching") # to make different from TruePred
 
                 matchingLib = MatchingLibrary.FromOriginalState(d["Library"], solutions)
                 library = PredicateLibrary(tag="Problem")
@@ -431,7 +431,7 @@ class MasterSolutionLibrary:
                 library = PredicateLibrary(tag="Problem")
                 library.rows.append({"predicate": predicate, "library": freesizeLib})
             elif d["LibraryType"] == "Prediction":
-                predicate = Properties.Predicate(tag="PredictionMatching")
+                predicate = Properties.Predicate(tag="PredictionMatching") # So that FreeSize / Prediction can co-exist
 
                 predictionLib = PredictionLibrary.FromOriginalState(d["Library"], solutions)
                 library = PredicateLibrary(tag="Problem")

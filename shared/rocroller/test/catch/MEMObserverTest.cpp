@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <cmath>
 #include <memory>
@@ -32,6 +9,7 @@
 #include "TestContext.hpp"
 #include "TestKernels.hpp"
 
+#include <common/Scheduling.hpp>
 #include <common/SourceMatcher.hpp>
 #include <common/TestValues.hpp>
 
@@ -42,7 +20,9 @@
 #include <rocRoller/CodeGen/MemoryInstructions.hpp>
 #include <rocRoller/Expression.hpp>
 #include <rocRoller/ExpressionTransformations.hpp>
+#include <rocRoller/GPUArchitecture/GPUCapability.hpp>
 #include <rocRoller/Scheduling/Observers/FunctionalUnit/MEMObserver.hpp>
+#include <rocRoller/Scheduling/Scheduler.hpp>
 
 #include <catch2/catch_template_test_macros.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -68,9 +48,10 @@ namespace MEMObserverTest
     {
         SUPPORTED_ARCH_SECTION(arch)
         {
-            if(arch.isRDNAGPU())
+            if(!TestContext::ForTarget(arch)->targetArchitecture().HasCapability(
+                   GPUCapability::HasAccCD))
             {
-                SKIP("RDNA not supported yet");
+                SKIP("Architecture " + arch.toString() + " does not use Accumulator registers.");
             }
 
             SECTION("VMEM Instructions stall")
@@ -254,6 +235,244 @@ namespace MEMObserverTest
 
                 CHECK_THAT(context.output(), ContainsSubstring("s_waitcnt vmcnt(2)"));
             }
+        }
+    }
+
+    struct WeaveLDSAndSAddKernel : public AssemblyTestKernel
+    {
+        WeaveLDSAndSAddKernel(ContextPtr context, size_t strideMultiplier)
+            : AssemblyTestKernel(context)
+            , m_strideMultiplier(strideMultiplier)
+        {
+        }
+
+        size_t m_strideMultiplier;
+
+        void generate() override
+        {
+            auto k = m_context->kernel();
+            m_context->schedule(k->preamble());
+            m_context->schedule(k->prolog());
+
+            const auto workgroupSize = 64;
+            const auto instrDwords   = 4;
+
+            auto ldsWithOffset = Register::Value::Placeholder(
+                m_context, Register::Type::Vector, DataType::UInt32, 1);
+            auto workitemIndex = m_context->kernel()->workitemIndex()[0];
+
+            const auto baseAddresses
+                = generateLDSAddresses(workgroupSize, m_strideMultiplier, instrDwords);
+
+            auto agpr
+                = Register::Value::Placeholder(m_context,
+                                               Register::Type::Accumulator,
+                                               DataType::Float,
+                                               16,
+                                               Register::AllocationOptions::FullyContiguous());
+            agpr->allocateNow();
+
+            auto v0 = Register::Value::Placeholder(m_context,
+                                                   Register::Type::Vector,
+                                                   DataType::Half,
+                                                   1,
+                                                   Register::AllocationOptions::FullyContiguous());
+            v0->allocateNow();
+
+            auto v1 = Register::Value::Placeholder(m_context,
+                                                   Register::Type::Vector,
+                                                   DataType::Half,
+                                                   1,
+                                                   Register::AllocationOptions::FullyContiguous());
+            v1->allocateNow();
+
+            int counter = 0;
+
+            auto ldsData = Register::Value::AllocateLDS(m_context, DataType::Raw32, 64);
+
+            auto m_ldsDst = Register::Value::Placeholder(
+                m_context,
+                Register::Type::Vector,
+                DataType::Raw32,
+                64,
+                Register::AllocationOptions{.contiguousChunkWidth = Register::FULLY_CONTIGUOUS,
+                                            .alignment            = static_cast<int>(instrDwords)});
+
+            auto prereq = [&]() -> Generator<Instruction> {
+                co_yield Expression::generate(
+                    ldsWithOffset,
+                    Expression::literal(ldsData->getLDSAllocation()->offset())
+                        + workitemIndex->expression()
+                              * Expression::literal(
+                                  (4 * m_strideMultiplier * instrDwords)
+                                      % ldsData->getLDSAllocation()->size(),
+                                  resultType(workitemIndex->expression()).varType),
+                    m_context);
+
+                co_yield m_ldsDst->allocate();
+            };
+
+            auto ldsInstructions = [&]() -> Generator<Instruction> {
+                for(int i = 0; i < 12; ++i)
+                {
+                    const auto [start, end]
+                        = getAlignedSubset(m_ldsDst->registerCount(), instrDwords, counter++);
+                    auto dstRegs = m_ldsDst->subset(Generated(iota(start, end)));
+                    for(auto inst :
+                        m_context->mem()->loadLocal(dstRegs, ldsWithOffset, 0, 4 * instrDwords))
+                    {
+                        inst.setModelledAddresses(baseAddresses);
+                        co_yield inst;
+                    }
+                }
+                co_yield Instruction::Wait(WaitCount::Zero(m_context->targetArchitecture()));
+            };
+
+            auto addInstructions = [&]() -> Generator<Instruction> {
+                for(int i = 1; i < 12; ++i)
+                {
+                    co_yield Instruction("v_mfma_f32_32x32x2f32", {agpr}, {v0, v1, agpr}, {}, "");
+                }
+            };
+
+            std::vector<Generator<Instruction>> sequences;
+            sequences.push_back(addInstructions());
+            sequences.push_back(ldsInstructions());
+
+            std::shared_ptr<Scheduling::Scheduler> scheduler
+                = Component::GetNew<Scheduling::Scheduler>(Scheduling::SchedulerProcedure::Priority,
+                                                           Scheduling::CostFunction::LinearWeighted,
+                                                           m_context);
+
+            m_context->schedule(prereq());
+            m_context->schedule((*scheduler)(sequences));
+            m_context->schedule(k->postamble());
+            m_context->schedule(k->amdgpu_metadata());
+        }
+    };
+
+    TEST_CASE("DSObserver scheduling", "[rocprofiler][lds-model][gpu]")
+    {
+        /*
+        Schedules a stream of ds_read_b128s and a stream of mfmas (does no meaningful work)
+        Checks scheduler interweaves based on information from observers
+        */
+        const auto dsObserver
+            = GENERATE(DSObserverType::WeightlessDSMemObserver, DSObserverType::DSMEMObserver);
+        const auto strideMultiplier = GENERATE(1, 16);
+
+        KernelOptions kernelOps;
+        kernelOps->dsObserver = dsObserver;
+
+        auto context = TestContext::ForTestDevice(kernelOps);
+
+        if(not context->targetArchitecture().target().isCDNA4GPU())
+        {
+            // LDS bandwidth and observer weights being different in different architectures
+            // results in different scheduling decisions.
+            // Purpose of this test is to verify scheduling differences between the two observers.
+            SKIP("Test tailored for gfx950 behavior");
+        }
+
+        WeaveLDSAndSAddKernel testKernel(context.get(), strideMultiplier);
+        testKernel({});
+
+        SECTION(fmt::format("{}, stride {}", toString(dsObserver), strideMultiplier))
+        {
+            std::string expected;
+            if(strideMultiplier == 1 && dsObserver == DSObserverType::WeightlessDSMemObserver)
+            {
+                expected = R"(
+                    v_mfma_f32_32x32x2f32 a[0:15], v0, v4, a[0:15]
+                    ds_read_b128 v[8:11], v5
+                    ds_read_b128 v[12:15], v5
+                    ds_read_b128 v[16:19], v5
+                    ds_read_b128 v[20:23], v5
+                    ds_read_b128 v[24:27], v5
+                    v_mfma_f32_32x32x2f32 a[0:15], v0, v4, a[0:15]
+                    ds_read_b128 v[28:31], v5
+                    ds_read_b128 v[32:35], v5
+                    ds_read_b128 v[36:39], v5
+                    ds_read_b128 v[40:43], v5
+                    ds_read_b128 v[44:47], v5
+                    v_mfma_f32_32x32x2f32 a[0:15], v0, v4, a[0:15]
+                    ds_read_b128 v[48:51], v5
+                    ds_read_b128 v[52:55], v5
+                    v_mfma_f32_32x32x2f32 a[0:15], v0, v4, a[0:15]
+                    s_waitcnt vmcnt(0) lgkmcnt(0) expcnt(0)
+                    v_mfma_f32_32x32x2f32 a[0:15], v0, v4, a[0:15]
+                    v_mfma_f32_32x32x2f32 a[0:15], v0, v4, a[0:15]
+                    v_mfma_f32_32x32x2f32 a[0:15], v0, v4, a[0:15]
+                    v_mfma_f32_32x32x2f32 a[0:15], v0, v4, a[0:15]
+                    v_mfma_f32_32x32x2f32 a[0:15], v0, v4, a[0:15]
+                    v_mfma_f32_32x32x2f32 a[0:15], v0, v4, a[0:15]
+                    v_mfma_f32_32x32x2f32 a[0:15], v0, v4, a[0:15]
+                )";
+            }
+            else if(strideMultiplier == 16 && dsObserver == DSObserverType::WeightlessDSMemObserver)
+            {
+                expected = R"(
+                    v_mfma_f32_32x32x2f32 a[0:15], v0, v4, a[0:15]
+                    ds_read_b128 v[8:11], v5
+                    ds_read_b128 v[12:15], v5
+                    ds_read_b128 v[16:19], v5
+                    ds_read_b128 v[20:23], v5
+                    ds_read_b128 v[24:27], v5
+                    v_mfma_f32_32x32x2f32 a[0:15], v0, v4, a[0:15]
+                    ds_read_b128 v[28:31], v5
+                    ds_read_b128 v[32:35], v5
+                    ds_read_b128 v[36:39], v5
+                    ds_read_b128 v[40:43], v5
+                    v_mfma_f32_32x32x2f32 a[0:15], v0, v4, a[0:15]
+                    ds_read_b128 v[44:47], v5
+                    v_mfma_f32_32x32x2f32 a[0:15], v0, v4, a[0:15]
+                    ds_read_b128 v[48:51], v5
+                    v_mfma_f32_32x32x2f32 a[0:15], v0, v4, a[0:15]
+                    ds_read_b128 v[52:55], v5
+                    v_mfma_f32_32x32x2f32 a[0:15], v0, v4, a[0:15]
+                    v_mfma_f32_32x32x2f32 a[0:15], v0, v4, a[0:15]
+                    v_mfma_f32_32x32x2f32 a[0:15], v0, v4, a[0:15]
+                    v_mfma_f32_32x32x2f32 a[0:15], v0, v4, a[0:15]
+                    v_mfma_f32_32x32x2f32 a[0:15], v0, v4, a[0:15]
+                    v_mfma_f32_32x32x2f32 a[0:15], v0, v4, a[0:15]
+                    s_waitcnt vmcnt(0) lgkmcnt(0) expcnt(0)
+                )";
+            }
+            else if(dsObserver == DSObserverType::DSMEMObserver)
+            {
+                expected = R"(
+                    v_mfma_f32_32x32x2f32 a[0:15], v0, v4, a[0:15]
+                    ds_read_b128 v[8:11], v5
+                    ds_read_b128 v[12:15], v5
+                    ds_read_b128 v[16:19], v5
+                    v_mfma_f32_32x32x2f32 a[0:15], v0, v4, a[0:15]
+                    v_mfma_f32_32x32x2f32 a[0:15], v0, v4, a[0:15]
+                    v_mfma_f32_32x32x2f32 a[0:15], v0, v4, a[0:15]
+                    v_mfma_f32_32x32x2f32 a[0:15], v0, v4, a[0:15]
+                    v_mfma_f32_32x32x2f32 a[0:15], v0, v4, a[0:15]
+                    v_mfma_f32_32x32x2f32 a[0:15], v0, v4, a[0:15]
+                    ds_read_b128 v[20:23], v5
+                    ds_read_b128 v[24:27], v5
+                    ds_read_b128 v[28:31], v5
+                    v_mfma_f32_32x32x2f32 a[0:15], v0, v4, a[0:15]
+                    v_mfma_f32_32x32x2f32 a[0:15], v0, v4, a[0:15]
+                    v_mfma_f32_32x32x2f32 a[0:15], v0, v4, a[0:15]
+                    v_mfma_f32_32x32x2f32 a[0:15], v0, v4, a[0:15]
+                    ds_read_b128 v[32:35], v5
+                    ds_read_b128 v[36:39], v5
+                    ds_read_b128 v[40:43], v5
+                    ds_read_b128 v[44:47], v5
+                    ds_read_b128 v[48:51], v5
+                    ds_read_b128 v[52:55], v5
+                    s_waitcnt vmcnt(0) lgkmcnt(0) expcnt(0)
+                )";
+            }
+            else
+            {
+                FAIL("Unknown DSObserverType");
+            }
+            CHECK_THAT(NormalizedSource(context.output()),
+                       ContainsSubstring(NormalizedSource(expected)));
         }
     }
 }

@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <cmath>
 #include <memory>
@@ -180,6 +157,19 @@ namespace ExpressionTest
         Expression::ExpressionPtr n = nullptr;
         CHECK_FALSE(Expression::equivalent(n + n, a + n));
         CHECK_FALSE(Expression::equivalent(n + n, n + a));
+
+        // Test convert to different types should not be identical or equivalent
+        auto convertFloat  = Expression::convert(DataType::Float, rc->expression());
+        auto convertInt64  = Expression::convert(DataType::Int64, rc->expression());
+        auto convertUInt32 = Expression::convert(DataType::UInt32, rc->expression());
+
+        CHECK_FALSE(identical(convertFloat, convertInt64));
+        CHECK_FALSE(identical(convertFloat, convertUInt32));
+        CHECK_FALSE(identical(convertInt64, convertUInt32));
+
+        CHECK_FALSE(equivalent(convertFloat, convertInt64));
+        CHECK_FALSE(equivalent(convertFloat, convertUInt32));
+        CHECK_FALSE(equivalent(convertInt64, convertUInt32));
     }
 
     TEST_CASE("Expression contains and split", "[expression]")

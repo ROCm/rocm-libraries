@@ -25,21 +25,22 @@
  *******************************************************************************/
 
 #include "mxDataGen.hpp"
-#include <DataGenerator.hpp>
+#include <mxDataGenerator/DataGenerator.hpp>
+#include <mxDataGenerator/PreSwizzle.hpp>
 #include <cblas.h>
+#include <cmath>
+
 
 template <typename DT>
 std::vector<uint8_t> unpackData(std::vector<uint8_t> const& dataBytes)
 {
     // Only F4 and F6 need to unpack data.
-    static_assert(
-        std::is_same_v<
-            DT,
-            DGen::
-                ocp_e2m1_mxfp4> || std::is_same_v<DT, DGen::ocp_e3m2_mxfp6> || std::is_same_v<DT, DGen::ocp_e2m3_mxfp6>);
+    static_assert(std::is_same_v<DT, DGen::ocp_e2m1_mxfp4>
+                  || std::is_same_v<DT, DGen::ocp_e3m2_mxfp6>
+                  || std::is_same_v<DT, DGen::ocp_e2m3_mxfp6>);
 
-    if constexpr(std::is_same_v<DT,
-                                DGen::ocp_e3m2_mxfp6> || std::is_same_v<DT, DGen::ocp_e2m3_mxfp6>)
+    if constexpr(std::is_same_v<DT, DGen::ocp_e3m2_mxfp6>
+                 || std::is_same_v<DT, DGen::ocp_e2m3_mxfp6>)
     {
         std::vector<uint8_t> unpackedDataBytes(dataBytes.size() * 8 / 6);
 #pragma omp parallel for
@@ -83,14 +84,12 @@ template <typename DT>
 void packData(std::vector<uint8_t> const& dataBytes, uint8_t* packedData)
 {
     // Only F4 and F6 need to unpack data.
-    static_assert(
-        std::is_same_v<
-            DT,
-            DGen::
-                ocp_e2m1_mxfp4> || std::is_same_v<DT, DGen::ocp_e3m2_mxfp6> || std::is_same_v<DT, DGen::ocp_e2m3_mxfp6>);
+    static_assert(std::is_same_v<DT, DGen::ocp_e2m1_mxfp4>
+                  || std::is_same_v<DT, DGen::ocp_e3m2_mxfp6>
+                  || std::is_same_v<DT, DGen::ocp_e2m3_mxfp6>);
 
-    if constexpr(std::is_same_v<DT,
-                                DGen::ocp_e3m2_mxfp6> || std::is_same_v<DT, DGen::ocp_e2m3_mxfp6>)
+    if constexpr(std::is_same_v<DT, DGen::ocp_e3m2_mxfp6>
+                 || std::is_same_v<DT, DGen::ocp_e2m3_mxfp6>)
     {
         auto const total = dataBytes.size() * 6 / 8;
 #pragma omp parallel for
@@ -133,11 +132,11 @@ void packData(std::vector<uint8_t> const& dataBytes, uint8_t* packedData)
  * @return float values of generated MX type data aligned with scale
  */
 template <typename DT>
-std::vector<float> getAlignedFloat(std::vector<uint8_t>&       dataBytes,
-                                   std::vector<uint8_t> const& scaleBytes,
-                                   std::array<DGen::index_t, 2> const    sizes,
-                                   int                         elementsPerMXBlock,
-                                   bool                        isMatrixA)
+std::vector<float> getAlignedFloat(std::vector<uint8_t>&              dataBytes,
+                                   std::vector<uint8_t> const&        scaleBytes,
+                                   std::array<DGen::index_t, 2> const sizes,
+                                   int                                elementsPerMXBlock,
+                                   bool                               isMatrixA)
 {
     std::vector<float>   refFloat(sizes[0] * sizes[1], 0.0);
     std::vector<uint8_t> alignedDataBytes(dataBytes.size());
@@ -221,8 +220,12 @@ std::vector<float> generateData(T                           dgen,
                                 DGen::DataGeneratorOptions& opt,
                                 int                         elementsPerMXBlock,
                                 bool                        isTranspose,
-                                bool                        isMatrixA)
+                                bool                        isMatrixA,
+                                std::vector<size_t> const&  preSwizzleTile,
+                                std::vector<size_t> const&  preTile)
 {
+    using namespace DGen;
+
     dgen.setSeed(seed);
     dgen.generate(sizes, strides, opt);
 
@@ -230,6 +233,19 @@ std::vector<float> generateData(T                           dgen,
     std::memcpy(data, dataBytes.data(), dataBytes.size() * sizeof(uint8_t));
 
     std::vector<uint8_t> scaleBytes = dgen.getScaleBytes();
+
+#ifdef HIPBLASLT_USE_ROCROLLER
+    // Apply pre-swizzle to scale data
+    size_t scaleRows = sizes[0] / elementsPerMXBlock;
+    size_t scaleCols = sizes[1];
+
+    if(preSwizzleTile.size() == 3)
+    {
+        scaleBytes = DGen::preSwizzleScalesGFX950(scaleBytes, {scaleCols, scaleRows});
+        
+    }
+#endif
+
     std::memcpy(scale, scaleBytes.data(), scaleBytes.size() * sizeof(uint8_t));
 
     if((isMatrixA && isTranspose) || (!isMatrixA && !isTranspose))
@@ -241,17 +257,16 @@ std::vector<float> generateData(T                           dgen,
 
     // For types smaller than 8-bit, mxDataGenerator returns packed data (i.e., two FP4 will be
     // stored in a uint8_t), so unpacking the data is required before converting them to float
-    if constexpr(std::is_same_v<DT,
-                                DGen::ocp_e5m2_mxfp8> || std::is_same_v<DT, DGen::ocp_e4m3_mxfp8>)
+    if constexpr(std::is_same_v<DT, DGen::ocp_e5m2_mxfp8>
+                 || std::is_same_v<DT, DGen::ocp_e4m3_mxfp8>)
     {
         auto ret = getAlignedFloat<DT>(
             dataBytes, scaleBytes, {sizes[0], sizes[1]}, elementsPerMXBlock, isMatrixA);
         std::memcpy(data, dataBytes.data(), dataBytes.size() * sizeof(uint8_t));
         return ret;
     }
-    else if constexpr(std::is_same_v<
-                          DT,
-                          DGen::ocp_e3m2_mxfp6> || std::is_same_v<DT, DGen::ocp_e2m3_mxfp6>)
+    else if constexpr(std::is_same_v<DT, DGen::ocp_e3m2_mxfp6>
+                      || std::is_same_v<DT, DGen::ocp_e2m3_mxfp6>)
     {
         auto unpackedDataBytes = unpackData<DT>(dataBytes);
         auto ret               = getAlignedFloat<DT>(
@@ -285,27 +300,51 @@ std::vector<float> generateData(T                           dgen,
  *
  * @return float values of generated MX type data
  */
-std::vector<float> generateMXInput(hipDataType            dataType,
-                                   void*                  data,
-                                   void*                  scale,
-                                   DGen::index_t          rowSize,
-                                   DGen::index_t          colSize,
-                                   DGen::index_t          stride,
-                                   bool                   isTranspose,
-                                   int const              scaleBlockRowSize,
-                                   int const              scaleBlockColSize,
-                                   bool                   isMatrixA,
-                                   std::string_view const initMethod,
-                                   float                  min_val,
-                                   float                  max_val)
+std::vector<float> generateMXInput(hipDataType                dataType,
+                                   void*                      data,
+                                   void*                      scale,
+                                   DGen::index_t              rowSize,
+                                   DGen::index_t              colSize,
+                                   DGen::index_t              stride,
+                                   bool                       isTranspose,
+                                   const std::vector<size_t>& preSwizzleTile,
+                                   const std::vector<size_t>& preTile,
+                                   int const                  scaleBlockRowSize,
+                                   int const                  scaleBlockColSize,
+                                   bool                       isMatrixA,
+                                   std::string_view const     initMethod,
+                                   float                      min_val,
+                                   float                      max_val)
 {
     using namespace DGen;
 
     DataGeneratorOptions opt;
-    opt.min          = min_val;
-    opt.max          = max_val;
+    opt.min          = initMethod == "uniform_01" ? 0. : (initMethod == "hpl" ? -.5 : min_val);
+    opt.max          = initMethod == "uniform_01" ? 1. : (initMethod == "hpl" ? .5 : max_val);
     opt.blockScaling = scaleBlockRowSize * scaleBlockColSize;
-    opt.pattern      = initMethod == "Bounded" ? Bounded : Trigonometric;
+
+    // Map string initMethod to DataInitMode
+    if(initMethod == "Sequential")
+        opt.initMode = DataInitMode(Sequential{});
+    else if(initMethod == "RowIndex")
+        opt.initMode = DataInitMode(RowIndex{});
+    else if(initMethod == "ColIndex")
+        opt.initMode = DataInitMode(ColIndex{});
+    else if(initMethod == "Checkerboard")
+        opt.initMode = DataInitMode(Checkerboard{});
+    else if(initMethod == "ScaledDiagonal")
+        opt.initMode = DataInitMode(ScaledDiagonal{});
+    else if(initMethod == "Identity")
+        opt.initMode = DataInitMode(Identity{});
+    else if(initMethod == "Ones")
+        opt.initMode = DataInitMode(Ones{});
+    else if(initMethod == "Zeros")
+        opt.initMode = DataInitMode(Zeros{});
+    else if(initMethod == "Bounded" || initMethod == "uniform_01")
+        opt.initMode = DataInitMode(Bounded{});
+    else
+        // TODO initMethod == "hpl" should also be Bounded, but fails some tests
+        opt.initMode = DataInitMode(TrigonometricFromFloat{});
 
     const uint32_t seed = 1713573849;
 
@@ -329,7 +368,9 @@ std::vector<float> generateMXInput(hipDataType            dataType,
                                                                   opt,
                                                                   elementsPerMXBlock,
                                                                   isTranspose,
-                                                                  isMatrixA);
+                                                                  isMatrixA,
+                                                                  preSwizzleTile,
+                                                                  preTile);
     }
     else if(dataType == HIP_R_8F_E4M3)
     {
@@ -343,7 +384,9 @@ std::vector<float> generateMXInput(hipDataType            dataType,
                                                                   opt,
                                                                   elementsPerMXBlock,
                                                                   isTranspose,
-                                                                  isMatrixA);
+                                                                  isMatrixA,
+                                                                  preSwizzleTile,
+                                                                  preTile);
     }
     else if(static_cast<hipDataType>(dataType) == HIP_R_6F_E2M3_EXT)
     {
@@ -357,7 +400,9 @@ std::vector<float> generateMXInput(hipDataType            dataType,
                                                                   opt,
                                                                   elementsPerMXBlock,
                                                                   isTranspose,
-                                                                  isMatrixA);
+                                                                  isMatrixA,
+                                                                  preSwizzleTile,
+                                                                  preTile);
     }
     else if(static_cast<hipDataType>(dataType) == HIP_R_6F_E3M2_EXT)
     {
@@ -371,7 +416,9 @@ std::vector<float> generateMXInput(hipDataType            dataType,
                                                                   opt,
                                                                   elementsPerMXBlock,
                                                                   isTranspose,
-                                                                  isMatrixA);
+                                                                  isMatrixA,
+                                                                  preSwizzleTile,
+                                                                  preTile);
     }
     else if(static_cast<hipDataType>(dataType) == HIP_R_4F_E2M1_EXT)
     {
@@ -385,7 +432,9 @@ std::vector<float> generateMXInput(hipDataType            dataType,
                                                                   opt,
                                                                   elementsPerMXBlock,
                                                                   isTranspose,
-                                                                  isMatrixA);
+                                                                  isMatrixA,
+                                                                  preSwizzleTile,
+                                                                  preTile);
     }
     else
     {

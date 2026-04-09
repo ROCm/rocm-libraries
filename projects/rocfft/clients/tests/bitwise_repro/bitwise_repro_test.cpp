@@ -61,17 +61,21 @@ TEST(bitwise_repro_test, compare_precisions)
     {
         GTEST_SKIP() << "host memory allocation failure";
     }
-    catch(HOSTBUF_MEM_USAGE& e)
+    catch(const HOSTBUF_MEM_USAGE& e)
     {
-        GTEST_SKIP() << e.msg;
+        GTEST_SKIP() << e.what();
+    }
+    catch(const DEVICEBUF_MEM_USAGE& e)
+    {
+        GTEST_SKIP() << e.what();
     }
     catch(ROCFFT_SKIP& e)
     {
-        GTEST_SKIP() << e.msg;
+        GTEST_SKIP() << e.what();
     }
     catch(ROCFFT_FAIL& e)
     {
-        GTEST_FAIL() << e.msg;
+        GTEST_FAIL() << e.what();
     }
     SUCCEED();
 }
@@ -106,17 +110,21 @@ TEST(bitwise_repro_test, compare_lengths)
     {
         GTEST_SKIP() << "host memory allocation failure";
     }
-    catch(HOSTBUF_MEM_USAGE& e)
+    catch(const HOSTBUF_MEM_USAGE& e)
     {
-        GTEST_SKIP() << e.msg;
+        GTEST_SKIP() << e.what();
+    }
+    catch(const DEVICEBUF_MEM_USAGE& e)
+    {
+        GTEST_SKIP() << e.what();
     }
     catch(ROCFFT_SKIP& e)
     {
-        GTEST_SKIP() << e.msg;
+        GTEST_SKIP() << e.what();
     }
     catch(ROCFFT_FAIL& e)
     {
-        GTEST_FAIL() << e.msg;
+        GTEST_FAIL() << e.what();
     }
     SUCCEED();
 }
@@ -151,17 +159,21 @@ TEST(bitwise_repro_test, compare_transform_types)
     {
         GTEST_SKIP() << "host memory allocation failure";
     }
-    catch(HOSTBUF_MEM_USAGE& e)
+    catch(const HOSTBUF_MEM_USAGE& e)
     {
-        GTEST_SKIP() << e.msg;
+        GTEST_SKIP() << e.what();
+    }
+    catch(const DEVICEBUF_MEM_USAGE& e)
+    {
+        GTEST_SKIP() << e.what();
     }
     catch(ROCFFT_SKIP& e)
     {
-        GTEST_SKIP() << e.msg;
+        GTEST_SKIP() << e.what();
     }
     catch(ROCFFT_FAIL& e)
     {
-        GTEST_FAIL() << e.msg;
+        GTEST_FAIL() << e.what();
     }
     SUCCEED();
 }
@@ -199,17 +211,21 @@ TEST_P(bitwise_repro_test, compare_to_reference)
     {
         GTEST_SKIP() << "host memory allocation failure";
     }
-    catch(HOSTBUF_MEM_USAGE& e)
+    catch(const HOSTBUF_MEM_USAGE& e)
     {
-        GTEST_SKIP() << e.msg;
+        GTEST_SKIP() << e.what();
+    }
+    catch(const DEVICEBUF_MEM_USAGE& e)
+    {
+        GTEST_SKIP() << e.what();
     }
     catch(ROCFFT_SKIP& e)
     {
-        GTEST_SKIP() << e.msg;
+        GTEST_SKIP() << e.what();
     }
     catch(ROCFFT_FAIL& e)
     {
-        GTEST_FAIL() << e.msg;
+        GTEST_FAIL() << e.what();
     }
     SUCCEED();
 }

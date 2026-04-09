@@ -44,7 +44,9 @@ from Tensile.Common import ensurePath, print1, printExit, printWarning, ClientEx
                            LIBRARY_LOGIC_DIR, LIBRARY_CLIENT_DIR
 from Tensile.Common.Architectures import isaToGfx
 from Tensile.Common.GlobalParameters import globalParameters
-from .TensileCreateLibrary import copyStaticFiles
+from Tensile.Common.TimingInstrumentation import timing_context
+from .TensileCreateLibrary import copyStaticFiles, libraryDir
+from .ParallelExecution import detectAvailableGpus, runClientParallel
 from .Contractions import FreeIndex, BatchIndex
 from .Contractions import ProblemType as ContractionsProblemType
 
@@ -113,10 +115,13 @@ def main(config, assembler: Assembler, cCompiler: str, isaInfoMap, outputPath: P
   else:
     env["PYTHONPATH"] = module_path
 
-  createLibraryScript = getBuildClientLibraryScript(clientLibraryPath, libraryLogicPath, str(assembler.path), isaToGfx(list(isaInfoMap.keys())[0]))
+  targetGfx = isaToGfx(list(isaInfoMap.keys())[0])
+  createLibraryScript = getBuildClientLibraryScript(clientLibraryPath, libraryLogicPath, str(assembler.path), targetGfx)
   subprocess.run(shlex.split(createLibraryScript), env=env, cwd=clientLibraryPath)
-  coList = glob(os.path.join(clientLibraryPath, "library/*.co"))
-  yamlList = glob(os.path.join(clientLibraryPath, "library/*.yaml"))
+  archs = [isaToGfx(isa) for isa in isaInfoMap.keys()]
+  libraryGlobBase = libraryDir(clientLibraryPath, archs)
+  coList = glob(os.path.join(libraryGlobBase, "*.co"))
+  yamlList = glob(os.path.join(libraryGlobBase, "*.yaml"))
 
   clientParametersPaths = []
   splitGSU = False
@@ -214,18 +219,41 @@ def runNewClient(scriptPath, clientParametersPath, cxxCompiler: str, cCompiler: 
 
 
 def runClient(libraryLogicPath, forBenchmark, enableTileSelection, cxxCompiler: str, cCompiler: str, outputPath, configPaths=None):
-
   buildPath = ensurePath(outputPath / "build")
+  timingEnabled = globalParameters.get("TimingInstrumentation", False)
+  parallelGpus = globalParameters.get("ParallelGpuExecution", 1)
 
-  runScriptName = writeRunScript(buildPath, forBenchmark, enableTileSelection, cxxCompiler, cCompiler, buildPath, configPaths)
-  with ClientExecutionLock(globalParameters["ClientExecutionLockPath"]):
-    process = subprocess.Popen(runScriptName, cwd=buildPath)
-    process.communicate()
+  # Compute default configPaths if not provided (same logic as writeRunScript)
+  if configPaths is None:
+    configPaths = []
+    configPaths.append(os.path.join(buildPath, "../source/ClientParameters.ini"))
+    if enableTileSelection:
+      configPaths.append(os.path.join(buildPath, "../source/ClientParameters_Granularity.ini"))
+
+  # Determine number of GPUs to use
+  if parallelGpus == 0:
+    numGpus = detectAvailableGpus()
+    print1(f"# Auto-detected {numGpus} GPUs for parallel execution")
+  else:
+    numGpus = parallelGpus
+
+  with timing_context("python_client_execution"):
+    # Use parallel execution only for benchmarking with multiple GPUs
+    if numGpus > 1 and forBenchmark:
+      return runClientParallel(buildPath, configPaths, numGpus, timingEnabled, getClientExecutablePath)
+
+    # Original single-GPU path
+    runScriptName = writeRunScript(buildPath, forBenchmark, enableTileSelection, cxxCompiler, cCompiler, buildPath, configPaths)
+
+    with ClientExecutionLock(globalParameters["ClientExecutionLockPath"]):
+      process = subprocess.Popen(runScriptName, cwd=buildPath)
+      process.communicate()
 
   if process.returncode:
     printWarning("ClientWriter Benchmark Process exited with code %u" % process.returncode)
 
   return process.returncode
+
 
 def getBuildClientLibraryScript(buildPath, libraryLogicPath, cxxCompiler, targetGfx):
   import io
@@ -241,6 +269,9 @@ def getBuildClientLibraryScript(buildPath, libraryLogicPath, cxxCompiler, target
 
   if globalParameters["KeepBuildTmp"]:
     callCreateLibraryCmd += " --keep-build-tmp"
+
+  if globalParameters["DisableAsmComments"]:
+    callCreateLibraryCmd += " --disable-asm-comments"
 
   callCreateLibraryCmd += " --architecture=" + targetGfx
   callCreateLibraryCmd += " --code-object-version=" + globalParameters["CodeObjectVersion"]
@@ -295,8 +326,9 @@ def writeRunScript(path, forBenchmark, enableTileSelection, cxxCompiler: str, cC
     runScriptFile.write("ERR1=0\n")
 
     clientExe = getClientExecutablePath()
+    timingFlag = " --timing-instrumentation" if globalParameters["TimingInstrumentation"] else ""
     for configFile in configPaths:
-      runScriptFile.write("{} --config-file {}\n".format(clientExe, configFile))
+      runScriptFile.write("{} --config-file {}{}\n".format(clientExe, configFile, timingFlag))
     runScriptFile.write("ERR2=$?\n\n")
 
     runScriptFile.write("""
@@ -653,6 +685,7 @@ def writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs
         param("max-workspace-size",       globalParameters["MaxWorkspaceSize"])
         param("PrintWinnersOnly",         globalParameters["PrintWinnersOnly"])
         param("granularity-threshold",    globalParameters["GranularityThreshold"])
+        param("prediction-threshold",     globalParameters["PredictionThreshold"])
         param("pristine-on-gpu",          globalParameters["PristineOnGPU"])
 
         param("library-update-file",      globalParameters["LibraryUpdateFile"])
@@ -661,7 +694,9 @@ def writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs
         param("use-user-args",            globalParameters["UseUserArgs"])
         param("rotating-buffer-size",     globalParameters["RotatingBufferSize"])
         param("rotating-buffer-mode",     globalParameters["RotatingMode"])
-
+        if globalParameters["RocProfCounter"]:
+            for counter in globalParameters["RocProfCounter"]:
+                param("rocprof-counter", counter)
 
 def writeClientConfig(
       forBenchmark,
@@ -704,10 +739,10 @@ def writeClientConfig(
 
     return filename
 
-def CreateBenchmarkClientParametersForSizes(libraryRootPath, problemSizes, dataFilePath, configFile, deviceId, gfxName, problemTypeDict=None):
+def CreateBenchmarkClientParametersForSizes(libraryRootPath, problemSizes, dataFilePath, configFile, deviceId, gfxName, problemTypeDict=None, archs=None):
 
-    libraryPath = os.path.join(libraryRootPath, "library")
-    libraryFiles = [os.path.join(libraryPath, f) for f in os.listdir(libraryPath)]
+    libraryPath = libraryDir(libraryRootPath, archs or [])
+    libraryFiles = [os.path.join(str(libraryPath), f) for f in os.listdir(libraryPath)]
     codeObjectFiles = [f for f in libraryFiles if f.endswith("co")]
 
     if problemTypeDict:

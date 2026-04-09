@@ -19,6 +19,7 @@
 // THE SOFTWARE.
 
 #include "../../shared/accuracy_test.h"
+#include "../../shared/client_except.h"
 #include "../../shared/gpubuf.h"
 #include "../../shared/params_gen.h"
 #include "../../shared/rocfft_params.h"
@@ -178,7 +179,30 @@ TEST(rocfft_UnitTest, 1D_hermitian_single_small)
         GTEST_SKIP();
     }
 
-    run_1D_hermitian_test(8);
+    try
+    {
+        run_1D_hermitian_test(8);
+    }
+    catch(const std::bad_alloc&)
+    {
+        GTEST_SKIP() << "host memory allocation failure";
+    }
+    catch(const ROCFFT_SKIP& e)
+    {
+        GTEST_SKIP() << e.what();
+    }
+    catch(const ROCFFT_FAIL& e)
+    {
+        GTEST_FAIL() << e.what();
+    }
+    catch(const HOSTBUF_MEM_USAGE& e)
+    {
+        GTEST_SKIP() << e.what();
+    }
+    catch(const DEVICEBUF_MEM_USAGE& e)
+    {
+        GTEST_SKIP() << e.what();
+    }
 }
 
 // test a case that's big enough that it needs multiple kernels
@@ -190,7 +214,30 @@ TEST(rocfft_UnitTest, 1D_hermitian_single_large)
         GTEST_SKIP();
     }
 
-    run_1D_hermitian_test(8192);
+    try
+    {
+        run_1D_hermitian_test(8192);
+    }
+    catch(const std::bad_alloc&)
+    {
+        GTEST_SKIP() << "host memory allocation failure";
+    }
+    catch(const ROCFFT_SKIP& e)
+    {
+        GTEST_SKIP() << e.what();
+    }
+    catch(const ROCFFT_FAIL& e)
+    {
+        GTEST_FAIL() << e.what();
+    }
+    catch(const HOSTBUF_MEM_USAGE& e)
+    {
+        GTEST_SKIP() << e.what();
+    }
+    catch(const DEVICEBUF_MEM_USAGE& e)
+    {
+        GTEST_SKIP() << e.what();
+    }
 }
 
 template <typename T>
@@ -217,141 +264,312 @@ TEST(rocfft_UnitTest, gpu_symmetrizer)
         GTEST_SKIP();
     }
 
-    std::vector<std::vector<size_t>> lengths = {{4, 4, 3},
-                                                {5},
-                                                {8},
-                                                {5, 5},
-                                                {5, 8},
-                                                {8, 5},
-                                                {8, 8},
-                                                {5, 5, 5},
-                                                {8, 5, 5},
-                                                {5, 8, 5},
-                                                {5, 5, 8},
-                                                {5, 8, 8},
-                                                {8, 5, 8},
-                                                {8, 8, 5},
-                                                {8, 8, 8}};
-
-    for(const auto& length : lengths)
+    try
     {
-        // Symmetrize complex data and ensure that the checker sees that it's symmetric.
+        std::vector<std::vector<size_t>> lengths = {{4, 4, 3},
+                                                    {5},
+                                                    {8},
+                                                    {5, 5},
+                                                    {5, 8},
+                                                    {8, 5},
+                                                    {8, 8},
+                                                    {5, 5, 5},
+                                                    {8, 5, 5},
+                                                    {5, 8, 5},
+                                                    {5, 5, 8},
+                                                    {5, 8, 8},
+                                                    {8, 5, 8},
+                                                    {8, 8, 5},
+                                                    {8, 8, 8}};
 
-        // Use the params class to set up strides and lengths:
-        rocfft_params p;
-        p.length         = length;
-        p.precision      = fft_precision_double;
-        p.transform_type = fft_transform_type_real_inverse;
-        p.placement      = fft_placement_notinplace;
-        p.validate();
-        if(verbose)
+        for(const auto& length : lengths)
         {
-            std::cout << "\t" << p.str("\n\t") << std::endl;
-        }
-        ASSERT_TRUE(p.valid(verbose));
+            // Symmetrize complex data and ensure that the checker sees that it's symmetric.
 
-        // Data buffers:
-        gpubuf buf;
-        ASSERT_TRUE(buf.alloc(sizeof(hipDoubleComplex) * p.isize[0]) == hipSuccess);
-        std::vector<hipDoubleComplex> hbuf(p.isize[0]);
+            // Use the params class to set up strides and lengths:
+            rocfft_params p;
+            p.length         = length;
+            p.precision      = fft_precision_double;
+            p.transform_type = fft_transform_type_real_inverse;
+            p.placement      = fft_placement_notinplace;
+            p.validate();
+            if(verbose)
+            {
+                std::cout << "\t" << p.str("\n\t") << std::endl;
+            }
+            ASSERT_TRUE(p.valid(verbose));
 
-        // Initialize a Hermitian-symmetric array; it should be symmetric.
-        init_hermitiancomplex_cm(p.length_cm(), p.ilength_cm(), p.istride_cm(), buf.data());
-        ASSERT_TRUE(hipMemcpy(hbuf.data(), buf.data(), buf.size(), hipMemcpyDeviceToHost)
-                    == hipSuccess);
-        if(verbose > 1)
-        {
-            printbuffer_cm(hbuf, p.ilength_cm(), p.istride_cm(), p.nbatch, p.idist);
-        }
-        EXPECT_TRUE(
-            check_symmetry_cm(hbuf, p.length_cm(), p.istride_cm(), p.nbatch, p.idist, verbose > 0))
-            << "length: " << str(length.begin(), length.end());
+            // Data buffers:
+            gpubuf_t<hipDoubleComplex> buf;
+            ASSERT_TRUE(buf.alloc(sizeof(hipDoubleComplex) * p.isize[0]) == hipSuccess);
+            std::vector<hipDoubleComplex> hbuf(p.isize[0]);
 
-        // This should not be symmetric:
-        std::mt19937_64 rng;
-        std::seed_seq   ss{uint32_t(10)};
-        rng.seed(ss);
-        std::uniform_real_distribution<double> unif(0, 1);
-        for(auto& v : hbuf)
-        {
-            v.x = unif(rng);
-            v.y = unif(rng);
+            // Initialize a Hermitian-symmetric array; it should be symmetric.
+            init_hermitiancomplex_cm(p.length_cm(), p.ilength_cm(), p.istride_cm(), buf.data());
+            ASSERT_TRUE(hipMemcpy(hbuf.data(), buf.data(), buf.size(), hipMemcpyDeviceToHost)
+                        == hipSuccess);
+            if(verbose > 1)
+            {
+                printbuffer_cm(hbuf, p.ilength_cm(), p.istride_cm(), p.nbatch, p.idist);
+            }
+            EXPECT_TRUE(check_symmetry_cm(
+                hbuf, p.length_cm(), p.istride_cm(), p.nbatch, p.idist, verbose > 0))
+                << "length: " << str(length.begin(), length.end());
+
+            // This should not be symmetric:
+            std::mt19937_64 rng;
+            std::seed_seq   ss{uint32_t(10)};
+            rng.seed(ss);
+            std::uniform_real_distribution<double> unif(0, 1);
+            for(auto& v : hbuf)
+            {
+                v.x = unif(rng);
+                v.y = unif(rng);
+            }
+            if(verbose > 2)
+            {
+                printbuffer_cm(hbuf, p.ilength_cm(), p.istride_cm(), p.nbatch, p.idist);
+            }
+            EXPECT_TRUE(
+                !check_symmetry_cm(hbuf, p.length_cm(), p.istride_cm(), p.nbatch, p.idist, false))
+                << "length: " << str(length.begin(), length.end());
         }
-        if(verbose > 2)
+
+        for(const auto& length : lengths)
         {
-            printbuffer_cm(hbuf, p.ilength_cm(), p.istride_cm(), p.nbatch, p.idist);
+            // Generate Hermitian-symmetric data and ensure that applying the symmetrizer has no effect.
+
+            rocfft_params p;
+            p.length         = length;
+            p.precision      = fft_precision_double;
+            p.transform_type = fft_transform_type_real_forward;
+            p.placement      = fft_placement_notinplace;
+            p.validate();
+            if(verbose)
+            {
+                std::cout << "\t" << p.str("\n\t") << std::endl;
+            }
+            ASSERT_TRUE(p.valid(verbose));
+            ASSERT_TRUE(p.create_plan() == fft_status_success);
+
+            gpubuf_t<double>           ibuf;
+            gpubuf_t<hipDoubleComplex> obuf;
+            ASSERT_TRUE(ibuf.alloc(p.ibuffer_sizes()[0]) == hipSuccess);
+            ASSERT_TRUE(obuf.alloc(p.obuffer_sizes()[0]) == hipSuccess);
+
+            initreal_cm(p.length_cm(), p.istride_cm(), ibuf.data());
+
+            std::vector<double*>           pibuf = {ibuf.data()};
+            std::vector<hipDoubleComplex*> pobuf = {obuf.data()};
+
+            ASSERT_TRUE(p.execute(reinterpret_cast<void**>(pibuf.data()),
+                                  reinterpret_cast<void**>(pobuf.data()))
+                        == fft_status_success);
+
+            std::vector<hipDoubleComplex> h_output(p.osize[0]);
+            std::fill(h_output.begin(), h_output.end(), hipDoubleComplex{0.0, 0.0});
+
+            ASSERT_TRUE(
+                hipMemcpy(h_output.data(), obuf.data(), p.obuffer_sizes()[0], hipMemcpyDeviceToHost)
+                == hipSuccess);
+
+            impose_hermitian_symmetry_cm(
+                p.length_cm(), p.olength_cm(), p.ostride_cm(), obuf.data());
+
+            std::vector<hipDoubleComplex> h_output_resym(p.osize[0]);
+            std::fill(h_output_resym.begin(), h_output_resym.end(), hipDoubleComplex{0.0, 0.0});
+
+            ASSERT_TRUE(
+                hipMemcpy(
+                    h_output_resym.data(), obuf.data(), p.obuffer_sizes()[0], hipMemcpyDeviceToHost)
+                == hipSuccess);
+
+            double maxdiff = 0;
+            for(unsigned int i = 0; i < h_output.size(); ++i)
+            {
+                auto rdiff = std::abs(h_output[i].x - h_output_resym[i].x);
+                auto idiff = std::abs(h_output[i].y - h_output_resym[i].y);
+                maxdiff    = std::max({maxdiff, rdiff, idiff});
+            }
+
+            if(verbose)
+            {
+                std::cout << "maxdiff: " << maxdiff << std::endl;
+            }
+
+            if(verbose > 2)
+            {
+                std::cout << "before symmetrization:\n";
+                printbuffer_cm(h_output, p.olength_cm(), p.ostride_cm(), p.nbatch, p.odist);
+                std::cout << "after symmetrization:\n";
+                printbuffer_cm(h_output_resym, p.olength_cm(), p.ostride_cm(), p.nbatch, p.odist);
+            }
+
+            EXPECT_TRUE(maxdiff < 1e-13) << maxdiff << "\n" << p.str() << "\n";
         }
-        EXPECT_TRUE(
-            !check_symmetry_cm(hbuf, p.length_cm(), p.istride_cm(), p.nbatch, p.idist, false))
-            << "length: " << str(length.begin(), length.end());
+    }
+    catch(const std::bad_alloc&)
+    {
+        GTEST_SKIP() << "host memory allocation failure";
+    }
+    catch(const ROCFFT_SKIP& e)
+    {
+        GTEST_SKIP() << e.what();
+    }
+    catch(const ROCFFT_FAIL& e)
+    {
+        GTEST_FAIL() << e.what();
+    }
+    catch(const HOSTBUF_MEM_USAGE& e)
+    {
+        GTEST_SKIP() << e.what();
+    }
+    catch(const DEVICEBUF_MEM_USAGE& e)
+    {
+        GTEST_SKIP() << e.what();
+    }
+}
+
+// Test that the host and device Hermitian symmetrizers produce the same results.
+TEST(rocfft_UnitTest, compare_cpu_gpu_symmetrizers)
+{
+    if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
+       > unittest_prob)
+    {
+        GTEST_SKIP();
     }
 
-    for(const auto& length : lengths)
+    try
     {
-        // Generate Hermitian-symmetric data and ensure that applying the symmetrizer has no effect.
+        std::vector<std::vector<size_t>> lengths
+            = {{1},       {2},       {16},      {512},     {1, 1},      {1, 2},      {2, 1},
+               {2, 2},    {8, 1},    {1, 8},    {8, 2},    {2, 8},      {16, 1},     {1, 16},
+               {7, 2},    {2, 7},    {2, 512},  {512, 2},  {16, 512},   {512, 16},   {1, 1, 1},
+               {1, 2, 1}, {2, 1, 1}, {1, 1, 2}, {2, 2, 2}, {8, 1, 2},   {1, 2, 8},   {1, 8, 2},
+               {5, 5, 5}, {8, 5, 5}, {5, 8, 5}, {5, 5, 8}, {512, 7, 2}, {7, 2, 512}, {2, 512, 7}};
 
-        rocfft_params p;
-        p.length         = length;
-        p.precision      = fft_precision_double;
-        p.transform_type = fft_transform_type_real_forward;
-        p.placement      = fft_placement_notinplace;
-        p.validate();
-        if(verbose)
+        std::vector<size_t> nbatch = {1, 2, 5, 10, 50};
+
+        const double                           double_linf_cutoff = 1e-15;
+        std::vector<std::pair<size_t, size_t>> linf_failures;
+
+        const auto array_types
+            = {fft_array_type_hermitian_interleaved, fft_array_type_hermitian_planar};
+
+        for(const auto& batch : nbatch)
         {
-            std::cout << "\t" << p.str("\n\t") << std::endl;
+            for(const auto& length : lengths)
+            {
+                for(const auto& itype : array_types)
+                {
+                    // Set up the params class to generate strides etc:
+                    rocfft_params p;
+                    p.length         = length;
+                    p.precision      = fft_precision_double;
+                    p.transform_type = fft_transform_type_real_inverse;
+                    p.itype          = itype;
+                    p.placement      = fft_placement_notinplace;
+                    p.nbatch         = batch;
+                    p.validate();
+                    ASSERT_TRUE(p.valid(verbose));
+
+                    const auto           nbuffer = p.nbuffer(p.itype);
+                    std::vector<gpubuf>  gpu_symm_gpubuf(nbuffer);
+                    std::vector<hostbuf> cpu_symm_hostbuf(nbuffer), gpu_symm_hostbuf(nbuffer);
+
+                    for(size_t i = 0; i < nbuffer; ++i)
+                    {
+                        auto hip_status = gpu_symm_gpubuf[i].alloc(p.ibuffer_sizes()[i]);
+                        if(hip_status != hipSuccess)
+                        {
+                            ++n_hip_failures;
+                            std::stringstream msg;
+                            msg << "allocation failure for gpu buffer of " << i << " size "
+                                << p.ibuffer_sizes()[i] << "("
+                                << byte_size_to_str(p.ibuffer_sizes()[i]) << ") with code "
+                                << hipError_to_string(hip_status);
+
+                            if(skip_runtime_fails)
+                                GTEST_SKIP() << msg.str();
+                            else
+                                GTEST_FAIL() << msg.str();
+                        }
+
+                        cpu_symm_hostbuf[i].alloc(p.ibuffer_sizes()[i]);
+                    }
+
+                    // This test relies on the (deterministic) host and device input generators producing the same data
+                    p.igen = fft_input_generator_device;
+                    p.compute_input(gpu_symm_gpubuf);
+
+                    p.igen = fft_input_generator_host;
+                    p.compute_input(cpu_symm_hostbuf);
+
+                    for(size_t i = 0; i < nbuffer; ++i)
+                    {
+                        gpu_symm_hostbuf[i].alloc(p.ibuffer_sizes()[i]);
+                        auto hip_status = hipMemcpy(gpu_symm_hostbuf[i].data(),
+                                                    gpu_symm_gpubuf[i].data(),
+                                                    p.ibuffer_sizes()[i],
+                                                    hipMemcpyDeviceToHost);
+                        if(hip_status != hipSuccess)
+                        {
+                            ++n_hip_failures;
+                            std::stringstream msg;
+                            msg << "hipMemcpy failure for buffer of " << i << " size "
+                                << p.ibuffer_sizes()[i] << "("
+                                << byte_size_to_str(p.ibuffer_sizes()[i]) << ") with code "
+                                << hipError_to_string(hip_status);
+
+                            if(skip_runtime_fails)
+                                GTEST_SKIP() << msg.str();
+                            else
+                                GTEST_FAIL() << msg.str();
+                        }
+                    }
+
+                    const auto diff = distance(gpu_symm_hostbuf,
+                                               cpu_symm_hostbuf,
+                                               p.ilength(),
+                                               p.nbatch,
+                                               p.precision,
+                                               p.itype,
+                                               p.istride,
+                                               p.idist,
+                                               p.itype,
+                                               p.istride,
+                                               p.idist,
+                                               &linf_failures,
+                                               double_linf_cutoff,
+                                               p.ioffset,
+                                               p.ioffset);
+
+                    EXPECT_TRUE(diff.l_inf <= double_linf_cutoff)
+                        << "Linf test failed.  Linf:" << diff.l_inf
+                        << "\tcutoff: " << double_linf_cutoff << "\n"
+                        << p.str();
+                }
+            }
         }
-        ASSERT_TRUE(p.valid(verbose));
-        ASSERT_TRUE(p.create_plan() == fft_status_success);
-
-        gpubuf ibuf, obuf;
-        ASSERT_TRUE(ibuf.alloc(p.ibuffer_sizes()[0]) == hipSuccess);
-        ASSERT_TRUE(obuf.alloc(p.obuffer_sizes()[0]) == hipSuccess);
-
-        initreal_cm(p.length_cm(), p.istride_cm(), ibuf.data());
-
-        std::vector<void*> pibuf = {ibuf.data()};
-        std::vector<void*> pobuf = {obuf.data()};
-
-        ASSERT_TRUE(p.execute(pibuf.data(), pobuf.data()) == fft_status_success);
-
-        std::vector<hipDoubleComplex> h_output(p.osize[0]);
-        std::fill(h_output.begin(), h_output.end(), hipDoubleComplex{0.0, 0.0});
-
-        ASSERT_TRUE(
-            hipMemcpy(h_output.data(), obuf.data(), p.obuffer_sizes()[0], hipMemcpyDeviceToHost)
-            == hipSuccess);
-
-        impose_hermitian_symmetry_cm(p.length_cm(), p.olength_cm(), p.ostride_cm(), obuf.data());
-
-        std::vector<hipDoubleComplex> h_output_resym(p.osize[0]);
-        std::fill(h_output_resym.begin(), h_output_resym.end(), hipDoubleComplex{0.0, 0.0});
-
-        ASSERT_TRUE(
-            hipMemcpy(
-                h_output_resym.data(), obuf.data(), p.obuffer_sizes()[0], hipMemcpyDeviceToHost)
-            == hipSuccess);
-
-        double maxdiff = 0;
-        for(unsigned int i = 0; i < h_output.size(); ++i)
-        {
-            auto rdiff = std::abs(h_output[i].x - h_output_resym[i].x);
-            auto idiff = std::abs(h_output[i].y - h_output_resym[i].y);
-            maxdiff    = std::max({maxdiff, rdiff, idiff});
-        }
-
-        if(verbose)
-        {
-            std::cout << "maxdiff: " << maxdiff << std::endl;
-        }
-
-        if(verbose > 2)
-        {
-            std::cout << "before symmetrization:\n";
-            printbuffer_cm(h_output, p.olength_cm(), p.ostride_cm(), p.nbatch, p.odist);
-            std::cout << "after symmetrization:\n";
-            printbuffer_cm(h_output_resym, p.olength_cm(), p.ostride_cm(), p.nbatch, p.odist);
-        }
-
-        EXPECT_TRUE(maxdiff < 1e-13) << maxdiff << "\n" << p.str() << "\n";
+    }
+    catch(const std::bad_alloc&)
+    {
+        GTEST_SKIP() << "host memory allocation failure";
+    }
+    catch(const ROCFFT_SKIP& e)
+    {
+        GTEST_SKIP() << e.what();
+    }
+    catch(const ROCFFT_FAIL& e)
+    {
+        GTEST_FAIL() << e.what();
+    }
+    catch(const HOSTBUF_MEM_USAGE& e)
+    {
+        GTEST_SKIP() << e.what();
+    }
+    catch(const DEVICEBUF_MEM_USAGE& e)
+    {
+        GTEST_SKIP() << e.what();
     }
 }

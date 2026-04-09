@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -35,6 +12,8 @@ namespace rocRoller
 {
     namespace Expression
     {
+        using ExpressionTransformType = std::function<ExpressionPtr(ExpressionPtr)>;
+
         ExpressionPtr identity(ExpressionPtr expr);
 
         /**
@@ -71,12 +50,12 @@ namespace rocRoller
         /**
          * Gets expressions which can be used to compute magic division of denominator.
          *
-         * Returns [magicMultiple, magicShift, magicSign]
+         * Returns [magicMultiple, magicShift, magicSign, magicShiftMSB]
          *
          * If denominator is unsigned, magicSign will be nullptr.
          */
-        std::tuple<ExpressionPtr, ExpressionPtr, ExpressionPtr>
-            getMagicMultipleShiftAndSign(ExpressionPtr denominator, ContextPtr context);
+        std::tuple<ExpressionPtr, ExpressionPtr, ExpressionPtr, ExpressionPtr>
+            getMagicDivisionParams(ExpressionPtr denominator, ContextPtr context);
 
         /**
          * @brief Attempt to replace multiplication operations found within an expression with faster operations.
@@ -91,6 +70,16 @@ namespace rocRoller
          * - Opposite shifts by same amount: mask off bits that would be zeroed out.
          */
         ExpressionPtr combineShifts(ExpressionPtr expr);
+
+        /**
+         * Splits BitfieldCombine expressions that target more than 32 bits into a Concatenate of 32 bit sub-expressions.
+         */
+        ExpressionPtr splitBitfieldCombine(ExpressionPtr expr);
+
+        /**
+         * Splits uint64_t literal operands in a Concatenate expression into two Raw32 operands.
+         */
+        Concatenate splitConcatenate(Concatenate const& expr);
 
         /**
          * @brief Simplify expressions
@@ -176,7 +165,10 @@ namespace rocRoller
             FastArithmetic() = delete;
             explicit FastArithmetic(ContextPtr);
 
-            ExpressionPtr operator()(ExpressionPtr) const;
+            ExpressionPtr                        operator()(ExpressionPtr) const;
+            std::vector<ExpressionTransformType> getTransforms() const;
+            ExpressionPtr                        applyTransforms(ExpressionPtr,
+                                                                 const std::vector<ExpressionTransformType>&) const;
 
         private:
             ContextPtr m_context;

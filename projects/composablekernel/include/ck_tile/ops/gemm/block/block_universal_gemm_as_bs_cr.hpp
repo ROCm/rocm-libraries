@@ -1,10 +1,10 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2024-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 
 #include "ck_tile/core.hpp"
-#include "ck_tile/ops/common/load_interleaved_pk_type.hpp"
+#include "ck_tile/ops/common/load_and_convert_tile.hpp"
 #include "ck_tile/ops/gemm/block/block_gemm_asmem_bsmem_creg_v1_default_policy.hpp"
 #include "ck_tile/ops/gemm/pipeline/gemm_pipeline_ag_bg_cr_scheduler.hpp"
 #include "ck_tile/ops/elementwise.hpp"
@@ -94,7 +94,14 @@ struct BlockUniversalGemmAsBsCr
     using ComputeDataType = remove_cvref_t<typename Traits::ComputeDataType>;
     using CDataType       = remove_cvref_t<typename Traits::CDataType>;
 
-    using Loader   = remove_cvref_t<InterleavedPKTypeLoader<ComputeDataType, UnaryOpSize_>>;
+    using ATypeToUse =
+        std::conditional_t<std::is_same_v<ADataType, pk_int4_t>, BDataType, ADataType>;
+    using BTypeToUse = std::conditional_t<std::is_same_v<BDataType, pk_int4_t> ||
+                                              std::is_same_v<BDataType, pk_fp4_t> ||
+                                              sizeof(BDataType) < sizeof(ADataType),
+                                          ADataType,
+                                          BDataType>;
+
     using WarpGemm = remove_cvref_t<typename Traits::WarpGemm>;
 
     static constexpr index_t KIterPerWarp = Traits::KIterPerWarp;
@@ -189,95 +196,6 @@ struct BlockUniversalGemmAsBsCr
     };
 
     template <typename GemmTraits>
-    struct BlockGemmImpl<GemmPipelineScheduler::Default, GemmTraits>
-    {
-        static constexpr auto ALdsTileDistr =
-            decltype(make_static_tile_distribution(MakeABlockDistributionEncode())){};
-        static constexpr auto BLdsTileDistr =
-            decltype(make_static_tile_distribution(MakeBBlockDistributionEncode())){};
-
-        using ALdsTile = decltype(make_static_distributed_tensor<ComputeDataType>(ALdsTileDistr));
-        using BLdsTile = decltype(make_static_distributed_tensor<ComputeDataType>(BLdsTileDistr));
-
-        ALdsTile a_warp_tile_;
-        BLdsTile b_warp_tile_;
-
-        // C += A * B
-        template <typename CBlockTensor,
-                  typename ASmemBlockWindow,
-                  typename BSmemBlockWindow,
-                  bool ALoadTranspose = false,
-                  bool BLoadTranspose = false>
-        CK_TILE_DEVICE void operator()(CBlockTensor& c_block_tensor,
-                                       const ASmemBlockWindow& a_block_window,
-                                       const BSmemBlockWindow& b_block_window,
-                                       bool_constant<ALoadTranspose> = {},
-                                       bool_constant<BLoadTranspose> = {})
-        {
-            static_assert(std::is_same_v<CDataType, typename CBlockTensor::DataType>,
-                          "The CDataType as defined in traits should be the same as correspoinding "
-                          "C block tensor data type!");
-            static_assert(std::is_same_v<ADataType, typename ASmemBlockWindow::DataType> &&
-                              std::is_same_v<BDataType, typename BSmemBlockWindow::DataType>,
-                          "The ADataType and BDataType as defined in "
-                          "traits should be the same as correspoinding block window data type!");
-
-            if constexpr(std::is_same_v<ADataType, pk_int4_t>)
-            {
-                Loader::load_interleaved_pk_type(a_warp_tile_, a_block_window);
-            }
-            else
-            {
-                load_tile(a_warp_tile_, a_block_window);
-            }
-            if constexpr(std::is_same_v<BDataType, pk_int4_t>)
-            {
-                Loader::load_interleaved_pk_type(b_warp_tile_, b_block_window);
-            }
-            else
-            {
-                load_tile(b_warp_tile_, b_block_window);
-            }
-            // hot loop:
-            static_for<0, GemmTraits::KIterPerWarp, 1>{}([&](auto kIter) {
-                static_for<0, MIterPerWarp, 1>{}([&](auto mIter) {
-                    // read A warp tensor from A block tensor
-                    AWarpTensor a_warp_tensor;
-
-                    a_warp_tensor.get_thread_buffer() = a_warp_tile_.get_y_sliced_thread_data(
-                        merge_sequences(sequence<mIter, kIter>{}, a_warp_y_index_zeros),
-                        merge_sequences(sequence<1, 1>{}, a_warp_y_lengths));
-
-                    static_for<0, NIterPerWarp, 1>{}([&](auto nIter) {
-                        // read B warp tensor from B block tensor
-                        BWarpTensor b_warp_tensor;
-
-                        b_warp_tensor.get_thread_buffer() = b_warp_tile_.get_y_sliced_thread_data(
-                            merge_sequences(sequence<nIter, kIter>{}, b_warp_y_index_zeros),
-                            merge_sequences(sequence<1, 1>{}, b_warp_y_lengths));
-
-                        // read C warp tensor from C block tensor-
-                        CWarpTensor c_warp_tensor;
-
-                        c_warp_tensor.get_thread_buffer() = c_block_tensor.get_y_sliced_thread_data(
-                            merge_sequences(sequence<mIter, nIter>{}, c_warp_y_index_zeros),
-                            merge_sequences(sequence<1, 1>{}, c_warp_y_lengths));
-
-                        // warp GEMM
-                        WarpGemm{}(c_warp_tensor, a_warp_tensor, b_warp_tensor);
-
-                        // write C warp tensor into C block tensor
-                        c_block_tensor.set_y_sliced_thread_data(
-                            merge_sequences(sequence<mIter, nIter>{}, c_warp_y_index_zeros),
-                            merge_sequences(sequence<1, 1>{}, c_warp_y_lengths),
-                            c_warp_tensor.get_thread_buffer());
-                    });
-                });
-            });
-        }
-    };
-
-    template <typename GemmTraits>
     struct BlockGemmImpl<GemmPipelineScheduler::Intrawave, GemmTraits>
     {
         static constexpr auto ALdsTileDistr =
@@ -285,8 +203,8 @@ struct BlockUniversalGemmAsBsCr
         static constexpr auto BLdsTileDistr =
             decltype(make_static_tile_distribution(MakeBBlockDistributionEncode())){};
 
-        using ALdsTile = decltype(make_static_distributed_tensor<ComputeDataType>(ALdsTileDistr));
-        using BLdsTile = decltype(make_static_distributed_tensor<ComputeDataType>(BLdsTileDistr));
+        using ALdsTile = decltype(make_static_distributed_tensor<ATypeToUse>(ALdsTileDistr));
+        using BLdsTile = decltype(make_static_distributed_tensor<BTypeToUse>(BLdsTileDistr));
 
         ALdsTile a_warp_tile_;
         BLdsTile b_warp_tile_;
@@ -300,30 +218,8 @@ struct BlockUniversalGemmAsBsCr
                                           bool_constant<ALoadTranspose> = {},
                                           bool_constant<BLoadTranspose> = {})
         {
-            if constexpr(std::is_same_v<ADataType, pk_int4_t>)
-            {
-                Loader::load_interleaved_pk_type(a_warp_tile_, a_block_window);
-            }
-            else if constexpr(ALoadTranspose)
-            {
-                a_warp_tile_ = load_tile_transpose(a_block_window);
-            }
-            else
-            {
-                load_tile(a_warp_tile_, a_block_window);
-            }
-            if constexpr(std::is_same_v<BDataType, pk_int4_t>)
-            {
-                Loader::load_interleaved_pk_type(b_warp_tile_, b_block_window);
-            }
-            else if constexpr(BLoadTranspose)
-            {
-                b_warp_tile_ = load_tile_transpose(b_block_window);
-            }
-            else
-            {
-                load_tile(b_warp_tile_, b_block_window);
-            }
+            load_and_convert_tile<UnaryOpSize_, ALoadTranspose>(a_warp_tile_, a_block_window);
+            load_and_convert_tile<UnaryOpSize_, BLoadTranspose>(b_warp_tile_, b_block_window);
         }
 
         // C += A * B
@@ -333,8 +229,8 @@ struct BlockUniversalGemmAsBsCr
                   bool ALoadTranspose = false,
                   bool BLoadTranspose = false>
         CK_TILE_DEVICE void operator()(CBlockTensor& c_block_tensor,
-                                       [[maybe_unused]] ASmemBlockWindow& a_block_window,
-                                       [[maybe_unused]] BSmemBlockWindow& b_block_window,
+                                       const ASmemBlockWindow&,
+                                       const BSmemBlockWindow&,
                                        bool_constant<ALoadTranspose> = {},
                                        bool_constant<BLoadTranspose> = {})
         {
@@ -343,39 +239,39 @@ struct BlockUniversalGemmAsBsCr
                           "C block tensor data type!");
 
             // hot loop:
-            static_for<0, KIterPerWarp, 1>{}([&](auto kIter) {
-                static_for<0, MIterPerWarp, 1>{}([&](auto mIter) {
-                    // read A warp tensor from A block tensor
-                    AWarpTensor a_warp_tensor;
+            static_ford<sequence<KIterPerWarp, MIterPerWarp>>{}([&](auto km) {
+                constexpr auto kIter = number<km[number<0>{}]>{};
+                constexpr auto mIter = number<km[number<1>{}]>{};
+                // read A warp tensor from A block tensor
+                AWarpTensor a_warp_tensor;
 
-                    a_warp_tensor.get_thread_buffer() = a_warp_tile_.get_y_sliced_thread_data(
-                        merge_sequences(sequence<mIter, kIter>{}, a_warp_y_index_zeros),
-                        merge_sequences(sequence<1, 1>{}, a_warp_y_lengths));
+                a_warp_tensor.get_thread_buffer() = a_warp_tile_.get_y_sliced_thread_data(
+                    merge_sequences(sequence<mIter, kIter>{}, a_warp_y_index_zeros),
+                    merge_sequences(sequence<1, 1>{}, a_warp_y_lengths));
 
-                    static_for<0, NIterPerWarp, 1>{}([&](auto nIter) {
-                        // read B warp tensor from B block tensor
-                        BWarpTensor b_warp_tensor;
+                static_for<0, NIterPerWarp, 1>{}([&](auto nIter) {
+                    // read B warp tensor from B block tensor
+                    BWarpTensor b_warp_tensor;
 
-                        b_warp_tensor.get_thread_buffer() = b_warp_tile_.get_y_sliced_thread_data(
-                            merge_sequences(sequence<nIter, kIter>{}, b_warp_y_index_zeros),
-                            merge_sequences(sequence<1, 1>{}, b_warp_y_lengths));
+                    b_warp_tensor.get_thread_buffer() = b_warp_tile_.get_y_sliced_thread_data(
+                        merge_sequences(sequence<nIter, kIter>{}, b_warp_y_index_zeros),
+                        merge_sequences(sequence<1, 1>{}, b_warp_y_lengths));
 
-                        // read C warp tensor from C block tensor
-                        CWarpTensor c_warp_tensor;
+                    // read C warp tensor from C block tensor
+                    CWarpTensor c_warp_tensor;
 
-                        c_warp_tensor.get_thread_buffer() = c_block_tensor.get_y_sliced_thread_data(
-                            merge_sequences(sequence<mIter, nIter>{}, c_warp_y_index_zeros),
-                            merge_sequences(sequence<1, 1>{}, c_warp_y_lengths));
+                    c_warp_tensor.get_thread_buffer() = c_block_tensor.get_y_sliced_thread_data(
+                        merge_sequences(sequence<mIter, nIter>{}, c_warp_y_index_zeros),
+                        merge_sequences(sequence<1, 1>{}, c_warp_y_lengths));
 
-                        // warp GEMM
-                        WarpGemm{}(c_warp_tensor, a_warp_tensor, b_warp_tensor);
+                    // warp GEMM
+                    WarpGemm{}(c_warp_tensor, a_warp_tensor, b_warp_tensor);
 
-                        // write C warp tensor into C block tensor
-                        c_block_tensor.set_y_sliced_thread_data(
-                            merge_sequences(sequence<mIter, nIter>{}, c_warp_y_index_zeros),
-                            merge_sequences(sequence<1, 1>{}, c_warp_y_lengths),
-                            c_warp_tensor.get_thread_buffer());
-                    });
+                    // write C warp tensor into C block tensor
+                    c_block_tensor.set_y_sliced_thread_data(
+                        merge_sequences(sequence<mIter, nIter>{}, c_warp_y_index_zeros),
+                        merge_sequences(sequence<1, 1>{}, c_warp_y_lengths),
+                        c_warp_tensor.get_thread_buffer());
                 });
             });
         }
@@ -392,12 +288,12 @@ struct BlockUniversalGemmAsBsCr
         static constexpr index_t KInnerLoopIter = KPerInnerLoop / WarpGemm::kKPerThread;
 
         static constexpr auto ALdsTileDistr =
-            make_static_tile_distribution(MakeABlockDistributionEncode());
+            decltype(make_static_tile_distribution(MakeABlockDistributionEncode())){};
         static constexpr auto BLdsTileDistr =
-            make_static_tile_distribution(MakeBBlockDistributionEncode());
+            decltype(make_static_tile_distribution(MakeBBlockDistributionEncode())){};
 
-        using ALdsTile = decltype(make_static_distributed_tensor<ComputeDataType>(ALdsTileDistr));
-        using BLdsTile = decltype(make_static_distributed_tensor<ComputeDataType>(BLdsTileDistr));
+        using ALdsTile = decltype(make_static_distributed_tensor<ATypeToUse>(ALdsTileDistr));
+        using BLdsTile = decltype(make_static_distributed_tensor<BTypeToUse>(BLdsTileDistr));
 
         ALdsTile a_warp_tile_;
         BLdsTile b_warp_tile_;
@@ -451,30 +347,8 @@ struct BlockUniversalGemmAsBsCr
             auto b_lds_gemm_window = make_tile_window(
                 b_block_window.get_bottom_tensor_view(), b_lds_shape, b_offset, b_lds_load_distr);
 
-            if constexpr(std::is_same_v<ADataType, pk_int4_t>)
-            {
-                Loader::load_interleaved_pk_type(a_warp_tile_, a_block_window);
-            }
-            else if constexpr(ALoadTranspose)
-            {
-                a_warp_tile_ = load_tile_transpose(a_lds_gemm_window);
-            }
-            else
-            {
-                load_tile(a_warp_tile_, a_lds_gemm_window);
-            }
-            if constexpr(std::is_same_v<BDataType, pk_int4_t>)
-            {
-                Loader::load_interleaved_pk_type(b_warp_tile_, b_block_window);
-            }
-            else if constexpr(BLoadTranspose)
-            {
-                b_warp_tile_ = load_tile_transpose(b_lds_gemm_window);
-            }
-            else
-            {
-                load_tile(b_warp_tile_, b_lds_gemm_window);
-            }
+            load_and_convert_tile<UnaryOpSize_, ALoadTranspose>(a_warp_tile_, a_lds_gemm_window);
+            load_and_convert_tile<UnaryOpSize_, BLoadTranspose>(b_warp_tile_, b_lds_gemm_window);
         }
 
         // C += A * B
@@ -496,7 +370,9 @@ struct BlockUniversalGemmAsBsCr
             // hot loop:
             static_for<0, KRepeat, 1>{}([&](auto kIter) {
                 LocalPrefetch<kIter.value>(a_block_window, b_block_window, a_load_tr, b_load_tr);
-                __builtin_amdgcn_sched_barrier(0);
+                __builtin_amdgcn_sched_barrier(
+                    0); // Complete scheduling all pending instruction groups before this point
+
                 // NOTE: Synchronize threads in a workgroup at the start of each MAC
                 // cluster, but except the first, as we can shorten non-MAC cluster a bit
                 // and there's no observable negative impact. The desired effect is waves in
@@ -506,67 +382,69 @@ struct BlockUniversalGemmAsBsCr
                 // sync point.
                 if constexpr(kIter.value != 0 || KRepeat == 1)
                 {
-                    __builtin_amdgcn_s_barrier();
-                    __builtin_amdgcn_sched_barrier(0);
+                    // This pattern ensures:
+                    // At runtime: All waves synchronize (hardware barrier)
+                    // At compile-time: Instructions after the barrier don't get moved before it
+                    // (scheduling barrier)
+                    __builtin_amdgcn_s_barrier(); // Blocks execution until all waves (threads) in
+                                                  // the workgroup reach this point
+                    __builtin_amdgcn_sched_barrier(
+                        0); // Prevents instruction reordering across this boundary
                 }
 
-                static_for<0, KInnerLoopIter, 1>{}([&](auto kInnerIter) {
-                    static_for<0, MIterPerWarp, 1>{}([&](auto mIter) {
-                        // read A warp tensor from A block tensor
-                        AWarpTensor a_warp_tensor;
+                static_ford<sequence<KInnerLoopIter, MIterPerWarp>>{}([&](auto km) {
+                    constexpr auto kInnerIter = number<km[number<0>{}]>{};
+                    constexpr auto mIter      = number<km[number<1>{}]>{};
+                    // read A warp tensor from A block tensor
+                    AWarpTensor a_warp_tensor;
 
-                        a_warp_tensor.get_thread_buffer() = a_warp_tile_.get_y_sliced_thread_data(
-                            merge_sequences(sequence<mIter, kInnerIter>{}, a_warp_y_index_zeros),
-                            merge_sequences(sequence<1, 1>{}, a_warp_y_lengths));
-                        static_for<0, NIterPerWarp, 1>{}([&](auto nIter) {
-                            // read B warp tensor from B block tensor
-                            BWarpTensor b_warp_tensor;
+                    a_warp_tensor.get_thread_buffer() = a_warp_tile_.get_y_sliced_thread_data(
+                        merge_sequences(sequence<mIter, kInnerIter>{}, a_warp_y_index_zeros),
+                        merge_sequences(sequence<1, 1>{}, a_warp_y_lengths));
+                    static_for<0, NIterPerWarp, 1>{}([&](auto nIter) {
+                        // read B warp tensor from B block tensor
+                        BWarpTensor b_warp_tensor;
 
-                            b_warp_tensor.get_thread_buffer() =
-                                b_warp_tile_.get_y_sliced_thread_data(
-                                    merge_sequences(sequence<nIter, kInnerIter>{},
-                                                    b_warp_y_index_zeros),
-                                    merge_sequences(sequence<1, 1>{}, b_warp_y_lengths));
-                            // read C warp tensor from C block tensor-
-                            CWarpTensor c_warp_tensor;
+                        b_warp_tensor.get_thread_buffer() = b_warp_tile_.get_y_sliced_thread_data(
+                            merge_sequences(sequence<nIter, kInnerIter>{}, b_warp_y_index_zeros),
+                            merge_sequences(sequence<1, 1>{}, b_warp_y_lengths));
+                        // read C warp tensor from C block tensor-
+                        CWarpTensor c_warp_tensor;
 
-                            c_warp_tensor.get_thread_buffer() =
-                                c_block_tensor.get_y_sliced_thread_data(
-                                    merge_sequences(sequence<mIter, nIter>{}, c_warp_y_index_zeros),
-                                    merge_sequences(sequence<1, 1>{}, c_warp_y_lengths));
+                        c_warp_tensor.get_thread_buffer() = c_block_tensor.get_y_sliced_thread_data(
+                            merge_sequences(sequence<mIter, nIter>{}, c_warp_y_index_zeros),
+                            merge_sequences(sequence<1, 1>{}, c_warp_y_lengths));
 
-                            // The block_sync_lds() here performs double duty:
-                            // A) safeguard against data hazard because barrier from
-                            // blockwise_gemm is moved here B) reduce VMEM FIFO congestion
-                            // by applying small delays to different wavefronts It is
-                            // performed near the end of MAC cluster to minimize lgkmcnt
-                            // penalty
-                            if constexpr(kIter.value == KRepeat - 1 &&
-                                         kInnerIter.value == KInnerLoopIter - 1 &&
-                                         mIter.value == MIterPerWarp - 1 &&
-                                         nIter.value == NIterPerWarp - 1)
-                            {
-                                __builtin_amdgcn_sched_barrier(0);
-                                block_sync_lds();
-                                __builtin_amdgcn_sched_barrier(0);
-                            }
-                            // warp GEMM
-                            WarpGemm{}(c_warp_tensor, a_warp_tensor, b_warp_tensor);
+                        // The block_sync_lds() here performs double duty:
+                        // A) safeguard against data hazard because barrier from
+                        // blockwise_gemm is moved here B) reduce VMEM FIFO congestion
+                        // by applying small delays to different wavefronts It is
+                        // performed near the end of MAC cluster to minimize lgkmcnt
+                        // penalty
+                        if constexpr(kIter.value == KRepeat - 1 &&
+                                     kInnerIter.value == KInnerLoopIter - 1 &&
+                                     mIter.value == MIterPerWarp - 1 &&
+                                     nIter.value == NIterPerWarp - 1)
+                        {
+                            __builtin_amdgcn_sched_barrier(0);
+                            block_sync_lds();
+                            __builtin_amdgcn_sched_barrier(0);
+                        }
+                        // warp GEMM
+                        WarpGemm{}(c_warp_tensor, a_warp_tensor, b_warp_tensor);
 
-                            // write C warp tensor into C block tensor
-                            c_block_tensor.set_y_sliced_thread_data(
-                                merge_sequences(sequence<mIter, nIter>{}, c_warp_y_index_zeros),
-                                merge_sequences(sequence<1, 1>{}, c_warp_y_lengths),
-                                c_warp_tensor.get_thread_buffer());
+                        // write C warp tensor into C block tensor
+                        c_block_tensor.set_y_sliced_thread_data(
+                            merge_sequences(sequence<mIter, nIter>{}, c_warp_y_index_zeros),
+                            merge_sequences(sequence<1, 1>{}, c_warp_y_lengths),
+                            c_warp_tensor.get_thread_buffer());
 
-                            if constexpr(kInnerIter.value == 0 && mIter.value == 0 &&
-                                         nIter.value == 0)
-                            {
-                                __builtin_amdgcn_sched_barrier(0);
-                                __builtin_amdgcn_s_setprio(1);
-                                __builtin_amdgcn_sched_barrier(0);
-                            }
-                        });
+                        if constexpr(kInnerIter.value == 0 && mIter.value == 0 && nIter.value == 0)
+                        {
+                            __builtin_amdgcn_sched_barrier(0);
+                            __builtin_amdgcn_s_setprio(1);
+                            __builtin_amdgcn_sched_barrier(0);
+                        }
                     });
                 });
 

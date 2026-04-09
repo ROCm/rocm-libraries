@@ -29,13 +29,13 @@ extern "C" {
 #endif
 
 /*! \ingroup conv_module
-*  \brief Convert a sparse BSR matrix into a sparse CSR matrix
+*  \brief Convert a sparse BSR matrix into a sparse CSR matrix.
 *
 *  \details
-*  \p hipsparseXbsr2csr converts a BSR matrix into a CSR matrix. It is assumed,
-*  that \p csrValC, \p csrColIndC and \p csrRowPtrC are allocated. Allocation size
+*  \p hipsparseXbsr2csr converts a BSR matrix into a CSR matrix. It is assumed
+*  that \p csrValC, \p csrColIndC, and \p csrRowPtrC are allocated. Allocation size
 *  for \p csrRowPtrC is computed by the number of block rows multiplied by the block
-*  dimension plus one. Allocation for \p csrValC and \p csrColInd is computed by the
+*  dimension plus one. Allocation for \p csrValC and \p csrColInd is computed by
 *  the number of blocks in the BSR matrix multiplied by the block dimension squared.
 *
 *  For example, given the BSR matrix using block dimension 2:
@@ -73,17 +73,17 @@ extern "C" {
 *  \f]
 *
 *  \note
-*  This function is non blocking and executed asynchronously with respect to the host.
-*  It may return before the actual computation has finished.
+*  This function is non-blocking and executed asynchronously with respect to the host.
+*  It can return before the actual computation has finished.
 *
 *  @param[in]
-*  handle      handle to the hipsparse library context queue.
+*  handle      handle to the hipSPARSE library context queue.
 *  @param[in]
-*  dirA        the storage format of the blocks, \ref HIPSPARSE_DIRECTION_ROW or \ref HIPSPARSE_DIRECTION_COLUMN
+*  dirA        the storage format of the blocks, \ref HIPSPARSE_DIRECTION_ROW or \ref HIPSPARSE_DIRECTION_COLUMN.
 *  @param[in]
-*  mb          number of block rows in the sparse BSR matrix.
+*  mb          number of block rows in the sparse BSR matrix, which must be non-negative.
 *  @param[in]
-*  nb          number of block columns in the sparse BSR matrix.
+*  nb          number of block columns in the sparse BSR matrix, which must be non-negative.
 *  @param[in]
 *  descrA      descriptor of the sparse BSR matrix. Currently, only
 *              \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
@@ -95,7 +95,7 @@ extern "C" {
 *  @param[in]
 *  bsrColIndA  array of \p nnzb elements containing the block column indices of the sparse BSR matrix.
 *  @param[in]
-*  blockDim    size of the blocks in the sparse BSR matrix.
+*  blockDim    size of the blocks in the sparse BSR matrix. Must be positive.
 *  @param[in]
 *  descrC      descriptor of the sparse CSR matrix. Currently, only
 *              \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
@@ -107,12 +107,11 @@ extern "C" {
 *  @param[out]
 *  csrColIndC  array of \p nnzb*blockDim*blockDim elements containing the column indices of the sparse CSR matrix.
 *
-*  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p mb, \p nb, \p blockDim, \p bsrValA,
-*              \p bsrRowPtrA, \p bsrColIndA, \p csrValC, \p csrRowPtrC or \p csrColIndC pointer is invalid.
-*
-*  \par Example
-*  \snippet example_hipsparse_bsr2csr.cpp doc example
+*  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
+*  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p descrA, \p descrC, \p bsrValA,
+*          \p bsrRowPtrA, \p bsrColIndA, \p csrValC, \p csrRowPtrC, or \p csrColIndC is nullptr,
+*          \p mb or \p nb is negative, or \p blockDim is invalid.
 */
 /**@{*/
 HIPSPARSE_EXPORT

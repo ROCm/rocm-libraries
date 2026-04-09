@@ -33,7 +33,12 @@
 #include "rocsparse_cscmv.hpp"
 #include "rocsparse_csrmv.hpp"
 #include "rocsparse_ellmv.hpp"
+#include "rocsparse_sellmv.hpp"
 #include "rocsparse_spmv.hpp"
+#include "rocsparse_spmv_helpers.h"
+
+// Include the helper function
+#include "rocsparse_csrmv_helpers.cpp"
 
 template <>
 bool rocsparse::enum_utils::is_invalid(rocsparse_spmv_alg value_)
@@ -49,6 +54,7 @@ bool rocsparse::enum_utils::is_invalid(rocsparse_spmv_alg value_)
     case rocsparse_spmv_alg_bsr:
     case rocsparse_spmv_alg_csr_lrb:
     case rocsparse_spmv_alg_csr_nnzsplit:
+    case rocsparse_spmv_alg_sell:
     {
         return false;
     }
@@ -66,6 +72,7 @@ bool rocsparse::enum_utils::is_invalid(rocsparse_spmv_input value_)
     case rocsparse_spmv_input_compute_datatype:
     case rocsparse_spmv_input_scalar_datatype:
     case rocsparse_spmv_input_nnz_use_starting_block_ids:
+    case rocsparse_spmv_input_enable_extra:
     {
         return false;
     }
@@ -219,6 +226,205 @@ public:
     {
         return this->m_use_starting_block_ids;
     }
+
+    void set_enable_extra(bool value)
+    {
+        this->extras.set_enable(value);
+    }
+
+    bool has_extras() const
+    {
+        return this->extras.has_extras();
+    }
+
+    // Residual computation parameters
+    struct extra_vectors
+    {
+    private:
+        int64_t                      count;
+        rocsparse_const_dnvec_descr  gamma_vec;
+        rocsparse_const_dnvec_descr* z_vecs;
+
+        // Device arrays for extracted gamma and z data
+        void*  gamma_device_array;
+        void*  z_array;
+        size_t device_array_size;
+        bool   device_arrays_allocated;
+        bool   enabled; // Flag to enable/disable extra computations
+
+    public:
+        extra_vectors()
+            : count(0)
+            , gamma_vec(nullptr)
+            , z_vecs(nullptr)
+            , gamma_device_array(nullptr)
+            , z_array(nullptr)
+            , device_array_size(0)
+            , device_arrays_allocated(false)
+            , enabled(true) // Default to enabled when extras are set
+        {
+        }
+
+        ~extra_vectors()
+        {
+            clear();
+        }
+
+        // Getter methods
+        int64_t get_count() const
+        {
+            return count;
+        }
+
+        rocsparse_const_dnvec_descr get_gamma_vec() const
+        {
+            if(count == 0)
+                return nullptr;
+            return gamma_vec;
+        }
+
+        rocsparse_const_dnvec_descr* get_z_vecs() const
+        {
+            if(count == 0)
+                return nullptr;
+            return z_vecs;
+        }
+
+        // Getters for device arrays
+        template <typename T>
+        T* get_gamma_device_array() const
+        {
+            return reinterpret_cast<T*>(gamma_device_array);
+        }
+
+        template <typename T>
+        const T** get_z_array() const
+        {
+            if(count == 0 || !device_arrays_allocated)
+                return nullptr;
+            // z_array starts after gamma array
+            size_t gamma_size = count * sizeof(T);
+            return reinterpret_cast<const T**>(static_cast<char*>(gamma_device_array) + gamma_size);
+        }
+
+        bool has_device_arrays() const
+        {
+            return device_arrays_allocated;
+        }
+
+        // Check if extras are available (set but possibly disabled)
+        bool has_extras() const
+        {
+            return count > 0 && gamma_vec != nullptr && z_vecs != nullptr;
+        }
+
+        // Check if extras are enabled
+        bool is_enabled() const
+        {
+            return enabled && has_extras();
+        }
+
+        // Enable extras
+        void enable()
+        {
+            enabled = true;
+        }
+
+        // Disable extras
+        void disable()
+        {
+            enabled = false;
+        }
+
+        // Set enable state directly
+        void set_enable(bool value)
+        {
+            enabled = value;
+        }
+
+        void clear()
+        {
+            if(z_vecs)
+                delete[] z_vecs;
+
+            // Free device arrays if allocated
+            if(device_arrays_allocated && gamma_device_array)
+            {
+                (void)rocsparse_hipFree(gamma_device_array);
+                gamma_device_array      = nullptr;
+                z_array                 = nullptr;
+                device_arrays_allocated = false;
+                device_array_size       = 0;
+            }
+
+            count     = 0;
+            gamma_vec = nullptr;
+            z_vecs    = nullptr;
+        }
+
+        rocsparse_status set(int64_t                      num_extras,
+                             rocsparse_const_dnvec_descr  gamma_vec_in,
+                             rocsparse_const_dnvec_descr* z_vecs_in)
+        {
+            clear();
+
+            if(num_extras <= 0)
+            {
+                // LCOV_EXCL_START
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+                // LCOV_EXCL_STOP
+            }
+
+            count     = num_extras;
+            gamma_vec = gamma_vec_in;
+            z_vecs    = new rocsparse_const_dnvec_descr[count];
+
+            if(z_vecs == nullptr)
+            {
+                // LCOV_EXCL_START
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_memory_error);
+                // LCOV_EXCL_STOP
+            }
+
+            for(int64_t i = 0; i < count; ++i)
+            {
+                z_vecs[i] = z_vecs_in[i];
+            }
+
+            return rocsparse_status_success;
+        }
+
+        // Method to allocate and extract device arrays
+        template <typename T, typename Y>
+        rocsparse_status extract_device_arrays(rocsparse_handle handle)
+        {
+            ROCSPARSE_ROUTINE_TRACE;
+
+            if(count <= 0)
+            {
+                return rocsparse_status_success;
+            }
+
+            // Calculate required buffer size
+            device_array_size = count * sizeof(T) + count * sizeof(const Y*);
+
+            // Allocate device memory
+            RETURN_IF_HIP_ERROR(rocsparse_hipMalloc(&gamma_device_array, device_array_size));
+
+            // Setup pointers
+            z_array = static_cast<char*>(gamma_device_array) + count * sizeof(T);
+
+            // Extract the data using the helper function
+            T*        gamma_ptr = reinterpret_cast<T*>(gamma_device_array);
+            const Y** z_ptr     = reinterpret_cast<const Y**>(z_array);
+
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrmv_extract_gamma_and_z_arrays(
+                handle, static_cast<rocsparse_int>(count), gamma_vec, z_vecs, gamma_ptr, z_ptr));
+
+            device_arrays_allocated = true;
+            return rocsparse_status_success;
+        }
+    } extras;
 };
 
 extern "C" rocsparse_status rocsparse_create_spmv_descr(rocsparse_spmv_descr* descr)
@@ -348,6 +554,22 @@ try
         descr->set_use_starting_block_ids(use_starting_block_ids);
         return rocsparse_status_success;
     }
+
+    case rocsparse_spmv_input_enable_extra:
+    {
+        ROCSPARSE_CHECKARG(
+            4, size_in_bytes, size_in_bytes != sizeof(int32_t), rocsparse_status_invalid_size);
+
+        // Check if extras have been set
+        if(!descr->has_extras())
+        {
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+        }
+
+        const int32_t enable_extra = *reinterpret_cast<const int32_t*>(in);
+        descr->set_enable_extra(enable_extra != 0);
+        return rocsparse_status_success;
+    }
         // LCOV_EXCL_START
     }
     RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
@@ -377,26 +599,28 @@ namespace rocsparse
         //
         //
         //
-        const rocsparse_format    format         = mat->format;
-        const int64_t             rows           = mat->rows;
-        const int64_t             cols           = mat->cols;
-        const int64_t             nnz            = mat->nnz;
-        rocsparse_mat_descr       mat_descr      = mat->descr;
-        const rocsparse_datatype  data_type      = mat->data_type;
-        const rocsparse_indextype row_type       = mat->row_type;
-        const rocsparse_indextype col_type       = mat->col_type;
-        const void*               const_val_data = mat->const_val_data;
-        const void*               const_row_data = mat->const_row_data;
-        const void*               const_ind_data = mat->const_ind_data;
-        const void*               const_col_data = mat->const_col_data;
-        const rocsparse_datatype  x_data_type    = x->data_type;
-        const rocsparse_datatype  y_data_type    = y->data_type;
-        const void*               x_const_values = x->const_values;
-        void*                     y_values       = y->values;
-        const bool                analysed       = mat->analysed;
-        const int64_t             block_dim      = mat->block_dim;
-        const int64_t             ell_width      = mat->ell_width;
-        const rocsparse_direction block_dir      = mat->block_dir;
+        const rocsparse_format    format           = mat->format;
+        const int64_t             rows             = mat->rows;
+        const int64_t             cols             = mat->cols;
+        const int64_t             nnz              = mat->nnz;
+        rocsparse_mat_descr       mat_descr        = mat->descr;
+        const rocsparse_datatype  data_type        = mat->data_type;
+        const rocsparse_indextype row_type         = mat->row_type;
+        const rocsparse_indextype col_type         = mat->col_type;
+        const void*               const_val_data   = mat->const_val_data;
+        const void*               const_row_data   = mat->const_row_data;
+        const void*               const_ind_data   = mat->const_ind_data;
+        const void*               const_col_data   = mat->const_col_data;
+        const rocsparse_datatype  x_data_type      = x->data_type;
+        const rocsparse_datatype  y_data_type      = y->data_type;
+        const void*               x_const_values   = x->const_values;
+        void*                     y_values         = y->values;
+        const bool                analysed         = mat->analysed;
+        const int64_t             block_dim        = mat->block_dim;
+        const int64_t             ell_width        = mat->ell_width;
+        const int64_t             sell_slice_size  = mat->sell_slice_size;
+        const int64_t             sell_colval_size = mat->sell_colval_size;
+        const rocsparse_direction block_dir        = mat->block_dir;
 
         //
         //
@@ -406,6 +630,14 @@ namespace rocsparse
 
         RETURN_IF_ROCSPARSE_ERROR((rocsparse::check_spmv_alg(format, alg)));
 
+        // Pass gamma dnvec and dnvec descriptors for z vectors only if enabled
+        const int64_t num_extra
+            = spmv_descr->extras.is_enabled() ? spmv_descr->extras.get_count() : 0;
+        rocsparse_const_dnvec_descr gamma_vec
+            = spmv_descr->extras.is_enabled() ? spmv_descr->extras.get_gamma_vec() : nullptr;
+        rocsparse_const_dnvec_descr* z_vecs
+            = spmv_descr->extras.is_enabled() ? spmv_descr->extras.get_z_vecs() : nullptr;
+
         switch(stage)
         {
         case rocsparse_v2_spmv_stage_analysis:
@@ -414,6 +646,7 @@ namespace rocsparse
             {
 
             case rocsparse_format_ell:
+            case rocsparse_format_sell:
             case rocsparse_format_coo_aos:
             {
                 return rocsparse_status_success;
@@ -681,33 +914,45 @@ namespace rocsparse
             {
                 rocsparse::csrmv_alg alg_csrmv;
                 RETURN_IF_ROCSPARSE_ERROR((rocsparse::spmv_alg2csrmv_alg(alg, alg_csrmv)));
-                RETURN_IF_ROCSPARSE_ERROR(
-                    (rocsparse::csrmv(handle,
-                                      operation,
-                                      alg_csrmv,
-                                      rows,
-                                      cols,
-                                      nnz,
-                                      compute_datatype,
-                                      local_alpha,
-                                      mat_descr,
-                                      data_type,
-                                      const_val_data,
-                                      row_type,
-                                      const_row_data,
-                                      row_type,
-                                      reinterpret_cast<const char*>(const_row_data)
-                                          + rocsparse::indextype_sizeof(row_type),
-                                      col_type,
-                                      const_col_data,
-                                      spmv_descr->get_csrmv_info(),
-                                      x_data_type,
-                                      x_const_values,
-                                      compute_datatype,
-                                      local_beta,
-                                      y_data_type,
-                                      y_values,
-                                      fallback_algorithm)));
+
+                // Set the temporary spmv descriptor in handle to allow template functions to access pre-extracted arrays
+                handle->temp_spmv_descr = spmv_descr;
+
+                rocsparse_status csrmv_status
+                    = rocsparse::csrmv(handle,
+                                       operation,
+                                       alg_csrmv,
+                                       rows,
+                                       cols,
+                                       nnz,
+                                       compute_datatype,
+                                       local_alpha,
+                                       mat_descr,
+                                       data_type,
+                                       const_val_data,
+                                       row_type,
+                                       const_row_data,
+                                       row_type,
+                                       reinterpret_cast<const char*>(const_row_data)
+                                           + rocsparse::indextype_sizeof(row_type),
+                                       col_type,
+                                       const_col_data,
+                                       spmv_descr->get_csrmv_info(),
+                                       x_data_type,
+                                       x_const_values,
+                                       compute_datatype,
+                                       local_beta,
+                                       y_data_type,
+                                       y_values,
+                                       num_extra,
+                                       gamma_vec,
+                                       z_vecs,
+                                       fallback_algorithm);
+
+                // Clear the temporary pointer
+                handle->temp_spmv_descr = nullptr;
+
+                RETURN_IF_ROCSPARSE_ERROR(csrmv_status);
                 return rocsparse_status_success;
             }
             case rocsparse_format_csc:
@@ -763,6 +1008,33 @@ namespace rocsparse
                 return rocsparse_status_success;
             }
 
+            case rocsparse_format_sell:
+            {
+                RETURN_IF_ROCSPARSE_ERROR((rocsparse::sellmv(handle,
+                                                             operation,
+                                                             rows,
+                                                             cols,
+                                                             nnz,
+                                                             sell_slice_size,
+                                                             sell_colval_size,
+                                                             compute_datatype,
+                                                             local_alpha,
+                                                             mat_descr,
+                                                             data_type,
+                                                             const_val_data,
+                                                             row_type,
+                                                             const_row_data,
+                                                             col_type,
+                                                             const_col_data,
+                                                             x_data_type,
+                                                             x_const_values,
+                                                             compute_datatype,
+                                                             local_beta,
+                                                             y_data_type,
+                                                             y_values)));
+                return rocsparse_status_success;
+            }
+
                 // LCOV_EXCL_START
             case rocsparse_format_bell:
             {
@@ -805,6 +1077,10 @@ try
     ROCSPARSE_CHECKARG_ENUM(5, stage);
     ROCSPARSE_CHECKARG_POINTER(6, buffer_size_in_bytes);
 
+    ROCSPARSE_CHECKARG(2, mat, (mat->batch_count != 1), rocsparse_status_not_implemented);
+    ROCSPARSE_CHECKARG(3, x, (x->batch_count != 1), rocsparse_status_not_implemented);
+    ROCSPARSE_CHECKARG(4, y, (y->batch_count != 1), rocsparse_status_not_implemented);
+
     //
     // Validate spmv_inputs.
     //
@@ -838,6 +1114,7 @@ try
     case rocsparse_format_bsr:
     case rocsparse_format_ell:
     case rocsparse_format_bell:
+    case rocsparse_format_sell:
     {
         switch(stage)
         {
@@ -891,6 +1168,10 @@ try
                        buffer,
                        (buffer == nullptr && buffer_size_in_bytes > 0),
                        rocsparse_status_invalid_pointer);
+
+    ROCSPARSE_CHECKARG(3, mat, (mat->batch_count != 1), rocsparse_status_not_implemented);
+    ROCSPARSE_CHECKARG(4, x, (x->batch_count != 1), rocsparse_status_not_implemented);
+    ROCSPARSE_CHECKARG(6, y, (y->batch_count != 1), rocsparse_status_not_implemented);
 
     //
     // Validate spmv_inputs.
@@ -968,3 +1249,196 @@ catch(...)
     RETURN_ROCSPARSE_EXCEPTION();
 }
 // LCOV_EXCL_STOP
+
+extern "C" rocsparse_status rocsparse_spmv_set_extra(rocsparse_handle             handle,
+                                                     rocsparse_spmv_descr         descr,
+                                                     int64_t                      num_extras,
+                                                     rocsparse_const_dnvec_descr  gamma_vec,
+                                                     rocsparse_const_dnvec_descr* z_vecs,
+                                                     rocsparse_error*             p_error)
+try
+{
+    ROCSPARSE_ROUTINE_TRACE;
+
+    ROCSPARSE_CHECKARG_HANDLE(0, handle);
+    ROCSPARSE_CHECKARG_POINTER(1, descr);
+    ROCSPARSE_CHECKARG(2, num_extras, (num_extras <= 0), rocsparse_status_invalid_value);
+    ROCSPARSE_CHECKARG_POINTER(3, gamma_vec);
+    ROCSPARSE_CHECKARG_ARRAY(4, num_extras, z_vecs);
+
+    // Validate that scalar and compute datatypes are set
+    ROCSPARSE_CHECKARG(1,
+                       descr,
+                       rocsparse::enum_utils::is_invalid(descr->get_scalar_datatype()),
+                       rocsparse_status_invalid_value);
+
+    ROCSPARSE_CHECKARG(1,
+                       descr,
+                       rocsparse::enum_utils::is_invalid(descr->get_compute_datatype()),
+                       rocsparse_status_invalid_value);
+
+    // Validate gamma_vec datatype matches scalar datatype
+    const rocsparse_datatype scalar_datatype  = descr->get_scalar_datatype();
+    const rocsparse_datatype compute_datatype = descr->get_compute_datatype();
+
+    ROCSPARSE_CHECKARG(
+        3, gamma_vec, gamma_vec->data_type != scalar_datatype, rocsparse_status_invalid_value);
+
+    // Validate gamma_vec size matches num_extras
+    ROCSPARSE_CHECKARG(3, gamma_vec, gamma_vec->size != num_extras, rocsparse_status_invalid_size);
+
+    // Validate all z_vecs have the same datatype as compute_datatype and same size
+    for(int64_t i = 0; i < num_extras; ++i)
+    {
+        ROCSPARSE_CHECKARG_POINTER(4, z_vecs[i]);
+
+        ROCSPARSE_CHECKARG(
+            4, z_vecs[i], z_vecs[i]->data_type != compute_datatype, rocsparse_status_invalid_value);
+
+        // All z vectors should have the same size
+        if(i > 0)
+        {
+            ROCSPARSE_CHECKARG(
+                4, z_vecs[i], z_vecs[i]->size != z_vecs[0]->size, rocsparse_status_invalid_size);
+        }
+    }
+
+    // First set the extras
+    RETURN_IF_ROCSPARSE_ERROR(descr->extras.set(num_extras, gamma_vec, z_vecs));
+
+    // Now extract the device arrays based on datatypes
+    rocsparse_status extract_status = rocsparse_status_success;
+
+    // Dispatch based on scalar and compute datatypes
+    if(scalar_datatype == rocsparse_datatype_f32_r && compute_datatype == rocsparse_datatype_f32_r)
+    {
+        extract_status = descr->extras.extract_device_arrays<float, float>(handle);
+    }
+    else if(scalar_datatype == rocsparse_datatype_f64_r
+            && compute_datatype == rocsparse_datatype_f64_r)
+    {
+        extract_status = descr->extras.extract_device_arrays<double, double>(handle);
+    }
+    else if(scalar_datatype == rocsparse_datatype_f32_c
+            && compute_datatype == rocsparse_datatype_f32_c)
+    {
+        extract_status
+            = descr->extras.extract_device_arrays<rocsparse_float_complex, rocsparse_float_complex>(
+                handle);
+    }
+    else if(scalar_datatype == rocsparse_datatype_f64_c
+            && compute_datatype == rocsparse_datatype_f64_c)
+    {
+        extract_status = descr->extras.extract_device_arrays<rocsparse_double_complex,
+                                                             rocsparse_double_complex>(handle);
+    }
+    else if(scalar_datatype == rocsparse_datatype_i32_r
+            && compute_datatype == rocsparse_datatype_i32_r)
+    {
+        extract_status = descr->extras.extract_device_arrays<int32_t, int32_t>(handle);
+    }
+    else
+    {
+        // Clear the extras if unsupported datatype combination
+        descr->extras.clear();
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
+    }
+
+    if(extract_status != rocsparse_status_success)
+    {
+        // Clear the extras if extraction failed
+        descr->extras.clear();
+        RETURN_IF_ROCSPARSE_ERROR(extract_status);
+    }
+
+    return rocsparse_status_success;
+    // LCOV_EXCL_START
+}
+catch(...)
+{
+    RETURN_ROCSPARSE_EXCEPTION();
+}
+// LCOV_EXCL_STOP
+
+extern "C" rocsparse_status rocsparse_spmv_clear_extra(rocsparse_handle     handle,
+                                                       rocsparse_spmv_descr descr,
+                                                       rocsparse_error*     p_error)
+try
+{
+    ROCSPARSE_ROUTINE_TRACE;
+
+    ROCSPARSE_CHECKARG_HANDLE(0, handle);
+    ROCSPARSE_CHECKARG_POINTER(1, descr);
+
+    descr->extras.clear();
+
+    return rocsparse_status_success;
+    // LCOV_EXCL_START
+}
+catch(...)
+{
+    RETURN_ROCSPARSE_EXCEPTION();
+}
+// LCOV_EXCL_STOP
+
+// Helper functions for accessing pre-extracted arrays from template files
+bool rocsparse::spmv_has_device_arrays(void* spmv_descr_ptr)
+{
+    ROCSPARSE_ROUTINE_TRACE;
+
+    if(!spmv_descr_ptr)
+        return false;
+
+    auto* descr = static_cast<_rocsparse_spmv_descr*>(spmv_descr_ptr);
+    return descr->extras.has_device_arrays();
+}
+
+// Template helper functions for accessing pre-extracted arrays from template files
+template <typename T>
+T* rocsparse::spmv_get_gamma_device_array(void* spmv_descr_ptr)
+{
+    if(!spmv_descr_ptr)
+        return nullptr;
+
+    auto* descr = static_cast<_rocsparse_spmv_descr*>(spmv_descr_ptr);
+    return descr->extras.template get_gamma_device_array<T>();
+}
+
+template <typename Z>
+const Z** rocsparse::spmv_get_z_array(void* spmv_descr_ptr)
+{
+    if(!spmv_descr_ptr)
+        return nullptr;
+
+    auto* descr = static_cast<_rocsparse_spmv_descr*>(spmv_descr_ptr);
+    return descr->extras.template get_z_array<Z>();
+}
+
+// Macro for gamma device array ETI
+#define INSTANTIATE_GAMMA_DEVICE_ARRAY(T) \
+    template T* rocsparse::spmv_get_gamma_device_array<T>(void*);
+
+// Macro for z array ETI
+#define INSTANTIATE_Z_ARRAY(T) template const T** rocsparse::spmv_get_z_array<T>(void*);
+
+// ETI for gamma device array
+INSTANTIATE_GAMMA_DEVICE_ARRAY(float)
+INSTANTIATE_GAMMA_DEVICE_ARRAY(double)
+INSTANTIATE_GAMMA_DEVICE_ARRAY(rocsparse_float_complex)
+INSTANTIATE_GAMMA_DEVICE_ARRAY(rocsparse_double_complex)
+INSTANTIATE_GAMMA_DEVICE_ARRAY(int)
+INSTANTIATE_GAMMA_DEVICE_ARRAY(_Float16)
+INSTANTIATE_GAMMA_DEVICE_ARRAY(rocsparse_bfloat16)
+
+// ETI for z array
+INSTANTIATE_Z_ARRAY(float)
+INSTANTIATE_Z_ARRAY(double)
+INSTANTIATE_Z_ARRAY(rocsparse_float_complex)
+INSTANTIATE_Z_ARRAY(rocsparse_double_complex)
+INSTANTIATE_Z_ARRAY(int)
+INSTANTIATE_Z_ARRAY(_Float16)
+INSTANTIATE_Z_ARRAY(rocsparse_bfloat16)
+
+// Cleanup macros
+#undef INSTANTIATE_GAMMA_DEVICE_ARRAY
+#undef INSTANTIATE_Z_ARRAY

@@ -1,11 +1,14 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2018-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 
 #include "ck_tile/core/config.hpp"
 #include "ck_tile/core/container/array.hpp"
 #include "ck_tile/core/container/tuple.hpp"
+
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
 
 namespace ck_tile {
 
@@ -51,17 +54,17 @@ struct thread_buffer {
     CK_TILE_HOST_DEVICE static constexpr auto size() { return N; }
     CK_TILE_HOST_DEVICE auto & get() {return data; }
     CK_TILE_HOST_DEVICE const auto & get() const {return data; }
-    CK_TILE_HOST_DEVICE auto & get(index_t i) {return data[i]; }
-    CK_TILE_HOST_DEVICE const auto & get(index_t i) const {return data[i]; }
-    CK_TILE_HOST_DEVICE constexpr const auto& operator[](index_t i) const { return get(i); }
-    CK_TILE_HOST_DEVICE constexpr auto& operator[](index_t i)             { return get(i); }
-    CK_TILE_HOST_DEVICE constexpr auto& operator()(index_t i)             { return get(i); }     // TODO: compatible
-    CK_TILE_HOST_DEVICE constexpr auto& at(index_t i)                                   { return get(i); }
-    CK_TILE_HOST_DEVICE constexpr const auto& at(index_t i) const                       { return get(i); }
-    template <index_t I> CK_TILE_HOST_DEVICE constexpr auto& at()                       { return get(I); }
-    template <index_t I> CK_TILE_HOST_DEVICE constexpr const auto& at() const           { return get(I); }
-    template <index_t I> CK_TILE_HOST_DEVICE constexpr auto& at(number<I>)              { return get(I); }
-    template <index_t I> CK_TILE_HOST_DEVICE constexpr const auto& at(number<I>) const  { return get(I); }
+    CK_TILE_HOST_DEVICE auto & get(index_t i) [[clang::lifetimebound]] {return data[i]; }
+    CK_TILE_HOST_DEVICE const auto & get(index_t i) const [[clang::lifetimebound]] {return data[i]; }
+    CK_TILE_HOST_DEVICE constexpr const auto& operator[](index_t i) const [[clang::lifetimebound]] {return get(i); }
+    CK_TILE_HOST_DEVICE constexpr auto& operator[](index_t i) [[clang::lifetimebound]]             { return get(i); }
+    CK_TILE_HOST_DEVICE constexpr auto& operator()(index_t i) [[clang::lifetimebound]]            { return get(i); }     // TODO: compatible
+    CK_TILE_HOST_DEVICE constexpr auto& at(index_t i) [[clang::lifetimebound]]                                  { return get(i); }
+    CK_TILE_HOST_DEVICE constexpr const auto& at(index_t i) const [[clang::lifetimebound]]                      { return get(i); }
+    template <index_t I> CK_TILE_HOST_DEVICE constexpr auto& at() [[clang::lifetimebound]]                       { return get(I); }
+    template <index_t I> CK_TILE_HOST_DEVICE constexpr const auto& at() const [[clang::lifetimebound]]         { return get(I); }
+    template <index_t I> CK_TILE_HOST_DEVICE constexpr auto& at(number<I>) [[clang::lifetimebound]]              { return get(I); }
+    template <index_t I> CK_TILE_HOST_DEVICE constexpr const auto& at(number<I>) const [[clang::lifetimebound]] { return get(I); }
     
     template <typename X_,
               typename std::enable_if<has_same_scalar_type<value_type, X_>::value, bool>::type = false>
@@ -174,3 +177,5 @@ struct vector_traits<thread_buffer<T, N>, std::enable_if_t<std::is_class_v<T>>>
 #endif
 
 } // namespace ck_tile
+
+#pragma clang diagnostic pop

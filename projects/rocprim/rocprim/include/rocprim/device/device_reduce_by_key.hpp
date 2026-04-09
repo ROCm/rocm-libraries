@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -38,6 +38,7 @@
 #include "../intrinsics/thread.hpp"
 #include "../iterator/constant_iterator.hpp"
 #include "../type_traits.hpp"
+#include "rocprim/device/detail/ordered_block_id.hpp"
 
 #include <chrono>
 #include <iostream>
@@ -51,15 +52,18 @@ BEGIN_ROCPRIM_NAMESPACE
 namespace detail
 {
 
-template<typename LookBackScanState, typename AccumulatorType>
+template<typename LookBackScanState, typename AccumulatorType, typename BlockIdWrapper>
 ROCPRIM_KERNEL ROCPRIM_LAUNCH_BOUNDS(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE) void
     reduce_by_key_init_kernel(LookBackScanState      lookback_scan_state,
                               const unsigned int     number_of_blocks,
                               const bool             is_first_launch,
                               const unsigned int     block_save_idx,
                               std::size_t* const     global_head_count,
-                              AccumulatorType* const previous_accumulated)
+                              AccumulatorType* const previous_accumulated,
+                              BlockIdWrapper         ordered_bid)
 {
+    // 'ordered_bid' gets reset by 'init_lookback_scan_state'.
+
     const unsigned int block_id        = ::rocprim::detail::block_id<0>();
     const unsigned int block_size      = ::rocprim::detail::block_size<0>();
     const unsigned int block_thread_id = ::rocprim::detail::block_thread_id<0>();
@@ -89,61 +93,12 @@ ROCPRIM_KERNEL ROCPRIM_LAUNCH_BOUNDS(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE) void
                                       update_func);
     }
 
-    init_lookback_scan_state(lookback_scan_state, number_of_blocks, flat_thread_id);
-}
-
-template<typename Config,
-         lookback_scan_determinism Determinism,
-         typename AccumulatorType,
-         typename KeyIterator,
-         typename ValueIterator,
-         typename UniqueIterator,
-         typename ReductionIterator,
-         typename UniqueCountIterator,
-         typename CompareFunction,
-         typename BinaryOp,
-         typename LookbackScanState>
-inline hipError_t launch_reduce_by_key(detail::target_arch          arch,
-                                       const KeyIterator            keys_input,
-                                       const ValueIterator          values_input,
-                                       const UniqueIterator         unique_keys,
-                                       const ReductionIterator      reductions,
-                                       const UniqueCountIterator    unique_count,
-                                       const BinaryOp               reduce_op,
-                                       const CompareFunction        compare,
-                                       const LookbackScanState      scan_state,
-                                       const std::size_t            starting_block,
-                                       const std::size_t            total_number_of_blocks,
-                                       const std::size_t            size,
-                                       const std::size_t* const     global_head_count,
-                                       const AccumulatorType* const previous_accumulated,
-                                       dim3                         grid,
-                                       dim3                         block,
-                                       size_t                       shmem,
-                                       hipStream_t                  stream)
-{
-    auto kernel = [=](auto arch_config)
-    {
-        reduce_by_key::kernel_impl<decltype(arch_config), Determinism>(keys_input,
-                                                                       values_input,
-                                                                       unique_keys,
-                                                                       reductions,
-                                                                       unique_count,
-                                                                       reduce_op,
-                                                                       compare,
-                                                                       scan_state,
-                                                                       starting_block,
-                                                                       total_number_of_blocks,
-                                                                       size,
-                                                                       global_head_count,
-                                                                       previous_accumulated);
-    };
-
-    return execute_launch_plan<Config>(arch, kernel, grid, block, shmem, stream);
+    init_lookback_scan_state(lookback_scan_state, number_of_blocks, ordered_bid, flat_thread_id);
 }
 
 template<lookback_scan_determinism Determinism,
-         typename config,
+         typename Config,
+         typename Selector,
          typename KeysInputIterator,
          typename ValuesInputIterator,
          typename UniqueOutputIterator,
@@ -165,181 +120,169 @@ hipError_t reduce_by_key_impl_wrapped_config(void*                     temporary
                                              const bool                debug_synchronous)
 {
     using accumulator_type = reduce_by_key::accumulator_type_t<ValuesInputIterator, BinaryFunction>;
-    detail::target_arch target_arch;
-    hipError_t          result = host_target_arch(stream, target_arch);
-    if(result != hipSuccess)
-    {
-        return result;
-    }
-    const reduce_by_key_config_params params = dispatch_target_arch<config, false>(target_arch);
 
-    using scan_state_type
-        = reduce_by_key::lookback_scan_state_t<accumulator_type, /*UseSleep=*/false>;
-    using scan_state_with_sleep_type
-        = reduce_by_key::lookback_scan_state_t<accumulator_type, /*UseSleep=*/true>;
+    bool use_atomic_block_id;
+    ROCPRIM_RETURN_ON_ERROR(check_if_using_atomic_block_id(stream, use_atomic_block_id));
+    const auto use_atomic_block_id_variant
+        = ::rocprim::detail::constexpr_value_variant<bool, false, true>::create(
+            use_atomic_block_id);
 
-    const unsigned int block_size      = params.kernel_config.block_size;
-    const unsigned int items_per_block = block_size * params.kernel_config.items_per_thread;
+    bool use_sleepy_scan;
+    ROCPRIM_RETURN_ON_ERROR(is_sleep_scan_state_used(stream, use_sleepy_scan));
+    const auto use_sleepy_scan_variant
+        = ::rocprim::detail::constexpr_value_variant<bool, false, true>::create(use_sleepy_scan);
 
-    const size_t size_limit = params.kernel_config.size_limit;
-    const size_t aligned_size_limit
-        = ::rocprim::max<size_t>(size_limit - size_limit % items_per_block, items_per_block);
-
-    const size_t limited_size     = std::min<size_t>(size, aligned_size_limit);
-    const bool   use_limited_size = limited_size == aligned_size_limit;
-
-    // Number of blocks in a single launch (or the only launch if it fits)
-    const std::size_t number_of_blocks = detail::ceiling_div(limited_size, items_per_block);
-
-    // Calculate required temporary storage
-    void* scan_state_storage;
-    // The number of segment heads in previous launches.
-    std::size_t* d_global_head_count = nullptr;
-    // The running accumulation across the launch boundary.
-    accumulator_type* d_previous_accumulated = nullptr;
-
-    detail::temp_storage::layout layout{};
-    result = scan_state_type::get_temp_storage_layout(number_of_blocks, stream, layout);
-    if(result != hipSuccess)
-    {
-        return result;
-    }
-
-    result = detail::temp_storage::partition(
-        temporary_storage,
-        storage_size,
-        detail::temp_storage::make_linear_partition(
-            // This is valid even with scan_state_with_sleep_type
-            detail::temp_storage::make_partition(&scan_state_storage, layout),
-            detail::temp_storage::ptr_aligned_array(&d_global_head_count, use_limited_size ? 1 : 0),
-            detail::temp_storage::ptr_aligned_array(&d_previous_accumulated,
-                                                    use_limited_size ? 1 : 0)));
-    if(result != hipSuccess || temporary_storage == nullptr)
-    {
-        return result;
-    }
-
-    bool use_sleep;
-    result = detail::is_sleep_scan_state_used(stream, use_sleep);
-    if(result != hipSuccess)
-    {
-        return result;
-    }
-    scan_state_type scan_state{};
-    result = scan_state_type::create(scan_state, scan_state_storage, number_of_blocks, stream);
-    if(result != hipSuccess)
-    {
-        return result;
-    }
-    scan_state_with_sleep_type scan_state_with_sleep{};
-    result = scan_state_with_sleep_type::create(scan_state_with_sleep,
-                                                scan_state_storage,
-                                                number_of_blocks,
-                                                stream);
-    if(result != hipSuccess)
-    {
-        return result;
-    }
-
-    auto with_scan_state
-        = [use_sleep, scan_state, scan_state_with_sleep](auto&& func) mutable -> decltype(auto)
-    {
-        if(use_sleep)
+    ROCPRIM_RETURN_ON_ERROR(std::visit(
+        [&](auto use_sleepy_scan, auto use_atomic_block_id)
         {
-            return func(scan_state_with_sleep);
-        }
-        else
-        {
-            return func(scan_state);
-        }
-    };
+            const target current_target(stream);
 
-    if(size == 0)
-    {
-        // Fill out unique_count_output with zero
-        return rocprim::transform(rocprim::constant_iterator<std::size_t>(0),
-                                  unique_count_output,
-                                  1,
-                                  rocprim::identity<std::size_t>{},
-                                  stream,
-                                  debug_synchronous);
-    }
+            const auto params = get_config<Selector>(Config{}, current_target);
 
-    // Total number of blocks in all launches
-    const std::size_t total_number_of_blocks = ceiling_div(size, items_per_block);
-    const std::size_t number_of_launch       = ceiling_div(size, limited_size);
+            using scan_state_type
+                = reduce_by_key::lookback_scan_state_t<accumulator_type, use_sleepy_scan>;
+            const unsigned int block_size      = params.kernel_config.block_size;
+            const unsigned int items_per_block = block_size * params.kernel_config.items_per_thread;
 
-    if(debug_synchronous)
-    {
-        std::cout << "size:               " << size << '\n';
-        std::cout << "aligned_size_limit: " << aligned_size_limit << '\n';
-        std::cout << "use_limited_size:   " << std::boolalpha << use_limited_size << '\n';
-        std::cout << "number_of_launch:   " << number_of_launch << '\n';
-        std::cout << "block_size:         " << block_size << '\n';
-        std::cout << "number_of_blocks:   " << number_of_blocks << '\n';
-        std::cout << "items_per_block:    " << items_per_block << '\n';
-    }
+            const size_t size_limit         = params.kernel_config.size_limit;
+            const size_t aligned_size_limit = ::rocprim::max<size_t>(
+                size_limit - (size_limit % static_cast<std::size_t>(items_per_block)),
+                items_per_block);
 
-    for(size_t i = 0, offset = 0; i < number_of_launch; ++i, offset += limited_size)
-    {
-        const std::size_t current_size = std::min<std::size_t>(size - offset, limited_size);
-        const std::size_t number_of_blocks_launch = ceiling_div(current_size, items_per_block);
+            const size_t limited_size     = std::min<size_t>(size, aligned_size_limit);
+            const bool   use_limited_size = limited_size == aligned_size_limit;
 
-        // Start point for time measurements
-        std::chrono::steady_clock::time_point start;
-        if(debug_synchronous)
-        {
-            std::cout << "index:            " << i << '\n';
-            std::cout << "current_size:     " << current_size << '\n';
-            std::cout << "number of blocks: " << number_of_blocks_launch << '\n';
+            // Number of blocks in a single launch (or the only launch if it fits)
+            const std::size_t number_of_blocks = detail::ceiling_div(limited_size, items_per_block);
 
-            start = std::chrono::steady_clock::now();
-        }
+            // Calculate required temporary storage
+            void* scan_state_storage;
+            // The number of segment heads in previous launches.
+            std::size_t* d_global_head_count = nullptr;
+            // The running accumulation across the launch boundary.
+            accumulator_type* d_previous_accumulated = nullptr;
 
-        with_scan_state(
-            [&](const auto scan_state)
+            detail::temp_storage::layout layout{};
+            ROCPRIM_RETURN_ON_ERROR(
+                scan_state_type::get_temp_storage_layout(number_of_blocks, stream, layout));
+
+            using ordered_bid_type = block_id_wrapper<unsigned int, use_atomic_block_id>;
+            typename ordered_bid_type::id_type* ordered_bid_storage;
+
+            auto result = detail::temp_storage::partition(
+                temporary_storage,
+                storage_size,
+                detail::temp_storage::make_linear_partition(
+                    // This is valid even with scan_state_with_sleep_type
+                    detail::temp_storage::make_partition(&scan_state_storage, layout),
+                    detail::temp_storage::ptr_aligned_array(&d_global_head_count,
+                                                            use_limited_size ? 1 : 0),
+                    detail::temp_storage::ptr_aligned_array(&d_previous_accumulated,
+                                                            use_limited_size ? 1 : 0),
+                    detail::temp_storage::make_partition(
+                        &ordered_bid_storage,
+                        ordered_bid_type::get_temp_storage_layout())));
+            if(result != hipSuccess || temporary_storage == nullptr)
             {
-                const unsigned int block_size = ROCPRIM_DEFAULT_MAX_BLOCK_SIZE;
-                const std::size_t  grid_size
-                    = detail::ceiling_div(number_of_blocks_launch, block_size);
+                return result;
+            }
 
-                reduce_by_key_init_kernel<<<dim3(grid_size), dim3(block_size), 0, stream>>>(
+            scan_state_type scan_state{};
+            ROCPRIM_RETURN_ON_ERROR(
+                scan_state_type::create(scan_state, scan_state_storage, number_of_blocks, stream));
+            auto ordered_bid = ordered_bid_type::create(ordered_bid_storage);
+
+            if(size == 0)
+            {
+                // Fill out unique_count_output with zero
+                return rocprim::transform(rocprim::constant_iterator<std::size_t>(0),
+                                          unique_count_output,
+                                          1,
+                                          rocprim::identity<std::size_t>{},
+                                          stream,
+                                          debug_synchronous);
+            }
+
+            // Total number of blocks in all launches
+            const std::size_t total_number_of_blocks = ceiling_div(size, items_per_block);
+            const std::size_t number_of_launch       = ceiling_div(size, limited_size);
+
+            if(debug_synchronous)
+            {
+                std::cout << "size:               " << size << '\n';
+                std::cout << "aligned_size_limit: " << aligned_size_limit << '\n';
+                std::cout << "use_limited_size:   " << std::boolalpha << use_limited_size << '\n';
+                std::cout << "number_of_launch:   " << number_of_launch << '\n';
+                std::cout << "block_size:         " << block_size << '\n';
+                std::cout << "number_of_blocks:   " << number_of_blocks << '\n';
+                std::cout << "items_per_block:    " << items_per_block << '\n';
+            }
+
+            for(size_t i = 0, offset = 0; i < number_of_launch; ++i, offset += limited_size)
+            {
+                const std::size_t current_size = std::min<std::size_t>(size - offset, limited_size);
+                const std::size_t number_of_blocks_launch
+                    = ceiling_div(current_size, items_per_block);
+
+                // Start point for time measurements
+                std::chrono::steady_clock::time_point start;
+                if(debug_synchronous)
+                {
+                    std::cout << "index:            " << i << '\n';
+                    std::cout << "current_size:     " << current_size << '\n';
+                    std::cout << "number of blocks: " << number_of_blocks_launch << '\n';
+
+                    start = std::chrono::steady_clock::now();
+                }
+
+                // Define block and grid sizes for init kernel.
+                const size_t init_block_size = ROCPRIM_DEFAULT_MAX_BLOCK_SIZE;
+                const size_t init_grid_size
+                    = detail::ceiling_div(number_of_blocks_launch, init_block_size);
+                reduce_by_key_init_kernel<<<init_grid_size, init_block_size, 0, stream>>>(
                     scan_state,
                     number_of_blocks_launch,
                     i == 0,
                     number_of_blocks - 1,
                     d_global_head_count,
-                    d_previous_accumulated);
-            });
-        ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("reduce_by_key_init_kernel",
-                                                    number_of_blocks_launch,
-                                                    start);
-
-        ROCPRIM_RETURN_ON_ERROR(with_scan_state(
-            [&](const auto scan_state)
-            {
-                return launch_reduce_by_key<config, Determinism>(
-                    target_arch,
-                    keys_input + offset,
-                    values_input + offset,
-                    unique_output,
-                    aggregates_output,
-                    unique_count_output,
-                    reduce_op,
-                    key_compare_op,
-                    scan_state,
-                    i * number_of_blocks,
-                    total_number_of_blocks,
-                    size,
-                    i > 0 ? d_global_head_count : nullptr,
-                    i > 0 ? d_previous_accumulated : nullptr,
-                    dim3(number_of_blocks_launch),
-                    dim3(block_size),
-                    0,
-                    stream);
-            }));
-        ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("reduce_by_key_kernel", current_size, start);
-    }
+                    d_previous_accumulated,
+                    ordered_bid);
+                ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("reduce_by_key_init_kernel",
+                                                            number_of_blocks_launch,
+                                                            start);
+                auto kernel = [=](auto target_config)
+                {
+                    reduce_by_key::kernel_impl<decltype(target_config), Determinism>(
+                        keys_input + offset,
+                        values_input + offset,
+                        unique_output,
+                        aggregates_output,
+                        unique_count_output,
+                        reduce_op,
+                        key_compare_op,
+                        scan_state,
+                        i * number_of_blocks,
+                        total_number_of_blocks,
+                        size,
+                        i > 0 ? d_global_head_count : nullptr,
+                        i > 0 ? d_previous_accumulated : nullptr,
+                        ordered_bid);
+                };
+                ROCPRIM_RETURN_ON_ERROR(
+                    execute_launch_plan<Config, Selector>(current_target,
+                                                          kernel,
+                                                          dim3(number_of_blocks_launch),
+                                                          dim3(block_size),
+                                                          0,
+                                                          stream));
+                ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("reduce_by_key_kernel",
+                                                            current_size,
+                                                            start);
+            }
+            return hipSuccess;
+        },
+        use_sleepy_scan_variant,
+        use_atomic_block_id_variant));
 
     return hipSuccess;
 }
@@ -368,21 +311,21 @@ hipError_t reduce_by_key_impl(void*                     temporary_storage,
 {
     using key_type         = ::rocprim::detail::value_type_t<KeysInputIterator>;
     using accumulator_type = reduce_by_key::accumulator_type_t<ValuesInputIterator, BinaryFunction>;
+    using Selector = reduce_by_key_config_selector<key_type, accumulator_type, BinaryFunction>;
 
-    using config = wrapped_reduce_by_key_config<Config, key_type, accumulator_type, BinaryFunction>;
-
-    return detail::reduce_by_key_impl_wrapped_config<Determinism, config>(temporary_storage,
-                                                                          storage_size,
-                                                                          keys_input,
-                                                                          values_input,
-                                                                          size,
-                                                                          unique_output,
-                                                                          aggregates_output,
-                                                                          unique_count_output,
-                                                                          reduce_op,
-                                                                          key_compare_op,
-                                                                          stream,
-                                                                          debug_synchronous);
+    return detail::reduce_by_key_impl_wrapped_config<Determinism, Config, Selector>(
+        temporary_storage,
+        storage_size,
+        keys_input,
+        values_input,
+        size,
+        unique_output,
+        aggregates_output,
+        unique_count_output,
+        reduce_op,
+        key_compare_op,
+        stream,
+        debug_synchronous);
 }
 
 } // namespace detail
@@ -459,6 +402,8 @@ hipError_t reduce_by_key_impl(void*                     temporary_storage,
 /// \parblock
 /// In this example a device-level sum operation is performed on an array of
 /// integer values and integer keys.
+///
+/// The full example is [on GitHub](https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocprim/example/rocprim/device/example_device_reduce_by_key.cpp).
 ///
 /// \code{.cpp}
 /// #include <rocprim/rocprim.hpp>

@@ -53,19 +53,19 @@ hipsparseStatus_t hipsparseSpGEMM_destroyDescr(hipsparseSpGEMMDescr_t descr);
 *  \f[
 *    C' := \alpha \cdot op(A) \cdot op(B) + \beta \cdot C,
 *  \f]
-*  where \f$C'\f$, \f$A\f$, \f$B\f$, \f$C\f$ are sparse matrices and \f$C'\f$ and \f$C\f$ have the same sparsity pattern.
+*  where \f$C'\f$, \f$A\f$, \f$B\f$, and \f$C\f$ are sparse matrices and \f$C'\f$ and \f$C\f$ have the same sparsity pattern.
 *
 *  \details
-*  \p hipsparseSpGEMM_workEstimation is called twice. We call it to compute the size of the first required user allocated
-*  buffer. After this buffer size is determined, the user allocates it and calls \p hipsparseSpGEMM_workEstimation
+*  \p hipsparseSpGEMM_workEstimation is called twice. First, call it to compute the size of the first required user-allocated
+*  buffer. After this buffer size is determined, allocate the buffer and call \p hipsparseSpGEMM_workEstimation
 *  a second time with the newly allocated buffer passed in. This second call inspects the matrices \f$A\f$ and \f$B\f$ to
-*  determine the number of intermediate products that will result from multipltying \f$A\f$ and \f$B\f$ together.
+*  determine the number of intermediate products that will result from multiplying \f$A\f$ and \f$B\f$ together.
 *
 *  \p hipsparseSpGEMM_workEstimation supports multiple combinations of data types and compute types. See \ref hipsparseSpGEMM_copy
 *  for a complete listing of all the data type and compute type combinations available.
 *
 *  @param[in]
-*  handle           handle to the hipsparse library context queue.
+*  handle           handle to the hipSPARSE library context queue.
 *  @param[in]
 *  opA              sparse matrix \f$A\f$ operation type.
 *  @param[in]
@@ -92,15 +92,14 @@ hipsparseStatus_t hipsparseSpGEMM_destroyDescr(hipsparseSpGEMMDescr_t descr);
 *  externalBuffer1  temporary storage buffer allocated by the user.
 *
 *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p alpha, \p beta, \p matA, \p matB, \p matC
-*                                         or \p bufferSize1 pointer is invalid.
-*  \retval HIPSPARSE_STATUS_ALLOC_FAILED additional buffer for long rows could not be
-*          allocated.
-*  \retval HIPSPARSE_STATUS_NOT_SUPPORTED
-*          \p opA != \ref HIPSPARSE_OPERATION_NON_TRANSPOSE or
+*  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p alpha, \p beta, \p matA, \p matB, \p matC,
+*          \p spgemmDescr, or \p bufferSize1 is nullptr, or \p opA or \p opB is invalid.
+*  \retval HIPSPARSE_STATUS_ALLOC_FAILED additional buffer for long rows could not be allocated.
+*  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p opA != \ref HIPSPARSE_OPERATION_NON_TRANSPOSE or
 *          \p opB != \ref HIPSPARSE_OPERATION_NON_TRANSPOSE.
 *
-*  \par Example (See full example below)
+*  \par Example (see full example below)
 *  \code{.c}
 *    void*  dBuffer1  = NULL;
 *    size_t bufferSize1 = 0;
@@ -159,10 +158,10 @@ hipsparseStatus_t hipsparseSpGEMM_workEstimation(hipsparseHandle_t      handle,
 *  \f[
 *    C' := \alpha \cdot op(A) \cdot op(B) + \beta \cdot C,
 *  \f]
-*  where \f$C'\f$, \f$A\f$, \f$B\f$, \f$C\f$ are sparse matrices and \f$C'\f$ and \f$C\f$ have the same sparsity pattern.
+*  where \f$C'\f$, \f$A\f$, \f$B\f$, and \f$C\f$ are sparse matrices and \f$C'\f$ and \f$C\f$ have the same sparsity pattern.
 *
 *  \details
-*  \p hipsparseSpGEMM_compute is called twice. First to compute the size of the second required user allocated
+*  \p hipsparseSpGEMM_compute is called twice, first to compute the size of the second required user-allocated
 *  buffer. After this buffer size is determined, the user allocates it and calls \p hipsparseSpGEMM_compute
 *  a second time with the newly allocated buffer passed in. This second call performs the actual computation
 *  of \f$C' = \alpha \cdot A \cdot B\f$ (the result is stored in the temporary buffers).
@@ -171,7 +170,7 @@ hipsparseStatus_t hipsparseSpGEMM_workEstimation(hipsparseHandle_t      handle,
 *  for a complete listing of all the data type and compute type combinations available.
 *
 *  @param[in]
-*  handle           handle to the hipsparse library context queue.
+*  handle           handle to the hipSPARSE library context queue.
 *  @param[in]
 *  opA              sparse matrix \f$A\f$ operation type.
 *  @param[in]
@@ -198,7 +197,7 @@ hipsparseStatus_t hipsparseSpGEMM_workEstimation(hipsparseHandle_t      handle,
 *  externalBuffer2  temporary storage buffer allocated by the user.
 *
 *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p alpha, \p beta, \p matA, \p matB, \p matC
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p alpha, \p beta, \p matA, \p matB, \p matC,
 *                                         or \p bufferSize2 pointer is invalid.
 *  \retval HIPSPARSE_STATUS_ALLOC_FAILED additional buffer for long rows could not be
 *          allocated.
@@ -206,7 +205,7 @@ hipsparseStatus_t hipsparseSpGEMM_workEstimation(hipsparseHandle_t      handle,
 *          \p opA != \ref HIPSPARSE_OPERATION_NON_TRANSPOSE or
 *          \p opB != \ref HIPSPARSE_OPERATION_NON_TRANSPOSE.
 *
-*  \par Example (See full example below)
+*  \par Example (see full example below)
 *  \code{.c}
 *    void*  dBuffer2  = NULL;
 *    size_t bufferSize2 = 0;
@@ -262,7 +261,7 @@ hipsparseStatus_t hipsparseSpGEMM_compute(hipsparseHandle_t      handle,
 *  \f[
 *    C' := \alpha \cdot op(A) \cdot op(B) + \beta \cdot C,
 *  \f]
-*  where \f$C'\f$, \f$A\f$, \f$B\f$, \f$C\f$ are sparse matrices and \f$C'\f$ and \f$C\f$ have the same sparsity pattern.
+*  where \f$C'\f$, \f$A\f$, \f$B\f$, and \f$C\f$ are sparse matrices and \f$C'\f$ and \f$C\f$ have the same sparsity pattern.
 *
 *  \details
 *  \p hipsparseSpGEMM_copy is called once to copy the results (that are currently stored in the temporary arrays)
@@ -271,9 +270,9 @@ hipsparseStatus_t hipsparseSpGEMM_compute(hipsparseHandle_t      handle,
 *  the same sparsity pattern.
 *
 *  \p hipsparseSpGEMM_copy supports multiple combinations of data types and compute types. The tables below indicate the currently
-*  supported different data types that can be used for for the sparse matrices \f$op(A)\f$, \f$op(B)\f$, \f$C\f$, and \f$C'\f$
+*  supported different data types that can be used for the sparse matrices \f$op(A)\f$, \f$op(B)\f$, \f$C\f$, and \f$C'\f$
 *  and the compute type for \f$\alpha\f$ and \f$\beta\f$. The advantage of using different data types is to save on
-*  memory bandwidth and storage when a user application allows while performing the actual computation in a higher precision.
+*  memory bandwidth and storage when a user application supports it, while performing the actual computation in a higher precision.
 *
 *  \par Uniform Precisions:
 *  <table>
@@ -291,7 +290,7 @@ hipsparseStatus_t hipsparseSpGEMM_compute(hipsparseHandle_t      handle,
 *  \note The two user allocated temporary buffers can only be freed after the call to \p hipsparseSpGEMM_copy
 *
 *  @param[in]
-*  handle           handle to the hipsparse library context queue.
+*  handle           handle to the hipSPARSE library context queue.
 *  @param[in]
 *  opA              sparse matrix \f$A\f$ operation type.
 *  @param[in]
@@ -314,15 +313,12 @@ hipsparseStatus_t hipsparseSpGEMM_compute(hipsparseHandle_t      handle,
 *  spgemmDescr      SpGEMM descriptor.
 *
 *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p alpha, \p beta, \p matA, \p matB, \p matC pointer is invalid.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p alpha, \p beta, \p matA, \p matB, or \p matC pointer is invalid.
 *  \retval HIPSPARSE_STATUS_ALLOC_FAILED additional buffer for long rows could not be
 *          allocated.
 *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED
 *          \p opA != \ref HIPSPARSE_OPERATION_NON_TRANSPOSE or
 *          \p opB != \ref HIPSPARSE_OPERATION_NON_TRANSPOSE.
-*
-*  \par Example (Full example)
-*  \snippet example_hipsparse_spgemm.cpp doc example
 */
 #if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 HIPSPARSE_EXPORT

@@ -173,6 +173,7 @@ void ParseProblemKey(const std::string& key_, conv::ProblemDescription& prob_des
     TensorDescriptor wei{};
     TensorDescriptor out{};
     ConvolutionDescriptor conv;
+    bool use_tf32 = false;
     if(opt.size() >= 2)
     {
         key = opt[0];
@@ -293,7 +294,12 @@ void ParseProblemKey(const std::string& key_, conv::ProblemDescription& prob_des
         conv::ProblemDescription tmp{in, wei, out, conv, dir};
     }
     conv.group_count = group_cnt;
-    prob_desc        = conv::ProblemDescription{in, wei, out, conv, dir};
+    if(precision == miopenFloat)
+    {
+        const auto math_type_ = use_tf32 ? miopenMathDefault : miopenMathPedantic;
+        conv.attribute.Set(MIOPEN_CONVOLUTION_ATTRIB_MATH_TYPE, static_cast<int>(math_type_));
+    }
+    prob_desc = conv::ProblemDescription{in, wei, out, conv, dir};
 }
 
 struct FDBVal
@@ -363,6 +369,7 @@ void GetPerfDbVals(const fs::path& filename,
     const auto& perf_db =
         miopen::ReadonlyRamDb::GetCached(miopen::DbKinds::PerfDb, filename.string(), true);
     const auto& perf_db_map = perf_db.GetCacheMap();
+    auto& perf_db_rw = miopen::RamDb::GetCached(miopen::DbKinds::PerfDb, filename.string(), false);
 
     std::ostringstream ss;
     conv::ProblemDescription::VisitAll(problem_config, [&](auto&& value, auto&&) {
@@ -374,6 +381,7 @@ void GetPerfDbVals(const fs::path& filename,
 
     if(perf_db_map.find(key) != perf_db_map.end())
     {
+        bool duplicate = false;
         std::istringstream pdb_line{perf_db_map.at(key).content};
         char fragment[1024];
         while(pdb_line.getline(fragment, 1024, ';'))
@@ -383,7 +391,26 @@ void GetPerfDbVals(const fs::path& filename,
             ASSERT_TRUE(id_size != std::string::npos) << "Ill formed value: " << id_val;
             auto id  = id_val.substr(0, id_size);
             auto cfg = id_val.substr(id_size + 1);
+
+            if(env::enabled(MIOPEN_DBSYNC_CLEAN) && vals.find(id) != vals.end())
+            {
+                duplicate = true;
+                MIOPEN_LOG_E("Duplicate ID: " << id << "; key: " << key);
+                continue;
+            }
+            else
+            {
+                EXPECT_TRUE(vals.count(id) == 0)
+                    << "Duplicate ID in perf DB: " << id << "; key: " << key;
+            }
+
             vals.emplace(id, cfg);
+        }
+        if(env::enabled(MIOPEN_DBSYNC_CLEAN) && duplicate)
+        {
+            MIOPEN_LOG_W("Rewrite Record at key: " << key);
+            const auto record = *perf_db_rw.FindRecord(problem_config);
+            perf_db_rw.StoreRecord(record);
         }
         select_query = " Loading " + key + " from " + filename.string();
     }
@@ -523,6 +550,11 @@ void SetupPaths(fs::path& fdb_file_path,
 
 TEST(CPU_DBSync_NONE, KDBTargetID)
 {
+#if defined(__SANITIZE_ADDRESS__) || (defined(__has_feature) && __has_feature(address_sanitizer))
+    // Skip kernel db test when AddressSanitizer is enabled as we have not built and cached
+    // the kernels with AddressSanitizer enabled.
+    GTEST_SKIP();
+#else
     // Skip this test for gfx11 and gfx12 to avoid test failure (we don't have databases for those
     // devices yet)
     const auto& handle = get_handle();
@@ -541,6 +573,7 @@ TEST(CPU_DBSync_NONE, KDBTargetID)
     std::ignore = pdb_file_path;
     EXPECT_TRUE(miopen::CheckKDBJournalMode(kdb_file_path));
     EXPECT_FALSE(!SKIP_KDB_PDB_TESTING && miopen::CheckKDBForTargetID(kdb_file_path));
+#endif
 }
 
 bool LogBuildMessage()
@@ -606,6 +639,7 @@ void CheckDynamicFDBEntry(size_t thread_index,
         miopen::conv::ProblemDescription problem;
         miopen::ParseProblemKey(kinder.first, problem);
         problem.SetupFloats(ctx); // TODO: Check if this is necessary
+        problem.SetupComputeType(ctx);
         std::stringstream ss;
         problem.Serialize(ss);
         ASSERT_TRUE(ss.str() == kinder.first)
@@ -711,6 +745,7 @@ void CheckFDBEntry(size_t thread_index,
         miopen::conv::ProblemDescription problem;
         miopen::ParseProblemKey(kinder.first, problem);
         problem.SetupFloats(ctx); // TODO: Check if this is necessary
+        problem.SetupComputeType(ctx);
         std::stringstream ss;
         problem.Serialize(ss);
         // moment of truth
@@ -995,10 +1030,16 @@ struct CPU_DBSync_NONE : testing::TestWithParam<std::pair<std::string, size_t>>
 
 TEST_P(CPU_DBSync_NONE, StaticFDBSync)
 {
+#if defined(__SANITIZE_ADDRESS__) || (defined(__has_feature) && __has_feature(address_sanitizer))
+    // Skip database sync tests when AddressSanitizer is enabled as the database
+    // file naming may not match the expected xnack configuration.
+    GTEST_SKIP();
+#else
     std::string arch;
     size_t num_cu;
     std::tie(arch, num_cu) = GetParam();
     StaticFDBSync(arch, num_cu);
+#endif
 }
 
 INSTANTIATE_TEST_SUITE_P(Smoke,

@@ -31,8 +31,7 @@
 #include <miopen/solver_id.hpp>
 #include <miopen/miopen.h>
 
-#include <boost/optional.hpp>
-
+#include <optional>
 #include <ostream>
 
 namespace miopen {
@@ -61,7 +60,7 @@ enum class FindEnforceAction
     EnforcedLast_  = DbClean,
 };
 
-class MIOPEN_INTERNALS_EXPORT FindEnforce
+class FindEnforce
 {
     FindEnforceAction action;
 
@@ -73,7 +72,7 @@ private:
     }
 
 public:
-    FindEnforce();
+    MIOPEN_INTERNALS_EXPORT FindEnforce();
     explicit FindEnforce(FindEnforceAction action_) : action(action_) {}
 
     template <class Context>
@@ -85,9 +84,8 @@ public:
     template <class Context>
     bool IsSearch(const Context& context) const
     {
-        return IsEnabled(context) && (action == FindEnforceAction::Search ||
-                                      action == FindEnforceAction::SearchDbUpdate ||
-                                      action == FindEnforceAction::DbUpdate);
+        return IsEnabled(context) &&
+               (action == FindEnforceAction::Search || action == FindEnforceAction::SearchDbUpdate);
     }
 
     template <class Context>
@@ -107,9 +105,9 @@ public:
     MIOPEN_INTERNALS_EXPORT friend std::ostream& operator<<(std::ostream&, const FindEnforce&);
 };
 
-MIOPEN_INTERNALS_EXPORT boost::optional<std::vector<solver::Id>> GetEnvFindOnlySolver();
+MIOPEN_INTERNALS_EXPORT std::optional<std::vector<solver::Id>> GetEnvFindOnlySolver();
 
-class MIOPEN_INTERNALS_EXPORT FindMode
+class FindMode
 {
 public:
     enum class Values
@@ -142,7 +140,7 @@ private:
 
 public:
     // Todo: remove default value of primitive
-    FindMode(solver::Primitive primitive = solver::Primitive::Convolution);
+    MIOPEN_INTERNALS_EXPORT FindMode(solver::Primitive primitive = solver::Primitive::Convolution);
     Values Get() const { return value; }
     void Set(Values const v) { value = v; }
 
@@ -173,7 +171,7 @@ public:
     {
         // TrustVerify uses user db as groud truth, disable if no user db
 #if MIOPEN_DISABLE_USERDB
-        return false
+        return false;
 #else
         return (value == Values::TrustVerify || value == Values::TrustVerifyFull) &&
                IsEnabled(context);

@@ -35,8 +35,8 @@ extern "C" {
 *  storage buffer must be allocated by the user.
 *
 *  \note
-*  This function is non blocking and executed asynchronously with respect to the host.
-*  It may return before the actual computation has finished.
+*  This function is non-blocking and executed asynchronously with respect to the host.
+*  It can return before the actual computation has finished.
 *
 *  \note
 *  This routine supports execution in a hipGraph context.
@@ -44,27 +44,29 @@ extern "C" {
 *  @param[in]
 *  handle             handle to the hipSPARSE library context queue.
 *  @param[in]
-*  m                  size of the tri-diagonal linear system (must be >= 2).
+*  m                  size of the tridiagonal linear system. Must be at least 2.
 *  @param[in]
-*  n                  number of columns in the dense matrix B.
+*  n                  number of columns in the dense matrix B. Must be non-negative.
 *  @param[in]
-*  dl                 lower diagonal of tri-diagonal system. First entry must be zero.
+*  dl                 lower diagonal of the tridiagonal system. The first entry must be zero.
 *  @param[in]
-*  d                  main diagonal of tri-diagonal system.
+*  d                  main diagonal of the tridiagonal system.
 *  @param[in]
-*  du                 upper diagonal of tri-diagonal system. Last entry must be zero.
+*  du                 upper diagonal of the tridiagonal system. The last entry must be zero.
 *  @param[in]
-*  B                  Dense matrix of size ( \p ldb, \p n ).
+*  B                  dense matrix of size ( \p ldb, \p n ).
 *  @param[in]
-*  ldb                Leading dimension of B. Must satisfy \p ldb >= max(1, m).
+*  ldb                leading dimension of B. Must satisfy \p ldb >= max(1, m).
 *  @param[out]
 *  pBufferSizeInBytes number of bytes of the temporary storage buffer required by
 *                     \ref hipsparseSgtsv2 "hipsparseXgtsv2()".
 *
-*  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p ldb, \p dl, \p d, \p du,
-*              \p B or \p pBufferSizeInBytes pointer is invalid.
-*  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
+*  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
+*  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p dl, \p d, \p du, \p B, or
+*          \p pBufferSizeInBytes is nullptr, \p m is less than 2, \p n is negative,
+*          or \p ldb is invalid.
+*  \retval HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
 */
 /**@{*/
 HIPSPARSE_EXPORT
@@ -116,24 +118,24 @@ hipsparseStatus_t hipsparseZgtsv2_bufferSizeExt(hipsparseHandle_t       handle,
 *  \brief Tridiagonal solver with pivoting
 *
 *  \details
-*  \p hipsparseXgtsv2 solves a tridiagonal system for multiple right hand sides using pivoting
+*  \p hipsparseXgtsv2 solves a tridiagonal system for multiple right-hand sides using pivoting
 *  \f[
 *    T*B = B
 *  \f]
 *  where \f$T\f$ is a sparse tridiagonal matrix and \f$B\f$ is a dense \f$ldb \times n\f$ matrix storing the
 *  right-hand side vectors in column order. The tridiagonal matrix \f$T\f$ is defined by three vectors: \p dl
-*  for the lower diagonal, \p d for the main diagonal and \p du for the upper diagonal.
+*  for the lower diagonal, \p d for the main diagonal, and \p du for the upper diagonal.
 *
 *  Solving the tridiagonal system involves two steps. First, the user calls
-*  \ref hipsparseSgtsv2_bufferSizeExt "hipsparseXgtsv2_bufferSizeExt()" in order to determine the size of the required
-*  temporary storage buffer. Once determined, the user allocates this buffer and passes it to
+*  \ref hipsparseSgtsv2_bufferSizeExt "hipsparseXgtsv2_bufferSizeExt()" to determine the size of the required
+*  temporary storage buffer. After this is determined, the user allocates the buffer and passes it to
 *  \ref hipsparseSgtsv2 "hipsparseXgtsv2()" to perform the actual solve. The \f$B\f$ dense matrix, which initially
 *  stores the \p n right-hand side vectors, is overwritten with the \p n solution vectors after the call to
 *  \ref hipsparseSgtsv2 "hipsparseXgtsv2()".
 *
 *  \note
-*  This function is non blocking and executed asynchronously with respect to the host.
-*  It may return before the actual computation has finished.
+*  This function is non-blocking and executed asynchronously with respect to the host.
+*  It can return before the actual computation has finished.
 *
 *  \note
 *  This routine supports execution in a hipGraph context.
@@ -141,15 +143,15 @@ hipsparseStatus_t hipsparseZgtsv2_bufferSizeExt(hipsparseHandle_t       handle,
 *  @param[in]
 *  handle      handle to the hipSPARSE library context queue.
 *  @param[in]
-*  m           size of the tri-diagonal linear system (must be >= 2).
+*  m           size of the tridiagonal linear system (must be >= 2).
 *  @param[in]
 *  n           number of columns in the dense matrix B.
 *  @param[in]
-*  dl          lower diagonal of tri-diagonal system. First entry must be zero.
+*  dl          lower diagonal of the tridiagonal system. The first entry must be zero.
 *  @param[in]
-*  d           main diagonal of tri-diagonal system.
+*  d           main diagonal of the tridiagonal system.
 *  @param[in]
-*  du          upper diagonal of tri-diagonal system. Last entry must be zero.
+*  du          upper diagonal of the tridiagonal system. The last entry must be zero.
 *  @param[inout]
 *  B           Dense matrix of size ( \p ldb, \p n ).
 *  @param[in]
@@ -159,11 +161,8 @@ hipsparseStatus_t hipsparseZgtsv2_bufferSizeExt(hipsparseHandle_t       handle,
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p ldb, \p dl, \p d,
-*              \p du, \p B or \p pBuffer pointer is invalid.
+*              \p du, \p B, or \p pBuffer pointer is invalid.
 *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
-*
-*  \par Example
-*  \snippet example_hipsparse_gtsv.cpp doc example
 */
 /**@{*/
 HIPSPARSE_EXPORT

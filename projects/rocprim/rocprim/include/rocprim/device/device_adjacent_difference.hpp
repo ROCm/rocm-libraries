@@ -1,4 +1,4 @@
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -57,38 +57,6 @@ BEGIN_ROCPRIM_NAMESPACE
 namespace detail
 {
 
-template<class Config,
-         bool InPlace,
-         bool Right,
-         typename InputIt,
-         typename OutputIt,
-         typename BinaryFunction>
-inline hipError_t launch_adjacent_difference(
-    detail::target_arch                                       arch,
-    const InputIt                                             input,
-    const OutputIt                                            output,
-    const std::size_t                                         size,
-    const BinaryFunction                                      op,
-    const typename std::iterator_traits<InputIt>::value_type* previous_values,
-    const std::size_t                                         starting_block,
-    dim3                                                      grid,
-    dim3                                                      block,
-    size_t                                                    shmem,
-    hipStream_t                                               stream)
-{
-    auto kernel = [=](auto arch_config)
-    {
-        adjacent_difference_kernel_impl<decltype(arch_config), InPlace, Right>(input,
-                                                                               output,
-                                                                               size,
-                                                                               op,
-                                                                               previous_values,
-                                                                               starting_block);
-    };
-
-    return execute_launch_plan<Config>(arch, kernel, grid, block, shmem, stream);
-}
-
 template<typename Config,
          bool InPlace,
          bool Right,
@@ -109,17 +77,11 @@ hipError_t adjacent_difference_impl(void* const          temporary_storage,
     using larger_type
         = std::conditional_t<(sizeof(value_type) >= sizeof(output_type)), value_type, output_type>;
 
-    using config = wrapped_adjacent_difference_config<Config, InPlace, larger_type>;
+    using Selector = adjacent_difference_config_selector<InPlace, larger_type>;
 
-    detail::target_arch target_arch;
-    hipError_t          result = detail::host_target_arch(stream, target_arch);
-    if(result != hipSuccess)
-    {
-        return result;
-    }
+    const target current_target(stream);
 
-    const detail::adjacent_difference_config_params params
-        = detail::dispatch_target_arch<config, false>(target_arch);
+    const auto params = get_config<Selector>(Config{}, current_target);
 
     const unsigned int block_size          = params.kernel_config.block_size;
     const unsigned int items_per_thread    = params.kernel_config.items_per_thread;
@@ -204,18 +166,24 @@ hipError_t adjacent_difference_impl(void* const          temporary_storage,
             start = std::chrono::steady_clock::now();
         }
 
-        ROCPRIM_RETURN_ON_ERROR(
-            launch_adjacent_difference<config, InPlace, Right>(target_arch,
-                                                               input + offset,
-                                                               output + offset,
-                                                               size,
-                                                               op,
-                                                               previous_values + starting_block,
-                                                               starting_block,
-                                                               current_blocks,
-                                                               block_size,
-                                                               0,
-                                                               stream));
+        auto adjacent_difference_kernel = [=](auto target_config)
+        {
+            adjacent_difference_kernel_impl<decltype(target_config), InPlace, Right>(
+                input + offset,
+                output + offset,
+                size,
+                op,
+                previous_values + starting_block,
+                starting_block);
+        };
+
+        ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<Config, Selector>(current_target,
+                                                                      adjacent_difference_kernel,
+                                                                      current_blocks,
+                                                                      block_size,
+                                                                      0,
+                                                                      stream));
+
         ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("adjacent_difference_kernel",
                                                     current_size,
                                                     start);
@@ -272,6 +240,8 @@ hipError_t adjacent_difference_impl(void* const          temporary_storage,
 /// \parblock
 /// In this example a device-level adjacent_difference operation is performed on integer values.
 ///
+/// The full example is [on GitHub](https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocprim/example/rocprim/device/example_device_adjacent_difference.cpp).
+///
 /// \code{.cpp}
 /// #include <rocprim/rocprim.hpp> //or <rocprim/device/device_adjacent_difference.hpp>
 ///
@@ -284,7 +254,7 @@ hipError_t adjacent_difference_impl(void* const          temporary_storage,
 ///
 /// // Prepare input and output (declare pointers, allocate device memory etc.)
 /// std::size_t size; // e.g., 8
-/// int* input1; // e.g., [8, 7, 6, 5, 4, 3, 2, 1]
+/// int* input1; // e.g., [1, 2, 3, 4, 5, 6, 7, 8]
 /// int* output; // empty array of 8 elements
 ///
 /// std::size_t temporary_storage_size_bytes;
@@ -303,7 +273,7 @@ hipError_t adjacent_difference_impl(void* const          temporary_storage,
 ///     temporary_storage_ptr, temporary_storage_size_bytes,
 ///     input, output, size, binary_op
 /// );
-/// // output: [8, 1, 1, 1, 1, 1, 1, 1]
+/// // output: [1, 1, 1, 1, 1, 1, 1, 1]
 /// \endcode
 /// \endparblock
 template<typename Config = default_config,

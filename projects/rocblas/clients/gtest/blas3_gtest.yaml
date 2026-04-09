@@ -9,6 +9,8 @@ include: geam_gtest.yaml
 include: geam_ex_gtest.yaml
 include: symm_gtest.yaml
 include: syrk_gtest.yaml
+include: syrk_ex_gtest.yaml
+include: herk_ex_gtest.yaml
 include: syr2k_gtest.yaml
 include: syrkx_gtest.yaml
 include: hemm_gtest.yaml

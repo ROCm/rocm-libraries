@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -215,6 +215,63 @@ void unit_check_enum(const rocsparse_indextype a, const rocsparse_indextype b)
     ASSERT_TRUE(a == b);
 }
 
+template <>
+void unit_check_enum(const rocsparse_status a, const rocsparse_status b)
+{
+    ASSERT_TRUE(a == b);
+}
+
+template <typename T>
+void check_integer(const T* a)
+{
+#ifdef GOOGLE_TEST
+    if constexpr(std::is_same<T, rocsparse_float_complex>::value
+                 || std::is_same<T, rocsparse_double_complex>::value)
+    {
+        auto val       = *a;
+        auto real_part = std::real(val);
+        auto imag_part = std::imag(val);
+        EXPECT_EQ(real_part, std::round(real_part)) << "Real part is not an integer: " << real_part;
+        EXPECT_EQ(imag_part, std::round(imag_part))
+            << "Imaginary part is not an integer: " << imag_part;
+    }
+    else
+    {
+        auto val = *a;
+        EXPECT_EQ(val, std::round(val)) << "Value is not an integer: " << val;
+    }
+#else
+    if constexpr(std::is_same<T, rocsparse_float_complex>::value
+                 || std::is_same<T, rocsparse_double_complex>::value)
+    {
+        auto val       = *a;
+        auto real_part = std::real(val);
+        auto imag_part = std::imag(val);
+        if(real_part != std::round(real_part) || imag_part != std::round(imag_part))
+        {
+            std::cerr << "Value is not an integer: (" << real_part << ", " << imag_part << ")"
+                      << " (diffs: " << real_part - std::round(real_part) << ", "
+                      << imag_part - std::round(imag_part) << ")" << std::endl;
+            exit(EXIT_FAILURE);
+        }
+    }
+    else
+    {
+        auto val = *a;
+        if(val != std::round(val))
+        {
+            std::cerr << "Value is not an integer: " << val << std::endl;
+            exit(EXIT_FAILURE);
+        }
+    }
+#endif
+}
+
+template void check_integer(const float*);
+template void check_integer(const double*);
+template void check_integer(const rocsparse_float_complex*);
+template void check_integer(const rocsparse_double_complex*);
+
 #define MAX_TOL_MULTIPLIER 4
 
 template <typename T>
@@ -234,7 +291,7 @@ void near_check_general_template(int64_t            M,
         for(int64_t i = 0; i < M; ++i)
         {
             T compare_val = std::max(rocsparse_abs(A[i + j * LDA] * tol),
-                                     10 * std::numeric_limits<T>::epsilon());
+                                     static_cast<T>(10) * std::numeric_limits<T>::epsilon());
 #ifdef GOOGLE_TEST
             if(rocsparse_isnan(A[i + j * LDA]))
             {
@@ -250,7 +307,8 @@ void near_check_general_template(int64_t            M,
                 int k;
                 for(k = 1; k <= MAX_TOL_MULTIPLIER; ++k)
                 {
-                    if(rocsparse_abs(A[i + j * LDA] - B[i + j * LDB]) <= compare_val * k)
+                    if(rocsparse_abs(A[i + j * LDA] - B[i + j * LDB])
+                       <= compare_val * static_cast<T>(k))
                     {
                         break;
                     }
@@ -267,7 +325,8 @@ void near_check_general_template(int64_t            M,
                                 << "ASSERT_NEAR(" << A[i + j * LDA] << ", " << B[i + j * LDB]
                                 << ") failed: " << rocsparse_abs(A[i + j * LDA] - B[i + j * LDB])
                                 << " exceeds permissive range [" << compare_val << ","
-                                << compare_val * MAX_TOL_MULTIPLIER << " ]" << std::endl;
+                                << compare_val * static_cast<T>(MAX_TOL_MULTIPLIER) << " ]"
+                                << std::endl;
                         }
 
                         min_passing_tol = std::max(min_passing_tol,
@@ -483,6 +542,7 @@ void near_check_general(
 
 INSTANTIATE(int32_t);
 INSTANTIATE(_Float16);
+INSTANTIATE(rocsparse_bfloat16);
 INSTANTIATE(float);
 INSTANTIATE(double);
 INSTANTIATE(rocsparse_float_complex);

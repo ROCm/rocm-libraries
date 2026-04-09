@@ -4,7 +4,7 @@
 #ifndef CK_CONFIG_AMD_HPP
 #define CK_CONFIG_AMD_HPP
 
-#ifndef MIOPEN_DONT_USE_HIP_RUNTIME_HEADERS
+#ifndef MIOPEN_HIP_RUNTIME_COMPILE
 #include "hip/hip_runtime.h"
 #include "hip/hip_fp16.h"
 #endif
@@ -20,7 +20,8 @@
       defined(CK_AMD_GPU_GFX908) || defined(CK_AMD_GPU_GFX90A) || defined(CK_AMD_GPU_GFX942) ||    \
       defined(CK_AMD_GPU_GFX950) || defined(CK_AMD_GPU_GFX1030) || defined(CK_AMD_GPU_GFX1031) ||  \
       defined(CK_AMD_GPU_GFX1036) || defined(CK_AMD_GPU_GFX1100) || defined(CK_AMD_GPU_GFX1101) || \
-      defined(CK_AMD_GPU_GFX1102) || defined(CK_AMD_GPU_GFX1150) || defined(CK_AMD_GPU_GFX1151) || \
+      defined(CK_AMD_GPU_GFX1102) || defined(CK_AMD_GPU_GFX1103) || defined(CK_AMD_GPU_GFX1150) || \
+      defined(CK_AMD_GPU_GFX1151) || defined(CK_AMD_GPU_GFX1152) || defined(CK_AMD_GPU_GFX1153) || \
       defined(CK_AMD_GPU_GFX1200) || defined(CK_AMD_GPU_GFX1201))
 #error No CK_AMD_GPU_GFX* macro defined. Exactly one target must be defined.
 #endif
@@ -40,7 +41,8 @@
 #define CK_BUFFER_RESOURCE_3RD_DWORD 0x00020000
 #elif defined(CK_AMD_GPU_GFX1030) || defined(CK_AMD_GPU_GFX1031) || defined(CK_AMD_GPU_GFX1036) || \
     defined(CK_AMD_GPU_GFX1100) || defined(CK_AMD_GPU_GFX1101) || defined(CK_AMD_GPU_GFX1102) ||   \
-    defined(CK_AMD_GPU_GFX1150) || defined(CK_AMD_GPU_GFX1151) || defined(CK_AMD_GPU_GFX1200) ||   \
+    defined(CK_AMD_GPU_GFX1103) || defined(CK_AMD_GPU_GFX1150) || defined(CK_AMD_GPU_GFX1151) ||   \
+    defined(CK_AMD_GPU_GFX1152) || defined(CK_AMD_GPU_GFX1153) || defined(CK_AMD_GPU_GFX1200) ||   \
     defined(CK_AMD_GPU_GFX1201)
 #define CK_BUFFER_RESOURCE_3RD_DWORD 0x31014000
 #endif
@@ -51,7 +53,8 @@
 #elif defined(CK_AMD_GPU_GFX906) || defined(CK_AMD_GPU_GFX908) || defined(CK_AMD_GPU_GFX90a) ||  \
     defined(CK_AMD_GPU_GFX942) || defined(CK_AMD_GPU_GFX1030) || defined(CK_AMD_GPU_GFX1031) ||  \
     defined(CK_AMD_GPU_GFX1100) || defined(CK_AMD_GPU_GFX1101) || defined(CK_AMD_GPU_GFX1102) || \
-    defined(CK_AMD_GPU_GFX1150) || defined(CK_AMD_GPU_GFX1151) || defined(CK_AMD_GPU_GFX1200) || \
+    defined(CK_AMD_GPU_GFX1103) || defined(CK_AMD_GPU_GFX1150) || defined(CK_AMD_GPU_GFX1151) || \
+    defined(CK_AMD_GPU_GFX1152) || defined(CK_AMD_GPU_GFX1153) || defined(CK_AMD_GPU_GFX1200) || \
     defined(CK_AMD_GPU_GFX1201)
 #define CK_USE_AMD_V_FMAC_F32
 #define CK_USE_AMD_V_DOT2_F32_F16

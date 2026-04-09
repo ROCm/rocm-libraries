@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -46,38 +46,9 @@ BEGIN_ROCPRIM_NAMESPACE
 namespace detail
 {
 
-template<class Config,
-         bool IsPointer,
-         class ResultType,
-         class InputIt,
-         class OutputIt,
-         class UnaryOp>
-inline hipError_t launch_transform(detail::target_arch arch,
-                                   InputIt             in,
-                                   OutputIt            out,
-                                   size_t              n,
-                                   UnaryOp             op,
-                                   dim3                grid,
-                                   dim3                block,
-                                   size_t              shmem,
-                                   hipStream_t         stream)
-{
-    auto kernel = [=](auto arch_config)
-    {
-        constexpr auto params = decltype(arch_config)::params;
-
-        detail::transform_kernel_impl<IsPointer,
-                                      params.kernel_config.block_size,
-                                      params.kernel_config.items_per_thread,
-                                      params.load_type,
-                                      ResultType>(in, n, out, op);
-    };
-
-    return execute_launch_plan<Config>(arch, kernel, grid, block, shmem, stream);
-}
-
 template<bool IsPointer,
          class Config,
+         class Selector,
          class InputIterator,
          class OutputIterator,
          class UnaryFunction>
@@ -88,24 +59,17 @@ inline hipError_t transform_impl(InputIterator     input,
                                  const hipStream_t stream,
                                  bool              debug_synchronous)
 {
+    using input_type  = typename std::iterator_traits<InputIterator>::value_type;
+    using result_type = typename ::rocprim::invoke_result<UnaryFunction, input_type>::type;
+
     if(size == size_t(0))
     {
         return hipSuccess;
     }
 
-    using input_type  = typename std::iterator_traits<InputIterator>::value_type;
-    using result_type = typename ::rocprim::invoke_result<UnaryFunction, input_type>::type;
+    const target current_target(stream);
 
-    using config = detail::wrapped_transform_config<Config, input_type, IsPointer>;
-
-    detail::target_arch target_arch;
-    hipError_t          result = detail::host_target_arch(stream, target_arch);
-    if(result != hipSuccess)
-    {
-        return result;
-    }
-    const detail::transform_config_params params
-        = detail::dispatch_target_arch<config, false>(target_arch);
+    const auto params = get_config<Selector>(Config{}, current_target);
 
     const unsigned int block_size       = params.kernel_config.block_size;
     const unsigned int items_per_thread = params.kernel_config.items_per_thread;
@@ -139,16 +103,26 @@ inline hipError_t transform_impl(InputIterator     input,
         {
             start = std::chrono::steady_clock::now();
         }
+        auto transform_kernel = [=](auto target_config)
+        {
+            constexpr auto params = decltype(target_config)::params;
 
-        ROCPRIM_RETURN_ON_ERROR(launch_transform<config, IsPointer, result_type>(target_arch,
-                                                                                 input + offset,
-                                                                                 output + offset,
-                                                                                 current_size,
-                                                                                 transform_op,
-                                                                                 current_blocks,
-                                                                                 block_size,
-                                                                                 0,
-                                                                                 stream));
+            detail::transform_kernel_impl<IsPointer,
+                                          params.kernel_config.block_size,
+                                          params.kernel_config.items_per_thread,
+                                          params.load_type,
+                                          result_type>(input + offset,
+                                                       current_size,
+                                                       output + offset,
+                                                       transform_op);
+        };
+
+        ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<Config, Selector>(current_target,
+                                                                      transform_kernel,
+                                                                      current_blocks,
+                                                                      block_size,
+                                                                      0,
+                                                                      stream));
         ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("transform_kernel", current_size, start);
     }
 
@@ -188,6 +162,8 @@ inline hipError_t transform_impl(InputIterator     input,
 /// In this example a device-level transform operation is performed on an array of
 /// integer values (<tt>short</tt>s are transformed into <tt>int</tt>s).
 ///
+/// The full example is [on GitHub](https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocprim/example/rocprim/device/example_device_search.cpp).
+///
 /// \code{.cpp}
 /// #include <rocprim/rocprim.hpp>
 ///
@@ -224,13 +200,17 @@ inline hipError_t transform(InputIterator     input,
     constexpr bool is_pointer
         = std::is_pointer<InputIterator>::value && std::is_pointer<OutputIterator>::value;
 
-    return detail::transform_impl<is_pointer, Config, InputIterator, OutputIterator, UnaryFunction>(
-        input,
-        output,
-        size,
-        transform_op,
-        stream,
-        debug_synchronous);
+    using input_type = typename std::iterator_traits<InputIterator>::value_type;
+    using selector   = detail::transform_config_selector<input_type, is_pointer>;
+
+    return detail::
+        transform_impl<is_pointer, Config, selector, InputIterator, OutputIterator, UnaryFunction>(
+            input,
+            output,
+            size,
+            transform_op,
+            stream,
+            debug_synchronous);
 }
 
 /// \brief Parallel device-level transform primitive for two inputs.

@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -95,11 +95,6 @@ namespace TensileLite
 
             virtual std::vector<ReturnValue>
                 findTopMatch(Object const& object, Transform transform, int numSolutions) const = 0;
-
-            virtual ReturnValue findBestEvaluationSolution(Object const&   object,
-                                                           Hardware const& hardware,
-                                                           Transform       transform) const
-                = 0;
 
             virtual std::vector<Value> matchesInOrder(Object const& object) const = 0;
 
@@ -365,85 +360,6 @@ namespace TensileLite
                     numSolutions);
             }
 
-            virtual ReturnValue findBestEvaluationSolution(Object const&   object,
-                                                           Hardware const& hardware,
-                                                           Transform       transform) const override
-            {
-                double bestDistance = std::numeric_limits<double>::max();
-
-                auto iter = this->table.begin();
-                if(iter == this->table.end())
-                    return this->nullValue;
-
-                ReturnValue theMatch = transform(iter->value);
-
-                ReturnValue bestMatch = theMatch;
-                if(theMatch != nullptr)
-                {
-                    size_t model_M          = iter->key[0];
-                    size_t model_N          = iter->key[1];
-                    size_t model_K          = 1;
-                    size_t model_NumBatches = 1;
-
-                    if(iter->key.size() > 3)
-                    {
-                        model_K          = iter->key[3];
-                        model_NumBatches = iter->key[2];
-                    }
-                    else
-                    {
-                        model_K = iter->key[2];
-                    }
-                    bestDistance = theMatch->computeTAMScore(object,
-                                                             hardware,
-                                                             (double)model_M,
-                                                             (double)model_N,
-                                                             (double)model_K,
-                                                             (double)model_NumBatches);
-                }
-
-                iter++;
-
-                while(iter != this->table.end())
-                {
-                    auto nextMatch = transform(iter->value);
-
-                    if(nextMatch != nullptr)
-                    {
-                        size_t model_M          = iter->key[0];
-                        size_t model_N          = iter->key[1];
-                        size_t model_K          = 1;
-                        size_t model_NumBatches = 1;
-
-                        if(iter->key.size() > 3)
-                        {
-                            model_K          = iter->key[3];
-                            model_NumBatches = iter->key[2];
-                        }
-                        else
-                        {
-                            model_K = iter->key[2];
-                        }
-                        double nextDistance = theMatch->computeTAMScore(object,
-                                                                        hardware,
-                                                                        (double)model_M,
-                                                                        (double)model_N,
-                                                                        (double)model_K,
-                                                                        (double)model_NumBatches);
-
-                        if(nextDistance < bestDistance)
-                        {
-                            bestMatch    = nextMatch;
-                            bestDistance = nextDistance;
-                        }
-                    }
-
-                    ++iter;
-                }
-
-                return bestMatch;
-            }
-
             virtual std::vector<Value> matchesInOrder(Object const& object) const override
             {
                 return keyMatchesInOrder(
@@ -593,9 +509,16 @@ namespace TensileLite
                     streamJoin(std::cout, key, ", ");
                     std::cout << std::endl;
 
-                    std::cout << "Starting point: ";
-                    streamJoin(std::cout, origIter->key, ", ");
-                    std::cout << std::endl;
+                    if(origIter == table.end())
+                    {
+                        std::cout << "Starting point: <end>" << std::endl;
+                    }
+                    else
+                    {
+                        std::cout << "Starting point: ";
+                        streamJoin(std::cout, origIter->key, ", ");
+                        std::cout << std::endl;
+                    }
 
                     std::cout << "Rightward search..." << std::endl;
                 }
@@ -869,6 +792,11 @@ namespace TensileLite
             {
                 auto comp = [](Entry const& e, Key const& key) { return e.key < key; };
                 auto iter = std::lower_bound(table.begin(), table.end(), key, comp);
+
+                if(iter == table.end())
+                {
+                    return std::make_tuple(this->nullValue, std::numeric_limits<double>::max());
+                }
 
                 return (iter->key == key)
                            ? std::make_tuple(transform(iter->value), 0.0)

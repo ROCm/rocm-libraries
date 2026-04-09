@@ -99,7 +99,9 @@ inline bool is_bias_enabled(hipblasLtEpilogue_t value_)
     case HIPBLASLT_EPILOGUE_GELU_BIAS:
     case HIPBLASLT_EPILOGUE_RELU_BIAS:
     case HIPBLASLT_EPILOGUE_GELU_AUX_BIAS:
+    case HIPBLASLT_EPILOGUE_RELU_AUX_BIAS:
     case HIPBLASLT_EPILOGUE_DGELU_BGRAD:
+    case HIPBLASLT_EPILOGUE_DRELU_BGRAD:
     case HIPBLASLT_EPILOGUE_BGRADA:
     case HIPBLASLT_EPILOGUE_BGRADB:
     case HIPBLASLT_EPILOGUE_SWISH_BIAS_EXT:
@@ -529,3 +531,9 @@ typename std::enable_if<!std::is_same<int8_t, T>::value, T>::type saturate_cast(
 std::vector<void*> benchmark_allocation();
 int32_t            hipblaslt_get_arch_major();
 void hipblaslt_print_version();
+
+/* ==================================================================== */
+/*! \brief write a matrix to file. */
+void hipblasltDispatchValuesToFile(hipblasOperation_t transA, hipDataType TiA,
+                                   int row, int col, int lda, void *hA,
+                                   std::string ADataFile);

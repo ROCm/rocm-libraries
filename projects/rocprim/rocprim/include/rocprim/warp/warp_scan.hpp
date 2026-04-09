@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -83,6 +83,8 @@ struct select_warp_scan_impl
 /// In the examples scan operation is performed on groups of 16 threads, each provides
 /// one \p int value, result is returned using the same variable as for input. Hardware
 /// warp size is 64. Block (tile) size is 64.
+///
+/// The full example is [on GitHub](https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocprim/example/rocprim/warp/example_warp_scan.cpp).
 ///
 /// \code{.cpp}
 /// __global__ void example_kernel(...)
@@ -191,10 +193,7 @@ public:
         {
             if(VirtualWaveSize > ::rocprim::arch::wavefront::size())
             {
-                ROCPRIM_PRINT_ERROR_ONCE(
-                    "Specified warp size exceeds current hardware supported warp "
-                    "size. Aborting warp sort.");
-                return;
+                __builtin_trap(); // behavior undefined if virtual wave size exceeds hardware limit
             }
         }
         base_type::inclusive_scan(input, output, storage, scan_op);
@@ -209,9 +208,7 @@ public:
         typename std::enable_if<(FunctionVirtualWaveSize > arch::wavefront::max_size()), void>::type
     {
         (void)scan_op;
-        ROCPRIM_PRINT_ERROR_ONCE("Specified warp size exceeds current hardware supported warp size "
-                                 ". Aborting warp sort.");
-        return;
+        __builtin_trap(); // behavior undefined if virtual wave size exceeds hardware limit
     }
 
     /// \brief Performs seeded inclusive scan across threads in a logical warp.
@@ -280,9 +277,7 @@ public:
         {
             if(VirtualWaveSize > ::rocprim::arch::wavefront::size())
             {
-                ROCPRIM_PRINT_ERROR_ONCE(
-                    "Specified warp size exceeds current hardware supported warp "
-                    "size. Aborting warp sort.");
+                __builtin_trap(); // behavior undefined if virtual wave size exceeds hardware limit
             }
         }
         base_type::inclusive_scan(input, output, storage, scan_op, init);
@@ -297,9 +292,7 @@ public:
         typename std::enable_if<(FunctionVirtualWaveSize > arch::wavefront::max_size()), void>::type
     {
         (void)scan_op;
-        ROCPRIM_PRINT_ERROR_ONCE("Specified warp size exceeds current hardware supported warp size "
-                                 ". Aborting warp sort.");
-        return;
+        __builtin_trap(); // behavior undefined if virtual wave size exceeds hardware limit
     }
 
     /// \brief Performs inclusive scan and reduction across threads in a logical warp.
@@ -366,9 +359,7 @@ public:
         {
             if(VirtualWaveSize > ::rocprim::arch::wavefront::size())
             {
-                ROCPRIM_PRINT_ERROR_ONCE(
-                    "Specified warp size exceeds current hardware supported warp "
-                    "size. Aborting warp sort.");
+                __builtin_trap(); // behavior undefined if virtual wave size exceeds hardware limit
             }
         }
         base_type::inclusive_scan(input, output, reduction, storage, scan_op);
@@ -383,9 +374,7 @@ public:
         typename std::enable_if<(FunctionVirtualWaveSize > arch::wavefront::max_size()), void>::type
     {
         (void)scan_op;
-        ROCPRIM_PRINT_ERROR_ONCE("Specified warp size exceeds current hardware supported warp size "
-                                 ". Aborting warp sort.");
-        return;
+        __builtin_trap(); // behavior undefined if virtual wave size exceeds hardware limit
     }
 
     /// \brief Performs seeded inclusive scan and reduction across threads in a logical warp.
@@ -458,9 +447,7 @@ public:
         {
             if(VirtualWaveSize > ::rocprim::arch::wavefront::size())
             {
-                ROCPRIM_PRINT_ERROR_ONCE(
-                    "Specified warp size exceeds current hardware supported warp "
-                    "size. Aborting warp sort.");
+                __builtin_trap(); // behavior undefined if virtual wave size exceeds hardware limit
             }
         }
         base_type::inclusive_scan(input, output, reduction, storage, scan_op, init);
@@ -475,9 +462,7 @@ public:
         typename std::enable_if<(FunctionVirtualWaveSize > arch::wavefront::max_size()), void>::type
     {
         (void)scan_op;
-        ROCPRIM_PRINT_ERROR_ONCE("Specified warp size exceeds current hardware supported warp size "
-                                 ". Aborting warp sort.");
-        return;
+        __builtin_trap(); // behavior undefined if virtual wave size exceeds hardware limit
     }
 
     /// \brief Performs exclusive scan across threads in a logical warp.
@@ -547,9 +532,7 @@ public:
         {
             if(VirtualWaveSize > ::rocprim::arch::wavefront::size())
             {
-                ROCPRIM_PRINT_ERROR_ONCE(
-                    "Specified warp size exceeds current hardware supported warp "
-                    "size. Aborting warp sort.");
+                __builtin_trap(); // behavior undefined if virtual wave size exceeds hardware limit
             }
         }
         base_type::exclusive_scan(input, output, init, storage, scan_op);
@@ -564,9 +547,7 @@ public:
         typename std::enable_if<(FunctionVirtualWaveSize > arch::wavefront::max_size()), void>::type
     {
         (void)scan_op;
-        ROCPRIM_PRINT_ERROR_ONCE("Specified warp size exceeds current hardware supported warp size "
-                                 ". Aborting warp sort.");
-        return;
+        __builtin_trap(); // behavior undefined if virtual wave size exceeds hardware limit
     }
 
     /// \brief Performs exclusive scan and reduction across threads in a logical warp.
@@ -638,9 +619,7 @@ public:
         {
             if(VirtualWaveSize > ::rocprim::arch::wavefront::size())
             {
-                ROCPRIM_PRINT_ERROR_ONCE(
-                    "Specified warp size exceeds current hardware supported warp "
-                    "size. Aborting warp sort.");
+                __builtin_trap(); // behavior undefined if virtual wave size exceeds hardware limit
             }
         }
         base_type::exclusive_scan(input, output, init, reduction, storage, scan_op);
@@ -655,9 +634,7 @@ public:
         typename std::enable_if<(FunctionVirtualWaveSize > arch::wavefront::max_size()), void>::type
     {
         (void)scan_op;
-        ROCPRIM_PRINT_ERROR_ONCE("Specified warp size exceeds current hardware supported warp size "
-                                 ". Aborting warp sort.");
-        return;
+        __builtin_trap(); // behavior undefined if virtual wave size exceeds hardware limit
     }
 
     /// \brief Performs exclusive scan without an initial value across threads in a logical warp
@@ -694,8 +671,7 @@ public:
                         BinaryFunction /*scan_op*/ = BinaryFunction())
         -> std::enable_if_t<(FunctionVirtualWaveSize > arch::wavefront::max_size())>
     {
-        ROCPRIM_PRINT_ERROR_ONCE("Specified warp size exceeds current hardware supported warp size."
-                                 " Aborting warp scan.");
+        __builtin_trap(); // behavior undefined if virtual wave size exceeds hardware limit
     }
     /// \endcond
 
@@ -737,8 +713,7 @@ public:
                         BinaryFunction /*scan_op*/ = BinaryFunction())
         -> std::enable_if_t<(FunctionVirtualWaveSize > arch::wavefront::max_size())>
     {
-        ROCPRIM_PRINT_ERROR_ONCE("Specified warp size exceeds current hardware supported warp size."
-                                 " Aborting warp scan.");
+        __builtin_trap(); // behavior undefined if virtual wave size exceeds hardware limit
     }
     /// \endcond
 
@@ -816,9 +791,7 @@ public:
         {
             if(VirtualWaveSize > ::rocprim::arch::wavefront::size())
             {
-                ROCPRIM_PRINT_ERROR_ONCE(
-                    "Specified warp size exceeds current hardware supported warp "
-                    "size. Aborting warp sort.");
+                __builtin_trap(); // behavior undefined if virtual wave size exceeds hardware limit
             }
         }
         base_type::scan(input, inclusive_output, exclusive_output, init, storage, scan_op);
@@ -833,9 +806,7 @@ public:
         typename std::enable_if<(FunctionVirtualWaveSize > arch::wavefront::max_size()), void>::type
     {
         (void)scan_op;
-        ROCPRIM_PRINT_ERROR_ONCE("Specified warp size exceeds current hardware supported warp size "
-                                 ". Aborting warp sort.");
-        return;
+        __builtin_trap(); // behavior undefined if virtual wave size exceeds hardware limit
     }
 
     /// \brief Performs inclusive and exclusive scan operations, and reduction across
@@ -913,9 +884,7 @@ public:
         {
             if(VirtualWaveSize > ::rocprim::arch::wavefront::size())
             {
-                ROCPRIM_PRINT_ERROR_ONCE(
-                    "Specified warp size exceeds current hardware supported warp "
-                    "size. Aborting warp sort.");
+                __builtin_trap(); // behavior undefined if virtual wave size exceeds hardware limit
             }
         }
         base_type::scan(input,
@@ -936,9 +905,7 @@ public:
         typename std::enable_if<(FunctionVirtualWaveSize > arch::wavefront::max_size()), void>::type
     {
         (void)scan_op;
-        ROCPRIM_PRINT_ERROR_ONCE("Specified warp size exceeds current hardware supported warp size "
-                                 ". Aborting warp sort.");
-        return;
+        __builtin_trap(); // behavior undefined if virtual wave size exceeds hardware limit
     }
 
     /// \brief Broadcasts value from one thread to all threads in logical warp.
@@ -950,6 +917,7 @@ public:
     /// \par Storage reusage
     /// Synchronization barrier should be placed before \p storage is reused
     /// or repurposed: \p __syncthreads() or \p rocprim::syncthreads().
+    /// \note Behavior is undefined if the virtual wave size exceeds the hardware-supported wave size.
     template<unsigned int FunctionVirtualWaveSize = VirtualWaveSize>
     ROCPRIM_DEVICE ROCPRIM_INLINE
     auto broadcast(T input, const unsigned int src_lane, storage_type& storage) ->
@@ -959,9 +927,7 @@ public:
         {
             if(VirtualWaveSize > ::rocprim::arch::wavefront::size())
             {
-                ROCPRIM_PRINT_ERROR_ONCE(
-                    "Specified warp size exceeds current hardware supported warp "
-                    "size. Aborting warp sort.");
+                __builtin_trap(); // behavior undefined if virtual wave size exceeds hardware limit
             }
         }
         return base_type::broadcast(input, src_lane, storage);
@@ -974,9 +940,7 @@ public:
     auto broadcast(T, const unsigned int, storage_type&) ->
         typename std::enable_if<(FunctionVirtualWaveSize > arch::wavefront::max_size()), T>::type
     {
-        ROCPRIM_PRINT_ERROR_ONCE("Specified warp size exceeds current hardware supported warp "
-                                 "size. Aborting warp sort.");
-        return T();
+        __builtin_trap(); // behavior undefined if virtual wave size exceeds hardware limit
     }
 
     /// \brief Broadcasts value from one thread to all threads in logical warp.

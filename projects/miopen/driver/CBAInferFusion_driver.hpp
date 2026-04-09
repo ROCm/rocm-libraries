@@ -41,6 +41,7 @@
 #include "../test/cpu_bias.hpp"
 
 #include <miopen/env.hpp>
+#include <miopen/errors.hpp>
 #include <miopen/handle.hpp>
 #include <miopen/miopen.h>
 #include <miopen/tensor.hpp>
@@ -249,12 +250,11 @@ private:
     std::vector<Tref> conv_res_host;
     std::vector<Tref> bn_res_host;
     std::vector<Tref> out_host;
-    std::vector<Tgpu> scale;
-    std::vector<Tgpu> bias;
+    std::vector<float> scale;
+    std::vector<float> bias;
     std::vector<Tref> bias_host;
-    std::vector<Tgpu> runningMean;
-    std::vector<Tgpu> runningVariance;
-
+    std::vector<float> runningMean;
+    std::vector<float> runningVariance;
     int createSaveBuffers();
     int createRunningBuffers();
 
@@ -280,8 +280,7 @@ int CBAInferFusionDriver<Tgpu, Tref>::ChkLayout_ShortName()
     }
     else
     {
-        std::cerr << "Error:Invalid Short Name!" << std::endl;
-        exit(EXIT_FAILURE);
+        MIOPEN_THROW(miopenStatusBadParm, "Invalid Short Name!");
     }
 }
 
@@ -290,8 +289,8 @@ void CBAInferFusionDriver<Tgpu, Tref>::ValidateLayoutInputParameters(std::string
 {
     if((ChkLayout_ShortName()))
     {
-        std::cerr << " Invalid Layout Short Name = " << ChkLayout_ShortName() << std::endl;
-        exit(EXIT_FAILURE);
+        MIOPEN_THROW(miopenStatusBadParm,
+                     "Invalid Layout Short Name = " + std::to_string(ChkLayout_ShortName()));
     }
     else
     {
@@ -303,8 +302,7 @@ void CBAInferFusionDriver<Tgpu, Tref>::ValidateLayoutInputParameters(std::string
         }
         else
         {
-            std::cerr << "Invalid Layout Parameter Value - " << layout_value << std::endl;
-            exit(EXIT_FAILURE);
+            MIOPEN_THROW(miopenStatusBadParm, "Invalid Layout Parameter Value - " + layout_value);
         }
     }
 }
@@ -359,8 +357,7 @@ int CBAInferFusionDriver<Tgpu, Tref>::ParseCmdLineArgs(int argc, char* argv[])
     fusion_mode = inflags.GetValueInt("fusion_mode");
     if(fusion_mode > 6 || fusion_mode < 0)
     {
-        std::cout << "Fusion mode out of range.\n Exiting..." << std::endl;
-        exit(EXIT_FAILURE); // NOLINT (concurrency-mt-unsafe)
+        MIOPEN_THROW(miopenStatusBadParm, "Fusion mode out of range");
     }
     if(fusion_mode != miopen_fusion_cba && fusion_mode != miopen_fusion_ca &&
        fusion_mode != miopen_fusion_cb)
@@ -576,8 +573,7 @@ int CBAInferFusionDriver<Tgpu, Tref>::SetBNParametersFromCmdLineArgs()
     }
     else
     {
-        printf("Incorrect Batch Normalization Mode\n");
-        exit(EXIT_FAILURE); // NOLINT (concurrency-mt-unsafe)
+        MIOPEN_THROW(miopenStatusBadParm, "Incorrect Batch Normalization Mode");
     }
 
     return miopenStatusSuccess;
@@ -637,8 +633,7 @@ int CBAInferFusionDriver<Tgpu, Tref>::SetConvDescriptorFromCmdLineArgs()
         if(in_c % group_count != 0 || out_c % group_count != 0 || group_count > in_c ||
            group_count > out_c)
         {
-            printf("Invalid group number\n");
-            exit(0); // NOLINT (concurrency-mt-unsafe)
+            MIOPEN_THROW(miopenStatusBadParm, "Invalid group number");
         }
     }
 
@@ -720,12 +715,12 @@ int CBAInferFusionDriver<Tgpu, Tref>::createRunningBuffers()
         size_t sb_sz = GetTensorSize(biasScaleTensor);
 
         // GPU allocation
-        runningMean_dev     = std::make_unique<GPUMem>(ctx, sb_sz, sizeof(Tgpu));
-        runningVariance_dev = std::make_unique<GPUMem>(ctx, sb_sz, sizeof(Tgpu));
+        runningMean_dev     = std::make_unique<GPUMem>(ctx, sb_sz, sizeof(float));
+        runningVariance_dev = std::make_unique<GPUMem>(ctx, sb_sz, sizeof(float));
 
         // GPU host allocation
-        runningMean     = std::vector<Tgpu>(sb_sz, static_cast<Tgpu>(0));
-        runningVariance = std::vector<Tgpu>(sb_sz, static_cast<Tgpu>(0));
+        runningMean     = std::vector<float>(sb_sz, 0.0f);
+        runningVariance = std::vector<float>(sb_sz, 0.0f);
 
         // Populate
         for(int i = 0; i < sb_sz; i++)
@@ -734,8 +729,8 @@ int CBAInferFusionDriver<Tgpu, Tref>::createRunningBuffers()
             runningMean[i]     = 0.;
             runningVariance[i] = 1.;
 #else
-            runningMean[i]     = prng::gen_canonical<Tgpu>();
-            runningVariance[i] = prng::gen_canonical<Tgpu>();
+            runningMean[i]     = prng::gen_canonical<float>();
+            runningVariance[i] = prng::gen_canonical<float>();
 #endif
         }
 
@@ -744,8 +739,7 @@ int CBAInferFusionDriver<Tgpu, Tref>::createRunningBuffers()
         status |= runningVariance_dev->ToGPU(q, runningVariance.data());
         if(status != STATUS_SUCCESS)
         {
-            printf("Error copying data to GPU\n");
-            exit(EXIT_FAILURE); // NOLINT (concurrency-mt-unsafe)
+            MIOPEN_THROW(miopenStatusInternalError, "Error copying data to GPU");
         }
     }
     else
@@ -810,23 +804,23 @@ int CBAInferFusionDriver<Tgpu, Tref>::AllocateBuffersAndCopy()
 
     if(useBatchNorm)
     {
-        scale       = std::vector<Tgpu>(sb_sz, static_cast<Tgpu>(0));
-        bias        = std::vector<Tgpu>(sb_sz, static_cast<Tgpu>(0));
+        scale       = std::vector<float>(sb_sz, 0.0f);
+        bias        = std::vector<float>(sb_sz, 0.0f);
         bn_res      = std::vector<Tgpu>(out_sz, static_cast<Tgpu>(0));
         bn_res_host = std::vector<Tref>(out_sz, static_cast<Tref>(0));
 
         bn_res_dev = std::make_unique<GPUMem>(ctx, out_sz, sizeof(Tgpu));
-        scale_dev  = std::make_unique<GPUMem>(ctx, sb_sz, sizeof(Tgpu));
-        bias_dev   = std::make_unique<GPUMem>(ctx, sb_sz, sizeof(Tgpu));
+        scale_dev  = std::make_unique<GPUMem>(ctx, sb_sz, sizeof(float));
+        bias_dev   = std::make_unique<GPUMem>(ctx, sb_sz, sizeof(float));
         // Using random beta and gamma
         for(int i = 0; i < sb_sz; i++)
         {
 #if(CBA_DEBUG_VALUES == 1)
-            scale[i] = 1.; // prng::gen_canonical<Tgpu>(); // 1.0;
+            scale[i] = 1.; // prng::gen_canonical<float>(); // 1.0;
             bias[i]  = 10.;
 #else
-            scale[i]           = prng::gen_canonical<Tgpu>();
-            bias[i]            = prng::gen_canonical<Tgpu>();
+            scale[i] = prng::gen_canonical<float>();
+            bias[i]  = prng::gen_canonical<float>();
 #endif
         }
         status |= scale_dev->ToGPU(q, scale.data());
@@ -852,9 +846,9 @@ int CBAInferFusionDriver<Tgpu, Tref>::AllocateBuffersAndCopy()
         in_host[i] = static_cast<double>(rval);
         in[i]      = rval;
 #else
-        auto rval = prng::gen_0_to_B(Data_scale);
+        auto rval  = prng::gen_0_to_B(Data_scale);
         in_host[i] = static_cast<double>(rval);
-        in[i] = rval;
+        in[i]      = rval;
 #endif
     }
 
@@ -868,9 +862,9 @@ int CBAInferFusionDriver<Tgpu, Tref>::AllocateBuffersAndCopy()
             wei[i]      = static_cast<double>(rval);
             wei_host[i] = rval;
 #else
-            auto rval = Data_scale * conv::RanGenWeights<Tgpu>();
+            auto rval   = Data_scale * conv::RanGenWeights<Tgpu>();
             wei_host[i] = static_cast<double>(rval);
-            wei[i] = rval;
+            wei[i]      = rval;
 #endif
         }
         status |= wei_dev->ToGPU(q, wei.data());
@@ -916,8 +910,7 @@ void CBAInferFusionDriver<Tgpu, Tref>::runGPUBatchNormActivInference()
     miopenError = miopenCompileFusionPlan(GetHandle(), fusePlanDesc);
     if(miopenError != miopenStatusSuccess)
     {
-        std::cerr << "BatchNormActivInference plan not supported." << std::endl;
-        exit(EXIT_FAILURE); // NOLINT (concurrency-mt-unsafe)
+        MIOPEN_THROW(miopenStatusNotImplemented, "BatchNormActivInference plan not supported");
     }
 
     size_t workspace_size = 0;
@@ -1013,8 +1006,7 @@ void CBAInferFusionDriver<Tgpu, Tref>::runGPUConvBatchNormActivInference()
     miopenError = miopenCompileFusionPlan(GetHandle(), fusePlanDesc);
     if(miopenError != miopenStatusSuccess)
     {
-        std::cerr << plan_error_str << " plan not supported." << std::endl;
-        exit(EXIT_FAILURE); // NOLINT (concurrency-mt-unsafe)
+        MIOPEN_THROW(miopenStatusNotImplemented, plan_error_str + " plan not supported");
     }
 
     size_t workspace_size = 0;
@@ -1075,11 +1067,9 @@ void CBAInferFusionDriver<Tgpu, Tref>::runGPUConvActivInference()
     miopenError = miopenCompileFusionPlan(GetHandle(), fusePlanDesc);
     if(miopenError != miopenStatusSuccess)
     {
-        if(bias_mode)
-            std::cerr << "ConvBiasActivInference plan not supported." << std::endl;
-        else
-            std::cerr << "ConvActivInference plan not supported." << std::endl;
-        exit(EXIT_FAILURE); // NOLINT (concurrency-mt-unsafe)
+        MIOPEN_THROW(miopenStatusNotImplemented,
+                     bias_mode ? "ConvBiasActivInference plan not supported"
+                               : "ConvActivInference plan not supported");
     }
 
     size_t workspace_size = 0;
@@ -1374,9 +1364,8 @@ void CBAInferFusionDriver<Tgpu, Tref>::runCPUBNFwdInference()
     }
     else
     {
-        printf("Something went wrong.\nBad batch normalization mode in host kernel "
-               "selection.\nExiting...\n\n");
-        exit(EXIT_FAILURE); // NOLINT (concurrency-mt-unsafe)
+        MIOPEN_THROW(miopenStatusInternalError,
+                     "Bad batch normalization mode in host kernel selection");
     }
     // C+N mode so we are done
     if(fusion_mode == miopen_fusion_cn)

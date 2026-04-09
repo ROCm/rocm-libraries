@@ -29,6 +29,7 @@
 #include <Tensile/ContractionProblem.hpp>
 #include <Tensile/ContractionSolution.hpp>
 #include <Tensile/KernelLanguageTypes.hpp>
+#include <Tensile/PredicateDebugger.hpp>
 #include <Tensile/Predicates.hpp>
 
 #include <Tensile/AMDGPU.hpp>
@@ -38,6 +39,7 @@
 #include <cmath>
 #include <cstddef>
 #include <limits>
+#include <sstream>
 #include <vector>
 
 namespace TensileLite
@@ -130,6 +132,186 @@ namespace TensileLite
                     int freeSize = !problem.transposeC01() ? problem.freeSizeB(index)
                                                            : problem.freeSizeA(index);
                     return debugEvalCmp(problem, stream, "prob", freeSize, "%", "sol", value);
+                }
+            };
+
+            // Address-interleave restriction:
+            // Require tiles1 (=Free1Size/value) to have lowbit(tiles1) > 1 (i.e. even),
+            // and require Free1Size % value == 0.
+            // This matches the kernel's initBInterleaveG enable condition that G=min(lowbit, LVCB) must be > 1.
+            struct Free1SizeDivByValueLowbitGT1
+                : public Predicate_CRTP<Free1SizeDivByValueLowbitGT1, ContractionProblemGemm>
+            {
+                enum
+                {
+                    HasIndex = true,
+                    HasValue = true
+                };
+                size_t index;
+                size_t value;
+
+                Free1SizeDivByValueLowbitGT1() = default;
+                Free1SizeDivByValueLowbitGT1(size_t index, size_t value)
+                    : index(index)
+                    , value(value)
+                {
+                }
+
+                static std::string Type()
+                {
+                    return "Free1SizeDivByValueLowbitGT1";
+                }
+
+                virtual bool operator()(ContractionProblemGemm const& problem) const override
+                {
+                    if(value == 0)
+                        return false;
+                    size_t freeSize = (!problem.transposeC01() ? problem.freeSizeB(index)
+                                                              : problem.freeSizeA(index));
+                    if(freeSize % value != 0)
+                        return false;
+                    size_t tiles1 = freeSize / value;
+                    if(tiles1 == 0)
+                        return false;
+                    size_t lowbit = tiles1 & (~tiles1 + 1); // tiles1 & -tiles1
+                    return lowbit > 1;
+                }
+
+                virtual bool debugEval(ContractionProblemGemm const& problem,
+                                       std::ostream&                 stream) const override
+                {
+                    size_t freeSize = (!problem.transposeC01() ? problem.freeSizeB(index)
+                                                              : problem.freeSizeA(index));
+                    bool   okDiv    = (value != 0) && (freeSize % value == 0);
+                    size_t tiles1   = okDiv ? (freeSize / value) : 0;
+                    size_t lowbit   = tiles1 ? (tiles1 & (~tiles1 + 1)) : 0;
+                    bool   ok       = okDiv && (lowbit > 1);
+                    return debugEvalCmp(problem,
+                                        stream,
+                                        "free1",
+                                        freeSize,
+                                        "%",
+                                        "value",
+                                        value,
+                                        "lowbit",
+                                        lowbit,
+                                        ">",
+                                        "1",
+                                        size_t(1)) && ok;
+                }
+            };
+
+            // KRingShift wrap restriction:
+            // Require that any (k + KRingShift) wrap occurs only in tail loop (no main-loop wrap fix).
+            //
+            // We model the exact KRS enable/shift computation used in initKRingShift:
+            //   rem = StrideB1J % cacheLineElements
+            //   shift = (-WorkGroup1 * rem) mod cacheLineElements
+            //
+            // mainLoopElems = k - (k % DepthU)
+            // tailSize      = k % DepthU
+            //
+            // To guarantee no wrap in main loop for any WG1, require:
+            //   maxShift(wg1 in [0, tiles1-1]) <= tailSize
+            //
+            // Packed value format (size_t):
+            //   [63:48]=cacheLineBytes, [47:32]=depthU, [31:16]=mt1, [15:8]=lvcb, [7:0]=bpeB
+            struct KRingShiftTailWrapOnly
+                : public Predicate_CRTP<KRingShiftTailWrapOnly, ContractionProblemGemm>
+            {
+                enum
+                {
+                    HasIndex = true,
+                    HasValue = true
+                };
+                int64_t index;
+                size_t value;
+
+                KRingShiftTailWrapOnly() = default;
+                KRingShiftTailWrapOnly(int64_t index, size_t value)
+                    : index(index)
+                    , value(value)
+                {
+                }
+
+                static std::string Type()
+                {
+                    return "KRingShiftTailWrapOnly";
+                }
+
+                virtual bool operator()(ContractionProblemGemm const& problem) const override
+                {
+                    if(value == 0)
+                        return false;
+
+                    size_t bpeB          = (value & 0xFFu);
+                    size_t lvcb          = ((value >> 8) & 0xFFu);
+                    size_t mt1           = ((value >> 16) & 0xFFFFu);
+                    size_t depthU        = ((value >> 32) & 0xFFFFu);
+                    size_t cacheLineByte = ((value >> 48) & 0xFFFFu);
+
+                    if(mt1 == 0 || lvcb == 0 || bpeB == 0 || depthU == 0 || cacheLineByte == 0)
+                        return false;
+                    size_t cacheLineElems = cacheLineByte / bpeB;
+                    // Compute runtime G from Free1 size and MT1.
+                    size_t free1 = (!problem.transposeC01() ? problem.freeSizeB(0)
+                                                           : problem.freeSizeA(0));
+                    if(free1 % mt1 != 0)
+                        return false;
+                    size_t tiles1 = free1 / mt1;
+                    if(tiles1 == 0)
+                        return false;
+                    size_t lowbit = tiles1 & (~tiles1 + 1); // tiles1 & -tiles1
+                    size_t G      = (lowbit <= lvcb) ? lowbit : lvcb;
+                    if(G <= 1)
+                        return false;
+
+                    // StrideB1J: stride of B along Free1 (J) in elements.
+                    auto const& freeB = problem.freeIndicesB();
+                    if(freeB.empty())
+                        return false;
+                    size_t bDim = freeB[0].i;
+                    if(bDim >= problem.b().strides().size())
+                        return false;
+                    size_t strideB1J = problem.b().strides()[bDim];
+
+                    // Determine whether KRS shift can be enabled at runtime.
+                    size_t mask = cacheLineElems - 1;
+                    size_t rem  = strideB1J & mask; // mod cacheLineElems (pow2)
+
+                    // K is the (last) bound index (typically the summation dimension).
+                    auto const boundCount = static_cast<int64_t>(problem.boundIndices().size());
+                    int64_t    idx        = (index < 0) ? (boundCount + index) : index;
+                    if(idx < 0 || idx >= boundCount)
+                        return false;
+                    size_t k = problem.boundSize(static_cast<size_t>(idx));
+
+                    // tailSize = k % depthU. If depthU>k, tailSize=k and mainloop is empty => safe.
+                    size_t tailSize = (depthU != 0) ? (k % depthU) : 0;
+
+                    // Compute maxShift over wg1 in [0, tiles1-1] (cycle length <= cacheLineElems <= 256 typically, <=64 on gfx950).
+                    size_t wgCount = tiles1;
+                    size_t limit   = (wgCount < cacheLineElems) ? wgCount : cacheLineElems;
+                    size_t maxShift = 0;
+                    for(size_t wg1 = 0; wg1 < limit; ++wg1)
+                    {
+                        // shift = (-wg1*rem) mod cacheLineElems
+                        size_t prod  = (wg1 * rem) & mask;
+                        size_t shift = (prod == 0) ? 0 : ((cacheLineElems - prod) & mask);
+                        if(shift > maxShift)
+                            maxShift = shift;
+                    }
+
+                    return tailSize >= maxShift;
+                }
+
+                virtual bool debugEval(ContractionProblemGemm const& problem,
+                                       std::ostream&                 stream) const override
+                {
+                    // Reuse operator() and print a single boolean result for simplicity.
+                    bool ok = (*this)(problem);
+                    return debugEvalCmp(problem, stream, "KRingShiftTailWrapOnly", size_t(ok), "==", "true", size_t(1))
+                           && ok;
                 }
             };
 
@@ -235,29 +417,33 @@ namespace TensileLite
 
                     // WorkGroup numbers x number of global write instruction x Wave numbers
                     // M/MT0 x N/MT1 x NumElementsPerThread/StoreVectorWidth x x Wavenumbers x batch
-                    bool ret = (std::ceil(static_cast<float>(problem.freeSizeA(0)) / value[0])
+                    uint32_t synchronizerUsage = (std::ceil(static_cast<float>(problem.freeSizeA(0)) / value[0])
                                 * std::ceil(static_cast<float>(problem.freeSizeB(0)) / value[1]))
-                                   * value[2] * value[4] * value[3] * problem.d().sizes()[2]
-                               <= 409600;
-                    if(problem.groupedGemm())
-                        ret = ret && (problem.groupedGemmCount() <= 16);
+                                   * value[2] * value[4] * value[3] * problem.d().sizes()[2];
 
-                    return ret;
+                    if(problem.groupedGemm())
+                        return synchronizerUsage <= 409600 * 16 / problem.groupedGemmCount();
+                    else
+                        return synchronizerUsage <= 409600 * 16;
                 }
 
                 virtual bool debugEval(ContractionProblemGemm const& problem,
                                        std::ostream&                 stream) const override
                 {
+                    uint32_t synchronizerSize = 409600 * 16;
+                    if(problem.groupedGemm())
+                        synchronizerSize /= problem.groupedGemmCount();
+
                     return debugEvalCmp(
                         problem,
                         stream,
                         "prob",
                         (std::ceil(static_cast<float>(problem.freeSizeA(0)) / value[0])
                          * std::ceil(static_cast<float>(problem.freeSizeB(0)) / value[1]))
-                            * (value[2]) * (value[4] / 64) * value[3],
-                        "==",
-                        "sol",
-                        40960);
+                            * (value[2]) * (value[4]) * value[3] * problem.d().sizes()[2],
+                        ">=",
+                        "limit",
+                        synchronizerSize);
                 }
             };
 
@@ -887,25 +1073,13 @@ namespace TensileLite
                 virtual bool debugEval(ContractionProblemGemm const& problem,
                                        std::ostream&                 stream) const override
                 {
+                    bool rv = (*this)(problem);
+                    std::ostringstream details;
+                    details << "prob_amaxD=" << problem.outputAmaxD() << " == sol_amaxD=" << value;
                     if(value)
-                    {
-                        bool rv = (*this)(problem);
-
-                        stream << *this << ": (" << "prob_amaxD " << problem.outputAmaxD() << " == " << "sol_amaxD "
-                               << value << " prob_gsu " << problem.getParams().gsu() << " is either 0 or 1"
-                               << ") == " << rv;
-
-                        return rv;
-                    }
-                    else
-                        return debugEvalCmp(problem,
-                                            stream,
-                                            "prob_amaxD",
-                                            problem.outputAmaxD(),
-                                            "==",
-                                            "sol_amaxD",
-                                            value);
-                    return false;
+                        details << ", prob_gsu=" << problem.getParams().gsu() << " (must be 0 or 1)";
+                    PredicateDebugger::printRow(stream, rv, this->type(), details.str());
+                    return rv;
                 }
             };
 
@@ -1109,12 +1283,7 @@ namespace TensileLite
                 virtual bool debugEval(ContractionProblemGemm const& problem,
                                        std::ostream&                 stream) const override
                 {
-                    bool rv = (*this)(problem);
-
-                    stream << *this << ": (" << problem.arithmeticIntensity() << " >= " << value
-                           << ") == " << rv;
-
-                    return rv;
+                    return debugEvalCmp(problem, stream, "prob", problem.arithmeticIntensity(), ">=", "sol", value);
                 }
             };
 
@@ -1147,12 +1316,7 @@ namespace TensileLite
                 virtual bool debugEval(ContractionProblemGemm const& problem,
                                        std::ostream&                 stream) const override
                 {
-                    bool rv = (*this)(problem);
-
-                    stream << *this << ": (" << problem.arithmeticIntensity() << " <= " << value
-                           << ") == " << rv;
-
-                    return rv;
+                    return debugEvalCmp(problem, stream, "prob", problem.arithmeticIntensity(), "<=", "sol", value);
                 }
             };
 
@@ -1367,13 +1531,14 @@ namespace TensileLite
                     return "BufferLoadOffsetLimitCheck";
                 }
 
+                // The min operator is used to handle cases where size_M/size_K is smaller than the value.depthUorMT0
                 virtual bool operator()(ContractionProblemGemm const& problem) const override
                 {
                     const uint64_t TWO_POW_32 = 4294967296;
-                    return (problem.a().strides()[1] * value.depthUorMT0 + value.shiftPtrElemA)
+                    return (problem.a().strides()[1] * min(value.depthUorMT0, problem.a().sizes()[1]) + value.shiftPtrElemA)
                                    * problem.a().elementBytes()
                                < TWO_POW_32
-                           && (problem.b().strides()[1] * value.depthUorMT1 + value.shiftPtrElemB)
+                           && (problem.b().strides()[1] * min(value.depthUorMT1, problem.b().sizes()[1]) + value.shiftPtrElemB)
                                       * problem.b().elementBytes()
                                   < TWO_POW_32;
                 }
@@ -1396,16 +1561,13 @@ namespace TensileLite
                                        std::ostream&                 stream) const override
                 {
                     bool rv = (*this)(problem);
-
-                    stream << rv << ": " << *this << ": ("
-                           << " (" << problem.a().strides()[1] << " * " << value.depthUorMT0
-                           << " + " << value.shiftPtrElemA << ") * " << problem.a().elementBytes()
-                           << " < 4294967296 && "
-                           << " (" << problem.b().strides()[1] << " * " << value.depthUorMT1
-                           << " + " << value.shiftPtrElemB << ") * " << problem.b().elementBytes()
-                           << " < 4294967296"
-                           << ")" << std::endl;
-
+                    std::ostringstream details;
+                    details << "A:(" << problem.a().strides()[1] << "*" << value.depthUorMT0 << "+"
+                            << value.shiftPtrElemA << ")*" << problem.a().elementBytes()
+                            << "<2^32, B:(" << problem.b().strides()[1] << "*" << value.depthUorMT1
+                            << "+" << value.shiftPtrElemB << ")*" << problem.b().elementBytes()
+                            << "<2^32";
+                    PredicateDebugger::printRow(stream, rv, this->type(), details.str());
                     return rv;
                 }
             };
@@ -1431,6 +1593,7 @@ namespace TensileLite
                     return "BufferLoadOffsetLimitCheck_Beta";
                 }
 
+                // The min operator is used to handle cases where size_N is smaller than the value(usually is MacroTile1)
                 virtual bool operator()(ContractionProblemGemm const& problem) const override
                 {
                     if(problem.c().empty() || problem.beta() == 0)
@@ -1440,7 +1603,7 @@ namespace TensileLite
                     else
                     {
                         const uint64_t TWO_POW_32 = 4294967296;
-                        return problem.c().strides()[1] * problem.c().elementBytes() * value
+                        return problem.c().strides()[1] * problem.c().elementBytes() * min(value, problem.c().sizes()[1])
                                < TWO_POW_32;
                     }
                 }
@@ -1454,11 +1617,10 @@ namespace TensileLite
                                        std::ostream&                 stream) const override
                 {
                     bool rv = (*this)(problem);
-
-                    stream << rv << ": " << *this << ": (" << problem.c().strides()[1] << " * "
-                           << problem.c().elementBytes() << " * " << value << " < 4294967296"
-                           << ")" << std::endl;
-
+                    std::ostringstream details;
+                    details << "C:" << problem.c().strides()[1] << "*"
+                            << problem.c().elementBytes() << "*" << value << "<2^32";
+                    PredicateDebugger::printRow(stream, rv, this->type(), details.str());
                     return rv;
                 }
             };
@@ -1484,10 +1646,11 @@ namespace TensileLite
                     return "BufferStoreOffsetLimitCheck";
                 }
 
+                // The min operator is used to handle cases where size_N is smaller than the value(usually is MacroTile1)
                 virtual bool operator()(ContractionProblemGemm const& problem) const override
                 {
                     const uint64_t TWO_POW_32 = 4294967296;
-                    return problem.d().strides()[1] * problem.d().elementBytes() * value
+                    return problem.d().strides()[1] * problem.d().elementBytes() * min(value, problem.d().sizes()[1])
                            < TWO_POW_32;
                 }
 
@@ -1500,9 +1663,10 @@ namespace TensileLite
                                        std::ostream&                 stream) const override
                 {
                     bool rv = (*this)(problem);
-                    stream << rv << ": " << *this << ": (" << problem.d().strides()[1] << " * "
-                           << problem.d().elementBytes() << " * " << value << " < 4294967296"
-                           << ")" << std::endl;
+                    std::ostringstream details;
+                    details << "D:" << problem.d().strides()[1] << "*"
+                            << problem.d().elementBytes() << "*" << value << "<2^32";
+                    PredicateDebugger::printRow(stream, rv, this->type(), details.str());
                     return rv;
                 }
             };
@@ -1552,25 +1716,14 @@ namespace TensileLite
                     if(gsu == -1)
                     {
                         bool rv = (*this)(problem);
-
-                        stream << *this << ": (" << "auto gsu will consider workgroup number, so bypassed"
-                               << ") == " << rv;
-
+                        PredicateDebugger::printRow(stream, rv, this->type(), "auto gsu (bypassed)");
                         return rv;
                     }
-
-                    gsu = gsu > 1 ? gsu : 1;
-                    int workgroupNumber
-                        = std::ceil(static_cast<float>(problem.freeSizeA(0)) / value[0])
-                          * std::ceil(static_cast<float>(problem.freeSizeB(0)) / value[1]) * gsu
-                          * problem.batchSize(0);
-                    return debugEvalCmp(problem,
-                                        stream,
-                                        "prob's workgroup number",
-                                        workgroupNumber,
-                                        "<=",
-                                        "max workgroup number",
-                                        MAX_WORKGROUP_NUMBER);
+                    gsu                 = gsu > 1 ? gsu : 1;
+                    int workgroupNumber = std::ceil(static_cast<float>(problem.freeSizeA(0)) / value[0])
+                                          * std::ceil(static_cast<float>(problem.freeSizeB(0)) / value[1])
+                                          * gsu * problem.batchSize(0);
+                    return debugEvalCmp(problem, stream, "wg_num", workgroupNumber, "<=", "max", MAX_WORKGROUP_NUMBER);
                 }
             };
 
@@ -1598,7 +1751,8 @@ namespace TensileLite
                                        std::ostream&                 stream) const override
                 {
                     bool rv = (*this)(problem);
-                    stream << rv << ": " << this->type() << std::endl;
+                    PredicateDebugger::printRow(
+                        stream, rv, this->type(), rv ? "eligible" : "not eligible");
                     return rv;
                 }
             };
@@ -1641,22 +1795,15 @@ namespace TensileLite
                 virtual bool debugEval(ContractionProblemGemm const& problem,
                                        std::ostream&                 stream) const override
                 {
-                    size_t minK
-                        = (problem.getParams().gsu() != 0 ? problem.getParams().gsu() : value[1]);
-                    if(minK == -1)
+                    size_t gsu = (problem.getParams().gsu() != 0 ? problem.getParams().gsu() : value[1]);
+                    if(gsu == static_cast<size_t>(-1))
                     {
                         bool rv = (*this)(problem);
-
-                        stream << *this << ": (" << "auto gsu will consider MinK, so bypassed"
-                               << ") == " << rv;
-
+                        PredicateDebugger::printRow(stream, rv, this->type(), "auto gsu (bypassed)");
                         return rv;
                     }
-                    if(minK == 1)
-                        minK = 0;
-                    minK *= value[0];
-                    return debugEvalCmp(
-                        problem, stream, "prob", problem.boundSize(0), ">=", "sol", minK);
+                    size_t minK = (gsu == 1) ? 0 : gsu * value[0];
+                    return debugEvalCmp(problem, stream, "prob", problem.boundSize(0), ">=", "sol", minK);
                 }
             };
 
@@ -1799,21 +1946,14 @@ namespace TensileLite
                                        std::ostream&                 stream) const override
                 {
                     bool rv = (*this)(problem);
+                    std::ostringstream details;
                     if(problem.performanceMetric() == PerformanceMetric::CUEfficiency)
-                        stream
-                            << rv << ": " << this->type()
-                            << " (problem.performanceMetric() == PerformanceMetric::CUEfficiency)"
-                            << std::endl;
+                        details << "metric=CUEfficiency";
                     else if(problem.performanceMetric() == PerformanceMetric::Auto)
-                        stream << rv << ": " << this->type()
-                               << " ((problem.performanceMetric() == PerformanceMetric::Auto) &&"
-                               << " (problem.flopCount() < 1500 * 1500 * 1500 * 2))" << std::endl;
+                        details << "metric=Auto, flopCount=" << problem.flopCount();
                     else
-                        stream << rv << ": " << this->type()
-                               << " ((problem.performanceMetric() != "
-                                  "PerformanceMetric::CUEfficiency) &&"
-                               << " (problem.performanceMetric() != PerformanceMetric::Auto))"
-                               << std::endl;
+                        details << "metric=other (not CUEfficiency or Auto)";
+                    PredicateDebugger::printRow(stream, rv, this->type(), details.str());
                     return rv;
                 }
             };
@@ -1906,7 +2046,7 @@ namespace TensileLite
                                        std::ostream&                 stream) const override
                 {
                     bool rv = (*this)(problem);
-                    stream << rv << ": " << this->type() << std::endl;
+                    stream << "Searching " << this->type() << " Library..." << std::endl;
                     return rv;
                 }
             };
@@ -1936,7 +2076,7 @@ namespace TensileLite
                                        std::ostream&                 stream) const override
                 {
                     bool rv = (*this)(problem);
-                    stream << rv << ": " << this->type() << std::endl;
+                    stream << "Searching " << this->type() << " Library..." << std::endl;
                     return rv;
                 }
             };
@@ -1967,13 +2107,12 @@ namespace TensileLite
                                        std::ostream&                 stream) const override
                 {
                     bool rv = (*this)(problem);
-                    stream << rv << ": " << this->type() << std::endl;
+                    stream << "Searching " << this->type() << " Library..." << std::endl;
                     return rv;
                 }
             };
 
-            struct PredictionMatching
-                : public Predicate_CRTP<PredictionMatching, ContractionProblemGemm>
+            struct PredictionMatching : public Predicate_CRTP<PredictionMatching, ContractionProblemGemm>
             {
                 enum
                 {
@@ -1997,11 +2136,40 @@ namespace TensileLite
                                        std::ostream&                 stream) const override
                 {
                     bool rv = (*this)(problem);
-                    stream << rv << ": " << this->type() << std::endl;
+                    PredicateDebugger::printRow(stream, rv, this->type());
                     return rv;
                 }
             };
 
+            struct GridBasedMatching
+                : public Predicate_CRTP<GridBasedMatching, ContractionProblemGemm>
+            {
+                enum
+                {
+                    HasIndex = false,
+                    HasValue = false
+                };
+
+                GridBasedMatching() = default;
+
+                static std::string Type()
+                {
+                    return "GridBasedMatching";
+                }
+
+                virtual bool operator()(ContractionProblemGemm const& problem) const override
+                {
+                    return true;
+                }
+
+                virtual bool debugEval(ContractionProblemGemm const& problem,
+                                       std::ostream&                 stream) const override
+                {
+                    bool rv = (*this)(problem);
+                    PredicateDebugger::printRow(stream, rv, this->type());
+                    return rv;
+                }
+            };
 
             struct UseGradientEqual
                 : public Predicate_CRTP<UseGradientEqual, ContractionProblemGemm>
@@ -2067,6 +2235,7 @@ namespace TensileLite
                         return true;
                     if(value == ActivationType::Hipblaslt_all
                        && (problem.activationType() == ActivationType::DGelu
+                           || problem.activationType() == ActivationType::DRelu
                            || problem.activationType() == ActivationType::Gelu
                            || problem.activationType() == ActivationType::Relu
                            || problem.activationType() == ActivationType::Silu
@@ -2121,16 +2290,17 @@ namespace TensileLite
                 virtual bool debugEval(ContractionProblemGemm const& problem,
                                        std::ostream&                 stream) const override
                 {
-                    bool        rv        = (*this)(problem);
-                    std::string actString = "";
+                    bool rv = (*this)(problem);
+                    std::ostringstream details;
+                    details << "supported=[";
                     for(size_t i = 0; i < value.size(); i++)
                     {
-                        actString += ToString(value[i]);
+                        details << ToString(value[i]);
                         if(i < value.size() - 1)
-                            actString += ", ";
+                            details << ", ";
                     }
-                    stream << rv << ": " << this->type()
-                           << " (The supported activations are: " + actString << ")" << std::endl;
+                    details << "], prob=" << ToString(problem.getParams().activationEnum());
+                    PredicateDebugger::printRow(stream, rv, this->type(), details.str());
                     return rv;
                 }
             };
@@ -2242,8 +2412,9 @@ namespace TensileLite
                                        std::ostream&                 stream) const override
                 {
                     bool rv = (*this)(problem);
-                    stream << *this << ": prob: " << problem.useBias()
-                           << ", Is sol support: " << value << std::endl;
+                    std::ostringstream details;
+                    details << "prob=" << problem.useBias() << ", sol_supports=" << value;
+                    PredicateDebugger::printRow(stream, rv, this->type(), details.str());
                     return rv;
                 }
             };
@@ -2354,9 +2525,9 @@ namespace TensileLite
                                        std::ostream&                 stream) const override
                 {
                     bool rv = (*this)(problem);
-
-                    stream << *this << ": prob: " << problem.useScaleAB()
-                           << ", Is sol support: " << value << std::endl;
+                    std::ostringstream details;
+                    details << "prob=" << problem.useScaleAB() << ", sol_supports=" << value;
+                    PredicateDebugger::printRow(stream, rv, this->type(), details.str());
                     return rv;
                 }
             };
@@ -2390,9 +2561,9 @@ namespace TensileLite
                                        std::ostream&                 stream) const override
                 {
                     bool rv = (*this)(problem);
-
-                    stream << *this << ": prob: " << problem.useScaleCD()
-                           << ", Is sol support: " << value << std::endl;
+                    std::ostringstream details;
+                    details << "prob=" << problem.useScaleCD() << ", sol_supports=" << value;
+                    PredicateDebugger::printRow(stream, rv, this->type(), details.str());
                     return rv;
                 }
             };
@@ -2427,9 +2598,9 @@ namespace TensileLite
                                        std::ostream&                 stream) const override
                 {
                     bool rv = (*this)(problem);
-
-                    stream << *this << ": prob: " << problem.useScaleAlphaVec()
-                           << ", Is sol support: " << value << std::endl;
+                    std::ostringstream details;
+                    details << "prob=" << problem.useScaleAlphaVec() << ", sol_supports=" << value;
+                    PredicateDebugger::printRow(stream, rv, this->type(), details.str());
                     return rv;
                 }
             };
@@ -2470,16 +2641,19 @@ namespace TensileLite
                 virtual bool debugEval(ContractionProblemGemm const& problem,
                                        std::ostream&                 stream) const override
                 {
-                    bool        rv         = (*this)(problem);
-                    std::string biasString = "";
+                    bool rv = (*this)(problem);
+                    std::ostringstream details;
+                    details << "supported_types=[";
                     for(size_t i = 0; i < value.size(); i++)
                     {
-                        biasString += ToString(value[i]);
+                        details << ToString(value[i]);
                         if(i < value.size() - 1)
-                            biasString += ", ";
+                            details << ", ";
                     }
-                    stream << rv << ": " << this->type()
-                           << " (The supported bias types are: " + biasString << ")" << std::endl;
+                    details << "]";
+                    if(problem.useBias())
+                        details << ", prob_type=" << ToString(problem.bias().dataType());
+                    PredicateDebugger::printRow(stream, rv, this->type(), details.str());
                     return rv;
                 }
             };
@@ -2563,16 +2737,19 @@ namespace TensileLite
                 virtual bool debugEval(ContractionProblemGemm const& problem,
                                        std::ostream&                 stream) const override
                 {
-                    bool        rv         = (*this)(problem);
-                    std::string biasString = "";
+                    bool rv = (*this)(problem);
+                    std::ostringstream details;
+                    details << "supported_sources=[";
                     for(size_t i = 0; i < value.size(); i++)
                     {
-                        biasString += ToString(value[i]);
+                        details << value[i];
                         if(i < value.size() - 1)
-                            biasString += ", ";
+                            details << ", ";
                     }
-                    stream << rv << ": " << this->type()
-                           << " (The supported bias source are: " + biasString << ")" << std::endl;
+                    details << "]";
+                    if(problem.useBias())
+                        details << ", bias_src=" << static_cast<int>(problem.biasSrc());
+                    PredicateDebugger::printRow(stream, rv, this->type(), details.str());
                     return rv;
                 }
             };
@@ -2792,11 +2969,14 @@ namespace TensileLite
 
                 virtual bool operator()(ContractionProblemGemm const& problem) const override
                 {
+                    // If XCC == -1, we automatically set it to the number XCCs.
+                    // In this case, no predicate is needed.
+                    if(value[0] == -1)
+                        return true;
                     // NB: If this solution is a cu-fallback for current hardware.
                     // We overwrite the XCC to 1 to make sure this can pass.
                     // But we also have to notice we are passing the correct XCC to kernel.
                     // (i.e. Remember to do param.setWGMXCC(1) when running the kernel)
-
                     size_t XCC  = (problem.getParams().fallbackStatus()) ? 1 : value[0];
                     size_t XCCG = (value[1] == -1) ? cuCount : value[1];
                     return ((XCC & (XCC - 1)) == 0) && XCCG % XCC == 0;
@@ -2805,6 +2985,8 @@ namespace TensileLite
                 virtual bool debugEval(ContractionProblemGemm const& problem,
                                        std::ostream&                 stream) const override
                 {
+                    if(value[0] == -1)
+                        return true;
                     size_t XCC  = (problem.getParams().fallbackStatus()) ? 1 : value[0];
                     size_t XCCG = (value[1] == -1) ? cuCount : value[1];
                     return debugEvalCmp(problem,

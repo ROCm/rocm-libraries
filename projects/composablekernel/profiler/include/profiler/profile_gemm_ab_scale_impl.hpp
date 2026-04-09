@@ -1,5 +1,5 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2024-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 
@@ -47,6 +47,7 @@ bool profile_gemm_ab_scale_impl(int do_verification,
                                 int StrideA,
                                 int StrideB,
                                 int StrideE,
+                                int KBatch,
                                 int n_warmup,
                                 int n_iter,
                                 uint64_t rotating = 0)
@@ -108,8 +109,8 @@ bool profile_gemm_ab_scale_impl(int do_verification,
     case 1:
         a0_m_k.GenerateTensorValue(GeneratorTensor_2<A0DataType>{-2, 2});
         b0_k_n.GenerateTensorValue(GeneratorTensor_2<B0DataType>{-2, 2});
-        a1_m_k.GenerateTensorValue(GeneratorTensor_3<A1DataType>{0, 1.0});
-        b1_k_n.GenerateTensorValue(GeneratorTensor_3<B1DataType>{0, 1.0});
+        a1_m_k.GenerateTensorValue(GeneratorTensor_2<A1DataType>{-1, 2});
+        b1_k_n.GenerateTensorValue(GeneratorTensor_2<B1DataType>{-1, 2});
         break;
     default:
         a0_m_k.GenerateTensorValue(GeneratorTensor_3<A0DataType>{-0.5, 0.5});
@@ -238,6 +239,7 @@ bool profile_gemm_ab_scale_impl(int do_verification,
                                         a_element_op,
                                         b_element_op,
                                         c_element_op);
+        op_ptr->SetKBatch(argument_ptr.get(), KBatch);
 
         auto invoker_ptr = op_ptr->MakeInvokerPointer();
 
@@ -300,7 +302,7 @@ bool profile_gemm_ab_scale_impl(int do_verification,
             float gb_per_sec = num_btype / 1.E6 / ave_time;
 
             std::cout << "Perf: " << std::setw(10) << ave_time << " ms, " << tflops << " TFlops, "
-                      << gb_per_sec << " GB/s, " << op_name << std::endl;
+                      << gb_per_sec << " GB/s, " << op_name << ", KBatch " << KBatch << std::endl;
 
             if(tflops > best_tflops)
             {

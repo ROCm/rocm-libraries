@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -45,38 +45,6 @@ BEGIN_ROCPRIM_NAMESPACE
 namespace detail
 {
 
-template<class Config,
-         bool         WithInitialValue,
-         bool         FitLarger,
-         unsigned int FitItems,
-         class ResultType,
-         class InputIterator,
-         class OutputIterator,
-         class InitValueType,
-         class BinaryFunction>
-inline hipError_t launch_block_reduce(detail::target_arch arch,
-                                      InputIterator       input,
-                                      const size_t        size,
-                                      OutputIterator      output,
-                                      InitValueType       initial_value,
-                                      BinaryFunction      reduce_op,
-                                      dim3                grid,
-                                      dim3                block,
-                                      size_t              shmem,
-                                      hipStream_t         stream)
-{
-    auto kernel = [=](auto arch_config)
-    {
-        block_reduce_kernel_impl<decltype(arch_config),
-                                 WithInitialValue,
-                                 FitLarger,
-                                 FitItems,
-                                 ResultType>(input, size, output, initial_value, reduce_op);
-    };
-
-    return execute_launch_plan<Config>(arch, kernel, grid, block, shmem, stream);
-}
-
 #define ROCPRIM_DETAIL_HIP_SYNC(name, size, start)                                           \
     if(debug_synchronous)                                                                    \
     {                                                                                        \
@@ -88,36 +56,6 @@ inline hipError_t launch_block_reduce(detail::target_arch arch,
         auto _d   = std::chrono::duration_cast<std::chrono::duration<double>>(_end - start); \
         std::cout << " " << _d.count() * 1000 << " ms" << '\n';                              \
     }
-
-#define SINGLE_REDUCE_KERNEL(fit_larger, fit_items)                                            \
-    do                                                                                         \
-    {                                                                                          \
-        detail::target_arch target_arch;                                                       \
-        hipError_t          result = detail::host_target_arch(stream, target_arch);            \
-        if(result != hipSuccess)                                                               \
-        {                                                                                      \
-            return result;                                                                     \
-        }                                                                                      \
-        if(debug_synchronous)                                                                  \
-        {                                                                                      \
-            start = std::chrono::steady_clock::now();                                          \
-        }                                                                                      \
-                                                                                               \
-        ROCPRIM_RETURN_ON_ERROR(                                                               \
-            launch_block_reduce<config, WithInitialValue, fit_larger, fit_items, result_type>( \
-                target_arch,                                                                   \
-                input,                                                                         \
-                size,                                                                          \
-                output,                                                                        \
-                initial_value,                                                                 \
-                reduce_op,                                                                     \
-                dim3(1),                                                                       \
-                dim3(block_size),                                                              \
-                0,                                                                             \
-                stream));                                                                      \
-        ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("block_reduce_kernel", size, start);       \
-    }                                                                                          \
-    while(0)
 
 template<bool WithInitialValue, // true when inital_value should be used in reduction
          class Config,
@@ -138,12 +76,11 @@ inline hipError_t reduce_impl(void*               temporary_storage,
     using input_type  = typename std::iterator_traits<InputIterator>::value_type;
     using result_type = ::rocprim::accumulator_t<BinaryFunction, input_type>;
 
-    using config = wrapped_reduce_config<Config, result_type>;
+    using Selector = reduce_config_selector<input_type>;
 
-    detail::target_arch target_arch;
-    ROCPRIM_RETURN_ON_ERROR(host_target_arch(stream, target_arch));
+    const target current_target(stream);
 
-    const reduce_config_params params = dispatch_target_arch<config, false>(target_arch);
+    const auto params = get_config<Selector>(Config{}, current_target);
 
     const unsigned int block_size       = params.kernel_config.block_size;
     const unsigned int items_per_thread = params.kernel_config.items_per_thread;
@@ -198,10 +135,21 @@ inline hipError_t reduce_impl(void*               temporary_storage,
         std::cout << "items_per_block " << items_per_block << '\n';
     }
 
-    // We increase the items per thread with a maximum of 16.
-    // This means if the number_of_blocks is larger than 16 it
-    // will not fit in one kernel.
-    if(number_of_blocks > 16)
+    const auto get_max_items_per_thread = [&](auto ipt)
+    {
+        return rocprim::max(
+            ipt,
+            rocprim::min(ipt * 16u,
+                         128u / static_cast<unsigned int>(sizeof(input_type) / sizeof(uint8_t))));
+    };
+
+    const unsigned int max_items_per_thread = get_max_items_per_thread(items_per_thread);
+    const unsigned int max_number_of_blocks = max_items_per_thread / items_per_thread;
+
+    // We increase the items per thread with a maximum of 16x the input value.
+    // This ensures each thread processes enough work while keeping the total
+    // number of blocks manageable for a single kernel launch.
+    if(number_of_blocks > max_number_of_blocks)
     {
         const auto aligned_size_limit = number_of_blocks_limit * items_per_block;
 
@@ -216,22 +164,22 @@ inline hipError_t reduce_impl(void*               temporary_storage,
             {
                 start = std::chrono::steady_clock::now();
             }
-            const hipError_t error = launch_block_reduce<config, false, true, 1, result_type>(
-                target_arch,
-                input + offset,
-                current_size,
-                block_prefixes + i * number_of_blocks_limit,
-                initial_value,
-                reduce_op,
-                dim3(current_blocks),
-                dim3(block_size),
-                0,
-                stream);
-
-            if(error != hipSuccess)
+            auto block_reduce_kernel = [=](auto target_config)
             {
-                return error;
-            }
+                block_reduce_kernel_impl<decltype(target_config), false, result_type>(
+                    input + offset,
+                    current_size,
+                    block_prefixes + i * number_of_blocks_limit,
+                    initial_value,
+                    reduce_op);
+            };
+            ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<Config, Selector>(current_target,
+                                                                          block_reduce_kernel,
+                                                                          dim3(current_blocks),
+                                                                          dim3(block_size),
+                                                                          0,
+                                                                          stream));
+
             ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("block_reduce_kernel", current_size, start);
         }
 
@@ -262,50 +210,50 @@ inline hipError_t reduce_impl(void*               temporary_storage,
         const unsigned int too_large = size > 0 ? items_per_block / size : 0;
         const unsigned int too_small = number_of_blocks;
 
-        if(too_small > 1)
+        const unsigned int needed_ipt
+            = detail::next_power_of_two(too_large == 0 ? items_per_thread * too_small
+                                                       : ceiling_div(items_per_thread, too_large));
+
+        if(debug_synchronous)
         {
-            // Decrease IPT for better utilisation
-            if(too_small <= 2)
-            {
-                SINGLE_REDUCE_KERNEL(true, 2);
-            }
-            else if(too_small <= 4)
-            {
-                SINGLE_REDUCE_KERNEL(true, 4);
-            }
-            else if(too_small <= 8)
-            {
-                SINGLE_REDUCE_KERNEL(true, 8);
-            }
-            else if(too_small <= 16)
-            {
-                SINGLE_REDUCE_KERNEL(true, 16);
-            }
+            start = std::chrono::steady_clock::now();
         }
-        else
+
+        auto block_reduce_kernel = [=](auto target_config) mutable
         {
-            // Increase IPT to prevent kernel launch
-            if(too_large >= 16)
-            {
-                SINGLE_REDUCE_KERNEL(false, 16);
-            }
-            else if(too_large >= 8)
-            {
-                SINGLE_REDUCE_KERNEL(false, 8);
-            }
-            else if(too_large >= 4)
-            {
-                SINGLE_REDUCE_KERNEL(false, 4);
-            }
-            else if(too_large >= 2)
-            {
-                SINGLE_REDUCE_KERNEL(false, 2);
-            }
-            else
-            {
-                SINGLE_REDUCE_KERNEL(false, 1);
-            }
-        }
+            constexpr unsigned int config_items_per_thread
+                = decltype(target_config)::params.kernel_config.items_per_thread;
+
+            constexpr unsigned int max_items_per_thread
+                = get_max_items_per_thread(config_items_per_thread);
+
+            // for(int i = 1; i <= max_items_per_thread; i*2)
+            ::rocprim::detail::constexpr_for_lte<0, Log2<max_items_per_thread>::VALUE, 1>(
+                [&](auto i)
+                {
+                    constexpr unsigned ipt = 1 << i;
+
+                    if(needed_ipt == ipt)
+                    {
+                        block_reduce_kernel_impl<decltype(target_config),
+                                                 WithInitialValue,
+                                                 result_type,
+                                                 ipt>(input,
+                                                      size,
+                                                      output,
+                                                      initial_value,
+                                                      reduce_op);
+                    }
+                });
+        };
+
+        ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<Config, Selector>(current_target,
+                                                                      block_reduce_kernel,
+                                                                      dim3(1),
+                                                                      dim3(block_size),
+                                                                      0,
+                                                                      stream));
+        ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("block_reduce_kernel", size, start);
     }
 
     return hipSuccess;
@@ -366,6 +314,8 @@ inline hipError_t reduce_impl(void*               temporary_storage,
 /// \parblock
 /// In this example a device-level min-reduction operation is performed on an array of
 /// integer values (<tt>short</tt>s are reduced into <tt>int</tt>s) using custom operator.
+///
+/// The full example is [on GitHub](https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocprim/example/rocprim/device/example_device_reduce.cpp).
 ///
 /// \code{.cpp}
 /// #include <rocprim/rocprim.hpp>

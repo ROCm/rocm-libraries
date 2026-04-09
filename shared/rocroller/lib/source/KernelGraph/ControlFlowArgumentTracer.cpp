@@ -1,36 +1,13 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <variant>
-#include <vector>
 
 #include <rocRoller/KernelGraph/ControlGraph/ControlFlowArgumentTracer.hpp>
 #include <rocRoller/KernelGraph/TopoVisitor.hpp>
 
 #include <rocRoller/ExpressionTransformations.hpp>
+#include <rocRoller/KernelGraph/CoordinateGraph/Dimension.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
 #include <rocRoller/KernelGraph/RegisterTagManager.hpp>
 #include <rocRoller/KernelGraph/Utils.hpp>
@@ -110,7 +87,6 @@ namespace rocRoller::KernelGraph
         void incorporate(int node, std::unordered_set<std::string> const& args)
         {
             auto& dest = m_referencedArgs[node];
-
             for(auto const& arg : args)
             {
                 incorporate(node, arg);
@@ -121,7 +97,7 @@ namespace rocRoller::KernelGraph
         {
             auto& dest = m_referencedArgs[node];
 
-            dest.insert(m_kernel->findArgument(arg).name);
+            dest.insert(m_kernel->findArgument(arg).getName());
         }
 
         void operator()(int node, CG::SetCoordinate const& op)
@@ -143,83 +119,23 @@ namespace rocRoller::KernelGraph
 
         void operator()(int node, CG::Assign const& op)
         {
-            incorporate(node, op.expression);
-        }
-
-        void operator()(int node, CG::ComputeIndex const& op)
-        {
-            for(int argIdx = 0; argIdx < static_cast<int>(Connections::ComputeIndexArgument::Count);
-                argIdx++)
+            auto dest = m_graph.mapper.get(node, NaryArgument::DEST);
+            if(dest > 0)
             {
-                auto arg = static_cast<Connections::ComputeIndexArgument>(argIdx);
-
-                auto dim = m_graph.mapper.get(node, Connections::ComputeIndex{arg});
-
-                if(dim > 0)
+                incorporate(node, m_tracer.trace(dest, true));
+                incorporate(node, m_tracer.trace(dest, false));
+                if(op.strideExpressionAttributes)
                 {
-                    incorporate(node, m_tracer.trace(dim, true));
+                    incorporate(node, op.strideExpressionAttributes->elementBlockStride);
+                    incorporate(node, op.strideExpressionAttributes->trLoadPairStride);
 
-                    if(arg == Connections::ComputeIndexArgument::TARGET)
-                    {
-                        auto dir = op.forward ? Graph::Direction::Upstream
-                                              : Graph::Direction::Downstream;
-
-                        auto [coords, path] = findRequiredCoordinates(dim, dir, m_graph);
-
-                        path = includeEdgeNeighbours(m_graph.coordinates, opposite(dir), path);
-
-                        std::unordered_set<std::string> targetCoords;
-                        for(auto coord : coords)
-                        {
-                            mergeSets(targetCoords, m_tracer.trace(coord, false));
-                            mergeSets(targetCoords, m_tracer.trace(coord, true));
-                        }
-                        for(auto coord : path)
-                        {
-                            mergeSets(targetCoords, m_tracer.trace(coord, false));
-                            mergeSets(targetCoords, m_tracer.trace(coord, true));
-                        }
-
-                        auto stride = m_graph.mapper.get(
-                            node,
-                            Connections::ComputeIndex{Connections::ComputeIndexArgument::STRIDE});
-
-                        if(stride > 0)
-                        {
-                            Expression::ExpressionPtr expr;
-                            for(auto const& argName : targetCoords)
-                            {
-                                auto arg = std::make_shared<AssemblyKernelArgument>(
-                                    argName, DataType::Int32);
-
-                                auto argExpr
-                                    = std::make_shared<Expression::Expression>(std::move(arg));
-
-                                if(expr)
-                                    expr = expr + argExpr;
-                                else
-                                    expr = argExpr;
-                            }
-
-                            if(expr)
-                                m_tagManager.addExpression(stride, expr, {});
-                        }
-
-                        incorporate(node, std::move(targetCoords));
-
-                        auto buffer = m_graph.mapper.get(
-                            node,
-                            Connections::ComputeIndex{Connections::ComputeIndexArgument::BUFFER});
-                        if(buffer > 0)
-                        {
-                            incorporate(node, m_tracer.trace(dim, false));
-                            auto pointer = m_tracer.call(dim);
-                            if(pointer)
-                                incorporate(node, std::move(*pointer));
-                        }
-                    }
+                    // Register the stride expression in the TagManager so that other nodes
+                    // referencing this stride coordinate (via DataFlowTag) can trace dependencies.
+                    m_tagManager.addExpression(dest, op.expression, {});
                 }
             }
+
+            incorporate(node, op.expression);
         }
 
         void operator()(int                                 node,
@@ -257,8 +173,22 @@ namespace rocRoller::KernelGraph
 
             auto [coords, path] = findAllRequiredCoordinates(node, m_graph);
 
+            auto subDimensionCoordinates
+                = filterCoordinates<CoordinateGraph::SubDimension>(path, m_graph);
+            auto isPretiled = subDimensionCoordinates.size() > 2;
+
             for(auto coord : path)
+            {
                 incorporate(node, m_tracer.trace(coord, true));
+
+                auto isSubDimension
+                    = m_graph.coordinates.get<CoordinateGraph::SubDimension>(coord).has_value();
+                if(isSubDimension && isPretiled)
+                {
+                    Log::debug("Pretiled coordinate: {}", coord);
+                    incorporate(node, m_tracer.trace(coord, false));
+                }
+            }
         }
 
         void operator()(int node, CIsAnyOf<CG::LoadVGPR, CG::StoreVGPR> auto const& op)
@@ -316,10 +246,10 @@ namespace rocRoller::KernelGraph
         {
             for(auto const& arg : m_kernel->arguments())
             {
-                auto argArgs = referencedKernelArguments(arg.expression);
+                auto argArgs = referencedKernelArguments(arg.getExpression());
                 for(auto const& argArg : argArgs)
                 {
-                    m_subReferencedArgs[argArg].insert(arg.name);
+                    m_subReferencedArgs[argArg].insert(arg.getName());
                 }
             }
 
@@ -357,32 +287,19 @@ namespace rocRoller::KernelGraph
 
             Log::debug("-=-=-=-=-=-=-=-=-=-=");
 
-            do
+            // Collect directly referenced args before propagation
+            // These are args actually used in control flow operations
+            for(auto const& [node, args] : m_referencedArgs)
             {
-                any = false;
-
-                for(auto& [node, referencedArgs] : m_referencedArgs)
+                for(auto const& arg : args)
                 {
-                    std::unordered_set<std::string> additions;
-
-                    for(auto const& arg : referencedArgs)
-                    {
-                        auto iter = m_subReferencedArgs.find(arg);
-                        if(iter != m_subReferencedArgs.end())
-                        {
-                            additions.insert(iter->second.begin(), iter->second.end());
-                        }
-                    }
-
-                    auto beforeSize = referencedArgs.size();
-                    referencedArgs.insert(additions.begin(), additions.end());
-                    auto afterSize = referencedArgs.size();
-
-                    if(afterSize > beforeSize)
-                        any = true;
+                    m_directlyReferencedArgs.insert(arg);
                 }
-            } while(any);
+            }
         }
+
+        // Arguments directly used in control flow (before propagation)
+        std::set<std::string> m_directlyReferencedArgs;
 
         CoordinateArgumentTracer m_tracer;
 
@@ -414,12 +331,17 @@ namespace rocRoller::KernelGraph
         m_referencedArguments = std::move(visitor.m_referencedArgs);
 
         for(auto arg : kernel->arguments())
-            m_neverReferencedArguments.insert(arg.name);
+            m_neverReferencedArguments.insert(arg.getName());
 
+        // Collect all referenced args and compute launch-time-only args
+        std::set<std::string> allReferenced;
         for(auto const& [node, args] : m_referencedArguments)
         {
             for(auto const& arg : args)
+            {
                 m_neverReferencedArguments.erase(arg);
+                allReferenced.insert(arg);
+            }
         }
 
         if(m_neverReferencedArguments.size() > 0)
@@ -428,7 +350,14 @@ namespace rocRoller::KernelGraph
             msg << "Argument(s) ";
             streamJoin(msg, m_neverReferencedArguments, ", ");
             msg << " are never referenced!";
+            Log::debug(msg.str());
+        }
 
+        if(visitor.m_directlyReferencedArgs.size() > 0)
+        {
+            std::ostringstream msg;
+            msg << "Directly referenced args (" << visitor.m_directlyReferencedArgs.size() << "): ";
+            streamJoin(msg, visitor.m_directlyReferencedArgs, ", ");
             Log::debug(msg.str());
         }
     }

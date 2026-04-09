@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -85,6 +85,8 @@ struct select_warp_reduce_impl
 /// In the examples reduce operation is performed on groups of 16 threads, each provides
 /// one \p int value, result is returned using the same variable as for input. Hardware
 /// warp size is 64. Block (tile) size is 64.
+///
+/// The full example is [on GitHub](https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocprim/example/rocprim/warp/example_warp_reduce.cpp).
 ///
 /// \code{.cpp}
 /// __global__ void example_kernel(...)
@@ -194,10 +196,7 @@ public:
         {
             if(VirtualWaveSize > ::rocprim::arch::wavefront::size())
             {
-                ROCPRIM_PRINT_ERROR_ONCE(
-                    "Specified warp size exceeds current hardware supported warp "
-                    "size. Aborting warp sort.");
-                return;
+                __builtin_trap(); // behavior undefined if virtual wave size exceeds hardware limit
             }
         }
         base_type::reduce(input, output, storage, reduce_op);
@@ -212,9 +211,7 @@ public:
         typename std::enable_if<(FunctionWarpSize > arch::wavefront::max_size()), void>::type
     {
         (void)reduce_op;
-        ROCPRIM_PRINT_ERROR_ONCE("Specified warp size exceeds current hardware supported warp "
-                                 "size. Aborting warp sort.");
-        return;
+        __builtin_trap(); // behavior undefined if virtual wave size exceeds hardware limit
     }
 
     /// \brief Performs reduction across threads in a logical warp.
@@ -277,10 +274,7 @@ public:
         {
             if(VirtualWaveSize > ::rocprim::arch::wavefront::size())
             {
-                ROCPRIM_PRINT_ERROR_ONCE(
-                    "Specified warp size exceeds current hardware supported warp "
-                    "size. Aborting warp sort.");
-                return;
+                __builtin_trap(); // behavior undefined if virtual wave size exceeds hardware limit
             }
         }
         base_type::reduce(input, output, valid_items, storage, reduce_op);
@@ -295,9 +289,7 @@ public:
         typename std::enable_if<(FunctionWarpSize > arch::wavefront::max_size()), void>::type
     {
         (void)reduce_op;
-        ROCPRIM_PRINT_ERROR_ONCE("Specified warp size exceeds current hardware supported warp "
-                                 "size. Aborting warp sort.");
-        return;
+        __builtin_trap(); // behavior undefined if virtual wave size exceeds hardware limit
     }
 
     /// \brief Performs head-segmented reduction across threads in a logical warp.
@@ -333,10 +325,7 @@ public:
         {
             if(VirtualWaveSize > ::rocprim::arch::wavefront::size())
             {
-                ROCPRIM_PRINT_ERROR_ONCE(
-                    "Specified warp size exceeds current hardware supported warp "
-                    "size. Aborting warp sort.");
-                return;
+                __builtin_trap(); // behavior undefined if virtual wave size exceeds hardware limit
             }
         }
         base_type::head_segmented_reduce(input, output, flag, storage, reduce_op);
@@ -353,9 +342,7 @@ public:
         typename std::enable_if<(FunctionWarpSize > arch::wavefront::max_size()), void>::type
     {
         (void)reduce_op;
-        ROCPRIM_PRINT_ERROR_ONCE("Specified warp size exceeds current hardware supported warp "
-                                 "size. Aborting warp sort.");
-        return;
+        __builtin_trap(); // behavior undefined if virtual wave size exceeds hardware limit
     }
 
     /// \brief Performs tail-segmented reduction across threads in a logical warp.
@@ -391,10 +378,7 @@ public:
         {
             if(VirtualWaveSize > ::rocprim::arch::wavefront::size())
             {
-                ROCPRIM_PRINT_ERROR_ONCE(
-                    "Specified warp size exceeds current hardware supported warp "
-                    "size. Aborting warp sort.");
-                return;
+                __builtin_trap(); // behavior undefined if virtual wave size exceeds hardware limit
             }
         }
         base_type::tail_segmented_reduce(input, output, flag, storage, reduce_op);
@@ -411,9 +395,7 @@ public:
         typename std::enable_if<(FunctionWarpSize > arch::wavefront::max_size()), void>::type
     {
         (void)reduce_op;
-        ROCPRIM_PRINT_ERROR_ONCE("Specified warp size exceeds current hardware supported warp "
-                                 "size. Aborting warp sort.");
-        return;
+        __builtin_trap(); // behavior undefined if virtual wave size exceeds hardware limit
     }
 };
 

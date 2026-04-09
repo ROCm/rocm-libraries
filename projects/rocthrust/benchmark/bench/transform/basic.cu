@@ -140,29 +140,29 @@ void run_benchmark(benchmark::State& state, const std::size_t elements, const st
   state.counters["gpu_noise"] = gpu_cv;
 }
 
-#define CREATE_BENCHMARK(T, Elements)                                                 \
-  benchmark::RegisterBenchmark(                                                       \
-    bench_utils::bench_naming::format_name(                                           \
-      "{algo:transform,subalgo:" + name + ",input_type:" #T + ",elements:" #Elements) \
-      .c_str(),                                                                       \
-    run_benchmark<Benchmark, T>,                                                      \
-    Elements,                                                                         \
+#define CREATE_BENCHMARK(T, Elements)                                                                            \
+  benchmark::RegisterBenchmark(                                                                                  \
+    bench_utils::bench_naming::format_name(                                                                      \
+      "{algo:transform,subalgo:" + name + ",input_type:" #T + ",elements:" + bench_utils::format_pow2(Elements)) \
+      .c_str(),                                                                                                  \
+    run_benchmark<Benchmark, T>,                                                                                 \
+    Elements,                                                                                                    \
     seed_type)
 
-// clang-format off
-#define BENCHMARK_TYPE(type)       \
-  CREATE_BENCHMARK(type, 1 << 16), \
-  CREATE_BENCHMARK(type, 1 << 20), \
-  CREATE_BENCHMARK(type, 1 << 24), \
-  CREATE_BENCHMARK(type, 1 << 28)
-// clang-format on
+#define BENCHMARK_TYPE(type)                                               \
+  for (size_t size : bench_utils::sizes)                                   \
+  {                                                                        \
+    if (sizeof(type) * size <= bench_utils::system.devProp.totalGlobalMem) \
+      bs.push_back(CREATE_BENCHMARK(type, size));                          \
+  }
 
 template <class Benchmark>
 void add_benchmarks(
   const std::string& name, std::vector<benchmark::internal::Benchmark*>& benchmarks, const std::string seed_type)
 {
-  std::vector<benchmark::internal::Benchmark*> bs = {BENCHMARK_TYPE(uint32_t), BENCHMARK_TYPE(uint64_t)};
-
+  std::vector<benchmark::internal::Benchmark*> bs;
+  BENCHMARK_TYPE(uint32_t)
+  BENCHMARK_TYPE(uint64_t)
   benchmarks.insert(benchmarks.end(), bs.begin(), bs.end());
 }
 
@@ -294,7 +294,17 @@ void run_babelstream(benchmark::State& state, const std::size_t n)
     thrust::fill(b.begin(), b.end(), startB);
     thrust::fill(c.begin(), c.end(), startC);
 
-    auto duration = Benchmark::template run<T>(a, b, c);
+    float64_t duration;
+    try
+    {
+      duration = Benchmark::template run<T>(a, b, c);
+    }
+    catch (const ::thrust::system::detail::bad_alloc& e)
+    {
+      (void) hipGetLastError();
+      state.SkipWithError(("thrust::system::detail::bad_alloc: " + std::string(e.what())).c_str());
+      return;
+    }
     state.SetIterationTime(duration);
     gpu_times.push_back(duration);
   }
@@ -309,40 +319,41 @@ void run_babelstream(benchmark::State& state, const std::size_t n)
 #define CREATE_BABELSTREAM_BENCHMARK(T, Elements, Benchmark)                                             \
   benchmark::RegisterBenchmark(                                                                          \
     bench_utils::bench_naming::format_name(                                                              \
-      "{algo:transform,subalgo:" + name + "." + #Benchmark + ",input_type:" #T + ",elements:" #Elements) \
+      "{algo:transform,subalgo:" + name + "." + #Benchmark + ",input_type:" #T + ",elements:" + bench_utils::format_pow2(Elements)) \
       .c_str(),                                                                                          \
     run_babelstream<Benchmark, T>,                                                                       \
     Elements)
 
-// clang-format off
 // Different benchmarks use a different number of buffers. H200/B200 can fit 2^31 elements for all benchmarks and types.
 // Upstream BabelStream uses 2^25. Allocation failure just skips the benchmark
-#define BENCHMARK_BABELSTREAM_TYPE(type)              \
-  CREATE_BABELSTREAM_BENCHMARK(type, 1 << 25, mul),   \
-  CREATE_BABELSTREAM_BENCHMARK(type, 1 << 31, mul),   \
-  CREATE_BABELSTREAM_BENCHMARK(type, 1 << 25, add),   \
-  CREATE_BABELSTREAM_BENCHMARK(type, 1 << 31, add),   \
-  CREATE_BABELSTREAM_BENCHMARK(type, 1 << 25, triad), \
-  CREATE_BABELSTREAM_BENCHMARK(type, 1 << 31, triad), \
-  CREATE_BABELSTREAM_BENCHMARK(type, 1 << 25, nstream), \
-  CREATE_BABELSTREAM_BENCHMARK(type, 1 << 31, nstream), \
-  CREATE_BABELSTREAM_BENCHMARK(type, 1 << 25, nstream_stable), \
-  CREATE_BABELSTREAM_BENCHMARK(type, 1 << 31, nstream_stable)
-// clang-format on
+#define BENCHMARK_BABELSTREAM_TYPE(type)                                          \
+  if (sizeof(type) * (1u << 25) <= bench_utils::system.devProp.totalGlobalMem)    \
+  {                                                                               \
+    bs.push_back(CREATE_BABELSTREAM_BENCHMARK(type, (1u << 25), mul));            \
+    bs.push_back(CREATE_BABELSTREAM_BENCHMARK(type, (1u << 25), add));            \
+    bs.push_back(CREATE_BABELSTREAM_BENCHMARK(type, (1u << 25), triad));          \
+    bs.push_back(CREATE_BABELSTREAM_BENCHMARK(type, (1u << 25), nstream));        \
+    bs.push_back(CREATE_BABELSTREAM_BENCHMARK(type, (1u << 25), nstream_stable)); \
+  }                                                                               \
+  if (sizeof(type) * (1u << 31) <= bench_utils::system.devProp.totalGlobalMem)    \
+  {                                                                               \
+    bs.push_back(CREATE_BABELSTREAM_BENCHMARK(type, (1u << 31), mul));            \
+    bs.push_back(CREATE_BABELSTREAM_BENCHMARK(type, (1u << 31), add));            \
+    bs.push_back(CREATE_BABELSTREAM_BENCHMARK(type, (1u << 31), triad));          \
+    bs.push_back(CREATE_BABELSTREAM_BENCHMARK(type, (1u << 31), nstream));        \
+    bs.push_back(CREATE_BABELSTREAM_BENCHMARK(type, (1u << 31), nstream_stable)); \
+  }
 
 void add_benchmarks(const std::string& name, std::vector<benchmark::internal::Benchmark*>& benchmarks)
 {
-  std::vector<benchmark::internal::Benchmark*> bs = {
-    BENCHMARK_BABELSTREAM_TYPE(int8_t),
-    BENCHMARK_BABELSTREAM_TYPE(int16_t),
-    BENCHMARK_BABELSTREAM_TYPE(float),
-    BENCHMARK_BABELSTREAM_TYPE(double)
+  std::vector<benchmark::internal::Benchmark*> bs;
+  BENCHMARK_BABELSTREAM_TYPE(int8_t)
+  BENCHMARK_BABELSTREAM_TYPE(int16_t)
+  BENCHMARK_BABELSTREAM_TYPE(float)
+  BENCHMARK_BABELSTREAM_TYPE(double)
 #if THRUST_BENCHMARKS_HAVE_INT128_SUPPORT
-      ,
-    BENCHMARK_BABELSTREAM_TYPE(int128_t)
+  BENCHMARK_BABELSTREAM_TYPE(int128_t)
 #endif
-  };
-
   benchmarks.insert(benchmarks.end(), bs.begin(), bs.end());
 }
 #undef CREATE_BABELSTREAM_BENCHMARK

@@ -5,7 +5,7 @@
 
 #pragma once
 
-#include <hipdnn_sdk/plugin/PluginApiDataTypes.h>
+#include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 
 void getAllEngineIds(int64_t* engineIds, uint32_t maxEngines, uint32_t* numEngines);
 void getApplicableEngineIds(hipdnnEnginePluginHandle_t handle,
@@ -23,6 +23,8 @@ void destroyEngineDetails(hipdnnEnginePluginHandle_t handle,
 size_t getWorkspaceSize(hipdnnEnginePluginHandle_t handle,
                         const hipdnnPluginConstData_t* engineConfig,
                         const hipdnnPluginConstData_t* opGraph);
+size_t getWorkspaceSize(hipdnnEnginePluginHandle_t handle,
+                        hipdnnEnginePluginExecutionContext_t executionContext);
 hipdnnEnginePluginExecutionContext_t
     createExecutionContext(hipdnnEnginePluginHandle_t handle,
                            const hipdnnPluginConstData_t* engineConfig,

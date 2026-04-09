@@ -39,26 +39,24 @@ BEGIN_ROCPRIM_NAMESPACE
 namespace detail
 {
 
-template<
-    class Config,
-    class HaystackIterator,
-    class NeedlesIterator,
-    class OutputIterator,
-    class SearchFunction,
-    class CompareFunction
->
-inline
-hipError_t binary_search(void * temporary_storage,
-                         size_t& storage_size,
-                         HaystackIterator haystack,
-                         NeedlesIterator needles,
-                         OutputIterator output,
-                         size_t haystack_size,
-                         size_t needles_size,
-                         SearchFunction search_op,
-                         CompareFunction compare_op,
-                         hipStream_t stream,
-                         bool debug_synchronous)
+template<class Config,
+         class Selector,
+         class HaystackIterator,
+         class NeedlesIterator,
+         class OutputIterator,
+         class SearchFunction,
+         class CompareFunction>
+inline hipError_t binary_search(void*            temporary_storage,
+                                size_t&          storage_size,
+                                HaystackIterator haystack,
+                                NeedlesIterator  needles,
+                                OutputIterator   output,
+                                size_t           haystack_size,
+                                size_t           needles_size,
+                                SearchFunction   search_op,
+                                CompareFunction  compare_op,
+                                hipStream_t      stream,
+                                bool             debug_synchronous)
 {
     using value_type = typename std::iterator_traits<NeedlesIterator>::value_type;
 
@@ -70,7 +68,9 @@ hipError_t binary_search(void * temporary_storage,
         return hipSuccess;
     }
 
-    return detail::transform_impl<false, Config>(
+    constexpr bool is_pointer
+        = false; // We do not use the optimization for transform when input is a pointer.
+    return detail::transform_impl<is_pointer, Config, Selector>(
         needles,
         output,
         needles_size,
@@ -147,6 +147,8 @@ struct is_default_or_has_tag<default_config, Tag>
 /// In this example a device-level lower bound computation on a haystack of double precision type
 /// values is performed on an input array of integer values.
 ///
+/// The full example is [on GitHub](https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocprim/example/rocprim/device/example_device_binary_search.cpp).
+///
 /// \code{.cpp}
 /// #include <rocprim/rocprim.hpp>
 ///
@@ -187,7 +189,7 @@ struct is_default_or_has_tag<default_config, Tag>
 ///                              stream,
 ///                              debug_synchronous);
 ///
-/// // output = {0, 1, 2, 2, 3}
+/// // output = {1, 2, 2, 3, 4}
 /// \endcode
 /// \endparblock
 template<
@@ -209,27 +211,21 @@ hipError_t lower_bound(void * temporary_storage,
                        hipStream_t stream = 0,
                        bool debug_synchronous = false)
 {
-    static_assert(detail::is_default_or_has_tag<Config, detail::lower_bound_config_tag>::value,
-                  "Config must be a specialization of struct template lower_bound_config");
-
     using value_type  = typename std::iterator_traits<NeedlesIterator>::value_type;
     using output_type = typename std::iterator_traits<OutputIterator>::value_type;
-    using config
-        = std::conditional_t<std::is_same<default_config, Config>::value,
-                             detail::default_config_for_lower_bound<value_type, output_type>,
-                             Config>;
+    using selector    = detail::lower_bound_config_selector<value_type, output_type>;
 
-    return detail::binary_search<config>(temporary_storage,
-                                         storage_size,
-                                         haystack,
-                                         needles,
-                                         output,
-                                         haystack_size,
-                                         needles_size,
-                                         detail::lower_bound_search_op(),
-                                         compare_op,
-                                         stream,
-                                         debug_synchronous);
+    return detail::binary_search<Config, selector>(temporary_storage,
+                                                   storage_size,
+                                                   haystack,
+                                                   needles,
+                                                   output,
+                                                   haystack_size,
+                                                   needles_size,
+                                                   detail::lower_bound_search_op(),
+                                                   compare_op,
+                                                   stream,
+                                                   debug_synchronous);
 }
 
 /// \brief Parallel primitive that uses binary search for computing an upper bound on a given ordered
@@ -346,26 +342,21 @@ hipError_t upper_bound(void * temporary_storage,
                        hipStream_t stream = 0,
                        bool debug_synchronous = false)
 {
-    static_assert(detail::is_default_or_has_tag<Config, detail::upper_bound_config_tag>::value,
-                  "Config must be a specialization of struct template upper_bound_config");
     using value_type  = typename std::iterator_traits<NeedlesIterator>::value_type;
     using output_type = typename std::iterator_traits<OutputIterator>::value_type;
-    using config
-        = std::conditional_t<std::is_same<default_config, Config>::value,
-                             detail::default_config_for_upper_bound<value_type, output_type>,
-                             Config>;
+    using selector    = detail::upper_bound_config_selector<value_type, output_type>;
 
-    return detail::binary_search<config>(temporary_storage,
-                                         storage_size,
-                                         haystack,
-                                         needles,
-                                         output,
-                                         haystack_size,
-                                         needles_size,
-                                         detail::upper_bound_search_op(),
-                                         compare_op,
-                                         stream,
-                                         debug_synchronous);
+    return detail::binary_search<Config, selector>(temporary_storage,
+                                                   storage_size,
+                                                   haystack,
+                                                   needles,
+                                                   output,
+                                                   haystack_size,
+                                                   needles_size,
+                                                   detail::upper_bound_search_op(),
+                                                   compare_op,
+                                                   stream,
+                                                   debug_synchronous);
 }
 
 /// \brief Parallel primitive for performing a binary search (on a sorted range) of a given input.
@@ -477,26 +468,21 @@ hipError_t binary_search(void * temporary_storage,
                          hipStream_t stream = 0,
                          bool debug_synchronous = false)
 {
-    static_assert(detail::is_default_or_has_tag<Config, detail::binary_search_config_tag>::value,
-                  "Config must be a specialization of struct template binary_search_config");
     using value_type  = typename std::iterator_traits<NeedlesIterator>::value_type;
     using output_type = typename std::iterator_traits<OutputIterator>::value_type;
-    using config
-        = std::conditional_t<std::is_same<default_config, Config>::value,
-                             detail::default_config_for_binary_search<value_type, output_type>,
-                             Config>;
+    using selector    = detail::binary_search_config_selector<value_type, output_type>;
 
-    return detail::binary_search<config>(temporary_storage,
-                                         storage_size,
-                                         haystack,
-                                         needles,
-                                         output,
-                                         haystack_size,
-                                         needles_size,
-                                         detail::binary_search_op(),
-                                         compare_op,
-                                         stream,
-                                         debug_synchronous);
+    return detail::binary_search<Config, selector>(temporary_storage,
+                                                   storage_size,
+                                                   haystack,
+                                                   needles,
+                                                   output,
+                                                   haystack_size,
+                                                   needles_size,
+                                                   detail::binary_search_op(),
+                                                   compare_op,
+                                                   stream,
+                                                   debug_synchronous);
 }
 
 END_ROCPRIM_NAMESPACE

@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,17 +20,15 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "benchmark_device_partition.parallel.hpp"
-#include "benchmark_utils.hpp"
+#include "benchmark_device_partition.hpp"
+#include "primbench.hpp"
 
 #ifndef BENCHMARK_CONFIG_TUNING
     #include "../common/utils_custom_type.hpp"
 #endif
 
-// HIP API
 #include <hip/hip_runtime.h>
 
-// rocPRIM
 #ifndef BENCHMARK_CONFIG_TUNING
     #include <rocprim/device/config_types.hpp>
     #include <rocprim/types.hpp>
@@ -44,21 +42,19 @@
 #endif
 
 #define CREATE_PARTITION_FLAG_BENCHMARK(T, F, p) \
-    executor.queue_instance(device_partition_flag_benchmark<T, rocprim::default_config, F, p>());
+    executor.queue<device_partition_flag_benchmark<T, rocprim::default_config, F, p>>();
 
 #define CREATE_PARTITION_PREDICATE_BENCHMARK(T, p) \
-    executor.queue_instance(device_partition_predicate_benchmark<T, rocprim::default_config, p>());
+    executor.queue<device_partition_predicate_benchmark<T, rocprim::default_config, p>>();
 
 #define CREATE_PARTITION_TWO_WAY_FLAG_BENCHMARK(T, F, p) \
-    executor.queue_instance(                             \
-        device_partition_two_way_flag_benchmark<T, rocprim::default_config, F, p>());
+    executor.queue<device_partition_two_way_flag_benchmark<T, rocprim::default_config, F, p>>();
 
 #define CREATE_PARTITION_TWO_WAY_PREDICATE_BENCHMARK(T, p) \
-    executor.queue_instance(                               \
-        device_partition_two_way_predicate_benchmark<T, rocprim::default_config, p>());
+    executor.queue<device_partition_two_way_predicate_benchmark<T, rocprim::default_config, p>>();
 
 #define CREATE_PARTITION_THREE_WAY_BENCHMARK(T, p) \
-    executor.queue_instance(device_partition_three_way_benchmark<T, rocprim::default_config, p>());
+    executor.queue<device_partition_three_way_benchmark<T, rocprim::default_config, p>>();
 
 #define BENCHMARK_FLAG_TYPE(type, flag_type)                                      \
     CREATE_PARTITION_FLAG_BENCHMARK(type, flag_type, partition_probability::p005) \
@@ -90,69 +86,63 @@
     CREATE_PARTITION_THREE_WAY_BENCHMARK(type, partition_three_way_probability::p050_p075) \
     CREATE_PARTITION_THREE_WAY_BENCHMARK(type, partition_three_way_probability::p075_p100)
 
+#define BENCHMARK_TYPES_TUNING(T)          \
+    BENCHMARK_FLAG_TYPE(T, int8_t)         \
+    BENCHMARK_PREDICATE_TYPE(T)            \
+    BENCHMARK_TWO_WAY_FLAG_TYPE(T, int8_t) \
+    BENCHMARK_TWO_WAY_PREDICATE_TYPE(T)    \
+    BENCHMARK_THREE_WAY_TYPE(T)
+
 int main(int argc, char* argv[])
 {
-    benchmark_utils::executor executor(argc, argv, 128 * benchmark_utils::MiB, 10, 5);
+    primbench::settings settings;
+    settings.size = 128 * primbench::MiB;
+    primbench::executor executor(argc, argv, settings);
 
 #ifndef BENCHMARK_CONFIG_TUNING
-    using custom_double2    = common::custom_type<double, double>;
-    using custom_int_double = common::custom_type<int, double>;
-    using huge_float2       = common::custom_huge_type<1024, float, float>;
+    // Tuned types
+    BENCHMARK_TYPES_TUNING(rocprim::int128_t)
+    BENCHMARK_TYPES_TUNING(int64_t)
+    BENCHMARK_TYPES_TUNING(int32_t)
+    BENCHMARK_TYPES_TUNING(int16_t)
+    BENCHMARK_TYPES_TUNING(int8_t)
+    BENCHMARK_TYPES_TUNING(double)
+    BENCHMARK_TYPES_TUNING(float)
+    BENCHMARK_TYPES_TUNING(rocprim::half)
 
-    BENCHMARK_FLAG_TYPE(int, unsigned char)
-    BENCHMARK_FLAG_TYPE(float, unsigned char)
-    BENCHMARK_FLAG_TYPE(double, unsigned char)
+    #ifndef BENCHMARK_AUTOTUNED_TYPES_ONLY
+    // Not tuned types
     BENCHMARK_FLAG_TYPE(uint8_t, uint8_t)
-    BENCHMARK_FLAG_TYPE(int8_t, int8_t)
-    BENCHMARK_FLAG_TYPE(rocprim::half, int8_t)
-    BENCHMARK_FLAG_TYPE(custom_double2, unsigned char)
-    BENCHMARK_FLAG_TYPE(rocprim::int128_t, int8_t)
     BENCHMARK_FLAG_TYPE(rocprim::uint128_t, uint8_t)
-    BENCHMARK_FLAG_TYPE(huge_float2, uint8_t)
 
-    BENCHMARK_PREDICATE_TYPE(int)
-    BENCHMARK_PREDICATE_TYPE(float)
-    BENCHMARK_PREDICATE_TYPE(double)
     BENCHMARK_PREDICATE_TYPE(uint8_t)
-    BENCHMARK_PREDICATE_TYPE(int8_t)
-    BENCHMARK_PREDICATE_TYPE(rocprim::half)
-    BENCHMARK_PREDICATE_TYPE(custom_int_double)
-    BENCHMARK_PREDICATE_TYPE(rocprim::int128_t)
     BENCHMARK_PREDICATE_TYPE(rocprim::uint128_t)
-    BENCHMARK_PREDICATE_TYPE(huge_float2)
 
-    BENCHMARK_TWO_WAY_FLAG_TYPE(int, unsigned char)
-    BENCHMARK_TWO_WAY_FLAG_TYPE(float, unsigned char)
-    BENCHMARK_TWO_WAY_FLAG_TYPE(double, unsigned char)
     BENCHMARK_TWO_WAY_FLAG_TYPE(uint8_t, uint8_t)
-    BENCHMARK_TWO_WAY_FLAG_TYPE(int8_t, int8_t)
-    BENCHMARK_TWO_WAY_FLAG_TYPE(rocprim::half, int8_t)
-    BENCHMARK_TWO_WAY_FLAG_TYPE(custom_double2, unsigned char)
-    BENCHMARK_TWO_WAY_FLAG_TYPE(rocprim::int128_t, int8_t)
     BENCHMARK_TWO_WAY_FLAG_TYPE(rocprim::uint128_t, uint8_t)
-    BENCHMARK_TWO_WAY_FLAG_TYPE(huge_float2, uint8_t)
 
-    BENCHMARK_TWO_WAY_PREDICATE_TYPE(int)
-    BENCHMARK_TWO_WAY_PREDICATE_TYPE(float)
-    BENCHMARK_TWO_WAY_PREDICATE_TYPE(double)
     BENCHMARK_TWO_WAY_PREDICATE_TYPE(uint8_t)
-    BENCHMARK_TWO_WAY_PREDICATE_TYPE(int8_t)
-    BENCHMARK_TWO_WAY_PREDICATE_TYPE(rocprim::half)
-    BENCHMARK_TWO_WAY_PREDICATE_TYPE(custom_int_double)
-    BENCHMARK_TWO_WAY_PREDICATE_TYPE(rocprim::int128_t)
     BENCHMARK_TWO_WAY_PREDICATE_TYPE(rocprim::uint128_t)
-    BENCHMARK_TWO_WAY_PREDICATE_TYPE(huge_float2)
 
-    BENCHMARK_THREE_WAY_TYPE(int)
-    BENCHMARK_THREE_WAY_TYPE(float)
-    BENCHMARK_THREE_WAY_TYPE(double)
     BENCHMARK_THREE_WAY_TYPE(uint8_t)
-    BENCHMARK_THREE_WAY_TYPE(int8_t)
-    BENCHMARK_THREE_WAY_TYPE(rocprim::half)
-    BENCHMARK_THREE_WAY_TYPE(custom_int_double)
-    BENCHMARK_THREE_WAY_TYPE(rocprim::int128_t)
     BENCHMARK_THREE_WAY_TYPE(rocprim::uint128_t)
-    BENCHMARK_THREE_WAY_TYPE(huge_float2)
+
+    // Not tuned custom types
+    BENCHMARK_FLAG_TYPE(custom_f64_f64, uint8_t)
+    BENCHMARK_FLAG_TYPE(huge_1024_f32_f32, uint8_t)
+
+    BENCHMARK_PREDICATE_TYPE(custom_i32_f64)
+    BENCHMARK_PREDICATE_TYPE(huge_1024_f32_f32)
+
+    BENCHMARK_TWO_WAY_FLAG_TYPE(custom_f64_f64, uint8_t)
+    BENCHMARK_TWO_WAY_FLAG_TYPE(huge_1024_f32_f32, uint8_t)
+
+    BENCHMARK_TWO_WAY_PREDICATE_TYPE(custom_i32_f64)
+    BENCHMARK_TWO_WAY_PREDICATE_TYPE(huge_1024_f32_f32)
+
+    BENCHMARK_THREE_WAY_TYPE(custom_i32_f64)
+    BENCHMARK_THREE_WAY_TYPE(huge_1024_f32_f32)
+    #endif
 #endif
 
     executor.run();

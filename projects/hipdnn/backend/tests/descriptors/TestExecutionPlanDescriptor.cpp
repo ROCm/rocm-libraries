@@ -19,7 +19,7 @@
 
 using namespace hipdnn_backend;
 using namespace plugin;
-using namespace hipdnn_sdk::test_utilities;
+using namespace hipdnn_backend::test_utilities;
 using namespace ::testing;
 
 using ::testing::Return;
@@ -27,15 +27,6 @@ using ::testing::Return;
 class TestExecutionPlanDescriptor : public ::testing::Test
 {
 public:
-    std::unique_ptr<HipdnnBackendDescriptor> _planWrapper = nullptr;
-    std::unique_ptr<HipdnnBackendDescriptor> _mockGraphWrapper = nullptr;
-    std::unique_ptr<HipdnnBackendDescriptor> _mockEngineWrapper = nullptr;
-    std::unique_ptr<HipdnnBackendDescriptor> _mockEngineConfigWrapper = nullptr;
-    std::unique_ptr<HipdnnBackendDescriptor> _mockEngineConfigBadTypeWrapper = nullptr;
-    std::unique_ptr<HipdnnBackendDescriptor> _mockWrongTypeWrapper = nullptr;
-    std::unique_ptr<MockHandle> _mockHandle = nullptr;
-    std::shared_ptr<MockEnginePluginResourceManager> _mockEnginePluginResourceManager = nullptr;
-
     std::shared_ptr<ExecutionPlanDescriptor> getExecutionPlanDescriptor() const
     {
         return _planWrapper->asDescriptor<ExecutionPlanDescriptor>();
@@ -75,6 +66,8 @@ public:
         EXPECT_CALL(*_mockEnginePluginResourceManager, createExecutionContext(_, _, _))
             .WillOnce(Return(getExecutionContext()));
         EXPECT_CALL(*_mockEnginePluginResourceManager, destroyExecutionContext(_, _));
+        EXPECT_CALL(*_mockEnginePluginResourceManager, getWorkspaceSize(_, _))
+            .WillOnce(Return(1024));
 
         EXPECT_CALL(*_mockHandle, getPluginResourceManager())
             .WillOnce(Return(_mockEnginePluginResourceManager));
@@ -108,10 +101,19 @@ public:
     }
 
 protected:
+    std::unique_ptr<HipdnnBackendDescriptor> _planWrapper = nullptr;
+    std::unique_ptr<HipdnnBackendDescriptor> _mockGraphWrapper = nullptr;
+    std::unique_ptr<HipdnnBackendDescriptor> _mockEngineWrapper = nullptr;
+    std::unique_ptr<HipdnnBackendDescriptor> _mockEngineConfigWrapper = nullptr;
+    std::unique_ptr<HipdnnBackendDescriptor> _mockEngineConfigBadTypeWrapper = nullptr;
+    std::unique_ptr<HipdnnBackendDescriptor> _mockWrongTypeWrapper = nullptr;
+    std::unique_ptr<MockHandle> _mockHandle = nullptr;
+    std::shared_ptr<MockEnginePluginResourceManager> _mockEnginePluginResourceManager = nullptr;
+
     void SetUp() override
     {
         _planWrapper = createDescriptor<ExecutionPlanDescriptor>();
-        _mockGraphWrapper = hipdnn_sdk::test_utilities::createDescriptor<MockGraphDescriptor>();
+        _mockGraphWrapper = createDescriptor<MockGraphDescriptor>();
         _mockEngineWrapper = createDescriptor<MockEngineDescriptor>();
         _mockEngineConfigWrapper = createDescriptor<MockEngineConfigDescriptor>();
         _mockEngineConfigBadTypeWrapper = createDescriptor<MockEngineConfigDescriptor>();
@@ -137,7 +139,7 @@ TEST_F(TestExecutionPlanDescriptor, CreateExecutionPlanDescriptor)
 TEST_F(TestExecutionPlanDescriptor, SetAttrWhenNotFinalized)
 {
     auto plan = getExecutionPlanDescriptor();
-    uint64_t dummyWorkspaceSize;
+    uint64_t dummyWorkspaceSize = 0;
 
     ASSERT_THROW_HIPDNN_STATUS(
         plan->setAttribute(
@@ -157,24 +159,33 @@ TEST_F(TestExecutionPlanDescriptor, SetHandle)
     auto plan = getExecutionPlanDescriptor();
     hipdnnHandle_t handle = nullptr;
 
-    ASSERT_THROW_HIPDNN_STATUS(
-        plan->setAttribute(HIPDNN_ATTR_EXECUTION_PLAN_HANDLE, HIPDNN_TYPE_INT64, 1, &handle),
-        HIPDNN_STATUS_BAD_PARAM);
+    ASSERT_THROW_HIPDNN_STATUS(plan->setAttribute(HIPDNN_ATTR_EXECUTION_PLAN_HANDLE,
+                                                  HIPDNN_TYPE_INT64,
+                                                  1,
+                                                  static_cast<const void*>(&handle)),
+                               HIPDNN_STATUS_BAD_PARAM);
 
-    ASSERT_THROW_HIPDNN_STATUS(
-        plan->setAttribute(HIPDNN_ATTR_EXECUTION_PLAN_HANDLE, HIPDNN_TYPE_HANDLE, 2, &handle),
-        HIPDNN_STATUS_BAD_PARAM);
+    ASSERT_THROW_HIPDNN_STATUS(plan->setAttribute(HIPDNN_ATTR_EXECUTION_PLAN_HANDLE,
+                                                  HIPDNN_TYPE_HANDLE,
+                                                  2,
+                                                  static_cast<const void*>(&handle)),
+                               HIPDNN_STATUS_BAD_PARAM);
 
     ASSERT_THROW_HIPDNN_STATUS(
         plan->setAttribute(HIPDNN_ATTR_EXECUTION_PLAN_HANDLE, HIPDNN_TYPE_HANDLE, 1, nullptr),
         HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
 
-    ASSERT_THROW_HIPDNN_STATUS(
-        plan->setAttribute(HIPDNN_ATTR_EXECUTION_PLAN_HANDLE, HIPDNN_TYPE_HANDLE, 1, &handle),
-        HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
+    ASSERT_THROW_HIPDNN_STATUS(plan->setAttribute(HIPDNN_ATTR_EXECUTION_PLAN_HANDLE,
+                                                  HIPDNN_TYPE_HANDLE,
+                                                  1,
+                                                  static_cast<const void*>(&handle)),
+                               HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
 
     handle = reinterpret_cast<hipdnnHandle_t>(0x12345678);
-    plan->setAttribute(HIPDNN_ATTR_EXECUTION_PLAN_HANDLE, HIPDNN_TYPE_HANDLE, 1, &handle);
+    plan->setAttribute(HIPDNN_ATTR_EXECUTION_PLAN_HANDLE,
+                       HIPDNN_TYPE_HANDLE,
+                       1,
+                       static_cast<const void*>(&handle));
 }
 
 TEST_F(TestExecutionPlanDescriptor, SetEngineConfig)
@@ -251,7 +262,7 @@ TEST_F(TestExecutionPlanDescriptor, Finalize)
 TEST_F(TestExecutionPlanDescriptor, GetAttrWhenNotFinalized)
 {
     auto plan = getExecutionPlanDescriptor();
-    uint64_t dummyWorkspaceSize;
+    uint64_t dummyWorkspaceSize = 0;
 
     ASSERT_THROW_HIPDNN_STATUS(plan->getAttribute(HIPDNN_ATTR_EXECUTION_PLAN_WORKSPACE_SIZE,
                                                   HIPDNN_TYPE_INT64,
@@ -268,7 +279,6 @@ TEST_F(TestExecutionPlanDescriptor, GetWorkspaceSize)
     int64_t workspaceSize = 0;
 
     makeExecutionPlanFinalized();
-    EXPECT_CALL(*mockEngineConfig, getAttribute(_, _, _, _, _)).WillOnce(SetArg4ToInt64(1024));
     plan->getAttribute(
         HIPDNN_ATTR_EXECUTION_PLAN_WORKSPACE_SIZE, HIPDNN_TYPE_INT64, 1, nullptr, &workspaceSize);
     ASSERT_EQ(workspaceSize, 1024);
@@ -288,7 +298,7 @@ TEST_F(TestExecutionPlanDescriptor, GetEngineConfig)
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        1,
                                        &count,
-                                       returnedEngineConfig.getPtr()));
+                                       static_cast<void*>(returnedEngineConfig.getPtr())));
 
     ASSERT_EQ(count, 1);
     ASSERT_EQ(*returnedEngineConfig.get(), *(_mockEngineConfigWrapper.get()));
@@ -297,7 +307,7 @@ TEST_F(TestExecutionPlanDescriptor, GetEngineConfig)
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        1,
                                        nullptr,
-                                       nullCountEngineConfig.getPtr()));
+                                       static_cast<void*>(nullCountEngineConfig.getPtr())));
 
     ASSERT_EQ(*nullCountEngineConfig.get(), *(_mockEngineConfigWrapper.get()));
 }
@@ -307,7 +317,7 @@ TEST_F(TestExecutionPlanDescriptor, GetEngineConfigErrors)
     auto plan = getExecutionPlanDescriptor();
     hipdnnBackendDescriptor_t returnedEngineConfig = nullptr;
     int64_t count = 0;
-    void* dummy = &returnedEngineConfig;
+    void* dummy = static_cast<void*>(&returnedEngineConfig);
 
     makeExecutionPlanFinalized();
 

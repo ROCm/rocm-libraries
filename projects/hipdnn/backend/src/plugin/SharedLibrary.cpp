@@ -63,16 +63,16 @@ void SharedLibrary::load(const std::filesystem::path& libraryPath)
     // Check file extension and add prefix/suffix if needed
     if(modifiedLibraryPath.has_extension())
     {
-        if(modifiedLibraryPath.extension() != hipdnn_sdk::utilities::SHARED_LIB_EXT)
+        if(modifiedLibraryPath.extension() != hipdnn_data_sdk::utilities::SHARED_LIB_EXT)
         {
             throw HipdnnException(HIPDNN_STATUS_BAD_PARAM,
                                   std::string("Invalid file extension. Expected ")
-                                      + hipdnn_sdk::utilities::SHARED_LIB_EXT);
+                                      + hipdnn_data_sdk::utilities::SHARED_LIB_EXT);
         }
     }
     else
     {
-        auto libraryName = hipdnn_sdk::utilities::getLibraryName(
+        auto libraryName = hipdnn_data_sdk::utilities::getLibraryName(
             modifiedLibraryPath.filename().string().c_str());
         modifiedLibraryPath = modifiedLibraryPath.parent_path() / libraryName;
     }
@@ -94,8 +94,9 @@ void SharedLibrary::load(const std::filesystem::path& libraryPath)
                                   + _libraryPath.string());
     }
 
-    HIPDNN_LOG_INFO("SharedLibrary: Attempting to load shared library from final absolute path: {}",
-                    _libraryPath.string());
+    HIPDNN_BACKEND_LOG_INFO(
+        "SharedLibrary: Attempting to load shared library from final absolute path: {}",
+        _libraryPath.string());
 
     _libraryHandle = platform_utilities::openLibrary(_libraryPath);
 }
@@ -118,7 +119,7 @@ void* SharedLibrary::getSymbol(std::string_view symbolName) const
                                   + std::string(symbolName));
     }
 
-    return platform_utilities::getSymbol(_libraryHandle, symbolName.data());
+    return platform_utilities::getSymbol(_libraryHandle, std::string(symbolName).c_str());
 }
 
 const std::filesystem::path& SharedLibrary::libraryPath() const

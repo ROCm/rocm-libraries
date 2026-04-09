@@ -1,29 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
-
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 #include <algorithm>
 #include <numeric>
 #include <queue>
@@ -133,8 +109,34 @@ namespace rocRoller
             using RegisterValue = std::variant<Register::ValuePtr>;
 
             Register::ValuePtr resultPlaceholder(ResultType const& resType,
-                                                 bool              allowSpecial = true,
-                                                 int               valueCount   = 1)
+                                                 bool              allowSpecial = true)
+            {
+                auto regType = resType.regType;
+                if(IsWriteableSpecial(regType))
+                {
+                    if(allowSpecial)
+                        return m_context->getSpecial(regType);
+                    regType = MapSPRTypeToGPRType(regType);
+                }
+
+                // Obtain the register count by dividing the value count of the result type by its packing
+                size_t count = resType.valueCount
+                               / (resType.varType.dataType == DataType::None
+                                      ? 1
+                                      : DataTypeInfo::Get(resType.varType).packing);
+
+                return Register::Value::Placeholder(m_context,
+                                                    regType,
+                                                    resType.varType,
+                                                    count,
+                                                    Register::AllocationOptions::FullyContiguous());
+            }
+
+            // A special case of resultPlaceholder, for use when the value count in resType should be ignored
+            // and the placeholder should be created with a given count
+            Register::ValuePtr resultPlaceholderWithCount(ResultType const& resType,
+                                                          size_t            count,
+                                                          bool              allowSpecial = true)
             {
                 auto regType = resType.regType;
                 if(IsWriteableSpecial(regType))
@@ -147,25 +149,8 @@ namespace rocRoller
                 return Register::Value::Placeholder(m_context,
                                                     regType,
                                                     resType.varType,
-                                                    valueCount,
+                                                    count,
                                                     Register::AllocationOptions::FullyContiguous());
-            }
-
-            int resultValueCount(Register::ValuePtr const&              dest,
-                                 std::vector<Register::ValuePtr> const& operands)
-
-            {
-                if(dest)
-                {
-                    return dest->valueCount();
-                }
-
-                std::vector<int> count;
-                std::transform(
-                    operands.cbegin(), operands.cend(), std::back_inserter(count), [](auto x) {
-                        return x->valueCount() * DataTypeInfo::Get(x->variableType()).packing;
-                    });
-                return *std::max_element(count.cbegin(), count.cend());
             }
 
             Register::Type promoteRegisterTypes(std::vector<Register::ValuePtr> const& regs)
@@ -345,14 +330,12 @@ namespace rocRoller
                 auto const lhsInfo = DataTypeInfo::Get(lhs->variableType());
                 auto const rhsInfo = DataTypeInfo::Get(rhs->variableType());
 
-                int valueCount = resultValueCount(dest, {lhs, rhs});
-
                 if(!dest)
                 {
-                    dest = resultPlaceholder(resType, true, valueCount);
+                    dest = resultPlaceholder(resType, true);
                 }
 
-                for(size_t k = 0; k < dest->valueCount(); ++k)
+                for(size_t k = 0; k < resType.valueCount; ++k)
                 {
                     // TODD: Consolidate with other similar code
                     // that only calls `->element` if conditions are met
@@ -386,16 +369,13 @@ namespace rocRoller
                 Register::ValuePtr& rhs,
                 ResultType&         resType)
             {
-
                 auto const lhsInfo  = DataTypeInfo::Get(lhs->variableType());
                 auto const rhsInfo  = DataTypeInfo::Get(rhs->variableType());
                 auto const destInfo = DataTypeInfo::Get(resType.varType);
 
-                int valueCount = resultValueCount(dest, {lhs, rhs});
-
                 // TODO: Should this be pushed to arithmetic generators?
                 // If any sources were AGPRs, copy to VGPRs first.
-                if(valueCount > 1 && resType.regType == Register::Type::Accumulator)
+                if(resType.valueCount > 1 && resType.regType == Register::Type::Accumulator)
                 {
                     const auto& arch = m_context->targetArchitecture();
                     AssertFatal(arch.HasCapability(GPUCapability::HasAccCD),
@@ -409,7 +389,7 @@ namespace rocRoller
 
                 if(dest == nullptr)
                 {
-                    dest = resultPlaceholder(resType, true, valueCount / destInfo.packing);
+                    dest = resultPlaceholder(resType, true);
                 }
                 else
                 {
@@ -446,9 +426,9 @@ namespace rocRoller
                     int packingRatio = std::max(lhsInfo.packing, rhsInfo.packing)
                                        / std::min(lhsInfo.packing, rhsInfo.packing);
 
-                    auto conversion = resultPlaceholder(resType, true, packingRatio);
+                    auto conversion = resultPlaceholderWithCount(resType, packingRatio, true);
 
-                    for(size_t i = 0; i < valueCount; i += packingRatio)
+                    for(size_t i = 0; i < resType.valueCount; i += packingRatio)
                     {
                         Register::ValuePtr lhsVal, rhsVal;
                         if(lhsInfo.packing < rhsInfo.packing)
@@ -489,7 +469,7 @@ namespace rocRoller
                                     || rhs->variableType() == resType.varType,
                                 "Only one floating point argument can be converted");
 
-                    auto conversion = resultPlaceholder(resType, true, 1);
+                    auto conversion = resultPlaceholderWithCount(resType, 1, true);
 
                     for(size_t k = 0; k < dest->valueCount(); ++k)
                     {
@@ -576,7 +556,7 @@ namespace rocRoller
                 co_yield prepareSourceOperands(results, schedulerLockCount, subExprs);
 
                 // Convert one value at a time
-                dest = resultPlaceholder(resultType(expr), true, results[0]->valueCount());
+                dest = resultPlaceholderWithCount(resultType(expr), results[0]->valueCount(), true);
 
                 // Assume the seed is a single scalar value. Consider allowing a
                 // vector of seeds?
@@ -636,20 +616,20 @@ namespace rocRoller
                 std::vector<ExpressionPtr>      subExprs{expr.lhs, expr.r1hs, expr.r2hs};
 
                 co_yield prepareSourceOperands(results, schedulerLockCount, subExprs);
-                auto regType    = promoteRegisterTypes(results);
-                auto valueCount = resultValueCount(dest, results);
+                auto resType = resultType(expr);
 
-                if(valueCount > 1 && regType == Register::Type::Accumulator)
+                if(resType.valueCount > 1 && resType.regType == Register::Type::Accumulator)
                 {
                     const auto& arch = m_context->targetArchitecture();
                     AssertFatal(arch.HasCapability(GPUCapability::HasAccCD),
                                 concatenate("Architecture",
                                             arch.target().toString(),
                                             "does not use Accumulator registers."));
-                    regType = Register::Type::Vector;
+                    resType.regType = Register::Type::Vector;
                     for(int i = 0; i < results.size(); ++i)
                     {
-                        co_yield m_context->copier()->ensureType(results[i], results[i], regType);
+                        co_yield m_context->copier()->ensureType(
+                            results[i], results[i], resType.regType);
                     }
                 }
 
@@ -657,10 +637,10 @@ namespace rocRoller
 
                 if(!dest)
                 {
-                    dest = resultPlaceholder({regType, varType}, true, valueCount);
+                    dest = resultPlaceholder(resType, true);
                 }
 
-                for(size_t k = 0; k < valueCount; ++k)
+                for(size_t k = 0; k < resType.valueCount; ++k)
                 {
                     auto lhsVal  = results[0]->regType() == Register::Type::Literal
                                           || results[0]->valueCount() == 1
@@ -693,27 +673,26 @@ namespace rocRoller
                 std::vector<ExpressionPtr>      subExprs{expr.lhs, expr.r1hs, expr.r2hs};
 
                 co_yield prepareSourceOperands(results, schedulerLockCount, subExprs);
-                auto regType    = promoteRegisterTypes(results);
-                auto valueCount = resultValueCount(dest, results);
+                auto resType = resultType(expr);
 
-                if(valueCount > 1 && regType == Register::Type::Accumulator)
+                if(resType.regType == Register::Type::Accumulator)
                 {
                     const auto& arch = m_context->targetArchitecture();
                     AssertFatal(arch.HasCapability(GPUCapability::HasAccCD),
                                 concatenate("Architecture",
                                             arch.target().toString(),
                                             "does not use Accumulator registers."));
-                    regType = Register::Type::Vector;
+                    resType.regType = Register::Type::Vector;
                     for(int i = 0; i < results.size(); ++i)
                     {
-                        co_yield m_context->copier()->ensureType(results[i], results[i], regType);
+                        co_yield m_context->copier()->ensureType(
+                            results[i], results[i], resType.regType);
                     }
                 }
 
                 if(!dest)
                 {
-                    auto varType = promoteVariableTypes(results);
-                    dest         = resultPlaceholder({regType, varType}, true, valueCount);
+                    dest = resultPlaceholder(resType, true);
                 }
 
                 //If dest, results have multiple elements, handled inside generateOp
@@ -735,16 +714,14 @@ namespace rocRoller
                 co_yield prepareSourceOperands(results, schedulerLockCount, subExprs);
                 auto cond = results[0];
                 results.erase(results.begin());
-                auto regType    = promoteRegisterTypes(results);
-                auto valueCount = resultValueCount(dest, results);
+                auto resType = resultType(expr);
 
                 if(dest == nullptr)
                 {
-                    auto varType = promoteVariableTypes(results);
-                    dest         = resultPlaceholder({regType, varType}, true, valueCount);
+                    dest = resultPlaceholder(resType, true);
                 }
 
-                for(size_t k = 0; k < valueCount; ++k)
+                for(size_t k = 0; k < resType.valueCount; ++k)
                 {
                     auto lhs    = results[0];
                     auto rhs    = results[1];
@@ -810,19 +787,19 @@ namespace rocRoller
                     if(isUnpacking)
                     {
                         // unpacking args into (multiple registers) dest
-                        dest = resultPlaceholder(
-                            destType, true, results[0]->valueCount() * packingRatio);
+                        dest = resultPlaceholderWithCount(
+                            destType, results[0]->valueCount() * packingRatio, true);
                     }
                     else
                     {
-                        dest = resultPlaceholder(
-                            destType, true, results[0]->valueCount() / packingRatio);
+                        dest = resultPlaceholderWithCount(
+                            destType, results[0]->valueCount() / packingRatio, true);
                     }
                 }
 
                 dest->setName(dest->name() + results[0]->name());
 
-                if(dest->valueCount() == 1 && results[0]->valueCount() == 1)
+                if(destType.valueCount == 1 && results[0]->valueCount() == 1)
                 {
                     co_yield generateOp<Operation>(dest, results[0], expr);
                 }
@@ -941,6 +918,14 @@ namespace rocRoller
                 co_yield generateOp<BitFieldExtract>(dest, arg, expr);
             }
 
+            Generator<Instruction> operator()(Register::ValuePtr& dest, Reinterpret const& expr)
+            {
+                co_yield call(dest, expr.arg);
+                AssertFatal(dest != nullptr,
+                            "Reinterpret expression must have a destination register.");
+                dest->setVariableType(expr.destinationType);
+            }
+
             Generator<Instruction> operator()(Register::ValuePtr& dest, ScaledMatrixMultiply expr)
             {
 
@@ -1037,9 +1022,12 @@ namespace rocRoller
 
             Generator<Instruction> operator()(Register::ValuePtr& dest, Concatenate const& expr)
             {
-                auto                    destResultType = resultType(expr);
+                // TODO: this transform is required the copier generates incorrect code for 64 bit literals
+                auto cpy = splitConcatenate(expr);
+
+                auto                    destResultType = resultType(cpy);
                 std::vector<ResultType> operandResultTypes;
-                std::ranges::transform(expr.operands,
+                std::ranges::transform(cpy.operands,
                                        std::back_inserter(operandResultTypes),
                                        [](auto const& operand) { return resultType(operand); });
 
@@ -1060,12 +1048,11 @@ namespace rocRoller
                 }
 
                 unsigned offset = 0;
-                for(size_t i = 0; i < expr.operands.size(); ++i)
+                for(size_t i = 0; i < cpy.operands.size(); ++i)
                 {
-                    auto const& operand           = expr.operands[i];
+                    auto const& operand           = cpy.operands[i];
                     auto const& operandResultType = operandResultTypes[i];
-                    auto        length
-                        = DataTypeInfo::Get(operandResultType.varType.dataType).registerCount;
+                    auto        length = DataTypeInfo::Get(operandResultType.varType).registerCount;
 
                     auto operandDest
                         = dest->subset(iota<int>(offset, offset + length).to<std::vector>());
@@ -1108,7 +1095,7 @@ namespace rocRoller
             Generator<Instruction> operator()(Register::ValuePtr&              dest,
                                               AssemblyKernelArgumentPtr const& expr)
             {
-                co_yield m_context->argLoader()->getValue(expr->name, dest);
+                co_yield m_context->argLoader()->getValue(expr->getName(), dest);
             }
 
             Generator<Instruction> operator()(Register::ValuePtr&         dest,
@@ -1188,6 +1175,7 @@ namespace rocRoller
 
             if(Log::getLogger()->should_log(LogLevel::Trace))
             {
+                co_yield Instruction::Comment("generateFromTree()");
                 co_yield Instruction::Comment(toDOT(tree));
                 co_yield Instruction::Comment(statistics(tree));
             }
@@ -1227,13 +1215,12 @@ namespace rocRoller
                 return options->maxConcurrentSubExpressions;
             };
 
-            auto comparePriorities = [&](int a, int b) {
-                auto const& nodeA = tree.at(a);
-                auto const& nodeB = tree.at(b);
-
-                return std::make_tuple(nodeA.distanceFromRoot, nodeA.deps.size(), -a)
-                       < std::make_tuple(nodeB.distanceFromRoot, nodeB.deps.size(), -b);
-            };
+            // Use Sethi-Ullman inspired priority order.
+            // Smaller order = earlier in traversal = higher priority.
+            // Used with std::priority_queue (max-heap), so returning a > b means
+            // smaller order values are popped first.
+            auto comparePriorities
+                = [&](int a, int b) { return tree.at(a).priorityOrder > tree.at(b).priorityOrder; };
 
             co_yield generateNodes<int, Register::Type>(scheduler,
                                                         nodes,
@@ -1298,7 +1285,6 @@ namespace rocRoller
                    && getConsolidationCount(tree) == 0))
             {
                 // Don't use CSE in this case
-
                 tree.resize(0);
                 co_yield v.call(dest, expr);
             }

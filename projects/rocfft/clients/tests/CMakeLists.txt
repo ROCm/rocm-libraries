@@ -1,5 +1,5 @@
 # #############################################################################
-# Copyright (C) 2016 - 2022 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2016 - 2025 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -44,7 +44,7 @@ endif()
 
 project( rocfft-clients-tests LANGUAGES CXX )
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 
 list( APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake )
 
@@ -70,7 +70,6 @@ set( rocfft-test_source
   gtest_main.cpp
   rocfft_accuracy_test.cpp
   bitwise_repro/bitwise_repro_test.cpp
-  accuracy_test.cpp
   accuracy_test_1D.cpp	
   accuracy_test_2D.cpp
   accuracy_test_3D.cpp
@@ -89,6 +88,8 @@ set( rocfft-test_source
   validate_length_stride.cpp
   random.cpp
   ../../shared/array_validator.cpp
+  ../../shared/test_callbacks.cpp
+  ../../shared/data_gen_device.cpp
   )
 
 add_executable( rocfft-test ${rocfft-test_source} ${rocfft-test_includes} )
@@ -107,10 +108,6 @@ if (NOT WIN32)
   target_link_options( rocfft-test PRIVATE -fgpu-rdc )
 endif()
 
-find_package( Boost REQUIRED )
-set( Boost_DEBUG ON )
-set( Boost_DETAILED_FAILURE_MSG ON )
-
 option( BUILD_FFTW "Download and build FFTW" OFF )
 
 # look for installed FFTW if we weren't asked to build it
@@ -128,8 +125,14 @@ if( NOT BUILD_FFTW )
     find_package(FFTW3f CONFIG QUIET )
     if( FFTW3_FOUND AND FFTW3f_FOUND )
       message(STATUS "FFTW3 found by using the FFTW3Config.cmake")
-      get_target_property(fftw3_libs FFTW3::fftw3 IMPORTED_LOCATION_RELEASE)
-      get_target_property(fftw3f_libs FFTW3::fftw3f IMPORTED_LOCATION_RELEASE)
+      string(TOUPPER "${CMAKE_BUILD_TYPE}" CMAKE_BUILD_TYPE_UPPER)
+      if ( NOT WIN32 )
+        get_target_property(fftw3_libs FFTW3::fftw3 IMPORTED_LOCATION_${CMAKE_BUILD_TYPE_UPPER})
+        get_target_property(fftw3f_libs FFTW3::fftw3f IMPORTED_LOCATION_${CMAKE_BUILD_TYPE_UPPER})
+      else()
+        get_target_property(fftw3_libs FFTW3::fftw3 IMPORTED_IMPLIB_${CMAKE_BUILD_TYPE_UPPER})
+        get_target_property(fftw3f_libs FFTW3::fftw3f IMPORTED_IMPLIB_${CMAKE_BUILD_TYPE_UPPER})
+      endif()
 
       # Look for omp (preferred) or thread libraries. These are not a
       # hard requirement, but are nice to have to make FFTW run faster.
@@ -231,7 +234,6 @@ else()
 endif()
 
 set( rocfft-test_include_dirs
-  $<BUILD_INTERFACE:${Boost_INCLUDE_DIRS}>
   $<BUILD_INTERFACE:${FFTW_INCLUDE_DIRS}>
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/include>
   ${ROCM_CLANG_ROOT}/include
@@ -244,17 +246,22 @@ set( rocfft-test_link_libs
 option( BUILD_CLIENTS_TESTS_OPENMP "Build tests with OpenMP" ON )
 if( BUILD_CLIENTS_TESTS_OPENMP )
   # Attempt to find a config version, which provides openmp_LIB_DIR.
-  #find_package( OpenMP CONFIG PATHS "${HIP_CLANG_ROOT}/lib/cmake" )
-  if( NOT OPENMP_FOUND OR NOT DEFINED ${openmp_LIB_DIR} )
+  find_package( OpenMP CONFIG QUIET PATHS "${HIP_CLANG_ROOT}/lib/cmake" )
+  if( NOT OpenMP_FOUND OR NOT DEFINED openmp_LIB_DIR )
      # Fall-back to module mode.
-     find_package( OpenMP REQUIRED )
+     find_package( OpenMP MODULE REQUIRED )
      set( BUILD_RPATH "${HIP_CLANG_ROOT}/lib" )
      set( INSTALL_RPATH "$ORIGIN/../llvm/lib" )
   else()
      set( BUILD_RPATH "${HIP_CLANG_ROOT}/${openmp_LIB_DIR}" )
      set( INSTALL_RPATH "$ORIGIN/../llvm/${openmp_LIB_DIR}" )
   endif()
-  list( APPEND rocfft-test_link_libs OpenMP::OpenMP_CXX )
+  if( TARGET OpenMP::omp )
+    set( ROCFFT_OPENMP_LIBRARY OpenMP::omp )
+  else()
+    set( ROCFFT_OPENMP_LIBRARY OpenMP::OpenMP_CXX )
+  endif()
+  list( APPEND rocfft-test_link_libs ${ROCFFT_OPENMP_LIBRARY} )
 
   set_target_properties( rocfft-test PROPERTIES
      BUILD_RPATH "{$BUILD_RPATH}"
@@ -398,7 +405,7 @@ endif()
 if( ROCFFT_MPI_ENABLE )
   # normal and dynamic-loading MPI worker processes
   foreach(worker rocfft_mpi_worker dyna_rocfft_mpi_worker)
-    add_executable( ${worker} rocfft_mpi_worker.cpp )
+    add_executable( ${worker} rocfft_mpi_worker.cpp ../../shared/test_callbacks.cpp ../../shared/data_gen_device.cpp)
 
     if( BUILD_CLIENTS_TESTS_OPENMP )
       set_target_properties( ${worker} PROPERTIES
@@ -422,7 +429,7 @@ if( ROCFFT_MPI_ENABLE )
 
     if ( ROCFFT_CRAY_MPI_ENABLE )
       target_link_libraries( ${worker} PRIVATE
-        OpenMP::OpenMP_CXX 
+        ${ROCFFT_OPENMP_LIBRARY}
         hip::hiprand
         hip::device
         MPI::MPI_CXX
@@ -435,7 +442,7 @@ if( ROCFFT_MPI_ENABLE )
   	${MPI_LIBDIR}/../../../../gtl/lib )
     else()
       target_link_libraries( ${worker} PRIVATE
-        OpenMP::OpenMP_CXX 
+        ${ROCFFT_OPENMP_LIBRARY}
         hip::hiprand
         hip::device
         MPI::MPI_CXX

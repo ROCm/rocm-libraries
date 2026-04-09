@@ -1,34 +1,12 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #ifdef ROCROLLER_USE_HIP
 #include <hip/hip_ext.h>
 #include <hip/hip_runtime.h>
 #endif /* ROCROLLER_USE_HIP */
 
+#include <algorithm>
 #include <random>
 
 #include <rocRoller/AssemblyKernel.hpp>
@@ -38,6 +16,7 @@
 #include <rocRoller/Expression.hpp>
 #include <rocRoller/ExpressionTransformations.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
+#include <rocRoller/KernelOptions.hpp>
 #include <rocRoller/Operations/Command.hpp>
 #include <rocRoller/Scheduling/Observers/FileWritingObserver.hpp>
 #include <rocRoller/TensorDescriptor.hpp>
@@ -54,7 +33,14 @@
 
 namespace GEMMDriverTest
 {
-    struct GEMMFusionGPU : public CurrentGPUContextFixture
+    using namespace rocRoller;
+    namespace SolutionParams = rocRoller::Parameters::Solution;
+
+    // ========================================================================
+    // GEMMFusionTestSuite
+    // ========================================================================
+
+    struct GEMMFusionTestSuite : public CurrentGPUContextFixture
     {
         template <typename T>
         void basicGEMMRelu(ContextPtr&        m_context,
@@ -161,15 +147,15 @@ namespace GEMMDriverTest
                                                   : std::vector<size_t>({});
 
             auto tagTensorA = command->addOperation(rocRoller::Operations::Tensor(
-                2, dataType, gemm.transA == "N" ? oneStridesN : oneStridesT)); // A
+                2, dataType, {}, gemm.transA == "N" ? oneStridesN : oneStridesT)); // A
             auto tagLoadA = command->addOperation(rocRoller::Operations::T_Load_Tiled(tagTensorA));
 
             auto tagTensorB = command->addOperation(rocRoller::Operations::Tensor(
-                2, dataType, gemm.transB == "N" ? oneStridesN : oneStridesT)); // B
+                2, dataType, {}, gemm.transB == "N" ? oneStridesN : oneStridesT)); // B
             auto tagLoadB = command->addOperation(rocRoller::Operations::T_Load_Tiled(tagTensorB));
 
             auto tagTensorC = command->addOperation(
-                rocRoller::Operations::Tensor(2, dataType, oneStridesN)); // C
+                rocRoller::Operations::Tensor(2, dataType, {}, oneStridesN)); // C
             auto tagLoadC = command->addOperation(rocRoller::Operations::T_Load_Tiled(tagTensorC));
 
             auto tagScalarAlpha
@@ -218,15 +204,22 @@ namespace GEMMDriverTest
             command->addOperation(std::move(execute));
 
             auto tagTensorRelu = command->addOperation(
-                rocRoller::Operations::Tensor(2, dataType, oneStridesN)); // E
+                rocRoller::Operations::Tensor(2, dataType, {}, oneStridesN)); // E
             command->addOperation(rocRoller::Operations::T_Store_Tiled(tagRelu, tagTensorRelu));
 
-            auto tagScratch = command->allocateTag();
-            command->allocateArgument(VariableType(DataType::UInt32, PointerType::PointerGlobal),
-                                      tagScratch,
-                                      ArgumentType::Value,
-                                      DataDirection::ReadWrite,
-                                      rocRoller::SCRATCH);
+            Operations::OperationTag tagScratch[static_cast<int>(Operations::ScratchPolicy::Count)];
+            for(int i = 0; i < static_cast<int>(Operations::ScratchPolicy::Count); ++i)
+            {
+                auto policy   = static_cast<Operations::ScratchPolicy>(i);
+                tagScratch[i] = command->allocateTag();
+                command->addOperation(rocRoller::Operations::Scratch(tagScratch[i], policy));
+                command->allocateArgument(
+                    VariableType(DataType::UInt32, PointerType::PointerGlobal),
+                    tagScratch[i],
+                    ArgumentType::Value,
+                    DataDirection::ReadWrite,
+                    getScratchName(policy));
+            }
 
             auto params = std::make_shared<CommandParameters>();
             params->setManualKernelDimension(2);
@@ -270,12 +263,12 @@ namespace GEMMDriverTest
                 {gemm.macM, gemm.macK},
                 LayoutType::MATRIX_A,
                 {gemm.waveM, gemm.waveN, gemm.waveK, gemm.waveB},
-                gemm.loadLDSA ? MemoryType::LDS : MemoryType::WAVE);
+                GetMemoryType(gemm.loadPathA));
             auto macTileB = KernelGraph::CoordinateGraph::MacroTile(
                 {gemm.macK, gemm.macN},
                 LayoutType::MATRIX_B,
                 {gemm.waveM, gemm.waveN, gemm.waveK, gemm.waveB},
-                gemm.loadLDSB ? MemoryType::LDS : MemoryType::WAVE);
+                GetMemoryType(gemm.loadPathB));
             auto macTileC = KernelGraph::CoordinateGraph::MacroTile(
                 {gemm.macM, gemm.macN},
                 LayoutType::MATRIX_ACCUMULATOR,
@@ -284,7 +277,9 @@ namespace GEMMDriverTest
                 {gemm.macM, gemm.macN},
                 LayoutType::MATRIX_ACCUMULATOR,
                 {gemm.waveM, gemm.waveN, gemm.waveK, gemm.waveB},
-                gemm.storeLDSD ? MemoryType::WAVE_LDS : MemoryType::WAVE);
+                (gemm.storePath == SolutionParams::StorePath::VGPRToGlobalMemoryViaLDSWithBuffer)
+                    ? MemoryType::WAVE_LDS
+                    : MemoryType::WAVE);
 
             params->setDimensionInfo(tagLoadA, macTileA);
             params->setDimensionInfo(tagLoadB, macTileB);
@@ -329,10 +324,20 @@ namespace GEMMDriverTest
             {
                 commandArgs.setArgument(command->getNextTag(), ArgumentType::Value, gemm.numWGs);
             }
-            auto scratchSpaceRequired
-                = commandKernel.scratchSpaceRequired(commandArgs.runtimeArguments());
-            auto deviceScratch = make_shared_device<uint8_t>(scratchSpaceRequired, 0);
-            commandArgs.setArgument(tagScratch, ArgumentType::Value, deviceScratch.get());
+            std::shared_ptr<uint8_t>
+                   deviceScratch[static_cast<size_t>(Operations::ScratchPolicy::Count)];
+            size_t scratchSpaceRequired[static_cast<size_t>(Operations::ScratchPolicy::Count)];
+            for(size_t i = 0; i < static_cast<size_t>(Operations::ScratchPolicy::Count); ++i)
+            {
+                scratchSpaceRequired[i] = commandKernel.scratchSpaceRequired(
+                    static_cast<Operations::ScratchPolicy>(i), commandArgs.runtimeArguments());
+                if(scratchSpaceRequired[i] > 0)
+                {
+                    deviceScratch[i] = make_shared_device<uint8_t>(scratchSpaceRequired[i], 0);
+                    commandArgs.setArgument(
+                        command->getNextTag(), ArgumentType::Value, deviceScratch[i].get());
+                }
+            }
 
             // Host result
             std::vector<T> h_result(M * N, 0.0);
@@ -365,8 +370,14 @@ namespace GEMMDriverTest
             for(int iteration = 0; iteration < numIters; ++iteration)
             {
                 ASSERT_THAT(hipMemset(deviceD.get(), 0, M * N * sizeof(T)), HasHipSuccess(0));
-                ASSERT_THAT(hipMemset(deviceScratch.get(), 0, scratchSpaceRequired),
-                            HasHipSuccess(0));
+                for(size_t i = 0; i < static_cast<size_t>(Operations::ScratchPolicy::Count); ++i)
+                {
+                    if(scratchSpaceRequired[i] > 0)
+                    {
+                        ASSERT_THAT(hipMemset(deviceScratch[i].get(), 0, scratchSpaceRequired[i]),
+                                    HasHipSuccess(0));
+                    }
+                }
 
                 commandKernel.launchKernel(commandArgs.runtimeArguments());
                 m_context = commandKernel.getContext();
@@ -375,6 +386,23 @@ namespace GEMMDriverTest
                     hipMemcpy(
                         d_result.data(), deviceD.get(), M * N * sizeof(T), hipMemcpyDeviceToHost),
                     HasHipSuccess(0));
+
+                // Verify ZeroedBeforeAndAfter scratch is all zeros after kernel
+                auto zeroedIdx
+                    = static_cast<size_t>(Operations::ScratchPolicy::ZeroedBeforeAndAfter);
+                if(scratchSpaceRequired[zeroedIdx] > 0)
+                {
+                    std::vector<uint8_t> zeroedResult(scratchSpaceRequired[zeroedIdx]);
+                    ASSERT_THAT(hipMemcpy(zeroedResult.data(),
+                                          deviceScratch[zeroedIdx].get(),
+                                          scratchSpaceRequired[zeroedIdx],
+                                          hipMemcpyDeviceToHost),
+                                HasHipSuccess(0));
+                    EXPECT_TRUE(std::all_of(
+                        zeroedResult.begin(), zeroedResult.end(), [](uint8_t v) { return v == 0; }))
+                        << "ZeroedBeforeAndAfter scratch should be all zeros after kernel "
+                           "execution";
+                }
 
                 auto tol = gemmAcceptableError<T, T, T>(
                     M, N, K, m_context->targetArchitecture().target());
@@ -404,7 +432,7 @@ namespace GEMMDriverTest
         }
     };
 
-    TEST_F(GEMMFusionGPU, GPU_GEMMRelu)
+    TEST_F(GEMMFusionTestSuite, GPU_GEMM_Fusion_Relu)
     {
         GEMMProblem gemm;
         basicGEMMRelu<float>(m_context, gemm);

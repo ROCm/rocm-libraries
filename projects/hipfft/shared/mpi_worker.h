@@ -1,5 +1,5 @@
 /******************************************************************************
-* Copyright (C) 2024 Advanced Micro Devices, Inc. All rights reserved.
+* Copyright (C) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -23,116 +23,17 @@
 #include "fft_params.h"
 
 #include "CLI11.hpp"
+#include "fft_enums.h"
 #include "gpubuf.h"
 #include "hostbuf.h"
 #include "ptrdiff.h"
 #include "rocfft_against_fftw.h"
 #include "rocfft_hip.h"
+#include "test_callbacks.h"
 #include <chrono>
 #include <mpi.h>
-
-// functor to search for bricks on a rank, in a container of bricks
-// sorted by rank
-struct match_rank
-{
-    bool operator()(const fft_params::fft_brick& b, int rank) const
-    {
-        return b.rank < rank;
-    }
-    bool operator()(int rank, const fft_params::fft_brick& b) const
-    {
-        return rank < b.rank;
-    }
-};
-
-// Initialize input for the bricks on the current rank.
-template <typename Tparams>
-void init_local_input(MPI_Comm                  mpi_comm,
-                      const Tparams&            params,
-                      size_t                    elem_size,
-                      const std::vector<void*>& input_ptrs)
-{
-    int mpi_rank = 0;
-    MPI_Comm_rank(mpi_comm, &mpi_rank);
-
-    // get bricks for this rank
-    auto range = std::equal_range(params.ifields.front().bricks.begin(),
-                                  params.ifields.front().bricks.end(),
-                                  mpi_rank,
-                                  match_rank());
-
-    size_t ptr_idx = 0;
-    for(auto brick = range.first; brick != range.second; ++brick, ++ptr_idx)
-    {
-        // some utility code below needs batch separated from brick lengths
-        std::vector<size_t> brick_len_nobatch = brick->length();
-        auto                brick_batch       = brick_len_nobatch.front();
-        brick_len_nobatch.erase(brick_len_nobatch.begin());
-        std::vector<size_t> brick_stride_nobatch = brick->stride;
-        auto                brick_dist           = brick_stride_nobatch.front();
-        brick_stride_nobatch.erase(brick_stride_nobatch.begin());
-        std::vector<size_t> brick_lower_nobatch = brick->lower;
-        auto                brick_lower_batch   = brick_lower_nobatch.front();
-        brick_lower_nobatch.erase(brick_lower_nobatch.begin());
-
-        auto contiguous_stride = params.compute_stride(params.ilength());
-        auto contiguous_dist   = params.compute_idist();
-
-        std::vector<gpubuf> bufvec(1);
-        bufvec.back() = gpubuf::make_nonowned(
-            input_ptrs[ptr_idx], compute_ptrdiff(brick->length(), brick->stride, 0, 0) * elem_size);
-
-        // generate data (in device mem)
-        switch(params.precision)
-        {
-        case fft_precision_half:
-            set_input<gpubuf, rocfft_fp16>(bufvec,
-                                           fft_input_random_generator_device,
-                                           params.itype,
-                                           brick_len_nobatch,
-                                           brick_len_nobatch,
-                                           brick_stride_nobatch,
-                                           brick_dist,
-                                           brick_batch,
-                                           get_curr_device_prop(),
-                                           brick_lower_nobatch,
-                                           brick_lower_batch,
-                                           contiguous_stride,
-                                           contiguous_dist);
-            break;
-        case fft_precision_single:
-            set_input<gpubuf, float>(bufvec,
-                                     fft_input_random_generator_device,
-                                     params.itype,
-                                     brick_len_nobatch,
-                                     brick_len_nobatch,
-                                     brick_stride_nobatch,
-                                     brick_dist,
-                                     brick_batch,
-                                     get_curr_device_prop(),
-                                     brick_lower_nobatch,
-                                     brick_lower_batch,
-                                     contiguous_stride,
-                                     contiguous_dist);
-            break;
-        case fft_precision_double:
-            set_input<gpubuf, double>(bufvec,
-                                      fft_input_random_generator_device,
-                                      params.itype,
-                                      brick_len_nobatch,
-                                      brick_len_nobatch,
-                                      brick_stride_nobatch,
-                                      brick_dist,
-                                      brick_batch,
-                                      get_curr_device_prop(),
-                                      brick_lower_nobatch,
-                                      brick_lower_batch,
-                                      contiguous_stride,
-                                      contiguous_dist);
-            break;
-        }
-    }
-}
+#include <optional>
+#include <stdexcept>
 
 static MPI_Datatype get_mpi_type(size_t elem_size)
 {
@@ -163,23 +64,49 @@ static MPI_Datatype get_mpi_type(size_t elem_size)
 
 static size_t add_brick_elems(size_t val, const fft_params::fft_brick& b)
 {
-    return val + compute_ptrdiff(b.length(), b.stride, 0, 0);
+    return val + compute_ptrdiff(b.length(), b.stride);
 }
 
-// Gather a whole field to a host buffer on rank 0.  local_bricks is
-// the contiguous buffer allocated by alloc_local_bricks with all of
-// the current rank's bricks.
-static void gather_field(MPI_Comm                                  mpi_comm,
-                         const std::vector<fft_params::fft_brick>& bricks,
-                         const std::vector<size_t>&                field_stride,
-                         size_t                                    field_dist,
-                         const fft_precision                       precision,
-                         const fft_array_type                      array_type,
-                         gpubuf&                                   local_bricks,
-                         hostbuf&                                  output)
+// Test if any rank uses multiple devices.
+static bool multiple_devices_on_rank(const std::vector<fft_params::fft_brick>& bricks)
+{
+    // Go over each rank's bricks
+    for(auto range
+        = std::equal_range(bricks.begin(), bricks.end(), bricks.front().rank, match_rank());
+        range.first != range.second;
+        range = std::equal_range(range.second, bricks.end(), range.second->rank, match_rank()))
+    {
+        // If we find a device on this rank that has a different device
+        // from the first, then that means this rank is using multiple
+        // devices.
+        int first_device = range.first->device;
+        if(std::any_of(
+               range.first, range.second, [first_device](const fft_params::fft_brick& brick) {
+                   return brick.device != first_device;
+               }))
+            return true;
+    }
+    // No rank had multiple devices
+    return false;
+}
+
+// Gather a whole field to a host buffer on rank 0, using MPI_Gatherv.
+// This is only possible if each rank's bricks are on a single device.
+// local_bricks is the contiguous buffer allocated by
+// alloc_local_bricks with all of the current rank's bricks.
+static void gather_field_v(MPI_Comm                                  mpi_comm,
+                           const std::vector<fft_params::fft_brick>& bricks,
+                           const std::vector<size_t>&                field_stride,
+                           size_t                                    field_dist,
+                           const fft_precision                       precision,
+                           const fft_array_type                      array_type,
+                           std::map<int, gpubuf>&                    local_bricks,
+                           hostbuf&                                  output)
 {
     int mpi_rank = 0;
     MPI_Comm_rank(mpi_comm, &mpi_rank);
+    int mpi_size = 0;
+    MPI_Comm_size(mpi_comm, &mpi_size);
 
     auto elem_size = var_size<size_t>(precision, array_type);
 
@@ -188,13 +115,15 @@ static void gather_field(MPI_Comm                                  mpi_comm,
     // allocate buffer for rank 0 to run fftw
     if(mpi_rank == 0)
     {
-        size_t field_elems = std::accumulate(bricks.begin(), bricks.end(), 0UL, add_brick_elems);
+        size_t field_elems = std::accumulate(
+            bricks.begin(), bricks.end(), static_cast<size_t>(0), add_brick_elems);
         recvbuf.alloc(field_elems * elem_size);
     }
 
     // work out how much to receive from each rank and where
-    std::vector<int> recvcounts;
-    std::vector<int> displs;
+    std::vector<int> recvcounts(static_cast<size_t>(mpi_size));
+    size_t           send_count = 0;
+    std::vector<int> displs(static_cast<size_t>(mpi_size));
     // loop over each rank's bricks
     size_t elem_total = 0;
     for(auto range
@@ -202,17 +131,36 @@ static void gather_field(MPI_Comm                                  mpi_comm,
         range.first != range.second;
         range = std::equal_range(range.second, bricks.end(), range.second->rank, match_rank()))
     {
-        size_t rank_elems = std::accumulate(range.first, range.second, 0UL, add_brick_elems);
-        recvcounts.push_back(rank_elems);
-        displs.push_back(elem_total);
+        size_t current_rank = range.first->rank;
+        size_t rank_elems
+            = std::accumulate(range.first, range.second, static_cast<size_t>(0), add_brick_elems);
+        recvcounts[current_rank] = rank_elems;
+        displs[current_rank]     = elem_total;
         elem_total += rank_elems;
+        if(range.first->rank == mpi_rank)
+            send_count = rank_elems;
     }
 
     // gather brick(s) to rank 0 (to host memory)
     auto mpi_type = get_mpi_type(elem_size);
+    // make sure init/execution kernels are done before sending data
+    const auto hip_status = hipDeviceSynchronize();
+    // check that all buffers are at least as large as they need
+    // for what the process is expected to send
+    const bool local_buffer_is_too_small
+        = send_count > 0
+          && (local_bricks.empty() || send_count > local_bricks.begin()->second.size() / elem_size);
+    bool global_check = hip_status != hipSuccess || local_buffer_is_too_small;
+    MPI_Allreduce(MPI_IN_PLACE, &global_check, 1, MPI_CXX_BOOL, MPI_LOR, mpi_comm);
+    if(global_check)
+    {
+        throw std::runtime_error(
+            "Device synchronization failed on some process or its local buffer is too small for "
+            "the number of elements it's expected to send");
+    }
 
-    MPI_Gatherv(local_bricks.data(),
-                local_bricks.size() / elem_size,
+    MPI_Gatherv(local_bricks.empty() ? nullptr : local_bricks.begin()->second.data(),
+                send_count,
                 mpi_type,
                 recvbuf.data(),
                 recvcounts.data(),
@@ -269,96 +217,268 @@ static void gather_field(MPI_Comm                                  mpi_comm,
                              {0},
                              {0});
 
-                size_t brick_bytes
-                    = compute_ptrdiff(brick.length(), brick.stride, 0, 0) * elem_size;
+                size_t brick_bytes = compute_ptrdiff(brick.length(), brick.stride) * elem_size;
                 cur_brick_offset_bytes += brick_bytes;
             }
         }
     }
 }
 
-// Allocate a device buffer to hold all of the bricks for this rank.
-// A rank can have N bricks on it but this will allocate one
-// contiguous buffer and return pointers to each of the N bricks.
-static void alloc_local_bricks(MPI_Comm                                  mpi_comm,
-                               const std::vector<fft_params::fft_brick>& bricks,
-                               size_t                                    elem_size,
-                               gpubuf&                                   buffer,
-                               std::vector<void*>&                       buffer_ptrs)
+// Gather a whole field to a host buffer on rank 0, using MPI
+// point-to-point operations.  local_bricks is the contiguous buffer
+// allocated by alloc_local_bricks with all of the current rank's
+// bricks.
+static void gather_field_p2p(MPI_Comm                                  mpi_comm,
+                             const std::vector<fft_params::fft_brick>& bricks,
+                             const std::vector<size_t>&                field_stride,
+                             size_t                                    field_dist,
+                             const fft_precision                       precision,
+                             const fft_array_type                      array_type,
+                             std::map<int, gpubuf>&                    local_bricks,
+                             hostbuf&                                  output)
 {
     int mpi_rank = 0;
     MPI_Comm_rank(mpi_comm, &mpi_rank);
 
-    auto range = std::equal_range(bricks.begin(), bricks.end(), mpi_rank, match_rank());
+    auto elem_size = var_size<size_t>(precision, array_type);
+    auto mpi_type  = get_mpi_type(elem_size);
 
-    // get ptrdiff (i.e. length to alloc) of all bricks on this rank
-    std::vector<size_t> brick_ptrdiffs_bytes;
-    for(auto b = range.first; b != range.second; ++b)
-        brick_ptrdiffs_bytes.push_back(compute_ptrdiff(b->length(), b->stride, 0, 0) * elem_size);
+    // map device -> offset, to keep track of the offset of each
+    // brick in the per-device buffers
+    std::map<int, size_t> offsets;
 
-    size_t alloc_length_bytes
-        = std::accumulate(brick_ptrdiffs_bytes.begin(), brick_ptrdiffs_bytes.end(), 0);
-
-    if(buffer.alloc(alloc_length_bytes) != hipSuccess)
-        throw std::runtime_error("failed to alloc brick");
-
-    // return pointers to the bricks
-    size_t cur_offset_bytes = 0;
-    for(auto len : brick_ptrdiffs_bytes)
+    for(unsigned int i = 0; i < bricks.size(); ++i)
     {
-        buffer_ptrs.push_back(buffer.data_offset(cur_offset_bytes));
-        cur_offset_bytes += len;
+        const auto& brick       = bricks[i];
+        size_t      brick_elems = compute_ptrdiff(brick.length(), brick.stride);
+
+        // The rank that this brick is on needs to send to rank 0,
+        // and rank 0 needs to receive all bricks
+        if(brick.rank != mpi_rank && mpi_rank != 0)
+            continue;
+
+        void* brick_ptr   = nullptr;
+        auto  local_brick = local_bricks.find(brick.device);
+        if(local_brick != local_bricks.end())
+        {
+            // get pointer to this brick in the per-device buffer
+            auto& cur_offset = offsets.emplace(brick.device, static_cast<size_t>(0)).first->second;
+            brick_ptr        = local_brick->second.data_offset(cur_offset);
+            cur_offset += brick_elems * elem_size;
+        }
+
+        // rank 0 needs to receive the data
+        hostbuf recvbuf;
+        if(mpi_rank == 0)
+            recvbuf.alloc(brick_elems * elem_size);
+
+        if(brick.rank == 0)
+        {
+            if(mpi_rank == 0)
+            {
+                rocfft_scoped_device dev(brick.device);
+                // Data is already on a rank-0 local device, just memcpy it
+                //
+                // Ignore error as we don't want to hang collective
+                // operations, but we will notice accuracy test
+                // problems if this fails.
+                (void)hipMemcpy(
+                    recvbuf.data(), brick_ptr, brick_elems * elem_size, hipMemcpyDeviceToHost);
+            }
+        }
+        else
+        {
+            // otherwise, brick is on another rank and needs to be
+            // communicated via Send/Recv
+
+            if(mpi_rank == 0)
+            {
+                // Receive this brick to rank 0
+                MPI_Recv(recvbuf.data(),
+                         static_cast<int>(brick_elems),
+                         mpi_type,
+                         brick.rank,
+                         i,
+                         mpi_comm,
+                         MPI_STATUS_IGNORE);
+            }
+            else if(mpi_rank == brick.rank)
+            {
+                // Send this brick to rank 0
+                rocfft_scoped_device dev(brick.device);
+                MPI_Send(brick_ptr, static_cast<int>(brick_elems), mpi_type, 0, i, mpi_comm);
+            }
+        }
+
+        if(mpi_rank == 0)
+        {
+            // Brick is now local, transpose to the output buf
+            void* brick_write_ptr = output.data_offset(
+                brick.lower_field_offset(field_stride, field_dist) * elem_size);
+
+            std::vector<hostbuf> copy_in(1);
+            std::vector<hostbuf> copy_out(1);
+            copy_in.front()  = hostbuf::make_nonowned(recvbuf.data());
+            copy_out.front() = hostbuf::make_nonowned(brick_write_ptr);
+
+            // separate batch length + stride for the sake of copy_buffers
+            std::vector<size_t> brick_len_nobatch = brick.length();
+            auto                brick_batch       = brick_len_nobatch.front();
+            brick_len_nobatch.erase(brick_len_nobatch.begin());
+            std::vector<size_t> brick_stride_nobatch = brick.stride;
+            auto                brick_dist           = brick_stride_nobatch.front();
+            brick_stride_nobatch.erase(brick_stride_nobatch.begin());
+
+            copy_buffers(copy_in,
+                         copy_out,
+                         brick_len_nobatch,
+                         brick_batch,
+                         precision,
+                         array_type,
+                         brick_stride_nobatch,
+                         brick_dist,
+                         array_type,
+                         field_stride,
+                         field_dist,
+                         {0},
+                         {0});
+        }
+    }
+}
+
+// Gather a whole field to a host buffer on rank 0.
+static void gather_field(MPI_Comm                                  mpi_comm,
+                         const std::vector<fft_params::fft_brick>& bricks,
+                         const std::vector<size_t>&                field_stride,
+                         size_t                                    field_dist,
+                         const fft_precision                       precision,
+                         const fft_array_type                      array_type,
+                         std::map<int, gpubuf>&                    local_bricks,
+                         hostbuf&                                  output)
+{
+    if(multiple_devices_on_rank(bricks))
+    {
+        // Can't do MPI_Gather, as MPI assumes we only have one pointer per rank
+        gather_field_p2p(mpi_comm,
+                         bricks,
+                         field_stride,
+                         field_dist,
+                         precision,
+                         array_type,
+                         local_bricks,
+                         output);
+    }
+    else
+    {
+        // Do gather, which is more efficient
+        gather_field_v(mpi_comm,
+                       bricks,
+                       field_stride,
+                       field_dist,
+                       precision,
+                       array_type,
+                       local_bricks,
+                       output);
+    }
+}
+
+// Allocate device buffer(s) to hold all of the bricks for this rank.
+// A rank can have N bricks on it but this will allocate one
+// contiguous buffer per device and return pointers to each of the N bricks.
+static void
+    alloc_local_bricks(int                                       mpi_rank,
+                       const std::vector<fft_params::fft_brick>& bricks,
+                       size_t                                    elem_size,
+                       std::map<int, gpubuf>&                    buffers,
+                       std::vector<void*>&                       buffer_ptrs,
+                       const std::vector<fft_params::fft_brick>* corresponding_in_place_bricks
+                       = nullptr,
+                       size_t corresponding_in_place_elem_size = 0)
+{
+    // Get bricks that are local to this rank
+    auto local_range = std::equal_range(bricks.begin(), bricks.end(), mpi_rank, match_rank());
+    if(corresponding_in_place_bricks)
+    {
+        if(corresponding_in_place_elem_size == 0)
+            throw std::invalid_argument("Invalid element size for corresponding in-place I/O data");
+
+        for(auto brick = local_range.first; brick != local_range.second; ++brick)
+        {
+            const size_t brick_idx = std::distance(bricks.begin(), brick);
+            if(brick_idx >= corresponding_in_place_bricks->size()
+               || corresponding_in_place_bricks->at(brick_idx).rank != mpi_rank
+               || corresponding_in_place_bricks->at(brick_idx).device != brick->device)
+                throw std::invalid_argument("Invalid configuration for in-place operations");
+        }
+    }
+
+    // Do one pass over these bricks to work out how big of a buffer
+    // we need to allocate on each device
+    std::map<int, size_t> buffer_byte_sizes;
+    for(auto brick = local_range.first; brick != local_range.second; ++brick)
+    {
+        const size_t brick_idx = std::distance(bricks.begin(), brick);
+        buffer_byte_sizes.insert({brick->device, static_cast<size_t>(0)}).first->second
+            += std::max(compute_ptrdiff(brick->length(), brick->stride) * elem_size,
+                        corresponding_in_place_bricks
+                            ? compute_ptrdiff(corresponding_in_place_bricks->at(brick_idx).length(),
+                                              corresponding_in_place_bricks->at(brick_idx).stride)
+                                  * corresponding_in_place_elem_size
+                            : 0);
+    }
+
+    // Alloc buffers for each device
+    for(const auto buffer_size : buffer_byte_sizes)
+    {
+        rocfft_scoped_device dev(buffer_size.first);
+        if(buffers.emplace(buffer_size.first, gpubuf{}).first->second.alloc(buffer_size.second)
+           != hipSuccess)
+        {
+            throw std::runtime_error("Failed to allocate buffer on device "
+                                     + std::to_string(buffer_size.first));
+        }
+    }
+
+    // Return pointers for each brick
+    for(auto brick = local_range.first; brick != local_range.second; ++brick)
+    {
+        const size_t brick_idx = std::distance(bricks.begin(), brick);
+        auto&        buf       = buffers[brick->device];
+
+        // Use buffer_byte_sizes to count down bricks for each device
+        auto& remaining_byte_size = buffer_byte_sizes[brick->device];
+        auto  offset_bytes        = buf.size() - remaining_byte_size;
+        remaining_byte_size
+            -= std::max(compute_ptrdiff(brick->length(), brick->stride) * elem_size,
+                        corresponding_in_place_bricks
+                            ? compute_ptrdiff(corresponding_in_place_bricks->at(brick_idx).length(),
+                                              corresponding_in_place_bricks->at(brick_idx).stride)
+                                  * corresponding_in_place_elem_size
+                            : 0);
+        buffer_ptrs.push_back(buf.data_offset(offset_bytes));
     }
 }
 
 template <typename Tfloat>
 void execute_reference_fft(const fft_params& params, std::vector<hostbuf>& input)
 {
-    auto cpu_plan = fftw_plan_via_rocfft<Tfloat>(params.length,
-                                                 params.istride,
-                                                 params.ostride,
-                                                 params.nbatch,
-                                                 params.idist,
-                                                 params.odist,
-                                                 params.transform_type,
-                                                 input,
-                                                 input);
+    fftw_plan_wrapper_t<Tfloat> cpu_plan = fftw_plan_via_rocfft<Tfloat>(params.length,
+                                                                        params.istride,
+                                                                        params.ostride,
+                                                                        params.nbatch,
+                                                                        params.idist,
+                                                                        params.odist,
+                                                                        params.transform_type,
+                                                                        input,
+                                                                        input);
 
     fftw_run<Tfloat>(params.transform_type, cpu_plan, input, input);
-
-    fftw_destroy_plan_type(cpu_plan);
 }
 
 bool   use_fftw_wisdom = false;
 double half_epsilon    = default_half_epsilon();
 double single_epsilon  = default_single_epsilon();
 double double_epsilon  = default_double_epsilon();
-
-// get the device that the field's bricks are on, for this rank.
-// throws std::runtime_error if bricks for this rank are on multiple
-// devices since that's not something we currently handle.
-static int get_field_device(int mpi_rank, const fft_params::fft_field& field)
-{
-    // get first brick on this rank
-    auto first
-        = std::find_if(field.bricks.begin(),
-                       field.bricks.end(),
-                       [mpi_rank](const fft_params::fft_brick& b) { return b.rank == mpi_rank; });
-
-    if(first == field.bricks.end())
-        return true;
-
-    int first_device = first->device;
-
-    // check if remaining bricks are either not on this rank or on
-    // the same device
-    if(std::all_of(
-           first, field.bricks.end(), [mpi_rank, first_device](const fft_params::fft_brick& b) {
-               return b.rank != mpi_rank || b.device == first_device;
-           }))
-        return first_device;
-    throw std::runtime_error("field spans multiple devices");
-}
 
 // execute the specific number of trials on a vec of libraries
 template <typename AllParams>
@@ -371,9 +491,9 @@ void exec_testcases(std::function<AllParams(const std::vector<std::string>&)> ma
                     const std::string&                                        token,
                     const std::vector<std::string>&                           lib_strings,
                     std::vector<std::vector<double>>&                         gpu_time,
-                    gpubuf&                                                   local_input,
+                    std::map<int, gpubuf>&                                    local_inputs,
                     std::vector<void*>&                                       local_input_ptrs,
-                    gpubuf&                                                   local_output,
+                    std::map<int, gpubuf>&                                    local_outputs,
                     std::vector<void*>&                                       local_output_ptrs,
                     size_t                                                    ntrial)
 {
@@ -385,8 +505,8 @@ void exec_testcases(std::function<AllParams(const std::vector<std::string>&)> ma
 
         p.from_token(token);
         p.validate();
-        p.ifields.front().sort_by_rank();
-        p.ofields.front().sort_by_rank();
+        p.ifields.front().stable_sort_by_rank();
+        p.ofields.front().stable_sort_by_rank();
 
         p.mp_lib  = fft_params::fft_mp_lib_mpi;
         p.mp_comm = &mpi_comm;
@@ -396,6 +516,7 @@ void exec_testcases(std::function<AllParams(const std::vector<std::string>&)> ma
     // it to all ranks
     std::vector<size_t> testcases;
     testcases.reserve(ntrial * lib_strings.size());
+
     if(mpi_rank == 0)
     {
         switch(test_sequence)
@@ -442,140 +563,116 @@ void exec_testcases(std::function<AllParams(const std::vector<std::string>&)> ma
     const auto  in_elem_size  = var_size<size_t>(params.precision, params.itype);
     const auto  out_elem_size = var_size<size_t>(params.precision, params.otype);
 
-    // currently, MPI worker requires that any rank only uses a
-    // single device
-    int input_device  = get_field_device(mpi_rank, params.ifields.front());
-    int output_device = get_field_device(mpi_rank, params.ifields.front());
-    if(input_device != output_device)
-        throw std::runtime_error("input field uses different device from output field");
+    // allocate and initialize input buffers
+    alloc_local_bricks(mpi_rank,
+                       params.ifields.back().bricks,
+                       in_elem_size,
+                       local_inputs,
+                       local_input_ptrs,
+                       params.placement == fft_placement_inplace ? &params.ofields.back().bricks
+                                                                 : nullptr,
+                       out_elem_size);
 
-    rocfft_scoped_device dev(input_device);
+    init_local_input<decltype(params), gpubuf>(
+        mpi_rank, params, params.ifields.back().bricks, in_elem_size, local_input_ptrs);
 
-    // check accuracy vs. FFTW - we only do this if FFTW actually ran
-    // on this iteration
-    bool                 check_fftw = false;
+    // gather input for FFTW before we transform, in case we're doing an in-place FFT
     std::vector<hostbuf> cpu_data(1);
-    VectorNorms          cpu_output_norm;
-
-    // allocate input/output if it hasn't been allocated already
-    if(local_input_ptrs.empty())
+    if(run_fftw)
     {
-        alloc_local_bricks(
-            mpi_comm, params.ifields.back().bricks, in_elem_size, local_input, local_input_ptrs);
-        init_local_input(mpi_comm, params, in_elem_size, local_input_ptrs);
+        if(mpi_rank == 0)
+            cpu_data.front().alloc(std::max(params.isize.front() * in_elem_size,
+                                            params.osize.front() * out_elem_size));
 
-        // allocate local output bricks
-        if(params.placement == fft_placement_inplace)
-        {
-            local_output_ptrs = local_input_ptrs;
-        }
-        else
-        {
-            alloc_local_bricks(mpi_comm,
-                               params.ofields.back().bricks,
-                               out_elem_size,
-                               local_output,
-                               local_output_ptrs);
-        }
-
-        if(run_fftw)
-        {
-            check_fftw = true;
-            if(mpi_rank == 0)
-                cpu_data.front().alloc(std::max(params.isize.front() * in_elem_size,
-                                                params.osize.front() * out_elem_size));
-
-            gather_field(mpi_comm,
-                         params.ifields.front().bricks,
-                         params.istride,
-                         params.idist,
-                         params.precision,
-                         params.itype,
-                         local_input,
-                         cpu_data.front());
-
-            if(mpi_rank == 0)
-            {
-                fft_params params_inplace = params;
-                params_inplace.placement  = fft_placement_inplace;
-
-                // create fftw plan and run it
-                switch(params_inplace.precision)
-                {
-                case fft_precision_half:
-                {
-                    execute_reference_fft<rocfft_fp16>(params_inplace, cpu_data);
-                    break;
-                }
-                case fft_precision_single:
-                {
-                    execute_reference_fft<float>(params_inplace, cpu_data);
-                    break;
-                }
-                case fft_precision_double:
-                {
-                    execute_reference_fft<double>(params_inplace, cpu_data);
-                    break;
-                }
-                }
-
-                cpu_output_norm = norm(cpu_data,
-                                       params_inplace.ilength(),
-                                       params_inplace.nbatch,
-                                       params_inplace.precision,
-                                       params_inplace.itype,
-                                       params_inplace.istride,
-                                       params_inplace.idist,
-                                       params_inplace.ioffset);
-            }
-        }
+        gather_field(mpi_comm,
+                     params.ifields.front().bricks,
+                     params.istride,
+                     params.idist,
+                     params.precision,
+                     params.itype,
+                     local_inputs,
+                     cpu_data.front());
     }
 
-    // now all ranks are ready to start FFT
+    // if this is not an in-place transform, then allocate output buffers
+    if(params.placement == fft_placement_inplace)
+    {
+        local_output_ptrs = local_input_ptrs;
+    }
+    else
+    {
+        alloc_local_bricks(mpi_rank,
+                           params.ofields.back().bricks,
+                           out_elem_size,
+                           local_outputs,
+                           local_output_ptrs);
+    }
+
+    // execute FFTs
+    std::chrono::time_point<std::chrono::steady_clock> start, stop;
 
     // call rocfft_plan_create
     for(auto& p : all_params)
         p.create_plan();
 
-    std::chrono::time_point<std::chrono::steady_clock> start, stop;
     for(size_t i = 0; i < testcases.size(); ++i)
     {
         size_t testcase = testcases[i];
+
+        std::vector<gpubuf_t<callback_test_data>> all_cb_data;
+        std::vector<void*>                        load_cb_func;
+        std::vector<void*>                        load_cb_data;
+        std::vector<void*>                        store_cb_func;
+        std::vector<void*>                        store_cb_data;
+        if(all_params[testcase].run_callbacks)
+        {
+            auto runtime_err_handler
+                = [&](const std::string& msg) { throw std::runtime_error(msg); };
+
+            get_rank_load_callbacks(all_params[testcase],
+                                    load_cb_func,
+                                    load_cb_data,
+                                    runtime_err_handler,
+                                    false,
+                                    all_cb_data);
+            get_rank_store_callbacks(all_params[testcase],
+                                     store_cb_func,
+                                     store_cb_data,
+                                     runtime_err_handler,
+                                     false,
+                                     all_cb_data);
+
+            auto fft_status = all_params[testcase].set_callbacks(
+                &load_cb_func, &load_cb_data, &store_cb_func, &store_cb_data);
+            if(fft_status != fft_status_success)
+                throw std::runtime_error("set callback failure");
+        }
+
         if(run_bench)
         {
-            // reinit input for tests after the first one
             if(i > 0)
-                init_local_input(mpi_comm, params, in_elem_size, local_input_ptrs);
+            {
+                init_local_input<decltype(params), gpubuf>(
+                    mpi_rank, params, params.ifields.back().bricks, in_elem_size, local_input_ptrs);
+            }
 
-            // ensure plan is finished building, synchronize all devices
-            // in the input bricks
             (void)hipDeviceSynchronize();
-
             MPI_Barrier(mpi_comm);
 
-            // start timer
             start = std::chrono::steady_clock::now();
         }
 
-        all_params[testcase].execute(local_input_ptrs.data(), local_output_ptrs.data());
+        all_params[testcase].execute(reinterpret_cast<void**>(local_input_ptrs.data()),
+                                     reinterpret_cast<void**>(local_output_ptrs.data()));
 
         if(run_bench)
         {
-            // ensure FFT is finished executing - synchronize all devices
-            // on output bricks
-            {
-                rocfft_scoped_device dev(output_device);
-                (void)hipDeviceSynchronize();
-            }
-
-            stop = std::chrono::steady_clock::now();
-
-            std::chrono::duration<double, std::milli> diff = stop - start;
-
-            double diff_ms = diff.count();
+            (void)hipDeviceSynchronize();
+            stop                                              = std::chrono::steady_clock::now();
+            std::chrono::duration<double, std::milli> diff    = stop - start;
+            double                                    diff_ms = diff.count();
 
             double max_diff_ms = 0.0;
-            // reduce max runtime to root
             MPI_Reduce(&diff_ms, &max_diff_ms, 1, MPI_DOUBLE, MPI_MAX, 0, mpi_comm);
 
             if(mpi_rank == 0)
@@ -583,24 +680,61 @@ void exec_testcases(std::function<AllParams(const std::vector<std::string>&)> ma
         }
     }
 
-    if(check_fftw)
+    // FFTW Validation
+    if(run_fftw)
     {
-        // gather output
         std::vector<hostbuf> gpu_output(1);
+        VectorNorms          cpu_output_norm;
+
+        if(mpi_rank == 0)
+        {
+            fft_params params_inplace = params;
+            params_inplace.placement  = fft_placement_inplace;
+
+            apply_load_callback(params_inplace, cpu_data);
+            params.apply_host_load_ops(cpu_data);
+
+            switch(params_inplace.precision)
+            {
+            case fft_precision_half:
+                execute_reference_fft<rocfft_fp16>(params_inplace, cpu_data);
+                break;
+            case fft_precision_single:
+                execute_reference_fft<float>(params_inplace, cpu_data);
+                break;
+            case fft_precision_double:
+                execute_reference_fft<double>(params_inplace, cpu_data);
+                break;
+            }
+
+            params.apply_host_store_ops(cpu_data);
+            apply_store_callback(params_inplace, cpu_data);
+
+            cpu_output_norm = norm(cpu_data,
+                                   params_inplace.ilength(),
+                                   params_inplace.nbatch,
+                                   params_inplace.precision,
+                                   params_inplace.itype,
+                                   params_inplace.istride,
+                                   params_inplace.idist,
+                                   params_inplace.ioffset);
+        }
+
         if(mpi_rank == 0)
             gpu_output.front().alloc(params.osize.front() * out_elem_size);
+
         gather_field(mpi_comm,
                      params.ofields.front().bricks,
                      params.ostride,
                      params.odist,
                      params.precision,
                      params.otype,
-                     params.placement == fft_placement_inplace ? local_input : local_output,
+                     params.placement == fft_placement_inplace ? local_inputs : local_outputs,
                      gpu_output.front());
 
         if(mpi_rank == 0)
         {
-            // compare data to reference implementation
+            // Compare data to reference implementation
             const double linf_cutoff = type_epsilon(params.precision) * cpu_output_norm.l_inf
                                        * log(product(params.length.begin(), params.length.end()));
 
@@ -621,6 +755,7 @@ void exec_testcases(std::function<AllParams(const std::vector<std::string>&)> ma
                                  linf_cutoff,
                                  params.ooffset,
                                  params.ooffset);
+
             if(diff.l_inf > linf_cutoff)
             {
                 std::stringstream msg;
@@ -642,6 +777,21 @@ void exec_testcases(std::function<AllParams(const std::vector<std::string>&)> ma
         p.cleanup();
     }
 }
+
+// returns final grid integrating inter-process and intra-process grids
+std::vector<unsigned int> compute_final_grid(const std::vector<unsigned int>& mpi_grid,
+                                             const std::vector<unsigned int>& intra_grid)
+{
+    std::vector<unsigned int> final_grid(mpi_grid.size());
+    for(size_t i = 0; i < mpi_grid.size(); ++i)
+    {
+        final_grid[i] = mpi_grid[i] * intra_grid[i];
+    }
+    return final_grid;
+}
+
+int  n_hip_failures     = 0;
+bool skip_runtime_fails = false;
 
 // AllParams is a callable that returns a container of fft_params
 // structs to test.  It accepts a vector of library strings, which
@@ -721,6 +871,13 @@ int mpi_worker_main(const char*                                               de
     std::vector<unsigned int> imgrid;
     std::vector<unsigned int> omgrid;
 
+    // input/output GPU grids per process
+    std::vector<unsigned int> ingrid;
+    std::vector<unsigned int> outgrid;
+
+    // number of GPUs to use per rank
+    int ngpus{};
+
     auto* non_token = app.add_option_group("Token Conflict", "Options excluded by --token");
     non_token
         ->add_flag("--double", "Double precision transform (deprecated: use --precision double)")
@@ -771,6 +928,20 @@ int mpi_worker_main(const char*                                               de
                      "If this value is greater than one, arrays will be used")
         ->default_val(1);
 
+    // set number of GPUs to user per MPI rank
+    non_token->add_option("--ngpus", ngpus, "Number of GPUs to use per rank")
+        ->default_val(1)
+        ->check(CLI::NonNegativeNumber);
+
+    // define multi-GPU grids per process
+    non_token->add_option("--ingrid", ingrid, "Single-process grid of GPUs at input")
+        ->expected(1, 3)
+        ->needs("--ngpus");
+
+    non_token->add_option("--outgrid", outgrid, "Single-process grid of GPUs at output")
+        ->expected(1, 3)
+        ->needs("--ngpus");
+
     CLI::Option* opt_istride = non_token->add_option("--istride", params.istride, "Input strides");
     CLI::Option* opt_ostride = non_token->add_option("--ostride", params.ostride, "Output strides");
 
@@ -810,25 +981,28 @@ int mpi_worker_main(const char*                                               de
 
     if(token.empty())
     {
-
-        int localDeviceCount = 0;
-        (void)hipGetDeviceCount(&localDeviceCount);
-
         // set default multi-process grids in case none were given
         params.set_default_grid(mp_size, imgrid, omgrid);
+
+        // set default GPU grids per process
+        params.set_default_grid(ngpus, ingrid, outgrid);
 
         // start with all-ones in grids
         std::vector<unsigned int> input_grid(params.length.size() + 1, 1);
         std::vector<unsigned int> output_grid(params.length.size() + 1, 1);
 
         // sanity checks
-        int imgrid_size = std::accumulate(imgrid.begin(), imgrid.end(), 1, std::multiplies<int>());
-        int omgrid_size = std::accumulate(omgrid.begin(), omgrid.end(), 1, std::multiplies<int>());
+        int imgrid_size = product(imgrid.begin(), imgrid.end());
+        int omgrid_size = product(omgrid.begin(), omgrid.end());
 
-        if((imgrid.size() != params.length.size()) || (omgrid.size() != params.length.size()))
+        int ingrid_size  = product(ingrid.begin(), ingrid.end());
+        int outgrid_size = product(outgrid.begin(), outgrid.end());
+
+        if((imgrid.size() != params.length.size()) || (omgrid.size() != params.length.size())
+           || (ingrid.size() != params.length.size()) || (outgrid.size() != params.length.size()))
         {
             throw std::runtime_error(
-                "grid of processors must be of the same size as the problem dimension!");
+                "grid of processors and GPUs must be of the same size as the problem dimension!");
         }
 
         if((imgrid_size != mp_size) || (omgrid_size != mp_size))
@@ -837,12 +1011,25 @@ int mpi_worker_main(const char*                                               de
                 "size of grid of processors must be equal to the number of MPI resources!");
         }
 
-        // create input and output grids and distribute it according to user requirements
-        std::copy(imgrid.begin(), imgrid.end(), input_grid.begin() + 1);
-        std::copy(omgrid.begin(), omgrid.end(), output_grid.begin() + 1);
+        if((ingrid_size != ngpus) || (outgrid_size != ngpus))
+        {
+            throw std::runtime_error("size of grid of GPUs per process must be equal to ngpus!");
+        }
 
-        params.distribute_input(localDeviceCount, input_grid);
-        params.distribute_output(localDeviceCount, output_grid);
+        // create input and output grids and distribute it according to user requirements
+        std::vector<unsigned int> final_input_grid, final_output_grid;
+        final_input_grid  = compute_final_grid(imgrid, ingrid);
+        final_output_grid = compute_final_grid(omgrid, outgrid);
+
+        std::copy(final_input_grid.begin(), final_input_grid.end(), input_grid.begin() + 1);
+        std::copy(final_output_grid.begin(), final_output_grid.end(), output_grid.begin() + 1);
+
+        // get number of nodes to assign local GPU indexing, since within
+        // each node, GPUs are indexed 0,1,...,N
+
+        // distribute input and output among the available number of ranks and GPUs per rank
+        params.distribute_field<fft_io::fft_io_in>(ngpus, input_grid, mp_size);
+        params.distribute_field<fft_io::fft_io_out>(ngpus, output_grid, mp_size);
 
         params.validate();
         token = params.token();
@@ -902,11 +1089,32 @@ int mpi_worker_main(const char*                                               de
                 std::cout << " " << i;
             std::cout << "\n";
 
+            if(!ingrid.empty())
+            {
+                std::cout << "\tGPU grid:";
+                for(auto& i : ingrid)
+                    std::cout << " " << i;
+                std::cout << "\n";
+            }
+
             std::cout << "output grid:";
             for(auto& i : omgrid)
                 std::cout << " " << i;
             std::cout << "\n";
 
+            if(!outgrid.empty())
+            {
+                std::cout << "\tGPU grid:";
+                for(auto& i : outgrid)
+                    std::cout << " " << i;
+                std::cout << "\n";
+            }
+
+            std::cout << "\n";
+        }
+
+        if(mpi_rank == 0)
+        {
             std::cout << "Token: " << token << std::endl;
             std::cout << "\n";
 
@@ -914,10 +1122,11 @@ int mpi_worker_main(const char*                                               de
         }
     }
 
-    gpubuf             local_input;
-    std::vector<void*> local_input_ptrs;
-    gpubuf             local_output;
-    std::vector<void*> local_output_ptrs;
+    // Resize buffers based on the number of GPUs assigned
+    std::map<int, gpubuf> local_inputs;
+    std::vector<void*>    local_input_ptrs;
+    std::map<int, gpubuf> local_outputs;
+    std::vector<void*>    local_output_ptrs;
 
     // timing results - for each lib, store a vector of measured
     // times
@@ -935,9 +1144,9 @@ int mpi_worker_main(const char*                                               de
                    token,
                    lib_strings,
                    gpu_time,
-                   local_input,
+                   local_inputs,
                    local_input_ptrs,
-                   local_output,
+                   local_outputs,
                    local_output_ptrs,
                    ntrial_pass1);
     if(reverse)
@@ -956,9 +1165,9 @@ int mpi_worker_main(const char*                                               de
                        token,
                        lib_strings,
                        gpu_time,
-                       local_input,
+                       local_inputs,
                        local_input_ptrs,
-                       local_output,
+                       local_outputs,
                        local_output_ptrs,
                        ntrial_pass2);
         // put back to normal order
@@ -978,7 +1187,8 @@ int mpi_worker_main(const char*                                               de
             std::sort(times.begin(), times.end());
             // print median
             double median;
-            if(ntrial % 2)
+            // average the two times around the middle
+            if(ntrial % 2 && ntrial > 1)
                 median = (times[ntrial / 2] + times[(ntrial + 1) / 2]) / 2;
             else
                 median = times[ntrial / 2];

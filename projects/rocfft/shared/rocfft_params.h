@@ -21,16 +21,18 @@
 #ifndef ROCFFT_PARAMS_H
 #define ROCFFT_PARAMS_H
 
+#include "../shared/fft_enums.h"
 #include "../shared/fft_params.h"
 #include "../shared/gpubuf.h"
 #include "../shared/precision_type.h"
 #include "rocfft/rocfft.h"
+#include "rocfft_enums_vs_fft_enums.h"
 
 #ifdef ROCFFT_MPI_ENABLE
 #include <mpi.h>
 #endif
 
-#ifdef WIN32
+#ifdef _WIN32
 #include <windows.h>
 // psapi.h requires windows.h to be included first
 #include <psapi.h>
@@ -64,166 +66,6 @@ static std::string rocfft_status_to_string(const rocfft_status ret)
         return "rocfft_status_invalid_work_buffer";
     default:
         throw std::runtime_error("unknown rocfft_status");
-    }
-}
-
-inline fft_status fft_status_from_rocfftparams(const rocfft_status val)
-{
-    switch(val)
-    {
-    case rocfft_status_success:
-        return fft_status_success;
-    case rocfft_status_failure:
-        return fft_status_failure;
-    case rocfft_status_invalid_arg_value:
-        return fft_status_invalid_arg_value;
-    case rocfft_status_invalid_dimensions:
-        return fft_status_invalid_dimensions;
-    case rocfft_status_invalid_array_type:
-        return fft_status_invalid_array_type;
-    case rocfft_status_invalid_strides:
-        return fft_status_invalid_strides;
-    case rocfft_status_invalid_distance:
-        return fft_status_invalid_distance;
-    case rocfft_status_invalid_offset:
-        return fft_status_invalid_offset;
-    case rocfft_status_invalid_work_buffer:
-        return fft_status_invalid_work_buffer;
-    default:
-        throw std::runtime_error("Invalid status");
-    }
-}
-
-inline rocfft_precision rocfft_precision_from_fftparams(const fft_precision val)
-{
-    switch(val)
-    {
-    case fft_precision_single:
-        return rocfft_precision_single;
-    case fft_precision_double:
-        return rocfft_precision_double;
-    case fft_precision_half:
-        return rocfft_precision_half;
-    default:
-        throw std::runtime_error("Invalid precision");
-    }
-}
-
-inline fft_precision fft_precision_from_rocfft_precision(const rocfft_precision val)
-{
-    switch(val)
-    {
-    case rocfft_precision_single:
-        return fft_precision_single;
-    case rocfft_precision_double:
-        return fft_precision_double;
-    case rocfft_precision_half:
-        return fft_precision_half;
-    default:
-        throw std::runtime_error("Invalid precision");
-    }
-}
-
-inline rocfft_array_type rocfft_array_type_from_fftparams(const fft_array_type val)
-{
-    switch(val)
-    {
-    case fft_array_type_complex_interleaved:
-        return rocfft_array_type_complex_interleaved;
-    case fft_array_type_complex_planar:
-        return rocfft_array_type_complex_planar;
-    case fft_array_type_real:
-        return rocfft_array_type_real;
-    case fft_array_type_hermitian_interleaved:
-        return rocfft_array_type_hermitian_interleaved;
-    case fft_array_type_hermitian_planar:
-        return rocfft_array_type_hermitian_planar;
-    case fft_array_type_unset:
-        return rocfft_array_type_unset;
-    }
-    return rocfft_array_type_unset;
-}
-
-inline fft_array_type fft_array_type_from_rocfft_array_type(const rocfft_array_type val)
-{
-    switch(val)
-    {
-    case rocfft_array_type_complex_interleaved:
-        return fft_array_type_complex_interleaved;
-    case rocfft_array_type_complex_planar:
-        return fft_array_type_complex_planar;
-    case rocfft_array_type_real:
-        return fft_array_type_real;
-    case rocfft_array_type_hermitian_interleaved:
-        return fft_array_type_hermitian_interleaved;
-    case rocfft_array_type_hermitian_planar:
-        return fft_array_type_hermitian_planar;
-    case rocfft_array_type_unset:
-        return fft_array_type_unset;
-    }
-    return fft_array_type_unset;
-}
-
-inline rocfft_transform_type rocfft_transform_type_from_fftparams(const fft_transform_type val)
-{
-    switch(val)
-    {
-    case fft_transform_type_complex_forward:
-        return rocfft_transform_type_complex_forward;
-    case fft_transform_type_complex_inverse:
-        return rocfft_transform_type_complex_inverse;
-    case fft_transform_type_real_forward:
-        return rocfft_transform_type_real_forward;
-    case fft_transform_type_real_inverse:
-        return rocfft_transform_type_real_inverse;
-    default:
-        throw std::runtime_error("Invalid transform type");
-    }
-}
-
-inline fft_transform_type
-    fft_transform_type_from_rocfft_transform_type(const rocfft_transform_type val)
-{
-    switch(val)
-    {
-    case rocfft_transform_type_complex_forward:
-        return fft_transform_type_complex_forward;
-    case rocfft_transform_type_complex_inverse:
-        return fft_transform_type_complex_inverse;
-    case rocfft_transform_type_real_forward:
-        return fft_transform_type_real_forward;
-    case rocfft_transform_type_real_inverse:
-        return fft_transform_type_real_inverse;
-    default:
-        throw std::runtime_error("Invalid transform type");
-    }
-}
-
-inline rocfft_result_placement
-    rocfft_result_placement_from_fftparams(const fft_result_placement val)
-{
-    switch(val)
-    {
-    case fft_placement_inplace:
-        return rocfft_placement_inplace;
-    case fft_placement_notinplace:
-        return rocfft_placement_notinplace;
-    default:
-        throw std::runtime_error("Invalid result placement");
-    }
-}
-
-inline fft_result_placement
-    fft_result_placement_from_rocfft_result_placement(const rocfft_result_placement val)
-{
-    switch(val)
-    {
-    case rocfft_placement_inplace:
-        return fft_placement_inplace;
-    case rocfft_placement_notinplace:
-        return fft_placement_notinplace;
-    default:
-        throw std::runtime_error("Invalid result placement");
     }
 }
 
@@ -334,22 +176,13 @@ public:
 
         if(rocfft.field_create(&rfield) != rocfft_status_success)
             throw std::runtime_error("rocfft_field_create failed");
+        const auto proc_rank = get_process_rank();
         for(const auto& b : f.bricks)
         {
             // if this is an MPI transform, only tell the current rank
             // about bricks for that rank
-            if(mp_lib == fft_mp_lib_mpi)
-            {
-#ifdef ROCFFT_MPI_ENABLE
-                int mpi_rank = 0;
-                MPI_Comm_rank(*static_cast<MPI_Comm*>(mp_comm), &mpi_rank);
-
-                if(mpi_rank != b.rank)
-                    continue;
-#else
-                throw std::runtime_error("MPI is not enabled");
-#endif
-            }
+            if(proc_rank != b.rank)
+                continue;
 
             // rocFFT wants column-major bricks and fft_params stores
             // row-major
@@ -387,18 +220,21 @@ public:
             if(fft_status != rocfft_status_success)
                 return fft_status_from_rocfftparams(fft_status);
 
-            fft_status
-                = rocfft.plan_description_set_data_layout(desc,
-                                                          rocfft_array_type_from_fftparams(itype),
-                                                          rocfft_array_type_from_fftparams(otype),
-                                                          ioffset.data(),
-                                                          ooffset.data(),
-                                                          istride_cm().size(),
-                                                          istride_cm().data(),
-                                                          idist,
-                                                          ostride_cm().size(),
-                                                          ostride_cm().data(),
-                                                          odist);
+            const bool test_default_strides_and_dist
+                = is_using_default_layout() && std::hash<std::string>()(token()) % 2 == 1;
+
+            fft_status = rocfft.plan_description_set_data_layout(
+                desc,
+                rocfft_array_type_from_fftparams(itype),
+                rocfft_array_type_from_fftparams(otype),
+                test_default_strides_and_dist ? nullptr : ioffset.data(),
+                test_default_strides_and_dist ? nullptr : ooffset.data(),
+                test_default_strides_and_dist ? 0 : istride_cm().size(),
+                test_default_strides_and_dist ? nullptr : istride_cm().data(),
+                test_default_strides_and_dist ? 0 : idist,
+                test_default_strides_and_dist ? 0 : ostride_cm().size(),
+                test_default_strides_and_dist ? nullptr : ostride_cm().data(),
+                test_default_strides_and_dist ? 0 : odist);
             if(fft_status != rocfft_status_success)
             {
                 throw std::runtime_error("rocfft_plan_description_set_data_layout failed");
@@ -486,18 +322,8 @@ public:
             if(hip_status != hipSuccess)
             {
                 std::ostringstream oss;
-                oss << "work buffer allocation failed (" << workbuffersize << " requested)";
-                size_t mem_free  = 0;
-                size_t mem_total = 0;
-                hip_status       = hipMemGetInfo(&mem_free, &mem_total);
-                if(hip_status == hipSuccess)
-                {
-                    oss << "free vram: " << mem_free << " total vram: " << mem_total;
-                }
-                else
-                {
-                    oss << "hipMemGetInfo also failed";
-                }
+                oss << "work buffer allocation failed (" << byte_size_to_str(workbuffersize)
+                    << " requested)";
                 throw work_buffer_alloc_failure(oss.str(), workbuffersize);
             }
 
@@ -512,22 +338,60 @@ public:
         return ret;
     }
 
-    fft_status set_callbacks(void*  load_cb_host,
-                             void*  load_cb_data,
-                             void*  store_cb_host,
-                             void*  store_cb_data,
-                             size_t load_cb_shared_mem_bytes  = 0,
-                             size_t store_cb_shared_mem_bytes = 0) override
+    // Return the number of expected callback entries for supplied
+    // fields.
+    size_t expected_callback_count(const std::vector<fft_field>& fields)
+    {
+        // If fields are not specified, we consider the input or
+        // output to have a single brick (and thus expect a single
+        // callback entry)
+        if(fields.empty())
+            return 1;
+
+        const int mpi_rank = get_process_rank();
+
+        // count the number of bricks on this rank
+        size_t expected_callbacks = 0;
+        for(const auto& f : fields)
+        {
+            for(const auto& b : f.bricks)
+            {
+                if(b.rank == mpi_rank)
+                    ++expected_callbacks;
+            }
+        }
+        return expected_callbacks;
+    }
+
+    fft_status set_callbacks(std::vector<void*>* load_cb_func,
+                             std::vector<void*>* load_cb_data,
+                             std::vector<void*>* store_cb_func,
+                             std::vector<void*>* store_cb_data,
+                             size_t              load_cb_shared_mem_bytes  = 0,
+                             size_t              store_cb_shared_mem_bytes = 0) override
     {
         if(run_callbacks)
         {
+            auto expected_load_cb_count  = expected_callback_count(ifields);
+            auto expected_store_cb_count = expected_callback_count(ofields);
+            check_callback_vec(load_cb_func, expected_load_cb_count, true);
+            check_callback_vec(load_cb_data, expected_load_cb_count, false);
+            check_callback_vec(store_cb_func, expected_store_cb_count, true);
+            check_callback_vec(store_cb_data, expected_store_cb_count, false);
+
             auto roc_status = rocfft.execution_info_set_load_callback(
-                info, &load_cb_host, &load_cb_data, load_cb_shared_mem_bytes);
+                info,
+                load_cb_func ? load_cb_func->data() : nullptr,
+                load_cb_data ? load_cb_data->data() : nullptr,
+                load_cb_shared_mem_bytes);
             if(roc_status != rocfft_status_success)
                 return fft_status_from_rocfftparams(roc_status);
 
             roc_status = rocfft.execution_info_set_store_callback(
-                info, &store_cb_host, &store_cb_data, store_cb_shared_mem_bytes);
+                info,
+                store_cb_func ? store_cb_func->data() : nullptr,
+                store_cb_data ? store_cb_data->data() : nullptr,
+                store_cb_shared_mem_bytes);
             if(roc_status != rocfft_status_success)
                 return fft_status_from_rocfftparams(roc_status);
         }
@@ -540,98 +404,167 @@ public:
         return fft_status_from_rocfftparams(ret);
     }
 
-    // scatter data to multiple GPUs and adjust I/O buffers to match
-    virtual void multi_gpu_prepare(std::vector<hostbuf>& cpu_input,
-                                   std::vector<gpubuf>&  ibuffer,
-                                   std::vector<void*>&   pibuffer,
-                                   std::vector<void*>&   pobuffer) override
+    void multi_gpu_prepare(std::vector<hostbuf>& input_data_host,
+                           std::vector<gpubuf>& /* input_data_gpu (unused) */,
+                           std::vector<void*>& mgpu_ibuffers,
+                           std::vector<void*>& mgpu_obuffers) override
     {
-        auto alloc_fields = [&](const fft_params::fft_field& field,
-                                fft_array_type               array_type,
-                                std::vector<void*>&          pbuffer,
-                                bool                         copy_input) {
-            if(field.bricks.empty())
-                return;
+        if(ifields.empty() && ofields.empty())
+        {
+            // not a multi-device case
+            return;
+        }
 
-            // we have a field defined, clear the list of buffers as
-            // we'll be allocating new ones for each brick
-            pbuffer.clear();
+        if(input_data_host.empty())
+        {
+            throw std::invalid_argument(
+                "rocfft_params::multi_gpu_prepare: host-residing input buffer does not exist.");
+        }
+        const auto cpu_ref_params = make_params_for_reference_cpu();
+        if(cpu_ref_params.itype == fft_array_type_complex_planar
+           || cpu_ref_params.itype == fft_array_type_hermitian_planar)
+            throw std::logic_error("rocfft_params::multi_gpu_prepare: planar input data considered "
+                                   "by cpu reference calculation.");
+        const auto req_min_size = cpu_ref_params.ibuffer_sizes()[0];
+        if(input_data_host[0].size() < req_min_size)
+        {
+            std::ostringstream excpt_info;
+            excpt_info << "rocfft_params::multi_gpu_prepare: given host-residing input buffer is "
+                          "too small for scattering the multi-device transform inputs.\n"
+                       << "Buffer size is " << input_data_host[0].size()
+                       << ", required min size is " << req_min_size << ".";
+            throw std::invalid_argument(excpt_info.str());
+        }
 
-            const size_t elem_size_bytes = var_size<size_t>(precision, array_type);
-
-            for(const auto& b : field.bricks)
+        if(placement == fft_placement_inplace)
+        {
+            // validate test case configuration with respect to what we assume below (current
+            // limitations with respect to what we test for "in-place multi-device")
+            const std::runtime_error unmet_mgpu_inplace_requirement(
+                "rocfft_params::multi_gpu_prepare requires in-place tests to have the same total "
+                "number of fields and number of bricks per field on input and output. All bricks "
+                "should be assigned to the same devices, in the same order on input and output.");
+            if(ifields.size() != ofields.size())
+                throw unmet_mgpu_inplace_requirement;
+            for(size_t field_idx = 0; field_idx < ifields.size(); field_idx++)
             {
-                const size_t brick_size_elems = compute_ptrdiff(b.length(), b.stride, 0, 0);
-                const size_t brick_size_bytes = brick_size_elems * elem_size_bytes;
-
-                // set device for the alloc, but we want to return to the
-                // default device as the source of a following memcpy
+                const auto& ifield = ifields[field_idx];
+                const auto& ofield = ofields[field_idx];
+                if(ifield.bricks.size() != ofield.bricks.size())
+                    throw unmet_mgpu_inplace_requirement;
+                for(size_t b_idx = 0; b_idx < ifield.bricks.size(); b_idx++)
                 {
-                    rocfft_scoped_device dev(b.device);
-                    multi_gpu_data.emplace_back();
-                    if(multi_gpu_data.back().alloc(brick_size_bytes) != hipSuccess)
-                        throw std::runtime_error("device allocation failure");
-                    pbuffer.push_back(multi_gpu_data.back().data());
+                    const auto& ibrick = ifield.bricks[b_idx];
+                    const auto& obrick = ofield.bricks[b_idx];
+                    if(ibrick.rank != obrick.rank || ibrick.device != obrick.device)
+                        throw unmet_mgpu_inplace_requirement;
                 }
+            }
+        }
 
-                if(copy_input)
+        // I/O raw pointer(s) are left untouched if there is no corresponding field,
+        // i.e., no data decomposition
+        if(!ifields.empty())
+            mgpu_ibuffers.clear();
+        if(!ofields.empty())
+            mgpu_obuffers.clear();
+        const auto process_rank = get_process_rank();
+        for(size_t f_idx = 0; f_idx < std::max(ifields.size(), ofields.size()); f_idx++)
+        {
+            const auto* ifield = f_idx < ifields.size() ? &ifields[f_idx] : nullptr;
+            const auto* ofield = f_idx < ofields.size() ? &ofields[f_idx] : nullptr;
+            for(size_t b_idx = 0; b_idx < std::max(ifield ? ifield->bricks.size() : 0,
+                                                   ofield ? ofield->bricks.size() : 0);
+                b_idx++)
+            {
+                const auto* ibrick
+                    = ifield && b_idx < ifield->bricks.size() ? &ifield->bricks[b_idx] : nullptr;
+                const auto* obrick
+                    = ofield && b_idx < ofield->bricks.size() ? &ofield->bricks[b_idx] : nullptr;
+                for(const auto io : {fft_io::fft_io_in, fft_io::fft_io_out})
                 {
-                    // get this brick's starting offset in the field
-                    const size_t brick_offset_elems = b.lower_field_offset(istride, idist);
-
-                    // transpose input data to the brick's shape in
-                    // host memory, then memcpy
-
-                    // alloc a host-side brick that's the right shape
-                    std::vector<hostbuf> host_brick(1);
-                    host_brick.front().alloc(brick_size_bytes);
-
-                    std::vector<size_t> istride_with_batch{idist};
-                    std::copy(
-                        istride.begin(), istride.end(), std::back_inserter(istride_with_batch));
-
-                    copy_buffers(cpu_input,
-                                 host_brick,
-                                 b.length(),
-                                 1,
-                                 precision,
-                                 array_type,
-                                 istride_with_batch,
-                                 0,
-                                 array_type,
-                                 b.stride,
-                                 0,
-                                 {brick_offset_elems},
-                                 {0});
-
-                    // memcpy the transposed brick to the device
-                    if(hipMemcpy(pbuffer.back(),
-                                 host_brick.front().data(),
-                                 brick_size_bytes,
-                                 hipMemcpyHostToDevice)
-                       != hipSuccess)
+                    if(placement == fft_placement_inplace && io == fft_io::fft_io_out)
                     {
-                        throw std::runtime_error("hipMemcpy failure");
+                        // outputs and input are set together (when the input is set)
+                        // for in-place operations
+                        continue;
+                    }
+                    const auto* io_brick = io == fft_io::fft_io_in ? ibrick : obrick;
+                    auto& io_buffer_vec  = io == fft_io::fft_io_in ? mgpu_ibuffers : mgpu_obuffers;
+                    if(!io_brick || io_brick->rank != process_rank)
+                        continue;
+                    // calculate byte size for device allocation:
+                    const auto array_type = io == fft_io::fft_io_in ? itype : otype;
+                    size_t     alloc_byte_size
+                        = var_size<size_t>(precision, array_type)
+                          * compute_ptrdiff(io_brick->length(), io_brick->stride);
+                    if(placement == fft_placement_inplace)
+                    {
+                        // The I/O buffers must be large enough for both input and output data.
+                        // NOTE: see above argument validation checks for testing "in-place". As
+                        // a consequence, if this point is reached, io_brick == ibrick,
+                        // obrick != nullptr, ibrick->rank == obrick->rank, and
+                        // ibrick->device == obrick->device.
+                        alloc_byte_size
+                            = std::max(alloc_byte_size,
+                                       var_size<size_t>(precision, otype)
+                                           * compute_ptrdiff(obrick->length(), obrick->stride));
+                    }
+
+                    // set device for the alloc, but we want to return to the
+                    // default device as the source of a following memcpy
+                    {
+                        rocfft_scoped_device dev(io_brick->device);
+                        multi_gpu_data.emplace_back();
+                        if(multi_gpu_data.back().alloc(alloc_byte_size) != hipSuccess)
+                            throw std::runtime_error(
+                                "rocfft_params::multi_gpu_prepare: device allocation failed");
+                        io_buffer_vec.push_back(multi_gpu_data.back().data());
+                        if(placement == fft_placement_inplace)
+                            mgpu_obuffers.push_back(multi_gpu_data.back().data());
+                    }
+                    if(io == fft_io::fft_io_in)
+                    {
+                        // copy cpu input data to device buffer(s)
+                        const auto input_data_host_offset = io_brick->lower_field_offset(
+                            cpu_ref_params.istride, cpu_ref_params.idist);
+
+                        // transpose input data to the brick's shape in host memory, then
+                        // memcpy (as is) into allocated device buffer
+                        std::vector<hostbuf> host_tmp(1);
+                        host_tmp.front().alloc(alloc_byte_size);
+
+                        std::vector<size_t> cpu_istrides_with_idist(cpu_ref_params.istride);
+                        cpu_istrides_with_idist.insert(cpu_istrides_with_idist.begin(),
+                                                       cpu_ref_params.idist);
+
+                        copy_buffers(input_data_host,
+                                     host_tmp,
+                                     io_brick->length(),
+                                     /* "nbatch" = */ 1,
+                                     cpu_ref_params.precision,
+                                     cpu_ref_params.itype,
+                                     cpu_istrides_with_idist,
+                                     /* "idist" = */ 0,
+                                     array_type,
+                                     io_brick->stride,
+                                     /* "odist" =  */ 0,
+                                     {input_data_host_offset},
+                                     /* "ooffset" = */ {0});
+
+                        // memcpy the transposed brick to the device
+                        if(hipMemcpy(io_buffer_vec.back(),
+                                     host_tmp.front().data(),
+                                     alloc_byte_size,
+                                     hipMemcpyHostToDevice)
+                           != hipSuccess)
+                        {
+                            throw std::runtime_error(
+                                "rocfft_params::multi_gpu_prepare: hipMemcpy failed");
+                        }
                     }
                 }
             }
-
-            // if we copied the input to all the other devices, and
-            // this is an out-of-place transform, we no longer
-            // need the original input
-            if(copy_input && placement == fft_placement_notinplace)
-                ibuffer.clear();
-        };
-
-        // assume one input, one output field for simple cases
-        if(!ifields.empty())
-            alloc_fields(ifields.front(), itype, pibuffer, true);
-        if(!ofields.empty())
-        {
-            if(!ifields.empty() && placement == fft_placement_inplace)
-                pobuffer = pibuffer;
-            else
-                alloc_fields(ofields.front(), otype, pobuffer, false);
         }
     }
 
@@ -639,59 +572,91 @@ public:
     // on each GPU.  This vector remembers all of those allocations.
     std::vector<gpubuf> multi_gpu_data;
 
-    // gather data after multi-GPU FFT for verification
-    void multi_gpu_finalize(std::vector<hostbuf>& gpu_output,
-                            std::vector<gpubuf>&  obuffer,
-                            std::vector<void*>&   pobuffer) override
+    void multi_gpu_finalize(std::vector<hostbuf>& gathered_results_host,
+                            std::vector<gpubuf>& /* gathered_results_device (unused) */,
+                            std::vector<void*>& mgpu_obuffers) override
     {
         if(ofields.empty())
-            return;
-
-        const size_t elem_size_bytes = var_size<size_t>(precision, otype);
-
-        for(size_t i = 0; i < pobuffer.size(); ++i)
         {
-            const auto& b = ofields.front().bricks[i];
-
-            const size_t brick_size_elems = compute_ptrdiff(b.length(), b.stride, 0, 0);
-            const size_t brick_size_bytes = brick_size_elems * elem_size_bytes;
-
-            // get this brick's starting offset in the field
-            const size_t brick_offset_elems = b.lower_field_offset(ostride, odist);
-
-            // switch device to where we're copying from
-            rocfft_scoped_device dev(b.device);
-
-            // copy the brick to host, then copy to output
-            std::vector<hostbuf> host_brick(1);
-            host_brick.front().alloc(brick_size_bytes);
-            if(hipMemcpy(
-                   host_brick.front().data(), pobuffer[i], brick_size_bytes, hipMemcpyDeviceToHost)
-               != hipSuccess)
-            {
-                throw std::runtime_error("hipMemcpy failed");
-            }
-
-            std::vector<size_t> ostride_with_batch{odist};
-            std::copy(ostride.begin(), ostride.end(), std::back_inserter(ostride_with_batch));
-
-            copy_buffers(host_brick,
-                         gpu_output,
-                         b.length(),
-                         1,
-                         precision,
-                         otype,
-                         b.stride,
-                         0,
-                         otype,
-                         ostride_with_batch,
-                         0,
-                         {0},
-                         {brick_offset_elems});
+            // not multi-device, no data gathering to be done
+            return;
         }
-        // set pobuffer back to a single-device transform
-        pobuffer.clear();
-        pobuffer.push_back(obuffer.front().data());
+        if(gathered_results_host.empty())
+        {
+            throw std::invalid_argument(
+                "rocfft_params::multi_gpu_finalize: given host-residing buffer does not exist.");
+        }
+        if(otype == fft_array_type_complex_planar || otype == fft_array_type_hermitian_planar)
+            throw std::logic_error("rocfft_params::multi_gpu_finalize: planar output data "
+                                   "considered by current object.");
+        const auto req_min_size = obuffer_sizes()[0];
+        if(gathered_results_host[0].size() < req_min_size)
+        {
+            throw std::invalid_argument(
+                "rocfft_params::multi_gpu_finalize: given host-residing buffer does not exist or "
+                "is too small for gathering the multi-device transform results.");
+            std::ostringstream excpt_info;
+            excpt_info << "rocfft_params::multi_gpu_finalize: given host-residing buffer is is too "
+                          "small for gathering the multi-device transform results.\n"
+                       << "Buffer size is " << gathered_results_host[0].size()
+                       << ", required min size is " << req_min_size << ".";
+            throw std::invalid_argument(excpt_info.str());
+        }
+
+        const auto          process_rank = get_process_rank();
+        std::vector<size_t> ostrides_with_odist(ostride);
+        ostrides_with_odist.insert(ostrides_with_odist.begin(), odist);
+
+        size_t obuffer_idx = 0;
+        for(const auto& ofield : ofields)
+        {
+            for(const auto& obrick : ofield.bricks)
+            {
+                if(obrick.rank != process_rank)
+                    continue;
+                if(obuffer_idx >= mgpu_obuffers.size())
+                {
+                    throw std::invalid_argument(
+                        "rocfft_params::multi_gpu_finalize: not as many device output buffers as "
+                        "expected when gathering the multi-device transform results.");
+                }
+
+                const size_t brick_byte_size = var_size<size_t>(precision, otype)
+                                               * compute_ptrdiff(obrick.length(), obrick.stride);
+
+                const auto offset_in_gathered_results_host
+                    = obrick.lower_field_offset(ostride, odist);
+
+                // switch device to where we're copying from
+                rocfft_scoped_device dev(obrick.device);
+
+                // copy the device results to host, then copy to gathered_results
+                std::vector<hostbuf> host_tmp(1);
+                host_tmp.front().alloc(brick_byte_size);
+                if(hipMemcpy(host_tmp.front().data(),
+                             mgpu_obuffers[obuffer_idx++],
+                             brick_byte_size,
+                             hipMemcpyDeviceToHost)
+                   != hipSuccess)
+                {
+                    throw std::runtime_error("rocfft_params::multi_gpu_finalize: hipMemcpy failed");
+                }
+
+                copy_buffers(host_tmp,
+                             gathered_results_host,
+                             obrick.length(),
+                             /* "nbatch" =  */ 1,
+                             precision,
+                             otype,
+                             obrick.stride,
+                             /* "idist" = */ 0,
+                             otype,
+                             ostrides_with_odist,
+                             /* "odist" =  */ 0,
+                             /* "ioffset" =  */ {0},
+                             {offset_in_gathered_results_host});
+            }
+        }
     }
 
 private:
@@ -723,6 +688,28 @@ private:
             throw std::runtime_error("too many split dimensions");
         }
         return splitDims;
+    }
+
+    int get_process_rank() const
+    {
+        int process_rank = -1; // invalid initialization
+        if(mp_lib == fft_mp_lib_mpi)
+        {
+#ifdef ROCFFT_MPI_ENABLE
+            if(!mp_comm)
+                throw std::runtime_error("Multi-process communicator is not defined");
+            auto ret = MPI_Comm_rank(*static_cast<MPI_Comm*>(mp_comm), &process_rank);
+            if(ret != MPI_SUCCESS || process_rank < 0)
+                throw std::runtime_error("Rank of current process couldn't be set");
+#else
+            throw std::runtime_error("MPI is not enabled");
+#endif
+        }
+        else
+        {
+            process_rank = 0;
+        }
+        return process_rank;
     }
 };
 
@@ -767,7 +754,7 @@ struct rocfft_funcs
 
 struct dyna_rocfft_funcs
 {
-#ifdef WIN32
+#ifdef _WIN32
     typedef HMODULE ROCFFT_LIB;
 #else
     typedef void* ROCFFT_LIB;
@@ -776,7 +763,7 @@ struct dyna_rocfft_funcs
     // Load the rocfft library
     static ROCFFT_LIB lib_load(const std::string& path)
     {
-#ifdef WIN32
+#ifdef _WIN32
         return LoadLibraryA(path.c_str());
 #else
         return dlopen(path.c_str(), RTLD_LAZY);
@@ -786,7 +773,7 @@ struct dyna_rocfft_funcs
     // Return a string describing the error loading rocfft
     static const char* lib_load_error()
     {
-#ifdef WIN32
+#ifdef _WIN32
         // just return the error number
         static std::string error_str;
         error_str = std::to_string(GetLastError());
@@ -799,7 +786,7 @@ struct dyna_rocfft_funcs
     // Get symbol from rocfft lib
     static void* lib_symbol(ROCFFT_LIB libhandle, const char* sym)
     {
-#ifdef WIN32
+#ifdef _WIN32
         return reinterpret_cast<void*>(GetProcAddress(libhandle, sym));
 #else
         return dlsym(libhandle, sym);
@@ -810,7 +797,7 @@ struct dyna_rocfft_funcs
     {
         if(!libhandle)
             return;
-#ifdef WIN32
+#ifdef _WIN32
         FreeLibrary(libhandle);
 #else
         dlclose(libhandle);

@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -33,6 +33,14 @@
 #include <rocprim/block/block_adjacent_difference.hpp>
 #include <rocprim/block/block_load_func.hpp>
 #include <rocprim/block/block_store.hpp>
+
+enum class TestBlockAdjacentDifferenceMethod
+{
+    LEFT          = 0,
+    RIGHT         = 1,
+    LEFT_PARTIAL  = 2,
+    RIGHT_PARTIAL = 3
+};
 
 // Host (CPU) implementaions of the wrapping function that allows to pass 3 args
 template<class T, class FlagType, class FlagOp>
@@ -219,10 +227,11 @@ __global__ __launch_bounds__(
 template<typename T,
          typename Output,
          typename BinaryFunction,
-         unsigned int Method,
-         unsigned int BlockSize,
-         unsigned int ItemsPerThread>
-auto test_block_adjacent_difference() -> typename std::enable_if<Method == 0>::type
+         TestBlockAdjacentDifferenceMethod Method,
+         unsigned int                      BlockSize,
+         unsigned int                      ItemsPerThread>
+auto test_block_adjacent_difference() ->
+    typename std::enable_if<Method == TestBlockAdjacentDifferenceMethod::LEFT>::type
 {
     using stored_type = std::conditional_t<std::is_same<Output, bool>::value, int, Output>;
 
@@ -306,10 +315,11 @@ auto test_block_adjacent_difference() -> typename std::enable_if<Method == 0>::t
 template<typename T,
          typename Output,
          typename BinaryFunction,
-         unsigned int Method,
-         unsigned int BlockSize,
-         unsigned int ItemsPerThread>
-auto test_block_adjacent_difference() -> typename std::enable_if<Method == 1>::type
+         TestBlockAdjacentDifferenceMethod Method,
+         unsigned int                      BlockSize,
+         unsigned int                      ItemsPerThread>
+auto test_block_adjacent_difference() ->
+    typename std::enable_if<Method == TestBlockAdjacentDifferenceMethod::RIGHT>::type
 {
     using stored_type = std::conditional_t<std::is_same<Output, bool>::value, int, Output>;
 
@@ -393,10 +403,11 @@ auto test_block_adjacent_difference() -> typename std::enable_if<Method == 1>::t
 template<typename T,
          typename Output,
          typename BinaryFunction,
-         unsigned int Method,
-         unsigned int BlockSize,
-         unsigned int ItemsPerThread>
-auto test_block_adjacent_difference() -> typename std::enable_if<Method == 2>::type
+         TestBlockAdjacentDifferenceMethod Method,
+         unsigned int                      BlockSize,
+         unsigned int                      ItemsPerThread>
+auto test_block_adjacent_difference() ->
+    typename std::enable_if<Method == TestBlockAdjacentDifferenceMethod::LEFT_PARTIAL>::type
 {
     using stored_type = std::conditional_t<std::is_same<Output, bool>::value, int, Output>;
 
@@ -495,10 +506,11 @@ auto test_block_adjacent_difference() -> typename std::enable_if<Method == 2>::t
 template<typename T,
          typename Output,
          typename BinaryFunction,
-         unsigned int Method,
-         unsigned int BlockSize,
-         unsigned int ItemsPerThread>
-auto test_block_adjacent_difference() -> typename std::enable_if<Method == 3>::type
+         TestBlockAdjacentDifferenceMethod Method,
+         unsigned int                      BlockSize,
+         unsigned int                      ItemsPerThread>
+auto test_block_adjacent_difference() ->
+    typename std::enable_if<Method == TestBlockAdjacentDifferenceMethod::RIGHT_PARTIAL>::type
 {
     using stored_type = std::conditional_t<std::is_same<Output, bool>::value, int, Output>;
 
@@ -605,8 +617,10 @@ template<unsigned int First,
          class Type,
          class FlagType,
          class FlagOpType,
-         unsigned int Method,
-         unsigned int BlockSize = 256U>
+         TestBlockAdjacentDifferenceMethod            Method,
+         unsigned int                                 BlockSize = 256U,
+         rocprim::block_adjacent_difference_algorithm Algorithm
+         = rocprim::block_adjacent_difference_algorithm::default_algorithm>
 struct static_for
 {
     static void run()
@@ -624,7 +638,8 @@ struct static_for
                                            BlockSize,
                                            items[First]>();
         }
-        static_for<First + 1, Last, Type, FlagType, FlagOpType, Method, BlockSize>::run();
+        static_for<First + 1, Last, Type, FlagType, FlagOpType, Method, BlockSize, Algorithm>::
+            run();
     }
 };
 
@@ -632,9 +647,10 @@ template<unsigned int N,
          class Type,
          class FlagType,
          class FlagOpType,
-         unsigned int Method,
-         unsigned int BlockSize>
-struct static_for<N, N, Type, FlagType, FlagOpType, Method, BlockSize>
+         TestBlockAdjacentDifferenceMethod            Method,
+         unsigned int                                 BlockSize,
+         rocprim::block_adjacent_difference_algorithm Algorithm>
+struct static_for<N, N, Type, FlagType, FlagOpType, Method, BlockSize, Algorithm>
 {
     static void run() {}
 };

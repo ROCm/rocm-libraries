@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,17 +20,15 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "benchmark_device_binary_search.parallel.hpp"
+#include "benchmark_device_binary_search.hpp"
 
-#include "benchmark_utils.hpp"
+#include "primbench.hpp"
 
 #include "../common/utils_custom_type.hpp"
 #include "../common/utils_device_ptr.hpp"
 
-// HIP API
 #include <hip/hip_runtime.h>
 
-// rocPRIM
 #include <rocprim/device/config_types.hpp>
 #include <rocprim/functional.hpp>
 #include <rocprim/types.hpp>
@@ -45,45 +43,60 @@
     #include <stdint.h>
 #endif
 
-#define CREATE_BENCHMARK(T, K, SORTED, SUBALGORITHM)                                  \
-    executor.queue_fn(                                                                \
-        bench_naming::format_name("{lvl:device,algo:" + SUBALGORITHM{}.name()         \
-                                  + ",key_type:" #T ",subalgo:" #K "_percent_"        \
-                                  + std::string(SORTED ? "sorted" : "random")         \
-                                  + "_needles,cfg:default_config}")                   \
-            .c_str(),                                                                 \
-        [=](benchmark_utils::state&& state)                                           \
-        {                                                                             \
-            device_binary_search_benchmark<SUBALGORITHM, T, size_t, K, SORTED>().run( \
-                std::forward<benchmark_utils::state>(state));                         \
-        });
+#define CREATE_BENCHMARK(VALUE_TYPE, OUTPUT_TYPE, K, SORTED, SUBALGORITHM) \
+    executor.queue<                                                        \
+        device_binary_search_benchmark<SUBALGORITHM, VALUE_TYPE, OUTPUT_TYPE, K, SORTED>>();
 
-#define BENCHMARK_ALGORITHMS(T, K, SORTED)                     \
-    CREATE_BENCHMARK(T, K, SORTED, binary_search_subalgorithm) \
-    CREATE_BENCHMARK(T, K, SORTED, lower_bound_subalgorithm)   \
-    CREATE_BENCHMARK(T, K, SORTED, upper_bound_subalgorithm)
+#define BENCHMARK_ALGORITHMS(VALUE_TYPE, OUTPUT_TYPE, K, SORTED)                     \
+    CREATE_BENCHMARK(VALUE_TYPE, OUTPUT_TYPE, K, SORTED, binary_search_subalgorithm) \
+    CREATE_BENCHMARK(VALUE_TYPE, OUTPUT_TYPE, K, SORTED, lower_bound_subalgorithm)   \
+    CREATE_BENCHMARK(VALUE_TYPE, OUTPUT_TYPE, K, SORTED, upper_bound_subalgorithm)
 
-#define BENCHMARK_TYPE(type)             \
-    BENCHMARK_ALGORITHMS(type, 10, true) \
-    BENCHMARK_ALGORITHMS(type, 10, false)
+#define BENCHMARK_TYPE(VALUE_TYPE)                     \
+    BENCHMARK_ALGORITHMS(VALUE_TYPE, size_t, 10, true) \
+    BENCHMARK_ALGORITHMS(VALUE_TYPE, size_t, 10, false)
+
+#define BENCHMARK_TYPE_TUNING(VALUE_TYPE, OUTPUT_TYPE)      \
+    BENCHMARK_ALGORITHMS(VALUE_TYPE, OUTPUT_TYPE, 10, true) \
+    BENCHMARK_ALGORITHMS(VALUE_TYPE, OUTPUT_TYPE, 10, false)
+
+// All of the limited tuned types
+#define BENCHMARK_TYPES_TUNING(VALUE_TYPE)               \
+    BENCHMARK_TYPE_TUNING(VALUE_TYPE, rocprim::int128_t) \
+    BENCHMARK_TYPE_TUNING(VALUE_TYPE, int64_t)           \
+    BENCHMARK_TYPE_TUNING(VALUE_TYPE, int32_t)           \
+    BENCHMARK_TYPE_TUNING(VALUE_TYPE, int16_t)           \
+    BENCHMARK_TYPE_TUNING(VALUE_TYPE, int8_t)
 
 int main(int argc, char* argv[])
 {
-    benchmark_utils::executor executor(argc, argv, 128 * benchmark_utils::MiB, 10, 5);
+    primbench::settings settings;
+    settings.size = 128 * primbench::MiB;
+    primbench::executor executor(argc, argv, settings);
 
 #ifndef BENCHMARK_CONFIG_TUNING
-    using custom_float2  = common::custom_type<float, float>;
-    using custom_double2 = common::custom_type<double, double>;
+    // Tuned types
+    BENCHMARK_TYPES_TUNING(rocprim::int128_t)
+    BENCHMARK_TYPES_TUNING(int64_t)
+    BENCHMARK_TYPES_TUNING(int32_t)
+    BENCHMARK_TYPES_TUNING(int16_t)
+    BENCHMARK_TYPES_TUNING(int8_t)
+    BENCHMARK_TYPES_TUNING(double)
+    BENCHMARK_TYPES_TUNING(float)
+    BENCHMARK_TYPES_TUNING(rocprim::half)
 
+    #ifndef BENCHMARK_AUTOTUNED_TYPES_ONLY
+    // Not tuned types
     BENCHMARK_TYPE(float)
     BENCHMARK_TYPE(double)
-    BENCHMARK_TYPE(int8_t)
     BENCHMARK_TYPE(uint8_t)
     BENCHMARK_TYPE(rocprim::half)
-    BENCHMARK_TYPE(rocprim::int128_t)
     BENCHMARK_TYPE(rocprim::uint128_t)
-    BENCHMARK_TYPE(custom_float2)
-    BENCHMARK_TYPE(custom_double2)
+
+    // Not tuned custom types
+    BENCHMARK_TYPE(custom_f32_f32)
+    BENCHMARK_TYPE(custom_f64_f64)
+    #endif
 #endif
 
     executor.run();

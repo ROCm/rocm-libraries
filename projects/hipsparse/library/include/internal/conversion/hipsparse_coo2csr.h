@@ -29,13 +29,13 @@ extern "C" {
 #endif
 
 /*! \ingroup conv_module
-*  \brief Convert a sparse COO matrix into a sparse CSR matrix
+*  \brief Convert a sparse COO matrix into a sparse CSR matrix.
 *
 *  \details
 *  \p hipsparseXcoo2csr converts the COO array containing the row indices into a
-*  CSR array of row offsets, that point to the start of every row.
+*  CSR array of row offsets that point to the start of every row.
 *  It is assumed that the COO row index array is sorted and that all arrays have been allocated
-*  prior to calling hipsparseXcoo2csr.
+*  prior to calling \p hipsparseXcoo2csr.
 *
 *  For example, given the COO row indices array:
 *  \f[
@@ -51,35 +51,35 @@ extern "C" {
 *    \end{align}
 *  \f]
 *
-*  \note It can also be used, to convert a COO array containing the column indices into
-*  a CSC array of column offsets, that point to the start of every column. Then, it is
-*  assumed that the COO column index array is sorted, instead.
+*  \note This function can also be used to convert a COO array containing the column indices into
+*  a CSC array of column offsets that point to the start of every column. In this case, it is
+*  assumed that the COO column index array is sorted instead.
 *
 *  \note
-*  This function is non blocking and executed asynchronously with respect to the host.
-*  It may return before the actual computation has finished.
+*  This function is non-blocking and executed asynchronously with respect to the host.
+*  It can return before the actual computation has finished.
 *
 *  @param[in]
-*  handle      handle to the hipsparse library context queue.
+*  handle      handle to the hipSPARSE library context queue.
 *  @param[in]
 *  cooRowInd   array of \p nnz elements containing the row indices of the sparse COO
 *              matrix.
 *  @param[in]
-*  nnz         number of non-zero entries of the sparse CSR matrix.
+*  nnz         number of non-zero entries of the sparse CSR matrix. Must be non-negative.
 *  @param[in]
-*  m           number of rows of the sparse CSR matrix.
+*  m           number of rows of the sparse CSR matrix. Must be non-negative.
 *  @param[out]
 *  csrRowPtr   array of \p m+1 elements that point to the start of every row of the
 *              sparse CSR matrix.
 *  @param[in]
-*  idxBase    \ref HIPSPARSE_INDEX_BASE_ZERO or \ref HIPSPARSE_INDEX_BASE_ONE.
+*  idxBase     index base. \ref HIPSPARSE_INDEX_BASE_ZERO for zero-based indexing or
+*              \ref HIPSPARSE_INDEX_BASE_ONE for one-based indexing.
 *
-*  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p nnz, \p cooRowInd or \p csrRowPtr
-*              pointer is invalid.
-*
-*  \par Example
-*  \snippet example_hipsparse_coo2csr.cpp doc example
+*  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
+*  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle is nullptr, \p m or \p nnz is negative,
+*          \p cooRowInd or \p csrRowPtr is nullptr when \p nnz is greater than zero, or
+*          \p idxBase is neither \ref HIPSPARSE_INDEX_BASE_ZERO nor \ref HIPSPARSE_INDEX_BASE_ONE.
 */
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseXcoo2csr(hipsparseHandle_t    handle,

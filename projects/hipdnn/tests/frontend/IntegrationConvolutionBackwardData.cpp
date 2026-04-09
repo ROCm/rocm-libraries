@@ -9,15 +9,15 @@
 #include <random>
 #include <vector>
 
+#include <hipdnn_data_sdk/utilities/MigratableMemory.hpp>
+#include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_frontend.hpp>
-#include <hipdnn_sdk/test_utilities/TestUtilities.hpp>
-#include <hipdnn_sdk/utilities/MigratableMemory.hpp>
-#include <hipdnn_sdk/utilities/Tensor.hpp>
+#include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <test_plugins/TestPluginConstants.hpp>
 
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
-using namespace hipdnn_sdk::utilities;
+using namespace hipdnn_data_sdk::utilities;
 
 namespace
 {
@@ -106,6 +106,10 @@ protected:
     void SetUp() override
     {
         SKIP_IF_NO_DEVICES();
+
+        ASSERT_EQ(hipInit(0), hipSuccess);
+        int deviceId = 0;
+        ASSERT_EQ(hipGetDevice(&deviceId), hipSuccess);
     }
 
     void TearDown() override
@@ -118,10 +122,6 @@ protected:
 
     static hipdnnHandle_t setupEnvironmentWithPlugin(const std::string& pluginPath)
     {
-        EXPECT_EQ(hipInit(0), hipSuccess);
-        int deviceId = 0;
-        EXPECT_EQ(hipGetDevice(&deviceId), hipSuccess);
-
         // Load specific plugin
         const std::array<const char*, 1> paths = {pluginPath.c_str()};
         EXPECT_EQ(hipdnnSetEnginePluginPaths_ext(
@@ -145,7 +145,10 @@ protected:
             bool useManualUids)
     {
         auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
-        graph->set_name(graphName);
+        graph->set_name(graphName)
+            .set_io_data_type(DataType::FLOAT)
+            .set_intermediate_data_type(DataType::FLOAT)
+            .set_compute_data_type(DataType::FLOAT);
 
         int64_t uid = 1;
         ConvolutionTestTensors tensors;
@@ -248,17 +251,17 @@ protected:
         // Setup environment with specified plugin
         _handle = setupEnvironmentWithPlugin(testCase.pluginPath);
 
-        std::vector<int64_t> inputDims = {2, 3, 14, 14}; // DX dimensions
-        std::vector<int64_t> filterDims = {3, 3, 3, 3}; // W dimensions (K, C, R, S)
-        std::vector<int64_t> outputDims = {2, 3, 12, 12}; // DY dimensions
+        const std::vector<int64_t> inputDims = {2, 3, 14, 14}; // DX dimensions
+        const std::vector<int64_t> filterDims = {3, 3, 3, 3}; // W dimensions (K, C, R, S)
+        const std::vector<int64_t> outputDims = {2, 3, 12, 12}; // DY dimensions
 
         // Input: N=2, C=3, H=14, W=14
         // Filter: K=3, C=3, R=3, S=3 (output channels = input channels for backward data)
         // Output (DY): N=2, K=3, P=12, Q=12 (calculated based on conv params)
-        std::vector<int64_t> prePadding = {0, 0};
-        std::vector<int64_t> postPadding = {0, 0};
-        std::vector<int64_t> stride = {1, 1};
-        std::vector<int64_t> dilation = {1, 1};
+        const std::vector<int64_t> prePadding = {0, 0};
+        const std::vector<int64_t> postPadding = {0, 0};
+        const std::vector<int64_t> stride = {1, 1};
+        const std::vector<int64_t> dilation = {1, 1};
 
         SimpleConvolution2DTensorBundle<float> tensorBundle(inputDims, filterDims, outputDims);
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -22,6 +22,7 @@
 #define ROCPRIM_DEVICE_DEVICE_NTH_ELEMENT_HPP_
 
 #include "detail/device_nth_element.hpp"
+#include "detail/ordered_block_id.hpp"
 
 #include "../detail/temp_storage.hpp"
 
@@ -57,107 +58,126 @@ hipError_t
                      = nullptr)
 {
     using key_type = typename std::iterator_traits<KeysIterator>::value_type;
-    using config   = wrapped_nth_element_config<Config, key_type>;
+    using selector = nth_element_config_selector<key_type>;
 
-    target_arch target_arch;
-    hipError_t  result = host_target_arch(stream, target_arch);
-    if(result != hipSuccess)
-    {
-        return result;
-    }
-    const nth_element_config_params params = dispatch_target_arch<config, false>(target_arch);
+    bool use_atomic_block_id;
+    ROCPRIM_RETURN_ON_ERROR(check_if_using_atomic_block_id(stream, use_atomic_block_id));
+    const auto use_atomic_block_id_variant
+        = ::rocprim::detail::constexpr_value_variant<bool, false, true>::create(
+            use_atomic_block_id);
 
-    constexpr unsigned int num_partitions        = 3;
-    const unsigned int     num_buckets           = params.number_of_buckets;
-    const unsigned int     num_splitters         = num_buckets - 1;
-    const unsigned int     stop_recursion_size   = params.stop_recursion_size;
-    const unsigned int     num_items_per_threads = params.kernel_config.items_per_thread;
-    const unsigned int     num_threads_per_block = params.kernel_config.block_size;
-    const unsigned int     num_items_per_block   = num_threads_per_block * num_items_per_threads;
-    const unsigned int     num_blocks            = ceiling_div(size, num_items_per_block);
-
-    key_type*                            tree             = nullptr;
-    unsigned int*                        buckets          = nullptr;
-    n_th_element_iteration_data*         nth_element_data = nullptr;
-    bool*                                equality_buckets = nullptr;
-    nth_element_onesweep_lookback_state* lookback_states  = nullptr;
-
-    key_type* keys_buffer = nullptr;
-
-    {
-        using namespace temp_storage;
-
-        hipError_t partition_result;
-        if(keys_double_buffer == nullptr)
+    ROCPRIM_RETURN_ON_ERROR(std::visit(
+        [&](auto use_atomic_block_id)
         {
-            partition_result
-                = partition(temporary_storage,
-                            storage_size,
-                            make_linear_partition(
-                                ptr_aligned_array(&tree, num_splitters),
-                                ptr_aligned_array(&equality_buckets, num_buckets),
-                                ptr_aligned_array(&buckets, num_buckets),
-                                ptr_aligned_array(&keys_buffer, size),
-                                ptr_aligned_array(&nth_element_data, 1),
-                                ptr_aligned_array(&lookback_states, num_partitions * num_blocks)));
-        }
-        else
-        {
-            partition_result
-                = partition(temporary_storage,
-                            storage_size,
-                            make_linear_partition(
-                                ptr_aligned_array(&tree, num_splitters),
-                                ptr_aligned_array(&equality_buckets, num_buckets),
-                                ptr_aligned_array(&buckets, num_buckets),
-                                ptr_aligned_array(&nth_element_data, 1),
-                                ptr_aligned_array(&lookback_states, num_partitions * num_blocks)));
-            keys_buffer = keys_double_buffer;
-        }
+            const target current_target(stream);
 
-        if(partition_result != hipSuccess || temporary_storage == nullptr)
-        {
-            return partition_result;
-        }
-    }
+            const auto             params         = get_config<selector>(Config{}, current_target);
+            constexpr unsigned int num_partitions = 3;
+            const unsigned int     num_buckets    = params.number_of_buckets;
+            const unsigned int     num_splitters  = num_buckets - 1;
+            const unsigned int     stop_recursion_size   = params.stop_recursion_size;
+            const unsigned int     num_items_per_threads = params.kernel_config.items_per_thread;
+            const unsigned int     num_threads_per_block = params.kernel_config.block_size;
+            const unsigned int num_items_per_block = num_threads_per_block * num_items_per_threads;
+            const unsigned int num_blocks          = ceiling_div(size, num_items_per_block);
 
-    if((size == 0) || (size == 1 && nth == 0))
-    {
-        return hipSuccess;
-    }
+            key_type*                            tree             = nullptr;
+            unsigned int*                        buckets          = nullptr;
+            n_th_element_iteration_data*         nth_element_data = nullptr;
+            bool*                                equality_buckets = nullptr;
+            nth_element_onesweep_lookback_state* lookback_states  = nullptr;
 
-    if(nth >= size)
-    {
-        return hipErrorInvalidValue;
-    }
+            key_type* keys_buffer = nullptr;
 
-    if(debug_synchronous)
-    {
-        std::cout << "-----" << '\n';
-        std::cout << "size: " << size << '\n';
-        std::cout << "num_buckets: " << num_buckets << '\n';
-        std::cout << "num_threads_per_block: " << num_threads_per_block << '\n';
-        std::cout << "num_blocks: " << num_blocks << '\n';
-        std::cout << "storage_size: " << storage_size << '\n';
-    }
+            using ordered_bid_type = block_id_wrapper<unsigned int, use_atomic_block_id>;
+            typename ordered_bid_type::id_type* ordered_bid_storage;
 
-    return nth_element_keys_impl<config, num_partitions>(target_arch,
-                                                         keys,
-                                                         keys_buffer,
-                                                         tree,
-                                                         nth,
-                                                         size,
-                                                         buckets,
-                                                         equality_buckets,
-                                                         lookback_states,
-                                                         num_buckets,
-                                                         stop_recursion_size,
-                                                         num_threads_per_block,
-                                                         num_items_per_threads,
-                                                         nth_element_data,
-                                                         compare_function,
-                                                         stream,
-                                                         debug_synchronous);
+            {
+                using namespace temp_storage;
+
+                hipError_t partition_result;
+                if(keys_double_buffer == nullptr)
+                {
+                    partition_result = partition(
+                        temporary_storage,
+                        storage_size,
+                        make_linear_partition(
+                            ptr_aligned_array(&tree, num_splitters),
+                            ptr_aligned_array(&equality_buckets, num_buckets),
+                            ptr_aligned_array(&buckets, num_buckets),
+                            ptr_aligned_array(&keys_buffer, size),
+                            ptr_aligned_array(&nth_element_data, 1),
+                            ptr_aligned_array(&lookback_states, num_partitions * num_blocks),
+                            detail::temp_storage::make_partition(
+                                &ordered_bid_storage,
+                                ordered_bid_type::get_temp_storage_layout())));
+                }
+                else
+                {
+                    partition_result = partition(
+                        temporary_storage,
+                        storage_size,
+                        make_linear_partition(
+                            ptr_aligned_array(&tree, num_splitters),
+                            ptr_aligned_array(&equality_buckets, num_buckets),
+                            ptr_aligned_array(&buckets, num_buckets),
+                            ptr_aligned_array(&nth_element_data, 1),
+                            ptr_aligned_array(&lookback_states, num_partitions * num_blocks),
+                            detail::temp_storage::make_partition(
+                                &ordered_bid_storage,
+                                ordered_bid_type::get_temp_storage_layout())));
+                    keys_buffer = keys_double_buffer;
+                }
+
+                if(partition_result != hipSuccess || temporary_storage == nullptr)
+                {
+                    return partition_result;
+                }
+            }
+
+            if((size == 0) || (size == 1 && nth == 0))
+            {
+                return hipSuccess;
+            }
+
+            if(nth >= size)
+            {
+                return hipErrorInvalidValue;
+            }
+
+            if(debug_synchronous)
+            {
+                std::cout << "-----" << '\n';
+                std::cout << "size: " << size << '\n';
+                std::cout << "num_buckets: " << num_buckets << '\n';
+                std::cout << "num_threads_per_block: " << num_threads_per_block << '\n';
+                std::cout << "num_blocks: " << num_blocks << '\n';
+                std::cout << "storage_size: " << storage_size << '\n';
+            }
+
+            auto ordered_bid = ordered_bid_type::create(ordered_bid_storage);
+
+            return nth_element_keys_impl<Config, selector, num_partitions>(current_target,
+                                                                           keys,
+                                                                           keys_buffer,
+                                                                           tree,
+                                                                           nth,
+                                                                           size,
+                                                                           buckets,
+                                                                           equality_buckets,
+                                                                           lookback_states,
+                                                                           num_buckets,
+                                                                           stop_recursion_size,
+                                                                           num_threads_per_block,
+                                                                           num_items_per_threads,
+                                                                           nth_element_data,
+                                                                           compare_function,
+                                                                           stream,
+                                                                           debug_synchronous,
+                                                                           ordered_bid);
+        },
+        use_atomic_block_id_variant));
+    return hipSuccess;
 }
 
 } // namespace detail
@@ -217,6 +237,8 @@ hipError_t
 /// \parblock
 /// In this example a device-level nth_element is performed where input keys are
 ///   represented by an array of unsigned integers.
+///
+/// The full example is [on GitHub](https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocprim/example/rocprim/device/example_device_nth_element.cpp).
 ///
 /// \code{.cpp}
 /// #include <rocprim/rocprim.hpp>

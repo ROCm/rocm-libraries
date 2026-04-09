@@ -3,9 +3,10 @@
 
 #include <algorithm>
 #include <gtest/gtest.h>
-#include <hipdnn_frontend/node/TopologicalSortingUtils.hpp>
+#include <hipdnn_frontend/node/detail/TopologicalSortingUtils.hpp>
 
 using namespace hipdnn_frontend;
+using namespace hipdnn_frontend::detail;
 
 class TestTopologicalSortingUtils : public ::testing::Test
 {
@@ -44,19 +45,19 @@ TEST_F(TestTopologicalSortingUtils, ComputesInDegreesCorrectly)
     {
         GraphStructure structure;
         structure.adjacencyList = {};
-        std::vector<int> inDegreesExpected = {};
+        const std::vector<int> inDegreesExpected = {};
         EXPECT_EQ(computeInDegrees(structure), inDegreesExpected);
     }
     {
         GraphStructure structure;
         structure.adjacencyList = {{}};
-        std::vector<int> inDegreesExpected = {0};
+        const std::vector<int> inDegreesExpected = {0};
         EXPECT_EQ(computeInDegrees(structure), inDegreesExpected);
     }
     {
         GraphStructure structure;
         structure.adjacencyList = {{1}, {2}, {}};
-        std::vector<int> inDegreesExpected = {0, 1, 1};
+        const std::vector<int> inDegreesExpected = {0, 1, 1};
         EXPECT_EQ(computeInDegrees(structure), inDegreesExpected);
     }
     {
@@ -73,7 +74,7 @@ TEST_F(TestTopologicalSortingUtils, ComputesInDegreesCorrectly)
             {9}, // 8
             {} // 9
         };
-        std::vector<int> inDegreesExpected = {0, 1, 1, 1, 2, 1, 2, 1, 1, 3};
+        const std::vector<int> inDegreesExpected = {0, 1, 1, 1, 2, 1, 2, 1, 1, 3};
         // Graph structure:
         //      0
         //     / \

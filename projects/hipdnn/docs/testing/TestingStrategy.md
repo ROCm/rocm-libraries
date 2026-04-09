@@ -1,6 +1,6 @@
 # hipDNN Testing Strategy
 
-This document outlines the comprehensive testing strategy for hipDNN, covering unit tests(white box testing), integration tests (black box testing, api tests, and end to end tests), and performance/benchmarking.
+This document outlines the comprehensive testing strategy for hipDNN, covering unit tests (white box testing), integration tests (black box testing, api tests, and end to end tests), and performance/benchmarking.
 
 Please refer to the coding standards in [Coding Style and Naming Guidelines](../CodingStyleAndNamingGuidelines.md) to see test naming conventions we follow.
 
@@ -16,7 +16,9 @@ White box tests focus on internal implementation details of hipDNN components.
 |-----------|----------|---------|-------------|--------------|
 | **Backend** | `backend/tests/` | Test internal implementation of hipDNN backend | Minimal/None | Windows & Linux |
 | **Frontend** | `frontend/tests/` | Test internal implementation of hipDNN frontend | Minimal/None | Windows & Linux |
-| **SDK** | `sdk/tests/` | Test internal implementation of hipDNN SDK | Minimal/None expected | Windows & Linux |
+| **Data SDK** | `data_sdk/tests/` | Test internal implementation of Data SDK | Minimal/None | Windows & Linux |
+| **Plugin SDK** | `plugin_sdk/tests/` | Test internal implementation of Plugin SDK | Minimal/None | Windows & Linux |
+| **Test SDK** | `test_sdk/tests/` | Test internal implementation of Test SDK | Minimal/None | Windows & Linux |
 | **Plugin** | `plugins/<name>/tests/` | Test internal implementation of specific plugin | Minimal & fast | Windows & Linux |
 
 Note: If a test depends on the GPU then it needs to be marked with `SKIP_IF_NO_DEVICE()` so tests run and pass correctly on CPU only machines.
@@ -38,12 +40,19 @@ Note: If a test depends on the GPU then it needs to be marked with `SKIP_IF_NO_D
 - Graph construction & flow
 - Frontend utilities
 
-#### SDK
-- Plugins
+#### Data SDK
 - Data objects
 - Logging
 - SDK utilities
-- Reference implementations
+
+#### Plugin SDK
+- Plugin API utilities
+- Engine base classes
+
+#### Test SDK
+- CPU reference implementations
+- Test utilities
+- Validation helpers
 
 #### Plugin
 - TBD based on plugin implementation
@@ -51,7 +60,7 @@ Note: If a test depends on the GPU then it needs to be marked with `SKIP_IF_NO_D
 
 ### Common Requirements
 - **Mocking**: Use GMOCK for mocking dependencies
-- **Execution**: Fast execution required
+- **Execution**: Fast execution required (Time limits enabled in TheRock CI)
 - **Isolation**: Use stubbed/mocked implementations for dependencies
 - **GPU Operations**: Must be marked with `SKIP_IF_NO_DEVICE()`
 - **Coverage**: Each component should maintain >80% code coverage
@@ -114,12 +123,18 @@ Integration tests validate end-to-end functionality across components.
 - Validate correctness and graph support
 - Each plugin maintains its own test suite
 - Test on all ASICs supported by the plugin
+- Tests are divided into two categories described by the prefix argument passed to INSTANTIATE_TEST_SUITE_P
+  - **Smoke** - These tests are designed to test features using the smallest possible shape and run quickly (combined smoke test run time must be under 5 mins)
+  - **Full** - These tests can contain regression shapes, large shapes, or slow shapes
+
+### Graph Validation
+We use reference implementations via the CPU Graph Executor to validate correctness of graph execution in integration tests. See the [CPU Graph Executor Design Document](../rfcs/0001_CpuGraphExecutorDesign.md) for more details.
 
 ---
 
 ## 3. General Testing Requirements
 
-### Code Coverage 
+### Code Coverage
 - **Target**: 80% overall coverage
 - **Component Target**: Each sub-section should be above 80% individually
 - **Enforcement**: Coverage must remain above 80% for PRs to be accepted
@@ -130,14 +145,14 @@ Tests must work in the following environments:
 
 | Environment Type | Supported Methods |
 |-----------------|-------------------|
-| **CLI Build Environment** | `ninja check`, `ninja check_ctest` |
+| **CLI Build Environment** | `ninja check`, `ninja check-verbose` |
 | **IDE** | Visual Studio Code and extensions like TestMate |
 | **Artifacts** | • Installed testing artifacts<br>• Running built test executables |
 | **Operating System** | • Windows<br>• Supported Linux distros |
 
 > [!TIP]
-> `ninja unit-check` runs fast, isolated unit and API tests.
-> `ninja integration-check` runs slower, end-to-end integration tests.
+> `ninja unit-check` runs fast, isolated unit and API tests (also: `unit-check-verbose`).<br>
+> `ninja integration-check` runs slower, end-to-end integration tests (also: `integration-check-verbose`).
 
 ### GPU Requirements
 - **Without GPU**: All GPU tests must be skippable (warnings, not errors)

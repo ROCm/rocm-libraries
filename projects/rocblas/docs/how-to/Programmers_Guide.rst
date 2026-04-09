@@ -225,7 +225,7 @@ the ``hipStreamSynchronize(old_stream)`` API before setting the new stream.
 
 .. code-block:: cpp
 
-    // Synchronize the old stream (optional)
+    // Synchronize the old stream
     if(hipStreamSynchronize(old_stream) != hipSuccess) return EXIT_FAILURE;
 
     // Create a new stream (this step can be done before the steps above)
@@ -237,8 +237,8 @@ the ``hipStreamSynchronize(old_stream)`` API before setting the new stream.
     // Destroy the old stream (this step is optional but must come after synchronization)
     if(hipStreamDestroy(old_stream) != hipSuccess) return EXIT_FAILURE;
 
-The call to ``hipStreamSynchronize`` above is necessary for the ``user_owned`` allocation scheme because the ``rocBLAS_handle`` contains allocated device
-memory provided by the user that must not be shared by multiple asynchronous streams at the same time.
+The call to ``hipStreamSynchronize`` above is necessary because the ``rocBLAS_handle`` contains allocated device
+memory that must not be shared by multiple asynchronous streams at the same time.
 
 If either the old or new stream is the default or ``NULL`` stream, it is not necessary to
 synchronize the old stream before destroying it, or before setting the new stream,
@@ -246,8 +246,8 @@ because the synchronization is implicit.
 
 .. note::
 
-   You can switch from one non-default stream to another without calling ``hipStreamSynchronize()`` as the default memory allocation scheme (``rocBLAS_managed``) uses stream order allocation.
-   For more information, see :ref:`Device Memory Allocation Usage`.
+   You can switch from one non-default stream to another without calling ``hipStreamSynchronize()`` by enabling stream-order memory allocation.
+   For more information, see :ref:`stream order alloc`.
 
 Creating the handle incurs a startup cost. There is an additional startup cost for
 GEMM functions to load GEMM kernels for a specific device. You can shift the
@@ -994,12 +994,15 @@ After the build, the rocBLAS clients can be found in the ``rocBLAS/build/release
 
 .. note::
 
-   The ``rocblas-bench`` and ``rocblas-test`` executables use AMD's ILP64 version of AOCL-BLAS 4.2 as the host
-   reference BLAS to verify correctness. However, there is a known issue with multiple threads
-   in AOCL-BLAS that can cause these executables to hang.
+   The ``rocblas-bench`` and ``rocblas-test`` executables use AMD's AOCL-BLAS library with ILP64 support
+   (64-bit integers) as the host reference BLAS to verify correctness. On Linux, ``install.sh -dc`` automatically
+   builds AOCL 5.2 from source. On Windows, AOCL 4.2+ can be manually installed from
+   `AMD Developer Central <https://www.amd.com/en/developer/aocl.html>`_.
+
+   There is a known issue with thread oversubscription in AOCL-BLAS that can cause these executables to hang.
    If the number of threads matches the total number of CPU threads, thread oversubscription can occur, which causes the process to hang.
 
-   To prevent this issue, the number of threads used the AOCL-BLAS library should be smaller than the number of available CPU cores.
+   To prevent this issue, the number of threads used by the AOCL-BLAS library should be smaller than the number of available CPU cores.
    You can configure this setting using the ``OMP_NUM_THREADS`` environment variable.
    For example, on a server with 32 cores, limit the number of threads to 28 by setting ``export OMP_NUM_THREADS=28``.
 
@@ -1461,6 +1464,12 @@ For example, the performance of SGEMM using rocblas-bench on an AMD vega20 machi
    transA,transB,M,N,K,alpha,lda,ldb,beta,ldc,rocblas-Gflops,us
    N,N,4096,4096,4096,1,4096,4096,0,4096,11941.5,11509.4
 
+Logging affects performance, so only use it to log the command under evaluation,
+then run the command without logging to measure performance.
+
+Use of logging to advise on rocblas-bench arguments
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
 A useful way of finding the parameters that can be used with ``./rocblas-bench -f gemm`` is to turn on logging
 by setting the environment variable ``ROCBLAS_LAYER=2``. For example, if the user runs:
 
@@ -1480,15 +1489,18 @@ The user can copy and change the above command. For example, to change the datat
 
    ./rocblas-bench -f gemm -r f64_r --transposeA N --transposeB N -m 2048 -n 2048 -k 2048 --alpha 1 --lda 2048 --ldb 2048 --beta 0 --ldc 2048
 
+
+Benchmarking ILP64 APIs
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
 To measure performance on the ILP64 API functions, when they exist, add the argument ``--api 1`` rather
 than changing the function name set in ``-f``.
-Logging affects performance, so only use it to log the command under evaluation,
-then run the command without logging to measure performance.
 
 
 .. note::
 
-   rocblas-bench also has the flag ``-v 1`` for correctness checks.
+   rocblas-bench has the flag ``-v 1`` for norm based correctness checks against CPU reference.
+   rocblas-bench has the flag ``-t 1`` for equality and tolerance based correctness checks against CPU reference.
 
 Benchmarking special case gemv_batched and gemv_strided_batched functions using rocblas-bench
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

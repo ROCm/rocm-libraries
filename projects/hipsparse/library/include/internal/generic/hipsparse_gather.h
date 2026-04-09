@@ -29,7 +29,7 @@ extern "C" {
 #endif
 
 /*! \ingroup generic_module
-*  \brief Gather elements from a dense vector and store them into a sparse vector.
+*  \brief Gather elements from a dense vector and store them in a sparse vector.
 *
 *  \details
 *  \p hipsparseGather gathers the elements from the dense vector \f$y\f$ and stores
@@ -59,17 +59,16 @@ extern "C" {
 *  </table>
 *
 *  @param[in]
-*  handle       handle to the hipsparse library context queue.
+*  handle       handle to the hipSPARSE library context queue.
 *  @param[in]
 *  vecY         dense vector descriptor \f$y\f$.
 *  @param[out]
 *  vecX         sparse vector descriptor \f$x\f$.
 *
-*  \retval      HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval      HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p vecX or \p vecY pointer is invalid.
-*
-*  \par Example
-*  \snippet example_hipsparse_gather.cpp doc example
+*  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
+*  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p vecX, or \p vecY is nullptr,
+*          or the vector sizes or data types are incompatible.
 */
 #if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 HIPSPARSE_EXPORT

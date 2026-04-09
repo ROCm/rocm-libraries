@@ -1,28 +1,6 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright (c) 2017 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier:  MIT
+
 #include "include_inliner.hpp"
 #include "miopen/filesystem.hpp"
 #include <algorithm>
@@ -112,7 +90,8 @@ void Bin2Asm(std::istream& source,
 
     // Write header data
     targetHeader << "extern \"C\" const size_t " << variable << "_SIZE;" << std::endl;
-    targetHeader << "extern \"C\" const char " << variable << "[" << sourceSize << "];" << std::endl;
+    targetHeader << "extern \"C\" const char " << variable << "[" << sourceSize << "];"
+                 << std::endl;
 
     const auto incbinOffset = targetBin.tellp();
 
@@ -131,9 +110,8 @@ void Bin2Asm(std::istream& source,
         targetBin.put(0);
 
     // Write assembly
-    const auto incbinSize = targetBin.tellp() - incbinOffset;
-    const auto writeSymbol = [&](const std::string& symbol, auto f)
-    {
+    const auto incbinSize  = targetBin.tellp() - incbinOffset;
+    const auto writeSymbol = [&](const std::string& symbol, auto f) {
         targetAsm << "#if defined(_WIN32) || defined(__CYGWIN__)\n";
         targetAsm << "     /* PE/COFF format */\n";
         targetAsm << "     .section .rdata\n";
@@ -152,15 +130,12 @@ void Bin2Asm(std::istream& source,
         targetAsm << "#endif\n";
     };
 
-    writeSymbol(variable, [&]
-    {
-        targetAsm << "    .incbin \"" << targetBinPath.string() << "\", " << incbinOffset << ", " << incbinSize << "\n";
+    writeSymbol(variable, [&] {
+        targetAsm << "    .incbin \"" << targetBinPath.string() << "\", " << incbinOffset << ", "
+                  << incbinSize << "\n";
     });
 
-    writeSymbol(variable + "_SIZE", [&]
-    {
-        targetAsm << "    .quad " << incbinSize << "\n";
-    });
+    writeSymbol(variable + "_SIZE", [&] { targetAsm << "    .quad " << incbinSize << "\n"; });
 }
 
 void PrintHelp()
@@ -276,10 +251,13 @@ void Process(const fs::path& sourcePath,
         variable = "MIOPEN_KERNEL_" + variable;
     }
 
-    if (asmStream.is_open()) {
+    if(asmStream.is_open())
+    {
         assert(binStream.is_open());
         Bin2Asm(*source, target, asmStream, binStream, targetBinPath, variable, true, bufferSize);
-    } else {
+    }
+    else
+    {
         Bin2Hex(*source, target, variable, true, bufferSize, lineSize);
     }
 }
@@ -316,7 +294,27 @@ int main(int argc, char* argv[])
         std::string arg(argv[i]);
         std::transform(arg.begin(), arg.end(), arg.begin(), ::tolower);
 
-        if(arg == "-s" || arg == "-source")
+        // Handle response file (starts with @)
+        if(arg.starts_with('@'))
+        {
+            std::string response_file = std::string(argv[i]).substr(1);
+            std::ifstream file(response_file);
+            if(!file.is_open())
+            {
+                std::cerr << "Error: Cannot open response file: " << response_file << std::endl;
+                return 1;
+            }
+
+            std::string line;
+            while(std::getline(file, line))
+            {
+                if(!line.empty() && !line.starts_with('#'))
+                {
+                    sourceFiles.emplace_back(line);
+                }
+            }
+        }
+        else if(arg == "-s" || arg == "-source")
         {
             while(++i < argc && *argv[i] != '-')
                 sourceFiles.emplace_back(argv[i]);
@@ -353,9 +351,9 @@ int main(int argc, char* argv[])
         {
             as_extern = true;
         }
-        else if (arg == "-a" || arg == "-asm")
+        else if(arg == "-a" || arg == "-asm")
         {
-            if (i + 2 >= argc)
+            if(i + 2 >= argc)
             {
                 std::ostringstream ss;
                 ss << arg << " requires arguments <asm path> <bin path>";
@@ -363,7 +361,7 @@ int main(int argc, char* argv[])
             }
 
             std::string outputAsm{argv[++i]};
-            if (!asmOutputFile.empty())
+            if(!asmOutputFile.empty())
                 std::cerr << "Warning: overriding asm output file\n    '" << asmOutputFile
                           << "'\nwith\n    '" << outputAsm << "'\n";
 
@@ -394,19 +392,19 @@ int main(int argc, char* argv[])
 
     std::ofstream asmStream;
     std::ofstream binStream;
-    if (!asmOutputFile.empty())
+    if(!asmOutputFile.empty())
     {
         assert(!binOutputFile.empty());
         asmStream.open(asmOutputFile, std::ios::out | std::ios::binary);
         binStream.open(binOutputFile, std::ios::out | std::ios::binary);
 
-        if (!asmStream.is_open())
+        if(!asmStream.is_open())
         {
             std::cerr << "failure opening file: " << asmOutputFile << "\n";
             return 1;
         }
 
-        if (!binStream.is_open())
+        if(!binStream.is_open())
         {
             std::cerr << "failure opening file: " << binOutputFile << "\n";
             return 1;

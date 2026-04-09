@@ -241,6 +241,52 @@ static bool ValidOutBufferBluestein(TreeNode& node)
     return false;
 }
 
+// Decide if two length+stride sets match, even if one of the
+// lengths/strides is out of order with respect to the other.
+static bool MatchingLengthStride(const std::vector<size_t>& lengthA,
+                                 const std::vector<size_t>& strideA,
+                                 const std::vector<size_t>& lengthB,
+                                 const std::vector<size_t>& strideB)
+{
+    // attach a length to a stride and make them sortable and
+    // comparable
+    struct iodim
+    {
+        size_t length;
+        size_t stride;
+
+        iodim(size_t length, size_t stride)
+            : length(length)
+            , stride(stride)
+        {
+        }
+
+        bool operator<(const iodim& other) const
+        {
+            return this->stride < other.stride;
+        }
+
+        bool operator==(const iodim& other) const
+        {
+            return this->length == other.length && this->stride == other.stride;
+        }
+    };
+
+    // check that A and B are equal when sorted
+    auto make_sorted_iodim_vec
+        = [](const std::vector<size_t>& length, const std::vector<size_t>& stride) {
+              std::vector<iodim> ret;
+              for(size_t i = 0; i < length.size(); ++i)
+                  ret.emplace_back(length[i], stride[i]);
+              std::sort(ret.begin(), ret.end());
+              return ret;
+          };
+
+    std::vector<iodim> iodimA = make_sorted_iodim_vec(lengthA, strideA);
+    std::vector<iodim> iodimB = make_sorted_iodim_vec(lengthB, strideB);
+    return std::equal(iodimA.begin(), iodimA.end(), iodimB.begin());
+}
+
 bool AssignmentPolicy::ValidOutBuffer(ExecPlan&           execPlan,
                                       NodeBufTestCacheKey cacheMapKey,
                                       TreeNode&           node,
@@ -280,6 +326,18 @@ bool AssignmentPolicy::ValidOutBuffer(ExecPlan&           execPlan,
             // just check if there's enough space
             return product(nodeLen.begin(), nodeLen.end()) <= product(bufLen.begin(), bufLen.end());
         }
+
+        // Data fits if the length+stride we want matches the
+        // length+stride of the buffer.  Since we could be accessing
+        // a higher dimension of the buffer, the order of the node's
+        // length+stride might not match what's declared on the
+        // buffer.
+        if(MatchingLengthStride(nodeLen,
+                                node.outStride,
+                                bufLen,
+                                buffer == OB_USER_OUT ? execPlan.rootPlan->outStride
+                                                      : execPlan.rootPlan->inStride))
+            return true;
 
         // ensure that the node's dimensions fit exactly into the
         // buffer's dimensions.  e.g. if the node wants XxYxZ and the
@@ -904,7 +962,7 @@ static void PadStride(std::vector<size_t>&       stride,
     // to give us a number that doesn't make sense in that case.  but
     // if so, assume it's contiguous so that all the math works out.
     if(batch == 1)
-        dist = compute_ptrdiff(length, stride, 1, 1);
+        dist = compute_ptrdiff(length, stride);
 
     // sort lengths, treat batch dimension as another dim
     std::vector<LengthStrideSort<size_t>> cur;

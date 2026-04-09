@@ -1,29 +1,9 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright (c) 2023 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
+#include "miopen/execution_context.hpp"
+#include "miopen/miopen.h"
+#include "miopen/softmax/problem_description.hpp"
 #include <miopen/env.hpp>
 #include <miopen/softmax/solvers.hpp>
 
@@ -34,12 +14,10 @@
 #include <miopen/target_properties.hpp>
 #include <miopen/float_equal.hpp>
 
-MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_OCL_SOFTMAX)
-
 namespace miopen {
 
 namespace {
-constexpr int nextPow2(int v)
+constexpr uint64_t nextPow2(uint64_t v)
 {
     if(v == 1)
     {
@@ -53,68 +31,9 @@ constexpr int nextPow2(int v)
         v |= v >> 4;
         v |= v >> 8;
         v |= v >> 16;
+        v |= v >> 32;
         v++;
         return v;
-    }
-}
-
-void getParams(const TensorDescriptor& in_desc,
-               miopenSoftmaxMode_t in_mode,
-               int& out_n,
-               int& out_c,
-               int& out_h,
-               int& out_w,
-               int& out_grid_size,
-               int& out_spatial_dim,
-               int& out_vector_size,
-               int& out_num_batch,
-               bool& out_usefp16,
-               bool& out_usefp32,
-               std::vector<size_t>& out_vld,
-               std::vector<size_t>& out_vgd,
-               size_t& out_workgroups,
-               int& out_batch_size,
-               int& out_u_batch_size)
-{
-    std::tie(out_n, out_c, out_h, out_w) = tien<4>(in_desc.GetLengths());
-
-    // using workgroup size of 256 by default
-    out_grid_size   = in_mode == MIOPEN_SOFTMAX_MODE_INSTANCE ? out_n : out_n * out_h * out_w;
-    out_spatial_dim = in_mode == MIOPEN_SOFTMAX_MODE_INSTANCE ? 1 : out_h * out_w;
-    out_vector_size = in_mode == MIOPEN_SOFTMAX_MODE_INSTANCE ? out_c * out_h * out_w : out_c;
-    // num_spatial_dims or pixels each workgroup can compute
-
-    /// \todo Magic numbers
-    out_num_batch = out_vector_size < 256 ? nextPow2(256 / out_vector_size) : 1;
-
-    out_vld = {256, 1, 1};
-
-    out_usefp16 = false;
-    out_usefp32 = true;
-    if(in_desc.GetType() == miopenHalf)
-    {
-        out_usefp16 = true;
-        out_usefp32 = false;
-    }
-
-    if(out_num_batch == 1)
-    {
-        out_workgroups = std::min(out_grid_size, 64 * 40 * 8);
-        out_vgd        = {out_workgroups * out_vld[0], 1, 1};
-
-        out_batch_size   = 0;
-        out_u_batch_size = 0;
-    }
-    else
-    {
-        out_batch_size = 256 / out_num_batch;
-        // num_channels each threads iterates over to cover all the channels
-        out_u_batch_size =
-            (out_vector_size > out_batch_size) ? nextPow2(out_vector_size / out_batch_size) : 1;
-
-        out_workgroups = (out_grid_size % out_num_batch == 0) ? (out_grid_size / out_num_batch)
-                                                              : (out_grid_size / out_num_batch + 1);
-        out_vgd        = {out_workgroups * out_vld[0], 1, 1};
     }
 }
 } // namespace
@@ -127,216 +46,256 @@ bool Softmax::IsApplicable(
     [[maybe_unused]] const ExecutionContext& context,
     [[maybe_unused]] const miopen::softmax::ProblemDescription& problem) const
 {
-    return !env::disabled(MIOPEN_DEBUG_OCL_SOFTMAX);
+    if(!(problem.GetYDesc().GetType() == miopenFloat ||
+         problem.GetYDesc().GetType() == miopenHalf ||
+         problem.GetYDesc().GetType() == miopenBFloat16))
+    {
+        return false;
+    }
+    if(problem.IsForward())
+    {
+        if(problem.GetXDesc().GetType() != problem.GetYDesc().GetType())
+        {
+            return false;
+        }
+        if(problem.GetXDesc().GetVectorLength() != problem.GetYDesc().GetVectorLength())
+        {
+            return false;
+        }
+        if(problem.GetXDesc().GetLayoutEnum() != problem.GetYDesc().GetLayoutEnum())
+        {
+            return false;
+        }
+    }
+    if(!problem.IsForward())
+    {
+        if(problem.GetdYDesc().GetType() != problem.GetYDesc().GetType())
+        {
+            return false;
+        }
+        if(problem.GetdXDesc().GetType() != problem.GetYDesc().GetType())
+        {
+            return false;
+        }
+        if(problem.GetYDesc().GetVectorLength() != problem.GetdYDesc().GetVectorLength() ||
+           problem.GetYDesc().GetVectorLength() != problem.GetdXDesc().GetVectorLength())
+        {
+            return false;
+        }
+        if(problem.GetYDesc().GetLayoutEnum() != problem.GetdYDesc().GetLayoutEnum() ||
+           problem.GetYDesc().GetLayoutEnum() != problem.GetdXDesc().GetLayoutEnum())
+        {
+            return false;
+        }
+    }
+    return true;
 }
 
-std::size_t
-Softmax::GetWorkspaceSize([[maybe_unused]] const ExecutionContext& context,
-                          [[maybe_unused]] const miopen::softmax::ProblemDescription& problem) const
+PerformanceConfigSoftmax
+Softmax::GetDefaultPerformanceConfig(const ExecutionContext&,
+                                     const miopen::softmax::ProblemDescription& problem) const
 {
-    return 0;
+    PerformanceConfigSoftmax config;
+    config.HeuristicInit(problem);
+    config.local_size = PerformanceConfigSoftmax::default_local_size;
+    MIOPEN_LOG_I(config.ToString());
+    return config;
+}
+
+bool Softmax::IsValidPerformanceConfig(const ExecutionContext& context,
+                                       const miopen::softmax::ProblemDescription& problem,
+                                       const PerformanceConfigSoftmax& config) const
+{
+    return config.IsValid(context, problem);
 }
 
 ConvSolution Softmax::GetSolution([[maybe_unused]] const ExecutionContext& context,
-                                  const miopen::softmax::ProblemDescription& problem) const
+                                  const miopen::softmax::ProblemDescription& problem,
+                                  const PerformanceConfigSoftmax& config) const
 {
     auto result = ConvSolution{miopenStatusSuccess};
 
-    auto xDesc = problem.GetXDesc();
-    auto yDesc = problem.GetYDesc();
+    auto lengths    = problem.GetXDesc().GetLengths();
+    auto strides    = problem.GetXDesc().GetStrides();
+    auto dtype      = problem.GetXDesc().GetType();
+    auto data_dtype = miopen::GetDataType(problem.GetXDesc().GetType());
+    auto algorithm  = problem.GetAlgorithm();
+    auto mode       = problem.GetMode();
 
-    auto dxDesc = problem.GetdXDesc();
-    auto dyDesc = problem.GetdYDesc();
+    auto grid_size =
+        mode == MIOPEN_SOFTMAX_MODE_INSTANCE ? lengths[0] : lengths[0] * lengths[2] * lengths[3];
+    auto spatial_dim = mode == MIOPEN_SOFTMAX_MODE_INSTANCE ? 1 : lengths[2] * lengths[3];
+    auto vector_size =
+        mode == MIOPEN_SOFTMAX_MODE_INSTANCE ? lengths[1] * lengths[2] * lengths[3] : lengths[1];
+    auto num_batch =
+        vector_size < config.local_size ? nextPow2(config.local_size / vector_size) : 1;
+    auto workgroups   = num_batch == 1 ? grid_size : (grid_size + num_batch - 1) / num_batch;
+    auto batch_size   = config.local_size / num_batch;
+    auto u_batch_size = vector_size > batch_size ? nextPow2(vector_size / batch_size) : 1;
 
-    auto alpha     = problem.GetAlpha();
-    auto beta      = problem.GetBeta();
-    auto mode      = problem.GetMode();
-    auto algorithm = problem.GetAlgorithm();
-
-    bool isForward = problem.IsForward();
-
-    int n, c, h, w;
-    // using workgroup size of 256 by default
-    int grid_size, spatial_dim, vector_size, num_batch;
-
-    std::vector<size_t> vld;
-    std::vector<size_t> vgd;
-
-    bool usefp16, usefp32;
-
-    size_t workgroups;
-    int batch_size;
-    int u_batch_size;
-
-    getParams(yDesc,
-              mode,
-              n,
-              c,
-              h,
-              w,
-              grid_size,
-              spatial_dim,
-              vector_size,
-              num_batch,
-              usefp16,
-              usefp32,
-              vld,
-              vgd,
-              workgroups,
-              batch_size,
-              u_batch_size);
-
-    if(num_batch > 1)
-    {
-        if(isForward)
-        {
-            /// \todo Magic numbers
-            if((u_batch_size + 1) * 256 > 65536 && yDesc.GetType() == miopenHalf)
-                MIOPEN_THROW(miopenStatusBadParm, "Exceed local memory capacity");
-        }
-        else
-        {
-            /// \todo Magic numbers
-            if((2 * u_batch_size + 1) * 256 > 65536 && yDesc.GetType() == miopenHalf)
-                MIOPEN_THROW(miopenStatusBadParm, "Exceed local memory capacity");
-        }
-    }
-
-    KernelBuildParameters build_params = KernelBuildParameters{{"NUM_BATCH", num_batch}};
-
-    if(num_batch > 1)
-    {
-        build_params.Define("BATCH_SIZE", batch_size);
-        build_params.Define("U_BATCH_SIZE", u_batch_size);
-    }
-
-    build_params.Define("MIOPEN_USE_FP16", static_cast<int>(usefp16));
-    build_params.Define("MIOPEN_USE_FP32", static_cast<int>(usefp32));
-
-    if(algorithm == MIOPEN_SOFTMAX_LOG)
-        build_params.Define("USE_SOFTMAX_LOG", 1);
-    else if(algorithm == MIOPEN_SOFTMAX_FAST)
-        build_params.Define("USE_SOFTMAX_FAST", 1);
-    else
-        build_params.Define("USE_SOFTMAX_ACCURATE", 1);
-
-    if(mode == MIOPEN_SOFTMAX_MODE_INSTANCE)
-        build_params.Define("USE_SOFTMAX_MODE_INSTANCE", 1);
-    else
-        build_params.Define("USE_SOFTMAX_MODE_CHANNEL", 1);
-
-    build_params.Define("RUN_FORWARD", isForward ? 1 : 0);
-
-    if(isForward)
-    {
-        build_params.Define("IS_INPUT_PACKED", static_cast<int>(xDesc.IsPacked()));
-        build_params.Define("IS_OUTPUT_PACKED", static_cast<int>(yDesc.IsPacked()));
-    }
-    else
-    {
-        build_params.Define("IS_OUTPUT_PACKED", static_cast<int>(yDesc.IsPacked()));
-        build_params.Define("IS_DOUTPUT_PACKED", static_cast<int>(dyDesc.IsPacked()));
-        build_params.Define("IS_DINPUT_PACKED", static_cast<int>(dxDesc.IsPacked()));
-    }
-
-    if(!float_equal(alpha, 1.0))
-        build_params.Define("USE_ALPHA", 1);
-
-    if(!float_equal(beta, 0))
-        build_params.Define("USE_BETA", 1);
+    size_t xlocalsize = config.local_size;
+    size_t xgridsize  = workgroups * xlocalsize;
+    size_t ylocalsize = 1;
+    size_t ygridsize  = 1;
+    size_t zlocalsize = 1;
+    size_t zgridsize  = 1;
 
     auto kernel = KernelInfo{};
 
-    kernel.comp_options = build_params.GenerateFor(kbp::OpenCL{});
+    kernel.kernel_file = "MIOpenSoftmax.cpp";
+    kernel.kernel_name = problem.IsForward() ? "SoftmaxFwd" : "SoftmaxBwd";
 
-    kernel.kernel_file = "MIOpenSoftmax.cl";
+    const auto build_params = KernelBuildParameters{
+        {"MIOPEN_USE_FP16", static_cast<int>(dtype == miopenHalf)},
+        {"MIOPEN_USE_FP32", static_cast<int>(dtype == miopenFloat)},
+        {"MIOPEN_USE_BFP16", static_cast<int>(dtype == miopenBFloat16)},
+        {"DATA_TYPE", data_dtype == "bfloat16" ? "ushort" : data_dtype},
+        {"USE_SOFTMAX_FAST", algorithm == MIOPEN_SOFTMAX_FAST},
+        {"USE_SOFTMAX_ACCURATE", algorithm == MIOPEN_SOFTMAX_ACCURATE},
+        {"USE_SOFTMAX_LOG", algorithm == MIOPEN_SOFTMAX_LOG},
+        {"USE_SOFTMAX_MODE_INSTANCE", mode == MIOPEN_SOFTMAX_MODE_INSTANCE},
+        {"USE_SOFTMAX_MODE_CHANNEL", mode == MIOPEN_SOFTMAX_MODE_CHANNEL},
+        {"HEIGHT", lengths[2]},
+        {"WIDTH", lengths[3]},
+        {"N_STRIDE", strides[0]},
+        {"C_STRIDE", strides[1]},
+        {"H_STRIDE", strides[2]},
+        {"W_STRIDE", strides[3]},
+        {"LOCAL_SIZE", config.local_size},
+        {"WORKGROUPS", workgroups},
+        {"GRID_SIZE", grid_size},
+        {"SPATIAL_DIM", spatial_dim},
+        {"VECTOR_SIZE", vector_size},
+        {"NUM_BATCH", num_batch},
+        {"BATCH_SIZE", batch_size},
+        {"U_BATCH_SIZE", u_batch_size},
+        {"IS_INPUT_CONTIGUOUS", problem.IsForward() && problem.GetXDesc().IsContiguous()},
+        {"IS_OUTPUT_CONTIGUOUS", problem.GetYDesc().IsContiguous()},
+        {"IS_DINPUT_CONTIGUOUS", !problem.IsForward() && problem.GetdXDesc().IsContiguous()},
+        {"IS_DOUTPUT_CONTIGUOUS", !problem.IsForward() && problem.GetdYDesc().IsContiguous()}};
 
-    kernel.kernel_name = isForward ? "SoftmaxForward" : "SoftmaxBackward";
+    kernel.comp_options = build_params.GenerateFor(kbp::HIP{});
 
-    for(unsigned int i = 0; i < 2; ++i)
+    kernel.l_wk.push_back(xlocalsize);
+    kernel.l_wk.push_back(ylocalsize);
+    kernel.l_wk.push_back(zlocalsize);
+
+    kernel.g_wk.push_back(xgridsize);
+    kernel.g_wk.push_back(ygridsize);
+    kernel.g_wk.push_back(zgridsize);
+
+    result.construction_params.push_back(kernel);
+
+    if(problem.IsForward())
     {
-        kernel.l_wk.push_back(vld[i]);
-        kernel.g_wk.push_back(vgd[i]);
-    }
-
-    if(isForward)
-    {
-        int in_nstr, in_cstr, in_hstr;
-        std::tie(in_nstr, in_cstr, in_hstr, std::ignore) = tien<4>(xDesc.GetStrides());
-
-        int out_nstr, out_cstr, out_hstr;
-        std::tie(out_nstr, out_cstr, out_hstr, std::ignore) = tien<4>(yDesc.GetStrides());
-
-        result.invoker_factory = [=](const std::vector<Kernel>& kernels) {
+        result.invoker_factory = [](const std::vector<Kernel>& kernels) {
             return [=](const Handle& handle_, const AnyInvokeParams& raw_params) {
-                decltype(auto) kernel = handle_.Run(kernels.front());
-                decltype(auto) params = raw_params.CastTo<miopen::softmax::InvokeParams>();
+                decltype(auto) kernel_ = handle_.Run(kernels.front());
+                decltype(auto) params  = raw_params.CastTo<miopen::softmax::InvokeParams>();
 
-                kernel(params.x,
-                       params.forward_y,
-                       vector_size,
-                       grid_size,
-                       spatial_dim,
-                       h,
-                       w,
-                       in_nstr,
-                       in_cstr,
-                       in_hstr,
-                       out_nstr,
-                       out_cstr,
-                       out_hstr,
-                       params.xdx_offset,
-                       params.y_offset,
-                       alpha,
-                       beta);
+                kernel_(params.x,
+                        params.forward_y,
+                        params.xdx_offset,
+                        params.y_offset,
+                        params.alpha,
+                        params.beta);
             };
         };
     }
     else
     {
-        int din_nstr, din_cstr, din_hstr;
-        std::tie(din_nstr, din_cstr, din_hstr, std::ignore) = tien<4>(dxDesc.GetStrides());
-
-        int dout_nstr, dout_cstr, dout_hstr;
-        std::tie(dout_nstr, dout_cstr, dout_hstr, std::ignore) = tien<4>(dyDesc.GetStrides());
-
-        int out_nstr, out_cstr, out_hstr;
-        std::tie(out_nstr, out_cstr, out_hstr, std::ignore) = tien<4>(yDesc.GetStrides());
-
-        result.invoker_factory = [=](const std::vector<Kernel>& kernels) {
+        result.invoker_factory = [](const std::vector<Kernel>& kernels) {
             return [=](const Handle& handle_, const AnyInvokeParams& raw_params) {
-                decltype(auto) kernel = handle_.Run(kernels.front());
-                decltype(auto) params = raw_params.CastTo<miopen::softmax::InvokeParams>();
+                decltype(auto) kernel_ = handle_.Run(kernels.front());
+                decltype(auto) params  = raw_params.CastTo<miopen::softmax::InvokeParams>();
 
-                kernel(params.backward_y,
-                       params.dy,
-                       params.dx,
-                       vector_size,
-                       grid_size,
-                       spatial_dim,
-                       h,
-                       w,
-                       out_nstr,
-                       out_cstr,
-                       out_hstr,
-                       dout_nstr,
-                       dout_cstr,
-                       dout_hstr,
-                       din_nstr,
-                       din_cstr,
-                       din_hstr,
-                       params.y_offset,
-                       params.dy_offset,
-                       params.xdx_offset,
-                       alpha,
-                       beta);
+                kernel_(params.backward_y,
+                        params.dy,
+                        params.dx,
+                        params.y_offset,
+                        params.dy_offset,
+                        params.xdx_offset,
+                        params.alpha,
+                        params.beta);
             };
         };
     }
 
-    result.construction_params.push_back(kernel);
-
     return result;
+}
+
+void PerformanceConfigSoftmax::HeuristicInit(const miopen::softmax::ProblemDescription& problem)
+{
+#if !MIOPEN_BACKEND_HIP
+    std::ignore = problem;
+#else
+    switch(problem.GetYDesc().GetType())
+    {
+    case miopenHalf:
+    case miopenFloat:
+    case miopenBFloat16: local_size = PerformanceConfigSoftmax::start_local_size; break;
+    case miopenDouble:
+    case miopenFloat8_fnuz:
+    case miopenBFloat8_fnuz:
+    case miopenInt8:
+    case miopenInt32:
+    case miopenInt64:
+    default: MIOPEN_THROW("Unsupported datatype");
+    }
+#endif
+    initialized = true;
+}
+
+bool PerformanceConfigSoftmax::SetNextValue(const miopen::softmax::ProblemDescription& problem)
+{
+#if !MIOPEN_BACKEND_HIP
+    std::ignore = problem;
+    return false;
+#else
+    if(!initialized)
+    {
+        HeuristicInit(problem);
+    }
+    if(local_size <= 0)
+    {
+        MIOPEN_THROW(miopenStatusInvalidValue, "Local size zero or negative");
+    }
+    local_size *= 2;
+    return local_size <= max_local_size;
+#endif
+}
+
+bool PerformanceConfigSoftmax::IsValidValue() const
+{
+    return local_size > 0 && local_size <= max_local_size;
+}
+
+bool PerformanceConfigSoftmax::IsValid(const ExecutionContext&,
+                                       const miopen::softmax::ProblemDescription& problem) const
+{
+#if !MIOPEN_BACKEND_HIP
+    std::ignore = problem;
+    return false;
+#else
+    switch(problem.GetXDesc().GetType())
+    {
+    case miopenHalf:
+    case miopenFloat:
+    case miopenBFloat16: return true;
+    case miopenDouble:
+    case miopenFloat8_fnuz:
+    case miopenBFloat8_fnuz:
+    case miopenInt8:
+    case miopenInt32:
+    case miopenInt64:
+    default: MIOPEN_THROW("Unsupported datatype");
+    }
+#endif
+}
+
+bool PerformanceConfigSoftmax::operator==(const PerformanceConfigSoftmax& other) const
+{
+    return local_size == other.local_size;
 }
 
 } // namespace softmax

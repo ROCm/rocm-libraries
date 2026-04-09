@@ -1,5 +1,5 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2018-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 
@@ -14,6 +14,8 @@
 #include <type_traits>
 #include <utility>
 #include <variant>
+#include <iostream>
+#include <functional>
 
 struct FmhaBwdFp32
 {
@@ -114,9 +116,54 @@ struct fmha_bwd_args
     void* dv_ptr;
     void* dbias_ptr;
     void* dq_acc_ptr;
-    const void* seqstart_q_ptr;
-    const void* seqstart_k_ptr;
-    const void* seqlen_k_ptr;
+    const void*
+        sink_ptr; // sink scores [batch, nhead] in log-space (LSEDataType); nullptr disables sink
+    void* d_sink_ptr; // sink gradient output [nhead] (LSEDataType); nullptr disables sink gradient
+
+    // Usage notes for sequence length pointer parameters:
+    //
+    // [Note: Define "Group mode" vs "Batch mode" here if possible, e.g., "Group mode handles
+    // MQA/GQA..."]
+    //
+    // With padding:
+    //   Group mode:
+    //     - seqstart_q_ptr, seqstart_k_ptr: Record cumulative physical (including padding) sequence
+    //     lengths. [array size: batch + 1]
+    //     - seqlen_q_ptr/seqlen_k_ptr: Records logical (excluding padding) length for each
+    //     sequence. [array size: batch]
+    //     - cu_seqlen_q_ptr/cu_seqlen_k_ptr: Records cumulative logical (excluding padding)
+    //     sequence lengths. [array size: batch + 1]
+    //     - seqlen_q_ptr (per-sequence) and cu_seqlen_q_ptr (cumulative logical) are mutually
+    //     exclusive. Use one set, not both.
+    //
+    //   Batch mode:
+    //     - cu_seqlen_q_ptr/cu_seqlen_k_ptr: Records cumulative logical (excluding padding)
+    //     sequence lengths. [array size: batch + 1]
+    //     - seqstart_* and seqlen_* pointers must be nullptr.
+    //
+    // Without padding:
+    //   (Note: Physical length equals logical length)
+    //
+    //   Group mode:
+    //     - seqstart_q_ptr, seqstart_k_ptr: Record cumulative physical sequence lengths. [array
+    //     size: batch + 1]
+    //     - seqlen_q_ptr/seqlen_k_ptr and cu_seqlen_q_ptr/cu_seqlen_k_ptr must be nullptr.
+    //
+    //   Batch mode:
+    //     - All sequence length pointers (seqstart_*, seqlen_*, cu_seqlen_*) must be nullptr.
+    //
+    const void* seqstart_q_ptr =
+        nullptr; // Cumulative physical sequence length array [batch + 1]. (Used in Group mode)
+    const void* seqstart_k_ptr =
+        nullptr; // Cumulative physical sequence length array [batch + 1]. (Used in Group mode)
+    const void* seqlen_q_ptr = nullptr;    // Per-sequence logical (excluding padding) length array
+                                           // [batch]. (Used in Group mode with padding)
+    const void* seqlen_k_ptr = nullptr;    // Per-sequence logical (excluding padding) length array
+                                           // [batch]. (Used in Group mode with padding)
+    const void* cu_seqlen_q_ptr = nullptr; // Cumulative logical (excluding padding) sequence length
+                                           // array [batch + 1]. (Used with padding)
+    const void* cu_seqlen_k_ptr = nullptr; // Cumulative logical (excluding padding) sequence length
+                                           // array [batch + 1]. (Used with padding)
     ck_tile::index_t seqlen_q;
     ck_tile::index_t seqlen_k;
     ck_tile::index_t batch;
@@ -147,7 +194,7 @@ struct fmha_bwd_args
     ck_tile::index_t nhead_stride_randval;
     ck_tile::index_t nhead_stride_do;
     ck_tile::index_t nhead_stride_lsed;
-    ck_tile::index_t nhead_stride_dq_acc;
+    ck_tile::long_index_t nhead_stride_dq_acc;
     ck_tile::index_t nhead_stride_dq;
     ck_tile::index_t nhead_stride_dk;
     ck_tile::index_t nhead_stride_dv;
@@ -160,7 +207,7 @@ struct fmha_bwd_args
     ck_tile::index_t batch_stride_randval;
     ck_tile::index_t batch_stride_do;
     ck_tile::index_t batch_stride_lsed;
-    ck_tile::index_t batch_stride_dq_acc;
+    ck_tile::long_index_t batch_stride_dq_acc;
     ck_tile::index_t batch_stride_dq;
     ck_tile::index_t batch_stride_dk;
     ck_tile::index_t batch_stride_dv;
@@ -203,7 +250,11 @@ auto fmha_bwd_dq_dk_dv_create_kargs_and_grids(fmha_bwd_args args)
                                                       dq_ptr,
                                                       args.seqstart_q_ptr,
                                                       args.seqstart_k_ptr,
+                                                      args.seqlen_q_ptr,
                                                       args.seqlen_k_ptr,
+                                                      args.cu_seqlen_q_ptr,
+                                                      args.cu_seqlen_k_ptr,
+                                                      args.batch,
                                                       args.hdim_q,
                                                       args.hdim_v,
                                                       args.nhead_q,
@@ -253,6 +304,7 @@ auto fmha_bwd_dq_dk_dv_create_kargs_and_grids(fmha_bwd_args args)
                                                       dq_ptr,
                                                       args.seqlen_q,
                                                       args.seqlen_k,
+                                                      args.batch,
                                                       args.hdim_q,
                                                       args.hdim_v,
                                                       args.nhead_q,
@@ -313,9 +365,15 @@ auto fmha_bwd_dot_do_o_create_kargs_and_grids(fmha_bwd_args args)
             return FmhaBwdOGradDotOKernel::MakeKargs(args.o_ptr,
                                                      args.do_ptr,
                                                      args.d_ptr,
+                                                     args.lse_ptr,
+                                                     args.sink_ptr,
+                                                     args.d_sink_ptr,
                                                      args.p_undrop,
                                                      args.seqstart_q_ptr,
+                                                     args.seqlen_q_ptr,
+                                                     args.cu_seqlen_q_ptr,
                                                      args.hdim_v,
+                                                     args.nhead_q,
                                                      args.stride_do,
                                                      args.stride_o,
                                                      args.nhead_stride_do,
@@ -327,9 +385,13 @@ auto fmha_bwd_dot_do_o_create_kargs_and_grids(fmha_bwd_args args)
             return FmhaBwdOGradDotOKernel::MakeKargs(args.o_ptr,
                                                      args.do_ptr,
                                                      args.d_ptr,
+                                                     args.lse_ptr,
+                                                     args.sink_ptr,
+                                                     args.d_sink_ptr,
                                                      args.p_undrop,
                                                      args.seqlen_q,
                                                      args.hdim_v,
+                                                     args.nhead_q,
                                                      args.stride_do,
                                                      args.stride_o,
                                                      args.nhead_stride_do,
@@ -356,6 +418,10 @@ auto fmha_bwd_convert_dq_create_kargs_and_grids(fmha_bwd_args args)
                                                         args.dq_ptr,
                                                         args.seqstart_q_ptr,
                                                         args.seqstart_k_ptr,
+                                                        args.seqlen_q_ptr,
+                                                        args.seqlen_k_ptr,
+                                                        args.cu_seqlen_q_ptr,
+                                                        args.cu_seqlen_k_ptr,
                                                         args.hdim_q,
                                                         args.stride_dq,
                                                         args.stride_dq_acc,
@@ -376,7 +442,9 @@ auto fmha_bwd_convert_dq_create_kargs_and_grids(fmha_bwd_args args)
                                                         args.nhead_stride_dq_acc,
                                                         args.batch_stride_dq,
                                                         args.batch_stride_dq_acc,
-                                                        args.split_stride_dq_acc);
+                                                        args.split_stride_dq_acc,
+                                                        args.batch,
+                                                        args.nhead_q);
         }
     }();
 
@@ -402,16 +470,21 @@ struct fmha_bwd_dq_dk_dv_traits_
 {
 };
 
-template <typename Traits_>
+template <typename Traits_, typename Arch = void>
 float fmha_bwd_dq_dk_dv_(const ck_tile::stream_config&, fmha_bwd_args);
 
-template <typename Traits_>
+template <typename Traits_, typename Arch = void>
 void fmha_bwd_dq_dk_dv_oneshot_(const ck_tile::stream_config&, fmha_bwd_args);
 
-template <typename Traits_>
+template <typename Traits_, typename Arch = void>
 std::string fmha_bwd_dq_dk_dv_get_name_();
-template <typename Traits_>
+template <typename Traits_, typename Arch = void>
 int fmha_bwd_dq_dk_dv_maxq_();
+struct fmha_bwd_traits;
+template <typename Traits_, typename Arch = void>
+int fmha_bwd_dq_dk_dv_dq_acc_splits_(const fmha_bwd_traits& t);
+template <typename Traits_, typename Arch = void>
+bool fmha_bwd_dq_dk_dv_needs_zero_dq_acc_();
 
 template <ck_tile::index_t HDim_, typename DataType_, bool kIsGroupMode_, bool kPadS_, bool kPadDv_>
 struct fmha_bwd_dot_do_o_traits_
@@ -423,13 +496,13 @@ struct fmha_bwd_dot_do_o_traits_
     static constexpr bool kPadDv           = kPadDv_;
 };
 
-template <typename Traits_>
+template <typename Traits_, typename Arch = void>
 float fmha_bwd_dot_do_o_(const ck_tile::stream_config&, fmha_bwd_args);
 
-template <typename Traits_>
+template <typename Traits_, typename Arch = void>
 void fmha_bwd_dot_do_o_oneshot_(const ck_tile::stream_config&, fmha_bwd_args);
 
-template <typename Traits_>
+template <typename Traits_, typename Arch = void>
 std::string fmha_bwd_dot_do_o_get_name_();
 
 template <ck_tile::index_t HDim_,
@@ -443,20 +516,27 @@ struct fmha_bwd_convert_dq_traits_
 {
 };
 
-template <typename Traits_>
+template <typename Traits_, typename Arch = void>
 float fmha_bwd_convert_dq_(const ck_tile::stream_config&, fmha_bwd_args);
 
-template <typename Traits_>
+template <typename Traits_, typename Arch = void>
 void fmha_bwd_convert_dq_oneshot_(const ck_tile::stream_config&, fmha_bwd_args);
 
-template <typename Traits_>
+template <typename Traits_, typename Arch = void>
 std::string fmha_bwd_convert_dq_get_name_();
 
-// This is the public API, will be generated by script
+// Traits that are used to dispatch different kernel implementations for fmha backward
 struct fmha_bwd_traits
 {
+    int seqlen_q;
+    int seqlen_k;
+    int batch;
+    int max_seqlen_q;
+    int max_seqlen_k;
     int hdim_q;
     int hdim_v;
+    int nhead_q;
+    int nhead_k;
     std::string data_type;
     bool is_group_mode;
     mask_enum mask_type;
@@ -467,5 +547,53 @@ struct fmha_bwd_traits
     bool is_deterministic;
     // TODO: padding check is inside this api
 };
+
+template <typename T0 /*dot_do_o_trait*/,
+          typename T1 /*dq_dk_dv_trait*/,
+          typename T2 /*convert_dq_trait*/,
+          typename Arch>
+float fmha_bwd_(const ck_tile::stream_config& s, fmha_bwd_args a)
+{
+    if constexpr(!std::is_same_v<T2, void>)
+    {
+        if(s.log_level_ > 0)
+            std::cout << ", " << fmha_bwd_dot_do_o_get_name_<T0, Arch>() << "@"
+                      << fmha_bwd_convert_dq_get_name_<T2, Arch>() << "@"
+                      << fmha_bwd_dq_dk_dv_get_name_<T1, Arch>() << std::flush;
+        return ck_tile::launch_kernel(
+            s,
+            [=](const ck_tile::stream_config& s_) { fmha_bwd_dot_do_o_oneshot_<T0, Arch>(s_, a); },
+            [=](const ck_tile::stream_config& s_) { fmha_bwd_dq_dk_dv_oneshot_<T1, Arch>(s_, a); },
+            [=](const ck_tile::stream_config& s_) {
+                fmha_bwd_convert_dq_oneshot_<T2, Arch>(s_, a);
+            });
+    }
+    else
+    {
+        if(s.log_level_ > 0)
+            std::cout << ", " << fmha_bwd_dot_do_o_get_name_<T0, Arch>() << "@"
+                      << fmha_bwd_dq_dk_dv_get_name_<T1, Arch>() << std::flush;
+        return ck_tile::launch_kernel(
+            s,
+            [=](const ck_tile::stream_config& s_) { fmha_bwd_dot_do_o_oneshot_<T0, Arch>(s_, a); },
+            [=](const ck_tile::stream_config& s_) { fmha_bwd_dq_dk_dv_oneshot_<T1, Arch>(s_, a); });
+    }
+}
+
 template <int Version = 2>
-float fmha_bwd(fmha_bwd_traits, fmha_bwd_args, const ck_tile::stream_config&);
+float fmha_bwd(const fmha_bwd_traits&, fmha_bwd_args, const ck_tile::stream_config&);
+
+struct fmha_bwd_launcher
+{
+    std::function<float(fmha_bwd_args, const ck_tile::stream_config&)> run{};
+    ck_tile::index_t dq_acc_splits{0};
+    bool needs_zero_dq_acc{true};
+
+    fmha_bwd_launcher(const fmha_bwd_traits&);
+
+    template <typename... Args>
+    float operator()(Args&&... args) const
+    {
+        return run(std::forward<Args>(args)...);
+    }
+};

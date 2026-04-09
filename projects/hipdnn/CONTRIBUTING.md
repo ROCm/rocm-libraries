@@ -25,6 +25,16 @@ We encourage you to open a GitHub issue to discuss your planned contribution bef
 
 All contributions must meet the following requirements before they can be merged:
 
+### Feature Proposals & RFCs
+
+- **RFC Process**: For large or complex feature changes, contributors must provide a Request for Comments (RFC) proposal ahead of development.
+  - This proposal should be discussed and iterated upon with maintainers prior to beginning feature work and implementation.
+  - RFCs should be submitted as a Markdown document added to `hipdnn/docs/rfcs` via a Pull Request (e.g., see [PR #3266](https://github.com/ROCm/rocm-libraries/pull/3266)).
+- **Phased Implementation**: We strongly encourage landing changes in multiple phases.
+- **Small PRs**: Please keep Pull Requests small and focused.
+  - This makes reviews easier to digest.
+  - It minimizes the potential for conflicts or large feature reverts if issues are discovered later.
+
 ### Code Quality Standards
 
 - **Code Formatting**: All code must follow the format specified by the `.clang-format` file
@@ -74,18 +84,15 @@ When contributing to hipDNN, please keep these architectural principles in mind:
   - Plugins can have their own dependencies as needed
   - See [Plugin Development](./docs/PluginDevelopment.md) for further guidance
 
-> [!NOTE]
-> 📝 The MIOpen Legacy Plugin is currently an exception and will be migrated to its own repository in the future.
-
 ## Development Workflow
 
 ### 1. Fork and Clone
 
 ```bash
 # Fork the repository on GitHub, then:
-git clone https://github.com/YOUR_USERNAME/hipDNN.git
-cd hipDNN
-git remote add upstream https://github.com/ROCm/hipDNN.git
+git clone https://github.com/YOUR_USERNAME/rocm-libraries.git
+cd rocm-libraries
+git remote add upstream https://github.com/ROCm/rocm-libraries.git
 ```
 
 ### 2. Create a Feature Branch
@@ -98,7 +105,40 @@ git checkout -b feature/your-feature-name
 
 Follow the remaining instructions in the [Quick Start Guide](./docs/Building.md#quick-start-guide) to build hipDNN.
 
-### 4. Run All Required Checks
+### 4. Set Up Pre-commit Hooks
+
+hipDNN uses pre-commit hooks to automatically validate code quality. See the [main contributing guide](../../CONTRIBUTING.md#pre-commit-hooks) for general pre-commit setup instructions.
+
+#### Installing flatc (Required for hipDNN)
+
+hipDNN requires `flatc` version **25.9.23** for the FlatBuffers schema compiler. Install it before setting up pre-commit:
+
+**Linux:**
+```bash
+wget https://github.com/google/flatbuffers/releases/download/v25.9.23/Linux.flatc.binary.g++-13.zip
+unzip Linux.flatc.binary.g++-13.zip
+sudo mv flatc /usr/local/bin/
+sudo chmod +x /usr/local/bin/flatc
+rm Linux.flatc.binary.g++-13.zip
+```
+
+**Windows:**
+1. Download: https://github.com/google/flatbuffers/releases/download/v25.9.23/Windows.flatc.binary.zip.
+2. Extract `flatc.exe` and add it to your system PATH.
+
+**Verify installation:**
+```bash
+flatc --version
+# Should output: flatc version 25.9.23
+```
+
+After `flatc` is installed, set up pre-commit:
+```bash
+pip install pre-commit
+pre-commit install
+```
+
+### 5. Run All Required Checks
 
 Before submitting your PR, ensure all checks pass:
 
@@ -117,7 +157,7 @@ cmake -DBUILD_ADDRESS_SANITIZER=ON ..
 ninja check
 
 # Check code coverage (optional but recommended)
-cmake -DCODE_COVERAGE=ON ..
+cmake -DHIPDNN_ENABLE_COVERAGE=ON ..
 ninja code_coverage
 ```
 
@@ -144,6 +184,7 @@ When creating a pull request, ensure you can check all these boxes:
 
 - **Questions**: Open a GitHub issue with your question
 - **Discussion**: For design discussions or feature proposals, open an issue before starting work
+- **RFCs**: For large or complex features, submitting an RFC is a great way to get early feedback on your design
 - **Draft PRs**: Feel free to open a draft PR early to get feedback on your approach
 - **CI Pipelines**: In your PR, ask members of the hipDNN team to run CI on your branch
 - **Code Reviews**: Be responsive to code review feedback and make requested changes promptly

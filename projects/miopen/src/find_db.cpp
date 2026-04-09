@@ -33,6 +33,8 @@
 #include <miopen_data.hpp>
 #endif
 #include <miopen/filesystem.hpp>
+
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -44,10 +46,10 @@ namespace debug {
 MIOPEN_EXPORT bool testing_find_db_enabled = true;
 
 /// \todo Remove when #1723 is resolved.
-boost::optional<fs::path>& testing_find_db_path_override()
+std::optional<fs::path>& testing_find_db_path_override()
 {
     // NOLINTNEXTLINE (cppcoreguidelines-avoid-non-const-global-variables)
-    static boost::optional<fs::path> data = boost::none;
+    static std::optional<fs::path> data{std::nullopt};
     return data;
 }
 
@@ -125,76 +127,77 @@ template <class TDb>
 fs::path FindDbRecord_t<TDb>::GetInstalledPathFile(const Handle& handle,
                                                    const std::string& path_suffix)
 {
-    static const auto installed_path = [&] {
+    static const fs::path installed_path = [&] {
         const std::string ext = ".fdb.txt";
         const auto root_path  = GetSystemDbPath();
         const auto base_name  = handle.GetDbBasename();
         const auto suffix =
             GetSystemFindDbSuffix() + (path_suffix.empty() ? "" : ('.' + path_suffix));
-        const auto file_path = root_path / (base_name + "." + suffix + ext);
+        auto file_path = root_path / (base_name + "." + suffix + ext);
         if(fs::exists(file_path))
         {
             MIOPEN_LOG_I2("Found exact find database file: " << file_path);
-            return file_path;
+            return std::move(file_path);
         }
-        else
-        {
-            MIOPEN_LOG_I2("inexact find database search");
-            if(fs::is_directory(root_path))
-            {
-                MIOPEN_LOG_I2("Iterating over find db directory " << root_path);
-                std::vector<fs::path> all_files;
-                std::vector<fs::path> contents;
-                std::copy(fs::directory_iterator(root_path),
-                          fs::directory_iterator(),
-                          std::back_inserter(contents));
-                for(auto const& filepath : contents)
-                {
-                    if(fs::is_regular_file(filepath) &&
-                       filepath.extension() == path_suffix + ".fdb.txt")
-                        all_files.push_back(filepath);
-                }
 
-                const auto db_id        = handle.GetTargetProperties().DbId();
-                const int real_cu_count = handle.GetMaxComputeUnits();
-                int closest_cu          = std::numeric_limits<int>::max();
-                fs::path best_path;
-                for(const auto& entry : all_files)
-                {
-                    const auto fname = entry.stem().string();
-                    MIOPEN_LOG_I("Checking find db file: " << fname);
-                    // Check for alternate back end same ASIC
-                    if(fname.starts_with(base_name))
-                    {
-                        return entry;
-                    }
-                    if(db_id.empty() || !miopen::StartsWith(db_id, "gfx") || real_cu_count == 0)
-                        return fs::path{};
-                    // Check for alternate ASIC any back end
-                    if(fname.starts_with(db_id))
-                    {
-                        const auto pos = fname.find('_');
-                        int cur_count  = -1;
-                        if(pos != std::string::npos)
-                            cur_count = std::stoi(fname.substr(pos + 1));
-                        else
-                            cur_count = std::stoi(fname.substr(db_id.length()), nullptr, 16);
-                        if(abs(cur_count - real_cu_count) < (closest_cu))
-                        {
-                            best_path  = entry;
-                            closest_cu = abs(cur_count - real_cu_count);
-                        }
-                    }
-                }
-                return best_path;
-            }
-            else
+        MIOPEN_LOG_I2("inexact find database search");
+        if(!fs::is_directory(root_path))
+        {
+            MIOPEN_LOG_I("Database directory does not exist");
+            file_path = fs::path{};
+            return std::move(file_path);
+        }
+
+        MIOPEN_LOG_I2("Iterating over find db directory " << root_path);
+        std::vector<fs::path> all_files;
+        std::vector<fs::path> contents;
+        std::copy(fs::directory_iterator(root_path),
+                  fs::directory_iterator(),
+                  std::back_inserter(contents));
+        for(auto const& filepath : contents)
+        {
+            if(fs::is_regular_file(filepath) && filepath.extension() == path_suffix + ".fdb.txt")
+                all_files.push_back(filepath);
+        }
+
+        const auto db_id        = handle.GetTargetProperties().DbId();
+        const int real_cu_count = handle.GetMaxComputeUnits();
+        int closest_cu          = std::numeric_limits<int>::max();
+
+        for(const auto& entry : all_files)
+        {
+            const auto fname = entry.stem().string();
+            MIOPEN_LOG_I("Checking find db file: " << fname);
+            // Check for alternate back end same ASIC
+            if(fname.starts_with(base_name))
             {
-                MIOPEN_LOG_I("Database directory does not exist");
-                return fs::path{};
+                file_path = entry;
+                return std::move(file_path);
+            }
+            if(db_id.empty() || !miopen::StartsWith(db_id, "gfx") || real_cu_count == 0)
+            {
+                file_path = fs::path{};
+                return std::move(file_path); // empty
+            }
+            // Check for alternate ASIC any back end
+            if(fname.starts_with(db_id))
+            {
+                const auto pos = fname.find('_');
+                int cur_count  = -1;
+                if(pos != std::string::npos)
+                    cur_count = std::stoi(fname.substr(pos + 1));
+                else
+                    cur_count = std::stoi(fname.substr(db_id.length()), nullptr, 16);
+                if(abs(cur_count - real_cu_count) < (closest_cu))
+                {
+                    file_path  = entry;
+                    closest_cu = abs(cur_count - real_cu_count);
+                }
             }
         }
+        return std::move(file_path);
     }();
+
     return installed_path;
 }
 #endif
@@ -233,22 +236,29 @@ bool FindDbRecord_t<TDb>::Validate(const Handle& handle, const NetworkConfig& co
     auto unbuilt = false;
     auto any     = false;
 
-    for(const auto& pair : content->As<FindDbData>())
+    if(content.has_value())
     {
-        if(in_sync)
+        for(const auto& pair : content->As<FindDbData>())
         {
-            if(!handle.GetInvoker(config, {{pair.first}}))
+            if(in_sync)
             {
-                unbuilt = true;
-                // This is not an logged as error because no error was detected.
-                // Find wasn't executed yet and invokers were not prepared.
-                LogFindDbItem(pair);
-                break;
-            }
+                if(!handle.GetInvoker(config, {{pair.first}}))
+                {
+                    unbuilt = true;
+                    // This is not an logged as error because no error was detected.
+                    // Find wasn't executed yet and invokers were not prepared.
+                    LogFindDbItem(pair);
+                    break;
+                }
 
-            any = true;
-            continue;
+                any = true;
+                continue;
+            }
         }
+    }
+    else
+    {
+        MIOPEN_LOG_E("Error: no content.");
     }
 
     return !any || unbuilt;
@@ -257,20 +267,34 @@ bool FindDbRecord_t<TDb>::Validate(const Handle& handle, const NetworkConfig& co
 template <class TDb>
 void FindDbRecord_t<TDb>::CopyTo(std::vector<Solution>& to) const
 {
-    const auto range = content->As<FindDbData>();
-    std::transform(range.begin(), range.end(), std::back_inserter(to), [](const auto& pair) {
-        return Solution{solver::Id{pair.first}, pair.second.time, pair.second.workspace};
-    });
+    if(content.has_value())
+    {
+        const auto range = content->As<FindDbData>();
+        std::transform(range.begin(), range.end(), std::back_inserter(to), [](const auto& pair) {
+            return Solution{solver::Id{pair.first}, pair.second.time, pair.second.workspace};
+        });
+    }
+    else
+    {
+        MIOPEN_LOG_E("Error: no content.");
+    }
 }
 
 template <class TDb>
 void FindDbRecord_t<TDb>::LogFindDbItem(const std::pair<std::string, FindDbData>& item) const
 {
-    MIOPEN_LOG_I2("Kernel cache entry not found for solver: "
-                  << item.first << " at network config: " << content->GetKey());
+    if(content.has_value())
+    {
+        MIOPEN_LOG_I2("Kernel cache entry not found for solver: "
+                      << item.first << " at network config: " << content->GetKey());
 
-    for(const auto& pair2 : content->As<FindDbData>())
-        MIOPEN_LOG_I2("Find-db record content: " << pair2.first << ':' << pair2.second);
+        for(const auto& pair2 : content->As<FindDbData>())
+            MIOPEN_LOG_I2("Find-db record content: " << pair2.first << ':' << pair2.second);
+    }
+    else
+    {
+        MIOPEN_LOG_E("Error: no content.");
+    }
 }
 
 template class FindDbRecord_t<FindDb>;

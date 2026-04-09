@@ -2,7 +2,24 @@
 # SPDX-License-Identifier: MIT
 
 cmake_minimum_required(VERSION 3.25.2)
-project(rocm-libraries LANGUAGES C CXX Fortran ASM)
+project(rocm-libraries LANGUAGES C CXX ASM)
+
+include(CheckLanguage)
+check_language(Fortran)
+if(CMAKE_Fortran_COMPILER)
+    enable_language(Fortran)
+    set(ROCM_LIBS_HAVE_FORTRAN TRUE)
+else()
+    set(ROCM_LIBS_HAVE_FORTRAN FALSE)
+    message(STATUS "Fortran compiler not found - Fortran support disabled")
+endif()
+
+if(POLICY CMP0135)
+    cmake_policy(SET CMP0135 NEW) # FetchContent timestamp handling
+endif()
+if(POLICY CMP0077)
+    cmake_policy(SET CMP0077 NEW) # option() honors normal variables
+endif()
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake/modules")
 
@@ -18,14 +35,25 @@ set(ROCM_LIBS_ENABLE_COMPONENTS "all"
     CACHE STRING "Semicolon-separated list of components to build (default: 'all')"
 )
 
-set(SUPPORTED_COMPONENTS
+set(DEFAULT_COMPONENTS
     # shared
     mxdatagenerator
     rocroller
+    origami
     # projects
     hipblas-common
+    hipblaslt
     rocprim
     rocrand
+)
+
+set(AVAILABLE_COMPONENTS
+    ${DEFAULT_COMPONENTS}
+    # dnn
+    hipdnn
+    hipdnn-integration-tests
+    miopen-provider
+    hipblaslt-provider
 )
 
 set(UNSUPPORTED_COMPONENTS
@@ -34,7 +62,6 @@ set(UNSUPPORTED_COMPONENTS
     # projects
     composablekernel
     hipblas
-    hipblaslt
     hipcub
     hipfft
     hiprand
@@ -61,12 +88,12 @@ if(NOT ROCM_LIBS_ENABLE_COMPONENTS)
 endif()
 
 if("all" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
-    set(ROCM_LIBS_ENABLE_COMPONENTS ${SUPPORTED_COMPONENTS})
+    set(ROCM_LIBS_ENABLE_COMPONENTS ${DEFAULT_COMPONENTS})
 endif()
 
 message(STATUS "Enabling components:")
 foreach(component ${ROCM_LIBS_ENABLE_COMPONENTS})
-    if(component IN_LIST SUPPORTED_COMPONENTS)
+    if(component IN_LIST AVAILABLE_COMPONENTS)
         message(STATUS "  ${component} (supported)")
     elseif(component IN_LIST UNSUPPORTED_COMPONENTS)
         message(STATUS "  ${component} (unsupported)")
@@ -93,12 +120,30 @@ if("hipblas-common" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
 endif()
 
 if("rocroller" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
-    # required deps: pip install pytest-cmake
+    # pip packages:
+    #   pip install pytest-cmake
     set(ROCROLLER_ENABLE_FETCH ON)
     add_subdirectory_with_message(
         COMPONENT rocroller
         PREFIX_PATH shared
         EXPECT_TARGET roc::rocroller
+    )
+endif()
+
+if("origami" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
+    add_subdirectory_with_message(
+        COMPONENT origami
+        PREFIX_PATH shared
+        EXPECT_TARGET roc::origami
+    )
+endif()
+
+if("hipblaslt" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
+    set(HIPBLASLT_ENABLE_BLIS OFF)
+    add_subdirectory_with_message(
+        COMPONENT hipblaslt
+        PREFIX_PATH projects
+        EXPECT_TARGET roc::hipblaslt
     )
 endif()
 
@@ -115,6 +160,39 @@ if("rocrand" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
         COMPONENT rocrand
         PREFIX_PATH projects
         EXPECT_TARGET rocrand
+    )
+endif()
+
+# --- DNN components (opt-in, not part of default 'all' build) ---
+if("hipdnn" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
+    add_subdirectory_with_message(
+        COMPONENT hipdnn
+        PREFIX_PATH projects
+        EXPECT_TARGET hipdnn_backend
+    )
+endif()
+
+if("hipdnn-integration-tests" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
+    add_subdirectory_with_message(
+        COMPONENT integration-tests
+        PREFIX_PATH dnn-providers
+        EXPECT_TARGET hipdnn_integration_tests
+    )
+endif()
+
+if("miopen-provider" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
+    add_subdirectory_with_message(
+        COMPONENT miopen-provider
+        PREFIX_PATH dnn-providers
+        EXPECT_TARGET miopen_plugin
+    )
+endif()
+
+if("hipblaslt-provider" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
+    add_subdirectory_with_message(
+        COMPONENT hipblaslt-provider
+        PREFIX_PATH dnn-providers
+        EXPECT_TARGET hipblaslt_plugin
     )
 endif()
 
@@ -155,10 +233,6 @@ endif()
 
 if("hiprand" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
     message(FATAL_ERROR "hiprand is not yet supported in the superbuild")
-endif()
-
-if("hipblaslt" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
-    message(FATAL_ERROR "hipblaslt is not yet supported in the superbuild")
 endif()
 
 if("hipblas" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)

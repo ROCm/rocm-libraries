@@ -199,7 +199,7 @@ class KernelTuningNetTest : public ::testing::TestWithParam<KernelTuningNetTestC
 protected:
     void TestParameterPredictionModel(std::string solver_nm)
     {
-#if MIOPEN_ENABLE_AI_KERNEL_TUNING
+#if MIOPEN_ENABLE_AI_KERNEL_TUNING && MIOPEN_USE_COMPOSABLEKERNEL
         auto test_case = GetParam();
 
         auto&& handle = get_handle();
@@ -282,7 +282,7 @@ protected:
         MIOPEN_LOG_I2("perf_config: " << perf_config.ToString());
         ASSERT_NE(perf_config.ToString(), "");
 
-        ASSERT_FALSE(miopen::conv::IsAlgorithmDisabled(algo));
+        ASSERT_FALSE(miopen::conv::IsAlgorithmDisabled(algo, problem));
         ASSERT_TRUE(solv.IsDynamic());
         ASSERT_TRUE(solv.IsApplicable(ctx, problem));
         const auto ws = solv.GetWorkspaceSize(ctx, problem);

@@ -1,42 +1,57 @@
 # hipDNN Operation Support
 
-This document provides a comprehensive overview of the operations currently supported in hipDNN and the details of their implementation support.
+This document provides an overview of operation support in hipDNN and guides you to detailed information about specific plugin implementations.
 
-## Current Operation Support
+## About hipDNN Operation Support
 
-The following table lists all operations currently supported in hipDNN, along with their supported data types, layouts, sparse support status, and the plugin that provides the implementation.
-
-| Graph Pattern | Datatypes | Layouts | Sparse Support | Plugin with Support |
-|--------------|-----------|---------|----------------|-------------------|
-| Batchnorm Inference | Fp16, BFp16, Float32 | NHWC, NCHW, NDHWC, NCDHW | No | MIOpen Legacy Plugin |
-| Batchnorm Backwards | Fp16, BFp16, Float32 | NHWC, NCHW, NDHWC, NCDHW | No | MIOpen Legacy Plugin |
-| Convolution Forward | Fp16, BFp16, Float32 | NHWC, NCHW, NDHWC, NCDHW | No | MIOpen Legacy Plugin |
-
-## Notes
+hipDNN is a plugin-based deep learning library that provides graph-based operation support through various backend plugins. Each plugin implements specific operations with support for different datatypes, layouts, and features.
 
 > [!IMPORTANT]
-> ⚠️ **hipDNN is in the early phase of development.** The operation support table above reflects the current state of the library. We are actively working on expanding support for additional operations and features.
+> ⚠️ **hipDNN is in the early phase of development.** Operation support continues to expand as the library matures. Check individual plugin documentation for current support details.
 
-For information about upcoming operations and features, please refer to the [Roadmap.md](./Roadmap.md) document.
+## Plugin-Specific Operation Support
 
-## Legend
+hipDNN operations are implemented through plugins. Each plugin provides its own set of supported operations. For detailed information about what operations are available, please refer to the plugin-specific documentation:
 
-### Datatypes
-- **Fp16**: Half-precision floating point (16-bit)
-- **BFp16**: Brain floating point (16-bit)
-- **Float32**: Single-precision floating point (32-bit)
+### Available Plugins
 
-### Layouts
-- **NHWC**: Batch, Height, Width, Channels
-- **NCHW**: Batch, Channels, Height, Width
-- **NDHWC**: Batch, Depth, Height, Width, Channels (for 3D operations)
-- **NCDHW**: Batch, Channels, Depth, Height, Width (for 3D operations)
+- **[MIOpen Provider Plugin](../../../dnn-providers/miopen-provider/docs/OperationSupport.md)** - Integration with AMD's MIOpen library for GPU-accelerated deep learning operations
+  - Convolution operations (Forward, Dgrad, Wgrad)
+  - Batchnorm operations (Training, Backward, Inference)
+  - Fused operation graphs
 
-### Plugins
-- **MIOpen Legacy Plugin**: Integration with AMD's MIOpen library for GPU-accelerated operations
+- **[hipBLASLt Provider Plugin](../../../dnn-providers/hipblaslt-provider/docs/OperationSupport.md)** - Integration with AMD's hipBLASLt library that provides optimized GEMM operations.
+
+- **[Fusilli IREE Plugin](https://github.com/iree-org/fusilli)** - IREE backed plugin for JIT compiling ML operations (with fusions) for AMD GPUs, supporting efficient codegenerated kernels
+  - Convolution (Forward, Dgrad, Wgrad)
+  - GEMM
+  - Batchnorm (Training, Inference)
+
+### Reference Implementation
+
+- **[CPU Reference Implementation](./OperationSupport-ReferenceImpl.md)** - CPU-based reference implementation for validation and testing
+  - Provides ground-truth results for validating GPU implementations
+  - Supports core operations (Convolution, Batchnorm, Pointwise)
+  - Not intended for performance or production use
+
+## Roadmap
+
+For information about planned features, upcoming operations, and the development roadmap, please see:
+
+- **[hipDNN Roadmap](./Roadmap.md)** - Comprehensive roadmap covering all hipDNN components, including planned plugin enhancements and new operation support
 
 ## Contributing
 
-As hipDNN evolves, this document will be updated to reflect new operation support.
+We welcome contributions to expand operation support in hipDNN!
 
-If you're interested in contributing to expand operation support, please see our [CONTRIBUTING.md](../CONTRIBUTING.md) guide.
+For detailed contribution guidelines, please see:
+
+- **[Contributing Guide](../CONTRIBUTING.md)** - Complete guide to contributing to hipDNN
+- **[Plugin Development](./PluginDevelopment.md)** - Guide for creating and extending plugins
+
+### Getting Started
+
+1. Review the [hipDNN Design](./Design.md) to understand the architecture
+2. Check the [Roadmap](./Roadmap.md) for planned features and contribution opportunities
+3. Open a GitHub issue to discuss your planned contribution
+4. Follow the [Contributing Guide](../CONTRIBUTING.md) for code quality and testing requirements

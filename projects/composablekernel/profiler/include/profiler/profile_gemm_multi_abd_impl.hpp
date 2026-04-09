@@ -1,5 +1,5 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 
@@ -17,21 +17,10 @@
 #include "ck/library/utility/host_tensor.hpp"
 #include "ck/library/utility/host_tensor_generator.hpp"
 #include "ck/library/utility/literals.hpp"
-#include "ck/library/reference_tensor_operation/cpu/reference_gemm.hpp"
+#include "ck/library/reference_tensor_operation/cpu/reference_gemm_multi_abd.hpp"
 
 namespace ck {
 namespace profiler {
-
-// this function is also defined in CK but because of the way we use it in
-// profile_gemm_multi_impl, it requires the arguments to not be const
-template <typename... X, typename... Y>
-auto concat_tuple_of_refs(ck::Tuple<X&...>& tx, ck::Tuple<Y&...>& ty)
-{
-    return ck::unpack2(
-        [&](auto&&... zs) { return ck::Tuple<decltype(zs)...>{ck::forward<decltype(zs)>(zs)...}; },
-        tx,
-        ty);
-}
 
 template <typename AsDataType,
           typename BsDataType,
@@ -180,104 +169,35 @@ bool profile_gemm_multi_abd_impl(int do_verification,
     // run reference
     if(do_verification)
     {
-        using PassThrough = ck::tensor_operation::element_wise::PassThrough;
-        Tensor<AccDataType> c_m_n({M, N});
-
         using AComputeType =
             typename std::conditional<(NumATensor > 1),
                                       EDataType,
                                       remove_cvref_t<tuple_element_t<0, AsDataType>>>::type;
-
-        auto get_a_matrix = [&]() -> auto {
-            // in case of pass through we avoid allocating a new
-            // tensor and copying values
-            if constexpr(is_same_v<AElementOp, PassThrough>)
-            {
-                return as_m_k(Number<0>{});
-            }
-            else
-            {
-                Tensor<AComputeType> a_m_k({M, K});
-                for(int m = 0; m < M; ++m)
-                {
-                    for(int k = 0; k < K; ++k)
-                    {
-                        // result
-                        auto data_refs1 = ck::tie(a_m_k(m, k));
-                        // inputs
-                        auto data_refs2 =
-                            generate_tie([&](auto i) -> auto& { return as_m_k(Number<i>{})(m, k); },
-                                         Number<NumATensor>{});
-                        auto data_refs = concat_tuple_of_refs(data_refs1, data_refs2);
-                        unpack(a_element_op, data_refs);
-                    }
-                }
-                return a_m_k;
-            }
-        };
 
         using BComputeType =
             typename std::conditional<(NumBTensor > 1),
                                       EDataType,
                                       remove_cvref_t<tuple_element_t<0, BsDataType>>>::type;
 
-        auto get_b_matrix = [&]() -> auto {
-            // in case of pass through we avoid allocating a new
-            // tensor and copying values
-            if constexpr(is_same_v<BElementOp, PassThrough>)
-            {
-                return bs_k_n(Number<0>{});
-            }
-            else
-            {
-                Tensor<BComputeType> b_k_n({K, N});
-                for(int k = 0; k < K; ++k)
-                {
-                    for(int n = 0; n < N; ++n)
-                    {
-                        // result
-                        auto data_refs1 = ck::tie(b_k_n(k, n));
-                        // inputs
-                        auto data_refs2 =
-                            generate_tie([&](auto i) -> auto& { return bs_k_n(Number<i>{})(k, n); },
-                                         Number<NumBTensor>{});
-                        auto data_refs = concat_tuple_of_refs(data_refs1, data_refs2);
-                        unpack(b_element_op, data_refs);
-                    }
-                }
-                return b_k_n;
-            }
-        };
+        using ReferenceGemmInstance =
+            ck::tensor_operation::host::ReferenceGemmMultiABD<decltype(as_m_k),
+                                                              decltype(bs_k_n),
+                                                              decltype(ds_m_n),
+                                                              EDataType,
+                                                              AccDataType,
+                                                              AElementOp,
+                                                              BElementOp,
+                                                              CDEElementOp,
+                                                              AComputeType,
+                                                              BComputeType>;
 
-        using ReferenceGemmInstance = ck::tensor_operation::host::ReferenceGemm<AComputeType,
-                                                                                BComputeType,
-                                                                                AccDataType,
-                                                                                AccDataType,
-                                                                                PassThrough,
-                                                                                PassThrough,
-                                                                                PassThrough>;
-        auto ref_gemm               = ReferenceGemmInstance{};
-        auto ref_invoker            = ref_gemm.MakeInvoker();
+        auto ref_gemm    = ReferenceGemmInstance{};
+        auto ref_invoker = ref_gemm.MakeInvoker();
 
         auto ref_argument = ref_gemm.MakeArgument(
-            get_a_matrix(), get_b_matrix(), c_m_n, PassThrough{}, PassThrough{}, PassThrough{});
+            as_m_k, bs_k_n, ds_m_n, e_m_n_host_result, a_element_op, b_element_op, cde_element_op);
 
         ref_invoker.Run(ref_argument);
-
-        for(int m = 0; m < M; ++m)
-        {
-            for(int n = 0; n < N; ++n)
-            {
-                // compulsory
-                auto data_refs1 = ck::tie(e_m_n_host_result(m, n), c_m_n(m, n));
-                // optional (if multiple Ds)
-                auto data_refs2 =
-                    generate_tie([&](auto i) -> auto& { return ds_m_n(Number<i>{})(m, n); },
-                                 Number<NumDTensor>{});
-                auto data_refs = concat_tuple_of_refs(data_refs1, data_refs2);
-                unpack(cde_element_op, data_refs);
-            }
-        }
     }
 
     std::array<DeviceMem*, NumATensor> as_device_buf;

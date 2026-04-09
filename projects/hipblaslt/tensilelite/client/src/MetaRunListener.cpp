@@ -34,6 +34,10 @@
 
 #include <cstddef>
 
+#ifndef TENSILELITE_CLIENT_ENABLE_ROCPROFSDK
+#define TENSILELITE_CLIENT_ENABLE_ROCPROFSDK 0
+#endif
+
 namespace TensileLite
 {
     namespace Client
@@ -95,7 +99,7 @@ namespace TensileLite
                 (*iter)->postProblem();
         }
 
-        void MetaRunListener::preSolution(ContractionSolution const& solution)
+        void MetaRunListener::preSolution(ContractionSolution* const solution)
         {
             for(auto iter = m_listeners.begin(); iter != m_listeners.end(); iter++)
                 (*iter)->preSolution(solution);
@@ -154,6 +158,20 @@ namespace TensileLite
             for(auto iter = m_listeners.begin(); iter != m_listeners.end(); iter++)
                 (*iter)->validateWarmups(inputs, startEvents, stopEvents);
         }
+
+#if TENSILELITE_CLIENT_ENABLE_ROCPROFSDK
+        void MetaRunListener::preProfiler()
+        {
+            for(auto iter = m_listeners.begin(); iter != m_listeners.end(); iter++)
+                (*iter)->preProfiler();
+        }
+
+        void MetaRunListener::postProfiler()
+        {
+            for(auto iter = m_listeners.rbegin(); iter != m_listeners.rend(); iter++)
+                (*iter)->postProfiler();
+        }
+#endif
 
         size_t MetaRunListener::numSyncs()
         {

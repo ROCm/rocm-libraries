@@ -1,5 +1,5 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2018-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 
@@ -11,6 +11,9 @@
 #include "ck_tile/core/numeric/math.hpp"
 #include "ck_tile/core/utility/type_traits.hpp"
 #include "ck_tile/core/numeric/numeric.hpp"
+
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
 
 namespace ck_tile {
 
@@ -76,7 +79,7 @@ struct tensor_adaptor
             number<ndim_top_>{});
 
         // TODO: make container_reduce support tuple of number and index_t
-        return container_reduce(lengths, multiplies{}, number<1>{});
+        return container_reduce(lengths, multiplies<>{}, number<1>{});
     }
 
     template <index_t IDimHidden>
@@ -373,9 +376,10 @@ CK_TILE_HOST_DEVICE constexpr auto make_single_stage_tensor_adaptor(const Transf
     constexpr auto all_up_dim_new_top_ids = unpack(
         [](auto&&... xs) constexpr { return merge_sequences(xs...); }, UpperDimensionNewTopIdss{});
 
-    static_assert(is_valid_sequence_map<decltype(all_low_dim_old_top_ids)>::value &&
-                      is_valid_sequence_map<decltype(all_up_dim_new_top_ids)>::value,
-                  "wrong!");
+    static_assert(
+        is_valid_sequence_map<remove_cvref_t<decltype(all_low_dim_old_top_ids)>>::value &&
+            is_valid_sequence_map<remove_cvref_t<decltype(all_up_dim_new_top_ids)>>::value,
+        "wrong!");
 
     constexpr index_t ndim_old_top = all_low_dim_old_top_ids.size();
     constexpr index_t ndim_new_top = all_up_dim_new_top_ids.size();
@@ -440,8 +444,8 @@ transform_tensor_adaptor(const OldTensorAdaptor& old_tensor_adaptor,
         constexpr auto all_new_top_ids = unpack([](auto... xs) { return merge_sequences(xs...); },
                                                 NewUpperDimensionNewTopIdss{});
 
-        static_assert(is_valid_sequence_map<decltype(all_old_top_ids)>::value &&
-                          is_valid_sequence_map<decltype(all_new_top_ids)>::value,
+        static_assert(is_valid_sequence_map<remove_cvref_t<decltype(all_old_top_ids)>>::value &&
+                          is_valid_sequence_map<remove_cvref_t<decltype(all_new_top_ids)>>::value,
                       "wrong!");
     }
 
@@ -950,3 +954,4 @@ CK_TILE_HOST_DEVICE constexpr auto chain_tensor_adaptors(const X& x, const Xs&..
                               remove_cvref_t<decltype(bottom_dim_ids)>,                            \
                               remove_cvref_t<decltype(top_dim_ids)>>{trans};                       \
     }()
+#pragma clang diagnostic pop

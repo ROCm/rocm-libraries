@@ -1,4 +1,4 @@
-// Copyright (C) 2019 - 2022 Advanced Micro Devices, Inc. All rights
+// Copyright (C) 2019 - 2025 Advanced Micro Devices, Inc. All rights
 // reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -30,8 +30,6 @@ DISABLE_WARNING_DEPRECATED_DECLARATIONS
 DISABLE_WARNING_RETURN_TYPE
 #include <hip/hip_runtime_api.h>
 DISABLE_WARNING_POP
-
-#include "../hipfft_params.h"
 
 int main()
 {
@@ -69,7 +67,7 @@ int main()
         throw std::runtime_error("hipMemcpy failed");
 
     // Create the plan
-    hipfftHandle plan      = hipfft_params::INVALID_PLAN_HANDLE;
+    hipfftHandle plan{};
     hipfftResult hipfft_rt = hipfftCreate(&plan);
     if(hipfft_rt != HIPFFT_SUCCESS)
         throw std::runtime_error("failed to create plan");

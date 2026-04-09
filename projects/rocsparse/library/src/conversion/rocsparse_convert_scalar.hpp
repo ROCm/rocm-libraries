@@ -29,20 +29,24 @@
 
 namespace rocsparse
 {
-    typedef void (*convert_scalar_t)(const void*, void*);
+    typedef void (*host_convert_scalar_t)(const void*, void*);
+    typedef void (*device_convert_scalar_t)(const void*, void*);
 
-    convert_scalar_t find_convert_scalar(rocsparse_datatype source_datatype,
-                                         rocsparse_datatype target_datatype);
+    host_convert_scalar_t find_host_convert_scalar(rocsparse_datatype source_datatype,
+                                                   rocsparse_datatype target_datatype);
+
+    device_convert_scalar_t find_device_convert_scalar(rocsparse_datatype source_datatype,
+                                                       rocsparse_datatype target_datatype);
 
     template <typename... P>
-    inline void convert_host_scalars_impl(convert_scalar_t convert_scalar)
+    inline void convert_host_scalars_impl(host_convert_scalar_t convert_scalar)
     {
     }
 
     template <typename... P>
-    inline void convert_host_scalars_impl(convert_scalar_t convert_scalar,
-                                          const void*      source,
-                                          void*            target,
+    inline void convert_host_scalars_impl(host_convert_scalar_t convert_scalar,
+                                          const void*           source,
+                                          void*                 target,
                                           P... p)
     {
         convert_scalar(source, target);
@@ -56,7 +60,8 @@ namespace rocsparse
                                                  void*              target,
                                                  P... p)
     {
-        convert_scalar_t convert_scalar = find_convert_scalar(source_datatype, target_datatype);
+        host_convert_scalar_t convert_scalar
+            = find_host_convert_scalar(source_datatype, target_datatype);
 
         if(convert_scalar != nullptr)
         {
@@ -76,30 +81,6 @@ namespace rocsparse
         // LCOV_EXCL_STOP
     }
 
-    template <typename F>
-    __device__ inline void convert_device_scalars_kernel_device(F f, uint32_t tid)
-    {
-    }
-
-    template <typename F, typename... P>
-    __device__ inline void convert_device_scalars_kernel_device(
-        F f, uint32_t tid, const void* source, void* target, P... p)
-    {
-        if(tid == 0)
-        {
-            f(source, target);
-        }
-        convert_device_scalars_kernel_device(f, tid, p...);
-    }
-
-    template <uint32_t BLOCKSIZE, typename F, typename... P>
-    __launch_bounds__(BLOCKSIZE) __global__
-        void convert_device_scalars_kernel(F f, const void* source, void* target, P... p)
-    {
-        const size_t tid = hipBlockIdx_x * BLOCKSIZE + hipThreadIdx_x;
-        convert_device_scalars_kernel_device(f, tid, source, target, p...);
-    }
-
     template <typename... P>
     inline rocsparse_status convert_device_scalars(hipStream_t        stream,
                                                    rocsparse_datatype source_datatype,
@@ -108,20 +89,36 @@ namespace rocsparse
                                                    void*              target,
                                                    P... p)
     {
-        convert_scalar_t convert_scalar = find_convert_scalar(source_datatype, target_datatype);
+        device_convert_scalar_t convert_scalar
+            = find_device_convert_scalar(source_datatype, target_datatype);
+
+        static constexpr int32_t n = (2 + sizeof...(p)) / 2;
+        const void*              sources[n];
+        void*                    targets[n];
+
+        {
+            struct st_t
+            {
+                const void* s;
+                void*       t;
+            };
+
+            const void* arg[] = {source, target, p...};
+            for(int i = 0; i < n; ++i)
+            {
+                sources[i] = ((st_t*)arg)[i].s;
+                targets[i] = ((st_t*)arg)[i].t;
+            }
+        }
 
         if(convert_scalar != nullptr)
         {
-            static uint32_t blocksize = 32;
-            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(convert_device_scalars_kernel<32>,
-                                               dim3(1),
-                                               dim3(blocksize),
-                                               0,
-                                               stream,
-                                               convert_scalar,
-                                               source,
-                                               target,
-                                               p...);
+            static uint32_t blocksize = 64;
+            for(int i = 0; i < n; ++i)
+            {
+                RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+                    convert_scalar, dim3(1), dim3(blocksize), 0, stream, sources[i], targets[i]);
+            }
             return rocsparse_status_success;
         }
         // LCOV_EXCL_START

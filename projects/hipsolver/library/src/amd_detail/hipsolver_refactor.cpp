@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2023-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -120,9 +120,10 @@ struct hipsolverRfHandle
 
             if(this->d_buffer)
             {
-                if(hipFree(this->d_buffer) != hipSuccess)
+                auto const istat = hipFree(this->d_buffer);
+                this->d_buffer   = nullptr;
+                if(istat != hipSuccess)
                     return HIPSOLVER_STATUS_INTERNAL_ERROR;
-                this->d_buffer = nullptr;
             }
 
             size_t size_dPtrA = sizeof(rocblas_int) * (n + 1);
@@ -246,7 +247,7 @@ struct hipsolverRfHandle
     }
 
     // Free memory
-    void free_all()
+    hipsolverStatus_t free_all()
     {
         if(this->h_buffer)
         {
@@ -256,9 +257,13 @@ struct hipsolverRfHandle
 
         if(this->d_buffer)
         {
-            hipFree(this->d_buffer);
-            this->d_buffer = nullptr;
+            auto const istat = hipFree(this->d_buffer);
+            this->d_buffer   = nullptr;
+            if(istat != hipSuccess)
+                return HIPSOLVER_STATUS_INTERNAL_ERROR;
         }
+
+        return HIPSOLVER_STATUS_SUCCESS;
     }
 };
 
@@ -285,6 +290,32 @@ try
     }
 
     *handle = rf;
+
+    // we check if rocsolver logging needs to be started
+    bool enable_rocsolver_logging = false;
+    // check for ROCSOLVER_LAYER environment variable
+    if(const char* str_layer_mode = std::getenv("ROCSOLVER_LAYER"))
+    {
+        errno      = 0;
+        long value = strtol(str_layer_mode, 0, 0);
+        if(!(errno || value < 0 || size_t(value) > size_t(UINT32_MAX)))
+            enable_rocsolver_logging = true;
+    }
+
+    // check for ROCSOLVER_LEVELS environment variable
+    if(const char* str_max_level = std::getenv("ROCSOLVER_LEVELS"))
+    {
+        errno      = 0;
+        long value = strtol(str_max_level, 0, 0);
+        if(!(errno || value < 1 || size_t(value) > size_t(INT_MAX)))
+            enable_rocsolver_logging = true;
+    }
+
+    if(enable_rocsolver_logging)
+    {
+        rocsolver_log_begin();
+    }
+
     return HIPSOLVER_STATUS_SUCCESS;
 }
 catch(...)
@@ -298,11 +329,38 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_INVALID_VALUE;
 
-    hipsolverRfHandle* rf = (hipsolverRfHandle*)handle;
-    rf->free_all();
+    hipsolverRfHandle* rf     = (hipsolverRfHandle*)handle;
+    hipsolverStatus_t  status = rf->free_all();
     rocsolver_destroy_rfinfo(rf->rfinfo);
     rocblas_destroy_handle(rf->handle);
     delete rf;
+    if(status != HIPSOLVER_STATUS_SUCCESS)
+        return status;
+
+    // we check if rocsolver logging needs to be ended
+    bool enable_rocsolver_logging = false;
+    // check for ROCSOLVER_LAYER environment variable
+    if(const char* str_layer_mode = std::getenv("ROCSOLVER_LAYER"))
+    {
+        errno      = 0;
+        long value = strtol(str_layer_mode, 0, 0);
+        if(!(errno || value < 0 || size_t(value) > size_t(UINT32_MAX)))
+            enable_rocsolver_logging = true;
+    }
+
+    // check for ROCSOLVER_LEVELS environment variable
+    if(const char* str_max_level = std::getenv("ROCSOLVER_LEVELS"))
+    {
+        errno      = 0;
+        long value = strtol(str_max_level, 0, 0);
+        if(!(errno || value < 1 || size_t(value) > size_t(INT_MAX)))
+            enable_rocsolver_logging = true;
+    }
+
+    if(enable_rocsolver_logging)
+    {
+        rocsolver_log_end();
+    }
 
     return HIPSOLVER_STATUS_SUCCESS;
 }

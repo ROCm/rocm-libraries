@@ -56,8 +56,8 @@ lengths = {
 def api_overhead():
     """API overhead"""
 
-    # iteraion 10000 takes too long time for "getAll", 1000 is enough
-    problemlist = [Problem(args={"--cold_iters" : "10" , "--iters" : "1000"})]
+    # set different value for hot iteration of getHeuristic and getAll
+    problemlist = [Problem(args={"--cold_iters" : "10" , "--iters" : "1000" , "--get_all_iters" : "100"})]
     yield ProblemSet(benchType="api_overhead", name="benchset_1", problems=problemlist)
 
 def amax_example():
@@ -86,6 +86,12 @@ def amax_set_1():
 
     yield ProblemSet(benchType="amax", name="benchset_1", problems=problemlist)
 
+def matmul_examples():
+    """gemm examples"""
+
+    problemlist = [Problem(args={"--log_function_name" : "" , "--yaml" : "matmul_example_bench.yaml"})]
+    yield ProblemSet(benchType="matmul", name="example", problems=problemlist)
+
 def matmul_set_1():
     """gemm benchset 1"""
 
@@ -98,7 +104,38 @@ def matmul_set_2():
     problemlist = [Problem(args={"--log_function_name" : "" , "--yaml" : "matmul_probset2_bench.yaml"})]
     yield ProblemSet(benchType="matmul", name="benchset_2", problems=problemlist)
 
-def all():
+def matmul_set_3():
+    """gemm benchset 3"""
+
+    problemlist = [Problem(args={"--log_function_name" : "" , "--yaml" : "matmul_probset3_bench.yaml"})]
+    yield ProblemSet(benchType="matmul", name="benchset_3", problems=problemlist)
+
+def matmul_set_4():
+    """gemm benchset 4"""
+
+    problemlist = [Problem(args={"--log_function_name" : "" , "--yaml" : "matmul_probset4_bench.yaml"})]
+    yield ProblemSet(benchType="matmul", name="benchset_4", problems=problemlist)
+
+def matmul_set_5():
+    """gemm benchset 5"""
+
+    problemlist = [Problem(args={"--log_function_name" : "" , "--yaml" : "matmul_probset5_bench.yaml"})]
+    yield ProblemSet(benchType="matmul", name="benchset_5", problems=problemlist)
+
+def matmul_set_6():
+    """gemm benchset 6"""
+
+    problemlist = [Problem(args={"--log_function_name" : "" , "--yaml" : "matmul_probset6_bench.yaml"})]
+    yield ProblemSet(benchType="matmul", name="benchset_6", problems=problemlist)
+
+def ci_perf_job():
+    """run basic job for PR-CI"""
+
+    # general suites for all arches
+    yield from api_overhead()
+    yield from matmul_set_1()
+
+def all(problems_dir=None):
     """all routine benchmarks"""
 
     target_arch = SuiteProblemGenerator.target_arch_static
@@ -110,14 +147,58 @@ def all():
 
     print(f'Info: bench with --suite all with --targetArch {target_arch}')
 
-    # general suites for all arches
-    yield from api_overhead()
-    yield from amax_set_1()
+    # If custom problems directory is provided, discover and run all YAMLs
+    if problems_dir is not None:
+        print(f'Info: Using custom problems directory: {problems_dir}')
+        
+        # Import Path for directory operations
+        from pathlib import Path
+        
+        # Discover all YAML files in the custom directory
+        yaml_files = list(Path(problems_dir).glob("*.yaml"))
+        
+        if not yaml_files:
+            print(f'Warning: No YAML files found in {problems_dir}')
+            return
+        
+        print(f'Info: Found {len(yaml_files)} YAML files to process')
+        
+        # Create a problem set for each YAML file
+        for yaml_file in sorted(yaml_files):
+            problemlist = [Problem(args={
+                "--log_function_name": "",
+                "--yaml": yaml_file.name
+            })]
+            
+            yield ProblemSet(
+                benchType="matmul",
+                name=yaml_file.stem,  # filename without extension
+                problems=problemlist
+            )
+    else:
+        # general suites for all arches
+        yield from api_overhead()
+        yield from amax_set_1()
 
-    if "942" in target_arch:
-        yield from matmul_set_1() # this problemset is an initial test example for gfx942
-        yield from matmul_set_2()
-        # Can put any other interested set for gfx942
-    elif "950" in target_arch:
-        yield from matmul_set_2()
-        # Can put any other interested set for gfx950
+        if "gfx942" in target_arch:
+            # Put focused tests set for gfx942
+            yield from matmul_set_1() # this problemset is an initial test example for gfx942
+            yield from matmul_set_2()
+            yield from matmul_set_3()
+            yield from matmul_set_4()
+            yield from matmul_set_5()
+            yield from matmul_set_6()
+        elif "gfx950" in target_arch:
+            # Put focused tests set for gfx950
+            yield from matmul_set_2()
+        elif "gfx90a" in target_arch:
+            # FIXME- please replace the examples with the real interested problems for gfx90a
+            yield from matmul_set_3()
+            yield from matmul_set_4()
+            yield from matmul_set_5()
+        elif "gfx110" in target_arch:
+            # FIXME- please replace the examples with the real interested problems for gfx110?
+            yield from matmul_set_3()
+        elif "gfx120" in target_arch:
+            # FIXME- please replace the examples with the real interested problems for gfx120?
+            yield from matmul_set_3()
