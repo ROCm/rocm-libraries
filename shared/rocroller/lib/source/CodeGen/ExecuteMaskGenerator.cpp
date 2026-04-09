@@ -168,9 +168,9 @@ namespace rocRoller
                         ShowValue(wavefrontSize));
 
             auto elseLabel = m_context->labelAllocator()->label(
-                fmt::format("ELSE_Conditional_EXECZ_{}", op.conditionName, tag));
+                fmt::format("ELSE_Conditional_EXECZ_{}_{}", op.conditionName, tag));
             auto exitLabel = m_context->labelAllocator()->label(
-                fmt::format("EXIT_Conditional_EXECZ_{}", op.conditionName, tag));
+                fmt::format("EXIT_Conditional_EXECZ_{}_{}", op.conditionName, tag));
 
             co_yield Instruction::Lock(Scheduling::Dependency::Branch,
                                        "Lock for Conditional EXECZ");
