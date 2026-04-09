@@ -30,6 +30,7 @@ add_executable(hipdnn_gpu_ref_tests
     gpu_ref/main.cpp
     gpu_ref/TestGpuFpReferenceConvolution.cpp
     gpu_ref/TestGpuFpReferenceWgrad.cpp
+    gpu_ref/TestGpuFpReferenceValidation.cpp
     gpu_ref/TestGpuRefHipError.cpp
     gpu_ref/TestGpuRefKernelCompiler.cpp
 )

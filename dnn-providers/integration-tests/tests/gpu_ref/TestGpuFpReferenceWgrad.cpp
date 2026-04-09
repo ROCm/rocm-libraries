@@ -332,9 +332,8 @@ TEST(TestGpuConvWrwRefValidation, ThrowsOnInvalidDimCount)
     Tensor<float> dw({8, 8});
     Tensor<float> dy({8, 8});
 
-    EXPECT_THROW(
-        GpuFpReferenceConvolution::wgrad<float>(x, dw, dy, Vec{1}, Vec{1}, Vec{0}, Vec{0}),
-        std::invalid_argument);
+    EXPECT_THROW(GpuFpReferenceConvolution::wgrad<float>(x, dw, dy, Vec{1}, Vec{1}, Vec{0}, Vec{0}),
+                 std::invalid_argument);
 }
 
 TEST(TestGpuConvWrwRefValidation, ThrowsOnWeightDimMismatch)

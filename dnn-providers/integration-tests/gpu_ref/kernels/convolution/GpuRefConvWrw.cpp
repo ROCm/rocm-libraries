@@ -114,8 +114,8 @@ extern "C" __global__ void convWrwRef2d(ConvWrwArgs2d args)
                     continue;
                 }
 
-                long long dyIdx = n * args.dyStr.s[0] + k * args.dyStr.s[1]
-                                  + ho * args.dyStr.s[2] + wo * args.dyStr.s[3];
+                long long dyIdx = n * args.dyStr.s[0] + k * args.dyStr.s[1] + ho * args.dyStr.s[2]
+                                  + wo * args.dyStr.s[3];
                 long long xIdx = n * args.xStr.s[0] + c * args.xStr.s[1] + hi * args.xStr.s[2]
                                  + wi * args.xStr.s[3];
 
@@ -124,8 +124,8 @@ extern "C" __global__ void convWrwRef2d(ConvWrwArgs2d args)
         }
     }
 
-    long long dwIdx
-        = k * args.dwStr.s[0] + localC * args.dwStr.s[1] + kh * args.dwStr.s[2] + kw * args.dwStr.s[3];
+    long long dwIdx = k * args.dwStr.s[0] + localC * args.dwStr.s[1] + kh * args.dwStr.s[2]
+                      + kw * args.dwStr.s[3];
     W_TYPE* tag = nullptr;
 
     if(args.beta == 0.0)
@@ -199,9 +199,8 @@ extern "C" __global__ void convWrwRef3d(ConvWrwArgs3d args)
                     long long dyIdx = n * args.dyStr.s[0] + k * args.dyStr.s[1]
                                       + do_ * args.dyStr.s[2] + ho * args.dyStr.s[3]
                                       + wo * args.dyStr.s[4];
-                    long long xIdx = n * args.xStr.s[0] + c * args.xStr.s[1]
-                                     + di * args.xStr.s[2] + hi * args.xStr.s[3]
-                                     + wi * args.xStr.s[4];
+                    long long xIdx = n * args.xStr.s[0] + c * args.xStr.s[1] + di * args.xStr.s[2]
+                                     + hi * args.xStr.s[3] + wi * args.xStr.s[4];
 
                     acc += toAccum(dy[dyIdx]) * toAccum(x[xIdx]);
                 }
