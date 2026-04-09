@@ -8,69 +8,34 @@
 #include <vector>
 
 #include <hipdnn_frontend.hpp>
-#include <hipdnn_frontend/detail/ScopedHipdnnBackendDescriptor.hpp>
 #include <hipdnn_frontend/node/ConvolutionWgradNode.hpp>
 #include <hipdnn_test_sdk/constants/ConvWgradConstants.hpp>
+#include <hipdnn_test_sdk/utilities/IntegrationTestFixture.hpp>
+#include <hipdnn_test_sdk/utilities/LiftingTestHelpers.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
+#include <hipdnn_test_sdk/utilities/TestableGraph.hpp>
 #include <hipdnn_test_sdk/utilities/ToVec.hpp>
-
-#include "test_plugins/TestPluginConstants.hpp"
 
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
 using namespace hipdnn_tests::constants;
+using hipdnn_tests::IntegrationTestFixture;
+using hipdnn_tests::liftGraph;
+using hipdnn_tests::liftGraphWithoutFinalization;
+using hipdnn_tests::TestableGraphLifting;
 using hipdnn_tests::toVec;
 
 namespace
 {
-
-// Exposes protected Graph methods for lifting integration tests
-class TestableGraph : public Graph
-{
-public:
-    using Graph::build_operation_graph;
-    using Graph::deserialize_via_backend;
-    using Graph::fromBackendDescriptor;
-    using Graph::get_raw_graph_descriptor;
-
-    const std::vector<std::shared_ptr<INode>>& getSubNodes() const
-    {
-        return _sub_nodes;
-    }
-};
-
 // Lifts a frontend graph via build_operation_graph(handle), then
 // reconstructs it with fromBackendDescriptor() for verification.
-class IntegrationConvolutionWgradDescriptorLifting : public ::testing::Test
+class IntegrationConvolutionWgradDescriptorLifting : public IntegrationTestFixture
 {
 protected:
-    void SetUp() override
-    {
-        SKIP_IF_NO_DEVICES();
-
-        ASSERT_EQ(hipInit(0), hipSuccess);
-
-        const std::array<const char*, 1> paths
-            = {hipdnn_tests::plugin_constants::testGoodPluginPath().c_str()};
-        ASSERT_EQ(hipdnnSetEnginePluginPaths_ext(
-                      paths.size(), paths.data(), HIPDNN_PLUGIN_LOADING_ABSOLUTE),
-                  HIPDNN_STATUS_SUCCESS);
-
-        ASSERT_EQ(hipdnnCreate(&_handle), HIPDNN_STATUS_SUCCESS);
-    }
-
-    void TearDown() override
-    {
-        if(_handle != nullptr)
-        {
-            hipdnnDestroy(_handle);
-        }
-    }
-
     /// Builds a standard ConvolutionWrw graph for round-trip testing.
-    static std::shared_ptr<TestableGraph> buildGraph()
+    static std::shared_ptr<TestableGraphLifting> buildGraph()
     {
-        auto graph = std::make_shared<TestableGraph>();
+        auto graph = std::make_shared<TestableGraphLifting>();
         graph->set_name("ConvolutionWrwLiftingTestGraph")
             .set_compute_data_type(DataType::FLOAT)
             .set_intermediate_data_type(DataType::FLOAT)
@@ -97,8 +62,6 @@ protected:
 
         return graph;
     }
-
-    hipdnnHandle_t _handle = nullptr;
 };
 
 // Builds a standard ConvolutionWrw graph, lowers via build_operation_graph(handle),
@@ -108,18 +71,8 @@ TEST_F(IntegrationConvolutionWgradDescriptorLifting, BasicConvolutionWrwRoundTri
 {
     auto originalGraph = buildGraph();
 
-    auto result = originalGraph->validate();
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    result = originalGraph->build_operation_graph(_handle);
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    auto rawDesc = originalGraph->get_raw_graph_descriptor();
-    ASSERT_NE(rawDesc, nullptr);
-
-    auto liftedGraph = std::make_shared<TestableGraph>();
-    result = liftedGraph->fromBackendDescriptor(rawDesc);
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+    auto liftedGraph = liftGraph(*originalGraph, _handle);
+    ASSERT_NE(liftedGraph, nullptr);
 
     // Verify graph-level data types
     EXPECT_EQ(liftedGraph->get_compute_data_type(), DataType::FLOAT);
@@ -156,10 +109,12 @@ TEST_F(IntegrationConvolutionWgradDescriptorLifting, BasicConvolutionWrwRoundTri
 
     // Verify sub-node count and type
     auto& subNodes = liftedGraph->getSubNodes();
-    ASSERT_EQ(subNodes.size(), 1u) << "Expected 1 operation node in lifted graph";
+    ASSERT_EQ(subNodes.size(), 1u)
+        << "Expected 1 operation node in lifted graph"; // NOLINT(readability-implicit-bool-conversion)
 
     auto* opNode = dynamic_cast<ConvolutionWgradNode*>(subNodes[0].get());
-    ASSERT_NE(opNode, nullptr) << "Expected a ConvolutionWgradNode";
+    ASSERT_NE(opNode, nullptr)
+        << "Expected a ConvolutionWgradNode"; // NOLINT(readability-implicit-bool-conversion)
 
     // Verify mode
     EXPECT_EQ(opNode->attributes.get_convolution_mode(), ConvolutionMode::CONVOLUTION);
@@ -183,18 +138,8 @@ TEST_F(IntegrationConvolutionWgradDescriptorLifting, ConvolutionWrwTensorSharing
 {
     auto originalGraph = buildGraph();
 
-    auto result = originalGraph->validate();
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    result = originalGraph->build_operation_graph(_handle);
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    auto rawDesc = originalGraph->get_raw_graph_descriptor();
-    ASSERT_NE(rawDesc, nullptr);
-
-    auto liftedGraph = std::make_shared<TestableGraph>();
-    result = liftedGraph->fromBackendDescriptor(rawDesc);
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+    auto liftedGraph = liftGraph(*originalGraph, _handle);
+    ASSERT_NE(liftedGraph, nullptr);
 
     auto tensorMap = liftedGraph->getTensorsByUid();
 
@@ -227,21 +172,8 @@ TEST_F(IntegrationConvolutionWgradDescriptorLifting, ConvolutionWrwLiftWithoutFi
 {
     auto originalGraph = buildGraph();
 
-    auto result = originalGraph->validate();
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    // Serialize to binary via the frontend
-    auto data = originalGraph->toBinary();
-    ASSERT_FALSE(data.empty());
-
-    // Create a backend graph descriptor from serialized bytes (no handle, no finalize)
-    const detail::ScopedHipdnnBackendDescriptor graphDesc(data.data(), data.size());
-    ASSERT_TRUE(graphDesc.valid()) << "Failed to create backend graph descriptor";
-
-    // Lift into a new graph via fromBackendDescriptor
-    auto liftedGraph = std::make_shared<TestableGraph>();
-    result = liftedGraph->fromBackendDescriptor(graphDesc.get());
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+    auto liftedGraph = liftGraphWithoutFinalization(*originalGraph);
+    ASSERT_NE(liftedGraph, nullptr);
 
     // Verify graph-level data types
     EXPECT_EQ(liftedGraph->get_compute_data_type(), DataType::FLOAT);
@@ -294,7 +226,7 @@ TEST_F(IntegrationConvolutionWgradDescriptorLifting, AutoAssignedUidsPreservedIn
     constexpr std::array<int64_t, 4> K_AUTO_DY_DIMS = {1, 16, 6, 6};
     constexpr std::array<int64_t, 4> K_AUTO_DY_STRIDES = {576, 36, 6, 1};
 
-    auto graph = std::make_shared<TestableGraph>();
+    auto graph = std::make_shared<TestableGraphLifting>();
     graph->set_name("AutoUidWgradLiftTest")
         .set_compute_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
@@ -319,21 +251,12 @@ TEST_F(IntegrationConvolutionWgradDescriptorLifting, AutoAssignedUidsPreservedIn
     auto dw = graph->conv_wgrad(dy, x, convAttrs);
     dw->set_output(true).set_name("dw");
 
-    auto result = graph->validate();
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    result = graph->build_operation_graph(_handle);
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    auto rawDesc = graph->get_raw_graph_descriptor();
-    ASSERT_NE(rawDesc, nullptr);
-
-    auto liftedGraph = std::make_shared<TestableGraph>();
-    result = liftedGraph->fromBackendDescriptor(rawDesc);
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+    auto liftedGraph = liftGraph(*graph, _handle);
+    ASSERT_NE(liftedGraph, nullptr);
 
     auto tensorMap = liftedGraph->getTensorsByUid();
-    ASSERT_EQ(tensorMap.size(), 3u) << "Expected 3 tensors in lifted graph";
+    ASSERT_EQ(tensorMap.size(), 3u)
+        << "Expected 3 tensors in lifted graph"; // NOLINT(readability-implicit-bool-conversion)
 
     // Collect all UIDs and verify they are distinct
     std::vector<int64_t> uids;
@@ -344,7 +267,7 @@ TEST_F(IntegrationConvolutionWgradDescriptorLifting, AutoAssignedUidsPreservedIn
     }
     std::sort(uids.begin(), uids.end());
     EXPECT_EQ(std::adjacent_find(uids.begin(), uids.end()), uids.end())
-        << "All auto-assigned UIDs must be distinct";
+        << "All auto-assigned UIDs must be distinct"; // NOLINT(readability-implicit-bool-conversion)
 
     // Verify the node references tensors with auto-assigned UIDs
     auto& subNodes = liftedGraph->getSubNodes();
@@ -374,7 +297,7 @@ TEST_F(IntegrationConvolutionWgradDescriptorLifting, AsymmetricPaddingPreservedI
     constexpr std::array<int64_t, 2> K_ASYM_PRE_PADDING = {1, 1};
     constexpr std::array<int64_t, 2> K_ASYM_POST_PADDING = {2, 2};
 
-    auto graph = std::make_shared<TestableGraph>();
+    auto graph = std::make_shared<TestableGraphLifting>();
     graph->set_name("AsymPaddingWgradLiftTest")
         .set_compute_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
@@ -399,24 +322,15 @@ TEST_F(IntegrationConvolutionWgradDescriptorLifting, AsymmetricPaddingPreservedI
     auto dw = graph->conv_wgrad(dy, x, convAttrs);
     dw->set_uid(K_WGRAD_TENSOR_DW_UID).set_output(true).set_name("dw");
 
-    auto result = graph->validate();
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    result = graph->build_operation_graph(_handle);
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    auto rawDesc = graph->get_raw_graph_descriptor();
-    ASSERT_NE(rawDesc, nullptr);
-
-    auto liftedGraph = std::make_shared<TestableGraph>();
-    result = liftedGraph->fromBackendDescriptor(rawDesc);
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+    auto liftedGraph = liftGraph(*graph, _handle);
+    ASSERT_NE(liftedGraph, nullptr);
 
     auto& subNodes = liftedGraph->getSubNodes();
     ASSERT_EQ(subNodes.size(), 1u);
 
     auto* opNode = dynamic_cast<ConvolutionWgradNode*>(subNodes[0].get());
-    ASSERT_NE(opNode, nullptr) << "Expected a ConvolutionWgradNode";
+    ASSERT_NE(opNode, nullptr)
+        << "Expected a ConvolutionWgradNode"; // NOLINT(readability-implicit-bool-conversion)
 
     EXPECT_EQ(opNode->attributes.get_pre_padding(), toVec(K_ASYM_PRE_PADDING));
     EXPECT_EQ(opNode->attributes.get_post_padding(), toVec(K_ASYM_POST_PADDING));
