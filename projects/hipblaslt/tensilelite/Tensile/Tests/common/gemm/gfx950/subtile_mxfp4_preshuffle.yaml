@@ -730,9 +730,8 @@ BenchmarkProblems:
           - [16, 16, 128, 1, 1, 2, 2, 2, 2]
           - [16, 16, 128, 1, 1, 4, 4, 2, 2]
           - [16, 16, 128, 1, 1, 8, 8, 2, 2]
-          # WG 4x1/1x4 commented out: fails with and without pre-shuffle
-          # - [16, 16, 128, 1, 1, 2, 2, 4, 1]
-          # - [16, 16, 128, 1, 1, 2, 2, 1, 4]
+          - [16, 16, 128, 1, 1, 2, 2, 4, 1]
+          - [16, 16, 128, 1, 1, 2, 2, 1, 4]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - DepthU: [256]
@@ -777,9 +776,8 @@ BenchmarkProblems:
           - [16, 16, 128, 1, 1, 2, 2, 2, 2]
           - [16, 16, 128, 1, 1, 4, 4, 2, 2]
           - [16, 16, 128, 1, 1, 8, 8, 2, 2]
-          # WG 4x1/1x4 commented out: fails with and without pre-shuffle
-          # - [16, 16, 128, 1, 1, 2, 2, 4, 1]
-          # - [16, 16, 128, 1, 1, 2, 2, 1, 4]
+          - [16, 16, 128, 1, 1, 2, 2, 4, 1]
+          - [16, 16, 128, 1, 1, 2, 2, 1, 4]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - DepthU: [256]

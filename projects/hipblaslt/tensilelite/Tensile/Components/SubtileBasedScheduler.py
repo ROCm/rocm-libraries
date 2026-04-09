@@ -1517,18 +1517,11 @@ class SubtileBasedScheduler:
         if op.firstForMT and self.hasScale:
             module.add(globalReadDoScaleSubtile('MXSA', writer, kernel))
             module.add(globalReadDoScaleSubtile('MXSB', writer, kernel))
-        # A and B data loads.  When loadRatioGR > 1, multiple subtiles share
-        # the same globalReadMap (one buffer_load covers both).  Skip duplicates
-        # using a grTracker set, matching the PGR=0 path in globalReadDoSubtile.
+        # A and B data loads — subtile lists are already deduped by the scheduler
         for subtileList, tileInfo in [(op.subtileA, self.tileInfoA),
                                       (op.subtileB, self.tileInfoB)]:
-            grTracker = set()
             for sId0 in subtileList:
-                subtileInfo = tileInfo.localSubtiles[tileInfo.getLocalSubtileLinearId(sId0, 0)]
-                grIds = subtileInfo.globalReadMap
-                if not set(grIds).issubset(grTracker):
-                    grTracker.update(grIds)
-                    module.add(emitSingleBufferLoad(tileInfo, writer, kernel, sId0, 0))
+                module.add(emitSingleBufferLoad(tileInfo, writer, kernel, sId0, 0))
         return module
 
     def _emitOp(self, writer, kernel, op, dtileInfo, scaleSet=0, scaleLRSet=0):
