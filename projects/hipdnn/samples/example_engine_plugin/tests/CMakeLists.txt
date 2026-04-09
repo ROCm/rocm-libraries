@@ -10,6 +10,8 @@ FetchContent_Declare(
 )
 # Prevent GoogleTest from overriding our compiler/linker options on Windows
 set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+# Prevent GoogleTest from being installed with cmake --install
+set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(googletest)
 
 # Suppress warnings in GoogleTest targets (GoogleTest uses #if instead of #ifdef for

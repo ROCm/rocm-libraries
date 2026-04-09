@@ -41,25 +41,12 @@ target_compile_options(example_provider_compile_options INTERFACE
 add_compile_definitions(__HIP_PLATFORM_AMD__)
 
 # =============================================================================
-# ROCM_PATH
-# =============================================================================
-if(NOT DEFINED ROCM_PATH)
-    if(DEFINED ENV{ROCM_PATH})
-        set(ROCM_PATH "$ENV{ROCM_PATH}")
-    else()
-        set(ROCM_PATH "/opt/rocm")
-    endif()
-endif()
-
-# =============================================================================
 # Dependencies
 #
 # The plugin SDK and data SDK are header-only libraries installed by hipDNN.
 # find_package locates them via their CMake config files and transitively
 # brings in the HIP, flatbuffers, and nlohmann_json include paths.
 # =============================================================================
-list(APPEND CMAKE_PREFIX_PATH /opt/rocm /opt/rocm/hip)
-
 find_package(hipdnn_plugin_sdk CONFIG REQUIRED)
 # hipdnn_data_sdk is found transitively through hipdnn_plugin_sdk
 find_package(hip REQUIRED)
@@ -73,8 +60,10 @@ add_subdirectory(kernels)
 add_subdirectory(src)
 
 # Install the plugin shared library
+# HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR is the standard ROCm distribution subfolder
+# where hipDNN plugins are located (e.g. lib/hipdnn_plugins/engines/).
 if(NOT DEFINED HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR)
-    set(HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR "lib/hipdnn_plugins/engines")
+    message(FATAL_ERROR "HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR was not set by hipdnn_data_sdk package import.")
 endif()
 install(TARGETS example_provider_plugin LIBRARY DESTINATION ${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR})
 

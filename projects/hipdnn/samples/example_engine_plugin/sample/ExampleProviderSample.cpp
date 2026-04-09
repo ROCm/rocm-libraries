@@ -23,8 +23,9 @@
 // When no GPU is detected, only non-GPU portions run (plugin
 // loading, presence verification, graph construction).
 //
-// Plugin directory resolution:
-//   1. If a command-line argument is provided, that path is used.
+// Plugin path resolution:
+//   1. If a command-line argument is provided, that path is used. This can be
+//      a directory containing the plugin or the full path to the plugin file.
 //   2. Otherwise, if HIPDNN_PLUGIN_DIR is set in the environment, that is used.
 //   3. Otherwise, the directory containing this executable is used as a last resort.
 //
@@ -264,7 +265,7 @@ static bool verifyPluginPresence(hipdnnHandle_t handle, const std::string& modeL
 // ============================================================================
 // Scenario 1: ReLU Forward with Engine Selection and Knob Modification
 // ============================================================================
-static bool scenario1_ReluForward(const std::string& pluginDir, bool hasGpu)
+static bool scenario1_ReluForward(const std::vector<std::string>& pluginPaths, bool hasGpu)
 {
     std::cout << "\n=== Scenario 1: ReLU Forward with Engine Selection and Knob Modification ===\n";
     std::cout
@@ -273,7 +274,6 @@ static bool scenario1_ReluForward(const std::string& pluginDir, bool hasGpu)
 
     // Use ABSOLUTE mode so the example plugin is loaded regardless of
     // system-installed plugins
-    std::vector<std::string> pluginPaths = {pluginDir};
     setEnginePluginPaths(pluginPaths, PluginLoadingMode::MODE_ABSOLUTE);
 
     hipdnnHandle_t handle = nullptr;
@@ -467,7 +467,7 @@ static bool scenario1_ReluForward(const std::string& pluginDir, bool hasGpu)
 // ============================================================================
 // Scenario 2: Convolution Forward with Engine Selection
 // ============================================================================
-static bool scenario2_ConvForward(const std::string& pluginDir, bool hasGpu)
+static bool scenario2_ConvForward(const std::vector<std::string>& pluginPaths, bool hasGpu)
 {
     std::cout << "\n=== Scenario 2: Convolution Forward with Engine Selection ===\n";
     std::cout
@@ -477,7 +477,6 @@ static bool scenario2_ConvForward(const std::string& pluginDir, bool hasGpu)
 
     // Use ABSOLUTE mode so the example plugin is loaded regardless of
     // system-installed plugins
-    std::vector<std::string> pluginPaths = {pluginDir};
     setEnginePluginPaths(pluginPaths, PluginLoadingMode::MODE_ABSOLUTE);
 
     hipdnnHandle_t handle = nullptr;
@@ -665,7 +664,7 @@ static bool scenario2_ConvForward(const std::string& pluginDir, bool hasGpu)
 // ============================================================================
 // Scenario 3: Plugin Loading Modes
 // ============================================================================
-static bool scenario3_PluginLoadingModes(const std::string& pluginDir, bool hasGpu)
+static bool scenario3_PluginLoadingModes(const std::vector<std::string>& pluginPaths, bool hasGpu)
 {
     std::cout << "\n=== Scenario 3: Plugin Loading Modes ===\n";
     std::cout << "Demonstrates ADDITIVE and ABSOLUTE loading modes with presence verification "
@@ -676,7 +675,6 @@ static bool scenario3_PluginLoadingModes(const std::string& pluginDir, bool hasG
     std::cout << "  ADDITIVE mode loads the specified plugin directories alongside\n"
               << "  any system-installed plugins. This is the default mode.\n\n";
 
-    std::vector<std::string> pluginPaths = {pluginDir};
     auto err = setEnginePluginPaths(pluginPaths, PluginLoadingMode::MODE_ADDITIVE);
     if(err.is_bad())
     {
@@ -826,33 +824,78 @@ int main(int argc, char* argv[])
                   << "Running non-GPU portions only.\n";
     }
 
-    // Determine plugin directory: CLI argument > HIPDNN_PLUGIN_DIR > executable directory
-    std::string pluginDir;
+    // Determine plugin path: CLI argument > HIPDNN_PLUGIN_DIR > executable directory.
+#ifdef _WIN32
+    const std::string pluginFilename = "example_provider_plugin.dll";
+#else
+    const std::string pluginFilename = "libexample_provider_plugin.so";
+#endif
+
+    std::string pluginPath;
     if(argc > 1)
     {
-        pluginDir = argv[1];
-        std::cout << "Plugin directory (from argument): " << pluginDir << "\n";
+        pluginPath = argv[1];
+        std::cout << "Plugin path (from argument): " << pluginPath << "\n";
     }
     else
     {
-        pluginDir = hipdnn_data_sdk::utilities::getEnv("HIPDNN_PLUGIN_DIR");
-        if(!pluginDir.empty())
+        pluginPath = hipdnn_data_sdk::utilities::getEnv("HIPDNN_PLUGIN_DIR");
+        if(!pluginPath.empty())
         {
-            std::cout << "Plugin directory (from HIPDNN_PLUGIN_DIR): " << pluginDir << "\n";
+            std::cout << "Plugin path (from HIPDNN_PLUGIN_DIR): " << pluginPath << "\n";
         }
         else
         {
             auto exeDir = hipdnn_data_sdk::utilities::getCurrentExecutableDirectory();
-            pluginDir = std::filesystem::absolute(exeDir).string();
-            std::cout << "Plugin directory (from executable location): " << pluginDir << "\n";
+            pluginPath = std::filesystem::absolute(exeDir).string();
+            std::cout << "Plugin path (from executable location): " << pluginPath << "\n";
         }
+    }
+
+    // To assist in debugging issues when running this sample, determine whether
+    // the plugin exists before running the scenarios.
+    std::vector<std::string> pluginPaths;
+    auto fsPath = std::filesystem::path(pluginPath);
+    if(std::filesystem::is_regular_file(fsPath))
+    {
+        if(fsPath.filename().string().find("example_provider_plugin") != std::string::npos)
+        {
+            pluginPaths.push_back(pluginPath);
+        }
+    }
+    else if(std::filesystem::is_directory(fsPath))
+    {
+        if(std::filesystem::exists(fsPath / pluginFilename))
+        {
+            pluginPaths.push_back(pluginPath);
+        }
+    }
+
+    std::cout << "Plugin paths:\n";
+    for(size_t i = 0; i < pluginPaths.size(); ++i)
+    {
+        std::cout << "  [" << i << "] " << pluginPaths[i] << "\n";
+    }
+
+    if(pluginPaths.empty())
+    {
+        std::cerr << "\nERROR: Example plugin library (" << pluginFilename << ") not found.\n\n";
+        std::cerr << "Path provided: " << pluginPath << "\n\n";
+        std::cerr << "Usage: " << argv[0] << " [plugin_path]\n\n"
+                  << "The plugin path can be:\n"
+                  << "  - A directory containing " << pluginFilename << "\n"
+                  << "  - The full path to the plugin file itself\n\n"
+                  << "Plugin path resolution (when no argument is provided):\n"
+                  << "  1. If HIPDNN_PLUGIN_DIR is set, that is used.\n"
+                  << "  2. Otherwise, the directory containing this executable is used.\n";
+        return 1;
     }
 
     bool allPassed = true;
 
-    allPassed = scenario1_ReluForward(pluginDir, hasGpu) && allPassed;
-    allPassed = scenario2_ConvForward(pluginDir, hasGpu) && allPassed;
-    allPassed = scenario3_PluginLoadingModes(pluginDir, hasGpu) && allPassed;
+    allPassed = scenario1_ReluForward(pluginPaths, hasGpu) && allPassed;
+    allPassed = scenario2_ConvForward(pluginPaths, hasGpu) && allPassed;
+    allPassed = scenario3_PluginLoadingModes(pluginPaths, hasGpu) && allPassed;
 
     std::cout << "\n=========================================\n";
     if(allPassed)

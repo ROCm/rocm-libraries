@@ -15,8 +15,6 @@
 # No-GPU behavior: returns 0 (success) when no GPU is detected, running
 # non-GPU portions only.
 # =============================================================================
-list(APPEND CMAKE_PREFIX_PATH /opt/rocm /opt/rocm/hip)
-
 find_package(hipdnn_frontend CONFIG REQUIRED)
 find_package(hipdnn_test_sdk CONFIG REQUIRED)
 find_package(hip REQUIRED)

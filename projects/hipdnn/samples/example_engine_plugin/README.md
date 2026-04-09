@@ -18,7 +18,7 @@ Runtime Compilation):
 | CMake >= 3.20 | Build system | |
 | C++17 compiler | GCC/G++ or MSVC | No GPU compiler needed at build time |
 | ROCm (HIP SDK + HIPRTC) | GPU kernel compilation and execution | `hipStream_t`, `hipMalloc`, HIPRTC APIs |
-| hipDNN (installed) | Plugin SDK, data SDK, frontend library | Typically installed at `/opt/rocm` (Linux) |
+| hipDNN (installed) | Plugin SDK, data SDK, frontend library, test SDK (for sample) | Typically installed at `/opt/rocm` (Linux) |
 | GPU hardware | Runtime execution of HIPRTC-compiled kernels | Any ROCm-supported GPU |
 | Internet access | GTest is downloaded via CMake `FetchContent` | Only needed for the first build |
 
@@ -129,17 +129,15 @@ cmake --install build --prefix /opt/rocm
 # Plugin .so is installed to <prefix>/lib/hipdnn_plugins/engines/
 ```
 
-### Windows
-
-Ensure that the ROCm install bin folder is in your system PATH. E.g.
-
-```powershell
-set PATH=C:\ROCm\bin;%PATH%
-```
-
 ### Windows (MSVC)
 
-With the ROCm bin folder in your system PATH:
+Ensure that the ROCm install `bin` folder is in your system PATH before building:
+
+```powershell
+set PATH=C:\AMD\ROCm\bin;%PATH%
+```
+
+With MSVC installed:
 
 ```powershell
 cmake -B build -G "Visual Studio 17 2022"
@@ -156,19 +154,38 @@ The tests and sample can also be run directly:
 .\build\bin\Release\example_provider_sample.exe
 ```
 
+### Windows (GNU/Clang with Ninja)
+
+With Clang and Ninja installed, and with the ROCm `bin` folder in your system PATH:
+
+```powershell
+cmake -B build -G "Ninja"
+cmake --build build
+ctest --test-dir build
+```
+
+The tests and sample can also be run directly:
+
+```powershell
+.\build\bin\example_provider_tests.exe
+```
+```powershell
+.\build\bin\example_provider_sample.exe
+```
+
 ### CMake Options
 
 | Option | Default | Description |
 |---|---|---|
 | `HIPDNN_EXAMPLE_PROVIDER_BUILD_UNIT_TESTS` | `ON` | Build unit tests (no GPU required) |
 | `HIPDNN_EXAMPLE_PROVIDER_BUILD_SAMPLE` | `ON` | Build sample application (serves as acceptance test via `ctest`) |
-| `ROCM_PATH` | `/opt/rocm` | ROCm installation path (for RPATH and library discovery) |
 
 To build only the plugin library (no tests or sample):
 
 ```bash
-cmake .. -DHIPDNN_EXAMPLE_PROVIDER_BUILD_UNIT_TESTS=OFF \
-         -DHIPDNN_EXAMPLE_PROVIDER_BUILD_SAMPLE=OFF
+cmake -B build -DCMAKE_PREFIX_PATH="/opt/rocm" \
+    -DHIPDNN_EXAMPLE_PROVIDER_BUILD_UNIT_TESTS=OFF \
+    -DHIPDNN_EXAMPLE_PROVIDER_BUILD_SAMPLE=OFF
 ```
 
 ## Architecture
@@ -213,7 +230,7 @@ and update only the namespace.
 
 ### Engine Execution Flow
 
-1. **Container** creates engines and returns available engines IDs.
+1. **Container** creates engines and returns available engine IDs.
 
 2. hipDNN calls `isApplicable()` on each engine to check whether it supports a
    given operation graph.
@@ -264,8 +281,8 @@ individual kernels are then extracted from it by name. The three DI interfaces
 (`IKernelCompiler`, `ICompiledProgram`, `IRunnableKernel`) model each stage
 directly.
 
-Note that compilation is distinct from the source embedding described in the
-HIPRTC Compilation Flow above. At CMake configure time, all kernel `.cpp` files
+Note that compilation is distinct from the source embedding described in
+[HIPRTC Compilation Flow](#hiprtc-compilation-flow) above. At CMake configure time, all kernel `.cpp` files
 are embedded as C++ string literals into a generated source registry. This is
 just text storage, not GPU compilation. At runtime, each Plan compiles only its
 own kernel source file via HIPRTC, and only when its engine is selected for a
@@ -403,9 +420,9 @@ and `TEMPLATE REFERENCE` comment markers in the source files for per-file guidan
 | `kernels/relu/ReluForward.cpp`, `kernels/conv/ConvForwardNaive.cpp` | *(none)* | Replace with your GPU kernel source files. Each kernel must use `extern "C" __global__` and include only HIPRTC-compatible headers. |
 | `kernels/CMakeLists.txt` | `TEMPLATE ADAPTATION` | Update `KERNEL_FILES` list with your kernel filenames. |
 | `tests/TestReluPlanBuilder.cpp`, `tests/TestReluPlan.cpp`, `tests/TestConvFwdPlanBuilder.cpp`, `tests/TestConvFwdPlan.cpp` | `TEMPLATE REFERENCE` | Study the testing patterns, then write equivalent tests for your operations. |
-| `tests/TestHelpers.hpp` | `TEMPLATE ADAPTATION` | As preferred, replace `createReluFwdGraph()` / `createConvFwdGraph()` with helpers that build your operation's FlatBuffer graphs. Keep `createEngineConfig()`. |
-| `tests/mocks/MockKernelCompiler.hpp`, `tests/mocks/MockCompiledProgram.hpp`, `tests/mocks/MockRunnableKernel.hpp` | *(none)* | As preferred, copy into your test directory. Update namespace only. These mocks implement the interfaces for GPU-free unit testing. |
-| `sample/ExampleProviderSample.cpp` | `TEMPLATE ADAPTATION` | As preferred, adapt scenarios to exercise your operations. Keep the plugin loading and engine selection patterns; replace the graph construction and verification logic. This file can alternatively be replaced with a suite of integration tests or a custom application. |
+| `tests/TestHelpers.hpp` | `TEMPLATE ADAPTATION` | As needed, replace `createReluFwdGraph()` / `createConvFwdGraph()` with helpers that build your operation's FlatBuffer graphs. Keep `createEngineConfig()`. |
+| `tests/mocks/MockKernelCompiler.hpp`, `tests/mocks/MockCompiledProgram.hpp`, `tests/mocks/MockRunnableKernel.hpp` | *(none)* | As needed, copy into your test directory. Update namespace only. These mocks implement the interfaces for GPU-free unit testing. |
+| `sample/ExampleProviderSample.cpp` | `TEMPLATE ADAPTATION` | As needed, adapt scenarios to exercise your operations. Keep the plugin loading and engine selection patterns; replace the graph construction and verification logic. |
 
 ## Testing Your Plugin
 
@@ -452,14 +469,34 @@ See [Build Instructions](#build-instructions) for build and test commands.
 
 ## Integrating the Plugin into Your Application
 
+Plugins are automatically loaded by the hipDNN library when a hipDNN handle is created.
+
+There are two distinct but related requirements to consider when integrating hipDNN
+with the new plugin into your application:
+1. Ensuring that the plugin is in a location that hipDNN can load it (see
+   [Plugin Loading](#plugin-loading) below).
+2. Ensuring that the plugin itself is in turn able to load any additional libraries
+   it requires. Refer to [Runtime Dependency Resolution and RPATH](#runtime-dependency-resolution-and-rpath)
+   for further details.
+
 ### Plugin Loading
 
 Ensuring the plugin is loaded is the **application's** responsibility, not the
 plugin's. The plugin developer builds a shared library (`.so` / `.dll`) and
 ensures it is placed in a discoverable location.
 
-By default, hipDNN loads all plugins in the ROCm install
-`/lib/hipdnn_plugins/engines` folder. There are three ways to override this:
+By default, hipDNN loads all plugins in the `lib/hipdnn_plugins/engines` subfolder
+of the ROCm install folder. The plugin CMake project uses the
+`HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR` CMake variable (exported by the
+`hipdnn_data_sdk` package) to set the plugin to install to this subfolder. This
+way, if the plugin is installed to the ROCm install folder (e.g., `/opt/rocm` on
+Linux) then the plugin will automatically be loaded by the hipDNN library.
+
+```bash
+cmake --install build --prefix /opt/rocm
+```
+
+There are three ways to override the default hipDNN plugin loading behavior:
 
 **Environment variable** (`HIPDNN_PLUGIN_DIR`): Set before creating a hipDNN
 handle. This becomes the new default plugin directory that hipDNN scans for
@@ -470,7 +507,8 @@ export HIPDNN_PLUGIN_DIR=/path/to/plugin/directory
 ```
 
 **ADDITIVE mode**: Load additional plugin directories alongside any paths
-already specified, including the hipDNN default plugin directory.
+already specified, including the hipDNN default plugin directory and those
+set by `HIPDNN_PLUGIN_DIR`.
 
 ```cpp
 #include <hipdnn_frontend.hpp>
@@ -487,7 +525,7 @@ std::vector<std::string> paths = {"/path/to/my/plugins"};
 auto err = setEnginePluginPaths(paths, PluginLoadingMode::MODE_ABSOLUTE);
 ```
 
-### Path Resolution
+#### Path Resolution
 
 hipDNN resolves plugin paths as follows:
 
@@ -507,13 +545,14 @@ When a **plugin file** (not a directory) is specified:
 - If the file has an incorrect extension (e.g., `.so` on Windows or `.dll` on
   Linux), it is rejected with an error.
 
-### Verifying the Plugin Is Loaded
+#### Verifying the Plugin Is Loaded
 
 After creating a hipDNN handle, query loaded plugins to confirm yours is
 present:
 
 ```cpp
-auto paths = getLoadedEnginePluginPaths();
+std::vector<std::filesystem::path> paths;
+auto err = getLoadedEnginePluginPaths(handle, paths);
 for (const auto& path : paths) {
     std::cout << "Loaded: " << path << std::endl;
 }
@@ -555,16 +594,18 @@ graph->get_ranked_engine_ids(engineIds);
 ### Install Location
 
 The plugin `.so` is installed to
-`${CMAKE_INSTALL_PREFIX}/lib/hipdnn_plugins/engines/` by default (configurable
-via `HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR`).
+`${CMAKE_INSTALL_PREFIX}/lib/hipdnn_plugins/engines/` by default (set by the
+`HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR` variable exported by the
+`hipdnn_data_sdk` package).
 
-See `sample/ExampleProviderSample.cpp` for a complete example showing plugin
-loading, engine selection, knob modification, and correctness verification.
+See `sample/ExampleProviderSample.cpp` for a complete example demonstrating
+methods for overriding the default plugin loading behavior, engine selection,
+knob modification, and correctness verification.
 
 ## Quick Checklist
 
 - [ ] Copy and rename `example_engine_plugin/` directory
-- [ ] Perform a preliminary build and test runs to verify environment.
+- [ ] Perform a preliminary build and test runs to verify environment
 - [ ] Rename all `ExampleProvider*` classes to `YourPlugin*`
 - [ ] Update namespace from `example_provider`
 - [ ] Update the 5 macros in `Public.cpp`
@@ -577,7 +618,7 @@ loading, engine selection, knob modification, and correctness verification.
 - [ ] Update `ExampleProviderSettings` with your settings fields
 - [ ] Write unit tests for PlanBuilder and Plan
 - [ ] Create graph construction helpers in `TestHelpers.hpp`
-- [ ] Build and verify: `cmake --workflow --preset release`
+- [ ] Build and verify as described in [Build Instructions](#build-instructions)
 - [ ] Adapt sample app scenarios and verify on GPU
 
 ## Custom Knobs
@@ -633,39 +674,88 @@ DLL search order.
 
 ### Runtime Dependency Resolution and RPATH
 
-ROCm libraries (including `libhiprtc.so`) are typically installed in
-`/opt/rocm/lib` (Linux), which is NOT registered with `ldconfig` and is not in the
-default library search path. The plugin links against `hiprtc::hiprtc`, making
-`libhiprtc.so` a transitive dependency of the plugin `.so`. **The user's
-application does NOT need to link against hiprtc**. When hipDNN loads the
-plugin via `dlopen()`, the dynamic linker resolves `libhiprtc.so` independently
-from the user's application binary.
+ROCm libraries (including `libhiprtc.so`) are typically installed in the `/lib`
+folder of the ROCm install path (e.g., `/opt/rocm/lib` on Linux), which is NOT
+registered with `ldconfig` and is not in the default library search path. The example
+plugin links against `hiprtc::hiprtc`, making `libhiprtc.so` a transitive dependency
+of the plugin `.so`. **The user's application does NOT need to link against hiprtc**.
+When hipDNN loads the plugin via `dlopen()`, the dynamic linker resolves `libhiprtc.so`
+independently from the user's application binary.
 
-The plugin project embeds RPATH in the `.so`:
+**Note:** this dependency resolution is distinct from ensuring that hipDNN is
+able to locate the plugin for loading. See [Plugin Loading](#plugin-loading)
+for further details on this topic.
+
+The approach for managing the plugin's library dependencies changes depending on
+the environment and how the plugin is deployed.
+
+#### Windows
+
+On Windows, dynamic libraries are loaded from either the same folder that the
+hipDNN application is located in or from folders listed in the system PATH.
+Ensure that the ROCm install `bin` folder is available in the system PATH so
+that the `hiprtc` library used by the plugin can be found when the plugin is
+loaded by hipDNN. For example:
+
+```powershell
+set PATH=C:\AMD\ROCm\bin;%PATH%
+```
+
+#### Linux
+
+On Linux, `RPATH`/`RUNPATH` and `LD_LIBRARY_PATH` are used to control which folders
+will be searched for dependent libraries when loading the plugin. The choice of how
+to set these depends on the environments used for developing and deploying the plugin
+and how the hipDNN application is written. This will likely need to be tailored
+to your specific deployment.
+
+To facilitate plugin development, the plugin CMake project embeds RPATH in the
+`.so` as follows:
 
 ```cmake
 set_target_properties(example_provider_plugin PROPERTIES
-    INSTALL_RPATH "${ROCM_PATH}/lib"
+    CXX_VISIBILITY_PRESET hidden
+    INSTALL_RPATH "$ORIGIN;$ORIGIN/../../lib"
     INSTALL_RPATH_USE_LINK_PATH TRUE
-    BUILD_WITH_INSTALL_RPATH TRUE
+    LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
 )
 ```
-
-- `INSTALL_RPATH "${ROCM_PATH}/lib"` -- tells the dynamic linker where to find
-  `libhiprtc.so` **at runtime**
+The following line defines the RPATH value that is set when the plugin is **installed**
+using `cmake --install` (this is different from the development RPATH set for the
+plugin in the build folder):
+- `INSTALL_RPATH "$ORIGIN;$ORIGIN/../../lib"` -- search both the folder that the
+  plugin is located in and a folder named `lib` in the plugin's grandparent
+  folder.
 - `INSTALL_RPATH_USE_LINK_PATH TRUE` -- automatically adds directories of
-  linked libraries to RPATH
-- `BUILD_WITH_INSTALL_RPATH TRUE` -- the plugin works from the build tree
-  without needing `LD_LIBRARY_PATH`
+  linked libraries to the plugin's RPATH (e.g., the `hiprtc` library's ROCm
+  library folder).
 
-To customize the ROCm path:
+It is important to ensure the RPATH set on the plugin matches the deployment environment.
+Hardcoded paths like `/opt/rocm/lib` will fail on machines with different
+layouts. The default `$ORIGIN` entries mitigate this by resolving relative to
+the plugin's installed location. See
+[Plugin Loading](#plugin-loading) for further context for deploying the plugin.
+
+Note that `INSTALL_RPATH_USE_LINK_PATH` is typically not needed for production
+builds of the plugin but is included to assist in starting new plugin development
+projects. It can be removed once the development and deployment environments have
+been established. Its presence can often mask issues that will arise once the plugin
+is deployed to an environment that has a different folder layout than the development
+machine. If plugins load successfully in development environments but fail to load
+in production environments, it may be because the RPATH is hard-coded to use the
+ROCm folder path on the development machine, added because of this option. See
+[Troubleshooting Plugin Loading](#troubleshooting-plugin-loading).
+
+To add additional paths to the plugin's RPATH, the `INSTALL_RPATH` target property can be
+modified directly in the CMake project or CMake variables such as `CMAKE_INSTALL_RPATH`
+can be used on the command-line:
 
 ```bash
-cmake .. -DROCM_PATH=/custom/rocm/path
+cmake -B build -DCMAKE_INSTALL_RPATH=/custom/rocm/path/lib
 ```
 
-On Windows, `hiprtc.dll` must be findable via the system `PATH` or placed
-alongside the plugin DLL.
+Where `/custom/rocm/path/lib` is the path to the needed libraries as it exists on
+the deployment machine.
 
 #### Troubleshooting Plugin Loading
 
@@ -673,7 +763,7 @@ If the plugin fails to load silently (no engines from this plugin appear):
 
 1. Check library dependencies:
    ```bash
-   ldd build/src/libexample_provider_plugin.so
+   ldd build/bin/libexample_provider_plugin.so
    ```
    All dependencies should resolve. Look for `not found` entries.
 
@@ -684,7 +774,7 @@ If the plugin fails to load silently (no engines from this plugin appear):
 
 3. Verify RPATH is embedded:
    ```bash
-   readelf -d build/src/libexample_provider_plugin.so | grep 'RPATH|RUNPATH'
+   readelf -d build/bin/libexample_provider_plugin.so | grep -E 'RPATH|RUNPATH'
    ```
 
 ## Extending for Real-World Use
