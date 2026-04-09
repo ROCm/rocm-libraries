@@ -370,7 +370,7 @@ INSTANTIATE_TEST_SUITE_P(Full,
                          ::testing::ValuesIn(GenerateCandidateSelectionParams()),
                          [](const ::testing::TestParamInfo<CandidateSelectionParams>& info) {
                              std::ostringstream os;
-                             PrintTo(info.param, &os);
+                             PrintTo(info_.param, &os);
                              return os.str();
                          });
 
