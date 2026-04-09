@@ -7,7 +7,6 @@
 #include <memory>
 #include <unordered_map>
 
-#include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/engine_details_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/KnobWrapper.hpp>
 

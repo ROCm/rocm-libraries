@@ -29,7 +29,7 @@ function(_hipdnn_generate_secondary_version _version _flatc_flags)
     string(REPLACE "." "_" _ver_tag "${_version}")
     set(_ver_dir "v${_ver_tag}")
     set(_fc_name "flatbuffers_${_ver_tag}")
-    set(_ep_name "${ARG_TARGET}_flatc_${_ver_tag}")
+    set(_ep_name "flatc_${_ver_tag}")
     set(_flatc_build_dir "${CMAKE_CURRENT_BINARY_DIR}/_flatc_builds/${_ver_dir}")
     set(_flatc_binary "${_flatc_build_dir}/flatc")
     set(_output_dir "${ARG_GENERATED_INCLUDE_DIR}/${_ver_dir}/${ARG_OUTPUT_NAMESPACE}/data_objects")
@@ -55,7 +55,9 @@ function(_hipdnn_generate_secondary_version _version _flatc_flags)
     file(TO_CMAKE_PATH "${CMAKE_CXX_COMPILER}" _cxx_compiler)
 
     # Build flatc at build time via ExternalProject (separate CMake instance avoids
-    # target name collisions). LOG flags suppress all configure/build output.
+    # target name collisions). Guard prevents duplicate target when multiple SDKs
+    # call this function for the same version.
+    if(NOT TARGET ${_ep_name})
     ExternalProject_Add(${_ep_name}
         SOURCE_DIR "${${_fc_name}_SOURCE_DIR}"
         DOWNLOAD_COMMAND ""
@@ -79,6 +81,7 @@ function(_hipdnn_generate_secondary_version _version _flatc_flags)
         LOG_BUILD ON
         LOG_OUTPUT_ON_FAILURE ON
     )
+    endif()
 
     # Generate headers at build time using the built flatc
     set(_output_files)

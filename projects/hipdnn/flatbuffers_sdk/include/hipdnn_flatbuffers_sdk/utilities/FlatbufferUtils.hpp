@@ -108,14 +108,14 @@ TargetType extractValueFromTensorValue(const data_objects::TensorAttributesT& te
     case data_objects::DataType::FP8_E4M3:
         if(auto val = tensorAttr.value.AsFloat8Value())
         {
-            auto fp8 = types::fp8_e4m3::from_bits(val->value());
+            auto fp8 = hipdnn_data_sdk::types::fp8_e4m3::from_bits(val->value());
             return static_cast<TargetType>(static_cast<float>(fp8));
         }
         break;
     case data_objects::DataType::FP8_E5M2:
         if(auto val = tensorAttr.value.AsFloat8Value())
         {
-            auto bfp8 = types::fp8_e5m2::from_bits(val->value());
+            auto bfp8 = hipdnn_data_sdk::types::fp8_e5m2::from_bits(val->value());
             return static_cast<TargetType>(static_cast<float>(bfp8));
         }
         break;

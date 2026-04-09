@@ -9,7 +9,7 @@ hipdnn_setup_version(hipdnn_flatbuffers_sdk)
 # Set project with version
 project(hipdnn_flatbuffers_sdk VERSION ${HIPDNN_FLATBUFFERS_SDK_VERSION} LANGUAGES CXX)
 
-# Read data_sdk version for minimum requirement (still needed for types.hpp, StringUtil.hpp)
+# Read data_sdk version for minimum requirement (needed for types.hpp shared type definitions)
 hipdnn_get_component_version(hipdnn_data_sdk HIPDNN_FLATBUFFERS_SDK_DATA_SDK_MIN_VERSION)
 
 set(HIP_DNN_FLATBUFFERS_SDK_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include")
@@ -40,60 +40,12 @@ set(HIP_DNN_FLATBUFFERS_SDK_GENERATED_INCLUDE_DIR
     "${CMAKE_CURRENT_SOURCE_DIR}/include/hipdnn_flatbuffers_sdk/data_objects/${HIPDNN_FLATBUFFERS_VERSION_DIR}"
 )
 
-# --- Process dependencies for local vs imported builds ---
+# --- Dependency processing ---
+# During the transition period, data_sdk already processes and exports FlatBuffers/nlohmann_json
+# dependencies (aliases, include dirs, local export targets). Re-enable this block once data_sdk
+# no longer provides these dependencies.
 set(_hipdnn_flatbuffers_sdk_local_export_targets)
 set(_hipdnn_flatbuffers_sdk_local_export_includes)
-
-# Internal helper to process and track dependencies for export
-function(_hipdnn_flatbuffers_sdk_process_dependency TARGET_NAME ALIAS_NAME)
-    set(options "")
-    set(oneValueArgs INCLUDE_SUBDIR INCLUDE_DIR)
-    set(multiValueArgs "")
-    cmake_parse_arguments(ARG "${options}" "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
-
-    if(NOT TARGET ${TARGET_NAME})
-        return()
-    endif()
-
-    if(NOT TARGET ${ALIAS_NAME})
-        add_library(${ALIAS_NAME} ALIAS ${TARGET_NAME})
-    endif()
-
-    get_target_property(_is_imported ${TARGET_NAME} IMPORTED)
-    if(NOT _is_imported)
-        list(APPEND _hipdnn_flatbuffers_sdk_local_export_targets ${TARGET_NAME})
-        set(_hipdnn_flatbuffers_sdk_local_export_targets ${_hipdnn_flatbuffers_sdk_local_export_targets} PARENT_SCOPE)
-
-        if(ARG_INCLUDE_DIR)
-            list(APPEND _hipdnn_flatbuffers_sdk_local_export_includes ${ARG_INCLUDE_DIR})
-            set(_hipdnn_flatbuffers_sdk_local_export_includes ${_hipdnn_flatbuffers_sdk_local_export_includes} PARENT_SCOPE)
-        endif()
-    endif()
-endfunction()
-
-# Process flatbuffers dependency
-if(TARGET FlatBuffers)
-    get_target_property(_is_imported FlatBuffers IMPORTED)
-    if(NOT _is_imported)
-        get_target_property(current_includes FlatBuffers INTERFACE_INCLUDE_DIRECTORIES)
-        list(REMOVE_ITEM current_includes "$<INSTALL_INTERFACE:include/include>")
-        list(APPEND current_includes "$<INSTALL_INTERFACE:${HIP_DNN_FLATBUFFERS_SDK_INSTALL_INCLUDE_DIR}>")
-        set_target_properties(
-            FlatBuffers PROPERTIES INTERFACE_INCLUDE_DIRECTORIES "${current_includes}"
-        )
-    endif()
-    _hipdnn_flatbuffers_sdk_process_dependency(
-        FlatBuffers flatbuffers::flatbuffers INCLUDE_DIR ${HIP_DNN_FLATBUFFERS_INCLUDE_DIR}
-        INCLUDE_SUBDIR flatbuffers
-    )
-endif()
-
-# Process nlohmann_json dependency
-if(NOT HIPDNN_FRONTEND_SKIP_JSON_LIB)
-    _hipdnn_flatbuffers_sdk_process_dependency(
-        nlohmann_json nlohmann_json::nlohmann_json INCLUDE_DIR ${HIP_DNN_NLOHMANN_JSON_INCLUDE_DIR}
-    )
-endif()
 
 # --- Create the library target ---
 add_library(hipdnn_flatbuffers_sdk INTERFACE)
@@ -101,7 +53,8 @@ add_library(hipdnn_flatbuffers_sdk INTERFACE)
 # Generate version header
 hipdnn_generate_version_header(hipdnn_flatbuffers_sdk)
 
-# Link to data_sdk for non-flatbuffer utilities (types.hpp, StringUtil.hpp)
+# Link to data_sdk for shared type definitions (types.hpp) and the
+# hipdnn_add_dependency_includes() function provided by data_sdk's CMake config.
 target_link_libraries(hipdnn_flatbuffers_sdk INTERFACE hipdnn_data_sdk)
 
 # Add FlatBuffers includes
@@ -152,6 +105,7 @@ if(HIPDNN_GENERATE_SDK_HEADERS)
             schemas/block_scale_quantize_attributes.fbs
             schemas/sdpa_attributes.fbs
             schemas/sdpa_backward_attributes.fbs
+            schemas/reduction_attributes.fbs
             schemas/tensor_attributes.fbs
         SCHEMAS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/schemas"
         PRIMARY_VERSION ${HIPDNN_FLATBUFFERS_VERSION}
@@ -176,8 +130,8 @@ install(
     DESTINATION ${HIP_DNN_FLATBUFFERS_SDK_INSTALL_INCLUDE_DIR}
     COMPONENT Development
     FILES_MATCHING
-    PATTERN "*.hpp"
     PATTERN "*.h"
+    PATTERN "*.hpp"
     PATTERN "*.h.in" EXCLUDE
 )
 
