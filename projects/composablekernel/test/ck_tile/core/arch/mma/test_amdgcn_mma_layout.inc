@@ -195,10 +195,6 @@ struct MmaLayoutTestKernel
                 }
             }
 
-            // Sparse_idx is calced in *exactly* one lane (check), but it must be broadcast to all.
-            assert(__popcll(__ballot(sparse_idx)) == 1);
-            sparse_idx = __reduce_or_sync(__activemask(), sparse_idx);
-
             for(index_t v = 0; v < b_vec_size; ++v)
             {
                 // Same considerations as for A (but no compression), see comment above.
@@ -208,13 +204,17 @@ struct MmaLayoutTestKernel
 
                 if(b_coords[0] == n && b_coords[1] == k_target)
                 {
-                    b_frag[v] = packed_one<typename MmaOp::ADataType>(k_rem_pack);
+                    b_frag[v] = packed_one<typename MmaOp::BDataType>(k_rem_pack);
                 }
             }
 
             if constexpr(MmaOpTraits<MmaOp>::IsSparse)
             {
-                c_frag = MmaOp::exec(a_frag, b_frag, c_frag, sparse_idx);
+                // Sparse_idx is calculated (overwriting default 0 value) in *exactly* one lane
+                // (assert), but must be broadcast to all (warp-level "or" reduction intrinsic).
+                assert(__popcll(__ballot(sparse_idx != 0)) == 1);
+                sparse_idx = __reduce_or_sync(__activemask(), sparse_idx);
+                c_frag     = MmaOp::exec(a_frag, b_frag, c_frag, sparse_idx);
             }
             else if constexpr(MmaOpTraits<MmaOp>::IsScale)
             {
