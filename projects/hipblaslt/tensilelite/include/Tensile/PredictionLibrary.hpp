@@ -177,8 +177,8 @@ namespace TensileLite
                 .c_dtype     = datatypeToAnalyticalDatatype(problem.c().dataType()),
                 .d_dtype     = datatypeToAnalyticalDatatype(problem.d().dataType()),
                 .mi_dtype    = miDataType,
-                .a_mx_block_size = 0, // MX Data types come from rocroller
-                .b_mx_block_size = 0, // MX Data types come from rocroller
+                .a_mx_block_size = problem.mxBlockA(), // MXA scale size
+                .b_mx_block_size = problem.mxBlockB(), // MXB scale size
             };
 
             auto prediction_result = origami::rank_configs(

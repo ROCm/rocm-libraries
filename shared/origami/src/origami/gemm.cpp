@@ -983,6 +983,10 @@ double compute_total_latency(const problem_t& problem,
     OLOG_DEBUG("MatrixInstruction: " << int(MI_M) << "x" << int(MI_N) << "x" << int(MI_K));
     OLOG_DEBUG("Element size A (bits): " << int(a_bits));
     OLOG_DEBUG("Element size B (bits): " << int(b_bits));
+    OLOG_DEBUG("cache_hints_a: " << int(config.cache_hints_a));
+    OLOG_DEBUG("cache_hints_b: " << int(config.cache_hints_b));
+    OLOG_DEBUG("problem mxa_block_size: " << int(problem.a_mx_block_size));
+    OLOG_DEBUG("problem mxb_block_size: " << int(problem.b_mx_block_size));
   }
   // 1-1) To compute the latency, use default WGM. And WGM can't be greater than one
   int defaultWGM =
