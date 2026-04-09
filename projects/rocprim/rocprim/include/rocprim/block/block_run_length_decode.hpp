@@ -342,7 +342,8 @@ public:
 #pragma unroll
         for(DecodedOffsetT i = 0; i < DECODED_ITEMS_PER_THREAD; ++i, ++thread_decoded_offset)
         {
-            // If we are in a new run...
+            // Check if we are in a new run. Short-circuit the check on 'i==0', since 'current_run_end'
+            // is uninitialized.
             if(i == 0 || thread_decoded_offset == current_run_end)
             {
                 // The value of the new run
