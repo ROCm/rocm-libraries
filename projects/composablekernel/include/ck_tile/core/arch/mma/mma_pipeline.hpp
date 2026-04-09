@@ -270,17 +270,26 @@ struct MmaPipelineBase
     {
         if constexpr(MmaOpTraits<typename Derived::MmaOp>::IsSupported)
         {
-            auto transformed_inputs = applyTransformsToInputs(
-                hasFlag<MmaPipelineOptionFlag::ABSwap>() ? std::forward<VecTB>(b)
-                                                         : std::forward<VecTA>(a),
-                hasFlag<MmaPipelineOptionFlag::ABSwap>() ? std::forward<VecTA>(a)
-                                                         : std::forward<VecTB>(b),
-                std::forward<VecTC>(accum));
+            if constexpr(hasFlag<MmaPipelineOptionFlag::ABSwap>())
+            {
+                auto transformed_inputs = applyTransformsToInputs(
+                    std::forward<VecTB>(b), std::forward<VecTA>(a), std::forward<VecTC>(accum));
 
-            Derived::execImpl(transformed_inputs);
+                Derived::execImpl(transformed_inputs);
 
-            auto&& [a_result, b_result, c_result] = std::move(transformed_inputs);
-            return applyTransformToOutput(std::move(c_result));
+                auto&& [a_result, b_result, c_result] = std::move(transformed_inputs);
+                return applyTransformToOutput(std::move(c_result));
+            }
+            else
+            {
+                auto transformed_inputs = applyTransformsToInputs(
+                    std::forward<VecTA>(a), std::forward<VecTB>(b), std::forward<VecTC>(accum));
+
+                Derived::execImpl(transformed_inputs);
+
+                auto&& [a_result, b_result, c_result] = std::move(transformed_inputs);
+                return applyTransformToOutput(std::move(c_result));
+            }
         }
         else
         {
