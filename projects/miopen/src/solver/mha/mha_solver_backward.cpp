@@ -248,15 +248,15 @@ ConvSolution MhaBackward::GetSolution(const ExecutionContext& context,
             void* fp32_dSxK_ws      = getBuffPart(params.GetWorkspace(), 3);
             void* fp32_dSxQ_ws      = getBuffPart(params.GetWorkspace(), 4);
 
-            decltype(auto) dOxO_reduction_kernel = handle_.Run(kernels[0]);
-            dOxO_reduction_kernel(dataBwd.doData,
-                                  dataBwd.oData,
-                                  fp32_dOxO_SxdO_ws,
-                                  dataBwd.descaleDOData,
-                                  dataBwd.descaleOData,
-                                  dataBwd.dropoutProbabilityData,
-                                  emb_dim,
-                                  nhs);
+            decltype(auto) dOxO_reduction_kernel_ = handle_.Run(kernels[0]);
+            dOxO_reduction_kernel_(dataBwd.doData,
+                                   dataBwd.oData,
+                                   fp32_dOxO_SxdO_ws,
+                                   dataBwd.descaleDOData,
+                                   dataBwd.descaleOData,
+                                   dataBwd.dropoutProbabilityData,
+                                   emb_dim,
+                                   nhs);
             (void)hipMemsetAsync(dataBwd.amaxDSData, 0, sizeof(float), handle_.GetStream());
             (void)hipMemsetAsync(dataBwd.amaxDVData, 0, sizeof(float), handle_.GetStream());
 
@@ -314,26 +314,26 @@ ConvSolution MhaBackward::GetSolution(const ExecutionContext& context,
             waitSyncEvent(std::move(event_QxK));
             waitSyncEvent(std::move(event_dOxV));
 
-            decltype(auto) bwd_attention_kernel = handle_.Run(kernels[1]);
-            bwd_attention_kernel(fp32_QxK_S_ws,
-                                 fp32_dOxV_ws,
-                                 fp32_dS_ws,
-                                 dataBwd.mData,
-                                 dataBwd.zInvData,
-                                 fp32_dOxO_SxdO_ws,
-                                 dataBwd.amaxDSData,
-                                 dataBwd.descaleQData,
-                                 dataBwd.descaleKData,
-                                 dataBwd.descaleDOData,
-                                 dataBwd.descaleVData,
-                                 dataBwd.scaleSData,
-                                 dataBwd.scaleDSData,
-                                 dataBwd.dropoutSeedData,
-                                 dataBwd.dropoutOffsetData,
-                                 dataBwd.dropoutProbabilityData,
-                                 scale,
-                                 seq_len,
-                                 nhs);
+            decltype(auto) bwd_attention_kernel_ = handle_.Run(kernels[1]);
+            bwd_attention_kernel_(fp32_QxK_S_ws,
+                                  fp32_dOxV_ws,
+                                  fp32_dS_ws,
+                                  dataBwd.mData,
+                                  dataBwd.zInvData,
+                                  fp32_dOxO_SxdO_ws,
+                                  dataBwd.amaxDSData,
+                                  dataBwd.descaleQData,
+                                  dataBwd.descaleKData,
+                                  dataBwd.descaleDOData,
+                                  dataBwd.descaleVData,
+                                  dataBwd.scaleSData,
+                                  dataBwd.scaleDSData,
+                                  dataBwd.dropoutSeedData,
+                                  dataBwd.dropoutOffsetData,
+                                  dataBwd.dropoutProbabilityData,
+                                  scale,
+                                  seq_len,
+                                  nhs);
 
             gemm(handle_,
                  false,

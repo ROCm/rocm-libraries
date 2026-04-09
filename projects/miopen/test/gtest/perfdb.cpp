@@ -903,7 +903,7 @@ public:
             for(auto i = 0u; i < DBMultiThreadedTestWork::threads_count; i++)
             {
                 auto thread_body = [c, &mutex, i]() {
-                    std::shared_lock<std::shared_mutex> lock(mutex);
+                    std::shared_lock<std::shared_mutex> lock_(mutex);
                     DBMultiThreadedTestWork::WorkItem(i, c, "mt");
                 };
 
@@ -951,7 +951,7 @@ public:
             for(auto i = 0u; i < DBMultiThreadedTestWork::threads_count; i++)
             {
                 threads.emplace_back([c, &mutex, i]() {
-                    std::shared_lock<std::shared_mutex> lock(mutex);
+                    std::shared_lock<std::shared_mutex> lock_(mutex);
                     DBMultiThreadedTestWork::ReadWorkItem(i, c, "mt");
                 });
             }
@@ -1380,7 +1380,7 @@ public:
             for(auto i = 0u; i < DBMultiThreadedTestWork::threads_count; i++)
             {
                 threads.emplace_back([c, &mutex, i]() {
-                    std::shared_lock<std::shared_mutex> lock(mutex);
+                    std::shared_lock<std::shared_mutex> lock_(mutex);
                     DBMultiThreadedTestWork::ReadWorkItem(i, c, "mt");
                 });
             }
@@ -1422,7 +1422,7 @@ public:
             for(auto i = 0u; i < DBMultiThreadedTestWork::threads_count; i++)
             {
                 threads.emplace_back([c, &mutex, i]() {
-                    std::shared_lock<std::shared_mutex> lock(mutex);
+                    std::shared_lock<std::shared_mutex> _lock(mutex);
                     DBMultiThreadedTestWork::WorkItem(i, c, "mt");
                 });
             }
