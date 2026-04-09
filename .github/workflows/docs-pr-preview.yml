@@ -119,7 +119,7 @@ jobs:
         env:
           RTD_TOKEN: ${{ secrets.RTD_TOKEN }}
         run: |
-          curl -f -s -X PATCH \
+          curl -f -X PATCH \
             -H "Authorization: Token $RTD_TOKEN" \
             -H "Content-Type: application/json" \
             -d '{"active": true, "hidden": true, "privacy_level": "private"}' \
@@ -139,7 +139,7 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.generate-token.outputs.token }}
         run: |
-          preview_url="https://${{ steps.rtd.outputs.project_slug }}.readthedocs-hosted.com/en/${{ steps.rtd.outputs.version_slug }}/"
+          preview_url="https://rocm.docs.amd.com/projects/${{ steps.rtd.outputs.project_slug }}/en/${{ steps.rtd.outputs.version_slug }}/"
           gh pr comment ${{ github.event.issue.number }} \
             --repo ${{ github.repository }} \
             --body "Docs preview for **${{ steps.extract.outputs.project_name }}** is building on Read the Docs: $preview_url"
