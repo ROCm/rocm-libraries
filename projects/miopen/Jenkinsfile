@@ -148,7 +148,7 @@ def runDockerBuild(String gpuFamily) {
 }
 
 def runTheRockDockerBuild() {
-    node(rocmnode("gfx90a")) {
+    node(rocmnode("docker")) {
         try {
             withWorkingDir {
                 utils.buildTheRockDockerImage()
@@ -592,7 +592,7 @@ pipeline {
                 }
             }
         }
-        stage('Build DEV Docker: Nightly') {
+        stage('Build TheRock Docker: Nightly') {
             when {
                 expression { params.BUILD_THEROCK_DOCKER && params.TARGET_NOGPU && params.DATATYPE_NA }
             }
