@@ -18,7 +18,7 @@ else()
     message(DEBUG "Skipping ck_tile_gemm tests for current target")
 endif()
 
-if(GPU_TARGETS MATCHES "gfx9|gfx11|gfx12")
+if(GPU_TARGETS MATCHES "gfx9|gfx11|gfx12|amdgcnspirv")
     add_gtest_executable(test_amdgcn_mma_layout test_amdgcn_mma_layout.cpp)
     target_compile_options(test_amdgcn_mma_layout PRIVATE ${EXAMPLE_GEMM_COMPILE_OPTIONS})
 else()

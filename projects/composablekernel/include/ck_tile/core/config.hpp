@@ -160,7 +160,7 @@
 // buffer atomic add: floating point
 #ifndef __HIP_DEVICE_COMPILE__ // for host code
 #define CK_TILE_USE_AMD_BUFFER_ATOMIC_ADD_FLOAT 1
-#elif defined(__gfx9__) || defined(__gfx12__) // for GPU code
+#elif defined(__gfx9__) || defined(__gfx12__) || defined(__SPIRV__) // for GPU code
 #define CK_TILE_USE_AMD_BUFFER_ATOMIC_ADD_FLOAT 1
 #else // for GPU code
 #define CK_TILE_USE_AMD_BUFFER_ATOMIC_ADD_FLOAT 0
@@ -209,6 +209,15 @@
 #endif
 #endif
 
+// SPIR-V constexpr handling: variables that depend on compile-time architecture
+// detection cannot be constexpr under SPIR-V since the target is resolved at runtime.
+// Following rocPRIM's ROCPRIM_AMDGCN_CONSTEXPR pattern.
+#if defined(__SPIRV__)
+#define CK_TILE_AMDGCN_CONSTEXPR
+#else
+#define CK_TILE_AMDGCN_CONSTEXPR constexpr
+#endif
+
 #ifndef CK_TILE_DEBUG_LOG
 #define CK_TILE_DEBUG_LOG 0
 #endif
@@ -222,6 +231,10 @@
 #define CK_TILE_BUFFER_RESOURCE_3RD_DWORD 0x31014000
 #elif defined(__gfx11__) || defined(__gfx12__) // for GPU code
 #define CK_TILE_BUFFER_RESOURCE_3RD_DWORD 0x31004000
+#elif defined(__SPIRV__) // SPIR-V: safe default (gfx9-like), JIT will resolve at runtime
+#define CK_TILE_BUFFER_RESOURCE_3RD_DWORD 0x00020000
+#else
+#define CK_TILE_BUFFER_RESOURCE_3RD_DWORD 0xffffffff // Unknown device
 #endif
 
 #ifndef CK_TILE_EXPERIMENTAL_BLOCK_SYNC_LDS_WITHOUT_SYNC_VMEM
@@ -502,6 +515,15 @@ struct amdgcn_compiler_target_state
 #else
     static constexpr bool CK_TILE_ARCH_GFX12_GENERIC = false;
 #endif // __gfx12_generic__
+
+    // SPIR-V (target-agnostic, JIT-compiled at runtime)
+    // Guard with __HIP_DEVICE_COMPILE__ because __SPIRV__ is defined during
+    // both host and device passes when compiling for amdgcnspirv.
+#if defined(__SPIRV__) && defined(__HIP_DEVICE_COMPILE__)
+    static constexpr bool CK_TILE_ARCH_SPIRV = true;
+#else
+    static constexpr bool CK_TILE_ARCH_SPIRV = false;
+#endif // __SPIRV__
 };
 
 /**
@@ -555,7 +577,9 @@ CK_TILE_HOST_DEVICE static constexpr uint32_t count_values_of(T search, Ts... se
         amdgcn_compiler_target_state::CK_TILE_ARCH_GFX12_GENERIC
 
 // Sanity check: make sure only one target architecture is defined during device compile
+// SPIR-V is target-agnostic, so none of the specific arch flags will be set
 static_assert(!amdgcn_compiler_target_state::CK_TILE_DEVICE_COMPILE ||
+                  amdgcn_compiler_target_state::CK_TILE_ARCH_SPIRV ||
                   count_values_of(true, CK_TILE_COMPILER_TARGETS_LIST) == 1u,
               "Only one target architecture can be defined during device compile");
 
