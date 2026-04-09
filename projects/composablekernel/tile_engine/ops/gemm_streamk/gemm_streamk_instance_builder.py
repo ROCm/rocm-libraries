@@ -219,7 +219,7 @@ class GemmKernelBuilder:
         warp_tile_m,
         warp_tile_n,
         warp_tile_k,
-        pipeline="mem",  # Default pipeline for validation
+        pipeline="compv3",  # Default pipeline for validation
         fast_mode=False,  # Add fast mode option
     ):
         """Validate that tile configuration is reasonable"""
@@ -267,6 +267,7 @@ class GemmKernelBuilder:
                 b_datatype,
                 c_datatype,
                 pipeline,
+                self.layout
             )
 
     def _generate_trait_combinations(self):
