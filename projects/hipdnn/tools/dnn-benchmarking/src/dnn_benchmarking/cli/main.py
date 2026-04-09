@@ -3,19 +3,36 @@
 
 """Main entry point for dnn-benchmark CLI."""
 
+import glob
 import json
+import socket
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Literal, Optional
+from typing import List, Literal, Optional
 
 from ..common.exceptions import ExecutionError, GraphLoadError
-from ..config.benchmark_config import ABTestConfig, BenchmarkConfig, ValidationConfig
+from ..config.benchmark_config import (
+    ABTestConfig,
+    BenchmarkConfig,
+    SuiteConfig,
+    ValidationConfig,
+)
 from ..execution.ab_runner import ABRunner
 from ..execution.buffer_manager import BufferManager
 from ..execution.executor import Executor
+from ..execution.suite_runner import run_graph_all_providers
 from ..graph.loader import GraphLoader
 from ..reporting.reporter import Reporter
 from ..reporting.statistics import BenchmarkStats, CombinedBenchmarkStats
+from ..reporting.suite_results import (
+    CorrectnessResult,
+    GraphResult,
+    ProviderEngineResult,
+    SuiteMetadata,
+    SuiteResult,
+    collect_environment_info,
+)
 from ..validation import ArrayComparator, ReferenceProviderRegistry
 from ..validation.validator import Validator
 from .parser import create_parser
@@ -426,6 +443,183 @@ def run_ab_test(
         return 1
 
 
+def run_suite(
+    graph_paths: List[Path],
+    config: SuiteConfig,
+    output_path: Optional[Path] = None,
+) -> int:
+    """Run suite benchmark workflow (per D-04/D-05).
+
+    Iterates all graph files sequentially. Per each graph, iterates all
+    providers/engines via run_graph_all_providers(). Per D-06, warmup
+    and benchmark iterations apply per graph independently.
+
+    Args:
+        graph_paths: List of resolved graph file paths.
+        config: Suite configuration.
+        output_path: Optional JSON output path (per D-16).
+
+    Returns:
+        Exit code: 0=all pass, 1=errors, 2=correctness failures (per D-09).
+    """
+    reporter = Reporter()
+    total = len(graph_paths)
+
+    reporter.print_suite_header(total)
+
+    # Import hipdnn and create handle once for entire suite
+    try:
+        import hipdnn_frontend as hipdnn
+
+        handle = hipdnn.Handle()
+    except ImportError:
+        reporter.print_error(
+            "hipdnn_frontend not available. "
+            "Install hipDNN Python bindings first."
+        )
+        return 1
+
+    graph_results: List[GraphResult] = []
+    has_errors = False
+    has_correctness_failures = False
+
+    for i, graph_path in enumerate(graph_paths, start=1):
+        graph_name = graph_path.stem
+        reporter.print_suite_graph_start(i, total, graph_name)
+
+        try:
+            loader = GraphLoader()
+            graph_json = loader.load_json(graph_path)
+            tensor_infos = loader.extract_tensor_info(graph_json)
+
+            result = run_graph_all_providers(
+                graph_path, graph_json, tensor_infos, config, handle
+            )
+            graph_results.append(result)
+
+            # Count statuses
+            n_pass = sum(
+                1
+                for r in result.results
+                if r.status == "success"
+                and r.correctness is not None
+                and r.correctness.passed
+            )
+            n_fail = sum(
+                1
+                for r in result.results
+                if r.status == "success"
+                and r.correctness is not None
+                and not r.correctness.passed
+            )
+            n_skip = sum(1 for r in result.results if r.status == "skipped")
+            n_error = sum(1 for r in result.results if r.status == "error")
+
+            reporter.print_suite_graph_result(n_pass, n_fail, n_skip, n_error)
+
+            if n_error > 0:
+                has_errors = True
+            if n_fail > 0:
+                has_correctness_failures = True
+
+        except GraphLoadError as e:
+            reporter.print_suite_graph_error(graph_name, str(e))
+            error_result = GraphResult(
+                graph_name=graph_name,
+                graph_path=str(graph_path),
+                results=[
+                    ProviderEngineResult(
+                        provider="unknown",
+                        engine_id=0,
+                        status="error",
+                        error_message=str(e),
+                    )
+                ],
+            )
+            graph_results.append(error_result)
+            has_errors = True
+
+        except Exception as e:
+            reporter.print_suite_graph_error(graph_name, str(e))
+            error_result = GraphResult(
+                graph_name=graph_name,
+                graph_path=str(graph_path),
+                results=[
+                    ProviderEngineResult(
+                        provider="unknown",
+                        engine_id=0,
+                        status="error",
+                        error_message=str(e),
+                    )
+                ],
+            )
+            graph_results.append(error_result)
+            has_errors = True
+
+    # Collect environment info and build metadata
+    env_info = collect_environment_info()
+
+    total_pass = sum(
+        1
+        for gr in graph_results
+        for r in gr.results
+        if r.status == "success"
+        and r.correctness is not None
+        and r.correctness.passed
+    )
+    total_fail = sum(
+        1
+        for gr in graph_results
+        for r in gr.results
+        if r.status == "success"
+        and r.correctness is not None
+        and not r.correctness.passed
+    )
+    total_skip = sum(
+        1 for gr in graph_results for r in gr.results if r.status == "skipped"
+    )
+    total_error = sum(
+        1 for gr in graph_results for r in gr.results if r.status == "error"
+    )
+    total_combinations = total_pass + total_fail + total_skip + total_error
+
+    metadata = SuiteMetadata(
+        timestamp=datetime.now(timezone.utc).isoformat(),
+        hostname=socket.gethostname(),
+        total_graphs=total,
+        pass_count=total_pass,
+        fail_count=total_fail,
+        skip_count=total_skip,
+        rocm_version=env_info.get("rocm_version"),
+        gpu_model=env_info.get("gpu_model"),
+        python_version=env_info.get("python_version"),
+        hipdnn_version=env_info.get("hipdnn_version"),
+    )
+
+    suite_result = SuiteResult(metadata=metadata, graphs=graph_results)
+
+    # Write JSON output if requested (per D-16)
+    if output_path is not None:
+        suite_result.save_json(str(output_path))
+
+    reporter.print_suite_summary(
+        total_graphs=total,
+        total_combinations=total_combinations,
+        pass_count=total_pass,
+        fail_count=total_fail,
+        skip_count=total_skip,
+        error_count=total_error,
+    )
+    reporter.print_suite_footer()
+
+    # Exit code per D-09
+    if has_correctness_failures:
+        return 2
+    if has_errors:
+        return 1
+    return 0
+
+
 def main() -> int:
     """CLI entry point.
 
@@ -435,15 +629,18 @@ def main() -> int:
     parser = create_parser()
     args = parser.parse_args()
 
-    try:
-        config = BenchmarkConfig(
-            graph_path=args.graph,
-            warmup_iters=args.warmup,
-            benchmark_iters=args.iters,
-            engine_id=args.engine_id,
+    # Resolve --graph: glob expansion for suite mode (per D-05)
+    resolved_files = sorted(glob.glob(args.graph))
+
+    # Backward compatibility: if raw string is a single existing file
+    if not resolved_files and Path(args.graph).is_file():
+        resolved_files = [args.graph]
+
+    if not resolved_files:
+        print(
+            f"No graph files found matching: {args.graph}",
+            file=sys.stderr,
         )
-    except ValueError as e:
-        print(f"Configuration error: {e}", file=sys.stderr)
         return 1
 
     # Check if A/B testing mode is enabled (either AId or BId specified)
@@ -454,6 +651,17 @@ def main() -> int:
                 "A/B testing requires both --AId and --BId to be specified",
                 file=sys.stderr,
             )
+            return 1
+
+        try:
+            config = BenchmarkConfig(
+                graph_path=Path(resolved_files[0]),
+                warmup_iters=args.warmup,
+                benchmark_iters=args.iters,
+                engine_id=args.engine_id,
+            )
+        except ValueError as e:
+            print(f"Configuration error: {e}", file=sys.stderr)
             return 1
 
         try:
@@ -489,6 +697,41 @@ def main() -> int:
             gpu_backend=args.gpu_backend,
             validation_config=ab_validation_config,
         )
+
+    # Suite mode: multiple files resolved (per D-05)
+    if len(resolved_files) > 1:
+        try:
+            suite_config = SuiteConfig(
+                warmup_iters=args.warmup,
+                benchmark_iters=args.iters,
+                seed=args.seed,
+                provider_filter=args.provider,
+                engine_filter=args.engine,
+                rtol=args.rtol,
+                atol=args.atol,
+                gpu_backend=args.gpu_backend,
+            )
+        except ValueError as e:
+            print(f"Suite configuration error: {e}", file=sys.stderr)
+            return 1
+
+        return run_suite(
+            graph_paths=[Path(p) for p in resolved_files],
+            config=suite_config,
+            output_path=args.output,
+        )
+
+    # Single file mode (backward compatible)
+    try:
+        config = BenchmarkConfig(
+            graph_path=Path(resolved_files[0]),
+            warmup_iters=args.warmup,
+            benchmark_iters=args.iters,
+            engine_id=args.engine_id,
+        )
+    except ValueError as e:
+        print(f"Configuration error: {e}", file=sys.stderr)
+        return 1
 
     # Route based on execution backend
     if args.backend == "pytorch":

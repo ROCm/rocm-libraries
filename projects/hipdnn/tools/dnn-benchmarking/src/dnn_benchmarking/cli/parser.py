@@ -46,10 +46,11 @@ A/B Testing:
     parser.add_argument(
         "--graph",
         "-g",
-        type=Path,
+        type=str,
         required=True,
         metavar="PATH",
-        help="Path to JSON-serialized hipDNN graph file",
+        help="Path to JSON graph file, or glob pattern for suite mode "
+        "(e.g., 'graphs/*.json')",
     )
 
     parser.add_argument(
@@ -188,6 +189,23 @@ A/B Testing:
         default=1e-8,
         metavar="TOL",
         help="Absolute tolerance for validation (default: 1e-8)",
+    )
+
+    # Suite options
+    suite_group = parser.add_argument_group("Suite Options")
+    suite_group.add_argument(
+        "--provider",
+        type=str,
+        default=None,
+        metavar="NAME",
+        help="Filter to specific provider name (default: all available)",
+    )
+    suite_group.add_argument(
+        "--engine",
+        type=int,
+        default=None,
+        metavar="ID",
+        help="Filter to specific engine ID (default: all available)",
     )
 
     return parser

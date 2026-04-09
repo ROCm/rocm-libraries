@@ -5,8 +5,10 @@
 
 import json
 import os
+import sys
 import tempfile
 from pathlib import Path
+from types import ModuleType
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -21,6 +23,13 @@ from dnn_benchmarking.reporting.suite_results import (
     SuiteResult,
     TimingStats,
 )
+
+
+def _mock_hipdnn():
+    """Create a mock hipdnn_frontend module with a Handle class."""
+    mock_module = ModuleType("hipdnn_frontend")
+    mock_module.Handle = MagicMock  # type: ignore[attr-defined]
+    return mock_module
 
 
 class TestParserGlobAndFilters:
@@ -192,6 +201,7 @@ class TestRunSuiteWorkflow:
 
     @patch("dnn_benchmarking.cli.main.run_graph_all_providers")
     @patch("dnn_benchmarking.cli.main.collect_environment_info")
+    @patch.dict(sys.modules, {"hipdnn_frontend": _mock_hipdnn()})
     def test_all_pass_returns_zero(
         self, mock_env: MagicMock, mock_run: MagicMock
     ) -> None:
@@ -218,6 +228,7 @@ class TestRunSuiteWorkflow:
 
     @patch("dnn_benchmarking.cli.main.run_graph_all_providers")
     @patch("dnn_benchmarking.cli.main.collect_environment_info")
+    @patch.dict(sys.modules, {"hipdnn_frontend": _mock_hipdnn()})
     def test_one_failure_still_processes_second(
         self, mock_env: MagicMock, mock_run: MagicMock
     ) -> None:
@@ -247,6 +258,7 @@ class TestRunSuiteWorkflow:
 
     @patch("dnn_benchmarking.cli.main.run_graph_all_providers")
     @patch("dnn_benchmarking.cli.main.collect_environment_info")
+    @patch.dict(sys.modules, {"hipdnn_frontend": _mock_hipdnn()})
     def test_correctness_failure_returns_two(
         self, mock_env: MagicMock, mock_run: MagicMock
     ) -> None:
@@ -288,6 +300,7 @@ class TestRunSuiteWorkflow:
 
     @patch("dnn_benchmarking.cli.main.run_graph_all_providers")
     @patch("dnn_benchmarking.cli.main.collect_environment_info")
+    @patch.dict(sys.modules, {"hipdnn_frontend": _mock_hipdnn()})
     def test_json_output_written_when_output_specified(
         self, mock_env: MagicMock, mock_run: MagicMock
     ) -> None:
@@ -308,13 +321,14 @@ class TestRunSuiteWorkflow:
             config = SuiteConfig()
             run_suite(paths, config, output_path=output_file)
 
-        assert output_file.exists()
-        data = json.loads(output_file.read_text())
-        assert "metadata" in data
-        assert "graphs" in data
+            assert output_file.exists()
+            data = json.loads(output_file.read_text())
+            assert "metadata" in data
+            assert "graphs" in data
 
     @patch("dnn_benchmarking.cli.main.run_graph_all_providers")
     @patch("dnn_benchmarking.cli.main.collect_environment_info")
+    @patch.dict(sys.modules, {"hipdnn_frontend": _mock_hipdnn()})
     def test_no_json_output_when_output_not_specified(
         self, mock_env: MagicMock, mock_run: MagicMock
     ) -> None:
@@ -339,6 +353,7 @@ class TestRunSuiteWorkflow:
 
     @patch("dnn_benchmarking.cli.main.run_graph_all_providers")
     @patch("dnn_benchmarking.cli.main.collect_environment_info")
+    @patch.dict(sys.modules, {"hipdnn_frontend": _mock_hipdnn()})
     def test_warmup_iters_passed_per_graph(
         self, mock_env: MagicMock, mock_run: MagicMock
     ) -> None:
@@ -367,6 +382,7 @@ class TestRunSuiteWorkflow:
 
     @patch("dnn_benchmarking.cli.main.run_graph_all_providers")
     @patch("dnn_benchmarking.cli.main.collect_environment_info")
+    @patch.dict(sys.modules, {"hipdnn_frontend": _mock_hipdnn()})
     def test_graph_load_error_continues_to_next(
         self, mock_env: MagicMock, mock_run: MagicMock
     ) -> None:

@@ -395,6 +395,67 @@ class Reporter:
 
     # Reference Validation Methods
 
+    # Suite Methods
+
+    def print_suite_header(self, total_graphs: int) -> None:
+        """Print suite execution header (per D-17)."""
+        self._print_line("=")
+        self._print(f"hipDNN Benchmark Suite: {total_graphs} graph(s)")
+        self._print_line("=")
+        self._print("")
+
+    def print_suite_graph_start(
+        self, index: int, total: int, graph_name: str
+    ) -> None:
+        """Print per-graph progress line at start (per D-17).
+
+        Format: [1/3] graph_name...
+        """
+        self._print(f"[{index}/{total}] {graph_name}...")
+
+    def print_suite_graph_result(
+        self, passed: int, failed: int, skipped: int, errored: int
+    ) -> None:
+        """Print per-graph result summary line (per D-17).
+
+        Format:   -> 2 passed, 1 failed, 0 skipped, 0 errored
+        """
+        self._print(
+            f"  -> {passed} passed, {failed} failed, "
+            f"{skipped} skipped, {errored} errored"
+        )
+
+    def print_suite_graph_error(self, graph_name: str, error: str) -> None:
+        """Print inline error when a graph fails to load/execute (per D-08).
+
+        Prints error then continues (caller must not abort).
+        """
+        self._print(f"  ERROR: {error}")
+
+    def print_suite_summary(
+        self,
+        total_graphs: int,
+        total_combinations: int,
+        pass_count: int,
+        fail_count: int,
+        skip_count: int,
+        error_count: int,
+    ) -> None:
+        """Print suite execution summary."""
+        self._print("")
+        self._print_line("-")
+        self._print("Suite Summary:")
+        self._print(f"  Graphs:       {total_graphs}")
+        self._print(f"  Combinations: {total_combinations}")
+        self._print(f"  Passed:       {pass_count}")
+        self._print(f"  Failed:       {fail_count}")
+        self._print(f"  Skipped:      {skip_count}")
+        self._print(f"  Errors:       {error_count}")
+
+    def print_suite_footer(self) -> None:
+        """Print suite footer."""
+        self._print_line("=")
+
     def print_reference_validation(
         self,
         provider_name: str,
