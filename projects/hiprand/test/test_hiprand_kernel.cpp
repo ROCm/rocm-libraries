@@ -728,10 +728,8 @@ void hiprand_kernel_h_hiprand_sobol_init_test()
     const unsigned int dimensions = 8;
 
     DirectionVectors_t<int_type>* d_vector;
-    int_type*                     d_constants;
 
 	load_sobol_vectors_to_gpu<state_type, int_type>(dimensions, &d_vector);
-	d_constants = NULL;
 
     unsigned long long offset = 4;
 
@@ -746,7 +744,6 @@ void hiprand_kernel_h_hiprand_sobol_init_test()
     HIP_CHECK(hipDeviceSynchronize());
     HIP_CHECK(hipFree(states));
     HIP_CHECK(hipFree(d_vector));
-    HIP_CHECK(hipFree(d_constants));
 }
 
 template<class state_type>
@@ -1429,19 +1426,8 @@ void hiprand_kernel_h_hiprand_log_normal_sobol_test()
     const unsigned int dimensions = 8;
 
     DirectionVectors_t<int_type>* d_vector;
-    int_type*                     d_constants;
 
-    if(is_sobol_scrambled<state_type>::value)
-    {
-        load_scrambled_sobol_constants_and_vectors_to_gpu<state_type, int_type>(dimensions,
-                                                                                &d_vector,
-                                                                                &d_constants);
-    }
-    else
-    {
-        load_sobol_vectors_to_gpu<state_type, int_type>(dimensions, &d_vector);
-        d_constants = NULL;
-    }
+    load_sobol_vectors_to_gpu<state_type, int_type>(dimensions, &d_vector);
 
     const size_t output_size = 8192;
     float*       output;
@@ -1458,10 +1444,7 @@ void hiprand_kernel_h_hiprand_log_normal_sobol_test()
     HIP_CHECK(hipDeviceSynchronize());
     HIP_CHECK(hipFree(output));
     HIP_CHECK(hipFree(d_vector));
-    if(is_sobol_scrambled<state_type>::value)
-    {
-        HIP_CHECK(hipFree(d_constants));
-    }
+
     double mean = 0;
     for(auto v : output_host)
     {
@@ -1617,7 +1600,7 @@ void hiprand_kernel_h_sobol()
     const size_t       output_size         = dimensions * items_per_dimension;
 
     DirectionVectors_t<T>* d_vector;
-    T*                     d_constants;
+    T*                     d_constants = nullptr;
     T*                     d_output;
 
     HIP_CHECK(hipMallocHelper(reinterpret_cast<void**>(&d_output), output_size * sizeof(T)));
@@ -1632,7 +1615,6 @@ void hiprand_kernel_h_sobol()
     else
     {
         load_sobol_vectors_to_gpu<S, T>(dimensions, &d_vector);
-        d_constants = NULL;
     }
     HIP_CHECK(hipDeviceSynchronize());
 
@@ -1645,11 +1627,7 @@ void hiprand_kernel_h_sobol()
 
     HIP_CHECK(hipFree(d_output));
     HIP_CHECK(hipFree(d_vector));
-
-    if(is_sobol_scrambled<S>::value)
-    {
-        HIP_CHECK(hipFree(d_constants));
-    }
+    HIP_CHECK(hipFree(d_constants));
 
     const double int_type_max = (double)std::numeric_limits<T>::max();
 
