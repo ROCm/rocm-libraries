@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Compare ML predictions against oracle benchmark results for backward passes (BWD_DATA, BWD_WEIGHT).
+Compare ML predictions against oracle benchmark results for grouped convolution (FORWARD, BWD_DATA, BWD_WEIGHT).
 
 This script:
-1. Loads ML model predictions for 10 validation problems
+1. Loads ML model predictions for validation problems
 2. Loads oracle results from validation_{variant}_bf16_gfx950.csv (when available)
 3. Computes efficiency metrics: how close is ML's top-1 pick to oracle's best?
 4. Optionally runs ML-picked kernels on hardware for actual TFLOPS measurement (--run-ml-hw)
@@ -22,34 +22,32 @@ _THIS_DIR = Path(__file__).resolve().parent
 _DISPATCHER_ROOT = _THIS_DIR.parents[2] / "dispatcher"
 sys.path.insert(0, str(_DISPATCHER_ROOT / "python"))
 sys.path.insert(0, str(_DISPATCHER_ROOT / "heuristics"))
+sys.path.insert(0, str(_DISPATCHER_ROOT / "codegen"))
 sys.path.insert(0, str(_THIS_DIR / "problems"))
 
 from predict import Predictor
 from feature_engine_grouped_conv import GroupedConvFeatureEngine
+from grouped_config_rules import COMMON_TILES, VARIANT_PIPELINES
 
-# Backward kernels (20 total)
-BACKWARD_KERNELS = [
-    {'block_size': 16, 'gemm_m_per_block': 64, 'gemm_n_per_block': 64, 'pipeline': 'compv3'},
-    {'block_size': 16, 'gemm_m_per_block': 64, 'gemm_n_per_block': 64, 'pipeline': 'mem'},
-    {'block_size': 16, 'gemm_m_per_block': 64, 'gemm_n_per_block': 128, 'pipeline': 'compv3'},
-    {'block_size': 16, 'gemm_m_per_block': 64, 'gemm_n_per_block': 128, 'pipeline': 'mem'},
-    {'block_size': 32, 'gemm_m_per_block': 64, 'gemm_n_per_block': 64, 'pipeline': 'compv3'},
-    {'block_size': 32, 'gemm_m_per_block': 64, 'gemm_n_per_block': 64, 'pipeline': 'mem'},
-    {'block_size': 32, 'gemm_m_per_block': 64, 'gemm_n_per_block': 128, 'pipeline': 'compv3'},
-    {'block_size': 32, 'gemm_m_per_block': 64, 'gemm_n_per_block': 128, 'pipeline': 'mem'},
-    {'block_size': 32, 'gemm_m_per_block': 128, 'gemm_n_per_block': 64, 'pipeline': 'compv3'},
-    {'block_size': 32, 'gemm_m_per_block': 128, 'gemm_n_per_block': 64, 'pipeline': 'mem'},
-    {'block_size': 64, 'gemm_m_per_block': 64, 'gemm_n_per_block': 64, 'pipeline': 'compv3'},
-    {'block_size': 64, 'gemm_m_per_block': 64, 'gemm_n_per_block': 64, 'pipeline': 'mem'},
-    {'block_size': 64, 'gemm_m_per_block': 64, 'gemm_n_per_block': 128, 'pipeline': 'compv3'},
-    {'block_size': 64, 'gemm_m_per_block': 64, 'gemm_n_per_block': 128, 'pipeline': 'mem'},
-    {'block_size': 64, 'gemm_m_per_block': 128, 'gemm_n_per_block': 64, 'pipeline': 'compv3'},
-    {'block_size': 64, 'gemm_m_per_block': 128, 'gemm_n_per_block': 64, 'pipeline': 'mem'},
-    {'block_size': 128, 'gemm_m_per_block': 64, 'gemm_n_per_block': 128, 'pipeline': 'compv3'},
-    {'block_size': 128, 'gemm_m_per_block': 64, 'gemm_n_per_block': 128, 'pipeline': 'mem'},
-    {'block_size': 128, 'gemm_m_per_block': 128, 'gemm_n_per_block': 64, 'pipeline': 'compv3'},
-    {'block_size': 128, 'gemm_m_per_block': 128, 'gemm_n_per_block': 64, 'pipeline': 'mem'},
-]
+
+def get_kernel_pool(variant: str) -> list:
+    """Get kernel pool for a variant from single source of truth.
+
+    Returns list of dicts with keys: block_size, gemm_m_per_block, gemm_n_per_block, pipeline
+    """
+    kernels = []
+    pipelines = VARIANT_PIPELINES.get(variant, [])
+
+    for tile_m, tile_n, tile_k in COMMON_TILES:
+        for pipeline in pipelines:
+            kernels.append({
+                'block_size': tile_m,
+                'gemm_m_per_block': tile_n,
+                'gemm_n_per_block': tile_k,
+                'pipeline': pipeline
+            })
+
+    return kernels
 
 
 def problem_to_dict(p):
@@ -70,14 +68,14 @@ def format_problem(p):
             f"f{p.Y}x{p.X}")
 
 
-def kernel_to_name(kernel, variant='bwd_data', short=False):
+def kernel_to_name(kernel, variant='forward', short=False):
     """Convert kernel dict to name.
 
     Args:
         kernel: Kernel configuration dict
-        variant: 'bwd_data' or 'bwd_weight'
+        variant: 'forward', 'bwd_data', or 'bwd_weight'
         short: If True, return short name (e.g., "16x64x64_compv3")
-               If False, return oracle name (e.g., "grouped_conv_bwd_data_bf16_2d_16x64x64_compv3")
+               If False, return oracle name (e.g., "grouped_conv_forward_bf16_2d_16x64x64_compv3")
     """
     tile_name = f"{kernel['block_size']}x{kernel['gemm_m_per_block']}x{kernel['gemm_n_per_block']}"
     pipeline = kernel['pipeline']
@@ -115,6 +113,76 @@ def load_oracle_results(csv_path):
     return dict(results)
 
 
+def run_oracle_benchmark(variant, output_csv):
+    """Run full oracle benchmark to generate CSV results.
+
+    Args:
+        variant: 'forward', 'bwd_data', or 'bwd_weight'
+        output_csv: Path to output CSV file
+
+    Returns:
+        bool: True if benchmark succeeded, False otherwise
+    """
+    print(f"  Starting oracle benchmark for {variant}...")
+    print(f"  Output: {output_csv}")
+    print()
+
+    # Determine config path (try _bf16 suffix first, then without)
+    config_path = _THIS_DIR / "configs" / f"{variant}_bf16.json"
+    if not config_path.exists():
+        config_path = _THIS_DIR / "configs" / f"{variant}.json"
+        if not config_path.exists():
+            print(f"  ✗ Config file not found: {config_path}")
+            return False
+
+    # Problem set name
+    problems_module = f"{variant}_test_validation"
+
+    # Run benchmark script
+    benchmark_script = _THIS_DIR / "grouped_conv_full_benchmark.py"
+
+    cmd = [
+        sys.executable,
+        str(benchmark_script),
+        str(config_path),
+        "--arch", "gfx950",
+        "--problems", problems_module,
+        "--csv", str(output_csv),
+        "--workers", "8",
+        "--batch-size", "10"
+    ]
+
+    try:
+        print(f"  Running: {' '.join(cmd)}")
+        print()
+
+        result = subprocess.run(
+            cmd,
+            cwd=_THIS_DIR,
+            capture_output=False,  # Show output in real-time
+            text=True,
+            timeout=3600  # 1 hour timeout
+        )
+
+        if result.returncode == 0:
+            print()
+            print(f"  ✓ Benchmark completed successfully")
+            return True
+        else:
+            print()
+            print(f"  ✗ Benchmark failed with exit code {result.returncode}")
+            return False
+
+    except subprocess.TimeoutExpired:
+        print()
+        print(f"  ✗ Benchmark timed out after 1 hour")
+        return False
+    except Exception as e:
+        print()
+        print(f"  ✗ Benchmark error: {e}")
+        return False
+
+
 def find_kernel_so_path(kernel_name, arch='gfx950'):
     """Find the .so path for a compiled kernel.
 
@@ -147,13 +215,14 @@ def find_kernel_so_path(kernel_name, arch='gfx950'):
     return None
 
 
-def run_ml_kernel_on_hw(problem_idx, problem, kernel_name):
+def run_ml_kernel_on_hw(problem_idx, problem, kernel_name, variant='forward'):
     """Run a specific ML-picked kernel on hardware.
 
     Args:
         problem_idx: Problem index
         problem: GroupedConvProblem object
         kernel_name: Kernel name (e.g., "32x128x64_compv3")
+        variant: 'forward', 'bwd_data', or 'bwd_weight'
 
     Returns:
         dict: {'status': 'SUCCESS'/'FAIL', 'tflops': float, 'latency_ms': float, 'error': str}
@@ -170,7 +239,7 @@ def run_ml_kernel_on_hw(problem_idx, problem, kernel_name):
         'Hi': problem.Hi, 'Wi': problem.Wi, 'Y': problem.Y, 'X': problem.X,
         'stride_h': problem.stride_h, 'stride_w': problem.stride_w,
         'pad_h': problem.pad_h, 'pad_w': problem.pad_w,
-        'direction': 'bwd_data'
+        'direction': variant
     }
 
     # Run via subprocess
@@ -223,8 +292,8 @@ def run_ml_kernel_on_hw(problem_idx, problem, kernel_name):
 
 def main():
     parser = argparse.ArgumentParser(description="Validate ML heuristic predictions against oracle")
-    parser.add_argument('--variant', choices=['bwd_data', 'bwd_weight'], default='bwd_data',
-                       help='Variant to validate (bwd_data or bwd_weight)')
+    parser.add_argument('--variant', choices=['forward', 'bwd_data', 'bwd_weight'], default='forward',
+                       help='Variant to validate (forward, bwd_data, or bwd_weight)')
     parser.add_argument('--run-ml-hw', action='store_true',
                        help='Run ML-picked kernels on hardware for actual TFLOPS measurement')
     args = parser.parse_args()
@@ -232,7 +301,9 @@ def main():
     variant = args.variant
 
     # Load appropriate validation problems
-    if variant == 'bwd_data':
+    if variant == 'forward':
+        from forward_test_validation import VALIDATION_PROBLEMS_FORWARD as validation_problems
+    elif variant == 'bwd_data':
         from bwd_data_test_validation import VALIDATION_PROBLEMS_BWD_DATA as validation_problems
     else:  # bwd_weight
         from bwd_weight_test_validation import VALIDATION_PROBLEMS_BWD_WEIGHT as validation_problems
@@ -263,14 +334,28 @@ def main():
     oracle_results = load_oracle_results(oracle_csv)
 
     if oracle_results is None:
-        if args.run_ml_hw:
-            print(f"ERROR: Oracle results required for --run-ml-hw mode: {oracle_csv}")
-            print("Please run the oracle benchmark first.")
-            sys.exit(1)
-        print(f"  ⚠  Oracle results not yet available: {oracle_csv}")
-        print("  ⚠  Will only show ML predictions (waiting for oracle benchmark to complete)")
+        print(f"  ⚠  Oracle results not found: {oracle_csv}")
+        print(f"  ⚠  Running full benchmark to generate oracle results...")
         print()
-        mode = "prediction_only"
+
+        # Run benchmark to generate oracle CSV
+        success = run_oracle_benchmark(variant, oracle_csv)
+
+        if not success:
+            print(f"  ✗ Benchmark failed. Continuing in prediction-only mode.")
+            print()
+            mode = "prediction_only"
+        else:
+            # Try loading again
+            oracle_results = load_oracle_results(oracle_csv)
+            if oracle_results is None:
+                print(f"  ✗ Failed to load oracle results after benchmark.")
+                mode = "prediction_only"
+            else:
+                print(f"  ✓ Oracle results loaded: {oracle_csv}")
+                print(f"  ✓ Oracle benchmarks: {sum(len(v) for v in oracle_results.values())} kernel measurements")
+                print()
+                mode = "hardware" if args.run_ml_hw else "comparison"
     else:
         print(f"  ✓ Oracle results loaded: {oracle_csv}")
         print(f"  ✓ Oracle benchmarks: {sum(len(v) for v in oracle_results.values())} kernel measurements")
@@ -290,13 +375,16 @@ def main():
 
     efficiencies = []
 
+    # Get kernel pool for this variant
+    kernel_pool = get_kernel_pool(variant)
+
     for idx, problem in enumerate(validation_problems):
         prob_str = format_problem(problem)
         prob_dict = problem_to_dict(problem)
 
         # Get ML predictions
         predictions = []
-        for kernel in BACKWARD_KERNELS:
+        for kernel in kernel_pool:
             pred_tflops = predictor.predict_tflops(prob_dict, kernel)
             predictions.append({
                 'kernel': kernel,
@@ -320,7 +408,7 @@ def main():
             oracle_short = oracle_best_name.replace('grouped_conv_bwd_data_bf16_2d_', '') if oracle_best_name != 'N/A' else 'N/A'
 
             # Run ML pick on hardware
-            hw_result = run_ml_kernel_on_hw(idx, problem, ml_short_name)
+            hw_result = run_ml_kernel_on_hw(idx, problem, ml_short_name, variant)
 
             if hw_result['status'] == 'SUCCESS':
                 ml_hw_tflops = hw_result['tflops']

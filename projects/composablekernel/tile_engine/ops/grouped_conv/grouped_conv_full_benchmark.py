@@ -110,10 +110,12 @@ def main():
         from bwd_weight_test_validation import VALIDATION_PROBLEMS_BWD_WEIGHT as problems
     elif args.problems == "forward_training":
         from forward_training import TRAINING_PROBLEMS_FORWARD as problems
+    elif args.problems == "forward_test_validation":
+        from forward_test_validation import VALIDATION_PROBLEMS_FORWARD as problems
     elif args.problems == "forward_validation_model_crawler_100":
         from forward_validation_model_crawler_100 import VALIDATION_PROBLEMS_FORWARD_MODEL_CRAWLER_100 as problems
     else:
-        raise ValueError(f"Unknown problem set: {args.problems}. Available: forward_training, forward_validation_model_crawler_100, bwd_data_synthetic_extended, bwd_data_test_validation, bwd_weight_synthetic_extended, bwd_weight_test_validation")
+        raise ValueError(f"Unknown problem set: {args.problems}. Available: forward_training, forward_test_validation, forward_validation_model_crawler_100, bwd_data_synthetic_extended, bwd_data_test_validation, bwd_weight_synthetic_extended, bwd_weight_test_validation")
 
     print(f"  Problems: {len(problems)}")
     print(f"  Total measurements: {len(built_kernels)} x {len(problems)} = {len(built_kernels) * len(problems)}")
