@@ -36,10 +36,12 @@ struct ConvSolution;
 struct CKKernelListHandle;
 
 // ---------------------------------------------------------------------------
-// DLL export macro for Windows
+// DLL/SO export macro
 // ---------------------------------------------------------------------------
 #if defined(_WIN32) && defined(CK_IMPL_BUILDING_DLL)
 #define CK_IMPL_API __declspec(dllexport)
+#elif defined(CK_IMPL_BUILDING_DLL)
+#define CK_IMPL_API __attribute__((visibility("default")))
 #else
 #define CK_IMPL_API
 #endif
