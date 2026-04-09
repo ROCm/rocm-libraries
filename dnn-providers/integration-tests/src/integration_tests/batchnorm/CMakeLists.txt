@@ -7,4 +7,7 @@ target_sources(${INTEGRATION_TESTS_EXE}
         IntegrationGpuBatchnormBackwardActivation.cpp
         IntegrationGpuBatchnormForwardInference.cpp
         IntegrationGpuBatchnormForwardTraining.cpp
+        IntegrationGpuBatchnormFwdInferenceVarianceActiv.cpp
+        IntegrationGpuBatchnormFwdPlusActive.cpp
+        IntegrationGpuBatchnormFwdTrainingActiv.cpp
 )
