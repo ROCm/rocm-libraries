@@ -129,7 +129,22 @@ float conv_bwdw_run(const void* input_ptr,
         return -1.0f;
     if(!input_ptr || !grad_output_ptr || !grad_weight_ptr)
         return -1.0f; // Null data pointer would cause kernel crash
-    return run_bwd_weight_impl(input_ptr, grad_output_ptr, grad_weight_ptr, prob, stream);
+
+    try
+    {
+        return run_bwd_weight_impl(input_ptr, grad_output_ptr, grad_weight_ptr, prob, stream);
+    }
+    catch(const std::exception& e)
+    {
+        // Catch C++ exceptions to prevent undefined behavior across extern "C" boundary
+        // Log error if possible, return negative value to indicate failure
+        return -2.0f; // Different error code to distinguish from validation failures
+    }
+    catch(...)
+    {
+        // Catch any non-standard exceptions
+        return -3.0f;
+    }
 #else
     return -1.0f;
 #endif
