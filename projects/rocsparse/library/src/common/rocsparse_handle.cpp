@@ -101,15 +101,15 @@ _rocsparse_handle::_rocsparse_handle()
         THROW_IF_HIP_ERROR(hipMemsetAsync(sone, 0, sizeof(float) * 2, stream));
         THROW_IF_HIP_ERROR(hipMemsetAsync(done, 0, sizeof(double) * 2, stream));
 
-	const float  s_value = 1.0f;
-	const double d_value = 1.0;
-	THROW_IF_HIP_ERROR(
-        rocsparse_hipMemcpyAsync(sone, &s_value, sizeof(float), hipMemcpyHostToDevice, stream));
-	THROW_IF_HIP_ERROR(
-			   rocsparse_hipMemcpyAsync(done, &d_value, sizeof(double), hipMemcpyHostToDevice, stream));
+        const float  s_value = 1.0f;
+        const double d_value = 1.0;
+        THROW_IF_HIP_ERROR(
+            rocsparse_hipMemcpyAsync(sone, &s_value, sizeof(float), hipMemcpyHostToDevice, stream));
+        THROW_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
+            done, &d_value, sizeof(double), hipMemcpyHostToDevice, stream));
 
-	// Wait for device transfer to finish
-	THROW_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(stream));
+        // Wait for device transfer to finish
+        THROW_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(stream));
 
         // create blas handle
         rocsparse::blas_impl blas_impl;
