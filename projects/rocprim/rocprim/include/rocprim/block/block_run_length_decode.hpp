@@ -360,7 +360,7 @@ public:
                 {
                     current_run++;
                 }
-                current_run_end   = temp_storage.runs.run_offsets[current_run];
+                current_run_end = temp_storage.runs.run_offsets[current_run];
             }
 
             // Decode the current run by storing the run's value
