@@ -1549,7 +1549,6 @@ miopenMathType_t ConvolutionDescriptor::GetMathType() const
     return static_cast<miopenMathType_t>(this->attribute.Get(MIOPEN_CONVOLUTION_ATTRIB_MATH_TYPE));
 }
 
-
 bool EnvEnableTF32()
 {
     // disable TF32 by default temporarily until we fully complete this feature.

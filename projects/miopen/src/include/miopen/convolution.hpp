@@ -405,7 +405,6 @@ private:
     void ValidateTensors(const ConvTensors& conv_tensors) const;
 };
 
-
 MIOPEN_INTERNALS_EXPORT Invoker LoadOrPrepareInvoker(const ExecutionContext& ctx,
                                                      const conv::ProblemDescription& problem,
                                                      solver::Id solver_id);
