@@ -136,14 +136,6 @@ install(FILES "${INSTALLED_CTEST_FILE}" DESTINATION ${HIPDNN_SAMPLES_CTEST_FILE_
 # =============================================================================
 include(ExternalProject)
 
-message(STATUS "example_engine_plugin: CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}")
-message(STATUS "example_engine_plugin: CMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}")
-message(STATUS "example_engine_plugin: CMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}")
-message(STATUS "example_engine_plugin: CMAKE_MAKE_PROGRAM=${CMAKE_MAKE_PROGRAM}")
-message(STATUS "example_engine_plugin: HIP_PLATFORM=${HIP_PLATFORM}")
-message(STATUS "example_engine_plugin: hip_DIR=${hip_DIR}")
-message(STATUS "example_engine_plugin: hiprtc_DIR=${hiprtc_DIR}")
-
 ExternalProject_Add(example_engine_plugin
     SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/example_engine_plugin
     CMAKE_CACHE_ARGS
@@ -156,6 +148,8 @@ ExternalProject_Add(example_engine_plugin
         "-DHIP_PLATFORM:STRING=${HIP_PLATFORM}"
         "-Dhip_DIR:PATH=${hip_DIR}"
         "-Dhiprtc_DIR:PATH=${hiprtc_DIR}"
+        "-Dflatbuffers_DIR:PATH=${flatbuffers_DIR}"
+        "-Dnlohmann_json_DIR:PATH=${nlohmann_json_DIR}"
     INSTALL_COMMAND ""
 )
 
