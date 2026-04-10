@@ -49,4 +49,4 @@ target_compile_options(hipdnn_gpu_ref_tests
 
 clang_tidy_check(hipdnn_gpu_ref_tests)
 
-add_unit_test_target(hipdnn_gpu_ref_tests ${CMAKE_CURRENT_BINARY_DIR})
+add_integration_test_target(hipdnn_gpu_ref_tests ${CMAKE_CURRENT_BINARY_DIR} LABELS slow)

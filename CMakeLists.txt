@@ -102,6 +102,19 @@ foreach(component ${ROCM_LIBS_ENABLE_COMPONENTS})
     endif()
 endforeach()
 
+# Determine if CTest should be enabled at the root superbuild project level.
+# If enabled, this must be done BEFORE any add_subdirectory() calls so that tests
+# registered in subprojects are visible to root-level ctest.
+# Note: The environment variable is checked for only the FIRST configure; the cache
+# value is used exclusively after that.
+set(_root_ctest_env_default "$ENV{ROCM_LIBS_ENABLE_ROOT_CTEST}")
+option(ROCM_LIBS_ENABLE_ROOT_CTEST "Enable CTest at the root superbuild level" "${_root_ctest_env_default}")
+if(ROCM_LIBS_ENABLE_ROOT_CTEST)
+    message(STATUS "CTest test aggregation is enabled at the root superbuild level")
+    enable_testing()
+    include(CTest)
+endif()
+
 # --- Add subdirectories ---
 if("mxdatagenerator" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
     add_subdirectory_with_message(

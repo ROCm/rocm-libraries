@@ -83,6 +83,14 @@
             }
         },
         {
+            "name": "hipdnn-providers",
+            "description": "Build hipdnn, all supported providers, and integration tests",
+            "inherits": ["default:release"],
+            "cacheVariables": {
+                "ROCM_LIBS_ENABLE_COMPONENTS": "hipdnn;hipdnn-integration-tests;miopen-provider;hipblaslt-provider"
+            }
+        },
+        {
             "name": "hipblaslt-provider",
             "description": "Build hipdnn and hipblaslt-provider",
             "inherits": ["default:release"],
