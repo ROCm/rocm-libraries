@@ -7041,6 +7041,7 @@ inline hipsolverStatus_t hipsolver_syevd_heevd_bufferSize(testAPI_t           AP
     case API_COMPAT:
         return hipsolverDnSsyevd_bufferSize(handle, jobz, uplo, n, A, lda, W, lworkOnDevice);
     default:
+        *lworkOnDevice = 0;
         return HIPSOLVER_STATUS_NOT_SUPPORTED;
     }
 }
@@ -7067,6 +7068,7 @@ inline hipsolverStatus_t hipsolver_syevd_heevd_bufferSize(testAPI_t           AP
     case API_COMPAT:
         return hipsolverDnDsyevd_bufferSize(handle, jobz, uplo, n, A, lda, W, lworkOnDevice);
     default:
+        *lworkOnDevice = 0;
         return HIPSOLVER_STATUS_NOT_SUPPORTED;
     }
 }
@@ -7096,6 +7098,7 @@ inline hipsolverStatus_t hipsolver_syevd_heevd_bufferSize(testAPI_t           AP
         return hipsolverDnCheevd_bufferSize(
             handle, jobz, uplo, n, (hipFloatComplex*)A, lda, W, lworkOnDevice);
     default:
+        *lworkOnDevice = 0;
         return HIPSOLVER_STATUS_NOT_SUPPORTED;
     }
 }
@@ -7125,6 +7128,7 @@ inline hipsolverStatus_t hipsolver_syevd_heevd_bufferSize(testAPI_t             
         return hipsolverDnZheevd_bufferSize(
             handle, jobz, uplo, n, (hipDoubleComplex*)A, lda, W, lworkOnDevice);
     default:
+        *lworkOnDevice = 0;
         return HIPSOLVER_STATUS_NOT_SUPPORTED;
     }
 }
