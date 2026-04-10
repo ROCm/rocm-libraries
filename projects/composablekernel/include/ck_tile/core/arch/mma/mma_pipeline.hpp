@@ -77,18 +77,6 @@ constexpr bool operator==(MmaPipelineOptionFlags::Type lhs, const MmaPipelineOpt
     return rhs == lhs;
 }
 
-namespace {
-template <typename T>
-struct is_tuple : std::false_type
-{
-};
-
-template <typename... Args>
-struct is_tuple<std::tuple<Args...>> : std::true_type
-{
-};
-} // namespace
-
 // TODO: c++20: use MmaPipelineOptionFlags directly
 template <MmaPipelineOptionFlags::Type Flags_, typename Derived>
 struct MmaPipelineBase
@@ -116,7 +104,7 @@ struct MmaPipelineBase
 
         // If SrcT is a tuple, extract the first element (the vector) and format it
         // while preserving all remaining elements (metadata)
-        if constexpr(is_tuple<DecayedSrcT>::value)
+        if constexpr(is_std_tuple_v<DecayedSrcT>)
         {
             // Create index sequence for all remaining elements (skip first)
             constexpr std::size_t tuple_size = std::tuple_size_v<DecayedSrcT>;
@@ -180,7 +168,7 @@ struct MmaPipelineBase
     applyTransformToOutput(std::tuple<ATransformResult, BTransformResult, CTransformResult>&& vecs)
     {
         auto&& [a_result, b_result, c_result] = vecs;
-        static_assert(!is_tuple<decltype(c_result)>::value,
+        static_assert(!is_std_tuple_v<decltype(c_result)>,
                       "If CTransform returns more than the vector, update this function.");
 
         using CVecT      = typename Derived::CVecType;
