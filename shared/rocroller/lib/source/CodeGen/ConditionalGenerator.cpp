@@ -1,13 +1,12 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-#include <rocRoller/CodeGen/ExecuteMaskGenerator.hpp>
+#include <rocRoller/CodeGen/ConditionalGenerator.hpp>
 
 #include <rocRoller/CodeGen/BranchGenerator.hpp>
 #include <rocRoller/CodeGen/CopyGenerator.hpp>
 #include <rocRoller/Context.hpp>
 #include <rocRoller/Expression.hpp>
-#include <rocRoller/ExpressionTransformations.hpp>
 #include <rocRoller/InstructionValues/LabelAllocator.hpp>
 #include <rocRoller/InstructionValues/Register.hpp>
 #include <rocRoller/Utilities/Error.hpp>
@@ -21,24 +20,91 @@ namespace rocRoller
     {
         namespace Expression = rocRoller::Expression;
 
-        ExecuteMaskGenerator::ExecuteMaskGenerator(ContextPtr context)
+        static Register::ValuePtr MakeScalarBool(ContextPtr context, uint32_t wavefrontSize)
+        {
+            auto dataType = wavefrontSize == 64 ? DataType::Bool64 : DataType::Bool32;
+            return std::make_shared<Register::Value>(
+                context,
+                Register::Type::Scalar,
+                dataType,
+                1,
+                Register::AllocationOptions::FullyContiguous());
+        }
+
+        ConditionalGenerator::ConditionalGenerator(ContextPtr context)
             : m_context(context)
-            , m_fastArith(Expression::FastArithmetic(context))
         {
         }
 
         Generator<Instruction>
-            ExecuteMaskGenerator::genExec(Expression::ExpressionPtr               condition,
+            ConditionalGenerator::genBranch(Expression::ExpressionPtr               condition,
+                                            std::string const&                      conditionName,
+                                            std::function<Generator<Instruction>()> trueBodyFn,
+                                            std::function<Generator<Instruction>()> elseBodyFn)
+        {
+            Log::debug("ConditionalGenerator::genBranch({})", conditionName);
+
+            auto falseLabel = m_context->labelAllocator()->label(
+                fmt::format("ConditionalFalse_{}", conditionName));
+            auto botLabel = m_context->labelAllocator()->label(
+                fmt::format("ConditionalBottom_{}", conditionName));
+
+            co_yield Instruction::Lock(Scheduling::Dependency::Branch,
+                                       "Lock for Conditional Branch");
+
+            auto conditionResult = m_context->brancher()->resultRegister(condition);
+            co_yield Expression::generate(conditionResult, condition, m_context);
+            // -------------------------------------------------------------------------------
+            // TODO: remove this once we better handle data-flow across branches
+            {
+                co_yield Instruction::Wait(
+                    WaitCount::Zero(m_context->targetArchitecture(),
+                                    "REMOVEME: Wait before branching into conditional label!"));
+            }
+            // -------------------------------------------------------------------------------
+            co_yield m_context->brancher()->branchIfZero(
+                falseLabel,
+                conditionResult,
+                concatenate("Condition: False, jump to ", falseLabel->toString()));
+            co_yield trueBodyFn();
+            co_yield m_context->brancher()->branch(
+                botLabel, concatenate("Condition: Done, jump to ", botLabel->toString()));
+
+            // -------------------------------------------------------------------------------
+            // TODO: remove this once we better handle data-flow across branches
+            {
+                co_yield Instruction::Wait(WaitCount::Zero(
+                    m_context->targetArchitecture(), "REMOVEME: Wait before conditional label!"));
+            }
+            // -------------------------------------------------------------------------------
+            co_yield Instruction::Label(falseLabel);
+            if(elseBodyFn)
+            {
+                co_yield elseBodyFn();
+            }
+
+            // -------------------------------------------------------------------------------
+            // TODO: remove this once we better handle data-flow across branches
+            {
+                co_yield Instruction::Wait(WaitCount::Zero(
+                    m_context->targetArchitecture(), "REMOVEME: Wait before conditional label!"));
+            }
+            // -------------------------------------------------------------------------------
+            co_yield Instruction::Label(botLabel);
+            co_yield Instruction::Unlock("Unlock Conditional");
+        }
+
+        Generator<Instruction>
+            ConditionalGenerator::genExec(Expression::ExpressionPtr               condition,
                                           std::string const&                      conditionName,
                                           std::function<Generator<Instruction>()> trueBodyFn,
                                           std::function<Generator<Instruction>()> elseBodyFn)
         {
-            Log::debug("ExecuteMaskGenerator::genExec({})", conditionName);
+            Log::debug("ConditionalGenerator::genExec({})", conditionName);
             auto const wavefrontSize = m_context->kernel()->wavefront_size();
             AssertFatal(wavefrontSize == 32 || wavefrontSize == 64, ShowValue(wavefrontSize));
 
-            auto expr = m_fastArith(condition);
-            auto vcc  = m_context->brancher()->resultRegister(expr);
+            auto vcc = m_context->brancher()->resultRegister(condition);
 
             auto regType = vcc->regType();
             auto varType = vcc->variableType();
@@ -52,9 +118,7 @@ namespace rocRoller
 
             co_yield Instruction::Lock(Scheduling::Dependency::Branch, "Lock for Conditional EXEC");
             // code-gen the if-condition
-            co_yield Expression::generate(vcc, expr, m_context);
-
-            Register::ValuePtr sgpr;
+            co_yield Expression::generate(vcc, condition, m_context);
 
             // s_and_saveexec_b{32,64}: Calculate bitwise AND on the scalar input and the EXEC mask,
             // store the calculated result into the EXEC mask,
@@ -62,26 +126,9 @@ namespace rocRoller
             // store the original value of the EXEC mask into the scalar destination register.
             // The original EXEC mask is saved to the destination SGPRs before the
             // bitwise operation is performed.
-            if(wavefrontSize == 64)
-            {
-                sgpr = std::make_shared<Register::Value>(
-                    m_context,
-                    Register::Type::Scalar,
-                    DataType::Bool64,
-                    1,
-                    Register::AllocationOptions::FullyContiguous());
-                co_yield_(Instruction("s_and_saveexec_b64", {sgpr}, {vcc}, {}, ""));
-            }
-            else
-            {
-                sgpr = std::make_shared<Register::Value>(
-                    m_context,
-                    Register::Type::Scalar,
-                    DataType::Bool32,
-                    1,
-                    Register::AllocationOptions::FullyContiguous());
-                co_yield_(Instruction("s_and_saveexec_b32", {sgpr}, {vcc}, {}, ""));
-            }
+            auto sgpr     = MakeScalarBool(m_context, wavefrontSize);
+            auto saveExec = wavefrontSize == 64 ? "s_and_saveexec_b64" : "s_and_saveexec_b32";
+            co_yield_(Instruction(saveExec, {sgpr}, {vcc}, {}, ""));
 
             // If there is an else body, save VCC into an SGPR now, before generating the
             // true body.  Nested conditionals inside the true body may overwrite VCC, making
@@ -89,24 +136,7 @@ namespace rocRoller
             Register::ValuePtr savedVcc;
             if(elseBodyFn)
             {
-                if(wavefrontSize == 64)
-                {
-                    savedVcc = std::make_shared<Register::Value>(
-                        m_context,
-                        Register::Type::Scalar,
-                        DataType::Bool64,
-                        1,
-                        Register::AllocationOptions::FullyContiguous());
-                }
-                else
-                {
-                    savedVcc = std::make_shared<Register::Value>(
-                        m_context,
-                        Register::Type::Scalar,
-                        DataType::Bool32,
-                        1,
-                        Register::AllocationOptions::FullyContiguous());
-                }
+                savedVcc = MakeScalarBool(m_context, wavefrontSize);
                 co_yield m_context->copier()->copy(
                     savedVcc, vcc, "Save condition for else transition");
             }
@@ -126,14 +156,9 @@ namespace rocRoller
                 // store the original value of the EXEC mask into the scalar destination register.
                 // Use savedVcc (not vcc) so that nested conditionals in the true body cannot
                 // corrupt the condition used here.
-                if(wavefrontSize == 64)
-                {
-                    co_yield_(Instruction("s_andn1_saveexec_b64", {sgpr}, {savedVcc}, {}, ""));
-                }
-                else
-                {
-                    co_yield_(Instruction("s_andn1_saveexec_b32", {sgpr}, {savedVcc}, {}, ""));
-                }
+                auto andn1SaveExec
+                    = wavefrontSize == 64 ? "s_andn1_saveexec_b64" : "s_andn1_saveexec_b32";
+                co_yield_(Instruction(andn1SaveExec, {sgpr}, {savedVcc}, {}, ""));
                 co_yield elseBodyFn();
             }
 
@@ -143,18 +168,17 @@ namespace rocRoller
             co_yield Instruction::Unlock("Unlock Conditional EXEC");
         }
 
-        Generator<Instruction> ExecuteMaskGenerator::genBranchAndExec(
+        Generator<Instruction> ConditionalGenerator::genBranchAndExec(
             Expression::ExpressionPtr               condition,
             std::string const&                      conditionName,
             std::function<Generator<Instruction>()> trueBodyFn,
             std::function<Generator<Instruction>()> elseBodyFn)
         {
-            Log::debug("ExecuteMaskGenerator::genBranchAndExec({})", conditionName);
+            Log::debug("ConditionalGenerator::genBranchAndExec({})", conditionName);
             auto const wavefrontSize = m_context->kernel()->wavefront_size();
             AssertFatal(wavefrontSize == 32 || wavefrontSize == 64, ShowValue(wavefrontSize));
 
-            auto expr = m_fastArith(condition);
-            auto vcc  = m_context->brancher()->resultRegister(expr);
+            auto vcc = m_context->brancher()->resultRegister(condition);
 
             auto regType = vcc->regType();
             auto varType = vcc->variableType();
@@ -174,9 +198,7 @@ namespace rocRoller
             co_yield Instruction::Lock(Scheduling::Dependency::Branch,
                                        "Lock for Conditional EXECZ");
             // code-gen the if-condition
-            co_yield Expression::generate(vcc, expr, m_context);
-
-            Register::ValuePtr sgpr;
+            co_yield Expression::generate(vcc, condition, m_context);
 
             // s_and_saveexec_b{32,64}: Calculate bitwise AND on the scalar input and the EXEC mask,
             // store the calculated result into the EXEC mask,
@@ -184,26 +206,9 @@ namespace rocRoller
             // store the original value of the EXEC mask into the scalar destination register.
             // The original EXEC mask is saved to the destination SGPRs before the
             // bitwise operation is performed.
-            if(wavefrontSize == 64)
-            {
-                sgpr = std::make_shared<Register::Value>(
-                    m_context,
-                    Register::Type::Scalar,
-                    DataType::Bool64,
-                    1,
-                    Register::AllocationOptions::FullyContiguous());
-                co_yield_(Instruction("s_and_saveexec_b64", {sgpr}, {vcc}, {}, ""));
-            }
-            else
-            {
-                sgpr = std::make_shared<Register::Value>(
-                    m_context,
-                    Register::Type::Scalar,
-                    DataType::Bool32,
-                    1,
-                    Register::AllocationOptions::FullyContiguous());
-                co_yield_(Instruction("s_and_saveexec_b32", {sgpr}, {vcc}, {}, ""));
-            }
+            auto sgpr     = MakeScalarBool(m_context, wavefrontSize);
+            auto saveExec = wavefrontSize == 64 ? "s_and_saveexec_b64" : "s_and_saveexec_b32";
+            co_yield_(Instruction(saveExec, {sgpr}, {vcc}, {}, ""));
 
             auto EXECZ = m_context->getEXECZ();
             // if execz == 1 (set), it means EXEC == 0 i.e. the entire execute mask is zero,
@@ -219,24 +224,7 @@ namespace rocRoller
             Register::ValuePtr savedVcc;
             if(elseBodyFn)
             {
-                if(wavefrontSize == 64)
-                {
-                    savedVcc = std::make_shared<Register::Value>(
-                        m_context,
-                        Register::Type::Scalar,
-                        DataType::Bool64,
-                        1,
-                        Register::AllocationOptions::FullyContiguous());
-                }
-                else
-                {
-                    savedVcc = std::make_shared<Register::Value>(
-                        m_context,
-                        Register::Type::Scalar,
-                        DataType::Bool32,
-                        1,
-                        Register::AllocationOptions::FullyContiguous());
-                }
+                savedVcc = MakeScalarBool(m_context, wavefrontSize);
                 co_yield m_context->copier()->copy(
                     savedVcc, vcc, "Save condition for else transition");
             }
@@ -259,14 +247,9 @@ namespace rocRoller
                 // store the original value of the EXEC mask into the scalar destination register.
                 // Use savedVcc (not vcc) so that nested conditionals in the true body cannot
                 // corrupt the condition used here.
-                if(wavefrontSize == 64)
-                {
-                    co_yield_(Instruction("s_andn1_saveexec_b64", {sgpr}, {savedVcc}, {}, ""));
-                }
-                else
-                {
-                    co_yield_(Instruction("s_andn1_saveexec_b32", {sgpr}, {savedVcc}, {}, ""));
-                }
+                auto andn1SaveExec
+                    = wavefrontSize == 64 ? "s_andn1_saveexec_b64" : "s_andn1_saveexec_b32";
+                co_yield_(Instruction(andn1SaveExec, {sgpr}, {savedVcc}, {}, ""));
 
                 auto EXECZ = m_context->getEXECZ();
                 // if execz == 1 (set), it means EXEC == 0 i.e. the entire execute mask is zero,

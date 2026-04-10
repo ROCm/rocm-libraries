@@ -9,10 +9,10 @@
 #include <rocRoller/CodeGen/Annotate.hpp>
 #include <rocRoller/CodeGen/ArgumentLoader.hpp>
 #include <rocRoller/CodeGen/BranchGenerator.hpp>
+#include <rocRoller/CodeGen/ConditionalGenerator.hpp>
 #include <rocRoller/CodeGen/CopyGenerator.hpp>
 #include <rocRoller/CodeGen/CrashKernelGenerator.hpp>
 #include <rocRoller/CodeGen/ExchangeGenerator.hpp>
-#include <rocRoller/CodeGen/ExecuteMaskGenerator.hpp>
 #include <rocRoller/CodeGen/GenerateNodes.hpp>
 #include <rocRoller/CodeGen/LoadStoreTileGenerator.hpp>
 #include <rocRoller/Context.hpp>
@@ -56,7 +56,7 @@ namespace rocRoller
                 , m_loadStoreTileGenerator(
                       m_graph, kernel->context(), kernel->max_flat_workgroup_size())
                 , m_exchangeGenerator(m_graph, kernel->context())
-                , m_execMaskGenerator(kernel->context())
+                , m_conditionalGenerator(kernel->context())
                 , m_argumentTracer(std::move(argTracer))
             {
             }
@@ -345,64 +345,22 @@ namespace rocRoller
 
             Generator<Instruction> operator()(int tag, ConditionalOp const& op)
             {
+                Log::debug("ConditionalOp tag {}: mode {}, condition {}",
+                           tag,
+                           toString(op.mode),
+                           op.conditionName);
                 switch(op.mode)
                 {
                 case OpMode::Branch:
                 {
-                    auto falseLabel = m_context->labelAllocator()->label(
-                        fmt::format("ConditionalFalse_{}_{}", op.conditionName, tag));
-                    auto botLabel = m_context->labelAllocator()->label(
-                        fmt::format("ConditionalBottom_{}_{}", op.conditionName, tag));
-
-                    co_yield Instruction::Lock(Scheduling::Dependency::Branch,
-                                               "Lock for Conditional Branch");
-
-                    auto expr            = m_fastArith(op.condition);
-                    auto conditionResult = m_context->brancher()->resultRegister(expr);
-
-                    co_yield Expression::generate(conditionResult, expr, m_context);
-                    // -------------------------------------------------------------------------------
-                    // TODO: remove this once we better handle data-flow across branches
-                    {
-                        co_yield Instruction::Wait(WaitCount::Zero(
-                            m_context->targetArchitecture(),
-                            "REMOVEME: Wait before branching into conditional label!"));
-                    }
-                    // -------------------------------------------------------------------------------
-                    co_yield m_context->brancher()->branchIfZero(
-                        falseLabel,
-                        conditionResult,
-                        concatenate("Condition: False, jump to ", falseLabel->toString()));
                     auto trueBody = m_graph->control.getOutputNodeIndices<Body>(tag).to<std::set>();
-                    co_yield generate(trueBody);
-                    co_yield m_context->brancher()->branch(
-                        botLabel, concatenate("Condition: Done, jump to ", botLabel->toString()));
-
-                    // -------------------------------------------------------------------------------
-                    // TODO: remove this once we better handle data-flow across branches
-                    {
-                        co_yield Instruction::Wait(
-                            WaitCount::Zero(m_context->targetArchitecture(),
-                                            "REMOVEME: Wait before conditional label!"));
-                    }
-                    // -------------------------------------------------------------------------------
-                    co_yield Instruction::Label(falseLabel);
                     auto elseBody = m_graph->control.getOutputNodeIndices<Else>(tag).to<std::set>();
+                    auto trueBodyFn = [this, trueBody]() { return generate(trueBody); };
+                    std::function<Generator<Instruction>()> elseBodyFn;
                     if(!elseBody.empty())
-                    {
-                        co_yield generate(elseBody);
-                    }
-
-                    // -------------------------------------------------------------------------------
-                    // TODO: remove this once we better handle data-flow across branches
-                    {
-                        co_yield Instruction::Wait(
-                            WaitCount::Zero(m_context->targetArchitecture(),
-                                            "REMOVEME: Wait before conditional label!"));
-                    }
-                    // -------------------------------------------------------------------------------
-                    co_yield Instruction::Label(botLabel);
-                    co_yield Instruction::Unlock("Unlock Conditional");
+                        elseBodyFn = [this, elseBody]() { return generate(elseBody); };
+                    co_yield m_conditionalGenerator.genBranch(
+                        m_fastArith(op.condition), op.conditionName, trueBodyFn, elseBodyFn);
                     break;
                 }
                 case OpMode::Exec:
@@ -413,8 +371,8 @@ namespace rocRoller
                     std::function<Generator<Instruction>()> elseBodyFn;
                     if(!elseBody.empty())
                         elseBodyFn = [this, elseBody]() { return generate(elseBody); };
-                    co_yield m_execMaskGenerator.genExec(
-                        op.condition, op.conditionName, trueBodyFn, elseBodyFn);
+                    co_yield m_conditionalGenerator.genExec(
+                        m_fastArith(op.condition), op.conditionName, trueBodyFn, elseBodyFn);
                     break;
                 }
                 case OpMode::BranchAndExec:
@@ -425,8 +383,8 @@ namespace rocRoller
                     std::function<Generator<Instruction>()> elseBodyFn;
                     if(!elseBody.empty())
                         elseBodyFn = [this, elseBody]() { return generate(elseBody); };
-                    co_yield m_execMaskGenerator.genBranchAndExec(
-                        op.condition, op.conditionName, trueBodyFn, elseBodyFn);
+                    co_yield m_conditionalGenerator.genBranchAndExec(
+                        m_fastArith(op.condition), op.conditionName, trueBodyFn, elseBodyFn);
                     break;
                 }
                 default:
@@ -1204,7 +1162,7 @@ namespace rocRoller
             FastArithmetic         m_fastArith;
             LoadStoreTileGenerator m_loadStoreTileGenerator;
             ExchangeGenerator      m_exchangeGenerator;
-            ExecuteMaskGenerator   m_execMaskGenerator;
+            ConditionalGenerator   m_conditionalGenerator;
 
             std::optional<ControlFlowArgumentTracer> m_argumentTracer;
         };
