@@ -1027,12 +1027,16 @@ try
     if(workOnDevice && lworkOnDevice)
     {
         // Use provided workspace: carve out E array from the beginning
+        size_t e_bytes = realTypeSize * n;
+        if(lworkOnDevice < e_bytes)
+            return HIPSOLVER_STATUS_INVALID_VALUE;
+
         E = workOnDevice;
         if(n > 0)
-            workOnDevice = static_cast<char*>(workOnDevice) + realTypeSize * n;
+            workOnDevice = static_cast<std::byte*>(workOnDevice) + e_bytes;
 
         CHECK_ROCBLAS_ERROR(
-            rocblas_set_workspace((rocblas_handle)handle, workOnDevice, lworkOnDevice));
+            rocblas_set_workspace((rocblas_handle)handle, workOnDevice, lworkOnDevice - e_bytes));
     }
     else
     {
