@@ -3246,8 +3246,8 @@ public:
                 std::exit(EXIT_FAILURE);
             }
 
-            // When "--bytes" is specified, the number can optionally be suffixed with KiB/MiB/GiB
-            if(key == "bytes")
+            // When "--size" is specified, the number can optionally be suffixed with KiB/MiB/GiB.
+            if(key == "size")
             {
                 if constexpr(std::is_same_v<T, size_t>)
                 {
@@ -3827,13 +3827,12 @@ private:
         auto& cli = m_cli;
         auto& s   = m_settings;
 
-        s.bytes = cli.get<size_t>(
-            "bytes",
-            default_bytes,
-            "Sets the size (in bytes) of the randomly generated input array, "
-            "overriding the value provided to `primbench::executor`."
-            "Optionally supports the suffixes KiB/MiB/GiB, e.g. `--bytes 256KiB.`");
-        if(s.bytes == 0)
+        s.size = cli.get<size_t>("size",
+                                 s.size,
+                                 "Input size. Benchmarks decide what this represents, but it is "
+                                 "commonly the number of bytes or items."
+                                 " Supports the suffixes KiB/MiB/GiB, e.g. `--size 256KiB`.");
+        if(s.size == 0)
         {
             std::cerr << "Error: --size must be greater than 0\n";
             exit(EXIT_FAILURE);
