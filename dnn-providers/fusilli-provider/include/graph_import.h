@@ -52,6 +52,8 @@ inline fusilli::ErrorOr<fusilli::DataType> hipDnnDataTypeToFusilliDataType(
     return ok(fusilli::DataType::Uint8);
   case hipdnn_data_sdk::data_objects::DataType::INT32:
     return ok(fusilli::DataType::Int32);
+  case hipdnn_data_sdk::data_objects::DataType::INT4:
+    return ok(fusilli::DataType::Int4);
   case hipdnn_data_sdk::data_objects::DataType::UNSET:
     return ok(fusilli::DataType::NotSet);
   default:

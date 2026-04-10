@@ -156,6 +156,11 @@ protected:
         }
     }
 
+    virtual hipStream_t stream() const
+    {
+        return _stream;
+    }
+
 private:
     void executeGpuGraph(hipdnnHandle_t handle,
                          hipdnn_frontend::graph::Graph& graph,
