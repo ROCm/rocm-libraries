@@ -20,3 +20,4 @@ In order to build the plugin standalone, you will need to have installed hipDNN 
 1. Run `ninja` to build the plugin.
 # merge queue clean test
 <!-- mergify test: miopen change -->
+<!-- mergify scopes test: miopen -->
