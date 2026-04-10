@@ -106,6 +106,15 @@ Tests:
   matrix: [rocsparse_matrix_random]
   graph_test: true
 
+- name: gtsv_no_pivot
+  category: pre_checkin
+  function: gtsv_no_pivot
+  precision: *single_double_precisions
+  M: [436987]
+  N: [8, 9, 10, 11, 12]
+  denseld: [436987]
+  matrix: [rocsparse_matrix_random]
+
 # Nightly
 - name: gtsv_no_pivot
   category: nightly
