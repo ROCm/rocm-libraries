@@ -153,6 +153,8 @@ NB_MODULE(origami, m) {
       .def_rw("direct_to_lds_b", &origami::config_t::direct_to_lds_b)
       .def_rw("local_split_u", &origami::config_t::local_split_u)
       .def_rw("lds_bytes", &origami::config_t::lds_bytes)
+      .def_rw("one_lds_buffer", &origami::config_t::one_lds_buffer)
+      .def_rw("lds_tr_inst", &origami::config_t::lds_tr_inst)
       .def_rw("workspace_size", &origami::config_t::workspace_size)
       .def_rw("workspace_size_per_elem_c", &origami::config_t::workspace_size_per_elem_c)
       .def_rw("reduction_strategy", &origami::config_t::reduction_strategy)

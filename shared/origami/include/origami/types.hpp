@@ -512,6 +512,14 @@ struct config_t {
   /// Used to compute per-CU occupancy: floor(hardware.lds_capacity / lds_bytes).
   std::size_t lds_bytes = 0;
 
+  /// Single LDS buffer mode (1LDSBuffer=1): uses one LDS staging slab instead
+  /// of two, saving LDS at the cost of a read-sync-write barrier per iteration.
+  bool one_lds_buffer = false;
+
+  /// LDS Transpose Instruction: uses hardware ds_load_b64_tr_b16 to transpose
+  /// 16-bit data during LDS read, eliminating explicit VALU pack/shuffle.
+  bool lds_tr_inst = false;
+
   /// Workspace size parameters.
   std::size_t workspace_size            = 0;
   std::size_t workspace_size_per_elem_c = 0;
@@ -570,6 +578,8 @@ struct config_t {
            prefetch_global_read == o.prefetch_global_read &&
            direct_to_lds_a == o.direct_to_lds_a && direct_to_lds_b == o.direct_to_lds_b &&
            local_split_u == o.local_split_u && lds_bytes == o.lds_bytes &&
+           one_lds_buffer == o.one_lds_buffer &&
+           lds_tr_inst == o.lds_tr_inst &&
            workgroup_mapping == o.workgroup_mapping && reduction_strategy == o.reduction_strategy &&
            prediction_mode == o.prediction_mode && target == o.target && grvw_a == o.grvw_a &&
            grvw_b == o.grvw_b && gwvw_d == o.gwvw_d && vector_width_a == o.vector_width_a &&
@@ -592,6 +602,8 @@ struct config_t {
                                           direct_to_lds_b,
                                           local_split_u,
                                           lds_bytes,
+                                          one_lds_buffer,
+                                          lds_tr_inst,
                                           workgroup_mapping,
                                           static_cast<std::uint32_t>(reduction_strategy),
                                           static_cast<std::uint32_t>(prediction_mode),

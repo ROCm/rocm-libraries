@@ -63,6 +63,8 @@ void heuristic_params_t::merge_with(const heuristic_params_t& other) {
   lsu_reduction_overhead              = other.lsu_reduction_overhead;
   ntd_ksplit_penalty                  = other.ntd_ksplit_penalty;
   occ_timestep_benefit                = other.occ_timestep_benefit;
+  one_lds_buffer_overhead             = other.one_lds_buffer_overhead;
+  pack_transpose_overhead             = other.pack_transpose_overhead;
   tail_loop_overhead                  = other.tail_loop_overhead;
   tile_fixed_overhead                 = other.tile_fixed_overhead;
 

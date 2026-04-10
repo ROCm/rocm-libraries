@@ -134,6 +134,8 @@ namespace TensileLite
                                 .direct_to_lds_b           = solution->sizeMapping.DirectToLdsB,
                                 .local_split_u             = solution->sizeMapping.LocalSplitU,
                                 .lds_bytes                 = solution->sizeMapping.LdsNumBytes,
+                                .one_lds_buffer            = (solution->sizeMapping.OneLDSBuffer == 1),
+                                .lds_tr_inst               = solution->sizeMapping.LDSTrInst,
                                 .workspace_size            = std::numeric_limits<size_t>::max(),
                                 .workspace_size_per_elem_c = std::numeric_limits<size_t>::max(),
                                 .index                     = local_index,

@@ -188,6 +188,8 @@ namespace TensileLite
         bool DirectToLdsA = false;
         bool DirectToLdsB = false;
         size_t LdsNumBytes = 0;
+        int OneLDSBuffer = 0;
+        bool LDSTrInst = false;
 
         int expertSchedulingMode = 0;
 

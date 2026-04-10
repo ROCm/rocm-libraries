@@ -48,9 +48,9 @@ struct heuristic_defaults_t {
   static constexpr double WEIGHT_COMPUTE       = 1.0;
   static constexpr double WEIGHT_MEMORY        = 1.0;
   static constexpr double WEIGHT_WG_SETUP      = 1.0;
-  static constexpr double WEIGHT_PROLOGUE      = 1.5;
+  static constexpr double WEIGHT_PROLOGUE      = 1.0;
   static constexpr double WEIGHT_EPILOGUE      = 1.0;
-  static constexpr double WEIGHT_LOOP_OVERHEAD = 50.0;
+  static constexpr double WEIGHT_LOOP_OVERHEAD = 100.0;
   static constexpr double WEIGHT_TILE_TOTAL    = 1.0;
 
   // Empirical Constants
@@ -76,10 +76,10 @@ struct heuristic_defaults_t {
   static constexpr size_t EPILOGUE_WORKSPACE_BYTES_PER_ELEM = 4;
   static constexpr double EPILOGUE_SALU_OVERHEAD            = 35.0;
   static constexpr double EPILOGUE_L_BARRIER                = 100.0;
-  static constexpr double EPILOGUE_L_SMEM = 900.0;  // s_load_dword(glc) cross-XCD flag poll
+  static constexpr double EPILOGUE_L_SMEM = 1900.0;  // s_load_dword(glc) cross-XCD flag poll
   static constexpr double EPILOGUE_K_PADDING_PENALTY     = 50000.0;
   static constexpr size_t POSTGSU_COMPUTE_BYTES          = 4;  // workspace partials stored as f32
-  static constexpr double POSTGSU_KERNEL_LAUNCH_OVERHEAD = 4000.0;
+  static constexpr double POSTGSU_KERNEL_LAUNCH_OVERHEAD = 8000.0;
   static constexpr size_t POSTGSU_THREADS_PER_WG         = 256;
   static constexpr size_t POSTGSU_WAVEFRONT_SIZE         = 64;
 
@@ -91,7 +91,7 @@ struct heuristic_defaults_t {
 
   // --- PGR (PrefetchGlobalRead) ---
   // Prologue = (setup + pgr) * L_mem.  Setup captures WG init overhead.
-  static constexpr double PROLOGUE_SETUP_FRACTION  = 0.5;
+  static constexpr double PROLOGUE_SETUP_FRACTION  = 0.0;
   // Main loop: two overlapping streams —
   //   memory  stream = L_mem * (num_iter - pgr)
   //   compute stream = L_compute * num_iter
@@ -111,6 +111,17 @@ struct heuristic_defaults_t {
   // effective timestep count is multiplied by this factor.
   // < 1.0 means higher occupancy hides more inter-WG latency.
   static constexpr double OCC_TIMESTEP_BENEFIT = 0.95;
+
+  // --- 1LDSBuffer ---
+  // Per-iteration overhead (cycles) when using a single LDS buffer instead
+  // of double-buffering.  Represents the read-sync-write barrier stall.
+  static constexpr double ONE_LDS_BUFFER_OVERHEAD = 80.0;
+
+  // --- LDSTrInst ---
+  // Per-iteration VALU pack/transpose overhead (cycles) when NOT using
+  // hardware LDS transpose loads (16-bit types only).  Without LDSTrInst,
+  // each iteration needs explicit VPermB32/VSwapB32 after ds_load.
+  static constexpr double PACK_TRANSPOSE_OVERHEAD = 15.0;
 
   // --- Tail Loop ---
   // Fixed overhead per tail-loop invocation (cycles).
@@ -182,9 +193,11 @@ struct heuristic_params_t {
   double prologue_setup_fraction  = heuristic_defaults_t::PROLOGUE_SETUP_FRACTION;
   double lsu_reduction_overhead = heuristic_defaults_t::LSU_REDUCTION_OVERHEAD;
   double ntd_ksplit_penalty     = heuristic_defaults_t::NTD_KSPLIT_PENALTY;
-  double occ_timestep_benefit  = heuristic_defaults_t::OCC_TIMESTEP_BENEFIT;
-  double tail_loop_overhead    = heuristic_defaults_t::TAIL_LOOP_OVERHEAD;
-  double tile_fixed_overhead   = heuristic_defaults_t::TILE_FIXED_OVERHEAD;
+  double occ_timestep_benefit    = heuristic_defaults_t::OCC_TIMESTEP_BENEFIT;
+  double one_lds_buffer_overhead   = heuristic_defaults_t::ONE_LDS_BUFFER_OVERHEAD;
+  double pack_transpose_overhead   = heuristic_defaults_t::PACK_TRANSPOSE_OVERHEAD;
+  double tail_loop_overhead        = heuristic_defaults_t::TAIL_LOOP_OVERHEAD;
+  double tile_fixed_overhead     = heuristic_defaults_t::TILE_FIXED_OVERHEAD;
 
   /**
    * @brief Merge this parameter set with another (for hierarchical lookup).

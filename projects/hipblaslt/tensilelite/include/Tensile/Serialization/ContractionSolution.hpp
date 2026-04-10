@@ -151,6 +151,8 @@ namespace TensileLite
                 iot::mapOptional(io, "ExpertSchedulingMode", s.expertSchedulingMode);
                 iot::mapOptional(io, "clusterDim", s.clusterDim);
                 iot::mapOptional(io, "LdsNumBytes", s.LdsNumBytes);
+                iot::mapOptional(io, "1LDSBuffer", s.OneLDSBuffer);
+                iot::mapOptional(io, "LDSTrInst", s.LDSTrInst);
             }
 
             const static bool flow = false;

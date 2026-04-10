@@ -107,6 +107,8 @@ context_t::context_t(const problem_t& problem, const hardware_t& hardware, const
     OLOG_DEBUG("PrefetchGlobalRead: " << int(config.prefetch_global_read));
     OLOG_DEBUG("DirectToLdsA: " << int(config.direct_to_lds_a));
     OLOG_DEBUG("DirectToLdsB: " << int(config.direct_to_lds_b));
+    OLOG_DEBUG("1LDSBuffer: " << int(config.one_lds_buffer));
+    OLOG_DEBUG("LDSTrInst: " << int(config.lds_tr_inst));
     // OLOG_DEBUG("DirectToVgprA: " << int(config.tensile().direct_to_vgpr_a));
     // OLOG_DEBUG("DirectToVgprB: " << int(config.tensile().direct_to_vgpr_b));
     OLOG_DEBUG("ElementSizeA (bits): " << int(a_bits));
@@ -1693,6 +1695,16 @@ double compute_tile_latency(const problem_t& problem,
   double L_compute = compute_mt_compute_latency(problem, hardware, config);
   double L_mem     = compute_memory_latency(problem, hardware, config, context);
 
+  // LDSTrInst: without hardware LDS transpose (16-bit types), each iteration
+  // needs explicit VALU pack/shuffle (VPermB32/VSwapB32) after ds_load.
+  // Added to L_compute so it participates in the max(mem, compute) overlap:
+  // when memory-bound the pack cost is hidden; when compute-bound it matters.
+  const bool is_16bit = (context.a_bytes <= 2.0 && context.a_bytes > 0);
+  const double L_pack = (!config.lds_tr_inst && is_16bit)
+      ? heuristic.pack_transpose_overhead
+      : 0.0;
+  L_compute += L_pack;
+
   // Non-DTL penalty: without DirectToLds the kernel must DS_WRITE each
   // operand from VGPRs into LDS, adding cycles proportional to the tile
   // data volume divided by the LDS bank-limited write throughput
@@ -1718,8 +1730,12 @@ double compute_tile_latency(const problem_t& problem,
 
   const int pgr = config.prefetch_global_read;
 
-  // 3-1) Prologue: WG setup (0.5 * L_mem) + PGR prefetch loads (pgr * L_mem).
-  double L_prologue = (heuristic.prologue_setup_fraction + static_cast<double>(pgr)) * L_mem;
+  // 3-1) Prologue: WG setup + first-load stall.
+  //   The prologue issues PGR global loads, but the CU only stalls at vmcnt
+  //   until the oldest (first) load arrives — roughly 1 × L_mem.
+  //   The remaining PGR-1 loads complete during early main-loop compute.
+  //   PGR depth is captured structurally by the main→NGLL iteration shift.
+  double L_prologue = (heuristic.prologue_setup_fraction + 1.0) * L_mem;
   L_prologue *= effective_tile_penalty;
   L_prologue *= occupancy_factor;
 
@@ -1790,7 +1806,15 @@ double compute_tile_latency(const problem_t& problem,
     L_tail *= eff_scale;
   }
 
-  // 5) LSU: add local K-split reduction overhead when LocalSplitU > 1.
+  // 5) 1LDSBuffer penalty: single-buffer mode requires a read-sync-write
+  //    barrier each main-loop iteration (s_waitcnt + s_barrier) that
+  //    serialises LDS reads and writes, stalling the pipeline.
+  const double L_one_lds = config.one_lds_buffer
+      ? heuristic.one_lds_buffer_overhead * static_cast<double>(num_main_iters)
+      : 0.0;
+  L_mainloop += L_one_lds;
+
+  // 6) LSU: add local K-split reduction overhead when LocalSplitU > 1.
   const int lsu = config.local_split_u;
   const double L_lsu_reduction = (lsu > 1)
       ? heuristic.lsu_reduction_overhead *
@@ -1798,7 +1822,7 @@ double compute_tile_latency(const problem_t& problem,
             std::log2(static_cast<double>(lsu))
       : 0.0;
 
-  // 6) Total tile latency
+  // 7) Total tile latency
   double L_tile_total = L_mainloop + L_ngll + L_nll + L_tail;
   L_tile_total += heuristic.weight_prologue * L_prologue;
   L_tile_total += heuristic.weight_epilogue * L_epilogue;
@@ -1815,6 +1839,7 @@ double compute_tile_latency(const problem_t& problem,
     OLOG_DEBUG("effective_tile_penalty: " << effective_tile_penalty);
 
     OLOG_DEBUG("L_mem: " << L_mem);
+    OLOG_DEBUG("L_pack: " << L_pack);
     OLOG_DEBUG("L_compute: " << L_compute);
     OLOG_DEBUG("L_cvt: " << L_cvt);
     OLOG_DEBUG("k_per_split: " << k_per_split);
@@ -1823,6 +1848,7 @@ double compute_tile_latency(const problem_t& problem,
     OLOG_DEBUG("num_ngll_iters: " << int(num_ngll_iters));
     OLOG_DEBUG("L_mem_stream: " << L_mem_stream);
     OLOG_DEBUG("L_compute_stream: " << L_compute_stream);
+    OLOG_DEBUG("L_one_lds: " << L_one_lds);
     OLOG_DEBUG("L_mainloop: " << L_mainloop);
     OLOG_DEBUG("L_ngll: " << L_ngll);
     OLOG_DEBUG("L_nll: " << L_nll);
@@ -2013,7 +2039,7 @@ double compute_total_latency(const problem_t& problem,
   double total_latency       = L_timestep * effective_timesteps;
 
   //  4) Kernel launch overhead (~5 us converted to cycles)
-  const double L_kernel_launch = 4000.0;
+  const double L_kernel_launch = 8000.0;
   total_latency += L_kernel_launch;
 
   //  5) Add parallel reduction kernel cost (separate kernel launch, 0 if not parallel)
