@@ -394,7 +394,8 @@ int runGemm(size_t         m,
             rocisa::DataType   computeInputB = rocisa::DataType::None,
             int                mxBlockA      = 0,
             int                mxBlockB      = 0,
-            size_t             batchCount    = 1)
+            size_t             batchCount    = 1,
+            bool               isTF32        = false)
 {
     if(batchCount == 0)
     {
@@ -505,6 +506,9 @@ int runGemm(size_t         m,
     contraction.setComputeInputTypeB(computeInputB);
     contraction.setAlphaType(rocisa::DataType::Float);
     contraction.setBetaType(rocisa::DataType::Float);
+
+    if(isTF32)
+        contraction.setF32XdlMathOp(rocisa::DataType::XFloat32);
 
     // Allocate host memory for inputs and outputs. Each batch slice is packed.
     size_t numA = m * k;
@@ -829,54 +833,62 @@ int runGemm(size_t         m,
 #endif
 
         // Run the golden reference per-batch.
-        for(size_t batch = 0; batch < batchCount; ++batch)
-        {
-            const float* aPtr = aF32.data() + batch * numA;
-            const float* bPtr = bF32.data() + batch * numB;
-            const float* cPtr = cF32.data() + batch * numC;
-            float*       dPtr = dRef.data() + batch * numC;
+        // When isTF32, use XFloat32 as MathOpAccumT so the golden ref
+        // truncates each A/B element to 10-bit mantissa before multiply.
+        auto runGoldenRef = [&](auto mathOpTag) {
+            using MathOpT = decltype(mathOpTag);
+            for(size_t batch = 0; batch < batchCount; ++batch)
+            {
+                const float* aPtr = aF32.data() + batch * numA;
+                const float* bPtr = bF32.data() + batch * numB;
+                const float* cPtr = cF32.data() + batch * numC;
+                float*       dPtr = dRef.data() + batch * numC;
 
-            columnMajorGemm(aPtr,
-                            bPtr,
-                            cPtr,
-                            dPtr,
-                            m,
-                            n,
-                            k,
-                            transA,
-                            transB,
-                            (useScaleAB == "Scalar") ? alpha * scaleABuf[0] * scaleBBuf[0] : alpha,
-                            beta,
-                            useBias ? biasVec.data() : nullptr,
-                            useScaleAlphaVec ? scaleAlphaVecBuf.data() : nullptr,
-                            activation,
-                            (useScaleAB == "Vector") ? scaleABuf.data() : nullptr,
-                            (useScaleAB == "Vector") ? scaleBBuf.data() : nullptr,
-                            factorDim,
-                            quantA,
-                            quantB
+                columnMajorGemm<float, MathOpT>(
+                    aPtr,
+                    bPtr,
+                    cPtr,
+                    dPtr,
+                    m,
+                    n,
+                    k,
+                    transA,
+                    transB,
+                    (useScaleAB == "Scalar") ? alpha * scaleABuf[0] * scaleBBuf[0] : alpha,
+                    beta,
+                    useBias ? biasVec.data() : nullptr,
+                    useScaleAlphaVec ? scaleAlphaVecBuf.data() : nullptr,
+                    activation,
+                    (useScaleAB == "Vector") ? scaleABuf.data() : nullptr,
+                    (useScaleAB == "Vector") ? scaleBBuf.data() : nullptr,
+                    factorDim,
+                    quantA,
+                    quantB
 #ifndef _WIN32
-                            ,
-                            MXGemmOperand{
-                                (isFP4 && mxBlockA > 0)
-                                    ? mxsa.data() + batch * mxsaBatchStride
-                                    : nullptr,
-                                mxBlockA,
-                                mxsaStrideM,
-                                mxsaStrideKBlk},
-                            MXGemmOperand{
-                                (isFP4 && mxBlockB > 0)
-                                    ? mxsb.data() + batch * mxsbBatchStride
-                                    : nullptr,
-                                mxBlockB,
-                                mxsbStrideN,
-                                mxsbStrideKBlk}
+                    ,
+                    MXGemmOperand{
+                        (isFP4 && mxBlockA > 0) ? mxsa.data() + batch * mxsaBatchStride : nullptr,
+                        mxBlockA,
+                        mxsaStrideM,
+                        mxsaStrideKBlk},
+                    MXGemmOperand{
+                        (isFP4 && mxBlockB > 0) ? mxsb.data() + batch * mxsbBatchStride : nullptr,
+                        mxBlockB,
+                        mxsbStrideN,
+                        mxsbStrideKBlk}
 #endif
-                            );
-        }
+                );
+            }
+        };
 
-        // Compare results — FP4 with MX scales needs wider tolerance
-        float tolerance = isFP4 ? 0.5f : 0.05f;
+        if(isTF32)
+            runGoldenRef(XFloat32{});
+        else
+            runGoldenRef(float{});
+
+        // Compare results — reduced-precision types need wider tolerance.
+        // TF32 loses 13 of 23 mantissa bits; errors accumulate over K.
+        float tolerance = isFP4 ? 0.5f : (isTF32 ? 1.0f : 0.05f);
 
         bool  allClose = true;
         float maxDiff  = 0.0f;
@@ -925,7 +937,7 @@ int main(int argc, char* argv[])
         "transB", po::value<bool>()->default_value(false), "Transpose B")(
         "alpha", po::value<float>()->default_value(1.0f), "Alpha scalar")(
         "beta", po::value<float>()->default_value(0.0f), "Beta scalar")(
-        "type", po::value<std::string>()->default_value("f32"), "Data type for A and B (f32, f16, bf16, f8, bf8, f8fnuz, bf8fnuz, f4)")(
+        "type", po::value<std::string>()->default_value("f32"), "Data type for A and B (f32, tf32, f16, bf16, f8, bf8, f8fnuz, bf8fnuz, f4)")(
         "typeA", po::value<std::string>()->default_value(""), "Override A storage type (defaults to --type)")(
         "typeB", po::value<std::string>()->default_value(""), "Override B storage type (defaults to --type)")(
         "computeInputA", po::value<std::string>()->default_value(""), "Override A compute-input type for MAC (defaults to --typeA). Set smaller than storage to mimic kernels that quantize A.")(
@@ -1068,11 +1080,22 @@ int main(int argc, char* argv[])
     std::cout << "Running GEMM with: M=" << m << " N=" << n << " K=" << k
               << " TypeA=" << typeAStr << " TypeB=" << typeBStr
               << " ComputeInA=" << computeInputAStr << " ComputeInB=" << computeInputBStr
-              << " FastPath=" << tryFastPath << std::endl;
+              << " FastPath=" << tryFastPath;
+    if(typeAStr == "tf32" || typeBStr == "tf32")
+        std::cout << " MathOp=XFloat32";
+    std::cout << std::endl;
 
     // Dispatcher: pick A storage type, then B storage type. Each leaf calls
     // runGemm<A,B>(...). Asymmetric A/B is required to repro mixed-precision
     // bugs in the fast-path validator (e.g. F8N x Half).
+    // tf32 = float storage + XFloat32 math-op. Dispatched as float with isTF32 flag.
+    bool isTF32 = (typeAStr == "tf32" || typeBStr == "tf32");
+    auto resolveAccumStorage = [](std::string& s) {
+        if(s == "tf32") s = "f32";
+    };
+    resolveAccumStorage(typeAStr);
+    resolveAccumStorage(typeBStr);
+
     auto dispatchB = [&](auto aTag) -> int {
         using AT = decltype(aTag);
         auto callB = [&](auto bTag) -> int {
@@ -1091,7 +1114,7 @@ int main(int argc, char* argv[])
             return runGemm<AT, BT>(
                 m, n, k, transA, transB, alpha, beta, validate, tryFastPath,
                 useBias, activation, useScaleAlphaVec, useScaleAB, factorDim,
-                computeInputA, computeInputB, mxBlockA, mxBlockB, batchCount);
+                computeInputA, computeInputB, mxBlockA, mxBlockB, batchCount, isTF32);
         };
         if(typeBStr == "f32")        return callB(float{});
         if(typeBStr == "f16")        return callB(Half{});

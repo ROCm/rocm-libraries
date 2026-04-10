@@ -299,6 +299,35 @@ if(NOT WIN32)
 endif()
 
 #################################################
+#     TF32 (XFloat32 math-op) tests (slow only) #
+#################################################
+# TF32 uses float storage with XFloat32 truncation on multiply.
+# Fast path support is added separately.
+foreach(TRANS NN TN NT TT)
+    get_trans_flags(${TRANS} TFLAGS)
+    add_cpu_gemm_test(slow_tf32_${TRANS}
+        ARGS ${F32_SIZES} ${TFLAGS} --type tf32 --validate
+    )
+endforeach()
+add_cpu_gemm_test(slow_tf32_Beta
+    ARGS ${F32_SIZES} --type tf32 --beta 1.0 --validate
+)
+add_cpu_gemm_test(slow_tf32_Bias
+    ARGS ${F32_SIZES} --type tf32 --validate --bias
+)
+add_cpu_gemm_test(slow_tf32_AllFeatures
+    ARGS ${F32_SIZES} --type tf32 --validate --bias --activation relu --scaleAlphaVec
+)
+add_cpu_gemm_test(slow_tf32_TN_AllFeatures
+    ARGS ${F32_SIZES} --transA --type tf32 --validate --bias --activation relu --scaleAlphaVec
+)
+foreach(MODE Scalar Vector)
+    add_cpu_gemm_test(slow_tf32_ScaleAB_${MODE}
+        ARGS ${F32_SIZES} --type tf32 --validate --useScaleAB ${MODE}
+    )
+endforeach()
+
+#################################################
 #        FP4 / MX Scale tests (fast & slow)     #
 #################################################
 if(NOT WIN32)
