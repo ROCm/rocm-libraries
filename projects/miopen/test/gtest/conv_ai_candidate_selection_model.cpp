@@ -368,9 +368,9 @@ std::vector<CandidateSelectionParams> GenerateCandidateSelectionParams()
 INSTANTIATE_TEST_SUITE_P(Full,
                          CPU_CandidateSelection_NONE,
                          ::testing::ValuesIn(GenerateCandidateSelectionParams()),
-                         [](const ::testing::TestParamInfo<CandidateSelectionParams>& info) {
+                         [](const ::testing::TestParamInfo<CandidateSelectionParams>& testInfo) {
                              std::ostringstream os;
-                             PrintTo(info_.param, &os);
+                             PrintTo(testInfo.param, &os);
                              return os.str();
                          });
 
