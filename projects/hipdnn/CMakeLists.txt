@@ -355,3 +355,4 @@ endif()
 if(NOT HIPDNN_SKIP_TESTS)
     install_hipdnn_ctest_files()
 endif()
+<!-- core-seq-3: error code expansion -->
