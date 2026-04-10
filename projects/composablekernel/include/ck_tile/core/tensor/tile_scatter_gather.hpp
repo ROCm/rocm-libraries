@@ -526,6 +526,90 @@ struct tile_scatter_gather
         });
     }
 
+    // Flat load from global memory to VGPRs using 64-bit addressing.
+    // Replaces load() for the page_size < kN0 path where SRD-based buffer_load
+    // would overflow its 32-bit voffset for scattered pages.
+    //
+    // Uses physical_pages array + page_stride_bytes to compute 64-bit flat
+    // addresses per element, then loads via pointer dereference (flat_load).
+    template <typename PhysicalPagesArray,
+              index_t i_access_unsupport_ = -1>
+    CK_TILE_DEVICE auto load_flat(const PhysicalPagesArray& physical_pages,
+                                   long_index_t page_stride_bytes,
+                                   number<i_access_unsupport_> = {}) const
+    {
+        constexpr auto tile_dstr = TileDstr{};
+        auto dst_tensor          = make_static_distributed_tensor<DataType>(tile_dstr);
+
+        using Traits   = load_store_traits;
+        using vector_t = typename Traits::vector_t;
+        using SFC_Ys   = typename Traits::SFC_Ys;
+
+        const auto* base_ptr =
+            reinterpret_cast<const char*>(get_bottom_tensor_view().buf_.p_data_);
+
+        static_for<0, NumCoord, 1>{}([&](auto iCoord) {
+            auto window_adaptor_thread_coord = pre_computed_coords_[iCoord][I0];
+            auto bottom_tensor_thread_coord  = pre_computed_coords_[iCoord][I1];
+
+            static_for<0, NumAccessPerCoord, 1>{}([&](auto iCoordAccess) {
+                constexpr auto iAccess      = number<iCoord * NumAccessPerCoord + iCoordAccess>{};
+                constexpr auto idx_ys_start = SFC_Ys::get_index(iAccess);
+                constexpr auto idx_gather   = get_gather_index(idx_ys_start);
+
+                // within-page offset from page_idx_
+                const auto within_page_offset = page_idx_[idx_gather];
+                // physical page index
+                const auto physical_page = physical_pages[idx_gather];
+
+                // 64-bit flat address: base + page*stride + (coord+within_page)*sizeof(T)
+                const auto coord_offset = bottom_tensor_thread_coord.get_offset();
+                const auto* flat_addr =
+                    base_ptr +
+                    static_cast<long_index_t>(physical_page) * page_stride_bytes +
+                    static_cast<long_index_t>(coord_offset + within_page_offset) *
+                        sizeof(DataType);
+
+                // Load via pointer dereference (generates flat_load instruction)
+                vector_t vec_value;
+                __builtin_memcpy(&vec_value, flat_addr, sizeof(vector_t));
+
+                // Write into distributed tensor (same as load())
+                static_for<0, Traits::ScalarPerVector, Traits::PackedSize>{}([&](auto j) {
+                    constexpr auto idx_ys = generate_tuple(
+                        [&](auto jj) {
+                            return jj == Traits::VectorDimY ? (idx_ys_start[jj] + j)
+                                                            : idx_ys_start[jj];
+                        },
+                        number<NDimY>{});
+
+                    constexpr index_t d =
+                        tile_dstr.get_ys_to_d_descriptor().calculate_offset(idx_ys) /
+                        Traits::PackedSize;
+
+                    dst_tensor.get_thread_buffer().template at<d>() =
+                        vec_value.template get_as<DataType>()[j / Traits::PackedSize];
+                });
+
+                // Move thread coordinate
+                if constexpr(iCoordAccess != (NumAccessPerCoord - 1))
+                {
+                    constexpr auto idx_diff_ys = SFC_Ys::get_forward_step(iAccess);
+                    constexpr auto forward_step_scatter = generate_tuple(
+                        [&](auto i) { return is_gather_dim(i) ? 0 : idx_diff_ys[i]; },
+                        number<NDimY>{});
+                    constexpr auto idx_diff_ps_ys = container_concat(
+                        generate_tuple([&](auto) { return number<0>{}; }, number<NDimP>{}),
+                        forward_step_scatter);
+
+                    move_window_adaptor_and_bottom_tensor_thread_coordinate(
+                        window_adaptor_thread_coord, bottom_tensor_thread_coord, idx_diff_ps_ys);
+                }
+            });
+        });
+        return dst_tensor;
+    }
+
     template <typename LdsTileWindow_,
               index_t i_access_unsupport_ = -1,
               bool oob_conditional_check  = true>

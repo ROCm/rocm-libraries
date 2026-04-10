@@ -203,22 +203,19 @@ CK_TILE_HOST_DEVICE void kv_offset_array_transform(const IndexArrayType& physica
             }
             else
             {
-                // Full global offset (original code path for ps1, ps16, etc.)
-                const index_t physical_page = physical_pages[k0];
-                const long_index_t page_base_offset =
-                    static_cast<long_index_t>(physical_page) * stride_page_block;
-
+                // Within-page offset only: page base is handled by flat 64-bit
+                // addressing in load_tile_flat (via physical_pages array).
                 if constexpr(kKVMemoryLayout ==
                              BlockAttentionKVCacheMemoryLayoutEnum::VECTORIZED_LAYOUT)
                 {
                     const index_t token_offset =
                         (token_idx_in_page / kVectorSize) * (stride_token * kVectorSize) +
                         (token_idx_in_page % kVectorSize);
-                    kv_offset_vec[k0] = page_base_offset + token_offset;
+                    kv_offset_vec[k0] = token_offset;
                 }
                 else
                 {
-                    kv_offset_vec[k0] = page_base_offset + token_idx_in_page * stride_token;
+                    kv_offset_vec[k0] = token_idx_in_page * stride_token;
                 }
             }
         });
@@ -919,13 +916,10 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSAsync
                     v_physical_pages, stride_v, page_stride_v, v_coord, v_offsets, current_seq_k);
             }
 
-            // Per-tile min-reduce for V with page_size < kN0:
-            // adjust offsets to be relative to wave-level min page.
-            if constexpr(kPageBlockSize < kN0)
-            {
-                v_wave_min_page = compute_min_and_adjust_offsets(
-                    v_physical_pages, v_offsets, page_stride_v, number<V_PageIdxRepeat>{});
-            }
+            // For page_size < kN0: V uses flat 64-bit loads (load_tile_flat),
+            // so no per-tile SRD rebase or offset adjustment needed.
+            // v_offsets contain within-page offsets; page base is handled by
+            // physical_pages in load_tile_flat.
         };
 
         // Prefetch V physical pages early to hide buffer load latency
@@ -941,15 +935,20 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSAsync
                                      number<1>{}, // NumCoord
                                      VPageIndexYDims);
 
-        // For page_size < kN0, set max buffer size for V SRD
-        if constexpr(kPageBlockSize < kN0)
-        {
-            v_dram_window.set_bottom_tensor_view_buffer_size(0x7FFFFFFF);
-        }
+        // V page stride in bytes for flat 64-bit addressing
+        const long_index_t v_page_stride_bytes =
+            static_cast<long_index_t>(page_stride_v) *
+            sizeof(typename std::remove_const<typename std::remove_pointer<
+                       decltype(v_dram_block_window_tmp.get_bottom_tensor_view().buf_.p_data_)>::type>::
+                       type);
 
-        // Initial V SRD rebase
-        rebase_v_window(v_dram_window,
-                        kPageBlockSize >= kN0 ? v_physical_pages[number<0>{}] : v_wave_min_page);
+        // For page_size >= kN0, use SRD rebase (all threads on same page)
+        if constexpr(kPageBlockSize >= kN0)
+        {
+            rebase_v_window(v_dram_window, v_physical_pages[number<0>{}]);
+        }
+        // For page_size < kN0, V uses flat 64-bit loads (load_tile_flat)
+        // instead of SRD rebase, so no init_raw/rebase needed.
 
         // prefetch K tile: use flat 64-bit loads for page_size < kN0
         if constexpr(kPageBlockSize < kN0)
@@ -1078,7 +1077,12 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSAsync
             }
             __builtin_amdgcn_sched_barrier(1);
 
-            auto v_buf = load_tile(v_dram_window, number<-1>{}, bool_constant<false>{});
+            auto v_buf = [&]() {
+                if constexpr(kPageBlockSize < kN0)
+                    return load_tile_flat(v_dram_window, v_physical_pages, v_page_stride_bytes);
+                else
+                    return load_tile(v_dram_window, number<-1>{}, bool_constant<false>{});
+            }();
             // V physical pages already prefetched before GEMM0
             update_v_offsets(number<kK1>{});
             v_dram_window.update_page_idx(v_offsets);
@@ -1281,8 +1285,10 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSAsync
                         v_dram_window,
                         {0,
                          kK1}); // will have scratch if move this right after load_tile(v_dram)...
-                    v_buf = load_tile(
-                        v_dram_window, number<-1>{}, bool_constant<false>{}); // load next v_buf
+                    if constexpr(kPageBlockSize < kN0)
+                        v_buf = load_tile_flat(v_dram_window, v_physical_pages, v_page_stride_bytes);
+                    else
+                        v_buf = load_tile(v_dram_window, number<-1>{}, bool_constant<false>{});
                     update_v_offsets(number<2 * kK1>{});
                     v_dram_window.update_page_idx(v_offsets);
                     rebase_v_window(v_dram_window,
@@ -1453,8 +1459,12 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSAsync
                 static_for<0, k1_loops - 1, 1>{}([&](auto i_k1) {
                     if constexpr(i_k1 != 0 && i_k1 < k1_loops - 1)
                     {
-                        v_buf = load_tile(
-                            v_dram_window, number<-1>{}, bool_constant<false>{}); // load next v_buf
+                        if constexpr(kPageBlockSize < kN0)
+                            v_buf = load_tile_flat(
+                                v_dram_window, v_physical_pages, v_page_stride_bytes);
+                        else
+                            v_buf = load_tile(
+                                v_dram_window, number<-1>{}, bool_constant<false>{});
                         // Update V offsets using previously prefetched physical pages
                         update_v_offsets(number<(2 + i_k1.value) * kK1>{});
                         v_dram_window.update_page_idx(v_offsets);

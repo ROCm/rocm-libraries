@@ -40,6 +40,19 @@ CK_TILE_DEVICE auto load_tile(const TileWindow_& tile_window,
     return tile_window.load(number<i_access>{}, bool_constant<oob_conditional_check>{});
 }
 
+// Flat load variant using 64-bit addressing. For scatter/gather windows with
+// page_size < kN0 where SRD-based buffer_load would overflow its 32-bit voffset.
+template <typename TileWindow_,
+          typename PhysicalPagesArray,
+          index_t i_access = -1>
+CK_TILE_DEVICE auto load_tile_flat(const TileWindow_& tile_window,
+                                   const PhysicalPagesArray& physical_pages,
+                                   long_index_t page_stride_bytes,
+                                   number<i_access> = {})
+{
+    return tile_window.load_flat(physical_pages, page_stride_bytes, number<i_access>{});
+}
+
 /**
  * @brief Load tile with elementwise function
  *
