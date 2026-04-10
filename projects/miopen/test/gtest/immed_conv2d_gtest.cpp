@@ -15,21 +15,16 @@ using TestCase = ConvTestBaseTestCase<NamedParameter<size_t>,              // ba
                                       NamedContainer<std::vector<int>>,    // trans_output_pads
                                       NamedParameter<std::string>,         // in_layout
                                       NamedParameter<std::string>,         // fil_layout
-                                      NamedParameter<std::string>,         // out_layout
-                                      NamedParameter<bool>,                // deterministic
-                                      NamedParameter<size_t>,              // tensor_vect
-                                      NamedParameter<size_t>,              // vector_length
-                                      NamedParameter<std::string>,         // output_type
-                                      NamedParameter<bool>                 // int8_vectorize
+                                      NamedParameter<std::string>          // out_layout
                                       >;
 
 template <typename T>
 auto GenCases(bool smoke_test)
 {
-    using ct = conv_test<T, ConvApi::Find_2_0>;
+    using ct = conv_test<T, ConvApi::Immediate>;
 
     auto batch_size = MakeNamedParameterCollectionValues<size_t>(
-        "batch_size", generate_data_limited(ct::get_batch_sizes(), 1, {8}, !smoke_test));
+        "batch_size", generate_data_limited(ct::get_batch_sizes(), 1, {16}, !smoke_test));
 
     auto input_channels = MakeNamedParameterCollectionValues<size_t>(
         "input_channels", generate_data_limited(ct::get_input_channels(), 1, {32}, !smoke_test));
@@ -39,28 +34,21 @@ auto GenCases(bool smoke_test)
 
     auto spatial_dim_elements = MakeNamedParameterCollectionValues<std::vector<size_t>>(
         "spatial_dim_elements",
-        generate_data_limited(ct::get_3d_spatial_dims(), 1, {16, 16, 16}, !smoke_test));
+        generate_data_limited(ct::get_2d_spatial_dims(), 1, {56, 56}, !smoke_test));
 
     auto filter_dims = MakeNamedParameterCollectionValues<std::vector<size_t>>(
-        "filter_dims", generate_data_limited(ct::get_3d_filter_dims(), 2, {3, 3, 3}, !smoke_test));
+        "filter_dims", generate_data_limited(ct::get_2d_filter_dims(), 2, {3, 3}, !smoke_test));
 
     auto pads_strides_dilations = MakeNamedParameterCollectionValues<std::vector<int>>(
         "pads_strides_dilations",
-        generate_data_limited(ct::get_3d_pads_strides_dilations(), 2, !smoke_test));
+        generate_data_limited(ct::get_2d_pads_strides_dilations(), 2, !smoke_test));
 
     auto trans_output_pads = MakeNamedParameterCollectionValues<std::vector<int>>(
-        "trans_output_pads", generate_data_limited(ct::get_3d_trans_output_pads(), 1, !smoke_test));
+        "trans_output_pads", generate_data_limited(ct::get_2d_trans_output_pads(), 1, !smoke_test));
 
-    auto in_layout     = MakeNamedParameterValues<std::string>("in_layout", std::string{"NCDHW"});
-    auto fil_layout    = MakeNamedParameterValues<std::string>("fil_layout", std::string{"NCDHW"});
-    auto out_layout    = MakeNamedParameterValues<std::string>("out_layout", std::string{"NCDHW"});
-    auto deterministic = MakeNamedParameterValues<bool>("deterministic", false);
-    auto tensor_vect   = MakeNamedParameterValues<size_t>("tensor_vect", 0);
-    auto vector_length = MakeNamedParameterValues<size_t>("vector_length", 1);
-
-    // Only valid for int8 input and weights
-    auto output_type = MakeNamedParameterValues<std::string>("output_type", std::string{"int32"});
-    auto int8_vectorize = MakeNamedParameterValues<bool>("int8_vectorize", false);
+    auto in_layout  = MakeNamedParameterValues<std::string>("in_layout", std::string{"NCHW"});
+    auto fil_layout = MakeNamedParameterValues<std::string>("fil_layout", std::string{"NCHW"});
+    auto out_layout = MakeNamedParameterValues<std::string>("out_layout", std::string{"NCHW"});
 
     return ct::GenTestParams(batch_size,
                              input_channels,
@@ -71,12 +59,7 @@ auto GenCases(bool smoke_test)
                              trans_output_pads,
                              in_layout,
                              fil_layout,
-                             out_layout,
-                             deterministic,
-                             tensor_vect,
-                             vector_length,
-                             output_type,
-                             int8_vectorize);
+                             out_layout);
 }
 
 template <typename T>
@@ -94,7 +77,7 @@ auto GetCasesSmoke()
 }
 
 template <class T>
-struct conv3d_find2_test : public conv_test<T, ConvApi::Find_2_0>,
+struct immed_conv2d_test : public conv_test<T, ConvApi::Immediate>,
                            public testing::TestWithParam<TestCase>
 {
     void SetUp() override
@@ -111,39 +94,45 @@ struct conv3d_find2_test : public conv_test<T, ConvApi::Find_2_0>,
                             this->trans_output_pads,
                             this->in_layout,
                             this->fil_layout,
-                            this->out_layout,
-                            this->deterministic,
-                            this->tensor_vect,
-                            this->vector_length,
-                            this->output_type,
-                            this->int8_vectorize);
+                            this->out_layout);
     }
 };
 
-using GPU_Conv3d_Find2_FP32 = conv3d_find2_test<float>;
-using GPU_Conv3d_Find2_FP16 = conv3d_find2_test<half_float::half>;
+using GPU_Immed_Conv2d_FP32  = immed_conv2d_test<float>;
+using GPU_Immed_Conv2d_FP16  = immed_conv2d_test<half_float::half>;
+using GPU_Immed_Conv2d_BFP16 = immed_conv2d_test<bfloat16>;
 
 struct TestNameGenerator
 {
     std::string operator()(const auto& info)
     {
-        return GetParamNamesString(info, std::make_index_sequence<24>{});
+        return GetParamNamesString(info, std::make_index_sequence<20>{});
     }
 };
 
-TEST_P(GPU_Conv3d_Find2_FP32, TestFloat) { run(); }
-TEST_P(GPU_Conv3d_Find2_FP16, TestFloat16) { run(); }
+TEST_P(GPU_Immed_Conv2d_FP32, TestFloat) { run(); }
+TEST_P(GPU_Immed_Conv2d_FP16, TestFloat16) { run(); }
+TEST_P(GPU_Immed_Conv2d_BFP16, TestBFloat16) { run(); }
 
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_Conv3d_Find2_FP32, GetCasesSmoke<float>(), TestNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(Full, GPU_Conv3d_Find2_FP32, GetCasesFull<float>(), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Smoke, GPU_Immed_Conv2d_FP32, GetCasesSmoke<float>(), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Full, GPU_Immed_Conv2d_FP32, GetCasesFull<float>(), TestNameGenerator{});
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
-                         GPU_Conv3d_Find2_FP16,
+                         GPU_Immed_Conv2d_FP16,
                          GetCasesSmoke<half_float::half>(),
                          TestNameGenerator{});
 INSTANTIATE_TEST_SUITE_P(Full,
-                         GPU_Conv3d_Find2_FP16,
+                         GPU_Immed_Conv2d_FP16,
                          GetCasesFull<half_float::half>(),
+                         TestNameGenerator{});
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_Immed_Conv2d_BFP16,
+                         GetCasesSmoke<bfloat16>(),
+                         TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Full,
+                         GPU_Immed_Conv2d_BFP16,
+                         GetCasesFull<bfloat16>(),
                          TestNameGenerator{});
 
 } // namespace

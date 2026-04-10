@@ -1998,23 +1998,6 @@ struct conv_test
         return -1;
     }
 
-    conv_test()
-    {
-        // add(conv_mode, "cmode", generate_data({"conv"}));
-        // add(pad_mode, "pmode", generate_data({"default", "same", "valid"}));
-        // add(groupCount, "group-count", generate_data({1}));
-        // add(do_forward, "disable-forward", set_value(false));
-        // add(do_backward_data, "disable-backward-data", set_value(false));
-        // add(do_backward_weights, "disable-backward-weights", set_value(false));
-        // add(search, "search", set_value(1));
-        // add(gen_float, "generate-float", set_value(true));
-
-        // if constexpr(api == ConvApi::Immediate)
-        //     add(enable_fdb, "enable-fdb", generate_data({false, true}));
-        // else if constexpr(api == ConvApi::Find_2_0)
-        //     add(preallocate, "preallocate", generate_data({false, true}));
-    }
-
     template <typename... TParams>
     static auto GenTestParams(TParams&&... params)
     {
