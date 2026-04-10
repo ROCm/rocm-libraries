@@ -202,38 +202,64 @@ INSTANTIATE_TEST_SUITE_P(
     }
     );
 
-
-class hipfftxtunitdesc : public ::testing::TestWithParam<std::tuple<bool, int, hipfftXtSubFormat, size_t>>
-{};
-
-// Real/complex, tx direction, subformat, dimension
-// FIXME: rename and document
-static std::vector<std::tuple<bool, int, hipfftXtSubFormat, size_t>> in_goodlist =
+// FIXME: document
+struct directionformat_t
 {
-    // Real/complex must be inplace 
-    {1, HIPFFT_FORWARD, HIPFFT_XT_FORMAT_INPLACE, 2},
-    {1, HIPFFT_BACKWARD, HIPFFT_XT_FORMAT_INPLACE_SHUFFLED, 2},
-    {1, HIPFFT_FORWARD, HIPFFT_XT_FORMAT_INPLACE, 3},
-    {1, HIPFFT_BACKWARD, HIPFFT_XT_FORMAT_INPLACE_SHUFFLED, 3},
-    // Complex/complex can be in-place or out-of-place
-    {0, HIPFFT_FORWARD, HIPFFT_XT_FORMAT_INPLACE, 2},
-    {0, HIPFFT_BACKWARD, HIPFFT_XT_FORMAT_INPLACE_SHUFFLED, 2},
-    {0, HIPFFT_FORWARD, HIPFFT_XT_FORMAT_INPLACE, 3},
-    {0, HIPFFT_BACKWARD, HIPFFT_XT_FORMAT_INPLACE_SHUFFLED, 3},
-
-    // It seems that cufftxt only wants to do in-place, even for c2c?
-    //{0, HIPFFT_FORWARD, HIPFFT_XT_FORMAT_INPUT, 2},
-    //{0, HIPFFT_BACKWARD, HIPFFT_XT_FORMAT_OUTPUT, 2}
+    int direction;
+    hipfftXtSubFormat format;
 };
+
+// FIXME: document
+static std::vector<directionformat_t> real_directionformat =
+{
+    {HIPFFT_FORWARD, HIPFFT_XT_FORMAT_INPLACE},
+    {HIPFFT_BACKWARD, HIPFFT_XT_FORMAT_INPLACE_SHUFFLED},
+};
+
+// FIXME: document
+static std::vector<directionformat_t> complex_directionformat =
+{
+    {HIPFFT_FORWARD, HIPFFT_XT_FORMAT_INPLACE},
+    {HIPFFT_BACKWARD, HIPFFT_XT_FORMAT_INPLACE_SHUFFLED},
+    //{HIPFFT_FORWARD, HIPFFT_XT_FORMAT_INPUT},
+    //{HIPFFT_BACKWARD, HIPFFT_XT_FORMAT_OUTPUT}
+};
+
+// FIXME: document
+static auto all_directionformat() {
+    std::vector<std::tuple<bool, directionformat_t>> combined;
+    for(const auto &val : real_directionformat)
+        combined.push_back(std::make_tuple(true, val));
+    for(const auto &val : complex_directionformat)
+        combined.push_back(std::make_tuple(false, val));
+    return combined;
+}
+
+// FIXME: document
+static auto getdevcount()
+{
+    int deviceCount = 0;
+    const auto ret = hipGetDeviceCount(&deviceCount);
+    if (ret != hipSuccess)
+        throw std::runtime_error("hipGetDeviceCount failed");
+    return deviceCount;
+}
+
+// FIXME: document
+static std::vector<size_t> multidims = {2, 3};
+
+class hipfftxtunitdesc : public ::testing::TestWithParam<std::tuple<bool, int, hipfftXtSubFormat, size_t, int>>
+{};
 
 // FIXME: rename this to also mention it does a H2D copy.
 TEST_P(hipfftxtunitdesc, desccreation)
 {
     const bool realcomplex = std::get<0>(GetParam());
-    const int direction = std::get<1>(GetParam());
+    const auto direction = std::get<1>(GetParam());
     const hipfftXtSubFormat format = std::get<2>(GetParam());
-    const size_t dimension = std::get<3>(GetParam());
-
+    const auto dimension = std::get<3>(GetParam());
+    const auto ngpus = std::get<4>(GetParam());
+    
     const int Nx    = 32;
     const int Ny    = 36;
     const int Nz    = 38;
@@ -247,12 +273,10 @@ TEST_P(hipfftxtunitdesc, desccreation)
         std::cout << "Nx: " << Nx << " Ny: " << Ny;
         if(dimension == 3)
             std::cout << " Nz: " << Nz;
+        std::cout << " ngpus: " << ngpus;
         std::cout << "\n";
     }
-
-    // FIXME: handle variable number of GPUs
-    size_t    ngpus = 8;
-    std::vector<int> gpus(ngpus);
+std::vector<int> gpus(ngpus);
     std::iota(gpus.begin(), gpus.end(), 0);
     
     // TODO: other sizes, batch, etc.
@@ -837,26 +861,46 @@ TEST_P(hipfftxtunitdesc, desccreation)
     ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS);
 }
 
-INSTANTIATE_TEST_SUITE_P(
-    hipfftxttest,
-    hipfftxtunitdesc,
-    ::testing::ValuesIn(in_goodlist),
-    [](const testing::TestParamInfo<hipfftxtunitdesc::ParamType>& info) {
-        const bool realcomplex = std::get<0>(info.param);
-        const int direction = std::get<1>(info.param);
-        const hipfftXtSubFormat format = std::get<2>(info.param);
-        const size_t dimension = std::get<3>(info.param);
-        std::string name = direction == HIPFFT_FORWARD ? "forward" : "backward";
-        name += realcomplex ? "rc" : "cc";
-        name += format_name(format);
-        name += "dim" + std::to_string(dimension);
-        return name;
-    }
+INSTANTIATE_TEST_SUITE_P(hipfftxttest, hipfftxtunitdesc,
+                         ::testing::ConvertGenerator(
+                             ::testing::Combine(
+                                 ::testing::ValuesIn(all_directionformat()),
+                                 ::testing::ValuesIn(multidims),
+                                 ::testing::Range(1, getdevcount() + 1)
+                                 )
+                             ,
+                             [](const std::tuple<std::tuple<bool, directionformat_t>, size_t, int> & t) {
+                                 // FIXME: comment
+
+                                 auto rdf = std::get<0>(t);
+                                 bool realcomplex = std::get<0>(rdf);
+                                 auto df = std::get<1>(rdf);
+                                 size_t dim = std::get<1>(t);
+                                 int ngpus = std::get<2>(t);
+                                 auto ret
+                                     = std::make_tuple(
+                                         realcomplex, df.direction, df.format, dim, ngpus);
+                                 return ret;
+                                 }
+                             ),
+                         [](const testing::TestParamInfo<hipfftxtunitdesc::ParamType>& info) {
+                             const auto realcomplex = std::get<0>(info.param);
+                             //const auto direction_format  = std::get<1>(info.param);
+                             const auto direction = std::get<1>(info.param);
+                             const auto format  = std::get<2>(info.param);
+                             const auto dimension = std::get<3>(info.param);
+                             const auto ngpus = std::get<4>(info.param);
+                             std::string name = realcomplex ? "rc" : "cc";
+                             name += direction == HIPFFT_FORWARD ? "forward" : "backward";
+                             name += format_name(format);
+                             name += "dim" + std::to_string(dimension);
+                             name += "ngpus" + std::to_string(ngpus);
+                             return name;
+                         }
     );
 
 // Params are direction, format, and batch size.
-class hipfftxtdirectionformat : public ::testing::TestWithParam<std::tuple<int, hipfftXtSubFormat,
-                                                                           int>>
+class hipfftxtdirectionformat : public ::testing::TestWithParam<std::tuple<int, hipfftXtSubFormat, int>>
 {};
 
 TEST_P(hipfftxtdirectionformat, c2cinplace)
