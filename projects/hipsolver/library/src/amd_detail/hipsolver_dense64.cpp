@@ -37,8 +37,10 @@
 #include "rocsolver/rocsolver.h"
 #include <algorithm>
 #include <climits>
+#include <cstddef>
 #include <functional>
 #include <iostream>
+#include <limits>
 #include <math.h>
 
 extern "C" {
@@ -896,12 +898,15 @@ try
     *lworkOnDevice = 0;
     *lworkOnHost   = 0;
 
+    // TODO: Update to call 64-bit rocsolver_*syevd_64 / rocsolver_*heevd_64 once available in rocSOLVER.
+    // Currently rocSOLVER only has 32-bit versions, so we cast int64_t to rocblas_int.
+    if(n > std::numeric_limits<rocblas_int>::max() || lda > std::numeric_limits<rocblas_int>::max())
+        return HIPSOLVER_STATUS_NOT_SUPPORTED;
+
     size_t sz;
     rocblas_start_device_memory_size_query((rocblas_handle)handle);
     hipsolverStatus_t status;
 
-    // TODO: Update to call 64-bit rocsolver_*syevd_64 / rocsolver_*heevd_64 once available in rocSOLVER.
-    // Currently rocSOLVER only has 32-bit versions, so we cast int64_t to rocblas_int.
     if(dataTypeA == HIP_R_32F && dataTypeW == HIP_R_32F && computeType == HIP_R_32F)
     {
         status = hipsolver::rocblas2hip_status(rocsolver_ssyevd((rocblas_handle)handle,
