@@ -52,7 +52,6 @@ set(__clang_cxx_compile_options
     -Wno-exit-time-destructors
     -Wno-extra-semi
     -Wno-extra-semi-stmt
-    -Wno-float-conversion
     -Wno-gnu-anonymous-struct
     -Wno-gnu-zero-variadic-macro-arguments
     -Wno-missing-prototypes
@@ -78,7 +77,6 @@ set(__clang_cxx_compile_options
     -Wno-microsoft-enum-value
     -Wno-language-extension-token
     -Wno-c++11-narrowing
-    -Wno-float-equal
     -Wno-redundant-parens
     -Wno-format-nonliteral
     -Wno-unused-template
