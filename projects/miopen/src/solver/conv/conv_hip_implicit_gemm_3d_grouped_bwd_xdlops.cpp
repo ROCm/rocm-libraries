@@ -539,6 +539,7 @@ void PerformanceConfigHipImplicitGemm3DGroupBwdXdlops::InitValidKernels(
 }
 #endif
 
+
 void PerformanceConfigHipImplicitGemm3DGroupBwdXdlops::DefaultKernelFromList(
     const ExecutionContext& ctx)
 {

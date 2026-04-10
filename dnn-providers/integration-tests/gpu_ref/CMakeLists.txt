@@ -9,7 +9,12 @@ add_subdirectory(kernels)
 
 add_library(
     hipdnn_gpu_ref STATIC
+    src/GpuFpReferenceConvolution.cpp
+    src/GpuFpReferenceValidation.cpp
+    src/GpuIntReferenceValidation.cpp
+    src/GpuReferenceValidationFactory.cpp
     src/GpuRefKernelCompiler.cpp
+    src/GpuRefValidatorHelpers.cpp
     ${GPU_REF_KERNEL_GENERATED_SOURCES}
 )
 

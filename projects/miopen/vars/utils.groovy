@@ -267,6 +267,7 @@ def buildTheRockDockerImage(Map conf=[:])
     def dockerArgs = "--build-arg PREFIX=${prefixpath} " +
                      "--build-arg THEROCK_GIT_HASH=\"${theRockHash}\" " +
                      "--build-arg THEROCK_ASIC=\"${gpu_arch}\" " +
+                     "--build-arg BUILD_TYPE=build " +
                      "--target update_therock " +
                      " -f ${env.WORKSPACE}/${env.MIOPEN_DIR}/Dockerfile "
 
