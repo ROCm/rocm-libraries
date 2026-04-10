@@ -47,7 +47,7 @@ struct SparseMmaPipeline : public MmaPipelineBase<sparse::detail::getPipelineFla
     using Base = MmaPipelineBase<sparse::detail::getPipelineFlags(), SparseMmaPipeline<ADataType, BDataType, CDataType, FragM, FragN, FragK, CompilerTarget, MmaOp_, MmaTransforms>>;
     // clang-format on
 
-    static_assert(!Base::template hasFlag<MmaPipelineOptionFlag::C_TRANSPOSE>(),
+    static_assert(!Base::template hasFlag<MmaPipelineOptionFlag::ABSwap>(),
                   "Cannot transpose C in sparse intrinsics.");
 
     using MmaOp = MmaOp_; // Expose the selected MmaOp

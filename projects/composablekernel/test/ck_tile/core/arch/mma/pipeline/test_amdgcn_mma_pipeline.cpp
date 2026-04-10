@@ -16,24 +16,24 @@ using namespace ck_tile::core::arch::mma;
 TEST(MmaPipelineOptionFlagsTests, ConversionTests)
 {
     MmaPipelineOptionFlags flags_0{};
-    MmaPipelineOptionFlags flags_1{MmaPipelineOptionFlag::C_TRANSPOSE};
+    MmaPipelineOptionFlags flags_1{MmaPipelineOptionFlag::ABSwap};
     MmaPipelineOptionFlags flags_2{MmaPipelineOptionFlag::COMPRESS_A};
     MmaPipelineOptionFlags flags_3{0b11};
 
     EXPECT_TRUE(flags_0.testFlag(MmaPipelineOptionFlag::NONE));
-    EXPECT_FALSE(flags_0.testFlag(MmaPipelineOptionFlag::C_TRANSPOSE));
+    EXPECT_FALSE(flags_0.testFlag(MmaPipelineOptionFlag::ABSwap));
     EXPECT_FALSE(flags_0.testFlag(MmaPipelineOptionFlag::COMPRESS_A));
 
-    EXPECT_TRUE(flags_1.testFlag(MmaPipelineOptionFlag::C_TRANSPOSE));
+    EXPECT_TRUE(flags_1.testFlag(MmaPipelineOptionFlag::ABSwap));
     EXPECT_FALSE(flags_1.testFlag(MmaPipelineOptionFlag::NONE));
     EXPECT_FALSE(flags_1.testFlag(MmaPipelineOptionFlag::COMPRESS_A));
 
     EXPECT_TRUE(flags_2.testFlag(MmaPipelineOptionFlag::COMPRESS_A));
     EXPECT_FALSE(flags_2.testFlag(MmaPipelineOptionFlag::NONE));
-    EXPECT_FALSE(flags_2.testFlag(MmaPipelineOptionFlag::C_TRANSPOSE));
+    EXPECT_FALSE(flags_2.testFlag(MmaPipelineOptionFlag::ABSwap));
 
     EXPECT_TRUE(flags_3.testFlag(MmaPipelineOptionFlag::COMPRESS_A));
-    EXPECT_TRUE(flags_3.testFlag(MmaPipelineOptionFlag::C_TRANSPOSE));
+    EXPECT_TRUE(flags_3.testFlag(MmaPipelineOptionFlag::ABSwap));
     EXPECT_FALSE(flags_3.testFlag(MmaPipelineOptionFlag::NONE));
 }
 
@@ -43,24 +43,24 @@ TEST(MmaPipelineOptionFlagsTests, OperatorsTests)
 
     EXPECT_TRUE(flags.testFlag(MmaPipelineOptionFlag::NONE));
 
-    flags |= MmaPipelineOptionFlag::C_TRANSPOSE;
+    flags |= MmaPipelineOptionFlag::ABSwap;
 
     EXPECT_FALSE(flags.testFlag(MmaPipelineOptionFlag::NONE));
-    EXPECT_TRUE(flags.testFlag(MmaPipelineOptionFlag::C_TRANSPOSE));
+    EXPECT_TRUE(flags.testFlag(MmaPipelineOptionFlag::ABSwap));
 
     flags |= MmaPipelineOptionFlag::COMPRESS_A;
 
     EXPECT_FALSE(flags.testFlag(MmaPipelineOptionFlag::NONE));
-    EXPECT_TRUE(flags.testFlag(MmaPipelineOptionFlag::C_TRANSPOSE));
+    EXPECT_TRUE(flags.testFlag(MmaPipelineOptionFlag::ABSwap));
     EXPECT_TRUE(flags.testFlag(MmaPipelineOptionFlag::COMPRESS_A));
 
     flags &= MmaPipelineOptionFlag::COMPRESS_A;
 
     EXPECT_FALSE(flags.testFlag(MmaPipelineOptionFlag::NONE));
-    EXPECT_FALSE(flags.testFlag(MmaPipelineOptionFlag::C_TRANSPOSE));
+    EXPECT_FALSE(flags.testFlag(MmaPipelineOptionFlag::ABSwap));
     EXPECT_TRUE(flags.testFlag(MmaPipelineOptionFlag::COMPRESS_A));
 
     EXPECT_FALSE((~flags).testFlag(MmaPipelineOptionFlag::NONE));
-    EXPECT_TRUE((~flags).testFlag(MmaPipelineOptionFlag::C_TRANSPOSE));
+    EXPECT_TRUE((~flags).testFlag(MmaPipelineOptionFlag::ABSwap));
     EXPECT_FALSE((~flags).testFlag(MmaPipelineOptionFlag::COMPRESS_A));
 }

@@ -16,9 +16,9 @@ namespace ck_tile::core::arch::mma {
  */
 enum struct MmaPipelineOptionFlag : unsigned
 {
-    NONE        = 0x0, ///< No flags set
-    C_TRANSPOSE = 0x1, ///< Swap A and B inputs to transpose the C output
-    COMPRESS_A  = 0x2, ///< Enable compressed (sparse) A matrix input
+    NONE       = 0x0, ///< No flags set
+    ABSwap     = 0x1, ///< Swap A and B inputs to transpose the C output
+    COMPRESS_A = 0x2, ///< Enable compressed (sparse) A matrix input
 };
 
 /**
@@ -104,7 +104,7 @@ constexpr bool operator==(MmaPipelineOptionFlags::Type lhs, const MmaPipelineOpt
  *      1. Apply pre-transforms and format input buffers (A, B, C).
  *      2. Delegate to @c Derived::execImpl for the actual mma loop.
  *      3. Apply post-transform and format the output buffer (D) back to the user type.
- *      When @c C_TRANSPOSE is set, the A and B inputs are swapped before step 1.
+ *      When @c ABSwap is set, the A and B inputs are swapped before step 1.
  */
 // TODO: c++20: use MmaPipelineOptionFlags directly
 template <MmaPipelineOptionFlags::Type Flags_, typename Derived>
@@ -262,10 +262,10 @@ struct MmaPipelineBase
         if constexpr(MmaOpTraits<typename Derived::MmaOp>::IsSupported)
         {
             auto transformed_inputs = applyTransformsToInputs(
-                hasFlag<MmaPipelineOptionFlag::C_TRANSPOSE>() ? std::forward<VecTB>(b)
-                                                              : std::forward<VecTA>(a),
-                hasFlag<MmaPipelineOptionFlag::C_TRANSPOSE>() ? std::forward<VecTA>(a)
-                                                              : std::forward<VecTB>(b),
+                hasFlag<MmaPipelineOptionFlag::ABSwap>() ? std::forward<VecTB>(b)
+                                                         : std::forward<VecTA>(a),
+                hasFlag<MmaPipelineOptionFlag::ABSwap>() ? std::forward<VecTA>(a)
+                                                         : std::forward<VecTB>(b),
                 std::forward<VecTC>(accum));
 
             Derived::execImpl(transformed_inputs);

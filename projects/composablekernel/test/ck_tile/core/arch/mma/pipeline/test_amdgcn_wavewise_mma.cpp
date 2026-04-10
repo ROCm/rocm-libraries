@@ -77,7 +77,7 @@ TEST(WaveWiseMmaPipeline, testKIter)
     test.test_pipeline(should_skip, kernel, validator);
 }
 
-TEST(WaveWiseMmaPipeline, testKIterTransposeC)
+TEST(WaveWiseMmaPipeline, testKIterSwapAB)
 {
     MmaPipelineTest<> test;
     const auto kernel = [](uint32_t waveSize, void* a, void* b, void* c, void* out) {
