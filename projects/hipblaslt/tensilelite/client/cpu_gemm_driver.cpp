@@ -25,6 +25,7 @@
  *******************************************************************************/
 
 #include <algorithm>
+#include <cassert>
 #include <chrono>
 #include <cmath>
 #include <iostream>
@@ -141,6 +142,12 @@ namespace
     // scaleA is always indexed by row (M), scaleB always by col (N).
     // factorDim only affects scaleAlphaVec: 0 = row-dim (length M), 1 = col-dim (length N).
     //
+    // Template parameters:
+    //   AccumT       — accumulation type (float or double)
+    //   MathOpAccumT — math-operation precision type. When different from AccumT,
+    //                  each A/B element is cast through MathOpAccumT before multiply
+    //                  (e.g. XFloat32 truncates mantissa to 10 bits).
+    //
     // When both MX operand descriptors are populated, the K-reduction is
     // block-structured: accumulate min(mxA.block, mxB.block) products, then
     // scale by the MX scale factors before adding to the running sum.
@@ -224,22 +231,23 @@ namespace
     }
 #endif
 
-    void columnMajorGemm(const float*   a,
-                         const float*   b,
-                         const float*   c,
-                         float*         d,
+    template <typename AccumT = float, typename MathOpAccumT = AccumT>
+    void columnMajorGemm(const AccumT*  a,
+                         const AccumT*  b,
+                         const AccumT*  c,
+                         AccumT*        d,
                          size_t         m,
                          size_t         n,
                          size_t         k,
                          bool           transA,
                          bool           transB,
-                         float          alpha,
-                         float          beta,
-                         const float*   biasVec       = nullptr,
-                         const float*   scaleAlphaVec = nullptr,
+                         AccumT         alpha,
+                         AccumT         beta,
+                         const AccumT*  biasVec       = nullptr,
+                         const AccumT*  scaleAlphaVec = nullptr,
                          ActivationType activation    = ActivationType::None,
-                         const float*   scaleAVec     = nullptr,
-                         const float*   scaleBVec     = nullptr,
+                         const AccumT*  scaleAVec     = nullptr,
+                         const AccumT*  scaleBVec     = nullptr,
                          int            factorDim     = 0,
                          QuantizeFn     quantizeA     = nullptr,
                          QuantizeFn     quantizeB     = nullptr
@@ -274,7 +282,7 @@ namespace
         {
             for(size_t j = 0; j < n; j++)
             {
-                float sum = 0.0f;
+                AccumT sum = AccumT(0);
 
 #ifndef _WIN32
                 // MX scale tensor layout follows the ContractionProblem tensor
@@ -294,15 +302,16 @@ namespace
                         std::min(mxA.block, mxB.block));
                     for(size_t lBase = 0; lBase < k; lBase += step)
                     {
-                        float blockSum = 0.0f;
+                        AccumT blockSum = AccumT(0);
                         for(size_t t = 0; t < step; t++)
                         {
                             size_t l    = lBase + t;
-                            float  aVal = a[i * strideAM + l * strideAK];
-                            float  bVal = b[l * strideBK + j * strideBN];
-                            if(quantizeA) aVal = quantizeA(aVal);
-                            if(quantizeB) bVal = quantizeB(bVal);
-                            blockSum += aVal * bVal;
+                            AccumT aVal = a[i * strideAM + l * strideAK];
+                            AccumT bVal = b[l * strideBK + j * strideBN];
+                            if(quantizeA) aVal = static_cast<AccumT>(quantizeA(static_cast<float>(aVal)));
+                            if(quantizeB) bVal = static_cast<AccumT>(quantizeB(static_cast<float>(bVal)));
+                            blockSum += AccumT(MathOpAccumT(aVal))
+                                      * AccumT(MathOpAccumT(bVal));
                         }
 
                         size_t blkA = lBase / static_cast<size_t>(mxA.block);
@@ -313,8 +322,8 @@ namespace
                         size_t mxsbIdx = j * mxB.strideFree
                                         + blkB * mxB.strideKBlock;
 
-                        float mxScale = static_cast<float>(mxA.scale[mxsaIdx])
-                                      * static_cast<float>(mxB.scale[mxsbIdx]);
+                        AccumT mxScale = static_cast<AccumT>(mxA.scale[mxsaIdx])
+                                       * static_cast<AccumT>(mxB.scale[mxsbIdx]);
                         sum += blockSum * mxScale;
                     }
                 }
@@ -323,15 +332,15 @@ namespace
                 {
                     for(size_t l = 0; l < k; l++)
                     {
-                        float aVal = a[i * strideAM + l * strideAK];
-                        float bVal = b[l * strideBK + j * strideBN];
-                        if(quantizeA) aVal = quantizeA(aVal);
-                        if(quantizeB) bVal = quantizeB(bVal);
-                        sum += aVal * bVal;
+                        AccumT aVal = a[i * strideAM + l * strideAK];
+                        AccumT bVal = b[l * strideBK + j * strideBN];
+                        if(quantizeA) aVal = static_cast<AccumT>(quantizeA(static_cast<float>(aVal)));
+                        if(quantizeB) bVal = static_cast<AccumT>(quantizeB(static_cast<float>(bVal)));
+                        sum += AccumT(MathOpAccumT(aVal)) * AccumT(MathOpAccumT(bVal));
                     }
                 }
 
-                float effectiveAlpha = alpha;
+                AccumT effectiveAlpha = alpha;
                 if(scaleAVec)
                     effectiveAlpha *= scaleAVec[i];
                 if(scaleBVec)
@@ -339,13 +348,19 @@ namespace
                 if(scaleAlphaVec)
                     effectiveAlpha *= scaleAlphaVec[factorDim == 0 ? i : j];
 
-                float result = effectiveAlpha * sum + beta * c[i + j * m];
+                AccumT result = effectiveAlpha * sum + beta * c[i + j * m];
 
                 if(biasVec)
                     result += biasVec[i];
 
                 if(activation == ActivationType::Relu)
-                    result = std::max(0.0f, result);
+                {
+                    result = std::max(AccumT(0), result);
+                }
+                else
+                {
+                    assert(activation == ActivationType::None);
+                }
 
                 d[i + j * m] = result;
             }
