@@ -11,12 +11,12 @@
 #include "hipdnn_backend.h"
 
 #include <gtest/gtest.h>
-#include <hipdnn_data_sdk/data_objects/block_scale_quantize_attributes_generated.h>
-#include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/block_scale_quantize_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_test_sdk/constants/BlockScaleQuantizeConstants.hpp>
 #include <hipdnn_test_sdk/utilities/ToVec.hpp>
 
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 
 #include <algorithm>
 #include <initializer_list>
@@ -25,7 +25,7 @@
 
 using namespace hipdnn_backend;
 using namespace hipdnn_backend::test_utilities;
-using namespace hipdnn_data_sdk::data_objects;
+using namespace hipdnn_flatbuffers_sdk::data_objects;
 using hipdnn_tests::constants::K_BSQ_BLOCK_SIZE;
 using hipdnn_tests::constants::K_BSQ_TENSOR_SCALE_DIMS;
 using hipdnn_tests::constants::K_BSQ_TENSOR_SCALE_STRIDES;
