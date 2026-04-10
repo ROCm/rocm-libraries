@@ -1245,9 +1245,9 @@ TEST_F(TestKnobDescriptor, ToKnobTWithInt64Default)
     auto knob = getDescriptor()->toKnobT();
     ASSERT_NE(knob, nullptr);
     ASSERT_EQ(knob->knob_id, knobId);
-    ASSERT_EQ(knob->default_value.type, hipdnn_data_sdk::data_objects::KnobValue::IntValue);
+    ASSERT_EQ(knob->default_value.type, hipdnn_flatbuffers_sdk::data_objects::KnobValue::IntValue);
     ASSERT_EQ(knob->default_value.AsIntValue()->value, value);
-    ASSERT_EQ(knob->constraint.type, hipdnn_data_sdk::data_objects::KnobConstraint::NONE);
+    ASSERT_EQ(knob->constraint.type, hipdnn_flatbuffers_sdk::data_objects::KnobConstraint::NONE);
 }
 
 TEST_F(TestKnobDescriptor, ToKnobTWithDoubleDefault)
@@ -1261,7 +1261,8 @@ TEST_F(TestKnobDescriptor, ToKnobTWithDoubleDefault)
     auto knob = getDescriptor()->toKnobT();
     ASSERT_NE(knob, nullptr);
     ASSERT_EQ(knob->knob_id, knobId);
-    ASSERT_EQ(knob->default_value.type, hipdnn_data_sdk::data_objects::KnobValue::FloatValue);
+    ASSERT_EQ(knob->default_value.type,
+              hipdnn_flatbuffers_sdk::data_objects::KnobValue::FloatValue);
     ASSERT_DOUBLE_EQ(knob->default_value.AsFloatValue()->value, value);
 }
 
@@ -1276,7 +1277,8 @@ TEST_F(TestKnobDescriptor, ToKnobTWithStringDefault)
     auto knob = getDescriptor()->toKnobT();
     ASSERT_NE(knob, nullptr);
     ASSERT_EQ(knob->knob_id, knobId);
-    ASSERT_EQ(knob->default_value.type, hipdnn_data_sdk::data_objects::KnobValue::StringValue);
+    ASSERT_EQ(knob->default_value.type,
+              hipdnn_flatbuffers_sdk::data_objects::KnobValue::StringValue);
     ASSERT_EQ(knob->default_value.AsStringValue()->value, value);
 }
 
@@ -1306,7 +1308,8 @@ TEST_F(TestKnobDescriptor, ToKnobTWithIntConstraints)
 
     auto knob = getDescriptor()->toKnobT();
     ASSERT_NE(knob, nullptr);
-    ASSERT_EQ(knob->constraint.type, hipdnn_data_sdk::data_objects::KnobConstraint::IntConstraint);
+    ASSERT_EQ(knob->constraint.type,
+              hipdnn_flatbuffers_sdk::data_objects::KnobConstraint::IntConstraint);
 
     const auto* constraint = knob->constraint.AsIntConstraint();
     ASSERT_NE(constraint, nullptr);
@@ -1332,7 +1335,7 @@ TEST_F(TestKnobDescriptor, ToKnobTWithFloatConstraints)
     auto knob = getDescriptor()->toKnobT();
     ASSERT_NE(knob, nullptr);
     ASSERT_EQ(knob->constraint.type,
-              hipdnn_data_sdk::data_objects::KnobConstraint::FloatConstraint);
+              hipdnn_flatbuffers_sdk::data_objects::KnobConstraint::FloatConstraint);
 
     const auto* constraint = knob->constraint.AsFloatConstraint();
     ASSERT_NE(constraint, nullptr);
@@ -1360,7 +1363,7 @@ TEST_F(TestKnobDescriptor, ToKnobTWithStringConstraints)
     auto knob = getDescriptor()->toKnobT();
     ASSERT_NE(knob, nullptr);
     ASSERT_EQ(knob->constraint.type,
-              hipdnn_data_sdk::data_objects::KnobConstraint::StringConstraint);
+              hipdnn_flatbuffers_sdk::data_objects::KnobConstraint::StringConstraint);
 
     const auto* constraint = knob->constraint.AsStringConstraint();
     ASSERT_NE(constraint, nullptr);
@@ -1456,15 +1459,15 @@ TEST_F(TestKnobDescriptor, SetAttributeUnsupportedAttributeFails)
 
 TEST(TestKnobDescriptorFromKnobT, IntKnobWithConstraints)
 {
-    hipdnn_data_sdk::data_objects::KnobT knobT;
+    hipdnn_flatbuffers_sdk::data_objects::KnobT knobT;
     knobT.knob_id = "test.int_knob";
     knobT.description = "An int knob";
     knobT.deprecated = false;
-    hipdnn_data_sdk::data_objects::IntValueT intDefault;
+    hipdnn_flatbuffers_sdk::data_objects::IntValueT intDefault;
     intDefault.value = 50;
     knobT.default_value.Set(intDefault);
 
-    hipdnn_data_sdk::data_objects::IntConstraintT intConstraint;
+    hipdnn_flatbuffers_sdk::data_objects::IntConstraintT intConstraint;
     intConstraint.min_value = 0;
     intConstraint.max_value = 100;
     intConstraint.step = 10;
@@ -1491,14 +1494,14 @@ TEST(TestKnobDescriptorFromKnobT, IntKnobWithConstraints)
 
 TEST(TestKnobDescriptorFromKnobT, FloatKnobWithConstraints)
 {
-    hipdnn_data_sdk::data_objects::KnobT knobT;
+    hipdnn_flatbuffers_sdk::data_objects::KnobT knobT;
     knobT.knob_id = "test.float_knob";
     knobT.description = "A float knob";
-    hipdnn_data_sdk::data_objects::FloatValueT floatDefault;
+    hipdnn_flatbuffers_sdk::data_objects::FloatValueT floatDefault;
     floatDefault.value = 0.5;
     knobT.default_value.Set(floatDefault);
 
-    hipdnn_data_sdk::data_objects::FloatConstraintT floatConstraint;
+    hipdnn_flatbuffers_sdk::data_objects::FloatConstraintT floatConstraint;
     floatConstraint.min_value = 0.0;
     floatConstraint.max_value = 1.0;
     knobT.constraint.Set(floatConstraint);
@@ -1519,14 +1522,14 @@ TEST(TestKnobDescriptorFromKnobT, FloatKnobWithConstraints)
 
 TEST(TestKnobDescriptorFromKnobT, StringKnobWithConstraints)
 {
-    hipdnn_data_sdk::data_objects::KnobT knobT;
+    hipdnn_flatbuffers_sdk::data_objects::KnobT knobT;
     knobT.knob_id = "test.string_knob";
     knobT.description = "A string knob";
-    hipdnn_data_sdk::data_objects::StringValueT stringDefault;
+    hipdnn_flatbuffers_sdk::data_objects::StringValueT stringDefault;
     stringDefault.value = "fast";
     knobT.default_value.Set(std::move(stringDefault));
 
-    hipdnn_data_sdk::data_objects::StringConstraintT stringConstraint;
+    hipdnn_flatbuffers_sdk::data_objects::StringConstraintT stringConstraint;
     stringConstraint.max_length = 32;
     stringConstraint.valid_values = {"fast", "slow", "balanced"};
     knobT.constraint.Set(std::move(stringConstraint));
@@ -1547,10 +1550,10 @@ TEST(TestKnobDescriptorFromKnobT, StringKnobWithConstraints)
 
 TEST(TestKnobDescriptorFromKnobT, DeprecatedKnob)
 {
-    hipdnn_data_sdk::data_objects::KnobT knobT;
+    hipdnn_flatbuffers_sdk::data_objects::KnobT knobT;
     knobT.knob_id = "test.deprecated";
     knobT.deprecated = true;
-    hipdnn_data_sdk::data_objects::IntValueT intDefault;
+    hipdnn_flatbuffers_sdk::data_objects::IntValueT intDefault;
     intDefault.value = 0;
     knobT.default_value.Set(intDefault);
 
@@ -1564,9 +1567,9 @@ TEST(TestKnobDescriptorFromKnobT, DeprecatedKnob)
 
 TEST(TestKnobDescriptorFromKnobT, IntKnobNoConstraint)
 {
-    hipdnn_data_sdk::data_objects::KnobT knobT;
+    hipdnn_flatbuffers_sdk::data_objects::KnobT knobT;
     knobT.knob_id = "test.unconstrained";
-    hipdnn_data_sdk::data_objects::IntValueT intDefault;
+    hipdnn_flatbuffers_sdk::data_objects::IntValueT intDefault;
     intDefault.value = 42;
     knobT.default_value.Set(intDefault);
 
@@ -1576,18 +1579,19 @@ TEST(TestKnobDescriptorFromKnobT, IntKnobNoConstraint)
     auto roundTrip = desc->toKnobT();
     ASSERT_NE(roundTrip, nullptr);
     EXPECT_EQ(roundTrip->default_value.AsIntValue()->value, 42);
-    EXPECT_EQ(roundTrip->constraint.type, hipdnn_data_sdk::data_objects::KnobConstraint::NONE);
+    EXPECT_EQ(roundTrip->constraint.type,
+              hipdnn_flatbuffers_sdk::data_objects::KnobConstraint::NONE);
 }
 
 TEST(TestKnobDescriptorFromKnobT, IntKnobWithValidValues)
 {
-    hipdnn_data_sdk::data_objects::KnobT knobT;
+    hipdnn_flatbuffers_sdk::data_objects::KnobT knobT;
     knobT.knob_id = "test.valid_values";
-    hipdnn_data_sdk::data_objects::IntValueT intDefault;
+    hipdnn_flatbuffers_sdk::data_objects::IntValueT intDefault;
     intDefault.value = 16;
     knobT.default_value.Set(intDefault);
 
-    hipdnn_data_sdk::data_objects::IntConstraintT intConstraint;
+    hipdnn_flatbuffers_sdk::data_objects::IntConstraintT intConstraint;
     intConstraint.valid_values = {8, 16, 32, 64};
     knobT.constraint.Set(std::move(intConstraint));
 
@@ -1603,7 +1607,7 @@ TEST(TestKnobDescriptorFromKnobT, IntKnobWithValidValues)
 
 TEST(TestKnobDescriptorFromKnobT, UnknownValueTypeReturnsNull)
 {
-    hipdnn_data_sdk::data_objects::KnobT knobT;
+    hipdnn_flatbuffers_sdk::data_objects::KnobT knobT;
     knobT.knob_id = "test.unknown_type";
     // default_value is NONE by default (no Set called)
 

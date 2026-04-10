@@ -360,33 +360,6 @@ RunParameterPredictionModel<int8_t, bool (*)(int, int)>(
     std::function<std::vector<std::string>(const ProblemDescription&)>,
     std::string,
     bool (*&&)(int, int));
-#if MIOPEN_USE_COMPOSABLEKERNEL
-
-template std::pair<bool, miopen::ai::tuning::candidate_selection::CandidateSelectionResult>
-RunParameterPredictionModel<ck::half_t, bool (*)(int, int)>(
-    const miopen::ExecutionContext&,
-    const ProblemDescription&,
-    std::vector<std::string>&,
-    int&,
-    int&,
-    std::string&,
-    std::function<std::vector<std::string>(const ProblemDescription&)>,
-    std::string,
-    bool (*&&)(int, int));
-
-template std::pair<bool, miopen::ai::tuning::candidate_selection::CandidateSelectionResult>
-RunParameterPredictionModel<ck::bhalf_t, bool (*)(int, int)>(
-    const miopen::ExecutionContext&,
-    const ProblemDescription&,
-    std::vector<std::string>&,
-    int&,
-    int&,
-    std::string&,
-    std::function<std::vector<std::string>(const ProblemDescription&)>,
-    std::string,
-    bool (*&&)(int, int));
-#endif // MIOPEN_USE_COMPOSABLEKERNEL
-
 // helper function to get a dummy execution context for when we do not have a real context
 const miopen::ExecutionContext& GetDummyCtx()
 {

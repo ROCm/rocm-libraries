@@ -87,6 +87,7 @@ const auto& GetTestParams()
 #endif
         auto p = miopen::unit_tests::UnitTestConvSolverParams(supportedDevices);
         p.Tunable(5);
+        p.UsesCKDynamicLib();
 
         // Increased tolerance factor to 2 because of the following errors observed :
         // Expected: (error) < (threshold), actual: 1.4733528696833642e-07 vs 1.1920928955078125e-07
