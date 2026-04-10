@@ -405,13 +405,6 @@ private:
     void ValidateTensors(const ConvTensors& conv_tensors) const;
 };
 
-MIOPEN_INTERNALS_EXPORT void ConvolutionBackwardBias(const Handle& handle,
-                                                     const void* alpha,
-                                                     const TensorDescriptor& dyDesc,
-                                                     ConstData_t dy,
-                                                     const void* beta,
-                                                     const TensorDescriptor& dbDesc,
-                                                     Data_t db);
 
 MIOPEN_INTERNALS_EXPORT Invoker LoadOrPrepareInvoker(const ExecutionContext& ctx,
                                                      const conv::ProblemDescription& problem,
