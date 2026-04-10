@@ -34,6 +34,7 @@ class TestNameValidator:
     FULL_NAME_RE: Pattern[str] = re.compile(
         r"^(?:(?P<prefix>[A-Z][A-Za-z0-9]*)/)?"
         r"(?P<suite>[A-Z][A-Za-z0-9]*)"
+        r"(?:/\d+)?"
         r"\.(?P<case>(?:DISABLED_[A-Z][A-Za-z0-9]+|[A-Z][A-Za-z0-9]*))"
         r"(?:/.*)?$"
     )
@@ -207,13 +208,15 @@ class TestNameValidator:
                     if not line:
                         continue
 
+                    # Strip gtest comments (e.g. "# TypeParam = float")
+                    line = line.split("#")[0].strip()
+                    if not line:
+                        continue
+
                     if line.endswith(".") and not line.endswith("..."):
                         current_suite = line[:-1]
                     elif line and current_suite:
-                        test_case = line.strip()
-                        test_names.append(
-                            f"{current_suite}.{test_case.split("#")[0].strip()}"
-                        )
+                        test_names.append(f"{current_suite}.{line}")
 
             except subprocess.TimeoutExpired:
                 print(f"Warning: Timeout running {executable}", file=sys.stderr)
