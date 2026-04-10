@@ -544,6 +544,9 @@ class hardware_t {
          }}};
   // clang-format on
 
+  /// LDS write throughput per CU in bytes/cycle (32 banks x 4 bytes/bank).
+  static constexpr size_t LDS_WRITE_BW = 128;
+
   architecture_t arch;  ///< GPU architecture type
   size_t N_CU;          ///< Number of Compute Units
   size_t lds_capacity;  ///< Capacity of Local Data Share (LDS) in bytes

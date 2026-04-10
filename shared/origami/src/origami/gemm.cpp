@@ -71,9 +71,11 @@ context_t::context_t(const problem_t& problem, const hardware_t& hardware, const
   active_cus           = cus;
   mem_bw_limited       = compute_mem_bw_from_occupancy(hardware, active_cus);
   write_mem_bw_limited = compute_mem_bw_from_occupancy(hardware, num_output_tiles);
-  real_occupancy       = std::min(
-      std::max(config.occupancy, static_cast<int>(1)),
-      static_cast<int>(math::safe_ceil_div(grid_m * grid_n * batch * splitting_factor, N_CU)));
+  lds_occupancy = (config.lds_bytes > 0)
+                      ? std::max(hardware.lds_capacity / config.lds_bytes, static_cast<size_t>(1))
+                      : static_cast<size_t>(1);
+  real_occupancy = static_cast<int>(math::safe_ceil_div(grid_m * grid_n * batch * splitting_factor, N_CU));
+  real_occupancy = std::min(real_occupancy, lds_occupancy);
   occupancy_factor = pow(heuristic.occupancy_decay_base, real_occupancy);
 
   // Tile-derived values
@@ -99,12 +101,19 @@ context_t::context_t(const problem_t& problem, const hardware_t& hardware, const
     OLOG_DEBUG("======== Origami Debug Info ========");
     OLOG_DEBUG("ProblemSize (MxNxBxK): " << int(M) << "x" << int(N) << "x" << int(batch) << "x"
                                          << int(K));
+    OLOG_DEBUG("transpose: " << (problem.a_transpose == transpose_t::T ? "T" : "N") << (problem.b_transpose == transpose_t::T ? "T" : "N"));
     OLOG_DEBUG("MacroTile: " << int(MT_M) << "x" << int(MT_N) << "x" << int(MT_K));
     OLOG_DEBUG("MatrixInstruction: " << int(MI_M) << "x" << int(MI_N) << "x" << int(MI_K));
+    OLOG_DEBUG("PrefetchGlobalRead: " << int(config.prefetch_global_read));
+    OLOG_DEBUG("DirectToLdsA: " << int(config.direct_to_lds_a));
+    OLOG_DEBUG("DirectToLdsB: " << int(config.direct_to_lds_b));
+    // OLOG_DEBUG("DirectToVgprA: " << int(config.tensile().direct_to_vgpr_a));
+    // OLOG_DEBUG("DirectToVgprB: " << int(config.tensile().direct_to_vgpr_b));
     OLOG_DEBUG("ElementSizeA (bits): " << int(a_bits));
     OLOG_DEBUG("ElementSizeB (bits): " << int(b_bits));
     OLOG_DEBUG("CacheHintsA: " << int(config.cache_hints_a));
     OLOG_DEBUG("CacheHintsB: " << int(config.cache_hints_b));
+    OLOG_DEBUG("CacheHintsD: " << int(config.cache_hints_d));
 
     OLOG_DEBUG("Grid: " << int(grid_m) << "x" << int(grid_n));
     OLOG_DEBUG("NumOutputTiles: " << int(num_output_tiles));
@@ -116,6 +125,8 @@ context_t::context_t(const problem_t& problem, const hardware_t& hardware, const
     OLOG_DEBUG("ActiveCUs: " << int(active_cus));
     OLOG_DEBUG("ReadMemBWFactor: " << mem_bw_limited);
     OLOG_DEBUG("WriteMemBWFactor: " << write_mem_bw_limited);
+    OLOG_DEBUG("LdsBytes: " << config.lds_bytes);
+    OLOG_DEBUG("LdsOccupancy: " << lds_occupancy);
     OLOG_DEBUG("RealOccupancy: " << real_occupancy);
     OLOG_DEBUG("OccupancyFactor: " << occupancy_factor);
 
@@ -1612,6 +1623,12 @@ double compute_epilogue_latency(const problem_t& problem,
       // per partial dominates the tiny per-WG compute, and workspace traffic is
       // proportionally large.
       if (tile_m * tile_n <= 2048) L_reduce *= 2.0;
+
+      // Non-temporal D writes bypass cache, so the reduction
+      // kernel reads partials from DRAM instead of L2/MALL.
+      if (config.cache_hints_d >= 4) {
+        L_reduce += heuristic.ntd_ksplit_penalty * static_cast<double>(splitting_factor);
+      }
     }
 
     return L_acc_transfer + L_edge_check + L_store + L_reduce;
@@ -1676,6 +1693,19 @@ double compute_tile_latency(const problem_t& problem,
   double L_compute = compute_mt_compute_latency(problem, hardware, config);
   double L_mem     = compute_memory_latency(problem, hardware, config, context);
 
+  // Non-DTL penalty: without DirectToLds the kernel must DS_WRITE each
+  // operand from VGPRs into LDS, adding cycles proportional to the tile
+  // data volume divided by the LDS bank-limited write throughput
+  // (32 banks x 4 B = 128 B/cycle per CU).
+  double L_ds_write = 0.0;
+  if (!config.direct_to_lds_a)
+    L_ds_write += static_cast<double>(MT_M * MT_K * context.a_bytes) /
+                  static_cast<double>(hardware_t::LDS_WRITE_BW);
+  if (!config.direct_to_lds_b)
+    L_ds_write += static_cast<double>(MT_K * MT_N * context.b_bytes) /
+                  static_cast<double>(hardware_t::LDS_WRITE_BW);
+  L_mem += L_ds_write;
+
   double utilization            = calculate_work_utilization(problem, config);
   double effective_tile_penalty = (utilization > 1e-9) ? (1.0 / (utilization)) : 1.0;
 
@@ -1686,24 +1716,23 @@ double compute_tile_latency(const problem_t& problem,
   const size_t real_occupancy   = context.real_occupancy;
   const double occupancy_factor = context.occupancy_factor;
 
-  // 3-1) Prologue
-  double L_prologue = L_mem;
+  const int pgr = config.prefetch_global_read;
+
+  // 3-1) Prologue: WG setup (0.5 * L_mem) + PGR prefetch loads (pgr * L_mem).
+  double L_prologue = (heuristic.prologue_setup_fraction + static_cast<double>(pgr)) * L_mem;
   L_prologue *= effective_tile_penalty;
   L_prologue *= occupancy_factor;
 
-  // 3-2) Epilogue (per-tile store + optional in-kernel reduction)
-  // Core epilogue (compute + stores + reduction) scaled by occupancy decay.
-  // K-padding penalty added outside the decay (it's a structural mismatch, not a latency).
+  // 3-2) Epilogue (per-tile store only; compute is covered by NLL)
   double L_epilogue =
-      (L_compute + compute_epilogue_latency(problem, hardware, config, context)) * occupancy_factor;
+      compute_epilogue_latency(problem, hardware, config, context) * occupancy_factor;
 
-  double problem_k_quant = 0.0;
-  if (K % MT_K != 0) {
-    problem_k_quant = static_cast<double>(K % MT_K) / static_cast<double>(K);
-    L_epilogue += problem_k_quant * heuristic.epilogue_k_padding_penalty;
-  }
-
-  // 4) Single-tile main-loop latency (pipelined: compute overlaps memory)
+  // 4) Main-loop latency
+  //    ISA structure (PGR=N):
+  //      Main loop  : k_iters - PGR iterations, each overlapping global load + compute
+  //      NGLL       : PGR - 1 iterations, drain in-flight LDS writes + compute (no new loads)
+  //      NLL        : 1 iteration, pure compute from LDS (no memory)
+  //    Total compute iterations = k_iters, total global loads = k_iters
   double L_cvt = 0;
   // TODO: gfx90a also lacks native TF32 and should get CVT overhead,
   // but enabling it changes rankings — address in a separate PR.
@@ -1714,22 +1743,69 @@ double compute_tile_latency(const problem_t& problem,
       L_cvt = compute_cvt_overhead_x1(problem, hardware, config);
     }
   }
-  double L_tile_single =
-      std::max(L_compute * heuristic.weight_compute, L_mem * heuristic.weight_memory);
-  L_tile_single *= (splitting_factor > 4) ? 1.0 : heuristic.main_loop_efficiency;
-  L_tile_single *= effective_tile_penalty;
-  L_tile_single += L_cvt;
 
-  // 5) Number of K-iterations (excluding epilogue), at least 1
-  long num_iter =
-      std::max(static_cast<long>(math::safe_ceil_div(k_per_split, MT_K) - 1), static_cast<long>(1));
+  // ISA splits K into full unroll iterations then distributes across GSU:
+  //   total_full_iters = floor(K / MT_K)
+  //   iters_per_wg     = ceil(total_full_iters / GSU)   (critical-path WG)
+  //   tail_k           = K % MT_K                        (exactly 1 WG handles this)
+  long total_full_iters = static_cast<long>(K / MT_K);
+  long k_iters = (splitting_factor > 1)
+      ? static_cast<long>(math::safe_ceil_div(static_cast<size_t>(total_full_iters), splitting_factor))
+      : total_full_iters;
+  k_iters = std::max(k_iters, 0L);
+  long num_main_iters = std::max(k_iters - static_cast<long>(pgr), 0L);
+  long num_ngll_iters = std::max(static_cast<long>(pgr) - 1L, 0L);
+
+  double L_mem_stream     = L_mem     * heuristic.weight_memory  * static_cast<double>(num_main_iters);
+  double L_compute_stream = L_compute * heuristic.weight_compute * static_cast<double>(num_main_iters);
+
+  double L_mainloop;
+  if (pgr <= 1) {
+    L_mainloop = L_mem_stream + L_compute_stream;
+  } else {
+    L_mainloop = std::max(L_mem_stream, L_compute_stream);
+  }
+
+  const double eff_scale =
+      ((splitting_factor > 4) ? 1.0 : heuristic.main_loop_efficiency) * effective_tile_penalty;
+  L_mainloop *= eff_scale;
+  L_mainloop += L_cvt * static_cast<double>(num_main_iters);
+
+  // 4a) NGLL (NoGlobalLoadLoop drain phase): PGR-1 iterations.
+  //     Drains in-flight prefetch data into LDS (vmcnt wait + ds_write + barrier)
+  //     while computing; no new global load latency.
+  double L_ngll = static_cast<double>(num_ngll_iters) * L_compute * eff_scale;
+
+  // 4b) NLL (NoLoadLoop): 1 iteration of pure compute from already-resident LDS.
+  double L_nll = L_compute * eff_scale;
+
+  // 4c) Tail loop (structural): if K is not a multiple of MT_K, a masked
+  //     partial iteration executes after NLL with reduced global reads.
+  //     Tail = K % MT_K; assigned to exactly one WG regardless of GSU.
+  const size_t tail_k = K % MT_K;
+  double L_tail = 0.0;
+  if (tail_k > 0) {
+    double tail_fraction = static_cast<double>(tail_k) / static_cast<double>(MT_K);
+    L_tail = tail_fraction * L_mem + L_compute + heuristic.tail_loop_overhead;
+    L_tail *= eff_scale;
+  }
+
+  // 5) LSU: add local K-split reduction overhead when LocalSplitU > 1.
+  const int lsu = config.local_split_u;
+  const double L_lsu_reduction = (lsu > 1)
+      ? heuristic.lsu_reduction_overhead *
+            (static_cast<double>(MT_M * MT_N) / 64.0) *
+            std::log2(static_cast<double>(lsu))
+      : 0.0;
 
   // 6) Total tile latency
-  double L_tile_total = L_tile_single * static_cast<double>(num_iter);
+  double L_tile_total = L_mainloop + L_ngll + L_nll + L_tail;
   L_tile_total += heuristic.weight_prologue * L_prologue;
   L_tile_total += heuristic.weight_epilogue * L_epilogue;
+  L_tile_total += L_lsu_reduction;
   L_tile_total += heuristic.weight_wg_setup * L_WG_setup;
-  L_tile_total += heuristic.weight_loop_overhead * static_cast<double>(num_iter);
+  L_tile_total += heuristic.weight_loop_overhead * static_cast<double>(k_iters);
+  L_tile_total += heuristic.tile_fixed_overhead;
 
   // Apply final tile total weight
   L_tile_total *= heuristic.weight_tile_total;
@@ -1742,10 +1818,17 @@ double compute_tile_latency(const problem_t& problem,
     OLOG_DEBUG("L_compute: " << L_compute);
     OLOG_DEBUG("L_cvt: " << L_cvt);
     OLOG_DEBUG("k_per_split: " << k_per_split);
-    OLOG_DEBUG("num_iter: " << int(num_iter));
-    OLOG_DEBUG("problem_k_quant: " << problem_k_quant);
+    OLOG_DEBUG("k_iters: " << int(k_iters));
+    OLOG_DEBUG("num_main_iters: " << int(num_main_iters));
+    OLOG_DEBUG("num_ngll_iters: " << int(num_ngll_iters));
+    OLOG_DEBUG("L_mem_stream: " << L_mem_stream);
+    OLOG_DEBUG("L_compute_stream: " << L_compute_stream);
+    OLOG_DEBUG("L_mainloop: " << L_mainloop);
+    OLOG_DEBUG("L_ngll: " << L_ngll);
+    OLOG_DEBUG("L_nll: " << L_nll);
+    OLOG_DEBUG("tail_k: " << tail_k);
+    OLOG_DEBUG("L_tail: " << L_tail);
     OLOG_DEBUG("L_prologue: " << L_prologue);
-    OLOG_DEBUG("L_tile_single: " << L_tile_single);
     OLOG_DEBUG("L_epilogue: " << L_epilogue);
     OLOG_DEBUG("L_tile_total: " << L_tile_total);
   }
@@ -1822,6 +1905,12 @@ double compute_parallel_reduction_latency(const problem_t& problem,
   double L_total =
       heuristic.postgsu_kernel_launch_overhead + (L_read + L_acc + L_write) * timesteps;
 
+  // Non-temporal D writes bypass cache, so the reduction
+  // kernel reads partials from DRAM instead of L2/MALL.
+  if (config.cache_hints_d >= 4) {
+    L_total += heuristic.ntd_ksplit_penalty * static_cast<double>(context.splitting_factor);
+  }
+
   if (context.debug) {
     OLOG_DEBUG("L_parallel_reduce_active_wgs: " << active_wgs);
     OLOG_DEBUG("L_parallel_reduce_timesteps: " << timesteps);
@@ -1869,8 +1958,8 @@ double compute_total_latency(const problem_t& problem,
   size_t MI_N = config.mi.n;
   size_t MI_K = config.mi.k;
 
-  const int a_bits = datatype_to_bits(problem.a_dtype);
-  const int b_bits = datatype_to_bits(problem.b_dtype);
+  const int a_bits  = datatype_to_bits(problem.a_dtype);
+  const int b_bits  = datatype_to_bits(problem.b_dtype);
 
   // 0) Short-circuit
   // We don't need to compute latency for all MTs. With this, we can shortcut.
@@ -1905,6 +1994,7 @@ double compute_total_latency(const problem_t& problem,
     } else if (config.cache_hints_a || config.cache_hints_b) {
       return std::numeric_limits<double>::max();
     }
+
   }
 
   // 1) Setup context (computes grid dims, launch params, WGM, etc.)
@@ -1913,14 +2003,27 @@ double compute_total_latency(const problem_t& problem,
   // 2) Compute latency of a timestep
   double L_timestep = compute_timestep_latency(problem, hardware, config, context);
 
-  // 3) Compute latency for all timesteps with linear scaling
-  double total_latency = L_timestep * context.num_timesteps;
+  // 3) Compute latency for all timesteps, adjusted for LDS-based occupancy.
+  // Higher per-CU occupancy hides inter-WG latency and reduces effective
+  // timestep count.  DTL does not change occupancy (LDS footprint is the
+  // same); its effect is captured by L_ds_write in the per-tile latency.
+  double occ_scaling = std::pow(context.heuristic.occ_timestep_benefit,
+                                static_cast<double>(context.lds_occupancy - 1));
+  double effective_timesteps = std::max(context.num_timesteps * occ_scaling, 1.0);
+  double total_latency       = L_timestep * effective_timesteps;
 
-  //  4) Add parallel reduction kernel cost (separate kernel launch, 0 if not parallel)
+  //  4) Kernel launch overhead (~5 us converted to cycles)
+  const double L_kernel_launch = 4000.0;
+  total_latency += L_kernel_launch;
+
+  //  5) Add parallel reduction kernel cost (separate kernel launch, 0 if not parallel)
   double L_parallel_reduce = compute_parallel_reduction_latency(problem, hardware, config, context);
   total_latency += L_parallel_reduce;
 
   if (context.debug) {
+    OLOG_DEBUG("OccScaling: " << occ_scaling);
+    OLOG_DEBUG("EffectiveTimesteps: " << effective_timesteps);
+    OLOG_DEBUG("L_kernel_launch: " << L_kernel_launch);
     OLOG_DEBUG("L_parallel_reduce: " << L_parallel_reduce);
     OLOG_DEBUG("total_latency: " << total_latency);
     OLOG_DEBUG("=================================");

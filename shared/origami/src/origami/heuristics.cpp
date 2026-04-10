@@ -59,6 +59,12 @@ void heuristic_params_t::merge_with(const heuristic_params_t& other) {
   postgsu_kernel_launch_overhead      = other.postgsu_kernel_launch_overhead;
   postgsu_threads_per_wg              = other.postgsu_threads_per_wg;
   postgsu_wavefront_size              = other.postgsu_wavefront_size;
+  prologue_setup_fraction              = other.prologue_setup_fraction;
+  lsu_reduction_overhead              = other.lsu_reduction_overhead;
+  ntd_ksplit_penalty                  = other.ntd_ksplit_penalty;
+  occ_timestep_benefit                = other.occ_timestep_benefit;
+  tail_loop_overhead                  = other.tail_loop_overhead;
+  tile_fixed_overhead                 = other.tile_fixed_overhead;
 
   // Main loop efficiency
   main_loop_efficiency = other.main_loop_efficiency;

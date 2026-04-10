@@ -49,8 +49,8 @@ struct heuristic_defaults_t {
   static constexpr double WEIGHT_MEMORY        = 1.0;
   static constexpr double WEIGHT_WG_SETUP      = 1.0;
   static constexpr double WEIGHT_PROLOGUE      = 1.5;
-  static constexpr double WEIGHT_EPILOGUE      = 2.0;
-  static constexpr double WEIGHT_LOOP_OVERHEAD = 500.0;
+  static constexpr double WEIGHT_EPILOGUE      = 1.0;
+  static constexpr double WEIGHT_LOOP_OVERHEAD = 50.0;
   static constexpr double WEIGHT_TILE_TOTAL    = 1.0;
 
   // Empirical Constants
@@ -79,7 +79,7 @@ struct heuristic_defaults_t {
   static constexpr double EPILOGUE_L_SMEM = 900.0;  // s_load_dword(glc) cross-XCD flag poll
   static constexpr double EPILOGUE_K_PADDING_PENALTY     = 50000.0;
   static constexpr size_t POSTGSU_COMPUTE_BYTES          = 4;  // workspace partials stored as f32
-  static constexpr double POSTGSU_KERNEL_LAUNCH_OVERHEAD = 12000.0;
+  static constexpr double POSTGSU_KERNEL_LAUNCH_OVERHEAD = 4000.0;
   static constexpr size_t POSTGSU_THREADS_PER_WG         = 256;
   static constexpr size_t POSTGSU_WAVEFRONT_SIZE         = 64;
 
@@ -88,6 +88,40 @@ struct heuristic_defaults_t {
 
   // TF32 Emulation Constants
   static constexpr double TF32_ARITH_INTENSITY_THRESHOLD = 1000.0;
+
+  // --- PGR (PrefetchGlobalRead) ---
+  // Prologue = (setup + pgr) * L_mem.  Setup captures WG init overhead.
+  static constexpr double PROLOGUE_SETUP_FRACTION  = 0.5;
+  // Main loop: two overlapping streams —
+  //   memory  stream = L_mem * (num_iter - pgr)
+  //   compute stream = L_compute * num_iter
+  //   duration = max(memory, compute)   (additive for PGR=1)
+
+  // --- LSU (LocalSplitU) ---
+  // Intra-WG LDS reduction overhead after the K-loop; scales as lsu * log2(lsu).
+  static constexpr double LSU_REDUCTION_OVERHEAD = 1.0;   // cycles per element-group per log2(lsu) pass
+
+  // --- NTD (NonTemporalD) ---
+  // NTD=4 + K-split: partials bypass cache, so reduction reads hit DRAM.
+  // Penalty per split factor (cycles).  0 = no penalty (non-split case).
+  static constexpr double NTD_KSPLIT_PENALTY = 5000.0;
+
+  // --- LDS Occupancy ---
+  // Per additional workgroup that can co-reside on a CU (beyond the first),
+  // effective timestep count is multiplied by this factor.
+  // < 1.0 means higher occupancy hides more inter-WG latency.
+  static constexpr double OCC_TIMESTEP_BENEFIT = 0.95;
+
+  // --- Tail Loop ---
+  // Fixed overhead per tail-loop invocation (cycles).
+  // Covers K-masking setup, LDS address reset, conditional branching.
+  static constexpr double TAIL_LOOP_OVERHEAD = 500.0;
+
+  // --- Tile Fixed Overhead ---
+  // Fixed per-tile cost (cycles) that does not scale with tile dimensions.
+  // Covers WG dispatch, pipeline setup, address generation, and barriers.
+  // Compresses the cost ratio between large and small tiles.
+  static constexpr double TILE_FIXED_OVERHEAD = 1500.0;
 };
 
 /**
@@ -143,6 +177,14 @@ struct heuristic_params_t {
 
   // === Main Loop Efficiency ===
   double main_loop_efficiency = heuristic_defaults_t::MAIN_LOOP_EFFICIENCY;
+
+  // === PGR / LSU / DTL / NTD parameters ===
+  double prologue_setup_fraction  = heuristic_defaults_t::PROLOGUE_SETUP_FRACTION;
+  double lsu_reduction_overhead = heuristic_defaults_t::LSU_REDUCTION_OVERHEAD;
+  double ntd_ksplit_penalty     = heuristic_defaults_t::NTD_KSPLIT_PENALTY;
+  double occ_timestep_benefit  = heuristic_defaults_t::OCC_TIMESTEP_BENEFIT;
+  double tail_loop_overhead    = heuristic_defaults_t::TAIL_LOOP_OVERHEAD;
+  double tile_fixed_overhead   = heuristic_defaults_t::TILE_FIXED_OVERHEAD;
 
   /**
    * @brief Merge this parameter set with another (for hierarchical lookup).

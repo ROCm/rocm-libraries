@@ -495,6 +495,23 @@ struct config_t {
   /// Whether operand B is accessed with cache-flags.
   int cache_hints_b = 0;
 
+  /// Whether output D is written with non-temporal (streaming) cache flags (NonTemporalD).
+  int cache_hints_d = 0;
+
+  /// PrefetchGlobalRead depth (number of global-read prefetch stages in the pipeline).
+  int prefetch_global_read = 2;
+
+  /// DirectToLds flags — bypass VGPR and write global loads directly to LDS.
+  bool direct_to_lds_a = false;
+  bool direct_to_lds_b = false;
+
+  /// LocalSplitU factor (intra-workgroup K-split across threads).
+  int local_split_u = 1;
+
+  /// LDS footprint of this kernel in bytes (from TensileLite LdsNumBytes).
+  /// Used to compute per-CU occupancy: floor(hardware.lds_capacity / lds_bytes).
+  std::size_t lds_bytes = 0;
+
   /// Workspace size parameters.
   std::size_t workspace_size            = 0;
   std::size_t workspace_size_per_elem_c = 0;
@@ -549,6 +566,10 @@ struct config_t {
   bool operator==(const config_t& o) const noexcept {
     return mt == o.mt && mi == o.mi && hand_optimized_main_loop == o.hand_optimized_main_loop &&
            cache_hints_a == o.cache_hints_a && cache_hints_b == o.cache_hints_b &&
+           cache_hints_d == o.cache_hints_d &&
+           prefetch_global_read == o.prefetch_global_read &&
+           direct_to_lds_a == o.direct_to_lds_a && direct_to_lds_b == o.direct_to_lds_b &&
+           local_split_u == o.local_split_u && lds_bytes == o.lds_bytes &&
            workgroup_mapping == o.workgroup_mapping && reduction_strategy == o.reduction_strategy &&
            prediction_mode == o.prediction_mode && target == o.target && grvw_a == o.grvw_a &&
            grvw_b == o.grvw_b && gwvw_d == o.gwvw_d && vector_width_a == o.vector_width_a &&
@@ -565,6 +586,12 @@ struct config_t {
                                           hand_optimized_main_loop,
                                           cache_hints_a,
                                           cache_hints_b,
+                                          cache_hints_d,
+                                          prefetch_global_read,
+                                          direct_to_lds_a,
+                                          direct_to_lds_b,
+                                          local_split_u,
+                                          lds_bytes,
                                           workgroup_mapping,
                                           static_cast<std::uint32_t>(reduction_strategy),
                                           static_cast<std::uint32_t>(prediction_mode),

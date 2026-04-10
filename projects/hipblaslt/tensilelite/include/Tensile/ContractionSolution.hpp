@@ -187,6 +187,7 @@ namespace TensileLite
         int LocalSplitU = 1;
         bool DirectToLdsA = false;
         bool DirectToLdsB = false;
+        size_t LdsNumBytes = 0;
 
         int expertSchedulingMode = 0;
 
