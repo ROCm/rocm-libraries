@@ -81,6 +81,11 @@ void to_json(nlohmann::json& vectorList, const Vector<Offset<T>>* vec)
     }
 }
 
+inline const char* safeStr(const String* s)
+{
+    return s != nullptr ? s->c_str() : "";
+}
+
 }
 
 // NOLINTEND(readability-identifier-naming)
