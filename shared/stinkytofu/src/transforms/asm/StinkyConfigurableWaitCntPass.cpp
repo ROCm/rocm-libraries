@@ -1087,7 +1087,7 @@ class StinkyConfigurableWaitCntPass : public StinkyInstPass {
         return &StinkyConfigurableWaitCntPass::ID;
     }
 
-    void run(Function& func, PassContext& passCtx) override {
+    PreservedAnalyses run(Function& func, PassContext& passCtx, AnalysisManager& /*AM*/) override {
         GfxArchID arch =
             getGfxArchID(passCtx.getGemmTileConfig().arch[0], passCtx.getGemmTileConfig().arch[1],
                          passCtx.getGemmTileConfig().arch[2]);
@@ -1237,6 +1237,7 @@ class StinkyConfigurableWaitCntPass : public StinkyInstPass {
             // If no loops, one iteration is sufficient
             if (!hasLoops && iteration >= 1) break;
         }
+        return PreservedAnalyses::none();
     }
 
     // Allow configuration to be changed

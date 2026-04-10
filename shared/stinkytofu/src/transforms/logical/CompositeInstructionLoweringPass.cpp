@@ -58,7 +58,7 @@ class CompositeInstructionLoweringPassImpl : public Pass {
         return PassName;
     }
 
-    void run(Function& func, PassContext& passCtx) override {
+    PreservedAnalyses run(Function& func, PassContext& passCtx, AnalysisManager& /*AM*/) override {
         GfxArchID arch =
             getGfxArchID(passCtx.getGemmTileConfig().arch[0], passCtx.getGemmTileConfig().arch[1],
                          passCtx.getGemmTileConfig().arch[2]);
@@ -70,6 +70,7 @@ class CompositeInstructionLoweringPassImpl : public Pass {
 
             expandCompositeInstructions(bb, arch);
         }
+        return PreservedAnalyses::none();
     }
 
    private:

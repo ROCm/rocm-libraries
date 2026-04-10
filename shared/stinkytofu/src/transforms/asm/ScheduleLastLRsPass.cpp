@@ -260,10 +260,11 @@ class ScheduleLastLRsPass : public StinkyInstPass {
         scheduleFinalLocalReadWithLatency(bb, passCtx);
     }
 
-    void run(Function& func, PassContext& passCtx) override {
+    PreservedAnalyses run(Function& func, PassContext& passCtx, AnalysisManager& /*AM*/) override {
         for (BasicBlock& bb : func) {
             if (passCtx.shouldProcessBasicBlock(bb)) runOnBasicBlock(bb, passCtx);
         }
+        return PreservedAnalyses::none();
     }
 };
 

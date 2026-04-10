@@ -160,7 +160,7 @@ class InsertVgprMsbPassImpl : public Pass {
         return &InsertVgprMsbPassImpl::ID;
     }
 
-    void run(Function& func, PassContext& passCtx) override {
+    PreservedAnalyses run(Function& func, PassContext& passCtx, AnalysisManager& /*AM*/) override {
         auto arch = passCtx.getGemmTileConfig().arch;
         GfxArchID archId = getGfxArchID(arch[0], arch[1], arch[2]);
 
@@ -187,6 +187,7 @@ class InsertVgprMsbPassImpl : public Pass {
                                     hasVgprMsb16);
             }
         }
+        return PreservedAnalyses::none();
     }
 };
 

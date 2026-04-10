@@ -95,7 +95,7 @@ class RedundantMovEliminationPassImpl : public Pass {
         return PassName;
     }
 
-    void run(Function& func, PassContext& passCtx) override {
+    PreservedAnalyses run(Function& func, PassContext& passCtx, AnalysisManager& /*AM*/) override {
         int totalEliminated = 0;
 
         // Process all basic blocks
@@ -106,6 +106,7 @@ class RedundantMovEliminationPassImpl : public Pass {
             int eliminated = runOnBasicBlock(bb);
             totalEliminated += eliminated;
         }
+        return PreservedAnalyses::none();
     }
 
    private:

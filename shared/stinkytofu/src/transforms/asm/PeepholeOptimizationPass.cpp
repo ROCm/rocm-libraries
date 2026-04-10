@@ -83,7 +83,7 @@ class PeepholeOptimizationPassImpl : public Pass {
         return &PeepholeOptimizationPassImpl::ID;
     }
 
-    void run(Function& func, PassContext& passCtx) override {
+    PreservedAnalyses run(Function& func, PassContext& passCtx, AnalysisManager& /*AM*/) override {
         GfxArchID arch =
             getGfxArchID(passCtx.getGemmTileConfig().arch[0], passCtx.getGemmTileConfig().arch[1],
                          passCtx.getGemmTileConfig().arch[2]);
@@ -110,6 +110,7 @@ class PeepholeOptimizationPassImpl : public Pass {
         }
 
         std::cout << "Peephole Optimization: Applied " << totalFusions << " fusion(s)\n";
+        return PreservedAnalyses::none();
     }
 
    private:

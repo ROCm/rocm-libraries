@@ -399,7 +399,7 @@ class StinkyDAGSchedulerPass : public StinkyInstPass {
         return &StinkyDAGSchedulerPass::ID;
     }
 
-    void run(Function& func, PassContext& passCtx) override {
+    PreservedAnalyses run(Function& func, PassContext& passCtx, AnalysisManager& /*AM*/) override {
         // Build def-use chains so we can look up cross-BB WMMA consumers
         // of ds_reads for wmmaAffinity annotation.
         buildUseDefChain(func, true);
@@ -464,6 +464,7 @@ class StinkyDAGSchedulerPass : public StinkyInstPass {
                 scheduleInDAG(*bb, *rq, wmmaIndex);
             }
         });
+        return PreservedAnalyses::none();
     }
 };
 

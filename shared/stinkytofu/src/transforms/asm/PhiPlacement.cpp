@@ -204,8 +204,9 @@ class InsertPhiPass : public Pass {
         return &InsertPhiPass::ID;
     }
 
-    void run(Function& func, PassContext&) override {
+    PreservedAnalyses run(Function& func, PassContext&, AnalysisManager& /*AM*/) override {
         insertPhiInstructions(func, true);
+        return PreservedAnalyses::none();
     }
 };
 

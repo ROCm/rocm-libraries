@@ -54,7 +54,7 @@ class DeadCodeEliminationPassImpl : public Pass {
         return PassName;
     }
 
-    void run(Function& func, PassContext& passCtx) override {
+    PreservedAnalyses run(Function& func, PassContext& passCtx, AnalysisManager& /*AM*/) override {
         int totalRemoved = 0;
 
         // Process all basic blocks
@@ -73,6 +73,7 @@ class DeadCodeEliminationPassImpl : public Pass {
 
             totalRemoved += removedInBB;
         }
+        return PreservedAnalyses::none();
     }
 
    private:

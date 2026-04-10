@@ -206,7 +206,7 @@ class StinkyWaitCntInsertionPass : public StinkyInstPass {
         return &StinkyWaitCntInsertionPass::ID;
     }
 
-    void run(Function& func, PassContext& passCtx) override {
+    PreservedAnalyses run(Function& func, PassContext& passCtx, AnalysisManager& /*AM*/) override {
         GfxArchID arch =
             getGfxArchID(passCtx.getGemmTileConfig().arch[0], passCtx.getGemmTileConfig().arch[1],
                          passCtx.getGemmTileConfig().arch[2]);
@@ -229,6 +229,7 @@ class StinkyWaitCntInsertionPass : public StinkyInstPass {
         }
 
         removePHIs(func, passCtx);
+        return PreservedAnalyses::none();
     }
 
    private:

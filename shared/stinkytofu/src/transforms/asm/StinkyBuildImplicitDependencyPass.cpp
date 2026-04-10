@@ -151,10 +151,11 @@ class StinkyBuildImplicitDependencyPass : public StinkyInstPass {
         return &StinkyBuildImplicitDependencyPass::ID;
     }
 
-    void run(Function& func, PassContext& passCtx) override {
+    PreservedAnalyses run(Function& func, PassContext& passCtx, AnalysisManager& /*AM*/) override {
         for (BasicBlock& bb : func) {
             if (passCtx.shouldProcessBasicBlock(bb)) setPseudoRegistersInBlock(bb, passCtx);
         }
+        return PreservedAnalyses::none();
     }
 };
 

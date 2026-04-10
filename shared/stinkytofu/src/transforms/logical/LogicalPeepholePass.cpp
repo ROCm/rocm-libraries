@@ -47,7 +47,7 @@ class LogicalPeepholePassImpl : public Pass {
         return PassName;
     }
 
-    void run(Function& func, PassContext& passCtx) override {
+    PreservedAnalyses run(Function& func, PassContext& passCtx, AnalysisManager& /*AM*/) override {
         optimizationCount = 0;
 
         // Create pattern matcher registry
@@ -61,6 +61,7 @@ class LogicalPeepholePassImpl : public Pass {
 
             runOnBasicBlock(bb, patterns);
         }
+        return PreservedAnalyses::none();
     }
 
     size_t getOptimizationCount() const {

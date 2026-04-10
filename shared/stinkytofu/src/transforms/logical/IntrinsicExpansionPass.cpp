@@ -39,13 +39,14 @@ IntrinsicExpansionPass::IntrinsicExpansionPass() {}
 
 IntrinsicExpansionPass::~IntrinsicExpansionPass() = default;
 
-void IntrinsicExpansionPass::run(Function& func, PassContext& passCtx) {
+PreservedAnalyses IntrinsicExpansionPass::run(Function& func, PassContext& passCtx,
+                                              AnalysisManager& /*AM*/) {
     // Check if intrinsic registry is initialized
     auto& registry = IntrinsicRegistry::instance();
     if (!registry.isInitialized()) {
         std::cerr << "[IntrinsicExpansionPass] Warning: IntrinsicRegistry not initialized, "
                   << "skipping intrinsic expansion\n";
-        return;
+        return PreservedAnalyses::none();
     }
 
     // Process all basic blocks
@@ -55,6 +56,7 @@ void IntrinsicExpansionPass::run(Function& func, PassContext& passCtx) {
 
         expandIntrinsicsInBlock(bb);
     }
+    return PreservedAnalyses::none();
 }
 
 void IntrinsicExpansionPass::expandIntrinsicsInBlock(BasicBlock& bb) {

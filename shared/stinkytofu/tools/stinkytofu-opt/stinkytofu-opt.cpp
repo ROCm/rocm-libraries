@@ -59,7 +59,7 @@ class DeserializeStinkytofuIRPass : public StinkyInstPass {
         return &DeserializeStinkytofuIRPass::ID;
     }
 
-    void run(Function& func, PassContext& passCtx) override {
+    PreservedAnalyses run(Function& func, PassContext& passCtx, AnalysisManager& /*AM*/) override {
         GfxArchID arch =
             getGfxArchID(passCtx.getGemmTileConfig().arch[0], passCtx.getGemmTileConfig().arch[1],
                          passCtx.getGemmTileConfig().arch[2]);
@@ -76,7 +76,9 @@ class DeserializeStinkytofuIRPass : public StinkyInstPass {
                 std::cerr << "Error: Failed to populate IRList from string. Error code: "
                           << static_cast<int>(result) << "\n";
             }
+            return PreservedAnalyses::none();
         }
+        return PreservedAnalyses::none();
     }
 
    private:

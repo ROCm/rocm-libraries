@@ -195,8 +195,9 @@ class BuildUseDefChainPass : public Pass {
         return &BuildUseDefChainPass::ID;
     }
 
-    void run(Function& func, PassContext&) override {
+    PreservedAnalyses run(Function& func, PassContext&, AnalysisManager& /*AM*/) override {
         buildUseDefChain(func, clearExisting_);
+        return PreservedAnalyses::none();
     }
 };
 
