@@ -84,8 +84,7 @@ protected:
 
         if(hip_kernel_provider_common::getDeviceString(this->stream()) != "gfx942")
         {
-            GTEST_SKIP() << "Skipped: ASM SDPA kernel only supports gfx942. "
-                            "Architecture gating will be added in the isApplicable PR.";
+            GTEST_SKIP() << "Skipped: ASM SDPA kernel only supports gfx942.";
         }
 
         const SdpaTestCase& testCase = this->GetParam();

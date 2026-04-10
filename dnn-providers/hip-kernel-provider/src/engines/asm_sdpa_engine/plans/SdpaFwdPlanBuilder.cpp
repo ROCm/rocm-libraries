@@ -63,6 +63,8 @@ bool SdpaFwdPlanBuilder::isApplicable(
     HIP_KERNEL_RETURN_FALSE_IF(attrs.page_table_v_tensor_uid(),
                                "page_table_v tensor not supported");
 
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.generate_stats(), "Stats output not supported");
+
     const auto& tensorMap = opGraph.getTensorMap();
 
     int64_t qUid = attrs.q_tensor_uid();
