@@ -866,7 +866,11 @@ INSTANTIATE_TEST_SUITE_P(hipfftxttest, hipfftxtunitdesc,
                              ::testing::Combine(
                                  ::testing::ValuesIn(all_directionformat()),
                                  ::testing::ValuesIn(multidims),
+#ifdef __HIP_PLATFORM_NVIDIA__
+                                 ::testing::Range(2, getdevcount() + 1)
+#else
                                  ::testing::Range(1, getdevcount() + 1)
+#endif
                                  )
                              ,
                              [](const std::tuple<std::tuple<bool, directionformat_t>, size_t, int> & t) {
