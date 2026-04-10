@@ -122,8 +122,8 @@ foreach(gpu_target IN LISTS GPU_TARGETS)
 
     # Install alongside MIOpen
     install(TARGETS ${lib_name}
-        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT ck_plugins
-        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT ck_plugins
+        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
     )
 endforeach()
 
