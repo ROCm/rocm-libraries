@@ -860,38 +860,35 @@ inline void fft_vs_reference_impl(Tparams& params, bool round_trip)
 
         EXPECT_TRUE(std::isfinite(gpu_norm.get().l_inf)) << params.str();
         EXPECT_TRUE(std::isfinite(gpu_norm.get().l_2)) << params.str();
-    }
 
-    switch(params.precision)
-    {
-    case fft_precision_half:
-        max_linf_eps_half = std::max(max_linf_eps_half,
-                                     diff.l_inf / cpu_output_norm.get().l_inf / log(total_length));
-        max_l2_eps_half   = std::max(max_l2_eps_half,
-                                   diff.l_2 / cpu_output_norm.get().l_2 * sqrt(log2(total_length)));
-        break;
-    case fft_precision_single:
-        max_linf_eps_single = std::max(
-            max_linf_eps_single, diff.l_inf / cpu_output_norm.get().l_inf / log(total_length));
-        max_l2_eps_single = std::max(
-            max_l2_eps_single, diff.l_2 / cpu_output_norm.get().l_2 * sqrt(log2(total_length)));
-        break;
-    case fft_precision_double:
-        max_linf_eps_double = std::max(
-            max_linf_eps_double, diff.l_inf / cpu_output_norm.get().l_inf / log(total_length));
-        max_l2_eps_double = std::max(
-            max_l2_eps_double, diff.l_2 / cpu_output_norm.get().l_2 * sqrt(log2(total_length)));
-        break;
-    }
+        switch(params.precision)
+        {
+        case fft_precision_half:
+            max_linf_eps_half = std::max(
+                max_linf_eps_half, diff.l_inf / cpu_output_norm.get().l_inf / log(total_length));
+            max_l2_eps_half = std::max(
+                max_l2_eps_half, diff.l_2 / cpu_output_norm.get().l_2 * sqrt(log2(total_length)));
+            break;
+        case fft_precision_single:
+            max_linf_eps_single = std::max(
+                max_linf_eps_single, diff.l_inf / cpu_output_norm.get().l_inf / log(total_length));
+            max_l2_eps_single = std::max(
+                max_l2_eps_single, diff.l_2 / cpu_output_norm.get().l_2 * sqrt(log2(total_length)));
+            break;
+        case fft_precision_double:
+            max_linf_eps_double = std::max(
+                max_linf_eps_double, diff.l_inf / cpu_output_norm.get().l_inf / log(total_length));
+            max_l2_eps_double = std::max(
+                max_l2_eps_double, diff.l_2 / cpu_output_norm.get().l_2 * sqrt(log2(total_length)));
+            break;
+        }
 
-    if(verbose > 1)
-    {
-        std::cout << "L2 diff: " << diff.l_2 << "\n";
-        std::cout << "Linf diff: " << diff.l_inf << "\n";
-    }
+        if(verbose > 1)
+        {
+            std::cout << "L2 diff: " << diff.l_2 << "\n";
+            std::cout << "Linf diff: " << diff.l_inf << "\n";
+        }
 
-    if(fftw_compare)
-    {
         EXPECT_TRUE(diff.l_inf <= linf_cutoff)
             << "Linf test failed.  Linf:" << diff.l_inf
             << "\tnormalized Linf: " << diff.l_inf / cpu_output_norm.get().l_inf
@@ -904,16 +901,16 @@ inline void fft_vs_reference_impl(Tparams& params, bool round_trip)
             << "\tnormalized L2: " << diff.l_2 / cpu_output_norm.get().l_2
             << "\tepsilon: " << sqrt(log2(total_length)) * type_epsilon(params.precision) << "\n"
             << params.str();
-    }
 
-    if(round_trip && fftw_compare)
-    {
-        compare_round_trip_inverse<Tparams>(params_inverse,
-                                            reference_results.get_params(),
-                                            rountrip_output_buffers,
-                                            reference_results.get_buffers<fft_io::fft_io_in>(),
-                                            cpu_input_norm.get(),
-                                            total_length);
+        if(round_trip)
+        {
+            compare_round_trip_inverse<Tparams>(params_inverse,
+                                                reference_results.get_params(),
+                                                rountrip_output_buffers,
+                                                reference_results.get_buffers<fft_io::fft_io_in>(),
+                                                cpu_input_norm.get(),
+                                                total_length);
+        }
     }
 }
 
