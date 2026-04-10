@@ -212,7 +212,7 @@ struct reference_fft_data_t
         const auto ibuffer_sizes = test_params.ibuffer_sizes();
         if(params.itype == test_params.itype && params.istride == test_params.istride
            && params.idist == test_params.idist && params.isize == test_params.isize
-           && src_buffers.size() == cpu_input.size())
+           && params.ioffset == test_params.ioffset && src_buffers.size() == cpu_input.size())
         {
             // Direct copy of device input data into CPU input data
             for(unsigned int idx = 0; idx < src_buffers.size(); ++idx)
@@ -309,7 +309,7 @@ struct reference_fft_data_t
 
         if(!(params.itype == test_params.itype && params.istride == test_params.istride
              && params.idist == test_params.idist && params.isize == test_params.isize
-             && params.precision == test_params.precision))
+             && params.ioffset == test_params.ioffset && params.precision == test_params.precision))
         {
             temp_host_buffers = allocate_host_buffer(ibuffer_sizes);
             copy_buffers(cpu_input,
