@@ -239,6 +239,8 @@ def run_ml_kernel_on_hw(problem_idx, problem, kernel_name, variant='forward'):
         'Hi': problem.Hi, 'Wi': problem.Wi, 'Y': problem.Y, 'X': problem.X,
         'stride_h': problem.stride_h, 'stride_w': problem.stride_w,
         'pad_h': problem.pad_h, 'pad_w': problem.pad_w,
+        'dilation_h': getattr(problem, 'dilation_h', 1),
+        'dilation_w': getattr(problem, 'dilation_w', 1),
         'direction': variant
     }
 

@@ -115,4 +115,5 @@ VALIDATION_PROBLEMS_BWD_DATA = [
     ),
 ]
 
-print(f"Generated {len(VALIDATION_PROBLEMS_BWD_DATA)} validation problems for BWD_DATA")
+if __name__ == '__main__':
+    print(f"Generated {len(VALIDATION_PROBLEMS_BWD_DATA)} validation problems for BWD_DATA")

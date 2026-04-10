@@ -4,7 +4,7 @@
 AUTO-GENERATED FILE - DO NOT EDIT DIRECTLY!
 
 Generated from: arch_specs.json
-Generated at: 2026-03-31T21:36:23.580154
+Generated at: 2026-04-10T20:07:11.665064
 
 To update this file:
 1. Edit arch_specs.json

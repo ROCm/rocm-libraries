@@ -110,12 +110,8 @@ def main():
         from bwd_weight_test_validation import VALIDATION_PROBLEMS_BWD_WEIGHT as problems
     elif args.problems == "forward_training":
         from forward_training import TRAINING_PROBLEMS_FORWARD as problems
-    elif args.problems == "forward_test_validation":
-        from forward_test_validation import VALIDATION_PROBLEMS_FORWARD as problems
-    elif args.problems == "forward_validation_model_crawler_100":
-        from forward_validation_model_crawler_100 import VALIDATION_PROBLEMS_FORWARD_MODEL_CRAWLER_100 as problems
     else:
-        raise ValueError(f"Unknown problem set: {args.problems}. Available: forward_training, forward_test_validation, forward_validation_model_crawler_100, bwd_data_synthetic_extended, bwd_data_test_validation, bwd_weight_synthetic_extended, bwd_weight_test_validation")
+        raise ValueError(f"Unknown problem set: {args.problems}. Available: forward_training, bwd_data_synthetic_extended, bwd_data_test_validation, bwd_weight_synthetic_extended, bwd_weight_test_validation")
 
     print(f"  Problems: {len(problems)}")
     print(f"  Total measurements: {len(built_kernels)} x {len(problems)} = {len(built_kernels) * len(problems)}")
@@ -187,6 +183,8 @@ def main():
             "stride_w": prob.stride_w,
             "pad_h": prob.pad_h,
             "pad_w": prob.pad_w,
+            "dilation_h": getattr(prob, 'dilation_h', 1),
+            "dilation_w": getattr(prob, 'dilation_w', 1),
             "direction": prob.direction,
         }
 
@@ -221,6 +219,9 @@ def main():
                     input=payload.encode("utf-8"), timeout=timeout_total
                 )
 
+                # Track which batch indices were reported
+                reported_indices = set()
+
                 # Parse results (one JSON line per kernel)
                 for line in stdout_bytes.decode("utf-8").strip().split("\n"):
                     if not line:
@@ -230,6 +231,7 @@ def main():
                         result = json.loads(line)
                         batch_idx = result.get("idx", 0)
                         cfg, lib_path = batch[batch_idx]
+                        reported_indices.add(batch_idx)
 
                         if result.get("ok", False):
                             status = "OK" if result.get("non_zero", 0) > 0 else "ZERO"
@@ -268,6 +270,18 @@ def main():
                     except json.JSONDecodeError:
                         print(f"  Warning: Could not parse result line: {line[:50]}")
                         total_failures += 1
+
+                # Check for missing results (worker crashed mid-batch or non-zero exit)
+                missing_indices = set(range(len(batch))) - reported_indices
+                if missing_indices or proc.returncode != 0:
+                    if proc.returncode != 0:
+                        print(f"  Worker exited with code {proc.returncode}")
+                    if missing_indices:
+                        print(f"  Missing results for {len(missing_indices)} kernel(s)")
+                        for idx in sorted(missing_indices):
+                            cfg, _ = batch[idx]
+                            print(f"  {cfg.name:<60} MISSING (worker crash)")
+                        total_failures += len(missing_indices)
 
             except subprocess.TimeoutExpired:
                 proc.kill()

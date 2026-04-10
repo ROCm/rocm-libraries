@@ -13,7 +13,7 @@ _THIS_DIR = Path(__file__).resolve().parent
 print("Testing batch benchmark with small dataset")
 print("=" * 80)
 print("Config: forward_bf16.json (limited to first 2 kernels)")
-print("Problems: Using forward_training_small (5 problems)")
+print("Problems: Using forward_training (small subset via --max-kernels)")
 print("Batch size: 2 (both kernels in one subprocess per problem)")
 print()
 
@@ -23,7 +23,7 @@ cmd = [
     str(_THIS_DIR / "grouped_conv_full_benchmark.py"),
     str(_THIS_DIR / "configs/forward_bf16.json"),
     "--arch", "gfx950",
-    "--problems", "forward_training_small",
+    "--problems", "forward_training",  # Use existing problem set
     "--csv", str(_THIS_DIR / "test_batch_results.csv"),
     "--workers", "4",
     "--batch-size", "2",

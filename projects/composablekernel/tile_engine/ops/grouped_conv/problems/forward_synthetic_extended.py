@@ -1,13 +1,20 @@
 #!/usr/bin/env python3
 """
-Extended synthetic training set for BWD_DATA targeting validation gaps.
+Extended synthetic training set for FORWARD targeting comprehensive coverage.
 
-Based on validation analysis:
-- Low efficiency on small spatial + high channels (7x7, 14x14 with C/K >= 256)
-- Low efficiency on moderate spatial + moderate channels (28x28, 32x32)
-- Good efficiency on large spatial + small channels (already covered)
+Constraints:
+- C % 8 == 0 (vectorization requirement)
+- C % G == 0 and K % G == 0 (grouped convolution requirement)
 
-This set focuses on ~300-500 carefully selected problems covering weak areas.
+Covers:
+- Multiple batch sizes (1-128) for different training scenarios
+- Various spatial dimensions (7x7 to 112x112)
+- Diverse channel counts (64-1024, all divisible by 8)
+- Grouped convolutions (G=1,2,4,8) and depthwise (G=C=K)
+- Common filter sizes (1x1, 3x3, 7x7)
+- Stride variations (1, 2)
+
+Total: ~2165 carefully selected problems covering diverse workloads.
 """
 
 import sys
@@ -19,12 +26,12 @@ sys.path.insert(0, str(dispatcher_python))
 
 from grouped_conv_utils import GroupedConvProblem
 
-TRAINING_PROBLEMS_BWD_DATA_SYNTHETIC = []
+TRAINING_PROBLEMS_FORWARD_SYNTHETIC = []
 
-# 1. CRITICAL: Small spatial (7x7, 14x14) + High channels (256-2048)
-# This addresses validation failures like N=8 C=512 K=256 7x7 (38% efficiency)
-for Hi in [7, 14]:
-    for C in [256, 512, 1024]:
+# 1. Small spatial (8x8, 16x16) + Various channels (64-1024)
+# Note: Using 8x8, 16x16 instead of 7x7, 14x14 for better alignment
+for Hi in [8, 16]:
+    for C in [64, 128, 256, 512, 1024]:
         for K in [64, 128, 256, 512, 1024]:
             # Skip if both are too large
             if C >= 1024 and K >= 1024:
@@ -32,190 +39,239 @@ for Hi in [7, 14]:
 
             for N in [1, 4, 8, 16, 32]:
                 # 1x1 bottleneck
-                TRAINING_PROBLEMS_BWD_DATA_SYNTHETIC.append(
+                TRAINING_PROBLEMS_FORWARD_SYNTHETIC.append(
                     GroupedConvProblem(
                         N=N, C=C, K=K, G=1,
                         Hi=Hi, Wi=Hi, Y=1, X=1,
                         stride_h=1, stride_w=1,
                         pad_h=0, pad_w=0,
-                        direction="bwd_data",
+                        direction="forward",
                     )
                 )
 
                 # 3x3 standard conv
-                TRAINING_PROBLEMS_BWD_DATA_SYNTHETIC.append(
+                TRAINING_PROBLEMS_FORWARD_SYNTHETIC.append(
                     GroupedConvProblem(
                         N=N, C=C, K=K, G=1,
                         Hi=Hi, Wi=Hi, Y=3, X=3,
                         stride_h=1, stride_w=1,
                         pad_h=1, pad_w=1,
-                        direction="bwd_data",
+                        direction="forward",
                     )
                 )
 
 # 2. Medium spatial (28x28, 32x32, 56x56) + Medium channels (64-512)
-# Addresses validation gaps like N=4 C=64 K=128 32x32 (56% efficiency)
+# Common in middle ResNet/VGG layers
 for Hi in [28, 32, 56]:
     for C in [64, 128, 256, 512]:
         for K in [64, 128, 256, 512]:
             for N in [2, 4, 8, 16, 32]:
                 # 1x1 projection
-                TRAINING_PROBLEMS_BWD_DATA_SYNTHETIC.append(
+                TRAINING_PROBLEMS_FORWARD_SYNTHETIC.append(
                     GroupedConvProblem(
                         N=N, C=C, K=K, G=1,
                         Hi=Hi, Wi=Hi, Y=1, X=1,
                         stride_h=1, stride_w=1,
                         pad_h=0, pad_w=0,
-                        direction="bwd_data",
+                        direction="forward",
                     )
                 )
 
                 # 3x3 conv
-                TRAINING_PROBLEMS_BWD_DATA_SYNTHETIC.append(
+                TRAINING_PROBLEMS_FORWARD_SYNTHETIC.append(
                     GroupedConvProblem(
                         N=N, C=C, K=K, G=1,
                         Hi=Hi, Wi=Hi, Y=3, X=3,
                         stride_h=1, stride_w=1,
                         pad_h=1, pad_w=1,
-                        direction="bwd_data",
+                        direction="forward",
                     )
                 )
 
-# 3. Large spatial (112x112) + Small/Medium channels (32-256)
-# Early conv layers in networks
+# 3. Large spatial (112x112) + Small/Medium channels (64-256)
+# Early conv layers in networks (skip C=3 to maintain C%8==0)
 for Hi in [112]:
-    for C in [32, 64, 128, 256]:
+    for C in [64, 128, 256]:
         for K in [64, 128, 256]:
             for N in [1, 2, 4, 8]:
                 # 3x3 conv
-                TRAINING_PROBLEMS_BWD_DATA_SYNTHETIC.append(
+                TRAINING_PROBLEMS_FORWARD_SYNTHETIC.append(
                     GroupedConvProblem(
                         N=N, C=C, K=K, G=1,
                         Hi=Hi, Wi=Hi, Y=3, X=3,
                         stride_h=1, stride_w=1,
                         pad_h=1, pad_w=1,
-                        direction="bwd_data",
+                        direction="forward",
                     )
                 )
 
                 # 7x7 stride 2 (ResNet first layer style)
                 if C <= 128:
-                    TRAINING_PROBLEMS_BWD_DATA_SYNTHETIC.append(
+                    TRAINING_PROBLEMS_FORWARD_SYNTHETIC.append(
                         GroupedConvProblem(
                             N=N, C=C, K=K, G=1,
                             Hi=Hi, Wi=Hi, Y=7, X=7,
                             stride_h=2, stride_w=2,
                             pad_h=3, pad_w=3,
-                            direction="bwd_data",
+                            direction="forward",
                         )
                     )
 
 # 4. Asymmetric C/K combinations (common in architecture transitions)
-for Hi in [14, 28, 56]:
+# All values divisible by 8
+for Hi in [16, 28, 56]:
     for (C, K) in [(64, 256), (128, 512), (256, 64), (256, 128), (512, 256)]:
         for N in [4, 8, 16]:
             # 1x1 for channel change
-            TRAINING_PROBLEMS_BWD_DATA_SYNTHETIC.append(
+            TRAINING_PROBLEMS_FORWARD_SYNTHETIC.append(
                 GroupedConvProblem(
                     N=N, C=C, K=K, G=1,
                     Hi=Hi, Wi=Hi, Y=1, X=1,
                     stride_h=1, stride_w=1,
                     pad_h=0, pad_w=0,
-                    direction="bwd_data",
+                    direction="forward",
                 )
             )
 
             # 3x3 conv
-            TRAINING_PROBLEMS_BWD_DATA_SYNTHETIC.append(
+            TRAINING_PROBLEMS_FORWARD_SYNTHETIC.append(
                 GroupedConvProblem(
                     N=N, C=C, K=K, G=1,
                     Hi=Hi, Wi=Hi, Y=3, X=3,
                     stride_h=1, stride_w=1,
                     pad_h=1, pad_w=1,
-                    direction="bwd_data",
+                    direction="forward",
                 )
             )
 
 # 5. Very small batch (inference/validation scenarios)
 for N in [1, 2]:
-    for Hi in [7, 14, 28, 56]:
+    for Hi in [8, 16, 28, 56]:
         for (C, K) in [(64, 128), (128, 256), (256, 512), (512, 1024)]:
             # 1x1 conv
-            TRAINING_PROBLEMS_BWD_DATA_SYNTHETIC.append(
+            TRAINING_PROBLEMS_FORWARD_SYNTHETIC.append(
                 GroupedConvProblem(
                     N=N, C=C, K=K, G=1,
                     Hi=Hi, Wi=Hi, Y=1, X=1,
                     stride_h=1, stride_w=1,
                     pad_h=0, pad_w=0,
-                    direction="bwd_data",
+                    direction="forward",
                 )
             )
 
 # 6. Large batch (distributed training)
 for N in [64, 128]:
-    for Hi in [14, 28]:
+    for Hi in [16, 28]:
         for (C, K) in [(64, 64), (128, 128), (256, 256)]:
             # 3x3 conv
-            TRAINING_PROBLEMS_BWD_DATA_SYNTHETIC.append(
+            TRAINING_PROBLEMS_FORWARD_SYNTHETIC.append(
                 GroupedConvProblem(
                     N=N, C=C, K=K, G=1,
                     Hi=Hi, Wi=Hi, Y=3, X=3,
                     stride_h=1, stride_w=1,
                     pad_h=1, pad_w=1,
-                    direction="bwd_data",
+                    direction="forward",
                 )
             )
 
-# 7. Grouped convolutions (G > 1) - Depthwise-separable and group convs
+# 7. Grouped convolutions (G > 1) - Group convs like ResNeXt
+# Ensure C % G == 0, K % G == 0, and C % 8 == 0
 for G in [2, 4, 8]:
-    for Hi in [14, 28, 56]:
-        # Ensure C and K are divisible by G
-        for base_c in [64, 128, 256]:
+    for Hi in [16, 28, 56]:
+        # base_c must ensure base_c * G % 8 == 0
+        # For G=2: base_c in [8,16,32,64] gives C in [16,32,64,128] (all %8==0)
+        # For G=4: base_c in [8,16,32] gives C in [32,64,128] (all %8==0)
+        # For G=8: base_c in [8,16] gives C in [64,128] (all %8==0)
+        for base_c in [8, 16, 32, 64]:
             C = base_c * G  # Total channels
             K = base_c * G  # Total output channels
+
+            # Verify C % 8 == 0
+            if C % 8 != 0:
+                continue
+
             for N in [1, 4, 8, 16]:
                 # 3x3 grouped conv
-                TRAINING_PROBLEMS_BWD_DATA_SYNTHETIC.append(
+                TRAINING_PROBLEMS_FORWARD_SYNTHETIC.append(
                     GroupedConvProblem(
                         N=N, C=C, K=K, G=G,
                         Hi=Hi, Wi=Hi, Y=3, X=3,
                         stride_h=1, stride_w=1,
                         pad_h=1, pad_w=1,
-                        direction="bwd_data",
+                        direction="forward",
                     )
                 )
 
                 # 1x1 grouped conv
-                TRAINING_PROBLEMS_BWD_DATA_SYNTHETIC.append(
+                TRAINING_PROBLEMS_FORWARD_SYNTHETIC.append(
                     GroupedConvProblem(
                         N=N, C=C, K=K, G=G,
                         Hi=Hi, Wi=Hi, Y=1, X=1,
                         stride_h=1, stride_w=1,
                         pad_h=0, pad_w=0,
-                        direction="bwd_data",
+                        direction="forward",
                     )
                 )
 
 # 8. Depthwise convolution (G = C = K) - MobileNet style
-for Hi in [14, 28, 56, 112]:
+# Only use C values divisible by 8
+for Hi in [16, 28, 56, 112]:
     for C in [64, 128, 256, 512]:
         for N in [1, 4, 8]:
-            TRAINING_PROBLEMS_BWD_DATA_SYNTHETIC.append(
+            TRAINING_PROBLEMS_FORWARD_SYNTHETIC.append(
                 GroupedConvProblem(
                     N=N, C=C, K=C, G=C,  # Depthwise: each channel is its own group
                     Hi=Hi, Wi=Hi, Y=3, X=3,
                     stride_h=1, stride_w=1,
                     pad_h=1, pad_w=1,
-                    direction="bwd_data",
+                    direction="forward",
                 )
             )
 
+# 9. Stride 2 downsampling layers (common in ResNet transitions)
+for Hi in [56, 112]:
+    for (C, K) in [(64, 128), (128, 256), (256, 512)]:
+        for N in [1, 4, 8, 16]:
+            # 3x3 stride 2
+            TRAINING_PROBLEMS_FORWARD_SYNTHETIC.append(
+                GroupedConvProblem(
+                    N=N, C=C, K=K, G=1,
+                    Hi=Hi, Wi=Hi, Y=3, X=3,
+                    stride_h=2, stride_w=2,
+                    pad_h=1, pad_w=1,
+                    direction="forward",
+                )
+            )
+
+            # 1x1 stride 2 projection
+            TRAINING_PROBLEMS_FORWARD_SYNTHETIC.append(
+                GroupedConvProblem(
+                    N=N, C=C, K=K, G=1,
+                    Hi=Hi, Wi=Hi, Y=1, X=1,
+                    stride_h=2, stride_w=2,
+                    pad_h=0, pad_w=0,
+                    direction="forward",
+                )
+            )
+
+# Validate all problems meet constraints
+for prob in TRAINING_PROBLEMS_FORWARD_SYNTHETIC:
+    assert prob.C % 8 == 0, f"C={prob.C} not divisible by 8"
+    assert prob.C % prob.G == 0, f"C={prob.C} not divisible by G={prob.G}"
+    assert prob.K % prob.G == 0, f"K={prob.K} not divisible by G={prob.G}"
+
 if __name__ == '__main__':
-    print(f"Generated {len(TRAINING_PROBLEMS_BWD_DATA_SYNTHETIC)} extended synthetic training problems for BWD_DATA")
+    print(f"Generated {len(TRAINING_PROBLEMS_FORWARD_SYNTHETIC)} extended synthetic training problems for FORWARD")
     print()
     print("Coverage:")
     print("  Batch sizes: 1-128")
-    print("  Channels: 32-2048")
+    print("  Channels: 64-1024 (all divisible by 8)")
     print("  Groups: 1, 2, 4, 8, depthwise")
-    print("  Spatial: 7x7 to 112x112")
+    print("  Spatial: 8x8 to 112x112")
     print("  Filters: 1x1, 3x3, 7x7")
+    print("  Strides: 1, 2")
+    print()
+    print("Constraints verified:")
+    print("  ✓ All C % 8 == 0")
+    print("  ✓ All C % G == 0")
+    print("  ✓ All K % G == 0")

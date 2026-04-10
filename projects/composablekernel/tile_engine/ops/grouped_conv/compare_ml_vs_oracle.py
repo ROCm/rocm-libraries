@@ -2,35 +2,29 @@
 """
 Compare ML heuristic predictions against oracle benchmark results.
 
-MODE 1: CSV Comparison (existing workflow)
+MODE 1: CSV Comparison (SUPPORTED)
   Reads:
     - Oracle CSV: benchmark results with all kernel measurements
     - ML CSV: ML predictions with rankings
   Outputs:
     - Efficiency metrics: ML_picked_actual_TFLOPS / Oracle_best_TFLOPS
 
-MODE 2: End-to-End Workflow (NEW)
-  Takes custom shapes, automatically:
-    1. Runs benchmark to get oracle results
-    2. Runs ML predictions
-    3. Compares and shows efficiency
+MODE 2: End-to-End Workflow (NOT YET IMPLEMENTED)
+  Planned feature to automatically run benchmarks and ML predictions.
+  Currently shows manual workflow instructions instead.
 
 Usage:
   # Mode 1: Compare existing CSVs
   python compare_ml_vs_oracle.py --oracle-csv oracle.csv --ml-csv ml.csv --plot result.png
 
-  # Mode 2: End-to-end with custom shapes
-  python compare_ml_vs_oracle.py --shapes "N=1,C=64,K=64,Hi=28,Wi=28,Y=3,X=3,stride_h=1,stride_w=1" \
-                                           "N=2,C=128,K=256,Hi=14,Wi=14,Y=1,X=1,stride_h=1,stride_w=1"
-
-  # Mode 2: End-to-end with problem set module
-  python compare_ml_vs_oracle.py --problem-set forward_validation_300 --plot result.png
+  # Mode 2: Not yet implemented (shows manual workflow instructions)
+  python compare_ml_vs_oracle.py --shapes "N=1,C=64,K=64,Hi=28,Wi=28,Y=3,X=3,stride_h=1,stride_w=1"
+  python compare_ml_vs_oracle.py --problem-set forward_validation_300
 """
 
 import argparse
 import csv
 import sys
-import tempfile
 from collections import defaultdict
 from pathlib import Path
 
@@ -146,38 +140,20 @@ def run_end_to_end_workflow(args):
 
     print()
 
-    # Create temp files for oracle and ML results
-    with tempfile.NamedTemporaryFile(mode='w', suffix='_oracle.csv', delete=False) as oracle_f, \
-         tempfile.NamedTemporaryFile(mode='w', suffix='_ml.csv', delete=False) as ml_f:
+    # Mode 2 is not yet implemented - show helpful message
+    print("-" * 100)
+    print("⚠️  End-to-end workflow not yet implemented")
+    print("-" * 100)
+    print()
+    print("Please use the manual workflow documented in README.md:")
+    print()
+    print("  1. Create problem set file in problems/")
+    print("  2. Run: python grouped_conv_full_benchmark.py --problems <your_set> --csv oracle.csv")
+    print("  3. Run: cd ../../dispatcher/heuristics && python predict_cli.py --problem-module <your_set> --output ml.csv")
+    print("  4. Run: cd ../../tile_engine/ops/grouped_conv && python compare_ml_vs_oracle.py --oracle-csv oracle.csv --ml-csv ml.csv --plot result.png")
+    print()
 
-        oracle_csv = oracle_f.name
-        ml_csv = ml_f.name
-
-        print("Temp files:")
-        print(f"  Oracle: {oracle_csv}")
-        print(f"  ML:     {ml_csv}")
-        print()
-
-        # Step 1: Run benchmark to get oracle
-        print("-" * 100)
-        print("STEP 1: Running benchmark to find oracle best (this may take a while...)")
-        print("-" * 100)
-
-        # Use 09_ml_heuristic.py to run benchmarks via subprocess
-        script_dir = Path(__file__).parent.parent.parent.parent / "dispatcher" / "examples" / "grouped_conv" / "python"
-        bench_script = script_dir / "09_ml_heuristic.py"
-
-        # For now, show a simpler message
-        print("⚠️  Full benchmark integration requires additional implementation.")
-        print("    Please use the 3-step manual workflow documented in README.md")
-        print()
-        print("Manual workflow:")
-        print("  1. Create problem set file in problems/")
-        print("  2. Run: python grouped_conv_full_benchmark.py --problem_set <your_set> --output oracle.csv")
-        print("  3. Run: cd ../../dispatcher/heuristics && python predict_cli.py --problem-module <your_set> --output ml.csv")
-        print("  4. Run: cd ../../tile_engine/ops/grouped_conv && python compare_ml_vs_oracle.py --oracle-csv oracle.csv --ml-csv ml.csv --plot result.png")
-
-        return 1
+    return 1
 
 
 def main():
@@ -186,14 +162,11 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Mode 1: Compare existing CSVs
-  python compare_ml_vs_oracle.py --oracle-csv oracle.csv --ml-csv ml.csv
+  # Mode 1: Compare existing CSVs (SUPPORTED)
+  python compare_ml_vs_oracle.py --oracle-csv oracle.csv --ml-csv ml.csv --plot result.png
 
-  # Mode 2: End-to-end with custom shapes (EXPERIMENTAL)
-  python compare_ml_vs_oracle.py --shapes "N=1,C=64,K=64,Hi=28,Wi=28,Y=3,X=3,stride_h=1,stride_w=1"
-
-  # Mode 2: End-to-end with problem set (EXPERIMENTAL)
-  python compare_ml_vs_oracle.py --problem-set forward_validation_300
+  # Mode 2: End-to-end workflow (NOT YET IMPLEMENTED)
+  # Use manual workflow instead - see error message when attempting Mode 2
         """
     )
 

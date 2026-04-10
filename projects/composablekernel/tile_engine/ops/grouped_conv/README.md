@@ -139,16 +139,7 @@ python grouped_conv_full_benchmark.py \
 kernel,problem_idx,N,C,K,G,Hi,Wi,Y,X,stride_h,stride_w,pad_h,pad_w,latency_ms,tflops,non_zero
 ```
 
-### Resume Support
-
-Automatically skips completed measurements if CSV exists:
-```bash
-# Run fails after 1000 measurements
-python grouped_conv_full_benchmark.py --variant forward --category full
-
-# Resume from where it left off (reads existing CSV)
-python grouped_conv_full_benchmark.py --variant forward --category full
-```
+**Note**: The benchmark always starts fresh and overwrites the output CSV file. If you need to preserve previous results, rename or move the CSV file before running a new benchmark.
 
 ---
 
@@ -199,7 +190,7 @@ Based on FMHA tile engine design with subprocess isolation:
 ```
 grouped_conv_full_benchmark.py (orchestrator)
   ├─> grouped_conv_instance_builder.py (generate kernel configs)
-  ├─> Build phase: JIT compile all kernels (parallel)
+  ├─> Build phase: JIT compile all kernels (serial, avoids fork/GPU issues)
   └─> Benchmark phase: subprocess workers (serial GPU access)
       └─> run_one_grouped_conv_kernel.py (subprocess)
           └─> GpuGroupedConvRunner (fresh GPU context per problem)
@@ -210,6 +201,10 @@ grouped_conv_full_benchmark.py (orchestrator)
 2. **Batch size 20** - Optimal kernels per subprocess
 3. **Path-only build** - Main process never initializes GPU
 4. **Serial GPU access** - Accurate timing, no contention
+5. **Serial codegen/compile** - Avoids ProcessPoolExecutor + GPU fork() issues
+
+**Note**: The `--workers` flag is accepted for API compatibility but currently ignored.
+Codegen and compilation run serially to avoid GPU context issues with process forking.
 
 **Success rate**: 99.5% (3,760/3,780 measurements succeeded)
 

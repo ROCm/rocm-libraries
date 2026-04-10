@@ -667,6 +667,14 @@ class GpuGroupedConvRunner:
     def is_available(self) -> bool:
         return self._initialized and self._dispatch_lib is not None
 
+    def get_init_error(self) -> Optional[str]:
+        """Get initialization error message if initialization failed."""
+        return self._init_error
+
+    def get_init_traceback(self) -> Optional[str]:
+        """Get full initialization traceback for debugging."""
+        return self._init_traceback
+
     @property
     def library_path(self) -> Optional[str]:
         if self._dispatch_lib:
@@ -683,6 +691,7 @@ class GpuGroupedConvRunner:
         weight_np: np.ndarray,
         problem: GroupedConvProblem,
         output_np: Optional[np.ndarray] = None,
+        verbose: bool = False,
     ) -> GroupedConvResult:
         """Run convolution on GPU.
 
@@ -691,6 +700,7 @@ class GpuGroupedConvRunner:
             weight_np: For forward: W (GKYXC). For bwd_data: W. For bwd_weight: dY.
             problem:   Problem specification.
             output_np: Optional pre-allocated output buffer.
+            verbose:   If True, print full traceback on initialization failure.
 
         Returns:
             GroupedConvResult with success, time_ms, tflops, output.
@@ -699,7 +709,18 @@ class GpuGroupedConvRunner:
         self._ensure_initialized()
 
         if not self.is_available():
-            return GroupedConvResult(error="GPU not available")
+            # Surface the actual initialization error for diagnosability
+            if self._init_error:
+                error_msg = f"GPU initialization failed: {self._init_error}"
+                if verbose and self._init_traceback:
+                    print("=" * 80)
+                    print("GPU Initialization Traceback:")
+                    print("=" * 80)
+                    print(self._init_traceback)
+                    print("=" * 80)
+            else:
+                error_msg = "GPU not available"
+            return GroupedConvResult(error=error_msg)
 
         try:
             # Determine output shape based on direction
@@ -1493,8 +1514,8 @@ class GroupedConvCodegenRunner:
 
         if verbose:
             print(
-                f"Generating {len(configs)} grouped-conv kernels in parallel "
-                f"(workers={self.max_workers})..."
+                f"Generating {len(configs)} grouped-conv kernels serially "
+                f"(avoiding fork/GPU issues)..."
             )
 
         gen_jobs: List[Dict[str, Any]] = []
@@ -1724,7 +1745,7 @@ def setup_multiple_grouped_conv_dispatchers(
     max_workers: Optional[int] = None,
 ) -> List[Optional[Path]]:
     """
-    Setup multiple grouped-conv dispatchers in parallel.
+    Setup multiple grouped-conv dispatchers.
 
     Returns library paths WITHOUT loading them, to avoid GPU context during compilation.
     This mirrors FMHA design: keep GPU context out of JIT phase entirely.
@@ -1733,8 +1754,11 @@ def setup_multiple_grouped_conv_dispatchers(
       1. Validate + auto-correct each requested config
       2. Query codegen's arch-valid config set for each (arch, dtype, variant, ndim)
       3. Map each request to nearest valid config
-      4. Parallel codegen + parallel compile
+      4. Serial codegen + serial compile (avoids fork/GPU context issues)
       5. Return paths (NOT loaded libraries)
+
+    Note: max_workers parameter is accepted for API compatibility but codegen/compile
+    runs serially to avoid ProcessPoolExecutor + GPU fork() issues.
 
     Returns:
         List of paths to compiled .so files (or None for failed configs)

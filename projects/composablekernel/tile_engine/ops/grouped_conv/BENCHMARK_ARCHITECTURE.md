@@ -63,10 +63,10 @@ python3 grouped_conv_full_benchmark.py configs/forward_bf16.json \
     --workers 8 \
     --batch-size 20
 
-# Quick test: 2 kernels x 20 problems = 40 measurements
+# Quick test: 2 kernels x first few problems for validation
 python3 grouped_conv_full_benchmark.py configs/forward_bf16.json \
     --arch gfx950 \
-    --problems forward_training_small \
+    --problems forward_training \
     --csv test.csv \
     --max-kernels 2 \
     --batch-size 2

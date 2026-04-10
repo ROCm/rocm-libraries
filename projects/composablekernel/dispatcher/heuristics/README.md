@@ -279,14 +279,14 @@ ML-based kernel selection for grouped convolution operations (forward, bwd_data,
 ### Results
 
 #### Forward Pass Model
-- **Training Data**: 187 MIOpen problems × 30 kernels = 5,640 measurements  
+- **Training Data**: 48,845 measurements across 1,372 unique problem shapes
 - **Cross-validation Performance**:
   - Mean Efficiency: **96.1%**
   - P10 Efficiency: **87.2%**
   - R²: **0.9559**
 
 #### BWD_DATA Model
-- **Training Data**: 1,242 synthetic problems × 20 kernels = 14,562 measurements
+- **Training Data**: 14,562 measurements across 701 unique problem shapes
 - **Validation**: 10 unseen problems
 - **Performance**:
   - Mean Efficiency: **100.0%**
@@ -295,7 +295,7 @@ ML-based kernel selection for grouped convolution operations (forward, bwd_data,
   - Cross-validation R²: **0.9924**
 
 #### BWD_WEIGHT Model
-- **Training Data**: 2,009 synthetic problems × 20 kernels = 18,150 measurements
+- **Training Data**: 18,150 measurements across 921 unique problem shapes
 - **Validation**: 10 unseen problems
 - **Performance**:
   - Mean Efficiency: **100.0%**

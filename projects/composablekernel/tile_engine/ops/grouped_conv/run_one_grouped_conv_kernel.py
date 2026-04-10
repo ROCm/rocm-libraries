@@ -34,7 +34,7 @@ import numpy as np  # noqa: E402
 def _run_one(idx, so_path, prob_dict, kernel_name):
     """Run a single kernel and output result as JSON."""
     try:
-        # Create problem from dict
+        # Create problem from dict (include dilation if present)
         problem = GroupedConvProblem(
             N=prob_dict['N'],
             C=prob_dict['C'],
@@ -48,13 +48,30 @@ def _run_one(idx, so_path, prob_dict, kernel_name):
             stride_w=prob_dict['stride_w'],
             pad_h=prob_dict['pad_h'],
             pad_w=prob_dict['pad_w'],
+            dilation_h=prob_dict.get('dilation_h', 1),
+            dilation_w=prob_dict.get('dilation_w', 1),
             direction=prob_dict['direction']
         )
 
-        # Generate input data
+        # Generate input/weight data based on direction using shape helpers
+        # Direction determines what input_np and weight_np represent:
+        #   forward:    input_np=X,    weight_np=W
+        #   bwd_data:   input_np=dY,   weight_np=W
+        #   bwd_weight: input_np=X,    weight_np=dY
         np.random.seed(42)
-        input_shape = (problem.N, problem.Hi, problem.Wi, problem.G, problem.C // problem.G)
-        weight_shape = (problem.K, problem.Y, problem.X, problem.G, problem.C // problem.G)
+        if problem.direction == "bwd_data":
+            # Runner expects (dY, W) for bwd_data
+            input_shape = problem.output_shape()  # dY shape
+            weight_shape = problem.weight_shape()  # W shape
+        elif problem.direction == "bwd_weight":
+            # Runner expects (X, dY) for bwd_weight
+            input_shape = problem.input_shape()  # X shape
+            weight_shape = problem.output_shape()  # dY shape
+        else:  # forward
+            # Runner expects (X, W) for forward
+            input_shape = problem.input_shape()  # X shape
+            weight_shape = problem.weight_shape()  # W shape
+
         input_data = (np.random.randn(*input_shape) * 0.1).astype(np.float16)
         weight_data = (np.random.randn(*weight_shape) * 0.1).astype(np.float16)
 
