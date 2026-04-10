@@ -369,6 +369,7 @@ const auto& GetSolverConfigs<BatchNormSolverConfig>()
     return configs;
 }
 
+#if MIOPEN_ENABLE_FIN_INTERFACE
 template <class SolverInfo>
 const auto& GetSolverNames()
 {
@@ -382,6 +383,7 @@ const auto& GetSolverNames()
     }();
     return names;
 }
+#endif // MIOPEN_ENABLE_FIN_INTERFACE
 
 template <class TestCase>
 const auto GetTestCases()

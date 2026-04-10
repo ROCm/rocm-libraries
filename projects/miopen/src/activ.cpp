@@ -54,6 +54,7 @@ double ActivationDescriptor::GetAlpha() const { return this->parms[0]; }
 double ActivationDescriptor::GetBeta() const { return this->parms[1]; }
 
 double ActivationDescriptor::GetGamma() const { return this->parms[2]; }
+
 std::ostream& operator<<(std::ostream& stream, const ActivationDescriptor& x)
 {
     MIOPEN_LOG_ENUM(stream,

@@ -30,7 +30,7 @@
 namespace miopen {
 
 // operator args
-std::ostream& operator<<(std::ostream& stream, const OperatorArgs&) // x )
+std::ostream& operator<<(std::ostream& stream, const OperatorArgs& /* x */)
 {
     /*MIOPEN_LOG_ENUM(stream,
                     x.mode,
