@@ -25,20 +25,20 @@
 
 #include "clientcommon.hpp"
 
-template <testAPI_t API, typename I, typename SIZE, typename T, typename S, typename U>
+template <testAPI_t API, typename I, typename SIZE, typename Td, typename Sd, typename U>
 void syevd_heevd_checkBadArgs(const hipsolverHandle_t   handle,
                               const hipsolverDnParams_t params,
                               const hipsolverEigMode_t  evect,
                               const hipsolverFillMode_t uplo,
                               const I                   n,
-                              T                         dA,
+                              Td                        dA,
                               const I                   lda,
                               const I                   stA,
-                              S                         dD,
+                              Sd                        dD,
                               const I                   stD,
-                              T                         dWork,
+                              Td                        dWork,
                               const SIZE                lwork,
-                              T                         hWork,
+                              Td                        hWork,
                               const SIZE                lworkHost,
                               U                         dinfo,
                               const int                 bc)
