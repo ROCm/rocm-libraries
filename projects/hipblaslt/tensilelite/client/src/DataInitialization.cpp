@@ -2607,31 +2607,21 @@ namespace TensileLite
             size_t rotatingSize = 0;
             if(inputs.a != nullptr)
             {
-                auto unswizzled = problem.tensors()[ContractionProblemGemm::TENSOR::A].totalAllocatedBytes();
                 if(problem.swizzleTensorA())
-                {
-                    auto swizzled = getSwizzledTensorAllocatedBytes(
+                    rotatingSize += getSwizzledTensorAllocatedBytes(
                         problem.tensors()[ContractionProblemGemm::TENSOR::A]);
-                    std::cout << "  [debug] A: unswizzled=" << unswizzled
-                              << " swizzled=" << swizzled << std::endl;
-                    rotatingSize += swizzled;
-                }
                 else
-                    rotatingSize += unswizzled;
+                    rotatingSize
+                        += problem.tensors()[ContractionProblemGemm::TENSOR::A].totalAllocatedBytes();
             }
             if(inputs.b != nullptr)
             {
-                auto unswizzled = problem.tensors()[ContractionProblemGemm::TENSOR::B].totalAllocatedBytes();
                 if(problem.swizzleTensorB())
-                {
-                    auto swizzled = getSwizzledTensorAllocatedBytes(
+                    rotatingSize += getSwizzledTensorAllocatedBytes(
                         problem.tensors()[ContractionProblemGemm::TENSOR::B]);
-                    std::cout << "  [debug] B: unswizzled=" << unswizzled
-                              << " swizzled=" << swizzled << std::endl;
-                    rotatingSize += swizzled;
-                }
                 else
-                    rotatingSize += unswizzled;
+                    rotatingSize
+                        += problem.tensors()[ContractionProblemGemm::TENSOR::B].totalAllocatedBytes();
             }
             if(inputs.c != nullptr && problem.beta())
             {

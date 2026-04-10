@@ -124,7 +124,7 @@ BenchmarkProblems:
   #
   # DU > 256 + pre-shuffle not yet supported: DTL buffer_load shares vaddr
   # for HBM and LDS, but they need different row strides (depthUBytes vs
-  # subIterKBytes). See ~/claude_workspace/preshuffle_du512_analysis.md.
+  # subIterKBytes).
   ########################################
   # -
   #   - # ProblemType
