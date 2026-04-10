@@ -102,20 +102,8 @@ TEST(MatmulIntegrationTest, Int4xFp16Matmul) {
       .set_data_type(DataType_t::HALF)
       .set_output(true);
 
-  // Build + validate + build plans for graph.
-  auto result = graph->validate();
-  ASSERT_EQ(result.code, error_code_t::OK) << result.err_msg;
-
-  result = graph->build_operation_graph(handle);
-  ASSERT_EQ(result.code, error_code_t::OK) << result.err_msg;
-
-  result = graph->create_execution_plans();
-  ASSERT_EQ(result.code, error_code_t::OK) << result.err_msg;
-
-  result = graph->check_support();
-  ASSERT_EQ(result.code, error_code_t::OK) << result.err_msg;
-
-  result = graph->build_plans();
+  // Build graph.
+  auto result = graph->build(handle);
   ASSERT_EQ(result.code, error_code_t::OK) << result.err_msg;
 
   // Create variant pack.

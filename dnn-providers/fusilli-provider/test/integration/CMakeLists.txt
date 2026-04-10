@@ -111,8 +111,8 @@ add_fusilli_plugin_test(
 )
 
 add_fusilli_plugin_test(
-  NAME fusilli_plugin_simple_matmul_int4_fp16_test
-  SRCS matmul/simple_matmul_int4_fp16.cpp
+  NAME fusilli_plugin_simple_batched_matmul_int4_fp16_test
+  SRCS matmul/simple_batched_matmul_int4_fp16.cpp
   DEPS
     GTest::gtest_main
     hip::host
