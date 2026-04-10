@@ -431,8 +431,13 @@ namespace rocRoller::KernelGraph
 
         bool canJoin(KernelGraph const& graph, Chains const& group, Chain const& chain)
         {
-            auto groupParent = bodyParents(group.at(0).at(0), graph).take(1).only();
-            auto chainParent = bodyParents(chain.at(0), graph).take(1).only();
+            auto groupParentPair = containingAncestors(group.at(0).at(0), graph).take(1).only();
+            auto chainParentPair = containingAncestors(chain.at(0), graph).take(1).only();
+
+            std::optional<int> groupParent
+                = groupParentPair ? std::optional(groupParentPair->first) : std::nullopt;
+            std::optional<int> chainParent
+                = chainParentPair ? std::optional(chainParentPair->first) : std::nullopt;
 
             auto showParent = [](auto x) -> std::string {
                 if(x)
