@@ -2788,7 +2788,7 @@ public:
 #endif
     }
 
-    fft_params make_params_for_reference_cpu(int verbose = 0) const
+    fft_params make_params_for_reference_cpu() const
     {
         fft_params ret;
         ret.length         = length;
