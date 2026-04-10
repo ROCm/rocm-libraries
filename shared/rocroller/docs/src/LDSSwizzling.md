@@ -4,9 +4,6 @@ Column-level pair-swap + circular rotation to eliminate 4x LDS bank
 conflict serialization during Local Read (`ds_read_b128`). Only column
 indices are permuted; row assignments are unchanged.
 
-See the LDS swizzling presentation for background on bank conflicts,
-`ds_read_b128` phases, and correctness proofs.
-
 ## Hardware Background (GFX950)
 
 LDS has 64 banks x 4 bytes = 256 bytes per bank row, holding exactly
@@ -87,11 +84,11 @@ swappedCol    = col ^ swapOnEvenRow
 **Rotate**: Circular rotation of the column based on bank row index.
 
 ```
--- Forward (GR side):
+-- Forward (LoadTiled / write to LDS):
 rotation    = numColumns - (bankRowIdx / 2) * 2
 rotatedCol  = (col + rotation) & (numColumns - 1)
 
--- Inverse (LR side):
+-- Inverse (LoadLDSTile / read from LDS):
 invRotation = (bankRowIdx / 2) * 2
 rotatedCol  = (col + invRotation) & (numColumns - 1)
 ```
@@ -101,15 +98,16 @@ permutations, enough to differentiate all tile rows sharing a bank row.
 
 ## Implementation in rocRoller
 
-Gated by `LDSBankSwizzleMode` kernel option (None, Swizzle). The GR and
-LR sides each insert `PairSwap` and `Rotate` coordinate graph edges. No
+Gated by `LDSBankSwizzleMode` kernel option (None, Swizzle). The LoadTiled and
+LoadLDSTile sides each insert `PairSwap` and `Rotate` coordinate graph edges. No
 new instruction emission or cross-lane operations are needed.
 
-### GR side (Global Read / LDS write)
+### LoadTiled (global memory to LDS)
 
-On the GR side, the column coordinate is permuted before being used
-in the Tile decomposition, so each lane fetches from a different global
-column, producing a swizzled layout in LDS.
+During LoadTiled, the column coordinate is
+permuted before being used in the Tile decomposition, so each lane
+fetches from a different global column, producing a swizzled layout
+in LDS.
 
 Graph topology (MATRIX_B, swizzle enabled):
 
@@ -122,12 +120,12 @@ Graph topology (MATRIX_B, swizzle enabled):
 
 For MATRIX_A, the roles of X/Y are swapped (K is dim 1).
 
-### LR side (Local Read)
+### LoadLDSTile (LDS to VGPRs)
 
-On the LR side, the element-granularity K-column index is decomposed
-into a dwordx4 chunk index and sub-element offset. The chunk index is
-un-permuted (inverse Rotate, then PairSwap) so the wave reads the
-correct logical element from the swizzled LDS layout.
+During LoadLDSTile, the element-granularity K-column
+index is decomposed into a dwordx4 chunk index and sub-element offset.
+The chunk index is un-permuted (inverse Rotate, then PairSwap) so the
+wave reads the correct logical element from the swizzled LDS layout.
 
 Graph topology (swizzle enabled):
 
@@ -151,7 +149,7 @@ waves by construction.
 
 ### Verification tables
 
-GR verification (numColumns=8, rowsPerBankRow=2):
+LoadTiled verification (numColumns=8, rowsPerBankRow=2):
 
 | lane | base_col | bankRowIdx | swap_col | gr_rotation | gr_col | expected   |
 |------|----------|------------|----------|-------------|--------|------------|
