@@ -500,15 +500,12 @@ static const std::vector<std::string> ranked_gemm_3d_grp_fwd = {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables, cert-err58-cpp)
 static const std::vector<std::string> ranked_gemm_3d_grp_fwd_navi = {
-"DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3<256, 128, 256, 32, Default, 16, 16, 4, 4, 8, 8, 8, 1, 1, BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v1, 1>",
-"DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3<128, 128, 128, 32, Default, 16, 16, 4, 4, 8, 8, 1, 1, 1, BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v1, 1>",
-"DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3<128, 128, 32, 32, Default, 16, 16, 4, 1, 8, 8, 8, 1, 1, BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v1, 1>",
-"DeviceGroupedConvFwdMultipleD_Wmma_CShuffle_V3_Large_Tensor<128, 128, 128, Default, 16, 16, 4, 4, 8, 8, 1, 1, 1>",
-"DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3<128, 128, 96, 64, Default, 16, 16, 4, 3, 8, 8, 1, 1, 1, BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v1, 1>",
-"DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3<256, 128, 256, 64, Default, 16, 16, 4, 4, 8, 8, 1, 1, 1, BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v1, 1>",
-"DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_WmmaPorted<256, 256, 128, 32, Default, 32, 32, 4, 2, 8, 8, 8, 1, 1, 1>",
-"DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_WmmaPorted<256, 64, 64, 32, Default, 16, 16, 2, 2, 4, 4, 4, 1, 1, 1>",
-"DeviceGroupedConvFwdMultipleD_Xdl_CShuffle_Large_Tensor_WmmaPorted<64, 64, 64, 32, Default, 32, 32, 2, 2, 1, 1, 1, 1, 1>"
+"DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_WmmaPorted<128, 128, 64, 32, Filter1x1Stride1Pad0, 32, 32, 2, 2, 8, 8, 8, 1, 1, 1>",
+"DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3<128, 64, 128, 32, Filter1x1Pad0, 16, 16, 4, 2, 8, 8, 8, 1, 1, BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v1, 1>",
+"DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3<128, 64, 32, 64, Filter1x1Stride1Pad0, 16, 16, 2, 1, 8, 8, 1, 1, 1, BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v1, 1>",
+"DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_WmmaPorted<256, 64, 64, 32, Filter1x1Stride1Pad0, 16, 16, 2, 2, 1, 2, 1, 1, 1, 1>",
+"DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3<256, 128, 96, 64, Default, 16, 16, 2, 3, 8, 8, 1, 1, 1, BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v1, 1>",
+"DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_WmmaPorted<64, 64, 64, 32, Default, 32, 32, 2, 2, 1, 1, 1, 1, 1, 1>"
 };
 // clang-format on
 

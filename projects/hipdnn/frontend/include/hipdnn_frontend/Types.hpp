@@ -1531,6 +1531,43 @@ inline std::pair<ReductionMode, Error> fromHipdnnReduceTensorOp(hipdnnReduceTens
     }
 }
 
+/// @brief Get a human-readable string for a ReductionMode value
+// NOLINTNEXTLINE(readability-identifier-naming)
+inline const char* to_string(const ReductionMode& mode)
+{
+    switch(mode)
+    {
+    case ReductionMode::NOT_SET:
+        return "NOT_SET";
+    case ReductionMode::ADD:
+        return "ADD";
+    case ReductionMode::MUL:
+        return "MUL";
+    case ReductionMode::MIN:
+        return "MIN";
+    case ReductionMode::MAX:
+        return "MAX";
+    case ReductionMode::AMAX:
+        return "AMAX";
+    case ReductionMode::AVG:
+        return "AVG";
+    case ReductionMode::NORM1:
+        return "NORM1";
+    case ReductionMode::NORM2:
+        return "NORM2";
+    case ReductionMode::MUL_NO_ZEROS:
+        return "MUL_NO_ZEROS";
+    default:
+        return "UNKNOWN";
+    }
+}
+
+/// @brief Stream insertion operator for ReductionMode
+inline std::ostream& operator<<(std::ostream& os, const ReductionMode& mode)
+{
+    return os << to_string(mode);
+}
+
 /// @brief Get a human-readable string for a KnobValueType value
 // NOLINTNEXTLINE(readability-identifier-naming)
 inline const char* to_string(const KnobValueType& type)
