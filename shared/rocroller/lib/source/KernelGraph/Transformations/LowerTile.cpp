@@ -1001,7 +1001,7 @@ namespace rocRoller
             connections.push_back(DC<ElementNumber>(elementNumberX, 0));
             connections.push_back(DC<ElementNumber>(elementNumberY, 1));
 
-            // GR swizzle for Direct2LDS MATRIX_B: permute K-column
+            // LoadTiled swizzle for Direct2LDS MATRIX_B: permute K-column
             // (nThrX, dim 0) based on N-row (nThrY).
             auto grSwizzleNThrX = nThrX;
             if(ldsSwizzle && macTile.layoutType == LayoutType::MATRIX_B)
@@ -1025,7 +1025,7 @@ namespace rocRoller
                         {swappedCol, nThrY});
 
                     Log::getLogger()->debug(
-                        "GR swizzle B: K={} R={}", params.numColumns, params.rowsPerBankRow);
+                        "LoadTiled swizzle B: K={} R={}", params.numColumns, params.rowsPerBankRow);
                 }
             }
 
@@ -1060,7 +1060,7 @@ namespace rocRoller
                     graph.coordinates.addElement(Tile(), {iMacX}, {grSwizzleNThrX, iThrX});
             }
 
-            // GR swizzle for Direct2LDS MATRIX_A: permute K-column
+            // LoadTiled swizzle for Direct2LDS MATRIX_A: permute K-column
             // (nThrY, dim 1) based on M-row (nThrX).
             auto grSwizzleNThrY = nThrY;
             if(ldsSwizzle && macTile.layoutType == LayoutType::MATRIX_A)
@@ -1084,7 +1084,7 @@ namespace rocRoller
                         {swappedCol, nThrX});
 
                     Log::getLogger()->debug(
-                        "GR swizzle (load): nThrY={} nThrX={} grSwizzleNThrY={} K={} R={}",
+                        "LoadTiled swizzle A: nThrY={} nThrX={} grSwizzleNThrY={} K={} R={}",
                         nThrY,
                         nThrX,
                         grSwizzleNThrY,
@@ -1544,9 +1544,9 @@ namespace rocRoller
                     graph.coordinates.addElement(Flatten(), {nThrX, iThrX}, {iMacX});
             }
 
-            // Note: No GR column swizzle on the store side.  For D2L the
+            // Note: No column swizzle on the store side.  For D2L the
             // LDS write address (M0) must remain un-swizzled because the
-            // hardware writes sequentially at M0 + lane*16.  The GR swizzle
+            // hardware writes sequentially at M0 + lane*16.  The swizzle
             // is applied only on the load side (addLoadThreadTileCT) where
             // it permutes the global read offset (v16/offen) so that each
             // lane fetches from a different global column, producing a
@@ -2279,7 +2279,7 @@ namespace rocRoller
                                         0u);
                 }
 
-                // LR swizzle: insert PairSwap + Rotate(inv) edges
+                // LoadLDSTile swizzle: insert PairSwap + Rotate(inv) edges
                 // that un-permute the K-column so the wave reads the
                 // correct logical element.
                 //   {colChunk, elemInChunk} --Flatten--> {colCoord}
@@ -2345,7 +2345,7 @@ namespace rocRoller
                                 tileIMacX = rawColElem;
                         }
 
-                        logger->debug("LR swizzle {}: K={} E={} R={}",
+                        logger->debug("LoadLDSTile swizzle {}: K={} E={} R={}",
                                       toString(tile.layoutType),
                                       params.numColumns,
                                       params.elementsPerChunk,
