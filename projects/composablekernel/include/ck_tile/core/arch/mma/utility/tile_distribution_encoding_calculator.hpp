@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include "ck_tile/core/tensor/tile_distribution.hpp"
 #include "ck_tile/core/arch/mma/utility/tile_distribution_encoding_register_mapper.hpp"
 

@@ -1,6 +1,8 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+#pragma once
+
 #include <hip/hip_runtime.h>
 #include <gtest/gtest.h>
 
@@ -12,6 +14,9 @@
 
 #include <cstdio>
 #include <vector>
+#include <cmath>
+
+namespace {
 
 using namespace ck_tile;
 using namespace ck_tile::core::arch;
@@ -133,7 +138,7 @@ struct MmaLayoutTestKernel
 
                 const float expected = (c_coords[0] == m && c_coords[1] == n) ? 1 : 0;
                 const float value    = static_cast<float>(c_frag[v]);
-                if(fabsf(value - expected) > tolerance)
+                if(std::fabs(value - expected) > tolerance)
                 {
                     err = 1;
                 }
@@ -168,12 +173,12 @@ void run_mma_layout_test()
     hipDevice_t device{};
     HIP_CHECK_ERROR(hipGetDevice(&device));
     HIP_CHECK_ERROR(hipGetDeviceCount(&device_count));
+    EXPECT_TRUE(device_count > 0) << "No device found!";
+
     hipDeviceProp_t props{};
     HIP_CHECK_ERROR(hipGetDeviceProperties(&props, device));
     EXPECT_EQ(props.warpSize, static_cast<int>(MmaOp::WaveSize))
         << "Device wavesize " << props.warpSize << " != Mma wavesize " << MmaOp::WaveSize;
-
-    EXPECT_TRUE(device_count > 0) << "No device found!";
 
     constexpr uint32_t total_cases = MmaOp::kM * MmaOp::kN * MmaOp::kK;
     ck_tile::DeviceMem d_errors(total_cases * sizeof(uint32_t));
@@ -181,11 +186,11 @@ void run_mma_layout_test()
 
     auto* d_error_ptr = static_cast<uint32_t*>(d_errors.GetDeviceBuffer());
 
-    std::ignore = hipGetLastError();
+    (void)hipGetLastError();
 
     using Kernel = MmaLayoutTestKernel<MmaOp>;
 
-    std::ignore = ck_tile::launch_kernel(
+    ck_tile::launch_kernel(
         ck_tile::stream_config{nullptr, false, 0, 0, 1},
         ck_tile::make_kernel(Kernel{}, dim3(total_cases), dim3(MmaOp::WaveSize), 0, d_error_ptr));
 
@@ -231,3 +236,4 @@ template <typename MmaOp>
 class TestMmaLayout : public ::testing::Test
 {
 };
+} // namespace
