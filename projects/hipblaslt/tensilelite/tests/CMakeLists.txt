@@ -299,32 +299,39 @@ if(NOT WIN32)
 endif()
 
 #################################################
-#     TF32 (XFloat32 math-op) tests (slow only) #
+#     TF32 (XFloat32 math-op) tests             #
 #################################################
 # TF32 uses float storage with XFloat32 truncation on multiply.
-# Fast path support is added separately.
-foreach(TRANS NN TN NT TT)
-    get_trans_flags(${TRANS} TFLAGS)
-    add_cpu_gemm_test(slow_tf32_${TRANS}
-        ARGS ${F32_SIZES} ${TFLAGS} --type tf32 --validate
+foreach(PATH fast slow)
+    if("${PATH}" STREQUAL "fast")
+        set(PATH_FLAGS --tryFastPath)
+    else()
+        set(PATH_FLAGS "")
+    endif()
+
+    foreach(TRANS NN TN NT TT)
+        get_trans_flags(${TRANS} TFLAGS)
+        add_cpu_gemm_test(${PATH}_tf32_${TRANS}
+            ARGS ${F32_SIZES} ${TFLAGS} --type tf32 --validate ${PATH_FLAGS}
+        )
+    endforeach()
+    add_cpu_gemm_test(${PATH}_tf32_Beta
+        ARGS ${F32_SIZES} --type tf32 --beta 1.0 --validate ${PATH_FLAGS}
     )
-endforeach()
-add_cpu_gemm_test(slow_tf32_Beta
-    ARGS ${F32_SIZES} --type tf32 --beta 1.0 --validate
-)
-add_cpu_gemm_test(slow_tf32_Bias
-    ARGS ${F32_SIZES} --type tf32 --validate --bias
-)
-add_cpu_gemm_test(slow_tf32_AllFeatures
-    ARGS ${F32_SIZES} --type tf32 --validate --bias --activation relu --scaleAlphaVec
-)
-add_cpu_gemm_test(slow_tf32_TN_AllFeatures
-    ARGS ${F32_SIZES} --transA --type tf32 --validate --bias --activation relu --scaleAlphaVec
-)
-foreach(MODE Scalar Vector)
-    add_cpu_gemm_test(slow_tf32_ScaleAB_${MODE}
-        ARGS ${F32_SIZES} --type tf32 --validate --useScaleAB ${MODE}
+    add_cpu_gemm_test(${PATH}_tf32_Bias
+        ARGS ${F32_SIZES} --type tf32 --validate --bias ${PATH_FLAGS}
     )
+    add_cpu_gemm_test(${PATH}_tf32_AllFeatures
+        ARGS ${F32_SIZES} --type tf32 --validate --bias --activation relu --scaleAlphaVec ${PATH_FLAGS}
+    )
+    add_cpu_gemm_test(${PATH}_tf32_TN_AllFeatures
+        ARGS ${F32_SIZES} --transA --type tf32 --validate --bias --activation relu --scaleAlphaVec ${PATH_FLAGS}
+    )
+    foreach(MODE Scalar Vector)
+        add_cpu_gemm_test(${PATH}_tf32_ScaleAB_${MODE}
+            ARGS ${F32_SIZES} --type tf32 --validate --useScaleAB ${MODE} ${PATH_FLAGS}
+        )
+    endforeach()
 endforeach()
 
 #################################################
