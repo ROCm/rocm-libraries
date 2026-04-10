@@ -215,7 +215,7 @@ TEST(TestINode, VisitGraphModifyNodes)
     EXPECT_EQ(child2->value, 30);
 }
 
-TEST(TestINode, CreateOperationDefaultReturnsError)
+TEST(TestINode, CreateOperationReturnsError)
 {
     const FakeNode node(1);
     std::unordered_map<int64_t, detail::ScopedHipdnnBackendDescriptor> tensorDescs;
