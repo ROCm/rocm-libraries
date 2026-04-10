@@ -95,11 +95,6 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableSdpaVariations)
            {GraphTest{createSdpaFwdGraph({4, 8, 256, 128}, DataType::HALF),
                       "Half precision tensor data type"},
             false},
-           // TODO: Determine compute data type for this kernel and add corresponding test and check
-           // {GraphTest{
-           //      createSdpaFwdGraph({4, 8, 256, 128}, DataType::BFLOAT16, DataType::BFLOAT16),
-           //      "Compute data type bfloat16"},
-           //  false},
            {GraphTest{createSdpaFwdGraph({4, 8, 256, 128}, DataType::BFLOAT16, true),
                       "attn_mask = true"},
             false},
@@ -114,16 +109,10 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableSdpaVariations)
                           {4, 8, 256, 128}, DataType::BFLOAT16, false, true, false, false, true),
                       "padding_mask = true"},
             false},
-           {GraphTest{createSdpaFwdGraph({4, 8, 256, 128},
-                                         DataType::BFLOAT16,
-
-                                         false,
-                                         true,
-                                         false,
-                                         false,
-                                         false,
-                                         true),
-                      "causal_mask = true"},
+           {GraphTest{
+                createSdpaFwdGraph(
+                    {4, 8, 256, 128}, DataType::BFLOAT16, false, true, false, false, false, true),
+                "causal_mask = true"},
             false}};
 
     for(const auto& [test, applicability] : applicabilityTests)

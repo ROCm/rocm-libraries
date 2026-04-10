@@ -765,7 +765,8 @@ static auto GetFusedWinogradSolvers()
 {
     return solver::SolverContainer<solver::fusion::ConvBinWinogradRxSFused,
                                    solver::fusion::ConvBinWinogradRxSf2x3g1Fused,
-                                   solver::fusion::ConvWinoFuryRxSFused<2, 3>>{};
+                                   solver::fusion::ConvWinoFuryRxSFused<2, 3>,
+                                   solver::fusion::ConvWinoRageRxSFused<2, 3>>{};
 }
 
 static auto GetAllFusionSolvers()
@@ -1083,7 +1084,7 @@ miopenStatus_t FusionPlanDescriptor::Compile(const Handle& handle)
     }
 
     std::vector<Solution> find_results = [&]() {
-        std::vector<Solution> find_results;
+        std::vector<Solution> find_results_;
 
         auto sol = std::optional<miopenConvSolution_t>{};
         if(findMode.IsFast(fusion_problem) || findMode.IsHybrid(fusion_problem))
@@ -1135,19 +1136,19 @@ miopenStatus_t FusionPlanDescriptor::Compile(const Handle& handle)
 
                 auto ret = Solution{id, sol->time, solver.GetWorkspaceSize(ctx, fusion_problem)};
                 ret.SetInvoker(std::move(invoker));
-                find_results.push_back(std::move(ret));
+                find_results_.push_back(std::move(ret));
             });
         }
         else
         {
             std::vector<Allocator::ManageDataPtr> invoke_bufs;
             miopen::OperatorArgs params;
-            find_results = Find(handle, [&](size_t req_workspace) {
+            find_results_ = Find(handle, [&](size_t req_workspace) {
                 return AllocateBuffersAndMakeFusionInvokeParams(
                     handle, fusion_problem, invoke_bufs, params, *this, req_workspace);
             });
         }
-        return find_results;
+        return find_results_;
     }();
 
     for(const auto& result : find_results)

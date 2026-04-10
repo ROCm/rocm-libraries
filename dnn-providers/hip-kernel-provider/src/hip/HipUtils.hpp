@@ -2,7 +2,6 @@
 // SPDX-License-Identifier:  MIT
 
 #pragma once
-#include <hip/hip_runtime.h>
 #include <hip/hiprtc.h>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <stdexcept>

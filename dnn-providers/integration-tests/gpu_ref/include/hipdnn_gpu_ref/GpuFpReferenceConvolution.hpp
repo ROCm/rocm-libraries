@@ -3,20 +3,14 @@
 
 #pragma once
 
-#include <hipdnn_data_sdk/types/Bfloat16.hpp>
-#include <hipdnn_data_sdk/types/Half.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
-#include <hipdnn_gpu_ref/detail/GpuRefHipError.hpp>
 #include <hipdnn_gpu_ref/detail/GpuRefKernelCompiler.hpp>
+#include <hipdnn_gpu_ref/detail/HipRtcTypeName.hpp>
 #include <hipdnn_test_sdk/utilities/ConvolutionValidation.hpp>
 
-#include <array>
 #include <cstdint>
-#include <hip/hip_runtime.h>
-#include <limits>
 #include <stdexcept>
 #include <string>
-#include <type_traits>
 #include <vector>
 
 namespace hipdnn_gpu_ref
@@ -24,52 +18,6 @@ namespace hipdnn_gpu_ref
 
 namespace detail
 {
-
-// --- HipRTC type name mapping ---
-
-template <typename T>
-struct HipRtcTypeName;
-
-template <>
-struct HipRtcTypeName<float>
-{
-    static constexpr const char* VALUE = "float";
-};
-
-template <>
-struct HipRtcTypeName<hipdnn_data_sdk::types::half>
-{
-    static constexpr const char* VALUE = "_Float16";
-};
-
-template <>
-struct HipRtcTypeName<hipdnn_data_sdk::types::bfloat16>
-{
-    static constexpr const char* VALUE = "unsigned short";
-};
-
-template <>
-struct HipRtcTypeName<int8_t>
-{
-    static constexpr const char* VALUE = "signed char";
-};
-
-template <>
-struct HipRtcTypeName<int32_t>
-{
-    static constexpr const char* VALUE = "int";
-};
-
-template <>
-struct HipRtcTypeName<double>
-{
-    static constexpr const char* VALUE = "double";
-};
-
-// Shared argument and stride structs — single definition used by both host and device (HipRTC).
-#include <GpuRefConvArgs.h> // NOLINT(misc-include-cleaner)
-
-// --- Helpers ---
 
 template <typename XDataType, typename WDataType, typename YDataType, typename ComputeDataType>
 inline std::vector<std::string> buildConvDefines(bool useTf32 = false)
@@ -84,70 +32,6 @@ inline std::vector<std::string> buildConvDefines(bool useTf32 = false)
         defines.emplace_back("-DUSE_TF32");
     }
     return defines;
-}
-
-inline Strides3 toStrides3(const std::vector<int64_t>& strides)
-{
-    Strides3 result{};
-    for(size_t i = 0; i < 3 && i < strides.size(); ++i)
-    {
-        result.s[i] = static_cast<long long>(strides[i]);
-    }
-    return result;
-}
-
-inline Strides4 toStrides4(const std::vector<int64_t>& strides)
-{
-    Strides4 result{};
-    for(size_t i = 0; i < 4 && i < strides.size(); ++i)
-    {
-        result.s[i] = static_cast<long long>(strides[i]);
-    }
-    return result;
-}
-
-inline Strides5 toStrides5(const std::vector<int64_t>& strides)
-{
-    Strides5 result{};
-    for(size_t i = 0; i < 5 && i < strides.size(); ++i)
-    {
-        result.s[i] = static_cast<long long>(strides[i]);
-    }
-    return result;
-}
-
-inline void
-    launchKernel(hipFunction_t function, int64_t totalElements, void* argsPtr, size_t argsSize)
-{
-    const int64_t blockSize = 256;
-    auto gridSize = (totalElements + blockSize - 1) / blockSize;
-
-    if(gridSize > static_cast<int64_t>(std::numeric_limits<unsigned int>::max()))
-    {
-        throw std::runtime_error("Grid size exceeds hipModuleLaunchKernel limit");
-    }
-
-    // NOLINTNEXTLINE(modernize-avoid-c-arrays)
-    void* config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER,
-                      argsPtr,
-                      HIP_LAUNCH_PARAM_BUFFER_SIZE,
-                      &argsSize,
-                      HIP_LAUNCH_PARAM_END};
-
-    throwOnHipError(hipModuleLaunchKernel(function,
-                                          static_cast<unsigned int>(gridSize),
-                                          1,
-                                          1,
-                                          static_cast<unsigned int>(blockSize),
-                                          1,
-                                          1,
-                                          0,
-                                          nullptr,
-                                          nullptr,
-                                          config),
-                    "hipModuleLaunchKernel failed");
-
-    throwOnHipError(hipDeviceSynchronize(), "hipDeviceSynchronize failed");
 }
 
 } // namespace detail
@@ -293,7 +177,7 @@ private:
             x, w, y, strides, dilations, prePadding, postPadding);
     }
 
-    // --- 1D kernel launcher ---
+    // --- Kernel launchers (defined in GpuFpReferenceConvolution.cpp) ---
 
     static void launchFprop1d(const void* xPtr,
                               const void* wPtr,
@@ -309,38 +193,7 @@ private:
                               const std::vector<int64_t>& padding,
                               const std::vector<std::string>& defines,
                               double alpha,
-                              double beta)
-    {
-        auto& compiler = hipdnn_gpu_ref::detail::GpuRefKernelCompiler::instance();
-        auto& kernel = compiler.getOrCompile("GpuRefConvFwd.cpp", defines, "convFwdRef1d");
-
-        auto nGroups = xDims[1] / wDims[1];
-
-        detail::ConvFwdArgs1d args{};
-        args.x = xPtr;
-        args.w = wPtr;
-        args.y = yPtr;
-        args.xStr = detail::toStrides3(xTensorStrides);
-        args.wStr = detail::toStrides3(wTensorStrides);
-        args.yStr = detail::toStrides3(yTensorStrides);
-        args.N = static_cast<long long>(xDims[0]);
-        args.C = static_cast<long long>(xDims[1]);
-        args.Wi = static_cast<long long>(xDims[2]);
-        args.K = static_cast<long long>(wDims[0]);
-        args.Wo = static_cast<long long>(yDims[2]);
-        args.Kw = static_cast<long long>(wDims[2]);
-        args.strideW = static_cast<long long>(convStrides[0]);
-        args.dilW = static_cast<long long>(dilations[0]);
-        args.padW = static_cast<long long>(padding[0]);
-        args.groups = static_cast<long long>(nGroups);
-        args.alpha = alpha;
-        args.beta = beta;
-
-        auto totalElements = xDims[0] * wDims[0] * yDims[2];
-        detail::launchKernel(kernel.function(), totalElements, &args, sizeof(args));
-    }
-
-    // --- 2D kernel launcher ---
+                              double beta);
 
     static void launchFprop2d(const void* xPtr,
                               const void* wPtr,
@@ -356,44 +209,7 @@ private:
                               const std::vector<int64_t>& padding,
                               const std::vector<std::string>& defines,
                               double alpha,
-                              double beta)
-    {
-        auto& compiler = hipdnn_gpu_ref::detail::GpuRefKernelCompiler::instance();
-        auto& kernel = compiler.getOrCompile("GpuRefConvFwd.cpp", defines, "convFwdRef2d");
-
-        auto nGroups = xDims[1] / wDims[1];
-
-        detail::ConvFwdArgs2d args{};
-        args.x = xPtr;
-        args.w = wPtr;
-        args.y = yPtr;
-        args.xStr = detail::toStrides4(xTensorStrides);
-        args.wStr = detail::toStrides4(wTensorStrides);
-        args.yStr = detail::toStrides4(yTensorStrides);
-        args.N = static_cast<long long>(xDims[0]);
-        args.C = static_cast<long long>(xDims[1]);
-        args.Hi = static_cast<long long>(xDims[2]);
-        args.Wi = static_cast<long long>(xDims[3]);
-        args.K = static_cast<long long>(wDims[0]);
-        args.Ho = static_cast<long long>(yDims[2]);
-        args.Wo = static_cast<long long>(yDims[3]);
-        args.Kh = static_cast<long long>(wDims[2]);
-        args.Kw = static_cast<long long>(wDims[3]);
-        args.strideH = static_cast<long long>(convStrides[0]);
-        args.strideW = static_cast<long long>(convStrides[1]);
-        args.dilH = static_cast<long long>(dilations[0]);
-        args.dilW = static_cast<long long>(dilations[1]);
-        args.padH = static_cast<long long>(padding[0]);
-        args.padW = static_cast<long long>(padding[1]);
-        args.groups = static_cast<long long>(nGroups);
-        args.alpha = alpha;
-        args.beta = beta;
-
-        auto totalElements = xDims[0] * wDims[0] * yDims[2] * yDims[3];
-        detail::launchKernel(kernel.function(), totalElements, &args, sizeof(args));
-    }
-
-    // --- 3D kernel launcher ---
+                              double beta);
 
     static void launchFprop3d(const void* xPtr,
                               const void* wPtr,
@@ -409,48 +225,7 @@ private:
                               const std::vector<int64_t>& padding,
                               const std::vector<std::string>& defines,
                               double alpha,
-                              double beta)
-    {
-        auto& compiler = hipdnn_gpu_ref::detail::GpuRefKernelCompiler::instance();
-        auto& kernel = compiler.getOrCompile("GpuRefConvFwd.cpp", defines, "convFwdRef3d");
-
-        auto nGroups = xDims[1] / wDims[1];
-
-        detail::ConvFwdArgs3d args{};
-        args.x = xPtr;
-        args.w = wPtr;
-        args.y = yPtr;
-        args.xStr = detail::toStrides5(xTensorStrides);
-        args.wStr = detail::toStrides5(wTensorStrides);
-        args.yStr = detail::toStrides5(yTensorStrides);
-        args.N = static_cast<long long>(xDims[0]);
-        args.C = static_cast<long long>(xDims[1]);
-        args.Di = static_cast<long long>(xDims[2]);
-        args.Hi = static_cast<long long>(xDims[3]);
-        args.Wi = static_cast<long long>(xDims[4]);
-        args.K = static_cast<long long>(wDims[0]);
-        args.Do = static_cast<long long>(yDims[2]);
-        args.Ho = static_cast<long long>(yDims[3]);
-        args.Wo = static_cast<long long>(yDims[4]);
-        args.Kd = static_cast<long long>(wDims[2]);
-        args.Kh = static_cast<long long>(wDims[3]);
-        args.Kw = static_cast<long long>(wDims[4]);
-        args.strideD = static_cast<long long>(convStrides[0]);
-        args.strideH = static_cast<long long>(convStrides[1]);
-        args.strideW = static_cast<long long>(convStrides[2]);
-        args.dilD = static_cast<long long>(dilations[0]);
-        args.dilH = static_cast<long long>(dilations[1]);
-        args.dilW = static_cast<long long>(dilations[2]);
-        args.padD = static_cast<long long>(padding[0]);
-        args.padH = static_cast<long long>(padding[1]);
-        args.padW = static_cast<long long>(padding[2]);
-        args.groups = static_cast<long long>(nGroups);
-        args.alpha = alpha;
-        args.beta = beta;
-
-        auto totalElements = xDims[0] * wDims[0] * yDims[2] * yDims[3] * yDims[4];
-        detail::launchKernel(kernel.function(), totalElements, &args, sizeof(args));
-    }
+                              double beta);
 };
 
 } // namespace hipdnn_gpu_ref

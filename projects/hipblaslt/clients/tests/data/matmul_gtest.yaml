@@ -23,6 +23,10 @@ Definitions:
     - { alpha: 1, beta: 0 }
     - { alpha: 1, beta: 1 }
 
+  - &integer_exact_alpha_beta
+    - { alpha: 2.0, beta: 0.0 }
+    - { alpha: 2.0, beta: -2.0 }
+
   - &deepbench_transA_transB_range
     - { transA: N, transB: N }
     - { transA: N, transB: T }
@@ -80,6 +84,203 @@ Tests:
   transA_transB: *transA_transB_range
   alpha_beta: *alpha_beta_range
   c_equal_d: [false, true]
+
+# FP16 I/O + FP32 compute: full-matrix probe for internal FP32 accumulation (rocBLAS-style near-max A, ±2 pairs in B).
+# Mirrors matmul_integer_exact_* matrix_size / category / batch / gpu_arch; NN only (probe does not support transposes).
+# Odd K skipped at runtime.
+- name: matmul_fp16_accumulator_probe_one
+  category: quick
+  function:
+    matmul: *hpa_half_precision
+  matrix_size: *one_matrix_size_range
+  transA: N
+  transB: N
+  alpha: 1.0
+  beta: 0.0
+  initialization: fp16_accumulator_probe
+  unit_check: 1
+
+- name: matmul_fp16_accumulator_probe_small
+  category: quick
+  function:
+    matmul: *hpa_half_precision
+  matrix_size: *small_matrix_size_range
+  transA: N
+  transB: N
+  alpha: 1.0
+  beta: 0.0
+  initialization: fp16_accumulator_probe
+  unit_check: 1
+
+- name: matmul_fp16_accumulator_probe_medium
+  category: pre_checkin
+  function:
+    matmul: *hpa_half_precision
+  matrix_size: *medium_matrix_size_range
+  transA: N
+  transB: N
+  alpha: 1.0
+  beta: 0.0
+  initialization: fp16_accumulator_probe
+  unit_check: 1
+
+- name: matmul_fp16_accumulator_probe_batch_medium
+  category: pre_checkin
+  function:
+    matmul: *hpa_half_precision
+  matrix_size: *medium_matrix_size_range
+  transA: N
+  transB: N
+  alpha: 1.0
+  beta: 0.0
+  batch_count: 10
+  initialization: fp16_accumulator_probe
+  unit_check: 1
+
+- name: matmul_fp16_accumulator_probe_chunk
+  category: pre_checkin
+  function:
+    matmul: *hpa_half_precision
+  matrix_size: *chunk_matrix_size_range
+  transA: N
+  transB: N
+  alpha: 1.0
+  beta: 0.0
+  initialization: fp16_accumulator_probe
+  unit_check: 1
+
+- name: matmul_fp16_accumulator_probe_grid_limit_real
+  category: nightly
+  function:
+    matmul: *hpa_half_precision
+  matrix_size: *grid_limit_matrix_size_real
+  transA: N
+  transB: N
+  alpha: 1.0
+  beta: 0.0
+  initialization: fp16_accumulator_probe
+  unit_check: 1
+  gpu_arch: '120[0-1]'
+
+- name: matmul_fp16_accumulator_probe_deepbench
+  category: nightly
+  function:
+    matmul: *hpa_half_precision
+  matrix_size: *deepbench_sizes
+  transA: N
+  transB: N
+  alpha: 1.0
+  beta: 0.0
+  initialization: fp16_accumulator_probe
+  unit_check: 1
+
+# Integer-exact: A,C in [0,1,2], B ±[0,1,2]; alpha=2, beta in {0,-2} (D = 2 A*B or 2 A*B - 2 C). Exact GPU vs CPU.
+# On gfx11, integer_exact is skipped at runtime for fp16/bf16 A only; f32/f64 still run (see testing_matmul.hpp).
+# TF32x1 (f32 A+B, compute input bf16) runs only on gfx950 where solutions exist (see matmul_integer_exact_tf32x1_gfx950 below).
+- name: matmul_integer_exact_one
+  category: quick
+  function:
+    matmul: *real_precisions
+  matrix_size: *one_matrix_size_range
+  transA_transB: *transA_transB_range
+  alpha_beta: *integer_exact_alpha_beta
+  initialization: integer_exact
+  unit_check: 1
+
+- name: matmul_integer_exact_small
+  category: quick
+  function:
+    matmul: *real_precisions
+  matrix_size: *small_matrix_size_range
+  transA_transB: *transA_transB_range
+  alpha_beta: *integer_exact_alpha_beta
+  initialization: integer_exact
+  unit_check: 1
+
+- name: matmul_integer_exact_medium
+  category: pre_checkin
+  function:
+    matmul: *real_precisions
+  matrix_size: *medium_matrix_size_range
+  transA_transB: *transA_transB_range
+  alpha_beta: *integer_exact_alpha_beta
+  initialization: integer_exact
+  unit_check: 1
+
+- name: matmul_integer_exact_batch_medium
+  category: pre_checkin
+  function:
+    matmul: *real_precisions
+  matrix_size: *medium_matrix_size_range
+  transA_transB: *transA_transB_range
+  alpha_beta: *integer_exact_alpha_beta
+  batch_count: 10
+  initialization: integer_exact
+  unit_check: 1
+
+- name: matmul_integer_exact_chunk
+  category: pre_checkin
+  function:
+    matmul: *real_precisions
+  matrix_size: *chunk_matrix_size_range
+  transA_transB: *transA_transB_range
+  alpha_beta: *integer_exact_alpha_beta
+  initialization: integer_exact
+  unit_check: 1
+
+- name: matmul_integer_exact_grid_limit_real
+  category: nightly
+  function:
+    matmul: *real_precisions
+  matrix_size: *grid_limit_matrix_size_real
+  transA_transB: *transA_transB_range
+  alpha_beta: *integer_exact_alpha_beta
+  initialization: integer_exact
+  unit_check: 1
+  gpu_arch: '120[0-1]'
+
+- name: matmul_integer_exact_grid_limit_double
+  category: nightly
+  function:
+    matmul: *double_precision
+  matrix_size: *grid_limit_matrix_size_double
+  transA_transB: *transA_transB_range
+  alpha_beta: *integer_exact_alpha_beta
+  initialization: integer_exact
+  unit_check: 1
+  api_method: [0, 2]
+  gpu_arch: '120[0-1]'
+
+- name: matmul_integer_exact_deepbench
+  category: nightly
+  function:
+    - matmul: *real_precisions
+    - matmul: *real_precisions_gemm_only
+  matrix_size: *deepbench_sizes
+  alpha_beta: *integer_exact_alpha_beta
+  transA_transB: *deepbench_transA_transB_range
+  initialization: integer_exact
+  unit_check: 1
+
+# Integer-exact + TF32x1 (f32 A+B, compute input bf16). gfx950 only. Sizes match matmul_gemm_f32_fast_bf16.
+# Omit TT: TF32x1 often has no solution for both-transposed on gfx950 (CI saw 21× NO solution, all TT).
+- name: matmul_integer_exact_tf32x1_gfx950
+  category: quick
+  function:
+    matmul: *real_precisions_tf32x1_only
+  matrix_size:
+    - { M:  128,  N:  128,  K:  128  }
+    - { M:  131,  N:  131,  K:  131  }
+    - { M:  1024, N:  1024, K:  1024 }
+    - { M:  1031, N:  1031,  K:  1031  }
+  transA_transB:
+    - { transA: N, transB: N }
+    - { transA: N, transB: T }
+    - { transA: T, transB: N }
+  alpha_beta: *integer_exact_alpha_beta
+  initialization: integer_exact
+  unit_check: 1
+  gpu_arch: '950'
 
 - name: matmul_conj_small
   category: quick
