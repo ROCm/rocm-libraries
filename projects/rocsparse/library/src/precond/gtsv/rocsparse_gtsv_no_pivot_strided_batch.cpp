@@ -40,7 +40,7 @@ namespace rocsparse
     }
     static constexpr int determine_max_recursion_levels()
     {
-        return 3;
+        return 4;
     }
     // LCOV_EXCL_STOP
 }
@@ -101,7 +101,7 @@ rocsparse_status
     constexpr int BLOCKSIZE            = determine_spike_solver_blocksize();
     constexpr int MAX_RECURSION_LEVELS = determine_max_recursion_levels();
 
-    int current_m = m;
+    int64_t current_m = m;
     for(int level = 0; level < MAX_RECURSION_LEVELS; level++)
     {
         if(current_m <= 1024)
@@ -815,8 +815,8 @@ rocsparse_status rocsparse::gtsv_no_pivot_strided_batch_template(rocsparse_handl
 
     char* ptr = reinterpret_cast<char*>(temp_buffer);
 
-    int    current_m = m;
-    size_t offset    = 0;
+    int64_t current_m = m;
+    size_t  offset    = 0;
     for(int level = 0; level < determine_max_recursion_levels(); level++)
     {
         if(current_m <= 1024)
