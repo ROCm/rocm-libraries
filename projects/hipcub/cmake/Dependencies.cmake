@@ -358,6 +358,8 @@ if(USER_BUILD_BENCHMARK)
       GIT_REPOSITORY https://github.com/google/benchmark.git
       GIT_TAG        v${BENCHMARK_VERSION}
     )
+    set(HAVE_STD_REGEX ON)
+    set(RUN_HAVE_STD_REGEX 1)
     set(_HIPCUB_DISABLE_ROCM_CHECKS TRUE)
     FetchContent_MakeAvailable(googlebench)
     set(_HIPCUB_DISABLE_ROCM_CHECKS FALSE)
