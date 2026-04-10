@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -803,7 +803,8 @@ private:
 
         lookback_scan_prefix_flag flag = static_cast<lookback_scan_prefix_flag>(
             ::rocprim::detail::atomic_load(&prefixes_flags[padding + block_id]));
-        while(flag == lookback_scan_prefix_flag::empty)
+
+        while(::rocprim::detail::warp_any(flag == lookback_scan_prefix_flag::empty))
         {
             if(UseSleep)
             {
