@@ -24,18 +24,24 @@ sys.path.insert(0, str(dispatcher_python))
 
 
 # Import MIOpen real-world shapes
-from forward_training_miopen import TRAINING_PROBLEMS_FORWARD_MIOPEN
+from forward_training_miopen import TRAINING_PROBLEMS_FORWARD_MIOPEN  # noqa: E402
 
 # Import synthetic shapes with diverse G and N
-from forward_synthetic_extended import TRAINING_PROBLEMS_FORWARD_SYNTHETIC
+from forward_synthetic_extended import TRAINING_PROBLEMS_FORWARD_SYNTHETIC  # noqa: E402
 
 # Combine both datasets
-TRAINING_PROBLEMS_FORWARD = TRAINING_PROBLEMS_FORWARD_MIOPEN + TRAINING_PROBLEMS_FORWARD_SYNTHETIC
+TRAINING_PROBLEMS_FORWARD = (
+    TRAINING_PROBLEMS_FORWARD_MIOPEN + TRAINING_PROBLEMS_FORWARD_SYNTHETIC
+)
 
 # Validate count
-assert len(TRAINING_PROBLEMS_FORWARD) > 1000, f"Expected >1000 problems, got {len(TRAINING_PROBLEMS_FORWARD)}"
+assert len(TRAINING_PROBLEMS_FORWARD) > 1000, (
+    f"Expected >1000 problems, got {len(TRAINING_PROBLEMS_FORWARD)}"
+)
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     # Note: Count may vary as synthetic set is tuned for C%8==0 and C%G==0 constraints
-    print(f"Total training problems: {len(TRAINING_PROBLEMS_FORWARD)} " +
-          f"({len(TRAINING_PROBLEMS_FORWARD_MIOPEN)} MIOpen + {len(TRAINING_PROBLEMS_FORWARD_SYNTHETIC)} synthetic)")
+    print(
+        f"Total training problems: {len(TRAINING_PROBLEMS_FORWARD)} "
+        + f"({len(TRAINING_PROBLEMS_FORWARD_MIOPEN)} MIOpen + {len(TRAINING_PROBLEMS_FORWARD_SYNTHETIC)} synthetic)"
+    )

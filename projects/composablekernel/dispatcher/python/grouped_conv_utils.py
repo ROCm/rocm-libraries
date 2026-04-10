@@ -747,19 +747,25 @@ class GpuGroupedConvRunner:
                 # Allocate input
                 ret = self._hip.hipMalloc(ctypes.byref(d_a), input_np.nbytes)
                 if ret != 0:
-                    raise RuntimeError(f"hipMalloc failed for input (code {ret}, size {input_np.nbytes})")
+                    raise RuntimeError(
+                        f"hipMalloc failed for input (code {ret}, size {input_np.nbytes})"
+                    )
                 allocated_ptrs.append(d_a)
 
                 # Allocate weight
                 ret = self._hip.hipMalloc(ctypes.byref(d_b), weight_np.nbytes)
                 if ret != 0:
-                    raise RuntimeError(f"hipMalloc failed for weight (code {ret}, size {weight_np.nbytes})")
+                    raise RuntimeError(
+                        f"hipMalloc failed for weight (code {ret}, size {weight_np.nbytes})"
+                    )
                 allocated_ptrs.append(d_b)
 
                 # Allocate output
                 ret = self._hip.hipMalloc(ctypes.byref(d_c), output_size)
                 if ret != 0:
-                    raise RuntimeError(f"hipMalloc failed for output (code {ret}, size {output_size})")
+                    raise RuntimeError(
+                        f"hipMalloc failed for output (code {ret}, size {output_size})"
+                    )
                 allocated_ptrs.append(d_c)
 
                 # Host to device
@@ -778,7 +784,9 @@ class GpuGroupedConvRunner:
                 self._hip.hipDeviceSynchronize()
 
                 # Launch kernel
-                time_ms = self._dispatch_lib.run(d_a.value, d_b.value, d_c.value, problem)
+                time_ms = self._dispatch_lib.run(
+                    d_a.value, d_b.value, d_c.value, problem
+                )
                 self._hip.hipDeviceSynchronize()
 
                 result = GroupedConvResult()
@@ -789,7 +797,9 @@ class GpuGroupedConvRunner:
                         output_np.ctypes.data, d_c, output_size, self.HIP_MEMCPY_D2H
                     )
                     if ret != 0:
-                        raise RuntimeError(f"hipMemcpy D2H failed for output (code {ret})")
+                        raise RuntimeError(
+                            f"hipMemcpy D2H failed for output (code {ret})"
+                        )
 
                     self._hip.hipDeviceSynchronize()
                     result.success = True
@@ -1582,9 +1592,7 @@ class GroupedConvCodegenRunner:
 
         if verbose:
             compile_count = sum(1 for h in generated_headers if h is not None)
-            print(
-                f"Compiling {compile_count} grouped-conv libraries serially..."
-            )
+            print(f"Compiling {compile_count} grouped-conv libraries serially...")
 
         compile_jobs: List[Dict[str, Any]] = []
         compile_to_input_index: Dict[int, int] = {}

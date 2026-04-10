@@ -25,9 +25,9 @@ sys.path.insert(0, str(_DISPATCHER_ROOT / "heuristics"))
 sys.path.insert(0, str(_DISPATCHER_ROOT / "codegen"))
 sys.path.insert(0, str(_THIS_DIR / "problems"))
 
-from predict import Predictor
-from feature_engine_grouped_conv import GroupedConvFeatureEngine
-from grouped_config_rules import COMMON_TILES, VARIANT_PIPELINES
+from predict import Predictor  # noqa: E402
+from feature_engine_grouped_conv import GroupedConvFeatureEngine  # noqa: E402
+from grouped_config_rules import COMMON_TILES, VARIANT_PIPELINES  # noqa: E402
 
 
 def get_kernel_pool(variant: str) -> list:
@@ -40,12 +40,14 @@ def get_kernel_pool(variant: str) -> list:
 
     for tile_m, tile_n, tile_k in COMMON_TILES:
         for pipeline in pipelines:
-            kernels.append({
-                'block_size': tile_m,
-                'gemm_m_per_block': tile_n,
-                'gemm_n_per_block': tile_k,
-                'pipeline': pipeline
-            })
+            kernels.append(
+                {
+                    "block_size": tile_m,
+                    "gemm_m_per_block": tile_n,
+                    "gemm_n_per_block": tile_k,
+                    "pipeline": pipeline,
+                }
+            )
 
     return kernels
 
@@ -53,22 +55,32 @@ def get_kernel_pool(variant: str) -> list:
 def problem_to_dict(p):
     """Convert GroupedConvProblem to dictionary."""
     return {
-        'N': p.N, 'C': p.C, 'K': p.K, 'G': p.G,
-        'Hi': p.Hi, 'Wi': p.Wi, 'Y': p.Y, 'X': p.X,
-        'stride_h': p.stride_h, 'stride_w': p.stride_w,
-        'pad_h': p.pad_h, 'pad_w': p.pad_w,
-        'dtype': 'bf16'
+        "N": p.N,
+        "C": p.C,
+        "K": p.K,
+        "G": p.G,
+        "Hi": p.Hi,
+        "Wi": p.Wi,
+        "Y": p.Y,
+        "X": p.X,
+        "stride_h": p.stride_h,
+        "stride_w": p.stride_w,
+        "pad_h": p.pad_h,
+        "pad_w": p.pad_w,
+        "dtype": "bf16",
     }
 
 
 def format_problem(p):
     """Format problem for display."""
-    return (f"N={p.N:3d} C={p.C:4d} K={p.K:4d} "
-            f"{p.Hi:2d}x{p.Wi:2d}→{p.Ho:2d}x{p.Wo:2d} "
-            f"f{p.Y}x{p.X}")
+    return (
+        f"N={p.N:3d} C={p.C:4d} K={p.K:4d} "
+        f"{p.Hi:2d}x{p.Wi:2d}→{p.Ho:2d}x{p.Wo:2d} "
+        f"f{p.Y}x{p.X}"
+    )
 
 
-def kernel_to_name(kernel, variant='forward', short=False):
+def kernel_to_name(kernel, variant="forward", short=False):
     """Convert kernel dict to name.
 
     Args:
@@ -78,7 +90,7 @@ def kernel_to_name(kernel, variant='forward', short=False):
                If False, return oracle name (e.g., "grouped_conv_forward_bf16_2d_16x64x64_compv3")
     """
     tile_name = f"{kernel['block_size']}x{kernel['gemm_m_per_block']}x{kernel['gemm_n_per_block']}"
-    pipeline = kernel['pipeline']
+    pipeline = kernel["pipeline"]
 
     if short:
         return f"{tile_name}_{pipeline}"
@@ -100,9 +112,9 @@ def load_oracle_results(csv_path):
     with open(csv_path) as f:
         reader = csv.DictReader(f)
         for row in reader:
-            problem_idx = int(row['problem_idx'])
-            kernel_name = row['kernel']
-            tflops = float(row['tflops']) if row['tflops'] not in ['nan', ''] else 0.0
+            problem_idx = int(row["problem_idx"])
+            kernel_name = row["kernel"]
+            tflops = float(row["tflops"]) if row["tflops"] not in ["nan", ""] else 0.0
 
             results[problem_idx].append((kernel_name, tflops))
 
@@ -145,11 +157,16 @@ def run_oracle_benchmark(variant, output_csv):
         sys.executable,
         str(benchmark_script),
         str(config_path),
-        "--arch", "gfx950",
-        "--problems", problems_module,
-        "--csv", str(output_csv),
-        "--workers", "8",
-        "--batch-size", "10"
+        "--arch",
+        "gfx950",
+        "--problems",
+        problems_module,
+        "--csv",
+        str(output_csv),
+        "--workers",
+        "8",
+        "--batch-size",
+        "10",
     ]
 
     try:
@@ -161,12 +178,12 @@ def run_oracle_benchmark(variant, output_csv):
             cwd=_THIS_DIR,
             capture_output=False,  # Show output in real-time
             text=True,
-            timeout=3600  # 1 hour timeout
+            timeout=3600,  # 1 hour timeout
         )
 
         if result.returncode == 0:
             print()
-            print(f"  ✓ Benchmark completed successfully")
+            print("  ✓ Benchmark completed successfully")
             return True
         else:
             print()
@@ -175,7 +192,7 @@ def run_oracle_benchmark(variant, output_csv):
 
     except subprocess.TimeoutExpired:
         print()
-        print(f"  ✗ Benchmark timed out after 1 hour")
+        print("  ✗ Benchmark timed out after 1 hour")
         return False
     except Exception as e:
         print()
@@ -183,7 +200,7 @@ def run_oracle_benchmark(variant, output_csv):
         return False
 
 
-def find_kernel_so_path(kernel_name, arch='gfx950'):
+def find_kernel_so_path(kernel_name, arch="gfx950"):
     """Find the .so path for a compiled kernel.
 
     Args:
@@ -195,7 +212,7 @@ def find_kernel_so_path(kernel_name, arch='gfx950'):
     """
     # Parse kernel name to construct .so filename
     # kernel_name format: "32x128x64_compv3"
-    parts = kernel_name.split('_')
+    parts = kernel_name.split("_")
     tile = parts[0]  # "32x128x64"
     pipeline = parts[1]  # "compv3" or "mem"
 
@@ -204,18 +221,21 @@ def find_kernel_so_path(kernel_name, arch='gfx950'):
 
     # Find matching .so - pattern: libdispatcher_conv_bwd_data_2d_bf16_*_{pipeline}_intrawave.so
     import glob
-    pattern = str(build_dir / f"libdispatcher_conv_bwd_data_2d_bf16_*_{pipeline}_intrawave.so")
+
+    pattern = str(
+        build_dir / f"libdispatcher_conv_bwd_data_2d_bf16_*_{pipeline}_intrawave.so"
+    )
     matches = glob.glob(pattern)
 
     # Filter by tile size in the name
     for match in matches:
-        if tile.replace('x', 'x') in match:
+        if tile.replace("x", "x") in match:
             return Path(match)
 
     return None
 
 
-def run_ml_kernel_on_hw(problem_idx, problem, kernel_name, variant='forward'):
+def run_ml_kernel_on_hw(problem_idx, problem, kernel_name, variant="forward"):
     """Run a specific ML-picked kernel on hardware.
 
     Args:
@@ -231,96 +251,129 @@ def run_ml_kernel_on_hw(problem_idx, problem, kernel_name, variant='forward'):
     so_path = find_kernel_so_path(kernel_name)
 
     if so_path is None or not so_path.exists():
-        return {'status': 'FAIL', 'error': f'Kernel .so not found: {kernel_name}'}
+        return {"status": "FAIL", "error": f"Kernel .so not found: {kernel_name}"}
 
     # Prepare problem dict for subprocess
     prob_dict = {
-        'N': problem.N, 'C': problem.C, 'K': problem.K, 'G': problem.G,
-        'Hi': problem.Hi, 'Wi': problem.Wi, 'Y': problem.Y, 'X': problem.X,
-        'stride_h': problem.stride_h, 'stride_w': problem.stride_w,
-        'pad_h': problem.pad_h, 'pad_w': problem.pad_w,
-        'dilation_h': getattr(problem, 'dilation_h', 1),
-        'dilation_w': getattr(problem, 'dilation_w', 1),
-        'direction': variant
+        "N": problem.N,
+        "C": problem.C,
+        "K": problem.K,
+        "G": problem.G,
+        "Hi": problem.Hi,
+        "Wi": problem.Wi,
+        "Y": problem.Y,
+        "X": problem.X,
+        "stride_h": problem.stride_h,
+        "stride_w": problem.stride_w,
+        "pad_h": problem.pad_h,
+        "pad_w": problem.pad_w,
+        "dilation_h": getattr(problem, "dilation_h", 1),
+        "dilation_w": getattr(problem, "dilation_w", 1),
+        "direction": variant,
     }
 
     # Run via subprocess
     runner_script = _THIS_DIR / "run_one_grouped_conv_kernel.py"
 
-    input_data = json.dumps({
-        "so_path": str(so_path),
-        "problem": prob_dict,
-        "kernel_name": kernel_name
-    })
+    input_data = json.dumps(
+        {"so_path": str(so_path), "problem": prob_dict, "kernel_name": kernel_name}
+    )
 
     try:
         env = os.environ.copy()
-        env['GCONV_PYPATH'] = str(_DISPATCHER_ROOT / "python")
-        env['ROCR_VISIBLE_DEVICES'] = '0'
+        env["GCONV_PYPATH"] = str(_DISPATCHER_ROOT / "python")
+        env["ROCR_VISIBLE_DEVICES"] = "0"
 
         result = subprocess.run(
-            ['python3', str(runner_script)],
+            ["python3", str(runner_script)],
             input=input_data,
             capture_output=True,
             text=True,
             timeout=30,
             cwd=_THIS_DIR,
-            env=env
+            env=env,
         )
 
         if result.returncode != 0:
-            return {'status': 'FAIL', 'error': f'Subprocess error: {result.stderr[:200]}'}
+            return {
+                "status": "FAIL",
+                "error": f"Subprocess error: {result.stderr[:200]}",
+            }
 
         # Parse JSON output
         output = result.stdout.strip()
         data = json.loads(output)
 
-        if data.get('ok'):
+        if data.get("ok"):
             return {
-                'status': 'SUCCESS',
-                'tflops': data['tflops'],
-                'latency_ms': data['ms']
+                "status": "SUCCESS",
+                "tflops": data["tflops"],
+                "latency_ms": data["ms"],
             }
         else:
-            return {'status': 'FAIL', 'error': data.get('error', 'Unknown error')}
+            return {"status": "FAIL", "error": data.get("error", "Unknown error")}
 
     except subprocess.TimeoutExpired:
-        return {'status': 'FAIL', 'error': 'Timeout (30s)'}
+        return {"status": "FAIL", "error": "Timeout (30s)"}
     except json.JSONDecodeError:
-        return {'status': 'FAIL', 'error': f'JSON parse error: {result.stdout[:200]}'}
+        return {"status": "FAIL", "error": f"JSON parse error: {result.stdout[:200]}"}
     except Exception as e:
-        return {'status': 'FAIL', 'error': str(e)[:200]}
+        return {"status": "FAIL", "error": str(e)[:200]}
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Validate ML heuristic predictions against oracle")
-    parser.add_argument('--variant', choices=['forward', 'bwd_data', 'bwd_weight'], default='forward',
-                       help='Variant to validate (forward, bwd_data, or bwd_weight)')
-    parser.add_argument('--run-ml-hw', action='store_true',
-                       help='Run ML-picked kernels on hardware for actual TFLOPS measurement')
+    parser = argparse.ArgumentParser(
+        description="Validate ML heuristic predictions against oracle"
+    )
+    parser.add_argument(
+        "--variant",
+        choices=["forward", "bwd_data", "bwd_weight"],
+        default="forward",
+        help="Variant to validate (forward, bwd_data, or bwd_weight)",
+    )
+    parser.add_argument(
+        "--run-ml-hw",
+        action="store_true",
+        help="Run ML-picked kernels on hardware for actual TFLOPS measurement",
+    )
     args = parser.parse_args()
 
     variant = args.variant
 
     # Load appropriate validation problems
-    if variant == 'forward':
-        from forward_test_validation import VALIDATION_PROBLEMS_FORWARD as validation_problems
-    elif variant == 'bwd_data':
-        from bwd_data_test_validation import VALIDATION_PROBLEMS_BWD_DATA as validation_problems
+    if variant == "forward":
+        from forward_test_validation import (
+            VALIDATION_PROBLEMS_FORWARD as validation_problems,
+        )
+    elif variant == "bwd_data":
+        from bwd_data_test_validation import (
+            VALIDATION_PROBLEMS_BWD_DATA as validation_problems,
+        )
     else:  # bwd_weight
-        from bwd_weight_test_validation import VALIDATION_PROBLEMS_BWD_WEIGHT as validation_problems
+        from bwd_weight_test_validation import (
+            VALIDATION_PROBLEMS_BWD_WEIGHT as validation_problems,
+        )
 
     print()
     print("=" * 120)
     if args.run_ml_hw:
-        print(f"  {variant.upper()} ML MODEL VALIDATION - Hardware Execution of ML Picks")
+        print(
+            f"  {variant.upper()} ML MODEL VALIDATION - Hardware Execution of ML Picks"
+        )
     else:
-        print(f"  {variant.upper()} ML MODEL VALIDATION - Prediction vs Oracle Comparison")
+        print(
+            f"  {variant.upper()} ML MODEL VALIDATION - Prediction vs Oracle Comparison"
+        )
     print("=" * 120)
     print()
 
     # Load ML model
-    model_dir = _DISPATCHER_ROOT / "heuristics" / "models" / f"grouped_conv_{variant}_bf16_gfx950"
+    model_dir = (
+        _DISPATCHER_ROOT
+        / "heuristics"
+        / "models"
+        / f"grouped_conv_{variant}_bf16_gfx950"
+    )
     if not model_dir.exists():
         print(f"ERROR: Model not found: {model_dir}")
         sys.exit(1)
@@ -337,39 +390,47 @@ def main():
 
     if oracle_results is None:
         print(f"  ⚠  Oracle results not found: {oracle_csv}")
-        print(f"  ⚠  Running full benchmark to generate oracle results...")
+        print("  ⚠  Running full benchmark to generate oracle results...")
         print()
 
         # Run benchmark to generate oracle CSV
         success = run_oracle_benchmark(variant, oracle_csv)
 
         if not success:
-            print(f"  ✗ Benchmark failed. Continuing in prediction-only mode.")
+            print("  ✗ Benchmark failed. Continuing in prediction-only mode.")
             print()
             mode = "prediction_only"
         else:
             # Try loading again
             oracle_results = load_oracle_results(oracle_csv)
             if oracle_results is None:
-                print(f"  ✗ Failed to load oracle results after benchmark.")
+                print("  ✗ Failed to load oracle results after benchmark.")
                 mode = "prediction_only"
             else:
                 print(f"  ✓ Oracle results loaded: {oracle_csv}")
-                print(f"  ✓ Oracle benchmarks: {sum(len(v) for v in oracle_results.values())} kernel measurements")
+                print(
+                    f"  ✓ Oracle benchmarks: {sum(len(v) for v in oracle_results.values())} kernel measurements"
+                )
                 print()
                 mode = "hardware" if args.run_ml_hw else "comparison"
     else:
         print(f"  ✓ Oracle results loaded: {oracle_csv}")
-        print(f"  ✓ Oracle benchmarks: {sum(len(v) for v in oracle_results.values())} kernel measurements")
+        print(
+            f"  ✓ Oracle benchmarks: {sum(len(v) for v in oracle_results.values())} kernel measurements"
+        )
         print()
         mode = "hardware" if args.run_ml_hw else "comparison"
 
     # Get ML predictions for each problem
     if mode == "hardware":
-        print(f"  {'Problem':<40} {'Oracle Best':<20} {'Oracle':>10} {'ML Pick':<20} {'ML Pred':>10} {'ML HW':>10} {'Efficiency':>11}")
+        print(
+            f"  {'Problem':<40} {'Oracle Best':<20} {'Oracle':>10} {'ML Pick':<20} {'ML Pred':>10} {'ML HW':>10} {'Efficiency':>11}"
+        )
         print("  " + "-" * 115)
     elif mode == "comparison":
-        print(f"  {'Problem':<45} {'ML Pick':<25} {'ML Pred':>11} {'Oracle Best':<25} {'Oracle':>13} {'Efficiency':>11}")
+        print(
+            f"  {'Problem':<45} {'ML Pick':<25} {'ML Pred':>11} {'Oracle Best':<25} {'Oracle':>13} {'Efficiency':>11}"
+        )
         print("  " + "-" * (45 + 25 + 11 + 25 + 13 + 11 + 4))
     else:
         print(f"  {'Problem':<45} {'ML Pick':<25} {'ML TFLOPS':>11}")
@@ -388,37 +449,57 @@ def main():
         predictions = []
         for kernel in kernel_pool:
             pred_tflops = predictor.predict_tflops(prob_dict, kernel)
-            predictions.append({
-                'kernel': kernel,
-                'name': kernel_to_name(kernel, variant=variant, short=False),  # Use oracle format for matching
-                'short_name': kernel_to_name(kernel, variant=variant, short=True),  # For display
-                'pred_tflops': pred_tflops
-            })
+            predictions.append(
+                {
+                    "kernel": kernel,
+                    "name": kernel_to_name(
+                        kernel, variant=variant, short=False
+                    ),  # Use oracle format for matching
+                    "short_name": kernel_to_name(
+                        kernel, variant=variant, short=True
+                    ),  # For display
+                    "pred_tflops": pred_tflops,
+                }
+            )
 
         # Sort by predicted TFLOPS
-        predictions.sort(key=lambda x: x['pred_tflops'], reverse=True)
+        predictions.sort(key=lambda x: x["pred_tflops"], reverse=True)
 
         ml_pick = predictions[0]
-        ml_name = ml_pick['name']  # Oracle format for matching
-        ml_short_name = ml_pick['short_name']  # Short format for display
-        ml_pred_tflops = ml_pick['pred_tflops']
+        ml_name = ml_pick["name"]  # Oracle format for matching
+        ml_short_name = ml_pick["short_name"]  # Short format for display
+        ml_pred_tflops = ml_pick["pred_tflops"]
 
         if mode == "hardware":
             # Get oracle best
             oracle_list = oracle_results.get(idx, [])
-            oracle_best_name, oracle_best_tflops = oracle_list[0] if oracle_list else ('N/A', 0.0)
-            oracle_short = oracle_best_name.replace('grouped_conv_bwd_data_bf16_2d_', '') if oracle_best_name != 'N/A' else 'N/A'
+            oracle_best_name, oracle_best_tflops = (
+                oracle_list[0] if oracle_list else ("N/A", 0.0)
+            )
+            oracle_short = (
+                oracle_best_name.replace("grouped_conv_bwd_data_bf16_2d_", "")
+                if oracle_best_name != "N/A"
+                else "N/A"
+            )
 
             # Run ML pick on hardware
             hw_result = run_ml_kernel_on_hw(idx, problem, ml_short_name, variant)
 
-            if hw_result['status'] == 'SUCCESS':
-                ml_hw_tflops = hw_result['tflops']
-                efficiency = 100.0 * ml_hw_tflops / oracle_best_tflops if oracle_best_tflops > 0 else 0.0
+            if hw_result["status"] == "SUCCESS":
+                ml_hw_tflops = hw_result["tflops"]
+                efficiency = (
+                    100.0 * ml_hw_tflops / oracle_best_tflops
+                    if oracle_best_tflops > 0
+                    else 0.0
+                )
                 efficiencies.append(efficiency)
-                print(f"  {prob_str:<40} {oracle_short:<20} {oracle_best_tflops:>10.2f} {ml_short_name:<20} {ml_pred_tflops:>10.2f} {ml_hw_tflops:>10.2f} {efficiency:>10.1f}%")
+                print(
+                    f"  {prob_str:<40} {oracle_short:<20} {oracle_best_tflops:>10.2f} {ml_short_name:<20} {ml_pred_tflops:>10.2f} {ml_hw_tflops:>10.2f} {efficiency:>10.1f}%"
+                )
             else:
-                print(f"  {prob_str:<40} {oracle_short:<20} {oracle_best_tflops:>10.2f} {ml_short_name:<20} {ml_pred_tflops:>10.2f} {'FAIL':>10} {'N/A':>11}")
+                print(
+                    f"  {prob_str:<40} {oracle_short:<20} {oracle_best_tflops:>10.2f} {ml_short_name:<20} {ml_pred_tflops:>10.2f} {'FAIL':>10} {'N/A':>11}"
+                )
                 print(f"    Error: {hw_result['error']}")
 
         elif mode == "comparison":
@@ -426,7 +507,9 @@ def main():
             oracle_list = oracle_results.get(idx, [])
             if oracle_list:
                 oracle_best_name, oracle_best_tflops = oracle_list[0]
-                oracle_short = oracle_best_name.replace(f'grouped_conv_{variant}_bf16_2d_', '')
+                oracle_short = oracle_best_name.replace(
+                    f"grouped_conv_{variant}_bf16_2d_", ""
+                )
 
                 # Find ML's pick in oracle results (match by full name)
                 ml_oracle_tflops = None
@@ -438,11 +521,17 @@ def main():
                 if ml_oracle_tflops is not None and oracle_best_tflops > 0:
                     efficiency = 100.0 * ml_oracle_tflops / oracle_best_tflops
                     efficiencies.append(efficiency)
-                    print(f"  {prob_str:<45} {ml_short_name:<25} {ml_pred_tflops:>11.2f} {oracle_short:<25} {oracle_best_tflops:>13.2f} {efficiency:>10.1f}%")
+                    print(
+                        f"  {prob_str:<45} {ml_short_name:<25} {ml_pred_tflops:>11.2f} {oracle_short:<25} {oracle_best_tflops:>13.2f} {efficiency:>10.1f}%"
+                    )
                 else:
-                    print(f"  {prob_str:<45} {ml_short_name:<25} {ml_pred_tflops:>11.2f} {oracle_short:<25} {oracle_best_tflops:>13.2f} {'N/A':>11}")
+                    print(
+                        f"  {prob_str:<45} {ml_short_name:<25} {ml_pred_tflops:>11.2f} {oracle_short:<25} {oracle_best_tflops:>13.2f} {'N/A':>11}"
+                    )
             else:
-                print(f"  {prob_str:<45} {ml_short_name:<25} {ml_pred_tflops:>11.2f} {'N/A':<25} {'N/A':>13} {'N/A':>11}")
+                print(
+                    f"  {prob_str:<45} {ml_short_name:<25} {ml_pred_tflops:>11.2f} {'N/A':<25} {'N/A':>13} {'N/A':>11}"
+                )
         else:
             print(f"  {prob_str:<45} {ml_short_name:<25} {ml_pred_tflops:>11.2f}")
 
@@ -454,25 +543,32 @@ def main():
         print("  EFFICIENCY METRICS:")
         print(f"  {'Metric':<30} {'Value':>15}")
         print("  " + "-" * 47)
-        print(f"  {'Mean Efficiency':<30} {sum(efficiencies)/len(efficiencies):>14.1f}%")
-        print(f"  {'P10 Efficiency':<30} {sorted(efficiencies)[len(efficiencies)//10]:>14.1f}%")
-        print(f"  {'P50 Efficiency (Median)':<30} {sorted(efficiencies)[len(efficiencies)//2]:>14.1f}%")
+        print(
+            f"  {'Mean Efficiency':<30} {sum(efficiencies) / len(efficiencies):>14.1f}%"
+        )
+        print(
+            f"  {'P10 Efficiency':<30} {sorted(efficiencies)[len(efficiencies) // 10]:>14.1f}%"
+        )
+        print(
+            f"  {'P50 Efficiency (Median)':<30} {sorted(efficiencies)[len(efficiencies) // 2]:>14.1f}%"
+        )
         print(f"  {'Min Efficiency':<30} {min(efficiencies):>14.1f}%")
         print(f"  {'Max Efficiency':<30} {max(efficiencies):>14.1f}%")
         print()
 
         # Top-1 accuracy (how often ML picks the oracle best)
         top1_count = sum(1 for eff in efficiencies if eff >= 99.9)
-        print(f"  {'Top-1 Accuracy':<30} {100*top1_count/len(efficiencies):>14.1f}% ({top1_count}/{len(efficiencies)})")
+        print(
+            f"  {'Top-1 Accuracy':<30} {100 * top1_count / len(efficiencies):>14.1f}% ({top1_count}/{len(efficiencies)})"
+        )
         print()
     elif mode == "prediction_only":
         # Show statistics on predictions
-        all_pred_tflops = [p['pred_tflops'] for p in predictions]
         print("  ML PREDICTION STATISTICS (Oracle not yet available):")
         print(f"  {'Metric':<30} {'Value':>15}")
         print("  " + "-" * 47)
 
-        avg_tflops = sum(predictions[0]['pred_tflops'] for _ in validation_problems) / len(validation_problems)
+        avg_tflops = sum(p["pred_tflops"] for p in predictions) / len(predictions)
         print(f"  {'Avg Predicted TFLOPS':<30} {avg_tflops:>15.2f}")
         print()
         print("  Run oracle benchmark to enable efficiency comparison:")

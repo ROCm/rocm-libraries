@@ -70,7 +70,7 @@ def main():
         all_configs.extend(expand_sweep(cfg_path, args.arch))
 
     if args.max_kernels > 0:
-        all_configs = all_configs[:args.max_kernels]
+        all_configs = all_configs[: args.max_kernels]
 
     print(f"  Expanded configs: {len(all_configs)}")
     print(f"  Build workers: {args.workers}")
@@ -85,7 +85,9 @@ def main():
     built_kernels = [
         (cfg, lib) for cfg, lib in zip(all_configs, lib_paths) if lib is not None
     ]
-    print(f"\n  Built {len(built_kernels)}/{len(all_configs)} kernels in {build_time:.0f}s")
+    print(
+        f"\n  Built {len(built_kernels)}/{len(all_configs)} kernels in {build_time:.0f}s"
+    )
 
     if not built_kernels:
         print("  ERROR: No kernels built successfully")
@@ -101,20 +103,30 @@ def main():
     sys.path.insert(0, str(_THIS_DIR / "problems"))
     # Load problem sets for training and validation
     if args.problems == "bwd_data_synthetic_extended":
-        from bwd_data_synthetic_extended import TRAINING_PROBLEMS_BWD_DATA_SYNTHETIC as problems
+        from bwd_data_synthetic_extended import (
+            TRAINING_PROBLEMS_BWD_DATA_SYNTHETIC as problems,
+        )
     elif args.problems == "bwd_data_test_validation":
         from bwd_data_test_validation import VALIDATION_PROBLEMS_BWD_DATA as problems
     elif args.problems == "bwd_weight_synthetic_extended":
-        from bwd_weight_synthetic_extended import TRAINING_PROBLEMS_BWD_WEIGHT_SYNTHETIC as problems
+        from bwd_weight_synthetic_extended import (
+            TRAINING_PROBLEMS_BWD_WEIGHT_SYNTHETIC as problems,
+        )
     elif args.problems == "bwd_weight_test_validation":
-        from bwd_weight_test_validation import VALIDATION_PROBLEMS_BWD_WEIGHT as problems
+        from bwd_weight_test_validation import (
+            VALIDATION_PROBLEMS_BWD_WEIGHT as problems,
+        )
     elif args.problems == "forward_training":
         from forward_training import TRAINING_PROBLEMS_FORWARD as problems
     else:
-        raise ValueError(f"Unknown problem set: {args.problems}. Available: forward_training, bwd_data_synthetic_extended, bwd_data_test_validation, bwd_weight_synthetic_extended, bwd_weight_test_validation")
+        raise ValueError(
+            f"Unknown problem set: {args.problems}. Available: forward_training, bwd_data_synthetic_extended, bwd_data_test_validation, bwd_weight_synthetic_extended, bwd_weight_test_validation"
+        )
 
     print(f"  Problems: {len(problems)}")
-    print(f"  Total measurements: {len(built_kernels)} x {len(problems)} = {len(built_kernels) * len(problems)}")
+    print(
+        f"  Total measurements: {len(built_kernels)} x {len(problems)} = {len(built_kernels) * len(problems)}"
+    )
 
     # ========================================================================
     # Phase 3: Benchmark via subprocess (serial GPU, batched subprocess)
@@ -155,17 +167,18 @@ def main():
     worker_path = _THIS_DIR / "run_one_grouped_conv_kernel.py"
     worker_env = os.environ.copy()
     # Worker needs both dispatcher/python (for dispatcher_common) and current dir (for grouped_conv_utils)
-    worker_env["GCONV_PYPATH"] = os.pathsep.join([
-        str(_DISPATCHER_ROOT / "python"),
-        str(_THIS_DIR)
-    ])
+    worker_env["GCONV_PYPATH"] = os.pathsep.join(
+        [str(_DISPATCHER_ROOT / "python"), str(_THIS_DIR)]
+    )
 
     total_measurements = 0
     total_failures = 0
     bench_t0 = time.perf_counter()
 
     for prob_idx, prob in enumerate(problems):
-        print(f"\nProblem [{prob_idx + 1}/{len(problems)}]: N={prob.N} C={prob.C} K={prob.K} H={prob.Hi} W={prob.Wi}")
+        print(
+            f"\nProblem [{prob_idx + 1}/{len(problems)}]: N={prob.N} C={prob.C} K={prob.K} H={prob.Hi} W={prob.Wi}"
+        )
         print(f"  {'Kernel':<60} {'Time(ms)':>10} {'TFLOPS':>10} {'Status':>10}")
         print(f"  {'-' * 95}")
 
@@ -183,8 +196,8 @@ def main():
             "stride_w": prob.stride_w,
             "pad_h": prob.pad_h,
             "pad_w": prob.pad_w,
-            "dilation_h": getattr(prob, 'dilation_h', 1),
-            "dilation_w": getattr(prob, 'dilation_w', 1),
+            "dilation_h": getattr(prob, "dilation_h", 1),
+            "dilation_w": getattr(prob, "dilation_w", 1),
             "direction": prob.direction,
         }
 
@@ -196,11 +209,15 @@ def main():
             # Build JSON payload for this batch
             items = []
             for cfg, lib_path in batch:
-                items.append({
-                    "so_path": str(lib_path),  # CRITICAL: Only pass string path, not loaded library
-                    "problem": prob_dict,
-                    "kernel_name": cfg.name,
-                })
+                items.append(
+                    {
+                        "so_path": str(
+                            lib_path
+                        ),  # CRITICAL: Only pass string path, not loaded library
+                        "problem": prob_dict,
+                        "kernel_name": cfg.name,
+                    }
+                )
 
             payload = json.dumps({"items": items})
 
@@ -239,25 +256,27 @@ def main():
                                 f"  {cfg.name:<60} {result['ms']:>10.3f} {result['tflops']:>10.2f} {status:>10}"
                             )
 
-                            writer.writerow({
-                                "kernel": cfg.name,
-                                "problem_idx": prob_idx,
-                                "N": prob.N,
-                                "C": prob.C,
-                                "K": prob.K,
-                                "G": prob.G,
-                                "Hi": prob.Hi,
-                                "Wi": prob.Wi,
-                                "Y": prob.Y,
-                                "X": prob.X,
-                                "stride_h": prob.stride_h,
-                                "stride_w": prob.stride_w,
-                                "pad_h": prob.pad_h,
-                                "pad_w": prob.pad_w,
-                                "latency_ms": result["ms"],
-                                "tflops": result["tflops"],
-                                "non_zero": result.get("non_zero", 0),
-                            })
+                            writer.writerow(
+                                {
+                                    "kernel": cfg.name,
+                                    "problem_idx": prob_idx,
+                                    "N": prob.N,
+                                    "C": prob.C,
+                                    "K": prob.K,
+                                    "G": prob.G,
+                                    "Hi": prob.Hi,
+                                    "Wi": prob.Wi,
+                                    "Y": prob.Y,
+                                    "X": prob.X,
+                                    "stride_h": prob.stride_h,
+                                    "stride_w": prob.stride_w,
+                                    "pad_h": prob.pad_h,
+                                    "pad_w": prob.pad_w,
+                                    "latency_ms": result["ms"],
+                                    "tflops": result["tflops"],
+                                    "non_zero": result.get("non_zero", 0),
+                                }
+                            )
                             csv_file.flush()
                             total_measurements += 1
                         else:

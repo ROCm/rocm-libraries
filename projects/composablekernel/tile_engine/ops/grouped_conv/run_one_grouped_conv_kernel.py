@@ -36,21 +36,21 @@ def _run_one(idx, so_path, prob_dict, kernel_name):
     try:
         # Create problem from dict (include dilation if present)
         problem = GroupedConvProblem(
-            N=prob_dict['N'],
-            C=prob_dict['C'],
-            K=prob_dict['K'],
-            G=prob_dict['G'],
-            Hi=prob_dict['Hi'],
-            Wi=prob_dict['Wi'],
-            Y=prob_dict['Y'],
-            X=prob_dict['X'],
-            stride_h=prob_dict['stride_h'],
-            stride_w=prob_dict['stride_w'],
-            pad_h=prob_dict['pad_h'],
-            pad_w=prob_dict['pad_w'],
-            dilation_h=prob_dict.get('dilation_h', 1),
-            dilation_w=prob_dict.get('dilation_w', 1),
-            direction=prob_dict['direction']
+            N=prob_dict["N"],
+            C=prob_dict["C"],
+            K=prob_dict["K"],
+            G=prob_dict["G"],
+            Hi=prob_dict["Hi"],
+            Wi=prob_dict["Wi"],
+            Y=prob_dict["Y"],
+            X=prob_dict["X"],
+            stride_h=prob_dict["stride_h"],
+            stride_w=prob_dict["stride_w"],
+            pad_h=prob_dict["pad_h"],
+            pad_w=prob_dict["pad_w"],
+            dilation_h=prob_dict.get("dilation_h", 1),
+            dilation_w=prob_dict.get("dilation_w", 1),
+            direction=prob_dict["direction"],
         )
 
         # Generate input/weight data based on direction using shape helpers
@@ -80,38 +80,41 @@ def _run_one(idx, so_path, prob_dict, kernel_name):
         result = runner.run(input_data, weight_data, problem)
 
         if result.success:
-            non_zero = int(np.count_nonzero(result.output)) if result.output is not None else 0
+            non_zero = (
+                int(np.count_nonzero(result.output)) if result.output is not None else 0
+            )
             print(
-                json.dumps({
-                    "idx": idx,
-                    "ok": True,
-                    "ms": result.time_ms,
-                    "tflops": result.tflops,
-                    "non_zero": non_zero,
-                    "kernel": kernel_name
-                }),
-                flush=True
+                json.dumps(
+                    {
+                        "idx": idx,
+                        "ok": True,
+                        "ms": result.time_ms,
+                        "tflops": result.tflops,
+                        "non_zero": non_zero,
+                        "kernel": kernel_name,
+                    }
+                ),
+                flush=True,
             )
         else:
             print(
-                json.dumps({
-                    "idx": idx,
-                    "ok": False,
-                    "error": result.error,
-                    "kernel": kernel_name
-                }),
-                flush=True
+                json.dumps(
+                    {
+                        "idx": idx,
+                        "ok": False,
+                        "error": result.error,
+                        "kernel": kernel_name,
+                    }
+                ),
+                flush=True,
             )
 
     except Exception as e:
         print(
-            json.dumps({
-                "idx": idx,
-                "ok": False,
-                "error": str(e),
-                "kernel": kernel_name
-            }),
-            flush=True
+            json.dumps(
+                {"idx": idx, "ok": False, "error": str(e), "kernel": kernel_name}
+            ),
+            flush=True,
         )
 
 
@@ -120,13 +123,18 @@ def main():
     try:
         d = json.loads(sys.stdin.buffer.read())
     except Exception as e:
-        print(json.dumps({"idx": 0, "ok": False, "error": f"JSON parse error: {e}"}), flush=True)
+        print(
+            json.dumps({"idx": 0, "ok": False, "error": f"JSON parse error: {e}"}),
+            flush=True,
+        )
         sys.exit(1)
 
     if "items" in d:
         # Batch mode: run multiple kernels in this one subprocess
         for i, item in enumerate(d["items"]):
-            _run_one(i, item["so_path"], item["problem"], item.get("kernel_name", "unknown"))
+            _run_one(
+                i, item["so_path"], item["problem"], item.get("kernel_name", "unknown")
+            )
     else:
         # Single mode
         _run_one(0, d["so_path"], d["problem"], d.get("kernel_name", "unknown"))

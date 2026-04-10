@@ -22,13 +22,20 @@ cmd = [
     sys.executable,
     str(_THIS_DIR / "grouped_conv_full_benchmark.py"),
     str(_THIS_DIR / "configs/forward_bf16.json"),
-    "--arch", "gfx950",
-    "--problems", "forward_training",  # Use existing problem set
-    "--csv", str(_THIS_DIR / "test_batch_results.csv"),
-    "--workers", "4",
-    "--batch-size", "2",
-    "--kernel-timeout", "10",
-    "--max-kernels", "2",  # Limit to first 2 kernels
+    "--arch",
+    "gfx950",
+    "--problems",
+    "forward_training",  # Use existing problem set
+    "--csv",
+    str(_THIS_DIR / "test_batch_results.csv"),
+    "--workers",
+    "4",
+    "--batch-size",
+    "2",
+    "--kernel-timeout",
+    "10",
+    "--max-kernels",
+    "2",  # Limit to first 2 kernels
 ]
 
 print(f"Command: {' '.join(cmd)}")
