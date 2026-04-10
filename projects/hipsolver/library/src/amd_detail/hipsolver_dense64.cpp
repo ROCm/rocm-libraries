@@ -1005,6 +1005,18 @@ try
     if(!params)
         return HIPSOLVER_STATUS_INVALID_VALUE;
 
+    // Validate datatype combination before workspace setup
+    if(!((dataTypeA == HIP_R_32F && dataTypeW == HIP_R_32F && computeType == HIP_R_32F)
+         || (dataTypeA == HIP_R_64F && dataTypeW == HIP_R_64F && computeType == HIP_R_64F)
+         || (dataTypeA == HIP_C_32F && dataTypeW == HIP_R_32F && computeType == HIP_C_32F)
+         || (dataTypeA == HIP_C_64F && dataTypeW == HIP_R_64F && computeType == HIP_C_64F)))
+        return HIPSOLVER_STATUS_INVALID_ENUM;
+
+    // TODO: Update to call 64-bit rocsolver_*syevd_64 / rocsolver_*heevd_64 once available in rocSOLVER.
+    // Currently rocSOLVER only has 32-bit versions, so we cast int64_t to rocblas_int.
+    if(n > std::numeric_limits<rocblas_int>::max() || lda > std::numeric_limits<rocblas_int>::max())
+        return HIPSOLVER_STATUS_NOT_SUPPORTED;
+
     // Determine the real type size for E array allocation
     size_t realTypeSize
         = (dataTypeA == HIP_R_32F || dataTypeA == HIP_C_32F) ? sizeof(float) : sizeof(double);
