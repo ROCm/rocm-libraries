@@ -35,6 +35,7 @@ import os
 # ---------------------------------------------------------------------------
 _METADATA_NAME_TO_SEMANTIC = {
     "Gemm info":              "GemmInfo",
+    "kernel info":            "InternalArgs",
     "kernel info0":           "InternalArgs",
     "kernel info1":           "InternalArgs1",
     "numWG":                  "NumWorkGroups",
@@ -155,7 +156,8 @@ def _metadataArgToCustomArg(metaArg):
         return {"type": argType, "semantic": _METADATA_NAME_TO_SEMANTIC[name]}
 
     if name in _ACTIVATION_ARG_INDEX:
-        entry = {"type": argType, "semantic": "ActivationArg"}
+        actType = "float64" if size > 4 else "float32"
+        entry = {"type": actType, "semantic": "ActivationArg"}
         idx = _ACTIVATION_ARG_INDEX[name]
         if idx:
             entry["index"] = idx

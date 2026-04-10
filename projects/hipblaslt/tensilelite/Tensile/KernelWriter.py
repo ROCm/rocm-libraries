@@ -8740,7 +8740,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     # -- Activation args -------------------------------------------------------
     if ((kernel["ProblemType"]["ActivationType"] != 'none') and kernel["ActivationFused"]):
-      actArgType = "float64" if self.states.numActivationArgSize > 1 else "uint32"
+      actArgType = "float64" if self.states.numActivationArgSize > 1 else "float32"
       for idx in range(len(kernel["ProblemType"]["ActivationType"].getAdditionalArgStringList())):
         _reg(actArgType, "ActivationArg", idx)
       if kernel["ProblemType"]["ActivationType"] in ['all', 'hipblaslt_all']:

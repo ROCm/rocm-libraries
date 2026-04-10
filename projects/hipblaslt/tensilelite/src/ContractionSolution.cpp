@@ -1649,20 +1649,9 @@ namespace TensileLite
         AMDGPU const* pAMDGPU = dynamic_cast<AMDGPU const*>(&hardware);
         assert(pAMDGPU);
 
-        rv.workGroupSize.x = customKernel.threads.x;
-        rv.workGroupSize.y = customKernel.threads.y;
-        rv.workGroupSize.z = customKernel.threads.z;
-
-        if(T_Debug)
-        {
-            std::cout << "Wavefront size: " << pAMDGPU->wavefrontSize << std::endl;
-            std::cout << "Threads: " << customKernel.threads.x << ", " << customKernel.threads.y << ", " << customKernel.threads.z << std::endl;
-            std::cout << "Work group size: " << rv.workGroupSize.x << ", " << rv.workGroupSize.y << ", " << rv.workGroupSize.z << std::endl;
-            std::cout << "Macrotile: " << customKernel.macrotile.x << ", " << customKernel.macrotile.y << ", " << customKernel.macrotile.z << std::endl;
-        }
-
-        dim3 tiles;
-        calculateTiles(tiles, problem);
+        if(customKernel.threads.x == 0 || customKernel.macrotile.x == 0)
+            throw std::runtime_error(
+                concatenate("Solution ", kernelName, " has uninitialized customKernel metadata"));
 
         uint32_t autoGsuVal = calculateAutoGSU(problem, &hardware);
         uint32_t gsu = problem.getParams().gsu() > 0 ? problem.getParams().gsu() : autoGsuVal;
@@ -1716,6 +1705,21 @@ namespace TensileLite
                 }
             }
         }
+
+        rv.workGroupSize.x = customKernel.threads.x;
+        rv.workGroupSize.y = customKernel.threads.y;
+        rv.workGroupSize.z = customKernel.threads.z;
+
+        if(T_Debug)
+        {
+            std::cout << "Wavefront size: " << pAMDGPU->wavefrontSize << std::endl;
+            std::cout << "Threads: " << customKernel.threads.x << ", " << customKernel.threads.y << ", " << customKernel.threads.z << std::endl;
+            std::cout << "Work group size: " << rv.workGroupSize.x << ", " << rv.workGroupSize.y << ", " << rv.workGroupSize.z << std::endl;
+            std::cout << "Macrotile: " << customKernel.macrotile.x << ", " << customKernel.macrotile.y << ", " << customKernel.macrotile.z << std::endl;
+        }
+
+        dim3 tiles;
+        calculateTiles(tiles, problem);
 
         if(T_Debug)
         {
@@ -2044,7 +2048,12 @@ namespace TensileLite
                     rv.args.template append<void const*>("AddressScaleAlphaVec", inputs.scaleAlphaVec);
                     break;
                 case CustomArgSemantic::AddressBias:
-                    rv.args.template append<void const*>("AddressBias", inputs.bias);
+                    if(problemType.useGradient
+                       && problem.biasSrc() == ContractionProblemGemm::TENSOR::D
+                       && inputs.bias != nullptr)
+                        rv.args.template append<void const*>("AddressBias", inputs.ws);
+                    else
+                        rv.args.template append<void const*>("AddressBias", inputs.bias);
                     break;
                 case CustomArgSemantic::AddressAmaxOut:
                     rv.args.template append<void const*>("AddressAmaxOut", inputs.amaxD);
