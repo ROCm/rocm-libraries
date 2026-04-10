@@ -18,6 +18,7 @@ namespace rocRoller
 
         namespace LDSSwizzleDetail
         {
+            /// Parameters for LDS bank swizzle column permutation.
             struct LDSSwizzleParams
             {
                 unsigned int numColumns; ///< dwordx4 chunks per tile row in K
@@ -37,19 +38,19 @@ namespace rocRoller
 
             /// Insert forward PairSwap + Rotate edges for LoadTiled swizzle.
             /// Returns the swizzled column coordinate tag.
-            int addGRSwizzleEdges(KernelGraph&            graph,
-                                  int                     colCoord,
-                                  int                     rowCoord,
-                                  int                     kDim,
-                                  LDSSwizzleParams const& params);
+            int addLoadTiledSwizzleEdges(KernelGraph&            graph,
+                                         int                     colCoord,
+                                         int                     rowCoord,
+                                         int                     kDim,
+                                         LDSSwizzleParams const& params);
 
             /// Insert inverse Rotate + PairSwap edges for LoadLDSTile unswizzle.
             /// Returns the unswizzled element-level column coordinate tag.
-            int addLRSwizzleEdges(KernelGraph&            graph,
-                                  int                     colCoord,
-                                  int                     rowCoord,
-                                  int                     kDim,
-                                  LDSSwizzleParams const& params);
+            int addLoadLDSTileSwizzleEdges(KernelGraph&            graph,
+                                           int                     colCoord,
+                                           int                     rowCoord,
+                                           int                     kDim,
+                                           LDSSwizzleParams const& params);
         }
     }
 }

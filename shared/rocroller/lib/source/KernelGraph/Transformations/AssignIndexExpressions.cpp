@@ -1348,22 +1348,6 @@ namespace rocRoller::KernelGraph
             });
         }
 
-        /**
-         * @brief Detect if a candidate's index path contains a non-affine
-         * transform (e.g. LDS bank swizzle edge) and extract
-         * the unroll coordinate and its value from the upstream SetCoordinate.
-         *
-         * When found, the unroll coordinate's value must be incorporated
-         * into the base address (not as a stride) so that the non-affine
-         * transform receives the correct input.
-         *
-         * Returns (unrollCoord, unrollValue) or (-1, -1) if not applicable.
-         */
-        std::pair<int, int> getInlineUnrollInfo(KernelGraph const& kgraph, int candidate) const
-        {
-            return GetInlineUnrollInfo(kgraph, candidate);
-        }
-
         void stage(KernelGraph const& kgraph, int candidate, bool isStorePartOfGlobalToLDSOp)
         {
             auto node = kgraph.control.getNode<Operation>(candidate);
@@ -1385,7 +1369,7 @@ namespace rocRoller::KernelGraph
             // Check if an unroll coordinate must be incorporated into the base address
             auto [inlineUnrollCoord, inlineUnrollValue]
                 = isStorePartOfGlobalToLDSOp ? std::pair{-1, -1}
-                                             : getInlineUnrollInfo(kgraph, candidate);
+                                             : GetInlineUnrollInfo(kgraph, candidate);
 
             // Gather loop context information
             auto maybeForLoop  = findContainingOperation<ForLoopOp>(candidate, kgraph);

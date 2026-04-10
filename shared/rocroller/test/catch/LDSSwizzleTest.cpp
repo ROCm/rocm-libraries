@@ -48,7 +48,7 @@ TEST_CASE("LDS swizzle round-trip: forward then inverse recovers original column
                 MacroTileIndex(0, literal(cfg.numCols), literal(1u)));
             auto grRow = grGraph.coordinates.addElement(
                 MacroTileIndex(1, literal(totalRows), literal(1u)));
-            auto grSwizzled = addGRSwizzleEdges(grGraph, grCol, grRow, 0, params);
+            auto grSwizzled = addLoadTiledSwizzleEdges(grGraph, grCol, grRow, 0, params);
 
             // Build a coordinate graph with LoadLDSTile unswizzle edges
             rocRoller::KernelGraph::KernelGraph lrGraph;
@@ -56,7 +56,7 @@ TEST_CASE("LDS swizzle round-trip: forward then inverse recovers original column
                 MacroTileIndex(0, literal(totalElems), literal(1u)));
             auto lrRow = lrGraph.coordinates.addElement(
                 MacroTileIndex(1, literal(totalRows), literal(1u)));
-            auto lrUnswizzled = addLRSwizzleEdges(lrGraph, lrCol, lrRow, 0, params);
+            auto lrUnswizzled = addLoadLDSTileSwizzleEdges(lrGraph, lrCol, lrRow, 0, params);
 
             for(unsigned int row = 0; row < totalRows; ++row)
             {

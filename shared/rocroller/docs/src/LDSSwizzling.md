@@ -22,7 +22,7 @@ In the code (`LDSSwizzleParams` struct in `LowerTile.cpp`):
 numColumns      = tileK / (128 / elementBits)     -- dwordx4 chunks per tile row
 rowsPerBankRow  = columnsPerBankRow / numColumns   -- tile rows per bank row
 elementsPerChunk = 128 / elementBits               -- elements per dwordx4 chunk
-columnsPerBankRow = 16                             -- GFX950 constant
+columnsPerBankRow = numBanks / 4              -- arch-dependent (16 for GFX950, 8 for 32-bank)
 ```
 
 Per-lane terms:
