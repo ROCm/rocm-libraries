@@ -127,6 +127,28 @@ namespace TensileLite
                     m_storage = loadToFloat<TensileLite::BFloat16>(ptr, N);
                     m_ptr     = m_storage.data();
                 }
+#ifdef TENSILE_USE_FP8_BF8
+                else if(type == rocisa::DataType::Float8)
+                {
+                    m_storage = loadToFloat<TensileLite::Float8>(ptr, N);
+                    m_ptr     = m_storage.data();
+                }
+                else if(type == rocisa::DataType::BFloat8)
+                {
+                    m_storage = loadToFloat<TensileLite::BFloat8>(ptr, N);
+                    m_ptr     = m_storage.data();
+                }
+                else if(type == rocisa::DataType::Float8_fnuz)
+                {
+                    m_storage = loadToFloat<TensileLite::Float8_fnuz>(ptr, N);
+                    m_ptr     = m_storage.data();
+                }
+                else if(type == rocisa::DataType::BFloat8_fnuz)
+                {
+                    m_storage = loadToFloat<TensileLite::BFloat8_fnuz>(ptr, N);
+                    m_ptr     = m_storage.data();
+                }
+#endif
                 else
                 {
                     throw std::runtime_error("Unsupported type for ShadowBuffer");
@@ -1021,14 +1043,28 @@ namespace TensileLite
                 return rejectFast("XFloat32");
             }
 
-            auto isSupportedType = [](rocisa::DataType t) {
+            auto isSupportedOutputType = [](rocisa::DataType t) {
                 return t == rocisa::DataType::Float || t == rocisa::DataType::Half
                        || t == rocisa::DataType::BFloat16;
             };
 
-            if(!isSupportedType(problem.a().dataType()) || !isSupportedType(problem.b().dataType())
-               || !isSupportedType(problem.c().dataType())
-               || !isSupportedType(problem.d().dataType()))
+            auto isSupportedInputType = [&](rocisa::DataType t) {
+                if(isSupportedOutputType(t))
+                    return true;
+#ifdef TENSILE_USE_FP8_BF8
+                if(t == rocisa::DataType::Float8
+                   || t == rocisa::DataType::BFloat8
+                   || t == rocisa::DataType::Float8_fnuz
+                   || t == rocisa::DataType::BFloat8_fnuz)
+                    return true;
+#endif
+                return false;
+            };
+
+            if(!isSupportedInputType(problem.a().dataType())
+               || !isSupportedInputType(problem.b().dataType())
+               || !isSupportedOutputType(problem.c().dataType())
+               || !isSupportedOutputType(problem.d().dataType()))
             {
                 std::string detail = "unsupported_type"
                     " A=" + TensileLite::ToString(problem.a().dataType())
