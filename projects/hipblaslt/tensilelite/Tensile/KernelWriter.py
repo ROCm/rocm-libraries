@@ -8778,6 +8778,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       "macrotile": [kernel["MacroTile0"], kernel["MacroTile1"], kernel["DepthU"]],
       "threads": [kernel["NumThreads"], 1, 1],
       "grid": [gridX, "One", "One"],
+      "generated": True,
     }
 
     self.stringIdx = 0

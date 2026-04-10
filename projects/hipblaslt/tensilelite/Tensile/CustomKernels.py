@@ -84,6 +84,8 @@ _ACTIVATION_ARG_INDEX = {
 
 def isCustomKernelConfig(config):
     if "CustomKernel" in config and config["CustomKernel"]["name"]:
+        if config["CustomKernel"].get("generated", False):
+            return False
         return True
     return bool(config.get("CustomKernelName", ""))
 
@@ -189,15 +191,34 @@ def _metadataArgToCustomArg(metaArg):
 
     raise RuntimeError("Unknown metadata arg name: '%s'" % name)
 
+_HEADER_SEMANTIC_ORDER = {
+    "GemmInfo": 0, "InternalArgs": 1, "InternalArgs1": 2, "NumWorkGroups": 3,
+}
+
 def _buildCustomKernelFromMetadata(kernelName, fullYaml, kernelConfig):
     """Build a CustomKernel dict from the amdgpu_metadata and custom.config sections."""
     kernelMeta = fullYaml["amdhsa.kernels"][0]
 
     args = [_metadataArgToCustomArg(a) for a in kernelMeta[".args"]]
 
+    # UseUniversalArgs kernels expect a header (GemmInfo, InternalArgs, ...) at
+    # the start of the kernel argument buffer, followed by the data args.  The
+    # .amdgpu_metadata declares them at interior offsets, so reorder here to
+    # match the actual runtime layout the assembly prologue depends on.
+    isp = kernelConfig.get("InternalSupportParams", {})
+    if isp.get("UseUniversalArgs", True):
+        headerArgs = [a for a in args if a["semantic"] in _HEADER_SEMANTIC_ORDER]
+        dataArgs   = [a for a in args if a["semantic"] not in _HEADER_SEMANTIC_ORDER]
+        headerArgs.sort(key=lambda a: _HEADER_SEMANTIC_ORDER[a["semantic"]])
+        args = headerArgs + dataArgs
+
     mi = kernelConfig.get("MatrixInstruction", kernelConfig.get("MIBlock", [0,0,0,0]))
-    wt = kernelConfig.get("MIWaveTile", [1, 1])
-    wg = kernelConfig.get("MIWaveGroup", [1, 1])
+    if len(mi) >= 9 and "MIWaveTile" not in kernelConfig:
+        wt = [mi[5], mi[6]]
+        wg = [mi[7], mi[8]]
+    else:
+        wt = kernelConfig.get("MIWaveTile", [1, 1])
+        wg = kernelConfig.get("MIWaveGroup", [1, 1])
     depthU = kernelConfig.get("DepthU", 0)
     macrotile = [mi[0] * wt[0] * wg[0], mi[1] * wt[1] * wg[1], depthU]
 
@@ -210,18 +231,26 @@ def _buildCustomKernelFromMetadata(kernelName, fullYaml, kernelConfig):
     threads = [kernelMeta.get(".max_flat_workgroup_size", 256), 1, 1]
 
     streamK = kernelConfig.get("StreamK", 0)
+    hasNumWGArg = any(a.get("semantic") == "NumWorkGroups" for a in args)
+
     if streamK:
         batched = kernelConfig.get("ProblemType", {}).get("Batched", False)
-        gridX = "StreamKWithBatch" if batched else "StreamKNoBatch"
+        grid = ["StreamKWithBatch" if batched else "StreamKNoBatch", "One", "One"]
+    elif hasNumWGArg:
+        # Version >= 1 kernels receive numWorkGroups as arg and decompose
+        # the flat 1-D work-group index internally.
+        grid = ["TilesXYBatchGSU", "One", "One"]
     else:
-        gridX = "TilesXYBatchGSU"
+        # Version 0 kernels rely on hardware gridDim for tile decomposition,
+        # so the grid must be multi-dimensional.
+        grid = ["TilesX", "TilesY", "Batch"]
 
     return {
         "name": kernelName,
         "args": args,
         "macrotile": macrotile,
         "threads": threads,
-        "grid": [gridX, "One", "One"],
+        "grid": grid,
     }
 
 def getCustomKernelConfig(
@@ -266,5 +295,6 @@ def getCustomKernelConfig(
         kernelConfig["CustomKernel"] = _buildCustomKernelFromMetadata(kernelName, fullYaml, kernelConfig)
 
     kernelConfig["CustomKernel"]["name"] = kernelName
+    kernelConfig["CustomKernelName"] = kernelName
 
     return kernelConfig

@@ -222,7 +222,8 @@ def shortenFileBase(splitGSU, kernel):
 
 
 def getKernelFileBase(splitGSU: bool, kernel):
-  if "CustomKernel" in kernel and kernel["CustomKernel"]["name"]:
+  if "CustomKernel" in kernel and kernel["CustomKernel"]["name"] \
+      and not kernel["CustomKernel"].get("generated", False):
     fileBase = kernel["CustomKernel"]["name"]
   elif kernel.get("CustomKernelName", ""):
     fileBase = kernel["CustomKernelName"]
