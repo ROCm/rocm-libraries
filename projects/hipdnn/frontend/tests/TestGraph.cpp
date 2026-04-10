@@ -6156,6 +6156,147 @@ static void createConvDgradGraph(Graph& graph)
     dx->set_output(true).set_uid(3);
 }
 
+// Helper: create a conv fprop + relu fusion graph (2 nodes, linear chain)
+static void createConvReluFusionGraph(Graph& graph)
+{
+    graph.set_name("ConvReluFusionGraph")
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT)
+        .set_io_data_type(DataType::FLOAT);
+
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_uid(1)
+        .set_name("X")
+        .set_dim({1, 3, 32, 32})
+        .set_stride({3072, 1024, 32, 1})
+        .set_data_type(DataType::FLOAT);
+
+    auto w = std::make_shared<TensorAttributes>();
+    w->set_uid(2)
+        .set_name("W")
+        .set_dim({64, 3, 3, 3})
+        .set_stride({27, 9, 3, 1})
+        .set_data_type(DataType::FLOAT);
+
+    ConvFpropAttributes convAttrs;
+    convAttrs.set_name("ConvFwd");
+    convAttrs.set_pre_padding({1, 1});
+    convAttrs.set_post_padding({1, 1});
+    convAttrs.set_stride({1, 1});
+    convAttrs.set_dilation({1, 1});
+
+    auto convOut = graph.conv_fprop(x, w, convAttrs);
+
+    PointwiseAttributes reluAttrs;
+    reluAttrs.set_name("Relu");
+    reluAttrs.set_mode(PointwiseMode::RELU_FWD);
+
+    auto y = graph.pointwise(convOut, reluAttrs);
+    y->set_output(true).set_uid(3);
+}
+
+// Helper: create a pointwise chain graph (2 nodes: unary RELU -> binary ADD)
+static void createPointwiseChainGraph(Graph& graph)
+{
+    graph.set_name("PointwiseChainGraph")
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT)
+        .set_io_data_type(DataType::FLOAT);
+
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_uid(1)
+        .set_name("X")
+        .set_dim({2, 4, 16, 16})
+        .set_stride({1024, 256, 16, 1})
+        .set_data_type(DataType::FLOAT);
+
+    auto b = std::make_shared<TensorAttributes>();
+    b->set_uid(2)
+        .set_name("B")
+        .set_dim({2, 4, 16, 16})
+        .set_stride({1024, 256, 16, 1})
+        .set_data_type(DataType::FLOAT);
+
+    PointwiseAttributes reluAttrs;
+    reluAttrs.set_name("Relu");
+    reluAttrs.set_mode(PointwiseMode::RELU_FWD);
+
+    auto activated = graph.pointwise(x, reluAttrs);
+
+    PointwiseAttributes addAttrs;
+    addAttrs.set_name("Add");
+    addAttrs.set_mode(PointwiseMode::ADD);
+
+    auto y = graph.pointwise(activated, b, addAttrs);
+    y->set_output(true).set_uid(3);
+}
+
+// Helper: create a diamond graph (4 nodes: BN -> 2x RELU fan-out -> ADD fan-in)
+static void createDiamondGraph(Graph& graph)
+{
+    graph.set_name("DiamondGraph")
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT)
+        .set_io_data_type(DataType::FLOAT);
+
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_uid(1)
+        .set_name("X")
+        .set_dim({1, 2, 8, 8})
+        .set_stride({128, 64, 8, 1})
+        .set_data_type(DataType::FLOAT);
+
+    auto mean = std::make_shared<TensorAttributes>();
+    mean->set_uid(2)
+        .set_name("Mean")
+        .set_data_type(DataType::FLOAT)
+        .set_dim({1, 2, 1, 1})
+        .set_stride({2, 1, 1, 1});
+
+    auto invVariance = std::make_shared<TensorAttributes>();
+    invVariance->set_uid(3)
+        .set_name("InvVariance")
+        .set_data_type(DataType::FLOAT)
+        .set_dim({1, 2, 1, 1})
+        .set_stride({2, 1, 1, 1});
+
+    auto scale = std::make_shared<TensorAttributes>();
+    scale->set_uid(4)
+        .set_name("Scale")
+        .set_data_type(DataType::FLOAT)
+        .set_dim({1, 2, 1, 1})
+        .set_stride({2, 1, 1, 1});
+
+    auto bias = std::make_shared<TensorAttributes>();
+    bias->set_uid(5)
+        .set_name("Bias")
+        .set_data_type(DataType::FLOAT)
+        .set_dim({1, 2, 1, 1})
+        .set_stride({2, 1, 1, 1});
+
+    BatchnormInferenceAttributes bnAttrs;
+    bnAttrs.set_name("BN");
+
+    auto bnOut = graph.batchnorm_inference(x, mean, invVariance, scale, bias, bnAttrs);
+
+    PointwiseAttributes relu1Attrs;
+    relu1Attrs.set_name("Relu1");
+    relu1Attrs.set_mode(PointwiseMode::RELU_FWD);
+    auto branch1 = graph.pointwise(bnOut, relu1Attrs);
+
+    PointwiseAttributes relu2Attrs;
+    relu2Attrs.set_name("Relu2");
+    relu2Attrs.set_mode(PointwiseMode::RELU_FWD);
+    auto branch2 = graph.pointwise(bnOut, relu2Attrs);
+
+    PointwiseAttributes addAttrs;
+    addAttrs.set_name("Add");
+    addAttrs.set_mode(PointwiseMode::ADD);
+
+    auto y = graph.pointwise(branch1, branch2, addAttrs);
+    y->set_output(true).set_uid(6);
+}
+
 // Type to hold a graph builder function and a descriptive name
 struct GraphTopologyParam
 {
@@ -6283,5 +6424,8 @@ INSTANTIATE_TEST_SUITE_P(
                       GraphTopologyParam{"PointwiseRelu", createPointwiseReluGraph},
                       GraphTopologyParam{"ConvFprop", createConvFpropGraph},
                       GraphTopologyParam{"PointwiseAdd", createPointwiseAddGraph},
-                      GraphTopologyParam{"ConvDgrad", createConvDgradGraph}),
+                      GraphTopologyParam{"ConvDgrad", createConvDgradGraph},
+                      GraphTopologyParam{"ConvReluFusion", createConvReluFusionGraph},
+                      GraphTopologyParam{"PointwiseChain", createPointwiseChainGraph},
+                      GraphTopologyParam{"Diamond", createDiamondGraph}),
     [](const ::testing::TestParamInfo<GraphTopologyParam>& info) { return info.param.name; });
