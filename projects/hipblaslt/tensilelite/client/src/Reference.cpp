@@ -1129,21 +1129,12 @@ namespace TensileLite
         bool isFastPathEligible(ContractionProblemGemm const& problem)
         {
 
-            // For more precise numerical correctness with XFloat32, skip this fast path.
-            // If we knew at this point that the data was initialized as whole number floats,
-            // we could continue down this fast path, because there would be no rounding
-            // errors incurred by f32 accumulation. But we do not.
             auto rejectFast = [](const char* reason) {
                 if (false) {  // Re-enable when testing to find reason.
                     std::clog << "FAST_PATH_REJECT: " << reason << std::endl;
                 }
                 return false;
             };
-
-            if(problem.f32XdlMathOp() == rocisa::DataType::XFloat32)
-            {
-                return rejectFast("XFloat32");
-            }
 
             auto isSupportedOutputType = [](rocisa::DataType t) {
                 return t == rocisa::DataType::Float || t == rocisa::DataType::Half
@@ -1338,7 +1329,7 @@ namespace TensileLite
             }
         }
 
-        template <size_t BLOCK_M, size_t BLOCK_N, size_t BLOCK_K>
+        template <size_t BLOCK_M, size_t BLOCK_N, size_t BLOCK_K, typename MathOpAccumT = float>
         TENSILELITE_CPU_REF_FORCE_INLINE void innerFastPathReduction(const float* A,
                                                                      const float* B,
                                                                      float*       C)
@@ -1354,7 +1345,7 @@ namespace TensileLite
                         auto  c_index = m_i * BLOCK_N + n_i;
                         float valB    = B[b_index];
                         float valA    = A[a_index];
-                        C[c_index] += valA * valB;
+                        C[c_index] += float(MathOpAccumT(valA)) * float(MathOpAccumT(valB));
                     }
                 }
             }
@@ -1410,6 +1401,10 @@ namespace TensileLite
         // Solve combinations of f16, bf16, f32 gemm problems using efficient CPU code.
         // This function assumes the problem is eligible for the fast path — callers
         // must check isFastPathEligible() first.
+        // MathOpAccumT: when set to XFloat32, each A/B operand is truncated
+        // to 10-bit mantissa before multiply (simulating TF32 hardware behavior).
+        // Default (float) is a no-op cast with identical codegen.
+        template <typename MathOpAccumT = float>
         void solveCPUFastInF32(ContractionProblemGemm const& problem,
                                ContractionInputs const&      inputs)
         {
@@ -1606,7 +1601,7 @@ namespace TensileLite
                                                                     strideKB);
 
                                 std::array<float, BLOCK_M * BLOCK_N> tilePartial = {0};
-                                innerFastPathReduction<BLOCK_M, BLOCK_N, BLOCK_K>(
+                                innerFastPathReduction<BLOCK_M, BLOCK_N, BLOCK_K, MathOpAccumT>(
                                     aReg.data(), bReg.data(), tilePartial.data());
 
                                 size_t mxsaI
@@ -1653,7 +1648,7 @@ namespace TensileLite
                                                                     sizeK,
                                                                     strideNB,
                                                                     strideKB);
-                                innerFastPathReduction<BLOCK_M, BLOCK_N, BLOCK_K>(
+                                innerFastPathReduction<BLOCK_M, BLOCK_N, BLOCK_K, MathOpAccumT>(
                                     aReg.data(), bReg.data(), cReg.data());
                             }
                         }
@@ -3113,7 +3108,10 @@ namespace TensileLite
             if(tryFastPath && isDenseEnoughForFastPath && isFastPathEligible(problem))
             {
                 ScopedTimer timer("solve_cpu_fast");
-                solveCPUFastInF32(problem, inputs);
+                if(problem.f32XdlMathOp() == rocisa::DataType::XFloat32)
+                    solveCPUFastInF32<XFloat32>(problem, inputs);
+                else
+                    solveCPUFastInF32<float>(problem, inputs);
                 return;
             }
 
