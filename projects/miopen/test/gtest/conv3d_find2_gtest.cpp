@@ -127,7 +127,7 @@ struct TestNameGenerator
 {
     std::string operator()(const auto& info)
     {
-        return GetParamNamesString(info, std::make_index_sequence<24>{});
+        return GetParamNamesString(info, std::make_index_sequence<std::tuple_size_v<TestCase>>{});
     }
 };
 
