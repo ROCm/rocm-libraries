@@ -1514,7 +1514,7 @@ double compute_epilogue_latency(const problem_t& problem,
 
   const size_t num_active_cus          = context.active_cus;
   const size_t splitting_factor        = context.splitting_factor;
-  const size_t d_bytes                 = context.d_bytes;
+  const double d_bytes                 = context.d_bytes;
   const size_t grid_m                  = context.grid_m;
   const size_t grid_n                  = context.grid_n;
   const size_t num_output_tiles        = context.num_output_tiles;
@@ -1525,16 +1525,15 @@ double compute_epilogue_latency(const problem_t& problem,
   const bool is_parallel_reduction     = (reduction_strategy == reduction_t::parallel);
   const auto& heuristic                = context.heuristic;
 
-  // Early return if there is no output dtype
-  if (d_bytes == 0) return 0.0;
+  if (d_bytes == 0.0) return 0.0;
 
   // Common setup
   const size_t total_mfmas =
       math::safe_ceil_div(MT_M, config.mi.m) * math::safe_ceil_div(MT_N, config.mi.n);
   const size_t elements_per_vectorized_store =
-      heuristic.epilogue_bytes_per_vectorized_store / d_bytes;
+      static_cast<size_t>(std::ceil(heuristic.epilogue_bytes_per_vectorized_store / d_bytes));
   const size_t elements_per_cache_line =
-      math::safe_ceil_div(heuristic.epilogue_cache_line_bytes, d_bytes);
+      static_cast<size_t>(std::ceil(heuristic.epilogue_cache_line_bytes / d_bytes));
   const double alignment_penalty = (M % elements_per_cache_line != 0) ? 1.1 : 1.0;
 
   // Per-CU write bandwidth: total write BW shared among all writers
@@ -1573,8 +1572,8 @@ double compute_epilogue_latency(const problem_t& problem,
 
     // 3) Store: per-tile bytes through per-CU bandwidth share
     // Split-K WGs write partials as f32 (4 bytes) to workspace, not d_dtype.
-    size_t store_elem_bytes = (splitting_factor > 1 && !is_parallel_reduction)
-                                  ? heuristic.epilogue_workspace_bytes_per_elem
+    double store_elem_bytes = (splitting_factor > 1 && !is_parallel_reduction)
+                                  ? static_cast<double>(heuristic.epilogue_workspace_bytes_per_elem)
                                   : d_bytes;
     double store_bytes      = static_cast<double>(tile_m) * tile_n * store_elem_bytes;
     double store_scale      = is_scalar_path ? heuristic.epilogue_scalar_store_penalty : 1.0;
@@ -1786,10 +1785,12 @@ double compute_parallel_reduction_latency(const problem_t& problem,
   const size_t output_elements = M * N * batch;
 
   const size_t splitting_factor = context.splitting_factor;
-  const size_t d_bytes          = context.d_bytes;
+  const double d_bytes          = context.d_bytes;
+
+  if (d_bytes == 0.0) return 0.0;
 
   // Each thread processes VW output elements.
-  const size_t VW = std::max(static_cast<size_t>(1), 4 / d_bytes);  // 16 bytes / d_bytes, capped
+  const size_t VW = std::max(static_cast<size_t>(1), static_cast<size_t>(4.0 / d_bytes));
   const size_t total_wgs =
       math::safe_ceil_div(output_elements, heuristic.postgsu_threads_per_wg * VW);
   const size_t active_wgs = std::min(total_wgs, hardware.N_CU);

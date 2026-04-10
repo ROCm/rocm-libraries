@@ -31,10 +31,10 @@ struct context_t {
   /// Heuristic parameters (cached to avoid repeated lookups).
   heuristic_params_t heuristic{};
 
-  /// Element sizes
-  size_t a_bytes = 0;
-  size_t b_bytes = 0;
-  size_t d_bytes = 0;
+  /// Element sizes (fractional for sub-byte types like FP4).
+  double a_bytes = 0.0;
+  double b_bytes = 0.0;
+  double d_bytes = 0.0;
 
   /// Grid dimensions.
   size_t grid_m           = 0;
@@ -56,7 +56,7 @@ struct context_t {
   size_t k_per_split       = 0;
   size_t k_iters           = 0;
   size_t tile_elements     = 0;
-  size_t output_tile_bytes = 0;
+  double output_tile_bytes = 0.0;
 
   /// Workgroup mapping parameters.
   workgroup_mapping_t wgm{0, 8, 1};
