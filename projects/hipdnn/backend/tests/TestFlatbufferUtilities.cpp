@@ -26,8 +26,8 @@ public:
         EXPECT_EQ(graph.compute_data_type, DataType::FLOAT);
         EXPECT_EQ(graph.intermediate_data_type, DataType::HALF);
         EXPECT_EQ(graph.io_data_type, DataType::BFLOAT16);
-        EXPECT_EQ(graph.tensors.size(), 0);
-        EXPECT_EQ(graph.nodes.size(), 0);
+        EXPECT_EQ(graph.tensors.size(), 3);
+        EXPECT_EQ(graph.nodes.size(), 1);
     }
 };
 
