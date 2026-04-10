@@ -29,21 +29,21 @@ constexpr curandStatus_t RAND_STATUS_TYPE_ERROR = CURAND_STATUS_TYPE_ERROR;
 #endif
 
 #ifdef __HIP__
-using rand_ordering_t = rocrand_ordering;
+using rand_ordering_t                                  = rocrand_ordering;
 constexpr rand_ordering_t RAND_ORDERING_PSEUDO_DEFAULT = ROCRAND_ORDERING_PSEUDO_DEFAULT;
-constexpr rand_ordering_t RAND_ORDERING_PSEUDO_LEGACY = ROCRAND_ORDERING_PSEUDO_LEGACY;
-constexpr rand_ordering_t RAND_ORDERING_PSEUDO_BEST = ROCRAND_ORDERING_PSEUDO_BEST;
+constexpr rand_ordering_t RAND_ORDERING_PSEUDO_LEGACY  = ROCRAND_ORDERING_PSEUDO_LEGACY;
+constexpr rand_ordering_t RAND_ORDERING_PSEUDO_BEST    = ROCRAND_ORDERING_PSEUDO_BEST;
 constexpr rand_ordering_t RAND_ORDERING_PSEUDO_DYNAMIC = ROCRAND_ORDERING_PSEUDO_DYNAMIC;
-constexpr rand_ordering_t RAND_ORDERING_PSEUDO_SEEDED = ROCRAND_ORDERING_PSEUDO_SEEDED;
-constexpr rand_ordering_t RAND_ORDERING_QUASI_DEFAULT = ROCRAND_ORDERING_QUASI_DEFAULT;
+constexpr rand_ordering_t RAND_ORDERING_PSEUDO_SEEDED  = ROCRAND_ORDERING_PSEUDO_SEEDED;
+constexpr rand_ordering_t RAND_ORDERING_QUASI_DEFAULT  = ROCRAND_ORDERING_QUASI_DEFAULT;
 #elif defined(__CUDACC__)
-using rand_ordering_t = curandOrdering_t;
+using rand_ordering_t                                  = curandOrdering_t;
 constexpr rand_ordering_t RAND_ORDERING_PSEUDO_DEFAULT = CURAND_ORDERING_PSEUDO_DEFAULT;
-constexpr rand_ordering_t RAND_ORDERING_PSEUDO_LEGACY = CURAND_ORDERING_PSEUDO_LEGACY;
-constexpr rand_ordering_t RAND_ORDERING_PSEUDO_BEST = CURAND_ORDERING_PSEUDO_BEST;
+constexpr rand_ordering_t RAND_ORDERING_PSEUDO_LEGACY  = CURAND_ORDERING_PSEUDO_LEGACY;
+constexpr rand_ordering_t RAND_ORDERING_PSEUDO_BEST    = CURAND_ORDERING_PSEUDO_BEST;
 constexpr rand_ordering_t RAND_ORDERING_PSEUDO_DYNAMIC = CURAND_ORDERING_PSEUDO_DYNAMIC;
-constexpr rand_ordering_t RAND_ORDERING_PSEUDO_SEEDED = CURAND_ORDERING_PSEUDO_SEEDED;
-constexpr rand_ordering_t RAND_ORDERING_QUASI_DEFAULT = CURAND_ORDERING_QUASI_DEFAULT;
+constexpr rand_ordering_t RAND_ORDERING_PSEUDO_SEEDED  = CURAND_ORDERING_PSEUDO_SEEDED;
+constexpr rand_ordering_t RAND_ORDERING_QUASI_DEFAULT  = CURAND_ORDERING_QUASI_DEFAULT;
 #endif
 
 constexpr const char* ordering_name(ordering_t order)
@@ -63,7 +63,12 @@ constexpr const char* ordering_name(ordering_t order)
 template<typename T, distribution Distribution>
 struct host_api_benchmark : public primbench::benchmark_interface
 {
-    host_api_benchmark(rng_type_t engine, ordering_t ordering, size_t dimensions, size_t offset, bool benchmark_host, std::optional<double> poisson_lambda = std::nullopt)
+    host_api_benchmark(rng_type_t            engine,
+                       ordering_t            ordering,
+                       size_t                dimensions,
+                       size_t                offset,
+                       bool                  benchmark_host,
+                       std::optional<double> poisson_lambda = std::nullopt)
         : m_engine(engine)
         , m_ordering(ordering)
         , m_dimensions(dimensions)
@@ -143,9 +148,11 @@ struct host_api_benchmark : public primbench::benchmark_interface
         {
             if constexpr(Distribution == DISTRIBUTION_UNIFORM && std::is_same_v<T, unsigned int>)
                 return rocrand_generate(generator, data, items);
-            else if constexpr(Distribution == DISTRIBUTION_UNIFORM && std::is_same_v<T, unsigned char>)
+            else if constexpr(Distribution == DISTRIBUTION_UNIFORM
+                              && std::is_same_v<T, unsigned char>)
                 return rocrand_generate_char(generator, data, items);
-            else if constexpr(Distribution == DISTRIBUTION_UNIFORM && std::is_same_v<T, unsigned short>)
+            else if constexpr(Distribution == DISTRIBUTION_UNIFORM
+                              && std::is_same_v<T, unsigned short>)
                 return rocrand_generate_short(generator, data, items);
             else if constexpr(Distribution == DISTRIBUTION_UNIFORM && std::is_same_v<T, __half>)
                 return rocrand_generate_uniform_half(generator, data, items);
@@ -183,7 +190,8 @@ struct host_api_benchmark : public primbench::benchmark_interface
         {
             if constexpr(Distribution == DISTRIBUTION_UNIFORM && std::is_same_v<T, unsigned int>)
                 return curandGenerate(generator, data, items);
-            else if constexpr(Distribution == DISTRIBUTION_UNIFORM && std::is_same_v<T, unsigned long long>)
+            else if constexpr(Distribution == DISTRIBUTION_UNIFORM
+                              && std::is_same_v<T, unsigned long long>)
                 return curandGenerateLongLong(generator, data, items);
             else if constexpr(Distribution == DISTRIBUTION_UNIFORM && std::is_same_v<T, float>)
                 return curandGenerateUniform(generator, data, items);
@@ -230,87 +238,89 @@ private:
     std::optional<double> m_poisson_lambda;
 };
 
-#define QUEUE_POISSON(engine, ordering, poisson_lambda)                                            \
+#define QUEUE_POISSON(engine, ordering, poisson_lambda)                                    \
     executor.queue<host_api_benchmark<unsigned int, DISTRIBUTION_POISSON>>(engine,         \
-                                                                                   ordering,       \
-                                                                                   dimensions,     \
-                                                                                   offset,         \
-                                                                                   benchmark_host, \
-                                                                                   poisson_lambda)
+                                                                           ordering,       \
+                                                                           dimensions,     \
+                                                                           offset,         \
+                                                                           benchmark_host, \
+                                                                           poisson_lambda)
 
-#define QUEUE(T, engine, ordering, Distribution)                            \
+#define QUEUE(T, engine, ordering, Distribution)                    \
     executor.queue<host_api_benchmark<T, Distribution>>(engine,     \
-                                                                ordering,   \
-                                                                dimensions, \
-                                                                offset,     \
-                                                                benchmark_host)
+                                                        ordering,   \
+                                                        dimensions, \
+                                                        offset,     \
+                                                        benchmark_host)
 
 #ifdef __HIP__
-#define QUEUE_DISTRIBUTIONS(engine, ordering)                          \
-    do                                                                 \
-    {                                                                  \
-        QUEUE(unsigned int, engine, ordering, DISTRIBUTION_UNIFORM);   \
-        QUEUE(unsigned char, engine, ordering, DISTRIBUTION_UNIFORM);  \
-        QUEUE(unsigned short, engine, ordering, DISTRIBUTION_UNIFORM); \
-                                                                       \
-        QUEUE(__half, engine, ordering, DISTRIBUTION_UNIFORM);         \
-        QUEUE(float, engine, ordering, DISTRIBUTION_UNIFORM);          \
-        QUEUE(double, engine, ordering, DISTRIBUTION_UNIFORM);         \
-                                                                       \
-        QUEUE(__half, engine, ordering, DISTRIBUTION_NORMAL);          \
-        QUEUE(float, engine, ordering, DISTRIBUTION_NORMAL);           \
-        QUEUE(double, engine, ordering, DISTRIBUTION_NORMAL);          \
-                                                                       \
-        QUEUE(__half, engine, ordering, DISTRIBUTION_LOG_NORMAL);      \
-        QUEUE(float, engine, ordering, DISTRIBUTION_LOG_NORMAL);       \
-        QUEUE(double, engine, ordering, DISTRIBUTION_LOG_NORMAL);      \
-                                                                       \
-        for(auto poisson_lambda : poisson_lambdas)                     \
-        {                                                              \
-            QUEUE_POISSON(engine, ordering, poisson_lambda);           \
-        }                                                              \
-    }                                                                  \
-    while(0)
+    #define QUEUE_DISTRIBUTIONS(engine, ordering)                          \
+        do                                                                 \
+        {                                                                  \
+            QUEUE(unsigned int, engine, ordering, DISTRIBUTION_UNIFORM);   \
+            QUEUE(unsigned char, engine, ordering, DISTRIBUTION_UNIFORM);  \
+            QUEUE(unsigned short, engine, ordering, DISTRIBUTION_UNIFORM); \
+                                                                           \
+            QUEUE(__half, engine, ordering, DISTRIBUTION_UNIFORM);         \
+            QUEUE(float, engine, ordering, DISTRIBUTION_UNIFORM);          \
+            QUEUE(double, engine, ordering, DISTRIBUTION_UNIFORM);         \
+                                                                           \
+            QUEUE(__half, engine, ordering, DISTRIBUTION_NORMAL);          \
+            QUEUE(float, engine, ordering, DISTRIBUTION_NORMAL);           \
+            QUEUE(double, engine, ordering, DISTRIBUTION_NORMAL);          \
+                                                                           \
+            QUEUE(__half, engine, ordering, DISTRIBUTION_LOG_NORMAL);      \
+            QUEUE(float, engine, ordering, DISTRIBUTION_LOG_NORMAL);       \
+            QUEUE(double, engine, ordering, DISTRIBUTION_LOG_NORMAL);      \
+                                                                           \
+            for(auto poisson_lambda : poisson_lambdas)                     \
+            {                                                              \
+                QUEUE_POISSON(engine, ordering, poisson_lambda);           \
+            }                                                              \
+        }                                                                  \
+        while(0)
 #elif defined(__CUDACC__)
-#define QUEUE_DISTRIBUTIONS(engine, ordering)                              \
-    do                                                                     \
-    {                                                                      \
-        if(engine != CURAND_RNG_QUASI_SOBOL64 && engine != CURAND_RNG_QUASI_SCRAMBLED_SOBOL64) \
-        { \
-            QUEUE(unsigned int, engine, ordering, DISTRIBUTION_UNIFORM);       \
-        } else {                                                               \
-            QUEUE(unsigned long long, engine, ordering, DISTRIBUTION_UNIFORM); \
-        }                                                                      \
-                                                                               \
-        QUEUE(float, engine, ordering, DISTRIBUTION_UNIFORM);                  \
-        QUEUE(double, engine, ordering, DISTRIBUTION_UNIFORM);                 \
-                                                                               \
-        QUEUE(float, engine, ordering, DISTRIBUTION_NORMAL);                   \
-        QUEUE(double, engine, ordering, DISTRIBUTION_NORMAL);                  \
-                                                                               \
-        QUEUE(float, engine, ordering, DISTRIBUTION_LOG_NORMAL);               \
-        QUEUE(double, engine, ordering, DISTRIBUTION_LOG_NORMAL);              \
-                                                                               \
-        for(auto poisson_lambda : poisson_lambdas)                             \
-        {                                                                      \
-            QUEUE_POISSON(engine, ordering, poisson_lambda);                   \
-        }                                                                      \
-    }                                                                          \
-    while(0)
+    #define QUEUE_DISTRIBUTIONS(engine, ordering)                                                  \
+        do                                                                                         \
+        {                                                                                          \
+            if(engine != CURAND_RNG_QUASI_SOBOL64 && engine != CURAND_RNG_QUASI_SCRAMBLED_SOBOL64) \
+            {                                                                                      \
+                QUEUE(unsigned int, engine, ordering, DISTRIBUTION_UNIFORM);                       \
+            }                                                                                      \
+            else                                                                                   \
+            {                                                                                      \
+                QUEUE(unsigned long long, engine, ordering, DISTRIBUTION_UNIFORM);                 \
+            }                                                                                      \
+                                                                                                   \
+            QUEUE(float, engine, ordering, DISTRIBUTION_UNIFORM);                                  \
+            QUEUE(double, engine, ordering, DISTRIBUTION_UNIFORM);                                 \
+                                                                                                   \
+            QUEUE(float, engine, ordering, DISTRIBUTION_NORMAL);                                   \
+            QUEUE(double, engine, ordering, DISTRIBUTION_NORMAL);                                  \
+                                                                                                   \
+            QUEUE(float, engine, ordering, DISTRIBUTION_LOG_NORMAL);                               \
+            QUEUE(double, engine, ordering, DISTRIBUTION_LOG_NORMAL);                              \
+                                                                                                   \
+            for(auto poisson_lambda : poisson_lambdas)                                             \
+            {                                                                                      \
+                QUEUE_POISSON(engine, ordering, poisson_lambda);                                   \
+            }                                                                                      \
+        }                                                                                          \
+        while(0)
 #endif
 
 // Quoting programmers-guide.rst:
 // ``ROCRAND_ORDERING_PSEUDO_DYNAMIC`` is not supported for generators
 // created with ``rocrand_create_generator_host``.
-#define QUEUE_PSEUDO(engine)                                              \
-    do                                                                    \
-    {                                                                     \
+#define QUEUE_PSEUDO(engine)                                           \
+    do                                                                 \
+    {                                                                  \
         QUEUE_DISTRIBUTIONS(engine, RAND_ORDERING_PSEUDO_DEFAULT);     \
-        if(!benchmark_host)                                               \
-        {                                                                 \
+        if(!benchmark_host)                                            \
+        {                                                              \
             QUEUE_DISTRIBUTIONS(engine, RAND_ORDERING_PSEUDO_DYNAMIC); \
-        }                                                                 \
-    }                                                                     \
+        }                                                              \
+    }                                                                  \
     while(0)
 
 #define QUEUE_QUASI(engine) QUEUE_DISTRIBUTIONS(engine, RAND_ORDERING_QUASI_DEFAULT)
@@ -318,11 +328,11 @@ private:
 int main(int argc, char* argv[])
 {
     primbench::settings settings;
-    settings.size = 128 * 1024 * 1024; // In items
-    settings.min_gpu_ms_per_batch = 1000;
-    settings.batch_window_size = 3;
+    settings.size                    = 128 * 1024 * 1024; // In items
+    settings.min_gpu_ms_per_batch    = 1000;
+    settings.batch_window_size       = 3;
     settings.noise_tolerance_percent = 3;
-    settings.hot = true;
+    settings.hot                     = true;
     primbench::executor executor(argc, argv, settings, primbench::flags::sync);
 
     auto dimensions

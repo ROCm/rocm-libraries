@@ -21,9 +21,9 @@
 #include "benchmark_utils.hpp"
 
 #ifdef __HIP__
-#include <rocrand/rocrand_mtgp32_11213.h>
+    #include <rocrand/rocrand_mtgp32_11213.h>
 #elif defined(__CUDACC__)
-#include <curand_mtgp32_host.h>
+    #include <curand_mtgp32_host.h>
 #endif
 
 #include <optional>
@@ -38,55 +38,63 @@ constexpr memcpy_kind_t MEMCPY_HOST_TO_DEVICE = cudaMemcpyHostToDevice;
 #endif
 
 #ifdef __HIP__
-constexpr rng_type_t RAND_RNG_PSEUDO_MRG32K3A = ROCRAND_RNG_PSEUDO_MRG32K3A;
-constexpr rng_type_t RAND_RNG_PSEUDO_XORWOW = ROCRAND_RNG_PSEUDO_XORWOW;
-constexpr rng_type_t RAND_RNG_PSEUDO_PHILOX4_32_10 = ROCRAND_RNG_PSEUDO_PHILOX4_32_10;
-constexpr rng_type_t RAND_RNG_PSEUDO_MTGP32 = ROCRAND_RNG_PSEUDO_MTGP32;
-constexpr rng_type_t RAND_RNG_QUASI_SOBOL32 = ROCRAND_RNG_QUASI_SOBOL32;
+constexpr rng_type_t RAND_RNG_PSEUDO_MRG32K3A         = ROCRAND_RNG_PSEUDO_MRG32K3A;
+constexpr rng_type_t RAND_RNG_PSEUDO_XORWOW           = ROCRAND_RNG_PSEUDO_XORWOW;
+constexpr rng_type_t RAND_RNG_PSEUDO_PHILOX4_32_10    = ROCRAND_RNG_PSEUDO_PHILOX4_32_10;
+constexpr rng_type_t RAND_RNG_PSEUDO_MTGP32           = ROCRAND_RNG_PSEUDO_MTGP32;
+constexpr rng_type_t RAND_RNG_QUASI_SOBOL32           = ROCRAND_RNG_QUASI_SOBOL32;
 constexpr rng_type_t RAND_RNG_QUASI_SCRAMBLED_SOBOL32 = ROCRAND_RNG_QUASI_SCRAMBLED_SOBOL32;
-constexpr rng_type_t RAND_RNG_QUASI_SOBOL64 = ROCRAND_RNG_QUASI_SOBOL64;
+constexpr rng_type_t RAND_RNG_QUASI_SOBOL64           = ROCRAND_RNG_QUASI_SOBOL64;
 constexpr rng_type_t RAND_RNG_QUASI_SCRAMBLED_SOBOL64 = ROCRAND_RNG_QUASI_SCRAMBLED_SOBOL64;
 #elif defined(__CUDACC__)
-constexpr rng_type_t RAND_RNG_PSEUDO_MRG32K3A = CURAND_RNG_PSEUDO_MRG32K3A;
-constexpr rng_type_t RAND_RNG_PSEUDO_XORWOW = CURAND_RNG_PSEUDO_XORWOW;
-constexpr rng_type_t RAND_RNG_PSEUDO_PHILOX4_32_10 = CURAND_RNG_PSEUDO_PHILOX4_32_10;
-constexpr rng_type_t RAND_RNG_PSEUDO_MTGP32 = CURAND_RNG_PSEUDO_MTGP32;
-constexpr rng_type_t RAND_RNG_QUASI_SOBOL32 = CURAND_RNG_QUASI_SOBOL32;
+constexpr rng_type_t RAND_RNG_PSEUDO_MRG32K3A         = CURAND_RNG_PSEUDO_MRG32K3A;
+constexpr rng_type_t RAND_RNG_PSEUDO_XORWOW           = CURAND_RNG_PSEUDO_XORWOW;
+constexpr rng_type_t RAND_RNG_PSEUDO_PHILOX4_32_10    = CURAND_RNG_PSEUDO_PHILOX4_32_10;
+constexpr rng_type_t RAND_RNG_PSEUDO_MTGP32           = CURAND_RNG_PSEUDO_MTGP32;
+constexpr rng_type_t RAND_RNG_QUASI_SOBOL32           = CURAND_RNG_QUASI_SOBOL32;
 constexpr rng_type_t RAND_RNG_QUASI_SCRAMBLED_SOBOL32 = CURAND_RNG_QUASI_SCRAMBLED_SOBOL32;
-constexpr rng_type_t RAND_RNG_QUASI_SOBOL64 = CURAND_RNG_QUASI_SOBOL64;
+constexpr rng_type_t RAND_RNG_QUASI_SOBOL64           = CURAND_RNG_QUASI_SOBOL64;
 constexpr rng_type_t RAND_RNG_QUASI_SCRAMBLED_SOBOL64 = CURAND_RNG_QUASI_SCRAMBLED_SOBOL64;
 #endif
 
 #ifdef __HIP__
-using rand_state_mrg32k3a_t = rocrand_state_mrg32k3a;
-using rand_state_philox4x32_10_t = rocrand_state_philox4x32_10;
-using rand_state_xorwow_t = rocrand_state_xorwow;
-using rand_state_mtgp32_t = rocrand_state_mtgp32;
-using rand_state_sobol32_t = rocrand_state_sobol32;
+using rand_state_mrg32k3a_t          = rocrand_state_mrg32k3a;
+using rand_state_philox4x32_10_t     = rocrand_state_philox4x32_10;
+using rand_state_xorwow_t            = rocrand_state_xorwow;
+using rand_state_mtgp32_t            = rocrand_state_mtgp32;
+using rand_state_sobol32_t           = rocrand_state_sobol32;
 using rand_state_scrambled_sobol32_t = rocrand_state_scrambled_sobol32;
-using rand_state_sobol64_t = rocrand_state_sobol64;
+using rand_state_sobol64_t           = rocrand_state_sobol64;
 using rand_state_scrambled_sobol64_t = rocrand_state_scrambled_sobol64;
 #elif defined(__CUDACC__)
-using rand_state_mrg32k3a_t = curandStateMRG32k3a_t;
-using rand_state_philox4x32_10_t = curandStatePhilox4_32_10_t;
-using rand_state_xorwow_t = curandStateXORWOW_t;
-using rand_state_mtgp32_t = curandStateMtgp32_t;
-using rand_state_sobol32_t = curandStateSobol32_t;
+using rand_state_mrg32k3a_t          = curandStateMRG32k3a_t;
+using rand_state_philox4x32_10_t     = curandStatePhilox4_32_10_t;
+using rand_state_xorwow_t            = curandStateXORWOW_t;
+using rand_state_mtgp32_t            = curandStateMtgp32_t;
+using rand_state_sobol32_t           = curandStateSobol32_t;
 using rand_state_scrambled_sobol32_t = curandStateScrambledSobol32_t;
-using rand_state_sobol64_t = curandStateSobol64_t;
+using rand_state_sobol64_t           = curandStateSobol64_t;
 using rand_state_scrambled_sobol64_t = curandStateScrambledSobol64_t;
 #endif
 
 #ifdef __HIP__
-constexpr rand_direction_vector_set_t RAND_DIRECTION_VECTORS_32_JOEKUO6 = ROCRAND_DIRECTION_VECTORS_32_JOEKUO6;
-constexpr rand_direction_vector_set_t RAND_SCRAMBLED_DIRECTION_VECTORS_32_JOEKUO6 = ROCRAND_SCRAMBLED_DIRECTION_VECTORS_32_JOEKUO6;
-constexpr rand_direction_vector_set_t RAND_DIRECTION_VECTORS_64_JOEKUO6 = ROCRAND_DIRECTION_VECTORS_64_JOEKUO6;
-constexpr rand_direction_vector_set_t RAND_SCRAMBLED_DIRECTION_VECTORS_64_JOEKUO6 = ROCRAND_SCRAMBLED_DIRECTION_VECTORS_64_JOEKUO6;
+constexpr rand_direction_vector_set_t RAND_DIRECTION_VECTORS_32_JOEKUO6
+    = ROCRAND_DIRECTION_VECTORS_32_JOEKUO6;
+constexpr rand_direction_vector_set_t RAND_SCRAMBLED_DIRECTION_VECTORS_32_JOEKUO6
+    = ROCRAND_SCRAMBLED_DIRECTION_VECTORS_32_JOEKUO6;
+constexpr rand_direction_vector_set_t RAND_DIRECTION_VECTORS_64_JOEKUO6
+    = ROCRAND_DIRECTION_VECTORS_64_JOEKUO6;
+constexpr rand_direction_vector_set_t RAND_SCRAMBLED_DIRECTION_VECTORS_64_JOEKUO6
+    = ROCRAND_SCRAMBLED_DIRECTION_VECTORS_64_JOEKUO6;
 #elif defined(__CUDACC__)
-constexpr rand_direction_vector_set_t RAND_DIRECTION_VECTORS_32_JOEKUO6 = CURAND_DIRECTION_VECTORS_32_JOEKUO6;
-constexpr rand_direction_vector_set_t RAND_SCRAMBLED_DIRECTION_VECTORS_32_JOEKUO6 = CURAND_SCRAMBLED_DIRECTION_VECTORS_32_JOEKUO6;
-constexpr rand_direction_vector_set_t RAND_DIRECTION_VECTORS_64_JOEKUO6 = CURAND_DIRECTION_VECTORS_64_JOEKUO6;
-constexpr rand_direction_vector_set_t RAND_SCRAMBLED_DIRECTION_VECTORS_64_JOEKUO6 = CURAND_SCRAMBLED_DIRECTION_VECTORS_64_JOEKUO6;
+constexpr rand_direction_vector_set_t RAND_DIRECTION_VECTORS_32_JOEKUO6
+    = CURAND_DIRECTION_VECTORS_32_JOEKUO6;
+constexpr rand_direction_vector_set_t RAND_SCRAMBLED_DIRECTION_VECTORS_32_JOEKUO6
+    = CURAND_SCRAMBLED_DIRECTION_VECTORS_32_JOEKUO6;
+constexpr rand_direction_vector_set_t RAND_DIRECTION_VECTORS_64_JOEKUO6
+    = CURAND_DIRECTION_VECTORS_64_JOEKUO6;
+constexpr rand_direction_vector_set_t RAND_SCRAMBLED_DIRECTION_VECTORS_64_JOEKUO6
+    = CURAND_SCRAMBLED_DIRECTION_VECTORS_64_JOEKUO6;
 #endif
 
 constexpr size_t next_power2(size_t x)
@@ -110,8 +118,7 @@ void init_kernel(EngineState*             states,
 }
 
 template<typename EngineState, typename T, typename Generator>
-__global__
-__launch_bounds__(RAND_DEFAULT_MAX_BLOCK_SIZE)
+__global__ __launch_bounds__(RAND_DEFAULT_MAX_BLOCK_SIZE)
 void generate_kernel(EngineState* states, T* data, const size_t size, Generator generator)
 {
     const unsigned int state_id = blockIdx.x * blockDim.x + threadIdx.x;
@@ -155,7 +162,7 @@ struct runner
     template<typename T, typename Generator>
     void generate(const size_t     blocks,
                   const size_t     threads,
-                  stream_t      stream,
+                  stream_t         stream,
                   T*               data,
                   const size_t     size,
                   const Generator& generator)
@@ -168,10 +175,10 @@ template<typename T, typename Generator>
 __global__ __launch_bounds__(RAND_DEFAULT_MAX_BLOCK_SIZE)
 void generate_kernel(rand_state_mtgp32_t* states, T* data, const size_t size, Generator generator)
 {
-    const unsigned int state_id = blockIdx.x;
-    const unsigned int thread_id = threadIdx.x;
-    unsigned int       index    = blockIdx.x * blockDim.x + thread_id;
-    unsigned int       stride   = gridDim.x * blockDim.x;
+    const unsigned int  state_id  = blockIdx.x;
+    const unsigned int  thread_id = threadIdx.x;
+    unsigned int        index     = blockIdx.x * blockDim.x + thread_id;
+    unsigned int        stride    = gridDim.x * blockDim.x;
 
     __shared__
     rand_state_mtgp32_t state;
@@ -228,15 +235,16 @@ struct runner<rand_state_mtgp32_t>
         PRIMBENCH_CHECK(gpu_malloc(&states, states_size * sizeof(rand_state_mtgp32_t)));
 
 #ifdef __HIP__
-        RAND_CHECK(rocrand_make_state_mtgp32(states, mtgp32dc_params_fast_11213, states_size, seed));
+        RAND_CHECK(
+            rocrand_make_state_mtgp32(states, mtgp32dc_params_fast_11213, states_size, seed));
 #else
         PRIMBENCH_CHECK(gpu_malloc(&d_param, sizeof(mtgp32_kernel_params)));
         RAND_CHECK(curandMakeMTGP32Constants(mtgp32dc_params_fast_11213, d_param));
         RAND_CHECK(curandMakeMTGP32KernelState(states,
-                                                mtgp32dc_params_fast_11213,
-                                                d_param,
-                                                states_size,
-                                                seed));
+                                               mtgp32dc_params_fast_11213,
+                                               d_param,
+                                               states_size,
+                                               seed));
 #endif
     }
 
@@ -252,7 +260,7 @@ struct runner<rand_state_mtgp32_t>
     template<typename T, typename Generator>
     void generate(const size_t blocks,
                   const size_t /* threads */,
-                  stream_t      stream,
+                  stream_t         stream,
                   T*               data,
                   const size_t     size,
                   const Generator& generator)
@@ -289,10 +297,10 @@ struct runner<rocrand_state_lfsr113>
         PRIMBENCH_CHECK(gpu_malloc(&states, states_size * sizeof(rocrand_state_lfsr113)));
 
         init_kernel<<<dim3(blocks), dim3(threads), 0, 0>>>(states,
-                           uint4{ROCRAND_LFSR113_DEFAULT_SEED_X,
-                                 ROCRAND_LFSR113_DEFAULT_SEED_Y,
-                                 ROCRAND_LFSR113_DEFAULT_SEED_Z,
-                                 ROCRAND_LFSR113_DEFAULT_SEED_W});
+                                                           uint4{ROCRAND_LFSR113_DEFAULT_SEED_X,
+                                                                 ROCRAND_LFSR113_DEFAULT_SEED_Y,
+                                                                 ROCRAND_LFSR113_DEFAULT_SEED_Z,
+                                                                 ROCRAND_LFSR113_DEFAULT_SEED_W});
 
         PRIMBENCH_CHECK(gpu_get_last_error());
         PRIMBENCH_CHECK(gpu_device_synchronize());
@@ -306,16 +314,12 @@ struct runner<rocrand_state_lfsr113>
     template<typename T, typename Generator>
     void generate(const size_t     blocks,
                   const size_t     threads,
-                  stream_t      stream,
+                  stream_t         stream,
                   T*               data,
                   const size_t     size,
                   const Generator& generator)
     {
-        generate_kernel<<<dim3(blocks), dim3(threads), 0, stream>>>(
-                           states,
-                           data,
-                           size,
-                           generator);
+        generate_kernel<<<dim3(blocks), dim3(threads), 0, stream>>>(states, data, size, generator);
     }
 };
 #endif
@@ -342,9 +346,9 @@ void init_scrambled_sobol_kernel(EngineState* states,
     const unsigned int state_id  = blockIdx.x * blockDim.x + threadIdx.x;
     EngineState        state;
     rand_init(&directions[dimension * sizeof(SobolType) * 8],
-                 scramble_constants[dimension],
-                 offset + state_id,
-                 &state);
+              scramble_constants[dimension],
+              offset + state_id,
+              &state);
     states[gridDim.x * blockDim.x * dimension + state_id] = state;
 }
 
@@ -375,7 +379,7 @@ template<>
 struct runner<rand_state_sobol32_t>
 {
     rand_state_sobol32_t* states;
-    size_t                 dimensions;
+    size_t                dimensions;
 
     runner(const size_t dimensions,
            const size_t blocks,
@@ -416,7 +420,7 @@ struct runner<rand_state_sobol32_t>
     template<typename T, typename Generator>
     void generate(const size_t     blocks,
                   const size_t     threads,
-                  stream_t      stream,
+                  stream_t         stream,
                   T*               data,
                   const size_t     size,
                   const Generator& generator)
@@ -434,7 +438,7 @@ template<>
 struct runner<rand_state_scrambled_sobol32_t>
 {
     rand_state_scrambled_sobol32_t* states;
-    size_t                           dimensions;
+    size_t                          dimensions;
 
     runner(const size_t dimensions,
            const size_t blocks,
@@ -446,9 +450,9 @@ struct runner<rand_state_scrambled_sobol32_t>
 
         direction_vectors32_t* h_directions;
         RAND_CHECK(rand_get_direction_vectors32(&h_directions,
-                                            RAND_SCRAMBLED_DIRECTION_VECTORS_32_JOEKUO6));
+                                                RAND_SCRAMBLED_DIRECTION_VECTORS_32_JOEKUO6));
 
-        const unsigned int*    h_constants;
+        const unsigned int* h_constants;
         RAND_CHECK(rand_get_scramble_constants32(&h_constants));
 
         const size_t states_size = blocks * threads * dimensions;
@@ -457,7 +461,8 @@ struct runner<rand_state_scrambled_sobol32_t>
         unsigned int* directions;
         const size_t  directions_size = dimensions * 32 * sizeof(unsigned int);
         PRIMBENCH_CHECK(gpu_malloc(&directions, directions_size));
-        PRIMBENCH_CHECK(gpu_memcpy(directions, h_directions, directions_size, MEMCPY_HOST_TO_DEVICE));
+        PRIMBENCH_CHECK(
+            gpu_memcpy(directions, h_directions, directions_size, MEMCPY_HOST_TO_DEVICE));
 
         unsigned int* scramble_constants;
         const size_t  constants_size = dimensions * sizeof(unsigned int);
@@ -487,7 +492,7 @@ struct runner<rand_state_scrambled_sobol32_t>
     template<typename T, typename Generator>
     void generate(const size_t     blocks,
                   const size_t     threads,
-                  stream_t      stream,
+                  stream_t         stream,
                   T*               data,
                   const size_t     size,
                   const Generator& generator)
@@ -505,7 +510,7 @@ template<>
 struct runner<rand_state_sobol64_t>
 {
     rand_state_sobol64_t* states;
-    size_t                 dimensions;
+    size_t                dimensions;
 
     runner(const size_t dimensions,
            const size_t blocks,
@@ -545,7 +550,7 @@ struct runner<rand_state_sobol64_t>
     template<typename T, typename Generator>
     void generate(const size_t     blocks,
                   const size_t     threads,
-                  stream_t      stream,
+                  stream_t         stream,
                   T*               data,
                   const size_t     size,
                   const Generator& generator)
@@ -563,7 +568,7 @@ template<>
 struct runner<rand_state_scrambled_sobol64_t>
 {
     rand_state_scrambled_sobol64_t* states;
-    size_t                           dimensions;
+    size_t                          dimensions;
 
     runner(const size_t dimensions,
            const size_t blocks,
@@ -573,9 +578,9 @@ struct runner<rand_state_scrambled_sobol64_t>
     {
         this->dimensions = dimensions;
 
-        direction_vectors64_t*    h_directions;
+        direction_vectors64_t* h_directions;
         RAND_CHECK(rand_get_direction_vectors64(&h_directions,
-                                            RAND_SCRAMBLED_DIRECTION_VECTORS_64_JOEKUO6));
+                                                RAND_SCRAMBLED_DIRECTION_VECTORS_64_JOEKUO6));
 
         const unsigned long long* h_constants;
         RAND_CHECK(rand_get_scramble_constants64(&h_constants));
@@ -586,7 +591,8 @@ struct runner<rand_state_scrambled_sobol64_t>
         unsigned long long int* directions;
         const size_t            directions_size = dimensions * 64 * sizeof(unsigned long long int);
         PRIMBENCH_CHECK(gpu_malloc(&directions, directions_size));
-        PRIMBENCH_CHECK(gpu_memcpy(directions, h_directions, directions_size, MEMCPY_HOST_TO_DEVICE));
+        PRIMBENCH_CHECK(
+            gpu_memcpy(directions, h_directions, directions_size, MEMCPY_HOST_TO_DEVICE));
 
         unsigned long long int* scramble_constants;
         const size_t            constants_size = dimensions * sizeof(unsigned long long int);
@@ -616,7 +622,7 @@ struct runner<rand_state_scrambled_sobol64_t>
     template<typename T, typename Generator>
     void generate(const size_t     blocks,
                   const size_t     threads,
-                  stream_t      stream,
+                  stream_t         stream,
                   T*               data,
                   const size_t     size,
                   const Generator& generator)
@@ -644,7 +650,7 @@ struct generator_uint : public generator_type
     typedef unsigned int data_type;
 
     __device__
-    data_type operator()(Engine* state) const
+    data_type            operator()(Engine* state) const
     {
         return gpu_rand(state);
     }
@@ -656,7 +662,7 @@ struct generator_ullong : public generator_type
     typedef unsigned long long int data_type;
 
     __device__
-    data_type operator()(Engine* state) const
+    data_type                      operator()(Engine* state) const
     {
         return gpu_rand(state);
     }
@@ -668,7 +674,7 @@ struct generator_uniform : public generator_type
     typedef float data_type;
 
     __device__
-    data_type operator()(Engine* state) const
+    data_type     operator()(Engine* state) const
     {
         return gpu_rand_uniform(state);
     }
@@ -680,7 +686,7 @@ struct generator_uniform_double : public generator_type
     typedef double data_type;
 
     __device__
-    data_type operator()(Engine* state) const
+    data_type      operator()(Engine* state) const
     {
         return gpu_rand_uniform_double(state);
     }
@@ -692,7 +698,7 @@ struct generator_normal : public generator_type
     typedef float data_type;
 
     __device__
-    data_type operator()(Engine* state) const
+    data_type     operator()(Engine* state) const
     {
         return gpu_rand_normal(state);
     }
@@ -704,7 +710,7 @@ struct generator_normal_double : public generator_type
     typedef double data_type;
 
     __device__
-    data_type operator()(Engine* state) const
+    data_type      operator()(Engine* state) const
     {
         return gpu_rand_normal_double(state);
     }
@@ -716,7 +722,7 @@ struct generator_log_normal : public generator_type
     typedef float data_type;
 
     __device__
-    data_type operator()(Engine* state) const
+    data_type     operator()(Engine* state) const
     {
         return gpu_rand_log_normal(state, 0.f, 1.f);
     }
@@ -728,7 +734,7 @@ struct generator_log_normal_double : public generator_type
     typedef double data_type;
 
     __device__
-    data_type operator()(Engine* state) const
+    data_type      operator()(Engine* state) const
     {
         return gpu_rand_log_normal_double(state, 0., 1.);
     }
@@ -742,7 +748,7 @@ struct generator_poisson : public generator_type
     typedef unsigned int data_type;
 
     __device__
-    data_type operator()(Engine* state) const
+    data_type            operator()(Engine* state) const
     {
         return gpu_rand_poisson(state, lambda);
     }
@@ -774,7 +780,7 @@ struct generator_discrete_poisson : public generator_type
     }
 
     rand_discrete_distribution_t discrete_distribution;
-    double                        lambda;
+    double                       lambda;
 };
 
 #ifdef __HIP__
@@ -794,9 +800,9 @@ struct generator_discrete_custom : public generator_type
                        probabilities.begin(),
                        [=](double p) { return p / sum; });
         RAND_CHECK(rocrand_create_discrete_distribution(probabilities.data(),
-                                                           probabilities.size(),
-                                                           offset,
-                                                           &discrete_distribution));
+                                                        probabilities.size(),
+                                                        offset,
+                                                        &discrete_distribution));
     }
 
     void destroy()
@@ -818,12 +824,12 @@ template<typename Generator, typename State, typename T, distribution Distributi
 struct device_api_benchmark : public primbench::benchmark_interface
 {
     device_api_benchmark(Generator             generator,
-                                 rng_type_t      engine,
-                                 size_t                blocks,
-                                 size_t                threads,
-                                 size_t                dimensions,
-                                 size_t                offset,
-                                 std::optional<double> poisson_lambda = std::nullopt)
+                         rng_type_t            engine,
+                         size_t                blocks,
+                         size_t                threads,
+                         size_t                dimensions,
+                         size_t                offset,
+                         std::optional<double> poisson_lambda = std::nullopt)
         : m_generator(generator)
         , m_engine(engine)
         , m_blocks(blocks)
@@ -831,20 +837,17 @@ struct device_api_benchmark : public primbench::benchmark_interface
         , m_dimensions(dimensions)
         , m_offset(offset)
         , m_poisson_lambda(poisson_lambda)
-    {
-    }
+    {}
 
     primbench::json meta() const override
     {
-        auto json = primbench::json{}
-                        .add("algo", "device_api")
-                        .add("engine", engine_name(m_engine))
-                        .add("type", primbench::name<T>())
-                        .add("distribution", distribution_name(Distribution))
-                        .add("cfg",
-                            primbench::json{}
-                                .add("blocks", m_blocks)
-                                .add("threads", m_threads));
+        auto json
+            = primbench::json{}
+                  .add("algo", "device_api")
+                  .add("engine", engine_name(m_engine))
+                  .add("type", primbench::name<T>())
+                  .add("distribution", distribution_name(Distribution))
+                  .add("cfg", primbench::json{}.add("blocks", m_blocks).add("threads", m_threads));
 
         if constexpr(Distribution == DISTRIBUTION_POISSON
                      || Distribution == DISTRIBUTION_DISCRETE_POISSON)
@@ -881,7 +884,7 @@ struct device_api_benchmark : public primbench::benchmark_interface
 
 private:
     Generator             m_generator;
-    rng_type_t      m_engine;
+    rng_type_t            m_engine;
     size_t                m_blocks;
     size_t                m_threads;
     size_t                m_dimensions;
@@ -889,116 +892,124 @@ private:
     std::optional<double> m_poisson_lambda;
 };
 
-#define QUEUE(generator, T, State, engine, Distribution, ...)                        \
+#define QUEUE(generator, T, State, engine, Distribution, ...)                \
     executor.queue<device_api_benchmark<generator, State, T, Distribution>>( \
-        generator(__VA_ARGS__),                                                      \
-        engine,                                                                      \
-        blocks,                                                                      \
-        threads,                                                                     \
-        dimensions,                                                                  \
-        offset,                                                                      \
+        generator(__VA_ARGS__),                                              \
+        engine,                                                              \
+        blocks,                                                              \
+        threads,                                                             \
+        dimensions,                                                          \
+        offset,                                                              \
         ##__VA_ARGS__)
 
 #ifdef __HIP__
-#define QUEUE_DISTRIBUTIONS(State, engine)                                                         \
-    do                                                                                             \
-    {                                                                                              \
-        if constexpr(std::is_same_v<State, rand_state_sobol64_t>                                  \
-                     || std::is_same_v<State, rand_state_scrambled_sobol64_t>                     \
-                     || std::is_same_v<State, rocrand_state_threefry2x64_20>                       \
-                     || std::is_same_v<State, rocrand_state_threefry4x64_20>)                      \
-        {                                                                                          \
-            QUEUE(generator_ullong<State>,                                                         \
-                  unsigned long long,                                                              \
-                  State,                                                                           \
-                  engine,                                                                          \
-                  DISTRIBUTION_UNIFORM);                                                           \
-        }                                                                                          \
-        else                                                                                       \
-        {                                                                                          \
-            QUEUE(generator_uint<State>, uint32_t, State, engine, DISTRIBUTION_UNIFORM);           \
-        }                                                                                          \
-                                                                                                   \
-        QUEUE(generator_uniform<State>, float, State, engine, DISTRIBUTION_UNIFORM);               \
-        QUEUE(generator_uniform_double<State>, double, State, engine, DISTRIBUTION_UNIFORM);       \
-        QUEUE(generator_normal<State>, float, State, engine, DISTRIBUTION_NORMAL);                 \
-        QUEUE(generator_normal_double<State>, double, State, engine, DISTRIBUTION_NORMAL);         \
-        QUEUE(generator_log_normal<State>, float, State, engine, DISTRIBUTION_LOG_NORMAL);         \
-        QUEUE(generator_log_normal_double<State>, double, State, engine, DISTRIBUTION_LOG_NORMAL); \
-                                                                                                   \
-        for(double lambda : poisson_lambdas)                                                       \
-        {                                                                                          \
-            QUEUE(generator_poisson<State>,                                                        \
-                  uint32_t,                                                                        \
-                  State,                                                                           \
-                  engine,                                                                          \
-                  DISTRIBUTION_POISSON,                                                            \
-                  lambda);                                                                         \
-            QUEUE(generator_discrete_poisson<State>,                                               \
-                  uint32_t,                                                                        \
-                  State,                                                                           \
-                  engine,                                                                          \
-                  DISTRIBUTION_DISCRETE_POISSON,                                                   \
-                  lambda);                                                                         \
-        }                                                                                          \
-                                                                                                   \
-        QUEUE(generator_discrete_custom<State>,                                                    \
-              uint32_t,                                                                            \
-              State,                                                                               \
-              engine,                                                                              \
-              DISTRIBUTION_DISCRETE_CUSTOM);                                                       \
-    }                                                                                              \
-    while(0)
+    #define QUEUE_DISTRIBUTIONS(State, engine)                                                   \
+        do                                                                                       \
+        {                                                                                        \
+            if constexpr(std::is_same_v<State, rand_state_sobol64_t>                             \
+                         || std::is_same_v<State, rand_state_scrambled_sobol64_t>                \
+                         || std::is_same_v<State, rocrand_state_threefry2x64_20>                 \
+                         || std::is_same_v<State, rocrand_state_threefry4x64_20>)                \
+            {                                                                                    \
+                QUEUE(generator_ullong<State>,                                                   \
+                      unsigned long long,                                                        \
+                      State,                                                                     \
+                      engine,                                                                    \
+                      DISTRIBUTION_UNIFORM);                                                     \
+            }                                                                                    \
+            else                                                                                 \
+            {                                                                                    \
+                QUEUE(generator_uint<State>, uint32_t, State, engine, DISTRIBUTION_UNIFORM);     \
+            }                                                                                    \
+                                                                                                 \
+            QUEUE(generator_uniform<State>, float, State, engine, DISTRIBUTION_UNIFORM);         \
+            QUEUE(generator_uniform_double<State>, double, State, engine, DISTRIBUTION_UNIFORM); \
+            QUEUE(generator_normal<State>, float, State, engine, DISTRIBUTION_NORMAL);           \
+            QUEUE(generator_normal_double<State>, double, State, engine, DISTRIBUTION_NORMAL);   \
+            QUEUE(generator_log_normal<State>, float, State, engine, DISTRIBUTION_LOG_NORMAL);   \
+            QUEUE(generator_log_normal_double<State>,                                            \
+                  double,                                                                        \
+                  State,                                                                         \
+                  engine,                                                                        \
+                  DISTRIBUTION_LOG_NORMAL);                                                      \
+                                                                                                 \
+            for(double lambda : poisson_lambdas)                                                 \
+            {                                                                                    \
+                QUEUE(generator_poisson<State>,                                                  \
+                      uint32_t,                                                                  \
+                      State,                                                                     \
+                      engine,                                                                    \
+                      DISTRIBUTION_POISSON,                                                      \
+                      lambda);                                                                   \
+                QUEUE(generator_discrete_poisson<State>,                                         \
+                      uint32_t,                                                                  \
+                      State,                                                                     \
+                      engine,                                                                    \
+                      DISTRIBUTION_DISCRETE_POISSON,                                             \
+                      lambda);                                                                   \
+            }                                                                                    \
+                                                                                                 \
+            QUEUE(generator_discrete_custom<State>,                                              \
+                  uint32_t,                                                                      \
+                  State,                                                                         \
+                  engine,                                                                        \
+                  DISTRIBUTION_DISCRETE_CUSTOM);                                                 \
+        }                                                                                        \
+        while(0)
 #elif defined(__CUDACC__)
-#define QUEUE_DISTRIBUTIONS(State, engine)                                                         \
-    do                                                                                             \
-    {                                                                                              \
-        if constexpr(std::is_same_v<State, rand_state_sobol64_t>                                  \
-                     || std::is_same_v<State, rand_state_scrambled_sobol64_t>)                    \
-        {                                                                                          \
-            QUEUE(generator_ullong<State>,                                                         \
-                  unsigned long long,                                                              \
-                  State,                                                                           \
-                  engine,                                                                          \
-                  DISTRIBUTION_UNIFORM);                                                           \
-        }                                                                                          \
-        else                                                                                       \
-        {                                                                                          \
-            QUEUE(generator_uint<State>, uint32_t, State, engine, DISTRIBUTION_UNIFORM);           \
-        }                                                                                          \
-                                                                                                   \
-        QUEUE(generator_uniform<State>, float, State, engine, DISTRIBUTION_UNIFORM);               \
-        QUEUE(generator_uniform_double<State>, double, State, engine, DISTRIBUTION_UNIFORM);       \
-        QUEUE(generator_normal<State>, float, State, engine, DISTRIBUTION_NORMAL);                 \
-        QUEUE(generator_normal_double<State>, double, State, engine, DISTRIBUTION_NORMAL);         \
-        QUEUE(generator_log_normal<State>, float, State, engine, DISTRIBUTION_LOG_NORMAL);         \
-        QUEUE(generator_log_normal_double<State>, double, State, engine, DISTRIBUTION_LOG_NORMAL); \
-                                                                                                   \
-        for(double lambda : poisson_lambdas)                                                       \
-        {                                                                                          \
-            QUEUE(generator_poisson<State>,                                                        \
-                  uint32_t,                                                                        \
-                  State,                                                                           \
-                  engine,                                                                          \
-                  DISTRIBUTION_POISSON,                                                            \
-                  lambda);                                                                         \
-            QUEUE(generator_discrete_poisson<State>,                                               \
-                  uint32_t,                                                                        \
-                  State,                                                                           \
-                  engine,                                                                          \
-                  DISTRIBUTION_DISCRETE_POISSON,                                                   \
-                  lambda);                                                                         \
-        }                                                                                          \
-    }                                                                                              \
-    while(0)
+    #define QUEUE_DISTRIBUTIONS(State, engine)                                                   \
+        do                                                                                       \
+        {                                                                                        \
+            if constexpr(std::is_same_v<State, rand_state_sobol64_t>                             \
+                         || std::is_same_v<State, rand_state_scrambled_sobol64_t>)               \
+            {                                                                                    \
+                QUEUE(generator_ullong<State>,                                                   \
+                      unsigned long long,                                                        \
+                      State,                                                                     \
+                      engine,                                                                    \
+                      DISTRIBUTION_UNIFORM);                                                     \
+            }                                                                                    \
+            else                                                                                 \
+            {                                                                                    \
+                QUEUE(generator_uint<State>, uint32_t, State, engine, DISTRIBUTION_UNIFORM);     \
+            }                                                                                    \
+                                                                                                 \
+            QUEUE(generator_uniform<State>, float, State, engine, DISTRIBUTION_UNIFORM);         \
+            QUEUE(generator_uniform_double<State>, double, State, engine, DISTRIBUTION_UNIFORM); \
+            QUEUE(generator_normal<State>, float, State, engine, DISTRIBUTION_NORMAL);           \
+            QUEUE(generator_normal_double<State>, double, State, engine, DISTRIBUTION_NORMAL);   \
+            QUEUE(generator_log_normal<State>, float, State, engine, DISTRIBUTION_LOG_NORMAL);   \
+            QUEUE(generator_log_normal_double<State>,                                            \
+                  double,                                                                        \
+                  State,                                                                         \
+                  engine,                                                                        \
+                  DISTRIBUTION_LOG_NORMAL);                                                      \
+                                                                                                 \
+            for(double lambda : poisson_lambdas)                                                 \
+            {                                                                                    \
+                QUEUE(generator_poisson<State>,                                                  \
+                      uint32_t,                                                                  \
+                      State,                                                                     \
+                      engine,                                                                    \
+                      DISTRIBUTION_POISSON,                                                      \
+                      lambda);                                                                   \
+                QUEUE(generator_discrete_poisson<State>,                                         \
+                      uint32_t,                                                                  \
+                      State,                                                                     \
+                      engine,                                                                    \
+                      DISTRIBUTION_DISCRETE_POISSON,                                             \
+                      lambda);                                                                   \
+            }                                                                                    \
+        }                                                                                        \
+        while(0)
 #endif
 
 int main(int argc, char* argv[])
 {
     primbench::settings settings;
-    settings.size = 128 * 1024 * 1024; // In items
+    settings.size                 = 128 * 1024 * 1024; // In items
     settings.min_gpu_ms_per_batch = 100;
-    settings.hot = true;
+    settings.hot                  = true;
     primbench::executor executor(argc, argv, settings);
 
     auto blocks     = executor.get<size_t>("blocks", 256, "Number of blocks");
