@@ -29,7 +29,7 @@ enum struct MmaPipelineOptionFlag : unsigned
  */
 struct MmaPipelineOptionFlags
 {
-    using Type = std::underlying_type<MmaPipelineOptionFlag>::type;
+    using Type = std::underlying_type_t<MmaPipelineOptionFlag>;
 
     explicit constexpr MmaPipelineOptionFlags() : mFlags(0) {}
     explicit constexpr MmaPipelineOptionFlags(Type value) : mFlags(value) {}
