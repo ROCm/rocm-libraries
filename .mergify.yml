@@ -3,60 +3,40 @@
 # Each provider scope includes projects/hipdnn/ so that core PRs
 # automatically enter ALL provider scopes and serialize with them.
 # Provider-only PRs enter just their own scope and move independently.
+#
+# Queue PRs manually with: @mergifyio queue
 
 queue_rules:
   - name: default
     merge_method: squash
     batch_size: 1
-    speculative_checks: 1
     merge_conditions:
       - check-success=pre-commit
 
-pull_request_rules:
-  - name: Auto-queue hipDNN and provider PRs
-    conditions:
-      - base=develop
-      - or:
-        - files~=^projects/hipdnn/
-        - files~=^dnn-providers/
-    actions:
-      queue:
-
-  - name: Remove from queue on new push
-    conditions:
-      - base=develop
-      - updated-at<2s
-    actions:
-      dequeue:
-        reason: New commits pushed — re-enqueue with the merge queue after CI passes.
-
 scopes:
-  - name: miopen-provider
-    conditions:
-      matching_files:
-        - ^dnn-providers/miopen-provider/
-        - ^projects/hipdnn/
+  source:
+    files:
+      miopen-provider:
+        include:
+          - dnn-providers/miopen-provider/**
+          - projects/hipdnn/**
 
-  - name: hipblaslt-provider
-    conditions:
-      matching_files:
-        - ^dnn-providers/hipblaslt-provider/
-        - ^projects/hipdnn/
+      hipblaslt-provider:
+        include:
+          - dnn-providers/hipblaslt-provider/**
+          - projects/hipdnn/**
 
-  - name: hip-kernel-provider
-    conditions:
-      matching_files:
-        - ^dnn-providers/hip-kernel-provider/
-        - ^projects/hipdnn/
+      hip-kernel-provider:
+        include:
+          - dnn-providers/hip-kernel-provider/**
+          - projects/hipdnn/**
 
-  - name: fusilli-provider
-    conditions:
-      matching_files:
-        - ^dnn-providers/fusilli-provider/
-        - ^projects/hipdnn/
+      fusilli-provider:
+        include:
+          - dnn-providers/fusilli-provider/**
+          - projects/hipdnn/**
 
-  - name: integration-tests
-    conditions:
-      matching_files:
-        - ^dnn-providers/integration-tests/
-        - ^projects/hipdnn/
+      integration-tests:
+        include:
+          - dnn-providers/integration-tests/**
+          - projects/hipdnn/**
