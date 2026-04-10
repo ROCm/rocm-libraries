@@ -11,13 +11,22 @@
 
 namespace ck_tile::core::arch::mma {
 
+/*! @enum MmaPipelineOptionFlag
+ * @brief Individual option flags for configuring MmaPipeline behavior.
+ */
 enum struct MmaPipelineOptionFlag : unsigned
 {
-    NONE        = 0x0,
-    C_TRANSPOSE = 0x1,
-    COMPRESS_A  = 0x2,
+    NONE        = 0x0, ///< No flags set
+    C_TRANSPOSE = 0x1, ///< Swap A and B inputs to transpose the C output
+    COMPRESS_A  = 0x2, ///< Enable compressed (sparse) A matrix input
 };
 
+/**
+ * @struct MmaPipelineOptionFlags
+ * @brief  Type-safe bitmask wrapper for combining @ref MmaPipelineOptionFlag values.
+ * @par    Provides bitwise OR, AND, NOT, and equality operators for composing
+ *         and querying pipeline option flags.
+ */
 struct MmaPipelineOptionFlags
 {
     using Type = std::underlying_type<MmaPipelineOptionFlag>::type;
@@ -77,6 +86,26 @@ constexpr bool operator==(MmaPipelineOptionFlags::Type lhs, const MmaPipelineOpt
     return rhs == lhs;
 }
 
+/**
+ * @class  MmaPipelineBase
+ * @brief  CRTP base class that implements the common Mma pipeline logic shared by
+ *         all concrete pipeline drivers (e.g., dense wave-wise, sparse, etc.).
+ *
+ * @tparam Flags_  Compile-time bitmask of @ref MmaPipelineOptionFlag controlling
+ *                 pipeline behavior (e.g., C transposition, A compression).
+ * @tparam Derived The concrete CRTP-derived pipeline class. Must expose:
+ *                 - Type aliases: @c InternalAVecT, @c InternalBVecT, @c InternalCVecT,
+ *                   @c CVecType, @c MmaOp
+ *                 - Transform aliases: @c ATransform, @c BTransform, @c CTransform,
+ *                   @c DTransform
+ *                 - A static @c execImpl(std::tuple<A,B,C>&) method.
+ *
+ * @par The pipeline performs the following steps in @c exec():
+ *      1. Apply pre-transforms and format input buffers (A, B, C).
+ *      2. Delegate to @c Derived::execImpl for the actual mma loop.
+ *      3. Apply post-transform and format the output buffer (D) back to the user type.
+ *      When @c C_TRANSPOSE is set, the A and B inputs are swapped before step 1.
+ */
 // TODO: c++20: use MmaPipelineOptionFlags directly
 template <MmaPipelineOptionFlags::Type Flags_, typename Derived>
 struct MmaPipelineBase
@@ -84,7 +113,15 @@ struct MmaPipelineBase
     static constexpr auto Flags = MmaPipelineOptionFlags(Flags_);
 
     private:
-    // Helper to reconstruct a tuple with formatted first element and remaining elements
+    /**
+     * @brief Reconstruct a tuple with its first element passed through @c formatBuffer
+     *        while preserving all remaining elements unchanged.
+     * @tparam DstT  Target type for the formatted first element.
+     * @tparam SrcT  Forwarding-reference type of the input tuple.
+     * @tparam Is    Index pack for elements 1..N-1 of the tuple.
+     * @param  inputTuple The source tuple whose first element will be formatted.
+     * @return A new tuple with the formatted first element and the remaining elements forwarded.
+     */
     template <typename DstT, typename SrcT, std::size_t... Is>
     CK_TILE_DEVICE static auto formatBufferTupleImpl(SrcT&& inputTuple, std::index_sequence<Is...>)
     {
@@ -97,6 +134,20 @@ struct MmaPipelineBase
             std::get<Is + 1>(std::forward<SrcT>(inputTuple))...);
     }
 
+    /**
+     * @brief Format (reinterpret-cast) a buffer to the hardware-native vector type @p DstT.
+     *
+     * Three cases are handled:
+     * - **Tuple**: recursively format the first element via @c formatBufferTupleImpl,
+     *   preserving any metadata in the remaining tuple elements.
+     * - **Array / Pointer**: forwarded unchanged.
+     * - **Scalar / Vector**: reinterpret-cast to @p DstT (sizes must match).
+     *
+     * @tparam DstT        The target hardware vector type.
+     * @tparam SrcT        Forwarding-reference type of the input buffer.
+     * @param  inputBuffer The buffer to format.
+     * @return A reference (or value) of type @p DstT corresponding to @p inputBuffer.
+     */
     template <typename DstT, typename SrcT>
     CK_TILE_DEVICE static decltype(auto) formatBuffer(SrcT&& inputBuffer)
     {
@@ -127,24 +178,37 @@ struct MmaPipelineBase
     }
 
     protected:
+    /** @brief Query whether a specific @ref MmaPipelineOptionFlag is set. */
     template <MmaPipelineOptionFlag Flag>
     constexpr CK_TILE_DEVICE static bool hasFlag()
     {
         return Flags.testFlag(Flag);
     }
 
+    /**
+     * @brief Apply a transform **then** format the result to @p DstT.
+     *        Used for input operands (A, B, C) before the mma loop.
+     */
     template <typename DstT, typename Transform, typename... Args>
     CK_TILE_DEVICE static auto preApplyTransform(Args&&... args)
     {
         return formatBuffer<DstT>(Transform::exec(std::forward<Args>(args)...));
     }
 
+    /**
+     * @brief Format a buffer to @p DstT **then** apply a transform.
+     *        Used for the output operand (D) after the mma loop.
+     */
     template <typename DstT, typename Transform, typename... Args>
     CK_TILE_DEVICE static auto postApplyTransform(Args&&... args)
     {
         return Transform::exec(formatBuffer<DstT>(std::forward<Args>(args)...));
     }
 
+    /**
+     * @brief Apply the per-operand pre-transforms and buffer formatting to A, B, and C.
+     * @return A @c std::tuple of the transformed (A, B, C) vectors ready for the mma loop.
+     */
     template <typename ATransformInputs, typename BTransformInputs, typename CTransformInputs>
     CK_TILE_DEVICE static decltype(auto)
     applyTransformsToInputs(ATransformInputs&& a, BTransformInputs&& b, CTransformInputs&& accum)
@@ -163,6 +227,11 @@ struct MmaPipelineBase
             preApplyTransform<InternalCVecT, CTransform>(std::forward<CTransformInputs>(accum)));
     }
 
+    /**
+     * @brief Apply the post-transform and buffer formatting to the C (accumulator) output.
+     * @param vecs The (A, B, C) tuple after @c execImpl; only C is consumed.
+     * @return The final D output in the user-facing vector type.
+     */
     template <typename ATransformResult, typename BTransformResult, typename CTransformResult>
     CK_TILE_DEVICE static auto
     applyTransformToOutput(std::tuple<ATransformResult, BTransformResult, CTransformResult>&& vecs)
@@ -177,6 +246,16 @@ struct MmaPipelineBase
     }
 
     public:
+    /**
+     * @brief Entry point: execute the full Mma pipeline (transforms + mma loop + output).
+     * @tparam VecTA Type of the A WaveTile buffer.
+     * @tparam VecTB Type of the B WaveTile buffer.
+     * @tparam VecTC Type of the C (accumulator) WaveTile buffer.
+     * @param  a     Input WaveTile A.
+     * @param  b     Input WaveTile B.
+     * @param  accum Input/output accumulator WaveTile C.
+     * @return The output WaveTile D after accumulation and post-transform.
+     */
     template <typename VecTA, typename VecTB, typename VecTC>
     CK_TILE_DEVICE static decltype(auto) exec(VecTA&& a, VecTB&& b, VecTC&& accum)
     {
