@@ -41,6 +41,10 @@ TEST(TestGraphImport, ConvertHipDnnToFusilli) {
                         hipdnn_data_sdk::data_objects::DataType::INT32));
   EXPECT_EQ(int32Dt, fusilli::DataType::Int32);
   FUSILLI_PLUGIN_EXPECT_OR_ASSIGN(
+      auto int4Dt, hipDnnDataTypeToFusilliDataType(
+                       hipdnn_data_sdk::data_objects::DataType::INT4));
+  EXPECT_EQ(int4Dt, fusilli::DataType::Int4);
+  FUSILLI_PLUGIN_EXPECT_OR_ASSIGN(
       auto unsetDt, hipDnnDataTypeToFusilliDataType(
                         hipdnn_data_sdk::data_objects::DataType::UNSET));
   EXPECT_EQ(unsetDt, fusilli::DataType::NotSet);

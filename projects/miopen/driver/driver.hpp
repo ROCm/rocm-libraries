@@ -38,6 +38,7 @@
 #include <miopen/logger.hpp>
 #include <miopen/miopen.h>
 #include <miopen/bfloat16.hpp>
+#include <miopen/handle.hpp>
 #include <../test/tensor_holder.hpp>
 #include "util_driver.hpp"
 #include "rocrand_wrapper.hpp"
@@ -58,6 +59,7 @@ using bfloat8_fnuz = miopen_f8::hip_f8<miopen_f8::hip_f8_type::bf8>;
 #endif
 #elif MIOPEN_BACKEND_HIP
 #include <hip/hip_runtime_api.h>
+#include <functional>
 #endif
 
 #define UNPACK_VEC4(v) (v[0]), (v[1]), (v[2]), (v[3])
@@ -532,6 +534,18 @@ public:
     cl_command_queue& GetStream() { return q; }
 #elif MIOPEN_BACKEND_HIP
     hipStream_t& GetStream() { return q; }
+    using hipGraphFuncPtrType   = std::function<int()>;
+    hipGraph_t hipGraph         = nullptr;
+    hipGraphExec_t hipGraphExec = nullptr;
+    hipGraphFuncPtrType hipGraphFuncPtr;
+    hipEvent_t hipGraphStartEvent   = nullptr;
+    hipEvent_t hipGraphStopEvent    = nullptr;
+    float hipGraphLastExecutionTime = 0.0f;
+    int CaptureKernel(hipGraphFuncPtrType functPtr);
+    int CaptureKernelCapturing(hipGraphFuncPtrType functPtr);
+    int ExecuteKernel();
+    void FinalizeKernel();
+    float GetHipGraphExecutionTime() { return hipGraphLastExecutionTime; }
 #endif
     virtual ~Driver() { miopenDestroy(handle); }
 
@@ -553,6 +567,7 @@ protected:
     void InitDataType();
     void AddGpuBufferCheckFlag(InputFlags& inflags);
     GPUMem::Check GetGpuBufferCheck(const InputFlags& inflags) const;
+    void AddHipGraphFlag(InputFlags& inflags);
     miopenHandle_t handle;
     miopenDataType_t data_type;
 

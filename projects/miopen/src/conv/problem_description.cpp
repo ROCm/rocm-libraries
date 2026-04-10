@@ -173,10 +173,10 @@ void SerializeStrides(
     std::ostringstream& stream, in_desc& in, out_desc& out, wei_desc& wei, const char delim)
 {
 
-    auto join_v = [](std::ostringstream& stream, const auto& vec, const char delim) {
-        stream << *vec.begin();
+    auto join_v = [](std::ostringstream& stream_, const auto& vec, const char delim_) {
+        stream_ << *vec.begin();
         std::for_each(std::next(vec.begin()), vec.end(), [&](const auto& value) {
-            stream << delim << value;
+            stream_ << delim_ << value;
         });
     };
 

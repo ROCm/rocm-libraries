@@ -336,10 +336,44 @@ You must install the `half` header from the [half website](http://half.sourcefor
 
 ## Using Docker
 
-The easiest way to build MIOpen is via Docker. For example, you can build the top-level Docker file for gfx1101 using:
+The easiest way to build MIOpen is via Docker. Building the MIOpen Docker image requires [Docker Buildx](https://docs.docker.com/build/buildx/). Ensure it is available before proceeding:
 
 ```shell
-docker build -t miopen-image:gfx1101 --build-arg PREFIX=/opt/rocm --build-arg THEROCK_ASIC=gfx1101 -f ../../projects/miopen/Dockerfile ../../projects/.
+docker buildx version
+```
+
+The Dockerfile supports two build modes controlled by the `BUILD_TYPE` build argument:
+
+### Option 1: Using a prebuilt ROCm/TheRock image (default)
+
+This is the standard path for development. It pulls a pre-built `rocm/miopen:therock` base image from Docker Hub and builds the MIOpen environment on top of it, targeting the `miopen` stage:
+
+```shell
+docker buildx build \
+  --load \
+  --target miopen \
+  --tag miopen-image:gfx1101 \
+  --build-arg PREFIX=/opt/rocm \
+  --build-arg THEROCK_ASIC=gfx1101 \
+  -f ../../projects/miopen/Dockerfile \
+  ../../projects/.
+```
+
+### Option 2: Building ROCm/TheRock from source (nightly)
+
+This path clones and builds TheRock from source before building the MIOpen environment in a single step. Use this when you need to build against a specific TheRock commit or when no prebuilt image is available:
+
+```shell
+docker buildx build \
+  --load \
+  --target miopen \
+  --tag miopen-image:gfx1101 \
+  --build-arg BUILD_TYPE=build \
+  --build-arg THEROCK_GIT_HASH=<commit-hash> \
+  --build-arg PREFIX=/opt/rocm \
+  --build-arg THEROCK_ASIC=gfx1101 \
+  -f ../../projects/miopen/Dockerfile \
+  ../../projects/.
 ```
 
 Then, to enter the development environment, use `docker run`. For example:
@@ -348,9 +382,7 @@ Then, to enter the development environment, use `docker run`. For example:
 docker run -it -v $HOME:/data --privileged --rm --device=/dev/kfd --device /dev/dri:/dev/dri:rw  --volume /dev/dri:/dev/dri:rw -v /var/lib/docker/:/var/lib/docker --group-add video --cap-add=SYS_PTRACE --security-opt seccomp=unconfined miopen-image
 ```
 
-You can find prebuilt Docker images on [ROCm's public Docker Hub](https://hub.docker.com/r/rocm/miopen/tags). These images are CI images, with separate Docker tags for each device architecture.
-
-For development workflows requiring multi-arch support, nightly-built dev images are available at [rocm/miopen-dev on Docker Hub](https://hub.docker.com/r/rocm/miopen-dev/tags).
+You can find prebuilt Docker images on [ROCm's public Docker Hub](https://hub.docker.com/r/rocm/miopen/tags). These images are multi arch CI images.
 
 ## Porting from cuDNN to MIOpen
 

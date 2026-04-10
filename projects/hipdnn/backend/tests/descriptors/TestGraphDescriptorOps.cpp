@@ -16,9 +16,9 @@
 
 #include <flatbuffers/flatbuffers.h>
 #include <gtest/gtest.h>
-#include <hipdnn_data_sdk/data_objects/convolution_fwd_attributes_generated.h>
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
-#include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/convolution_fwd_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_test_sdk/constants/ConvFpropConstants.hpp>
 #include <hipdnn_test_sdk/utilities/ToVec.hpp>
 
@@ -30,7 +30,7 @@
 
 using namespace hipdnn_backend;
 using namespace hipdnn_backend::test_utilities;
-using namespace hipdnn_data_sdk::data_objects;
+using namespace hipdnn_flatbuffers_sdk::data_objects;
 using namespace hipdnn_tests::constants;
 using hipdnn_tests::toVec;
 
@@ -153,32 +153,32 @@ TEST_F(TestGraphDescriptorOps, BuildFromSingleOperation)
     ASSERT_EQ(graphT->tensors.size(), 3);
 
     // Verify each tensor has correct fields
-    verifyTensor(findTensorByUid(*graphT, K_TENSOR_X_UID),
-                 K_TENSOR_X_UID,
-                 toVec(K_TENSOR_X_DIMS),
-                 toVec(K_TENSOR_X_STRIDES),
+    verifyTensor(findTensorByUid(*graphT, K_FPROP_TENSOR_X_UID),
+                 K_FPROP_TENSOR_X_UID,
+                 toVec(K_FPROP_TENSOR_X_DIMS),
+                 toVec(K_FPROP_TENSOR_X_STRIDES),
                  DataType::FLOAT);
-    verifyTensor(findTensorByUid(*graphT, K_TENSOR_W_UID),
-                 K_TENSOR_W_UID,
-                 toVec(K_TENSOR_W_DIMS),
-                 toVec(K_TENSOR_W_STRIDES),
+    verifyTensor(findTensorByUid(*graphT, K_FPROP_TENSOR_W_UID),
+                 K_FPROP_TENSOR_W_UID,
+                 toVec(K_FPROP_TENSOR_W_DIMS),
+                 toVec(K_FPROP_TENSOR_W_STRIDES),
                  DataType::FLOAT);
-    verifyTensor(findTensorByUid(*graphT, K_TENSOR_Y_UID),
-                 K_TENSOR_Y_UID,
-                 toVec(K_TENSOR_Y_DIMS),
-                 toVec(K_TENSOR_Y_STRIDES),
+    verifyTensor(findTensorByUid(*graphT, K_FPROP_TENSOR_Y_UID),
+                 K_FPROP_TENSOR_Y_UID,
+                 toVec(K_FPROP_TENSOR_Y_DIMS),
+                 toVec(K_FPROP_TENSOR_Y_STRIDES),
                  DataType::FLOAT);
 
     // Verify the node's convolution attributes and tensor UID references
     verifyConvFwdNode(*graphT->nodes[0],
                       DataType::FLOAT,
-                      K_TENSOR_X_UID,
-                      K_TENSOR_W_UID,
-                      K_TENSOR_Y_UID,
-                      toVec(K_CONV_PADDING),
-                      toVec(K_CONV_PADDING),
-                      toVec(K_CONV_STRIDE),
-                      toVec(K_CONV_DILATION));
+                      K_FPROP_TENSOR_X_UID,
+                      K_FPROP_TENSOR_W_UID,
+                      K_FPROP_TENSOR_Y_UID,
+                      toVec(K_FPROP_CONV_PADDING),
+                      toVec(K_FPROP_CONV_PADDING),
+                      toVec(K_FPROP_CONV_STRIDE),
+                      toVec(K_FPROP_CONV_DILATION));
 }
 
 TEST_F(TestGraphDescriptorOps, BuildFromMultipleOperations)
@@ -188,11 +188,11 @@ TEST_F(TestGraphDescriptorOps, BuildFromMultipleOperations)
 
     // Second conv: second tensor set
     auto xDesc2 = createFinalizedTensor(
-        K_TENSOR_X2_UID, toVec(K_TENSOR_X2_DIMS), toVec(K_TENSOR_X2_STRIDES));
+        K_FPROP_TENSOR_X2_UID, toVec(K_FPROP_TENSOR_X2_DIMS), toVec(K_FPROP_TENSOR_X2_STRIDES));
     auto wDesc2 = createFinalizedTensor(
-        K_TENSOR_W2_UID, toVec(K_TENSOR_W2_DIMS), toVec(K_TENSOR_W2_STRIDES));
+        K_FPROP_TENSOR_W2_UID, toVec(K_FPROP_TENSOR_W2_DIMS), toVec(K_FPROP_TENSOR_W2_STRIDES));
     auto yDesc2 = createFinalizedTensor(
-        K_TENSOR_Y2_UID, toVec(K_TENSOR_Y2_DIMS), toVec(K_TENSOR_Y2_STRIDES));
+        K_FPROP_TENSOR_Y2_UID, toVec(K_FPROP_TENSOR_Y2_DIMS), toVec(K_FPROP_TENSOR_Y2_STRIDES));
     auto convOp2 = createFinalizedConvOp(xDesc2.get(), wDesc2.get(), yDesc2.get());
 
     auto desc = getDescriptor();
@@ -212,60 +212,60 @@ TEST_F(TestGraphDescriptorOps, BuildFromMultipleOperations)
     ASSERT_EQ(graphT->tensors.size(), 6);
 
     // Verify all tensors from first conv op
-    verifyTensor(findTensorByUid(*graphT, K_TENSOR_X_UID),
-                 K_TENSOR_X_UID,
-                 toVec(K_TENSOR_X_DIMS),
-                 toVec(K_TENSOR_X_STRIDES),
+    verifyTensor(findTensorByUid(*graphT, K_FPROP_TENSOR_X_UID),
+                 K_FPROP_TENSOR_X_UID,
+                 toVec(K_FPROP_TENSOR_X_DIMS),
+                 toVec(K_FPROP_TENSOR_X_STRIDES),
                  DataType::FLOAT);
-    verifyTensor(findTensorByUid(*graphT, K_TENSOR_W_UID),
-                 K_TENSOR_W_UID,
-                 toVec(K_TENSOR_W_DIMS),
-                 toVec(K_TENSOR_W_STRIDES),
+    verifyTensor(findTensorByUid(*graphT, K_FPROP_TENSOR_W_UID),
+                 K_FPROP_TENSOR_W_UID,
+                 toVec(K_FPROP_TENSOR_W_DIMS),
+                 toVec(K_FPROP_TENSOR_W_STRIDES),
                  DataType::FLOAT);
-    verifyTensor(findTensorByUid(*graphT, K_TENSOR_Y_UID),
-                 K_TENSOR_Y_UID,
-                 toVec(K_TENSOR_Y_DIMS),
-                 toVec(K_TENSOR_Y_STRIDES),
+    verifyTensor(findTensorByUid(*graphT, K_FPROP_TENSOR_Y_UID),
+                 K_FPROP_TENSOR_Y_UID,
+                 toVec(K_FPROP_TENSOR_Y_DIMS),
+                 toVec(K_FPROP_TENSOR_Y_STRIDES),
                  DataType::FLOAT);
 
     // Verify all tensors from second conv op
-    verifyTensor(findTensorByUid(*graphT, K_TENSOR_X2_UID),
-                 K_TENSOR_X2_UID,
-                 toVec(K_TENSOR_X2_DIMS),
-                 toVec(K_TENSOR_X2_STRIDES),
+    verifyTensor(findTensorByUid(*graphT, K_FPROP_TENSOR_X2_UID),
+                 K_FPROP_TENSOR_X2_UID,
+                 toVec(K_FPROP_TENSOR_X2_DIMS),
+                 toVec(K_FPROP_TENSOR_X2_STRIDES),
                  DataType::FLOAT);
-    verifyTensor(findTensorByUid(*graphT, K_TENSOR_W2_UID),
-                 K_TENSOR_W2_UID,
-                 toVec(K_TENSOR_W2_DIMS),
-                 toVec(K_TENSOR_W2_STRIDES),
+    verifyTensor(findTensorByUid(*graphT, K_FPROP_TENSOR_W2_UID),
+                 K_FPROP_TENSOR_W2_UID,
+                 toVec(K_FPROP_TENSOR_W2_DIMS),
+                 toVec(K_FPROP_TENSOR_W2_STRIDES),
                  DataType::FLOAT);
-    verifyTensor(findTensorByUid(*graphT, K_TENSOR_Y2_UID),
-                 K_TENSOR_Y2_UID,
-                 toVec(K_TENSOR_Y2_DIMS),
-                 toVec(K_TENSOR_Y2_STRIDES),
+    verifyTensor(findTensorByUid(*graphT, K_FPROP_TENSOR_Y2_UID),
+                 K_FPROP_TENSOR_Y2_UID,
+                 toVec(K_FPROP_TENSOR_Y2_DIMS),
+                 toVec(K_FPROP_TENSOR_Y2_STRIDES),
                  DataType::FLOAT);
 
     // Verify first node references primary tensors
     verifyConvFwdNode(*graphT->nodes[0],
                       DataType::FLOAT,
-                      K_TENSOR_X_UID,
-                      K_TENSOR_W_UID,
-                      K_TENSOR_Y_UID,
-                      toVec(K_CONV_PADDING),
-                      toVec(K_CONV_PADDING),
-                      toVec(K_CONV_STRIDE),
-                      toVec(K_CONV_DILATION));
+                      K_FPROP_TENSOR_X_UID,
+                      K_FPROP_TENSOR_W_UID,
+                      K_FPROP_TENSOR_Y_UID,
+                      toVec(K_FPROP_CONV_PADDING),
+                      toVec(K_FPROP_CONV_PADDING),
+                      toVec(K_FPROP_CONV_STRIDE),
+                      toVec(K_FPROP_CONV_DILATION));
 
     // Verify second node references second tensor set
     verifyConvFwdNode(*graphT->nodes[1],
                       DataType::FLOAT,
-                      K_TENSOR_X2_UID,
-                      K_TENSOR_W2_UID,
-                      K_TENSOR_Y2_UID,
-                      toVec(K_CONV_PADDING),
-                      toVec(K_CONV_PADDING),
-                      toVec(K_CONV_STRIDE),
-                      toVec(K_CONV_DILATION));
+                      K_FPROP_TENSOR_X2_UID,
+                      K_FPROP_TENSOR_W2_UID,
+                      K_FPROP_TENSOR_Y2_UID,
+                      toVec(K_FPROP_CONV_PADDING),
+                      toVec(K_FPROP_CONV_PADDING),
+                      toVec(K_FPROP_CONV_STRIDE),
+                      toVec(K_FPROP_CONV_DILATION));
 }
 
 TEST_F(TestGraphDescriptorOps, TensorDeduplication)
@@ -274,9 +274,9 @@ TEST_F(TestGraphDescriptorOps, TensorDeduplication)
     auto conv1 = createDefaultConvOp();
 
     auto xDesc2 = createFinalizedTensor(
-        K_TENSOR_X2_UID, toVec(K_TENSOR_X2_DIMS), toVec(K_TENSOR_X2_STRIDES));
+        K_FPROP_TENSOR_X2_UID, toVec(K_FPROP_TENSOR_X2_DIMS), toVec(K_FPROP_TENSOR_X2_STRIDES));
     auto wDesc2 = createFinalizedTensor(
-        K_TENSOR_W2_UID, toVec(K_TENSOR_W2_DIMS), toVec(K_TENSOR_W2_STRIDES));
+        K_FPROP_TENSOR_W2_UID, toVec(K_FPROP_TENSOR_W2_DIMS), toVec(K_FPROP_TENSOR_W2_STRIDES));
 
     // Reuse conv1.yDesc (uid 3) as Y for the second op
     auto convOp2 = createFinalizedConvOp(xDesc2.get(), wDesc2.get(), conv1.yDesc.get());
@@ -307,53 +307,53 @@ TEST_F(TestGraphDescriptorOps, TensorDeduplication)
     EXPECT_EQ(tensorUids.size(), 5);
 
     // Verify each tensor's fields
-    verifyTensor(findTensorByUid(*graphT, K_TENSOR_X_UID),
-                 K_TENSOR_X_UID,
-                 toVec(K_TENSOR_X_DIMS),
-                 toVec(K_TENSOR_X_STRIDES),
+    verifyTensor(findTensorByUid(*graphT, K_FPROP_TENSOR_X_UID),
+                 K_FPROP_TENSOR_X_UID,
+                 toVec(K_FPROP_TENSOR_X_DIMS),
+                 toVec(K_FPROP_TENSOR_X_STRIDES),
                  DataType::FLOAT);
-    verifyTensor(findTensorByUid(*graphT, K_TENSOR_W_UID),
-                 K_TENSOR_W_UID,
-                 toVec(K_TENSOR_W_DIMS),
-                 toVec(K_TENSOR_W_STRIDES),
+    verifyTensor(findTensorByUid(*graphT, K_FPROP_TENSOR_W_UID),
+                 K_FPROP_TENSOR_W_UID,
+                 toVec(K_FPROP_TENSOR_W_DIMS),
+                 toVec(K_FPROP_TENSOR_W_STRIDES),
                  DataType::FLOAT);
-    verifyTensor(findTensorByUid(*graphT, K_TENSOR_Y_UID),
-                 K_TENSOR_Y_UID,
-                 toVec(K_TENSOR_Y_DIMS),
-                 toVec(K_TENSOR_Y_STRIDES),
+    verifyTensor(findTensorByUid(*graphT, K_FPROP_TENSOR_Y_UID),
+                 K_FPROP_TENSOR_Y_UID,
+                 toVec(K_FPROP_TENSOR_Y_DIMS),
+                 toVec(K_FPROP_TENSOR_Y_STRIDES),
                  DataType::FLOAT);
-    verifyTensor(findTensorByUid(*graphT, K_TENSOR_X2_UID),
-                 K_TENSOR_X2_UID,
-                 toVec(K_TENSOR_X2_DIMS),
-                 toVec(K_TENSOR_X2_STRIDES),
+    verifyTensor(findTensorByUid(*graphT, K_FPROP_TENSOR_X2_UID),
+                 K_FPROP_TENSOR_X2_UID,
+                 toVec(K_FPROP_TENSOR_X2_DIMS),
+                 toVec(K_FPROP_TENSOR_X2_STRIDES),
                  DataType::FLOAT);
-    verifyTensor(findTensorByUid(*graphT, K_TENSOR_W2_UID),
-                 K_TENSOR_W2_UID,
-                 toVec(K_TENSOR_W2_DIMS),
-                 toVec(K_TENSOR_W2_STRIDES),
+    verifyTensor(findTensorByUid(*graphT, K_FPROP_TENSOR_W2_UID),
+                 K_FPROP_TENSOR_W2_UID,
+                 toVec(K_FPROP_TENSOR_W2_DIMS),
+                 toVec(K_FPROP_TENSOR_W2_STRIDES),
                  DataType::FLOAT);
 
     // Verify first node: primary tensors
     verifyConvFwdNode(*graphT->nodes[0],
                       DataType::FLOAT,
-                      K_TENSOR_X_UID,
-                      K_TENSOR_W_UID,
-                      K_TENSOR_Y_UID,
-                      toVec(K_CONV_PADDING),
-                      toVec(K_CONV_PADDING),
-                      toVec(K_CONV_STRIDE),
-                      toVec(K_CONV_DILATION));
+                      K_FPROP_TENSOR_X_UID,
+                      K_FPROP_TENSOR_W_UID,
+                      K_FPROP_TENSOR_Y_UID,
+                      toVec(K_FPROP_CONV_PADDING),
+                      toVec(K_FPROP_CONV_PADDING),
+                      toVec(K_FPROP_CONV_STRIDE),
+                      toVec(K_FPROP_CONV_DILATION));
 
     // Verify second node also references Y (the shared tensor)
     verifyConvFwdNode(*graphT->nodes[1],
                       DataType::FLOAT,
-                      K_TENSOR_X2_UID,
-                      K_TENSOR_W2_UID,
-                      K_TENSOR_Y_UID,
-                      toVec(K_CONV_PADDING),
-                      toVec(K_CONV_PADDING),
-                      toVec(K_CONV_STRIDE),
-                      toVec(K_CONV_DILATION));
+                      K_FPROP_TENSOR_X2_UID,
+                      K_FPROP_TENSOR_W2_UID,
+                      K_FPROP_TENSOR_Y_UID,
+                      toVec(K_FPROP_CONV_PADDING),
+                      toVec(K_FPROP_CONV_PADDING),
+                      toVec(K_FPROP_CONV_STRIDE),
+                      toVec(K_FPROP_CONV_DILATION));
 }
 
 TEST_F(TestGraphDescriptorOps, ComputeDataTypePreserved)
@@ -377,32 +377,32 @@ TEST_F(TestGraphDescriptorOps, ComputeDataTypePreserved)
     ASSERT_EQ(graphT->tensors.size(), 3);
 
     // Verify tensors retain FLOAT data type (tensor data type is independent of compute type)
-    verifyTensor(findTensorByUid(*graphT, K_TENSOR_X_UID),
-                 K_TENSOR_X_UID,
-                 toVec(K_TENSOR_X_DIMS),
-                 toVec(K_TENSOR_X_STRIDES),
+    verifyTensor(findTensorByUid(*graphT, K_FPROP_TENSOR_X_UID),
+                 K_FPROP_TENSOR_X_UID,
+                 toVec(K_FPROP_TENSOR_X_DIMS),
+                 toVec(K_FPROP_TENSOR_X_STRIDES),
                  DataType::FLOAT);
-    verifyTensor(findTensorByUid(*graphT, K_TENSOR_W_UID),
-                 K_TENSOR_W_UID,
-                 toVec(K_TENSOR_W_DIMS),
-                 toVec(K_TENSOR_W_STRIDES),
+    verifyTensor(findTensorByUid(*graphT, K_FPROP_TENSOR_W_UID),
+                 K_FPROP_TENSOR_W_UID,
+                 toVec(K_FPROP_TENSOR_W_DIMS),
+                 toVec(K_FPROP_TENSOR_W_STRIDES),
                  DataType::FLOAT);
-    verifyTensor(findTensorByUid(*graphT, K_TENSOR_Y_UID),
-                 K_TENSOR_Y_UID,
-                 toVec(K_TENSOR_Y_DIMS),
-                 toVec(K_TENSOR_Y_STRIDES),
+    verifyTensor(findTensorByUid(*graphT, K_FPROP_TENSOR_Y_UID),
+                 K_FPROP_TENSOR_Y_UID,
+                 toVec(K_FPROP_TENSOR_Y_DIMS),
+                 toVec(K_FPROP_TENSOR_Y_STRIDES),
                  DataType::FLOAT);
 
     // Verify node compute data type is HALF and all conv attributes are correct
     verifyConvFwdNode(*graphT->nodes[0],
                       DataType::HALF,
-                      K_TENSOR_X_UID,
-                      K_TENSOR_W_UID,
-                      K_TENSOR_Y_UID,
-                      toVec(K_CONV_PADDING),
-                      toVec(K_CONV_PADDING),
-                      toVec(K_CONV_STRIDE),
-                      toVec(K_CONV_DILATION));
+                      K_FPROP_TENSOR_X_UID,
+                      K_FPROP_TENSOR_W_UID,
+                      K_FPROP_TENSOR_Y_UID,
+                      toVec(K_FPROP_CONV_PADDING),
+                      toVec(K_FPROP_CONV_PADDING),
+                      toVec(K_FPROP_CONV_STRIDE),
+                      toVec(K_FPROP_CONV_DILATION));
 }
 
 TEST_F(TestGraphDescriptorOps, ConvolutionAttributesPreserved)
@@ -433,7 +433,7 @@ TEST_F(TestGraphDescriptorOps, ConvolutionAttributesPreserved)
     const std::vector<int64_t> kCustomPrePadding = {2, 3};
     const std::vector<int64_t> kCustomPostPadding = {4, 5};
     const std::vector<int64_t> kCustomStride = {2, 2};
-    auto dilation = toVec(K_CONV_DILATION);
+    auto dilation = toVec(K_FPROP_CONV_DILATION);
 
     convDesc->setAttribute(
         HIPDNN_ATTR_CONVOLUTION_PRE_PADDINGS, HIPDNN_TYPE_INT64, 2, kCustomPrePadding.data());
@@ -447,7 +447,7 @@ TEST_F(TestGraphDescriptorOps, ConvolutionAttributesPreserved)
     auto computeType = HIPDNN_DATA_FLOAT;
     convDesc->setAttribute(
         HIPDNN_ATTR_CONVOLUTION_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
-    hipdnnConvolutionMode_t convMode = HIPDNN_CONVOLUTION_MODE_CROSS_CORRELATION;
+    hipdnnConvolutionMode_t convMode = HIPDNN_CROSS_CORRELATION;
     convDesc->setAttribute(
         HIPDNN_ATTR_CONVOLUTION_CONV_MODE, HIPDNN_TYPE_CONVOLUTION_MODE, 1, &convMode);
     convDesc->finalize();
@@ -469,32 +469,32 @@ TEST_F(TestGraphDescriptorOps, ConvolutionAttributesPreserved)
     ASSERT_EQ(graphT->tensors.size(), 3);
 
     // Verify tensors
-    verifyTensor(findTensorByUid(*graphT, K_TENSOR_X_UID),
-                 K_TENSOR_X_UID,
-                 toVec(K_TENSOR_X_DIMS),
-                 toVec(K_TENSOR_X_STRIDES),
+    verifyTensor(findTensorByUid(*graphT, K_FPROP_TENSOR_X_UID),
+                 K_FPROP_TENSOR_X_UID,
+                 toVec(K_FPROP_TENSOR_X_DIMS),
+                 toVec(K_FPROP_TENSOR_X_STRIDES),
                  DataType::FLOAT);
-    verifyTensor(findTensorByUid(*graphT, K_TENSOR_W_UID),
-                 K_TENSOR_W_UID,
-                 toVec(K_TENSOR_W_DIMS),
-                 toVec(K_TENSOR_W_STRIDES),
+    verifyTensor(findTensorByUid(*graphT, K_FPROP_TENSOR_W_UID),
+                 K_FPROP_TENSOR_W_UID,
+                 toVec(K_FPROP_TENSOR_W_DIMS),
+                 toVec(K_FPROP_TENSOR_W_STRIDES),
                  DataType::FLOAT);
-    verifyTensor(findTensorByUid(*graphT, K_TENSOR_Y_UID),
-                 K_TENSOR_Y_UID,
-                 toVec(K_TENSOR_Y_DIMS),
-                 toVec(K_TENSOR_Y_STRIDES),
+    verifyTensor(findTensorByUid(*graphT, K_FPROP_TENSOR_Y_UID),
+                 K_FPROP_TENSOR_Y_UID,
+                 toVec(K_FPROP_TENSOR_Y_DIMS),
+                 toVec(K_FPROP_TENSOR_Y_STRIDES),
                  DataType::FLOAT);
 
     // Verify node with asymmetric padding and non-unit stride
     verifyConvFwdNode(*graphT->nodes[0],
                       DataType::FLOAT,
-                      K_TENSOR_X_UID,
-                      K_TENSOR_W_UID,
-                      K_TENSOR_Y_UID,
+                      K_FPROP_TENSOR_X_UID,
+                      K_FPROP_TENSOR_W_UID,
+                      K_FPROP_TENSOR_Y_UID,
                       kCustomPrePadding,
                       kCustomPostPadding,
                       kCustomStride,
-                      toVec(K_CONV_DILATION));
+                      toVec(K_FPROP_CONV_DILATION));
 }
 
 // =============================================================================
@@ -529,30 +529,30 @@ TEST_F(TestGraphDescriptorOps, SetOperationsAndHandleAnyOrder)
 
         ASSERT_EQ(graphT->tensors.size(), 3);
         ASSERT_EQ(graphT->nodes.size(), 1);
-        verifyTensor(findTensorByUid(*graphT, K_TENSOR_X_UID),
-                     K_TENSOR_X_UID,
-                     toVec(K_TENSOR_X_DIMS),
-                     toVec(K_TENSOR_X_STRIDES),
+        verifyTensor(findTensorByUid(*graphT, K_FPROP_TENSOR_X_UID),
+                     K_FPROP_TENSOR_X_UID,
+                     toVec(K_FPROP_TENSOR_X_DIMS),
+                     toVec(K_FPROP_TENSOR_X_STRIDES),
                      DataType::FLOAT);
-        verifyTensor(findTensorByUid(*graphT, K_TENSOR_W_UID),
-                     K_TENSOR_W_UID,
-                     toVec(K_TENSOR_W_DIMS),
-                     toVec(K_TENSOR_W_STRIDES),
+        verifyTensor(findTensorByUid(*graphT, K_FPROP_TENSOR_W_UID),
+                     K_FPROP_TENSOR_W_UID,
+                     toVec(K_FPROP_TENSOR_W_DIMS),
+                     toVec(K_FPROP_TENSOR_W_STRIDES),
                      DataType::FLOAT);
-        verifyTensor(findTensorByUid(*graphT, K_TENSOR_Y_UID),
-                     K_TENSOR_Y_UID,
-                     toVec(K_TENSOR_Y_DIMS),
-                     toVec(K_TENSOR_Y_STRIDES),
+        verifyTensor(findTensorByUid(*graphT, K_FPROP_TENSOR_Y_UID),
+                     K_FPROP_TENSOR_Y_UID,
+                     toVec(K_FPROP_TENSOR_Y_DIMS),
+                     toVec(K_FPROP_TENSOR_Y_STRIDES),
                      DataType::FLOAT);
         verifyConvFwdNode(*graphT->nodes[0],
                           DataType::FLOAT,
-                          K_TENSOR_X_UID,
-                          K_TENSOR_W_UID,
-                          K_TENSOR_Y_UID,
-                          toVec(K_CONV_PADDING),
-                          toVec(K_CONV_PADDING),
-                          toVec(K_CONV_STRIDE),
-                          toVec(K_CONV_DILATION));
+                          K_FPROP_TENSOR_X_UID,
+                          K_FPROP_TENSOR_W_UID,
+                          K_FPROP_TENSOR_Y_UID,
+                          toVec(K_FPROP_CONV_PADDING),
+                          toVec(K_FPROP_CONV_PADDING),
+                          toVec(K_FPROP_CONV_STRIDE),
+                          toVec(K_FPROP_CONV_DILATION));
     }
 
     // Test: handle first, then operations (with alternate UIDs)
@@ -562,9 +562,9 @@ TEST_F(TestGraphDescriptorOps, SetOperationsAndHandleAnyOrder)
 
         auto xDesc = createFinalizedTensor(K_ALT_TENSOR_X_UID);
         auto wDesc = createFinalizedTensor(
-            K_ALT_TENSOR_W_UID, toVec(K_TENSOR_W_DIMS), toVec(K_TENSOR_W_STRIDES));
+            K_ALT_TENSOR_W_UID, toVec(K_FPROP_TENSOR_W_DIMS), toVec(K_FPROP_TENSOR_W_STRIDES));
         auto yDesc = createFinalizedTensor(
-            K_ALT_TENSOR_Y_UID, toVec(K_TENSOR_Y_DIMS), toVec(K_TENSOR_Y_STRIDES));
+            K_ALT_TENSOR_Y_UID, toVec(K_FPROP_TENSOR_Y_DIMS), toVec(K_FPROP_TENSOR_Y_STRIDES));
         auto convOp = createFinalizedConvOp(xDesc.get(), wDesc.get(), yDesc.get());
 
         hipdnnHandle_t handle = &_mockHandle;
@@ -588,28 +588,28 @@ TEST_F(TestGraphDescriptorOps, SetOperationsAndHandleAnyOrder)
         ASSERT_EQ(graphT->nodes.size(), 1);
         verifyTensor(findTensorByUid(*graphT, K_ALT_TENSOR_X_UID),
                      K_ALT_TENSOR_X_UID,
-                     toVec(K_TENSOR_X_DIMS),
-                     toVec(K_TENSOR_X_STRIDES),
+                     toVec(K_FPROP_TENSOR_X_DIMS),
+                     toVec(K_FPROP_TENSOR_X_STRIDES),
                      DataType::FLOAT);
         verifyTensor(findTensorByUid(*graphT, K_ALT_TENSOR_W_UID),
                      K_ALT_TENSOR_W_UID,
-                     toVec(K_TENSOR_W_DIMS),
-                     toVec(K_TENSOR_W_STRIDES),
+                     toVec(K_FPROP_TENSOR_W_DIMS),
+                     toVec(K_FPROP_TENSOR_W_STRIDES),
                      DataType::FLOAT);
         verifyTensor(findTensorByUid(*graphT, K_ALT_TENSOR_Y_UID),
                      K_ALT_TENSOR_Y_UID,
-                     toVec(K_TENSOR_Y_DIMS),
-                     toVec(K_TENSOR_Y_STRIDES),
+                     toVec(K_FPROP_TENSOR_Y_DIMS),
+                     toVec(K_FPROP_TENSOR_Y_STRIDES),
                      DataType::FLOAT);
         verifyConvFwdNode(*graphT->nodes[0],
                           DataType::FLOAT,
                           K_ALT_TENSOR_X_UID,
                           K_ALT_TENSOR_W_UID,
                           K_ALT_TENSOR_Y_UID,
-                          toVec(K_CONV_PADDING),
-                          toVec(K_CONV_PADDING),
-                          toVec(K_CONV_STRIDE),
-                          toVec(K_CONV_DILATION));
+                          toVec(K_FPROP_CONV_PADDING),
+                          toVec(K_FPROP_CONV_PADDING),
+                          toVec(K_FPROP_CONV_STRIDE),
+                          toVec(K_FPROP_CONV_DILATION));
     }
 }
 
@@ -618,11 +618,11 @@ TEST_F(TestGraphDescriptorOps, SetOperationsMultipleBatches)
     auto conv1 = createDefaultConvOp();
 
     auto xDesc2 = createFinalizedTensor(
-        K_TENSOR_X2_UID, toVec(K_TENSOR_X2_DIMS), toVec(K_TENSOR_X2_STRIDES));
+        K_FPROP_TENSOR_X2_UID, toVec(K_FPROP_TENSOR_X2_DIMS), toVec(K_FPROP_TENSOR_X2_STRIDES));
     auto wDesc2 = createFinalizedTensor(
-        K_TENSOR_W2_UID, toVec(K_TENSOR_W2_DIMS), toVec(K_TENSOR_W2_STRIDES));
+        K_FPROP_TENSOR_W2_UID, toVec(K_FPROP_TENSOR_W2_DIMS), toVec(K_FPROP_TENSOR_W2_STRIDES));
     auto yDesc2 = createFinalizedTensor(
-        K_TENSOR_Y2_UID, toVec(K_TENSOR_Y2_DIMS), toVec(K_TENSOR_Y2_STRIDES));
+        K_FPROP_TENSOR_Y2_UID, toVec(K_FPROP_TENSOR_Y2_DIMS), toVec(K_FPROP_TENSOR_Y2_STRIDES));
     auto convOp2 = createFinalizedConvOp(xDesc2.get(), wDesc2.get(), yDesc2.get());
 
     auto desc = getDescriptor();
@@ -645,58 +645,58 @@ TEST_F(TestGraphDescriptorOps, SetOperationsMultipleBatches)
     ASSERT_EQ(graphT->tensors.size(), 6);
 
     // Verify tensors from first operation
-    verifyTensor(findTensorByUid(*graphT, K_TENSOR_X_UID),
-                 K_TENSOR_X_UID,
-                 toVec(K_TENSOR_X_DIMS),
-                 toVec(K_TENSOR_X_STRIDES),
+    verifyTensor(findTensorByUid(*graphT, K_FPROP_TENSOR_X_UID),
+                 K_FPROP_TENSOR_X_UID,
+                 toVec(K_FPROP_TENSOR_X_DIMS),
+                 toVec(K_FPROP_TENSOR_X_STRIDES),
                  DataType::FLOAT);
-    verifyTensor(findTensorByUid(*graphT, K_TENSOR_W_UID),
-                 K_TENSOR_W_UID,
-                 toVec(K_TENSOR_W_DIMS),
-                 toVec(K_TENSOR_W_STRIDES),
+    verifyTensor(findTensorByUid(*graphT, K_FPROP_TENSOR_W_UID),
+                 K_FPROP_TENSOR_W_UID,
+                 toVec(K_FPROP_TENSOR_W_DIMS),
+                 toVec(K_FPROP_TENSOR_W_STRIDES),
                  DataType::FLOAT);
-    verifyTensor(findTensorByUid(*graphT, K_TENSOR_Y_UID),
-                 K_TENSOR_Y_UID,
-                 toVec(K_TENSOR_Y_DIMS),
-                 toVec(K_TENSOR_Y_STRIDES),
+    verifyTensor(findTensorByUid(*graphT, K_FPROP_TENSOR_Y_UID),
+                 K_FPROP_TENSOR_Y_UID,
+                 toVec(K_FPROP_TENSOR_Y_DIMS),
+                 toVec(K_FPROP_TENSOR_Y_STRIDES),
                  DataType::FLOAT);
 
     // Verify tensors from second operation
-    verifyTensor(findTensorByUid(*graphT, K_TENSOR_X2_UID),
-                 K_TENSOR_X2_UID,
-                 toVec(K_TENSOR_X2_DIMS),
-                 toVec(K_TENSOR_X2_STRIDES),
+    verifyTensor(findTensorByUid(*graphT, K_FPROP_TENSOR_X2_UID),
+                 K_FPROP_TENSOR_X2_UID,
+                 toVec(K_FPROP_TENSOR_X2_DIMS),
+                 toVec(K_FPROP_TENSOR_X2_STRIDES),
                  DataType::FLOAT);
-    verifyTensor(findTensorByUid(*graphT, K_TENSOR_W2_UID),
-                 K_TENSOR_W2_UID,
-                 toVec(K_TENSOR_W2_DIMS),
-                 toVec(K_TENSOR_W2_STRIDES),
+    verifyTensor(findTensorByUid(*graphT, K_FPROP_TENSOR_W2_UID),
+                 K_FPROP_TENSOR_W2_UID,
+                 toVec(K_FPROP_TENSOR_W2_DIMS),
+                 toVec(K_FPROP_TENSOR_W2_STRIDES),
                  DataType::FLOAT);
-    verifyTensor(findTensorByUid(*graphT, K_TENSOR_Y2_UID),
-                 K_TENSOR_Y2_UID,
-                 toVec(K_TENSOR_Y2_DIMS),
-                 toVec(K_TENSOR_Y2_STRIDES),
+    verifyTensor(findTensorByUid(*graphT, K_FPROP_TENSOR_Y2_UID),
+                 K_FPROP_TENSOR_Y2_UID,
+                 toVec(K_FPROP_TENSOR_Y2_DIMS),
+                 toVec(K_FPROP_TENSOR_Y2_STRIDES),
                  DataType::FLOAT);
 
     // Verify both nodes reference correct tensor UIDs
     verifyConvFwdNode(*graphT->nodes[0],
                       DataType::FLOAT,
-                      K_TENSOR_X_UID,
-                      K_TENSOR_W_UID,
-                      K_TENSOR_Y_UID,
-                      toVec(K_CONV_PADDING),
-                      toVec(K_CONV_PADDING),
-                      toVec(K_CONV_STRIDE),
-                      toVec(K_CONV_DILATION));
+                      K_FPROP_TENSOR_X_UID,
+                      K_FPROP_TENSOR_W_UID,
+                      K_FPROP_TENSOR_Y_UID,
+                      toVec(K_FPROP_CONV_PADDING),
+                      toVec(K_FPROP_CONV_PADDING),
+                      toVec(K_FPROP_CONV_STRIDE),
+                      toVec(K_FPROP_CONV_DILATION));
     verifyConvFwdNode(*graphT->nodes[1],
                       DataType::FLOAT,
-                      K_TENSOR_X2_UID,
-                      K_TENSOR_W2_UID,
-                      K_TENSOR_Y2_UID,
-                      toVec(K_CONV_PADDING),
-                      toVec(K_CONV_PADDING),
-                      toVec(K_CONV_STRIDE),
-                      toVec(K_CONV_DILATION));
+                      K_FPROP_TENSOR_X2_UID,
+                      K_FPROP_TENSOR_W2_UID,
+                      K_FPROP_TENSOR_Y2_UID,
+                      toVec(K_FPROP_CONV_PADDING),
+                      toVec(K_FPROP_CONV_PADDING),
+                      toVec(K_FPROP_CONV_STRIDE),
+                      toVec(K_FPROP_CONV_DILATION));
 }
 
 // =============================================================================
@@ -735,7 +735,7 @@ TEST_F(TestGraphDescriptorOps, SetOperationsFailsWrongType)
     auto desc = getDescriptor();
 
     // Use a TensorDescriptor instead of an operation descriptor
-    auto tensorDesc = createFinalizedTensor(K_TENSOR_X_UID);
+    auto tensorDesc = createFinalizedTensor(K_FPROP_TENSOR_X_UID);
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {tensorDesc.get()};
     ASSERT_THROW_HIPDNN_STATUS(desc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_OPS,
@@ -822,13 +822,13 @@ TEST_F(TestGraphDescriptorOps, SerializedGraphVerifiable)
     ASSERT_EQ(graphT->nodes.size(), 1);
     verifyConvFwdNode(*graphT->nodes[0],
                       DataType::FLOAT,
-                      K_TENSOR_X_UID,
-                      K_TENSOR_W_UID,
-                      K_TENSOR_Y_UID,
-                      toVec(K_CONV_PADDING),
-                      toVec(K_CONV_PADDING),
-                      toVec(K_CONV_STRIDE),
-                      toVec(K_CONV_DILATION));
+                      K_FPROP_TENSOR_X_UID,
+                      K_FPROP_TENSOR_W_UID,
+                      K_FPROP_TENSOR_Y_UID,
+                      toVec(K_FPROP_CONV_PADDING),
+                      toVec(K_FPROP_CONV_PADDING),
+                      toVec(K_FPROP_CONV_STRIDE),
+                      toVec(K_FPROP_CONV_DILATION));
 }
 
 TEST_F(TestGraphDescriptorOps, SerializedGraphUnpackable)
@@ -855,32 +855,32 @@ TEST_F(TestGraphDescriptorOps, SerializedGraphUnpackable)
     ASSERT_EQ(graphT->nodes.size(), 1);
 
     // Verify unpacked tensor values match input
-    verifyTensor(findTensorByUid(*graphT, K_TENSOR_X_UID),
-                 K_TENSOR_X_UID,
-                 toVec(K_TENSOR_X_DIMS),
-                 toVec(K_TENSOR_X_STRIDES),
+    verifyTensor(findTensorByUid(*graphT, K_FPROP_TENSOR_X_UID),
+                 K_FPROP_TENSOR_X_UID,
+                 toVec(K_FPROP_TENSOR_X_DIMS),
+                 toVec(K_FPROP_TENSOR_X_STRIDES),
                  DataType::FLOAT);
-    verifyTensor(findTensorByUid(*graphT, K_TENSOR_W_UID),
-                 K_TENSOR_W_UID,
-                 toVec(K_TENSOR_W_DIMS),
-                 toVec(K_TENSOR_W_STRIDES),
+    verifyTensor(findTensorByUid(*graphT, K_FPROP_TENSOR_W_UID),
+                 K_FPROP_TENSOR_W_UID,
+                 toVec(K_FPROP_TENSOR_W_DIMS),
+                 toVec(K_FPROP_TENSOR_W_STRIDES),
                  DataType::FLOAT);
-    verifyTensor(findTensorByUid(*graphT, K_TENSOR_Y_UID),
-                 K_TENSOR_Y_UID,
-                 toVec(K_TENSOR_Y_DIMS),
-                 toVec(K_TENSOR_Y_STRIDES),
+    verifyTensor(findTensorByUid(*graphT, K_FPROP_TENSOR_Y_UID),
+                 K_FPROP_TENSOR_Y_UID,
+                 toVec(K_FPROP_TENSOR_Y_DIMS),
+                 toVec(K_FPROP_TENSOR_Y_STRIDES),
                  DataType::FLOAT);
 
     // Verify unpacked node values match input
     verifyConvFwdNode(*graphT->nodes[0],
                       DataType::FLOAT,
-                      K_TENSOR_X_UID,
-                      K_TENSOR_W_UID,
-                      K_TENSOR_Y_UID,
-                      toVec(K_CONV_PADDING),
-                      toVec(K_CONV_PADDING),
-                      toVec(K_CONV_STRIDE),
-                      toVec(K_CONV_DILATION));
+                      K_FPROP_TENSOR_X_UID,
+                      K_FPROP_TENSOR_W_UID,
+                      K_FPROP_TENSOR_Y_UID,
+                      toVec(K_FPROP_CONV_PADDING),
+                      toVec(K_FPROP_CONV_PADDING),
+                      toVec(K_FPROP_CONV_STRIDE),
+                      toVec(K_FPROP_CONV_DILATION));
 }
 
 TEST_F(TestGraphDescriptorOps, GetSerializedGraphMultipleCalls)
@@ -954,13 +954,13 @@ TEST_F(TestGraphDescriptorOps, GraphHasCorrectNodeCount)
     // Verify node has ConvolutionFwdAttributes and correct tensor UID references
     verifyConvFwdNode(*graphT->nodes[0],
                       DataType::FLOAT,
-                      K_TENSOR_X_UID,
-                      K_TENSOR_W_UID,
-                      K_TENSOR_Y_UID,
-                      toVec(K_CONV_PADDING),
-                      toVec(K_CONV_PADDING),
-                      toVec(K_CONV_STRIDE),
-                      toVec(K_CONV_DILATION));
+                      K_FPROP_TENSOR_X_UID,
+                      K_FPROP_TENSOR_W_UID,
+                      K_FPROP_TENSOR_Y_UID,
+                      toVec(K_FPROP_CONV_PADDING),
+                      toVec(K_FPROP_CONV_PADDING),
+                      toVec(K_FPROP_CONV_STRIDE),
+                      toVec(K_FPROP_CONV_DILATION));
 }
 
 TEST_F(TestGraphDescriptorOps, GraphHasCorrectTensorCount)
@@ -983,20 +983,20 @@ TEST_F(TestGraphDescriptorOps, GraphHasCorrectTensorCount)
     ASSERT_EQ(graphT->tensors.size(), 3);
 
     // Verify each tensor's full field values (not just UIDs)
-    verifyTensor(findTensorByUid(*graphT, K_TENSOR_X_UID),
-                 K_TENSOR_X_UID,
-                 toVec(K_TENSOR_X_DIMS),
-                 toVec(K_TENSOR_X_STRIDES),
+    verifyTensor(findTensorByUid(*graphT, K_FPROP_TENSOR_X_UID),
+                 K_FPROP_TENSOR_X_UID,
+                 toVec(K_FPROP_TENSOR_X_DIMS),
+                 toVec(K_FPROP_TENSOR_X_STRIDES),
                  DataType::FLOAT);
-    verifyTensor(findTensorByUid(*graphT, K_TENSOR_W_UID),
-                 K_TENSOR_W_UID,
-                 toVec(K_TENSOR_W_DIMS),
-                 toVec(K_TENSOR_W_STRIDES),
+    verifyTensor(findTensorByUid(*graphT, K_FPROP_TENSOR_W_UID),
+                 K_FPROP_TENSOR_W_UID,
+                 toVec(K_FPROP_TENSOR_W_DIMS),
+                 toVec(K_FPROP_TENSOR_W_STRIDES),
                  DataType::FLOAT);
-    verifyTensor(findTensorByUid(*graphT, K_TENSOR_Y_UID),
-                 K_TENSOR_Y_UID,
-                 toVec(K_TENSOR_Y_DIMS),
-                 toVec(K_TENSOR_Y_STRIDES),
+    verifyTensor(findTensorByUid(*graphT, K_FPROP_TENSOR_Y_UID),
+                 K_FPROP_TENSOR_Y_UID,
+                 toVec(K_FPROP_TENSOR_Y_DIMS),
+                 toVec(K_FPROP_TENSOR_Y_STRIDES),
                  DataType::FLOAT);
 }
 
@@ -1131,7 +1131,7 @@ public:
                                dilation.data());
         convDesc->setAttribute(
             HIPDNN_ATTR_CONVOLUTION_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &computeDataType);
-        hipdnnConvolutionMode_t convMode = HIPDNN_CONVOLUTION_MODE_CROSS_CORRELATION;
+        hipdnnConvolutionMode_t convMode = HIPDNN_CROSS_CORRELATION;
         convDesc->setAttribute(
             HIPDNN_ATTR_CONVOLUTION_CONV_MODE, HIPDNN_TYPE_CONVOLUTION_MODE, 1, &convMode);
         convDesc->finalize();
@@ -1192,7 +1192,7 @@ public:
 
         auto flatbufferBuffer
             = buildGraphViaFlatBuffer(xTensor, wTensor, yTensor, convAttrs, sdkComputeDt);
-        auto flatbufferGraphT = UnPackGraph(flatbufferBuffer.data());
+        auto serializedGraphT = UnPackGraph(flatbufferBuffer.data());
 
         // Build via descriptor path
         auto descriptorGraphT = buildGraphViaDescriptors(p.xUid,
@@ -1212,12 +1212,12 @@ public:
                                                          p.computeDataType);
 
         // Verify structural equivalence
-        ASSERT_EQ(flatbufferGraphT->tensors.size(), descriptorGraphT->tensors.size());
-        ASSERT_EQ(flatbufferGraphT->nodes.size(), descriptorGraphT->nodes.size());
+        ASSERT_EQ(serializedGraphT->tensors.size(), descriptorGraphT->tensors.size());
+        ASSERT_EQ(serializedGraphT->nodes.size(), descriptorGraphT->nodes.size());
 
         // Compare tensors (order may differ, so compare by UID)
         std::map<int64_t, const TensorAttributesT*> fbTensors;
-        for(const auto& t : flatbufferGraphT->tensors)
+        for(const auto& t : serializedGraphT->tensors)
         {
             fbTensors[t->uid] = t.get();
         }
@@ -1236,10 +1236,10 @@ public:
         }
 
         // Compare nodes
-        ASSERT_EQ(flatbufferGraphT->nodes.size(), 1);
+        ASSERT_EQ(serializedGraphT->nodes.size(), 1);
         ASSERT_EQ(descriptorGraphT->nodes.size(), 1);
 
-        const auto& fbNode = flatbufferGraphT->nodes[0];
+        const auto& fbNode = serializedGraphT->nodes[0];
         const auto& descNode = descriptorGraphT->nodes[0];
 
         EXPECT_EQ(fbNode->compute_data_type, descNode->compute_data_type);
@@ -1280,19 +1280,19 @@ std::string convEquivalenceParamName(const ::testing::TestParamInfo<ConvEquivale
 INSTANTIATE_TEST_SUITE_P(ConvOps,
                          TestGraphDescriptorEquivalence,
                          ::testing::Values(ConvEquivalenceParams{"SingleConvOp",
-                                                                 K_TENSOR_X_UID,
-                                                                 K_TENSOR_W_UID,
-                                                                 K_TENSOR_Y_UID,
-                                                                 toVec(K_TENSOR_X_DIMS),
-                                                                 toVec(K_TENSOR_X_STRIDES),
-                                                                 toVec(K_TENSOR_W_DIMS),
-                                                                 toVec(K_TENSOR_W_STRIDES),
-                                                                 toVec(K_TENSOR_Y_DIMS),
-                                                                 toVec(K_TENSOR_Y_STRIDES),
-                                                                 toVec(K_CONV_PADDING),
-                                                                 toVec(K_CONV_PADDING),
-                                                                 toVec(K_CONV_STRIDE),
-                                                                 toVec(K_CONV_DILATION),
+                                                                 K_FPROP_TENSOR_X_UID,
+                                                                 K_FPROP_TENSOR_W_UID,
+                                                                 K_FPROP_TENSOR_Y_UID,
+                                                                 toVec(K_FPROP_TENSOR_X_DIMS),
+                                                                 toVec(K_FPROP_TENSOR_X_STRIDES),
+                                                                 toVec(K_FPROP_TENSOR_W_DIMS),
+                                                                 toVec(K_FPROP_TENSOR_W_STRIDES),
+                                                                 toVec(K_FPROP_TENSOR_Y_DIMS),
+                                                                 toVec(K_FPROP_TENSOR_Y_STRIDES),
+                                                                 toVec(K_FPROP_CONV_PADDING),
+                                                                 toVec(K_FPROP_CONV_PADDING),
+                                                                 toVec(K_FPROP_CONV_STRIDE),
+                                                                 toVec(K_FPROP_CONV_DILATION),
                                                                  HIPDNN_DATA_FLOAT,
                                                                  HIPDNN_DATA_FLOAT},
                                            ConvEquivalenceParams{"HalfPrecision",
@@ -1433,15 +1433,15 @@ TEST_F(TestGraphDescriptorOps, SharedTensorDifferentPositions)
                             static_cast<const void*>(&handle));
 
     // Create tensors (Y tensor shared between ops)
-    auto xDesc1 = createFinalizedTensor(K_TENSOR_X_UID);
-    auto wDesc1
-        = createFinalizedTensor(K_TENSOR_W_UID, toVec(K_TENSOR_W_DIMS), toVec(K_TENSOR_W_STRIDES));
-    auto sharedTensor
-        = createFinalizedTensor(K_TENSOR_Y_UID, toVec(K_TENSOR_Y_DIMS), toVec(K_TENSOR_Y_STRIDES));
+    auto xDesc1 = createFinalizedTensor(K_FPROP_TENSOR_X_UID);
+    auto wDesc1 = createFinalizedTensor(
+        K_FPROP_TENSOR_W_UID, toVec(K_FPROP_TENSOR_W_DIMS), toVec(K_FPROP_TENSOR_W_STRIDES));
+    auto sharedTensor = createFinalizedTensor(
+        K_FPROP_TENSOR_Y_UID, toVec(K_FPROP_TENSOR_Y_DIMS), toVec(K_FPROP_TENSOR_Y_STRIDES));
     // 64->64 channel weights unique to this test (not in the shared constant set)
     auto wDesc2 = createFinalizedTensor(K_SHARED_TENSOR_W_UID, {64, 64, 3, 3}, {576, 9, 3, 1});
     auto yDesc2 = createFinalizedTensor(
-        K_SHARED_TENSOR_Y_UID, toVec(K_TENSOR_Y_DIMS), toVec(K_TENSOR_Y_STRIDES));
+        K_SHARED_TENSOR_Y_UID, toVec(K_FPROP_TENSOR_Y_DIMS), toVec(K_FPROP_TENSOR_Y_STRIDES));
 
     // Op1: x=1, w=2, y=3
     auto op1 = createFinalizedConvOp(xDesc1.get(), wDesc1.get(), sharedTensor.get());
@@ -1465,20 +1465,20 @@ TEST_F(TestGraphDescriptorOps, SharedTensorDifferentPositions)
     ASSERT_EQ(graphT->nodes.size(), 2);
 
     // Verify each tensor's fields
-    verifyTensor(findTensorByUid(*graphT, K_TENSOR_X_UID),
-                 K_TENSOR_X_UID,
-                 toVec(K_TENSOR_X_DIMS),
-                 toVec(K_TENSOR_X_STRIDES),
+    verifyTensor(findTensorByUid(*graphT, K_FPROP_TENSOR_X_UID),
+                 K_FPROP_TENSOR_X_UID,
+                 toVec(K_FPROP_TENSOR_X_DIMS),
+                 toVec(K_FPROP_TENSOR_X_STRIDES),
                  DataType::FLOAT);
-    verifyTensor(findTensorByUid(*graphT, K_TENSOR_W_UID),
-                 K_TENSOR_W_UID,
-                 toVec(K_TENSOR_W_DIMS),
-                 toVec(K_TENSOR_W_STRIDES),
+    verifyTensor(findTensorByUid(*graphT, K_FPROP_TENSOR_W_UID),
+                 K_FPROP_TENSOR_W_UID,
+                 toVec(K_FPROP_TENSOR_W_DIMS),
+                 toVec(K_FPROP_TENSOR_W_STRIDES),
                  DataType::FLOAT);
-    verifyTensor(findTensorByUid(*graphT, K_TENSOR_Y_UID),
-                 K_TENSOR_Y_UID,
-                 toVec(K_TENSOR_Y_DIMS),
-                 toVec(K_TENSOR_Y_STRIDES),
+    verifyTensor(findTensorByUid(*graphT, K_FPROP_TENSOR_Y_UID),
+                 K_FPROP_TENSOR_Y_UID,
+                 toVec(K_FPROP_TENSOR_Y_DIMS),
+                 toVec(K_FPROP_TENSOR_Y_STRIDES),
                  DataType::FLOAT);
     verifyTensor(findTensorByUid(*graphT, K_SHARED_TENSOR_W_UID),
                  K_SHARED_TENSOR_W_UID,
@@ -1487,50 +1487,50 @@ TEST_F(TestGraphDescriptorOps, SharedTensorDifferentPositions)
                  DataType::FLOAT);
     verifyTensor(findTensorByUid(*graphT, K_SHARED_TENSOR_Y_UID),
                  K_SHARED_TENSOR_Y_UID,
-                 toVec(K_TENSOR_Y_DIMS),
-                 toVec(K_TENSOR_Y_STRIDES),
+                 toVec(K_FPROP_TENSOR_Y_DIMS),
+                 toVec(K_FPROP_TENSOR_Y_STRIDES),
                  DataType::FLOAT);
 
     // Verify first node: x=1, w=2, y=3 (shared tensor used as Y here)
     verifyConvFwdNode(*graphT->nodes[0],
                       DataType::FLOAT,
-                      K_TENSOR_X_UID,
-                      K_TENSOR_W_UID,
-                      K_TENSOR_Y_UID,
-                      toVec(K_CONV_PADDING),
-                      toVec(K_CONV_PADDING),
-                      toVec(K_CONV_STRIDE),
-                      toVec(K_CONV_DILATION));
+                      K_FPROP_TENSOR_X_UID,
+                      K_FPROP_TENSOR_W_UID,
+                      K_FPROP_TENSOR_Y_UID,
+                      toVec(K_FPROP_CONV_PADDING),
+                      toVec(K_FPROP_CONV_PADDING),
+                      toVec(K_FPROP_CONV_STRIDE),
+                      toVec(K_FPROP_CONV_DILATION));
 
     // Verify second node: x=3, w=4, y=5 (shared tensor reused as X here)
     verifyConvFwdNode(*graphT->nodes[1],
                       DataType::FLOAT,
-                      K_TENSOR_Y_UID,
+                      K_FPROP_TENSOR_Y_UID,
                       K_SHARED_TENSOR_W_UID,
                       K_SHARED_TENSOR_Y_UID,
-                      toVec(K_CONV_PADDING),
-                      toVec(K_CONV_PADDING),
-                      toVec(K_CONV_STRIDE),
-                      toVec(K_CONV_DILATION));
+                      toVec(K_FPROP_CONV_PADDING),
+                      toVec(K_FPROP_CONV_PADDING),
+                      toVec(K_FPROP_CONV_STRIDE),
+                      toVec(K_FPROP_CONV_DILATION));
 }
 
 TEST_F(TestGraphDescriptorOps, FinalizeFailsDuplicateTensorUidDifferentDescriptors)
 {
     // Create two distinct tensor descriptors with the same UID
-    auto xDesc1 = createFinalizedTensor(K_TENSOR_X_UID);
-    auto xDesc2 = createFinalizedTensor(K_TENSOR_X_UID);
-    auto wDesc
-        = createFinalizedTensor(K_TENSOR_W_UID, toVec(K_TENSOR_W_DIMS), toVec(K_TENSOR_W_STRIDES));
-    auto yDesc
-        = createFinalizedTensor(K_TENSOR_Y_UID, toVec(K_TENSOR_Y_DIMS), toVec(K_TENSOR_Y_STRIDES));
+    auto xDesc1 = createFinalizedTensor(K_FPROP_TENSOR_X_UID);
+    auto xDesc2 = createFinalizedTensor(K_FPROP_TENSOR_X_UID);
+    auto wDesc = createFinalizedTensor(
+        K_FPROP_TENSOR_W_UID, toVec(K_FPROP_TENSOR_W_DIMS), toVec(K_FPROP_TENSOR_W_STRIDES));
+    auto yDesc = createFinalizedTensor(
+        K_FPROP_TENSOR_Y_UID, toVec(K_FPROP_TENSOR_Y_DIMS), toVec(K_FPROP_TENSOR_Y_STRIDES));
 
     // Op1 uses xDesc1, Op2 uses xDesc2 (different object, same UID)
     auto op1 = createFinalizedConvOp(xDesc1.get(), wDesc.get(), yDesc.get());
 
     auto xDesc2a = createFinalizedTensor(
-        K_TENSOR_X2_UID, toVec(K_TENSOR_X2_DIMS), toVec(K_TENSOR_X2_STRIDES));
+        K_FPROP_TENSOR_X2_UID, toVec(K_FPROP_TENSOR_X2_DIMS), toVec(K_FPROP_TENSOR_X2_STRIDES));
     auto wDesc2 = createFinalizedTensor(
-        K_TENSOR_W2_UID, toVec(K_TENSOR_W2_DIMS), toVec(K_TENSOR_W2_STRIDES));
+        K_FPROP_TENSOR_W2_UID, toVec(K_FPROP_TENSOR_W2_DIMS), toVec(K_FPROP_TENSOR_W2_STRIDES));
     // Use xDesc2 (same UID as xDesc1, different descriptor object) as Y
     auto op2 = createFinalizedConvOp(xDesc2a.get(), wDesc2.get(), xDesc2.get());
 
@@ -1600,11 +1600,11 @@ TEST_F(TestGraphDescriptorOps, GetAttributeReturnsOperationCountMultiple)
     auto conv1 = createDefaultConvOp();
 
     auto xDesc2 = createFinalizedTensor(
-        K_TENSOR_X2_UID, toVec(K_TENSOR_X2_DIMS), toVec(K_TENSOR_X2_STRIDES));
+        K_FPROP_TENSOR_X2_UID, toVec(K_FPROP_TENSOR_X2_DIMS), toVec(K_FPROP_TENSOR_X2_STRIDES));
     auto wDesc2 = createFinalizedTensor(
-        K_TENSOR_W2_UID, toVec(K_TENSOR_W2_DIMS), toVec(K_TENSOR_W2_STRIDES));
+        K_FPROP_TENSOR_W2_UID, toVec(K_FPROP_TENSOR_W2_DIMS), toVec(K_FPROP_TENSOR_W2_STRIDES));
     auto yDesc2 = createFinalizedTensor(
-        K_TENSOR_Y2_UID, toVec(K_TENSOR_Y2_DIMS), toVec(K_TENSOR_Y2_STRIDES));
+        K_FPROP_TENSOR_Y2_UID, toVec(K_FPROP_TENSOR_Y2_DIMS), toVec(K_FPROP_TENSOR_Y2_STRIDES));
     auto convOp2 = createFinalizedConvOp(xDesc2.get(), wDesc2.get(), yDesc2.get());
 
     auto desc = getDescriptor();
@@ -1650,10 +1650,10 @@ TEST_F(TestGraphDescriptorOps, GetAttributeReturnsOperations)
 
     // Verify the returned operation is a conv forward operation
     int64_t opTypeCount = 0;
-    hipdnnOperationType_t opType = HIPDNN_OPERATION_TYPE_NOT_SET;
+    hipdnnOperationType_ext_t opType = HIPDNN_OPERATION_TYPE_NOT_SET_EXT;
     ASSERT_NO_THROW(returnedOps[0]->getAttribute(
         HIPDNN_ATTR_OPERATION_TYPE_EXT, HIPDNN_TYPE_OPERATION_TYPE_EXT, 1, &opTypeCount, &opType));
-    EXPECT_EQ(opType, HIPDNN_OPERATION_TYPE_CONVOLUTION_FORWARD);
+    EXPECT_EQ(opType, HIPDNN_OPERATION_TYPE_CONVOLUTION_FORWARD_EXT);
 
     auto returnedOp0 = std::unique_ptr<HipdnnBackendDescriptor>(returnedOps[0]);
     EXPECT_TRUE(returnedOp0->isFinalized());
@@ -1838,10 +1838,10 @@ TEST_F(TestGraphDescriptorOps, OperationsPreservedAfterFinalize)
 
     // Verify the returned operation is a conv forward operation
     int64_t opTypeCount = 0;
-    hipdnnOperationType_t opType = HIPDNN_OPERATION_TYPE_NOT_SET;
+    hipdnnOperationType_ext_t opType = HIPDNN_OPERATION_TYPE_NOT_SET_EXT;
     ASSERT_NO_THROW(returnedOps[0]->getAttribute(
         HIPDNN_ATTR_OPERATION_TYPE_EXT, HIPDNN_TYPE_OPERATION_TYPE_EXT, 1, &opTypeCount, &opType));
-    EXPECT_EQ(opType, HIPDNN_OPERATION_TYPE_CONVOLUTION_FORWARD);
+    EXPECT_EQ(opType, HIPDNN_OPERATION_TYPE_CONVOLUTION_FORWARD_EXT);
 
     auto returnedOp0 = std::unique_ptr<HipdnnBackendDescriptor>(returnedOps[0]);
     EXPECT_TRUE(returnedOp0->isFinalized());
@@ -1971,6 +1971,58 @@ TEST_F(TestGraphDescriptorOps, GetAttributeNameCountWhenUnset)
     ASSERT_NO_THROW(desc->getAttribute(
         HIPDNN_ATTR_OPERATIONGRAPH_NAME_EXT, HIPDNN_TYPE_CHAR, 0, &elementCount, nullptr));
     EXPECT_EQ(elementCount, 1);
+}
+
+TEST_F(TestGraphDescriptorOps, AppendOpsAfterSerialization)
+{
+    // Set a single op, build the serialized buffer, then append more ops
+    auto conv1 = createDefaultConvOp();
+
+    auto desc = getDescriptor();
+    setHandle();
+
+    std::array<HipdnnBackendDescriptor*, 1> ops1 = {conv1.convOp.get()};
+    ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_OPS,
+                                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                       1,
+                                       static_cast<const void*>(ops1.data())));
+
+    // Build the serialized buffer explicitly
+    desc->buildSerializedGraph();
+    auto serialized1 = desc->getSerializedGraph();
+    ASSERT_NE(serialized1.ptr, nullptr);
+    ASSERT_GT(serialized1.size, 0UL);
+
+    // Append a second operation (should succeed and invalidate the cache)
+    auto xDesc2 = createFinalizedTensor(
+        K_ALT_TENSOR_X_UID, toVec(K_FPROP_TENSOR_X_DIMS), toVec(K_FPROP_TENSOR_X_STRIDES));
+    auto wDesc2 = createFinalizedTensor(
+        K_ALT_TENSOR_W_UID, toVec(K_FPROP_TENSOR_W_DIMS), toVec(K_FPROP_TENSOR_W_STRIDES));
+    auto yDesc2 = createFinalizedTensor(
+        K_ALT_TENSOR_Y_UID, toVec(K_FPROP_TENSOR_Y_DIMS), toVec(K_FPROP_TENSOR_Y_STRIDES));
+    auto convOp2 = createFinalizedConvOp(xDesc2.get(), wDesc2.get(), yDesc2.get());
+
+    std::array<HipdnnBackendDescriptor*, 1> ops2 = {convOp2.get()};
+    ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_OPS,
+                                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                       1,
+                                       static_cast<const void*>(ops2.data())));
+
+    // Verify cache was invalidated by the append
+    ASSERT_THROW_HIPDNN_STATUS(desc->getSerializedGraph(), HIPDNN_STATUS_BAD_PARAM);
+
+    // Verify operations count is 2
+    int64_t elementCount = 0;
+    ASSERT_NO_THROW(desc->getAttribute(
+        HIPDNN_ATTR_OPERATIONGRAPH_OPS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 0, &elementCount, nullptr));
+    EXPECT_EQ(elementCount, 2);
+
+    // Verify re-serialization reflects both operations
+    desc->buildSerializedGraph();
+    auto serialized2 = desc->getSerializedGraph();
+    auto graphT = UnPackGraph(serialized2.ptr);
+    ASSERT_EQ(graphT->nodes.size(), 2);
+    ASSERT_EQ(graphT->tensors.size(), 6);
 }
 
 TEST_F(TestGraphDescriptorOps, GetAttributeWrongTypeForName)

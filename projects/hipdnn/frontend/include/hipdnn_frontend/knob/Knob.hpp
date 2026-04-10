@@ -337,7 +337,7 @@ inline Error getKnobsForEngine(std::vector<Knob>& knobs, hipdnnBackendDescriptor
     int64_t knobCount = 0;
     HIPDNN_RETURN_ON_BACKEND_FAILURE(
         hipdnnBackend()->backendGetAttribute(engineDesc,
-                                             HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE_EXT,
+                                             HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE,
                                              HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
                                              0,
                                              &knobCount,
@@ -355,7 +355,7 @@ inline Error getKnobsForEngine(std::vector<Knob>& knobs, hipdnnBackendDescriptor
     int64_t actualCount = 0;
     HIPDNN_RETURN_ON_BACKEND_FAILURE(
         hipdnnBackend()->backendGetAttribute(engineDesc,
-                                             HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE_EXT,
+                                             HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE,
                                              HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
                                              knobCount,
                                              &actualCount,

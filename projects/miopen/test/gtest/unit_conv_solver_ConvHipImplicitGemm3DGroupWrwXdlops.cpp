@@ -87,6 +87,7 @@ const auto& GetTestParams()
 #endif
         auto p = miopen::unit_tests::UnitTestConvSolverParams(supportedDevices);
         p.Tunable(5);
+        p.UsesCKDynamicLib();
 
         // Increased tolerance because of tolerance failures
         p.SetTolerance(supportedDevices, miopenFloat, 30.0f);
