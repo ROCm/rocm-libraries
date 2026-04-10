@@ -3,9 +3,5 @@
 
 target_sources(${INTEGRATION_TESTS_EXE}
     PRIVATE
-        IntegrationIsSupportedExtPerformance.cpp
+        IntegrationGpuReduction.cpp
 )
-
-add_subdirectory(batchnorm)
-add_subdirectory(conv)
-add_subdirectory(reduction)
