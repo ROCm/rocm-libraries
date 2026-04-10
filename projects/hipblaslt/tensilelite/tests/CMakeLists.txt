@@ -299,32 +299,39 @@ if(NOT WIN32)
 endif()
 
 #################################################
-#     F64 (double precision) tests (slow only)  #
+#     F64 (double precision) tests              #
 #################################################
 # F64 uses double storage and accumulation.
-# Fast path support is added separately.
-foreach(TRANS NN TN NT TT)
-    get_trans_flags(${TRANS} TFLAGS)
-    add_cpu_gemm_test(slow_f64_${TRANS}
-        ARGS ${F32_SIZES} ${TFLAGS} --type f64 --validate
+foreach(PATH fast slow)
+    if("${PATH}" STREQUAL "fast")
+        set(PATH_FLAGS --tryFastPath)
+    else()
+        set(PATH_FLAGS "")
+    endif()
+
+    foreach(TRANS NN TN NT TT)
+        get_trans_flags(${TRANS} TFLAGS)
+        add_cpu_gemm_test(${PATH}_f64_${TRANS}
+            ARGS ${F32_SIZES} ${TFLAGS} --type f64 --validate ${PATH_FLAGS}
+        )
+    endforeach()
+    add_cpu_gemm_test(${PATH}_f64_Beta
+        ARGS ${F32_SIZES} --type f64 --beta 1.0 --validate ${PATH_FLAGS}
     )
-endforeach()
-add_cpu_gemm_test(slow_f64_Beta
-    ARGS ${F32_SIZES} --type f64 --beta 1.0 --validate
-)
-add_cpu_gemm_test(slow_f64_Bias
-    ARGS ${F32_SIZES} --type f64 --validate --bias
-)
-add_cpu_gemm_test(slow_f64_AllFeatures
-    ARGS ${F32_SIZES} --type f64 --validate --bias --activation relu --scaleAlphaVec
-)
-add_cpu_gemm_test(slow_f64_TN_AllFeatures
-    ARGS ${F32_SIZES} --transA --type f64 --validate --bias --activation relu --scaleAlphaVec
-)
-foreach(MODE Scalar Vector)
-    add_cpu_gemm_test(slow_f64_ScaleAB_${MODE}
-        ARGS ${F32_SIZES} --type f64 --validate --useScaleAB ${MODE}
+    add_cpu_gemm_test(${PATH}_f64_Bias
+        ARGS ${F32_SIZES} --type f64 --validate --bias ${PATH_FLAGS}
     )
+    add_cpu_gemm_test(${PATH}_f64_AllFeatures
+        ARGS ${F32_SIZES} --type f64 --validate --bias --activation relu --scaleAlphaVec ${PATH_FLAGS}
+    )
+    add_cpu_gemm_test(${PATH}_f64_TN_AllFeatures
+        ARGS ${F32_SIZES} --transA --type f64 --validate --bias --activation relu --scaleAlphaVec ${PATH_FLAGS}
+    )
+    foreach(MODE Scalar Vector)
+        add_cpu_gemm_test(${PATH}_f64_ScaleAB_${MODE}
+            ARGS ${F32_SIZES} --type f64 --validate --useScaleAB ${MODE} ${PATH_FLAGS}
+        )
+    endforeach()
 endforeach()
 
 #################################################
