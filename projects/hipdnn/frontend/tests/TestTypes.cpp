@@ -119,6 +119,17 @@ TEST(TestTypes, DataTypeToString)
     EXPECT_STREQ(to_string(DataType::NOT_SET), "unknown");
 }
 
+TEST(TestTypes, PointwiseModeToString)
+{
+    using namespace hipdnn_frontend;
+
+    EXPECT_STREQ(to_string(PointwiseMode::NOT_SET), "NOT_SET");
+    EXPECT_STREQ(to_string(PointwiseMode::RELU_FWD), "RELU_FWD");
+    EXPECT_STREQ(to_string(PointwiseMode::ADD), "ADD");
+    EXPECT_STREQ(to_string(PointwiseMode::BINARY_SELECT), "BINARY_SELECT");
+    EXPECT_STREQ(to_string(PointwiseMode::COUNT), "UNKNOWN");
+}
+
 TEST(TestTypes, DataTypeStreamOperator)
 {
     using namespace hipdnn_frontend;

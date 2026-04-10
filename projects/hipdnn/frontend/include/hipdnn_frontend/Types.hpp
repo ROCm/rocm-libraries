@@ -1416,8 +1416,6 @@ inline const char* to_string(const PointwiseMode& mode)
         return "TANH_BWD";
     case PointwiseMode::TANH_FWD:
         return "TANH_FWD";
-    case PointwiseMode::COUNT:
-        return "COUNT";
     default:
         return "UNKNOWN";
     }
@@ -1754,6 +1752,9 @@ inline KnobValueType getKnobValueTypeFromVariant(const std::variant<Ts...>& valu
 
     return ret;
 }
+
+// NOTE: Parallel mode classification exists in data_sdk PointwiseValidation.hpp.
+// Keep both in sync when adding new PointwiseMode values.
 
 /**
  * @brief Check if a pointwise mode is a unary operation (1 input)

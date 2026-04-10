@@ -6314,7 +6314,7 @@ class TestGraphSerializationRoundTrip : public TestGraph,
 {
 };
 
-TEST_P(TestGraphSerializationRoundTrip, BinaryRoundTrip)
+TEST_P(TestGraphSerializationRoundTrip, BinarySerializeDeserializeForwardsData)
 {
     ::testing::FLAGS_gmock_verbose = "error";
     const auto& param = GetParam();
@@ -6365,7 +6365,7 @@ TEST_P(TestGraphSerializationRoundTrip, BinaryRoundTrip)
     EXPECT_EQ(capturedData, fakeSerializedData);
 }
 
-TEST_P(TestGraphSerializationRoundTrip, JsonRoundTrip)
+TEST_P(TestGraphSerializationRoundTrip, JsonSerializeDeserializeForwardsData)
 {
     ::testing::FLAGS_gmock_verbose = "error";
     const auto& param = GetParam();

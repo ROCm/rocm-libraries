@@ -258,6 +258,16 @@ private:
         return {};
     }
 
+    Error ensureLowered()
+    {
+        if(!hasValidGraphDesc())
+        {
+            HIPDNN_FE_LOG_INFO("Graph not lowered — auto-lowering for serialization");
+            HIPDNN_CHECK_ERROR(lower_to_backend());
+        }
+        return {};
+    }
+
     /// Check if we have a valid graph descriptor (may or may not be finalized)
     bool hasValidGraphDesc() const
     {
@@ -1158,11 +1168,7 @@ public:
      */
     Error serialize(std::vector<uint8_t>& data)
     {
-        if(!hasValidGraphDesc())
-        {
-            HIPDNN_FE_LOG_INFO("Graph not lowered — auto-lowering for binary serialization");
-            HIPDNN_CHECK_ERROR(lower_to_backend());
-        }
+        HIPDNN_CHECK_ERROR(ensureLowered());
         return std::as_const(*this).serialize(data);
     }
 
@@ -1188,6 +1194,11 @@ public:
             detail::hipdnnBackend()->backendGetSerializedBinaryGraphExt(
                 _graphDesc->get(), 0, &graphByteSize, nullptr),
             "Failed to query serialized graph size");
+
+        if(graphByteSize == 0)
+        {
+            return {ErrorCode::HIPDNN_BACKEND_ERROR, "Backend returned zero-length binary graph"};
+        }
 
         data.resize(graphByteSize);
         HIPDNN_RETURN_ON_BACKEND_FAILURE(
@@ -1348,11 +1359,7 @@ public:
      */
     Error serialize(std::string& jsonData)
     {
-        if(!hasValidGraphDesc())
-        {
-            HIPDNN_FE_LOG_INFO("Graph not lowered — auto-lowering for JSON serialization");
-            HIPDNN_CHECK_ERROR(lower_to_backend());
-        }
+        HIPDNN_CHECK_ERROR(ensureLowered());
         return std::as_const(*this).serialize(jsonData);
     }
 
@@ -1476,11 +1483,7 @@ public:
     /// Serialize a graph to a nlohmann::json object, auto-lowering if needed.
     Error serialize(nlohmann::json& j)
     {
-        if(!hasValidGraphDesc())
-        {
-            HIPDNN_FE_LOG_INFO("Graph not lowered — auto-lowering for JSON object serialization");
-            HIPDNN_CHECK_ERROR(lower_to_backend());
-        }
+        HIPDNN_CHECK_ERROR(ensureLowered());
         return std::as_const(*this).serialize(j);
     }
 
