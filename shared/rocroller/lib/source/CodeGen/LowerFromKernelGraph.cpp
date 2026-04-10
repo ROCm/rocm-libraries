@@ -349,44 +349,32 @@ namespace rocRoller
                            tag,
                            toString(op.mode),
                            op.conditionName);
+                AssertFatal(op.mode < OpMode::Count,
+                            "Unsupported mode for ConditionalOp: ",
+                            ShowValue(op.mode));
+
+                auto trueBody   = m_graph->control.getOutputNodeIndices<Body>(tag).to<std::set>();
+                auto elseBody   = m_graph->control.getOutputNodeIndices<Else>(tag).to<std::set>();
+                auto trueBodyFn = [this, trueBody]() { return generate(trueBody); };
+                std::function<Generator<Instruction>()> elseBodyFn;
+                if(!elseBody.empty())
+                    elseBodyFn = [this, elseBody]() { return generate(elseBody); };
+                auto condition = m_fastArith(op.condition);
+
                 switch(op.mode)
                 {
                 case OpMode::Branch:
-                {
-                    auto trueBody = m_graph->control.getOutputNodeIndices<Body>(tag).to<std::set>();
-                    auto elseBody = m_graph->control.getOutputNodeIndices<Else>(tag).to<std::set>();
-                    auto trueBodyFn = [this, trueBody]() { return generate(trueBody); };
-                    std::function<Generator<Instruction>()> elseBodyFn;
-                    if(!elseBody.empty())
-                        elseBodyFn = [this, elseBody]() { return generate(elseBody); };
                     co_yield m_conditionalGenerator.genBranch(
-                        m_fastArith(op.condition), op.conditionName, trueBodyFn, elseBodyFn);
+                        condition, op.conditionName, trueBodyFn, elseBodyFn);
                     break;
-                }
                 case OpMode::Exec:
-                {
-                    auto trueBody = m_graph->control.getOutputNodeIndices<Body>(tag).to<std::set>();
-                    auto elseBody = m_graph->control.getOutputNodeIndices<Else>(tag).to<std::set>();
-                    auto trueBodyFn = [this, trueBody]() { return generate(trueBody); };
-                    std::function<Generator<Instruction>()> elseBodyFn;
-                    if(!elseBody.empty())
-                        elseBodyFn = [this, elseBody]() { return generate(elseBody); };
                     co_yield m_conditionalGenerator.genExec(
-                        m_fastArith(op.condition), op.conditionName, trueBodyFn, elseBodyFn);
+                        condition, op.conditionName, trueBodyFn, elseBodyFn);
                     break;
-                }
                 case OpMode::BranchAndExec:
-                {
-                    auto trueBody = m_graph->control.getOutputNodeIndices<Body>(tag).to<std::set>();
-                    auto elseBody = m_graph->control.getOutputNodeIndices<Else>(tag).to<std::set>();
-                    auto trueBodyFn = [this, trueBody]() { return generate(trueBody); };
-                    std::function<Generator<Instruction>()> elseBodyFn;
-                    if(!elseBody.empty())
-                        elseBodyFn = [this, elseBody]() { return generate(elseBody); };
                     co_yield m_conditionalGenerator.genBranchAndExec(
-                        m_fastArith(op.condition), op.conditionName, trueBodyFn, elseBodyFn);
+                        condition, op.conditionName, trueBodyFn, elseBodyFn);
                     break;
-                }
                 default:
                     Throw<FatalError>("Unsupported mode for ConditionalOp: ", ShowValue(op.mode));
                 }
