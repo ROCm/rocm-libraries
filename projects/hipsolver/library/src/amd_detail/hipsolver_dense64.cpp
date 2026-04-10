@@ -1061,9 +1061,6 @@ try
             return HIPSOLVER_STATUS_ALLOC_FAILED;
         E = (void*)mem[0];
     }
-
-    // TODO: Update to call 64-bit rocsolver_*syevd_64 / rocsolver_*heevd_64 once available in rocSOLVER.
-    // Currently rocSOLVER only has 32-bit versions, so we cast int64_t to rocblas_int.
     if(dataTypeA == HIP_R_32F && dataTypeW == HIP_R_32F && computeType == HIP_R_32F)
     {
         return hipsolver::rocblas2hip_status(rocsolver_ssyevd((rocblas_handle)handle,
