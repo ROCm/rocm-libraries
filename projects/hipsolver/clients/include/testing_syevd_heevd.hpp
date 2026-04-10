@@ -160,7 +160,7 @@ void syevd_heevd_checkBadArgs(const hipsolverHandle_t   handle,
 #endif
 
     // params (only for DnX / int64_t path)
-    if constexpr(!std::is_same_v<I, int>)
+    if constexpr(!std::is_same_v<I, int32_t>)
         EXPECT_ROCBLAS_STATUS(hipsolver_syevd_heevd(API,
                                                     handle,
                                                     (hipsolverDnParams_t) nullptr,
@@ -253,7 +253,7 @@ void testing_syevd_heevd_bad_arg()
             API, handle, params, evect, uplo, n, dA.data(), lda, dD.data(), &size_dW, &size_hW);
 
         size_t bytes_dW;
-        if constexpr(std::is_same_v<I, int>)
+        if constexpr(std::is_same_v<I, int32_t>)
             bytes_dW = std::getenv("HIPSOLVER_BUFFERSIZE_RETURN_BYTES") != nullptr
                            ? size_dW
                            : sizeof(T) * size_dW;
@@ -721,7 +721,7 @@ void testing_syevd_heevd(Arguments& argus)
         API, handle, params, evect, uplo, n, (T*)nullptr, lda, (S*)nullptr, &size_dW, &size_hW);
 
     size_t bytes_dW;
-    if constexpr(std::is_same_v<I, int>)
+    if constexpr(std::is_same_v<I, int32_t>)
         bytes_dW = std::getenv("HIPSOLVER_BUFFERSIZE_RETURN_BYTES") != nullptr
                        ? size_dW
                        : sizeof(T) * size_dW;
