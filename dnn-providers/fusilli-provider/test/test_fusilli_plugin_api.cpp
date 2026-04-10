@@ -452,6 +452,55 @@ TEST(TestFusilliPluginApi, GetApplicableEngineIdsMatmulPointwise) {
   EXPECT_EQ(hipdnnEnginePluginDestroy(handle), HIPDNN_PLUGIN_STATUS_SUCCESS);
 }
 
+TEST(TestFusilliPluginApi, GetApplicableEngineIdsInt4NonBatchedMatmul) {
+  hipdnnEnginePluginHandle_t handle = nullptr;
+  ASSERT_EQ(hipdnnEnginePluginCreate(&handle), HIPDNN_PLUGIN_STATUS_SUCCESS);
+
+  // Non-batched (2D) mixed-precision int4 x fp16 matmul is not supported —
+  // mixed element types require rank-3 tensors (torch.bmm). The plugin should
+  // report 0 engines.
+  using DT = hipdnn_data_sdk::data_objects::DataType;
+  flatbuffers::FlatBufferBuilder builder;
+  std::vector<int64_t> aDims = {4, 8}, aStrides = {8, 1};
+  std::vector<int64_t> bDims = {8, 4}, bStrides = {4, 1};
+  std::vector<int64_t> cDims = {4, 4}, cStrides = {4, 1};
+
+  std::vector<
+      ::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
+      tensors;
+  tensors.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+      builder, 1, "A", DT::INT4, &aStrides, &aDims));
+  tensors.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+      builder, 2, "B", DT::HALF, &bStrides, &bDims));
+  tensors.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+      builder, 3, "C", DT::HALF, &cStrides, &cDims));
+
+  auto matmulAttr =
+      hipdnn_data_sdk::data_objects::CreateMatmulAttributes(builder, 1, 2, 3);
+  std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> nodes;
+  nodes.push_back(hipdnn_data_sdk::data_objects::CreateNodeDirect(
+      builder, "matmul", DT::FLOAT,
+      hipdnn_data_sdk::data_objects::NodeAttributes::MatmulAttributes,
+      matmulAttr.Union()));
+
+  auto graphOffset = hipdnn_data_sdk::data_objects::CreateGraphDirect(
+      builder, "test", DT::HALF, DT::HALF, DT::FLOAT, &tensors, &nodes);
+  builder.Finish(graphOffset);
+
+  hipdnnPluginConstData_t opGraph;
+  opGraph.ptr = builder.GetBufferPointer();
+  opGraph.size = builder.GetSize();
+
+  std::array<int64_t, 5> engineIDs;
+  uint32_t numEngines = 10;
+  ASSERT_EQ(hipdnnEnginePluginGetApplicableEngineIds(
+                handle, &opGraph, engineIDs.data(), 5, &numEngines),
+            HIPDNN_PLUGIN_STATUS_SUCCESS);
+  ASSERT_EQ(numEngines, 0);
+
+  EXPECT_EQ(hipdnnEnginePluginDestroy(handle), HIPDNN_PLUGIN_STATUS_SUCCESS);
+}
+
 TEST(TestFusilliPluginApi, CreateExecutionContext) {
   // Create plugin handle.
   hipdnnEnginePluginHandle_t handle = nullptr;
