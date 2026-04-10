@@ -39,7 +39,7 @@ namespace rocsparse
     }
     static constexpr int determine_max_recursion_levels()
     {
-        return 3;
+        return 4;
     }
     // LCOV_EXCL_STOP
 }
@@ -52,7 +52,7 @@ rocsparse_status rocsparse::gtsv_no_pivot_buffer_size_template(rocsparse_handle 
                                                                const T*         d,
                                                                const T*         du,
                                                                const T*         B,
-                                                               rocsparse_int    ldb,
+                                                               int64_t          ldb,
                                                                size_t*          buffer_size)
 {
     ROCSPARSE_ROUTINE_TRACE;
@@ -76,7 +76,7 @@ rocsparse_status rocsparse::gtsv_no_pivot_buffer_size_template(rocsparse_handle 
     ROCSPARSE_CHECKARG_SIZE(2, n);
     ROCSPARSE_CHECKARG(7,
                        ldb,
-                       (ldb < rocsparse::max(static_cast<rocsparse_int>(1), m)),
+                       (ldb < rocsparse::max(static_cast<int64_t>(1), static_cast<int64_t>(m))),
                        rocsparse_status_invalid_size);
 
     ROCSPARSE_CHECKARG_ARRAY(3, n, dl);
@@ -102,7 +102,7 @@ rocsparse_status rocsparse::gtsv_no_pivot_buffer_size_template(rocsparse_handle 
     constexpr int BLOCKSIZE            = determine_spike_solver_blocksize();
     constexpr int MAX_RECURSION_LEVELS = determine_max_recursion_levels();
 
-    int current_m = m;
+    int64_t current_m = m;
     for(int level = 0; level < MAX_RECURSION_LEVELS; level++)
     {
         if(current_m <= 1024)
@@ -424,7 +424,7 @@ namespace rocsparse
                                                   const T*         d,
                                                   const T*         du,
                                                   T*               B,
-                                                  rocsparse_int    ldb)
+                                                  int64_t          ldb)
     {
         ROCSPARSE_ROUTINE_TRACE;
 
@@ -616,7 +616,7 @@ namespace rocsparse
                                         const T*                      d,
                                         const T*                      du,
                                         T*                            B,
-                                        rocsparse_int                 ldb,
+                                        int64_t                       ldb,
                                         gtsv_no_pivot_buffer_data<T>* buffer_data,
                                         int                           level);
 
@@ -628,7 +628,7 @@ namespace rocsparse
                                                    const T*                      d,
                                                    const T*                      du,
                                                    T*                            B,
-                                                   rocsparse_int                 ldb,
+                                                   int64_t                       ldb,
                                                    gtsv_no_pivot_buffer_data<T>* buffer_data,
                                                    int                           level)
     {
@@ -745,7 +745,7 @@ namespace rocsparse
                                         const T*                      d,
                                         const T*                      du,
                                         T*                            B,
-                                        rocsparse_int                 ldb,
+                                        int64_t                       ldb,
                                         gtsv_no_pivot_buffer_data<T>* buffer_data,
                                         int                           level)
     {
@@ -773,7 +773,7 @@ rocsparse_status rocsparse::gtsv_no_pivot_template(rocsparse_handle handle,
                                                    const T*         d,
                                                    const T*         du,
                                                    T*               B,
-                                                   rocsparse_int    ldb,
+                                                   int64_t          ldb,
                                                    void*            temp_buffer)
 {
     ROCSPARSE_ROUTINE_TRACE;
@@ -795,7 +795,7 @@ rocsparse_status rocsparse::gtsv_no_pivot_template(rocsparse_handle handle,
     ROCSPARSE_CHECKARG_SIZE(2, n);
     ROCSPARSE_CHECKARG(7,
                        ldb,
-                       (ldb < rocsparse::max(static_cast<rocsparse_int>(1), m)),
+                       (ldb < rocsparse::max(static_cast<int64_t>(1), static_cast<int64_t>(m))),
                        rocsparse_status_invalid_size);
 
     ROCSPARSE_CHECKARG_ARRAY(3, n, dl);
@@ -823,8 +823,8 @@ rocsparse_status rocsparse::gtsv_no_pivot_template(rocsparse_handle handle,
 
     char* ptr = reinterpret_cast<char*>(temp_buffer);
 
-    int    current_m = m;
-    size_t offset    = 0;
+    int64_t current_m = m;
+    size_t  offset    = 0;
     for(int level = 0; level < determine_max_recursion_levels(); level++)
     {
         if(current_m <= 1024)
