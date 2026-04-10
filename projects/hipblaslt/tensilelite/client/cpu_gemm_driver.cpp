@@ -92,6 +92,32 @@ namespace
         static constexpr rocisa::DataType value = rocisa::DataType::BFloat16;
     };
 
+#ifdef TENSILE_USE_FP8_BF8
+    template <>
+    struct TypeTraits<TensileLite::Float8>
+    {
+        static constexpr rocisa::DataType value = rocisa::DataType::Float8;
+    };
+
+    template <>
+    struct TypeTraits<TensileLite::BFloat8>
+    {
+        static constexpr rocisa::DataType value = rocisa::DataType::BFloat8;
+    };
+
+    template <>
+    struct TypeTraits<TensileLite::Float8_fnuz>
+    {
+        static constexpr rocisa::DataType value = rocisa::DataType::Float8_fnuz;
+    };
+
+    template <>
+    struct TypeTraits<TensileLite::BFloat8_fnuz>
+    {
+        static constexpr rocisa::DataType value = rocisa::DataType::BFloat8_fnuz;
+    };
+#endif
+
     // A slow, easy to understand, golden reference implementation of GEMM.
     // Used strictly for validating the correctness of the optimized path.
     // Calculates, for each element (i, j):
@@ -412,7 +438,7 @@ int main(int argc, char* argv[])
         "transB", po::value<bool>()->default_value(false), "Transpose B")(
         "alpha", po::value<float>()->default_value(1.0f), "Alpha scalar")(
         "beta", po::value<float>()->default_value(0.0f), "Beta scalar")(
-        "type", po::value<std::string>()->default_value("f32"), "Data type (f32, f16, bf16)")(
+        "type", po::value<std::string>()->default_value("f32"), "Data type (f32, f16, bf16, f8, bf8, f8fnuz, bf8fnuz)")(
         "validate", po::value<bool>()->default_value(true), "Run validation against ref")(
         "tryFastPath", po::value<bool>()->default_value(false), "Use optimized path")(
         "bias", po::value<bool>()->default_value(false), "Enable bias vector")(
@@ -499,6 +525,32 @@ int main(int argc, char* argv[])
                 m, n, k, transA, transB, alpha, beta, validate, tryFastPath,
                 useBias, activation, useScaleAlphaVec, useScaleAB, factorDim);
         }
+#ifdef TENSILE_USE_FP8_BF8
+        else if(typeStr == "f8")
+        {
+            return runGemm<Float8>(
+                m, n, k, transA, transB, alpha, beta, validate, tryFastPath,
+                useBias, activation, useScaleAlphaVec, useScaleAB, factorDim);
+        }
+        else if(typeStr == "bf8")
+        {
+            return runGemm<BFloat8>(
+                m, n, k, transA, transB, alpha, beta, validate, tryFastPath,
+                useBias, activation, useScaleAlphaVec, useScaleAB, factorDim);
+        }
+        else if(typeStr == "f8fnuz")
+        {
+            return runGemm<Float8_fnuz>(
+                m, n, k, transA, transB, alpha, beta, validate, tryFastPath,
+                useBias, activation, useScaleAlphaVec, useScaleAB, factorDim);
+        }
+        else if(typeStr == "bf8fnuz")
+        {
+            return runGemm<BFloat8_fnuz>(
+                m, n, k, transA, transB, alpha, beta, validate, tryFastPath,
+                useBias, activation, useScaleAlphaVec, useScaleAB, factorDim);
+        }
+#endif
         else
         {
             std::cerr << "Unknown type: " << typeStr << std::endl;
