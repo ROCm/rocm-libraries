@@ -1356,25 +1356,25 @@ def emitSingleBufferLoad(tileInfo, writer, kernel, sId0, sId1):
     soffset = sgpr(regList.regValues[0]) if len(regList) > 0 and useSgpr else 0
     voff = tileInfo.sharedVgprGROffset[i] if useSgpr or len(regList) == 0 else regList.regValues[i]
 
-    # Pre-shuffled: data is tiled into 16x16 byte blocks. The HBM stride
-    # between rows is uniform within a tile but has a gap at tile boundaries
-    # (every 16 rows) proportional to (K - DepthU). Waves whose rows span
-    # a boundary need the soffset correction from _computePreShuffleSoffsetCorr.
-    # Add before the load, restore after (soffset SGPR must be clean for
-    # the next subtile).
+    # Pre-shuffled: in HBM, consecutive 16-row stripes are K elements apart,
+    # but in LDS they are only DepthU elements apart. The soffset correction
+    # bridges this gap for each wave. When soffset is already in use (SGPR
+    # path), add the correction before the load and restore it after.
     matrixStates = writer.states.a if tc == 'A' else writer.states.b
+    needsRestore = False
     if tileInfo.isPreShuffled:
-      correctionSgpr = matrixStates.preShuffleSoffsetCorrection
+      correction = sgpr(matrixStates.preShuffleSoffsetCorrection)
       if soffset == 0:
-        soffset = sgpr(correctionSgpr)
+        soffset = correction
       else:
-        module.add(SAddU32(dst=soffset, src0=soffset, src1=sgpr(correctionSgpr),
+        module.add(SAddU32(dst=soffset, src0=soffset, src1=correction,
                            comment="Pre-shuffled %s: soffset += wave partition correction" % tc))
+        needsRestore = True
 
     module.add(BufferLoadB128(dst=None, vaddr=vgpr(voff), saddr=sgpr("Srd%s"%tc, 4), soffset=soffset, mubuf=mubuf, comment="grBaseId = %u, i= %u"%(grBaseId , i)))
 
-    if tileInfo.isPreShuffled and soffset != sgpr(correctionSgpr):
-      module.add(SSubU32(dst=soffset, src0=soffset, src1=sgpr(correctionSgpr),
+    if needsRestore:
+      module.add(SSubU32(dst=soffset, src0=soffset, src1=correction,
                          comment="Pre-shuffled %s: restore soffset" % tc))
 
   return module
@@ -1667,14 +1667,11 @@ def localReadLDSBufferSwap(tc, writer, kernel):
 def globalReadPtrUpdates(tc, writer, kernel):
   module = Module()
   tileInfo = writer.states.a.tileInfo if tc == 'A' else writer.states.b.tileInfo
-  inc = int(tileInfo.localSubtileGrid[1] * tileInfo.mmaTileShape[1] * tileInfo.subtileShape[1] * tileInfo.bpe)
 
-  # Pre-shuffled layout is [N/16, K/32, 16, 32] FP4, so each K-tile
-  # (32 FP4 = 16 bytes) is interleaved with 16 N-rows, making each tile
-  # 256 bytes. The SRD advance per DepthU must be 16x larger than the
-  # non-pre-shuffled case to skip over the interleaved N-rows.
-  if tileInfo.isPreShuffled:
-    inc *= tileInfo.mmaTileShape[0]  # 16 rows per pre-shuffle tile
+  # For pre-shuffled layout, each K-tile is interleaved with mmaTileShape[0]
+  # rows (16), so the SRD advance per DepthU is 16x larger.
+  rowMultiplier = tileInfo.mmaTileShape[0] if tileInfo.isPreShuffled else 1
+  inc = int(tileInfo.localSubtileGrid[1] * tileInfo.mmaTileShape[1] * tileInfo.subtileShape[1] * tileInfo.bpe * rowMultiplier)
 
   module.add(SAddU32(dst=sgpr("Srd%s"%tc), src0=sgpr("Srd%s"%tc), src1=inc))
   module.add(SAddCU32(dst=sgpr("Srd%s+1"%tc), src0=sgpr("Srd%s+1"%tc), src1=0))
