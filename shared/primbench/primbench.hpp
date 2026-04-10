@@ -259,13 +259,11 @@ inline bool use_color()
     return result;
 }
 
-/// Clears the current line if colors are enabled, otherwise prints a newline.
+/// Clears the current line if colors are enabled.
 inline std::ostream& clearline(std::ostream& os)
 {
     if(use_color())
         os << "\r\033[K";
-    else
-        os << "\n";
     return os;
 }
 
@@ -2237,7 +2235,8 @@ public:
             if(gpu_temp >= min_gpu_temp)
                 break;
 
-            progress::print_warming(gpu_temp, min_gpu_temp);
+            if(use_color())
+                progress::print_warming(gpu_temp, min_gpu_temp);
 
             dim3 threads(threads_per_block);
             dim3 blocks(ceil_div(num_items, threads.x));
@@ -2510,21 +2509,26 @@ private:
         else if(noise_timeout)
             status = "Noisy timed out after " + std::to_string(secs) + "s";
 
-        progress::print_progress(iterations,
-                                 noise_percent,
-                                 bytes_per_sec,
-                                 status,
-                                 name,
-                                 m_algo,
-                                 s.batch_window_size,
-                                 m_specialization_index,
-                                 m_specialization_column_width,
-                                 m_index_column_width,
-                                 m_print_index,
-                                 elapsed_host_secs,
-                                 s.noise_timeout_secs,
-                                 s.noise_tolerance_percent,
-                                 estimated_remaining_secs);
+        // Only print progress if it's a terminal (real-time updates)
+        // or if the specialization has finished (single final update).
+        if(use_color() || stop_early || noise_timeout)
+        {
+            progress::print_progress(iterations,
+                                     noise_percent,
+                                     bytes_per_sec,
+                                     status,
+                                     name,
+                                     m_algo,
+                                     s.batch_window_size,
+                                     m_specialization_index,
+                                     m_specialization_column_width,
+                                     m_index_column_width,
+                                     m_print_index,
+                                     elapsed_host_secs,
+                                     s.noise_timeout_secs,
+                                     s.noise_tolerance_percent,
+                                     estimated_remaining_secs);
+        }
 
         if(stop_early || noise_timeout)
         {
@@ -2572,7 +2576,8 @@ private:
             if(gpu_temp <= s.max_gpu_temp)
                 break;
 
-            progress::print_cooling(gpu_temp, s.max_gpu_temp);
+            if(use_color())
+                progress::print_cooling(gpu_temp, s.max_gpu_temp);
 
             auto duration = std::chrono::steady_clock::now() - start;
             if(duration >= std::chrono::duration<double>(s.max_cooling_secs))
@@ -3240,6 +3245,9 @@ std::string name()
 template<typename... Args>
 void log(Args&&... args)
 {
+    if(!detail::use_color())
+        return;
+
     std::cout << detail::clearline << detail::gray;
     (std::cout << ... << args);
     std::cout << detail::reset << std::flush;
