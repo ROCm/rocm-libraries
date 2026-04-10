@@ -73,47 +73,7 @@ namespace rocRoller
             return numBanks / 4u; // each dwordx4 spans 4 banks
         }
 
-        struct LDSSwizzleParams
-        {
-            unsigned int numColumns; ///< dwordx4 chunks per tile row in K
-            unsigned int rowsPerBankRow; ///< tile rows sharing one LDS bank row
-            unsigned int elementsPerChunk; ///< elements per dwordx4 chunk (128 / elementBits)
-            unsigned int columnsPerBankRow; ///< dwordx4 columns per bank row (arch-dependent)
-
-            static LDSSwizzleParams
-                compute(unsigned int tileK, unsigned int elementBits, unsigned int colsPerBankRow)
-            {
-                AssertFatal(elementBits > 0 && tileK > 0,
-                            "LDSSwizzleParams::compute requires non-zero tileK and elementBits",
-                            ShowValue(tileK),
-                            ShowValue(elementBits));
-                auto elems = 128u / elementBits; // elements per dwordx4
-                auto cols  = tileK / elems; // dwordx4 chunks per tile row
-                AssertFatal(tileK % elems == 0,
-                            "tileK must be a multiple of elements per dwordx4 chunk",
-                            ShowValue(tileK),
-                            ShowValue(elems));
-                AssertFatal(cols > 0 && (cols & (cols - 1)) == 0 && colsPerBankRow % cols == 0,
-                            "LDS swizzle requires power-of-2 numColumns",
-                            ShowValue(cols));
-                return {cols, colsPerBankRow / cols, elems, colsPerBankRow};
-            }
-
-            static LDSSwizzleParams fromColumnCount(unsigned int numCols,
-                                                    unsigned int colsPerBankRow)
-            {
-                AssertFatal(numCols > 0 && (numCols & (numCols - 1)) == 0
-                                && colsPerBankRow % numCols == 0,
-                            "LDS swizzle requires power-of-2 numColumns",
-                            ShowValue(numCols));
-                return {numCols, colsPerBankRow / numCols, 0u, colsPerBankRow};
-            }
-
-            bool noConflicts() const
-            {
-                return numColumns >= columnsPerBankRow;
-            }
-        };
+        using LDSSwizzleParams = LDSSwizzleDetail::LDSSwizzleParams;
 
         /**
          * Check whether LDS bank swizzle is active for a given layout type.
@@ -1012,17 +972,8 @@ namespace rocRoller
                 if(!params.noConflicts())
                 {
 
-                    auto swappedCol
-                        = graph.coordinates.addElement(ThreadTileNumber(0, literal(numColumns)));
-                    graph.coordinates.addElement(
-                        PairSwap{params.rowsPerBankRow}, {swappedCol}, {nThrX, nThrY});
-
                     grSwizzleNThrX
-                        = graph.coordinates.addElement(ThreadTileNumber(0, literal(numColumns)));
-                    graph.coordinates.addElement(
-                        Rotate{params.numColumns, params.rowsPerBankRow, false},
-                        {grSwizzleNThrX},
-                        {swappedCol, nThrY});
+                        = LDSSwizzleDetail::addGRSwizzleEdges(graph, nThrX, nThrY, 0, params);
 
                     Log::getLogger()->debug(
                         "LoadTiled swizzle B: K={} R={}", params.numColumns, params.rowsPerBankRow);
@@ -2309,35 +2260,8 @@ namespace rocRoller
                             int rowCoord = isA ? iMacX : iMacY;
                             int colCoord = isA ? iMacY : iMacX;
 
-                            auto ePC = params.elementsPerChunk;
-
-                            // Decompose element col into chunk + sub-element offset
-                            auto colChunk = graph.coordinates.addElement(
-                                MacroTileIndex(kDim, literal(params.numColumns), literal(1u)));
-                            auto elemInChunk = graph.coordinates.addElement(
-                                MacroTileIndex(kDim, literal(ePC), literal(1u)));
-                            graph.coordinates.addElement(
-                                Flatten(), {colChunk, elemInChunk}, {colCoord});
-
-                            // Inverse rotation (chunk-level)
-                            auto rotatedCol = graph.coordinates.addElement(
-                                MacroTileIndex(kDim, literal(params.numColumns), literal(1u)));
-                            graph.coordinates.addElement(
-                                Rotate{params.numColumns, params.rowsPerBankRow, true},
-                                {rotatedCol},
-                                {colChunk, rowCoord});
-
-                            // Swap (self-inverse, chunk-level)
-                            auto rawColChunk = graph.coordinates.addElement(
-                                MacroTileIndex(kDim, literal(params.numColumns), literal(1u)));
-                            graph.coordinates.addElement(PairSwap{params.rowsPerBankRow},
-                                                         {rawColChunk},
-                                                         {rotatedCol, rowCoord});
-
-                            // Reconstruct element-level raw col from chunk + sub-element
-                            auto rawColElem = graph.coordinates.addElement(tile.tileIndex(kDim));
-                            graph.coordinates.addElement(
-                                Tile(), {rawColElem}, {rawColChunk, elemInChunk});
+                            auto rawColElem = LDSSwizzleDetail::addLRSwizzleEdges(
+                                graph, colCoord, rowCoord, kDim, params);
 
                             if(isA)
                                 tileIMacY = rawColElem;
@@ -2583,6 +2507,100 @@ namespace rocRoller
         {
             auto visitor = LowerTileVisitor(m_params, m_context);
             return rewrite(graph, visitor);
+        }
+
+        namespace LDSSwizzleDetail
+        {
+            using namespace CoordinateGraph;
+            using namespace Expression;
+
+            LDSSwizzleParams LDSSwizzleParams::compute(unsigned int tileK,
+                                                       unsigned int elementBits,
+                                                       unsigned int colsPerBankRow)
+            {
+                AssertFatal(elementBits > 0 && tileK > 0,
+                            "LDSSwizzleParams::compute requires non-zero tileK and elementBits",
+                            ShowValue(tileK),
+                            ShowValue(elementBits));
+                auto elems = 128u / elementBits;
+                auto cols  = tileK / elems;
+                AssertFatal(tileK % elems == 0,
+                            "tileK must be a multiple of elements per dwordx4 chunk",
+                            ShowValue(tileK),
+                            ShowValue(elems));
+                AssertFatal(cols > 0 && (cols & (cols - 1)) == 0 && colsPerBankRow % cols == 0,
+                            "LDS swizzle requires power-of-2 numColumns",
+                            ShowValue(cols));
+                return {cols, colsPerBankRow / cols, elems, colsPerBankRow};
+            }
+
+            LDSSwizzleParams LDSSwizzleParams::fromColumnCount(unsigned int numCols,
+                                                               unsigned int colsPerBankRow)
+            {
+                AssertFatal(numCols > 0 && (numCols & (numCols - 1)) == 0
+                                && colsPerBankRow % numCols == 0,
+                            "LDS swizzle requires power-of-2 numColumns",
+                            ShowValue(numCols));
+                return {numCols, colsPerBankRow / numCols, 0u, colsPerBankRow};
+            }
+
+            bool LDSSwizzleParams::noConflicts() const
+            {
+                return numColumns >= columnsPerBankRow;
+            }
+
+            int addGRSwizzleEdges(KernelGraph&            graph,
+                                  int                     colCoord,
+                                  int                     rowCoord,
+                                  int                     kDim,
+                                  LDSSwizzleParams const& params)
+            {
+                auto swappedCol = graph.coordinates.addElement(
+                    ThreadTileNumber(kDim, literal(params.numColumns)));
+                graph.coordinates.addElement(
+                    PairSwap{params.rowsPerBankRow}, {swappedCol}, {colCoord, rowCoord});
+
+                auto rotatedCol = graph.coordinates.addElement(
+                    ThreadTileNumber(kDim, literal(params.numColumns)));
+                graph.coordinates.addElement(
+                    Rotate{params.numColumns, params.rowsPerBankRow, false},
+                    {rotatedCol},
+                    {swappedCol, rowCoord});
+
+                return rotatedCol;
+            }
+
+            int addLRSwizzleEdges(KernelGraph&            graph,
+                                  int                     colCoord,
+                                  int                     rowCoord,
+                                  int                     kDim,
+                                  LDSSwizzleParams const& params)
+            {
+                auto ePC = params.elementsPerChunk;
+
+                auto colChunk = graph.coordinates.addElement(
+                    MacroTileIndex(kDim, literal(params.numColumns), literal(1u)));
+                auto elemInChunk
+                    = graph.coordinates.addElement(MacroTileIndex(kDim, literal(ePC), literal(1u)));
+                graph.coordinates.addElement(Flatten(), {colChunk, elemInChunk}, {colCoord});
+
+                auto rotatedCol = graph.coordinates.addElement(
+                    MacroTileIndex(kDim, literal(params.numColumns), literal(1u)));
+                graph.coordinates.addElement(Rotate{params.numColumns, params.rowsPerBankRow, true},
+                                             {rotatedCol},
+                                             {colChunk, rowCoord});
+
+                auto rawColChunk = graph.coordinates.addElement(
+                    MacroTileIndex(kDim, literal(params.numColumns), literal(1u)));
+                graph.coordinates.addElement(
+                    PairSwap{params.rowsPerBankRow}, {rawColChunk}, {rotatedCol, rowCoord});
+
+                auto rawColElem = graph.coordinates.addElement(
+                    MacroTileIndex(kDim, literal(params.numColumns * ePC), literal(1u)));
+                graph.coordinates.addElement(Tile(), {rawColElem}, {rawColChunk, elemInChunk});
+
+                return rawColElem;
+            }
         }
     }
 }
