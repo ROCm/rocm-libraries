@@ -1,4 +1,4 @@
-// Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2025-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,25 +20,23 @@
 
 #include <hip/hip_runtime.h>
 
-#include <cstdlib>
-#include <iostream>
-#include <fstream>
-#include <vector>
-#include <map>
 #include <algorithm>
+#include <cstdlib>
+#include <fstream>
+#include <iostream>
+#include <map>
+#include <vector>
 
-#define HIP_CHECK(expression)                        \
-{                                                    \
-    const hipError_t status = expression;            \
-    if (status != hipSuccess)                        \
-    {                                                \
-        std::cerr << "HIP error " << status          \
-                << ": " << hipGetErrorString(status) \
-                << " at " << __FILE__ << ":"         \
-                << __LINE__ << std::endl;            \
-        std::exit(EXIT_FAILURE);                     \
-    }                                                \
-}
+#define HIP_CHECK(expression)                                                                               \
+  {                                                                                                         \
+    const hipError_t status = expression;                                                                   \
+    if (status != hipSuccess)                                                                               \
+    {                                                                                                       \
+      std::cerr << "HIP error " << status << ": " << hipGetErrorString(status) << " at " << __FILE__ << ":" \
+                << __LINE__ << std::endl;                                                                   \
+      std::exit(EXIT_FAILURE);                                                                              \
+    }                                                                                                       \
+  }
 
 // This program queries available AMD GPUs in the system and outputs
 // a JSON structure that conforms to CTest's resource spec file format.
@@ -98,7 +96,7 @@ int main(int argc, char* argv[])
 
   // Figure out how many devices are in the system.
   int dev_count = 0;
-  hipGetDeviceCount(&dev_count);
+  HIP_CHECK(hipGetDeviceCount(&dev_count));
 
   // There could be more than one device of each type.
   // Build a mapping of gfxID (string) to a vector of device IDs (unsigned ints).
@@ -107,36 +105,43 @@ int main(int argc, char* argv[])
   names_to_ids["gpus"] = {};
 
   // Populate the map
-  for (unsigned int dev_id = 0; dev_id < dev_count; ++dev_id)
+  for (unsigned int dev_id = 0; dev_id < static_cast<unsigned int>(dev_count); ++dev_id)
   {
     hipDeviceProp_t dev_prop;
     HIP_CHECK(hipGetDeviceProperties(&dev_prop, dev_id));
     std::string name(dev_prop.gcnArchName);
     auto pos = name.find_first_of(':');
     if (pos != std::string::npos)
+    {
       name = name.substr(0, pos);
+    }
 
     if (names_to_ids.find(name) == names_to_ids.end())
+    {
       names_to_ids[name] = std::vector<unsigned int>({dev_id});
+    }
     else
+    {
       names_to_ids[name].push_back(dev_id);
+    }
 
     // Add every device ID to the "gpus" entry
     names_to_ids["gpus"].push_back(dev_id);
   }
 
   // Begin the JSON output. The first few lines are boilerplate:
-  out_file << "{"                  << std::endl <<
-               "  \"version\": {"  << std::endl <<
-               "    \"major\": 1," << std::endl <<
-               "    \"minor\": 0"  << std::endl <<
-               "  },"              << std::endl <<
-               "  \"local\": ["    << std::endl <<
-               "    {"             << std::endl;
+  out_file
+    << "{" << std::endl
+    << "  \"version\": {" << std::endl
+    << "    \"major\": 1," << std::endl
+    << "    \"minor\": 0" << std::endl
+    << "  }," << std::endl
+    << "  \"local\": [" << std::endl
+    << "    {" << std::endl;
 
   // Add one object for each gfxID.
   // Each gfxID-keyed object will contain an array of device IDs.
-  int key_index = 0;
+  unsigned int key_index = 0;
   for (auto& name_it : names_to_ids)
   {
     out_file << "      \"" << name_it.first << "\": [" << std::endl;
@@ -147,7 +152,7 @@ int main(int argc, char* argv[])
     // to have a consistent output on each run so that the resource
     // spec file stays the same.
     std::sort(name_it.second.begin(), name_it.second.end());
-    int id_index = 0;
+    unsigned int id_index = 0;
     for (const auto& id_it : name_it.second)
     {
       out_file << "        {" << std::endl;
@@ -156,7 +161,9 @@ int main(int argc, char* argv[])
       out_file << "        }";
 
       if (id_index < name_it.second.size() - 1)
+      {
         out_file << ",";
+      }
       out_file << std::endl;
       id_index++;
     }
@@ -164,15 +171,15 @@ int main(int argc, char* argv[])
     out_file << "      ]";
 
     if (key_index < names_to_ids.size() - 1)
+    {
       out_file << ",";
+    }
     out_file << std::endl;
     key_index++;
   }
 
   // Close out the remaining open objects and arrays.
-  out_file << "    }" << std::endl <<
-              "  ]"   << std::endl <<
-              "}"     << std::endl;
+  out_file << "    }" << std::endl << "  ]" << std::endl << "}" << std::endl;
 
   out_file.close();
 
