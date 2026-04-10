@@ -282,6 +282,9 @@ namespace rocRoller
             explicit PairSwap(unsigned int rowsPerGroup)
                 : rowsPerGroup(rowsPerGroup)
             {
+                AssertFatal(rowsPerGroup > 0 && (rowsPerGroup & (rowsPerGroup - 1)) == 0,
+                            "PairSwap requires power-of-2 rowsPerGroup",
+                            ShowValue(rowsPerGroup));
             }
 
             std::string toString() const
@@ -321,6 +324,9 @@ namespace rocRoller
                 , rowsPerGroup(rowsPerGroup)
                 , inverse(inverse)
             {
+                AssertFatal(rowsPerGroup > 0 && (rowsPerGroup & (rowsPerGroup - 1)) == 0,
+                            "Rotate requires power-of-2 rowsPerGroup",
+                            ShowValue(rowsPerGroup));
             }
 
             std::string toString() const
