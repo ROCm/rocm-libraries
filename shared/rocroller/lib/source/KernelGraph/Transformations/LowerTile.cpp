@@ -15,6 +15,7 @@
 #include <rocRoller/KernelOptions_detail.hpp>
 #include <rocRoller/Operations/Command.hpp>
 #include <rocRoller/Operations/Operations.hpp>
+#include <rocRoller/Scheduling/LDSModel.hpp>
 #include <rocRoller/Utilities/Logging.hpp>
 
 namespace rocRoller
@@ -63,21 +64,24 @@ namespace rocRoller
          * Permutes K-column assignments per tile row to eliminate
          * ds_read_b128 bank conflicts.  See docs/src/LDSSwizzling.md.
          */
+        /// Number of dwordx4 columns per LDS bank row.
+        unsigned int getColumnsPerBankRow(ContextPtr context)
+        {
+            auto gfx      = context->targetArchitecture().target().gfx;
+            auto numBanks = Scheduling::LDSModel::getNumLDSBanks(
+                gfx, {Scheduling::LDSModel::LdsDirection::Read}, 4 /*dwordx4*/);
+            return numBanks / 4u; // each dwordx4 spans 4 banks
+        }
+
         struct LDSSwizzleParams
         {
             unsigned int numColumns; ///< dwordx4 chunks per tile row in K
-            unsigned int rowsPerBankRow; ///< tile rows per LDS bank row (conflict-free access unit)
-            unsigned int elementsPerChunk; ///< elements per dwordx4 chunk = 128 / elementBits
+            unsigned int rowsPerBankRow; ///< tile rows sharing one LDS bank row
+            unsigned int elementsPerChunk; ///< elements per dwordx4 chunk (128 / elementBits)
+            unsigned int columnsPerBankRow; ///< dwordx4 columns per bank row (arch-dependent)
 
-            /// 16 = dwordx4 columns per bank row on GFX950 (64 LDS banks).
-            /// Other architectures (32-bank, 128-byte bank rows) use 8. The
-            /// LowerTileVisitor constructor asserts GFX950 when swizzle is enabled.
-            static constexpr unsigned int columnsPerBankRow = 16u;
-
-            /// Compute from tile K dimension and element size.
-            /// When numColumns >= columnsPerBankRow, each tile row fills
-            /// an entire bank row and swizzle is unnecessary.
-            static LDSSwizzleParams compute(unsigned int tileK, unsigned int elementBits)
+            static LDSSwizzleParams
+                compute(unsigned int tileK, unsigned int elementBits, unsigned int colsPerBankRow)
             {
                 AssertFatal(elementBits > 0 && tileK > 0,
                             "LDSSwizzleParams::compute requires non-zero tileK and elementBits",
@@ -89,23 +93,22 @@ namespace rocRoller
                             "tileK must be a multiple of elements per dwordx4 chunk",
                             ShowValue(tileK),
                             ShowValue(elems));
-                AssertFatal(cols > 0 && (cols & (cols - 1)) == 0 && columnsPerBankRow % cols == 0,
+                AssertFatal(cols > 0 && (cols & (cols - 1)) == 0 && colsPerBankRow % cols == 0,
                             "LDS swizzle requires power-of-2 numColumns",
                             ShowValue(cols));
-                return {cols, columnsPerBankRow / cols, elems};
+                return {cols, colsPerBankRow / cols, elems, colsPerBankRow};
             }
 
-            /// Compute from a pre-computed column count (GR path).
-            static LDSSwizzleParams fromColumnCount(unsigned int numCols)
+            static LDSSwizzleParams fromColumnCount(unsigned int numCols,
+                                                    unsigned int colsPerBankRow)
             {
                 AssertFatal(numCols > 0 && (numCols & (numCols - 1)) == 0
-                                && columnsPerBankRow % numCols == 0,
+                                && colsPerBankRow % numCols == 0,
                             "LDS swizzle requires power-of-2 numColumns",
                             ShowValue(numCols));
-                return {numCols, columnsPerBankRow / numCols, 0u};
+                return {numCols, colsPerBankRow / numCols, 0u, colsPerBankRow};
             }
 
-            /// True when swizzle is unnecessary (tile row fills the bank row).
             bool noConflicts() const
             {
                 return numColumns >= columnsPerBankRow;
@@ -927,7 +930,8 @@ namespace rocRoller
                                  std::vector<unsigned int> const&   jammedTiles,
                                  bool                               rightmostFastest,
                                  bool                               isGlobalToLDS,
-                                 bool                               ldsSwizzle)
+                                 bool                               ldsSwizzle,
+                                 unsigned int                       columnsPerBankRow)
         {
             auto macTile = graph.coordinates.getNode<MacroTile>(macTileTag);
             auto thrTile = ThreadTile(macTile);
@@ -1003,7 +1007,7 @@ namespace rocRoller
             if(ldsSwizzle && macTile.layoutType == LayoutType::MATRIX_B)
             {
                 auto numColumns = thrTile.wsizes.at(0);
-                auto params     = LDSSwizzleParams::fromColumnCount(numColumns);
+                auto params     = LDSSwizzleParams::fromColumnCount(numColumns, columnsPerBankRow);
 
                 if(!params.noConflicts())
                 {
@@ -1062,7 +1066,7 @@ namespace rocRoller
             if(ldsSwizzle && macTile.layoutType == LayoutType::MATRIX_A)
             {
                 auto numColumns = thrTile.wsizes.at(1);
-                auto params     = LDSSwizzleParams::fromColumnCount(numColumns);
+                auto params     = LDSSwizzleParams::fromColumnCount(numColumns, columnsPerBankRow);
 
                 if(!params.noConflicts())
                 {
@@ -1739,7 +1743,8 @@ namespace rocRoller
                                 jammedTiles,
                                 rightmostFastest,
                                 isGlobalToLDS,
-                                ldsSwizzle);
+                                ldsSwizzle,
+                                ldsSwizzle ? getColumnsPerBankRow(context) : 0u);
 
             graph.coordinates.addElement(DataFlow(), {userTag}, {macTileTag});
         }
@@ -2268,10 +2273,13 @@ namespace rocRoller
                                         iMacY,
                                         workgroupSizes,
                                         jammedTiles,
-                                        false);
+                                        false,
+                                        false,
+                                        false,
+                                        0u);
                 }
 
-                // LR swizzle: insert Rotate(inv) + PairSwap edges
+                // LR swizzle: insert PairSwap + Rotate(inv) edges
                 // that un-permute the K-column so the wave reads the
                 // correct logical element.
                 //   {colChunk, elemInChunk} --Flatten--> {colCoord}
@@ -2293,7 +2301,8 @@ namespace rocRoller
                         int  kDim        = isA ? 1 : 0;
                         auto elementBits = DataTypeInfo::Get(lrVarType.dataType).elementBits;
                         auto tileK       = static_cast<unsigned int>(tile.sizes.at(kDim));
-                        auto params      = LDSSwizzleParams::compute(tileK, elementBits);
+                        auto params      = LDSSwizzleParams::compute(
+                            tileK, elementBits, getColumnsPerBankRow(m_context));
 
                         if(!params.noConflicts())
                         {
