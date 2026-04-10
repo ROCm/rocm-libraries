@@ -1,0 +1,19 @@
+name: Mergify Scopes
+
+on:
+  pull_request:
+    paths:
+      - 'projects/hipdnn/**'
+      - 'dnn-providers/**'
+
+jobs:
+  scopes:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Detect and upload scopes
+        uses: Mergifyio/gha-mergify-ci@main
+        with:
+          action: scopes
+          token: ${{ secrets.MERGIFY_TOKEN }}
