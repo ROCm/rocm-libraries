@@ -44,7 +44,7 @@ This target tests bitwise reproducibility either by issuing multiple calls to th
 
 In the first case, where multiple calls are made, a special scan operator inserts a random amount of delay into calculations to create variations in the internal timing of operations. The test then verifies that the results for each call are the same. All calls are issued within a single run of the test program.
 
-In the second case, several runs of the test are done and compared to each other. On the first run, the test stores input and output pairs for each function in a database file. On subsequent runs, the test compares the input and output pairs to those in the database. If identical pairs for a function are found, the test has succeeded. If no matching pair is found, the test has failed.
+In the second case, several test runs are performed and compared. On the first run, the test stores input-output pairs for each function in a database file. In subsequent runs, the test compares the input-output pairs to those in the database. If identical pairs for a function are found, the test has succeeded. If no matching pair is found, the test has failed.
 
 On the first run, set ``ROCTHRUST_BWR_PATH`` to the database file path and ``ROCTHRUST_BWR_GENERATE`` to 1. This will create the database file and populate it with input-output pairs.
 
