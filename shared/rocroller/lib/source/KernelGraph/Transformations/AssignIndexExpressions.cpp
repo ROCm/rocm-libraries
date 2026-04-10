@@ -1155,30 +1155,29 @@ namespace rocRoller::KernelGraph
             if(kUnrollCoord < 0)
                 return {-1, -1};
 
-            // Check if any edge in the transform path is non-affine.
-            bool hasNonAffine = false;
+            // PairSwap and Rotate edges are used for LDS bank swizzling.
+            // They are non-affine with respect to the K dimension: the
+            // column permutation depends on the row index, so the unroll
+            // value cannot be applied as a simple stride and must be
+            // folded into the base address (done elsewhere).
+            bool hasLDSSwizzle = false;
             for(auto nodeTag : path)
             {
                 for(auto edgeTag :
                     kgraph.coordinates.getNeighbours(nodeTag, Graph::opposite(direction)))
                 {
-                    if(kgraph.coordinates.getEdgeType(edgeTag)
-                       != EdgeType::CoordinateTransform)
-                        continue;
-                    auto const& elem = kgraph.coordinates.getElement(edgeTag);
-                    auto const& edge
-                        = std::get<CoordinateTransformEdge>(std::get<Edge>(elem));
-                    if(!isAffine(edge))
+                    if(kgraph.coordinates.get<PairSwap>(edgeTag).has_value()
+                       || kgraph.coordinates.get<Rotate>(edgeTag).has_value())
                     {
-                        hasNonAffine = true;
+                        hasLDSSwizzle = true;
                         break;
                     }
                 }
-                if(hasNonAffine)
+                if(hasLDSSwizzle)
                     break;
             }
 
-            if(!hasNonAffine)
+            if(!hasLDSSwizzle)
                 return {-1, -1};
 
             int current = candidate;

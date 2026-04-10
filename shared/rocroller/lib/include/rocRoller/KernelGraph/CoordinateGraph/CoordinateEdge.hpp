@@ -274,7 +274,6 @@ namespace rocRoller
          */
         struct PairSwap
         {
-            static constexpr bool IsAffine = false;
 
             unsigned int rowsPerGroup;
 
@@ -310,7 +309,6 @@ namespace rocRoller
          */
         struct Rotate
         {
-            static constexpr bool IsAffine = false;
 
             unsigned int numPositions;
             unsigned int rowsPerGroup;
@@ -549,27 +547,5 @@ namespace rocRoller
             return false;
         }
 
-        /**
-         * True if the edge type has a constant stride (affine transform).
-         * Edges with IsAffine = false require full address recomputation
-         * rather than simple base + k * stride.
-         */
-        template <typename T>
-        constexpr bool isAffineEdge()
-        {
-            if constexpr(requires { T::IsAffine; })
-                return T::IsAffine;
-            else
-                return true;
-        }
-
-        /**
-         * Runtime check: true if a CoordinateTransformEdge variant is affine.
-         */
-        inline bool isAffine(const CoordinateTransformEdge& x)
-        {
-            return std::visit(
-                [](const auto& e) { return isAffineEdge<std::decay_t<decltype(e)>>(); }, x);
-        }
     }
 }
