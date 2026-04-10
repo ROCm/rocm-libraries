@@ -30,6 +30,7 @@
 #include <miopen/logger.hpp>
 
 namespace miopen {
+/*
 std::ostream& operator<<(std::ostream& stream, const FusionOpDescriptor& x)
 {
     MIOPEN_LOG_ENUM(stream,
@@ -43,7 +44,7 @@ std::ostream& operator<<(std::ostream& stream, const FusionOpDescriptor& x)
                     miopenFusionOpActivBackward);
     return stream;
 }
-
+*/
 std::ostream& operator<<(std::ostream& stream, const std::any& a)
 {
     // NOLINTBEGIN(*-braces-around-statements)

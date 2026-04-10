@@ -413,6 +413,7 @@ struct Reducer
 };
 
 template <typename Tgpu, typename Tref, typename compType, typename SizeT>
+[[maybe_unused]]
 static std::tuple<tensor<Tref>, tensor<int>>
 reduce_cpu_common(const miopenReduceTensorOp_t& reduceOp,
                   const miopenNanPropagation_t& nanOpt,
@@ -616,6 +617,7 @@ reduce_cpu_common(const miopenReduceTensorOp_t& reduceOp,
 }
 
 template <typename T, typename compType>
+[[maybe_unused]]
 static std::tuple<tensor<T>, tensor<int>>
 reduce_cpu_common(const miopen::ReduceTensorDescriptor& reduceDesc,
                   const tensor<T>& input,
