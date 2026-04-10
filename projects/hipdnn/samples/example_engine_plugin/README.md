@@ -710,15 +710,17 @@ To facilitate plugin development, the plugin CMake project embeds RPATH in the
 ```cmake
 set_target_properties(example_provider_plugin PROPERTIES
     CXX_VISIBILITY_PRESET hidden
-    INSTALL_RPATH "$ORIGIN;$ORIGIN/../.."
+    BUILD_WITH_INSTALL_RPATH TRUE
+    INSTALL_RPATH "\$ORIGIN;\$ORIGIN/../.."
     INSTALL_RPATH_USE_LINK_PATH TRUE
     LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
 )
 ```
-The following properties define the RPATH behavior when the plugin is **installed**
-using `cmake --install` (this is different from the development RPATH set for the
-plugin in the build folder):
-- `INSTALL_RPATH "$ORIGIN;$ORIGIN/../.."` -- search both the folder that the
+- `BUILD_WITH_INSTALL_RPATH TRUE` -- the RPATH is the same for the library in the
+  build folder and when the library is installed (otherwise CMake uses a different
+  RPATH for the library in the build folder and changes this when the library is
+  installed using `cmake --install`).
+- `INSTALL_RPATH "\$ORIGIN;\$ORIGIN/../.."` -- search both the folder that the
   plugin is located in and the plugin's grandparent folder.
 - `INSTALL_RPATH_USE_LINK_PATH TRUE` -- automatically adds directories of
   linked libraries to the plugin's RPATH (e.g., the `hiprtc` library's ROCm
