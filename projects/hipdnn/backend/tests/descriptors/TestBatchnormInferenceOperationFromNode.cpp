@@ -11,9 +11,9 @@
 #include "hipdnn_backend.h"
 
 #include <gtest/gtest.h>
-#include <hipdnn_data_sdk/data_objects/batchnorm_inference_attributes_generated.h>
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
-#include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/batchnorm_inference_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
 
 #include <memory>
 #include <unordered_map>
@@ -22,7 +22,7 @@
 #include <hipdnn_test_sdk/constants/BatchnormInferenceConstants.hpp>
 
 using namespace hipdnn_backend;
-using namespace hipdnn_data_sdk::data_objects;
+using namespace hipdnn_flatbuffers_sdk::data_objects;
 using namespace hipdnn_tests::constants;
 
 // =============================================================================
@@ -117,10 +117,10 @@ protected:
         _tensorMap[K_BN_INF_TENSOR_Y_UID] = TensorDescriptor::fromFlatBuffer(yAttrs);
     }
 
-    static hipdnn_data_sdk::data_objects::BatchnormInferenceAttributesT
+    static hipdnn_flatbuffers_sdk::data_objects::BatchnormInferenceAttributesT
         createStandardBatchnormInferenceAttrs()
     {
-        hipdnn_data_sdk::data_objects::BatchnormInferenceAttributesT attrs;
+        hipdnn_flatbuffers_sdk::data_objects::BatchnormInferenceAttributesT attrs;
         attrs.x_tensor_uid = K_BN_INF_TENSOR_X_UID;
         attrs.mean_tensor_uid = K_BN_INF_TENSOR_MEAN_UID;
         attrs.inv_variance_tensor_uid = K_BN_INF_TENSOR_INV_VARIANCE_UID;
