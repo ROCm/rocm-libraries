@@ -624,6 +624,7 @@ TEST(CPU_CkImplError_NONE, ThrowIfNeThrowsOnNotEqual)
 TEST(CPU_CkImplError_NONE, ThrowIfNePassesOnEqual)
 {
     EXPECT_NO_THROW(
+        // cppcheck-suppress duplicateExpression
         { CK_IMPL_THROW_IF_NE(7, 7, CK_IMPL_STATUS_INVALID_VALUE, "should not throw"); });
 }
 
@@ -631,6 +632,7 @@ TEST(CPU_CkImplError_NONE, ThrowIfEqThrowsOnEqual)
 {
     try
     {
+        // cppcheck-suppress duplicateExpression
         CK_IMPL_THROW_IF_EQ(10, 10, CK_IMPL_STATUS_BAD_PARAM, "values equal");
         FAIL() << "Expected CkImplException";
     }
@@ -729,6 +731,7 @@ TEST(CPU_CkImplError_NONE, NoThrowOnValidInputsThroughTryCatch)
         CK_IMPL_THROW_IF_NULL(ptr, CK_IMPL_STATUS_BAD_PARAM, "should not throw");
         CK_IMPL_THROW_IF_FALSE(true, CK_IMPL_STATUS_INVALID_VALUE, "should not throw");
         CK_IMPL_THROW_IF_TRUE(false, CK_IMPL_STATUS_INTERNAL_ERROR, "should not throw");
+        // cppcheck-suppress duplicateExpression
         CK_IMPL_THROW_IF_NE(1, 1, CK_IMPL_STATUS_BAD_PARAM, "should not throw");
         CK_IMPL_THROW_IF_EQ(1, 2, CK_IMPL_STATUS_BAD_PARAM, "should not throw");
     });
