@@ -3165,6 +3165,14 @@ public:
             // For bools, explicitly output "true" or "false" instead of "0" or "1"
             if constexpr(std::is_same_v<T, bool>)
             {
+                if(default_val)
+                {
+                    std::cerr << "Error: Boolean flag --" << key
+                              << " cannot be registered with a default value of true. "
+                              << "Flags are implicitly false.\n";
+                    std::exit(EXIT_FAILURE);
+                }
+
                 oss << std::boolalpha;
             }
             oss << default_val;
@@ -3402,7 +3410,11 @@ private:
             auto it_def = _defaults.find(key);
             if(it_def != _defaults.end() && !it_def->second.empty())
             {
-                std::cout << " (default: " << it_def->second << ")";
+                // Boolean flags are implicitly false by default.
+                if(it_def->second != "false")
+                {
+                    std::cout << " (default: " << it_def->second << ")";
+                }
             }
             std::cout << "\n";
 
