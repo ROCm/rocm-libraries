@@ -1917,11 +1917,11 @@ namespace rocRoller
                 , m_params(params)
                 , m_kernel(context->kernel())
             {
-                // LDS bank swizzle assumes 64 LDS banks (GFX950).
+                // LDS bank swizzle currently targets CDNA4 (64 LDS banks).
                 auto swzMode = context->kernelOptions()->ldsSwizzleMode;
                 AssertFatal(swzMode == LDSBankSwizzleMode::None
                                 || context->targetArchitecture().target().isCDNA4GPU(),
-                            "LDS bank swizzle is only supported on GFX950 (CDNA4)",
+                            "LDS bank swizzle is only supported on CDNA4 architectures",
                             ShowValue(swzMode));
             }
 
