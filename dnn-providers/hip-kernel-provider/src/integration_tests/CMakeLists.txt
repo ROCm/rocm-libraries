@@ -26,6 +26,10 @@ target_compile_definitions(
         PLUGIN_PATH="../$<IF:$<PLATFORM_ID:Windows>,bin,lib>/${HIPDNN_PLUGIN_ENGINE_SUBDIR}/hip_kernel_provider"
 )
 
+target_include_directories(hip_kernel_provider_integration_tests PRIVATE
+    ${CMAKE_CURRENT_LIST_DIR}/../../include
+)
+
 target_link_libraries(
     hip_kernel_provider_integration_tests PUBLIC GTest::gtest hip::host hipdnn_test_sdk hipdnn_plugin_sdk Threads::Threads
 )

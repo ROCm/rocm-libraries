@@ -49,7 +49,13 @@ void EnginePluginResourceManager::setPluginLogLevel(hipdnnSeverity_t level)
     {
         for(const auto& plugin : pm->getPlugins())
         {
-            plugin->setLogLevel(level);
+            auto status = plugin->setLogLevel(level);
+            if(status != HIPDNN_PLUGIN_STATUS_SUCCESS)
+            {
+                HIPDNN_BACKEND_LOG_WARN("Failed to set log level for plugin '{}': status {}",
+                                        plugin->name(),
+                                        static_cast<int>(status));
+            }
         }
     }
 }
