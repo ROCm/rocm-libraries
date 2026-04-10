@@ -197,14 +197,6 @@ def retrieve_projects(args):
 
     project_to_run = collect_projects_to_run(subtrees)
 
-    # -------------------------------------------------------------------------
-    # TEMPORARY BRANCH HACK — REMOVE BEFORE MERGE
-    # Force CTest category passed as TEST_TYPE (valid: quick, standard,
-    # comprehensive, full). "smoke" from .github/therock* edits is NOT valid for
-    # test_runner.py and becomes quick; use "full" for weekly/stress-equivalent.
-    # -------------------------------------------------------------------------
-    test_type = "full"
-
     return project_to_run, test_type
 
 
