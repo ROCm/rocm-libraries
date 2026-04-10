@@ -299,6 +299,35 @@ if(NOT WIN32)
 endif()
 
 #################################################
+#     F64 (double precision) tests (slow only)  #
+#################################################
+# F64 uses double storage and accumulation.
+# Fast path support is added separately.
+foreach(TRANS NN TN NT TT)
+    get_trans_flags(${TRANS} TFLAGS)
+    add_cpu_gemm_test(slow_f64_${TRANS}
+        ARGS ${F32_SIZES} ${TFLAGS} --type f64 --validate
+    )
+endforeach()
+add_cpu_gemm_test(slow_f64_Beta
+    ARGS ${F32_SIZES} --type f64 --beta 1.0 --validate
+)
+add_cpu_gemm_test(slow_f64_Bias
+    ARGS ${F32_SIZES} --type f64 --validate --bias
+)
+add_cpu_gemm_test(slow_f64_AllFeatures
+    ARGS ${F32_SIZES} --type f64 --validate --bias --activation relu --scaleAlphaVec
+)
+add_cpu_gemm_test(slow_f64_TN_AllFeatures
+    ARGS ${F32_SIZES} --transA --type f64 --validate --bias --activation relu --scaleAlphaVec
+)
+foreach(MODE Scalar Vector)
+    add_cpu_gemm_test(slow_f64_ScaleAB_${MODE}
+        ARGS ${F32_SIZES} --type f64 --validate --useScaleAB ${MODE}
+    )
+endforeach()
+
+#################################################
 #     TF32 (XFloat32 math-op) tests             #
 #################################################
 # TF32 uses float storage with XFloat32 truncation on multiply.
