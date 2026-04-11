@@ -33,9 +33,9 @@ void syevd_heevd_checkBadArgs(const hipsolverHandle_t   handle,
                               const I                   n,
                               Td                        dA,
                               const I                   lda,
-                              const I                   stA,
+                              const rocblas_stride      stA,
                               Sd                        dD,
-                              const I                   stD,
+                              const rocblas_stride      stD,
                               Td                        dWork,
                               const SIZE                lwork,
                               Td                        hWork,
@@ -198,8 +198,8 @@ void testing_syevd_heevd_bad_arg()
     hipsolverFillMode_t    uplo  = HIPSOLVER_FILL_MODE_LOWER;
     I                      n     = 1;
     I                      lda   = 1;
-    I                      stA   = 1;
-    I                      stD   = 1;
+    rocblas_stride         stA   = 1;
+    rocblas_stride         stD   = 1;
     int                    bc    = 1;
 
     if(BATCHED)
@@ -350,9 +350,9 @@ void syevd_heevd_getError(const hipsolverHandle_t   handle,
                           const I                   n,
                           Td&                       dA,
                           const I                   lda,
-                          const I                   stA,
+                          const rocblas_stride      stA,
                           Sd&                       dD,
-                          const I                   stD,
+                          const rocblas_stride      stD,
                           Td&                       dWork,
                           const SIZE                lwork,
                           Th&                       hWork,
@@ -510,9 +510,9 @@ void syevd_heevd_getPerfData(const hipsolverHandle_t   handle,
                              const I                   n,
                              Td&                       dA,
                              const I                   lda,
-                             const I                   stA,
+                             const rocblas_stride      stA,
                              Sd&                       dD,
-                             const I                   stD,
+                             const rocblas_stride      stD,
                              Td&                       dWork,
                              const SIZE                lwork,
                              Th&                       hWork,
@@ -646,8 +646,8 @@ void testing_syevd_heevd(Arguments& argus)
     char                   uploC  = argus.get<char>("uplo");
     I                      n      = argus.get<int>("n");
     I                      lda    = argus.get<int>("lda", n);
-    I                      stA    = argus.get<int>("strideA", lda * n);
-    I                      stD    = argus.get<int>("strideD", n);
+    rocblas_stride         stA    = argus.get<rocblas_stride>("strideA", rocblas_stride(lda) * n);
+    rocblas_stride         stD    = argus.get<rocblas_stride>("strideD", n);
 
     hipsolverEigMode_t  evect     = char2hipsolver_evect(evectC);
     hipsolverFillMode_t uplo      = char2hipsolver_fill(uploC);
