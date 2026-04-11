@@ -900,7 +900,9 @@ try
 
     // TODO: Update to call 64-bit rocsolver_*syevd_64 / rocsolver_*heevd_64 once available in rocSOLVER.
     // Currently rocSOLVER only has 32-bit versions, so we cast int64_t to rocblas_int.
-    if(n > std::numeric_limits<rocblas_int>::max() || lda > std::numeric_limits<rocblas_int>::max())
+    auto const MAX_INT             = std::numeric_limits<int32_t>::max();
+    bool const is_integer_overflow = (int64_t(lda) * n) > MAX_INT;
+    if(is_integer_overflow)
         return HIPSOLVER_STATUS_NOT_SUPPORTED;
 
     size_t sz;
@@ -1014,7 +1016,9 @@ try
 
     // TODO: Update to call 64-bit rocsolver_*syevd_64 / rocsolver_*heevd_64 once available in rocSOLVER.
     // Currently rocSOLVER only has 32-bit versions, so we cast int64_t to rocblas_int.
-    if(n > std::numeric_limits<rocblas_int>::max() || lda > std::numeric_limits<rocblas_int>::max())
+    auto const MAX_INT             = std::numeric_limits<int32_t>::max();
+    bool const is_integer_overflow = (int64_t(lda) * n) > MAX_INT;
+    if(is_integer_overflow)
         return HIPSOLVER_STATUS_NOT_SUPPORTED;
 
     // Determine the real type size for E array allocation
