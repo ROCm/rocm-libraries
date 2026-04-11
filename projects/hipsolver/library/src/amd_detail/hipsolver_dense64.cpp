@@ -958,7 +958,10 @@ try
                                                                 nullptr));
     }
     else
+    {
+        rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
         return HIPSOLVER_STATUS_INVALID_ENUM;
+    }
 
     rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
 
