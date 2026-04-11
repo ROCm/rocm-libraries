@@ -386,7 +386,7 @@ void syevd_heevd_getError(const hipsolverHandle_t   handle,
     std::vector<T>   work(ltwork);
     std::vector<S>   hE(sizeE);
     std::vector<int> iwork(liwork);
-    std::vector<T>   A(lda * n * bc);
+    std::vector<T>   A(int64_t(lda) * n * bc);
 
     // input data initialization
     syevd_heevd_initData<true, true, T, I>(handle, evect, n, dA, lda, bc, hA, A);
