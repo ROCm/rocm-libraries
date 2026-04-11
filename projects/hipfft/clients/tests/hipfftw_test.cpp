@@ -2705,6 +2705,7 @@ namespace
                        && verification_output.size() != 1))
                     GTEST_FAIL() << "Verification IO buffer incorrectly initialized";
                 // generate input data
+                const std::vector<size_t> ioffset = {0};
                 const std::vector<size_t> field_lower(params.get_rank(), 0);
                 set_input<hostbuf, hipfftw_real_t<prec>>(verification_input,
                                                          fft_input_random_generator_host,
@@ -2712,6 +2713,7 @@ namespace
                                                          params.get_lengths(),
                                                          params.get_ilengths(),
                                                          params.get_istride(),
+                                                         ioffset,
                                                          params.get_idist(),
                                                          params.get_nbatch(),
                                                          get_curr_device_prop(),
