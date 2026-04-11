@@ -586,7 +586,7 @@ bool ConvHipImplicitGemmV4R4WrW::IsApplicable(const ExecutionContext& ctx,
         return false;
     const std::string name = ctx.GetStream().GetDeviceName();
     if(!(StartsWith(name, "gfx8") || StartsWith(name, "gfx90") || StartsWith(name, "gfx103") ||
-         StartsWith(name, "gfx12")))
+         StartsWith(name, "gfx120")))
         return false;
     if(problem.GetConv().attribute.deterministic)
         return false;
