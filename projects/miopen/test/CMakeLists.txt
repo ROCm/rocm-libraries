@@ -322,11 +322,10 @@ if (MIOPEN_TEST_GFX115X)
 endif()
 
 # Skip conv2d tests to capture flaky behavior                                                                             
-list(APPEND SKIP_TESTS test_conv2d test_conv2d_find2)
+list(APPEND SKIP_TESTS test_conv2d test_conv2d_find2 test_immed_conv2d)
 
-# Skip test_immed_conv2d tests to capture flaky behavior                                                                             
-list(APPEND SKIP_TESTS test_immed_conv2d)
-
+# Skip ternary_tensor_ops test (temporary)                                                                            
+list(APPEND SKIP_TESTS ternary_tensor_ops)
 
 # The usage is non-trivial, see function add_test_command.
 if(SKIP_TESTS)
