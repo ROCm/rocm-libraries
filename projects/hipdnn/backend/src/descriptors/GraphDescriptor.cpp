@@ -10,7 +10,7 @@
 #include "HipdnnException.hpp"
 #include "NodeFactory.hpp"
 
-#include <hipdnn_data_sdk/utilities/json/Graph.hpp>
+#include <hipdnn_flatbuffers_sdk/utilities/json/Graph.hpp>
 #include <logging/GraphLogger.hpp>
 #include <nlohmann/json.hpp>
 #include <unordered_map>
@@ -44,10 +44,10 @@ void GraphDescriptor::finalize()
     }
 }
 
-std::unique_ptr<hipdnn_data_sdk::data_objects::GraphT>
+std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::GraphT>
     GraphDescriptor::buildGraphFromOperations() const
 {
-    auto graph = std::make_unique<hipdnn_data_sdk::data_objects::GraphT>();
+    auto graph = std::make_unique<hipdnn_flatbuffers_sdk::data_objects::GraphT>();
 
     // Apply graph-level attributes
     graph->compute_data_type = _computeDataType;
@@ -79,7 +79,7 @@ std::unique_ptr<hipdnn_data_sdk::data_objects::GraphT>
             {
                 seenTensors[uid] = tensorDesc;
                 graph->tensors.push_back(
-                    std::make_unique<hipdnn_data_sdk::data_objects::TensorAttributesT>(
+                    std::make_unique<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT>(
                         tensorDesc->getData()));
             }
         }
@@ -357,7 +357,7 @@ void GraphDescriptor::deserializeGraph(const uint8_t* serializedGraph, size_t gr
     invalidateCache();
 
     // Parse FlatBuffer and eagerly unpack into _operations
-    std::unique_ptr<hipdnn_data_sdk::data_objects::GraphT> graph;
+    std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::GraphT> graph;
     flatbuffer_utilities::convertSerializedGraphToGraph(serializedGraph, graphByteSize, graph);
 
     // Extract graph-level attributes
@@ -391,11 +391,11 @@ void GraphDescriptor::buildSerializedGraph()
                   "GraphDescriptor::buildSerializedGraph: graph is null");
 
     flatbuffers::FlatBufferBuilder builder;
-    builder.Finish(hipdnn_data_sdk::data_objects::Graph::Pack(builder, graph.get()));
+    builder.Finish(hipdnn_flatbuffers_sdk::data_objects::Graph::Pack(builder, graph.get()));
     _graphSerializedBuffer = builder.Release();
 
     flatbuffers::Verifier verifier(_graphSerializedBuffer.data(), _graphSerializedBuffer.size());
-    THROW_IF_FALSE(hipdnn_data_sdk::data_objects::VerifyGraphBuffer(verifier),
+    THROW_IF_FALSE(hipdnn_flatbuffers_sdk::data_objects::VerifyGraphBuffer(verifier),
                    HIPDNN_STATUS_INTERNAL_ERROR,
                    "GraphDescriptor::buildSerializedGraph: serialized graph failed verification");
 }
@@ -417,7 +417,7 @@ std::string GraphDescriptor::getSerializedJsonGraph() const
     // is not cached because this path is not performance-critical.
     auto data = getSerializedGraph();
 
-    auto* graph = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::Graph>(
+    auto* graph = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::Graph>(
         static_cast<const uint8_t*>(data.ptr));
     const nlohmann::json j = *graph;
     return j.dump();
@@ -439,7 +439,9 @@ void GraphDescriptor::createFromJsonGraph(GraphDescriptor& desc,
         auto j = nlohmann::json::parse(jsonGraph, jsonGraph + jsonByteSize);
 
         flatbuffers::FlatBufferBuilder builder;
-        builder.Finish(hipdnn_data_sdk::json::to<hipdnn_data_sdk::data_objects::Graph>(builder, j));
+        builder.Finish(
+            hipdnn_flatbuffers_sdk::json::to<hipdnn_flatbuffers_sdk::data_objects::Graph>(builder,
+                                                                                          j));
 
         auto buf = builder.Release();
         desc.deserializeGraph(buf.data(), buf.size());
