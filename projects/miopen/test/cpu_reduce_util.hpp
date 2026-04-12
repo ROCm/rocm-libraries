@@ -297,6 +297,7 @@ static inline void binop_with_nan_check2(miopenNanPropagation_t nanOpt,
 }; // end of namespace reduce
 
 template <typename T>
+[[maybe_unused]]
 static std::vector<std::vector<T>> get_all_indexes(const std::vector<T>& lens)
 {
     const std::size_t D = lens.size();
@@ -339,6 +340,7 @@ linear_to_offset(size_t li, const std::vector<T>& lens, const std::vector<T>& st
 }
 
 template <typename T>
+[[maybe_unused]]
 static T get_offset_from_index(const std::vector<T>& strides, const std::vector<T>& index)
 {
     T offset = 0;
@@ -352,6 +354,7 @@ static T get_offset_from_index(const std::vector<T>& strides, const std::vector<
 };
 
 template <typename T>
+[[maybe_unused]]
 static T get_flatten_offset(const std::vector<T>& lengths, const std::vector<T>& index)
 {
     T offset = 0;
