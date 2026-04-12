@@ -12,7 +12,9 @@
 #include <hipdnn_frontend/detail/ScopedHipdnnBackendDescriptor.hpp>
 #include <hipdnn_frontend/node/SdpaBwdNode.hpp>
 #include <hipdnn_test_sdk/constants/SdpaBwdConstants.hpp>
+#include <hipdnn_test_sdk/utilities/LiftingTestHelpers.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
+#include <hipdnn_test_sdk/utilities/TestableGraph.hpp>
 #include <hipdnn_test_sdk/utilities/ToVec.hpp>
 
 #include "test_plugins/TestPluginConstants.hpp"
@@ -25,20 +27,7 @@ using hipdnn_tests::toVec;
 namespace
 {
 
-// Exposes protected Graph methods for testing
-class TestableGraph : public Graph
-{
-public:
-    using Graph::build_operation_graph;
-    using Graph::deserialize;
-    using Graph::fromBackendDescriptor;
-    using Graph::get_raw_graph_descriptor;
-
-    const std::vector<std::shared_ptr<INode>>& getSubNodes() const
-    {
-        return _sub_nodes;
-    }
-};
+using TestableGraph = hipdnn_tests::TestableGraphLifting;
 
 // Builds an SDPA backward graph via the frontend, lowers it through the backend C-API
 // via build_operation_graph(), then lifts it back with fromBackendDescriptor()
@@ -678,30 +667,60 @@ TEST_F(IntegrationSdpaBwdLifting, JsonRoundTripWithHandle)
     auto tensorMap = liftedGraph->getTensorsByUid();
     ASSERT_EQ(tensorMap.size(), 9u) << "Expected 9 tensors in lifted SDPA backward graph";
 
-    ASSERT_NE(tensorMap.count(K_SDPA_BWD_TENSOR_Q_UID), 0u);
-    EXPECT_EQ(tensorMap[K_SDPA_BWD_TENSOR_Q_UID]->get_dim(), toVec(K_SDPA_BWD_TENSOR_Q_DIMS));
-    EXPECT_EQ(tensorMap[K_SDPA_BWD_TENSOR_Q_UID]->get_stride(), toVec(K_SDPA_BWD_TENSOR_Q_STRIDES));
-    EXPECT_EQ(tensorMap[K_SDPA_BWD_TENSOR_Q_UID]->get_data_type(), DataType::FLOAT);
-
-    ASSERT_NE(tensorMap.count(K_SDPA_BWD_TENSOR_K_UID), 0u);
-    EXPECT_EQ(tensorMap[K_SDPA_BWD_TENSOR_K_UID]->get_dim(), toVec(K_SDPA_BWD_TENSOR_K_DIMS));
-    EXPECT_EQ(tensorMap[K_SDPA_BWD_TENSOR_K_UID]->get_stride(), toVec(K_SDPA_BWD_TENSOR_K_STRIDES));
-
-    ASSERT_NE(tensorMap.count(K_SDPA_BWD_TENSOR_V_UID), 0u);
-    ASSERT_NE(tensorMap.count(K_SDPA_BWD_TENSOR_O_UID), 0u);
-    ASSERT_NE(tensorMap.count(K_SDPA_BWD_TENSOR_DO_UID), 0u);
-    ASSERT_NE(tensorMap.count(K_SDPA_BWD_TENSOR_STATS_UID), 0u);
-
-    ASSERT_NE(tensorMap.count(K_SDPA_BWD_TENSOR_DQ_UID), 0u);
-    EXPECT_EQ(tensorMap[K_SDPA_BWD_TENSOR_DQ_UID]->get_dim(), toVec(K_SDPA_BWD_TENSOR_DQ_DIMS));
-    EXPECT_EQ(tensorMap[K_SDPA_BWD_TENSOR_DQ_UID]->get_stride(),
-              toVec(K_SDPA_BWD_TENSOR_DQ_STRIDES));
-
-    ASSERT_NE(tensorMap.count(K_SDPA_BWD_TENSOR_DK_UID), 0u);
-    EXPECT_EQ(tensorMap[K_SDPA_BWD_TENSOR_DK_UID]->get_dim(), toVec(K_SDPA_BWD_TENSOR_DK_DIMS));
-
-    ASSERT_NE(tensorMap.count(K_SDPA_BWD_TENSOR_DV_UID), 0u);
-    EXPECT_EQ(tensorMap[K_SDPA_BWD_TENSOR_DV_UID]->get_dim(), toVec(K_SDPA_BWD_TENSOR_DV_DIMS));
+    hipdnn_tests::verifyTensorInGraph(tensorMap,
+                                      K_SDPA_BWD_TENSOR_Q_UID,
+                                      "Q",
+                                      toVec(K_SDPA_BWD_TENSOR_Q_DIMS),
+                                      toVec(K_SDPA_BWD_TENSOR_Q_STRIDES),
+                                      DataType::FLOAT);
+    hipdnn_tests::verifyTensorInGraph(tensorMap,
+                                      K_SDPA_BWD_TENSOR_K_UID,
+                                      "K",
+                                      toVec(K_SDPA_BWD_TENSOR_K_DIMS),
+                                      toVec(K_SDPA_BWD_TENSOR_K_STRIDES),
+                                      DataType::FLOAT);
+    hipdnn_tests::verifyTensorInGraph(tensorMap,
+                                      K_SDPA_BWD_TENSOR_V_UID,
+                                      "V",
+                                      toVec(K_SDPA_BWD_TENSOR_V_DIMS),
+                                      toVec(K_SDPA_BWD_TENSOR_V_STRIDES),
+                                      DataType::FLOAT);
+    hipdnn_tests::verifyTensorInGraph(tensorMap,
+                                      K_SDPA_BWD_TENSOR_O_UID,
+                                      "O",
+                                      toVec(K_SDPA_BWD_TENSOR_O_DIMS),
+                                      toVec(K_SDPA_BWD_TENSOR_O_STRIDES),
+                                      DataType::FLOAT);
+    hipdnn_tests::verifyTensorInGraph(tensorMap,
+                                      K_SDPA_BWD_TENSOR_DO_UID,
+                                      "dO",
+                                      toVec(K_SDPA_BWD_TENSOR_DO_DIMS),
+                                      toVec(K_SDPA_BWD_TENSOR_DO_STRIDES),
+                                      DataType::FLOAT);
+    hipdnn_tests::verifyTensorInGraph(tensorMap,
+                                      K_SDPA_BWD_TENSOR_STATS_UID,
+                                      "Stats",
+                                      toVec(K_SDPA_BWD_TENSOR_STATS_DIMS),
+                                      toVec(K_SDPA_BWD_TENSOR_STATS_STRIDES),
+                                      DataType::FLOAT);
+    hipdnn_tests::verifyTensorInGraph(tensorMap,
+                                      K_SDPA_BWD_TENSOR_DQ_UID,
+                                      "dQ",
+                                      toVec(K_SDPA_BWD_TENSOR_DQ_DIMS),
+                                      toVec(K_SDPA_BWD_TENSOR_DQ_STRIDES),
+                                      DataType::FLOAT);
+    hipdnn_tests::verifyTensorInGraph(tensorMap,
+                                      K_SDPA_BWD_TENSOR_DK_UID,
+                                      "dK",
+                                      toVec(K_SDPA_BWD_TENSOR_DK_DIMS),
+                                      toVec(K_SDPA_BWD_TENSOR_DK_STRIDES),
+                                      DataType::FLOAT);
+    hipdnn_tests::verifyTensorInGraph(tensorMap,
+                                      K_SDPA_BWD_TENSOR_DV_UID,
+                                      "dV",
+                                      toVec(K_SDPA_BWD_TENSOR_DV_DIMS),
+                                      toVec(K_SDPA_BWD_TENSOR_DV_STRIDES),
+                                      DataType::FLOAT);
 
     // Verify the lifted graph has 1 SDPA backward operation node with the correct name
     auto& subNodes = liftedGraph->getSubNodes();

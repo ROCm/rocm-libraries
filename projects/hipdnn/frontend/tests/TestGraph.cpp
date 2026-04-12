@@ -11,6 +11,7 @@
 #include <hipdnn_frontend/attributes/PointwiseAttributes.hpp>
 #include <hipdnn_frontend/attributes/SdpaAttributes.hpp>
 #include <hipdnn_test_sdk/constants/ConvFpropConstants.hpp>
+#include <hipdnn_test_sdk/utilities/FrontendGraphFactory.hpp>
 #include <hipdnn_test_sdk/utilities/ToVec.hpp>
 
 #include "fake_backend/BackendTestMatchers.hpp"
@@ -6037,125 +6038,6 @@ TEST_F(TestGraph, ToJsonPropagatesSerializationDataError)
 // Round-trip serialization tests
 // ============================================================================
 
-// Helper: create a pointwise ReLU graph
-static void createPointwiseReluGraph(Graph& graph)
-{
-    graph.set_name("PointwiseReluGraph")
-        .set_compute_data_type(DataType::FLOAT)
-        .set_intermediate_data_type(DataType::FLOAT)
-        .set_io_data_type(DataType::FLOAT);
-
-    auto x = std::make_shared<TensorAttributes>();
-    x->set_uid(1)
-        .set_name("X")
-        .set_dim({1, 3, 8, 8})
-        .set_stride({192, 64, 8, 1})
-        .set_data_type(DataType::FLOAT);
-
-    PointwiseAttributes attrs;
-    attrs.set_name("Relu");
-    attrs.set_mode(PointwiseMode::RELU_FWD);
-
-    auto y = graph.pointwise(x, attrs);
-    y->set_output(true).set_uid(2);
-}
-
-// Helper: create a conv fprop graph
-static void createConvFpropGraph(Graph& graph)
-{
-    graph.set_name("ConvFpropGraph")
-        .set_compute_data_type(DataType::FLOAT)
-        .set_intermediate_data_type(DataType::FLOAT)
-        .set_io_data_type(DataType::FLOAT);
-
-    auto x = std::make_shared<TensorAttributes>();
-    x->set_uid(1)
-        .set_name("X")
-        .set_dim({1, 3, 32, 32})
-        .set_stride({3072, 1024, 32, 1})
-        .set_data_type(DataType::FLOAT);
-
-    auto w = std::make_shared<TensorAttributes>();
-    w->set_uid(2)
-        .set_name("W")
-        .set_dim({64, 3, 3, 3})
-        .set_stride({27, 9, 3, 1})
-        .set_data_type(DataType::FLOAT);
-
-    ConvFpropAttributes attrs;
-    attrs.set_name("ConvFwd");
-    attrs.set_pre_padding({1, 1});
-    attrs.set_post_padding({1, 1});
-    attrs.set_stride({1, 1});
-    attrs.set_dilation({1, 1});
-
-    auto y = graph.conv_fprop(x, w, attrs);
-    y->set_output(true).set_uid(3);
-}
-
-// Helper: create a pointwise ADD graph (binary op)
-static void createPointwiseAddGraph(Graph& graph)
-{
-    graph.set_name("PointwiseAddGraph")
-        .set_compute_data_type(DataType::FLOAT)
-        .set_intermediate_data_type(DataType::FLOAT)
-        .set_io_data_type(DataType::FLOAT);
-
-    auto x = std::make_shared<TensorAttributes>();
-    x->set_uid(1)
-        .set_name("X")
-        .set_dim({2, 4, 16, 16})
-        .set_stride({1024, 256, 16, 1})
-        .set_data_type(DataType::FLOAT);
-
-    auto y = std::make_shared<TensorAttributes>();
-    y->set_uid(2)
-        .set_name("Y")
-        .set_dim({2, 4, 16, 16})
-        .set_stride({1024, 256, 16, 1})
-        .set_data_type(DataType::FLOAT);
-
-    PointwiseAttributes attrs;
-    attrs.set_name("Add");
-    attrs.set_mode(PointwiseMode::ADD);
-
-    auto out = graph.pointwise(x, y, attrs);
-    out->set_output(true).set_uid(3);
-}
-
-// Helper: create a conv dgrad graph
-static void createConvDgradGraph(Graph& graph)
-{
-    graph.set_name("ConvDgradGraph")
-        .set_compute_data_type(DataType::FLOAT)
-        .set_intermediate_data_type(DataType::FLOAT)
-        .set_io_data_type(DataType::FLOAT);
-
-    auto dy = std::make_shared<TensorAttributes>();
-    dy->set_uid(1)
-        .set_name("DY")
-        .set_dim({1, 64, 32, 32})
-        .set_stride({65536, 1024, 32, 1})
-        .set_data_type(DataType::FLOAT);
-
-    auto w = std::make_shared<TensorAttributes>();
-    w->set_uid(2)
-        .set_name("W")
-        .set_dim({64, 3, 3, 3})
-        .set_stride({27, 9, 3, 1})
-        .set_data_type(DataType::FLOAT);
-
-    ConvDgradAttributes attrs;
-    attrs.set_name("ConvDgrad");
-    attrs.set_pre_padding({1, 1});
-    attrs.set_post_padding({1, 1});
-    attrs.set_stride({1, 1});
-    attrs.set_dilation({1, 1});
-
-    auto dx = graph.conv_dgrad(dy, w, attrs);
-    dx->set_output(true).set_uid(3);
-}
-
 // Helper: create a conv fprop + relu fusion graph (2 nodes, linear chain)
 static void createConvReluFusionGraph(Graph& graph)
 {
@@ -6309,6 +6191,8 @@ struct GraphTopologyParam
     }
 };
 
+using FrontendGraphFactory = hipdnn_test_sdk::utilities::FrontendGraphFactory;
+
 class TestGraphSerializationRoundTrip : public TestGraph,
                                         public ::testing::WithParamInterface<GraphTopologyParam>
 {
@@ -6419,13 +6303,47 @@ TEST_P(TestGraphSerializationRoundTrip, JsonSerializeDeserializeForwardsData)
 INSTANTIATE_TEST_SUITE_P(
     GraphTopologies,
     TestGraphSerializationRoundTrip,
-    ::testing::Values(GraphTopologyParam{"BatchnormInference",
-                                         [](Graph& g) { createBasicBatchnormGraph(g); }},
-                      GraphTopologyParam{"PointwiseRelu", createPointwiseReluGraph},
-                      GraphTopologyParam{"ConvFprop", createConvFpropGraph},
-                      GraphTopologyParam{"PointwiseAdd", createPointwiseAddGraph},
-                      GraphTopologyParam{"ConvDgrad", createConvDgradGraph},
-                      GraphTopologyParam{"ConvReluFusion", createConvReluFusionGraph},
-                      GraphTopologyParam{"PointwiseChain", createPointwiseChainGraph},
-                      GraphTopologyParam{"Diamond", createDiamondGraph}),
+    ::testing::Values(
+        // Single-node topologies via FrontendGraphFactory
+        GraphTopologyParam{
+            "BatchnormInference",
+            [](Graph& g) { g = FrontendGraphFactory::createBatchnormInferenceGraph(); }},
+        GraphTopologyParam{
+            "BatchnormTraining",
+            [](Graph& g) { g = FrontendGraphFactory::createBatchnormTrainingGraph(); }},
+        GraphTopologyParam{
+            "BatchnormBackward",
+            [](Graph& g) { g = FrontendGraphFactory::createBatchnormBackwardGraph(); }},
+        GraphTopologyParam{"ConvForward",
+                           [](Graph& g) { g = FrontendGraphFactory::createConvForwardGraph(); }},
+        GraphTopologyParam{
+            "ConvBackwardData",
+            [](Graph& g) { g = FrontendGraphFactory::createConvBackwardDataGraph(); }},
+        GraphTopologyParam{
+            "ConvBackwardWeights",
+            [](Graph& g) { g = FrontendGraphFactory::createConvBackwardWeightsGraph(); }},
+        GraphTopologyParam{"PointwiseUnary",
+                           [](Graph& g) { g = FrontendGraphFactory::createPointwiseUnaryGraph(); }},
+        GraphTopologyParam{
+            "PointwiseBinary",
+            [](Graph& g) { g = FrontendGraphFactory::createPointwiseBinaryGraph(); }},
+        GraphTopologyParam{"Matmul",
+                           [](Graph& g) { g = FrontendGraphFactory::createMatmulGraph(); }},
+        GraphTopologyParam{"Layernorm",
+                           [](Graph& g) { g = FrontendGraphFactory::createLayernormGraph(); }},
+        GraphTopologyParam{"Rmsnorm",
+                           [](Graph& g) { g = FrontendGraphFactory::createRmsnormGraph(); }},
+        GraphTopologyParam{"Reduction",
+                           [](Graph& g) { g = FrontendGraphFactory::createReductionGraph(); }},
+        GraphTopologyParam{"SdpaForward",
+                           [](Graph& g) { g = FrontendGraphFactory::createSdpaForwardGraph(); }},
+        GraphTopologyParam{"SdpaBackward",
+                           [](Graph& g) { g = FrontendGraphFactory::createSdpaBackwardGraph(); }},
+        // Multi-node topologies
+        GraphTopologyParam{
+            "ConvFwdBiasActiv",
+            [](Graph& g) { g = FrontendGraphFactory::createConvFwdBiasActivGraph(); }},
+        GraphTopologyParam{"ConvReluFusion", createConvReluFusionGraph},
+        GraphTopologyParam{"PointwiseChain", createPointwiseChainGraph},
+        GraphTopologyParam{"Diamond", createDiamondGraph}),
     [](const ::testing::TestParamInfo<GraphTopologyParam>& info) { return info.param.name; });

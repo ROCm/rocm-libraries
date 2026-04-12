@@ -4,6 +4,7 @@
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 #include <memory>
+#include <string>
 #include <vector>
 
 #include <hipdnn_frontend.hpp>
@@ -387,6 +388,71 @@ TEST_F(IntegrationGraphLifting, PreferredEngineIdPreservedThroughDeserialize)
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
     EXPECT_EQ(liftedGraph->get_preferred_engine_id_ext(), 42);
+}
+
+// Exercises the JSON serialize/deserialize path with a handle (full finalization)
+// for a conv fprop graph.
+TEST_F(IntegrationGraphLifting, JsonRoundTripWithHandle)
+{
+    auto originalGraph = buildConvFpropGraph();
+
+    auto result = originalGraph->validate();
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    // Serialize to JSON (auto-lowers internally)
+    std::string jsonData;
+    result = originalGraph->serialize(jsonData);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+    ASSERT_FALSE(jsonData.empty());
+
+    // Deserialize from JSON with handle
+    auto liftedGraph = std::make_shared<TestableGraphLifting>();
+    result = liftedGraph->deserialize(_handle, jsonData);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    // Verify graph-level attributes
+    EXPECT_EQ(liftedGraph->get_name(), "ConvFpropTestGraph");
+    EXPECT_EQ(liftedGraph->get_compute_data_type(), DataType::FLOAT);
+    EXPECT_EQ(liftedGraph->get_intermediate_data_type(), DataType::FLOAT);
+    EXPECT_EQ(liftedGraph->get_io_data_type(), DataType::FLOAT);
+
+    // Verify tensors by UID
+    auto tensorMap = liftedGraph->getTensorsByUid();
+    ASSERT_EQ(tensorMap.size(), 3u) << "Expected 3 tensors (X, W, Y)";
+
+    hipdnn_tests::verifyTensorInGraph(tensorMap,
+                                      K_FPROP_TENSOR_X_UID,
+                                      "X",
+                                      toVec(K_FPROP_TENSOR_X_DIMS),
+                                      toVec(K_FPROP_TENSOR_X_STRIDES),
+                                      DataType::FLOAT);
+    hipdnn_tests::verifyTensorInGraph(tensorMap,
+                                      K_FPROP_TENSOR_W_UID,
+                                      "W",
+                                      toVec(K_FPROP_TENSOR_W_DIMS),
+                                      toVec(K_FPROP_TENSOR_W_STRIDES),
+                                      DataType::FLOAT);
+    hipdnn_tests::verifyTensorInGraph(tensorMap,
+                                      K_FPROP_TENSOR_Y_UID,
+                                      "Y",
+                                      toVec(K_FPROP_TENSOR_Y_DIMS),
+                                      toVec(K_FPROP_TENSOR_Y_STRIDES),
+                                      DataType::FLOAT);
+
+    // Verify sub-node count and type
+    auto& subNodes = liftedGraph->getSubNodes();
+    ASSERT_EQ(subNodes.size(), 1u) << "Expected 1 operation node in lifted graph";
+
+    auto* convNode = dynamic_cast<ConvolutionFpropNode*>(subNodes[0].get());
+    ASSERT_NE(convNode, nullptr) << "Expected a ConvolutionFpropNode";
+
+    // Verify convolution parameters
+    EXPECT_EQ(convNode->attributes.get_pre_padding(), toVec(K_FPROP_CONV_PADDING));
+    EXPECT_EQ(convNode->attributes.get_post_padding(), toVec(K_FPROP_CONV_PADDING));
+    EXPECT_EQ(convNode->attributes.get_stride(), toVec(K_FPROP_CONV_STRIDE));
+    EXPECT_EQ(convNode->attributes.get_dilation(), toVec(K_FPROP_CONV_DILATION));
+    EXPECT_EQ(convNode->attributes.get_convolution_mode(), ConvolutionMode::CROSS_CORRELATION);
+    EXPECT_EQ(convNode->attributes.get_name(), "conv_fprop_op");
 }
 
 } // namespace

@@ -60,14 +60,207 @@ TEST(TestTypes, ConvolutionModeConversion)
     EXPECT_EQ(toSdkType(ConvolutionMode::NOT_SET), hipdnn_data_sdk::data_objects::ConvMode::UNSET);
 }
 
-TEST(TestTypes, PointwiseModeConversion)
+TEST(TestTypes, ToSdkTypePointwiseModeAllValidModes)
+{
+    using namespace hipdnn_frontend;
+    using sdk = hipdnn_data_sdk::data_objects::PointwiseMode;
+
+    const std::vector<std::pair<PointwiseMode, hipdnn_data_sdk::data_objects::PointwiseMode>>
+        validModes = {
+            {PointwiseMode::NOT_SET, sdk::UNSET},
+            {PointwiseMode::ABS, sdk::ABS},
+            {PointwiseMode::ADD, sdk::ADD},
+            {PointwiseMode::ADD_SQUARE, sdk::ADD_SQUARE},
+            {PointwiseMode::BINARY_SELECT, sdk::BINARY_SELECT},
+            {PointwiseMode::CEIL, sdk::CEIL},
+            {PointwiseMode::CMP_EQ, sdk::CMP_EQ},
+            {PointwiseMode::CMP_GE, sdk::CMP_GE},
+            {PointwiseMode::CMP_GT, sdk::CMP_GT},
+            {PointwiseMode::CMP_LE, sdk::CMP_LE},
+            {PointwiseMode::CMP_LT, sdk::CMP_LT},
+            {PointwiseMode::CMP_NEQ, sdk::CMP_NEQ},
+            {PointwiseMode::DIV, sdk::DIV},
+            {PointwiseMode::ELU_BWD, sdk::ELU_BWD},
+            {PointwiseMode::ELU_FWD, sdk::ELU_FWD},
+            {PointwiseMode::ERF, sdk::ERF},
+            {PointwiseMode::EXP, sdk::EXP},
+            {PointwiseMode::FLOOR, sdk::FLOOR},
+            {PointwiseMode::GELU_APPROX_TANH_BWD, sdk::GELU_APPROX_TANH_BWD},
+            {PointwiseMode::GELU_APPROX_TANH_FWD, sdk::GELU_APPROX_TANH_FWD},
+            {PointwiseMode::GELU_BWD, sdk::GELU_BWD},
+            {PointwiseMode::GELU_FWD, sdk::GELU_FWD},
+            {PointwiseMode::GEN_INDEX, sdk::GEN_INDEX},
+            {PointwiseMode::IDENTITY, sdk::IDENTITY},
+            {PointwiseMode::LOG, sdk::LOG},
+            {PointwiseMode::LOGICAL_AND, sdk::LOGICAL_AND},
+            {PointwiseMode::LOGICAL_NOT, sdk::LOGICAL_NOT},
+            {PointwiseMode::LOGICAL_OR, sdk::LOGICAL_OR},
+            {PointwiseMode::MAX, sdk::MAX_OP},
+            {PointwiseMode::MIN, sdk::MIN_OP},
+            {PointwiseMode::MUL, sdk::MUL},
+            {PointwiseMode::NEG, sdk::NEG},
+            {PointwiseMode::RECIPROCAL, sdk::RECIPROCAL},
+            {PointwiseMode::RELU_BWD, sdk::RELU_BWD},
+            {PointwiseMode::RELU_FWD, sdk::RELU_FWD},
+            {PointwiseMode::RSQRT, sdk::RSQRT},
+            {PointwiseMode::SIGMOID_BWD, sdk::SIGMOID_BWD},
+            {PointwiseMode::SIGMOID_FWD, sdk::SIGMOID_FWD},
+            {PointwiseMode::SIN, sdk::SIN},
+            {PointwiseMode::SOFTPLUS_BWD, sdk::SOFTPLUS_BWD},
+            {PointwiseMode::SOFTPLUS_FWD, sdk::SOFTPLUS_FWD},
+            {PointwiseMode::SQRT, sdk::SQRT},
+            {PointwiseMode::SUB, sdk::SUB},
+            {PointwiseMode::SWISH_BWD, sdk::SWISH_BWD},
+            {PointwiseMode::SWISH_FWD, sdk::SWISH_FWD},
+            {PointwiseMode::TAN, sdk::TAN},
+            {PointwiseMode::TANH_BWD, sdk::TANH_BWD},
+            {PointwiseMode::TANH_FWD, sdk::TANH_FWD},
+        };
+
+    for(const auto& [frontendMode, expectedSdkMode] : validModes)
+    {
+        EXPECT_EQ(toSdkType(frontendMode), expectedSdkMode)
+            << "toSdkType mismatch for PointwiseMode " << static_cast<int>(frontendMode);
+    }
+}
+
+TEST(TestTypes, FromSdkTypePointwiseModeAllValidModes)
+{
+    using namespace hipdnn_frontend;
+    using sdk = hipdnn_data_sdk::data_objects::PointwiseMode;
+
+    const std::vector<std::pair<hipdnn_data_sdk::data_objects::PointwiseMode, PointwiseMode>>
+        validModes = {
+            {sdk::UNSET, PointwiseMode::NOT_SET},
+            {sdk::ABS, PointwiseMode::ABS},
+            {sdk::ADD, PointwiseMode::ADD},
+            {sdk::ADD_SQUARE, PointwiseMode::ADD_SQUARE},
+            {sdk::BINARY_SELECT, PointwiseMode::BINARY_SELECT},
+            {sdk::CEIL, PointwiseMode::CEIL},
+            {sdk::CMP_EQ, PointwiseMode::CMP_EQ},
+            {sdk::CMP_GE, PointwiseMode::CMP_GE},
+            {sdk::CMP_GT, PointwiseMode::CMP_GT},
+            {sdk::CMP_LE, PointwiseMode::CMP_LE},
+            {sdk::CMP_LT, PointwiseMode::CMP_LT},
+            {sdk::CMP_NEQ, PointwiseMode::CMP_NEQ},
+            {sdk::DIV, PointwiseMode::DIV},
+            {sdk::ELU_BWD, PointwiseMode::ELU_BWD},
+            {sdk::ELU_FWD, PointwiseMode::ELU_FWD},
+            {sdk::ERF, PointwiseMode::ERF},
+            {sdk::EXP, PointwiseMode::EXP},
+            {sdk::FLOOR, PointwiseMode::FLOOR},
+            {sdk::GELU_APPROX_TANH_BWD, PointwiseMode::GELU_APPROX_TANH_BWD},
+            {sdk::GELU_APPROX_TANH_FWD, PointwiseMode::GELU_APPROX_TANH_FWD},
+            {sdk::GELU_BWD, PointwiseMode::GELU_BWD},
+            {sdk::GELU_FWD, PointwiseMode::GELU_FWD},
+            {sdk::GEN_INDEX, PointwiseMode::GEN_INDEX},
+            {sdk::IDENTITY, PointwiseMode::IDENTITY},
+            {sdk::LOG, PointwiseMode::LOG},
+            {sdk::LOGICAL_AND, PointwiseMode::LOGICAL_AND},
+            {sdk::LOGICAL_NOT, PointwiseMode::LOGICAL_NOT},
+            {sdk::LOGICAL_OR, PointwiseMode::LOGICAL_OR},
+            {sdk::MAX_OP, PointwiseMode::MAX},
+            {sdk::MIN_OP, PointwiseMode::MIN},
+            {sdk::MUL, PointwiseMode::MUL},
+            {sdk::NEG, PointwiseMode::NEG},
+            {sdk::RECIPROCAL, PointwiseMode::RECIPROCAL},
+            {sdk::RELU_BWD, PointwiseMode::RELU_BWD},
+            {sdk::RELU_FWD, PointwiseMode::RELU_FWD},
+            {sdk::RSQRT, PointwiseMode::RSQRT},
+            {sdk::SIGMOID_BWD, PointwiseMode::SIGMOID_BWD},
+            {sdk::SIGMOID_FWD, PointwiseMode::SIGMOID_FWD},
+            {sdk::SIN, PointwiseMode::SIN},
+            {sdk::SOFTPLUS_BWD, PointwiseMode::SOFTPLUS_BWD},
+            {sdk::SOFTPLUS_FWD, PointwiseMode::SOFTPLUS_FWD},
+            {sdk::SQRT, PointwiseMode::SQRT},
+            {sdk::SUB, PointwiseMode::SUB},
+            {sdk::SWISH_BWD, PointwiseMode::SWISH_BWD},
+            {sdk::SWISH_FWD, PointwiseMode::SWISH_FWD},
+            {sdk::TAN, PointwiseMode::TAN},
+            {sdk::TANH_BWD, PointwiseMode::TANH_BWD},
+            {sdk::TANH_FWD, PointwiseMode::TANH_FWD},
+        };
+
+    for(const auto& [sdkMode, expectedFrontendMode] : validModes)
+    {
+        EXPECT_EQ(fromSdkType(sdkMode), expectedFrontendMode)
+            << "fromSdkType mismatch for SDK PointwiseMode " << static_cast<int>(sdkMode);
+    }
+}
+
+TEST(TestTypes, PointwiseModeRoundTripSdk)
 {
     using namespace hipdnn_frontend;
 
-    EXPECT_EQ(toSdkType(PointwiseMode::RELU_FWD),
-              hipdnn_data_sdk::data_objects::PointwiseMode::RELU_FWD);
-    EXPECT_EQ(toSdkType(PointwiseMode::NOT_SET),
-              hipdnn_data_sdk::data_objects::PointwiseMode::UNSET);
+    const std::vector<PointwiseMode> modes = {
+        PointwiseMode::NOT_SET,
+        PointwiseMode::ABS,
+        PointwiseMode::ADD,
+        PointwiseMode::ADD_SQUARE,
+        PointwiseMode::BINARY_SELECT,
+        PointwiseMode::CEIL,
+        PointwiseMode::CMP_EQ,
+        PointwiseMode::CMP_GE,
+        PointwiseMode::CMP_GT,
+        PointwiseMode::CMP_LE,
+        PointwiseMode::CMP_LT,
+        PointwiseMode::CMP_NEQ,
+        PointwiseMode::DIV,
+        PointwiseMode::ELU_BWD,
+        PointwiseMode::ELU_FWD,
+        PointwiseMode::ERF,
+        PointwiseMode::EXP,
+        PointwiseMode::FLOOR,
+        PointwiseMode::GELU_APPROX_TANH_BWD,
+        PointwiseMode::GELU_APPROX_TANH_FWD,
+        PointwiseMode::GELU_BWD,
+        PointwiseMode::GELU_FWD,
+        PointwiseMode::GEN_INDEX,
+        PointwiseMode::IDENTITY,
+        PointwiseMode::LOG,
+        PointwiseMode::LOGICAL_AND,
+        PointwiseMode::LOGICAL_NOT,
+        PointwiseMode::LOGICAL_OR,
+        PointwiseMode::MAX,
+        PointwiseMode::MIN,
+        PointwiseMode::MUL,
+        PointwiseMode::NEG,
+        PointwiseMode::RECIPROCAL,
+        PointwiseMode::RELU_BWD,
+        PointwiseMode::RELU_FWD,
+        PointwiseMode::RSQRT,
+        PointwiseMode::SIGMOID_BWD,
+        PointwiseMode::SIGMOID_FWD,
+        PointwiseMode::SIN,
+        PointwiseMode::SOFTPLUS_BWD,
+        PointwiseMode::SOFTPLUS_FWD,
+        PointwiseMode::SQRT,
+        PointwiseMode::SUB,
+        PointwiseMode::SWISH_BWD,
+        PointwiseMode::SWISH_FWD,
+        PointwiseMode::TAN,
+        PointwiseMode::TANH_BWD,
+        PointwiseMode::TANH_FWD,
+    };
+
+    for(auto mode : modes)
+    {
+        EXPECT_EQ(fromSdkType(toSdkType(mode)), mode)
+            << "Round-trip failed for PointwiseMode " << static_cast<int>(mode);
+    }
+}
+
+TEST(TestTypes, PointwiseModeMinMaxSdkNameMapping)
+{
+    using namespace hipdnn_frontend;
+    using sdk = hipdnn_data_sdk::data_objects::PointwiseMode;
+
+    // MIN and MAX are renamed to MIN_OP and MAX_OP in the SDK schema due to
+    // flatc reserved identifier conflicts.
+    EXPECT_EQ(toSdkType(PointwiseMode::MIN), sdk::MIN_OP);
+    EXPECT_EQ(toSdkType(PointwiseMode::MAX), sdk::MAX_OP);
+    EXPECT_EQ(fromSdkType(sdk::MIN_OP), PointwiseMode::MIN);
+    EXPECT_EQ(fromSdkType(sdk::MAX_OP), PointwiseMode::MAX);
 }
 
 TEST(TestTypes, HeuristicModeConversion)
@@ -128,6 +321,62 @@ TEST(TestTypes, PointwiseModeToString)
     EXPECT_STREQ(to_string(PointwiseMode::ADD), "ADD");
     EXPECT_STREQ(to_string(PointwiseMode::BINARY_SELECT), "BINARY_SELECT");
     EXPECT_STREQ(to_string(PointwiseMode::COUNT), "UNKNOWN");
+
+    // Verify all valid modes produce a non-UNKNOWN string
+    for(auto mode : {PointwiseMode::NOT_SET,
+                     PointwiseMode::ABS,
+                     PointwiseMode::ADD,
+                     PointwiseMode::ADD_SQUARE,
+                     PointwiseMode::BINARY_SELECT,
+                     PointwiseMode::CEIL,
+                     PointwiseMode::CMP_EQ,
+                     PointwiseMode::CMP_GE,
+                     PointwiseMode::CMP_GT,
+                     PointwiseMode::CMP_LE,
+                     PointwiseMode::CMP_LT,
+                     PointwiseMode::CMP_NEQ,
+                     PointwiseMode::DIV,
+                     PointwiseMode::ELU_BWD,
+                     PointwiseMode::ELU_FWD,
+                     PointwiseMode::ERF,
+                     PointwiseMode::EXP,
+                     PointwiseMode::FLOOR,
+                     PointwiseMode::GELU_APPROX_TANH_BWD,
+                     PointwiseMode::GELU_APPROX_TANH_FWD,
+                     PointwiseMode::GELU_BWD,
+                     PointwiseMode::GELU_FWD,
+                     PointwiseMode::GEN_INDEX,
+                     PointwiseMode::IDENTITY,
+                     PointwiseMode::LOG,
+                     PointwiseMode::LOGICAL_AND,
+                     PointwiseMode::LOGICAL_NOT,
+                     PointwiseMode::LOGICAL_OR,
+                     PointwiseMode::MAX,
+                     PointwiseMode::MIN,
+                     PointwiseMode::MUL,
+                     PointwiseMode::NEG,
+                     PointwiseMode::RECIPROCAL,
+                     PointwiseMode::RELU_BWD,
+                     PointwiseMode::RELU_FWD,
+                     PointwiseMode::RSQRT,
+                     PointwiseMode::SIGMOID_BWD,
+                     PointwiseMode::SIGMOID_FWD,
+                     PointwiseMode::SIN,
+                     PointwiseMode::SOFTPLUS_BWD,
+                     PointwiseMode::SOFTPLUS_FWD,
+                     PointwiseMode::SQRT,
+                     PointwiseMode::SUB,
+                     PointwiseMode::SWISH_BWD,
+                     PointwiseMode::SWISH_FWD,
+                     PointwiseMode::TAN,
+                     PointwiseMode::TANH_BWD,
+                     PointwiseMode::TANH_FWD})
+    {
+        EXPECT_STRNE(to_string(mode), "UNKNOWN")
+            << "to_string returned UNKNOWN for PointwiseMode " << static_cast<int>(mode);
+        EXPECT_STRNE(to_string(mode), "")
+            << "to_string returned empty for PointwiseMode " << static_cast<int>(mode);
+    }
 }
 
 TEST(TestTypes, DataTypeStreamOperator)

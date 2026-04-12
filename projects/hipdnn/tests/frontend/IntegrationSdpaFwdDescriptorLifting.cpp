@@ -12,7 +12,9 @@
 #include <hipdnn_frontend/detail/ScopedHipdnnBackendDescriptor.hpp>
 #include <hipdnn_frontend/node/SdpaFwdNode.hpp>
 #include <hipdnn_test_sdk/constants/SdpaFwdConstants.hpp>
+#include <hipdnn_test_sdk/utilities/LiftingTestHelpers.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
+#include <hipdnn_test_sdk/utilities/TestableGraph.hpp>
 #include <hipdnn_test_sdk/utilities/ToVec.hpp>
 
 #include "test_plugins/TestPluginConstants.hpp"
@@ -25,20 +27,7 @@ using hipdnn_tests::toVec;
 namespace
 {
 
-// Exposes protected Graph methods for lifting integration tests
-class TestableGraph : public Graph
-{
-public:
-    using Graph::build_operation_graph;
-    using Graph::deserialize;
-    using Graph::fromBackendDescriptor;
-    using Graph::get_raw_graph_descriptor;
-
-    const std::vector<std::shared_ptr<INode>>& getSubNodes() const
-    {
-        return _sub_nodes;
-    }
-};
+using TestableGraph = hipdnn_tests::TestableGraphLifting;
 
 // Use SDK constants from SdpaFwdConstants.hpp:
 // K_SDPA_TENSOR_Q_UID, K_SDPA_TENSOR_K_UID, K_SDPA_TENSOR_V_UID, K_SDPA_TENSOR_O_UID,
@@ -604,28 +593,30 @@ TEST_F(IntegrationSdpaFwdDescriptorLifting, JsonRoundTripWithHandle)
     auto tensorMap = liftedGraph->getTensorsByUid();
     ASSERT_EQ(tensorMap.size(), 4u);
 
-    // Verify q tensor
-    ASSERT_NE(tensorMap.count(K_SDPA_TENSOR_Q_UID), 0u);
-    EXPECT_EQ(tensorMap[K_SDPA_TENSOR_Q_UID]->get_uid(), K_SDPA_TENSOR_Q_UID);
-    EXPECT_EQ(tensorMap[K_SDPA_TENSOR_Q_UID]->get_name(), "q");
-    EXPECT_EQ(tensorMap[K_SDPA_TENSOR_Q_UID]->get_dim(), toVec(K_SDPA_TENSOR_Q_DIMS));
-    EXPECT_EQ(tensorMap[K_SDPA_TENSOR_Q_UID]->get_stride(), toVec(K_SDPA_TENSOR_Q_STRIDES));
-    EXPECT_EQ(tensorMap[K_SDPA_TENSOR_Q_UID]->get_data_type(), DataType::FLOAT);
-
-    // Verify k tensor
-    ASSERT_NE(tensorMap.count(K_SDPA_TENSOR_K_UID), 0u);
-    EXPECT_EQ(tensorMap[K_SDPA_TENSOR_K_UID]->get_dim(), toVec(K_SDPA_TENSOR_K_DIMS));
-    EXPECT_EQ(tensorMap[K_SDPA_TENSOR_K_UID]->get_stride(), toVec(K_SDPA_TENSOR_K_STRIDES));
-
-    // Verify v tensor
-    ASSERT_NE(tensorMap.count(K_SDPA_TENSOR_V_UID), 0u);
-    EXPECT_EQ(tensorMap[K_SDPA_TENSOR_V_UID]->get_dim(), toVec(K_SDPA_TENSOR_V_DIMS));
-    EXPECT_EQ(tensorMap[K_SDPA_TENSOR_V_UID]->get_stride(), toVec(K_SDPA_TENSOR_V_STRIDES));
-
-    // Verify o tensor
-    ASSERT_NE(tensorMap.count(K_SDPA_TENSOR_O_UID), 0u);
-    EXPECT_EQ(tensorMap[K_SDPA_TENSOR_O_UID]->get_dim(), toVec(K_SDPA_TENSOR_O_DIMS));
-    EXPECT_EQ(tensorMap[K_SDPA_TENSOR_O_UID]->get_stride(), toVec(K_SDPA_TENSOR_O_STRIDES));
+    hipdnn_tests::verifyTensorInGraph(tensorMap,
+                                      K_SDPA_TENSOR_Q_UID,
+                                      "q",
+                                      toVec(K_SDPA_TENSOR_Q_DIMS),
+                                      toVec(K_SDPA_TENSOR_Q_STRIDES),
+                                      DataType::FLOAT);
+    hipdnn_tests::verifyTensorInGraph(tensorMap,
+                                      K_SDPA_TENSOR_K_UID,
+                                      "k",
+                                      toVec(K_SDPA_TENSOR_K_DIMS),
+                                      toVec(K_SDPA_TENSOR_K_STRIDES),
+                                      DataType::FLOAT);
+    hipdnn_tests::verifyTensorInGraph(tensorMap,
+                                      K_SDPA_TENSOR_V_UID,
+                                      "v",
+                                      toVec(K_SDPA_TENSOR_V_DIMS),
+                                      toVec(K_SDPA_TENSOR_V_STRIDES),
+                                      DataType::FLOAT);
+    hipdnn_tests::verifyTensorInGraph(tensorMap,
+                                      K_SDPA_TENSOR_O_UID,
+                                      "o",
+                                      toVec(K_SDPA_TENSOR_O_DIMS),
+                                      toVec(K_SDPA_TENSOR_O_STRIDES),
+                                      DataType::FLOAT);
 
     // Verify sub-node count and type
     auto& subNodes = liftedGraph->getSubNodes();
