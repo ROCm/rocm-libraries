@@ -324,9 +324,6 @@ endif()
 # Skip conv2d tests to capture flaky behavior                                                                             
 list(APPEND SKIP_TESTS test_conv2d test_conv2d_find2 test_immed_conv2d)
 
-# Skip ternary_tensor_ops test (temporary)                                                                            
-list(APPEND SKIP_TESTS test_ternary_tensor_ops)
-
 # The usage is non-trivial, see function add_test_command.
 if(SKIP_TESTS)
     list(REMOVE_DUPLICATES SKIP_TESTS)
