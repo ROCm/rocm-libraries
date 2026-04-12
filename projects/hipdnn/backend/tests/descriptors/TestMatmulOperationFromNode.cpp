@@ -11,9 +11,9 @@
 #include "hipdnn_backend.h"
 
 #include <gtest/gtest.h>
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
-#include <hipdnn_data_sdk/data_objects/matmul_attributes_generated.h>
-#include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/matmul_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_test_sdk/constants/MatmulConstants.hpp>
 #include <hipdnn_test_sdk/utilities/ToVec.hpp>
 
@@ -24,7 +24,7 @@
 
 using namespace hipdnn_backend;
 using namespace hipdnn_backend::test_utilities;
-using namespace hipdnn_data_sdk::data_objects;
+using namespace hipdnn_flatbuffers_sdk::data_objects;
 using namespace hipdnn_tests::constants;
 using hipdnn_tests::toVec;
 
@@ -61,9 +61,9 @@ protected:
         _tensorMap[K_MATMUL_TENSOR_C_UID] = TensorDescriptor::fromFlatBuffer(cAttrs);
     }
 
-    static hipdnn_data_sdk::data_objects::MatmulAttributesT createStandardMatmulAttrs()
+    static hipdnn_flatbuffers_sdk::data_objects::MatmulAttributesT createStandardMatmulAttrs()
     {
-        hipdnn_data_sdk::data_objects::MatmulAttributesT attrs;
+        hipdnn_flatbuffers_sdk::data_objects::MatmulAttributesT attrs;
         attrs.a_tensor_uid = K_MATMUL_TENSOR_A_UID;
         attrs.b_tensor_uid = K_MATMUL_TENSOR_B_UID;
         attrs.c_tensor_uid = K_MATMUL_TENSOR_C_UID;

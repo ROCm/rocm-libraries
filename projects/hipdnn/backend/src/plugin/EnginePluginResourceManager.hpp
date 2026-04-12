@@ -16,11 +16,11 @@
 
 #include "hipdnn_backend.h"
 
-namespace hipdnn_data_sdk::data_objects
+namespace hipdnn_flatbuffers_sdk::data_objects
 {
 // NOLINTNEXTLINE(readability-identifier-naming)
 struct EngineDetails;
-} // namespace hipdnn_data_sdk::data_objects
+} // namespace hipdnn_flatbuffers_sdk::data_objects
 
 namespace hipdnn_backend
 {
@@ -157,7 +157,7 @@ public:
     EngineDetailsWrapper(EngineDetailsWrapper&& other) noexcept;
     EngineDetailsWrapper& operator=(EngineDetailsWrapper&& other) noexcept;
 
-    const hipdnn_data_sdk::data_objects::EngineDetails* get() const;
+    const hipdnn_flatbuffers_sdk::data_objects::EngineDetails* get() const;
 
 private:
     std::shared_ptr<EnginePluginResourceManager> _rm;
