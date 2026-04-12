@@ -335,14 +335,14 @@ protected:
         auto error = miopen::rms_range(tensC_ocl, tensC_hip);
         std::cout << "error=" << error << std::endl;
         std::cout << "OpenCL: ";
-        for (size_t i = 0; i < 16; ++i)
-          std::cout << tensC_ocl[i] << ' ';
+        for(size_t i = 0; i < 16; ++i)
+            std::cout << tensC_ocl[i] << ' ';
         std::cout << std::endl;
         std::cout << "   HIP: ";
-        for (size_t i = 0; i < 16; ++i)
-          std::cout << tensC_hip[i] << ' ';
+        for(size_t i = 0; i < 16; ++i)
+            std::cout << tensC_hip[i] << ' ';
         std::cout << std::endl;
-        //EXPECT_NEAR(error, 0, 0.001) << "GPU outputs do not match each other. Error: " << error;
+        // EXPECT_NEAR(error, 0, 0.001) << "GPU outputs do not match each other. Error: " << error;
     }
 
     void TearDown() override
