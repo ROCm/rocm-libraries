@@ -82,7 +82,7 @@ namespace rocsparse_clients_test
 
         case sync_property::partially_synchronous:
         {
-            return "synchronous";
+            return "partially_synchronous";
         }
 
         case sync_property::asynchronous:

@@ -26,8 +26,8 @@
 #include "rocsparse_data.hpp"
 #include "rocsparse_parse_data.hpp"
 #include "rocsparse_reproducibility.hpp"
-#include "rocsparse_test.hpp"
 #include "rocsparse_test_listeners.hpp"
+#include "rocsparse_test_sync_wrappers.hpp"
 #include "utility.hpp"
 
 #include <gtest/gtest.h>
@@ -90,7 +90,7 @@ int main(int argc, char** argv)
     {
         if(!strcmp(argv[i], "--test-sync-o"))
         {
-            if(!argv[i + 1] || !argv[i + 1][0])
+            if(i + 1 >= argc || !argv[i + 1][0])
             {
                 std::cerr << "The " << argv[i] << " option requires an argument" << std::endl;
                 exit(EXIT_FAILURE);

@@ -25,6 +25,7 @@
 #pragma once
 
 #include "rocsparse_debug.hpp"
+#include <atomic>
 #include <hip/hip_runtime_api.h>
 namespace rocsparse
 {
@@ -50,11 +51,11 @@ namespace rocsparse
         static constexpr int32_t func_size = 11;
 
     private:
-        int64_t stack_count{};
-        int64_t count_calls[func_size]{};
-        int64_t ncalls{};
+        std::atomic<int64_t> stack_count{0};
+        std::atomic<int64_t> count_calls[func_size]{};
+        std::atomic<int64_t> ncalls{0};
         execution_t() = default;
-        func_t m_last_call{(func_t)-1};
+        std::atomic<func_t> m_last_call{(func_t)-1};
 
     public:
         ~execution_t();

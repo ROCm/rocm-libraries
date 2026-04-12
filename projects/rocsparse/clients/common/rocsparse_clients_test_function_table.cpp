@@ -26,11 +26,13 @@
 // Pull in the declarations from the header (enum, struct, class).
 // We only need the rocsparse_clients_test namespace types, not the WRAP macros,
 // but including the full header is harmless for a single TU.
-#include "../tests/rocsparse_test.hpp"
+#include "../tests/rocsparse_test_sync_wrappers.hpp"
 using namespace rocsparse_clients_test;
 #include <fstream>
 #include <iostream>
 #include <map>
+#include <stdexcept>
+#include <string>
 
 void rocsparse_execution_record_property(rocsparse_handle handle, const char* name)
 {
@@ -77,7 +79,8 @@ void rocsparse_execution_check_sync_property(rocsparse_handle handle, const char
                 std::cerr << "Error: rocsparse_" << name << " is declared '"
                           << rocsparse_clients_test::sync_property2string(sync)
                           << "' but production code returns 'synchronous'" << std::endl;
-                throw rocsparse_status_internal_error;
+                throw std::runtime_error(std::string("rocsparse_") + name
+                                         + ": sync property mismatch (synchronous)");
             }
 
             return;
@@ -94,7 +97,8 @@ void rocsparse_execution_check_sync_property(rocsparse_handle handle, const char
                 std::cerr << "Error: rocsparse_" << name << " is declared '"
                           << rocsparse_clients_test::sync_property2string(sync)
                           << "' but production code returns 'asynchronous'" << std::endl;
-                throw rocsparse_status_internal_error;
+                throw std::runtime_error(std::string("rocsparse_") + name
+                                         + ": sync property mismatch (asynchronous)");
             }
             return;
         }
@@ -110,7 +114,8 @@ void rocsparse_execution_check_sync_property(rocsparse_handle handle, const char
                 std::cerr << "Error: rocsparse_" << name << " is declared '"
                           << rocsparse_clients_test::sync_property2string(sync)
                           << "' but production code returns 'partially_synchronous'" << std::endl;
-                throw rocsparse_status_internal_error;
+                throw std::runtime_error(std::string("rocsparse_") + name
+                                         + ": sync property mismatch (partially_synchronous)");
             }
             return;
         }
@@ -127,14 +132,15 @@ void rocsparse_execution_check_sync_property(rocsparse_handle handle, const char
                 std::cerr << "Error: rocsparse_" << name << " is declared '"
                           << rocsparse_clients_test::sync_property2string(sync)
                           << "' but production code returns 'host'" << std::endl;
-                throw rocsparse_status_internal_error;
+                throw std::runtime_error(std::string("rocsparse_") + name
+                                         + ": sync property mismatch (host)");
             }
             return;
         }
     }
 }
 
-static std::map<const char*, function_info> s_map{
+static std::map<std::string, function_info> s_map{
     {"axpby", {sync_property::host_or_asynchronous}},
     {"bsrgeam_nnzb", {sync_property::depends}},
     {"bsrgemm_nnzb", {sync_property::depends}},
@@ -874,7 +880,13 @@ void function_properties_t::set_sync_report_filename(const char* value)
 
 const function_info& function_properties_t::get_info(const char* name) const
 {
-    return s_map[name];
+    auto it = s_map.find(name);
+    if(it == s_map.end())
+    {
+        static const function_info s_unknown{};
+        return s_unknown;
+    }
+    return it->second;
 }
 
 function_info& function_properties_t::get_info(const char* name)
@@ -885,8 +897,7 @@ function_info& function_properties_t::get_info(const char* name)
 void function_properties_t::report(rocsparse_handle handle) const
 {
     std::ofstream out(this->filename);
-    out << "# rocsparse-test: summary of called functions " << std::endl;
-    out << "{" << std::endl;
+    out << "[" << std::endl;
     int64_t count = 0;
     for(const auto& p : s_map)
     {
@@ -895,9 +906,9 @@ void function_properties_t::report(rocsparse_handle handle) const
         {
             continue;
         }
-        const char*    name = p.first;
-        const auto     sync = info.get_sync();
-        const uint64_t ncalls_synchronous
+        const std::string& name = p.first;
+        const auto         sync = info.get_sync();
+        const uint64_t     ncalls_synchronous
             = info.get_calls(rocsparse_clients_test::sync_property::synchronous);
         const uint64_t ncalls_asynchronous
             = info.get_calls(rocsparse_clients_test::sync_property::asynchronous);
@@ -910,18 +921,17 @@ void function_properties_t::report(rocsparse_handle handle) const
             out << ", " << std::endl;
         }
 
-        out << "{'name': 'rocsparse_" << name << "'," << std::endl;
-        out << " 'sync': '" << rocsparse_clients_test::sync_property2string(sync) << "'}"
+        out << "{\"name\": \"rocsparse_" << name << "\"," << std::endl;
+        out << " \"sync\": \"" << rocsparse_clients_test::sync_property2string(sync) << "\","
             << std::endl;
-        out << " 'calls': [ 'sync': '" << ncalls_synchronous << "'," << std::endl;
-        out << "            'async':      '" << ncalls_asynchronous << "'," << std::endl;
-        out << "            'partialsync: '" << ncalls_partially_synchronous << "'," << std::endl;
-        out << "            'host':       '" << ncalls_host << "' ]";
+        out << " \"calls\": {\"sync\": " << ncalls_synchronous << "," << std::endl;
+        out << "            \"async\": " << ncalls_asynchronous << "," << std::endl;
+        out << "            \"partialsync\": " << ncalls_partially_synchronous << "," << std::endl;
+        out << "            \"host\": " << ncalls_host << "}}";
         ++count;
     }
 
-    out << std::endl << "}" << std::endl;
-    out << "# end report " << std::endl;
+    out << std::endl << "]" << std::endl;
 }
 
 const std::string& function_properties_t::get_filename() const
@@ -938,9 +948,9 @@ rocsparse_status function_properties_t::check(rocsparse_handle handle) const
         {
             continue;
         }
-        const char*    name = p.first;
-        const auto     sync = info.get_sync();
-        const uint64_t ncalls_synchronous
+        const std::string& name = p.first;
+        const auto         sync = info.get_sync();
+        const uint64_t     ncalls_synchronous
             = info.get_calls(rocsparse_clients_test::sync_property::synchronous);
         const uint64_t ncalls_asynchronous
             = info.get_calls(rocsparse_clients_test::sync_property::asynchronous);

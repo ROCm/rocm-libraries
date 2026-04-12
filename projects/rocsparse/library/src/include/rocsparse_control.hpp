@@ -267,21 +267,21 @@ inline void dprint(I size_, const T* v, const char* name_ = nullptr, I short_siz
     delete[] p;
 }
 
-// #define HIPLAUNCHKERNELGGL_EXTRACT_STREAM(K_,G_,B_,M_,S_,...) S_
-// 	  HIPLAUNCHKERNELGGL_EXTRACT_STREAM(__VA_ARGS__);
-
 #include "rocsparse_memory.hpp"
 
 #define THROW_IF_HIPLAUNCHKERNELGGL_ERROR(...)                                                 \
     do                                                                                         \
     {                                                                                          \
+        if(rocsparse_debug_variables.get_debug())                                              \
+        {                                                                                      \
+            rocsparse::execution_t::instance().flag_kernel_launch();                           \
+        }                                                                                      \
         if(false == rocsparse_debug_variables.get_debug_kernel_launch())                       \
         {                                                                                      \
             hipLaunchKernelGGL(__VA_ARGS__);                                                   \
         }                                                                                      \
         else                                                                                   \
         {                                                                                      \
-            rocsparse::execution_t::instance().flag_kernel_launch();                           \
             THROW_WITH_MESSAGE_IF_HIP_ERROR(hipGetLastError(), "prior to hipLaunchKernelGGL"); \
             hipLaunchKernelGGL(__VA_ARGS__);                                                   \
             THROW_IF_HIP_ERROR(hipGetLastError());                                             \
@@ -291,13 +291,16 @@ inline void dprint(I size_, const T* v, const char* name_ = nullptr, I short_siz
 #define RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(...)                                                 \
     do                                                                                          \
     {                                                                                           \
+        if(rocsparse_debug_variables.get_debug())                                               \
+        {                                                                                       \
+            rocsparse::execution_t::instance().flag_kernel_launch();                            \
+        }                                                                                       \
         if(false == rocsparse_debug_variables.get_debug_kernel_launch())                        \
         {                                                                                       \
             hipLaunchKernelGGL(__VA_ARGS__);                                                    \
         }                                                                                       \
         else                                                                                    \
         {                                                                                       \
-            rocsparse::execution_t::instance().flag_kernel_launch();                            \
             RETURN_WITH_MESSAGE_IF_HIP_ERROR(hipGetLastError(), "prior to hipLaunchKernelGGL"); \
             hipLaunchKernelGGL(__VA_ARGS__);                                                    \
             RETURN_IF_HIP_ERROR(hipGetLastError());                                             \

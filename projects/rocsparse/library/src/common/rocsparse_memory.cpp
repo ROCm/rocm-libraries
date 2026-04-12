@@ -25,6 +25,8 @@
 #include "rocsparse-export.h"
 #include "rocsparse-types.h"
 
+#include <iostream>
+
 int64_t rocsparse::execution_t::get_ncalls() const
 {
     return this->ncalls;
@@ -59,6 +61,7 @@ void rocsparse::execution_t::reset()
 {
     this->stack_count = 0;
     this->ncalls      = 0;
+    this->m_last_call = (func_t)-1;
     for(int32_t i = 0; i < func_size; ++i)
     {
         this->count_calls[i] = 0;
@@ -169,6 +172,8 @@ hipError_t rocsparse::execution_t::call_memcpy(void*         target,
                                                hipMemcpyKind kind)
 {
     ++this->count_calls[func_t::hip_memcpy];
+    this->m_last_call = func_t::hip_memcpy;
+    ++this->ncalls;
     return hipMemcpy(target, source, size, kind);
 }
 
@@ -176,12 +181,16 @@ hipError_t rocsparse::execution_t::call_memcpy_async(
     void* target, const void* source, size_t size, hipMemcpyKind kind, hipStream_t stream)
 {
     ++this->count_calls[func_t::hip_memcpy_async];
+    this->m_last_call = func_t::hip_memcpy_async;
+    ++this->ncalls;
     return hipMemcpyAsync(target, source, size, kind, stream);
 }
 
 hipError_t rocsparse::execution_t::call_memset(void* target, int value, size_t size)
 {
     ++this->count_calls[func_t::hip_memset];
+    this->m_last_call = func_t::hip_memset;
+    ++this->ncalls;
     return hipMemset(target, value, size);
 }
 
@@ -191,6 +200,8 @@ hipError_t rocsparse::execution_t::call_memset_async(void*       target,
                                                      hipStream_t stream)
 {
     ++this->count_calls[func_t::hip_memset_async];
+    this->m_last_call = func_t::hip_memset_async;
+    ++this->ncalls;
     return hipMemsetAsync(target, value, size, stream);
 }
 
@@ -204,7 +215,6 @@ void rocsparse::execution_t::set_last_call(func_t value)
     this->m_last_call = value;
 }
 
-#include <iostream>
 rocsparse::execution_t::~execution_t() {}
 
 void rocsparse::execution_t::info() const
