@@ -584,7 +584,8 @@ TEST_F(IntegrationSdpaFwdDescriptorLifting, JsonRoundTripWithHandle)
     result = liftedGraph->deserialize(_handle, jsonData);
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
-    // Verify graph-level data types
+    // Verify graph-level attributes
+    EXPECT_EQ(liftedGraph->get_name(), "SdpaFwdLiftingTestGraph");
     EXPECT_EQ(liftedGraph->get_compute_data_type(), DataType::FLOAT);
     EXPECT_EQ(liftedGraph->get_intermediate_data_type(), DataType::FLOAT);
     EXPECT_EQ(liftedGraph->get_io_data_type(), DataType::FLOAT);
