@@ -146,6 +146,14 @@ namespace rocRoller
             if(branchAndExec)
             {
                 auto EXECZ = m_context->getEXECZ();
+                // -------------------------------------------------------------------------------
+                // TODO: remove this once we better handle data-flow across branches
+                {
+                    co_yield Instruction::Wait(
+                        WaitCount::Zero(m_context->targetArchitecture(),
+                                        "REMOVEME: Wait before branching into EXEC conditional!"));
+                }
+                // -------------------------------------------------------------------------------
                 // if execz == 1 (set), it means EXEC == 0 i.e. the entire execute mask is zero,
                 // then skip the then branch and jump to the else branch.
                 co_yield m_context->brancher()->branchIfNonZero(
@@ -169,6 +177,14 @@ namespace rocRoller
 
             if(branchAndExec)
             {
+                // -------------------------------------------------------------------------------
+                // TODO: remove this once we better handle data-flow across branches
+                {
+                    co_yield Instruction::Wait(
+                        WaitCount::Zero(m_context->targetArchitecture(),
+                                        "REMOVEME: Wait before EXEC conditional label!"));
+                }
+                // -------------------------------------------------------------------------------
                 co_yield m_context->brancher()->branch(
                     exitLabel, concatenate("THEN: Done, jump to ", exitLabel->toString()));
                 co_yield Instruction::Label(elseLabel);
@@ -194,6 +210,14 @@ namespace rocRoller
                 if(branchAndExec)
                 {
                     auto EXECZ = m_context->getEXECZ();
+                    // -------------------------------------------------------------------------------
+                    // TODO: remove this once we better handle data-flow across branches
+                    {
+                        co_yield Instruction::Wait(WaitCount::Zero(
+                            m_context->targetArchitecture(),
+                            "REMOVEME: Wait before branching past EXEC else body!"));
+                    }
+                    // -------------------------------------------------------------------------------
                     // if execz == 1 (set), it means EXEC == 0 i.e. the entire execute mask is zero,
                     // then skip the else branch and jump to the exit.
                     co_yield m_context->brancher()->branchIfNonZero(
@@ -207,6 +231,14 @@ namespace rocRoller
 
             if(branchAndExec)
             {
+                // -------------------------------------------------------------------------------
+                // TODO: remove this once we better handle data-flow across branches
+                {
+                    co_yield Instruction::Wait(
+                        WaitCount::Zero(m_context->targetArchitecture(),
+                                        "REMOVEME: Wait before EXEC conditional exit label!"));
+                }
+                // -------------------------------------------------------------------------------
                 co_yield Instruction::Label(exitLabel);
             }
 
