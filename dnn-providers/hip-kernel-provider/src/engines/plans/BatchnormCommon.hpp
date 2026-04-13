@@ -49,6 +49,11 @@ inline void getLocalConfigNHWC(size_t c,
     // shared memory size per workgroup is fixed
     unsigned int maxLocalsize = 1024 / vectorsize;
 
+    // default local config in case the while loop is not entered
+    xlocalsize = std::min(size_t{1} << static_cast<size_t>(std::ceil(std::log2(c / vectorsize))),
+                          static_cast<size_t>(xlocalsizeLimit));
+    ylocalsize = maxLocalsize / xlocalsize;
+
     size_t nworkgroups = 0;
     // decrease maxLocalsize until the number of workgroups is greater than 80%
     // of the available CUs
@@ -127,7 +132,7 @@ inline bool isSpatialMultipleApplicable(size_t n,
                                         size_t zlocalsize,
                                         size_t nelements)
 {
-    auto inCstride = static_cast<unsigned int>(h * w);
+    const auto inCstride = static_cast<unsigned int>(h * w);
 
     if(isLayoutNHWC)
     {
@@ -193,28 +198,32 @@ inline bool isSpatialMultipleApplicable(size_t n,
 inline bool useMultiple(
     size_t n, size_t h, size_t w, bool isFp16OrBfp16Mix, bool isLayoutNHWC, Direction direction)
 {
-    auto inCstride = static_cast<unsigned int>(h * w);
-    auto inNhw = static_cast<unsigned int>(n) * inCstride;
+    const auto inCstride = static_cast<unsigned int>(h * w);
+    const auto inNhw = static_cast<unsigned int>(n) * inCstride;
+    const auto thrInNhw = static_cast<unsigned int>(32 * 1024 * 1024);
 
-    // Check heuristics (used to choose between spatial single and multiple for performance)
-    // NOLINTBEGIN
-    if(!isLayoutNHWC && direction == Direction::BACKWARD
-       && (!((inNhw >= static_cast<unsigned int>(32 * 1024 * 1024) || inCstride <= 1024)
-             && (inNhw >= static_cast<unsigned int>(32 * 1024 * 1024) || inCstride <= 512)
-             && inCstride > 512)))
+    if(!isLayoutNHWC && direction == Direction::BACKWARD)
     {
-        return false;
+        if((inNhw < thrInNhw && inCstride > 1024) || (inNhw < thrInNhw && inCstride > 512)
+           || inCstride <= 512)
+        {
+            return false;
+        }
     }
 
-    if(!isLayoutNHWC && direction == Direction::FORWARD_TRAINING
-       && (!((n >= 3 && inCstride > 512 && (inNhw >= 33554432 || inCstride <= 1024)
-              && ((n < 256) || (inCstride <= 60) || !isFp16OrBfp16Mix)
-              && (!isFp16OrBfp16Mix || inCstride <= 512))
-             || ((n > 768) && (inCstride > 150)))))
+    if(!isLayoutNHWC && direction == Direction::FORWARD_TRAINING)
     {
-        return false;
+        bool condition1 = (n < 3) || (inCstride <= 512) || (inNhw < 33554432 && inCstride > 1024)
+                          || (n >= 256 && inCstride > 60 && isFp16OrBfp16Mix)
+                          || (isFp16OrBfp16Mix && inCstride > 512);
+
+        bool condition2 = (n <= 768) || (inCstride <= 150);
+
+        if(condition1 && condition2)
+        {
+            return false;
+        }
     }
-    // NOLINTEND
 
     return true;
 }
@@ -259,8 +268,8 @@ inline void defaultConfigSpatialSingle(size_t n,
                                        Direction direction,
                                        KernelConfig& config)
 {
-    auto inCstride = static_cast<unsigned int>(h * w);
-    auto inNhw = static_cast<unsigned int>(n * inCstride);
+    const auto inCstride = static_cast<unsigned int>(h * w);
+    const auto inNhw = static_cast<unsigned int>(n * inCstride);
 
     // NCHW supports also variants 0 and 3 which can be much faster than
     // variant 1 but have more restrictions. Here we decide if we use variant
@@ -270,7 +279,6 @@ inline void defaultConfigSpatialSingle(size_t n,
     // we add the latter for tuning to be sure and because it is cheap to run.
     // NOTE: Currently we don't have the tuning infrastructure in place, so we
     // are only selecting one variant to run based on heuristics.
-    // NOLINTBEGIN
     if(!isLayoutNHWC)
     {
         if(direction == Direction::BACKWARD)
@@ -291,10 +299,11 @@ inline void defaultConfigSpatialSingle(size_t n,
                 config.vectorsize = 1;
                 return;
             }
+
             // N*H*W < 32M and H*W > 512
             // use batchnorm variant#1 or variant#3 implementation which
             // parallelize work groups over channels and loop through N.
-            else if(inNhw < (32 * 1024 * 1024) && inCstride > 512)
+            if(inNhw < (32 * 1024 * 1024) && inCstride > 512)
             {
                 if(n >= 32)
                 {
@@ -302,17 +311,16 @@ inline void defaultConfigSpatialSingle(size_t n,
                     config.vectorsize = 1;
                     return;
                 }
-                else
-                {
-                    config.variant = 3;
-                    config.vectorsize = 1;
-                    return;
-                }
+
+                config.variant = 3;
+                config.vectorsize = 1;
+                return;
             }
+
             // H*W < 512
             // use batchnorm variant#0 or variant#3 implementation
             // based on batch size and H*W
-            else if(inCstride <= 512)
+            if(inCstride <= 512)
             {
                 if((n > 64) && (inCstride > 160))
                 {
@@ -320,17 +328,14 @@ inline void defaultConfigSpatialSingle(size_t n,
                     config.vectorsize = 1;
                     return;
                 }
-                else
-                {
-                    config.variant = 0;
-                    config.vectorsize = 1;
-                    return;
-                }
+
+                config.variant = 0;
+                config.vectorsize = 1;
+                return;
             }
         }
         else
         {
-            // clang-format off
             if(inCstride > 512 && inCstride <= 1024 && n < 32)
             {
                 config.variant = 3;
@@ -338,21 +343,18 @@ inline void defaultConfigSpatialSingle(size_t n,
                 return;
             }
 
-            if( (inNhw < 33554432 && inCstride > 1024) ||
-            ((n >= 256) && (inCstride > 60) && (isFp16Mix || isBfp16Mix)) ||
-            ((inCstride > 512) && (isFp16Mix || isBfp16Mix)))
+            if((inNhw < 33554432 && inCstride > 1024)
+               || ((n >= 256) && (inCstride > 60) && (isFp16Mix || isBfp16Mix))
+               || ((inCstride > 512) && (isFp16Mix || isBfp16Mix)))
             {
                 config.variant = 1;
                 config.vectorsize = 1;
                 return;
             }
-            else if(inCstride <= 512)
-            {
-                config.variant = 0;
-                config.vectorsize = 1;
-                return;
-            }
-            // clang-format on
+
+            config.variant = 0;
+            config.vectorsize = 1;
+            return;
         }
         config.variant = 1;
         config.vectorsize = 1;
@@ -362,7 +364,6 @@ inline void defaultConfigSpatialSingle(size_t n,
         config.variant = 1;
         config.vectorsize = 1;
     }
-    // NOLINTEND
 }
 
 // Add spatial multiple instances for given problem.
@@ -384,13 +385,12 @@ inline void defaultConfigSpatialMultiple(size_t n,
                                          unsigned int stashValues,
                                          KernelConfig& config)
 {
-    size_t xlocalsizeDefault = 0;
-    size_t ylocalsizeDefault = 0;
-    size_t vectorsizeDefault = 4;
+    size_t xlocalsizeDefault = 1;
+    size_t ylocalsizeDefault = 1;
     size_t zlocalsizeDefault = 1;
+    size_t vectorsizeDefault = 4;
     size_t nelementsDefault = n;
 
-    // NOLINTBEGIN
     if(isLayoutNHWC)
     {
         // First add the default instance, which should work well for a large range of problems
@@ -467,45 +467,42 @@ inline void defaultConfigSpatialMultiple(size_t n,
         // instance.
         return;
     }
-    else
-    {
-        // For NCHW we add all the supported vector sizes smaller than the default (if they are
-        // applicable)
-        while(vectorsizeDefault > 0)
-        {
-            getSpatialMultipleConfig(c,
-                                     h,
-                                     w,
-                                     isLayoutNHWC,
-                                     isFp32,
-                                     minWorkgroups,
-                                     vectorsizeDefault,
-                                     xlocalsizeDefault,
-                                     ylocalsizeDefault);
 
-            if(isSpatialMultipleApplicable(n,
-                                           c,
-                                           h,
-                                           w,
-                                           isLayoutNHWC,
-                                           isFp32,
-                                           vectorsizeDefault,
-                                           stashValues,
-                                           ylocalsizeDefault,
-                                           zlocalsizeDefault,
-                                           nelementsDefault))
-            {
-                config.variant = 2;
-                config.vectorsize = vectorsizeDefault;
-                config.xlocalsize = xlocalsizeDefault;
-                config.ylocalsize = ylocalsizeDefault;
-                config.zlocalsize = zlocalsizeDefault;
-                config.nelements = nelementsDefault;
-            }
-            vectorsizeDefault >>= 1;
+    // For NCHW we add all the supported vector sizes smaller than the default (if they are
+    // applicable)
+    while(vectorsizeDefault > 0)
+    {
+        getSpatialMultipleConfig(c,
+                                 h,
+                                 w,
+                                 isLayoutNHWC,
+                                 isFp32,
+                                 minWorkgroups,
+                                 vectorsizeDefault,
+                                 xlocalsizeDefault,
+                                 ylocalsizeDefault);
+
+        if(isSpatialMultipleApplicable(n,
+                                       c,
+                                       h,
+                                       w,
+                                       isLayoutNHWC,
+                                       isFp32,
+                                       vectorsizeDefault,
+                                       stashValues,
+                                       ylocalsizeDefault,
+                                       zlocalsizeDefault,
+                                       nelementsDefault))
+        {
+            config.variant = 2;
+            config.vectorsize = vectorsizeDefault;
+            config.xlocalsize = xlocalsizeDefault;
+            config.ylocalsize = ylocalsizeDefault;
+            config.zlocalsize = zlocalsizeDefault;
+            config.nelements = nelementsDefault;
         }
+        vectorsizeDefault >>= 1;
     }
-    // NOLINTEND
 }
 
 } // namespace batchnorm
