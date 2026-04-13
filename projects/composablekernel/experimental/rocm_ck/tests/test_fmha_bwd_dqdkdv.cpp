@@ -412,7 +412,21 @@ TEST(FmhaBwdDqDkDv, RequiredTensorsGroupSameAsBatch)
                                                    .hdim_v = 128,
                                                    .mode   = FmhaMode::GROUP},
                                      .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}});
-    EXPECT_EQ(S::requiredTensors(k_batch), S::requiredTensors(k_group));
+    EXPECT_EQ(S::requiredTensors(k_batch), 9);
+    EXPECT_EQ(S::requiredTensors(k_group), 16);
+
+    // Group mode slot constants
+    EXPECT_EQ(S::SEQSTART_Q, 12);
+    EXPECT_EQ(S::SEQSTART_K, 13);
+    EXPECT_EQ(S::SEQLEN_Q, 14);
+    EXPECT_EQ(S::SEQLEN_K, 15);
+
+    // Group mode always returns 16 regardless of features
+    constexpr auto k_group_dropout = makeSpec(FmhaBwdDQDKDVConfig{
+        .signature =
+            {.dtype = DataType::FP16, .hdim_q = 128, .hdim_v = 128, .mode = FmhaMode::GROUP},
+        .algorithm = {.has_dropout = true, .pad_hdim_q = 8, .pad_hdim_v = 8}});
+    EXPECT_EQ(S::requiredTensors(k_group_dropout), 16);
 }
 
 // ============================================================================
@@ -421,8 +435,7 @@ TEST(FmhaBwdDqDkDv, RequiredTensorsGroupSameAsBatch)
 
 TEST(FmhaBwdDqDkDv, GridSizeBasic)
 {
-    constexpr auto g =
-        dqdkdv_grid_size(/*batch=*/2, /*nhead=*/8, /*seqlen_q=*/256, /*block_n0=*/128);
+    const auto g = dqdkdv_grid_size(/*batch=*/2, /*nhead=*/8, /*seqlen_q=*/256, /*block_n0=*/128);
     EXPECT_EQ(g.x, 2u);
     EXPECT_EQ(g.y, 8u);
     EXPECT_EQ(g.z, 2u);
@@ -430,8 +443,7 @@ TEST(FmhaBwdDqDkDv, GridSizeBasic)
 
 TEST(FmhaBwdDqDkDv, GridSizeCeil)
 {
-    constexpr auto g =
-        dqdkdv_grid_size(/*batch=*/1, /*nhead=*/1, /*seqlen_q=*/129, /*block_n0=*/128);
+    const auto g = dqdkdv_grid_size(/*batch=*/1, /*nhead=*/1, /*seqlen_q=*/129, /*block_n0=*/128);
     EXPECT_EQ(g.x, 2u);
     EXPECT_EQ(g.y, 1u);
     EXPECT_EQ(g.z, 1u);

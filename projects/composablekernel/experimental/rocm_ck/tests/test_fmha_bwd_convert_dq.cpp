@@ -168,8 +168,7 @@ TEST(FmhaBwdConvertDQ, RequiredScalarsAlways0)
 
 TEST(FmhaBwdConvertDQ, GridSizeBasic)
 {
-    constexpr auto g =
-        convert_dq_grid_size(/*batch=*/2, /*nhead=*/8, /*seqlen_q=*/256, /*tile_m0=*/64);
+    const auto g = convert_dq_grid_size(/*batch=*/2, /*nhead=*/8, /*seqlen_q=*/256, /*tile_m0=*/64);
     EXPECT_EQ(g.x, 4u);
     EXPECT_EQ(g.y, 8u);
     EXPECT_EQ(g.z, 2u);
@@ -178,6 +177,6 @@ TEST(FmhaBwdConvertDQ, GridSizeBasic)
 TEST(FmhaBwdConvertDQ, GridSizeDefaultTileM0)
 {
     // Default tile_m0 = 64
-    constexpr auto g = convert_dq_grid_size(/*batch=*/1, /*nhead=*/1, /*seqlen_q=*/128);
+    const auto g = convert_dq_grid_size(/*batch=*/1, /*nhead=*/1, /*seqlen_q=*/128);
     EXPECT_EQ(g.x, 2u);
 }

@@ -162,7 +162,7 @@ TEST(FmhaBwdOGradDotO, RequiredScalarsAlways1)
 
 TEST(FmhaBwdOGradDotO, GridSizeBasic)
 {
-    constexpr auto g =
+    const auto g =
         ograd_dot_o_grid_size(/*batch=*/2, /*nhead=*/8, /*seqlen_q=*/256, /*tile_m0=*/64);
     EXPECT_EQ(g.x, 4u);
     EXPECT_EQ(g.y, 8u);
@@ -171,8 +171,7 @@ TEST(FmhaBwdOGradDotO, GridSizeBasic)
 
 TEST(FmhaBwdOGradDotO, GridSizeCeil)
 {
-    constexpr auto g =
-        ograd_dot_o_grid_size(/*batch=*/1, /*nhead=*/1, /*seqlen_q=*/65, /*tile_m0=*/64);
+    const auto g = ograd_dot_o_grid_size(/*batch=*/1, /*nhead=*/1, /*seqlen_q=*/65, /*tile_m0=*/64);
     EXPECT_EQ(g.x, 2u);
     EXPECT_EQ(g.y, 1u);
     EXPECT_EQ(g.z, 1u);
@@ -180,8 +179,7 @@ TEST(FmhaBwdOGradDotO, GridSizeCeil)
 
 TEST(FmhaBwdOGradDotO, GridSizeExact)
 {
-    constexpr auto g =
-        ograd_dot_o_grid_size(/*batch=*/1, /*nhead=*/1, /*seqlen_q=*/64, /*tile_m0=*/64);
+    const auto g = ograd_dot_o_grid_size(/*batch=*/1, /*nhead=*/1, /*seqlen_q=*/64, /*tile_m0=*/64);
     EXPECT_EQ(g.x, 1u);
     EXPECT_EQ(g.y, 1u);
     EXPECT_EQ(g.z, 1u);

@@ -39,8 +39,23 @@ namespace rocm_ck {
 ///   GridDim(ceil(seqlen_q / kM0), nhead, batch).
 /// kM0 = 64 (tile rows along seqlen_q for 1D kernels), NOT block_size.
 /// Precondition: tile_m0 > 0, seqlen_q >= 0, batch > 0, nhead > 0.
-constexpr GridDim convert_dq_grid_size(int batch, int nhead, int seqlen_q, int tile_m0 = 64)
+inline GridDim convert_dq_grid_size(int batch, int nhead, int seqlen_q, int tile_m0 = 64)
 {
+#ifndef NDEBUG
+    if(tile_m0 <= 0)
+    {
+        std::fprintf(
+            stderr, "rocm_ck::convert_dq_grid_size: tile_m0 must be positive, got %d\n", tile_m0);
+        std::abort();
+    }
+    if(seqlen_q < 0)
+    {
+        std::fprintf(stderr,
+                     "rocm_ck::convert_dq_grid_size: seqlen_q must be non-negative, got %d\n",
+                     seqlen_q);
+        std::abort();
+    }
+#endif
     return {static_cast<unsigned>((seqlen_q + tile_m0 - 1) / tile_m0),
             static_cast<unsigned>(nhead),
             static_cast<unsigned>(batch)};

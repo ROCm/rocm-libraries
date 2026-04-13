@@ -39,8 +39,22 @@ namespace rocm_ck {
 ///   GridDim(ceil(seqlen_k / kN0), nhead, batch).
 /// block_n0 comes from FmhaBwdDQDKDVSpec::block_n0 (kN0).
 /// Precondition: block_n0 > 0, seqlen_k >= 0, batch > 0, nhead > 0.
-constexpr GridDim dqdkdv_grid_size(int batch, int nhead, int seqlen_k, int block_n0)
+inline GridDim dqdkdv_grid_size(int batch, int nhead, int seqlen_k, int block_n0)
 {
+#ifndef NDEBUG
+    if(block_n0 <= 0)
+    {
+        std::fprintf(
+            stderr, "rocm_ck::dqdkdv_grid_size: block_n0 must be positive, got %d\n", block_n0);
+        std::abort();
+    }
+    if(seqlen_k < 0)
+    {
+        std::fprintf(
+            stderr, "rocm_ck::dqdkdv_grid_size: seqlen_k must be non-negative, got %d\n", seqlen_k);
+        std::abort();
+    }
+#endif
     return {static_cast<unsigned>((seqlen_k + block_n0 - 1) / block_n0),
             static_cast<unsigned>(nhead),
             static_cast<unsigned>(batch)};

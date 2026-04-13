@@ -38,8 +38,24 @@ namespace rocm_ck {
 /// Matches FmhaBwdOGradDotOSpec::GridSize():
 ///   GridDim(ceil(seqlen_q / kM0), nhead, batch).
 /// Precondition: block_size > 0, seqlen_q >= 0, batch > 0, nhead > 0.
-constexpr GridDim ograd_dot_o_grid_size(int batch, int nhead, int seqlen_q, int block_size)
+inline GridDim ograd_dot_o_grid_size(int batch, int nhead, int seqlen_q, int block_size)
 {
+#ifndef NDEBUG
+    if(block_size <= 0)
+    {
+        std::fprintf(stderr,
+                     "rocm_ck::ograd_dot_o_grid_size: block_size must be positive, got %d\n",
+                     block_size);
+        std::abort();
+    }
+    if(seqlen_q < 0)
+    {
+        std::fprintf(stderr,
+                     "rocm_ck::ograd_dot_o_grid_size: seqlen_q must be non-negative, got %d\n",
+                     seqlen_q);
+        std::abort();
+    }
+#endif
     return {static_cast<unsigned>((seqlen_q + block_size - 1) / block_size),
             static_cast<unsigned>(nhead),
             static_cast<unsigned>(batch)};
