@@ -10,22 +10,6 @@
 
 namespace ck_tile {
 
-// Host-side arguments
-struct WarpDecodeGateUpHostArgs
-{
-    const void* p_x;            // [B, HIDDEN]
-    const void* p_w_gate;       // [E, INTER, HIDDEN]
-    const void* p_w_up;         // [E, INTER, HIDDEN]
-    const int32_t* p_router_ids;// [B, TOP_K]
-    void* p_intermediate;       // [B, TOP_K, INTER]
-
-    index_t b;
-    index_t hidden;
-    index_t inter;
-    index_t top_k;
-    index_t e;
-};
-
 template <typename Problem_, typename Policy_>
 struct WarpDecodeGateUpKernel
 {
@@ -37,14 +21,32 @@ struct WarpDecodeGateUpKernel
     using ComputeDataType      = typename Problem::ComputeDataType;
     using IntermediateDataType = typename Problem::IntermediateDataType;
 
-    using Kargs = WarpDecodeGateUpHostArgs;
+    static constexpr index_t kBlockSize = Problem::kBlockSize;
 
-    CK_TILE_HOST static constexpr Kargs MakeKargs(const WarpDecodeGateUpHostArgs& hargs)
+    struct Kargs
     {
-        return hargs;
-    }
+        const void* p_x;            // [B, HIDDEN]
+        const void* p_x_scale;
+        const void* p_w_gate;       // [E, INTER, HIDDEN]
+        const void* p_w_gate_scale;
+        const void* p_w_up;         // [E, INTER, HIDDEN]
+        const void* p_w_up_scale;
+        const int32_t* p_router_ids;// [B, TOP_K]
+        void* p_intermediate;       // [B, TOP_K, INTER]
 
-    CK_TILE_HOST static constexpr auto GridSize(const WarpDecodeGateUpHostArgs& hargs)
+        index_t b;
+        index_t hidden;
+        index_t inter;
+        index_t top_k;
+        index_t e;
+
+        index_t stride_x;
+        index_t stride_w_gate;
+        index_t stride_w_up;
+        index_t stride_intermediate;
+    };
+
+    CK_TILE_HOST static constexpr auto GridSize(const Kargs& hargs)
     {
         // 1 wavefront per output neuron
         return dim3(hargs.b * hargs.top_k * hargs.inter);
@@ -86,21 +88,21 @@ struct WarpDecodeGateUpKernel
         const auto x_m_n = make_naive_tensor_view<address_space_enum::global>(
             static_cast<const XDataType*>(kargs.p_x),
             make_tuple(kargs.b, kargs.hidden),
-            make_tuple(kargs.hidden, 1),
+            make_tuple(kargs.stride_x, 1),
             number<1>{},
             number<1>{});
 
         const auto w_gate_m_n = make_naive_tensor_view<address_space_enum::global>(
             static_cast<const WDataType*>(kargs.p_w_gate),
             make_tuple(kargs.e * kargs.inter, kargs.hidden),
-            make_tuple(kargs.hidden, 1),
+            make_tuple(kargs.stride_w_gate, 1),
             number<1>{},
             number<1>{});
 
         const auto w_up_m_n = make_naive_tensor_view<address_space_enum::global>(
             static_cast<const WDataType*>(kargs.p_w_up),
             make_tuple(kargs.e * kargs.inter, kargs.hidden),
-            make_tuple(kargs.hidden, 1),
+            make_tuple(kargs.stride_w_up, 1),
             number<1>{},
             number<1>{});
 
@@ -158,13 +160,30 @@ struct WarpDecodeGateUpKernel
 
         if(get_lane_id() == 0)
         {
-            // Apply SwiGLU: SiLU(gate) * up
-            ComputeDataType silu_gate = gate_acc / (type_convert<ComputeDataType>(1.0f) + math::exp(-gate_acc));
+            // Apply Activation(gate) * up
+            typename Problem::Activation activation_func;
+            ComputeDataType silu_gate;
+            activation_func(silu_gate, gate_acc);
             ComputeDataType result = silu_gate * up_acc;
 
-            auto* out_ptr = static_cast<IntermediateDataType*>(kargs.p_intermediate);
-            index_t out_idx = token_b * (kargs.top_k * kargs.inter) + expert_k * kargs.inter + neuron_j;
-            out_ptr[out_idx] = type_convert<IntermediateDataType>(result);
+            auto out_m_n = make_naive_tensor_view<address_space_enum::global>(
+                static_cast<IntermediateDataType*>(kargs.p_intermediate),
+                make_tuple(kargs.b * kargs.top_k, kargs.inter),
+                make_tuple(kargs.stride_intermediate, 1),
+                number<1>{},
+                number<1>{});
+
+            auto out_window = make_tile_window(
+                out_m_n, 
+                make_tuple(number<1>{}, number<1>{}), 
+                {token_b * kargs.top_k + expert_k, neuron_j}, 
+                Policy::template MakeOutputScalarDistribution<Problem>());
+
+            auto result_tile = make_static_distributed_tensor<IntermediateDataType>(
+                Policy::template MakeOutputScalarDistribution<Problem>());
+            result_tile.get_thread_buffer()[number<0>{}] = type_convert<IntermediateDataType>(result);
+
+            store_tile(out_window, result_tile);
         }
     }
 };

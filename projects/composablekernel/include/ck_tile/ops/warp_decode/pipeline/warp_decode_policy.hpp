@@ -37,6 +37,29 @@ struct WarpDecodePolicy
     }
 
     template <typename Problem>
+    CK_TILE_DEVICE static constexpr auto MakeOutputScalarDistribution()
+    {
+        return make_static_tile_distribution(
+            tile_distribution_encoding<
+                sequence<>,
+                tuple<
+                    sequence<1, 1>, // M: 1
+                    sequence<1, 1>  // N: 1
+                >,
+                tuple<
+                    sequence<1>,    // P0 maps to M
+                    sequence<2>     // P1 maps to N
+                >,
+                tuple<
+                    sequence<1>,
+                    sequence<1>
+                >,
+                sequence<1, 2>,     // Y0 -> M(0), Y1 -> N(0)
+                sequence<0, 0>      // Y0 -> M(0), Y1 -> N(0)
+            >{});
+    }
+
+    template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSize()
     {
         return 0;

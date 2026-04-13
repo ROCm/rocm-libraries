@@ -17,11 +17,11 @@ float launch_warp_decode_gate_up(const typename WarpDecodeGateUpKernel::Kargs& a
                                  const stream_config& s)
 {
     return launch_kernel(s,
-                         WarpDecodeGateUpKernel{},
-                         WarpDecodeGateUpKernel::GridSize(args),
-                         WarpDecodeGateUpKernel::BlockSize(),
-                         0,
-                         WarpDecodeGateUpKernel::MakeKargs(args));
+                         make_kernel(WarpDecodeGateUpKernel{},
+                                     WarpDecodeGateUpKernel::GridSize(args),
+                                     WarpDecodeGateUpKernel::BlockSize(),
+                                     0,
+                                     args));
 }
 
 template <typename WarpDecodeDownReduceKernel>
@@ -29,11 +29,11 @@ float launch_warp_decode_down_reduce(const typename WarpDecodeDownReduceKernel::
                                      const stream_config& s)
 {
     return launch_kernel(s,
-                         WarpDecodeDownReduceKernel{},
-                         WarpDecodeDownReduceKernel::GridSize(args),
-                         WarpDecodeDownReduceKernel::BlockSize(),
-                         0,
-                         WarpDecodeDownReduceKernel::MakeKargs(args));
+                         make_kernel(WarpDecodeDownReduceKernel{},
+                                     WarpDecodeDownReduceKernel::GridSize(args),
+                                     WarpDecodeDownReduceKernel::BlockSize(),
+                                     0,
+                                     args));
 }
 
 } // namespace ck_tile

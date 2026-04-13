@@ -23,6 +23,7 @@ void reference_warp_decode_gate_up(
     const index_t B = x.get_lengths()[0];
     const index_t HIDDEN = x.get_lengths()[1];
     const index_t E = w_gate.get_lengths()[0];
+    (void)E;
     const index_t INTER = w_gate.get_lengths()[1];
     const index_t TOP_K = router_ids.get_lengths()[1];
 
@@ -67,6 +68,7 @@ void reference_warp_decode_down_reduce(
     const index_t TOP_K = intermediate.get_lengths()[1];
     const index_t INTER = intermediate.get_lengths()[2];
     const index_t E = w_down.get_lengths()[0];
+    (void)E;
     const index_t HIDDEN = w_down.get_lengths()[1];
 
     for(index_t b = 0; b < B; ++b) {

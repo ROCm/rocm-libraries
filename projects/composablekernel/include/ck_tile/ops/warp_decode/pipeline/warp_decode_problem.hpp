@@ -4,6 +4,7 @@
 #pragma once
 
 #include "ck_tile/core.hpp"
+#include "ck_tile/ops/elementwise/unary_element_wise_operation.hpp"
 
 namespace ck_tile {
 
@@ -19,7 +20,8 @@ template <typename XDataType_,
           typename ComputeDataType_,
           typename IntermediateDataType_,
           typename XScaleLayout_ = WarpDecodeScaleLayout::PerTensor,
-          typename WScaleLayout_ = WarpDecodeScaleLayout::PerTensor>
+          typename WScaleLayout_ = WarpDecodeScaleLayout::PerTensor,
+          typename Activation_ = ck_tile::element_wise::Silu>
 struct WarpDecodeGateUpProblem
 {
     using XDataType            = remove_cvref_t<XDataType_>;
@@ -28,6 +30,7 @@ struct WarpDecodeGateUpProblem
     using IntermediateDataType = remove_cvref_t<IntermediateDataType_>;
     using XScaleLayout         = remove_cvref_t<XScaleLayout_>;
     using WScaleLayout         = remove_cvref_t<WScaleLayout_>;
+    using Activation           = remove_cvref_t<Activation_>;
 
     static constexpr index_t kBlockSize = get_warp_size();
 };

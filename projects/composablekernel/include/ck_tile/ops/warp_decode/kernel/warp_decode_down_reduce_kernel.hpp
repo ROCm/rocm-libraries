@@ -10,22 +10,6 @@
 
 namespace ck_tile {
 
-// Host-side arguments
-struct WarpDecodeDownReduceHostArgs
-{
-    const void* p_intermediate; // [B, TOP_K, INTER]
-    const void* p_w_down;       // [E, HIDDEN, INTER]
-    const int32_t* p_router_ids;// [B, TOP_K]
-    const float* p_router_wts;  // [B, TOP_K]
-    void* p_y;                  // [B, HIDDEN]
-
-    index_t b;
-    index_t hidden;
-    index_t inter;
-    index_t top_k;
-    index_t e;
-};
-
 template <typename Problem_, typename Policy_>
 struct WarpDecodeDownReduceKernel
 {
@@ -37,14 +21,29 @@ struct WarpDecodeDownReduceKernel
     using ComputeDataType      = typename Problem::ComputeDataType;
     using YDataType            = typename Problem::YDataType;
 
-    using Kargs = WarpDecodeDownReduceHostArgs;
+    static constexpr index_t kBlockSize = Problem::kBlockSize;
 
-    CK_TILE_HOST static constexpr Kargs MakeKargs(const WarpDecodeDownReduceHostArgs& hargs)
+    struct Kargs
     {
-        return hargs;
-    }
+        const void* p_intermediate; // [B, TOP_K, INTER]
+        const void* p_w_down;       // [E, HIDDEN, INTER]
+        const void* p_w_down_scale;
+        const int32_t* p_router_ids;// [B, TOP_K]
+        const float* p_router_wts;  // [B, TOP_K]
+        void* p_y;                  // [B, HIDDEN]
 
-    CK_TILE_HOST static constexpr auto GridSize(const WarpDecodeDownReduceHostArgs& hargs)
+        index_t b;
+        index_t hidden;
+        index_t inter;
+        index_t top_k;
+        index_t e;
+
+        index_t stride_intermediate;
+        index_t stride_w_down;
+        index_t stride_y;
+    };
+
+    CK_TILE_HOST static constexpr auto GridSize(const Kargs& hargs)
     {
         return dim3(hargs.b * hargs.hidden);
     }
@@ -80,14 +79,14 @@ struct WarpDecodeDownReduceKernel
         const auto intermediate_m_n = make_naive_tensor_view<address_space_enum::global>(
             static_cast<const IntermediateDataType*>(kargs.p_intermediate),
             make_tuple(kargs.b * kargs.top_k, kargs.inter),
-            make_tuple(kargs.inter, 1),
+            make_tuple(kargs.stride_intermediate, 1),
             number<1>{},
             number<1>{});
 
         const auto w_down_m_n = make_naive_tensor_view<address_space_enum::global>(
             static_cast<const WDataType*>(kargs.p_w_down),
             make_tuple(kargs.e * kargs.hidden, kargs.inter),
-            make_tuple(kargs.inter, 1),
+            make_tuple(kargs.stride_w_down, 1),
             number<1>{},
             number<1>{});
 
@@ -137,9 +136,24 @@ struct WarpDecodeDownReduceKernel
 
         if(get_lane_id() == 0)
         {
-            auto* y_ptr = static_cast<YDataType*>(kargs.p_y);
-            index_t y_idx = token_b * kargs.hidden + out_j;
-            y_ptr[y_idx] = type_convert<YDataType>(result);
+            auto y_m_n = make_naive_tensor_view<address_space_enum::global>(
+                static_cast<YDataType*>(kargs.p_y),
+                make_tuple(kargs.b, kargs.hidden),
+                make_tuple(kargs.stride_y, 1),
+                number<1>{},
+                number<1>{});
+
+            auto y_window = make_tile_window(
+                y_m_n, 
+                make_tuple(number<1>{}, number<1>{}), 
+                {token_b, out_j}, 
+                Policy::template MakeOutputScalarDistribution<Problem>());
+
+            auto result_tile = make_static_distributed_tensor<YDataType>(
+                Policy::template MakeOutputScalarDistribution<Problem>());
+            result_tile.get_thread_buffer()[number<0>{}] = type_convert<YDataType>(result);
+
+            store_tile(y_window, result_tile);
         }
     }
 };

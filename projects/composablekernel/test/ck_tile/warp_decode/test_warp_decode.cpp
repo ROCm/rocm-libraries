@@ -15,10 +15,10 @@ using namespace ck_tile;
 
 template <typename DataType>
 void FillRandom(HostTensor<DataType>& tensor, float min_val = -1.0f, float max_val = 1.0f) {
-    std::mt19range generator(42); // fixed seed for reproducibility
+    std::mt19937 generator(42); // fixed seed for reproducibility
     std::uniform_real_distribution<float> distribution(min_val, max_val);
 
-    for(index_t i = 0; i < tensor.get_element_space_size(); ++i) {
+    for(index_t i = 0; i < static_cast<index_t>(tensor.get_element_space_size()); ++i) {
         tensor.mData[i] = type_convert<DataType>(distribution(generator));
     }
 }
@@ -99,14 +99,15 @@ bool TestWarpDecode() {
     using Policy = WarpDecodePolicy;
     using GateUpKernel = WarpDecodeGateUpKernel<Problem1, Policy>;
 
-    auto args1 = GateUpKernel::MakeKargs({
-        x_buf.GetDeviceBuffer(),
-        w_gate_buf.GetDeviceBuffer(),
-        w_up_buf.GetDeviceBuffer(),
+    typename GateUpKernel::Kargs args1{
+        x_buf.GetDeviceBuffer(), nullptr,
+        w_gate_buf.GetDeviceBuffer(), nullptr,
+        w_up_buf.GetDeviceBuffer(), nullptr,
         static_cast<int32_t*>(router_ids_buf.GetDeviceBuffer()),
         intermediate_buf.GetDeviceBuffer(),
-        B, HIDDEN, INTER, TOP_K, E
-    });
+        B, HIDDEN, INTER, TOP_K, E,
+        HIDDEN, HIDDEN, HIDDEN, INTER // strides
+    };
     
     auto s = stream_config{};
     launch_warp_decode_gate_up<GateUpKernel>(args1, s);
@@ -114,14 +115,15 @@ bool TestWarpDecode() {
     using Problem2 = WarpDecodeDownReduceProblem<IntermediateDataType, WDataType, ComputeDataType, YDataType>;
     using DownReduceKernel = WarpDecodeDownReduceKernel<Problem2, Policy>;
     
-    auto args2 = DownReduceKernel::MakeKargs({
+    typename DownReduceKernel::Kargs args2{
         intermediate_buf.GetDeviceBuffer(),
-        w_down_buf.GetDeviceBuffer(),
+        w_down_buf.GetDeviceBuffer(), nullptr,
         static_cast<int32_t*>(router_ids_buf.GetDeviceBuffer()),
         static_cast<float*>(router_wts_buf.GetDeviceBuffer()),
         y_buf.GetDeviceBuffer(),
-        B, HIDDEN, INTER, TOP_K, E
-    });
+        B, HIDDEN, INTER, TOP_K, E,
+        INTER, INTER, HIDDEN // strides
+    };
     
     launch_warp_decode_down_reduce<DownReduceKernel>(args2, s);
 
@@ -129,7 +131,7 @@ bool TestWarpDecode() {
     y_buf.FromDevice(y_dev.mData.data());
 
     bool pass = true;
-    for (index_t i = 0; i < y_host.get_element_space_size(); ++i) {
+    for (index_t i = 0; i < static_cast<index_t>(y_host.get_element_space_size()); ++i) {
         float host_val = type_convert<float>(y_host.mData[i]);
         float dev_val = type_convert<float>(y_dev.mData[i]);
         if (std::abs(host_val - dev_val) > 1e-2) {
@@ -139,7 +141,7 @@ bool TestWarpDecode() {
         }
     }
     
-    std::cout << "Test " << (pass ? "PASSED" : "FAILED") << std::n;
+    std::cout << "Test " << (pass ? "PASSED" : "FAILED") << std::endl;
     return pass;
 }
 
