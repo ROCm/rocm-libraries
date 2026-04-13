@@ -38,7 +38,7 @@ DISABLE_WARNING_RETURN_TYPE
 DISABLE_WARNING_POP
 #endif
 
-std::string transform_type_name(const fft_transform_type transform_type)
+static std::string transform_type_name(const fft_transform_type transform_type)
 {
     switch(transform_type)
     {
@@ -55,7 +55,7 @@ std::string transform_type_name(const fft_transform_type transform_type)
     }
 }
 
-std::string fft_io_name(const fft_io io)
+static std::string fft_io_name(const fft_io io)
 {
     switch(io)
     {
@@ -68,7 +68,7 @@ std::string fft_io_name(const fft_io io)
     }
 }
 
-std::string fft_result_placement_name(const fft_result_placement placement)
+static std::string fft_result_placement_name(const fft_result_placement placement)
 {
     switch(placement)
     {
@@ -81,7 +81,7 @@ std::string fft_result_placement_name(const fft_result_placement placement)
     }
 }
 
-std::string format_name(const int format)
+static std::string format_name(const int format)
 {
     switch(format)
     {
@@ -102,7 +102,7 @@ std::string format_name(const int format)
     }
 }
 
-std::string hipffttype_to_name(const hipfftType txtype )
+static std::string hipffttype_to_name(const hipfftType txtype )
 {
     switch(txtype)
     {
@@ -121,7 +121,7 @@ std::string hipffttype_to_name(const hipfftType txtype )
     }
 }
 
-std::string directionname(const int direction)
+static std::string directionname(const int direction)
 {
     switch(direction)
     {
@@ -202,21 +202,25 @@ INSTANTIATE_TEST_SUITE_P(
     }
     );
 
-// FIXME: document
+// Data holder struct for combining allowable direction/format combinations.
 struct directionformat_t
 {
     int direction;
     hipfftXtSubFormat format;
 };
 
-// FIXME: document
+// Real/complex hipfftxt multi-gpu transforms use HIPFFT_XT_FORMAT_INPLACE for the space format, and
+// HIPFFT_XT_FORMAT_INPLACE_SHUFFLED for the frequency format.
 static std::vector<directionformat_t> real_directionformat =
 {
     {HIPFFT_FORWARD, HIPFFT_XT_FORMAT_INPLACE},
     {HIPFFT_BACKWARD, HIPFFT_XT_FORMAT_INPLACE_SHUFFLED},
 };
 
-// FIXME: document
+// Complex/complex hipfftxt multi-gpu transforms use HIPFFT_XT_FORMAT_INPLACE for the space format,
+// and HIPFFT_XT_FORMAT_INPLACE_SHUFFLED for the frequency format.  Out-of-place transforms may use
+// HIPFFT_XT_FORMAT_INPUT/HIPFFT_XT_FORMAT_OUTPUT, but we do not currently support this
+// functionality.
 static std::vector<directionformat_t> complex_directionformat =
 {
     {HIPFFT_FORWARD, HIPFFT_XT_FORMAT_INPLACE},
@@ -225,7 +229,8 @@ static std::vector<directionformat_t> complex_directionformat =
     //{HIPFFT_BACKWARD, HIPFFT_XT_FORMAT_OUTPUT}
 };
 
-// FIXME: document
+// Combine the real/complex and complex/complex direction-format arrays, prepending a bool which is
+// true for real/complex tramsforms.
 static auto all_directionformat() {
     std::vector<std::tuple<bool, directionformat_t>> combined;
     for(const auto &val : real_directionformat)
@@ -235,7 +240,7 @@ static auto all_directionformat() {
     return combined;
 }
 
-// FIXME: document
+// We may run tests on all visible devices; query how many devices with this function.
 static auto getdevcount()
 {
     int deviceCount = 0;
@@ -245,14 +250,16 @@ static auto getdevcount()
     return deviceCount;
 }
 
-// FIXME: document
+// 2D and 3D transforms single-batch multi-gpu FFTs are handled differently than 1D transforms.
 static std::vector<size_t> multidims = {2, 3};
 
 class hipfftxtunitdesc : public ::testing::TestWithParam<std::tuple<bool, int, hipfftXtSubFormat, size_t, int>>
 {};
 
-// FIXME: rename this to also mention it does a H2D copy.
-TEST_P(hipfftxtunitdesc, desccreation)
+// Verify that the distributed data decomposition is what we expect.  After distributing the data to
+// multiple device buffers via hipfftXtMemcpy, copy the buffers back and verify that the values are
+// at the pointer offset where we expect it to be.
+TEST_P(hipfftxtunitdesc, xtmemcpytest)
 {
     const bool realcomplex = std::get<0>(GetParam());
     const auto direction = std::get<1>(GetParam());
@@ -276,7 +283,7 @@ TEST_P(hipfftxtunitdesc, desccreation)
         std::cout << " ngpus: " << ngpus;
         std::cout << "\n";
     }
-std::vector<int> gpus(ngpus);
+    std::vector<int> gpus(ngpus);
     std::iota(gpus.begin(), gpus.end(), 0);
     
     // TODO: other sizes, batch, etc.
@@ -292,8 +299,8 @@ std::vector<int> gpus(ngpus);
     const bool isreal = realcomplex ? ( format == HIPFFT_XT_FORMAT_INPLACE  ) : false;
     const bool isherm = realcomplex ? ( format == HIPFFT_XT_FORMAT_INPLACE_SHUFFLED  ) : false;
     const size_t lastdim = batchlengths.size() - 1;
-    const bool isinput = format == HIPFFT_XT_FORMAT_INPUT || format == HIPFFT_XT_FORMAT_INPLACE;
-    const size_t splitdim = isinput ? 1 : 2;
+    const bool inspace = format == HIPFFT_XT_FORMAT_INPUT || format == HIPFFT_XT_FORMAT_INPLACE;
+    const size_t splitdim = inspace ? 1 : 2;
 
     if(verbose > 2)
     {
@@ -317,16 +324,18 @@ std::vector<int> gpus(ngpus);
     const hipfftType transform_type  = realcomplex
         ? (forward ? HIPFFT_D2Z : HIPFFT_Z2D) : HIPFFT_Z2Z;
 
-    // FIXME: document
+    // Compute the data lengths for a (complete transform) buffer.
+    // Basically, this function just accounts for Hermitian symmetry.
     auto computedatabatchlengths = [](const bool isherm,
-                                   const std::vector<size_t> &batchlengths) -> std::vector<size_t>
-    {
-        std::vector<size_t> newbatchlengths = batchlengths;
-        const size_t lastdim = batchlengths.size() - 1;
-        if(isherm)
-            newbatchlengths[lastdim] = newbatchlengths[lastdim] / 2 + 1;
-        return newbatchlengths;
-    };
+                                      const std::vector<size_t> &batchlengths) -> std::vector<size_t>
+        {
+            std::vector<size_t> newbatchlengths = batchlengths;
+            if(isherm) {
+                const size_t lastdim = batchlengths.size() - 1;
+                newbatchlengths[lastdim] = newbatchlengths[lastdim] / 2 + 1;
+            }
+            return newbatchlengths;
+        };
     
     // Host data configuration:
     const auto host_distances = default_distances(dft_type, placement, io, lengths, batches);
@@ -396,10 +405,11 @@ std::vector<int> gpus(ngpus);
         // around.  (Particularly for multi-batch cases.)
         ASSERT_NE(mydesc->descriptor->size[igpu], 0) << "gpu buffer size is zero for gpu " << igpu;
     }
-    
+
+    // Host buff printer
     auto printhostbuf = [](const char* hostbuf,
                            const bool isreal,
-                           std::vector<size_t> batchlengths,
+                           const std::vector<size_t> batchlengths,
                            const std::vector<size_t> &hostdiststrides) -> void  {
         switch(batchlengths.size())
         {
@@ -491,7 +501,7 @@ std::vector<int> gpus(ngpus);
     // as we are just testing data movement, not transforms.
     auto fillhostbuf = [](std::vector<char> &hostbuf,
                           const bool isreal,
-                          std::vector<size_t> batchlengths,
+                          const std::vector<size_t> batchlengths,
                           const std::vector<size_t> &hostdiststrides) -> void  {
         switch(batchlengths.size())
         {
@@ -558,10 +568,12 @@ std::vector<int> gpus(ngpus);
         }
     };
 
-    // FIXME: document.  This is the per-gpu-buffer lengths.
-    auto devbatchlength = [splitdim](const size_t ngpus,
-                                     const std::vector<size_t> &hostdatabatchlengths,
-                                     const size_t igpu) -> std::vector<size_t>
+    // Compute the per-buffer data length, split in dimension splitdim.  If the data isn't perfectly
+    // divisible, then any remainder is distributed between lower-index devices.
+    auto devbatchlength = [](const size_t splitdim,
+                             const size_t ngpus,
+                             const std::vector<size_t> &hostdatabatchlengths,
+                             const size_t igpu) -> std::vector<size_t>
         {
             std::vector<size_t> databatchlengths = hostdatabatchlengths;
             const auto l = databatchlengths[splitdim];
@@ -572,9 +584,10 @@ std::vector<int> gpus(ngpus);
     // Return a vector containing {gpu index, batch index, transform indices...}.
     // Batch and transform indices are buffer-local multi-index (ie relative to an index starting at
     // {0, ... , 0} on each brick).
-    auto devidx = [splitdim](const size_t ngpus,
-                             const std::vector<size_t> &hostidx,
-                             const std::vector<size_t> &databatchlengths) -> std::vector<size_t> {
+    auto devidx = [](const size_t splitdim,
+                     const size_t ngpus,
+                     const std::vector<size_t> &hostidx,
+                     const std::vector<size_t> &databatchlengths) -> std::vector<size_t> {
         std::vector<size_t> ret(databatchlengths.size() + 1, 0);
         for(size_t idx = 0; idx < hostidx.size(); ++idx)
         {
@@ -582,10 +595,8 @@ std::vector<int> gpus(ngpus);
                 ret[idx + 1] = hostidx[idx];
         }
         const auto l = databatchlengths[splitdim];
-        //std::cout << databatchlengths[splitdim] << std::endl;
         const auto b = l / ngpus; // Elements per gpu in splitdim (if no remainder).
         const auto r = l - b * ngpus; // Remainder
-        //std::cout << r << std::endl;
         
         const auto a = hostidx[splitdim];
         if(a < r * (b + 1))
@@ -663,7 +674,7 @@ std::vector<int> gpus(ngpus);
 
     for(size_t igpu = 0; igpu < gpus.size(); ++igpu)
     {
-        brick_batchlengths[igpu] = devbatchlength(ngpus, hostdatabatchlengths, igpu);
+        brick_batchlengths[igpu] = devbatchlength(splitdim, ngpus, hostdatabatchlengths, igpu);
         std::vector<size_t> brick_batches;
         brick_batches.insert(brick_batches.end(),
                              brick_batchlengths[igpu].begin(),
@@ -711,13 +722,12 @@ std::vector<int> gpus(ngpus);
                 std::cout << " " << val;
             std::cout << "\n";
 
-            // FIXME: allow printing of subsection
+            // TODO: allow printing of subsection
             // printhostbuf(hostbufparts[igpu].data(), isreal, brick_batchlengths[igpu],
             //              brick_diststrides[igpu]);
         }
     }
         
-    // TODO: lambda this?
     // Check all of the host buf values and make sure that they're where we expect them to be:
     switch(batchlengths.size())
     {
@@ -728,7 +738,7 @@ std::vector<int> gpus(ngpus);
             for(size_t yidx = 0; yidx < hostdatabatchlengths[2]; ++yidx)
             {
                 const std::vector<size_t> hostidx = {0, xidx, yidx};
-                const auto bufidx = devidx(ngpus, hostidx, hostdatabatchlengths);
+                const auto bufidx = devidx(splitdim, ngpus, hostidx, hostdatabatchlengths);
 
                 std::stringstream idxstrs;
                 idxstrs << hostidx[0]
@@ -759,9 +769,7 @@ std::vector<int> gpus(ngpus);
                     valss << hostoffset << " -> " << hostval << "\t"
                           << gpuoffset << " -> " << gpuval << "\n";
                     if(verbose > 3)
-                    {
                         std::cout << idxstrs.str() << valss.str()<< std::flush;
-                    }
                     EXPECT_EQ(hostval, gpuval) << idxstrs.str() << valss.str();
                 }
                 else
@@ -776,9 +784,7 @@ std::vector<int> gpus(ngpus);
                     valss << hostoffset << " -> " << hostval << "\t"
                           << gpuoffset << " -> " << gpuval << "\n";
                     if(verbose > 3)
-                    {
                         std::cout << idxstrs.str() << valss.str()<< std::flush;
-                    }
                     EXPECT_EQ(hostval, gpuval) << idxstrs.str() << valss.str();
                 }
             }
@@ -793,7 +799,7 @@ std::vector<int> gpus(ngpus);
                 for(size_t zidx = 0; zidx < hostdatabatchlengths[3]; ++zidx)
                 {
                     const std::vector<size_t> hostidx = {0, xidx, yidx, zidx};
-                    const auto bufidx = devidx(ngpus, hostidx, hostdatabatchlengths);
+                    const auto bufidx = devidx(splitdim, ngpus, hostidx, hostdatabatchlengths);
 
                     std::stringstream idxstrs;
                     idxstrs << hostidx[0]
@@ -824,9 +830,7 @@ std::vector<int> gpus(ngpus);
                         valss << hostoffset << " -> " << hostval << "\t"
                               << gpuoffset << " -> " << gpuval << "\n";
                         if(verbose > 3)
-                        {
                             std::cout << idxstrs.str() << valss.str()<< std::flush;
-                        }
                         EXPECT_EQ(hostval, gpuval) << idxstrs.str() << valss.str();
                     }
                     else
@@ -841,9 +845,7 @@ std::vector<int> gpus(ngpus);
                         valss << hostoffset << " -> " << hostval << "\t"
                               << gpuoffset << " -> " << gpuval << "\n";
                         if(verbose > 3)
-                        {
                             std::cout << idxstrs.str() << valss.str()<< std::flush;
-                        }
                         EXPECT_EQ(hostval, gpuval) << idxstrs.str() << valss.str();
                     }
                 }
@@ -874,13 +876,13 @@ INSTANTIATE_TEST_SUITE_P(hipfftxttest, hipfftxtunitdesc,
                                  )
                              ,
                              [](const std::tuple<std::tuple<bool, directionformat_t>, size_t, int> & t) {
-                                 // FIXME: comment
-
+                                 // This lambda recombines the nested tuples into a flat tuple to
+                                 // make test parametrization simpler.
                                  auto rdf = std::get<0>(t);
-                                 bool realcomplex = std::get<0>(rdf);
+                                 const bool realcomplex = std::get<0>(rdf);
                                  auto df = std::get<1>(rdf);
-                                 size_t dim = std::get<1>(t);
-                                 int ngpus = std::get<2>(t);
+                                 const size_t dim = std::get<1>(t);
+                                 const int ngpus = std::get<2>(t);
                                  auto ret
                                      = std::make_tuple(
                                          realcomplex, df.direction, df.format, dim, ngpus);
@@ -903,6 +905,8 @@ INSTANTIATE_TEST_SUITE_P(hipfftxttest, hipfftxtunitdesc,
                          }
     );
 
+
+// FIXME: generalize
 // Params are direction, format, and batch size.
 class hipfftxtdirectionformat : public ::testing::TestWithParam<std::tuple<int, hipfftXtSubFormat, int>>
 {};
@@ -987,13 +991,13 @@ TEST_P(hipfftxtdirectionformat, c2cinplace)
     std::vector<std::complex<double>> output(Nx * Ny);
 
     // FIXME: re-enable
-    // hipfft_rt = hipfftXtMemcpy(plan,
-    //                            reinterpret_cast<void*>(output.data()),
-    //                            reinterpret_cast<void*>(inoutdesc),
-    //                            HIPFFT_COPY_DEVICE_TO_HOST);
-    // EXPECT_EQ(hipfft_rt, HIPFFT_SUCCESS) << "hipfftXtMemcpy post-exec failed with code "
-    //                                      << hipfft_rt
-    //                                      << " (" << hipfftResult_string(hipfft_rt) << ")";
+    hipfft_rt = hipfftXtMemcpy(plan,
+                               reinterpret_cast<void*>(output.data()),
+                               reinterpret_cast<void*>(inoutdesc),
+                               HIPFFT_COPY_DEVICE_TO_HOST);
+    EXPECT_EQ(hipfft_rt, HIPFFT_SUCCESS) << "hipfftXtMemcpy post-exec failed with code "
+                                         << hipfft_rt
+                                         << " (" << hipfftResult_string(hipfft_rt) << ")";
     
     hipfft_rt = hipfftXtFree(inoutdesc);
     EXPECT_EQ(hipfft_rt, HIPFFT_SUCCESS);
