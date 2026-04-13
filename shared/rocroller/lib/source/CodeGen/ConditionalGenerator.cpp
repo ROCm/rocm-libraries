@@ -98,9 +98,10 @@ namespace rocRoller
             ConditionalGenerator::genExec(Expression::ExpressionPtr               condition,
                                           std::string const&                      conditionName,
                                           std::function<Generator<Instruction>()> trueBodyFn,
-                                          std::function<Generator<Instruction>()> elseBodyFn)
+                                          std::function<Generator<Instruction>()> elseBodyFn,
+                                          ControlGraph::OpMode                    mode)
         {
-            Log::debug("ConditionalGenerator::genExec({})", conditionName);
+            Log::debug("ConditionalGenerator::genExec({}, {})", conditionName, toString(mode));
             auto const wavefrontSize = m_context->kernel()->wavefront_size();
             AssertFatal(wavefrontSize == 32 || wavefrontSize == 64, ShowValue(wavefrontSize));
 
@@ -115,6 +116,17 @@ namespace rocRoller
                         ShowValue(regType),
                         ShowValue(varType),
                         ShowValue(wavefrontSize));
+
+            bool const branchAndExec = (mode == ControlGraph::OpMode::BranchAndExec);
+
+            Register::ValuePtr elseLabel, exitLabel;
+            if(branchAndExec)
+            {
+                elseLabel = m_context->labelAllocator()->label(
+                    fmt::format("ELSE_Conditional_EXECZ_{}", conditionName));
+                exitLabel = m_context->labelAllocator()->label(
+                    fmt::format("EXIT_Conditional_EXECZ_{}", conditionName));
+            }
 
             co_yield Instruction::Lock(Scheduling::Dependency::Branch, "Lock for Conditional EXEC");
             // code-gen the if-condition
@@ -130,6 +142,17 @@ namespace rocRoller
             auto saveExec = wavefrontSize == 64 ? "s_and_saveexec_b64" : "s_and_saveexec_b32";
             co_yield_(Instruction(saveExec, {sgpr}, {vcc}, {}, ""));
 
+            if(branchAndExec)
+            {
+                auto EXECZ = m_context->getEXECZ();
+                // if execz == 1 (set), it means EXEC == 0 i.e. the entire execute mask is zero,
+                // then skip the then branch and jump to the else branch.
+                co_yield m_context->brancher()->branchIfNonZero(
+                    elseLabel,
+                    EXECZ,
+                    concatenate("If EXECZ is set(1), jump to ", elseLabel->toString()));
+            }
+
             // If there is an else body, save VCC into an SGPR now, before generating the
             // true body.  Nested conditionals inside the true body may overwrite VCC, making
             // the original condition unavailable for the s_andn1_saveexec transition.
@@ -142,6 +165,13 @@ namespace rocRoller
             }
 
             co_yield trueBodyFn();
+
+            if(branchAndExec)
+            {
+                co_yield m_context->brancher()->branch(
+                    exitLabel, concatenate("THEN: Done, jump to ", exitLabel->toString()));
+                co_yield Instruction::Label(elseLabel);
+            }
 
             if(elseBodyFn)
             {
@@ -159,115 +189,30 @@ namespace rocRoller
                 auto andn1SaveExec
                     = wavefrontSize == 64 ? "s_andn1_saveexec_b64" : "s_andn1_saveexec_b32";
                 co_yield_(Instruction(andn1SaveExec, {sgpr}, {savedVcc}, {}, ""));
+
+                if(branchAndExec)
+                {
+                    auto EXECZ = m_context->getEXECZ();
+                    // if execz == 1 (set), it means EXEC == 0 i.e. the entire execute mask is zero,
+                    // then skip the else branch and jump to the exit.
+                    co_yield m_context->brancher()->branchIfNonZero(
+                        exitLabel,
+                        EXECZ,
+                        concatenate("If EXECZ is set(1), jump to ", exitLabel->toString()));
+                }
+
                 co_yield elseBodyFn();
+            }
+
+            if(branchAndExec)
+            {
+                co_yield Instruction::Label(exitLabel);
             }
 
             // restore the original EXEC mask from the scalar destination register.
             auto EXEC = m_context->getEXEC();
             co_yield m_context->copier()->copy(EXEC, sgpr, "restore the EXEC mask");
             co_yield Instruction::Unlock("Unlock Conditional EXEC");
-        }
-
-        Generator<Instruction> ConditionalGenerator::genBranchAndExec(
-            Expression::ExpressionPtr               condition,
-            std::string const&                      conditionName,
-            std::function<Generator<Instruction>()> trueBodyFn,
-            std::function<Generator<Instruction>()> elseBodyFn)
-        {
-            Log::debug("ConditionalGenerator::genBranchAndExec({})", conditionName);
-            auto const wavefrontSize = m_context->kernel()->wavefront_size();
-            AssertFatal(wavefrontSize == 32 || wavefrontSize == 64, ShowValue(wavefrontSize));
-
-            auto vcc = m_context->brancher()->resultRegister(condition);
-
-            auto regType = vcc->regType();
-            auto varType = vcc->variableType();
-            AssertFatal((regType == Register::Type::VCC && varType == DataType::Bool64
-                         && wavefrontSize == 64)
-                            || (regType == Register::Type::VCC_LO && varType == DataType::Bool32
-                                && wavefrontSize == 32),
-                        ShowValue(regType),
-                        ShowValue(varType),
-                        ShowValue(wavefrontSize));
-
-            auto elseLabel = m_context->labelAllocator()->label(
-                fmt::format("ELSE_Conditional_EXECZ_{}", conditionName));
-            auto exitLabel = m_context->labelAllocator()->label(
-                fmt::format("EXIT_Conditional_EXECZ_{}", conditionName));
-
-            co_yield Instruction::Lock(Scheduling::Dependency::Branch,
-                                       "Lock for Conditional EXECZ");
-            // code-gen the if-condition
-            co_yield Expression::generate(vcc, condition, m_context);
-
-            // s_and_saveexec_b{32,64}: Calculate bitwise AND on the scalar input and the EXEC mask,
-            // store the calculated result into the EXEC mask,
-            // set SCC iff the calculated result is nonzero and
-            // store the original value of the EXEC mask into the scalar destination register.
-            // The original EXEC mask is saved to the destination SGPRs before the
-            // bitwise operation is performed.
-            auto sgpr     = MakeScalarBool(m_context, wavefrontSize);
-            auto saveExec = wavefrontSize == 64 ? "s_and_saveexec_b64" : "s_and_saveexec_b32";
-            co_yield_(Instruction(saveExec, {sgpr}, {vcc}, {}, ""));
-
-            auto EXECZ = m_context->getEXECZ();
-            // if execz == 1 (set), it means EXEC == 0 i.e. the entire execute mask is zero,
-            // then skip the then branch and jump to the else branch.
-            co_yield m_context->brancher()->branchIfNonZero(
-                elseLabel,
-                EXECZ,
-                concatenate("If EXECZ is set(1), jump to ", elseLabel->toString()));
-
-            // If there is an else body, save VCC into an SGPR now, before generating the
-            // true body.  Nested conditionals inside the true body may overwrite VCC, making
-            // the original condition unavailable for the s_andn1_saveexec transition.
-            Register::ValuePtr savedVcc;
-            if(elseBodyFn)
-            {
-                savedVcc = MakeScalarBool(m_context, wavefrontSize);
-                co_yield m_context->copier()->copy(
-                    savedVcc, vcc, "Save condition for else transition");
-            }
-
-            co_yield trueBodyFn();
-            co_yield m_context->brancher()->branch(
-                exitLabel, concatenate("THEN: Done, jump to ", exitLabel->toString()));
-
-            co_yield Instruction::Label(elseLabel);
-            if(elseBodyFn)
-            {
-                // restore the original EXEC mask from the scalar destination register.
-                auto EXEC = m_context->getEXEC();
-                co_yield m_context->copier()->copy(EXEC, sgpr, "restore the EXEC mask");
-
-                // s_andn1_saveexec_b{32,64}: Calculate bitwise AND on the EXEC mask and
-                // the negation of the scalar input,
-                // store the calculated result into the EXEC mask,
-                // set SCC iff the calculated result is nonzero and
-                // store the original value of the EXEC mask into the scalar destination register.
-                // Use savedVcc (not vcc) so that nested conditionals in the true body cannot
-                // corrupt the condition used here.
-                auto andn1SaveExec
-                    = wavefrontSize == 64 ? "s_andn1_saveexec_b64" : "s_andn1_saveexec_b32";
-                co_yield_(Instruction(andn1SaveExec, {sgpr}, {savedVcc}, {}, ""));
-
-                auto EXECZ = m_context->getEXECZ();
-                // if execz == 1 (set), it means EXEC == 0 i.e. the entire execute mask is zero,
-                // then skip the else branch and jump to the exit.
-                co_yield m_context->brancher()->branchIfNonZero(
-                    exitLabel,
-                    EXECZ,
-                    concatenate("If EXECZ is set(1), jump to ", exitLabel->toString()));
-                co_yield elseBodyFn();
-            }
-
-            co_yield Instruction::Label(exitLabel);
-
-            // restore the original EXEC mask from the scalar destination register.
-            auto EXEC = m_context->getEXEC();
-            co_yield m_context->copier()->copy(EXEC, sgpr, "restore the EXEC mask");
-
-            co_yield Instruction::Unlock("Unlock Conditional EXECZ");
         }
     }
 }

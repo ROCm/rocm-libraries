@@ -368,12 +368,9 @@ namespace rocRoller
                         condition, op.conditionName, trueBodyFn, elseBodyFn);
                     break;
                 case OpMode::Exec:
-                    co_yield m_conditionalGenerator.genExec(
-                        condition, op.conditionName, trueBodyFn, elseBodyFn);
-                    break;
                 case OpMode::BranchAndExec:
-                    co_yield m_conditionalGenerator.genBranchAndExec(
-                        condition, op.conditionName, trueBodyFn, elseBodyFn);
+                    co_yield m_conditionalGenerator.genExec(
+                        condition, op.conditionName, trueBodyFn, elseBodyFn, op.mode);
                     break;
                 default:
                     Throw<FatalError>("Unsupported mode for ConditionalOp: ", ShowValue(op.mode));
