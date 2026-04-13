@@ -367,7 +367,7 @@ endif()
 
 # Benchmark dependencies
 if(BUILD_BENCHMARK)
-  set(BENCHMARK_VERSION 1.9.4)
+  set(BENCHMARK_VERSION 1.9.5)
   if(NOT EXTERNAL_DEPS_FORCE_DOWNLOAD)
     # Google Benchmark (https://github.com/google/benchmark.git)
     find_package(benchmark ${BENCHMARK_VERSION} QUIET)
@@ -399,9 +399,19 @@ if(BUILD_BENCHMARK)
       GIT_TAG        v${BENCHMARK_VERSION}
     )
     FetchContent_MakeAvailable(googlebench)
-    if(NOT TARGET benchmark::benchmark)
-      add_library(benchmark::benchmark ALIAS benchmark)
-    endif()
+	# Clang on Windows throws the following warnings with Googlebenchmark v1.9.5 (along with Werror):
+    # googlebench-src/src/string_util.cc:158:34: error: format string is not a string literal [-Werror,-Wformat-nonliteral]
+	if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND WIN32)  
+	  if(TARGET benchmark)  
+	    target_compile_options(benchmark PRIVATE -Wno-format-nonliteral -Wno-missing-format-attribute -Wno-unused-command-line-argument)  
+	  endif()  
+	  if(TARGET benchmark_main)  
+	    target_compile_options(benchmark_main PRIVATE -Wno-format-nonliteral -Wno-missing-format-attribute -Wno-unused-command-line-argument)	
+	  endif()
+      if(NOT TARGET benchmark::benchmark)
+        add_library(benchmark::benchmark ALIAS benchmark)
+      endif()
+	endif()
   endif()
 
   # rocRAND (https://github.com/ROCm/rocm-libraries)

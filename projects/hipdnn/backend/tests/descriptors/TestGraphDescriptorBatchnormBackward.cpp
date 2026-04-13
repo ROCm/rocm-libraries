@@ -13,9 +13,10 @@
 
 #include <flatbuffers/flatbuffers.h>
 #include <gtest/gtest.h>
-#include <hipdnn_data_sdk/data_objects/batchnorm_backward_attributes_generated.h>
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
-#include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/batchnorm_backward_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
+#include <hipdnn_test_sdk/constants/BatchnormBackwardConstants.hpp>
 #include <hipdnn_test_sdk/utilities/ToVec.hpp>
 
 #include <array>
@@ -27,7 +28,9 @@
 
 using namespace hipdnn_backend;
 using namespace hipdnn_backend::test_utilities;
-using namespace hipdnn_data_sdk::data_objects;
+using namespace hipdnn_flatbuffers_sdk::data_objects;
+using namespace hipdnn_tests::constants;
+using hipdnn_tests::toVec;
 namespace
 {
 
@@ -138,14 +141,23 @@ protected:
 
 TEST_F(TestGraphDescriptorBatchnormBackward, BuildFromSingleOperation)
 {
-    auto dyDesc = createFinalizedTensor(60, {1, 64, 32, 32}, {65536, 1024, 32, 1});
-    auto xDesc = createFinalizedTensor(61, {1, 64, 32, 32}, {65536, 1024, 32, 1});
-    auto scaleDesc = createFinalizedTensor(62, {1, 64, 1, 1}, {64, 1, 1, 1});
-    auto dxDesc = createFinalizedTensor(63, {1, 64, 32, 32}, {65536, 1024, 32, 1});
-    auto dscaleDesc = createFinalizedTensor(64, {1, 64, 1, 1}, {64, 1, 1, 1});
-    auto dbiasDesc = createFinalizedTensor(65, {1, 64, 1, 1}, {64, 1, 1, 1});
-    auto meanDesc = createFinalizedTensor(7);
-    auto invVarianceDesc = createFinalizedTensor(8);
+    auto dyDesc = createFinalizedTensor(
+        K_BN_BWD_TENSOR_DY_UID, toVec(K_BN_BWD_TENSOR_DY_DIMS), toVec(K_BN_BWD_TENSOR_DY_STRIDES));
+    auto xDesc = createFinalizedTensor(
+        K_BN_BWD_TENSOR_X_UID, toVec(K_BN_BWD_TENSOR_X_DIMS), toVec(K_BN_BWD_TENSOR_X_STRIDES));
+    auto scaleDesc = createFinalizedTensor(K_BN_BWD_TENSOR_SCALE_UID,
+                                           toVec(K_BN_BWD_TENSOR_SCALE_DIMS),
+                                           toVec(K_BN_BWD_TENSOR_SCALE_STRIDES));
+    auto dxDesc = createFinalizedTensor(
+        K_BN_BWD_TENSOR_DX_UID, toVec(K_BN_BWD_TENSOR_DX_DIMS), toVec(K_BN_BWD_TENSOR_DX_STRIDES));
+    auto dscaleDesc = createFinalizedTensor(K_BN_BWD_TENSOR_DSCALE_UID,
+                                            toVec(K_BN_BWD_TENSOR_DSCALE_DIMS),
+                                            toVec(K_BN_BWD_TENSOR_DSCALE_STRIDES));
+    auto dbiasDesc = createFinalizedTensor(K_BN_BWD_TENSOR_DBIAS_UID,
+                                           toVec(K_BN_BWD_TENSOR_DBIAS_DIMS),
+                                           toVec(K_BN_BWD_TENSOR_DBIAS_STRIDES));
+    auto meanDesc = createFinalizedTensor(K_BN_BWD_TENSOR_MEAN_UID);
+    auto invVarianceDesc = createFinalizedTensor(K_BN_BWD_TENSOR_INV_VARIANCE_UID);
     auto opDesc = createFinalizedBatchnormBackwardOp(dyDesc.get(),
                                                      xDesc.get(),
                                                      scaleDesc.get(),
@@ -185,14 +197,14 @@ TEST_F(TestGraphDescriptorBatchnormBackward, BuildFromSingleOperation)
     ASSERT_NE(attrs, nullptr);
 
     // Verify tensor UID references
-    EXPECT_EQ(attrs->dy_tensor_uid, 60);
-    EXPECT_EQ(attrs->x_tensor_uid, 61);
-    EXPECT_EQ(attrs->scale_tensor_uid, 62);
-    EXPECT_EQ(attrs->dx_tensor_uid, 63);
-    EXPECT_EQ(attrs->dscale_tensor_uid, 64);
-    EXPECT_EQ(attrs->dbias_tensor_uid, 65);
-    EXPECT_EQ(attrs->mean_tensor_uid, 7);
-    EXPECT_EQ(attrs->inv_variance_tensor_uid, 8);
+    EXPECT_EQ(attrs->dy_tensor_uid, K_BN_BWD_TENSOR_DY_UID);
+    EXPECT_EQ(attrs->x_tensor_uid, K_BN_BWD_TENSOR_X_UID);
+    EXPECT_EQ(attrs->scale_tensor_uid, K_BN_BWD_TENSOR_SCALE_UID);
+    EXPECT_EQ(attrs->dx_tensor_uid, K_BN_BWD_TENSOR_DX_UID);
+    EXPECT_EQ(attrs->dscale_tensor_uid, K_BN_BWD_TENSOR_DSCALE_UID);
+    EXPECT_EQ(attrs->dbias_tensor_uid, K_BN_BWD_TENSOR_DBIAS_UID);
+    EXPECT_EQ(attrs->mean_tensor_uid, K_BN_BWD_TENSOR_MEAN_UID);
+    EXPECT_EQ(attrs->inv_variance_tensor_uid, K_BN_BWD_TENSOR_INV_VARIANCE_UID);
 
     // Verify peer_stats tensor array is empty (not set in basic test)
     EXPECT_EQ(attrs->peer_stats_tensor_uid.size(), 0u);
@@ -200,14 +212,23 @@ TEST_F(TestGraphDescriptorBatchnormBackward, BuildFromSingleOperation)
 
 TEST_F(TestGraphDescriptorBatchnormBackward, ComputeDataTypePreserved)
 {
-    auto dyDesc = createFinalizedTensor(60, {1, 64, 32, 32}, {65536, 1024, 32, 1});
-    auto xDesc = createFinalizedTensor(61, {1, 64, 32, 32}, {65536, 1024, 32, 1});
-    auto scaleDesc = createFinalizedTensor(62, {1, 64, 1, 1}, {64, 1, 1, 1});
-    auto dxDesc = createFinalizedTensor(63, {1, 64, 32, 32}, {65536, 1024, 32, 1});
-    auto dscaleDesc = createFinalizedTensor(64, {1, 64, 1, 1}, {64, 1, 1, 1});
-    auto dbiasDesc = createFinalizedTensor(65, {1, 64, 1, 1}, {64, 1, 1, 1});
-    auto meanDesc = createFinalizedTensor(7);
-    auto invVarianceDesc = createFinalizedTensor(8);
+    auto dyDesc = createFinalizedTensor(
+        K_BN_BWD_TENSOR_DY_UID, toVec(K_BN_BWD_TENSOR_DY_DIMS), toVec(K_BN_BWD_TENSOR_DY_STRIDES));
+    auto xDesc = createFinalizedTensor(
+        K_BN_BWD_TENSOR_X_UID, toVec(K_BN_BWD_TENSOR_X_DIMS), toVec(K_BN_BWD_TENSOR_X_STRIDES));
+    auto scaleDesc = createFinalizedTensor(K_BN_BWD_TENSOR_SCALE_UID,
+                                           toVec(K_BN_BWD_TENSOR_SCALE_DIMS),
+                                           toVec(K_BN_BWD_TENSOR_SCALE_STRIDES));
+    auto dxDesc = createFinalizedTensor(
+        K_BN_BWD_TENSOR_DX_UID, toVec(K_BN_BWD_TENSOR_DX_DIMS), toVec(K_BN_BWD_TENSOR_DX_STRIDES));
+    auto dscaleDesc = createFinalizedTensor(K_BN_BWD_TENSOR_DSCALE_UID,
+                                            toVec(K_BN_BWD_TENSOR_DSCALE_DIMS),
+                                            toVec(K_BN_BWD_TENSOR_DSCALE_STRIDES));
+    auto dbiasDesc = createFinalizedTensor(K_BN_BWD_TENSOR_DBIAS_UID,
+                                           toVec(K_BN_BWD_TENSOR_DBIAS_DIMS),
+                                           toVec(K_BN_BWD_TENSOR_DBIAS_STRIDES));
+    auto meanDesc = createFinalizedTensor(K_BN_BWD_TENSOR_MEAN_UID);
+    auto invVarianceDesc = createFinalizedTensor(K_BN_BWD_TENSOR_INV_VARIANCE_UID);
     auto opDesc = createFinalizedBatchnormBackwardOp(dyDesc.get(),
                                                      xDesc.get(),
                                                      scaleDesc.get(),
@@ -237,16 +258,25 @@ TEST_F(TestGraphDescriptorBatchnormBackward, ComputeDataTypePreserved)
 
 TEST_F(TestGraphDescriptorBatchnormBackward, BuildWithPeerStatsTensorArray)
 {
-    auto dyDesc = createFinalizedTensor(60, {1, 64, 32, 32}, {65536, 1024, 32, 1});
-    auto xDesc = createFinalizedTensor(61, {1, 64, 32, 32}, {65536, 1024, 32, 1});
-    auto scaleDesc = createFinalizedTensor(62, {1, 64, 1, 1}, {64, 1, 1, 1});
-    auto dxDesc = createFinalizedTensor(63, {1, 64, 32, 32}, {65536, 1024, 32, 1});
-    auto dscaleDesc = createFinalizedTensor(64, {1, 64, 1, 1}, {64, 1, 1, 1});
-    auto dbiasDesc = createFinalizedTensor(65, {1, 64, 1, 1}, {64, 1, 1, 1});
-    auto meanDesc = createFinalizedTensor(7);
-    auto invVarianceDesc = createFinalizedTensor(8);
-    auto peerStatsDesc0 = createFinalizedTensor(110);
-    auto peerStatsDesc1 = createFinalizedTensor(111);
+    auto dyDesc = createFinalizedTensor(
+        K_BN_BWD_TENSOR_DY_UID, toVec(K_BN_BWD_TENSOR_DY_DIMS), toVec(K_BN_BWD_TENSOR_DY_STRIDES));
+    auto xDesc = createFinalizedTensor(
+        K_BN_BWD_TENSOR_X_UID, toVec(K_BN_BWD_TENSOR_X_DIMS), toVec(K_BN_BWD_TENSOR_X_STRIDES));
+    auto scaleDesc = createFinalizedTensor(K_BN_BWD_TENSOR_SCALE_UID,
+                                           toVec(K_BN_BWD_TENSOR_SCALE_DIMS),
+                                           toVec(K_BN_BWD_TENSOR_SCALE_STRIDES));
+    auto dxDesc = createFinalizedTensor(
+        K_BN_BWD_TENSOR_DX_UID, toVec(K_BN_BWD_TENSOR_DX_DIMS), toVec(K_BN_BWD_TENSOR_DX_STRIDES));
+    auto dscaleDesc = createFinalizedTensor(K_BN_BWD_TENSOR_DSCALE_UID,
+                                            toVec(K_BN_BWD_TENSOR_DSCALE_DIMS),
+                                            toVec(K_BN_BWD_TENSOR_DSCALE_STRIDES));
+    auto dbiasDesc = createFinalizedTensor(K_BN_BWD_TENSOR_DBIAS_UID,
+                                           toVec(K_BN_BWD_TENSOR_DBIAS_DIMS),
+                                           toVec(K_BN_BWD_TENSOR_DBIAS_STRIDES));
+    auto meanDesc = createFinalizedTensor(K_BN_BWD_TENSOR_MEAN_UID);
+    auto invVarianceDesc = createFinalizedTensor(K_BN_BWD_TENSOR_INV_VARIANCE_UID);
+    auto peerStatsDesc0 = createFinalizedTensor(K_BN_BWD_TENSOR_PEER_STAT_0_UID);
+    auto peerStatsDesc1 = createFinalizedTensor(K_BN_BWD_TENSOR_PEER_STAT_1_UID);
 
     const std::vector<HipdnnBackendDescriptor*> peerStatsDescs
         = {peerStatsDesc0.get(), peerStatsDesc1.get()};
@@ -281,20 +311,29 @@ TEST_F(TestGraphDescriptorBatchnormBackward, BuildWithPeerStatsTensorArray)
 
     // Verify peer_stats tensor array UIDs
     ASSERT_EQ(attrs->peer_stats_tensor_uid.size(), 2u);
-    EXPECT_EQ(attrs->peer_stats_tensor_uid[0], 110);
-    EXPECT_EQ(attrs->peer_stats_tensor_uid[1], 111);
+    EXPECT_EQ(attrs->peer_stats_tensor_uid[0], K_BN_BWD_TENSOR_PEER_STAT_0_UID);
+    EXPECT_EQ(attrs->peer_stats_tensor_uid[1], K_BN_BWD_TENSOR_PEER_STAT_1_UID);
 }
 
 TEST_F(TestGraphDescriptorBatchnormBackward, OperationNamePreservedInSerialization)
 {
-    auto dyDesc = createFinalizedTensor(60, {1, 64, 32, 32}, {65536, 1024, 32, 1});
-    auto xDesc = createFinalizedTensor(61, {1, 64, 32, 32}, {65536, 1024, 32, 1});
-    auto scaleDesc = createFinalizedTensor(62, {1, 64, 1, 1}, {64, 1, 1, 1});
-    auto dxDesc = createFinalizedTensor(63, {1, 64, 32, 32}, {65536, 1024, 32, 1});
-    auto dscaleDesc = createFinalizedTensor(64, {1, 64, 1, 1}, {64, 1, 1, 1});
-    auto dbiasDesc = createFinalizedTensor(65, {1, 64, 1, 1}, {64, 1, 1, 1});
-    auto meanDesc = createFinalizedTensor(7);
-    auto invVarianceDesc = createFinalizedTensor(8);
+    auto dyDesc = createFinalizedTensor(
+        K_BN_BWD_TENSOR_DY_UID, toVec(K_BN_BWD_TENSOR_DY_DIMS), toVec(K_BN_BWD_TENSOR_DY_STRIDES));
+    auto xDesc = createFinalizedTensor(
+        K_BN_BWD_TENSOR_X_UID, toVec(K_BN_BWD_TENSOR_X_DIMS), toVec(K_BN_BWD_TENSOR_X_STRIDES));
+    auto scaleDesc = createFinalizedTensor(K_BN_BWD_TENSOR_SCALE_UID,
+                                           toVec(K_BN_BWD_TENSOR_SCALE_DIMS),
+                                           toVec(K_BN_BWD_TENSOR_SCALE_STRIDES));
+    auto dxDesc = createFinalizedTensor(
+        K_BN_BWD_TENSOR_DX_UID, toVec(K_BN_BWD_TENSOR_DX_DIMS), toVec(K_BN_BWD_TENSOR_DX_STRIDES));
+    auto dscaleDesc = createFinalizedTensor(K_BN_BWD_TENSOR_DSCALE_UID,
+                                            toVec(K_BN_BWD_TENSOR_DSCALE_DIMS),
+                                            toVec(K_BN_BWD_TENSOR_DSCALE_STRIDES));
+    auto dbiasDesc = createFinalizedTensor(K_BN_BWD_TENSOR_DBIAS_UID,
+                                           toVec(K_BN_BWD_TENSOR_DBIAS_DIMS),
+                                           toVec(K_BN_BWD_TENSOR_DBIAS_STRIDES));
+    auto meanDesc = createFinalizedTensor(K_BN_BWD_TENSOR_MEAN_UID);
+    auto invVarianceDesc = createFinalizedTensor(K_BN_BWD_TENSOR_INV_VARIANCE_UID);
     auto opDesc = createFinalizedBatchnormBackwardOp(dyDesc.get(),
                                                      xDesc.get(),
                                                      scaleDesc.get(),
@@ -326,14 +365,23 @@ TEST_F(TestGraphDescriptorBatchnormBackward, OperationNamePreservedInSerializati
 
 TEST_F(TestGraphDescriptorBatchnormBackward, OperationNameRoundTripThroughLifting)
 {
-    auto dyDesc = createFinalizedTensor(60, {1, 64, 32, 32}, {65536, 1024, 32, 1});
-    auto xDesc = createFinalizedTensor(61, {1, 64, 32, 32}, {65536, 1024, 32, 1});
-    auto scaleDesc = createFinalizedTensor(62, {1, 64, 1, 1}, {64, 1, 1, 1});
-    auto dxDesc = createFinalizedTensor(63, {1, 64, 32, 32}, {65536, 1024, 32, 1});
-    auto dscaleDesc = createFinalizedTensor(64, {1, 64, 1, 1}, {64, 1, 1, 1});
-    auto dbiasDesc = createFinalizedTensor(65, {1, 64, 1, 1}, {64, 1, 1, 1});
-    auto meanDesc = createFinalizedTensor(7);
-    auto invVarianceDesc = createFinalizedTensor(8);
+    auto dyDesc = createFinalizedTensor(
+        K_BN_BWD_TENSOR_DY_UID, toVec(K_BN_BWD_TENSOR_DY_DIMS), toVec(K_BN_BWD_TENSOR_DY_STRIDES));
+    auto xDesc = createFinalizedTensor(
+        K_BN_BWD_TENSOR_X_UID, toVec(K_BN_BWD_TENSOR_X_DIMS), toVec(K_BN_BWD_TENSOR_X_STRIDES));
+    auto scaleDesc = createFinalizedTensor(K_BN_BWD_TENSOR_SCALE_UID,
+                                           toVec(K_BN_BWD_TENSOR_SCALE_DIMS),
+                                           toVec(K_BN_BWD_TENSOR_SCALE_STRIDES));
+    auto dxDesc = createFinalizedTensor(
+        K_BN_BWD_TENSOR_DX_UID, toVec(K_BN_BWD_TENSOR_DX_DIMS), toVec(K_BN_BWD_TENSOR_DX_STRIDES));
+    auto dscaleDesc = createFinalizedTensor(K_BN_BWD_TENSOR_DSCALE_UID,
+                                            toVec(K_BN_BWD_TENSOR_DSCALE_DIMS),
+                                            toVec(K_BN_BWD_TENSOR_DSCALE_STRIDES));
+    auto dbiasDesc = createFinalizedTensor(K_BN_BWD_TENSOR_DBIAS_UID,
+                                           toVec(K_BN_BWD_TENSOR_DBIAS_DIMS),
+                                           toVec(K_BN_BWD_TENSOR_DBIAS_STRIDES));
+    auto meanDesc = createFinalizedTensor(K_BN_BWD_TENSOR_MEAN_UID);
+    auto invVarianceDesc = createFinalizedTensor(K_BN_BWD_TENSOR_INV_VARIANCE_UID);
     auto opDesc = createFinalizedBatchnormBackwardOp(dyDesc.get(),
                                                      xDesc.get(),
                                                      scaleDesc.get(),
@@ -383,18 +431,18 @@ TEST_F(TestGraphDescriptorBatchnormBackward, OperationNameRoundTripThroughLiftin
     // Verify all tensor UIDs survived
     auto* attrs = graphT->nodes[0]->attributes.AsBatchnormBackwardAttributes();
     ASSERT_NE(attrs, nullptr);
-    EXPECT_EQ(attrs->dy_tensor_uid, 60);
-    EXPECT_EQ(attrs->x_tensor_uid, 61);
-    EXPECT_EQ(attrs->scale_tensor_uid, 62);
-    EXPECT_EQ(attrs->dx_tensor_uid, 63);
-    EXPECT_EQ(attrs->dscale_tensor_uid, 64);
-    EXPECT_EQ(attrs->dbias_tensor_uid, 65);
+    EXPECT_EQ(attrs->dy_tensor_uid, K_BN_BWD_TENSOR_DY_UID);
+    EXPECT_EQ(attrs->x_tensor_uid, K_BN_BWD_TENSOR_X_UID);
+    EXPECT_EQ(attrs->scale_tensor_uid, K_BN_BWD_TENSOR_SCALE_UID);
+    EXPECT_EQ(attrs->dx_tensor_uid, K_BN_BWD_TENSOR_DX_UID);
+    EXPECT_EQ(attrs->dscale_tensor_uid, K_BN_BWD_TENSOR_DSCALE_UID);
+    EXPECT_EQ(attrs->dbias_tensor_uid, K_BN_BWD_TENSOR_DBIAS_UID);
 
     // Verify optional tensor UIDs survived
     ASSERT_TRUE(attrs->mean_tensor_uid.has_value());
-    EXPECT_EQ(attrs->mean_tensor_uid.value(), 7);
+    EXPECT_EQ(attrs->mean_tensor_uid.value(), K_BN_BWD_TENSOR_MEAN_UID);
     ASSERT_TRUE(attrs->inv_variance_tensor_uid.has_value());
-    EXPECT_EQ(attrs->inv_variance_tensor_uid.value(), 8);
+    EXPECT_EQ(attrs->inv_variance_tensor_uid.value(), K_BN_BWD_TENSOR_INV_VARIANCE_UID);
 }
 
 } // namespace

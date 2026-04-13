@@ -1264,7 +1264,7 @@
     InnerUnroll: 1
     InterleaveAlpha: 0
     KernelLanguage: Assembly
-    KernelNameMin: Cijk_Ailk_Bjlk_I8I8S_BH_Bias_FDMN_SPA_AS_SAV_MT32x32x128_MI32x32x1_SN_AFC1_AFEM1_DTVSM0_GSU1_LPM2_MIWT1_1_PLR3_SU0_SUS0_VWA1_VWB1_WG32_2_1
+    KernelNameMin: Cijk_Ailk_Bjlk_I8I8S_BH_Bias_FDMN_SPA_AS_SAV_MT32x32x128_MI32x32x1_SN_AFC1_AFEM1_DTVSM0_GSU1_LPM2_MIWT1_1_PLR1_SU0_SUS0_VWA1_VWB1_WG32_2_1
     LSCA: 32
     LSCB: 32
     LSCMetadata: 16
@@ -1362,13 +1362,13 @@
     PackedC1IdxChars: [J]
     PackedC1IndicesX: [1]
     PrefetchGlobalRead: 2
-    PrefetchLocalRead: 3
+    PrefetchLocalRead: 1
     PreloadKernArgs: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 6
-    SolutionNameMin: Cijk_Ailk_Bjlk_I8I8S_BH_Bias_FDMN_SPA_AS_SAV_MT32x32x128_MI32x32x1_SN_AFC1_AFEM1_DTVSM0_GSU1_LPM2_MIWT1_1_PLR3_SU0_SUS0_VWA1_VWB1_WG32_2_1
+    SolutionNameMin: Cijk_Ailk_Bjlk_I8I8S_BH_Bias_FDMN_SPA_AS_SAV_MT32x32x128_MI32x32x1_SN_AFC1_AFEM1_DTVSM0_GSU1_LPM2_MIWT1_1_PLR1_SU0_SUS0_VWA1_VWB1_WG32_2_1
     SourceSwap: false
     StaggerU: 0
     StaggerUMapping: 0
@@ -1822,7 +1822,7 @@
     InnerUnroll: 1
     InterleaveAlpha: 0
     KernelLanguage: Assembly
-    KernelNameMin: Cijk_Ailk_Bjlk_I8I8S_BH_Bias_FDMN_SPA_AS_SAV_MT32x32x128_MI32x32x1_SN_AFC1_AFEM8_DTVSM1_GSU1_LPMn1_MIWT1_1_PLR3_SU0_SUS0_VWA1_VWB1_WG32_2_1
+    KernelNameMin: Cijk_Ailk_Bjlk_I8I8S_BH_Bias_FDMN_SPA_AS_SAV_MT32x32x128_MI32x32x1_SN_AFC1_AFEM8_DTVSM1_GSU1_LPMn1_MIWT1_1_PLR1_SU0_SUS0_VWA1_VWB1_WG32_2_1
     LSCA: 32
     LSCB: 32
     LSPA: 16
@@ -1911,13 +1911,13 @@
     PackedC1IdxChars: [J]
     PackedC1IndicesX: [1]
     PrefetchGlobalRead: 2
-    PrefetchLocalRead: 3
+    PrefetchLocalRead: 1
     PreloadKernArgs: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 9
-    SolutionNameMin: Cijk_Ailk_Bjlk_I8I8S_BH_Bias_FDMN_SPA_AS_SAV_MT32x32x128_MI32x32x1_SN_AFC1_AFEM8_DTVSM1_GSU1_LPMn1_MIWT1_1_PLR3_SU0_SUS0_VWA1_VWB1_WG32_2_1
+    SolutionNameMin: Cijk_Ailk_Bjlk_I8I8S_BH_Bias_FDMN_SPA_AS_SAV_MT32x32x128_MI32x32x1_SN_AFC1_AFEM8_DTVSM1_GSU1_LPMn1_MIWT1_1_PLR1_SU0_SUS0_VWA1_VWB1_WG32_2_1
     SourceSwap: false
     StaggerU: 0
     StaggerUMapping: 0
@@ -2202,7 +2202,7 @@
     InnerUnroll: 1
     InterleaveAlpha: 0
     KernelLanguage: Assembly
-    KernelNameMin: Cijk_Ailk_Bjlk_I8I8S_BH_Bias_FDMN_SPA_AS_SAV_MT32x32x128_MI32x32x1_SN_AFC1_AFEM8_DTVSM0_GSU1_LPM2_MIWT1_1_PLR3_SU4_SUS256_VWA1_VWB1_WG32_2_1
+    KernelNameMin: Cijk_Ailk_Bjlk_I8I8S_BH_Bias_FDMN_SPA_AS_SAV_MT32x32x128_MI32x32x1_SN_AFC1_AFEM8_DTVSM0_GSU1_LPM2_MIWT1_1_PLR1_SU4_SUS256_VWA1_VWB1_WG32_2_1
     LSCA: 32
     LSCB: 32
     LSCMetadata: 16
@@ -2300,13 +2300,13 @@
     PackedC1IdxChars: [J]
     PackedC1IndicesX: [1]
     PrefetchGlobalRead: 2
-    PrefetchLocalRead: 3
+    PrefetchLocalRead: 1
     PreloadKernArgs: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 11
-    SolutionNameMin: Cijk_Ailk_Bjlk_I8I8S_BH_Bias_FDMN_SPA_AS_SAV_MT32x32x128_MI32x32x1_SN_AFC1_AFEM8_DTVSM0_GSU1_LPM2_MIWT1_1_PLR3_SU4_SUS256_VWA1_VWB1_WG32_2_1
+    SolutionNameMin: Cijk_Ailk_Bjlk_I8I8S_BH_Bias_FDMN_SPA_AS_SAV_MT32x32x128_MI32x32x1_SN_AFC1_AFEM8_DTVSM0_GSU1_LPM2_MIWT1_1_PLR1_SU4_SUS256_VWA1_VWB1_WG32_2_1
     SourceSwap: false
     StaggerU: 4
     StaggerUMapping: 0
@@ -2578,7 +2578,7 @@
     InnerUnroll: 1
     InterleaveAlpha: 0
     KernelLanguage: Assembly
-    KernelNameMin: Cijk_Ailk_Bjlk_I8I8S_BH_Bias_FDMN_SPA_AS_SAV_MT32x32x128_MI32x32x1_SN_AFC1_AFEM8_DTVSM1_GSU1_LPMn1_MIWT1_1_PLR3_SU4_SUS256_VWA1_VWB1_WG32_2_1
+    KernelNameMin: Cijk_Ailk_Bjlk_I8I8S_BH_Bias_FDMN_SPA_AS_SAV_MT32x32x128_MI32x32x1_SN_AFC1_AFEM8_DTVSM1_GSU1_LPMn1_MIWT1_1_PLR1_SU4_SUS256_VWA1_VWB1_WG32_2_1
     LSCA: 32
     LSCB: 32
     LSPA: 16
@@ -2667,13 +2667,13 @@
     PackedC1IdxChars: [J]
     PackedC1IndicesX: [1]
     PrefetchGlobalRead: 2
-    PrefetchLocalRead: 3
+    PrefetchLocalRead: 1
     PreloadKernArgs: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 13
-    SolutionNameMin: Cijk_Ailk_Bjlk_I8I8S_BH_Bias_FDMN_SPA_AS_SAV_MT32x32x128_MI32x32x1_SN_AFC1_AFEM8_DTVSM1_GSU1_LPMn1_MIWT1_1_PLR3_SU4_SUS256_VWA1_VWB1_WG32_2_1
+    SolutionNameMin: Cijk_Ailk_Bjlk_I8I8S_BH_Bias_FDMN_SPA_AS_SAV_MT32x32x128_MI32x32x1_SN_AFC1_AFEM8_DTVSM1_GSU1_LPMn1_MIWT1_1_PLR1_SU4_SUS256_VWA1_VWB1_WG32_2_1
     SourceSwap: false
     StaggerU: 4
     StaggerUMapping: 0
@@ -2762,7 +2762,7 @@
     InnerUnroll: 1
     InterleaveAlpha: 0
     KernelLanguage: Assembly
-    KernelNameMin: Cijk_Ailk_Bjlk_I8I8S_BH_Bias_FDMN_SPA_AS_SAV_MT32x32x128_MI32x32x1_SN_AFC0_AFEM8_DTVSM0_GSUM_LPM2_MIWT1_1_PLR3_SU0_SUS0_VWA1_VWB1_WG32_2_1
+    KernelNameMin: Cijk_Ailk_Bjlk_I8I8S_BH_Bias_FDMN_SPA_AS_SAV_MT32x32x128_MI32x32x1_SN_AFC0_AFEM8_DTVSM0_GSUM_LPM2_MIWT1_1_PLR1_SU0_SUS0_VWA1_VWB1_WG32_2_1
     LSCA: 32
     LSCB: 32
     LSCMetadata: 16
@@ -2860,13 +2860,13 @@
     PackedC1IdxChars: [J]
     PackedC1IndicesX: [1]
     PrefetchGlobalRead: 2
-    PrefetchLocalRead: 3
+    PrefetchLocalRead: 1
     PreloadKernArgs: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 14
-    SolutionNameMin: Cijk_Ailk_Bjlk_I8I8S_BH_Bias_FDMN_SPA_AS_SAV_MT32x32x128_MI32x32x1_SN_AFC0_AFEM8_DTVSM0_GSU2_LPM2_MIWT1_1_PLR3_SU0_SUS0_VWA1_VWB1_WG32_2_1
+    SolutionNameMin: Cijk_Ailk_Bjlk_I8I8S_BH_Bias_FDMN_SPA_AS_SAV_MT32x32x128_MI32x32x1_SN_AFC0_AFEM8_DTVSM0_GSU2_LPM2_MIWT1_1_PLR1_SU0_SUS0_VWA1_VWB1_WG32_2_1
     SourceSwap: false
     StaggerU: 0
     StaggerUMapping: 0
@@ -2956,7 +2956,7 @@
     InnerUnroll: 1
     InterleaveAlpha: 0
     KernelLanguage: Assembly
-    KernelNameMin: Cijk_Ailk_Bjlk_I8I8S_BH_Bias_FDMN_SPA_AS_SAV_MT32x32x128_MI32x32x1_SN_AFC0_AFEM1_DTVSM1_GSUM_LPMn1_MIWT1_1_PLR3_SU4_SUS256_VWA1_VWB1_WG32_2_1
+    KernelNameMin: Cijk_Ailk_Bjlk_I8I8S_BH_Bias_FDMN_SPA_AS_SAV_MT32x32x128_MI32x32x1_SN_AFC0_AFEM1_DTVSM1_GSUM_LPMn1_MIWT1_1_PLR1_SU4_SUS256_VWA1_VWB1_WG32_2_1
     LSCA: 32
     LSCB: 32
     LSPA: 16
@@ -3045,13 +3045,13 @@
     PackedC1IdxChars: [J]
     PackedC1IndicesX: [1]
     PrefetchGlobalRead: 2
-    PrefetchLocalRead: 3
+    PrefetchLocalRead: 1
     PreloadKernArgs: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 15
-    SolutionNameMin: Cijk_Ailk_Bjlk_I8I8S_BH_Bias_FDMN_SPA_AS_SAV_MT32x32x128_MI32x32x1_SN_AFC0_AFEM1_DTVSM1_GSU2_LPMn1_MIWT1_1_PLR3_SU4_SUS256_VWA1_VWB1_WG32_2_1
+    SolutionNameMin: Cijk_Ailk_Bjlk_I8I8S_BH_Bias_FDMN_SPA_AS_SAV_MT32x32x128_MI32x32x1_SN_AFC0_AFEM1_DTVSM1_GSU2_LPMn1_MIWT1_1_PLR1_SU4_SUS256_VWA1_VWB1_WG32_2_1
     SourceSwap: false
     StaggerU: 4
     StaggerUMapping: 0
@@ -3236,12 +3236,12 @@
     PackedC1IdxChars: [J]
     PackedC1IndicesX: [1]
     PrefetchGlobalRead: 2
-    PrefetchLocalRead: 3
+    PrefetchLocalRead: 1
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 16
-    SolutionNameMin: Cijk_Ailk_Bjlk_I8I8S_BH_Bias_FDMN_SPA_AS_SAV_MT256x64x128_MI32x32x32x1_SN_1LDSB0_AFC1_AF0EM8_GRVWA8_GRVWB16_GSU1_LBSPPA0_LBSPPB0_LBSPPM0_LPA0_LPB0_LPM2_MIWT2_2_NLCA1_NLCB1_PLR3_SUS256_WG128_2_1
+    SolutionNameMin: Cijk_Ailk_Bjlk_I8I8S_BH_Bias_FDMN_SPA_AS_SAV_MT256x64x128_MI32x32x32x1_SN_1LDSB0_AFC1_AF0EM8_GRVWA8_GRVWB16_GSU1_LBSPPA0_LBSPPB0_LBSPPM0_LPA0_LPB0_LPM2_MIWT2_2_NLCA1_NLCB1_PLR1_SUS256_WG128_2_1
     SourceSwap: false
     StaggerU: 4
     StaggerUMapping: 0
@@ -3622,12 +3622,12 @@
     PackedC1IdxChars: [J]
     PackedC1IndicesX: [1]
     PrefetchGlobalRead: 2
-    PrefetchLocalRead: 3
+    PrefetchLocalRead: 1
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 18
-    SolutionNameMin: Cijk_Ailk_Bjlk_I8I8S_BH_Bias_FDMN_SPA_AS_SAV_MT256x64x128_MI32x32x32x1_SN_1LDSB0_AFC0_AF0EM8_GRVWA8_GRVWB16_GSU3_LBSPPA0_LBSPPB0_LBSPPM0_LPA0_LPB0_LPM2_MIWT2_2_NLCA1_NLCB1_PLR3_SUS128_WG128_2_1
+    SolutionNameMin: Cijk_Ailk_Bjlk_I8I8S_BH_Bias_FDMN_SPA_AS_SAV_MT256x64x128_MI32x32x32x1_SN_1LDSB0_AFC0_AF0EM8_GRVWA8_GRVWB16_GSU3_LBSPPA0_LBSPPB0_LBSPPM0_LPA0_LPB0_LPM2_MIWT2_2_NLCA1_NLCB1_PLR1_SUS128_WG128_2_1
     SourceSwap: false
     StaggerU: 4
     StaggerUMapping: 0
@@ -3815,12 +3815,12 @@
     PackedC1IdxChars: [J]
     PackedC1IndicesX: [1]
     PrefetchGlobalRead: 2
-    PrefetchLocalRead: 3
+    PrefetchLocalRead: 1
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 19
-    SolutionNameMin: Cijk_Ailk_Bjlk_I8I8S_BH_Bias_FDMN_SPA_AS_SAV_MT128x64x128_MI32x32x32x1_SN_1LDSB0_AFC1_AF0EM8_GRVWA8_GRVWB16_GSU1_LBSPPA0_LBSPPB0_LBSPPM0_LPA0_LPB0_LPM2_MIWT1_2_NLCA1_NLCB1_PLR3_SUS128_WG128_2_1
+    SolutionNameMin: Cijk_Ailk_Bjlk_I8I8S_BH_Bias_FDMN_SPA_AS_SAV_MT128x64x128_MI32x32x32x1_SN_1LDSB0_AFC1_AF0EM8_GRVWA8_GRVWB16_GSU1_LBSPPA0_LBSPPB0_LBSPPM0_LPA0_LPB0_LPM2_MIWT1_2_NLCA1_NLCB1_PLR1_SUS128_WG128_2_1
     SourceSwap: false
     StaggerU: 4
     StaggerUMapping: 0

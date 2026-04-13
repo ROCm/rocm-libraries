@@ -119,8 +119,13 @@ def start_shard(
 
     # Set environment variables
     env = os.environ.copy()
+
+    # Parallelization
     env["OPENBLAS_NUM_THREADS"] = "2"
     env["OMP_NUM_THREADS"] = "2"
+
+    # Debug logging for failed kernel generation
+    env["AMD_COMGR_REDIRECT_LOGS"] = "stdout"
 
     # Start with base command from profile and add framework-specific sharding arguments
     cmd = base_cmd.copy()

@@ -6,7 +6,7 @@
 #include "DescriptorTestUtils.hpp"
 #include "descriptors/TensorDescriptor.hpp"
 #include "hipdnn_backend.h"
-#include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_test_sdk/constants/ConvFpropConstants.hpp>
 #include <hipdnn_test_sdk/utilities/ToVec.hpp>
 
@@ -17,11 +17,13 @@
 namespace hipdnn_backend::test_utilities
 {
 
-inline std::unique_ptr<HipdnnBackendDescriptor> createFinalizedTensor(
-    int64_t uid,
-    std::vector<int64_t> dims = hipdnn_tests::toVec(hipdnn_tests::constants::K_TENSOR_X_DIMS),
-    std::vector<int64_t> strides = hipdnn_tests::toVec(hipdnn_tests::constants::K_TENSOR_X_STRIDES),
-    hipdnnDataType_t dataType = HIPDNN_DATA_FLOAT)
+inline std::unique_ptr<HipdnnBackendDescriptor>
+    createFinalizedTensor(int64_t uid,
+                          std::vector<int64_t> dims
+                          = hipdnn_tests::toVec(hipdnn_tests::constants::K_FPROP_TENSOR_X_DIMS),
+                          std::vector<int64_t> strides
+                          = hipdnn_tests::toVec(hipdnn_tests::constants::K_FPROP_TENSOR_X_STRIDES),
+                          hipdnnDataType_t dataType = HIPDNN_DATA_FLOAT)
 {
     auto wrapper = createDescriptor<TensorDescriptor>();
     auto desc = wrapper->asDescriptor<TensorDescriptor>();
