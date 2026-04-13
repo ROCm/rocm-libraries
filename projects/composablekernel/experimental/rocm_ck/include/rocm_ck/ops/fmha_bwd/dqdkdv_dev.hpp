@@ -220,7 +220,7 @@ struct FmhaBwdDQDKDVTypes
 
     // --- Kernel ---
     using Kernel =
-        ck_tile::FmhaBwdDQDKDVSpec<Pipeline, KGradEpilogue, VGradEpilogue, QGradEpilogue>;
+        ck_tile::FmhaBwdDQDKDVKernel<Pipeline, KGradEpilogue, VGradEpilogue, QGradEpilogue>;
 
     using Kargs = typename Kernel::Kargs;
 };

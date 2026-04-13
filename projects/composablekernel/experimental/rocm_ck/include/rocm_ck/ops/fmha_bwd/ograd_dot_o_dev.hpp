@@ -60,7 +60,7 @@ struct FmhaBwdOGradDotOTypes
                                                       Traits>;
 
     using Pipeline = ck_tile::BlockFmhaBwdOGradDotO<PipelineProblem>;
-    using Kernel   = ck_tile::FmhaBwdOGradDotOSpec<Pipeline>;
+    using Kernel   = ck_tile::FmhaBwdOGradDotOKernel<Pipeline>;
     using Kargs    = typename Kernel::Kargs;
 };
 
