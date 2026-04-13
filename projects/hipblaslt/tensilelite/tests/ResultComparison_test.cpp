@@ -44,8 +44,19 @@ namespace
     {
         std::ostringstream captured;
         std::streambuf*    oldBuf = std::cout.rdbuf(captured.rdbuf());
+
+        // RAII guard: restores std::cout's buffer when leaving scope,
+        // even if func() throws.
+        struct StreamGuard
+        {
+            std::streambuf* orig;
+            ~StreamGuard()
+            {
+                std::cout.rdbuf(orig);
+            }
+        } guard{oldBuf};
+
         func();
-        std::cout.rdbuf(oldBuf);
         return captured.str();
     }
 
