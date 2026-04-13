@@ -20,7 +20,7 @@
  * | KnobValueType | Engine knob data type | int64, float64, or string |
  *
  * This file also contains conversion utilities between frontend types and
- * the internal SDK/backend types.
+ * the backend C API types (hipdnn_backend.h).
  */
 
 #pragma once
@@ -134,6 +134,7 @@ enum class PointwiseMode
     TAN = 45, ///< Tangent function
     TANH_BWD = 46, ///< Tanh backward pass
     TANH_FWD = 47, ///< Tanh forward pass
+    COUNT = 48 ///< Number of pointwise modes (sentinel — not a valid mode)
 };
 typedef PointwiseMode PointwiseMode_t; ///< @brief Type alias for PointwiseMode
 
@@ -403,6 +404,21 @@ inline std::pair<ConvolutionMode, Error> fromHipdnnConvMode(hipdnnConvolutionMod
     }
 }
 
+/// @brief Convert SDK ConvMode to frontend ConvolutionMode
+inline hipdnn_frontend::ConvolutionMode
+    fromSdkType(const hipdnn_data_sdk::data_objects::ConvMode& type)
+{
+    switch(type)
+    {
+    case hipdnn_data_sdk::data_objects::ConvMode::CROSS_CORRELATION:
+        return hipdnn_frontend::ConvolutionMode::CROSS_CORRELATION;
+    case hipdnn_data_sdk::data_objects::ConvMode::CONVOLUTION:
+        return hipdnn_frontend::ConvolutionMode::CONVOLUTION;
+    default:
+        return hipdnn_frontend::ConvolutionMode::NOT_SET;
+    }
+}
+
 /**
  * @brief Convert frontend DiagonalAlignment to backend hipdnnDiagonalAlignment_t
  *
@@ -657,21 +673,6 @@ inline std::optional<hipdnnPointwiseMode_t> toBackendPointwiseMode(const Pointwi
         return HIPDNN_POINTWISE_TANH_FWD;
     default:
         return std::nullopt;
-    }
-}
-
-/// @brief Convert SDK ConvMode to frontend ConvolutionMode
-inline hipdnn_frontend::ConvolutionMode
-    fromSdkType(const hipdnn_data_sdk::data_objects::ConvMode& type)
-{
-    switch(type)
-    {
-    case hipdnn_data_sdk::data_objects::ConvMode::CROSS_CORRELATION:
-        return hipdnn_frontend::ConvolutionMode::CROSS_CORRELATION;
-    case hipdnn_data_sdk::data_objects::ConvMode::CONVOLUTION:
-        return hipdnn_frontend::ConvolutionMode::CONVOLUTION;
-    default:
-        return hipdnn_frontend::ConvolutionMode::NOT_SET;
     }
 }
 
@@ -1313,6 +1314,119 @@ inline std::ostream& operator<<(std::ostream& os, const DataType& type)
     return os << to_string(type);
 }
 
+/// @brief Get a human-readable string for a PointwiseMode value
+// NOLINTNEXTLINE(readability-identifier-naming)
+inline const char* to_string(const PointwiseMode& mode)
+{
+    switch(mode)
+    {
+    case PointwiseMode::NOT_SET:
+        return "NOT_SET";
+    case PointwiseMode::ABS:
+        return "ABS";
+    case PointwiseMode::ADD:
+        return "ADD";
+    case PointwiseMode::ADD_SQUARE:
+        return "ADD_SQUARE";
+    case PointwiseMode::BINARY_SELECT:
+        return "BINARY_SELECT";
+    case PointwiseMode::CEIL:
+        return "CEIL";
+    case PointwiseMode::CMP_EQ:
+        return "CMP_EQ";
+    case PointwiseMode::CMP_GE:
+        return "CMP_GE";
+    case PointwiseMode::CMP_GT:
+        return "CMP_GT";
+    case PointwiseMode::CMP_LE:
+        return "CMP_LE";
+    case PointwiseMode::CMP_LT:
+        return "CMP_LT";
+    case PointwiseMode::CMP_NEQ:
+        return "CMP_NEQ";
+    case PointwiseMode::DIV:
+        return "DIV";
+    case PointwiseMode::ELU_BWD:
+        return "ELU_BWD";
+    case PointwiseMode::ELU_FWD:
+        return "ELU_FWD";
+    case PointwiseMode::ERF:
+        return "ERF";
+    case PointwiseMode::EXP:
+        return "EXP";
+    case PointwiseMode::FLOOR:
+        return "FLOOR";
+    case PointwiseMode::GELU_APPROX_TANH_BWD:
+        return "GELU_APPROX_TANH_BWD";
+    case PointwiseMode::GELU_APPROX_TANH_FWD:
+        return "GELU_APPROX_TANH_FWD";
+    case PointwiseMode::GELU_BWD:
+        return "GELU_BWD";
+    case PointwiseMode::GELU_FWD:
+        return "GELU_FWD";
+    case PointwiseMode::GEN_INDEX:
+        return "GEN_INDEX";
+    case PointwiseMode::IDENTITY:
+        return "IDENTITY";
+    case PointwiseMode::LOG:
+        return "LOG";
+    case PointwiseMode::LOGICAL_AND:
+        return "LOGICAL_AND";
+    case PointwiseMode::LOGICAL_NOT:
+        return "LOGICAL_NOT";
+    case PointwiseMode::LOGICAL_OR:
+        return "LOGICAL_OR";
+    case PointwiseMode::MAX:
+        return "MAX";
+    case PointwiseMode::MIN:
+        return "MIN";
+    case PointwiseMode::MUL:
+        return "MUL";
+    case PointwiseMode::NEG:
+        return "NEG";
+    case PointwiseMode::RECIPROCAL:
+        return "RECIPROCAL";
+    case PointwiseMode::RELU_BWD:
+        return "RELU_BWD";
+    case PointwiseMode::RELU_FWD:
+        return "RELU_FWD";
+    case PointwiseMode::RSQRT:
+        return "RSQRT";
+    case PointwiseMode::SIGMOID_BWD:
+        return "SIGMOID_BWD";
+    case PointwiseMode::SIGMOID_FWD:
+        return "SIGMOID_FWD";
+    case PointwiseMode::SIN:
+        return "SIN";
+    case PointwiseMode::SOFTPLUS_BWD:
+        return "SOFTPLUS_BWD";
+    case PointwiseMode::SOFTPLUS_FWD:
+        return "SOFTPLUS_FWD";
+    case PointwiseMode::SQRT:
+        return "SQRT";
+    case PointwiseMode::SUB:
+        return "SUB";
+    case PointwiseMode::SWISH_BWD:
+        return "SWISH_BWD";
+    case PointwiseMode::SWISH_FWD:
+        return "SWISH_FWD";
+    case PointwiseMode::TAN:
+        return "TAN";
+    case PointwiseMode::TANH_BWD:
+        return "TANH_BWD";
+    case PointwiseMode::TANH_FWD:
+        return "TANH_FWD";
+    default:
+        return "UNKNOWN";
+    }
+}
+
+/// @brief Stream insertion operator for PointwiseMode
+inline std::ostream& operator<<(std::ostream& os, const PointwiseMode& mode)
+{
+    return os << to_string(mode);
+}
+
 /// @brief Get a human-readable string for a BuildPlanPolicy value
 // NOLINTNEXTLINE(readability-identifier-naming)
 inline const char* to_string(const BuildPlanPolicy& policy)
@@ -1639,6 +1753,9 @@ inline KnobValueType getKnobValueTypeFromVariant(const std::variant<Ts...>& valu
     return ret;
 }
 
+// NOTE: Parallel mode classification exists in data_sdk PointwiseValidation.hpp.
+// Keep both in sync when adding new PointwiseMode values.
+
 /**
  * @brief Check if a pointwise mode is a unary operation (1 input)
  * @param mode The pointwise mode to check
@@ -1646,7 +1763,35 @@ inline KnobValueType getKnobValueTypeFromVariant(const std::variant<Ts...>& valu
  */
 inline bool isUnaryPointwiseMode(PointwiseMode mode)
 {
-    return hipdnn_data_sdk::utilities::isUnaryPointwiseMode(toSdkType(mode));
+    switch(mode)
+    {
+    case PointwiseMode::ABS:
+    case PointwiseMode::CEIL:
+    case PointwiseMode::ELU_FWD:
+    case PointwiseMode::ERF:
+    case PointwiseMode::EXP:
+    case PointwiseMode::FLOOR:
+    case PointwiseMode::GELU_APPROX_TANH_FWD:
+    case PointwiseMode::GELU_FWD:
+    case PointwiseMode::GEN_INDEX:
+    case PointwiseMode::IDENTITY:
+    case PointwiseMode::LOG:
+    case PointwiseMode::LOGICAL_NOT:
+    case PointwiseMode::NEG:
+    case PointwiseMode::RECIPROCAL:
+    case PointwiseMode::RELU_FWD:
+    case PointwiseMode::RSQRT:
+    case PointwiseMode::SIGMOID_FWD:
+    case PointwiseMode::SIN:
+    case PointwiseMode::SOFTPLUS_FWD:
+    case PointwiseMode::SQRT:
+    case PointwiseMode::SWISH_FWD:
+    case PointwiseMode::TAN:
+    case PointwiseMode::TANH_FWD:
+        return true;
+    default:
+        return false;
+    }
 }
 
 /**
@@ -1656,7 +1801,35 @@ inline bool isUnaryPointwiseMode(PointwiseMode mode)
  */
 inline bool isBinaryPointwiseMode(PointwiseMode mode)
 {
-    return hipdnn_data_sdk::utilities::isBinaryPointwiseMode(toSdkType(mode));
+    switch(mode)
+    {
+    case PointwiseMode::ADD:
+    case PointwiseMode::ADD_SQUARE:
+    case PointwiseMode::CMP_EQ:
+    case PointwiseMode::CMP_GE:
+    case PointwiseMode::CMP_GT:
+    case PointwiseMode::CMP_LE:
+    case PointwiseMode::CMP_LT:
+    case PointwiseMode::CMP_NEQ:
+    case PointwiseMode::DIV:
+    case PointwiseMode::ELU_BWD:
+    case PointwiseMode::GELU_APPROX_TANH_BWD:
+    case PointwiseMode::GELU_BWD:
+    case PointwiseMode::LOGICAL_AND:
+    case PointwiseMode::LOGICAL_OR:
+    case PointwiseMode::MAX:
+    case PointwiseMode::MIN:
+    case PointwiseMode::MUL:
+    case PointwiseMode::RELU_BWD:
+    case PointwiseMode::SIGMOID_BWD:
+    case PointwiseMode::SOFTPLUS_BWD:
+    case PointwiseMode::SUB:
+    case PointwiseMode::SWISH_BWD:
+    case PointwiseMode::TANH_BWD:
+        return true;
+    default:
+        return false;
+    }
 }
 
 /**
@@ -1666,25 +1839,7 @@ inline bool isBinaryPointwiseMode(PointwiseMode mode)
  */
 inline bool isTernaryPointwiseMode(PointwiseMode mode)
 {
-    return hipdnn_data_sdk::utilities::isTernaryPointwiseMode(toSdkType(mode));
-}
-
-/// @brief Get the bitset of all unary pointwise modes
-inline const auto& getUnaryModesBitset()
-{
-    return hipdnn_data_sdk::utilities::getUnaryModesBitset();
-}
-
-/// @brief Get the bitset of all binary pointwise modes
-inline const auto& getBinaryModesBitset()
-{
-    return hipdnn_data_sdk::utilities::getBinaryModesBitset();
-}
-
-/// @brief Get the bitset of all ternary pointwise modes
-inline const auto& getTernaryModesBitset()
-{
-    return hipdnn_data_sdk::utilities::getTernaryModesBitset();
+    return mode == PointwiseMode::BINARY_SELECT;
 }
 
 } // namespace hipdnn_frontend

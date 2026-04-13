@@ -20,6 +20,7 @@
 #include <hipdnn_plugin_sdk/EnginePluginApi.h>
 #include <hipdnn_plugin_sdk/PluginApi.h>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
+#include <hipdnn_test_sdk/utilities/SdkFrontendTypeConversions.hpp>
 
 #include <chrono>
 #include <condition_variable>
@@ -55,7 +56,7 @@ void testLoggingCallback(hipdnnSeverity_t severity, const char *msg) {
 }
 
 // Build matmul + pointwise graph using frontend API.
-flatbuffers::DetachedBuffer
+std::vector<uint8_t>
 buildMatmulActivGraph(const std::vector<int64_t> &aDims,
                       const std::vector<int64_t> &bDims,
                       const std::vector<int64_t> &cDims,
@@ -106,7 +107,12 @@ buildMatmulActivGraph(const std::vector<int64_t> &aDims,
                              result.get_message());
   }
 
-  return graph.buildFlatbufferOperationGraph();
+  auto [serializedGraph, serErr] = graph.to_binary();
+  if (serErr.is_bad()) {
+    throw std::runtime_error("Graph serialization failed: " +
+                             serErr.get_message());
+  }
+  return serializedGraph;
 }
 
 TEST(TestFusilliPluginApi, Logging) {
@@ -430,19 +436,19 @@ TEST(TestFusilliPluginApi, GetApplicableEngineIdsMatmulPointwise) {
                     hipdnn_frontend::PointwiseMode::SIGMOID_FWD,
                     hipdnn_frontend::PointwiseMode::TANH_FWD,
                     hipdnn_frontend::PointwiseMode::GELU_FWD}) {
-    auto flatbufferGraph = buildMatmulActivGraph(
+    auto serializedGraph = buildMatmulActivGraph(
         /*aDims=*/{4, 8}, /*bDims=*/{8, 5}, /*cDims=*/{4, 5}, mode);
 
     hipdnnPluginConstData_t opGraph;
-    opGraph.ptr = flatbufferGraph.data();
-    opGraph.size = flatbufferGraph.size();
+    opGraph.ptr = serializedGraph.data();
+    opGraph.size = serializedGraph.size();
 
     ASSERT_EQ(hipdnnEnginePluginGetApplicableEngineIds(
                   handle, &opGraph, engineIDs.data(), 5, &numEngines),
               HIPDNN_PLUGIN_STATUS_SUCCESS);
 
     // Graph supported if pointwise mode translates to fusilli.
-    auto sdkMode = hipdnn_frontend::toSdkType(mode);
+    auto sdkMode = hipdnn_test_sdk::utilities::frontendToSdkPointwiseMode(mode);
     bool modeSupported =
         !fusilli::isError(hipDnnPointwiseModeToFusilliMode(sdkMode));
     uint32_t expectedEngines = modeSupported ? 1 : 0;
