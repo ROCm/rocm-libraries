@@ -26,7 +26,7 @@ using BnFwdInfActivTestCase = std::
     tuple<TensorLayout, test_bn_common::BatchnormTestCase, test_activation_common::ActivTestCase>;
 
 template <typename DataType>
-class BatchnormFwdPlusActiv
+class BatchnormFwdInferenceActiv
     : public IntegrationGraphVerificationHarness<DataType, BnFwdInfActivTestCase>
 {
 public:
@@ -144,19 +144,19 @@ protected:
 };
 
 // 1D layout tests (NCL, NLC)
-using IntegrationGpuBatchnormFwdPlusActiv1dFp32 = BatchnormFwdPlusActiv<float>;
-using IntegrationGpuBatchnormFwdPlusActiv1dBfp16 = BatchnormFwdPlusActiv<bfloat16>;
-using IntegrationGpuBatchnormFwdPlusActiv1dFp16 = BatchnormFwdPlusActiv<half>;
+using IntegrationGpuBatchnormFwdInferenceActiv1dFp32 = BatchnormFwdInferenceActiv<float>;
+using IntegrationGpuBatchnormFwdInferenceActiv1dBfp16 = BatchnormFwdInferenceActiv<bfloat16>;
+using IntegrationGpuBatchnormFwdInferenceActiv1dFp16 = BatchnormFwdInferenceActiv<half>;
 
 // 2D layout tests (NCHW, NHWC)
-using IntegrationGpuBatchnormFwdPlusActiv2dFp32 = BatchnormFwdPlusActiv<float>;
-using IntegrationGpuBatchnormFwdPlusActiv2dBfp16 = BatchnormFwdPlusActiv<bfloat16>;
-using IntegrationGpuBatchnormFwdPlusActiv2dFp16 = BatchnormFwdPlusActiv<half>;
+using IntegrationGpuBatchnormFwdInferenceActiv2dFp32 = BatchnormFwdInferenceActiv<float>;
+using IntegrationGpuBatchnormFwdInferenceActiv2dBfp16 = BatchnormFwdInferenceActiv<bfloat16>;
+using IntegrationGpuBatchnormFwdInferenceActiv2dFp16 = BatchnormFwdInferenceActiv<half>;
 
 // 3D layout tests (NCDHW, NDHWC)
-using IntegrationGpuBatchnormFwdPlusActiv3dFp32 = BatchnormFwdPlusActiv<float>;
-using IntegrationGpuBatchnormFwdPlusActiv3dBfp16 = BatchnormFwdPlusActiv<bfloat16>;
-using IntegrationGpuBatchnormFwdPlusActiv3dFp16 = BatchnormFwdPlusActiv<half>;
+using IntegrationGpuBatchnormFwdInferenceActiv3dFp32 = BatchnormFwdInferenceActiv<float>;
+using IntegrationGpuBatchnormFwdInferenceActiv3dBfp16 = BatchnormFwdInferenceActiv<bfloat16>;
+using IntegrationGpuBatchnormFwdInferenceActiv3dFp16 = BatchnormFwdInferenceActiv<half>;
 
 } // namespace
 
@@ -164,62 +164,62 @@ using IntegrationGpuBatchnormFwdPlusActiv3dFp16 = BatchnormFwdPlusActiv<half>;
 // 1D Tests
 // ============================================================================
 
-GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuBatchnormFwdPlusActiv1dFp32);
-TEST_P(IntegrationGpuBatchnormFwdPlusActiv1dFp32, Correctness)
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuBatchnormFwdInferenceActiv1dFp32);
+TEST_P(IntegrationGpuBatchnormFwdInferenceActiv1dFp32, Correctness)
 {
     runGraphTest();
 }
 
 INSTANTIATE_TEST_SUITE_P(
     Smoke,
-    IntegrationGpuBatchnormFwdPlusActiv1dFp32,
+    IntegrationGpuBatchnormFwdInferenceActiv1dFp32,
     testing::Combine(testing::Values(TensorLayout::NCL, TensorLayout::NLC),
                      testing::ValuesIn(getBnFwdInference1dTestCases()),
                      testing::ValuesIn(test_activation_common::createFwdActivationSmokeCases())));
 
 INSTANTIATE_TEST_SUITE_P(
     Full,
-    IntegrationGpuBatchnormFwdPlusActiv1dFp32,
+    IntegrationGpuBatchnormFwdInferenceActiv1dFp32,
     testing::Combine(testing::Values(TensorLayout::NCL, TensorLayout::NLC),
                      testing::ValuesIn(getBnFwdInference1dFullTestCases()),
                      testing::ValuesIn(test_activation_common::createFwdActivationFullCases())));
 
-GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuBatchnormFwdPlusActiv1dBfp16);
-TEST_P(IntegrationGpuBatchnormFwdPlusActiv1dBfp16, Correctness)
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuBatchnormFwdInferenceActiv1dBfp16);
+TEST_P(IntegrationGpuBatchnormFwdInferenceActiv1dBfp16, Correctness)
 {
     runGraphTest();
 }
 
 INSTANTIATE_TEST_SUITE_P(
     Smoke,
-    IntegrationGpuBatchnormFwdPlusActiv1dBfp16,
+    IntegrationGpuBatchnormFwdInferenceActiv1dBfp16,
     testing::Combine(testing::Values(TensorLayout::NCL, TensorLayout::NLC),
                      testing::ValuesIn(getBnFwdInference1dTestCases()),
                      testing::ValuesIn(test_activation_common::createFwdActivationSmokeCases())));
 
 INSTANTIATE_TEST_SUITE_P(
     Full,
-    IntegrationGpuBatchnormFwdPlusActiv1dBfp16,
+    IntegrationGpuBatchnormFwdInferenceActiv1dBfp16,
     testing::Combine(testing::Values(TensorLayout::NCL, TensorLayout::NLC),
                      testing::ValuesIn(getBnFwdInference1dFullTestCases()),
                      testing::ValuesIn(test_activation_common::createFwdActivationFullCases())));
 
-GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuBatchnormFwdPlusActiv1dFp16);
-TEST_P(IntegrationGpuBatchnormFwdPlusActiv1dFp16, Correctness)
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuBatchnormFwdInferenceActiv1dFp16);
+TEST_P(IntegrationGpuBatchnormFwdInferenceActiv1dFp16, Correctness)
 {
     runGraphTest();
 }
 
 INSTANTIATE_TEST_SUITE_P(
     Smoke,
-    IntegrationGpuBatchnormFwdPlusActiv1dFp16,
+    IntegrationGpuBatchnormFwdInferenceActiv1dFp16,
     testing::Combine(testing::Values(TensorLayout::NCL, TensorLayout::NLC),
                      testing::ValuesIn(getBnFwdInference1dTestCases()),
                      testing::ValuesIn(test_activation_common::createFwdActivationSmokeCases())));
 
 INSTANTIATE_TEST_SUITE_P(
     Full,
-    IntegrationGpuBatchnormFwdPlusActiv1dFp16,
+    IntegrationGpuBatchnormFwdInferenceActiv1dFp16,
     testing::Combine(testing::Values(TensorLayout::NCL, TensorLayout::NLC),
                      testing::ValuesIn(getBnFwdInference1dFullTestCases()),
                      testing::ValuesIn(test_activation_common::createFwdActivationFullCases())));
@@ -228,62 +228,62 @@ INSTANTIATE_TEST_SUITE_P(
 // 2D Tests
 // ============================================================================
 
-GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuBatchnormFwdPlusActiv2dFp32);
-TEST_P(IntegrationGpuBatchnormFwdPlusActiv2dFp32, Correctness)
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuBatchnormFwdInferenceActiv2dFp32);
+TEST_P(IntegrationGpuBatchnormFwdInferenceActiv2dFp32, Correctness)
 {
     runGraphTest();
 }
 
 INSTANTIATE_TEST_SUITE_P(
     Smoke,
-    IntegrationGpuBatchnormFwdPlusActiv2dFp32,
+    IntegrationGpuBatchnormFwdInferenceActiv2dFp32,
     testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
                      testing::ValuesIn(getBnFwdInferenceTestCases()),
                      testing::ValuesIn(test_activation_common::createFwdActivationSmokeCases())));
 
 INSTANTIATE_TEST_SUITE_P(
     Full,
-    IntegrationGpuBatchnormFwdPlusActiv2dFp32,
+    IntegrationGpuBatchnormFwdInferenceActiv2dFp32,
     testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
                      testing::ValuesIn(getBnFwdInferenceFullTestCases()),
                      testing::ValuesIn(test_activation_common::createFwdActivationFullCases())));
 
-GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuBatchnormFwdPlusActiv2dBfp16);
-TEST_P(IntegrationGpuBatchnormFwdPlusActiv2dBfp16, Correctness)
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuBatchnormFwdInferenceActiv2dBfp16);
+TEST_P(IntegrationGpuBatchnormFwdInferenceActiv2dBfp16, Correctness)
 {
     runGraphTest();
 }
 
 INSTANTIATE_TEST_SUITE_P(
     Smoke,
-    IntegrationGpuBatchnormFwdPlusActiv2dBfp16,
+    IntegrationGpuBatchnormFwdInferenceActiv2dBfp16,
     testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
                      testing::ValuesIn(getBnFwdInferenceTestCases()),
                      testing::ValuesIn(test_activation_common::createFwdActivationSmokeCases())));
 
 INSTANTIATE_TEST_SUITE_P(
     Full,
-    IntegrationGpuBatchnormFwdPlusActiv2dBfp16,
+    IntegrationGpuBatchnormFwdInferenceActiv2dBfp16,
     testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
                      testing::ValuesIn(getBnFwdInferenceFullTestCases()),
                      testing::ValuesIn(test_activation_common::createFwdActivationFullCases())));
 
-GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuBatchnormFwdPlusActiv2dFp16);
-TEST_P(IntegrationGpuBatchnormFwdPlusActiv2dFp16, Correctness)
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuBatchnormFwdInferenceActiv2dFp16);
+TEST_P(IntegrationGpuBatchnormFwdInferenceActiv2dFp16, Correctness)
 {
     runGraphTest();
 }
 
 INSTANTIATE_TEST_SUITE_P(
     Smoke,
-    IntegrationGpuBatchnormFwdPlusActiv2dFp16,
+    IntegrationGpuBatchnormFwdInferenceActiv2dFp16,
     testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
                      testing::ValuesIn(getBnFwdInferenceTestCases()),
                      testing::ValuesIn(test_activation_common::createFwdActivationSmokeCases())));
 
 INSTANTIATE_TEST_SUITE_P(
     Full,
-    IntegrationGpuBatchnormFwdPlusActiv2dFp16,
+    IntegrationGpuBatchnormFwdInferenceActiv2dFp16,
     testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
                      testing::ValuesIn(getBnFwdInferenceFullTestCases()),
                      testing::ValuesIn(test_activation_common::createFwdActivationFullCases())));
@@ -292,41 +292,41 @@ INSTANTIATE_TEST_SUITE_P(
 // 3D Tests (Smoke only)
 // ============================================================================
 
-GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuBatchnormFwdPlusActiv3dFp32);
-TEST_P(IntegrationGpuBatchnormFwdPlusActiv3dFp32, Correctness)
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuBatchnormFwdInferenceActiv3dFp32);
+TEST_P(IntegrationGpuBatchnormFwdInferenceActiv3dFp32, Correctness)
 {
     runGraphTest();
 }
 
 INSTANTIATE_TEST_SUITE_P(
     Smoke,
-    IntegrationGpuBatchnormFwdPlusActiv3dFp32,
+    IntegrationGpuBatchnormFwdInferenceActiv3dFp32,
     testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
                      testing::ValuesIn(getBnFwdInference3dTestCases()),
                      testing::ValuesIn(test_activation_common::createFwdActivationSmokeCases())));
 
-GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuBatchnormFwdPlusActiv3dBfp16);
-TEST_P(IntegrationGpuBatchnormFwdPlusActiv3dBfp16, Correctness)
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuBatchnormFwdInferenceActiv3dBfp16);
+TEST_P(IntegrationGpuBatchnormFwdInferenceActiv3dBfp16, Correctness)
 {
     runGraphTest();
 }
 
 INSTANTIATE_TEST_SUITE_P(
     Smoke,
-    IntegrationGpuBatchnormFwdPlusActiv3dBfp16,
+    IntegrationGpuBatchnormFwdInferenceActiv3dBfp16,
     testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
                      testing::ValuesIn(getBnFwdInference3dTestCases()),
                      testing::ValuesIn(test_activation_common::createFwdActivationSmokeCases())));
 
-GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuBatchnormFwdPlusActiv3dFp16);
-TEST_P(IntegrationGpuBatchnormFwdPlusActiv3dFp16, Correctness)
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuBatchnormFwdInferenceActiv3dFp16);
+TEST_P(IntegrationGpuBatchnormFwdInferenceActiv3dFp16, Correctness)
 {
     runGraphTest();
 }
 
 INSTANTIATE_TEST_SUITE_P(
     Smoke,
-    IntegrationGpuBatchnormFwdPlusActiv3dFp16,
+    IntegrationGpuBatchnormFwdInferenceActiv3dFp16,
     testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
                      testing::ValuesIn(getBnFwdInference3dTestCases()),
                      testing::ValuesIn(test_activation_common::createFwdActivationSmokeCases())));
