@@ -124,23 +124,32 @@ namespace rocRoller
         };
 
         /**
-         * ConditionalOp - Represents a conditional.
+         * ConditionalOp - Represents a conditional with one of three execution modes.
          *
-         * Must have nodes connected via the following outgoing edges:
+         * Outgoing edges:
+         *   - Body     : true branch (required)
+         *   - Else     : false branch (optional)
+         *   - Sequence : code that runs after both branches, regardless of the condition
          *
-         * - True  body:
-         * - False body:
+         * The `mode` field selects how the conditional is lowered:
          *
-         * Code that follows the Conditional Op regardless of the validity of the condition should be connected via a Sequence edge.
+         * OpMode::Branch
+         *   Scalar branch-based conditional. Suitable for uniform conditions where all
+         *   lanes take the same path.
+         *   if (condition) { <Body> } else { <Else> }
          *
-         * Currently generates code that behaves like:
+         * OpMode::Exec
+         *   Exec-mask-based conditional for per-lane (VGPR) conditions. Both the true
+         *   and else sections are always executed: only active lanes satisfying the
+         *   condition execute <Body>, and only active lanes not satisfying the condition
+         *   execute <Else>. EXEC is restored afterward.
          *
-         * if(condition)
-         * <True Body>
-         * else
-         * <False Body>
-         * <Sequence>
-         *
+         * OpMode::BranchAndExec
+         *   Like Exec (including EXEC restore), but checks EXECZ after masking: if no
+         *   active lanes satisfy the condition (EXECZ is set), the true body is skipped
+         *   and execution jumps to the else section (where EXECZ is checked again upon
+         *   masking with ~condition). If some active lanes satisfy the condition, the
+         *   true body executes for those lanes and the else body is skipped for all lanes.
         */
         struct ConditionalOp
         {
