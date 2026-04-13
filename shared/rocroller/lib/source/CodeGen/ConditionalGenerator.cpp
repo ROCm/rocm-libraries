@@ -62,14 +62,12 @@ namespace rocRoller
                                     "REMOVEME: Wait before branching into conditional label!"));
             }
             // -------------------------------------------------------------------------------
+
             co_yield m_context->brancher()->branchIfZero(
                 falseLabel,
                 conditionResult,
                 concatenate("Condition: False, jump to ", falseLabel->toString()));
             co_yield trueBodyFn();
-            co_yield m_context->brancher()->branch(
-                botLabel, concatenate("Condition: Done, jump to ", botLabel->toString()));
-
             // -------------------------------------------------------------------------------
             // TODO: remove this once we better handle data-flow across branches
             {
@@ -77,19 +75,22 @@ namespace rocRoller
                     m_context->targetArchitecture(), "REMOVEME: Wait before conditional label!"));
             }
             // -------------------------------------------------------------------------------
+            co_yield m_context->brancher()->branch(
+                botLabel, concatenate("Condition: Done, jump to ", botLabel->toString()));
+
             co_yield Instruction::Label(falseLabel);
             if(elseBodyFn)
             {
                 co_yield elseBodyFn();
+                // -------------------------------------------------------------------------------
+                // TODO: remove this once we better handle data-flow across branches
+                {
+                    co_yield Instruction::Wait(
+                        WaitCount::Zero(m_context->targetArchitecture(),
+                                        "REMOVEME: Wait before conditional label!"));
+                }
+                // -------------------------------------------------------------------------------
             }
-
-            // -------------------------------------------------------------------------------
-            // TODO: remove this once we better handle data-flow across branches
-            {
-                co_yield Instruction::Wait(WaitCount::Zero(
-                    m_context->targetArchitecture(), "REMOVEME: Wait before conditional label!"));
-            }
-            // -------------------------------------------------------------------------------
             co_yield Instruction::Label(botLabel);
             co_yield Instruction::Unlock("Unlock Conditional");
         }
