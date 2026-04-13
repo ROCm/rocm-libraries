@@ -18436,6 +18436,90 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zhegst_strided_batched(rocblas_handle 
 //! @}
 
 /*! @{
+    \brief The GEHD2 functions compute the upper Hessenberg form of a general square matrix ``A``.
+
+    \details
+    (This is the unblocked version of the algorithm.)
+
+    The Hessenberg form is given by:
+
+    \f[
+        B = Q'  A  Q
+    \f]
+
+    Q is represented as the product of (ihi-ilo) Householder matrices
+
+    \f[
+        Q = H(ilo)H(ilo+1)\cdots H(ihi-1)
+    \f]
+
+    Each Householder matrix \f$H(i)\f$ is given by
+
+    \f[
+        H(i) = I - \text{ipiv}[i] \cdot v_i^{} v_i'
+    \f]
+
+    where the first i elements of the Householder vector \f$v_i\f$ are zero, and \f$v_i[i+1] = 1\f$.
+
+    @param[in]
+    handle      rocblas_handle.
+    @param[in]
+    n           rocblas_int. n >= 0.
+                The number of rows and columns of the matrix A.
+    @param[in]
+    ilo         rocblas_int. 1 <= ilo <= ihi.
+                The starting 1-based index of the row and column to be reduced.
+    @param[in]
+    ihi         rocblas_int. ilo <= ihi <= n.
+                The ending 1-based index of the row and column to be reduced.
+    @param[inout]
+    A           pointer to type. Array on the GPU of dimension lda*n.
+                On entry, the n-by-n matrix to be reduced.
+                On exit, the elements on and above the first subdiagonal contain the
+                Hessenberg form H, and the elements below the first subdiagonal are the last ihi - i - 1 elements
+                of Householder vector v_i.
+    @param[in]
+    lda         rocblas_int. lda >= m.
+                Specifies the leading dimension of A.
+    @param[out]
+    ipiv        pointer to type. Array on the GPU of dimension n-1.
+                The Householder scalars.
+    ********************************************************************/
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_sgehd2(rocblas_handle handle,
+                                                 const rocblas_int n,
+                                                 const rocblas_int ilo,
+                                                 const rocblas_int ihi,
+                                                 float* A,
+                                                 const rocblas_int lda,
+                                                 float* ipiv);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_dgehd2(rocblas_handle handle,
+                                                 const rocblas_int n,
+                                                 const rocblas_int ilo,
+                                                 const rocblas_int ihi,
+                                                 double* A,
+                                                 const rocblas_int lda,
+                                                 double* ipiv);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_cgehd2(rocblas_handle handle,
+                                                 const rocblas_int n,
+                                                 const rocblas_int ilo,
+                                                 const rocblas_int ihi,
+                                                 rocblas_float_complex* A,
+                                                 const rocblas_int lda,
+                                                 rocblas_float_complex* ipiv);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_zgehd2(rocblas_handle handle,
+                                                 const rocblas_int n,
+                                                 const rocblas_int ilo,
+                                                 const rocblas_int ihi,
+                                                 rocblas_double_complex* A,
+                                                 const rocblas_int lda,
+                                                 rocblas_double_complex* ipiv);
+//! @}
+
+/*! @{
     \brief The SYEV functions compute the eigenvalues and optionally the eigenvectors of a real symmetric
     matrix ``A``.
 

@@ -131,6 +131,7 @@ if(BUILD_CLIENTS_BENCHMARKS OR BUILD_CLIENTS_TESTS)
     common/lapack/testing_getri_npvt_outofplace.cpp
     common/lapack/testing_gels.cpp
     common/lapack/testing_gebd2_gebrd.cpp
+    common/lapack/testing_gehd2_gehrd.cpp
     common/lapack/testing_sytf2_sytrf.cpp
     common/lapack/testing_sytrs.cpp
     common/lapack/testing_sytrs2.cpp

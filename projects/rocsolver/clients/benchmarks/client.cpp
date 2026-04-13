@@ -596,6 +596,19 @@ try
             "                           Same value is used for all matrices in batched cases.\n"
             "                           ")
 
+        // Hessenberg decomposition options
+        ("ilo",
+         value<rocblas_int>(),
+            "Lower index of rows and columns to be reduced.\n"
+            "                           Used in Hessenberg decomposition functions.\n"
+            "                           ")
+
+        ("ihi",
+         value<rocblas_int>(),
+            "Upper index of rows and columns to be reduced.\n"
+            "                           Used in Hessenberg decomposition functions.\n"
+            "                           ")
+
         // other options
         ("abstol",
          value<double>()->default_value(0),

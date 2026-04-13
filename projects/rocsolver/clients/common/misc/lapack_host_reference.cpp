@@ -1826,6 +1826,54 @@ void zgebrd_(int* m,
              int* size_w,
              int* info);
 
+void sgehd2_(int* n, int* ilo, int* ihi, float* A, int* lda, float* ipiv, float* work, int* info);
+void dgehd2_(int* n, int* ilo, int* ihi, double* A, int* lda, double* ipiv, double* work, int* info);
+void cgehd2_(int* n,
+             int* ilo,
+             int* ihi,
+             rocblas_float_complex* A,
+             int* lda,
+             rocblas_float_complex* ipiv,
+             rocblas_float_complex* work,
+             int* info);
+void zgehd2_(int* n,
+             int* ilo,
+             int* ihi,
+             rocblas_double_complex* A,
+             int* lda,
+             rocblas_double_complex* ipiv,
+             rocblas_double_complex* work,
+             int* info);
+
+void sgehrd_(int* n, int* ilo, int* ihi, float* A, int* lda, float* ipiv, float* work, int* info, int* lwork);
+void dgehrd_(int* n,
+             int* ilo,
+             int* ihi,
+             double* A,
+             int* lda,
+             double* ipiv,
+             double* work,
+             int* info,
+             int* lwork);
+void cgehrd_(int* n,
+             int* ilo,
+             int* ihi,
+             rocblas_float_complex* A,
+             int* lda,
+             rocblas_float_complex* ipiv,
+             rocblas_float_complex* work,
+             int* info,
+             int* lwork);
+void zgehrd_(int* n,
+             int* ilo,
+             int* ihi,
+             rocblas_double_complex* A,
+             int* lda,
+             rocblas_double_complex* ipiv,
+             rocblas_double_complex* work,
+             int* info,
+             int* lwork);
+
 void ssytrd_(char* uplo,
              int* n,
              float* A,
@@ -6927,6 +6975,116 @@ void cpu_gebrd<rocblas_double_complex, double>(rocblas_int m,
 {
     int info;
     zgebrd_(&m, &n, A, &lda, D, E, tauq, taup, work, &size_w, &info);
+}
+
+// gehd2
+template <>
+void cpu_gehd2<float>(rocblas_int n,
+                      rocblas_int ilo,
+                      rocblas_int ihi,
+                      float* A,
+                      rocblas_int lda,
+                      float* ipiv,
+                      float* work)
+{
+    int info;
+    sgehd2_(&n, &ilo, &ihi, A, &lda, ipiv, work, &info);
+}
+
+template <>
+void cpu_gehd2<double>(rocblas_int n,
+                       rocblas_int ilo,
+                       rocblas_int ihi,
+                       double* A,
+                       rocblas_int lda,
+                       double* ipiv,
+                       double* work)
+{
+    int info;
+    dgehd2_(&n, &ilo, &ihi, A, &lda, ipiv, work, &info);
+}
+
+template <>
+void cpu_gehd2<rocsolver_float_complex>(rocblas_int n,
+                                        rocblas_int ilo,
+                                        rocblas_int ihi,
+                                        rocsolver_float_complex* A,
+                                        rocblas_int lda,
+                                        rocsolver_float_complex* ipiv,
+                                        rocsolver_float_complex* work)
+{
+    int info;
+    cgehd2_(&n, &ilo, &ihi, A, &lda, ipiv, work, &info);
+}
+
+template <>
+void cpu_gehd2<rocsolver_double_complex>(rocblas_int n,
+                                         rocblas_int ilo,
+                                         rocblas_int ihi,
+                                         rocsolver_double_complex* A,
+                                         rocblas_int lda,
+                                         rocsolver_double_complex* ipiv,
+                                         rocsolver_double_complex* work)
+{
+    int info;
+    zgehd2_(&n, &ilo, &ihi, A, &lda, ipiv, work, &info);
+}
+
+// gehrd
+template <>
+void cpu_gehrd<float>(rocblas_int n,
+                      rocblas_int ilo,
+                      rocblas_int ihi,
+                      float* A,
+                      rocblas_int lda,
+                      float* ipiv,
+                      float* work,
+                      int lwork)
+{
+    int info;
+    sgehrd_(&n, &ilo, &ihi, A, &lda, ipiv, work, &info, &lwork);
+}
+
+template <>
+void cpu_gehrd<double>(rocblas_int n,
+                       rocblas_int ilo,
+                       rocblas_int ihi,
+                       double* A,
+                       rocblas_int lda,
+                       double* ipiv,
+                       double* work,
+                       int lwork)
+{
+    int info;
+    dgehrd_(&n, &ilo, &ihi, A, &lda, ipiv, work, &info, &lwork);
+}
+
+template <>
+void cpu_gehrd<rocblas_float_complex>(rocblas_int n,
+                                      rocblas_int ilo,
+                                      rocblas_int ihi,
+                                      rocblas_float_complex* A,
+                                      rocblas_int lda,
+                                      rocblas_float_complex* ipiv,
+                                      rocblas_float_complex* work,
+                                      int lwork)
+{
+    int info;
+    cgehrd_(&n, &ilo, &ihi, A, &lda, ipiv, work, &info, &lwork);
+}
+
+template <>
+void cpu_gehrd<rocblas_double_complex>(rocblas_int n,
+                                       rocblas_int ilo,
+                                       rocblas_int ihi,
+                                       rocblas_double_complex* A,
+                                       rocblas_int lda,
+                                       rocblas_double_complex* ipiv,
+                                       rocblas_double_complex* work,
+                                       int lwork)
+{
+    int info;
+    zgehrd_(&n, &ilo, &ihi, A, &lda, ipiv, work, &info, &lwork);
 }
 
 // sytrd & hetrd

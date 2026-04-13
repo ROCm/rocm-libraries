@@ -73,6 +73,7 @@
 #include "common/lapack/testing_gebd2_gebrd.hpp"
 #include "common/lapack/testing_geblttrf_npvt.hpp"
 #include "common/lapack/testing_geblttrs_npvt.hpp"
+#include "common/lapack/testing_gehd2_gehrd.hpp"
 #include "common/lapack/testing_gelq2_gelqf.hpp"
 #include "common/lapack/testing_gels.hpp"
 #include "common/lapack/testing_geql2_geqlf.hpp"
@@ -339,6 +340,13 @@ class rocsolver_dispatcher
             {"gebrd", testing_gebd2_gebrd<false, false, 1, T>},
             {"gebrd_batched", testing_gebd2_gebrd<true, true, 1, T>},
             {"gebrd_strided_batched", testing_gebd2_gebrd<false, true, 1, T>},
+            // gehrd
+            {"gehd2", testing_gehd2_gehrd<false, false, 0, T>},
+            {"gehd2_batched", testing_gehd2_gehrd<true, true, 0, T>},
+            {"gehd2_strided_batched", testing_gehd2_gehrd<false, true, 0, T>},
+            {"gehrd", testing_gehd2_gehrd<false, false, 1, T>},
+            {"gehrd_batched", testing_gehd2_gehrd<true, true, 1, T>},
+            {"gehrd_strided_batched", testing_gehd2_gehrd<false, true, 1, T>},
             // sytrf
             {"sytf2", testing_sytf2_sytrf<false, false, 0, T>},
             {"sytf2_batched", testing_sytf2_sytrf<true, true, 0, T>},

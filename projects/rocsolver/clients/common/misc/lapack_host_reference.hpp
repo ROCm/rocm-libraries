@@ -629,6 +629,19 @@ void cpu_gebrd(rocblas_int m,
                T* work,
                rocblas_int size_w);
 
+template <typename T>
+void cpu_gehd2(rocblas_int n, rocblas_int ilo, rocblas_int ihi, T* A, rocblas_int lda, T* ipiv, T* work);
+
+template <typename T>
+void cpu_gehrd(rocblas_int n,
+               rocblas_int ilo,
+               rocblas_int ihi,
+               T* A,
+               rocblas_int lda,
+               T* ipiv,
+               T* work,
+               rocblas_int lwork);
+
 template <typename T, typename S>
 void cpu_sytrd_hetrd(rocblas_fill uplo,
                      rocblas_int n,

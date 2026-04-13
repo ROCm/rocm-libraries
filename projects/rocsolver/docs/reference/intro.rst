@@ -145,6 +145,7 @@ LAPACK main functions
     :ref:`rocsolver_hegst <hegst>`, , , x, x
     :ref:`rocsolver_gebd2 <gebd2>`, x, x, x, x
     :ref:`rocsolver_gebrd <gebrd>`, x, x, x, x
+    :ref:`rocsolver_gebrd <gehd2>`, x, x, x, x
 
 .. csv-table:: Linear-systems solvers
     :header: "Function", "single", "double", "single complex", "double complex"

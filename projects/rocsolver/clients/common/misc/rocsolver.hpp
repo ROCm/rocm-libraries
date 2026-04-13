@@ -1311,6 +1311,89 @@ rocblas_status rocsolver_zsytrs2_batched_64(rocblas_handle handle,
 #endif
 /***************************************************/
 
+/******************** GEHD2 ********************/
+// normal and strided_batched
+inline rocblas_status rocsolver_gehd2_gehrd(bool STRIDED,
+                                            bool GEHRD,
+                                            rocblas_handle handle,
+                                            rocblas_int n,
+                                            rocblas_int ilo,
+                                            rocblas_int ihi,
+                                            float* A,
+                                            rocblas_int lda,
+                                            rocblas_stride stA,
+                                            float* ipiv,
+                                            rocblas_stride stP,
+                                            rocblas_int bc)
+{
+    if(STRIDED)
+        return GEHRD ? rocblas_status_not_implemented : rocblas_status_not_implemented;
+    else
+        return GEHRD ? rocblas_status_not_implemented
+                     : rocsolver_sgehd2(handle, n, ilo, ihi, A, lda, ipiv);
+}
+
+inline rocblas_status rocsolver_gehd2_gehrd(bool STRIDED,
+                                            bool GEHRD,
+                                            rocblas_handle handle,
+                                            rocblas_int n,
+                                            rocblas_int ilo,
+                                            rocblas_int ihi,
+                                            double* A,
+                                            rocblas_int lda,
+                                            rocblas_stride stA,
+                                            double* ipiv,
+                                            rocblas_stride stP,
+                                            rocblas_int bc)
+{
+    if(STRIDED)
+        return GEHRD ? rocblas_status_not_implemented : rocblas_status_not_implemented;
+    else
+        return GEHRD ? rocblas_status_not_implemented
+                     : rocsolver_dgehd2(handle, n, ilo, ihi, A, lda, ipiv);
+}
+
+inline rocblas_status rocsolver_gehd2_gehrd(bool STRIDED,
+                                            bool GEHRD,
+                                            rocblas_handle handle,
+                                            rocblas_int n,
+                                            rocblas_int ilo,
+                                            rocblas_int ihi,
+                                            rocblas_float_complex* A,
+                                            rocblas_int lda,
+                                            rocblas_stride stA,
+                                            rocblas_float_complex* ipiv,
+                                            rocblas_stride stP,
+                                            rocblas_int bc)
+{
+    if(STRIDED)
+        return GEHRD ? rocblas_status_not_implemented : rocblas_status_not_implemented;
+    else
+        return GEHRD ? rocblas_status_not_implemented
+                     : rocsolver_cgehd2(handle, n, ilo, ihi, A, lda, ipiv);
+}
+
+inline rocblas_status rocsolver_gehd2_gehrd(bool STRIDED,
+                                            bool GEHRD,
+                                            rocblas_handle handle,
+                                            rocblas_int n,
+                                            rocblas_int ilo,
+                                            rocblas_int ihi,
+                                            rocblas_double_complex* A,
+                                            rocblas_int lda,
+                                            rocblas_stride stA,
+                                            rocblas_double_complex* ipiv,
+                                            rocblas_stride stP,
+                                            rocblas_int bc)
+{
+    if(STRIDED)
+        return GEHRD ? rocblas_status_not_implemented : rocblas_status_not_implemented;
+    else
+        return GEHRD ? rocblas_status_not_implemented
+                     : rocsolver_zgehd2(handle, n, ilo, ihi, A, lda, ipiv);
+}
+/*****************************************************/
+
 /******************** GEMM ********************/
 // normal and strided_batched
 inline rocblas_status rocsolver_gemm(bool STRIDED,
