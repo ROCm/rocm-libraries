@@ -4575,6 +4575,15 @@ std::string getSolutionNameFromData(rocblaslt_handle             handle,
 
 std::string getKernelNameFromAlgoIndex(rocblaslt_handle handle, const rocblaslt_matmul_algo& algo)
 {
+    int* solutionIndex = (int*)algo.data;
+
+#ifdef HIPBLASLT_USE_ROCROLLER
+    if(*solutionIndex < 0)
+    {
+        return rocRollerShortKernelNameFromEncodedSolutionIndex(*solutionIndex);
+    }
+#endif
+
     std::shared_ptr<TensileLite::MasterSolutionLibrary<TensileLite::ContractionProblemGemm>>
                                      library;
     std::shared_ptr<hipDeviceProp_t> deviceProp;
@@ -4588,13 +4597,21 @@ std::string getKernelNameFromAlgoIndex(rocblaslt_handle handle, const rocblaslt_
         return std::string();
     }
 
-    int* solutionIndex = (int*)algo.data;
-    auto solution      = library->getSolutionByIndex(*hardware, *solutionIndex);
+    auto solution = library->getSolutionByIndex(*hardware, *solutionIndex);
     return solution->kernelName;
 }
 
 std::string getSolutionNameFromAlgoIndex(rocblaslt_handle handle, const rocblaslt_matmul_algo& algo)
 {
+    int* solutionIndex = (int*)algo.data;
+ 
+#ifdef HIPBLASLT_USE_ROCROLLER
+    if(*solutionIndex < 0)
+    {
+        return rocRollerShortKernelNameFromEncodedSolutionIndex(*solutionIndex);
+    }
+#endif
+
     std::shared_ptr<TensileLite::MasterSolutionLibrary<TensileLite::ContractionProblemGemm>>
                                      library;
     std::shared_ptr<hipDeviceProp_t> deviceProp;
@@ -4608,8 +4625,7 @@ std::string getSolutionNameFromAlgoIndex(rocblaslt_handle handle, const rocblasl
         return std::string();
     }
 
-    int* solutionIndex = (int*)algo.data;
-    auto solution      = library->getSolutionByIndex(*hardware, *solutionIndex);
+    auto solution = library->getSolutionByIndex(*hardware, *solutionIndex);
     return solution->solutionName;
 }
 

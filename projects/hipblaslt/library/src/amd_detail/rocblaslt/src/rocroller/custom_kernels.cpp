@@ -345,7 +345,7 @@ void preloadCustomKernels(SolutionCache& cache)
                     params.workgroupTile,
                     getCoPath() / "rr_custom_kernels.co"));            
 
-            params.workgroupTile    = {128, 256, 256};
+            /*params.workgroupTile    = {128, 256, 256};
             cache.addKernel(
                 mxfp4Kernel,
                 params,
@@ -353,7 +353,7 @@ void preloadCustomKernels(SolutionCache& cache)
                     getKernelName("f4gemm_bf16_per1x32Fp4_BpreShuffle_128x256", nonTemporalA, nonTemporalB),
                     mxfp4Kernel,
                     params.workgroupTile,
-                    getCoPath() / "rr_custom_kernels.co"));
+                    getCoPath() / "rr_custom_kernels.co"));*/
 
             params.workgroupTile    = {128, 384, 256};
             cache.addKernel(
@@ -726,7 +726,15 @@ size_t AssemblyStoreRowOrderGemm::workspaceRequired(const RocblasltContractionPr
 bool AssemblyStoreRowOrderGemm::isSupportedProblem(const RocblasltContractionProblem& prob)
 {
     const auto& wgt = params->workgroupTile;
-    return (prob.m % wgt.m == 0 && prob.n % wgt.n == 0 && prob.k % wgt.k == 0);
+
+    if ((wgt.m == 192 && wgt.n == 256) || (wgt.m == 224 && wgt.n == 256) || (wgt.m == 128 && wgt.n == 512))
+    {
+        return (prob.m % wgt.m == 0 && prob.n % wgt.n == 0 && prob.k % wgt.k == 0);
+    }
+    else
+    {
+        return (prob.m % 32 == 0 && prob.n % 32 == 0 && prob.k % wgt.k == 0);
+    }
 }
 
 rocblaslt_status AssemblyStoreRowOrderGemm::run(const RocblasltContractionProblem& prob)
