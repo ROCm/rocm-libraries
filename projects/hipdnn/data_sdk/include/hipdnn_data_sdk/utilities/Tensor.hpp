@@ -698,6 +698,13 @@ private:
 template <typename T>
 using PinnedTensor = Tensor<T, PinnedHostAllocator<T>>;
 
+template <typename T>
+inline std::unique_ptr<ITensor> createTensor(const std::vector<int64_t>& dims,
+                                             const std::vector<int64_t>& strides)
+{
+    return std::make_unique<Tensor<T>>(dims, strides);
+}
+
 inline std::unique_ptr<utilities::ITensor> createTensor(data_objects::DataType dataType,
                                                         const std::vector<int64_t>& dims,
                                                         const std::vector<int64_t>& strides)
