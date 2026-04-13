@@ -33,6 +33,14 @@
     "channels_per_group",
     "aspect_ratio_hw",
     "aspect_ratio_filter",
+    "log2_channels_per_group",
+    "log2_output_channels_per_group",
+    "is_depthwise",
+    "group_density",
+    "is_small_group",
+    "channels_product_per_group",
+    "batch_group_product",
+    "is_small_batch_grouped",
     "block_size",
     "gemm_m_per_block",
     "gemm_n_per_block",
@@ -78,33 +86,5 @@
     "hw_l2_cache_kb",
     "hw_l3_cache_kb",
     "hw_num_xcd"
-  ],
-  "categorical_features": [
-    "pipeline"
-  ],
-  "targets": [
-    "tflops"
-  ],
-  "log_targets": [
-    "tflops"
-  ],
-  "params": {
-    "objective": "regression",
-    "metric": [
-      "rmse",
-      "mae"
-    ],
-    "num_leaves": 255,
-    "max_depth": 15,
-    "n_estimators": 2000,
-    "learning_rate": 0.02,
-    "min_child_samples": 10,
-    "subsample": 0.85,
-    "colsample_bytree": 0.85,
-    "reg_alpha": 0.05,
-    "reg_lambda": 0.5,
-    "verbose": -1,
-    "n_jobs": 8,
-    "seed": 42
-  }
+  ]
 }

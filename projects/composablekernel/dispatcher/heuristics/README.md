@@ -285,23 +285,23 @@ ML-based kernel selection for grouped convolution operations (forward, bwd_data,
   - P10 Efficiency: **87.2%**
   - R²: **0.9559**
 
-#### BWD_DATA Model
-- **Training Data**: 14,562 measurements across 701 unique problem shapes
-- **Validation**: 10 unseen problems
-- **Performance**:
-  - Mean Efficiency: **100.0%**
-  - P10 Efficiency: **99.9%**
-  - P50 Efficiency: **100.0%**
-  - Cross-validation R²: **0.9924**
+#### Backward Data Gradient (bwd_data) Model
+- **Training Data**: 18,773 measurements across 891 unique problem shapes
+- **Validation Set**: 300 unseen problems from model crawler
+- **Validation Performance** (vs. oracle):
+  - Mean Efficiency: **93.8%**
+  - Median Efficiency: **96.5%**
+  - P10 Efficiency: **82.9%**
+  - Top-1 Accuracy: **25.2%** (37/147 problems)
 
-#### BWD_WEIGHT Model
-- **Training Data**: 18,150 measurements across 921 unique problem shapes
-- **Validation**: 10 unseen problems
-- **Performance**:
-  - Mean Efficiency: **100.0%**
-  - P10 Efficiency: **100.0%**
-  - P50 Efficiency: **100.0%**
-  - Cross-validation R²: **0.9948**
+#### Backward Weight Gradient (bwd_weight) Model
+- **Training Data**: 34,900 measurements across 1,508 unique problem shapes
+- **Validation Set**: 300 unseen problems from model crawler
+- **Validation Performance** (vs. oracle):
+  - Mean Efficiency: **96.1%**
+  - Median Efficiency: **99.2%**
+  - P10 Efficiency: **89.4%**
+  - Top-1 Accuracy: **32.7%** (51/156 problems)
 
 ### Training Data Generation
 
