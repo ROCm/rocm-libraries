@@ -446,8 +446,11 @@ class MasterSolutionLibrary:
                 assert 0 and "Unrecognized LibraryType."
 
             if lazyLibraryLoading:
+                computeInputTypeStr = str(problemType.computeInputTypeA)
+                if problemType.computeInputTypeA != problemType.computeInputTypeB:
+                    computeInputTypeStr = str(problemType.computeInputTypeA) + str(problemType.computeInputTypeB)
                 placeholderName += '_' + str(problemType.aType) + str(problemType.bType)
-                placeholderName += '_' + str(problemType.cType) + str(problemType.computeInputType)
+                placeholderName += '_' + str(problemType.cType) + computeInputTypeStr
                 if problemType.activationType != 'none':
                     if str(problemType.activationType).upper() == 'ALL':
                         placeholderName += "_A"
@@ -455,6 +458,11 @@ class MasterSolutionLibrary:
                         placeholderName += "_HA"
                     else:
                         placeholderName += "_%s"%str(problemType.activationType).upper()
+
+                if problemType.mxBlockA:
+                    placeholderName += ('_MXA' + str(problemType.mxTypeA) + 'B' + str(problemType.mxBlockA))
+                if problemType.mxBlockB:
+                    placeholderName += ('_MXB' + str(problemType.mxTypeB) + 'B' + str(problemType.mxBlockB))
 
                 if problemType.swizzleTensorA:
                     placeholderName += '_STA'
@@ -480,7 +488,8 @@ class MasterSolutionLibrary:
                     placeholderName += '_SAV'
                 if problemType.sparse:
                     placeholderName += '_SPB' if problemType.sparse == 2 else '_SPA'
-                if not problemType.f32XdlMathOp.isSingle() and problemType.computeInputType.isSingle():
+                    placeholderName += "ML" + str(problemType.metadataLayout)
+                if not problemType.f32XdlMathOp.isSingle() and problemType.computeInputTypeA.isSingle() and problemType.computeInputTypeB.isSingle():
                     placeholderName += '_M' + str(problemType.f32XdlMathOp)
                 if problemType.supportDeviceUserArguments:
                     placeholderName += '_UA'

@@ -23,6 +23,7 @@
 ################################################################################
 
 from .CustomKernels import getCustomKernelConfig
+from rocisa.enum import DataTypeEnum
 from . import SolutionLibrary
 from .CustomYamlLoader import load_yaml_stream
 from Tensile import __version__
@@ -281,7 +282,30 @@ def parseSolutionsData(
     problemSizes = ProblemSizes(problemType, problemSizesConfig)
     return (problemSizes, solutions)
 
+def getRealDataTypeA(dataType):
+    if dataType == DataTypeEnum.Float8BFloat8.value:
+        return DataTypeEnum.Float8.value
+    elif dataType == DataTypeEnum.BFloat8Float8.value:
+        return DataTypeEnum.BFloat8.value
+    elif dataType == DataTypeEnum.Float8BFloat8_fnuz.value:
+        return DataTypeEnum.Float8_fnuz.value
+    elif dataType == DataTypeEnum.BFloat8Float8_fnuz.value:
+        return DataTypeEnum.BFloat8_fnuz.value
+    else:
+        return dataType
 
+def getRealDataTypeB(dataType):
+    if dataType == DataTypeEnum.Float8BFloat8.value:
+        return DataTypeEnum.BFloat8.value
+    elif dataType == DataTypeEnum.BFloat8Float8.value:
+        return DataTypeEnum.Float8.value
+    elif dataType == DataTypeEnum.Float8BFloat8_fnuz.value:
+        return DataTypeEnum.BFloat8_fnuz.value
+    elif dataType == DataTypeEnum.BFloat8Float8_fnuz.value:
+        return DataTypeEnum.Float8_fnuz.value
+    else:
+        return dataType
+    
 class LibraryLogic(NamedTuple):
     """Return tuple for parseLibraryLogicData()"""
     schedule: str
@@ -329,6 +353,21 @@ def parseLibraryLogicData(
 
     if "CUCount" not in data:
         data["CUCount"] = None
+    if 'MacDataTypeA' not in data["ProblemType"]: #it will either be set as d['MacDataType'] or a specified input
+        data["ProblemType"]['MacDataTypeA'] = getRealDataTypeA(data["ProblemType"]['DataType'])
+
+    if 'MacDataTypeB' not in data["ProblemType"]:
+        data["ProblemType"]['MacDataTypeB'] = getRealDataTypeB(data["ProblemType"]['DataType'])
+
+    if 'DataTypeA' not in data["ProblemType"]:
+        data["ProblemType"]['DataTypeA'] = data["ProblemType"]['MacDataTypeA']
+    else:
+        data["ProblemType"]['DataTypeA'] = getRealDataTypeA(data["ProblemType"]['DataTypeA'])
+
+    if 'DataTypeB' not in data["ProblemType"]:
+        data["ProblemType"]['DataTypeB'] = data["ProblemType"]['MacDataTypeB']
+    else:
+        data["ProblemType"]['DataTypeB'] = getRealDataTypeB(data["ProblemType"]['DataTypeB'])
 
     if not versionIsCompatible(data["MinimumRequiredVersion"]):
         printWarning("Version = {} in library logic file {} does not match Tensile version = {}" \
@@ -357,6 +396,22 @@ def parseLibraryLogicData(
                 raise ValueError(f"Custom kernel MatrixInstruction can only be of length 4, found {customConfig['MatrixInstruction']}")
         # overwrite problemType if any
         solutionState["ProblemType"] = problemType
+        if 'MacDataTypeA' not in solutionState["ProblemType"]: #it will either be set as d['MacDataType'] or a specified input
+            solutionState["ProblemType"]['MacDataTypeA'] = getRealDataTypeA(solutionState["ProblemType"]['DataType'])
+
+        if 'MacDataTypeB' not in solutionState["ProblemType"]:
+            solutionState["ProblemType"]['MacDataTypeB'] = getRealDataTypeB(solutionState["ProblemType"]['DataType'])
+
+        if 'DataTypeA' not in solutionState["ProblemType"]:
+            solutionState["ProblemType"]['DataTypeA'] = solutionState["ProblemType"]['MacDataTypeA']
+        else:
+            solutionState["ProblemType"]['DataTypeA'] = getRealDataTypeA(solutionState["ProblemType"]['DataTypeA'])
+
+        if 'DataTypeB' not in solutionState["ProblemType"]:
+            solutionState["ProblemType"]['DataTypeB'] = solutionState["ProblemType"]['MacDataTypeB']
+        else:
+            solutionState["ProblemType"]['DataTypeB'] = getRealDataTypeB(solutionState["ProblemType"]['DataTypeB'])
+
         solutionObject = Solution(
                              solutionState,
                              splitGSU,
@@ -513,6 +568,10 @@ def createLibraryLogic(schedulePrefix, architectureName, deviceNames, libraryTyp
     problemTypeState = problemType.state
     problemTypeState["DataType"] = \
             problemTypeState["DataType"].value
+    problemTypeState["MacDataTypeA"] = \
+            problemTypeState["MacDataTypeA"].value
+    problemTypeState["MacDataTypeB"] = \
+            problemTypeState["MacDataTypeB"].value
     problemTypeState["DataTypeA"] = \
             problemTypeState["DataTypeA"].value
     problemTypeState["DataTypeB"] = \
@@ -536,6 +595,12 @@ def createLibraryLogic(schedulePrefix, architectureName, deviceNames, libraryTyp
     if "DataTypeMetadata" in problemTypeState:
         problemTypeState["DataTypeMetadata"] = \
                 problemTypeState["DataTypeMetadata"].value
+    if "DataTypeMXSA" in problemTypeState:
+        problemTypeState["DataTypeMXSA"] = \
+                problemTypeState["DataTypeMXSA"].value
+    if "DataTypeMXSB" in problemTypeState:
+        problemTypeState["DataTypeMXSB"] = \
+                problemTypeState["DataTypeMXSB"].value
     data.append(problemTypeState)
     # solutions
     solutionList = []
