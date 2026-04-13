@@ -266,8 +266,9 @@ This example is built as part of the CK build tree (same as all other
 ```bash
 cd composable_kernel
 mkdir -p build && cd build
-sh ../script/cmake-ck-dev.sh ../ gfx950 -G Ninja
+../script/cmake-ck-dev.sh ../ gfx950 -G Ninja
 cmake --build . -- tile_example_ssd_fwd -j
+./bin/tile_example_ssd_fwd -B=2 -E=2 -H=2 -v=1
 ```
 
 ---
@@ -276,13 +277,13 @@ cmake --build . -- tile_example_ssd_fwd -j
 
 ```bash
 # Default: B=2, E=2, H=2 with CPU verification
-./example_ssd_fwd
+./bin/tile_example_ssd_fwd
 
 # Custom sizes
-./example_ssd_fwd -B=4 -E=2 -H=4
+./bin/tile_example_ssd_fwd -B=4 -E=2 -H=4
 
 # Benchmark only (no CPU verification)
-./example_ssd_fwd -B=4 -E=2 -H=4 -v=0 -warmup=10 -repeat=100
+./bin/tile_example_ssd_fwd -B=4 -E=2 -H=4 -v=0 -warmup=10 -repeat=100
 ```
 
 ### Command-line options
