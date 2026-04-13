@@ -21,6 +21,35 @@
  *
  * ************************************************************************ */
 
+#include <cstdio>
+#include <iostream>
+#include <string>
+#include <type_traits>
+
+//
+// To be removed when tests are complete.
+//
+template <typename T>
+void print_array(T* array, int nrows, int ncols, int ld, std::string str = "array = ")
+{
+    std::cout << str << std::endl;
+    for(int i = 0; i < nrows; ++i)
+    {
+        for(int j = 0; j < ncols; ++j)
+        {
+            if(j == ncols - 1)
+            {
+                std::cout << array[i + j * ld] << std::endl;
+            }
+            else
+            {
+                std::cout << array[i + j * ld] << ", ";
+            }
+        }
+        std::cout << std::endl;
+    }
+}
+
 #include "clientcommon.hpp"
 
 template <testAPI_t API, typename I, typename SIZE, typename Td, typename INTd, typename Th>
@@ -42,7 +71,302 @@ void geev_checkBadArgs(const hipsolverHandle_t   handle,
                        const SIZE                hlwork,
                        INTd                      dinfo)
 {
-    // TODO
+    // Check handle.
+    EXPECT_ROCBLAS_STATUS(hipsolver_geev(API,
+                                         (hipsolverHandle_t) nullptr,
+                                         params,
+                                         jobvl,
+                                         jobvr,
+                                         n,
+                                         dA,
+                                         lda,
+                                         dW,
+                                         dVL,
+                                         ldvl,
+                                         dVR,
+                                         ldvr,
+                                         dWork,
+                                         dlwork,
+                                         hWork,
+                                         hlwork,
+                                         dinfo),
+                          HIPSOLVER_STATUS_NOT_INITIALIZED);
+
+#if defined(__HIP_PLATFORM_HCC__) || defined(__HIP_PLATFORM_AMD__)
+    //
+    // Check pointers.
+    //
+    EXPECT_ROCBLAS_STATUS(hipsolver_geev(API,
+                                         handle,
+                                         (hipsolverDnParams_t) nullptr,
+                                         jobvl,
+                                         jobvr,
+                                         n,
+                                         dA,
+                                         lda,
+                                         dW,
+                                         dVL,
+                                         ldvl,
+                                         dVR,
+                                         ldvr,
+                                         dWork,
+                                         dlwork,
+                                         hWork,
+                                         hlwork,
+                                         dinfo),
+                          HIPSOLVER_STATUS_INVALID_VALUE);
+    EXPECT_ROCBLAS_STATUS(hipsolver_geev(API,
+                                         handle,
+                                         params,
+                                         jobvl,
+                                         jobvr,
+                                         n,
+                                         (Td) nullptr,
+                                         lda,
+                                         dW,
+                                         dVL,
+                                         ldvl,
+                                         dVR,
+                                         ldvr,
+                                         dWork,
+                                         dlwork,
+                                         hWork,
+                                         hlwork,
+                                         dinfo),
+                          HIPSOLVER_STATUS_INVALID_VALUE);
+    EXPECT_ROCBLAS_STATUS(hipsolver_geev(API,
+                                         handle,
+                                         params,
+                                         jobvl,
+                                         jobvr,
+                                         n,
+                                         dA,
+                                         lda,
+                                         (Td) nullptr,
+                                         dVL,
+                                         ldvl,
+                                         dVR,
+                                         ldvr,
+                                         dWork,
+                                         dlwork,
+                                         hWork,
+                                         hlwork,
+                                         dinfo),
+                          HIPSOLVER_STATUS_INVALID_VALUE);
+    EXPECT_ROCBLAS_STATUS(hipsolver_geev(API,
+                                         handle,
+                                         params,
+                                         HIPSOLVER_EIG_MODE_VECTOR,
+                                         jobvr,
+                                         n,
+                                         dA,
+                                         lda,
+                                         dW,
+                                         (Td) nullptr,
+                                         ldvl,
+                                         dVR,
+                                         ldvr,
+                                         dWork,
+                                         dlwork,
+                                         hWork,
+                                         hlwork,
+                                         dinfo),
+                          HIPSOLVER_STATUS_INVALID_VALUE);
+    EXPECT_ROCBLAS_STATUS(hipsolver_geev(API,
+                                         handle,
+                                         params,
+                                         jobvl,
+                                         HIPSOLVER_EIG_MODE_VECTOR,
+                                         n,
+                                         dA,
+                                         lda,
+                                         dW,
+                                         dVL,
+                                         ldvl,
+                                         (Td) nullptr,
+                                         ldvr,
+                                         dWork,
+                                         dlwork,
+                                         hWork,
+                                         hlwork,
+                                         dinfo),
+                          HIPSOLVER_STATUS_INVALID_VALUE);
+    /* Note: `workOnDevice` is still allowed to be `nullptr` */
+    /* EXPECT_ROCBLAS_STATUS(hipsolver_geev(API, */
+    /*                                      handle, */
+    /*                                      params, */
+    /*                                      jobvl, */
+    /*                                      jobvr, */
+    /*                                      n, */
+    /*                                      dA, */
+    /*                                      lda, */
+    /*                                      dW, */
+    /*                                      dVL, */
+    /*                                      ldvl, */
+    /*                                      dVR, */
+    /*                                      ldvr, */
+    /*                                      (Td) nullptr, */
+    /*                                      dlwork, */
+    /*                                      hWork, */
+    /*                                      hlwork, */
+    /*                                      dinfo), */
+    /*                       HIPSOLVER_STATUS_INVALID_VALUE); */
+    EXPECT_ROCBLAS_STATUS(hipsolver_geev(API,
+                                         handle,
+                                         params,
+                                         jobvl,
+                                         jobvr,
+                                         n,
+                                         dA,
+                                         lda,
+                                         dW,
+                                         dVL,
+                                         ldvl,
+                                         dVR,
+                                         ldvr,
+                                         dWork,
+                                         dlwork,
+                                         (Th) nullptr,
+                                         hlwork,
+                                         dinfo),
+                          HIPSOLVER_STATUS_INVALID_VALUE);
+    EXPECT_ROCBLAS_STATUS(hipsolver_geev(API,
+                                         handle,
+                                         params,
+                                         jobvl,
+                                         jobvr,
+                                         n,
+                                         dA,
+                                         lda,
+                                         dW,
+                                         dVL,
+                                         ldvl,
+                                         dVR,
+                                         ldvr,
+                                         dWork,
+                                         dlwork,
+                                         hWork,
+                                         hlwork,
+                                         (INTd) nullptr),
+                          HIPSOLVER_STATUS_INVALID_VALUE);
+    //
+    // Check values.
+    //
+    EXPECT_ROCBLAS_STATUS(hipsolver_geev(API,
+                                         handle,
+                                         params,
+                                         hipsolverEigMode_t(-1),
+                                         jobvr,
+                                         n,
+                                         dA,
+                                         lda,
+                                         dW,
+                                         dVL,
+                                         ldvl,
+                                         dVR,
+                                         ldvr,
+                                         dWork,
+                                         dlwork,
+                                         hWork,
+                                         hlwork,
+                                         dinfo),
+                          HIPSOLVER_STATUS_INVALID_ENUM);
+    EXPECT_ROCBLAS_STATUS(hipsolver_geev(API,
+                                         handle,
+                                         params,
+                                         jobvl,
+                                         hipsolverEigMode_t(-1),
+                                         n,
+                                         dA,
+                                         lda,
+                                         dW,
+                                         dVL,
+                                         ldvl,
+                                         dVR,
+                                         ldvr,
+                                         dWork,
+                                         dlwork,
+                                         hWork,
+                                         hlwork,
+                                         dinfo),
+                          HIPSOLVER_STATUS_INVALID_ENUM);
+    EXPECT_ROCBLAS_STATUS(hipsolver_geev(API,
+                                         handle,
+                                         params,
+                                         jobvl,
+                                         jobvr,
+                                         -1,
+                                         dA,
+                                         lda,
+                                         dW,
+                                         dVL,
+                                         ldvl,
+                                         dVR,
+                                         ldvr,
+                                         dWork,
+                                         dlwork,
+                                         hWork,
+                                         hlwork,
+                                         dinfo),
+                          HIPSOLVER_STATUS_INVALID_VALUE);
+    EXPECT_ROCBLAS_STATUS(hipsolver_geev(API,
+                                         handle,
+                                         params,
+                                         jobvl,
+                                         jobvr,
+                                         n,
+                                         dA,
+                                         -1,
+                                         dW,
+                                         dVL,
+                                         ldvl,
+                                         dVR,
+                                         ldvr,
+                                         dWork,
+                                         dlwork,
+                                         hWork,
+                                         hlwork,
+                                         dinfo),
+                          HIPSOLVER_STATUS_INVALID_VALUE);
+    EXPECT_ROCBLAS_STATUS(hipsolver_geev(API,
+                                         handle,
+                                         params,
+                                         jobvl,
+                                         jobvr,
+                                         n,
+                                         dA,
+                                         lda,
+                                         dW,
+                                         dVL,
+                                         -1,
+                                         dVR,
+                                         ldvr,
+                                         dWork,
+                                         dlwork,
+                                         hWork,
+                                         hlwork,
+                                         dinfo),
+                          HIPSOLVER_STATUS_INVALID_VALUE);
+    EXPECT_ROCBLAS_STATUS(hipsolver_geev(API,
+                                         handle,
+                                         params,
+                                         jobvl,
+                                         jobvr,
+                                         n,
+                                         dA,
+                                         lda,
+                                         dW,
+                                         dVL,
+                                         ldvl,
+                                         dVR,
+                                         -1,
+                                         dWork,
+                                         dlwork,
+                                         hWork,
+                                         hlwork,
+                                         dinfo),
+                          HIPSOLVER_STATUS_INVALID_VALUE);
+#endif
 }
 
 template <testAPI_t API, bool BATCHED, bool STRIDED, typename T, typename I, typename SIZE>
@@ -128,13 +452,60 @@ void geev_initData(const hipsolverHandle_t   handle,
 {
     if(CPU)
     {
-        // TODO
+        // TODO: Add option to create defective matrices.
+
+        // Create a (non-symmetric) Sylvester-Kac/Clement matrix.  For a given
+        // dimension `n`, the spectrum of hA[0] is composed of `n + 1` distinct
+        // integers:
+        //
+        //    -n, -n + 2, -n + 4, ..., n - 2, n.
+        //
+        /* for(int i = 0; i < n; ++i) */
+        /* { */
+        /*     for(int j = 0; j < n; ++j) */
+        /*     { */
+        /*         if(i == j + 1) */
+        /*         { */
+        /*             hA[0][i + j * lda] = T(n - i); */
+        /*             hA[0][j + i * lda] = T(i); */
+        /*         } */
+        /*         else */
+        /*         { */
+        /*             hA[0][i + j * lda] = T(0); */
+        /*         } */
+        /*     } */
+        /* } */
+
+        // Temporary: Create a symmetric Clement matrix to simplify testing.
+        //
+        // The main reason to rely on the symmetric version of the Clement
+        // matrices is to guarantee that computed eigenvalues will be real
+        // (numerically) for all relevant test sizes; this will be removed in
+        // favor of the general (non-symmetric) Clement matrices when the test
+        // routine is complete.
+        for(int i = 0; i < n; ++i)
+        {
+            for(int j = 0; j < n; ++j)
+            {
+                if(i == j + 1)
+                {
+                    hA[0][i + j * lda] = std::sqrt(i * (n - i));
+                    hA[0][j + i * lda] = std::sqrt(i * (n - i));
+                }
+                else
+                {
+                    hA[0][i + j * lda] = T(0);
+                }
+            }
+        }
+        /* print_array(hA[0], n, n, lda, "hA[0] = "); */
     }
 
     if(GPU)
     {
         // now copy data to the GPU
         CHECK_HIP_ERROR(dA.transfer_from(hA));
+        CHECK_HIP_ERROR(hipDeviceSynchronize());
     }
 }
 
@@ -145,6 +516,7 @@ template <testAPI_t API,
           typename Td,
           typename INTd,
           typename Th,
+          typename CTh,
           typename INTh>
 void geev_getError(const hipsolverHandle_t   handle,
                    const hipsolverDnParams_t params,
@@ -164,22 +536,45 @@ void geev_getError(const hipsolverHandle_t   handle,
                    const SIZE                hlwork,
                    INTd&                     dInfo,
                    Th&                       hA,
+                   CTh&                      hCA,
                    Th&                       hARes,
                    Th&                       hW,
                    Th&                       hWRes,
-                   Th&                       hVL,
+                   CTh&                      hVL,
                    Th&                       hVLRes,
-                   Th&                       hVR,
+                   CTh&                      hVR,
                    Th&                       hVRRes,
                    INTh&                     hInfo,
                    INTh&                     hInfoRes,
+                   Th&                       hD,
+                   CTh&                      hCD,
+                   Th&                       hErr,
+                   CTh&                      hCErr,
                    double*                   max_err)
 {
+    // Initialize extra type used to simplify testing when type `T` is real.
+    using CT
+        = std::conditional_t<std::is_same_v<T, float>,
+                             hipFloatComplex,
+                             std::conditional_t<std::is_same_v<T, double>, hipDoubleComplex, T>>;
+
+    // Initialize variables used in 2nd run.
+    bool               vl_2nd_run    = true;
+    bool               vr_2nd_run    = true;
+    hipsolverEigMode_t jobvl_2nd_run = HIPSOLVER_EIG_MODE_VECTOR;
+    hipsolverEigMode_t jobvr_2nd_run = HIPSOLVER_EIG_MODE_VECTOR;
+    I                  ldvl_2nd_run  = n;
+    I                  ldvr_2nd_run  = n;
+    I                  ldvl_{ldvl};
+    I                  ldvr_{ldvr};
+
     // input data initialization
     geev_initData<true, true, T>(handle, params, n, dA, lda, hA);
 
-    // execute computations
+    //
+    // Execute computations
     // GPU lapack
+    //
     CHECK_ROCBLAS_ERROR(hipsolver_geev(API,
                                        handle,
                                        params,
@@ -200,14 +595,199 @@ void geev_getError(const hipsolverHandle_t   handle,
                                        dInfo.data()));
     CHECK_HIP_ERROR(hARes.transfer_from(dA));
     CHECK_HIP_ERROR(hWRes.transfer_from(dW));
+    /* print_array(hWRes[0], n, 1, n, "Re(hWRes[0]) = "); */
+    /* if(!is_complex<T>) */
+    /* { */
+    /*     print_array(hWRes[0] + n, n, 1, n, "Im(hWRes[0]) = "); */
+    /* } */
     if(jobvl != HIPSOLVER_EIG_MODE_NOVECTOR)
+    {
         CHECK_HIP_ERROR(hVLRes.transfer_from(dVL));
+        vl_2nd_run    = false;
+        jobvl_2nd_run = HIPSOLVER_EIG_MODE_NOVECTOR;
+    }
     if(jobvr != HIPSOLVER_EIG_MODE_NOVECTOR)
+    {
         CHECK_HIP_ERROR(hVRRes.transfer_from(dVR));
+        vr_2nd_run    = false;
+        jobvr_2nd_run = HIPSOLVER_EIG_MODE_NOVECTOR;
+    }
     CHECK_HIP_ERROR(hInfoRes.transfer_from(dInfo));
 
+    //
+    // `geev` is supposed to converge for all input test matrices, if
+    // `info != 0` test has failed.
+    //
+    EXPECT_EQ(hInfoRes[0][0], 0);
+    if(hInfoRes[0][0] != 0)
+    {
+        *max_err += 1;
+        return;
+    }
+
+    //
+    // Execute `geev` a second time to get missing left and right eigenvectors
+    // (if necessary).
+    //
+    CHECK_HIP_ERROR(dA.transfer_from(hA));
+    if(vl_2nd_run || vr_2nd_run)
+    {
+        CHECK_ROCBLAS_ERROR(hipsolver_geev(API,
+                                           handle,
+                                           params,
+                                           jobvl_2nd_run,
+                                           jobvr_2nd_run,
+                                           n,
+                                           dA.data(),
+                                           lda,
+                                           dW.data(),
+                                           dVL.data(),
+                                           ldvl_2nd_run,
+                                           dVR.data(),
+                                           ldvr_2nd_run,
+                                           dWork.data(),
+                                           dlwork,
+                                           hWork.data(),
+                                           hlwork,
+                                           dInfo.data()));
+
+        if(jobvl_2nd_run != HIPSOLVER_EIG_MODE_NOVECTOR)
+        {
+            CHECK_HIP_ERROR(hVLRes.transfer_from(dVL));
+            ldvl_ = ldvl_2nd_run;
+        }
+        if(jobvr_2nd_run != HIPSOLVER_EIG_MODE_NOVECTOR)
+        {
+            CHECK_HIP_ERROR(hVRRes.transfer_from(dVR));
+            ldvr_ = ldvr_2nd_run;
+        }
+    }
+
+    //
+    // [Not implemented:] Execute `geev` a third time (if necessary) to check if eigenvalues change when
+    // `geev`'s input parameters change.
+    //
+
+    //
+    // Compute error(s).
+    //
+
+    //
+    // *** Note: FOR NOW, the tests' code require the spectrum of A to be real. ***
+    //
+    double err{};
+    double normA = snorm('F', n, n, hA[0], lda);
+    T      alpha, beta;
+    T*     ReWRes = hWRes[0];
+    T*     ImWRes = hWRes[0] + n;
+
+    for(int j = 0; j < n; ++j)
+    {
+        for(int i = 0; i < n; ++i)
+        {
+            if(i == j)
+            {
+                hD[0][i + j * n] = hWRes[0][i];
+            }
+            else
+            {
+                hD[0][i + j * n] = T(0);
+            }
+        }
+    }
+
+    // [Not implemented:] 1. Check if eigenvalues computed with different parameters match.
+
+    // 2a. If computing left eigenvectors: check if ||VL_i|| == 1, for 0 <= i < n, and if entry
+    // with largest absolute value of VL is real.
+    if(jobvl != HIPSOLVER_EIG_MODE_NOVECTOR)
+    {
+    }
+
+    // 2b. If computing right eigenvectors: check if ||VR_i|| == 1, for 0 <= i < n, and if entry
+    // with largest absolute value of VR is real.
+    if(jobvr != HIPSOLVER_EIG_MODE_NOVECTOR)
+    {
+    }
+
+    // 3a. Check reconstruction with right eigenvectors (VR): ||A*VR - VR*W||/|A|| <= n * eps
+    alpha = T(1);
+    beta  = T(0);
+    cpu_gemm(HIPSOLVER_OP_N,
+             HIPSOLVER_OP_N,
+             n,
+             n,
+             n,
+             alpha,
+             hA[0],
+             lda,
+             hVRRes[0],
+             ldvr_,
+             beta,
+             hErr[0],
+             n);
+
+    alpha = T(-1);
+    beta  = T(1);
+    cpu_gemm(HIPSOLVER_OP_N,
+             HIPSOLVER_OP_N,
+             n,
+             n,
+             n,
+             alpha,
+             hVRRes[0],
+             ldvr_,
+             hD[0],
+             n,
+             beta,
+             hErr[0],
+             n);
+
+    err = snorm('F', n, n, hErr[0], n) / normA;
+    /* std::cout << "err (VR) = " << err << std::endl; */
+
+    *max_err = *max_err < err ? err : *max_err;
+
+    // 3b. Check reconstruction with left eigenvectors (VL): ||A'*VL - VL*W||/||A|| <= n * eps
+    alpha = T(1);
+    beta  = T(0);
+    cpu_gemm(HIPSOLVER_OP_T,
+             HIPSOLVER_OP_N,
+             n,
+             n,
+             n,
+             alpha,
+             hA[0],
+             lda,
+             hVLRes[0],
+             ldvl_,
+             beta,
+             hErr[0],
+             n);
+
+    alpha = T(-1);
+    beta  = T(1);
+    cpu_gemm(HIPSOLVER_OP_N,
+             HIPSOLVER_OP_N,
+             n,
+             n,
+             n,
+             alpha,
+             hVLRes[0],
+             ldvl_,
+             hD[0],
+             n,
+             beta,
+             hErr[0],
+             n);
+
+    err = snorm('F', n, n, hErr[0], n) / normA;
+    /* std::cout << "err (VL) = " << err << std::endl; */
+
+    *max_err = *max_err < err ? err : *max_err;
+
     // TODO
-    *max_err = 1;
+    // Save different errors in different variables instead of accumulating everything in `max_err`.
 }
 
 template <testAPI_t API,
@@ -308,6 +888,12 @@ void geev_getPerfData(const hipsolverHandle_t   handle,
 template <testAPI_t API, bool BATCHED, bool STRIDED, typename T, typename I, typename SIZE>
 void testing_geev(Arguments& argus)
 {
+    // Initialize extra type used to simplify testing when type `T` is real.
+    using CT
+        = std::conditional_t<std::is_same_v<T, float>,
+                             hipFloatComplex,
+                             std::conditional_t<std::is_same_v<T, double>, hipDoubleComplex, T>>;
+
     // get arguments
     hipsolver_local_handle handle;
     hipsolver_local_params params;
@@ -329,8 +915,10 @@ void testing_geev(Arguments& argus)
     // determine sizes
     size_t size_A    = size_t(lda) * n;
     size_t size_W    = is_complex<T> ? size_t(n) : size_t(2 * n);
-    size_t size_VL   = jobvlC == 'N' ? 0 : size_t(ldvl) * n;
-    size_t size_VR   = jobvrC == 'N' ? 0 : size_t(ldvr) * n;
+    size_t size_VL   = jobvlC == 'N' ? size_t(n) * n : size_t(ldvl) * n;
+    size_t size_VR   = jobvrC == 'N' ? size_t(n) * n : size_t(ldvr) * n;
+    size_t size_D    = size_t(n) * n;
+    size_t size_Err  = size_t(n) * n;
     double max_error = 0, gpu_time_used = 0, cpu_time_used = 0;
 
     size_t size_ARes  = (argus.unit_check || argus.norm_check) ? size_A : 0;
@@ -379,21 +967,23 @@ void testing_geev(Arguments& argus)
         return;
     }
 
-    // memory size query is necessary
+    // Memory size query is necessary.
+    //
+    // Note: current test implementation requires the computation of left and right eigenvectors.
     SIZE size_dW, size_hW;
     hipsolver_geev_bufferSize(API,
                               handle,
                               params,
-                              jobvl,
-                              jobvr,
+                              HIPSOLVER_EIG_MODE_VECTOR,
+                              HIPSOLVER_EIG_MODE_VECTOR,
                               n,
                               (T*)nullptr,
                               lda,
                               (T*)nullptr,
                               (T*)nullptr,
-                              ldvl,
+                              std::max(ldvl, n),
                               (T*)nullptr,
-                              ldvr,
+                              std::max(ldvr, n),
                               &size_dW,
                               &size_hW);
 
@@ -412,16 +1002,21 @@ void testing_geev(Arguments& argus)
     {
         // memory allocations
         host_strided_batch_vector<T>     hA(size_A, 1, size_A, bc);
+        host_strided_batch_vector<CT>    hCA(size_A, 1, size_A, bc);
         host_strided_batch_vector<T>     hARes(size_ARes, 1, size_ARes, bc);
         host_strided_batch_vector<T>     hW(size_W, 1, size_W, bc);
         host_strided_batch_vector<T>     hWRes(size_WRes, 1, size_WRes, bc);
-        host_strided_batch_vector<T>     hVL(size_VL, 1, size_VL, bc);
+        host_strided_batch_vector<CT>    hVL(size_VL, 1, size_VL, bc);
         host_strided_batch_vector<T>     hVLRes(size_VLRes, 1, size_VLRes, bc);
-        host_strided_batch_vector<T>     hVR(size_VR, 1, size_VR, bc);
+        host_strided_batch_vector<CT>    hVR(size_VR, 1, size_VR, bc);
         host_strided_batch_vector<T>     hVRRes(size_VRRes, 1, size_VRRes, bc);
         host_strided_batch_vector<int>   hInfo(1, 1, 1, bc);
         host_strided_batch_vector<int>   hInfoRes(1, 1, 1, bc);
         host_strided_batch_vector<T>     hWork(size_hW, 1, size_hW, 1); // size_hW accounts for bc
+        host_strided_batch_vector<T>     hD(size_D, 1, size_D, bc);
+        host_strided_batch_vector<CT>    hCD(size_D, 1, size_D, bc);
+        host_strided_batch_vector<T>     hErr(size_Err, 1, size_Err, bc);
+        host_strided_batch_vector<CT>    hCErr(size_Err, 1, size_Err, bc);
         device_strided_batch_vector<T>   dA(size_A, 1, size_A, bc);
         device_strided_batch_vector<T>   dW(size_W, 1, size_W, bc);
         device_strided_batch_vector<T>   dVL(size_VL, 1, size_VL, bc);
@@ -460,6 +1055,7 @@ void testing_geev(Arguments& argus)
                                   size_hW,
                                   dInfo,
                                   hA,
+                                  hCA,
                                   hARes,
                                   hW,
                                   hWRes,
@@ -469,6 +1065,10 @@ void testing_geev(Arguments& argus)
                                   hVRRes,
                                   hInfo,
                                   hInfoRes,
+                                  hD,
+                                  hCD,
+                                  hErr,
+                                  hCErr,
                                   &max_error);
 
         // collect performance data
@@ -497,10 +1097,10 @@ void testing_geev(Arguments& argus)
                                      argus.perf);
     }
 
-    // validate results for rocsolver-test
-    // using n * machine_precision as tolerance
+    // validate results for hipsolver-test
+    // using 5 * n * machine_precision as tolerance
     if(argus.unit_check)
-        ROCSOLVER_TEST_CHECK(T, max_error, n);
+        ROCSOLVER_TEST_CHECK(T, max_error, 5 * n);
 
     // output results for rocsolver-bench
     if(argus.timing)
