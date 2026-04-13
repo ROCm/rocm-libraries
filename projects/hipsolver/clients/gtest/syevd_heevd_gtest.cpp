@@ -68,8 +68,6 @@ Arguments syevd_heevd_setup_arguments(syevd_heevd_tuple tup)
     arg.set<char>("jobz", op[0]);
     arg.set<char>("uplo", op[1]);
 
-    // only testing standard use case/defaults for strides
-
     arg.timing = 0;
 
     return arg;
