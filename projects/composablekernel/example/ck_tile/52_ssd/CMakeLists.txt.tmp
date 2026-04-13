@@ -1,0 +1,26 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+cmake_minimum_required(VERSION 3.21)
+project(ck_tile_ssd_52 LANGUAGES CXX HIP)
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+if(NOT DEFINED CK_DIR)
+    set(CK_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../.." CACHE PATH "composable_kernel root")
+endif()
+
+if(NOT DEFINED GPU_TARGETS)
+    set(GPU_TARGETS "gfx950" CACHE STRING "GPU arch")
+endif()
+
+add_executable(tile_example_ssd_fwd example_ssd_fwd.cpp)
+set_source_files_properties(example_ssd_fwd.cpp PROPERTIES LANGUAGE HIP)
+target_include_directories(tile_example_ssd_fwd PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CK_DIR}/include)
+set_target_properties(tile_example_ssd_fwd PROPERTIES
+    HIP_STANDARD 17
+    LINKER_LANGUAGE HIP
+    HIP_ARCHITECTURES "${GPU_TARGETS}")
