@@ -19,8 +19,10 @@
 #include <hipdnn_data_sdk/data_objects/convolution_wrw_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_data_sdk/data_objects/matmul_attributes_generated.h>
+#include <hipdnn_data_sdk/data_objects/norm_common_generated.h>
 #include <hipdnn_data_sdk/data_objects/pointwise_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/reduction_attributes_generated.h>
+#include <hipdnn_data_sdk/data_objects/rmsnorm_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/sdpa_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
@@ -73,6 +75,25 @@ hipDnnPointwiseModeToFusilliMode(
   default:
     return error(fusilli::ErrorCode::NotImplemented,
                  "Unsupported pointwise mode.");
+  }
+}
+
+// Convert from hipDNN NormFwdPhase to fusilli NormFwdPhase. If the hipDNN
+// phase is NOT_SET, infer from whether the training-only inv_rms output is
+// present (TRAINING) or not (INFERENCE).
+inline fusilli::ErrorOr<fusilli::NormFwdPhase> hipDnnNormFwdPhaseToFusilliPhase(
+    hipdnn_data_sdk::data_objects::NormFwdPhase hipdnnPhase, bool hasInvRms) {
+  switch (hipdnnPhase) {
+  case hipdnn_data_sdk::data_objects::NormFwdPhase::TRAINING:
+    return ok(fusilli::NormFwdPhase::TRAINING);
+  case hipdnn_data_sdk::data_objects::NormFwdPhase::INFERENCE:
+    return ok(fusilli::NormFwdPhase::INFERENCE);
+  case hipdnn_data_sdk::data_objects::NormFwdPhase::NOT_SET:
+    return ok(hasInvRms ? fusilli::NormFwdPhase::TRAINING
+                        : fusilli::NormFwdPhase::INFERENCE);
+  default:
+    return error(fusilli::ErrorCode::NotImplemented,
+                 "Unsupported norm forward phase.");
   }
 }
 
@@ -198,6 +219,10 @@ private:
     case hipdnn_data_sdk::data_objects::NodeAttributes::ReductionAttributes:
       FUSILLI_CHECK_ERROR(
           importReductionAttr(node.attributes_as_ReductionAttributes()));
+      break;
+    case hipdnn_data_sdk::data_objects::NodeAttributes::RMSNormAttributes:
+      FUSILLI_CHECK_ERROR(
+          importRmsnormAttr(node.attributes_as_RMSNormAttributes()));
       break;
     default:
       return fusilli::error(fusilli::ErrorCode::NotImplemented,
@@ -476,6 +501,65 @@ private:
     // Import node output.
     FUSILLI_CHECK_ERROR(
         importNodeOutput(hipDnnRedAttr->out_tensor_uid(), "y", y));
+
+    return fusilli::ok();
+  }
+
+  fusilli::ErrorObject
+  importRmsnormAttr(const hipdnn_data_sdk::data_objects::RMSNormAttributes
+                        *hipDnnRmsnormAttr) {
+    // Fusilli's rmsnorm does not support the optional bias input.
+    if (hipDnnRmsnormAttr->bias_tensor_uid().has_value())
+      return fusilli::error(fusilli::ErrorCode::NotImplemented,
+                            "RmsNorm with bias input is not supported.");
+
+    // Import node inputs.
+    FUSILLI_ASSIGN_OR_RETURN(
+        std::shared_ptr<fusilli::TensorAttr> x,
+        importNodeInput(hipDnnRmsnormAttr->x_tensor_uid(), "x"));
+    FUSILLI_ASSIGN_OR_RETURN(
+        std::shared_ptr<fusilli::TensorAttr> scale,
+        importNodeInput(hipDnnRmsnormAttr->scale_tensor_uid(), "scale"));
+    FUSILLI_ASSIGN_OR_RETURN(
+        std::shared_ptr<fusilli::TensorAttr> epsilon,
+        importNodeInput(hipDnnRmsnormAttr->epsilon_tensor_uid(), "epsilon"));
+
+    // Fusilli requires epsilon to be a scalar constant (pass-by-value).
+    if (!epsilon->isScalar())
+      return fusilli::error(
+          fusilli::ErrorCode::NotImplemented,
+          "RmsNorm epsilon must be a pass-by-value scalar, not a device "
+          "tensor.");
+
+    // Determine forward phase. If hipDNN left it unset, infer it from the
+    // presence of the training-only inv_rms output.
+    bool hasInvRms = hipDnnRmsnormAttr->inv_rms_tensor_uid().has_value();
+    FUSILLI_ASSIGN_OR_RETURN(
+        fusilli::NormFwdPhase forwardPhase,
+        hipDnnNormFwdPhaseToFusilliPhase(hipDnnRmsnormAttr->forward_phase(),
+                                         hasInvRms));
+
+    // If the caller explicitly requested TRAINING, inv_rms must be present;
+    // conversely an inv_rms output only makes sense for TRAINING.
+    if ((forwardPhase == fusilli::NormFwdPhase::TRAINING) != hasInvRms)
+      return fusilli::error(
+          fusilli::ErrorCode::InvalidAttribute,
+          "RmsNorm inv_rms output must be set if and only if forward phase "
+          "is TRAINING.");
+
+    // Import node.
+    auto fusilliRmsnormAttr =
+        fusilli::RmsnormAttr().setEpsilon(epsilon).setForwardPhase(
+            forwardPhase);
+    auto [y, invRms] = fusilliGraph.rmsnorm(x, scale, fusilliRmsnormAttr);
+
+    // Import node outputs.
+    FUSILLI_CHECK_ERROR(
+        importNodeOutput(hipDnnRmsnormAttr->y_tensor_uid(), "y", y));
+    if (hasInvRms) {
+      FUSILLI_CHECK_ERROR(importNodeOutput(
+          *hipDnnRmsnormAttr->inv_rms_tensor_uid(), "inv_rms", invRms));
+    }
 
     return fusilli::ok();
   }

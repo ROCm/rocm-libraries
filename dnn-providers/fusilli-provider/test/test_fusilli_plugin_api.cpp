@@ -639,6 +639,31 @@ TEST(TestFusilliPluginApi, GetApplicableEngineIdsSdpa) {
   EXPECT_EQ(hipdnnEnginePluginDestroy(handle), HIPDNN_PLUGIN_STATUS_SUCCESS);
 }
 
+TEST(TestFusilliPluginApi, GetApplicableEngineIdsRmsnorm) {
+  hipdnnEnginePluginHandle_t handle = nullptr;
+  ASSERT_EQ(hipdnnEnginePluginCreate(&handle), HIPDNN_PLUGIN_STATUS_SUCCESS);
+  ASSERT_NE(handle, nullptr);
+
+  std::array<int64_t, 5> engineIDs;
+  uint32_t numEngines = 0;
+
+  // A basic rmsnorm inference graph (x, scale, epsilon -> y) should be
+  // supported. The helper leaves forward_phase as NOT_SET; the plugin import
+  // layer infers INFERENCE because there is no inv_rms output.
+  auto builder = hipdnn_test_sdk::utilities::createValidRMSNormGraph();
+  hipdnnPluginConstData_t opGraph;
+  opGraph.ptr = builder.GetBufferPointer();
+  opGraph.size = builder.GetSize();
+
+  ASSERT_EQ(hipdnnEnginePluginGetApplicableEngineIds(
+                handle, &opGraph, engineIDs.data(), 5, &numEngines),
+            HIPDNN_PLUGIN_STATUS_SUCCESS);
+  ASSERT_EQ(numEngines, 1);
+  ASSERT_EQ(engineIDs[0], hipdnn_data_sdk::utilities::FUSILLI_ENGINE_ID);
+
+  EXPECT_EQ(hipdnnEnginePluginDestroy(handle), HIPDNN_PLUGIN_STATUS_SUCCESS);
+}
+
 TEST(TestFusilliPluginApi, SetLogLevelSuccess) {
   EXPECT_EQ(hipdnnPluginSetLogLevel(HIPDNN_SEV_INFO),
             HIPDNN_PLUGIN_STATUS_SUCCESS);
