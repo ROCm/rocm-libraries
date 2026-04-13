@@ -2225,8 +2225,10 @@ namespace
 #if ROCBLASLT_TENSILE_LAZY_LOAD
         std::unordered_set<TensileLite::LazyLoadingInit>                  m_deviceSet;
         std::unordered_map<std::string, std::shared_ptr<hipDeviceProp_t>> m_devicePropMap;
+        std::unordered_map<std::string, std::shared_ptr<TensileLite::Hardware>> m_hardwareMap;
 #else
-        std::shared_ptr<hipDeviceProp_t> m_deviceProp;
+        std::shared_ptr<hipDeviceProp_t>       m_deviceProp;
+        std::shared_ptr<TensileLite::Hardware> m_hardware;
 #endif
         std::string m_tensileLibPath;
 
@@ -2283,10 +2285,18 @@ namespace
         {
             return m_devicePropMap.at(deviceName);
         }
+        auto get_hardware(const std::string& deviceName) const
+        {
+            return m_hardwareMap.at(deviceName);
+        }
 #else
         auto& get_device_property() const
         {
             return m_deviceProp;
+        }
+        auto get_hardware() const
+        {
+            return m_hardware;
         }
 #endif
         auto& get_adapters() const
@@ -2443,6 +2453,7 @@ namespace
                         std::string deviceString
                             = deviceFullString.substr(0, deviceFullString.find(":"));
                         m_devicePropMap[deviceString] = std::make_shared<hipDeviceProp_t>(prop);
+                        m_hardwareMap[deviceString] = TensileLite::hip::GetDevice(devId);
                     }
                 }
 
@@ -2454,6 +2465,7 @@ namespace
                 hipDeviceProp_t prop;
                 HIP_CHECK_EXC(hipGetDeviceProperties(&prop, deviceId));
                 m_deviceProp = std::make_shared<hipDeviceProp_t>(prop);
+                m_hardware = TensileLite::hip::GetDevice(deviceId);
 
                 // Load library
                 auto lib = TensileLite::LoadLibraryFile<TensileLite::ContractionProblemGemm>(
@@ -2493,8 +2505,9 @@ namespace
         std::shared_ptr<TensileLite::MasterSolutionLibrary<TensileLite::ContractionProblemGemm>>*
             library
         = nullptr,
-        std::shared_ptr<hipDeviceProp_t>* deviceProp = nullptr,
-        int                               device     = -1)
+        std::shared_ptr<hipDeviceProp_t>*       deviceProp = nullptr,
+        std::shared_ptr<TensileLite::Hardware>* hardware   = nullptr,
+        int                                     device     = -1)
     try
     {
         // TensileHost is initialized on the first call
@@ -2530,11 +2543,16 @@ namespace
         // If an adapter is found, it is assumed that the library is initialized
         if(library)
             *library = host.get_library();
-        if(deviceProp)
 #if ROCBLASLT_TENSILE_LAZY_LOAD
+        if(deviceProp)
             *deviceProp = host.get_device_property(rocblaslt_internal_get_arch_name());
+        if(hardware)
+            *hardware = host.get_hardware(rocblaslt_internal_get_arch_name());
 #else
+        if(deviceProp)
             *deviceProp = host.get_device_property();
+        if(hardware)
+            *hardware = host.get_hardware();
 #endif
 
         return adapter;
@@ -2745,14 +2763,12 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
         std::shared_ptr<hipDeviceProp_t>       deviceProp;
         std::shared_ptr<TensileLite::Hardware> hardware;
 
-        auto adapter = get_library_and_adapter(&library, &deviceProp, handle->device);
+        auto adapter = get_library_and_adapter(&library, &deviceProp, &hardware, handle->device);
 
         if(!library)
         {
             return rocblaslt_status_invalid_pointer;
         }
-
-        hardware = TensileLite::hip::GetDevice(*deviceProp);
 
         std::shared_ptr<TensileDataGemm> data = std::static_pointer_cast<TensileDataGemm>(gemmData);
         rocblaslt_matmul_heuristic_result heuristicResult;
@@ -3127,14 +3143,12 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
         std::shared_ptr<hipDeviceProp_t>       deviceProp;
         std::shared_ptr<TensileLite::Hardware> hardware;
 
-        auto adapter = get_library_and_adapter(&library, &deviceProp, handle->device);
+        auto adapter = get_library_and_adapter(&library, &deviceProp, &hardware, handle->device);
 
         if(!library)
         {
             return rocblaslt_status_invalid_pointer;
         }
-
-        hardware = TensileLite::hip::GetDevice(*deviceProp);
 
         int* solutionIndex = (int*)algo.data;
         if(gemmType == rocblaslt::RocGemmType::ROCBLASLT_GEMM)
@@ -3321,7 +3335,7 @@ rocblaslt_status runKernelFromInvocation(rocblaslt_handle       handle,
         std::shared_ptr<hipDeviceProp_t>       deviceProp;
         std::shared_ptr<TensileLite::Hardware> hardware;
 
-        auto adapter = get_library_and_adapter(&library, &deviceProp, handle->device);
+        auto adapter = get_library_and_adapter(&library, &deviceProp, &hardware, handle->device);
 
         if(!library)
         {
@@ -3459,7 +3473,7 @@ rocblaslt_status getDeviceUserArgumentsValuesFromContractionProblem(rocblaslt_ha
         std::shared_ptr<hipDeviceProp_t>       deviceProp;
         std::shared_ptr<TensileLite::Hardware> hardware;
 
-        auto adapter = get_library_and_adapter(&library, &deviceProp, handle->device);
+        auto adapter = get_library_and_adapter(&library, &deviceProp, &hardware, handle->device);
 
         if(!library)
         {
@@ -3523,7 +3537,7 @@ rocblaslt_status runKernelFromNewDeviceUserArguments(rocblaslt_handle       hand
         std::shared_ptr<hipDeviceProp_t>       deviceProp;
         std::shared_ptr<TensileLite::Hardware> hardware;
 
-        auto adapter = get_library_and_adapter(&library, &deviceProp, handle->device);
+        auto adapter = get_library_and_adapter(&library, &deviceProp, &hardware, handle->device);
 
         if(!library)
         {
@@ -3646,7 +3660,7 @@ rocblaslt_status runKernelFromDeviceUserArguments(rocblaslt_handle             h
         std::shared_ptr<hipDeviceProp_t>       deviceProp;
         std::shared_ptr<TensileLite::Hardware> hardware;
 
-        auto adapter = get_library_and_adapter(&library, &deviceProp, handle->device);
+        auto adapter = get_library_and_adapter(&library, &deviceProp, &hardware, handle->device);
 
         if(!library)
         {
@@ -3747,14 +3761,12 @@ std::vector<std::shared_ptr<TensileLite::ContractionSolution>>
     std::shared_ptr<hipDeviceProp_t>       deviceProp;
     std::shared_ptr<TensileLite::Hardware> hardware;
 
-    static_cast<void>(get_library_and_adapter(&library, &deviceProp, handle->device));
+    static_cast<void>(get_library_and_adapter(&library, &deviceProp, &hardware, handle->device));
 
     if(!library)
     {
         return {};
     }
-
-    hardware = TensileLite::hip::GetDevice(*deviceProp);
 
     std::shared_ptr<TensileDataGemm> data = std::static_pointer_cast<TensileDataGemm>(gemmData);
     updateTensileProblem(prob, data->problem);
@@ -3799,14 +3811,12 @@ rocblaslt_status getBestSolutions(RocblasltContractionProblem const& prob,
     std::shared_ptr<TensileLite::Hardware> hardware;
 
     // auto &adapter =
-    static_cast<void>(get_library_and_adapter(&library, &deviceProp, handle->device));
+    static_cast<void>(get_library_and_adapter(&library, &deviceProp, &hardware, handle->device));
 
     if(!library)
     {
         return rocblaslt_status_invalid_pointer;
     }
-
-    hardware = TensileLite::hip::GetDevice(*deviceProp);
 
     std::shared_ptr<TensileDataGemm> data = std::static_pointer_cast<TensileDataGemm>(gemmData);
     updateTensileProblem(prob, data->problem);
@@ -3864,7 +3874,7 @@ rocblaslt_status getAllSolutions(MyProblem&                                     
     std::shared_ptr<TensileLite::Hardware> hardware;
 
     // auto &adapter =
-    static_cast<void>(get_library_and_adapter(&library, &deviceProp, handle->device));
+    static_cast<void>(get_library_and_adapter(&library, &deviceProp, &hardware, handle->device));
 
     if(!library)
     {
@@ -3873,8 +3883,6 @@ rocblaslt_status getAllSolutions(MyProblem&                                     
 
     std::string deviceFullString(deviceProp->gcnArchName);
     std::string deviceString = deviceFullString.substr(0, deviceFullString.find(":"));
-
-    hardware = TensileLite::hip::GetDevice(*deviceProp);
 
     std::set<std::shared_ptr<TensileLite::ContractionSolution>> solutions;
     std::shared_ptr<void>                                       tensile_prob;
@@ -4016,14 +4024,12 @@ rocblaslt_status
     std::shared_ptr<hipDeviceProp_t>       deviceProp;
     std::shared_ptr<TensileLite::Hardware> hardware;
 
-    auto adapter = get_library_and_adapter(&library, &deviceProp, handle->device);
+    auto adapter = get_library_and_adapter(&library, &deviceProp, &hardware, handle->device);
 
     if(!library)
     {
         return rocblaslt_status_invalid_pointer;
     }
-
-    hardware = TensileLite::hip::GetDevice(*deviceProp);
 
     bool isOutOfBound = false;
     int  i            = 0;
@@ -4074,14 +4080,13 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle       handle,
     std::shared_ptr<hipDeviceProp_t>       deviceProp;
     std::shared_ptr<TensileLite::Hardware> hardware;
 
-    auto adapter = get_library_and_adapter(&library, &deviceProp, handle->device);
+    auto adapter = get_library_and_adapter(&library, &deviceProp, &hardware, handle->device);
 
     if(!library)
     {
         return rocblaslt_status_invalid_pointer;
     }
 
-    hardware              = TensileLite::hip::GetDevice(*deviceProp);
     *workspaceSizeInBytes = 0;
 
     int* solutionIndex = (int*)algo->data;
@@ -4383,14 +4388,12 @@ rocblaslt_status getBestSolutions(rocblaslt_handle       handle,
     std::shared_ptr<TensileLite::Hardware> hardware;
 
     // auto &adapter =
-    static_cast<void>(get_library_and_adapter(&library, &deviceProp, handle->device));
+    static_cast<void>(get_library_and_adapter(&library, &deviceProp, &hardware, handle->device));
 
     if(!library)
     {
         return rocblaslt_status_invalid_pointer;
     }
-
-    hardware = TensileLite::hip::GetDevice(*deviceProp);
 
     if(gemmType == rocblaslt::RocGemmType::ROCBLASLT_GEMM)
     {
@@ -4477,7 +4480,7 @@ std::string getKernelNameFromData(rocblaslt_handle             handle,
                                      library;
     std::shared_ptr<hipDeviceProp_t> deviceProp;
 
-    auto adapter = get_library_and_adapter(&library, &deviceProp, handle->device);
+    auto adapter = get_library_and_adapter(&library, &deviceProp, nullptr, handle->device);
 
     if(!library)
     {
@@ -4519,10 +4522,11 @@ std::string getSolutionNameFromData(rocblaslt_handle             handle,
                                     std::shared_ptr<void>        gemmData)
 {
     std::shared_ptr<TensileLite::MasterSolutionLibrary<TensileLite::ContractionProblemGemm>>
-                                     library;
-    std::shared_ptr<hipDeviceProp_t> deviceProp;
+                                           library;
+    std::shared_ptr<hipDeviceProp_t>       deviceProp;
+    std::shared_ptr<TensileLite::Hardware> hardware;
 
-    auto adapter = get_library_and_adapter(&library, &deviceProp, handle->device);
+    auto adapter = get_library_and_adapter(&library, &deviceProp, &hardware, handle->device);
 
     if(!library)
     {
@@ -4532,10 +4536,6 @@ std::string getSolutionNameFromData(rocblaslt_handle             handle,
     int gsu           = 0;
     int wgm           = 0;
     int solutionIndex = -1;
-
-    std::shared_ptr<TensileLite::Hardware> hardware;
-
-    hardware = TensileLite::hip::GetDevice(*deviceProp);
 
     if(gemmType == rocblaslt::RocGemmType::ROCBLASLT_GEMM)
     {
@@ -4585,12 +4585,11 @@ std::string getKernelNameFromAlgoIndex(rocblaslt_handle handle, const rocblaslt_
 #endif
 
     std::shared_ptr<TensileLite::MasterSolutionLibrary<TensileLite::ContractionProblemGemm>>
-                                     library;
-    std::shared_ptr<hipDeviceProp_t> deviceProp;
-
-    auto adapter = get_library_and_adapter(&library, &deviceProp, handle->device);
+                                           library;
+    std::shared_ptr<hipDeviceProp_t>       deviceProp;
     std::shared_ptr<TensileLite::Hardware> hardware;
-    hardware = TensileLite::hip::GetDevice(*deviceProp);
+
+    auto adapter = get_library_and_adapter(&library, &deviceProp, &hardware, handle->device);
 
     if(!library)
     {
@@ -4613,12 +4612,11 @@ std::string getSolutionNameFromAlgoIndex(rocblaslt_handle handle, const rocblasl
 #endif
 
     std::shared_ptr<TensileLite::MasterSolutionLibrary<TensileLite::ContractionProblemGemm>>
-                                     library;
-    std::shared_ptr<hipDeviceProp_t> deviceProp;
-
-    auto adapter = get_library_and_adapter(&library, &deviceProp, handle->device);
+                                           library;
+    std::shared_ptr<hipDeviceProp_t>       deviceProp;
     std::shared_ptr<TensileLite::Hardware> hardware;
-    hardware = TensileLite::hip::GetDevice(*deviceProp);
+
+    auto adapter = get_library_and_adapter(&library, &deviceProp, &hardware, handle->device);
 
     if(!library)
     {
