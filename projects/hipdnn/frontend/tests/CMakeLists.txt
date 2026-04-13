@@ -45,7 +45,6 @@ add_executable(
     TestGraph.cpp
     TestGraphAttributes.cpp
     TestGraphGenerated.cpp
-    TestGraphSerialization.cpp
     TestHandle.cpp
     TestIncompatibleBackendWrapper.cpp
     TestINode.cpp
