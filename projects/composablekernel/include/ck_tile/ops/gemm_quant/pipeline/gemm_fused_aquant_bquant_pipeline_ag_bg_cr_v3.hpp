@@ -6,6 +6,7 @@
 #include <string>
 
 #include "ck_tile/core.hpp"
+#include "ck_tile/core/tensor/load_tile.hpp"
 #include "ck_tile/ops/gemm/pipeline/gemm_pipeline_ag_bg_cr_comp_v3.hpp"
 #include "ck_tile/ops/gemm/pipeline/gemm_pipeline_ag_bg_cr_scheduler.hpp"
 #include "ck_tile/ops/gemm_quant/pipeline/gemm_abquant_pipeline_ag_bg_cr_base.hpp"
@@ -158,14 +159,13 @@ struct FusedAQuantBQuantGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCr
     {
         using Base = PipelineImplBase;
 
-        template <typename ADramWindow, typename ABlockTile_>
+        template <typename ADramWindow, typename ABlockTile_, typename AQBlockTile_>
         CK_TILE_DEVICE static void LoadAndQuantizeATile(ABlockTile_& a_block_tile,
+                                                        AQBlockTile_& aq_block_tile,
                                                         const ADramWindow& a_dram_window)
         {
             static_assert(std::is_same_v<ADataType, ck_tile::bf16_t>);
-
-            constexpr index_t UnaryOpSize = 8;
-            load_and_convert_tile<UnaryOpSize>(a_block_tile, a_dram_window);
+            a_dram_window.load_and_quantize(a_block_tile, aq_block_tile);
         }
 
         template <typename BDramWindow, typename BBlockTile_>
@@ -305,14 +305,14 @@ struct FusedAQuantBQuantGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCr
             // Base::GlobalPrefetch(a_block_tile, a_copy_dram_window, a_dram_tile_window_step);
             // Base::GlobalPrefetch(b_block_tile, b_copy_dram_window, b_dram_tile_window_step);
 
-            LoadAndQuantizeATile(a_block_tile, a_copy_dram_window);
+            LoadAndQuantizeATile(a_block_tile, aq_block_tile[currIdx], a_copy_dram_window);
             move_tile_window(a_copy_dram_window, a_dram_tile_window_step);
             // B tile gets converted to A datatype during loading
             LoadAndConvertBTile(b_block_tile, b_copy_dram_window);
             move_tile_window(b_copy_dram_window, b_dram_tile_window_step);
 
-            Base::GlobalPrefetch(
-                aq_block_tile[currIdx], aq_copy_dram_window, aq_dram_tile_window_step);
+            // Base::GlobalPrefetch(
+            //     aq_block_tile[currIdx], aq_copy_dram_window, aq_dram_tile_window_step);
             Base::GlobalPrefetch(
                 bq_block_tile[currIdx], bq_copy_dram_window, bq_dram_tile_window_step);
 
@@ -345,7 +345,8 @@ struct FusedAQuantBQuantGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCr
             // Base::GlobalPrefetch(a_block_tile, a_copy_dram_window, a_dram_tile_window_step);
             // Base::GlobalPrefetch(b_block_tile, b_copy_dram_window, b_dram_tile_window_step);
 
-            LoadAndQuantizeATile(a_block_tile, a_copy_dram_window);
+            LoadAndQuantizeATile(
+                a_block_tile, aq_block_tile[(currIdx + 1) % 2], a_copy_dram_window);
             move_tile_window(a_copy_dram_window, a_dram_tile_window_step);
 
             LoadAndConvertBTile(b_block_tile, b_copy_dram_window);
@@ -395,7 +396,7 @@ struct FusedAQuantBQuantGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCr
                     // a_dram_tile_window_step);
                     // Base::GlobalPrefetch(b_block_tile, b_copy_dram_window,
                     // b_dram_tile_window_step);
-                    LoadAndQuantizeATile(a_block_tile, a_copy_dram_window);
+                    LoadAndQuantizeATile(a_block_tile, aq_block_tile[currIdx], a_copy_dram_window);
                     move_tile_window(a_copy_dram_window, a_dram_tile_window_step);
 
                     LoadAndConvertBTile(b_block_tile, b_copy_dram_window);
@@ -436,9 +437,9 @@ struct FusedAQuantBQuantGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCr
             }
             else
             {
-                Base::GlobalPrefetch(aq_block_tile[(currIdx + 1) % 2],
-                                     aq_copy_dram_window,
-                                     aq_dram_tile_window_step);
+                // Base::GlobalPrefetch(aq_block_tile[(currIdx + 1) % 2],
+                //                      aq_copy_dram_window,
+                //                      aq_dram_tile_window_step);
                 Base::GlobalPrefetch(bq_block_tile[(currIdx + 1) % 2],
                                      bq_copy_dram_window,
                                      bq_dram_tile_window_step);
