@@ -1004,7 +1004,7 @@ class TestCustomScheduleTF32:
 
         kernel.update({
             "UseF32XEmulation": True, "UseDirect32XEmulation": True,
-            "ForceUnrollSubIter": (True if plr == 0 else False), # internal state/config that needs to be set explicitly 
+            "ForceUnrollSubIter": (macro_tile[2] == mi[2]), # production sets True when DU == matrixInstK (Solution.py:1442)
             "MacroTile0": macro_tile[0], "MacroTile1": macro_tile[1], "DepthU": macro_tile[2],
             "PrefetchGlobalRead": 2, "PrefetchLocalRead": plr,
             "GlobalReadVectorWidthA": 4, "GlobalReadVectorWidthB": 4, "LocalReadVectorWidthA": 4, "LocalReadVectorWidthB": 4,
