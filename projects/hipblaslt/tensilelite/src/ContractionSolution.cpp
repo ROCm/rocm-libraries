@@ -2059,7 +2059,7 @@ namespace TensileLite
                     rv.args.template append<void const*>("AddressAmaxOut", inputs.amaxD);
                     break;
                 case CustomArgSemantic::AmaxWS:
-                    rv.args.template append<void const*>("AmaxWS", inputs.amaxD);
+                    rv.args.template append<void const*>("AmaxWS", inputs.ws);
                     break;
                 case CustomArgSemantic::AmaxSync:
                     rv.args.template append<void const*>("AmaxSync", inputs.Synchronizer);

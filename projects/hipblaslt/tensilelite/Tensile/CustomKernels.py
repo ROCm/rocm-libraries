@@ -38,6 +38,7 @@ _METADATA_NAME_TO_SEMANTIC = {
     "kernel info":            "InternalArgs",
     "kernel info0":           "InternalArgs",
     "kernel info1":           "InternalArgs1",
+    "internalArgs":           "InternalArgs",
     "numWG":                  "NumWorkGroups",
     "D":                      "AddressD",
     "C":                      "AddressC",
