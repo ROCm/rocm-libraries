@@ -143,6 +143,19 @@ namespace rocRoller
             auto saveExec = wavefrontSize == 64 ? "s_and_saveexec_b64" : "s_and_saveexec_b32";
             co_yield_(Instruction(saveExec, {sgpr}, {vcc}, {}, ""));
 
+            // If there is an else body, save VCC into an SGPR now, before generating the
+            // true body.  Nested conditionals inside the true body may overwrite VCC, making
+            // the original condition unavailable for the s_andn1_saveexec transition.
+            // This must also be before any branchAndExec branch, since the branch may skip
+            // directly to the else label, bypassing the true body.
+            Register::ValuePtr savedVcc;
+            if(elseBodyFn)
+            {
+                savedVcc = MakeScalarBool(m_context, wavefrontSize);
+                co_yield m_context->copier()->copy(
+                    savedVcc, vcc, "Save condition for else transition");
+            }
+
             if(branchAndExec)
             {
                 auto EXECZ = m_context->getEXECZ();
@@ -160,17 +173,6 @@ namespace rocRoller
                     elseLabel,
                     EXECZ,
                     concatenate("If EXECZ is set(1), jump to ", elseLabel->toString()));
-            }
-
-            // If there is an else body, save VCC into an SGPR now, before generating the
-            // true body.  Nested conditionals inside the true body may overwrite VCC, making
-            // the original condition unavailable for the s_andn1_saveexec transition.
-            Register::ValuePtr savedVcc;
-            if(elseBodyFn)
-            {
-                savedVcc = MakeScalarBool(m_context, wavefrontSize);
-                co_yield m_context->copier()->copy(
-                    savedVcc, vcc, "Save condition for else transition");
             }
 
             co_yield trueBodyFn();
