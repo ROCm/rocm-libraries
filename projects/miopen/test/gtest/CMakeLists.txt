@@ -25,7 +25,7 @@ if(MIOPEN_BACKEND_HIP)
 endif()
 
 # Skip ternary_tensor_ops test (temporary)                                                                            
-list(APPEND SKIP_TESTS test_ternary_tensor_ops)
+list(APPEND SKIP_TESTS ternary_tensor_ops.cpp)
 
 if(MIOPEN_BACKEND_OPENCL)
   list(APPEND SKIP_TESTS dumpTensorTest.cpp)
