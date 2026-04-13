@@ -74,13 +74,24 @@ inline void validateArgs([[maybe_unused]] const Args& args, [[maybe_unused]] Fmh
     // clang-format off
     static constexpr const char* tensor_names[] = {
         "Q", "K", "V", "LSE", "DO", "D", "DQ_ACC", "DK", "DV",
-        "BIAS", "DBIAS", "RANDVAL"
+        "BIAS", "DBIAS", "RANDVAL",
+        "SEQSTART_Q", "SEQSTART_K", "SEQLEN_Q", "SEQLEN_K"
     };
     // clang-format on
 
     int n = S::requiredTensors(k);
     for(int i = 0; i < n; ++i)
     {
+        // Skip optional feature slots that are not enabled for this config.
+        // Slots 9-11 (BIAS, DBIAS, RANDVAL) are intentionally unpopulated
+        // when their respective features are disabled.
+        if(i == S::BIAS && k.bias_type == FmhaBiasType::NONE)
+            continue;
+        if(i == S::DBIAS && !k.has_bias_grad)
+            continue;
+        if(i == S::RANDVAL && !k.has_dropout)
+            continue;
+
         if(args.tensors[i].ptr == nullptr)
         {
             std::fprintf(stderr,

@@ -362,9 +362,6 @@ __device__ void runFmhaBwdDQDKDV(Args args)
     if constexpr(K.mode == FmhaMode::GROUP)
     {
         // Group mode: variable-length sequences
-        // TODO: Group mode requires additional tensor slots for seqstart/seqlen
-        //       pointers. Full implementation deferred — batch mode is the
-        //       demo target.
 
         typename T::Kargs kargs{
             // FmhaBwdCommonKargs
@@ -406,16 +403,67 @@ __device__ void runFmhaBwdDQDKDV(Args args)
             {},                               // placeholder for dropout
             {},                               // placeholder for deterministic
             // FmhaBwdGroupModeKargs members
-            nullptr, // seqstart_q_ptr  (TODO: populate from Args)
-            nullptr, // seqstart_k_ptr  (TODO: populate from Args)
-            nullptr, // seqlen_q_ptr    (TODO: populate from Args)
-            nullptr, // seqlen_k_ptr    (TODO: populate from Args)
-            nullptr, // cu_seqlen_q_ptr (TODO: populate from Args)
-            nullptr  // cu_seqlen_k_ptr (TODO: populate from Args)
+            reinterpret_cast<const int32_t*>(args.tensors[S::SEQSTART_Q].ptr),
+            reinterpret_cast<const int32_t*>(args.tensors[S::SEQSTART_K].ptr),
+            reinterpret_cast<const int32_t*>(args.tensors[S::SEQLEN_Q].ptr),
+            reinterpret_cast<const int32_t*>(args.tensors[S::SEQLEN_K].ptr),
+            nullptr, // cu_seqlen_q_ptr (unused — seqstart/seqlen are authoritative)
+            nullptr  // cu_seqlen_k_ptr (unused)
         };
 
-        // TODO: Populate optional fields (bias, mask, dropout, deterministic)
-        //       and group-mode seqstart/seqlen pointers.
+        // --- Populate optional fields via if constexpr ---
+
+        if constexpr(K.bias_type == FmhaBiasType::ELEMENTWISE)
+        {
+            const TensorArg& t_bias = args.tensors[S::BIAS];
+            kargs.bias_ptr          = t_bias.ptr;
+            kargs.stride_bias       = static_cast<index_t>(t_bias.strides[0]);
+            kargs.nhead_stride_bias = static_cast<index_t>(t_bias.strides[1]);
+        }
+        else if constexpr(K.bias_type == FmhaBiasType::ALIBI)
+        {
+            const TensorArg& t_bias  = args.tensors[S::BIAS];
+            kargs.alibi_slope_ptr    = t_bias.ptr;
+            kargs.alibi_slope_stride = static_cast<index_t>(t_bias.strides[0]);
+        }
+
+        if constexpr(K.has_bias_grad)
+        {
+            const TensorArg& t_dbias = args.tensors[S::DBIAS];
+            kargs.dbias_ptr          = const_cast<void*>(t_dbias.ptr);
+            kargs.stride_dbias       = static_cast<index_t>(t_dbias.strides[0]);
+            kargs.nhead_stride_dbias = static_cast<index_t>(t_dbias.strides[1]);
+        }
+
+        if constexpr(K.has_mask)
+        {
+            kargs.window_size_left  = -1;
+            kargs.window_size_right = 0;
+            kargs.mask_type         = ck_tile::GenericAttentionMaskEnum::MASK_FROM_TOP_LEFT;
+        }
+
+        if constexpr(K.has_dropout)
+        {
+            const float p_undrop      = args.scalars[S::P_UNDROP].f32;
+            const float rp_undrop     = args.scalars[S::RP_UNDROP].f32;
+            kargs.rp_undrop           = rp_undrop;
+            kargs.scale_rp_undrop     = rp_undrop * raw_scale;
+            kargs.p_undrop_in_uint8_t = static_cast<uint8_t>(__builtin_floorf(p_undrop * 255.0f));
+
+            kargs.drop_seed.val                 = args.scalars[S::DROP_SEED].u64;
+            kargs.drop_offset.val               = args.scalars[S::DROP_OFFSET].u64;
+            kargs.is_drop_seed_offset_from_host = true;
+
+            kargs.rand_val_ptr         = nullptr;
+            kargs.stride_randval       = 0;
+            kargs.nhead_stride_randval = 0;
+        }
+
+        if constexpr(K.is_deterministic)
+        {
+            const index_t split_stride_dq_acc = static_cast<index_t>(t_dq_acc.strides[3]);
+            kargs.split_stride_dq_acc         = split_stride_dq_acc;
+        }
 
         typename T::Kernel{}(kargs);
     }

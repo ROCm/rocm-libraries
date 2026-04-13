@@ -115,18 +115,33 @@ constexpr int BIAS    = 9;  // optional: present if bias_type != NONE
 constexpr int DBIAS   = 10; // optional: present if has_bias_grad
 constexpr int RANDVAL = 11; // optional: present if has_dropout
 
+// Group-mode tensor slots (indices into Args::tensors[])
+// These provide per-batch sequence start offsets and actual lengths
+// for variable-length sequences.
+constexpr int SEQSTART_Q = 12; // const int32_t*: Q-sequence start offsets [batch+1]
+constexpr int SEQSTART_K = 13; // const int32_t*: K-sequence start offsets [batch+1]
+constexpr int SEQLEN_Q   = 14; // const int32_t*: per-batch actual Q-lengths [batch]
+constexpr int SEQLEN_K   = 15; // const int32_t*: per-batch actual K-lengths [batch]
+
 /// Minimum tensor slot count (max_used_index + 1) for a given config.
 /// Slot indices are fixed (BIAS=9, DBIAS=10, RANDVAL=11) regardless of
 /// which features are enabled — unused slots are simply not populated.
 constexpr int requiredTensors(FmhaBwdDQDKDVSpec k)
 {
-    if(k.has_dropout)
-        return RANDVAL + 1; // 12
-    if(k.has_bias_grad)
-        return DBIAS + 1; // 11
+    // Start with the highest optional feature slot used
+    int n = DV + 1; // 9 (base: Q through DV)
     if(k.bias_type != FmhaBiasType::NONE)
-        return BIAS + 1; // 10
-    return DV + 1;       // 9
+        n = BIAS + 1; // 10
+    if(k.has_bias_grad)
+        n = DBIAS + 1; // 11
+    if(k.has_dropout)
+        n = RANDVAL + 1; // 12
+
+    // Group mode adds seqstart/seqlen slots after all feature slots
+    if(k.mode == FmhaMode::GROUP)
+        n = SEQLEN_K + 1; // 16 (always the highest slot)
+
+    return n;
 }
 
 // Scalar slots (indices into Args::scalars[])

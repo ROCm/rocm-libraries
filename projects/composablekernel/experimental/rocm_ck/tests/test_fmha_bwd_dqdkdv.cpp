@@ -398,7 +398,7 @@ TEST(FmhaBwdDqDkDv, RequiredScalarsWithDropout)
     EXPECT_EQ(S::requiredScalars(k), 8);
 }
 
-TEST(FmhaBwdDqDkDv, RequiredTensorsGroupSameAsBatch)
+TEST(FmhaBwdDqDkDv, RequiredTensorsGroupIncludesSeqSlots)
 {
     constexpr auto k_batch =
         makeSpec(FmhaBwdDQDKDVConfig{.signature = {.dtype  = DataType::FP16,
