@@ -34,7 +34,7 @@ pandas==1.5.3
     # via
     #   -r requirements.in
     #   seaborn
-pillow==10.3.0
+pillow==12.2.0
     # via matplotlib
 pyparsing==3.0.9
     # via matplotlib
