@@ -273,7 +273,7 @@ protected:
            != bundle.tensors.end())
         {
             bundle.tensors.at(BatchnormFwdTrainingActivTensorIds::PREV_RUNNING_VARIANCE_UID)
-                ->fillTensorWithRandomValues(-2.0f, 2.0f, seed + 2000);
+                ->fillTensorWithRandomValues(0.1f, 2.0f, seed + 2000);
         }
     }
 
