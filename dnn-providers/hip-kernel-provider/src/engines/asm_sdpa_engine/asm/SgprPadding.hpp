@@ -14,6 +14,7 @@
 
 #pragma once
 
+#include <array>
 #include <cstdint>
 
 namespace asm_sdpa_engine
@@ -29,12 +30,12 @@ namespace asm_sdpa_engine
 
 struct SgprPad2
 {
-    uint32_t pad[2]; // NOLINT(modernize-avoid-c-arrays,readability-identifier-naming)
+    std::array<uint32_t, 2> pad;
 };
 
 struct SgprPad3
 {
-    uint32_t pad[3]; // NOLINT(modernize-avoid-c-arrays,readability-identifier-naming)
+    std::array<uint32_t, 3> pad;
 };
 
 } // namespace asm_sdpa_engine
