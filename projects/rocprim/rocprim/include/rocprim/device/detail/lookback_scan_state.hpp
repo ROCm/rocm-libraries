@@ -636,17 +636,18 @@ public:
         this->set(block_id, lookback_scan_prefix_flag::complete, value);
     }
 
-    /// \brief This device function queries the value and the flag of the given prefix.
+    /// \brief This device function queries the value of the given prefix with the know flag.
     ///
     /// \param [in] block_id the index of the prefix to be queried.
     /// \param [out] flag the flag of the prefix.
     /// \param [out] value the value of the prefix.
     ROCPRIM_DEVICE ROCPRIM_INLINE
-    void get(const unsigned int block_id, lookback_scan_prefix_flag& flag, T& value)
+    void get_value_with_known_flag(const unsigned int              block_id,
+                                   const lookback_scan_prefix_flag flag,
+                                   T&                              value)
     {
         const unsigned int padding = ::rocprim::arch::wavefront::size();
 
-        flag = this->get_flag(block_id);
 #if ROCPRIM_DETAIL_LOOKBACK_SCAN_STATE_WITHOUT_SLOW_FENCES
         rocprim::detail::atomic_fence_acquire_order_only();
 
@@ -667,6 +668,19 @@ public:
                                                        : prefixes_complete_values);
         value              = values[padding + block_id];
 #endif
+    }
+
+    /// \brief This device function queries the value and the flag of the given prefix.
+    ///
+    /// \param [in] block_id the index of the prefix to be queried.
+    /// \param [out] flag the flag of the prefix.
+    /// \param [out] value the value of the prefix.
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void get(const unsigned int block_id, lookback_scan_prefix_flag& flag, T& value)
+    {
+        flag = this->get_flag(block_id);
+
+        this->get_value_with_known_flag(block_id, flag, value);
     }
 
     /// \brief This device function queries the value of the given prefix. It should only be called after all the blocks/prefixes are complete.
@@ -767,7 +781,7 @@ public:
         }
 
         T block_prefix;
-        this->get(lookback_block_id, flag, block_prefix);
+        this->get_value_with_known_flag(lookback_block_id, flag, block_prefix);
 
         // Now just sum all these values to get the prefix
         // Note that the values are striped across the threads.
