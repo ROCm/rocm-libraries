@@ -576,10 +576,8 @@ int main(int argc, char* argv[])
     const auto io_vram_footprint = params.io_vram_footprint();
     if(!vram_fits_problem(io_vram_footprint, vram_avail))
     {
-        std::cout << "SKIPPED: Problem size ("
-                  << fft_params::vram_footprint_to_str(io_vram_footprint)
-                  << ") exceeds usable memory on device ("
-                  << fft_params::vram_footprint_to_str(vram_avail) << ")";
+        std::cout << "SKIPPED: Problem size (" << byte_sizes_to_str(io_vram_footprint)
+                  << ") exceeds usable memory on device (" << byte_sizes_to_str(vram_avail) << ")";
         return EXIT_SUCCESS;
     }
 
@@ -684,8 +682,7 @@ int main(int argc, char* argv[])
             info.push_back(make_execinfo(handle[idx]));
         }
 
-        std::cout << "Work buffer size: " << fft_params::vram_footprint_to_str(max_wbuffer_sizes)
-                  << std::endl;
+        std::cout << "Work buffer size: " << byte_sizes_to_str(max_wbuffer_sizes) << std::endl;
 
         // add work memory to vram footprint
         auto total_vram_footprint = io_vram_footprint;
@@ -695,13 +692,11 @@ int main(int argc, char* argv[])
         }
         if(!vram_fits_problem(total_vram_footprint, vram_avail))
         {
-            std::cout << "SKIPPED: Problem size ("
-                      << fft_params::vram_footprint_to_str(total_vram_footprint) << " + "
-                      << fft_params::vram_footprint_to_str(max_wbuffer_sizes) << " = "
-                      << fft_params::vram_footprint_to_str(io_vram_footprint)
-                             + fft_params::vram_footprint_to_str(max_wbuffer_sizes)
-                      << ") exceeds usable memory on device ("
-                      << fft_params::vram_footprint_to_str(vram_avail) << ")";
+            std::cout << "SKIPPED: Problem size (" << byte_sizes_to_str(total_vram_footprint)
+                      << " + " << byte_sizes_to_str(max_wbuffer_sizes) << " = "
+                      << byte_sizes_to_str(io_vram_footprint) + byte_sizes_to_str(max_wbuffer_sizes)
+                      << ") exceeds usable memory on device (" << byte_sizes_to_str(vram_avail)
+                      << ")";
             return EXIT_SUCCESS;
         }
 

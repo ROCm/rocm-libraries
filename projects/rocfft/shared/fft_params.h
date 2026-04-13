@@ -2275,19 +2275,6 @@ public:
     virtual fft_status execute(void** in, void** out)
     {
         return fft_status_success;
-    };
-
-    // stringify a vram footprint for output/logging
-    static std::string vram_footprint_to_str(const std::vector<size_t>& footprint)
-    {
-        std::string ret;
-        for(auto i : footprint)
-        {
-            if(!ret.empty())
-                ret.push_back(',');
-            ret += byte_size_to_str(i);
-        }
-        return ret;
     }
 
     // return the per-device memory footprint of just the input/output data

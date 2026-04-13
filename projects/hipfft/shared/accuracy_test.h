@@ -93,16 +93,14 @@ inline void check_problem_fits_device_memory(Tparams& params, const int verbose)
     if(!vram_fits_problem(io_vram_footprint, vram_avail))
     {
         std::stringstream ss;
-        ss << "Raw problem size (" << fft_params::vram_footprint_to_str(io_vram_footprint)
-           << ") exceeds usable memory on device (" << fft_params::vram_footprint_to_str(vram_avail)
-           << ")";
+        ss << "Raw problem size (" << byte_sizes_to_str(io_vram_footprint)
+           << ") exceeds usable memory on device (" << byte_sizes_to_str(vram_avail) << ")";
         throw ROCFFT_SKIP{ss.str()};
     }
 
     if(verbose > 2)
     {
-        std::cout << "Raw problem size: " << fft_params::vram_footprint_to_str(io_vram_footprint)
-                  << std::endl;
+        std::cout << "Raw problem size: " << byte_sizes_to_str(io_vram_footprint) << std::endl;
     }
 
     // If it passed the quick estimation test, go for the more
@@ -116,9 +114,8 @@ inline void check_problem_fits_device_memory(Tparams& params, const int verbose)
             std::cout << "Problem raw data won't fit on device; skipped." << std::endl;
         }
         std::stringstream ss;
-        ss << "Problem size (" << fft_params::vram_footprint_to_str(vram_footprint)
-           << ") exceeds usable memory on device (" << fft_params::vram_footprint_to_str(vram_avail)
-           << ")";
+        ss << "Problem size (" << byte_sizes_to_str(vram_footprint)
+           << ") exceeds usable memory on device (" << byte_sizes_to_str(vram_avail) << ")";
         throw ROCFFT_SKIP{ss.str()};
     }
 }
