@@ -33,6 +33,12 @@
 
 namespace hiptensor
 {
+    /* static */ std::unique_ptr<Logger> const& Logger::instance()
+    {
+        static auto sInstance = std::make_unique<Logger>();
+        return sInstance;
+    }
+
     Logger::Logger()
         : mEnabled(true)
         , mOwnsStream(false)

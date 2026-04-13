@@ -77,14 +77,12 @@ namespace RandomNumberGenerationTest
             std::vector<uint32_t> A(nx, 0u);
             auto                  d_A = make_shared_device(A);
             commandArgs.setArgument(tagA, ArgumentType::Value, d_A.get());
-            commandArgs.setArgument(tagA, ArgumentType::Limit, nx);
             commandArgs.setArgument(tagA, ArgumentType::Size, 0, nx);
             commandArgs.setArgument(tagA, ArgumentType::Stride, 0, (size_t)1);
 
             std::vector<uint32_t> output(nx, 0u);
             auto                  d_output = make_shared_device(output);
             commandArgs.setArgument(outputTag, ArgumentType::Value, d_output.get());
-            commandArgs.setArgument(outputTag, ArgumentType::Limit, nx);
             commandArgs.setArgument(outputTag, ArgumentType::Size, 0, nx);
             commandArgs.setArgument(outputTag, ArgumentType::Stride, 0, (size_t)1);
 
@@ -172,7 +170,6 @@ namespace RandomNumberGenerationTest
             for(auto tag : inputTags)
             {
                 commandArgs.setArgument(tag, ArgumentType::Value, d_A.get());
-                commandArgs.setArgument(tag, ArgumentType::Limit, nx);
                 commandArgs.setArgument(tag, ArgumentType::Size, 0, nx);
                 commandArgs.setArgument(tag, ArgumentType::Stride, 0, (size_t)1);
             }
@@ -182,7 +179,6 @@ namespace RandomNumberGenerationTest
             {
                 auto d_output = make_shared_device<uint32_t>(nx, 0);
                 commandArgs.setArgument(outputTags[i], ArgumentType::Value, d_output.get());
-                commandArgs.setArgument(outputTags[i], ArgumentType::Limit, nx);
                 commandArgs.setArgument(outputTags[i], ArgumentType::Size, 0, nx);
                 commandArgs.setArgument(outputTags[i], ArgumentType::Stride, 0, (size_t)1);
                 d_outputs.push_back(d_output);
@@ -282,21 +278,18 @@ namespace RandomNumberGenerationTest
             std::vector<uint32_t> A(nx, 0u);
             auto                  d_A = make_shared_device(A);
             commandArgs.setArgument(tagA, ArgumentType::Value, d_A.get());
-            commandArgs.setArgument(tagA, ArgumentType::Limit, nx);
             commandArgs.setArgument(tagA, ArgumentType::Size, 0, nx);
             commandArgs.setArgument(tagA, ArgumentType::Stride, 0, (size_t)1);
 
             std::vector<uint32_t> output1(nx, 0u);
             auto                  d_output1 = make_shared_device(output1);
             commandArgs.setArgument(outputTag1, ArgumentType::Value, d_output1.get());
-            commandArgs.setArgument(outputTag1, ArgumentType::Limit, nx);
             commandArgs.setArgument(outputTag1, ArgumentType::Size, 0, nx);
             commandArgs.setArgument(outputTag1, ArgumentType::Stride, 0, (size_t)1);
 
             std::vector<uint32_t> output2(nx, 0u);
             auto                  d_output2 = make_shared_device(output2);
             commandArgs.setArgument(outputTag2, ArgumentType::Value, d_output2.get());
-            commandArgs.setArgument(outputTag2, ArgumentType::Limit, nx);
             commandArgs.setArgument(outputTag2, ArgumentType::Size, 0, nx);
             commandArgs.setArgument(outputTag2, ArgumentType::Stride, 0, (size_t)1);
 
@@ -388,8 +381,8 @@ namespace RandomNumberGenerationTest
             params->setManualKernelDimension(2);
             params->setManualWorkgroupSize({workgroup_size_x, workgroup_size_y, 1});
 
-            auto macTile
-                = KernelGraph::CoordinateGraph::MacroTile({m, n}, MemoryType::VGPR, {t_m, t_n});
+            auto macTile = KernelGraph::CoordinateGraph::MacroTile(
+                {m, n}, LayoutType::ROW_MAJOR, {t_m, t_n}, MemoryType::VGPR);
             params->setDimensionInfo(tagLoadA, macTile);
             params->setDimensionInfo(outputTag, macTile);
 

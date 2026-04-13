@@ -56,6 +56,11 @@ struct Arguments
         Scalar                  = 1,
         Vector                  = 2,
         Block_32_UE8M0          = 3,
+        Block_16_UE8M0          = 4,
+        Block_32_UE4M3          = 5,
+        Block_16_UE4M3          = 6,
+        Block_32_UE5M3          = 7,
+        Block_16_UE5M3          = 8,
         Block_32_UE8M0_32_8_EXT = 1001,
     };
 

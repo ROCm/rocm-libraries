@@ -246,9 +246,9 @@ T5LayernormBackward::GetSolution(const ExecutionContext& context,
                 decltype(auto) weight_kernel          = handle_.Run(kernels[2]);
                 decltype(auto) params = raw_params.CastTo<miopen::layernorm::T5BwdInvokeParams>();
 
-                auto reqd_work_item_cnt = get_reqd_work_item_cnt(handle_, LOCAL_SIZE);
-                auto parallelism_size =
-                    get_parallelism_size(reqd_work_item_cnt, params.inner_size, params.outer_size);
+                auto reqd_work_item_count = get_reqd_work_item_cnt(handle_, LOCAL_SIZE);
+                auto parallelism_size     = get_parallelism_size(
+                    reqd_work_item_count, params.inner_size, params.outer_size);
 
                 auto elapsed = 0.f;
                 HipEventPtr start;

@@ -14,9 +14,9 @@
 
 #include <flatbuffers/flatbuffers.h>
 #include <gtest/gtest.h>
-#include <hipdnn_data_sdk/data_objects/block_scale_dequantize_attributes_generated.h>
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
-#include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/block_scale_dequantize_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_test_sdk/constants/BlockScaleDequantizeConstants.hpp>
 #include <hipdnn_test_sdk/utilities/ToVec.hpp>
 
@@ -27,7 +27,7 @@
 
 using namespace hipdnn_backend;
 using namespace hipdnn_backend::test_utilities;
-using namespace hipdnn_data_sdk::data_objects;
+using namespace hipdnn_flatbuffers_sdk::data_objects;
 using namespace hipdnn_tests::constants;
 using hipdnn_tests::toVec;
 
@@ -44,26 +44,28 @@ inline std::unique_ptr<HipdnnBackendDescriptor>
     auto wrapper = createDescriptor<BlockScaleDequantizeOperationDescriptor>();
     auto desc = wrapper->asDescriptor<BlockScaleDequantizeOperationDescriptor>();
 
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_X_EXT,
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_XDESC,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        static_cast<const void*>(&xDesc));
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_SCALE_EXT,
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_SCALE_DESC,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        static_cast<const void*>(&scaleDesc));
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_Y_EXT,
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_YDESC,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        static_cast<const void*>(&yDesc));
 
     std::vector<int32_t> blockSize = {K_BSD_BLOCK_SIZE};
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_BLOCK_SIZE_EXT,
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_BLOCK_SIZE,
                        HIPDNN_TYPE_INT32,
                        1,
                        blockSize.data());
-    desc->setAttribute(
-        HIPDNN_ATTR_BLOCK_SCALE_DEQUANTIZE_MATH_PREC_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_MATH_PREC,
+                       HIPDNN_TYPE_DATA_TYPE,
+                       1,
+                       &computeType);
 
     desc->finalize();
     return wrapper;
@@ -294,34 +296,36 @@ TEST_F(TestGraphDescriptorBlockScaleDequantize, DeserializePreservesIsNegativeSc
     auto* xRaw = xDesc.get();
     auto* scaleRaw = scaleDesc.get();
     auto* yRaw = yDesc.get();
-    opDesc->setAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_X_EXT,
+    opDesc->setAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_XDESC,
                          HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                          1,
                          static_cast<const void*>(&xRaw));
-    opDesc->setAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_SCALE_EXT,
+    opDesc->setAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_SCALE_DESC,
                          HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                          1,
                          static_cast<const void*>(&scaleRaw));
-    opDesc->setAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_Y_EXT,
+    opDesc->setAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_YDESC,
                          HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                          1,
                          static_cast<const void*>(&yRaw));
 
     std::vector<int32_t> blockSize = {K_BSD_BLOCK_SIZE};
-    opDesc->setAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_BLOCK_SIZE_EXT,
+    opDesc->setAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_BLOCK_SIZE,
                          HIPDNN_TYPE_INT32,
                          1,
                          blockSize.data());
 
     bool isNegativeScale = true;
-    opDesc->setAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_IS_NEGATIVE_SCALE_EXT,
+    opDesc->setAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_NEG_SCALE,
                          HIPDNN_TYPE_BOOLEAN,
                          1,
                          &isNegativeScale);
 
     hipdnnDataType_t computeType = HIPDNN_DATA_FLOAT;
-    opDesc->setAttribute(
-        HIPDNN_ATTR_BLOCK_SCALE_DEQUANTIZE_MATH_PREC_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
+    opDesc->setAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_MATH_PREC,
+                         HIPDNN_TYPE_DATA_TYPE,
+                         1,
+                         &computeType);
     opDesc->finalize();
 
     auto serializedBytes = buildAndSerializeGraph(wrapper.get());
