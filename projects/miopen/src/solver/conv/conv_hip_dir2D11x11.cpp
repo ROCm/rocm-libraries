@@ -26,6 +26,7 @@ bool ConvHipDirectFwd11x11::IsApplicable(const ExecutionContext& ctx,
     if(!ctx.use_hip_kernels)
         return false;
     const auto& name = ctx.GetStream().GetDeviceName();
+    // gfx8 is intentionally excluded: it is end-of-life and not supported for new HIP solvers.
     if(!(StartsWith(name, "gfx90") || StartsWith(name, "gfx94") || StartsWith(name, "gfx95") ||
          StartsWith(name, "gfx103") || StartsWith(name, "gfx110") || StartsWith(name, "gfx115") ||
          StartsWith(name, "gfx120")))
@@ -134,7 +135,6 @@ ConvSolution ConvHipDirectFwd11x11::GetSolution(const ExecutionContext& /*ctx*/,
 
     // Build compile-time parameters for the HIP kernel
     const auto build_params = KernelBuildParameters{
-        {"MLO_DIR_FORWARD", 1},
         {"MLO_GRP_SZ", GRP_SZ},
         {"MLO_GRP_SZ0", result.grp_tile0},
         {"MLO_GRP_SZ1", result.grp_tile1},

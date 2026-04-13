@@ -235,7 +235,6 @@ set( MIOpen_Source
     solver/conv/conv_ocl_dir2D_bwdWrW_2.cpp
     solver/conv/conv_ocl_dir2D_bwdWrW_53.cpp
     solver/conv/conv_hip_dir2D11x11.cpp
-
     solver/conv/conv_ocl_dir2Dfwd.cpp
     solver/conv/conv_ocl_dir2Dfwd_exhaustive_search.cpp
     solver/conv/conv_ocl_dir2Dfwd1x1.cpp
