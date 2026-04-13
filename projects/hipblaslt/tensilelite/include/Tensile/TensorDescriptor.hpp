@@ -345,10 +345,10 @@ namespace TensileLite
         }
         size_t totalAllocatedBytes() const
         {
-            return totalAllocatedElements() * elementBytes();
+            return multiplyElementSize(totalAllocatedElements(), elementBytes());
         }
 
-        size_t elementBytes() const
+        float elementBytes() const
         {
             return DataTypeInfo::Get(m_dataType).elementSize;
         }
@@ -509,14 +509,14 @@ namespace TensileLite
             {
                 coord[0] = 0;
 
-                auto const* localPtr = data + desc.index(coord);
+                auto const* localPtr = data + (desc.index(coord) / TypeInfo<T>::Packing);
 
                 if(sizes[0] > 0)
                     stream << localPtr[0];
 
-                for(coord[0] = 1; coord[0] < sizes[0]; coord[0]++)
+                for(coord[0] = TypeInfo<T>::Packing; coord[0] < sizes[0]; coord[0]+=TypeInfo<T>::Packing)
                 {
-                    stream << " " << localPtr[coord[0] * stride0];
+                    stream << " " << localPtr[coord[0] * stride0 / TypeInfo<T>::Packing];
                 }
 
                 stream << std::endl;
@@ -524,7 +524,7 @@ namespace TensileLite
 
             if(decorated)
             {
-                stream << std::endl << "]" << std::endl;
+                stream << "]" << std::endl;
             }
         }
     }

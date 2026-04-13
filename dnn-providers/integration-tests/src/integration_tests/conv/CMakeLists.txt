@@ -6,4 +6,5 @@ target_sources(${INTEGRATION_TESTS_EXE}
         IntegrationGpuConvForward.cpp
         IntegrationGpuConvBackwardData.cpp
         IntegrationGpuConvBackwardWeights.cpp
+        IntegrationGpuConvFwdBiasActiv.cpp
 )

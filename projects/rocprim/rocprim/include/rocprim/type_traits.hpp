@@ -60,6 +60,9 @@ namespace traits
 /// \par Example
 /// \parblock
 /// The example below demonstrates how to implement traits for a custom floating-point type.
+///
+/// The full example is [on GitHub](https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocprim/example/rocprim/example_type_traits.cpp).
+///
 /// \code{.cpp}
 /// // Your type definition
 /// struct custom_float_type

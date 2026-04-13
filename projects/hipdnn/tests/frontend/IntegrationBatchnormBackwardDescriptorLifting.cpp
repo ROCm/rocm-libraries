@@ -5,6 +5,7 @@
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 #include <memory>
+#include <string>
 #include <vector>
 
 #include <hipdnn_frontend.hpp>
@@ -244,24 +245,27 @@ TEST_F(IntegrationBatchnormBackwardDescriptorLifting, BasicBatchnormBackwardRoun
     auto liftedDx = tensorMap[K_BN_BWD_TENSOR_DX_UID];
     EXPECT_EQ(liftedDx->get_uid(), K_BN_BWD_TENSOR_DX_UID);
     EXPECT_EQ(liftedDx->get_name(), "DX");
-    EXPECT_FALSE(liftedDx->get_dim().empty());
-    EXPECT_FALSE(liftedDx->get_stride().empty());
+    EXPECT_EQ(liftedDx->get_dim(), toVec(K_BN_BWD_TENSOR_DX_DIMS));
+    EXPECT_EQ(liftedDx->get_stride(), toVec(K_BN_BWD_TENSOR_DX_STRIDES));
+    EXPECT_EQ(liftedDx->get_data_type(), DataType::FLOAT);
 
     // DScale tensor (output)
     ASSERT_NE(tensorMap.count(K_BN_BWD_TENSOR_DSCALE_UID), 0u);
     auto liftedDscale = tensorMap[K_BN_BWD_TENSOR_DSCALE_UID];
     EXPECT_EQ(liftedDscale->get_uid(), K_BN_BWD_TENSOR_DSCALE_UID);
     EXPECT_EQ(liftedDscale->get_name(), "DScale");
-    EXPECT_FALSE(liftedDscale->get_dim().empty());
-    EXPECT_FALSE(liftedDscale->get_stride().empty());
+    EXPECT_EQ(liftedDscale->get_dim(), toVec(K_BN_BWD_TENSOR_DSCALE_DIMS));
+    EXPECT_EQ(liftedDscale->get_stride(), toVec(K_BN_BWD_TENSOR_DSCALE_STRIDES));
+    EXPECT_EQ(liftedDscale->get_data_type(), DataType::FLOAT);
 
     // DBias tensor (output)
     ASSERT_NE(tensorMap.count(K_BN_BWD_TENSOR_DBIAS_UID), 0u);
     auto liftedDbias = tensorMap[K_BN_BWD_TENSOR_DBIAS_UID];
     EXPECT_EQ(liftedDbias->get_uid(), K_BN_BWD_TENSOR_DBIAS_UID);
     EXPECT_EQ(liftedDbias->get_name(), "DBias");
-    EXPECT_FALSE(liftedDbias->get_dim().empty());
-    EXPECT_FALSE(liftedDbias->get_stride().empty());
+    EXPECT_EQ(liftedDbias->get_dim(), toVec(K_BN_BWD_TENSOR_DBIAS_DIMS));
+    EXPECT_EQ(liftedDbias->get_stride(), toVec(K_BN_BWD_TENSOR_DBIAS_STRIDES));
+    EXPECT_EQ(liftedDbias->get_data_type(), DataType::FLOAT);
 
     // Verify 1 sub-node of the correct type
     auto& subNodes = liftedGraph->getSubNodes();
@@ -519,6 +523,97 @@ TEST_F(IntegrationBatchnormBackwardDescriptorLifting, BatchnormBackwardAutoAssig
     EXPECT_EQ(tensorMap[scaleUid]->get_stride(), toVec(K_BN_BWD_AUTO_PARAM_STRIDES));
     EXPECT_EQ(tensorMap[dxUid]->get_dim(), toVec(K_BN_BWD_AUTO_DATA_DIMS));
     EXPECT_EQ(tensorMap[dxUid]->get_stride(), toVec(K_BN_BWD_AUTO_DATA_STRIDES));
+}
+
+// Exercises the JSON serialize/deserialize path with a handle (full finalization)
+// for a batchnorm backward graph with optional mean/invVariance.
+TEST_F(IntegrationBatchnormBackwardDescriptorLifting, JsonRoundTripWithHandle)
+{
+    auto originalGraph = buildBatchnormBackwardGraph();
+
+    auto result = originalGraph->validate();
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    // Serialize to JSON (auto-lowers internally)
+    std::string jsonData;
+    result = originalGraph->serialize(jsonData);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+    ASSERT_FALSE(jsonData.empty());
+
+    // Deserialize from JSON with handle
+    auto liftedGraph = std::make_shared<TestableGraphLifting>();
+    result = liftedGraph->deserialize(_handle, jsonData);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    // Verify graph-level attributes
+    EXPECT_EQ(liftedGraph->get_name(), "BnBwdLiftingTestGraph");
+    EXPECT_EQ(liftedGraph->get_compute_data_type(), DataType::FLOAT);
+    EXPECT_EQ(liftedGraph->get_intermediate_data_type(), DataType::FLOAT);
+    EXPECT_EQ(liftedGraph->get_io_data_type(), DataType::FLOAT);
+
+    // Verify tensor count (dy, x, scale, mean, invVar, dx, dscale, dbias = 8)
+    auto tensorMap = liftedGraph->getTensorsByUid();
+    ASSERT_EQ(tensorMap.size(), 8u) << "Expected 8 tensors in lifted batchnorm backward graph";
+
+    // Verify tensors
+    hipdnn_tests::verifyTensorInGraph(tensorMap,
+                                      K_BN_BWD_TENSOR_DY_UID,
+                                      "DY",
+                                      toVec(K_BN_BWD_TENSOR_DY_DIMS),
+                                      toVec(K_BN_BWD_TENSOR_DY_STRIDES),
+                                      DataType::FLOAT);
+    hipdnn_tests::verifyTensorInGraph(tensorMap,
+                                      K_BN_BWD_TENSOR_X_UID,
+                                      "X",
+                                      toVec(K_BN_BWD_TENSOR_X_DIMS),
+                                      toVec(K_BN_BWD_TENSOR_X_STRIDES),
+                                      DataType::FLOAT);
+    hipdnn_tests::verifyTensorInGraph(tensorMap,
+                                      K_BN_BWD_TENSOR_SCALE_UID,
+                                      "Scale",
+                                      toVec(K_BN_BWD_TENSOR_SCALE_DIMS),
+                                      toVec(K_BN_BWD_TENSOR_SCALE_STRIDES),
+                                      DataType::FLOAT);
+    hipdnn_tests::verifyTensorInGraph(tensorMap,
+                                      K_BN_BWD_TENSOR_MEAN_UID,
+                                      "Mean",
+                                      toVec(K_BN_BWD_TENSOR_SCALE_DIMS),
+                                      toVec(K_BN_BWD_TENSOR_SCALE_STRIDES),
+                                      DataType::FLOAT);
+    hipdnn_tests::verifyTensorInGraph(tensorMap,
+                                      K_BN_BWD_TENSOR_INV_VARIANCE_UID,
+                                      "InvVariance",
+                                      toVec(K_BN_BWD_TENSOR_SCALE_DIMS),
+                                      toVec(K_BN_BWD_TENSOR_SCALE_STRIDES),
+                                      DataType::FLOAT);
+    hipdnn_tests::verifyTensorInGraph(tensorMap,
+                                      K_BN_BWD_TENSOR_DX_UID,
+                                      "DX",
+                                      toVec(K_BN_BWD_TENSOR_DX_DIMS),
+                                      toVec(K_BN_BWD_TENSOR_DX_STRIDES),
+                                      DataType::FLOAT);
+    hipdnn_tests::verifyTensorInGraph(tensorMap,
+                                      K_BN_BWD_TENSOR_DSCALE_UID,
+                                      "DScale",
+                                      toVec(K_BN_BWD_TENSOR_DSCALE_DIMS),
+                                      toVec(K_BN_BWD_TENSOR_DSCALE_STRIDES),
+                                      DataType::FLOAT);
+    hipdnn_tests::verifyTensorInGraph(tensorMap,
+                                      K_BN_BWD_TENSOR_DBIAS_UID,
+                                      "DBias",
+                                      toVec(K_BN_BWD_TENSOR_DBIAS_DIMS),
+                                      toVec(K_BN_BWD_TENSOR_DBIAS_STRIDES),
+                                      DataType::FLOAT);
+
+    // Verify sub-node count and type
+    auto& subNodes = liftedGraph->getSubNodes();
+    ASSERT_EQ(subNodes.size(), 1u) << "Expected 1 operation node in lifted graph";
+
+    auto* bnBwdNode = dynamic_cast<BatchnormBackwardNode*>(subNodes[0].get());
+    ASSERT_NE(bnBwdNode, nullptr) << "Expected a BatchnormBackwardNode";
+
+    EXPECT_EQ(bnBwdNode->attributes.get_name(), "bn_bwd_op");
+    EXPECT_EQ(bnBwdNode->attributes.compute_data_type, DataType::FLOAT);
 }
 
 } // namespace
