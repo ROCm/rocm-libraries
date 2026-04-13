@@ -682,7 +682,7 @@ option(DISABLE_OFFLOAD_COMPRESS "Disable offload compress compiler flag when bui
 option(BUILD_MHA_LIB "Build the static library for flash attention" OFF)
 option(BUILD_CK_DEVICE_INSTANCES "Build device operation instances in library/" ON)
 option(BUILD_CK_PROFILER "Build the CK profiler in profiler/" ON)
-option(BUILD_CK_TILE_ENGINE_TESTS "Build tile engine tests (gemm_tile_engine and gemm_streamk_tile_engine)" ON)
+option(BUILD_CK_TILE_ENGINE_TESTS "Build tile engine tests" ON)
 option(BUILD_CK_TILE_FMHA_TESTS "Build FMHA tests" ON)
 option(BUILD_CK_TILE_CSHUFFLE_LDS_BENCHMARKS "Build CShuffleLds microbenchmarks (requires BUILD_CK_EXAMPLES=ON)" OFF)
 
