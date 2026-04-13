@@ -107,7 +107,7 @@ void cpu_geev(char   jobvl,
               float* rwork,
               int*   info)
 {
-    // zero out Infs and NaNs
+    // check for Infs and NaNs
     for(int i = 0; i < n; i++)
         for(int j = 0; j < n; j++)
             if(std::isinf(A[i + j * lda]) || std::isnan(A[i + j * lda]))
@@ -131,7 +131,7 @@ void cpu_geev(char    jobvl,
               double* rwork,
               int*    info)
 {
-    // zero out Infs and NaNs
+    // check for Infs and NaNs
     for(int i = 0; i < n; i++)
         for(int j = 0; j < n; j++)
             if(std::isinf(A[i + j * lda]) || std::isnan(A[i + j * lda]))
@@ -155,7 +155,7 @@ void cpu_geev(char             jobvl,
               float*           rwork,
               int*             info)
 {
-    // zero out Infs and NaNs
+    // check for Infs and NaNs
     for(int i = 0; i < n; i++)
     {
         for(int j = 0; j < n; j++)
@@ -187,7 +187,7 @@ void cpu_geev(char              jobvl,
               double*           rwork,
               int*              info)
 {
-    // zero out Infs and NaNs
+    // check for Infs and NaNs
     for(int i = 0; i < n; i++)
     {
         for(int j = 0; j < n; j++)
