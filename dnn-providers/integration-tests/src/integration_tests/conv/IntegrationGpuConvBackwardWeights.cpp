@@ -122,7 +122,9 @@ protected:
         }
     }
 };
-
+// Large input value range [-10, 10] stress-tests numerical precision in wgrad
+// accumulation. Limited to fp32 because half/bfloat16 would overflow during
+// reduction over batch and spatial dimensions.
 using IntegrationGpuConvWrwLargeValues2dFp32 = ConvBackwardWeightsLargeValues<float>;
 
 } // namespace
