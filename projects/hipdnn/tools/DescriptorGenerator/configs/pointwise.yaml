@@ -205,11 +205,12 @@ operation:
   has_compute_data_type: true
   compute_data_type_attr: "HIPDNN_ATTR_POINTWISE_MATH_PREC"
 
-  operation_type_enum: "HIPDNN_OPERATION_TYPE_POINTWISE"
+  operation_type_enum: "HIPDNN_OPERATION_TYPE_POINTWISE_EXT"
 
   test_data:
     constants_include: "PointwiseConstants"
-    tensor_uids: { in_0: 40, out_0: 41, in_1: 3, in_2: 4 }
+    tensor_const_prefix: "K_PW_"
+    tensor_uids: { in_0: 1300, out_0: 1301, in_1: 1302, in_2: 1303 }
     tensor_configs:
       in_0: { dims: [1, 64, 32, 32], strides: [65536, 1024, 32, 1] }
       out_0: { dims: [1, 64, 32, 32], strides: [65536, 1024, 32, 1] }

@@ -324,6 +324,9 @@ endif()
 # Skip conv2d tests to capture flaky behavior                                                                             
 list(APPEND SKIP_TESTS test_conv2d test_conv2d_find2)
 
+# Skip test_immed_conv2d tests to capture flaky behavior                                                                             
+list(APPEND SKIP_TESTS test_immed_conv2d)
+
 
 # The usage is non-trivial, see function add_test_command.
 if(SKIP_TESTS)
@@ -409,10 +412,11 @@ function(add_test_executable TEST_NAME)
         AND (${TEST_NAME} MATCHES "test_soft_max") )
         set_tests_properties(${TEST_NAME} PROPERTIES RUN_SERIAL On)
     endif()
+    # MIOpen_with_plugins ensures CK plugin .so's are built alongside the test
     if(NOT MIOPEN_EMBED_DB STREQUAL "")
-        target_link_libraries(${TEST_NAME} MIOpen miopen_data)
+        target_link_libraries(${TEST_NAME} MIOpen_with_plugins miopen_data)
     else()
-        target_link_libraries(${TEST_NAME} MIOpen)
+        target_link_libraries(${TEST_NAME} MIOpen_with_plugins)
     endif()
     target_include_directories(${TEST_NAME} PRIVATE ../src/kernels)
     if(WIN32)

@@ -12,19 +12,19 @@
 #include "hipdnn_backend.h"
 
 #include <gtest/gtest.h>
-#include <hipdnn_data_sdk/data_objects/reduction_attributes_generated.h>
-#include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/reduction_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_test_sdk/constants/ReductionConstants.hpp>
 #include <hipdnn_test_sdk/utilities/ToVec.hpp>
 
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 
 #include <memory>
 #include <vector>
 
 using namespace hipdnn_backend;
 using namespace hipdnn_backend::test_utilities;
-using namespace hipdnn_data_sdk::data_objects;
+using namespace hipdnn_flatbuffers_sdk::data_objects;
 using namespace hipdnn_tests::constants;
 using hipdnn_tests::toVec;
 
@@ -701,13 +701,13 @@ TEST_F(TestReductionOperationDescriptor, GetAttributeOperationTypeReturnsCorrect
     makeFinalized();
     auto desc = getDescriptor();
 
-    hipdnnOperationType_t opType = HIPDNN_OPERATION_TYPE_NOT_SET;
+    hipdnnOperationType_ext_t opType = HIPDNN_OPERATION_TYPE_NOT_SET_EXT;
     int64_t elementCount = 0;
     ASSERT_NO_THROW(desc->getAttribute(
         HIPDNN_ATTR_OPERATION_TYPE_EXT, HIPDNN_TYPE_OPERATION_TYPE_EXT, 1, &elementCount, &opType));
 
     ASSERT_EQ(elementCount, 1);
-    EXPECT_EQ(opType, HIPDNN_OPERATION_TYPE_REDUCTION);
+    EXPECT_EQ(opType, HIPDNN_OPERATION_TYPE_REDUCTION_EXT);
 }
 
 TEST_F(TestReductionOperationDescriptor, GetAttributeOperationTypeQueryReturnsOne)

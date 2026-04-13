@@ -111,6 +111,11 @@ _rocsparse_handle::_rocsparse_handle()
         // Wait for device transfer to finish
         THROW_IF_HIP_ERROR(hipStreamSynchronize(stream));
 
+#if defined(ROCSPARSE_WITH_ASAN)
+        const size_t required_stack_size = 64 * 1024;
+        THROW_IF_HIP_ERROR(hipDeviceSetLimit(hipLimitStackSize, required_stack_size));
+#endif
+
         // create blas handle
         rocsparse::blas_impl blas_impl;
 
