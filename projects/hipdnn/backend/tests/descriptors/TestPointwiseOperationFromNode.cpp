@@ -10,9 +10,9 @@
 #include "hipdnn_backend.h"
 
 #include <gtest/gtest.h>
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
-#include <hipdnn_data_sdk/data_objects/pointwise_attributes_generated.h>
-#include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/pointwise_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_test_sdk/constants/PointwiseConstants.hpp>
 #include <hipdnn_test_sdk/utilities/ToVec.hpp>
 
@@ -21,7 +21,7 @@
 #include <vector>
 
 using namespace hipdnn_backend;
-using namespace hipdnn_data_sdk::data_objects;
+using namespace hipdnn_flatbuffers_sdk::data_objects;
 using hipdnn_tests::toVec;
 using namespace hipdnn_tests::constants;
 
@@ -66,9 +66,9 @@ protected:
         _tensorMap[K_PW_TENSOR_IN2_UID] = TensorDescriptor::fromFlatBuffer(in2Attrs);
     }
 
-    static hipdnn_data_sdk::data_objects::PointwiseAttributesT createStandardPointwiseAttrs()
+    static hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributesT createStandardPointwiseAttrs()
     {
-        hipdnn_data_sdk::data_objects::PointwiseAttributesT attrs;
+        hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributesT attrs;
         attrs.in_0_tensor_uid = K_PW_TENSOR_IN0_UID;
         attrs.out_0_tensor_uid = K_PW_TENSOR_OUT0_UID;
         attrs.in_1_tensor_uid = K_PW_TENSOR_IN1_UID;

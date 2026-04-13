@@ -26,7 +26,7 @@
 
 #include <miopen/conv/problem_description.hpp>
 #include <miopen/conv/solvers.hpp>
-#include <miopen/solver/implicitgemm_ck_util.hpp>
+#include "../../src/ck_impl/implicitgemm_ck_util.hpp"
 #include <gtest/gtest.h>
 #include <iostream>
 #include <memory>

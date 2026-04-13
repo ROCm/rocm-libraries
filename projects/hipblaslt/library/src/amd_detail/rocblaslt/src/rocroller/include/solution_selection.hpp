@@ -76,6 +76,12 @@ struct SolutionIndexParameters
 int                     parametersToIndex(const SolutionIndexParameters& params);
 SolutionIndexParameters indexToParameters(int index);
 
+/**
+ * Compact kernel label for rocRoller algo indices (negative signed int, bit 31 set).
+ * Format: rr_<M>x<N>x<K> with optional _wgm, _sk, _notl, _ntA, _ntB suffixes.
+ */
+std::string shortRocRollerKernelNameFromSolutionIndex(const SolutionIndexParameters& params);
+
 size_t maxNumberSolutions();
 
 /**
