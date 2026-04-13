@@ -26,6 +26,7 @@
 #pragma once
 
 #include "conv3d_test_case.hpp"
+#include "gtest_common.hpp"
 
 struct NonPackTestCase : Conv3DTestCase
 {
@@ -104,6 +105,12 @@ protected:
     void SetUp() override
     {
         test_skipped = false;
+
+        if(ShouldSkipForAsan())
+        {
+            test_skipped = true;
+            GTEST_SKIP() << "Test disabled under ASAN (set MIOPEN_TEST_ASAN_OVERRIDE=1 to force)";
+        }
 
         std::tie(algo, conv_config, alpha_val, beta_val, tensor_layout) = GetParam();
         input   = tensor<T>{tensor_layout, conv_config.GetInput(), conv_config.GetInputStrides()};
