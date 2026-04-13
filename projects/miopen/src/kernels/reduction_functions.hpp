@@ -251,9 +251,9 @@ __forceinline__ __device__ void gcn_reduce2(FloatAccum& x,
 }
 
 template <typename FloatAccum>
-__forceinline__ __device__ void dpp_interleaved_reduction_welford(volatile FloatAccum& temp_mean,
-                                                                  volatile FloatAccum& temp_var,
-                                                                  volatile FloatAccum& temp_count)
+__forceinline__ __device__ void dpp_interleaved_reduction_welford(FloatAccum& temp_mean,
+                                                                  FloatAccum& temp_var,
+                                                                  FloatAccum& temp_count)
 {
     FloatAccum delta;
     FloatAccum count_mult;
@@ -298,9 +298,9 @@ __forceinline__ __device__ void dpp_interleaved_reduction_welford(volatile Float
 }
 
 template <typename FloatAccum>
-__forceinline__ __device__ void shfl_interleaved_reduction_welford(volatile FloatAccum& temp_mean,
-                                                                   volatile FloatAccum& temp_var,
-                                                                   volatile FloatAccum& temp_count)
+__forceinline__ __device__ void shfl_interleaved_reduction_welford(FloatAccum& temp_mean,
+                                                                   FloatAccum& temp_var,
+                                                                   FloatAccum& temp_count)
 {
 #pragma unroll
     for(unsigned int offset = warpSize >> 1; offset >= 1; offset >>= 1)
