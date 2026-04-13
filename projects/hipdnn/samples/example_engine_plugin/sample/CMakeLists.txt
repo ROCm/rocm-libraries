@@ -18,6 +18,7 @@
 find_package(hipdnn_frontend CONFIG REQUIRED)
 find_package(hipdnn_test_sdk CONFIG REQUIRED)
 find_package(hip REQUIRED)
+find_package(Threads REQUIRED)
 
 add_executable(example_provider_sample ExampleProviderSample.cpp)
 
@@ -27,6 +28,7 @@ target_link_libraries(
         hipdnn_frontend
         hipdnn_test_sdk
         hip::host
+        Threads::Threads
         example_provider_compile_options
 )
 
