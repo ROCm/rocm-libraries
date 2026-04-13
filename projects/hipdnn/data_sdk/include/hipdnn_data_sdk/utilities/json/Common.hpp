@@ -46,6 +46,11 @@ inline void to_json(nlohmann::json& json, const String* str)
     json = str->str();
 }
 
+inline const char* safeStr(const String* s)
+{
+    return s != nullptr ? s->c_str() : "";
+}
+
 template <class T>
 // NOLINTNEXTLINE(readability-identifier-naming)
 void to_json(nlohmann::json& vectorList, const Vector<T>* vec)

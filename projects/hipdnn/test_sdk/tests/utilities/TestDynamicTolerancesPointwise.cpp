@@ -321,12 +321,9 @@ TEST(TestCalculatePointwiseTolerance, DetectsFailure)
     const std::vector<int64_t> dims = {1, 1, 1, 1};
     const std::vector<int64_t> strides = {1, 1, 1, 1};
 
-    auto baseline = hipdnn_data_sdk::utilities::createTensor(
-        hipdnn_data_sdk::data_objects::DataType::FLOAT, dims, strides);
-    auto actualPassing = hipdnn_data_sdk::utilities::createTensor(
-        hipdnn_data_sdk::data_objects::DataType::FLOAT, dims, strides);
-    auto actualFailing = hipdnn_data_sdk::utilities::createTensor(
-        hipdnn_data_sdk::data_objects::DataType::FLOAT, dims, strides);
+    auto baseline = hipdnn_data_sdk::utilities::createTensor<float>(dims, strides);
+    auto actualPassing = hipdnn_data_sdk::utilities::createTensor<float>(dims, strides);
+    auto actualFailing = hipdnn_data_sdk::utilities::createTensor<float>(dims, strides);
 
     // For float/float/float, TRANSCENDENTAL_FWD, scale=1.0:
     // tol = 8 * 2^-23 ≈ 9.54e-7 (no cast errors, clean C * epsilon * scale)

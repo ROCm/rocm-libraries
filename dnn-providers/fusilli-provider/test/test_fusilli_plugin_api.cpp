@@ -20,6 +20,7 @@
 #include <hipdnn_plugin_sdk/EnginePluginApi.h>
 #include <hipdnn_plugin_sdk/PluginApi.h>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
+#include <hipdnn_test_sdk/utilities/SdkFrontendTypeConversions.hpp>
 
 #include <chrono>
 #include <condition_variable>
@@ -55,7 +56,7 @@ void testLoggingCallback(hipdnnSeverity_t severity, const char *msg) {
 }
 
 // Build matmul + pointwise graph using frontend API.
-flatbuffers::DetachedBuffer
+std::vector<uint8_t>
 buildMatmulActivGraph(const std::vector<int64_t> &aDims,
                       const std::vector<int64_t> &bDims,
                       const std::vector<int64_t> &cDims,
@@ -106,7 +107,12 @@ buildMatmulActivGraph(const std::vector<int64_t> &aDims,
                              result.get_message());
   }
 
-  return graph.buildFlatbufferOperationGraph();
+  auto [serializedGraph, serErr] = graph.to_binary();
+  if (serErr.is_bad()) {
+    throw std::runtime_error("Graph serialization failed: " +
+                             serErr.get_message());
+  }
+  return serializedGraph;
 }
 
 TEST(TestFusilliPluginApi, Logging) {
@@ -430,24 +436,73 @@ TEST(TestFusilliPluginApi, GetApplicableEngineIdsMatmulPointwise) {
                     hipdnn_frontend::PointwiseMode::SIGMOID_FWD,
                     hipdnn_frontend::PointwiseMode::TANH_FWD,
                     hipdnn_frontend::PointwiseMode::GELU_FWD}) {
-    auto flatbufferGraph = buildMatmulActivGraph(
+    auto serializedGraph = buildMatmulActivGraph(
         /*aDims=*/{4, 8}, /*bDims=*/{8, 5}, /*cDims=*/{4, 5}, mode);
 
     hipdnnPluginConstData_t opGraph;
-    opGraph.ptr = flatbufferGraph.data();
-    opGraph.size = flatbufferGraph.size();
+    opGraph.ptr = serializedGraph.data();
+    opGraph.size = serializedGraph.size();
 
     ASSERT_EQ(hipdnnEnginePluginGetApplicableEngineIds(
                   handle, &opGraph, engineIDs.data(), 5, &numEngines),
               HIPDNN_PLUGIN_STATUS_SUCCESS);
 
     // Graph supported if pointwise mode translates to fusilli.
-    auto sdkMode = hipdnn_frontend::toSdkType(mode);
+    auto sdkMode = hipdnn_test_sdk::utilities::frontendToSdkPointwiseMode(mode);
     bool modeSupported =
         !fusilli::isError(hipDnnPointwiseModeToFusilliMode(sdkMode));
     uint32_t expectedEngines = modeSupported ? 1 : 0;
     ASSERT_EQ(numEngines, expectedEngines);
   }
+
+  EXPECT_EQ(hipdnnEnginePluginDestroy(handle), HIPDNN_PLUGIN_STATUS_SUCCESS);
+}
+
+TEST(TestFusilliPluginApi, GetApplicableEngineIdsInt4NonBatchedMatmul) {
+  hipdnnEnginePluginHandle_t handle = nullptr;
+  ASSERT_EQ(hipdnnEnginePluginCreate(&handle), HIPDNN_PLUGIN_STATUS_SUCCESS);
+
+  // Non-batched (2D) mixed-precision int4 x fp16 matmul is not supported —
+  // mixed element types require rank-3 tensors (torch.bmm). The plugin should
+  // report 0 engines.
+  using DT = hipdnn_data_sdk::data_objects::DataType;
+  flatbuffers::FlatBufferBuilder builder;
+  std::vector<int64_t> aDims = {4, 8}, aStrides = {8, 1};
+  std::vector<int64_t> bDims = {8, 4}, bStrides = {4, 1};
+  std::vector<int64_t> cDims = {4, 4}, cStrides = {4, 1};
+
+  std::vector<
+      ::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
+      tensors;
+  tensors.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+      builder, 1, "A", DT::INT4, &aStrides, &aDims));
+  tensors.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+      builder, 2, "B", DT::HALF, &bStrides, &bDims));
+  tensors.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+      builder, 3, "C", DT::HALF, &cStrides, &cDims));
+
+  auto matmulAttr =
+      hipdnn_data_sdk::data_objects::CreateMatmulAttributes(builder, 1, 2, 3);
+  std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> nodes;
+  nodes.push_back(hipdnn_data_sdk::data_objects::CreateNodeDirect(
+      builder, "matmul", DT::FLOAT,
+      hipdnn_data_sdk::data_objects::NodeAttributes::MatmulAttributes,
+      matmulAttr.Union()));
+
+  auto graphOffset = hipdnn_data_sdk::data_objects::CreateGraphDirect(
+      builder, "test", DT::HALF, DT::HALF, DT::FLOAT, &tensors, &nodes);
+  builder.Finish(graphOffset);
+
+  hipdnnPluginConstData_t opGraph;
+  opGraph.ptr = builder.GetBufferPointer();
+  opGraph.size = builder.GetSize();
+
+  std::array<int64_t, 5> engineIDs;
+  uint32_t numEngines = 10;
+  ASSERT_EQ(hipdnnEnginePluginGetApplicableEngineIds(
+                handle, &opGraph, engineIDs.data(), 5, &numEngines),
+            HIPDNN_PLUGIN_STATUS_SUCCESS);
+  ASSERT_EQ(numEngines, 0);
 
   EXPECT_EQ(hipdnnEnginePluginDestroy(handle), HIPDNN_PLUGIN_STATUS_SUCCESS);
 }
