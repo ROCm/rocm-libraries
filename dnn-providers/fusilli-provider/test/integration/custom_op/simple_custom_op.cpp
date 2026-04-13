@@ -114,20 +114,8 @@ TEST(CustomOpIntegrationTest, SimpleCustomAdd) {
       .set_stride(outTensor.strides())
       .set_output(true);
 
-  // Build + validate + build plans for graph.
-  auto result = graphPtr->validate();
-  ASSERT_EQ(result.code, error_code_t::OK) << result.err_msg;
-
-  result = graphPtr->build_operation_graph(handle);
-  ASSERT_EQ(result.code, error_code_t::OK) << result.err_msg;
-
-  result = graphPtr->create_execution_plans();
-  ASSERT_EQ(result.code, error_code_t::OK) << result.err_msg;
-
-  result = graphPtr->check_support();
-  ASSERT_EQ(result.code, error_code_t::OK) << result.err_msg;
-
-  result = graphPtr->build_plans();
+  // Build.
+  auto result = graphPtr->build(handle);
   ASSERT_EQ(result.code, error_code_t::OK) << result.err_msg;
 
   // Create variant pack.

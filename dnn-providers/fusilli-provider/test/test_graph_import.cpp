@@ -76,7 +76,7 @@ buildCustomOpGraph(const std::string &customOpId = "fusilli.my_add") {
   in1->set_uid(1)
       .set_name("in1")
       .set_data_type(DataType::FLOAT)
-      .set_dim({4})
+      .set_dim({1})
       .set_stride({1});
 
   // Opaque data: MLIR add template stored directly as bytes (no JSON).
@@ -134,23 +134,25 @@ TEST(TestGraphImport, ImportCustomOpGraph) {
   ASSERT_TRUE(ctx.uidToFusilliTensorAttr.contains(2));
 
   // Check tensor properties.
-  const std::vector<int64_t> expectedDim = {4};
+  const std::vector<int64_t> in0ExpectedDim = {4};
+  const std::vector<int64_t> in1ExpectedDim = {1};
+  const std::vector<int64_t> out0ExpectedDim = {4};
   const std::vector<int64_t> expectedStride = {1};
 
   auto in0 = ctx.uidToFusilliTensorAttr.at(0);
-  EXPECT_EQ(in0->getDim(), expectedDim);
+  EXPECT_EQ(in0->getDim(), in0ExpectedDim);
   EXPECT_EQ(in0->getStride(), expectedStride);
   EXPECT_EQ(in0->getDataType(), fusilli::DataType::Float);
   EXPECT_FALSE(in0->isVirtual());
 
   auto in1 = ctx.uidToFusilliTensorAttr.at(1);
-  EXPECT_EQ(in1->getDim(), expectedDim);
+  EXPECT_EQ(in1->getDim(), in1ExpectedDim);
   EXPECT_EQ(in1->getStride(), expectedStride);
   EXPECT_EQ(in1->getDataType(), fusilli::DataType::Float);
   EXPECT_FALSE(in1->isVirtual());
 
   auto out = ctx.uidToFusilliTensorAttr.at(2);
-  EXPECT_EQ(out->getDim(), expectedDim);
+  EXPECT_EQ(out->getDim(), out0ExpectedDim);
   EXPECT_EQ(out->getStride(), expectedStride);
   EXPECT_EQ(out->getDataType(), fusilli::DataType::Float);
   EXPECT_FALSE(out->isVirtual());
