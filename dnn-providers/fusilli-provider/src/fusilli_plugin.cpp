@@ -111,6 +111,13 @@ hipdnnPluginStatus_t hipdnnPluginSetLoggingCallback(hipdnnCallback_t callback) {
   return HIPDNN_PLUGIN_STATUS_SUCCESS;
 }
 
+hipdnnPluginStatus_t hipdnnPluginSetLogLevel(hipdnnSeverity_t level) {
+  hipdnn_plugin_sdk::logging::setLogLevel(level);
+
+  LOG_API_SUCCESS_AUTO("level=" << level);
+  return HIPDNN_PLUGIN_STATUS_SUCCESS;
+}
+
 // ----------------------------------------------------------------------
 // Implementations for engine plugin API defined in
 // hipDNN/sdk/include/hipdnn_sdk/plugin/EnginePluginApi.h
@@ -505,8 +512,8 @@ hipdnnPluginStatus_t hipdnnEnginePluginExecuteOpGraph(
     FUSILLI_PLUGIN_ASSIGN_OR_RETURN(
         auto elementType,
         fusilliDataTypeToIreeHalDataType(tensorAttr->getDataType()));
-    size_t sizeBytes = iree_hal_element_dense_byte_count(elementType) *
-                       static_cast<size_t>(tensorAttr->getVolume());
+    size_t sizeBytes = iree_hal_element_packed_byte_count(
+        elementType, static_cast<size_t>(tensorAttr->getVolume()));
     std::vector<int64_t> dims = tensorAttr->getPhysicalDim();
     std::vector<iree_hal_dim_t> shape(dims.begin(), dims.end());
     FUSILLI_PLUGIN_ASSIGN_OR_RETURN(

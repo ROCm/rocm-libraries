@@ -46,6 +46,11 @@ inline void to_json(nlohmann::json& json, const String* str)
     json = str->str();
 }
 
+inline const char* safeStr(const String* s)
+{
+    return s != nullptr ? s->c_str() : "";
+}
+
 template <class T>
 // NOLINTNEXTLINE(readability-identifier-naming)
 void to_json(nlohmann::json& vectorList, const Vector<T>* vec)
@@ -95,6 +100,12 @@ NLOHMANN_JSON_SERIALIZE_ENUM(DataType,
                                  {DataType::INT8, "int8"},
                                  {DataType::FP8_E4M3, "fp8_e4m3"},
                                  {DataType::FP8_E5M2, "fp8_e5m2"},
+                                 {DataType::FP8_E8M0, "fp8_e8m0"},
+                                 {DataType::FP4_E2M1, "fp4_e2m1"},
+                                 {DataType::INT4, "int4"},
+                                 {DataType::FP6_E2M3, "fp6_e2m3"},
+                                 {DataType::FP6_E3M2, "fp6_e3m2"},
+                                 {DataType::INT64, "int64"},
                              }
 
 )
@@ -107,6 +118,7 @@ NLOHMANN_JSON_SERIALIZE_ENUM(TensorValue,
                                  {TensorValue::BFloat16Value, "BFloat16Value"},
                                  {TensorValue::Float8Value, "Float8Value"},
                                  {TensorValue::Int32Value, "Int32Value"},
+                                 {TensorValue::Int64Value, "Int64Value"},
                                  {TensorValue::Float64Value, "Float64Value"},
                              }
 

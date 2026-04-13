@@ -23,8 +23,9 @@ class CpuFpReferenceSdpa
 public:
     /// SDPA forward: O = softmax(Q @ K^T * scale) @ V
     ///
-    /// Supports GQA/MQA: numHeads must be divisible by numKvHeads.
+    /// Supports GQA/MQA: numHeads must be divisible by both numHeadsK and numHeadsV.
     /// Optionally adds an additive attention mask before softmax.
+    /// Optionally outputs LSE (log-sum-exp) for backward pass recomputation.
     ///
     /// @param q              Query tensor [B, H, Sq, D]
     /// @param k              Key tensor   [B, Hkv, Skv, D]
@@ -35,6 +36,10 @@ public:
     ///                       to [B, H, Sq, Skv] (rank 1–4), with broadcasting on size-1 dims
     /// @param causalMask     When true, applies a lower-triangular causal mask so each
     ///                       query position sq can only attend to kv positions skv <= sq
+    /// @param lse            Optional log-sum-exp output [B, H, Sq] (always float type).
+    ///                       Stores maxVal + log(sumExp) for each query position.
+    ///                       Used for memory-efficient backward pass recomputation.
+    ///                       Pass nullptr (default) to disable LSE output.
     template <class QDataType,
               class KDataType,
               class VDataType,
@@ -47,7 +52,8 @@ public:
                         std::optional<float> attnScaleValue = std::nullopt,
                         const hipdnn_data_sdk::utilities::TensorBase<ComputeDataType>* attnMask
                         = nullptr,
-                        bool causalMask = false)
+                        bool causalMask = false,
+                        hipdnn_data_sdk::utilities::TensorBase<float>* lse = nullptr)
     {
         if(q.dims().size() != 4)
         {
@@ -69,11 +75,12 @@ public:
         const auto numHeads = q.dims()[1];
         const auto seqQ = q.dims()[2];
         const auto headDim = q.dims()[3];
-        const auto numKvHeads = k.dims()[1];
+        const auto numHeadsK = k.dims()[1];
+        const auto numHeadsV = v.dims()[1];
         const auto seqKv = k.dims()[2];
         const auto headDimV = v.dims()[3];
-        if(batch <= 0 || numHeads <= 0 || seqQ <= 0 || headDim <= 0 || numKvHeads <= 0 || seqKv <= 0
-           || headDimV <= 0)
+        if(batch <= 0 || numHeads <= 0 || seqQ <= 0 || headDim <= 0 || numHeadsK <= 0
+           || numHeadsV <= 0 || seqKv <= 0 || headDimV <= 0)
         {
             throw std::invalid_argument("CpuFpReferenceSdpa: all dimensions must be positive");
         }
@@ -88,10 +95,10 @@ public:
             throw std::invalid_argument("CpuFpReferenceSdpa: Q head_dim (" + std::to_string(headDim)
                                         + ") != K head_dim (" + std::to_string(k.dims()[3]) + ")");
         }
-        if(v.dims()[1] != numKvHeads)
+        if(numHeads % numHeadsV != 0)
         {
             throw std::invalid_argument(
-                "CpuFpReferenceSdpa: K and V must have same number of heads");
+                "CpuFpReferenceSdpa: numHeads must be divisible by numHeadsV");
         }
         if(v.dims()[2] != seqKv)
         {
@@ -101,13 +108,31 @@ public:
         {
             throw std::invalid_argument("CpuFpReferenceSdpa: output shape must be [B, H, Sq, Dv]");
         }
-        if(numHeads % numKvHeads != 0)
+        if(numHeads % numHeadsK != 0)
         {
             throw std::invalid_argument(
-                "CpuFpReferenceSdpa: numHeads must be divisible by numKvHeads");
+                "CpuFpReferenceSdpa: numHeads must be divisible by numHeadsK");
         }
 
-        const auto headsPerKvHead = numHeads / numKvHeads;
+        // Validate LSE tensor if provided
+        if(lse != nullptr)
+        {
+            if(lse->dims().size() != 3)
+            {
+                throw std::invalid_argument("CpuFpReferenceSdpa: lse must be rank-3 [B, H, Sq]");
+            }
+            if(lse->dims()[0] != batch || lse->dims()[1] != numHeads || lse->dims()[2] != seqQ)
+            {
+                throw std::invalid_argument(
+                    "CpuFpReferenceSdpa: lse shape must be [" + std::to_string(batch) + ", "
+                    + std::to_string(numHeads) + ", " + std::to_string(seqQ) + "] but got ["
+                    + std::to_string(lse->dims()[0]) + ", " + std::to_string(lse->dims()[1]) + ", "
+                    + std::to_string(lse->dims()[2]) + "]");
+            }
+        }
+
+        const auto headsPerHeadK = numHeads / numHeadsK;
+        const auto headsPerHeadV = numHeads / numHeadsV;
 
         const float scale = attnScaleValue.has_value()
                                 ? attnScaleValue.value()
@@ -119,7 +144,8 @@ public:
             const auto b = indices[0];
             const auto h = indices[1];
             const auto sq = indices[2];
-            const auto kvHead = h / headsPerKvHead;
+            const auto kvHeadK = h / headsPerHeadK;
+            const auto kvHeadV = h / headsPerHeadV;
 
             // Step 1: Compute scaled dot-product scores S[skv]
             std::vector<float> scores(static_cast<size_t>(seqKv));
@@ -130,7 +156,7 @@ public:
                 {
                     dot += static_cast<float>(q.getHostValue(std::vector<int64_t>{b, h, sq, d}))
                            * static_cast<float>(
-                               k.getHostValue(std::vector<int64_t>{b, kvHead, skv, d}));
+                               k.getHostValue(std::vector<int64_t>{b, kvHeadK, skv, d}));
                 }
                 scores[static_cast<size_t>(skv)] = dot * scale;
             }
@@ -185,6 +211,16 @@ public:
                 probs[static_cast<size_t>(skv)] /= sumExp;
             }
 
+            // Step 4b: Write LSE (log-sum-exp) if requested
+            // LSE = maxVal + log(sumExp) enables backward pass to recompute softmax
+            // probabilities without storing the full [B, H, Sq, Skv] attention matrix.
+            // For fully masked rows (sumExp = 0), log(0) = -inf which is correct.
+            if(lse != nullptr)
+            {
+                const float lseVal = maxVal + std::log(sumExp);
+                lse->setHostValue(lseVal, std::vector<int64_t>{b, h, sq});
+            }
+
             // Step 5: Weighted sum over V to produce O
             for(int64_t dv = 0; dv < headDimV; ++dv)
             {
@@ -193,7 +229,7 @@ public:
                 {
                     acc += probs[static_cast<size_t>(skv)]
                            * static_cast<float>(
-                               v.getHostValue(std::vector<int64_t>{b, kvHead, skv, dv}));
+                               v.getHostValue(std::vector<int64_t>{b, kvHeadV, skv, dv}));
                 }
                 o.setHostValue(hipdnn_test_sdk::detail::safeConvert<ODataType>(acc),
                                std::vector<int64_t>{b, h, sq, dv});
@@ -205,6 +241,10 @@ public:
         parallelFunc(std::thread::hardware_concurrency());
 
         o.memory().markHostModified();
+        if(lse != nullptr)
+        {
+            lse->memory().markHostModified();
+        }
     }
 };
 

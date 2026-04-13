@@ -16,6 +16,9 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 ### Changed
 ### Removed
 ### Optimized
+
+* Improved the performance of POTF2 and downstream functions such as POTRF.
+
 ### Resolved issues
 
 * Fixed a memory access error in SYTRF and synchronization issues in LASYF and SYTF2.

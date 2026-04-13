@@ -18,7 +18,7 @@ inline void to_json(nlohmann::json& tensorAttrJson,
     tensorAttrJson["data_type"] = tensorAttr.data_type();
     tensorAttrJson["dims"] = tensorAttr.dims();
     tensorAttrJson["strides"] = tensorAttr.strides();
-    tensorAttrJson["name"] = tensorAttr.name();
+    tensorAttrJson["name"] = flatbuffers::safeStr(tensorAttr.name());
     tensorAttrJson["virtual"] = tensorAttr.virtual_();
 
     // Serialize TensorValue union if present
@@ -42,6 +42,9 @@ inline void to_json(nlohmann::json& tensorAttrJson,
             break;
         case data_objects::TensorValue::Int32Value:
             tensorAttrJson["value"] = tensorAttr.value_as_Int32Value()->value();
+            break;
+        case data_objects::TensorValue::Int64Value:
+            tensorAttrJson["value"] = tensorAttr.value_as_Int64Value()->value();
             break;
         case data_objects::TensorValue::Float64Value:
             tensorAttrJson["value"] = tensorAttr.value_as_Float64Value()->value();
@@ -109,6 +112,13 @@ inline auto to<data_objects::TensorAttributes>(flatbuffers::FlatBufferBuilder& b
             auto val = entry.at("value").get<int32_t>();
             const data_objects::Int32Value intVal(val);
             valueOffset = builder.CreateStruct(intVal).Union();
+            break;
+        }
+        case data_objects::TensorValue::Int64Value:
+        {
+            auto val = entry.at("value").get<int64_t>();
+            const data_objects::Int64Value int64Val(val);
+            valueOffset = builder.CreateStruct(int64Val).Union();
             break;
         }
         case data_objects::TensorValue::Float64Value:

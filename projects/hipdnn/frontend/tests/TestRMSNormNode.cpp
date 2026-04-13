@@ -29,7 +29,7 @@ TEST(TestRMSNormNode, RMSNormNodeProperties)
     outputTensor->set_uid(2).set_name("OutputTensor");
 
     auto scaleTensor = rmsnormAttributes.get_scale();
-    scaleTensor->set_dim({1, 2, 1, 1});
+    scaleTensor->set_dim({1, 2, 3, 4});
 
     auto epsilonTensor = rmsnormAttributes.get_epsilon();
     epsilonTensor->set_dim({1}).set_value(1e-5f);
@@ -54,7 +54,7 @@ TEST(TestRMSNormNode, PreValidateNode)
     rmsnormAttributes.set_y(std::make_shared<TensorAttributes>());
 
     auto scaleTensor = std::make_shared<TensorAttributes>();
-    scaleTensor->set_dim({1, 64, 1, 1});
+    scaleTensor->set_dim({1, 64, 32, 32});
     rmsnormAttributes.set_scale(scaleTensor);
 
     auto epsilonTensor = std::make_shared<TensorAttributes>();
@@ -112,7 +112,7 @@ TEST(TestRMSNormNode, PreValidateNodeMissingValues)
     xTensor->set_dim({2, 64, 32, 32}).set_stride({65536, 1024, 32, 1});
 
     auto scaleTensor = rmsnormAttributes.get_scale();
-    scaleTensor->set_dim({1, 64, 1, 1});
+    scaleTensor->set_dim({1, 64, 32, 32});
 
     rmsnormAttributesCopy = rmsnormAttributes;
     const RMSNormNode nodeWithAllValues(std::move(rmsnormAttributesCopy), graphAttributes);
@@ -132,11 +132,11 @@ TEST(TestRMSNormNode, PreValidateNodeWithBias)
     rmsnormAttributes.set_y(std::make_shared<TensorAttributes>());
 
     auto scaleTensor = std::make_shared<TensorAttributes>();
-    scaleTensor->set_dim({1, 64, 1, 1});
+    scaleTensor->set_dim({1, 64, 32, 32});
     rmsnormAttributes.set_scale(scaleTensor);
 
     auto biasTensor = std::make_shared<TensorAttributes>();
-    biasTensor->set_dim({1, 64, 1, 1});
+    biasTensor->set_dim({1, 64, 32, 32});
     rmsnormAttributes.set_bias(biasTensor);
 
     auto epsilonTensor = std::make_shared<TensorAttributes>();
@@ -163,11 +163,11 @@ TEST(TestRMSNormNode, PreValidateRejectsMismatchedBiasChannelDimensions)
     rmsnormAttributes.set_y(std::make_shared<TensorAttributes>());
 
     auto scaleTensor = std::make_shared<TensorAttributes>();
-    scaleTensor->set_dim({1, 64, 1, 1});
+    scaleTensor->set_dim({1, 64, 32, 32});
     rmsnormAttributes.set_scale(scaleTensor);
 
     auto biasTensor = std::make_shared<TensorAttributes>();
-    biasTensor->set_dim({1, 128, 1, 1}); // Mismatched channel dimension
+    biasTensor->set_dim({1, 128, 32, 32}); // Mismatched channel dimension
     rmsnormAttributes.set_bias(biasTensor);
 
     auto epsilonTensor = std::make_shared<TensorAttributes>();
@@ -204,7 +204,7 @@ TEST(TestRMSNormNode, InferPropertiesNode)
     outputTensor->set_uid(2).set_name("OutputTensor");
 
     auto scaleTensor = rmsnormAttributes.get_scale();
-    scaleTensor->set_dim({1, 2, 1, 1});
+    scaleTensor->set_dim({1, 2, 3, 4});
 
     auto epsilonTensor = rmsnormAttributes.get_epsilon();
     epsilonTensor->set_dim({1}).set_value(1e-5f);
@@ -533,7 +533,8 @@ TEST(TestRMSNormNode, PreValidateRejectsMismatchedChannelDimensions)
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
-    EXPECT_TRUE(error.get_message().find("channel dimension") != std::string::npos);
+    const std::string expected = "index 1 must match input dimension at index 1";
+    EXPECT_TRUE(error.get_message().find(expected) != std::string::npos);
 }
 
 TEST(TestRMSNormNode, PreValidateRejectsInvalidScaleTensorShape)
@@ -547,18 +548,21 @@ TEST(TestRMSNormNode, PreValidateRejectsInvalidScaleTensorShape)
     rmsnormAttributes.set_y(std::make_shared<TensorAttributes>());
 
     auto scaleTensor = std::make_shared<TensorAttributes>();
-    scaleTensor->set_dim({1, 64, 32, 32}); // Should be [1, 64, 1, 1]
+    scaleTensor->set_dim({1, 64, 2, 2}); // Should be [1, 64, 32, 32]
     rmsnormAttributes.set_scale(scaleTensor);
 
     auto epsilonTensor = std::make_shared<TensorAttributes>();
     epsilonTensor->set_dim({1}).set_value(1e-5f);
     rmsnormAttributes.set_epsilon(epsilonTensor);
 
+    rmsnormAttributes.set_forward_phase(NormFwdPhase::TRAINING);
+
     const GraphAttributes graphAttributes;
     const RMSNormNode node(std::move(rmsnormAttributes), graphAttributes);
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
+    std::cerr << "Error message: " << error.get_message() << "\n";
     EXPECT_TRUE(error.get_message().find("Scale tensor") != std::string::npos);
 }
 
@@ -713,7 +717,7 @@ TEST(TestRMSNormNode, InferInvRmsPreservesUserSetDims)
         .set_stride({4096, 64, 8, 1});
 
     rmsnormAttributes.get_y()->set_uid(2);
-    rmsnormAttributes.get_scale()->set_dim({1, 64, 1, 1});
+    rmsnormAttributes.get_scale()->set_dim({1, 64, 8, 8});
     rmsnormAttributes.get_epsilon()->set_dim({1}).set_value(1e-5f);
 
     // User explicitly sets inv_rms dims — inference should not overwrite

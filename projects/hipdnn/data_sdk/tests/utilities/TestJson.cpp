@@ -123,9 +123,9 @@ TEST(TestJson, GraphToJsonAndBack)
             context = "(valid matmul graph)";
             break;
         case hipdnn_data_sdk::data_objects::NodeAttributes::SdpaAttributes:
-            graphBuilder = hipdnn_test_sdk::utilities::createValidSdpaFpropGraph();
+            graphBuilder = hipdnn_test_sdk::utilities::createValidSdpaFwdGraph();
             graph = hipdnn_data_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
-            context = "(valid sdpa fprop graph)";
+            context = "(valid sdpa fwd graph)";
             break;
         case hipdnn_data_sdk::data_objects::NodeAttributes::LayernormAttributes:
             graphBuilder = hipdnn_test_sdk::utilities::createValidLayernormFpropGraph();
@@ -153,7 +153,7 @@ TEST(TestJson, GraphToJsonAndBack)
             context = "(valid block scale quantize graph)";
             break;
         case hipdnn_data_sdk::data_objects::NodeAttributes::SdpaBackwardAttributes:
-            graphBuilder = hipdnn_test_sdk::utilities::createValidSdpaBpropGraph();
+            graphBuilder = hipdnn_test_sdk::utilities::createValidSdpaBwdGraph();
             graph = hipdnn_data_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
             context = "(valid sdpa backward graph)";
             break;
@@ -161,6 +161,11 @@ TEST(TestJson, GraphToJsonAndBack)
             graphBuilder = hipdnn_test_sdk::utilities::createValidCustomOpGraph();
             graph = hipdnn_data_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
             context = "(valid custom op graph)";
+            break;
+        case hipdnn_data_sdk::data_objects::NodeAttributes::ReductionAttributes:
+            graphBuilder = hipdnn_test_sdk::utilities::createValidReductionGraph();
+            graph = hipdnn_data_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
+            context = "(valid reduction graph)";
             break;
         default:
             FAIL() << "Unhandled NodeAttributes enum value";

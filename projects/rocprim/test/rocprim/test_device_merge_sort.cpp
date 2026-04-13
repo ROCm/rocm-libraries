@@ -1,6 +1,6 @@
 /// MIT License
 //
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -156,7 +156,7 @@ TYPED_TEST_SUITE(RocprimDeviceSortTests, RocprimDeviceSortTestsParams);
 // 1. At compile time, by setting the template argument to true, and/or
 // 2. At runtime, by passing true as an argument to this function.
 template<bool CompileTimeDisableWithValgrind = false>
-inline bool should_skip(const bool rt_disable_with_valgrind = false)
+inline bool should_skip([[maybe_unused]] const bool rt_disable_with_valgrind = false)
 {
 #if HAS_VALGRIND_H
     if (RUNNING_ON_VALGRIND && (CompileTimeDisableWithValgrind || rt_disable_with_valgrind))

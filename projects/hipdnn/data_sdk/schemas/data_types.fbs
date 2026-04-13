@@ -18,4 +18,6 @@ enum DataType : byte {
     FP4_E2M1 = 11,
     FP6_E2M3 = 12,
     FP6_E3M2 = 13,
+    INT4 = 14,
+    INT64 = 15,
 }
