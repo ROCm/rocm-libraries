@@ -266,9 +266,8 @@ This example is built as part of the CK build tree (same as all other
 ```bash
 cd composable_kernel
 mkdir -p build && cd build
-../script/cmake-ck-dev.sh ../ gfx950 -G Ninja
+bash ../script/cmake-ck-dev.sh ../ gfx950 -G Ninja
 cmake --build . -- tile_example_ssd_fwd -j
-./bin/tile_example_ssd_fwd -B=2 -E=2 -H=2 -v=1
 ```
 
 ---
@@ -314,11 +313,11 @@ Fixed dimensions (not configurable): `C=8, L=128, D=64, N=128`.
 
 ## Implementation Notes
 
-- The ck_tile `BatchedGemmKernel` is invoked with `batch_count=1` per
-  (head, chunk) pair because B_mat/C_mat sub-matrices have non-unit stride
-  (`C*L` between N-rows).  A `pack_matrix_kernel` copies them into contiguous
-  buffers before each GEMM.  A production implementation would use a custom
-  `tile_program` to avoid this overhead.
+- B_mat/C_mat sub-matrices have non-unit stride (`C*L` between N-rows),
+  so batched pack kernels copy them into contiguous buffers before each
+  GEMM.  The GEMMs then run as a single batched launch with
+  `batch_count = BEH * C`.  A production implementation would use a custom
+  `tile_program` with strided tile windows to avoid the pack overhead.
 
 - `SsdGemmConfig` tile sizes (M=128, N=64, K=32) are tuned for CDNA
   (MI-series) GPUs.  RDNA3 may benefit from different tile shapes.
