@@ -830,7 +830,9 @@ namespace TensileLite
             // we could continue down this fast path, because there would be no rounding
             // errors incurred by f32 accumulation. But we do not.
             auto rejectFast = [](const char* reason) {
-                std::clog << "FAST_PATH_REJECT: " << reason << std::endl;
+                if (false) {  // Re-enable when testing to find reason.
+                    std::clog << "FAST_PATH_REJECT: " << reason << std::endl;
+                }
                 return false;
             };
 
