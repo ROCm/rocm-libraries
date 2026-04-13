@@ -905,6 +905,26 @@ rocsolver_<type>gehd2()
    :outline:
 .. doxygenfunction:: rocsolver_sgehd2
 
+rocsolver_<type>gehd2_batched()
+---------------------------------------------------
+.. doxygenfunction:: rocsolver_zgehd2_batched
+   :outline:
+.. doxygenfunction:: rocsolver_cgehd2_batched
+   :outline:
+.. doxygenfunction:: rocsolver_dgehd2_batched
+   :outline:
+.. doxygenfunction:: rocsolver_sgehd2_batched
+
+rocsolver_<type>gehd2_strided_batched()
+---------------------------------------------------
+.. doxygenfunction:: rocsolver_zgehd2_strided_batched
+   :outline:
+.. doxygenfunction:: rocsolver_cgehd2_strided_batched
+   :outline:
+.. doxygenfunction:: rocsolver_dgehd2_strided_batched
+   :outline:
+.. doxygenfunction:: rocsolver_sgehd2_strided_batched
+
 
 
 .. _linears:

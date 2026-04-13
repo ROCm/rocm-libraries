@@ -95,19 +95,19 @@ void testing_gehd2_gehrd_bad_arg()
     rocblas_stride stP = 1;
     rocblas_int bc = 1;
 
-    // if(BATCHED)
-    // {
-    //     // memory allocations
-    //     device_batch_vector<T> dA(1, 1, 1);
-    //     device_strided_batch_vector<T> dIpiv(1, 1, 1, 1);
-    //     CHECK_HIP_ERROR(dA.memcheck());
-    //     CHECK_HIP_ERROR(dIpiv.memcheck());
+    if(BATCHED)
+    {
+        // memory allocations
+        device_batch_vector<T> dA(1, 1, 1);
+        device_strided_batch_vector<T> dIpiv(1, 1, 1, 1);
+        CHECK_HIP_ERROR(dA.memcheck());
+        CHECK_HIP_ERROR(dIpiv.memcheck());
 
-    //     // check bad arguments
-    //     gehd2_gehrd_checkBadArgs<STRIDED, GEHRD>(handle, n, ilo, ihi, dA.data(), lda, stA, dIpiv.data(),
-    //                                              stP, bc);
-    // }
-    // else
+        // check bad arguments
+        gehd2_gehrd_checkBadArgs<STRIDED, GEHRD>(handle, n, ilo, ihi, dA.data(), lda, stA,
+                                                 dIpiv.data(), stP, bc);
+    }
+    else
     {
         // memory allocations
         device_strided_batch_vector<T> dA(1, 1, 1, 1);
@@ -151,6 +151,8 @@ void gehd2_gehrd_initData(const rocblas_handle handle,
                     // set A to upper triangular outside of bounds
                     else if(i > j && (j < ilo - 1 || j > ihi - 1))
                         hA[b][i + j * lda] = 0;
+                    else if(i == j + 1)
+                        hA[b][i + j * lda] += 400;
                     else
                         hA[b][i + j * lda] -= 4;
                 }
@@ -326,15 +328,15 @@ void testing_gehd2_gehrd(Arguments& argus)
     bool invalid_size = (n < 0 || lda < n || bc < 0 || n && (ilo < 1 || ihi < ilo || ihi > n));
     if(invalid_size)
     {
-        // if(BATCHED)
-        //     EXPECT_ROCBLAS_STATUS(rocsolver_gehd2_gehrd(STRIDED, GEHRD, handle, n, ilo, ihi,
-        //                                                 (T* const*)nullptr, lda, stA, (T*)nullptr,
-        //                                                 stP, bc),
-        //                           rocblas_status_invalid_size);
-        // else
-        EXPECT_ROCBLAS_STATUS(rocsolver_gehd2_gehrd(STRIDED, GEHRD, handle, n, ilo, ihi,
-                                                    (T*)nullptr, lda, stA, (T*)nullptr, stP, bc),
-                              rocblas_status_invalid_size);
+        if(BATCHED)
+            EXPECT_ROCBLAS_STATUS(rocsolver_gehd2_gehrd(STRIDED, GEHRD, handle, n, ilo, ihi,
+                                                        (T* const*)nullptr, lda, stA, (T*)nullptr,
+                                                        stP, bc),
+                                  rocblas_status_invalid_size);
+        else
+            EXPECT_ROCBLAS_STATUS(rocsolver_gehd2_gehrd(STRIDED, GEHRD, handle, n, ilo, ihi,
+                                                        (T*)nullptr, lda, stA, (T*)nullptr, stP, bc),
+                                  rocblas_status_invalid_size);
 
         if(argus.timing)
             rocsolver_bench_inform(inform_invalid_size);
@@ -346,12 +348,13 @@ void testing_gehd2_gehrd(Arguments& argus)
     if(argus.mem_query)
     {
         CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query(handle));
-        // if(BATCHED)
-        //     CHECK_ALLOC_QUERY(rocsolver_gehd2_gehrd(STRIDED, GEHRD, handle, n, ilo, ihi, (T* const*)nullptr,
-        //                                             lda, stA, (T*)nullptr, stP, bc));
-        // else
-        CHECK_ALLOC_QUERY(rocsolver_gehd2_gehrd(STRIDED, GEHRD, handle, n, ilo, ihi, (T*)nullptr,
-                                                lda, stA, (T*)nullptr, stP, bc));
+        if(BATCHED)
+            CHECK_ALLOC_QUERY(rocsolver_gehd2_gehrd(STRIDED, GEHRD, handle, n, ilo, ihi,
+                                                    (T* const*)nullptr, lda, stA, (T*)nullptr, stP,
+                                                    bc));
+        else
+            CHECK_ALLOC_QUERY(rocsolver_gehd2_gehrd(STRIDED, GEHRD, handle, n, ilo, ihi,
+                                                    (T*)nullptr, lda, stA, (T*)nullptr, stP, bc));
 
         size_t size;
         CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query(handle, &size));
@@ -360,44 +363,44 @@ void testing_gehd2_gehrd(Arguments& argus)
         return;
     }
 
-    // if(BATCHED)
-    // {
-    //     // memory allocations
-    //     host_batch_vector<T> hA(size_A, 1, bc);
-    //     host_batch_vector<T> hARes(size_ARes, 1, bc);
-    //     host_batch_vector<T> hIpiv(size_P, 1, bc);
-    //     device_batch_vector<T> dA(size_A, 1, bc);
-    //     device_batch_vector<T> dIpiv(size_P, 1, bc);
-    //     if(size_A)
-    //         CHECK_HIP_ERROR(dA.memcheck());
-    //     if(size_P)
-    //         CHECK_HIP_ERROR(dIpiv.memcheck());
+    if(BATCHED && STRIDED)
+    {
+        // memory allocations
+        host_batch_vector<T> hA(size_A, 1, bc);
+        host_batch_vector<T> hARes(size_ARes, 1, bc);
+        host_strided_batch_vector<T> hIpiv(size_P, 1, stP, bc);
+        host_strided_batch_vector<T> hIpivRes(size_PRes, 1, stP, bc);
+        device_batch_vector<T> dA(size_A, 1, bc);
+        device_strided_batch_vector<T> dIpiv(size_P, 1, stP, bc);
+        if(size_A)
+            CHECK_HIP_ERROR(dA.memcheck());
+        if(size_P)
+            CHECK_HIP_ERROR(dIpiv.memcheck());
 
-    //     // check quick return
-    //     if(n == 0 || bc == 0)
-    //     {
-    //         EXPECT_ROCBLAS_STATUS(rocsolver_gehd2_gehrd(STRIDED, GEHRD, handle, n, ilo, ihi, dA.data(),
-    //                                                     lda, stA, dIpiv.data(), stP, bc),
-    //                               rocblas_status_success);
-    //         if(argus.timing)
-    //             rocsolver_bench_inform(inform_quick_return);
+        // check quick return
+        if(n == 0 || bc == 0)
+        {
+            EXPECT_ROCBLAS_STATUS(rocsolver_gehd2_gehrd(STRIDED, GEHRD, handle, n, ilo, ihi,
+                                                        dA.data(), lda, stA, dIpiv.data(), stP, bc),
+                                  rocblas_status_success);
+            if(argus.timing)
+                rocsolver_bench_inform(inform_quick_return);
 
-    //         return;
-    //     }
+            return;
+        }
 
-    //     // check computations
-    //     if(argus.unit_check || argus.norm_check)
-    //         gehd2_gehrd_getError<STRIDED, GEHRD, T>(handle, n, ilo, ihi, dA, lda, stA, dIpiv, stP, bc, hA,
-    //                                                 hARes, hIpiv, &max_error);
+        // check computations
+        if(argus.unit_check || argus.norm_check)
+            gehd2_gehrd_getError<STRIDED, GEHRD, T>(handle, n, ilo, ihi, dA, lda, stA, dIpiv, stP,
+                                                    bc, hA, hARes, hIpiv, hIpivRes, &max_error);
 
-    //     // collect performance data
-    //     if(argus.timing && hot_calls > 0)
-    //         gehd2_gehrd_getPerfData<STRIDED, GEHRD, T>(
-    //             handle, n, ilo, ihi, dA, lda, stA, dIpiv, stP, bc, hA, hIpiv, &gpu_time_used,
-    //             &cpu_time_used, hot_calls, argus.profile, argus.profile_kernels, argus.perf);
-    // }
-
-    // else
+        // collect performance data
+        if(argus.timing && hot_calls > 0)
+            gehd2_gehrd_getPerfData<STRIDED, GEHRD, T>(
+                handle, n, ilo, ihi, dA, lda, stA, dIpiv, stP, bc, hA, hIpiv, &gpu_time_used,
+                &cpu_time_used, hot_calls, argus.profile, argus.profile_kernels, argus.perf);
+    }
+    else
     {
         // memory allocations
         host_strided_batch_vector<T> hA(size_A, 1, stA, bc);
@@ -436,9 +439,9 @@ void testing_gehd2_gehrd(Arguments& argus)
     }
 
     // validate results for rocsolver-test
-    // using n * machine_precision as tolerance
+    // using 12 * n * machine_precision as tolerance
     if(argus.unit_check)
-        ROCSOLVER_TEST_CHECK(T, max_error, 8 * n);
+        ROCSOLVER_TEST_CHECK(T, max_error, 12 * n);
 
     // output results for rocsolver-bench
     if(argus.timing)

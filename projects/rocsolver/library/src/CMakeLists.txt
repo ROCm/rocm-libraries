@@ -171,6 +171,8 @@ set(rocsolver_lapack_source
   lapack/roclapack_sygst_hegst_batched.cpp
   lapack/roclapack_sygst_hegst_strided_batched.cpp
   lapack/roclapack_gehd2.cpp
+  lapack/roclapack_gehd2_batched.cpp
+  lapack/roclapack_gehd2_strided_batched.cpp
   #### Singular Value Decomposition ####
   ######################################
   #- classic

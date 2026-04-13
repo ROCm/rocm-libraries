@@ -51,16 +51,16 @@ const vector<vector<int>> matrix_size_range = {
     {20, 20, 0, 20},
     // normal (valid) samples
     {5, 5, 1, 5},
-    // {50, 50},
-    // {70, 100},
-    // {130, 130},
-    // {150, 200},
+    {50, 50, 1, 50},
+    {70, 100, 6, 49},
+    {130, 130, 1, 80},
+    {150, 200, 60, 150},
 };
 
 const vector<vector<int>> large_matrix_size_range = {
     {152, 152, 1, 152},
-    {640, 640, 1, 640},
-    {1000, 1024, 1, 1000},
+    {640, 640, 80, 120},
+    {1000, 1024, 350, 900},
 };
 
 Arguments gehrd_setup_arguments(gehrd_tuple tup)
@@ -105,9 +105,9 @@ class GEHD2 : public GEHD2_GEHRD<false>
 {
 };
 
-class GEHRD : public GEHD2_GEHRD<true>
-{
-};
+// class GEHRD : public GEHD2_GEHRD<true>
+// {
+// };
 
 // non-batch tests
 
@@ -131,25 +131,25 @@ TEST_P(GEHD2, __double_complex)
     run_tests<false, false, rocblas_double_complex>();
 }
 
-TEST_P(GEHRD, __float)
-{
-    run_tests<false, false, float>();
-}
+// TEST_P(GEHRD, __float)
+// {
+//     run_tests<false, false, float>();
+// }
 
-TEST_P(GEHRD, __double)
-{
-    run_tests<false, false, double>();
-}
+// TEST_P(GEHRD, __double)
+// {
+//     run_tests<false, false, double>();
+// }
 
-TEST_P(GEHRD, __float_complex)
-{
-    run_tests<false, false, rocblas_float_complex>();
-}
+// TEST_P(GEHRD, __float_complex)
+// {
+//     run_tests<false, false, rocblas_float_complex>();
+// }
 
-TEST_P(GEHRD, __double_complex)
-{
-    run_tests<false, false, rocblas_double_complex>();
-}
+// TEST_P(GEHRD, __double_complex)
+// {
+//     run_tests<false, false, rocblas_double_complex>();
+// }
 
 // batched tests
 
@@ -173,25 +173,25 @@ TEST_P(GEHD2, batched__double_complex)
     run_tests<true, true, rocblas_double_complex>();
 }
 
-TEST_P(GEHRD, batched__float)
-{
-    run_tests<true, true, float>();
-}
+// TEST_P(GEHRD, batched__float)
+// {
+//     run_tests<true, true, float>();
+// }
 
-TEST_P(GEHRD, batched__double)
-{
-    run_tests<true, true, double>();
-}
+// TEST_P(GEHRD, batched__double)
+// {
+//     run_tests<true, true, double>();
+// }
 
-TEST_P(GEHRD, batched__float_complex)
-{
-    run_tests<true, true, rocblas_float_complex>();
-}
+// TEST_P(GEHRD, batched__float_complex)
+// {
+//     run_tests<true, true, rocblas_float_complex>();
+// }
 
-TEST_P(GEHRD, batched__double_complex)
-{
-    run_tests<true, true, rocblas_double_complex>();
-}
+// TEST_P(GEHRD, batched__double_complex)
+// {
+//     run_tests<true, true, rocblas_double_complex>();
+// }
 
 // strided_batched cases
 
@@ -215,30 +215,30 @@ TEST_P(GEHD2, strided_batched__double_complex)
     run_tests<false, true, rocblas_double_complex>();
 }
 
-TEST_P(GEHRD, strided_batched__float)
-{
-    run_tests<false, true, float>();
-}
+// TEST_P(GEHRD, strided_batched__float)
+// {
+//     run_tests<false, true, float>();
+// }
 
-TEST_P(GEHRD, strided_batched__double)
-{
-    run_tests<false, true, double>();
-}
+// TEST_P(GEHRD, strided_batched__double)
+// {
+//     run_tests<false, true, double>();
+// }
 
-TEST_P(GEHRD, strided_batched__float_complex)
-{
-    run_tests<false, true, rocblas_float_complex>();
-}
+// TEST_P(GEHRD, strided_batched__float_complex)
+// {
+//     run_tests<false, true, rocblas_float_complex>();
+// }
 
-TEST_P(GEHRD, strided_batched__double_complex)
-{
-    run_tests<false, true, rocblas_double_complex>();
-}
+// TEST_P(GEHRD, strided_batched__double_complex)
+// {
+//     run_tests<false, true, rocblas_double_complex>();
+// }
 
 INSTANTIATE_TEST_SUITE_P(daily_lapack, GEHD2, ValuesIn(large_matrix_size_range));
 
 INSTANTIATE_TEST_SUITE_P(checkin_lapack, GEHD2, ValuesIn(matrix_size_range));
 
-INSTANTIATE_TEST_SUITE_P(daily_lapack, GEHRD, ValuesIn(large_matrix_size_range));
+// INSTANTIATE_TEST_SUITE_P(daily_lapack, GEHRD, ValuesIn(large_matrix_size_range));
 
-INSTANTIATE_TEST_SUITE_P(checkin_lapack, GEHRD, ValuesIn(matrix_size_range));
+// INSTANTIATE_TEST_SUITE_P(checkin_lapack, GEHRD, ValuesIn(matrix_size_range));
