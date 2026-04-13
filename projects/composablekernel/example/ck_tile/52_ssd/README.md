@@ -8,6 +8,7 @@ An implementation of the
 > - Data type: **fp32 only**.  bf16 / fp16 support is planned.
 > - Features: `HAS_D=true`, `D_HAS_HDIM=true`, `HAS_Z=false`.
 >   Output gating (`HAS_Z`) will be added in a future update.
+>   Plan to use grouped gemm to replace batched gemm.
 
 ---
 
