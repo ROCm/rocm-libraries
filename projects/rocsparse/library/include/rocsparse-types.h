@@ -502,21 +502,21 @@ typedef enum rocsparse_layer_mode
  */
 typedef enum rocsparse_status_
 {
-    rocsparse_status_success                 = 0, /**< Success. */
-    rocsparse_status_invalid_handle          = 1, /**< Handle not initialized, invalid, or null. */
-    rocsparse_status_not_implemented         = 2, /**< Function is not implemented. */
-    rocsparse_status_invalid_pointer         = 3, /**< Invalid pointer parameter. */
-    rocsparse_status_invalid_size            = 4, /**< Invalid size parameter. */
-    rocsparse_status_memory_error            = 5, /**< Failed memory allocation, copy, or dealloc. */
-    rocsparse_status_internal_error          = 6, /**< Other internal library failure. */
-    rocsparse_status_invalid_value           = 7, /**< Invalid value parameter. */
-    rocsparse_status_arch_mismatch           = 8, /**< Device arch is not supported. */
-    rocsparse_status_zero_pivot              = 9, /**< Encountered zero pivot. */
-    rocsparse_status_not_initialized         = 10, /**< Descriptor has not been initialized. */
-    rocsparse_status_type_mismatch           = 11, /**< Index types do not match. */
-    rocsparse_status_requires_sorted_storage = 12, /**< Sorted storage required. */
-    rocsparse_status_thrown_exception        = 13, /**< Exception being thrown. */
-    rocsparse_status_continue                = 14 /**< The function can proceed. */
+    rocsparse_status_success                 = 0, /**< success. */
+    rocsparse_status_invalid_handle          = 1, /**< handle not initialized, invalid, or null. */
+    rocsparse_status_not_implemented         = 2, /**< function is not implemented. */
+    rocsparse_status_invalid_pointer         = 3, /**< invalid pointer parameter. */
+    rocsparse_status_invalid_size            = 4, /**< invalid size parameter. */
+    rocsparse_status_memory_error            = 5, /**< failed memory allocation, copy, or dealloc. */
+    rocsparse_status_internal_error          = 6, /**< other internal library failure. */
+    rocsparse_status_invalid_value           = 7, /**< invalid value parameter. */
+    rocsparse_status_arch_mismatch           = 8, /**< device arch is not supported. */
+    rocsparse_status_zero_pivot              = 9, /**< encountered zero pivot. */
+    rocsparse_status_not_initialized         = 10, /**< descriptor has not been initialized. */
+    rocsparse_status_type_mismatch           = 11, /**< index types do not match. */
+    rocsparse_status_requires_sorted_storage = 12, /**< sorted storage required. */
+    rocsparse_status_thrown_exception        = 13, /**< exception being thrown. */
+    rocsparse_status_continue                = 14 /**< the function can proceed. */
 } rocsparse_status;
 
 /*! \ingroup types_module
