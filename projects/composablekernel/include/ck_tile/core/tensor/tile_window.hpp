@@ -492,6 +492,100 @@ struct tile_window_with_static_distribution
         }
     }
 
+    template <typename DataType,
+              typename StaticTileDistribution,
+              typename QDataType,
+              typename QStaticTileDistribution,
+              index_t i_access_unsupport_ = -1,
+              bool oob_conditional_check  = true,
+              bool static_move_ys         = false>
+    CK_TILE_DEVICE void load_and_quantize(
+        static_distributed_tensor<DataType, StaticTileDistribution>& dst_tensor,
+        [[maybe_unused]] static_distributed_tensor<QDataType, QStaticTileDistribution>&
+            dst_scale_tensor,
+        number<i_access_unsupport_>          = {},
+        bool_constant<oob_conditional_check> = {},
+        bool_constant<static_move_ys>        = {}) const
+    {
+        using Traits   = typename Base::Traits;
+        using vector_t = typename Traits::vector_t;
+        using SFC_Ys   = typename Traits::SFC_Ys;
+
+        using DstTensor  = remove_cvref_t<decltype(dst_tensor)>;
+        using DstQTensor = remove_cvref_t<decltype(dst_scale_tensor)>;
+
+        static_assert(DstTensor::get_thread_buffer_size() ==
+                      DstQTensor::get_thread_buffer_size() *
+                          (Traits::ScalarPerVector / Traits::PackedSize));
+
+        constexpr auto tile_dstr   = StaticTileDistribution{};
+        constexpr auto q_tile_dstr = QStaticTileDistribution{};
+
+        // loop over thread tensor space [y0, y1, ...]
+        static_for<0, NumCoord, 1>{}([&](auto iCoord) {
+            /// TODO: use structure binding (to be captured later) if compiled in C++20
+            auto window_adaptor_thread_coord = pre_computed_coords_[iCoord][I0];
+            auto bottom_tensor_thread_coord  = pre_computed_coords_[iCoord][I1];
+
+            static_for<0, NumAccessPerCoord, 1>{}([&](auto iCoordAccess) {
+                constexpr auto iAccess = number<iCoord * NumAccessPerCoord + iCoordAccess>{};
+
+                // data index [y0, y1, ...]
+                constexpr auto idx_ys_start = SFC_Ys::get_index(iAccess);
+
+                // read from bottom tensor
+                const vector_t vec_value =
+                    this->get_bottom_tensor_view().template get_vectorized_elements<vector_t>(
+                        bottom_tensor_thread_coord, 0, bool_constant<oob_conditional_check>{});
+
+                // Compute and write the scale (absmax)
+                QDataType vmax = 0.;
+                static_for<0, Traits::ScalarPerVector, Traits::PackedSize>{}([&](auto j) {
+                    vmax = std::max(vmax,
+                                    std::abs(type_convert<QDataType>(
+                                        vec_value.template get_as<
+                                            typename Base::DataType>()[j / Traits::PackedSize])));
+                });
+
+                constexpr index_t qd =
+                    q_tile_dstr.get_ys_to_d_descriptor().calculate_offset(idx_ys_start);
+
+                dst_scale_tensor.get_thread_buffer().template at<qd>() = vmax;
+
+                // write scaled values into the distributed tensor
+                static_for<0, Traits::ScalarPerVector, Traits::PackedSize>{}([&](auto j) {
+                    constexpr auto idx_ys = generate_tuple(
+                        [&](auto jj) {
+                            return jj == Traits::VectorDimY ? (idx_ys_start[jj] + j)
+                                                            : idx_ys_start[jj];
+                        },
+                        number<Base::NDimY>{});
+
+                    constexpr index_t d =
+                        tile_dstr.get_ys_to_d_descriptor().calculate_offset(idx_ys) /
+                        Traits::PackedSize;
+
+                    dst_tensor.get_thread_buffer().template at<d>() = type_convert<DataType>(
+                        vec_value
+                            .template get_as<typename Base::DataType>()[j / Traits::PackedSize] /
+                        vmax);
+                });
+                // move thread coordinate
+                if constexpr(!static_move_ys && iCoordAccess != (NumAccessPerCoord - 1))
+                {
+                    constexpr auto idx_diff_ys = SFC_Ys::get_forward_step(iAccess);
+
+                    constexpr auto idx_diff_ps_ys = container_concat(
+                        generate_tuple([&](auto) { return number<0>{}; }, number<Base::NDimP>{}),
+                        idx_diff_ys);
+
+                    Base::move_window_adaptor_and_bottom_tensor_thread_coordinate(
+                        window_adaptor_thread_coord, bottom_tensor_thread_coord, idx_diff_ps_ys);
+                }
+            });
+        });
+    }
+
     template <typename DstTile,
               index_t i_access_unsupport_ = -1,
               bool oob_conditional_check  = true,
