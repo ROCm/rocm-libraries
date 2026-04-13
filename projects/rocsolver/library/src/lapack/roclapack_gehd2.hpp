@@ -138,18 +138,16 @@ rocblas_status rocsolver_gehd2_template(rocblas_handle handle,
     rocblas_get_stream(handle, &stream);
 
     const I dim = ihi - ilo;
-    for(I i1 = ilo; i1 < ihi; ++i1)
+    for(I i = ilo - 1; i < ihi - 1; ++i)
     {
-        const I i = i1 - 1;
-
         // generate Householder reflector to work on column i
-        rocsolver_larfg_template<T>(handle, ihi - i1, A, shiftA + idx2D(i + 1, i, lda), (S*)diag,
-                                    i1 - ilo, dim, A,
+        rocsolver_larfg_template<T>(handle, ihi - i - 1, A, shiftA + idx2D(i + 1, i, lda), (S*)diag,
+                                    i + 1 - ilo, dim, A,
                                     shiftA + idx2D(std::min(i + 2, n - 1), i, lda), (I)1, strideA,
                                     (ipiv + i), strideP, batch_count, (T*)work_workArr, Abyx_norms);
 
         // apply reflector from the right to A(0:ihi-1,i+1:ihi-1)
-        rocsolver_larf_template(handle, rocblas_side_right, ihi, ihi - i1, A,
+        rocsolver_larf_template(handle, rocblas_side_right, ihi, ihi - i - 1, A,
                                 shiftA + idx2D(i + 1, i, lda), (I)1, strideA, (ipiv + i), strideP,
                                 A, shiftA + idx2D(0, i + 1, lda), lda, strideA, batch_count,
                                 scalars, Abyx_norms, (T**)work_workArr);
@@ -159,7 +157,7 @@ rocblas_status rocsolver_gehd2_template(rocblas_handle handle,
             rocsolver_lacgv_template<T>(handle, (I)1, ipiv, i, (I)1, strideP, batch_count);
 
         // apply reflector from the left to A(i+1:ihi-1,i+1:n-1)
-        rocsolver_larf_template(handle, rocblas_side_left, ihi - i1, n - i1, A,
+        rocsolver_larf_template(handle, rocblas_side_left, ihi - i - 1, n - i - 1, A,
                                 shiftA + idx2D(i + 1, i, lda), (I)1, strideA, (ipiv + i), strideP,
                                 A, shiftA + idx2D(i + 1, i + 1, lda), lda, strideA, batch_count,
                                 scalars, Abyx_norms, (T**)work_workArr);
