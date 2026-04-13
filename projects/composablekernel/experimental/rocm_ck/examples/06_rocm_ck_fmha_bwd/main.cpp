@@ -31,7 +31,6 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
-#include <cstring>
 #include <numeric>
 #include <vector>
 
@@ -359,8 +358,8 @@ static void setTensor(rocm_ck::TensorArg& t,
                       std::initializer_list<int64_t> strs)
 {
     t.ptr = ptr;
-    std::memset(t.lengths, 0, sizeof(t.lengths));
-    std::memset(t.strides, 0, sizeof(t.strides));
+    t.lengths.fill(0);
+    t.strides.fill(0);
     int i = 0;
     for(auto l : lens)
     {
