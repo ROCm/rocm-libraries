@@ -444,7 +444,7 @@ rocsparse_status rocsparse_csrsm_clear(rocsparse_handle handle, rocsparse_mat_in
 *    \right.
 *  \f]
 *
-*  \p rocsparse_csrsm_solve requires a user allocated temporary buffer. Its size is returned by
+*  \p rocsparse_csrsm_solve requires a user-allocated temporary buffer. Its size is returned by
 *  \ref rocsparse_scsrsm_buffer_size "rocsparse_Xcsrsm_buffer_size()". The size of the required buffer is
 *  larger when \p trans_A equals \ref rocsparse_operation_transpose or \ref rocsparse_operation_conjugate_transpose
 *  and when \p trans_B is \ref rocsparse_operation_none. The subsequent solve will also be faster when \f$A\f$

@@ -510,13 +510,13 @@ typedef enum rocsparse_status_
     rocsparse_status_memory_error            = 5, /**< Failed memory allocation, copy, or dealloc. */
     rocsparse_status_internal_error          = 6, /**< Other internal library failure. */
     rocsparse_status_invalid_value           = 7, /**< Invalid value parameter. */
-    rocsparse_status_arch_mismatch           = 8, /**< Device architecture is not supported. */
+    rocsparse_status_arch_mismatch           = 8, /**< Device arch is not supported. */
     rocsparse_status_zero_pivot              = 9, /**< Encountered zero pivot. */
     rocsparse_status_not_initialized         = 10, /**< Descriptor has not been initialized. */
     rocsparse_status_type_mismatch           = 11, /**< Index types do not match. */
     rocsparse_status_requires_sorted_storage = 12, /**< Sorted storage required. */
     rocsparse_status_thrown_exception        = 13, /**< Exception being thrown. */
-    rocsparse_status_continue                = 14 /**< Nothing preventing the function from proceeding. */
+    rocsparse_status_continue                = 14 /**< The function can proceed. */
 } rocsparse_status;
 
 /*! \ingroup types_module
