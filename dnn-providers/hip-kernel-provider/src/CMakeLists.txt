@@ -9,8 +9,8 @@ add_library(
     HipKernelPluginPublic.cpp
     HipKernelUtils.cpp
     engines/HipKernelEngine.cpp
-    hip/HipProgram.cpp
     hip/HipKernel.cpp
+    hip/HipProgram.cpp
     ${KERNEL_GENERATED_SOURCES}
     engines/plans/BatchnormPlanBuilder.cpp
     engines/plans/BatchnormFwdInferencePlan.cpp
@@ -25,6 +25,7 @@ if(ENABLE_ASM_SDPA_ENGINE)
 endif()
 target_include_directories(hip_kernel_provider_impl PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_LIST_DIR}/../include
     ${CMAKE_BINARY_DIR}
     ${CMAKE_CURRENT_BINARY_DIR}/../kernels
 )
