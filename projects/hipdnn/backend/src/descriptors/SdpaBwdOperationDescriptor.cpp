@@ -40,7 +40,7 @@ void SdpaBwdOperationDescriptor::finalize()
     THROW_IF_NULL(_dvDesc,
                   HIPDNN_STATUS_BAD_PARAM,
                   "SdpaBwdOperationDescriptor::finalize() failed: dV tensor not set");
-    THROW_IF_TRUE(_computeDataType == hipdnn_data_sdk::data_objects::DataType::UNSET,
+    THROW_IF_TRUE(_computeDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET,
                   HIPDNN_STATUS_BAD_PARAM,
                   "SdpaBwdOperationDescriptor::finalize() failed: compute data type not "
                   "set");
@@ -637,17 +637,18 @@ std::vector<std::shared_ptr<TensorDescriptor>>
     return tensors;
 }
 
-std::unique_ptr<hipdnn_data_sdk::data_objects::NodeT> SdpaBwdOperationDescriptor::buildNode() const
+std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::NodeT>
+    SdpaBwdOperationDescriptor::buildNode() const
 {
-    auto node = std::make_unique<hipdnn_data_sdk::data_objects::NodeT>();
+    auto node = std::make_unique<hipdnn_flatbuffers_sdk::data_objects::NodeT>();
     node->compute_data_type = _computeDataType;
     node->name = _name;
-    node->attributes.Set(hipdnn_data_sdk::data_objects::SdpaBackwardAttributesT(_data));
+    node->attributes.Set(hipdnn_flatbuffers_sdk::data_objects::SdpaBackwardAttributesT(_data));
     return node;
 }
 
 std::shared_ptr<SdpaBwdOperationDescriptor> SdpaBwdOperationDescriptor::fromNode(
-    const hipdnn_data_sdk::data_objects::NodeT& nodeT,
+    const hipdnn_flatbuffers_sdk::data_objects::NodeT& nodeT,
     const std::unordered_map<int64_t, std::shared_ptr<TensorDescriptor>>& tensorMap)
 {
     const auto* attrs = nodeT.attributes.AsSdpaBackwardAttributes();
@@ -738,7 +739,7 @@ std::string SdpaBwdOperationDescriptor::toString() const
     str += ", right_bound=" + optionalToString(_data.right_bound);
     str += ", diagonal_alignment=" + std::to_string(static_cast<int>(_data.diagonal_alignment));
     str += ", compute_data_type=";
-    str += hipdnn_data_sdk::data_objects::EnumNameDataType(_computeDataType);
+    str += hipdnn_flatbuffers_sdk::data_objects::EnumNameDataType(_computeDataType);
     str += "}";
     return str;
 }

@@ -1,5 +1,5 @@
 TestParameters:
-  marks: [skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201] # not supported yet
+  marks: [skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250] # not supported yet
 
 GlobalParameters:
   MinimumRequiredVersion: 5.0.0
