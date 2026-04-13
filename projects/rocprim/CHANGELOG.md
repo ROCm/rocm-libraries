@@ -2,6 +2,12 @@
 
 Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projects/rocPRIM/en/latest/](https://rocm.docs.amd.com/projects/rocPRIM/en/latest/).
 
+## rocPRIM changes since ROCm 7.13
+
+### Optimizations
+
+* Improved performance for the fallback path of lookback scan where the flag can't be fit into the same atomic load/store.
+
 ## Since last release ROCm 7.12
 
 ### Added
