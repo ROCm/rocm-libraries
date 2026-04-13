@@ -345,13 +345,13 @@ namespace rocRoller
 
             Generator<Instruction> operator()(int tag, ConditionalOp const& op)
             {
+                AssertFatal(op.mode < OpMode::Count,
+                            "Unsupported mode for ConditionalOp: ",
+                            ShowValue(op.mode));
                 Log::debug("ConditionalOp tag {}: mode {}, condition {}",
                            tag,
                            toString(op.mode),
                            op.conditionName);
-                AssertFatal(op.mode < OpMode::Count,
-                            "Unsupported mode for ConditionalOp: ",
-                            ShowValue(op.mode));
 
                 auto trueBody   = m_graph->control.getOutputNodeIndices<Body>(tag).to<std::set>();
                 auto elseBody   = m_graph->control.getOutputNodeIndices<Else>(tag).to<std::set>();

@@ -390,6 +390,155 @@ namespace ExecuteMaskGeneratorTest
     }
 
     /**
+     * Like buildConditionalGraphWithStore, but uses a condition that is false for every
+     * active lane so that s_and_saveexec_* produces EXEC==0 and the EXECZ branch is taken.
+     *
+     * Condition: (workitemId & 0u) == 1u
+     * Bitwise-AND of any value with 0 is always 0, which never equals 1, so VCC==0 for
+     * every lane and EXECZ is set after s_and_saveexec_*.
+     *
+     * Graph structure:
+     *   Kernel
+     *     +-- Body     -> initOp      (assign 0u to destVGPR)
+     *     +-- Sequence -> conditional (BranchAndExec: alwaysFalse)
+     *           +-- Body     -> trueOp  (assign 1u) [skipped: EXECZ branch taken]
+     *           +-- Else     -> falseOp (assign 2u) [if withElseBody]
+     *           +-- Sequence -> storeOp (StoreVGPR: destVGPR -> output[workitemId])
+     *
+     * Expected per-lane output:
+     *   withElseBody==true:  2u for all lanes (else body runs with EXEC restored to full mask)
+     *   withElseBody==false: 0u for all lanes (no body runs; pre-init value retained)
+     */
+    kg::KernelGraph buildAlwaysFalseConditionalGraphWithStore(OpMode             mode,
+                                                              bool               withElseBody,
+                                                              Register::ValuePtr workitemIdReg,
+                                                              uint32_t           wavefrontSize)
+    {
+        kg::KernelGraph kgraph;
+
+        auto zero = Expression::literal(0u);
+        auto one  = Expression::literal(1u);
+        auto two  = Expression::literal(2u);
+
+        // Always-false VCC condition: workitemId >= wavefrontSize.
+        // workitemId is always in [0, wfSize), so this is always false for every lane,
+        // and s_and_saveexec_* produces EXEC==0 (EXECZ set).
+        auto workitemId  = workitemIdReg->expression();
+        auto alwaysFalse = workitemId >= Expression::literal(wavefrontSize);
+
+        auto destVGPR = kgraph.coordinates.addElement(VGPR());
+
+        auto initOp = kgraph.control.addElement(Assign{Register::Type::Vector, zero});
+        kgraph.mapper.connect(initOp, destVGPR, NaryArgument::DEST);
+
+        auto trueOp = kgraph.control.addElement(Assign{Register::Type::Vector, one});
+        kgraph.mapper.connect(trueOp, destVGPR, NaryArgument::DEST);
+
+        auto conditional = kgraph.control.addElement(
+            ConditionalOp{alwaysFalse, mode, "AlwaysFalse Conditional"});
+
+        auto kernel = kgraph.control.addElement(Kernel());
+        kgraph.control.addElement(Body(), {kernel}, {initOp});
+        kgraph.control.addElement(Sequence(), {initOp}, {conditional});
+        kgraph.control.addElement(Body(), {conditional}, {trueOp});
+
+        if(withElseBody)
+        {
+            auto falseOp = kgraph.control.addElement(Assign{Register::Type::Vector, two});
+            kgraph.mapper.connect(falseOp, destVGPR, NaryArgument::DEST);
+            kgraph.control.addElement(Else(), {conditional}, {falseOp});
+        }
+
+        auto wfSizeExpr = Expression::literal(wavefrontSize);
+        auto workitem0  = kgraph.coordinates.addElement(Workitem(0, wfSizeExpr));
+        auto user       = kgraph.coordinates.addElement(User({}, "output"));
+        kgraph.coordinates.addElement(PassThrough(), {workitem0}, {user});
+        kgraph.coordinates.addElement(PassThrough(), {user}, {destVGPR});
+
+        auto storeOp = kgraph.control.addElement(StoreVGPR{});
+        kgraph.mapper.connect<User>(storeOp, user);
+        kgraph.mapper.connect<VGPR>(storeOp, destVGPR);
+        kgraph.control.addElement(Sequence(), {conditional}, {storeOp});
+
+        return kgraph;
+    }
+
+    // Helper for EXECZ-forced GPU execution tests.
+    // The condition is always false for every lane so s_and_saveexec_* produces
+    // EXEC==0, EXECZ is set, and the EXECZ branch is taken at runtime.
+    void runGPUExecutionTestEXECZ(bool withElseBody)
+    {
+        auto testCtx = TestContext::ForTestDevice();
+        auto ctx     = testCtx.get();
+        auto k       = ctx->kernel();
+
+        auto wfSize = static_cast<uint32_t>(k->wavefront_size());
+
+        k->addArgument(
+            {"output", {DataType::UInt32, PointerType::PointerGlobal}, DataDirection::WriteOnly});
+        k->setKernelDimensions(1);
+        k->setWorkitemCount(
+            {Expression::literal(wfSize), Expression::literal(1u), Expression::literal(1u)});
+        k->setWorkgroupSize({wfSize, 1, 1});
+
+        ctx->schedule(k->preamble());
+        ctx->schedule(k->prolog());
+        auto kgraph = buildAlwaysFalseConditionalGraphWithStore(
+            OpMode::BranchAndExec, withElseBody, k->workitemIndex()[0], wfSize);
+        ctx->schedule(rocRoller::KernelGraph::generate(kgraph, k));
+        ctx->schedule(k->postamble());
+        ctx->schedule(k->amdgpu_metadata());
+
+        if(ctx->hipDeviceIndex() < 0)
+            return;
+
+        auto deviceOutput = make_shared_device<uint32_t>(wfSize, 0u);
+
+        KernelArguments kargs(false);
+        kargs.append("output", deviceOutput.get());
+
+        KernelInvocation kinv;
+        kinv.workitemCount = {wfSize, 1, 1};
+        kinv.workgroupSize = {wfSize, 1, 1};
+
+        ctx->instructions()->getExecutableKernel()->executeKernel(kargs, kinv);
+
+        std::vector<uint32_t> hostOutput(wfSize);
+        REQUIRE_THAT(
+            hipMemcpy(
+                hostOutput.data(), deviceOutput.get(), wfSize * sizeof(uint32_t), hipMemcpyDefault),
+            HasHipSuccess(0));
+
+        // The condition (workitemId & 0u) == 1u is false for every lane.
+        // s_and_saveexec_* produces EXEC==0 so EXECZ is set and the s_cbranch_execz
+        // over the true body is taken; the true body is never executed.
+        //
+        // With else body: EXEC is restored to the original mask, s_andn1_saveexec_*
+        //   computes EXEC AND NOT(vcc) = originalEXEC AND ~0 = originalEXEC, leaving
+        //   all lanes active for the else body (assign 2u).
+        // Without else body: destVGPR retains its pre-initialized value (0u) for all lanes,
+        //   and EXEC is correctly restored to the original mask at the exit label.
+        uint32_t              expectedValue = withElseBody ? 2u : 0u;
+        std::vector<uint32_t> expected(wfSize, expectedValue);
+
+        CHECK(hostOutput == expected);
+    }
+
+    TEST_CASE("ExecuteMaskGenerator - BranchAndExec mode, EXECZ forced (all-lanes false, true body "
+              "only) (GPU execution)",
+              "[exec-mask][gpu]")
+    {
+        runGPUExecutionTestEXECZ(false);
+    }
+
+    TEST_CASE("ExecuteMaskGenerator - BranchAndExec mode, EXECZ forced (all-lanes false, with else "
+              "body) (GPU execution)",
+              "[exec-mask][gpu]")
+    {
+        runGPUExecutionTestEXECZ(true);
+    }
+
+    /**
      * Like buildConditionalGraphWithStore, but adds a nested ConditionalOp inside the
      * true body that overwrites destVGPR with 4u for lanes whose workitem ID is
      * divisible by 4 (workitemId & 3u == 0u), and optionally 8u for the inner false

@@ -58,8 +58,8 @@ namespace rocRoller
                                  && context->kernel()->wavefront_size() == 64)
                                 || (condition->registerCount() == 1
                                     && context->kernel()->wavefront_size() == 32))),
-                    "Condition must be vcc, scc, or scalar. If it's a scalar, it must be size 1 "
-                    "for wavefront=32 and size 2 for wavefront=64.",
+                    "Condition must be vcc, scc, execz, or scalar. If it's a scalar, it must be "
+                    "size 1 for wavefront=32 and size 2 for wavefront=64.",
                     ShowValue(condition->isSCC()),
                     ShowValue(condition->isVCC()),
                     ShowValue(condition->isEXECZ()),
