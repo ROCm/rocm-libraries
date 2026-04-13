@@ -1353,7 +1353,7 @@ class TestConstantsGeneration:
         self, load_test_config, generator, tmp_path
     ):
         """Constants file IS generated in lift-only mode when not set."""
-        config = load_test_config("convolution_bwd.yaml")
+        config = load_test_config("batchnorm_backward.yaml")
         assert not config.test_data.constants_include
 
         output_dir = tmp_path / "output"
@@ -1516,7 +1516,8 @@ class TestLiftingTemplateImprovements:
         content = lifting_path.read_text()
 
         assert "K_TEST_" not in content
-        assert "K_TENSOR_X_UID" in content
+        prefix = convolution_fwd_config.tensor_const_prefix
+        assert f"{prefix}TENSOR_X_UID" in content
         assert "using namespace hipdnn_tests::constants;" in content
 
     def test_lowering_uses_constants_not_inline(
@@ -1535,7 +1536,8 @@ class TestLiftingTemplateImprovements:
         content = lowering_path.read_text()
 
         assert "K_TEST_" not in content
-        assert "K_TENSOR_X_UID" in content
+        prefix = convolution_fwd_config.tensor_const_prefix
+        assert f"{prefix}TENSOR_X_UID" in content
         assert "using namespace hipdnn_tests::constants;" in content
 
     def test_lowering_uses_assert_eq_not_ge(

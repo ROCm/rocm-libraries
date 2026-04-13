@@ -9,8 +9,8 @@
 #include "hipdnn_backend.h"
 
 #include <gtest/gtest.h>
-#include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_data_sdk/types.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
 
 #include <array>
 #include <cstring>
@@ -18,7 +18,7 @@
 
 using namespace hipdnn_backend;
 using namespace hipdnn_backend::test_utilities;
-using namespace hipdnn_data_sdk::data_objects;
+using namespace hipdnn_flatbuffers_sdk::data_objects;
 
 class TestTensorDescriptor : public ::testing::Test
 {
@@ -201,7 +201,7 @@ TEST_F(TestTensorDescriptor, SetAttributeDataType)
     ASSERT_NO_THROW(
         desc->setAttribute(HIPDNN_ATTR_TENSOR_DATA_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &dataType));
 
-    ASSERT_EQ(desc->getData().data_type, hipdnn_data_sdk::data_objects::DataType::HALF);
+    ASSERT_EQ(desc->getData().data_type, hipdnn_flatbuffers_sdk::data_objects::DataType::HALF);
 }
 
 TEST_F(TestTensorDescriptor, SetAttributeDataTypeWrongElementCount)
@@ -785,7 +785,7 @@ TEST_F(TestTensorDescriptor, IsByValueReturnsFalseWhenNoValueSet)
     bool isByValue = true;
     int64_t count = 0;
     ASSERT_NO_THROW(desc->getAttribute(
-        HIPDNN_ATTR_TENSOR_IS_BY_VALUE_EXT, HIPDNN_TYPE_BOOLEAN, 1, &count, &isByValue));
+        HIPDNN_ATTR_TENSOR_IS_BY_VALUE, HIPDNN_TYPE_BOOLEAN, 1, &count, &isByValue));
     EXPECT_FALSE(isByValue);
 }
 
@@ -800,7 +800,7 @@ TEST_F(TestTensorDescriptor, IsByValueReturnsTrueWhenValueSet)
     bool isByValue = false;
     int64_t count = 0;
     ASSERT_NO_THROW(desc->getAttribute(
-        HIPDNN_ATTR_TENSOR_IS_BY_VALUE_EXT, HIPDNN_TYPE_BOOLEAN, 1, &count, &isByValue));
+        HIPDNN_ATTR_TENSOR_IS_BY_VALUE, HIPDNN_TYPE_BOOLEAN, 1, &count, &isByValue));
     EXPECT_TRUE(isByValue);
 }
 

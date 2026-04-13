@@ -18,7 +18,7 @@ inline Error createBlockScaleDequantizeOperation(
 {
     // Create operation descriptor
     ScopedHipdnnBackendDescriptor opDesc(
-        HIPDNN_BACKEND_OPERATION_BLOCK_SCALE_DEQUANTIZE_DESCRIPTOR_EXT);
+        HIPDNN_BACKEND_OPERATION_BLOCK_SCALE_DEQUANTIZE_DESCRIPTOR);
     if(!opDesc.valid())
     {
         return {ErrorCode::HIPDNN_BACKEND_ERROR,
@@ -27,42 +27,43 @@ inline Error createBlockScaleDequantizeOperation(
 
     // Create tensor descriptors (if needed) and set them on the operation
     HIPDNN_CHECK_ERROR(ensureAndSetTensorRef(opDesc.get(),
-                                             HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_X_EXT,
+                                             HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_XDESC,
                                              attributes.get_x(),
                                              tensorDescs,
                                              "block_scale_dequantize X"));
+    HIPDNN_CHECK_ERROR(
+        ensureAndSetTensorRef(opDesc.get(),
+                              HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_SCALE_DESC,
+                              attributes.get_scale(),
+                              tensorDescs,
+                              "block_scale_dequantize SCALE"));
     HIPDNN_CHECK_ERROR(ensureAndSetTensorRef(opDesc.get(),
-                                             HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_SCALE_EXT,
-                                             attributes.get_scale(),
-                                             tensorDescs,
-                                             "block_scale_dequantize SCALE"));
-    HIPDNN_CHECK_ERROR(ensureAndSetTensorRef(opDesc.get(),
-                                             HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_Y_EXT,
+                                             HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_YDESC,
                                              attributes.get_y(),
                                              tensorDescs,
                                              "block_scale_dequantize Y"));
 
     // Set block_size as int32 (matches backend and FBS schema type)
-    HIPDNN_CHECK_ERROR(
-        setDescriptorAttrVec(opDesc.get(),
-                             HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_BLOCK_SIZE_EXT,
-                             HIPDNN_TYPE_INT32,
-                             attributes.get_block_size(),
-                             "block_scale_dequantize block_size"));
+    HIPDNN_CHECK_ERROR(setDescriptorAttrVec(opDesc.get(),
+                                            HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_BLOCK_SIZE,
+                                            HIPDNN_TYPE_INT32,
+                                            attributes.get_block_size(),
+                                            "block_scale_dequantize block_size"));
 
     // Set is_negative_scale
     HIPDNN_CHECK_ERROR(
         setDescriptorAttrScalar(opDesc.get(),
-                                HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_IS_NEGATIVE_SCALE_EXT,
+                                HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_NEG_SCALE,
                                 HIPDNN_TYPE_BOOLEAN,
                                 attributes.get_is_negative_scale(),
                                 "block_scale_dequantize is_negative_scale"));
 
     // Set compute data type
-    HIPDNN_CHECK_ERROR(setDescriptorAttrDataType(opDesc.get(),
-                                                 HIPDNN_ATTR_BLOCK_SCALE_DEQUANTIZE_MATH_PREC_EXT,
-                                                 attributes.compute_data_type,
-                                                 "block_scale_dequantize compute data type"));
+    HIPDNN_CHECK_ERROR(
+        setDescriptorAttrDataType(opDesc.get(),
+                                  HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_MATH_PREC,
+                                  attributes.compute_data_type,
+                                  "block_scale_dequantize compute data type"));
 
     // Set operation name if provided
     auto& opName = attributes.get_name();

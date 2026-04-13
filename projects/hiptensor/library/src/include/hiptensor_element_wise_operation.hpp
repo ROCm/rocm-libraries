@@ -36,6 +36,12 @@
 #include <ck/tensor_operation/gpu/element/binary_element_wise_operation.hpp>
 #include <hiptensor/hiptensor_types.h>
 
+#if HIPTENSOR_INLINE_UNARY_OPS
+#define HIPTENSOR_UNARY_INLINE
+#else
+#define HIPTENSOR_UNARY_INLINE __attribute__((noinline))
+#endif
+
 namespace ck
 {
     namespace tensor_operation
@@ -46,122 +52,122 @@ namespace ck
             using DoubleFunctionPtr = void (*)(double& y, double const& x);
 
             template <typename T>
-            __host__ __device__ static void hiptensor_identity(T& y, T const& x)
+            __host__ __device__ HIPTENSOR_UNARY_INLINE static void hiptensor_identity(T& y, T const& x)
             {
                 y = x;
             };
             template <typename T>
-            __host__ __device__ static void hiptensor_sqrt(T& y, T const& x)
+            __host__ __device__ HIPTENSOR_UNARY_INLINE static void hiptensor_sqrt(T& y, T const& x)
             {
                 y = std::sqrt(x);
             };
             template <typename T>
-            __host__ __device__ static void hiptensor_relu(T& y, T const& x)
+            __host__ __device__ HIPTENSOR_UNARY_INLINE static void hiptensor_relu(T& y, T const& x)
             {
                 y = x > 0 ? x : 0;
             };
             template <typename T>
-            __host__ __device__ static void hiptensor_conj(T& y, T const& x)
+            __host__ __device__ HIPTENSOR_UNARY_INLINE static void hiptensor_conj(T& y, T const& x)
             {
                 y = x;
             };
             template <typename T>
-            __host__ __device__ static void hiptensor_rcp(T& y, T const& x)
+            __host__ __device__ HIPTENSOR_UNARY_INLINE static void hiptensor_rcp(T& y, T const& x)
             {
                 y = 1 / x;
             }
             template <typename T>
-            __host__ __device__ static void hiptensor_sigmoid(T& y, T const& x)
+            __host__ __device__ HIPTENSOR_UNARY_INLINE static void hiptensor_sigmoid(T& y, T const& x)
             {
                 y = 1 / (1 + std::exp(-x));
             }
             template <typename T>
-            __host__ __device__ static void hiptensor_tanh(T& y, T const& x)
+            __host__ __device__ HIPTENSOR_UNARY_INLINE static void hiptensor_tanh(T& y, T const& x)
             {
                 y = std::tanh(x);
             }
             template <typename T>
-            __host__ __device__ static void hiptensor_exp(T& y, T const& x)
+            __host__ __device__ HIPTENSOR_UNARY_INLINE static void hiptensor_exp(T& y, T const& x)
             {
                 y = std::exp(x);
             }
             template <typename T>
-            __host__ __device__ static void hiptensor_log(T& y, T const& x)
+            __host__ __device__ HIPTENSOR_UNARY_INLINE static void hiptensor_log(T& y, T const& x)
             {
                 y = std::log(x);
             }
             template <typename T>
-            __host__ __device__ static void hiptensor_abs(T& y, T const& x)
+            __host__ __device__ HIPTENSOR_UNARY_INLINE static void hiptensor_abs(T& y, T const& x)
             {
                 y = std::abs(x);
             }
             template <typename T>
-            __host__ __device__ static void hiptensor_neg(T& y, T const& x)
+            __host__ __device__ HIPTENSOR_UNARY_INLINE static void hiptensor_neg(T& y, T const& x)
             {
                 y = -x;
             }
             template <typename T>
-            __host__ __device__ static void hiptensor_sin(T& y, T const& x)
+            __host__ __device__ HIPTENSOR_UNARY_INLINE static void hiptensor_sin(T& y, T const& x)
             {
                 y = std::sin(x);
             }
             template <typename T>
-            __host__ __device__ static void hiptensor_cos(T& y, T const& x)
+            __host__ __device__ HIPTENSOR_UNARY_INLINE static void hiptensor_cos(T& y, T const& x)
             {
                 y = std::cos(x);
             }
             template <typename T>
-            __host__ __device__ static void hiptensor_tan(T& y, T const& x)
+            __host__ __device__ HIPTENSOR_UNARY_INLINE static void hiptensor_tan(T& y, T const& x)
             {
                 y = std::tan(x);
             }
             template <typename T>
-            __host__ __device__ static void hiptensor_sinh(T& y, T const& x)
+            __host__ __device__ HIPTENSOR_UNARY_INLINE static void hiptensor_sinh(T& y, T const& x)
             {
                 y = std::sinh(x);
             }
             template <typename T>
-            __host__ __device__ static void hiptensor_cosh(T& y, T const& x)
+            __host__ __device__ HIPTENSOR_UNARY_INLINE static void hiptensor_cosh(T& y, T const& x)
             {
                 y = std::cosh(x);
             }
             template <typename T>
-            __host__ __device__ static void hiptensor_asin(T& y, T const& x)
+            __host__ __device__ HIPTENSOR_UNARY_INLINE static void hiptensor_asin(T& y, T const& x)
             {
                 y = std::asin(x);
             }
             template <typename T>
-            __host__ __device__ static void hiptensor_acos(T& y, T const& x)
+            __host__ __device__ HIPTENSOR_UNARY_INLINE static void hiptensor_acos(T& y, T const& x)
             {
                 y = std::acos(x);
             }
             template <typename T>
-            __host__ __device__ static void hiptensor_atan(T& y, T const& x)
+            __host__ __device__ HIPTENSOR_UNARY_INLINE static void hiptensor_atan(T& y, T const& x)
             {
                 y = std::atan(x);
             }
             template <typename T>
-            __host__ __device__ static void hiptensor_asinh(T& y, T const& x)
+            __host__ __device__ HIPTENSOR_UNARY_INLINE static void hiptensor_asinh(T& y, T const& x)
             {
                 y = std::asinh(x);
             }
             template <typename T>
-            __host__ __device__ static void hiptensor_acosh(T& y, T const& x)
+            __host__ __device__ HIPTENSOR_UNARY_INLINE static void hiptensor_acosh(T& y, T const& x)
             {
                 y = std::acosh(x);
             }
             template <typename T>
-            __host__ __device__ static void hiptensor_atanh(T& y, T const& x)
+            __host__ __device__ HIPTENSOR_UNARY_INLINE static void hiptensor_atanh(T& y, T const& x)
             {
                 y = std::atanh(x);
             }
             template <typename T>
-            __host__ __device__ static void hiptensor_ceil(T& y, T const& x)
+            __host__ __device__ HIPTENSOR_UNARY_INLINE static void hiptensor_ceil(T& y, T const& x)
             {
                 y = std::ceil(x);
             }
             template <typename T>
-            __host__ __device__ static void hiptensor_floor(T& y, T const& x)
+            __host__ __device__ HIPTENSOR_UNARY_INLINE static void hiptensor_floor(T& y, T const& x)
             {
                 y = std::floor(x);
             }

@@ -11,10 +11,10 @@
 #include "hipdnn_backend.h"
 
 #include <gtest/gtest.h>
-#include <hipdnn_data_sdk/data_objects/convolution_fwd_attributes_generated.h>
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
-#include <hipdnn_data_sdk/data_objects/reduction_attributes_generated.h>
-#include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/convolution_fwd_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/reduction_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_test_sdk/constants/ReductionConstants.hpp>
 #include <hipdnn_test_sdk/utilities/ToVec.hpp>
 
@@ -25,7 +25,7 @@
 
 using namespace hipdnn_backend;
 using namespace hipdnn_backend::test_utilities;
-using namespace hipdnn_data_sdk::data_objects;
+using namespace hipdnn_flatbuffers_sdk::data_objects;
 using namespace hipdnn_tests::constants;
 using hipdnn_tests::toVec;
 
@@ -56,9 +56,9 @@ protected:
         _tensorMap[K_REDUCTION_TENSOR_Y_UID] = TensorDescriptor::fromFlatBuffer(yAttrs);
     }
 
-    static hipdnn_data_sdk::data_objects::ReductionAttributesT createStandardReductionAttrs()
+    static hipdnn_flatbuffers_sdk::data_objects::ReductionAttributesT createStandardReductionAttrs()
     {
-        hipdnn_data_sdk::data_objects::ReductionAttributesT attrs;
+        hipdnn_flatbuffers_sdk::data_objects::ReductionAttributesT attrs;
         attrs.in_tensor_uid = K_REDUCTION_TENSOR_X_UID;
         attrs.out_tensor_uid = K_REDUCTION_TENSOR_Y_UID;
         attrs.mode = ReductionMode::ADD;
@@ -293,12 +293,12 @@ TEST_F(TestReductionOperationFromNode, GetAttributeWorksAfterFromNode)
         yScoped.get(), K_REDUCTION_TENSOR_Y_UID, HIPDNN_DATA_FLOAT, {2, 3, 1, 1}, {3, 1, 1, 1});
 
     // Verify operation type
-    hipdnnOperationType_t opType = HIPDNN_OPERATION_TYPE_NOT_SET;
+    hipdnnOperationType_ext_t opType = HIPDNN_OPERATION_TYPE_NOT_SET_EXT;
     int64_t opTypeCount = 0;
     desc->getAttribute(
         HIPDNN_ATTR_OPERATION_TYPE_EXT, HIPDNN_TYPE_OPERATION_TYPE_EXT, 1, &opTypeCount, &opType);
     ASSERT_EQ(opTypeCount, 1);
-    EXPECT_EQ(opType, HIPDNN_OPERATION_TYPE_REDUCTION);
+    EXPECT_EQ(opType, HIPDNN_OPERATION_TYPE_REDUCTION_EXT);
 }
 
 TEST_F(TestReductionOperationFromNode, NamePreservedFromNode)

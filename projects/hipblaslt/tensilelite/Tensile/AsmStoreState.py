@@ -404,10 +404,14 @@ class StoreState:
         kw = self.kernelWriter
 
         if kernel["EnableMatrixInstruction"]:
-            matrixInstM  = (kernel["MatrixInstM"] * kernel["MatrixInstBM"]) if (kernel["MatrixInstM"] == 4) else kernel["MatrixInstM"]
-            matrixInstN  = (kernel["MatrixInstN"] * kernel["MatrixInstBN"]) if (kernel["MatrixInstN"] == 4) else kernel["MatrixInstN"]
-            matrixInstBM = 1                                                if (kernel["MatrixInstM"] == 4) else kernel["MatrixInstBM"]
-            matrixInstBN = 1                                                if (kernel["MatrixInstN"] == 4) else kernel["MatrixInstBN"]
+            matrixInstT  = min(kernel["MatrixInstM"], kernel["MatrixInstN"])
+            matrixInstBM = kernel["MatrixInstM"] // matrixInstT
+            matrixInstBN = kernel["MatrixInstN"] // matrixInstT
+
+            matrixInstM  = (kernel["MatrixInstM"] * kernel["MatrixInstBM"]) if (kernel["MatrixInstM"] == 4) else matrixInstT
+            matrixInstN  = (kernel["MatrixInstN"] * kernel["MatrixInstBN"]) if (kernel["MatrixInstN"] == 4) else matrixInstT
+            matrixInstBM = 1                                                if (kernel["MatrixInstM"] == 4) else kernel["MatrixInstBM"] * matrixInstBM
+            matrixInstBN = 1                                                if (kernel["MatrixInstN"] == 4) else kernel["MatrixInstBN"] * matrixInstBN
 
         for elementIdx in range(0, len(batchElements)):
 

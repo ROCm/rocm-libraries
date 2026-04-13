@@ -165,8 +165,8 @@ class LSUOn(LSU):
 
         # Checkout local read resource
         bpr            = 4 #bytes per register
-        bytesPerElem   = kernel["ProblemType"]["ComputeDataType"].numBytes()
         regsPerElem = kernel["ProblemType"]["ComputeDataType"].numRegisters()
+        bytesPerElem   = int(kernel["ProblemType"]["ComputeDataType"].numBytes())
         bytesPerVector = self.LSUfullVws[0] * bytesPerElem
         numWaves       = kernel["MIWaveGroup"][0] * kernel["MIWaveGroup"][1]
         regsPerStep = int((bytesPerVector+3)//4)
