@@ -42,7 +42,6 @@ option(ENABLE_CLANG_FORMAT "Enable clang-format targets" ON)
 list(
     PREPEND
     HIPDNN_WARNING_COMPILE_OPTIONS
-    -Werror # Treat all warnings as errors
     -Wall # Enable most common warnings
     -Wextra # Enable additional warnings not covered by -Wall
     -Wpedantic # Enforce strict ISO C++ compliance
@@ -62,6 +61,15 @@ list(
     -Wno-error=unused-command-line-argument # Disable error for unused command line arguments
     -Wswitch-default # Warn if a switch statement does not have a default case
 )
+
+# Treat warnings as errors on non-Windows platforms.
+# On Windows, hipBLASLt upstream headers (hipblaslt_e5m3.h / hipblaslt_e8.h) trigger
+# an ambiguous operator<< diagnostic that is normally suppressed for -isystem headers
+# but surfaces when -Werror promotes it to an error.
+# See: https://github.com/ROCm/rocm-libraries/issues/6404
+if(NOT WIN32)
+    list(PREPEND HIPDNN_WARNING_COMPILE_OPTIONS -Werror)
+endif()
 
 # NOTE: Workaround until llvm & hip cmake modules fixes symlink logic in their config files;
 # remove when fixed. Added to prevent issues with not finding hip cmake.
