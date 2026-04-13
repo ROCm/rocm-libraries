@@ -18,4 +18,4 @@ build:
       python: "mambaforge-22.9"
 
 conda:
-   environment: docs/environment.yml
+   environment: projects/rocfft/docs/environment.yml

@@ -10,10 +10,10 @@
 #include "hipdnn_backend.h"
 
 #include <gtest/gtest.h>
-#include <hipdnn_data_sdk/data_objects/batchnorm_attributes_generated.h>
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
-#include <hipdnn_data_sdk/data_objects/pointwise_attributes_generated.h>
-#include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/batchnorm_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/pointwise_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_test_sdk/constants/BatchnormConstants.hpp>
 
 #include <array>
@@ -23,7 +23,7 @@
 #include <vector>
 
 using namespace hipdnn_backend;
-using namespace hipdnn_data_sdk::data_objects;
+using namespace hipdnn_flatbuffers_sdk::data_objects;
 using namespace hipdnn_tests::constants;
 
 // =============================================================================
@@ -168,9 +168,9 @@ protected:
             = TensorDescriptor::fromFlatBuffer(peerStatsAttrs1);
     }
 
-    static hipdnn_data_sdk::data_objects::BatchnormAttributesT createStandardBatchnormAttrs()
+    static hipdnn_flatbuffers_sdk::data_objects::BatchnormAttributesT createStandardBatchnormAttrs()
     {
-        hipdnn_data_sdk::data_objects::BatchnormAttributesT attrs;
+        hipdnn_flatbuffers_sdk::data_objects::BatchnormAttributesT attrs;
         attrs.x_tensor_uid = K_BATCHNORM_TENSOR_X_UID;
         attrs.scale_tensor_uid = K_BATCHNORM_TENSOR_SCALE_UID;
         attrs.bias_tensor_uid = K_BATCHNORM_TENSOR_BIAS_UID;
