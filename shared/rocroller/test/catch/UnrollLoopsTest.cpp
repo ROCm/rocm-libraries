@@ -84,7 +84,7 @@ TEST_CASE("UnrollLoops simple test", "[kernel-graph][unroll][graph-transforms]")
         kg::CoordinateGraph::VGPR{});
 
     auto argTag = command->allocateTag();
-    auto arg    = command->allocateArgument(DataType::Int32, argTag, ArgumentType::Limit);
+    auto arg    = command->allocateArgument(DataType::Int32, argTag, ArgumentType::Size);
 
     auto [forDim, forOp] = kg::rangeFor(kgraph, arg->expression(), rocRoller::KLOOP);
 

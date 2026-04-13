@@ -863,7 +863,7 @@ The knobs system has been fully implemented in hipDNN as of version 1.0+. The im
    - All schemas support int64, float64, and string value types
 
 2. **Backend API** (Phase 1.2)
-   - `HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE_EXT` - Query knob metadata
+   - `HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE` - Query knob metadata
    - `HIPDNN_ATTR_ENGINECFG_KNOB_CHOICES` - Set knob values
    - Validation during `hipdnnBackendFinalize(engineCfg)`
    - Error reporting for invalid knob values

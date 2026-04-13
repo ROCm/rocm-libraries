@@ -100,10 +100,10 @@ typedef enum
     HIPDNN_TYPE_POINTWISE_MODE = 25,
 
     /** @brief Diagonal alignment mode enumeration (hipdnnDiagonalAlignment_t) */
-    HIPDNN_TYPE_DIAGONAL_ALIGNMENT = 26,
+    HIPDNN_TYPE_DIAGONAL_ALIGNMENT_EXT = 26,
 
     /** @brief Attention implementation mode enumeration (hipdnnAttentionImplementation_t) */
-    HIPDNN_TYPE_ATTENTION_IMPLEMENTATION = 27,
+    HIPDNN_TYPE_ATTENTION_IMPLEMENTATION_EXT = 27,
 
     /** @brief Reduce tensor operator enumeration (hipdnnReduceTensorOp_t) */
     HIPDNN_TYPE_REDUCTION_OPERATOR_TYPE = 28,
@@ -123,7 +123,7 @@ typedef enum
     HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT = 10000,
 
     /**
-     * @brief Operation type enumeration (hipdnnOperationType_t, extension)
+     * @brief Operation type enumeration (hipdnnOperationType_ext_t, extension)
      *
      * Used for querying the operation type of an operation descriptor
      * via HIPDNN_ATTR_OPERATION_TYPE_EXT.

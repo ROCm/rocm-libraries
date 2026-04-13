@@ -386,11 +386,6 @@ For more information, see :doc:`Logging and debugging <../how-to/debug-log>`.
       - | 0: Disable
         | 1: Enable
 
-    * - | ``MIOPEN_DEBUG_AMD_WINOGRAD_RAGE_RXS_F2X3``
-        | Controls Winograd Rage RxS F(2,3) solution.
-      - | 0: Disable
-        | 1: Enable
-
 Multi-pass Winograd solution control
 ====================================
 
