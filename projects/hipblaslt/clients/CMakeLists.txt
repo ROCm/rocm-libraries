@@ -26,6 +26,7 @@ target_link_libraries(hipblaslt-clients-common
         ${LAPACK_LIBRARIES}
     PRIVATE
         hip::device
+        tensilelite::tensilelite-host
 )
 
 if(HIPBLASLT_ENABLE_ROCROLLER)
@@ -112,9 +113,9 @@ if(BUILD_TESTING OR HIPBLASLT_BUILD_TESTING)
     if(HIPBLASLT_ENABLE_ROCROLLER)
         target_compile_definitions(hipblaslt-test PRIVATE HIPBLASLT_USE_ROCROLLER)
     endif()
+
     add_subdirectory(tests)
 endif()
-
 if(HIPBLASLT_ENABLE_SAMPLES)
     add_subdirectory(samples)
 endif()

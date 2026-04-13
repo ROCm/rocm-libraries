@@ -9,13 +9,10 @@ namespace hipdnn_tests
 {
 
 /// Exposes protected Graph methods needed by lifting integration tests.
-/// Used by tests that lower a graph via build_operation_graph() and
-/// then lift it back with fromBackendDescriptor().
+/// Used by tests that lower a graph and then lift it back with fromBackendDescriptor().
 class TestableGraphLifting : public hipdnn_frontend::graph::Graph
 {
 public:
-    using Graph::build_operation_graph;
-    using Graph::deserialize_via_backend;
     using Graph::fromBackendDescriptor;
     using Graph::get_raw_graph_descriptor;
 
@@ -40,7 +37,6 @@ public:
 class TestableGraphKnobs : public hipdnn_frontend::graph::Graph
 {
 public:
-    using Graph::build_operation_graph;
     using Graph::get_knobs_for_engine_via_descriptors;
 };
 
@@ -51,7 +47,6 @@ class TestableGraphKnobLowering : public hipdnn_frontend::graph::Graph
 {
 public:
     using Graph::build_operation_graph_via_descriptors;
-    using Graph::create_execution_plan_ext_via_descriptors;
 };
 
 } // namespace hipdnn_tests

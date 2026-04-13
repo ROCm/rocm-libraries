@@ -5,6 +5,7 @@
 #include <random>
 
 #include <hip/hip_runtime.h>
+#include <hip_kernel_provider_common/HipDeviceUtils.hpp>
 #include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
@@ -80,8 +81,11 @@ protected:
 
     void runGraphTest(float tolerance)
     {
-        GTEST_SKIP() << "Skipped: ASM SDPA kernel only supports gfx942. "
-                        "Architecture gating will be added in the isApplicable PR.";
+
+        if(hip_kernel_provider_common::getDeviceString(this->stream()) != "gfx942")
+        {
+            GTEST_SKIP() << "Skipped: ASM SDPA kernel only supports gfx942.";
+        }
 
         const SdpaTestCase& testCase = this->GetParam();
 

@@ -802,26 +802,30 @@ namespace rocRoller
         void removeRedundantBodyEdgesBaselineMethod(KernelGraph& graph);
 
         /**
-         * Yields all of the nodes that are body parents of `control` in order from the node
-         * up to the root of the graph.
+         * Yields all nodes that contain `control` via a non-Sequence edge, in order from
+         * the immediate parent up to the root of the graph, paired with the containing edge
+         * connecting the parent to the child (e.g. Body, Else, Initialize, ForLoopIncrement).
          */
-        Generator<int> bodyParents(int control, KernelGraph const& graph);
+        Generator<std::pair<int, ControlGraph::ControlEdge>>
+            containingAncestors(int control, KernelGraph const& graph);
 
         /**
-         * Yields all of the nodes that are body parents of `control` in order from the node
-         * up to the root of the graph.
+         * Yields all nodes that contain `control` via a non-Sequence edge, in order from
+         * the immediate parent up to the root of the graph, paired with the containing edge
+         * connecting the parent to the child (e.g. Body, Else, Initialize, ForLoopIncrement).
          */
-        Generator<int> bodyParents(int control, ControlGraph::ControlGraph const& graph);
+        Generator<std::pair<int, ControlGraph::ControlEdge>>
+            containingAncestors(int control, ControlGraph::ControlGraph const& graph);
 
         /**
-         * Returns all of the nodes that contain `control` with a body
-         * relationship in order from the root of the graph, including `control` itself.
+         * Returns all nodes that contain `control` via a non-Sequence edge, in order
+         * from the root of the graph down to `control` itself.
          */
         std::deque<int> controlStack(int control, KernelGraph const& graph);
 
         /**
-         * Returns all of the nodes that contain `control` with a body
-         * relationship in order from the root of the graph, including `control` itself.
+         * Returns all nodes that contain `control` via a non-Sequence edge, in order
+         * from the root of the graph down to `control` itself.
          */
         std::deque<int> controlStack(int control, ControlGraph::ControlGraph const& graph);
 

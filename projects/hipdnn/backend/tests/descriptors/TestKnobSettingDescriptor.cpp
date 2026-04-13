@@ -282,7 +282,7 @@ TEST_F(TestKnobSettingDescriptor, ToKnobSettingTProducesCorrectObject)
     auto knobSettingT = getDescriptor()->toKnobSettingT();
     ASSERT_NE(knobSettingT, nullptr);
     ASSERT_EQ(knobSettingT->knob_id, knobId);
-    ASSERT_EQ(knobSettingT->value.type, hipdnn_data_sdk::data_objects::KnobValue::IntValue);
+    ASSERT_EQ(knobSettingT->value.type, hipdnn_flatbuffers_sdk::data_objects::KnobValue::IntValue);
     ASSERT_EQ(knobSettingT->value.AsIntValue()->value, value);
 }
 
@@ -297,7 +297,8 @@ TEST_F(TestKnobSettingDescriptor, ToKnobSettingTWithDoubleValue)
     auto knobSettingT = getDescriptor()->toKnobSettingT();
     ASSERT_NE(knobSettingT, nullptr);
     ASSERT_EQ(knobSettingT->knob_id, knobId);
-    ASSERT_EQ(knobSettingT->value.type, hipdnn_data_sdk::data_objects::KnobValue::FloatValue);
+    ASSERT_EQ(knobSettingT->value.type,
+              hipdnn_flatbuffers_sdk::data_objects::KnobValue::FloatValue);
     ASSERT_DOUBLE_EQ(knobSettingT->value.AsFloatValue()->value, value);
 }
 
@@ -395,7 +396,8 @@ TEST_F(TestKnobSettingDescriptor, ToKnobSettingTWithStringValue)
     auto knobSettingT = getDescriptor()->toKnobSettingT();
     ASSERT_NE(knobSettingT, nullptr);
     ASSERT_EQ(knobSettingT->knob_id, knobId);
-    ASSERT_EQ(knobSettingT->value.type, hipdnn_data_sdk::data_objects::KnobValue::StringValue);
+    ASSERT_EQ(knobSettingT->value.type,
+              hipdnn_flatbuffers_sdk::data_objects::KnobValue::StringValue);
     ASSERT_EQ(knobSettingT->value.AsStringValue()->value, value);
 }
 

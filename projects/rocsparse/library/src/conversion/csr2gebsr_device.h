@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -471,6 +471,10 @@ namespace rocsparse
                                                   rocsparse_int* __restrict__ bsr_row_ptr,
                                                   rocsparse_int* __restrict__ bsr_col_ind)
     {
+        constexpr uint32_t REQUIRED_SHARED_MEMORY
+            = std::max(ROW_BLOCKDIM * COL_BLOCKDIM,
+                       BLOCKSIZE * static_cast<uint32_t>(sizeof(rocsparse_int) / sizeof(T)));
+
         int bid = hipBlockIdx_x;
         int tid = hipThreadIdx_x;
 
@@ -483,7 +487,7 @@ namespace rocsparse
         rocsparse_int row       = row_block_dim * bid + wid;
 
         __shared__ bool table;
-        __shared__ T    data[ROW_BLOCKDIM * COL_BLOCKDIM];
+        __shared__ T    data[REQUIRED_SHARED_MEMORY];
 
         rocsparse_int row_begin
             = (row < m && wid < row_block_dim) ? csr_row_ptr[row] - csr_base : 0;
