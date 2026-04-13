@@ -49,7 +49,10 @@ def handleCustomKernel(sol: dict, isaInfoMap: Dict[IsaVersion, IsaInfo]) -> Tupl
     if not isCustomKernelConfig(sol):
         return sol, False
 
-    name = sol["CustomKernel"]["name"]
+    if "CustomKernel" in sol and sol["CustomKernel"]["name"]:
+        name = sol["CustomKernel"]["name"]
+    else:
+        name = sol.get("CustomKernelName", "")
     dir = CUSTOM_KERNEL_PATH
     config = getCustomKernelConfig(name, {}, dir)
     sol.update(config)

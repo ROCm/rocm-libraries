@@ -356,7 +356,7 @@ class Solution(collections.abc.Mapping):
       for key in defaultInternalSupportParams:
         assignParameterWithDefault(self["InternalSupportParams"], key, config["InternalSupportParams"], defaultInternalSupportParams)
     else:
-      self["InternalSupportParams"] = defaultInternalSupportParams
+      self["InternalSupportParams"] = dict(defaultInternalSupportParams)
 
     # Assign solution state from config, filling missing from the defaultSolution
     for key in defaultSolution:
