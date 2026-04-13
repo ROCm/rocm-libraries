@@ -54,6 +54,7 @@ set(AVAILABLE_COMPONENTS
     hipdnn-integration-tests
     miopen-provider
     hipblaslt-provider
+    hip-kernel-provider
 )
 
 set(UNSUPPORTED_COMPONENTS
@@ -206,6 +207,14 @@ if("hipblaslt-provider" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
         COMPONENT hipblaslt-provider
         PREFIX_PATH dnn-providers
         EXPECT_TARGET hipblaslt_plugin
+    )
+endif()
+
+if("hip-kernel-provider" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
+    add_subdirectory_with_message(
+        COMPONENT hip-kernel-provider
+        PREFIX_PATH dnn-providers
+        EXPECT_TARGET hip_kernel_provider
     )
 endif()
 
