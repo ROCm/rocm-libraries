@@ -55,15 +55,11 @@ struct BlockFmhaPipelineQRKSVSAsync
 
     static_assert(kSubQKHeaddim <= 256, "hdim bigger than 256 is not suitable for this pipeline!");
 
-    static constexpr bool kIsGroupMode = Problem::kIsGroupMode;
-    // TODO: seq_q always support padding, hdim_q/v support multiple of vector(like 8x)
-    //       only need special care about seq_k padding (oob need set -INF of p instead of zero)
-    static_assert(Problem::kPadSeqLenQ == true && Problem::kPadHeadDimQ == true &&
-                  Problem::kPadHeadDimV == true);
-    static constexpr bool kPadSeqLenQ       = true;
+    static constexpr bool kIsGroupMode      = Problem::kIsGroupMode;
+    static constexpr bool kPadSeqLenQ       = Problem::kPadSeqLenQ;
     static constexpr bool kPadSeqLenK       = Problem::kPadSeqLenK;
-    static constexpr bool kPadHeadDimQ      = true; // support multiple of vector(like 8x)
-    static constexpr bool kPadHeadDimV      = true; // support multiple of vector(like 8x)
+    static constexpr bool kPadHeadDimQ      = Problem::kPadHeadDimQ;
+    static constexpr bool kPadHeadDimV      = Problem::kPadHeadDimV;
     static constexpr bool kHasLogitsSoftCap = Problem::kHasLogitsSoftCap;
     static constexpr auto BiasEnum          = Problem::BiasEnum;
     static constexpr bool kStoreLSE         = Problem::kStoreLSE;
