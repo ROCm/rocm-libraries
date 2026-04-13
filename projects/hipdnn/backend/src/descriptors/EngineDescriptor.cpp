@@ -14,8 +14,8 @@
 #include "plugin/EnginePluginResourceManager.hpp"
 
 #include <algorithm>
-#include <hipdnn_data_sdk/data_objects/knob_value_generated.h>
-#include <hipdnn_data_sdk/flatbuffer_utilities/EngineDetailsWrapper.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/knob_value_generated.h>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineDetailsWrapper.hpp>
 
 namespace hipdnn_backend
 {
@@ -50,7 +50,7 @@ void EngineDescriptor::finalize()
     auto engineDetailsPtr = _engineDetails->get();
     if(engineDetailsPtr != nullptr)
     {
-        const hipdnn_data_sdk::flatbuffer_utilities::EngineDetailsWrapper detailsWrapper(
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineDetailsWrapper detailsWrapper(
             engineDetailsPtr);
         auto knobCount = detailsWrapper.knobCount();
 
@@ -61,12 +61,13 @@ void EngineDescriptor::finalize()
 
             for(const auto& knobWrapper : knobWrappers)
             {
-                hipdnn_data_sdk::data_objects::KnobT knobNative;
+                hipdnn_flatbuffers_sdk::data_objects::KnobT knobNative;
                 knobWrapper->getKnob().UnPackTo(&knobNative);
 
                 // Serialize for the flatbuffer-based getAttribute path.
                 flatbuffers::FlatBufferBuilder builder;
-                auto knobOffset = hipdnn_data_sdk::data_objects::Knob::Pack(builder, &knobNative);
+                auto knobOffset
+                    = hipdnn_flatbuffers_sdk::data_objects::Knob::Pack(builder, &knobNative);
                 builder.Finish(knobOffset);
                 _knobSerializedBuffers.push_back(builder.Release());
 
