@@ -2286,19 +2286,14 @@ public:
         if(hipGetDevice(&currentDevice) != hipSuccess)
             throw std::runtime_error("hipGetDevice failed");
 
-        auto add_buffer_size = [this](size_t& val, auto buffer_sizes) {
-            auto buf_size = buffer_sizes(*this);
-            val += std::accumulate(buf_size.begin(), buf_size.end(), static_cast<size_t>(1));
-        };
-
         // add sizes for field if specified, otherwise assume
         // single-device input/output buffer on current device
         if(ifields.empty() && ofields.empty())
         {
-            add_buffer_size(sizes[currentDevice], std::mem_fn(&fft_params::ibuffer_sizes));
+            sizes[currentDevice] += sum(ibuffer_sizes());
             if(placement == fft_placement_notinplace)
             {
-                add_buffer_size(sizes[currentDevice], std::mem_fn(&fft_params::obuffer_sizes));
+                sizes[currentDevice] += sum(obuffer_sizes());
             }
         }
         else
@@ -2307,14 +2302,14 @@ public:
                 if(fields.empty())
                 {
                     // use buffer size calculation
-                    add_buffer_size(sizes[currentDevice], buffer_sizes);
+                    sizes[currentDevice] += sum(buffer_sizes);
                 }
                 else
                 {
                 }
             };
-            add_field(ifields, std::mem_fn(&fft_params::ibuffer_sizes));
-            add_field(ofields, std::mem_fn(&fft_params::obuffer_sizes));
+            add_field(ifields, ibuffer_sizes());
+            add_field(ofields, obuffer_sizes());
         }
 
         return sizes;
