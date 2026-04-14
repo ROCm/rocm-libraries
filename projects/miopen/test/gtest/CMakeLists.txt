@@ -28,9 +28,6 @@ if(MIOPEN_BACKEND_OPENCL)
   list(APPEND SKIP_TESTS dumpTensorTest.cpp)
 endif()
 
-# Temporary skipping getitem test                                                                            
-list(APPEND SKIP_TESTS getitem.cpp)
-
 # Add files to SKIP_TESTS when ASAN packaging is enabled.  These are temporary until a fix is found for
 # the hang that occurs with CK kernels.
 if(THEROCK_SANITIZER STREQUAL "ASAN")
