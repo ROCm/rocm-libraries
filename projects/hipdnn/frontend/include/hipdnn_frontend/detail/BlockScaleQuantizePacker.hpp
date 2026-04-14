@@ -17,8 +17,7 @@ inline Error createBlockScaleQuantizeOperation(
     std::vector<ScopedHipdnnBackendDescriptor>& operations)
 {
     // Create operation descriptor
-    ScopedHipdnnBackendDescriptor opDesc(
-        HIPDNN_BACKEND_OPERATION_BLOCK_SCALE_QUANTIZE_DESCRIPTOR_EXT);
+    ScopedHipdnnBackendDescriptor opDesc(HIPDNN_BACKEND_OPERATION_BLOCK_SCALE_QUANTIZE_DESCRIPTOR);
     if(!opDesc.valid())
     {
         return {ErrorCode::HIPDNN_BACKEND_ERROR,
@@ -27,17 +26,17 @@ inline Error createBlockScaleQuantizeOperation(
 
     // Create tensor descriptors (if needed) and set them on the operation
     HIPDNN_CHECK_ERROR(ensureAndSetTensorRef(opDesc.get(),
-                                             HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_X_EXT,
+                                             HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_XDESC,
                                              attributes.get_x(),
                                              tensorDescs,
                                              "blockscalequantize X_EXT"));
     HIPDNN_CHECK_ERROR(ensureAndSetTensorRef(opDesc.get(),
-                                             HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_Y_EXT,
+                                             HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_YDESC,
                                              attributes.get_y(),
                                              tensorDescs,
                                              "blockscalequantize Y_EXT"));
     HIPDNN_CHECK_ERROR(ensureAndSetTensorRef(opDesc.get(),
-                                             HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_SCALE_EXT,
+                                             HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_SCALE_DESC,
                                              attributes.get_scale(),
                                              tensorDescs,
                                              "blockscalequantize SCALE_EXT"));
@@ -47,17 +46,17 @@ inline Error createBlockScaleQuantizeOperation(
     {
         return {ErrorCode::ATTRIBUTE_NOT_SET, "blockscalequantize block_size is required"};
     }
-    int32_t blockSize = attributes.get_block_size().value();
+    const int32_t blockSize = attributes.get_block_size().value();
     HIPDNN_CHECK_ERROR(
         setDescriptorAttrScalar(opDesc.get(),
-                                HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_BLOCK_SIZE_EXT,
+                                HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_BLOCK_SIZE,
                                 HIPDNN_TYPE_INT32,
                                 blockSize,
                                 "blockscalequantize block_size"));
 
     if(attributes.get_axis().has_value())
     {
-        int64_t axis = attributes.get_axis().value();
+        const int64_t axis = attributes.get_axis().value();
         HIPDNN_CHECK_ERROR(
             setDescriptorAttrScalar(opDesc.get(),
                                     HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_AXIS_EXT,
@@ -66,7 +65,7 @@ inline Error createBlockScaleQuantizeOperation(
                                     "blockscalequantize axis"));
     }
 
-    bool transpose = attributes.get_transpose();
+    const bool transpose = attributes.get_transpose();
     HIPDNN_CHECK_ERROR(
         setDescriptorAttrScalar(opDesc.get(),
                                 HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_TRANSPOSE_EXT,
@@ -74,10 +73,19 @@ inline Error createBlockScaleQuantizeOperation(
                                 transpose,
                                 "blockscalequantize transpose"));
 
-    HIPDNN_CHECK_ERROR(setDescriptorAttrDataType(opDesc.get(),
-                                                 HIPDNN_ATTR_BLOCK_SCALE_QUANTIZE_MATH_PREC_EXT,
-                                                 attributes.compute_data_type,
-                                                 "blockscalequantize MATH_PREC"));
+    HIPDNN_CHECK_ERROR(
+        setDescriptorAttrDataType(opDesc.get(),
+                                  HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_MATH_PREC,
+                                  attributes.compute_data_type,
+                                  "blockscalequantize MATH_PREC"));
+
+    // Set operation name
+    const auto& opName = attributes.get_name();
+    if(!opName.empty())
+    {
+        HIPDNN_CHECK_ERROR(setDescriptorAttrString(
+            opDesc.get(), HIPDNN_ATTR_OPERATION_NAME_EXT, opName, "operation name"));
+    }
 
     // Finalize operation descriptor
     HIPDNN_CHECK_ERROR(finalizeDescriptor(opDesc.get(), "blockscalequantize operation descriptor"));

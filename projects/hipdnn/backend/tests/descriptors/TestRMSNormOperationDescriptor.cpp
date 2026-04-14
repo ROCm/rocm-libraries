@@ -12,12 +12,12 @@
 #include "hipdnn_backend.h"
 
 #include <gtest/gtest.h>
-#include <hipdnn_data_sdk/data_objects/rmsnorm_attributes_generated.h>
-#include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/rmsnorm_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_test_sdk/constants/RMSNormConstants.hpp>
 #include <hipdnn_test_sdk/utilities/ToVec.hpp>
 
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 
 #include <algorithm>
 #include <initializer_list>
@@ -26,7 +26,7 @@
 
 using namespace hipdnn_backend;
 using namespace hipdnn_backend::test_utilities;
-using namespace hipdnn_data_sdk::data_objects;
+using namespace hipdnn_flatbuffers_sdk::data_objects;
 using namespace hipdnn_tests::constants;
 
 class TestRMSNormOperationDescriptor : public ::testing::Test
@@ -52,16 +52,16 @@ public:
         setIf(HIPDNN_ATTR_OPERATION_RMSNORM_Y_EXT, _yDesc);
         setIf(HIPDNN_ATTR_OPERATION_RMSNORM_BIAS_EXT, _biasDesc);
         setIf(HIPDNN_ATTR_OPERATION_RMSNORM_INV_RMS_EXT, _invRmsDesc);
-        if(std::find(skip.begin(), skip.end(), HIPDNN_ATTR_RMSNORM_MATH_PREC_EXT) == skip.end())
+        if(std::find(skip.begin(), skip.end(), HIPDNN_ATTR_RMSNORM_COMP_TYPE_EXT) == skip.end())
         {
             auto computeType = HIPDNN_DATA_FLOAT;
             desc->setAttribute(
-                HIPDNN_ATTR_RMSNORM_MATH_PREC_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
+                HIPDNN_ATTR_RMSNORM_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
         }
         if(std::find(skip.begin(), skip.end(), HIPDNN_ATTR_OPERATION_RMSNORM_FWD_PHASE_EXT)
            == skip.end())
         {
-            auto forwardPhase = HIPDNN_NORM_FWD_PHASE_TRAINING;
+            auto forwardPhase = HIPDNN_NORM_FWD_TRAINING;
             desc->setAttribute(HIPDNN_ATTR_OPERATION_RMSNORM_FWD_PHASE_EXT,
                                HIPDNN_TYPE_NORM_FWD_PHASE,
                                1,
@@ -175,7 +175,7 @@ TEST_F(TestRMSNormOperationDescriptor, FinalizeFailsWithoutYTensor)
 
 TEST_F(TestRMSNormOperationDescriptor, FinalizeFailsWithoutComputeType)
 {
-    setAllAttributesExcept({HIPDNN_ATTR_RMSNORM_MATH_PREC_EXT});
+    setAllAttributesExcept({HIPDNN_ATTR_RMSNORM_COMP_TYPE_EXT});
     ASSERT_THROW_HIPDNN_STATUS(getDescriptor()->finalize(), HIPDNN_STATUS_BAD_PARAM);
 }
 
@@ -298,7 +298,7 @@ TEST_F(TestRMSNormOperationDescriptor, SetTensorFailsNullPointer)
 TEST_F(TestRMSNormOperationDescriptor, SetForwardPhase)
 {
     auto desc = getDescriptor();
-    auto forwardPhase = HIPDNN_NORM_FWD_PHASE_TRAINING;
+    auto forwardPhase = HIPDNN_NORM_FWD_TRAINING;
 
     ASSERT_NO_THROW(desc->setAttribute(
         HIPDNN_ATTR_OPERATION_RMSNORM_FWD_PHASE_EXT, HIPDNN_TYPE_NORM_FWD_PHASE, 1, &forwardPhase));
@@ -310,7 +310,7 @@ TEST_F(TestRMSNormOperationDescriptor, SetForwardPhaseWrongElementCount)
 {
     auto desc = getDescriptor();
     // Value is irrelevant — this test exercises the elementCount != 1 error path.
-    auto forwardPhase = HIPDNN_NORM_FWD_PHASE_TRAINING;
+    auto forwardPhase = HIPDNN_NORM_FWD_TRAINING;
 
     ASSERT_THROW_HIPDNN_STATUS(desc->setAttribute(HIPDNN_ATTR_OPERATION_RMSNORM_FWD_PHASE_EXT,
                                                   HIPDNN_TYPE_NORM_FWD_PHASE,
@@ -329,7 +329,7 @@ TEST_F(TestRMSNormOperationDescriptor, SetComputeDataType)
     auto computeType = HIPDNN_DATA_FLOAT;
 
     ASSERT_NO_THROW(desc->setAttribute(
-        HIPDNN_ATTR_RMSNORM_MATH_PREC_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType));
+        HIPDNN_ATTR_RMSNORM_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType));
 
     ASSERT_EQ(desc->getComputeDataType(), DataType::FLOAT);
 }
@@ -341,7 +341,7 @@ TEST_F(TestRMSNormOperationDescriptor, SetComputeDataTypeWrongElementCount)
 
     ASSERT_THROW_HIPDNN_STATUS(
         desc->setAttribute(
-            HIPDNN_ATTR_RMSNORM_MATH_PREC_EXT, HIPDNN_TYPE_DATA_TYPE, 2, &computeType),
+            HIPDNN_ATTR_RMSNORM_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 2, &computeType),
         HIPDNN_STATUS_BAD_PARAM);
 }
 
@@ -386,7 +386,7 @@ TEST_F(TestRMSNormOperationDescriptor, GetAttributeTensorDescriptor)
                                        1,
                                        &elementCount,
                                        static_cast<void*>(&rawX)));
-    std::unique_ptr<HipdnnBackendDescriptor> retrievedX(rawX);
+    const std::unique_ptr<HipdnnBackendDescriptor> retrievedX(rawX);
 
     ASSERT_EQ(elementCount, 1);
     ASSERT_NE(retrievedX, nullptr);
@@ -409,7 +409,7 @@ TEST_F(TestRMSNormOperationDescriptor, GetAttributeForwardPhase)
                                        &forwardPhaseCount,
                                        &forwardPhase));
     ASSERT_EQ(forwardPhaseCount, 1);
-    EXPECT_EQ(forwardPhase, HIPDNN_NORM_FWD_PHASE_TRAINING);
+    EXPECT_EQ(forwardPhase, HIPDNN_NORM_FWD_TRAINING);
 }
 
 // =============================================================================
@@ -421,13 +421,13 @@ TEST_F(TestRMSNormOperationDescriptor, GetAttributeComputeType)
     auto desc = getDescriptor();
     setAllAttributesExcept();
     auto computeType = HIPDNN_DATA_HALF;
-    desc->setAttribute(HIPDNN_ATTR_RMSNORM_MATH_PREC_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
+    desc->setAttribute(HIPDNN_ATTR_RMSNORM_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
     desc->finalize();
 
     hipdnnDataType_t retrieved = HIPDNN_DATA_FLOAT;
     int64_t elementCount = 0;
     ASSERT_NO_THROW(desc->getAttribute(
-        HIPDNN_ATTR_RMSNORM_MATH_PREC_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &elementCount, &retrieved));
+        HIPDNN_ATTR_RMSNORM_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &elementCount, &retrieved));
 
     ASSERT_EQ(retrieved, HIPDNN_DATA_HALF);
     ASSERT_EQ(elementCount, 1);
@@ -618,7 +618,7 @@ TEST_F(TestRMSNormOperationDescriptor, GetAttributeComputeTypeQueryReturnsOne)
 
     int64_t elementCount = 0;
     ASSERT_NO_THROW(desc->getAttribute(
-        HIPDNN_ATTR_RMSNORM_MATH_PREC_EXT, HIPDNN_TYPE_DATA_TYPE, 0, &elementCount, nullptr));
+        HIPDNN_ATTR_RMSNORM_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 0, &elementCount, nullptr));
     ASSERT_EQ(elementCount, 1);
 }
 
@@ -681,7 +681,7 @@ TEST_F(TestRMSNormOperationDescriptor, ToStringContainsExpectedInfo)
     setAllAttributesExcept();
     auto desc = getDescriptor();
 
-    std::string str = desc->toString();
+    const std::string str = desc->toString();
     ASSERT_NE(str.find("RMSNormOperationDescriptor"), std::string::npos);
     ASSERT_NE(str.find("x_uid=" + std::to_string(K_RMSNORM_TENSOR_X_UID)), std::string::npos);
     ASSERT_NE(str.find("scale_uid=" + std::to_string(K_RMSNORM_TENSOR_SCALE_UID)),
@@ -735,7 +735,7 @@ TEST_F(TestRMSNormOperationDescriptor, BuildNodeProducesCorrectNodeT)
 
     auto desc = getDescriptor();
     auto computeType = HIPDNN_DATA_FLOAT;
-    desc->setAttribute(HIPDNN_ATTR_RMSNORM_MATH_PREC_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
+    desc->setAttribute(HIPDNN_ATTR_RMSNORM_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
     desc->finalize();
 
     auto node = desc->buildNode();
@@ -762,7 +762,7 @@ TEST_F(TestRMSNormOperationDescriptor, BuildNodeWithHalfComputeType)
 
     auto desc = getDescriptor();
     auto computeType = HIPDNN_DATA_HALF;
-    desc->setAttribute(HIPDNN_ATTR_RMSNORM_MATH_PREC_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
+    desc->setAttribute(HIPDNN_ATTR_RMSNORM_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
     desc->finalize();
 
     auto node = desc->buildNode();

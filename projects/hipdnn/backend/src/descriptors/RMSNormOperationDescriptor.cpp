@@ -5,6 +5,7 @@
 #include "DescriptorAttributeUtils.hpp"
 #include "HipdnnBackendDescriptorType.h"
 #include "HipdnnException.hpp"
+#include "HipdnnOperationType.h"
 
 namespace hipdnn_backend
 {
@@ -23,10 +24,11 @@ void RMSNormOperationDescriptor::finalize()
     THROW_IF_NULL(_yDesc,
                   HIPDNN_STATUS_BAD_PARAM,
                   "RMSNormOperationDescriptor::finalize() failed: Y tensor not set");
-    THROW_IF_TRUE(_computeDataType == hipdnn_data_sdk::data_objects::DataType::UNSET,
+    THROW_IF_TRUE(_computeDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET,
                   HIPDNN_STATUS_BAD_PARAM,
                   "RMSNormOperationDescriptor::finalize() failed: compute data type not set");
-    THROW_IF_TRUE(_data.forward_phase == hipdnn_data_sdk::data_objects::NormFwdPhase::NOT_SET,
+    THROW_IF_TRUE(_data.forward_phase
+                      == hipdnn_flatbuffers_sdk::data_objects::NormFwdPhase::NOT_SET,
                   HIPDNN_STATUS_BAD_PARAM,
                   "RMSNormOperationDescriptor::finalize() failed: forward_phase not set");
 
@@ -105,12 +107,19 @@ void RMSNormOperationDescriptor::setAttribute(hipdnnBackendAttributeName_t attri
                         arrayOfElements,
                         "RMSNormOperationDescriptor::setAttribute()");
         break;
-    case HIPDNN_ATTR_RMSNORM_MATH_PREC_EXT:
+    case HIPDNN_ATTR_RMSNORM_COMP_TYPE_EXT:
         setDataType(_computeDataType,
                     attributeType,
                     elementCount,
                     arrayOfElements,
                     "RMSNormOperationDescriptor::setAttribute()");
+        break;
+    case HIPDNN_ATTR_OPERATION_NAME_EXT:
+        setString(_name,
+                  attributeType,
+                  elementCount,
+                  arrayOfElements,
+                  "RMSNormOperationDescriptor::setAttribute()");
         break;
     default:
         throw HipdnnException(HIPDNN_STATUS_NOT_SUPPORTED,
@@ -191,13 +200,29 @@ void RMSNormOperationDescriptor::getAttribute(hipdnnBackendAttributeName_t attri
                         arrayOfElements,
                         "RMSNormOperationDescriptor::getAttribute()");
         break;
-    case HIPDNN_ATTR_RMSNORM_MATH_PREC_EXT:
+    case HIPDNN_ATTR_RMSNORM_COMP_TYPE_EXT:
         getDataType(_computeDataType,
                     attributeType,
                     requestedElementCount,
                     elementCount,
                     arrayOfElements,
                     "RMSNormOperationDescriptor::getAttribute()");
+        break;
+    case HIPDNN_ATTR_OPERATION_NAME_EXT:
+        getString(_name,
+                  attributeType,
+                  requestedElementCount,
+                  elementCount,
+                  arrayOfElements,
+                  "RMSNormOperationDescriptor::getAttribute()");
+        break;
+    case HIPDNN_ATTR_OPERATION_TYPE_EXT:
+        getOperationType(HIPDNN_OPERATION_TYPE_RMSNORM_EXT,
+                         attributeType,
+                         requestedElementCount,
+                         elementCount,
+                         arrayOfElements,
+                         "RMSNormOperationDescriptor::getAttribute()");
         break;
     default:
         throw HipdnnException(HIPDNN_STATUS_NOT_SUPPORTED,
@@ -229,11 +254,13 @@ std::vector<std::shared_ptr<TensorDescriptor>>
     return result;
 }
 
-std::unique_ptr<hipdnn_data_sdk::data_objects::NodeT> RMSNormOperationDescriptor::buildNode() const
+std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::NodeT>
+    RMSNormOperationDescriptor::buildNode() const
 {
-    auto node = std::make_unique<hipdnn_data_sdk::data_objects::NodeT>();
+    auto node = std::make_unique<hipdnn_flatbuffers_sdk::data_objects::NodeT>();
+    node->name = _name;
     node->compute_data_type = _computeDataType;
-    node->attributes.Set(hipdnn_data_sdk::data_objects::RMSNormAttributesT(_data));
+    node->attributes.Set(hipdnn_flatbuffers_sdk::data_objects::RMSNormAttributesT(_data));
     return node;
 }
 
@@ -245,7 +272,8 @@ hipdnnBackendDescriptorType_t RMSNormOperationDescriptor::getStaticType()
 std::string RMSNormOperationDescriptor::toString() const
 {
     std::string str = "RMSNormOperationDescriptor: {";
-    str += "x_uid=" + std::to_string(_data.x_tensor_uid);
+    str += "name=" + _name;
+    str += ", x_uid=" + std::to_string(_data.x_tensor_uid);
     str += ", scale_uid=" + std::to_string(_data.scale_tensor_uid);
     str += ", epsilon_uid=" + std::to_string(_data.epsilon_tensor_uid);
     str += ", y_uid=" + std::to_string(_data.y_tensor_uid);
@@ -259,9 +287,51 @@ std::string RMSNormOperationDescriptor::toString() const
     }
     str += ", forward_phase=" + std::to_string(static_cast<int>(_data.forward_phase));
     str += ", compute_data_type=";
-    str += hipdnn_data_sdk::data_objects::EnumNameDataType(_computeDataType);
+    str += hipdnn_flatbuffers_sdk::data_objects::EnumNameDataType(_computeDataType);
     str += "}";
     return str;
+}
+
+std::shared_ptr<RMSNormOperationDescriptor> RMSNormOperationDescriptor::fromNode(
+    const hipdnn_flatbuffers_sdk::data_objects::NodeT& nodeT,
+    const std::unordered_map<int64_t, std::shared_ptr<TensorDescriptor>>& tensorMap)
+{
+    const auto* attrs = nodeT.attributes.AsRMSNormAttributes();
+    THROW_IF_NULL(attrs,
+                  HIPDNN_STATUS_INTERNAL_ERROR,
+                  "RMSNormOperationDescriptor::fromNode: RMSNormAttributes is null");
+
+    auto desc = std::make_shared<RMSNormOperationDescriptor>();
+    desc->_data = *attrs;
+    desc->_computeDataType = nodeT.compute_data_type;
+    desc->_name = nodeT.name;
+
+    // Required tensors
+    desc->_xDesc = findTensorInMap(
+        tensorMap, attrs->x_tensor_uid, "RMSNormOperationDescriptor::fromNode: X");
+    desc->_scaleDesc = findTensorInMap(
+        tensorMap, attrs->scale_tensor_uid, "RMSNormOperationDescriptor::fromNode: Scale");
+    desc->_epsilonDesc = findTensorInMap(
+        tensorMap, attrs->epsilon_tensor_uid, "RMSNormOperationDescriptor::fromNode: Epsilon");
+    desc->_yDesc = findTensorInMap(
+        tensorMap, attrs->y_tensor_uid, "RMSNormOperationDescriptor::fromNode: Y");
+
+    // Optional tensors
+    if(attrs->bias_tensor_uid.has_value())
+    {
+        desc->_biasDesc = findTensorInMap(tensorMap,
+                                          attrs->bias_tensor_uid.value(),
+                                          "RMSNormOperationDescriptor::fromNode: Bias");
+    }
+    if(attrs->inv_rms_tensor_uid.has_value())
+    {
+        desc->_invRmsDesc = findTensorInMap(tensorMap,
+                                            attrs->inv_rms_tensor_uid.value(),
+                                            "RMSNormOperationDescriptor::fromNode: InvRms");
+    }
+
+    desc->finalize();
+    return desc;
 }
 
 } // namespace hipdnn_backend

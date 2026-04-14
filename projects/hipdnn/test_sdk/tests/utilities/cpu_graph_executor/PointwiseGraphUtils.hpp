@@ -9,6 +9,7 @@
 #include <hipdnn_frontend/Graph.hpp>
 #include <hipdnn_frontend/Utilities.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
+#include <hipdnn_test_sdk/utilities/SdkFrontendTypeConversions.hpp>
 #include <hipdnn_test_sdk/utilities/Seeds.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/GraphTensorBundle.hpp>
 
@@ -38,7 +39,11 @@ inline std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
 {
     auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
     graph->set_name("PointwiseUnaryTest");
-    graph->set_compute_data_type(hipdnn_frontend::fromSdkType(accumulatorDataType));
+    graph->set_io_data_type(hipdnn_test_sdk::utilities::sdkToFrontendDataType(input0DataType))
+        .set_compute_data_type(
+            hipdnn_test_sdk::utilities::sdkToFrontendDataType(accumulatorDataType))
+        .set_intermediate_data_type(
+            hipdnn_test_sdk::utilities::sdkToFrontendDataType(accumulatorDataType));
 
     int64_t uid = 1;
 
@@ -46,7 +51,10 @@ inline std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
     auto inputStrides = hipdnn_data_sdk::utilities::generateStrides(inputDims, layout.strideOrder);
     const auto& inputDimsCopy = inputDims;
     auto inputAttr = hipdnn_frontend::graph::makeTensorAttributes(
-        "Input", hipdnn_frontend::fromSdkType(input0DataType), inputDimsCopy, inputStrides);
+        "Input",
+        hipdnn_test_sdk::utilities::sdkToFrontendDataType(input0DataType),
+        inputDimsCopy,
+        inputStrides);
     inputAttr.set_uid(uid++);
     auto inputTensorAttr
         = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(inputAttr));
@@ -85,7 +93,8 @@ inline std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
     {
         outputTensorAttr->set_uid(uid++);
     }
-    outputTensorAttr->set_data_type(hipdnn_frontend::fromSdkType(outputDataType));
+    outputTensorAttr->set_data_type(
+        hipdnn_test_sdk::utilities::sdkToFrontendDataType(outputDataType));
     outputTensorAttr->set_dim(outputDims);
     outputTensorAttr->set_stride(
         hipdnn_data_sdk::utilities::generateStrides(outputDims, layout.strideOrder));
@@ -99,7 +108,11 @@ inline std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
     }
 
     // Serialize graph and create tensor bundle
-    auto serializedGraph = graph->buildFlatbufferOperationGraph();
+    auto [serializedGraph, serErr] = graph->to_binary();
+    if(serErr.is_bad())
+    {
+        throw std::runtime_error("Graph serialization failed: " + serErr.get_message());
+    }
     auto graphWrap = hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper(serializedGraph.data(),
                                                                          serializedGraph.size());
     auto nodeWrap = hipdnn_data_sdk::flatbuffer_utilities::NodeWrapper(&graphWrap.getNode(0));
@@ -133,7 +146,11 @@ inline std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
 {
     auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
     graph->set_name("PointwiseBinaryTest");
-    graph->set_compute_data_type(hipdnn_frontend::fromSdkType(accumulatorDataType));
+    graph->set_io_data_type(hipdnn_test_sdk::utilities::sdkToFrontendDataType(input0DataType))
+        .set_compute_data_type(
+            hipdnn_test_sdk::utilities::sdkToFrontendDataType(accumulatorDataType))
+        .set_intermediate_data_type(
+            hipdnn_test_sdk::utilities::sdkToFrontendDataType(accumulatorDataType));
 
     int64_t uid = 1;
 
@@ -142,7 +159,10 @@ inline std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
         = hipdnn_data_sdk::utilities::generateStrides(input1Dims, layout.strideOrder);
     const auto& input1DimsCopy = input1Dims;
     auto input1Attr = hipdnn_frontend::graph::makeTensorAttributes(
-        "Input1", hipdnn_frontend::fromSdkType(input0DataType), input1DimsCopy, input1Strides);
+        "Input1",
+        hipdnn_test_sdk::utilities::sdkToFrontendDataType(input0DataType),
+        input1DimsCopy,
+        input1Strides);
     input1Attr.set_uid(uid++);
     auto input1TensorAttr
         = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(input1Attr));
@@ -151,7 +171,10 @@ inline std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
         = hipdnn_data_sdk::utilities::generateStrides(input2Dims, layout.strideOrder);
     const auto& input2DimsCopy = input2Dims;
     auto input2Attr = hipdnn_frontend::graph::makeTensorAttributes(
-        "Input2", hipdnn_frontend::fromSdkType(input1DataType), input2DimsCopy, input2Strides);
+        "Input2",
+        hipdnn_test_sdk::utilities::sdkToFrontendDataType(input1DataType),
+        input2DimsCopy,
+        input2Strides);
     input2Attr.set_uid(uid++);
     auto input2TensorAttr
         = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(input2Attr));
@@ -190,7 +213,8 @@ inline std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
     {
         outputTensorAttr->set_uid(uid++);
     }
-    outputTensorAttr->set_data_type(hipdnn_frontend::fromSdkType(outputDataType));
+    outputTensorAttr->set_data_type(
+        hipdnn_test_sdk::utilities::sdkToFrontendDataType(outputDataType));
     outputTensorAttr->set_dim(outputDims);
     outputTensorAttr->set_stride(
         hipdnn_data_sdk::utilities::generateStrides(outputDims, layout.strideOrder));
@@ -204,7 +228,11 @@ inline std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
     }
 
     // Serialize graph and create tensor bundle
-    auto serializedGraph = graph->buildFlatbufferOperationGraph();
+    auto [serializedGraph, serErr] = graph->to_binary();
+    if(serErr.is_bad())
+    {
+        throw std::runtime_error("Graph serialization failed: " + serErr.get_message());
+    }
     auto graphWrap = hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper(serializedGraph.data(),
                                                                          serializedGraph.size());
     auto nodeWrap = hipdnn_data_sdk::flatbuffer_utilities::NodeWrapper(&graphWrap.getNode(0));

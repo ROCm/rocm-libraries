@@ -24,7 +24,7 @@ protected:
 
         ON_CALL(*_mockBackend, getLastErrorString(_, _))
             .WillByDefault([](char* errorString, size_t size) {
-                std::string fakeError = "Fake backend error";
+                const std::string fakeError = "Fake backend error";
                 hipdnn_data_sdk::utilities::copyMaxSizeWithNullTerminator(
                     errorString, fakeError.c_str(), size - 1);
             });
@@ -53,6 +53,13 @@ TEST_F(TestScopedHipdnnBackendDescriptor, ConstructWithRawDescriptorIsValid)
 
     EXPECT_TRUE(desc.valid());
     EXPECT_EQ(desc.get(), fakeDesc);
+}
+
+TEST_F(TestScopedHipdnnBackendDescriptor, ConstructWithNullRawDescriptorIsInvalid)
+{
+    auto desc = ScopedHipdnnBackendDescriptor(static_cast<hipdnnBackendDescriptor_t>(nullptr));
+    EXPECT_FALSE(desc.valid());
+    EXPECT_EQ(desc.get(), nullptr);
 }
 
 TEST_F(TestScopedHipdnnBackendDescriptor, ConstructWithTypeSuccess)
@@ -111,6 +118,37 @@ TEST_F(TestScopedHipdnnBackendDescriptor, ConstructWithSerializedGraphFailure)
     EXPECT_CALL(*_mockBackend, getLastErrorString).Times(AnyNumber()); // Uninteresting call
 
     auto desc = ScopedHipdnnBackendDescriptor(fakeGraph.data(), fakeGraph.size());
+    EXPECT_FALSE(desc.valid());
+    EXPECT_EQ(desc.get(), nullptr);
+}
+
+TEST_F(TestScopedHipdnnBackendDescriptor, ConstructWithJsonGraphSuccess)
+{
+    auto fakeDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x7777);
+    const std::string fakeJson = "{}";
+    EXPECT_CALL(*_mockBackend, backendCreateAndDeserializeJsonGraphExt(_, _, _))
+        .WillOnce([&fakeDesc](hipdnnBackendDescriptor_t* out, const char*, size_t) {
+            *out = fakeDesc;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+    EXPECT_CALL(*_mockBackend, backendDestroyDescriptor(fakeDesc))
+        .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+
+    auto desc = ScopedHipdnnBackendDescriptor(fakeJson.c_str(), fakeJson.size());
+    EXPECT_TRUE(desc.valid());
+    EXPECT_EQ(desc.get(), fakeDesc);
+}
+
+TEST_F(TestScopedHipdnnBackendDescriptor, ConstructWithJsonGraphFailure)
+{
+    const std::string fakeJson = "{}";
+    EXPECT_CALL(*_mockBackend, backendCreateAndDeserializeJsonGraphExt(_, _, _))
+        .WillOnce([](hipdnnBackendDescriptor_t*, const char*, size_t) {
+            return HIPDNN_STATUS_BAD_PARAM;
+        });
+    EXPECT_CALL(*_mockBackend, getLastErrorString).Times(AnyNumber()); // Uninteresting call
+
+    auto desc = ScopedHipdnnBackendDescriptor(fakeJson.c_str(), fakeJson.size());
     EXPECT_FALSE(desc.valid());
     EXPECT_EQ(desc.get(), nullptr);
 }

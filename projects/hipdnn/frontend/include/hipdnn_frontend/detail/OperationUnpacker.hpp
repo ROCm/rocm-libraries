@@ -9,8 +9,24 @@
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
 #include <hipdnn_frontend/detail/BackendWrapper.hpp>
+#include <hipdnn_frontend/node/BatchnormBackwardNode.hpp>
+#include <hipdnn_frontend/node/BatchnormInferenceNode.hpp>
+#include <hipdnn_frontend/node/BatchnormInferenceNodeVarianceExt.hpp>
+#include <hipdnn_frontend/node/BatchnormNode.hpp>
+#include <hipdnn_frontend/node/BlockScaleDequantizeNode.hpp>
+#include <hipdnn_frontend/node/BlockScaleQuantizeNode.hpp>
+#include <hipdnn_frontend/node/ConvolutionDgradNode.hpp>
 #include <hipdnn_frontend/node/ConvolutionFpropNode.hpp>
+#include <hipdnn_frontend/node/ConvolutionWgradNode.hpp>
+#include <hipdnn_frontend/node/CustomOpNode.hpp>
+#include <hipdnn_frontend/node/LayerNormNode.hpp>
+#include <hipdnn_frontend/node/MatmulNode.hpp>
 #include <hipdnn_frontend/node/Node.hpp>
+#include <hipdnn_frontend/node/PointwiseNode.hpp>
+#include <hipdnn_frontend/node/RMSNormNode.hpp>
+#include <hipdnn_frontend/node/ReductionNode.hpp>
+#include <hipdnn_frontend/node/SdpaBwdNode.hpp>
+#include <hipdnn_frontend/node/SdpaFwdNode.hpp>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -20,10 +36,10 @@ namespace hipdnn_frontend::detail
 
 /// Queries the operation type directly via HIPDNN_ATTR_OPERATION_TYPE_EXT.
 /// Returns an error on failure — no fallback probing.
-[[nodiscard]] inline std::pair<hipdnnOperationType_t, Error>
+[[nodiscard]] inline std::pair<hipdnnOperationType_ext_t, Error>
     queryOperationType(hipdnnBackendDescriptor_t opDesc)
 {
-    hipdnnOperationType_t typeValue = HIPDNN_OPERATION_TYPE_NOT_SET;
+    hipdnnOperationType_ext_t typeValue = HIPDNN_OPERATION_TYPE_NOT_SET_EXT;
     int64_t actualCount = 0;
     auto status = hipdnnBackend()->backendGetAttribute(opDesc,
                                                        HIPDNN_ATTR_OPERATION_TYPE_EXT,
@@ -35,7 +51,7 @@ namespace hipdnn_frontend::detail
     {
         std::array<char, HIPDNN_ERROR_STRING_MAX_LENGTH> backendErrMsg{};
         hipdnnBackend()->getLastErrorString(backendErrMsg.data(), backendErrMsg.size());
-        return {HIPDNN_OPERATION_TYPE_NOT_SET,
+        return {HIPDNN_OPERATION_TYPE_NOT_SET_EXT,
                 {ErrorCode::HIPDNN_BACKEND_ERROR,
                  std::string("Failed to query HIPDNN_ATTR_OPERATION_TYPE_EXT. Backend error: ")
                      + backendErrMsg.data()}};
@@ -49,14 +65,65 @@ namespace hipdnn_frontend::detail
 /// @param graphAttrs Graph-level attributes to associate with the created node
 /// @return A shared_ptr to the created INode, or an error if the type is unsupported
 [[nodiscard]] inline std::pair<std::shared_ptr<graph::INode>, Error>
-    createNodeForType(hipdnnOperationType_t opType, const graph::GraphAttributes& graphAttrs)
+    createNodeForType(hipdnnOperationType_ext_t opType, const graph::GraphAttributes& graphAttrs)
 {
     switch(opType)
     {
-    case HIPDNN_OPERATION_TYPE_CONVOLUTION_FORWARD:
+    case HIPDNN_OPERATION_TYPE_BATCHNORM_EXT:
+        return {std::make_shared<graph::BatchnormNode>(graph::BatchnormAttributes{}, graphAttrs),
+                {}};
+    case HIPDNN_OPERATION_TYPE_BATCHNORM_BACKWARD_EXT:
+        return {std::make_shared<graph::BatchnormBackwardNode>(graph::BatchnormBackwardAttributes{},
+                                                               graphAttrs),
+                {}};
+    case HIPDNN_OPERATION_TYPE_BATCHNORM_INFERENCE_EXT:
+        return {std::make_shared<graph::BatchnormInferenceNode>(
+                    graph::BatchnormInferenceAttributes{}, graphAttrs),
+                {}};
+    case HIPDNN_OPERATION_TYPE_BATCHNORM_INFERENCE_VARIANCE_EXT:
+        return {std::make_shared<graph::BatchnormInferenceNodeVarianceExt>(
+                    graph::BatchnormInferenceAttributesVarianceExt{}, graphAttrs),
+                {}};
+    case HIPDNN_OPERATION_TYPE_BLOCK_SCALE_DEQUANTIZE_EXT:
+        return {std::make_shared<graph::BlockScaleDequantizeNode>(
+                    graph::BlockScaleDequantizeAttributes{}, graphAttrs),
+                {}};
+    case HIPDNN_OPERATION_TYPE_BLOCK_SCALE_QUANTIZE_EXT:
+        return {std::make_shared<graph::BlockScaleQuantizeNode>(
+                    graph::BlockScaleQuantizeAttributes{}, graphAttrs),
+                {}};
+    case HIPDNN_OPERATION_TYPE_CONVOLUTION_BACKWARD_DATA_EXT:
+        return {
+            std::make_shared<graph::ConvolutionDgradNode>(graph::ConvDgradAttributes{}, graphAttrs),
+            {}};
+    case HIPDNN_OPERATION_TYPE_CONVOLUTION_BACKWARD_WEIGHTS_EXT:
+        return {
+            std::make_shared<graph::ConvolutionWgradNode>(graph::ConvWgradAttributes{}, graphAttrs),
+            {}};
+    case HIPDNN_OPERATION_TYPE_CONVOLUTION_FORWARD_EXT:
         return {
             std::make_shared<graph::ConvolutionFpropNode>(graph::ConvFpropAttributes{}, graphAttrs),
             {}};
+    case HIPDNN_OPERATION_TYPE_CUSTOM_OP_EXT:
+        return {std::make_shared<graph::CustomOpNode>(graph::CustomOpAttributes{}, graphAttrs), {}};
+    case HIPDNN_OPERATION_TYPE_LAYERNORM_EXT:
+        return {std::make_shared<graph::LayerNormNode>(graph::LayernormAttributes{}, graphAttrs),
+                {}};
+    case HIPDNN_OPERATION_TYPE_MATMUL_EXT:
+        return {std::make_shared<graph::MatmulNode>(graph::MatmulAttributes{}, graphAttrs), {}};
+    case HIPDNN_OPERATION_TYPE_POINTWISE_EXT:
+        return {std::make_shared<graph::PointwiseNode>(graph::PointwiseAttributes{}, graphAttrs),
+                {}};
+    case HIPDNN_OPERATION_TYPE_REDUCTION_EXT:
+        return {std::make_shared<graph::ReductionNode>(graph::ReductionAttributes{}, graphAttrs),
+                {}};
+    case HIPDNN_OPERATION_TYPE_RMSNORM_EXT:
+        return {std::make_shared<graph::RMSNormNode>(graph::RMSNormAttributes{}, graphAttrs), {}};
+    case HIPDNN_OPERATION_TYPE_SDPA_BACKWARD_EXT:
+        return {std::make_shared<graph::SdpaBwdNode>(graph::SdpaBackwardAttributes{}, graphAttrs),
+                {}};
+    case HIPDNN_OPERATION_TYPE_SDPA_FORWARD_EXT:
+        return {std::make_shared<graph::SdpaFwdNode>(graph::SdpaAttributes{}, graphAttrs), {}};
     default:
         return {nullptr,
                 {ErrorCode::HIPDNN_BACKEND_ERROR,

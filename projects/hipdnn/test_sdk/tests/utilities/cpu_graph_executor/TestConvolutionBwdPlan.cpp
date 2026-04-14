@@ -39,15 +39,15 @@ protected:
 
 TEST_F(TestConvolutionBwdPlan, ExecutePlan)
 {
-    std::vector<int64_t> dxDims = {1, 1, 2, 2};
-    std::vector<int64_t> wDims = {1, 1, 1, 1};
-    std::vector<int64_t> dyDims = {1, 1, 2, 2};
+    const std::vector<int64_t> dxDims = {1, 1, 2, 2};
+    const std::vector<int64_t> wDims = {1, 1, 1, 1};
+    const std::vector<int64_t> dyDims = {1, 1, 2, 2};
 
-    std::vector<int64_t> strides = {1, 1};
-    std::vector<int64_t> dilation = {1, 1};
-    std::vector<int64_t> padding = {0, 0};
+    const std::vector<int64_t> strides = {1, 1};
+    const std::vector<int64_t> dilation = {1, 1};
+    const std::vector<int64_t> padding = {0, 0};
 
-    unsigned int seed = getGlobalTestSeed();
+    const unsigned int seed = getGlobalTestSeed();
     ConvolutionBwdTensorBundle<float> planTensorBundle(
         dxDims, wDims, dyDims, seed, TensorLayout::NHWC);
     ConvolutionBwdTensorBundle<float> directTensorBundle(
@@ -86,7 +86,7 @@ TEST_F(TestConvolutionBwdPlan, ExecutePlan)
                                                                             1.0, // wMin, wMax
                                                                             wDims); // wDims
 
-    CpuFpReferenceValidation<float> cpuRefOutputValidation(tolerance, tolerance);
+    const CpuFpReferenceValidation<float> cpuRefOutputValidation(tolerance, tolerance);
 
     EXPECT_TRUE(
         cpuRefOutputValidation.allClose(directTensorBundle.dxTensor, planTensorBundle.dxTensor));
@@ -94,54 +94,65 @@ TEST_F(TestConvolutionBwdPlan, ExecutePlan)
 
 TEST(TestConvolutionBwdPlanBuilder, PlanConstruction)
 {
-    std::vector<int64_t> dxDims = {1, 1, 2, 2};
-    std::vector<int64_t> wDims = {1, 1, 1, 1};
-    std::vector<int64_t> dyDims = {1, 1, 2, 2};
+    const std::vector<int64_t> dxDims = {1, 1, 2, 2};
+    const std::vector<int64_t> wDims = {1, 1, 1, 1};
+    const std::vector<int64_t> dyDims = {1, 1, 2, 2};
 
     ConvolutionBwdTensorBundle<float> tensorBundle(dxDims, wDims, dyDims, 1, TensorLayout::NCHW);
 
     auto graphTuple = buildConvolutionBwdGraph(tensorBundle, DataType::FLOAT, DataType::FLOAT);
 
     auto& graph = std::get<0>(graphTuple);
-    auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
 
-    auto graphWrap = hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper(flatbufferGraph.data(),
-                                                                         flatbufferGraph.size());
+    auto graphWrap = hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper(serializedGraph.data(),
+                                                                         serializedGraph.size());
 
-    ConvolutionBwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
+    const ConvolutionBwdPlanBuilder<DataType::FLOAT,
+                                    DataType::FLOAT,
+                                    DataType::FLOAT,
+                                    DataType::FLOAT>
         patient;
 
     auto builtPlan = patient.buildNodePlan(graphWrap, graphWrap.getNode(0));
 
-    bool result
+    const bool result
         = dynamic_cast<ConvolutionBwdPlan<float, float, float, float>*>(builtPlan.get()) != nullptr;
     EXPECT_TRUE(result);
 }
 
 TEST(TestConvolutionBwdPlanBuilder, IsApplicable)
 {
-    std::vector<int64_t> dxDims = {1, 1, 2, 2};
-    std::vector<int64_t> wDims = {1, 1, 1, 1};
-    std::vector<int64_t> dyDims = {1, 1, 2, 2};
+    const std::vector<int64_t> dxDims = {1, 1, 2, 2};
+    const std::vector<int64_t> wDims = {1, 1, 1, 1};
+    const std::vector<int64_t> dyDims = {1, 1, 2, 2};
 
     ConvolutionBwdTensorBundle<float> tensorBundle(dxDims, wDims, dyDims, 1, TensorLayout::NCHW);
 
     auto graphTuple = buildConvolutionBwdGraph(tensorBundle, DataType::FLOAT, DataType::FLOAT);
 
     auto& graph = std::get<0>(graphTuple);
-    auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
 
-    auto graphWrap = hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper(flatbufferGraph.data(),
-                                                                         flatbufferGraph.size());
+    auto graphWrap = hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper(serializedGraph.data(),
+                                                                         serializedGraph.size());
 
-    ConvolutionBwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
+    const ConvolutionBwdPlanBuilder<DataType::FLOAT,
+                                    DataType::FLOAT,
+                                    DataType::FLOAT,
+                                    DataType::FLOAT>
         floatPlanBuilder;
 
     EXPECT_TRUE(floatPlanBuilder.isApplicable(graphWrap.getNode(0), graphWrap.getTensorMap()));
 
     auto tensorMapCopy = graphWrap.getTensorMap();
     tensorMapCopy.erase(2);
-    ConvolutionBwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::HALF, DataType::FLOAT>
+    const ConvolutionBwdPlanBuilder<DataType::FLOAT,
+                                    DataType::FLOAT,
+                                    DataType::HALF,
+                                    DataType::FLOAT>
         badTypesPlanBuilder;
     EXPECT_FALSE(badTypesPlanBuilder.isApplicable(graphWrap.getNode(0), tensorMapCopy));
 }

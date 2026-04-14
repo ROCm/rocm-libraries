@@ -25,13 +25,13 @@ using namespace hipdnn_data_sdk::types;
 TEST(TestFp4E2M1, RoundTripAllValues)
 {
     // clang-format off
-    std::vector<float> exactValues = {0.0f,  0.5f,  1.0f,  1.5f,  2.0f,  3.0f,  4.0f,  6.0f,
-                                      -0.0f, -0.5f, -1.0f, -1.5f, -2.0f, -3.0f, -4.0f, -6.0f};
+    std::vector<float> const exactValues = {0.0f,  0.5f,  1.0f,  1.5f,  2.0f,  3.0f,  4.0f,  6.0f,
+                                           -0.0f, -0.5f, -1.0f, -1.5f, -2.0f, -3.0f, -4.0f, -6.0f};
     // clang-format on
 
-    for(float val : exactValues)
+    for(const float val : exactValues)
     {
-        fp4_e2m1 f4(val);
+        const fp4_e2m1 f4(val);
         EXPECT_EQ(static_cast<float>(f4), val);
     }
 }
@@ -40,6 +40,8 @@ TEST(TestFp4E2M1, RoundTripAllValues)
 // Rounding Tests
 // ============================================================================
 
+namespace
+{
 struct RoundingTestCase
 {
     float input;
@@ -50,6 +52,7 @@ struct RoundingTestCase
         return os << tc.input << " -> " << tc.expected;
     }
 };
+} // namespace
 
 class TestFp4E2M1Rounding : public ::testing::TestWithParam<RoundingTestCase>
 {
@@ -58,38 +61,42 @@ class TestFp4E2M1Rounding : public ::testing::TestWithParam<RoundingTestCase>
 TEST_P(TestFp4E2M1Rounding, Rounding)
 {
     auto [input, expected] = GetParam();
-    fp4_e2m1 val(input);
+    const fp4_e2m1 val(input);
     EXPECT_EQ(static_cast<float>(val), expected);
 }
 
-INSTANTIATE_TEST_SUITE_P(
-    MidpointRounding,
-    TestFp4E2M1Rounding,
-    ::testing::Values(RoundingTestCase{0.25f, 0.0f}, // Midpoint rounds to even (0)
-                      RoundingTestCase{0.75f, 1.0f}, // Midpoint rounds to even (1)
-                      RoundingTestCase{1.25f, 1.0f}, // Midpoint rounds to even (1)
-                      RoundingTestCase{2.5f, 2.0f}, // Midpoint rounds to even (2)
-                      RoundingTestCase{5.0f, 4.0f})); // Midpoint rounds to even (4)
+INSTANTIATE_TEST_SUITE_P(MidpointRounding,
+                         TestFp4E2M1Rounding,
+                         ::testing::Values(RoundingTestCase{0.25f, 0.0f},
+                                           RoundingTestCase{0.75f, 1.0f},
+                                           RoundingTestCase{1.25f, 1.0f},
+                                           RoundingTestCase{2.5f, 2.0f},
+                                           RoundingTestCase{5.0f, 4.0f}));
 
-INSTANTIATE_TEST_SUITE_P(
-    SubnormalRounding,
-    TestFp4E2M1Rounding,
-    ::testing::Values(RoundingTestCase{0.3f, 0.5f}, // Rounds up to subnormal
-                      RoundingTestCase{0.4f, 0.5f}, // Rounds up to subnormal
-                      RoundingTestCase{0.24f, 0.0f}, // Underflows to zero
-                      RoundingTestCase{0.6f, 0.5f}, // Rounds down to subnormal
-                      RoundingTestCase{-0.3f, -0.5f}, // Negative rounds to subnormal
-                      RoundingTestCase{-0.4f, -0.5f})); // Negative rounds to subnormal
+INSTANTIATE_TEST_SUITE_P(SubnormalRounding,
+                         TestFp4E2M1Rounding,
+                         ::testing::Values(RoundingTestCase{0.3f, 0.5f},
+                                           RoundingTestCase{0.4f, 0.5f},
+                                           RoundingTestCase{0.24f, 0.0f},
+                                           RoundingTestCase{0.6f, 0.5f},
+                                           RoundingTestCase{-0.3f, -0.5f},
+                                           RoundingTestCase{-0.4f, -0.5f}));
 
-INSTANTIATE_TEST_SUITE_P(
-    BoundaryRounding,
-    TestFp4E2M1Rounding,
-    ::testing::Values(RoundingTestCase{5.5f, 6.0f}, // Rounds up to max
-                      RoundingTestCase{5.1f, 6.0f}, // Rounds up (closer to 6.0 than 4.0)
-                      RoundingTestCase{3.5f, 4.0f}, // Midpoint between values
-                      RoundingTestCase{2.25f, 2.0f}, // Quarter-step rounds down
-                      RoundingTestCase{2.75f, 3.0f}, // Three-quarter-step rounds up
-                      RoundingTestCase{-5.5f, -6.0f})); // Negative rounds to lowest
+INSTANTIATE_TEST_SUITE_P(BoundaryRounding,
+                         TestFp4E2M1Rounding,
+                         ::testing::Values(RoundingTestCase{5.5f, 6.0f},
+                                           RoundingTestCase{5.1f, 6.0f},
+                                           RoundingTestCase{3.5f, 4.0f},
+                                           RoundingTestCase{2.25f, 2.0f},
+                                           RoundingTestCase{2.75f, 3.0f},
+                                           RoundingTestCase{-5.5f, -6.0f}));
+
+INSTANTIATE_TEST_SUITE_P(RoundingOverflow,
+                         TestFp4E2M1Rounding,
+                         ::testing::Values(
+                             // Mantissa overflow from rounding causes exponent increment
+                             RoundingTestCase{1.75f, 2.0f}, // e=1 to e=2: mant overflow 1->0, exp++
+                             RoundingTestCase{-1.75f, -2.0f})); // Negative: e=1 to e=2
 
 // ============================================================================
 // Saturation Tests
@@ -97,28 +104,28 @@ INSTANTIATE_TEST_SUITE_P(
 
 TEST(TestFp4E2M1, SaturationPositive)
 {
-    fp4_e2m1 val1(7.0f);
+    const fp4_e2m1 val1(7.0f);
     EXPECT_EQ(static_cast<float>(val1), 6.0f);
 
-    fp4_e2m1 val2(100.0f);
+    const fp4_e2m1 val2(100.0f);
     EXPECT_EQ(static_cast<float>(val2), 6.0f);
 }
 
 TEST(TestFp4E2M1, SaturationNegative)
 {
-    fp4_e2m1 val1(-7.0f);
+    const fp4_e2m1 val1(-7.0f);
     EXPECT_EQ(static_cast<float>(val1), -6.0f);
 
-    fp4_e2m1 val2(-100.0f);
+    const fp4_e2m1 val2(-100.0f);
     EXPECT_EQ(static_cast<float>(val2), -6.0f);
 }
 
 TEST(TestFp4E2M1, SaturationInfinity)
 {
-    fp4_e2m1 posInf(std::numeric_limits<float>::infinity());
+    const fp4_e2m1 posInf(std::numeric_limits<float>::infinity());
     EXPECT_EQ(static_cast<float>(posInf), 6.0f);
 
-    fp4_e2m1 negInf(-std::numeric_limits<float>::infinity());
+    const fp4_e2m1 negInf(-std::numeric_limits<float>::infinity());
     EXPECT_EQ(static_cast<float>(negInf), -6.0f);
 }
 
@@ -128,21 +135,21 @@ TEST(TestFp4E2M1, SaturationInfinity)
 
 TEST(TestFp4E2M1, Underflow)
 {
-    fp4_e2m1 val1(0.1f);
+    const fp4_e2m1 val1(0.1f);
     EXPECT_EQ(static_cast<float>(val1), 0.0f);
 
-    fp4_e2m1 val2(-0.1f);
+    const fp4_e2m1 val2(-0.1f);
     EXPECT_EQ(static_cast<float>(val2), -0.0f);
     EXPECT_TRUE(std::signbit(static_cast<float>(val2)));
 
     // fp32 subnormal inputs (exercises shift > 24 path with fp32Exp == 0)
-    fp4_e2m1 val3(std::numeric_limits<float>::denorm_min());
+    const fp4_e2m1 val3(std::numeric_limits<float>::denorm_min());
     EXPECT_EQ(static_cast<float>(val3), 0.0f);
 
-    fp4_e2m1 val4(-std::numeric_limits<float>::denorm_min());
+    const fp4_e2m1 val4(-std::numeric_limits<float>::denorm_min());
     EXPECT_EQ(static_cast<float>(val4), 0.0f);
 
-    fp4_e2m1 val5(1e-40f);
+    const fp4_e2m1 val5(1e-40f);
     EXPECT_EQ(static_cast<float>(val5), 0.0f);
 }
 
@@ -154,7 +161,7 @@ TEST(TestFp4E2M1, IsnanAlwaysFalse)
 {
     for(uint8_t bits = 0; bits < 16; ++bits)
     {
-        fp4_e2m1 val = fp4_e2m1::from_bits(bits);
+        const fp4_e2m1 val = fp4_e2m1::from_bits(bits);
         EXPECT_FALSE(isnan(val));
     }
 }
@@ -163,7 +170,7 @@ TEST(TestFp4E2M1, IsinfAlwaysFalse)
 {
     for(uint8_t bits = 0; bits < 16; ++bits)
     {
-        fp4_e2m1 val = fp4_e2m1::from_bits(bits);
+        const fp4_e2m1 val = fp4_e2m1::from_bits(bits);
         EXPECT_FALSE(isinf(val));
     }
 }
@@ -172,7 +179,7 @@ TEST(TestFp4E2M1, IsfiniteAlwaysTrue)
 {
     for(uint8_t bits = 0; bits < 16; ++bits)
     {
-        fp4_e2m1 val = fp4_e2m1::from_bits(bits);
+        const fp4_e2m1 val = fp4_e2m1::from_bits(bits);
         EXPECT_TRUE(isfinite(val));
     }
 }
@@ -181,7 +188,7 @@ TEST(TestFp4E2M1, NanConversionToZero)
 {
     // Per OCP MX Spec, conversion from NaN is implementation-defined.
     // This implementation returns zero.
-    fp4_e2m1 fromNan(std::numeric_limits<float>::quiet_NaN());
+    const fp4_e2m1 fromNan(std::numeric_limits<float>::quiet_NaN());
     EXPECT_EQ(static_cast<float>(fromNan), 0.0f);
 }
 
@@ -195,6 +202,7 @@ TEST(TestFp4E2M1, NumericLimitsSpecificValues)
     EXPECT_EQ(static_cast<float>(std::numeric_limits<fp4_e2m1>::min()), 1.0f);
     EXPECT_EQ(static_cast<float>(std::numeric_limits<fp4_e2m1>::lowest()), -6.0f);
     EXPECT_EQ(static_cast<float>(std::numeric_limits<fp4_e2m1>::epsilon()), 0.5f);
+    EXPECT_EQ(static_cast<float>(std::numeric_limits<fp4_e2m1>::round_error()), 0.5f);
     EXPECT_EQ(static_cast<float>(std::numeric_limits<fp4_e2m1>::denorm_min()), 0.5f);
 }
 
@@ -220,7 +228,7 @@ TEST(TestFp4E2M1, NamedConstants)
 
 TEST(TestFp4x2E2M1, DefaultConstruction)
 {
-    fp4x2_e2m1 val;
+    const fp4x2_e2m1 val;
     EXPECT_EQ(val.data, 0x00);
     EXPECT_EQ(static_cast<float>(val.lo()), 0.0f);
     EXPECT_EQ(static_cast<float>(val.hi()), 0.0f);
@@ -228,17 +236,17 @@ TEST(TestFp4x2E2M1, DefaultConstruction)
 
 TEST(TestFp4x2E2M1, SingleValueConstruction)
 {
-    fp4_e2m1 elem(3.0f);
-    fp4x2_e2m1 packed(elem);
+    const fp4_e2m1 elem(3.0f);
+    const fp4x2_e2m1 packed(elem);
     EXPECT_EQ(static_cast<float>(packed.lo()), 3.0f);
     EXPECT_EQ(static_cast<float>(packed.hi()), 0.0f);
 }
 
 TEST(TestFp4x2E2M1, TwoValueConstruction)
 {
-    fp4_e2m1 lo(1.0f);
-    fp4_e2m1 hi(2.0f);
-    fp4x2_e2m1 packed(lo, hi);
+    const fp4_e2m1 lo(1.0f);
+    const fp4_e2m1 hi(2.0f);
+    const fp4x2_e2m1 packed(lo, hi);
     EXPECT_EQ(static_cast<float>(packed.lo()), 1.0f);
     EXPECT_EQ(static_cast<float>(packed.hi()), 2.0f);
 }
@@ -247,7 +255,7 @@ TEST(TestFp4x2E2M1, DataLayout)
 {
     // Verify storage model: lo = low nibble, hi = high nibble
     // lo = 0x02 (1.0), hi = 0x06 (4.0) -> byte = 0x62
-    fp4x2_e2m1 packed(fp4_e2m1::from_bits(0x02), fp4_e2m1::from_bits(0x06));
+    const fp4x2_e2m1 packed(fp4_e2m1::from_bits(0x02), fp4_e2m1::from_bits(0x06));
     EXPECT_EQ(packed.data, 0x62);
     EXPECT_EQ(static_cast<float>(packed.lo()), 1.0f);
     EXPECT_EQ(static_cast<float>(packed.hi()), 4.0f);
@@ -255,40 +263,40 @@ TEST(TestFp4x2E2M1, DataLayout)
 
 TEST(TestFp4x2E2M1, NegativeValuesInLo)
 {
-    fp4_e2m1 neg(-2.0f);
-    fp4x2_e2m1 packed(neg);
+    const fp4_e2m1 neg(-2.0f);
+    const fp4x2_e2m1 packed(neg);
     EXPECT_EQ(static_cast<float>(packed.lo()), -2.0f);
     EXPECT_EQ(static_cast<float>(packed.hi()), 0.0f);
 }
 
 TEST(TestFp4x2E2M1, NegativeValuesInHi)
 {
-    fp4_e2m1 lo(1.0f);
-    fp4_e2m1 hi(-3.0f);
-    fp4x2_e2m1 packed(lo, hi);
+    const fp4_e2m1 lo(1.0f);
+    const fp4_e2m1 hi(-3.0f);
+    const fp4x2_e2m1 packed(lo, hi);
     EXPECT_EQ(static_cast<float>(packed.lo()), 1.0f);
     EXPECT_EQ(static_cast<float>(packed.hi()), -3.0f);
 }
 
 TEST(TestFp4x2E2M1, BothNegativeValues)
 {
-    fp4_e2m1 lo(-1.5f);
-    fp4_e2m1 hi(-4.0f);
-    fp4x2_e2m1 packed(lo, hi);
+    const fp4_e2m1 lo(-1.5f);
+    const fp4_e2m1 hi(-4.0f);
+    const fp4x2_e2m1 packed(lo, hi);
     EXPECT_EQ(static_cast<float>(packed.lo()), -1.5f);
     EXPECT_EQ(static_cast<float>(packed.hi()), -4.0f);
 }
 
 TEST(TestFp4x2E2M1, CopyConstruct)
 {
-    fp4x2_e2m1 a(fp4_e2m1(1.0f), fp4_e2m1(2.0f));
-    fp4x2_e2m1 b(a);
+    const fp4x2_e2m1 a(fp4_e2m1(1.0f), fp4_e2m1(2.0f));
+    const fp4x2_e2m1 b(a);
     EXPECT_EQ(a.data, b.data);
 }
 
 TEST(TestFp4x2E2M1, CopyAssignment)
 {
-    fp4x2_e2m1 a(fp4_e2m1(1.0f), fp4_e2m1(2.0f));
+    const fp4x2_e2m1 a(fp4_e2m1(1.0f), fp4_e2m1(2.0f));
     fp4x2_e2m1 b;
     b = a;
     EXPECT_EQ(a.data, b.data);

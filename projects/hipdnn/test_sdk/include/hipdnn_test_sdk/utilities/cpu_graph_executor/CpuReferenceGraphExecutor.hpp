@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <cstring>
 #include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 
 #ifndef HIPDNN_DATA_SDK_SKIP_JSON_LIB
@@ -18,6 +19,7 @@
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/PlanBuilderRegistry.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/PointwisePlan.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/RMSNormFwdSignatureKey.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/ReductionPlan.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/SdpaFwdSignatureKey.hpp>
 
 namespace hipdnn_test_sdk::utilities
@@ -29,6 +31,7 @@ class CpuReferenceGraphExecutor
 public:
     CpuReferenceGraphExecutor() = default;
 
+    // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
     void execute(void* graphBuffer,
                  size_t size,
                  const std::unordered_map<int64_t, void*>& variantPack)
@@ -45,7 +48,7 @@ public:
         }
 
         std::vector<std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>> virtualTensors;
-        std::unordered_map<int64_t, void*> variantPackWithVirtualTensorsAdded
+        const std::unordered_map<int64_t, void*> variantPackWithVirtualTensorsAdded
             = populateVariantPackWithMissingVirtualTensors(
                 variantPack, graphWrap.getTensorMap(), virtualTensors);
 
@@ -69,6 +72,7 @@ private:
             if(attr->virtual_() && updatedVariantPack.find(id) == updatedVariantPack.end())
             {
                 auto tensor = detail::createTensorFromAttribute(*attr);
+                tensor->fillWithSentinelValue();
                 virtualTensors.push_back(std::move(tensor));
                 updatedVariantPack[id] = virtualTensors.back()->rawHostData();
             }
@@ -85,7 +89,7 @@ private:
         const auto& planBuilder = _planRegistry.getPlanBuilder(key);
         if(!planBuilder.isApplicable(node, graph.getTensorMap()))
         {
-            std::string nodeName = node.name() == nullptr ? "" : " " + node.name()->str();
+            const std::string nodeName = node.name() == nullptr ? "" : " " + node.name()->str();
             throw std::runtime_error("Plan builder is not applicable for the given node: "
                                      + nodeName);
         }
@@ -125,6 +129,8 @@ private:
             return detail::RMSNormFwdSignatureKey(node, tensorMap);
         case hipdnn_data_sdk::data_objects::NodeAttributes::SdpaAttributes:
             return detail::SdpaFwdSignatureKey(node, tensorMap);
+        case hipdnn_data_sdk::data_objects::NodeAttributes::ReductionAttributes:
+            return detail::ReductionSignatureKey(node, tensorMap, computeType);
         default:
             throw std::runtime_error("Unsupported node type for signature key generation");
         }

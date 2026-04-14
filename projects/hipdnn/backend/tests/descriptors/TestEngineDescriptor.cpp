@@ -14,8 +14,8 @@
 #include "mocks/MockHandle.hpp"
 
 #include <gtest/gtest.h>
-#include <hipdnn_data_sdk/data_objects/engine_details_generated.h>
-#include <hipdnn_data_sdk/data_objects/knob_value_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/engine_details_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/knob_value_generated.h>
 
 #include <memory>
 
@@ -68,7 +68,7 @@ public:
         EXPECT_CALL(*getMockGraph(), getHandle()).WillOnce(Return(_mockHandle.get()));
         EXPECT_CALL(*_mockHandle, getPluginResourceManager())
             .WillOnce(Return(_mockEnginePluginResourceManager));
-        EXPECT_CALL(*_mockEnginePluginResourceManager, getApplicableEngineIds(_))
+        EXPECT_CALL(*_mockEnginePluginResourceManager, getApplicableEngineIds(_, _))
             .WillOnce(Return(std::vector<int64_t>{ENGINE_ID}));
         EXPECT_CALL(*_mockEnginePluginResourceManager, getEngineDetails(_, _, _))
             .WillOnce(Invoke([this](int64_t, const GraphDescriptor*, hipdnnPluginConstData_t* d) {
@@ -107,7 +107,7 @@ private:
     void serializeEngineDetails(int64_t engineId)
     {
         flatbuffers::FlatBufferBuilder builder;
-        hipdnn_data_sdk::data_objects::EngineDetailsBuilder engineDetailsBuilder(builder);
+        hipdnn_flatbuffers_sdk::data_objects::EngineDetailsBuilder engineDetailsBuilder(builder);
         engineDetailsBuilder.add_engine_id(engineId);
         builder.Finish(engineDetailsBuilder.Finish());
         _engineDetailsBuffer = builder.Release();
@@ -244,7 +244,7 @@ TEST_F(TestEngineDescriptor, GetEngineDescriptorUnsupportedAttr)
 
     ASSERT_THROW_HIPDNN_STATUS(
         engine->getAttribute(
-            HIPDNN_ATTR_ENGINE_SM_COUNT_TARGET, HIPDNN_TYPE_INT32, 1, nullptr, &dummy),
+            HIPDNN_ATTR_ENGINE_CU_COUNT_TARGET_EXT, HIPDNN_TYPE_INT32, 1, nullptr, &dummy),
         HIPDNN_STATUS_NOT_SUPPORTED);
 }
 
@@ -367,28 +367,28 @@ protected:
     {
         flatbuffers::FlatBufferBuilder builder;
 
-        std::vector<flatbuffers::Offset<hipdnn_data_sdk::data_objects::Knob>> knobOffsets;
+        std::vector<flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Knob>> knobOffsets;
         for(size_t i = 0; i < knobCount; ++i)
         {
             auto knobIdStr = builder.CreateString("test_knob_" + std::to_string(i));
             auto description = builder.CreateString("Test knob description " + std::to_string(i));
 
             // Create a default int value
-            auto defaultValue = hipdnn_data_sdk::data_objects::CreateIntValue(
+            auto defaultValue = hipdnn_flatbuffers_sdk::data_objects::CreateIntValue(
                 builder, static_cast<int64_t>(i * 10));
 
-            auto knob = hipdnn_data_sdk::data_objects::CreateKnob(
+            auto knob = hipdnn_flatbuffers_sdk::data_objects::CreateKnob(
                 builder,
                 knobIdStr,
                 description,
-                hipdnn_data_sdk::data_objects::KnobValue::IntValue,
+                hipdnn_flatbuffers_sdk::data_objects::KnobValue::IntValue,
                 defaultValue.Union());
             knobOffsets.push_back(knob);
         }
 
         auto knobsVector = builder.CreateVector(knobOffsets);
-        auto engineDetails
-            = hipdnn_data_sdk::data_objects::CreateEngineDetails(builder, engineId, knobsVector);
+        auto engineDetails = hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetails(
+            builder, engineId, knobsVector);
         builder.Finish(engineDetails);
 
         _engineDetailsWithKnobsBuffer = builder.Release();
@@ -411,7 +411,7 @@ protected:
         EXPECT_CALL(*getMockGraph(), getHandle()).WillOnce(Return(_mockHandle.get()));
         EXPECT_CALL(*_mockHandle, getPluginResourceManager())
             .WillOnce(Return(_mockEnginePluginResourceManager));
-        EXPECT_CALL(*_mockEnginePluginResourceManager, getApplicableEngineIds(_))
+        EXPECT_CALL(*_mockEnginePluginResourceManager, getApplicableEngineIds(_, _))
             .WillOnce(Return(std::vector<int64_t>{0}));
         EXPECT_CALL(*_mockEnginePluginResourceManager, getEngineDetails(_, _, _))
             .WillOnce(Invoke([this](int64_t, const GraphDescriptor*, hipdnnPluginConstData_t* d) {
@@ -431,7 +431,7 @@ TEST_F(TestEngineDescriptor, GetKnobInfoCountWithNoKnobs)
     makeEngineFinalized();
 
     int64_t knobCount = -1;
-    ASSERT_NO_THROW(engine->getAttribute(HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE_EXT,
+    ASSERT_NO_THROW(engine->getAttribute(HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE,
                                          HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
                                          0,
                                          &knobCount,
@@ -447,7 +447,7 @@ TEST_F(TestEngineDescriptor, GetKnobInfoInvalidType)
     int64_t knobCount = 0;
     ASSERT_THROW_HIPDNN_STATUS(
         engine->getAttribute(
-            HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE_EXT, HIPDNN_TYPE_INT64, 0, &knobCount, nullptr),
+            HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE, HIPDNN_TYPE_INT64, 0, &knobCount, nullptr),
         HIPDNN_STATUS_BAD_PARAM);
 }
 
@@ -456,7 +456,7 @@ TEST_F(TestEngineDescriptor, GetKnobInfoNotFinalized)
     auto engine = getEngineDescriptor();
 
     int64_t knobCount = 0;
-    ASSERT_THROW_HIPDNN_STATUS(engine->getAttribute(HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE_EXT,
+    ASSERT_THROW_HIPDNN_STATUS(engine->getAttribute(HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE,
                                                     HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
                                                     0,
                                                     &knobCount,
@@ -470,7 +470,7 @@ TEST_F(TestEngineDescriptorWithKnobs, GetKnobInfoCountWithKnobs)
     makeEngineFinalizedWithKnobs();
 
     int64_t knobCount = -1;
-    ASSERT_NO_THROW(engine->getAttribute(HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE_EXT,
+    ASSERT_NO_THROW(engine->getAttribute(HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE,
                                          HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
                                          0,
                                          &knobCount,
@@ -485,7 +485,7 @@ TEST_F(TestEngineDescriptorWithKnobs, GetKnobInfoReturnsSerializedKnobs)
 
     // First, get the count
     int64_t knobCount = 0;
-    ASSERT_NO_THROW(engine->getAttribute(HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE_EXT,
+    ASSERT_NO_THROW(engine->getAttribute(HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE,
                                          HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
                                          0,
                                          &knobCount,
@@ -495,7 +495,7 @@ TEST_F(TestEngineDescriptorWithKnobs, GetKnobInfoReturnsSerializedKnobs)
     // Now get the actual knob data
     std::vector<hipdnnBackendFlatbufferData_t> knobData(static_cast<size_t>(knobCount));
     int64_t returnedCount = 0;
-    ASSERT_NO_THROW(engine->getAttribute(HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE_EXT,
+    ASSERT_NO_THROW(engine->getAttribute(HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE,
                                          HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
                                          knobCount,
                                          &returnedCount,
@@ -511,9 +511,10 @@ TEST_F(TestEngineDescriptorWithKnobs, GetKnobInfoReturnsSerializedKnobs)
         // Verify we can parse the flatbuffer
         flatbuffers::Verifier verifier(static_cast<const uint8_t*>(knobData[i].ptr),
                                        knobData[i].size);
-        ASSERT_TRUE(verifier.VerifyBuffer<hipdnn_data_sdk::data_objects::Knob>());
+        ASSERT_TRUE(verifier.VerifyBuffer<hipdnn_flatbuffers_sdk::data_objects::Knob>());
 
-        auto knob = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::Knob>(knobData[i].ptr);
+        auto knob
+            = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::Knob>(knobData[i].ptr);
         ASSERT_EQ(knob->knob_id()->str(), "test_knob_" + std::to_string(i));
     }
 }
@@ -524,7 +525,7 @@ TEST_F(TestEngineDescriptorWithKnobs, GetKnobInfoNullPointerWhenCountNonZero)
     makeEngineFinalizedWithKnobs();
 
     int64_t returnedCount = 0;
-    ASSERT_THROW_HIPDNN_STATUS(engine->getAttribute(HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE_EXT,
+    ASSERT_THROW_HIPDNN_STATUS(engine->getAttribute(HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE,
                                                     HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
                                                     1,
                                                     &returnedCount,

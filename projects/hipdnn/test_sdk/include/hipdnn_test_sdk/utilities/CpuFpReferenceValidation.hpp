@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <hipdnn_data_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_data_sdk/utilities/TensorView.hpp>
@@ -24,9 +25,11 @@ public:
         : _absoluteTolerance(absoluteTolerance)
         , _relativeTolerance(relativeTolerance)
     {
-        if(absoluteTolerance < 0.0f || relativeTolerance < 0.0f)
+        if(absoluteTolerance < 0.0f || relativeTolerance < 0.0f || std::isnan(absoluteTolerance)
+           || std::isnan(relativeTolerance) || std::isinf(absoluteTolerance)
+           || std::isinf(relativeTolerance))
         {
-            throw std::invalid_argument("Tolerances must be non-negative");
+            throw std::invalid_argument("Tolerances must be finite and non-negative");
         }
     }
 
@@ -48,8 +51,21 @@ public:
 
         auto validateFunc = [&](const std::vector<int64_t>& indices) {
             using hipdnn_data_sdk::types::fabs;
+            using hipdnn_data_sdk::types::isnan;
+            using hipdnn_data_sdk::types::isinf;
             T refValue = refView.getHostValue(indices);
             T implValue = implView.getHostValue(indices);
+
+            if(isnan(refValue) || isinf(refValue) || isnan(implValue) || isinf(implValue))
+            {
+                HIPDNN_SDK_LOG_ERROR(
+                    "NaN or Inf detected at indices "
+                    << StreamVec(indices) << ": reference value = " << refValue
+                    << ", implementation value = " << implValue
+                    << ". This may indicate an output element was not written by the operation.");
+                result.store(false, std::memory_order_relaxed);
+                return result.load(std::memory_order_relaxed);
+            }
 
             auto absDiff = static_cast<float>(fabs(implValue - refValue));
             auto threshold
@@ -107,6 +123,18 @@ public:
         auto validateFunc = [&](const std::vector<int64_t>& indices) {
             T refValue = refView.getHostValue(indices);
             T implValue = implView.getHostValue(indices);
+
+            if(refValue == std::numeric_limits<T>::max()
+               || implValue == std::numeric_limits<T>::max())
+            {
+                HIPDNN_SDK_LOG_ERROR(
+                    "Sentinel value detected at indices "
+                    << StreamVec(indices) << ": reference value = " << refValue
+                    << ", implementation value = " << implValue
+                    << ". This may indicate an output element was not written by the operation.");
+                result.store(false, std::memory_order_relaxed);
+                return result.load(std::memory_order_relaxed);
+            }
 
             T absDiff = static_cast<T>(hipdnn_data_sdk::types::abs(implValue - refValue));
 

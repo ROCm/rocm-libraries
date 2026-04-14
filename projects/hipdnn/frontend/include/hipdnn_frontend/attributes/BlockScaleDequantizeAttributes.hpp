@@ -57,6 +57,8 @@ namespace hipdnn_frontend::graph
 class BlockScaleDequantizeAttributes : public Attributes<BlockScaleDequantizeAttributes>
 {
 public:
+    BlockScaleDequantizeAttributes() = default;
+
     enum class InputNames
     {
         X = 0,
@@ -199,7 +201,7 @@ public:
 
         if(fb->block_size() != nullptr)
         {
-            std::vector<int32_t> bs(fb->block_size()->begin(), fb->block_size()->end());
+            const std::vector<int32_t> bs(fb->block_size()->begin(), fb->block_size()->end());
             attr.set_block_size(bs);
         }
 

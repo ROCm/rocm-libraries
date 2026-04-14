@@ -39,7 +39,8 @@ extern "C" {
 
 /**
  * @defgroup PluginFunctions Plugin API Functions
- * @brief Functions that every plugin must implement.
+ * @brief Functions that define the plugin API. Most are required; optional functions
+ * are marked in their documentation.
  * @{
  */
 
@@ -120,6 +121,23 @@ HIPDNN_PLUGIN_EXPORT void hipdnnPluginGetLastErrorString(const char** error_str)
  */
 HIPDNN_PLUGIN_NODISCARD HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t
     hipdnnPluginSetLoggingCallback(hipdnnCallback_t callback);
+
+/**
+ * @brief Sets the log level for the plugin.
+ *
+ * This function synchronizes the plugin's log level with the backend's global log level.
+ * The backend calls this function when the global log level changes or when a plugin is loaded.
+ *
+ * @param[in] level The log level to set.
+ *
+ * @return A value of type `hipdnnPluginStatus_t` indicating the status of the operation.
+ *
+ * @note This function is optional for backwards compatibility with plugins built against
+ *       earlier SDK versions. Plugins that do not implement this function will continue
+ *       to work but will not receive log level updates from the backend.
+ */
+HIPDNN_PLUGIN_NODISCARD HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t
+    hipdnnPluginSetLogLevel(hipdnnSeverity_t level);
 
 /** @} */ // End of PluginFunctions group
 

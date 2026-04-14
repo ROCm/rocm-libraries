@@ -159,13 +159,13 @@ ConvSolution PoolingBackwardNd::GetSolution(const ExecutionContext&,
     const auto top_h = *(top.GetLengths().rbegin() + 1);
     const auto top_w = *(top.GetLengths().rbegin());
 
-    auto unpackStrides = [is2d](const auto& strides) {
-        return std::make_tuple(strides[0], // N stride
-                               strides[1], // C stride
-                               strides[2], // D stride. Same as H_stride in 3D converted from 2D.
-                               is2d        //
-                                   ? strides[2] // 2D H stride
-                                   : strides[3] // 3D H stride
+    auto unpackStrides = [is2d](const auto& strides_) {
+        return std::make_tuple(strides_[0], // N stride
+                               strides_[1], // C stride
+                               strides_[2], // D stride. Same as H_stride in 3D converted from 2D.
+                               is2d         //
+                                   ? strides_[2] // 2D H stride
+                                   : strides_[3] // 3D H stride
         );
     };
 
@@ -178,59 +178,59 @@ ConvSolution PoolingBackwardNd::GetSolution(const ExecutionContext&,
 
     result.invoker_factory = [=](const std::vector<Kernel>& kernels) {
         return [=](const Handle& handle_, const AnyInvokeParams& raw_params) {
-            decltype(auto) kernel = handle_.Run(kernels.front());
-            decltype(auto) params = raw_params.CastTo<miopen::pooling::BwdInvokeParams>();
+            decltype(auto) kernel_ = handle_.Run(kernels.front());
+            decltype(auto) params  = raw_params.CastTo<miopen::pooling::BwdInvokeParams>();
 
             if(params.pooling.GetMode() == miopenPoolingMax)
             {
-                kernel(params.dy,
-                       params.dx,
-                       params.workspace,
-                       static_cast<unsigned>(pads[0]),
-                       static_cast<unsigned>(pads[1]),
-                       static_cast<unsigned>(pads[2]),
-                       static_cast<unsigned>(batch),
-                       static_cast<unsigned>(chal),
-                       static_cast<unsigned>(bot_d),
-                       static_cast<unsigned>(bot_h),
-                       static_cast<unsigned>(bot_w),
-                       static_cast<unsigned>(top_d),
-                       static_cast<unsigned>(top_h),
-                       static_cast<unsigned>(top_w),
-                       static_cast<unsigned>(bot_n_stride),
-                       static_cast<unsigned>(bot_c_stride),
-                       static_cast<unsigned>(bot_d_stride),
-                       static_cast<unsigned>(bot_h_stride),
-                       static_cast<unsigned>(top_n_stride),
-                       static_cast<unsigned>(top_c_stride),
-                       static_cast<unsigned>(top_d_stride),
-                       static_cast<unsigned>(top_h_stride),
-                       static_cast<unsigned>(total_work));
+                kernel_(params.dy,
+                        params.dx,
+                        params.workspace,
+                        static_cast<unsigned>(pads[0]),
+                        static_cast<unsigned>(pads[1]),
+                        static_cast<unsigned>(pads[2]),
+                        static_cast<unsigned>(batch),
+                        static_cast<unsigned>(chal),
+                        static_cast<unsigned>(bot_d),
+                        static_cast<unsigned>(bot_h),
+                        static_cast<unsigned>(bot_w),
+                        static_cast<unsigned>(top_d),
+                        static_cast<unsigned>(top_h),
+                        static_cast<unsigned>(top_w),
+                        static_cast<unsigned>(bot_n_stride),
+                        static_cast<unsigned>(bot_c_stride),
+                        static_cast<unsigned>(bot_d_stride),
+                        static_cast<unsigned>(bot_h_stride),
+                        static_cast<unsigned>(top_n_stride),
+                        static_cast<unsigned>(top_c_stride),
+                        static_cast<unsigned>(top_d_stride),
+                        static_cast<unsigned>(top_h_stride),
+                        static_cast<unsigned>(total_work));
             }
             else
             {
-                kernel(params.dy,
-                       params.dx,
-                       static_cast<unsigned>(pads[0]),
-                       static_cast<unsigned>(pads[1]),
-                       static_cast<unsigned>(pads[2]),
-                       static_cast<unsigned>(batch),
-                       static_cast<unsigned>(chal),
-                       static_cast<unsigned>(bot_d),
-                       static_cast<unsigned>(bot_h),
-                       static_cast<unsigned>(bot_w),
-                       static_cast<unsigned>(top_d),
-                       static_cast<unsigned>(top_h),
-                       static_cast<unsigned>(top_w),
-                       static_cast<unsigned>(bot_n_stride),
-                       static_cast<unsigned>(bot_c_stride),
-                       static_cast<unsigned>(bot_d_stride),
-                       static_cast<unsigned>(bot_h_stride),
-                       static_cast<unsigned>(top_n_stride),
-                       static_cast<unsigned>(top_c_stride),
-                       static_cast<unsigned>(top_d_stride),
-                       static_cast<unsigned>(top_h_stride),
-                       static_cast<unsigned>(total_work));
+                kernel_(params.dy,
+                        params.dx,
+                        static_cast<unsigned>(pads[0]),
+                        static_cast<unsigned>(pads[1]),
+                        static_cast<unsigned>(pads[2]),
+                        static_cast<unsigned>(batch),
+                        static_cast<unsigned>(chal),
+                        static_cast<unsigned>(bot_d),
+                        static_cast<unsigned>(bot_h),
+                        static_cast<unsigned>(bot_w),
+                        static_cast<unsigned>(top_d),
+                        static_cast<unsigned>(top_h),
+                        static_cast<unsigned>(top_w),
+                        static_cast<unsigned>(bot_n_stride),
+                        static_cast<unsigned>(bot_c_stride),
+                        static_cast<unsigned>(bot_d_stride),
+                        static_cast<unsigned>(bot_h_stride),
+                        static_cast<unsigned>(top_n_stride),
+                        static_cast<unsigned>(top_c_stride),
+                        static_cast<unsigned>(top_d_stride),
+                        static_cast<unsigned>(top_h_stride),
+                        static_cast<unsigned>(total_work));
             }
         };
     };

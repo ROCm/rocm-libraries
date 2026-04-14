@@ -16,7 +16,7 @@ TEST(TestBackendDescriptor, PackAndUnpackDescriptorWorks)
 {
     auto mockPtr = std::make_shared<MockDescriptor<EngineDescriptor>>();
 
-    ScopedDescriptor packed(HipdnnBackendDescriptor::packDescriptor(mockPtr));
+    const ScopedDescriptor packed(HipdnnBackendDescriptor::packDescriptor(mockPtr));
     ASSERT_NE(packed.get(), nullptr);
 
     auto unpacked = HipdnnBackendDescriptor::unpackDescriptor<MockDescriptor<EngineDescriptor>>(
@@ -28,7 +28,7 @@ TEST(TestBackendDescriptor, PackAndUnpackDescriptorWorks)
 TEST(TestBackendDescriptor, AsDescriptorCastsCorrectly)
 {
     auto mockPtr = std::make_shared<MockDescriptor<EngineDescriptor>>();
-    ScopedDescriptor packed(HipdnnBackendDescriptor::packDescriptor(mockPtr));
+    const ScopedDescriptor packed(HipdnnBackendDescriptor::packDescriptor(mockPtr));
 
     auto result = packed.get()->asDescriptor<MockDescriptor<EngineDescriptor>>();
     ASSERT_EQ(result.get(), mockPtr.get());
@@ -51,7 +51,7 @@ TEST(TestBackendDescriptor, PackDescriptorToArrayWorks)
     hipdnnBackendDescriptor_t desc = nullptr;
     auto* arrayOfElements = static_cast<void*>(&desc);
     HipdnnBackendDescriptor::packDescriptor(mockPtr, arrayOfElements);
-    ScopedDescriptor scoped(desc);
+    const ScopedDescriptor scoped(desc);
 
     ASSERT_NE(desc, nullptr);
 }
@@ -70,7 +70,7 @@ TEST(TestBackendDescriptor, UnpackDescriptorThrowsOnNullDescriptor)
 
 TEST(TestBackendDescriptor, UnpackDescriptorThrowsOnNullPrivateDescriptor)
 {
-    ScopedDescriptor packed(new HipdnnBackendDescriptor());
+    const ScopedDescriptor packed(new HipdnnBackendDescriptor());
 
     EXPECT_THROW(
         {

@@ -8,6 +8,7 @@
 #include <hipdnn_frontend/attributes/BatchnormInferenceAttributes.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
 #include <hipdnn_frontend/detail/BatchnormInferencePacker.hpp>
+#include <hipdnn_frontend/detail/BatchnormInferenceUnpacker.hpp>
 #include <hipdnn_frontend/node/detail/Utilities.hpp>
 
 namespace hipdnn_frontend::graph
@@ -101,7 +102,7 @@ public:
 
         // Extract channel count - safe to access xDims[1] after SECTION 2 validation
         auto& xDims = x->get_dim();
-        int64_t channels = xDims[1];
+        const int64_t channels = xDims[1];
 
         // Validate scale has correct channel-only shape (required user parameter)
         HIPDNN_CHECK_ERROR(detail::validateChannelOnlyTensorShape(scale, channels, "Scale tensor"));
@@ -171,6 +172,16 @@ public:
         std::vector<detail::ScopedHipdnnBackendDescriptor>& operations) const override
     {
         return detail::createBatchnormInferenceOperation(attributes, tensorDescs, operations);
+    }
+
+    Error unpack_from_descriptor(
+        hipdnnBackendDescriptor_t opDesc,
+        std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>>& tensorMap) override
+    {
+        BatchnormInferenceAttributes attrs;
+        HIPDNN_CHECK_ERROR(detail::unpackBatchnormInferenceOperation(opDesc, tensorMap, attrs));
+        attributes = std::move(attrs);
+        return {};
     }
 };
 }

@@ -10,6 +10,7 @@
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceRMSNorm.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_test_sdk/utilities/DynamicTolerances.hpp>
 #include <hipdnn_test_sdk/utilities/Seeds.hpp>
 #include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/RMSNormFwdPlan.hpp>
@@ -21,15 +22,17 @@ using namespace hipdnn_data_sdk::utilities;
 using namespace hipdnn_data_sdk::flatbuffer_utilities;
 using namespace ::testing;
 using namespace hipdnn_sdk_test_utils;
+namespace rmsnorm = hipdnn_test_sdk::utilities::rmsnorm;
 
 TEST(TestRMSNormFwdPlan, ExecutePlan)
 {
-    std::vector<int64_t> dims = {6, 3, 32, 32};
-    unsigned int seed = getGlobalTestSeed();
+    const std::vector<int64_t> dims = {6, 3, 32, 32};
+    const unsigned int seed = getGlobalTestSeed();
     auto graph = buildRMSNormFwdGraph(
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, dims, TensorLayout::NHWC);
-    auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
-    GraphWrapper graphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+    const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());
     const INodeWrapper& node = graphWrapper.getNodeWrapper(0);
     RMSNormFwdTensorBundle planTensorBundle(node, graphWrapper.getTensorMap(), seed);
     RMSNormFwdTensorBundle directTensorBundle(node, graphWrapper.getTensorMap(), seed);
@@ -46,9 +49,9 @@ TEST(TestRMSNormFwdPlan, ExecutePlan)
                             *tensorMap.at(attributes.y_tensor_uid()),
                             invRmsPtr);
 
-    std::unordered_map<int64_t, void*> variantPack = planTensorBundle.toHostVariantPack();
+    const std::unordered_map<int64_t, void*> variantPack = planTensorBundle.toHostVariantPack();
 
-    double epsilon
+    const double epsilon
         = hipdnn_data_sdk::utilities::extractDoubleFromTensorValue(params.epsilonTensor, "Epsilon");
 
     auto shallowXTensor = createShallowTensor<float>(
@@ -64,8 +67,10 @@ TEST(TestRMSNormFwdPlan, ExecutePlan)
     RMSNormFwdPlan<float, float, float, float> fwdPlan(std::move(params));
     fwdPlan.execute(variantPack);
 
-    float tolerance = 1e-5f;
-    CpuFpReferenceValidation<float> cpuRefOutputValidation(tolerance, tolerance);
+    // x in [0, 1], scale in [0, 1], C=3, no bias
+    const float tolerance
+        = rmsnorm::calculateRMSNormFwdTolerance<float, float, float>(0.0, 1.0, 0.0, 1.0, dims[1]);
+    const CpuFpReferenceValidation<float> cpuRefOutputValidation(tolerance, tolerance);
     EXPECT_TRUE(cpuRefOutputValidation.allClose(
         *directTensorBundle.tensors[attributes.y_tensor_uid()].get(),
         *planTensorBundle.tensors[attributes.y_tensor_uid()].get()));
@@ -73,37 +78,39 @@ TEST(TestRMSNormFwdPlan, ExecutePlan)
 
 TEST(TestRMSNormFwdPlanBuilder, PlanConstruction)
 {
-    std::vector<int64_t> dims = {1, 1, 1, 1};
+    const std::vector<int64_t> dims = {1, 1, 1, 1};
     auto graph = buildRMSNormFwdGraph(
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, dims, TensorLayout::NHWC);
-    auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
-    GraphWrapper graphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+    const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());
 
-    RMSNormFwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
+    const RMSNormFwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
         patient;
 
     auto builtPlan = patient.buildNodePlan(graphWrapper, graphWrapper.getNode(0));
 
-    bool result
+    const bool result
         = dynamic_cast<RMSNormFwdPlan<float, float, float, float>*>(builtPlan.get()) != nullptr;
     EXPECT_TRUE(result);
 }
 
 TEST(TestRMSNormFwdPlanBuilder, IsApplicable)
 {
-    std::vector<int64_t> dims = {1, 1, 1, 1};
+    const std::vector<int64_t> dims = {1, 1, 1, 1};
     auto graph = buildRMSNormFwdGraph(
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, dims, TensorLayout::NHWC);
-    auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
-    GraphWrapper graphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+    const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());
 
-    RMSNormFwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
+    const RMSNormFwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
         floatPlanBuilder;
 
     EXPECT_TRUE(
         floatPlanBuilder.isApplicable(graphWrapper.getNode(0), graphWrapper.getTensorMap()));
 
-    RMSNormFwdPlanBuilder<DataType::FLOAT, DataType::HALF, DataType::FLOAT, DataType::FLOAT>
+    const RMSNormFwdPlanBuilder<DataType::FLOAT, DataType::HALF, DataType::FLOAT, DataType::FLOAT>
         badTypesPlanBuilder;
     EXPECT_FALSE(
         badTypesPlanBuilder.isApplicable(graphWrapper.getNode(0), graphWrapper.getTensorMap()));
@@ -111,12 +118,13 @@ TEST(TestRMSNormFwdPlanBuilder, IsApplicable)
 
 TEST(TestRMSNormFwdPlan, ExecutePlanWithBias)
 {
-    std::vector<int64_t> dims = {4, 3, 16, 16};
-    unsigned int seed = getGlobalTestSeed();
+    const std::vector<int64_t> dims = {4, 3, 16, 16};
+    const unsigned int seed = getGlobalTestSeed();
     auto graph = buildRMSNormFwdGraphWithBias(
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, dims, TensorLayout::NHWC);
-    auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
-    GraphWrapper graphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+    const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());
     const INodeWrapper& node = graphWrapper.getNodeWrapper(0);
     RMSNormFwdWithBiasTensorBundle planTensorBundle(node, graphWrapper.getTensorMap(), seed);
     RMSNormFwdWithBiasTensorBundle directTensorBundle(node, graphWrapper.getTensorMap(), seed);
@@ -137,7 +145,7 @@ TEST(TestRMSNormFwdPlan, ExecutePlanWithBias)
                             invRmsBiasPtr,
                             biasPtr);
 
-    double epsilon = extractDoubleFromTensorValue(params.epsilonTensor, "Epsilon");
+    const double epsilon = extractDoubleFromTensorValue(params.epsilonTensor, "Epsilon");
 
     auto shallowXTensor = createShallowTensor<float>(
         params.xTensor, directTensorBundle.tensors[attributes.x_tensor_uid()]->rawHostData());
@@ -157,12 +165,14 @@ TEST(TestRMSNormFwdPlan, ExecutePlanWithBias)
                                                                nullptr,
                                                                shallowBiasTensor.get());
 
-    std::unordered_map<int64_t, void*> variantPack = planTensorBundle.toHostVariantPack();
+    const std::unordered_map<int64_t, void*> variantPack = planTensorBundle.toHostVariantPack();
     RMSNormFwdPlan<float, float, float, float> fwdPlan(std::move(params));
     fwdPlan.execute(variantPack);
 
-    float tolerance = 1e-5f;
-    CpuFpReferenceValidation<float> cpuRefOutputValidation(tolerance, tolerance);
+    // x in [0, 1], scale in [0, 1], C=3, bias in [-0.5, 0.5]
+    const float tolerance = rmsnorm::calculateRMSNormFwdTolerance<float, float, float>(
+        0.0, 1.0, 0.0, 1.0, dims[1], -0.5, 0.5);
+    const CpuFpReferenceValidation<float> cpuRefOutputValidation(tolerance, tolerance);
     EXPECT_TRUE(cpuRefOutputValidation.allClose(
         *directTensorBundle.tensors[attributes.y_tensor_uid()].get(),
         *planTensorBundle.tensors[attributes.y_tensor_uid()].get()));
@@ -170,31 +180,33 @@ TEST(TestRMSNormFwdPlan, ExecutePlanWithBias)
 
 TEST(TestRMSNormFwdPlanBuilder, PlanConstructionWithBias)
 {
-    std::vector<int64_t> dims = {1, 2, 1, 1};
+    const std::vector<int64_t> dims = {1, 2, 1, 1};
     auto graph = buildRMSNormFwdGraphWithBias(
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, dims, TensorLayout::NHWC);
-    auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
-    GraphWrapper graphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+    const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());
 
-    RMSNormFwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
+    const RMSNormFwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
         patient;
 
     auto builtPlan = patient.buildNodePlan(graphWrapper, graphWrapper.getNode(0));
 
-    bool result
+    const bool result
         = dynamic_cast<RMSNormFwdPlan<float, float, float, float>*>(builtPlan.get()) != nullptr;
     EXPECT_TRUE(result);
 }
 
 TEST(TestRMSNormFwdPlanBuilder, IsApplicableWithBias)
 {
-    std::vector<int64_t> dims = {1, 2, 1, 1};
+    const std::vector<int64_t> dims = {1, 2, 1, 1};
     auto graph = buildRMSNormFwdGraphWithBias(
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, dims, TensorLayout::NHWC);
-    auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
-    GraphWrapper graphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+    const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());
 
-    RMSNormFwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
+    const RMSNormFwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
         floatPlanBuilder;
 
     EXPECT_TRUE(

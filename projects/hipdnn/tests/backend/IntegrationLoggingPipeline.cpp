@@ -78,7 +78,7 @@ TEST_F(IntegrationGpuLoggingPipeline, DescriptorLogging)
 {
     SKIP_IF_NO_DEVICES();
 
-    std::vector<hipdnnBackendDescriptorType_t> descriptorTypes
+    const std::vector<hipdnnBackendDescriptorType_t> descriptorTypes
         = {HIPDNN_BACKEND_OPERATIONGRAPH_DESCRIPTOR,
            HIPDNN_BACKEND_ENGINE_DESCRIPTOR,
            HIPDNN_BACKEND_ENGINECFG_DESCRIPTOR,
@@ -173,7 +173,7 @@ TEST_F(IntegrationGpuLoggingPipeline, ErrorStatusLogging)
 
     // Invalid descriptor type
     hipdnnBackendDescriptor_t descriptor = nullptr;
-    status = hipdnnBackendCreateDescriptor(HIPDNN_INVALID_TYPE, &descriptor);
+    status = hipdnnBackendCreateDescriptor(HIPDNN_INVALID_TYPE_EXT, &descriptor);
     ASSERT_EQ(status, HIPDNN_STATUS_NOT_SUPPORTED);
 }
 
