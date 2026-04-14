@@ -115,6 +115,9 @@ if(BUILD_ADDRESS_SANITIZER)
   set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fsanitize=address -shared-libasan")
   set(CMAKE_C_LINK_EXECUTABLE "${CMAKE_C_LINK_EXECUTABLE} -fuse-ld=lld")
 
+  # Define a macro visible to both host and device compilation
+  add_compile_definitions(ROCSPARSE_WITH_ASAN)
+
   # Fortran not supported, add_link_options below invalid for fortran linking
   set(BUILD_FORTRAN_CLIENTS OFF)
 endif()
