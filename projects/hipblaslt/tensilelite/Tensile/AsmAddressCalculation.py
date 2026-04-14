@@ -24,10 +24,10 @@ from rocisa.code import Module
 from rocisa.container import EXEC, VCC, vgpr, sgpr
 from rocisa.instruction import MacroInstruction, SAddCU32, SAddU32, SAndB32, \
     SAndB64, SLShiftLeftB32, SMovB32, SMovB64, SMulI32, SSubBU32, SSubU32, \
-    VAddCCOU32, VAddCOU32, VAddI32, VAddLShiftLeftU32, VAddU32, VAndB32, VBfiB32, \
+    VAddCCOU32, VAddCOU32, VAddI32, VAddU32, VAndB32, VBfiB32, \
     VCmpEQU32, VCmpGtU32, VCmpLtU32, VCmpXNeU32, VCndMaskB32, VLShiftLeftB32, \
     VMadI32I24, VMovB32, VMulLOU32, VSubI32, VSubU32
-
+from rocisa.functions import vectorAddMultiplyBpe, vectorMultiply64Bpe
 from .Common import INDEX_CHARS, DataDirection, log2
 
 ##############################################################################
@@ -200,7 +200,11 @@ class AddrCalculation:
             idxChar= INDEX_CHARS[idx]
             module.addComment0("extract %s"%kw.sizeRef(idx))
             assert(tmpVgpr+1 != packedBits) # bad since we still need packedBits below for remainder (can't overwrite here)
-            module.add(MacroInstruction("V_MAGIC_DIV", \
+            if kw.states.asmCaps["HasVgprMSB"]:
+                module.add(VMagicDiv(kernel["MagicDivAlg"], tmpVgpr+1, vgpr(packedBits), sgpr("MagicNumberSize%s"%idxChar), \
+                           sgpr("MagicShiftSize%s"%idxChar), sgpr("MagicAbitSize%s"%idxChar)))
+            else:
+                module.add(MacroInstruction("V_MAGIC_DIV", \
                            args=[tmpVgpr+1, vgpr(packedBits), sgpr("MagicNumberSize%s"%idxChar), \
                            sgpr("MagicShiftSize%s"%idxChar), sgpr("MagicAbitSize%s"%idxChar) if kernel["MagicDivAlg"]==2 else "0"]))
             # tmpVgpr+1 returns the quotient, tmpVgpr+2 is overwritten
@@ -235,11 +239,8 @@ class AddrCalculation:
             module.add(VAddU32(dst=vgpr(addrVgpr), src0=vgpr(addrVgpr), \
                       src1=vgpr(tmpVgpr+2), comment="addrCalc += scaled extracted dim "))
 
-            module.add(VAddLShiftLeftU32(dst=vgpr(addrVgpr), \
-                      src0=vgpr(rowPtr), \
-                      src1=vgpr(addrVgpr), \
-                      shiftHex=hex(log2(bpe)), \
-                      comment="packed: add rowPtr and scaleToBpe"))
+            module.add(vectorAddMultiplyBpe(addrVgpr, rowPtr, addrVgpr, bpe, \
+                        comment="packed: add rowPtr and scaleToBpe"))
 
         return module
 
@@ -359,11 +360,8 @@ class AddrCalculation:
                         ss.singleColTDAddrUpdated    = True
                     else:
                         ss.singleColDAddrUpdated    = True
-                    module.add(VAddLShiftLeftU32(dst=vgpr(addrVgpr), \
-                      src0=vgpr(rowPtr), \
-                      src1=vgpr(elementVgpr), \
-                      shiftHex=hex(log2(bpe)), \
-                      comment="optSingleColVgpr scaleToBpe: sharedAddrVgpr <- cinRowPtr + coord0, scaled by BPE. BSHERE:coord0=%d, coord0Vgpr=%d"%(kw.vgprs.coord0, self.coord0Vgpr)))
+                    module.add(vectorAddMultiplyBpe(addrVgpr, rowPtr, elementVgpr, bpe, \
+                        comment="optSingleColVgpr scaleToBpe: sharedAddrVgpr <- cinRowPtr + coord0, scaled by BPE. BSHERE:coord0=%d, coord0Vgpr=%d"%(kw.vgprs.coord0, self.coord0Vgpr)))
         elif ss.optSharedColVgpr:
             # Need an address calculation for the first address in each row:
             if d1==0 and vc1==0:
@@ -430,11 +428,8 @@ class AddrCalculation:
                     module.add(self.emitExtractAndScalePackedDims(kernel, ss, tmpVgpr, tc))
                 else:
                     updatedAddr = True
-                    module.add(VAddLShiftLeftU32(dst=vgpr(addrVgpr), \
-                      src0=vgpr(rowPtr), \
-                      src1=vgpr(elementVgpr), \
-                      shiftHex=hex(log2(bpe)), \
-                      comment="optSharedColVgpr scaleToBpe for first row: col addr <- cinRowPtr + coord0, scaled by BPE"))
+                    module.add(vectorAddMultiplyBpe(addrVgpr, rowPtr, elementVgpr, bpe,
+                                comment="optSharedColVgpr scaleToBpe for first row: col addr <- cinRowPtr + coord0, scaled by BPE"))
         else:
             # Generate final address calculation (to bytes) for each element
             # The unpacking takes 8-10 instructions so could be worth optimizing someday :
@@ -503,21 +498,15 @@ class AddrCalculation:
                 module.add(self.emitExtractAndScalePackedDims(kernel, ss, tmpVgpr, tc))
             else:
                 updatedAddr = True
-                module.add(VAddLShiftLeftU32(dst=vgpr(addrVgpr), \
-                    src0=vgpr(rowPtr), \
-                    src1=vgpr(elementVgpr), \
-                    shiftHex=hex(log2(bpe)), \
-                    comment="scaleToBpe: accumulate d0 lower and *= bpe into Cin addr"))
+                module.add(vectorAddMultiplyBpe(addrVgpr, rowPtr, elementVgpr, bpe, \
+                            comment="scaleToBpe: accumulate d0 lower and *= bpe into Cin addr"))
 
         # if not optSrdIncForRow then we may have moved the row pointer
         # and depending on paths above may not have refreshed addrVgpr already.
         # if so - do it here:
         if self.rowIncDirtyRowPtr and not updatedAddr:
-            module.add(VAddLShiftLeftU32(dst=vgpr(addrVgpr), \
-              src0=vgpr(rowPtr), \
-              src1=vgpr(kw.vgprs.coord0), \
-              shiftHex=hex(log2(bpe)), \
-              comment="scaleToBpe: Update address with new rowPtr"))
+            module.add(vectorAddMultiplyBpe(addrVgpr, rowPtr, kw.vgprs.coord0, bpe, \
+                        comment="scaleToBpe: Update address with new rowPtr"))
 
         return module
 
@@ -595,7 +584,11 @@ class AddrCalculation:
                 else: # just a group index
                     params.append("sgprWorkGroup%u"%i)
             params.append("%s" % (tmpVgpr+2))
-            module.add(MacroInstruction(name="GLOBAL_OFFSET_C", args=params))
+            if kw.states.asmCaps["HasVgprMSB"]:
+                module.add(kw.globalOffset(kernel, None, "C", params))
+            else:
+                module.add(MacroInstruction(name="GLOBAL_OFFSET_C", args=params))
+            module.add(vectorMultiply64Bpe(addrVgpr, addrVgpr, tPB["bpeGR"]))
             module.add(VMovB32(dst=vgpr(tmpVgpr+2), src=vgpr(addrVgpr+0), comment="temp store offset 0"))
             module.add(VMovB32(dst=vgpr(tmpVgpr+3), src=vgpr(addrVgpr+1), comment="temp store offset 1"))
 

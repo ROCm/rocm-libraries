@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright 2019-2025 Advanced Micro Devices, Inc.
+# Copyright 2019-2026 Advanced Micro Devices, Inc.
 # ########################################################################
 
 cmake_minimum_required(VERSION 3.18 FATAL_ERROR)
@@ -80,7 +80,8 @@ include(CheckCXXCompilerFlag)
 if(BUILD_OFFLOAD_COMPRESS)
   check_cxx_compiler_flag("--offload-compress -x hip" CXX_COMPILER_SUPPORTS_OFFLOAD_COMPRESS)
   if(CXX_COMPILER_SUPPORTS_OFFLOAD_COMPRESS)
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} --offload-compress")
+    # Some test will raise an unused-command-line-argument warning while building when they have no kernel code.
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} --offload-compress -Wno-unused-command-line-argument")
   else()
     message(STATUS "Warning: BUILD_OFFLOAD_COMPRESS=ON but flag not supported by compiler. Ignoring option.")
   endif()

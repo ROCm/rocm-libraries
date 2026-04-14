@@ -667,6 +667,34 @@ namespace rocisa
         }
     };
 
+    struct SSubU64 : public CommonInstruction
+    {
+        SSubU64(const std::shared_ptr<Container>& dst,
+                const InstructionInput&           src0,
+                const InstructionInput&           src1,
+                const std::string&                comment = "")
+            : CommonInstruction(InstType::INST_B64,
+                                dst,
+                                {src0, src1},
+                                std::nullopt,
+                                std::nullopt,
+                                std::nullopt,
+                                comment)
+        {
+            setInst("s_sub_u64");
+        }
+
+        SSubU64(const SSubU64& other)
+            : CommonInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<SSubU64>(*this);
+        }
+    };
+
     struct SGetPCB64 : public CommonInstruction
     {
         SGetPCB64(const std::shared_ptr<Container>& dst, const std::string& comment = "")
@@ -1392,11 +1420,52 @@ namespace rocisa
 
         std::string toString() const override
         {
+            std::string kStr;
+            setMsb(kStr, {}, nullptr);
             return formatWithComment(instStr + " " + std::to_string(waitState));
         }
 
     private:
         int waitState;
+    };
+
+    struct VNop : public Instruction
+    {
+        VNop(int count, const std::string& comment = "")
+            : Instruction(InstType::INST_NOTYPE, comment)
+            , count(count)
+        {
+            setInst("v_nop");
+        }
+
+        VNop(const VNop& other)
+            : Instruction(other)
+            , count(other.count)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<VNop>(*this);
+        }
+
+        std::vector<InstructionInput> getParams() const override
+        {
+            return {count};
+        }
+
+        std::string toString() const override
+        {
+            std::string resultStr = "";
+            for (int i = 0; i < count; i++)
+            {
+                resultStr += formatWithComment(instStr);
+            }
+            return resultStr;
+        }
+
+    private:
+        int count;
     };
 
     struct SEndpgm : public Instruction
@@ -1455,6 +1524,48 @@ namespace rocisa
 
         std::string toString() const override
         {
+            return formatWithComment(instStr + " " + std::to_string(simm16));
+        }
+
+    private:
+        int simm16;
+    };
+
+    struct SSetVgprMsb : public Instruction
+    {
+        SSetVgprMsb(const int simm16, const std::string& comment = "")
+            : Instruction(InstType::INST_NOTYPE, comment)
+            , simm16(simm16)
+        {
+            setInst("s_set_vgpr_msb");
+        }
+
+        SSetVgprMsb(const int msbSrc0, const int msbSrc1, const int msbSrc2, const int msbDst, const std::string& comment = "")
+            : Instruction(InstType::INST_NOTYPE, comment)
+            , simm16( (msbDst << 6) + (msbSrc2 << 4) + (msbSrc1 << 2) + msbSrc0 )
+        {
+            setInst("s_set_vgpr_msb");
+        }
+
+        SSetVgprMsb(const SSetVgprMsb& other)
+            : Instruction(other)
+            , simm16(other.simm16)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<SSetVgprMsb>(*this);
+        }
+
+        std::vector<InstructionInput> getParams() const override
+        {
+            return {simm16};
+        }
+
+        std::string toString() const override
+        {
+            rocIsa::getInstance().setVgprMsb(simm16);
             return formatWithComment(instStr + " " + std::to_string(simm16));
         }
 
@@ -1643,6 +1754,8 @@ namespace rocisa
 
         std::string toString() const override
         {
+            std::string kStr;
+            setMsb(kStr, {}, nullptr);
             int maxStorecnt = getAsmCaps()["MaxStorecnt"];
             return formatWithComment("s_wait_storecnt " + std::to_string(std::min(storecnt, maxStorecnt)));
         }
@@ -1677,6 +1790,8 @@ namespace rocisa
 
         std::string toString() const override
         {
+            std::string kStr;
+            setMsb(kStr, {}, nullptr);
             int maxLoadcnt = getAsmCaps()["MaxLoadcnt"];
             return formatWithComment("s_wait_loadcnt " + std::to_string(std::min(loadcnt, maxLoadcnt)));
         }
@@ -1711,6 +1826,8 @@ namespace rocisa
 
         std::string toString() const override
         {
+            std::string kStr;
+            setMsb(kStr, {}, nullptr);
             int maxKmcnt = getAsmCaps()["MaxKmcnt"];
             return formatWithComment("s_wait_kmcnt " + std::to_string(std::min(kmcnt, maxKmcnt)));
         }
@@ -1745,6 +1862,8 @@ namespace rocisa
 
         std::string toString() const override
         {
+            std::string kStr;
+            setMsb(kStr, {}, nullptr);
             int maxDscnt = getAsmCaps()["MaxDscnt"];
             return formatWithComment("s_wait_dscnt " + std::to_string(std::min(dscnt, maxDscnt)));
         }
@@ -1882,6 +2001,39 @@ namespace rocisa
 
     private:
         bool waitAll;
+    };
+
+    struct SWaitTensorcnt : public Instruction
+    {
+        SWaitTensorcnt(int tensorcnt = 0, const std::string& comment = "")
+            : Instruction(InstType::INST_NOTYPE, comment)
+            , tensorcnt(tensorcnt)
+        {
+        }
+
+        SWaitTensorcnt(const SWaitTensorcnt& other)
+            : Instruction(other)
+            , tensorcnt(other.tensorcnt)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<SWaitTensorcnt>(*this);
+        }
+
+        std::vector<InstructionInput> getParams() const override
+        {
+            return {tensorcnt};
+        }
+
+        std::string toString() const override
+        {
+            return formatWithComment("s_wait_tensorcnt " + std::to_string(tensorcnt));
+        }
+
+    private:
+        int tensorcnt;
     };
 
     /*

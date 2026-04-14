@@ -1,0 +1,23 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
+namespace hipdnn_flatbuffers_sdk.data_objects;
+
+enum DataType : byte {
+    UNSET = 0,
+    FLOAT = 1,
+    HALF = 2,
+    BFLOAT16 = 3,
+    DOUBLE = 4,
+    UINT8 = 5,
+    INT32 = 6,
+    INT8 = 7,
+    FP8_E4M3 = 8,
+    FP8_E5M2 = 9,
+    FP8_E8M0 = 10,
+    FP4_E2M1 = 11,
+    FP6_E2M3 = 12,
+    FP6_E3M2 = 13,
+    INT4 = 14,
+    INT64 = 15,
+}

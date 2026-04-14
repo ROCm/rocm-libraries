@@ -27,7 +27,7 @@ void BlockScaleDequantizeOperationDescriptor::finalize()
                   HIPDNN_STATUS_BAD_PARAM,
                   "BlockScaleDequantizeOperationDescriptor::finalize() failed: block_size not set");
     THROW_IF_TRUE(
-        _computeDataType == hipdnn_data_sdk::data_objects::DataType::UNSET,
+        _computeDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET,
         HIPDNN_STATUS_BAD_PARAM,
         "BlockScaleDequantizeOperationDescriptor::finalize() failed: compute data type not "
         "set");
@@ -216,14 +216,15 @@ std::vector<std::shared_ptr<TensorDescriptor>>
     return {_xDesc, _scaleDesc, _yDesc};
 }
 
-std::unique_ptr<hipdnn_data_sdk::data_objects::NodeT>
+std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::NodeT>
     BlockScaleDequantizeOperationDescriptor::buildNode() const
 {
-    auto node = std::make_unique<hipdnn_data_sdk::data_objects::NodeT>();
+    auto node = std::make_unique<hipdnn_flatbuffers_sdk::data_objects::NodeT>();
     node->name = _name;
     node->compute_data_type = _computeDataType;
 
-    node->attributes.Set(hipdnn_data_sdk::data_objects::BlockScaleDequantizeAttributesT(_data));
+    node->attributes.Set(
+        hipdnn_flatbuffers_sdk::data_objects::BlockScaleDequantizeAttributesT(_data));
     return node;
 }
 
@@ -243,14 +244,14 @@ std::string BlockScaleDequantizeOperationDescriptor::toString() const
     str += ", block_size=" + vecToString(_data.block_size);
     str += ", is_negative_scale=" + std::to_string(static_cast<int>(_data.is_negative_scale));
     str += ", compute_data_type=";
-    str += hipdnn_data_sdk::data_objects::EnumNameDataType(_computeDataType);
+    str += hipdnn_flatbuffers_sdk::data_objects::EnumNameDataType(_computeDataType);
     str += "}";
     return str;
 }
 
 std::shared_ptr<BlockScaleDequantizeOperationDescriptor>
     BlockScaleDequantizeOperationDescriptor::fromNode(
-        const hipdnn_data_sdk::data_objects::NodeT& nodeT,
+        const hipdnn_flatbuffers_sdk::data_objects::NodeT& nodeT,
         const std::unordered_map<int64_t, std::shared_ptr<TensorDescriptor>>& tensorMap)
 {
     const auto* attrs = nodeT.attributes.AsBlockScaleDequantizeAttributes();
