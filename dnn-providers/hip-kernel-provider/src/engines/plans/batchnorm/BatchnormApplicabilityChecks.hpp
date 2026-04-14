@@ -5,6 +5,7 @@
 
 #include "../ApplicabilityChecks.hpp"
 #include <array>
+#include <hipdnn_data_sdk/data_objects/batchnorm_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/batchnorm_inference_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/batchnorm_inference_attributes_variance_ext_generated.h>
 #include <hipdnn_data_sdk/data_objects/pointwise_attributes_generated.h>
@@ -72,6 +73,9 @@ public:
     void checkInferenceVarianceExtActivationTensorConfigSupported(
         const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributesVarianceExt& bnInfAttr,
         const hipdnn_data_sdk::data_objects::PointwiseAttributes& actAttr);
+
+    void checkFwdTrainingTensorConfigSupported(
+        const hipdnn_data_sdk::data_objects::BatchnormAttributes& bnAttr);
 };
 
 // --- Batchnorm Type Configuration ---

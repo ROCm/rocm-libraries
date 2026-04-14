@@ -3,7 +3,7 @@
 
 #include <gtest/gtest.h>
 
-#include "engines/plans/Batchnorm/BatchnormApplicabilityChecks.hpp"
+#include "engines/plans/batchnorm/BatchnormApplicabilityChecks.hpp"
 #include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
@@ -66,6 +66,19 @@ TEST(TestBatchnormValidator, ValidVarianceExtInferenceActiv)
     BatchnormValidator validator(graph.getTensorMap());
     EXPECT_NO_THROW(
         validator.checkInferenceVarianceExtActivationTensorConfigSupported(attr, activAttrs));
+}
+
+TEST(TestBatchnormValidator, ValidFwdTraining)
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph();
+    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                              builder.GetSize());
+
+    const auto& node = graph.getNode(0);
+    const auto& attr = *node.attributes_as_BatchnormAttributes();
+
+    BatchnormValidator validator(graph.getTensorMap());
+    EXPECT_NO_THROW(validator.checkFwdTrainingTensorConfigSupported(attr));
 }
 
 TEST(TestBatchnormValidator, MismatchShapes)

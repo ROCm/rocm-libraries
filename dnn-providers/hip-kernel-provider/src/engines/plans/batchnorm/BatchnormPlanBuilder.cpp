@@ -198,8 +198,8 @@ bool BatchnormPlanBuilder::isApplicable(
             switch(node.attributes_type())
             {
             case hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormAttributes:
-                checkBatchnormFwdTrainingTensorConfigSupported(
-                    *node.attributes_as_BatchnormAttributes(), opGraph.getTensorMap());
+                validator.checkFwdTrainingTensorConfigSupported(
+                    *node.attributes_as_BatchnormAttributes());
                 break;
             case hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes:
                 validator.checkInferenceTensorConfigSupported(
