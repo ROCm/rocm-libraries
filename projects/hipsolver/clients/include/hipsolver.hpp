@@ -9743,18 +9743,18 @@ inline hipsolverStatus_t hipsolver_sytrf(testAPI_t               API,
 
 /******************** SYEVBATCHED ********************/
 // bufferSize
-inline hipsolverStatus_t hipsolver_syevBatched_bufferSize(testAPI_t           API,
-                                                          hipsolverHandle_t   handle,
-                                                          hipsolverDnParams_t params,
-                                                          hipsolverEigMode_t  jobz,
-                                                          hipsolverFillMode_t uplo,
-                                                          int64_t             n,
-                                                          float*              A,
-                                                          int64_t             lda,
-                                                          float*              W,
-                                                          size_t*             lworkOnDevice,
-                                                          size_t*             lworkOnHost,
-                                                          int64_t             batchSize)
+inline hipsolverStatus_t hipsolver_syev_heev_bufferSize(testAPI_t           API,
+                                                        hipsolverHandle_t   handle,
+                                                        hipsolverDnParams_t params,
+                                                        hipsolverEigMode_t  jobz,
+                                                        hipsolverFillMode_t uplo,
+                                                        int64_t             n,
+                                                        float*              A,
+                                                        int64_t             lda,
+                                                        float*              W,
+                                                        size_t*             lworkOnDevice,
+                                                        size_t*             lworkOnHost,
+                                                        int64_t             batchSize)
 {
     switch(API)
     {
@@ -9780,18 +9780,18 @@ inline hipsolverStatus_t hipsolver_syevBatched_bufferSize(testAPI_t           AP
     }
 }
 
-inline hipsolverStatus_t hipsolver_syevBatched_bufferSize(testAPI_t           API,
-                                                          hipsolverHandle_t   handle,
-                                                          hipsolverDnParams_t params,
-                                                          hipsolverEigMode_t  jobz,
-                                                          hipsolverFillMode_t uplo,
-                                                          int64_t             n,
-                                                          double*             A,
-                                                          int64_t             lda,
-                                                          double*             W,
-                                                          size_t*             lworkOnDevice,
-                                                          size_t*             lworkOnHost,
-                                                          int64_t             batchSize)
+inline hipsolverStatus_t hipsolver_syev_heev_bufferSize(testAPI_t           API,
+                                                        hipsolverHandle_t   handle,
+                                                        hipsolverDnParams_t params,
+                                                        hipsolverEigMode_t  jobz,
+                                                        hipsolverFillMode_t uplo,
+                                                        int64_t             n,
+                                                        double*             A,
+                                                        int64_t             lda,
+                                                        double*             W,
+                                                        size_t*             lworkOnDevice,
+                                                        size_t*             lworkOnHost,
+                                                        int64_t             batchSize)
 {
     switch(API)
     {
@@ -9817,18 +9817,18 @@ inline hipsolverStatus_t hipsolver_syevBatched_bufferSize(testAPI_t           AP
     }
 }
 
-inline hipsolverStatus_t hipsolver_syevBatched_bufferSize(testAPI_t           API,
-                                                          hipsolverHandle_t   handle,
-                                                          hipsolverDnParams_t params,
-                                                          hipsolverEigMode_t  jobz,
-                                                          hipsolverFillMode_t uplo,
-                                                          int64_t             n,
-                                                          hipsolverComplex*   A,
-                                                          int64_t             lda,
-                                                          float*              W,
-                                                          size_t*             lworkOnDevice,
-                                                          size_t*             lworkOnHost,
-                                                          int64_t             batchSize)
+inline hipsolverStatus_t hipsolver_syev_heev_bufferSize(testAPI_t           API,
+                                                        hipsolverHandle_t   handle,
+                                                        hipsolverDnParams_t params,
+                                                        hipsolverEigMode_t  jobz,
+                                                        hipsolverFillMode_t uplo,
+                                                        int64_t             n,
+                                                        hipsolverComplex*   A,
+                                                        int64_t             lda,
+                                                        float*              W,
+                                                        size_t*             lworkOnDevice,
+                                                        size_t*             lworkOnHost,
+                                                        int64_t             batchSize)
 {
     switch(API)
     {
@@ -9854,18 +9854,18 @@ inline hipsolverStatus_t hipsolver_syevBatched_bufferSize(testAPI_t           AP
     }
 }
 
-inline hipsolverStatus_t hipsolver_syevBatched_bufferSize(testAPI_t               API,
-                                                          hipsolverHandle_t       handle,
-                                                          hipsolverDnParams_t     params,
-                                                          hipsolverEigMode_t      jobz,
-                                                          hipsolverFillMode_t     uplo,
-                                                          int64_t                 n,
-                                                          hipsolverDoubleComplex* A,
-                                                          int64_t                 lda,
-                                                          double*                 W,
-                                                          size_t*                 lworkOnDevice,
-                                                          size_t*                 lworkOnHost,
-                                                          int64_t                 batchSize)
+inline hipsolverStatus_t hipsolver_syev_heev_bufferSize(testAPI_t               API,
+                                                        hipsolverHandle_t       handle,
+                                                        hipsolverDnParams_t     params,
+                                                        hipsolverEigMode_t      jobz,
+                                                        hipsolverFillMode_t     uplo,
+                                                        int64_t                 n,
+                                                        hipsolverDoubleComplex* A,
+                                                        int64_t                 lda,
+                                                        double*                 W,
+                                                        size_t*                 lworkOnDevice,
+                                                        size_t*                 lworkOnHost,
+                                                        int64_t                 batchSize)
 {
     switch(API)
     {
@@ -9892,21 +9892,21 @@ inline hipsolverStatus_t hipsolver_syevBatched_bufferSize(testAPI_t             
 }
 
 // solve
-inline hipsolverStatus_t hipsolver_syevBatched(testAPI_t           API,
-                                               hipsolverHandle_t   handle,
-                                               hipsolverDnParams_t params,
-                                               hipsolverEigMode_t  jobz,
-                                               hipsolverFillMode_t uplo,
-                                               int64_t             n,
-                                               float*              A,
-                                               int64_t             lda,
-                                               float*              W,
-                                               float*              workOnDevice,
-                                               size_t              lworkOnDevice,
-                                               float*              workOnHost,
-                                               size_t              lworkOnHost,
-                                               int*                devInfo,
-                                               int64_t             batchSize)
+inline hipsolverStatus_t hipsolver_syev_heev(testAPI_t           API,
+                                             hipsolverHandle_t   handle,
+                                             hipsolverDnParams_t params,
+                                             hipsolverEigMode_t  jobz,
+                                             hipsolverFillMode_t uplo,
+                                             int64_t             n,
+                                             float*              A,
+                                             int64_t             lda,
+                                             float*              W,
+                                             float*              workOnDevice,
+                                             size_t              lworkOnDevice,
+                                             float*              workOnHost,
+                                             size_t              lworkOnHost,
+                                             int*                devInfo,
+                                             int64_t             batchSize)
 {
     switch(API)
     {
@@ -9933,21 +9933,21 @@ inline hipsolverStatus_t hipsolver_syevBatched(testAPI_t           API,
     }
 }
 
-inline hipsolverStatus_t hipsolver_syevBatched(testAPI_t           API,
-                                               hipsolverHandle_t   handle,
-                                               hipsolverDnParams_t params,
-                                               hipsolverEigMode_t  jobz,
-                                               hipsolverFillMode_t uplo,
-                                               int64_t             n,
-                                               double*             A,
-                                               int64_t             lda,
-                                               double*             W,
-                                               double*             workOnDevice,
-                                               size_t              lworkOnDevice,
-                                               double*             workOnHost,
-                                               size_t              lworkOnHost,
-                                               int*                devInfo,
-                                               int64_t             batchSize)
+inline hipsolverStatus_t hipsolver_syev_heev(testAPI_t           API,
+                                             hipsolverHandle_t   handle,
+                                             hipsolverDnParams_t params,
+                                             hipsolverEigMode_t  jobz,
+                                             hipsolverFillMode_t uplo,
+                                             int64_t             n,
+                                             double*             A,
+                                             int64_t             lda,
+                                             double*             W,
+                                             double*             workOnDevice,
+                                             size_t              lworkOnDevice,
+                                             double*             workOnHost,
+                                             size_t              lworkOnHost,
+                                             int*                devInfo,
+                                             int64_t             batchSize)
 {
     switch(API)
     {
@@ -9974,21 +9974,21 @@ inline hipsolverStatus_t hipsolver_syevBatched(testAPI_t           API,
     }
 }
 
-inline hipsolverStatus_t hipsolver_syevBatched(testAPI_t           API,
-                                               hipsolverHandle_t   handle,
-                                               hipsolverDnParams_t params,
-                                               hipsolverEigMode_t  jobz,
-                                               hipsolverFillMode_t uplo,
-                                               int64_t             n,
-                                               hipsolverComplex*   A,
-                                               int64_t             lda,
-                                               float*              W,
-                                               hipsolverComplex*   workOnDevice,
-                                               size_t              lworkOnDevice,
-                                               hipsolverComplex*   workOnHost,
-                                               size_t              lworkOnHost,
-                                               int*                devInfo,
-                                               int64_t             batchSize)
+inline hipsolverStatus_t hipsolver_syev_heev(testAPI_t           API,
+                                             hipsolverHandle_t   handle,
+                                             hipsolverDnParams_t params,
+                                             hipsolverEigMode_t  jobz,
+                                             hipsolverFillMode_t uplo,
+                                             int64_t             n,
+                                             hipsolverComplex*   A,
+                                             int64_t             lda,
+                                             float*              W,
+                                             hipsolverComplex*   workOnDevice,
+                                             size_t              lworkOnDevice,
+                                             hipsolverComplex*   workOnHost,
+                                             size_t              lworkOnHost,
+                                             int*                devInfo,
+                                             int64_t             batchSize)
 {
     switch(API)
     {
@@ -10015,21 +10015,21 @@ inline hipsolverStatus_t hipsolver_syevBatched(testAPI_t           API,
     }
 }
 
-inline hipsolverStatus_t hipsolver_syevBatched(testAPI_t               API,
-                                               hipsolverHandle_t       handle,
-                                               hipsolverDnParams_t     params,
-                                               hipsolverEigMode_t      jobz,
-                                               hipsolverFillMode_t     uplo,
-                                               int64_t                 n,
-                                               hipsolverDoubleComplex* A,
-                                               int64_t                 lda,
-                                               double*                 W,
-                                               hipsolverDoubleComplex* workOnDevice,
-                                               size_t                  lworkOnDevice,
-                                               hipsolverDoubleComplex* workOnHost,
-                                               size_t                  lworkOnHost,
-                                               int*                    devInfo,
-                                               int64_t                 batchSize)
+inline hipsolverStatus_t hipsolver_syev_heev(testAPI_t               API,
+                                             hipsolverHandle_t       handle,
+                                             hipsolverDnParams_t     params,
+                                             hipsolverEigMode_t      jobz,
+                                             hipsolverFillMode_t     uplo,
+                                             int64_t                 n,
+                                             hipsolverDoubleComplex* A,
+                                             int64_t                 lda,
+                                             double*                 W,
+                                             hipsolverDoubleComplex* workOnDevice,
+                                             size_t                  lworkOnDevice,
+                                             hipsolverDoubleComplex* workOnHost,
+                                             size_t                  lworkOnHost,
+                                             int*                    devInfo,
+                                             int64_t                 batchSize)
 {
     switch(API)
     {
