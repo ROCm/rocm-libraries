@@ -1112,6 +1112,9 @@ try
 
     if(workOnDevice && lworkOnDevice)
     {
+        if(lworkOnDevice < e_workspace_size)
+            return HIPSOLVER_STATUS_INVALID_VALUE;
+
         // User provided workspace: E at the beginning, rocSOLVER workspace after
         E_workspace                = workOnDevice;
         void*  rocsolver_work      = (char*)workOnDevice + e_workspace_size;
