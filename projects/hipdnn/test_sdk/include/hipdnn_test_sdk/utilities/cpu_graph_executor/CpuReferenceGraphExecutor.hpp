@@ -31,6 +31,7 @@ class CpuReferenceGraphExecutor
 public:
     CpuReferenceGraphExecutor() = default;
 
+    // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
     void execute(void* graphBuffer,
                  size_t size,
                  const std::unordered_map<int64_t, void*>& variantPack)

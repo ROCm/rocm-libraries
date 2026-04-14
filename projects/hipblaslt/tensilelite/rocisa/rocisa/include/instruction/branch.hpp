@@ -112,6 +112,25 @@ namespace rocisa
         }
     };
 
+    struct SAddPCI64_SIMM : public BranchInstruction
+    {
+        SAddPCI64_SIMM(const std::string& src, const std::string& comment = "")
+            : BranchInstruction(src, comment)
+        {
+            setInst("s_add_pc_i64");
+        }
+
+        SAddPCI64_SIMM(const SAddPCI64_SIMM& other)
+            : BranchInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<SAddPCI64_SIMM>(*this);
+        }
+    };
+
     struct SCBranchVCCNZ : public BranchInstruction
     {
         SCBranchVCCNZ(const std::string& labelName, const std::string& comment = "")
