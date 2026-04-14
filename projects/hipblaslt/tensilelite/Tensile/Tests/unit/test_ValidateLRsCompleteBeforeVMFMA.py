@@ -633,7 +633,9 @@ class TestValidateLRsCompleteBeforeVMFMA_ForceUnrollSubIter(CMSValidationTestBas
             Not including them here in order to test just the LR-VMFMA orderling logic.
     """
     def setup_method(self, method=None, *, kernel_updates: Optional[dict[str, Any]] = None):
-        super().setup_method(method, kernel_updates={"ForceUnrollSubIter": True, "MIWaveTileA": 4, "MIWaveTileB": 4, "DepthU": 32})
+        kernel_updates = kernel_updates.copy() if kernel_updates else {}
+        kernel_updates.update({"ForceUnrollSubIter": True, "MIWaveTileA": 4, "MIWaveTileB": 4, "DepthU": 32})
+        super().setup_method(method, kernel_updates=kernel_updates)
 
     validator_passes = [add_local_read_constraints]
 

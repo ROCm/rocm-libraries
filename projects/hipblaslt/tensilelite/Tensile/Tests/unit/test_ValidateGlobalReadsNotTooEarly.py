@@ -20,6 +20,7 @@
 # CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ################################################################################
 
+from typing import Any, Optional
 from Tensile.Components.CMSValidator import add_gr_not_too_early_constraints
 from rocisa.instruction import SBarrier, SWaitCnt
 from cms_validation_base import CMSValidationTestBase
@@ -726,9 +727,10 @@ class TestValidateGlobalReadsNotTooEarlyDtlPlusLdsBuf(CMSValidationTestBase):
     """
     validator_passes = [add_gr_not_too_early_constraints]
 
-    def setup_method(self, method=None):
-        super().setup_method(method)
-        self.kernel["DtlPlusLdsBuf"] = True
+    def setup_method(self, method=None, *, kernel_updates: Optional[dict[str, Any]] = None):
+        kernel_updates = kernel_updates.copy() if kernel_updates else {}
+        kernel_updates.update({"DtlPlusLdsBuf": True})
+        super().setup_method(method, kernel_updates=kernel_updates)
 
     def test_basic(self):
         """
