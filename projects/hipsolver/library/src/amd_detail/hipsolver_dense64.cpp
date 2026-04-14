@@ -1061,7 +1061,6 @@ try
     else
     {
         // No user workspace: query required size, use managed workspace for rocSOLVER, device_malloc for E
-        size_t lwork_device, lwork_host;
         CHECK_HIPSOLVER_ERROR(hipsolverDnXsyevBatched_bufferSize(handle,
                                                                  params,
                                                                  jobz,
@@ -1073,11 +1072,11 @@ try
                                                                  dataTypeW,
                                                                  W,
                                                                  computeType,
-                                                                 &lwork_device,
-                                                                 &lwork_host,
+                                                                 &lworkOnDevice,
+                                                                 &lworkOnHost,
                                                                  batchSize));
 
-        CHECK_ROCBLAS_ERROR(hipsolverManageWorkspace((rocblas_handle)handle, lwork_device));
+        CHECK_ROCBLAS_ERROR(hipsolverManageWorkspace((rocblas_handle)handle, lworkOnDevice));
 
         mem = rocblas_device_malloc((rocblas_handle)handle, e_workspace_size);
         if(!mem)
