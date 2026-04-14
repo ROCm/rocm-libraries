@@ -253,6 +253,7 @@ static auto getdevcount()
 // 2D and 3D transforms single-batch multi-gpu FFTs are handled differently than 1D transforms.
 static std::vector<size_t> multidims = {2, 3};
 
+// Parameters are real/complex, direction, format, dimension, and number of GPUs.
 class hipfftxtunitdesc : public ::testing::TestWithParam<std::tuple<bool, int, hipfftXtSubFormat, size_t, int>>
 {};
 
@@ -906,350 +907,130 @@ INSTANTIATE_TEST_SUITE_P(hipfftxttest, hipfftxtunitdesc,
     );
 
 
-// FIXME: generalize
-// Params are direction, format, and batch size.
-class hipfftxtdirectionformat : public ::testing::TestWithParam<std::tuple<int, hipfftXtSubFormat, int>>
-{};
-
-TEST_P(hipfftxtdirectionformat, c2cinplace)
+// FIXME: TEST_P this thing.
+TEST(hipfftxtdirectionformat, formatsok)
 {
-    size_t    ngpus = 2;
-    const int Nx    = 1024;
-    const int Ny    = 1024;
-
-    auto hipfft_rt = HIPFFT_SUCCESS;
-
-    const auto direction = std::get<0>(GetParam());
-    const hipfftXtSubFormat informat = std::get<1>(GetParam());
-    const auto batch = std::get<2>(GetParam());
-    
-    const hipfftXtSubFormat outformat
-        = informat == HIPFFT_XT_FORMAT_INPLACE
-        ? HIPFFT_XT_FORMAT_INPLACE_SHUFFLED
-        : HIPFFT_XT_FORMAT_INPLACE;
-
-    if(verbose > 0)
-    {
-        std::cout << "complex-to-complex direction: " << directionname(direction)
-                  << " input format: " << format_name(informat)
-                  << " output format: " << format_name(outformat)
-                  << "\n";
-    }
-    
-    hipfftHandle plan;
-    hipfft_rt =   hipfftCreate(&plan);
-    EXPECT_EQ(hipfft_rt, HIPFFT_SUCCESS);
-
-    // FIXME: deal with not having enough GPUs.
+    size_t    ngpus = getdevcount();
+#ifdef __HIP_PLATFORM_NVIDIA__
+    if(ngpus == 1)
+        GTEST_SKIP() << "Need at least 2 gpus for this test";
+#endif
     std::vector<int> gpus(ngpus);
     std::iota(gpus.begin(), gpus.end(), 0);
-    hipfft_rt = hipfftXtSetGPUs(plan, gpus.size(), gpus.data());
-    EXPECT_EQ(hipfft_rt, HIPFFT_SUCCESS);
-
-    std::vector<size_t> workSize(ngpus);
-    hipfft_rt = hipfftMakePlan2d(plan, Nx, Ny, HIPFFT_Z2Z, workSize.data());
-    ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS)<< "hipfftMakePlan2d failed with code "
-                                         << hipfft_rt
-                                         << " (" << hipfftResult_string(hipfft_rt) << ")";
-    
-    hipLibXtDesc*       inoutdesc = nullptr;
-    hipfft_rt                     = hipfftXtMalloc(plan, &inoutdesc, informat);
-    ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS) << "hipfftXtMalloc failed with code "
-                                         << hipfft_rt
-                                         << " (" << hipfftResult_string(hipfft_rt) << ")";
-    
-    std::vector<std::complex<double>> input(Nx * Ny);
-    for(size_t xidx = 0; xidx < Nx; ++xidx)
-    {
-        for(size_t yidx = 0; yidx < Ny; ++yidx)
-        {
-            input[xidx * Ny + yidx] = std::complex<double>(xidx,yidx);
-        }
-    }
-    
-    hipfft_rt = hipfftXtMemcpy(plan,
-                               reinterpret_cast<void*>(inoutdesc),
-                               reinterpret_cast<void*>(input.data()),
-                               HIPFFT_COPY_HOST_TO_DEVICE);
-    ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS) << "hipfftXtMemcpy pre-exec failed with code "
-                                         << hipfft_rt
-                                         << " (" << hipfftResult_string(hipfft_rt) << ")";
-    
-    EXPECT_EQ(inoutdesc->subFormat, informat);
-
-    hipfft_rt = hipfftXtExecDescriptor(plan, inoutdesc, inoutdesc, direction);
-    ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS) << "hipfftXtExecDescriptor failed with code "
-                                         << hipfft_rt
-                                         << " (" << hipfftResult_string(hipfft_rt) << ")";
-
-    EXPECT_EQ(inoutdesc->subFormat, outformat) << "descriptor subformat is "
-                                               << inoutdesc->subFormat
-                                               << " (" << format_name(inoutdesc->subFormat) << ")"
-                                               << " but we expected " << outformat
-                                               << " (" << format_name(outformat) << ")";
-    
-    std::vector<std::complex<double>> output(Nx * Ny);
-
-    // FIXME: re-enable
-    hipfft_rt = hipfftXtMemcpy(plan,
-                               reinterpret_cast<void*>(output.data()),
-                               reinterpret_cast<void*>(inoutdesc),
-                               HIPFFT_COPY_DEVICE_TO_HOST);
-    EXPECT_EQ(hipfft_rt, HIPFFT_SUCCESS) << "hipfftXtMemcpy post-exec failed with code "
-                                         << hipfft_rt
-                                         << " (" << hipfftResult_string(hipfft_rt) << ")";
-    
-    hipfft_rt = hipfftXtFree(inoutdesc);
-    EXPECT_EQ(hipfft_rt, HIPFFT_SUCCESS);
-
-    hipfft_rt = hipfftDestroy(plan);
-    EXPECT_EQ(hipfft_rt, HIPFFT_SUCCESS);
-}
-
-INSTANTIATE_TEST_SUITE_P(
-    hipfftxttest,
-    hipfftxtdirectionformat,
-    ::testing::Combine(
-        ::testing::Values(HIPFFT_FORWARD, HIPFFT_BACKWARD),
-        ::testing::Values(HIPFFT_XT_FORMAT_INPLACE,
-                          HIPFFT_XT_FORMAT_INPLACE_SHUFFLED),
-        ::testing::Values(1) // We only cover batch=1 for now.
-        ),
-    [](const testing::TestParamInfo<hipfftxtdirectionformat::ParamType>& info) {
-        const int direction = std::get<0>(info.param);
-        const hipfftXtSubFormat informat = std::get<1>(info.param);
-        std::string name = direction == HIPFFT_FORWARD ? "forward" : "backward";
-        name += informat == HIPFFT_XT_FORMAT_INPLACE ? "inplace" : "shuffled";
-        name += "batch" + std::to_string(std::get<2>(info.param));
-        return name;
-    }
-    );
-
-TEST_P(hipfftxtdirectionformat, r2cinplace)
-{
-    int ngpus = 2;
-
-    int count = 0;
-    ASSERT_EQ(hipGetDeviceCount(&count), hipSuccess) << "hipGetDeviceCount failed";
-    if(count < ngpus)
-    {
-        // We actually use separate GPUs, so skip if we don't have enough GPUs.
-        GTEST_SKIP() << "not enough GPUs";
-    }
     
     const int Nx    = 32;
     const int Ny    = 32;
-    
-    const int Nyp = Ny / 2 + 1;
-    const int Nypp = 2 * Nyp;
-    
+
     auto hipfft_rt = HIPFFT_SUCCESS;
-    
-    const int direction = std::get<0>(GetParam());
-    const hipfftXtSubFormat informat = std::get<1>(GetParam());
-    const int batch = std::get<2>(GetParam());
 
-    // Skip the unhappy paths
-    if(direction == HIPFFT_FORWARD && batch == 1 && informat != HIPFFT_XT_FORMAT_INPLACE)
+    for(const auto realcomplex : {true, false})
     {
-        GTEST_SKIP();
-    }
-    if(direction == HIPFFT_BACKWARD && batch == 1 && informat != HIPFFT_XT_FORMAT_INPLACE_SHUFFLED)
-    {
-        GTEST_SKIP();
-    }
-    if(direction == HIPFFT_FORWARD && batch > 1 && informat != HIPFFT_XT_FORMAT_INPLACE)
-    {
-        GTEST_SKIP();
-    }
-    if(direction == HIPFFT_BACKWARD && batch > 1 && informat != HIPFFT_XT_FORMAT_INPLACE_SHUFFLED)
-    {
-        GTEST_SKIP();
-    }
-    if(batch > 1)
-    {
-        // Running multi-batch transforms seems to lead to failures in subsequent tests for the cuda
-        // back-end.
-        GTEST_SKIP();
-    }
-    
-    hipfftXtSubFormat outformat;
-    if(batch == 1)
-    {
-        outformat = informat == HIPFFT_XT_FORMAT_INPLACE
-            ? HIPFFT_XT_FORMAT_INPLACE_SHUFFLED
-            : HIPFFT_XT_FORMAT_INPLACE;
-    }
-    else
-    {
-        outformat = informat;
-    }
-
-    const hipfftType transform_type  = (direction == HIPFFT_FORWARD) ? HIPFFT_D2Z : HIPFFT_Z2D;
-    
-    std::vector<int> gpus(ngpus);
-    std::iota(gpus.begin(), gpus.end(), 0);
-    
-    if(verbose > 0)
-    {
-        std::cout << "hipfftxt format change test\n";
-        std::cout << "\tNx: " << Nx << "\n";
-        std::cout << "\tNy: " << Ny << "\n";
-        std::cout << "\tngpus: " << ngpus << "\n";
-        std::cout << "\tgpus:";
-        for(const auto igpu: gpus)
-            std::cout << " " << igpu;
-        std::cout << "\n";
-        std::cout << "\ttransform_type: " << transform_type << " : "
-                  << hipffttype_to_name(transform_type) << "\n";
-        std::cout << "\tdirection: " << direction << " : " << directionname(direction)
-                  << "\n\tinput subformat: " << informat << " : " << format_name(informat)
-                  << "\n\toutput subformat: " << outformat << " : " << format_name(outformat)
-                  << "\n";
-    }
-    
-    hipfftHandle plan;
-    hipfft_rt =   hipfftCreate(&plan);
-    ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS);
-
-    if(verbose > 1)
-    {
-        std::cout << "direction: " << directionname(direction)
-                  << " informat: " << format_name(informat)
-                  << " batch: " << batch << "\n";
-    }
-
-    hipfft_rt = hipfftXtSetGPUs(plan, gpus.size(), gpus.data());
-    ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS) << "hipfftXtSetGPUs failed";
-        
-    std::vector<size_t> workSize(ngpus);
-
-    if(batch > 1)
-    {
-        int rank = 2;
-        int n[2] = {Nx, Ny};
-    
-        int n1_complex_elements      = n[1] / 2 + 1;
-        int n1_padding_real_elements = n1_complex_elements * 2;
-
-        int istride    = 1;
-        int ostride    = istride;
-        int inembed[2] = {n[0],
-                          direction == HIPFFT_FORWARD
-                          ? n1_padding_real_elements
-                          : n1_complex_elements};
-        int onembed[2] = {n[0],
-                          direction == HIPFFT_FORWARD
-                          ? n1_complex_elements
-                          : n1_padding_real_elements}; 
-        int idist      = istride * inembed[0] * inembed[1];
-        int odist      = ostride * onembed[0] * onembed[1];
-
-        // NB: it seems that cufftxt will treat the batch=1 hipfftPlanMany case as batched, so the
-        // data decomposition is trivial if one calls hipfftPlanMany (even if batch=1).
-        hipfft_rt = hipfftPlanMany(&plan,
-                                   rank,
-                                   n,
-                                   inembed,
-                                   istride,
-                                   idist,
-                                   onembed,
-                                   ostride,
-                                   odist,
-                                   transform_type,
-                                   batch);
-        ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS) << "hipfftPlanMany failed with return code "
-                                             << hipfft_rt << "=" << hipfftResult_string(hipfft_rt);
-    }
-    else
-    {
-        hipfft_rt = hipfftMakePlan2d(plan, Nx, Ny,
-                                     transform_type,
-                                     workSize.data());
-        ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS) << "hipfftMakePlan2d failed with return code "
-                                             << hipfft_rt << "=" << hipfftResult_string(hipfft_rt);
-    }
-
-    hipLibXtDesc*       inoutdesc = nullptr;
-    hipfft_rt                     = hipfftXtMalloc(plan, &inoutdesc, informat);
-    EXPECT_EQ(hipfft_rt, HIPFFT_SUCCESS) << "hipfftXtMalloc failed";
-
-    std::vector<double> real(Nx * Nypp);
-    std::vector<std::complex<double>> complex(Nx * Nyp);
-
-    if(direction == HIPFFT_FORWARD)
-    {
-        for(size_t xidx = 0; xidx < Nx; ++xidx)
+        for(const auto direction : {HIPFFT_FORWARD, HIPFFT_BACKWARD})
         {
-            for(size_t yidx = 0; yidx < Ny; ++yidx)
+            for(const auto format : {HIPFFT_XT_FORMAT_INPUT, HIPFFT_XT_FORMAT_OUTPUT,
+                                     HIPFFT_XT_FORMAT_INPLACE,
+                        HIPFFT_XT_FORMAT_INPLACE_SHUFFLED, HIPFFT_XT_FORMAT_1D_INPUT_SHUFFLED,
+                        HIPFFT_FORMAT_UNDEFINED})
             {
-                const size_t pos = xidx * Nypp + yidx;
-                const size_t idx = xidx * Ny + yidx;
-                real[pos] = idx;
+                // FIXME: temp
+                std::cout << (realcomplex ? "rc" : "cc")
+                          << " " << directionname(direction)
+                          << " " << format_name(format) << "\n";
+                              
+                auto good_rdfs = all_directionformat();
+                bool goodcase = false;
+                for(const auto &val  : good_rdfs)
+                {
+                    if(realcomplex == std::get<0>(val)
+                       && std::get<1>(val).direction == direction
+                       && std::get<1>(val).format == format)
+                    {
+                        goodcase = true;
+                        break;
+                    }
+                }
+                
+                hipfftHandle plan;
+                hipfft_rt =   hipfftCreate(&plan);
+                EXPECT_EQ(hipfft_rt, HIPFFT_SUCCESS);
+
+                hipfft_rt = hipfftXtSetGPUs(plan, gpus.size(), gpus.data());
+                EXPECT_EQ(hipfft_rt, HIPFFT_SUCCESS);
+            
+                const auto ffttype
+                    = realcomplex ? (direction == HIPFFT_FORWARD ? HIPFFT_D2Z: HIPFFT_Z2D) : HIPFFT_Z2Z;
+                std::vector<size_t> workSize(ngpus);
+                hipfft_rt = hipfftMakePlan2d(plan, Nx, Ny, ffttype, workSize.data());
+                ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS);
+
+                hipLibXtDesc*       indesc = nullptr;
+                hipfft_rt                     = hipfftXtMalloc(plan, &indesc, format);
+
+                if(goodcase)
+                {
+                    EXPECT_EQ(hipfft_rt, HIPFFT_SUCCESS) << "hipfftXtMalloc failed with code "
+                                                         << hipfft_rt
+                                                         << " (" << hipfftResult_string(hipfft_rt) << ")";
+                }
+                else
+                {
+                    EXPECT_NE(hipfft_rt, HIPFFT_SUCCESS) << "hipfftXtMalloc failed with code "
+                                                         << hipfft_rt
+                                                         << " (" << hipfftResult_string(hipfft_rt) << ")";
+                }
+
+                const bool inplace = (format == HIPFFT_XT_FORMAT_INPLACE)
+                    || (format == HIPFFT_XT_FORMAT_INPLACE_SHUFFLED);
+                if(!inplace)
+                {
+                    hipfftXtSubFormat outformat;
+                    switch(format)
+                    {
+                    case HIPFFT_XT_FORMAT_INPUT:
+                        outformat =  HIPFFT_XT_FORMAT_OUTPUT;
+                        break;
+                    case HIPFFT_XT_FORMAT_OUTPUT:
+                        outformat =  HIPFFT_XT_FORMAT_INPUT;
+                        break;
+                    case HIPFFT_XT_FORMAT_1D_INPUT_SHUFFLED:
+                        outformat =  HIPFFT_XT_FORMAT_1D_INPUT_SHUFFLED;
+                        break;
+                    case HIPFFT_FORMAT_UNDEFINED:
+                        outformat =  HIPFFT_FORMAT_UNDEFINED;
+                        break;
+                    case HIPFFT_XT_FORMAT_INPLACE:
+                    case HIPFFT_XT_FORMAT_INPLACE_SHUFFLED:
+                    default:
+                        throw std::runtime_error("Input format is not actually an out-of-place format");
+                    }
+                    hipLibXtDesc*       outdesc = nullptr;
+                    hipfft_rt                     = hipfftXtMalloc(plan, &indesc, outformat);
+                    if(goodcase)
+                    {
+                        EXPECT_EQ(hipfft_rt, HIPFFT_SUCCESS) << "hipfftXtMalloc failed with code "
+                                                             << hipfft_rt
+                                                             << " (" << hipfftResult_string(hipfft_rt)
+                                                             << ")";
+                    }
+                    else
+                    {
+                        EXPECT_NE(hipfft_rt, HIPFFT_SUCCESS) << "hipfftXtMalloc failed with code "
+                                                             << hipfft_rt
+                                                             << " (" << hipfftResult_string(hipfft_rt)
+                                                             << ")";
+                    }
+
+                    hipfft_rt = hipfftXtFree(outdesc);
+                    EXPECT_EQ(hipfft_rt, HIPFFT_SUCCESS);
+                    
+                }
+
+                hipfft_rt = hipfftXtFree(indesc);
+                EXPECT_EQ(hipfft_rt, HIPFFT_SUCCESS);
+                            
+                hipfft_rt = hipfftDestroy(plan);
+                EXPECT_EQ(hipfft_rt, HIPFFT_SUCCESS);
             }
         }
     }
-    else
-    {
-        for(size_t xidx = 0; xidx < Nx; ++xidx)
-        {
-            for(size_t yidx = 0; yidx < Nyp; ++yidx)
-            {
-                const size_t pos = xidx * Nyp + yidx;
-                complex[pos] = std::complex<double>(xidx, yidx);
-            }
-        }
-    }
-
-    
-    if(verbose > 1)
-        std::cout << "Copying to the devices ...\n";
-    hipfft_rt = hipfftXtMemcpy(plan,
-                               reinterpret_cast<void*>(inoutdesc),
-                               direction == HIPFFT_FORWARD
-                               ? reinterpret_cast<void*>(real.data())
-                               : reinterpret_cast<void*>(complex.data()),
-                               HIPFFT_COPY_HOST_TO_DEVICE);
-    ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS) << "hipfftXtMemcpy h2d failed with code "
-                                         << hipfft_rt
-                                         << " (" << hipfftResult_string(hipfft_rt) << ")";
-    
-    EXPECT_EQ(inoutdesc->subFormat, informat)
-        << "informat not what expected:"
-        << " got " << format_name((hipfftXtSubFormat)inoutdesc->subFormat)
-        << " expected " << format_name((hipfftXtSubFormat)informat);
-
-    if(verbose > 1)
-        std::cout << "Executing the transform ...\n";
-    hipfft_rt = hipfftXtExecDescriptor(plan, inoutdesc, inoutdesc, direction);
-    ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS) << "hipfftXtExecDescriptor failed with code "
-                                         << hipfft_rt
-                                         << " (" << hipfftResult_string(hipfft_rt) << ")";
-
-    
-    EXPECT_EQ(inoutdesc->subFormat, outformat)
-        << "outformat not what expected:"
-        << " got " << inoutdesc->subFormat << " "
-        << format_name((hipfftXtSubFormat)inoutdesc->subFormat)
-        << " expected "  << outformat << " "
-        << format_name((hipfftXtSubFormat)outformat);
-
-    if(verbose > 1)
-        std::cout << "Copying back to host ...\n";
-    
-    hipfft_rt = hipfftXtMemcpy(plan,
-                               direction == HIPFFT_FORWARD
-                               ? reinterpret_cast<void*>(complex.data())
-                               : reinterpret_cast<void*>(real.data()),
-                               reinterpret_cast<void*>(inoutdesc),
-                               HIPFFT_COPY_DEVICE_TO_HOST);
-    EXPECT_EQ(hipfft_rt, HIPFFT_SUCCESS) << "hipfftXtMemcpy d2h failed with code "
-                                         << hipfft_rt
-                                         << " (" << hipfftResult_string(hipfft_rt) << ")";
-
-    hipfft_rt = hipfftXtFree(inoutdesc);
-    EXPECT_EQ(hipfft_rt, HIPFFT_SUCCESS);
-
-    hipfft_rt = hipfftDestroy(plan);
-    EXPECT_EQ(hipfft_rt, HIPFFT_SUCCESS);
 }
