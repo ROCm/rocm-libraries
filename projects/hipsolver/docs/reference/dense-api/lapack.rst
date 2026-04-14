@@ -366,10 +366,10 @@ hipsolverDn<type><type>gels()
 
 .. _dense_eigens:
 
-Symmetric eigensolvers
+General and symmetric eigensolvers
 ================================
 
-.. contents:: List of symmetric eigensolvers
+.. contents:: List of general and symmetric eigensolvers
    :local:
    :backlinks: top
 

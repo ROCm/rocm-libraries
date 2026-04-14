@@ -38,6 +38,7 @@
 #include "rocsolver/rocsolver.h"
 #include <algorithm>
 #include <climits>
+#include <cstddef>
 #include <functional>
 #include <iostream>
 #include <math.h>
@@ -228,7 +229,7 @@ try
         return HIPSOLVER_STATUS_INVALID_VALUE;
     if(ldvl < (jobvl == HIPSOLVER_EIG_MODE_NOVECTOR ? 1 : n))
         return HIPSOLVER_STATUS_INVALID_VALUE;
-    if(ldvr < (jobvl == HIPSOLVER_EIG_MODE_NOVECTOR ? 1 : n))
+    if(ldvr < (jobvr == HIPSOLVER_EIG_MODE_NOVECTOR ? 1 : n))
         return HIPSOLVER_STATUS_INVALID_VALUE;
     if(!lworkOnDevice || !lworkOnHost)
         return HIPSOLVER_STATUS_INVALID_VALUE;
@@ -247,7 +248,7 @@ try
         size_rwork = 0;
     }
     else if(dataTypeA == HIP_R_64F && dataTypeW == HIP_R_64F && dataTypeVL == HIP_R_64F
-            && dataTypeVL == HIP_R_64F && computeType == HIP_R_64F)
+            && dataTypeVR == HIP_R_64F && computeType == HIP_R_64F)
     {
         size_type  = sizeof(double);
         size_hW    = size_type * 2 * n;
@@ -330,7 +331,7 @@ try
         return HIPSOLVER_STATUS_INVALID_VALUE;
     if(ldvl < (jobvl == HIPSOLVER_EIG_MODE_NOVECTOR ? 1 : n))
         return HIPSOLVER_STATUS_INVALID_VALUE;
-    if(ldvr < (jobvl == HIPSOLVER_EIG_MODE_NOVECTOR ? 1 : n))
+    if(ldvr < (jobvr == HIPSOLVER_EIG_MODE_NOVECTOR ? 1 : n))
         return HIPSOLVER_STATUS_INVALID_VALUE;
     if(!A || !W || !workOnHost || !devInfo)
         return HIPSOLVER_STATUS_INVALID_VALUE;
@@ -338,6 +339,13 @@ try
         return HIPSOLVER_STATUS_INVALID_VALUE;
     if(jobvr == HIPSOLVER_EIG_MODE_VECTOR && !VR)
         return HIPSOLVER_STATUS_INVALID_VALUE;
+
+    if(lda * n > INT_MAX)
+        return HIPSOLVER_STATUS_INTERNAL_ERROR;
+    if(ldvl * n > INT_MAX)
+        return HIPSOLVER_STATUS_INTERNAL_ERROR;
+    if(ldvr * n > INT_MAX)
+        return HIPSOLVER_STATUS_INTERNAL_ERROR;
 
     // ----- GET HOST ARRAY SIZES -----
     size_t size_type = 0;
@@ -350,7 +358,7 @@ try
         size_rwork = 0;
     }
     else if(dataTypeA == HIP_R_64F && dataTypeW == HIP_R_64F && dataTypeVL == HIP_R_64F
-            && dataTypeVL == HIP_R_64F && computeType == HIP_R_64F)
+            && dataTypeVR == HIP_R_64F && computeType == HIP_R_64F)
     {
         size_type  = sizeof(double);
         size_hW    = size_type * 2 * n;
@@ -384,21 +392,22 @@ try
     size_t rounded_size_hVR = ((size_hVR + MIN_CHUNK_SIZE - 1) / MIN_CHUNK_SIZE) * MIN_CHUNK_SIZE;
     size_t rounded_size_rwork
         = ((size_rwork + MIN_CHUNK_SIZE - 1) / MIN_CHUNK_SIZE) * MIN_CHUNK_SIZE;
+    size_t required_bytes = rounded_size_hA + rounded_size_hW + rounded_size_hVL + rounded_size_hVR
+                            + rounded_size_rwork;
 
-    size_t lwork_computed = (lworkOnHost
-                             - (rounded_size_hA + rounded_size_hW + rounded_size_hVL
-                                + rounded_size_hVR + rounded_size_rwork))
-                            / size_type;
-    if(lwork_computed < 0)
+    if(lworkOnHost < required_bytes)
         return HIPSOLVER_STATUS_INVALID_VALUE;
+    size_t lwork_computed = (lworkOnHost - required_bytes) / size_type;
+    if(lwork_computed > INT_MAX)
+        return HIPSOLVER_STATUS_INTERNAL_ERROR;
 
     // ----- GET HOST ARRAYS -----
-    uint8_t* hA    = (uint8_t*)workOnHost;
-    uint8_t* hW    = hA + rounded_size_hA;
-    uint8_t* hVL   = hW + rounded_size_hW;
-    uint8_t* hVR   = hVL + rounded_size_hVL;
-    uint8_t* rwork = hVR + rounded_size_hVR;
-    uint8_t* work  = rwork + rounded_size_rwork;
+    std::byte* hA    = (std::byte*)workOnHost;
+    std::byte* hW    = hA + rounded_size_hA;
+    std::byte* hVL   = hW + rounded_size_hW;
+    std::byte* hVR   = hVL + rounded_size_hVL;
+    std::byte* rwork = hVR + rounded_size_hVR;
+    std::byte* work  = rwork + rounded_size_rwork;
 
     hipStream_t stream;
     CHECK_ROCBLAS_ERROR(rocblas_get_stream((rocblas_handle)handle, &stream));
@@ -416,34 +425,34 @@ try
     {
         cpu_geev(jobvlC,
                  jobvrC,
-                 n,
+                 (int)n,
                  (float*)hA,
-                 lda,
+                 (int)lda,
                  (float*)hW,
                  (float*)hVL,
-                 ldvl,
+                 (int)ldvl,
                  (float*)hVR,
-                 ldvr,
+                 (int)ldvr,
                  (float*)work,
-                 lwork_computed,
+                 (int)lwork_computed,
                  (float*)rwork,
                  &hInfo);
     }
     else if(dataTypeA == HIP_R_64F && dataTypeW == HIP_R_64F && dataTypeVL == HIP_R_64F
-            && dataTypeVL == HIP_R_64F && computeType == HIP_R_64F)
+            && dataTypeVR == HIP_R_64F && computeType == HIP_R_64F)
     {
         cpu_geev(jobvlC,
                  jobvrC,
-                 n,
+                 (int)n,
                  (double*)hA,
-                 lda,
+                 (int)lda,
                  (double*)hW,
                  (double*)hVL,
-                 ldvl,
+                 (int)ldvl,
                  (double*)hVR,
-                 ldvr,
+                 (int)ldvr,
                  (double*)work,
-                 lwork_computed,
+                 (int)lwork_computed,
                  (double*)rwork,
                  &hInfo);
     }
@@ -452,16 +461,16 @@ try
     {
         cpu_geev(jobvlC,
                  jobvrC,
-                 n,
+                 (int)n,
                  (hipFloatComplex*)hA,
-                 lda,
+                 (int)lda,
                  (hipFloatComplex*)hW,
                  (hipFloatComplex*)hVL,
-                 ldvl,
+                 (int)ldvl,
                  (hipFloatComplex*)hVR,
-                 ldvr,
+                 (int)ldvr,
                  (hipFloatComplex*)work,
-                 lwork_computed,
+                 (int)lwork_computed,
                  (float*)rwork,
                  &hInfo);
     }
@@ -470,16 +479,16 @@ try
     {
         cpu_geev(jobvlC,
                  jobvrC,
-                 n,
+                 (int)n,
                  (hipDoubleComplex*)hA,
-                 lda,
+                 (int)lda,
                  (hipDoubleComplex*)hW,
                  (hipDoubleComplex*)hVL,
-                 ldvl,
+                 (int)ldvl,
                  (hipDoubleComplex*)hVR,
-                 ldvr,
+                 (int)ldvr,
                  (hipDoubleComplex*)work,
-                 lwork_computed,
+                 (int)lwork_computed,
                  (double*)rwork,
                  &hInfo);
     }
@@ -494,7 +503,7 @@ try
         CHECK_HIP_ERROR(hipMemcpyAsync(VR, hVR, size_hVR, hipMemcpyHostToDevice, stream));
     CHECK_HIP_ERROR(hipMemcpyAsync(devInfo, &hInfo, sizeof(int), hipMemcpyHostToDevice, stream));
 
-    return HIPSOLVER_STATUS_NOT_SUPPORTED;
+    return HIPSOLVER_STATUS_SUCCESS;
 }
 catch(...)
 {

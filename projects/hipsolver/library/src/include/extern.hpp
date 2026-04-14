@@ -25,6 +25,7 @@
 
 #include <cmath>
 
+#include "hipsolver.h"
 #include <hip/library_types.h>
 
 #ifdef __cplusplus
@@ -92,20 +93,20 @@ void zgeev_(char*             jobvl,
 }
 #endif
 
-void cpu_geev(char   jobvl,
-              char   jobvr,
-              int    n,
-              float* A,
-              int    lda,
-              float* w,
-              float* vl,
-              int    ldvl,
-              float* vr,
-              int    ldvr,
-              float* work,
-              int    lwork,
-              float* rwork,
-              int*   info)
+inline void cpu_geev(char   jobvl,
+                     char   jobvr,
+                     int    n,
+                     float* A,
+                     int    lda,
+                     float* w,
+                     float* vl,
+                     int    ldvl,
+                     float* vr,
+                     int    ldvr,
+                     float* work,
+                     int    lwork,
+                     float* rwork,
+                     int*   info)
 {
     // check for Infs and NaNs
     for(int i = 0; i < n; i++)
@@ -116,20 +117,20 @@ void cpu_geev(char   jobvl,
     sgeev_(&jobvl, &jobvr, &n, A, &lda, w, w + n, vl, &ldvl, vr, &ldvr, work, &lwork, info);
 }
 
-void cpu_geev(char    jobvl,
-              char    jobvr,
-              int     n,
-              double* A,
-              int     lda,
-              double* w,
-              double* vl,
-              int     ldvl,
-              double* vr,
-              int     ldvr,
-              double* work,
-              int     lwork,
-              double* rwork,
-              int*    info)
+inline void cpu_geev(char    jobvl,
+                     char    jobvr,
+                     int     n,
+                     double* A,
+                     int     lda,
+                     double* w,
+                     double* vl,
+                     int     ldvl,
+                     double* vr,
+                     int     ldvr,
+                     double* work,
+                     int     lwork,
+                     double* rwork,
+                     int*    info)
 {
     // check for Infs and NaNs
     for(int i = 0; i < n; i++)
@@ -140,20 +141,20 @@ void cpu_geev(char    jobvl,
     dgeev_(&jobvl, &jobvr, &n, A, &lda, w, w + n, vl, &ldvl, vr, &ldvr, work, &lwork, info);
 }
 
-void cpu_geev(char             jobvl,
-              char             jobvr,
-              int              n,
-              hipFloatComplex* A,
-              int              lda,
-              hipFloatComplex* w,
-              hipFloatComplex* vl,
-              int              ldvl,
-              hipFloatComplex* vr,
-              int              ldvr,
-              hipFloatComplex* work,
-              int              lwork,
-              float*           rwork,
-              int*             info)
+inline void cpu_geev(char             jobvl,
+                     char             jobvr,
+                     int              n,
+                     hipFloatComplex* A,
+                     int              lda,
+                     hipFloatComplex* w,
+                     hipFloatComplex* vl,
+                     int              ldvl,
+                     hipFloatComplex* vr,
+                     int              ldvr,
+                     hipFloatComplex* work,
+                     int              lwork,
+                     float*           rwork,
+                     int*             info)
 {
     // check for Infs and NaNs
     for(int i = 0; i < n; i++)
@@ -172,20 +173,20 @@ void cpu_geev(char             jobvl,
     cgeev_(&jobvl, &jobvr, &n, A, &lda, w, vl, &ldvl, vr, &ldvr, work, &lwork, rwork, info);
 }
 
-void cpu_geev(char              jobvl,
-              char              jobvr,
-              int               n,
-              hipDoubleComplex* A,
-              int               lda,
-              hipDoubleComplex* w,
-              hipDoubleComplex* vl,
-              int               ldvl,
-              hipDoubleComplex* vr,
-              int               ldvr,
-              hipDoubleComplex* work,
-              int               lwork,
-              double*           rwork,
-              int*              info)
+inline void cpu_geev(char              jobvl,
+                     char              jobvr,
+                     int               n,
+                     hipDoubleComplex* A,
+                     int               lda,
+                     hipDoubleComplex* w,
+                     hipDoubleComplex* vl,
+                     int               ldvl,
+                     hipDoubleComplex* vr,
+                     int               ldvr,
+                     hipDoubleComplex* work,
+                     int               lwork,
+                     double*           rwork,
+                     int*              info)
 {
     // check for Infs and NaNs
     for(int i = 0; i < n; i++)
