@@ -32,6 +32,25 @@ struct WarpDecodePolicy
             >{});
     }
 
+    // [1, WAVE_SIZE*2] tile with Vector=2: each thread gets 2 consecutive elements.
+    // Thread lane_id owns elements at (lane_id*2) and (lane_id*2+1).
+    template <typename Problem>
+    CK_TILE_DEVICE static constexpr auto MakeTileDistributionV2()
+    {
+        return make_static_tile_distribution(
+            tile_distribution_encoding<
+                sequence<>,
+                tuple<
+                    sequence<1>,                   // M: [Warps=1]
+                    sequence<get_warp_size(), 2>   // N: [Lanes=WAVE_SIZE, Vector=2]
+                >,
+                tuple<sequence<1>, sequence<2>>,
+                tuple<sequence<0>, sequence<0>>,
+                sequence<2>,
+                sequence<1>
+            >{});
+    }
+
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSize()
     {

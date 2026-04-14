@@ -53,6 +53,15 @@ struct WarpDecodeDownReduceKernel
         return Problem::kBlockSize;
     }
 
+    CK_TILE_DEVICE static ComputeDataType unpack_fp4_nibble(uint8_t raw, index_t nibble_idx)
+    {
+        constexpr float lut[16] = {
+            0.f, 0.5f, 1.f, 1.5f, 2.f, 3.f, 4.f, 6.f,
+            -0.f, -0.5f, -1.f, -1.5f, -2.f, -3.f, -4.f, -6.f};
+        uint8_t nib = nibble_idx ? (raw >> 4) : (raw & 0x0F);
+        return static_cast<ComputeDataType>(lut[nib]);
+    }
+
     CK_TILE_DEVICE static ComputeDataType wavefront_reduce_sum(ComputeDataType val)
     {
         constexpr index_t num_stages = integer_log2_floor(get_warp_size());
@@ -95,20 +104,6 @@ struct WarpDecodeDownReduceKernel
             return;
         }
 
-        const auto intermediate_m_n = make_naive_tensor_view<address_space_enum::global>(
-            static_cast<const IntermediateDataType*>(kargs.p_intermediate),
-            make_tuple(kargs.b * kargs.top_k, kargs.inter),
-            make_tuple(kargs.stride_intermediate, 1),
-            number<1>{},
-            number<1>{});
-
-        const auto w_down_m_n = make_naive_tensor_view<address_space_enum::global>(
-            static_cast<const WDataType*>(kargs.p_w_down),
-            make_tuple(kargs.e * kargs.hidden, kargs.inter),
-            make_tuple(kargs.stride_w_down, 1),
-            number<1>{},
-            number<1>{});
-
         ComputeDataType acc = 0;
 
         ComputeDataType w_down_scale_val = type_convert<ComputeDataType>(1.0f);
@@ -129,44 +124,102 @@ struct WarpDecodeDownReduceKernel
                     w_down_scale_val = type_convert<ComputeDataType>(static_cast<const typename Problem::WScaleDataType*>(kargs.p_w_down_scale)[e * kargs.hidden + out_j]);
             }
 
-            auto intermediate_window = make_tile_window(
-                intermediate_m_n, 
-                make_tuple(number<1>{}, number<get_warp_size()>{}), 
-                {token_b * kargs.top_k + k, 0}, 
-                Policy::template MakeTileDistribution<Problem>());
+            constexpr bool is_packed_w = std::is_same_v<WDataType, pk_fp4_t>;
+            const index_t w_row = e * kargs.hidden + out_j;
 
-            auto w_down_window = make_tile_window(
-                w_down_m_n, 
-                make_tuple(number<1>{}, number<get_warp_size()>{}), 
-                {e * kargs.hidden + out_j, 0}, 
-                Policy::template MakeTileDistribution<Problem>());
-
-            index_t num_iterations = kargs.inter / get_warp_size();
-
-            for(index_t i = 0; i < num_iterations; ++i)
             {
-                auto inter_tile   = load_tile(intermediate_window);
-                auto w_down_tile  = load_tile(w_down_window);
+                // V2 intermediate: always non-packed (float/bf16)
+                const auto intermediate_m_n = make_naive_tensor_view<address_space_enum::global>(
+                    static_cast<const IntermediateDataType*>(kargs.p_intermediate),
+                    make_tuple(kargs.b * kargs.top_k, kargs.inter),
+                    make_tuple(kargs.stride_intermediate, 1),
+                    number<1>{},
+                    number<1>{});
 
-                index_t k_idx = i * get_warp_size() + get_lane_id();
+                auto intermediate_window = make_tile_window(
+                    intermediate_m_n,
+                    make_tuple(number<1>{}, number<get_warp_size() * 2>{}),
+                    {token_b * kargs.top_k + k, 0},
+                    Policy::template MakeTileDistributionV2<Problem>());
 
-                ComputeDataType ds = w_down_scale_val;
-                if constexpr(ScaleLayoutTraits<typename Problem::WScaleLayout>::is_block2d)
+                if constexpr(is_packed_w)
                 {
-                    ds = load_block2d_scale<typename Problem::WScaleLayout, typename Problem::WScaleDataType>(kargs.p_w_down_scale, e * kargs.hidden + out_j, k_idx, kargs.inter);
+                    // pk_fp4_t weights: raw pointer access
+                    const auto* d_ptr = static_cast<const WDataType*>(kargs.p_w_down) + w_row * kargs.stride_w_down;
+
+                    const index_t num_iterations = kargs.inter / (get_warp_size() * 2);
+
+                    for(index_t i = 0; i < num_iterations; ++i)
+                    {
+                        auto inter_tile = load_tile(intermediate_window);
+
+                        const index_t byte_idx = i * get_warp_size() + get_lane_id();
+                        const index_t k_base = byte_idx * 2;
+
+                        uint8_t d_raw = static_cast<uint8_t>(d_ptr[byte_idx]);
+
+                        ComputeDataType d0 = unpack_fp4_nibble(d_raw, 0);
+                        ComputeDataType d1 = unpack_fp4_nibble(d_raw, 1);
+
+                        ComputeDataType ds = w_down_scale_val;
+                        if constexpr(ScaleLayoutTraits<typename Problem::WScaleLayout>::is_block2d)
+                            ds = load_block2d_scale<typename Problem::WScaleLayout, typename Problem::WScaleDataType>(kargs.p_w_down_scale, w_row, k_base, kargs.inter);
+
+                        index_t sub = 0;
+                        constexpr auto i_spans = decltype(inter_tile)::get_distributed_spans();
+                        sweep_tile_span(i_spans[number<1>{}], [&](auto iidx1) {
+                            constexpr auto iidx = make_tuple(make_tuple(), iidx1);
+                            auto act_val = type_convert<ComputeDataType>(inter_tile[iidx]);
+                            ComputeDataType dw = (sub == 0) ? d0 : d1;
+                            acc += w * act_val * (dw * ds);
+                            sub++;
+                        });
+
+                        move_tile_window(intermediate_window, {0, get_warp_size() * 2});
+                    }
                 }
+                else
+                {
+                    // Non-packed weights: V2 tile windows
+                    const auto w_down_m_n = make_naive_tensor_view<address_space_enum::global>(
+                        static_cast<const WDataType*>(kargs.p_w_down),
+                        make_tuple(kargs.e * kargs.hidden, kargs.inter),
+                        make_tuple(kargs.stride_w_down, 1),
+                        number<1>{},
+                        number<1>{});
 
-                constexpr auto spans = decltype(inter_tile)::get_distributed_spans();
-                sweep_tile_span(spans[number<1>{}], [&](auto idx1) {
-                    constexpr auto idx = make_tuple(make_tuple(), idx1);
-                    auto act_val = type_convert<ComputeDataType>(inter_tile[idx]);
-                    auto d_val   = type_convert<ComputeDataType>(w_down_tile[idx]);
+                    auto w_down_window = make_tile_window(
+                        w_down_m_n,
+                        make_tuple(number<1>{}, number<get_warp_size() * 2>{}),
+                        {w_row, 0},
+                        Policy::template MakeTileDistributionV2<Problem>());
 
-                    acc += w * act_val * (d_val * ds);
-                });
+                    const index_t num_iterations = kargs.inter / (get_warp_size() * 2);
 
-                move_tile_window(intermediate_window, {0, get_warp_size()});
-                move_tile_window(w_down_window, {0, get_warp_size()});
+                    for(index_t i = 0; i < num_iterations; ++i)
+                    {
+                        auto inter_tile  = load_tile(intermediate_window);
+                        auto w_down_tile = load_tile(w_down_window);
+
+                        const index_t k_base = i * get_warp_size() * 2 + get_lane_id() * 2;
+
+                        ComputeDataType ds = w_down_scale_val;
+                        if constexpr(ScaleLayoutTraits<typename Problem::WScaleLayout>::is_block2d)
+                            ds = load_block2d_scale<typename Problem::WScaleLayout, typename Problem::WScaleDataType>(kargs.p_w_down_scale, w_row, k_base, kargs.inter);
+
+                        constexpr auto spans = decltype(inter_tile)::get_distributed_spans();
+                        sweep_tile_span(spans[number<1>{}], [&](auto idx1) {
+                            constexpr auto idx = make_tuple(make_tuple(), idx1);
+                            auto act_val = type_convert<ComputeDataType>(inter_tile[idx]);
+                            auto d_val   = type_convert<ComputeDataType>(w_down_tile[idx]);
+
+                            acc += w * act_val * (d_val * ds);
+                        });
+
+                        move_tile_window(intermediate_window, {0, get_warp_size() * 2});
+                        move_tile_window(w_down_window, {0, get_warp_size() * 2});
+                    }
+                }
             }
         }
 

@@ -57,6 +57,15 @@ struct WarpDecodeGateUpKernel
         return Problem::kBlockSize;
     }
 
+    CK_TILE_DEVICE static ComputeDataType unpack_fp4_nibble(uint8_t raw, index_t nibble_idx)
+    {
+        constexpr float lut[16] = {
+            0.f, 0.5f, 1.f, 1.5f, 2.f, 3.f, 4.f, 6.f,
+            -0.f, -0.5f, -1.f, -1.5f, -2.f, -3.f, -4.f, -6.f};
+        uint8_t nib = nibble_idx ? (raw >> 4) : (raw & 0x0F);
+        return static_cast<ComputeDataType>(lut[nib]);
+    }
+
     CK_TILE_DEVICE static ComputeDataType wavefront_reduce_sum(ComputeDataType val)
     {
         constexpr index_t num_stages = integer_log2_floor(get_warp_size());
@@ -103,48 +112,7 @@ struct WarpDecodeGateUpKernel
 
         const int32_t e = kargs.p_router_ids[token_b * kargs.top_k + expert_k];
 
-        // Create tensor views
-        const auto x_m_n = make_naive_tensor_view<address_space_enum::global>(
-            static_cast<const XDataType*>(kargs.p_x),
-            make_tuple(kargs.b, kargs.hidden),
-            make_tuple(kargs.stride_x, 1),
-            number<1>{},
-            number<1>{});
-
-        const auto w_gate_m_n = make_naive_tensor_view<address_space_enum::global>(
-            static_cast<const WDataType*>(kargs.p_w_gate),
-            make_tuple(kargs.e * kargs.inter, kargs.hidden),
-            make_tuple(kargs.stride_w_gate, 1),
-            number<1>{},
-            number<1>{});
-
-        const auto w_up_m_n = make_naive_tensor_view<address_space_enum::global>(
-            static_cast<const WDataType*>(kargs.p_w_up),
-            make_tuple(kargs.e * kargs.inter, kargs.hidden),
-            make_tuple(kargs.stride_w_up, 1),
-            number<1>{},
-            number<1>{});
-
-        // Initialize windows
-        auto x_window = make_tile_window(
-            x_m_n, 
-            make_tuple(number<1>{}, number<get_warp_size()>{}), 
-            {token_b, 0}, 
-            Policy::template MakeTileDistribution<Problem>());
-
-        auto w_gate_window = make_tile_window(
-            w_gate_m_n, 
-            make_tuple(number<1>{}, number<get_warp_size()>{}), 
-            {e * kargs.inter + neuron_j, 0}, 
-            Policy::template MakeTileDistribution<Problem>());
-
-        auto w_up_window = make_tile_window(
-            w_up_m_n, 
-            make_tuple(number<1>{}, number<get_warp_size()>{}), 
-            {e * kargs.inter + neuron_j, 0}, 
-            Policy::template MakeTileDistribution<Problem>());
-
-        // Scale initialization
+        // Scale initialization (shared by both paths)
         ComputeDataType x_scale_val = type_convert<ComputeDataType>(1.0f);
         if constexpr(std::is_same_v<typename Problem::XScaleLayout, WarpDecodeScaleLayout::PerTensor>)
         {
@@ -181,50 +149,147 @@ struct WarpDecodeGateUpKernel
                 w_up_scale_val = type_convert<ComputeDataType>(static_cast<const typename Problem::WScaleDataType*>(kargs.p_w_up_scale)[e * kargs.inter + neuron_j]);
         }
 
-        index_t num_iterations = kargs.hidden / get_warp_size();
+        constexpr bool is_packed_w = std::is_same_v<WDataType, pk_fp4_t>;
+        const index_t w_row = e * kargs.inter + neuron_j;
 
         ComputeDataType gate_acc = 0;
         ComputeDataType up_acc = 0;
 
-        for(index_t i = 0; i < num_iterations; ++i)
         {
-            auto x_tile      = load_tile(x_window);
-            auto w_gate_tile = load_tile(w_gate_window);
-            auto w_up_tile   = load_tile(w_up_window);
+            // V2 activation: 2 scalar values per thread, [1, 2*WARP_SIZE] tile.
+            const auto x_m_n = make_naive_tensor_view<address_space_enum::global>(
+                static_cast<const XDataType*>(kargs.p_x),
+                make_tuple(kargs.b, kargs.hidden),
+                make_tuple(kargs.stride_x, 1),
+                number<1>{},
+                number<1>{});
 
-            index_t k_idx = i * get_warp_size() + get_lane_id();
+            auto x_window = make_tile_window(
+                x_m_n,
+                make_tuple(number<1>{}, number<get_warp_size() * 2>{}),
+                {token_b, 0},
+                Policy::template MakeTileDistributionV2<Problem>());
 
-            ComputeDataType xs = x_scale_val;
-            if constexpr(ScaleLayoutTraits<typename Problem::XScaleLayout>::is_block2d)
+            if constexpr(is_packed_w)
             {
-                xs = load_block2d_scale<typename Problem::XScaleLayout, typename Problem::XScaleDataType>(kargs.p_x_scale, token_b, k_idx, kargs.hidden);
+                static_assert(sizeof(WDataType) == 1, "pk_fp4_t must be exactly 1 byte");
+
+                // pk_fp4_t weights: raw pointer access (tile windows can't address sub-byte).
+                // stride_w_gate is in pk_fp4_t units (HIDDEN/2 bytes per row).
+                const auto* g_ptr = static_cast<const WDataType*>(kargs.p_w_gate) + w_row * kargs.stride_w_gate;
+                const auto* u_ptr = static_cast<const WDataType*>(kargs.p_w_up)   + w_row * kargs.stride_w_up;
+
+                const index_t num_iterations = kargs.hidden / (get_warp_size() * 2);
+
+                for(index_t i = 0; i < num_iterations; ++i)
+                {
+                    auto x_tile = load_tile(x_window);
+
+                    const index_t byte_idx = i * get_warp_size() + get_lane_id();
+                    const index_t k_base = byte_idx * 2;
+
+                    uint8_t g_raw = g_ptr[byte_idx].data;
+                    uint8_t u_raw = u_ptr[byte_idx].data;
+
+                    ComputeDataType g0 = unpack_fp4_nibble(g_raw, 0);
+                    ComputeDataType g1 = unpack_fp4_nibble(g_raw, 1);
+                    ComputeDataType u0 = unpack_fp4_nibble(u_raw, 0);
+                    ComputeDataType u1 = unpack_fp4_nibble(u_raw, 1);
+
+                    ComputeDataType xs = x_scale_val;
+                    if constexpr(ScaleLayoutTraits<typename Problem::XScaleLayout>::is_block2d)
+                        xs = load_block2d_scale<typename Problem::XScaleLayout, typename Problem::XScaleDataType>(kargs.p_x_scale, token_b, k_base, kargs.hidden);
+
+                    ComputeDataType gs = w_gate_scale_val;
+                    if constexpr(ScaleLayoutTraits<typename Problem::WScaleLayout>::is_block2d)
+                        gs = load_block2d_scale<typename Problem::WScaleLayout, typename Problem::WScaleDataType>(kargs.p_w_gate_scale, w_row, k_base, kargs.hidden);
+
+                    ComputeDataType us = w_up_scale_val;
+                    if constexpr(ScaleLayoutTraits<typename Problem::WScaleLayout>::is_block2d)
+                        us = load_block2d_scale<typename Problem::WScaleLayout, typename Problem::WScaleDataType>(kargs.p_w_up_scale, w_row, k_base, kargs.hidden);
+
+                    index_t sub = 0;
+                    constexpr auto x_spans = decltype(x_tile)::get_distributed_spans();
+                    sweep_tile_span(x_spans[number<1>{}], [&](auto xidx1) {
+                        constexpr auto xidx = make_tuple(make_tuple(), xidx1);
+                        auto x_val = type_convert<ComputeDataType>(x_tile[xidx]);
+                        ComputeDataType gw = (sub == 0) ? g0 : g1;
+                        ComputeDataType uw = (sub == 0) ? u0 : u1;
+                        gate_acc += (x_val * xs) * (gw * gs);
+                        up_acc   += (x_val * xs) * (uw * us);
+                        sub++;
+                    });
+
+                    move_tile_window(x_window, {0, get_warp_size() * 2});
+                }
             }
-            ComputeDataType gs = w_gate_scale_val;
-            if constexpr(ScaleLayoutTraits<typename Problem::WScaleLayout>::is_block2d)
+            else
             {
-                gs = load_block2d_scale<typename Problem::WScaleLayout, typename Problem::WScaleDataType>(kargs.p_w_gate_scale, e * kargs.inter + neuron_j, k_idx, kargs.hidden);
+                // Non-packed weights: V2 tile windows work normally.
+                const auto w_gate_m_n = make_naive_tensor_view<address_space_enum::global>(
+                    static_cast<const WDataType*>(kargs.p_w_gate),
+                    make_tuple(kargs.e * kargs.inter, kargs.hidden),
+                    make_tuple(kargs.stride_w_gate, 1),
+                    number<1>{},
+                    number<1>{});
+
+                const auto w_up_m_n = make_naive_tensor_view<address_space_enum::global>(
+                    static_cast<const WDataType*>(kargs.p_w_up),
+                    make_tuple(kargs.e * kargs.inter, kargs.hidden),
+                    make_tuple(kargs.stride_w_up, 1),
+                    number<1>{},
+                    number<1>{});
+
+                auto w_gate_window = make_tile_window(
+                    w_gate_m_n,
+                    make_tuple(number<1>{}, number<get_warp_size() * 2>{}),
+                    {w_row, 0},
+                    Policy::template MakeTileDistributionV2<Problem>());
+
+                auto w_up_window = make_tile_window(
+                    w_up_m_n,
+                    make_tuple(number<1>{}, number<get_warp_size() * 2>{}),
+                    {w_row, 0},
+                    Policy::template MakeTileDistributionV2<Problem>());
+
+                const index_t num_iterations = kargs.hidden / (get_warp_size() * 2);
+
+                for(index_t i = 0; i < num_iterations; ++i)
+                {
+                    auto x_tile      = load_tile(x_window);
+                    auto w_gate_tile = load_tile(w_gate_window);
+                    auto w_up_tile   = load_tile(w_up_window);
+
+                    const index_t k_base = i * get_warp_size() * 2 + get_lane_id() * 2;
+
+                    ComputeDataType xs = x_scale_val;
+                    if constexpr(ScaleLayoutTraits<typename Problem::XScaleLayout>::is_block2d)
+                        xs = load_block2d_scale<typename Problem::XScaleLayout, typename Problem::XScaleDataType>(kargs.p_x_scale, token_b, k_base, kargs.hidden);
+
+                    ComputeDataType gs = w_gate_scale_val;
+                    if constexpr(ScaleLayoutTraits<typename Problem::WScaleLayout>::is_block2d)
+                        gs = load_block2d_scale<typename Problem::WScaleLayout, typename Problem::WScaleDataType>(kargs.p_w_gate_scale, w_row, k_base, kargs.hidden);
+
+                    ComputeDataType us = w_up_scale_val;
+                    if constexpr(ScaleLayoutTraits<typename Problem::WScaleLayout>::is_block2d)
+                        us = load_block2d_scale<typename Problem::WScaleLayout, typename Problem::WScaleDataType>(kargs.p_w_up_scale, w_row, k_base, kargs.hidden);
+
+                    constexpr auto spans = decltype(x_tile)::get_distributed_spans();
+                    sweep_tile_span(spans[number<1>{}], [&](auto idx1) {
+                        constexpr auto idx = make_tuple(make_tuple(), idx1);
+                        auto x_val = type_convert<ComputeDataType>(x_tile[idx]);
+                        auto g_val = type_convert<ComputeDataType>(w_gate_tile[idx]);
+                        auto u_val = type_convert<ComputeDataType>(w_up_tile[idx]);
+
+                        gate_acc += (x_val * xs) * (g_val * gs);
+                        up_acc   += (x_val * xs) * (u_val * us);
+                    });
+
+                    move_tile_window(x_window, {0, get_warp_size() * 2});
+                    move_tile_window(w_gate_window, {0, get_warp_size() * 2});
+                    move_tile_window(w_up_window, {0, get_warp_size() * 2});
+                }
             }
-            ComputeDataType us = w_up_scale_val;
-            if constexpr(ScaleLayoutTraits<typename Problem::WScaleLayout>::is_block2d)
-            {
-                us = load_block2d_scale<typename Problem::WScaleLayout, typename Problem::WScaleDataType>(kargs.p_w_up_scale, e * kargs.inter + neuron_j, k_idx, kargs.hidden);
-            }
-
-            // Inline dequantize & accumulate
-            constexpr auto spans = decltype(x_tile)::get_distributed_spans();
-            sweep_tile_span(spans[number<1>{}], [&](auto idx1) {
-                constexpr auto idx = make_tuple(make_tuple(), idx1);
-                auto x_val = type_convert<ComputeDataType>(x_tile[idx]);
-                auto g_val = type_convert<ComputeDataType>(w_gate_tile[idx]);
-                auto u_val = type_convert<ComputeDataType>(w_up_tile[idx]);
-
-                gate_acc += (x_val * xs) * (g_val * gs);
-                up_acc   += (x_val * xs) * (u_val * us);
-            });
-
-            move_tile_window(x_window, {0, get_warp_size()});
-            move_tile_window(w_gate_window, {0, get_warp_size()});
-            move_tile_window(w_up_window, {0, get_warp_size()});
         }
 
         gate_acc = wavefront_reduce_sum(gate_acc);
@@ -232,7 +297,6 @@ struct WarpDecodeGateUpKernel
 
         if(get_lane_id() == 0)
         {
-            // Apply Activation(gate) * up
             typename Problem::Activation activation_func;
             ComputeDataType silu_gate;
             activation_func(silu_gate, gate_acc);
