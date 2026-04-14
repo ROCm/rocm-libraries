@@ -9741,9 +9741,11 @@ inline hipsolverStatus_t hipsolver_sytrf(testAPI_t               API,
 }
 /********************************************************/
 
-/******************** SYEVBATCHED ********************/
+/******************** SYEV/HEEV ********************/
+// normal and strided_batched
 // bufferSize
 inline hipsolverStatus_t hipsolver_syev_heev_bufferSize(testAPI_t           API,
+                                                        bool                STRIDED,
                                                         hipsolverHandle_t   handle,
                                                         hipsolverDnParams_t params,
                                                         hipsolverEigMode_t  jobz,
@@ -9756,9 +9758,9 @@ inline hipsolverStatus_t hipsolver_syev_heev_bufferSize(testAPI_t           API,
                                                         size_t*             lworkOnHost,
                                                         int64_t             batchSize)
 {
-    switch(API)
+    switch(api2marshal(API, STRIDED))
     {
-    case API_COMPAT:
+    case COMPAT_NORMAL_ALT:
         return hipsolverDnXsyevBatched_bufferSize(handle,
                                                   params,
                                                   jobz,
@@ -9781,6 +9783,7 @@ inline hipsolverStatus_t hipsolver_syev_heev_bufferSize(testAPI_t           API,
 }
 
 inline hipsolverStatus_t hipsolver_syev_heev_bufferSize(testAPI_t           API,
+                                                        bool                STRIDED,
                                                         hipsolverHandle_t   handle,
                                                         hipsolverDnParams_t params,
                                                         hipsolverEigMode_t  jobz,
@@ -9793,9 +9796,9 @@ inline hipsolverStatus_t hipsolver_syev_heev_bufferSize(testAPI_t           API,
                                                         size_t*             lworkOnHost,
                                                         int64_t             batchSize)
 {
-    switch(API)
+    switch(api2marshal(API, STRIDED))
     {
-    case API_COMPAT:
+    case COMPAT_NORMAL_ALT:
         return hipsolverDnXsyevBatched_bufferSize(handle,
                                                   params,
                                                   jobz,
@@ -9818,6 +9821,7 @@ inline hipsolverStatus_t hipsolver_syev_heev_bufferSize(testAPI_t           API,
 }
 
 inline hipsolverStatus_t hipsolver_syev_heev_bufferSize(testAPI_t           API,
+                                                        bool                STRIDED,
                                                         hipsolverHandle_t   handle,
                                                         hipsolverDnParams_t params,
                                                         hipsolverEigMode_t  jobz,
@@ -9830,9 +9834,9 @@ inline hipsolverStatus_t hipsolver_syev_heev_bufferSize(testAPI_t           API,
                                                         size_t*             lworkOnHost,
                                                         int64_t             batchSize)
 {
-    switch(API)
+    switch(api2marshal(API, STRIDED))
     {
-    case API_COMPAT:
+    case COMPAT_NORMAL_ALT:
         return hipsolverDnXsyevBatched_bufferSize(handle,
                                                   params,
                                                   jobz,
@@ -9855,6 +9859,7 @@ inline hipsolverStatus_t hipsolver_syev_heev_bufferSize(testAPI_t           API,
 }
 
 inline hipsolverStatus_t hipsolver_syev_heev_bufferSize(testAPI_t               API,
+                                                        bool                    STRIDED,
                                                         hipsolverHandle_t       handle,
                                                         hipsolverDnParams_t     params,
                                                         hipsolverEigMode_t      jobz,
@@ -9867,9 +9872,9 @@ inline hipsolverStatus_t hipsolver_syev_heev_bufferSize(testAPI_t               
                                                         size_t*                 lworkOnHost,
                                                         int64_t                 batchSize)
 {
-    switch(API)
+    switch(api2marshal(API, STRIDED))
     {
-    case API_COMPAT:
+    case COMPAT_NORMAL_ALT:
         return hipsolverDnXsyevBatched_bufferSize(handle,
                                                   params,
                                                   jobz,
@@ -9893,6 +9898,7 @@ inline hipsolverStatus_t hipsolver_syev_heev_bufferSize(testAPI_t               
 
 // solve
 inline hipsolverStatus_t hipsolver_syev_heev(testAPI_t           API,
+                                             bool                STRIDED,
                                              hipsolverHandle_t   handle,
                                              hipsolverDnParams_t params,
                                              hipsolverEigMode_t  jobz,
@@ -9908,9 +9914,9 @@ inline hipsolverStatus_t hipsolver_syev_heev(testAPI_t           API,
                                              int*                devInfo,
                                              int64_t             batchSize)
 {
-    switch(API)
+    switch(api2marshal(API, STRIDED))
     {
-    case API_COMPAT:
+    case COMPAT_NORMAL_ALT:
         return hipsolverDnXsyevBatched(handle,
                                        params,
                                        jobz,
@@ -9934,6 +9940,7 @@ inline hipsolverStatus_t hipsolver_syev_heev(testAPI_t           API,
 }
 
 inline hipsolverStatus_t hipsolver_syev_heev(testAPI_t           API,
+                                             bool                STRIDED,
                                              hipsolverHandle_t   handle,
                                              hipsolverDnParams_t params,
                                              hipsolverEigMode_t  jobz,
@@ -9949,9 +9956,9 @@ inline hipsolverStatus_t hipsolver_syev_heev(testAPI_t           API,
                                              int*                devInfo,
                                              int64_t             batchSize)
 {
-    switch(API)
+    switch(api2marshal(API, STRIDED))
     {
-    case API_COMPAT:
+    case COMPAT_NORMAL_ALT:
         return hipsolverDnXsyevBatched(handle,
                                        params,
                                        jobz,
@@ -9975,6 +9982,7 @@ inline hipsolverStatus_t hipsolver_syev_heev(testAPI_t           API,
 }
 
 inline hipsolverStatus_t hipsolver_syev_heev(testAPI_t           API,
+                                             bool                STRIDED,
                                              hipsolverHandle_t   handle,
                                              hipsolverDnParams_t params,
                                              hipsolverEigMode_t  jobz,
@@ -9990,9 +9998,9 @@ inline hipsolverStatus_t hipsolver_syev_heev(testAPI_t           API,
                                              int*                devInfo,
                                              int64_t             batchSize)
 {
-    switch(API)
+    switch(api2marshal(API, STRIDED))
     {
-    case API_COMPAT:
+    case COMPAT_NORMAL_ALT:
         return hipsolverDnXsyevBatched(handle,
                                        params,
                                        jobz,
@@ -10016,6 +10024,7 @@ inline hipsolverStatus_t hipsolver_syev_heev(testAPI_t           API,
 }
 
 inline hipsolverStatus_t hipsolver_syev_heev(testAPI_t               API,
+                                             bool                    STRIDED,
                                              hipsolverHandle_t       handle,
                                              hipsolverDnParams_t     params,
                                              hipsolverEigMode_t      jobz,
@@ -10031,9 +10040,9 @@ inline hipsolverStatus_t hipsolver_syev_heev(testAPI_t               API,
                                              int*                    devInfo,
                                              int64_t                 batchSize)
 {
-    switch(API)
+    switch(api2marshal(API, STRIDED))
     {
-    case API_COMPAT:
+    case COMPAT_NORMAL_ALT:
         return hipsolverDnXsyevBatched(handle,
                                        params,
                                        jobz,
