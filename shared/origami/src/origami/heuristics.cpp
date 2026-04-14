@@ -168,31 +168,37 @@ static void apply_tf32_heuristics(heuristic_params_t& params,
   double arith     = emulated_tf32_arithmetic_intensity(M, N, K, static_cast<double>(a_bytes));
   double threshold = heuristic_defaults_t::TF32_ARITH_INTENSITY_THRESHOLD;
 
+  // Skip TF32 tile discount when splitting is active (similar guard to CMS
+  // kernels where main_loop_efficiency is bypassed when splitting_factor > 4).
+  const auto [reduction, num_wgs, active_cus, num_timesteps, splitting_factor] =
+      compute_launch_parameters(problem, hardware, config, config.grid_selection, hardware.N_CU);
+  if (splitting_factor > 1) return;
+
   // Custom kernel optimizations based on transpose mode and tile config
   // NT: N-transpose configuration
   if ((!a_trans && b_trans) && MT_M == 256 && MT_N == 256 && MT_K == 32) {
     if (arith < threshold) {
-      params.weight_tile_total *= 0.6;
+      params.weight_tile_total *= 0.85;
     } else {
-      params.weight_tile_total *= 0.4;
+      params.weight_tile_total *= 0.7;
     }
   }
 
   // NN: No-transpose configuration
   if ((!a_trans && !b_trans) && MT_M == 256 && MT_N == 256 && MT_K == 32) {
     if (arith < threshold) {
-      params.weight_tile_total *= 0.8;
+      params.weight_tile_total *= 0.9;
     } else {
-      params.weight_tile_total *= 0.4;
+      params.weight_tile_total *= 0.7;
     }
   }
 
   // TN: Transpose-A configuration
   if ((a_trans && !b_trans) && MT_M == 256 && MT_N == 256 && MT_K == 32) {
     if (arith < threshold) {
-      params.weight_tile_total *= 0.8;
+      params.weight_tile_total *= 0.9;
     } else {
-      params.weight_tile_total *= 0.4;
+      params.weight_tile_total *= 0.7;
     }
   }
 

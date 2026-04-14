@@ -124,9 +124,9 @@ struct heuristic_defaults_t {
   static constexpr double PACK_TRANSPOSE_OVERHEAD = 15.0;
 
   // --- Tail Loop ---
-  // Fixed overhead per tail-loop invocation (cycles).
-  // Covers K-masking setup, LDS address reset, conditional branching.
-  static constexpr double TAIL_LOOP_OVERHEAD = 500.0;
+  // Fixed overhead per tail-loop sub-iteration (cycles).
+  // Covers K-masking, LDS address reset, barrier, ds_read/write, conditional branching.
+  static constexpr double TAIL_LOOP_OVERHEAD = 1500.0;
 
   // --- Tile Fixed Overhead ---
   // Fixed per-tile cost (cycles) that does not scale with tile dimensions.

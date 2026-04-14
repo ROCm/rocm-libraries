@@ -1735,9 +1735,14 @@ double compute_tile_latency(const problem_t& problem,
   //   until the oldest (first) load arrives — roughly 1 × L_mem.
   //   The remaining PGR-1 loads complete during early main-loop compute.
   //   PGR depth is captured structurally by the main→NGLL iteration shift.
-  double L_prologue = (heuristic.prologue_setup_fraction + 1.0) * L_mem;
-  L_prologue *= effective_tile_penalty;
-  L_prologue *= occupancy_factor;
+  //   When K < MT_K (k_iters=0), the pipeline never runs: ISA jumps
+  //   directly to the tail loop, so no prologue loads execute.
+  const long total_full_iters_for_prologue = static_cast<long>(K / MT_K);
+  double L_prologue = 0.0;
+  if (total_full_iters_for_prologue > 0) {
+    L_prologue = (heuristic.prologue_setup_fraction + 1.0) * L_mem;
+    L_prologue *= occupancy_factor;
+  }
 
   // 3-2) Epilogue (per-tile store only; compute is covered by NLL)
   double L_epilogue =
@@ -1770,39 +1775,53 @@ double compute_tile_latency(const problem_t& problem,
       : total_full_iters;
   k_iters = std::max(k_iters, 0L);
   long num_main_iters = std::max(k_iters - static_cast<long>(pgr), 0L);
-  long num_ngll_iters = std::max(static_cast<long>(pgr) - 1L, 0L);
+
+  // NGLL can only drain as many loads as were actually issued minus the one
+  // consumed by NLL.  When k_iters < PGR the pipeline never reaches steady
+  // state, so fewer loads are in flight to drain.
+  long num_ngll_iters = std::min(std::max(static_cast<long>(pgr) - 1L, 0L),
+                                 std::max(k_iters - 1L, 0L));
 
   double L_mem_stream     = L_mem     * heuristic.weight_memory  * static_cast<double>(num_main_iters);
   double L_compute_stream = L_compute * heuristic.weight_compute * static_cast<double>(num_main_iters);
 
+  // When k_iters < PGR the prefetch pipeline never reaches steady state:
+  // use additive (non-overlapped) mode just like PGR=1.
   double L_mainloop;
-  if (pgr <= 1) {
+  if (pgr <= 1 || k_iters < static_cast<long>(pgr)) {
     L_mainloop = L_mem_stream + L_compute_stream;
   } else {
     L_mainloop = std::max(L_mem_stream, L_compute_stream);
   }
 
   const double eff_scale =
-      ((splitting_factor > 4) ? 1.0 : heuristic.main_loop_efficiency) * effective_tile_penalty;
+      ((splitting_factor > 4) ? 1.0 : heuristic.main_loop_efficiency);
   L_mainloop *= eff_scale;
   L_mainloop += L_cvt * static_cast<double>(num_main_iters);
 
-  // 4a) NGLL (NoGlobalLoadLoop drain phase): PGR-1 iterations.
+  // 4a) NGLL (NoGlobalLoadLoop drain phase): num_ngll_iters iterations.
   //     Drains in-flight prefetch data into LDS (vmcnt wait + ds_write + barrier)
   //     while computing; no new global load latency.
   double L_ngll = static_cast<double>(num_ngll_iters) * L_compute * eff_scale;
 
   // 4b) NLL (NoLoadLoop): 1 iteration of pure compute from already-resident LDS.
-  double L_nll = L_compute * eff_scale;
+  //     When k_iters=0 no full iteration was ever loaded, so NLL doesn't execute.
+  double L_nll = (k_iters > 0) ? L_compute * eff_scale : 0.0;
 
   // 4c) Tail loop (structural): if K is not a multiple of MT_K, a masked
   //     partial iteration executes after NLL with reduced global reads.
   //     Tail = K % MT_K; assigned to exactly one WG regardless of GSU.
+  //     The tail loop iterates over ceil(tail_k / MI_K) sub-iterations, each
+  //     with its own barrier + ds_write + ds_read + MFMA, so the per-sub-iter
+  //     overhead scales with the number of sub-iterations.
   const size_t tail_k = K % MT_K;
   double L_tail = 0.0;
   if (tail_k > 0) {
     double tail_fraction = static_cast<double>(tail_k) / static_cast<double>(MT_K);
-    L_tail = tail_fraction * L_mem + L_compute + heuristic.tail_loop_overhead;
+    size_t MI_K = config.mi.k;
+    size_t tail_sub_iters = math::safe_ceil_div(tail_k, MI_K);
+    L_tail = tail_fraction * (L_mem + L_compute)
+           + heuristic.tail_loop_overhead * static_cast<double>(tail_sub_iters);
     L_tail *= eff_scale;
   }
 
