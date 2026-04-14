@@ -1096,23 +1096,6 @@ try
     if(!params)
         return HIPSOLVER_STATUS_INVALID_VALUE;
 
-    // Get required workspace size
-    size_t lwork_device, lwork_host;
-    CHECK_HIPSOLVER_ERROR(hipsolverDnXsyevBatched_bufferSize(handle,
-                                                             params,
-                                                             jobz,
-                                                             uplo,
-                                                             n,
-                                                             dataTypeA,
-                                                             A,
-                                                             lda,
-                                                             dataTypeW,
-                                                             W,
-                                                             computeType,
-                                                             &lwork_device,
-                                                             &lwork_host,
-                                                             batchSize));
-
     // Calculate E workspace size
     size_t e_workspace_size = 0;
     if(dataTypeA == HIP_R_32F && dataTypeW == HIP_R_32F && computeType == HIP_R_32F)
@@ -1138,7 +1121,23 @@ try
     }
     else
     {
-        // No user workspace: use managed workspace for rocSOLVER, device_malloc for E
+        // No user workspace: query required size, use managed workspace for rocSOLVER, device_malloc for E
+        size_t lwork_device, lwork_host;
+        CHECK_HIPSOLVER_ERROR(hipsolverDnXsyevBatched_bufferSize(handle,
+                                                                 params,
+                                                                 jobz,
+                                                                 uplo,
+                                                                 n,
+                                                                 dataTypeA,
+                                                                 A,
+                                                                 lda,
+                                                                 dataTypeW,
+                                                                 W,
+                                                                 computeType,
+                                                                 &lwork_device,
+                                                                 &lwork_host,
+                                                                 batchSize));
+
         size_t rocsolver_workspace = lwork_device - e_workspace_size;
         CHECK_ROCBLAS_ERROR(hipsolverManageWorkspace((rocblas_handle)handle, rocsolver_workspace));
 
