@@ -50,8 +50,9 @@ inline void getLocalConfigNHWC(size_t c,
     unsigned int maxLocalsize = 1024 / vectorsize;
 
     // default local config in case the while loop is not entered
-    xlocalsize = std::min(size_t{1} << static_cast<size_t>(std::ceil(std::log2(c / vectorsize))),
-                          static_cast<size_t>(xlocalsizeLimit));
+    xlocalsize = std::min(
+        size_t{1} << static_cast<size_t>(std::ceil(std::log2(std::max(c / vectorsize, size_t{1})))),
+        static_cast<size_t>(xlocalsizeLimit));
     ylocalsize = maxLocalsize / xlocalsize;
 
     size_t nworkgroups = 0;
@@ -61,9 +62,9 @@ inline void getLocalConfigNHWC(size_t c,
     {
         // xlocalsize must be power of 2 as reductions in the kernels rely on it, here c is rounded
         // up to next power of 2.
-        xlocalsize
-            = std::min(size_t{1} << static_cast<size_t>(std::ceil(std::log2(c / vectorsize))),
-                       static_cast<size_t>(xlocalsizeLimit));
+        xlocalsize = std::min(size_t{1} << static_cast<size_t>(
+                                  std::ceil(std::log2(std::max(c / vectorsize, size_t{1})))),
+                              static_cast<size_t>(xlocalsizeLimit));
         ylocalsize = maxLocalsize / xlocalsize;
         nworkgroups = ((c / vectorsize + xlocalsize - 1) / xlocalsize)
                       * ((h * w + ylocalsize - 1) / ylocalsize);
