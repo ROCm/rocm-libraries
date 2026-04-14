@@ -20,65 +20,15 @@ struct WarpDecodePolicy
             tile_distribution_encoding<
                 sequence<>,
                 tuple<
-                    sequence<1, 1>,                   // M: [Iterations=1, Warps=1]
-                    sequence<1, get_warp_size(), 1>   // N: [Iterations=1, Lanes=WAVE_SIZE, Vector=1]
+                    sequence<1>,                   // M: [Warps=1]
+                    sequence<get_warp_size(), 1>   // N: [Lanes=WAVE_SIZE, Vector=1]
                 >,
-                tuple<
-                    sequence<1>, // P0 (Warp ID) maps to M's factor 1
-                    sequence<2>  // P1 (Lane ID) maps to N's factor 1
-                >,
-                tuple<
-                    sequence<1>, // M factor 1
-                    sequence<1>  // N factor 1
-                >,
-                sequence<1, 2, 2>, // Y0 -> M(0), Y1 -> N(0), Y2 -> N(2)
-                sequence<0, 0, 2>  // Y0 -> M(0), Y1 -> N(0), Y2 -> N(2)
-            >{});
-    }
-
-    template <typename Problem, index_t Block_K>
-    CK_TILE_DEVICE static constexpr auto MakeScaleTileDistribution()
-    {
-        return make_static_tile_distribution(
-            tile_distribution_encoding<
-                sequence<Block_K>, // Replication dimension
-                tuple<
-                    sequence<1, 1>,                               // M: [Iterations=1, Warps=1]
-                    sequence<1, get_warp_size() / Block_K, 1>     // N: [Iterations=1, Lanes=WAVE_SIZE/Block_K, Vector=1]
-                >,
-                tuple<
-                    sequence<1>,    // P0 (Warp ID) maps to M's factor 1
-                    sequence<2, 0>  // P1 (Lane ID) maps to N's factor 1, then R's factor 0
-                >,
-                tuple<
-                    sequence<1>,
-                    sequence<1, 0>
-                >,
-                sequence<1, 2, 2>, // Y0 -> M(0), Y1 -> N(0), Y2 -> N(2)
-                sequence<0, 0, 2>  // Y0 -> M(0), Y1 -> N(0), Y2 -> N(2)
-            >{});
-    }
-
-    template <typename Problem>
-    CK_TILE_DEVICE static constexpr auto MakeOutputScalarDistribution()
-    {
-        return make_static_tile_distribution(
-            tile_distribution_encoding<
-                sequence<>,
-                tuple<
-                    sequence<1, 1>, // M: 1
-                    sequence<1, 1>  // N: 1
-                >,
-                tuple<
-                    sequence<1>,    // P0 maps to M
-                    sequence<2>     // P1 maps to N
-                >,
-                tuple<
-                    sequence<1>,
-                    sequence<1>
-                >,
-                sequence<1, 2>,     // Y0 -> M(0), Y1 -> N(0)
-                sequence<0, 0>      // Y0 -> M(0), Y1 -> N(0)
+                // One M per warp, split N into lanes
+                tuple<sequence<1>, sequence<2>>,
+                tuple<sequence<0>, sequence<0>>,
+                /// One element per lane
+                sequence<2>,
+                sequence<1>
             >{});
     }
 

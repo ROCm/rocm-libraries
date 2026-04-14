@@ -157,14 +157,12 @@ struct WarpDecodeDownReduceKernel
                 }
 
                 constexpr auto spans = decltype(inter_tile)::get_distributed_spans();
-                sweep_tile_span(spans[number<0>{}], [&](auto idx0) {
-                    sweep_tile_span(spans[number<1>{}], [&](auto idx1) {
-                        constexpr auto idx = make_tuple(idx0, idx1);
-                        auto act_val = type_convert<ComputeDataType>(inter_tile[idx]);
-                        auto d_val   = type_convert<ComputeDataType>(w_down_tile[idx]);
+                sweep_tile_span(spans[number<1>{}], [&](auto idx1) {
+                    constexpr auto idx = make_tuple(make_tuple(), idx1);
+                    auto act_val = type_convert<ComputeDataType>(inter_tile[idx]);
+                    auto d_val   = type_convert<ComputeDataType>(w_down_tile[idx]);
 
-                        acc += w * act_val * (d_val * ds);
-                    });
+                    acc += w * act_val * (d_val * ds);
                 });
 
                 move_tile_window(intermediate_window, {0, get_warp_size()});
@@ -176,24 +174,7 @@ struct WarpDecodeDownReduceKernel
 
         if(get_lane_id() == 0)
         {
-            auto y_m_n = make_naive_tensor_view<address_space_enum::global>(
-                static_cast<YDataType*>(kargs.p_y),
-                make_tuple(kargs.b, kargs.hidden),
-                make_tuple(kargs.stride_y, 1),
-                number<1>{},
-                number<1>{});
-
-            auto y_window = make_tile_window(
-                y_m_n, 
-                make_tuple(number<1>{}, number<1>{}), 
-                {token_b, out_j}, 
-                Policy::template MakeOutputScalarDistribution<Problem>());
-
-            auto result_tile = make_static_distributed_tensor<YDataType>(
-                Policy::template MakeOutputScalarDistribution<Problem>());
-            result_tile.get_thread_buffer()[number<0>{}] = type_convert<YDataType>(result);
-
-            store_tile(y_window, result_tile);
+            static_cast<YDataType*>(kargs.p_y)[token_b * kargs.stride_y + out_j] = type_convert<YDataType>(result);
         }
     }
 };

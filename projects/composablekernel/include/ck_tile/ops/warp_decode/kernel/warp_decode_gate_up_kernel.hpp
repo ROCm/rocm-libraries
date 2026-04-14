@@ -212,16 +212,14 @@ struct WarpDecodeGateUpKernel
 
             // Inline dequantize & accumulate
             constexpr auto spans = decltype(x_tile)::get_distributed_spans();
-            sweep_tile_span(spans[number<0>{}], [&](auto idx0) {
-                sweep_tile_span(spans[number<1>{}], [&](auto idx1) {
-                    constexpr auto idx = make_tuple(idx0, idx1);
-                    auto x_val = type_convert<ComputeDataType>(x_tile[idx]);
-                    auto g_val = type_convert<ComputeDataType>(w_gate_tile[idx]);
-                    auto u_val = type_convert<ComputeDataType>(w_up_tile[idx]);
+            sweep_tile_span(spans[number<1>{}], [&](auto idx1) {
+                constexpr auto idx = make_tuple(make_tuple(), idx1);
+                auto x_val = type_convert<ComputeDataType>(x_tile[idx]);
+                auto g_val = type_convert<ComputeDataType>(w_gate_tile[idx]);
+                auto u_val = type_convert<ComputeDataType>(w_up_tile[idx]);
 
-                    gate_acc += (x_val * xs) * (g_val * gs);
-                    up_acc   += (x_val * xs) * (u_val * us);
-                });
+                gate_acc += (x_val * xs) * (g_val * gs);
+                up_acc   += (x_val * xs) * (u_val * us);
             });
 
             move_tile_window(x_window, {0, get_warp_size()});
@@ -240,24 +238,7 @@ struct WarpDecodeGateUpKernel
             activation_func(silu_gate, gate_acc);
             ComputeDataType result = silu_gate * up_acc;
 
-            auto out_m_n = make_naive_tensor_view<address_space_enum::global>(
-                static_cast<IntermediateDataType*>(kargs.p_intermediate),
-                make_tuple(kargs.b * kargs.top_k, kargs.inter),
-                make_tuple(kargs.stride_intermediate, 1),
-                number<1>{},
-                number<1>{});
-
-            auto out_window = make_tile_window(
-                out_m_n, 
-                make_tuple(number<1>{}, number<1>{}), 
-                {token_b * kargs.top_k + expert_k, neuron_j}, 
-                Policy::template MakeOutputScalarDistribution<Problem>());
-
-            auto result_tile = make_static_distributed_tensor<IntermediateDataType>(
-                Policy::template MakeOutputScalarDistribution<Problem>());
-            result_tile.get_thread_buffer()[number<0>{}] = type_convert<IntermediateDataType>(result);
-
-            store_tile(out_window, result_tile);
+            static_cast<IntermediateDataType*>(kargs.p_intermediate)[(token_b * kargs.top_k + expert_k) * kargs.stride_intermediate + neuron_j] = type_convert<IntermediateDataType>(result);
         }
     }
 };
