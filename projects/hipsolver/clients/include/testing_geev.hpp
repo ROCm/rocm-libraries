@@ -52,13 +52,8 @@ void print_array(T* array, int nrows, int ncols, int ld, std::string str = "arra
 
 #include "clientcommon.hpp"
 
-#if !defined(__HIP_PLATFORM_HCC__) && !defined(__HIP_PLATFORM_AMD__)
 static bool test_left_eigenvectors
     = false; // Computing left eigenvectors is not supported in cuSOLVER.
-#else
-static bool test_left_eigenvectors
-    = std::getenv("HIPSOLVER_TEST_GEEV_LEFT_EIGENVECTORS") != nullptr ? true : false;
-#endif
 static bool test_right_eigenvectors = true;
 
 template <testAPI_t API, typename I, typename SIZE, typename Td, typename INTd, typename Th>
@@ -1001,7 +996,7 @@ void testing_geev(Arguments& argus)
     // get arguments
     hipsolver_local_handle handle;
     hipsolver_local_params params;
-    char                   jobvlC = argus.get<char>("jobvl");
+    char                   jobvlC = argus.get<char>("jobvl", 'N');
     char                   jobvrC = argus.get<char>("jobvr");
     I                      n      = argus.get<int>("n");
     I                      lda    = argus.get<int>("lda", n);

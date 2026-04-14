@@ -234,6 +234,10 @@ try
     if(!lworkOnDevice || !lworkOnHost)
         return HIPSOLVER_STATUS_INVALID_VALUE;
 
+    // disable left eigenvector computation
+    if(jobvl == HIPSOLVER_EIG_MODE_VECTOR)
+        return HIPSOLVER_STATUS_NOT_SUPPORTED;
+
     *lworkOnDevice = 0;
     *lworkOnHost   = 0;
 
@@ -339,6 +343,10 @@ try
         return HIPSOLVER_STATUS_INVALID_VALUE;
     if(jobvr == HIPSOLVER_EIG_MODE_VECTOR && !VR)
         return HIPSOLVER_STATUS_INVALID_VALUE;
+
+    // disable left eigenvector computation
+    if(jobvl == HIPSOLVER_EIG_MODE_VECTOR)
+        return HIPSOLVER_STATUS_NOT_SUPPORTED;
 
     if(lda * n > INT_MAX)
         return HIPSOLVER_STATUS_INTERNAL_ERROR;

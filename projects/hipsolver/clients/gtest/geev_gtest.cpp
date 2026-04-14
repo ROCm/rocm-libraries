@@ -38,11 +38,7 @@ typedef std::tuple<vector<int>, vector<char>> geev_tuple;
 // case when n = -1, jobvl = N, and jobvr = N will also execute the bad arguments test
 // (null handle, null pointers and invalid values)
 
-#if defined(__HIP_PLATFORM_HCC__) || defined(__HIP_PLATFORM_AMD__)
-const vector<vector<char>> op_range = {{'N', 'N'}, {'N', 'V'}, {'V', 'N'}, {'V', 'V'}};
-#else
 const vector<vector<char>> op_range = {{'N', 'N'}, {'N', 'V'}};
-#endif
 
 // for checkin_lapack tests
 const vector<vector<int>> matrix_size_range = {
