@@ -5,61 +5,6 @@
 #include <gtest/gtest.h>
 #include <sstream>
 
-TEST(TestTypes, ToSdkTypeDataTypes)
-{
-    using namespace hipdnn_frontend;
-
-    EXPECT_EQ(toSdkType(DataType::FLOAT), hipdnn_data_sdk::data_objects::DataType::FLOAT);
-    EXPECT_EQ(toSdkType(DataType::HALF), hipdnn_data_sdk::data_objects::DataType::HALF);
-    EXPECT_EQ(toSdkType(DataType::BFLOAT16), hipdnn_data_sdk::data_objects::DataType::BFLOAT16);
-    EXPECT_EQ(toSdkType(DataType::DOUBLE), hipdnn_data_sdk::data_objects::DataType::DOUBLE);
-    EXPECT_EQ(toSdkType(DataType::UINT8), hipdnn_data_sdk::data_objects::DataType::UINT8);
-    EXPECT_EQ(toSdkType(DataType::INT32), hipdnn_data_sdk::data_objects::DataType::INT32);
-    EXPECT_EQ(toSdkType(DataType::INT8), hipdnn_data_sdk::data_objects::DataType::INT8);
-    EXPECT_EQ(toSdkType(DataType::FP8_E4M3), hipdnn_data_sdk::data_objects::DataType::FP8_E4M3);
-    EXPECT_EQ(toSdkType(DataType::FP8_E5M2), hipdnn_data_sdk::data_objects::DataType::FP8_E5M2);
-    EXPECT_EQ(toSdkType(DataType::FP8_E8M0), hipdnn_data_sdk::data_objects::DataType::FP8_E8M0);
-    EXPECT_EQ(toSdkType(DataType::FP4_E2M1), hipdnn_data_sdk::data_objects::DataType::FP4_E2M1);
-    EXPECT_EQ(toSdkType(DataType::INT4), hipdnn_data_sdk::data_objects::DataType::INT4);
-    EXPECT_EQ(toSdkType(DataType::FP6_E2M3), hipdnn_data_sdk::data_objects::DataType::FP6_E2M3);
-    EXPECT_EQ(toSdkType(DataType::FP6_E3M2), hipdnn_data_sdk::data_objects::DataType::FP6_E3M2);
-    EXPECT_EQ(toSdkType(DataType::INT64), hipdnn_data_sdk::data_objects::DataType::INT64);
-    EXPECT_EQ(toSdkType(DataType::NOT_SET), hipdnn_data_sdk::data_objects::DataType::UNSET);
-}
-
-TEST(TestTypes, FromSdkTypeDataTypes)
-{
-    using namespace hipdnn_frontend;
-
-    EXPECT_EQ(fromSdkType(hipdnn_data_sdk::data_objects::DataType::FLOAT), DataType::FLOAT);
-    EXPECT_EQ(fromSdkType(hipdnn_data_sdk::data_objects::DataType::HALF), DataType::HALF);
-    EXPECT_EQ(fromSdkType(hipdnn_data_sdk::data_objects::DataType::BFLOAT16), DataType::BFLOAT16);
-    EXPECT_EQ(fromSdkType(hipdnn_data_sdk::data_objects::DataType::DOUBLE), DataType::DOUBLE);
-    EXPECT_EQ(fromSdkType(hipdnn_data_sdk::data_objects::DataType::UINT8), DataType::UINT8);
-    EXPECT_EQ(fromSdkType(hipdnn_data_sdk::data_objects::DataType::INT32), DataType::INT32);
-    EXPECT_EQ(fromSdkType(hipdnn_data_sdk::data_objects::DataType::INT8), DataType::INT8);
-    EXPECT_EQ(fromSdkType(hipdnn_data_sdk::data_objects::DataType::FP8_E4M3), DataType::FP8_E4M3);
-    EXPECT_EQ(fromSdkType(hipdnn_data_sdk::data_objects::DataType::FP8_E5M2), DataType::FP8_E5M2);
-    EXPECT_EQ(fromSdkType(hipdnn_data_sdk::data_objects::DataType::FP8_E8M0), DataType::FP8_E8M0);
-    EXPECT_EQ(fromSdkType(hipdnn_data_sdk::data_objects::DataType::FP4_E2M1), DataType::FP4_E2M1);
-    EXPECT_EQ(fromSdkType(hipdnn_data_sdk::data_objects::DataType::INT4), DataType::INT4);
-    EXPECT_EQ(fromSdkType(hipdnn_data_sdk::data_objects::DataType::FP6_E2M3), DataType::FP6_E2M3);
-    EXPECT_EQ(fromSdkType(hipdnn_data_sdk::data_objects::DataType::FP6_E3M2), DataType::FP6_E3M2);
-    EXPECT_EQ(fromSdkType(hipdnn_data_sdk::data_objects::DataType::INT64), DataType::INT64);
-    EXPECT_EQ(fromSdkType(hipdnn_data_sdk::data_objects::DataType::UNSET), DataType::NOT_SET);
-}
-
-TEST(TestTypes, ConvolutionModeConversion)
-{
-    using namespace hipdnn_frontend;
-
-    EXPECT_EQ(toSdkType(ConvolutionMode::CROSS_CORRELATION),
-              hipdnn_data_sdk::data_objects::ConvMode::CROSS_CORRELATION);
-    EXPECT_EQ(toSdkType(ConvolutionMode::CONVOLUTION),
-              hipdnn_data_sdk::data_objects::ConvMode::CONVOLUTION);
-    EXPECT_EQ(toSdkType(ConvolutionMode::NOT_SET), hipdnn_data_sdk::data_objects::ConvMode::UNSET);
-}
-
 TEST(TestTypes, HeuristicModeConversion)
 {
     using namespace hipdnn_frontend;
@@ -297,42 +242,6 @@ TEST(TestTypes, GetKnobValueTypeFromVariantString)
     EXPECT_EQ(getKnobValueTypeFromVariant(value), KnobValueType::STRING);
 }
 
-TEST(TestTypes, ToSdkTypeKnobValueType)
-{
-    using namespace hipdnn_frontend;
-
-    EXPECT_EQ(toSdkType(KnobValueType::INT64), hipdnn_data_sdk::data_objects::KnobValue::IntValue);
-    EXPECT_EQ(toSdkType(KnobValueType::FLOAT64),
-              hipdnn_data_sdk::data_objects::KnobValue::FloatValue);
-    EXPECT_EQ(toSdkType(KnobValueType::STRING),
-              hipdnn_data_sdk::data_objects::KnobValue::StringValue);
-    EXPECT_EQ(toSdkType(KnobValueType::NOT_SET), hipdnn_data_sdk::data_objects::KnobValue::NONE);
-}
-
-TEST(TestTypes, FromSdkTypeKnobValue)
-{
-    using namespace hipdnn_frontend;
-
-    EXPECT_EQ(fromSdkType(hipdnn_data_sdk::data_objects::KnobValue::IntValue),
-              KnobValueType::INT64);
-    EXPECT_EQ(fromSdkType(hipdnn_data_sdk::data_objects::KnobValue::FloatValue),
-              KnobValueType::FLOAT64);
-    EXPECT_EQ(fromSdkType(hipdnn_data_sdk::data_objects::KnobValue::StringValue),
-              KnobValueType::STRING);
-    EXPECT_EQ(fromSdkType(hipdnn_data_sdk::data_objects::KnobValue::NONE), KnobValueType::NOT_SET);
-}
-
-TEST(TestTypes, KnobValueTypeRoundTripConversion)
-{
-    using namespace hipdnn_frontend;
-
-    // Test round-trip conversion: frontend -> SDK -> frontend
-    EXPECT_EQ(fromSdkType(toSdkType(KnobValueType::INT64)), KnobValueType::INT64);
-    EXPECT_EQ(fromSdkType(toSdkType(KnobValueType::FLOAT64)), KnobValueType::FLOAT64);
-    EXPECT_EQ(fromSdkType(toSdkType(KnobValueType::STRING)), KnobValueType::STRING);
-    EXPECT_EQ(fromSdkType(toSdkType(KnobValueType::NOT_SET)), KnobValueType::NOT_SET);
-}
-
 TEST(TestTypes, ToHipdnnDataType)
 {
     using namespace hipdnn_frontend;
@@ -460,75 +369,6 @@ TEST(TestTypes, FromHipdnnConvModeRoundTrip)
         EXPECT_TRUE(err.is_good());
         EXPECT_EQ(roundTripped, mode);
     }
-}
-
-TEST(TestTypes, ToSdkTypeReductionMode)
-{
-    using namespace hipdnn_frontend;
-    using sdk = hipdnn_data_sdk::data_objects::ReductionMode;
-
-    EXPECT_EQ(toSdkType(ReductionMode::NOT_SET), sdk::NOT_SET);
-    EXPECT_EQ(toSdkType(ReductionMode::ADD), sdk::ADD);
-    EXPECT_EQ(toSdkType(ReductionMode::MUL), sdk::MUL);
-    EXPECT_EQ(toSdkType(ReductionMode::MIN), sdk::MIN_OP);
-    EXPECT_EQ(toSdkType(ReductionMode::MAX), sdk::MAX_OP);
-    EXPECT_EQ(toSdkType(ReductionMode::AMAX), sdk::AMAX);
-    EXPECT_EQ(toSdkType(ReductionMode::AVG), sdk::AVG);
-    EXPECT_EQ(toSdkType(ReductionMode::NORM1), sdk::NORM1);
-    EXPECT_EQ(toSdkType(ReductionMode::NORM2), sdk::NORM2);
-    EXPECT_EQ(toSdkType(ReductionMode::MUL_NO_ZEROS), sdk::MUL_NO_ZEROS);
-}
-
-TEST(TestTypes, FromSdkTypeReductionMode)
-{
-    using namespace hipdnn_frontend;
-    using sdk = hipdnn_data_sdk::data_objects::ReductionMode;
-
-    EXPECT_EQ(fromSdkType(sdk::NOT_SET), ReductionMode::NOT_SET);
-    EXPECT_EQ(fromSdkType(sdk::ADD), ReductionMode::ADD);
-    EXPECT_EQ(fromSdkType(sdk::MUL), ReductionMode::MUL);
-    EXPECT_EQ(fromSdkType(sdk::MIN_OP), ReductionMode::MIN);
-    EXPECT_EQ(fromSdkType(sdk::MAX_OP), ReductionMode::MAX);
-    EXPECT_EQ(fromSdkType(sdk::AMAX), ReductionMode::AMAX);
-    EXPECT_EQ(fromSdkType(sdk::AVG), ReductionMode::AVG);
-    EXPECT_EQ(fromSdkType(sdk::NORM1), ReductionMode::NORM1);
-    EXPECT_EQ(fromSdkType(sdk::NORM2), ReductionMode::NORM2);
-    EXPECT_EQ(fromSdkType(sdk::MUL_NO_ZEROS), ReductionMode::MUL_NO_ZEROS);
-}
-
-TEST(TestTypes, ReductionModeRoundTrip)
-{
-    using namespace hipdnn_frontend;
-
-    const std::vector<ReductionMode> modes = {ReductionMode::NOT_SET,
-                                              ReductionMode::ADD,
-                                              ReductionMode::MUL,
-                                              ReductionMode::MIN,
-                                              ReductionMode::MAX,
-                                              ReductionMode::AMAX,
-                                              ReductionMode::AVG,
-                                              ReductionMode::NORM1,
-                                              ReductionMode::NORM2,
-                                              ReductionMode::MUL_NO_ZEROS};
-
-    for(auto mode : modes)
-    {
-        EXPECT_EQ(fromSdkType(toSdkType(mode)), mode)
-            << "Round-trip failed for ReductionMode " << static_cast<int>(mode);
-    }
-}
-
-TEST(TestTypes, ReductionModeMinMaxSdkNameMapping)
-{
-    using namespace hipdnn_frontend;
-    using sdk = hipdnn_data_sdk::data_objects::ReductionMode;
-
-    // MIN and MAX are renamed to MIN_OP and MAX_OP in the SDK schema due to
-    // flatc reserved identifier conflicts (matched to PointwiseMode convention).
-    EXPECT_EQ(toSdkType(ReductionMode::MIN), sdk::MIN_OP);
-    EXPECT_EQ(toSdkType(ReductionMode::MAX), sdk::MAX_OP);
-    EXPECT_EQ(fromSdkType(sdk::MIN_OP), ReductionMode::MIN);
-    EXPECT_EQ(fromSdkType(sdk::MAX_OP), ReductionMode::MAX);
 }
 
 TEST(TestTypes, FromHipdnnPointwiseModeAllValidModes)

@@ -179,7 +179,6 @@ def _preview_files(config, mode: str) -> list[str]:
     ]
     frontend_fragments = [
         "fragments/graph_method.txt",
-        "fragments/deserialize_case.txt",
         "fragments/graph_includes.txt",
         "fragments/frontend_cmake_entries.txt",
         "fragments/node_type_enum.txt",
@@ -199,7 +198,6 @@ def _preview_files(config, mode: str) -> list[str]:
         "fragments/node_unpack_override.txt",
         "fragments/descriptor_lifting_additions.txt",
         "fragments/packer_name_addition.txt",
-        "fragments/packer_name_test.txt",
     ]
 
     if mode == MODE_BACKEND:

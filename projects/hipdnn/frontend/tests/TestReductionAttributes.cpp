@@ -2,7 +2,6 @@
 // SPDX-License-Identifier:  MIT
 
 #include <gtest/gtest.h>
-#include <hipdnn_data_sdk/data_objects/reduction_attributes_generated.h>
 #include <hipdnn_frontend/Types.hpp>
 #include <hipdnn_frontend/attributes/ReductionAttributes.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
@@ -106,101 +105,6 @@ TEST(TestReductionAttributes, SetYWithMove)
     EXPECT_EQ(attrs.get_y().get(), rawPtr);
 }
 
-TEST(TestReductionAttributes, PackAttributesCorrectMode)
-{
-    ReductionAttributes attrs;
-    attrs.set_mode(ReductionMode::AVG);
-
-    auto x = std::make_shared<TensorAttributes>();
-    x->set_uid(10).set_dim({4, 8}).set_stride({8, 1}).set_data_type(DataType::FLOAT);
-    auto y = std::make_shared<TensorAttributes>();
-    y->set_uid(20).set_dim({1, 8}).set_stride({8, 1}).set_data_type(DataType::FLOAT);
-
-    attrs.set_x(x);
-    attrs.set_y(y);
-
-    flatbuffers::FlatBufferBuilder builder;
-    auto offset = attrs.pack_attributes(builder);
-    builder.Finish(offset);
-
-    auto* fb = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::ReductionAttributes>(
-        builder.GetBufferPointer());
-
-    EXPECT_EQ(fb->mode(), hipdnn_data_sdk::data_objects::ReductionMode::AVG);
-    EXPECT_EQ(fb->in_tensor_uid(), 10);
-    EXPECT_EQ(fb->out_tensor_uid(), 20);
-}
-
-TEST(TestReductionAttributes, PackAttributesMinMaxMapping)
-{
-    {
-        ReductionAttributes attrs;
-        attrs.set_mode(ReductionMode::MIN);
-        auto x = std::make_shared<TensorAttributes>();
-        x->set_uid(1).set_dim({4, 8}).set_stride({8, 1}).set_data_type(DataType::FLOAT);
-        auto y = std::make_shared<TensorAttributes>();
-        y->set_uid(2).set_dim({1, 8}).set_stride({8, 1}).set_data_type(DataType::FLOAT);
-        attrs.set_x(x);
-        attrs.set_y(y);
-
-        flatbuffers::FlatBufferBuilder builder;
-        auto offset = attrs.pack_attributes(builder);
-        builder.Finish(offset);
-
-        auto* fb = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::ReductionAttributes>(
-            builder.GetBufferPointer());
-        EXPECT_EQ(fb->mode(), hipdnn_data_sdk::data_objects::ReductionMode::MIN_OP);
-    }
-    {
-        ReductionAttributes attrs;
-        attrs.set_mode(ReductionMode::MAX);
-        auto x = std::make_shared<TensorAttributes>();
-        x->set_uid(1).set_dim({4, 8}).set_stride({8, 1}).set_data_type(DataType::FLOAT);
-        auto y = std::make_shared<TensorAttributes>();
-        y->set_uid(2).set_dim({1, 8}).set_stride({8, 1}).set_data_type(DataType::FLOAT);
-        attrs.set_x(x);
-        attrs.set_y(y);
-
-        flatbuffers::FlatBufferBuilder builder;
-        auto offset = attrs.pack_attributes(builder);
-        builder.Finish(offset);
-
-        auto* fb = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::ReductionAttributes>(
-            builder.GetBufferPointer());
-        EXPECT_EQ(fb->mode(), hipdnn_data_sdk::data_objects::ReductionMode::MAX_OP);
-    }
-}
-
-TEST(TestReductionAttributes, FromFlatBufferRoundTrip)
-{
-    auto x = std::make_shared<TensorAttributes>();
-    x->set_uid(5).set_dim({4, 8}).set_stride({8, 1}).set_data_type(DataType::FLOAT);
-    auto y = std::make_shared<TensorAttributes>();
-    y->set_uid(7).set_dim({1, 8}).set_stride({8, 1}).set_data_type(DataType::FLOAT);
-
-    ReductionAttributes original;
-    original.set_mode(ReductionMode::NORM2);
-    original.set_x(x);
-    original.set_y(y);
-
-    flatbuffers::FlatBufferBuilder builder;
-    auto offset = original.pack_attributes(builder);
-    builder.Finish(offset);
-
-    auto* fb = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::ReductionAttributes>(
-        builder.GetBufferPointer());
-
-    std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>> tensorMap;
-    tensorMap[5] = x;
-    tensorMap[7] = y;
-
-    auto restored = ReductionAttributes::fromFlatBuffer(fb, tensorMap);
-
-    EXPECT_EQ(restored.get_mode().value(), ReductionMode::NORM2);
-    EXPECT_EQ(restored.get_x()->get_uid(), 5);
-    EXPECT_EQ(restored.get_y()->get_uid(), 7);
-}
-
 TEST(TestReductionAttributes, IsDeterministicDefaultsFalse)
 {
     const ReductionAttributes attrs;
@@ -215,56 +119,6 @@ TEST(TestReductionAttributes, SetGetIsDeterministic)
 
     attrs.set_is_deterministic(false);
     EXPECT_FALSE(attrs.get_is_deterministic());
-}
-
-TEST(TestReductionAttributes, PackAttributesIsDeterministic)
-{
-    ReductionAttributes attrs;
-    attrs.set_mode(ReductionMode::ADD);
-    attrs.set_is_deterministic(true);
-
-    auto x = std::make_shared<TensorAttributes>();
-    x->set_uid(1).set_dim({4, 8}).set_stride({8, 1}).set_data_type(DataType::FLOAT);
-    auto y = std::make_shared<TensorAttributes>();
-    y->set_uid(2).set_dim({1, 8}).set_stride({8, 1}).set_data_type(DataType::FLOAT);
-    attrs.set_x(x);
-    attrs.set_y(y);
-
-    flatbuffers::FlatBufferBuilder builder;
-    auto offset = attrs.pack_attributes(builder);
-    builder.Finish(offset);
-
-    auto* fb = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::ReductionAttributes>(
-        builder.GetBufferPointer());
-    EXPECT_TRUE(fb->is_deterministic());
-}
-
-TEST(TestReductionAttributes, FromFlatBufferIsDeterministicRoundTrip)
-{
-    auto x = std::make_shared<TensorAttributes>();
-    x->set_uid(1).set_dim({4, 8}).set_stride({8, 1}).set_data_type(DataType::FLOAT);
-    auto y = std::make_shared<TensorAttributes>();
-    y->set_uid(2).set_dim({1, 8}).set_stride({8, 1}).set_data_type(DataType::FLOAT);
-
-    ReductionAttributes original;
-    original.set_mode(ReductionMode::ADD);
-    original.set_is_deterministic(true);
-    original.set_x(x);
-    original.set_y(y);
-
-    flatbuffers::FlatBufferBuilder builder;
-    auto offset = original.pack_attributes(builder);
-    builder.Finish(offset);
-
-    auto* fb = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::ReductionAttributes>(
-        builder.GetBufferPointer());
-
-    std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>> tensorMap;
-    tensorMap[1] = x;
-    tensorMap[2] = y;
-
-    auto restored = ReductionAttributes::fromFlatBuffer(fb, tensorMap);
-    EXPECT_TRUE(restored.get_is_deterministic());
 }
 
 TEST(TestReductionAttributes, ReductionAttributesTypedefExists)
