@@ -1583,7 +1583,9 @@ inline flatbuffers::FlatBufferBuilder
     std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
         tensorAttributes;
 
-    const std::vector<int64_t> derivedDims = hipdnn_data_sdk::utilities::getDerivedShape(dims);
+    std::vector<int64_t> derivedDims(dims);
+    derivedDims[0] = 1; // Batch dim should be one, otherwise matches.
+
     const std::vector<int64_t> derivedStrides = hipdnn_data_sdk::utilities::generateStrides(
         derivedDims, hipdnn_data_sdk::utilities::extractStrideOrder(strides));
 
@@ -1882,7 +1884,10 @@ inline flatbuffers::FlatBufferBuilder
                             = hipdnn_data_sdk::data_objects::DataType::HALF,
                             bool withAttnMask = false,
                             bool withScale = false,
-                            bool withStats = false)
+                            bool withStats = false,
+                            bool alibiMask = false,
+                            bool paddingMask = false,
+                            bool causalMask = false)
 {
     flatbuffers::FlatBufferBuilder builder;
     std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
@@ -1974,7 +1979,16 @@ inline flatbuffers::FlatBufferBuilder
         flatbuffers::nullopt, // descale_s_tensor_uid
         flatbuffers::nullopt, // scale_s_tensor_uid
         flatbuffers::nullopt, // scale_o_tensor_uid
-        statsUid);
+        statsUid,
+        flatbuffers::nullopt, // max_tensor_uid
+        flatbuffers::nullopt,
+        flatbuffers::nullopt,
+        flatbuffers::nullopt,
+        flatbuffers::nullopt,
+        flatbuffers::nullopt,
+        alibiMask,
+        paddingMask,
+        causalMask);
 
     std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> nodes;
     nodes.push_back(hipdnn_data_sdk::data_objects::CreateNodeDirect(

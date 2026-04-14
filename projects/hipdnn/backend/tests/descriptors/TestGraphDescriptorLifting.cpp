@@ -15,10 +15,10 @@
 
 #include <flatbuffers/flatbuffers.h>
 #include <gtest/gtest.h>
-#include <hipdnn_data_sdk/data_objects/convolution_fwd_attributes_generated.h>
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
-#include <hipdnn_data_sdk/data_objects/matmul_attributes_generated.h>
-#include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/convolution_fwd_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/matmul_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_test_sdk/constants/ConvFpropConstants.hpp>
 #include <hipdnn_test_sdk/utilities/ToVec.hpp>
 
@@ -30,7 +30,7 @@
 
 using namespace hipdnn_backend;
 using namespace hipdnn_backend::test_utilities;
-using namespace hipdnn_data_sdk::data_objects;
+using namespace hipdnn_flatbuffers_sdk::data_objects;
 using namespace hipdnn_tests::constants;
 using hipdnn_tests::toVec;
 
@@ -516,17 +516,17 @@ TEST_F(TestGraphDescriptorLifting, DoubleRoundTrip)
 }
 
 // =============================================================================
-// Mutual Exclusivity Tests (FlatBuffer vs C-API flows)
+// Cross-flow Tests (FlatBuffer + C-API interoperability)
 // =============================================================================
 
-TEST_F(TestGraphDescriptorLifting, SetOperationsAfterDeserializeThrows)
+TEST_F(TestGraphDescriptorLifting, SetOperationsAfterDeserializeSucceeds)
 {
     // Build and serialize a single conv op graph
     auto conv1 = createDefaultConvOp();
     const std::vector<HipdnnBackendDescriptor*> ops = {conv1.convOp.get()};
     auto serializedBytes = buildAndSerializeGraph(ops);
 
-    // Create a new GraphDescriptor and deserialize the bytes (FlatBuffer flow)
+    // Create a new GraphDescriptor and deserialize the bytes
     auto graphWrapper = createDescriptor<GraphDescriptor>();
     auto graphDesc = graphWrapper->asDescriptor<GraphDescriptor>();
     graphDesc->deserializeGraph(serializedBytes.data(), serializedBytes.size());
@@ -537,14 +537,19 @@ TEST_F(TestGraphDescriptorLifting, SetOperationsAfterDeserializeThrows)
                                             1,
                                             static_cast<const void*>(&handle)));
 
-    // Attempting to add operations after deserialization should throw NOT_SUPPORTED
-    auto conv2 = createDefaultConvOp();
+    // Adding operations after deserialization appends to the existing operations
+    auto conv2 = createDefaultConvOp(HIPDNN_DATA_HALF);
     HipdnnBackendDescriptor* op2Ptr = conv2.convOp.get();
-    ASSERT_THROW_HIPDNN_STATUS(graphDesc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_OPS,
-                                                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                                                       1,
-                                                       static_cast<const void*>(&op2Ptr)),
-                               HIPDNN_STATUS_NOT_SUPPORTED);
+    ASSERT_NO_THROW(graphDesc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_OPS,
+                                            HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                            1,
+                                            static_cast<const void*>(&op2Ptr)));
+
+    // Verify the operations count includes both deserialized and appended ops
+    int64_t elementCount = 0;
+    ASSERT_NO_THROW(graphDesc->getAttribute(
+        HIPDNN_ATTR_OPERATIONGRAPH_OPS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 0, &elementCount, nullptr));
+    EXPECT_EQ(elementCount, 2);
 }
 
 TEST_F(TestGraphDescriptorLifting, GetAttributeOpsAfterDeserializeSucceeds)
@@ -590,7 +595,7 @@ TEST_F(TestGraphDescriptorLifting, DeserializeOnlyFinalize)
                                                  static_cast<const uint8_t*>(serialized.ptr)
                                                      + serialized.size);
 
-    // Deserialize-only finalize should reuse cached bytes without rebuilding
+    // Re-serializing from unpacked operations should produce identical bytes
     ASSERT_EQ(originalBytes.size(), reSerializedBytes.size());
     EXPECT_EQ(originalBytes, reSerializedBytes);
 }
