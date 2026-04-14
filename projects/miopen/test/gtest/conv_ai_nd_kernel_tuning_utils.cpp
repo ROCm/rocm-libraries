@@ -36,6 +36,7 @@
 #include <miopen/handle.hpp>
 #include <miopen/solver/problem_description_interpreter.hpp>
 #include <miopen/conv/solvers.hpp>
+#include <miopen/solver/ck_impl_lib_loader.hpp>
 #include <miopen/filesystem.hpp>
 
 #if MIOPEN_ENABLE_AI_KERNEL_TUNING
@@ -284,7 +285,7 @@ void ValidateMetadataEncoding(const std::string& solver_name,
                               const std::vector<std::string>& all_ck_kernels,
                               const std::string& device_arch)
 {
-    ASSERT_FALSE(all_ck_kernels.empty()) << "No CK instances found for " << solver_name;
+    ASSERT_FALSE(all_ck_kernels.empty()) << "No CK kernel instances found for " << solver_name;
     MIOPEN_LOG_I("Testing " << all_ck_kernels.size() << " total CK instances for " << solver_name);
 
     const auto& model    = GetCandidateSelectionModel(device_arch, solver_name);
@@ -975,6 +976,13 @@ TEST_P(GPU_ConvNDKernelTuningAI_FP32, RunParameterPredictionModel_Fallback_Test)
 
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
 
+// Helper: get all kernel type strings for a given solver type via CkImplLibLoader
+std::vector<std::string> GetAllKernelTypeStringsFor(miopen::solver::CKSolverType solver,
+                                                    const std::string& device_name)
+{
+    return miopen::solver::CkImplLibLoader::Get(device_name).GetAllKernelTypeStrings(solver);
+}
+
 // Fixed fixture tests for specific directions (non-parameterized)
 class GPU_Conv2DKernelTuningAI_FP32 : public GPU_ConvNDKernelTuningAI_Base
 {
@@ -1001,37 +1009,49 @@ protected:
 TEST_F(GPU_Conv2DKernelTuningAI_FP32, MetadataEncodingValidation_AllCKInstances_Wrw_Test)
 {
     ValidateMetadataEncoding(
-        "ConvHipImplicitGemmGroupWrwXdlops", GetAllWrwKernelTypeStrings(), device_arch);
+        "ConvHipImplicitGemmGroupWrwXdlops",
+        GetAllKernelTypeStringsFor(miopen::solver::CKSolverType::GrpConvWrw, device_arch),
+        device_arch);
 }
 
 TEST_F(GPU_Conv2DKernelTuningAI_FP32, MetadataEncodingValidation_AllCKInstances_Fwd_Test)
 {
     ValidateMetadataEncoding(
-        "ConvHipImplicitGemmGroupFwdXdlops", GetAllFwdKernelTypeStrings(), device_arch);
+        "ConvHipImplicitGemmGroupFwdXdlops",
+        GetAllKernelTypeStringsFor(miopen::solver::CKSolverType::GrpConvFwd, device_arch),
+        device_arch);
 }
 
 TEST_F(GPU_Conv2DKernelTuningAI_FP32, MetadataEncodingValidation_AllCKInstances_Bwd_Test)
 {
     ValidateMetadataEncoding(
-        "ConvHipImplicitGemmGroupBwdXdlops", GetAllBwdKernelTypeStrings(), device_arch);
+        "ConvHipImplicitGemmGroupBwdXdlops",
+        GetAllKernelTypeStringsFor(miopen::solver::CKSolverType::GrpConvBwd, device_arch),
+        device_arch);
 }
 
 TEST_F(GPU_Conv3DKernelTuningAI_FP32, MetadataEncodingValidation_AllCKInstances_Wrw_Test)
 {
     ValidateMetadataEncoding(
-        "ConvHipImplicitGemm3DGroupWrwXdlops", GetAllWrwKernelTypeStrings(), device_arch);
+        "ConvHipImplicitGemm3DGroupWrwXdlops",
+        GetAllKernelTypeStringsFor(miopen::solver::CKSolverType::GrpConv3dWrw, device_arch),
+        device_arch);
 }
 
 TEST_F(GPU_Conv3DKernelTuningAI_FP32, MetadataEncodingValidation_AllCKInstances_Fwd_Test)
 {
     ValidateMetadataEncoding(
-        "ConvHipImplicitGemm3DGroupFwdXdlops", GetAllFwdKernelTypeStrings(), device_arch);
+        "ConvHipImplicitGemm3DGroupFwdXdlops",
+        GetAllKernelTypeStringsFor(miopen::solver::CKSolverType::GrpConv3dFwd, device_arch),
+        device_arch);
 }
 
 TEST_F(GPU_Conv3DKernelTuningAI_FP32, MetadataEncodingValidation_AllCKInstances_Bwd_Test)
 {
     ValidateMetadataEncoding(
-        "ConvHipImplicitGemm3DGroupBwdXdlops", GetAllBwdKernelTypeStrings(), device_arch);
+        "ConvHipImplicitGemm3DGroupBwdXdlops",
+        GetAllKernelTypeStringsFor(miopen::solver::CKSolverType::GrpConv3dBwd, device_arch),
+        device_arch);
 }
 
 #endif // MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
@@ -1314,7 +1334,7 @@ TEST_F(GPU_RunAIHeuristics_Integration_FP32, CandidateSelection_BasicFlow)
         true                                 // supports_ktn
     };
 
-    auto fill_kernels = [&](const miopen::conv::ProblemDescription&) {
+    auto fill_kernels = [&](const miopen::conv::ProblemDescription&, bool /*try_tf32*/) {
         return std::vector<std::string>{
             "DeviceGroupedConvBwdWeight_Xdl_CShuffle<64,64,64,4,Default,4,2,2,1,4,1,4,1,1,1>",
             "DeviceGroupedConvBwdWeight_Xdl_CShuffle<128,128,32,4,Default,4,2,1,4,4,1,1,1,1,1>"};
@@ -1365,7 +1385,7 @@ TEST_F(GPU_RunAIHeuristics_Integration_FP32, Deterministic_EnforcesSplitK1)
         true                                 // supports_ktn
     };
 
-    auto fill_kernels = [&](const miopen::conv::ProblemDescription&) {
+    auto fill_kernels = [&](const miopen::conv::ProblemDescription&, bool /*try_tf32*/) {
         return std::vector<std::string>{
             "DeviceGroupedConvBwdWeight_Xdl_CShuffle<64,64,64,4,Default,4,2,2,1,4,1,4,1,1,1>"};
     };
@@ -1410,7 +1430,7 @@ TEST_F(GPU_RunAIHeuristics_Integration_FP32, ForwardSolver_NoSplitK)
         true                                 // supports_ktn
     };
 
-    auto fill_kernels = [&](const miopen::conv::ProblemDescription&) {
+    auto fill_kernels = [&](const miopen::conv::ProblemDescription&, bool /*try_tf32*/) {
         return std::vector<std::string>{
             "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle<256,256,256,4,Default,4,4,1,1,S<4,64,1>,"
             "S<1,0,2>,S<1,0,2>,2,8,8,1,S<4,64,1>,S<1,0,2>,S<1,0,2>,2,8,8,1,1,1,S<1,32,1,8>,S<1,32,"
@@ -1497,7 +1517,9 @@ TEST_F(GPU_CKValidatorIntegration_FP32, RestrictiveValidator_OnlyAcceptsSplitK1A
     int validator_call_count       = 0;
     auto state                     = CreateState();
 
-    auto fill_kernels = [this](const miopen::conv::ProblemDescription&) { return test_kernels_; };
+    auto fill_kernels = [this](const miopen::conv::ProblemDescription&, bool /*try_tf32*/) {
+        return test_kernels_;
+    };
 
     // Create validator with proper capture
     CKSplitKValidatorCreatorFunc ck_validator_creator =
@@ -1530,7 +1552,9 @@ TEST_F(GPU_CKValidatorIntegration_FP32, RejectAllValidator_ReturnsFalse)
     int validator_call_count = 0;
     auto state               = CreateState();
 
-    auto fill_kernels = [this](const miopen::conv::ProblemDescription&) { return test_kernels_; };
+    auto fill_kernels = [this](const miopen::conv::ProblemDescription&, bool /*try_tf32*/) {
+        return test_kernels_;
+    };
 
     // Create validator that rejects all combinations
     CKSplitKValidatorCreatorFunc ck_validator_creator =
