@@ -69,6 +69,25 @@ struct WarpDecodeGateUpKernel
         return val;
     }
 
+    template <typename ScaleLayout, typename ScaleDataType>
+    CK_TILE_DEVICE static ComputeDataType load_block2d_scale(const void* p_scale, index_t row_idx, index_t k_idx, index_t max_k)
+    {
+        if constexpr(ScaleLayoutTraits<ScaleLayout>::is_block2d)
+        {
+            if (!p_scale) return type_convert<ComputeDataType>(1.0f);
+            constexpr index_t Block_N = ScaleLayoutTraits<ScaleLayout>::block_n;
+            constexpr index_t Block_K = ScaleLayoutTraits<ScaleLayout>::block_k;
+            const ScaleDataType* ptr = static_cast<const ScaleDataType*>(p_scale);
+            index_t r = row_idx / Block_N;
+            index_t c = k_idx / Block_K;
+            return type_convert<ComputeDataType>(ptr[r * (max_k / Block_K) + c]);
+        }
+        else
+        {
+            return type_convert<ComputeDataType>(1.0f);
+        }
+    }
+
     CK_TILE_DEVICE void operator()(Kargs kargs) const
     {
         const index_t block_id = get_block_id();
@@ -125,6 +144,43 @@ struct WarpDecodeGateUpKernel
             {e * kargs.inter + neuron_j, 0}, 
             Policy::template MakeTileDistribution<Problem>());
 
+        // Scale initialization
+        ComputeDataType x_scale_val = type_convert<ComputeDataType>(1.0f);
+        if constexpr(std::is_same_v<typename Problem::XScaleLayout, WarpDecodeScaleLayout::PerTensor>)
+        {
+            if (kargs.p_x_scale)
+                x_scale_val = type_convert<ComputeDataType>(*static_cast<const typename Problem::XScaleDataType*>(kargs.p_x_scale));
+        }
+        else if constexpr(std::is_same_v<typename Problem::XScaleLayout, WarpDecodeScaleLayout::PerToken>)
+        {
+            if (kargs.p_x_scale)
+                x_scale_val = type_convert<ComputeDataType>(static_cast<const typename Problem::XScaleDataType*>(kargs.p_x_scale)[token_b]);
+        }
+
+        ComputeDataType w_gate_scale_val = type_convert<ComputeDataType>(1.0f);
+        if constexpr(std::is_same_v<typename Problem::WScaleLayout, WarpDecodeScaleLayout::PerTensor>)
+        {
+            if (kargs.p_w_gate_scale)
+                w_gate_scale_val = type_convert<ComputeDataType>(*static_cast<const typename Problem::WScaleDataType*>(kargs.p_w_gate_scale));
+        }
+        else if constexpr(std::is_same_v<typename Problem::WScaleLayout, WarpDecodeScaleLayout::PerToken>)
+        {
+            if (kargs.p_w_gate_scale)
+                w_gate_scale_val = type_convert<ComputeDataType>(static_cast<const typename Problem::WScaleDataType*>(kargs.p_w_gate_scale)[e * kargs.inter + neuron_j]);
+        }
+
+        ComputeDataType w_up_scale_val = type_convert<ComputeDataType>(1.0f);
+        if constexpr(std::is_same_v<typename Problem::WScaleLayout, WarpDecodeScaleLayout::PerTensor>)
+        {
+            if (kargs.p_w_up_scale)
+                w_up_scale_val = type_convert<ComputeDataType>(*static_cast<const typename Problem::WScaleDataType*>(kargs.p_w_up_scale));
+        }
+        else if constexpr(std::is_same_v<typename Problem::WScaleLayout, WarpDecodeScaleLayout::PerToken>)
+        {
+            if (kargs.p_w_up_scale)
+                w_up_scale_val = type_convert<ComputeDataType>(static_cast<const typename Problem::WScaleDataType*>(kargs.p_w_up_scale)[e * kargs.inter + neuron_j]);
+        }
+
         index_t num_iterations = kargs.hidden / get_warp_size();
 
         ComputeDataType gate_acc = 0;
@@ -136,6 +192,24 @@ struct WarpDecodeGateUpKernel
             auto w_gate_tile = load_tile(w_gate_window);
             auto w_up_tile   = load_tile(w_up_window);
 
+            index_t k_idx = i * get_warp_size() + get_lane_id();
+
+            ComputeDataType xs = x_scale_val;
+            if constexpr(ScaleLayoutTraits<typename Problem::XScaleLayout>::is_block2d)
+            {
+                xs = load_block2d_scale<typename Problem::XScaleLayout, typename Problem::XScaleDataType>(kargs.p_x_scale, token_b, k_idx, kargs.hidden);
+            }
+            ComputeDataType gs = w_gate_scale_val;
+            if constexpr(ScaleLayoutTraits<typename Problem::WScaleLayout>::is_block2d)
+            {
+                gs = load_block2d_scale<typename Problem::WScaleLayout, typename Problem::WScaleDataType>(kargs.p_w_gate_scale, e * kargs.inter + neuron_j, k_idx, kargs.hidden);
+            }
+            ComputeDataType us = w_up_scale_val;
+            if constexpr(ScaleLayoutTraits<typename Problem::WScaleLayout>::is_block2d)
+            {
+                us = load_block2d_scale<typename Problem::WScaleLayout, typename Problem::WScaleDataType>(kargs.p_w_up_scale, e * kargs.inter + neuron_j, k_idx, kargs.hidden);
+            }
+
             // Inline dequantize & accumulate
             constexpr auto spans = decltype(x_tile)::get_distributed_spans();
             sweep_tile_span(spans[number<0>{}], [&](auto idx0) {
@@ -145,8 +219,8 @@ struct WarpDecodeGateUpKernel
                     auto g_val = type_convert<ComputeDataType>(w_gate_tile[idx]);
                     auto u_val = type_convert<ComputeDataType>(w_up_tile[idx]);
 
-                    gate_acc += x_val * g_val;
-                    up_acc   += x_val * u_val;
+                    gate_acc += (x_val * xs) * (g_val * gs);
+                    up_acc   += (x_val * xs) * (u_val * us);
                 });
             });
 

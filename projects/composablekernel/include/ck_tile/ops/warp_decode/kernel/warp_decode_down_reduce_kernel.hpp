@@ -65,6 +65,25 @@ struct WarpDecodeDownReduceKernel
         return val;
     }
 
+    template <typename ScaleLayout, typename ScaleDataType>
+    CK_TILE_DEVICE static ComputeDataType load_block2d_scale(const void* p_scale, index_t row_idx, index_t k_idx, index_t max_k)
+    {
+        if constexpr(ScaleLayoutTraits<ScaleLayout>::is_block2d)
+        {
+            if (!p_scale) return type_convert<ComputeDataType>(1.0f);
+            constexpr index_t Block_N = ScaleLayoutTraits<ScaleLayout>::block_n;
+            constexpr index_t Block_K = ScaleLayoutTraits<ScaleLayout>::block_k;
+            const ScaleDataType* ptr = static_cast<const ScaleDataType*>(p_scale);
+            index_t r = row_idx / Block_N;
+            index_t c = k_idx / Block_K;
+            return type_convert<ComputeDataType>(ptr[r * (max_k / Block_K) + c]);
+        }
+        else
+        {
+            return type_convert<ComputeDataType>(1.0f);
+        }
+    }
+
     CK_TILE_DEVICE void operator()(Kargs kargs) const
     {
         const index_t block_id = get_block_id();
@@ -92,10 +111,23 @@ struct WarpDecodeDownReduceKernel
 
         ComputeDataType acc = 0;
 
+        ComputeDataType w_down_scale_val = type_convert<ComputeDataType>(1.0f);
+        if constexpr(std::is_same_v<typename Problem::WScaleLayout, WarpDecodeScaleLayout::PerTensor>)
+        {
+            if (kargs.p_w_down_scale)
+                w_down_scale_val = type_convert<ComputeDataType>(*static_cast<const typename Problem::WScaleDataType*>(kargs.p_w_down_scale));
+        }
+
         for(index_t k = 0; k < kargs.top_k; ++k)
         {
             const int32_t e = kargs.p_router_ids[token_b * kargs.top_k + k];
             const float w   = kargs.p_router_wts[token_b * kargs.top_k + k];
+
+            if constexpr(std::is_same_v<typename Problem::WScaleLayout, WarpDecodeScaleLayout::PerToken>)
+            {
+                if (kargs.p_w_down_scale)
+                    w_down_scale_val = type_convert<ComputeDataType>(static_cast<const typename Problem::WScaleDataType*>(kargs.p_w_down_scale)[e * kargs.hidden + out_j]);
+            }
 
             auto intermediate_window = make_tile_window(
                 intermediate_m_n, 
@@ -116,6 +148,14 @@ struct WarpDecodeDownReduceKernel
                 auto inter_tile   = load_tile(intermediate_window);
                 auto w_down_tile  = load_tile(w_down_window);
 
+                index_t k_idx = i * get_warp_size() + get_lane_id();
+
+                ComputeDataType ds = w_down_scale_val;
+                if constexpr(ScaleLayoutTraits<typename Problem::WScaleLayout>::is_block2d)
+                {
+                    ds = load_block2d_scale<typename Problem::WScaleLayout, typename Problem::WScaleDataType>(kargs.p_w_down_scale, e * kargs.hidden + out_j, k_idx, kargs.inter);
+                }
+
                 constexpr auto spans = decltype(inter_tile)::get_distributed_spans();
                 sweep_tile_span(spans[number<0>{}], [&](auto idx0) {
                     sweep_tile_span(spans[number<1>{}], [&](auto idx1) {
@@ -123,7 +163,7 @@ struct WarpDecodeDownReduceKernel
                         auto act_val = type_convert<ComputeDataType>(inter_tile[idx]);
                         auto d_val   = type_convert<ComputeDataType>(w_down_tile[idx]);
 
-                        acc += w * act_val * d_val;
+                        acc += w * act_val * (d_val * ds);
                     });
                 });
 
