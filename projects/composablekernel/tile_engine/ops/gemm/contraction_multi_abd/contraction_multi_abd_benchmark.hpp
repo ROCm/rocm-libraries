@@ -3,11 +3,6 @@
 
 #pragma once
 
-#include <iostream>
-#include <string>
-#include <fstream>
-#include <stdexcept>
-#include <iomanip>
 #include <array>
 #include <vector>
 
@@ -15,27 +10,10 @@
 #include "ck_tile/host.hpp"
 #include "ck_tile/ops/batched_contraction.hpp"
 #include "contraction_multi_abd_common.hpp"
+#include "../gemm_benchmark_common.hpp"
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-seggestions"
-
-enum class Metric
-{
-    LATENCY   = 0,
-    TFLOPS    = 1,
-    BANDWIDTH = 2
-};
-
-inline constexpr auto get_metric_name(Metric m)
-{
-    switch(m)
-    {
-    case Metric::LATENCY: return "latency";
-    case Metric::TFLOPS: return "tflops";
-    case Metric::BANDWIDTH: return "bandwidth";
-    default: throw std::invalid_argument("Unsupported metric type");
-    }
-}
 
 struct ContractionMultiABDProblem
 {
@@ -81,34 +59,6 @@ struct ContractionMultiABDProblem
     }
 };
 
-struct PerformanceResult
-{
-    double latency_;
-    double tflops_;
-    double bandwidth_;
-
-    static bool compare(const PerformanceResult& a, const PerformanceResult& b, Metric m)
-    {
-        switch(m)
-        {
-        case Metric::LATENCY: return a.latency_ < b.latency_;
-        case Metric::TFLOPS: return a.tflops_ > b.tflops_;
-        case Metric::BANDWIDTH: return a.bandwidth_ > b.bandwidth_;
-        default: throw std::invalid_argument("Unsupported metric type");
-        }
-    }
-
-    friend std::ostream& operator<<(std::ostream& os, const PerformanceResult& r)
-    {
-        os << "{\n"
-           << "   \"latency(ms)\": " << std::fixed << std::setprecision(2) << r.latency_ << ",\n"
-           << "   \"tflops(TFlops)\": " << r.tflops_ << ",\n"
-           << "   \"bandwidth(GB/s)\": " << r.bandwidth_ << "\n"
-           << "}";
-        return os;
-    }
-};
-
 struct KernelInstance
 {
     std::string name_;
@@ -137,17 +87,5 @@ struct Setting
     std::string csv_filename_;
     bool json_output_;
 };
-
-inline std::string get_rocm_version()
-{
-    std::ifstream version_file("/opt/rocm/.info/version");
-    if(version_file.is_open())
-    {
-        std::string version;
-        std::getline(version_file, version);
-        return version;
-    }
-    return "Unknown";
-}
 
 #pragma clang diagnostic pop

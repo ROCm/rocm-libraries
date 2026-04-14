@@ -8,33 +8,7 @@
 #include <sstream>
 #include "ck_tile/core.hpp"
 #include "ck_tile/host.hpp"
-
-template <typename T>
-struct DataTypeTraits;
-
-template <>
-struct DataTypeTraits<float>
-{
-    static constexpr const char* name = "fp32";
-};
-
-template <>
-struct DataTypeTraits<double>
-{
-    static constexpr const char* name = "fp64";
-};
-
-template <>
-struct DataTypeTraits<ck_tile::half_t>
-{
-    static constexpr const char* name = "fp16";
-};
-
-template <>
-struct DataTypeTraits<ck_tile::bf16_t>
-{
-    static constexpr const char* name = "bf16";
-};
+#include "ck_tile/ops/common/utils.hpp"
 
 template <typename Layout>
 constexpr auto is_row_major(Layout)

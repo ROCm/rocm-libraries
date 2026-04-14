@@ -187,8 +187,7 @@ class ContractionMultiABDProfiler
             {
                 if(file.tellp() == 0)
                 {
-                    file << "rocm_version,device_name,"
-                         << "g_total,m_total,n_total,k_total,"
+                    file << "rocm_version,device_name," << "g_total,m_total,n_total,k_total,"
                          << "name,latency(ms),tflops(TFlops),bandwidth(GB/s),metric\n";
                 }
 
