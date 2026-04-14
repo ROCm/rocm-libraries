@@ -576,7 +576,7 @@ static std::map<std::string, function_info> s_map{
     {"spmm", {sync_property::host_or_asynchronous}},
     {"spmv", {sync_property::depends}},
     {"spmv_clear_extra", {sync_property::synchronous}},
-    {"spmv_set_extra", {sync_property::synchronous}},
+    {"spmv_set_extra", {sync_property::partially_synchronous}},
     {"spmv_set_input", {sync_property::host}},
     {"sprune_csr2csr", {sync_property::synchronous}},
     {"sprune_csr2csr_buffer_size", {sync_property::asynchronous}},

@@ -335,7 +335,7 @@ int main(int argc, char** argv)
             = rocsparse_clients_test::function_properties_t::instance().check(nullptr);
         if(status_info_prop != rocsparse_status_success)
         {
-            std::cerr << argv[0] << ": function_properties_t::check failed " << std::endl;
+            ADD_FAILURE() << argv[0] << ": function_properties_t::check failed " << std::endl;
             return status_info_prop;
         }
         std::cout << "report "
