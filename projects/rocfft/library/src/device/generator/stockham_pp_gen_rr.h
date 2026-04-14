@@ -57,11 +57,6 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
         pp_factors_prod = product(factors_pp.begin(), factors_pp.end());
         length_off_dim  = params.parent_length[params.off_dim];
 
-        R.size                   = Expression{std::max(
-            nregisters, compute_nregisters(pp_factors_prod, factors_pp, threads_per_transform_pp))};
-        threads_per_transform_pp = params.pp_threads_per_transform;
-        transforms_per_block_pp  = workgroup_size / threads_per_transform_pp;
-
         R.size = Expression{std::max(
             nregisters, compute_nregisters(pp_factors_prod, factors_pp, threads_per_transform_pp))};
     }
