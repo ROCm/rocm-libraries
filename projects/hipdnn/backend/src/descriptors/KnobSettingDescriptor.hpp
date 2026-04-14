@@ -4,8 +4,8 @@
 #pragma once
 
 #include "BackendDescriptor.hpp"
-#include <hipdnn_data_sdk/data_objects/engine_config_generated.h>
-#include <hipdnn_data_sdk/data_objects/knob_value_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/engine_config_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/knob_value_generated.h>
 
 namespace hipdnn_backend
 {
@@ -43,7 +43,7 @@ public:
                       const void* arrayOfElements) override;
 
     /// Convert to a KnobSettingT for consumption by EngineConfigDescriptor
-    std::unique_ptr<hipdnn_data_sdk::data_objects::KnobSettingT> toKnobSettingT() const;
+    std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::KnobSettingT> toKnobSettingT() const;
 
     static hipdnnBackendDescriptorType_t getStaticType();
 
@@ -51,7 +51,7 @@ public:
 
 private:
     std::string _knobId;
-    hipdnn_data_sdk::data_objects::KnobValueUnion _value;
+    hipdnn_flatbuffers_sdk::data_objects::KnobValueUnion _value;
 };
 
 } // namespace hipdnn_backend

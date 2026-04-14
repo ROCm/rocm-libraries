@@ -1,11 +1,13 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier:  MIT
 
 #pragma once
 
 #include <gtest/gtest.h>
 #include <memory>
 #include <string>
+#include <unordered_map>
+#include <vector>
 
 #include <hipdnn_frontend.hpp>
 #include <hipdnn_frontend/detail/ScopedHipdnnBackendDescriptor.hpp>
@@ -72,7 +74,12 @@ inline std::shared_ptr<TestableGraphLifting>
         return nullptr;
     }
 
-    auto data = graph.toBinary();
+    auto [data, serErr] = graph.to_binary();
+    EXPECT_TRUE(serErr.is_good()) << serErr.get_message();
+    if(!serErr.is_good())
+    {
+        return nullptr;
+    }
     EXPECT_FALSE(data.empty());
     if(data.empty())
     {
@@ -137,6 +144,27 @@ inline std::shared_ptr<TestableGraphLifting>
     y->set_uid(K_FPROP_TENSOR_Y_UID).set_output(true).set_name("Y");
 
     return graph;
+}
+
+/// Verify that a tensor with the given UID exists in the graph's tensor map
+/// and matches expected attributes (name, dims, strides, data type).
+inline void verifyTensorInGraph(
+    const std::unordered_map<int64_t, std::shared_ptr<hipdnn_frontend::graph::TensorAttributes>>&
+        tensorMap,
+    int64_t expectedUid,
+    const std::string& expectedName,
+    const std::vector<int64_t>& expectedDims,
+    const std::vector<int64_t>& expectedStrides,
+    hipdnn_frontend::DataType expectedDataType)
+{
+    auto it = tensorMap.find(expectedUid);
+    ASSERT_NE(it, tensorMap.end()) << "Tensor with UID " << expectedUid << " not found";
+    const auto& tensor = it->second;
+    EXPECT_EQ(tensor->get_name(), expectedName) << "Name mismatch for UID " << expectedUid;
+    EXPECT_EQ(tensor->get_dim(), expectedDims) << "Dims mismatch for UID " << expectedUid;
+    EXPECT_EQ(tensor->get_stride(), expectedStrides) << "Strides mismatch for UID " << expectedUid;
+    EXPECT_EQ(tensor->get_data_type(), expectedDataType)
+        << "DataType mismatch for UID " << expectedUid;
 }
 
 } // namespace hipdnn_tests
