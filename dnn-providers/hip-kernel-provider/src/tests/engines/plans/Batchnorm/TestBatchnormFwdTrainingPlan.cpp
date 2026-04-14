@@ -4,7 +4,7 @@
 #include <cstdio>
 #include <gtest/gtest.h>
 
-#include "engines/plans/BatchnormFwdTrainingPlan.hpp"
+#include "engines/plans/batchnorm/BatchnormFwdTrainingPlan.hpp"
 #include "mocks/MockCompiledProgram.hpp"
 #include "mocks/MockKernelCompiler.hpp"
 #include "mocks/MockRunnableKernel.hpp"
@@ -15,6 +15,7 @@
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 
 using namespace hip_kernel_provider;
+using namespace hip_kernel_provider::batchnorm;
 
 // ============================================================================
 // BatchnormFwdTrainingParams - construction from valid graph data
