@@ -50,7 +50,7 @@ def main():
         proj["project_name"] = primary.upper()
 
     output = {
-        "linux_projects_coverage": json.dumps(projects),
+        "coverage_projects": json.dumps(projects),
     }
     github_output = os.environ.get("GITHUB_OUTPUT")
     if github_output:
