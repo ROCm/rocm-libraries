@@ -11,7 +11,7 @@ using namespace ::testing;
 
 TEST(TestIncompatibleBackendWrapper, AllFunctionsReturnFailed)
 {
-    IncompatibleBackendWrapper backendWrapper;
+    const IncompatibleBackendWrapper backendWrapper;
 }
 
 TEST(TestIncompatibleBackendWrapper, Create)
@@ -120,11 +120,16 @@ TEST(TestIncompatibleBackendWrapper, BackendCreateAndDeserializeGraphExt)
               hipdnnStatus_t::HIPDNN_STATUS_NOT_INITIALIZED);
 }
 
-TEST(TestIncompatibleBackendWrapper, VersionExt)
+TEST(TestIncompatibleBackendWrapper, VersionString)
 {
     IncompatibleBackendWrapper backendWrapper;
-    const char* version = nullptr;
-    EXPECT_EQ(backendWrapper.versionExt(&version), hipdnnStatus_t::HIPDNN_STATUS_NOT_INITIALIZED);
+    EXPECT_STREQ(backendWrapper.versionString(), "");
+}
+
+TEST(TestIncompatibleBackendWrapper, Version)
+{
+    IncompatibleBackendWrapper backendWrapper;
+    EXPECT_EQ(backendWrapper.version(), hipdnn_data_sdk::utilities::Version(-1, 0, 0));
 }
 
 TEST(TestIncompatibleBackendWrapper, SetEnginePluginPathsExt)

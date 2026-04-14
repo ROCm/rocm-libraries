@@ -20,6 +20,7 @@
  *
  * ************************************************************************ */
 
+#include "asan_helpers.hpp"
 #include "device_macros.hpp"
 #include "rocblas_spr.hpp"
 
@@ -137,7 +138,7 @@ rocblas_status rocblas_internal_spr_launcher(rocblas_handle handle,
     int batches = handle->getBatchGridDim((int)batch_count);
 
     static constexpr int SPR_DIM_X = 64;
-    static constexpr int SPR_DIM_Y = 16;
+    static constexpr int SPR_DIM_Y = rocblas::conditional_v<rocblas_enable_asan, 4, 16>;
 
     bool                            host_mode = handle->pointer_mode == rocblas_pointer_mode_host;
     rocblas_internal_val_ptr<TScal> alpha_device_host(host_mode, alpha);

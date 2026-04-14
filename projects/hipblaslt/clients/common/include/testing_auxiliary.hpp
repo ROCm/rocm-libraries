@@ -664,13 +664,13 @@ void testing_aux_matmul_set_get_attr(const Arguments& arg)
 
     ASSERT_TRUE(scale_mode_a_r == scale_mode_a); // validate
 
-    scale_mode_a = HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE4M3; // will not set anything
-    scale_mode_b = HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE4M3; // ditto
+    scale_mode_a = HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE4M3;
+    scale_mode_b = HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE4M3;
 
     EXPECT_HIPBLAS_STATUS(
         hipblasLtMatmulDescSetAttribute(
             matmul, HIPBLASLT_MATMUL_DESC_A_SCALE_MODE, &scale_mode_a, sizeof(uint32_t)),
-        HIPBLAS_STATUS_INVALID_VALUE);
+        HIPBLAS_STATUS_SUCCESS);
 
     EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescGetAttribute(matmul,
                                                           HIPBLASLT_MATMUL_DESC_A_SCALE_MODE,
@@ -682,7 +682,7 @@ void testing_aux_matmul_set_get_attr(const Arguments& arg)
     EXPECT_HIPBLAS_STATUS(
         hipblasLtMatmulDescSetAttribute(
             matmul, HIPBLASLT_MATMUL_DESC_B_SCALE_MODE, &scale_mode_b, sizeof(uint32_t)),
-        HIPBLAS_STATUS_INVALID_VALUE);
+        HIPBLAS_STATUS_SUCCESS);
 
     EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescGetAttribute(matmul,
                                                           HIPBLASLT_MATMUL_DESC_B_SCALE_MODE,
@@ -693,8 +693,8 @@ void testing_aux_matmul_set_get_attr(const Arguments& arg)
 
     ASSERT_TRUE(
         scale_mode_a_r
-        == HIPBLASLT_MATMUL_MATRIX_SCALE_OUTER_VEC_32F); // validate, it's still the previous value as expected
-    ASSERT_TRUE(scale_mode_b_r == HIPBLASLT_MATMUL_MATRIX_SCALE_OUTER_VEC_32F); // ditto
+        == HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE4M3); // validate round-trip
+    ASSERT_TRUE(scale_mode_b_r == HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE4M3); // ditto
 
     hipStream_t stream;
     CHECK_HIP_ERROR(hipStreamCreate(&stream));
@@ -1842,8 +1842,11 @@ void testing_aux_auxiliary_func(const Arguments& arg)
     ASSERT_TRUE(hipblaslt_isnan(arg_hipblaslt_bf8_fnuz));
 
     hipblaslt_f8 arg_hipblaslt_f8;
-    arg_hipblaslt_f8.__x = 0x80;
+    arg_hipblaslt_f8.__x = 0x7f;
     ASSERT_TRUE(hipblaslt_isnan(arg_hipblaslt_f8));
+    arg_hipblaslt_f8.__x = 0x80;
+    ASSERT_FALSE(hipblaslt_isnan(arg_hipblaslt_f8));
+    ASSERT_TRUE(arg_hipblaslt_f8.is_zero());
 
     hipblaslt_bf8 arg_hipblaslt_bf8;
     arg_hipblaslt_bf8.__x = 0x7d;
@@ -1858,52 +1861,136 @@ void testing_aux_auxiliary_func(const Arguments& arg)
 
 void testing_aux_float8_func(const Arguments& arg)
 {
-    // Test hipblaslt_float8
-    _Float16          f16 = 2.0;
-    hipblaslt_f8_fnuz f8_fnuz_data(f16);
-    ASSERT_TRUE(f16 == static_cast<_Float16>(f8_fnuz_data));
-    f8_fnuz_data.__x = 0x00;
-    ASSERT_TRUE(f8_fnuz_data.is_zero());
-    f8_fnuz_data.__x = 0x80;
-    ASSERT_TRUE(f8_fnuz_data.is_inf());
-    hipblaslt_f8_fnuz f8_fnuz_data_copy;
-    f8_fnuz_data_copy = f8_fnuz_data;
-    ASSERT_TRUE(f8_fnuz_data_copy.__x == f8_fnuz_data.__x);
+    _Float16 f16 = 2.0;
 
-    // Test hipblaslt_f8
-    hipblaslt_f8 f8_data(f16);
-    ASSERT_TRUE(f16 == static_cast<_Float16>(f8_data));
-    f8_data.__x = 0x00;
-    ASSERT_TRUE(f8_data.is_zero());
-    f8_data.__x = 0x80;
-    ASSERT_TRUE(f8_data.is_inf());
-    hipblaslt_f8 f8_data_copy;
-    f8_data_copy = f8_data;
-    ASSERT_TRUE(f8_data_copy.__x == f8_data.__x);
+    // hipblaslt_f8_fnuz (FNUZ E4M3): zero only 0x00; 0x80 is NaN (is_inf matches for legacy API).
+    {
+        hipblaslt_f8_fnuz v(f16);
+        ASSERT_TRUE(f16 == static_cast<_Float16>(v));
 
-    // Test hipblaslt_bf8_fnuz
-    hipblaslt_bf8_fnuz bf8_fnuz_data(f16);
-    ASSERT_TRUE(f16 == static_cast<_Float16>(bf8_fnuz_data));
-    bf8_fnuz_data.__x = 0x00;
-    ASSERT_TRUE(bf8_fnuz_data.is_zero());
-    bf8_fnuz_data.__x = 0x80;
-    ASSERT_TRUE(bf8_fnuz_data.is_inf());
-    hipblaslt_bf8_fnuz bf8_fnuz_data_copy;
-    bf8_fnuz_data_copy = bf8_fnuz_data;
-    ASSERT_TRUE(bf8_fnuz_data_copy.__x == bf8_fnuz_data.__x);
+        v.__x = 0x00;
+        ASSERT_TRUE(v.is_zero());
+        ASSERT_FALSE(v.is_nan());
+        ASSERT_FALSE(v.is_inf());
 
-    // Test hipblaslt_bf8
-    hipblaslt_bf8 bf8_data(f16);
-    ASSERT_TRUE(f16 == static_cast<_Float16>(bf8_data));
-    bf8_data.__x = 0x00;
-    ASSERT_TRUE(bf8_data.is_zero());
-    bf8_data.__x = 0xff;
-    ASSERT_TRUE(bf8_data.is_nan());
-    bf8_data.__x = 0xfc;
-    ASSERT_TRUE(bf8_data.is_inf());
-    hipblaslt_bf8 bf8_data_copy;
-    bf8_data_copy = bf8_data;
-    ASSERT_TRUE(bf8_data_copy.__x == bf8_data.__x);
+        v.__x = 0x80;
+        ASSERT_FALSE(v.is_zero());
+        ASSERT_TRUE(v.is_nan());
+        ASSERT_TRUE(v.is_inf());
+        ASSERT_TRUE(hipblaslt_isnan(v));
+
+        v.__x = 0x38;
+        ASSERT_FALSE(v.is_zero());
+        ASSERT_FALSE(v.is_nan());
+        ASSERT_FALSE(v.is_inf());
+
+        hipblaslt_f8_fnuz c;
+        c = v;
+        ASSERT_TRUE(c.__x == v.__x);
+    }
+
+    // hipblaslt_f8 (OCP E4M3): ±0 = 0x00/0x80; canonical NaN = 0x7f/0xff; no Inf.
+    {
+        hipblaslt_f8 v(f16);
+        ASSERT_TRUE(f16 == static_cast<_Float16>(v));
+
+        v.__x = 0x00;
+        ASSERT_TRUE(v.is_zero());
+        ASSERT_FALSE(v.is_nan());
+        ASSERT_FALSE(v.is_inf());
+
+        v.__x = 0x80;
+        ASSERT_TRUE(v.is_zero());
+        ASSERT_FALSE(v.is_nan());
+        ASSERT_FALSE(v.is_inf());
+
+        v.__x = 0x7f;
+        ASSERT_FALSE(v.is_zero());
+        ASSERT_TRUE(v.is_nan());
+        ASSERT_FALSE(v.is_inf());
+        ASSERT_TRUE(hipblaslt_isnan(v));
+
+        v.__x = 0xff;
+        ASSERT_FALSE(v.is_zero());
+        ASSERT_TRUE(v.is_nan());
+        ASSERT_FALSE(v.is_inf());
+
+        v.__x = 0x2a;
+        ASSERT_FALSE(v.is_zero());
+        ASSERT_FALSE(v.is_nan());
+        ASSERT_FALSE(v.is_inf());
+
+        hipblaslt_f8 c = v;
+        ASSERT_TRUE(c.__x == v.__x);
+    }
+
+    // hipblaslt_bf8_fnuz (FNUZ E5M2): same sentinel pattern as f8_fnuz.
+    {
+        hipblaslt_bf8_fnuz v(f16);
+        ASSERT_TRUE(f16 == static_cast<_Float16>(v));
+
+        v.__x = 0x00;
+        ASSERT_TRUE(v.is_zero());
+        ASSERT_FALSE(v.is_nan());
+        ASSERT_FALSE(v.is_inf());
+
+        v.__x = 0x80;
+        ASSERT_FALSE(v.is_zero());
+        ASSERT_TRUE(v.is_nan());
+        ASSERT_TRUE(v.is_inf());
+        ASSERT_TRUE(hipblaslt_isnan(v));
+
+        v.__x = 0x14;
+        ASSERT_FALSE(v.is_zero());
+        ASSERT_FALSE(v.is_nan());
+        ASSERT_FALSE(v.is_inf());
+
+        hipblaslt_bf8_fnuz c = v;
+        ASSERT_TRUE(c.__x == v.__x);
+    }
+
+    // hipblaslt_bf8 (OCP E5M2): ±0; Inf 0x7c/0xfc; NaN when exp=max and mantissa non-zero.
+    {
+        hipblaslt_bf8 v(f16);
+        ASSERT_TRUE(f16 == static_cast<_Float16>(v));
+
+        v.__x = 0x00;
+        ASSERT_TRUE(v.is_zero());
+        ASSERT_FALSE(v.is_nan());
+        ASSERT_FALSE(v.is_inf());
+
+        v.__x = 0x80;
+        ASSERT_TRUE(v.is_zero());
+        ASSERT_FALSE(v.is_nan());
+        ASSERT_FALSE(v.is_inf());
+
+        v.__x = 0x7c;
+        ASSERT_FALSE(v.is_zero());
+        ASSERT_FALSE(v.is_nan());
+        ASSERT_TRUE(v.is_inf());
+
+        v.__x = 0xfc;
+        ASSERT_FALSE(v.is_zero());
+        ASSERT_FALSE(v.is_nan());
+        ASSERT_TRUE(v.is_inf());
+
+        for(int b : {0x7d, 0x7e, 0x7f, 0xfd, 0xfe, 0xff})
+        {
+            v.__x = static_cast<decltype(v.__x)>(b);
+            ASSERT_FALSE(v.is_zero());
+            ASSERT_TRUE(v.is_nan());
+            ASSERT_FALSE(v.is_inf());
+            ASSERT_TRUE(hipblaslt_isnan(v));
+        }
+
+        v.__x = 0x08;
+        ASSERT_FALSE(v.is_zero());
+        ASSERT_FALSE(v.is_nan());
+        ASSERT_FALSE(v.is_inf());
+
+        hipblaslt_bf8 c = v;
+        ASSERT_TRUE(c.__x == v.__x);
+    }
 
     // namespace std functions
     // Test hipblaslt_f8_fnuz sin function

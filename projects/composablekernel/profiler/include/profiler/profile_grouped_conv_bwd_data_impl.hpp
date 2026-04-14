@@ -25,6 +25,58 @@
 namespace ck {
 namespace profiler {
 
+namespace bwd_data {
+template <ck::index_t NDimSpatial,
+          typename InLayout,
+          typename WeiLayout,
+          typename OutLayout,
+          typename InDataType,
+          typename WeiDataType,
+          typename OutDataType,
+          typename InElementOp,
+          typename WeiElementOp,
+          typename OutElementOp,
+          typename ComputeDataType>
+void print_instances()
+{
+    using DeviceOp =
+        ck::tensor_operation::device::DeviceGroupedConvBwdDataMultipleD<NDimSpatial,
+                                                                        OutLayout,
+                                                                        WeiLayout,
+                                                                        ck::Tuple<>,
+                                                                        InLayout,
+                                                                        OutDataType,
+                                                                        WeiDataType,
+                                                                        ck::Tuple<>,
+                                                                        InDataType,
+                                                                        OutElementOp,
+                                                                        WeiElementOp,
+                                                                        InElementOp,
+                                                                        ComputeDataType,
+                                                                        ComputeDataType>;
+
+    const auto op_ptrs = ck::tensor_operation::device::instance::DeviceOperationInstanceFactory<
+        DeviceOp>::GetInstances();
+
+    for(const auto& op_ptr : op_ptrs)
+    {
+#ifdef CK_EXPERIMENTAL_BUILDER
+        const auto& instance_str = op_ptr->GetInstanceString();
+        if(!instance_str.empty())
+        {
+            std::cout << instance_str << std::endl;
+        }
+        else
+        {
+            std::cout << op_ptr->GetTypeString() << std::endl;
+        }
+#else
+        std::cout << op_ptr->GetTypeString() << std::endl;
+#endif
+    }
+}
+} // namespace bwd_data
+
 template <ck::index_t NDimSpatial,
           typename OutLayout,
           typename WeiLayout,
@@ -62,6 +114,28 @@ bool profile_grouped_conv_bwd_data_impl(int do_verification,
     std::cout << "out: " << out_g_n_k_wos_desc << std::endl;
     std::cout << "wei: " << wei_g_k_c_xs_desc << std::endl;
     std::cout << "in: " << in_g_n_c_wis_desc << std::endl;
+
+    using DeviceOp =
+        ck::tensor_operation::device::DeviceGroupedConvBwdDataMultipleD<NDimSpatial,
+                                                                        OutLayout,
+                                                                        WeiLayout,
+                                                                        ck::Tuple<>,
+                                                                        InLayout,
+                                                                        OutDataType,
+                                                                        WeiDataType,
+                                                                        ck::Tuple<>,
+                                                                        InDataType,
+                                                                        OutElementOp,
+                                                                        WeiElementOp,
+                                                                        InElementOp,
+                                                                        ComputeDataType,
+                                                                        ComputeDataType>;
+
+    // get device op instances
+    const auto op_ptrs = ck::tensor_operation::device::instance::DeviceOperationInstanceFactory<
+        DeviceOp>::GetInstances();
+
+    std::cout << "found " << op_ptrs.size() << " instances" << std::endl;
 
     // Create host tensors
     Tensor<OutDataType> out(out_g_n_k_wos_desc);
@@ -213,6 +287,8 @@ bool profile_grouped_conv_bwd_data_impl(int do_verification,
     bool pass               = true;
     index_t num_kernel      = 0;
     index_t valid_instances = 0;
+    bool dummy_run_executed = false;
+
     auto run_impl = [&](auto& op_ptr, auto& argument_ptr, const index_t& split_k_for_run) {
         // workspace_sz will be equal to 0 for other layout than NGCHW
         const std::size_t workspace_sz = op_ptr->GetWorkSpaceSize(argument_ptr.get());
@@ -243,8 +319,25 @@ bool profile_grouped_conv_bwd_data_impl(int do_verification,
 
             auto invoker_ptr = op_ptr->MakeInvokerPointer();
 
-            float avg_time =
-                invoker_ptr->Run(argument_ptr.get(), StreamConfig{nullptr, time_kernel});
+            // Run first instance twice to get proper time
+            if(time_kernel && !dummy_run_executed)
+            {
+                invoker_ptr->Run(argument_ptr.get(),
+                                 StreamConfig{nullptr,
+                                              time_kernel,
+                                              0 /*log_level*/,
+                                              5 /*cold_iters*/,
+                                              50 /*nrepeat_*/,
+                                              time_kernel /*flush_cache*/});
+                dummy_run_executed = true;
+            }
+            float avg_time = invoker_ptr->Run(argument_ptr.get(),
+                                              StreamConfig{nullptr,
+                                                           time_kernel,
+                                                           0 /*log_level*/,
+                                                           5 /*cold_iters*/,
+                                                           50 /*nrepeat_*/,
+                                                           time_kernel /*flush_cache*/});
 
             std::size_t flop      = conv_param.GetFlops();
             std::size_t num_btype = conv_param.GetByte<InDataType, WeiDataType, OutDataType>();
@@ -386,26 +479,6 @@ bool profile_grouped_conv_bwd_data_impl(int do_verification,
     };
 
     // do GEMM
-    using DeviceOp =
-        ck::tensor_operation::device::DeviceGroupedConvBwdDataMultipleD<NDimSpatial,
-                                                                        OutLayout,
-                                                                        WeiLayout,
-                                                                        ck::Tuple<>,
-                                                                        InLayout,
-                                                                        OutDataType,
-                                                                        WeiDataType,
-                                                                        ck::Tuple<>,
-                                                                        InDataType,
-                                                                        OutElementOp,
-                                                                        WeiElementOp,
-                                                                        InElementOp,
-                                                                        ComputeDataType,
-                                                                        ComputeDataType>;
-
-    // get device op instances
-    const auto op_ptrs = ck::tensor_operation::device::instance::DeviceOperationInstanceFactory<
-        DeviceOp>::GetInstances();
-
     std::array<ck::index_t, NDimSpatial + 3> out_lengths{};
     std::array<ck::index_t, NDimSpatial + 3> out_strides{};
     std::array<ck::index_t, NDimSpatial + 3> wei_lengths{};
@@ -441,7 +514,6 @@ bool profile_grouped_conv_bwd_data_impl(int do_verification,
     {
         std::cout << "\nValid instances for this problem:" << std::endl;
     }
-
     for(auto& op_ptr : op_ptrs)
     {
         for(std::size_t split_k_id = 0; split_k_id < split_k_list.size(); split_k_id++)

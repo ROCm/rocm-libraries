@@ -87,9 +87,38 @@ public:
         return hipdnnStatus_t::HIPDNN_STATUS_NOT_INITIALIZED;
     }
 
-    hipdnnStatus_t versionExt(const char** /*version*/) override
+    hipdnnStatus_t backendGetSerializedBinaryGraphExt(hipdnnBackendDescriptor_t /*descriptor*/,
+                                                      size_t /*requestedByteSize*/,
+                                                      size_t* /*graphByteSize*/,
+                                                      uint8_t* /*serializedGraph*/) override
     {
         return hipdnnStatus_t::HIPDNN_STATUS_NOT_INITIALIZED;
+    }
+
+    hipdnnStatus_t backendGetSerializedJsonGraphExt(hipdnnBackendDescriptor_t /*descriptor*/,
+                                                    size_t /*requestedByteSize*/,
+                                                    size_t* /*graphByteSize*/,
+                                                    char* /*serializedJsonGraph*/) override
+    {
+        return hipdnnStatus_t::HIPDNN_STATUS_NOT_INITIALIZED;
+    }
+
+    hipdnnStatus_t
+        backendCreateAndDeserializeJsonGraphExt(hipdnnBackendDescriptor_t* /*descriptor*/,
+                                                const char* /*jsonGraph*/,
+                                                size_t /*jsonByteSize*/) override
+    {
+        return hipdnnStatus_t::HIPDNN_STATUS_NOT_INITIALIZED;
+    }
+
+    hipdnn_data_sdk::utilities::Version version() override
+    {
+        return hipdnn_data_sdk::utilities::Version{-1, 0, 0};
+    }
+
+    const char* versionString() override
+    {
+        return "";
     }
 
     void loggingCallbackExt(hipdnnSeverity_t /*severity*/, const char* /*msg*/) override {}
@@ -100,5 +129,13 @@ public:
     {
         return hipdnnStatus_t::HIPDNN_STATUS_NOT_INITIALIZED;
     }
+
+    hipdnnStatus_t getLoadedEnginePluginPathsExt(hipdnnHandle_t /*handle*/,
+                                                 size_t* /*numPluginPaths*/,
+                                                 char** /*pluginPaths*/,
+                                                 size_t* /*maxStringLen*/) override
+    {
+        return hipdnnStatus_t::HIPDNN_STATUS_NOT_INITIALIZED;
+    }
 };
-}
+} // namespace hipdnn_frontend::detail

@@ -30,6 +30,58 @@
 namespace ck {
 namespace profiler {
 
+namespace fwd {
+template <ck::index_t NDimSpatial,
+          typename InLayout,
+          typename WeiLayout,
+          typename OutLayout,
+          typename InDataType,
+          typename WeiDataType,
+          typename OutDataType,
+          typename InElementOp,
+          typename WeiElementOp,
+          typename OutElementOp,
+          typename ComputeTypeA,
+          typename ComputeTypeB>
+void print_instances()
+{
+    using DeviceOp = ck::tensor_operation::device::DeviceGroupedConvFwdMultipleABD<NDimSpatial,
+                                                                                   InLayout,
+                                                                                   WeiLayout,
+                                                                                   ck::Tuple<>,
+                                                                                   OutLayout,
+                                                                                   InDataType,
+                                                                                   WeiDataType,
+                                                                                   ck::Tuple<>,
+                                                                                   OutDataType,
+                                                                                   InElementOp,
+                                                                                   WeiElementOp,
+                                                                                   OutElementOp,
+                                                                                   ComputeTypeA,
+                                                                                   ComputeTypeB>;
+
+    const auto op_ptrs = ck::tensor_operation::device::instance::DeviceOperationInstanceFactory<
+        DeviceOp>::GetInstances();
+
+    for(const auto& op_ptr : op_ptrs)
+    {
+#ifdef CK_EXPERIMENTAL_BUILDER
+        const auto& instance_str = op_ptr->GetInstanceString();
+        if(!instance_str.empty())
+        {
+            std::cout << instance_str << std::endl;
+        }
+        else
+        {
+            std::cout << op_ptr->GetTypeString() << std::endl;
+        }
+#else
+        std::cout << op_ptr->GetTypeString() << std::endl;
+#endif
+    }
+}
+} // namespace fwd
+
 template <ck::index_t NDimSpatial,
           typename InLayout,
           typename WeiLayout,
@@ -92,6 +144,27 @@ bool profile_grouped_conv_fwd_impl(int do_verification,
     std::cout << "input: " << in_g_n_c_wis_desc << std::endl;
     std::cout << "weight: " << wei_g_k_c_xs_desc << std::endl;
     std::cout << "output: " << out_g_n_k_wos_desc << std::endl;
+
+    using DeviceOp = ck::tensor_operation::device::DeviceGroupedConvFwdMultipleABD<NDimSpatial,
+                                                                                   InLayout,
+                                                                                   WeiLayout,
+                                                                                   ck::Tuple<>,
+                                                                                   OutLayout,
+                                                                                   InDataType,
+                                                                                   WeiDataType,
+                                                                                   ck::Tuple<>,
+                                                                                   OutDataType,
+                                                                                   InElementOp,
+                                                                                   WeiElementOp,
+                                                                                   OutElementOp,
+                                                                                   AComputeType,
+                                                                                   BComputeType>;
+
+    // get device op instances
+    const auto op_ptrs = ck::tensor_operation::device::instance::DeviceOperationInstanceFactory<
+        DeviceOp>::GetInstances();
+
+    std::cout << "ckProfiler found " << op_ptrs.size() << " instances" << std::endl;
 
     // Create host tensors
     Tensor<InDataType> input(in_g_n_c_wis_desc);
@@ -223,7 +296,8 @@ bool profile_grouped_conv_fwd_impl(int do_verification,
     index_t best_instance_index = 0;
 
     // profile device op instances
-    bool pass = true;
+    bool pass               = true;
+    bool dummy_run_executed = false;
 
     auto run_impl = [&](auto& op_ptr, auto& argument_ptr) {
         // workspace_sz will be equal to 0 for other layout than NGCHW
@@ -258,8 +332,26 @@ bool profile_grouped_conv_fwd_impl(int do_verification,
 
             auto invoker_ptr = op_ptr->MakeInvokerPointer();
 
-            float avg_time =
-                invoker_ptr->Run(argument_ptr.get(), StreamConfig{nullptr, time_kernel});
+            // Run first instance twice to get proper time
+            if(time_kernel && !dummy_run_executed)
+            {
+                invoker_ptr->Run(argument_ptr.get(),
+                                 StreamConfig{nullptr,
+                                              time_kernel,
+                                              0 /*log_level*/,
+                                              5 /*cold_iters*/,
+                                              50 /*nrepeat_*/,
+                                              time_kernel /*flush_cache*/});
+                dummy_run_executed = true;
+            }
+
+            float avg_time = invoker_ptr->Run(argument_ptr.get(),
+                                              StreamConfig{nullptr,
+                                                           time_kernel,
+                                                           0 /*log_level*/,
+                                                           5 /*cold_iters*/,
+                                                           50 /*nrepeat_*/,
+                                                           time_kernel /*flush_cache*/});
 
             std::size_t flop      = conv_param.GetFlops();
             std::size_t num_btype = conv_param.GetByte<InDataType, WeiDataType, OutDataType>();
@@ -353,27 +445,6 @@ bool profile_grouped_conv_fwd_impl(int do_verification,
             std::cout << op_ptr->GetTypeString() << " does not support this problem" << std::endl;
         }
     };
-
-    using DeviceOp = ck::tensor_operation::device::DeviceGroupedConvFwdMultipleABD<NDimSpatial,
-                                                                                   InLayout,
-                                                                                   WeiLayout,
-                                                                                   ck::Tuple<>,
-                                                                                   OutLayout,
-                                                                                   InDataType,
-                                                                                   WeiDataType,
-                                                                                   ck::Tuple<>,
-                                                                                   OutDataType,
-                                                                                   InElementOp,
-                                                                                   WeiElementOp,
-                                                                                   OutElementOp,
-                                                                                   AComputeType,
-                                                                                   BComputeType>;
-
-    // get device op instances
-    const auto op_ptrs = ck::tensor_operation::device::instance::DeviceOperationInstanceFactory<
-        DeviceOp>::GetInstances();
-
-    std::cout << "ckProfiler found " << op_ptrs.size() << " instances" << std::endl;
 
     if(list_instances)
     {

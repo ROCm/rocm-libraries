@@ -16,6 +16,7 @@
 
 #include <hipdnn_backend/version.h>
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
+#include <hipdnn_plugin_sdk/FunctionNameMacro.hpp>
 
 #include <cstring>
 
@@ -51,7 +52,8 @@ void throwIfNull(T* value)
     if(value == nullptr)
     {
         throw hipdnn_backend::HipdnnException(HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
-                                              std::string(typeid(T).name()) + " is nullptr");
+                                              "Null pointer provided to "
+                                                  + std::string(HIPDNN_FUNCTION_NAME));
     }
 }
 } // namespace
@@ -265,6 +267,7 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t
         throwIfNull(graphByteSize);
 
         auto graphDesc = descriptor->asDescriptor<hipdnn_backend::GraphDescriptor>();
+        graphDesc->buildSerializedGraph();
         auto data = graphDesc->getSerializedGraph();
 
         *graphByteSize = data.size;
@@ -281,6 +284,64 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t
         }
 
         LOG_API_SUCCESS(apiName, "graphByteSize={}", *graphByteSize);
+    });
+}
+
+// NOTE: The JSON serialization path is slower than the binary path. Each call
+// reconstructs the JSON from the cached binary buffer (binary -> unpack -> JSON).
+HIPDNN_BACKEND_EXPORT hipdnnStatus_t
+    hipdnnBackendGetSerializedJsonGraph_ext(hipdnnBackendDescriptor_t descriptor,
+                                            size_t requestedByteSize,
+                                            size_t* graphByteSize,
+                                            char* serializedJsonGraph)
+{
+    LOG_API_ENTRY("descriptor={}, requestedByteSize={}, graphByteSize_ptr={:p}, "
+                  "serializedJsonGraph_ptr={:p}",
+                  logPtr(descriptor),
+                  requestedByteSize,
+                  static_cast<void*>(graphByteSize),
+                  static_cast<void*>(serializedJsonGraph));
+
+    return hipdnn_backend::tryCatch([&, apiName = __func__]() {
+        throwIfInvalidDescriptor(descriptor);
+        throwIfNull(graphByteSize);
+
+        auto graphDesc = descriptor->asDescriptor<hipdnn_backend::GraphDescriptor>();
+        // buildSerializedGraph() populates the cached binary buffer (no-op if already cached).
+        // getSerializedJsonGraph() then converts binary -> JSON on each call (not cached).
+        graphDesc->buildSerializedGraph();
+        auto jsonStr = graphDesc->getSerializedJsonGraph();
+
+        *graphByteSize = jsonStr.size() + 1;
+
+        if(serializedJsonGraph != nullptr)
+        {
+            THROW_IF_LT(requestedByteSize,
+                        jsonStr.size() + 1,
+                        HIPDNN_STATUS_BAD_PARAM_SIZE_INSUFFICIENT,
+                        "Requested buffer size (" + std::to_string(requestedByteSize)
+                            + ") is smaller than the JSON graph size ("
+                            + std::to_string(jsonStr.size() + 1) + ")");
+            std::memcpy(serializedJsonGraph, jsonStr.c_str(), jsonStr.size() + 1);
+        }
+
+        LOG_API_SUCCESS(apiName, "graphByteSize={}", *graphByteSize);
+    });
+}
+
+HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendCreateAndDeserializeJsonGraph_ext(
+    hipdnnBackendDescriptor_t* descriptor, const char* jsonGraph, size_t jsonByteSize)
+{
+    LOG_API_ENTRY("descriptor_ptr={:p}, jsonGraph_ptr={:p}, jsonByteSize={}",
+                  static_cast<void*>(descriptor),
+                  static_cast<const void*>(jsonGraph),
+                  jsonByteSize);
+
+    return hipdnn_backend::tryCatch([&, apiName = __func__]() {
+        hipdnn_backend::DescriptorFactory::createGraphFromJsonExt(
+            descriptor, jsonGraph, jsonByteSize);
+
+        LOG_API_SUCCESS(apiName, "created_descriptor={}", logPtr(*descriptor));
     });
 }
 
@@ -337,7 +398,7 @@ HIPDNN_BACKEND_EXPORT void hipdnnPeekLastErrorString_ext(char* message, size_t m
 
 HIPDNN_BACKEND_EXPORT void hipdnnLoggingCallback_ext(hipdnnSeverity_t severity, const char* msg)
 {
-    hipdnn_backend::logging::hipdnnLoggingCallback(severity, msg);
+    hipdnn_backend::logging::backendLoggingCallback(severity, msg);
 }
 
 HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnSetEnginePluginPaths_ext(
@@ -408,6 +469,39 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetLoadedEnginePluginPaths_ext(hipdnn
     });
 }
 
+// NOLINTBEGIN(readability-identifier-naming) - C API function
+HIPDNN_BACKEND_EXPORT hipdnnStatus_t
+    hipdnnSetUserLogCallback_ext(hipdnnUserLogCallback_t callback,
+                                 hipdnnSeverity_t minLevel,
+                                 hipdnnLogCallbackMode_t mode,
+                                 hipdnnUserLogCallbackHandle_t userHandle)
+// NOLINTEND(readability-identifier-naming)
+{
+    return hipdnn_backend::logging::setUserLogCallback(callback, minLevel, mode, userHandle);
+}
+
+HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendSetGlobalLogLevel_ext(hipdnnSeverity_t level)
+{
+    // Validate log level
+    if(level != HIPDNN_SEV_INFO && level != HIPDNN_SEV_WARN && level != HIPDNN_SEV_ERROR
+       && level != HIPDNN_SEV_FATAL && level != HIPDNN_SEV_OFF)
+    {
+        return HIPDNN_STATUS_BAD_PARAM;
+    }
+
+    return hipdnn_backend::logging::setGlobalLogLevel(level);
+}
+
+HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendGetGlobalLogLevel_ext(hipdnnSeverity_t* level)
+{
+    if(level == nullptr)
+    {
+        return HIPDNN_STATUS_BAD_PARAM;
+    }
+
+    return hipdnn_backend::logging::getGlobalLogLevel(*level);
+}
+
 HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetEngineCount_ext(hipdnnHandle_t handle,
                                                               size_t* numEngines)
 {
@@ -469,10 +563,10 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetEngineInfo_ext(hipdnnHandle_t hand
             *engineId = info.engineId;
         }
 
-        size_t requiredEngineNameLen = info.engineName.size() + 1;
-        size_t requiredPluginNameLen = info.pluginName.size() + 1;
-        size_t requiredVersionLen = info.version.size() + 1;
-        size_t requiredTypeLen = info.type.size() + 1;
+        const size_t requiredEngineNameLen = info.engineName.size() + 1;
+        const size_t requiredPluginNameLen = info.pluginName.size() + 1;
+        const size_t requiredVersionLen = info.version.size() + 1;
+        const size_t requiredTypeLen = info.type.size() + 1;
 
         if(engineName == nullptr || pluginName == nullptr || version == nullptr || type == nullptr)
         {
@@ -516,4 +610,9 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetVersion_ext(const char** version)
         throwIfNull(version);
         *version = HIPDNN_BACKEND_VERSION_STRING;
     });
+}
+
+HIPDNN_BACKEND_EXPORT const char* hipdnnVersionString_ext()
+{
+    return HIPDNN_BACKEND_VERSION_STRING;
 }

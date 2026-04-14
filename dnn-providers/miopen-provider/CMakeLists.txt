@@ -10,8 +10,16 @@ set(CMAKE_TOOLCHAIN_FILE "${CMAKE_SOURCE_DIR}/cmake/ClangToolChain.cmake"
 )
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
-set(MIOPEN_PLUGIN_VERSION "0.0.1")
-project(miopen-provider VERSION ${MIOPEN_PLUGIN_VERSION} LANGUAGES CXX)
+# Include version utilities (must be before project() call)
+include(${CMAKE_CURRENT_LIST_DIR}/cmake/VersionUtils.cmake)
+
+# Version handling
+miopen_provider_setup_version(miopen_provider)
+
+# Set project with version
+project(miopen-provider VERSION ${MIOPEN_PROVIDER_VERSION} LANGUAGES CXX)
+
+include(CMakePackageConfigHelpers)
 
 include(${CMAKE_CURRENT_LIST_DIR}/cmake/CheckPreCommit.cmake)
 
@@ -49,7 +57,7 @@ option(MIOPENPROVIDER_SKIP_TESTS "Skip building tests" OFF)
 option(MIOPENPROVIDER_ENABLE_COVERAGE "Build with code coverage flags" OFF)
 
 option(BUILD_ADDRESS_SANITIZER "Build with Address Sanitizer enabled" OFF)
-option(ENABLE_CLANG_FORMAT "Enable Clang-Format checks" OFF)
+option(ENABLE_CLANG_FORMAT "Enable Clang-Format checks" ON)
 if(NOT ENABLE_CLANG_FORMAT)
     message(WARNING "Clang-Format checks are disabled. CI requires passing clang-format checks.")
 endif()
@@ -59,7 +67,7 @@ if(WIN32)
         message(WARNING "Clang-Tidy enabled on Windows - this significantly increases build time.")
     endif()
 else()
-    option(ENABLE_CLANG_TIDY "Enable Clang-Tidy checks" OFF)
+    option(ENABLE_CLANG_TIDY "Enable Clang-Tidy checks" ON)
     if(NOT ENABLE_CLANG_TIDY)
         message(WARNING "Clang-Tidy checks are disabled. CI requires passing clang-tidy checks.")
     endif()
@@ -161,6 +169,7 @@ add_library(
 target_include_directories(miopen_plugin_impl PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(miopen_plugin_impl PUBLIC MIOpen hipdnn_data_sdk hipdnn_plugin_sdk)
 
+target_compile_definitions(miopen_plugin_impl PUBLIC MIOPEN_BETA_API)
 target_compile_options(miopen_plugin_impl PRIVATE ${MIOPENPROVIDER_WARNING_COMPILE_OPTIONS})
 set_target_properties(miopen_plugin_impl PROPERTIES
     CXX_VISIBILITY_PRESET hidden
@@ -200,6 +209,9 @@ set_target_properties(
 set_target_properties(miopen_plugin PROPERTIES
     THEROCK_INSTALL_RPATH_ORIGIN "lib/hipdnn_plugins/engines")
 
+# Generate version header
+miopen_provider_generate_version_header(miopen_provider miopen_plugin_impl)
+
 if(NOT MIOPENPROVIDER_SKIP_TESTS)
     add_subdirectory(tests)
     add_subdirectory(integration_tests)
@@ -212,6 +224,24 @@ if(NOT MIOPENPROVIDER_SKIP_TESTS)
     # For standalone builds we need to install the ctest files
     if(NOT ROCM_LIBS_SUPERBUILD)
         install_miopen_plugin_ctest_files()
+    endif()
+
+    if(NOT TARGET hipdnn_integration_tests)
+        find_package(hipdnn_integration_tests CONFIG QUIET)
+    endif()
+
+    if(TARGET hipdnn_integration_tests)
+        add_external_integration_test_target(
+            TARGET_NAME   ${PROJECT_NAME}-external-integration-check
+            PLUGIN_TARGET miopen_plugin
+            ENGINE_NAME   MIOPEN_ENGINE
+            GTEST_FILTER
+                *IsSupported*
+                *ConvFwd*
+        )
+        message(STATUS "Created ${PROJECT_NAME}-external-integration-check target")
+    else()
+        message(STATUS "hipdnn_integration_tests not found - skipping external-integration-check")
     endif()
 endif()
 

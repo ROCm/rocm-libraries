@@ -3,7 +3,7 @@
 
 #include <gtest/gtest.h>
 #include <hipdnn_frontend.hpp>
-#include <hipdnn_test_sdk/utilities/LoggingUtils.hpp>
+#include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 #include <test_plugins/TestPluginConstants.hpp>
 
 using namespace hipdnn_frontend;
@@ -65,17 +65,22 @@ protected:
     Graph createAndBuildSimpleGraph()
     {
         Graph graph;
-        graph.set_compute_data_type(DataType::FLOAT).set_io_data_type(DataType::FLOAT);
+        graph.set_compute_data_type(DataType::FLOAT)
+            .set_intermediate_data_type(DataType::FLOAT)
+            .set_io_data_type(DataType::FLOAT);
 
         auto x = std::make_shared<TensorAttributes>();
-        x->set_name("X").set_dim({2, 3, 4, 4});
+        x->set_name("X").set_dim({2, 3, 4, 4}).set_stride({48, 16, 4, 1});
 
         PointwiseAttributes attrs;
         attrs.set_mode(PointwiseMode::RELU_FWD);
         auto y = graph.pointwise(x, attrs);
         y->set_name("Y");
 
-        auto result = graph.build_operation_graph(_handle);
+        auto result = graph.validate();
+        EXPECT_TRUE(result.is_good()) << result.get_message();
+
+        result = graph.build_operation_graph(_handle);
         EXPECT_TRUE(result.is_good()) << result.get_message();
 
         return graph;
@@ -107,7 +112,7 @@ TEST_P(IntegrationGraphKnobsApi, QueryKnobsFromEngine)
 {
     const auto& testCase = GetParam();
 
-    Graph graph = createAndBuildSimpleGraph();
+    const Graph graph = createAndBuildSimpleGraph();
 
     std::vector<Knob> knobs;
     auto result = graph.get_knobs_for_engine(testCase.engineId, knobs);
@@ -175,7 +180,7 @@ TEST_P(IntegrationGraphKnobsApi, QueryKnobsFromEngine)
             const auto& validValues = intConstraint->getValidValues();
             EXPECT_FALSE(validValues.empty())
                 << "test.engine_b.block_size should have valid values";
-            std::unordered_set<int64_t> expectedValues = {8, 16, 32, 64};
+            const std::unordered_set<int64_t> expectedValues = {8, 16, 32, 64};
             EXPECT_EQ(validValues, expectedValues)
                 << "test.engine_b.block_size valid values mismatch";
             EXPECT_EQ(intConstraint->getStep(), 1)
@@ -191,7 +196,7 @@ TEST_P(IntegrationGraphKnobsApi, CreateExecutionPlanWithEmptyKnobs)
     Graph graph = createAndBuildSimpleGraph();
 
     // Create execution plan with no knob settings (should use defaults)
-    std::vector<KnobSetting> emptySettings;
+    const std::vector<KnobSetting> emptySettings;
 
     auto result = graph.create_execution_plan_ext(testCase.engineId, emptySettings);
     EXPECT_TRUE(result.is_good()) << "Engine " << testCase.engineId
@@ -202,7 +207,7 @@ TEST_F(IntegrationGraphKnobsApi, CreateExecutionPlanWithValidKnobs)
 {
     Graph graph = createAndBuildSimpleGraph();
 
-    int64_t engineId = hipdnn_tests::plugin_constants::engineId<KnobsPlugin>();
+    const int64_t engineId = hipdnn_tests::plugin_constants::engineId<KnobsPlugin>();
     std::vector<KnobSetting> settings;
     settings.emplace_back("test.int_knob", static_cast<int64_t>(80));
     settings.emplace_back("test.float_knob", 0.75);
@@ -216,7 +221,7 @@ TEST_F(IntegrationGraphKnobsApi, CreateExecutionPlanWithValidBoundaryKnobs)
 {
     Graph graph = createAndBuildSimpleGraph();
 
-    int64_t engineId = hipdnn_tests::plugin_constants::engineId<KnobsPlugin>();
+    const int64_t engineId = hipdnn_tests::plugin_constants::engineId<KnobsPlugin>();
 
     // Query knobs to get constraint information
     std::vector<Knob> knobs;
@@ -268,7 +273,7 @@ TEST_F(IntegrationGraphKnobsApi, CreateExecutionPlanWithOutOfRangeIntKnob)
     Graph graph = createAndBuildSimpleGraph();
 
     // Try to set int knob with value outside range (min=0, max=100)
-    int64_t engineId = hipdnn_tests::plugin_constants::engineId<KnobsPlugin>();
+    const int64_t engineId = hipdnn_tests::plugin_constants::engineId<KnobsPlugin>();
     std::vector<KnobSetting> settings;
     settings.emplace_back("test.int_knob", static_cast<int64_t>(150)); // Above max
 
@@ -282,7 +287,7 @@ TEST_F(IntegrationGraphKnobsApi, CreateExecutionPlanWithMisalignedIntKnobStep)
     Graph graph = createAndBuildSimpleGraph();
 
     // test.int_knob has step=10, so valid values are 0, 10, 20, ..., 100
-    int64_t engineId = hipdnn_tests::plugin_constants::engineId<KnobsPlugin>();
+    const int64_t engineId = hipdnn_tests::plugin_constants::engineId<KnobsPlugin>();
     std::vector<KnobSetting> settings;
     settings.emplace_back("test.int_knob", static_cast<int64_t>(15)); // Not aligned with step
 
@@ -296,7 +301,7 @@ TEST_F(IntegrationGraphKnobsApi, CreateExecutionPlanWithInvalidStringKnob)
     Graph graph = createAndBuildSimpleGraph();
 
     // Try to set string knob with invalid choice (valid: "fast", "accurate", "balanced")
-    int64_t engineId = hipdnn_tests::plugin_constants::engineId<KnobsPlugin>();
+    const int64_t engineId = hipdnn_tests::plugin_constants::engineId<KnobsPlugin>();
     std::vector<KnobSetting> settings;
     settings.emplace_back("test.string_knob", std::string("invalid_choice"));
 
@@ -307,39 +312,63 @@ TEST_F(IntegrationGraphKnobsApi, CreateExecutionPlanWithInvalidStringKnob)
 
 TEST_F(IntegrationGraphKnobsApi, CreateExecutionPlanWithUnsupportedKnob)
 {
+    // Set up log recorder to capture warning about deprecated knob
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
+
     Graph graph = createAndBuildSimpleGraph();
 
     // Try to set knob that doesn't exist on this engine
-    int64_t engineId = hipdnn_tests::plugin_constants::engineId<KnobsPlugin>();
+    const int64_t engineId = hipdnn_tests::plugin_constants::engineId<KnobsPlugin>();
     std::vector<KnobSetting> settings;
     settings.emplace_back("nonexistent.knob", static_cast<int64_t>(42));
 
     auto result = graph.create_execution_plan_ext(engineId, settings);
     // Should succeed - unsupported knobs are ignored with warning
-    // TODO: Add test to confirm log is emitted.
     EXPECT_TRUE(result.is_good()) << result.get_message();
+
+    // Verify warning log is emitted for unsupported knob
+    EXPECT_TRUE(recorder.hasLogContaining(
+        HIPDNN_SEV_WARN, "Ignoring knob nonexistent.knob when creating execution plan for graph"))
+        << "Expected warning log 'Ignoring knob nonexistent.knob when creating execution plan for "
+           "graph'\nCaptured logs:\n"
+        << recorder.getRecordedLogsAsString();
 }
 
 TEST_F(IntegrationGraphKnobsApi, CreateExecutionPlanWithDeprecatedKnob)
 {
+    // Set up log recorder to capture warning about deprecated knob
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
+
     Graph graph = createAndBuildSimpleGraph();
 
-    int64_t engineId = hipdnn_tests::plugin_constants::engineId<KnobsPlugin>();
+    const int64_t engineId = hipdnn_tests::plugin_constants::engineId<KnobsPlugin>();
     std::vector<KnobSetting> settings;
     settings.emplace_back("test.deprecated_knob", static_cast<int64_t>(5));
 
     auto result = graph.create_execution_plan_ext(engineId, settings);
     // Should succeed - deprecated knobs are used with warning
-    // TODO: Add test to confirm log is emitted.
     EXPECT_TRUE(result.is_good()) << result.get_message();
+
+    // Verify warning log is emitted for deprecated knob
+    EXPECT_TRUE(recorder.hasLogContaining(
+        HIPDNN_SEV_WARN, "Knob test.deprecated_knob has been marked as deprecated."))
+        << "Expected warning log 'Knob test.deprecated_knob has been marked as "
+           "deprecated.'\nCaptured logs:\n"
+        << recorder.getRecordedLogsAsString();
 }
 
 TEST_F(IntegrationGraphKnobsApi, CreateExecutionPlanWithSharedKnob)
 {
+    // Set up log recorder to verify no deprecation warning is emitted
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
+
     Graph graph = createAndBuildSimpleGraph();
 
     // Set shared knob for Engine A
-    int64_t engineIdA = hipdnn_tests::plugin_constants::engineId<KnobsPlugin>();
+    const int64_t engineIdA = hipdnn_tests::plugin_constants::engineId<KnobsPlugin>();
     std::vector<KnobSetting> settingsA;
     settingsA.emplace_back("test.shared.deterministic", static_cast<int64_t>(1));
 
@@ -348,12 +377,17 @@ TEST_F(IntegrationGraphKnobsApi, CreateExecutionPlanWithSharedKnob)
     EXPECT_TRUE(result.is_good()) << "Engine A should accept shared knob: " << result.get_message();
 
     // Set same shared knob for Engine B
-    int64_t engineIdB = hipdnn_tests::plugin_constants::engineId<KnobsPluginEngineB>();
+    const int64_t engineIdB = hipdnn_tests::plugin_constants::engineId<KnobsPluginEngineB>();
     std::vector<KnobSetting> settingsB;
     settingsB.emplace_back("test.shared.deterministic", static_cast<int64_t>(1));
 
     result = graph.create_execution_plan_ext(engineIdB, settingsB);
     EXPECT_TRUE(result.is_good()) << "Engine B should accept shared knob: " << result.get_message();
+
+    // Verify no deprecation warning is emitted for shared knob
+    EXPECT_FALSE(recorder.hasLogContaining("has been marked as deprecated"))
+        << "Shared knob should not trigger deprecation warning.\nCaptured logs:\n"
+        << recorder.getRecordedLogsAsString();
 }
 
 TEST_F(IntegrationGraphKnobsApi, QueryKnobsBeforeGraphBuilt)
@@ -371,7 +405,7 @@ TEST_F(IntegrationGraphKnobsApi, QueryKnobsBeforeGraphBuilt)
     y->set_name("Y");
 
     // Try to query knobs WITHOUT building the graph first
-    int64_t engineId = hipdnn_tests::plugin_constants::engineId<KnobsPlugin>();
+    const int64_t engineId = hipdnn_tests::plugin_constants::engineId<KnobsPlugin>();
     std::vector<Knob> knobs;
     auto result = graph.get_knobs_for_engine(engineId, knobs);
 

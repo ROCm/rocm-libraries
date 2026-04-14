@@ -25,104 +25,130 @@
  *******************************************************************************/
 
 #include "lstm.hpp"
-#include "get_handle.hpp"
-#include <gtest/gtest_common.hpp>
-#include <gtest/gtest.h>
 
-namespace lstm_extra {
-void GetArgs(const std::string& param, std::vector<std::string>& tokens)
+namespace {
+
+struct TestCase
 {
-    std::stringstream ss(param);
-    std::istream_iterator<std::string> begin(ss);
-    std::istream_iterator<std::string> end;
-    while(begin != end)
-        tokens.push_back(*begin++);
-}
+    TestCase(int dir_mode_,
+             int no_hx_,
+             int no_dhy_,
+             int no_cx_,
+             int no_dcy_,
+             int no_hy_,
+             int no_dhx_,
+             int no_cy_,
+             int no_dcx_)
+        : dir_mode(dir_mode_),
+          no_hx(no_hx_),
+          no_dhy(no_dhy_),
+          no_cx(no_cx_),
+          no_dcy(no_dcy_),
+          no_hy(no_hy_),
+          no_dhx(no_dhx_),
+          no_cy(no_cy_),
+          no_dcx(no_dcx_)
+    {
+    }
 
-auto GetTestCases(std::string precision)
+    int dir_mode;
+    int no_hx;
+    int no_dhy;
+    int no_cx;
+    int no_dcy;
+    int no_hy;
+    int no_dhx;
+    int no_cy;
+    int no_dcx;
+
+    friend std::ostream& operator<<(std::ostream& os, const TestCase& tc)
+    {
+        return os << "dir-mode:" << tc.dir_mode << " no-hx:" << tc.no_hx << " no-dhy:" << tc.no_dhy
+                  << " no-cx:" << tc.no_cx << " no-dcy:" << tc.no_dcy << " no-hy:" << tc.no_hy
+                  << " no-dhx:" << tc.no_dhx << " no-cy:" << tc.no_cy << " no-dcx:" << tc.no_dcx
+                  << " no-dcx:" << tc.no_dcx;
+    }
+};
+
+std::vector<TestCase> GetTestCases()
 {
-    std::string flags       = "test_lstm --verbose " + precision;
-    std::string commonFlags = " --batch-size 32 --seq-len 3 --batch-seq 32 32 32 --vector-len 128 "
-                              "--hidden-size 128 --num-layers 1 --in-mode 0 --bias-mode 0";
-
-    // clang-format off
-    return std::vector<std::string>{
-        {flags + commonFlags + " -dir-mode 0 --no-hx"},
-        {flags + commonFlags + " -dir-mode 0 --no-dhy"},
-        {flags + commonFlags + " -dir-mode 0 --no-hx --no-dhy"},
-        {flags + commonFlags + " -dir-mode 0 --no-cx"},
-        {flags + commonFlags + " -dir-mode 0 --no-hx --no-cx"},
-        {flags + commonFlags + " -dir-mode 0 --no-dcy"},
-        {flags + commonFlags + " -dir-mode 0 --no-cx --no-dcy"},
-        {flags + commonFlags + " -dir-mode 1 --no-hx"},
-        {flags + commonFlags + " -dir-mode 1 --no-dhy"},
-        {flags + commonFlags + " -dir-mode 1 --no-hx --no-dhy"},
-        {flags + commonFlags + " -dir-mode 1 --no-cx"},
-        {flags + commonFlags + " -dir-mode 1 --no-hx --no-cx"},
-        {flags + commonFlags + " -dir-mode 1 --no-dcy"},
-        {flags + commonFlags + " -dir-mode 1 --no-cx --no-dcy"},
-        {flags + commonFlags + " -dir-mode 0 --no-hy"},
-        {flags + commonFlags + " -dir-mode 0 --no-dhx"},
-        {flags + commonFlags + " -dir-mode 0 --no-hy --no-dhx"},
-        {flags + commonFlags + " -dir-mode 0 --no-cy"},
-        {flags + commonFlags + " -dir-mode 0 --no-hy --no-cy"},
-        {flags + commonFlags + " -dir-mode 0 --no-dcx"},
-        {flags + commonFlags + " -dir-mode 0 --no-cy --no-dcx"},
-        {flags + commonFlags + " -dir-mode 1 --no-hy"},
-        {flags + commonFlags + " -dir-mode 1 --no-dhx"},
-        {flags + commonFlags + " -dir-mode 1 --no-hy --no-dhx"},
-        {flags + commonFlags + " -dir-mode 1 --no-cy"},
-        {flags + commonFlags + " -dir-mode 1 --no-hy --no-cy"},
-        {flags + commonFlags + " -dir-mode 1 --no-dcx"},
-        {flags + commonFlags + " -dir-mode 1 --no-cy --no-dcx"},
-	    {flags + commonFlags + " -dir-mode 0 --no-hx --no-dhy --no-cx --no-dcy --no-hy --no-dhx --no-cy --no-dcx"},
-	    {flags + commonFlags + " -dir-mode 1 --no-hx --no-dhy --no-cx --no-dcy --no-hy --no-dhx --no-cy --no-dcx"}
+    return std::vector{
+        // clang-format off
+        //   dir-mode no-hx no-dhy no-cx no-dcy no-hy no-dhx no-cy no-dcx
+        TestCase(0,     1,    0,     0,    0,     0,    0,     0,    0),
+        TestCase(0,     0,    1,     0,    0,     0,    0,     0,    0),
+        TestCase(0,     1,    1,     0,    0,     0,    0,     0,    0),
+        TestCase(0,     0,    0,     1,    0,     0,    0,     0,    0),
+        TestCase(0,     1,    0,     1,    0,     0,    0,     0,    0),
+        TestCase(0,     0,    0,     0,    1,     0,    0,     0,    0),
+        TestCase(0,     0,    0,     1,    1,     0,    0,     0,    0),
+        TestCase(1,     1,    0,     0,    0,     0,    0,     0,    0),
+        TestCase(1,     0,    1,     0,    0,     0,    0,     0,    0),
+        TestCase(1,     1,    1,     0,    0,     0,    0,     0,    0),
+        TestCase(1,     0,    0,     1,    0,     0,    0,     0,    0),
+        TestCase(1,     1,    0,     1,    0,     0,    0,     0,    0),
+        TestCase(1,     0,    0,     0,    1,     0,    0,     0,    0),
+        TestCase(1,     0,    0,     1,    1,     0,    0,     0,    0),
+        TestCase(0,     0,    0,     0,    0,     1,    0,     0,    0),
+        TestCase(0,     0,    0,     0,    0,     0,    1,     0,    0),
+        TestCase(0,     0,    0,     0,    0,     1,    1,     0,    0),
+        TestCase(0,     0,    0,     0,    0,     0,    0,     1,    0),
+        TestCase(0,     0,    0,     0,    0,     1,    0,     1,    0),
+        TestCase(0,     0,    0,     0,    0,     0,    0,     0,    1),
+        TestCase(0,     0,    0,     0,    0,     0,    0,     1,    1),
+        TestCase(1,     0,    0,     0,    0,     1,    0,     0,    0),
+        TestCase(1,     0,    0,     0,    0,     0,    1,     0,    0),
+        TestCase(1,     0,    0,     0,    0,     1,    1,     0,    1),
+        TestCase(1,     0,    0,     0,    0,     0,    0,     1,    0),
+        TestCase(1,     0,    0,     0,    0,     1,    0,     1,    0),
+        TestCase(1,     0,    0,     0,    0,     0,    0,     0,    1),
+        TestCase(1,     0,    0,     0,    0,     0,    0,     1,    1),
+        TestCase(0,     1,    1,     1,    1,     1,    1,     1,    1),
+        TestCase(1,     1,    1,     1,    1,     1,    1,     1,    1)
+        // clang-format on
     };
-    // clang-format on
 }
 
-using TestCase = decltype(GetTestCases({}))::value_type;
+} // namespace
 
-class GPU_lstm_extra_FP32 : public testing::TestWithParam<std::vector<TestCase>>
+template <typename T>
+struct GPU_LSTM_extra_test : LSTM_test<T>, testing::TestWithParam<TestCase>
 {
-    MIOPEN_DECLARE_GTEST_USES_TEST_DRIVE();
-};
-
-bool IsTestSupportedForDevice()
-{
-    using namespace miopen::debug;
-    using e_mask = enabled<Gpu::gfx94X, Gpu::gfx103X, Gpu::gfx110X>;
-    using d_mask = disabled<Gpu::Default>;
-    return ::IsTestSupportedForDevMask<d_mask, e_mask>();
-}
-
-void Run2dDriver(miopenDataType_t prec)
-{
-    if(!IsTestSupportedForDevice())
+protected:
+    void SetUp() override
     {
-        GTEST_SKIP();
-    }
-    std::vector<std::string> params = GPU_lstm_extra_FP32::GetParam();
+        this->dataType = miopen_type<T>{};
 
-    for(const auto& test_value : params)
-    {
-        std::vector<std::string> tokens;
-        GetArgs(test_value, tokens);
-        std::vector<const char*> ptrs;
+        auto [dirMode, nohx, nodhy, nocx, nodcy, nohy, nodhx, nocy, nodcx] = GetParam();
 
-        std::transform(tokens.begin(), tokens.end(), std::back_inserter(ptrs), [](const auto& str) {
-            return str.data();
-        });
-        testing::internal::CaptureStderr();
-        test_drive<lstm_driver>(ptrs.size(), ptrs.data());
-        auto capture = testing::internal::GetCapturedStderr();
-        std::cout << capture;
+        this->batchSize  = 32;
+        this->seqLength  = 3;
+        this->batchSeq   = {32, 32, 32};
+        this->inVecLen   = 128;
+        this->hiddenSize = 128;
+        this->numLayers  = 1;
+        this->inputMode  = 0;
+        this->biasMode   = 0;
+        this->dirMode    = dirMode;
+        this->nohx       = bool(nohx);
+        this->nodhy      = bool(nodhy);
+        this->nocx       = bool(nocx);
+        this->nodcy      = bool(nodcy);
+        this->nohy       = bool(nohy);
+        this->nodhx      = bool(nodhx);
+        this->nocy       = bool(nocy);
+        this->nodcx      = bool(nodcx);
     }
 };
 
-} // namespace lstm_extra
-using namespace lstm_extra;
+using GPU_LSTM_extra_FP16 = GPU_LSTM_extra_test<half_float::half>;
 
-TEST_P(GPU_lstm_extra_FP32, FloatTest_lstm_extra) { Run2dDriver(miopenFloat); };
+TEST_P(GPU_LSTM_extra_FP16, HalfTest) { RunTest(); }
 
-INSTANTIATE_TEST_SUITE_P(Full, GPU_lstm_extra_FP32, testing::Values(GetTestCases("--float")));
+INSTANTIATE_TEST_SUITE_P(Full, GPU_LSTM_extra_FP16, testing::ValuesIn(GetTestCases()));
+
+using GPU_LSTM_extra_FP32 = GPU_LSTM_extra_test<float>;
+
+TEST_P(GPU_LSTM_extra_FP32, FloatTest) { RunTest(); }
+
+INSTANTIATE_TEST_SUITE_P(Full, GPU_LSTM_extra_FP32, testing::ValuesIn(GetTestCases()));

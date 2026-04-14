@@ -3,18 +3,21 @@
 
 import argparse
 import dataclasses as dc
-import pathlib
 import random
 import time
+from pathlib import Path
 from types import SimpleNamespace as NS
 
 import pytest
 import rrperf.optimize_weights as ow
 import yaml
 
+weights_subclasses = [ow.FullWeights, ow.SimplifiedWeights]
+
 
 @pytest.mark.slow
-def test_run_optimize(tmp_path_factory):
+@pytest.mark.parametrize("subclass", weights_subclasses)
+def test_run_optimize(tmp_path_factory, subclass):
     t = int(time.time())
     print(f"Random seed: {t}")
     random.seed(t)
@@ -28,6 +31,7 @@ def test_run_optimize(tmp_path_factory):
         "--population=3",
         "--new=1",
         "--suite=guidepost_1",
+        f"--weight-type={subclass().type}",
     ]
     parser = argparse.ArgumentParser()
     ow.get_args(parser)
@@ -85,7 +89,7 @@ benchmark:
     yaml_file = None
     for arg in cmd:
         if arg.startswith("--yaml"):
-            yaml_file = pathlib.Path(arg.split("=")[1])
+            yaml_file = Path(arg.split("=")[1])
     yaml_file.write_text(test_yaml)
     return NS(returncode=0, stdout=test_yaml.encode("ascii"))
 
@@ -139,35 +143,36 @@ def test_mocked_integration(tmp_path_factory, mocker):
         assert "weights" in d
 
 
-def test_weights():
-    test1 = ow.Weights()
-    test2 = ow.Weights()
+@pytest.mark.parametrize("subclass", weights_subclasses)
+def test_weights(subclass):
+    test1 = subclass()
+    test2 = subclass()
 
     assert test1.outOfRegisters >= 1e9
     assert test2.outOfRegisters >= 1e9
 
     # With 0% mutation rate, all of the fields will come from one of the parents.
-    test3 = ow.Weights.Combine([test1, test2], mutation=0)
-    for field in dc.fields(ow.Weights):
+    test3 = subclass.Combine([test1, test2], mutation=0)
+    for field in dc.fields(subclass):
         assert getattr(test3, field.name) == getattr(test1, field.name) or getattr(
             test3, field.name
         ) == getattr(test2, field.name)
 
     # With 100% mutation rate, all of the float fields _will probably_ be different
     # from the parents after a combine.
-    test4 = ow.Weights.Combine([test1, test2], 1.0)
+    test4 = subclass.Combine([test1, test2], 1.0)
     assert test4.outOfRegisters >= 1e9
 
     fields = {
         fld.name
-        for fld in dc.fields(ow.Weights)
+        for fld in dc.fields(subclass)
         if fld.type == float and fld.default_factory.is_variable
     }
     for fld in fields:
         assert getattr(test1, fld) != getattr(test4, fld)
         assert getattr(test2, fld) != getattr(test4, fld)
 
-    test5 = ow.Weights.Combine([test1, test2])
+    test5 = subclass.Combine([test1, test2])
     assert test5.outOfRegisters >= 1e9
 
     weights = [test1, test2, test3, test4, test5]
@@ -191,7 +196,7 @@ def test_get_args():
     parser = argparse.ArgumentParser()
     ow.get_args(parser)
     args = parser.parse_args(["--output=testingrequired"])
-    assert args.output_dir == pathlib.Path("testingrequired")
+    assert args.output_dir == Path("testingrequired")
 
     input_args = [
         "--output=testing123",
@@ -204,19 +209,20 @@ def test_get_args():
     ow.get_args(parser)
     args = parser.parse_args(input_args)
 
-    assert args.output_dir == pathlib.Path("testing123")
+    assert args.output_dir == Path("testing123")
     assert args.generations == 2
     assert args.num_parents == 2
     assert args.population == 3
     assert args.num_random == 1
 
 
-def test_gen_rw(tmp_path_factory):
+@pytest.mark.parametrize("subclass", weights_subclasses)
+def test_gen_rw(tmp_path_factory, subclass):
     output_dir = tmp_path_factory.mktemp("test_gen_rw")
     population = 5
     num_gens = 10
     for gen in range(num_gens):
-        results = [ow.Result(i, ow.Weights()) for i in range(population)]
+        results = [ow.Result(i, weights=subclass()) for i in range(population)]
         ow.write_generation(output_dir, gen, results)
 
         test_file = output_dir / f"results_{gen}.yaml"
@@ -224,25 +230,26 @@ def test_gen_rw(tmp_path_factory):
         assert test == results, (test_file, test[0], results[0])
 
 
-def test_new_inputs():
+@pytest.mark.parametrize("subclass", weights_subclasses)
+def test_new_inputs(subclass):
     population = 10
     num_parents = 2
     num_rand = 2
-    test_gen_1 = ow.new_inputs([], population, num_parents, num_rand, 0.1)
-    test_gen_1_results = [ow.Result(i, val) for i, val in enumerate(test_gen_1)]
+    test_gen_1 = ow.new_inputs([], population, num_parents, num_rand, 0.1, subclass)
+    test_gen_1_results = [ow.Result(i, weights=val) for i, val in enumerate(test_gen_1)]
     assert len(test_gen_1) == population
 
     test_gen_2 = ow.new_inputs(
-        test_gen_1_results, population, num_parents, num_rand, 0.1
+        test_gen_1_results, population, num_parents, num_rand, 0.1, subclass
     )
-    test_gen_2_results = [ow.Result(i, val) for i, val in enumerate(test_gen_2)]
+    test_gen_2_results = [ow.Result(i, weights=val) for i, val in enumerate(test_gen_2)]
     assert len(test_gen_2) == (population + num_parents)
     # Parents are taken from the beginning and passed through.
     for i in range(num_parents):
         assert test_gen_1[i] in test_gen_2
 
     test_gen_3 = ow.new_inputs(
-        test_gen_2_results, population, num_parents, num_rand, 0.1
+        test_gen_2_results, population, num_parents, num_rand, 0.1, subclass
     )
     assert len(test_gen_3) == (population + num_parents)
     # Parents are taken from the beginning and passed through.

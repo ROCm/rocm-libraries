@@ -774,9 +774,11 @@ class RegisterSchedule:
                 return ScheduleMatchStatus.NO_MATCH, None
 
             GRVWA, GRVWB = kernel["GlobalReadVectorWidthA"], kernel["GlobalReadVectorWidthB"]
-            LRVW = kernel["LocalReadVectorWidth"]
-            kernel_vector_widths = [GRVWA, GRVWB, LRVW]            
-            if self.vector_widths != kernel_vector_widths:
+            LRVWA, LRVWB = kernel["LocalReadVectorWidthA"], kernel["LocalReadVectorWidthB"]
+            kernel_vector_widths = [GRVWA, GRVWB, LRVWA, LRVWB]
+            # WA: if need to support different LRVW for A and B, add a new parameter to vector_widths
+            extended_vector_widths = self.vector_widths + [self.vector_widths[2]]
+            if extended_vector_widths != kernel_vector_widths:
                 return ScheduleMatchStatus.NO_MATCH, None
             
             if self.matrix_inst != kernel["MatrixInstruction"]:
@@ -938,6 +940,69 @@ def _get_schedule_256x96x64_16bit(kernel, useLDSTr, TLDS):
 
     numMfma = 48
     opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
+    return True, opt1
+
+@RegisterSchedule(
+    tile_config=TileConfig(256, 96, 64, 2, 1, 1, True, 0, 0),
+    dtype_predicate=is16bit,
+    vector_widths=[8, 8, 8],
+    matrix_inst=[16, 16, 32, 1],
+    mfma_wave_group=[2, 2]
+)
+def _get_schedule_256x96x64_16bit_DPLB(kernel, useLDSTr, TLDS):
+    optSchedule = dict()
+    syncCode = []
+    nglshift = nllshift = 0 # vmcnt shift for ngl and nll
+
+    if isNT(kernel) and useLDSTr and TLDS == 0:
+        syncTable = [
+            -1, SWaitCnt(dscnt= 4, vlcnt=-1, vscnt=-1, comment="wait for all LRA1 and one LRB1"),
+             7, SWaitCnt(dscnt= 6, vlcnt=-1, vscnt=-1, comment="wait the rest of LRB1"),
+            23, SWaitCnt(dscnt= 0, vlcnt=-1, vscnt=-1, comment="wait for all LR0 before starting 2nd sub-iteration"),
+            27, SWaitCnt(dscnt=-1, vlcnt=10, vscnt=-1, comment="wait for GRAs before starting LRA1"),
+            27, SBarrier(comment=""),
+            41, SWaitCnt(dscnt=-1, vlcnt=11, vscnt=-1, comment="wait for GRBs before starting LRB1"),
+            41, SBarrier(comment=""),
+        ]
+
+        optSchedule = {
+            'SYNC': [syncTable[::2]],
+
+            'GRIncA': [[0,1,1, 1,2,3, 3,3,4],
+                       [0,0,0, 1,2,2, 2,3,4]],
+            'GRIncB': [[18,18,18, 21,21,21, 22,22,22]],
+
+            'LRA0': [[0,0, 2,2, 4,4, 6,6, 8,8, 10,10, 12,12, 14,14],
+                     [1,1, 3,3, 5,5, 7,7, 9,9, 11,11, 13,13, 15,15]],
+            'LRB0': [[9,11, 13,15, 16,16],
+                     [10,12, 14,16, 17,17]],
+
+            'GRA': [[5,5, 5,6, 7, 9, 11,11, 15,16, 19,20, 24,25, 26,27],
+                    [4,5, 6,6, 7,10, 11,12, 15,16, 19,20, 24,25, 26,28]],
+            'GRB': [[31,31, 35,35, 39,39],
+                    [32,32, 36,36, 40,40]],
+
+            'LRA1': [[28,28, 30,30, 32,32, 34,34, 36,36, 37,37, 38,38, 40,40],
+                     [29,29, 31,31, 33,33, 35,35, 37,37, 39,39, 41,41, 42,42]],
+            'LRB1': [[42,42, 43,43, 45,45],
+                     [43,43, 44,44, 46,46]],
+
+            'LRSA': [[26,26,26,27]],
+            'LRSB': [[27]],
+            'LWSA': [[44,44,44],
+                     [44,45,45]],
+            'LWSB': [[]],
+            'LCC': [[46,46],
+                    [45,46]],
+        }
+        syncCode = syncTable[1::2]
+        nglshift = nllshift = 11
+    else:
+        return False, None
+
+    numMfma = 48
+    opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
+    opt1.disableValidationPass(cmsv.ValidatorPass.ADD_GR_NOT_TOO_EARLY_CONSTRAINTS, "GR validation is not yet supported for DtlPlusLdsBuf")
     return True, opt1
 
 @RegisterSchedule(
@@ -4524,7 +4589,7 @@ def _get_schedule_128x128x32_TF32_plr1(kernel, useLDSTr, TLDS):
                              4,5,5,5, 6,6, 7,7,7,7, 
                              5,5,6,6, 6,6, 8,8,8,8]
         # because of GR starting at 10, we need barrier at 9, will use that for sync too.
-        syncs.add(                               9, dscnt=0, comment="wait for LRBs before the packing them",
+        syncs.add(                               9, dscnt=0, comment="wait for LRBs",
                                                  barrier=True, barrier_comment="make sure all LRs are done before starting GR")
         pack_b0= [                               9,9, 9,9, # swap instructions, must come after LR and before other packs
                                                  10,10,10,10, 10,10, 11,11,11,11,
@@ -4551,8 +4616,7 @@ def _get_schedule_128x128x32_TF32_plr1(kernel, useLDSTr, TLDS):
         pack_a1 =[                                                            15,15,16,16, # swap instructions, must come after LR and before other packs
                                                                                 17,17,17,17, 20,20, 21,21,21,21,
                                                                                  18,18,18,18, 20,20, 21,21,21,21]
-        syncs.add(                                                                19, dscnt=4, comment="wait for the first 2 LRBs before the packing them")
-        syncs.add(                                                                 20, dscnt=0, comment="wait for the rest of LRBs")
+        syncs.add(                                                                19, dscnt=0, comment="wait for LRBs")
         pack_b1= [                                                                19,19,19,19, # swap instructions, must come after LR and before other packs
                                                                                   19,19,19,19, 20,20, 22,22,22,22,
                                                                                    20,20,20,20, 20,20, 22,22,22,22]
@@ -4597,9 +4661,10 @@ def _get_schedule_128x128x32_TF32_plr1(kernel, useLDSTr, TLDS):
     kernel["MfmaInitCVgprs"] = True
     kernel["UsePLRPack"] = True
     kernel["UseMFMAF32XEmulation"] = True
+    kernel["UseDot2F32XEmulation"] = False
     opt1 = ScheduleInfo(num_code_paths, n_mfma, optSchedule, syncCode, nglshift, nllshift)
     if disable_validation:
-        opt1.disableValidation("swap instructions included in pack are not supported yet")
+        opt1.disableValidationPass(cmsv.ValidatorPass.ADD_PACK_CONSTRAINTS, "swap instructions included in pack are not supported yet")
     return True, opt1
 
 @RegisterSchedule(
@@ -4620,10 +4685,6 @@ def _get_schedule_128x128x64_TF32(kernel, useLDSTr, TLDS):
     disable_validation = False
 
     if isTN(kernel) and not useLDSTr and TLDS==1:
-        kernel["UseMFMAF32XEmulation"] = True
-        kernel["UseDot2F32XEmulation"] = False
-        kernel["UsePLRPack"] = True
-
         offset=[0,0,1,1, 8,8,  9, 9,10,10, 
                 2,2,3,3, 8,8, 11,11,12,12,
                 4,4,5,5, 8,8, 13,13,14,14, 
@@ -4664,10 +4725,6 @@ def _get_schedule_128x128x64_TF32(kernel, useLDSTr, TLDS):
     elif isNN(kernel) and TLDS==1 and kernel["VectorWidthA"] == 4:
         disable_validation = True
 
-        kernel["UseMFMAF32XEmulation"] = True
-        kernel["UseDot2F32XEmulation"] = False
-        kernel["UsePLRPack"] = True
-
         offset=[0,0,1,1, 8,8,  9, 9,10,10, 
                 2,2,3,3, 8,8, 11,11,12,12,
                 4,4,5,5, 8,8, 13,13,14,14, 
@@ -4677,7 +4734,7 @@ def _get_schedule_128x128x64_TF32(kernel, useLDSTr, TLDS):
         lrb0   = [                                       11,11,13,13,15,15,17,17]
         #                wait then read
         syncs.add(             6, dscnt=2, comment="wait for the first 4 LRAs before swapping/packing")
-        syncs.add(                     9, dscnt=2, comment="wait for the rest of LRAs before swapping/packing them")
+        syncs.add(                     9, dscnt=0, comment="wait for the rest of LRAs before swapping/packing them")
         pack_a0= [              7,7,7, 9,9,9, 8,8, 10,10, 8, 10] # swap instructions
         pack_a0+=[                                       i+11 for i in offset] # last at 27
         # because of GR starting at 22, we need barrier at 21, will use that for sync too.
@@ -4696,7 +4753,7 @@ def _get_schedule_128x128x64_TF32(kernel, useLDSTr, TLDS):
         grb    = [                                                    53,57,61, 64,69,75,79,84] # one index for two instructions
         num_gr = len(gra) + len(grb)
 
-        syncs.add(                                                 47, vlcnt=7, barrier=True, comment="wait for the previous GRs")
+        syncs.add(                                                 48, vlcnt=7, barrier=True, comment="wait for the previous GRs")
         lra1   =[[                                                 48,48,50,50,52,52,54,54],
                                                                    [49,49,51,51,53,53,54,54]]
         lrb1   = [                                                                                  59,59,  61,61,63,63,65,65]
@@ -4738,10 +4795,11 @@ def _get_schedule_128x128x64_TF32(kernel, useLDSTr, TLDS):
 
     kernel["MfmaInitCVgprs"] = True
     kernel["UseMFMAF32XEmulation"] = True
+    kernel["UseDot2F32XEmulation"] = False
     kernel["UsePLRPack"] = True
     opt1 = ScheduleInfo(2, n_mfma, optSchedule, syncCode, nglshift, nllshift)
     if disable_validation:
-        opt1.disableValidation("NN transpose with wider loads is not yet supported by validator")
+        opt1.disableValidationPass(cmsv.ValidatorPass.ADD_PACK_CONSTRAINTS, "Pack validation for NN transpose is not yet supported by validator")
     return True, opt1
 
 

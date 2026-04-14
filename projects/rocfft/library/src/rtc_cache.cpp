@@ -30,17 +30,25 @@
 
 #include <atomic>
 #include <chrono>
+#include <hip/hip_runtime_api.h>
 #include <hip/hip_version.h>
 #include <hip/hiprtc.h>
 #include <mutex>
 #include <optional>
 #include <semaphore>
+#include <set>
 
 namespace fs = std::filesystem;
 
 std::unique_ptr<RTCCache> RTCCache::single;
 
-static const char* default_cache_filename = "rocfft_kernel_cache.db";
+const bool RTCCache::db_file::cache_read_disabled
+    = !rocfft_getenv("ROCFFT_RTC_CACHE_READ_DISABLE").empty();
+const bool RTCCache::db_file::cache_write_disabled
+    = !rocfft_getenv("ROCFFT_RTC_CACHE_WRITE_DISABLE").empty();
+
+static const char* default_cache_filename_prefix = "rocfft_kernel_cache_";
+static const char* default_cache_filename_suffix = ".db";
 
 // Lock for in-process compilation - due to limits in ROCclr, we
 // can do at most one compilation in a process before we have to
@@ -117,7 +125,7 @@ static unsigned int get_max_subprocesses()
 }
 
 // Get paths to system RTC cache, in decreasing order of preference.
-static std::vector<fs::path> rtccache_db_sys_paths()
+static std::vector<fs::path> rtccache_db_sys_paths(const std::string& gpu_arch)
 {
     // if env var is set, use that directly
     std::vector<fs::path> paths;
@@ -133,12 +141,40 @@ static std::vector<fs::path> rtccache_db_sys_paths()
         if(!lib_path.empty())
         {
             // try next to the library, and in rocfft subdir
+            auto cache_filename = std::string(default_cache_filename_prefix) + gpu_arch
+                                  + default_cache_filename_suffix;
             fs::path library_parent_path = lib_path.parent_path();
-            paths.push_back(library_parent_path / default_cache_filename);
-            paths.push_back(library_parent_path / "rocfft" / default_cache_filename);
+            paths.push_back(library_parent_path / cache_filename);
+            paths.push_back(library_parent_path / "rocfft" / cache_filename);
         }
     }
     return paths;
+}
+
+// get the GPU arches that are present on the devices that are visible
+static std::set<std::string> get_visible_gpu_arches()
+{
+    std::set<std::string> arches;
+    int                   deviceCount = 0;
+    if(hipGetDeviceCount(&deviceCount) != hipSuccess)
+        // this can mean no devices are visible
+        return arches;
+
+    for(int device = 0; device < deviceCount; ++device)
+    {
+        hipDeviceProp_t prop;
+        if(hipGetDeviceProperties(&prop, device) != hipSuccess)
+            throw std::runtime_error("hipGetDeviceProperties failed");
+
+        std::string arch = prop.gcnArchName;
+        // strip flags, as rocFFT deals with generic code for each
+        // arch
+        auto colonIdx = arch.find(':');
+        if(colonIdx != std::string::npos)
+            arch.resize(colonIdx);
+        arches.insert(arch);
+    }
+    return arches;
 }
 
 // Get list of candidate paths to RTC user cache DB, in decreasing
@@ -157,16 +193,18 @@ static std::vector<fs::path> rtccache_db_user_paths()
     return paths;
 }
 
-static sqlite3_stmt_ptr prepare_stmt(sqlite3_ptr& db, const char* sql)
+static sqlite3_stmt_ptr prepare_stmt(sqlite3* db, const char* sql)
 {
     sqlite3_stmt* stmt = nullptr;
-    if(sqlite3_prepare_v2(db.get(), sql, -1, &stmt, nullptr) == SQLITE_OK)
+    if(sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK)
         return sqlite3_stmt_ptr(stmt);
-    throw std::runtime_error(std::string("sqlite_prepare_v2 failed: ") + sqlite3_errmsg(db.get()));
+    throw std::runtime_error(std::string("sqlite_prepare_v2 failed: ") + sqlite3_errmsg(db));
 }
 
-sqlite3_ptr RTCCache::connect_db(const fs::path& path, bool readonly)
+void RTCCache::db_file::connect_db(const fs::path& path, bool readonly)
 {
+    db.reset();
+
     sqlite3* db_raw = nullptr;
     int      flags  = SQLITE_OPEN_FULLMUTEX;
     if(readonly)
@@ -181,21 +219,21 @@ sqlite3_ptr RTCCache::connect_db(const fs::path& path, bool readonly)
     if(sqlite3_open_v2(path.string().c_str(), &db_raw, flags, nullptr) != SQLITE_OK)
     {
         sqlite3_close(db_raw);
-        return nullptr;
+        return;
     }
 
-    sqlite3_ptr db(db_raw);
+    db.reset(db_raw);
 
     // we can potentially want to write a bunch of kernels in
     // parallel (when doing mass compilation).  set a bigger busy
     // timeout (5s) so that concurrent modifications will wait for one
     // another
-    sqlite3_busy_timeout(db_raw, 5000);
+    sqlite3_busy_timeout(db.get(), 5000);
 
+    // create the default table
     if(!readonly)
     {
-        // create the default table
-        auto create = prepare_stmt(db,
+        auto create = prepare_stmt(db.get(),
                                    "CREATE TABLE IF NOT EXISTS cache_v1 ("
                                    "  kernel_name TEXT NOT NULL,"
                                    "  arch TEXT NOT NULL,"
@@ -207,28 +245,7 @@ sqlite3_ptr RTCCache::connect_db(const fs::path& path, bool readonly)
                                    "      kernel_name, arch, hip_version, generator_sum"
                                    "      ))");
         if(sqlite3_step(create.get()) != SQLITE_DONE)
-            return nullptr;
-    }
-
-    return db;
-}
-
-RTCCache::RTCCache()
-{
-    auto sys_paths = rtccache_db_sys_paths();
-    for(const auto& p : sys_paths)
-    {
-        db_sys = connect_db(p, true);
-        if(db_sys)
-            break;
-    }
-
-    auto paths = rtccache_db_user_paths();
-    for(const auto& p : paths)
-    {
-        db_user = connect_db(p, false);
-        if(db_user)
-            break;
+            throw std::runtime_error(sqlite3_errmsg(db.get()));
     }
 
     static const char* get_stmt_text = "SELECT code "
@@ -239,56 +256,81 @@ RTCCache::RTCCache()
                                        "  AND hip_version = :hip_version "
                                        "  AND generator_sum = :generator_sum ";
 
-    static const char* store_stmt_text = "INSERT OR REPLACE INTO cache_v1 ("
-                                         "    kernel_name,"
-                                         "    arch,"
-                                         "    hip_version,"
-                                         "    generator_sum,"
-                                         "    code,"
-                                         "    timestamp"
-                                         ")"
-                                         "VALUES ("
-                                         "    :kernel_name,"
-                                         "    :arch,"
-                                         "    :hip_version,"
-                                         "    :generator_sum,"
-                                         "    :code,"
-                                         "    CAST(STRFTIME('%s','now') AS INTEGER)"
-                                         ")";
-
-    // prepare get/store statements once so they can be called many
-    // times
-    if(db_sys)
+    try
     {
-        // it's possible that the sys cache exists but is not usable.
-        // so if we are unable to talk to it, just stop using it
+        get_stmt = prepare_stmt(db.get(), get_stmt_text);
+    }
+    catch(std::exception&)
+    {
+        // connection is not usable
+        db.reset();
+        return;
+    }
+
+    if(!readonly)
+    {
+        static const char* store_stmt_text = "INSERT OR REPLACE INTO cache_v1 ("
+                                             "    kernel_name,"
+                                             "    arch,"
+                                             "    hip_version,"
+                                             "    generator_sum,"
+                                             "    code,"
+                                             "    timestamp"
+                                             ")"
+                                             "VALUES ("
+                                             "    :kernel_name,"
+                                             "    :arch,"
+                                             "    :hip_version,"
+                                             "    :generator_sum,"
+                                             "    :code,"
+                                             "    CAST(STRFTIME('%s','now') AS INTEGER)"
+                                             ")";
         try
         {
-            get_stmt_sys = prepare_stmt(db_sys, get_stmt_text);
+            store_stmt = prepare_stmt(db.get(), store_stmt_text);
         }
         catch(std::exception&)
         {
-            db_sys.reset();
+            // connection might still be usable for getting kernels,
+            // but store_stmt will be null.  store operations will be
+            // a no-op.
         }
-    }
-    if(db_user)
-    {
-        get_stmt_user   = prepare_stmt(db_user, get_stmt_text);
-        store_stmt_user = prepare_stmt(db_user, store_stmt_text);
     }
 }
 
-static std::vector<char> get_code_object_impl(const std::string&          kernel_name,
-                                              const std::string&          gpu_arch,
-                                              const std::array<char, 32>& generator_sum,
-                                              sqlite3_ptr&                db,
-                                              sqlite3_stmt_ptr&           get_stmt,
-                                              std::mutex&                 get_mutex)
+RTCCache::RTCCache()
+{
+    for(const auto& arch : get_visible_gpu_arches())
+    {
+        auto sys_paths = rtccache_db_sys_paths(arch);
+        // create an entry in the map for this arch
+        auto iter = db_sys.try_emplace(arch).first;
+        // try connecting to the available paths until one succeeds
+        for(const auto& p : sys_paths)
+        {
+            iter->second.connect_db(p, true);
+            if(iter->second.is_connected())
+                break;
+        }
+    }
+
+    auto paths = rtccache_db_user_paths();
+    // try connecting to the available paths until one succeeds
+    for(const auto& p : paths)
+    {
+        db_user.connect_db(p, false);
+        if(db_user.is_connected())
+            break;
+    }
+}
+
+std::vector<char> RTCCache::db_file::get_code_object(const std::string&          kernel_name,
+                                                     const std::string&          gpu_arch,
+                                                     const std::array<char, 32>& generator_sum)
 {
     std::vector<char> code;
 
-    // allow env variable to disable reads
-    if(!rocfft_getenv("ROCFFT_RTC_CACHE_READ_DISABLE").empty())
+    if(cache_read_disabled || !db || !get_stmt)
         return code;
 
     std::lock_guard<std::mutex> lock(get_mutex);
@@ -323,28 +365,29 @@ std::vector<char> RTCCache::get_code_object(const std::string&          kernel_n
 {
     std::vector<char> code;
     // try user cache first
-    if(get_stmt_user)
-        code = get_code_object_impl(
-            kernel_name, gpu_arch, generator_sum, db_user, get_stmt_user, get_mutex_user);
+    if(db_user.is_connected())
+        code = db_user.get_code_object(kernel_name, gpu_arch, generator_sum);
     // fall back to system cache
-    if(code.empty() && get_stmt_sys)
-        code = get_code_object_impl(
-            kernel_name, gpu_arch, generator_sum, db_sys, get_stmt_sys, get_mutex_sys);
+    if(code.empty())
+    {
+        auto sys = db_sys.find(gpu_arch);
+        if(sys != db_sys.end() && sys->second.is_connected())
+            code = sys->second.get_code_object(kernel_name, gpu_arch, generator_sum);
+    }
     return code;
 }
 
-void RTCCache::store_code_object(const std::string&          kernel_name,
-                                 const std::string&          gpu_arch,
-                                 const std::array<char, 32>& generator_sum,
-                                 const std::vector<char>&    code)
+void RTCCache::db_file::store_code_object(const std::string&          kernel_name,
+                                          const std::string&          gpu_arch,
+                                          const std::array<char, 32>& generator_sum,
+                                          const std::vector<char>&    code)
 {
-    // allow env variable to disable writes
-    if(!rocfft_getenv("ROCFFT_RTC_CACHE_WRITE_DISABLE").empty())
+    if(cache_write_disabled || !db || !store_stmt)
         return;
 
-    std::lock_guard<std::mutex> lock(store_mutex_user);
+    std::lock_guard<std::mutex> lock(store_mutex);
 
-    auto s = store_stmt_user.get();
+    auto s = store_stmt.get();
     sqlite3_reset(s);
 
     // bind arguments to the query and execute
@@ -357,25 +400,34 @@ void RTCCache::store_code_object(const std::string&          kernel_name,
        || sqlite3_bind_blob(s, 5, code.data(), code.size(), SQLITE_TRANSIENT))
     {
         throw std::runtime_error(std::string("store_code_object bind: ")
-                                 + sqlite3_errmsg(db_user.get()));
+                                 + sqlite3_errmsg(db.get()));
     }
     if(sqlite3_step(s) != SQLITE_DONE)
     {
         std::cerr << "Error: failed to store code object for " << kernel_name << ": "
-                  << sqlite3_errmsg(db_user.get()) << std::endl;
+                  << sqlite3_errmsg(db.get()) << std::endl;
         // some kind of problem storing the row?  log it
         if(LOG_RTC_ENABLED())
             (*LogSingleton::GetInstance().GetRTCOS())
                 << "Error: failed to store code object for " << kernel_name << ": "
-                << sqlite3_errmsg(db_user.get()) << std::flush;
+                << sqlite3_errmsg(db.get()) << std::flush;
     }
     sqlite3_reset(s);
+}
+
+void RTCCache::store_code_object(const std::string&          kernel_name,
+                                 const std::string&          gpu_arch,
+                                 const std::array<char, 32>& generator_sum,
+                                 const std::vector<char>&    code)
+{
+    if(db_user.is_connected())
+        db_user.store_code_object(kernel_name, gpu_arch, generator_sum, code);
 }
 
 rocfft_status RTCCache::serialize(void** buffer, size_t* buffer_len_bytes)
 {
     sqlite3_int64 db_size = 0;
-    auto          ptr     = sqlite3_serialize(db_user.get(), "main", &db_size, 0);
+    auto          ptr     = sqlite3_serialize(db_user, "main", &db_size, 0);
     if(ptr)
     {
         *buffer           = ptr;
@@ -395,8 +447,7 @@ rocfft_status RTCCache::deserialize(const void* buffer, size_t buffer_len_bytes)
     std::lock_guard<std::mutex> lock(deserialize_mutex);
 
     // attach an empty database named "deserialized"
-    sqlite3_exec(
-        db_user.get(), "ATTACH DATABASE ':memory:' AS deserialized", nullptr, nullptr, nullptr);
+    sqlite3_exec(db_user, "ATTACH DATABASE ':memory:' AS deserialized", nullptr, nullptr, nullptr);
     // the attach might fail if somehow this is our second
     // deserialize and the db already existed.  later steps will
     // notice this, so we can skip this error check
@@ -405,7 +456,7 @@ rocfft_status RTCCache::deserialize(const void* buffer, size_t buffer_len_bytes)
     // it to be read-only
     auto buffer_mut = const_cast<unsigned char*>(static_cast<const unsigned char*>(buffer));
 
-    int sql_err = sqlite3_deserialize(db_user.get(),
+    int sql_err = sqlite3_deserialize(db_user,
                                       "deserialized",
                                       buffer_mut,
                                       buffer_len_bytes,
@@ -416,7 +467,7 @@ rocfft_status RTCCache::deserialize(const void* buffer, size_t buffer_len_bytes)
 
     // now the deserialized db is in memory.  run an additive query to
     // update the real db with the temp contents.
-    sql_err           = sqlite3_exec(db_user.get(),
+    sql_err           = sqlite3_exec(db_user,
                            "INSERT OR REPLACE INTO cache_v1 ("
                            "    kernel_name,"
                            "    arch,"
@@ -439,7 +490,7 @@ rocfft_status RTCCache::deserialize(const void* buffer, size_t buffer_len_bytes)
     rocfft_status ret = sql_err == SQLITE_OK ? rocfft_status_success : rocfft_status_failure;
 
     // detach the temp db
-    sqlite3_exec(db_user.get(), "DETACH DATABASE deserialized", nullptr, nullptr, nullptr);
+    sqlite3_exec(db_user, "DETACH DATABASE deserialized", nullptr, nullptr, nullptr);
 
     return ret;
 }
@@ -725,7 +776,7 @@ void RTCCache::enable_write_mostly()
 {
     // increase sqlite timeout as many processes may be contending over
     // this database
-    sqlite3_busy_timeout(db_user.get(), 30000);
+    sqlite3_busy_timeout(db_user, 30000);
 
     // set the cache file to WAL mode, which allows for faster writes
     // that don't block with reads
@@ -744,10 +795,13 @@ void RTCCache::write_aot_cache(const std::string&              output_path,
     if(fs::exists(output_path))
         fs::remove(output_path);
 
-    // connect to the output path but discard the returned pointer -
+    // connect to the output db but discard it immediately -
     // this will create the cache tables but close the connection so
     // we can reopen it from inside our existing db handle.
-    connect_db(output_path, false);
+    {
+        db_file out_db;
+        out_db.connect_db(output_path, false);
+    }
 
     auto attach_stmt = prepare_stmt(db_user, "ATTACH DATABASE :db AS out_db");
     sqlite3_reset(attach_stmt.get());
@@ -755,10 +809,10 @@ void RTCCache::write_aot_cache(const std::string&              output_path,
            attach_stmt.get(), 1, output_path.c_str(), output_path.size(), SQLITE_TRANSIENT)
        != SQLITE_OK)
         throw std::runtime_error(std::string("write_aot_cache attach bind: ")
-                                 + sqlite3_errmsg(db_user.get()));
+                                 + sqlite3_errmsg(db_user));
     if(sqlite3_step(attach_stmt.get()) != SQLITE_DONE)
         throw std::runtime_error(std::string("write_aot_cache attach step: ")
-                                 + sqlite3_errmsg(db_user.get()));
+                                 + sqlite3_errmsg(db_user));
     sqlite3_reset(attach_stmt.get());
 
     // copy only the required arches, in case more are present in the
@@ -768,7 +822,7 @@ void RTCCache::write_aot_cache(const std::string&              output_path,
                                          "  arch TEXT NOT NULL )");
     if(sqlite3_step(create_temp_stmt.get()) != SQLITE_DONE)
         throw std::runtime_error(std::string("write_aot_cache create temp table: ")
-                                 + sqlite3_errmsg(db_user.get()));
+                                 + sqlite3_errmsg(db_user));
 
     auto insert_temp_stmt = prepare_stmt(db_user, "INSERT INTO temp.aot_arch VALUES ( ? )");
     for(const auto& gpu_arch_with_flags : gpu_archs)
@@ -779,10 +833,10 @@ void RTCCache::write_aot_cache(const std::string&              output_path,
                insert_temp_stmt.get(), 1, gpu_arch.c_str(), gpu_arch.size(), SQLITE_TRANSIENT)
            != SQLITE_OK)
             throw std::runtime_error(std::string("write_aot_cache temp bind: ")
-                                     + sqlite3_errmsg(db_user.get()));
+                                     + sqlite3_errmsg(db_user));
         if(sqlite3_step(insert_temp_stmt.get()) != SQLITE_DONE)
             throw std::runtime_error(std::string("write_aot_cache temp step: ")
-                                     + sqlite3_errmsg(db_user.get()));
+                                     + sqlite3_errmsg(db_user));
         sqlite3_reset(insert_temp_stmt.get());
     }
 
@@ -810,11 +864,11 @@ void RTCCache::write_aot_cache(const std::string&              output_path,
            != SQLITE_OK
        || sqlite3_bind_int64(copy_stmt.get(), 2, HIP_VERSION) != SQLITE_OK)
         throw std::runtime_error(std::string("write_aot_cache copy bind: ")
-                                 + sqlite3_errmsg(db_user.get()));
+                                 + sqlite3_errmsg(db_user));
 
     if(sqlite3_step(copy_stmt.get()) != SQLITE_DONE)
         throw std::runtime_error(std::string("write_aot_cache copy step: ")
-                                 + sqlite3_errmsg(db_user.get()));
+                                 + sqlite3_errmsg(db_user));
     sqlite3_reset(copy_stmt.get());
 }
 
@@ -848,10 +902,10 @@ void RTCCache::cleanup_cache(sqlite3_int64 target_size_bytes)
                                     "    ) ");
     if(sqlite3_bind_int64(delete_stmt.get(), 1, target_size_bytes) != SQLITE_OK)
         throw std::runtime_error(std::string("cleanup_cache delete bind: ")
-                                 + sqlite3_errmsg(db_user.get()));
+                                 + sqlite3_errmsg(db_user));
     if(sqlite3_step(delete_stmt.get()) != SQLITE_DONE)
         throw std::runtime_error(std::string("cleanup_cache delete step: ")
-                                 + sqlite3_errmsg(db_user.get()));
+                                 + sqlite3_errmsg(db_user));
     delete_stmt.reset();
 
     // check if we can reclaim 20% or more of the file's space by vacuuming
@@ -872,6 +926,6 @@ void RTCCache::cleanup_cache(sqlite3_int64 target_size_bytes)
         auto vacuum_stmt = prepare_stmt(db_user, "VACUUM");
         if(sqlite3_step(vacuum_stmt.get()) != SQLITE_DONE)
             throw std::runtime_error(std::string("cleanup_cache vacuum step: ")
-                                     + sqlite3_errmsg(db_user.get()));
+                                     + sqlite3_errmsg(db_user));
     }
 }

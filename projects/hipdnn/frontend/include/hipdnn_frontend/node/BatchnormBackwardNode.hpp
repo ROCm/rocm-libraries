@@ -8,12 +8,14 @@
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/attributes/BatchnormBackwardAttributes.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
+#include <hipdnn_frontend/detail/BatchnormBackwardPacker.hpp>
+#include <hipdnn_frontend/detail/BatchnormBackwardUnpacker.hpp>
 #include <hipdnn_frontend/node/detail/Utilities.hpp>
 
 namespace hipdnn_frontend::graph
 {
 
-class BatchnormBackwardNode : public BaseNode<BatchnormBackwardNode>
+class BatchnormBackwardNode : public BaseNode<BatchnormBackwardNode, NodeType::BATCHNORM_BACKWARD>
 {
 public:
     BatchnormBackwardAttributes attributes;
@@ -23,6 +25,16 @@ public:
         : BaseNode(graphAttrs)
         , attributes(std::move(batchnormAttrs))
     {
+    }
+
+    Error unpack_from_descriptor(
+        hipdnnBackendDescriptor_t opDesc,
+        std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>>& tensorMap) override
+    {
+        BatchnormBackwardAttributes attrs;
+        HIPDNN_CHECK_ERROR(detail::unpackBatchnormBackwardOperation(opDesc, tensorMap, attrs));
+        attributes = std::move(attrs);
+        return {};
     }
 
     Error pre_validate_node() const override
@@ -118,7 +130,7 @@ public:
 
         // Extract channel count - safe to access xDims[1] after SECTION 2 validation
         auto& xDims = x->get_dim();
-        int64_t channels = xDims[1];
+        const int64_t channels = xDims[1];
 
         // Validate scale has correct channel-only shape (required user parameter)
         HIPDNN_CHECK_ERROR(detail::validateChannelOnlyTensorShape(scale, channels, "Scale tensor"));
@@ -138,8 +150,8 @@ public:
         // Why: Backward computation uses saved statistics (mean_c, invStd_c) from forward pass.
         // These must be provided together (both or neither). If neither is provided, they will
         // be recomputed during backward pass (less efficient but valid).
-        bool hasMean = (mean != nullptr);
-        bool hasInvVariance = (invVar != nullptr);
+        const bool hasMean = (mean != nullptr);
+        const bool hasInvVariance = (invVar != nullptr);
         if(hasMean != hasInvVariance)
         {
             return {ErrorCode::INVALID_VALUE,
@@ -219,7 +231,8 @@ public:
     void gather_hipdnn_tensors(
         std::unordered_set<std::shared_ptr<TensorAttributes>>& allTensors) const override
     {
-        BaseNode<BatchnormBackwardNode>::gather_hipdnn_tensors(allTensors);
+        BaseNode<BatchnormBackwardNode, NodeType::BATCHNORM_BACKWARD>::gather_hipdnn_tensors(
+            allTensors);
 
         for(auto& tensor : attributes.peer_stats)
         {
@@ -239,6 +252,13 @@ public:
             toSdkType(attributes.compute_data_type),
             hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormBackwardAttributes,
             attributes.pack_attributes(builder).Union());
+    }
+
+    Error create_operation(
+        std::unordered_map<int64_t, detail::ScopedHipdnnBackendDescriptor>& tensorDescs,
+        std::vector<detail::ScopedHipdnnBackendDescriptor>& operations) const override
+    {
+        return detail::createBatchnormBackwardOperation(attributes, tensorDescs, operations);
     }
 };
 

@@ -52,7 +52,7 @@ project_map = {
             "-DTHEROCK_ENABLE_MIOPENPROVIDER=ON",
             "-DTHEROCK_ENABLE_COMPOSABLE_KERNEL=ON",
         ],
-        "projects_to_test": ["miopen", "miopen_plugin"],
+        "projects_to_test": ["miopen", "miopenprovider"],
     },
     "fft": {
         "cmake_options": ["-DTHEROCK_ENABLE_FFT=ON", "-DTHEROCK_ENABLE_RAND=ON"],
@@ -86,8 +86,8 @@ additional_options = {
             "hipdnn",
             "hipdnn_install",
             "hipdnn-samples",
-            "miopen_plugin",
-            "hipblaslt_plugin",
+            "miopenprovider",
+            "hipblasltprovider",
         ],
         "project_to_add": "miopen",
     },
@@ -96,14 +96,14 @@ additional_options = {
             "-DTHEROCK_ENABLE_MIOPENPROVIDER=ON",
             "-DTHEROCK_ENABLE_COMPOSABLE_KERNEL=ON",
         ],
-        "projects_to_test": ["miopen_plugin"],
+        "projects_to_test": ["miopenprovider"],
         "project_to_add": "miopen",
     },
     "hipblaslt-provider": {
         "cmake_options": [
             "-DTHEROCK_ENABLE_HIPBLASLTPROVIDER=ON",
         ],
-        "projects_to_test": ["hipblaslt_plugin"],
+        "projects_to_test": ["hipblasltprovider"],
         "project_to_add": "blas",
     },
     "rocwmma": {

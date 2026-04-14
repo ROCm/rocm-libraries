@@ -81,6 +81,14 @@ workgroup_mapping_t select_workgroup_mapping(const problem_t& problem,
       skGrid > numMTs ? math::safe_ceil_div(skGrid, numCUs) : math::safe_ceil_div(numMTs, numCUs);
   auto split_factor = math::safe_ceil_div(skGrid, numMTs);
 
+  // Stream-K fixup deadlock prevention:
+  // When the SK grid doesn't evenly divide tiles, some workgroups produce partial
+  // results combined via a spin-wait fixup loop.
+  // That loop assumes consecutive StreamKIdx values are dispatched in physical WG order.
+  // The chunk transform reorders WG IDs across XCDs, breaking this assumption and potentially
+  // filling all GPU execution slots with spinning fixup waves resulting in a cooperative deadlock.
+  bool sk_has_partial_tiles = (skGrid > 0 && skGrid < (numMTs * batch) && (numMTs * batch) % skGrid != 0);
+
   // -------------------
   // NonTemporal Cases
   // -------------------
@@ -96,6 +104,7 @@ workgroup_mapping_t select_workgroup_mapping(const problem_t& problem,
 
     // If we are using chunking, we use the minimum of the number of tiles per XCD and the number of CUs per XCD.
     size_t out_wgmxccchunk = use_chunk ? std::min(math::safe_ceil_div(numMTs, numXCD), numCUsPerXCD) : 0;
+    if (sk_has_partial_tiles) out_wgmxccchunk = 0;
     // If we are using wgmxcc, we use the number of XCDs.
     size_t out_wgmxcc = use_wgmxcc ? numXCD : 1;
     // If we are using wgm, we use the number of tiles in the smaller dimension.
@@ -137,6 +146,7 @@ workgroup_mapping_t select_workgroup_mapping(const problem_t& problem,
       wgm         = 1;
     }
 
+    if (sk_has_partial_tiles) wgmxccchunk = 0;
     return workgroup_mapping_t{wgmxccchunk, wgmxcc, wgm};
   }
 
@@ -155,14 +165,16 @@ workgroup_mapping_t select_workgroup_mapping(const problem_t& problem,
   else
     out_wgmxccchunk = 0;
 
+  if (sk_has_partial_tiles) out_wgmxccchunk = 0;
+
   // -------------------
   // WGMXCC Prediction
   // -------------------
   size_t out_wgmxcc = defaultWGMXCC;
 
   if (split_factor % numXCD == 0) out_wgmxcc = 0;
-  // Small GEMMs
-  else if (numMTs <= numXCD)
+  // Small output tiles with no split
+  else if (numMTs <= numXCD && split_factor == 1)
     out_wgmxcc = 0;
   else
     out_wgmxcc = defaultWGMXCC;
@@ -532,33 +544,38 @@ std::vector<prediction_result_t> rank_configs(const problem_t& problem,
                                               const std::vector<config_t>& configs) {
   if (configs.empty()) { throw std::runtime_error("No configurations provided."); }
 
-  std::vector<prediction_result_t> results(configs.size());
+  struct prediction_result_wrapper_t {
+    double latency;
+    std::reference_wrapper<const config_t> config;
+  };
 
-  std::transform(configs.begin(),
-                 configs.end(),
-                 results.begin(),
-                 [&](const config_t& config) -> prediction_result_t {
-                   if (!check_lds_capacity(hardware, config.mt, problem.a_dtype, problem.b_dtype)) {
-                     return {std::numeric_limits<double>::max(), config};
-                   }
-                   double latency = compute_total_latency(problem, hardware, config, hardware.N_CU);
-                   return {latency, config};
-                 });
+  std::vector<prediction_result_wrapper_t> latencies_configs;
+  latencies_configs.reserve(configs.size());
 
-  results.erase(std::remove_if(results.begin(),
-                               results.end(),
-                               [](const prediction_result_t& p) {
-                                 return p.latency == std::numeric_limits<double>::max();
-                               }),
-                results.end());
+  for (auto& config : configs) {
+    if (!check_lds_capacity(hardware, config.mt, problem.a_dtype, problem.b_dtype))
+      continue;
+    double latency = compute_total_latency(problem, hardware, config, hardware.N_CU);
+    if (latency != std::numeric_limits<double>::max())
+      latencies_configs.push_back({latency, std::cref(config)});
+  }
 
-  std::stable_sort(results.begin(),
-                   results.end(),
-                   [](const prediction_result_t& a, const prediction_result_t& b) {
+  if (latencies_configs.empty()) { throw std::runtime_error("No valid configs found."); }
+
+  std::stable_sort(latencies_configs.begin(),
+                   latencies_configs.end(),
+                   [](const auto& a, const auto& b) {
                      return a.latency < b.latency;
                    });
 
-  if (results.empty()) { throw std::runtime_error("No valid configs found."); }
+  std::vector<prediction_result_t> results;
+  results.reserve(latencies_configs.size());
+  std::transform(latencies_configs.begin(),
+                 latencies_configs.end(),
+                 std::back_inserter(results),
+                 [&](const auto& r) -> prediction_result_t {
+                   return {r.latency, r.config.get()};
+                 });
 
   // Compute arithmetic intensity for tie-breaking
   // Flops = 2 * MT_M * MT_N * MT_K, Memory traffic = MT_M*MT_K + MT_K*MT_N + MT_M*MT_N

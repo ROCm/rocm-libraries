@@ -4,7 +4,7 @@
 #pragma once
 
 #include "BackendDescriptor.hpp"
-#include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
 
 namespace hipdnn_backend
 {
@@ -26,10 +26,17 @@ public:
                       const void* arrayOfElements) override;
 
     // Direct access to the underlying T struct for OperationGraphBuilder
-    const hipdnn_data_sdk::data_objects::TensorAttributesT& getData() const
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT& getData() const
     {
         return _data;
     }
+
+    // Creates a finalized TensorDescriptor directly from a FlatBuffer TensorAttributesT.
+    // Bypasses setAttribute() by directly copying the data struct and calling finalize().
+    static std::shared_ptr<TensorDescriptor>
+        fromFlatBuffer(const hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT& tensorT);
+    static std::shared_ptr<TensorDescriptor>
+        fromFlatBuffer(hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT&& tensorT);
 
     static hipdnnBackendDescriptorType_t getStaticType();
 
@@ -52,7 +59,7 @@ private:
                         int64_t* elementCount,
                         void* arrayOfElements) const;
 
-    hipdnn_data_sdk::data_objects::TensorAttributesT _data;
+    hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT _data;
 };
 
 } // namespace hipdnn_backend

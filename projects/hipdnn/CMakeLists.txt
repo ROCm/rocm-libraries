@@ -148,11 +148,16 @@ option(BUILD_THREAD_SANITIZER "Build with Thread Sanitizer enabled" OFF)
 option(ENABLE_CLANG_FORMAT "Enable Clang-Format checks" ON)
 if(WIN32)
     option(ENABLE_CLANG_TIDY "Enable Clang-Tidy checks" OFF)
-    if(ENABLE_CLANG_TIDY)
+else()
+    option(ENABLE_CLANG_TIDY "Enable Clang-Tidy checks" ON)
+endif()
+
+if(ENABLE_CLANG_TIDY)
+    if(WIN32)
         message(WARNING "Clang-Tidy enabled on Windows - this significantly increases build time.")
     endif()
 else()
-    option(ENABLE_CLANG_TIDY "Enable Clang-Tidy checks" ON)
+    message(WARNING "Clang-Tidy is disabled - some build issues may be missed.")
 endif()
 
 set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE CACHE BOOL
@@ -197,14 +202,23 @@ list(
     -Wformat=2 # Enable stricter format string checks
     -Winit-self # Warn about variables initialized with itself
     -Wunreachable-code # Warn about unreachable code
-    -Wno-error=unused-command-line-argument # Disable error for unused command line arguments
+    $<$<CXX_COMPILER_ID:Clang>:-Wno-error=unused-command-line-argument> # Clang: disable error for unused command line arguments
+    -Wno-error=null-dereference # Downgrade null-dereference to warning (false positives with flatbuffers in backend/data_sdk)
     -Wswitch-default # Warn if a switch statement does not have a default case
 )
 
 add_compile_options(${EXTRA_COMPILE_OPTIONS})
 add_link_options(${EXTRA_LINK_OPTIONS})
 
+# Disable RTTI in production code and RTTI-free test targets.
+# Public headers must not use typeid, dynamic_cast, or dynamic_pointer_cast.
+set(HIPDNN_NO_RTTI_OPTIONS
+    $<$<CXX_COMPILER_ID:MSVC>:/GR->
+    $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-fno-rtti>
+)
+
 add_subdirectory(data_sdk)
+add_subdirectory(flatbuffers_sdk)
 
 if(HIPDNN_BUILD_BACKEND)
     add_subdirectory(backend)
@@ -229,6 +243,32 @@ endif()
 # keep this after all the targets have been added that could use the HIP language compiler.
 add_clang_tidy_custom_target()
 
+# Doxygen documentation target (standalone builds only to avoid target name
+# collisions with other projects in the superbuild)
+if(PROJECT_IS_TOP_LEVEL)
+    find_package(Doxygen QUIET)
+    if(DOXYGEN_FOUND)
+        add_custom_target(
+            doxygen
+            COMMAND ${DOXYGEN_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/Doxyfile"
+            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+            COMMENT "Generating Doxygen documentation"
+            VERBATIM
+            USES_TERMINAL
+        )
+    else()
+        add_custom_target(
+            doxygen
+            COMMAND ${CMAKE_COMMAND} -E echo
+                    "Error: Doxygen not found. Please install it (e.g. sudo apt-get install doxygen)."
+            COMMAND ${CMAKE_COMMAND} -E false
+            COMMENT "Doxygen not found"
+            VERBATIM
+            USES_TERMINAL
+        )
+    endif()
+endif()
+
 if(HIPDNN_ENABLE_COVERAGE)
     findandcheckllvmtools()
 
@@ -243,7 +283,7 @@ if(HIPDNN_ENABLE_COVERAGE)
         -object
         ./${CMAKE_INSTALL_BINDIR}/hipdnn_frontend_tests
         -object
-        ./${CMAKE_INSTALL_BINDIR}/public_hipdnn_backend_tests
+        ./${CMAKE_INSTALL_BINDIR}/hipdnn_public_backend_tests
         -object
         ./${CMAKE_INSTALL_BINDIR}/hipdnn_data_sdk_tests
         -object

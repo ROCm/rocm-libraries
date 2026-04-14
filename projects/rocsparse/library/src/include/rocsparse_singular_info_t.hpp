@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -32,32 +32,29 @@ namespace rocsparse
     struct singular_info_t : rocsparse::position_t
     {
     protected:
-        double m_singular_tol{};
-        singular_info_t() = default;
+        double                 m_singular_tol_host_value[1]{};
+        const double*          m_singular_tol_pointer = m_singular_tol_host_value;
+        rocsparse_pointer_mode m_singular_tol_pointer_mode{rocsparse_pointer_mode_host};
+        rocsparse_datatype     m_singular_tol_datatype{rocsparse_datatype_f64_r};
 
     public:
+        singular_info_t() = default;
         ~singular_info_t();
 
-        rocsparse_status copy_singular_pivot_async(rocsparse_pointer_mode pointer_mode,
-                                                   rocsparse_indextype    position_indextype,
-                                                   void*                  position,
-                                                   hipStream_t            stream) const;
+        double get_tolerance_legacy() const;
+        void   set_tolerance_legacy(double);
+
+        const void*            get_tolerance_pointer() const;
+        rocsparse_pointer_mode get_tolerance_pointer_mode() const;
+        rocsparse_datatype     get_tolerance_datatype() const;
+
+        void set_tolerance_pointer(const void*            p,
+                                   rocsparse_pointer_mode pointer_mode,
+                                   rocsparse_datatype     datatype);
 
         rocsparse_status create_singular_pivot_async(int64_t             batch_count,
                                                      rocsparse_indextype indextype,
                                                      hipStream_t         stream);
-
-        const void*         get_singular_pivot() const;
-        void*               get_singular_pivot();
-        int64_t             get_singular_pivot_stride() const;
-        rocsparse_indextype get_singular_pivot_indextype() const;
-
-        rocsparse_status set_singular_pivot_batch_count(int64_t, hipStream_t stream);
-
-        int64_t get_singular_pivot_batch_count() const;
-
-        double get_singular_tol() const;
-        void   set_singular_tol(double);
 
         rocsparse_status copy_singular_info_async(const singular_info_t* that, hipStream_t stream);
     };

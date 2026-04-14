@@ -179,12 +179,12 @@ ConvSolution MhaForward::GetSolution(const ExecutionContext& context,
                 start = make_hip_event();
                 stop  = make_hip_event();
                 handle_.EnableProfiling(false);
-                hipEventRecord(start.get(), handle_.GetStream());
+                (void)hipEventRecord(start.get(), handle_.GetStream());
             }
 
             // zero amax output data to use atomics
-            hipMemsetAsync(dataFwd.amaxSData, 0, sizeof(float), handle_.GetStream());
-            hipMemsetAsync(dataFwd.amaxOData, 0, sizeof(float), handle_.GetStream());
+            (void)hipMemsetAsync(dataFwd.amaxSData, 0, sizeof(float), handle_.GetStream());
+            (void)hipMemsetAsync(dataFwd.amaxOData, 0, sizeof(float), handle_.GetStream());
 
             void* fp32_ws = getBuffPart(params.GetWorkspace(), 0);
             void* fp8_ws  = getBuffPart(params.GetWorkspace(), 1);
@@ -210,21 +210,21 @@ ConvSolution MhaForward::GetSolution(const ExecutionContext& context,
                  fp32_ws,
                  true);
 
-            decltype(auto) softmax_kernel = handle_.Run(kernels.front());
-            softmax_kernel(fp32_ws,
-                           fp8_ws,
-                           dataFwd.mData,
-                           dataFwd.zInvData,
-                           dataFwd.biasData,
-                           dataFwd.amaxSData,
-                           dataFwd.descaleQData,
-                           dataFwd.descaleKData,
-                           dataFwd.scaleSData,
-                           dataFwd.dropoutSeedData,
-                           dataFwd.dropoutOffsetData,
-                           dataFwd.dropoutProbabilityData,
-                           seq_len,
-                           nhs);
+            decltype(auto) softmax_kernel_ = handle_.Run(kernels.front());
+            softmax_kernel_(fp32_ws,
+                            fp8_ws,
+                            dataFwd.mData,
+                            dataFwd.zInvData,
+                            dataFwd.biasData,
+                            dataFwd.amaxSData,
+                            dataFwd.descaleQData,
+                            dataFwd.descaleKData,
+                            dataFwd.scaleSData,
+                            dataFwd.dropoutSeedData,
+                            dataFwd.dropoutOffsetData,
+                            dataFwd.dropoutProbabilityData,
+                            seq_len,
+                            nhs);
 
             gemm(handle_,
                  false,
@@ -247,22 +247,22 @@ ConvSolution MhaForward::GetSolution(const ExecutionContext& context,
                  fp32_ws,
                  true);
 
-            decltype(auto) scale_reduce_kernel = handle_.Run(kernels.back());
-            scale_reduce_kernel(fp32_ws,
-                                dataFwd.oData,
-                                dataFwd.amaxOData,
-                                dataFwd.descaleSData,
-                                dataFwd.descaleVData,
-                                dataFwd.scaleOData,
-                                nhsd);
+            decltype(auto) scale_reduce_kernel_ = handle_.Run(kernels.back());
+            scale_reduce_kernel_(fp32_ws,
+                                 dataFwd.oData,
+                                 dataFwd.amaxOData,
+                                 dataFwd.descaleSData,
+                                 dataFwd.descaleVData,
+                                 dataFwd.scaleOData,
+                                 nhsd);
 
             if(profiling)
             {
-                hipEventRecord(stop.get(), handle_.GetStream());
+                (void)hipEventRecord(stop.get(), handle_.GetStream());
                 handle_.EnableProfiling(true);
-                hipEventSynchronize(stop.get());
+                (void)hipEventSynchronize(stop.get());
                 float mS = 0;
-                hipEventElapsedTime(&mS, start.get(), stop.get());
+                (void)hipEventElapsedTime(&mS, start.get(), stop.get());
                 handle_.ResetKernelTime();
                 handle_.AccumKernelTime(mS);
             }

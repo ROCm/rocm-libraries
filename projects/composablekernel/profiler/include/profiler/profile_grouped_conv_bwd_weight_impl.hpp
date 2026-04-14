@@ -29,6 +29,56 @@
 namespace ck {
 namespace profiler {
 
+namespace bwd_weight {
+template <ck::index_t NDimSpatial,
+          typename InLayout,
+          typename WeiLayout,
+          typename OutLayout,
+          typename InDataType,
+          typename WeiDataType,
+          typename OutDataType,
+          typename InElementOp,
+          typename WeiElementOp,
+          typename OutElementOp,
+          typename ComputeTypeA,
+          typename ComputeTypeB>
+void print_instances()
+{
+    using DeviceOp = ck::tensor_operation::device::DeviceGroupedConvBwdWeight<NDimSpatial,
+                                                                              InLayout,
+                                                                              WeiLayout,
+                                                                              OutLayout,
+                                                                              InDataType,
+                                                                              WeiDataType,
+                                                                              OutDataType,
+                                                                              InElementOp,
+                                                                              WeiElementOp,
+                                                                              OutElementOp,
+                                                                              ComputeTypeA,
+                                                                              ComputeTypeB>;
+
+    const auto op_ptrs = ck::tensor_operation::device::instance::DeviceOperationInstanceFactory<
+        DeviceOp>::GetInstances();
+
+    for(const auto& op_ptr : op_ptrs)
+    {
+#ifdef CK_EXPERIMENTAL_BUILDER
+        const auto& instance_str = op_ptr->GetInstanceString();
+        if(!instance_str.empty())
+        {
+            std::cout << instance_str << std::endl;
+        }
+        else
+        {
+            std::cout << op_ptr->GetTypeString() << std::endl;
+        }
+#else
+        std::cout << op_ptr->GetTypeString() << std::endl;
+#endif
+    }
+}
+} // namespace bwd_weight
+
 template <ck::index_t NDimSpatial,
           typename InLayout,
           typename WeiLayout,
@@ -67,6 +117,25 @@ bool profile_grouped_conv_bwd_weight_impl(int do_verification,
     std::cout << "input: " << in_g_n_c_wis_desc << std::endl;
     std::cout << "weight: " << wei_g_k_c_xs_desc << std::endl;
     std::cout << "output: " << out_g_n_k_wos_desc << std::endl;
+
+    using DeviceOp = ck::tensor_operation::device::DeviceGroupedConvBwdWeight<NDimSpatial,
+                                                                              InLayout,
+                                                                              WeiLayout,
+                                                                              OutLayout,
+                                                                              InDataType,
+                                                                              WeiDataType,
+                                                                              OutDataType,
+                                                                              InElementOp,
+                                                                              WeiElementOp,
+                                                                              OutElementOp,
+                                                                              ComputeTypeA,
+                                                                              ComputeTypeB>;
+
+    // get device op instances
+    const auto op_ptrs = ck::tensor_operation::device::instance::DeviceOperationInstanceFactory<
+        DeviceOp>::GetInstances();
+
+    std::cout << "found " << op_ptrs.size() << " instances" << std::endl;
 
     // Create host tensors
     Tensor<InDataType> input(in_g_n_c_wis_desc);
@@ -194,25 +263,6 @@ bool profile_grouped_conv_bwd_weight_impl(int do_verification,
         }
     }
 
-    using DeviceOp = ck::tensor_operation::device::DeviceGroupedConvBwdWeight<NDimSpatial,
-                                                                              InLayout,
-                                                                              WeiLayout,
-                                                                              OutLayout,
-                                                                              InDataType,
-                                                                              WeiDataType,
-                                                                              OutDataType,
-                                                                              InElementOp,
-                                                                              WeiElementOp,
-                                                                              OutElementOp,
-                                                                              ComputeTypeA,
-                                                                              ComputeTypeB>;
-
-    // get device op instances
-    const auto op_ptrs = ck::tensor_operation::device::instance::DeviceOperationInstanceFactory<
-        DeviceOp>::GetInstances();
-
-    std::cout << "found " << op_ptrs.size() << " instances" << std::endl;
-
     std::string best_op_name;
     float best_avg_time   = 0;
     float best_tflops     = 0;
@@ -222,7 +272,8 @@ bool profile_grouped_conv_bwd_weight_impl(int do_verification,
     index_t valid_instances     = 0;
 
     // profile device Conv instances
-    bool all_pass = true;
+    bool all_pass           = true;
+    bool dummy_run_executed = false;
 
     std::array<ck::index_t, NDimSpatial + 3> input_lengths{};
     std::array<ck::index_t, NDimSpatial + 3> filter_lengths{};
@@ -350,8 +401,25 @@ bool profile_grouped_conv_bwd_weight_impl(int do_verification,
 
                 auto invoker_ptr = op_ptr->MakeInvokerPointer();
 
-                float avg_time =
-                    invoker_ptr->Run(argument_ptr.get(), StreamConfig{nullptr, time_kernel});
+                if(time_kernel && !dummy_run_executed)
+                {
+                    // Run first instance as dummy to get proper time from the first instance
+                    invoker_ptr->Run(argument_ptr.get(),
+                                     StreamConfig{nullptr,
+                                                  time_kernel,
+                                                  0 /*log_level*/,
+                                                  5 /*cold_iters*/,
+                                                  50 /*nrepeat_*/,
+                                                  time_kernel /*flush_cache*/});
+                    dummy_run_executed = true;
+                }
+                float avg_time = invoker_ptr->Run(argument_ptr.get(),
+                                                  StreamConfig{nullptr,
+                                                               time_kernel,
+                                                               0 /*log_level*/,
+                                                               5 /*cold_iters*/,
+                                                               50 /*nrepeat_*/,
+                                                               time_kernel /*flush_cache*/});
 
                 std::size_t flop      = conv_param.GetFlops();
                 std::size_t num_btype = conv_param.GetByte<InDataType, WeiDataType, OutDataType>();
