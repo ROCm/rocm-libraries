@@ -540,11 +540,10 @@ struct tile_window_with_static_distribution
 
                 // Compute and write the scale (absmax)
                 QDataType vmax = 0.;
-                static_for<0, Traits::ScalarPerVector, Traits::PackedSize>{}([&](auto j) {
+                static_for<0, Traits::ScalarPerVector / Traits::PackedSize, 1>{}([&](auto j) {
                     vmax = std::max(vmax,
                                     std::abs(type_convert<QDataType>(
-                                        vec_value.template get_as<
-                                            typename Base::DataType>()[j / Traits::PackedSize])));
+                                        vec_value.template get_as<typename Base::DataType>()[j])));
                 });
 
                 constexpr index_t qd =
