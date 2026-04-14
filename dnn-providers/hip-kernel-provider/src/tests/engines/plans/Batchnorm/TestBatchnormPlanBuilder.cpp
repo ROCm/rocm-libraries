@@ -6,7 +6,7 @@
 
 #include "HipKernelContext.hpp"
 #include "HipKernelHandle.hpp"
-#include "engines/plans/BatchnormPlanBuilder.hpp"
+#include "engines/plans/batchnorm/BatchnormPlanBuilder.hpp"
 #include "mocks/MockCompiledProgram.hpp"
 #include "mocks/MockDevicePropertyProvider.hpp"
 #include "mocks/MockKernelCompiler.hpp"
@@ -18,8 +18,10 @@
 #include <hipdnn_test_sdk/utilities/MockGraph.hpp>
 #include <hipdnn_test_sdk/utilities/MockNode.hpp>
 
-using namespace hip_kernel_provider;
 using hipdnn_test_sdk::utilities::MockEngineConfig;
+
+namespace hip_kernel_provider::batchnorm::test
+{
 
 class TestBatchnormPlanBuilder : public ::testing::Test
 {
@@ -165,3 +167,5 @@ TEST_F(TestBatchnormPlanBuilder, GetCustomKnobsReturnsEmptyForFwdTrainingGraph)
     auto knobs = _planBuilder.getCustomKnobs(_dummyHandle, graph);
     EXPECT_TRUE(knobs.empty());
 }
+
+} // namespace hip_kernel_provider::batchnorm::test

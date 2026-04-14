@@ -18,6 +18,9 @@ namespace hip_kernel_provider
 
 class IKernelCompiler;
 
+namespace batchnorm
+{
+
 class BatchnormFwdTrainingParams
 {
 public:
@@ -101,4 +104,6 @@ private:
     float _invInNhw;
 };
 
-}
+} // namespace batchnorm
+
+} // namespace hip_kernel_provider
