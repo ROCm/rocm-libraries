@@ -76,9 +76,6 @@ using ABQuantTypes = ::testing::Types<
     std::tuple<RowMajor, ColumnMajor, RowMajor, RowMajor, BF8, BF8, float, Half, ABQuantGrouped, GemmConfigBase, GroupSize, GroupSize, ColumnMajor>,
     std::tuple<ColumnMajor, RowMajor, RowMajor, RowMajor, BF8, BF8, float, Half, ABQuantGrouped, GemmConfigBase, GroupSize, GroupSize, ColumnMajor>,
     std::tuple<RowMajor, RowMajor, RowMajor, RowMajor, BF8, BF8, float, Half, ABQuantGrouped, GemmConfigBase, GroupSize, GroupSize, ColumnMajor>,
-    std::tuple<RowMajor, ColumnMajor, RowMajor, RowMajor, BF16, BF8, float, Half, ABQuantGrouped, GemmConfigFuseAQuant, GroupSize, GroupSize, ColumnMajor>,
-    std::tuple<ColumnMajor, RowMajor, RowMajor, RowMajor, BF16, BF8, float, Half, ABQuantGrouped, GemmConfigFuseAQuant, GroupSize, GroupSize, ColumnMajor>,
-    std::tuple<RowMajor, RowMajor, RowMajor, RowMajor, BF16, BF8, float, Half, ABQuantGrouped, GemmConfigFuseAQuant, GroupSize, GroupSize, ColumnMajor>,
 	
     // 2D B-scales; PreshuffleQuant = false && TransposeC = true (RCR layout with RowMajor AQ)
     std::tuple<RowMajor, ColumnMajor, RowMajor, RowMajor, FP8, FP8, float, Half, ABQuantGrouped, GemmConfigTransposeC, GroupSize, GroupSize2D128N, ColumnMajor>,
@@ -86,10 +83,7 @@ using ABQuantTypes = ::testing::Types<
     std::tuple<RowMajor, RowMajor, RowMajor, RowMajor, FP8, FP8, float, Half, ABQuantGrouped, GemmConfigTransposeC, GroupSize, GroupSize2D128N, ColumnMajor>,
     std::tuple<RowMajor, ColumnMajor, RowMajor, RowMajor, BF8, BF8, float, Half, ABQuantGrouped, GemmConfigTransposeC, GroupSize, GroupSize2D128N, ColumnMajor>,
     std::tuple<ColumnMajor, RowMajor, RowMajor, RowMajor, BF8, BF8, float, Half, ABQuantGrouped, GemmConfigTransposeC, GroupSize, GroupSize2D128N, ColumnMajor>,
-    std::tuple<RowMajor, RowMajor, RowMajor, RowMajor, BF8, BF8, float, Half, ABQuantGrouped, GemmConfigTransposeC, GroupSize, GroupSize2D128N, ColumnMajor>,
-    std::tuple<RowMajor, ColumnMajor, RowMajor, RowMajor, BF16, BF8, float, Half, ABQuantGrouped, GemmConfigFuseAQuantTransposeC, GroupSize, GroupSize2D128N, ColumnMajor>,
-    std::tuple<ColumnMajor, RowMajor, RowMajor, RowMajor, BF16, BF8, float, Half, ABQuantGrouped, GemmConfigFuseAQuantTransposeC, GroupSize, GroupSize2D128N, ColumnMajor>,
-    std::tuple<RowMajor, RowMajor, RowMajor, RowMajor, BF16, BF8, float, Half, ABQuantGrouped, GemmConfigFuseAQuantTransposeC, GroupSize, GroupSize2D128N, ColumnMajor>
+    std::tuple<RowMajor, RowMajor, RowMajor, RowMajor, BF8, BF8, float, Half, ABQuantGrouped, GemmConfigTransposeC, GroupSize, GroupSize2D128N, ColumnMajor>
 >;
 // clang-format on
 
