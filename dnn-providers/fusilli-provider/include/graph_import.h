@@ -81,19 +81,14 @@ hipDnnPointwiseModeToFusilliMode(
   }
 }
 
-// Convert from hipDNN NormFwdPhase to fusilli NormFwdPhase. If the hipDNN
-// phase is NOT_SET, infer from whether the training-only inv_rms output is
-// present (TRAINING) or not (INFERENCE).
+// Convert from hipDNN NormFwdPhase to fusilli NormFwdPhase.
 inline fusilli::ErrorOr<fusilli::NormFwdPhase> hipDnnNormFwdPhaseToFusilliPhase(
-    hipdnn_data_sdk::data_objects::NormFwdPhase hipdnnPhase, bool hasInvRms) {
+    hipdnn_data_sdk::data_objects::NormFwdPhase hipdnnPhase) {
   switch (hipdnnPhase) {
   case hipdnn_data_sdk::data_objects::NormFwdPhase::TRAINING:
     return ok(fusilli::NormFwdPhase::TRAINING);
   case hipdnn_data_sdk::data_objects::NormFwdPhase::INFERENCE:
     return ok(fusilli::NormFwdPhase::INFERENCE);
-  case hipdnn_data_sdk::data_objects::NormFwdPhase::NOT_SET:
-    return ok(hasInvRms ? fusilli::NormFwdPhase::TRAINING
-                        : fusilli::NormFwdPhase::INFERENCE);
   default:
     return error(fusilli::ErrorCode::NotImplemented,
                  "Unsupported norm forward phase.");
@@ -538,16 +533,13 @@ private:
           "RmsNorm epsilon must be a pass-by-value scalar, not a device "
           "tensor.");
 
-    // Determine forward phase. If hipDNN left it unset, infer it from the
-    // presence of the training-only inv_rms output.
     bool hasInvRms = hipDnnRmsnormAttr->inv_rms_tensor_uid().has_value();
     FUSILLI_ASSIGN_OR_RETURN(
         fusilli::NormFwdPhase forwardPhase,
-        hipDnnNormFwdPhaseToFusilliPhase(hipDnnRmsnormAttr->forward_phase(),
-                                         hasInvRms));
+        hipDnnNormFwdPhaseToFusilliPhase(hipDnnRmsnormAttr->forward_phase()));
 
-    // If the caller explicitly requested TRAINING, inv_rms must be present;
-    // conversely an inv_rms output only makes sense for TRAINING.
+    // The hipDNN frontend should have already rejected this mismatch; this
+    // check exists as a defensive guard for the plugin boundary.
     if ((forwardPhase == fusilli::NormFwdPhase::TRAINING) != hasInvRms)
       return fusilli::error(
           fusilli::ErrorCode::InvalidAttribute,

@@ -118,16 +118,7 @@ TEST_F(RmsnormIntegrationTest, SimpleRmsnormInference) {
   auto result = graph->validate();
   ASSERT_EQ(result.code, error_code_t::OK) << result.err_msg;
 
-  result = graph->build_operation_graph(handle);
-  ASSERT_EQ(result.code, error_code_t::OK) << result.err_msg;
-
-  result = graph->create_execution_plans();
-  ASSERT_EQ(result.code, error_code_t::OK) << result.err_msg;
-
-  result = graph->check_support();
-  ASSERT_EQ(result.code, error_code_t::OK) << result.err_msg;
-
-  result = graph->build_plans();
+  result = graph->build(handle);
   ASSERT_EQ(result.code, error_code_t::OK) << result.err_msg;
 
   // Query workspace size.
@@ -172,8 +163,6 @@ TEST_F(RmsnormIntegrationTest, RmsnormInferenceWithScale) {
   // Dimensions.
   const int64_t N = 3;
   const int64_t C = 4;
-  const int64_t H = 8;
-  const int64_t W = 12;
 
   // UIDs.
   const int64_t xUID = 0;
@@ -244,16 +233,7 @@ TEST_F(RmsnormIntegrationTest, RmsnormInferenceWithScale) {
   auto result = graph->validate();
   ASSERT_EQ(result.code, error_code_t::OK) << result.err_msg;
 
-  result = graph->build_operation_graph(handle);
-  ASSERT_EQ(result.code, error_code_t::OK) << result.err_msg;
-
-  result = graph->create_execution_plans();
-  ASSERT_EQ(result.code, error_code_t::OK) << result.err_msg;
-
-  result = graph->check_support();
-  ASSERT_EQ(result.code, error_code_t::OK) << result.err_msg;
-
-  result = graph->build_plans();
+  result = graph->build(handle);
   ASSERT_EQ(result.code, error_code_t::OK) << result.err_msg;
 
   // Query workspace size.

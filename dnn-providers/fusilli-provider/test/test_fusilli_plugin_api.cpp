@@ -16,6 +16,7 @@
 #include <hipdnn_frontend/Utilities.hpp>
 #include <hipdnn_frontend/attributes/MatmulAttributes.hpp>
 #include <hipdnn_frontend/attributes/PointwiseAttributes.hpp>
+#include <hipdnn_frontend/attributes/RMSNormAttributes.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
 #include <hipdnn_plugin_sdk/EnginePluginApi.h>
 #include <hipdnn_plugin_sdk/PluginApi.h>
@@ -99,6 +100,64 @@ buildMatmulActivGraph(const std::vector<int64_t> &aDims,
       .set_data_type(hipdnn_frontend::DataType::FLOAT)
       .set_dim(cDims)
       .set_stride({cDims[1], 1})
+      .set_output(true);
+
+  auto result = graph.validate();
+  if (result.is_bad()) {
+    throw std::runtime_error("Graph validation failed: " +
+                             result.get_message());
+  }
+
+  auto [serializedGraph, serErr] = graph.to_binary();
+  if (serErr.is_bad()) {
+    throw std::runtime_error("Graph serialization failed: " +
+                             serErr.get_message());
+  }
+  return serializedGraph;
+}
+
+// Build an inference-phase rmsnorm graph using the frontend API.
+std::vector<uint8_t> buildRmsnormInferenceGraph() {
+  hipdnn_frontend::graph::Graph graph;
+  graph.set_name("RmsnormTest")
+      .set_io_data_type(hipdnn_frontend::DataType::FLOAT)
+      .set_compute_data_type(hipdnn_frontend::DataType::FLOAT)
+      .set_intermediate_data_type(hipdnn_frontend::DataType::FLOAT);
+
+  const std::vector<int64_t> dims = {1, 3, 224, 224};
+  const std::vector<int64_t> strides = {150528, 50176, 224, 1};
+  const std::vector<int64_t> scaleDims = {1, 3, 224, 224};
+  const std::vector<int64_t> scaleStrides = {150528, 50176, 224, 1};
+
+  auto xAttr = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+  xAttr->set_uid(1)
+      .set_name("x")
+      .set_data_type(hipdnn_frontend::DataType::FLOAT)
+      .set_dim(dims)
+      .set_stride(strides);
+
+  auto scaleAttr = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+  scaleAttr->set_uid(2)
+      .set_name("scale")
+      .set_data_type(hipdnn_frontend::DataType::FLOAT)
+      .set_dim(scaleDims)
+      .set_stride(scaleStrides);
+
+  auto epsilonAttr =
+      std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+  epsilonAttr->set_name("epsilon").set_value(1e-5f).set_uid(3);
+
+  hipdnn_frontend::graph::RMSNormAttributes rmsnormAttrs;
+  rmsnormAttrs.set_name("rmsnorm")
+      .set_epsilon(epsilonAttr)
+      .set_forward_phase(hipdnn_frontend::NormFwdPhase::INFERENCE);
+
+  auto [yAttr, invRmsAttr] = graph.rmsnorm(xAttr, scaleAttr, rmsnormAttrs);
+  yAttr->set_uid(4)
+      .set_name("y")
+      .set_data_type(hipdnn_frontend::DataType::FLOAT)
+      .set_dim(dims)
+      .set_stride(strides)
       .set_output(true);
 
   auto result = graph.validate();
@@ -703,12 +762,11 @@ TEST(TestFusilliPluginApi, GetApplicableEngineIdsRmsnorm) {
   uint32_t numEngines = 0;
 
   // A basic rmsnorm inference graph (x, scale, epsilon -> y) should be
-  // supported. The helper leaves forward_phase as NOT_SET; the plugin import
-  // layer infers INFERENCE because there is no inv_rms output.
-  auto builder = hipdnn_test_sdk::utilities::createValidRMSNormGraph();
+  // supported.
+  auto serializedGraph = buildRmsnormInferenceGraph();
   hipdnnPluginConstData_t opGraph;
-  opGraph.ptr = builder.GetBufferPointer();
-  opGraph.size = builder.GetSize();
+  opGraph.ptr = serializedGraph.data();
+  opGraph.size = serializedGraph.size();
 
   ASSERT_EQ(hipdnnEnginePluginGetApplicableEngineIds(
                 handle, &opGraph, engineIDs.data(), 5, &numEngines),
