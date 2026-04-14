@@ -109,7 +109,8 @@ protected:
         if(ShouldSkipForAsan())
         {
             test_skipped = true;
-            GTEST_SKIP() << "Test disabled under ASAN (set MIOPEN_SKIP_ASAN_DISABLED_TESTS=0 to force)";
+            GTEST_SKIP()
+                << "Test disabled under ASAN (set MIOPEN_SKIP_ASAN_DISABLED_TESTS=0 to force)";
         }
 
         std::tie(algo, conv_config, alpha_val, beta_val, tensor_layout) = GetParam();
