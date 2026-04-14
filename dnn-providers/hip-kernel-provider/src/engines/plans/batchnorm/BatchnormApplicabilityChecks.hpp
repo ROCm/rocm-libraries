@@ -8,12 +8,13 @@
 #include <unordered_set>
 #include <vector>
 
+#include <hipdnn_data_sdk/data_objects/batchnorm_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/batchnorm_inference_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/batchnorm_inference_attributes_variance_ext_generated.h>
 #include <hipdnn_data_sdk/data_objects/pointwise_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
 
-namespace hip_kernel_provider
+namespace hip_kernel_provider::batchnorm
 {
 
 // --- Tensor Descriptor Value Object ---
@@ -130,12 +131,17 @@ void checkBatchnormFwdActivationModeSupported(
 void checkBatchnormBwdActivationModeSupported(
     const hipdnn_data_sdk::data_objects::PointwiseAttributes& activAttr);
 
+void checkBatchnormFwdTrainingTensorConfigSupported(
+    const hipdnn_data_sdk::data_objects::BatchnormAttributes& bnAttr,
+    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        tensorMap);
+
 // --- Batchnorm Type Configuration ---
 
 // hip-kernel-provider batchnorm requirements (based on underlying kernel constraints):
 // - IO tensors: same type (FLOAT, HALF, or BFLOAT16)
 // - Affine/Stat/Intermediate tensors: FLOAT only
-struct BnTensorTypes
+struct TensorTypes
 {
     hipdnn_data_sdk::data_objects::DataType io;
     hipdnn_data_sdk::data_objects::DataType affine;
@@ -143,21 +149,21 @@ struct BnTensorTypes
     hipdnn_data_sdk::data_objects::DataType intermediate;
 };
 
-namespace bn_type_configs
+namespace type_configs
 {
 using DT = hipdnn_data_sdk::data_objects::DataType;
 
-inline constexpr BnTensorTypes ALL_FLOAT = {DT::FLOAT, DT::FLOAT, DT::FLOAT, DT::FLOAT};
-inline constexpr BnTensorTypes HALF_IO = {DT::HALF, DT::FLOAT, DT::FLOAT, DT::FLOAT};
-inline constexpr BnTensorTypes BFLOAT16_IO = {DT::BFLOAT16, DT::FLOAT, DT::FLOAT, DT::FLOAT};
+inline constexpr TensorTypes ALL_FLOAT = {DT::FLOAT, DT::FLOAT, DT::FLOAT, DT::FLOAT};
+inline constexpr TensorTypes HALF_IO = {DT::HALF, DT::FLOAT, DT::FLOAT, DT::FLOAT};
+inline constexpr TensorTypes BFLOAT16_IO = {DT::BFLOAT16, DT::FLOAT, DT::FLOAT, DT::FLOAT};
 
-inline constexpr std::array<BnTensorTypes, 3> VALID = {ALL_FLOAT, HALF_IO, BFLOAT16_IO};
+inline constexpr std::array<TensorTypes, 3> VALID = {ALL_FLOAT, HALF_IO, BFLOAT16_IO};
 
 std::unordered_set<hipdnn_data_sdk::data_objects::DataType> getAllowedIoTypes();
 std::unordered_set<hipdnn_data_sdk::data_objects::DataType> getAllowedAffineTypes();
 std::unordered_set<hipdnn_data_sdk::data_objects::DataType> getAllowedStatTypes();
 std::unordered_set<hipdnn_data_sdk::data_objects::DataType> getAllowedIntermediateTypes();
 
-} // namespace bn_type_configs
+} // namespace type_configs
 
-} // namespace hip_kernel_provider
+} // namespace hip_kernel_provider::batchnorm

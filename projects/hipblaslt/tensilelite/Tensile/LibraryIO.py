@@ -381,6 +381,7 @@ def parseLibraryLogicData(
         if solutionState["KernelLanguage"] == "Assembly":
             solutionState["ISA"] = gfxToIsa(data["ArchitectureName"])
         solutionState["CUCount"] = data["CUCount"]
+        solutionState["DeviceNames"] = data.get("DeviceNames", None)
         # force redo the deriving of parameters, make sure old version logic yamls can be validated
         solutionState["AssignedProblemIndependentDerivedParameters"] = False
         solutionState["AssignedDerivedParameters"] = False
@@ -433,7 +434,8 @@ def parseLibraryLogicData(
         printIndexAssignmentInfo,
         assembler,
         isaInfoMap,
-        lazyLibraryLoading
+        lazyLibraryLoading,
+        logicFile=srcFile
     )
 
     return LibraryLogic(data["ScheduleName"], data["ArchitectureName"], problemType, solutions, \

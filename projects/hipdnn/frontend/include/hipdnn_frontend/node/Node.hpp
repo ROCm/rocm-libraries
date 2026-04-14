@@ -87,17 +87,15 @@ public:
 
     // Creates backend operation descriptor(s) for this node using the C-API.
     // Tensor descriptors are deduplicated by UID in tensorDescs.
-    // TODO: Make pure virtual once pack_node / flatbuffers serialization path is removed.
+    // Container nodes (e.g. Graph) do not override this — they delegate to child nodes.
     // NOLINTNEXTLINE(readability-identifier-naming)
     virtual Error create_operation(
         [[maybe_unused]] std::unordered_map<int64_t, detail::ScopedHipdnnBackendDescriptor>&
             tensorDescs,
         [[maybe_unused]] std::vector<detail::ScopedHipdnnBackendDescriptor>& operations) const
     {
-        auto nodeName = getNodeName();
         return {ErrorCode::HIPDNN_BACKEND_ERROR,
-                "create_operation not implemented for node"
-                    + (nodeName.empty() ? std::string{} : ": " + nodeName)};
+                "create_operation not implemented for node: " + getNodeName()};
     }
 
     virtual std::vector<std::shared_ptr<TensorAttributes>> getNodeInputTensorAttributes() const
