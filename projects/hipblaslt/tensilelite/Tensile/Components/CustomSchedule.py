@@ -774,9 +774,11 @@ class RegisterSchedule:
                 return ScheduleMatchStatus.NO_MATCH, None
 
             GRVWA, GRVWB = kernel["GlobalReadVectorWidthA"], kernel["GlobalReadVectorWidthB"]
-            LRVW = kernel["LocalReadVectorWidth"]
-            kernel_vector_widths = [GRVWA, GRVWB, LRVW]            
-            if self.vector_widths != kernel_vector_widths:
+            LRVWA, LRVWB = kernel["LocalReadVectorWidthA"], kernel["LocalReadVectorWidthB"]
+            kernel_vector_widths = [GRVWA, GRVWB, LRVWA, LRVWB]
+            # WA: if need to support different LRVW for A and B, add a new parameter to vector_widths
+            extended_vector_widths = self.vector_widths + [self.vector_widths[2]]
+            if extended_vector_widths != kernel_vector_widths:
                 return ScheduleMatchStatus.NO_MATCH, None
             
             if self.matrix_inst != kernel["MatrixInstruction"]:
