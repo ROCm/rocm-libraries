@@ -87,4 +87,4 @@ jobs:
 
       - name: Build coverage
         run: |
-          cmake --build TheRock/build-coverage --target coverage
+          cmake --build TheRock/build-coverage/ml-libs/hipDNN/build --target coverage
