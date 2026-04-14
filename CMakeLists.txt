@@ -55,6 +55,7 @@ set(AVAILABLE_COMPONENTS
     miopen-provider
     hipblaslt-provider
     hip-kernel-provider
+    hipdnn-samples
 )
 
 set(UNSUPPORTED_COMPONENTS
@@ -216,6 +217,21 @@ if("hip-kernel-provider" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
         PREFIX_PATH dnn-providers
         EXPECT_TARGET hip_kernel_provider
     )
+endif()
+
+if("hipdnn-samples" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
+    add_subdirectory_with_message(
+        COMPONENT samples
+        PREFIX_PATH projects/hipdnn
+        EXPECT_TARGET hipdnn_samples
+    )
+
+    # Ensure the supported provider plugins are built before samples (needed at test runtime)
+    foreach(_provider_target miopen_plugin hipblaslt_plugin hip_kernel_provider)
+        if(TARGET ${_provider_target})
+            add_dependencies(hipdnn_samples ${_provider_target})
+        endif()
+    endforeach()
 endif()
 
 # --- Projects not yet configured for superbuild ---
