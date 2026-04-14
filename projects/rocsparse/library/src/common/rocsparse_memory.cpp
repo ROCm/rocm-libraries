@@ -80,7 +80,6 @@ ROCSPARSE_EXPORT int32_t rocsparse_execution_is_host(rocsparse_handle handle);
 
 namespace rocsparse
 {
-    using exec_t      = rocsparse::execution_t;
     static auto* exec = &rocsparse::execution_t::instance();
 }
 
