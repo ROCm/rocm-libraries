@@ -894,35 +894,10 @@ try
     if(!lworkOnDevice || !lworkOnHost)
         return HIPSOLVER_STATUS_INVALID_VALUE;
 
-    *lworkOnHost = 0;
+    *lworkOnDevice = 0;
+    *lworkOnHost   = 0;
 
-    // rocSOLVER's syev/heev_strided_batched requires an E workspace array
-    // Calculate size needed for E array (n elements per batch, using real type)
-    size_t e_workspace_size = 0;
-
-    if(dataTypeA == HIP_R_32F && dataTypeW == HIP_R_32F && computeType == HIP_R_32F)
-    {
-        e_workspace_size = sizeof(float) * n * batchSize;
-    }
-    else if(dataTypeA == HIP_R_64F && dataTypeW == HIP_R_64F && computeType == HIP_R_64F)
-    {
-        e_workspace_size = sizeof(double) * n * batchSize;
-    }
-    else if(dataTypeA == HIP_C_32F && dataTypeW == HIP_R_32F && computeType == HIP_C_32F)
-    {
-        e_workspace_size = sizeof(float) * n * batchSize;
-    }
-    else if(dataTypeA == HIP_C_64F && dataTypeW == HIP_R_64F && computeType == HIP_C_64F)
-    {
-        e_workspace_size = sizeof(double) * n * batchSize;
-    }
-    else
-    {
-        return HIPSOLVER_STATUS_NOT_SUPPORTED;
-    }
-
-    // Query rocSOLVER's internal workspace requirements
-    size_t rocsolver_workspace = 0;
+    size_t sz;
     rocblas_start_device_memory_size_query((rocblas_handle)handle);
 
     hipsolverStatus_t status  = HIPSOLVER_STATUS_SUCCESS;
@@ -999,14 +974,28 @@ try
                                             nullptr,
                                             static_cast<rocblas_int>(batchSize)));
     }
+    else
+        return HIPSOLVER_STATUS_NOT_SUPPORTED;
 
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &rocsolver_workspace);
+    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
 
     if(status != HIPSOLVER_STATUS_SUCCESS)
         return status;
 
-    // Total workspace = rocSOLVER's internal workspace + E array
-    *lworkOnDevice = rocsolver_workspace + e_workspace_size;
+    // space for E array
+    size_t size_E = 0;
+    if(n > 0 && batchSize > 0)
+    {
+        if(dataTypeW == HIP_R_32F)
+            size_E = sizeof(float) * n * batchSize;
+        else
+            size_E = sizeof(double) * n * batchSize;
+    }
+
+    // update size
+    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    rocblas_set_optimal_device_memory_size((rocblas_handle)handle, sz, size_E);
+    rocblas_stop_device_memory_size_query((rocblas_handle)handle, lworkOnDevice);
 
     return HIPSOLVER_STATUS_SUCCESS;
 }
@@ -1084,8 +1073,7 @@ try
                                                                  &lwork_host,
                                                                  batchSize));
 
-        size_t rocsolver_workspace = lwork_device - e_workspace_size;
-        CHECK_ROCBLAS_ERROR(hipsolverManageWorkspace((rocblas_handle)handle, rocsolver_workspace));
+        CHECK_ROCBLAS_ERROR(hipsolverManageWorkspace((rocblas_handle)handle, lwork_device));
 
         mem = rocblas_device_malloc((rocblas_handle)handle, e_workspace_size);
         if(!mem)
