@@ -54,9 +54,9 @@ wavewise_pipeline_kernel(const void* a_per_lane, const void* b_per_lane, void* c
 
     if constexpr(MmaOpTraits<typename Pipeline::MmaOp>::IsSupported)
     {
-        auto result = Pipeline::exec(a, b, c);
+        Pipeline::exec(a, b, c);
         __builtin_memcpy(
-            static_cast<uint8_t*>(c_per_lane) + lane * sizeof(CVecType), &result, sizeof(CVecType));
+            static_cast<uint8_t*>(c_per_lane) + lane * sizeof(CVecType), &c, sizeof(CVecType));
     }
 }
 
@@ -130,7 +130,7 @@ TEST(WaveWiseMmaPipeline, FullMatrixVerify_16x16x32_SwapAB)
     };
 
     mma_pipeline_test::run_pipeline_matrix_test<WaveWisePipelineFactory_16x16x32>(
-        16u, 16u, 32u, should_skip, kernel);
+        16u, 16u, 32u, should_skip, kernel, /*isSparse=*/false, /*transposeExpected=*/true);
 }
 
 TEST(WaveWiseMmaPipeline, FullMatrixVerify_16x16x32_ColMajor)
@@ -164,5 +164,5 @@ TEST(WaveWiseMmaPipeline, FullMatrixVerify_16x16x32_ColMajor_TransposeC)
     };
 
     mma_pipeline_test::run_pipeline_matrix_test<WaveWisePipelineFactory_16x16x32_ColMajor>(
-        16u, 16u, 32u, should_skip, kernel);
+        16u, 16u, 32u, should_skip, kernel, /*isSparse=*/false, /*transposeExpected=*/true);
 }
