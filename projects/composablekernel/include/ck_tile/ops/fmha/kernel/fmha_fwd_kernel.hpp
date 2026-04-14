@@ -1906,6 +1906,8 @@ struct FmhaFwdKernel
                 {
                     const ck_tile::index_t valid_k0_loops =
                         ck_tile::integer_divide_ceil(kargs.hdim_q, FmhaPipeline::kK0);
+                    const ck_tile::index_t valid_last_k0_columns =
+                        kargs.hdim_q - (valid_k0_loops - 1) * FmhaPipeline::kK0;
                     const ck_tile::index_t valid_n1_columns = [&]() {
                         const ck_tile::index_t remaining_n1 = kargs.hdim_v - i_n1;
                         return ck_tile::min(remaining_n1,
@@ -1914,6 +1916,7 @@ struct FmhaFwdKernel
                     return FmhaPipeline{}(static_cast<decltype(args)&&>(args)...,
                                           sink_value,
                                           valid_k0_loops,
+                                          valid_last_k0_columns,
                                           valid_n1_columns);
                 }
                 else
