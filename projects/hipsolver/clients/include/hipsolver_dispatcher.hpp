@@ -44,7 +44,7 @@
 #include "testing_potrf.hpp"
 #include "testing_potri.hpp"
 #include "testing_potrs.hpp"
-#include "testing_syevBatched.hpp"
+#include "testing_syev_heev.hpp"
 #include "testing_syevd_heevd.hpp"
 #include "testing_syevdx_heevdx.hpp"
 #include "testing_syevj_heevj.hpp"
@@ -96,7 +96,8 @@ class hipsolver_dispatcher
             {"potri", testing_potri<API_NORMAL, false, false, T>},
             {"potrs", testing_potrs<API_NORMAL, false, false, T>},
             {"potrs_batched", testing_potrs<API_NORMAL, true, false, T>},
-            {"syevBatched_64", testing_syevBatched<API_COMPAT, false, false, T, int64_t, size_t>},
+            {"syev_heev_strided_batched_64",
+             testing_syev_heev<API_COMPAT, false, true, T, int64_t, size_t>},
             {"sytrf", testing_sytrf<API_NORMAL, false, false, T>},
         };
 
