@@ -262,6 +262,85 @@ namespace rocRoller
         RR_EMPTY_STRUCT_WITH_NAME(PassThrough);
 
         /**
+         * Swap adjacent pairs of the first coordinate based on a
+         * grouping of the second coordinate.
+         *
+         * Self-inverse: applying the swap twice returns the original
+         * value.  rowsPerGroup controls how many rows share the same
+         * parity (bankRowIdx = row >> log2(rowsPerGroup)).
+         *
+         * Graph: addElement(edge, {out}, {in, groupCoord})
+         * Reverse: out = in ^ ((groupIdx ^ 1) & 1)
+         */
+        struct PairSwap
+        {
+
+            unsigned int rowsPerGroup;
+
+            PairSwap() = default;
+
+            explicit PairSwap(unsigned int rowsPerGroup)
+                : rowsPerGroup(rowsPerGroup)
+            {
+                AssertFatal(rowsPerGroup > 0 && (rowsPerGroup & (rowsPerGroup - 1)) == 0,
+                            "PairSwap requires power-of-2 rowsPerGroup",
+                            ShowValue(rowsPerGroup));
+            }
+
+            std::string toString() const
+            {
+                return name();
+            }
+
+            std::string name() const
+            {
+                return "PairSwap";
+            }
+        };
+
+        /**
+         * Circular rotation of the first coordinate based on a
+         * grouping of the second coordinate.
+         *
+         * Forward (inverse=false):
+         *   out = (in + numPositions - groupIdx/2*2) & (numPositions-1)
+         * Inverse (inverse=true):
+         *   out = (in + groupIdx/2*2) & (numPositions-1)
+         *
+         * Graph: addElement(edge, {out}, {in, groupCoord})
+         * Reverse: given in and groupCoord, compute rotated out.
+         */
+        struct Rotate
+        {
+
+            unsigned int numPositions;
+            unsigned int rowsPerGroup;
+            bool         inverse;
+
+            Rotate() = default;
+
+            Rotate(unsigned int numPositions, unsigned int rowsPerGroup, bool inverse)
+                : numPositions(numPositions)
+                , rowsPerGroup(rowsPerGroup)
+                , inverse(inverse)
+            {
+                AssertFatal(rowsPerGroup > 0 && (rowsPerGroup & (rowsPerGroup - 1)) == 0,
+                            "Rotate requires power-of-2 rowsPerGroup",
+                            ShowValue(rowsPerGroup));
+            }
+
+            std::string toString() const
+            {
+                return name();
+            }
+
+            std::string name() const
+            {
+                return "Rotate";
+            }
+        };
+
+        /**
          * Join dimensions using conditional strides and initial values.
          *
          * The strides and initial values are passed in.  They are not
@@ -473,5 +552,6 @@ namespace rocRoller
             }
             return false;
         }
+
     }
 }
