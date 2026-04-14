@@ -191,7 +191,7 @@ namespace rocRoller::KernelGraph
         };
 
         auto condOp = kgraph.control.addElement(
-            ConditionalOp{zero == DF(scalarDFTag), OpMode::Branch, "0 == beta"});
+            ConditionalOp{zero == DF(scalarDFTag), ConditionalMode::Branch, "0 == beta"});
 
         // find (parent --e--> head --body--> node)
         auto e           = *only(kgraph.control.getNeighbours<Graph::Direction::Upstream>(head));

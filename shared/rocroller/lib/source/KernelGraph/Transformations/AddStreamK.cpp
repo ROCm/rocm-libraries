@@ -460,7 +460,7 @@ namespace rocRoller
                     PassThrough(), {graph.mapper.get<ForLoop>(forY)}, {jammedY});
 
             auto sendTileTag = graph.control.addElement(
-                ConditionalOp{sendTileExpr, OpMode::Branch, "Send Tile"});
+                ConditionalOp{sendTileExpr, ConditionalMode::Branch, "Send Tile"});
             auto barrierTag  = graph.control.addElement(Barrier());
             auto waitZeroTag = graph.control.addElement(WaitZero());
 
@@ -484,7 +484,7 @@ namespace rocRoller
                 Expression::DataFlowTag{workitemTag, Register::Type::Vector, DataType::UInt32});
             auto isWave0Expr       = (workitemDF == Expression::literal(0u));
             auto wave0FlagStoreTag = graph.control.addElement(
-                ConditionalOp{isWave0Expr, OpMode::Branch, "Wave0 Store Flag"});
+                ConditionalOp{isWave0Expr, ConditionalMode::Branch, "Wave0 Store Flag"});
 
             // Add to control
             auto preWaitZeroTag = graph.control.addElement(WaitZero());
@@ -551,7 +551,7 @@ namespace rocRoller
 
             // Read tile
             auto receiveTileTag = graph.control.addElement(
-                ConditionalOp{receiveTileExpr, OpMode::Branch, "Receive Tile"});
+                ConditionalOp{receiveTileExpr, ConditionalMode::Branch, "Receive Tile"});
 
             // Read flag
             auto plusOneTag    = graph.coordinates.addElement(Linear(one, one));
@@ -641,7 +641,7 @@ namespace rocRoller
                 Expression::DataFlowTag{workitemTag, Register::Type::Vector, DataType::UInt32});
             auto isWave0Expr       = (workitemDF == Expression::literal(0u));
             auto wave0ResetFlagTag = graph.control.addElement(
-                ConditionalOp{isWave0Expr, OpMode::Branch, "Wave0 Reset Flag"});
+                ConditionalOp{isWave0Expr, ConditionalMode::Branch, "Wave0 Reset Flag"});
 
             auto barrierBeforeResetTag = graph.control.addElement(Barrier());
 
@@ -1399,7 +1399,7 @@ namespace rocRoller
                                           context);
 
                 postAccumulationCond = graph.control.addElement(ConditionalOp{
-                    hasFirstAccumTile, OpMode::Branch, "Post-accumulation Condition"});
+                    hasFirstAccumTile, ConditionalMode::Branch, "Post-accumulation Condition"});
             }
             else
             {

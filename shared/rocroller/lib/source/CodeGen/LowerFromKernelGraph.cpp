@@ -345,7 +345,7 @@ namespace rocRoller
 
             Generator<Instruction> operator()(int tag, ConditionalOp const& op)
             {
-                AssertFatal(op.mode < OpMode::Count,
+                AssertFatal(op.mode < ConditionalMode::Count,
                             "Unsupported mode for ConditionalOp: ",
                             ShowValue(op.mode));
                 Log::debug("ConditionalOp tag {}: mode {}, condition {}",
@@ -361,20 +361,8 @@ namespace rocRoller
                     elseBodyFn = [this, elseBody]() { return generate(elseBody); };
                 auto condition = m_fastArith(op.condition);
 
-                switch(op.mode)
-                {
-                case OpMode::Branch:
-                    co_yield m_conditionalGenerator.genBranch(
-                        condition, op.conditionName, trueBodyFn, elseBodyFn);
-                    break;
-                case OpMode::Exec:
-                case OpMode::BranchAndExec:
-                    co_yield m_conditionalGenerator.genExec(
-                        condition, op.conditionName, trueBodyFn, elseBodyFn, op.mode);
-                    break;
-                default:
-                    Throw<FatalError>("Unsupported mode for ConditionalOp: ", ShowValue(op.mode));
-                }
+                co_yield m_conditionalGenerator.genConditional(
+                    condition, op.conditionName, trueBodyFn, elseBodyFn, op.mode);
             }
 
             Generator<Instruction> operator()(int tag, AssertOp const& op)

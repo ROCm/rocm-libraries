@@ -22,7 +22,19 @@ namespace rocRoller
 {
     namespace KernelGraph::ControlGraph
     {
-        enum class OpMode
+        /**
+         * @brief Selects how a ConditionalOp is lowered to GPU instructions.
+         *
+         * Branch:        Scalar branch-based conditional. Suitable for uniform conditions where
+         *                all lanes take the same path.
+         * Exec:          Exec-mask-based conditional for per-lane (VGPR) conditions. Both the
+         *                true and else bodies are always entered; only active lanes satisfying
+         *                the condition execute Body, and only active lanes not satisfying it
+         *                execute Else. EXEC is restored afterward.
+         * BranchAndExec: Like Exec, but additionally branches over each body when EXECZ is set
+         *                (i.e. no lanes are active), avoiding unnecessary work.
+         */
+        enum class ConditionalMode
         {
             Branch = 0,
             Exec,
@@ -30,8 +42,8 @@ namespace rocRoller
             Count
         };
 
-        std::string   toString(OpMode m);
-        std::ostream& operator<<(std::ostream& stream, OpMode m);
+        std::string   toString(ConditionalMode m);
+        std::ostream& operator<<(std::ostream& stream, ConditionalMode m);
 
         /*
          * Control flow graph nodes.
@@ -133,18 +145,18 @@ namespace rocRoller
          *
          * The `mode` field selects how the conditional is lowered:
          *
-         * OpMode::Branch
+         * ConditionalMode::Branch
          *   Scalar branch-based conditional. Suitable for uniform conditions where all
          *   lanes take the same path.
          *   if (condition) { <Body> } else { <Else> }
          *
-         * OpMode::Exec
+         * ConditionalMode::Exec
          *   Exec-mask-based conditional for per-lane (VGPR) conditions. Both the true
          *   and else sections are always executed: only active lanes satisfying the
          *   condition execute <Body>, and only active lanes not satisfying the condition
          *   execute <Else>. EXEC is restored afterward.
          *
-         * OpMode::BranchAndExec
+         * ConditionalMode::BranchAndExec
          *   Like Exec (including EXEC restore), but checks EXECZ after masking: if no
          *   active lanes satisfy the condition (EXECZ is set), the true body is skipped
          *   and execution jumps to the else section (where EXECZ is checked again upon
@@ -154,7 +166,7 @@ namespace rocRoller
         struct ConditionalOp
         {
             Expression::ExpressionPtr condition;
-            OpMode                    mode;
+            ConditionalMode           mode;
             std::string               conditionName;
 
             std::string name() const;

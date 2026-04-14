@@ -40,8 +40,9 @@ namespace ExecuteMaskGeneratorTest
      * Comparing a VGPR expression to a scalar literal produces a VCC result, as required
      * by Exec and BranchAndExec modes.
      */
-    kg::KernelGraph
-        buildConditionalGraph(OpMode mode, bool withElseBody, Register::ValuePtr workitemIdReg)
+    kg::KernelGraph buildConditionalGraph(ConditionalMode    mode,
+                                          bool               withElseBody,
+                                          Register::ValuePtr workitemIdReg)
     {
         kg::KernelGraph kgraph;
 
@@ -95,7 +96,8 @@ namespace ExecuteMaskGeneratorTest
 
             ctx->schedule(k->preamble());
             ctx->schedule(k->prolog());
-            auto kgraph = buildConditionalGraph(OpMode::Exec, false, k->workitemIndex()[0]);
+            auto kgraph
+                = buildConditionalGraph(ConditionalMode::Exec, false, k->workitemIndex()[0]);
             ctx->schedule(rocRoller::KernelGraph::generate(kgraph, k));
 
             auto output = testCtx.output();
@@ -130,7 +132,7 @@ namespace ExecuteMaskGeneratorTest
 
             ctx->schedule(k->preamble());
             ctx->schedule(k->prolog());
-            auto kgraph = buildConditionalGraph(OpMode::Exec, true, k->workitemIndex()[0]);
+            auto kgraph = buildConditionalGraph(ConditionalMode::Exec, true, k->workitemIndex()[0]);
             ctx->schedule(rocRoller::KernelGraph::generate(kgraph, k));
 
             auto output = testCtx.output();
@@ -164,8 +166,8 @@ namespace ExecuteMaskGeneratorTest
 
             ctx->schedule(k->preamble());
             ctx->schedule(k->prolog());
-            auto kgraph
-                = buildConditionalGraph(OpMode::BranchAndExec, false, k->workitemIndex()[0]);
+            auto kgraph = buildConditionalGraph(
+                ConditionalMode::BranchAndExec, false, k->workitemIndex()[0]);
             ctx->schedule(rocRoller::KernelGraph::generate(kgraph, k));
 
             auto output = testCtx.output();
@@ -204,7 +206,8 @@ namespace ExecuteMaskGeneratorTest
 
             ctx->schedule(k->preamble());
             ctx->schedule(k->prolog());
-            auto kgraph = buildConditionalGraph(OpMode::BranchAndExec, true, k->workitemIndex()[0]);
+            auto kgraph = buildConditionalGraph(
+                ConditionalMode::BranchAndExec, true, k->workitemIndex()[0]);
             ctx->schedule(rocRoller::KernelGraph::generate(kgraph, k));
 
             auto output = testCtx.output();
@@ -250,7 +253,7 @@ namespace ExecuteMaskGeneratorTest
      *   Coordinate graph:
      *     Workitem(0) --PassThrough--> User("output") --PassThrough--> destVGPR (VGPR)
      */
-    kg::KernelGraph buildConditionalGraphWithStore(OpMode             mode,
+    kg::KernelGraph buildConditionalGraphWithStore(ConditionalMode    mode,
                                                    bool               withElseBody,
                                                    Register::ValuePtr workitemIdReg,
                                                    uint32_t           wavefrontSize)
@@ -308,7 +311,7 @@ namespace ExecuteMaskGeneratorTest
     }
 
     // Helper used by the GPU execution tests below.
-    void runGPUExecutionTest(OpMode mode, bool withElseBody)
+    void runGPUExecutionTest(ConditionalMode mode, bool withElseBody)
     {
         auto testCtx = TestContext::ForTestDevice();
         auto ctx     = testCtx.get();
@@ -357,7 +360,7 @@ namespace ExecuteMaskGeneratorTest
         //   BranchAndExec mode:  else label only reached when EXEC==0 (no true lanes at all);
         //                        with mixed lanes some true lanes exist, so else body never
         //                        runs -> odd lanes retain their pre-initialized value of 0.
-        bool                  elseBodyRunsPerLane = withElseBody && (mode == OpMode::Exec);
+        bool                  elseBodyRunsPerLane = withElseBody && (mode == ConditionalMode::Exec);
         std::vector<uint32_t> expected(wfSize);
         for(uint32_t i = 0; i < wfSize; ++i)
             expected[i] = (i % 2 == 0) ? 1u : (elseBodyRunsPerLane ? 2u : 0u);
@@ -368,34 +371,34 @@ namespace ExecuteMaskGeneratorTest
     TEST_CASE("ExecuteMaskGenerator - Exec mode, true body only (GPU execution)",
               "[exec-mask][gpu]")
     {
-        runGPUExecutionTest(OpMode::Exec, false);
+        runGPUExecutionTest(ConditionalMode::Exec, false);
     }
 
     TEST_CASE("ExecuteMaskGenerator - Exec mode, true and else bodies (GPU execution)",
               "[exec-mask][gpu]")
     {
-        runGPUExecutionTest(OpMode::Exec, true);
+        runGPUExecutionTest(ConditionalMode::Exec, true);
     }
 
     TEST_CASE("ExecuteMaskGenerator - BranchAndExec mode, true body only (GPU execution)",
               "[exec-mask][gpu]")
     {
-        runGPUExecutionTest(OpMode::BranchAndExec, false);
+        runGPUExecutionTest(ConditionalMode::BranchAndExec, false);
     }
 
     TEST_CASE("ExecuteMaskGenerator - BranchAndExec mode, true and else bodies (GPU execution)",
               "[exec-mask][gpu]")
     {
-        runGPUExecutionTest(OpMode::BranchAndExec, true);
+        runGPUExecutionTest(ConditionalMode::BranchAndExec, true);
     }
 
     /**
      * Like buildConditionalGraphWithStore, but uses a condition that is false for every
      * active lane so that s_and_saveexec_* produces EXEC==0 and the EXECZ branch is taken.
      *
-     * Condition: (workitemId & 0u) == 1u
-     * Bitwise-AND of any value with 0 is always 0, which never equals 1, so VCC==0 for
-     * every lane and EXECZ is set after s_and_saveexec_*.
+     * Condition: workitemId >= wavefrontSize
+     * workitemId is always in [0, wavefrontSize), so this is always false for every lane,
+     * VCC==0, and EXECZ is set after s_and_saveexec_*.
      *
      * Graph structure:
      *   Kernel
@@ -409,7 +412,7 @@ namespace ExecuteMaskGeneratorTest
      *   withElseBody==true:  2u for all lanes (else body runs with EXEC restored to full mask)
      *   withElseBody==false: 0u for all lanes (no body runs; pre-init value retained)
      */
-    kg::KernelGraph buildAlwaysFalseConditionalGraphWithStore(OpMode             mode,
+    kg::KernelGraph buildAlwaysFalseConditionalGraphWithStore(ConditionalMode    mode,
                                                               bool               withElseBody,
                                                               Register::ValuePtr workitemIdReg,
                                                               uint32_t           wavefrontSize)
@@ -484,7 +487,7 @@ namespace ExecuteMaskGeneratorTest
         ctx->schedule(k->preamble());
         ctx->schedule(k->prolog());
         auto kgraph = buildAlwaysFalseConditionalGraphWithStore(
-            OpMode::BranchAndExec, withElseBody, k->workitemIndex()[0], wfSize);
+            ConditionalMode::BranchAndExec, withElseBody, k->workitemIndex()[0], wfSize);
         ctx->schedule(rocRoller::KernelGraph::generate(kgraph, k));
         ctx->schedule(k->postamble());
         ctx->schedule(k->amdgpu_metadata());
@@ -509,7 +512,7 @@ namespace ExecuteMaskGeneratorTest
                 hostOutput.data(), deviceOutput.get(), wfSize * sizeof(uint32_t), hipMemcpyDefault),
             HasHipSuccess(0));
 
-        // The condition (workitemId & 0u) == 1u is false for every lane.
+        // The condition (workitemId >= wavefrontSize) is false for every lane.
         // s_and_saveexec_* produces EXEC==0 so EXECZ is set and the s_cbranch_execz
         // over the true body is taken; the true body is never executed.
         //
@@ -570,8 +573,8 @@ namespace ExecuteMaskGeneratorTest
      *   Coordinate graph:
      *     Workitem(0) --PassThrough--> User("output") --PassThrough--> destVGPR (VGPR)
      */
-    kg::KernelGraph buildNestedConditionalGraphWithStore(OpMode             outerMode,
-                                                         OpMode             innerMode,
+    kg::KernelGraph buildNestedConditionalGraphWithStore(ConditionalMode    outerMode,
+                                                         ConditionalMode    innerMode,
                                                          bool               withOuterElseBody,
                                                          bool               withInnerElseBody,
                                                          Register::ValuePtr workitemIdReg,
@@ -652,10 +655,10 @@ namespace ExecuteMaskGeneratorTest
 
     // Helper used by the nested-conditional GPU execution tests below.
     // outerMode and innerMode may differ to exercise mixed-mode nesting.
-    void runGPUExecutionTestNested(OpMode outerMode,
-                                   OpMode innerMode,
-                                   bool   withOuterElseBody,
-                                   bool   withInnerElseBody)
+    void runGPUExecutionTestNested(ConditionalMode outerMode,
+                                   ConditionalMode innerMode,
+                                   bool            withOuterElseBody,
+                                   bool            withInnerElseBody)
     {
         auto testCtx = TestContext::ForTestDevice();
         auto ctx     = testCtx.get();
@@ -705,8 +708,8 @@ namespace ExecuteMaskGeneratorTest
         // Exec mode else body runs per-lane; BranchAndExec else body only runs when the
         // entire EXEC mask is zero (all active lanes failed the condition), which never
         // happens for the inner condition across a mixed warp, so it effectively never runs.
-        bool outerElseRunsPerLane = withOuterElseBody && (outerMode == OpMode::Exec);
-        bool innerElseRunsPerLane = withInnerElseBody && (innerMode == OpMode::Exec);
+        bool outerElseRunsPerLane = withOuterElseBody && (outerMode == ConditionalMode::Exec);
+        bool innerElseRunsPerLane = withInnerElseBody && (innerMode == ConditionalMode::Exec);
 
         std::vector<uint32_t> expected(wfSize);
         for(uint32_t i = 0; i < wfSize; ++i)
@@ -725,55 +728,59 @@ namespace ExecuteMaskGeneratorTest
     TEST_CASE("ExecuteMaskGenerator - Exec mode, nested conditional (GPU execution)",
               "[exec-mask][gpu]")
     {
-        runGPUExecutionTestNested(OpMode::Exec, OpMode::Exec, false, false);
+        runGPUExecutionTestNested(ConditionalMode::Exec, ConditionalMode::Exec, false, false);
     }
 
     TEST_CASE(
         "ExecuteMaskGenerator - Exec mode, nested conditional with outer else (GPU execution)",
         "[exec-mask][gpu]")
     {
-        runGPUExecutionTestNested(OpMode::Exec, OpMode::Exec, true, false);
+        runGPUExecutionTestNested(ConditionalMode::Exec, ConditionalMode::Exec, true, false);
     }
 
     TEST_CASE(
         "ExecuteMaskGenerator - Exec mode, nested conditional with inner else (GPU execution)",
         "[exec-mask][gpu]")
     {
-        runGPUExecutionTestNested(OpMode::Exec, OpMode::Exec, false, true);
+        runGPUExecutionTestNested(ConditionalMode::Exec, ConditionalMode::Exec, false, true);
     }
 
     TEST_CASE("ExecuteMaskGenerator - Exec mode, nested conditional with outer and inner else (GPU "
               "execution)",
               "[exec-mask][gpu]")
     {
-        runGPUExecutionTestNested(OpMode::Exec, OpMode::Exec, true, true);
+        runGPUExecutionTestNested(ConditionalMode::Exec, ConditionalMode::Exec, true, true);
     }
 
     TEST_CASE("ExecuteMaskGenerator - BranchAndExec mode, nested conditional (GPU execution)",
               "[exec-mask][gpu]")
     {
-        runGPUExecutionTestNested(OpMode::BranchAndExec, OpMode::BranchAndExec, false, false);
+        runGPUExecutionTestNested(
+            ConditionalMode::BranchAndExec, ConditionalMode::BranchAndExec, false, false);
     }
 
     TEST_CASE("ExecuteMaskGenerator - BranchAndExec mode, nested conditional with outer else (GPU "
               "execution)",
               "[exec-mask][gpu]")
     {
-        runGPUExecutionTestNested(OpMode::BranchAndExec, OpMode::BranchAndExec, true, false);
+        runGPUExecutionTestNested(
+            ConditionalMode::BranchAndExec, ConditionalMode::BranchAndExec, true, false);
     }
 
     TEST_CASE("ExecuteMaskGenerator - BranchAndExec mode, nested conditional with inner else (GPU "
               "execution)",
               "[exec-mask][gpu]")
     {
-        runGPUExecutionTestNested(OpMode::BranchAndExec, OpMode::BranchAndExec, false, true);
+        runGPUExecutionTestNested(
+            ConditionalMode::BranchAndExec, ConditionalMode::BranchAndExec, false, true);
     }
 
     TEST_CASE("ExecuteMaskGenerator - BranchAndExec mode, nested conditional with outer and inner "
               "else (GPU execution)",
               "[exec-mask][gpu]")
     {
-        runGPUExecutionTestNested(OpMode::BranchAndExec, OpMode::BranchAndExec, true, true);
+        runGPUExecutionTestNested(
+            ConditionalMode::BranchAndExec, ConditionalMode::BranchAndExec, true, true);
     }
 
     // Mixed-mode nesting: outer Exec, inner BranchAndExec.
@@ -781,28 +788,32 @@ namespace ExecuteMaskGeneratorTest
               "execution)",
               "[exec-mask][gpu]")
     {
-        runGPUExecutionTestNested(OpMode::Exec, OpMode::BranchAndExec, false, false);
+        runGPUExecutionTestNested(
+            ConditionalMode::Exec, ConditionalMode::BranchAndExec, false, false);
     }
 
     TEST_CASE("ExecuteMaskGenerator - Exec outer / BranchAndExec inner, nested conditional with "
               "outer else (GPU execution)",
               "[exec-mask][gpu]")
     {
-        runGPUExecutionTestNested(OpMode::Exec, OpMode::BranchAndExec, true, false);
+        runGPUExecutionTestNested(
+            ConditionalMode::Exec, ConditionalMode::BranchAndExec, true, false);
     }
 
     TEST_CASE("ExecuteMaskGenerator - Exec outer / BranchAndExec inner, nested conditional with "
               "inner else (GPU execution)",
               "[exec-mask][gpu]")
     {
-        runGPUExecutionTestNested(OpMode::Exec, OpMode::BranchAndExec, false, true);
+        runGPUExecutionTestNested(
+            ConditionalMode::Exec, ConditionalMode::BranchAndExec, false, true);
     }
 
     TEST_CASE("ExecuteMaskGenerator - Exec outer / BranchAndExec inner, nested conditional with "
               "outer and inner else (GPU execution)",
               "[exec-mask][gpu]")
     {
-        runGPUExecutionTestNested(OpMode::Exec, OpMode::BranchAndExec, true, true);
+        runGPUExecutionTestNested(
+            ConditionalMode::Exec, ConditionalMode::BranchAndExec, true, true);
     }
 
     // Mixed-mode nesting: outer BranchAndExec, inner Exec.
@@ -810,28 +821,32 @@ namespace ExecuteMaskGeneratorTest
               "execution)",
               "[exec-mask][gpu]")
     {
-        runGPUExecutionTestNested(OpMode::BranchAndExec, OpMode::Exec, false, false);
+        runGPUExecutionTestNested(
+            ConditionalMode::BranchAndExec, ConditionalMode::Exec, false, false);
     }
 
     TEST_CASE("ExecuteMaskGenerator - BranchAndExec outer / Exec inner, nested conditional with "
               "outer else (GPU execution)",
               "[exec-mask][gpu]")
     {
-        runGPUExecutionTestNested(OpMode::BranchAndExec, OpMode::Exec, true, false);
+        runGPUExecutionTestNested(
+            ConditionalMode::BranchAndExec, ConditionalMode::Exec, true, false);
     }
 
     TEST_CASE("ExecuteMaskGenerator - BranchAndExec outer / Exec inner, nested conditional with "
               "inner else (GPU execution)",
               "[exec-mask][gpu]")
     {
-        runGPUExecutionTestNested(OpMode::BranchAndExec, OpMode::Exec, false, true);
+        runGPUExecutionTestNested(
+            ConditionalMode::BranchAndExec, ConditionalMode::Exec, false, true);
     }
 
     TEST_CASE("ExecuteMaskGenerator - BranchAndExec outer / Exec inner, nested conditional with "
               "outer and inner else (GPU execution)",
               "[exec-mask][gpu]")
     {
-        runGPUExecutionTestNested(OpMode::BranchAndExec, OpMode::Exec, true, true);
+        runGPUExecutionTestNested(
+            ConditionalMode::BranchAndExec, ConditionalMode::Exec, true, true);
     }
 
     /**
@@ -855,8 +870,8 @@ namespace ExecuteMaskGeneratorTest
      * For outerMode==BranchAndExec the outer else body never runs (EXECZ is never set
      * with a mixed warp), so all odd lanes stay at 0u.
      */
-    kg::KernelGraph buildNestedInElseConditionalGraphWithStore(OpMode             outerMode,
-                                                               OpMode             innerMode,
+    kg::KernelGraph buildNestedInElseConditionalGraphWithStore(ConditionalMode    outerMode,
+                                                               ConditionalMode    innerMode,
                                                                bool               withInnerElseBody,
                                                                Register::ValuePtr workitemIdReg,
                                                                uint32_t           wavefrontSize)
@@ -927,7 +942,9 @@ namespace ExecuteMaskGeneratorTest
         return kgraph;
     }
 
-    void runGPUExecutionTestNestedInElse(OpMode outerMode, OpMode innerMode, bool withInnerElseBody)
+    void runGPUExecutionTestNestedInElse(ConditionalMode outerMode,
+                                         ConditionalMode innerMode,
+                                         bool            withInnerElseBody)
     {
         auto testCtx = TestContext::ForTestDevice();
         auto ctx     = testCtx.get();
@@ -975,14 +992,14 @@ namespace ExecuteMaskGeneratorTest
         // For outerMode==BranchAndExec the else body only runs when all active lanes
         // fail isEven, which never happens with a mixed warp, so odd lanes stay at 0u.
         // The inner else (assign 3u) runs per-lane only when innerMode==Exec && withInnerElseBody.
-        bool innerElseRunsPerLane = withInnerElseBody && (innerMode == OpMode::Exec);
+        bool innerElseRunsPerLane = withInnerElseBody && (innerMode == ConditionalMode::Exec);
 
         std::vector<uint32_t> expected(wfSize);
         for(uint32_t i = 0; i < wfSize; ++i)
         {
             if(i % 2 == 0)
                 expected[i] = 1u; // outer true
-            else if(outerMode == OpMode::Exec)
+            else if(outerMode == ConditionalMode::Exec)
                 expected[i] = (i % 4 == 1) ? 5u : (innerElseRunsPerLane ? 3u : 2u);
             else
                 expected[i] = 0u; // BranchAndExec outer else never runs per-lane
@@ -995,56 +1012,62 @@ namespace ExecuteMaskGeneratorTest
               "execution)",
               "[exec-mask][gpu]")
     {
-        runGPUExecutionTestNestedInElse(OpMode::Exec, OpMode::Exec, false);
+        runGPUExecutionTestNestedInElse(ConditionalMode::Exec, ConditionalMode::Exec, false);
     }
 
     TEST_CASE("ExecuteMaskGenerator - Exec outer / BranchAndExec inner, nested conditional in else "
               "(GPU execution)",
               "[exec-mask][gpu]")
     {
-        runGPUExecutionTestNestedInElse(OpMode::Exec, OpMode::BranchAndExec, false);
+        runGPUExecutionTestNestedInElse(
+            ConditionalMode::Exec, ConditionalMode::BranchAndExec, false);
     }
 
     TEST_CASE("ExecuteMaskGenerator - BranchAndExec outer / Exec inner, nested conditional in else "
               "(GPU execution)",
               "[exec-mask][gpu]")
     {
-        runGPUExecutionTestNestedInElse(OpMode::BranchAndExec, OpMode::Exec, false);
+        runGPUExecutionTestNestedInElse(
+            ConditionalMode::BranchAndExec, ConditionalMode::Exec, false);
     }
 
     TEST_CASE("ExecuteMaskGenerator - BranchAndExec outer / BranchAndExec inner, nested "
               "conditional in else (GPU execution)",
               "[exec-mask][gpu]")
     {
-        runGPUExecutionTestNestedInElse(OpMode::BranchAndExec, OpMode::BranchAndExec, false);
+        runGPUExecutionTestNestedInElse(
+            ConditionalMode::BranchAndExec, ConditionalMode::BranchAndExec, false);
     }
 
     TEST_CASE("ExecuteMaskGenerator - Exec outer / Exec inner, nested conditional with inner else "
               "in else (GPU execution)",
               "[exec-mask][gpu]")
     {
-        runGPUExecutionTestNestedInElse(OpMode::Exec, OpMode::Exec, true);
+        runGPUExecutionTestNestedInElse(ConditionalMode::Exec, ConditionalMode::Exec, true);
     }
 
     TEST_CASE("ExecuteMaskGenerator - Exec outer / BranchAndExec inner, nested conditional with "
               "inner else in else (GPU execution)",
               "[exec-mask][gpu]")
     {
-        runGPUExecutionTestNestedInElse(OpMode::Exec, OpMode::BranchAndExec, true);
+        runGPUExecutionTestNestedInElse(
+            ConditionalMode::Exec, ConditionalMode::BranchAndExec, true);
     }
 
     TEST_CASE("ExecuteMaskGenerator - BranchAndExec outer / Exec inner, nested conditional with "
               "inner else in else (GPU execution)",
               "[exec-mask][gpu]")
     {
-        runGPUExecutionTestNestedInElse(OpMode::BranchAndExec, OpMode::Exec, true);
+        runGPUExecutionTestNestedInElse(
+            ConditionalMode::BranchAndExec, ConditionalMode::Exec, true);
     }
 
     TEST_CASE("ExecuteMaskGenerator - BranchAndExec outer / BranchAndExec inner, nested "
               "conditional with inner else in else (GPU execution)",
               "[exec-mask][gpu]")
     {
-        runGPUExecutionTestNestedInElse(OpMode::BranchAndExec, OpMode::BranchAndExec, true);
+        runGPUExecutionTestNestedInElse(
+            ConditionalMode::BranchAndExec, ConditionalMode::BranchAndExec, true);
     }
 
 } // namespace ExecuteMaskGeneratorTest

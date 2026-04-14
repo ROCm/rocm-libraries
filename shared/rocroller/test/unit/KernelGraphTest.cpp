@@ -2718,7 +2718,7 @@ namespace KernelGraphTest
         kgraph.control.addElement(Body(), {kernel}, {beforeConditionalAssign});
 
         auto conditional = kgraph.control.addElement(
-            ConditionalOp{test < unit, OpMode::Branch, "Test Conditional"});
+            ConditionalOp{test < unit, ConditionalMode::Branch, "Test Conditional"});
 
         kgraph.control.addElement(Sequence(), {beforeConditionalAssign}, {conditional});
 
@@ -2798,9 +2798,11 @@ namespace KernelGraphTest
 
         auto workgroupExpr    = k->workgroupIndex().at(0)->expression();
         auto firstConditional = kgraph.control.addElement(
-            ConditionalOp{workgroupExpr < one, OpMode::Branch, "First Conditional"});
-        auto secondConditional = kgraph.control.addElement(ConditionalOp{
-            (workgroupExpr > one) && (workgroupExpr <= two), OpMode::Branch, "Second Conditional"});
+            ConditionalOp{workgroupExpr < one, ConditionalMode::Branch, "First Conditional"});
+        auto secondConditional = kgraph.control.addElement(
+            ConditionalOp{(workgroupExpr > one) && (workgroupExpr <= two),
+                          ConditionalMode::Branch,
+                          "Second Conditional"});
 
         auto storeIndex = kgraph.control.addElement(StoreVGPR());
         kgraph.mapper.connect<User>(storeIndex, user);
@@ -2985,8 +2987,8 @@ namespace KernelGraphTest
 
         auto exprA = std::make_shared<Expression::Expression>(
             Expression::DataFlowTag{vgprA, Register::Type::Scalar, DataType::Int32});
-        auto conditional
-            = kgraph.control.addElement(ConditionalOp{exprA > unit, OpMode::Branch, "conditional"});
+        auto conditional = kgraph.control.addElement(
+            ConditionalOp{exprA > unit, ConditionalMode::Branch, "conditional"});
         kgraph.control.addElement(Sequence(), {loadA}, {conditional});
 
         auto loadB = kgraph.control.addElement(LoadVGPR(DataType::Int32, true));

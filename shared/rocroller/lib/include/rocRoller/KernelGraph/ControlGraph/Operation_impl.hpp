@@ -9,25 +9,25 @@ namespace rocRoller
 {
     namespace KernelGraph::ControlGraph
     {
-        inline std::string toString(OpMode m)
+        inline std::string toString(ConditionalMode m)
         {
             switch(m)
             {
-            case OpMode::Branch:
+            case ConditionalMode::Branch:
                 return "Branch";
-            case OpMode::Exec:
+            case ConditionalMode::Exec:
                 return "Exec";
-            case OpMode::BranchAndExec:
+            case ConditionalMode::BranchAndExec:
                 return "BranchAndExec";
 
-            case OpMode::Count:
+            case ConditionalMode::Count:
             default:
                 break;
             }
-            Throw<FatalError>("Invalid OpMode");
+            Throw<FatalError>("Invalid ConditionalMode");
         }
 
-        inline std::ostream& operator<<(std::ostream& stream, OpMode m)
+        inline std::ostream& operator<<(std::ostream& stream, ConditionalMode m)
         {
             return stream << toString(m);
         }

@@ -37,6 +37,27 @@ namespace rocRoller
         }
 
         Generator<Instruction>
+            ConditionalGenerator::genConditional(Expression::ExpressionPtr condition,
+                                                 std::string const&        conditionName,
+                                                 std::function<Generator<Instruction>()> trueBodyFn,
+                                                 std::function<Generator<Instruction>()> elseBodyFn,
+                                                 ControlGraph::ConditionalMode           mode)
+        {
+            switch(mode)
+            {
+            case ControlGraph::ConditionalMode::Branch:
+                co_yield genBranch(condition, conditionName, trueBodyFn, elseBodyFn);
+                break;
+            case ControlGraph::ConditionalMode::Exec:
+            case ControlGraph::ConditionalMode::BranchAndExec:
+                co_yield genExec(condition, conditionName, trueBodyFn, elseBodyFn, mode);
+                break;
+            default:
+                Throw<FatalError>("Unhandled ConditionalMode: ", ShowValue(mode));
+            }
+        }
+
+        Generator<Instruction>
             ConditionalGenerator::genBranch(Expression::ExpressionPtr               condition,
                                             std::string const&                      conditionName,
                                             std::function<Generator<Instruction>()> trueBodyFn,
@@ -100,7 +121,7 @@ namespace rocRoller
                                           std::string const&                      conditionName,
                                           std::function<Generator<Instruction>()> trueBodyFn,
                                           std::function<Generator<Instruction>()> elseBodyFn,
-                                          ControlGraph::OpMode                    mode)
+                                          ControlGraph::ConditionalMode           mode)
         {
             Log::debug("ConditionalGenerator::genExec({}, {})", conditionName, toString(mode));
             auto const wavefrontSize = m_context->kernel()->wavefront_size();
@@ -118,7 +139,7 @@ namespace rocRoller
                         ShowValue(varType),
                         ShowValue(wavefrontSize));
 
-            bool const branchAndExec = (mode == ControlGraph::OpMode::BranchAndExec);
+            bool const branchAndExec = (mode == ControlGraph::ConditionalMode::BranchAndExec);
 
             Register::ValuePtr elseLabel, exitLabel;
             if(branchAndExec)
