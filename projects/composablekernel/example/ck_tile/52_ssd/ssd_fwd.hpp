@@ -112,12 +112,20 @@ struct SsdPipelineTraits<GemmPipeline::COMPUTE_V3>
 // To compute A @ M, store M^T in B (pre-transpose to cancel the implicit one).
 // ---------------------------------------------------------------------------
 template <typename GemmCfg>
-inline float launch_batched_gemm(
-    const void* a_ptr, index_t stride_a, index_t batch_stride_a,
-    const void* b_ptr, index_t stride_b, index_t batch_stride_b,
-    void*       c_ptr, index_t stride_c, index_t batch_stride_c,
-    index_t M, index_t N, index_t K, index_t batch_count,
-    hipStream_t stream)
+inline float launch_batched_gemm(const void* a_ptr,
+                                 index_t stride_a,
+                                 index_t batch_stride_a,
+                                 const void* b_ptr,
+                                 index_t stride_b,
+                                 index_t batch_stride_b,
+                                 void* c_ptr,
+                                 index_t stride_c,
+                                 index_t batch_stride_c,
+                                 index_t M,
+                                 index_t N,
+                                 index_t K,
+                                 index_t batch_count,
+                                 hipStream_t stream)
 {
     using ADataType   = float;
     using BDataType   = float;
@@ -130,39 +138,56 @@ inline float launch_batched_gemm(
     using DsLayout    = tuple<>;
     using PassThrough = element_wise::PassThrough;
 
-    constexpr bool kPadM = true;
-    constexpr bool kPadN = true;
-    constexpr bool kPadK = true;
+    constexpr bool kPadM          = true;
+    constexpr bool kPadN          = true;
+    constexpr bool kPadK          = true;
     constexpr bool TransposeC     = false;
     constexpr bool DoubleSmemBuf  = GemmCfg::DoubleSmemBuffer;
     constexpr index_t kBlockPerCu = 1;
     constexpr index_t TilePartGrp = 8;
     constexpr index_t TilePartM01 = 4;
 
-    using GemmShape = TileGemmShape<
-        sequence<GemmCfg::M_Tile, GemmCfg::N_Tile, GemmCfg::K_Tile>,
-        sequence<GemmCfg::M_Warp, GemmCfg::N_Warp, GemmCfg::K_Warp>,
-        sequence<GemmCfg::M_Warp_Tile, GemmCfg::N_Warp_Tile, GemmCfg::K_Warp_Tile>>;
+    using GemmShape =
+        TileGemmShape<sequence<GemmCfg::M_Tile, GemmCfg::N_Tile, GemmCfg::K_Tile>,
+                      sequence<GemmCfg::M_Warp, GemmCfg::N_Warp, GemmCfg::K_Warp>,
+                      sequence<GemmCfg::M_Warp_Tile, GemmCfg::N_Warp_Tile, GemmCfg::K_Warp_Tile>>;
 
-    using TilePartitioner =
-        GemmSpatiallyLocalTilePartitioner<GemmShape, TilePartGrp, TilePartM01>;
+    using TilePartitioner = GemmSpatiallyLocalTilePartitioner<GemmShape, TilePartGrp, TilePartM01>;
 
-    using Traits = TileGemmUniversalTraits<kPadM, kPadN, kPadK, DoubleSmemBuf,
-                                           ALayout, BLayout, CLayout, TransposeC>;
+    using Traits = TileGemmUniversalTraits<kPadM,
+                                           kPadN,
+                                           kPadK,
+                                           DoubleSmemBuf,
+                                           ALayout,
+                                           BLayout,
+                                           CLayout,
+                                           TransposeC>;
 
-    using PipelineProblem = UniversalGemmPipelineProblem<
-        ADataType, BDataType, AccDataType, GemmShape, Traits, GemmCfg::Scheduler>;
+    using PipelineProblem = UniversalGemmPipelineProblem<ADataType,
+                                                         BDataType,
+                                                         AccDataType,
+                                                         GemmShape,
+                                                         Traits,
+                                                         GemmCfg::Scheduler>;
 
-    using Pipeline =
-        typename SsdPipelineTraits<GemmCfg::Pipeline>::template type<PipelineProblem>;
+    using Pipeline = typename SsdPipelineTraits<GemmCfg::Pipeline>::template type<PipelineProblem>;
 
-    using Epilogue = CShuffleEpilogue<CShuffleEpilogueProblem<
-        ADataType, BDataType, DsDataType, AccDataType, CDataType,
-        DsLayout, CLayout, PassThrough,
-        TilePartitioner::MPerBlock, TilePartitioner::NPerBlock,
-        GemmCfg::M_Warp, GemmCfg::N_Warp,
-        GemmCfg::M_Warp_Tile, GemmCfg::N_Warp_Tile, GemmCfg::K_Warp_Tile,
-        PipelineProblem::TransposeC>>;
+    using Epilogue = CShuffleEpilogue<CShuffleEpilogueProblem<ADataType,
+                                                              BDataType,
+                                                              DsDataType,
+                                                              AccDataType,
+                                                              CDataType,
+                                                              DsLayout,
+                                                              CLayout,
+                                                              PassThrough,
+                                                              TilePartitioner::MPerBlock,
+                                                              TilePartitioner::NPerBlock,
+                                                              GemmCfg::M_Warp,
+                                                              GemmCfg::N_Warp,
+                                                              GemmCfg::M_Warp_Tile,
+                                                              GemmCfg::N_Warp_Tile,
+                                                              GemmCfg::K_Warp_Tile,
+                                                              PipelineProblem::TransposeC>>;
 
     using Kernel = BatchedGemmKernel<TilePartitioner, Pipeline, Epilogue>;
 
@@ -171,31 +196,44 @@ inline float launch_batched_gemm(
     const index_t safe_batch_stride_b = (batch_stride_b > 0) ? batch_stride_b : K * N;
     const index_t safe_batch_stride_c = (batch_stride_c > 0) ? batch_stride_c : M * N;
 
-    BatchedGemmHostArgs args{
-        a_ptr, b_ptr, const_cast<void*>(static_cast<const void*>(c_ptr)),
-        /*k_batch=*/1,
-        M, N, K,
-        stride_a, stride_b, stride_c,
-        safe_batch_stride_a, safe_batch_stride_b, safe_batch_stride_c,
-        batch_count};
+    BatchedGemmHostArgs args{a_ptr,
+                             b_ptr,
+                             const_cast<void*>(static_cast<const void*>(c_ptr)),
+                             /*k_batch=*/1,
+                             M,
+                             N,
+                             K,
+                             stride_a,
+                             stride_b,
+                             stride_c,
+                             safe_batch_stride_a,
+                             safe_batch_stride_b,
+                             safe_batch_stride_c,
+                             batch_count};
 
     auto kargs = Kernel::MakeKernelArgs(args);
-    if (!Kernel::IsSupportedArgument(kargs)) {
+    if(!Kernel::IsSupportedArgument(kargs))
+    {
         printf("[SSD] GEMM unsupported args: M=%d N=%d K=%d stride_a=%d stride_b=%d stride_c=%d "
                "bs_a=%d bs_b=%d bs_c=%d batch=%d\n",
-               static_cast<int>(M), static_cast<int>(N), static_cast<int>(K),
-               static_cast<int>(stride_a), static_cast<int>(stride_b), static_cast<int>(stride_c),
-               static_cast<int>(safe_batch_stride_a), static_cast<int>(safe_batch_stride_b),
-               static_cast<int>(safe_batch_stride_c), static_cast<int>(batch_count));
+               static_cast<int>(M),
+               static_cast<int>(N),
+               static_cast<int>(K),
+               static_cast<int>(stride_a),
+               static_cast<int>(stride_b),
+               static_cast<int>(stride_c),
+               static_cast<int>(safe_batch_stride_a),
+               static_cast<int>(safe_batch_stride_b),
+               static_cast<int>(safe_batch_stride_c),
+               static_cast<int>(batch_count));
         return -1.0f;
     }
 
     const dim3 grids  = Kernel::GridSize(M, N, 1, batch_count);
     const dim3 blocks = Kernel::BlockSize();
 
-    return launch_kernel(
-        stream_config{stream, false},
-        make_kernel<kBlockPerCu>(Kernel{}, grids, blocks, 0, kargs));
+    return launch_kernel(stream_config{stream, false},
+                         make_kernel<kBlockPerCu>(Kernel{}, grids, blocks, 0, kargs));
 }
 
 // ---------------------------------------------------------------------------
@@ -204,22 +242,23 @@ inline float launch_batched_gemm(
 // Also supports transpose: if do_transpose, output is [cols, rows].
 // Grid: (1,1,1)  Block: (256,1,1)  — simple, for small matrices.
 // ---------------------------------------------------------------------------
-__global__ void pack_matrix_kernel(
-    const float* __restrict__ src,
-    float*       __restrict__ dst,
-    int rows, int cols, int src_stride, bool do_transpose)
+__global__ void pack_matrix_kernel(const float* __restrict__ src,
+                                   float* __restrict__ dst,
+                                   int rows,
+                                   int cols,
+                                   int src_stride,
+                                   bool do_transpose)
 {
     int total = rows * cols;
-    for (int idx = threadIdx.x + blockIdx.x * blockDim.x;
-         idx < total;
-         idx += blockDim.x * gridDim.x) {
-        int r = idx / cols;
-        int c = idx % cols;
+    for(int idx = threadIdx.x + blockIdx.x * blockDim.x; idx < total; idx += blockDim.x * gridDim.x)
+    {
+        int r     = idx / cols;
+        int c     = idx % cols;
         float val = src[r * src_stride + c];
-        if (do_transpose)
-            dst[c * rows + r] = val;  // [cols, rows] row-major
+        if(do_transpose)
+            dst[c * rows + r] = val; // [cols, rows] row-major
         else
-            dst[r * cols + c] = val;  // [rows, cols] row-major
+            dst[r * cols + c] = val; // [rows, cols] row-major
     }
 }
 
@@ -242,7 +281,7 @@ inline float ssd_fwd(const SsdHostArgs& args, hipStream_t stream = nullptr)
     const int N   = args.state_dim;
     const int BEH = B * EH;
     const int grp = args.grp_ratio();
-    const int BC  = BEH * C;  // total batch count for GEMM
+    const int BC  = BEH * C; // total batch count for GEMM
 
     // --- Single workspace allocation ---
     const size_t sz_cumsum = static_cast<size_t>(BEH) * C * L;
@@ -255,32 +294,44 @@ inline float ssd_fwd(const SsdHostArgs& args, hipStream_t stream = nullptr)
     const size_t sz_rbmm2  = static_cast<size_t>(BEH) * C * L * D;
     const size_t sz_ce     = static_cast<size_t>(BEH) * C * L;
     const size_t sz_lv     = static_cast<size_t>(BEH) * C;
-    const size_t sz_pack_a = static_cast<size_t>(BC) * std::max(static_cast<size_t>(N * L), static_cast<size_t>(D * L));
-    const size_t sz_pack_b = static_cast<size_t>(BC) * std::max(static_cast<size_t>(N * L), static_cast<size_t>(D * N));
+    const size_t sz_pack_a =
+        static_cast<size_t>(BC) * std::max(static_cast<size_t>(N * L), static_cast<size_t>(D * L));
+    const size_t sz_pack_b =
+        static_cast<size_t>(BC) * std::max(static_cast<size_t>(N * L), static_cast<size_t>(D * N));
 
-    const size_t total_floats = sz_cumsum + sz_ibmm1 + sz_pi2 + sz_abmm2 +
-                                sz_pi1 + sz_rbmm1 + sz_state + sz_rbmm2 +
-                                sz_ce + sz_lv + sz_pack_a + sz_pack_b;
+    const size_t total_floats = sz_cumsum + sz_ibmm1 + sz_pi2 + sz_abmm2 + sz_pi1 + sz_rbmm1 +
+                                sz_state + sz_rbmm2 + sz_ce + sz_lv + sz_pack_a + sz_pack_b;
     DeviceMem d_workspace(total_floats * sizeof(float));
     float* ws = static_cast<float*>(d_workspace.GetDeviceBuffer());
 
     // Carve up workspace
-    float* cum   = ws;  ws += sz_cumsum;
-    float* ibmm1 = ws;  ws += sz_ibmm1;
-    float* pi2   = ws;  ws += sz_pi2;
-    float* abmm2 = ws;  ws += sz_abmm2;
-    float* pi1   = ws;  ws += sz_pi1;
-    float* rbmm1 = ws;  ws += sz_rbmm1;
-    float* st    = ws;  ws += sz_state;
-    float* rbmm2 = ws;  ws += sz_rbmm2;
-    float* ce    = ws;  ws += sz_ce;
-    float* lv    = ws;  ws += sz_lv;
-    float* pa    = ws;  ws += sz_pack_a;
-    float* pb    = ws;  ws += sz_pack_b;
+    float* cum = ws;
+    ws += sz_cumsum;
+    float* ibmm1 = ws;
+    ws += sz_ibmm1;
+    float* pi2 = ws;
+    ws += sz_pi2;
+    float* abmm2 = ws;
+    ws += sz_abmm2;
+    float* pi1 = ws;
+    ws += sz_pi1;
+    float* rbmm1 = ws;
+    ws += sz_rbmm1;
+    float* st = ws;
+    ws += sz_state;
+    float* rbmm2 = ws;
+    ws += sz_rbmm2;
+    float* ce = ws;
+    ws += sz_ce;
+    float* lv = ws;
+    ws += sz_lv;
+    float* pa = ws;
+    ws += sz_pack_a;
+    float* pb = ws;
+    ws += sz_pack_b;
 
     // Zero entire workspace (async, on the same stream)
-    (void)hipMemsetAsync(d_workspace.GetDeviceBuffer(), 0,
-                         total_floats * sizeof(float), stream);
+    (void)hipMemsetAsync(d_workspace.GetDeviceBuffer(), 0, total_floats * sizeof(float), stream);
 
     const float* p_x   = static_cast<const float*>(args.p_x);
     const float* p_da  = static_cast<const float*>(args.p_delta_a);
@@ -289,8 +340,8 @@ inline float ssd_fwd(const SsdHostArgs& args, hipStream_t stream = nullptr)
     const float* p_cm  = static_cast<const float*>(args.p_c_mat);
     const float* p_dp  = static_cast<const float*>(args.p_d_param);
     const float* p_z   = static_cast<const float*>(args.p_z);
-    float*       p_y   = static_cast<float*>(args.p_y);
-    float*       p_fs  = static_cast<float*>(args.p_fstate);
+    float* p_y         = static_cast<float*>(args.p_y);
+    float* p_fs        = static_cast<float*>(args.p_fstate);
 
     // ====== Step 1: Cumsum ======
     ssd_cumsum_kernel<<<BEH, C, 0, stream>>>(p_da, cum, C, L);
@@ -311,16 +362,24 @@ inline float ssd_fwd(const SsdHostArgs& args, hipStream_t stream = nullptr)
 
         // Batched GEMM: Out[L,L] = pa(Row)[L,N] @ pb(Col)[L,N]
         launch_batched_gemm<SsdGemmConfigSquare>(
-            pa, N, static_cast<index_t>(L * N),     // A: [L,N], batch_stride=L*N
-            pb, N, static_cast<index_t>(L * N),     // B: [L,N] col-major, batch_stride=L*N
-            ibmm1, L, static_cast<index_t>(L * L),  // C: [L,L], batch_stride=L*L
-            L, L, N, BC,
+            pa,
+            N,
+            static_cast<index_t>(L * N), // A: [L,N], batch_stride=L*N
+            pb,
+            N,
+            static_cast<index_t>(L * N), // B: [L,N] col-major, batch_stride=L*N
+            ibmm1,
+            L,
+            static_cast<index_t>(L * L), // C: [L,L], batch_stride=L*L
+            L,
+            L,
+            N,
+            BC,
             stream);
     }
 
     // ====== Step 3: SegSum + Pre_IntraBMM2 ======
-    ssd_segsum_pre_intra2_kernel<<<dim3(BEH, C), 256, 0, stream>>>(
-        cum, p_dlt, ibmm1, pi2, C, L);
+    ssd_segsum_pre_intra2_kernel<<<dim3(BEH, C), 256, 0, stream>>>(cum, p_dlt, ibmm1, pi2, C, L);
 
     // ====== Step 4: IntraBMM2 — batched PreIntra2 @ X^T -> [L, D] ======
     // Pack all X slices, then one batched GEMM.
@@ -329,15 +388,23 @@ inline float ssd_fwd(const SsdHostArgs& args, hipStream_t stream = nullptr)
 
         // Pack X_chunk[D,L] stride=C*L -> pa[BC, D, L] (ld=L, no transpose)
         // ColumnMajor B implicitly transposes, giving us X^T for the GEMM.
-        pack_x_batched_kernel<<<dim3(dl_blocks, BC), 256, 0, stream>>>(
-            p_x, pa, D, C, L);
+        pack_x_batched_kernel<<<dim3(dl_blocks, BC), 256, 0, stream>>>(p_x, pa, D, C, L);
 
         // Batched GEMM: Out[L,D] = PI2(Row)[L,L] @ pa(Col)[D,L]
         launch_batched_gemm<SsdGemmConfig>(
-            pi2, L, static_cast<index_t>(L * L),    // A: [L,L], batch_stride=L*L
-            pa,  L, static_cast<index_t>(D * L),    // B: [D,L] col-major, batch_stride=D*L
-            abmm2, D, static_cast<index_t>(L * D),  // C: [L,D], batch_stride=L*D
-            L, D, L, BC,
+            pi2,
+            L,
+            static_cast<index_t>(L * L), // A: [L,L], batch_stride=L*L
+            pa,
+            L,
+            static_cast<index_t>(D * L), // B: [D,L] col-major, batch_stride=D*L
+            abmm2,
+            D,
+            static_cast<index_t>(L * D), // C: [L,D], batch_stride=L*D
+            L,
+            D,
+            L,
+            BC,
             stream);
     }
 
@@ -350,15 +417,23 @@ inline float ssd_fwd(const SsdHostArgs& args, hipStream_t stream = nullptr)
         const int dl_blocks = (D * L + 255) / 256;
 
         // Pack X again (same layout as Step 4)
-        pack_x_batched_kernel<<<dim3(dl_blocks, BC), 256, 0, stream>>>(
-            p_x, pa, D, C, L);
+        pack_x_batched_kernel<<<dim3(dl_blocks, BC), 256, 0, stream>>>(p_x, pa, D, C, L);
 
         // Batched GEMM: Out[N,D] = PI1(Row)[N,L] @ pa(Col)[D,L]
         launch_batched_gemm<SsdGemmConfig>(
-            pi1, L, static_cast<index_t>(N * L),    // A: [N,L], batch_stride=N*L
-            pa,  L, static_cast<index_t>(D * L),    // B: [D,L] col-major, batch_stride=D*L
-            rbmm1, D, static_cast<index_t>(N * D),  // C: [N,D], batch_stride=N*D
-            N, D, L, BC,
+            pi1,
+            L,
+            static_cast<index_t>(N * L), // A: [N,L], batch_stride=N*L
+            pa,
+            L,
+            static_cast<index_t>(D * L), // B: [D,L] col-major, batch_stride=D*L
+            rbmm1,
+            D,
+            static_cast<index_t>(N * D), // C: [N,D], batch_stride=N*D
+            N,
+            D,
+            L,
+            BC,
             stream);
     }
 
@@ -376,15 +451,23 @@ inline float ssd_fwd(const SsdHostArgs& args, hipStream_t stream = nullptr)
 
         // Pack State[N,D] -> transpose -> pb[BC, D, N] (ld=N)
         // ColumnMajor B implicitly transposes pb back to State.
-        pack_state_batched_kernel<<<dim3(nd_blocks, BC), 256, 0, stream>>>(
-            st, pb, N, D);
+        pack_state_batched_kernel<<<dim3(nd_blocks, BC), 256, 0, stream>>>(st, pb, N, D);
 
         // Batched GEMM: Out[L,D] = pa(Row)[L,N] @ pb(Col)[D,N]
         launch_batched_gemm<SsdGemmConfig>(
-            pa, N, static_cast<index_t>(L * N),     // A: [L,N], batch_stride=L*N
-            pb, N, static_cast<index_t>(D * N),     // B: [D,N] col-major, batch_stride=D*N
-            rbmm2, D, static_cast<index_t>(L * D),  // C: [L,D], batch_stride=L*D
-            L, D, N, BC,
+            pa,
+            N,
+            static_cast<index_t>(L * N), // A: [L,N], batch_stride=L*N
+            pb,
+            N,
+            static_cast<index_t>(D * N), // B: [D,N] col-major, batch_stride=D*N
+            rbmm2,
+            D,
+            static_cast<index_t>(L * D), // C: [L,D], batch_stride=L*D
+            L,
+            D,
+            N,
+            BC,
             stream);
     }
 
