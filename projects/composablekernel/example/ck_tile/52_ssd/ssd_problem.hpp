@@ -29,6 +29,7 @@ struct SsdHostArgs
     const void* p_b_mat;    // [B, G, N, C, L]
     const void* p_c_mat;    // [B, G, N, C, L]
     const void* p_d_param;  // [EH, D]
+    const void* p_z;        // [B, EH, D, C, L] or nullptr
     void* p_y;              // [B, EH, D, C, L]
     void* p_fstate;         // [B, EH, D, N]
 

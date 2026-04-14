@@ -158,6 +158,7 @@ __global__ void ssd_epilogue_kernel(
     const float* __restrict__ cumsum_exp,
     const float* __restrict__ x,
     const float* __restrict__ d_param,
+    const float* __restrict__ z,
     float*       __restrict__ y,
     int C, int L, int D, int EH)
 {
@@ -175,13 +176,16 @@ __global__ void ssd_epilogue_kernel(
         const int d = idx % D;
         float val = ce[l] * i2[l * D + d] + a2[l * D + d];
         float dp  = d_param[eh * D + d];
-        float xv  = x[static_cast<size_t>(beh) * D * C * L +
-                      static_cast<size_t>(d) * C * L +
-                      static_cast<size_t>(ci) * L + l];
+        size_t xz_off = static_cast<size_t>(beh) * D * C * L +
+                        static_cast<size_t>(d) * C * L +
+                        static_cast<size_t>(ci) * L + l;
+        float xv  = x[xz_off];
         val += dp * xv;
-        y[static_cast<size_t>(beh) * D * C * L +
-          static_cast<size_t>(d) * C * L +
-          static_cast<size_t>(ci) * L + l] = val;
+        if (z != nullptr) {
+            float zv = z[xz_off];
+            val *= zv * (1.0f / (1.0f + expf(-zv)));  // Y * silu(Z)
+        }
+        y[xz_off] = val;
     }
 }
 
