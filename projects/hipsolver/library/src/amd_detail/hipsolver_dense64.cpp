@@ -37,6 +37,7 @@
 #include "rocsolver/rocsolver.h"
 #include <algorithm>
 #include <climits>
+#include <cstddef>
 #include <functional>
 #include <iostream>
 #include <math.h>
