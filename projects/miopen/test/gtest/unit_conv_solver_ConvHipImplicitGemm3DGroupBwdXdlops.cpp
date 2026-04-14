@@ -73,6 +73,7 @@ const auto& GetTestParams()
 #endif
         auto p = miopen::unit_tests::UnitTestConvSolverParams(supportedDevices);
         p.Tunable(5);
+        p.UsesCKDynamicLib();
 
         return p;
     }();

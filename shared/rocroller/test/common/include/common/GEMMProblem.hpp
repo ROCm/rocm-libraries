@@ -5,6 +5,7 @@
 
 #include <rocRoller/DataTypes/DataTypes.hpp>
 #include <rocRoller/Operations/BlockScale_fwd.hpp>
+#include <rocRoller/Parameters/Solution/LDSBankSwizzleMode.hpp>
 #include <rocRoller/Parameters/Solution/LoadOption.hpp>
 #include <rocRoller/Parameters/Solution/ScaleSkipPermlaneMode.hpp>
 #include <rocRoller/Parameters/Solution/StoreOption.hpp>
@@ -93,6 +94,9 @@ struct GEMMProblem
     rocRoller::DataType scaleTypeB = rocRoller::DataType::None;
 
     int scaleBlockSize = -1;
+
+    // LDS bank conflict swizzle
+    rocRoller::LDSBankSwizzleMode ldsSwizzleMode = rocRoller::LDSBankSwizzleMode::None;
 
     // Scale pretile / swizzle (mirrors client TypeParameters)
     rocRoller::ScaleSkipPermlaneMode scaleSkipPermlane = rocRoller::ScaleSkipPermlaneMode::None;

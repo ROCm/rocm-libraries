@@ -13,9 +13,9 @@
 
 #include <flatbuffers/flatbuffers.h>
 #include <gtest/gtest.h>
-#include <hipdnn_data_sdk/data_objects/batchnorm_inference_attributes_generated.h>
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
-#include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/batchnorm_inference_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_test_sdk/utilities/ToVec.hpp>
 
 #include <hipdnn_test_sdk/constants/BatchnormInferenceConstants.hpp>
@@ -29,8 +29,8 @@
 
 using namespace hipdnn_backend;
 using namespace hipdnn_backend::test_utilities;
-using namespace hipdnn_data_sdk::data_objects;
-using namespace hipdnn_tests::constants::batchnorm_inference;
+using namespace hipdnn_flatbuffers_sdk::data_objects;
+using namespace hipdnn_tests::constants;
 namespace
 {
 
@@ -122,30 +122,60 @@ protected:
 
 TEST_F(TestGraphDescriptorBatchnormInference, BuildFromSingleOperation)
 {
-    auto xDesc = createFinalizedTensor(
-        K_TENSOR_X_UID,
-        {K_SPATIAL_DIMS[0], K_SPATIAL_DIMS[1], K_SPATIAL_DIMS[2], K_SPATIAL_DIMS[3]},
-        {K_SPATIAL_STRIDES[0], K_SPATIAL_STRIDES[1], K_SPATIAL_STRIDES[2], K_SPATIAL_STRIDES[3]});
-    auto meanDesc = createFinalizedTensor(
-        K_TENSOR_MEAN_UID,
-        {K_CHANNEL_DIMS[0], K_CHANNEL_DIMS[1], K_CHANNEL_DIMS[2], K_CHANNEL_DIMS[3]},
-        {K_CHANNEL_STRIDES[0], K_CHANNEL_STRIDES[1], K_CHANNEL_STRIDES[2], K_CHANNEL_STRIDES[3]});
-    auto invVarianceDesc = createFinalizedTensor(
-        K_TENSOR_INV_VARIANCE_UID,
-        {K_CHANNEL_DIMS[0], K_CHANNEL_DIMS[1], K_CHANNEL_DIMS[2], K_CHANNEL_DIMS[3]},
-        {K_CHANNEL_STRIDES[0], K_CHANNEL_STRIDES[1], K_CHANNEL_STRIDES[2], K_CHANNEL_STRIDES[3]});
-    auto scaleDesc = createFinalizedTensor(
-        K_TENSOR_SCALE_UID,
-        {K_CHANNEL_DIMS[0], K_CHANNEL_DIMS[1], K_CHANNEL_DIMS[2], K_CHANNEL_DIMS[3]},
-        {K_CHANNEL_STRIDES[0], K_CHANNEL_STRIDES[1], K_CHANNEL_STRIDES[2], K_CHANNEL_STRIDES[3]});
-    auto biasDesc = createFinalizedTensor(
-        K_TENSOR_BIAS_UID,
-        {K_CHANNEL_DIMS[0], K_CHANNEL_DIMS[1], K_CHANNEL_DIMS[2], K_CHANNEL_DIMS[3]},
-        {K_CHANNEL_STRIDES[0], K_CHANNEL_STRIDES[1], K_CHANNEL_STRIDES[2], K_CHANNEL_STRIDES[3]});
-    auto yDesc = createFinalizedTensor(
-        K_TENSOR_Y_UID,
-        {K_SPATIAL_DIMS[0], K_SPATIAL_DIMS[1], K_SPATIAL_DIMS[2], K_SPATIAL_DIMS[3]},
-        {K_SPATIAL_STRIDES[0], K_SPATIAL_STRIDES[1], K_SPATIAL_STRIDES[2], K_SPATIAL_STRIDES[3]});
+    auto xDesc = createFinalizedTensor(K_BN_INF_TENSOR_X_UID,
+                                       {K_BN_INF_SPATIAL_DIMS[0],
+                                        K_BN_INF_SPATIAL_DIMS[1],
+                                        K_BN_INF_SPATIAL_DIMS[2],
+                                        K_BN_INF_SPATIAL_DIMS[3]},
+                                       {K_BN_INF_SPATIAL_STRIDES[0],
+                                        K_BN_INF_SPATIAL_STRIDES[1],
+                                        K_BN_INF_SPATIAL_STRIDES[2],
+                                        K_BN_INF_SPATIAL_STRIDES[3]});
+    auto meanDesc = createFinalizedTensor(K_BN_INF_TENSOR_MEAN_UID,
+                                          {K_BN_INF_CHANNEL_DIMS[0],
+                                           K_BN_INF_CHANNEL_DIMS[1],
+                                           K_BN_INF_CHANNEL_DIMS[2],
+                                           K_BN_INF_CHANNEL_DIMS[3]},
+                                          {K_BN_INF_CHANNEL_STRIDES[0],
+                                           K_BN_INF_CHANNEL_STRIDES[1],
+                                           K_BN_INF_CHANNEL_STRIDES[2],
+                                           K_BN_INF_CHANNEL_STRIDES[3]});
+    auto invVarianceDesc = createFinalizedTensor(K_BN_INF_TENSOR_INV_VARIANCE_UID,
+                                                 {K_BN_INF_CHANNEL_DIMS[0],
+                                                  K_BN_INF_CHANNEL_DIMS[1],
+                                                  K_BN_INF_CHANNEL_DIMS[2],
+                                                  K_BN_INF_CHANNEL_DIMS[3]},
+                                                 {K_BN_INF_CHANNEL_STRIDES[0],
+                                                  K_BN_INF_CHANNEL_STRIDES[1],
+                                                  K_BN_INF_CHANNEL_STRIDES[2],
+                                                  K_BN_INF_CHANNEL_STRIDES[3]});
+    auto scaleDesc = createFinalizedTensor(K_BN_INF_TENSOR_SCALE_UID,
+                                           {K_BN_INF_CHANNEL_DIMS[0],
+                                            K_BN_INF_CHANNEL_DIMS[1],
+                                            K_BN_INF_CHANNEL_DIMS[2],
+                                            K_BN_INF_CHANNEL_DIMS[3]},
+                                           {K_BN_INF_CHANNEL_STRIDES[0],
+                                            K_BN_INF_CHANNEL_STRIDES[1],
+                                            K_BN_INF_CHANNEL_STRIDES[2],
+                                            K_BN_INF_CHANNEL_STRIDES[3]});
+    auto biasDesc = createFinalizedTensor(K_BN_INF_TENSOR_BIAS_UID,
+                                          {K_BN_INF_CHANNEL_DIMS[0],
+                                           K_BN_INF_CHANNEL_DIMS[1],
+                                           K_BN_INF_CHANNEL_DIMS[2],
+                                           K_BN_INF_CHANNEL_DIMS[3]},
+                                          {K_BN_INF_CHANNEL_STRIDES[0],
+                                           K_BN_INF_CHANNEL_STRIDES[1],
+                                           K_BN_INF_CHANNEL_STRIDES[2],
+                                           K_BN_INF_CHANNEL_STRIDES[3]});
+    auto yDesc = createFinalizedTensor(K_BN_INF_TENSOR_Y_UID,
+                                       {K_BN_INF_SPATIAL_DIMS[0],
+                                        K_BN_INF_SPATIAL_DIMS[1],
+                                        K_BN_INF_SPATIAL_DIMS[2],
+                                        K_BN_INF_SPATIAL_DIMS[3]},
+                                       {K_BN_INF_SPATIAL_STRIDES[0],
+                                        K_BN_INF_SPATIAL_STRIDES[1],
+                                        K_BN_INF_SPATIAL_STRIDES[2],
+                                        K_BN_INF_SPATIAL_STRIDES[3]});
     auto opDesc = createFinalizedBatchnormInferenceOp(xDesc.get(),
                                                       meanDesc.get(),
                                                       invVarianceDesc.get(),
@@ -183,40 +213,70 @@ TEST_F(TestGraphDescriptorBatchnormInference, BuildFromSingleOperation)
     ASSERT_NE(attrs, nullptr);
 
     // Verify tensor UID references
-    EXPECT_EQ(attrs->x_tensor_uid, K_TENSOR_X_UID);
-    EXPECT_EQ(attrs->mean_tensor_uid, K_TENSOR_MEAN_UID);
-    EXPECT_EQ(attrs->inv_variance_tensor_uid, K_TENSOR_INV_VARIANCE_UID);
-    EXPECT_EQ(attrs->scale_tensor_uid, K_TENSOR_SCALE_UID);
-    EXPECT_EQ(attrs->bias_tensor_uid, K_TENSOR_BIAS_UID);
-    EXPECT_EQ(attrs->y_tensor_uid, K_TENSOR_Y_UID);
+    EXPECT_EQ(attrs->x_tensor_uid, K_BN_INF_TENSOR_X_UID);
+    EXPECT_EQ(attrs->mean_tensor_uid, K_BN_INF_TENSOR_MEAN_UID);
+    EXPECT_EQ(attrs->inv_variance_tensor_uid, K_BN_INF_TENSOR_INV_VARIANCE_UID);
+    EXPECT_EQ(attrs->scale_tensor_uid, K_BN_INF_TENSOR_SCALE_UID);
+    EXPECT_EQ(attrs->bias_tensor_uid, K_BN_INF_TENSOR_BIAS_UID);
+    EXPECT_EQ(attrs->y_tensor_uid, K_BN_INF_TENSOR_Y_UID);
 }
 
 TEST_F(TestGraphDescriptorBatchnormInference, ComputeDataTypePreserved)
 {
-    auto xDesc = createFinalizedTensor(
-        K_TENSOR_X_UID,
-        {K_SPATIAL_DIMS[0], K_SPATIAL_DIMS[1], K_SPATIAL_DIMS[2], K_SPATIAL_DIMS[3]},
-        {K_SPATIAL_STRIDES[0], K_SPATIAL_STRIDES[1], K_SPATIAL_STRIDES[2], K_SPATIAL_STRIDES[3]});
-    auto meanDesc = createFinalizedTensor(
-        K_TENSOR_MEAN_UID,
-        {K_CHANNEL_DIMS[0], K_CHANNEL_DIMS[1], K_CHANNEL_DIMS[2], K_CHANNEL_DIMS[3]},
-        {K_CHANNEL_STRIDES[0], K_CHANNEL_STRIDES[1], K_CHANNEL_STRIDES[2], K_CHANNEL_STRIDES[3]});
-    auto invVarianceDesc = createFinalizedTensor(
-        K_TENSOR_INV_VARIANCE_UID,
-        {K_CHANNEL_DIMS[0], K_CHANNEL_DIMS[1], K_CHANNEL_DIMS[2], K_CHANNEL_DIMS[3]},
-        {K_CHANNEL_STRIDES[0], K_CHANNEL_STRIDES[1], K_CHANNEL_STRIDES[2], K_CHANNEL_STRIDES[3]});
-    auto scaleDesc = createFinalizedTensor(
-        K_TENSOR_SCALE_UID,
-        {K_CHANNEL_DIMS[0], K_CHANNEL_DIMS[1], K_CHANNEL_DIMS[2], K_CHANNEL_DIMS[3]},
-        {K_CHANNEL_STRIDES[0], K_CHANNEL_STRIDES[1], K_CHANNEL_STRIDES[2], K_CHANNEL_STRIDES[3]});
-    auto biasDesc = createFinalizedTensor(
-        K_TENSOR_BIAS_UID,
-        {K_CHANNEL_DIMS[0], K_CHANNEL_DIMS[1], K_CHANNEL_DIMS[2], K_CHANNEL_DIMS[3]},
-        {K_CHANNEL_STRIDES[0], K_CHANNEL_STRIDES[1], K_CHANNEL_STRIDES[2], K_CHANNEL_STRIDES[3]});
-    auto yDesc = createFinalizedTensor(
-        K_TENSOR_Y_UID,
-        {K_SPATIAL_DIMS[0], K_SPATIAL_DIMS[1], K_SPATIAL_DIMS[2], K_SPATIAL_DIMS[3]},
-        {K_SPATIAL_STRIDES[0], K_SPATIAL_STRIDES[1], K_SPATIAL_STRIDES[2], K_SPATIAL_STRIDES[3]});
+    auto xDesc = createFinalizedTensor(K_BN_INF_TENSOR_X_UID,
+                                       {K_BN_INF_SPATIAL_DIMS[0],
+                                        K_BN_INF_SPATIAL_DIMS[1],
+                                        K_BN_INF_SPATIAL_DIMS[2],
+                                        K_BN_INF_SPATIAL_DIMS[3]},
+                                       {K_BN_INF_SPATIAL_STRIDES[0],
+                                        K_BN_INF_SPATIAL_STRIDES[1],
+                                        K_BN_INF_SPATIAL_STRIDES[2],
+                                        K_BN_INF_SPATIAL_STRIDES[3]});
+    auto meanDesc = createFinalizedTensor(K_BN_INF_TENSOR_MEAN_UID,
+                                          {K_BN_INF_CHANNEL_DIMS[0],
+                                           K_BN_INF_CHANNEL_DIMS[1],
+                                           K_BN_INF_CHANNEL_DIMS[2],
+                                           K_BN_INF_CHANNEL_DIMS[3]},
+                                          {K_BN_INF_CHANNEL_STRIDES[0],
+                                           K_BN_INF_CHANNEL_STRIDES[1],
+                                           K_BN_INF_CHANNEL_STRIDES[2],
+                                           K_BN_INF_CHANNEL_STRIDES[3]});
+    auto invVarianceDesc = createFinalizedTensor(K_BN_INF_TENSOR_INV_VARIANCE_UID,
+                                                 {K_BN_INF_CHANNEL_DIMS[0],
+                                                  K_BN_INF_CHANNEL_DIMS[1],
+                                                  K_BN_INF_CHANNEL_DIMS[2],
+                                                  K_BN_INF_CHANNEL_DIMS[3]},
+                                                 {K_BN_INF_CHANNEL_STRIDES[0],
+                                                  K_BN_INF_CHANNEL_STRIDES[1],
+                                                  K_BN_INF_CHANNEL_STRIDES[2],
+                                                  K_BN_INF_CHANNEL_STRIDES[3]});
+    auto scaleDesc = createFinalizedTensor(K_BN_INF_TENSOR_SCALE_UID,
+                                           {K_BN_INF_CHANNEL_DIMS[0],
+                                            K_BN_INF_CHANNEL_DIMS[1],
+                                            K_BN_INF_CHANNEL_DIMS[2],
+                                            K_BN_INF_CHANNEL_DIMS[3]},
+                                           {K_BN_INF_CHANNEL_STRIDES[0],
+                                            K_BN_INF_CHANNEL_STRIDES[1],
+                                            K_BN_INF_CHANNEL_STRIDES[2],
+                                            K_BN_INF_CHANNEL_STRIDES[3]});
+    auto biasDesc = createFinalizedTensor(K_BN_INF_TENSOR_BIAS_UID,
+                                          {K_BN_INF_CHANNEL_DIMS[0],
+                                           K_BN_INF_CHANNEL_DIMS[1],
+                                           K_BN_INF_CHANNEL_DIMS[2],
+                                           K_BN_INF_CHANNEL_DIMS[3]},
+                                          {K_BN_INF_CHANNEL_STRIDES[0],
+                                           K_BN_INF_CHANNEL_STRIDES[1],
+                                           K_BN_INF_CHANNEL_STRIDES[2],
+                                           K_BN_INF_CHANNEL_STRIDES[3]});
+    auto yDesc = createFinalizedTensor(K_BN_INF_TENSOR_Y_UID,
+                                       {K_BN_INF_SPATIAL_DIMS[0],
+                                        K_BN_INF_SPATIAL_DIMS[1],
+                                        K_BN_INF_SPATIAL_DIMS[2],
+                                        K_BN_INF_SPATIAL_DIMS[3]},
+                                       {K_BN_INF_SPATIAL_STRIDES[0],
+                                        K_BN_INF_SPATIAL_STRIDES[1],
+                                        K_BN_INF_SPATIAL_STRIDES[2],
+                                        K_BN_INF_SPATIAL_STRIDES[3]});
     auto opDesc = createFinalizedBatchnormInferenceOp(xDesc.get(),
                                                       meanDesc.get(),
                                                       invVarianceDesc.get(),
@@ -244,30 +304,60 @@ TEST_F(TestGraphDescriptorBatchnormInference, ComputeDataTypePreserved)
 
 TEST_F(TestGraphDescriptorBatchnormInference, OperationNamePreservedInSerialization)
 {
-    auto xDesc = createFinalizedTensor(
-        K_TENSOR_X_UID,
-        {K_SPATIAL_DIMS[0], K_SPATIAL_DIMS[1], K_SPATIAL_DIMS[2], K_SPATIAL_DIMS[3]},
-        {K_SPATIAL_STRIDES[0], K_SPATIAL_STRIDES[1], K_SPATIAL_STRIDES[2], K_SPATIAL_STRIDES[3]});
-    auto meanDesc = createFinalizedTensor(
-        K_TENSOR_MEAN_UID,
-        {K_CHANNEL_DIMS[0], K_CHANNEL_DIMS[1], K_CHANNEL_DIMS[2], K_CHANNEL_DIMS[3]},
-        {K_CHANNEL_STRIDES[0], K_CHANNEL_STRIDES[1], K_CHANNEL_STRIDES[2], K_CHANNEL_STRIDES[3]});
-    auto invVarianceDesc = createFinalizedTensor(
-        K_TENSOR_INV_VARIANCE_UID,
-        {K_CHANNEL_DIMS[0], K_CHANNEL_DIMS[1], K_CHANNEL_DIMS[2], K_CHANNEL_DIMS[3]},
-        {K_CHANNEL_STRIDES[0], K_CHANNEL_STRIDES[1], K_CHANNEL_STRIDES[2], K_CHANNEL_STRIDES[3]});
-    auto scaleDesc = createFinalizedTensor(
-        K_TENSOR_SCALE_UID,
-        {K_CHANNEL_DIMS[0], K_CHANNEL_DIMS[1], K_CHANNEL_DIMS[2], K_CHANNEL_DIMS[3]},
-        {K_CHANNEL_STRIDES[0], K_CHANNEL_STRIDES[1], K_CHANNEL_STRIDES[2], K_CHANNEL_STRIDES[3]});
-    auto biasDesc = createFinalizedTensor(
-        K_TENSOR_BIAS_UID,
-        {K_CHANNEL_DIMS[0], K_CHANNEL_DIMS[1], K_CHANNEL_DIMS[2], K_CHANNEL_DIMS[3]},
-        {K_CHANNEL_STRIDES[0], K_CHANNEL_STRIDES[1], K_CHANNEL_STRIDES[2], K_CHANNEL_STRIDES[3]});
-    auto yDesc = createFinalizedTensor(
-        K_TENSOR_Y_UID,
-        {K_SPATIAL_DIMS[0], K_SPATIAL_DIMS[1], K_SPATIAL_DIMS[2], K_SPATIAL_DIMS[3]},
-        {K_SPATIAL_STRIDES[0], K_SPATIAL_STRIDES[1], K_SPATIAL_STRIDES[2], K_SPATIAL_STRIDES[3]});
+    auto xDesc = createFinalizedTensor(K_BN_INF_TENSOR_X_UID,
+                                       {K_BN_INF_SPATIAL_DIMS[0],
+                                        K_BN_INF_SPATIAL_DIMS[1],
+                                        K_BN_INF_SPATIAL_DIMS[2],
+                                        K_BN_INF_SPATIAL_DIMS[3]},
+                                       {K_BN_INF_SPATIAL_STRIDES[0],
+                                        K_BN_INF_SPATIAL_STRIDES[1],
+                                        K_BN_INF_SPATIAL_STRIDES[2],
+                                        K_BN_INF_SPATIAL_STRIDES[3]});
+    auto meanDesc = createFinalizedTensor(K_BN_INF_TENSOR_MEAN_UID,
+                                          {K_BN_INF_CHANNEL_DIMS[0],
+                                           K_BN_INF_CHANNEL_DIMS[1],
+                                           K_BN_INF_CHANNEL_DIMS[2],
+                                           K_BN_INF_CHANNEL_DIMS[3]},
+                                          {K_BN_INF_CHANNEL_STRIDES[0],
+                                           K_BN_INF_CHANNEL_STRIDES[1],
+                                           K_BN_INF_CHANNEL_STRIDES[2],
+                                           K_BN_INF_CHANNEL_STRIDES[3]});
+    auto invVarianceDesc = createFinalizedTensor(K_BN_INF_TENSOR_INV_VARIANCE_UID,
+                                                 {K_BN_INF_CHANNEL_DIMS[0],
+                                                  K_BN_INF_CHANNEL_DIMS[1],
+                                                  K_BN_INF_CHANNEL_DIMS[2],
+                                                  K_BN_INF_CHANNEL_DIMS[3]},
+                                                 {K_BN_INF_CHANNEL_STRIDES[0],
+                                                  K_BN_INF_CHANNEL_STRIDES[1],
+                                                  K_BN_INF_CHANNEL_STRIDES[2],
+                                                  K_BN_INF_CHANNEL_STRIDES[3]});
+    auto scaleDesc = createFinalizedTensor(K_BN_INF_TENSOR_SCALE_UID,
+                                           {K_BN_INF_CHANNEL_DIMS[0],
+                                            K_BN_INF_CHANNEL_DIMS[1],
+                                            K_BN_INF_CHANNEL_DIMS[2],
+                                            K_BN_INF_CHANNEL_DIMS[3]},
+                                           {K_BN_INF_CHANNEL_STRIDES[0],
+                                            K_BN_INF_CHANNEL_STRIDES[1],
+                                            K_BN_INF_CHANNEL_STRIDES[2],
+                                            K_BN_INF_CHANNEL_STRIDES[3]});
+    auto biasDesc = createFinalizedTensor(K_BN_INF_TENSOR_BIAS_UID,
+                                          {K_BN_INF_CHANNEL_DIMS[0],
+                                           K_BN_INF_CHANNEL_DIMS[1],
+                                           K_BN_INF_CHANNEL_DIMS[2],
+                                           K_BN_INF_CHANNEL_DIMS[3]},
+                                          {K_BN_INF_CHANNEL_STRIDES[0],
+                                           K_BN_INF_CHANNEL_STRIDES[1],
+                                           K_BN_INF_CHANNEL_STRIDES[2],
+                                           K_BN_INF_CHANNEL_STRIDES[3]});
+    auto yDesc = createFinalizedTensor(K_BN_INF_TENSOR_Y_UID,
+                                       {K_BN_INF_SPATIAL_DIMS[0],
+                                        K_BN_INF_SPATIAL_DIMS[1],
+                                        K_BN_INF_SPATIAL_DIMS[2],
+                                        K_BN_INF_SPATIAL_DIMS[3]},
+                                       {K_BN_INF_SPATIAL_STRIDES[0],
+                                        K_BN_INF_SPATIAL_STRIDES[1],
+                                        K_BN_INF_SPATIAL_STRIDES[2],
+                                        K_BN_INF_SPATIAL_STRIDES[3]});
     auto opDesc = createFinalizedBatchnormInferenceOp(xDesc.get(),
                                                       meanDesc.get(),
                                                       invVarianceDesc.get(),
@@ -296,30 +386,60 @@ TEST_F(TestGraphDescriptorBatchnormInference, OperationNamePreservedInSerializat
 
 TEST_F(TestGraphDescriptorBatchnormInference, OperationNameRoundTripThroughLifting)
 {
-    auto xDesc = createFinalizedTensor(
-        K_TENSOR_X_UID,
-        {K_SPATIAL_DIMS[0], K_SPATIAL_DIMS[1], K_SPATIAL_DIMS[2], K_SPATIAL_DIMS[3]},
-        {K_SPATIAL_STRIDES[0], K_SPATIAL_STRIDES[1], K_SPATIAL_STRIDES[2], K_SPATIAL_STRIDES[3]});
-    auto meanDesc = createFinalizedTensor(
-        K_TENSOR_MEAN_UID,
-        {K_CHANNEL_DIMS[0], K_CHANNEL_DIMS[1], K_CHANNEL_DIMS[2], K_CHANNEL_DIMS[3]},
-        {K_CHANNEL_STRIDES[0], K_CHANNEL_STRIDES[1], K_CHANNEL_STRIDES[2], K_CHANNEL_STRIDES[3]});
-    auto invVarianceDesc = createFinalizedTensor(
-        K_TENSOR_INV_VARIANCE_UID,
-        {K_CHANNEL_DIMS[0], K_CHANNEL_DIMS[1], K_CHANNEL_DIMS[2], K_CHANNEL_DIMS[3]},
-        {K_CHANNEL_STRIDES[0], K_CHANNEL_STRIDES[1], K_CHANNEL_STRIDES[2], K_CHANNEL_STRIDES[3]});
-    auto scaleDesc = createFinalizedTensor(
-        K_TENSOR_SCALE_UID,
-        {K_CHANNEL_DIMS[0], K_CHANNEL_DIMS[1], K_CHANNEL_DIMS[2], K_CHANNEL_DIMS[3]},
-        {K_CHANNEL_STRIDES[0], K_CHANNEL_STRIDES[1], K_CHANNEL_STRIDES[2], K_CHANNEL_STRIDES[3]});
-    auto biasDesc = createFinalizedTensor(
-        K_TENSOR_BIAS_UID,
-        {K_CHANNEL_DIMS[0], K_CHANNEL_DIMS[1], K_CHANNEL_DIMS[2], K_CHANNEL_DIMS[3]},
-        {K_CHANNEL_STRIDES[0], K_CHANNEL_STRIDES[1], K_CHANNEL_STRIDES[2], K_CHANNEL_STRIDES[3]});
-    auto yDesc = createFinalizedTensor(
-        K_TENSOR_Y_UID,
-        {K_SPATIAL_DIMS[0], K_SPATIAL_DIMS[1], K_SPATIAL_DIMS[2], K_SPATIAL_DIMS[3]},
-        {K_SPATIAL_STRIDES[0], K_SPATIAL_STRIDES[1], K_SPATIAL_STRIDES[2], K_SPATIAL_STRIDES[3]});
+    auto xDesc = createFinalizedTensor(K_BN_INF_TENSOR_X_UID,
+                                       {K_BN_INF_SPATIAL_DIMS[0],
+                                        K_BN_INF_SPATIAL_DIMS[1],
+                                        K_BN_INF_SPATIAL_DIMS[2],
+                                        K_BN_INF_SPATIAL_DIMS[3]},
+                                       {K_BN_INF_SPATIAL_STRIDES[0],
+                                        K_BN_INF_SPATIAL_STRIDES[1],
+                                        K_BN_INF_SPATIAL_STRIDES[2],
+                                        K_BN_INF_SPATIAL_STRIDES[3]});
+    auto meanDesc = createFinalizedTensor(K_BN_INF_TENSOR_MEAN_UID,
+                                          {K_BN_INF_CHANNEL_DIMS[0],
+                                           K_BN_INF_CHANNEL_DIMS[1],
+                                           K_BN_INF_CHANNEL_DIMS[2],
+                                           K_BN_INF_CHANNEL_DIMS[3]},
+                                          {K_BN_INF_CHANNEL_STRIDES[0],
+                                           K_BN_INF_CHANNEL_STRIDES[1],
+                                           K_BN_INF_CHANNEL_STRIDES[2],
+                                           K_BN_INF_CHANNEL_STRIDES[3]});
+    auto invVarianceDesc = createFinalizedTensor(K_BN_INF_TENSOR_INV_VARIANCE_UID,
+                                                 {K_BN_INF_CHANNEL_DIMS[0],
+                                                  K_BN_INF_CHANNEL_DIMS[1],
+                                                  K_BN_INF_CHANNEL_DIMS[2],
+                                                  K_BN_INF_CHANNEL_DIMS[3]},
+                                                 {K_BN_INF_CHANNEL_STRIDES[0],
+                                                  K_BN_INF_CHANNEL_STRIDES[1],
+                                                  K_BN_INF_CHANNEL_STRIDES[2],
+                                                  K_BN_INF_CHANNEL_STRIDES[3]});
+    auto scaleDesc = createFinalizedTensor(K_BN_INF_TENSOR_SCALE_UID,
+                                           {K_BN_INF_CHANNEL_DIMS[0],
+                                            K_BN_INF_CHANNEL_DIMS[1],
+                                            K_BN_INF_CHANNEL_DIMS[2],
+                                            K_BN_INF_CHANNEL_DIMS[3]},
+                                           {K_BN_INF_CHANNEL_STRIDES[0],
+                                            K_BN_INF_CHANNEL_STRIDES[1],
+                                            K_BN_INF_CHANNEL_STRIDES[2],
+                                            K_BN_INF_CHANNEL_STRIDES[3]});
+    auto biasDesc = createFinalizedTensor(K_BN_INF_TENSOR_BIAS_UID,
+                                          {K_BN_INF_CHANNEL_DIMS[0],
+                                           K_BN_INF_CHANNEL_DIMS[1],
+                                           K_BN_INF_CHANNEL_DIMS[2],
+                                           K_BN_INF_CHANNEL_DIMS[3]},
+                                          {K_BN_INF_CHANNEL_STRIDES[0],
+                                           K_BN_INF_CHANNEL_STRIDES[1],
+                                           K_BN_INF_CHANNEL_STRIDES[2],
+                                           K_BN_INF_CHANNEL_STRIDES[3]});
+    auto yDesc = createFinalizedTensor(K_BN_INF_TENSOR_Y_UID,
+                                       {K_BN_INF_SPATIAL_DIMS[0],
+                                        K_BN_INF_SPATIAL_DIMS[1],
+                                        K_BN_INF_SPATIAL_DIMS[2],
+                                        K_BN_INF_SPATIAL_DIMS[3]},
+                                       {K_BN_INF_SPATIAL_STRIDES[0],
+                                        K_BN_INF_SPATIAL_STRIDES[1],
+                                        K_BN_INF_SPATIAL_STRIDES[2],
+                                        K_BN_INF_SPATIAL_STRIDES[3]});
     auto opDesc = createFinalizedBatchnormInferenceOp(xDesc.get(),
                                                       meanDesc.get(),
                                                       invVarianceDesc.get(),
@@ -366,12 +486,12 @@ TEST_F(TestGraphDescriptorBatchnormInference, OperationNameRoundTripThroughLifti
     // Verify all tensor UIDs survived
     auto* attrs = graphT->nodes[0]->attributes.AsBatchnormInferenceAttributes();
     ASSERT_NE(attrs, nullptr);
-    EXPECT_EQ(attrs->x_tensor_uid, K_TENSOR_X_UID);
-    EXPECT_EQ(attrs->mean_tensor_uid, K_TENSOR_MEAN_UID);
-    EXPECT_EQ(attrs->inv_variance_tensor_uid, K_TENSOR_INV_VARIANCE_UID);
-    EXPECT_EQ(attrs->scale_tensor_uid, K_TENSOR_SCALE_UID);
-    EXPECT_EQ(attrs->bias_tensor_uid, K_TENSOR_BIAS_UID);
-    EXPECT_EQ(attrs->y_tensor_uid, K_TENSOR_Y_UID);
+    EXPECT_EQ(attrs->x_tensor_uid, K_BN_INF_TENSOR_X_UID);
+    EXPECT_EQ(attrs->mean_tensor_uid, K_BN_INF_TENSOR_MEAN_UID);
+    EXPECT_EQ(attrs->inv_variance_tensor_uid, K_BN_INF_TENSOR_INV_VARIANCE_UID);
+    EXPECT_EQ(attrs->scale_tensor_uid, K_BN_INF_TENSOR_SCALE_UID);
+    EXPECT_EQ(attrs->bias_tensor_uid, K_BN_INF_TENSOR_BIAS_UID);
+    EXPECT_EQ(attrs->y_tensor_uid, K_BN_INF_TENSOR_Y_UID);
 }
 
 } // namespace
