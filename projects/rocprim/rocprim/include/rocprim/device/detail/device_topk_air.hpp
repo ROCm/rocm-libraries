@@ -25,6 +25,7 @@
 #include "../../block/block_scan.hpp"
 #include "../../block/block_store_func.hpp"
 #include "../../detail/temp_storage.hpp"
+#include "../../intrinsics.hpp"
 #include "../config_types.hpp"
 #include "../device_topk_config.hpp"
 #include "../device_transform.hpp"
@@ -409,14 +410,14 @@ struct device_topk_air_impl
         for(; histo_offset + block_size <= size; histo_offset += block_size)
         {
             const auto idx = histo_offset + thread_id;
-            ::atomicAdd(dist + idx, src[idx]);
+            ::rocprim::detail::atomic_add(dist + idx, src[idx]);
         }
 
         // Finish up with guarded merging if necessary
         if((size % block_size != 0) && (histo_offset + thread_id < size))
         {
             const auto idx = histo_offset + thread_id;
-            ::atomicAdd(dist + idx, src[idx]);
+            ::rocprim::detail::atomic_add(dist + idx, src[idx]);
         }
     }
 
@@ -734,7 +735,8 @@ struct device_topk_air_impl
                         {
                             // Write this into output buffer
                             // TODO: use thread counter
-                            const auto output_pos   = ::atomicAdd(&p_global_storage->output_pos, 1);
+                            const auto output_pos
+                                = ::rocprim::detail::atomic_add(&p_global_storage->output_pos, 1);
                             keys_output[output_pos] = key;
                             if constexpr(output_value)
                             {
@@ -754,7 +756,8 @@ struct device_topk_air_impl
             if(store_adaptive && thread_out_buf_size)
             {
                 auto adaptive_buf_outpos
-                    = ::atomicAdd(&p_global_storage->adaptive_buf_outpos, thread_out_buf_size);
+                    = ::rocprim::detail::atomic_add(&p_global_storage->adaptive_buf_outpos,
+                                                    thread_out_buf_size);
                 ROCPRIM_UNROLL
                 for(decltype(thread_out_buf_size) i = 0; i < items_per_thread; ++i)
                 {
@@ -846,14 +849,15 @@ struct device_topk_air_impl
             {
                 if(i < thread_counter_size)
                 {
-                    ::atomicAdd(&storage.block_local_histogram[thread_digit[i]], thread_counter[i]);
+                    ::rocprim::detail::atomic_add(&storage.block_local_histogram[thread_digit[i]],
+                                                  thread_counter[i]);
                 }
             }
         }
         else
         {
-            auto record_to_histogram_fn
-                = [&](auto digit) { ::atomicAdd(&storage.block_local_histogram[digit], 1); };
+            auto record_to_histogram_fn = [&](auto digit)
+            { ::rocprim::detail::atomic_add(&storage.block_local_histogram[digit], 1); };
             thread_histogram_and_filter_prev<Iteration>(p_global_storage,
                                                         in_idx_buf,
                                                         out_idx_buf,
@@ -1011,6 +1015,16 @@ struct device_topk_air_impl
         // Make sure this block has completed writing data into global histogram
         ::rocprim::syncthreads();
 
+        // Above this line, there are atomic writes to global memory.
+        // Below this line, there are direct loads from global memory.
+        // This fence is needed to ensure the correct visibility for subsequent loads
+        // from global memory, so that we read the correct values.
+        // Because direct loads from global memory go through the cache, this fence
+        // acts as a cache invalidation.
+        // I'm not sure why this works without the fence on other architectures, but on
+        // gfx950 this is strictly required. It may have a more strict caching strategy.
+        ::rocprim::detail::atomic_fence_acquire_order_only();
+
         // Temporary fix for `__syncthreads_or`, which doesn't work when compiling with "-O0"
         // So we use shared memory for broadcasting
         auto syncdevice_and_is_last_block = [&]()
@@ -1020,7 +1034,7 @@ struct device_topk_air_impl
             if(thread_id == 0)
             {
                 const auto local_num_finished_blocks
-                    = ::atomicAdd(&p_global_storage->num_finished_blocks, 1);
+                    = ::rocprim::detail::atomic_add(&p_global_storage->num_finished_blocks, 1);
                 is_last_block = local_num_finished_blocks == (gridDim.x - 1);
             }
             // By using __syncthreads_or, all threads will communicate with each other
@@ -1030,11 +1044,16 @@ struct device_topk_air_impl
             if(thread_id == 0)
             {
                 const auto local_num_finished_blocks
-                    = ::atomicAdd(&p_global_storage->num_finished_blocks, 1);
+                    = ::rocprim::detail::atomic_add(&p_global_storage->num_finished_blocks, 1);
                 storage.union_data.is_last_block = local_num_finished_blocks == (gridDim.x - 1);
             }
             ::rocprim::syncthreads();
-            return storage.union_data.is_last_block;
+            const auto x = storage.union_data.is_last_block;
+            // The shared memory will be used by storage.union_data.scan
+            // So we need to make sure all write operations to this memory
+            // to be finished
+            ::rocprim::syncthreads();
+            return x;
 #endif
         };
 
@@ -1047,12 +1066,17 @@ struct device_topk_air_impl
             {
                 if(thread_id == 0)
                 {
+                    // Direct load of `p_global_storage->adaptive_buf_outpos` is ensured by the fence.
+                    // Direct store of `p_global_storage->adaptive_buf_size` doesn't need to be ensured
+                    // by a fence since, we don't read it later in this kernel.
                     p_global_storage->adaptive_buf_size = p_global_storage->adaptive_buf_outpos;
                 }
             }
 
             histogram_t<bins_per_thread> thread_bins;
             // Load data into register
+            // `block_load_direct_blocked` calls direct loads from the `p_global_storage->histogram`
+            // A fence is added to ensure that the cache is refreshed
             block_load_direct_blocked(thread_id,
                                       p_global_storage->histogram,
                                       thread_bins,
@@ -1066,6 +1090,8 @@ struct device_topk_air_impl
                                           storage.union_data.scan,
                                           ::rocprim::plus<SizeOut>{});
             // Store data into shared memory
+            // `storage.block_local_histogram` is not in the storage.union,
+            // so there is no conflict, we don't need a `syncthreads` here.
             block_store_direct_blocked(thread_id,
                                        storage.block_local_histogram,
                                        thread_bins,
@@ -1152,12 +1178,16 @@ struct device_topk_air_impl
                 [&](const auto i)
                 { digits[i] = extract_digit_of_cur_iteration<i>(key, decomposer); });
 
-            // Only check the iteration before last iteration
-            if(load_adaptive
-               && !equal_last_n_bits(chosen_bins.get(last_iteration - 1),
-                                     digits[last_iteration - 1],
-                                     bits_per_iteration))
+            // last_iteration could be 0, which invalidates `last_iteration - 1`
+            if(last_iteration == 0)
             {
+                is_candidate_in_prev_iteration = true;
+            }
+            else if(load_adaptive
+                    && !equal_last_n_bits(chosen_bins.get(last_iteration - 1),
+                                          digits[last_iteration - 1],
+                                          bits_per_iteration))
+            { // Only check the iteration before last iteration
                 is_candidate_in_prev_iteration = false;
             }
             else
@@ -1205,10 +1235,12 @@ struct device_topk_air_impl
             }
             else if(is_candidate_in_prev_iteration && !stopped
                     && equal_last_n_bits(digits[last_iteration], last_chosed_bin, cur_bits)
-                    && ::atomicAdd(&p_global_storage->last_output_pos, 1) < last_k)
+                    && ::rocprim::detail::atomic_add(&p_global_storage->last_output_pos, 1)
+                           < last_k)
             { // If not stopped, we need to check how many items in the pivot bin should we
                 // Write to the output
-                const auto output_pos   = ::atomicAdd(&p_global_storage->output_pos, 1);
+                const auto output_pos
+                    = ::rocprim::detail::atomic_add(&p_global_storage->output_pos, 1);
                 keys_output[output_pos] = key;
                 if constexpr(output_value)
                 {
