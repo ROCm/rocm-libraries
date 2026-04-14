@@ -52,6 +52,15 @@ void print_array(T* array, int nrows, int ncols, int ld, std::string str = "arra
 
 #include "clientcommon.hpp"
 
+#if !defined(__HIP_PLATFORM_HCC__) && !defined(__HIP_PLATFORM_AMD__)
+static bool test_left_eigenvectors
+    = false; // Computing left eigenvectors is not supported in cuSOLVER.
+#else
+static bool test_left_eigenvectors
+    = std::getenv("HIPSOLVER_TEST_GEEV_LEFT_EIGENVECTORS") != nullptr ? true : false;
+#endif
+static bool test_right_eigenvectors = true;
+
 template <testAPI_t API, typename I, typename SIZE, typename Td, typename INTd, typename Th>
 void geev_checkBadArgs(const hipsolverHandle_t   handle,
                        const hipsolverDnParams_t params,
@@ -401,21 +410,21 @@ void testing_geev_bad_arg()
         CHECK_HIP_ERROR(dInfo.memcheck());
 
         SIZE size_dW, size_hW;
-        hipsolver_geev_bufferSize(API,
-                                  handle,
-                                  params,
-                                  jobvl,
-                                  jobvr,
-                                  n,
-                                  dA.data(),
-                                  lda,
-                                  dW.data(),
-                                  dVL.data(),
-                                  ldvl,
-                                  dVR.data(),
-                                  ldvr,
-                                  &size_dW,
-                                  &size_hW);
+        CHECK_ROCBLAS_ERROR(hipsolver_geev_bufferSize(API,
+                                                      handle,
+                                                      params,
+                                                      jobvl,
+                                                      jobvr,
+                                                      n,
+                                                      dA.data(),
+                                                      lda,
+                                                      dW.data(),
+                                                      dVL.data(),
+                                                      ldvl,
+                                                      dVR.data(),
+                                                      ldvr,
+                                                      &size_dW,
+                                                      &size_hW));
         host_strided_batch_vector<T>   hWork(size_hW, 1, size_hW, 1);
         device_strided_batch_vector<T> dWork(size_dW, 1, size_dW, 1);
         if(size_dW)
@@ -455,42 +464,19 @@ void geev_initData(const hipsolverHandle_t   handle,
         // TODO: Add option to create defective matrices.
 
         // Create a (non-symmetric) Sylvester-Kac/Clement matrix.  For a given
-        // dimension `n`, the spectrum of hA[0] is composed of `n + 1` distinct
-        // integers:
+        // dimension `n`, the spectrum of hA[0] is composed of the following `n`
+        // distinct integers:
         //
-        //    -n, -n + 2, -n + 4, ..., n - 2, n.
+        //    -(n-1), -(n-1) + 2, -(n-1) + 4, ..., (n-1) - 2, (n-1).
         //
-        /* for(int i = 0; i < n; ++i) */
-        /* { */
-        /*     for(int j = 0; j < n; ++j) */
-        /*     { */
-        /*         if(i == j + 1) */
-        /*         { */
-        /*             hA[0][i + j * lda] = T(n - i); */
-        /*             hA[0][j + i * lda] = T(i); */
-        /*         } */
-        /*         else */
-        /*         { */
-        /*             hA[0][i + j * lda] = T(0); */
-        /*         } */
-        /*     } */
-        /* } */
-
-        // Temporary: Create a symmetric Clement matrix to simplify testing.
-        //
-        // The main reason to rely on the symmetric version of the Clement
-        // matrices is to guarantee that computed eigenvalues will be real
-        // (numerically) for all relevant test sizes; this will be removed in
-        // favor of the general (non-symmetric) Clement matrices when the test
-        // routine is complete.
         for(int i = 0; i < n; ++i)
         {
             for(int j = 0; j < n; ++j)
             {
                 if(i == j + 1)
                 {
-                    hA[0][i + j * lda] = std::sqrt(i * (n - i));
-                    hA[0][j + i * lda] = std::sqrt(i * (n - i));
+                    hA[0][i + j * lda] = T(n - i);
+                    hA[0][j + i * lda] = T(i);
                 }
                 else
                 {
@@ -498,6 +484,29 @@ void geev_initData(const hipsolverHandle_t   handle,
                 }
             }
         }
+
+        /* // Temporary: Create a symmetric Clement matrix to simplify testing. */
+        /* // */
+        /* // The main reason to rely on the symmetric version of the Clement */
+        /* // matrices is to guarantee that computed eigenvalues will be real */
+        /* // (numerically) for all relevant test sizes; this will be removed in */
+        /* // favor of the general (non-symmetric) Clement matrices when the test */
+        /* // routine is complete. */
+        /* for(int i = 0; i < n; ++i) */
+        /* { */
+        /*     for(int j = 0; j < n; ++j) */
+        /*     { */
+        /*         if(i == j + 1) */
+        /*         { */
+        /*             hA[0][i + j * lda] = std::sqrt(i * (n - i)); */
+        /*             hA[0][j + i * lda] = std::sqrt(i * (n - i)); */
+        /*         } */
+        /*         else */
+        /*         { */
+        /*             hA[0][i + j * lda] = T(0); */
+        /*         } */
+        /*     } */
+        /* } */
         /* print_array(hA[0], n, n, lda, "hA[0] = "); */
     }
 
@@ -505,7 +514,6 @@ void geev_initData(const hipsolverHandle_t   handle,
     {
         // now copy data to the GPU
         CHECK_HIP_ERROR(dA.transfer_from(hA));
-        CHECK_HIP_ERROR(hipDeviceSynchronize());
     }
 }
 
@@ -553,20 +561,22 @@ void geev_getError(const hipsolverHandle_t   handle,
                    double*                   max_err)
 {
     // Initialize extra type used to simplify testing when type `T` is real.
-    using CT
-        = std::conditional_t<std::is_same_v<T, float>,
-                             hipFloatComplex,
-                             std::conditional_t<std::is_same_v<T, double>, hipDoubleComplex, T>>;
+    using CT = std::conditional_t<
+        std::is_same_v<T, float>,
+        hipsolverComplex,
+        std::conditional_t<std::is_same_v<T, double>, hipsolverDoubleComplex, T>>;
 
     // Initialize variables used in 2nd run.
-    bool               vl_2nd_run    = true;
-    bool               vr_2nd_run    = true;
-    hipsolverEigMode_t jobvl_2nd_run = HIPSOLVER_EIG_MODE_VECTOR;
-    hipsolverEigMode_t jobvr_2nd_run = HIPSOLVER_EIG_MODE_VECTOR;
-    I                  ldvl_2nd_run  = n;
-    I                  ldvr_2nd_run  = n;
-    I                  ldvl_{ldvl};
-    I                  ldvr_{ldvr};
+    bool               vl_2nd_run = test_left_eigenvectors;
+    bool               vr_2nd_run = test_right_eigenvectors;
+    hipsolverEigMode_t jobvl_2nd_run
+        = test_left_eigenvectors ? HIPSOLVER_EIG_MODE_VECTOR : HIPSOLVER_EIG_MODE_NOVECTOR;
+    hipsolverEigMode_t jobvr_2nd_run
+        = test_right_eigenvectors ? HIPSOLVER_EIG_MODE_VECTOR : HIPSOLVER_EIG_MODE_NOVECTOR;
+    I ldvl_2nd_run = n;
+    I ldvr_2nd_run = n;
+    I ldvl_{ldvl};
+    I ldvr_{ldvr};
 
     // input data initialization
     geev_initData<true, true, T>(handle, params, n, dA, lda, hA);
@@ -677,114 +687,208 @@ void geev_getError(const hipsolverHandle_t   handle,
     //
     double err{};
     double normA = snorm('F', n, n, hA[0], lda);
-    T      alpha, beta;
-    T*     ReWRes = hWRes[0];
-    T*     ImWRes = hWRes[0] + n;
+    CT     alpha, beta;
 
-    for(int j = 0; j < n; ++j)
+    T*  ReWRes = hWRes[0];
+    T*  ImWRes = hWRes[0] + n;
+    CT* A      = hCA[0];
+    CT* D      = hCD[0];
+    CT* VR     = hVR[0];
+    CT* VL     = hVL[0];
+    CT* Err    = hCErr[0];
+    if constexpr(!is_complex<T>)
     {
-        for(int i = 0; i < n; ++i)
+        T* ReW = hWRes[0];
+        T* ImW = hWRes[0] + n;
+        T  imag_wij{}, real_wij{};
+        CT wij{}, vij{}, lij{};
+
+        for(int j = 0; j < n; ++j)
         {
-            if(i == j)
+            real_wij  = ReW[j];
+            imag_wij  = ImW[j];
+            auto VRij = [ld = ldvr_, V = hVRRes[0]](I i, I j) -> T { return V[i + j * ld]; };
+            auto VLij = [ld = ldvl_, V = hVLRes[0]](I i, I j) -> T { return V[i + j * ld]; };
+            for(int i = 0; i < n; ++i)
             {
-                hD[0][i + j * n] = hWRes[0][i];
-            }
-            else
-            {
-                hD[0][i + j * n] = T(0);
+                A[i + j * lda] = {hA[0][i + j * lda], 0};
+
+                if(i == j)
+                {
+                    D[i + j * n] = {real_wij, imag_wij};
+                }
+                else
+                {
+                    D[i + j * n] = CT(0);
+                }
+
+                if(imag_wij > 0)
+                {
+                    if(test_right_eigenvectors)
+                    {
+                        vij               = {VRij(i, j), VRij(i, j + 1)};
+                        VR[i + j * ldvr_] = vij;
+                        /* std::cout << "vij+ = " << vij << std::endl; */
+                    }
+
+                    if(test_left_eigenvectors)
+                    {
+                        lij               = {VLij(i, j), VLij(i, j + 1)};
+                        VL[i + j * ldvl_] = lij;
+                        /* std::cout << "lij+ = " << lij << std::endl; */
+                    }
+                }
+                else if(imag_wij < 0)
+                {
+                    if(test_right_eigenvectors)
+                    {
+                        vij               = {VRij(i, j - 1), -VRij(i, j)};
+                        VR[i + j * ldvr_] = vij;
+                        /* std::cout << "vij- = " << vij << std::endl; */
+                    }
+
+                    if(test_left_eigenvectors)
+                    {
+                        lij               = {VLij(i, j - 1), -VLij(i, j)};
+                        VL[i + j * ldvl_] = lij;
+                        /* std::cout << "lij- = " << lij << std::endl; */
+                    }
+                }
+                else
+                {
+                    if(test_right_eigenvectors)
+                    {
+                        vij               = {VRij(i, j), 0};
+                        VR[i + j * ldvr_] = vij;
+                    }
+
+                    if(test_left_eigenvectors)
+                    {
+                        lij               = {VLij(i, j), 0};
+                        VL[i + j * ldvl_] = lij;
+                    }
+                }
             }
         }
     }
+    else // is_complex<T> == true
+    {
+        for(int j = 0; j < n; ++j)
+        {
+            for(int i = 0; i < n; ++i)
+            {
+                if(i == j)
+                {
+                    D[i + j * n] = hWRes[0][j];
+                }
+                else
+                {
+                    D[i + j * n] = CT(0);
+                }
+            }
+        }
+        A  = hA[0];
+        VR = hVRRes[0];
+        VL = hVLRes[0];
+    }
+    /* print_array(D, n, n, n, "D = "); */
+    /* print_array(VL, n, n, ldvl_, "VL = "); */
 
     // [Not implemented:] 1. Check if eigenvalues computed with different parameters match.
 
     // 2a. If computing left eigenvectors: check if ||VL_i|| == 1, for 0 <= i < n, and if entry
     // with largest absolute value of VL is real.
-    if(jobvl != HIPSOLVER_EIG_MODE_NOVECTOR)
+    if(test_left_eigenvectors && (jobvl != HIPSOLVER_EIG_MODE_NOVECTOR))
     {
+        for(int j = 0; j < n; ++j)
+        {
+            auto   VLij    = [ld = ldvl_, V = VL](I i, I j) -> CT { return V[i + j * ld]; };
+            double norm    = 0.;
+            double abs_max = 0.;
+            I      imax    = I(0);
+            for(int i = 0; i < n; ++i)
+            {
+                auto vij = VLij(i, j);
+                norm += std::norm<double>({vij.real(), vij.imag()});
+                if(std::abs(VLij(i, j)) >= abs_max)
+                {
+                    imax    = i;
+                    abs_max = std::abs(VLij(i, j));
+                }
+            }
+            err      = (std::sqrt(norm) - 1.) / normA;
+            *max_err = *max_err < err ? err : *max_err;
+
+            if(std::abs(VLij(imax, j).imag()) > 0)
+            {
+                *max_err += 1.;
+            }
+        }
     }
 
     // 2b. If computing right eigenvectors: check if ||VR_i|| == 1, for 0 <= i < n, and if entry
     // with largest absolute value of VR is real.
-    if(jobvr != HIPSOLVER_EIG_MODE_NOVECTOR)
+    if(test_right_eigenvectors && (jobvr != HIPSOLVER_EIG_MODE_NOVECTOR))
     {
+        for(int j = 0; j < n; ++j)
+        {
+            auto   VRij    = [ld = ldvr_, V = VR](I i, I j) -> CT { return V[i + j * ld]; };
+            double norm    = 0.;
+            double abs_max = 0.;
+            I      imax    = I(0);
+            for(int i = 0; i < n; ++i)
+            {
+                auto vij = VRij(i, j);
+                norm += std::norm<double>({vij.real(), vij.imag()});
+                if(std::abs(VRij(i, j)) >= abs_max)
+                {
+                    imax    = i;
+                    abs_max = std::abs(VRij(i, j));
+                }
+            }
+            err      = (std::sqrt(norm) - 1.) / normA;
+            *max_err = *max_err < err ? err : *max_err;
+
+            if(std::abs(VRij(imax, j).imag()) > 0)
+            {
+                *max_err += 1.;
+            }
+        }
     }
 
     // 3a. Check reconstruction with right eigenvectors (VR): ||A*VR - VR*W||/|A|| <= n * eps
-    alpha = T(1);
-    beta  = T(0);
-    cpu_gemm(HIPSOLVER_OP_N,
-             HIPSOLVER_OP_N,
-             n,
-             n,
-             n,
-             alpha,
-             hA[0],
-             lda,
-             hVRRes[0],
-             ldvr_,
-             beta,
-             hErr[0],
-             n);
+    if(test_right_eigenvectors && (jobvr != HIPSOLVER_EIG_MODE_NOVECTOR))
+    {
+        alpha = T(1);
+        beta  = T(0);
+        cpu_gemm(HIPSOLVER_OP_N, HIPSOLVER_OP_N, n, n, n, alpha, A, lda, VR, ldvr_, beta, Err, n);
 
-    alpha = T(-1);
-    beta  = T(1);
-    cpu_gemm(HIPSOLVER_OP_N,
-             HIPSOLVER_OP_N,
-             n,
-             n,
-             n,
-             alpha,
-             hVRRes[0],
-             ldvr_,
-             hD[0],
-             n,
-             beta,
-             hErr[0],
-             n);
+        alpha = T(-1);
+        beta  = T(1);
+        cpu_gemm(HIPSOLVER_OP_N, HIPSOLVER_OP_N, n, n, n, alpha, VR, ldvr_, D, n, beta, Err, n);
 
-    err = snorm('F', n, n, hErr[0], n) / normA;
-    /* std::cout << "err (VR) = " << err << std::endl; */
+        err = snorm('F', n, n, Err, n) / normA;
+        /* std::cout << "err (VR) = " << err << std::endl; */
 
-    *max_err = *max_err < err ? err : *max_err;
+        *max_err = *max_err < err ? err : *max_err;
+    }
 
     // 3b. Check reconstruction with left eigenvectors (VL): ||A'*VL - VL*W||/||A|| <= n * eps
-    alpha = T(1);
-    beta  = T(0);
-    cpu_gemm(HIPSOLVER_OP_T,
-             HIPSOLVER_OP_N,
-             n,
-             n,
-             n,
-             alpha,
-             hA[0],
-             lda,
-             hVLRes[0],
-             ldvl_,
-             beta,
-             hErr[0],
-             n);
+    if(test_left_eigenvectors && (jobvl != HIPSOLVER_EIG_MODE_NOVECTOR))
+    {
+        alpha = T(1);
+        beta  = T(0);
+        cpu_gemm(HIPSOLVER_OP_T, HIPSOLVER_OP_N, n, n, n, alpha, A, lda, VL, ldvl_, beta, Err, n);
 
-    alpha = T(-1);
-    beta  = T(1);
-    cpu_gemm(HIPSOLVER_OP_N,
-             HIPSOLVER_OP_N,
-             n,
-             n,
-             n,
-             alpha,
-             hVLRes[0],
-             ldvl_,
-             hD[0],
-             n,
-             beta,
-             hErr[0],
-             n);
+        alpha = T(-1);
+        beta  = T(1);
+        cpu_gemm(HIPSOLVER_OP_N, HIPSOLVER_OP_N, n, n, n, alpha, VL, ldvl_, D, n, beta, Err, n);
 
-    err = snorm('F', n, n, hErr[0], n) / normA;
-    /* std::cout << "err (VL) = " << err << std::endl; */
+        err = snorm('F', n, n, Err, n) / normA;
+        /* std::cout << "err (VL) = " << err << std::endl; */
 
-    *max_err = *max_err < err ? err : *max_err;
+        *max_err = *max_err < err ? err : *max_err;
+    }
 
     // TODO
     // Save different errors in different variables instead of accumulating everything in `max_err`.
@@ -889,10 +993,10 @@ template <testAPI_t API, bool BATCHED, bool STRIDED, typename T, typename I, typ
 void testing_geev(Arguments& argus)
 {
     // Initialize extra type used to simplify testing when type `T` is real.
-    using CT
-        = std::conditional_t<std::is_same_v<T, float>,
-                             hipFloatComplex,
-                             std::conditional_t<std::is_same_v<T, double>, hipDoubleComplex, T>>;
+    using CT = std::conditional_t<
+        std::is_same_v<T, float>,
+        hipsolverComplex,
+        std::conditional_t<std::is_same_v<T, double>, hipsolverDoubleComplex, T>>;
 
     // get arguments
     hipsolver_local_handle handle;
@@ -971,21 +1075,22 @@ void testing_geev(Arguments& argus)
     //
     // Note: current test implementation requires the computation of left and right eigenvectors.
     SIZE size_dW, size_hW;
-    hipsolver_geev_bufferSize(API,
-                              handle,
-                              params,
-                              HIPSOLVER_EIG_MODE_VECTOR,
-                              HIPSOLVER_EIG_MODE_VECTOR,
-                              n,
-                              (T*)nullptr,
-                              lda,
-                              (T*)nullptr,
-                              (T*)nullptr,
-                              std::max(ldvl, n),
-                              (T*)nullptr,
-                              std::max(ldvr, n),
-                              &size_dW,
-                              &size_hW);
+    CHECK_ROCBLAS_ERROR(
+        hipsolver_geev_bufferSize(API,
+                                  handle,
+                                  params,
+                                  test_left_eigenvectors ? HIPSOLVER_EIG_MODE_VECTOR : jobvl,
+                                  test_right_eigenvectors ? HIPSOLVER_EIG_MODE_VECTOR : jobvr,
+                                  n,
+                                  (T*)nullptr,
+                                  lda,
+                                  (T*)nullptr,
+                                  (T*)nullptr,
+                                  std::max(ldvl, n),
+                                  (T*)nullptr,
+                                  std::max(ldvr, n),
+                                  &size_dW,
+                                  &size_hW));
 
     if(argus.mem_query)
     {
