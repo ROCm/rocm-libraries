@@ -86,6 +86,12 @@ target_link_libraries(generate_resource_spec PRIVATE hip::host)
 # code it will give an unused-command-line-argument warning.
 target_compile_options(generate_resource_spec PRIVATE "-Wno-unused-command-line-argument")
 
+# Include path to generated header test_utils_controller.hpp
+target_include_directories(hipcub
+  INTERFACE
+  $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/test/hipcub>
+)
+
 # hipCUB tests
 add_subdirectory(hipcub)
 
@@ -195,4 +201,31 @@ install(
     TARGETS generate_resource_spec
     DESTINATION "${CMAKE_INSTALL_BINDIR}/${PROJECT_NAME}"
     COMPONENT tests
+)
+
+# Test control file setup
+# Set the name of the test control file
+set(TEST_CONTROL_FILE_NAME "control.txt")
+# Set the paths to the directories containing the control file
+set(TEST_CONTROL_FILE_SOURCE_PATH "${CMAKE_SOURCE_DIR}/test")
+set(TEST_CONTROL_FILE_BUILD_PATH "${CMAKE_BINARY_DIR}/test")
+set(TEST_CONTROL_FILE_INSTALL_PATH "${CMAKE_INSTALL_BINDIR}/${PROJECT_NAME}")
+
+# Copy control file from source to build directory if it has changed.
+add_custom_target(copy_control_file_changes
+  ALL
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different "${TEST_CONTROL_FILE_SOURCE_PATH}/${TEST_CONTROL_FILE_NAME}" "${TEST_CONTROL_FILE_BUILD_PATH}/${TEST_CONTROL_FILE_NAME}"
+)
+add_dependencies(hipcub copy_control_file_changes)
+
+configure_file(
+  "${CMAKE_CURRENT_SOURCE_DIR}/hipcub/test_utils_controller.hpp.in"
+  "${CMAKE_CURRENT_BINARY_DIR}/hipcub/test_utils_controller.hpp"
+  @ONLY
+)
+
+rocm_install(
+  FILES "${TEST_CONTROL_FILE_BUILD_PATH}/control.txt"
+  DESTINATION "${TEST_CONTROL_FILE_INSTALL_PATH}"
+  COMPONENT tests
 )

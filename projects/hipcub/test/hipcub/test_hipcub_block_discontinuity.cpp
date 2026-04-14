@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #include "common_test_header.hpp"
+#include "test_utils_controller.hpp"
 
 // hipcub API
 #include <hipcub/block/block_discontinuity.hpp>
@@ -38,7 +39,7 @@ struct params
 };
 
 template<class Params>
-class HipcubBlockDiscontinuity : public ::testing::Test
+class HipcubBlockDiscontinuity : public test_controller::ControlledTest
 {
 public:
     using params = Params;
@@ -156,6 +157,8 @@ TYPED_TEST(HipcubBlockDiscontinuity, FlagHeads)
     constexpr size_t items_per_block  = block_size * items_per_thread;
     const size_t     size             = items_per_block * 2048;
     constexpr size_t grid_size        = size / items_per_block;
+
+	CHECK_SIZE_ENABLEMENT(size);
 
     // Given block size not supported
     if(block_size > test_utils::get_max_block_size())
@@ -294,6 +297,8 @@ TYPED_TEST(HipcubBlockDiscontinuity, FlagTails)
     constexpr size_t items_per_block  = block_size * items_per_thread;
     const size_t     size             = items_per_block * 2048;
     constexpr size_t grid_size        = size / items_per_block;
+
+	CHECK_SIZE_ENABLEMENT(size);
 
     // Given block size not supported
     if(block_size > test_utils::get_max_block_size())
@@ -461,6 +466,8 @@ TYPED_TEST(HipcubBlockDiscontinuity, FlagHeadsAndTails)
     constexpr size_t items_per_block  = block_size * items_per_thread;
     const size_t     size             = items_per_block * 2048;
     constexpr size_t grid_size        = size / items_per_block;
+
+	CHECK_SIZE_ENABLEMENT(size);
 
     // Given block size not supported
     if(block_size > test_utils::get_max_block_size())

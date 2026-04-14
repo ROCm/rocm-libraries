@@ -28,6 +28,7 @@
  ******************************************************************************/
 
 #include "common_test_header.hpp"
+#include "test_utils_controller.hpp"
 
 // required test headers
 #include "test_utils_types.hpp"

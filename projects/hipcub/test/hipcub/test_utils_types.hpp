@@ -22,11 +22,12 @@
 #define TEST_TEST_UTILS_TYPES_HPP_
 
 #include "test_utils.hpp"
+#include "test_utils_controller.hpp"
 
 // Global utility defines
 #define test_suite_type_def_helper(name, suffix) \
 template<class Params> \
-class name ## suffix : public ::testing::Test { \
+class name ## suffix : public test_controller::ControlledTest { \
 public: \
     using params = Params; \
 };

@@ -50,7 +50,8 @@ function(add_hipcub_test_internal TEST_NAME TEST_SOURCES TEST_TARGET)
     PRIVATE
       GTest::gtest
       GTest::gtest_main
-  )
+    )
+  target_include_directories("${TEST_TARGET}" PRIVATE "../../test/hipcub")
 
   if(USE_SYSTEM_LIB)
     target_link_libraries(${TEST_TARGET} PRIVATE hip::hipcub)
@@ -274,3 +275,4 @@ add_hipcub_test("hipcub.ThreadOperators" test_hipcub_thread_operators.cpp)
 add_hipcub_test("hipcub.ThreadSort" test_hipcub_thread_sort.cpp)
 
 add_hipcub_test("hipcub.SinglePassScanOperators" test_hipcub_single_pass_scan_operators.cpp)
+add_hipcub_test("hipcub.TestController" test_hipcub_test_controller.cpp)

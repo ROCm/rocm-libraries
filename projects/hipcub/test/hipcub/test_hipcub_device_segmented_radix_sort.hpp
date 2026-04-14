@@ -29,6 +29,7 @@
 #include <hipcub/device/device_segmented_radix_sort.hpp>
 
 #include "test_utils_data_generation.hpp"
+#include "test_utils_controller.hpp"
 
 #include <algorithm>
 #include <cstddef>
@@ -53,7 +54,7 @@ struct params
 };
 
 template<class Params>
-class HipcubDeviceSegmentedRadixSort : public ::testing::Test
+class HipcubDeviceSegmentedRadixSort : public test_controller::ControlledTest
 {
 public:
     using params = Params;
@@ -90,7 +91,7 @@ inline void sort_keys()
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        for(size_t size : test_utils::get_sizes(seed_value))
+        for(size_t size : CHECK_SIZE_FILTERS(test_utils::get_sizes(seed_value)))
         {
             SCOPED_TRACE(testing::Message() << "with size= " << size);
             // Generate data
@@ -234,7 +235,7 @@ inline void sort_keys_empty_data()
 
     hipStream_t stream = 0;
 
-    const std::vector<size_t> sizes = {0, 1024};
+    const std::vector<size_t> sizes = CHECK_SIZE_FILTERS(std::vector<size_t>({0, 1024}));
     for(size_t size : sizes)
     {
         SCOPED_TRACE(testing::Message() << "with size = " << size);
@@ -369,6 +370,7 @@ inline void sort_keys_large_segments()
 
     size_t size           = 1 << 20;
     size_t segments_count = 2;
+	CHECK_SIZE_ENABLEMENT(size);
 
     for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
@@ -517,7 +519,7 @@ inline void sort_keys_unspecified_ranges()
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
-        for(size_t size : test_utils::get_sizes(seed_value))
+        for(size_t size : CHECK_SIZE_FILTERS(test_utils::get_sizes(seed_value)))
         {
             SCOPED_TRACE(testing::Message() << "with size = " << size);
 
@@ -701,7 +703,7 @@ inline void sort_pairs()
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        for(size_t size : test_utils::get_sizes(seed_value))
+        for(size_t size : CHECK_SIZE_FILTERS(test_utils::get_sizes(seed_value)))
         {
             SCOPED_TRACE(testing::Message() << "with size= " << size);
             // Generate data
@@ -897,7 +899,7 @@ inline void sort_pairs_unspecified_ranges()
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
-        for(size_t size : test_utils::get_sizes(seed_value))
+        for(size_t size : CHECK_SIZE_FILTERS(test_utils::get_sizes(seed_value)))
         {
             SCOPED_TRACE(testing::Message() << "with size = " << size);
 
@@ -1124,7 +1126,7 @@ inline void sort_keys_double_buffer()
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        for(size_t size : test_utils::get_sizes(seed_value))
+        for(size_t size : CHECK_SIZE_FILTERS(test_utils::get_sizes(seed_value)))
         {
             SCOPED_TRACE(testing::Message() << "with size= " << size);
             // Generate data
@@ -1281,7 +1283,7 @@ inline void sort_pairs_double_buffer()
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        for(size_t size : test_utils::get_sizes(seed_value))
+        for(size_t size : CHECK_SIZE_FILTERS(test_utils::get_sizes(seed_value)))
         {
             SCOPED_TRACE(testing::Message() << "with size= " << size);
             // Generate data
