@@ -144,7 +144,7 @@ bool PerformanceConfigHipImplicitGemmGroupWrwXdlops::ModelApplyTokenKTN(
     return false;
 }
 
-static std::vector<float> GetFeatures(const ProblemDescription& problem, const std::string& arch)
+static std::vector<float> GetFeaturesKTN(const ProblemDescription& problem, const std::string& arch)
 {
     if(arch == "gfx90a")
     {
@@ -355,9 +355,9 @@ void PerformanceConfigHipImplicitGemmGroupWrwXdlops::HeuristicInit(
         bool mode_use_tf32 =
             (problem.GetInDataType() == miopenFloat) && problem.UseTF32();
 
-        auto fill_valid_kernels = [&loader](const ProblemDescription& p, bool use_tf32) {
+        auto fill_valid_kernels = [&loader](const ProblemDescription& p, bool try_tf32) {
             return loader.FillValidKernels(
-                CKSolverType::GrpConvWrw, p, p.GetInDataType(), use_tf32);
+                CKSolverType::GrpConvWrw, p, p.GetInDataType(), try_tf32);
         };
 
         auto ktn_runner = [this](const ExecutionContext& c, const ProblemDescription& p) {

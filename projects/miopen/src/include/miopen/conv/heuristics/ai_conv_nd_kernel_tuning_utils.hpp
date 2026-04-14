@@ -34,8 +34,7 @@
 #include <miopen/conv/heuristics/ai_heuristics.hpp>
 #include <miopen/conv/heuristics/ai_candidate_selection.hpp>
 #include <miopen/execution_context.hpp>
-#include <miopen/solver/implicitgemm_ck_util.hpp>
-#include <miopen/solver/implicitgemm_util.hpp>
+#include <miopen/solver/implicitgemm_ck_util_common.hpp>
 
 // ============================================================================
 // Centralized Heuristic Configuration for CK Implicit GEMM Solvers
@@ -336,9 +335,9 @@ bool RunKTNGeneric(ConfigType& config,
     {
     case miopenFloat: return config.template RunParameterPredictionModelKTN<float>(ctx, problem);
     case miopenBFloat16:
-        return config.template RunParameterPredictionModelKTN<ck::bhalf_t>(ctx, problem);
+        return config.template RunParameterPredictionModelKTN<BFloat16Tag>(ctx, problem);
     case miopenHalf:
-        return config.template RunParameterPredictionModelKTN<ck::half_t>(ctx, problem);
+        return config.template RunParameterPredictionModelKTN<HalfTag>(ctx, problem);
     default: return false;
     }
 }
