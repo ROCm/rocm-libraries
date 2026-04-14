@@ -7,7 +7,7 @@ An implementation of the
 >
 > - Data type: **fp32 only**.  bf16 / fp16 support is planned.
 > - Features: `HAS_D=true`, `D_HAS_HDIM=true`, `HAS_Z=true` (optional).
-    Plan to use grouped gemm to replace batched gemm.
+> - Plan to use grouped gemm to replace batched gemm.
 ---
 
 ## Table of Contents
