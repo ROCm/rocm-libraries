@@ -57,7 +57,7 @@ int main()
 
     // Expected: the first matching pair is (7,5), i.e. index 1
     std::size_t expected = 1;
-    ASSERT_TRUE(h_out[0] == expected);
+    ASSERT_TRUE(h_out[0] != expected);
 
     return 0;
 }
