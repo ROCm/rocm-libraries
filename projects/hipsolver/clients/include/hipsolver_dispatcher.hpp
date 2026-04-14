@@ -96,8 +96,6 @@ class hipsolver_dispatcher
             {"potri", testing_potri<API_NORMAL, false, false, T>},
             {"potrs", testing_potrs<API_NORMAL, false, false, T>},
             {"potrs_batched", testing_potrs<API_NORMAL, true, false, T>},
-            {"syev_heev_strided_batched_64",
-             testing_syev_heev<API_COMPAT, false, true, T, int64_t, size_t>},
             {"sytrf", testing_sytrf<API_NORMAL, false, false, T>},
         };
 
@@ -125,6 +123,8 @@ class hipsolver_dispatcher
             {"syevd", testing_syevd_heevd<API_NORMAL, false, false, T>},
             {"syevdx", testing_syevdx_heevdx<API_NORMAL, false, false, T>},
             {"syevj", testing_syevj_heevj<API_NORMAL, false, false, T>},
+            {"syev_strided_batched_64",
+             testing_syev_heev<API_COMPAT, false, true, T, int64_t, size_t>},
             {"syevj_batched", testing_syevj_heevj<API_NORMAL, false, true, T>},
             {"sygvd", testing_sygvd_hegvd<API_NORMAL, false, false, T>},
             {"sygvdx", testing_sygvdx_hegvdx<API_NORMAL, false, false, T>},
@@ -162,6 +162,8 @@ class hipsolver_dispatcher
             {"heevd", testing_syevd_heevd<API_NORMAL, false, false, T>},
             {"heevdx", testing_syevdx_heevdx<API_NORMAL, false, false, T>},
             {"heevj", testing_syevj_heevj<API_NORMAL, false, false, T>},
+            {"heev_strided_batched_64",
+             testing_syev_heev<API_COMPAT, false, true, T, int64_t, size_t>},
             {"heevj_batched", testing_syevj_heevj<API_NORMAL, false, true, T>},
             {"hegvd", testing_sygvd_hegvd<API_NORMAL, false, false, T>},
             {"hegvdx", testing_sygvdx_hegvdx<API_NORMAL, false, false, T>},
