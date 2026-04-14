@@ -360,9 +360,10 @@ namespace rocRoller
                 if(!elseBody.empty())
                     elseBodyFn = [this, elseBody]() { return generate(elseBody); };
                 auto condition = m_fastArith(op.condition);
+                auto labelBase = fmt::format("{}_{}", op.conditionName, tag);
 
                 co_yield m_conditionalGenerator.genConditional(
-                    condition, op.conditionName, trueBodyFn, elseBodyFn, op.mode);
+                    condition, labelBase, trueBodyFn, elseBodyFn, op.mode);
             }
 
             Generator<Instruction> operator()(int tag, AssertOp const& op)

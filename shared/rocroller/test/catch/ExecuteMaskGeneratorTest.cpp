@@ -335,7 +335,7 @@ namespace ExecuteMaskGeneratorTest
         ctx->schedule(k->amdgpu_metadata());
 
         if(ctx->hipDeviceIndex() < 0)
-            return;
+            SKIP("No HIP device present.");
 
         auto deviceOutput = make_shared_device<uint32_t>(wfSize, 0u);
 
@@ -493,7 +493,7 @@ namespace ExecuteMaskGeneratorTest
         ctx->schedule(k->amdgpu_metadata());
 
         if(ctx->hipDeviceIndex() < 0)
-            return;
+            SKIP("No HIP device present.");
 
         auto deviceOutput = make_shared_device<uint32_t>(wfSize, 0u);
 
@@ -686,7 +686,7 @@ namespace ExecuteMaskGeneratorTest
         ctx->schedule(k->amdgpu_metadata());
 
         if(ctx->hipDeviceIndex() < 0)
-            return;
+            SKIP("No HIP device present.");
 
         auto deviceOutput = make_shared_device<uint32_t>(wfSize, 0u);
 
@@ -968,7 +968,7 @@ namespace ExecuteMaskGeneratorTest
         ctx->schedule(k->amdgpu_metadata());
 
         if(ctx->hipDeviceIndex() < 0)
-            return;
+            SKIP("No HIP device present.");
 
         auto deviceOutput = make_shared_device<uint32_t>(wfSize, 0u);
 

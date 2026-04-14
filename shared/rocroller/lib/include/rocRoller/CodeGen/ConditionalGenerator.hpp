@@ -39,16 +39,17 @@ namespace rocRoller
              *   When mode is BranchAndExec, additionally branches over each body when EXECZ is
              *   set (i.e. the entire EXEC mask is zero).
              *
-             * @param condition     The condition expression (already fast-arithmetic transformed).
-             * @param conditionName Name used in generated labels.
-             * @param trueBodyFn    Callback to generate instructions for the true (Body) nodes.
-             * @param elseBodyFn    Callback to generate instructions for the else (Else) nodes,
-             *                      or empty if there is no else body.
-             * @param mode          The ConditionalMode to use.
+             * @param condition  The condition expression (already fast-arithmetic transformed).
+             * @param labelBase  Base string for generated labels; should encode both the
+             *                   conditionName and the control graph node tag to ensure uniqueness.
+             * @param trueBodyFn Callback to generate instructions for the true (Body) nodes.
+             * @param elseBodyFn Callback to generate instructions for the else (Else) nodes,
+             *                   or empty if there is no else body.
+             * @param mode       The ConditionalMode to use.
              */
             Generator<Instruction>
                 genConditional(Expression::ExpressionPtr               condition,
-                               std::string const&                      conditionName,
+                               std::string const&                      labelBase,
                                std::function<Generator<Instruction>()> trueBodyFn,
                                std::function<Generator<Instruction>()> elseBodyFn,
                                ControlGraph::ConditionalMode           mode);
@@ -57,12 +58,12 @@ namespace rocRoller
             ContextPtr m_context;
 
             Generator<Instruction> genBranch(Expression::ExpressionPtr               condition,
-                                             std::string const&                      conditionName,
+                                             std::string const&                      labelBase,
                                              std::function<Generator<Instruction>()> trueBodyFn,
                                              std::function<Generator<Instruction>()> elseBodyFn);
 
             Generator<Instruction> genExec(Expression::ExpressionPtr               condition,
-                                           std::string const&                      conditionName,
+                                           std::string const&                      labelBase,
                                            std::function<Generator<Instruction>()> trueBodyFn,
                                            std::function<Generator<Instruction>()> elseBodyFn,
                                            ControlGraph::ConditionalMode           mode);

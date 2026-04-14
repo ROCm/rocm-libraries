@@ -37,8 +37,8 @@ namespace rocRoller
         }
 
         Generator<Instruction>
-            ConditionalGenerator::genConditional(Expression::ExpressionPtr condition,
-                                                 std::string const&        conditionName,
+            ConditionalGenerator::genConditional(Expression::ExpressionPtr               condition,
+                                                 std::string const&                      labelBase,
                                                  std::function<Generator<Instruction>()> trueBodyFn,
                                                  std::function<Generator<Instruction>()> elseBodyFn,
                                                  ControlGraph::ConditionalMode           mode)
@@ -46,11 +46,11 @@ namespace rocRoller
             switch(mode)
             {
             case ControlGraph::ConditionalMode::Branch:
-                co_yield genBranch(condition, conditionName, trueBodyFn, elseBodyFn);
+                co_yield genBranch(condition, labelBase, trueBodyFn, elseBodyFn);
                 break;
             case ControlGraph::ConditionalMode::Exec:
             case ControlGraph::ConditionalMode::BranchAndExec:
-                co_yield genExec(condition, conditionName, trueBodyFn, elseBodyFn, mode);
+                co_yield genExec(condition, labelBase, trueBodyFn, elseBodyFn, mode);
                 break;
             default:
                 Throw<FatalError>("Unhandled ConditionalMode: ", ShowValue(mode));
@@ -59,16 +59,16 @@ namespace rocRoller
 
         Generator<Instruction>
             ConditionalGenerator::genBranch(Expression::ExpressionPtr               condition,
-                                            std::string const&                      conditionName,
+                                            std::string const&                      labelBase,
                                             std::function<Generator<Instruction>()> trueBodyFn,
                                             std::function<Generator<Instruction>()> elseBodyFn)
         {
-            Log::debug("ConditionalGenerator::genBranch({})", conditionName);
+            Log::debug("ConditionalGenerator::genBranch({})", labelBase);
 
-            auto falseLabel = m_context->labelAllocator()->label(
-                fmt::format("ConditionalFalse_{}", conditionName));
+            auto falseLabel
+                = m_context->labelAllocator()->label(fmt::format("ConditionalFalse_{}", labelBase));
             auto botLabel = m_context->labelAllocator()->label(
-                fmt::format("ConditionalBottom_{}", conditionName));
+                fmt::format("ConditionalBottom_{}", labelBase));
 
             co_yield Instruction::Lock(Scheduling::Dependency::Branch,
                                        "Lock for Conditional Branch");
@@ -118,12 +118,12 @@ namespace rocRoller
 
         Generator<Instruction>
             ConditionalGenerator::genExec(Expression::ExpressionPtr               condition,
-                                          std::string const&                      conditionName,
+                                          std::string const&                      labelBase,
                                           std::function<Generator<Instruction>()> trueBodyFn,
                                           std::function<Generator<Instruction>()> elseBodyFn,
                                           ControlGraph::ConditionalMode           mode)
         {
-            Log::debug("ConditionalGenerator::genExec({}, {})", conditionName, toString(mode));
+            Log::debug("ConditionalGenerator::genExec({}, {})", labelBase, toString(mode));
             auto const wavefrontSize = m_context->kernel()->wavefront_size();
             AssertFatal(wavefrontSize == 32 || wavefrontSize == 64, ShowValue(wavefrontSize));
 
@@ -145,9 +145,9 @@ namespace rocRoller
             if(branchAndExec)
             {
                 elseLabel = m_context->labelAllocator()->label(
-                    fmt::format("ELSE_Conditional_EXECZ_{}", conditionName));
+                    fmt::format("ELSE_Conditional_EXECZ_{}", labelBase));
                 exitLabel = m_context->labelAllocator()->label(
-                    fmt::format("EXIT_Conditional_EXECZ_{}", conditionName));
+                    fmt::format("EXIT_Conditional_EXECZ_{}", labelBase));
             }
 
             co_yield Instruction::Lock(Scheduling::Dependency::Branch, "Lock for Conditional EXEC");
