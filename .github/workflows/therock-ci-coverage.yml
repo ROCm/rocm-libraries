@@ -84,14 +84,14 @@ jobs:
           extra_cmake_options: >-
             -DTHEROCK_ROCM_LIBRARIES_SOURCE_DIR=../
             -D${{ inputs.project_name }}_ENABLE_COVERAGE=ON
+            -DLLVM_TOOLS_SEARCH_PREFIX=${{ github.workspace }}/TheRock/build-coverage/dist/rocm/lib/llvm
             ${{ inputs.cmake_options }}
           BUILD_DIR: build-coverage
         run: |
           python3 TheRock/build_tools/github_actions/build_configure.py
 
-      - name: Build ${{ inputs.cmake_target }}
-        run: |
-          ninja -C TheRock/build-coverage ${{ inputs.cmake_target }}
+      - name: Build therock-archives and therock-dist
+        run: cmake --build TheRock/build-coverage --target therock-archives therock-dist -- -k 0
 
       - name: Build coverage for ${{ inputs.project_name }}
         run: |
