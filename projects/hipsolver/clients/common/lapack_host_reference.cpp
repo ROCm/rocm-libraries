@@ -2733,7 +2733,7 @@ void cpu_syev_heev<float, float>(hipsolverEigMode_t  evect,
 {
     char evectC = hipsolver2char_evect(evect);
     char uploC  = hipsolver2char_fill(uplo);
-    ssyev_(&evectC, &uploC, &n, A, &lda, W, rwork, &lrwork, info);
+    ssyev_(&evectC, &uploC, &n, A, &lda, W, work, &lwork, info);
 }
 
 template <>
@@ -2751,7 +2751,7 @@ void cpu_syev_heev<double, double>(hipsolverEigMode_t  evect,
 {
     char evectC = hipsolver2char_evect(evect);
     char uploC  = hipsolver2char_fill(uplo);
-    dsyev_(&evectC, &uploC, &n, A, &lda, W, rwork, &lrwork, info);
+    dsyev_(&evectC, &uploC, &n, A, &lda, W, work, &lwork, info);
 }
 
 template <>
