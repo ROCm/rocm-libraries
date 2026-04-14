@@ -30,7 +30,6 @@ class TestableGraph : public Graph
 {
 public:
     using Graph::build_operation_graph;
-    using Graph::deserialize_via_backend;
     using Graph::fromBackendDescriptor;
     using Graph::get_raw_graph_descriptor;
 
@@ -250,7 +249,8 @@ TEST_F(IntegrationRMSNormBackwardDescriptorLifting, RMSNormBackwardLiftWithoutFi
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
     // Serialize to binary via the frontend
-    auto data = originalGraph->toBinary();
+    auto [data, serErr] = originalGraph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
     ASSERT_FALSE(data.empty());
 
     // Create a backend graph descriptor from serialized bytes (no handle, no finalize)

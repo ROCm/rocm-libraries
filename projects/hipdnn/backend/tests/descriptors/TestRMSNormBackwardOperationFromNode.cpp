@@ -11,9 +11,9 @@
 #include "hipdnn_backend.h"
 
 #include <gtest/gtest.h>
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
-#include <hipdnn_data_sdk/data_objects/rmsnorm_backward_attributes_generated.h>
-#include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/rmsnorm_backward_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_test_sdk/constants/RMSNormBackwardConstants.hpp>
 #include <hipdnn_test_sdk/utilities/ToVec.hpp>
 
@@ -23,7 +23,7 @@
 #include <vector>
 
 using namespace hipdnn_backend;
-using namespace hipdnn_data_sdk::data_objects;
+using namespace hipdnn_flatbuffers_sdk::data_objects;
 using namespace hipdnn_tests::constants;
 using hipdnn_backend::test_utilities::verifyTensorDescriptor;
 using hipdnn_tests::toVec;
@@ -94,10 +94,10 @@ protected:
             = TensorDescriptor::fromFlatBuffer(dbiasAttrs);
     }
 
-    static hipdnn_data_sdk::data_objects::RMSNormBackwardAttributesT
+    static hipdnn_flatbuffers_sdk::data_objects::RMSNormBackwardAttributesT
         createStandardRMSNormBackwardAttrs()
     {
-        hipdnn_data_sdk::data_objects::RMSNormBackwardAttributesT attrs;
+        hipdnn_flatbuffers_sdk::data_objects::RMSNormBackwardAttributesT attrs;
         attrs.dy_tensor_uid = K_RMSNORMBACKWARD_TENSOR_DY_UID;
         attrs.x_tensor_uid = K_RMSNORMBACKWARD_TENSOR_X_UID;
         attrs.scale_tensor_uid = K_RMSNORMBACKWARD_TENSOR_SCALE_UID;
@@ -508,7 +508,7 @@ TEST_F(TestRMSNormBackwardOperationFromNode, GetAttributeWorksAfterFromNode)
                            {64, 1, 1, 1});
 
     // Verify operation type
-    hipdnnOperationType_t opType = HIPDNN_OPERATION_TYPE_NOT_SET;
+    hipdnnOperationType_ext_t opType = HIPDNN_OPERATION_TYPE_NOT_SET_EXT;
     int64_t opTypeCount = 0;
     desc->getAttribute(
         HIPDNN_ATTR_OPERATION_TYPE_EXT, HIPDNN_TYPE_OPERATION_TYPE_EXT, 1, &opTypeCount, &opType);
