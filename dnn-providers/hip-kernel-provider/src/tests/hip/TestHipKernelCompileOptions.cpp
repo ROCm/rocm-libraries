@@ -1,3 +1,6 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier:  MIT
+
 #include "hip/HipKernelCompileOptions.hpp"
 #include <gtest/gtest.h>
 #include <hipdnn_data_sdk/data_objects/data_types_generated.h>

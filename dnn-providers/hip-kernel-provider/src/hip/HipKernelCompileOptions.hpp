@@ -36,6 +36,11 @@ public:
             HIPDNN_PLUGIN_LOG_INFO(
                 "HipKernelProvider: HIPRTC compile ROCm include path: " << rocmIncludeArg);
         }
+        else
+        {
+            HIPDNN_PLUGIN_LOG_WARN("HipKernelProvider: ROCM_PATH not set or empty, HIPRTC compile "
+                                   "may fail if ROCm headers are not in standard include paths");
+        }
 
         // Add device arch to compile options
         _compileOptions.emplace_back(std::string("--offload-arch=") + deviceProps.gcnArchName);
@@ -76,7 +81,7 @@ public:
         _compileOptions.emplace_back("-D" + name + "=" + (value ? "1" : "0"));
     }
 
-    operator const std::vector<std::string>&() const
+    operator const auto &() const
     {
         return _compileOptions;
     }
