@@ -161,7 +161,7 @@ class BatchedContractionBenchmark:
             print(f"Running: {' '.join(cmd)}")
 
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
 
             if result.returncode != 0:
                 print(f"Error running {kernel_path.name}: {result.stderr}")
