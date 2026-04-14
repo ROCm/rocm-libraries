@@ -1964,31 +1964,31 @@ protected:
     {
         ConvWgradAttributes attrs;
         auto x = std::make_shared<TensorAttributes>();
-        x->set_uid(K_TENSOR_X_UID)
+        x->set_uid(K_FPROP_TENSOR_X_UID)
             .set_name("X")
             .set_data_type(DataType::FLOAT)
-            .set_dim(toVec(K_TENSOR_X_DIMS))
-            .set_stride(toVec(K_TENSOR_X_STRIDES));
+            .set_dim(toVec(K_FPROP_TENSOR_X_DIMS))
+            .set_stride(toVec(K_FPROP_TENSOR_X_STRIDES));
         auto dy = std::make_shared<TensorAttributes>();
-        dy->set_uid(K_TENSOR_Y_UID)
+        dy->set_uid(K_FPROP_TENSOR_Y_UID)
             .set_name("DY")
             .set_data_type(DataType::FLOAT)
-            .set_dim(toVec(K_TENSOR_Y_DIMS))
-            .set_stride(toVec(K_TENSOR_Y_STRIDES));
+            .set_dim(toVec(K_FPROP_TENSOR_Y_DIMS))
+            .set_stride(toVec(K_FPROP_TENSOR_Y_STRIDES));
         auto dw = std::make_shared<TensorAttributes>();
-        dw->set_uid(K_TENSOR_W_UID)
+        dw->set_uid(K_FPROP_TENSOR_W_UID)
             .set_name("DW")
             .set_data_type(DataType::FLOAT)
-            .set_dim(toVec(K_TENSOR_W_DIMS))
-            .set_stride(toVec(K_TENSOR_W_STRIDES));
+            .set_dim(toVec(K_FPROP_TENSOR_W_DIMS))
+            .set_stride(toVec(K_FPROP_TENSOR_W_STRIDES));
 
         attrs.set_x(x);
         attrs.set_dy(dy);
         attrs.set_dw(dw);
-        attrs.set_pre_padding(toVec(K_CONV_PADDING));
-        attrs.set_post_padding(toVec(K_CONV_PADDING));
-        attrs.set_stride(toVec(K_CONV_STRIDE));
-        attrs.set_dilation(toVec(K_CONV_DILATION));
+        attrs.set_pre_padding(toVec(K_FPROP_CONV_PADDING));
+        attrs.set_post_padding(toVec(K_FPROP_CONV_PADDING));
+        attrs.set_stride(toVec(K_FPROP_CONV_STRIDE));
+        attrs.set_dilation(toVec(K_FPROP_CONV_DILATION));
         attrs.compute_data_type = DataType::FLOAT;
 
         const GraphAttributes graphAttrs;

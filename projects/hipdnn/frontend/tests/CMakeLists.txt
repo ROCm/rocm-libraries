@@ -45,7 +45,6 @@ add_executable(
     TestGraph.cpp
     TestGraphAttributes.cpp
     TestGraphGenerated.cpp
-    TestGraphSerialization.cpp
     TestHandle.cpp
     TestIncompatibleBackendWrapper.cpp
     TestINode.cpp
@@ -59,8 +58,8 @@ add_executable(
     TestOperationUnpacker.cpp
     TestSdpaAttributes.cpp
     TestSdpaBackwardAttributes.cpp
-    TestSdpaBpropNode.cpp
-    TestSdpaFpropNode.cpp
+    TestSdpaBwdNode.cpp
+    TestSdpaFwdNode.cpp
     TestPointwiseAttributes.cpp
     TestPointwiseNode.cpp
     TestReductionAttributes.cpp

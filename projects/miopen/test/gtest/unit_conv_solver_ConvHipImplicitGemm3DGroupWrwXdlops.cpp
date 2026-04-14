@@ -87,6 +87,7 @@ const auto& GetTestParams()
 #endif
         auto p = miopen::unit_tests::UnitTestConvSolverParams(supportedDevices);
         p.Tunable(5);
+        p.UsesCKDynamicLib();
 
         // Increased tolerance because of tolerance failures
         p.SetTolerance(supportedDevices, miopenFloat, 30.0f);
@@ -97,16 +98,6 @@ const auto& GetTestParams()
         return p;
     }();
     return params;
-}
-
-Gpu GetDeterministicSupportedDevices()
-{
-#if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
-    return Gpu::gfx908 | Gpu::gfx90A | Gpu::gfx94X | Gpu::gfx950 | Gpu::gfx110X | Gpu::gfx115X |
-           Gpu::gfx120X;
-#else
-    return Gpu::None;
-#endif
 }
 
 } // namespace
@@ -232,5 +223,5 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
 INSTANTIATE_TEST_SUITE_P(
     Smoke,
     CPU_UnitTestConvSolverImplicitGemm3DGroupWrwXdlopsDeterministicApplicability_NONE,
-    testing::Combine(testing::Values(GetDeterministicSupportedDevices()),
+    testing::Combine(testing::Values(GetTestParams<TestDataType::FP16>()),
                      testing::Values(GetDeterministicConvCase())));

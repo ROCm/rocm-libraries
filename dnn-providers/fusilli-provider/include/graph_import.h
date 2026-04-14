@@ -17,9 +17,11 @@
 #include <fusilli.h>
 #include <hipdnn_data_sdk/data_objects/convolution_bwd_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/convolution_wrw_attributes_generated.h>
+#include <hipdnn_data_sdk/data_objects/custom_op_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_data_sdk/data_objects/matmul_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/pointwise_attributes_generated.h>
+#include <hipdnn_data_sdk/data_objects/reduction_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/sdpa_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
@@ -51,6 +53,8 @@ inline fusilli::ErrorOr<fusilli::DataType> hipDnnDataTypeToFusilliDataType(
     return ok(fusilli::DataType::Uint8);
   case hipdnn_data_sdk::data_objects::DataType::INT32:
     return ok(fusilli::DataType::Int32);
+  case hipdnn_data_sdk::data_objects::DataType::INT4:
+    return ok(fusilli::DataType::Int4);
   case hipdnn_data_sdk::data_objects::DataType::UNSET:
     return ok(fusilli::DataType::NotSet);
   default:
@@ -72,6 +76,23 @@ hipDnnPointwiseModeToFusilliMode(
   default:
     return error(fusilli::ErrorCode::NotImplemented,
                  "Unsupported pointwise mode.");
+  }
+}
+
+// Convert from hipDNN ReductionMode to fusilli ReductionAttr::Mode.
+inline fusilli::ErrorOr<fusilli::ReductionAttr::Mode>
+hipDnnReductionModeToFusilliMode(
+    hipdnn_data_sdk::data_objects::ReductionMode hipdnnMode) {
+  switch (hipdnnMode) {
+  case hipdnn_data_sdk::data_objects::ReductionMode::ADD:
+    return ok(fusilli::ReductionAttr::Mode::SUM);
+  case hipdnn_data_sdk::data_objects::ReductionMode::MIN_OP:
+    return ok(fusilli::ReductionAttr::Mode::MIN);
+  case hipdnn_data_sdk::data_objects::ReductionMode::MAX_OP:
+    return ok(fusilli::ReductionAttr::Mode::MAX);
+  default:
+    return error(fusilli::ErrorCode::NotImplemented,
+                 "Unsupported reduction mode.");
   }
 }
 
@@ -176,6 +197,14 @@ private:
       break;
     case hipdnn_data_sdk::data_objects::NodeAttributes::SdpaAttributes:
       FUSILLI_CHECK_ERROR(importSdpaAttr(node.attributes_as_SdpaAttributes()));
+      break;
+    case hipdnn_data_sdk::data_objects::NodeAttributes::ReductionAttributes:
+      FUSILLI_CHECK_ERROR(
+          importReductionAttr(node.attributes_as_ReductionAttributes()));
+      break;
+    case hipdnn_data_sdk::data_objects::NodeAttributes::CustomOpAttributes:
+      FUSILLI_CHECK_ERROR(
+          importCustomOpAttr(node.attributes_as_CustomOpAttributes()));
       break;
     default:
       return fusilli::error(fusilli::ErrorCode::NotImplemented,
@@ -430,6 +459,75 @@ private:
     // flatbuffer tensor attributes.
     FUSILLI_CHECK_ERROR(
         importNodeOutput(hipDnnSdpaAttr->o_tensor_uid(), "o", outs[0]));
+
+    return fusilli::ok();
+  }
+
+  fusilli::ErrorObject importReductionAttr(
+      const hipdnn_data_sdk::data_objects::ReductionAttributes *hipDnnRedAttr) {
+    // Import node input.
+    FUSILLI_ASSIGN_OR_RETURN(
+        std::shared_ptr<fusilli::TensorAttr> x,
+        importNodeInput(hipDnnRedAttr->in_tensor_uid(), "x"));
+
+    // Convert reduction mode.
+    FUSILLI_ASSIGN_OR_RETURN(
+        fusilli::ReductionAttr::Mode mode,
+        hipDnnReductionModeToFusilliMode(hipDnnRedAttr->mode()));
+
+    // Import node.
+    auto fusilliRedAttr = fusilli::ReductionAttr().setMode(mode);
+    std::shared_ptr<fusilli::TensorAttr> y =
+        fusilliGraph.reduction(x, fusilliRedAttr);
+
+    // Import node output.
+    FUSILLI_CHECK_ERROR(
+        importNodeOutput(hipDnnRedAttr->out_tensor_uid(), "y", y));
+
+    return fusilli::ok();
+  }
+
+  fusilli::ErrorObject importCustomOpAttr(
+      const hipdnn_data_sdk::data_objects::CustomOpAttributes *hipDnnAttr) {
+    // Only import custom ops targeting this plugin.
+    std::string customOpId = hipDnnAttr->custom_op_id()->str();
+    if (!customOpId.starts_with("fusilli.")) {
+      return fusilli::error(
+          fusilli::ErrorCode::NotImplemented,
+          std::format("Custom op id '{}' does not target the fusilli plugin. "
+                      "Expected 'fusilli.<operation>' prefix.",
+                      customOpId));
+    }
+
+    // The data byte array is the MLIR template string directly.
+    std::string mlirString(
+        reinterpret_cast<const char *>(hipDnnAttr->data()->data()),
+        hipDnnAttr->data()->size());
+
+    // Import input tensors (variable-length).
+    std::vector<std::shared_ptr<fusilli::TensorAttr>> inputs;
+    for (auto uid : *hipDnnAttr->input_tensor_uids()) {
+      FUSILLI_ASSIGN_OR_RETURN(auto tensor, importNodeInput(uid, "custom_in"));
+      inputs.push_back(std::move(tensor));
+    }
+
+    // Build fusilli CustomOpAttr. numOutputs derived from flatbuffer directly.
+    auto numOutputs = hipDnnAttr->output_tensor_uids()->size();
+    fusilli::CustomOpAttr fusilliAttr;
+    fusilliAttr.setName(customOpId)
+        .setMlir(mlirString)
+        .setNumOutputs(numOutputs);
+
+    // Create custom op node in fusilli graph.
+    auto outputTensors = fusilliGraph.customOp(inputs, fusilliAttr);
+
+    // Import output tensors.
+    auto *outputUids = hipDnnAttr->output_tensor_uids();
+    for (size_t i = 0; i < outputUids->size(); ++i) {
+      FUSILLI_CHECK_ERROR(importNodeOutput(
+          outputUids->Get(static_cast<flatbuffers::uoffset_t>(i)), "custom_out",
+          outputTensors[i]));
+    }
 
     return fusilli::ok();
   }

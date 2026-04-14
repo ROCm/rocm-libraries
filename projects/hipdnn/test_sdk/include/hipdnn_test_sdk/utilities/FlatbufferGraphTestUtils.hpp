@@ -1583,7 +1583,9 @@ inline flatbuffers::FlatBufferBuilder
     std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
         tensorAttributes;
 
-    const std::vector<int64_t> derivedDims = hipdnn_data_sdk::utilities::getDerivedShape(dims);
+    std::vector<int64_t> derivedDims(dims);
+    derivedDims[0] = 1; // Batch dim should be one, otherwise matches.
+
     const std::vector<int64_t> derivedStrides = hipdnn_data_sdk::utilities::generateStrides(
         derivedDims, hipdnn_data_sdk::utilities::extractStrideOrder(strides));
 
@@ -1870,19 +1872,22 @@ inline flatbuffers::FlatBufferBuilder
 }
 
 inline flatbuffers::FlatBufferBuilder
-    createValidSdpaFpropGraph(const std::vector<int64_t>& qDims = {2, 8, 16, 64},
-                              const std::vector<int64_t>& qStrides = {8192, 1024, 64, 1},
-                              const std::vector<int64_t>& kDims = {2, 8, 16, 64},
-                              const std::vector<int64_t>& kStrides = {8192, 1024, 64, 1},
-                              const std::vector<int64_t>& vDims = {2, 8, 16, 64},
-                              const std::vector<int64_t>& vStrides = {8192, 1024, 64, 1},
-                              const std::vector<int64_t>& oDims = {2, 8, 16, 64},
-                              const std::vector<int64_t>& oStrides = {8192, 1024, 64, 1},
-                              hipdnn_data_sdk::data_objects::DataType dataType
-                              = hipdnn_data_sdk::data_objects::DataType::HALF,
-                              bool withAttnMask = false,
-                              bool withScale = false,
-                              bool withStats = false)
+    createValidSdpaFwdGraph(const std::vector<int64_t>& qDims = {2, 8, 16, 64},
+                            const std::vector<int64_t>& qStrides = {8192, 1024, 64, 1},
+                            const std::vector<int64_t>& kDims = {2, 8, 16, 64},
+                            const std::vector<int64_t>& kStrides = {8192, 1024, 64, 1},
+                            const std::vector<int64_t>& vDims = {2, 8, 16, 64},
+                            const std::vector<int64_t>& vStrides = {8192, 1024, 64, 1},
+                            const std::vector<int64_t>& oDims = {2, 8, 16, 64},
+                            const std::vector<int64_t>& oStrides = {8192, 1024, 64, 1},
+                            hipdnn_data_sdk::data_objects::DataType dataType
+                            = hipdnn_data_sdk::data_objects::DataType::HALF,
+                            bool withAttnMask = false,
+                            bool withScale = false,
+                            bool withStats = false,
+                            bool alibiMask = false,
+                            bool paddingMask = false,
+                            bool causalMask = false)
 {
     flatbuffers::FlatBufferBuilder builder;
     std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
@@ -1974,12 +1979,21 @@ inline flatbuffers::FlatBufferBuilder
         flatbuffers::nullopt, // descale_s_tensor_uid
         flatbuffers::nullopt, // scale_s_tensor_uid
         flatbuffers::nullopt, // scale_o_tensor_uid
-        statsUid);
+        statsUid,
+        flatbuffers::nullopt, // max_tensor_uid
+        flatbuffers::nullopt,
+        flatbuffers::nullopt,
+        flatbuffers::nullopt,
+        flatbuffers::nullopt,
+        flatbuffers::nullopt,
+        alibiMask,
+        paddingMask,
+        causalMask);
 
     std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> nodes;
     nodes.push_back(hipdnn_data_sdk::data_objects::CreateNodeDirect(
         builder,
-        "sdpa_fprop",
+        "sdpa_fwd",
         dataType,
         hipdnn_data_sdk::data_objects::NodeAttributes::SdpaAttributes,
         sdpaAttributes.Union()));
@@ -2120,16 +2134,16 @@ inline flatbuffers::FlatBufferBuilder
 }
 
 inline flatbuffers::FlatBufferBuilder
-    createValidSdpaBpropGraph(const std::vector<int64_t>& qDims = {2, 8, 16, 64},
-                              const std::vector<int64_t>& qStrides = {8192, 1024, 64, 1},
-                              const std::vector<int64_t>& kDims = {2, 8, 16, 64},
-                              const std::vector<int64_t>& kStrides = {8192, 1024, 64, 1},
-                              const std::vector<int64_t>& vDims = {2, 8, 16, 64},
-                              const std::vector<int64_t>& vStrides = {8192, 1024, 64, 1},
-                              const std::vector<int64_t>& oDims = {2, 8, 16, 64},
-                              const std::vector<int64_t>& oStrides = {8192, 1024, 64, 1},
-                              hipdnn_data_sdk::data_objects::DataType dataType
-                              = hipdnn_data_sdk::data_objects::DataType::HALF)
+    createValidSdpaBwdGraph(const std::vector<int64_t>& qDims = {2, 8, 16, 64},
+                            const std::vector<int64_t>& qStrides = {8192, 1024, 64, 1},
+                            const std::vector<int64_t>& kDims = {2, 8, 16, 64},
+                            const std::vector<int64_t>& kStrides = {8192, 1024, 64, 1},
+                            const std::vector<int64_t>& vDims = {2, 8, 16, 64},
+                            const std::vector<int64_t>& vStrides = {8192, 1024, 64, 1},
+                            const std::vector<int64_t>& oDims = {2, 8, 16, 64},
+                            const std::vector<int64_t>& oStrides = {8192, 1024, 64, 1},
+                            hipdnn_data_sdk::data_objects::DataType dataType
+                            = hipdnn_data_sdk::data_objects::DataType::HALF)
 {
     flatbuffers::FlatBufferBuilder builder;
     std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
@@ -2184,7 +2198,7 @@ inline flatbuffers::FlatBufferBuilder
     std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> nodes;
     nodes.push_back(hipdnn_data_sdk::data_objects::CreateNodeDirect(
         builder,
-        "sdpa_bprop",
+        "sdpa_bwd",
         dataType,
         hipdnn_data_sdk::data_objects::NodeAttributes::SdpaBackwardAttributes,
         sdpaBwdAttributes.Union()));
