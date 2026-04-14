@@ -3,7 +3,13 @@
 
 cmake_minimum_required(VERSION 3.20)
 
-project(hipdnn-example-provider VERSION 0.1.0 LANGUAGES CXX)
+# =============================================================================
+# Versioning
+# =============================================================================
+include(${CMAKE_CURRENT_LIST_DIR}/cmake/VersionUtils.cmake)
+example_provider_setup_version(example_provider)
+
+project(hipdnn-example-provider VERSION ${EXAMPLE_PROVIDER_VERSION} LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -58,6 +64,9 @@ find_package(hiprtc REQUIRED)
 # Kernel embedding must come first so KERNEL_GENERATED_SOURCES is set
 add_subdirectory(kernels)
 add_subdirectory(src)
+
+# Generate version header from version.h.in
+example_provider_generate_version_header(example_provider example_provider_impl)
 
 # Install the plugin shared library
 # HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR is the standard ROCm distribution subfolder

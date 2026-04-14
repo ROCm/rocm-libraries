@@ -30,11 +30,15 @@ directory. Ask if either is missing.
 
 1. Copy this directory to the target directory.
 
-2. Apply ALL renames from the Adaptation Reference tables in the README:
+2. Replace the copied `README.md` with `README_TEMPLATE.md` (rename
+   `README_TEMPLATE.md` to `README.md`) and fill in the placeholders for the
+   new plugin. Remove `ai_plugin_rename_prompt.md` from the target directory.
+
+3. Apply ALL renames from the Adaptation Reference tables in the README:
    files, CMake targets/options/project name, C++ classes, and namespaces.
    Use the Case Conversion Rules for all identifier replacements.
 
-3. Scope rules -- common pitfalls to avoid:
+4. Scope rules -- common pitfalls to avoid:
    - Do NOT rename SDK identifiers (see "SDK Identifiers" table in README).
    - Do NOT rename files in `hip/` or `tests/mocks/` -- update namespace only.
    - Do NOT rename kernel infrastructure: `templates/*.in`,
@@ -42,15 +46,18 @@ directory. Ask if either is missing.
    - Do NOT rename `HIPDNN_REGISTER_ENGINE` macro calls or their arguments
      (`EXAMPLE_PROVIDER_RELU_ENGINE`, `EXAMPLE_PROVIDER_CONV_FWD_ENGINE`)
      -- the example engines are placeholders to be replaced by the user.
+   - Rename version infrastructure: `version.json` (update key name),
+     `version.h.in` (rename header guard and macro prefix),
+     `cmake/VersionUtils.cmake` (rename the three function names).
    - Handle, Context, and Settings are at global scope (outside namespace).
      Keep them there.
    - Update nested namespaces: `example_provider::test_helpers` in tests,
      `example_provider` in `kernels/templates/*.in`.
 
-4. Grep the target directory for remaining occurrences of
-   `example_provider`, `ExampleProvider`, `EXAMPLE_PROVIDER`, and
-   `hipdnn_example` to verify nothing was missed. Engine registration
+5. Grep the target directory for remaining occurrences of
+   `example_provider`, `ExampleProvider`, `EXAMPLE_PROVIDER`,
+   `hipdnn_example`, and `hipdnn-example` to verify nothing was missed. Engine registration
    identifiers (`EXAMPLE_PROVIDER_RELU_ENGINE`,
    `EXAMPLE_PROVIDER_CONV_FWD_ENGINE`) are expected to remain.
 
-5. Build and run tests if ROCm/hipDNN is available.
+6. Build and run tests if ROCm/hipDNN is available.

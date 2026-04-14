@@ -28,7 +28,10 @@ Runtime Compilation):
 example_engine_plugin/
 ├── CMakeLists.txt                       # Root CMake: project options, dependencies
 ├── README.md                            # This file
+├── README_TEMPLATE.md                   # Template README for new plugins (copy as README.md)
 ├── ai_plugin_rename_prompt.md            # AI agent prompt for copy-and-rename plugin creation
+├── cmake/                              # CMake utility modules
+│   └── VersionUtils.cmake              # Version setup and header generation functions
 ├── kernels/                             # GPU kernel source files (embedded at configure time)
 │   ├── CMakeLists.txt                   # embed_kernel_sources() function
 │   ├── cmake/
@@ -82,9 +85,11 @@ example_engine_plugin/
 │   ├── TestReluPlan.cpp
 │   ├── TestConvFwdPlanBuilder.cpp
 │   └── TestConvFwdPlan.cpp
-└── sample/                              # Demo app + acceptance test
-    ├── CMakeLists.txt
-    └── ExampleProviderSample.cpp
+├── sample/                              # Demo app + acceptance test
+│   ├── CMakeLists.txt
+│   └── ExampleProviderSample.cpp
+├── version.h.in                        # Version header template
+└── version.json                        # Authoritative plugin version
 ```
 
 ## Build Instructions
@@ -373,7 +378,10 @@ enabling unit tests to run without GPU hardware:
    tables, case conversion rules, file rename lists, and SDK identifiers.
 
 2. **Copy and rename the directory**: Copy `example_engine_plugin/` to your new
-   plugin directory (e.g., `your-name-provider/`).
+   plugin directory (e.g., `your-name-provider/`). After copying, replace the
+   copied `README.md` with `README_TEMPLATE.md` (rename `README_TEMPLATE.md`
+   to `README.md`) and fill in the placeholders for your plugin. Also remove
+   `ai_plugin_rename_prompt.md` from the new plugin directory.
 
 3. **Verify the build on your system**: Before making any code changes, build
    and run the tests from your copied directory to verify the example works in
@@ -499,6 +507,9 @@ and `TEMPLATE REFERENCE` comment markers in the source files for per-file guidan
 | `tests/TestExampleProviderEngine.cpp` | Rename file, update class references |
 | `tests/TestHelpers.hpp` | Replace graph construction helpers for your operations |
 | `sample/ExampleProviderSample.cpp` | Rename file, adapt scenarios to your operations |
+| `version.json` | Update version key name from `example_provider_version` to `your_name_provider_version` |
+| `version.h.in` | Rename header guard and macro prefix from `EXAMPLE_PROVIDER_VERSION_*` to `YOUR_NAME_PROVIDER_VERSION_*` |
+| `cmake/VersionUtils.cmake` | Rename three function names from `example_provider_*` to `your_name_provider_*` |
 
 **`TEMPLATE REFERENCE`** -- Study, then replace with your own implementations.
 
@@ -537,7 +548,7 @@ Use the tables below when performing the rename steps in the workflow above.
 | CMake targets | Brand + provider | `example_provider_impl` | `your_name_provider_impl` |
 | CMake options | Concatenated | `EXAMPLEPROVIDER_*` | `YOURNAMEPROVIDER_*` |
 | CMake project name | Hyphenated | `hipdnn-example-provider` | `your-name-provider` |
-| `HIPDNN_PLUGIN_NAME` | Brand + provider + plugin | `"example_provider"` | `"your_name_provider_plugin"` |
+| `HIPDNN_PLUGIN_NAME` | Brand + provider + plugin | `"example_provider_plugin"` | `"your_name_provider_plugin"` |
 
 #### Case Conversion Rules
 
@@ -577,6 +588,8 @@ prefix. These are the `ExampleProvider`-prefixed files from the
 | `TestExampleProviderContainer.cpp` | `TestYourNameContainer.cpp` |
 | `TestExampleProviderEngine.cpp` | `TestYourNameEngine.cpp` |
 | `ExampleProviderSample.cpp` | `YourNameSample.cpp` |
+| `version.json` (key inside) | Update key to `your_name_provider_version` |
+| `version.h.in` | Rename guard/macros to `YOUR_NAME_PROVIDER_VERSION_*` |
 
 #### CMake Targets and Options Requiring Rename
 
@@ -585,13 +598,16 @@ prefix. These are the `ExampleProvider`-prefixed files from the
 | `hipdnn-example-provider` (project name) | `your-name-provider` |
 | `example_provider_impl` | `your_name_provider_impl` |
 | `example_provider_private` | `your_name_provider_private` |
-| `example_provider_plugin` | `your_name_provider` |
+| `example_provider_plugin` | `your_name_provider_plugin` |
 | `example_provider_compile_options` | `your_name_provider_compile_options` |
 | `example_provider_kernel_embed` | `your_name_provider_kernel_embed` |
 | `example_provider_tests` | `your_name_provider_tests` |
 | `example_provider_sample` | `your_name_provider_sample` |
 | `EXAMPLEPROVIDER_BUILD_UNIT_TESTS` | `YOURNAMEPROVIDER_BUILD_UNIT_TESTS` |
 | `EXAMPLEPROVIDER_BUILD_SAMPLE` | `YOURNAMEPROVIDER_BUILD_SAMPLE` |
+| `example_provider_version_file_dir` (function) | `your_name_provider_version_file_dir` |
+| `example_provider_setup_version` (function) | `your_name_provider_setup_version` |
+| `example_provider_generate_version_header` (function) | `your_name_provider_generate_version_header` |
 
 #### SDK Identifiers (Do Not Rename)
 
