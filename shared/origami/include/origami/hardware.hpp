@@ -580,9 +580,11 @@ class hardware_t {
   /**
    * @brief Get the default (hardcoded) XCD count for a known architecture.
    *
-   * Only covers architectures with established default XCD counts. Throws
-   * for architectures not in the table — use get_hardware_for_device() to
-   * query at runtime for new/unlisted architectures.
+   * Legacy fallback table for architectures that predate the runtime XCC
+   * query (hipDeviceAttributeNumberOfXccs, HIP 7.0+). Do NOT add new
+   * architectures here — new hardware should rely solely on the runtime
+   * query via get_hardware_for_device(). Throws for architectures not in
+   * the table.
    *
    * @param arch Architecture enum value
    * @return Number of XCDs for the architecture

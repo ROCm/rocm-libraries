@@ -141,6 +141,7 @@ bool hardware_t::is_hardware_supported(hipDeviceProp_t properties) {
 }
 
 size_t hardware_t::get_default_num_xcds(architecture_t arch) {
+  // Do NOT add new architectures here — see declaration in hardware.hpp.
   switch (arch) {
     case architecture_t::gfx90a:  return 1;
     case architecture_t::gfx942:  return 8;
