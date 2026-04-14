@@ -25,7 +25,7 @@
 
 #include "clientcommon.hpp"
 
-template <testAPI_t API, typename T, typename S, typename U>
+template <testAPI_t API, bool STRIDED, typename T, typename S, typename U>
 void syev_heev_checkBadArgs(const hipsolverHandle_t   handle,
                             const hipsolverDnParams_t params,
                             const hipsolverEigMode_t  jobz,
@@ -43,6 +43,7 @@ void syev_heev_checkBadArgs(const hipsolverHandle_t   handle,
 {
     // handle
     EXPECT_ROCBLAS_STATUS(hipsolver_syev_heev(API,
+                                              STRIDED,
                                               nullptr,
                                               params,
                                               jobz,
@@ -61,6 +62,7 @@ void syev_heev_checkBadArgs(const hipsolverHandle_t   handle,
 
     // values
     EXPECT_ROCBLAS_STATUS(hipsolver_syev_heev(API,
+                                              STRIDED,
                                               handle,
                                               params,
                                               hipsolverEigMode_t(-1),
@@ -77,6 +79,7 @@ void syev_heev_checkBadArgs(const hipsolverHandle_t   handle,
                                               batchSize),
                           HIPSOLVER_STATUS_INVALID_ENUM);
     EXPECT_ROCBLAS_STATUS(hipsolver_syev_heev(API,
+                                              STRIDED,
                                               handle,
                                               params,
                                               jobz,
@@ -96,6 +99,7 @@ void syev_heev_checkBadArgs(const hipsolverHandle_t   handle,
 #if defined(__HIP_PLATFORM_HCC__) || defined(__HIP_PLATFORM_AMD__)
     // pointers
     EXPECT_ROCBLAS_STATUS(hipsolver_syev_heev(API,
+                                              STRIDED,
                                               handle,
                                               (hipsolverDnParams_t) nullptr,
                                               jobz,
@@ -112,6 +116,7 @@ void syev_heev_checkBadArgs(const hipsolverHandle_t   handle,
                                               batchSize),
                           HIPSOLVER_STATUS_INVALID_VALUE);
     EXPECT_ROCBLAS_STATUS(hipsolver_syev_heev(API,
+                                              STRIDED,
                                               handle,
                                               params,
                                               jobz,
@@ -128,6 +133,7 @@ void syev_heev_checkBadArgs(const hipsolverHandle_t   handle,
                                               batchSize),
                           HIPSOLVER_STATUS_INVALID_VALUE);
     EXPECT_ROCBLAS_STATUS(hipsolver_syev_heev(API,
+                                              STRIDED,
                                               handle,
                                               params,
                                               jobz,
@@ -144,6 +150,7 @@ void syev_heev_checkBadArgs(const hipsolverHandle_t   handle,
                                               batchSize),
                           HIPSOLVER_STATUS_INVALID_VALUE);
     EXPECT_ROCBLAS_STATUS(hipsolver_syev_heev(API,
+                                              STRIDED,
                                               handle,
                                               params,
                                               jobz,
@@ -186,6 +193,7 @@ void testing_syev_heev_bad_arg()
 
     SIZE size_dW, size_hW;
     hipsolver_syev_heev_bufferSize(API,
+                                   STRIDED,
                                    handle,
                                    params,
                                    jobz,
@@ -203,20 +211,20 @@ void testing_syev_heev_bad_arg()
         CHECK_HIP_ERROR(dWork.memcheck());
 
     // check bad arguments
-    syev_heev_checkBadArgs<API>(handle,
-                                params,
-                                jobz,
-                                uplo,
-                                n,
-                                dA.data(),
-                                lda,
-                                dW.data(),
-                                dWork.data(),
-                                size_dW,
-                                hWork.data(),
-                                size_hW,
-                                dinfo.data(),
-                                batchSize);
+    syev_heev_checkBadArgs<API, STRIDED>(handle,
+                                         params,
+                                         jobz,
+                                         uplo,
+                                         n,
+                                         dA.data(),
+                                         lda,
+                                         dW.data(),
+                                         dWork.data(),
+                                         size_dW,
+                                         hWork.data(),
+                                         size_hW,
+                                         dinfo.data(),
+                                         batchSize);
 }
 
 template <bool CPU, bool GPU, typename T, typename Td, typename Th>
@@ -268,6 +276,7 @@ void syev_heev_initData(const hipsolverHandle_t  handle,
 }
 
 template <testAPI_t API,
+          bool      STRIDED,
           typename T,
           typename I,
           typename SIZE,
@@ -324,6 +333,7 @@ void syev_heev_getError(const hipsolverHandle_t   handle,
     // execute computations
     // GPU lapack
     CHECK_ROCBLAS_ERROR(hipsolver_syev_heev(API,
+                                            STRIDED,
                                             handle,
                                             params,
                                             evect,
@@ -411,6 +421,7 @@ void syev_heev_getError(const hipsolverHandle_t   handle,
 }
 
 template <testAPI_t API,
+          bool      STRIDED,
           typename T,
           typename I,
           typename SIZE,
@@ -490,6 +501,7 @@ void syev_heev_getPerfData(const hipsolverHandle_t   handle,
         syev_heev_initData<false, true, T>(handle, evect, n, dA, lda, bc, hA, A, 0);
 
         CHECK_ROCBLAS_ERROR(hipsolver_syev_heev(API,
+                                                STRIDED,
                                                 handle,
                                                 params,
                                                 evect,
@@ -517,6 +529,7 @@ void syev_heev_getPerfData(const hipsolverHandle_t   handle,
 
         start = get_time_us_sync(stream);
         hipsolver_syev_heev(API,
+                            STRIDED,
                             handle,
                             params,
                             evect,
@@ -574,6 +587,7 @@ void testing_syev_heev(Arguments& argus)
     if(invalid_size)
     {
         EXPECT_ROCBLAS_STATUS(hipsolver_syev_heev(API,
+                                                  STRIDED,
                                                   handle,
                                                   params,
                                                   evect,
@@ -598,8 +612,19 @@ void testing_syev_heev(Arguments& argus)
 
     // memory size query is necessary
     SIZE size_dW, size_hW;
-    hipsolver_syev_heev_bufferSize(
-        API, handle, params, evect, uplo, n, (T*)nullptr, lda, (S*)nullptr, &size_dW, &size_hW, bc);
+    hipsolver_syev_heev_bufferSize(API,
+                                   STRIDED,
+                                   handle,
+                                   params,
+                                   evect,
+                                   uplo,
+                                   n,
+                                   (T*)nullptr,
+                                   lda,
+                                   (S*)nullptr,
+                                   &size_dW,
+                                   &size_hW,
+                                   bc);
 
     if(argus.mem_query)
     {
@@ -634,53 +659,53 @@ void testing_syev_heev(Arguments& argus)
     // check computations
     if(argus.unit_check || argus.norm_check)
     {
-        syev_heev_getError<API, T>(handle,
-                                   params,
-                                   evect,
-                                   uplo,
-                                   n,
-                                   dA,
-                                   lda,
-                                   dW,
-                                   dWork,
-                                   size_dW,
-                                   hWork,
-                                   size_hW,
-                                   dinfo,
-                                   bc,
-                                   hA,
-                                   hAres,
-                                   hW,
-                                   hWres,
-                                   hinfo,
-                                   hinfoRes,
-                                   &max_error);
+        syev_heev_getError<API, STRIDED, T>(handle,
+                                            params,
+                                            evect,
+                                            uplo,
+                                            n,
+                                            dA,
+                                            lda,
+                                            dW,
+                                            dWork,
+                                            size_dW,
+                                            hWork,
+                                            size_hW,
+                                            dinfo,
+                                            bc,
+                                            hA,
+                                            hAres,
+                                            hW,
+                                            hWres,
+                                            hinfo,
+                                            hinfoRes,
+                                            &max_error);
     }
 
     // collect performance data
     if(argus.timing)
     {
-        syev_heev_getPerfData<API, T>(handle,
-                                      params,
-                                      evect,
-                                      uplo,
-                                      n,
-                                      dA,
-                                      lda,
-                                      dW,
-                                      dWork,
-                                      size_dW,
-                                      hWork,
-                                      size_hW,
-                                      dinfo,
-                                      bc,
-                                      hA,
-                                      hW,
-                                      hinfo,
-                                      &gpu_time_used,
-                                      &cpu_time_used,
-                                      hot_calls,
-                                      argus.perf);
+        syev_heev_getPerfData<API, STRIDED, T>(handle,
+                                               params,
+                                               evect,
+                                               uplo,
+                                               n,
+                                               dA,
+                                               lda,
+                                               dW,
+                                               dWork,
+                                               size_dW,
+                                               hWork,
+                                               size_hW,
+                                               dinfo,
+                                               bc,
+                                               hA,
+                                               hW,
+                                               hinfo,
+                                               &gpu_time_used,
+                                               &cpu_time_used,
+                                               hot_calls,
+                                               argus.perf);
     }
 
     // validate results for rocsolver-test
