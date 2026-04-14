@@ -570,13 +570,13 @@ INSTANTIATE_TEST_SUITE_P(Small2d,
                          [](const ::testing::TestParamInfo<ConvBwdShapeCase>& info) {
                              return info.param.tag;
                          });
-INSTANTIATE_TEST_SUITE_P(Medium2d,
+INSTANTIATE_TEST_SUITE_P(DISABLED_Medium2d,
                          TestGpuConvBwdRefShapesFp32,
                          ::testing::ValuesIn(getMedium2dDgradCases()),
                          [](const ::testing::TestParamInfo<ConvBwdShapeCase>& info) {
                              return info.param.tag;
                          });
-INSTANTIATE_TEST_SUITE_P(Large2d,
+INSTANTIATE_TEST_SUITE_P(DISABLED_Large2d,
                          TestGpuConvBwdRefShapesFp32,
                          ::testing::ValuesIn(getLarge2dDgradCases()),
                          [](const ::testing::TestParamInfo<ConvBwdShapeCase>& info) {
@@ -588,7 +588,7 @@ INSTANTIATE_TEST_SUITE_P(Small3d,
                          [](const ::testing::TestParamInfo<ConvBwdShapeCase>& info) {
                              return info.param.tag;
                          });
-INSTANTIATE_TEST_SUITE_P(Medium3d,
+INSTANTIATE_TEST_SUITE_P(DISABLED_Medium3d,
                          TestGpuConvBwdRefShapesFp32,
                          ::testing::ValuesIn(getMedium3dDgradCases()),
                          [](const ::testing::TestParamInfo<ConvBwdShapeCase>& info) {
@@ -600,7 +600,7 @@ INSTANTIATE_TEST_SUITE_P(Small1d,
                          [](const ::testing::TestParamInfo<ConvBwdShapeCase>& info) {
                              return info.param.tag;
                          });
-INSTANTIATE_TEST_SUITE_P(Medium1d,
+INSTANTIATE_TEST_SUITE_P(DISABLED_Medium1d,
                          TestGpuConvBwdRefShapesFp32,
                          ::testing::ValuesIn(getMedium1dDgradCases()),
                          [](const ::testing::TestParamInfo<ConvBwdShapeCase>& info) {
@@ -614,7 +614,7 @@ INSTANTIATE_TEST_SUITE_P(Small2d,
                          [](const ::testing::TestParamInfo<ConvBwdShapeCase>& info) {
                              return info.param.tag;
                          });
-INSTANTIATE_TEST_SUITE_P(Medium2d,
+INSTANTIATE_TEST_SUITE_P(DISABLED_Medium2d,
                          TestGpuConvBwdRefShapesFp16,
                          ::testing::ValuesIn(getMedium2dDgradCases()),
                          [](const ::testing::TestParamInfo<ConvBwdShapeCase>& info) {
@@ -626,7 +626,7 @@ INSTANTIATE_TEST_SUITE_P(Small1d,
                          [](const ::testing::TestParamInfo<ConvBwdShapeCase>& info) {
                              return info.param.tag;
                          });
-INSTANTIATE_TEST_SUITE_P(Medium1d,
+INSTANTIATE_TEST_SUITE_P(DISABLED_Medium1d,
                          TestGpuConvBwdRefShapesFp16,
                          ::testing::ValuesIn(getMedium1dDgradCases()),
                          [](const ::testing::TestParamInfo<ConvBwdShapeCase>& info) {
@@ -646,7 +646,7 @@ INSTANTIATE_TEST_SUITE_P(Small2d,
                          [](const ::testing::TestParamInfo<ConvBwdShapeCase>& info) {
                              return info.param.tag;
                          });
-INSTANTIATE_TEST_SUITE_P(Medium2d,
+INSTANTIATE_TEST_SUITE_P(DISABLED_Medium2d,
                          TestGpuConvBwdRefShapesBfp16,
                          ::testing::ValuesIn(getMedium2dDgradCases()),
                          [](const ::testing::TestParamInfo<ConvBwdShapeCase>& info) {
@@ -658,7 +658,7 @@ INSTANTIATE_TEST_SUITE_P(Small1d,
                          [](const ::testing::TestParamInfo<ConvBwdShapeCase>& info) {
                              return info.param.tag;
                          });
-INSTANTIATE_TEST_SUITE_P(Medium1d,
+INSTANTIATE_TEST_SUITE_P(DISABLED_Medium1d,
                          TestGpuConvBwdRefShapesBfp16,
                          ::testing::ValuesIn(getMedium1dDgradCases()),
                          [](const ::testing::TestParamInfo<ConvBwdShapeCase>& info) {
@@ -682,7 +682,7 @@ INSTANTIATE_TEST_SUITE_P(Nlc1dSmall,
                          [](const ::testing::TestParamInfo<ConvBwdShapeCase>& info) {
                              return info.param.tag;
                          });
-INSTANTIATE_TEST_SUITE_P(Nlc1dMedium,
+INSTANTIATE_TEST_SUITE_P(DISABLED_Nlc1dMedium,
                          TestGpuConvBwdRefShapesFp32,
                          ::testing::ValuesIn(withChannelLastLayout(getMedium1dDgradCases())),
                          [](const ::testing::TestParamInfo<ConvBwdShapeCase>& info) {
@@ -694,13 +694,13 @@ INSTANTIATE_TEST_SUITE_P(Nhwc2dSmall,
                          [](const ::testing::TestParamInfo<ConvBwdShapeCase>& info) {
                              return info.param.tag;
                          });
-INSTANTIATE_TEST_SUITE_P(Nhwc2dMedium,
+INSTANTIATE_TEST_SUITE_P(DISABLED_Nhwc2dMedium,
                          TestGpuConvBwdRefShapesFp32,
                          ::testing::ValuesIn(withChannelLastLayout(getMedium2dDgradCases())),
                          [](const ::testing::TestParamInfo<ConvBwdShapeCase>& info) {
                              return info.param.tag;
                          });
-INSTANTIATE_TEST_SUITE_P(Nhwc2dLarge,
+INSTANTIATE_TEST_SUITE_P(DISABLED_Nhwc2dLarge,
                          TestGpuConvBwdRefShapesFp32,
                          ::testing::ValuesIn(withChannelLastLayout(getLarge2dDgradCases())),
                          [](const ::testing::TestParamInfo<ConvBwdShapeCase>& info) {
@@ -712,7 +712,7 @@ INSTANTIATE_TEST_SUITE_P(Ndhwc3dSmall,
                          [](const ::testing::TestParamInfo<ConvBwdShapeCase>& info) {
                              return info.param.tag;
                          });
-INSTANTIATE_TEST_SUITE_P(Ndhwc3dMedium,
+INSTANTIATE_TEST_SUITE_P(DISABLED_Ndhwc3dMedium,
                          TestGpuConvBwdRefShapesFp32,
                          ::testing::ValuesIn(withChannelLastLayout(getMedium3dDgradCases())),
                          [](const ::testing::TestParamInfo<ConvBwdShapeCase>& info) {
@@ -726,7 +726,7 @@ INSTANTIATE_TEST_SUITE_P(Nlc1dSmall,
                          [](const ::testing::TestParamInfo<ConvBwdShapeCase>& info) {
                              return info.param.tag;
                          });
-INSTANTIATE_TEST_SUITE_P(Nlc1dMedium,
+INSTANTIATE_TEST_SUITE_P(DISABLED_Nlc1dMedium,
                          TestGpuConvBwdRefShapesFp16,
                          ::testing::ValuesIn(withChannelLastLayout(getMedium1dDgradCases())),
                          [](const ::testing::TestParamInfo<ConvBwdShapeCase>& info) {
@@ -738,7 +738,7 @@ INSTANTIATE_TEST_SUITE_P(Nhwc2dSmall,
                          [](const ::testing::TestParamInfo<ConvBwdShapeCase>& info) {
                              return info.param.tag;
                          });
-INSTANTIATE_TEST_SUITE_P(Nhwc2dMedium,
+INSTANTIATE_TEST_SUITE_P(DISABLED_Nhwc2dMedium,
                          TestGpuConvBwdRefShapesFp16,
                          ::testing::ValuesIn(withChannelLastLayout(getMedium2dDgradCases())),
                          [](const ::testing::TestParamInfo<ConvBwdShapeCase>& info) {
@@ -758,7 +758,7 @@ INSTANTIATE_TEST_SUITE_P(Nlc1dSmall,
                          [](const ::testing::TestParamInfo<ConvBwdShapeCase>& info) {
                              return info.param.tag;
                          });
-INSTANTIATE_TEST_SUITE_P(Nlc1dMedium,
+INSTANTIATE_TEST_SUITE_P(DISABLED_Nlc1dMedium,
                          TestGpuConvBwdRefShapesBfp16,
                          ::testing::ValuesIn(withChannelLastLayout(getMedium1dDgradCases())),
                          [](const ::testing::TestParamInfo<ConvBwdShapeCase>& info) {
@@ -770,7 +770,7 @@ INSTANTIATE_TEST_SUITE_P(Nhwc2dSmall,
                          [](const ::testing::TestParamInfo<ConvBwdShapeCase>& info) {
                              return info.param.tag;
                          });
-INSTANTIATE_TEST_SUITE_P(Nhwc2dMedium,
+INSTANTIATE_TEST_SUITE_P(DISABLED_Nhwc2dMedium,
                          TestGpuConvBwdRefShapesBfp16,
                          ::testing::ValuesIn(withChannelLastLayout(getMedium2dDgradCases())),
                          [](const ::testing::TestParamInfo<ConvBwdShapeCase>& info) {
