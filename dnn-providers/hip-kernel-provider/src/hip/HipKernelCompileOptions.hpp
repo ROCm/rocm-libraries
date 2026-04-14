@@ -6,6 +6,7 @@
 #include <optional>
 #include <string>
 #include <type_traits>
+#include <unordered_map>
 #include <vector>
 
 #include <hip/hip_runtime_api.h>
@@ -26,24 +27,20 @@ public:
                             const std::optional<hip_kernel_utils::ActivationMode>& optActivationMode
                             = std::nullopt)
     {
-        // Add rocm include path if ROCM_PATH env variable is set
-        auto rocmPath
-            = hipdnn_data_sdk::utilities::trim(hipdnn_data_sdk::utilities::getEnv("ROCM_PATH"));
-        if(!rocmPath.empty())
-        {
-            auto rocmIncludeArg = "-I" + rocmPath + "/include";
-            _compileOptions.emplace_back(rocmIncludeArg);
-            HIPDNN_PLUGIN_LOG_INFO(
-                "HipKernelProvider: HIPRTC compile ROCm include path: " << rocmIncludeArg);
-        }
-        else
-        {
-            HIPDNN_PLUGIN_LOG_WARN("HipKernelProvider: ROCM_PATH not set or empty, HIPRTC compile "
-                                   "may fail if ROCm headers are not in standard include paths");
-        }
+        // Add ROCm include path to compile options
+#ifdef ROCM_PATH
+        auto rocmIncludeArg = std::string("-I") + ROCM_PATH + "/include";
+        _baseCompileOptions.emplace_back(rocmIncludeArg);
+        HIPDNN_PLUGIN_LOG_INFO(
+            "HipKernelProvider: HIPRTC compile ROCm include path: " << rocmIncludeArg);
+#else
+        HIPDNN_PLUGIN_LOG_WARN(
+            "HipKernelProvider: ROCM_PATH is not set, HIPRTC compile might fail if "
+            "ROCm headers are not in include paths");
+#endif
 
         // Add device arch to compile options
-        _compileOptions.emplace_back(std::string("--offload-arch=") + deviceProps.gcnArchName);
+        _baseCompileOptions.emplace_back(std::string("--offload-arch=") + deviceProps.gcnArchName);
 
         // Add data type and layout options
         addDataTypeAndLayoutOptions(inputTensorAttrs);
@@ -52,8 +49,7 @@ public:
         if(optActivationMode.has_value())
         {
             int nrnOpId = static_cast<int>(optActivationMode.value());
-            _compileOptions.emplace_back(std::string("-DHIP_PLUGIN_NRN_OP_ID=")
-                                         + std::to_string(nrnOpId));
+            add("HIP_PLUGIN_NRN_OP_ID", nrnOpId);
         }
     }
 
@@ -64,26 +60,58 @@ public:
     HipKernelCompileOptions(HipKernelCompileOptions&&) = default;
     HipKernelCompileOptions& operator=(HipKernelCompileOptions&&) = default;
 
+    operator std::vector<std::string>() const
+    {
+        std::vector<std::string> compileOptions = _baseCompileOptions;
+
+        for(const auto& [name, value] : _mutableCompileOptionsMap)
+        {
+            std::string option = "-D";
+            option += name;
+            option += "=";
+            option += value;
+            compileOptions.emplace_back(std::move(option));
+        }
+        return compileOptions;
+    }
+
     template <typename T,
               typename = std::enable_if_t<std::is_integral_v<T> && !std::is_same_v<T, bool>>>
     void add(const std::string& name, T value)
     {
-        _compileOptions.emplace_back("-D" + name + "=" + std::to_string(value));
+        _mutableCompileOptionsMap[name] = std::to_string(value);
     }
 
     void add(const std::string& name, const std::string& value)
     {
-        _compileOptions.emplace_back("-D" + name + "=" + value);
+        _mutableCompileOptionsMap[name] = value;
     }
 
     void add(const std::string& name, bool value)
     {
-        _compileOptions.emplace_back("-D" + name + "=" + (value ? "1" : "0"));
+        _mutableCompileOptionsMap[name] = value ? "1" : "0";
     }
 
-    operator const auto &() const
+    template <typename T,
+              typename = std::enable_if_t<std::is_integral_v<T> && !std::is_same_v<T, bool>>>
+    void update(const std::string& name, T value)
     {
-        return _compileOptions;
+        updateIfExists(name, std::to_string(value));
+    }
+
+    void update(const std::string& name, const std::string& value)
+    {
+        updateIfExists(name, value);
+    }
+
+    void update(const std::string& name, bool value)
+    {
+        updateIfExists(name, value ? "1" : "0");
+    }
+
+    void remove(const std::string& name)
+    {
+        _mutableCompileOptionsMap.erase(name);
     }
 
 private:
@@ -93,23 +121,25 @@ private:
         auto inputDataType = tensorAttrs->data_type();
         auto isLayoutNhwc = hip_kernel_utils::isChannelLastLayout(tensorAttrs);
 
-        // Add data type options
-        bool useFp32 = (inputDataType == hipdnn_data_sdk::data_objects::DataType::FLOAT);
-        bool useFp16 = (inputDataType == hipdnn_data_sdk::data_objects::DataType::HALF);
-        bool useBfp16 = (inputDataType == hipdnn_data_sdk::data_objects::DataType::BFLOAT16);
-
-        _compileOptions.emplace_back(std::string("-DHIP_PLUGIN_USE_FP32=") + (useFp32 ? "1" : "0"));
-        _compileOptions.emplace_back(std::string("-DHIP_PLUGIN_USE_FP16=") + (useFp16 ? "1" : "0"));
-        _compileOptions.emplace_back(std::string("-DHIP_PLUGIN_USE_BFP16=")
-                                     + (useBfp16 ? "1" : "0"));
-        _compileOptions.emplace_back("-DHIP_PLUGIN_USE_RNE_BFLOAT16=1");
-
-        // Add layout option
-        _compileOptions.emplace_back(std::string("-DHIP_PLUGIN_LAYOUT_NHWC=")
-                                     + (isLayoutNhwc ? "1" : "0"));
+        add("HIP_PLUGIN_USE_FP32", inputDataType == hipdnn_data_sdk::data_objects::DataType::FLOAT);
+        add("HIP_PLUGIN_USE_FP16", inputDataType == hipdnn_data_sdk::data_objects::DataType::HALF);
+        add("HIP_PLUGIN_USE_BFP16",
+            inputDataType == hipdnn_data_sdk::data_objects::DataType::BFLOAT16);
+        add("HIP_PLUGIN_USE_RNE_BFLOAT16", true);
+        add("HIP_PLUGIN_LAYOUT_NHWC", isLayoutNhwc);
     }
 
-    std::vector<std::string> _compileOptions;
+    void updateIfExists(const std::string& name, std::string value)
+    {
+        auto it = _mutableCompileOptionsMap.find(name);
+        if(it != _mutableCompileOptionsMap.end())
+        {
+            it->second = std::move(value);
+        }
+    }
+
+    std::vector<std::string> _baseCompileOptions;
+    std::unordered_map<std::string, std::string> _mutableCompileOptionsMap;
 };
 
 } // namespace hip_kernel_provider
