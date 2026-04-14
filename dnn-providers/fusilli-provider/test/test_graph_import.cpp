@@ -59,7 +59,7 @@ TEST(TestGraphImport, ConvertHipDnnToFusilli) {
 
 // Build a hipDNN frontend custom op graph and serialize to flatbuffer.
 // The customOpId parameter controls the custom_op_id field.
-static flatbuffers::DetachedBuffer
+static std::vector<uint8_t>
 buildCustomOpGraph(const std::string &customOpId = "fusilli.my_add") {
   using namespace hipdnn_frontend;
 
@@ -119,7 +119,12 @@ buildCustomOpGraph(const std::string &customOpId = "fusilli.my_add") {
                              result.get_message());
   }
 
-  return graph.buildFlatbufferOperationGraph();
+  auto [serializedGraph, serErr] = graph.to_binary();
+  if (serErr.is_bad()) {
+    throw std::runtime_error("Graph serialization failed: " +
+                             serErr.get_message());
+  }
+  return serializedGraph;
 }
 
 TEST(TestGraphImport, ImportCustomOpGraph) {
