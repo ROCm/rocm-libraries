@@ -189,9 +189,9 @@ void PerformanceConfigHipImplicitGemm3DGroupWrwXdlops::HeuristicInit(
     {
         bool mode_use_tf32 = (problem.GetInDataType() == miopenFloat) && problem.UseTF32();
 
-        auto fill_valid_kernels = [&loader](const ProblemDescription& p, bool use_tf32) {
+        auto fill_valid_kernels = [&loader](const ProblemDescription& p, bool try_tf32) {
             return loader.FillValidKernels(
-                CKSolverType::GrpConv3dWrw, p, p.GetInDataType(), use_tf32);
+                CKSolverType::GrpConv3dWrw, p, p.GetInDataType(), try_tf32);
         };
 
         // Note: No KTN runner needed for 3D (supports_ktn = false)
