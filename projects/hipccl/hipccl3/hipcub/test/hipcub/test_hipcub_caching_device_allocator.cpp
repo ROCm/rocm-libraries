@@ -28,28 +28,11 @@
  ******************************************************************************/
 
 #include "common_test_header.hpp"
+#include "test_utils_controller.hpp"
 
 #include "hipcub/util_allocator.hpp"
 #include <cstdlib>
 #include <hipcub/util_allocator.hpp>
-
-#if __has_include(<valgrind/valgrind.h>)
-    #include <valgrind/valgrind.h>
-    #define HAS_VALGRIND_H 1
-#else
-    #define HAS_VALGRIND_H 0
-#endif
-
-#if defined(__SANITIZE_ADDRESS__)
-    #define IS_ASAN_BUILD 1
-#elif defined(__has_feature)
-    #if __has_feature(address_sanitizer)
-        #define IS_ASAN_BUILD 1
-    #endif
-#endif
-#ifndef IS_ASAN_BUILD
-    #define IS_ASAN_BUILD 0
-#endif
 
 // Borrowing upstream blocking_kernel for host-side control of kernel lifetimes.
 // This kernel does very bad things that violate the HIP programming model, but
@@ -106,22 +89,11 @@ void EmptyKernel()
 
 // Hipified test/test_allocator.cu
 
-TEST(HipcubCachingDeviceAllocatorTests, Test1)
+class HipcubCachingDeviceAllocatorTests : public test_controller::ControlledTest
+{};
+
+TEST_F(HipcubCachingDeviceAllocatorTests, Test1)
 {
-
-    // This test is very timing sensitive. Valgrind and ASAN slow down
-    // kernel execution and therefore messes up the timing of the test. 
-    // If valgrind or ASAN is being used we disable this test otherwise
-    // it will fail.
-#if HAS_VALGRIND_H
-    if (RUNNING_ON_VALGRIND) {
-        GTEST_SKIP() << "Skipping test under Valgrind";
-    }
-#endif //HAS_VALGRIND_H
-#if IS_ASAN_BUILD
-    GTEST_SKIP() << "Skipping test under ASAN";
-#endif
-
     // Get number of GPUs and current GPU
     int num_gpus;
     int initial_gpu;

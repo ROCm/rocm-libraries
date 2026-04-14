@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #include "common_test_header.hpp"
+#include "test_utils_controller.hpp"
 
 // hipcub API
 #include <hipcub/device/device_reduce.hpp>
@@ -46,7 +47,7 @@ struct params
 };
 
 template<class Params>
-class HipcubDeviceReduceByKey : public ::testing::Test {
+class HipcubDeviceReduceByKey : public test_controller::ControlledTest {
 public:
     using params = Params;
 };
@@ -104,9 +105,10 @@ TYPED_TEST(HipcubDeviceReduceByKey, ReduceByKey)
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        for(size_t size : test_utils::get_sizes(seed_value))
+        for(size_t size : CHECK_SIZE_FILTERS(test_utils::get_sizes(seed_value)))
         {
             SCOPED_TRACE(testing::Message() << "with size= " << size);
+            CHECK_SIZE_ENABLEMENT(size);
 
             // Generate data and calculate expected results
             std::vector<key_type> unique_expected;

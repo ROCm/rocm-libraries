@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #include "common_test_header.hpp"
+#include "test_utils_controller.hpp"
 
 // hipcub API
 #include <hipcub/block/block_reduce.hpp>
@@ -45,7 +46,7 @@ struct params
 // ---------------------------------------------------------
 
 template<class Params>
-class HipcubBlockReduceSingleValueTests : public ::testing::Test
+class HipcubBlockReduceSingleValueTests : public test_controller::ControlledTest
 {
 public:
     using type                                               = typename Params::type;
@@ -160,6 +161,7 @@ TYPED_TEST(HipcubBlockReduceSingleValueTests, Reduce)
 
     const size_t size      = block_size * 113;
     const size_t grid_size = size / block_size;
+    CHECK_SIZE_ENABLEMENT(size);
 
     for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
@@ -262,6 +264,7 @@ TYPED_TEST(HipcubBlockReduceSingleValueTests, Sum)
 
     const size_t size      = block_size * 113;
     const size_t grid_size = size / block_size;
+    CHECK_SIZE_ENABLEMENT(size);
 
     for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
@@ -362,6 +365,7 @@ TYPED_TEST(HipcubBlockReduceSingleValueTests, ReduceValid)
     constexpr size_t block_size = TestFixture::block_size;
     const size_t     size       = block_size * 113;
     const size_t     grid_size  = size / block_size;
+    CHECK_SIZE_ENABLEMENT(size);
 
     // Given block size not supported
     if(block_size > test_utils::get_max_block_size())
@@ -469,6 +473,7 @@ TYPED_TEST(HipcubBlockReduceSingleValueTests, SumValid)
     constexpr size_t block_size = TestFixture::block_size;
     const size_t     size       = block_size * 113;
     const size_t     grid_size  = size / block_size;
+    CHECK_SIZE_ENABLEMENT(size);
 
     // Given block size not supported
     if(block_size > test_utils::get_max_block_size())
@@ -544,7 +549,7 @@ TYPED_TEST(HipcubBlockReduceSingleValueTests, SumValid)
 }
 
 template<class Params>
-class HipcubBlockReduceInputArrayTests : public ::testing::Test
+class HipcubBlockReduceInputArrayTests : public test_controller::ControlledTest
 {
 public:
     using type                                                     = typename Params::type;
@@ -639,6 +644,7 @@ TYPED_TEST(HipcubBlockReduceInputArrayTests, Reduce)
     const size_t items_per_block = block_size * items_per_thread;
     const size_t size            = items_per_block * 37;
     const size_t grid_size       = size / items_per_block;
+    CHECK_SIZE_ENABLEMENT(size);
 
     for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
@@ -766,6 +772,7 @@ TYPED_TEST(HipcubBlockReduceInputArrayTests, Sum)
     const size_t items_per_block = block_size * items_per_thread;
     const size_t size            = items_per_block * 37;
     const size_t grid_size       = size / items_per_block;
+    CHECK_SIZE_ENABLEMENT(size);
 
     for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {

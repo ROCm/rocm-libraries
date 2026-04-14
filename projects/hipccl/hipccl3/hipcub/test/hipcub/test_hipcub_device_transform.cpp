@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #include "common_test_header.hpp"
+#include "test_utils_controller.hpp"
 
 #include "hipcub/device/device_transform.hpp"
 
@@ -129,10 +130,11 @@ TYPED_TEST(HipcubDeviceTransformTests, Transform)
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
-        for(size_t size : test_utils::get_sizes(seed_value))
+        for(size_t size : CHECK_SIZE_FILTERS(test_utils::get_sizes(seed_value)))
         {
             hipStream_t stream = hipStreamDefault;
             SCOPED_TRACE(testing::Message() << "with size = " << size);
+            CHECK_SIZE_ENABLEMENT(size);
 
             // Generate data
             std::vector<input_type> h_input
@@ -187,10 +189,11 @@ TYPED_TEST(HipcubDeviceTransformTests, TransformAddrStableNonCopyable)
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
-        for(size_t size : test_utils::get_sizes(seed_value))
+        for(size_t size : CHECK_SIZE_FILTERS(test_utils::get_sizes(seed_value)))
         {
             hipStream_t stream = hipStreamDefault;
             SCOPED_TRACE(testing::Message() << "with size = " << size);
+            CHECK_SIZE_ENABLEMENT(size);
 
             // Generate data
             std::vector<input_type> h_input
@@ -248,10 +251,11 @@ TYPED_TEST(HipcubDeviceTransformTests, TransformAddrStablePointerDiff)
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
-        for(size_t size : test_utils::get_sizes(seed_value))
+        for(size_t size : CHECK_SIZE_FILTERS(test_utils::get_sizes(seed_value)))
         {
             hipStream_t stream = hipStreamDefault;
             SCOPED_TRACE(testing::Message() << "with size = " << size);
+            CHECK_SIZE_ENABLEMENT(size);
 
             // Generate data
             std::vector<input_type>  h_input(size);

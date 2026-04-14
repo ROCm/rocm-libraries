@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #include "common_test_header.hpp"
+#include "test_utils_controller.hpp"
 
 #include "test_utils_assertions.hpp"
 #include "test_utils_data_generation.hpp"
@@ -44,7 +45,7 @@ struct ThreadOperatorsParams
 };
 
 template<class Params>
-class HipcubThreadOperatorsTests : public ::testing::Test
+class HipcubThreadOperatorsTests : public test_controller::ControlledTest
 {
 public:
     using input_type  = typename Params::input_type;

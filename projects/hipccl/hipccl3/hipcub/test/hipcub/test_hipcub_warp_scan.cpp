@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #include "common_test_header.hpp"
+#include "test_utils_controller.hpp"
 
 #include <hipcub/warp/warp_scan.hpp>
 #include <type_traits>
@@ -41,7 +42,7 @@ struct params
 // ---------------------------------------------------------
 
 template<class Params>
-class HipcubWarpScanTests : public ::testing::Test {
+class HipcubWarpScanTests : public test_controller::ControlledTest {
 public:
     using type = typename Params::type;
     static constexpr unsigned int warp_size = Params::warp_size;
@@ -171,6 +172,7 @@ TYPED_TEST(HipcubWarpScanTests, InclusiveScan)
     const size_t block_size = current_device_warp_size == ws32 ? block_size_ws32 : block_size_ws64;
     unsigned int grid_size = 4;
     const size_t size = block_size * grid_size;
+    CHECK_SIZE_ENABLEMENT(size);
 
     // Check if warp size is supported
     if( (logical_warp_size > current_device_warp_size) ||
@@ -506,6 +508,7 @@ TYPED_TEST(HipcubWarpScanTests, InclusiveScanReduce)
     const size_t block_size = current_device_warp_size == ws32 ? block_size_ws32 : block_size_ws64;
     unsigned int grid_size = 4;
     const size_t size = block_size * grid_size;
+    CHECK_SIZE_ENABLEMENT(size);
 
     // Check if warp size is supported
     if( (logical_warp_size > current_device_warp_size) ||
@@ -867,6 +870,7 @@ TYPED_TEST(HipcubWarpScanTests, ExclusiveScan)
     const size_t block_size = current_device_warp_size == ws32 ? block_size_ws32 : block_size_ws64;
     unsigned int grid_size = 4;
     const size_t size = block_size * grid_size;
+    CHECK_SIZE_ENABLEMENT(size);
 
     // Check if warp size is supported
     if( (logical_warp_size > current_device_warp_size) ||
@@ -1032,6 +1036,7 @@ TYPED_TEST(HipcubWarpScanTests, ExclusiveReduceScan)
     const size_t block_size = current_device_warp_size == ws32 ? block_size_ws32 : block_size_ws64;
     unsigned int grid_size = 4;
     const size_t size = block_size * grid_size;
+    CHECK_SIZE_ENABLEMENT(size);
 
     // Check if warp size is supported
     if( (logical_warp_size > current_device_warp_size) ||
@@ -1223,6 +1228,7 @@ TYPED_TEST(HipcubWarpScanTests, Scan)
     const size_t block_size = current_device_warp_size == ws32 ? block_size_ws32 : block_size_ws64;
     unsigned int grid_size = 4;
     const size_t size = block_size * grid_size;
+    CHECK_SIZE_ENABLEMENT(size);
 
     // Check if warp size is supported
     if( (logical_warp_size > current_device_warp_size) ||
@@ -1384,6 +1390,7 @@ TYPED_TEST(HipcubWarpScanTests, InclusiveScanCustomType)
     const size_t block_size = current_device_warp_size == ws32 ? block_size_ws32 : block_size_ws64;
     unsigned int grid_size = 4;
     const size_t size = block_size * grid_size;
+    CHECK_SIZE_ENABLEMENT(size);
 
     // Check if warp size is supported
     if( (logical_warp_size > current_device_warp_size) ||

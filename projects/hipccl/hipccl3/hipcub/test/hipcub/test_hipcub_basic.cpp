@@ -33,10 +33,16 @@
 
 #include "common_test_header.hpp"
 
+#include "test_utils_controller.hpp"
+
+class HipcubBasicTests : public test_controller::ControlledTest
+{
+};
+
 // get_hipcub_version_on_device is compiled in a separate source,
 // that way we can be sure that all hipCUB functions are inline
 // and there won't be any multiple definitions error
-TEST(HipcubBasicTests, GetVersionOnDevice)
+TEST_F(HipcubBasicTests, GetVersionOnDevice)
 {
     int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);

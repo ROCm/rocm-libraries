@@ -29,6 +29,7 @@
 ******************************************************************************/
 
 #include "common_test_header.hpp"
+#include "test_utils_controller.hpp"
 
 // hipcub API
 #include <hipcub/block/block_exchange.hpp>
@@ -59,7 +60,7 @@ struct params
 };
 
 template<class Params>
-class HipcubBlockRadixRank : public ::testing::Test
+class HipcubBlockRadixRank : public test_controller::ControlledTest
 {
 public:
     using params = Params;
@@ -364,7 +365,7 @@ void rank_kernel(const KeyType* keys_input,
 }
 
 template<typename TestFixture, RadixRankAlgorithm Algorithm>
-void test_radix_rank()
+inline void test_radix_rank()
 {
     int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
@@ -391,6 +392,7 @@ void test_radix_rank()
 
     const size_t grid_size = 42;
     const size_t size      = items_per_block * grid_size;
+	CHECK_SIZE_ENABLEMENT(size);
 
     SCOPED_TRACE(testing::Message()
                  << "with items_per_block= " << items_per_block << " size=" << size);
@@ -625,7 +627,7 @@ void fall_back_exclusive_scan(It first, It last, OutIt out, T init)
 #endif // (_GLIBCXX_RELEASE) && (GLIBCXX_RELEASE < 9)
 
 template<typename TestFixture, RadixRankAlgorithm Algorithm>
-void test_radix_rank_with_prefix_sum_output()
+inline void test_radix_rank_with_prefix_sum_output()
 {
     int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
@@ -653,6 +655,7 @@ void test_radix_rank_with_prefix_sum_output()
         const size_t pfs_items_per_block = (1 << radix_bits);
         const size_t pfs_size            = pfs_items_per_block * grid_size;
         const size_t size                = items_per_block * grid_size;
+		CHECK_SIZE_ENABLEMENT(size);
 
         SCOPED_TRACE(testing::Message()
                      << "with items_per_block= " << items_per_block << " size=" << size);

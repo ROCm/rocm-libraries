@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #include "common_test_header.hpp"
+#include "test_utils_controller.hpp"
 #include <hipcub/block/block_load.hpp>
 #include <hipcub/block/block_run_length_decode.hpp>
 #include <hipcub/block/block_store.hpp>
@@ -40,7 +41,7 @@ struct Params
 };
 
 template<class Params>
-class HipcubBlockRunLengthDecodeTest : public ::testing::Test
+class HipcubBlockRunLengthDecodeTest : public test_controller::ControlledTest
 {
 public:
     using params = Params;

@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #include "common_test_header.hpp"
+#include "test_utils_controller.hpp"
 
 // required hipcub headers
 #include <hipcub/block/block_load.hpp>
@@ -42,7 +43,7 @@ struct params
 };
 
 template<typename Params>
-class HipcubBlockShuffleTests : public ::testing::Test
+class HipcubBlockShuffleTests : public test_controller::ControlledTest
 {
 public:
     using type                               = typename Params::type;
@@ -95,6 +96,7 @@ TYPED_TEST(HipcubBlockShuffleTests, BlockOffset)
     const size_t block_size = TestFixture::block_size;
     const size_t size       = block_size * 1134;
     const size_t grid_size  = size / block_size;
+    CHECK_SIZE_ENABLEMENT(size);
     for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value
@@ -179,6 +181,7 @@ TYPED_TEST(HipcubBlockShuffleTests, BlockRotate)
     const size_t block_size = TestFixture::block_size;
     const size_t size       = block_size * 1134;
     const size_t grid_size  = size / block_size;
+    CHECK_SIZE_ENABLEMENT(size);
     for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value
@@ -355,6 +358,7 @@ TYPED_TEST(HipcubBlockShuffleTests, BlockUpWithSuffix)
     constexpr size_t grid_size        = 114;
 
     const size_t size = items_per_block * grid_size;
+    CHECK_SIZE_ENABLEMENT(size);
     for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value
@@ -551,6 +555,7 @@ TYPED_TEST(HipcubBlockShuffleTests, BlockDownWithSuffix)
     constexpr size_t grid_size        = 114;
 
     const size_t size = items_per_block * grid_size;
+    CHECK_SIZE_ENABLEMENT(size);
     for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value

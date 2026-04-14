@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #include "common_test_header.hpp"
+#include "test_utils_controller.hpp"
 
 #include <hipcub/warp/warp_reduce.hpp>
 #include <type_traits>
@@ -36,7 +37,7 @@ struct params
 };
 
 template<class Params>
-class HipcubWarpReduceTests : public ::testing::Test {
+class HipcubWarpReduceTests : public test_controller::ControlledTest {
 public:
     using type = typename Params::type;
     static constexpr unsigned int warp_size = Params::warp_size;
@@ -179,6 +180,7 @@ TYPED_TEST(HipcubWarpReduceTests, Reduce)
     const size_t block_size = current_device_warp_size == ws32 ? block_size_ws32 : block_size_ws64;
     unsigned int grid_size = 4;
     const size_t size = block_size * grid_size;
+    CHECK_SIZE_ENABLEMENT(size);
 
     // Check if warp size is supported
     if( (logical_warp_size > current_device_warp_size) ||
@@ -493,6 +495,7 @@ TYPED_TEST(HipcubWarpReduceTests, HeadSegmentedReduceSum)
     const size_t block_size = current_device_warp_size == ws32 ? block_size_ws32 : block_size_ws64;
     unsigned int grid_size = 4;
     const size_t size = block_size * grid_size;
+    CHECK_SIZE_ENABLEMENT(size);
 
     // Check if warp size is supported
     if( (logical_warp_size > current_device_warp_size) ||
@@ -704,6 +707,7 @@ TYPED_TEST(HipcubWarpReduceTests, TailSegmentedReduceSum)
     const size_t block_size = current_device_warp_size == ws32 ? block_size_ws32 : block_size_ws64;
     unsigned int grid_size = 4;
     const size_t size = block_size * grid_size;
+    CHECK_SIZE_ENABLEMENT(size);
 
     // Check if warp size is supported
     if( (logical_warp_size > current_device_warp_size) ||

@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #include "common_test_header.hpp"
+#include "test_utils_controller.hpp"
 
 // hipcub API
 #include <hipcub/device/device_select.hpp>
@@ -46,7 +47,7 @@ struct DeviceSelectParams
 };
 
 template<class Params>
-class HipcubDeviceSelectTests : public ::testing::Test
+class HipcubDeviceSelectTests : public test_controller::ControlledTest
 {
 public:
     using input_type                 = typename Params::input_type;
@@ -90,9 +91,10 @@ TYPED_TEST(HipcubDeviceSelectTests, Flagged)
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        for(size_t size : test_utils::get_sizes(seed_value))
+        for(size_t size : CHECK_SIZE_FILTERS(test_utils::get_sizes(seed_value)))
         {
             SCOPED_TRACE(testing::Message() << "with size= " << size);
+            CHECK_SIZE_ENABLEMENT(size);
 
             // Generate data
             std::vector<T> input
@@ -241,9 +243,10 @@ TEST(HipcubDeviceSelectTests, FlagNormalization)
 
     unsigned int seed_value = rand();
 
-    for(size_t size : test_utils::get_sizes(seed_value))
+    for(size_t size : CHECK_SIZE_FILTERS(test_utils::get_sizes(seed_value)))
     {
         SCOPED_TRACE(testing::Message() << "with size= " << size);
+        CHECK_SIZE_ENABLEMENT(size);
         rocprim::counting_iterator<T>    d_input(0);
         rocprim::counting_iterator<F>    d_flags(1);
         U*                               d_output;
@@ -354,9 +357,10 @@ TYPED_TEST(HipcubDeviceSelectTests, SelectOp)
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        for(size_t size : test_utils::get_sizes(seed_value))
+        for(size_t size : CHECK_SIZE_FILTERS(test_utils::get_sizes(seed_value)))
         {
             SCOPED_TRACE(testing::Message() << "with size= " << size);
+            CHECK_SIZE_ENABLEMENT(size);
 
             // Generate data
             std::vector<T> input
@@ -509,9 +513,10 @@ TYPED_TEST(HipcubDeviceSelectTests, FlaggedIf)
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        for(size_t size : test_utils::get_sizes(seed_value))
+        for(size_t size : CHECK_SIZE_FILTERS(test_utils::get_sizes(seed_value)))
         {
             SCOPED_TRACE(testing::Message() << "with size= " << size);
+            CHECK_SIZE_ENABLEMENT(size);
 
             // Generate data
             std::vector<T> input
@@ -677,9 +682,10 @@ TYPED_TEST(HipcubDeviceSelectTests, Unique)
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        for(size_t size : test_utils::get_sizes(seed_value))
+        for(size_t size : CHECK_SIZE_FILTERS(test_utils::get_sizes(seed_value)))
         {
             SCOPED_TRACE(testing::Message() << "with size= " << size);
+            CHECK_SIZE_ENABLEMENT(size);
             for(auto p : probabilities)
             {
                 SCOPED_TRACE(testing::Message() << "with p= " << p);
@@ -804,9 +810,10 @@ TEST(HipcubDeviceSelectTests, UniqueDiscardOutputIterator)
 
     unsigned int seed_value = rand();
 
-    for(size_t size : test_utils::get_sizes(seed_value))
+    for(size_t size : CHECK_SIZE_FILTERS(test_utils::get_sizes(seed_value)))
     {
         SCOPED_TRACE(testing::Message() << "with size= " << size);
+        CHECK_SIZE_ENABLEMENT(size);
         rocprim::counting_iterator<unsigned int>    d_input(0);
         rocprim::discard_iterator                   d_output;
         size_t*                                     d_selected_count_output;
@@ -891,15 +898,10 @@ TEST_P(HipcubDeviceSelectLargeIndicesTests, LargeIndicesSelectOp)
 
     const auto selected_size = GetParam();
 
-    for(size_t size : test_utils::get_large_sizes(0))
+    for(size_t size : CHECK_SIZE_FILTERS(test_utils::get_large_sizes(0)))
     {
         SCOPED_TRACE(testing::Message() << "with size= " << size);
-
-// Support for large indices in DeviceSelect is not implemented in CUB yet. Disable test meanwhile.
-#ifdef __HIP_PLATFORM_NVIDIA__
-        std::cout << "Test disabled for large sizes until support is present in CUB" << std::endl;
-        GTEST_SKIP();
-#endif
+        CHECK_SIZE_ENABLEMENT(size);
 
         // Generate data
         rocprim::counting_iterator<T>    d_input(0);
@@ -1053,9 +1055,10 @@ TYPED_TEST(HipcubDeviceUniqueByKeyTests, UniqueByKey)
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        for(size_t size : test_utils::get_sizes(seed_value))
+        for(size_t size : CHECK_SIZE_FILTERS(test_utils::get_sizes(seed_value)))
         {
             SCOPED_TRACE(testing::Message() << "with size= " << size);
+            CHECK_SIZE_ENABLEMENT(size);
 
             for(auto p : probabilities)
             {
@@ -1235,9 +1238,10 @@ TEST(HipcubDeviceUniqueByKeyTests, LargeIndicesUniqueByKey)
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        for(size_t size : test_utils::get_large_sizes(seed_value))
+        for(size_t size : CHECK_SIZE_FILTERS(test_utils::get_large_sizes(seed_value)))
         {
             SCOPED_TRACE(testing::Message() << "with size= " << size);
+            CHECK_SIZE_ENABLEMENT(size);
             TestUniqueEqualityOp equality_op;
 
             const size_t selected_count

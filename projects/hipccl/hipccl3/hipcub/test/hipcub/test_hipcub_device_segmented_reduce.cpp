@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #include "common_test_header.hpp"
+#include "test_utils_controller.hpp"
 
 // Thread operators fixes for extended float types
 #include "test_utils_data_generation.hpp"
@@ -50,7 +51,7 @@ struct params1
 };
 
 template<class Params>
-class HipcubDeviceSegmentedReduceOp : public ::testing::Test
+class HipcubDeviceSegmentedReduceOp : public test_controller::ControlledTest
 {
 public:
     using params = Params;
@@ -106,9 +107,10 @@ TYPED_TEST(HipcubDeviceSegmentedReduceOp, Reduce)
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        for(size_t size : test_utils::get_sizes(seed_value))
+        for(size_t size : CHECK_SIZE_FILTERS(test_utils::get_sizes(seed_value)))
         {
             SCOPED_TRACE(testing::Message() << "with size= " << size);
+            CHECK_SIZE_ENABLEMENT(size);
 
             // Generate data and calculate expected results
             std::vector<output_type> aggregates_expected;
@@ -247,7 +249,7 @@ struct params2
 };
 
 template<class Params>
-class HipcubDeviceSegmentedReduce : public ::testing::Test
+class HipcubDeviceSegmentedReduce : public test_controller::ControlledTest
 {
 public:
     using params = Params;
@@ -305,9 +307,10 @@ TYPED_TEST(HipcubDeviceSegmentedReduce, Sum)
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        for(size_t size : test_utils::get_sizes(seed_value))
+        for(size_t size : CHECK_SIZE_FILTERS(test_utils::get_sizes(seed_value)))
         {
             SCOPED_TRACE(testing::Message() << "with size= " << size);
+            CHECK_SIZE_ENABLEMENT(size);
 
             // Generate data and calculate expected results
             std::vector<output_type> aggregates_expected;
@@ -462,9 +465,10 @@ TYPED_TEST(HipcubDeviceSegmentedReduce, Min)
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        for(size_t size : test_utils::get_sizes(seed_value))
+        for(size_t size : CHECK_SIZE_FILTERS(test_utils::get_sizes(seed_value)))
         {
             SCOPED_TRACE(testing::Message() << "with size= " << size);
+            CHECK_SIZE_ENABLEMENT(size);
 
             // Generate data and calculate expected results
             std::vector<output_type> aggregates_expected;
@@ -619,9 +623,10 @@ TYPED_TEST(HipcubDeviceSegmentedReduce, Max)
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        for(size_t size : test_utils::get_sizes(seed_value))
+        for(size_t size : CHECK_SIZE_FILTERS(test_utils::get_sizes(seed_value)))
         {
             SCOPED_TRACE(testing::Message() << "with size= " << size);
+            CHECK_SIZE_ENABLEMENT(size);
 
             // Generate data and calculate expected results
             std::vector<output_type> aggregates_expected;
@@ -827,9 +832,10 @@ void test_argminmax(typename TestFixture::params::input_type empty_value)
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        for(size_t size : test_utils::get_sizes(seed_value))
+        for(size_t size : CHECK_SIZE_FILTERS(test_utils::get_sizes(seed_value)))
         {
             SCOPED_TRACE(testing::Message() << "with size= " << size);
+            CHECK_SIZE_ENABLEMENT(size);
 
             // Generate data and calculate expected results
             std::vector<key_value> aggregates_expected;
@@ -1159,7 +1165,7 @@ TEST(HipcubDeviceSegmentedReduceLargeIndicesTests, LargeIndices)
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        const std::vector<size_t> sizes = test_utils::get_large_sizes(seed_value);
+        const std::vector<size_t> sizes = CHECK_SIZE_FILTERS(test_utils::get_large_sizes(seed_value));
 
         for(const auto size : sizes)
         {
