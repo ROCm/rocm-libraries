@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #include "common_test_header.hpp"
+#include "test_utils_controller.hpp"
 
 // required rocprim headers
 #include <hipcub/block/block_adjacent_difference.hpp>
@@ -45,7 +46,7 @@ struct params_subtract
 };
 
 template<class ParamsSubtract>
-class HipcubBlockAdjacentDifferenceSubtract : public ::testing::Test {
+class HipcubBlockAdjacentDifferenceSubtract : public test_controller::ControlledTest {
 public:
     using params_subtract = ParamsSubtract;
 };
@@ -261,6 +262,8 @@ TYPED_TEST(HipcubBlockAdjacentDifferenceSubtract, SubtractLeft)
     static constexpr int size = items_per_block * 20;
     static constexpr int grid_size = size / items_per_block;
 
+	CHECK_SIZE_ENABLEMENT(size);
+
     // Given block size not supported
     if(block_size > test_utils::get_max_block_size())
     {
@@ -362,6 +365,8 @@ TYPED_TEST(HipcubBlockAdjacentDifferenceSubtract, SubtractLeftPartialTile)
     static constexpr int items_per_block = block_size * items_per_thread;
     static constexpr int size = items_per_block * 20;
     static constexpr int grid_size = size / items_per_block;
+
+	CHECK_SIZE_ENABLEMENT(size);
 
     // Given block size not supported
     if(block_size > test_utils::get_max_block_size())
@@ -485,6 +490,8 @@ TYPED_TEST(HipcubBlockAdjacentDifferenceSubtract, SubtractRight)
     static constexpr int size = items_per_block * 20;
     static constexpr int grid_size = size / items_per_block;
 
+	CHECK_SIZE_ENABLEMENT(size);
+
     // Given block size not supported
     if(block_size > test_utils::get_max_block_size())
     {
@@ -586,6 +593,8 @@ TYPED_TEST(HipcubBlockAdjacentDifferenceSubtract, SubtractRightPartialTile)
     static constexpr int items_per_block = block_size * items_per_thread;
     static constexpr int size = items_per_block * 20;
     static constexpr int grid_size = size / items_per_block;
+
+	CHECK_SIZE_ENABLEMENT(size);
 
     // Given block size not supported
     if(block_size > test_utils::get_max_block_size())

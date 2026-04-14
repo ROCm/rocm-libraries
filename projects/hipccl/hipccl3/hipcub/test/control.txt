@@ -1,0 +1,137 @@
+# -----------------
+# Test Control File
+# -----------------
+#
+# This file lists tests that are disabled.
+# The format is:
+# /test_name_regex/ : /arch_regex/ : size_filter_expr[,size_filter_expr...] : build_type[, build_type...] : "skip_msg"
+#
+# Where:
+# - test_name_regex   : is a regular expression to match against the fully qualified name of the currently running test (TestSuiteName.TestName).
+# - arch_regex        : is a regular expression that may contain kewords, which will be matched against the gfx id of the current device (eg. gfx942).
+#                       Please see the section below for a full description of keywords.
+# - size_filter_expr  : is an expression that allows you to filter out ranges of sizes using operators (eg. <, >, ==, *).
+#                       You can also use basic arithmetic operators (+, -, *, /, <<, >>).
+#                       You can specify multiple size filter expressions and separate them with commas.
+#                       Please see the section below for a full description.
+# - build_type        : is a comman-delimited list of build types that will be used to restrict the scope of the current line.
+#                       For example, you can restrict the effect of the current line to only asan or valgrind builds (or cause it to
+#                       be applied to all builds). See the section below for details.
+# - skip_msg          : is a message to print to stdout when the test is skipped. Note: if environment variable HIPCUB_EXTRA_TC_INFO == 1,
+#                       then additional information about which test sizes were skipped, and which control file line number caused them to
+#                       be skipped is also printed.
+#
+# --------
+# Keywords
+# --------
+# Keywords are predifined regex snippets that match a number of related architectures. They must be specified within angle brackets.
+# You can embed them in the arch_regex.
+# For example, to specify that the given test(s) should be disabled on all mi300 architectures and on gfx1100, you could use this
+# arch_regex: /<mi300-family>|gfx1100/
+#
+# When this control file is processed, keywords are substituted for their regular expression equivalents.
+# eg. /<mi300-family>|gfx1100/ expands to /(gfx942, gfx950)|gfx1100/
+#
+# This allows you to quickly disable whole families of architectures without having to individually specify each one.
+# Here are some example keywords and the architectures they match:
+# - all           : all architectures
+# - apus          : gfx1103, gfx1150, gfx1151, gfx1152
+# - navi2x-family : gfx1030, gfx1031, gfx1032
+# - navi3x-family : gfx1100, gfx1101, gfx1102
+# - navi4x-family : gfx1200, gfx1201
+# - mi100-family  : gfx908
+# - mi200-family  : gfx90a
+# - mi300-family  : gfx942, gfx950
+#
+# For a full list of keywords and their regex equivalents, please see the definition of the keywords unordered map at the bottom of
+# the test/hipcub/test_utils_controller.hpp.in file.
+#
+# ------------------------
+# Size Filters Expressions
+# ------------------------
+# Size filter expressions allow you to filter out a range of sizes (or individual sizes) using operators. You can also use basic arithmetic operators
+# (-, +, *, /, <<, and >> are supported, in addition to parenthesis).
+# Size filter expression syntax is: <operator><arithmetic expression> | *
+# Where operator is one of:
+# <, >, <=, >=, or empty string
+# You can think of the empty string as an alias for ==. This allows you to filter out individual sizes.
+#
+# The arithmetic expression must be an expression that simplifies down to a single size value (the size to filter on).
+# For example, here is a size filter expression that filters out all sizes greater than 2^32:
+# > (1 << 32)
+# Operators have normal C++ precedence. For a list of precedences, see the precedence map in test/hipcub/test_utils_controller.hpp.in. 
+#
+# You can specify multiple size filter expressions by separating them with a comma. Filters are applied individually from left to right.
+# This is equivalent to combining them using a logical OR.
+#
+# Examples:
+# - This will cause matching tests (on apus) to skip any size greater than 1000.
+# /HipcubDeviceRadixSort\/.*/ : /<apus>/ : >1000 : "Sizes greater than 1000 are disabled on APUs."
+#
+# - This will cause matching tests (on apus) to skip the individual size 1000.
+# /HipcubDeviceRadixSort\/.*/ : /<apus>/ : 1000 : "Skipping size 1000 on APUs."
+#
+# - This will cause matching tests (on apus) to skip any size less than 50 or greater than 2^32 - 1.
+# /HipcubDeviceRadixSort\/.*/ : /<apus>/ : < 50, > (2 << 32) - 1 : "Skipping some size ranges on APUs."
+#
+# Alternatively, you can specify a '*' instead of <operator><arithmetic expression>. This will cause all sizes to be skipped
+# (ie. any matching test will be completely skipped).
+# For example, this completely skip the any matching test (no sizes will be run) on apus:
+# /HipcubDeviceRadixSort\/.*/ : /<apus>/ : * : "This test is disabled on APUs."
+#
+# -----------
+# Build Types
+# -----------
+# You can specify that the current line should only disable tests when running with one or more specific build types, or you can
+# allow the current line to disable tests when running with any build type.
+# Available build types options include "asan", "valgrind", and "*" (to specify all build types).
+# You can list multiple build types delimited with a comma. This is equivalent to combining them using a logical OR.
+#
+# Examples:
+# - This will cause matching tests (on any architecture) to be disabled when running an asan build.
+# /HipcubDeviceRadixSort\/.*/ : /<all>/ : * : asan : "Skipping test under ASAN."
+#
+# - This will cause matching tests (on any architecture) to be disabled when running an asan or a valgrind build.
+# /HipcubDeviceRadixSort\/.*/ : /<all>/ : * : asan, valgrind : "Skipping test under ASAN and Valgrind."
+#
+# - This will cause matching tests (on any architecture) to be disabled when running on any build type.
+# /HipcubDeviceRadixSort\/.*/ : /<all>/ : * : * : "Skipping test under all build types."
+#
+# -------
+# Caveats
+# -------
+# - regexes are sensitive to spaces, so those should be omitted unless you want to match them.
+#   For example, /(gfx1100|gfx1101) | gfx1200/ will not match "gfx1100" or "gfx1200" but will match "gfx1100 " or " gfx1200".
+#   To match all three architectures, you should omit the spaces: /(gfx1100|gfx1101)|gfx1200/
+#
+# - Remember to escape literal '.' and '/' characters in test names - otherwise they'll have their regex meaning.
+#
+# - Tests that are compiled in parallel may have a "Id<integer>/" prefix. This prefix is stripped out before regex matching
+#   on the test name takes place, so you should ignore it when writing test name regexes.
+#
+# - If multiple regexes cover the same test, then the architecture regexes and size filters from all rules will examined,
+#   in order from top to bottom.
+#
+# - The arithmetic expressions in size filter expressions use unsigned arithmetic.
+#
+# - There's a small difference between disabling all test sizes using "*" and using a size expression that disables all of the
+#   test sizes (eg >=0). With the "*", the test will not be run at all (GTEST_SKIP will be called). However, with the size expression
+#   that filters out all sizes, the test will be run, but this individual test sizes will all be skipped (i.e. the vector returned
+#   by CHECK_SIZE_FILTERS will be empty. This means that other test code that is unrelated to the sizes will still be run.
+
+# ---------------
+# Add rules here:
+#----------------
+
+# Test Regex                               :  Arch Regex                           : Sizes              : Build Types    : Skip Message
+/HipcubDeviceRadixSort\/.*/                :  /<apus>/                             : >= (1 << 32)       : *              : "Skipping sizes over 2^32 on APUs"
+/HipcubDeviceRadixSortLargeInput.*/        :  /<apus>/                             : >= (1 << 32)       : *              : "Skipping sizes over 2^32 on APUs"
+
+/HipcubDeviceMergeSort\/.*/                : /<apus>/                              : >= (1 << 32)       : *              : "Skipping sizes over 2^32 on APUs"
+
+/HipcubIteratorTests\/\d+\.TestTex.+/      : /<mi300-family>|navi4x-family|<apus>/ : *                  : *              : "Test not run on gfx94x, gfx95x, or gfx120x as texture cache API is not supported."
+
+/HipcubCachingDeviceAllocatorTests\.Test1/ : /all/                                 : *                  : valgrind, asan : "Skipping timing-sensitive test under Valgrind and ASAN."
+
+/HipcubDeviceSelectLargeIndicesTest\/HipcubDeviceSelectLargeIndicesTests\.LargeIndicesSelectOp\/\d+/    : /<all>/ : * : nvidia : "Test disabled for large sizes until support is present in CUB."
+

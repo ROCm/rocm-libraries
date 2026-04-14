@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #include "common_test_header.hpp"
+#include "test_utils_controller.hpp"
 
 // hipcub API
 #include <hipcub/block/block_scan.hpp>
@@ -43,7 +44,7 @@ struct params
 // ---------------------------------------------------------
 
 template<class Params>
-class HipcubBlockScanSingleValueTests : public ::testing::Test
+class HipcubBlockScanSingleValueTests : public test_controller::ControlledTest
 {
 public:
     using type                                             = typename Params::type;
@@ -1848,7 +1849,7 @@ TYPED_TEST(HipcubBlockScanSingleValueTests, ExclusiveSumPrefixCallback)
 // // ---------------------------------------------------------
 
 template<class Params>
-class HipcubBlockScanInputArrayTests : public ::testing::Test
+class HipcubBlockScanInputArrayTests : public test_controller::ControlledTest
 {
 public:
     using type                                                   = typename Params::type;

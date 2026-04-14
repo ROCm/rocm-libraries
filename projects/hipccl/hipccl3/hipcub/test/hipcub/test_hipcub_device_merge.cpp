@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #include "common_test_header.hpp"
+#include "test_utils_controller.hpp"
 
 // hipcub API
 #include <hipcub/device/device_merge.hpp>
@@ -38,7 +39,7 @@ struct params
 };
 
 template<class Params>
-class HipcubDeviceMerge : public ::testing::Test
+class HipcubDeviceMerge : public test_controller::ControlledTest
 {
 public:
     using params = Params;
@@ -115,6 +116,8 @@ TYPED_TEST(HipcubDeviceMerge, MergeKeys)
 
         const size_t size1 = std::get<0>(sizes);
         const size_t size2 = std::get<1>(sizes);
+        CHECK_SIZE_ENABLEMENT(size1);
+        CHECK_SIZE_ENABLEMENT(size2);
 
         // compare function
         compare_function compare_op;
@@ -269,6 +272,8 @@ TYPED_TEST(HipcubDeviceMerge, MergePairs)
 
         const size_t size1 = std::get<0>(sizes);
         const size_t size2 = std::get<1>(sizes);
+        CHECK_SIZE_ENABLEMENT(size1);
+        CHECK_SIZE_ENABLEMENT(size2);
 
         // compare function
         compare_function compare_op;
@@ -495,6 +500,8 @@ TEST(HipcubDeviceMerge, MergeLargeSizeIterators)
         const size_t size1       = std::get<0>(sizes);
         const size_t size2       = std::get<1>(sizes);
         const size_t output_size = size1 + size2;
+        CHECK_SIZE_ENABLEMENT(size1);
+        CHECK_SIZE_ENABLEMENT(size2);
 
         // compare function
         compare_function compare_op;

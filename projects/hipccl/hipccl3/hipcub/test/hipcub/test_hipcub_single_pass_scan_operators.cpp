@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #include "common_test_header.hpp"
+#include "test_utils_controller.hpp"
 #include "test_utils_custom_test_types.hpp"
 
 #include <hipcub/agent/single_pass_scan_operators.hpp>

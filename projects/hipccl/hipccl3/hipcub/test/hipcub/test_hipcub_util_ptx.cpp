@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #include "common_test_header.hpp"
+#include "test_utils_controller.hpp"
 #include "test_utils_bfloat16.hpp"
 #include "test_utils_data_generation.hpp"
 
@@ -75,7 +76,7 @@ struct params
 };
 
 template<class Params>
-class HipcubUtilPtxTests : public ::testing::Test
+class HipcubUtilPtxTests : public test_controller::ControlledTest
 {
 public:
     using type                                      = typename Params::type;
@@ -133,6 +134,7 @@ TYPED_TEST(HipcubUtilPtxTests, ShuffleUp)
                                                     ? HIPCUB_WARP_SIZE_32
                                                     : HIPCUB_WARP_SIZE_64;
     const size_t           size               = hardware_warp_size;
+    CHECK_SIZE_ENABLEMENT(size);
 
     if(logical_warp_size > current_device_warp_size)
     {
@@ -244,6 +246,7 @@ TYPED_TEST(HipcubUtilPtxTests, ShuffleDown)
                                                     ? HIPCUB_WARP_SIZE_32
                                                     : HIPCUB_WARP_SIZE_64;
     const size_t           size               = hardware_warp_size;
+    CHECK_SIZE_ENABLEMENT(size);
 
     if(logical_warp_size > current_device_warp_size)
     {
@@ -357,6 +360,7 @@ TYPED_TEST(HipcubUtilPtxTests, ShuffleIndex)
                                                     ? HIPCUB_WARP_SIZE_32
                                                     : HIPCUB_WARP_SIZE_64;
     const size_t           size               = hardware_warp_size;
+    CHECK_SIZE_ENABLEMENT(size);
 
     if(logical_warp_size > current_device_warp_size)
     {
