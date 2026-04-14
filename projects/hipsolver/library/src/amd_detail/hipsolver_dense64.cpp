@@ -133,63 +133,6 @@ rocblas_status rocsolver_zpotrf_info32(rocblas_handle          handle,
                                        const int64_t           lda,
                                        rocblas_int*            info);
 
-// Symmetric eigenvalue solver (strided batched) - NOTE: Currently only 32-bit versions exist in rocSOLVER
-rocblas_status rocsolver_ssyev_strided_batched(rocblas_handle       handle,
-                                               const rocblas_evect  evect,
-                                               const rocblas_fill   uplo,
-                                               const rocblas_int    n,
-                                               float*               A,
-                                               const rocblas_int    lda,
-                                               const rocblas_stride strideA,
-                                               float*               D,
-                                               const rocblas_stride strideD,
-                                               float*               E,
-                                               const rocblas_stride strideE,
-                                               rocblas_int*         info,
-                                               const rocblas_int    batch_count);
-
-rocblas_status rocsolver_dsyev_strided_batched(rocblas_handle       handle,
-                                               const rocblas_evect  evect,
-                                               const rocblas_fill   uplo,
-                                               const rocblas_int    n,
-                                               double*              A,
-                                               const rocblas_int    lda,
-                                               const rocblas_stride strideA,
-                                               double*              D,
-                                               const rocblas_stride strideD,
-                                               double*              E,
-                                               const rocblas_stride strideE,
-                                               rocblas_int*         info,
-                                               const rocblas_int    batch_count);
-
-rocblas_status rocsolver_cheev_strided_batched(rocblas_handle         handle,
-                                               const rocblas_evect    evect,
-                                               const rocblas_fill     uplo,
-                                               const rocblas_int      n,
-                                               rocblas_float_complex* A,
-                                               const rocblas_int      lda,
-                                               const rocblas_stride   strideA,
-                                               float*                 D,
-                                               const rocblas_stride   strideD,
-                                               float*                 E,
-                                               const rocblas_stride   strideE,
-                                               rocblas_int*           info,
-                                               const rocblas_int      batch_count);
-
-rocblas_status rocsolver_zheev_strided_batched(rocblas_handle          handle,
-                                               const rocblas_evect     evect,
-                                               const rocblas_fill      uplo,
-                                               const rocblas_int       n,
-                                               rocblas_double_complex* A,
-                                               const rocblas_int       lda,
-                                               const rocblas_stride    strideA,
-                                               double*                 D,
-                                               const rocblas_stride    strideD,
-                                               double*                 E,
-                                               const rocblas_stride    strideE,
-                                               rocblas_int*            info,
-                                               const rocblas_int       batch_count);
-
 /******************** PARAMS ********************/
 struct hipsolverParams
 {
