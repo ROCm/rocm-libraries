@@ -4,7 +4,7 @@
 #pragma once
 
 #include "BackendDescriptor.hpp"
-#include <hipdnn_data_sdk/data_objects/knob_value_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/knob_value_generated.h>
 
 #include <optional>
 #include <string>
@@ -41,7 +41,7 @@ public:
     /// Construct a finalized KnobDescriptor from a deserialized KnobT.
     /// Returns nullptr if the knob has an unsupported default value type.
     static std::shared_ptr<KnobDescriptor>
-        fromKnobT(const hipdnn_data_sdk::data_objects::KnobT& knobNative);
+        fromKnobT(const hipdnn_flatbuffers_sdk::data_objects::KnobT& knobNative);
 
     void finalize() override;
 
@@ -57,7 +57,7 @@ public:
                       const void* arrayOfElements) override;
 
     /// Convert to a KnobT for consumption by other components
-    std::unique_ptr<hipdnn_data_sdk::data_objects::KnobT> toKnobT() const;
+    std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::KnobT> toKnobT() const;
 
     static hipdnnBackendDescriptorType_t getStaticType();
 
@@ -69,7 +69,7 @@ private:
     std::string _description;
 
     // Default value (polymorphic: int64, double, or string); NONE until set
-    hipdnn_data_sdk::data_objects::KnobValueUnion _defaultValue;
+    hipdnn_flatbuffers_sdk::data_objects::KnobValueUnion _defaultValue;
 
     // Deprecation flag
     bool _deprecated = false;

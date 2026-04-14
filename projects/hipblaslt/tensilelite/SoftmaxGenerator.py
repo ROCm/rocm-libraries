@@ -117,6 +117,7 @@ class SoftmaxKernelGenerator:
         self.numerically_stable = True
         self.debug_label = True
         self.arch = arch
+        self.isa = isa
         self.op = 'Softmax'
 
     def _validate(self):
@@ -124,7 +125,7 @@ class SoftmaxKernelGenerator:
 
     @property
     def lds_usage_byte(self) -> int:
-        return self.num_cols * self.num_rows * self.io_type.numBytes()
+        return self.num_cols * self.num_rows * int(self.io_type.numBytes())
 
     @property
     def func_name(self):
@@ -226,7 +227,31 @@ class SoftmaxKernelGenerator:
 
     @property
     def bpe(self) -> int:
-        return self.io_type.numBytes()
+        return int(self.io_type.numBytes())
+
+    def shiftSrd(self, srdIdx):
+        module = Module()
+        if self.isa[0] == 12 and self.isa[1] == 5:
+            stmp = self.sgpr_pool.checkOutAligned(1, 1)
+            module.add(ri.SAndB32(sgpr(stmp), sgpr(srdIdx+2), 0x7F))
+            module.add(ri.SLShiftLeftB32(sgpr(stmp), 25, sgpr(stmp)))
+            module.add(ri.SAndB32(sgpr(srdIdx+1), sgpr(srdIdx+1), 0x1FFFFFF))
+            module.add(ri.SOrB32(sgpr(srdIdx+1), sgpr(srdIdx+1), sgpr(stmp)))
+            module.add(ri.SLShiftRightB32(sgpr(srdIdx+2), 7, sgpr(srdIdx+2)))
+            self.sgpr_pool.checkIn(stmp)
+        return module
+
+    def shiftSrd(self, srdIdx):
+        module = Module()
+        if self.isa[0] == 12 and self.isa[1] == 5:
+            stmp = self.sgpr_pool.checkOutAligned(1, 1)
+            module.add(ri.SAndB32(sgpr(stmp), sgpr(srdIdx+2), 0x7F))
+            module.add(ri.SLShiftLeftB32(sgpr(stmp), 25, sgpr(stmp)))
+            module.add(ri.SAndB32(sgpr(srdIdx+1), sgpr(srdIdx+1), 0x1FFFFFF))
+            module.add(ri.SOrB32(sgpr(srdIdx+1), sgpr(srdIdx+1), sgpr(stmp)))
+            module.add(ri.SLShiftRightB32(sgpr(srdIdx+2), 7, sgpr(srdIdx+2)))
+            self.sgpr_pool.checkIn(stmp)
+        return module
 
     def load_kernel_args(self):
         kernel_args_addr = 0
@@ -249,6 +274,8 @@ class SoftmaxKernelGenerator:
         module.add(ri.SMovB32(sgpr(output_srd_idx + 2), sgpr(num_elem_reg_idx)))
         module.add(ri.SMovB32(sgpr(input_srd_idx + 3), self.srd_const))
         module.add(ri.SMovB32(sgpr(output_srd_idx + 3), self.srd_const))
+        module.add(self.shiftSrd(input_srd_idx))
+        module.add(self.shiftSrd(output_srd_idx))
         if _global_ti.getArchCaps()["WorkGroupIdFromTTM"]:
             module.add(ri.SMovB32(dst=sgpr(self.wg_id_reg_idx), src="ttmp9"))
         self.sgpr_pool.checkIn(num_elem_reg_idx)

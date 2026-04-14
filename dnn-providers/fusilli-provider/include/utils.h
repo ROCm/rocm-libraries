@@ -165,6 +165,8 @@ fusilliDataTypeToIreeHalDataType(fusilli::DataType fusilliDataType) {
     return fusilli::ok(IREE_HAL_ELEMENT_TYPE_INT_16);
   case fusilli::DataType::Int32:
     return fusilli::ok(IREE_HAL_ELEMENT_TYPE_INT_32);
+  case fusilli::DataType::Int4:
+    return fusilli::ok(IREE_HAL_ELEMENT_TYPE_SINT_4);
   case fusilli::DataType::Int64:
     return fusilli::ok(IREE_HAL_ELEMENT_TYPE_INT_64);
   case fusilli::DataType::Boolean:
