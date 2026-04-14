@@ -24,7 +24,7 @@ class ExampleProviderContainer;
 // detached buffer lifetime methods are framework plumbing; no operation-specific changes are needed.
 // If your plugin requires additional per-session state, add members here.
 
-/// Handle for the example plugin.
+/// Handle for the plugin.
 ///
 /// Inherits from HipdnnEnginePluginHandle for opaque pointer compatibility.
 /// Manages the HIP stream, plugin container, and detached FlatBuffers buffers.

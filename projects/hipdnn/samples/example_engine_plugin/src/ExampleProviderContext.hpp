@@ -15,7 +15,7 @@
 // Forward declaration
 struct ExampleProviderHandle;
 
-/// Execution context for the example plugin.
+/// Execution context for the plugin.
 ///
 /// Inherits from:
 /// - HipdnnEnginePluginExecutionContext: opaque pointer compatibility

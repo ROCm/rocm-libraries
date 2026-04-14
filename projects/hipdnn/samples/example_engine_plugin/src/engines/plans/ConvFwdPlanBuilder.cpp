@@ -82,7 +82,7 @@ size_t ConvFwdPlanBuilder::getMaxWorkspaceSize(
     const hipdnn_data_sdk::flatbuffer_utilities::IGraph& /*opGraph*/,
     const ExampleProviderSettings& /*executionSettings*/) const
 {
-    // The convolution kernel in this example does not require a workspace.
+    // The convolution kernel in this engine does not require a workspace.
     return 0;
 }
 
