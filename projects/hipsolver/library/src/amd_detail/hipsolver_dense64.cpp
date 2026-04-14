@@ -898,8 +898,8 @@ try
     *lworkOnHost   = 0;
 
     // rocSOLVER does not yet have 64-bit syev_strided_batched; validate args fit in 32-bit
-    if(n > INT_MAX || lda > INT_MAX || batchSize > INT_MAX)
-        return HIPSOLVER_STATUS_INVALID_VALUE;
+    if(n > INT_MAX || lda > INT_MAX || batchSize > INT_MAX || int64_t(lda) * n > INT_MAX)
+        return HIPSOLVER_STATUS_INTERNAL_ERROR;
 
     size_t sz;
     rocblas_start_device_memory_size_query((rocblas_handle)handle);
@@ -1033,8 +1033,8 @@ try
         return HIPSOLVER_STATUS_INVALID_VALUE;
 
     // rocSOLVER does not yet have 64-bit syev_strided_batched; validate args fit in 32-bit
-    if(n > INT_MAX || lda > INT_MAX || batchSize > INT_MAX)
-        return HIPSOLVER_STATUS_INVALID_VALUE;
+    if(n > INT_MAX || lda > INT_MAX || batchSize > INT_MAX || int64_t(lda) * n > INT_MAX)
+        return HIPSOLVER_STATUS_INTERNAL_ERROR;
 
     // Calculate E workspace size
     size_t e_workspace_size = 0;
