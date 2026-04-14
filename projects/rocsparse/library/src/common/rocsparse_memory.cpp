@@ -272,7 +272,13 @@ hipError_t rocsparse::execution_t::call_malloc_async(void** p_that, size_t size,
     ++this->count_calls[func_t::hip_malloc_async];
     this->m_last_call = func_t::hip_malloc_async;
     ++this->ncalls;
+
+// if hip version is atleast 5.3.0 hipMallocAsync and hipFreeAsync are defined
+#if HIP_VERSION >= 50300000
     return hipMallocAsync(p_that, size, stream);
+#else
+    return hipMalloc(p_that, size);
+#endif
 }
 
 hipError_t rocsparse::execution_t::call_free_async(void* that, hipStream_t stream)
@@ -283,7 +289,12 @@ hipError_t rocsparse::execution_t::call_free_async(void* that, hipStream_t strea
     ++this->count_calls[func_t::hip_free_async];
     this->m_last_call = func_t::hip_free_async;
     ++this->ncalls;
+    // if hip version is atleast 5.3.0 hipMallocAsync and hipFreeAsync are defined
+#if HIP_VERSION >= 50300000
     return hipFreeAsync(that, stream);
+#else
+    return hipFree(that);
+#endif
 }
 
 hipError_t rocsparse::execution_t::call_malloc(void** p_that, size_t size)
