@@ -78,24 +78,20 @@ test_categories:
       - "full"
       - "weekly"
 
-# Uncomment and populate to exclude specific tests on certain GPU architectures.
-# exclude_gpu:
-#   exclude_gpu_gfx11X:
-#     test_patterns:
-#       - "*test_pattern_that_fails_on_gfx11*"
-#     labels:
-#       - "quick"
-#       - "pre_checkin"
-#       - "nightly"
-#       - "ex_gpu_gfx11X"
-#
-#   exclude_gpu_gfx1150:
-#     test_patterns:
-#       - "*test_pattern_specific_to_gfx1150*"
-#     labels:
-#       - "quick"
-#       - "pre_checkin"
-#       - "ex_gpu_gfx1150"
+# GPU-specific CTest suites (hipsparse-test_{category}_gfx1151_suite) exclude f64 real/complex
+# parameterized tests on Strix Halo (gfx1151). Run those *_gfx1151_* tests on that hardware;
+# other GPUs use the standard category suites without these exclusions.
+exclude_gpu:
+  exclude_gpu_gfx1151:
+    test_patterns:
+      - "*f64_r*"
+      - "*f64_c*"
+    labels:
+      - quick
+      - standard
+      - comprehensive
+      - full
+      - ex_gpu_gfx1151
 
 execution_settings:
   timeout_multiplier: 1
