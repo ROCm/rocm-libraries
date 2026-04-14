@@ -3,32 +3,36 @@
 
 #include <cstdio>
 #include <gtest/gtest.h>
+#include <hipdnn_frontend/Types.hpp>
 
-#include "HipKernelContext.hpp"
-#include "HipKernelHandle.hpp"
-#include "engines/plans/batchnorm/BatchnormPlanBuilder.hpp"
-#include "mocks/MockCompiledProgram.hpp"
-#include "mocks/MockDevicePropertyProvider.hpp"
-#include "mocks/MockKernelCompiler.hpp"
-#include "mocks/MockRunnableKernel.hpp"
-
-#include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_data_sdk/data_objects/graph_generated.h>
+#include <hipdnn_plugin_sdk/EnginePluginApi.h>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/MockEngineConfig.hpp>
 #include <hipdnn_test_sdk/utilities/MockGraph.hpp>
 #include <hipdnn_test_sdk/utilities/MockNode.hpp>
 
-using hipdnn_test_sdk::utilities::MockEngineConfig;
+#include "HipKernelContext.hpp"
+#include "HipKernelHandle.hpp"
+#include "HipKernelSettings.hpp"
+#include "engines/plans/layernorm/LayernormPlanBuilder.hpp"
+#include "mocks/MockCompiledProgram.hpp"
+#include "mocks/MockDevicePropertyProvider.hpp"
+#include "mocks/MockKernelCompiler.hpp"
+#include "mocks/MockRunnableKernel.hpp"
 
-namespace hip_kernel_provider::batchnorm::test
+using namespace hipdnn_test_sdk::utilities;
+using namespace hipdnn_data_sdk::flatbuffer_utilities;
+
+namespace hip_kernel_provider::layernorm::test
 {
 
-class TestBatchnormPlanBuilder : public ::testing::Test
+class TestLayernormPlanBuilder : public ::testing::Test
 {
 protected:
     MockKernelCompiler _mockKernelCompiler;
     MockDevicePropertyProvider _mockDevicePropertyProvider;
-    BatchnormPlanBuilder _planBuilder{_mockKernelCompiler, _mockDevicePropertyProvider};
+    LayernormPlanBuilder _planBuilder{_mockKernelCompiler, _mockDevicePropertyProvider};
     HipKernelHandle _dummyHandle;
     MockEngineConfig _mockEngineConfig;
 
@@ -59,18 +63,9 @@ protected:
 // isApplicable - valid graphs
 // ============================================================================
 
-TEST_F(TestBatchnormPlanBuilder, IsApplicableReturnsTrueForValidInferenceGraph)
+TEST_F(TestLayernormPlanBuilder, IsApplicableReturnsTrueForValidInferenceGraph)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                              builder.GetSize());
-
-    EXPECT_TRUE(_planBuilder.isApplicable(_dummyHandle, graph));
-}
-
-TEST_F(TestBatchnormPlanBuilder, IsApplicableReturnsTrueForValidFwdTrainingGraph)
-{
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph();
+    auto builder = hipdnn_test_sdk::utilities::createValidLayernormFpropGraph();
     hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                               builder.GetSize());
 
@@ -81,37 +76,28 @@ TEST_F(TestBatchnormPlanBuilder, IsApplicableReturnsTrueForValidFwdTrainingGraph
 // isApplicable - invalid graphs
 // ============================================================================
 
-TEST_F(TestBatchnormPlanBuilder, IsApplicableReturnsFalseForThreeNodeGraph)
+TEST_F(TestLayernormPlanBuilder, IsApplicableReturnsFalseForTwoNodeGraph)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferActBwdGraph();
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                              builder.GetSize());
+    MockGraph mockGraph;
+    EXPECT_CALL(mockGraph, nodeCount()).WillRepeatedly(::testing::Return(2));
+    // nodeWrappers is only used in an all_of check which will pass when it's empty
+    std::vector<std::unique_ptr<INodeWrapper>> nodeWrappers;
+    EXPECT_CALL(mockGraph, nodeWrappers()).WillRepeatedly(::testing::ReturnRef(nodeWrappers));
 
-    EXPECT_FALSE(_planBuilder.isApplicable(_dummyHandle, graph));
+    bool applicable = _planBuilder.isApplicable(_dummyHandle, mockGraph);
+
+    EXPECT_FALSE(applicable);
 }
 
 // ============================================================================
 // buildPlan - valid graphs
 // ============================================================================
 
-TEST_F(TestBatchnormPlanBuilder, BuildPlanSetsPlanForSingleNodeInference)
+TEST_F(TestLayernormPlanBuilder, BuildPlanSetsPlanForSingleNode)
 {
     setupMockCompileChain();
 
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                              builder.GetSize());
-    HipKernelContext ctx;
-
-    EXPECT_NO_THROW(_planBuilder.buildPlan(_dummyHandle, graph, _mockEngineConfig, ctx));
-    EXPECT_TRUE(ctx.hasValidPlan());
-}
-
-TEST_F(TestBatchnormPlanBuilder, BuildPlanSetsPlanForSingleNodeFwdTraining)
-{
-    setupMockCompileChain();
-
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph();
+    auto builder = hipdnn_test_sdk::utilities::createValidLayernormFpropGraph();
     hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                               builder.GetSize());
     HipKernelContext ctx;
@@ -124,19 +110,9 @@ TEST_F(TestBatchnormPlanBuilder, BuildPlanSetsPlanForSingleNodeFwdTraining)
 // getMaxWorkspaceSize
 // ============================================================================
 
-TEST_F(TestBatchnormPlanBuilder, GetMaxWorkspaceSizeReturnsZero)
+TEST_F(TestLayernormPlanBuilder, GetMaxWorkspaceSizeReturnsZero)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                              builder.GetSize());
-    HipKernelSettings settings;
-
-    EXPECT_EQ(_planBuilder.getMaxWorkspaceSize(_dummyHandle, graph, settings), 0u);
-}
-
-TEST_F(TestBatchnormPlanBuilder, GetMaxWorkspaceSizeReturnsZeroForFwdTrainingGraph)
-{
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph();
+    auto builder = hipdnn_test_sdk::utilities::createValidLayernormFpropGraph();
     hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                               builder.GetSize());
     HipKernelSettings settings;
@@ -148,9 +124,9 @@ TEST_F(TestBatchnormPlanBuilder, GetMaxWorkspaceSizeReturnsZeroForFwdTrainingGra
 // getCustomKnobs
 // ============================================================================
 
-TEST_F(TestBatchnormPlanBuilder, GetCustomKnobsReturnsEmpty)
+TEST_F(TestLayernormPlanBuilder, GetCustomKnobsReturnsEmpty)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
+    auto builder = hipdnn_test_sdk::utilities::createValidLayernormFpropGraph();
     hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                               builder.GetSize());
 
@@ -158,14 +134,4 @@ TEST_F(TestBatchnormPlanBuilder, GetCustomKnobsReturnsEmpty)
     EXPECT_TRUE(knobs.empty());
 }
 
-TEST_F(TestBatchnormPlanBuilder, GetCustomKnobsReturnsEmptyForFwdTrainingGraph)
-{
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph();
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                              builder.GetSize());
-
-    auto knobs = _planBuilder.getCustomKnobs(_dummyHandle, graph);
-    EXPECT_TRUE(knobs.empty());
-}
-
-} // namespace hip_kernel_provider::batchnorm::test
+} // namespace hip_kernel_provider::layernorm::test
