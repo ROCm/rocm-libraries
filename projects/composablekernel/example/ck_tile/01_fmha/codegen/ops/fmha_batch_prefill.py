@@ -87,7 +87,8 @@ using fmha_trait_{F_idx} = ck_tile::TileFmhaBatchPrefillTraits<{F_spad},
                                                     {F_sink},
                                                     {F_page_size},
                                                     {F_kv_memory_layout},
-                                                    {F_kv_lookup_table}>;
+                                                    {F_kv_lookup_table},
+                                                    {F_use_64bit_load}>;
 
 using fmha_variant_{F_idx} = ck_tile::ComposedAttention<{F_logits} * ck_tile::LOGITS_SOFT_CAP, CK_TILE_FMHA_FWD_FAST_EXP2>;
 
@@ -125,7 +126,7 @@ using fmha_kernel_{F_idx} =
     ck_tile::FmhaBatchPrefillWithPagedKVCacheKernel<fmha_pipeline_{F_idx}, fmha_epilogue_{F_idx}>;
 
 using trait_{F_idx} = fmha_fwd_batch_prefill_traits_<{F_hdim}, {F_dtype}, {F_mode},{F_bm0}, {F_bn0}, {F_bk0}, {F_bn1}, {F_bk1}, {F_bk0max}, {F_vlayout},
-                        {F_pipeline_enum}, {F_logits}, fmha_mask_{F_idx}, {F_bias}, {F_lse}, {F_dropout}, {F_qscale}, {F_spad}, {F_skpad}, {F_dpad}, {F_dvpad}, false, false, {F_sink}, {F_page_size}, {F_kv_memory_layout}, {F_kv_lookup_table}>;
+                        {F_pipeline_enum}, {F_logits}, fmha_mask_{F_idx}, {F_bias}, {F_lse}, {F_dropout}, {F_qscale}, {F_spad}, {F_skpad}, {F_dpad}, {F_dvpad}, false, false, {F_sink}, {F_page_size}, {F_kv_memory_layout}, {F_kv_lookup_table}, {F_use_64bit_load}>;
 
 #include <iostream>
 
@@ -203,8 +204,8 @@ FMHA_FWD_API_PER_HDIM_CASE = """        {F_if} (t.hdim_q <= {F_hdim} && t.hdim_v
 """
 
 FMHA_FWD_API_INNER_DISPATCH = """            {F_if}((t.is_group_mode == {F_mode}) && (t.is_v_rowmajor == {F_vlayout}) && (t.has_logits_soft_cap == {F_logits}) && ({F_mask_check}) && (t.bias_type == {F_bias_check}) && (t.has_lse == {F_lse})  && (t.has_dropout == {F_dropout}) && (t.qscale_type == {F_qscale_check}) && (t.has_sink == {F_sink}) &&
-                        ({F_scheck}) && ({F_skcheck}) && ({F_dcheck}) && ({F_dvcheck}) && ({F_constraint}) && (t.kv_memory_layout == {F_kv_memory_layout}) && (t.kv_lookup_table == {F_kv_lookup_table}) && (t.page_size == {F_page_size})) {{
-                using trait_ = fmha_fwd_batch_prefill_traits_<{F_hdim}, {F_dtype}, {F_mode}, {F_bm0}, {F_bn0}, {F_bk0}, {F_bn1}, {F_bk1}, {F_bk0max}, {F_vlayout}, {F_pipeline_enum}, {F_logits}, {F_mask}, {F_bias}, {F_lse}, {F_dropout}, {F_qscale}, {F_spad}, {F_skpad}, {F_dpad}, {F_dvpad}, false, false, {F_sink}, {F_page_size}, {F_kv_memory_layout}, {F_kv_lookup_table}>;
+                        ({F_scheck}) && ({F_skcheck}) && ({F_dcheck}) && ({F_dvcheck}) && ({F_constraint}) && (t.kv_memory_layout == {F_kv_memory_layout}) && (t.kv_lookup_table == {F_kv_lookup_table}) && (t.page_size == {F_page_size}) && (t.use_64bit_load == {F_use_64bit_load})) {{
+                using trait_ = fmha_fwd_batch_prefill_traits_<{F_hdim}, {F_dtype}, {F_mode}, {F_bm0}, {F_bn0}, {F_bk0}, {F_bn1}, {F_bk1}, {F_bk0max}, {F_vlayout}, {F_pipeline_enum}, {F_logits}, {F_mask}, {F_bias}, {F_lse}, {F_dropout}, {F_qscale}, {F_spad}, {F_skpad}, {F_dpad}, {F_dvpad}, false, false, {F_sink}, {F_page_size}, {F_kv_memory_layout}, {F_kv_lookup_table}, {F_use_64bit_load}>;
                 return fmha_batch_prefill_<trait_>(s, a);
             }}
 """
@@ -253,12 +254,14 @@ class FmhaFwdApiTrait:
     kv_memory_layout: str
     kv_lookup_table: str
     page_size: int = 1  # page block size
+    use_64bit_load: bool = False  # use flat 64-bit loads for >4GB KV cache
 
     @property
     def name(self) -> str:
         return (
             f"{self.hdim}-{self.dtype}-{self.mode}-{self.bm0}-{self.bn0}-{self.bk0}-{self.bn0}-{self.bk1}-{self.bk0max}-"
             + f"{self.vlayout}-{self.logits}-{self.mask}-{self.bias}-{self.lse}-{self.dropout}-{self.qscale}-{self.spad}-{self.skpad}-{self.dpad}-{self.dvpad}-{self.kv_memory_layout}-{self.kv_lookup_table}-ps{self.page_size}"
+            + ("-64bit" if self.use_64bit_load else "")
         )
 
     @property
@@ -481,6 +484,7 @@ class FmhaFwdApiPool:
                         ],
                         F_page_size=trait.page_size,
                         F_sink=BOOL_MAP[trait.sink],
+                        F_use_64bit_load=BOOL_MAP["t" if trait.use_64bit_load else "f"],
                     )
                 if_j = "if" if j == 0 else "else if"
                 per_hdim_case = per_hdim_case + FMHA_FWD_API_PER_HDIM_CASE.format(
@@ -539,6 +543,7 @@ class FmhaFwdKernel:
     F_pipeline: FmhaFwdPipeline
     mask_impl: str
     F_page_size: int = 1  # page block size
+    F_use_64bit_load: bool = False  # use flat 64-bit loads for >4GB KV cache
 
     @property
     def template(self) -> str:
@@ -588,6 +593,7 @@ class FmhaFwdKernel:
             F_pipeline=FMHA_BATCH_PREFILL_PIPELINE_MAP[self.F_pipeline.tag],
             F_page_size=self.F_page_size,
             F_sink=BOOL_MAP[self.F_pipeline.F_sink],
+            F_use_64bit_load=BOOL_MAP["t" if self.F_use_64bit_load else "f"],
         )
 
     @property
@@ -595,6 +601,7 @@ class FmhaFwdKernel:
         # TODO: we don't encode idx here
         return (
             f"fmha_batch_prefill_d{self.F_hdim}_{self.F_dtype}_{self.F_mode}_ps{self.F_page_size}_"
+            + ("64bit_" if self.F_use_64bit_load else "")
             + self.F_tile.name
             + "_"
             + self.F_pipeline.name
@@ -632,6 +639,7 @@ class FmhaFwdKernel:
             kv_memory_layout=self.F_pipeline.F_kv_memory_layout,
             kv_lookup_table=self.F_pipeline.F_kv_lookup_table,
             page_size=self.F_page_size,
+            use_64bit_load=self.F_use_64bit_load,
         )
 
 
@@ -836,6 +844,24 @@ def get_fwd_blobs(
 
                     api_pool.register_traits(k.api_trait())
                     gen.append(k)
+
+                    # For page_size < kN0 (tile.F_bn0), also generate a kUse64BitLoad=true
+                    # variant for >4GB KV cache support. The default (false) uses SRD buffer_load
+                    # (fast, <4GB). The 64-bit variant uses flat loads (slower, handles >4GB).
+                    if page_size < tile.F_bn0:
+                        k_64bit = FmhaFwdKernel(
+                            F_idx=0,
+                            F_hdim=hdim,
+                            F_dtype=dtype,
+                            F_mode=mode,
+                            F_tile=tile,
+                            F_pipeline=pipeline,
+                            mask_impl=mask_impl,
+                            F_page_size=page_size,
+                            F_use_64bit_load=True,
+                        )
+                        api_pool.register_traits(k_64bit.api_trait())
+                        gen.append(k_64bit)
 
     return (api_pool, gen)
 

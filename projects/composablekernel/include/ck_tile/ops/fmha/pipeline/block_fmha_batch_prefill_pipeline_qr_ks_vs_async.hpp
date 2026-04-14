@@ -134,7 +134,8 @@ template <typename IndexArrayType,
           BlockAttentionKVCacheMemoryLayoutEnum kKVMemoryLayout,
           bool kIsKcache,
           index_t kN0,
-          index_t kVectorSize>
+          index_t kVectorSize,
+          bool kUseFlatLoad_ = false>
 CK_TILE_HOST_DEVICE void kv_offset_array_transform(const IndexArrayType& physical_pages,
                                                    const index_t& stride_token,
                                                    const index_t& stride_page_block,
@@ -156,56 +157,63 @@ CK_TILE_HOST_DEVICE void kv_offset_array_transform(const IndexArrayType& physica
     const index_t& thread_coord_start   = coord_vec[kCoordAxis];
     constexpr index_t kInPageOffsetMask = (1 << kLog2PageSize) - 1;
 
+    // Offset strategy:
+    //   kPageBlockSize >= kN0: within-page offset (SRD rebased to page base)
+    //   kPageBlockSize <  kN0 && kUseFlatLoad_: within-page offset (flat load uses
+    //   physical_pages[]) kPageBlockSize <  kN0 && !kUseFlatLoad_: FULL offset (page * stride +
+    //   within_page) for
+    //     direct buffer_load with 32-bit voffset — the original code path, fast but limited to <4GB
+    constexpr bool kNeedFullOffset = (kPageBlockSize < kN0) && !kUseFlatLoad_;
+
     if constexpr(kIsKcache)
     {
         // K cache: per-token lookup
-        // Each token may be on a different page, so we use physical_pages[k0] for each.
         static_for<0, kLoopCount, 1>{}([&](auto k0) {
             const index_t global_token_idx =
                 global_seq_offset + thread_coord_start + kLoopStart + kLoopStride * k0.value;
             const index_t token_idx_in_page = global_token_idx & kInPageOffsetMask;
 
-            // Store within-page offset only.
-            // For kPageBlockSize >= kN0: the full page base is handled by SRD rebase.
-            // For kPageBlockSize <  kN0: the full page base is handled by 64-bit flat
-            //   addressing (global_load_lds) or per-tile SRD rebase.
-            kv_offset_vec[k0] = token_idx_in_page * stride_token;
+            if constexpr(kNeedFullOffset)
+            {
+                const index_t physical_page = physical_pages[k0];
+                kv_offset_vec[k0] =
+                    physical_page * stride_page_block + token_idx_in_page * stride_token;
+            }
+            else
+            {
+                kv_offset_vec[k0] = token_idx_in_page * stride_token;
+            }
         });
     }
     else // V cache
     {
-        // V cache: use physical_pages[k0] for each token
-        // physical_pages was already populated correctly by load_physical_pages(), handling:
-        //   - page_size=1: page_idx maps token_idx -> physical_page directly
-        //   - V tile crosses pages: per-token page lookup
-        //   - V tile in single page: lane0 lookup with broadcast to all lanes
         static_for<0, kLoopCount, 1>{}([&](auto k0) {
             const index_t global_token_idx =
                 global_seq_offset + thread_coord_start + kLoopStart + kLoopStride * k0.value;
             const index_t token_idx_in_page = global_token_idx & kInPageOffsetMask;
 
-            if constexpr(kPageBlockSize >= kN0)
+            if constexpr(kNeedFullOffset)
             {
-                // SRD rebasing mode: within-page offset only.
-                // The full page base is handled by rebasing the SRD pointer.
+                const index_t physical_page = physical_pages[k0];
+                const long_index_t page_base =
+                    static_cast<long_index_t>(physical_page) * stride_page_block;
+
                 if constexpr(kKVMemoryLayout ==
                              BlockAttentionKVCacheMemoryLayoutEnum::VECTORIZED_LAYOUT)
                 {
                     const index_t token_offset =
                         (token_idx_in_page / kVectorSize) * (stride_token * kVectorSize) +
                         (token_idx_in_page % kVectorSize);
-                    kv_offset_vec[k0] = token_offset;
+                    kv_offset_vec[k0] = page_base + token_offset;
                 }
                 else
                 {
-                    kv_offset_vec[k0] = token_idx_in_page * stride_token;
+                    kv_offset_vec[k0] = page_base + token_idx_in_page * stride_token;
                 }
             }
             else
             {
-                // Within-page offset only: page base is handled by flat 64-bit
-                // addressing in load_tile_flat (via physical_pages array).
-                // Note: physical_pages[] carries the page index separately.
+                // Within-page offset only: page base handled by SRD rebase or flat load
                 if constexpr(kKVMemoryLayout ==
                              BlockAttentionKVCacheMemoryLayoutEnum::VECTORIZED_LAYOUT)
                 {
@@ -219,9 +227,6 @@ CK_TILE_HOST_DEVICE void kv_offset_array_transform(const IndexArrayType& physica
                     kv_offset_vec[k0] = token_idx_in_page * stride_token;
                 }
             }
-            // Note: K also uses within-page offsets here (line 172 above).
-            // Both K and V rely on physical_pages[] for the page base,
-            // computed via 64-bit arithmetic in load_flat/async_load_raw_flat.
         });
     }
 }
@@ -262,11 +267,14 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSAsync
     static constexpr index_t kQKHeaddim     = BlockFmhaShape::kQKHeaddim;
     static constexpr index_t kSubQKHeaddim  = BlockFmhaShape::kSubQKHeaddim;
     static constexpr index_t kPageBlockSize = Problem::kPageBlockSize;
+    static constexpr bool kUse64BitLoad     = Problem::kUse64BitLoad;
     static constexpr index_t kVectorSize    = Problem::kVectorSize;
-    static constexpr auto I0                = number<0>{};
-    static constexpr auto I1                = number<1>{};
-    static constexpr auto I2                = number<2>{};
-    static constexpr auto I3                = number<3>{};
+    // Effective condition for flat 64-bit loads: kUse64BitLoad AND page_size < kN0
+    static constexpr bool kUseFlatLoad = kUse64BitLoad && (kPageBlockSize < kN0);
+    static constexpr auto I0           = number<0>{};
+    static constexpr auto I1           = number<1>{};
+    static constexpr auto I2           = number<2>{};
+    static constexpr auto I3           = number<3>{};
 
     static_assert(kSubQKHeaddim <= 256, "hdim bigger than 256 is not suitable for this pipeline!");
     static constexpr bool kIsGroupMode = Problem::kIsGroupMode;
@@ -619,25 +627,9 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSAsync
                                   kKVMemoryLayout,
                                   true,
                                   kN0,
-                                  kVectorSize>(
+                                  kVectorSize,
+                                  kUseFlatLoad>(
             k_physical_pages, stride_k, page_stride_k, k_coord, k_offsets, current_seq_k);
-
-        // V wave min page for per-tile SRD rebase (page_size < kN0)
-        index_t v_wave_min_page = 0;
-
-        // Lambda: compute wave-level min physical page and adjust offsets to be relative.
-        auto compute_min_and_adjust_offsets = [](auto& physical_pages,
-                                                 auto& offsets,
-                                                 index_t page_stride,
-                                                 auto NPages) {
-            index_t thread_min = physical_pages[number<0>{}];
-            static_for<1, decltype(NPages)::value, 1>{}(
-                [&](auto k) { thread_min = min(thread_min, physical_pages[k]); });
-            const index_t wave_min    = wave_reduce_min(thread_min);
-            const index_t base_offset = wave_min * page_stride;
-            static_for<0, decltype(NPages)::value, 1>{}([&](auto k) { offsets[k] -= base_offset; });
-            return wave_min;
-        };
 
         // K load helper: use flat 64-bit loads for page_size < kN0,
         // SRD-based buffer loads for page_size >= kN0.
@@ -655,7 +647,7 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSAsync
         k_dram_window.init_raw();
 
         // SRD rebasing for K: only for page_size >= kN0 (all threads on same page).
-        // For page_size < kN0, K uses flat 64-bit loads (no SRD needed).
+        // For page_size < kN0: either flat loads (kUseFlatLoad) or full offsets handle addressing.
         auto rebase_k_window = [&](auto& window, index_t physical_page) {
             if constexpr(kPageBlockSize >= kN0)
             {
@@ -669,8 +661,7 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSAsync
         };
 
         // SRD rebasing for V: only for page_size >= kN0 (all threads on same page).
-        // For page_size < kN0, V uses flat 64-bit loads (load_tile_flat) which
-        // compute addresses independently — no SRD rebase needed.
+        // For page_size < kN0: either flat loads (kUseFlatLoad) or full offsets handle addressing.
         auto rebase_v_window = [&](auto& window, index_t physical_page) {
             if constexpr(kPageBlockSize >= kN0)
             {
@@ -897,12 +888,13 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSAsync
                                               kKVMemoryLayout,
                                               false,
                                               kN0,
-                                              kVectorSize>(v_physical_pages_k2,
-                                                           stride_v,
-                                                           page_stride_v,
-                                                           v_coord,
-                                                           v_offsets_k2,
-                                                           current_seq_k);
+                                              kVectorSize,
+                                              kUseFlatLoad>(v_physical_pages_k2,
+                                                            stride_v,
+                                                            page_stride_v,
+                                                            v_coord,
+                                                            v_offsets_k2,
+                                                            current_seq_k);
 
                     static_for<0, V_KIterInner, 1>{}([&](auto k1) {
                         constexpr auto idx = number<k1.value + k2.value * V_KIterInner>{};
@@ -922,7 +914,8 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSAsync
                                           kKVMemoryLayout,
                                           false,
                                           kN0,
-                                          kVectorSize>(
+                                          kVectorSize,
+                                          kUseFlatLoad>(
                     v_physical_pages, stride_v, page_stride_v, v_coord, v_offsets, current_seq_k);
             }
 
@@ -961,7 +954,7 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSAsync
         // instead of SRD rebase, so no init_raw/rebase needed.
 
         // prefetch K tile: use flat 64-bit loads for page_size < kN0
-        if constexpr(kPageBlockSize < kN0)
+        if constexpr(kUseFlatLoad)
         {
             async_load_tile_raw_flat(k_lds_store(LdsSeq.at(number<0>{})),
                                      k_dram_window,
@@ -1028,7 +1021,7 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSAsync
 
             // Save current physical pages before prefetch overwrites them
             // (load_tile_flat needs pages aligned with current page_idx_)
-            if constexpr(kPageBlockSize < kN0)
+            if constexpr(kUseFlatLoad)
                 v_physical_pages_current = v_physical_pages;
             // Prefetch V physical pages early - overlaps with GEMM0 computation
             prefetch_v_physical_pages(number<kK1>{});
@@ -1038,7 +1031,7 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSAsync
             if constexpr(k0_loops > 1)
             {
                 static_for<0, k0_loops - 1, 1>{}([&](auto i_k0) {
-                    if constexpr(kPageBlockSize < kN0)
+                    if constexpr(kUseFlatLoad)
                     {
                         async_load_tile_raw_flat(
                             k_lds_store(number<LdsSeq.at(number<i_k0 + 1>{})>{}),
@@ -1092,7 +1085,7 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSAsync
             __builtin_amdgcn_sched_barrier(1);
 
             auto v_buf = [&]() {
-                if constexpr(kPageBlockSize < kN0)
+                if constexpr(kUseFlatLoad)
                     return load_tile_flat(
                         v_dram_window, v_physical_pages_current, v_page_stride_bytes);
                 else
@@ -1101,9 +1094,7 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSAsync
             // V physical pages already prefetched before GEMM0
             update_v_offsets(number<kK1>{});
             v_dram_window.update_page_idx(v_offsets);
-            rebase_v_window(v_dram_window,
-                            kPageBlockSize >= kN0 ? v_physical_pages[number<0>{}]
-                                                  : v_wave_min_page);
+            rebase_v_window(v_dram_window, v_physical_pages[number<0>{}]);
 
             // KV_BLOCKSCALE: apply k_descale to s_acc (dequantize QK result)
             if constexpr(QScaleEnum == BlockAttentionQuantScaleEnum::KV_BLOCKSCALE)
@@ -1246,7 +1237,7 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSAsync
                 // Prefetch V physical pages early - overlaps with softmax computation
                 if constexpr(k1_loops > 1)
                 {
-                    if constexpr(kPageBlockSize < kN0)
+                    if constexpr(kUseFlatLoad)
                         v_physical_pages_current = v_physical_pages;
                     prefetch_v_physical_pages(number<2 * kK1>{});
                 }
@@ -1302,16 +1293,14 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSAsync
                         v_dram_window,
                         {0,
                          kK1}); // will have scratch if move this right after load_tile(v_dram)...
-                    if constexpr(kPageBlockSize < kN0)
+                    if constexpr(kUseFlatLoad)
                         v_buf = load_tile_flat(
                             v_dram_window, v_physical_pages_current, v_page_stride_bytes);
                     else
                         v_buf = load_tile(v_dram_window, number<-1>{}, bool_constant<false>{});
                     update_v_offsets(number<2 * kK1>{});
                     v_dram_window.update_page_idx(v_offsets);
-                    rebase_v_window(v_dram_window,
-                                    kPageBlockSize >= kN0 ? v_physical_pages[number<0>{}]
-                                                          : v_wave_min_page);
+                    rebase_v_window(v_dram_window, v_physical_pages[number<0>{}]);
                 }
                 __builtin_amdgcn_sched_barrier(0);
 
@@ -1477,7 +1466,7 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSAsync
                 static_for<0, k1_loops - 1, 1>{}([&](auto i_k1) {
                     if constexpr(i_k1 != 0 && i_k1 < k1_loops - 1)
                     {
-                        if constexpr(kPageBlockSize < kN0)
+                        if constexpr(kUseFlatLoad)
                             v_buf = load_tile_flat(
                                 v_dram_window, v_physical_pages_current, v_page_stride_bytes);
                         else
@@ -1485,15 +1474,13 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSAsync
                         // Update V offsets using previously prefetched physical pages
                         update_v_offsets(number<(2 + i_k1.value) * kK1>{});
                         v_dram_window.update_page_idx(v_offsets);
-                        rebase_v_window(v_dram_window,
-                                        kPageBlockSize >= kN0 ? v_physical_pages[number<0>{}]
-                                                              : v_wave_min_page);
+                        rebase_v_window(v_dram_window, v_physical_pages[number<0>{}]);
                     }
 
                     // Prefetch V physical pages for NEXT iteration - overlaps with GEMM1
                     if constexpr(i_k1 + 1 < k1_loops - 1)
                     {
-                        if constexpr(kPageBlockSize < kN0)
+                        if constexpr(kUseFlatLoad)
                             v_physical_pages_current = v_physical_pages;
                         prefetch_v_physical_pages(number<(2 + i_k1.value + 1) * kK1>{});
                     }
@@ -1575,7 +1562,8 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSAsync
                                           kKVMemoryLayout,
                                           true,
                                           kN0,
-                                          kVectorSize>(
+                                          kVectorSize,
+                                          kUseFlatLoad>(
                     k_physical_pages, stride_k, page_stride_k, k_coord, k_offsets, current_seq_k);
                 k_dram_window.update_page_idx(k_offsets);
                 rebase_k_window(k_dram_window, k_physical_pages[number<0>{}]);
@@ -1597,7 +1585,7 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSAsync
                 if constexpr(k1_loops >= 2 &&
                              LdsSeq.at(number<0>{}) == LdsSeq.at(number<k0_loops + k1_loops - 2>{}))
                     __builtin_amdgcn_s_barrier();
-                if constexpr(kPageBlockSize < kN0)
+                if constexpr(kUseFlatLoad)
                 {
                     async_load_tile_raw_flat(k_lds_store(LdsSeq.at(number<0>{})),
                                              k_dram_window,
