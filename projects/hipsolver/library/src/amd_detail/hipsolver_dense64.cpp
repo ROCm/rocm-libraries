@@ -1036,15 +1036,11 @@ try
     if(n > INT_MAX || lda > INT_MAX || batchSize > INT_MAX || int64_t(lda) * n > INT_MAX)
         return HIPSOLVER_STATUS_INTERNAL_ERROR;
 
-    // Calculate E workspace size
+    // Calculate E workspace size (E has same type as W -- real eigenvalues)
     size_t e_workspace_size = 0;
-    if(dataTypeA == HIP_R_32F && dataTypeW == HIP_R_32F && computeType == HIP_R_32F)
+    if(dataTypeW == HIP_R_32F)
         e_workspace_size = sizeof(float) * n * batchSize;
-    else if(dataTypeA == HIP_R_64F && dataTypeW == HIP_R_64F && computeType == HIP_R_64F)
-        e_workspace_size = sizeof(double) * n * batchSize;
-    else if(dataTypeA == HIP_C_32F && dataTypeW == HIP_R_32F && computeType == HIP_C_32F)
-        e_workspace_size = sizeof(float) * n * batchSize;
-    else if(dataTypeA == HIP_C_64F && dataTypeW == HIP_R_64F && computeType == HIP_C_64F)
+    else if(dataTypeW == HIP_R_64F)
         e_workspace_size = sizeof(double) * n * batchSize;
 
     rocblas_device_malloc mem((rocblas_handle)handle);
