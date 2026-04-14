@@ -134,9 +134,10 @@ public:
         const auto headsPerHeadK = numHeads / numHeadsK;
         const auto headsPerHeadV = numHeads / numHeadsV;
 
-        const float scale = attnScaleValue.has_value()
-                                ? attnScaleValue.value()
-                                : (1.0f / std::sqrt(static_cast<float>(headDim)));
+        const auto scale = attnScaleValue.has_value()
+                               ? static_cast<ComputeDataType>(attnScaleValue.value())
+                               : (static_cast<ComputeDataType>(1.0)
+                                  / std::sqrt(static_cast<ComputeDataType>(headDim)));
 
         const std::vector<int64_t> parallelDims = {batch, numHeads, seqQ};
 
@@ -148,14 +149,15 @@ public:
             const auto kvHeadV = h / headsPerHeadV;
 
             // Step 1: Compute scaled dot-product scores S[skv]
-            std::vector<float> scores(static_cast<size_t>(seqKv));
+            std::vector<ComputeDataType> scores(static_cast<size_t>(seqKv));
             for(int64_t skv = 0; skv < seqKv; ++skv)
             {
-                float dot = 0.0f;
+                auto dot = static_cast<ComputeDataType>(0.0);
                 for(int64_t d = 0; d < headDim; ++d)
                 {
-                    dot += static_cast<float>(q.getHostValue(std::vector<int64_t>{b, h, sq, d}))
-                           * static_cast<float>(
+                    dot += static_cast<ComputeDataType>(
+                               q.getHostValue(std::vector<int64_t>{b, h, sq, d}))
+                           * static_cast<ComputeDataType>(
                                k.getHostValue(std::vector<int64_t>{b, kvHeadK, skv, d}));
                 }
                 scores[static_cast<size_t>(skv)] = dot * scale;
@@ -183,7 +185,7 @@ public:
                             = (maskDims[static_cast<size_t>(i)] == 1) ? 0 : outputIdx;
                     }
                     scores[static_cast<size_t>(skv)]
-                        += static_cast<float>(attnMask->getHostValue(maskIndices));
+                        += static_cast<ComputeDataType>(attnMask->getHostValue(maskIndices));
                 }
             }
 
@@ -192,14 +194,15 @@ public:
             {
                 for(int64_t skv = sq + 1; skv < seqKv; ++skv)
                 {
-                    scores[static_cast<size_t>(skv)] = -std::numeric_limits<float>::infinity();
+                    scores[static_cast<size_t>(skv)]
+                        = -std::numeric_limits<ComputeDataType>::infinity();
                 }
             }
 
             // Step 4: Numerically stable softmax over skv
-            const float maxVal = *std::max_element(scores.begin(), scores.end());
-            std::vector<float> probs(static_cast<size_t>(seqKv));
-            float sumExp = 0.0f;
+            const auto maxVal = *std::max_element(scores.begin(), scores.end());
+            std::vector<ComputeDataType> probs(static_cast<size_t>(seqKv));
+            auto sumExp = static_cast<ComputeDataType>(0.0);
             for(int64_t skv = 0; skv < seqKv; ++skv)
             {
                 probs[static_cast<size_t>(skv)]
@@ -217,18 +220,18 @@ public:
             // For fully masked rows (sumExp = 0), log(0) = -inf which is correct.
             if(lse != nullptr)
             {
-                const float lseVal = maxVal + std::log(sumExp);
+                const auto lseVal = static_cast<float>(maxVal + std::log(sumExp));
                 lse->setHostValue(lseVal, std::vector<int64_t>{b, h, sq});
             }
 
             // Step 5: Weighted sum over V to produce O
             for(int64_t dv = 0; dv < headDimV; ++dv)
             {
-                float acc = 0.0f;
+                auto acc = static_cast<ComputeDataType>(0.0);
                 for(int64_t skv = 0; skv < seqKv; ++skv)
                 {
                     acc += probs[static_cast<size_t>(skv)]
-                           * static_cast<float>(
+                           * static_cast<ComputeDataType>(
                                v.getHostValue(std::vector<int64_t>{b, kvHeadV, skv, dv}));
                 }
                 o.setHostValue(hipdnn_test_sdk::detail::safeConvert<ODataType>(acc),
@@ -424,239 +427,247 @@ public:
         dK.fillWithValue(hipdnn_test_sdk::detail::safeConvert<DKDataType>(0.0));
         dV.fillWithValue(hipdnn_test_sdk::detail::safeConvert<DVDataType>(0.0));
 
-        const std::vector<int64_t> parallelDims = {batch, numHeadsQ, seqQ};
-
-        auto sdpaBwdFunc = [&](const std::vector<int64_t>& indices) {
-            const auto b = indices[0];
-            const auto hQ = indices[1];
-            const auto sq = indices[2];
-            const auto kvHeadK = hQ / headsPerHeadKv;
-            const auto kvHeadV = hQ / headsPerHeadKv;
-
-            // Allocate temporary buffers for this query position
-            std::vector<ComputeDataType> scores(static_cast<size_t>(seqKv));
-            std::vector<ComputeDataType> probs(static_cast<size_t>(seqKv));
-            std::vector<ComputeDataType> dpBuffer(static_cast<size_t>(seqKv));
-
-            // Step 1: Compute D[b, hQ, sq] = sum(dO[b, hQ, sq, :] * O[b, hQ, sq, :])
-            auto dVal = static_cast<ComputeDataType>(0.0);
-            for(int64_t dv = 0; dv < headDimV; ++dv)
+        // Sequential loop over [B, H_q, Sq]: multiple sq positions accumulate
+        // into the same dK/dV entries, and in GQA multiple Q heads also share
+        // K/V heads, so this cannot be parallelized without atomics.
+        for(int64_t b = 0; b < batch; ++b)
+        {
+            for(int64_t hQ = 0; hQ < numHeadsQ; ++hQ)
             {
-                const auto doVal = static_cast<ComputeDataType>(
-                    dO.getHostValue(std::vector<int64_t>{b, hQ, sq, dv}));
-                const auto oVal = static_cast<ComputeDataType>(
-                    o.getHostValue(std::vector<int64_t>{b, hQ, sq, dv}));
-                dVal += doVal * oVal;
-            }
-
-            // Step 2: Recompute attention scores and probabilities
-            // Option A: Use LSE if available (efficient)
-            // Option B: Recompute softmax from scratch
-            if(lse != nullptr)
-            {
-                // Efficient recomputation using LSE from forward pass
-                const float lseVal = lse->getHostValue(std::vector<int64_t>{b, hQ, sq});
-
-                for(int64_t skv = 0; skv < seqKv; ++skv)
+                for(int64_t sq = 0; sq < seqQ; ++sq)
                 {
-                    // Apply causal mask
-                    if(causalMask && skv > sq)
+                    const auto kvHeadK = hQ / headsPerHeadKv;
+                    const auto kvHeadV = hQ / headsPerHeadKv;
+
+                    // Allocate temporary buffers for this query position
+                    std::vector<ComputeDataType> scores(static_cast<size_t>(seqKv));
+                    std::vector<ComputeDataType> probs(static_cast<size_t>(seqKv));
+                    std::vector<ComputeDataType> dpBuffer(static_cast<size_t>(seqKv));
+
+                    // Step 1: Compute D[b,hQ,sq] = sum(dO[b,hQ,sq,:] * O[b,hQ,sq,:])
+                    auto dVal = static_cast<ComputeDataType>(0.0);
+                    for(int64_t dv = 0; dv < headDimV; ++dv)
                     {
-                        scores[static_cast<size_t>(skv)]
-                            = -std::numeric_limits<ComputeDataType>::infinity();
-                        probs[static_cast<size_t>(skv)] = static_cast<ComputeDataType>(0.0);
-                        continue;
+                        const auto doVal = static_cast<ComputeDataType>(
+                            dO.getHostValue(std::vector<int64_t>{b, hQ, sq, dv}));
+                        const auto oVal = static_cast<ComputeDataType>(
+                            o.getHostValue(std::vector<int64_t>{b, hQ, sq, dv}));
+                        dVal += doVal * oVal;
                     }
 
-                    // Compute QK dot product
-                    auto qkDot = static_cast<ComputeDataType>(0.0);
-                    for(int64_t d = 0; d < headDim; ++d)
+                    // Step 2: Recompute attention scores and probabilities
+                    // Option A: Use LSE if available (efficient)
+                    // Option B: Recompute softmax from scratch
+                    if(lse != nullptr)
                     {
-                        qkDot += static_cast<ComputeDataType>(
-                                     q.getHostValue(std::vector<int64_t>{b, hQ, sq, d}))
-                                 * static_cast<ComputeDataType>(
-                                     k.getHostValue(std::vector<int64_t>{b, kvHeadK, skv, d}));
-                    }
-                    scores[static_cast<size_t>(skv)] = qkDot * static_cast<ComputeDataType>(scale);
+                        // Efficient recomputation using LSE from forward pass
+                        const float lseVal = lse->getHostValue(std::vector<int64_t>{b, hQ, sq});
 
-                    // Apply additive attention mask if provided
-                    if(attnMask != nullptr)
-                    {
-                        const auto& maskDims = attnMask->dims();
-                        const auto maskRank = static_cast<int64_t>(maskDims.size());
-                        constexpr int64_t K_OUTPUT_CONTEXT_RANK = 4;
-
-                        const std::array<int64_t, K_OUTPUT_CONTEXT_RANK> ctxIdxs = {b, hQ, sq, skv};
-                        std::vector<int64_t> maskIndices(static_cast<size_t>(maskRank));
-                        for(int64_t i = 0; i < maskRank; ++i)
+                        for(int64_t skv = 0; skv < seqKv; ++skv)
                         {
-                            const auto outputDimIdx
-                                = static_cast<size_t>(K_OUTPUT_CONTEXT_RANK - maskRank + i);
-                            const auto outputIdx = ctxIdxs[outputDimIdx];
-                            maskIndices[static_cast<size_t>(i)]
-                                = (maskDims[static_cast<size_t>(i)] == 1) ? 0 : outputIdx;
+                            // Apply causal mask
+                            if(causalMask && skv > sq)
+                            {
+                                scores[static_cast<size_t>(skv)]
+                                    = -std::numeric_limits<ComputeDataType>::infinity();
+                                probs[static_cast<size_t>(skv)] = static_cast<ComputeDataType>(0.0);
+                                continue;
+                            }
+
+                            // Compute QK dot product
+                            auto qkDot = static_cast<ComputeDataType>(0.0);
+                            for(int64_t d = 0; d < headDim; ++d)
+                            {
+                                qkDot += static_cast<ComputeDataType>(
+                                             q.getHostValue(std::vector<int64_t>{b, hQ, sq, d}))
+                                         * static_cast<ComputeDataType>(k.getHostValue(
+                                             std::vector<int64_t>{b, kvHeadK, skv, d}));
+                            }
+                            scores[static_cast<size_t>(skv)]
+                                = qkDot * static_cast<ComputeDataType>(scale);
+
+                            // Apply additive attention mask if provided
+                            if(attnMask != nullptr)
+                            {
+                                const auto& maskDims = attnMask->dims();
+                                const auto maskRank = static_cast<int64_t>(maskDims.size());
+                                constexpr int64_t K_OUTPUT_CONTEXT_RANK = 4;
+
+                                const std::array<int64_t, K_OUTPUT_CONTEXT_RANK> ctxIdxs
+                                    = {b, hQ, sq, skv};
+                                std::vector<int64_t> maskIndices(static_cast<size_t>(maskRank));
+                                for(int64_t i = 0; i < maskRank; ++i)
+                                {
+                                    const auto outputDimIdx
+                                        = static_cast<size_t>(K_OUTPUT_CONTEXT_RANK - maskRank + i);
+                                    const auto outputIdx = ctxIdxs[outputDimIdx];
+                                    maskIndices[static_cast<size_t>(i)]
+                                        = (maskDims[static_cast<size_t>(i)] == 1) ? 0 : outputIdx;
+                                }
+                                scores[static_cast<size_t>(skv)] += static_cast<ComputeDataType>(
+                                    attnMask->getHostValue(maskIndices));
+                            }
+
+                            // Recompute probability using LSE:
+                            // P[skv] = exp(score[skv] - lse)
+                            // where lse = maxVal + log(sumExp)
+                            probs[static_cast<size_t>(skv)]
+                                = std::exp(scores[static_cast<size_t>(skv)]
+                                           - static_cast<ComputeDataType>(lseVal));
                         }
-                        scores[static_cast<size_t>(skv)]
-                            += static_cast<ComputeDataType>(attnMask->getHostValue(maskIndices));
-                    }
-
-                    // Recompute probability using LSE:
-                    // P[skv] = exp(score[skv] - lse)
-                    // where lse = maxVal + log(sumExp)
-                    probs[static_cast<size_t>(skv)] = std::exp(
-                        scores[static_cast<size_t>(skv)] - static_cast<ComputeDataType>(lseVal));
-                }
-            }
-            else
-            {
-                // Recompute softmax from scratch (no LSE available)
-                ComputeDataType maxVal = -std::numeric_limits<ComputeDataType>::infinity();
-
-                for(int64_t skv = 0; skv < seqKv; ++skv)
-                {
-                    // Apply causal mask
-                    if(causalMask && skv > sq)
-                    {
-                        scores[static_cast<size_t>(skv)]
-                            = -std::numeric_limits<ComputeDataType>::infinity();
-                        continue;
-                    }
-
-                    // Compute QK dot product
-                    auto qkDot = static_cast<ComputeDataType>(0.0);
-                    for(int64_t d = 0; d < headDim; ++d)
-                    {
-                        qkDot += static_cast<ComputeDataType>(
-                                     q.getHostValue(std::vector<int64_t>{b, hQ, sq, d}))
-                                 * static_cast<ComputeDataType>(
-                                     k.getHostValue(std::vector<int64_t>{b, kvHeadK, skv, d}));
-                    }
-                    scores[static_cast<size_t>(skv)] = qkDot * static_cast<ComputeDataType>(scale);
-
-                    // Apply additive attention mask if provided
-                    if(attnMask != nullptr)
-                    {
-                        const auto& maskDims = attnMask->dims();
-                        const auto maskRank = static_cast<int64_t>(maskDims.size());
-                        constexpr int64_t K_OUTPUT_CONTEXT_RANK = 4;
-
-                        const std::array<int64_t, K_OUTPUT_CONTEXT_RANK> ctxIdxs = {b, hQ, sq, skv};
-                        std::vector<int64_t> maskIndices(static_cast<size_t>(maskRank));
-                        for(int64_t i = 0; i < maskRank; ++i)
-                        {
-                            const auto outputDimIdx
-                                = static_cast<size_t>(K_OUTPUT_CONTEXT_RANK - maskRank + i);
-                            const auto outputIdx = ctxIdxs[outputDimIdx];
-                            maskIndices[static_cast<size_t>(i)]
-                                = (maskDims[static_cast<size_t>(i)] == 1) ? 0 : outputIdx;
-                        }
-                        scores[static_cast<size_t>(skv)]
-                            += static_cast<ComputeDataType>(attnMask->getHostValue(maskIndices));
-                    }
-
-                    maxVal = std::max(maxVal, scores[static_cast<size_t>(skv)]);
-                }
-
-                // Compute softmax probabilities
-                auto sumExp = static_cast<ComputeDataType>(0.0);
-                for(int64_t skv = 0; skv < seqKv; ++skv)
-                {
-                    if(scores[static_cast<size_t>(skv)]
-                       == -std::numeric_limits<ComputeDataType>::infinity())
-                    {
-                        probs[static_cast<size_t>(skv)] = static_cast<ComputeDataType>(0.0);
                     }
                     else
                     {
-                        probs[static_cast<size_t>(skv)]
-                            = std::exp(scores[static_cast<size_t>(skv)] - maxVal);
-                        sumExp += probs[static_cast<size_t>(skv)];
+                        // Recompute softmax from scratch (no LSE available)
+                        auto maxVal = -std::numeric_limits<ComputeDataType>::infinity();
+
+                        for(int64_t skv = 0; skv < seqKv; ++skv)
+                        {
+                            // Apply causal mask
+                            if(causalMask && skv > sq)
+                            {
+                                scores[static_cast<size_t>(skv)]
+                                    = -std::numeric_limits<ComputeDataType>::infinity();
+                                continue;
+                            }
+
+                            // Compute QK dot product
+                            auto qkDot = static_cast<ComputeDataType>(0.0);
+                            for(int64_t d = 0; d < headDim; ++d)
+                            {
+                                qkDot += static_cast<ComputeDataType>(
+                                             q.getHostValue(std::vector<int64_t>{b, hQ, sq, d}))
+                                         * static_cast<ComputeDataType>(k.getHostValue(
+                                             std::vector<int64_t>{b, kvHeadK, skv, d}));
+                            }
+                            scores[static_cast<size_t>(skv)]
+                                = qkDot * static_cast<ComputeDataType>(scale);
+
+                            // Apply additive attention mask if provided
+                            if(attnMask != nullptr)
+                            {
+                                const auto& maskDims = attnMask->dims();
+                                const auto maskRank = static_cast<int64_t>(maskDims.size());
+                                constexpr int64_t K_OUTPUT_CONTEXT_RANK = 4;
+
+                                const std::array<int64_t, K_OUTPUT_CONTEXT_RANK> ctxIdxs
+                                    = {b, hQ, sq, skv};
+                                std::vector<int64_t> maskIndices(static_cast<size_t>(maskRank));
+                                for(int64_t i = 0; i < maskRank; ++i)
+                                {
+                                    const auto outputDimIdx
+                                        = static_cast<size_t>(K_OUTPUT_CONTEXT_RANK - maskRank + i);
+                                    const auto outputIdx = ctxIdxs[outputDimIdx];
+                                    maskIndices[static_cast<size_t>(i)]
+                                        = (maskDims[static_cast<size_t>(i)] == 1) ? 0 : outputIdx;
+                                }
+                                scores[static_cast<size_t>(skv)] += static_cast<ComputeDataType>(
+                                    attnMask->getHostValue(maskIndices));
+                            }
+
+                            maxVal = std::max(maxVal, scores[static_cast<size_t>(skv)]);
+                        }
+
+                        // Compute softmax probabilities
+                        auto sumExp = static_cast<ComputeDataType>(0.0);
+                        for(int64_t skv = 0; skv < seqKv; ++skv)
+                        {
+                            if(scores[static_cast<size_t>(skv)]
+                               == -std::numeric_limits<ComputeDataType>::infinity())
+                            {
+                                probs[static_cast<size_t>(skv)] = static_cast<ComputeDataType>(0.0);
+                            }
+                            else
+                            {
+                                probs[static_cast<size_t>(skv)]
+                                    = std::exp(scores[static_cast<size_t>(skv)] - maxVal);
+                                sumExp += probs[static_cast<size_t>(skv)];
+                            }
+                        }
+                        for(int64_t skv = 0; skv < seqKv; ++skv)
+                        {
+                            probs[static_cast<size_t>(skv)] /= sumExp;
+                        }
+                    }
+
+                    // Step 3: Compute dP = dO @ V^T
+                    for(int64_t skv = 0; skv < seqKv; ++skv)
+                    {
+                        auto dpVal = static_cast<ComputeDataType>(0.0);
+                        for(int64_t dv = 0; dv < headDimV; ++dv)
+                        {
+                            const auto doVal = static_cast<ComputeDataType>(
+                                dO.getHostValue(std::vector<int64_t>{b, hQ, sq, dv}));
+                            const auto vVal = static_cast<ComputeDataType>(
+                                v.getHostValue(std::vector<int64_t>{b, kvHeadV, skv, dv}));
+                            dpVal += doVal * vVal;
+                        }
+                        dpBuffer[static_cast<size_t>(skv)] = dpVal;
+                    }
+
+                    // Step 4: Compute dS = P * (dP - D)  [softmax backward]
+                    // and accumulate gradients
+                    for(int64_t skv = 0; skv < seqKv; ++skv)
+                    {
+                        if(causalMask && skv > sq)
+                        {
+                            continue;
+                        }
+
+                        const ComputeDataType dsVal = probs[static_cast<size_t>(skv)]
+                                                      * (dpBuffer[static_cast<size_t>(skv)] - dVal);
+                        const ComputeDataType dsScaled
+                            = dsVal * static_cast<ComputeDataType>(scale);
+
+                        // dQ[b, hQ, sq, d] += dS[skv] * K[b, kvHeadK, skv, d] * scale
+                        for(int64_t d = 0; d < headDim; ++d)
+                        {
+                            const auto kVal = static_cast<ComputeDataType>(
+                                k.getHostValue(std::vector<int64_t>{b, kvHeadK, skv, d}));
+                            const auto dqContrib = dsScaled * kVal;
+
+                            const auto currentDq
+                                = dQ.getHostValue(std::vector<int64_t>{b, hQ, sq, d});
+                            dQ.setHostValue(
+                                hipdnn_test_sdk::detail::safeConvert<DQDataType>(
+                                    static_cast<ComputeDataType>(currentDq) + dqContrib),
+                                std::vector<int64_t>{b, hQ, sq, d});
+                        }
+
+                        // dK[b, kvHeadK, skv, d] += dS[skv] * Q[b, hQ, sq, d] * scale
+                        // Note: For GQA, multiple Q heads accumulate to same K head
+                        for(int64_t d = 0; d < headDim; ++d)
+                        {
+                            const auto qVal = static_cast<ComputeDataType>(
+                                q.getHostValue(std::vector<int64_t>{b, hQ, sq, d}));
+                            const auto dkContrib = dsScaled * qVal;
+
+                            const auto currentDk
+                                = dK.getHostValue(std::vector<int64_t>{b, kvHeadK, skv, d});
+                            dK.setHostValue(
+                                hipdnn_test_sdk::detail::safeConvert<DKDataType>(
+                                    static_cast<ComputeDataType>(currentDk) + dkContrib),
+                                std::vector<int64_t>{b, kvHeadK, skv, d});
+                        }
+
+                        // dV[b, kvHeadV, skv, dv] += P[skv] * dO[b, hQ, sq, dv]
+                        for(int64_t dv = 0; dv < headDimV; ++dv)
+                        {
+                            const auto doVal = static_cast<ComputeDataType>(
+                                dO.getHostValue(std::vector<int64_t>{b, hQ, sq, dv}));
+                            const auto dvContrib = probs[static_cast<size_t>(skv)] * doVal;
+
+                            const auto currentDv
+                                = dV.getHostValue(std::vector<int64_t>{b, kvHeadV, skv, dv});
+                            dV.setHostValue(
+                                hipdnn_test_sdk::detail::safeConvert<DVDataType>(
+                                    static_cast<ComputeDataType>(currentDv) + dvContrib),
+                                std::vector<int64_t>{b, kvHeadV, skv, dv});
+                        }
                     }
                 }
-                for(int64_t skv = 0; skv < seqKv; ++skv)
-                {
-                    probs[static_cast<size_t>(skv)]
-                        /= (sumExp + static_cast<ComputeDataType>(1e-12));
-                }
             }
-
-            // Step 3: Compute dP = dO @ V^T
-            for(int64_t skv = 0; skv < seqKv; ++skv)
-            {
-                auto dpVal = static_cast<ComputeDataType>(0.0);
-                for(int64_t dv = 0; dv < headDimV; ++dv)
-                {
-                    const auto doVal = static_cast<ComputeDataType>(
-                        dO.getHostValue(std::vector<int64_t>{b, hQ, sq, dv}));
-                    const auto vVal = static_cast<ComputeDataType>(
-                        v.getHostValue(std::vector<int64_t>{b, kvHeadV, skv, dv}));
-                    dpVal += doVal * vVal;
-                }
-                dpBuffer[static_cast<size_t>(skv)] = dpVal;
-            }
-
-            // Step 4: Compute dS = P * (dP - D)  [softmax backward]
-            // and accumulate gradients
-            for(int64_t skv = 0; skv < seqKv; ++skv)
-            {
-                if(causalMask && skv > sq)
-                {
-                    continue;
-                }
-
-                const ComputeDataType dsVal
-                    = probs[static_cast<size_t>(skv)] * (dpBuffer[static_cast<size_t>(skv)] - dVal);
-                const ComputeDataType dsScaled = dsVal * static_cast<ComputeDataType>(scale);
-
-                // dQ[b, hQ, sq, d] += dS[skv] * K[b, kvHeadK, skv, d] * scale
-                for(int64_t d = 0; d < headDim; ++d)
-                {
-                    const auto kVal = static_cast<ComputeDataType>(
-                        k.getHostValue(std::vector<int64_t>{b, kvHeadK, skv, d}));
-                    const auto dqContrib = dsScaled * kVal;
-
-                    const auto currentDq = dQ.getHostValue(std::vector<int64_t>{b, hQ, sq, d});
-                    dQ.setHostValue(hipdnn_test_sdk::detail::safeConvert<DQDataType>(
-                                        static_cast<ComputeDataType>(currentDq) + dqContrib),
-                                    std::vector<int64_t>{b, hQ, sq, d});
-                }
-
-                // dK[b, kvHeadK, skv, d] += dS[skv] * Q[b, hQ, sq, d] * scale
-                // Note: For GQA, multiple Q heads accumulate to same K head
-                for(int64_t d = 0; d < headDim; ++d)
-                {
-                    const auto qVal = static_cast<ComputeDataType>(
-                        q.getHostValue(std::vector<int64_t>{b, hQ, sq, d}));
-                    const auto dkContrib = dsScaled * qVal;
-
-                    const auto currentDk
-                        = dK.getHostValue(std::vector<int64_t>{b, kvHeadK, skv, d});
-                    dK.setHostValue(hipdnn_test_sdk::detail::safeConvert<DKDataType>(
-                                        static_cast<ComputeDataType>(currentDk) + dkContrib),
-                                    std::vector<int64_t>{b, kvHeadK, skv, d});
-                }
-
-                // dV[b, kvHeadV, skv, dv] += P[skv] * dO[b, hQ, sq, dv]
-                for(int64_t dv = 0; dv < headDimV; ++dv)
-                {
-                    const auto doVal = static_cast<ComputeDataType>(
-                        dO.getHostValue(std::vector<int64_t>{b, hQ, sq, dv}));
-                    const auto dvContrib = probs[static_cast<size_t>(skv)] * doVal;
-
-                    const auto currentDv
-                        = dV.getHostValue(std::vector<int64_t>{b, kvHeadV, skv, dv});
-                    dV.setHostValue(hipdnn_test_sdk::detail::safeConvert<DVDataType>(
-                                        static_cast<ComputeDataType>(currentDv) + dvContrib),
-                                    std::vector<int64_t>{b, kvHeadV, skv, dv});
-                }
-            }
-        };
-
-        // Execute backward pass over all [B, H_q, Sq] positions
-        // Note: Sequential execution for GQA correctness (multiple Q heads accumulate to same KV)
-        auto parallelFunc
-            = hipdnn_test_sdk::detail::makeParallelTensorFunctor(sdpaBwdFunc, parallelDims);
-        parallelFunc(std::thread::hardware_concurrency());
+        }
 
         dQ.memory().markHostModified();
         dK.memory().markHostModified();
