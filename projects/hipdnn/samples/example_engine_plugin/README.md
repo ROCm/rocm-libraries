@@ -22,17 +22,13 @@ Runtime Compilation):
 | GPU hardware | Runtime execution of HIPRTC-compiled kernels | Any ROCm-supported GPU |
 | Internet access | GTest is downloaded via CMake `FetchContent` | Only needed for the first build |
 
-The plugin C++ source code compiles with standard compilers (GCC, MSVC). GPU
-kernels are plain `.cpp` files that are embedded as string literals at CMake
-configure time and compiled at runtime by HIPRTC. No GPU compiler (`hipcc`,
-`amdclang++`) is needed during the build.
-
 ## Directory Structure
 
 ```
 example_engine_plugin/
 ├── CMakeLists.txt                       # Root CMake: project options, dependencies
 ├── README.md                            # This file
+├── ai_plugin_rename_prompt.md            # AI agent prompt for copy-and-rename plugin creation
 ├── kernels/                             # GPU kernel source files (embedded at configure time)
 │   ├── CMakeLists.txt                   # embed_kernel_sources() function
 │   ├── cmake/
@@ -178,15 +174,15 @@ The tests and sample can also be run directly:
 
 | Option | Default | Description |
 |---|---|---|
-| `HIPDNN_EXAMPLE_PROVIDER_BUILD_UNIT_TESTS` | `ON` | Build unit tests (no GPU required) |
-| `HIPDNN_EXAMPLE_PROVIDER_BUILD_SAMPLE` | `ON` | Build sample application (serves as acceptance test via `ctest`) |
+| `EXAMPLEPROVIDER_BUILD_UNIT_TESTS` | `ON` | Build unit tests (no GPU required) |
+| `EXAMPLEPROVIDER_BUILD_SAMPLE` | `ON` | Build sample application (serves as acceptance test via `ctest`) |
 
 To build only the plugin library (no tests or sample):
 
 ```bash
 cmake -B build -DCMAKE_PREFIX_PATH="/opt/rocm" \
-    -DHIPDNN_EXAMPLE_PROVIDER_BUILD_UNIT_TESTS=OFF \
-    -DHIPDNN_EXAMPLE_PROVIDER_BUILD_SAMPLE=OFF
+    -DEXAMPLEPROVIDER_BUILD_UNIT_TESTS=OFF \
+    -DEXAMPLEPROVIDER_BUILD_SAMPLE=OFF
 ```
 
 ## Architecture
@@ -248,6 +244,57 @@ and update only the namespace.
 5. `Plan::execute()` reads device pointers from the variant pack buffers
    (matched by tensor UID) and launches the compiled GPU kernel on the
    specified HIP stream.
+
+### Working with Operation Graphs
+
+hipDNN represents operation graphs as serialized FlatBuffers data. When hipDNN
+calls plugin methods like `isApplicable()` or `buildPlan()`, it passes an
+`IGraph` reference that wraps a FlatBuffers `Graph` object. The graph
+contains nodes (operations) with typed attributes and tensor metadata.
+
+#### GraphWrapper and NodeWrapper
+
+The data SDK provides wrapper classes in `hipdnn_data_sdk/flatbuffer_utilities/`
+that simplify working with the serialized graph data:
+
+- **`GraphWrapper`** -- wraps the serialized graph buffer. It validates the buffer on
+  construction. Key methods: `isValid()`, `nodeCount()`, `hasOnlySupportedAttributes()`,
+  `getNode(index)`, `getNodeWrapper(index)`, `getTensorMap()`.
+
+- **`NodeWrapper`** -- wraps individual graph nodes. Key methods: `isValid()`,
+  `attributesType()` (returns the union type), `attributesAs<T>()` (safely casts
+  to the specified type with type validation), `name()`, `computeDataType()`.
+
+#### Null-Checking FlatBuffers Accessors
+
+FlatBuffers accessors can return `nullptr`. Always check before use:
+
+- **Strings**: `node.name()` can be `nullptr`. Use the pattern:
+  `name != nullptr ? name->str() : ""`
+- **Vectors/containers**: `attrs->dilation()`, `tensor->dims()`,
+  `graph->nodes()` can all be `nullptr`. Always check before calling `size()`
+  or iterating.
+- **Attributes**: After `attributesAs<T>()`, check the result is not `nullptr`
+  before accessing fields.
+- **Tensor map lookups**: When looking up tensors by UID via `getTensorMap()`,
+  always verify the iterator before dereferencing.
+
+```cpp
+// Check vector before iterating
+const auto* dilation = attrs->dilation();
+if(dilation != nullptr)
+{
+    for(size_t i = 0; i < dilation->size(); ++i)
+    {
+        // safe to access dilation->Get(i)
+    }
+}
+```
+
+See `ReluPlanBuilder.cpp` and `ConvFwdPlanBuilder.cpp` for concrete examples of
+`isApplicable()` implementations that demonstrate graph inspection and
+null-checking. `ConvFwdPlanBuilder` is a particularly good reference because it
+checks `dilation()` for `nullptr` before iterating.
 
 ### HIPRTC Compilation Flow
 
@@ -316,42 +363,55 @@ enabling unit tests to run without GPU hardware:
 
 ### Step-by-Step Adaptation Workflow
 
-1. **Choose a name for your plugin**: Pick a short, descriptive name that
-   identifies the technology or backend your plugin provides (e.g.,
-   `rocblas_conv`, `custom_gemm`, `your_name`). This name will be
-   used throughout the plugin as:
-   - **Class prefix**: `ExampleProvider*` becomes `YourName*` (e.g.,
-     `YourNameContainer`, `YourNameHandle`, `YourNameEngine`)
-   - **Namespace**: `example_provider` becomes `your_name`
-   - **Engine identifiers**: `EXAMPLE_PROVIDER_RELU_ENGINE` becomes
-     `YOUR_NAME_xxx_ENGINE` (e.g., `YOUR_NAME_CONV_ENGINE`).
-     These names are visible to applications that select engines, so choose
-     something meaningful.
-   - **Plugin display name**: The `HIPDNN_PLUGIN_NAME` macro value (e.g.,
-     `"Your Name xxx engine"`)
+1. **Choose a brand name for your plugin**: Pick a short, descriptive name
+   that identifies the technology or backend your plugin provides (e.g.,
+   `CustomGemm`, `YourName`). C++ identifiers use the brand name alone
+   (e.g., `YourNameContainer`, `YourNameEngine`); build/deployment
+   identifiers append "provider" (e.g., `your_name_provider` namespace,
+   `your_name_provider_impl` CMake target). See
+   [Adaptation Reference](#adaptation-reference) for the complete naming
+   tables, case conversion rules, file rename lists, and SDK identifiers.
 
 2. **Copy and rename the directory**: Copy `example_engine_plugin/` to your new
-   plugin directory (e.g., `your_name-provider/`).
+   plugin directory (e.g., `your-name-provider/`).
 
 3. **Verify the build on your system**: Before making any code changes, build
    and run the tests from your copied directory to verify the example works in
    your environment. Resolve any build issues before continuing.
 
-4. **Rename classes**: Replace all `ExampleProvider*` class names with your
-   plugin prefix (e.g., `YourName*`). This affects `Container`,
-   `Handle`, `Context`, `Settings`, `Engine`, and `Public`.
+4. **Rename classes, source files, and log strings**: Replace all `ExampleProvider*` class
+   names with your brand prefix (e.g., `YourNameContainer`,
+   `YourNameHandle`, `YourNameEngine`). This affects `Container`, `Handle`,
+   `Context`, `Settings`, `Engine`, and `PluginPublic`. Rename the source
+   files to match the new class names, and update the source file lists in
+   `src/CMakeLists.txt`, `tests/CMakeLists.txt`, and `sample/CMakeLists.txt`.
+   Also update `ExampleProvider` references in log message strings (e.g.,
+   `HIPDNN_PLUGIN_LOG_INFO("Creating ExampleProviderContainer")`).
+   See [Files Requiring Rename](#files-requiring-rename) for the complete list.
 
 5. **Update the namespace**: Change the `example_provider` namespace to your
-   plugin's namespace throughout all source files.
+   brand + "provider" namespace (e.g., `your_name_provider`) throughout all
+   source files, including nested namespaces (e.g.,
+   `example_provider::test_helpers` in test files) and the kernel embedding
+   templates in `kernels/templates/`. Note that `Handle`, `Context`, and
+   `Settings` are declared at global scope, not inside the namespace; keep
+   them at global scope and only update the forward declaration of
+   `Container` in the Handle header. See
+   [Naming Convention Reference](#naming-convention-reference) for the
+   convention.
 
-6. **Update the 5 macros** in `ExampleProviderPluginPublic.cpp`: Update all
-   five macros to reflect your plugin's name, version, and class names.
+6. **Update the 5 macros** in your renamed PluginPublic file (was
+   `ExampleProviderPluginPublic.cpp`): Update all five macros to reflect
+   your plugin's name, version, and class names. `HIPDNN_PLUGIN_NAME`
+   should use the convention snake_case brand + `_provider_plugin` (e.g.,
+   `"your_name_provider_plugin"`). See
+   [Naming Convention Reference](#naming-convention-reference).
 
 7. **Replace example PlanBuilders and Plans**: Remove `ReluPlanBuilder`,
    `ReluPlan`, `ReluParams`, `ConvFwdPlanBuilder`, `ConvFwdPlan`, and
    `ConvFwdParams`. Create your own PlanBuilder, Plan, and Params for each
    operation your plugin supports. Plans inherit
-   `ICompilablePlan<YourPluginHandle>` from the plugin SDK. See the
+   `IPlan<YourPluginHandle>` from the plugin SDK. See the
    [File Classification](#file-classification) table for the key methods to
    implement. To add further operations later, repeat this step and
    steps 8-11.
@@ -362,11 +422,14 @@ enabling unit tests to run without GPU hardware:
 
 9. **Update CMake targets and kernel file list**: Update `KERNEL_FILES` in
    `kernels/CMakeLists.txt` with your kernel filenames. Update the source
-   file list in `src/CMakeLists.txt` with your `.cpp` files.
+   file list in `src/CMakeLists.txt` with your `.cpp` files. See
+   [CMake Targets and Options Requiring Rename](#cmake-targets-and-options-requiring-rename)
+   for the complete list of targets and options.
 
-10. **Register your engines**: Update `ExampleProviderContainer.cpp` to register
-    your engines via `HIPDNN_REGISTER_ENGINE` with unique engine names and add
-    lambdas to create the new engines:
+10. **Register your engines**: In your renamed Container file (was
+    `ExampleProviderContainer.cpp`), register your engines via
+    `HIPDNN_REGISTER_ENGINE` with unique engine names and add lambdas to
+    create the new engines:
 
     ```cpp
     HIPDNN_REGISTER_ENGINE(YOUR_ENGINE, "YOUR_ENGINE")
@@ -389,25 +452,163 @@ enabling unit tests to run without GPU hardware:
 11. **Build and run unit tests**: Follow the [Build Instructions](#build-instructions)
     to verify successful compilation and tests.
 
+12. **Update your Settings struct**: Replace the fields in your renamed
+    Settings struct (was `ExampleProviderSettings`) with settings relevant
+    to your operations (e.g., replace `reluNegativeSlope` with your knob
+    values).
+
+13. **Update Engine and Container tests**: In your renamed test files (were
+    `TestExampleProviderContainer.cpp` and
+    `TestExampleProviderEngine.cpp`), update the expected engine count to
+    match the number of engines you registered.
+
+14. **Create graph construction helpers in `TestHelpers.hpp`**: Replace
+    `createReluFwdGraph()` and `createConvFwdGraph()` with helpers that
+    build FlatBuffer graphs for your operations. Keep `createEngineConfig()`
+    and `createEngineConfigWithFloatKnob()` as-is.
+
+15. **Write unit tests for PlanBuilder and Plan**: Following the patterns in
+    `TestReluPlanBuilder.cpp` and `TestReluPlan.cpp`, write tests for your
+    PlanBuilder's `isApplicable()`, `getCustomKnobs()`, `buildPlan()`, and
+    your Plan's `compile()` and `execute()`. The tests included in this
+    example are not exhaustive; additional test coverage may be added.
+
+16. **Incorporate the new operations into your application**: Use the
+    patterns from `sample/ExampleProviderSample.cpp` to load the plugin,
+    select engines, and execute operations in your application.
+
 ### File Classification
 
 Comment markers are used to identify files that will be modified when using this
 example as a template for creating a new plugin. Look for `TEMPLATE ADAPTATION`
 and `TEMPLATE REFERENCE` comment markers in the source files for per-file guidance.
 
-| Files | Marker | What to Do |
-|-------|--------|------------|
-| `ExampleProviderPluginPublic.cpp`, `ExampleProviderContainer.hpp/cpp`, `ExampleProviderHandle.hpp/cpp`, `ExampleProviderContext.hpp`, `ExampleProviderSettings.hpp`, `ExampleProviderEngine.hpp/cpp`, `ExampleProviderUtils.hpp` | `TEMPLATE ADAPTATION` | Rename `ExampleProvider` to `YourPlugin`. Adjust class names, namespace, and includes. These files are framework plumbing; the structure stays the same. |
-| `hip/IKernelCompiler.hpp`, `hip/ICompiledProgram.hpp`, `hip/IRunnableKernel.hpp`, `hip/HipKernelCompiler.hpp`, `hip/HipCompiledProgram.hpp/cpp`, `hip/HipRunnableKernel.hpp/cpp`, `hip/HipUtils.hpp` | *(none)* | Update namespace only. These implement the HIPRTC compilation pipeline and do not contain operation-specific logic. |
-| `engines/plans/ReluPlanBuilder.hpp/cpp`, `engines/plans/ReluPlan.hpp/cpp`, `engines/plans/ReluParams.hpp` | `TEMPLATE REFERENCE` | Study to learn the PlanBuilder/Plan pattern, then replace with your own operation's PlanBuilder, Plan, and Params. Key methods: `isApplicable()`, `getCustomKnobs()`, `initializeExecutionSettings()`, `buildPlan()`, `compile()`, `execute()`. |
-| `engines/plans/ConvFwdPlanBuilder.hpp/cpp`, `engines/plans/ConvFwdPlan.hpp/cpp`, `engines/plans/ConvFwdParams.hpp` | `TEMPLATE REFERENCE` | Second example of the same pattern. Compare with ReLU to see how different operations handle graph matching, parameters, and kernel launch. |
-| `kernels/relu/ReluForward.cpp`, `kernels/conv/ConvForwardNaive.cpp` | *(none)* | Replace with your GPU kernel source files (see step 8 for requirements). |
-| `kernels/CMakeLists.txt` | `TEMPLATE ADAPTATION` | Update `KERNEL_FILES` list with your kernel filenames. |
-| `tests/TestExampleProviderContainer.cpp`, `tests/TestExampleProviderEngine.cpp` | `TEMPLATE ADAPTATION` | Rename `ExampleProvider` references to your plugin prefix. Container tests verify engine registration; Engine tests verify `isApplicable()` delegation to PlanBuilders. Keep both and update to match your registered engines. |
-| `tests/TestReluPlanBuilder.cpp`, `tests/TestReluPlan.cpp`, `tests/TestConvFwdPlanBuilder.cpp`, `tests/TestConvFwdPlan.cpp` | `TEMPLATE REFERENCE` | Study the testing patterns, then write equivalent tests for your operations. |
-| `tests/TestHelpers.hpp` | `TEMPLATE ADAPTATION` | As needed, replace `createReluFwdGraph()` / `createConvFwdGraph()` with helpers that build your operation's FlatBuffer graphs. Keep `createEngineConfig()` and `createEngineConfigWithFloatKnob()`. |
-| `tests/mocks/MockKernelCompiler.hpp`, `tests/mocks/MockCompiledProgram.hpp`, `tests/mocks/MockRunnableKernel.hpp` | *(none)* | As needed, copy into your test directory. Update namespace only. These mocks implement the interfaces for GPU-free unit testing. |
-| `sample/ExampleProviderSample.cpp` | `TEMPLATE ADAPTATION` | As needed, adapt scenarios to exercise your operations. Keep the plugin loading and engine selection patterns; replace the graph construction and verification logic. |
+**`TEMPLATE ADAPTATION`** -- Rename and adjust. The structure stays the same.
+
+| File | What to Do |
+|------|------------|
+| `ExampleProviderPluginPublic.cpp` | Rename file, update 5 macros and `using namespace` |
+| `ExampleProviderContainer.hpp/cpp` | Rename file, update class name and engine registrations |
+| `ExampleProviderHandle.hpp/cpp` | Rename file, update class name |
+| `ExampleProviderContext.hpp` | Rename file, update class name |
+| `ExampleProviderSettings.hpp` | Rename file, update class name and fields |
+| `ExampleProviderEngine.hpp/cpp` | Rename file, update class name |
+| `ExampleProviderUtils.hpp` | Rename file, update namespace |
+| `kernels/CMakeLists.txt` | Update `KERNEL_FILES` list with your kernel filenames |
+| `tests/TestExampleProviderContainer.cpp` | Rename file, update class references and engine count |
+| `tests/TestExampleProviderEngine.cpp` | Rename file, update class references |
+| `tests/TestHelpers.hpp` | Replace graph construction helpers for your operations |
+| `sample/ExampleProviderSample.cpp` | Rename file, adapt scenarios to your operations |
+
+**`TEMPLATE REFERENCE`** -- Study, then replace with your own implementations.
+
+| File | What to Do |
+|------|------------|
+| `engines/plans/ReluPlanBuilder.hpp/cpp` | Study `isApplicable()`, `getCustomKnobs()`, `initializeExecutionSettings()`, `buildPlan()`, then write your own |
+| `engines/plans/ReluPlan.hpp/cpp` | Study `compile()`, `execute()`, then write your own |
+| `engines/plans/ReluParams.hpp` | Study parameter extraction pattern, then write your own |
+| `engines/plans/ConvFwdPlanBuilder.hpp/cpp` | Second example; compare with ReLU for graph matching differences |
+| `engines/plans/ConvFwdPlan.hpp/cpp` | Second example; compare with ReLU for kernel launch differences |
+| `engines/plans/ConvFwdParams.hpp` | Second example of parameter extraction |
+| `tests/TestReluPlanBuilder.cpp`, `tests/TestReluPlan.cpp` | Study testing patterns, then write equivalent tests |
+| `tests/TestConvFwdPlanBuilder.cpp`, `tests/TestConvFwdPlan.cpp` | Second example of testing patterns |
+
+**No marker** -- Update namespace only or replace contents.
+
+| File | What to Do |
+|------|------------|
+| `hip/` directory (all files) | Update namespace only. HIPRTC infrastructure has no operation-specific logic. |
+| `tests/mocks/` (all files) | Update namespace only. Mock implementations for GPU-free testing. |
+| `kernels/relu/ReluForward.cpp` | Replace with your GPU kernel source file |
+| `kernels/conv/ConvForwardNaive.cpp` | Replace with your GPU kernel source file |
+
+### Adaptation Reference
+
+Use the tables below when performing the rename steps in the workflow above.
+
+#### Naming Convention Reference
+
+| Context | Convention | Example Plugin | Your Plugin |
+|---|---|---|---|
+| C++ classes | Brand only | `ExampleProviderContainer` | `YourNameContainer` |
+| C++ source files | Brand only | `ExampleProviderContainer.hpp` | `YourNameContainer.hpp` |
+| Engine names | Brand only | `EXAMPLE_PROVIDER_RELU_ENGINE` | Keep as-is until step 10 |
+| Namespace | Brand + provider | `example_provider` | `your_name_provider` |
+| CMake targets | Brand + provider | `example_provider_impl` | `your_name_provider_impl` |
+| CMake options | Concatenated | `EXAMPLEPROVIDER_*` | `YOURNAMEPROVIDER_*` |
+| CMake project name | Hyphenated | `hipdnn-example-provider` | `your-name-provider` |
+| `HIPDNN_PLUGIN_NAME` | Brand + provider + plugin | `"example_provider"` | `"your_name_provider_plugin"` |
+
+#### Case Conversion Rules
+
+The brand name must be expressed in three case forms. For a brand name like
+`YourName`, split at PascalCase word boundaries:
+
+| Form | Rule | Example |
+|---|---|---|
+| PascalCase | As chosen | `YourName` |
+| snake_case | Lowercase words joined by `_` | `your_name` |
+| UPPER_SNAKE_CASE | Uppercase words joined by `_` | `YOUR_NAME` |
+
+Apply each form as follows:
+- **C++ classes/files**: PascalCase brand (`YourNameContainer`)
+- **Namespace**: snake_case brand + `_provider` (`your_name_provider`)
+- **CMake targets**: snake_case brand + `_provider_` + suffix (`your_name_provider_impl`)
+- **CMake options**: UPPER brand + `PROVIDER_` + suffix (`YOURNAMEPROVIDER_BUILD_UNIT_TESTS`)
+- **Engine names** (step 10): UPPER_SNAKE brand + `_` + operation (`YOUR_NAME_GEMM_ENGINE`)
+- **CMake project**: Hyphenated lowercase brand + `-provider` (`your-name-provider`)
+- **`HIPDNN_PLUGIN_NAME`**: snake_case brand + `_provider_plugin` (`"your_name_provider_plugin"`)
+
+#### Files Requiring Rename
+
+Rename files with the `ExampleProvider` prefix to your brand
+prefix. These are the `ExampleProvider`-prefixed files from the
+[File Classification](#file-classification) `TEMPLATE ADAPTATION` table:
+
+| Original File | Renamed To |
+|---|---|
+| `ExampleProviderPluginPublic.cpp` | `YourNamePluginPublic.cpp` |
+| `ExampleProviderContainer.hpp/cpp` | `YourNameContainer.hpp/cpp` |
+| `ExampleProviderHandle.hpp/cpp` | `YourNameHandle.hpp/cpp` |
+| `ExampleProviderContext.hpp` | `YourNameContext.hpp` |
+| `ExampleProviderSettings.hpp` | `YourNameSettings.hpp` |
+| `ExampleProviderEngine.hpp/cpp` | `YourNameEngine.hpp/cpp` |
+| `ExampleProviderUtils.hpp` | `YourNameUtils.hpp` |
+| `TestExampleProviderContainer.cpp` | `TestYourNameContainer.cpp` |
+| `TestExampleProviderEngine.cpp` | `TestYourNameEngine.cpp` |
+| `ExampleProviderSample.cpp` | `YourNameSample.cpp` |
+
+#### CMake Targets and Options Requiring Rename
+
+| Original Target/Option | Renamed To |
+|---|---|
+| `hipdnn-example-provider` (project name) | `your-name-provider` |
+| `example_provider_impl` | `your_name_provider_impl` |
+| `example_provider_private` | `your_name_provider_private` |
+| `example_provider_plugin` | `your_name_provider` |
+| `example_provider_compile_options` | `your_name_provider_compile_options` |
+| `example_provider_kernel_embed` | `your_name_provider_kernel_embed` |
+| `example_provider_tests` | `your_name_provider_tests` |
+| `example_provider_sample` | `your_name_provider_sample` |
+| `EXAMPLEPROVIDER_BUILD_UNIT_TESTS` | `YOURNAMEPROVIDER_BUILD_UNIT_TESTS` |
+| `EXAMPLEPROVIDER_BUILD_SAMPLE` | `YOURNAMEPROVIDER_BUILD_SAMPLE` |
+
+#### SDK Identifiers (Do Not Rename)
+
+These identifiers are defined by the hipDNN SDK packages and must not be
+changed. They are the same for every plugin:
+
+| Identifier | Source |
+|---|---|
+| `hipdnn_plugin_sdk` | CMake package (plugin SDK) |
+| `hipdnn_data_sdk` | CMake package (data SDK) |
+| `hipdnn_frontend` | CMake package (frontend library) |
+| `hipdnn_test_sdk` | CMake package (test SDK, for sample validation only) |
+| `HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR` | CMake variable exported by `hipdnn_data_sdk` |
+| `HIPDNN_PLUGIN_NAME`, `HIPDNN_PLUGIN_VERSION`, `HIPDNN_PLUGIN_CONTAINER_TYPE`, `HIPDNN_PLUGIN_HANDLE_TYPE`, `HIPDNN_PLUGIN_CONTEXT_TYPE` | Macro names expected by `EnginePluginImpl.inl` (values are plugin-specific) |
+| `EnginePluginImpl.inl` | Plugin SDK header that generates C entry points |
+| `IPlan`, `EngineManager` | Plugin SDK types |
+| `IGraph`, `IEngineConfig` | Data SDK types |
 
 ## Testing Your Plugin
 
@@ -600,22 +801,29 @@ plugin loading, engine selection, knob modification, and correctness verificatio
 
 ## Quick Checklist
 
-- [ ] Step 1: Choose a name for your plugin
+- [ ] Step 1: Choose a brand name for your plugin
 - [ ] Step 2: Copy and rename the directory
 - [ ] Step 3: Verify the build on your system
-- [ ] Step 4: Rename classes
-- [ ] Step 5: Update the namespace
-- [ ] Step 6: Update the 5 macros in your renamed `ExampleProviderPluginPublic.cpp`
+- [ ] Step 4: Rename classes, source files, and log strings
+- [ ] Step 5: Update the namespace (including nested and template namespaces)
+- [ ] Step 6: Update the 5 macros in your renamed PluginPublic file
 - [ ] Step 7: Replace example PlanBuilders and Plans
 - [ ] Step 8: Write your GPU kernels
 - [ ] Step 9: Update CMake targets and kernel file list
 - [ ] Step 10: Register your engines
 - [ ] Step 11: Build and run unit tests
-- [ ] Step 12: Update your renamed `ExampleProviderSettings` struct with your settings
-- [ ] Step 13: Update Engine and Container tests (rename prefixes, adjust engine count)
+- [ ] Step 12: Update your renamed Settings struct
+- [ ] Step 13: Update Engine and Container tests (adjust engine count)
 - [ ] Step 14: Create graph construction helpers in `TestHelpers.hpp`
 - [ ] Step 15: Write unit tests for PlanBuilder and Plan
 - [ ] Step 16: Incorporate the new operations into your application
+
+## Creating a Plugin with AI Assistance
+
+An AI agent can automate the file copying, renaming, and text replacement
+steps of the adaptation workflow. See
+[`ai_plugin_rename_prompt.md`](ai_plugin_rename_prompt.md) for a prompt
+template and usage instructions.
 
 ## Custom Knobs
 
@@ -704,8 +912,8 @@ will be searched for dependent libraries when loading the plugin. How you set th
 the hipDNN application is written. The configuration will likely need to be
 tailored to your specific deployment.
 
-To facilitate plugin development, the plugin CMake project embeds RPATH in the
-`.so` as follows:
+To facilitate plugin development, the plugin CMake project embeds `RPATH` (`RUNPATH`)
+in the `.so` as follows:
 
 ```cmake
 set_target_properties(example_provider_plugin PROPERTIES
@@ -726,19 +934,19 @@ set_target_properties(example_provider_plugin PROPERTIES
   linked libraries to the plugin's RPATH (e.g., the `hiprtc` library's ROCm
   library folder).
 
-It is important to ensure the RPATH set on the plugin matches the deployment environment.
+It is important to ensure the `RPATH` set on the plugin matches the deployment environment.
 Hard-coded paths like `/opt/rocm/lib` will fail on machines with different
 layouts. The default `$ORIGIN` entries mitigate this by resolving relative to
 the plugin's installed location. See
 [Plugin Loading](#plugin-loading) for further context on deploying the plugin.
 
 **Note:** `INSTALL_RPATH_USE_LINK_PATH` is a development convenience that
-hard-codes linked library paths (e.g., the ROCm folder) into the RPATH. Consider
+hard-codes linked library paths (e.g., the ROCm folder) into the `RPATH`. Consider
 removing it for production builds because it can mask deployment failures when
 folder layouts differ from the development environment. See
 [Troubleshooting Plugin Loading](#troubleshooting-plugin-loading).
 
-To add additional paths to the plugin's RPATH, modify the `INSTALL_RPATH`
+To add additional paths to the plugin's `RPATH`, modify the `INSTALL_RPATH`
 target property directly in the CMake project, or pass `CMAKE_INSTALL_RPATH`
 on the command line:
 

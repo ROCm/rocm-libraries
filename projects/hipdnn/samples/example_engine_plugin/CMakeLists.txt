@@ -3,7 +3,7 @@
 
 cmake_minimum_required(VERSION 3.20)
 
-project(hipdnn_example_provider VERSION 0.1.0 LANGUAGES CXX)
+project(hipdnn-example-provider VERSION 0.1.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -19,8 +19,8 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 # =============================================================================
 # Options
 # =============================================================================
-option(HIPDNN_EXAMPLE_PROVIDER_BUILD_UNIT_TESTS "Build unit tests" ON)
-option(HIPDNN_EXAMPLE_PROVIDER_BUILD_SAMPLE "Build sample application (requires hipdnn_frontend)" ON)
+option(EXAMPLEPROVIDER_BUILD_UNIT_TESTS "Build unit tests" ON)
+option(EXAMPLEPROVIDER_BUILD_SAMPLE "Build sample application (requires hipdnn_frontend)" ON)
 
 # =============================================================================
 # Compiler flags
@@ -65,16 +65,17 @@ add_subdirectory(src)
 if(NOT DEFINED HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR)
     message(FATAL_ERROR "HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR was not set by hipdnn_data_sdk package import.")
 endif()
-install(TARGETS example_provider_plugin LIBRARY DESTINATION ${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR})
-
-if(HIPDNN_EXAMPLE_PROVIDER_BUILD_UNIT_TESTS OR HIPDNN_EXAMPLE_PROVIDER_BUILD_SAMPLE)
+install(TARGETS example_provider_plugin
+        LIBRARY DESTINATION ${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}
+        RUNTIME DESTINATION ${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR})
+if(EXAMPLEPROVIDER_BUILD_UNIT_TESTS OR EXAMPLEPROVIDER_BUILD_SAMPLE)
     enable_testing()
 endif()
 
-if(HIPDNN_EXAMPLE_PROVIDER_BUILD_UNIT_TESTS)
+if(EXAMPLEPROVIDER_BUILD_UNIT_TESTS)
     add_subdirectory(tests)
 endif()
 
-if(HIPDNN_EXAMPLE_PROVIDER_BUILD_SAMPLE)
+if(EXAMPLEPROVIDER_BUILD_SAMPLE)
     add_subdirectory(sample)
 endif()
