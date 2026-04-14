@@ -5504,7 +5504,7 @@ TEST_F(TestGraph, NonConstJsonSerializeAutoLowersWhenNeeded)
                 *graphByteSize = len;
                 if(data != nullptr && requestedSize >= len)
                 {
-                    std::strcpy(data, fakeJson);
+                    hipdnn_data_sdk::utilities::copyMaxSizeWithNullTerminator(data, fakeJson, len);
                 }
                 return HIPDNN_STATUS_SUCCESS;
             });
@@ -5654,7 +5654,7 @@ TEST_F(TestGraph, ToJsonReturnsDataAndSuccess)
                 *graphByteSize = len;
                 if(data != nullptr && requestedSize >= len)
                 {
-                    std::strcpy(data, fakeJson);
+                    hipdnn_data_sdk::utilities::copyMaxSizeWithNullTerminator(data, fakeJson, len);
                 }
                 return HIPDNN_STATUS_SUCCESS;
             });
@@ -5678,7 +5678,7 @@ TEST_F(TestGraph, ToJsonConstReturnsDataAndSuccess)
                 *graphByteSize = len;
                 if(data != nullptr && requestedSize >= len)
                 {
-                    std::strcpy(data, fakeJson);
+                    hipdnn_data_sdk::utilities::copyMaxSizeWithNullTerminator(data, fakeJson, len);
                 }
                 return HIPDNN_STATUS_SUCCESS;
             });
@@ -5755,7 +5755,7 @@ TEST_F(TestGraph, DeserializeStringHandleLess)
                 *graphByteSize = len;
                 if(data != nullptr && requestedSize >= len)
                 {
-                    std::strcpy(data, fakeJson);
+                    hipdnn_data_sdk::utilities::copyMaxSizeWithNullTerminator(data, fakeJson, len);
                 }
                 return HIPDNN_STATUS_SUCCESS;
             });
@@ -5868,7 +5868,7 @@ TEST_F(TestGraph, SerializeToJsonObject)
                 *graphByteSize = len;
                 if(data != nullptr && requestedSize >= len)
                 {
-                    std::strcpy(data, fakeJson);
+                    hipdnn_data_sdk::utilities::copyMaxSizeWithNullTerminator(data, fakeJson, len);
                 }
                 return HIPDNN_STATUS_SUCCESS;
             });
@@ -5896,7 +5896,7 @@ TEST_F(TestGraph, SerializeToJsonObjectAutoLower)
                 *graphByteSize = len;
                 if(data != nullptr && requestedSize >= len)
                 {
-                    std::strcpy(data, fakeJson);
+                    hipdnn_data_sdk::utilities::copyMaxSizeWithNullTerminator(data, fakeJson, len);
                 }
                 return HIPDNN_STATUS_SUCCESS;
             });
@@ -6270,7 +6270,7 @@ TEST_P(TestGraphSerializationRoundTrip, JsonSerializeDeserializeForwardsData)
             *graphByteSize = len;
             if(data != nullptr && requestedSize >= len)
             {
-                std::strcpy(data, fakeJsonStr);
+                hipdnn_data_sdk::utilities::copyMaxSizeWithNullTerminator(data, fakeJsonStr, len);
             }
             return HIPDNN_STATUS_SUCCESS;
         });

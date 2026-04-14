@@ -69,3 +69,42 @@ TEST_CASE("AssignIndexExpressions creates Assign nodes", "[kernel-graph]")
         CHECK(!conns.empty());
     }
 }
+
+// --- GetInlineUnrollInfo rejection tests ---
+
+#include <rocRoller/KernelGraph/Transforms/AssignIndexExpressions_detail.hpp>
+
+TEST_CASE("GetInlineUnrollInfo rejects non-applicable operations", "[kernel-graph][lds-bank-model]")
+{
+    using namespace rocRoller;
+    using namespace rocRoller::Expression;
+    using namespace rocRoller::KernelGraph::CoordinateGraph;
+    using namespace rocRoller::KernelGraph::ControlGraph;
+    using namespace rocRoller::KernelGraph::AssignIndexExpressionsDetail;
+
+    rocRoller::KernelGraph::KernelGraph kg;
+
+    // Non-LoadLDSTile is rejected immediately
+    auto storeTag = kg.control.addElement(StoreTiled{DataType::Float});
+    CHECK(GetInlineUnrollInfo(kg, storeTag) == std::pair{-1, -1});
+
+    // LoadLDSTile with scale type is rejected
+    auto macTile       = MacroTile({256, 256}, LayoutType::MATRIX_B, {32, 4});
+    macTile.memoryType = MemoryType::WAVE;
+    auto macTileTag    = kg.coordinates.addElement(macTile);
+    auto ldsTag        = kg.coordinates.addElement(LDS());
+    auto loadTag       = kg.control.addElement(LoadLDSTile{DataType::E8M0});
+    kg.mapper.connect<MacroTile>(loadTag, macTileTag);
+    kg.mapper.connect<LDS>(loadTag, ldsTag);
+    CHECK(GetInlineUnrollInfo(kg, loadTag) == std::pair{-1, -1});
+
+    // MATRIX_ACCUMULATOR layout is rejected (no K subdimension)
+    auto accTile       = MacroTile({256, 256}, LayoutType::MATRIX_ACCUMULATOR, {32, 4});
+    accTile.memoryType = MemoryType::WAVE;
+    auto accTileTag    = kg.coordinates.addElement(accTile);
+    auto ldsTag2       = kg.coordinates.addElement(LDS());
+    auto accLoadTag    = kg.control.addElement(LoadLDSTile{DataType::FP4});
+    kg.mapper.connect<MacroTile>(accLoadTag, accTileTag);
+    kg.mapper.connect<LDS>(accLoadTag, ldsTag2);
+    CHECK(GetInlineUnrollInfo(kg, accLoadTag) == std::pair{-1, -1});
+}
