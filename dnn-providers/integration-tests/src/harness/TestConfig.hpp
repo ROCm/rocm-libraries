@@ -139,7 +139,7 @@ public:
         {
             return std::nullopt;
         }
-        return _testSettings->findOverride(testName);
+        return _testSettings->findToleranceOverride(testName);
     }
 
 private:
