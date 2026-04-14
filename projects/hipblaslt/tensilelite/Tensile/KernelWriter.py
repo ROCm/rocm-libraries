@@ -8681,12 +8681,14 @@ class KernelWriter(metaclass=abc.ABCMeta):
         _reg("uint32", "StrideMetadata%d" % i)
 
     # -- Packed-batch magic divisors -------------------------------------------
-    for idxChar in kernel["PackedC0IdxChars"][:-1]:
-      _reg("uint32", "MagicNumberSize%s" % idxChar)
-      _reg("uint32", "MagicShiftSize%s" % idxChar)
-    for idxChar in kernel["PackedC1IdxChars"][:-1]:
-      _reg("uint32", "MagicNumberSize%s" % idxChar)
-      _reg("uint32", "MagicShiftSize%s" % idxChar)
+    for i, _ in enumerate(kernel["PackedC0IdxChars"][:-1]):
+      idx = kernel["PackedC0IndicesX"][i]
+      _reg("uint32", "MagicNumberSize", idx)
+      _reg("uint32", "MagicShiftSize", idx)
+    for i, _ in enumerate(kernel["PackedC1IdxChars"][:-1]):
+      idx = kernel["PackedC1IndicesX"][i]
+      _reg("uint32", "MagicNumberSize", idx)
+      _reg("uint32", "MagicShiftSize", idx)
 
     # -- Alpha / Beta ----------------------------------------------------------
     numSgprAlpha = max(1, int(self.states.bpeCinternal / 4))

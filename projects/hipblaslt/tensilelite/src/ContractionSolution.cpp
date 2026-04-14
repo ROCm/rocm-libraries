@@ -2139,9 +2139,21 @@ namespace TensileLite
 
                 // ---- Packed batch dimension divisors ----
                 case CustomArgSemantic::MagicNumberSize:
-                case CustomArgSemantic::MagicShiftSize:
-                    rv.args.template append<uint32_t>(toString(arg.semantic), 0);
+                {
+                    uint32_t dimSize = problem.problemSizes()[arg.index];
+                    uint32_t magicShift;
+                    uint32_t magicNum = magicNumber(sizeMapping.magicDivAlg, dimSize, &magicShift);
+                    rv.args.template append<uint32_t>("MagicNumberSize", magicNum);
                     break;
+                }
+                case CustomArgSemantic::MagicShiftSize:
+                {
+                    uint32_t dimSize = problem.problemSizes()[arg.index];
+                    uint32_t magicShift;
+                    magicNumber(sizeMapping.magicDivAlg, dimSize, &magicShift);
+                    rv.args.template append<uint32_t>("MagicShiftSize", magicShift);
+                    break;
+                }
 
                 // ---- Epilogue control args ----
                 case CustomArgSemantic::BiasType:

@@ -187,8 +187,11 @@ def _metadataArgToCustomArg(metaArg):
     if m:
         return {"type": argType, "semantic": "StrideE%s" % m.group(1)}
 
-    if re.match(r"MagicNumberSize|MagicShiftSize", name):
-        return {"type": argType, "semantic": name}
+    m = re.match(r"(MagicNumberSize|MagicShiftSize)(\w)", name)
+    if m:
+        from Tensile.Common.Constants import INDEX_CHARS
+        idx = INDEX_CHARS.index(m.group(2))
+        return {"type": argType, "semantic": m.group(1), "index": idx}
 
     raise RuntimeError("Unknown metadata arg name: '%s'" % name)
 

@@ -394,22 +394,26 @@ class Solution(collections.abc.Mapping):
       self["AssignedProblemIndependentDerivedParameters"] = False
     if "AssignedDerivedParameters" not in self._state:
       self["AssignedDerivedParameters"] = False
-    savedCustomKernel = None
-    if "CustomKernel" in self._state and not self._state["CustomKernel"].get("generated", False):
-      savedCustomKernel = self._state.pop("CustomKernel")
+    isHandwrittenCustomKernel = ("CustomKernel" in self._state
+        and self._state["CustomKernel"].get("name", "")
+        and not self._state["CustomKernel"].get("generated", False))
 
-    Solution.assignDerivedParameters(
-      self._state,
-      splitGSU,
-      printSolutionRejectionReason,
-      printIndexAssignmentInfo,
-      isaInfoMap,
-      assembler.rocm_version
-    )
-
-    if savedCustomKernel:
-      self._state["CustomKernel"] = savedCustomKernel
-    self._name = savedCustomKernel["name"] if savedCustomKernel else None
+    if isHandwrittenCustomKernel:
+      Solution._assignCustomKernelParameters(self._state)
+      self._name = self._state["CustomKernel"]["name"]
+    else:
+      savedCustomKernel = self._state.pop("CustomKernel", None) if "CustomKernel" in self._state else None
+      Solution.assignDerivedParameters(
+        self._state,
+        splitGSU,
+        printSolutionRejectionReason,
+        printIndexAssignmentInfo,
+        isaInfoMap,
+        assembler.rocm_version
+      )
+      if savedCustomKernel:
+        self._state["CustomKernel"] = savedCustomKernel
+      self._name = None
 
   # these keys are copied from ProblemType to internal that may be overridden
   InternalKeys = ["UseSgprForGRO","VectorStore"]
@@ -1138,6 +1142,43 @@ class Solution(collections.abc.Mapping):
         divisorName = "LVP{}".format(tC)
     return divisorName
 
+  @staticmethod
+  def _assignCustomKernelParameters(state):
+    """Minimal parameter setup for handwritten custom kernels.
+
+    These kernels carry their own argument layout and don't go through the
+    full assignDerivedParameters validation (which would reject them for
+    missing MatrixInstruction, etc.)."""
+    ck = state["CustomKernel"]
+    state["MacroTile0"] = ck["macrotile"][0]
+    state["MacroTile1"] = ck["macrotile"][1]
+    state["DepthU"]     = ck["macrotile"][2]
+
+    state["_GlobalAccumulation"]    = None
+    state["CUOccupancy"]            = -1
+    state["MathClocksUnrolledLoop"] = 0
+    state["PackedC0IndicesX"] = []
+    state["ThreadTile0"] = 0
+    state["ThreadTile1"] = 0
+    state["NumThreads"] = ck["threads"][0] * ck["threads"][1] * ck["threads"][2]
+
+    numElementsPerWorkGroup = state["MacroTile0"] * state["MacroTile1"]
+    state["NumElementsPerThread"] = numElementsPerWorkGroup // state["NumThreads"]
+
+    state["DirectToLdsA"] = state["DirectToLds"] == 1 or state["DirectToLds"] == 2
+    state["DirectToLdsB"] = state["DirectToLds"] == 1 or state["DirectToLds"] == 3
+
+    state["_WorkspaceSizePerElemC"] = ck["workspaceSizePerElemC"]
+    state["_WorkspaceSizePerElemBias"] = 0
+    if state["ProblemType"]["UseBias"] and state["ProblemType"]["Gradient"]:
+      state["_WorkspaceSizePerElemBias"] = ck["workspaceSizePerElemBias"]
+
+    state["MIWaveGroup"] = [0, 0]
+    state["LocalSplitU"] = 1
+    state["GlobalReadVectorWidthA"] = 1
+    state["GlobalReadVectorWidthB"] = 1
+    state["StoreVectorWidth"] = 1
+
   ########################################
   # assign all derived parameters
   @staticmethod
@@ -1213,9 +1254,8 @@ class Solution(collections.abc.Mapping):
         #del state[s]
 
     # Force update _GlobalAccumulation
-    computeBytes = int(state["ProblemType"]["ComputeDataType"].numBytes())
     state["_GlobalAccumulation"] = None
-    computeName  = state["ProblemType"]["ComputeDataType"].toName()
+    computeName = state["ProblemType"]["ComputeDataType"].toName()
     if state["UseDotInstruction"] and state["GlobalSplitUAlgorithm"] == 'MultipleBufferSingleKernel':
       # dot2 kernel does not support MBSK
       state["GlobalSplitUAlgorithm"] = 'MultipleBuffer'
