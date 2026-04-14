@@ -71,6 +71,17 @@ if(NOT WIN32)
     list(PREPEND HIPDNN_WARNING_COMPILE_OPTIONS -Werror)
 endif()
 
+# On Windows, hipBLASLt upstream headers define operator<<(ostream&, hipblaslt_e5m3)
+# and operator<<(ostream&, hipblaslt_e8) in namespace std with implicit float
+# conversions, causing an ambiguous overload error when the operator bodies are parsed.
+# hipBLASLt's own tests avoid this because they compile with hip::device (HIP mode),
+# which auto-adds -fdelayed-template-parsing via the MSVC ABI target. The
+# hipblaslt-provider uses hip::host (plain C++), so we add the flag explicitly.
+# See: https://github.com/ROCm/rocm-libraries/issues/6404
+if(WIN32)
+    list(APPEND HIPDNN_WARNING_COMPILE_OPTIONS -fdelayed-template-parsing)
+endif()
+
 # NOTE: Workaround until llvm & hip cmake modules fixes symlink logic in their config files;
 # remove when fixed. Added to prevent issues with not finding hip cmake.
 list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH}/llvm ${ROCM_PATH} ${ROCM_PATH}/hip)
