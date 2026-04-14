@@ -199,6 +199,10 @@ TEST(rocfft_UnitTest, 1D_hermitian_single_small)
     {
         GTEST_SKIP() << e.what();
     }
+    catch(const DEVICEBUF_MEM_USAGE& e)
+    {
+        GTEST_SKIP() << e.what();
+    }
 }
 
 // test a case that's big enough that it needs multiple kernels
@@ -227,6 +231,10 @@ TEST(rocfft_UnitTest, 1D_hermitian_single_large)
         GTEST_FAIL() << e.what();
     }
     catch(const HOSTBUF_MEM_USAGE& e)
+    {
+        GTEST_SKIP() << e.what();
+    }
+    catch(const DEVICEBUF_MEM_USAGE& e)
     {
         GTEST_SKIP() << e.what();
     }
@@ -416,6 +424,10 @@ TEST(rocfft_UnitTest, gpu_symmetrizer)
     {
         GTEST_SKIP() << e.what();
     }
+    catch(const DEVICEBUF_MEM_USAGE& e)
+    {
+        GTEST_SKIP() << e.what();
+    }
 }
 
 // Test that the host and device Hermitian symmetrizers produce the same results.
@@ -473,9 +485,9 @@ TEST(rocfft_UnitTest, compare_cpu_gpu_symmetrizers)
                             ++n_hip_failures;
                             std::stringstream msg;
                             msg << "allocation failure for gpu buffer of " << i << " size "
-                                << p.ibuffer_sizes()[i] << "(" << bytes_to_GiB(p.ibuffer_sizes()[i])
-                                << " GiB)"
-                                << " with code " << hipError_to_string(hip_status);
+                                << p.ibuffer_sizes()[i] << "("
+                                << byte_size_to_str(p.ibuffer_sizes()[i]) << ") with code "
+                                << hipError_to_string(hip_status);
 
                             if(skip_runtime_fails)
                                 GTEST_SKIP() << msg.str();
@@ -505,9 +517,9 @@ TEST(rocfft_UnitTest, compare_cpu_gpu_symmetrizers)
                             ++n_hip_failures;
                             std::stringstream msg;
                             msg << "hipMemcpy failure for buffer of " << i << " size "
-                                << p.ibuffer_sizes()[i] << "(" << bytes_to_GiB(p.ibuffer_sizes()[i])
-                                << " GiB)"
-                                << " with code " << hipError_to_string(hip_status);
+                                << p.ibuffer_sizes()[i] << "("
+                                << byte_size_to_str(p.ibuffer_sizes()[i]) << ") with code "
+                                << hipError_to_string(hip_status);
 
                             if(skip_runtime_fails)
                                 GTEST_SKIP() << msg.str();
@@ -553,6 +565,10 @@ TEST(rocfft_UnitTest, compare_cpu_gpu_symmetrizers)
         GTEST_FAIL() << e.what();
     }
     catch(const HOSTBUF_MEM_USAGE& e)
+    {
+        GTEST_SKIP() << e.what();
+    }
+    catch(const DEVICEBUF_MEM_USAGE& e)
     {
         GTEST_SKIP() << e.what();
     }

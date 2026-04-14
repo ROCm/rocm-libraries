@@ -31,6 +31,7 @@ The hipBLASLt public repository is located at `<https://github.com/ROCm/rocm-lib
 
     * :doc:`hipBLASLt library organization <./conceptual/hipblaslt-library-organization>`
     * :doc:`hipBLASLt clients <./conceptual/hipblaslt-clients>`
+    * :doc:`hipBLASLt PCI chip ID predicates <./conceptual/pci-chip-id-predicates-walkthrough>`
 
   .. grid-item-card:: How to
 

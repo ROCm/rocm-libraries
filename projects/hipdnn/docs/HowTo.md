@@ -156,6 +156,9 @@ The code generator (`tools/DescriptorGenerator/`) produces backend descriptors, 
 
 #### Step 1: Define the FlatBuffer Schema
 
+> [!NOTE]
+> The FBS schema is used by the **backend** and **Data SDK** for serialization and internal data representation. The frontend does not depend on FlatBuffers directly — it uses the backend C API descriptors to build and inspect operation graphs.
+
 Start by defining the operation's data structures:
 
 1. **Create Attribute Schema**
@@ -268,7 +271,7 @@ If you used `--mode full`, the generator produces frontend attributes, node, and
 
 2. **Create Attribute Classes**
    - Add corresponding attribute classes in [`frontend/include/hipdnn_frontend/attributes/`](../frontend/include/hipdnn_frontend/attributes/)
-   - These wrap the FlatBuffer-generated structures
+   - These define operation-specific parameters for the frontend
 
 3. **Update Frontend Tests**
    - Add tests for your new node and attributes

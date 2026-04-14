@@ -9,69 +9,34 @@
 #include <vector>
 
 #include <hipdnn_frontend.hpp>
-#include <hipdnn_frontend/detail/ScopedHipdnnBackendDescriptor.hpp>
 #include <hipdnn_frontend/node/BatchnormInferenceNodeVarianceExt.hpp>
 #include <hipdnn_test_sdk/constants/BnInfVarExtConstants.hpp>
+#include <hipdnn_test_sdk/utilities/IntegrationTestFixture.hpp>
+#include <hipdnn_test_sdk/utilities/LiftingTestHelpers.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
+#include <hipdnn_test_sdk/utilities/TestableGraph.hpp>
 #include <hipdnn_test_sdk/utilities/ToVec.hpp>
-
-#include "test_plugins/TestPluginConstants.hpp"
 
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
 using namespace hipdnn_tests::constants;
+using hipdnn_tests::IntegrationTestFixture;
+using hipdnn_tests::liftGraph;
+using hipdnn_tests::liftGraphWithoutFinalization;
+using hipdnn_tests::TestableGraphLifting;
 using hipdnn_tests::toVec;
 
 namespace
 {
-
-// Exposes protected Graph methods for lifting integration tests
-class TestableGraph : public Graph
-{
-public:
-    using Graph::build_operation_graph;
-    using Graph::deserialize_via_backend;
-    using Graph::fromBackendDescriptor;
-    using Graph::get_raw_graph_descriptor;
-
-    const std::vector<std::shared_ptr<INode>>& getSubNodes() const
-    {
-        return _sub_nodes;
-    }
-};
-
 // Lifts a frontend graph via build_operation_graph(handle), then
 // reconstructs it with fromBackendDescriptor() for verification.
-class IntegrationBatchnormInferenceVarianceExtDescriptorLifting : public ::testing::Test
+class IntegrationBatchnormInferenceVarianceExtDescriptorLifting : public IntegrationTestFixture
 {
 protected:
-    void SetUp() override
-    {
-        SKIP_IF_NO_DEVICES();
-
-        ASSERT_EQ(hipInit(0), hipSuccess);
-
-        const std::array<const char*, 1> paths
-            = {hipdnn_tests::plugin_constants::testGoodPluginPath().c_str()};
-        ASSERT_EQ(hipdnnSetEnginePluginPaths_ext(
-                      paths.size(), paths.data(), HIPDNN_PLUGIN_LOADING_ABSOLUTE),
-                  HIPDNN_STATUS_SUCCESS);
-
-        ASSERT_EQ(hipdnnCreate(&_handle), HIPDNN_STATUS_SUCCESS);
-    }
-
-    void TearDown() override
-    {
-        if(_handle != nullptr)
-        {
-            hipdnnDestroy(_handle);
-        }
-    }
-
     /// Builds a standard BatchnormInferenceVarianceExt graph for round-trip testing.
-    static std::shared_ptr<TestableGraph> buildGraph()
+    static std::shared_ptr<TestableGraphLifting> buildGraph()
     {
-        auto graph = std::make_shared<TestableGraph>();
+        auto graph = std::make_shared<TestableGraphLifting>();
         graph->set_name("BatchnormInferenceVarianceExtLiftingTestGraph")
             .set_compute_data_type(DataType::FLOAT)
             .set_intermediate_data_type(DataType::FLOAT)
@@ -119,8 +84,6 @@ protected:
 
         return graph;
     }
-
-    hipdnnHandle_t _handle = nullptr;
 };
 
 // Builds a standard BatchnormInferenceVarianceExt graph, lowers via build_operation_graph(handle),
@@ -131,18 +94,8 @@ TEST_F(IntegrationBatchnormInferenceVarianceExtDescriptorLifting,
 {
     auto originalGraph = buildGraph();
 
-    auto result = originalGraph->validate();
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    result = originalGraph->build_operation_graph(_handle);
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    auto rawDesc = originalGraph->get_raw_graph_descriptor();
-    ASSERT_NE(rawDesc, nullptr);
-
-    auto liftedGraph = std::make_shared<TestableGraph>();
-    result = liftedGraph->fromBackendDescriptor(rawDesc);
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+    auto liftedGraph = liftGraph(*originalGraph, _handle);
+    ASSERT_NE(liftedGraph, nullptr);
 
     // Verify graph-level data types
     EXPECT_EQ(liftedGraph->get_compute_data_type(), DataType::FLOAT);
@@ -224,10 +177,12 @@ TEST_F(IntegrationBatchnormInferenceVarianceExtDescriptorLifting,
 
     // Verify sub-node count and type
     auto& subNodes = liftedGraph->getSubNodes();
-    ASSERT_EQ(subNodes.size(), 1u) << "Expected 1 operation node in lifted graph";
+    ASSERT_EQ(subNodes.size(), 1u)
+        << "Expected 1 operation node in lifted graph"; // NOLINT(readability-implicit-bool-conversion)
 
     auto* opNode = dynamic_cast<BatchnormInferenceNodeVarianceExt*>(subNodes[0].get());
-    ASSERT_NE(opNode, nullptr) << "Expected a BatchnormInferenceNodeVarianceExt";
+    ASSERT_NE(opNode, nullptr)
+        << "Expected a BatchnormInferenceNodeVarianceExt"; // NOLINT(readability-implicit-bool-conversion)
 
     // Verify operation name
     EXPECT_EQ(opNode->attributes.get_name(), "test_op");
@@ -240,18 +195,8 @@ TEST_F(IntegrationBatchnormInferenceVarianceExtDescriptorLifting,
 {
     auto originalGraph = buildGraph();
 
-    auto result = originalGraph->validate();
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    result = originalGraph->build_operation_graph(_handle);
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    auto rawDesc = originalGraph->get_raw_graph_descriptor();
-    ASSERT_NE(rawDesc, nullptr);
-
-    auto liftedGraph = std::make_shared<TestableGraph>();
-    result = liftedGraph->fromBackendDescriptor(rawDesc);
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+    auto liftedGraph = liftGraph(*originalGraph, _handle);
+    ASSERT_NE(liftedGraph, nullptr);
 
     auto tensorMap = liftedGraph->getTensorsByUid();
 
@@ -288,27 +233,14 @@ TEST_F(IntegrationBatchnormInferenceVarianceExtDescriptorLifting,
 
 // Builds a BatchnormInferenceVarianceExt graph, serializes to binary, creates a backend descriptor
 // from bytes (no handle, no finalize), calls fromBackendDescriptor(), and verifies
-// all fields survive the FlatBuffer-direct path.
+// all fields survive the backend C API serialization path.
 TEST_F(IntegrationBatchnormInferenceVarianceExtDescriptorLifting,
        BatchnormInferenceVarianceExtLiftWithoutFinalization)
 {
     auto originalGraph = buildGraph();
 
-    auto result = originalGraph->validate();
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    // Serialize to binary via the frontend
-    auto data = originalGraph->toBinary();
-    ASSERT_FALSE(data.empty());
-
-    // Create a backend graph descriptor from serialized bytes (no handle, no finalize)
-    const detail::ScopedHipdnnBackendDescriptor graphDesc(data.data(), data.size());
-    ASSERT_TRUE(graphDesc.valid()) << "Failed to create backend graph descriptor";
-
-    // Lift into a new graph via fromBackendDescriptor
-    auto liftedGraph = std::make_shared<TestableGraph>();
-    result = liftedGraph->fromBackendDescriptor(graphDesc.get());
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+    auto liftedGraph = liftGraphWithoutFinalization(*originalGraph);
+    ASSERT_NE(liftedGraph, nullptr);
 
     // Verify graph-level data types
     EXPECT_EQ(liftedGraph->get_compute_data_type(), DataType::FLOAT);
@@ -374,7 +306,7 @@ TEST_F(IntegrationBatchnormInferenceVarianceExtDescriptorLifting,
 TEST_F(IntegrationBatchnormInferenceVarianceExtDescriptorLifting,
        AutoAssignedUidsPreservedInLiftingRoundTrip)
 {
-    auto graph = std::make_shared<TestableGraph>();
+    auto graph = std::make_shared<TestableGraphLifting>();
     graph->set_name("BatchnormInferenceVarianceExtAutoUidLiftTest")
         .set_compute_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
@@ -417,18 +349,8 @@ TEST_F(IntegrationBatchnormInferenceVarianceExtDescriptorLifting,
         = graph->batchnorm_inference_variance_ext(x, mean, variance, scale, bias, epsilon, attrs);
     y->set_output(true).set_name("y");
 
-    auto result = graph->validate();
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    result = graph->build_operation_graph(_handle);
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    auto rawDesc = graph->get_raw_graph_descriptor();
-    ASSERT_NE(rawDesc, nullptr);
-
-    auto liftedGraph = std::make_shared<TestableGraph>();
-    result = liftedGraph->fromBackendDescriptor(rawDesc);
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+    auto liftedGraph = liftGraph(*graph, _handle);
+    ASSERT_NE(liftedGraph, nullptr);
 
     // Verify the tensor map has the expected number of tensors
     auto tensorMap = liftedGraph->getTensorsByUid();
@@ -443,7 +365,7 @@ TEST_F(IntegrationBatchnormInferenceVarianceExtDescriptorLifting,
     }
     std::sort(uids.begin(), uids.end());
     ASSERT_EQ(std::adjacent_find(uids.begin(), uids.end()), uids.end())
-        << "All auto-assigned UIDs must be distinct";
+        << "All auto-assigned UIDs must be distinct"; // NOLINT(readability-implicit-bool-conversion)
 
     // Verify sub-node tensor UIDs are distinct via the node attributes
     auto& subNodes = liftedGraph->getSubNodes();
@@ -467,7 +389,8 @@ TEST_F(IntegrationBatchnormInferenceVarianceExtDescriptorLifting,
     nodeUids.insert(opNode->attributes.get_y()->get_uid());
     ASSERT_NE(opNode->attributes.get_epsilon(), nullptr);
     nodeUids.insert(opNode->attributes.get_epsilon()->get_uid());
-    ASSERT_EQ(nodeUids.size(), 7u) << "Node tensor UIDs are not all distinct";
+    ASSERT_EQ(nodeUids.size(), 7u)
+        << "Node tensor UIDs are not all distinct"; // NOLINT(readability-implicit-bool-conversion)
 
     // Verify tensor dims survived the round trip
     EXPECT_EQ(opNode->attributes.get_x()->get_dim(), toVec(K_BN_INF_VAR_EXT_X_DIMS));
@@ -486,6 +409,91 @@ TEST_F(IntegrationBatchnormInferenceVarianceExtDescriptorLifting,
     EXPECT_EQ(opNode->attributes.get_epsilon()->get_dim(), toVec(K_BN_INF_VAR_EXT_EPSILON_DIMS));
     EXPECT_EQ(opNode->attributes.get_epsilon()->get_stride(),
               toVec(K_BN_INF_VAR_EXT_EPSILON_STRIDES));
+}
+
+// Exercises the JSON serialize/deserialize path with a handle (full finalization)
+// for a batchnorm inference variance ext graph.
+TEST_F(IntegrationBatchnormInferenceVarianceExtDescriptorLifting, JsonRoundTripWithHandle)
+{
+    auto originalGraph = buildGraph();
+
+    auto result = originalGraph->validate();
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    // Serialize to JSON (auto-lowers internally)
+    std::string jsonData;
+    result = originalGraph->serialize(jsonData);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+    ASSERT_FALSE(jsonData.empty());
+
+    // Deserialize from JSON with handle
+    auto liftedGraph = std::make_shared<TestableGraphLifting>();
+    result = liftedGraph->deserialize(_handle, jsonData);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    // Verify graph-level attributes
+    EXPECT_EQ(liftedGraph->get_name(), "BatchnormInferenceVarianceExtLiftingTestGraph");
+    EXPECT_EQ(liftedGraph->get_compute_data_type(), DataType::FLOAT);
+    EXPECT_EQ(liftedGraph->get_intermediate_data_type(), DataType::FLOAT);
+    EXPECT_EQ(liftedGraph->get_io_data_type(), DataType::FLOAT);
+
+    // Verify tensor count (x, mean, variance, scale, bias, epsilon, y = 7)
+    auto tensorMap = liftedGraph->getTensorsByUid();
+    ASSERT_EQ(tensorMap.size(), 7u)
+        << "Expected 7 tensors in lifted batchnorm inference variance ext graph";
+
+    // Verify tensors
+    hipdnn_tests::verifyTensorInGraph(tensorMap,
+                                      K_BN_INF_VAR_EXT_X_UID,
+                                      "x",
+                                      toVec(K_BN_INF_VAR_EXT_X_DIMS),
+                                      toVec(K_BN_INF_VAR_EXT_X_STRIDES),
+                                      DataType::FLOAT);
+    hipdnn_tests::verifyTensorInGraph(tensorMap,
+                                      K_BN_INF_VAR_EXT_MEAN_UID,
+                                      "mean",
+                                      toVec(K_BN_INF_VAR_EXT_MEAN_DIMS),
+                                      toVec(K_BN_INF_VAR_EXT_MEAN_STRIDES),
+                                      DataType::FLOAT);
+    hipdnn_tests::verifyTensorInGraph(tensorMap,
+                                      K_BN_INF_VAR_EXT_VARIANCE_UID,
+                                      "variance",
+                                      toVec(K_BN_INF_VAR_EXT_VARIANCE_DIMS),
+                                      toVec(K_BN_INF_VAR_EXT_VARIANCE_STRIDES),
+                                      DataType::FLOAT);
+    hipdnn_tests::verifyTensorInGraph(tensorMap,
+                                      K_BN_INF_VAR_EXT_SCALE_UID,
+                                      "scale",
+                                      toVec(K_BN_INF_VAR_EXT_SCALE_DIMS),
+                                      toVec(K_BN_INF_VAR_EXT_SCALE_STRIDES),
+                                      DataType::FLOAT);
+    hipdnn_tests::verifyTensorInGraph(tensorMap,
+                                      K_BN_INF_VAR_EXT_BIAS_UID,
+                                      "bias",
+                                      toVec(K_BN_INF_VAR_EXT_BIAS_DIMS),
+                                      toVec(K_BN_INF_VAR_EXT_BIAS_STRIDES),
+                                      DataType::FLOAT);
+    hipdnn_tests::verifyTensorInGraph(tensorMap,
+                                      K_BN_INF_VAR_EXT_EPSILON_UID,
+                                      "epsilon",
+                                      toVec(K_BN_INF_VAR_EXT_EPSILON_DIMS),
+                                      toVec(K_BN_INF_VAR_EXT_EPSILON_STRIDES),
+                                      DataType::FLOAT);
+    hipdnn_tests::verifyTensorInGraph(tensorMap,
+                                      K_BN_INF_VAR_EXT_Y_UID,
+                                      "y",
+                                      toVec(K_BN_INF_VAR_EXT_Y_DIMS),
+                                      toVec(K_BN_INF_VAR_EXT_Y_STRIDES),
+                                      DataType::FLOAT);
+
+    // Verify sub-node count and type
+    auto& subNodes = liftedGraph->getSubNodes();
+    ASSERT_EQ(subNodes.size(), 1u) << "Expected 1 operation node in lifted graph";
+
+    auto* opNode = dynamic_cast<BatchnormInferenceNodeVarianceExt*>(subNodes[0].get());
+    ASSERT_NE(opNode, nullptr) << "Expected a BatchnormInferenceNodeVarianceExt";
+
+    EXPECT_EQ(opNode->attributes.get_name(), "test_op");
 }
 
 } // namespace

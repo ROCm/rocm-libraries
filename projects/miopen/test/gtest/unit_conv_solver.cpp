@@ -29,7 +29,7 @@
 #include <miopen/errors.hpp>
 #include <miopen/generic_search.hpp>
 #include <miopen/any_solver.hpp>
-#include <miopen/solver/ck_grouped_conv_lib_loader.hpp>
+#include <miopen/solver/ck_impl_lib_loader.hpp>
 
 #include "unit_conv_solver.hpp"
 
@@ -926,7 +926,7 @@ void UnitTestConvSolverDevApplicabilityBase::RunTestImpl(
             if(params.uses_ck_dynamic_lib && supported && !is_applicable)
             {
                 const auto& loader =
-                    miopen::solver::CKGroupedConvLibLoader::Get(std::string(dev_descr.name));
+                    miopen::solver::CkImplLibLoader::Get(std::string(dev_descr.name));
                 if(!loader.IsLoaded())
                     continue;
             }

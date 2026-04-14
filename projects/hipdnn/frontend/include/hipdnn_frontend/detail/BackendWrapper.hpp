@@ -115,6 +115,31 @@ public:
             descriptor, serializedGraph, graphByteSize);
     }
 
+    hipdnnStatus_t backendGetSerializedBinaryGraphExt(hipdnnBackendDescriptor_t descriptor,
+                                                      size_t requestedByteSize,
+                                                      size_t* graphByteSize,
+                                                      uint8_t* serializedGraph) override
+    {
+        return hipdnnBackendGetSerializedBinaryGraph_ext(
+            descriptor, requestedByteSize, graphByteSize, serializedGraph);
+    }
+
+    hipdnnStatus_t backendGetSerializedJsonGraphExt(hipdnnBackendDescriptor_t descriptor,
+                                                    size_t requestedByteSize,
+                                                    size_t* graphByteSize,
+                                                    char* serializedJsonGraph) override
+    {
+        return hipdnnBackendGetSerializedJsonGraph_ext(
+            descriptor, requestedByteSize, graphByteSize, serializedJsonGraph);
+    }
+
+    hipdnnStatus_t backendCreateAndDeserializeJsonGraphExt(hipdnnBackendDescriptor_t* descriptor,
+                                                           const char* jsonGraph,
+                                                           size_t jsonByteSize) override
+    {
+        return hipdnnBackendCreateAndDeserializeJsonGraph_ext(descriptor, jsonGraph, jsonByteSize);
+    }
+
     void loggingCallbackExt(hipdnnSeverity_t severity, const char* msg) override
     {
         hipdnnLoggingCallback_ext(severity, msg);

@@ -32,11 +32,11 @@
 #include <miopen/generic_search.hpp>
 #include <miopen/conv/wrw_invoke_params.hpp>
 #include <miopen/solver/problem_description_interpreter.hpp>
-#include <miopen/solver/ck_grouped_conv_lib_loader.hpp>
+#include <miopen/solver/ck_impl_lib_loader.hpp>
 #if MIOPEN_ENABLE_AI_KERNEL_TUNING
 #include <miopen/conv/heuristics/ai_heuristics.hpp>
 #endif
-#include <miopen/solver/implicitgemm_ck_util.hpp>
+#include <miopen/solver/implicitgemm_ck_util_common.hpp>
 #include <miopen/solver/implicitgemm_util.hpp>
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_GROUP_CONV_IMPLICIT_GEMM_HIP_WRW_XDLOPS)
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_GROUP_CONV_IMPLICIT_GEMM_HIP_WRW_XDLOPS_AI_HEUR)
@@ -56,7 +56,7 @@ void PerformanceConfigHipImplicitGemmGroupWrwXdlops::InitHeuristicKernelIDs(cons
         if(valid_kernels[i].find(type) != std::string::npos)
         {
             heuristic_indexes.push_back(i);
-            heuristic_kernels[i] = GetKernelAsTokens(valid_kernels[i]);
+            heuristic_kernels[i] = GetKernelAsTokens2D(valid_kernels[i]);
         }
     }
 }
@@ -89,9 +89,9 @@ bool PerformanceConfigHipImplicitGemmGroupWrwXdlops::ModelApplyToken(
             kernel_id = valid_kernels[heuristic_indexes[0]] + "+" + value;
             index     = heuristic_indexes[0];
 
-            const auto& loader = CKGroupedConvLibLoader::Get(GetCurrentDeviceName());
+            const auto& loader = CkImplLibLoader::Get(GetCurrentDeviceName());
             bool valid_split_k =
-                loader.IsLoaded() && loader.IsArgsSupported(CKConvDirection::Wrw,
+                loader.IsLoaded() && loader.IsArgsSupported(CKSolverType::GrpConvWrw,
                                                             problem,
                                                             kernel_id,
                                                             problem.GetInDataType(),
@@ -181,15 +181,15 @@ static std::vector<float> GetFeatures(const ProblemDescription& problem, const s
 bool PerformanceConfigHipImplicitGemmGroupWrwXdlops::RunParameterPredictionModel(
     const ExecutionContext& ctx, const ProblemDescription& problem)
 {
-    const auto& loader = CKGroupedConvLibLoader::Get(ctx.GetStream().GetDeviceName());
+    const auto& loader = CkImplLibLoader::Get(ctx.GetStream().GetDeviceName());
     if(!loader.IsLoaded())
         return false;
 
     auto data_type = problem.GetInDataType();
     use_tf32       = (data_type == miopenFloat && problem.UseTF32());
 
-    valid_kernels =
-        loader.FillValidKernelsWithTf32Fallback(CKConvDirection::Wrw, problem, data_type, use_tf32);
+    valid_kernels = loader.FillValidKernelsWithTf32Fallback(
+        CKSolverType::GrpConvWrw, problem, data_type, use_tf32);
     if(valid_kernels.empty())
         return false;
 
@@ -252,33 +252,16 @@ std::make_tuple("DeviceGroupedConvBwdWeightTwoStage_Xdl_CShuffle<64, 16, 16, 32,
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables, cert-err58-cpp)
 static const std::vector<std::tuple<std::string, int>> ranked_gemm_grp_wrw_navi = {
-std::make_tuple("DeviceGroupedConvBwdWeight_Wmma_CShuffleV3<128, 48, 64, 128, Default, 8, 3, 1, 6, 8, 8, 8, 1, 1, 8, 1, 1>", 1),
-std::make_tuple("DeviceGroupedConvBwdWeight_Explicit_Xdl<DeviceBatchedGemmXdlUniversal<MNKPadding, CRR> BlkSize: 128, BlkTile: 16x64x64, WaveTile: 16x16, WaveMap: 1x2, VmemReadVec: 2x8, BlkGemmPipelineScheduler: Interwave, BlkGemmPipelineVersion: v2, BlkGemmPipelinePrefetchStages: 2>", 1),
-std::make_tuple("DeviceGroupedConvBwdWeightTwoStage_Wmma_CShuffleV3<32, 16, 16, 32, Default, 8, 1, 1, 1, 4, 1, 4, 1, 1, 1, BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v1, 1>", 64),
-std::make_tuple("DeviceGroupedConvBwdWeight_Wmma_CShuffleV3<128, 48, 64, 128, Default, 8, 3, 1, 6, 8, 8, 8, 1, 1, 8, 1, 1>", 4),
-std::make_tuple("DeviceGroupedConvBwdWeight_Explicit_Xdl<DeviceBatchedGemmXdlUniversal<MNKPadding, CRR> BlkSize: 128, BlkTile: 16x64x64, WaveTile: 16x16, WaveMap: 1x2, VmemReadVec: 2x8, BlkGemmPipelineScheduler: Interwave, BlkGemmPipelineVersion: v2, BlkGemmPipelinePrefetchStages: 2>", 8),
-std::make_tuple("DeviceGroupedConvBwdWeightTwoStage_Wmma_CShuffleV3<32, 16, 16, 32, Default, 8, 1, 1, 1, 4, 1, 4, 1, 1, 1, BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v1, 1>", 4),
-std::make_tuple("DeviceGroupedConvBwdWeight_Explicit_Xdl<DeviceBatchedGemmMultipleD_Wmma_CShuffleV3<MNKPadding, CRR> BlkSize: 64, BlkTile: 32x32x128, WaveTile: 16x16, WaveMap: 2x1, VmemReadVec: 4x4, BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v1, BlkGemmPipelinePrefetchStages: 1>", 1),
-std::make_tuple("DeviceGroupedConvBwdWeightTwoStage_Wmma_CShuffleV3<32, 16, 16, 32, Default, 8, 1, 1, 1, 4, 1, 4, 1, 1, 1, BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v1, 1>", -1),
-std::make_tuple("DeviceGroupedConvBwdWeightTwoStage_Wmma_CShuffleV3<32, 16, 16, 32, Default, 8, 1, 1, 1, 4, 1, 4, 1, 1, 1, BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v1, 1>", 128),
-std::make_tuple("DeviceGroupedConvBwdWeightTwoStage_Wmma_CShuffleV3<32, 16, 16, 32, Default, 8, 1, 1, 1, 4, 1, 4, 1, 1, 1, BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v1, 1>", 8),
-std::make_tuple("DeviceGroupedConvBwdWeight_Wmma_CShuffleV3<128, 64, 64, 128, Default, 8, 4, 1, 8, 8, 8, 8, 1, 1, 8, 1, 1>", 2),
-std::make_tuple("DeviceGroupedConvBwdWeight_Explicit_Xdl<DeviceBatchedGemmXdlUniversal<MNKPadding, CRR> BlkSize: 256, BlkTile: 16x256x64, WaveTile: 16x16, WaveMap: 1x4, VmemReadVec: 2x1, BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v2, BlkGemmPipelinePrefetchStages: 2>", 8),
-std::make_tuple("DeviceGroupedConvBwdWeight_Wmma_CShuffleV3<64, 64, 64, 64, Default, 8, 4, 2, 8, 8, 8, 8, 1, 1, 8, 1, 1>", 1),
-std::make_tuple("DeviceGroupedConvBwdWeight_Explicit_Xdl<DeviceBatchedGemmMultipleD_Wmma_CShuffleV3<MNKPadding, CRR> BlkSize: 128, BlkTile: 48x64x128, WaveTile: 16x16, WaveMap: 3x1, VmemReadVec: 6x4, BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v1, BlkGemmPipelinePrefetchStages: 1>", 1),
-std::make_tuple("DeviceGroupedConvBwdWeight_Explicit_Xdl<DeviceBatchedGemmXdlUniversal<MNKPadding, CRR> BlkSize: 128, BlkTile: 16x64x64, WaveTile: 16x16, WaveMap: 1x2, VmemReadVec: 2x8, BlkGemmPipelineScheduler: Interwave, BlkGemmPipelineVersion: v2, BlkGemmPipelinePrefetchStages: 2>", 16),
-std::make_tuple("DeviceGroupedConvBwdWeight_Wmma_CShuffleV3<128, 128, 128, 32, Default, 8, 8, 2, 4, 8, 4, 8, 1, 1, 8, 1, 1>", 1),
-std::make_tuple("DeviceGroupedConvBwdWeight_Wmma_CShuffleV3<128, 48, 64, 128, Default, 8, 3, 1, 6, 8, 8, 8, 1, 1, 8, 1, 1>", 16),
-std::make_tuple("DeviceGroupedConvBwdWeight_Wmma_CShuffleV3<128, 48, 64, 128, Default, 8, 3, 1, 6, 8, 8, 8, 1, 1, 8, 1, 1>", 8),
-std::make_tuple("DeviceGroupedConvBwdWeight_Wmma_CShuffleV3<64, 64, 64, 64, Default, 8, 4, 2, 8, 8, 8, 8, 1, 1, 8, 1, 1>", 8),
 std::make_tuple("DeviceGroupedConvBwdWeightTwoStage_Xdl_CShuffle<64, 16, 128, 32, Default, 8, 1, 8, 4, 8, 4, 8, 1, 1, 1, BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v1, 4>", 1),
-std::make_tuple("DeviceGroupedConvBwdWeight_Wmma_CShuffleV3<96, 96, 96, 48, Default, 8, 6, 2, 6, 8, 6, 8, 1, 1, 8, 1, 1>", 8),
+std::make_tuple("DeviceGroupedConvBwdWeight_Explicit_Xdl<DeviceBatchedGemmMultipleD_Wmma_CShuffleV3<MNKPadding, CRR> BlkSize: 256, BlkTile: 128x64x32, WaveTile: 16x16, WaveMap: 1x4, VmemReadVec: 1x1, BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v1, BlkGemmPipelinePrefetchStages: 1>", -1),
+std::make_tuple("DeviceGroupedConvBwdWeight_Explicit_Xdl<DeviceBatchedGemmMultipleD_Wmma_CShuffleV3<MNKPadding, CRR> BlkSize: 256, BlkTile: 128x32x64, WaveTile: 16x16, WaveMap: 1x2, VmemReadVec: 1x1, BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v1, BlkGemmPipelinePrefetchStages: 1>", -1),
+std::make_tuple("DeviceGroupedConvBwdWeight_Explicit_Xdl<DeviceBatchedGemmMultipleD_Wmma_CShuffleV3<MNKPadding, CRR> BlkSize: 256, BlkTile: 128x32x128, WaveTile: 16x16, WaveMap: 1x2, VmemReadVec: 1x1, BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v1, BlkGemmPipelinePrefetchStages: 1>", 32),
+std::make_tuple("DeviceGroupedConvBwdWeight_Explicit_Xdl<DeviceBatchedGemmMultipleD_Wmma_CShuffleV3<MNKPadding, CRR> BlkSize: 64, BlkTile: 32x32x128, WaveTile: 16x16, WaveMap: 2x1, VmemReadVec: 8x8, BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v1, BlkGemmPipelinePrefetchStages: 1>", 1),
+std::make_tuple("DeviceGroupedConvBwdWeight_Explicit_Xdl<DeviceBatchedGemmMultipleD_Wmma_CShuffleV3<MNKPadding, CRR> BlkSize: 256, BlkTile: 128x32x64, WaveTile: 16x16, WaveMap: 1x2, VmemReadVec: 1x1, BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v1, BlkGemmPipelinePrefetchStages: 1>", 1),
+std::make_tuple("DeviceGroupedConvBwdWeight_Wmma_CShuffleV3<128, 64, 64, 128, Default, 8, 4, 1, 8, 8, 8, 8, 1, 1, 8, 1, 1>", 1),
+std::make_tuple("DeviceGroupedConvBwdWeight_Wmma_CShuffleV3<256, 128, 256, 64, Default, 8, 8, 2, 4, 8, 8, 8, 1, 1, 8, 1, 1>", 1),
 std::make_tuple("DeviceGroupedConvBwdWeight_Wmma_CShuffleV3<128, 96, 128, 64, Default, 8, 6, 2, 6, 8, 8, 8, 1, 1, 8, 1, 1>", 1),
-std::make_tuple("DeviceGroupedConvBwdWeight_Wmma_CShuffleV3<64, 32, 32, 32, Default, 8, 2, 1, 2, 2, 2, 2, 1, 1, 2, 1, 1>", 8),
-std::make_tuple("DeviceGroupedConvBwdWeightTwoStage_Xdl_CShuffle<64, 16, 256, 32, Default, 8, 1, 16, 8, 8, 8, 8, 1, 1, 1, BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v1, 8>", 1),
-std::make_tuple("DeviceGroupedConvBwdWeightTwoStage_Xdl_CShuffle<64, 48, 64, 32, Default, 8, 3, 4, 3, 4, 4, 4, 1, 1, 1, BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v5, 1>", 1),
-std::make_tuple("DeviceGroupedConvBwdWeight_Explicit_Xdl<DeviceBatchedGemmXdlUniversal<MNKPadding, CRR> BlkSize: 256, BlkTile: 16x256x64, WaveTile: 16x16, WaveMap: 1x4, VmemReadVec: 1x8, BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v2, BlkGemmPipelinePrefetchStages: 2>", 8),
-std::make_tuple("DeviceGroupedConvBwdWeight_Explicit_Xdl<DeviceBatchedGemmMultipleD_Wmma_CShuffleV3<MNKPadding, CRR> BlkSize: 256, BlkTile: 256x96x64, WaveTile: 16x16, WaveMap: 2x6, VmemReadVec: 1x1, BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v1, BlkGemmPipelinePrefetchStages: 1>", 2)
+std::make_tuple("DeviceGroupedConvBwdWeightTwoStage_Wmma_CShuffleV3<32, 16, 16, 32, Default, 8, 1, 1, 1, 4, 1, 4, 1, 1, 1, BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v1, 1>", 1)
 };
 // clang-format on
 
@@ -317,7 +300,7 @@ void PerformanceConfigHipImplicitGemmGroupWrwXdlops::HeuristicInit(
     index     = 0;
     kernel_id = "";
 
-    const auto& loader = CKGroupedConvLibLoader::Get(ctx.GetStream().GetDeviceName());
+    const auto& loader = CkImplLibLoader::Get(ctx.GetStream().GetDeviceName());
     if(!loader.IsLoaded())
         return;
 
@@ -344,8 +327,8 @@ void PerformanceConfigHipImplicitGemmGroupWrwXdlops::HeuristicInit(
     auto data_type = problem.GetInDataType();
     use_tf32       = (data_type == miopenFloat && problem.UseTF32());
 
-    valid_kernels =
-        loader.FillValidKernelsWithTf32Fallback(CKConvDirection::Wrw, problem, data_type, use_tf32);
+    valid_kernels = loader.FillValidKernelsWithTf32Fallback(
+        CKSolverType::GrpConvWrw, problem, data_type, use_tf32);
 
     if(!valid_kernels.empty())
     {
@@ -365,7 +348,7 @@ bool PerformanceConfigHipImplicitGemmGroupWrwXdlops::SetNextValue(const ProblemD
 {
     if(valid_kernels.empty())
     {
-        const auto& loader = CKGroupedConvLibLoader::Get(GetCurrentDeviceName());
+        const auto& loader = CkImplLibLoader::Get(GetCurrentDeviceName());
         if(!loader.IsLoaded())
             return false;
 
@@ -373,7 +356,7 @@ bool PerformanceConfigHipImplicitGemmGroupWrwXdlops::SetNextValue(const ProblemD
         use_tf32       = (data_type == miopenFloat && problem.UseTF32());
 
         valid_kernels = loader.FillValidKernelsWithTf32Fallback(
-            CKConvDirection::Wrw, problem, data_type, use_tf32);
+            CKSolverType::GrpConvWrw, problem, data_type, use_tf32);
 
         if(valid_kernels.empty())
             return false;
@@ -430,12 +413,12 @@ bool PerformanceConfigHipImplicitGemmGroupWrwXdlops::IsValid(
     if(!IsDeterministicSplitKValid(kernel_id, problem.GetConv().attribute.deterministic))
         return false;
 
-    const auto& loader = CKGroupedConvLibLoader::Get(GetCurrentDeviceName());
+    const auto& loader = CkImplLibLoader::Get(GetCurrentDeviceName());
     if(!loader.IsLoaded())
         return false;
 
     return loader.IsArgsSupported(
-        CKConvDirection::Wrw, problem, kernel_id, problem.GetInDataType(), problem.UseTF32());
+        CKSolverType::GrpConvWrw, problem, kernel_id, problem.GetInDataType(), problem.UseTF32());
 }
 
 bool PerformanceConfigHipImplicitGemmGroupWrwXdlops::operator==(
@@ -464,13 +447,13 @@ bool ConvHipImplicitGemmGroupWrwXdlops::IsValidPerformanceConfig(
 size_t
 ConvHipImplicitGemmGroupWrwXdlops::GetCKMaxWorkspaceSize(const ProblemDescription& problem) const
 {
-    const auto& loader = CKGroupedConvLibLoader::Get(GetCurrentDeviceName());
+    const auto& loader = CkImplLibLoader::Get(GetCurrentDeviceName());
     if(!loader.IsLoaded())
         return 0;
 
     auto data_type = problem.GetInDataType();
     bool use_tf32  = (data_type == miopenFloat) && problem.UseTF32();
-    return loader.GetWorkspaceSize(CKConvDirection::Wrw, problem, data_type, use_tf32);
+    return loader.GetWorkspaceSize(CKSolverType::GrpConvWrw, problem, data_type, use_tf32);
 }
 
 size_t ConvHipImplicitGemmGroupWrwXdlops::GetWorkspaceSize(const ExecutionContext&,
@@ -508,12 +491,12 @@ bool ConvHipImplicitGemmGroupWrwXdlops::IsApplicable(
     if(problem.IsLayoutDefault() && problem.HasNonPackedTensors())
         return false;
 
-    const auto& loader = CKGroupedConvLibLoader::Get(ctx.GetStream().GetDeviceName());
+    const auto& loader = CkImplLibLoader::Get(ctx.GetStream().GetDeviceName());
     if(!loader.IsLoaded())
         return false;
 
     return loader.IsApplicable(
-        CKConvDirection::Wrw, problem, problem.GetInDataType(), problem.UseTF32());
+        CKSolverType::GrpConvWrw, problem, problem.GetInDataType(), problem.UseTF32());
 }
 
 ConvSolution ConvHipImplicitGemmGroupWrwXdlops::GetSolution(
@@ -521,12 +504,12 @@ ConvSolution ConvHipImplicitGemmGroupWrwXdlops::GetSolution(
     [[maybe_unused]] const ProblemDescription& problem,
     [[maybe_unused]] const PerformanceConfigHipImplicitGemmGroupWrwXdlops& config) const
 {
-    const auto& loader = CKGroupedConvLibLoader::Get(ctx.GetStream().GetDeviceName());
+    const auto& loader = CkImplLibLoader::Get(ctx.GetStream().GetDeviceName());
     if(!loader.IsLoaded())
-        return {};
+        return ConvSolution{miopenStatusInternalError};
 
     return loader.GetSolution(
-        CKConvDirection::Wrw, ctx, problem, config.kernel_id, config.UseTF32());
+        CKSolverType::GrpConvWrw, ctx, problem, config.kernel_id, config.UseTF32());
 }
 
 } // namespace conv
