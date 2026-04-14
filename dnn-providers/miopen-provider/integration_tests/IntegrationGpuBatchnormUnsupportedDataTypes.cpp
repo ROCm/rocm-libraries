@@ -17,11 +17,12 @@ using namespace hipdnn_data_sdk::utilities;
 namespace
 {
 
-struct UnhappyBnDtypeCase
+struct UnsupportedBnDtypeCase
 {
     DataType io;
     DataType scale;
     DataType bias;
+    DataType stats;
     const char* name;
 };
 
@@ -30,11 +31,10 @@ std::vector<int64_t> makeDims()
     return {1, 4, 8, 8};
 }
 
-Graph makeGraph(const UnhappyBnDtypeCase& tc,
-                       const TensorLayout& layout = TensorLayout::NCHW)
+Graph makeGraph(const UnsupportedBnDtypeCase& tc, const TensorLayout& layout = TensorLayout::NCHW)
 {
     Graph g;
-    g.set_name("IntegrationGpuBatchnormUnhappyDataTypes");
+    g.set_name("IntegrationGpuBatchnormUnsupportedDataTypes");
     g.set_compute_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_io_data_type(tc.io);
@@ -45,9 +45,8 @@ Graph makeGraph(const UnhappyBnDtypeCase& tc,
     auto xAttr = makeTensorAttributes("X", tc.io, dims, generateStrides(dims, layout.strideOrder));
     auto X = std::make_shared<TensorAttributes>(std::move(xAttr));
 
-    auto meanAttr = makeTensorAttributes("mean", DataType::FLOAT, cDims, generateStrides(cDims));
-    auto invVarAttr
-        = makeTensorAttributes("inv_variance", DataType::FLOAT, cDims, generateStrides(cDims));
+    auto meanAttr = makeTensorAttributes("mean", tc.stats, cDims, generateStrides(cDims));
+    auto invVarAttr = makeTensorAttributes("inv_variance", tc.stats, cDims, generateStrides(cDims));
     auto mean = std::make_shared<TensorAttributes>(std::move(meanAttr));
     auto invVar = std::make_shared<TensorAttributes>(std::move(invVarAttr));
 
@@ -63,7 +62,8 @@ Graph makeGraph(const UnhappyBnDtypeCase& tc,
     return g;
 }
 
-class IntegrationGpuBatchnormUnsupportedDataTypes : public ::testing::TestWithParam<UnhappyBnDtypeCase>
+class IntegrationGpuBatchnormUnsupportedDataTypes
+    : public ::testing::TestWithParam<UnsupportedBnDtypeCase>
 {
 protected:
     hipdnnHandle_t _handle = nullptr;
@@ -112,8 +112,7 @@ TEST_P(IntegrationGpuBatchnormUnsupportedDataTypes, RejectsUnsupportedDataTypes)
 
     auto result = g.build(_handle);
 
-    EXPECT_EQ(result.code, ErrorCode::HIPDNN_BACKEND_ERROR)
-        << "err_msg: " << result.err_msg;
+    EXPECT_EQ(result.code, ErrorCode::HIPDNN_BACKEND_ERROR) << "err_msg: " << result.err_msg;
 
     EXPECT_FALSE(result.err_msg.empty()) << "err_msg is empty";
 }
@@ -122,10 +121,15 @@ INSTANTIATE_TEST_SUITE_P(
     Smoke,
     IntegrationGpuBatchnormUnsupportedDataTypes,
     ::testing::Values(
-        UnhappyBnDtypeCase{DataType::UINT8, DataType::FLOAT, DataType::FLOAT, "Uint8IO"},
-        UnhappyBnDtypeCase{DataType::FLOAT, DataType::HALF, DataType::HALF, "HalfScaleBias"},
-        UnhappyBnDtypeCase{
-            DataType::FLOAT, DataType::HALF, DataType::FLOAT, "MismatchedScaleHalfBiasFloat"}),
-    [](const ::testing::TestParamInfo<UnhappyBnDtypeCase>& info) {
+        UnsupportedBnDtypeCase{
+            DataType::UINT8, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, "Uint8IO"},
+        UnsupportedBnDtypeCase{
+            DataType::FLOAT, DataType::HALF, DataType::HALF, DataType::FLOAT, "HalfScaleBias"},
+        UnsupportedBnDtypeCase{DataType::FLOAT,
+                               DataType::HALF,
+                               DataType::FLOAT,
+                               DataType::FLOAT,
+                               "MismatchedScaleHalfBiasFloat"}),
+    [](const ::testing::TestParamInfo<UnsupportedBnDtypeCase>& info) {
         return std::string(info.param.name);
     });
