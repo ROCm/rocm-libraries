@@ -10,6 +10,8 @@
 #include <string>
 #include <string_view>
 
+#include "harness/ToleranceConfig.hpp"
+
 namespace hipdnn_integration_tests
 {
 
@@ -43,7 +45,8 @@ public:
     // Initialize with CLI arguments. Must be called before any get() access.
     static void initialize(std::optional<std::filesystem::path> articlePath,
                            std::optional<std::string> engineName,
-                           bool failOnUnsupported = false)
+                           bool failOnUnsupported = false,
+                           std::optional<std::filesystem::path> configPath = std::nullopt)
     {
         TestConfig& instance = get();
         if(instance._initialized)
@@ -53,6 +56,12 @@ public:
         instance._articlePath = std::move(articlePath);
         instance._engineName = std::move(engineName);
         instance._failOnUnsupported = failOnUnsupported;
+
+        if(configPath.has_value())
+        {
+            instance._toleranceConfig.emplace(*configPath);
+        }
+
         instance._initialized = true;
     }
 
@@ -114,6 +123,25 @@ public:
         return ToleranceMode::DEFAULT;
     }
 
+    // Check if a tolerance config file was provided
+    bool hasToleranceConfig() const
+    {
+        throwIfNotInitialized();
+        return _toleranceConfig.has_value();
+    }
+
+    // Find a tolerance override matching the given test name.
+    // Returns std::nullopt if no config loaded or no filter matches.
+    std::optional<ToleranceOverride> findToleranceOverride(std::string_view testName) const
+    {
+        throwIfNotInitialized();
+        if(!_toleranceConfig.has_value())
+        {
+            return std::nullopt;
+        }
+        return _toleranceConfig->findOverride(testName);
+    }
+
 private:
     TestConfig() = default;
 
@@ -127,6 +155,7 @@ private:
 
     std::optional<std::filesystem::path> _articlePath;
     std::optional<std::string> _engineName;
+    std::optional<ToleranceConfig> _toleranceConfig;
     bool _failOnUnsupported = false;
     bool _initialized = false;
 };
