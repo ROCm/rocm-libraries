@@ -40,7 +40,9 @@ struct hipblaslt_e8
     // default constructor
     HIP_HOST_DEVICE hipblaslt_e8() = default;
 
-    HIP_HOST_DEVICE hipblaslt_e8(float v0)
+    HIP_HOST_DEVICE hipblaslt_e8(const hipblaslt_e8& other) = default;
+
+    explicit HIP_HOST_DEVICE hipblaslt_e8(float v0)
     {
         union {
             uint32_t x;
@@ -83,6 +85,11 @@ struct hipblaslt_e8
         }
 
         return v.f;
+    }
+
+    inline HIP_HOST_DEVICE hipblaslt_e8 operator-() const
+    {
+        return hipblaslt_e8(*this);
     }
 };
 
