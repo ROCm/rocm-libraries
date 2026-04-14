@@ -13,6 +13,7 @@ add_executable(
     Batchnorm/IntegrationGpuBatchnormForwardInferenceWithVariance.cpp
     Batchnorm/IntegrationGpuBatchnormForwardInferenceAndActivation.cpp
     Batchnorm/IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivation.cpp
+    Batchnorm/IntegrationGpuBatchnormForwardTraining.cpp
     RMSnorm/IntegrationGpuRMSnormForward.cpp
 )
 

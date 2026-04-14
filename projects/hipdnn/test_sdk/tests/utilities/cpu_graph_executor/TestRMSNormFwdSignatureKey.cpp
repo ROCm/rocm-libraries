@@ -96,9 +96,10 @@ TEST(TestRMSNormFwdSignatureKey, CreateFromNodeAndTensorMap)
     const std::vector<int64_t> dims = {1, 1, 1, 1};
     auto graph = buildRMSNormFwdGraph(
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, dims, TensorLayout::NHWC);
-    auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
-    auto graphWrap = hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper(flatbufferGraph.data(),
-                                                                         flatbufferGraph.size());
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+    auto graphWrap = hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper(serializedGraph.data(),
+                                                                         serializedGraph.size());
 
     const RMSNormFwdSignatureKey keyFromNode(graphWrap.getNode(0), graphWrap.getTensorMap());
 

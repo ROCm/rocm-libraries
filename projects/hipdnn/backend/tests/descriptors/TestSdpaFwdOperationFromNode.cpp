@@ -11,9 +11,9 @@
 #include "hipdnn_backend.h"
 
 #include <gtest/gtest.h>
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
-#include <hipdnn_data_sdk/data_objects/sdpa_attributes_generated.h>
-#include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/sdpa_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_test_sdk/constants/SdpaFwdConstants.hpp>
 #include <hipdnn_test_sdk/utilities/ToVec.hpp>
 
@@ -24,7 +24,7 @@
 #include <vector>
 
 using namespace hipdnn_backend;
-using namespace hipdnn_data_sdk::data_objects;
+using namespace hipdnn_flatbuffers_sdk::data_objects;
 using namespace hipdnn_tests::constants;
 using hipdnn_tests::toVec;
 
@@ -119,9 +119,9 @@ protected:
                   toVec(K_SDPA_TENSOR_SCALAR_STRIDES));
     }
 
-    static hipdnn_data_sdk::data_objects::SdpaAttributesT createStandardSdpaFwdAttrs()
+    static hipdnn_flatbuffers_sdk::data_objects::SdpaAttributesT createStandardSdpaFwdAttrs()
     {
-        hipdnn_data_sdk::data_objects::SdpaAttributesT attrs;
+        hipdnn_flatbuffers_sdk::data_objects::SdpaAttributesT attrs;
         attrs.q_tensor_uid = K_SDPA_TENSOR_Q_UID;
         attrs.k_tensor_uid = K_SDPA_TENSOR_K_UID;
         attrs.v_tensor_uid = K_SDPA_TENSOR_V_UID;
@@ -1188,7 +1188,7 @@ TEST_F(TestSdpaFwdOperationFromNode, FromNodeFailsWithWrongAttributeType)
     // A node with ConvolutionFwdAttributes should fail SDPA fromNode — wrong union type.
     NodeT node;
     node.compute_data_type = DataType::FLOAT;
-    node.attributes.Set(hipdnn_data_sdk::data_objects::ConvolutionFwdAttributesT{});
+    node.attributes.Set(hipdnn_flatbuffers_sdk::data_objects::ConvolutionFwdAttributesT{});
 
     ASSERT_THROW_HIPDNN_STATUS(SdpaFwdOperationDescriptor::fromNode(node, _tensorMap),
                                HIPDNN_STATUS_INTERNAL_ERROR);

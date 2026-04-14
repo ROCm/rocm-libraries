@@ -60,16 +60,6 @@ TEST(TestTypes, ConvolutionModeConversion)
     EXPECT_EQ(toSdkType(ConvolutionMode::NOT_SET), hipdnn_data_sdk::data_objects::ConvMode::UNSET);
 }
 
-TEST(TestTypes, PointwiseModeConversion)
-{
-    using namespace hipdnn_frontend;
-
-    EXPECT_EQ(toSdkType(PointwiseMode::RELU_FWD),
-              hipdnn_data_sdk::data_objects::PointwiseMode::RELU_FWD);
-    EXPECT_EQ(toSdkType(PointwiseMode::NOT_SET),
-              hipdnn_data_sdk::data_objects::PointwiseMode::UNSET);
-}
-
 TEST(TestTypes, HeuristicModeConversion)
 {
     using namespace hipdnn_frontend;
@@ -117,6 +107,73 @@ TEST(TestTypes, DataTypeToString)
     EXPECT_STREQ(to_string(DataType::FP6_E3M2), "fp6_e3m2");
     EXPECT_STREQ(to_string(DataType::INT64), "int64");
     EXPECT_STREQ(to_string(DataType::NOT_SET), "unknown");
+}
+
+TEST(TestTypes, PointwiseModeToString)
+{
+    using namespace hipdnn_frontend;
+
+    EXPECT_STREQ(to_string(PointwiseMode::NOT_SET), "NOT_SET");
+    EXPECT_STREQ(to_string(PointwiseMode::RELU_FWD), "RELU_FWD");
+    EXPECT_STREQ(to_string(PointwiseMode::ADD), "ADD");
+    EXPECT_STREQ(to_string(PointwiseMode::BINARY_SELECT), "BINARY_SELECT");
+    EXPECT_STREQ(to_string(PointwiseMode::COUNT), "UNKNOWN");
+
+    // Verify all valid modes produce a non-UNKNOWN string
+    for(auto mode : {PointwiseMode::NOT_SET,
+                     PointwiseMode::ABS,
+                     PointwiseMode::ADD,
+                     PointwiseMode::ADD_SQUARE,
+                     PointwiseMode::BINARY_SELECT,
+                     PointwiseMode::CEIL,
+                     PointwiseMode::CMP_EQ,
+                     PointwiseMode::CMP_GE,
+                     PointwiseMode::CMP_GT,
+                     PointwiseMode::CMP_LE,
+                     PointwiseMode::CMP_LT,
+                     PointwiseMode::CMP_NEQ,
+                     PointwiseMode::DIV,
+                     PointwiseMode::ELU_BWD,
+                     PointwiseMode::ELU_FWD,
+                     PointwiseMode::ERF,
+                     PointwiseMode::EXP,
+                     PointwiseMode::FLOOR,
+                     PointwiseMode::GELU_APPROX_TANH_BWD,
+                     PointwiseMode::GELU_APPROX_TANH_FWD,
+                     PointwiseMode::GELU_BWD,
+                     PointwiseMode::GELU_FWD,
+                     PointwiseMode::GEN_INDEX,
+                     PointwiseMode::IDENTITY,
+                     PointwiseMode::LOG,
+                     PointwiseMode::LOGICAL_AND,
+                     PointwiseMode::LOGICAL_NOT,
+                     PointwiseMode::LOGICAL_OR,
+                     PointwiseMode::MAX,
+                     PointwiseMode::MIN,
+                     PointwiseMode::MUL,
+                     PointwiseMode::NEG,
+                     PointwiseMode::RECIPROCAL,
+                     PointwiseMode::RELU_BWD,
+                     PointwiseMode::RELU_FWD,
+                     PointwiseMode::RSQRT,
+                     PointwiseMode::SIGMOID_BWD,
+                     PointwiseMode::SIGMOID_FWD,
+                     PointwiseMode::SIN,
+                     PointwiseMode::SOFTPLUS_BWD,
+                     PointwiseMode::SOFTPLUS_FWD,
+                     PointwiseMode::SQRT,
+                     PointwiseMode::SUB,
+                     PointwiseMode::SWISH_BWD,
+                     PointwiseMode::SWISH_FWD,
+                     PointwiseMode::TAN,
+                     PointwiseMode::TANH_BWD,
+                     PointwiseMode::TANH_FWD})
+    {
+        EXPECT_STRNE(to_string(mode), "UNKNOWN")
+            << "to_string returned UNKNOWN for PointwiseMode " << static_cast<int>(mode);
+        EXPECT_STRNE(to_string(mode), "")
+            << "to_string returned empty for PointwiseMode " << static_cast<int>(mode);
+    }
 }
 
 TEST(TestTypes, DataTypeStreamOperator)

@@ -13,7 +13,7 @@
 #include <cstring>
 #include <flatbuffers/flatbuffers.h>
 #include <gtest/gtest.h>
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <nlohmann/json.hpp>
 #include <vector>
 
@@ -28,18 +28,19 @@ public:
         return test_utilities::createValidGraph();
     }
 
-    static void verifyGraph(const hipdnn_data_sdk::data_objects::GraphT& graph)
+    static void verifyGraph(const hipdnn_flatbuffers_sdk::data_objects::GraphT& graph)
     {
         EXPECT_EQ(graph.name, "test");
-        EXPECT_EQ(graph.compute_data_type, hipdnn_data_sdk::data_objects::DataType::FLOAT);
-        EXPECT_EQ(graph.intermediate_data_type, hipdnn_data_sdk::data_objects::DataType::HALF);
-        EXPECT_EQ(graph.io_data_type, hipdnn_data_sdk::data_objects::DataType::BFLOAT16);
+        EXPECT_EQ(graph.compute_data_type, hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
+        EXPECT_EQ(graph.intermediate_data_type,
+                  hipdnn_flatbuffers_sdk::data_objects::DataType::HALF);
+        EXPECT_EQ(graph.io_data_type, hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16);
         EXPECT_EQ(graph.tensors.size(), 3);
         EXPECT_EQ(graph.nodes.size(), 1);
     }
 
-    static void verifyGraphsEquivalent(const hipdnn_data_sdk::data_objects::GraphT& graph1,
-                                       const hipdnn_data_sdk::data_objects::GraphT& graph2)
+    static void verifyGraphsEquivalent(const hipdnn_flatbuffers_sdk::data_objects::GraphT& graph1,
+                                       const hipdnn_flatbuffers_sdk::data_objects::GraphT& graph2)
     {
         EXPECT_EQ(graph1.name, graph2.name);
         EXPECT_EQ(graph1.compute_data_type, graph2.compute_data_type);
@@ -84,10 +85,10 @@ TEST_F(TestGraphDescriptor, SerializeDeserializeGraph)
 
     auto output = descriptor.getSerializedGraph();
     flatbuffers::Verifier verifier(static_cast<const uint8_t*>(output.ptr), output.size);
-    ASSERT_TRUE(verifier.VerifyBuffer<hipdnn_data_sdk::data_objects::Graph>());
+    ASSERT_TRUE(verifier.VerifyBuffer<hipdnn_flatbuffers_sdk::data_objects::Graph>());
 
-    auto graph
-        = hipdnn_data_sdk::data_objects::UnPackGraph(static_cast<const uint8_t*>(output.ptr));
+    auto graph = hipdnn_flatbuffers_sdk::data_objects::UnPackGraph(
+        static_cast<const uint8_t*>(output.ptr));
     ASSERT_NE(graph, nullptr);
     verifyGraph(*graph);
 }
@@ -261,7 +262,7 @@ TEST_F(TestGraphDescriptor, EmptyGraphDeserializesButFailsToFinalize)
     descriptor.buildSerializedGraph();
     auto data = descriptor.getSerializedGraph();
     flatbuffers::Verifier verifier(static_cast<const uint8_t*>(data.ptr), data.size);
-    ASSERT_TRUE(verifier.VerifyBuffer<hipdnn_data_sdk::data_objects::Graph>());
+    ASSERT_TRUE(verifier.VerifyBuffer<hipdnn_flatbuffers_sdk::data_objects::Graph>());
 }
 
 TEST_F(TestGraphDescriptor, GetSerializedGraphWithoutPopulationThrows)
@@ -314,10 +315,10 @@ TEST_F(TestGraphDescriptor, JsonRoundTripViaDescriptorApi)
     auto binary1 = descriptor1.getSerializedGraph();
     auto binary2 = descriptor2.getSerializedGraph();
 
-    auto graph1
-        = hipdnn_data_sdk::data_objects::UnPackGraph(static_cast<const uint8_t*>(binary1.ptr));
-    auto graph2
-        = hipdnn_data_sdk::data_objects::UnPackGraph(static_cast<const uint8_t*>(binary2.ptr));
+    auto graph1 = hipdnn_flatbuffers_sdk::data_objects::UnPackGraph(
+        static_cast<const uint8_t*>(binary1.ptr));
+    auto graph2 = hipdnn_flatbuffers_sdk::data_objects::UnPackGraph(
+        static_cast<const uint8_t*>(binary2.ptr));
 
     verifyGraphsEquivalent(*graph1, *graph2);
 }
@@ -482,10 +483,10 @@ TEST_F(TestGraphDescriptor, JsonRoundTripViaApi)
     auto binary1 = graphDesc1->getSerializedGraph();
     auto binary2 = graphDesc2->getSerializedGraph();
 
-    auto graph1
-        = hipdnn_data_sdk::data_objects::UnPackGraph(static_cast<const uint8_t*>(binary1.ptr));
-    auto graph2
-        = hipdnn_data_sdk::data_objects::UnPackGraph(static_cast<const uint8_t*>(binary2.ptr));
+    auto graph1 = hipdnn_flatbuffers_sdk::data_objects::UnPackGraph(
+        static_cast<const uint8_t*>(binary1.ptr));
+    auto graph2 = hipdnn_flatbuffers_sdk::data_objects::UnPackGraph(
+        static_cast<const uint8_t*>(binary2.ptr));
 
     verifyGraphsEquivalent(*graph1, *graph2);
 }
@@ -494,15 +495,15 @@ TEST_F(TestGraphDescriptor, DeserializeInvalidatesSerializedBuffer)
 {
     // Build graph A with name "graphA"
     flatbuffers::FlatBufferBuilder builderA;
-    const std::vector<flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
+    const std::vector<flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>
         emptyTensorsA;
-    const std::vector<flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> emptyNodesA;
-    auto graphA = hipdnn_data_sdk::data_objects::CreateGraphDirect(
+    const std::vector<flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Node>> emptyNodesA;
+    auto graphA = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(
         builderA,
         "graphA",
-        hipdnn_data_sdk::data_objects::DataType::FLOAT,
-        hipdnn_data_sdk::data_objects::DataType::HALF,
-        hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
         &emptyTensorsA,
         &emptyNodesA);
     builderA.Finish(graphA);
@@ -524,15 +525,15 @@ TEST_F(TestGraphDescriptor, DeserializeInvalidatesSerializedBuffer)
 
     // Build graph B with name "graphB"
     flatbuffers::FlatBufferBuilder builderB;
-    const std::vector<flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
+    const std::vector<flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>
         emptyTensorsB;
-    const std::vector<flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> emptyNodesB;
-    auto graphB = hipdnn_data_sdk::data_objects::CreateGraphDirect(
+    const std::vector<flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Node>> emptyNodesB;
+    auto graphB = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(
         builderB,
         "graphB",
-        hipdnn_data_sdk::data_objects::DataType::FLOAT,
-        hipdnn_data_sdk::data_objects::DataType::HALF,
-        hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
         &emptyTensorsB,
         &emptyNodesB);
     builderB.Finish(graphB);
@@ -702,7 +703,7 @@ TEST_F(TestGraphDescriptor, BinarySerializeOversizedBuffer)
 
     // Verify the binary content is valid
     flatbuffers::Verifier verifier(buffer.data(), returnedSize);
-    ASSERT_TRUE(verifier.VerifyBuffer<hipdnn_data_sdk::data_objects::Graph>());
+    ASSERT_TRUE(verifier.VerifyBuffer<hipdnn_flatbuffers_sdk::data_objects::Graph>());
 }
 
 TEST_F(TestGraphDescriptor, BinaryRoundTripViaApi)
@@ -750,10 +751,10 @@ TEST_F(TestGraphDescriptor, BinaryRoundTripViaApi)
     auto binary1 = graphDesc1->getSerializedGraph();
     auto binary2 = graphDesc2->getSerializedGraph();
 
-    auto graph1
-        = hipdnn_data_sdk::data_objects::UnPackGraph(static_cast<const uint8_t*>(binary1.ptr));
-    auto graph2
-        = hipdnn_data_sdk::data_objects::UnPackGraph(static_cast<const uint8_t*>(binary2.ptr));
+    auto graph1 = hipdnn_flatbuffers_sdk::data_objects::UnPackGraph(
+        static_cast<const uint8_t*>(binary1.ptr));
+    auto graph2 = hipdnn_flatbuffers_sdk::data_objects::UnPackGraph(
+        static_cast<const uint8_t*>(binary2.ptr));
 
     verifyGraphsEquivalent(*graph1, *graph2);
 }
