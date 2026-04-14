@@ -406,10 +406,6 @@ try
     if(!params)
         return HIPSOLVER_STATUS_INVALID_VALUE;
 
-    // Calculate strides for strided-batched layout
-    int64_t strideA = lda * n;
-    int64_t strideW = n;
-
     return hipsolver::cuda2hip_status(
         cusolverDnXsyevBatched_bufferSize((cusolverDnHandle_t)handle,
                                           (cusolverDnParams_t)params,
@@ -454,10 +450,6 @@ try
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
     if(!params)
         return HIPSOLVER_STATUS_INVALID_VALUE;
-
-    // Calculate strides for strided-batched layout
-    int64_t strideA = lda * n;
-    int64_t strideW = n;
 
     return hipsolver::cuda2hip_status(cusolverDnXsyevBatched((cusolverDnHandle_t)handle,
                                                              (cusolverDnParams_t)params,
