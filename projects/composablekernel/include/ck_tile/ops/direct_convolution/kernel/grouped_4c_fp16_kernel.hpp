@@ -3,13 +3,13 @@
 
 #pragma once
 
-#include "ck_tile/ops/grouped_convolution/utils/direct/matrix_layout.hpp"
-#include "ck_tile/ops/grouped_convolution/utils/direct/swizzle.hpp"
-#include "ck_tile/ops/grouped_convolution/utils/direct/types.hpp"
-#include "ck_tile/ops/grouped_convolution/utils/direct/mathutil.hpp"
-#include "ck_tile/ops/grouped_convolution/utils/direct/launch_params.hpp"
-#include "ck_tile/ops/grouped_convolution/utils/direct/kernel_variant.hpp"
-#include "ck_tile/ops/grouped_convolution/utils/direct/transpose_lds_layout.hpp"
+#include "ck_tile/ops/direct_convolution/utils//matrix_layout.hpp"
+#include "ck_tile/ops/direct_convolution/utils//swizzle.hpp"
+#include "ck_tile/ops/direct_convolution/utils//types.hpp"
+#include "ck_tile/ops/direct_convolution/utils//mathutil.hpp"
+#include "ck_tile/ops/direct_convolution/utils//launch_params.hpp"
+#include "ck_tile/ops/direct_convolution/utils//kernel_variant.hpp"
+#include "ck_tile/ops/direct_convolution/utils//transpose_lds_layout.hpp"
 #include "memory.h"
 #include <hip/hip_fp16.h>
 #include <hip/hip_runtime.h>

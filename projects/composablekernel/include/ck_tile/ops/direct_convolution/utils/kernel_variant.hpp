@@ -4,7 +4,7 @@
 #pragma once
 
 #include "conv_params.hpp"
-#include "launch_params.h"
+#include "launch_params.hpp"
 #include <hip/hip_runtime.h>
 
 

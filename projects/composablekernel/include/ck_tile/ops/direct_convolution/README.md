@@ -17,6 +17,10 @@ For the original README, see [`projects/miopen/src/hipconv/README.md`](../../../
 
 The kernels use MFMA 16x16x16 (4c, 16c) and MFMA 16x16x32 (8c) instructions with buffer-load-to-LDS for input staging.
 
+## Supported device architectures
+
+CK Tile direct convolutions support `gfx942` and `gfx950` device architectures.
+
 ## Project structure
 
 ```

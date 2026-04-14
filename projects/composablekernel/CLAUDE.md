@@ -24,3 +24,7 @@ The entrypoint is is the project Readme file `projects/composablekernel/include/
 `projects/composablekernel/docs/direct_convolution` and it contains the mathematical and technical details of different components.
 We should update this documentation as we go. 
 
+## Supported device architectures
+
+The original HIP conv target `gfx942` device architecture. One of the goals of this project is to extend the coverage to `gfx942`.
+
