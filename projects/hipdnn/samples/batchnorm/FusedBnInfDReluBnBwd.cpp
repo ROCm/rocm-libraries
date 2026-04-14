@@ -159,7 +159,12 @@ bool SampleRunner::operator()(const TensorLayout& layout)
         cpuVariantPack[dbias->get_uid()] = dbiasRefTensor.memory().hostData();
 
         // Execute on CPU using graph executor
-        auto serializedGraph = graph->buildFlatbufferOperationGraph();
+        auto [serializedGraph, serErr] = graph->to_binary();
+        if(serErr.is_bad())
+        {
+            std::cerr << "Failed to serialize graph: " << serErr.get_message() << std::endl;
+            return false;
+        }
         hipdnn_test_sdk::utilities::CpuReferenceGraphExecutor cpuExecutor;
         cpuExecutor.execute(serializedGraph.data(), serializedGraph.size(), cpuVariantPack);
 

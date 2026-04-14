@@ -161,8 +161,9 @@ inline hipError_t segmented_radix_sort_impl(
     const auto params = get_config<Selector>(Config{}, current_target);
 
     static constexpr bool with_values = !std::is_same<value_type, ::rocprim::empty_type>::value;
-    const bool            partitioning_allowed     = params.warp_sort_config.partitioning_allowed;
-    const unsigned int    max_small_segment_length = params.warp_sort_config.items_per_thread_small
+
+    const bool         config_allows_partitioning = params.warp_sort_config.partitioning_allowed;
+    const unsigned int max_small_segment_length   = params.warp_sort_config.items_per_thread_small
                                                   * params.warp_sort_config.logical_warp_size_small;
     const unsigned int small_segments_per_block = params.warp_sort_config.block_size_small
                                                   / params.warp_sort_config.logical_warp_size_small;
@@ -194,8 +195,22 @@ inline hipError_t segmented_radix_sort_impl(
     const unsigned int iterations         = ::rocprim::detail::ceiling_div(bits, params.radix_bits);
     const bool         to_output          = with_double_buffer || (iterations - 1) % 2 == 0;
     is_result_in_output                   = (iterations % 2 == 0) != to_output;
-    const bool do_partitioning
-        = partitioning_allowed && segments >= params.warp_sort_config.partitioning_threshold;
+
+    // Check if the stream is a graph capture. Partitioning is not allowed under graph
+    // capture since the number, since the launch parameters are dependend on the results
+    // of partioning.
+    //
+    // This has implications on performance under graph capture and should be investigated
+    // in the future.
+    bool is_graph_capture;
+    ROCPRIM_RETURN_ON_ERROR(::rocprim::detail::is_graph_capture(stream, is_graph_capture));
+
+    // We only allow partitioning if:
+    //   - The config allows it,
+    //   - The number of segments is significant enough, and
+    //   - We are not a graph capture.
+    const bool do_partitioning = config_allows_partitioning && !is_graph_capture
+                                 && segments >= params.warp_sort_config.partitioning_threshold;
 
     const size_t medium_segment_indices_size = three_way_partitioning ? segments : 0;
     const size_t segment_count_output_size   = three_way_partitioning ? 2 : 1;
@@ -543,6 +558,8 @@ inline hipError_t segmented_radix_sort_impl(
 /// \parblock
 /// In this example a device-level ascending radix sort is performed on an array of
 /// \p float values.
+///
+/// The full example is [on GitHub](https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocprim/example/rocprim/device/example_device_segmented_radix_sort.cpp).
 ///
 /// \code{.cpp}
 /// #include <rocprim/rocprim.hpp>

@@ -220,6 +220,16 @@ void cast_mul(customVector<TcCast>& dst,
                      || !(std::is_same<TiA, hipblaslt_bf8>::value
                           || std::is_same<TiA, hipblaslt_f8>::value))
         {
+            if constexpr(false
+#if defined(HIPBLASLT_USE_FP4)
+                         || std::is_same<TiA, hipblaslt_f4x2>::value
+#endif
+#if defined(HIPBLASLT_USE_FP6) && defined(HIPBLASLT_USE_BF6)
+                         || std::is_same<TiA, hipblaslt_f6x16>::value
+                         || std::is_same<TiA, hipblaslt_bf6x16>::value
+#endif
+                         )
+                size = size / TiA::packed_size;
             if(AlphaVec != nullptr)
             {
                 if(transA)
@@ -234,7 +244,28 @@ void cast_mul(customVector<TcCast>& dst,
                         else
                         {
                             auto scaleA = isScaleAVec ? scaleAVec[i % m] : scaleAVec[0];
-                            dst[i]      = static_cast<TcCast>(A[i]) * scaleA * AlphaVec[i % m];
+                            if constexpr(false
+#if defined(HIPBLASLT_USE_FP4)
+                                         || std::is_same<TiA, hipblaslt_f4x2>::value
+#endif
+#if defined(HIPBLASLT_USE_FP6) && defined(HIPBLASLT_USE_BF6)
+                                         || std::is_same<TiA, hipblaslt_f6x16>::value
+                                         || std::is_same<TiA, hipblaslt_bf6x16>::value
+#endif
+                                         )
+                            {
+                                using type = TiA;
+                                for(int j = 0; j < type::packed_size; j++)
+                                {
+                                    dst[type::packed_size * i + j]
+                                        = static_cast<TcCast>(A[i].castElement(j)) * scaleA
+                                          * AlphaVec[i % m];
+                                }
+                            }
+                            else
+                            {
+                                dst[i] = static_cast<TcCast>(A[i]) * scaleA * AlphaVec[i % m];
+                            }
                         }
                     }
                 } // transA
@@ -250,7 +281,28 @@ void cast_mul(customVector<TcCast>& dst,
                         else
                         {
                             auto scaleA = isScaleAVec ? scaleAVec[i / k] : scaleAVec[0];
-                            dst[i]      = static_cast<TcCast>(A[i]) * scaleA * AlphaVec[i / k];
+                            if constexpr(false
+#if defined(HIPBLASLT_USE_FP4)
+                                         || std::is_same<TiA, hipblaslt_f4x2>::value
+#endif
+#if defined(HIPBLASLT_USE_FP6) && defined(HIPBLASLT_USE_BF6)
+                                         || std::is_same<TiA, hipblaslt_f6x16>::value
+                                         || std::is_same<TiA, hipblaslt_bf6x16>::value
+#endif
+                                         )
+                            {
+                                using type = TiA;
+                                for(int j = 0; j < type::packed_size; j++)
+                                {
+                                    dst[type::packed_size * i + j]
+                                        = static_cast<TcCast>(A[i].castElement(j)) * scaleA
+                                          * AlphaVec[i / k];
+                                }
+                            }
+                            else
+                            {
+                                dst[i] = static_cast<TcCast>(A[i]) * scaleA * AlphaVec[i / k];
+                            }
                         }
                     }
                 }
@@ -269,7 +321,27 @@ void cast_mul(customVector<TcCast>& dst,
                         else
                         {
                             auto scaleA = isScaleAVec ? scaleAVec[i % m] : scaleAVec[0];
-                            dst[i]      = static_cast<TcCast>(A[i] * scaleA);
+                            if constexpr(false
+#if defined(HIPBLASLT_USE_FP4)
+                                         || std::is_same<TiA, hipblaslt_f4x2>::value
+#endif
+#if defined(HIPBLASLT_USE_FP6) && defined(HIPBLASLT_USE_BF6)
+                                         || std::is_same<TiA, hipblaslt_f6x16>::value
+                                         || std::is_same<TiA, hipblaslt_bf6x16>::value
+#endif
+                                         )
+                            {
+                                using type = TiA;
+                                for(int j = 0; j < type::packed_size; j++)
+                                {
+                                    dst[type::packed_size * i + j]
+                                        = static_cast<TcCast>(A[i].castElement(j) * scaleA);
+                                }
+                            }
+                            else
+                            {
+                                dst[i] = static_cast<TcCast>(A[i] * scaleA);
+                            }
                         }
                     }
                 }
@@ -285,7 +357,27 @@ void cast_mul(customVector<TcCast>& dst,
                         else
                         {
                             auto scaleA = isScaleAVec ? scaleAVec[i / k] : scaleAVec[0];
-                            dst[i]      = static_cast<TcCast>(A[i] * scaleA);
+                            if constexpr(false
+#if defined(HIPBLASLT_USE_FP4)
+                                         || std::is_same<TiA, hipblaslt_f4x2>::value
+#endif
+#if defined(HIPBLASLT_USE_FP6) && defined(HIPBLASLT_USE_BF6)
+                                         || std::is_same<TiA, hipblaslt_f6x16>::value
+                                         || std::is_same<TiA, hipblaslt_bf6x16>::value
+#endif
+                                         )
+                            {
+                                using type = TiA;
+                                for(int j = 0; j < type::packed_size; j++)
+                                {
+                                    dst[type::packed_size * i + j]
+                                        = static_cast<TcCast>(A[i].castElement(j) * scaleA);
+                                }
+                            }
+                            else
+                            {
+                                dst[i] = static_cast<TcCast>(A[i] * scaleA);
+                            }
                         }
                     }
                 }
@@ -427,6 +519,45 @@ void cast_mul(customVector<TcCast>& dst,
                                             k,
                                             size);
         break;
+#if defined(HIPBLASLT_USE_FP4)
+    case static_cast<hipDataType>(HIP_R_4F_E2M1_EXT):
+        cast_mul<TcCast, Tc, hipblaslt_f4x2>(dst,
+                                             static_cast<const hipblaslt_f4x2*>(src),
+                                             isScaleAVec,
+                                             scaleAVec,
+                                             AlphaVec,
+                                             transA,
+                                             m,
+                                             k,
+                                             size);
+        break;
+#endif
+#if defined(HIPBLASLT_USE_FP6)
+    case static_cast<hipDataType>(HIP_R_6F_E2M3_EXT):
+        cast_mul<TcCast, Tc, hipblaslt_f6x16>(dst,
+                                              static_cast<const hipblaslt_f6x16*>(src),
+                                              isScaleAVec,
+                                              scaleAVec,
+                                              AlphaVec,
+                                              transA,
+                                              m,
+                                              k,
+                                              size);
+        break;
+#endif
+#if defined(HIPBLASLT_USE_BF6)
+    case static_cast<hipDataType>(HIP_R_6F_E3M2_EXT):
+        cast_mul<TcCast, Tc, hipblaslt_bf6x16>(dst,
+                                               static_cast<const hipblaslt_bf6x16*>(src),
+                                               isScaleAVec,
+                                               scaleAVec,
+                                               AlphaVec,
+                                               transA,
+                                               m,
+                                               k,
+                                               size);
+        break;
+#endif
     default:
         hipblaslt_cerr << "Error type in cast_mul" << std::endl;
         break;

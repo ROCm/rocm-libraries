@@ -307,7 +307,7 @@ TEST_F(IntegrationRMSNormDescriptorLifting, RMSNormLiftWithoutFinalization)
     EXPECT_FLOAT_EQ(liftedEpsilon->get_pass_by_value<float>().value(), 1e-5f);
 }
 
-// Exercises the deserialize_via_backend() path with a handle for an rmsnorm graph.
+// Exercises the deserialize() path with a handle for an rmsnorm graph.
 TEST_F(IntegrationRMSNormDescriptorLifting, RMSNormDeserializeViaBackendWithHandle)
 {
     auto graph = buildTrainingGraph();
@@ -316,12 +316,12 @@ TEST_F(IntegrationRMSNormDescriptorLifting, RMSNormDeserializeViaBackendWithHand
     auto result = graph->validate();
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
-    auto data = graph->toBinary();
-    ASSERT_FALSE(data.empty());
+    auto [data, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
 
-    // Create a new graph and use deserialize_via_backend with handle
+    // Create a new graph and use deserialize with handle
     auto liftedGraph = std::make_shared<TestableGraphLifting>();
-    result = liftedGraph->deserialize_via_backend(_handle, data);
+    result = liftedGraph->deserialize(_handle, data);
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
     // Verify graph-level data types
