@@ -63,6 +63,15 @@ list(
     -Wswitch-default # Warn if a switch statement does not have a default case
 )
 
+# On Windows, hipBLASLt upstream headers (hipblaslt_e5m3.h / hipblaslt_e8.h) cause a
+# hard ambiguous operator<< error when compiled in plain C++ mode (hip::host). HIP mode
+# (hip::device) avoids this via additional MSVC ABI flags added by the Clang driver.
+# Add -fdelayed-template-parsing to match the HIP mode behavior without switching targets.
+# See: https://github.com/ROCm/rocm-libraries/issues/6404
+if(WIN32)
+    list(APPEND HIPDNN_WARNING_COMPILE_OPTIONS -fdelayed-template-parsing)
+endif()
+
 # NOTE: Workaround until llvm & hip cmake modules fixes symlink logic in their config files;
 # remove when fixed. Added to prevent issues with not finding hip cmake.
 list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH}/llvm ${ROCM_PATH} ${ROCM_PATH}/hip)
