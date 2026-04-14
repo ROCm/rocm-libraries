@@ -49,21 +49,21 @@ class GemmMultiABDBenchmark:
         # benchmark_gemm_multi_abd_fp16_rcr_mem_default_intrawave_False_False_False_False_256x256x32_2x2x1_4x64x16
         parts = name.split("_")
 
-        if len(parts) >= 7:
-            # Extract data type (5th part after benchmark_gemm_multi_abd_)
-            info["data_type"] = parts[5] if len(parts) > 5 else "unknown"
+        if len(parts) >= 9:
+            # Extract data type (4th part after benchmark_gemm_multi_abd_)
+            info["data_type"] = parts[4] if len(parts) > 5 else "unknown"
 
             # Extract layout
-            info["layout"] = parts[6] if len(parts) > 6 else "unknown"
+            info["layout"] = parts[5] if len(parts) > 6 else "unknown"
 
             # Extract pipeline
-            info["pipeline"] = parts[7] if len(parts) > 7 else "unknown"
+            info["pipeline"] = parts[6] if len(parts) > 7 else "unknown"
 
             # Extract epilogue
-            info["epilogue"] = parts[8] if len(parts) > 8 else "unknown"
+            info["epilogue"] = parts[7] if len(parts) > 8 else "unknown"
 
             # Extract scheduler
-            info["scheduler"] = parts[9] if len(parts) > 9 else "unknown"
+            info["scheduler"] = parts[8] if len(parts) > 9 else "unknown"
 
         config_info = self.parse_detailed_config(name)
         info.update(config_info)
