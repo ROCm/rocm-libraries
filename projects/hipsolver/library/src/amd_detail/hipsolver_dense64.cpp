@@ -1052,11 +1052,11 @@ try
             return HIPSOLVER_STATUS_INVALID_VALUE;
 
         // User provided workspace: E at the beginning, rocSOLVER workspace after
-        E_workspace                = workOnDevice;
-        void*  rocsolver_work      = (char*)workOnDevice + e_workspace_size;
-        size_t rocsolver_workspace = lworkOnDevice - e_workspace_size;
+        E_workspace           = workOnDevice;
+        void*  rocsolver_work = reinterpret_cast<std::byte*>(workOnDevice) + e_workspace_size;
+        size_t lwork_computed = lworkOnDevice - e_workspace_size;
         CHECK_ROCBLAS_ERROR(
-            rocblas_set_workspace((rocblas_handle)handle, rocsolver_work, rocsolver_workspace));
+            rocblas_set_workspace((rocblas_handle)handle, rocsolver_work, lwork_computed));
     }
     else
     {
