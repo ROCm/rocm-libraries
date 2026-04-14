@@ -53,7 +53,7 @@ inline auto create_args(int argc, char* argv[])
         .insert("flush_cache",
                 "true",
                 "To flush cache, possible values are true or false. "
-                "Default is false.")
+                "Default is true.")
         .insert("rotating_count", "1000", "number of iterations to rotate the cache. default is 5.")
         .insert("metric",
                 "0",
