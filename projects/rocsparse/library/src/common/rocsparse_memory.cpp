@@ -231,7 +231,7 @@ void rocsparse::execution_t::info() const
                            "hip_device_synchronize",
                            "hip_launch_kernel"};
 
-    for(int i = 0; i < 11; ++i)
+    for(int i = 0; i < func_size; ++i)
     {
         std::cout << "[" << names[i] << "] = " << count_calls[i] << std::endl;
     }
