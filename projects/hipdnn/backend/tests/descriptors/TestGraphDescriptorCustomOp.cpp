@@ -12,9 +12,9 @@
 
 #include <flatbuffers/flatbuffers.h>
 #include <gtest/gtest.h>
-#include <hipdnn_data_sdk/data_objects/custom_op_attributes_generated.h>
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
-#include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/custom_op_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
 
 #include <hipdnn_test_sdk/constants/CustomOpConstants.hpp>
 #include <hipdnn_test_sdk/utilities/ToVec.hpp>
@@ -26,7 +26,7 @@
 
 using namespace hipdnn_backend;
 using namespace hipdnn_backend::test_utilities;
-using namespace hipdnn_data_sdk::data_objects;
+using namespace hipdnn_flatbuffers_sdk::data_objects;
 using namespace hipdnn_tests::constants;
 using hipdnn_tests::toVec;
 
@@ -124,7 +124,7 @@ namespace
 // @param tensorSideAttr  The attribute to set — either INPUTS or OUTPUTS — controls which side
 //                        receives the tensor (the other side remains zero).
 // @param fixture  The test fixture (provides getDescriptor() and setHandle()).
-std::unique_ptr<hipdnn_data_sdk::data_objects::GraphT>
+std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::GraphT>
     buildAndSerializeZeroPortCustomOp(HipdnnBackendDescriptor* tensorDesc,
                                       hipdnnBackendAttributeName_t tensorSideAttr,
                                       TestGraphDescriptorCustomOp& fixture)

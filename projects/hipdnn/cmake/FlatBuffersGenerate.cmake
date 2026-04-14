@@ -20,6 +20,7 @@ include(ExternalProject)
 #       PRIMARY_VERSION   ${HIPDNN_FLATBUFFERS_VERSION}
 #       SUPPORTED_VERSIONS "24.12.23" "25.9.23"
 #       GENERATED_INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/include/generated
+#       OUTPUT_NAMESPACE  hipdnn_data_sdk   # optional, defaults to hipdnn_data_sdk
 #   )
 
 # Helper function to generate headers for a secondary FlatBuffers version
@@ -31,7 +32,7 @@ function(_hipdnn_generate_secondary_version _version _flatc_flags)
     set(_ep_name "flatc_${_ver_tag}")
     set(_flatc_build_dir "${CMAKE_CURRENT_BINARY_DIR}/_flatc_builds/${_ver_dir}")
     set(_flatc_binary "${_flatc_build_dir}/flatc")
-    set(_output_dir "${ARG_GENERATED_INCLUDE_DIR}/${_ver_dir}/hipdnn_data_sdk/data_objects")
+    set(_output_dir "${ARG_GENERATED_INCLUDE_DIR}/${_ver_dir}/${ARG_OUTPUT_NAMESPACE}/data_objects")
 
     # Download source at configure time via FetchContent (skipped if already populated)
     FetchContent_Declare(${_fc_name}
@@ -54,30 +55,38 @@ function(_hipdnn_generate_secondary_version _version _flatc_flags)
     file(TO_CMAKE_PATH "${CMAKE_CXX_COMPILER}" _cxx_compiler)
 
     # Build flatc at build time via ExternalProject (separate CMake instance avoids
-    # target name collisions). LOG flags suppress all configure/build output.
-    ExternalProject_Add(${_ep_name}
-        SOURCE_DIR "${${_fc_name}_SOURCE_DIR}"
-        DOWNLOAD_COMMAND ""
-        UPDATE_COMMAND ""
-        CONFIGURE_HANDLED_BY_BUILD TRUE
-        BINARY_DIR ${_flatc_build_dir}
-        CMAKE_ARGS
-            -DFLATBUFFERS_BUILD_FLATC=ON
-            -DFLATBUFFERS_BUILD_FLATLIB=OFF
-            -DFLATBUFFERS_BUILD_TESTS=OFF
-            -DFLATBUFFERS_BUILD_FLATHASH=OFF
-            -DFLATBUFFERS_ENABLE_PCH=ON
-            -DCMAKE_C_COMPILER=${_c_compiler}
-            -DCMAKE_CXX_COMPILER=${_cxx_compiler}
-            -DCMAKE_RC_COMPILER=CMAKE_RC_COMPILER-NOTREQUIRED
-            -DCMAKE_BUILD_TYPE=Release
-        BUILD_COMMAND ${CMAKE_COMMAND} --build ${_flatc_build_dir} --target flatc
-        INSTALL_COMMAND ""
-        BUILD_BYPRODUCTS ${_flatc_binary}
-        LOG_CONFIGURE ON
-        LOG_BUILD ON
-        LOG_OUTPUT_ON_FAILURE ON
-    )
+    # target name collisions). Guard prevents duplicate target when multiple SDKs
+    # generate headers for the same FlatBuffers version.
+    if(NOT TARGET ${_ep_name})
+        ExternalProject_Add(${_ep_name}
+            SOURCE_DIR "${${_fc_name}_SOURCE_DIR}"
+            DOWNLOAD_COMMAND ""
+            UPDATE_COMMAND ""
+            CONFIGURE_HANDLED_BY_BUILD TRUE
+            BINARY_DIR ${_flatc_build_dir}
+            CMAKE_ARGS
+                -DFLATBUFFERS_BUILD_FLATC=ON
+                -DFLATBUFFERS_BUILD_FLATLIB=OFF
+                -DFLATBUFFERS_BUILD_TESTS=OFF
+                -DFLATBUFFERS_BUILD_FLATHASH=OFF
+                -DFLATBUFFERS_ENABLE_PCH=ON
+                -DCMAKE_C_COMPILER=${_c_compiler}
+                -DCMAKE_CXX_COMPILER=${_cxx_compiler}
+                -DCMAKE_RC_COMPILER=CMAKE_RC_COMPILER-NOTREQUIRED
+                -DCMAKE_BUILD_TYPE=Release
+            BUILD_COMMAND ${CMAKE_COMMAND} --build ${_flatc_build_dir} --target flatc
+            INSTALL_COMMAND ""
+            BUILD_BYPRODUCTS ${_flatc_binary}
+            LOG_CONFIGURE ON
+            LOG_BUILD ON
+            LOG_OUTPUT_ON_FAILURE ON
+        )
+    else()
+        # Target already created by another SDK — resolve the existing build directory
+        ExternalProject_Get_Property(${_ep_name} BINARY_DIR)
+        set(_flatc_build_dir "${BINARY_DIR}")
+        set(_flatc_binary "${_flatc_build_dir}/flatc")
+    endif()
 
     # Generate headers at build time using the built flatc
     set(_output_files)
@@ -98,7 +107,7 @@ function(_hipdnn_generate_secondary_version _version _flatc_flags)
         )
     endforeach()
 
-    set(_gen_target "generate_hipdnn_data_sdk_headers_${_ver_dir}")
+    set(_gen_target "generate_${ARG_OUTPUT_NAMESPACE}_headers_${_ver_dir}")
     add_custom_target(${_gen_target} DEPENDS ${_output_files}
         COMMENT "Generating FlatBuffer headers for version ${_version}"
     )
@@ -109,7 +118,7 @@ endfunction()
 # Generate FlatBuffer C++ headers for all supported versions from .fbs schema files.
 function(hipdnn_generate_flatbuffer_headers)
     set(_options "")
-    set(_one_value_args TARGET SCHEMAS_DIR PRIMARY_VERSION GENERATED_INCLUDE_DIR)
+    set(_one_value_args TARGET SCHEMAS_DIR PRIMARY_VERSION GENERATED_INCLUDE_DIR OUTPUT_NAMESPACE)
     set(_multi_value_args SCHEMAS SUPPORTED_VERSIONS)
     cmake_parse_arguments(ARG "${_options}" "${_one_value_args}" "${_multi_value_args}" ${ARGN})
 
@@ -120,6 +129,11 @@ function(hipdnn_generate_flatbuffer_headers)
         endif()
     endforeach()
 
+    # Default OUTPUT_NAMESPACE to hipdnn_data_sdk for backward compatibility
+    if(NOT ARG_OUTPUT_NAMESPACE)
+        set(ARG_OUTPUT_NAMESPACE "hipdnn_data_sdk")
+    endif()
+
     # Common extra flags (shared between primary and secondary generation)
     set(_flatc_extra_flags --gen-object-api --gen-mutable --gen-compare --defaults-json --scoped-enums)
     # Full flags for direct flatc invocation (add_custom_command includes --cpp explicitly)
@@ -129,8 +143,10 @@ function(hipdnn_generate_flatbuffer_headers)
     string(REPLACE "." "_" _primary_ver_tag "${ARG_PRIMARY_VERSION}")
     set(_primary_ver_dir "v${_primary_ver_tag}")
     set(_primary_output_dir
-        "${ARG_GENERATED_INCLUDE_DIR}/${_primary_ver_dir}/hipdnn_data_sdk/data_objects"
+        "${ARG_GENERATED_INCLUDE_DIR}/${_primary_ver_dir}/${ARG_OUTPUT_NAMESPACE}/data_objects"
     )
+
+    set(_gen_target_name "generate_${ARG_OUTPUT_NAMESPACE}_headers")
 
     # --- Primary version: use build_flatbuffers() from the active FlatBuffers dependency ---
     _save_var(FLATBUFFERS_FLATC_SCHEMA_EXTRA_ARGS)
@@ -139,7 +155,7 @@ function(hipdnn_generate_flatbuffer_headers)
     build_flatbuffers(
         "${ARG_SCHEMAS}" # flatbuffers_schemas
         "" # schema_include_dirs
-        generate_hipdnn_data_sdk_headers # custom_target_name
+        ${_gen_target_name} # custom_target_name
         "" # additional_dependencies
         ${_primary_output_dir} # generated_includes_dir
         "" # binary_schemas_dir
@@ -151,7 +167,7 @@ function(hipdnn_generate_flatbuffer_headers)
     endif()
     _restore_var(FLATBUFFERS_FLATC_SCHEMA_EXTRA_ARGS)
 
-    add_dependencies(${ARG_TARGET} generate_hipdnn_data_sdk_headers)
+    add_dependencies(${ARG_TARGET} ${_gen_target_name})
 
     # --- Secondary versions: configure-time download, build-time compilation + generation ---
     # For each supported version other than the primary, use FetchContent to download the
