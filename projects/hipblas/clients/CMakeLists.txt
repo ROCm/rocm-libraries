@@ -67,8 +67,16 @@ function( get_cblas cblas_libs cblas_inc cblas_defs )
       find_package( BLAS REQUIRED )
       set( libs ${BLAS_LIBRARIES} )
 
-      # Unified OpenBLAS / OpenBLAS64 CMake targets already include CBLAS; do not run path-based cblas64 lookup.
-      if(NOT TARGET "${BLAS_LIBRARIES}")
+      # Path-based cblas64 next to BLAS_LIBRARIES only applies to plain library paths. Imported targets that
+      # are *not* unified OpenBLAS would need a different discovery path; this ILP64 client path is built
+      # around OpenBLAS / TheRock OpenBLAS64. For OpenBLAS:: / OpenBLAS64:: targets, skip split CBLAS lookup.
+      set( _need_split_cblas TRUE )
+      if(TARGET "${BLAS_LIBRARIES}")
+        if("${BLAS_LIBRARIES}" MATCHES "OpenBLAS")
+          set( _need_split_cblas FALSE )
+        endif()
+      endif()
+      if( _need_split_cblas )
         get_filename_component(BLAS_DIR "${BLAS_LIBRARIES}" DIRECTORY)
         set(ORIG_CMAKE_FIND_LIBRARY_SUFFIXES ${CMAKE_FIND_LIBRARY_SUFFIXES})
         if(BLA_STATIC)
