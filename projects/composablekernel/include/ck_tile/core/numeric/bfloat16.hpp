@@ -241,6 +241,9 @@ constexpr bool float_is_nan_raw(float f)
 #endif
 }
 
+// Round to nearest even, but canonicalize any NaN input to the canonical quiet bf16 NaN
+// (`0x7fff`). Unlike `float_to_bf16_rtn_raw`, this does not preserve signaling NaN
+// payload/state.
 CK_TILE_HOST_DEVICE
 constexpr uint16_t float_to_bf16_rtn_cnan_raw(float f)
 {
@@ -248,6 +251,7 @@ constexpr uint16_t float_to_bf16_rtn_cnan_raw(float f)
     // Fast/finite-math can fold the NaN predicate away, so fall back to standard RTN.
     return float_to_bf16_rtn_raw(f);
 #else
+    // `-fgpu-flush-denormals-to-zero` only affects denormals, not NaN handling.
     uint32_t bits = bit_cast<uint32_t>(f);
     uint32_t tmp  = (bits >> 16) & 1;
     uint32_t res  = float_is_nan_raw(f) ? 0x7fff0000 : bits + tmp + 0x7fff;
