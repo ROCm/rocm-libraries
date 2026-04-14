@@ -108,6 +108,7 @@
 #endif // THRUST_HOST_COMPILER
 
 // figure out which device compiler we're using
+#if !defined(THRUST_DEVICE_COMPILER)  // Allow override from external configuration.
 #if defined(__CUDACC__) || defined(_NVHPC_CUDA)
 //! deprecated [Since 2.7]
 #  define THRUST_DEVICE_COMPILER THRUST_DEVICE_COMPILER_NVCC
@@ -133,6 +134,7 @@
 //! deprecated [Since 2.7]
 #  define THRUST_DEVICE_COMPILER THRUST_DEVICE_COMPILER_UNKNOWN
 #endif
+#endif // THRUST_DEVICE_COMPILER
 
 // is the device compiler capable of compiling omp?
 #if defined(_OPENMP) || defined(_NVHPC_STDPAR_OPENMP)
