@@ -8,9 +8,9 @@
 #include <fstream>
 #include <string>
 
-#include "harness/ToleranceConfig.hpp"
+#include "harness/TestSettings.hpp"
 
-using hipdnn_integration_tests::ToleranceConfig;
+using hipdnn_integration_tests::TestSettings;
 
 // NOLINTBEGIN(readability-identifier-naming) -- gtest macro-generated names
 
@@ -23,7 +23,7 @@ class TempTomlFile
 public:
     explicit TempTomlFile(const std::string& content)
         : _path(std::filesystem::temp_directory_path()
-                / ("test_tolerance_config_" + std::to_string(std::rand()) + ".toml"))
+                / ("test_settings_" + std::to_string(std::rand()) + ".toml"))
     {
         std::ofstream ofs(_path);
         ofs << content;
@@ -54,7 +54,7 @@ private:
 // Parsing
 // ---------------------------------------------------------------------------
 
-TEST(TestToleranceConfig, ParsesValidTomlWithOverrides)
+TEST(TestTestSettings, ParsesValidTomlWithOverrides)
 {
     const TempTomlFile file(R"(
 [meta]
@@ -71,41 +71,41 @@ atol = 1e-5
 rtol = 1e-4
 )");
 
-    const ToleranceConfig config(file.path());
-    EXPECT_EQ(config.overrideCount(), 2U);
+    const TestSettings settings(file.path());
+    EXPECT_EQ(settings.toleranceOverrideCount(), 2U);
 }
 
-TEST(TestToleranceConfig, ParsesValidTomlWithNoOverrides)
+TEST(TestTestSettings, ParsesValidTomlWithNoOverrides)
 {
     const TempTomlFile file(R"(
 [meta]
 version = 1
 )");
 
-    const ToleranceConfig config(file.path());
-    EXPECT_EQ(config.overrideCount(), 0U);
+    const TestSettings settings(file.path());
+    EXPECT_EQ(settings.toleranceOverrideCount(), 0U);
 }
 
-TEST(TestToleranceConfig, ThrowsOnMissingVersion)
+TEST(TestTestSettings, ThrowsOnMissingVersion)
 {
     const TempTomlFile file(R"(
 [meta]
 )");
 
-    EXPECT_THROW(const ToleranceConfig config(file.path()), std::runtime_error);
+    EXPECT_THROW(const TestSettings settings(file.path()), std::runtime_error);
 }
 
-TEST(TestToleranceConfig, ThrowsOnUnsupportedVersion)
+TEST(TestTestSettings, ThrowsOnUnsupportedVersion)
 {
     const TempTomlFile file(R"(
 [meta]
 version = 99
 )");
 
-    EXPECT_THROW(const ToleranceConfig config(file.path()), std::runtime_error);
+    EXPECT_THROW(const TestSettings settings(file.path()), std::runtime_error);
 }
 
-TEST(TestToleranceConfig, ThrowsOnMissingFilters)
+TEST(TestTestSettings, ThrowsOnMissingFilters)
 {
     const TempTomlFile file(R"(
 [meta]
@@ -116,10 +116,10 @@ atol = 1e-3
 rtol = 1e-2
 )");
 
-    EXPECT_THROW(const ToleranceConfig config(file.path()), std::runtime_error);
+    EXPECT_THROW(const TestSettings settings(file.path()), std::runtime_error);
 }
 
-TEST(TestToleranceConfig, ThrowsOnMissingAtol)
+TEST(TestTestSettings, ThrowsOnMissingAtol)
 {
     const TempTomlFile file(R"(
 [meta]
@@ -130,10 +130,10 @@ filters = ["*test*"]
 rtol = 1e-2
 )");
 
-    EXPECT_THROW(const ToleranceConfig config(file.path()), std::runtime_error);
+    EXPECT_THROW(const TestSettings settings(file.path()), std::runtime_error);
 }
 
-TEST(TestToleranceConfig, ThrowsOnMissingRtol)
+TEST(TestTestSettings, ThrowsOnMissingRtol)
 {
     const TempTomlFile file(R"(
 [meta]
@@ -144,19 +144,19 @@ filters = ["*test*"]
 atol = 1e-3
 )");
 
-    EXPECT_THROW(const ToleranceConfig config(file.path()), std::runtime_error);
+    EXPECT_THROW(const TestSettings settings(file.path()), std::runtime_error);
 }
 
-TEST(TestToleranceConfig, ThrowsOnNonexistentFile)
+TEST(TestTestSettings, ThrowsOnNonexistentFile)
 {
-    EXPECT_THROW(const ToleranceConfig config("/nonexistent/path.toml"), std::exception);
+    EXPECT_THROW(const TestSettings settings("/nonexistent/path.toml"), std::exception);
 }
 
 // ---------------------------------------------------------------------------
 // Filter matching
 // ---------------------------------------------------------------------------
 
-TEST(TestToleranceConfig, FindOverrideMatchesWildcard)
+TEST(TestTestSettings, FindOverrideMatchesWildcard)
 {
     const TempTomlFile file(R"(
 [meta]
@@ -168,15 +168,16 @@ atol = 1e-3
 rtol = 1e-2
 )");
 
-    const ToleranceConfig config(file.path());
+    const TestSettings settings(file.path());
 
-    auto result = config.findOverride("IntegrationGpuConvFwd2dFp16/Smoke.Correctness/NCHW_params");
+    auto result = settings.findToleranceOverride(
+        "IntegrationGpuConvFwd2dFp16/Smoke.Correctness/NCHW_params");
     ASSERT_TRUE(result.has_value());
     EXPECT_FLOAT_EQ(result->atol, 1e-3F);
     EXPECT_FLOAT_EQ(result->rtol, 1e-2F);
 }
 
-TEST(TestToleranceConfig, FindOverrideReturnsNulloptWhenNoMatch)
+TEST(TestTestSettings, FindOverrideReturnsNulloptWhenNoMatch)
 {
     const TempTomlFile file(R"(
 [meta]
@@ -188,26 +189,27 @@ atol = 1e-3
 rtol = 1e-2
 )");
 
-    const ToleranceConfig config(file.path());
+    const TestSettings settings(file.path());
 
-    auto result = config.findOverride("IntegrationGpuBatchnormFp32/Smoke.Correctness/params");
+    auto result
+        = settings.findToleranceOverride("IntegrationGpuBatchnormFp32/Smoke.Correctness/params");
     EXPECT_FALSE(result.has_value());
 }
 
-TEST(TestToleranceConfig, FindOverrideReturnsNulloptWhenNoOverrides)
+TEST(TestTestSettings, FindOverrideReturnsNulloptWhenNoOverrides)
 {
     const TempTomlFile file(R"(
 [meta]
 version = 1
 )");
 
-    const ToleranceConfig config(file.path());
+    const TestSettings settings(file.path());
 
-    auto result = config.findOverride("AnyTestName");
+    auto result = settings.findToleranceOverride("AnyTestName");
     EXPECT_FALSE(result.has_value());
 }
 
-TEST(TestToleranceConfig, FindOverrideMatchesMultipleFiltersInEntry)
+TEST(TestTestSettings, FindOverrideMatchesMultipleFiltersInEntry)
 {
     const TempTomlFile file(R"(
 [meta]
@@ -219,14 +221,16 @@ atol = 1e-3
 rtol = 1e-2
 )");
 
-    const ToleranceConfig config(file.path());
+    const TestSettings settings(file.path());
 
     // Should match the first filter
-    auto result1 = config.findOverride("IntegrationGpuConvFwd2dFp16/Smoke.Correctness/params");
+    auto result1
+        = settings.findToleranceOverride("IntegrationGpuConvFwd2dFp16/Smoke.Correctness/params");
     ASSERT_TRUE(result1.has_value());
 
     // Should match the second filter
-    auto result2 = config.findOverride("IntegrationGpuConvFwdHalf/Smoke.Correctness/params");
+    auto result2
+        = settings.findToleranceOverride("IntegrationGpuConvFwdHalf/Smoke.Correctness/params");
     ASSERT_TRUE(result2.has_value());
 }
 
@@ -234,7 +238,7 @@ rtol = 1e-2
 // Precedence: later entries win
 // ---------------------------------------------------------------------------
 
-TEST(TestToleranceConfig, LaterEntriesTakePrecedence)
+TEST(TestTestSettings, LaterEntriesTakePrecedence)
 {
     const TempTomlFile file(R"(
 [meta]
@@ -251,16 +255,17 @@ atol = 5e-3
 rtol = 5e-2
 )");
 
-    const ToleranceConfig config(file.path());
+    const TestSettings settings(file.path());
 
     // Matches both entries - the later (more specific) one should win
-    auto result = config.findOverride("IntegrationGpuConvFwd2dFp16/Smoke.Correctness/params");
+    auto result
+        = settings.findToleranceOverride("IntegrationGpuConvFwd2dFp16/Smoke.Correctness/params");
     ASSERT_TRUE(result.has_value());
     EXPECT_FLOAT_EQ(result->atol, 5e-3F);
     EXPECT_FLOAT_EQ(result->rtol, 5e-2F);
 }
 
-TEST(TestToleranceConfig, EarlierEntryUsedWhenLaterDoesNotMatch)
+TEST(TestTestSettings, EarlierEntryUsedWhenLaterDoesNotMatch)
 {
     const TempTomlFile file(R"(
 [meta]
@@ -277,10 +282,11 @@ atol = 5e-3
 rtol = 5e-2
 )");
 
-    const ToleranceConfig config(file.path());
+    const TestSettings settings(file.path());
 
     // Matches only the first entry (Fp32, not Fp16)
-    auto result = config.findOverride("IntegrationGpuConvFwd2dFp32/Smoke.Correctness/params");
+    auto result
+        = settings.findToleranceOverride("IntegrationGpuConvFwd2dFp32/Smoke.Correctness/params");
     ASSERT_TRUE(result.has_value());
     EXPECT_FLOAT_EQ(result->atol, 1e-3F);
     EXPECT_FLOAT_EQ(result->rtol, 1e-2F);

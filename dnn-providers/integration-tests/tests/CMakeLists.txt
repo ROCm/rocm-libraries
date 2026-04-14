@@ -4,7 +4,7 @@
 add_executable(hipdnn_integration_tests_unit_tests
     main.cpp
     TestTestConfig.cpp
-    TestToleranceConfig.cpp
+    TestTestSettings.cpp
     TestGpuReferenceGraphExecutor.cpp
 )
 

@@ -35,8 +35,9 @@ struct ToleranceOverride
     float rtol;
 };
 
-// Loads a TOML configuration file containing per-test tolerance overrides
-// and provides lookup by GTest test name using glob-style filter matching.
+// Loads a per-engine TOML settings file for integration tests.
+// Currently supports tolerance overrides; additional settings (knobs,
+// support matrix, etc.) will be added in future versions.
 //
 // TOML format:
 //   [meta]
@@ -49,11 +50,11 @@ struct ToleranceOverride
 //
 // Filters use GTest-style globs (fnmatch with * wildcards).
 // Later entries take precedence over earlier ones when multiple filters match.
-class ToleranceConfig
+class TestSettings
 {
 public:
     // Load config from a TOML file. Throws on parse errors or invalid format.
-    explicit ToleranceConfig(const std::filesystem::path& configPath)
+    explicit TestSettings(const std::filesystem::path& configPath)
     {
         auto table = toml::parse_file(configPath.string());
 
@@ -61,14 +62,13 @@ public:
         auto version = table["meta"]["version"].value<int64_t>();
         if(!version.has_value())
         {
-            throw std::runtime_error("ToleranceConfig: missing [meta].version in "
+            throw std::runtime_error("TestSettings: missing [meta].version in "
                                      + configPath.string());
         }
         if(*version != 1)
         {
-            throw std::runtime_error("ToleranceConfig: unsupported version "
-                                     + std::to_string(*version) + " in " + configPath.string()
-                                     + " (expected 1)");
+            throw std::runtime_error("TestSettings: unsupported version " + std::to_string(*version)
+                                     + " in " + configPath.string() + " (expected 1)");
         }
 
         // Parse [[tolerance_overrides]]
@@ -80,7 +80,7 @@ public:
                 if(entryTable == nullptr)
                 {
                     throw std::runtime_error(
-                        "ToleranceConfig: [[tolerance_overrides]] entry is not a table");
+                        "TestSettings: [[tolerance_overrides]] entry is not a table");
                 }
 
                 OverrideEntry parsed;
@@ -90,14 +90,14 @@ public:
                 if(filtersArray == nullptr || filtersArray->empty())
                 {
                     throw std::runtime_error(
-                        "ToleranceConfig: [[tolerance_overrides]] entry missing 'filters' array");
+                        "TestSettings: [[tolerance_overrides]] entry missing 'filters' array");
                 }
                 for(const auto& filter : *filtersArray)
                 {
                     auto filterStr = filter.value<std::string>();
                     if(!filterStr.has_value())
                     {
-                        throw std::runtime_error("ToleranceConfig: filter value must be a string");
+                        throw std::runtime_error("TestSettings: filter value must be a string");
                     }
                     parsed.filters.push_back(*filterStr);
                 }
@@ -107,7 +107,7 @@ public:
                 if(!atol.has_value())
                 {
                     throw std::runtime_error(
-                        "ToleranceConfig: [[tolerance_overrides]] entry missing 'atol'");
+                        "TestSettings: [[tolerance_overrides]] entry missing 'atol'");
                 }
                 parsed.atol = static_cast<float>(*atol);
 
@@ -116,7 +116,7 @@ public:
                 if(!rtol.has_value())
                 {
                     throw std::runtime_error(
-                        "ToleranceConfig: [[tolerance_overrides]] entry missing 'rtol'");
+                        "TestSettings: [[tolerance_overrides]] entry missing 'rtol'");
                 }
                 parsed.rtol = static_cast<float>(*rtol);
 
@@ -128,7 +128,7 @@ public:
     // Find a tolerance override matching the given test name.
     // Returns the last matching override (later entries take precedence).
     // Returns std::nullopt if no filter matches.
-    std::optional<ToleranceOverride> findOverride(std::string_view testName) const
+    std::optional<ToleranceOverride> findToleranceOverride(std::string_view testName) const
     {
         std::optional<ToleranceOverride> result;
         const std::string testNameStr(testName);
@@ -148,7 +148,7 @@ public:
         return result;
     }
 
-    size_t overrideCount() const
+    size_t toleranceOverrideCount() const
     {
         return _overrides.size();
     }

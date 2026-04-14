@@ -10,7 +10,7 @@
 #include <string>
 #include <string_view>
 
-#include "harness/ToleranceConfig.hpp"
+#include "harness/TestSettings.hpp"
 
 namespace hipdnn_integration_tests
 {
@@ -59,7 +59,7 @@ public:
 
         if(configPath.has_value())
         {
-            instance._toleranceConfig.emplace(*configPath);
+            instance._testSettings.emplace(*configPath);
         }
 
         instance._initialized = true;
@@ -123,11 +123,11 @@ public:
         return ToleranceMode::DEFAULT;
     }
 
-    // Check if a tolerance config file was provided
-    bool hasToleranceConfig() const
+    // Check if a test settings file was provided
+    bool hasTestSettings() const
     {
         throwIfNotInitialized();
-        return _toleranceConfig.has_value();
+        return _testSettings.has_value();
     }
 
     // Find a tolerance override matching the given test name.
@@ -135,11 +135,11 @@ public:
     std::optional<ToleranceOverride> findToleranceOverride(std::string_view testName) const
     {
         throwIfNotInitialized();
-        if(!_toleranceConfig.has_value())
+        if(!_testSettings.has_value())
         {
             return std::nullopt;
         }
-        return _toleranceConfig->findOverride(testName);
+        return _testSettings->findOverride(testName);
     }
 
 private:
@@ -155,7 +155,7 @@ private:
 
     std::optional<std::filesystem::path> _articlePath;
     std::optional<std::string> _engineName;
-    std::optional<ToleranceConfig> _toleranceConfig;
+    std::optional<TestSettings> _testSettings;
     bool _failOnUnsupported = false;
     bool _initialized = false;
 };
