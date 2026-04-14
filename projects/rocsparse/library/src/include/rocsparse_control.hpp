@@ -26,6 +26,7 @@
 
 #include "rocsparse_argdescr.hpp"
 #include "rocsparse_common.hpp"
+#include "rocsparse_memory.hpp"
 #include "rocsparse_message.hpp"
 #include <iostream>
 
@@ -266,8 +267,6 @@ inline void dprint(I size_, const T* v, const char* name_ = nullptr, I short_siz
     }
     delete[] p;
 }
-
-#include "rocsparse_memory.hpp"
 
 #define THROW_IF_HIPLAUNCHKERNELGGL_ERROR(...)                                                 \
     do                                                                                         \
