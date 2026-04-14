@@ -175,6 +175,23 @@ int main(int argc, char** argv)
         {
             showSkippedOverride = 0;
         }
+        else if(strcmp(argv[i], "--test-sync-o") == 0)
+        {
+            if(i + 1 >= argc || !argv[i + 1][0])
+            {
+                std::cerr << "The " << argv[i] << " option requires an argument" << std::endl;
+                exit(EXIT_FAILURE);
+            }
+            rocsparse_clients_test::function_properties_t::instance().enable();
+            rocsparse_clients_test::function_properties_t::instance().set_sync_report_filename(
+                argv[++i]);
+        }
+        else if(!strcmp(argv[i], "--test-sync"))
+        {
+            rocsparse_clients_test::function_properties_t::instance().enable();
+            rocsparse_clients_test::function_properties_t::instance().set_sync_report_filename(
+                "rocsparse_test_sync.json");
+        }
     }
 
     // Device query
