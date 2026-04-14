@@ -6,10 +6,8 @@ An implementation of the
 > **Current status**
 >
 > - Data type: **fp32 only**.  bf16 / fp16 support is planned.
-> - Features: `HAS_D=true`, `D_HAS_HDIM=true`, `HAS_Z=false`.
->   Output gating (`HAS_Z`) will be added in a future update.
->   Plan to use grouped gemm to replace batched gemm.
-
+> - Features: `HAS_D=true`, `D_HAS_HDIM=true`, `HAS_Z=true` (optional).
+    Plan to use grouped gemm to replace batched gemm.
 ---
 
 ## Table of Contents
@@ -58,6 +56,7 @@ All tensors are stored in **row-major** order.
 | `B_mat`  | `[B, G, N, C, L]` | Input-to-state projection matrix |
 | `C_mat`  | `[B, G, N, C, L]` | State-to-output projection matrix |
 | `D`      | `[EH, D]`         | Skip-connection (residual) parameter |
+| `Z`      | `[B, EH, D, C, L]`| Output gate tensor (optional, same shape as X) |
 | `Y`      | `[B, EH, D, C, L]`| Output activations |
 | `Fstate` | `[B, EH, D, N]`   | Final hidden state after the last chunk |
 
@@ -103,18 +102,21 @@ Controls the shape of the D parameter:
 
 Only meaningful when `HAS_D=true`.
 
-### `HAS_Z` (default: `false`, **not yet implemented**)
+### `HAS_Z` (default: `false`)
 
 Whether to apply an **output gate** using a Z tensor:
 
 ```
 if HAS_Z:
-    Y[l, d] = Y[l, d] * Z[l, d] * sigmoid(Z[l, d])
+    Y[l, d] = Y[l, d] * silu(Z[l, d])
+           = Y[l, d] * Z[l, d] * sigmoid(Z[l, d])
 ```
 
 Where `Z` has the same shape as `X`: `[B, EH, D, C, L]`.  This is the gated
-activation from the Mamba-2 architecture.  When `HAS_Z=false` (current
-behavior), the output Y is produced directly without gating.
+activation from the Mamba-2 architecture.  When `HAS_Z=false`, the output Y
+is produced directly without gating.
+
+Enable at runtime with `-Z=1` (see [Run](#run)).
 
 ---
 
@@ -212,12 +214,16 @@ Result shape: `[L, D]` per (head, chunk).
 
 ### Step 9 — Epilogue (custom kernel)
 
-Combine intra-chunk and inter-chunk contributions, plus the skip connection:
+Combine intra-chunk and inter-chunk contributions, plus the skip connection
+and optional Z gating:
 
 ```
 Y[d, l] = exp(cumsum[l]) * InterBMM2[l, d]     // inter-chunk, scaled by cumsum
          + IntraBMM2[l, d]                       // intra-chunk
          + D_param[d] * X[d, l]                  // skip connection (HAS_D)
+
+if HAS_Z:
+    Y[d, l] = Y[d, l] * silu(Z[d, l])           // output gating
 ```
 
 ### Step 10 — Final State (custom kernel)
@@ -271,6 +277,15 @@ bash ../script/cmake-ck-dev.sh ../ gfx950 -G Ninja
 cmake --build . -- tile_example_ssd_fwd -j
 ```
 
+Directly built in example, using standaloneCMakeLists as CMakeLists.txt
+
+```bash
+cd composable_kernel/example/ck_tile/52_ssd
+cp standaloneCMakeLists CMakeLists.txt
+cmake -B build -G Ninja -DGPU_TARGETS=gfx950 -DCMAKE_PREFIX_PATH=/opt/rocm
+ninja -C build
+```
+
 ---
 
 ## Run
@@ -280,10 +295,10 @@ cmake --build . -- tile_example_ssd_fwd -j
 ./bin/tile_example_ssd_fwd
 
 # Custom sizes
-./bin/tile_example_ssd_fwd -B=4 -E=2 -H=4
+./bin/tile_example_ssd_fwd -B=4 -E=2 -H=4 -Z=1
 
 # Benchmark only (no CPU verification)
-./bin/tile_example_ssd_fwd -B=4 -E=2 -H=4 -v=0 -warmup=10 -repeat=100
+./bin/tile_example_ssd_fwd -B=4 -E=2 -H=4 -Z=1 -v=0 -warmup=10 -repeat=100
 ```
 
 ### Command-line options
@@ -294,6 +309,7 @@ cmake --build . -- tile_example_ssd_fwd -j
 | `-G` | 1 | Groups (must be 1) |
 | `-E` | 2 | Expansion factor |
 | `-H` | 2 | Heads per group |
+| `-Z` | 0 | 0 = no Z gating, 1 = enable HAS_Z (`Y * silu(Z)`) |
 | `-v` | 1 | 0 = skip verification, 1 = verify against CPU reference |
 | `-warmup` | 3 | GPU warmup iterations |
 | `-repeat` | 10 | Benchmark iterations |
@@ -325,14 +341,14 @@ Fixed dimensions (not configurable): `C=8, L=128, D=64, N=128`.
 
 - Only `G=1` (single group) is supported.
 
-- The CPU reference in `example_ssd_fwd.cpp` computes everything in fp32 and
-  `HAS_D=true`, `D_HAS_HDIM=true`, `HAS_Z=false`.
+- The CPU reference in `example_ssd_fwd.cpp` computes everything in fp32 with
+  `HAS_D=true`, `D_HAS_HDIM=true`, and optional `HAS_Z` (controlled by `-Z`).
 
 ---
 
 ## Roadmap
 
-- [ ] `HAS_Z` support (output gating: `Y = Y * Z * sigmoid(Z)`)
+- [x] `HAS_Z` support (output gating: `Y = Y * silu(Z)`)
 - [ ] bf16 / fp16 data types with fp32 accumulation
 - [ ] Fused multi-chunk GEMM launch to reduce kernel launch overhead
 - [ ] Support for `G > 1` (multiple groups)

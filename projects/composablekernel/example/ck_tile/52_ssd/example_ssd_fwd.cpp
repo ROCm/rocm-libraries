@@ -27,6 +27,7 @@ static void ssd_forward_cpu_ref(
     float* Y, float* Fstate,
     const float* X, const float* DeltaA, const float* Delta,
     const float* B_mat, const float* C_mat, const float* D_param,
+    const float* Z,
     int B, int G, int EH, int C, int L, int D, int N)
 {
     auto idx5 = [](int a, int b, int c, int d, int e,
@@ -163,6 +164,10 @@ static void ssd_forward_cpu_ref(
                         float y = cum_exp[l] * inter_bmm2[l*D+d_] + intra_bmm2[l*D+d_];
                         y += D_param[idx2(eh, d_, D)] *
                              X[idx5(bi, eh, d_, ci, l, EH, D, C, L)];
+                        if (Z != nullptr) {
+                            float zv = Z[idx5(bi, eh, d_, ci, l, EH, D, C, L)];
+                            y *= zv / (1.0f + expf(-zv));  // Y * silu(Z)
+                        }
                         Y[idx5(bi, eh, d_, ci, l, EH, D, C, L)] = y;
                     }
             }
@@ -186,6 +191,7 @@ auto create_ssd_args(int argc, char* argv[])
       .insert("G", "1", "Groups (must be 1)")
       .insert("E", "2", "Expansion factor")
       .insert("H", "2", "Heads per group")
+      .insert("Z", "0", "0=no Z gating, 1=enable HAS_Z (Y*silu(Z))")
       .insert("v", "1", "0=no verify, 1=verify on CPU")
       .insert("warmup", "3", "Warmup iterations")
       .insert("repeat", "10", "Benchmark iterations");
@@ -205,6 +211,7 @@ int main(int argc, char* argv[])
     const int H = ap.get_int("H");
     const int EH = E * H;
     const int C = 8, L = 128, D = 64, N = 128;
+    const int has_z    = ap.get_int("Z");
     const int n_warmup = ap.get_int("warmup");
     const int n_repeat = ap.get_int("repeat");
     const int do_verify = ap.get_int("v");
@@ -212,7 +219,8 @@ int main(int argc, char* argv[])
     std::cout << "=== Mamba-2 SSD ck_tile Example ===" << std::endl;
     std::cout << "B=" << B << " G=" << G << " E=" << E << " H=" << H
               << " EH=" << EH << " C=" << C << " L=" << L
-              << " D=" << D << " N=" << N << std::endl;
+              << " D=" << D << " N=" << N
+              << " HAS_Z=" << has_z << std::endl;
 
     // Sizes
     size_t sz_x  = static_cast<size_t>(B) * EH * D * C * L;
@@ -225,6 +233,7 @@ int main(int argc, char* argv[])
     // Host tensors
     std::vector<float> h_x(sz_x), h_da(sz_da), h_delta(sz_da);
     std::vector<float> h_bm(sz_b), h_cm(sz_b), h_dp(sz_dp);
+    std::vector<float> h_z;
     std::vector<float> h_y_gpu(sz_y, 0.0f), h_f_gpu(sz_f, 0.0f);
 
     // Init random (same seed as ssd_amd for comparison)
@@ -244,6 +253,10 @@ int main(int argc, char* argv[])
     fill_u(h_bm.data(),    sz_b,  -2.0f, 2.0f);
     fill_u(h_cm.data(),    sz_b,  -2.0f, 2.0f);
     fill_u(h_dp.data(),    sz_dp, -2.0f, 2.0f);
+    if (has_z) {
+        h_z.resize(sz_x);
+        fill_u(h_z.data(), sz_x, -2.0f, 2.0f);
+    }
 
     // Device memory
     ck_tile::DeviceMem d_x(sz_x * sizeof(float));
@@ -252,6 +265,7 @@ int main(int argc, char* argv[])
     ck_tile::DeviceMem d_bm(sz_b * sizeof(float));
     ck_tile::DeviceMem d_cm(sz_b * sizeof(float));
     ck_tile::DeviceMem d_dp(sz_dp * sizeof(float));
+    ck_tile::DeviceMem d_z(has_z ? sz_x * sizeof(float) : 0);
     ck_tile::DeviceMem d_y(sz_y * sizeof(float));
     ck_tile::DeviceMem d_f(sz_f * sizeof(float));
 
@@ -261,6 +275,7 @@ int main(int argc, char* argv[])
     d_bm.ToDevice(h_bm.data());
     d_cm.ToDevice(h_cm.data());
     d_dp.ToDevice(h_dp.data());
+    if (has_z) d_z.ToDevice(h_z.data());
     d_y.SetZero();
     d_f.SetZero();
 
@@ -272,6 +287,7 @@ int main(int argc, char* argv[])
         d_bm.GetDeviceBuffer(),
         d_cm.GetDeviceBuffer(),
         d_dp.GetDeviceBuffer(),
+        has_z ? d_z.GetDeviceBuffer() : nullptr,
         d_y.GetDeviceBuffer(),
         d_f.GetDeviceBuffer(),
         B, G, EH, C, L, D, N};
@@ -311,6 +327,7 @@ int main(int argc, char* argv[])
             h_y_cpu.data(), h_f_cpu.data(),
             h_x.data(), h_da.data(), h_delta.data(),
             h_bm.data(), h_cm.data(), h_dp.data(),
+            has_z ? h_z.data() : nullptr,
             B, G, EH, C, L, D, N);
         auto t1 = std::chrono::high_resolution_clock::now();
         double cpu_ms = std::chrono::duration<double, std::milli>(t1 - t0).count();

@@ -288,6 +288,7 @@ inline float ssd_fwd(const SsdHostArgs& args, hipStream_t stream = nullptr)
     const float* p_bm  = static_cast<const float*>(args.p_b_mat);
     const float* p_cm  = static_cast<const float*>(args.p_c_mat);
     const float* p_dp  = static_cast<const float*>(args.p_d_param);
+    const float* p_z   = static_cast<const float*>(args.p_z);
     float*       p_y   = static_cast<float*>(args.p_y);
     float*       p_fs  = static_cast<float*>(args.p_fstate);
 
@@ -389,7 +390,7 @@ inline float ssd_fwd(const SsdHostArgs& args, hipStream_t stream = nullptr)
 
     // ====== Step 9: Epilogue ======
     ssd_epilogue_kernel<<<dim3(BEH, C), 256, 0, stream>>>(
-        rbmm2, abmm2, ce, p_x, p_dp, p_y, C, L, D, EH);
+        rbmm2, abmm2, ce, p_x, p_dp, p_z, p_y, C, L, D, EH);
 
     // ====== Step 10: Final state ======
     ssd_final_state_kernel<<<BEH, 256, 0, stream>>>(rbmm1, st, lv, p_fs, C, N, D);
