@@ -59,8 +59,8 @@ const vector<vector<int>> matrix_size_range = {
 
 const vector<vector<int>> large_matrix_size_range = {
     {152, 152, 1, 152},
-    {640, 640, 80, 120},
-    {1000, 1024, 350, 900},
+    {640, 640, 85, 600},
+    {1000, 1024, 1, 1000},
 };
 
 Arguments gehrd_setup_arguments(gehrd_tuple tup)
