@@ -27,6 +27,7 @@
 #endif
 
 #include "common_test_header.hpp"
+#include "test_utils_controller.hpp"
 
 // hipcub API
 #include <hipcub/device/device_histogram.hpp>
@@ -124,7 +125,7 @@ struct params1
 };
 
 template<class Params>
-class HipcubDeviceHistogramEven : public ::testing::Test {
+class HipcubDeviceHistogramEven : public test_controller::ControlledTest {
 public:
     using params = Params;
 };
@@ -336,7 +337,7 @@ TYPED_TEST(HipcubDeviceHistogramEven, Even)
 
 // Test HistogramEven overflow
 template<class Params>
-class HipcubDeviceHistogramEvenOverflow : public ::testing::Test
+class HipcubDeviceHistogramEvenOverflow : public test_controller::ControlledTest
 {
 public:
     using params = Params;
@@ -379,6 +380,7 @@ TYPED_TEST(HipcubDeviceHistogramEvenOverflow, EvenOverflow)
     hipStream_t stream = 0; // default
 
     const size_t size = 1000;
+    CHECK_SIZE_ENABLEMENT(size);
 
     for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
@@ -458,7 +460,7 @@ struct params2
 };
 
 template<class Params>
-class HipcubDeviceHistogramRange : public ::testing::Test {
+class HipcubDeviceHistogramRange : public test_controller::ControlledTest {
 public:
     using params = Params;
 };
@@ -701,7 +703,7 @@ struct params3
 };
 
 template<class Params>
-class HipcubDeviceHistogramMultiEven : public ::testing::Test {
+class HipcubDeviceHistogramMultiEven : public test_controller::ControlledTest {
 public:
     using params = Params;
 };
@@ -1014,7 +1016,7 @@ struct params4
 };
 
 template<class Params>
-class HipcubDeviceHistogramMultiRange : public ::testing::Test {
+class HipcubDeviceHistogramMultiRange : public test_controller::ControlledTest {
 public:
     using params = Params;
 };

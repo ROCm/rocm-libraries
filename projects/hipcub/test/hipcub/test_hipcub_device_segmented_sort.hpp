@@ -29,6 +29,7 @@
 #include <hipcub/device/device_segmented_sort.hpp>
 
 #include "test_utils_data_generation.hpp"
+#include "test_utils_controller.hpp"
 
 enum class SortMethod
 {
@@ -59,7 +60,7 @@ struct params
 };
 
 template<class Params>
-class HipcubDeviceSegmentedSort : public ::testing::Test
+class HipcubDeviceSegmentedSort : public test_controller::ControlledTest
 {
 public:
     using params = Params;
@@ -208,7 +209,7 @@ inline void sort_keys()
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        for(const size_t size : test_utils::get_sizes(seed_value))
+        for(const size_t size : CHECK_SIZE_FILTERS(test_utils::get_sizes(seed_value)))
         {
             SCOPED_TRACE(testing::Message() << "with size= " << size);
 
@@ -291,7 +292,7 @@ inline void sort_keys_double_buffer()
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        for(const size_t size : test_utils::get_sizes(seed_value))
+        for(const size_t size : CHECK_SIZE_FILTERS(test_utils::get_sizes(seed_value)))
         {
             SCOPED_TRACE(testing::Message() << "with size= " << size);
 
@@ -398,7 +399,7 @@ inline void sort_pairs()
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        for(const size_t size : test_utils::get_sizes(seed_value))
+        for(const size_t size : CHECK_SIZE_FILTERS(test_utils::get_sizes(seed_value)))
         {
             SCOPED_TRACE(testing::Message() << "with size= " << size);
 
@@ -499,7 +500,7 @@ inline void sort_pairs_double_buffer()
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        for(const size_t size : test_utils::get_sizes(seed_value))
+        for(const size_t size : CHECK_SIZE_FILTERS(test_utils::get_sizes(seed_value)))
         {
             SCOPED_TRACE(testing::Message() << "with size= " << size);
 

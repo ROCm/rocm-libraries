@@ -28,6 +28,7 @@
  ******************************************************************************/
 
 #include "common_test_header.hpp"
+#include "test_utils_controller.hpp"
 
 #include <hipcub/block/block_reduce.hpp>
 #include <hipcub/thread/thread_operators.hpp>
@@ -147,6 +148,7 @@ TEST(HipcubGridTests, GridEvenShare)
     constexpr size_t block_size = 256;
     constexpr size_t size = block_size * 113;
     constexpr size_t grid_size = size / block_size;
+    CHECK_SIZE_ENABLEMENT(size);
 
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
@@ -269,6 +271,7 @@ TEST(HipcubGridTests, GridQueue)
     constexpr size_t block_size = 256;
     constexpr size_t size = block_size * 113;
     constexpr size_t grid_size = size / block_size;
+    CHECK_SIZE_ENABLEMENT(size);
 
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {

@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #include "common_test_header.hpp"
+#include "test_utils_controller.hpp"
 
 #include <hipcub/block/block_load.hpp>
 #include <hipcub/block/block_store.hpp>

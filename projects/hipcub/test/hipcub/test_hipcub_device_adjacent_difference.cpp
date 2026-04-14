@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #include "common_test_header.hpp"
+#include "test_utils_controller.hpp"
 
 // hipcub API
 #include <hipcub/device/device_adjacent_difference.hpp>
@@ -129,7 +130,7 @@ struct params
 };
 
 template<class Params>
-class HipcubDeviceAdjacentDifference : public ::testing::Test
+class HipcubDeviceAdjacentDifference : public test_controller::ControlledTest
 {
 public:
     using params = Params;
@@ -172,9 +173,10 @@ TYPED_TEST(HipcubDeviceAdjacentDifference, SubtractLeftCopy)
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        for(size_t size : test_utils::get_sizes(seed_value))
+        for(size_t size : CHECK_SIZE_FILTERS(test_utils::get_sizes(seed_value)))
         {
             SCOPED_TRACE(testing::Message() << "with size= " << size);
+            CHECK_SIZE_ENABLEMENT(size);
 
             const auto input = test_utils::get_random_data<input_type>(
                 size,
@@ -270,7 +272,7 @@ struct DeviceAdjacentDifferenceLargeParams
 };
 
 template<class Params>
-class HipcubDeviceAdjacentDifferenceLargeTests : public ::testing::Test
+class HipcubDeviceAdjacentDifferenceLargeTests : public test_controller::ControlledTest
 {
 public:
     static constexpr bool left = Params::left;
@@ -466,11 +468,12 @@ TYPED_TEST(HipcubDeviceAdjacentDifferenceLargeTests, LargeIndicesAndOpOnce)
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        const std::vector<size_t> sizes = test_utils::get_large_sizes(seed_value);
+        const std::vector<size_t> sizes = CHECK_SIZE_FILTERS(test_utils::get_large_sizes(seed_value));
 
         for(const auto size : sizes)
         {
             SCOPED_TRACE(testing::Message() << "with size = " << size);
+            CHECK_SIZE_ENABLEMENT(size);
 
             flag_type*              d_incorrect_flag;
             unsigned long long int* d_counter;

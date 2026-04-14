@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #include "common_test_header.hpp"
+#include "test_utils_controller.hpp"
 #include "test_utils.hpp"
 
 // hipcub API
@@ -55,7 +56,7 @@ struct params
 };
 
 template<class Params>
-class HipcubWarpMergeSort : public ::testing::Test {
+class HipcubWarpMergeSort : public test_controller::ControlledTest {
 public:
     using params = Params;
 };
@@ -389,6 +390,7 @@ TYPED_TEST(HipcubWarpMergeSort, SortKeysSegmented)
     constexpr auto num_warps  = num_blocks * warps_per_block;
     constexpr auto max_segment_size = warp_size * items_per_thread;
     constexpr size_t size = num_blocks * items_per_block;
+    CHECK_SIZE_ENABLEMENT(size);
 
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
@@ -502,6 +504,7 @@ TYPED_TEST(HipcubWarpMergeSort, SortKeysValuesSegmented)
     constexpr auto num_warps  = num_blocks * warps_per_block;
     constexpr auto max_segment_size = warp_size * items_per_thread;
     constexpr size_t size = num_blocks * items_per_block;
+    CHECK_SIZE_ENABLEMENT(size);
 
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {

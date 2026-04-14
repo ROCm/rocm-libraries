@@ -37,6 +37,7 @@
 #include "test_utils_half.hpp"
 
 #include "common_test_header.hpp"
+#include "test_utils_controller.hpp"
 
 #include <stdint.h>
 #include <type_traits>

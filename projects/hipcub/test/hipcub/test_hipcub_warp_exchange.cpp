@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #include "common_test_header.hpp"
+#include "test_utils_controller.hpp"
 
 #include "test_utils_data_generation.hpp"
 #include "test_utils_half.hpp"
