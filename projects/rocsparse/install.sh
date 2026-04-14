@@ -532,7 +532,7 @@ if [[ "${install_dependencies}" == true ]]; then
     mkdir -p ${build_dir}/deps && cd ${build_dir}/deps
     ${cmake_executable} ../../deps
     make -j$(nproc)
-    elevate_if_not_root make install
+    elevate_if_not_root make install_deps
   popd
 fi
 

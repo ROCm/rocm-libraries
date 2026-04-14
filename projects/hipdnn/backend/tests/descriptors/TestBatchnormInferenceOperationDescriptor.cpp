@@ -11,17 +11,22 @@
 #include "hipdnn_backend.h"
 
 #include <gtest/gtest.h>
-#include <hipdnn_data_sdk/data_objects/batchnorm_inference_attributes_generated.h>
-#include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/batchnorm_inference_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
+#include <hipdnn_test_sdk/constants/BatchnormInferenceConstants.hpp>
+#include <hipdnn_test_sdk/utilities/ToVec.hpp>
 
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 
 #include <memory>
+#include <string>
 #include <vector>
 
 using namespace hipdnn_backend;
 using namespace hipdnn_backend::test_utilities;
-using namespace hipdnn_data_sdk::data_objects;
+using namespace hipdnn_flatbuffers_sdk::data_objects;
+using namespace hipdnn_tests::constants;
+using hipdnn_tests::toVec;
 
 class TestBatchnormInferenceOperationDescriptor : public ::testing::Test
 {
@@ -100,12 +105,22 @@ protected:
     void SetUp() override
     {
         _wrapper = createDescriptor<BatchnormInferenceOperationDescriptor>();
-        _xDesc = createFinalizedTensor(70, {1, 64, 32, 32}, {65536, 1024, 32, 1});
-        _meanDesc = createFinalizedTensor(71, {1, 64, 1, 1}, {64, 1, 1, 1});
-        _invVarianceDesc = createFinalizedTensor(72, {1, 64, 1, 1}, {64, 1, 1, 1});
-        _scaleDesc = createFinalizedTensor(73, {1, 64, 1, 1}, {64, 1, 1, 1});
-        _biasDesc = createFinalizedTensor(74, {1, 64, 1, 1}, {64, 1, 1, 1});
-        _yDesc = createFinalizedTensor(75, {1, 64, 32, 32}, {65536, 1024, 32, 1});
+        _xDesc = createFinalizedTensor(
+            K_BN_INF_TENSOR_X_UID, toVec(K_BN_INF_SPATIAL_DIMS), toVec(K_BN_INF_SPATIAL_STRIDES));
+        _meanDesc = createFinalizedTensor(K_BN_INF_TENSOR_MEAN_UID,
+                                          toVec(K_BN_INF_CHANNEL_DIMS),
+                                          toVec(K_BN_INF_CHANNEL_STRIDES));
+        _invVarianceDesc = createFinalizedTensor(K_BN_INF_TENSOR_INV_VARIANCE_UID,
+                                                 toVec(K_BN_INF_CHANNEL_DIMS),
+                                                 toVec(K_BN_INF_CHANNEL_STRIDES));
+        _scaleDesc = createFinalizedTensor(K_BN_INF_TENSOR_SCALE_UID,
+                                           toVec(K_BN_INF_CHANNEL_DIMS),
+                                           toVec(K_BN_INF_CHANNEL_STRIDES));
+        _biasDesc = createFinalizedTensor(K_BN_INF_TENSOR_BIAS_UID,
+                                          toVec(K_BN_INF_CHANNEL_DIMS),
+                                          toVec(K_BN_INF_CHANNEL_STRIDES));
+        _yDesc = createFinalizedTensor(
+            K_BN_INF_TENSOR_Y_UID, toVec(K_BN_INF_SPATIAL_DIMS), toVec(K_BN_INF_SPATIAL_STRIDES));
         _unfinalizedTensor = createDescriptor<TensorDescriptor>();
     }
 
@@ -238,7 +253,7 @@ TEST_F(TestBatchnormInferenceOperationDescriptor, SetTensorDescriptorX)
                                        &_xDesc));
 
     // Verify UID extracted via getData()
-    ASSERT_EQ(desc->getData().x_tensor_uid, 70);
+    ASSERT_EQ(desc->getData().x_tensor_uid, K_BN_INF_TENSOR_X_UID);
     ASSERT_NE(desc->getXDesc(), nullptr);
 }
 
@@ -250,7 +265,7 @@ TEST_F(TestBatchnormInferenceOperationDescriptor, SetTensorDescriptorMean)
                                        1,
                                        &_meanDesc));
 
-    ASSERT_EQ(desc->getData().mean_tensor_uid, 71);
+    ASSERT_EQ(desc->getData().mean_tensor_uid, K_BN_INF_TENSOR_MEAN_UID);
     ASSERT_NE(desc->getMeanDesc(), nullptr);
 }
 
@@ -262,7 +277,7 @@ TEST_F(TestBatchnormInferenceOperationDescriptor, SetTensorDescriptorInvVariance
                                        1,
                                        &_invVarianceDesc));
 
-    ASSERT_EQ(desc->getData().inv_variance_tensor_uid, 72);
+    ASSERT_EQ(desc->getData().inv_variance_tensor_uid, K_BN_INF_TENSOR_INV_VARIANCE_UID);
     ASSERT_NE(desc->getInvVarianceDesc(), nullptr);
 }
 
@@ -274,7 +289,7 @@ TEST_F(TestBatchnormInferenceOperationDescriptor, SetTensorDescriptorScale)
                                        1,
                                        &_scaleDesc));
 
-    ASSERT_EQ(desc->getData().scale_tensor_uid, 73);
+    ASSERT_EQ(desc->getData().scale_tensor_uid, K_BN_INF_TENSOR_SCALE_UID);
     ASSERT_NE(desc->getScaleDesc(), nullptr);
 }
 
@@ -286,7 +301,7 @@ TEST_F(TestBatchnormInferenceOperationDescriptor, SetTensorDescriptorBias)
                                        1,
                                        &_biasDesc));
 
-    ASSERT_EQ(desc->getData().bias_tensor_uid, 74);
+    ASSERT_EQ(desc->getData().bias_tensor_uid, K_BN_INF_TENSOR_BIAS_UID);
     ASSERT_NE(desc->getBiasDesc(), nullptr);
 }
 
@@ -298,7 +313,7 @@ TEST_F(TestBatchnormInferenceOperationDescriptor, SetTensorDescriptorY)
                                        1,
                                        &_yDesc));
 
-    ASSERT_EQ(desc->getData().y_tensor_uid, 75);
+    ASSERT_EQ(desc->getData().y_tensor_uid, K_BN_INF_TENSOR_Y_UID);
     ASSERT_NE(desc->getYDesc(), nullptr);
 }
 
@@ -612,12 +627,12 @@ TEST_F(TestBatchnormInferenceOperationDescriptor, FinalizePreservesTensorReferen
     ASSERT_NE(desc->getYDesc(), nullptr);
 
     // Verify UIDs match
-    ASSERT_EQ(desc->getXDesc()->getData().uid, 70);
-    ASSERT_EQ(desc->getMeanDesc()->getData().uid, 71);
-    ASSERT_EQ(desc->getInvVarianceDesc()->getData().uid, 72);
-    ASSERT_EQ(desc->getScaleDesc()->getData().uid, 73);
-    ASSERT_EQ(desc->getBiasDesc()->getData().uid, 74);
-    ASSERT_EQ(desc->getYDesc()->getData().uid, 75);
+    ASSERT_EQ(desc->getXDesc()->getData().uid, K_BN_INF_TENSOR_X_UID);
+    ASSERT_EQ(desc->getMeanDesc()->getData().uid, K_BN_INF_TENSOR_MEAN_UID);
+    ASSERT_EQ(desc->getInvVarianceDesc()->getData().uid, K_BN_INF_TENSOR_INV_VARIANCE_UID);
+    ASSERT_EQ(desc->getScaleDesc()->getData().uid, K_BN_INF_TENSOR_SCALE_UID);
+    ASSERT_EQ(desc->getBiasDesc()->getData().uid, K_BN_INF_TENSOR_BIAS_UID);
+    ASSERT_EQ(desc->getYDesc()->getData().uid, K_BN_INF_TENSOR_Y_UID);
 }
 
 // =============================================================================
@@ -631,12 +646,14 @@ TEST_F(TestBatchnormInferenceOperationDescriptor, ToStringContainsExpectedInfo)
 
     const std::string str = desc->toString();
     ASSERT_NE(str.find("BatchnormInferenceOperationDescriptor"), std::string::npos);
-    ASSERT_NE(str.find("x_uid=70"), std::string::npos);
-    ASSERT_NE(str.find("mean_uid=71"), std::string::npos);
-    ASSERT_NE(str.find("inv_variance_uid=72"), std::string::npos);
-    ASSERT_NE(str.find("scale_uid=73"), std::string::npos);
-    ASSERT_NE(str.find("bias_uid=74"), std::string::npos);
-    ASSERT_NE(str.find("y_uid=75"), std::string::npos);
+    ASSERT_NE(str.find("x_uid=" + std::to_string(K_BN_INF_TENSOR_X_UID)), std::string::npos);
+    ASSERT_NE(str.find("mean_uid=" + std::to_string(K_BN_INF_TENSOR_MEAN_UID)), std::string::npos);
+    ASSERT_NE(str.find("inv_variance_uid=" + std::to_string(K_BN_INF_TENSOR_INV_VARIANCE_UID)),
+              std::string::npos);
+    ASSERT_NE(str.find("scale_uid=" + std::to_string(K_BN_INF_TENSOR_SCALE_UID)),
+              std::string::npos);
+    ASSERT_NE(str.find("bias_uid=" + std::to_string(K_BN_INF_TENSOR_BIAS_UID)), std::string::npos);
+    ASSERT_NE(str.find("y_uid=" + std::to_string(K_BN_INF_TENSOR_Y_UID)), std::string::npos);
     ASSERT_NE(str.find("compute_data_type="), std::string::npos);
 }
 
@@ -651,12 +668,12 @@ TEST_F(TestBatchnormInferenceOperationDescriptor, GetTensorDescriptorsReturnsAll
 
     auto tensors = desc->getTensorDescriptors();
     ASSERT_EQ(tensors.size(), 6);
-    ASSERT_EQ(tensors[0]->getData().uid, 70);
-    ASSERT_EQ(tensors[1]->getData().uid, 71);
-    ASSERT_EQ(tensors[2]->getData().uid, 72);
-    ASSERT_EQ(tensors[3]->getData().uid, 73);
-    ASSERT_EQ(tensors[4]->getData().uid, 74);
-    ASSERT_EQ(tensors[5]->getData().uid, 75);
+    ASSERT_EQ(tensors[0]->getData().uid, K_BN_INF_TENSOR_X_UID);
+    ASSERT_EQ(tensors[1]->getData().uid, K_BN_INF_TENSOR_MEAN_UID);
+    ASSERT_EQ(tensors[2]->getData().uid, K_BN_INF_TENSOR_INV_VARIANCE_UID);
+    ASSERT_EQ(tensors[3]->getData().uid, K_BN_INF_TENSOR_SCALE_UID);
+    ASSERT_EQ(tensors[4]->getData().uid, K_BN_INF_TENSOR_BIAS_UID);
+    ASSERT_EQ(tensors[5]->getData().uid, K_BN_INF_TENSOR_Y_UID);
 }
 
 TEST_F(TestBatchnormInferenceOperationDescriptor, BuildNodeProducesCorrectNodeT)
@@ -676,12 +693,12 @@ TEST_F(TestBatchnormInferenceOperationDescriptor, BuildNodeProducesCorrectNodeT)
 
     auto* attrs = node->attributes.AsBatchnormInferenceAttributes();
     ASSERT_NE(attrs, nullptr);
-    ASSERT_EQ(attrs->x_tensor_uid, 70);
-    ASSERT_EQ(attrs->mean_tensor_uid, 71);
-    ASSERT_EQ(attrs->inv_variance_tensor_uid, 72);
-    ASSERT_EQ(attrs->scale_tensor_uid, 73);
-    ASSERT_EQ(attrs->bias_tensor_uid, 74);
-    ASSERT_EQ(attrs->y_tensor_uid, 75);
+    ASSERT_EQ(attrs->x_tensor_uid, K_BN_INF_TENSOR_X_UID);
+    ASSERT_EQ(attrs->mean_tensor_uid, K_BN_INF_TENSOR_MEAN_UID);
+    ASSERT_EQ(attrs->inv_variance_tensor_uid, K_BN_INF_TENSOR_INV_VARIANCE_UID);
+    ASSERT_EQ(attrs->scale_tensor_uid, K_BN_INF_TENSOR_SCALE_UID);
+    ASSERT_EQ(attrs->bias_tensor_uid, K_BN_INF_TENSOR_BIAS_UID);
+    ASSERT_EQ(attrs->y_tensor_uid, K_BN_INF_TENSOR_Y_UID);
 }
 
 TEST_F(TestBatchnormInferenceOperationDescriptor, BuildNodeWithHalfComputeType)
@@ -707,7 +724,7 @@ TEST_F(TestBatchnormInferenceOperationDescriptor,
 
     auto tensors = desc->getTensorDescriptors();
     ASSERT_EQ(tensors.size(), 6);
-    // Verify ordering: [X, MEAN, INV_VARIANCE, SCALE, BIAS, Y] matches UIDs [70, 71, 72, 73, 74, 75]
+    // Verify ordering: [X, MEAN, INV_VARIANCE, SCALE, BIAS, Y]
     EXPECT_EQ(tensors[0], desc->getXDesc());
     EXPECT_EQ(tensors[1], desc->getMeanDesc());
     EXPECT_EQ(tensors[2], desc->getInvVarianceDesc());
@@ -726,7 +743,7 @@ TEST_F(TestBatchnormInferenceOperationDescriptor, TryAsInterfaceReturnsValidGrap
     // Verify the returned interface is the same underlying object
     auto tensors = graphOp->getTensorDescriptors();
     ASSERT_EQ(tensors.size(), 6);
-    ASSERT_EQ(tensors[0]->getData().uid, 70);
+    ASSERT_EQ(tensors[0]->getData().uid, K_BN_INF_TENSOR_X_UID);
 }
 
 TEST_F(TestBatchnormInferenceOperationDescriptor, TryAsInterfaceReturnsNullForWrongType)

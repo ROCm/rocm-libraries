@@ -13,6 +13,7 @@ add_executable(
     Batchnorm/IntegrationGpuBatchnormForwardInferenceWithVariance.cpp
     Batchnorm/IntegrationGpuBatchnormForwardInferenceAndActivation.cpp
     Batchnorm/IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivation.cpp
+    Batchnorm/IntegrationGpuBatchnormForwardTraining.cpp
     RMSnorm/IntegrationGpuRMSnormForward.cpp
 )
 
@@ -24,6 +25,10 @@ target_compile_definitions(
     hip_kernel_provider_integration_tests
     PRIVATE
         PLUGIN_PATH="../$<IF:$<PLATFORM_ID:Windows>,bin,lib>/${HIPDNN_PLUGIN_ENGINE_SUBDIR}/hip_kernel_provider"
+)
+
+target_include_directories(hip_kernel_provider_integration_tests PRIVATE
+    ${CMAKE_CURRENT_LIST_DIR}/../../include
 )
 
 target_link_libraries(

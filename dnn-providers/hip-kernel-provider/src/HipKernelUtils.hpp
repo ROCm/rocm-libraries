@@ -9,6 +9,21 @@
 #include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 
+/**
+ * @brief Macro that returns and prints info log on passing provided condition.
+ * Arguments after first are passed into std::format().
+ * Requires a HIP_KERNEL_LOG_PREFIX in scope which will prefix the log
+ */
+#define HIP_KERNEL_RETURN_FALSE_IF(condition, message)                            \
+    do                                                                            \
+    {                                                                             \
+        if(condition)                                                             \
+        {                                                                         \
+            HIPDNN_PLUGIN_LOG_INFO(std::string{HIP_KERNEL_LOG_PREFIX} + message); \
+            return false;                                                         \
+        }                                                                         \
+    } while(0)
+
 namespace hip_kernel_provider::hip_kernel_utils
 {
 

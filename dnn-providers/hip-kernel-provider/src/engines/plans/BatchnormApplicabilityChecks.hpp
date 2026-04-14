@@ -8,6 +8,7 @@
 #include <unordered_set>
 #include <vector>
 
+#include <hipdnn_data_sdk/data_objects/batchnorm_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/batchnorm_inference_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/batchnorm_inference_attributes_variance_ext_generated.h>
 #include <hipdnn_data_sdk/data_objects/pointwise_attributes_generated.h>
@@ -129,6 +130,11 @@ void checkBatchnormFwdActivationModeSupported(
 
 void checkBatchnormBwdActivationModeSupported(
     const hipdnn_data_sdk::data_objects::PointwiseAttributes& activAttr);
+
+void checkBatchnormFwdTrainingTensorConfigSupported(
+    const hipdnn_data_sdk::data_objects::BatchnormAttributes& bnAttr,
+    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        tensorMap);
 
 // --- Batchnorm Type Configuration ---
 
