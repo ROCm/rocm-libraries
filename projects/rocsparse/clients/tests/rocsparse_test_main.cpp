@@ -186,7 +186,7 @@ int main(int argc, char** argv)
             rocsparse_clients_test::function_properties_t::instance().set_sync_report_filename(
                 argv[++i]);
         }
-        else if(!strcmp(argv[i], "--test-sync"))
+        else if(strcmp(argv[i], "--test-sync") == 0)
         {
             rocsparse_clients_test::function_properties_t::instance().enable();
             rocsparse_clients_test::function_properties_t::instance().set_sync_report_filename(
