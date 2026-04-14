@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -21,7 +21,7 @@
  *
  * ************************************************************************ */
 
-#include "testing_syevBatched.hpp"
+#include "testing_syev_heev.hpp"
 
 using ::testing::Combine;
 using ::testing::TestWithParam;
@@ -29,13 +29,13 @@ using ::testing::Values;
 using ::testing::ValuesIn;
 using namespace std;
 
-typedef std::tuple<vector<int>, vector<char>> syevBatched_tuple;
+typedef std::tuple<vector<int>, vector<char>> syev_heev_tuple;
 
 // each size_range vector is a {n, lda}
 
 // each op_range vector is a {jobz, uplo}
 
-// case when n == -1, jobz == N, and uplo = L will also execute the bad arguments test
+// case when n == 1, jobz == N, and uplo = L will also execute the bad arguments test
 // (null handle, null pointers and invalid values)
 
 const vector<vector<char>> op_range = {{'N', 'L'}, {'N', 'U'}, {'V', 'L'}, {'V', 'U'}};
@@ -43,7 +43,6 @@ const vector<vector<char>> op_range = {{'N', 'L'}, {'N', 'U'}, {'V', 'L'}, {'V',
 // for checkin_lapack tests
 const vector<vector<int>> size_range = {
     // normal (valid) samples
-    {-1, 1},
     {1, 1},
     {12, 12},
     {20, 30},
@@ -58,7 +57,7 @@ const vector<vector<int>> size_range = {
 //     {1000, 1024}};
 
 template <typename T>
-Arguments syevBatched_setup_arguments(syevBatched_tuple tup)
+Arguments syev_heev_setup_arguments(syev_heev_tuple tup)
 {
     vector<int>  size = std::get<0>(tup);
     vector<char> op   = std::get<1>(tup);
@@ -79,7 +78,7 @@ Arguments syevBatched_setup_arguments(syevBatched_tuple tup)
 }
 
 template <testAPI_t API, typename I, typename SIZE>
-class SYEVBATCHED_BASE : public ::TestWithParam<syevBatched_tuple>
+class SYEV_HEEV_BASE : public ::TestWithParam<syev_heev_tuple>
 {
 protected:
     void TearDown() override
@@ -90,45 +89,60 @@ protected:
     template <bool BATCHED, bool STRIDED, typename T>
     void run_tests()
     {
-        Arguments arg = syevBatched_setup_arguments<T>(GetParam());
+        Arguments arg = syev_heev_setup_arguments<T>(GetParam());
 
-        if(arg.peek<rocblas_int>("n") == -1 && arg.peek<char>("jobz") == 'N'
+        if(arg.peek<rocblas_int>("n") == 1 && arg.peek<char>("jobz") == 'N'
            && arg.peek<char>("uplo") == 'L')
-            testing_syevBatched_bad_arg<API, BATCHED, STRIDED, T, I, SIZE>();
+            testing_syev_heev_bad_arg<API, BATCHED, STRIDED, T, I, SIZE>();
 
-        arg.batch_count = 3;
-        testing_syevBatched<API, BATCHED, STRIDED, T, I, SIZE>(arg);
+        arg.batch_count = (BATCHED || STRIDED ? 3 : 1);
+        testing_syev_heev<API, BATCHED, STRIDED, T, I, SIZE>(arg);
     }
 };
 
-class SYEVBATCHED_COMPAT_64 : public SYEVBATCHED_BASE<API_COMPAT, int64_t, size_t>
+class SYEV_COMPAT_64 : public SYEV_HEEV_BASE<API_COMPAT, int64_t, size_t>
 {
 };
 
-TEST_P(SYEVBATCHED_COMPAT_64, __float)
+class HEEV_COMPAT_64 : public SYEV_HEEV_BASE<API_COMPAT, int64_t, size_t>
 {
-    run_tests<true, false, float>();
+};
+
+// Only strided_batched tests are instantiated here, as the underlying API
+// (hipsolverDnXsyevBatched) operates on strided-batched data layouts.
+
+TEST_P(SYEV_COMPAT_64, strided_batched__float)
+{
+    run_tests<false, true, float>();
 }
 
-TEST_P(SYEVBATCHED_COMPAT_64, __double)
+TEST_P(SYEV_COMPAT_64, strided_batched__double)
 {
-    run_tests<true, false, double>();
+    run_tests<false, true, double>();
 }
 
-TEST_P(SYEVBATCHED_COMPAT_64, __float_complex)
+TEST_P(HEEV_COMPAT_64, strided_batched__float_complex)
 {
-    run_tests<true, false, rocblas_float_complex>();
+    run_tests<false, true, rocblas_float_complex>();
 }
 
-TEST_P(SYEVBATCHED_COMPAT_64, __double_complex)
+TEST_P(HEEV_COMPAT_64, strided_batched__double_complex)
 {
-    run_tests<true, false, rocblas_double_complex>();
+    run_tests<false, true, rocblas_double_complex>();
 }
 
 INSTANTIATE_TEST_SUITE_P(checkin_lapack,
-                         SYEVBATCHED_COMPAT_64,
+                         SYEV_COMPAT_64,
+                         Combine(ValuesIn(size_range), ValuesIn(op_range)));
+
+INSTANTIATE_TEST_SUITE_P(checkin_lapack,
+                         HEEV_COMPAT_64,
                          Combine(ValuesIn(size_range), ValuesIn(op_range)));
 
 // INSTANTIATE_TEST_SUITE_P(daily_lapack,
-//                          SYEVBATCHED_COMPAT_64,
+//                          SYEV_COMPAT_64,
+//                          Combine(ValuesIn(large_size_range), ValuesIn(op_range)));
+
+// INSTANTIATE_TEST_SUITE_P(daily_lapack,
+//                          HEEV_COMPAT_64,
 //                          Combine(ValuesIn(large_size_range), ValuesIn(op_range)));
