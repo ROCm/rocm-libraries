@@ -2,7 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 #include "BatchnormFwdInferenceWithVariancePlan.hpp"
-#include "PlanUtils.hpp"
+#include "engines/plans/PlanUtils.hpp"
 
 #include "hip/IKernelCompiler.hpp"
 
@@ -12,7 +12,7 @@
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 
-namespace hip_kernel_provider
+namespace hip_kernel_provider::batchnorm
 {
 
 BatchnormFwdInferenceWithVarianceParams::BatchnormFwdInferenceWithVarianceParams(
@@ -184,7 +184,7 @@ void BatchnormFwdInferenceWithVariancePlan::compile(const IKernelCompiler& kerne
     bool isLayoutNHWC = hip_kernel_utils::isChannelLastLayout(_inferenceParams.x());
 
     // Calculate vector size based on layout
-    auto vectorsize = batchnorm::computeVectorSize(isLayoutNHWC, c, inCstride);
+    auto vectorsize = computeVectorSize(isLayoutNHWC, c, inCstride);
 
     // Calculate block and grid dimensions
     size_t xlocalsize = 0;
@@ -374,4 +374,5 @@ void BatchnormFwdInferenceWithVariancePlan::execute(const HipKernelHandle& handl
                                 activationBeta);
     }
 }
-}
+
+} // namespace hip_kernel_provider::batchnorm

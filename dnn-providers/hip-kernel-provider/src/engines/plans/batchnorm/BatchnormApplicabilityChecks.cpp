@@ -11,12 +11,12 @@
 #include "BatchnormApplicabilityChecks.hpp"
 #include "HipKernelUtils.hpp"
 
-namespace hip_kernel_provider
+namespace hip_kernel_provider::batchnorm
 {
 
 // --- Type Configuration Helpers ---
 
-std::unordered_set<hipdnn_data_sdk::data_objects::DataType> bn_type_configs::getAllowedIoTypes()
+std::unordered_set<hipdnn_data_sdk::data_objects::DataType> type_configs::getAllowedIoTypes()
 {
     std::unordered_set<hipdnn_data_sdk::data_objects::DataType> types;
     for(const auto& config : VALID)
@@ -26,7 +26,7 @@ std::unordered_set<hipdnn_data_sdk::data_objects::DataType> bn_type_configs::get
     return types;
 }
 
-std::unordered_set<hipdnn_data_sdk::data_objects::DataType> bn_type_configs::getAllowedAffineTypes()
+std::unordered_set<hipdnn_data_sdk::data_objects::DataType> type_configs::getAllowedAffineTypes()
 {
     std::unordered_set<hipdnn_data_sdk::data_objects::DataType> types;
     for(const auto& config : VALID)
@@ -36,7 +36,7 @@ std::unordered_set<hipdnn_data_sdk::data_objects::DataType> bn_type_configs::get
     return types;
 }
 
-std::unordered_set<hipdnn_data_sdk::data_objects::DataType> bn_type_configs::getAllowedStatTypes()
+std::unordered_set<hipdnn_data_sdk::data_objects::DataType> type_configs::getAllowedStatTypes()
 {
     std::unordered_set<hipdnn_data_sdk::data_objects::DataType> types;
     for(const auto& config : VALID)
@@ -47,7 +47,7 @@ std::unordered_set<hipdnn_data_sdk::data_objects::DataType> bn_type_configs::get
 }
 
 std::unordered_set<hipdnn_data_sdk::data_objects::DataType>
-    bn_type_configs::getAllowedIntermediateTypes()
+    type_configs::getAllowedIntermediateTypes()
 {
     std::unordered_set<hipdnn_data_sdk::data_objects::DataType> types;
     for(const auto& config : VALID)
@@ -332,12 +332,12 @@ void checkTensorDataTypesSupported(
     validators::validateConsistentDataTypes(
         ioTensorIds,
         tensorMap,
-        bn_type_configs::getAllowedIoTypes(),
+        type_configs::getAllowedIoTypes(),
         "Batchnorm implementation supports only FLOAT, HALF, and BFLOAT16 data types for x, y, "
         "dy, and dx tensors.",
         "All IO tensors for batchnorm must have the same data type.");
 
-    const auto allowedAffineTypes = bn_type_configs::getAllowedAffineTypes();
+    const auto allowedAffineTypes = type_configs::getAllowedAffineTypes();
     if(allowedAffineTypes.size() == 1)
     {
         validators::validateFixedDataType(affineTensorIds,
@@ -356,7 +356,7 @@ void checkTensorDataTypesSupported(
             "All affine tensors for batchnorm must have the same data type.");
     }
 
-    const auto allowedStatTypes = bn_type_configs::getAllowedStatTypes();
+    const auto allowedStatTypes = type_configs::getAllowedStatTypes();
     if(allowedStatTypes.size() == 1)
     {
         validators::validateFixedDataType(statTensorIds,
@@ -375,7 +375,7 @@ void checkTensorDataTypesSupported(
             "All stat tensors for batchnorm must have the same data type.");
     }
 
-    const auto allowedIntermediateTypes = bn_type_configs::getAllowedIntermediateTypes();
+    const auto allowedIntermediateTypes = type_configs::getAllowedIntermediateTypes();
     if(allowedIntermediateTypes.size() == 1)
     {
         validators::validateFixedDataType(
@@ -597,4 +597,4 @@ void checkBatchnormFwdTrainingTensorConfigSupported(
         ioTensorIds, affineTensorIds, statTensorIds, {}, tensorMap, true);
 }
 
-} // namespace hip_kernel_provider
+} // namespace hip_kernel_provider::batchnorm

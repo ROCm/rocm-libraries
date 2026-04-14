@@ -5,7 +5,7 @@
 #include <cstdio>
 #include <gtest/gtest.h>
 
-#include "engines/plans/BatchnormCommon.hpp"
+#include "engines/plans/batchnorm/BatchnormCommon.hpp"
 
 using namespace hip_kernel_provider::batchnorm;
 
