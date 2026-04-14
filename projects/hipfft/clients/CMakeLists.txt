@@ -100,8 +100,8 @@ if( BUILD_CLIENTS_TESTS )
       )
 
     ExternalProject_Add( gtest
-      URL https://github.com/google/googletest/archive/release-1.11.0.tar.gz
-      URL_HASH SHA256=b4870bf121ff7795ba20d20bcdd8627b8e088f2d1dab299a031c1034eddc93d5
+      URL https://github.com/google/googletest/archive/release-1.17.0.tar.gz
+      URL_HASH SHA256=65fab701d9829d38cb77c14acdc431d2108bfdbf8979e40eb8ae567edf10b27c
       PREFIX ${CMAKE_CURRENT_BINARY_DIR}
       CMAKE_ARGS -DCMAKE_CXX_COMPILER_LAUNCHER=${CMAKE_CXX_COMPILER_LAUNCHER} -DBUILD_SHARED_LIBS=OFF
         -DCMAKE_POSITION_INDEPENDENT_CODE=ON
