@@ -926,7 +926,7 @@ try
     rocblas_start_device_memory_size_query((rocblas_handle)handle);
 
     hipsolverStatus_t status  = HIPSOLVER_STATUS_SUCCESS;
-    int64_t           strideA = lda * n;
+    int64_t           strideA = int64_t(lda) * n;
     int64_t           strideW = n;
     int64_t           strideE = n;
 
@@ -1100,7 +1100,7 @@ try
     // Matrix A: each matrix is lda * n elements
     // Eigenvalues W: each vector is n elements
     // Workspace E: each vector is n elements
-    int64_t strideA = lda * n;
+    int64_t strideA = int64_t(lda) * n;
     int64_t strideW = n;
     int64_t strideE = n;
 
