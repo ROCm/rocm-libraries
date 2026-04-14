@@ -28,6 +28,10 @@
 
 #include <type_traits>
 
+#ifndef DEFAULT_N
+const size_t DEFAULT_N = 32 * primbench::MiB;
+#endif
+
 constexpr const char* get_algorithm_name(hipcub::WarpStoreAlgorithm algorithm)
 {
     switch(algorithm)
@@ -138,7 +142,7 @@ class warp_store_benchmark : public primbench::benchmark_interface
 int main(int argc, char* argv[])
 {
     primbench::settings settings;
-    settings.size                 = 32 * primbench::MiB;
+    settings.size                 = DEFAULT_N;
     settings.min_gpu_ms_per_batch = 100;
 
     primbench::executor executor(argc, argv, settings);
