@@ -7,6 +7,10 @@ on:
         type: string
       project_name:
         type: string
+      cmake_target:
+        type: string
+      build_dir:
+        type: string
       amdgpu_families:
         type: string
       test_runs_on:
@@ -85,6 +89,10 @@ jobs:
         run: |
           python3 TheRock/build_tools/github_actions/build_configure.py
 
-      - name: Build coverage
+      - name: Build ${{ inputs.cmake_target }}
         run: |
-          cmake --build TheRock/build-coverage/ml-libs/hipDNN/build --target coverage
+          ninja -C TheRock/build-coverage ${{ inputs.cmake_target }}
+
+      - name: Build coverage for ${{ inputs.project_name }}
+        run: |
+          cmake --build ${{ inputs.build_dir }} --target coverage
