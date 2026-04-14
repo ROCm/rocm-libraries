@@ -12,20 +12,20 @@
 #include "hip/IKernelCompiler.hpp"
 #include "hipdnn_data_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp"
 
-namespace hip_kernel_provider
+namespace hip_kernel_provider::layernorm
 {
 
-class BatchnormPlanBuilder
+class LayernormPlanBuilder
     : public hipdnn_plugin_sdk::IPlanBuilder<HipKernelHandle, HipKernelSettings, HipKernelContext>
 {
 public:
-    BatchnormPlanBuilder(const IKernelCompiler& kernelCompiler,
+    LayernormPlanBuilder(const IKernelCompiler& kernelCompiler,
                          const IDevicePropertyProvider& devicePropertyProvider);
-    ~BatchnormPlanBuilder() override = default;
+    ~LayernormPlanBuilder() override = default;
 
     // Disallow copy and assignment
-    BatchnormPlanBuilder(const BatchnormPlanBuilder&) = delete;
-    BatchnormPlanBuilder& operator=(const BatchnormPlanBuilder&) = delete;
+    LayernormPlanBuilder(const LayernormPlanBuilder&) = delete;
+    LayernormPlanBuilder& operator=(const LayernormPlanBuilder&) = delete;
 
     bool isApplicable(const HipKernelHandle& handle,
                       const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const override;
@@ -54,4 +54,4 @@ private:
     const IDevicePropertyProvider& _devicePropertyProvider;
 };
 
-}
+} // namespace hip_kernel_provider::layernorm
