@@ -384,7 +384,7 @@ catch(...)
     return hipsolver::exception2hip_status();
 }
 
-/******************** SYEVBATCHED ********************/
+/******************** SYEV_BATCHED ********************/
 hipsolverStatus_t hipsolverDnXsyevBatched_bufferSize(hipsolverDnHandle_t handle,
                                                      hipsolverDnParams_t params,
                                                      hipsolverEigMode_t  jobz,
