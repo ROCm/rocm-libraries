@@ -12,6 +12,27 @@ from therock_configure_ci import get_modified_paths  # reuse existing helper
 logging.basicConfig(level=logging.INFO)
 SCRIPT_DIR = Path(__file__).resolve().parent
 
+# Coverage-enabled projects: project key -> (cmake_target, build_subdir)
+# Only projects listed here will get coverage jobs
+COVERAGE_PROJECT_METADATA = {
+    "hipdnn": ("hipDNN", "ml-libs/hipDNN"),
+    "prim": ("rocPRIM", "math-libs/PRIM"),
+}
+
+
+def get_build_metadata(project_key: str, base_dir: str = "TheRock/build-coverage"):
+    """Get CMake target and build directory for a coverage-enabled project.
+
+    Returns:
+        Tuple of (uppercase_name, cmake_target, build_dir) or None if not coverage-enabled
+    """
+    if project_key not in COVERAGE_PROJECT_METADATA:
+        return None
+
+    cmake_target, build_subdir = COVERAGE_PROJECT_METADATA[project_key]
+    build_dir = f"{base_dir}/{build_subdir}/build"
+    return project_key.upper(), cmake_target, build_dir
+
 
 def get_changed_subtrees_only():
     repo_config_path = SCRIPT_DIR / ".." / "repos-config.json"
@@ -35,22 +56,35 @@ def main():
 
     projects = collect_projects_to_run(subtrees)
 
+    # Filter: only keep projects that have coverage-enabled tests
+    coverage_projects = []
     for proj in projects:
         pts_list = [p for p in proj.get("projects_to_test", "").split(",") if p]
 
-        # TODO: We don't want a default
+        # Find primary project (prefer changed projects)
         primary = pts_list[0] if pts_list else ""
-
-        # TODO: There's a better way than iterating and comparing to projects_to_test
         for p in pts_list:
             if p in changed_project_keys:
                 primary = p
                 break
 
-        proj["project_name"] = primary.upper()
+        # FILTER: Skip if not coverage-enabled
+        metadata = get_build_metadata(primary)
+        if metadata is None:
+            logging.info(f"Skipping {primary} - not coverage-enabled")
+            continue
 
+        # Add coverage metadata
+        uppercase_name, cmake_target, build_dir = metadata
+        proj["project_name"] = uppercase_name
+        proj["cmake_target"] = cmake_target
+        proj["build_dir"] = build_dir
+
+        coverage_projects.append(proj)
+
+    # Output for GitHub Actions
     output = {
-        "coverage_projects": json.dumps(projects),
+        "coverage_projects": json.dumps(coverage_projects),
     }
     github_output = os.environ.get("GITHUB_OUTPUT")
     if github_output:
