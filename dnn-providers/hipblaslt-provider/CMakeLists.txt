@@ -42,6 +42,7 @@ option(ENABLE_CLANG_FORMAT "Enable clang-format targets" ON)
 list(
     PREPEND
     HIPDNN_WARNING_COMPILE_OPTIONS
+    -Werror # Treat all warnings as errors
     -Wall # Enable most common warnings
     -Wextra # Enable additional warnings not covered by -Wall
     -Wpedantic # Enforce strict ISO C++ compliance
@@ -61,26 +62,6 @@ list(
     -Wno-error=unused-command-line-argument # Disable error for unused command line arguments
     -Wswitch-default # Warn if a switch statement does not have a default case
 )
-
-# Treat warnings as errors on non-Windows platforms.
-# On Windows, hipBLASLt upstream headers (hipblaslt_e5m3.h / hipblaslt_e8.h) trigger
-# an ambiguous operator<< diagnostic that is normally suppressed for -isystem headers
-# but surfaces when -Werror promotes it to an error.
-# See: https://github.com/ROCm/rocm-libraries/issues/6404
-if(NOT WIN32)
-    list(PREPEND HIPDNN_WARNING_COMPILE_OPTIONS -Werror)
-endif()
-
-# On Windows, hipBLASLt upstream headers define operator<<(ostream&, hipblaslt_e5m3)
-# and operator<<(ostream&, hipblaslt_e8) in namespace std with implicit float
-# conversions, causing an ambiguous overload error when the operator bodies are parsed.
-# hipBLASLt's own tests avoid this because they compile with hip::device (HIP mode),
-# which auto-adds -fdelayed-template-parsing via the MSVC ABI target. The
-# hipblaslt-provider uses hip::host (plain C++), so we add the flag explicitly.
-# See: https://github.com/ROCm/rocm-libraries/issues/6404
-if(WIN32)
-    list(APPEND HIPDNN_WARNING_COMPILE_OPTIONS -fdelayed-template-parsing)
-endif()
 
 # NOTE: Workaround until llvm & hip cmake modules fixes symlink logic in their config files;
 # remove when fixed. Added to prevent issues with not finding hip cmake.
@@ -137,7 +118,11 @@ add_library(
     HipblasltMatrixLayout.cpp
 )
 target_include_directories(hipblaslt_plugin_private PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(hipblaslt_plugin_private PUBLIC roc::hipblaslt hipdnn_data_sdk hipdnn_plugin_sdk hip::host)
+# Use hip::device to match hipBLASLt's own build configuration on Windows.
+# hip::host triggers a hard ambiguous operator<< error in upstream hipBLASLt
+# headers (hipblaslt_e5m3.h / hipblaslt_e8.h) due to missing MSVC ABI flags.
+# See: https://github.com/ROCm/rocm-libraries/issues/6404
+target_link_libraries(hipblaslt_plugin_private PUBLIC roc::hipblaslt hipdnn_data_sdk hipdnn_plugin_sdk hip::device)
 
 target_compile_options(hipblaslt_plugin_private PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
 
