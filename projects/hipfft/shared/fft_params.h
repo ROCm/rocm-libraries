@@ -2306,6 +2306,14 @@ public:
                 }
                 else
                 {
+                    // add footprint of each brick to its device
+                    for(const auto& field : fields)
+                    {
+                        for(const auto& brick : field.bricks)
+                        {
+                            sizes[brick.device] += compute_ptrdiff(brick.length(), brick.stride);
+                        }
+                    }
                 }
             };
             add_field(ifields, ibuffer_sizes());

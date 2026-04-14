@@ -693,8 +693,8 @@ int main(int argc, char* argv[])
         if(!vram_fits_problem(total_vram_footprint, vram_avail))
         {
             std::cout << "SKIPPED: Problem size (" << byte_sizes_to_str(total_vram_footprint)
-                      << " + " << byte_sizes_to_str(max_wbuffer_sizes) << " = "
-                      << byte_sizes_to_str(io_vram_footprint) + byte_sizes_to_str(max_wbuffer_sizes)
+                      << " = " << byte_sizes_to_str(io_vram_footprint) << " + "
+                      << byte_sizes_to_str(max_wbuffer_sizes)
                       << ") exceeds usable memory on device (" << byte_sizes_to_str(vram_avail)
                       << ")";
             return EXIT_SUCCESS;

@@ -329,7 +329,7 @@ public:
         // default behavior is to feed rocfft with a work area if it needs one
         bool need_workbuffers = std::any_of(
             workbuffersizes.begin(), workbuffersizes.end(), [](size_t s) { return s > 0; });
-        if(need_workbuffers > 0 && auto_allocate != fft_auto_allocation_on)
+        if(need_workbuffers && auto_allocate != fft_auto_allocation_on)
         {
             int ndevices = rocfft_scoped_device::device_count();
             for(int device = 0; device < ndevices; ++device)
@@ -343,17 +343,7 @@ public:
                     std::ostringstream oss;
                     oss << "work buffer allocation failed ("
                         << byte_size_to_str(workbuffersizes[device]) << " requested)";
-                    size_t mem_free  = 0;
-                    size_t mem_total = 0;
-                    hip_status       = hipMemGetInfo(&mem_free, &mem_total);
-                    if(hip_status == hipSuccess)
-                    {
-                        oss << "free vram: " << mem_free << " total vram: " << mem_total;
-                    }
-                    else
-                    {
-                        oss << "hipMemGetInfo also failed";
-                    }
+                    oss << "\n" << device_memory_accountant::singleton().get_details(device);
                     throw work_buffer_alloc_failure(oss.str(), workbuffersizes[device]);
                 }
 
