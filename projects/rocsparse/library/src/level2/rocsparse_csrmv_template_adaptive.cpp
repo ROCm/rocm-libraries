@@ -385,7 +385,6 @@ rocsparse_status
 
         // Wait for host transfer to finish
         RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(stream));
-        std::cout << "stream! " << std::endl;
         // Determine row blocks array size
         ComputeRowBlocks<I, J>((I*)NULL,
                                (J*)NULL,
