@@ -365,8 +365,7 @@ void PerformanceConfigHipImplicitGemm3DGroupFwdXdlops::HeuristicInit(
     {
         HeuristicInitState state(valid_kernels, index, split_k, kernel_id);
 
-        bool mode_use_tf32 =
-            (problem.GetInDataType() == miopenFloat) && problem.UseTF32();
+        bool mode_use_tf32 = (problem.GetInDataType() == miopenFloat) && problem.UseTF32();
 
         auto fill_valid_kernels = [&loader](const ProblemDescription& p, bool use_tf32) {
             return loader.FillValidKernels(
@@ -374,8 +373,15 @@ void PerformanceConfigHipImplicitGemm3DGroupFwdXdlops::HeuristicInit(
         };
 
         // Note: No KTN runner needed for 3D (supports_ktn = false)
-        if(RunAIHeuristics(k3DFwdSolverConfig, state, ctx, problem, false,
-                           fill_valid_kernels, nullptr, nullptr, mode_use_tf32))
+        if(RunAIHeuristics(k3DFwdSolverConfig,
+                           state,
+                           ctx,
+                           problem,
+                           false,
+                           fill_valid_kernels,
+                           nullptr,
+                           nullptr,
+                           mode_use_tf32))
         {
             return;
         }

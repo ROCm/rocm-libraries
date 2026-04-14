@@ -163,13 +163,12 @@ void PerformanceConfigHipImplicitGemm3DGroupBwdXdlops::HeuristicInit(
     if(!loader.IsLoaded())
         return;
 
-    // AI heuristics (if enabled)
+        // AI heuristics (if enabled)
 #if MIOPEN_ENABLE_AI_KERNEL_TUNING
     if(&ctx != &GetDummyCtx() &&
        !env::disabled(MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_BWD_XDLOPS_AI_HEUR))
     {
-        bool mode_use_tf32 =
-            (problem.GetInDataType() == miopenFloat) && problem.UseTF32();
+        bool mode_use_tf32 = (problem.GetInDataType() == miopenFloat) && problem.UseTF32();
 
         auto fill_valid_kernels = [&loader](const ProblemDescription& p, bool use_tf32) {
             return loader.FillValidKernels(
@@ -177,8 +176,15 @@ void PerformanceConfigHipImplicitGemm3DGroupBwdXdlops::HeuristicInit(
         };
 
         // Note: No KTN runner needed for 3D (supports_ktn = false)
-        if(RunAIHeuristics(k3DBwdSolverConfig, state, ctx, problem, false,
-                           fill_valid_kernels, nullptr, nullptr, mode_use_tf32))
+        if(RunAIHeuristics(k3DBwdSolverConfig,
+                           state,
+                           ctx,
+                           problem,
+                           false,
+                           fill_valid_kernels,
+                           nullptr,
+                           nullptr,
+                           mode_use_tf32))
         {
             return;
         }

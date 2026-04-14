@@ -70,7 +70,8 @@ constexpr SolverHeuristicConfig k2DFwdSolverConfig = {
 } // namespace
 
 #if MIOPEN_ENABLE_AI_KERNEL_TUNING
-void PerformanceConfigHipImplicitGemmGroupFwdXdlops::InitHeuristicKernelIDsKTN(const std::string& type)
+void PerformanceConfigHipImplicitGemmGroupFwdXdlops::InitHeuristicKernelIDsKTN(
+    const std::string& type)
 {
     for(int i = 0; i < valid_kernels.size(); i++)
     {
@@ -83,8 +84,8 @@ void PerformanceConfigHipImplicitGemmGroupFwdXdlops::InitHeuristicKernelIDsKTN(c
 }
 
 bool PerformanceConfigHipImplicitGemmGroupFwdXdlops::ModelApplyTokenKTN(int idx,
-                                                                     std::string value,
-                                                                     const std::string& arch)
+                                                                        std::string value,
+                                                                        const std::string& arch)
 {
     if(arch == "gfx90a")
     {
@@ -189,9 +190,10 @@ bool PerformanceConfigHipImplicitGemmGroupFwdXdlops::RunParameterPredictionModel
     const auto arch = ctx.GetStream().GetDeviceName();
     if(arch == "gfx90a")
         InitHeuristicKernelIDsKTN("DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle");
-    const std::string solver    = k2DFwdSolverConfig.GetSolverNameForArch(arch);
-    std::vector<float> features = GetFeaturesKTN(problem, ctx.GetStream().GetMaxComputeUnits(), arch);
-    bool transform              = (arch == "gfx90a") ? false : true;
+    const std::string solver = k2DFwdSolverConfig.GetSolverNameForArch(arch);
+    std::vector<float> features =
+        GetFeaturesKTN(problem, ctx.GetStream().GetMaxComputeUnits(), arch);
+    bool transform = (arch == "gfx90a") ? false : true;
     if(ai::tuning::ModelSetParams(arch,
                                   solver,
                                   problem.GetDirection(),
@@ -327,13 +329,12 @@ void PerformanceConfigHipImplicitGemmGroupFwdXdlops::HeuristicInit(
     if(!loader.IsLoaded())
         return;
 
-    // AI heuristics (if enabled)
+        // AI heuristics (if enabled)
 #if MIOPEN_ENABLE_AI_KERNEL_TUNING
     if(&ctx != &GetDummyCtx() &&
        !env::disabled(MIOPEN_DEBUG_GROUP_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS_AI_HEUR))
     {
-        bool mode_use_tf32 =
-            (problem.GetInDataType() == miopenFloat) && problem.UseTF32();
+        bool mode_use_tf32 = (problem.GetInDataType() == miopenFloat) && problem.UseTF32();
 
         auto fill_valid_kernels = [&loader](const ProblemDescription& p, bool use_tf32) {
             return loader.FillValidKernels(
@@ -344,8 +345,15 @@ void PerformanceConfigHipImplicitGemmGroupFwdXdlops::HeuristicInit(
             return RunKTNGeneric(*this, c, p);
         };
 
-        if(RunAIHeuristics(k2DFwdSolverConfig, state, ctx, problem, false,
-                           fill_valid_kernels, ktn_runner, nullptr, mode_use_tf32))
+        if(RunAIHeuristics(k2DFwdSolverConfig,
+                           state,
+                           ctx,
+                           problem,
+                           false,
+                           fill_valid_kernels,
+                           ktn_runner,
+                           nullptr,
+                           mode_use_tf32))
         {
             return;
         }

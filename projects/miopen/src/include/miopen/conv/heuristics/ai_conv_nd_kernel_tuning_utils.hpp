@@ -336,8 +336,7 @@ bool RunKTNGeneric(ConfigType& config,
     case miopenFloat: return config.template RunParameterPredictionModelKTN<float>(ctx, problem);
     case miopenBFloat16:
         return config.template RunParameterPredictionModelKTN<BFloat16Tag>(ctx, problem);
-    case miopenHalf:
-        return config.template RunParameterPredictionModelKTN<HalfTag>(ctx, problem);
+    case miopenHalf: return config.template RunParameterPredictionModelKTN<HalfTag>(ctx, problem);
     default: return false;
     }
 }
@@ -410,12 +409,13 @@ bool RunAIHeuristics(const SolverHeuristicConfig& solver_cfg,
     const std::string& arch = ctx.GetStream().GetDeviceName();
 
     MIOPEN_LOG_I2(solver_cfg.solver_name << ": RunAIHeuristics on " << arch
-                  << " (use_tf32=" << std::boolalpha << use_tf32 << ")");
+                                         << " (use_tf32=" << std::boolalpha << use_tf32 << ")");
 
     // Only applicable for supported architectures
     if(arch != "gfx90a" && arch != "gfx942" && arch != "gfx950")
     {
-        MIOPEN_LOG_I2(solver_cfg.solver_name << ": Unsupported architecture, skipping AI heuristics");
+        MIOPEN_LOG_I2(solver_cfg.solver_name
+                      << ": Unsupported architecture, skipping AI heuristics");
         return false;
     }
 
@@ -428,14 +428,15 @@ bool RunAIHeuristics(const SolverHeuristicConfig& solver_cfg,
         // Fill valid kernels with TF32 fallback support
         // If use_tf32 is true, first try with TF32; if no kernels, retry without TF32
         state.valid_kernels = fill_valid_kernels(problem, use_tf32);
-        
+
         if(state.valid_kernels.empty() && use_tf32)
         {
             // TF32 fallback: retry without TF32
-            MIOPEN_LOG_I2(solver_cfg.solver_name << ": TF32 yielded no kernels, retrying without TF32");
+            MIOPEN_LOG_I2(solver_cfg.solver_name
+                          << ": TF32 yielded no kernels, retrying without TF32");
             state.valid_kernels = fill_valid_kernels(problem, false);
         }
-        
+
         if(state.valid_kernels.empty())
         {
             MIOPEN_LOG_I(solver_cfg.solver_name << ": No valid kernels found");
@@ -496,12 +497,14 @@ bool RunAIHeuristics(const SolverHeuristicConfig& solver_cfg,
                 if(best_index >= 0 && best_index < static_cast<int>(state.valid_kernels.size()))
                 {
                     state.SetResult(best_index, best_split_k, use_split_k);
-                    MIOPEN_LOG_I(solver_cfg.solver_name << ": Candidate Selection selected: " << state.kernel_id);
+                    MIOPEN_LOG_I(solver_cfg.solver_name << ": Candidate Selection selected: "
+                                                        << state.kernel_id);
                     return true;
                 }
             }
 
-            MIOPEN_LOG_I(solver_cfg.solver_name << ": AI prediction returned no valid candidates, falling back");
+            MIOPEN_LOG_I(solver_cfg.solver_name
+                         << ": AI prediction returned no valid candidates, falling back");
         }
         catch(const miopen::Exception& ex)
         {
@@ -526,7 +529,8 @@ bool RunAIHeuristics(const SolverHeuristicConfig& solver_cfg,
                 // Enforce split_k == 1 for deterministic mode
                 if(is_deterministic && solver_cfg.uses_split_k && state.split_k != 1)
                 {
-                    MIOPEN_LOG_I(solver_cfg.solver_name << ": Deterministic mode: Overriding KTN-predicted split_k="
+                    MIOPEN_LOG_I(solver_cfg.solver_name
+                                 << ": Deterministic mode: Overriding KTN-predicted split_k="
                                  << state.split_k << " to split_k=1");
                     state.split_k = 1;
                     if(!state.valid_kernels.empty())

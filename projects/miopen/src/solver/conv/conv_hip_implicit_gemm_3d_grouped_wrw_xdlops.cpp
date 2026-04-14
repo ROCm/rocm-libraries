@@ -53,7 +53,6 @@ namespace conv {
 
 using ProblemDescription = miopen::conv::ProblemDescription;
 
-
 void PerformanceConfigHipImplicitGemm3DGroupWrwXdlops::InitValidKernels(
     const ::miopen::conv::ProblemDescription& problem)
 {
@@ -188,8 +187,7 @@ void PerformanceConfigHipImplicitGemm3DGroupWrwXdlops::HeuristicInit(
     if(&ctx != &GetDummyCtx() &&
        !env::disabled(MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_WRW_XDLOPS_AI_HEUR))
     {
-        bool mode_use_tf32 =
-            (problem.GetInDataType() == miopenFloat) && problem.UseTF32();
+        bool mode_use_tf32 = (problem.GetInDataType() == miopenFloat) && problem.UseTF32();
 
         auto fill_valid_kernels = [&loader](const ProblemDescription& p, bool use_tf32) {
             return loader.FillValidKernels(
@@ -197,8 +195,15 @@ void PerformanceConfigHipImplicitGemm3DGroupWrwXdlops::HeuristicInit(
         };
 
         // Note: No KTN runner needed for 3D (supports_ktn = false)
-        if(RunAIHeuristics(k3DWrwSolverConfig, state, ctx, problem, is_deterministic,
-                           fill_valid_kernels, nullptr, nullptr, mode_use_tf32))
+        if(RunAIHeuristics(k3DWrwSolverConfig,
+                           state,
+                           ctx,
+                           problem,
+                           is_deterministic,
+                           fill_valid_kernels,
+                           nullptr,
+                           nullptr,
+                           mode_use_tf32))
         {
             return;
         }

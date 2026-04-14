@@ -71,7 +71,8 @@ constexpr SolverHeuristicConfig k2DWrwSolverConfig = {
 } // namespace
 
 #if MIOPEN_ENABLE_AI_KERNEL_TUNING
-void PerformanceConfigHipImplicitGemmGroupWrwXdlops::InitHeuristicKernelIDsKTN(const std::string& type)
+void PerformanceConfigHipImplicitGemmGroupWrwXdlops::InitHeuristicKernelIDsKTN(
+    const std::string& type)
 {
     for(int i = 0; i < valid_kernels.size(); i++)
     {
@@ -219,7 +220,7 @@ bool PerformanceConfigHipImplicitGemmGroupWrwXdlops::RunParameterPredictionModel
     const auto arch = ctx.GetStream().GetDeviceName();
     if(arch == "gfx90a")
         InitHeuristicKernelIDsKTN("DeviceGroupedConvBwdWeight_Xdl_CShuffle");
-    const std::string solver = k2DWrwSolverConfig.GetSolverNameForArch(arch);
+    const std::string solver    = k2DWrwSolverConfig.GetSolverNameForArch(arch);
     std::vector<float> features = GetFeaturesKTN(problem, arch);
     if(ai::tuning::ModelSetParams(
            arch, solver, problem.GetDirection(), features, true, [&](int idx, std::string value) {
@@ -352,8 +353,7 @@ void PerformanceConfigHipImplicitGemmGroupWrwXdlops::HeuristicInit(
     if(&ctx != &GetDummyCtx() &&
        !env::disabled(MIOPEN_DEBUG_GROUP_CONV_IMPLICIT_GEMM_HIP_WRW_XDLOPS_AI_HEUR))
     {
-        bool mode_use_tf32 =
-            (problem.GetInDataType() == miopenFloat) && problem.UseTF32();
+        bool mode_use_tf32 = (problem.GetInDataType() == miopenFloat) && problem.UseTF32();
 
         auto fill_valid_kernels = [&loader](const ProblemDescription& p, bool try_tf32) {
             return loader.FillValidKernels(
@@ -364,8 +364,15 @@ void PerformanceConfigHipImplicitGemmGroupWrwXdlops::HeuristicInit(
             return RunKTNGeneric(*this, c, p);
         };
 
-        if(RunAIHeuristics(k2DWrwSolverConfig, state, ctx, problem, is_deterministic,
-                           fill_valid_kernels, ktn_runner, nullptr, mode_use_tf32))
+        if(RunAIHeuristics(k2DWrwSolverConfig,
+                           state,
+                           ctx,
+                           problem,
+                           is_deterministic,
+                           fill_valid_kernels,
+                           ktn_runner,
+                           nullptr,
+                           mode_use_tf32))
         {
             return;
         }

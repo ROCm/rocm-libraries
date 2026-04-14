@@ -191,9 +191,10 @@ bool PerformanceConfigHipImplicitGemmGroupBwdXdlops::RunParameterPredictionModel
         return false;
 
     InitHeuristicKernelIDsKTN();
-    const auto arch    = ctx.GetStream().GetDeviceName();
+    const auto arch          = ctx.GetStream().GetDeviceName();
     const std::string solver = k2DBwdSolverConfig.GetSolverNameForArch(arch);
-    std::vector<float> features = GetFeaturesKTN(problem, ctx.GetStream().GetMaxComputeUnits(), arch);
+    std::vector<float> features =
+        GetFeaturesKTN(problem, ctx.GetStream().GetMaxComputeUnits(), arch);
     if(ai::tuning::ModelSetParams(
            arch, solver, problem.GetDirection(), features, true, [&](int idx, std::string value) {
                return this->ModelApplyTokenKTN(idx, value, arch, problem);
@@ -318,8 +319,7 @@ void PerformanceConfigHipImplicitGemmGroupBwdXdlops::HeuristicInit(
     if(&ctx != &GetDummyCtx() &&
        !env::disabled(MIOPEN_DEBUG_GROUP_CONV_IMPLICIT_GEMM_HIP_BWD_XDLOPS_AI_HEUR))
     {
-        bool mode_use_tf32 =
-            (problem.GetInDataType() == miopenFloat) && problem.UseTF32();
+        bool mode_use_tf32 = (problem.GetInDataType() == miopenFloat) && problem.UseTF32();
 
         auto fill_valid_kernels = [&loader](const ProblemDescription& p, bool use_tf32) {
             return loader.FillValidKernels(
@@ -330,8 +330,15 @@ void PerformanceConfigHipImplicitGemmGroupBwdXdlops::HeuristicInit(
             return RunKTNGeneric(*this, c, p);
         };
 
-        if(RunAIHeuristics(k2DBwdSolverConfig, state, ctx, problem, is_deterministic,
-                           fill_valid_kernels, ktn_runner, nullptr, mode_use_tf32))
+        if(RunAIHeuristics(k2DBwdSolverConfig,
+                           state,
+                           ctx,
+                           problem,
+                           is_deterministic,
+                           fill_valid_kernels,
+                           ktn_runner,
+                           nullptr,
+                           mode_use_tf32))
         {
             return;
         }
