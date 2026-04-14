@@ -23,24 +23,24 @@ namespace ck_tile {
 struct SsdHostArgs
 {
     // Pointers
-    const void* p_x;        // [B, EH, D, C, L]
-    const void* p_delta_a;  // [B, EH, C, L]
-    const void* p_delta;    // [B, EH, C, L]
-    const void* p_b_mat;    // [B, G, N, C, L]
-    const void* p_c_mat;    // [B, G, N, C, L]
-    const void* p_d_param;  // [EH, D]
-    const void* p_z;        // [B, EH, D, C, L] or nullptr
-    void* p_y;              // [B, EH, D, C, L]
-    void* p_fstate;         // [B, EH, D, N]
+    const void* p_x;       // [B, EH, D, C, L]
+    const void* p_delta_a; // [B, EH, C, L]
+    const void* p_delta;   // [B, EH, C, L]
+    const void* p_b_mat;   // [B, G, N, C, L]
+    const void* p_c_mat;   // [B, G, N, C, L]
+    const void* p_d_param; // [EH, D]
+    const void* p_z;       // [B, EH, D, C, L] or nullptr
+    void* p_y;             // [B, EH, D, C, L]
+    void* p_fstate;        // [B, EH, D, N]
 
     // Problem sizes
-    index_t batch;      // B
-    index_t groups;     // G
-    index_t exp_heads;  // EH = E * H
-    index_t chunks;     // C
-    index_t chunk_len;  // L
-    index_t head_dim;   // D
-    index_t state_dim;  // N
+    index_t batch;     // B
+    index_t groups;    // G
+    index_t exp_heads; // EH = E * H
+    index_t chunks;    // C
+    index_t chunk_len; // L
+    index_t head_dim;  // D
+    index_t state_dim; // N
 
     // Derived
     CK_TILE_HOST index_t grp_ratio() const { return exp_heads / groups; }
