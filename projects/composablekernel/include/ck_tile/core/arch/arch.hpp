@@ -182,13 +182,13 @@ static constexpr auto make_amdgcn_gfx12_target()
 }
 
 // SPIR-V target: target-agnostic, JIT-compiled to native at runtime.
-// Defaults to WAVE64 (conservative); runtime dispatch needed for wave32 devices.
+// Defaults to WAVE32 (conservative minimum across all supported targets).
 static constexpr auto make_amdgcn_spirv_target()
 {
     return amdgcn_target<amdgcn_target_id::AMDGCN_SPIRV,
                          amdgcn_target_family_id::HOST,
                          amdgcn_target_arch_id::HOST,
-                         amdgcn_target_wave_size_id::WAVE64>{};
+                         amdgcn_target_wave_size_id::WAVE32>{};
 }
 
 template <typename CompilerTarget, amdgcn_target_id... TargetIds>

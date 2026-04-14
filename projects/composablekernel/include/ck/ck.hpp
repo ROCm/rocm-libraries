@@ -85,8 +85,19 @@
 #define CK_BUFFER_RESOURCE_3RD_DWORD 0x31014000
 #elif defined(__gfx11__) || defined(__gfx12__)
 #define CK_BUFFER_RESOURCE_3RD_DWORD 0x31004000
-#elif defined(__SPIRV__) // SPIR-V: safe default (gfx9-like), JIT will resolve at runtime
-#define CK_BUFFER_RESOURCE_3RD_DWORD 0x00020000
+#elif defined(__SPIRV__) // SPIR-V: dynamically select via ZCFS at runtime
+#define CK_BUFFER_RESOURCE_3RD_DWORD                                                             \
+    ((__builtin_amdgcn_processor_is("gfx1100") || __builtin_amdgcn_processor_is("gfx1101") ||    \
+      __builtin_amdgcn_processor_is("gfx1102") || __builtin_amdgcn_processor_is("gfx1103") ||    \
+      __builtin_amdgcn_processor_is("gfx1150") || __builtin_amdgcn_processor_is("gfx1151") ||    \
+      __builtin_amdgcn_processor_is("gfx1152") || __builtin_amdgcn_processor_is("gfx1153") ||    \
+      __builtin_amdgcn_processor_is("gfx1200") || __builtin_amdgcn_processor_is("gfx1201"))      \
+         ? 0x31004000                                                                             \
+     : ((__builtin_amdgcn_processor_is("gfx1030") || __builtin_amdgcn_processor_is("gfx1031") || \
+         __builtin_amdgcn_processor_is("gfx1032") || __builtin_amdgcn_processor_is("gfx1034") || \
+         __builtin_amdgcn_processor_is("gfx1035") || __builtin_amdgcn_processor_is("gfx1036"))   \
+            ? 0x31014000                                                                          \
+            : 0x00020000))
 #else
 #define CK_BUFFER_RESOURCE_3RD_DWORD -1 // Unknown device
 #endif
@@ -104,8 +115,6 @@
 #define CK_USE_AMD_V_FMAC_F32
 #define CK_USE_AMD_V_DOT2_F32_F16
 #define CK_USE_AMD_V_DOT4_I32_I8_GFX11
-#elif defined(__SPIRV__) // SPIR-V: conservative FMA support, JIT resolves at runtime
-#define CK_USE_AMD_V_FMAC_F32
 #endif
 
 // MFMA instruction
@@ -135,7 +144,7 @@
 // buffer atomic add: floating point
 #ifndef __HIP_DEVICE_COMPILE__ // for host code
 #define CK_USE_AMD_BUFFER_ATOMIC_ADD_FLOAT 1
-#elif defined(__gfx9__) || defined(__gfx12__) || defined(__SPIRV__) // for GPU code
+#elif defined(__gfx9__) || defined(__gfx12__) // for GPU code
 #define CK_USE_AMD_BUFFER_ATOMIC_ADD_FLOAT 1
 #else // for GPU code
 #define CK_USE_AMD_BUFFER_ATOMIC_ADD_FLOAT 0
@@ -275,7 +284,7 @@
 
 namespace ck {
 
-#if defined(__GFX9__) || !defined(__HIP_DEVICE_COMPILE__) || defined(__SPIRV__)
+#if defined(__GFX9__) || !defined(__HIP_DEVICE_COMPILE__)
 __device__ static constexpr int WarpSize = 64;
 #else
 __device__ static constexpr int WarpSize = 32;
