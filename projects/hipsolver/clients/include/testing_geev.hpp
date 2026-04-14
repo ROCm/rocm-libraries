@@ -52,6 +52,15 @@ void print_array(T* array, int nrows, int ncols, int ld, std::string str = "arra
 
 #include "clientcommon.hpp"
 
+#if !defined(__HIP_PLATFORM_HCC__) && !defined(__HIP_PLATFORM_AMD__)
+static bool test_left_eigenvectors
+    = false; // Computing left eigenvectors is not supported in cuSOLVER.
+#else
+static bool test_left_eigenvectors
+    = std::getenv("HIPSOLVER_TEST_GEEV_LEFT_EIGENVECTORS") != nullptr ? true : false;
+#endif
+static bool test_right_eigenvectors = true;
+
 template <testAPI_t API, typename I, typename SIZE, typename Td, typename INTd, typename Th>
 void geev_checkBadArgs(const hipsolverHandle_t   handle,
                        const hipsolverDnParams_t params,
@@ -401,21 +410,21 @@ void testing_geev_bad_arg()
         CHECK_HIP_ERROR(dInfo.memcheck());
 
         SIZE size_dW, size_hW;
-        hipsolver_geev_bufferSize(API,
-                                  handle,
-                                  params,
-                                  jobvl,
-                                  jobvr,
-                                  n,
-                                  dA.data(),
-                                  lda,
-                                  dW.data(),
-                                  dVL.data(),
-                                  ldvl,
-                                  dVR.data(),
-                                  ldvr,
-                                  &size_dW,
-                                  &size_hW);
+        CHECK_ROCBLAS_ERROR(hipsolver_geev_bufferSize(API,
+                                                      handle,
+                                                      params,
+                                                      jobvl,
+                                                      jobvr,
+                                                      n,
+                                                      dA.data(),
+                                                      lda,
+                                                      dW.data(),
+                                                      dVL.data(),
+                                                      ldvl,
+                                                      dVR.data(),
+                                                      ldvr,
+                                                      &size_dW,
+                                                      &size_hW));
         host_strided_batch_vector<T>   hWork(size_hW, 1, size_hW, 1);
         device_strided_batch_vector<T> dWork(size_dW, 1, size_dW, 1);
         if(size_dW)
@@ -558,14 +567,16 @@ void geev_getError(const hipsolverHandle_t   handle,
         std::conditional_t<std::is_same_v<T, double>, hipsolverDoubleComplex, T>>;
 
     // Initialize variables used in 2nd run.
-    bool               vl_2nd_run    = false;
-    bool               vr_2nd_run    = true;
-    hipsolverEigMode_t jobvl_2nd_run = HIPSOLVER_EIG_MODE_NOVECTOR;
-    hipsolverEigMode_t jobvr_2nd_run = HIPSOLVER_EIG_MODE_VECTOR;
-    I                  ldvl_2nd_run  = n;
-    I                  ldvr_2nd_run  = n;
-    I                  ldvl_{ldvl};
-    I                  ldvr_{ldvr};
+    bool               vl_2nd_run = test_left_eigenvectors;
+    bool               vr_2nd_run = test_right_eigenvectors;
+    hipsolverEigMode_t jobvl_2nd_run
+        = test_left_eigenvectors ? HIPSOLVER_EIG_MODE_VECTOR : HIPSOLVER_EIG_MODE_NOVECTOR;
+    hipsolverEigMode_t jobvr_2nd_run
+        = test_right_eigenvectors ? HIPSOLVER_EIG_MODE_VECTOR : HIPSOLVER_EIG_MODE_NOVECTOR;
+    I ldvl_2nd_run = n;
+    I ldvr_2nd_run = n;
+    I ldvl_{ldvl};
+    I ldvr_{ldvr};
 
     // input data initialization
     geev_initData<true, true, T>(handle, params, n, dA, lda, hA);
@@ -713,31 +724,49 @@ void geev_getError(const hipsolverHandle_t   handle,
 
                 if(imag_wij > 0)
                 {
-                    vij               = {VRij(i, j), VRij(i, j + 1)};
-                    VR[i + j * ldvr_] = vij;
-                    /* std::cout << "vij+ = " << vij << std::endl; */
+                    if(test_right_eigenvectors)
+                    {
+                        vij               = {VRij(i, j), VRij(i, j + 1)};
+                        VR[i + j * ldvr_] = vij;
+                        /* std::cout << "vij+ = " << vij << std::endl; */
+                    }
 
-                    lij               = {VLij(i, j), VLij(i, j + 1)};
-                    VL[i + j * ldvl_] = lij;
-                    /* std::cout << "lij+ = " << lij << std::endl; */
+                    if(test_left_eigenvectors)
+                    {
+                        lij               = {VLij(i, j), VLij(i, j + 1)};
+                        VL[i + j * ldvl_] = lij;
+                        /* std::cout << "lij+ = " << lij << std::endl; */
+                    }
                 }
                 else if(imag_wij < 0)
                 {
-                    vij               = {VRij(i, j - 1), -VRij(i, j)};
-                    VR[i + j * ldvr_] = vij;
-                    /* std::cout << "vij- = " << vij << std::endl; */
+                    if(test_right_eigenvectors)
+                    {
+                        vij               = {VRij(i, j - 1), -VRij(i, j)};
+                        VR[i + j * ldvr_] = vij;
+                        /* std::cout << "vij- = " << vij << std::endl; */
+                    }
 
-                    lij               = {VLij(i, j - 1), -VLij(i, j)};
-                    VL[i + j * ldvl_] = lij;
-                    /* std::cout << "lij- = " << lij << std::endl; */
+                    if(test_left_eigenvectors)
+                    {
+                        lij               = {VLij(i, j - 1), -VLij(i, j)};
+                        VL[i + j * ldvl_] = lij;
+                        /* std::cout << "lij- = " << lij << std::endl; */
+                    }
                 }
                 else
                 {
-                    vij               = {VRij(i, j), 0};
-                    VR[i + j * ldvr_] = vij;
+                    if(test_right_eigenvectors)
+                    {
+                        vij               = {VRij(i, j), 0};
+                        VR[i + j * ldvr_] = vij;
+                    }
 
-                    lij               = {VLij(i, j), 0};
-                    VL[i + j * ldvl_] = lij;
+                    if(test_left_eigenvectors)
+                    {
+                        lij               = {VLij(i, j), 0};
+                        VL[i + j * ldvl_] = lij;
+                    }
                 }
             }
         }
@@ -769,68 +798,66 @@ void geev_getError(const hipsolverHandle_t   handle,
 
     // 2a. If computing left eigenvectors: check if ||VL_i|| == 1, for 0 <= i < n, and if entry
     // with largest absolute value of VL is real.
-    if(jobvl != HIPSOLVER_EIG_MODE_NOVECTOR)
+    if(test_left_eigenvectors && (jobvl != HIPSOLVER_EIG_MODE_NOVECTOR))
     {
         for(int j = 0; j < n; ++j)
         {
-            auto VLij = [ld = ldvl_, V = VL](I i, I j) -> CT { return V[i + j * ld]; };
-            double norm = 0.;
+            auto   VLij    = [ld = ldvl_, V = VL](I i, I j) -> CT { return V[i + j * ld]; };
+            double norm    = 0.;
             double abs_max = 0.;
-            I imax = I(0);
+            I      imax    = I(0);
             for(int i = 0; i < n; ++i)
             {
                 auto vij = VLij(i, j);
                 norm += std::norm<double>({vij.real(), vij.imag()});
-                if (std::abs(VLij(i,j)) >= abs_max)
+                if(std::abs(VLij(i, j)) >= abs_max)
                 {
-                    imax = i;
-                    abs_max = std::abs(VLij(i,j));
+                    imax    = i;
+                    abs_max = std::abs(VLij(i, j));
                 }
             }
-            err = (std::sqrt(norm) - 1.)/normA;
+            err      = (std::sqrt(norm) - 1.) / normA;
             *max_err = *max_err < err ? err : *max_err;
 
-            if (std::abs(VLij(imax, j).imag()) > 0)
+            if(std::abs(VLij(imax, j).imag()) > 0)
             {
                 *max_err += 1.;
             }
         }
-
     }
 
     // 2b. If computing right eigenvectors: check if ||VR_i|| == 1, for 0 <= i < n, and if entry
     // with largest absolute value of VR is real.
-    if(jobvr != HIPSOLVER_EIG_MODE_NOVECTOR)
+    if(test_right_eigenvectors && (jobvr != HIPSOLVER_EIG_MODE_NOVECTOR))
     {
         for(int j = 0; j < n; ++j)
         {
-            auto VRij = [ld = ldvr_, V = VR](I i, I j) -> CT { return V[i + j * ld]; };
-            double norm = 0.;
+            auto   VRij    = [ld = ldvr_, V = VR](I i, I j) -> CT { return V[i + j * ld]; };
+            double norm    = 0.;
             double abs_max = 0.;
-            I imax = I(0);
+            I      imax    = I(0);
             for(int i = 0; i < n; ++i)
             {
                 auto vij = VRij(i, j);
                 norm += std::norm<double>({vij.real(), vij.imag()});
-                if (std::abs(VRij(i,j)) >= abs_max)
+                if(std::abs(VRij(i, j)) >= abs_max)
                 {
-                    imax = i;
-                    abs_max = std::abs(VRij(i,j));
+                    imax    = i;
+                    abs_max = std::abs(VRij(i, j));
                 }
             }
-            err = (std::sqrt(norm) - 1.)/normA;
+            err      = (std::sqrt(norm) - 1.) / normA;
             *max_err = *max_err < err ? err : *max_err;
 
-            if (std::abs(VRij(imax, j).imag()) > 0)
+            if(std::abs(VRij(imax, j).imag()) > 0)
             {
                 *max_err += 1.;
             }
         }
-
     }
 
     // 3a. Check reconstruction with right eigenvectors (VR): ||A*VR - VR*W||/|A|| <= n * eps
-    if(jobvr != HIPSOLVER_EIG_MODE_NOVECTOR)
+    if(test_right_eigenvectors && (jobvr != HIPSOLVER_EIG_MODE_NOVECTOR))
     {
         alpha = T(1);
         beta  = T(0);
@@ -841,13 +868,13 @@ void geev_getError(const hipsolverHandle_t   handle,
         cpu_gemm(HIPSOLVER_OP_N, HIPSOLVER_OP_N, n, n, n, alpha, VR, ldvr_, D, n, beta, Err, n);
 
         err = snorm('F', n, n, Err, n) / normA;
-        std::cout << "err (VR) = " << err << std::endl;
+        /* std::cout << "err (VR) = " << err << std::endl; */
 
         *max_err = *max_err < err ? err : *max_err;
     }
 
     // 3b. Check reconstruction with left eigenvectors (VL): ||A'*VL - VL*W||/||A|| <= n * eps
-    if(jobvl != HIPSOLVER_EIG_MODE_NOVECTOR)
+    if(test_left_eigenvectors && (jobvl != HIPSOLVER_EIG_MODE_NOVECTOR))
     {
         alpha = T(1);
         beta  = T(0);
@@ -858,7 +885,7 @@ void geev_getError(const hipsolverHandle_t   handle,
         cpu_gemm(HIPSOLVER_OP_N, HIPSOLVER_OP_N, n, n, n, alpha, VL, ldvl_, D, n, beta, Err, n);
 
         err = snorm('F', n, n, Err, n) / normA;
-        std::cout << "err (VL) = " << err << std::endl;
+        /* std::cout << "err (VL) = " << err << std::endl; */
 
         *max_err = *max_err < err ? err : *max_err;
     }
@@ -1048,21 +1075,22 @@ void testing_geev(Arguments& argus)
     //
     // Note: current test implementation requires the computation of left and right eigenvectors.
     SIZE size_dW, size_hW;
-    hipsolver_geev_bufferSize(API,
-                              handle,
-                              params,
-                              HIPSOLVER_EIG_MODE_VECTOR,
-                              HIPSOLVER_EIG_MODE_VECTOR,
-                              n,
-                              (T*)nullptr,
-                              lda,
-                              (T*)nullptr,
-                              (T*)nullptr,
-                              std::max(ldvl, n),
-                              (T*)nullptr,
-                              std::max(ldvr, n),
-                              &size_dW,
-                              &size_hW);
+    CHECK_ROCBLAS_ERROR(
+        hipsolver_geev_bufferSize(API,
+                                  handle,
+                                  params,
+                                  test_left_eigenvectors ? HIPSOLVER_EIG_MODE_VECTOR : jobvl,
+                                  test_right_eigenvectors ? HIPSOLVER_EIG_MODE_VECTOR : jobvr,
+                                  n,
+                                  (T*)nullptr,
+                                  lda,
+                                  (T*)nullptr,
+                                  (T*)nullptr,
+                                  std::max(ldvl, n),
+                                  (T*)nullptr,
+                                  std::max(ldvr, n),
+                                  &size_dW,
+                                  &size_hW));
 
     if(argus.mem_query)
     {
