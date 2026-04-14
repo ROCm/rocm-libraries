@@ -25,6 +25,15 @@
 # HIP dependency is handled earlier in the project cmake file
 # when VerifyCompiler.cmake is included.
 
+# Suppress ROCmChecks warnings for local toolchain modifications.
+set(ROCM_WARN_TOOLCHAIN_VAR OFF)
+
+# Force older versions of option() in googletest to respect the local variable setting.
+set(CMAKE_POLICY_DEFAULT_CMP0077 NEW)
+
+# Resolve Ninja generator errors regarding RPATH relinking during the install phase for merged subprojects.
+set(CMAKE_BUILD_WITH_INSTALL_RPATH ON)
+
 # This function checks to see if the download branch given by "branch" exists in the repository.
 # It does so using the git ls-remote command.
 # If the branch cannot be found, the variable described by "branch" is changed to "develop" in the host scope.

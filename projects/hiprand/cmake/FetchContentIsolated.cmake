@@ -28,11 +28,11 @@ include(CMakeParseArguments)
 function(fetch_content_isolated proj_name)
   cmake_parse_arguments(FC_ISO "" "" "CMAKE_ARGS" ${ARGN})
 
-  set(ROCM_WARN_TOOLCHAIN_VAR OFF)
-
-  # Force older versions of option() in googletest to respect the local variable setting.
-  set(CMAKE_POLICY_DEFAULT_CMP0077 NEW)
-  set(CMAKE_BUILD_WITH_INSTALL_RPATH ON)
+  if(COMMAND rocm_check_toolchain_var)
+    function(rocm_check_toolchain_var)
+      # Suppress ROCMChecks WARNING on third-party dependencies
+    endfunction()
+  endif()
 
   # Automatic Isolation
   # Safely remove `-Werror` and `-Werror=...` flags using regex.
@@ -47,7 +47,7 @@ function(fetch_content_isolated proj_name)
       endif()
   endforeach()
 
-  # Declare and make the project available. 
+  # Declare and make the project available.
   FetchContent_Declare(${proj_name} ${FC_ISO_UNPARSED_ARGUMENTS})
   FetchContent_MakeAvailable(${proj_name})
 

@@ -41,6 +41,15 @@ if(DEFINED BUILD_SHARED_LIBS)
 endif()
 set(USER_ROCM_WARN_TOOLCHAIN_VAR ${ROCM_WARN_TOOLCHAIN_VAR})
 
+# Suppress ROCmChecks warnings for local toolchain modifications.
+set(ROCM_WARN_TOOLCHAIN_VAR OFF)
+
+# Force older versions of option() in googletest to respect the local variable setting.
+set(CMAKE_POLICY_DEFAULT_CMP0077 NEW)
+
+# Resolve Ninja generator errors regarding RPATH relinking during the install phase for merged subprojects.
+set(CMAKE_BUILD_WITH_INSTALL_RPATH ON)
+
 set(ROCM_WARN_TOOLCHAIN_VAR OFF CACHE BOOL "")
 # Turn off warnings and errors for all warnings in dependencies
 separate_arguments(CXX_FLAGS_LIST NATIVE_COMMAND ${CMAKE_CXX_FLAGS})

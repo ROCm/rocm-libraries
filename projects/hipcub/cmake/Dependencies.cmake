@@ -44,14 +44,16 @@ if(DEFINED BUILD_SHARED_LIBS)
 endif()
 set(USER_ROCM_WARN_TOOLCHAIN_VAR ${ROCM_WARN_TOOLCHAIN_VAR})
 
+# Suppress ROCmChecks warnings for local toolchain modifications.
+set(ROCM_WARN_TOOLCHAIN_VAR OFF)
+
+# Force older versions of option() in googletest to respect the local variable setting.
+set(CMAKE_POLICY_DEFAULT_CMP0077 NEW)
+
+# Resolve Ninja generator errors regarding RPATH relinking during the install phase for merged subprojects.
+set(CMAKE_BUILD_WITH_INSTALL_RPATH ON)
+
 set(ROCM_WARN_TOOLCHAIN_VAR OFF CACHE BOOL "")
-# Suppress ROCMChecks WARNING on third-party dependencies
-set(_HIPCUB_DISABLE_ROCM_CHECKS FALSE)
-macro(rocm_check_toolchain_var var access value list_file)
-  if(NOT _HIPCUB_DISABLE_ROCM_CHECKS)
-    _rocm_check_toolchain_var("${var}" "${access}" "${value}" "${list_file}")
-  endif()
-endmacro()
 # Turn off warnings and errors for all warnings in dependencies
 separate_arguments(CXX_FLAGS_LIST NATIVE_COMMAND ${CMAKE_CXX_FLAGS})
 list(REMOVE_ITEM CXX_FLAGS_LIST /WX -Werror -Werror=pendantic -pedantic-errors)
@@ -353,7 +355,10 @@ if(USER_BUILD_BENCHMARK)
       googlebench
       GIT_REPOSITORY https://github.com/google/benchmark.git
       GIT_TAG        v${BENCHMARK_VERSION}
-      CMAKE_ARGS     -DBENCHMARK_ENABLE_TESTING=OFF -DBENCHMARK_ENABLE_INSTALL=OFF
+      CMAKE_ARGS     -DBENCHMARK_ENABLE_TESTING=OFF
+                     -DBENCHMARK_ENABLE_INSTALL=OFF
+                     -DHAVE_STD_REGEX=ON
+                     -DRUN_HAVE_STD_REGEX=1
     )
     if(NOT TARGET benchmark::benchmark)
       add_library(benchmark::benchmark ALIAS benchmark)

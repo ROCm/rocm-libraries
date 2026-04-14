@@ -12,6 +12,16 @@
 # For downloading, building, and installing required dependencies
 include(cmake/FetchContentIsolated.cmake)
 
+# Suppress ROCmChecks warnings for local toolchain modifications.
+set(ROCM_WARN_TOOLCHAIN_VAR OFF)
+
+# Force older versions of option() in googletest to respect the local variable setting.
+set(CMAKE_POLICY_DEFAULT_CMP0077 NEW)
+
+# Resolve Ninja generator errors regarding RPATH relinking during the install phase for
+# merged subprojects.
+set(CMAKE_BUILD_WITH_INSTALL_RPATH ON)
+
 # The option of using the SQLite provided by the system, instead of downloading a copy
 option( SQLITE_USE_SYSTEM_PACKAGE "Use SQLite3 from find_package" OFF )
 
@@ -372,6 +382,7 @@ if(BUILD_BENCHMARK)
                              -DRUN_HAVE_STD_REGEX=1)
 
     message(STATUS "Google Benchmark not found. Fetching...")
+
     fetch_content_isolated(
       googlebench
       GIT_REPOSITORY https://github.com/google/benchmark.git
