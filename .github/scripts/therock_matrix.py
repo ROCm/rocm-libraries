@@ -72,7 +72,7 @@ additional_options = {
     },
     "sparselt": {
         "cmake_options": ["-DTHEROCK_ENABLE_SPARSE=ON"],
-        "projects_to_test": ["hipsparselt", "hipsparse"],
+        "projects_to_test": ["hipsparselt"],
         "project_to_add": "blas",
     },
     "solver": {
