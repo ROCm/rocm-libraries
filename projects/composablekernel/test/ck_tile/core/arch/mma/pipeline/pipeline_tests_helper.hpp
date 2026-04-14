@@ -253,7 +253,8 @@ void run_pipeline_matrix_test_impl(
     uint32_t K,
     uint32_t waveSize,
     std::function<void(uint32_t waveSize, void* d_a, void* d_b, void* d_c)> kernelLaunch,
-    bool isSparse)
+    bool isSparse,
+    bool transposeExpected = false)
 {
     std::vector<AScalar> A_matrix(M * K);
     std::vector<BScalar> B_matrix(K * N);
@@ -310,7 +311,10 @@ void run_pipeline_matrix_test_impl(
     {
         for(uint32_t n = 0; n < N; ++n)
         {
-            float expected = static_cast<float>(C_expected[m * N + n]);
+            // When transposeExpected is true, the kernel computes C^T via SwapAB,
+            // so compare actual C[m][n] against reference C[n][m].
+            float expected = transposeExpected ? static_cast<float>(C_expected[n * M + m])
+                                               : static_cast<float>(C_expected[m * N + n]);
             float actual   = static_cast<float>(C_actual[m * N + n]);
             EXPECT_NEAR(actual, expected, std::abs(expected) * 1e-2f + 1e-3f)
                 << "Mismatch at C[" << m << "][" << n << "]";
@@ -333,6 +337,8 @@ void run_pipeline_matrix_test_impl(
 /// @param  shouldSkip      Predicate returning true if current device should skip
 /// @param  kernelLaunch    Callback that launches the GPU kernel: (waveSize, d_a, d_b, d_c)
 /// @param  isSparse        Whether to apply 2:4 sparsity pattern to A
+/// @param  transposeExpected When true, compare against transposed reference (for
+/// SwapAB/TransposeC)
 template <template <typename> class PipelineFactory,
           typename AScalar = fp16_t,
           typename BScalar = fp16_t,
@@ -343,7 +349,8 @@ void run_pipeline_matrix_test(
     uint32_t K,
     std::function<bool(ck_tile::core::arch::amdgcn_target_id)> shouldSkip,
     std::function<void(uint32_t waveSize, void* d_a, void* d_b, void* d_c)> kernelLaunch,
-    bool isSparse = false)
+    bool isSparse          = false,
+    bool transposeExpected = false)
 {
     int devCount;
     hipDevice_t dev;
@@ -372,7 +379,7 @@ void run_pipeline_matrix_test(
         using Pipeline       = typename PipelineFactory<CompilerTarget>::type;
 
         run_pipeline_matrix_test_impl<Pipeline, AScalar, BScalar, CScalar>(
-            M, N, K, waveSize, kernelLaunch, isSparse);
+            M, N, K, waveSize, kernelLaunch, isSparse, transposeExpected);
     });
 
     if(!dispatched)
