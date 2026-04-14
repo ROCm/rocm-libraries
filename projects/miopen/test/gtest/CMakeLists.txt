@@ -24,9 +24,6 @@ if(MIOPEN_BACKEND_HIP)
   list(APPEND SOURCES main_hip.cpp)
 endif()
 
-# Skip ternary_tensor_ops test (temporary)                                                                            
-list(APPEND SKIP_TESTS ternary_tensor_ops.cpp)
-
 if(MIOPEN_BACKEND_OPENCL)
   list(APPEND SKIP_TESTS dumpTensorTest.cpp)
 endif()
