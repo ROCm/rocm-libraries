@@ -1,0 +1,134 @@
+operation:
+  name: "BatchnormInference"
+  class_name: "BatchnormInferenceOperationDescriptor"
+  fbs_table: "BatchnormInferenceAttributes"
+  fbs_generated_header: "batchnorm_inference_attributes_generated.h"
+
+  descriptor_type:
+    enum_name: "HIPDNN_BACKEND_OPERATION_BATCHNORM_INFERENCE_DESCRIPTOR_EXT"
+
+  operation_attr_prefix: "HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE"
+
+  frontend:
+    packer_function: "createBatchnormInferenceOperation"
+    unpacker_function: "unpackBatchnormInferenceOperation"
+    node_class: "BatchnormInferenceNode"
+    attributes_class: "BatchnormInferenceAttributes"
+
+    inputs:
+      - name: "x"
+        enum_name: "X"
+        enum_value: 0
+        required: true
+        getter_name: "get_x"
+        setter_name: "set_x"
+      - name: "mean"
+        enum_name: "MEAN"
+        enum_value: 1
+        required: true
+        getter_name: "get_mean"
+        setter_name: "set_mean"
+      - name: "inv_variance"
+        enum_name: "INV_VARIANCE"
+        enum_value: 2
+        required: true
+        getter_name: "get_inv_variance"
+        setter_name: "set_inv_variance"
+      - name: "scale"
+        enum_name: "SCALE"
+        enum_value: 3
+        required: true
+        getter_name: "get_scale"
+        setter_name: "set_scale"
+      - name: "bias"
+        enum_name: "BIAS"
+        enum_value: 4
+        required: true
+        getter_name: "get_bias"
+        setter_name: "set_bias"
+    outputs:
+      - name: "y"
+        enum_name: "Y"
+        enum_value: 0
+        required: true
+        getter_name: "get_y"
+        setter_name: "set_y"
+    graph_method_name: "batchnorm_inference"
+    graph_method_params:
+      - name: "x"
+        tensor_name: "x"
+      - name: "mean"
+        tensor_name: "mean"
+      - name: "invVariance"
+        tensor_name: "inv_variance"
+      - name: "scale"
+        tensor_name: "scale"
+      - name: "bias"
+        tensor_name: "bias"
+    graph_return_type: "single"
+    graph_return_outputs:
+      - "y"
+    node_type_enum: "NodeType::BATCHNORM_INFERENCE"
+    node_attributes_union_type: "BatchnormInferenceAttributes"
+    compatibility_typedef: "Batchnorm_inference_attributes"
+
+  tensor_fields:
+    - name: "x"
+      fbs_field: "x_tensor_uid"
+      attr_suffix: "X_EXT"
+      required: true
+      frontend_getter: "get_x()"
+
+    - name: "mean"
+      fbs_field: "mean_tensor_uid"
+      attr_suffix: "MEAN_EXT"
+      required: true
+      frontend_getter: "get_mean()"
+
+    - name: "inv_variance"
+      fbs_field: "inv_variance_tensor_uid"
+      attr_suffix: "INV_VARIANCE_EXT"
+      required: true
+      frontend_getter: "get_inv_variance()"
+
+    - name: "scale"
+      fbs_field: "scale_tensor_uid"
+      attr_suffix: "SCALE_EXT"
+      required: true
+      frontend_getter: "get_scale()"
+
+    - name: "bias"
+      fbs_field: "bias_tensor_uid"
+      attr_suffix: "BIAS_EXT"
+      required: true
+      frontend_getter: "get_bias()"
+
+    - name: "y"
+      fbs_field: "y_tensor_uid"
+      attr_suffix: "Y_EXT"
+      required: true
+      frontend_getter: "get_y()"
+
+  data_fields: []
+
+  tensor_array_fields: []
+
+  has_compute_data_type: true
+  compute_data_type_attr: "HIPDNN_ATTR_BATCHNORM_INF_COMP_TYPE_EXT"
+
+  operation_type_enum: "HIPDNN_OPERATION_TYPE_BATCHNORM_INFERENCE_EXT"
+
+  infer_properties:
+    strategy: "match_input"
+    reference_input: "x"
+
+  test_data:
+    tensor_uids: { x: 70, mean: 71, inv_variance: 72, scale: 73, bias: 74, y: 75 }
+    tensor_configs:
+      x: { dims: [1, 64, 32, 32], strides: [65536, 1024, 32, 1] }
+      mean: { dims: [1, 64, 1, 1], strides: [64, 1, 1, 1] }
+      inv_variance: { dims: [1, 64, 1, 1], strides: [64, 1, 1, 1] }
+      scale: { dims: [1, 64, 1, 1], strides: [64, 1, 1, 1] }
+      bias: { dims: [1, 64, 1, 1], strides: [64, 1, 1, 1] }
+      y: { dims: [1, 64, 32, 32], strides: [65536, 1024, 32, 1] }
+    field_values: {}

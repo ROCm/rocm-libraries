@@ -1,0 +1,411 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
+#include <miopen/datatype.hpp>
+#include <miopen/kernel_build_params.hpp>
+#include <miopen/mlo_internal.hpp>
+#include <miopen/pooling.hpp>
+#include <miopen/pooling/invoke_params.hpp>
+#include <miopen/pooling/solvers.hpp>
+#include <miopen/solver/implicitgemm_util.hpp>
+
+#define WORKAROUND_ISSUE_MIFIN_80 1 // https://github.com/ROCm/MIFin/issues/80
+
+namespace miopen {
+
+namespace solver {
+
+namespace pooling {
+
+namespace {
+
+#if !MIOPEN_NDEBUG && !WORKAROUND_ISSUE_MIFIN_80
+template <typename T>
+bool IsPower2(T v)
+{
+    return (v != 0) && ((v & (v - 1)) == 0);
+}
+#endif
+
+#if !WORKAROUND_ISSUE_MIFIN_80
+template <typename T>
+T RoundUpNearestPower2Positive(T v) = delete;
+
+inline uint32_t RoundUpNearestPower2Positive(uint32_t v)
+{
+    assert(v > 0);
+    --v;
+    v |= v >> 1;
+    v |= v >> 2;
+    v |= v >> 4;
+    v |= v >> 8;
+    v |= v >> 16;
+    return std::max(++v, 1U); // Shut clang-tidy.
+}
+#endif
+
+} // namespace
+
+bool PoolingForwardNaive::IsApplicable(const ExecutionContext&,
+                                       const miopen::pooling::ProblemDescription& problem) const
+{
+    static const auto strict = TensorDescriptor::LayoutValidationMode::StrictDecreasingStrides;
+
+    return problem.GetDirection() == miopen::pooling::Direction::Forward           //
+           && problem.GetXDesc().GetType() == problem.GetYDesc().GetType()         //
+           && (problem.GetXDesc().GetType() == miopenFloat                         //
+               || problem.GetXDesc().GetType() == miopenHalf                       //
+               || problem.GetXDesc().GetType() == miopenBFloat16)                  //
+           && (problem.GetPooling().GetMode() == miopenPoolingMax                  //
+               || problem.GetPooling().GetMode() == miopenPoolingAverage           //
+               || problem.GetPooling().GetMode() == miopenPoolingAverageInclusive) //
+           && (                                                                    //
+                  (problem.GetXDesc().GetNumDims() == 5                            //
+                   && problem.GetXDesc().IsPossibleLayout4D5D("NCDHW", strict)     //
+                   && problem.GetYDesc().IsPossibleLayout4D5D("NCDHW", strict))    //
+                  ||                                                               //
+                  (problem.GetXDesc().GetNumDims() == 4                            //
+                   && problem.GetXDesc().IsPossibleLayout4D5D("NCHW", strict)      //
+                   && problem.GetYDesc().IsPossibleLayout4D5D("NCHW", strict))     //
+              );
+}
+
+ConvSolution
+PoolingForwardNaive::GetSolution(const ExecutionContext&,
+                                 const miopen::pooling::ProblemDescription& problem,
+                                 const PerformanceConfigPoolingForwardNaive& config) const
+{
+    auto result = ConvSolution{miopenStatusSuccess};
+
+    const auto bot  = problem.GetXDesc();
+    const auto top  = problem.GetYDesc();
+    const bool is2d = (bot.GetNumDims() == 4);
+
+    // To compact code:
+    const auto& pooling = problem.GetPooling();
+    const auto& lengths = pooling.GetLengths();
+    const auto& strides = pooling.GetStrides();
+    const auto& pads    = pooling.GetPads();
+
+    // This also deduces 3D (DHW) parameters from 2D (HW) descriptor.
+    const uint32_t filter_w        = lengths[is2d ? 1 : 2];
+    const uint32_t filter_h        = lengths[is2d ? 0 : 1];
+    const uint32_t filter_d        = is2d ? 1 : lengths[0];
+    const uint32_t filter_w_stride = strides[is2d ? 1 : 2];
+    const uint32_t filter_h_stride = strides[is2d ? 0 : 1];
+    const uint32_t filter_d_stride = is2d ? (filter_h_stride * filter_d) : strides[0];
+    const uint32_t filter_w_pad    = pads[is2d ? 1 : 2];
+    const uint32_t filter_h_pad    = pads[is2d ? 0 : 1];
+    const uint32_t filter_d_pad    = is2d ? 0 : pads[0];
+
+    const int pooling_method = (pooling.GetMode() == miopenPoolingMax) ? MLO_POOLING_OP_MAX
+                               : (pooling.GetMode() == miopenPoolingAverage)
+                                   ? MLO_POOLING_OP_AVE
+                                   : MLO_POOLING_OP_AVE_INCLUSIVE;
+
+    const auto save_index = problem.SaveIndex();
+    const auto index_mode = pooling.GetWorkspaceIndexMode();
+    const auto index_type = pooling.GetIndexType();
+
+    /// \anchor multiply_dims_overflow_assumption
+    ///
+    /// Preventing overflow during dimension-related computations:
+    /// Let's assume that multiplication of three dims always fits into 32 bits (unsigned).
+    /// Then let's use size_t when we need to multiply more than three dims.
+    /// For example, in NCDHW layout, the N and C strides are results of multiplication
+    /// of >= 3 dims, so we have to use size_t for storing them.
+    ///
+    /// We need to pay special attention to muls of D stride with some other dims.
+    /// The D stride is a result of 2 muls. Therefore (d_stride * dim) does
+    /// not require widening to size_t prior mul, but (d_stride * dim * dim)
+    /// requires it because the total number of muls is 4.
+
+    const auto spatial_dim = is2d ? 2U : 3U;
+    uint32_t all_n, all_c, bot_d, bot_h, bot_w;
+    std::tie(all_n, all_c, bot_d, bot_h, bot_w) = miopen::GetNCDHW(spatial_dim, bot.GetLengths());
+    uint32_t bot_w_stride, bot_h_stride, bot_d_stride;
+    size_t bot_c_stride, bot_n_stride;
+    std::tie(bot_n_stride, bot_c_stride, bot_d_stride, bot_h_stride, bot_w_stride) =
+        miopen::GetNCDHW(spatial_dim, bot.GetStrides());
+
+    uint32_t top_d, top_h, top_w;
+    std::tie(std::ignore, std::ignore, top_d, top_h, top_w) =
+        miopen::GetNCDHW(spatial_dim, top.GetLengths());
+    uint32_t top_w_stride, top_h_stride, top_d_stride;
+    size_t top_c_stride, top_n_stride;
+    std::tie(top_n_stride, top_c_stride, top_d_stride, top_h_stride, top_w_stride) =
+        miopen::GetNCDHW(spatial_dim, top.GetStrides());
+
+    // Mask data is always NCDHW
+    const uint32_t mask_w_stride = 1;
+    const uint32_t mask_h_stride = mask_w_stride * top_w;
+    const uint32_t mask_d_stride = mask_h_stride * top_h;
+    const size_t mask_c_stride   = static_cast<size_t>(mask_d_stride) * top_d;
+    const size_t mask_n_stride   = mask_c_stride * all_c;
+
+    /// About optimal grid size. The simplest way is to map the problem onto grid is 1:1 mapping of
+    /// N,C and top.D onto grid dimensions.
+    ///
+    /// However, this would waste 1 dimension of grid for 2D convolutions, i.e. the grid size would
+    /// be N*C*1, which might be too small and lead to under-utilization of GPU. If we exchange D
+    /// with H then the grid size for 2D problem would be N*C*H, but for 3D problem the kernel will
+    /// access memory in a scattered way, which would affect performance again. Current design
+    /// choice is using separate 2D and 3D kernels (via build-time parameter) and N*C*H grid for 2D.
+    ///
+    /// \anchor naive_pooling_max_grid_size
+    /// * Assumption: Max grid size is >= 2^32-1 (4G-1) i.e. std::max<unint32_t>.
+    ///   Currently this limitation is valid for both ROCm HIP and OCL runtimes.
+    ///
+    /// Another problem with this simple approach is finding out the optimal workgroup size.
+    /// The trivial solution is {1,1,1}, but this would lead to under-utilization of GPU, because
+    /// in this case only 1 thread out of the 64/32 available in the wavefront will be used.
+    /// Let's use workgroup size (w0*w1*w2) = WAVESIZE.
+    ///
+    /// We have to use workroup which is, after multiplication by some integer, gives exactly grid
+    /// (w0*I == g0, w1*J == g1, w2*K == g2). In order to simplify computation of the workgroup
+    /// sizes, let's round grid dims to be a power of 2. The extra positions in the grid (due to
+    /// rounding) are to be skipped by the kernels.
+    /// * Assumption: WAVESIZE is power of 2.
+    ///
+    /// The workgroup size does not have the restrictions imposed by synchronization between
+    /// workitems because the kernel does not require synchronization.
+
+#if !WORKAROUND_ISSUE_MIFIN_80
+    const auto wavesize = static_cast<uint32_t>(context.GetStream().GetWavefrontWidth());
+#if !MIOPEN_NDEBUG
+    assert(IsPower2(wavesize));
+#endif
+#endif
+
+    const auto is2d_kernel = (top_d == 1); // For 2D + optimize for 3D where the 1st dim is 1.
+    uint32_t g0, g1, g2, w0, w1, w2;
+#if WORKAROUND_ISSUE_MIFIN_80
+    w0 = static_cast<uint32_t>(config.local_size0);
+    w1 = static_cast<uint32_t>(config.local_size1);
+    w2 = static_cast<uint32_t>(config.local_size2);
+
+    // compute global sizes from local sizes
+    g0 = ((all_n + w0 - 1) / w0) * w0;
+    g1 = ((all_c + w1 - 1) / w1) * w1;
+    g2 = (((is2d_kernel ? top_h : top_d) + w2 - 1) / w2) * w2;
+#else
+    g0 = RoundUpNearestPower2Positive(all_n);
+    g1 = RoundUpNearestPower2Positive(all_c);
+    g2 = RoundUpNearestPower2Positive(is2d_kernel ? top_h : top_d);
+
+    // determine w0, w1, w2 such that w0 * w1 * w2 == wavesize
+    auto work_left = wavesize / 1;
+    w0             = (g0 < work_left) ? g0 : work_left;
+    work_left /= w0;
+    w1 = (g1 < work_left) ? g1 : work_left;
+    work_left /= w1;
+    w2 = (g2 < work_left) ? g2 : work_left;
+#endif
+
+    {
+        auto kernel = KernelInfo{};
+
+        kernel.kernel_file = "MIOpenPoolingForwardNaive.cpp";
+        kernel.kernel_name = "mloPoolingForwardNaive";
+
+        auto build_params = KernelBuildParameters{
+            {"MLO_POOLING_OP_ID", pooling_method}, // We need this at compile time in order to
+                                                   // engage mixed precision only when necessary.
+            {"MLO_POOLING_INDEX_TYPE", get_pooling_index_type_name(index_type)},
+            {"MLO_POOLING_IS2D_KERNEL", static_cast<int>(is2d_kernel)},
+        };
+        build_params << GetDataTypeKBP(bot.GetType());
+        kernel.comp_options = build_params.GenerateFor(kbp::HIP{});
+
+        // [Informative] The total number of kernels required to cover the whole
+        // forward pooling problem space is 3*4*2*2 = 48. The solver is dynamic.
+        // * 3: the number of supported operations
+        // * 4: the number of supported index types
+        // * 2: the number of supported data types
+        // * 2: 2D and 3D kernels (optimization)
+
+        kernel.g_wk.push_back(g0);
+        kernel.g_wk.push_back(g1);
+        kernel.g_wk.push_back(g2);
+        kernel.l_wk.push_back(w0);
+        kernel.l_wk.push_back(w1);
+        kernel.l_wk.push_back(w2);
+
+        result.construction_params.push_back(kernel);
+    }
+
+    result.invoker_factory = [=](const std::vector<Kernel>& kernels) {
+        return [=](const Handle& handle, const AnyInvokeParams& raw_params) {
+            decltype(auto) kernel = handle.Run(kernels.front());
+            decltype(auto) params = raw_params.CastTo<miopen::pooling::FwdInvokeParams>();
+
+            kernel(params.x,
+                   params.y,
+                   params.workspace,
+                   save_index,
+                   index_mode,
+                   filter_d,
+                   filter_h,
+                   filter_w,
+                   filter_d_stride,
+                   filter_h_stride,
+                   filter_w_stride,
+                   filter_d_pad,
+                   filter_h_pad,
+                   filter_w_pad,
+                   all_n,
+                   all_c,
+                   bot_d,
+                   bot_h,
+                   bot_w,
+                   bot_n_stride,
+                   bot_c_stride,
+                   bot_d_stride,
+                   bot_h_stride,
+                   bot_w_stride,
+                   top_d,
+                   top_h,
+                   top_w,
+                   top_n_stride,
+                   top_c_stride,
+                   top_d_stride,
+                   top_h_stride,
+                   top_w_stride,
+                   mask_n_stride,
+                   mask_c_stride,
+                   mask_d_stride,
+                   mask_h_stride,
+                   mask_w_stride);
+        };
+    };
+    return result;
+}
+
+std::size_t
+PoolingForwardNaive::GetWorkspaceSize(const ExecutionContext&,
+                                      const miopen::pooling::ProblemDescription& problem) const
+{
+    if(problem.GetPooling().GetMode() != miopenPoolingMax || !problem.SaveIndex())
+        return 0;
+    return problem.GetYDesc().GetElementSize() * get_data_size(problem.GetPooling().GetIndexType());
+}
+
+void PerformanceConfigPoolingForwardNaive::Init(const miopen::pooling::ProblemDescription&)
+{
+    // initialize with minimum values
+    local_size0 = 1;
+    local_size1 = 1;
+    local_size2 = 1;
+}
+
+void PerformanceConfigPoolingForwardNaive::HeuristicInit(
+    [[maybe_unused]] const miopen::pooling::ProblemDescription& problem)
+{
+#if MIOPEN_BACKEND_HIP
+    switch(problem.GetXDesc().GetType())
+    {
+    case miopenHalf:
+    case miopenFloat:
+    case miopenBFloat16: Init(problem); break;
+    case miopenDouble:
+    case miopenFloat8_fnuz:
+    case miopenBFloat8_fnuz:
+    case miopenInt8:
+    case miopenInt32:
+    case miopenInt64:
+    default: MIOPEN_THROW("Unsupported datatype");
+    }
+#endif
+}
+
+bool PerformanceConfigPoolingForwardNaive::SetNextValue(const miopen::pooling::ProblemDescription&)
+{
+#if !MIOPEN_BACKEND_HIP
+    return false;
+#else
+#if WORKAROUND_ISSUE_MIFIN_80
+    constexpr int wavesize = 64;
+    if(!NextTwoPower<1, wavesize>(local_size0))
+        return true;
+    if(!NextTwoPower<1, wavesize>(local_size1))
+        return true;
+    if(!NextTwoPower<1, wavesize>(local_size2))
+        return true;
+    return false;
+#else
+    return false;
+#endif
+#endif
+}
+
+bool PerformanceConfigPoolingForwardNaive::IsValidValue() const
+{
+#if WORKAROUND_ISSUE_MIFIN_80
+    constexpr int wavesize = 64;
+    if(!IsTwoPower<1, wavesize>(local_size0))
+        return false;
+    if(!IsTwoPower<1, wavesize>(local_size1))
+        return false;
+    if(!IsTwoPower<1, wavesize>(local_size2))
+        return false;
+    // block size must be equal to wavesize
+    if(local_size0 * local_size1 * local_size2 != wavesize)
+        return false;
+    return true;
+#else
+    return false;
+#endif
+}
+
+bool PerformanceConfigPoolingForwardNaive::IsValid(
+    const ExecutionContext&,
+    [[maybe_unused]] const miopen::pooling::ProblemDescription& problem) const
+{
+#if !MIOPEN_BACKEND_HIP
+    return false;
+#else
+    switch(problem.GetXDesc().GetType())
+    {
+    case miopenHalf:
+    case miopenFloat:
+    case miopenBFloat16: return IsValidValue();
+    case miopenDouble:
+    case miopenFloat8_fnuz:
+    case miopenBFloat8_fnuz:
+    case miopenInt8:
+    case miopenInt32:
+    case miopenInt64:
+    default: MIOPEN_THROW("Unsupported datatype");
+    }
+    return false;
+#endif
+}
+
+bool PerformanceConfigPoolingForwardNaive::operator==(
+    const PerformanceConfigPoolingForwardNaive& other) const
+{
+    return local_size0 == other.local_size0 && local_size1 == other.local_size1 &&
+           local_size2 == other.local_size2;
+}
+
+bool PoolingForwardNaive::IsValidPerformanceConfig(
+    const ExecutionContext& context,
+    const miopen::pooling::ProblemDescription& problem,
+    const PerformanceConfigPoolingForwardNaive& config) const
+{
+    return config.IsValid(context, problem);
+}
+
+PerformanceConfigPoolingForwardNaive PoolingForwardNaive::GetDefaultPerformanceConfig(
+    const ExecutionContext&, const miopen::pooling::ProblemDescription& problem) const
+{
+    PerformanceConfigPoolingForwardNaive config;
+    config.HeuristicInit(problem);
+    return config;
+}
+
+} // namespace pooling
+
+} // namespace solver
+
+} // namespace miopen

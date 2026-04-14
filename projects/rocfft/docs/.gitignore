@@ -1,0 +1,6 @@
+_build/
+_doxygen/
+_toc.yml
+doxygen/html
+doxygen/rtf
+doxygen/xml

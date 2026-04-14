@@ -1,0 +1,5 @@
+# Manually format sample code
+---
+Language: Cpp
+DisableFormat: true
+---

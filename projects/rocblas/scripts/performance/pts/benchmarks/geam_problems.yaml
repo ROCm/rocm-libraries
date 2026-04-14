@@ -1,0 +1,17 @@
+---
+include: ../../../../clients/include/rocblas_common.yaml
+
+Definitions:
+  - &m_equals_n_range
+    - { scan: [2000..9000..512], M: *c_scan_value, N: *c_scan_value, lda: *c_scan_value, ldb: *c_scan_value, ldc: *c_scan_value}
+
+Tests:
+  - name: geam
+    function: geam
+    precision: *single_double_precisions
+    transA: [ N, T ]
+    transB: [ N, T ]
+    alpha: 1
+    beta: 1
+    matrix_size: *m_equals_n_range
+...

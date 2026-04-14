@@ -1,0 +1,61 @@
+GlobalParameters:
+  BoundsCheck: False
+  KernelTime: True
+  NewClient: 2
+  NumBenchmarks: 20
+  NumElementsToValidate: 128
+
+
+BenchmarkProblems:
+
+  ########################################
+  # NN
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: d
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - BufferLoad: [True]
+        - BufferStore: [True]
+        - KernelLanguage: ["Assembly"]
+        - EdgeType: ["ShiftPtr"]
+        - LoopTail: [True]
+        - WorkGroupMapping: [8]
+      ForkParameters:
+        - VectorWidth: [2]
+        - PersistentKernel: [0,64,120]
+        - PrefetchLocalRead: [0,1]
+        - PrefetchGlobalRead: [False]   # True never wins
+        - InnerUnroll: [2]              # 1 never wins
+        - ThreadTile:
+          - [ 2, 4 ]
+        - WorkGroup:
+          - [ 16, 8, 1 ]   # 32x32
+          - [ 16, 8, 2 ]   # 32x32, LSU=2
+        - DepthU: [8,16]
+        - StaggerU: [16,32]
+        - StaggerUStride: [128]
+        - StaggerUMapping: [1]
+        - LdsPadB: [2]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [ [32], [4096, 4096, 32768], [1], [32] ]
+
+LibraryLogic:
+
+   ScheduleName: "arcturus"
+   DeviceNames: ["Device 7380", "Device 7388", "Device 738c", "Device 7390"]
+   ArchitectureName: "gfx908"
+
+LibraryClient:

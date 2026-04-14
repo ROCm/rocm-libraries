@@ -1,0 +1,55 @@
+GlobalParameters:
+  EnqueuesPerSync: 1
+  LibraryPrintDebug: 0
+  NumElementsToValidate: -1
+  KernelTime: True
+  SleepPercent: 0
+  DataInitTypeBeta : 0
+  DataInitTypeA: 3
+  DataInitTypeB: 3
+  DataInitTypeC: 4
+  DataInitTypeAlpha: 2
+  DataInitTypeBeta: 0
+  PrintSolutionRejectionReason: 0
+  PrintWinnersOnly: 0
+  PrintTensorA: 0
+  PrintTensorB: 0
+  PrintTensorD: 0
+  MergeFiles: 0
+
+BenchmarkProblems:
+  -
+    - # ProblemType
+      OperationType: TensorContraction
+      DataType: s
+      DestDataType: s
+      UseBeta: False
+      NumIndicesC: 2
+      IndexAssignmentsA: [ 0, 2]
+      IndexAssignmentsB: [ 1, 2]
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - EdgeType: ["ShiftPtr"]
+          #- TailLoop: [False]
+      ForkParameters:
+        - PackSummationDims: [0,1]
+        - GlobalSplitU: [1,2]
+        - KernelLanguage: [Assembly,Source]
+        - PrefetchLocalRead: [False]
+        - PrefetchGlobalRead: [True]
+        - ThreadTile:
+          - [ 8, 8 ]
+        - WorkGroup:
+          - [ 8, 8, 1 ]
+        - DepthU: [ 4]
+        - FractionalLoad: [1]
+        - StaggerU: [0]
+        - StaggerUMapping: [0]
+        - AssertSummationElementMultiple: [4]
+      BenchmarkForkParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [ 64, 64, 32]

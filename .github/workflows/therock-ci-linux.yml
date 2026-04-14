@@ -1,0 +1,158 @@
+name: TheRock CI Linux
+
+on:
+  workflow_call:
+    inputs:
+      cmake_options:
+        type: string
+      projects_to_test:
+        type: string
+      test_type:
+        type: string
+      amdgpu_families:
+        type: string
+      test_runs_on:
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  therock-build-linux:
+    name: Build (${{ inputs.amdgpu_families }})
+    runs-on: azure-linux-scale-rocm
+    permissions:
+      id-token: write
+    container:
+      image: ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:4443d9d710b9471e8ef658d509358bd92602498e67161b9280474bce0bb0decd
+      options: -v /runner/config:/home/awsconfig/
+    strategy:
+      fail-fast: true
+    env:
+      CACHE_DIR: ${{ github.workspace }}/.container-cache
+      CCACHE_CONFIGPATH: ${{ github.workspace }}/.ccache/ccache.conf
+      AMDGPU_FAMILIES: ${{ inputs.amdgpu_families }}
+      TEATIME_FORCE_INTERACTIVE: 0
+      AWS_SHARED_CREDENTIALS_FILE: /home/awsconfig/credentials.ini
+    steps:
+      - name: "Checking out repository for rocm-libraries"
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Checkout TheRock repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: "ROCm/TheRock"
+          path: TheRock
+          ref: b68757b3461145b85eabec29cea1223027a56da0 # 2026-04-01
+
+      - name: Install python deps
+        run: |
+          pip install -r TheRock/requirements.txt
+
+      - name: Patch rocm-libraries
+        run: |
+          # Remove patches here if they cannot be applied cleanly, and they have not been deleted from TheRock repo
+          # rm ./TheRock/patches/amd-mainline/rocm-libraries/*.patch
+          # git -c user.name="therockbot" -c "user.email=therockbot@amd.com" am --whitespace=nowarn ./TheRock/patches/amd-mainline/rocm-libraries/*.patch
+
+      # safe.directory must be set before Runner health status
+      - name: Adjust git config
+        run: |
+          git config --global --add safe.directory $PWD
+          git config fetch.parallel 10
+
+      - name: Setup ccache
+        run: |
+          ./TheRock/build_tools/setup_ccache.py \
+            --config-preset "github-oss-presubmit" \
+            --dir "$(dirname $CCACHE_CONFIGPATH)" \
+            --local-path "$CACHE_DIR/ccache"
+
+      - name: Runner health status
+        run: |
+          ./TheRock/build_tools/health_status.py
+
+      - name: Pull DVC files for rocm-libraries # LOGNAME details here https://github.com/ROCm/rocm-libraries/pull/1617
+        run: |
+          if command -v dvc &> /dev/null; then
+            echo "dvc detected"
+          else
+            echo "Warning, dvc not detected!"
+          fi
+          LOGNAME=github-runner dvc pull -v
+
+      - name: Fetch sources
+        timeout-minutes: 30
+        run: |
+          ./TheRock/build_tools/fetch_sources.py --jobs 12 --no-include-rocm-libraries --no-include-ml-frameworks
+
+      - name: Configure Projects
+        env:
+          amdgpu_families: ${{ env.AMDGPU_FAMILIES }}
+          package_version: ADHOCBUILD
+          extra_cmake_options: "-DTHEROCK_ROCM_LIBRARIES_SOURCE_DIR=../ ${{ inputs.cmake_options }}"
+          BUILD_DIR: build
+        run: |
+          python3 TheRock/build_tools/github_actions/build_configure.py
+
+      - name: Build therock-archives and therock-dist
+        run: cmake --build TheRock/build --target therock-archives therock-dist -- -k 0
+
+      - name: Report
+        if: ${{ !cancelled() }}
+        run: |
+          echo "Full SDK du:"
+          echo "------------"
+          du -h -d 1 TheRock/build/dist/rocm
+          echo "Artifact Archives:"
+          echo "------------------"
+          ls -lh TheRock/build/artifacts/*.tar.xz
+          echo "Artifacts:"
+          echo "----------"
+          du -h -d 1 TheRock/build/artifacts
+          echo "CCache Stats:"
+          echo "-------------"
+          ccache -s -v
+          tail -v -n +1 .ccache/compiler_check_cache/* > TheRock/build/logs/ccache_compiler_check_cache.log
+
+      - name: Configure AWS Credentials for non-forked repos
+        if: ${{ always() && !github.event.pull_request.head.repo.fork }}
+        uses: aws-actions/configure-aws-credentials@8df5847569e6427dd6c4fb1cf565c83acfa8afa7 # v6.0.0
+        with:
+          aws-region: us-east-2
+          role-to-assume: arn:aws:iam::692859939525:role/therock-ci-external
+
+      - name: Post Build Upload
+        if: always()
+        run: |
+          python3 TheRock/build_tools/github_actions/post_build_upload.py \
+            --run-id ${{ github.run_id }} \
+            --artifact-group ${{ env.AMDGPU_FAMILIES }} \
+            --build-dir TheRock/build \
+            --upload
+
+      - name: Notify MIOpen Teams Channel on Failure
+        # Channel name "MIOpen CI Reporting"
+        if: ${{ contains(inputs.projects_to_test, 'miopen') && failure() && !github.event.pull_request.head.repo.fork }}
+        run: |
+          python3 .github/scripts/notify_teams.py \
+            --project miopen \
+            --failure-stage build \
+            --log-path TheRock/build/logs \
+            --webhook-url "${{ secrets.MIOPEN_CI_WEBHOOK_URL }}" \
+            --pr-number "${{ github.event.pull_request.number }}" \
+            --pr-title "${{ github.event.pull_request.title }}"
+
+  therock-test-linux:
+    name: Test (${{ inputs.amdgpu_families }})
+    needs: [therock-build-linux]
+    # TODO(TheRock#3288): Re-enable gfx950-dcgpu runners once we get more capacity
+    if: ${{ inputs.amdgpu_families != 'gfx950-dcgpu' }}
+    uses: ./.github/workflows/therock-test-packages.yml
+    with:
+      projects_to_test: ${{ inputs.projects_to_test }}
+      amdgpu_families: ${{ inputs.amdgpu_families }}
+      test_runs_on: ${{ inputs.test_runs_on }}
+      platform: "linux"
+      test_type: ${{ inputs.test_type }}
+    secrets: inherit

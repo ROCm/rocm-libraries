@@ -1,0 +1,68 @@
+GlobalParameters:
+  MinimumRequiredVersion: 4.0.0
+  PrintLevel: 1
+  ForceRedoBenchmarkProblems: True
+  ForceRedoLibraryLogic: True
+  ForceRedoLibraryClient: True
+  CMakeBuildType: Release
+  EnqueuesPerSync: 1
+  SyncsPerBenchmark: 1
+  LibraryPrintDebug: False
+  NumElementsToValidate: 1000
+  ValidationMaxToPrint: 10
+  ValidationPrintValids: False
+  ShortNames: False
+  MergeFiles: True
+  Platform: 0
+  Device: 0
+  KernelTime: True
+  PinClocks: True
+  SleepPercent: 200
+  DataInitTypeAlpha : 1
+  DataInitTypeA : 3
+  DataInitTypeB : 3
+  PrintSolutionRejectionReason : 0
+
+BenchmarkProblems:
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: s
+      TransposeA: True
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+
+  ########################################
+  # NN - Batch
+  ########################################
+    - # Benchmark Group - ResNet 1x1:
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - EdgeType: ["ShiftPtr"]
+        - KernelLanguage: ["Assembly"]
+
+      ForkParameters:
+        - FractionalLoad: [1]
+        - PrefetchGlobalRead: [0]
+        - PrefetchLocalRead: [1]
+        - ThreadTile:
+          - [ 8, 6 ]
+        - WorkGroup:
+          - [ 32, 8, 1 ]
+            #- [ 16, 16, 1 ]
+        - WorkGroupMapping: [64]
+          #  - DepthU: [3,5,7,9,16] # some bugs with odd unroll dims
+        - DepthU: [16]
+        - VectorWidth: [2]
+        - GlobalReadVectorWidth: [2]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+            #- Range: [ [127,1,127], 0, [1], [64,1,64] ]
+
+# to repro, disable this in SolutionStructs.py
+# 1506         reject(state, "Fractional currently requires PreciseBoundsCheck") # debug this later
+# Symptom is GPUVM fault,

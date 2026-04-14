@@ -1,0 +1,648 @@
+# Template used to process YAML from log files
+---
+include: rocblas_common.yaml
+
+Functions:
+
+  ######
+  # L1 #
+  ######
+
+  # scal
+  rocblas_sscal:  { function: scal, <<: *single_precision }
+  rocblas_dscal:  { function: scal, <<: *double_precision }
+  rocblas_cscal:  { function: scal, <<: *single_precision_complex }
+  rocblas_zscal:  { function: scal, <<: *double_precision_complex }
+  rocblas_csscal: { function: scal, <<: *scal_single_precision_complex_real_alpha_complex_out }
+  rocblas_zdscal: { function: scal, <<: *scal_double_precision_complex_real_alpha_complex_out }
+
+  rocblas_sscal_batched:  { function: scal_batched, <<: *single_precision }
+  rocblas_dscal_batched:  { function: scal_batched, <<: *double_precision }
+  rocblas_cscal_batched:  { function: scal_batched, <<: *single_precision_complex }
+  rocblas_zscal_batched:  { function: scal_batched, <<: *double_precision_complex }
+  rocblas_csscal_batched: { function: scal_batched, <<: *scal_single_precision_complex_real_alpha_complex_out }
+  rocblas_zdscal_batched: { function: scal_batched, <<: *scal_double_precision_complex_real_alpha_complex_out }
+
+  rocblas_sscal_strided_batched:  { function: scal_strided_batched, <<: *single_precision }
+  rocblas_dscal_strided_batched:  { function: scal_strided_batched, <<: *double_precision }
+  rocblas_cscal_strided_batched:  { function: scal_strided_batched, <<: *single_precision_complex }
+  rocblas_zscal_strided_batched:  { function: scal_strided_batched, <<: *double_precision_complex }
+  rocblas_csscal_strided_batched: { function: scal_strided_batched, <<: *scal_single_precision_complex_real_alpha_complex_out }
+  rocblas_zdscal_strided_batched: { function: scal_strided_batched, <<: *scal_double_precision_complex_real_alpha_complex_out }
+
+  # copy
+  rocblas_scopy: { function: copy, <<: *single_precision }
+  rocblas_dcopy: { function: copy, <<: *double_precision }
+  rocblas_ccopy: { function: copy, <<: *single_precision_complex }
+  rocblas_zcopy: { function: copy, <<: *double_precision_complex }
+
+  rocblas_scopy_batched: { function: copy_batched, <<: *single_precision }
+  rocblas_dcopy_batched: { function: copy_batched, <<: *double_precision }
+  rocblas_ccopy_batched: { function: copy_batched, <<: *single_precision_complex }
+  rocblas_zcopy_batched: { function: copy_batched, <<: *double_precision_complex }
+
+  rocblas_scopy_strided_batched: { function: copy_strided_batched, <<: *single_precision }
+  rocblas_dcopy_strided_batched: { function: copy_strided_batched, <<: *double_precision }
+  rocblas_ccopy_strided_batched: { function: copy_strided_batched, <<: *single_precision_complex }
+  rocblas_zcopy_strided_batched: { function: copy_strided_batched, <<: *double_precision_complex }
+
+  # swap
+  rocblas_sswap: { function: swap, <<: *single_precision }
+  rocblas_dswap: { function: swap, <<: *double_precision }
+  rocblas_cswap: { function: swap, <<: *single_precision_complex }
+  rocblas_zswap: { function: swap, <<: *double_precision_complex }
+
+  rocblas_sswap_batched: { function: swap_batched, <<: *single_precision }
+  rocblas_dswap_batched: { function: swap_batched, <<: *double_precision }
+  rocblas_cswap_batched: { function: swap_batched, <<: *single_precision_complex }
+  rocblas_zswap_batched: { function: swap_batched, <<: *double_precision_complex }
+
+  rocblas_sswap_strided_batched: { function: swap_strided_batched, <<: *single_precision }
+  rocblas_dswap_strided_batched: { function: swap_strided_batched, <<: *double_precision }
+  rocblas_cswap_strided_batched: { function: swap_strided_batched, <<: *single_precision_complex }
+  rocblas_zswap_strided_batched: { function: swap_strided_batched, <<: *double_precision_complex }
+
+  # dot
+  rocblas_hdot:  { function: dot, <<: *half_precision }
+  rocblas_bfdot: { function: dot, <<: *bf16_precision }
+  rocblas_sdot:  { function: dot, <<: *single_precision  }
+  rocblas_ddot:  { function: dot, <<: *double_precision  }
+  rocblas_cdotu:  { function: dot, <<: *single_precision_complex }
+  rocblas_cdotc: { function: dotc, <<: *single_precision_complex }
+  rocblas_zdotu:  { function: dot, <<: *double_precision_complex }
+  rocblas_zdotc: { function: dotc, <<: *double_precision_complex }
+
+  rocblas_hdot_batched:  { function: dot_batched, <<: *half_precision }
+  rocblas_bfdot_batched: { function: dot_batched, <<: *bf16_precision }
+  rocblas_sdot_batched:  { function: dot_batched, <<: *single_precision }
+  rocblas_ddot_batched:  { function: dot_batched, <<: *double_precision }
+  rocblas_cdotu_batched:  { function: dot_batched, <<: *single_precision_complex }
+  rocblas_zdotu_batched:  { function: dot_batched, <<: *double_precision_complex }
+  rocblas_cdotc_batched: { function: dotc_batched, <<: *single_precision_complex }
+  rocblas_zdotc_batched: { function: dotc_batched, <<: *double_precision_complex }
+
+  rocblas_hdot_strided_batched:  { function: dot_strided_batched, <<: *half_precision }
+  rocblas_bfdot_strided_batched: { function: dot_strided_batched, <<: *bf16_precision }
+  rocblas_sdot_strided_batched:  { function: dot_strided_batched, <<: *single_precision }
+  rocblas_ddot_strided_batched:  { function: dot_strided_batched, <<: *double_precision }
+  rocblas_cdotu_strided_batched:  { function: dot_strided_batched, <<: *single_precision_complex }
+  rocblas_zdotu_strided_batched:  { function: dot_strided_batched, <<: *double_precision_complex }
+  rocblas_cdotc_strided_batched: { function: dotc_strided_batched, <<: *single_precision_complex }
+  rocblas_zdotc_strided_batched: { function: dotc_strided_batched, <<: *double_precision_complex }
+
+  # asum
+  rocblas_sasum: { function: asum, <<: *single_precision }
+  rocblas_dasum: { function: asum, <<: *double_precision }
+  rocblas_scasum: { function: asum, <<: *single_precision_complex }
+  rocblas_dzasum: { function: asum, <<: *double_precision_complex }
+
+  rocblas_sasum_batched: { function: asum_batched, <<: *single_precision }
+  rocblas_dasum_batched: { function: asum_batched, <<: *double_precision }
+  rocblas_scasum_batched: { function: asum_batched, <<: *single_precision_complex }
+  rocblas_dzasum_batched: { function: asum_batched, <<: *double_precision_complex }
+
+  rocblas_sasum_strided_batched: { function: asum_strided_batched, <<: *single_precision }
+  rocblas_dasum_strided_batched: { function: asum_strided_batched, <<: *double_precision }
+  rocblas_scasum_strided_batched: { function: asum_strided_batched, <<: *single_precision_complex }
+  rocblas_dzasum_strided_batched: { function: asum_strided_batched, <<: *double_precision_complex }
+
+  # nrm2
+  rocblas_snrm2: { function: nrm2, <<: *single_precision }
+  rocblas_dnrm2: { function: nrm2, <<: *double_precision }
+  rocblas_scnrm2: { function: nrm2, <<: *single_precision_complex }
+  rocblas_dznrm2: { function: nrm2, <<: *double_precision_complex }
+
+  rocblas_snrm2_batched: { function: nrm2_batched, <<: *single_precision }
+  rocblas_dnrm2_batched: { function: nrm2_batched, <<: *double_precision }
+  rocblas_scnrm2_batched: { function: nrm2_batched, <<: *single_precision_complex }
+  rocblas_dznrm2_batched: { function: nrm2_batched, <<: *double_precision_complex }
+
+  rocblas_snrm2_strided_batched: { function: nrm2_strided_batched, <<: *single_precision }
+  rocblas_dnrm2_strided_batched: { function: nrm2_strided_batched, <<: *double_precision }
+  rocblas_scnrm2_strided_batched: { function: nrm2_strided_batched, <<: *single_precision_complex }
+  rocblas_dznrm2_strided_batched: { function: nrm2_strided_batched, <<: *double_precision_complex }
+
+  # axpy
+  rocblas_haxpy: { function: axpy, <<: *half_precision   }
+  rocblas_saxpy: { function: axpy, <<: *single_precision }
+  rocblas_daxpy: { function: axpy, <<: *double_precision }
+  rocblas_caxpy: { function: axpy, <<: *single_precision_complex }
+  rocblas_zaxpy: { function: axpy, <<: *double_precision_complex }
+
+  rocblas_haxpy_batched: { function: axpy_batched, <<: *half_precision   }
+  rocblas_saxpy_batched: { function: axpy_batched, <<: *single_precision }
+  rocblas_daxpy_batched: { function: axpy_batched, <<: *double_precision }
+  rocblas_caxpy_batched: { function: axpy_batched, <<: *single_precision_complex }
+  rocblas_zaxpy_batched: { function: axpy_batched, <<: *double_precision_complex }
+
+  rocblas_haxpy_strided_batched: { function: axpy_strided_batched, <<: *half_precision   }
+  rocblas_saxpy_strided_batched: { function: axpy_strided_batched, <<: *single_precision }
+  rocblas_daxpy_strided_batched: { function: axpy_strided_batched, <<: *double_precision }
+  rocblas_caxpy_strided_batched: { function: axpy_strided_batched, <<: *single_precision_complex }
+  rocblas_zaxpy_strided_batched: { function: axpy_strided_batched, <<: *double_precision_complex }
+
+  # amax
+  rocblas_isamax: { function: amax, <<: *single_precision }
+  rocblas_idamax: { function: amax, <<: *double_precision }
+  rocblas_icamax: { function: amax, <<: *single_precision_complex }
+  rocblas_izamax: { function: amax, <<: *double_precision_complex }
+
+  rocblas_isamax_batched: { function: amax_batched, <<: *single_precision }
+  rocblas_idamax_batched: { function: amax_batched, <<: *double_precision }
+  rocblas_icamax_batched: { function: amax_batched, <<: *single_precision_complex }
+  rocblas_izamax_batched: { function: amax_batched, <<: *double_precision_complex }
+
+  rocblas_isamax_strided_batched: { function: amax_strided_batched, <<: *single_precision }
+  rocblas_idamax_strided_batched: { function: amax_strided_batched, <<: *double_precision }
+  rocblas_icamax_strided_batched: { function: amax_strided_batched, <<: *single_precision_complex }
+  rocblas_izamax_strided_batched: { function: amax_strided_batched, <<: *double_precision_complex }
+
+  # amin
+  rocblas_isamin: { function: amin, <<: *single_precision }
+  rocblas_idamin: { function: amin, <<: *double_precision }
+  rocblas_icamin: { function: amin, <<: *single_precision_complex }
+  rocblas_izamin: { function: amin, <<: *double_precision_complex }
+
+  rocblas_isamin_batched: { function: amin_batched, <<: *single_precision }
+  rocblas_idamin_batched: { function: amin_batched, <<: *double_precision }
+  rocblas_icamin_batched: { function: amin_batched, <<: *single_precision_complex }
+  rocblas_izamin_batched: { function: amin_batched, <<: *double_precision_complex }
+
+  rocblas_isamin_strided_batched: { function: amin_strided_batched, <<: *single_precision }
+  rocblas_idamin_strided_batched: { function: amin_strided_batched, <<: *double_precision }
+  rocblas_icamin_strided_batched: { function: amin_strided_batched, <<: *single_precision_complex }
+  rocblas_izamin_strided_batched: { function: amin_strided_batched, <<: *double_precision_complex }
+
+  # rot
+  rocblas_srot:  { function: rot, <<: *single_precision }
+  rocblas_drot:  { function: rot, <<: *double_precision }
+  rocblas_crot:  { function: rot, <<: *single_precision_complex_real_in_complex_compute }
+  rocblas_zrot:  { function: rot, <<: *double_precision_complex_real_in_complex_compute }
+  rocblas_csrot: { function: rot, <<: *single_precision_complex_real_in_real_compute }
+  rocblas_zdrot: { function: rot, <<: *double_precision_complex_real_in_real_compute }
+
+  rocblas_srot_batched: { function: rot_batched, <<: *single_precision }
+  rocblas_drot_batched: { function: rot_batched, <<: *double_precision }
+  rocblas_crot_batched: { function: rot_batched, <<: *single_precision_complex_real_in_complex_compute }
+  rocblas_zrot_batched: { function: rot_batched, <<: *double_precision_complex_real_in_complex_compute }
+  rocblas_csrot_batched: { function: rotu_batched, <<: *single_precision_complex_real_in_real_compute }
+  rocblas_zdrot_batched: { function: rotu_batched, <<: *double_precision_complex_real_in_real_compute }
+
+  rocblas_srot_strided_batched: { function: rot_strided_batched, <<: *single_precision }
+  rocblas_drot_strided_batched: { function: rot_strided_batched, <<: *double_precision }
+  rocblas_crot_strided_batched: { function: rot_strided_batched, <<: *single_precision_complex_real_in_complex_compute }
+  rocblas_zrot_strided_batched: { function: rot_strided_batched, <<: *double_precision_complex_real_in_complex_compute }
+  rocblas_csrot_strided_batched: { function: rotu_strided_batched, <<: *single_precision_complex_real_in_real_compute }
+  rocblas_zdrot_strided_batched: { function: rotu_strided_batched, <<: *double_precision_complex_real_in_real_compute }
+
+  # rotg
+  rocblas_srotg: { function: rotg, <<: *single_precision }
+  rocblas_drotg: { function: rotg, <<: *double_precision }
+  rocblas_crotg: { function: rotg, <<: *single_precision_complex_real_in_complex_compute }
+  rocblas_zrotg: { function: rotg, <<: *double_precision_complex_real_in_complex_compute }
+
+  rocblas_srotg_batched: { function: rotg_batched, <<: *single_precision }
+  rocblas_drotg_batched: { function: rotg_batched, <<: *double_precision }
+  rocblas_crotg_batched: { function: rotg_batched, <<: *single_precision_complex_real_in_complex_compute }
+  rocblas_zrotg_batched: { function: rotg_batched, <<: *double_precision_complex_real_in_complex_compute }
+
+  rocblas_srotg_strided_batched: { function: rotg_strided_batched, <<: *single_precision }
+  rocblas_drotg_strided_batched: { function: rotg_strided_batched, <<: *double_precision }
+  rocblas_crotg_strided_batched: { function: rotg_strided_batched, <<: *single_precision_complex_real_in_complex_compute }
+  rocblas_zrotg_strided_batched: { function: rotg_strided_batched, <<: *double_precision_complex_real_in_complex_compute }
+
+  # rotm
+  rocblas_srotm: { function: rotm, <<: *single_precision }
+  rocblas_drotm: { function: rotm, <<: *double_precision }
+
+  rocblas_srotm_batched: { function: rotm_batched, <<: *single_precision }
+  rocblas_drotm_batched: { function: rotm_batched, <<: *double_precision }
+
+  rocblas_srotm_strided_batched: { function: rotm_strided_batched, <<: *single_precision }
+  rocblas_drotm_strided_batched: { function: rotm_strided_batched, <<: *double_precision }
+
+  # rotmg
+  rocblas_srotmg: { function: rotmg, <<: *single_precision }
+  rocblas_drotmg: { function: rotmg, <<: *double_precision }
+
+  rocblas_srotmg_batched: { function: rotmg_batched, <<: *single_precision }
+  rocblas_drotmg_batched: { function: rotmg_batched, <<: *double_precision }
+
+  rocblas_srotmg_strided_batched: { function: rotmg_strided_batched, <<: *single_precision }
+  rocblas_drotmg_strided_batched: { function: rotmg_strided_batched, <<: *double_precision }
+
+
+  ######
+  # L2 #
+  ######
+
+  # gbmv
+  rocblas_sgbmv: { function: gbmv, <<: *single_precision }
+  rocblas_dgbmv: { function: gbmv, <<: *double_precision }
+  rocblas_cgbmv: { function: gbmv, <<: *single_precision_complex }
+  rocblas_zgbmv: { function: gbmv, <<: *double_precision_complex }
+
+  rocblas_sgbmv_batched: { function: gbmv_batched, <<: *single_precision }
+  rocblas_dgbmv_batched: { function: gbmv_batched, <<: *double_precision }
+  rocblas_cgbmv_batched: { function: gbmv_batched, <<: *single_precision_complex }
+  rocblas_zgbmv_batched: { function: gbmv_batched, <<: *double_precision_complex }
+
+  rocblas_sgbmv_strided_batched: { function: gbmv_strided_batched, <<: *single_precision }
+  rocblas_dgbmv_strided_batched: { function: gbmv_strided_batched, <<: *double_precision }
+  rocblas_cgbmv_strided_batched: { function: gbmv_strided_batched, <<: *single_precision_complex }
+  rocblas_zgbmv_strided_batched: { function: gbmv_strided_batched, <<: *double_precision_complex }
+
+  # gemv
+  rocblas_sgemv: { function: gemv, <<: *single_precision }
+  rocblas_dgemv: { function: gemv, <<: *double_precision }
+  rocblas_cgemv: { function: gemv, <<: *single_precision_complex }
+  rocblas_zgemv: { function: gemv, <<: *double_precision_complex }
+
+  rocblas_sgemv_batched: { function: gemv_batched, <<: *single_precision }
+  rocblas_dgemv_batched: { function: gemv_batched, <<: *double_precision }
+  rocblas_cgemv_batched: { function: gemv_batched, <<: *single_precision_complex }
+  rocblas_zgemv_batched: { function: gemv_batched, <<: *double_precision_complex }
+
+  rocblas_sgemv_strided_batched: { function: gemv_strided_batched, <<: *single_precision }
+  rocblas_dgemv_strided_batched: { function: gemv_strided_batched, <<: *double_precision }
+  rocblas_cgemv_strided_batched: { function: gemv_strided_batched, <<: *single_precision_complex }
+  rocblas_zgemv_strided_batched: { function: gemv_strided_batched, <<: *double_precision_complex }
+
+  # hbmv
+  rocblas_chbmv: { function: hbmv, <<: *single_precision_complex }
+  rocblas_zhbmv: { function: hbmv, <<: *double_precision_complex }
+
+  rocblas_chbmv_batched: { function: hbmv_batched, <<: *single_precision_complex }
+  rocblas_zhbmv_batched: { function: hbmv_batched, <<: *double_precision_complex }
+
+  rocblas_chbmv_strided_batched: { function: hbmv_strided_batched, <<: *single_precision_complex }
+  rocblas_zhbmv_strided_batched: { function: hbmv_strided_batched, <<: *double_precision_complex }
+
+  # hemv
+  rocblas_chemv: { function: hemv, <<: *single_precision_complex }
+  rocblas_zhemv: { function: hemv, <<: *double_precision_complex }
+
+  rocblas_chemv_batched: { function: hemv_batched, <<: *single_precision_complex }
+  rocblas_zhemv_batched: { function: hemv_batched, <<: *double_precision_complex }
+
+  rocblas_chemv_strided_batched: { function: hemv_strided_batched, <<: *single_precision_complex }
+  rocblas_zhemv_strided_batched: { function: hemv_strided_batched, <<: *double_precision_complex }
+
+  # her
+  rocblas_cher: { function: her, <<: *single_precision_complex }
+  rocblas_zher: { function: her, <<: *double_precision_complex }
+
+  rocblas_cher_batched: { function: her_batched, <<: *single_precision_complex }
+  rocblas_zher_batched: { function: her_batched, <<: *double_precision_complex }
+
+  rocblas_cher_strided_batched: { function: her_strided_batched, <<: *single_precision_complex }
+  rocblas_zher_strided_batched: { function: her_strided_batched, <<: *double_precision_complex }
+
+  # her2
+  rocblas_cher2: { function: her2, <<: *single_precision_complex }
+  rocblas_zher2: { function: her2, <<: *double_precision_complex }
+
+  rocblas_cher2_batched: { function: her2_batched, <<: *single_precision_complex }
+  rocblas_zher2_batched: { function: her2_batched, <<: *double_precision_complex }
+
+  rocblas_cher2_strided_batched: { function: her2_strided_batched, <<: *single_precision_complex }
+  rocblas_zher2_strided_batched: { function: her2_strided_batched, <<: *double_precision_complex }
+
+  # hpmv
+  rocblas_chpmv: { function: hpmv, <<: *single_precision_complex }
+  rocblas_zhpmv: { function: hpmv, <<: *double_precision_complex }
+
+  rocblas_chpmv_batched: { function: hpmv_batched, <<: *single_precision_complex }
+  rocblas_zhpmv_batched: { function: hpmv_batched, <<: *double_precision_complex }
+
+  rocblas_chpmv_strided_batched: { function: hpmv_strided_batched, <<: *single_precision_complex }
+  rocblas_zhpmv_strided_batched: { function: hpmv_strided_batched, <<: *double_precision_complex }
+
+  # hpr
+  rocblas_chpr: { function: hpr, <<: *single_precision_complex }
+  rocblas_zhpr: { function: hpr, <<: *double_precision_complex }
+
+  rocblas_chpr_batched: { function: hpr_batched, <<: *single_precision_complex }
+  rocblas_zhpr_batched: { function: hpr_batched, <<: *double_precision_complex }
+
+  rocblas_chpr_strided_batched: { function: hpr_strided_batched, <<: *single_precision_complex }
+  rocblas_zhpr_strided_batched: { function: hpr_strided_batched, <<: *double_precision_complex }
+
+  # trmv
+  rocblas_strmv: { function: trmv, <<: *single_precision }
+  rocblas_dtrmv: { function: trmv, <<: *double_precision }
+  rocblas_ctrmv: { function: trmv, <<: *single_precision_complex }
+  rocblas_ztrmv: { function: trmv, <<: *double_precision_complex }
+
+  rocblas_strmv_batched: { function: trmv_batched, <<: *single_precision }
+  rocblas_dtrmv_batched: { function: trmv_batched, <<: *double_precision }
+  rocblas_ctrmv_batched: { function: trmv_batched, <<: *single_precision_complex }
+  rocblas_ztrmv_batched: { function: trmv_batched, <<: *double_precision_complex }
+
+  rocblas_strmv_strided_batched: { function: trmv_strided_batched, <<: *single_precision }
+  rocblas_dtrmv_strided_batched: { function: trmv_strided_batched, <<: *double_precision }
+  rocblas_ctrmv_strided_batched: { function: trmv_strided_batched, <<: *single_precision_complex }
+  rocblas_ztrmv_strided_batched: { function: trmv_strided_batched, <<: *double_precision_complex }
+
+  # tpmv
+  rocblas_stpmv: { function: tpmv, <<: *single_precision }
+  rocblas_dtpmv: { function: tpmv, <<: *double_precision }
+  rocblas_ctpmv: { function: tpmv, <<: *single_precision_complex }
+  rocblas_ztpmv: { function: tpmv, <<: *double_precision_complex }
+
+  rocblas_stpmv_batched: { function: tpmv_batched, <<: *single_precision }
+  rocblas_dtpmv_batched: { function: tpmv_batched, <<: *double_precision }
+  rocblas_ctpmv_batched: { function: tpmv_batched, <<: *single_precision_complex }
+  rocblas_ztpmv_batched: { function: tpmv_batched, <<: *double_precision_complex }
+
+  rocblas_stpmv_strided_batched: { function: tpmv_strided_batched, <<: *single_precision }
+  rocblas_dtpmv_strided_batched: { function: tpmv_strided_batched, <<: *double_precision }
+  rocblas_ctpmv_strided_batched: { function: tpmv_strided_batched, <<: *single_precision_complex }
+  rocblas_ztpmv_strided_batched: { function: tpmv_strided_batched, <<: *double_precision_complex }
+
+  # tbmv
+  rocblas_stbmv: { function: tbmv, <<: *single_precision }
+  rocblas_dtbmv: { function: tbmv, <<: *double_precision }
+  rocblas_ctbmv: { function: tbmv, <<: *single_precision_complex }
+  rocblas_ztbmv: { function: tbmv, <<: *double_precision_complex }
+
+  rocblas_stbmv_batched: { function: tbmv_batched, <<: *single_precision }
+  rocblas_dtbmv_batched: { function: tbmv_batched, <<: *double_precision }
+  rocblas_ctbmv_batched: { function: tbmv_batched, <<: *single_precision_complex }
+  rocblas_ztbmv_batched: { function: tbmv_batched, <<: *double_precision_complex }
+
+  rocblas_stbmv_strided_batched: { function: tbmv_strided_batched, <<: *single_precision }
+  rocblas_dtbmv_strided_batched: { function: tbmv_strided_batched, <<: *double_precision }
+  rocblas_ctbmv_strided_batched: { function: tbmv_strided_batched, <<: *single_precision_complex }
+  rocblas_ztbmv_strided_batched: { function: tbmv_strided_batched, <<: *double_precision_complex }
+
+  # trsv
+  rocblas_strsv: { function: trsv, <<: *single_precision }
+  rocblas_dtrsv: { function: trsv, <<: *double_precision }
+
+  rocblas_strsv_batched: { function: trsv_batched, <<: *single_precision }
+  rocblas_dtrsv_batched: { function: trsv_batched, <<: *double_precision }
+
+  rocblas_strsv_strided_batched: { function: trsv_strided_batched, <<: *single_precision }
+  rocblas_dtrsv_strided_batched: { function: trsv_strided_batched, <<: *double_precision }
+
+  # ger
+  rocblas_sger:  { function: ger, <<: *single_precision  }
+  rocblas_dger:  { function: ger, <<: *double_precision  }
+  rocblas_cgeru: { function: geru, <<: *single_precision_complex }
+  rocblas_zgeru: { function: geru, <<: *double_precision_complex }
+  rocblas_cgerc: { function: gerc, <<: *single_precision_complex }
+  rocblas_zgerc: { function: gerc, <<: *double_precision_complex }
+
+  rocblas_sger_batched:  { function: ger_batched, <<: *single_precision  }
+  rocblas_dger_batched:  { function: ger_batched, <<: *double_precision  }
+  rocblas_cgeru_batched: { function: geru_batched, <<: *single_precision_complex }
+  rocblas_zgeru_batched: { function: geru_batched, <<: *double_precision_complex }
+  rocblas_cgerc_batched: { function: gerc_batched, <<: *single_precision_complex }
+  rocblas_zgerc_batched: { function: gerc_batched, <<: *double_precision_complex }
+
+  rocblas_sger_strided_batched:  { function: ger_strided_batched, <<: *single_precision  }
+  rocblas_dger_strided_batched:  { function: ger_strided_batched, <<: *double_precision  }
+  rocblas_cgeru_strided_batched: { function: geru_strided_batched, <<: *single_precision_complex }
+  rocblas_zgeru_strided_batched: { function: geru_strided_batched, <<: *double_precision_complex }
+  rocblas_cgerc_strided_batched: { function: gerc_strided_batched, <<: *single_precision_complex }
+  rocblas_zgerc_strided_batched: { function: gerc_strided_batched, <<: *double_precision_complex }
+
+  # spr
+  rocblas_sspr: { function: spr, <<: *single_precision }
+  rocblas_dspr: { function: spr, <<: *double_precision }
+  rocblas_cspr: { function: spr, <<: *single_precision_complex }
+  rocblas_zspr: { function: spr, <<: *double_precision_complex }
+
+  rocblas_sspr_batched: { function: spr_batched, <<: *single_precision }
+  rocblas_dspr_batched: { function: spr_batched, <<: *double_precision }
+  rocblas_cspr_batched: { function: spr_batched, <<: *single_precision_complex }
+  rocblas_zspr_batched: { function: spr_batched, <<: *double_precision_complex }
+
+  rocblas_sspr_strided_batched: { function: spr_strided_batched, <<: *single_precision }
+  rocblas_dspr_strided_batched: { function: spr_strided_batched, <<: *double_precision }
+  rocblas_cspr_strided_batched: { function: spr_strided_batched, <<: *single_precision_complex }
+  rocblas_zspr_strided_batched: { function: spr_strided_batched, <<: *double_precision_complex }
+
+  # spr2
+  rocblas_sspr2: { function: spr2, <<: *single_precision }
+  rocblas_dspr2: { function: spr2, <<: *double_precision }
+
+  rocblas_sspr2_batched: { function: spr2_batched, <<: *single_precision }
+  rocblas_dspr2_batched: { function: spr2_batched, <<: *double_precision }
+
+  rocblas_sspr2_strided_batched: { function: spr2_strided_batched, <<: *single_precision }
+  rocblas_dspr2_strided_batched: { function: spr2_strided_batched, <<: *double_precision }
+
+  # syr
+  rocblas_ssyr:  { function: syr, <<: *single_precision  }
+  rocblas_dsyr:  { function: syr, <<: *double_precision  }
+  rocblas_csyr:  { function: syr, <<: *single_precision_complex }
+  rocblas_zsyr:  { function: syr, <<: *double_precision_complex }
+
+  rocblas_ssyr_batched:  { function: syr_batched, <<: *single_precision }
+  rocblas_dsyr_batched:  { function: syr_batched, <<: *double_precision }
+  rocblas_csyr_batched:  { function: syr_batched, <<: *single_precision_complex }
+  rocblas_zsyr_batched:  { function: syr_batched, <<: *double_precision_complex }
+
+  rocblas_ssyr_strided_batched:  { function: syr_strided_batched, <<: *single_precision  }
+  rocblas_dsyr_strided_batched:  { function: syr_strided_batched, <<: *double_precision  }
+  rocblas_csyr_strided_batched:  { function: syr_strided_batched, <<: *single_precision_complex }
+  rocblas_zsyr_strided_batched:  { function: syr_strided_batched, <<: *double_precision_complex }
+
+  # syr2
+  rocblas_ssyr2:  { function: syr2, <<: *single_precision  }
+  rocblas_dsyr2:  { function: syr2, <<: *double_precision  }
+  rocblas_csyr2:  { function: syr2, <<: *single_precision_complex }
+  rocblas_zsyr2:  { function: syr2, <<: *double_precision_complex }
+
+  rocblas_ssyr2_batched:  { function: syr2_batched, <<: *single_precision }
+  rocblas_dsyr2_batched:  { function: syr2_batched, <<: *double_precision }
+  rocblas_csyr2_batched:  { function: syr2_batched, <<: *single_precision_complex }
+  rocblas_zsyr2_batched:  { function: syr2_batched, <<: *double_precision_complex }
+
+  rocblas_ssyr2_strided_batched:  { function: syr2_strided_batched, <<: *single_precision  }
+  rocblas_dsyr2_strided_batched:  { function: syr2_strided_batched, <<: *double_precision  }
+  rocblas_csyr2_strided_batched:  { function: syr2_strided_batched, <<: *single_precision_complex }
+  rocblas_zsyr2_strided_batched:  { function: syr2_strided_batched, <<: *double_precision_complex }
+
+  # symv
+  rocblas_ssymv: { function: symv, <<: *single_precision }
+  rocblas_dsymv: { function: symv, <<: *double_precision }
+  rocblas_csymv: { function: symv, <<: *single_precision_complex }
+  rocblas_zsymv: { function: symv, <<: *double_precision_complex }
+
+  rocblas_ssymv_batched: { function: symv_batched, <<: *single_precision }
+  rocblas_dsymv_batched: { function: symv_batched, <<: *double_precision }
+  rocblas_csymv_batched: { function: symv_batched, <<: *single_precision_complex }
+  rocblas_zsymv_batched: { function: symv_batched, <<: *double_precision_complex }
+
+  rocblas_ssymv_strided_batched: { function: symv_strided_batched, <<: *single_precision }
+  rocblas_dsymv_strided_batched: { function: symv_strided_batched, <<: *double_precision }
+  rocblas_csymv_strided_batched: { function: symv_strided_batched, <<: *single_precision_complex }
+  rocblas_zsymv_strided_batched: { function: symv_strided_batched, <<: *double_precision_complex }
+
+  # spmv
+  rocblas_sspmv: { function: spmv, <<: *single_precision }
+  rocblas_dspmv: { function: spmv, <<: *double_precision }
+
+  rocblas_sspmv_batched: { function: spmv_batched, <<: *single_precision }
+  rocblas_dspmv_batched: { function: spmv_batched, <<: *double_precision }
+
+  rocblas_sspmv_strided_batched: { function: spmv_strided_batched, <<: *single_precision }
+  rocblas_dspmv_strided_batched: { function: spmv_strided_batched, <<: *double_precision }
+
+  #sbmv
+  rocblas_ssbmv: { function: sbmv, <<: *single_precision }
+  rocblas_dsbmv: { function: sbmv, <<: *double_precision }
+
+  rocblas_ssbmv_batched: { function: sbmv_batched, <<: *single_precision }
+  rocblas_dsbmv_batched: { function: sbmv_batched, <<: *double_precision }
+
+  rocblas_ssbmv_strided_batched: { function: sbmv_strided_batched, <<: *single_precision }
+  rocblas_dsbmv_strided_batched: { function: sbmv_strided_batched, <<: *double_precision }
+
+  ######
+  # L3 #
+  ######
+
+  # dgmm
+  rocblas_sdgmm: { function: dgmm, <<: *single_precision }
+  rocblas_ddgmm: { function: dgmm, <<: *double_precision }
+  rocblas_cdgmm: { function: dgmm, <<: *single_precision_complex }
+  rocblas_zdgmm: { function: dgmm, <<: *double_precision_complex }
+
+  rocblas_sdgmm_batched: { function: dgmm_batched, <<: *single_precision }
+  rocblas_ddgmm_batched: { function: dgmm_batched, <<: *double_precision }
+  rocblas_cdgmm_batched: { function: dgmm_batched, <<: *single_precision_complex }
+  rocblas_zdgmm_batched: { function: dgmm_batched, <<: *double_precision_complex }
+
+  rocblas_sdgmm_strided_batched: { function: dgmm_strided_batched, <<: *single_precision }
+  rocblas_ddgmm_strided_batched: { function: dgmm_strided_batched, <<: *double_precision }
+  rocblas_cdgmm_strided_batched: { function: dgmm_strided_batched, <<: *single_precision_complex }
+  rocblas_zdgmm_strided_batched: { function: dgmm_strided_batched, <<: *double_precision_complex }
+
+  # geam
+  rocblas_sgeam: { function: geam, <<: *single_precision }
+  rocblas_dgeam: { function: geam, <<: *double_precision }
+  rocblas_cgeam: { function: geam, <<: *single_precision_complex }
+  rocblas_zgeam: { function: geam, <<: *double_precision_complex }
+
+  rocblas_sgeam_batched: { function: geam_batched, <<: *single_precision }
+  rocblas_dgeam_batched: { function: geam_batched, <<: *double_precision }
+  rocblas_cgeam_batched: { function: geam_batched, <<: *single_precision_complex }
+  rocblas_zgeam_batched: { function: geam_batched, <<: *double_precision_complex }
+
+  rocblas_sgeam_strided_batched: { function: geam_strided_batched, <<: *single_precision }
+  rocblas_dgeam_strided_batched: { function: geam_strided_batched, <<: *double_precision }
+  rocblas_cgeam_strided_batched: { function: geam_strided_batched, <<: *single_precision_complex }
+  rocblas_zgeam_strided_batched: { function: geam_strided_batched, <<: *double_precision_complex }
+
+  # gemm
+  rocblas_hgemm: { function: gemm, <<: *half_precision   }
+  rocblas_sgemm: { function: gemm, <<: *single_precision }
+  rocblas_dgemm: { function: gemm, <<: *double_precision }
+  rocblas_cgemm: { function: gemm, <<: *single_precision_complex }
+  rocblas_zgemm: { function: gemm, <<: *double_precision_complex }
+
+  rocblas_hgemm_batched: { function: gemm_batched, <<: *half_precision   }
+  rocblas_sgemm_batched: { function: gemm_batched, <<: *single_precision }
+  rocblas_dgemm_batched: { function: gemm_batched, <<: *double_precision }
+  rocblas_cgemm_batched: { function: gemm_batched, <<: *single_precision_complex }
+  rocblas_zgemm_batched: { function: gemm_batched, <<: *double_precision_complex }
+
+  rocblas_hgemm_strided_batched: { function: gemm_strided_batched, <<: *half_precision }
+  rocblas_sgemm_strided_batched: { function: gemm_strided_batched, <<: *single_precision }
+  rocblas_dgemm_strided_batched: { function: gemm_strided_batched, <<: *double_precision }
+  rocblas_cgemm_strided_batched: { function: gemm_strided_batched, <<: *single_precision_complex }
+  rocblas_zgemm_strided_batched: { function: gemm_strided_batched, <<: *double_precision_complex }
+
+  # herk
+  rocblas_cherk: { function: herk, <<: *single_precision_complex }
+  rocblas_zherk: { function: herk, <<: *double_precision_complex }
+  rocblas_cherk_batched: { function: herk_batched, <<: *single_precision_complex }
+  rocblas_zherk_batched: { function: herk_batched, <<: *double_precision_complex }
+  rocblas_cherk_strided_batched: { function: herk_strided_batched, <<: *single_precision_complex }
+  rocblas_zherk_strided_batched: { function: herk_strided_batched, <<: *double_precision_complex }
+
+  # her2k
+  rocblas_cher2k: { function: her2k, <<: *single_precision_complex }
+  rocblas_zher2k: { function: her2k, <<: *double_precision_complex }
+  rocblas_cher2k_batched: { function: her2k_batched, <<: *single_precision_complex }
+  rocblas_zher2k_batched: { function: her2k_batched, <<: *double_precision_complex }
+  rocblas_cher2k_strided_batched: { function: her2k_strided_batched, <<: *single_precision_complex }
+  rocblas_zher2k_strided_batched: { function: her2k_strided_batched, <<: *double_precision_complex }
+
+  # herkx
+  rocblas_cherkx: { function: herkx, <<: *single_precision_complex }
+  rocblas_zherkx: { function: herkx, <<: *double_precision_complex }
+  rocblas_cherkx_batched: { function: herkx_batched, <<: *single_precision_complex }
+  rocblas_zherkx_batched: { function: herkx_batched, <<: *double_precision_complex }
+  rocblas_cherkx_strided_batched: { function: herkx_strided_batched, <<: *single_precision_complex }
+  rocblas_zherkx_strided_batched: { function: herkx_strided_batched, <<: *double_precision_complex }
+
+  # syrk
+  rocblas_ssyrk: { function: syrk, <<: *single_precision }
+  rocblas_dsyrk: { function: syrk, <<: *double_precision }
+  rocblas_csyrk: { function: syrk, <<: *single_precision_complex }
+  rocblas_zsyrk: { function: syrk, <<: *double_precision_complex }
+  rocblas_ssyrk_batched: { function: syrk_batched, <<: *single_precision }
+  rocblas_dsyrk_batched: { function: syrk_batched, <<: *double_precision }
+  rocblas_csyrk_batched: { function: syrk_batched, <<: *single_precision_complex }
+  rocblas_zsyrk_batched: { function: syrk_batched, <<: *double_precision_complex }
+  rocblas_ssyrk_strided_batched: { function: syrk_strided_batched, <<: *single_precision }
+  rocblas_dsyrk_strided_batched: { function: syrk_strided_batched, <<: *double_precision }
+  rocblas_csyrk_strided_batched: { function: syrk_strided_batched, <<: *single_precision_complex }
+  rocblas_zsyrk_strided_batched: { function: syrk_strided_batched, <<: *double_precision_complex }
+
+  # syr2k
+  rocblas_ssyr2k: { function: syr2k, <<: *single_precision }
+  rocblas_dsyr2k: { function: syr2k, <<: *double_precision }
+  rocblas_csyr2k: { function: syr2k, <<: *single_precision_complex }
+  rocblas_zsyr2k: { function: syr2k, <<: *double_precision_complex }
+  rocblas_ssyr2k_batched: { function: syr2k_batched, <<: *single_precision }
+  rocblas_dsyr2k_batched: { function: syr2k_batched, <<: *double_precision }
+  rocblas_csyr2k_batched: { function: syr2k_batched, <<: *single_precision_complex }
+  rocblas_zsyr2k_batched: { function: syr2k_batched, <<: *double_precision_complex }
+  rocblas_ssyr2k_strided_batched: { function: syr2k_strided_batched, <<: *single_precision }
+  rocblas_dsyr2k_strided_batched: { function: syr2k_strided_batched, <<: *double_precision }
+  rocblas_csyr2k_strided_batched: { function: syr2k_strided_batched, <<: *single_precision_complex }
+  rocblas_zsyr2k_strided_batched: { function: syr2k_strided_batched, <<: *double_precision_complex }
+
+  # syrkx
+  rocblas_ssyrkx: { function: syrkx, <<: *single_precision }
+  rocblas_dsyrkx: { function: syrkx, <<: *double_precision }
+  rocblas_csyrkx: { function: syrkx, <<: *single_precision_complex }
+  rocblas_zsyrkx: { function: syrkx, <<: *double_precision_complex }
+  rocblas_ssyrkx_batched: { function: syrkx_batched, <<: *single_precision }
+  rocblas_dsyrkx_batched: { function: syrkx_batched, <<: *double_precision }
+  rocblas_csyrkx_batched: { function: syrkx_batched, <<: *single_precision_complex }
+  rocblas_zsyrkx_batched: { function: syrkx_batched, <<: *double_precision_complex }
+  rocblas_ssyrkx_strided_batched: { function: syrkx_strided_batched, <<: *single_precision }
+  rocblas_dsyrkx_strided_batched: { function: syrkx_strided_batched, <<: *double_precision }
+  rocblas_csyrkx_strided_batched: { function: syrkx_strided_batched, <<: *single_precision_complex }
+  rocblas_zsyrkx_strided_batched: { function: syrkx_strided_batched, <<: *double_precision_complex }
+
+  # trmm
+  rocblas_strmm: { function: trmm, <<: *single_precision }
+  rocblas_dtrmm: { function: trmm, <<: *double_precision }
+
+  # trsm
+  rocblas_strsm: { function: trsm, <<: *single_precision }
+  rocblas_dtrsm: { function: trsm, <<: *double_precision }
+
+  rocblas_strsm_batched: { function: trsm_batched, <<: *single_precision }
+  rocblas_dtrsm_batched: { function: trsm_batched, <<: *double_precision }
+
+  rocblas_strsm_strided_batched: { function: trsm_strided_batched, <<: *single_precision }
+  rocblas_dtrsm_strided_batched: { function: trsm_strided_batched, <<: *double_precision }
+
+  # trtri
+  rocblas_strtri: { function: trtri, <<: *single_precision }
+  rocblas_dtrtri: { function: trtri, <<: *double_precision }
+  rocblas_strtri_batched: { function: trtri_batched, <<: *single_precision }
+  rocblas_dtrtri_batched: { function: trtri_batched, <<: *double_precision }
+  rocblas_strtri_strided_batched: { function: trtri_strided_batched, <<: *single_precision }
+  rocblas_dtrtri_strided_batched: { function: trtri_strided_batched, <<: *double_precision }
+
+Tests:

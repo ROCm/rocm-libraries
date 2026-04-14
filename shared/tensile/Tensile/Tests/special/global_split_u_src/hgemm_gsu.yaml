@@ -1,0 +1,82 @@
+GlobalParameters:
+  MinimumRequiredVersion: 4.2.0
+  PrintLevel: 1
+  ForceRedoBenchmarkProblems: True
+  ForceRedoLibraryLogic: True
+  ForceRedoLibraryClient: True
+  CMakeBuildType: Release
+  EnqueuesPerSync: 1
+  SyncsPerBenchmark: 1
+  LibraryPrintDebug: False
+  NumElementsToValidate: -1
+  ValidationMaxToPrint: 8
+  ValidationPrintValids: False
+  ShortNames: False
+  MergeFiles: True
+  Platform: 0
+  Device: 0
+  KernelTime: True
+  PinClocks: False
+  SleepPercent: 200
+  DataInitTypeA : 3
+  DataInitTypeB : 3
+  DataInitTypeBeta : 0
+  CodeFromFiles: 1
+  SolutionSelectionAlg: 1
+  PrintWinnersOnly: 0
+  PrintTensorA: 0
+  PrintTensorB: 0
+  PrintSolutionRejectionReason: 0
+
+
+BenchmarkProblems:
+  ########################################
+  # NN - standard
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DestDataType: h
+      TransposeA: False
+      TransposeB: False
+      UseBeta: False
+      Batched: True
+
+  ########################################
+  # NN - MI workloads (DeepBench, ResNet, etc)
+  ########################################
+    -
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - EdgeType: ["ShiftPtr"]
+        - LoopTail: [True]
+        - KernelLanguage: ["Source"]
+      ForkParameters:
+        - PrefetchGlobalRead: [ False]
+        - PrefetchLocalRead: [ False]
+        - ThreadTile:
+          - [ 4, 8 ]
+          - [ 8, 8 ]
+        - WorkGroup:
+          #- [ 8, 16, 1 ] # control
+          - [ 8, 4, 2 ] # LSU case
+          - [ 8, 8, 1 ]
+          - [ 8, 16, 1 ]
+        - GlobalSplitU: [1,2,3,4,5,7,8,16,32,64]
+        - WorkGroupMapping: [64]
+        - DepthU: [ 16 ]
+        - VectorWidth: [2,4,8]
+        - GlobalReadVectorWidth: [2,4,8]
+        - VectorAtomicWidth: [-1]
+        - AssertFree0ElementMultiple: [8]  # so we can test GRVW sweep
+        - AssertSummationElementMultiple: [1,2]  # so we can test GRVW sweep
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          # Note for K>1024 the operation order change with LSU doesn't consistently match CPU
+          #- Range: [[64,8,64], [64,8,64], [1,1,2], [64, 64, 64, 1024]]
+          - Range: [[56,8,72], [56,8,72], [1,1,2], [64, 64, 34, 1024]]
+          - Range: [[56,8,72], [56,8,72], [1,1,2], [66, 64, 34, 1024]]

@@ -1,0 +1,144 @@
+---
+include: ../../../../clients/include/rocblas_common.yaml
+
+Definitions:
+  - &square_sizes
+    - { scan: [ 512..8192..512 ], N: *c_scan_value, M: *c_scan_value, K: *c_scan_value, lda: *c_scan_value, ldb: *c_scan_value, ldc: *c_scan_value }
+
+  - &gemm_n1_transBN_sizes
+    - { scan: [ 1024..8192..1024 ], M: *c_scan_value, N: 1, K: [ 1024..4096..1024 ], lda: 8192, ldb: 4096, ldc: *c_scan_value, ldd: *c_scan_value } # non-transpose B
+
+  - &gemm_n1_transBT_sizes
+    - { scan: [ 1024..8192..1024 ], M: *c_scan_value, N: 1, K: [ 1024..4096..1024 ], lda: 8192, ldb: 1, ldc: *c_scan_value, ldd: *c_scan_value } # transpose B
+    - { scan: [ 1024..8192..1024 ], M: *c_scan_value, N: 1, K: [ 1024..4096..1024 ], lda: 8192, ldb: 8, ldc: *c_scan_value, ldd: *c_scan_value } # transpose B
+    - { scan: [ 1024..8192..1024 ], M: *c_scan_value, N: 1, K: [ 1024..4096..1024 ], lda: 8192, ldb: 1024, ldc: *c_scan_value, ldd: *c_scan_value } # transpose B
+
+  - &gemm_m1_transAN_sizes
+    - { scan: [ 1024..8192..1024 ], M: 1, N: *c_scan_value, K: [ 1024..4096..1024 ], lda: 1, ldb: 8192, ldc: 1, ldd: 1 }
+    - { scan: [ 1024..8192..1024 ], M: 1, N: *c_scan_value, K: [ 1024..4096..1024 ], lda: 8, ldb: 8192, ldc: 8, ldd: 8 }
+
+  - &gemm_m1_transAT_sizes
+    - { scan: [ 1024..8192..1024 ], M: 1, N: *c_scan_value, K: [ 1024..4096..1024 ], lda: 4096, ldb: 8192, ldc: 4096, ldd: 4096 }
+
+  - &alpha_beta_range_small
+    - { alpha: 2.0, beta: 2.0, alphai: 1.5, betai: -1.5 }
+
+Tests:
+  - name: gemm_ex_bench_const_nk
+    category: bench
+    function: gemm_ex
+    precision:
+      - *hpa_half_precision
+      - *single_precision
+      - *double_precision
+    transA: [ N, T ]
+    transB: [ N, T ]
+    alpha: 1
+    incx: 1
+    incy: 1
+    N: 384
+    M: 2048..24576..2048
+    K: 384
+    lda: 24576 # m or k, depends on transA
+    ldb: 384 # k or n, depends on transB
+    ldc: 24576
+    ldd: 24576
+
+  - name: gemm_ex_bench_const_mk
+    category: bench
+    function: gemm_ex
+    precision:
+      - *hpa_half_precision
+      - *single_precision
+      - *double_precision
+    transA: [ N, T ]
+    transB: [ N, T ]
+    alpha: 1
+    incx: 1
+    incy: 1
+    N: 2048..24576..2048
+    M: 384
+    K: 384
+    lda: 384
+    ldb: 24576
+    ldc: 384
+    ldd: 384
+
+  - name: gemm_ex_bench_const_mn
+    category: bench
+    function: gemm_ex
+    precision:
+      - *hpa_half_precision
+      - *single_precision
+      - *double_precision
+    transA: [ N, T ]
+    transB: [ N, T ]
+    alpha: 1
+    incx: 1
+    incy: 1
+    N: 384
+    M: 384
+    K: 2048..24576..2048
+    lda: 24576
+    ldb: 24576
+    ldc: 384
+    ldd: 384
+
+  - name: gemm_ex_bench_m_equals_n_equals_k
+    category: bench
+    function: gemm_ex
+    precision:
+      - *hpa_half_precision
+      - *single_precision
+      - *double_precision
+    transA: [ N, T ]
+    transB: [ N, T ]
+    alpha: 1
+    incx: 1
+    incy: 1
+    matrix_size: *square_sizes
+
+  - name: gemm_ex_gemv_n1_non
+    category: bench
+    function:
+      gemm_ex: *gemv_bfloat_half_single_double_complex_real_precisions
+    transA: [N, T]
+    transB: [N]
+    matrix_size: *gemm_n1_transBN_sizes
+    alpha_beta: *alpha_beta_range_small
+    cold_iters: 10
+    iters: 20
+
+  - name: gemm_ex_gemv_n1_trans
+    category: bench
+    function:
+      gemm_ex: *gemv_bfloat_half_single_double_complex_real_precisions
+    transA: [N, T]
+    transB: [T]
+    matrix_size: *gemm_n1_transBT_sizes
+    alpha_beta: *alpha_beta_range_small
+    cold_iters: 10
+    iters: 20
+
+  - name: gemm_ex_gemv_m1_non
+    category: bench
+    function:
+      gemm_ex: *gemv_bfloat_half_single_double_complex_real_precisions
+    transA: [N]
+    transB: [N, T]
+    matrix_size: *gemm_m1_transAN_sizes
+    alpha_beta: *alpha_beta_range_small
+    cold_iters: 10
+    iters: 20
+
+  - name: gemm_ex_gemv_m1_trans
+    category: bench
+    function:
+      gemm_ex: *gemv_bfloat_half_single_double_complex_real_precisions
+    transA: [T]
+    transB: [N, T]
+    matrix_size: *gemm_m1_transAT_sizes
+    alpha_beta: *alpha_beta_range_small
+    cold_iters: 10
+    iters: 20
+...

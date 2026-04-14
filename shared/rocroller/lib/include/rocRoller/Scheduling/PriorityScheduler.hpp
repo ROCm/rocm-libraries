@@ -1,0 +1,46 @@
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
+#pragma once
+
+#include <concepts>
+#include <string>
+#include <vector>
+
+#include <rocRoller/Scheduling/Costs/Cost_fwd.hpp>
+#include <rocRoller/Scheduling/PriorityScheduler_fwd.hpp>
+#include <rocRoller/Scheduling/Scheduler.hpp>
+
+namespace rocRoller
+{
+    namespace Scheduling
+    {
+        /**
+         * A subclass for Priority scheduling
+         *
+         * This scheduler works by repeatedly yielding the next
+         * instruction from the the lowest index stream with the
+         * least cost.
+         */
+        class PriorityScheduler : public Scheduler
+        {
+        public:
+            PriorityScheduler(ContextPtr, CostFunction);
+
+            using Base = Scheduler;
+
+            static const std::string        Basename;
+            inline static const std::string Name = "PriorityScheduler";
+
+            static bool Match(Argument arg);
+
+            static std::shared_ptr<Scheduler> Build(Argument arg);
+
+            std::string name() const override;
+
+            virtual bool supportsAddingStreams() const override;
+
+            Generator<Instruction> operator()(std::vector<Generator<Instruction>>& seqs) override;
+        };
+    }
+}

@@ -1,0 +1,202 @@
+GlobalParameters:
+  MinimumRequiredVersion: 4.9.0
+  PrintLevel: 1
+  ForceRedoBenchmarkProblems: True
+  ForceRedoLibraryLogic: True
+  ForceRedoLibraryClient: True
+  CMakeBuildType: Release
+  EnqueuesPerSync: 1
+  SyncsPerBenchmark: 2
+  LibraryPrintDebug: False
+  NumElementsToValidate: 0
+  ValidationMaxToPrint: 4
+  ValidationPrintValids: False
+  ShortNames: False
+  MergeFiles: True
+  Platform: 0
+  Device: 0
+  KernelTime: True
+  PinClocks: False
+  SleepPercent: 0
+  DataInitTypeBeta : 2
+  CEqualD: True
+# PrintSolutionRejectionReason: True
+# SolutionSelectionAlg: 1
+# PrintWinnersOnly: 1
+# ExitOnFails: 0
+
+BenchmarkProblems:
+
+  ########################################
+  # NT
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: d
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - BufferLoad: [True]
+        - BufferStore: [True]
+        - KernelLanguage: ["Assembly"]
+        - EdgeType: ["ShiftPtr"]
+        - LoopTail: [True]
+        - WorkGroupMapping: [8]
+        - PrefetchLocalRead: [True]
+        - PrefetchGlobalRead: [True]
+        - VectorWidth: [-1]
+      ForkParameters:
+        - StaggerU: [0]
+        - ThreadTile:
+          - [ 4, 4 ]
+        - WorkGroup:
+          - [ 16, 16,  1 ]
+        - DepthU: [ 8 ]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [ [64], [64], [1], [64] ]
+
+    - # BenchmarkProblemSizeGroup - M,N < VW
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - BufferLoad: [True]
+        - BufferStore: [True]
+        - KernelLanguage: ["Assembly"]
+        - EdgeType: ["ShiftPtr"]
+        - LoopTail: [True]
+        - WorkGroupMapping: [8]
+        - PrefetchLocalRead: [True]
+        - PrefetchGlobalRead: [True]
+        - VectorWidth: [-1]
+      ForkParameters:
+        - StaggerU: [0]
+        - ThreadTile:
+          - [ 4, 4 ]
+        - WorkGroup:
+          - [ 16, 16,  1 ]
+        - DepthU: [ 4 ]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [ [1], [1], [1], [64] ]
+          - Range: [ [1], [64], [1], [64] ]
+          - Range: [ [64], [1], [1], [64] ]
+
+    - # BenchmarkProblemSizeGroup - k=256,384
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - BufferLoad: [True]
+        - BufferStore: [True]
+        - KernelLanguage: ["Assembly"]
+        - EdgeType: ["ShiftPtr"]
+        - LoopTail: [True]
+      ForkParameters:
+        - FractionalLoad: [True]
+        - PrefetchGlobalRead: [True]
+        - PrefetchLocalRead: [True, False]
+        - PersistentKernel: [0]
+        - SuppressNoLoadLoop: [True, False]
+        - StaggerU: [0]
+        - ThreadTile:
+          - [ 4, 4 ]
+          - [ 6, 4 ]
+          - [ 4, 6 ]
+          - [ 6, 6 ]
+          - [ 8, 4 ]
+          - [ 4, 8 ]
+        - WorkGroup:
+          - [ 32, 16,  1 ]
+          - [ 16,  8,  1 ]
+          - [  8, 16,  1 ]
+          - [ 16, 16,  1 ]
+          - [ 16, 32,  1 ]
+        - WorkGroupMapping: [1, 8]
+        - DepthU: [ 4, 8 ]
+        - VectorWidth: [-1]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [ 4608, 4608, 1, 4608 ]
+          - Exact: [ 4608, 4608, 1, 50000 ]
+          - Exact: [ 5760, 5760, 1, 5760 ]
+          - Exact: [ 7744, 7744, 1, 7744 ]
+          - Range: [ [384, 384, 44928],      0, [1], [384], [44928], [44928], [0], [0] ]
+          - Range: [ [256, 256, 44800],      0, [1], [256], [44928], [44928], [0], [0] ]
+          - Range: [ [384, 384, 44160], [3072], [1], [384], [44160], [44160], [0], [0] ]
+          - Range: [ [256, 256, 44800], [3072], [1], [256], [44800], [44800], [0], [0] ]
+          - Range: [ [256, 256, 44800], [2048], [1], [256], [44800], [44800], [0], [0] ]
+
+    - # BenchmarkProblemSizeGroup - M*128 128*N (small)
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - BufferLoad: [True]
+        - BufferStore: [True]
+        - KernelLanguage: ["Assembly"]
+        - EdgeType: ["ShiftPtr"]
+        - LoopTail: [True]
+        - WorkGroupMapping: [8]
+        - PrefetchGlobalRead: [True]
+        - VectorWidth: [-1]
+        - ReplacementKernel: [False]
+      ForkParameters:
+        - PrefetchLocalRead: [True,False]
+        - StaggerU: [0]
+        - ThreadTile:
+          - [ 4, 4 ]
+          - [ 6, 4 ]
+          - [ 4, 6 ]
+          - [ 6, 6 ]
+        - WorkGroup:
+          - [ 16,  8,  1 ]
+          - [  8, 16,  1 ]
+          - [ 16, 16,  1 ]
+          - [ 16, 32,  1 ]
+          # - [ 32, 16,  1 ]
+        - DepthU: [ 2, 4, 8, 12 ]
+        - AssertSummationElementMultiple: [2]
+        - AssertFree0ElementMultiple: [2]
+        - AssertFree1ElementMultiple: [2]
+        - FractionalLoad: [1]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [ [128, 1280, 44928], [128], [1], [128, 128, 384] ]  # TRSM
+
+LibraryLogic:
+    ScheduleName: "vega20"
+    DeviceNames: ["Device 66a0", "Device 66a1", "Device 66a7", "Device 66af", "Vega 20"]
+    ArchitectureName: "gfx906"
+
+#   ScheduleName: "vega10"
+#   DeviceNames: ["Device 6863", "Device 6862", "Device 687f", "Device 6860", "Device 6861", "Vega 10 XTX [Radeon Vega Frontier Edition]", "Vega [Radeon RX Vega]",
+#       Vega, Device 6864, Device 686c]
+#   ArchitectureName: "gfx900"
+
+#   ScheduleName: "mi25"
+#   DeviceNames: ["Device 6860"]
+#   ArchitectureName: "gfx900"
+
+#   ScheduleName: "r9nano"
+#   DeviceNames: ["Device 7300"]
+#   ArchitectureName: "gfx803"
+
+#   ScheduleName: "hip"
+#   DeviceNames: ["Device 0000"]
+#   ArchitectureName: "fallback"
+
+LibraryClient:

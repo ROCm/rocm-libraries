@@ -1,0 +1,10 @@
+/**
+@brief hipRAND host API Module.
+@author
+@file
+*/
+
+/**
+ * \defgroup hiprandhost hipRAND host API
+ *
+ */

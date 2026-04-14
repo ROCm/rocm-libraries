@@ -1,0 +1,166 @@
+GlobalParameters:
+  MinimumRequiredVersion: 4.2.0
+  PrintLevel: 1
+  ForceRedoBenchmarkProblems: True
+  ForceRedoLibraryLogic: True
+  ForceRedoLibraryClient: True
+  CMakeBuildType: Release
+  EnqueuesPerSync: 1
+  SyncsPerBenchmark: 1
+  LibraryPrintDebug: False
+  NumElementsToValidate: -1
+  ValidationMaxToPrint: 4
+  ValidationPrintValids: False
+  ShortNames: False
+  MergeFiles: True
+  ExitOnFails: 1  # Some solutions fail so just ensure we find one good solution
+  # In IndexAssignments, the fastest moving dimension is listed first.
+
+BenchmarkProblems:
+  - # 4-D batched sgemm NN
+    - # ProblemType
+      OperationType: TensorContraction
+      DataType: s
+      DestDataType: s
+      UseBeta: True
+      NumIndicesC: 3
+      IndexAssignmentsA: [0, 3, 2]
+      IndexAssignmentsB: [1, 3, 2]
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - EdgeType: ["ShiftPtr"]
+        - LoopTail: [True]
+      ForkParameters:
+        - ThreadTile:
+          - [ 4, 8 ]
+          - [ 4, 4 ]
+          - [ 2, 4 ]
+        - WorkGroup:
+          - [  8, 16,  1 ]
+          - [ 16, 16,  1 ]
+        - DepthU: [4, 8]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [ [127,1,128], [127,1,128], [2, 1, 3], [63,1,65] ]
+
+  - # 4-D with 2-D summation
+    - # ProblemType
+      OperationType: TensorContraction
+      DataType: s
+      DestDataType: s
+      UseBeta: True
+      NumIndicesC: 2 # change from above, remove batched dim so it becomes summation
+      IndexAssignmentsA: [2, 0, 3]  # [k, i, m]
+      IndexAssignmentsB: [2, 1, 3]  # [k, j, m]
+      # C[ij] = Sum[kl] A[kil] * B[kjl]
+      # Free Indices: [i, j]
+      # Batch Indices:
+      # Sum Indices:   k, l
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - EdgeType: ["ShiftPtr"]
+        - LoopTail: [True]
+      ForkParameters:
+        - PrefetchGlobalRead: [False, True]
+        - PrefetchLocalRead: [False, True]
+        - ThreadTile:
+          - [ 4, 4 ]
+          - [ 2, 4 ]
+          - [ 2, 2 ]
+        - WorkGroup:
+          - [ 16, 16,  1 ]
+          - [  8,  8,  4 ]
+          - [  8,  8,  1 ]
+        - DepthU: [4, 8]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [ [63,1,65], [63,1,65], [2,1,3], [15,1,17] ]
+
+  - # 5-D "gemm" with 3-D summation
+    - # ProblemType
+      OperationType: TensorContraction
+      DataType: s
+      DestDataType: s
+      UseBeta: True
+      NumIndicesC: 2
+      IndexAssignmentsA: [2, 3, 0, 4]
+      IndexAssignmentsB: [2, 3, 4, 1]
+      # C[ij] = Sum[klm] A[klim] * B[klmj]
+      # Free Indices: [i, j]
+      # Batch Indices:
+      # Sum Indices: k, l, m
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - EdgeType: ["ShiftPtr"]
+        - LoopTail: [True]
+      ForkParameters:
+        - PrefetchGlobalRead: [False]
+        - PrefetchLocalRead: [False, True]
+        - ThreadTile:
+          - [ 4, 8 ]
+          - [ 4, 4 ]
+          - [ 2, 2 ]
+        - WorkGroup:
+          - [  4,  8,  2 ]
+          - [  8,  8,  1 ]
+          - [ 16, 16,  1 ]
+        - DepthU: [4, 8]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [ [63,1,65], [63,1,65], [15,1,17], [2,1,3], [2,1,3] ]
+
+  - # 6-D Image Convolution
+    - # ProblemType
+      OperationType: TensorContraction
+      DataType: s
+      DestDataType: s
+      UseBeta: True
+      NumIndicesC: 3
+      IndexAssignmentsA: [3, 4, 0, 1, 5]  # n(s), m(s), i(f), j(b), l(s)
+      IndexAssignmentsB: [3, 4, 1, 5, 2]  # n(s), m(s), j(b), l(s), k(f)
+      # C[ijk] = Sum[lmn] A[lmijn] * B[lmjnk]
+      # Free Indices: [i, k]
+      # Batch Indices: j
+      # Sum Indices: l, m, n
+      # Translate to traditional conv notation:
+      # i=H*W, j=N, k=Cout, l=S, m=R, n=Cin
+      # Need one more free dimension to decouple H,W.
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - EdgeType: ["ShiftPtr"]
+        - LoopTail: [True]
+      ForkParameters:
+        - PrefetchGlobalRead: [False]
+        - PrefetchLocalRead: [False, True]
+        - ThreadTile:
+          - [ 4, 8 ]
+          - [ 4, 4 ]
+          - [ 2, 2 ]
+        - WorkGroup:
+          - [  4,  8,  2 ]
+          - [  8,  8,  1 ]
+          - [ 16, 16,  1 ]
+        - DepthU: [4, 8]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [ [63,1,65], [2,1,3], [63,1,65], [15,1,17], [2,1,3], [2,1,3] ]

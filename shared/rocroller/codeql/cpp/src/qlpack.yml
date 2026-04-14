@@ -1,0 +1,10 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier:  MIT
+
+name: rocmsoftwareplatform/rocroller
+version: 0.0.1
+libraryPathDependencies:
+  - codeql/cpp-all
+  - rocmsoftwareplatform/rocroller-lib
+suites: rr-query-suites
+extractor: cpp

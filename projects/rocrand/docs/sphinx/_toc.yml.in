@@ -1,0 +1,34 @@
+# Anywhere {branch} is used, the branch name will be substituted.
+# These comments will also be removed.
+root: index
+subtrees:
+  - caption: Install
+    entries:
+    - file: install/installing
+      title: Installation guide
+
+  - caption: Conceptual
+    entries:
+    - file: conceptual/programmers-guide
+      title: Programming guide
+    - file: conceptual/curand-compatibility
+    - file: conceptual/dynamic_ordering_configuration
+    - file: conceptual/generator-types
+      title: Random number generators
+
+  - caption: Examples
+    entries:
+    - url: https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocrand/python/rocrand/examples
+      title: Examples
+
+  - caption: API reference
+    entries:
+    - file: api-reference/data-type-support
+    - file: api-reference/cpp-api
+    - file: api-reference/python-api
+    - file: fortran-api-reference
+    - file: doxygen/html/index
+
+  - caption: About
+    entries:
+    - file: license

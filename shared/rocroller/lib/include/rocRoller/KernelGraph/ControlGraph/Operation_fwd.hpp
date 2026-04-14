@@ -1,0 +1,91 @@
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
+#pragma once
+
+#include <variant>
+
+#include <rocRoller/Utilities/Concepts.hpp>
+
+namespace rocRoller
+{
+    namespace KernelGraph::ControlGraph
+    {
+        struct Assign;
+        struct Barrier;
+        struct ConditionalOp;
+        struct AssertOp;
+        struct Deallocate;
+        struct DoWhileOp;
+        struct Exchange;
+        struct ForLoopOp;
+        struct Kernel;
+        struct LoadLDSTile;
+        struct LoadLinear;
+        struct LoadVGPR;
+        struct LoadSGPR;
+        struct LoadTiled;
+        struct Multiply;
+        struct NOP;
+        struct Block;
+        struct Scope;
+        struct SetCoordinate;
+        struct StoreLDSTile;
+        struct LoadTileDirect2LDS;
+        struct StoreLinear;
+        struct StoreTiled;
+        struct StoreVGPR;
+        struct StoreSGPR;
+        struct TensorContraction;
+        struct UnrollOp;
+        struct WaitZero;
+        struct SeedPRNG;
+
+        using Operation = std::variant<Assign,
+                                       Barrier,
+                                       ConditionalOp,
+                                       AssertOp,
+                                       Deallocate,
+                                       DoWhileOp,
+                                       Exchange,
+                                       ForLoopOp,
+                                       Kernel,
+                                       LoadLDSTile,
+                                       LoadLinear,
+                                       LoadTiled,
+                                       LoadVGPR,
+                                       LoadSGPR,
+                                       LoadTileDirect2LDS,
+                                       Multiply,
+                                       NOP,
+                                       Block,
+                                       Scope,
+                                       SetCoordinate,
+                                       StoreLDSTile,
+                                       StoreLinear,
+                                       StoreTiled,
+                                       StoreVGPR,
+                                       StoreSGPR,
+                                       TensorContraction,
+                                       UnrollOp,
+                                       WaitZero,
+                                       SeedPRNG>;
+
+        template <typename T>
+        concept COperation = std::constructible_from<Operation, T>;
+
+        template <typename T>
+        concept CConcreteOperation = (COperation<T> && !std::same_as<Operation, T>);
+
+        template <typename T>
+        concept COperationWithBody = CIsAnyOf<T,
+                                              ConditionalOp,
+                                              DoWhileOp,
+                                              ForLoopOp,
+                                              Kernel,
+                                              NOP,
+                                              Block,
+                                              Scope,
+                                              SetCoordinate>;
+    }
+}

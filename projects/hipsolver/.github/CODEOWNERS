@@ -1,0 +1,8 @@
+* @jzuniga-amd @tfalders @qjojo @EdDAzevedo @jmachado-amd @AGonzales-amd
+# Documentation files
+docs/ @ROCm/rocm-documentation @jzuniga-amd @tfalders @qjojo @EdDAzevedo @jmachado-amd @AGonzales-amd
+*.md @ROCm/rocm-documentation @jzuniga-amd @tfalders @qjojo @EdDAzevedo @jmachado-amd @AGonzales-amd
+*.rst @ROCm/rocm-documentation @jzuniga-amd @tfalders @qjojo @EdDAzevedo @jmachado-amd @AGonzales-amd
+.readthedocs.yaml @ROCm/rocm-documentation @jzuniga-amd @tfalders @qjojo @EdDAzevedo @jmachado-amd @AGonzales-amd
+# Header directory for Doxygen documentation
+library/include/ @ROCm/rocm-documentation @jzuniga-amd @tfalders @qjojo @EdDAzevedo @jmachado-amd @AGonzales-amd

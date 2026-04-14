@@ -1,0 +1,30 @@
+- DataType: "f16_r"
+  DestDataType: "f16_r"
+  ComputeDataType: "f32_r"
+  TransposeA: "N"
+  TransposeB: "N"
+  M:
+    Exact: "16,32,48,64"
+  N:
+    Range: "1:2048"
+    Points: 20
+  Batch:
+    Exact: "1"
+  K:
+    Range: "1:128"
+    Points: 4
+- DataType: "f32_r"
+  DestDataType: "f32_r"
+  ComputeDataType: "f32_r"
+  TransposeA: "N"
+  TransposeB: "N"
+  M:
+    Exact: "16,32,48,64"
+  N:
+    Range: "1:2048"
+    Points: 20
+  Batch:
+    Exact: "1"
+  K:
+    Range: "1:128"
+    Points: 4

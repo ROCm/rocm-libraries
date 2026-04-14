@@ -1,0 +1,10 @@
+# rmake
+psutil
+# rocBLAS clients use
+pyyaml
+# Tensile related
+msgpack
+six
+wheel
+virtualenv
+joblib

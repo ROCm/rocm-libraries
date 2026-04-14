@@ -1,0 +1,33 @@
+
+# Build and debug artifacts
+build**
+doc_**
+a.out*
+.cache
+core
+
+# Logs and tests
+202?-??-??-*
+.coverage
+results*.txt
+test_optimize_weights
+junit.xml
+
+# Temporary directories
+Temporary
+tmp
+
+#Editor
+.vscode
+.devcontainer
+
+# CodeQL
+cql-data
+cql/checks
+
+# Python
+*.pyc
+.venv
+
+# AI files
+mcp.json

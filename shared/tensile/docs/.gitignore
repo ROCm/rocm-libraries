@@ -1,0 +1,10 @@
+build/
+_build/
+_doxygen/
+doxygen/html
+doxygen/xml
+doxygen/docs
+_toc.yml
+html/
+xml/
+latex/

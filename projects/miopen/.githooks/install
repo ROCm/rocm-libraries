@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+
+cd $(git rev-parse --git-dir)
+
+echo "Installing hooks..."
+ln -sT ../.githooks hooks
+if [ $? -eq 0 ]; then
+    echo "Done!"
+else
+    echo "Hooks failed to install: .git/hooks already exists or cannot be created"
+fi

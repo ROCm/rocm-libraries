@@ -1,0 +1,37 @@
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
+#pragma once
+
+#include <map>
+
+#include <rocRoller/Expression_fwd.hpp>
+#include <rocRoller/KernelGraph/KernelGraph.hpp>
+
+namespace rocRoller
+{
+    namespace KernelGraph
+    {
+        class GraphReindexer
+        {
+        public:
+            std::map<int, int> coordinates;
+            std::map<int, int> control;
+        };
+
+        /**
+         * Transducer for reindexing expressions via GraphReindexer.
+         *
+         * Usage:
+         *
+         *   GraphReindexer reindexer;
+         *   ...
+         *   auto newExpr = reindexExpression(oldExpr, reindexer);
+         *
+         */
+        Expression::ExpressionPtr reindexExpression(Expression::ExpressionPtr expr,
+                                                    GraphReindexer const&     reindexer);
+
+        void reindexExpressions(KernelGraph& graph, int tag, GraphReindexer const& reindexer);
+    }
+}

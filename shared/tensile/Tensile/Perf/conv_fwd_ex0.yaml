@@ -1,0 +1,62 @@
+GlobalParameters:
+  MinimumRequiredVersion: 4.1.0
+  CMakeBuildType: Release
+  LibraryPrintDebug: False
+  NumElementsToValidate: 1000
+  ValidationMaxToPrint: 16
+  PinClocks: False
+  SleepPercent: 0
+  DataInitTypeA: 3
+  DataInitTypeB: 3
+  ClientArgs: "--stride_b 0"
+  EnqueuesPerSync: 100 # avoid weird timing issues
+  KernelTime: True
+
+BenchmarkProblems:
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: s
+      TransposeA: False
+      TransposeB: False
+      UseBeta: False
+      Batched: True
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+        - EdgeType: ["ShiftPtr"]
+      ForkParameters:
+        - ThreadTile:
+          - [ 8, 8 ]
+        - WorkGroup:
+          - [ 8, 16, 1 ]
+          - [ 16, 16, 1 ]
+          - [ 32, 16, 1 ]
+          - [ 16, 32, 1 ]
+        - GlobalSplitU: [1]
+        - DepthU: [16]
+        - GlobalReadVectorWidth: [4]
+        - StaggerU: [0,32]
+        - StaggerUMapping: [0,1]
+        - WorkGroupMapping: [1,8,64]
+        - VectorWidth: [4]
+        - FractionalLoad: [1]
+      BenchmarkForkParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          #- Exact: [ 784, 128, 64, 512 ] # original
+          #- Exact: [ 768, 128, 64, 512 ]
+          - Exact: [ 768, 128, 64, 2048 ] # modified to user more challenging 8K stride
+          #- Exact: [ 384, 128, 64, 2048 ]
+
+  ########################################
+  #
+  #Cijk_Ailk_Bljk_S_MT128x128x16_GRVW04_SUM01_TT08_08_USFGRO0_VW04_WG16_16_01_WGM0
+
+    # ./rocblas-bench -f gemm_strided_batched_ex --transposeA N --transposeB T -m 3136 -n 256 -k 64 --alpha 1 --a_type s --lda 3136 --stride_a 200704 --b_type s --ldb 256 --stride_b 0 --beta 0 --c_type s --ldc 3136 --stride_c 802816 --d_type s --ldd 3136 --stride_d 802816 --batch 64 --compute_type s --algo 0 --solution_index 0 --flags 0 --workspace_size 0x7ffc72d7d248
+    #
+    # ./rocblas-bench -f gemm_strided_batched_ex --transposeA N --transposeB N -m 784 -n 128 -k 512 --alpha 1 --a_type s --lda 784 --stride_a 401408 --b_type s --ldb 512 --stride_b 0 --beta 0 --c_type s --ldc 784 --stride_c 100352 --d_type s --ldd 784 --stride_d 100352 --batch 64 --compute_type s --algo 0 --solution_index 0 --flags 0 --workspace_size 0x7ffeb19c1c08
+    # Cijk_Ailk_Bljk_SB_MT128x064x16_APM0_AF0EM01_AF1EM01_ASEM01_BL1_DTL0_EPS1_FL01_GRVW04_GSU01_ISA906_K1_KLA_LPA00_LPB00_MGWVW01_NLCA01_NLCB01_PGR1_PLR1_SNLL1_TT08_04_USFGRO0_VAW01_VW04_WG16_16_01_WGM01;

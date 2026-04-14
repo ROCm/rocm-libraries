@@ -1,0 +1,206 @@
+/* **************************************************************************
+ * Copyright (C) 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ *
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ *
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ * *************************************************************************/
+
+#include "roclapack_geqrf.hpp"
+
+ROCSOLVER_BEGIN_NAMESPACE
+
+template <typename T, typename I, typename U>
+rocblas_status
+    rocsolver_geqrf_impl(rocblas_handle handle, const I m, const I n, U A, const I lda, T* ipiv)
+{
+    ROCSOLVER_ENTER_TOP("geqrf", "-m", m, "-n", n, "--lda", lda);
+
+    if(!handle)
+        return rocblas_status_invalid_handle;
+
+    // argument checking
+    rocblas_status st = rocsolver_geqr2_geqrf_argCheck(handle, m, n, lda, A, ipiv);
+    if(st != rocblas_status_continue)
+        return st;
+
+    // working with unshifted arrays
+    rocblas_stride shiftA = 0;
+
+    // normal (non-batched non-strided) execution
+    rocblas_stride strideA = 0;
+    rocblas_stride stridep = 0;
+    I batch_count = 1;
+
+    // memory workspace sizes:
+    // size for constants in rocblas calls
+    size_t size_scalars;
+    // size of arrays of pointers (for batched cases) and re-usable workspace
+    bool optim_mem;
+    size_t size_work_workArr_work1, size_work2, size_work3, size_work4, size_workArr;
+    // extra requirements for calling GEQR2 and to store temporary triangular factor
+    size_t size_Abyx_norms_trfact;
+    // extra requirements for calling GEQR2 and LARFB
+    size_t size_diag_tmptr;
+    rocsolver_geqrf_getMemorySize<false, false, T>(
+        m, n, batch_count, &size_scalars, &size_work_workArr_work1, &size_work2, &size_work3,
+        &size_work4, &size_Abyx_norms_trfact, &size_diag_tmptr, &size_workArr, &optim_mem);
+
+    if(rocblas_is_device_memory_size_query(handle))
+        return rocblas_set_optimal_device_memory_size(
+            handle, size_scalars, size_work_workArr_work1, size_work2, size_work3, size_work4,
+            size_Abyx_norms_trfact, size_diag_tmptr, size_workArr);
+
+    // memory workspace allocation
+    void *scalars, *work_workArr_work1, *work2, *work3, *work4, *Abyx_norms_trfact, *diag_tmptr,
+        *workArr;
+    rocblas_device_malloc mem(handle, size_scalars, size_work_workArr_work1, size_work2, size_work3,
+                              size_work4, size_Abyx_norms_trfact, size_diag_tmptr, size_workArr);
+
+    if(!mem)
+        return rocblas_status_memory_error;
+
+    scalars = mem[0];
+    work_workArr_work1 = mem[1];
+    work2 = mem[2];
+    work3 = mem[3];
+    work4 = mem[4];
+    Abyx_norms_trfact = mem[5];
+    diag_tmptr = mem[6];
+    workArr = mem[7];
+    if(size_scalars > 0)
+        init_scalars(handle, (T*)scalars);
+
+    // execution
+    return rocsolver_geqrf_template<false, false, T>(
+        handle, m, n, A, shiftA, lda, strideA, ipiv, stridep, batch_count, (T*)scalars,
+        work_workArr_work1, work2, work3, work4, (T*)Abyx_norms_trfact, (T*)diag_tmptr,
+        (T**)workArr, optim_mem);
+}
+
+ROCSOLVER_END_NAMESPACE
+
+/*
+ * ===========================================================================
+ *    C wrapper
+ * ===========================================================================
+ */
+
+extern "C" {
+
+rocblas_status rocsolver_sgeqrf(rocblas_handle handle,
+                                const rocblas_int m,
+                                const rocblas_int n,
+                                float* A,
+                                const rocblas_int lda,
+                                float* ipiv)
+{
+    return rocsolver::rocsolver_geqrf_impl<float>(handle, m, n, A, lda, ipiv);
+}
+
+rocblas_status rocsolver_dgeqrf(rocblas_handle handle,
+                                const rocblas_int m,
+                                const rocblas_int n,
+                                double* A,
+                                const rocblas_int lda,
+                                double* ipiv)
+{
+    return rocsolver::rocsolver_geqrf_impl<double>(handle, m, n, A, lda, ipiv);
+}
+
+rocblas_status rocsolver_cgeqrf(rocblas_handle handle,
+                                const rocblas_int m,
+                                const rocblas_int n,
+                                rocblas_float_complex* A,
+                                const rocblas_int lda,
+                                rocblas_float_complex* ipiv)
+{
+    return rocsolver::rocsolver_geqrf_impl<rocblas_float_complex>(handle, m, n, A, lda, ipiv);
+}
+
+rocblas_status rocsolver_zgeqrf(rocblas_handle handle,
+                                const rocblas_int m,
+                                const rocblas_int n,
+                                rocblas_double_complex* A,
+                                const rocblas_int lda,
+                                rocblas_double_complex* ipiv)
+{
+    return rocsolver::rocsolver_geqrf_impl<rocblas_double_complex>(handle, m, n, A, lda, ipiv);
+}
+
+rocblas_status rocsolver_sgeqrf_64(rocblas_handle handle,
+                                   const int64_t m,
+                                   const int64_t n,
+                                   float* A,
+                                   const int64_t lda,
+                                   float* ipiv)
+{
+#ifdef HAVE_ROCBLAS_64
+    return rocsolver::rocsolver_geqrf_impl<float>(handle, m, n, A, lda, ipiv);
+#else
+    return rocblas_status_not_implemented;
+#endif
+}
+
+rocblas_status rocsolver_dgeqrf_64(rocblas_handle handle,
+                                   const int64_t m,
+                                   const int64_t n,
+                                   double* A,
+                                   const int64_t lda,
+                                   double* ipiv)
+{
+#ifdef HAVE_ROCBLAS_64
+    return rocsolver::rocsolver_geqrf_impl<double>(handle, m, n, A, lda, ipiv);
+#else
+    return rocblas_status_not_implemented;
+#endif
+}
+
+rocblas_status rocsolver_cgeqrf_64(rocblas_handle handle,
+                                   const int64_t m,
+                                   const int64_t n,
+                                   rocblas_float_complex* A,
+                                   const int64_t lda,
+                                   rocblas_float_complex* ipiv)
+{
+#ifdef HAVE_ROCBLAS_64
+    return rocsolver::rocsolver_geqrf_impl<rocblas_float_complex>(handle, m, n, A, lda, ipiv);
+#else
+    return rocblas_status_not_implemented;
+#endif
+}
+
+rocblas_status rocsolver_zgeqrf_64(rocblas_handle handle,
+                                   const int64_t m,
+                                   const int64_t n,
+                                   rocblas_double_complex* A,
+                                   const int64_t lda,
+                                   rocblas_double_complex* ipiv)
+{
+#ifdef HAVE_ROCBLAS_64
+    return rocsolver::rocsolver_geqrf_impl<rocblas_double_complex>(handle, m, n, A, lda, ipiv);
+#else
+    return rocblas_status_not_implemented;
+#endif
+}
+
+} // extern C

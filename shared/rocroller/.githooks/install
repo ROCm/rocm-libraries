@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+set -e
+set -x
+
+cd $(git rev-parse --git-dir)
+cd hooks
+
+echo "Installing hooks..."
+ln -s ../../shared/rocroller/.githooks/pre-commit pre-commit
+echo "Done!"

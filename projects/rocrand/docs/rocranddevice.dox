@@ -1,0 +1,17 @@
+/**
+@brief rocRAND Device API Module.
+@author
+@file
+*/
+
+/**
+ * \rocrand_internal \defgroup rocranddevice rocRAND device functions
+ * @{
+ *     @page rocranddevice_page rocRAND RNG's state types
+ *     * \p rocrandStateXORWOW_t - XORWOW PRNG state type
+ *     * \p rocrandStatePhilox4_32_10_t - PHILOX PRNG state type
+ *     * \p rocrandStateMRG32k3a_t - MRG32k3a PRNG state type
+ *     * \p rocrandStateMtgp32_t - MTGP32 PRNG state type
+ *     * \p rocrandStateSobol32_t - SOBOL32 QRNG state type
+ * @}
+ */

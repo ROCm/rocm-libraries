@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE testset SYSTEM "/usr/local/share/rtest.dtd">
+<testset>
+    <fileversion>0.1</fileversion>
+    <var name="COMMAND">hipfft-test --gtest_color=yes --gtest_output=xml</var>
+    <test sets="psdb">
+        <run name="all-psdb">{COMMAND}:output_psdb.xml --test_prob 0.2 --gtest_filter=-*multi_gpu* --precompile=rocfft-test-precompile.db</run>
+    </test>
+    <test sets="osdb">
+        <run name="all-osdb">{COMMAND}:output_osdb.xml --test_prob 0.2 --gtest_filter=-*multi_gpu* --precompile=rocfft-test-precompile.db</run>
+    </test>
+    <test sets="custom">
+        <run name="custom_filter">{COMMAND}:output_custom.xml --test_prob 0.2 --gtest_filter=-*multi_gpu*</run>
+    </test>
+    <test sets="smoke">
+        <run name="smoketest">{COMMAND}:output_psdb.xml {WISDOM_FLAGS} --precompile=rocfft-test-precompile.db --smoketest</run>
+    </test>
+</testset>

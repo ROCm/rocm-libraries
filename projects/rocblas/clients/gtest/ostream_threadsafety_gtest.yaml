@@ -1,0 +1,10 @@
+---
+include: rocblas_common.yaml
+include: known_bugs.yaml
+
+Tests:
+- name: ostream_threadsafety
+  category: pre_checkin
+  function: ostream_threadsafety
+  precision: *single_precision
+...

@@ -1,0 +1,41 @@
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
+/**
+ * T_Mul (tensor/matrix multiply) command.
+ */
+
+#pragma once
+
+#include <unordered_set>
+
+#include <rocRoller/DataTypes/DataTypes.hpp>
+#include <rocRoller/Operations/Operation.hpp>
+#include <rocRoller/Serialization/Base_fwd.hpp>
+
+namespace rocRoller
+{
+    namespace Operations
+    {
+        class T_Mul : public BaseOperation
+        {
+        public:
+            T_Mul() = delete;
+            T_Mul(OperationTag a, OperationTag b, VariableType accType = DataType::Float);
+
+            std::unordered_set<OperationTag> getInputs() const;
+            std::string                      toString() const;
+
+            OperationTag a, b;
+            VariableType accType;
+
+            bool operator==(T_Mul const&) const;
+
+            template <typename T1, typename T2, typename T3>
+            friend struct rocRoller::Serialization::MappingTraits;
+        };
+
+    }
+}
+
+#include <rocRoller/Operations/T_Mul_impl.hpp>

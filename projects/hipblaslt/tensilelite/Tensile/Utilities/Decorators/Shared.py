@@ -1,0 +1,51 @@
+################################################################################
+#
+# Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+#
+################################################################################
+
+import os
+
+
+def envVariableIsSet(varName: str) -> bool:
+    """Checks if the provided environment variable is set to "YES", "ON", "TRUE", or "1"
+    Args:
+        varName: Environment variable name.
+    Returns:
+        True if the environment variable is set, otherwise False.
+    """
+    value = os.environ.get(varName, "").upper()
+    return True if value in ["YES", "ON", "TRUE", "1"] else False
+
+class CallableGuard:
+    """Disallow 'truthy' evaluation of the decorated callable.
+    Adds safety for `isABC` style functions.
+    """
+    def __init__(self, func):
+        self._func = func
+        self.__name__ = func.__name__
+        self.__doc__ = func.__doc__
+
+    def __call__(self, *args, **kwargs):
+        return self._func(*args, **kwargs)
+
+    def __bool__(self):
+        raise TypeError(f"Function '{self.__name__}' was used in a boolean context without being called. Did you mean to call it, e.g., '{self.__name__}(kernel)'?")

@@ -1,0 +1,28 @@
+---
+include: ../../../../clients/include/rocblas_common.yaml
+
+Definitions:
+  - &sizes
+    - {N:  2048000}
+    - {N:  4096000}
+    - {N:  6144000}
+    - {N:  8192000}
+    - {N: 10240000}
+    - {N: 12288000}
+    - {N: 14336000}
+    - {N: 16384000}
+    - {N: 18432000}
+    - {N: 20480000}
+
+Tests:
+  - name: copy_bench
+    category: bench
+    function: swap
+    precision: *single_double_precisions_complex_real
+#   precision: *single_precision
+    cold_iters: 5000
+    iters: 5000
+    incx: 1
+    incy: 1
+    matrix_size: *sizes
+...

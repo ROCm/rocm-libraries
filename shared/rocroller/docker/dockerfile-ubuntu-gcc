@@ -1,0 +1,121 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+# See here for image contents: https://github.com/devcontainers/images/tree/main/src/base-ubuntu
+
+##
+## Common with other Dockerfiles.
+##
+
+# ubuntu-20.04 = focal
+# ubuntu-22.04 = jammy
+FROM mcr.microsoft.com/devcontainers/base:jammy
+
+ARG DEBIAN_FRONTEND=noninteractive
+
+# Propagate the environment variable HTTP_PROXY into the apt config if it's set.
+RUN [ -z ${HTTP_PROXY} ] || (echo "Acquire::http::Proxy \"${HTTP_PROXY}\";" > /etc/apt/apt.conf.d/proxy)
+
+# Add PPA with g++-13
+RUN apt-get update && apt-get reinstall -y software-properties-common && add-apt-repository -y ppa:ubuntu-toolchain-r/test
+
+RUN apt-get update && apt-get install -y \
+   bc \
+   gdb \
+   libopenblas-dev \
+   libncurses-dev \
+   m4 \
+   make \
+   nano \
+   netcat-traditional \
+   ninja-build \
+   python3-dev \
+   python3-venv \
+   vim \
+   wget \
+   xz-utils \
+   libdw-dev
+
+# Needed for clang-format from ROCm 4.3.1
+RUN wget -nv --show-progress --progress=dot:mega -O /tmp/libtinfo5.deb http://security.ubuntu.com/ubuntu/pool/universe/n/ncurses/libtinfo5_6.3-2ubuntu0.1_amd64.deb \
+    && apt-get install -y /tmp/libtinfo5.deb
+
+# cmake 3.25.2
+ RUN wget -nv --show-progress --progress=dot:mega -O /tmp/cmake-install.sh https://github.com/Kitware/CMake/releases/download/v3.25.2/cmake-3.25.2-linux-x86_64.sh \
+   && sh /tmp/cmake-install.sh --prefix=/usr/local --skip-license \
+   && rm /tmp/cmake-install.sh
+
+# clang-format from ROCm 4.3.1
+ADD docker/install-clang-format /tmp
+RUN /tmp/install-clang-format && rm /tmp/install-clang-format
+ENV PATH="/opt/clang-format/bin:${PATH}"
+
+# ccache
+RUN apt-get update && apt-get install -y \
+      libzstd-dev
+RUN wget -nv --show-progress --progress=dot:mega https://github.com/ccache/ccache/releases/download/v4.11/ccache-4.11.tar.gz -O /tmp/ccache-4.11.tar.gz && \
+    tar xf /tmp/ccache-4.11.tar.gz -C /tmp && \
+    cmake -S/tmp/ccache-4.11 -B/tmp/ccache-4.11/build -GNinja \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DENABLE_TESTING=OFF \
+      -DREDIS_STORAGE_BACKEND=OFF && \
+    ninja -C /tmp/ccache-4.11/build install && \
+    rm -r /tmp/ccache-4.11 /tmp/ccache-4.11.tar.gz
+
+# cppcheck
+ADD docker/install-cppcheck /tmp
+RUN /tmp/install-cppcheck && rm /tmp/install-cppcheck
+
+# graph & documentation & perf
+RUN apt-get update && apt-get install -y \
+      graphviz \
+      doxygen \
+      linux-tools-common linux-tools-generic
+
+# Python
+RUN python3 -m venv /opt/rr-python-venv
+ENV PATH="/opt/rr-python-venv/bin:$PATH"
+COPY requirements.txt /tmp/requirements.txt
+RUN pip install --no-cache-dir -r /tmp/requirements.txt && rm /tmp/requirements.txt
+
+# HipBLASLt
+RUN apt-get update && apt-get install -y \
+    libmsgpack-dev \
+    libboost-program-options-dev \
+    libboost-filesystem-dev \
+    kmod
+
+##
+## Specific to this Dockerfile.  Put faster-changing-things last.
+##
+
+# ROCm
+ARG ROCROLLER_AMDGPU_URL=https://repo.radeon.com/amdgpu-install/7.2.1/ubuntu/jammy/amdgpu-install_7.2.1.70201-1_all.deb
+ARG ROCROLLER_AMDGPU_BUILD_NUMBER=
+ARG ROCROLLER_AMDGPU_BUILD_URI=
+
+RUN wget -nv --show-progress --progress=dot:mega -O /tmp/amdgpu_install.deb ${ROCROLLER_AMDGPU_URL} \
+    && apt-get update \
+    && apt-get install -y /tmp/amdgpu_install.deb \
+    && rm /tmp/amdgpu_install.deb \
+    && if test -n "${ROCROLLER_AMDGPU_BUILD_NUMBER}"; then amdgpu-repo --amdgpu-build=${ROCROLLER_AMDGPU_BUILD_NUMBER} --rocm-build=${ROCROLLER_AMDGPU_BUILD_URI}; fi \
+    && amdgpu-install -y --usecase=rocmdev --no-dkms
+RUN apt-get update && apt-get install -y rocm-llvm-dev
+
+# g++-13
+RUN apt-get update && apt-get install -y \
+      g++-13
+
+RUN ( \
+    echo "base_image: ${base_image}" && \
+    echo "rocroller: gcc-13" \
+    ) > /.container_info.txt
+
+ENV CXX=/usr/bin/g++-13
+ENV CC=/usr/bin/gcc-13
+
+ADD docker/install-rocprof-trace-decoder /tmp
+RUN /tmp/install-rocprof-trace-decoder && rm /tmp/install-rocprof-trace-decoder
+
+# Clean image
+RUN apt-get autoremove -y && apt-get clean -y && rm -rf /var/lib/apt/lists/*

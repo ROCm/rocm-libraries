@@ -1,0 +1,29 @@
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
+#include <rocRoller/CodeGen/Arithmetic/ArithmeticGenerator.hpp>
+#include <rocRoller/CodeGen/Arithmetic/RandomNumber.hpp>
+#include <rocRoller/CodeGen/CopyGenerator.hpp>
+#include <rocRoller/Utilities/Component.hpp>
+
+namespace rocRoller
+{
+    template <>
+    std::shared_ptr<UnaryArithmeticGenerator<Expression::RandomNumber>>
+        GetGenerator<Expression::RandomNumber>(Register::ValuePtr dst,
+                                               Register::ValuePtr arg,
+                                               Expression::RandomNumber const&)
+    {
+        return Component::Get<UnaryArithmeticGenerator<Expression::RandomNumber>>(
+            getContextFromValues(dst, arg), arg->regType(), arg->variableType().dataType);
+    }
+
+    Generator<Instruction> RandomNumberGenerator::generate(Register::ValuePtr dest,
+                                                           Register::ValuePtr seed,
+                                                           Expression::RandomNumber const&)
+    {
+        AssertFatal(seed != nullptr);
+        AssertFatal(dest != nullptr);
+        co_yield_(Instruction("v_prng_b32", {dest}, {seed}, {}, "Generate a random number"));
+    }
+}

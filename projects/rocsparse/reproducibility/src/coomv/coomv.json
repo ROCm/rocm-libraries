@@ -1,0 +1,3 @@
+{
+    "cmdlines":["--r --gtest_filter=q*coomv*rand*" ]
+}

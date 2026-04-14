@@ -1,0 +1,10 @@
+---
+include: rocblas_common.yaml
+include: known_bugs.yaml
+
+Tests:
+- name: set_get_atomics_mode
+  category: quick
+  function: set_get_atomics_mode
+  precision: *single_precision
+...

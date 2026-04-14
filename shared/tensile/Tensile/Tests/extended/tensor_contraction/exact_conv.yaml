@@ -1,0 +1,60 @@
+# A config to generate a fast kernel for large DGEMMs
+GlobalParameters:
+  EnqueuesPerSync: 1
+  LibraryPrintDebug: False
+  NumElementsToValidate: 0
+  ValidationMaxToPrint: 4
+  ValidationPrintValids: False
+  KernelTime: True
+  #PinClocks: True
+  SleepPercent: 0
+  DataInitTypeBeta : 0
+  DataInitTypeAB: 0
+  PrintSolutionRejectionReason: 1
+  PrintConvolutionUsage: 1
+  CEqualD: 1
+
+BenchmarkProblems:
+  -
+    -
+      OperationType: ConvolutionForward
+      DataType: s
+      ConvolutionConfig:
+      - Dilation: 1x1
+      - Filter: 1x1
+      - Stride: 2x2
+      - TensorAFormat: NCHW
+      - PackedSpatialDims: 0
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+        - EdgeType: ["ShiftPtr"]
+      ForkParameters:
+        - PrefetchLocalRead: [True]
+        - PrefetchGlobalRead: [True]
+        - ThreadTile:
+          - [ 8, 8 ]
+        - WorkGroup:
+          - [ 16, 32, 1 ]
+        - WorkGroupMapping: [8]
+        - DepthU: [ 4,8 ]
+        - VectorWidth: [4]
+        - FractionalLoad: [0,1]
+        - GlobalReadVectorWidth: [1]
+        - AssertSummationElementMultiple: [4]
+        - AssertFree0ElementMultiple: [4]
+        - AssertFree1ElementMultiple: [4]
+      BenchmarkForkParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+            - Exact: [100,200,1,3,5]
+            - Range: [[10], [1,1,5], [13], [22]]
+            - Range: [ [126,2,130], 0, [2], [62,2,66] ]
+            - Conv: { n: 64, c: 256, h: 20, w: 14, k: 1024, x: 1, y: 1, u: 2, v: 2 }
+
+# LibraryLogic:
+#     ScheduleName: "vega10"
+#     DeviceNames: ["Device 6863", "Device 6862", "Device 687f", "Device 6860", "Device 6861"]
+#     ArchitectureName: "gfx900"

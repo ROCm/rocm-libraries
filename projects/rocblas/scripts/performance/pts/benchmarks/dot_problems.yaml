@@ -1,0 +1,40 @@
+---
+include: ../../../../clients/include/rocblas_common.yaml
+include: rocblas_perf_common.yaml
+
+Tests:
+  - name: dot_bench_inc1
+    category: bench
+    function: dot
+    precision: *single_double_precisions_complex_real
+    N: *generic_l1_perf_sizes
+    incx: 1
+    incy: 1
+
+  - name: dot_bench_inc2
+    category: bench
+    function: dot
+    precision: *single_precision
+    N: *generic_l1_perf_sizes
+    incx: 2 # different kernel for non-unit increment
+    incy: 2
+
+  - name: dot_bench_algo1
+    category: bench
+    function: dot
+    precision: *single_precision
+    N: *generic_l1_perf_sizes
+    incx: 1
+    incy: 1
+    algo: 1 # x dot x
+
+  - name: dot_batched_bench
+    category: bench
+    function: dot_batched
+    precision: *single_precision
+    N: 1024 # separate kernel for small N large batch_count
+    batch_count: *l1_batch_count_range
+    incx: 1
+    incy: 1
+
+...

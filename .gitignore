@@ -1,0 +1,14 @@
+__pycache__
+
+# Build directories
+_build/
+build/
+
+# User-specific CMake presets
+CMakeUserPresets.json
+
+# Miscellanous tools
+.cline_storage/
+
+# claude tmp files
+.nfs*

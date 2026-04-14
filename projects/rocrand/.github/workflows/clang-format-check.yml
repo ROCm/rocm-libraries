@@ -1,0 +1,74 @@
+name: Check Clang-Format on Diff
+
+on: [pull_request]
+
+jobs:
+  clang-format:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v2
+
+    - name: Import LLVM GPG Key
+      run: |
+        sudo apt-key adv --keyserver keyserver.ubuntu.com --recv-keys 15CF4D18AF4F7421
+
+    - name: Add LLVM Repository
+      run: |
+        sudo add-apt-repository "deb http://apt.llvm.org/jammy llvm-toolchain-jammy-17 main"
+        sudo apt-get update
+
+    - name: Install clang-format 17
+      run: |
+        sudo apt-get install clang-format-17
+
+    - name: Fetch branches to check
+      run: |
+        git fetch origin ${{ github.base_ref }}
+        if [ "${{ github.repository_owner }}" != "${{ github.event.pull_request.head.repo.owner.login }}" ]; then
+          fork_owner="${{ github.event.pull_request.head.repo.owner.login }}"
+          fork_repo="${{ github.event.pull_request.head.repo.full_name }}"
+          echo "Fork repo: ${fork_repo}"
+          fork_url="https://github.com/${fork_repo}.git"
+          echo "Fork URL: ${fork_url}"
+          git remote add fork "${fork_url}"
+          git fetch fork ${{ github.head_ref }}
+        else
+          git fetch origin ${{ github.head_ref }}
+        fi
+
+    - name: Apply clang-format locally
+      if: github.event_name == 'pull_request'
+      run: |
+        if [ "${{ github.repository_owner }}" != "${{ github.event.pull_request.head.repo.owner.login }}" ]; then
+          ./scripts/clang-format/clang-format-apply.sh origin/${{ github.base_ref }} fork/${{ github.head_ref }}
+        else
+          ./scripts/clang-format/clang-format-apply.sh origin/${{ github.base_ref }} origin/${{ github.head_ref }}
+        fi
+
+    - name: Save clang-format changes as patch
+      run: |
+        git diff -U0
+        git diff -U0 > clang_format.patch
+
+    - name: Check if patch is not empty
+      run: |
+        if [ -s clang_format.patch ]; then
+          echo "Patch is not empty"
+          echo "patch_not_empty=true" >> $GITHUB_STATE
+        else
+          echo "Patch is empty"
+          echo "patch_not_empty=false" >> $GITHUB_STATE
+        fi
+
+    - name: Post patch as comment
+      if: env.GITHUB_STATE.patch_not_empty == 'true'
+      run: |
+        API_URL="https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments"
+        curl -X POST \
+          -H "Accept: application/vnd.github+json" \
+          -H "Authorization: token ${{ secrets.GH_ACTION_TOKEN_CLANG_FORMAT }}" \
+          -H "X-GitHub-Api-Version: 2022-11-28" \
+          -d "{\"body\": \"clang-format has detected some changes that need formatting\"}" \
+          "${API_URL}"

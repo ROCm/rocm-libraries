@@ -1,0 +1,151 @@
+/*! \file */
+/* ************************************************************************
+ * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ * THE SOFTWARE.
+ *
+ * ************************************************************************ */
+#ifndef HIPSPARSE_DENSE2CSR_H
+#define HIPSPARSE_DENSE2CSR_H
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+#if(!defined(CUDART_VERSION) || CUDART_VERSION < 12000)
+/*! \ingroup conv_module
+*  \brief
+*  \p hipsparseXdense2csr converts the matrix \p A in dense format into a sparse matrix in CSR format.
+*
+*  \details
+*  Given a dense, column-ordered matrix \p A with leading dimension \p ld where \p ld>=m,
+*  \p hipsparseXdense2csr converts the matrix to a sparse CSR format matrix. All the parameters
+*  are assumed to have been pre-allocated by the user and the arrays are filled in based on the number
+*  of non-zeros per row, which can be pre-computed with \ref hipsparseSnnz "hipsparseXnnz()". The
+*  desired index base in the output CSR matrix is set in the \ref hipsparseMatDescr_t. See
+*  \ref hipsparseSetMatIndexBase().
+*
+*  As an example, if using index base zero (which is the default) and the dense
+*  matrix:
+*
+*  \f[
+*    \begin{bmatrix}
+*    1 & 0 & 0 & 2 \\
+*    3 & 4 & 0 & 0 \\
+*    5 & 0 & 6 & 7
+*    \end{bmatrix}
+*  \f]
+*
+*  The conversion results in the CSR arrays:
+*
+*  \f[
+*    \begin{align}
+*    \text{csrRowPtr} &= \begin{bmatrix} 0 & 2 & 4 & 7 \end{bmatrix} \\
+*    \text{csrColInd} &= \begin{bmatrix} 0 & 3 & 0 & 1 & 0 & 2 & 3 \end{bmatrix} \\
+*    \text{csrVal} &= \begin{bmatrix} 1 & 2 & 3 & 4 & 5 & 6 & 7 \end{bmatrix} \\
+*    \end{align}
+*  \f]
+*
+*  \note
+*  This function is executed asynchronously with respect to the host and can return control to the
+*  application on the host before the entire result is ready.
+*
+*  @param[in]
+*  handle       handle to the hipSPARSE library context queue.
+*  @param[in]
+*  m            number of rows of the dense matrix \p A. Must be non-negative.
+*  @param[in]
+*  n            number of columns of the dense matrix \p A. Must be non-negative.
+*  @param[in]
+*  descr        the descriptor of the dense matrix \p A. The supported matrix type is  \ref HIPSPARSE_MATRIX_TYPE_GENERAL and
+*               any valid value of the \ref hipsparseIndexBase_t.
+*  @param[in]
+*  A            array of dimensions (\p ld, \p n).
+*  @param[in]
+*  ld           leading dimension of dense array \p A, which must be at least \p m.
+*  @param[in]
+*  nnzPerRow    array of size \p m containing the number of non-zero elements per row.
+*  @param[out]
+*  csrVal       array of nnz ( = \p csrRowPtr[m] - \p csrRowPtr[0] ) non-zero elements of matrix \p A.
+*  @param[out]
+*  csrRowPtr    integer array of \p m+1 elements that contains the start of every row and the end of the last row plus one.
+*  @param[out]
+*  csrColInd    integer array of nnz ( = \p csrRowPtr[m] - \p csrRowPtr[0] ) column indices of the non-zero elements of matrix \p A.
+*
+*  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
+*  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p descr, \p A, \p nnzPerRow, \p csrVal,
+*          \p csrRowPtr, or \p csrColInd is nullptr, \p m or \p n is negative, or \p ld is invalid.
+*/
+/**@{*/
+HIPSPARSE_EXPORT
+hipsparseStatus_t hipsparseSdense2csr(hipsparseHandle_t         handle,
+                                      int                       m,
+                                      int                       n,
+                                      const hipsparseMatDescr_t descr,
+                                      const float*              A,
+                                      int                       ld,
+                                      const int*                nnzPerRow,
+                                      float*                    csrVal,
+                                      int*                      csrRowPtr,
+                                      int*                      csrColInd);
+
+HIPSPARSE_EXPORT
+hipsparseStatus_t hipsparseDdense2csr(hipsparseHandle_t         handle,
+                                      int                       m,
+                                      int                       n,
+                                      const hipsparseMatDescr_t descr,
+                                      const double*             A,
+                                      int                       ld,
+                                      const int*                nnzPerRow,
+                                      double*                   csrVal,
+                                      int*                      csrRowPtr,
+                                      int*                      csrColInd);
+
+HIPSPARSE_EXPORT
+hipsparseStatus_t hipsparseCdense2csr(hipsparseHandle_t         handle,
+                                      int                       m,
+                                      int                       n,
+                                      const hipsparseMatDescr_t descr,
+                                      const hipComplex*         A,
+                                      int                       ld,
+                                      const int*                nnzPerRow,
+                                      hipComplex*               csrVal,
+                                      int*                      csrRowPtr,
+                                      int*                      csrColInd);
+
+HIPSPARSE_EXPORT
+hipsparseStatus_t hipsparseZdense2csr(hipsparseHandle_t         handle,
+                                      int                       m,
+                                      int                       n,
+                                      const hipsparseMatDescr_t descr,
+                                      const hipDoubleComplex*   A,
+                                      int                       ld,
+                                      const int*                nnzPerRow,
+                                      hipDoubleComplex*         csrVal,
+                                      int*                      csrRowPtr,
+                                      int*                      csrColInd);
+/**@}*/
+#endif
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif /* HIPSPARSE_DENSE2CSR_H */

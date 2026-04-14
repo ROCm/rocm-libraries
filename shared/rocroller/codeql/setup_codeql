@@ -1,0 +1,10 @@
+#!/bin/bash -ex
+
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+# Sets up a QLPack with dependencies for our check(s).
+mkdir -p codeql/build
+cd codeql/build
+unzip -q /opt/codeql/codeql-cli.zip
+mv codeql-codeql-cli-* codeql-cli

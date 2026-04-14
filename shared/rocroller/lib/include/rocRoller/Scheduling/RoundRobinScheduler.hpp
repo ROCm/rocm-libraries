@@ -1,0 +1,42 @@
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
+#pragma once
+
+#include <concepts>
+#include <string>
+#include <vector>
+
+#include <rocRoller/Scheduling/RoundRobinScheduler_fwd.hpp>
+#include <rocRoller/Scheduling/Scheduler.hpp>
+
+namespace rocRoller
+{
+    namespace Scheduling
+    {
+
+        /**
+         * Round-robin scheduler: Takes the first instruction from each stream, then the
+         * second from each stream, and so on.
+         *
+         * Must also follow the locking rules.
+         */
+        class RoundRobinScheduler : public Scheduler
+        {
+        public:
+            RoundRobinScheduler(ContextPtr);
+
+            using Base = Scheduler;
+
+            inline static const std::string Name = "RoundRobinScheduler";
+
+            static bool Match(Argument arg);
+
+            static std::shared_ptr<Scheduler> Build(Argument arg);
+
+            std::string name() const override;
+
+            Generator<Instruction> operator()(std::vector<Generator<Instruction>>& seqs) override;
+        };
+    }
+}

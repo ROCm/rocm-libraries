@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE testset SYSTEM "/usr/local/share/rtest.dtd">
+<testset>
+    <var name="COMMAND">rocfft-test --gtest_color=yes --gtest_output=xml</var>
+    <var name="WISDOM_FLAGS"></var>
+    <test sets="psdb">
+        <run name="all-psdb">{COMMAND}:output_psdb.xml {WISDOM_FLAGS} --test_prob 0.2 --precompile=rocfft-test-precompile.db --gtest_filter=-*multi_gpu*</run>
+    </test>
+    <test sets="osdb">
+        <run name="all-osdb">{COMMAND}:output_osdb.xml {WISDOM_FLAGS} --test_prob 0.2 --precompile=rocfft-test-precompile.db --gtest_filter=-*multi_gpu*</run>
+    </test>
+    <test sets="hmm">
+        <!-- * This test should be run with the following command: -->
+        <!-- HSA_XNACK=1 ROCFFT_MALLOC_MANAGED=1 rtest.py -t hmm [other options] -->
+        <run name="hmm-adhoc">{COMMAND}:output_hmm.xml {WISDOM_FLAGS} --gtest_filter=mix*:adhoc*:-*multi_gpu*</run>
+    </test>
+    <test sets="smoke">
+        <run name="smoketest">{COMMAND}:output_psdb.xml {WISDOM_FLAGS} --precompile=rocfft-test-precompile.db --smoketest</run>
+    </test>
+</testset>
