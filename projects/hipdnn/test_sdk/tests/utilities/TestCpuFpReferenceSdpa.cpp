@@ -841,7 +841,7 @@ TEST(TestCpuFpReferenceSdpaFp64, LseWithGqa)
 // Fp32 to match the actual kernel compute precision.
 // ---------------------------------------------------------------------------
 
-TEST(TestCpuFpReferenceSdpaBwd, BackwardSanityFp32)
+TEST(TestCpuFpReferenceSdpaBwdFp32, BackwardSanity)
 {
     // Hand-verified backward pass with small deterministic inputs.
     // [B=1, H=1, Sq=2, Skv=2, D=2, Dv=2]
@@ -919,7 +919,7 @@ TEST(TestCpuFpReferenceSdpaBwd, BackwardSanityFp32)
     EXPECT_NEAR(dV.getHostValue(0, 0, 1, 1), 1.0f, tol);
 }
 
-TEST(TestCpuFpReferenceSdpaBwd, BackwardMHAFp32)
+TEST(TestCpuFpReferenceSdpaBwdFp32, BackwardMHA)
 {
     // Test Multi-Head Attention (H_q == H_kv)
     // [B=1, H=2, Sq=4, Skv=4, D=8, Dv=8]
@@ -961,7 +961,7 @@ TEST(TestCpuFpReferenceSdpaBwd, BackwardMHAFp32)
     }
 }
 
-TEST(TestCpuFpReferenceSdpaBwd, BackwardGQAFp32)
+TEST(TestCpuFpReferenceSdpaBwdFp32, BackwardGQA)
 {
     // Test Grouped Query Attention (H_q = 4, H_kv = 1)
     // [B=1, H_q=4, H_kv=1, Sq=4, Skv=4, D=8, Dv=8]
@@ -1021,7 +1021,7 @@ TEST(TestCpuFpReferenceSdpaBwd, BackwardGQAFp32)
     EXPECT_GT(dkSum, 0.0f) << "dK should have non-zero gradients from GQA accumulation";
 }
 
-TEST(TestCpuFpReferenceSdpaBwd, BackwardCausalMaskFp32)
+TEST(TestCpuFpReferenceSdpaBwdFp32, BackwardCausalMask)
 {
     // Test backward pass with causal masking
     // [B=1, H=1, Sq=4, Skv=4, D=4, Dv=4]
@@ -1558,7 +1558,7 @@ TEST(TestCpuFpReferenceSdpaGradCheck, GQACausalMask)
     }
 }
 
-TEST(TestCpuFpReferenceSdpaBwd, BackwardBfloat16)
+TEST(TestCpuFpReferenceSdpaBwdBf16, BackwardBasic)
 {
     // Test backward pass with BFloat16 data type
     // [B=1, H=1, Sq=4, Skv=4, D=8, Dv=8]
@@ -1597,7 +1597,7 @@ TEST(TestCpuFpReferenceSdpaBwd, BackwardBfloat16)
     }
 }
 
-TEST(TestCpuFpReferenceSdpaBwd, BackwardGqaDifferentKVHeadsFp32)
+TEST(TestCpuFpReferenceSdpaBwdFp32, BackwardGqaDifferentKVHeads)
 {
     // Test backward with independent K and V head counts: H_q=4, H_k=2, H_v=1
     // Mirrors the forward GqaDifferentKVHeads test.
