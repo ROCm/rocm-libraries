@@ -46,8 +46,8 @@ struct DirectTileConvForward4CFp16Kernel
         par.n          = static_cast<int>(host_args.N_);
         par.h          = static_cast<int>(host_args.input_spatial_lengths_[0]);
         par.w          = static_cast<int>(host_args.input_spatial_lengths_[1]);
-        par.c          = static_cast<int>(host_args.G_ * host_args.C_);
-        par.k          = static_cast<int>(host_args.G_ * host_args.K_);
+        par.c_tot      = static_cast<int>(host_args.G_ * host_args.C_);
+        par.k_tot      = static_cast<int>(host_args.G_ * host_args.K_);
         par.kh         = static_cast<int>(host_args.filter_spatial_lengths_[0]);
         par.kw         = static_cast<int>(host_args.filter_spatial_lengths_[1]);
         par.pad_h      = static_cast<int>(host_args.input_left_pads_[0]);

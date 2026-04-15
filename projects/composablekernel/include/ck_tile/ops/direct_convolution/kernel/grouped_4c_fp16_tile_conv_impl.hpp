@@ -31,25 +31,43 @@ constexpr int GROUP_SIZE = 4;
 
 struct Config
 {
+    // waves_c64 — channel (group) dimension
+    // Each wave computes outputs for 64 input channels worth of groups. 
+    // Since each group has exactly 4 channels, 64 channels = 16 groups.
+    // This number tells many waves of 64 channels are processed by one workgroup (thread block).
     int waves_c64;
 
+    // waves_q4 — spatial output column dimension
+    // Each wave handles 4 output columns (WARP_Q = 4)
+    // This number tells how many waves of 4 ouput columns are processed by one workgroup (thread block).
     int waves_q4;
 
+    // Filter width & height
     int kh = 3;
     int kw = 3;
 
+    // Batch folding:
+    // The batch dimension is folded into the grid by a factor of n_fold, meaning each block processes n_fold batches.
+    // The grid for launching the kernel becomes 
+    //      dim3(ceil(out_W / block_q) * n_fold,   ceil(C / block_c),   ceil(N / n_fold))
+    //  This means that W-tiles are interleaved with n_fold groups of images
     int n_fold = 8;
 
     Direction direction = Direction::Fprop;
 
+    // Total number of waves.
     constexpr int num_waves() const { return waves_c64 * waves_q4; }
 
+    // Tile size in the channel dimension: number of input channels processed by one workgroup.
     constexpr int block_c() const { return waves_c64 * 64; }
 
+    // Tile size in the output column dimension.
     constexpr int block_q() const { return waves_q4 * 4; }
 
+    // Number of conv groups processed by one workgroup.
     constexpr int block_groups() const { return waves_c64 * 16; }
 
+    // Number of threads per workgroup (thread block).
     constexpr int block_size() const { return num_waves() * WAVE_SIZE; }
 };
 
@@ -96,7 +114,7 @@ inline LaunchParams get_launch_params(int config_idx, const Conv2dParams& par)
     const int out_q    = (cfg.direction == Direction::Dgrad) ? par.w : par.q;
     auto blocks_w      = divup(out_q, cfg.block_q());
     auto blocks_w_n    = blocks_w * cfg.n_fold;
-    auto blocks_c      = divup(par.c, cfg.block_c());
+    auto blocks_c      = divup(par.c_tot, cfg.block_c());
     auto blocks_n_fold = divup(par.n, cfg.n_fold);
 
     LaunchParams launch;
@@ -656,11 +674,11 @@ constexpr KernelVariant make_variant()
                 return false;
             if(par.kh != 3 || par.kw != 3)
                 return false;
-            if(par.k != par.c)
+            if(par.k_tot != par.c_tot)
                 return false;
             if(par.channels_per_group() != 4)
                 return false;
-            if(par.c % 4 != 0)
+            if(par.c_tot % 4 != 0)
                 return false;
             if(par.stride_h != 1 || par.stride_w != 1)
                 return false;

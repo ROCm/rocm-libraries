@@ -10,7 +10,7 @@ TEST(ConvParams, ComputeOutputSize_3x3_Pad1)
 {
     Conv2dParams par;
     par.n = 1; par.h = 8; par.w = 8;
-    par.c = 16; par.k = 16;
+    par.c_tot = 16; par.k_tot = 16;
     par.kh = 3; par.kw = 3;
     par.pad_h = 1; par.pad_w = 1;
     par.stride_h = 1; par.stride_w = 1;
@@ -25,7 +25,7 @@ TEST(ConvParams, ComputeOutputSize_NoPad)
 {
     Conv2dParams par;
     par.n = 1; par.h = 8; par.w = 8;
-    par.c = 16; par.k = 16;
+    par.c_tot = 16; par.k_tot = 16;
     par.kh = 3; par.kw = 3;
     par.pad_h = 0; par.pad_w = 0;
     par.stride_h = 1; par.stride_w = 1;
@@ -40,7 +40,7 @@ TEST(ConvParams, ComputeOutputSize_Stride2)
 {
     Conv2dParams par;
     par.n = 1; par.h = 8; par.w = 8;
-    par.c = 16; par.k = 16;
+    par.c_tot = 16; par.k_tot = 16;
     par.kh = 3; par.kw = 3;
     par.pad_h = 1; par.pad_w = 1;
     par.stride_h = 2; par.stride_w = 2;
@@ -55,7 +55,7 @@ TEST(ConvParams, IsValid_Good)
 {
     Conv2dParams par;
     par.n = 1; par.h = 8; par.w = 8;
-    par.c = 16; par.k = 16;
+    par.c_tot = 16; par.k_tot = 16;
     par.kh = 3; par.kw = 3;
     par.groups = 4;
     EXPECT_TRUE(par.is_valid());
@@ -65,7 +65,7 @@ TEST(ConvParams, IsValid_ZeroBatch)
 {
     Conv2dParams par;
     par.n = 0; par.h = 8; par.w = 8;
-    par.c = 16; par.k = 16;
+    par.c_tot = 16; par.k_tot = 16;
     par.kh = 3; par.kw = 3;
     par.groups = 4;
     EXPECT_FALSE(par.is_valid());
@@ -75,7 +75,7 @@ TEST(ConvParams, IsValid_BadGroups)
 {
     Conv2dParams par;
     par.n = 1; par.h = 8; par.w = 8;
-    par.c = 16; par.k = 16;
+    par.c_tot = 16; par.k_tot = 16;
     par.kh = 3; par.kw = 3;
     par.groups = 3;  // 16 % 3 != 0
     EXPECT_FALSE(par.is_valid());
@@ -85,7 +85,7 @@ TEST(ConvParams, IsValid_ZeroGroups)
 {
     Conv2dParams par;
     par.n = 1; par.h = 8; par.w = 8;
-    par.c = 16; par.k = 16;
+    par.c_tot = 16; par.k_tot = 16;
     par.kh = 3; par.kw = 3;
     par.groups = 0;
     EXPECT_FALSE(par.is_valid());
@@ -94,7 +94,7 @@ TEST(ConvParams, IsValid_ZeroGroups)
 TEST(ConvParams, ChannelsAndFiltersPerGroup)
 {
     Conv2dParams par;
-    par.c = 16; par.k = 32; par.groups = 4;
+    par.c_tot = 16; par.k_tot = 32; par.groups = 4;
     EXPECT_EQ(par.channels_per_group(), 4);
     EXPECT_EQ(par.filters_per_group(), 8);
 }
@@ -110,7 +110,7 @@ TEST(ConvParams, SizeViewFprop)
 {
     Conv2dParams par;
     par.n = 1; par.h = 8; par.w = 10;
-    par.c = 16; par.k = 16;
+    par.c_tot = 16; par.k_tot = 16;
     par.kh = 3; par.kw = 3;
     par.pad_h = 1; par.pad_w = 1;
     par.stride_h = 1; par.stride_w = 1;
@@ -135,7 +135,7 @@ TEST(ConvParams, SizeViewDgrad)
 {
     Conv2dParams par;
     par.n = 1; par.h = 8; par.w = 10;
-    par.c = 16; par.k = 16;
+    par.c_tot = 16; par.k_tot = 16;
     par.kh = 3; par.kw = 3;
     par.pad_h = 1; par.pad_w = 1;
     par.stride_h = 1; par.stride_w = 1;

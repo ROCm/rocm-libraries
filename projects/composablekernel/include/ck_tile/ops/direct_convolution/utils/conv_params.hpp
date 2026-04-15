@@ -57,8 +57,8 @@ struct Conv2dParams
     Direction direction = Direction::Fprop;
     int n;                              // batch size
     int h, w;                           // input size
-    int c;                              // input channels
-    int k;                              // output channels
+    int c_tot;                          // input channels (over all groups)
+    int k_tot;                          // output channels (over all groups)
     int kh, kw;                         // filter size
     int pad_h = 1, pad_w = 1;           // padding
     int stride_h = 1, stride_w = 1;     // stride
@@ -79,19 +79,19 @@ struct Conv2dParams
 
     bool is_valid() const
     {
-        if(n <= 0 || h <= 0 || w <= 0 || c <= 0 || k <= 0 || kh <= 0 || kw <= 0)
+        if(n <= 0 || h <= 0 || w <= 0 || c_tot <= 0 || k_tot <= 0 || kh <= 0 || kw <= 0)
         {
             return false;
         }
-        if(groups <= 0 || c % groups != 0 || k % groups != 0)
+        if(groups <= 0 || c_tot % groups != 0 || k_tot % groups != 0)
         {
             return false;
         }
         return true;
     }
 
-    int channels_per_group() const { return c / groups; }
-    int filters_per_group() const { return k / groups; }
+    int channels_per_group() const { return c_tot / groups; }
+    int filters_per_group() const { return k_tot / groups; }
 };
 
 
