@@ -1485,6 +1485,21 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSAsync
                     k_physical_pages, stride_k, page_stride_k, k_coord, k_offsets, current_seq_k);
                 k_dram_window.update_page_idx(k_offsets);
                 rebase_k_window(k_dram_window, k_physical_pages[number<0>{}]);
+
+                // After sink→window transition (i_total_loops == num_sink_loop), V window
+                // was advanced by kN0 (one normal iter), but current_seq_k jumped by k_advance
+                // = seqlen_k_start - sink_seq_end + kN0 > kN0.  Re-init V to current_seq_k.
+                if constexpr(kHasSink)
+                {
+                    if(i_total_loops == num_sink_loop && num_sink_loop > 0)
+                    {
+                        prefetch_v_physical_pages(number<0>{});
+                        update_v_offsets(number<0>{});
+                        v_dram_window.update_page_idx(v_offsets);
+                        rebase_v_window(v_dram_window, v_physical_pages[number<0>{}]);
+                    }
+                }
+
                 if constexpr(k1_loops >= 2 &&
                              LdsSeq.at(number<0>{}) == LdsSeq.at(number<k0_loops + k1_loops - 2>{}))
                     __builtin_amdgcn_s_barrier();
