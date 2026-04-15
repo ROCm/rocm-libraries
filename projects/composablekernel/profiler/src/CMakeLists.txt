@@ -14,28 +14,28 @@ message(STATUS "CK_PROFILER_OP_FILTER: ${CK_PROFILER_OP_FILTER}")
 message(STATUS "CK_PROFILER_INSTANCE_FILTER: ${CK_PROFILER_INSTANCE_FILTER}")
 
 set(PROFILER_OPS
-    profile_gemm.cpp
-    profile_reduce.cpp
-    profile_groupnorm_bwd_data.cpp
-    profile_groupnorm_fwd.cpp
-    profile_layernorm_bwd_data.cpp
-    profile_layernorm_bwd_gamma_beta.cpp
-    profile_groupnorm_bwd_gamma_beta.cpp
-    profile_layernorm_fwd.cpp
-    profile_max_pool2d_fwd.cpp
-    profile_pool3d_fwd.cpp
-    profile_avg_pool3d_bwd.cpp
-    profile_max_pool3d_bwd.cpp
-    profile_avg_pool2d_bwd.cpp
-    profile_max_pool2d_bwd.cpp
-    profile_softmax.cpp
-    profile_batchnorm_fwd.cpp
-    profile_batchnorm_bwd.cpp
-    profile_batchnorm_infer.cpp
-    profile_conv_tensor_rearrange.cpp
-    profile_transpose.cpp
-    profile_permute_scale.cpp
-    profile_gemm_quantization.cpp
+    # profile_gemm.cpp
+    # profile_reduce.cpp
+    # profile_groupnorm_bwd_data.cpp
+    # profile_groupnorm_fwd.cpp
+    # profile_layernorm_bwd_data.cpp
+    # profile_layernorm_bwd_gamma_beta.cpp
+    # profile_groupnorm_bwd_gamma_beta.cpp
+    # profile_layernorm_fwd.cpp
+    # profile_max_pool2d_fwd.cpp
+    # profile_pool3d_fwd.cpp
+    # profile_avg_pool3d_bwd.cpp
+    # profile_max_pool3d_bwd.cpp
+    # profile_avg_pool2d_bwd.cpp
+    # profile_max_pool2d_bwd.cpp
+    # profile_softmax.cpp
+    # profile_batchnorm_fwd.cpp
+    # profile_batchnorm_bwd.cpp
+    # profile_batchnorm_infer.cpp
+    # profile_conv_tensor_rearrange.cpp
+    # profile_transpose.cpp
+    # profile_permute_scale.cpp
+    # profile_gemm_quantization.cpp
 )
 
 if(SUPPORTED_GPU_TARGETS MATCHES "gfx9")
@@ -84,52 +84,52 @@ if(SUPPORTED_GPU_TARGETS MATCHES "gfx9|gfx1[12]")
   list(APPEND PROFILER_OPS profile_conv_fwd.cpp)
 endif()
 
-if((SUPPORTED_GPU_TARGETS MATCHES "gfx9" AND (DTYPES MATCHES "fp16" OR NOT DEFINED DTYPES)) OR
-   (SUPPORTED_GPU_TARGETS MATCHES "gfx1[12]"))
-  list(APPEND PROFILER_OPS profile_gemm_bilinear.cpp)
-endif()
-if(SUPPORTED_GPU_TARGETS MATCHES "gfx(9[45]|1[12])")
-  list(APPEND PROFILER_OPS profile_gemm_multiply_multiply.cpp)
-endif()
+# if((SUPPORTED_GPU_TARGETS MATCHES "gfx9" AND (DTYPES MATCHES "fp16" OR NOT DEFINED DTYPES)) OR
+#    (SUPPORTED_GPU_TARGETS MATCHES "gfx1[12]"))
+#   list(APPEND PROFILER_OPS profile_gemm_bilinear.cpp)
+# endif()
+# if(SUPPORTED_GPU_TARGETS MATCHES "gfx(9[45]|1[12])")
+#   list(APPEND PROFILER_OPS profile_gemm_multiply_multiply.cpp)
+# endif()
 
-if(SUPPORTED_GPU_TARGETS MATCHES "gfx9|gfx1[12]")
-  list(APPEND PROFILER_OPS profile_gemm_universal.cpp)
-  list(APPEND PROFILER_OPS profile_batched_gemm.cpp)
-  list(APPEND PROFILER_OPS profile_batched_gemm_b_scale.cpp)
-  list(APPEND PROFILER_OPS profile_gemm_b_scale.cpp)
-  list(APPEND PROFILER_OPS profile_gemm_universal_reduce.cpp)
-  list(APPEND PROFILER_OPS profile_grouped_conv_fwd.cpp)
-  list(APPEND PROFILER_OPS profile_grouped_conv_fwd_bias_clamp.cpp)
-  list(APPEND PROFILER_OPS profile_grouped_conv_fwd_bias_bnorm_clamp.cpp)
-  list(APPEND PROFILER_OPS profile_grouped_conv_fwd_clamp.cpp)
-  list(APPEND PROFILER_OPS profile_grouped_conv_fwd_convscale_add.cpp)
-  list(APPEND PROFILER_OPS profile_grouped_conv_bwd_data.cpp)
-  list(APPEND PROFILER_OPS profile_grouped_conv_fwd_dynamic_op.cpp)
-  list(APPEND PROFILER_OPS profile_grouped_conv_fwd_bilinear.cpp)
-  list(APPEND PROFILER_OPS profile_grouped_conv_bwd_weight.cpp)
-  list(APPEND PROFILER_OPS profile_grouped_conv_fwd_outelementop.cpp)
-  list(APPEND PROFILER_OPS profile_gemm_multi_abd.cpp)
-  list(APPEND PROFILER_OPS profile_grouped_conv_fwd_scaleadd_scaleadd_relu.cpp)
-  if(DTYPES MATCHES "fp16" OR NOT DEFINED DTYPES)
-    list(APPEND PROFILER_OPS profile_gemm_add_multiply.cpp)
-    list(APPEND PROFILER_OPS profile_gemm_multiply_add.cpp)
-    list(APPEND PROFILER_OPS profile_gemm_add_silu.cpp)
-    list(APPEND PROFILER_OPS profile_gemm_fastgelu.cpp)
-    list(APPEND PROFILER_OPS profile_gemm_add_fastgelu.cpp)
-    list(APPEND PROFILER_OPS profile_gemm_add_add_fastgelu.cpp)
-    list(APPEND PROFILER_SOURCES profile_gemm_add.cpp)
-  endif()
-  list(APPEND PROFILER_OPS profile_batched_gemm_gemm.cpp)
-endif()
+# if(SUPPORTED_GPU_TARGETS MATCHES "gfx9|gfx1[12]")
+#   list(APPEND PROFILER_OPS profile_gemm_universal.cpp)
+#   list(APPEND PROFILER_OPS profile_batched_gemm.cpp)
+#   list(APPEND PROFILER_OPS profile_batched_gemm_b_scale.cpp)
+#   list(APPEND PROFILER_OPS profile_gemm_b_scale.cpp)
+#   list(APPEND PROFILER_OPS profile_gemm_universal_reduce.cpp)
+#   list(APPEND PROFILER_OPS profile_grouped_conv_fwd.cpp)
+#   list(APPEND PROFILER_OPS profile_grouped_conv_fwd_bias_clamp.cpp)
+#   list(APPEND PROFILER_OPS profile_grouped_conv_fwd_bias_bnorm_clamp.cpp)
+#   list(APPEND PROFILER_OPS profile_grouped_conv_fwd_clamp.cpp)
+#   list(APPEND PROFILER_OPS profile_grouped_conv_fwd_convscale_add.cpp)
+#   list(APPEND PROFILER_OPS profile_grouped_conv_bwd_data.cpp)
+#   list(APPEND PROFILER_OPS profile_grouped_conv_fwd_dynamic_op.cpp)
+#   list(APPEND PROFILER_OPS profile_grouped_conv_fwd_bilinear.cpp)
+#   list(APPEND PROFILER_OPS profile_grouped_conv_bwd_weight.cpp)
+#   list(APPEND PROFILER_OPS profile_grouped_conv_fwd_outelementop.cpp)
+#   list(APPEND PROFILER_OPS profile_gemm_multi_abd.cpp)
+#   list(APPEND PROFILER_OPS profile_grouped_conv_fwd_scaleadd_scaleadd_relu.cpp)
+#   if(DTYPES MATCHES "fp16" OR NOT DEFINED DTYPES)
+#     list(APPEND PROFILER_OPS profile_gemm_add_multiply.cpp)
+#     list(APPEND PROFILER_OPS profile_gemm_multiply_add.cpp)
+#     list(APPEND PROFILER_OPS profile_gemm_add_silu.cpp)
+#     list(APPEND PROFILER_OPS profile_gemm_fastgelu.cpp)
+#     list(APPEND PROFILER_OPS profile_gemm_add_fastgelu.cpp)
+#     list(APPEND PROFILER_OPS profile_gemm_add_add_fastgelu.cpp)
+#     list(APPEND PROFILER_SOURCES profile_gemm_add.cpp)
+#   endif()
+#   list(APPEND PROFILER_OPS profile_batched_gemm_gemm.cpp)
+# endif()
 
-if(DL_KERNELS)
-  list(APPEND PROFILER_OPS profile_batched_gemm_multi_d.cpp)
-  list(APPEND PROFILER_OPS profile_grouped_conv_bwd_weight.cpp)
-endif()
+# if(DL_KERNELS)
+#   list(APPEND PROFILER_OPS profile_batched_gemm_multi_d.cpp)
+#   list(APPEND PROFILER_OPS profile_grouped_conv_bwd_weight.cpp)
+# endif()
 
-if(CK_ENABLE_INT8)
-  list(APPEND PROFILER_OPS profile_gemm_quantization.cpp)
-endif()
+# if(CK_ENABLE_INT8)
+#   list(APPEND PROFILER_OPS profile_gemm_quantization.cpp)
+# endif()
 
 set(PROFILER_SOURCES profiler.cpp)
 foreach(SOURCE ${PROFILER_OPS})
@@ -188,22 +188,22 @@ if(CK_TILE_DISPATCHER AND SUPPORTED_GPU_TARGETS MATCHES "gfx9")
 endif()
 
 set(DEVICE_INSTANCES "")
-list(APPEND DEVICE_INSTANCES device_gemm_instance)
-list(APPEND DEVICE_INSTANCES device_normalization_fwd_instance)
-list(APPEND DEVICE_INSTANCES device_normalization_bwd_data_instance)
-list(APPEND DEVICE_INSTANCES device_normalization_bwd_gamma_beta_instance)
-list(APPEND DEVICE_INSTANCES device_softmax_instance)
-list(APPEND DEVICE_INSTANCES device_reduce_instance)
-list(APPEND DEVICE_INSTANCES device_batchnorm_instance)
-list(APPEND DEVICE_INSTANCES device_pool2d_fwd_instance)
-list(APPEND DEVICE_INSTANCES device_pool3d_fwd_instance)
-list(APPEND DEVICE_INSTANCES device_avg_pool2d_bwd_instance)
-list(APPEND DEVICE_INSTANCES device_avg_pool3d_bwd_instance)
-list(APPEND DEVICE_INSTANCES device_max_pool_bwd_instance)
-list(APPEND DEVICE_INSTANCES device_image_to_column_instance)
-list(APPEND DEVICE_INSTANCES device_column_to_image_instance)
-list(APPEND DEVICE_INSTANCES device_transpose_instance)
-list(APPEND DEVICE_INSTANCES device_permute_scale_instance)
+# list(APPEND DEVICE_INSTANCES device_gemm_instance)
+# list(APPEND DEVICE_INSTANCES device_normalization_fwd_instance)
+# list(APPEND DEVICE_INSTANCES device_normalization_bwd_data_instance)
+# list(APPEND DEVICE_INSTANCES device_normalization_bwd_gamma_beta_instance)
+# list(APPEND DEVICE_INSTANCES device_softmax_instance)
+# list(APPEND DEVICE_INSTANCES device_reduce_instance)
+# list(APPEND DEVICE_INSTANCES device_batchnorm_instance)
+# list(APPEND DEVICE_INSTANCES device_pool2d_fwd_instance)
+# list(APPEND DEVICE_INSTANCES device_pool3d_fwd_instance)
+# list(APPEND DEVICE_INSTANCES device_avg_pool2d_bwd_instance)
+# list(APPEND DEVICE_INSTANCES device_avg_pool3d_bwd_instance)
+# list(APPEND DEVICE_INSTANCES device_max_pool_bwd_instance)
+# list(APPEND DEVICE_INSTANCES device_image_to_column_instance)
+# list(APPEND DEVICE_INSTANCES device_column_to_image_instance)
+# list(APPEND DEVICE_INSTANCES device_transpose_instance)
+# list(APPEND DEVICE_INSTANCES device_permute_scale_instance)
 
 if(SUPPORTED_GPU_TARGETS MATCHES "gfx9|gfx1[12]")
   if(DTYPES MATCHES "fp32" OR DTYPES MATCHES "fp64" OR NOT DEFINED DTYPES)
@@ -249,14 +249,57 @@ if(SUPPORTED_GPU_TARGETS MATCHES "gfx9|gfx1[12]")
   list(APPEND DEVICE_INSTANCES device_conv2d_bwd_data_instance)
 endif()
 
-if((SUPPORTED_GPU_TARGETS MATCHES "gfx9" AND (DTYPES MATCHES "fp16" OR NOT DEFINED DTYPES)) OR
-   (SUPPORTED_GPU_TARGETS MATCHES "gfx1[12]" ))
-  list(APPEND DEVICE_INSTANCES device_gemm_bilinear_instance)
-endif()
-if(SUPPORTED_GPU_TARGETS MATCHES "gfx(9[45]|1[12])")
-  list(APPEND DEVICE_INSTANCES device_gemm_multiply_multiply_instance)
-endif()
+# if((SUPPORTED_GPU_TARGETS MATCHES "gfx9" AND (DTYPES MATCHES "fp16" OR NOT DEFINED DTYPES)) OR
+#    (SUPPORTED_GPU_TARGETS MATCHES "gfx1[12]" ))
+#   list(APPEND DEVICE_INSTANCES device_gemm_bilinear_instance)
+# endif()
+# if(SUPPORTED_GPU_TARGETS MATCHES "gfx(9[45]|1[12])")
+#   list(APPEND DEVICE_INSTANCES device_gemm_multiply_multiply_instance)
+# endif()
 
+# if(SUPPORTED_GPU_TARGETS MATCHES "gfx9|gfx1[12]")
+#   list(APPEND DEVICE_INSTANCES device_gemm_universal_instance)
+#   list(APPEND DEVICE_INSTANCES device_batched_gemm_instance)
+#   list(APPEND DEVICE_INSTANCES device_gemm_b_scale_instance)
+#   list(APPEND DEVICE_INSTANCES device_gemm_universal_reduce_instance)
+#   list(APPEND DEVICE_INSTANCES device_batched_gemm_b_scale_instance)
+#   list(APPEND DEVICE_INSTANCES device_grouped_conv2d_bwd_data_instance)
+#   list(APPEND DEVICE_INSTANCES device_grouped_conv3d_bwd_data_instance)
+#   list(APPEND DEVICE_INSTANCES device_grouped_conv1d_fwd_instance)
+#   list(APPEND DEVICE_INSTANCES device_grouped_conv2d_fwd_instance)
+#   list(APPEND DEVICE_INSTANCES device_grouped_conv3d_fwd_convinvscale_instance)
+#   list(APPEND DEVICE_INSTANCES device_grouped_conv3d_fwd_convscale_add_instance)
+#   list(APPEND DEVICE_INSTANCES device_grouped_conv3d_fwd_convscale_relu_instance)
+#   list(APPEND DEVICE_INSTANCES device_grouped_conv3d_fwd_convscale_instance)
+#   list(APPEND DEVICE_INSTANCES device_grouped_conv3d_fwd_instance)
+#   list(APPEND DEVICE_INSTANCES device_grouped_conv2d_fwd_clamp_instance)
+#   list(APPEND DEVICE_INSTANCES device_grouped_conv3d_fwd_clamp_instance)
+#   list(APPEND DEVICE_INSTANCES device_grouped_conv3d_fwd_scale_instance)
+#   list(APPEND DEVICE_INSTANCES device_grouped_conv3d_fwd_scaleadd_scaleadd_relu_instance)
+#   list(APPEND DEVICE_INSTANCES device_grouped_conv2d_fwd_bias_clamp_instance)
+#   list(APPEND DEVICE_INSTANCES device_grouped_conv3d_fwd_bias_clamp_instance)
+#   list(APPEND DEVICE_INSTANCES device_grouped_conv2d_fwd_bias_bnorm_clamp_instance)
+#   list(APPEND DEVICE_INSTANCES device_grouped_conv3d_fwd_bias_bnorm_clamp_instance)
+#   list(APPEND DEVICE_INSTANCES device_grouped_conv3d_fwd_bilinear_instance)
+#   list(APPEND DEVICE_INSTANCES device_grouped_conv2d_fwd_dynamic_op_instance)
+#   list(APPEND DEVICE_INSTANCES device_grouped_conv3d_fwd_dynamic_op_instance)
+#   list(APPEND DEVICE_INSTANCES device_gemm_add_relu_instance)
+#   list(APPEND DEVICE_INSTANCES device_gemm_multi_abd_instance)
+#   if(DTYPES MATCHES "fp16" OR NOT DEFINED DTYPES)
+#     list(APPEND DEVICE_INSTANCES device_gemm_add_multiply_instance)
+#     list(APPEND DEVICE_INSTANCES device_gemm_multiply_add_instance)
+#     list(APPEND DEVICE_INSTANCES device_gemm_add_instance)
+#     list(APPEND DEVICE_INSTANCES device_gemm_add_silu_instance)
+#     list(APPEND DEVICE_INSTANCES device_gemm_fastgelu_instance)
+#     list(APPEND DEVICE_INSTANCES device_gemm_add_fastgelu_instance)
+#     list(APPEND DEVICE_INSTANCES device_gemm_add_add_fastgelu_instance)
+#   endif()
+#   list(APPEND DEVICE_INSTANCES device_batched_gemm_gemm_instance)
+#   list(APPEND DEVICE_INSTANCES device_grouped_conv1d_bwd_weight_instance)
+#   list(APPEND DEVICE_INSTANCES device_grouped_conv2d_bwd_weight_instance)
+#   list(APPEND DEVICE_INSTANCES device_grouped_convnd_bwd_weight_instance)
+#   list(APPEND DEVICE_INSTANCES device_grouped_conv3d_bwd_weight_instance)
+# endif()
 if(SUPPORTED_GPU_TARGETS MATCHES "gfx9|gfx1[12]")
   list(APPEND DEVICE_INSTANCES device_gemm_universal_instance)
   list(APPEND DEVICE_INSTANCES device_batched_gemm_instance)
@@ -343,9 +386,9 @@ if(DL_KERNELS)
   list(APPEND DEVICE_INSTANCES device_grouped_conv3d_bwd_weight_ngcdhw_instance)
 endif()
 
-if(CK_ENABLE_INT8)
-  list(APPEND DEVICE_INSTANCES device_quantization_instance)
-endif()
+# if(CK_ENABLE_INT8)
+#   list(APPEND DEVICE_INSTANCES device_quantization_instance)
+# endif()
 
 set(PROFILER_LIBS utility getopt::getopt)
 foreach(LIB ${DEVICE_INSTANCES})
