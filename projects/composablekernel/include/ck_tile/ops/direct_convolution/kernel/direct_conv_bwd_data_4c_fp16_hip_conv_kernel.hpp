@@ -25,7 +25,7 @@ namespace ck_tile::direct_conv {
 ///   - wei_ptr = weights (const void*)
 ///   - out_ptr = output gradient (input to backward, const void*)
 template <int ConfigIdx>
-struct DirectConvBwdData4CFp16Kernel
+struct DirectHipConvBwdData4CFp16Kernel
 {
     struct KernelArgs
     {
@@ -38,7 +38,7 @@ struct DirectConvBwdData4CFp16Kernel
 
     static std::string GetName()
     {
-        return "direct_conv_grouped_4c_fp16_bwd_data_" + std::to_string(ConfigIdx);
+        return "direct_hip_conv_grouped_4c_fp16_bwd_data_" + std::to_string(ConfigIdx);
     }
 
     static std::string GetTypeString() { return GetName(); }

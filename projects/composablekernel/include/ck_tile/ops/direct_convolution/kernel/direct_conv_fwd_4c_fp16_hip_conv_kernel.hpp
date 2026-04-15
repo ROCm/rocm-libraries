@@ -18,7 +18,7 @@ namespace ck_tile::direct_conv {
 /// This enables integration into the CK profiler and builder testing infrastructure
 /// which expects kernels to provide GetName(), IsSupportedArgument(), MakeKernelArgs(), etc.
 template <int ConfigIdx>
-struct DirectConvForward4CFp16Kernel
+struct DirectHipConvForward4CFp16Kernel
 {
     struct KernelArgs
     {
@@ -31,7 +31,7 @@ struct DirectConvForward4CFp16Kernel
 
     static std::string GetName()
     {
-        return "direct_conv_grouped_4c_fp16_fwd_" + std::to_string(ConfigIdx);
+        return "direct_hip_conv_grouped_4c_fp16_fwd_" + std::to_string(ConfigIdx);
     }
 
     static std::string GetTypeString() { return GetName(); }
