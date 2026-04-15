@@ -138,9 +138,7 @@ class TestMainRouting:
 class TestRunSuiteWorkflow:
     """Tests for run_suite() function behavior."""
 
-    def _make_graph_result(
-        self, name: str, status: str = "success"
-    ) -> GraphResult:
+    def _make_graph_result(self, name: str, status: str = "success") -> GraphResult:
         """Helper to create a GraphResult with one ProviderEngineResult."""
         correctness = CorrectnessResult(
             execution_success=status == "success",

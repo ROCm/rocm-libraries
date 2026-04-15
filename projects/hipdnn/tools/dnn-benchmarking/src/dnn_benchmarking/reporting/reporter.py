@@ -404,9 +404,7 @@ class Reporter:
         self._print_line("=")
         self._print("")
 
-    def print_suite_graph_start(
-        self, index: int, total: int, graph_name: str
-    ) -> None:
+    def print_suite_graph_start(self, index: int, total: int, graph_name: str) -> None:
         """Print per-graph progress line at start (per D-17).
 
         Format: [1/3] graph_name...

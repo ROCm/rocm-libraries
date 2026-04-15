@@ -223,9 +223,7 @@ class TestGraphResult:
         pe = ProviderEngineResult(
             provider="miopen", engine_id=0, status="error", error_message="fail"
         )
-        gr = GraphResult(
-            graph_name="conv", graph_path="/p/conv.json", results=[pe]
-        )
+        gr = GraphResult(graph_name="conv", graph_path="/p/conv.json", results=[pe])
         d = gr.to_dict()
         assert d["graph_name"] == "conv"
         assert d["graph_path"] == "/p/conv.json"
@@ -271,12 +269,8 @@ class TestSuiteResult:
             status="error",
             error_message="fail",
         )
-        gr1 = GraphResult(
-            graph_name="conv", graph_path="/p/conv.json", results=[pe1]
-        )
-        gr2 = GraphResult(
-            graph_name="relu", graph_path="/p/relu.json", results=[pe2]
-        )
+        gr1 = GraphResult(graph_name="conv", graph_path="/p/conv.json", results=[pe1])
+        gr2 = GraphResult(graph_name="relu", graph_path="/p/relu.json", results=[pe2])
         return SuiteResult(metadata=meta, graphs=[gr1, gr2])
 
     def test_metadata_includes_environment_fields(self):

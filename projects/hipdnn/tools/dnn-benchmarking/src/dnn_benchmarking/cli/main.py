@@ -473,8 +473,7 @@ def run_suite(
         handle = hipdnn.Handle()
     except ImportError:
         reporter.print_error(
-            "hipdnn_frontend not available. "
-            "Install hipDNN Python bindings first."
+            "hipdnn_frontend not available. " "Install hipDNN Python bindings first."
         )
         return 1
 
@@ -545,9 +544,7 @@ def run_suite(
         1
         for gr in graph_results
         for r in gr.results
-        if r.status == "success"
-        and r.correctness is not None
-        and r.correctness.passed
+        if r.status == "success" and r.correctness is not None and r.correctness.passed
     )
     total_fail = sum(
         1

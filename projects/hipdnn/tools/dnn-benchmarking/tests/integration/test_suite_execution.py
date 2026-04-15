@@ -83,9 +83,9 @@ class TestSuiteRunnerIntegration:
 
         # At least one result should have a non-error status
         statuses = [r.status for r in result.results]
-        assert any(s in ("success", "skipped") for s in statuses), (
-            f"All results errored: {[r.error_message for r in result.results]}"
-        )
+        assert any(
+            s in ("success", "skipped") for s in statuses
+        ), f"All results errored: {[r.error_message for r in result.results]}"
 
     def test_successful_result_has_separated_timing(
         self, hipdnn, conv_graph: Dict[str, Any]
@@ -200,9 +200,7 @@ class TestSuiteCLIIntegration:
         for i, p in enumerate(graph_paths, 1):
             assert f"[{i}/{len(graph_paths)}]" in result.stdout
 
-    def test_suite_mode_json_output(
-        self, project_root: Path, tmp_path: Path
-    ) -> None:
+    def test_suite_mode_json_output(self, project_root: Path, tmp_path: Path) -> None:
         """Suite mode writes valid JSON when --output specified."""
         output_file = tmp_path / "suite_results.json"
 
@@ -277,9 +275,7 @@ class TestSuiteCLIIntegration:
         graph_count = len(sorted(_graphs_dir().glob("*.json")))
         assert len(data["graphs"]) == graph_count
 
-    def test_suite_mode_provider_filter(
-        self, project_root: Path
-    ) -> None:
+    def test_suite_mode_provider_filter(self, project_root: Path) -> None:
         """--provider flag is accepted and filters execution."""
         result = subprocess.run(
             [

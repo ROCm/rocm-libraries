@@ -179,9 +179,7 @@ class ProviderEngineResult:
                 self.gpu_kernel_stats.to_dict() if self.gpu_kernel_stats else None
             )
             d["e2e_stats"] = self.e2e_stats.to_dict() if self.e2e_stats else None
-            d["correctness"] = (
-                self.correctness.to_dict() if self.correctness else None
-            )
+            d["correctness"] = self.correctness.to_dict() if self.correctness else None
         elif self.status == "error":
             d["error_message"] = self.error_message
         elif self.status == "skipped":

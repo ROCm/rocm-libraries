@@ -152,15 +152,11 @@ def _get_reference_provider(
     try:
         provider = ReferenceProviderRegistry.get_provider(config.reference_provider)
     except ValueError:
-        logger.info(
-            "Reference provider '%s' not registered", config.reference_provider
-        )
+        logger.info("Reference provider '%s' not registered", config.reference_provider)
         return None
 
     if not provider.is_available():
-        logger.info(
-            "Reference provider '%s' not available", config.reference_provider
-        )
+        logger.info("Reference provider '%s' not available", config.reference_provider)
         return None
 
     if not provider.supports_graph(graph_json):
@@ -394,9 +390,7 @@ def _run_single_provider_engine(
             e2e_stats = TimingStats.from_timings(bench_result.e2e_timings)
             gpu_kernel_stats = None
             if bench_result.has_kernel_timings:
-                gpu_kernel_stats = TimingStats.from_timings(
-                    bench_result.kernel_timings
-                )
+                gpu_kernel_stats = TimingStats.from_timings(bench_result.kernel_timings)
 
             # Correctness check (CORR-02)
             if ref_provider is not None:

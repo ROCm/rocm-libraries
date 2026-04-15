@@ -47,9 +47,7 @@ class TestSuiteReporter:
         output = io.StringIO()
         reporter = Reporter(output=output)
 
-        reporter.print_suite_graph_result(
-            passed=2, failed=1, skipped=0, errored=0
-        )
+        reporter.print_suite_graph_result(passed=2, failed=1, skipped=0, errored=0)
 
         result = output.getvalue()
         assert "  -> 2 passed, 1 failed, 0 skipped, 0 errored" in result
@@ -59,9 +57,7 @@ class TestSuiteReporter:
         output = io.StringIO()
         reporter = Reporter(output=output)
 
-        reporter.print_suite_graph_result(
-            passed=0, failed=0, skipped=0, errored=0
-        )
+        reporter.print_suite_graph_result(passed=0, failed=0, skipped=0, errored=0)
 
         result = output.getvalue()
         assert "  -> 0 passed, 0 failed, 0 skipped, 0 errored" in result

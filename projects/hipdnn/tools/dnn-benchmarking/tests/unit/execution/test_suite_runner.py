@@ -61,7 +61,12 @@ class TestRunGraphAllProviders:
     @patch("dnn_benchmarking.execution.suite_runner.Executor")
     @patch("dnn_benchmarking.execution.suite_runner.BufferManager")
     def test_returns_graph_result_with_one_result_per_provider_engine(
-        self, mock_bm_cls, mock_exec_cls, mock_get_ref, mock_disc_providers, mock_disc_engines
+        self,
+        mock_bm_cls,
+        mock_exec_cls,
+        mock_get_ref,
+        mock_disc_providers,
+        mock_disc_engines,
     ):
         """Test 1: run_graph_all_providers returns a GraphResult with one
         ProviderEngineResult per discovered provider/engine combo."""
@@ -109,7 +114,12 @@ class TestRunGraphAllProviders:
     @patch("dnn_benchmarking.execution.suite_runner.Executor")
     @patch("dnn_benchmarking.execution.suite_runner.BufferManager")
     def test_prepare_failure_records_error_status(
-        self, mock_bm_cls, mock_exec_cls, mock_get_ref, mock_disc_providers, mock_disc_engines
+        self,
+        mock_bm_cls,
+        mock_exec_cls,
+        mock_get_ref,
+        mock_disc_providers,
+        mock_disc_engines,
     ):
         """Test 2: When a provider/engine combo fails during prepare(), it records
         status='error' with error message, no timing data."""
@@ -148,7 +158,12 @@ class TestRunGraphAllProviders:
     @patch("dnn_benchmarking.execution.suite_runner.Executor")
     @patch("dnn_benchmarking.execution.suite_runner.BufferManager")
     def test_check_support_failure_records_skipped_status(
-        self, mock_bm_cls, mock_exec_cls, mock_get_ref, mock_disc_providers, mock_disc_engines
+        self,
+        mock_bm_cls,
+        mock_exec_cls,
+        mock_get_ref,
+        mock_disc_providers,
+        mock_disc_engines,
     ):
         """Test 3: When a provider/engine combo does not support the graph
         (check_support fails), it records status='skipped' with reason."""
@@ -186,7 +201,12 @@ class TestRunGraphAllProviders:
     @patch("dnn_benchmarking.execution.suite_runner.Executor")
     @patch("dnn_benchmarking.execution.suite_runner.BufferManager")
     def test_successful_execution_records_separated_timing(
-        self, mock_bm_cls, mock_exec_cls, mock_get_ref, mock_disc_providers, mock_disc_engines
+        self,
+        mock_bm_cls,
+        mock_exec_cls,
+        mock_get_ref,
+        mock_disc_providers,
+        mock_disc_engines,
     ):
         """Test 4: Successful execution records status='success' with separate
         cpu_build_time_ms, gpu_kernel_stats, e2e_stats."""
@@ -234,7 +254,12 @@ class TestRunGraphAllProviders:
     @patch("dnn_benchmarking.execution.suite_runner.Executor")
     @patch("dnn_benchmarking.execution.suite_runner.BufferManager")
     def test_cpu_build_time_from_init_time_ms(
-        self, mock_bm_cls, mock_exec_cls, mock_get_ref, mock_disc_providers, mock_disc_engines
+        self,
+        mock_bm_cls,
+        mock_exec_cls,
+        mock_get_ref,
+        mock_disc_providers,
+        mock_disc_engines,
     ):
         """Test 5: cpu_build_time_ms comes from Executor.init_time_ms."""
         mock_disc_providers.return_value = ["provA"]
@@ -307,7 +332,12 @@ class TestProviderFilter:
     @patch("dnn_benchmarking.execution.suite_runner.Executor")
     @patch("dnn_benchmarking.execution.suite_runner.BufferManager")
     def test_provider_filter_limits_iteration(
-        self, mock_bm_cls, mock_exec_cls, mock_get_ref, mock_disc_providers, mock_disc_engines
+        self,
+        mock_bm_cls,
+        mock_exec_cls,
+        mock_get_ref,
+        mock_disc_providers,
+        mock_disc_engines,
     ):
         """Test 7: When --provider filter is set, only that provider is iterated."""
         mock_disc_providers.return_value = ["provA", "provB", "provC"]
@@ -351,7 +381,12 @@ class TestProviderFilter:
     @patch("dnn_benchmarking.execution.suite_runner.Executor")
     @patch("dnn_benchmarking.execution.suite_runner.BufferManager")
     def test_engine_filter_limits_iteration(
-        self, mock_bm_cls, mock_exec_cls, mock_get_ref, mock_disc_providers, mock_disc_engines
+        self,
+        mock_bm_cls,
+        mock_exec_cls,
+        mock_get_ref,
+        mock_disc_providers,
+        mock_disc_engines,
     ):
         """Test 8: When --engine filter is set, only that engine ID is iterated per provider."""
         mock_disc_providers.return_value = ["provA"]
@@ -399,7 +434,12 @@ class TestNoRetryOnFailure:
     @patch("dnn_benchmarking.execution.suite_runner.Executor")
     @patch("dnn_benchmarking.execution.suite_runner.BufferManager")
     def test_no_retry_on_failure(
-        self, mock_bm_cls, mock_exec_cls, mock_get_ref, mock_disc_providers, mock_disc_engines
+        self,
+        mock_bm_cls,
+        mock_exec_cls,
+        mock_get_ref,
+        mock_disc_providers,
+        mock_disc_engines,
     ):
         """Test 9: No retry on failure -- single attempt per provider/engine combination."""
         mock_disc_providers.return_value = ["provA"]
@@ -438,8 +478,13 @@ class TestCorrectnessChecking:
     @patch("dnn_benchmarking.execution.suite_runner.Executor")
     @patch("dnn_benchmarking.execution.suite_runner.BufferManager")
     def test_tolerance_match_populated_from_comparator(
-        self, mock_bm_cls, mock_exec_cls, mock_check_corr, mock_get_ref,
-        mock_disc_providers, mock_disc_engines
+        self,
+        mock_bm_cls,
+        mock_exec_cls,
+        mock_check_corr,
+        mock_get_ref,
+        mock_disc_providers,
+        mock_disc_engines,
     ):
         """Test 10: Successful execution populates correctness.tolerance_match
         from ArrayComparator output (per CORR-02)."""
@@ -498,7 +543,12 @@ class TestCorrectnessChecking:
     @patch("dnn_benchmarking.execution.suite_runner.Executor")
     @patch("dnn_benchmarking.execution.suite_runner.BufferManager")
     def test_tolerance_match_none_when_ref_unavailable(
-        self, mock_bm_cls, mock_exec_cls, mock_get_ref, mock_disc_providers, mock_disc_engines
+        self,
+        mock_bm_cls,
+        mock_exec_cls,
+        mock_get_ref,
+        mock_disc_providers,
+        mock_disc_engines,
     ):
         """Test 11: When reference provider is unavailable, correctness.tolerance_match
         is None and correctness.error_message explains why."""
@@ -546,7 +596,12 @@ class TestCorrectnessChecking:
     @patch("dnn_benchmarking.execution.suite_runner.Executor")
     @patch("dnn_benchmarking.execution.suite_runner.BufferManager")
     def test_execution_success_false_on_error(
-        self, mock_bm_cls, mock_exec_cls, mock_get_ref, mock_disc_providers, mock_disc_engines
+        self,
+        mock_bm_cls,
+        mock_exec_cls,
+        mock_get_ref,
+        mock_disc_providers,
+        mock_disc_engines,
     ):
         """Test 12: correctness.execution_success is False when benchmark errors (CORR-01)."""
         mock_disc_providers.return_value = ["provA"]
