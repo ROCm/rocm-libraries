@@ -342,15 +342,15 @@ size_t GemmWrwUniversal::GetWorkspaceSize(const ExecutionContext& context,
     const auto wei_c = dwDesc.GetLengths()[1];
 
     auto ws_size = GetTypeSize(dyDesc.GetType()) * wei_c *
-                    std::accumulate(out_spatial.begin(),
-                                    out_spatial.end(),
-                                    std::size_t(1),
-                                    std::multiplies<std::size_t>()) *
-                    std::accumulate(wei_spatial.begin(),
-                                    wei_spatial.end(),
-                                    std::size_t(1),
-                                    std::multiplies<std::size_t>()) *
-                    conv.group_count;
+                   std::accumulate(out_spatial.begin(),
+                                   out_spatial.end(),
+                                   std::size_t(1),
+                                   std::multiplies<std::size_t>()) *
+                   std::accumulate(wei_spatial.begin(),
+                                   wei_spatial.end(),
+                                   std::size_t(1),
+                                   std::multiplies<std::size_t>()) *
+                   conv.group_count;
 
     // For bf16: extra workspace for fp32 accumulation buffer (same shape as dw)
     const auto xDesc           = problem.GetOut();
@@ -366,8 +366,7 @@ size_t GemmWrwUniversal::GetWorkspaceSize(const ExecutionContext& context,
 
     if(ws_size > handle.GetMaxMemoryAllocSize())
     {
-        MIOPEN_LOG_I2("GemmWrwUniversal: " << ws_size << " > "
-                                           << handle.GetMaxMemoryAllocSize());
+        MIOPEN_LOG_I2("GemmWrwUniversal: " << ws_size << " > " << handle.GetMaxMemoryAllocSize());
         return 0;
     }
     return ws_size;
