@@ -57,21 +57,6 @@ std::unordered_set<hipdnn_data_sdk::data_objects::DataType>
     return types;
 }
 
-void BatchnormValidator::validateFixedDataType(const std::vector<int64_t>& tensorIds,
-                                               hipdnn_data_sdk::data_objects::DataType expectedType,
-                                               const std::string& errorMessage)
-{
-    for(const auto tensorId : tensorIds)
-    {
-        const auto& tensor = hip_kernel_utils::findTensorAttributes(_tensorMap, tensorId);
-        if(tensor.data_type() != expectedType)
-        {
-            throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                                                           errorMessage);
-        }
-    }
-}
-
 void BatchnormValidator::validateSpatialDimensions(const std::vector<int64_t>& ioDims)
 {
     if(ioDims.size() < 3)

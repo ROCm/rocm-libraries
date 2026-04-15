@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "../ApplicabilityChecks.hpp"
+#include "engines/plans/ApplicabilityChecks.hpp"
 #include <hipdnn_data_sdk/data_objects/rmsnorm_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/rmsnorm_backward_attributes_generated.h>
 

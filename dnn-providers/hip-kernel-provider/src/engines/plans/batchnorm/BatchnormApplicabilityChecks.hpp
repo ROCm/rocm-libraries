@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "../ApplicabilityChecks.hpp"
+#include "engines/plans/ApplicabilityChecks.hpp"
 #include <array>
 #include <hipdnn_data_sdk/data_objects/batchnorm_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/batchnorm_inference_attributes_generated.h>
@@ -25,10 +25,6 @@ private:
         const hipdnn_data_sdk::data_objects::PointwiseAttributes& activAttr);
 
     // --- Validation Utilities ---
-
-    void validateFixedDataType(const std::vector<int64_t>& tensorIds,
-                               hipdnn_data_sdk::data_objects::DataType expectedType,
-                               const std::string& errorMessage);
 
     static void validateSpatialDimensions(const std::vector<int64_t>& ioDims);
 

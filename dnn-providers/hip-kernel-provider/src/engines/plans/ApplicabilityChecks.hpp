@@ -66,6 +66,10 @@ protected:
         const std::string& typeErrorMessage,
         const std::string& consistencyErrorMessage);
 
+    virtual void validateFixedDataType(const std::vector<int64_t>& tensorIds,
+                                       hipdnn_data_sdk::data_objects::DataType expectedType,
+                                       const std::string& errorMessage);
+
     virtual void validateConsistentShapes(const std::vector<int64_t>& tensorIds,
                                           const std::vector<int64_t>& referenceShape,
                                           const std::string& errorMessage);

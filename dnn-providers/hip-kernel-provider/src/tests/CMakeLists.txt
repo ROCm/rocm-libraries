@@ -25,6 +25,7 @@ add_executable(
     engines/plans/Batchnorm/TestBatchnormApplicabilityChecks.cpp
     engines/plans/Layernorm/TestLayernormPlanBuilder.cpp
     engines/plans/Layernorm/TestLayernormFwdPlan.cpp
+    engines/plans/Layernorm/TestLayernormApplicabilityChecks.cpp
     engines/plans/TestPlanUtils.cpp
     engines/plans/RMSnorm/TestRMSnormPlanBuilder.cpp
     engines/plans/RMSnorm/TestRMSnormFwdPlan.cpp

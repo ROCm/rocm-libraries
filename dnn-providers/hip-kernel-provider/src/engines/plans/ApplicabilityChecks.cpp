@@ -170,6 +170,21 @@ void IValidator::validateConsistentDataTypes(
     }
 }
 
+void IValidator::validateFixedDataType(const std::vector<int64_t>& tensorIds,
+                                       hipdnn_data_sdk::data_objects::DataType expectedType,
+                                       const std::string& errorMessage)
+{
+    for(const auto tensorId : tensorIds)
+    {
+        const auto& tensor = hip_kernel_utils::findTensorAttributes(_tensorMap, tensorId);
+        if(tensor.data_type() != expectedType)
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                                                           errorMessage);
+        }
+    }
+}
+
 void IValidator::validateConsistentShapes(const std::vector<int64_t>& tensorIds,
                                           const std::vector<int64_t>& referenceShape,
                                           const std::string& errorMessage)
