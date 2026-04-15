@@ -103,7 +103,7 @@ namespace hiptensor
         FILE*      mWriteStream;
         Callback_t mCallback;
 
-        mutable std::mutex mMutex;
+        mutable std::recursive_mutex mMutex;
     };
 
 } // namespace hiptensor
