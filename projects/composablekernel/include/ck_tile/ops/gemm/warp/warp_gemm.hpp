@@ -92,16 +92,21 @@ using WarpGemmMfmaF16F16F32M32N32K16 = WarpGemmImpl<WarpGemmAttributeMfmaIterate
 #endif
 
 #if defined(__gfx950__)
-template <WGAttrNumAccessEnum AttrNumAccess = WGAttrNumAccessEnum::Single>
+
+template <WGAttrNumAccessEnum AttrNumAccessA = WGAttrNumAccessEnum::Single,
+          WGAttrNumAccessEnum AttrNumAccessB = AttrNumAccessA>
 using WarpGemmMfmaF16F16F32M16N16K32 = WarpGemmImpl<
     WarpGemmAttributeMfma<WarpGemmAttributeMfmaImplF16F16F32M16N16K32<WGAttrCtlEnum::Default_>,
-                          AttrNumAccess>>;
+                          AttrNumAccessA,
+                          AttrNumAccessB>>;
 #else
-template <WGAttrNumAccessEnum AttrNumAccess = WGAttrNumAccessEnum::Single>
+template <WGAttrNumAccessEnum AttrNumAccessA = WGAttrNumAccessEnum::Single,
+          WGAttrNumAccessEnum AttrNumAccessB = AttrNumAccessA>
 using WarpGemmMfmaF16F16F32M16N16K32 = WarpGemmImpl<WarpGemmAttributeMfmaIterateK<
     WarpGemmAttributeMfmaImplF16F16F32M16N16K16<WGAttrCtlEnum::Default_>,
     2,
-    AttrNumAccess>>;
+    AttrNumAccessA,
+    AttrNumAccessB>>;
 #endif
 
 using WarpGemmMfmaF16F16F32M32N32K8SwizzleA = WarpGemmImpl<WarpGemmAttributeMfmaIterateK_SwizzleA<
@@ -411,11 +416,14 @@ using WarpGemmMfma_f32_16x16x64_bf8_bf8_CTransposed =
         WarpGemmAttributeMfmaImpl_f32_16x16x32_bf8_bf8<WGAttrCtlEnum::Default_>,
         2>>;
 
-template <typename A, typename B, WGAttrNumAccessEnum AttrNumAccess = WGAttrNumAccessEnum::Single>
+template <typename A,
+          typename B,
+          WGAttrNumAccessEnum AttrNumAccessA = WGAttrNumAccessEnum::Single,
+          WGAttrNumAccessEnum AttrNumAccessB = AttrNumAccessA>
 using WarpGemmMfma_f32_16x16x128_f8f6f4 =
     WarpGemmImpl<WarpGemmAttributeMfma<WarpGemmAttributeMfmaImpl_f32_16x16x128_f8f6f4<A, B>,
-                                       AttrNumAccess,
-                                       AttrNumAccess>>;
+                                       AttrNumAccessA,
+                                       AttrNumAccessB>>;
 
 template <typename A, typename B, WGAttrNumAccessEnum AttrNumAccess = WGAttrNumAccessEnum::Single>
 using WarpGemmMfma_f32_16x16x128_f8f6f4_CTransposed =

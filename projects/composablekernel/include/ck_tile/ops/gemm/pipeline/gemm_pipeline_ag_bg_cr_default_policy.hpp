@@ -32,7 +32,7 @@ struct GemmPipelineAgBgCrDefaultPolicy
             std::is_same_v<DataType, fp8_t> || std::is_same_v<DataType, bf8_t>;
         constexpr index_t NumAccess = is_8bit_float ? 2 : 1;
 
-        return IsTranspose ? 8 : WarpTileK / kpack / NumAccess;
+        return IsTranspose ? 2 * sizeof(DataType) : WarpTileK / kpack / NumAccess;
     };
 
     template <index_t YPerBlock,
@@ -222,7 +222,7 @@ struct GemmPipelineAgBgCrDefaultPolicy
         constexpr index_t PackedSize = numeric_traits<DataType>::PackedSize;
         constexpr index_t ContiguousElementsCacheLine =
             (kDramLoadPackBytes / sizeof(DataType) * PackedSize);
-        constexpr index_t NumContiguousElements = std::min(ContiguousElementsCacheLine, KPerBlock);
+        constexpr index_t NumContiguousElements = std::min(ContiguousElementsCacheLine, YPerBlock);
         constexpr index_t KPack                 = MaxVecSize / sizeof(DataType) * PackedSize;
         constexpr index_t PacksPerLdsRow        = NumContiguousElements / KPack;
 
@@ -239,7 +239,7 @@ struct GemmPipelineAgBgCrDefaultPolicy
         constexpr index_t X0 = XPerBlock / (X1 * X2 * X3);
         static_assert(X0 * X1 * X2 * X3 == XPerBlock, "X0, X1, X2, X3 must cover whole XPerBlock!");
 
-        constexpr index_t Pad = IsTranspose ? 0 : X3 * Y2;
+        constexpr index_t Pad = X3 * Y2;
 
         constexpr auto a_lds_block_desc_0 = make_naive_tensor_descriptor(
             make_tuple(number<X0>{},
@@ -340,12 +340,18 @@ struct GemmPipelineAgBgCrDefaultPolicy
         constexpr index_t vector_size =
             DS_READ_TR_SIZE() / sizeof(typename Problem::AComputeDataType);
         constexpr index_t thread_elements = WarpTile::at(I1) * WarpTile::at(I2) / get_warp_size();
-        constexpr auto wg_attr_num_access =
-            !(is_a_load_tr<Problem> || is_b_load_tr<Problem>) ? WGAttrNumAccessEnum::Single
-            : vector_size == thread_elements                  ? WGAttrNumAccessEnum::Single
-            : vector_size * 2 == thread_elements              ? WGAttrNumAccessEnum::Double
-            : vector_size * 4 == thread_elements              ? WGAttrNumAccessEnum::Quad
-                                                              : WGAttrNumAccessEnum::Invalid;
+        constexpr auto wg_attr_num_access_A =
+            !(is_a_load_tr<Problem>)             ? WGAttrNumAccessEnum::Single
+            : vector_size == thread_elements     ? WGAttrNumAccessEnum::Single
+            : vector_size * 2 == thread_elements ? WGAttrNumAccessEnum::Double
+            : vector_size * 4 == thread_elements ? WGAttrNumAccessEnum::Quad
+                                                 : WGAttrNumAccessEnum::Invalid;
+        constexpr auto wg_attr_num_access_B =
+            !(is_b_load_tr<Problem>)             ? WGAttrNumAccessEnum::Single
+            : vector_size == thread_elements     ? WGAttrNumAccessEnum::Single
+            : vector_size * 2 == thread_elements ? WGAttrNumAccessEnum::Double
+            : vector_size * 4 == thread_elements ? WGAttrNumAccessEnum::Quad
+                                                 : WGAttrNumAccessEnum::Invalid;
 
         using ADataType = remove_cvref_t<typename Problem::ADataType>;
         using BDataType = remove_cvref_t<typename Problem::BDataType>;
@@ -366,7 +372,8 @@ struct GemmPipelineAgBgCrDefaultPolicy
                                             Problem::TransposeC,
                                             false,
                                             Problem::UseStructuredSparsity,
-                                            wg_attr_num_access>;
+                                            wg_attr_num_access_A,
+                                            wg_attr_num_access_B>;
 
         using BlockGemmPolicy = BlockGemmASmemBSmemCRegV1CustomPolicy<ATypeToUse,
                                                                       BTypeToUse,
