@@ -2282,6 +2282,24 @@ public:
     {
         std::vector<size_t> sizes(rocfft_scoped_device::device_count());
 
+        // If this is library-decomposed multi-GPU, only the library
+        // can really say what the footprint will be.  Estimate it
+        // here by assuming the input/output size will be evenly
+        // divided across all of the devices.
+        if(multiGPU > 1)
+        {
+            // We will use the first N devices for library-decomposed
+            for(size_t device = 0; device < multiGPU; ++device)
+            {
+                sizes[device] += DivRoundingUp(sum(ibuffer_sizes()), multiGPU);
+                if(placement == fft_placement_notinplace)
+                {
+                    sizes[device] += DivRoundingUp(sum(obuffer_sizes()), multiGPU);
+                }
+            }
+            return sizes;
+        }
+
         int currentDevice = hipInvalidDeviceId;
         if(hipGetDevice(&currentDevice) != hipSuccess)
             throw std::runtime_error("hipGetDevice failed");

@@ -221,7 +221,7 @@ public:
         int device = hipInvalidDeviceId;
         if(hipGetDevice(&device) != hipSuccess)
             throw std::runtime_error("hipGetDevice failed");
-        size_t& val = footprint[device];
+        size_t& cur_device_footprint = footprint[device];
 
         // auto-allocated plans fail here if not enough VRAM, skip these tests
         try
@@ -233,14 +233,15 @@ public:
         }
         catch(fft_params::work_buffer_alloc_failure& e)
         {
-            val += auto_allocated_extra_vram_footprint();
-            val += externally_managed_extra_vram_footprint();
+            cur_device_footprint += auto_allocated_extra_vram_footprint();
+            cur_device_footprint += externally_managed_extra_vram_footprint();
             std::stringstream msg;
-            msg << "Plan work buffer size (" << val << " bytes raw data) too large for device";
+            msg << "Plan work buffer size (" << cur_device_footprint
+                << " bytes raw data) too large for device";
             throw ROCFFT_SKIP{msg.str()};
         }
-        val += auto_allocated_extra_vram_footprint();
-        val += externally_managed_extra_vram_footprint();
+        cur_device_footprint += auto_allocated_extra_vram_footprint();
+        cur_device_footprint += externally_managed_extra_vram_footprint();
         return footprint;
     }
 
