@@ -728,6 +728,9 @@ def get_fwd_blobs(
             continue
         # for hdim_str, mode, mask, bias, lse in itertools.product(d.keys(), MODE_MAP.keys(), MASK_MAP.keys(), ["t", "f"], ["t", "f"]):
         for (hdim, tiles), mode in itertools.product(d.items(), MODE_MAP.keys()):
+            # batch_prefill pipeline requires group mode (static_assert in pipeline problem)
+            if mode != "group":
+                continue
             for tile, pipeline in itertools.product(
                 tiles, CustomFactory.get_pipelines(dtype, hdim, receipt, mask_impl)
             ):

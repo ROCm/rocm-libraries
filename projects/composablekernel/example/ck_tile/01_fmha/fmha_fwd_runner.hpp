@@ -387,7 +387,7 @@ fwd_result fmha_fwd_run(mode_enum mode,
     }
 
 #if(!(CK_TILE_FMHA_FWD_APPENDKV_API || CK_TILE_FMHA_FWD_SPLITKV_API || \
-      CK_TILE_FMHA_FWD_PAGEDKV_API))
+      CK_TILE_FMHA_FWD_PAGEDKV_API || CK_TILE_FMHA_FWD_BATCH_PREFILL_API))
     if(0 < page_block_size)
     {
         std::cerr << "paged-kvcache is not supported. ignoring the 'page_block_size' option"
@@ -395,7 +395,11 @@ fwd_result fmha_fwd_run(mode_enum mode,
         page_block_size = 0;
     }
 #endif
-    if(!(page_block_size % 128 == 0))
+    // batch_prefill supports flexible page sizes (not just multiples of 128)
+    const bool need_128_aligned_page =
+        (CK_TILE_FMHA_FWD_APPENDKV_API || CK_TILE_FMHA_FWD_SPLITKV_API ||
+         CK_TILE_FMHA_FWD_PAGEDKV_API);
+    if(need_128_aligned_page && 0 < page_block_size && !(page_block_size % 128 == 0))
     {
         std::cerr << "only paged-kvcache block size divisible by 128 are currently supported"
                   << std::endl;
@@ -1572,6 +1576,17 @@ fwd_result fmha_fwd_run(mode_enum mode,
                 // group mode required: seqstart_q is prefix-sum of per-batch seqlen_q
                 args.seqstart_q_ptr = seqstart_q_buf.GetDeviceBuffer();
 
+                // batch_prefill LINEAR_LAYOUT strides for runner's K layout
+                // [max_num_page_blocks, nhead_k, page_block_size, hdim]:
+                //   stride_k       = hdim_q           (token stride within one head's page slice)
+                //   nhead_stride_k = page_block_size * hdim_q  (head stride)
+                //   batch_stride_k = nhead_k * page_block_size * hdim_q  (page stride, already set)
+                args.stride_k       = hdim_q;
+                args.nhead_stride_k = page_block_size * hdim_q;
+                // V is row-major, same layout convention
+                args.stride_v       = hdim_v;
+                args.nhead_stride_v = page_block_size * hdim_v;
+
                 // descale: not used for fp16/bf16
                 args.q_descale_ptr               = nullptr;
                 args.k_descale_ptr               = nullptr;
@@ -1940,7 +1955,8 @@ fwd_result fmha_fwd_run(mode_enum mode,
                 q_host_ref.ForEach([&](auto& self, auto i) { self(i) = q_host_ref_ro(i); });
             }
 #endif
-#if CK_TILE_FMHA_FWD_SPLITKV_API || CK_TILE_FMHA_FWD_PAGEDKV_API
+#if CK_TILE_FMHA_FWD_SPLITKV_API || CK_TILE_FMHA_FWD_PAGEDKV_API || \
+    CK_TILE_FMHA_FWD_BATCH_PREFILL_API
             if(0 < page_block_size)
             {
                 // clang-format off
@@ -1991,7 +2007,8 @@ fwd_result fmha_fwd_run(mode_enum mode,
                 });
             }
 #endif
-#if CK_TILE_FMHA_FWD_SPLITKV_API || CK_TILE_FMHA_FWD_PAGEDKV_API
+#if CK_TILE_FMHA_FWD_SPLITKV_API || CK_TILE_FMHA_FWD_PAGEDKV_API || \
+    CK_TILE_FMHA_FWD_BATCH_PREFILL_API
             if(0 < page_block_size)
             {
                 if(is_v_rowmajor)
