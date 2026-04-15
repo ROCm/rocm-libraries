@@ -128,25 +128,23 @@ struct conv3d_find2_test : public conv_test<T, ConvApi::Find_2_0>,
 using GPU_Conv3d_Find2_FP32 = conv3d_find2_test<float>;
 using GPU_Conv3d_Find2_FP16 = conv3d_find2_test<half_float::half>;
 
-struct TestNameGenerator
-{
-    std::string operator()(const auto& info)
-    {
-        return GetParamNamesString(info, std::make_index_sequence<std::tuple_size_v<TestCase>>{});
-    }
-};
-
 TEST_P(GPU_Conv3d_Find2_FP32, TestFloat) { run(); }
 TEST_P(GPU_Conv3d_Find2_FP16, TestFloat16) { run(); }
 
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_Conv3d_Find2_FP32, GetCasesSmoke<float>(), TestNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(Full, GPU_Conv3d_Find2_FP32, GetCasesFull<float>(), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_Conv3d_Find2_FP32,
+                         GetCasesSmoke<float>(),
+                         DefaultTestNameGenerator<TestCase>{});
+INSTANTIATE_TEST_SUITE_P(Full,
+                         GPU_Conv3d_Find2_FP32,
+                         GetCasesFull<float>(),
+                         DefaultTestNameGenerator<TestCase>{});
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_Conv3d_Find2_FP16,
                          GetCasesSmoke<half_float::half>(),
-                         TestNameGenerator{});
+                         DefaultTestNameGenerator<TestCase>{});
 INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_Conv3d_Find2_FP16,
                          GetCasesFull<half_float::half>(),
-                         TestNameGenerator{});
+                         DefaultTestNameGenerator<TestCase>{});

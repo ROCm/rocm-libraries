@@ -132,29 +132,33 @@ using GPU_Conv2d_FP32  = conv2d_test<float>;
 using GPU_Conv2d_FP16  = conv2d_test<half_float::half>;
 using GPU_Conv2d_BFP16 = conv2d_test<bfloat16>;
 
-struct TestNameGenerator
-{
-    std::string operator()(const auto& info)
-    {
-        return GetParamNamesString(info, std::make_index_sequence<std::tuple_size_v<TestCase>>{});
-    }
-};
-
 TEST_P(GPU_Conv2d_FP32, TestFloat) { run(); }
 TEST_P(GPU_Conv2d_FP16, TestFloat16) { run(); }
 TEST_P(GPU_Conv2d_BFP16, TestBFloat16) { run(); }
 
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_Conv2d_FP32, GetCasesSmoke<float>(), TestNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(Full, GPU_Conv2d_FP32, GetCasesFull<float>(), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_Conv2d_FP32,
+                         GetCasesSmoke<float>(),
+                         DefaultTestNameGenerator<TestCase>{});
+INSTANTIATE_TEST_SUITE_P(Full,
+                         GPU_Conv2d_FP32,
+                         GetCasesFull<float>(),
+                         DefaultTestNameGenerator<TestCase>{});
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_Conv2d_FP16,
                          GetCasesSmoke<half_float::half>(),
-                         TestNameGenerator{});
+                         DefaultTestNameGenerator<TestCase>{});
 INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_Conv2d_FP16,
                          GetCasesFull<half_float::half>(),
-                         TestNameGenerator{});
+                         DefaultTestNameGenerator<TestCase>{});
 
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_Conv2d_BFP16, GetCasesSmoke<bfloat16>(), TestNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(Full, GPU_Conv2d_BFP16, GetCasesFull<bfloat16>(), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_Conv2d_BFP16,
+                         GetCasesSmoke<bfloat16>(),
+                         DefaultTestNameGenerator<TestCase>{});
+INSTANTIATE_TEST_SUITE_P(Full,
+                         GPU_Conv2d_BFP16,
+                         GetCasesFull<bfloat16>(),
+                         DefaultTestNameGenerator<TestCase>{});

@@ -106,25 +106,23 @@ struct immed_conv3d_test : public conv_test<T, ConvApi::Immediate>,
 using GPU_Immed_Conv3d_FP32 = immed_conv3d_test<float>;
 using GPU_Immed_Conv3d_FP16 = immed_conv3d_test<half_float::half>;
 
-struct TestNameGenerator
-{
-    std::string operator()(const auto& info)
-    {
-        return GetParamNamesString(info, std::make_index_sequence<std::tuple_size_v<TestCase>>{});
-    }
-};
-
 TEST_P(GPU_Immed_Conv3d_FP32, TestFloat) { run(); }
 TEST_P(GPU_Immed_Conv3d_FP16, TestFloat16) { run(); }
 
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_Immed_Conv3d_FP32, GetCasesSmoke<float>(), TestNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(Full, GPU_Immed_Conv3d_FP32, GetCasesFull<float>(), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_Immed_Conv3d_FP32,
+                         GetCasesSmoke<float>(),
+                         DefaultTestNameGenerator<TestCase>{});
+INSTANTIATE_TEST_SUITE_P(Full,
+                         GPU_Immed_Conv3d_FP32,
+                         GetCasesFull<float>(),
+                         DefaultTestNameGenerator<TestCase>{});
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_Immed_Conv3d_FP16,
                          GetCasesSmoke<half_float::half>(),
-                         TestNameGenerator{});
+                         DefaultTestNameGenerator<TestCase>{});
 INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_Immed_Conv3d_FP16,
                          GetCasesFull<half_float::half>(),
-                         TestNameGenerator{});
+                         DefaultTestNameGenerator<TestCase>{});

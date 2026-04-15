@@ -7,6 +7,7 @@
 #include <ranges>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -251,5 +252,14 @@ static std::string GetParamNamesString(const ParamsInfo& inputParamsInfo,
 
     return str;
 }
+
+template <typename TestCase>
+struct DefaultTestNameGenerator
+{
+    std::string operator()(const auto& info)
+    {
+        return GetParamNamesString(info, std::make_index_sequence<std::tuple_size_v<TestCase>>{});
+    }
+};
 
 } // namespace
