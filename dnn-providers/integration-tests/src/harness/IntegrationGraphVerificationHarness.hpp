@@ -129,6 +129,14 @@ protected:
             }
         }
 
+        // --skip-graph-validation: graph is confirmed supported, exit early with PASS
+        if(TestConfig::get().skipGraphValidation())
+        {
+            HIPDNN_PLUGIN_LOG_INFO("--skip-graph-validation: graph is supported, skipping "
+                                   "execution and validation");
+            return;
+        }
+
         // Build execution plans, engine preference set above should ensure that
         // correct engine is selected.
         auto result = graph.create_execution_plans();
