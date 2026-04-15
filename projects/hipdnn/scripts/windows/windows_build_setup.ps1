@@ -6,7 +6,6 @@ param(
     [string]$InstallRoot = "D:\develop",
     [string]$VsBuildToolsPath = "",
     [string]$ClangPath = "",
-    [string]$TheRockPath = "",
     [Alias("GpuTarget")]
     [string]$Asic = "gfx1151",
     [switch]$SkipPrerequisites = $false,
@@ -22,9 +21,6 @@ $ProgressPreference = "SilentlyContinue"
 # Resolve default install paths from InstallRoot unless explicit paths are provided.
 if (-not $ClangPath) {
     $ClangPath = Join-Path $InstallRoot "dist\clang"
-}
-if (-not $TheRockPath) {
-    $TheRockPath = Join-Path $InstallRoot "dist\therock"
 }
 if (-not $VsBuildToolsPath) {
     $VsBuildToolsPath = Join-Path $InstallRoot "dist\vs-buildtools"
@@ -60,7 +56,6 @@ Write-Host "Configuration:" -ForegroundColor Yellow
 Write-Host "  Install Root: $InstallRoot"
 Write-Host "  VS Build Tools Path: $VsBuildToolsPath"
 Write-Host "  Clang Path: $ClangPath"
-Write-Host "  TheRock Path: $TheRockPath"
 Write-Host "  ASIC: $Asic"
 Write-Host "===================================================`n" -ForegroundColor Magenta
 
@@ -196,22 +191,6 @@ if (-not $SkipToolchainDownload) {
         }
     } else {
         Write-Success "Clang already installed at $ClangPath"
-    }
-
-    # Verify amdgpu-arch
-    if (Test-Path "$ClangPath\bin\amdgpu-arch.exe") {
-        Write-Status "Detecting GPU architecture..."
-        $detectedGpu = & "$ClangPath\bin\amdgpu-arch.exe" 2>$null
-        if ($detectedGpu) {
-            Write-Success "Detected GPU: $detectedGpu"
-            if ($detectedGpu -ne $Asic) {
-                Write-Warning "Detected GPU ($detectedGpu) differs from specified target ($Asic)"
-                $response = Read-Host 'Use detected GPU? (Y/N)'
-                if ($response -eq 'Y') {
-                    $Asic = $detectedGpu
-                }
-            }
-        }
     }
 
     Write-Status "Skipping TheRock nightly tarball download."
