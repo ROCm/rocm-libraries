@@ -220,6 +220,44 @@ namespace rocRoller
         };
 
         template <typename IO, typename Context>
+        struct MappingTraits<KernelGraph::CoordinateGraph::PairSwap, IO, Context>
+        {
+            using iot = IOTraits<IO>;
+
+            static void mapping(IO& io, KernelGraph::CoordinateGraph::PairSwap& edge, Context& ctx)
+            {
+                iot::mapRequired(io, "rowsPerGroup", edge.rowsPerGroup);
+            }
+
+            static void mapping(IO& io, KernelGraph::CoordinateGraph::PairSwap& edge)
+            {
+                AssertFatal((std::same_as<EmptyContext, Context>));
+                Context ctx;
+                mapping(io, edge, ctx);
+            }
+        };
+
+        template <typename IO, typename Context>
+        struct MappingTraits<KernelGraph::CoordinateGraph::Rotate, IO, Context>
+        {
+            using iot = IOTraits<IO>;
+
+            static void mapping(IO& io, KernelGraph::CoordinateGraph::Rotate& edge, Context& ctx)
+            {
+                iot::mapRequired(io, "numPositions", edge.numPositions);
+                iot::mapRequired(io, "rowsPerGroup", edge.rowsPerGroup);
+                iot::mapRequired(io, "inverse", edge.inverse);
+            }
+
+            static void mapping(IO& io, KernelGraph::CoordinateGraph::Rotate& edge)
+            {
+                AssertFatal((std::same_as<EmptyContext, Context>));
+                Context ctx;
+                mapping(io, edge, ctx);
+            }
+        };
+
+        template <typename IO, typename Context>
         struct MappingTraits<KernelGraph::CoordinateGraph::PiecewiseAffineJoin, IO, Context>
         {
             using iot = IOTraits<IO>;

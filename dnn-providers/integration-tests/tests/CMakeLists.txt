@@ -4,11 +4,14 @@
 add_executable(hipdnn_integration_tests_unit_tests
     main.cpp
     TestTestConfig.cpp
+    TestTestSettings.cpp
     TestGpuReferenceGraphExecutor.cpp
 )
 
 target_include_directories(hipdnn_integration_tests_unit_tests
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../src)
+target_include_directories(hipdnn_integration_tests_unit_tests SYSTEM PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/third_party/tomlplusplus)
 
 target_link_libraries(hipdnn_integration_tests_unit_tests
     PRIVATE
