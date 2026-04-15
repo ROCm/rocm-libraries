@@ -115,7 +115,7 @@ bool RunTest(const std::string& test_name, float atol = 0.02f)
     constexpr bool is_fp8_x  = std::is_same_v<XDataType, fp8_t>;
     constexpr bool is_fp8_w  = std::is_same_v<WDataType, fp8_t>;
     constexpr bool is_mxfp4  = std::is_same_v<WDataType, pk_fp4_t>;
-    constexpr index_t WPACK  = is_mxfp4 ? 2 : 1;
+    constexpr index_t kVector = is_mxfp4 ? 2 : 1;
 
     const float x_range = is_fp8_x ? 0.5f : 1.0f;
     const float w_range = is_fp8_w ? 0.25f : 1.0f;
@@ -282,7 +282,8 @@ bool RunTest(const std::string& test_name, float atol = 0.02f)
     // --- Launch gate_up kernel ---
     using GateUpProblem = WarpDecodeGateUpProblem<
         XDataType, WDataType, ComputeDataType, IntermediateDataType,
-        XScaleDataType, WScaleDataType, XScaleLayout, WScaleLayout>;
+        XScaleDataType, WScaleDataType, XScaleLayout, WScaleLayout,
+        ck_tile::element_wise::Silu, kVector>;
     using Policy = WarpDecodePolicy;
     using GateUpKernel = WarpDecodeGateUpKernel<GateUpProblem, Policy>;
 
@@ -296,7 +297,7 @@ bool RunTest(const std::string& test_name, float atol = 0.02f)
         static_cast<int32_t*>(router_ids_buf.GetDeviceBuffer()),
         inter_buf.GetDeviceBuffer(),
         B, HIDDEN, INTER, TOP_K, E,
-        HIDDEN, HIDDEN / WPACK, HIDDEN / WPACK, INTER
+        HIDDEN, HIDDEN, HIDDEN, INTER
     };
 
     auto s = stream_config{};
@@ -305,7 +306,7 @@ bool RunTest(const std::string& test_name, float atol = 0.02f)
     // --- Launch down_reduce kernel ---
     using DownProblem = WarpDecodeDownReduceProblem<
         IntermediateDataType, WDataType, ComputeDataType, YDataType,
-        WScaleDataType, WScaleLayout>;
+        WScaleDataType, WScaleLayout, kVector>;
     using DownKernel = WarpDecodeDownReduceKernel<DownProblem, Policy>;
 
     typename DownKernel::Kargs args2{
@@ -316,7 +317,7 @@ bool RunTest(const std::string& test_name, float atol = 0.02f)
         static_cast<float*>(router_wts_buf.GetDeviceBuffer()),
         y_buf.GetDeviceBuffer(),
         B, HIDDEN, INTER, TOP_K, E,
-        INTER, INTER / WPACK, HIDDEN
+        INTER, INTER, HIDDEN
     };
 
     launch_warp_decode_down_reduce<DownKernel>(args2, s);

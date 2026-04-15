@@ -10,39 +10,18 @@ namespace ck_tile {
 
 struct WarpDecodePolicy
 {
-    // Make distribution for a [1, WAVE_SIZE] tile.
-    // This is used for X, W, and Intermediate tiles within the loop.
-    // M dimension is always size 1. N dimension is WAVE_SIZE.
+    // [1, WAVE_SIZE * V] tile: each thread gets V consecutive elements.
+    // V comes from Problem::kVector (default 1, use 2 for pk_fp4_t).
     template <typename Problem>
     CK_TILE_DEVICE static constexpr auto MakeTileDistribution()
     {
+        constexpr index_t V = Problem::kVector;
         return make_static_tile_distribution(
             tile_distribution_encoding<
                 sequence<>,
                 tuple<
-                    sequence<1>,                   // M: [Warps=1]
-                    sequence<get_warp_size(), 1>   // N: [Lanes=WAVE_SIZE, Vector=1]
-                >,
-                // One M per warp, split N into lanes
-                tuple<sequence<1>, sequence<2>>,
-                tuple<sequence<0>, sequence<0>>,
-                /// One element per lane
-                sequence<2>,
-                sequence<1>
-            >{});
-    }
-
-    // [1, WAVE_SIZE*2] tile with Vector=2: each thread gets 2 consecutive elements.
-    // Thread lane_id owns elements at (lane_id*2) and (lane_id*2+1).
-    template <typename Problem>
-    CK_TILE_DEVICE static constexpr auto MakeTileDistributionV2()
-    {
-        return make_static_tile_distribution(
-            tile_distribution_encoding<
-                sequence<>,
-                tuple<
-                    sequence<1>,                   // M: [Warps=1]
-                    sequence<get_warp_size(), 2>   // N: [Lanes=WAVE_SIZE, Vector=2]
+                    sequence<1>,                    // M: [Warps=1]
+                    sequence<get_warp_size(), V>    // N: [Lanes=WAVE_SIZE, Vector=V]
                 >,
                 tuple<sequence<1>, sequence<2>>,
                 tuple<sequence<0>, sequence<0>>,

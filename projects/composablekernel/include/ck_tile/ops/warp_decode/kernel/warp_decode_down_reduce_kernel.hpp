@@ -95,131 +95,108 @@ struct WarpDecodeDownReduceKernel
 
     CK_TILE_DEVICE void operator()(Kargs kargs) const
     {
+        constexpr bool is_packed_w   = std::is_same_v<WDataType, pk_fp4_t>;
+        constexpr index_t kVector    = Problem::kVector;
+        constexpr index_t kTileN     = get_warp_size() * kVector;
+
+        using WScaleLayout   = typename Problem::WScaleLayout;
+        using WScaleDataType = typename Problem::WScaleDataType;
+
         const index_t block_id = get_block_id();
-        const index_t out_j = block_id % kargs.hidden;
-        const index_t token_b = block_id / kargs.hidden;
+        const index_t out_j    = block_id % kargs.hidden;
+        const index_t token_b  = block_id / kargs.hidden;
 
         if(token_b >= kargs.b)
-        {
             return;
-        }
 
         ComputeDataType acc = 0;
 
+        // Loop-invariant per-tensor scale
         ComputeDataType w_down_scale_val = type_convert<ComputeDataType>(1.0f);
-        if constexpr(std::is_same_v<typename Problem::WScaleLayout, WarpDecodeScaleLayout::PerTensor>)
+        if constexpr(std::is_same_v<WScaleLayout, WarpDecodeScaleLayout::PerTensor>)
         {
-            if (kargs.p_w_down_scale)
-                w_down_scale_val = type_convert<ComputeDataType>(*static_cast<const typename Problem::WScaleDataType*>(kargs.p_w_down_scale));
+            if(kargs.p_w_down_scale)
+                w_down_scale_val = type_convert<ComputeDataType>(
+                    *static_cast<const WScaleDataType*>(kargs.p_w_down_scale));
         }
+
+        // Intermediate view (always non-packed: float/bf16)
+        const auto intermediate_view = make_naive_tensor_view<address_space_enum::global>(
+            static_cast<const IntermediateDataType*>(kargs.p_intermediate),
+            make_tuple(kargs.b * kargs.top_k, kargs.inter),
+            make_tuple(kargs.stride_intermediate, 1),
+            number<kVector>{}, number<1>{});
+
+        // Weight view (kVector as guaranteed vector size for correct pk_fp4_t handling)
+        const auto w_down_view = make_naive_tensor_view<address_space_enum::global>(
+            static_cast<const WDataType*>(kargs.p_w_down),
+            make_tuple(kargs.e * kargs.hidden, kargs.inter),
+            make_tuple(kargs.stride_w_down, 1),
+            number<kVector>{}, number<1>{});
+
+        const index_t num_iterations = kargs.inter / kTileN;
 
         for(index_t k = 0; k < kargs.top_k; ++k)
         {
             const int32_t e = kargs.p_router_ids[token_b * kargs.top_k + k];
             const float w   = kargs.p_router_wts[token_b * kargs.top_k + k];
 
-            if constexpr(std::is_same_v<typename Problem::WScaleLayout, WarpDecodeScaleLayout::PerToken>)
+            if constexpr(std::is_same_v<WScaleLayout, WarpDecodeScaleLayout::PerToken>)
             {
-                if (kargs.p_w_down_scale)
-                    w_down_scale_val = type_convert<ComputeDataType>(static_cast<const typename Problem::WScaleDataType*>(kargs.p_w_down_scale)[e * kargs.hidden + out_j]);
+                if(kargs.p_w_down_scale)
+                    w_down_scale_val = type_convert<ComputeDataType>(
+                        static_cast<const WScaleDataType*>(kargs.p_w_down_scale)[e * kargs.hidden + out_j]);
             }
 
-            constexpr bool is_packed_w = std::is_same_v<WDataType, pk_fp4_t>;
             const index_t w_row = e * kargs.hidden + out_j;
 
+            auto intermediate_window = make_tile_window(
+                intermediate_view,
+                make_tuple(number<1>{}, number<kTileN>{}),
+                {token_b * kargs.top_k + k, 0},
+                Policy::template MakeTileDistribution<Problem>());
+
+            auto w_down_window = make_tile_window(
+                w_down_view,
+                make_tuple(number<1>{}, number<kTileN>{}),
+                {w_row, 0},
+                Policy::template MakeTileDistribution<Problem>());
+
+            for(index_t i = 0; i < num_iterations; ++i)
             {
-                // V2 intermediate: always non-packed (float/bf16)
-                const auto intermediate_m_n = make_naive_tensor_view<address_space_enum::global>(
-                    static_cast<const IntermediateDataType*>(kargs.p_intermediate),
-                    make_tuple(kargs.b * kargs.top_k, kargs.inter),
-                    make_tuple(kargs.stride_intermediate, 1),
-                    number<1>{},
-                    number<1>{});
+                auto inter_tile  = load_tile(intermediate_window);
+                auto w_down_tile = load_tile(w_down_window);
 
-                auto intermediate_window = make_tile_window(
-                    intermediate_m_n,
-                    make_tuple(number<1>{}, number<get_warp_size() * 2>{}),
-                    {token_b * kargs.top_k + k, 0},
-                    Policy::template MakeTileDistributionV2<Problem>());
+                const index_t k_base = i * kTileN + get_lane_id() * kVector;
 
-                if constexpr(is_packed_w)
-                {
-                    // pk_fp4_t weights: raw pointer access
-                    const auto* d_ptr = static_cast<const WDataType*>(kargs.p_w_down) + w_row * kargs.stride_w_down;
+                ComputeDataType ds = w_down_scale_val;
+                if constexpr(ScaleLayoutTraits<WScaleLayout>::is_block2d)
+                    ds = load_block2d_scale<WScaleLayout, WScaleDataType>(
+                        kargs.p_w_down_scale, w_row, k_base, kargs.inter);
 
-                    const index_t num_iterations = kargs.inter / (get_warp_size() * 2);
+                index_t sub = 0;
+                constexpr auto spans = decltype(inter_tile)::get_distributed_spans();
+                sweep_tile_span(spans[number<1>{}], [&](auto idx1) {
+                    constexpr auto idx = make_tuple(make_tuple(), idx1);
+                    auto act_val = type_convert<ComputeDataType>(inter_tile[idx]);
 
-                    for(index_t i = 0; i < num_iterations; ++i)
+                    ComputeDataType d_val;
+                    if constexpr(is_packed_w)
                     {
-                        auto inter_tile = load_tile(intermediate_window);
-
-                        const index_t byte_idx = i * get_warp_size() + get_lane_id();
-                        const index_t k_base = byte_idx * 2;
-
-                        uint8_t d_raw = static_cast<uint8_t>(d_ptr[byte_idx]);
-
-                        ComputeDataType d0 = unpack_fp4_nibble(d_raw, 0);
-                        ComputeDataType d1 = unpack_fp4_nibble(d_raw, 1);
-
-                        ComputeDataType ds = w_down_scale_val;
-                        if constexpr(ScaleLayoutTraits<typename Problem::WScaleLayout>::is_block2d)
-                            ds = load_block2d_scale<typename Problem::WScaleLayout, typename Problem::WScaleDataType>(kargs.p_w_down_scale, w_row, k_base, kargs.inter);
-
-                        index_t sub = 0;
-                        constexpr auto i_spans = decltype(inter_tile)::get_distributed_spans();
-                        sweep_tile_span(i_spans[number<1>{}], [&](auto iidx1) {
-                            constexpr auto iidx = make_tuple(make_tuple(), iidx1);
-                            auto act_val = type_convert<ComputeDataType>(inter_tile[iidx]);
-                            ComputeDataType dw = (sub == 0) ? d0 : d1;
-                            acc += w * act_val * (dw * ds);
-                            sub++;
-                        });
-
-                        move_tile_window(intermediate_window, {0, get_warp_size() * 2});
+                        d_val = unpack_fp4_nibble(
+                            static_cast<uint8_t>(w_down_tile[idx]), sub);
                     }
-                }
-                else
-                {
-                    // Non-packed weights: V2 tile windows
-                    const auto w_down_m_n = make_naive_tensor_view<address_space_enum::global>(
-                        static_cast<const WDataType*>(kargs.p_w_down),
-                        make_tuple(kargs.e * kargs.hidden, kargs.inter),
-                        make_tuple(kargs.stride_w_down, 1),
-                        number<1>{},
-                        number<1>{});
-
-                    auto w_down_window = make_tile_window(
-                        w_down_m_n,
-                        make_tuple(number<1>{}, number<get_warp_size() * 2>{}),
-                        {w_row, 0},
-                        Policy::template MakeTileDistributionV2<Problem>());
-
-                    const index_t num_iterations = kargs.inter / (get_warp_size() * 2);
-
-                    for(index_t i = 0; i < num_iterations; ++i)
+                    else
                     {
-                        auto inter_tile  = load_tile(intermediate_window);
-                        auto w_down_tile = load_tile(w_down_window);
-
-                        const index_t k_base = i * get_warp_size() * 2 + get_lane_id() * 2;
-
-                        ComputeDataType ds = w_down_scale_val;
-                        if constexpr(ScaleLayoutTraits<typename Problem::WScaleLayout>::is_block2d)
-                            ds = load_block2d_scale<typename Problem::WScaleLayout, typename Problem::WScaleDataType>(kargs.p_w_down_scale, w_row, k_base, kargs.inter);
-
-                        constexpr auto spans = decltype(inter_tile)::get_distributed_spans();
-                        sweep_tile_span(spans[number<1>{}], [&](auto idx1) {
-                            constexpr auto idx = make_tuple(make_tuple(), idx1);
-                            auto act_val = type_convert<ComputeDataType>(inter_tile[idx]);
-                            auto d_val   = type_convert<ComputeDataType>(w_down_tile[idx]);
-
-                            acc += w * act_val * (d_val * ds);
-                        });
-
-                        move_tile_window(intermediate_window, {0, get_warp_size() * 2});
-                        move_tile_window(w_down_window, {0, get_warp_size() * 2});
+                        d_val = type_convert<ComputeDataType>(w_down_tile[idx]);
                     }
-                }
+
+                    acc += w * act_val * (d_val * ds);
+                    sub++;
+                });
+
+                move_tile_window(intermediate_window, {0, kTileN});
+                move_tile_window(w_down_window, {0, kTileN});
             }
         }
 
@@ -227,7 +204,8 @@ struct WarpDecodeDownReduceKernel
 
         if(get_lane_id() == 0)
         {
-            static_cast<YDataType*>(kargs.p_y)[token_b * kargs.stride_y + out_j] = type_convert<YDataType>(result);
+            static_cast<YDataType*>(kargs.p_y)[token_b * kargs.stride_y + out_j] =
+                type_convert<YDataType>(result);
         }
     }
 };

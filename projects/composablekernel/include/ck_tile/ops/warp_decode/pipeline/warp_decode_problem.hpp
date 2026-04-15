@@ -43,7 +43,8 @@ template <typename XDataType_,
           typename WScaleDataType_ = float,
           typename XScaleLayout_ = WarpDecodeScaleLayout::PerTensor,
           typename WScaleLayout_ = WarpDecodeScaleLayout::PerTensor,
-          typename Activation_ = ck_tile::element_wise::Silu>
+          typename Activation_ = ck_tile::element_wise::Silu,
+          index_t kVector_ = 1>
 struct WarpDecodeGateUpProblem
 {
     using XDataType            = remove_cvref_t<XDataType_>;
@@ -57,6 +58,7 @@ struct WarpDecodeGateUpProblem
     using Activation           = remove_cvref_t<Activation_>;
 
     static constexpr index_t kBlockSize = get_warp_size();
+    static constexpr index_t kVector    = kVector_;
 };
 
 template <typename IntermediateDataType_,
@@ -64,7 +66,8 @@ template <typename IntermediateDataType_,
           typename ComputeDataType_,
           typename YDataType_,
           typename WScaleDataType_ = float,
-          typename WScaleLayout_ = WarpDecodeScaleLayout::PerTensor>
+          typename WScaleLayout_ = WarpDecodeScaleLayout::PerTensor,
+          index_t kVector_ = 1>
 struct WarpDecodeDownReduceProblem
 {
     using IntermediateDataType = remove_cvref_t<IntermediateDataType_>;
@@ -75,6 +78,7 @@ struct WarpDecodeDownReduceProblem
     using WScaleLayout         = remove_cvref_t<WScaleLayout_>;
 
     static constexpr index_t kBlockSize = get_warp_size();
+    static constexpr index_t kVector    = kVector_;
 };
 
 } // namespace ck_tile
