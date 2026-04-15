@@ -143,6 +143,9 @@ struct SparseMmaPipeline : public MmaPipelineBase<sparse::detail::getPipelineFla
         auto& [a, b_frag, c_frag]       = transformedInputs;
         auto& [a_compressed_whole, idx] = a;
 
+        // Validate that the ATransform result and per-fragment reinterpretation are correct
+        checkATransformResult<ATransformResult>();
+
         // Reinterpret the full compressed vector as per-fragment arrays
         auto* a_frags = std::launder(reinterpret_cast<FragAVecT(*)[FragsK]>(&a_compressed_whole));
 
@@ -193,13 +196,28 @@ struct SparseMmaPipeline : public MmaPipelineBase<sparse::detail::getPipelineFla
     }
 
     private:
-    // Type check helper - not a device function, so std::declval is available
+    // Compile-time validation of ATransform result and per-fragment reinterpretation.
+    // Ensures the compressed vector returned by ATransform::exec can be safely
+    // reinterpreted as FragAVecT[FragsM][FragsK] for per-fragment MmaOp dispatch.
     template <typename ATransformResult>
     static constexpr void checkATransformResult()
     {
         using ExternalAvecRef = std::add_lvalue_reference_t<AVecType>;
         static_assert(std::is_same_v<ATransformResult,
-                                     decltype(ATransform::exec(std::declval<ExternalAvecRef>()))>);
+                                     decltype(ATransform::exec(std::declval<ExternalAvecRef>()))>,
+                      "ATransformResult must match the return type of ATransform::exec");
+
+        using CompressedVecType =
+            std::remove_reference_t<std::tuple_element_t<0, ATransformResult>>;
+        static_assert(sizeof(CompressedVecType) == sizeof(FragAVecT) * FragsM * FragsK,
+                      "Compressed A vector size must equal sizeof(FragAVecT[FragsM][FragsK])");
+
+        static_assert(alignof(CompressedVecType) >= alignof(FragAVecT),
+                      "Compressed vector alignment must be >= FragAVecT alignment "
+                      "for safe reinterpret_cast to per-fragment array");
+
+        using IdxType = std::tuple_element_t<1, ATransformResult>;
+        static_assert(std::is_same_v<IdxType, int32_t>, "Sparsity index type must be int32_t");
     }
 };
 
