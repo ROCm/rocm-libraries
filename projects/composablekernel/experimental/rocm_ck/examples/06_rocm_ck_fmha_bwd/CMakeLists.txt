@@ -26,8 +26,12 @@ set(CK_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../../include")
 get_filename_component(CK_INCLUDE_DIR "${CK_INCLUDE_DIR}" ABSOLUTE)
 
 # Pull in the vendored kpack runtime library and shared rocm_ck headers
-add_subdirectory(../../rocm_kpack rocm_kpack_build)
-add_subdirectory(../../include rocm_ck_build)
+if(NOT TARGET rocm_kpack)
+    add_subdirectory(../../rocm_kpack rocm_kpack_build)
+endif()
+if(NOT TARGET rocm_ck)
+    add_subdirectory(../../include rocm_ck_build)
+endif()
 
 # --- Kernel variants ---
 set(OGRAD_DOT_O_VARIANTS
@@ -44,11 +48,18 @@ set(DQDKDV_VARIANTS
     fmha_bwd_dqdkdv_fp16_d128_batch_cmask
     fmha_bwd_dqdkdv_fp16_d128_batch_det
     fmha_bwd_dqdkdv_fp16_d128_group
+    fmha_bwd_dqdkdv_fp16_d128_batch_ebias
+    fmha_bwd_dqdkdv_fp16_d128_batch_alibi
+    fmha_bwd_dqdkdv_fp16_d128_batch_ebias_dbias
+    fmha_bwd_dqdkdv_fp16_d128_batch_dropout
+    fmha_bwd_dqdkdv_fp16_d128_batch_cmask_det
 )
 
 set(CONVERT_DQ_VARIANTS
     fmha_bwd_convert_dq_fp16_d128_batch_det
     fmha_bwd_convert_dq_fp16_d128_group_det
+    fmha_bwd_convert_dq_bf16_d128_batch_det
+    fmha_bwd_convert_dq_bf16_d128_group_det
 )
 
 set(KERNEL_VARIANTS

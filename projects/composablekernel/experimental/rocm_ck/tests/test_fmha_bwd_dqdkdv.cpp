@@ -328,6 +328,29 @@ TEST(FmhaBwdDqDkDv, ScalarSlotIndicesFixed)
     EXPECT_EQ(S::RP_UNDROP, 5);
     EXPECT_EQ(S::DROP_SEED, 6);
     EXPECT_EQ(S::DROP_OFFSET, 7);
+    EXPECT_EQ(S::WINDOW_SIZE_LEFT, 8);
+    EXPECT_EQ(S::WINDOW_SIZE_RIGHT, 9);
+    EXPECT_EQ(S::MASK_TYPE, 10);
+}
+
+TEST(FmhaBwdDqDkDv, RequiredScalarsWithMask)
+{
+    // has_mask alone: needs WINDOW_SIZE_LEFT/RIGHT + MASK_TYPE (slots 8..10) -> 11
+    constexpr auto k = makeSpec(FmhaBwdDQDKDVConfig{
+        .signature =
+            {.dtype = DataType::FP16, .hdim_q = 128, .hdim_v = 128, .mode = FmhaMode::BATCH},
+        .algorithm = {.has_mask = true, .pad_hdim_q = 8, .pad_hdim_v = 8}});
+    EXPECT_EQ(S::requiredScalars(k), 11);
+}
+
+TEST(FmhaBwdDqDkDv, RequiredScalarsWithMaskAndDropout)
+{
+    // has_mask + has_dropout: mask slots (8..10) are highest -> 11
+    constexpr auto k = makeSpec(FmhaBwdDQDKDVConfig{
+        .signature =
+            {.dtype = DataType::FP16, .hdim_q = 128, .hdim_v = 128, .mode = FmhaMode::BATCH},
+        .algorithm = {.has_mask = true, .has_dropout = true, .pad_hdim_q = 8, .pad_hdim_v = 8}});
+    EXPECT_EQ(S::requiredScalars(k), 11);
 }
 
 TEST(FmhaBwdDqDkDv, RequiredTensorsPlain)

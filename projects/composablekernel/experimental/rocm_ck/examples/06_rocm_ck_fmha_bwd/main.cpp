@@ -41,13 +41,16 @@ namespace DKV = rocm_ck::fmha_bwd_dqdkdv_slots;
 // ---------------------------------------------------------------------------
 // Test parameters
 // ---------------------------------------------------------------------------
-static constexpr int BATCH      = 2;
-static constexpr int NHEAD      = 2;
-static constexpr int SEQLEN_Q   = 128;
-static constexpr int SEQLEN_K   = 128;
-static constexpr int HDIM_Q     = 128;
-static constexpr int HDIM_V     = 128;
-static constexpr float P_UNDROP = 1.0f;
+static constexpr int BATCH    = 2;
+static constexpr int NHEAD    = 2;
+static constexpr int SEQLEN_Q = 128;
+static constexpr int SEQLEN_K = 128;
+// Multi-tile: seqlen_k=256 forces >1 K-tile iteration (block_n0=128).
+// Exercises the tile loop path that seqlen_k=128 skips.
+static constexpr int SEQLEN_K_MULTI = 256;
+static constexpr int HDIM_Q         = 128;
+static constexpr int HDIM_V         = 128;
+static constexpr float P_UNDROP     = 1.0f;
 
 // ---------------------------------------------------------------------------
 // CPU reference: OGradDotO
@@ -807,6 +810,13 @@ static bool runDqDkDvBatchVariant(const rocm_ck::FmhaBwdDQDKDVVariant& variant,
     args.scalars[DKV::NUM_HEAD_Q].i32     = nhead;
     args.scalars[DKV::NHEAD_RATIO_QK].i32 = 1; // MHA (no GQA)
 
+    if(variant.spec.has_mask)
+    {
+        args.scalars[DKV::WINDOW_SIZE_LEFT].i32  = -1; // full left context
+        args.scalars[DKV::WINDOW_SIZE_RIGHT].i32 = 0;  // standard causal
+        args.scalars[DKV::MASK_TYPE].i32         = 1;  // MASK_FROM_TOP_LEFT
+    }
+
     // Launch
     auto grid = rocm_ck::dqdkdv_grid_size(batch, nhead, seqlen_k, variant.spec.block_n0);
     std::printf("  %s: grid=(%u,%u,%u), block=%d\n",
@@ -1202,6 +1212,145 @@ int main(int argc, char** argv)
 
         if(!passed)
             all_passed = false;
+    }
+
+    // =================================================================
+    // Part 2b: DqDkDv multi-tile test (seqlen_k=256, >1 K-tile)
+    // =================================================================
+
+    std::printf("\n=== DqDkDv multi-tile (seqlen_k=%d) ===\n", SEQLEN_K_MULTI);
+
+    {
+        // fp16 plain batch variant re-used; seqlen_k=256 exercises the tile loop.
+        const auto* multi_v = rocm_ck::findVariant(
+            rocm_ck::FmhaBwdDQDKDVConfig{.signature = {.dtype  = rocm_ck::DataType::FP16,
+                                                       .hdim_q = HDIM_Q,
+                                                       .hdim_v = HDIM_V,
+                                                       .mode   = rocm_ck::FmhaMode::BATCH},
+                                         .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}});
+
+        if(multi_v)
+        {
+            const float multi_scale = 1.0f / std::sqrt(static_cast<float>(HDIM_Q));
+
+            std::vector<float> mQ, mK, mV, mdO;
+            makeDqDkDvTestData(
+                BATCH, NHEAD, SEQLEN_Q, SEQLEN_K_MULTI, HDIM_Q, HDIM_V, mQ, mK, mV, mdO);
+
+            // Forward reference for multi-tile config.
+            const size_t m_o_elems   = size_t(BATCH) * NHEAD * SEQLEN_Q * HDIM_V;
+            const size_t m_lse_elems = size_t(BATCH) * NHEAD * SEQLEN_Q;
+
+            std::vector<float> m_ref_LSE(m_lse_elems, 0.0f);
+            std::vector<float> m_ref_O(m_o_elems, 0.0f);
+            std::vector<float> m_ref_dQ(size_t(BATCH) * NHEAD * SEQLEN_Q * HDIM_Q, 0.0f);
+            std::vector<float> m_ref_dK(size_t(BATCH) * NHEAD * SEQLEN_K_MULTI * HDIM_Q, 0.0f);
+            std::vector<float> m_ref_dV(size_t(BATCH) * NHEAD * SEQLEN_K_MULTI * HDIM_V, 0.0f);
+
+            {
+                auto idx4 = [](int b, int h, int s, int d, int nh, int seq, int dim) {
+                    return ((b * nh + h) * seq + s) * dim + d;
+                };
+                auto idx3 = [](int b, int h, int s, int nh, int sq) {
+                    return (b * nh + h) * sq + s;
+                };
+
+                std::vector<float> mS(SEQLEN_Q * SEQLEN_K_MULTI);
+                std::vector<float> mP(SEQLEN_Q * SEQLEN_K_MULTI);
+
+                for(int b = 0; b < BATCH; ++b)
+                {
+                    for(int h = 0; h < NHEAD; ++h)
+                    {
+                        for(int i = 0; i < SEQLEN_Q; ++i)
+                            for(int j = 0; j < SEQLEN_K_MULTI; ++j)
+                            {
+                                float acc = 0.0f;
+                                for(int k = 0; k < HDIM_Q; ++k)
+                                    acc += mQ[idx4(b, h, i, k, NHEAD, SEQLEN_Q, HDIM_Q)] *
+                                           mK[idx4(b, h, j, k, NHEAD, SEQLEN_K_MULTI, HDIM_Q)];
+                                mS[i * SEQLEN_K_MULTI + j] = multi_scale * acc;
+                            }
+
+                        for(int i = 0; i < SEQLEN_Q; ++i)
+                        {
+                            float mx = mS[i * SEQLEN_K_MULTI];
+                            for(int j = 1; j < SEQLEN_K_MULTI; ++j)
+                                mx = std::max(mx, mS[i * SEQLEN_K_MULTI + j]);
+
+                            float se = 0.0f;
+                            for(int j = 0; j < SEQLEN_K_MULTI; ++j)
+                                se += std::exp(mS[i * SEQLEN_K_MULTI + j] - mx);
+
+                            float lse                                 = mx + std::log(se);
+                            m_ref_LSE[idx3(b, h, i, NHEAD, SEQLEN_Q)] = lse;
+
+                            for(int j = 0; j < SEQLEN_K_MULTI; ++j)
+                                mP[i * SEQLEN_K_MULTI + j] =
+                                    std::exp(mS[i * SEQLEN_K_MULTI + j] - lse);
+                        }
+
+                        for(int i = 0; i < SEQLEN_Q; ++i)
+                            for(int v = 0; v < HDIM_V; ++v)
+                            {
+                                float acc = 0.0f;
+                                for(int j = 0; j < SEQLEN_K_MULTI; ++j)
+                                    acc += mP[i * SEQLEN_K_MULTI + j] *
+                                           mV[idx4(b, h, j, v, NHEAD, SEQLEN_K_MULTI, HDIM_V)];
+                                m_ref_O[idx4(b, h, i, v, NHEAD, SEQLEN_Q, HDIM_V)] = acc;
+                            }
+                    }
+                }
+            }
+
+            std::vector<float> m_ref_D(m_lse_elems, 0.0f);
+            cpuOGradDotO(m_ref_O, mdO, m_ref_D, BATCH, NHEAD, SEQLEN_Q, HDIM_V, P_UNDROP);
+
+            cpuFmhaBwd(mQ,
+                       mK,
+                       mV,
+                       m_ref_O,
+                       mdO,
+                       m_ref_D,
+                       m_ref_LSE,
+                       m_ref_dQ,
+                       m_ref_dK,
+                       m_ref_dV,
+                       BATCH,
+                       NHEAD,
+                       SEQLEN_Q,
+                       SEQLEN_K_MULTI,
+                       HDIM_Q,
+                       HDIM_V,
+                       multi_scale);
+
+            bool passed = runDqDkDvBatchVariant(*multi_v,
+                                                archive,
+                                                gpu_arch.c_str(),
+                                                mQ,
+                                                mK,
+                                                mV,
+                                                mdO,
+                                                m_ref_LSE,
+                                                m_ref_D,
+                                                m_ref_dQ,
+                                                m_ref_dK,
+                                                m_ref_dV,
+                                                BATCH,
+                                                NHEAD,
+                                                SEQLEN_Q,
+                                                SEQLEN_K_MULTI,
+                                                HDIM_Q,
+                                                HDIM_V,
+                                                multi_scale,
+                                                /*verify=*/true);
+            if(!passed)
+                all_passed = false;
+        }
+        else
+        {
+            std::printf("  (no fp16 d128 batch variant found — skipped)\n");
+        }
     }
 
     // =================================================================

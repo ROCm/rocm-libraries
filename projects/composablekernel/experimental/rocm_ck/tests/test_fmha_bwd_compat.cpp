@@ -196,6 +196,127 @@ TEST(FmhaBwdCompat, DqDkDv_FP16_D128_Group)
     EXPECT_EQ(k.block_per_cu, 1);
 }
 
+TEST(FmhaBwdCompat, DqDkDv_FP16_D128_Batch_EBias)
+{
+    constexpr auto k = makeSpec(FmhaBwdDQDKDVConfig{
+        .signature =
+            {.dtype = DataType::FP16, .hdim_q = 128, .hdim_v = 128, .mode = FmhaMode::BATCH},
+        .algorithm = {.bias_type = FmhaBiasType::ELEMENTWISE, .pad_hdim_q = 8, .pad_hdim_v = 8}});
+
+    EXPECT_EQ(k.dtype, DataType::FP16);
+    EXPECT_EQ(k.hdim_q, 128);
+    EXPECT_EQ(k.hdim_v, 128);
+    EXPECT_EQ(k.mode, FmhaMode::BATCH);
+    EXPECT_EQ(k.bias_type, FmhaBiasType::ELEMENTWISE);
+    EXPECT_FALSE(k.has_bias_grad);
+    EXPECT_FALSE(k.has_mask);
+    EXPECT_FALSE(k.has_dropout);
+    EXPECT_FALSE(k.is_deterministic);
+    EXPECT_EQ(k.pad_hdim_q, 8);
+    EXPECT_EQ(k.pad_hdim_v, 8);
+    EXPECT_EQ(k.block_per_cu, 1);
+    EXPECT_EQ(k.block_size, 256);
+    EXPECT_EQ(k.block_n0, 128);
+}
+
+TEST(FmhaBwdCompat, DqDkDv_FP16_D128_Batch_ALiBi)
+{
+    constexpr auto k = makeSpec(FmhaBwdDQDKDVConfig{
+        .signature =
+            {.dtype = DataType::FP16, .hdim_q = 128, .hdim_v = 128, .mode = FmhaMode::BATCH},
+        .algorithm = {.bias_type = FmhaBiasType::ALIBI, .pad_hdim_q = 8, .pad_hdim_v = 8}});
+
+    EXPECT_EQ(k.dtype, DataType::FP16);
+    EXPECT_EQ(k.hdim_q, 128);
+    EXPECT_EQ(k.hdim_v, 128);
+    EXPECT_EQ(k.mode, FmhaMode::BATCH);
+    EXPECT_EQ(k.bias_type, FmhaBiasType::ALIBI);
+    EXPECT_FALSE(k.has_bias_grad);
+    EXPECT_FALSE(k.has_mask);
+    EXPECT_FALSE(k.has_dropout);
+    EXPECT_FALSE(k.is_deterministic);
+    EXPECT_EQ(k.pad_hdim_q, 8);
+    EXPECT_EQ(k.pad_hdim_v, 8);
+    EXPECT_EQ(k.block_per_cu, 1);
+    EXPECT_EQ(k.block_size, 256);
+    EXPECT_EQ(k.block_n0, 128);
+}
+
+TEST(FmhaBwdCompat, DqDkDv_FP16_D128_Batch_EBias_DBias)
+{
+    constexpr auto k =
+        makeSpec(FmhaBwdDQDKDVConfig{.signature = {.dtype  = DataType::FP16,
+                                                   .hdim_q = 128,
+                                                   .hdim_v = 128,
+                                                   .mode   = FmhaMode::BATCH},
+                                     .algorithm = {.bias_type     = FmhaBiasType::ELEMENTWISE,
+                                                   .has_bias_grad = true,
+                                                   .pad_hdim_q    = 8,
+                                                   .pad_hdim_v    = 8}});
+
+    EXPECT_EQ(k.dtype, DataType::FP16);
+    EXPECT_EQ(k.hdim_q, 128);
+    EXPECT_EQ(k.hdim_v, 128);
+    EXPECT_EQ(k.mode, FmhaMode::BATCH);
+    EXPECT_EQ(k.bias_type, FmhaBiasType::ELEMENTWISE);
+    EXPECT_TRUE(k.has_bias_grad);
+    EXPECT_FALSE(k.has_mask);
+    EXPECT_FALSE(k.has_dropout);
+    EXPECT_FALSE(k.is_deterministic);
+    EXPECT_EQ(k.pad_hdim_q, 8);
+    EXPECT_EQ(k.pad_hdim_v, 8);
+    EXPECT_EQ(k.block_per_cu, 1);
+    EXPECT_EQ(k.block_size, 256);
+    EXPECT_EQ(k.block_n0, 128);
+}
+
+TEST(FmhaBwdCompat, DqDkDv_FP16_D128_Batch_Dropout)
+{
+    constexpr auto k = makeSpec(FmhaBwdDQDKDVConfig{
+        .signature =
+            {.dtype = DataType::FP16, .hdim_q = 128, .hdim_v = 128, .mode = FmhaMode::BATCH},
+        .algorithm = {.has_dropout = true, .pad_hdim_q = 8, .pad_hdim_v = 8}});
+
+    EXPECT_EQ(k.dtype, DataType::FP16);
+    EXPECT_EQ(k.hdim_q, 128);
+    EXPECT_EQ(k.hdim_v, 128);
+    EXPECT_EQ(k.mode, FmhaMode::BATCH);
+    EXPECT_EQ(k.bias_type, FmhaBiasType::NONE);
+    EXPECT_FALSE(k.has_bias_grad);
+    EXPECT_FALSE(k.has_mask);
+    EXPECT_TRUE(k.has_dropout);
+    EXPECT_FALSE(k.is_deterministic);
+    EXPECT_EQ(k.pad_hdim_q, 8);
+    EXPECT_EQ(k.pad_hdim_v, 8);
+    EXPECT_EQ(k.block_per_cu, 1);
+    EXPECT_EQ(k.block_size, 256);
+    EXPECT_EQ(k.block_n0, 128);
+}
+
+TEST(FmhaBwdCompat, DqDkDv_FP16_D128_Batch_CMask_Det)
+{
+    constexpr auto k = makeSpec(FmhaBwdDQDKDVConfig{
+        .signature =
+            {.dtype = DataType::FP16, .hdim_q = 128, .hdim_v = 128, .mode = FmhaMode::BATCH},
+        .algorithm = {
+            .has_mask = true, .is_deterministic = true, .pad_hdim_q = 8, .pad_hdim_v = 8}});
+
+    EXPECT_EQ(k.dtype, DataType::FP16);
+    EXPECT_EQ(k.hdim_q, 128);
+    EXPECT_EQ(k.hdim_v, 128);
+    EXPECT_EQ(k.mode, FmhaMode::BATCH);
+    EXPECT_EQ(k.bias_type, FmhaBiasType::NONE);
+    EXPECT_FALSE(k.has_bias_grad);
+    EXPECT_TRUE(k.has_mask);
+    EXPECT_FALSE(k.has_dropout);
+    EXPECT_TRUE(k.is_deterministic);
+    EXPECT_EQ(k.pad_hdim_q, 8);
+    EXPECT_EQ(k.pad_hdim_v, 8);
+    EXPECT_EQ(k.block_per_cu, 1);
+    EXPECT_EQ(k.block_size, 256);
+    EXPECT_EQ(k.block_n0, 128);
+}
+
 // ============================================================================
 // ConvertDQ frozen baselines
 // ============================================================================
@@ -313,21 +434,50 @@ TEST(FmhaBwdCompat, Registry_DqDkDv_FindsDeterministic)
     EXPECT_STREQ(v->name, "fmha_bwd_dqdkdv_fp16_d128_batch_det");
 }
 
-TEST(FmhaBwdCompat, Registry_DqDkDv_RejectsPartialFeatureMatch)
+TEST(FmhaBwdCompat, Registry_DqDkDv_FindsCMaskDet)
 {
-    // mask+det: no combined variant exists
     const auto* v = findVariant(FmhaBwdDQDKDVConfig{
         .signature =
             {.dtype = DataType::FP16, .hdim_q = 128, .hdim_v = 128, .mode = FmhaMode::BATCH},
         .algorithm = {
             .has_mask = true, .is_deterministic = true, .pad_hdim_q = 8, .pad_hdim_v = 8}});
-    EXPECT_EQ(v, nullptr);
+    ASSERT_NE(v, nullptr);
+    EXPECT_STREQ(v->name, "fmha_bwd_dqdkdv_fp16_d128_batch_cmask_det");
 }
 
-TEST(FmhaBwdCompat, Registry_DqDkDv_IgnoresHasBiasGrad)
+TEST(FmhaBwdCompat, Registry_DqDkDv_FindsEBias)
 {
-    // findVariant does not match on has_bias_grad — only bias_type
-    // ELEMENTWISE + has_bias_grad=true returns nullptr (no ELEMENTWISE variant)
+    const auto* v = findVariant(FmhaBwdDQDKDVConfig{
+        .signature =
+            {.dtype = DataType::FP16, .hdim_q = 128, .hdim_v = 128, .mode = FmhaMode::BATCH},
+        .algorithm = {.bias_type = FmhaBiasType::ELEMENTWISE, .pad_hdim_q = 8, .pad_hdim_v = 8}});
+    ASSERT_NE(v, nullptr);
+    EXPECT_STREQ(v->name, "fmha_bwd_dqdkdv_fp16_d128_batch_ebias");
+}
+
+TEST(FmhaBwdCompat, Registry_DqDkDv_FindsALiBi)
+{
+    const auto* v = findVariant(FmhaBwdDQDKDVConfig{
+        .signature =
+            {.dtype = DataType::FP16, .hdim_q = 128, .hdim_v = 128, .mode = FmhaMode::BATCH},
+        .algorithm = {.bias_type = FmhaBiasType::ALIBI, .pad_hdim_q = 8, .pad_hdim_v = 8}});
+    ASSERT_NE(v, nullptr);
+    EXPECT_STREQ(v->name, "fmha_bwd_dqdkdv_fp16_d128_batch_alibi");
+}
+
+TEST(FmhaBwdCompat, Registry_DqDkDv_FindsDropout)
+{
+    const auto* v = findVariant(FmhaBwdDQDKDVConfig{
+        .signature =
+            {.dtype = DataType::FP16, .hdim_q = 128, .hdim_v = 128, .mode = FmhaMode::BATCH},
+        .algorithm = {.has_dropout = true, .pad_hdim_q = 8, .pad_hdim_v = 8}});
+    ASSERT_NE(v, nullptr);
+    EXPECT_STREQ(v->name, "fmha_bwd_dqdkdv_fp16_d128_batch_dropout");
+}
+
+TEST(FmhaBwdCompat, Registry_DqDkDv_FindsEBiasDBias)
+{
+    // has_bias_grad=true now has its own variant (ebias_dbias)
     const auto* v =
         findVariant(FmhaBwdDQDKDVConfig{.signature = {.dtype  = DataType::FP16,
                                                       .hdim_q = 128,
@@ -337,7 +487,8 @@ TEST(FmhaBwdCompat, Registry_DqDkDv_IgnoresHasBiasGrad)
                                                       .has_bias_grad = true,
                                                       .pad_hdim_q    = 8,
                                                       .pad_hdim_v    = 8}});
-    EXPECT_EQ(v, nullptr);
+    ASSERT_NE(v, nullptr);
+    EXPECT_STREQ(v->name, "fmha_bwd_dqdkdv_fp16_d128_batch_ebias_dbias");
 }
 
 TEST(FmhaBwdCompat, Registry_DqDkDv_ReturnsNullForUnregistered)
@@ -348,7 +499,7 @@ TEST(FmhaBwdCompat, Registry_DqDkDv_ReturnsNullForUnregistered)
     EXPECT_EQ(v, nullptr);
 }
 
-TEST(FmhaBwdCompat, Registry_DqDkDv_VariantCount) { EXPECT_EQ(ALL_DQDKDV_VARIANTS_COUNT, 5); }
+TEST(FmhaBwdCompat, Registry_DqDkDv_VariantCount) { EXPECT_EQ(ALL_DQDKDV_VARIANTS_COUNT, 10); }
 
 // ============================================================================
 // Registry: ConvertDQ findVariant
@@ -372,15 +523,25 @@ TEST(FmhaBwdCompat, Registry_ConvertDQ_FindsGroup)
     EXPECT_STREQ(v->name, "fmha_bwd_convert_dq_fp16_d128_group_det");
 }
 
-TEST(FmhaBwdCompat, Registry_ConvertDQ_ReturnsNullForBF16)
+TEST(FmhaBwdCompat, Registry_ConvertDQ_FindsBF16Batch)
 {
     const auto* v = findVariant(FmhaBwdConvertDQConfig{
         .signature = {.dtype = DataType::BF16, .hdim_q = 128, .mode = FmhaMode::BATCH},
         .algorithm = {}});
-    EXPECT_EQ(v, nullptr);
+    ASSERT_NE(v, nullptr);
+    EXPECT_STREQ(v->name, "fmha_bwd_convert_dq_bf16_d128_batch_det");
+}
+
+TEST(FmhaBwdCompat, Registry_ConvertDQ_FindsBF16Group)
+{
+    const auto* v = findVariant(FmhaBwdConvertDQConfig{
+        .signature = {.dtype = DataType::BF16, .hdim_q = 128, .mode = FmhaMode::GROUP},
+        .algorithm = {}});
+    ASSERT_NE(v, nullptr);
+    EXPECT_STREQ(v->name, "fmha_bwd_convert_dq_bf16_d128_group_det");
 }
 
 TEST(FmhaBwdCompat, Registry_ConvertDQ_VariantCount)
 {
-    EXPECT_EQ(ALL_CONVERT_DQ_VARIANTS_COUNT, 2);
+    EXPECT_EQ(ALL_CONVERT_DQ_VARIANTS_COUNT, 4);
 }

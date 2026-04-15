@@ -153,10 +153,17 @@ constexpr int P_UNDROP       = 4; // f32: 1/(1-dropout_rate)
 constexpr int RP_UNDROP      = 5; // f32: 1/p_undrop
 constexpr int DROP_SEED      = 6; // u64: dropout RNG seed
 constexpr int DROP_OFFSET    = 7; // u64: dropout RNG offset
+// Mask scalar slots — present only when has_mask=true.
+// Indices are fixed regardless of dropout; unused slots are not populated.
+constexpr int WINDOW_SIZE_LEFT  = 8;  // i32: left context window (-1 = unlimited)
+constexpr int WINDOW_SIZE_RIGHT = 9;  // i32: right context window (0 = causal)
+constexpr int MASK_TYPE         = 10; // i32: GenericAttentionMaskEnum cast to int
 
 /// Minimum scalar slot count (max_used_index + 1) for a given config.
 constexpr int requiredScalars(FmhaBwdDQDKDVSpec k)
 {
+    if(k.has_mask)
+        return MASK_TYPE + 1; // 11 (covers dropout slots [4..7] since 11 > 8)
     if(k.has_dropout)
         return DROP_OFFSET + 1; // 8
     return NHEAD_RATIO_QK + 1;  // 4

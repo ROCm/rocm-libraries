@@ -437,9 +437,10 @@ __device__ void runFmhaBwdDQDKDV(Args args)
 
         if constexpr(K.has_mask)
         {
-            kargs.window_size_left  = -1;
-            kargs.window_size_right = 0;
-            kargs.mask_type         = ck_tile::GenericAttentionMaskEnum::MASK_FROM_TOP_LEFT;
+            kargs.window_size_left  = args.scalars[S::WINDOW_SIZE_LEFT].i32;
+            kargs.window_size_right = args.scalars[S::WINDOW_SIZE_RIGHT].i32;
+            kargs.mask_type =
+                static_cast<ck_tile::GenericAttentionMaskEnum>(args.scalars[S::MASK_TYPE].i32);
         }
 
         if constexpr(K.has_dropout)
@@ -559,20 +560,14 @@ __device__ void runFmhaBwdDQDKDV(Args args)
 
         if constexpr(K.has_mask)
         {
-            // Default: causal mask (upper-triangle masking).
-            // window_size_left = -1 means unlimited left context.
-            // window_size_right = 0 means no future tokens (causal).
-            // For generic sliding window, pass window sizes via scalars.
-            kargs.window_size_left  = -1;
-            kargs.window_size_right = 0;
-            kargs.mask_type         = ck_tile::GenericAttentionMaskEnum::MASK_FROM_TOP_LEFT;
+            kargs.window_size_left  = args.scalars[S::WINDOW_SIZE_LEFT].i32;
+            kargs.window_size_right = args.scalars[S::WINDOW_SIZE_RIGHT].i32;
+            kargs.mask_type =
+                static_cast<ck_tile::GenericAttentionMaskEnum>(args.scalars[S::MASK_TYPE].i32);
         }
 
         if constexpr(K.has_dropout)
         {
-            // TODO: Dropout initialization requires p_drop computation
-            //       and seed/offset from scalars. For the plain-config
-            //       demo, has_dropout is false.
             const float p_undrop      = args.scalars[S::P_UNDROP].f32;
             const float rp_undrop     = args.scalars[S::RP_UNDROP].f32;
             kargs.rp_undrop           = rp_undrop;
