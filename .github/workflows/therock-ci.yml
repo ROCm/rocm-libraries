@@ -218,6 +218,8 @@ jobs:
     with:
       cmake_options: ${{ matrix.projects.cmake_options }}
       project_name: ${{ matrix.projects.project_name }}
+      cmake_target: ${{ matrix.projects.cmake_target }}
+      build_dir: ${{ matrix.projects.build_dir }}
       amdgpu_families: ${{ matrix.target_bundle.amdgpu_family }}
       test_runs_on: ${{ matrix.target_bundle.test_machine }}
 
