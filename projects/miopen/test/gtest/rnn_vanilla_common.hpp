@@ -1205,7 +1205,13 @@ protected:
         miopenCreateDropoutDescriptor(&DropoutDesc);
         size_t statesSizeInBytes = 0;
 
-        miopenRNNAlgo_t algoMode = miopenRNNdefault;
+        miopenRNNAlgo_t algoMode    = miopenRNNdefault;
+        miopenHandle_t mio_handle   = nullptr;
+#if MIOPEN_BACKEND_HIP
+        void* dropout_state_buf = nullptr;
+#elif MIOPEN_BACKEND_OPENCL
+        cl_mem dropout_state_buf = nullptr;
+#endif
         if(useDropout != 0)
         {
 // Workaround for issue #2335.
@@ -1213,7 +1219,6 @@ protected:
 #if MIOPEN_BACKEND_OPENCL
             GTEST_SKIP() << "Skip test for Issue #2335: " << std::endl;
 #endif
-            miopenHandle_t mio_handle;
             miopenCreateWithStream(&mio_handle, handle.GetStream());
 
             float dropout_rate              = 0.5;
@@ -1224,10 +1229,9 @@ protected:
             cl_context ctx;
             clGetCommandQueueInfo(
                 handle.GetStream(), CL_QUEUE_CONTEXT, sizeof(cl_context), &ctx, nullptr);
-            cl_mem dropout_state_buf =
+            dropout_state_buf =
                 clCreateBuffer(ctx, CL_MEM_READ_WRITE, statesSizeInBytes, nullptr, nullptr);
 #elif MIOPEN_BACKEND_HIP
-            void* dropout_state_buf;
             (void)hipMalloc(static_cast<void**>(&dropout_state_buf), statesSizeInBytes);
 #endif
 
@@ -1475,6 +1479,18 @@ protected:
         //                                        seqLength, numLayers,
         //                                        biasMode, dirMode,
         //                                        inputMode, rnnMode, inVecReal});
+
+        if(useDropout != 0)
+        {
+#if MIOPEN_BACKEND_HIP
+            (void)hipFree(dropout_state_buf);
+#elif MIOPEN_BACKEND_OPENCL
+            (void)clReleaseMemObject(dropout_state_buf);
+#endif
+            miopenDestroy(mio_handle);
+        }
+        miopenDestroyDropoutDescriptor(DropoutDesc);
+        miopenDestroyRNNDescriptor(rnnDesc);
     }
 
 private:
