@@ -15,7 +15,6 @@
 #include "Attributes.hpp"
 #include "TensorAttributes.hpp"
 #include <cstdint>
-#include <hipdnn_data_sdk/data_objects/block_scale_dequantize_attributes_generated.h>
 #include <memory>
 #include <unordered_map>
 #include <vector>
@@ -173,41 +172,6 @@ public:
     {
         is_negative_scale = value;
         return *this;
-    }
-
-    flatbuffers::Offset<hipdnn_data_sdk::data_objects::BlockScaleDequantizeAttributes>
-        pack_attributes(flatbuffers::FlatBufferBuilder& builder) const // NOLINT
-    {
-        auto blockSizeVector = builder.CreateVector(block_size);
-
-        return hipdnn_data_sdk::data_objects::CreateBlockScaleDequantizeAttributes(
-            builder,
-            get_x()->get_uid(),
-            get_scale()->get_uid(),
-            get_y()->get_uid(),
-            blockSizeVector,
-            is_negative_scale);
-    }
-
-    static BlockScaleDequantizeAttributes fromFlatBuffer(
-        const hipdnn_data_sdk::data_objects::BlockScaleDequantizeAttributes* fb,
-        const std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>>& tensorMap)
-    {
-        BlockScaleDequantizeAttributes attr;
-
-        attr.set_x(tensorMap.at(fb->x_tensor_uid()));
-        attr.set_scale(tensorMap.at(fb->scale_tensor_uid()));
-        attr.set_y(tensorMap.at(fb->y_tensor_uid()));
-
-        if(fb->block_size() != nullptr)
-        {
-            const std::vector<int32_t> bs(fb->block_size()->begin(), fb->block_size()->end());
-            attr.set_block_size(bs);
-        }
-
-        attr.set_is_negative_scale(fb->is_negative_scale());
-
-        return attr;
     }
 
 private:
