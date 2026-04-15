@@ -168,9 +168,10 @@ struct MmaLayoutTestKernel
             for(index_t v = 0; v < a_vec_size; ++v)
             {
                 // In case of packed data types or sparse intrinsics, the calculated matrix indices
-                // are in terms of the matrix of packed (or compressed) elements. We check if the
-                // compressed element corresponds with our targeted value element, and calculate the
-                // offset (remainder) within our packed element to get to the value element.
+                // are in terms of the matrix of packed (AND/OR sparse compressed) elements. We
+                // check if the compressed element corresponds with our targeted value element, and
+                // calculate the offset (remainder) within our packed element to get to the value
+                // element.
                 auto a_coords         = ARegMap::calc_matrix_indices_from_lane_vector(lane, v);
                 index_t k_target      = k / (MmaOp::kCompressionRatio * MmaOp::APackedSize);
                 index_t k_rem         = k % (MmaOp::kCompressionRatio * MmaOp::APackedSize);
