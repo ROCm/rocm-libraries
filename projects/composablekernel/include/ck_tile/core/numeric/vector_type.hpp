@@ -131,7 +131,7 @@ struct f6x16xN_tt // Underlying type for ext_vector_t<fp6x16, N> and ext_vector_
         }
     };
 
-    CK_TILE_HOST_DEVICE reference operator[](index_t i) { return {*this, i}; }
+    CK_TILE_HOST_DEVICE reference operator[](index_t i) { return reference{*this, i}; }
 
     CK_TILE_HOST_DEVICE pk_f6_legacy_t<16, kind> operator[](index_t i) const
     {
