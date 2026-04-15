@@ -32,13 +32,17 @@
 #   ``ENGINE_NAME``
 #     Engine name passed via ``--test-engine`` to the test binary.
 #
+#   ``TEST_CONFIG``
+#     Optional path to a TOML configuration file for per-test tolerance
+#     overrides. Passed via ``--test-config`` to the test binary.
+#
 #   ``GTEST_FILTER``
 #     Optional list of Google Test filter expressions. Each entry is joined
 #     with ``:`` to form the final filter string passed via ``--gtest_filter``.
 #     If omitted, all tests run. Patterns can be specified one per line for
 #     readability.
 function(add_external_integration_test_target)
-    cmake_parse_arguments(ARG "" "TARGET_NAME;PLUGIN_TARGET;ENGINE_NAME" "GTEST_FILTER" ${ARGN})
+    cmake_parse_arguments(ARG "" "TARGET_NAME;PLUGIN_TARGET;ENGINE_NAME;TEST_CONFIG" "GTEST_FILTER" ${ARGN})
 
     # Validate required arguments
     if(NOT ARG_TARGET_NAME)
@@ -57,6 +61,9 @@ function(add_external_integration_test_target)
         --test-article $<TARGET_FILE:${ARG_PLUGIN_TARGET}>
         --test-engine ${ARG_ENGINE_NAME}
     )
+    if(ARG_TEST_CONFIG)
+        list(APPEND _CMD "--test-config" "${ARG_TEST_CONFIG}")
+    endif()
     if(ARG_GTEST_FILTER)
         list(JOIN ARG_GTEST_FILTER ":" _GTEST_FILTER_STR)
         list(APPEND _CMD "--gtest_filter=${_GTEST_FILTER_STR}")
