@@ -7,6 +7,7 @@
 #include <vector>
 
 #include <hipdnn_data_sdk/data_objects/rmsnorm_attributes_generated.h>
+#include <hipdnn_data_sdk/data_objects/rmsnorm_backward_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
 
 namespace hip_kernel_provider::rmsnorm
@@ -32,6 +33,12 @@ struct RMSnormTensorDescriptor
 // --- High-Level Configuration Validators ---
 void checkRMSnormTensorConfigSupported(
     const hipdnn_data_sdk::data_objects::RMSNormAttributes& rmsNormAttr,
+    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        tensorMap);
+
+// Backward-specific validator
+void checkRMSNormBwdTensorConfigSupported(
+    const hipdnn_data_sdk::data_objects::RMSNormBackwardAttributes& rmsNormBwdAttr,
     const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
         tensorMap);
 

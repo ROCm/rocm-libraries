@@ -192,15 +192,35 @@ protected:
                            float absoluteTolerance,
                            float relativeTolerance)
     {
+        // Check for per-test tolerance override from TOML config
+        float finalAtol = absoluteTolerance;
+        float finalRtol = relativeTolerance;
+
+        auto* testInfo = ::testing::UnitTest::GetInstance()->current_test_info();
+        if(testInfo != nullptr)
+        {
+            std::string testName
+                = std::string(testInfo->test_suite_name()) + "." + testInfo->name();
+            auto override = TestConfig::get().findToleranceOverride(testName);
+            if(override.has_value())
+            {
+                finalAtol = override->atol;
+                finalRtol = override->rtol;
+                HIPDNN_PLUGIN_LOG_INFO("Tolerance override applied for " << testName
+                                                                         << ": atol=" << finalAtol
+                                                                         << " rtol=" << finalRtol);
+            }
+        }
+
         // Since the graph can infer properties + Ids, we defer validator registration until right
         // before validation in verifyGraph
-        _deferredValidators.emplace_back([this, attr, absoluteTolerance, relativeTolerance]() {
+        _deferredValidators.emplace_back([this, attr, finalAtol, finalRtol]() {
             _tensorIdToValidatorMap.insert(
                 {attr->get_uid(),
                  hipdnn_test_sdk::utilities::createAllCloseValidator(
                      hipdnn_test_sdk::utilities::frontendToSdkDataType(attr->get_data_type()),
-                     absoluteTolerance,
-                     relativeTolerance)});
+                     finalAtol,
+                     finalRtol)});
             _tensorIdToNameMap.insert({attr->get_uid(), attr->get_name()});
         });
     }
