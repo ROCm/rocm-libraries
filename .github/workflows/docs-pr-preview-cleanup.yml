@@ -47,6 +47,7 @@ jobs:
           RTD_TOKEN: ${{ secrets.RTD_TOKEN }}
         run: |
           branch_name="${{ github.head_ref }}"
+         # Generate slug like 'user-me-my_test_branch' from 'user/me/my_test_branch'
           version_slug="${branch_name//\//-}"
 
           response=$(curl -s -o /dev/null -w "%{http_code}" -X PATCH \
