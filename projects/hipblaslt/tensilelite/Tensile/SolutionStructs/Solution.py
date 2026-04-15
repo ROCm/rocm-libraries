@@ -1842,6 +1842,7 @@ class Solution(collections.abc.Mapping):
         and (sizeDataTypeA == sizeDataType) and (sizeDataTypeB == sizeDataType)
         and ((TLUA == False or state["enableLDSTrA"] or sizeDataTypeA >= 4) and (TLUB == False or state["enableLDSTrB"] or sizeDataTypeB >= 4) )
         and (not state["ProblemType"]["Sparse"] or state["TransposeLDSMetadata"])
+        and not (state["enableTDMA"] and state["enableTDMB"])
       )
 
     def _applySubIterSetting(enable):
