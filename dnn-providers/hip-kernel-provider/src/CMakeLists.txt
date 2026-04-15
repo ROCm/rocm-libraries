@@ -20,6 +20,8 @@ add_library(
     engines/plans/RMSnorm/RMSnormPlanBuilder.cpp
     engines/plans/RMSnorm/RMSnormFwdPlan.cpp
     engines/plans/RMSnorm/RMSnormApplicabilityChecks.cpp
+    engines/plans/RMSnorm/RMSnormBwdPlan.cpp
+    engines/plans/RMSnorm/RMSnormBwdPlanBuilder.cpp
     engines/plans/layernorm/LayernormApplicabilityChecks.cpp
     engines/plans/layernorm/LayernormFwdPlan.cpp
     engines/plans/layernorm/LayernormPlanBuilder.cpp
