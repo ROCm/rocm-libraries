@@ -149,7 +149,7 @@ struct MmaPipelineBase
      * @return A reference (or value) of type @p DstT corresponding to @p inputBuffer.
      */
     template <typename DstT, typename SrcT>
-    CK_TILE_DEVICE static decltype(auto) formatBuffer(SrcT&& inputBuffer)
+    CK_TILE_DEVICE static decltype(auto) formatBuffer([[clang::lifetimebound]] SrcT&& inputBuffer)
     {
         using DecayedSrcT = ck_tile::remove_cvref_t<SrcT>;
 
