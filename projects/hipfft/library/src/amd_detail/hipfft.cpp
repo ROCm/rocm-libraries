@@ -1831,6 +1831,9 @@ try
     if(!desc)
         return HIPFFT_INVALID_VALUE;
 
+    if(format == HIPFFT_FORMAT_UNDEFINED)
+        return HIPFFT_INVALID_VALUE;
+    
     // Only in-place multi-gpu transforms are currently implemented.
     if(format == HIPFFT_XT_FORMAT_INPUT || format == HIPFFT_XT_FORMAT_OUTPUT)
         return HIPFFT_NOT_IMPLEMENTED;

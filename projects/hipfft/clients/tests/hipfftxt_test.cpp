@@ -214,7 +214,7 @@ struct directionformat_t
 static std::vector<directionformat_t> real_directionformat =
 {
     {HIPFFT_FORWARD, HIPFFT_XT_FORMAT_INPLACE},
-    {HIPFFT_BACKWARD, HIPFFT_XT_FORMAT_INPLACE_SHUFFLED},
+    {HIPFFT_BACKWARD, HIPFFT_XT_FORMAT_INPLACE_SHUFFLED}
 };
 
 // Complex/complex hipfftxt multi-gpu transforms use HIPFFT_XT_FORMAT_INPLACE for the space format,
@@ -225,8 +225,12 @@ static std::vector<directionformat_t> complex_directionformat =
 {
     {HIPFFT_FORWARD, HIPFFT_XT_FORMAT_INPLACE},
     {HIPFFT_BACKWARD, HIPFFT_XT_FORMAT_INPLACE_SHUFFLED},
+    {HIPFFT_BACKWARD, HIPFFT_XT_FORMAT_INPLACE},
+    {HIPFFT_FORWARD, HIPFFT_XT_FORMAT_INPLACE_SHUFFLED},
     //{HIPFFT_FORWARD, HIPFFT_XT_FORMAT_INPUT},
     //{HIPFFT_BACKWARD, HIPFFT_XT_FORMAT_OUTPUT}
+    //{HIPFFT_BACKWARD, HIPFFT_XT_FORMAT_INPUT},
+    //{HIPFFT_FORWARD, HIPFFT_XT_FORMAT_OUTPUT}
 };
 
 // Combine the real/complex and complex/complex direction-format arrays, prepending a bool which is
@@ -906,9 +910,12 @@ INSTANTIATE_TEST_SUITE_P(hipfftxttest, hipfftxtunitdesc,
                          }
     );
 
+// Parameters are real/complex, direction, format, dimension, and number of GPUs.
+class hipfftxtformats : public ::testing::TestWithParam<std::tuple<bool, int, hipfftXtSubFormat>>
+{};
 
-// FIXME: TEST_P this thing.
-TEST(hipfftxtdirectionformat, formatsok)
+// FIXME: documentation
+TEST_P(hipfftxtformats, supportlist)
 {
     size_t    ngpus = getdevcount();
 #ifdef __HIP_PLATFORM_NVIDIA__
@@ -917,120 +924,162 @@ TEST(hipfftxtdirectionformat, formatsok)
 #endif
     std::vector<int> gpus(ngpus);
     std::iota(gpus.begin(), gpus.end(), 0);
-    
-    const int Nx    = 32;
-    const int Ny    = 32;
+
+    // Wrost-case minimum size for cuda-backend is 1024.
+    const int Nx    = 1024;
+    const int Ny    = 1024;
 
     auto hipfft_rt = HIPFFT_SUCCESS;
 
-    for(const auto realcomplex : {true, false})
+    const bool realcomplex = std::get<0>(GetParam());
+    const auto direction = std::get<1>(GetParam());
+    const auto format = std::get<2>(GetParam());
+        
+    if(verbose > 1)
     {
-        for(const auto direction : {HIPFFT_FORWARD, HIPFFT_BACKWARD})
+        std::cout << (realcomplex ? "rc" : "cc")
+                  << " " << directionname(direction)
+                  << " " << format_name(format) << "\n";
+    }
+
+#ifdef __HIP_PLATFORM_NVIDIA__
+    if(realcomplex && format == HIPFFT_XT_FORMAT_1D_INPUT_SHUFFLED)
+        GTEST_SKIP(); // Problematic unsupported case, so skip the test. 
+#endif
+    
+    auto good_rdfs = all_directionformat();
+    bool goodcase = false;
+    for(const auto &val : good_rdfs)
+    {
+        if(realcomplex == std::get<0>(val)
+           && std::get<1>(val).direction == direction
+           && std::get<1>(val).format == format)
         {
-            for(const auto format : {HIPFFT_XT_FORMAT_INPUT, HIPFFT_XT_FORMAT_OUTPUT,
-                                     HIPFFT_XT_FORMAT_INPLACE,
-                        HIPFFT_XT_FORMAT_INPLACE_SHUFFLED, HIPFFT_XT_FORMAT_1D_INPUT_SHUFFLED,
-                        HIPFFT_FORMAT_UNDEFINED})
-            {
-                // FIXME: temp
-                std::cout << (realcomplex ? "rc" : "cc")
-                          << " " << directionname(direction)
-                          << " " << format_name(format) << "\n";
-                              
-                auto good_rdfs = all_directionformat();
-                bool goodcase = false;
-                for(const auto &val  : good_rdfs)
-                {
-                    if(realcomplex == std::get<0>(val)
-                       && std::get<1>(val).direction == direction
-                       && std::get<1>(val).format == format)
-                    {
-                        goodcase = true;
-                        break;
-                    }
-                }
-                
-                hipfftHandle plan;
-                hipfft_rt =   hipfftCreate(&plan);
-                EXPECT_EQ(hipfft_rt, HIPFFT_SUCCESS);
-
-                hipfft_rt = hipfftXtSetGPUs(plan, gpus.size(), gpus.data());
-                EXPECT_EQ(hipfft_rt, HIPFFT_SUCCESS);
-            
-                const auto ffttype
-                    = realcomplex ? (direction == HIPFFT_FORWARD ? HIPFFT_D2Z: HIPFFT_Z2D) : HIPFFT_Z2Z;
-                std::vector<size_t> workSize(ngpus);
-                hipfft_rt = hipfftMakePlan2d(plan, Nx, Ny, ffttype, workSize.data());
-                ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS);
-
-                hipLibXtDesc*       indesc = nullptr;
-                hipfft_rt                     = hipfftXtMalloc(plan, &indesc, format);
-
-                if(goodcase)
-                {
-                    EXPECT_EQ(hipfft_rt, HIPFFT_SUCCESS) << "hipfftXtMalloc failed with code "
-                                                         << hipfft_rt
-                                                         << " (" << hipfftResult_string(hipfft_rt) << ")";
-                }
-                else
-                {
-                    EXPECT_NE(hipfft_rt, HIPFFT_SUCCESS) << "hipfftXtMalloc failed with code "
-                                                         << hipfft_rt
-                                                         << " (" << hipfftResult_string(hipfft_rt) << ")";
-                }
-
-                const bool inplace = (format == HIPFFT_XT_FORMAT_INPLACE)
-                    || (format == HIPFFT_XT_FORMAT_INPLACE_SHUFFLED);
-                if(!inplace)
-                {
-                    hipfftXtSubFormat outformat;
-                    switch(format)
-                    {
-                    case HIPFFT_XT_FORMAT_INPUT:
-                        outformat =  HIPFFT_XT_FORMAT_OUTPUT;
-                        break;
-                    case HIPFFT_XT_FORMAT_OUTPUT:
-                        outformat =  HIPFFT_XT_FORMAT_INPUT;
-                        break;
-                    case HIPFFT_XT_FORMAT_1D_INPUT_SHUFFLED:
-                        outformat =  HIPFFT_XT_FORMAT_1D_INPUT_SHUFFLED;
-                        break;
-                    case HIPFFT_FORMAT_UNDEFINED:
-                        outformat =  HIPFFT_FORMAT_UNDEFINED;
-                        break;
-                    case HIPFFT_XT_FORMAT_INPLACE:
-                    case HIPFFT_XT_FORMAT_INPLACE_SHUFFLED:
-                    default:
-                        throw std::runtime_error("Input format is not actually an out-of-place format");
-                    }
-                    hipLibXtDesc*       outdesc = nullptr;
-                    hipfft_rt                     = hipfftXtMalloc(plan, &indesc, outformat);
-                    if(goodcase)
-                    {
-                        EXPECT_EQ(hipfft_rt, HIPFFT_SUCCESS) << "hipfftXtMalloc failed with code "
-                                                             << hipfft_rt
-                                                             << " (" << hipfftResult_string(hipfft_rt)
-                                                             << ")";
-                    }
-                    else
-                    {
-                        EXPECT_NE(hipfft_rt, HIPFFT_SUCCESS) << "hipfftXtMalloc failed with code "
-                                                             << hipfft_rt
-                                                             << " (" << hipfftResult_string(hipfft_rt)
-                                                             << ")";
-                    }
-
-                    hipfft_rt = hipfftXtFree(outdesc);
-                    EXPECT_EQ(hipfft_rt, HIPFFT_SUCCESS);
-                    
-                }
-
-                hipfft_rt = hipfftXtFree(indesc);
-                EXPECT_EQ(hipfft_rt, HIPFFT_SUCCESS);
-                            
-                hipfft_rt = hipfftDestroy(plan);
-                EXPECT_EQ(hipfft_rt, HIPFFT_SUCCESS);
-            }
+            goodcase = true;
+            break;
         }
     }
+                
+    hipfftHandle plan;
+    hipfft_rt =   hipfftCreate(&plan);
+    EXPECT_EQ(hipfft_rt, HIPFFT_SUCCESS);
+
+    hipfft_rt = hipfftXtSetGPUs(plan, gpus.size(), gpus.data());
+    EXPECT_EQ(hipfft_rt, HIPFFT_SUCCESS);
+            
+    const auto ffttype
+        = realcomplex ? (direction == HIPFFT_FORWARD ? HIPFFT_D2Z: HIPFFT_Z2D) : HIPFFT_Z2Z;
+    std::vector<size_t> workSize(ngpus);
+    if(verbose > 2)
+        std::cout << "creating plan..." << std::flush;
+    if(format == HIPFFT_XT_FORMAT_1D_INPUT_SHUFFLED)
+    {
+        const int batchsize = 1;
+        hipfft_rt = hipfftMakePlan1d(plan, Nx, ffttype, batchsize, workSize.data());
+        if(realcomplex)
+        {
+            ASSERT_NE(hipfft_rt, HIPFFT_SUCCESS)
+                << "hipfftMakePlan1d should have failed for real/complex multi-gpu";
+        }
+        else
+        {
+            ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS) << "hipfftMakePlan1d failed with code "
+                                                 << hipfft_rt
+                                                 << " (" << hipfftResult_string(hipfft_rt) << ")";
+        }
+    }
+    else
+    {
+        hipfft_rt = hipfftMakePlan2d(plan, Nx, Ny, ffttype, workSize.data());
+        ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS)  << "hipfftMakePlan2d failed with code "
+                                             << hipfft_rt
+                                             << " (" << hipfftResult_string(hipfft_rt) << ")";
+    }
+    if(verbose > 2)
+        std::cout << " done.\n";
+    
+    hipLibXtDesc*       indesc = nullptr;
+    hipfft_rt                     = hipfftXtMalloc(plan, &indesc, format);
+
+    if(goodcase)
+    {
+        EXPECT_EQ(hipfft_rt, HIPFFT_SUCCESS) << "hipfftXtMalloc failed with code "
+                                             << hipfft_rt
+                                             << " (" << hipfftResult_string(hipfft_rt) << ")";
+    }
+    else
+    {
+        EXPECT_NE(hipfft_rt, HIPFFT_SUCCESS) << "hipfftXtMalloc passed but should have failed";
+    }
+
+    const bool inplace = (format == HIPFFT_XT_FORMAT_INPLACE)
+        || (format == HIPFFT_XT_FORMAT_INPLACE_SHUFFLED);
+    if(!inplace && format != HIPFFT_FORMAT_UNDEFINED)
+    {
+        hipfftXtSubFormat outformat;
+        switch(format)
+        {
+        case HIPFFT_XT_FORMAT_INPUT:
+            outformat =  HIPFFT_XT_FORMAT_OUTPUT;
+            break;
+        case HIPFFT_XT_FORMAT_OUTPUT:
+            outformat =  HIPFFT_XT_FORMAT_INPUT;
+            break;
+        case HIPFFT_XT_FORMAT_1D_INPUT_SHUFFLED:
+            outformat =  HIPFFT_XT_FORMAT_1D_INPUT_SHUFFLED;
+            break;
+        case HIPFFT_FORMAT_UNDEFINED:
+        case HIPFFT_XT_FORMAT_INPLACE:
+        case HIPFFT_XT_FORMAT_INPLACE_SHUFFLED:
+        default:
+            throw std::runtime_error("Test infrastructure error: input format is not actually an out-of-place format");
+        }
+        hipLibXtDesc*       outdesc = nullptr;
+        hipfft_rt                     = hipfftXtMalloc(plan, &indesc, outformat);
+        if(goodcase)
+        {
+            EXPECT_EQ(hipfft_rt, HIPFFT_SUCCESS) << "hipfftXtMalloc failed with code "
+                                                 << hipfft_rt
+                                                 << " (" << hipfftResult_string(hipfft_rt)
+                                                 << ")";
+        }
+        else
+        {
+            EXPECT_NE(hipfft_rt, HIPFFT_SUCCESS) << "hipfftXtMalloc passed but should have failed";
+        }
+
+        hipfft_rt = hipfftXtFree(outdesc);
+        EXPECT_EQ(hipfft_rt, HIPFFT_SUCCESS);
+                    
+    }
+
+    hipfft_rt = hipfftXtFree(indesc);
+    EXPECT_EQ(hipfft_rt, HIPFFT_SUCCESS);
+                            
+    hipfft_rt = hipfftDestroy(plan);
+    EXPECT_EQ(hipfft_rt, HIPFFT_SUCCESS);
 }
+
+const std::vector<int> hipfft_directions = {HIPFFT_FORWARD, HIPFFT_BACKWARD};
+const std::vector<hipfftXtSubFormat> hipfft_formats = {HIPFFT_XT_FORMAT_INPUT,
+                                             HIPFFT_XT_FORMAT_OUTPUT,
+                                             HIPFFT_XT_FORMAT_INPLACE,
+                                             HIPFFT_XT_FORMAT_INPLACE_SHUFFLED,
+                                             HIPFFT_XT_FORMAT_1D_INPUT_SHUFFLED,
+                                             HIPFFT_FORMAT_UNDEFINED};
+
+INSTANTIATE_TEST_SUITE_P(hipfftxttest, hipfftxtformats, 
+                         ::testing::Combine(::testing::Bool(),
+                                            ::testing::ValuesIn(hipfft_directions),
+                                            ::testing::ValuesIn(hipfft_formats)),
+                         [](const testing::TestParamInfo<hipfftxtformats::ParamType>& info) {
+                             const auto realcomplex = std::get<0>(info.param);
+                             const auto direction = std::get<1>(info.param);
+                             const auto format  = std::get<2>(info.param);
+                             std::string name = realcomplex ? "rc" : "cc";
+                             name += direction == HIPFFT_FORWARD ? "forward" : "backward";
+                             name += format_name(format);
+                             return name;
+                         }
+    );
+                         
