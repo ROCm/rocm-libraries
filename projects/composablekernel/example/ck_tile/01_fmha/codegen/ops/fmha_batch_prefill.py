@@ -84,6 +84,7 @@ using fmha_trait_{F_idx} = ck_tile::TileFmhaBatchPrefillTraits<{F_spad},
                                                     {F_qscale},
                                                     {F_occupancy},
                                                     false,
+                                                    {F_sink},
                                                     {F_page_size},
                                                     {F_kv_memory_layout},
                                                     {F_kv_lookup_table}>;
@@ -124,7 +125,7 @@ using fmha_kernel_{F_idx} =
     ck_tile::FmhaBatchPrefillWithPagedKVCacheKernel<fmha_pipeline_{F_idx}, fmha_epilogue_{F_idx}>;
 
 using trait_{F_idx} = fmha_fwd_batch_prefill_traits_<{F_hdim}, {F_dtype}, {F_mode},{F_bm0}, {F_bn0}, {F_bk0}, {F_bn1}, {F_bk1}, {F_bk0max}, {F_vlayout},
-                        {F_pipeline_enum}, {F_logits}, fmha_mask_{F_idx}, {F_bias}, {F_lse}, {F_dropout}, {F_qscale}, {F_spad}, {F_skpad}, {F_dpad}, {F_dvpad}, false, false, {F_page_size}, {F_kv_memory_layout}, {F_kv_lookup_table}>;
+                        {F_pipeline_enum}, {F_logits}, fmha_mask_{F_idx}, {F_bias}, {F_lse}, {F_dropout}, {F_qscale}, {F_spad}, {F_skpad}, {F_dpad}, {F_dvpad}, false, false, {F_sink}, {F_page_size}, {F_kv_memory_layout}, {F_kv_lookup_table}>;
 
 #include <iostream>
 
@@ -201,9 +202,9 @@ FMHA_FWD_API_PER_HDIM_CASE = """        {F_if} (t.hdim_q <= {F_hdim} && t.hdim_v
         }}
 """
 
-FMHA_FWD_API_INNER_DISPATCH = """            {F_if}((t.is_group_mode == {F_mode}) && (t.is_v_rowmajor == {F_vlayout}) && (t.has_logits_soft_cap == {F_logits}) && ({F_mask_check}) && (t.bias_type == {F_bias_check}) && (t.has_lse == {F_lse})  && (t.has_dropout == {F_dropout}) && (t.qscale_type == {F_qscale_check}) &&
+FMHA_FWD_API_INNER_DISPATCH = """            {F_if}((t.is_group_mode == {F_mode}) && (t.is_v_rowmajor == {F_vlayout}) && (t.has_logits_soft_cap == {F_logits}) && ({F_mask_check}) && (t.bias_type == {F_bias_check}) && (t.has_lse == {F_lse})  && (t.has_dropout == {F_dropout}) && (t.qscale_type == {F_qscale_check}) && (t.has_sink == {F_sink}) &&
                         ({F_scheck}) && ({F_skcheck}) && ({F_dcheck}) && ({F_dvcheck}) && ({F_constraint}) && (t.kv_memory_layout == {F_kv_memory_layout}) && (t.kv_lookup_table == {F_kv_lookup_table}) && (t.page_size == {F_page_size})) {{
-                using trait_ = fmha_fwd_batch_prefill_traits_<{F_hdim}, {F_dtype}, {F_mode}, {F_bm0}, {F_bn0}, {F_bk0}, {F_bn1}, {F_bk1}, {F_bk0max}, {F_vlayout}, {F_pipeline_enum}, {F_logits}, {F_mask}, {F_bias}, {F_lse}, {F_dropout}, {F_qscale}, {F_spad}, {F_skpad}, {F_dpad}, {F_dvpad}, false, false, {F_page_size}, {F_kv_memory_layout}, {F_kv_lookup_table}>;
+                using trait_ = fmha_fwd_batch_prefill_traits_<{F_hdim}, {F_dtype}, {F_mode}, {F_bm0}, {F_bn0}, {F_bk0}, {F_bn1}, {F_bk1}, {F_bk0max}, {F_vlayout}, {F_pipeline_enum}, {F_logits}, {F_mask}, {F_bias}, {F_lse}, {F_dropout}, {F_qscale}, {F_spad}, {F_skpad}, {F_dpad}, {F_dvpad}, false, false, {F_sink}, {F_page_size}, {F_kv_memory_layout}, {F_kv_lookup_table}>;
                 return fmha_batch_prefill_<trait_>(s, a);
             }}
 """
@@ -247,6 +248,7 @@ class FmhaFwdApiTrait:
     skpad: str
     dpad: str
     dvpad: str
+    sink: str  # t/f
     constraint: CppConstraint
     kv_memory_layout: str
     kv_lookup_table: str
@@ -343,6 +345,7 @@ class FmhaFwdPipeline:
     F_dropout: str  #
     F_qscale: str  # no/pertensor
     F_mask: str  # value from MASK_MAP
+    F_sink: str  # t/f (StreamLLM sink tokens)
     F_kv_memory_layout: str  #
     F_kv_lookup_table: str  #
     F_constraint: CppConstraint = field(default_factory=lambda: CppConstraint())
@@ -405,6 +408,11 @@ class FmhaFwdPipeline:
             n += f"_{self.F_qscale}"
         else:
             n += "_nqscale"
+
+        if self.F_sink == "t":
+            n += "_sink"
+        else:
+            n += "_nsink"
 
         n += "_" + self.F_kv_memory_layout + "_" + self.F_kv_lookup_table
         return n
@@ -472,6 +480,7 @@ class FmhaFwdApiPool:
                             trait.kv_lookup_table
                         ],
                         F_page_size=trait.page_size,
+                        F_sink=BOOL_MAP[trait.sink],
                     )
                 if_j = "if" if j == 0 else "else if"
                 per_hdim_case = per_hdim_case + FMHA_FWD_API_PER_HDIM_CASE.format(
@@ -578,6 +587,7 @@ class FmhaFwdKernel:
             F_mode=MODE_MAP[self.F_mode],
             F_pipeline=FMHA_BATCH_PREFILL_PIPELINE_MAP[self.F_pipeline.tag],
             F_page_size=self.F_page_size,
+            F_sink=BOOL_MAP[self.F_pipeline.F_sink],
         )
 
     @property
@@ -617,6 +627,7 @@ class FmhaFwdKernel:
             skpad=self.F_pipeline.F_skpad,
             dpad=self.F_pipeline.F_dpad,
             dvpad=self.F_pipeline.F_dvpad,
+            sink=self.F_pipeline.F_sink,
             constraint=self.F_tile.F_constraint & self.F_pipeline.F_constraint,
             kv_memory_layout=self.F_pipeline.F_kv_memory_layout,
             kv_lookup_table=self.F_pipeline.F_kv_lookup_table,
@@ -655,6 +666,7 @@ class KernelComponentFactory:
                 bias,
                 lse,
                 dropout,
+                sink,
                 kv_memory_layout,
                 kv_lookup_table,
             ) in itertools.product(
@@ -663,12 +675,13 @@ class KernelComponentFactory:
                 BIAS_MAP.keys(),
                 ["t", "f"],
                 ["t", "f"],
+                ["t", "f"],
                 SUPPORTED_KV_MEMORY_LAYOUT,
                 SUPPORTED_KV_LOOKUP_TABLE,
             ):
-                pipelines.append(FmhaFwdPipeline("qr_async", "row", "t", "t", "t", "t", logits, bias, lse, dropout, qscale, mask, kv_memory_layout, kv_lookup_table))  # fmt: skip
+                pipelines.append(FmhaFwdPipeline("qr_async", "row", "t", "t", "t", "t", logits, bias, lse, dropout, qscale, mask, sink, kv_memory_layout, kv_lookup_table))  # fmt: skip
         elif dtype in ["fp8bf16"]:
-            # no need lse/dropout kernels
+            # no need lse/dropout/sink kernels
             for (
                 logits,
                 qscale,
@@ -684,7 +697,7 @@ class KernelComponentFactory:
                 SUPPORTED_KV_MEMORY_LAYOUT,
                 SUPPORTED_KV_LOOKUP_TABLE,
             ):
-                pipelines.append(FmhaFwdPipeline("qr_async", "row", "t", "t", "t", "t", logits, bias, "f", "f", qscale, mask, kv_memory_layout, kv_lookup_table))  # fmt: skip
+                pipelines.append(FmhaFwdPipeline("qr_async", "row", "t", "t", "t", "t", logits, bias, "f", "f", qscale, mask, "f", kv_memory_layout, kv_lookup_table))  # fmt: skip
         else:
             assert False
         return pipelines
