@@ -258,13 +258,13 @@ public:
     /// recomputation.
     ///
     /// @param q              Query tensor [B, H_q, Sq, D]
-    /// @param k              Key tensor   [B, H_kv, Skv, D]
-    /// @param v              Value tensor [B, H_kv, Skv, Dv]
+    /// @param k              Key tensor   [B, H_k, Skv, D]
+    /// @param v              Value tensor [B, H_v, Skv, Dv]
     /// @param o              Output from forward pass [B, H_q, Sq, Dv]
     /// @param dO             Upstream gradient [B, H_q, Sq, Dv]
     /// @param dQ             Output: gradient w.r.t. Q [B, H_q, Sq, D]
-    /// @param dK             Output: gradient w.r.t. K [B, H_kv, Skv, D]
-    /// @param dV             Output: gradient w.r.t. V [B, H_kv, Skv, Dv]
+    /// @param dK             Output: gradient w.r.t. K [B, H_k, Skv, D]
+    /// @param dV             Output: gradient w.r.t. V [B, H_v, Skv, Dv]
     /// @param attnScaleValue Optional scale factor; defaults to 1/sqrt(D)
     /// @param lse            Optional log-sum-exp from forward [B, H_q, Sq] (FP32).
     ///                       When provided, enables efficient softmax recomputation.
@@ -344,12 +344,13 @@ public:
         const auto numHeadsQ = q.dims()[1];
         const auto seqQ = q.dims()[2];
         const auto headDim = q.dims()[3];
-        const auto numHeadsKv = k.dims()[1];
+        const auto numHeadsK = k.dims()[1];
+        const auto numHeadsV = v.dims()[1];
         const auto seqKv = k.dims()[2];
         const auto headDimV = v.dims()[3];
 
-        if(batch <= 0 || numHeadsQ <= 0 || seqQ <= 0 || headDim <= 0 || numHeadsKv <= 0
-           || seqKv <= 0 || headDimV <= 0)
+        if(batch <= 0 || numHeadsQ <= 0 || seqQ <= 0 || headDim <= 0 || numHeadsK <= 0
+           || numHeadsV <= 0 || seqKv <= 0 || headDimV <= 0)
         {
             throw std::invalid_argument(
                 "CpuFpReferenceSdpa::backward: all dimensions must be positive");
@@ -386,20 +387,25 @@ public:
             throw std::invalid_argument(
                 "CpuFpReferenceSdpa::backward: dQ shape must be [B, H_q, Sq, D]");
         }
-        if(dK.dims()[1] != numHeadsKv || dK.dims()[2] != seqKv || dK.dims()[3] != headDim)
+        if(dK.dims()[1] != numHeadsK || dK.dims()[2] != seqKv || dK.dims()[3] != headDim)
         {
             throw std::invalid_argument(
-                "CpuFpReferenceSdpa::backward: dK shape must be [B, H_kv, Skv, D]");
+                "CpuFpReferenceSdpa::backward: dK shape must be [B, H_k, Skv, D]");
         }
-        if(dV.dims()[1] != numHeadsKv || dV.dims()[2] != seqKv || dV.dims()[3] != headDimV)
+        if(dV.dims()[1] != numHeadsV || dV.dims()[2] != seqKv || dV.dims()[3] != headDimV)
         {
             throw std::invalid_argument(
-                "CpuFpReferenceSdpa::backward: dV shape must be [B, H_kv, Skv, Dv]");
+                "CpuFpReferenceSdpa::backward: dV shape must be [B, H_v, Skv, Dv]");
         }
-        if(numHeadsQ % numHeadsKv != 0)
+        if(numHeadsQ % numHeadsK != 0)
         {
             throw std::invalid_argument(
-                "CpuFpReferenceSdpa::backward: numHeadsQ must be divisible by numHeadsKv (GQA)");
+                "CpuFpReferenceSdpa::backward: numHeadsQ must be divisible by numHeadsK (GQA)");
+        }
+        if(numHeadsQ % numHeadsV != 0)
+        {
+            throw std::invalid_argument(
+                "CpuFpReferenceSdpa::backward: numHeadsQ must be divisible by numHeadsV (GQA)");
         }
 
         // Validate LSE tensor if provided
@@ -417,10 +423,12 @@ public:
             }
         }
 
-        const auto headsPerHeadKv = numHeadsQ / numHeadsKv;
-        const float scale = attnScaleValue.has_value()
-                                ? attnScaleValue.value()
-                                : (1.0f / std::sqrt(static_cast<float>(headDim)));
+        const auto headsPerHeadK = numHeadsQ / numHeadsK;
+        const auto headsPerHeadV = numHeadsQ / numHeadsV;
+        const auto scale = attnScaleValue.has_value()
+                               ? static_cast<ComputeDataType>(attnScaleValue.value())
+                               : (static_cast<ComputeDataType>(1.0)
+                                  / std::sqrt(static_cast<ComputeDataType>(headDim)));
 
         // Initialize output gradient tensors to zero
         dQ.fillWithValue(hipdnn_test_sdk::detail::safeConvert<DQDataType>(0.0));
@@ -436,8 +444,8 @@ public:
             {
                 for(int64_t sq = 0; sq < seqQ; ++sq)
                 {
-                    const auto kvHeadK = hQ / headsPerHeadKv;
-                    const auto kvHeadV = hQ / headsPerHeadKv;
+                    const auto kvHeadK = hQ / headsPerHeadK;
+                    const auto kvHeadV = hQ / headsPerHeadV;
 
                     // Allocate temporary buffers for this query position
                     std::vector<ComputeDataType> scores(static_cast<size_t>(seqKv));
