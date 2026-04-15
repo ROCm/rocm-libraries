@@ -9,7 +9,7 @@
  * in the Software without restriction, including without limitation the rights
  * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
  * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
+ * furnished to do so, suGbject to the following conditions:
  *
  * The above copyright notice and this permission notice shall be included in
  * all copies or substantial portions of the Software.
@@ -2511,7 +2511,6 @@ void testing_matmul_with_bias(const Arguments& arg,
         }
         else
         {
-#endif
             if(batchMode == 0)
             {
                 hipblaslt_init_device(ABC_dims::A,
@@ -2543,7 +2542,6 @@ void testing_matmul_with_bias(const Arguments& arg,
                                         1);
                 }
             }
-#ifdef HIPBLASLT_USE_ROCROLLER
         }
 
         size_t scaleB_row = ((transB == HIPBLAS_OP_T) ? 1 : blockSize(arg.scaleB));
@@ -2615,7 +2613,6 @@ void testing_matmul_with_bias(const Arguments& arg,
         }
         else
         {
-#endif
             if(batchMode == 0)
             {
                 hipblaslt_init_device(ABC_dims::B,
@@ -2647,9 +2644,8 @@ void testing_matmul_with_bias(const Arguments& arg,
                                         1);
                 }
             }
-#ifdef HIPBLASLT_USE_ROCROLLER
         }
-#endif
+
         if(batchMode == 0)
         {
             hipblaslt_init_device(ABC_dims::C,
@@ -2679,28 +2675,28 @@ void testing_matmul_with_bias(const Arguments& arg,
                                             realDataTypeSize(TiA),
                                             do_swizzle_a,
                                         stream));
-            // B is always stored as K×N in memory; use (K, N, ldb) not (B_row, B_col) to avoid row > lda when transB=T
-            CHECK_HIP_ERROR(synchronize(hB[i],
-                                        dB[i],
-                                        num_batches[i],
-                                        K[i],
-                                        N[i],
-                                        ldb[i],
-                                        realDataTypeSize(TiB),
-                                        do_swizzle_b,
-                                        stream));
+                // B is always stored as K×N in memory; use (K, N, ldb) not (B_row, B_col) to avoid row > lda when transB=T
+                CHECK_HIP_ERROR(synchronize(hB[i],
+                                            dB[i],
+                                            num_batches[i],
+                                            K[i],
+                                            N[i],
+                                            ldb[i],
+                                            realDataTypeSize(TiB),
+                                            do_swizzle_b,
+                                            stream));
                 CHECK_HIP_ERROR(synchronize(hC[i], dC[i], 0, 0, 0, 0, 1, false, stream));
 #ifndef HIPBLASLT_USE_ROCROLLER
-            if(isBlockScaling(arg.scaleA))
-            {
-                CHECK_HIP_ERROR(synchronize(hScaleA[i], dScaleA[i], 0, 0, 0, 0, 1, false, stream));
-                refA.emplace_back(mx_type_to_f32(TiA, scaleDataType(arg.scaleA), hA[i], hScaleA[i], A_row[i], A_col[i], scaleA_row, scaleA_col));
-            }
-            if(isBlockScaling(arg.scaleB))
-            {
-                CHECK_HIP_ERROR(synchronize(hScaleB[i], dScaleB[i], 0, 0, 0, 0, 1, false, stream));
-                refB.emplace_back(mx_type_to_f32(TiB, scaleDataType(arg.scaleB), hB[i], hScaleB[i], B_row[i], B_col[i], scaleB_row, scaleB_col));
-            }
+                if(isBlockScaling(arg.scaleA))
+                {
+                    CHECK_HIP_ERROR(synchronize(hScaleA[i], dScaleA[i], 0, 0, 0, 0, 1, false, stream));
+                    refA.emplace_back(mx_type_to_f32(TiA, scaleDataType(arg.scaleA), hA[i], hScaleA[i], A_row[i], A_col[i], scaleA_row, scaleA_col));
+                }
+                if(isBlockScaling(arg.scaleB))
+                {
+                    CHECK_HIP_ERROR(synchronize(hScaleB[i], dScaleB[i], 0, 0, 0, 0, 1, false, stream));
+                    refB.emplace_back(mx_type_to_f32(TiB, scaleDataType(arg.scaleB), hB[i], hScaleB[i], B_row[i], B_col[i], scaleB_row, scaleB_col));
+                }
 #endif
 
                 if(arg.dump_matrix)
@@ -3586,8 +3582,8 @@ void testing_matmul_with_bias(const Arguments& arg,
                                                 hipMemcpyHostToDevice));
         }
     }       
-/* Meant just for debuging pointer values
-    if(batchMode == 1)
+    // Meant just for debuging pointer values
+ /*   if(batchMode == 1)
     {
         for(int32_t b = 0; b < block_count; b++)
         {

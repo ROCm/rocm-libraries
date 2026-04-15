@@ -4315,35 +4315,34 @@ class KernelWriterAssembly(KernelWriter):
       moduleLoadGeneralBatch.add(SMemLoadInstruction(instType=InstType.INST_B64, dst=sgpr("Srd%s"%tc, 2), base=sgpr(stmp, 2), soffset=0, comment="Load the Matrix Address in the Pointer Array"))
       moduleLoadGeneralBatch.add(SWaitCnt(kmcnt=0, comment="Wait for the Matrix Address Load from the Pointer Array"))
       if self.states.groOffsetInMacroTile:
-        if(tc == 'A'):
-          prePad1 = self.states.srdShiftLeft[tc] * tP["bpeGR"] # leave room in case we have to pointer shift
-          moduleLoadGeneralBatch.add(SSubU32(dst=sgpr("Srd%s+0"%tc), src0=sgpr("Srd%s+0"%tc), src1=prePad1, comment="pre-pad to make room for possible pointer shift"))
-          moduleLoadGeneralBatch.add(SSubBU32(dst=sgpr("Srd%s+1"%tc), src0=sgpr("Srd%s+1"%tc), src1=0, comment="pre-pad to make room for possible pointer shift"))          
-        if(tc == 'B'):
-          prePad1 = self.states.srdShiftLeft[tc] * tP["bpeGR"] # leave room in case we have to pointer shift
-          moduleLoadGeneralBatch.add(SSubU32(dst=sgpr("Srd%s+0"%tc), src0=sgpr("Srd%s+0"%tc), src1=prePad1, comment="pre-pad to make room for possible pointer shift"))
-          moduleLoadGeneralBatch.add(SSubBU32(dst=sgpr("Srd%s+1"%tc), src0=sgpr("Srd%s+1"%tc), src1=0, comment="pre-pad to make room for possible pointer shift"))            
+        #if(tc == 'A'):
+        prePad1 = int(self.states.srdShiftLeft[tc] * tP["bpeGR"]) # leave room in case we have to pointer shift
+        moduleLoadGeneralBatch.add(SSubU32(dst=sgpr("Srd%s+0"%tc), src0=sgpr("Srd%s+0"%tc), src1=prePad1, comment="pre-pad to make room for possible pointer shift"))
+        moduleLoadGeneralBatch.add(SSubBU32(dst=sgpr("Srd%s+1"%tc), src0=sgpr("Srd%s+1"%tc), src1=0, comment="pre-pad to make room for possible pointer shift"))          
+        #if(tc == 'B'):
+          #prePad1 = self.states.srdShiftLeft[tc] * tP["bpeGR"] # leave room in case we have to pointer shift
+          #moduleLoadGeneralBatch.add(SSubU32(dst=sgpr("Srd%s+0"%tc), src0=sgpr("Srd%s+0"%tc), src1=prePad1, comment="pre-pad to make room for possible pointer shift"))
+          #moduleLoadGeneralBatch.add(SSubBU32(dst=sgpr("Srd%s+1"%tc), src0=sgpr("Srd%s+1"%tc), src1=0, comment="pre-pad to make room for possible pointer shift"))            
       moduleLoadGeneralBatch.add(scalarMultiply64Bpe(tileStart, tileStart, tP["bpeGR"], stmp, "tileStart"))
       moduleLoadGeneralBatch.add(SAddU32(dst=sgpr("Srd%s+0"%tc), src0=sgpr(tileStart+0), src1=sgpr("Srd%s+0"%tc), comment="SRD base = Address+ tileStart0"))
       moduleLoadGeneralBatch.add(SAddCU32(dst=sgpr("Srd%s+1"%tc), src0=sgpr(tileStart+1), src1=sgpr("Srd%s+1"%tc), comment="SRD base = Address+ tileStart1"))
       moduleLoadGeneralBatch.add(SBranch(labelName = stridedBatchedGemmLoad_End.getLabelName()))
       moduleLoadGeneralBatch.add(stridedBatchedGemmLoad)      
     else:
-      #module.add(SMovB64(dst=sgpr("Srd%s"%tc, 2), src=sgpr("Address%s"%tc, 2), comment="init SRD base address"))
       moduleLoadStridedBatch.add(SMovB64(dst=sgpr("Srd%s"%tc, 2), src=sgpr("Address%s"%tc, 2), comment="init SRD base address"))
       moduleLoadGeneralBatch.add(SAddU32(dst=sgpr(stmp+0), src0=sgpr(stmp+0), src1=sgpr("Address%s+0"%tc), comment="Offsetting to the location [Lower half of address]"))
       moduleLoadGeneralBatch.add(SAddCU32(dst=sgpr(stmp+1), src0=sgpr("Address%s+1"%tc), src1=0, comment="Offsetting to the location [Higher half of address]"))
       moduleLoadGeneralBatch.add(SMemLoadInstruction(instType=InstType.INST_B64, dst=sgpr("Srd%s"%tc, 2), base=sgpr(stmp, 2), soffset=0, comment="Load the Matrix Address in the Pointer Array"))
       moduleLoadGeneralBatch.add(SWaitCnt(kmcnt=0, comment="Wait for the Matrix Address Load from the Pointer Array"))    
       if self.states.groOffsetInMacroTile:
-        if(tc == 'A'):
-          prePad1 = self.states.srdShiftLeft[tc] * tP["bpeGR"] # leave room in case we have to pointer shift
-          moduleLoadGeneralBatch.add(SSubU32(dst=sgpr("Srd%s+0"%tc), src0=sgpr("Srd%s+0"%tc), src1=prePad1, comment="pre-pad to make room for possible pointer shift"))
-          moduleLoadGeneralBatch.add(SSubBU32(dst=sgpr("Srd%s+1"%tc), src0=sgpr("Srd%s+1"%tc), src1=0, comment="pre-pad to make room for possible pointer shift"))          
-        if(tc == 'B'):
-          prePad1 = self.states.srdShiftLeft[tc] * tP["bpeGR"] # leave room in case we have to pointer shift
-          moduleLoadGeneralBatch.add(SSubU32(dst=sgpr("Srd%s+0"%tc), src0=sgpr("Srd%s+0"%tc), src1=prePad1, comment="pre-pad to make room for possible pointer shift"))
-          moduleLoadGeneralBatch.add(SSubBU32(dst=sgpr("Srd%s+1"%tc), src0=sgpr("Srd%s+1"%tc), src1=0, comment="pre-pad to make room for possible pointer shift"))
+        #if(tc == 'A'):
+        prePad1 = int(self.states.srdShiftLeft[tc] * tP["bpeGR"]) # leave room in case we have to pointer shift
+        moduleLoadGeneralBatch.add(SSubU32(dst=sgpr("Srd%s+0"%tc), src0=sgpr("Srd%s+0"%tc), src1=prePad1, comment="pre-pad to make room for possible pointer shift"))
+        moduleLoadGeneralBatch.add(SSubBU32(dst=sgpr("Srd%s+1"%tc), src0=sgpr("Srd%s+1"%tc), src1=0, comment="pre-pad to make room for possible pointer shift"))          
+        #if(tc == 'B'):
+          #prePad1 = self.states.srdShiftLeft[tc] * tP["bpeGR"] # leave room in case we have to pointer shift
+          #moduleLoadGeneralBatch.add(SSubU32(dst=sgpr("Srd%s+0"%tc), src0=sgpr("Srd%s+0"%tc), src1=prePad1, comment="pre-pad to make room for possible pointer shift"))
+          #moduleLoadGeneralBatch.add(SSubBU32(dst=sgpr("Srd%s+1"%tc), src0=sgpr("Srd%s+1"%tc), src1=0, comment="pre-pad to make room for possible pointer shift"))
       moduleLoadGeneralBatch.add(SBranch(labelName = stridedBatchedGemmLoad_End.getLabelName()))
       moduleLoadGeneralBatch.add(stridedBatchedGemmLoad)                     
 
@@ -12272,21 +12271,9 @@ class KernelWriterAssembly(KernelWriter):
             module.add(SAddU32(dst=sgpr("Srd%s+0"%mat), src0=sgpr("%s%s+0"%(addrSrcSgpr, mat)), src1=sgpr(tmpS0), comment="add lo to SRD"))
             module.add(SAddCU32(dst=sgpr("Srd%s+1"%mat), src0=sgpr("%s%s+1"%(addrSrcSgpr, mat)), src1=sgpr(tmpS1), comment="add hi to SRD"))
             if(i == 2 and (mat == "C" or mat == "D")):
-<<<<<<< HEAD
-              if(mat == "C"):
-                module.add(SBranch(labelName=generalBatchedGemmLoadC_End.getLabelName()))
-                module.add(generalBatchedGemmLoadC)
-              else:
-                module.add(SBranch(labelName=generalBatchedGemmLoadD_End.getLabelName()))
-                module.add(generalBatchedGemmLoadD)
-              #module.add(SSubU32(dst=sgpr(tmpS2), src0=sgpr("Srd%s+0"%mat), src1=sgpr("Address%s+0"%mat), comment="Deduce the offset within a batch matrix"))
-              #module.add(SSubBU32(dst=sgpr(tmpS3), src0=sgpr("Srd%s+1"%mat), src1=sgpr("Address%s+1"%mat), comment="Deduce the offset within a batch matrix"))
-              module.add(SMulI32(dst=sgpr(tmpS2), src0=8, src1=coord, comment="Compute stride in bytes into Pointer Array"))
-=======
               module.add(SBranch(labelName=generalBatchedGemmLoad_End.getLabelName()))
               module.add(generalBatchedGemmLoad)
-              module.add(SMulI32(dst=sgpr(tmpS2), src0="BpeAddress", src1=coord, comment="Compute stride in bytes into Pointer Array"))
->>>>>>> 58d23746ce (Adding GSU support for General Batched GEMM)
+              module.add(SMulI32(dst=sgpr(tmpS2), src0=8, src1=coord, comment="Compute stride in bytes into Pointer Array"))
               module.add(SAddU32(dst=sgpr(tmpS2), src0=sgpr(tmpS2), src1=sgpr("Address%s+0"%mat), comment="Offsetting to the location [Lower half of address]"))
               module.add(SAddCU32(dst=sgpr(wgMT1), src0=sgpr("Address%s+1"%mat), src1=0, comment="Offsetting to the location [Higher half of address]"))
               module.add(SMemLoadInstruction(instType=InstType.INST_B64, dst=sgpr(tmpS0, 2), base=sgpr(tmpS2, 2), soffset=0, comment="Load the Matrix Address in the Pointer Array"))
@@ -12401,7 +12388,7 @@ class KernelWriterAssembly(KernelWriter):
     module.add(SLShiftLeftB64(dst=sgpr(tmpspgr1,2), src=sgpr(tmpspgr1,2), shiftHex=log2(bpe), comment="scale by bpe"))
     module.add(SBranch(labelName=SrdTDGeneralBatched_End.getLabelName()))
     module.add(SrdTDGeneralBatched)
-    module.add(SMulI32(dst=sgpr(tmpspgr2+0), src0="BpeAddress", src1=sgpr("WorkGroup2"), comment="Compute stride in bytes into Pointer Array"))
+    module.add(SMulI32(dst=sgpr(tmpspgr2+0), src0=8, src1=sgpr("WorkGroup2"), comment="Compute stride in bytes into Pointer Array"))
     module.add(SAddU32(dst=sgpr(tmpspgr2+0), src0=sgpr(tmpspgr2+0), src1=sgpr("AddressTD+0"), comment="Offsetting to the location [Lower half of address]"))
     module.add(SAddCU32(dst=sgpr(tmpspgr2+1), src0=sgpr("AddressTD+1"), src1=0, comment="Offsetting to the location [Higher half of address]"))
     module.add(SMemLoadInstruction(instType=InstType.INST_B64, dst=sgpr("SrdTD", 2), base=sgpr(tmpspgr2, 2), soffset=0, comment="Load the Matrix Address in the Pointer Array"))
@@ -12606,7 +12593,6 @@ class KernelWriterAssembly(KernelWriter):
     return module
 
   ##############################################################################
-<<<<<<< HEAD
   def shiftSrd(self, tc) -> Module:
     module = Module("shiftSrd")
     if self.states.version[:2] == (12, 5):
@@ -12618,13 +12604,8 @@ class KernelWriterAssembly(KernelWriter):
         module.add(SOrB32(sgpr("Srd%s+1"%tc), sgpr("Srd%s+1"%tc), sgpr(stmpRes.idx)))
         module.add(SLShiftRightB32(sgpr("Srd%s+2"%tc), 7, sgpr("Srd%s+2"%tc)))
     return module
-
-  def allocPostLoopSrd(self, ch: str):
-    checkForGeneralBatchedGemm = Label(label="checkForGeneralBatchedGemm"+ch, comment="Handling General Batched GEMM SRD initialization")
-    checkForGeneralBatchedGemm_End = Label(label="checkForGeneralBatchedGemm"+ch+"_End", comment="End of handling General Batched GEMM SRD initialization")    
-=======
+ 
   def allocPostLoopSrd(self, ch: str, kernel):   
->>>>>>> 58d23746ce (Adding GSU support for General Batched GEMM)
     module = Module("allocPostLoopSrd")
     GeneralBatchedGemmSrdInitiation = Label(label="GeneralBatchedGemmSrdInitiation"+ch, comment="Handling General Batched GEMM SRD initialization")
     GeneralBatchedGemmSrdInitiation_End = Label(label="GeneralBatchedGemmSrdInitiation"+ch+"_End", comment="End of handling General Batched GEMM SRD initialization")
