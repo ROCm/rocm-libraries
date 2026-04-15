@@ -1205,8 +1205,8 @@ protected:
         miopenCreateDropoutDescriptor(&DropoutDesc);
         size_t statesSizeInBytes = 0;
 
-        miopenRNNAlgo_t algoMode    = miopenRNNdefault;
-        miopenHandle_t mio_handle   = nullptr;
+        miopenRNNAlgo_t algoMode  = miopenRNNdefault;
+        miopenHandle_t mio_handle = nullptr;
 #if MIOPEN_BACKEND_HIP
         void* dropout_state_buf = nullptr;
 #elif MIOPEN_BACKEND_OPENCL
