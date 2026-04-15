@@ -245,14 +245,14 @@ rocsparse::execution_t& rocsparse::execution_t::instance()
 void rocsparse::execution_t::flag_kernel_launch()
 {
     ++this->count_calls[func_t::hip_launch_kernel];
-    this->m_last_call = func_t::hip_launch_kernel;
+    this->set_last_call(func_t::hip_launch_kernel);
     ++this->ncalls;
 }
 
 hipError_t rocsparse::execution_t::call_device_synchronize()
 {
     ++this->count_calls[func_t::hip_device_synchronize];
-    this->m_last_call = func_t::hip_device_synchronize;
+    this->set_last_call(func_t::hip_device_synchronize);
     ++this->ncalls;
     return hipDeviceSynchronize();
 }
@@ -260,7 +260,7 @@ hipError_t rocsparse::execution_t::call_device_synchronize()
 hipError_t rocsparse::execution_t::call_stream_synchronize(hipStream_t stream)
 {
     ++this->count_calls[func_t::hip_stream_synchronize];
-    this->m_last_call = func_t::hip_stream_synchronize;
+    this->set_last_call(func_t::hip_stream_synchronize);
     ++this->ncalls;
     return hipStreamSynchronize(stream);
 }
@@ -269,7 +269,7 @@ hipError_t rocsparse::execution_t::call_malloc_async(void** p_that, size_t size,
 {
     ++stack_count;
     ++this->count_calls[func_t::hip_malloc_async];
-    this->m_last_call = func_t::hip_malloc_async;
+    this->set_last_call(func_t::hip_malloc_async);
     ++this->ncalls;
 
 // if hip version is atleast 5.3.0 hipMallocAsync and hipFreeAsync are defined
@@ -286,7 +286,7 @@ hipError_t rocsparse::execution_t::call_free_async(void* that, hipStream_t strea
         return hipSuccess;
     --stack_count;
     ++this->count_calls[func_t::hip_free_async];
-    this->m_last_call = func_t::hip_free_async;
+    this->set_last_call(func_t::hip_free_async);
     ++this->ncalls;
     // if hip version is atleast 5.3.0 hipMallocAsync and hipFreeAsync are defined
 #if HIP_VERSION >= 50300000
@@ -300,7 +300,7 @@ hipError_t rocsparse::execution_t::call_malloc(void** p_that, size_t size)
 {
     ++stack_count;
     ++this->count_calls[func_t::hip_malloc];
-    this->m_last_call = func_t::hip_malloc;
+    this->set_last_call(func_t::hip_malloc);
     ++this->ncalls;
     return hipMalloc(p_that, size);
 }
@@ -311,7 +311,7 @@ hipError_t rocsparse::execution_t::call_free(void* that)
         return hipSuccess;
     --stack_count;
     ++this->count_calls[func_t::hip_free];
-    this->m_last_call = func_t::hip_free;
+    this->set_last_call(func_t::hip_free);
     ++this->ncalls;
     return hipFree(that);
 }
