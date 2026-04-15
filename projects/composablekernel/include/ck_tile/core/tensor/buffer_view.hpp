@@ -1123,7 +1123,8 @@ struct buffer_view<address_space_enum::lds,
             return tmp;
 #else
             constexpr index_t load_elts = scalar_per_t_vector * scalar_per_x_vector;
-            if constexpr(load_elts == 12 && sizeof(typename X::value_type) == 1)
+            if constexpr(load_elts == 12 &&
+                         sizeof(typename vector_traits<remove_cvref_t<T>>::scalar_type) == 1)
             {
                 auto rtn = reinterpret_cast<const int32_t*>(p_data_) +
                            (i + linear_offset + static_offset) / 4;
@@ -1194,8 +1195,8 @@ struct buffer_view<address_space_enum::lds,
         {
 #if defined(__gfx950__) || defined(__gfx125__)
             constexpr index_t t_per_x = scalar_per_x_vector / scalar_per_t_vector;
-            return amd_transpose_load_to_vgpr<remove_cvref_t<T>, t_per_x>(p_data_ + i +
-                                                                          linear_offset);
+            return bit_cast<X>(amd_transpose_load_to_vgpr<remove_cvref_t<T>, t_per_x>(
+                p_data_ + i + linear_offset));
 #else
             return X{numeric<remove_cvref_t<T>>::zero()};
 #endif

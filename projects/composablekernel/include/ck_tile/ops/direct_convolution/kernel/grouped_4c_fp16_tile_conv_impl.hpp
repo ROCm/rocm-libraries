@@ -12,7 +12,8 @@
 #include "ck_tile/ops/direct_convolution/utils/transpose_lds_layout.hpp"
 #include "ck_tile/ops/direct_convolution/utils/memory.hpp"
 #include "ck_tile/ops/direct_convolution/utils/detail.hpp"
-#include "ck_tile/core/arch/amd_buffer_addressing_builtins.hpp"
+#include "ck_tile/core/numeric/vector_type.hpp"
+#include "ck_tile/core/tensor/buffer_view.hpp"
 #include <hip/hip_fp16.h>
 #include <hip/hip_runtime.h>
 
@@ -159,30 +160,31 @@ __device__ void conv2d_grouped_4c_fp16_cdna4_nhwc_impl(const _Float16* __restric
     constexpr int MFMA_BATCH = 16;
     using OperandLayout      = MatrixLayout<MFMA_M, MFMA_K, MFMA_BATCH, __half>;
     using ResultLayout       = MatrixLayout<MFMA_N, MFMA_K, MFMA_BATCH, float>;
-    using int16x4_t          = __attribute__((ext_vector_type(4))) short;
 
     constexpr int GROUP_SIZE = cfg.channels_per_group; // 4
-
 
     constexpr int GROUP_SIZE_4 = GROUP_SIZE / 4; // 1
 
     // Number of input columns loaded by each workgroup (output columns plus halo)
     constexpr int BLOCK_W = cfg.block_q() + (cfg.kw - 1);
 
-    // uint4 vectors per channels fiber
+    // uint4 vectors per channels fiber - load in units of 8 channels
+    // uint4 = 8 fp16 elements, so BLOCK_C8 = number of uint4 elements per channel tile
     constexpr int BLOCK_C8 = cfg.block_c() / 8;
 
-    // Vectors to store.
+    // Vectors to store (output tensor)
     constexpr int STORE_VECS = cfg.block_q() * BLOCK_C8;
 
+    // LDS double buffering approach for reading input tensor from global memory
     constexpr int NUM_INPUT_LDS_BUFFERS = 2;
 
-    // Size of LDS buffer for inputs.
+    // Size of LDS buffer for inputs (num uint4 elements)
     constexpr int INPUT_LDS_BUFFER_SIZE_C8 = BLOCK_C8 * BLOCK_W;
 
+    // Size of the LDS buffer for half vector size (uint2 units)
     constexpr int INPUT_LDS_BUFFER_SIZE_C4 = INPUT_LDS_BUFFER_SIZE_C8 * 2;
 
-    // Size of LDS buffer for outputs.
+    // Size of LDS buffer for outputs (num elements)
     constexpr int OUTPUT_LDS_BUFFER_SIZE = BLOCK_C8 * cfg.block_q();
 
     // Size of LDS buffer for weight staging: [kh*kw][block_groups][GROUP_SIZE] in uint2 units.
@@ -194,6 +196,20 @@ __device__ void conv2d_grouped_4c_fp16_cdna4_nhwc_impl(const _Float16* __restric
 
     // LDS buffer for weight staging (prologue) and output staging (main loop).
     __shared__ uint4 output_lds[maximum(WEIGHT_LDS_SIZE_UINT4, OUTPUT_LDS_BUFFER_SIZE)];
+
+    // Typed LDS buffer views for structured access.
+    auto input_lds_fp16 =
+        ck_tile::buffer_view<ck_tile::address_space_enum::lds, _Float16, ck_tile::index_t, true>{
+            reinterpret_cast<_Float16*>(input_lds),
+            static_cast<ck_tile::index_t>(
+                NUM_INPUT_LDS_BUFFERS * INPUT_LDS_BUFFER_SIZE_C8 * (sizeof(uint4) / sizeof(_Float16)))};
+
+    auto output_lds_fp16 =
+        ck_tile::buffer_view<ck_tile::address_space_enum::lds, _Float16, ck_tile::index_t, true>{
+            reinterpret_cast<_Float16*>(output_lds),
+            static_cast<ck_tile::index_t>(
+                maximum(WEIGHT_LDS_SIZE_UINT4, OUTPUT_LDS_BUFFER_SIZE) *
+                (sizeof(uint4) / sizeof(_Float16)))};
 
     const int tid  = threadIdx.x;
     const int wave = tid / WAVE_SIZE;
@@ -323,15 +339,15 @@ __device__ void conv2d_grouped_4c_fp16_cdna4_nhwc_impl(const _Float16* __restric
             const int tr_batch    = TransposeLayout::batch(lane);
             const int tr_row      = TransposeLayout::row(lane);
             int filter_local      = wave_c64 * 64 + tr_batch * GROUP_SIZE + tr_row;
-            auto* weight_lds      = reinterpret_cast<__half*>(output_lds);
-            const int khw_stride  = GROUP_SIZE; // 4 fp16 per filter position
+
+            // Weight base in fp16 units: filter_local * kh * kw * GROUP_SIZE.
+            const ck_tile::index_t weight_base_fp16 =
+                filter_local * cfg.kh * cfg.kw * GROUP_SIZE;
 
             for(int khw = 0; khw < cfg.kh * cfg.kw; khw++)
             {
-                auto* addr = reinterpret_cast<int16x4_t*>(
-                    &weight_lds[filter_local * cfg.kh * cfg.kw * khw_stride + khw * khw_stride]);
-                int16x4_t r      = __builtin_amdgcn_ds_read_tr16_b64_v4i16(addr);
-                weights_reg[khw] = __builtin_bit_cast(fp16x4_t, r);
+                weights_reg[khw] = output_lds_fp16.template transpose_get<ck_tile::fp16x4_t>(
+                    weight_base_fp16 + khw * GROUP_SIZE, 0, true);
             }
         }
         else
@@ -339,11 +355,14 @@ __device__ void conv2d_grouped_4c_fp16_cdna4_nhwc_impl(const _Float16* __restric
             auto lane_k      = OperandLayout::outer(lane);
             auto lane_batch  = OperandLayout::batch(lane);
             int filter_local = wave_c64 * 64 + lane_batch * GROUP_SIZE + lane_k;
-            auto* weight_lds = reinterpret_cast<const uint2*>(output_lds);
+
+            // Weight base in fp16 units: filter_local * kh * kw * 4 (uint2 = 4 fp16).
+            const ck_tile::index_t weight_base_fp16 =
+                filter_local * cfg.kh * cfg.kw * 4;
             for(int khw = 0; khw < cfg.kh * cfg.kw; khw++)
             {
-                auto* lds_ptr    = &weight_lds[filter_local * cfg.kh * cfg.kw + khw];
-                weights_reg[khw] = *(const fp16x4_t*)lds_ptr;
+                weights_reg[khw] = output_lds_fp16.template get<ck_tile::fp16x4_t>(
+                    weight_base_fp16 + khw * 4, 0, true);
             }
         }
     }
@@ -403,10 +422,10 @@ __device__ void conv2d_grouped_4c_fp16_cdna4_nhwc_impl(const _Float16* __restric
                 static_for<cfg.kw>(
                     [&]<int S>()
                     {
-                        const uint2* lds_ptr = reinterpret_cast<const uint2*>(input_lds) +
-                                               toc * INPUT_LDS_BUFFER_SIZE_C4 +
-                                               input_lds_offsets[S];
-                        auto input_reg       = *(const fp16x4_t*)lds_ptr;
+                        auto input_reg = input_lds_fp16.template get<ck_tile::fp16x4_t>(
+                            0,
+                            (toc * INPUT_LDS_BUFFER_SIZE_C4 + input_lds_offsets[S]) * 4,
+                            true);
 
                         static_for<cfg.kh>(
                             [&]<int R>()
@@ -447,8 +466,8 @@ __device__ void conv2d_grouped_4c_fp16_cdna4_nhwc_impl(const _Float16* __restric
                     halves[1]    = __float22half2_rn({acc[P_FLUSH][2], acc[P_FLUSH][3]});
                     auto out_reg = *reinterpret_cast<const fp16x4_t*>(halves);
 
-                    auto* store_output_lds              = reinterpret_cast<uint2*>(output_lds);
-                    store_output_lds[output_lds_offset] = *reinterpret_cast<const uint2*>(&out_reg);
+                    output_lds_fp16.template set<ck_tile::fp16x4_t>(
+                        output_lds_offset * 4, 0, true, out_reg);
 
                     __syncthreads(); // load_output_lds fully written
 
@@ -489,10 +508,10 @@ __device__ void conv2d_grouped_4c_fp16_cdna4_nhwc_impl(const _Float16* __restric
                 static_for<cfg.kw>(
                     [&]<int S>()
                     {
-                        const uint2* lds_ptr = reinterpret_cast<const uint2*>(input_lds) +
-                                               toc * INPUT_LDS_BUFFER_SIZE_C4 +
-                                               input_lds_offsets[S];
-                        fp16x4_t input_reg   = *(const fp16x4_t*)lds_ptr;
+                        fp16x4_t input_reg = input_lds_fp16.template get<ck_tile::fp16x4_t>(
+                            0,
+                            (toc * INPUT_LDS_BUFFER_SIZE_C4 + input_lds_offsets[S]) * 4,
+                            true);
 
                         static_for<cfg.kh>(
                             [&]<int R>()
@@ -529,8 +548,8 @@ __device__ void conv2d_grouped_4c_fp16_cdna4_nhwc_impl(const _Float16* __restric
                     halves[1]    = __float22half2_rn({acc[P_FLUSH][2], acc[P_FLUSH][3]});
                     auto out_reg = *reinterpret_cast<const fp16x4_t*>(halves);
 
-                    auto* store_output_lds              = reinterpret_cast<uint2*>(output_lds);
-                    store_output_lds[output_lds_offset] = *reinterpret_cast<const uint2*>(&out_reg);
+                    output_lds_fp16.template set<ck_tile::fp16x4_t>(
+                        output_lds_offset * 4, 0, true, out_reg);
 
                     __syncthreads(); // output_lds fully written
 
@@ -563,8 +582,8 @@ __device__ void conv2d_grouped_4c_fp16_cdna4_nhwc_impl(const _Float16* __restric
         halves[1]    = __float22half2_rn({slot[2], slot[3]});
         auto out_reg = *reinterpret_cast<const fp16x4_t*>(halves);
 
-        auto* store_output_lds              = reinterpret_cast<uint2*>(output_lds);
-        store_output_lds[output_lds_offset] = *reinterpret_cast<const uint2*>(&out_reg);
+        output_lds_fp16.template set<ck_tile::fp16x4_t>(
+            output_lds_offset * 4, 0, true, out_reg);
 
         __syncthreads(); // output_lds fully written
 
