@@ -6,7 +6,7 @@
 #include <string>
 #include <tuple>
 
-#include "ck_tile/ops/direct_convolution/kernel/grouped_4c_fp16_kernel.hpp"
+#include "ck_tile/ops/direct_convolution/kernel/grouped_4c_fp16_hip_conv_impl.hpp"
 #include "ck_tile/ops/grouped_convolution/utils/grouped_convolution_utils.hpp"
 #include "ck_tile/host/kernel_launch.hpp"
 
