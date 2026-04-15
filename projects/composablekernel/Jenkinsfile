@@ -915,13 +915,16 @@ def Build_CK(Map conf=[:]){
                     cmake_build(conf)
                     if ( params.RUN_INDUCTOR_TESTS && arch == "gfx90a" ){
                             echo "Run inductor codegen tests"
-                            sh """
-                                  python3 -m venv ${env.WORKSPACE}/projects/composablekernel
-                                  . ${env.WORKSPACE}/projects/composablekernel/bin/activate
-                                  python3 -m pip install pytest build setuptools setuptools_scm
-                                  python3 -m pip install .
-                                  python3 -m pytest python/test/test_gen_instances.py
-                            """
+                            dir("projects/composablekernel"){
+                                sh """
+                                      python3 -m venv ${env.WORKSPACE}/ck-inductor-venv
+                                      . ${env.WORKSPACE}/ck-inductor-venv/bin/activate
+                                      pip install uv
+                                      uv pip install pytest build setuptools setuptools_scm
+                                      uv pip install .
+                                      python3 -m pytest python/test/test_gen_instances.py
+                                """
+                            }
                     }
                     // run performance tests, stash the logs, results will be processed on the master node
 					dir("projects/composablekernel/script"){
