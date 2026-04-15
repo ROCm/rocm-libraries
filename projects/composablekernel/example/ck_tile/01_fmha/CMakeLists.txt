@@ -49,7 +49,7 @@ set(FMHA_FWD_CODE_GEN_COMMON_ARGS
   --api ${FMHA_FWD_APIS}
   --optdim 32,64,80,128,256
   # fwd: minimal set for testing, batch_prefill: group+ps16+mask+sink/nsink (linear+vllm)
-  "--filter=*fp16*batch*b128x128*nlogits*nbias*nmask*nlse*ndropout*nqscale*ntrload*nsink*,*fp16*group*ps16*b128x128x32*nlogits*nbias*mask*nlse*ndropout*nqscale*sink*linear*vllm*"
+  "--filter=*fp16*batch*b128x128*nlogits*nbias*nmask*nlse*ndropout*nqscale*ntrload*nsink*,*group*ps16*b128x128x32*nlogits*nbias*mask*ndropout*nqscale*sink*linear*vllm*"
 )
 set(FMHA_BWD_CODE_GEN_COMMON_ARGS
   ${CMAKE_CURRENT_LIST_DIR}/generate.py
