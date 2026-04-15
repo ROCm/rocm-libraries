@@ -53,6 +53,57 @@ struct WarpDecodeDownReduceKernel
         return Problem::kBlockSize;
     }
 
+    CK_TILE_HOST static bool IsSupportedArgument(const Kargs& kargs)
+    {
+        constexpr index_t kVector = Problem::kVector;
+        constexpr index_t kTileN  = get_warp_size() * kVector;
+
+        using WScaleLayout = typename Problem::WScaleLayout;
+
+        const auto fail = [](const char* msg) {
+            if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
+            {
+                CK_TILE_ERROR(msg);
+            }
+            return false;
+        };
+
+        if(kargs.p_intermediate == nullptr || kargs.p_w_down == nullptr ||
+           kargs.p_router_ids == nullptr || kargs.p_router_wts == nullptr || kargs.p_y == nullptr)
+        {
+            return fail("WarpDecodeDownReduceKernel requires non-null tensor pointers.");
+        }
+
+        if(kargs.b <= 0 || kargs.hidden <= 0 || kargs.inter <= 0 || kargs.top_k <= 0 || kargs.e <= 0)
+        {
+            return fail("WarpDecodeDownReduceKernel requires positive tensor dimensions.");
+        }
+
+        if(kargs.stride_intermediate < kargs.inter || kargs.stride_w_down < kargs.inter ||
+           kargs.stride_y < kargs.hidden)
+        {
+            return fail("WarpDecodeDownReduceKernel received an invalid row stride.");
+        }
+
+        if(kargs.inter % kTileN != 0)
+        {
+            return fail("WarpDecodeDownReduceKernel requires inter to be divisible by warp_size * kVector.");
+        }
+
+        if constexpr(ScaleLayoutTraits<WScaleLayout>::is_block2d)
+        {
+            constexpr index_t Block_N = ScaleLayoutTraits<WScaleLayout>::block_n;
+            constexpr index_t Block_K = ScaleLayoutTraits<WScaleLayout>::block_k;
+
+            if(kargs.inter % Block_K != 0 || (kargs.e * kargs.hidden) % Block_N != 0)
+            {
+                return fail("WarpDecodeDownReduceKernel weight Block2D scales require divisible inter and E*hidden dimensions.");
+            }
+        }
+
+        return true;
+    }
+
     CK_TILE_DEVICE static ComputeDataType unpack_fp4_nibble(uint8_t raw, index_t nibble_idx)
     {
         constexpr float lut[16] = {

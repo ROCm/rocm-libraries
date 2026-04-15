@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include <stdexcept>
+
 #include "ck_tile/core.hpp"
 #include "ck_tile/host/kernel_launch.hpp"
 #include "ck_tile/ops/warp_decode/pipeline/warp_decode_problem.hpp"
@@ -16,6 +18,11 @@ template <typename WarpDecodeGateUpKernel>
 float launch_warp_decode_gate_up(const typename WarpDecodeGateUpKernel::Kargs& args,
                                  const stream_config& s)
 {
+    if(!WarpDecodeGateUpKernel::IsSupportedArgument(args))
+    {
+        throw std::invalid_argument("Warp decode gate/up arguments are not supported.");
+    }
+
     return launch_kernel(s,
                          make_kernel(WarpDecodeGateUpKernel{},
                                      WarpDecodeGateUpKernel::GridSize(args),
@@ -28,6 +35,11 @@ template <typename WarpDecodeDownReduceKernel>
 float launch_warp_decode_down_reduce(const typename WarpDecodeDownReduceKernel::Kargs& args,
                                      const stream_config& s)
 {
+    if(!WarpDecodeDownReduceKernel::IsSupportedArgument(args))
+    {
+        throw std::invalid_argument("Warp decode down/reduce arguments are not supported.");
+    }
+
     return launch_kernel(s,
                          make_kernel(WarpDecodeDownReduceKernel{},
                                      WarpDecodeDownReduceKernel::GridSize(args),

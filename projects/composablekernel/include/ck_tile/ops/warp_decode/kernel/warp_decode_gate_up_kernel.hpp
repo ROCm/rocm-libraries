@@ -57,6 +57,69 @@ struct WarpDecodeGateUpKernel
         return Problem::kBlockSize;
     }
 
+    CK_TILE_HOST static bool IsSupportedArgument(const Kargs& kargs)
+    {
+        constexpr index_t kVector = Problem::kVector;
+        constexpr index_t kTileN  = get_warp_size() * kVector;
+
+        using XScaleLayout = typename Problem::XScaleLayout;
+        using WScaleLayout = typename Problem::WScaleLayout;
+
+        const auto fail = [](const char* msg) {
+            if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
+            {
+                CK_TILE_ERROR(msg);
+            }
+            return false;
+        };
+
+        if(kargs.p_x == nullptr || kargs.p_w_gate == nullptr || kargs.p_w_up == nullptr ||
+           kargs.p_router_ids == nullptr || kargs.p_intermediate == nullptr)
+        {
+            return fail("WarpDecodeGateUpKernel requires non-null tensor pointers.");
+        }
+
+        if(kargs.b <= 0 || kargs.hidden <= 0 || kargs.inter <= 0 || kargs.top_k <= 0 || kargs.e <= 0)
+        {
+            return fail("WarpDecodeGateUpKernel requires positive tensor dimensions.");
+        }
+
+        if(kargs.stride_x < kargs.hidden || kargs.stride_w_gate < kargs.hidden ||
+           kargs.stride_w_up < kargs.hidden || kargs.stride_intermediate < kargs.inter)
+        {
+            return fail("WarpDecodeGateUpKernel received an invalid row stride.");
+        }
+
+        if(kargs.hidden % kTileN != 0)
+        {
+            return fail("WarpDecodeGateUpKernel requires hidden to be divisible by warp_size * kVector.");
+        }
+
+        if constexpr(ScaleLayoutTraits<XScaleLayout>::is_block2d)
+        {
+            constexpr index_t Block_N = ScaleLayoutTraits<XScaleLayout>::block_n;
+            constexpr index_t Block_K = ScaleLayoutTraits<XScaleLayout>::block_k;
+
+            if(kargs.b % Block_N != 0 || kargs.hidden % Block_K != 0)
+            {
+                return fail("WarpDecodeGateUpKernel x Block2D scales require divisible B and hidden dimensions.");
+            }
+        }
+
+        if constexpr(ScaleLayoutTraits<WScaleLayout>::is_block2d)
+        {
+            constexpr index_t Block_N = ScaleLayoutTraits<WScaleLayout>::block_n;
+            constexpr index_t Block_K = ScaleLayoutTraits<WScaleLayout>::block_k;
+
+            if(kargs.hidden % Block_K != 0 || (kargs.e * kargs.inter) % Block_N != 0)
+            {
+                return fail("WarpDecodeGateUpKernel weight Block2D scales require divisible hidden and E*inter dimensions.");
+            }
+        }
+
+        return true;
+    }
+
     CK_TILE_DEVICE static ComputeDataType unpack_fp4_nibble(uint8_t raw, index_t nibble_idx)
     {
         constexpr float lut[16] = {
