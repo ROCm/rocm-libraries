@@ -36,7 +36,7 @@ public:
         const hipdnn_data_sdk::data_objects::RMSNormAttributes& rmsNormAttr);
 
     void checkBwdTensorConfigSupported(
-        const hipdnn_data_sdk::data_objects::RMSNormBackwardAttributes& rmsNormAttr);
+        const hipdnn_data_sdk::data_objects::RMSNormBackwardAttributes& rmsNormBwdAttr);
 };
 
 } // namespace hip_kernel_provider::rmsnorm

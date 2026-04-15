@@ -23,6 +23,18 @@ TEST(TestRMSnormValidator, Valid)
     EXPECT_NO_THROW(validator.checkTensorConfigSupported(attr));
 }
 
+TEST(TestRMSnormValidator, ValidBwd)
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdGraph();
+    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                              builder.GetSize());
+    const auto& node = graph.getNode(0);
+    const auto& attr = *node.attributes_as_RMSNormBackwardAttributes();
+
+    RMSnormValidator validator(graph.getTensorMap());
+    EXPECT_NO_THROW(validator.checkBwdTensorConfigSupported(attr));
+}
+
 TEST(TestRMSnormValidator, UnsupportedDim)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidRMSNormGraph(

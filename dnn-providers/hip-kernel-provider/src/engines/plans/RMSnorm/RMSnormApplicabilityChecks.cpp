@@ -150,7 +150,7 @@ void RMSnormValidator::checkTensorConfigSupported(
 }
 
 void RMSnormValidator::checkBwdTensorConfigSupported(
-    const hipdnn_data_sdk::data_objects::RMSNormBackwardAttributes& rmsNormBwdAttr
+    const hipdnn_data_sdk::data_objects::RMSNormBackwardAttributes& rmsNormBwdAttr)
 {
     std::vector<int64_t> ioTensorIds = {rmsNormBwdAttr.dy_tensor_uid(),
                                         rmsNormBwdAttr.x_tensor_uid(),
@@ -170,8 +170,8 @@ void RMSnormValidator::checkBwdTensorConfigSupported(
     }
 
     checkTensorLayoutsAndDimsSupported();
-    checkTensorDataTypesSupported(ioTensorIds, affineTensorIds, statTensorIds, {});
-    checkTensorShapesSupported(ioTensorIds, affineTensorIds, statTensorIds, false);
+    checkTensorDataTypesSupported(ioTensorIds, affineTensorIds, statTensorIds);
+    checkTensorShapesSupported(ioTensorIds, affineTensorIds, statTensorIds);
 }
 
 } // namespace hip_kernel_provider::rmsnorm
