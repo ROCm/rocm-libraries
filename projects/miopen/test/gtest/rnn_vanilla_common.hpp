@@ -33,8 +33,7 @@
 #include "miopen/rnn.hpp"
 #include "miopen/tensor.hpp"
 #include "workspace.hpp"
-#include "gtest_dropout_desc_guard.hpp"
-#include "gtest_rnn_desc_guard.hpp"
+#include "gtest_desc_guard.hpp"
 
 #define MIO_RNN_TEST_DEBUG 0
 #define MIO_RNN_TIME_EVERYTHING 0
