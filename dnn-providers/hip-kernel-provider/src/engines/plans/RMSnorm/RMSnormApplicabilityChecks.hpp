@@ -25,6 +25,10 @@ private:
                                     const std::vector<int64_t>& affineTensorIds,
                                     const std::vector<int64_t>& statTensorIds);
 
+    static void checkAffineNormalizedShape(
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& affine,
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& io);
+
 public:
     RMSnormValidator(
         const std::unordered_map<int64_t,
