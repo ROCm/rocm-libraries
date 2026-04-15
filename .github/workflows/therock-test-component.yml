@@ -70,7 +70,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: "ROCm/TheRock"
-          ref: b83f9ec34c4363370f588c14d434b4198a69f38b # temporary CI pin
+          ref: b68757b3461145b85eabec29cea1223027a56da0 # 2026-04-01
 
       - name: Configure git for long paths on Windows
         if: ${{ runner.os == 'Windows' }}
