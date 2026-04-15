@@ -12,6 +12,7 @@
 #include "ck_tile/ops/direct_convolution/utils/transpose_lds_layout.hpp"
 #include "ck_tile/ops/direct_convolution/utils/memory.hpp"
 #include "ck_tile/ops/direct_convolution/utils/detail.hpp"
+#include "ck_tile/core/arch/amd_buffer_addressing_builtins.hpp"
 #include <hip/hip_fp16.h>
 #include <hip/hip_runtime.h>
 
@@ -22,10 +23,8 @@ namespace ck_tile::direct_conv::grouped_4c_tile
 constexpr int WAVE_SIZE = 64;
 
 // Block output is 16 columns wide.
+// Each wave handles 4 output columns.
 constexpr int WARP_Q = 4;
-
-// 4 channels per group.
-constexpr int GROUP_SIZE = 4;
 
 // Kernel configuration parameters.
 
@@ -33,7 +32,7 @@ struct Config
 {
     // waves_c64 — channel (group) dimension
     // Each wave computes outputs for 64 input channels worth of groups. 
-    // Since each group has exactly 4 channels, 64 channels = 16 groups.
+    // If each group has, e.g., exactly 4 channels, 64 channels -> 16 groups per workgroup.
     // This number tells many waves of 64 channels are processed by one workgroup (thread block).
     int waves_c64;
 
@@ -50,8 +49,15 @@ struct Config
     // The batch dimension is folded into the grid by a factor of n_fold, meaning each block processes n_fold batches.
     // The grid for launching the kernel becomes 
     //      dim3(ceil(out_W / block_q) * n_fold,   ceil(C / block_c),   ceil(N / n_fold))
-    //  This means that W-tiles are interleaved with n_fold groups of images
+    // This means that W-tiles are interleaved with n_fold groups of images
+    // The n_fold number tells how many image slots are packed into one X-dimension stride.
+    // By spreading images into the X dimension rather than only Z, 
+    // the GPU can schedule blocks from different images onto different CUs without 
+    // waiting for one image's channel tiles to finish first.
     int n_fold = 8;
+
+    // Number of channels per convolution group.
+    int channels_per_group = 4;
 
     Direction direction = Direction::Fprop;
 
@@ -155,6 +161,8 @@ __device__ void conv2d_grouped_4c_fp16_cdna4_nhwc_impl(const _Float16* __restric
     using ResultLayout       = MatrixLayout<MFMA_N, MFMA_K, MFMA_BATCH, float>;
     using int16x4_t          = __attribute__((ext_vector_type(4))) short;
 
+    constexpr int GROUP_SIZE = cfg.channels_per_group; // 4
+
 
     constexpr int GROUP_SIZE_4 = GROUP_SIZE / 4; // 1
 
@@ -219,12 +227,11 @@ __device__ void conv2d_grouped_4c_fp16_cdna4_nhwc_impl(const _Float16* __restric
     // This supports __builtin_amdgcn_raw_ptr_buffer_load_lds
     auto store_input_lds = &input_lds[tid];
 
-    // Create the input buffer resource.
-    auto input_bytes               = static_cast<size_t>(N) * hi * wi * C * sizeof(half);
-    constexpr int rsrc_data_format = 1 << 15;
-    auto input_rsrc                = __builtin_amdgcn_make_buffer_rsrc(
-        const_cast<_Float16*>(in), 0, input_bytes, rsrc_data_format);
-    uint32_t input_voffset;
+    // Create the input buffer resource using the CK Tile wrapper.
+    // make_builtin_buffer_resource sets the architecture-appropriate data format bits.
+    const auto input_bytes = static_cast<uint32_t>(
+        static_cast<size_t>(N) * hi * wi * C * sizeof(_Float16));
+    auto input_rsrc = ck_tile::make_builtin_buffer_resource(in, input_bytes);
 
     // Map threads to global memory input buffer using a swizzle.
     using Sw             = SwizzleT<cfg.block_c()>;
@@ -234,38 +241,48 @@ __device__ void conv2d_grouped_4c_fp16_cdna4_nhwc_impl(const _Float16* __restric
     // Trailing threads in partial waves are masked by EXEC (buffer_load_lds
     // honors the active mask; see ISA §9.1.9 "Memory Buffer Load to LDS").
     const bool load_active = (tid < (BLOCK_W)*BLOCK_C8);
-    if(0 <= global_col && global_col < wi)
-    {
-        input_voffset =
-            sizeof(uint4) * (offset_block + (size_t)global_col * C8 + block_c8 + c8_thread);
-    }
-    else
-    {
-        input_voffset = input_bytes;
-    }
+
+    // Byte offset into the input buffer for this thread's column.
+    // input_valid tracks whether the column is in-bounds; OOB threads pass
+    // flag=false to amd_async_buffer_load which sets voffset = 0x7fffffff.
+    const bool input_valid = (0 <= global_col && global_col < wi);
+    const ck_tile::index_t input_voffset =
+        input_valid
+            ? static_cast<ck_tile::index_t>(
+                  (offset_block + (size_t)global_col * C8 + block_c8 + c8_thread) * sizeof(uint4))
+            : 0;
 
     // Load weights from global memory through LDS into registers.
     // Global layout: wei[k][kh*kw] in uint2 units (GROUP_SIZE_4 = 1).
     // LDS mirrors the global layout: contiguous block of block_c * kh*kw uint2 elements.
     fp16x4_t weights_reg[cfg.kh * cfg.kw];
     {
-        auto weight_bytes = static_cast<size_t>(C) * cfg.kh * cfg.kw * GROUP_SIZE * sizeof(half);
-        auto weight_rsrc  = __builtin_amdgcn_make_buffer_rsrc(
-            const_cast<_Float16*>(wei), 0, weight_bytes, rsrc_data_format);
-        uint32_t voffset_base = block_k * cfg.kh * cfg.kw * sizeof(uint2);
+        const auto weight_bytes = static_cast<uint32_t>(
+            static_cast<size_t>(C) * cfg.kh * cfg.kw * GROUP_SIZE * sizeof(_Float16));
+        auto weight_rsrc = ck_tile::make_builtin_buffer_resource(wei, weight_bytes);
+        ck_tile::index_t voffset_base = block_k * cfg.kh * cfg.kw * sizeof(uint2);
 
         for(int j = tid; j < WEIGHT_LDS_SIZE_UINT4; j += cfg.block_size())
         {
-            __builtin_amdgcn_raw_ptr_buffer_load_lds(
-                weight_rsrc, &output_lds[j], 16, voffset_base + j * sizeof(uint4), 0, 0, 0);
+            // Weights are always in-bounds by construction; disable OOB check.
+            ck_tile::amd_async_buffer_load<int32_t, 4,
+                ck_tile::amd_buffer_coherence_enum::coherence_default, false>(
+                reinterpret_cast<CK_TILE_LDS_ADDR int32_t*>(&output_lds[j]),
+                weight_rsrc,
+                voffset_base + j * static_cast<ck_tile::index_t>(sizeof(uint4)));
         }
     }
 
     // Load first chunk of inputs asynchronously.
     if(load_active)
     {
-        __builtin_amdgcn_raw_ptr_buffer_load_lds(
-            input_rsrc, store_input_lds, 16, input_voffset, 0, 0, 0);
+        ck_tile::amd_async_buffer_load<int32_t, 4>(
+            reinterpret_cast<CK_TILE_LDS_ADDR int32_t*>(store_input_lds),
+            input_rsrc,
+            input_voffset,
+            0,
+            ck_tile::number<0>{},
+            input_valid);
     }
 
     // Each wave computes 16 groups of channels and 4 columns of the output tensor.
@@ -372,14 +389,15 @@ __device__ void conv2d_grouped_4c_fp16_cdna4_nhwc_impl(const _Float16* __restric
 
                 if(load_active && (y + 1) < hi)
                 {
-                    __builtin_amdgcn_raw_ptr_buffer_load_lds(
+                    ck_tile::amd_async_buffer_load<int32_t, 4>(
+                        reinterpret_cast<CK_TILE_LDS_ADDR int32_t*>(
+                            store_input_lds + tic * INPUT_LDS_BUFFER_SIZE_C8),
                         input_rsrc,
-                        store_input_lds + tic * INPUT_LDS_BUFFER_SIZE_C8,
-                        16,
-                        input_voffset + (y + 1) * wi_stride * sizeof(uint4),
+                        input_voffset +
+                            static_cast<ck_tile::index_t>((y + 1) * wi_stride * sizeof(uint4)),
                         0,
-                        0,
-                        0);
+                        ck_tile::number<0>{},
+                        input_valid);
                 }
 
                 static_for<cfg.kw>(
@@ -457,14 +475,15 @@ __device__ void conv2d_grouped_4c_fp16_cdna4_nhwc_impl(const _Float16* __restric
 
                 if(load_active && (y + 1) < hi)
                 {
-                    __builtin_amdgcn_raw_ptr_buffer_load_lds(
+                    ck_tile::amd_async_buffer_load<int32_t, 4>(
+                        reinterpret_cast<CK_TILE_LDS_ADDR int32_t*>(
+                            store_input_lds + tic * INPUT_LDS_BUFFER_SIZE_C8),
                         input_rsrc,
-                        store_input_lds + tic * INPUT_LDS_BUFFER_SIZE_C8,
-                        16,
-                        input_voffset + (y + 1) * wi_stride * sizeof(uint4),
+                        input_voffset +
+                            static_cast<ck_tile::index_t>((y + 1) * wi_stride * sizeof(uint4)),
                         0,
-                        0,
-                        0);
+                        ck_tile::number<0>{},
+                        input_valid);
                 }
 
                 static_for<cfg.kw>(
