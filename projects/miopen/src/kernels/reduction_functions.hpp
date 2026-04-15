@@ -293,7 +293,18 @@ __forceinline__ __device__ void dpp_interleaved_reduction_welford(FloatAccum& te
 
         ""
             : "=v"(temp_mean), "=v"(temp_var), "=v" (temp_count), "=v" (count_mult), "=v" (delta), "=v" (n_rcp)
-            : "0"(temp_mean), "1"(temp_var), "2" (temp_count), "3" (count_mult), "4" (delta), "5" (n_rcp));
+            : "0"(temp_mean), "1"(temp_var), "2" (temp_count), "3" (count_mult), "4" (delta), "5" (n_rcp)
+            : "vcc");
+    // The last list in the assembly block is the clobbers -- 
+    // those are registers (or other special arguments) that get
+    // modified in the assembly block that are not specified as either 
+    // inputs or outputs. In this case, the "vcc" register is the only
+    // register that gets modified in this way. If "vcc" is not added,
+    // this can lead to bugs in some test cases, specifically when the 
+    // vcc register is used to store some value needed after the execution 
+    // of this block. After adding this register to the clobbers, the three
+    // input parameters to this funciton no longer need to be volatie.
+
     // clang-format on
 }
 
