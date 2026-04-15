@@ -82,7 +82,7 @@ int call_profiler(const ckt::Args<SIGNATURE>& args,
     std::cout << args.make_input_descriptor() << std::endl;
     std::cout << args.make_weight_descriptor() << std::endl;
     std::cout << args.make_output_descriptor() << std::endl;
-    auto&& [valid, avg_time, op_name, best_split_k, best_instance_index] =
+    auto&& [valid, avg_time, tflops, gbs, op_name, best_split_k, best_instance_index] =
         ckp::run_grouped_conv_backward_data_tile_algs(
             args,
             split_k,
@@ -100,8 +100,12 @@ int call_profiler(const ckt::Args<SIGNATURE>& args,
     if(time_kernel)
     {
         std::cout << "\nBest configuration parameters:" << "\n\tname: " << op_name << " (instance "
-                  << best_instance_index << ")" << "\n\tavg_time: " << avg_time << ", SplitK "
-                  << best_split_k << std::endl;
+                  << best_instance_index << ")" 
+                  << "\n\tavg_time: " << avg_time << "ms"
+                  << "\n\ttflops: " << tflops
+                  << "\n\tGB/s: " << gbs
+                  << "\n\tSplitK " << best_split_k 
+                  << std::endl;
     }
     return !valid;
 }

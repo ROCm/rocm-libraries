@@ -16,6 +16,7 @@
 #include "ck_tile/builder/testing/conv/reference.hpp"
 #include "ck_tile/builder/conv_builder.hpp"
 #include "tile_profiler_common.hpp"
+#include "direct_conv_profiler_bridge.hpp"
 
 #define ENABLE_BUILDER_VALIDATE 1
 
@@ -60,7 +61,7 @@ void run_cpu_validation(const ckt::Args<SIGNATURE>& args,
 ///
 /// @see run_grouped_conv_forward_tile_algs()
 template <auto SIGNATURE>
-std::tuple<bool, float, std::string>
+std::tuple<bool, float, float, float, std::string>
 run_grouped_conv_forward_tile_algs(const ckt::Args<SIGNATURE>& args,
                                    const ckt::Inputs<SIGNATURE>& inputs,
                                    const ckt::Outputs<SIGNATURE>& outputs,
@@ -72,6 +73,8 @@ run_grouped_conv_forward_tile_algs(const ckt::Args<SIGNATURE>& args,
     // Run first instance as dummy to get proper time from the first instance
     bool dummy_run_executed = false;
     float best_avg_time     = std::numeric_limits<float>::max();
+    float best_tflops       = std::numeric_limits<float>::min();
+    float best_gbs          = std::numeric_limits<float>::min();
     std::string best_op_name, op_name;
     bool is_supported;
     float avg_time;
@@ -103,10 +106,6 @@ run_grouped_conv_forward_tile_algs(const ckt::Args<SIGNATURE>& args,
                     run_alg_func(args, inputs, outputs, s_conf);
                 dummy_run_executed = true;
             }
-            best_avg_time = std::min(best_avg_time, avg_time);
-            best_op_name  = best_avg_time < avg_time ? best_op_name : op_name;
-            std::cout << "Perf: " << std::setw(10) << avg_time << " ms," << " " << op_name
-                      << std::endl;
 
             if(do_verification)
             {
@@ -124,6 +123,7 @@ run_grouped_conv_forward_tile_algs(const ckt::Args<SIGNATURE>& args,
                                                          ck::profiler::get_atol<DataType>());
                                                  });
 
+
                 for(const auto& error : report.get_errors())
                 {
                     valid = false;
@@ -134,6 +134,21 @@ run_grouped_conv_forward_tile_algs(const ckt::Args<SIGNATURE>& args,
                         args, outputs, reference.get());
                 }
             }
+
+            if (valid)
+            {
+                best_avg_time = std::min(best_avg_time, avg_time);
+                best_op_name  = best_avg_time < avg_time ? best_op_name : op_name;
+                const auto conv_param  = args.to_ck_tile_conv_param();
+                float tflops           = static_cast<float>(conv_param.GetFlops()) / 1.E9 / avg_time;
+                float gb_per_sec       = static_cast<float>(
+                    conv_param.template GetByte<DataType, DataType, DataType>()) / 1.E6 / avg_time;
+                best_tflops = std::max(best_tflops, tflops);
+                best_gbs    = std::max(best_gbs, gb_per_sec);
+                std::cout << "[Valid] Perf: " << std::setw(10) << avg_time << " ms, " << tflops
+                        << " TFlops, " << gb_per_sec << " GB/s, " << op_name << std::endl;
+            }
+
         }
         else
         {
@@ -144,6 +159,7 @@ run_grouped_conv_forward_tile_algs(const ckt::Args<SIGNATURE>& args,
     if constexpr(SIGNATURE == SIGNATURE_NHWGC_FP16_FWD)
     {
 #include "../../experimental/grouped_convolution_tile_instances/instances/forward/grouped_convolution_forward_tile_nhwgc_fp16_calls.inc"
+#include "../../experimental/grouped_convolution_tile_instances/instances/forward_direct/grouped_convolution_forward_tile_nhwgc_fp16_calls.inc"
     }
     else if constexpr(SIGNATURE == SIGNATURE_NHWGC_BF16_FWD)
     {
@@ -180,9 +196,9 @@ run_grouped_conv_forward_tile_algs(const ckt::Args<SIGNATURE>& args,
     else
     {
         std::cout << "Signature not supported" << std::endl;
-        return std::make_tuple(false, best_avg_time, best_op_name);
+        return std::make_tuple(false, best_avg_time, best_tflops, best_gbs, best_op_name);
     }
-    return std::make_tuple(valid, best_avg_time, best_op_name);
+    return std::make_tuple(valid, best_avg_time, best_tflops, best_gbs, best_op_name);
 }
 
 } // namespace ck_tile::builder::profiling

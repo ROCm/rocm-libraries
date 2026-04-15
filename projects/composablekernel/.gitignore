@@ -109,7 +109,9 @@ test_data/*
 # The experimental/builder directory should be tracked despite matching build*
 !experimental/builder
 !experimental/builder/**
-experimental/grouped_convolution_tile_instances/instances/*
+experimental/grouped_convolution_tile_instances/instances/forward/*
+experimental/grouped_convolution_tile_instances/instances/backward_data/*
+experimental/grouped_convolution_tile_instances/instances/backward_weight/*
 !experimental/grouped_convolution_tile_instances/instances/*.in
 !experimental/grouped_convolution_tile_instances/instances/*.inc
 !experimental/grouped_convolution_tile_instances/instances/*.hpp

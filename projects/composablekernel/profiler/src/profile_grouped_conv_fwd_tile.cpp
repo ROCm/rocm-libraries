@@ -98,9 +98,11 @@ int call_profiler(const ckt::Args<SIGNATURE>& args, bool do_verification, bool t
     std::cout << args.make_weight_descriptor() << std::endl;
     std::cout << args.make_output_descriptor() << std::endl;
     float avg_time;
+    float tflops;
+    float gbs;
     std::string op_name;
     bool valid;
-    std::tie(valid, avg_time, op_name) =
+    std::tie(valid, avg_time, tflops, gbs, op_name) =
         ckp::run_grouped_conv_forward_tile_algs(args,
                                                 inputs.get(),
                                                 outputs.get(),
@@ -114,8 +116,12 @@ int call_profiler(const ckt::Args<SIGNATURE>& args, bool do_verification, bool t
                                                 do_verification);
     if(time_kernel)
     {
-        std::cout << "Best configuration parameters:" << "\nname: " << op_name
-                  << "\navg_time: " << avg_time << std::endl;
+        std::cout << "Best configuration parameters:" 
+                  << "\n\tname: " << op_name
+                  << "\n\tavg_time: " << avg_time << "ms"
+                  << "\n\ttflops: " << tflops 
+                  << "\n\tGB/s: " << gbs
+                  << std::endl;
     }
     return !valid;
 }
