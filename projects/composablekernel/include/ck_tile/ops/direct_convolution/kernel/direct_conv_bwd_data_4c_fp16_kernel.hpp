@@ -98,39 +98,29 @@ struct DirectConvBwdData4CFp16Kernel
     }
 
     static constexpr ck_tile::index_t GetSmemSize() { return 0; }
+
+    /// Run the kernel with timing via stream_config.
+    /// Returns {is_supported, avg_time_ms, instance_name}.
+    std::tuple<bool, float, std::string>
+    Run(const KernelArgs& kargs, const ck_tile::stream_config& s_conf) const
+    {
+        if(!IsSupportedArgument(kargs))
+            return {false, 0.0f, GetInstanceString()};
+
+        auto callable = [&](const ck_tile::stream_config& sc) {
+            grouped_4c::launch(ConfigIdx,
+                               kargs.lp,
+                               kargs.par,
+                               kargs.in_ptr,
+                               kargs.wei_ptr,
+                               kargs.out_ptr,
+                               nullptr,
+                               sc.stream_id_);
+        };
+
+        float avg_time = ck_tile::launch_kernel(s_conf, callable);
+        return {true, avg_time, GetInstanceString()};
+    }
 };
-
-/// Launch the backward data direct convolution kernel.
-template <int ConfigIdx>
-std::tuple<bool, float, std::string>
-run(DirectConvBwdData4CFp16Kernel<ConfigIdx>& conv,
-    const ck_tile::conv::ConvParam& param,
-    void* in_grad_ptr,
-    const void* wei_ptr,
-    const void* out_grad_ptr,
-    const ck_tile::stream_config& s_conf)
-{
-    using Kernel = DirectConvBwdData4CFp16Kernel<ConfigIdx>;
-
-    GroupedConvBwdDataHostArgs host_args(param, in_grad_ptr, wei_ptr, {}, out_grad_ptr, 1);
-    auto kargs = Kernel::MakeKernelArgs(host_args);
-
-    if(!Kernel::IsSupportedArgument(kargs))
-        return {false, 0.0f, conv.GetInstanceString()};
-
-    auto callable = [&](const ck_tile::stream_config& sc) {
-        grouped_4c::launch(ConfigIdx,
-                           kargs.lp,
-                           kargs.par,
-                           kargs.in_ptr,
-                           kargs.wei_ptr,
-                           kargs.out_ptr,
-                           nullptr,
-                           sc.stream_id_);
-    };
-
-    float avg_time = ck_tile::launch_kernel(s_conf, callable);
-    return {true, avg_time, conv.GetInstanceString()};
-}
 
 } // namespace ck_tile::direct_conv

@@ -83,42 +83,29 @@ struct DirectConvForward4CFp16Kernel
     }
 
     static constexpr ck_tile::index_t GetSmemSize() { return 0; }
+
+    /// Run the kernel with timing via stream_config.
+    /// Returns {is_supported, avg_time_ms, instance_name}.
+    std::tuple<bool, float, std::string>
+    Run(const KernelArgs& kargs, const ck_tile::stream_config& s_conf) const
+    {
+        if(!IsSupportedArgument(kargs))
+            return {false, 0.0f, GetInstanceString()};
+
+        auto callable = [&](const ck_tile::stream_config& sc) {
+            grouped_4c::launch(ConfigIdx,
+                               kargs.lp,
+                               kargs.par,
+                               kargs.in_ptr,
+                               kargs.wei_ptr,
+                               kargs.out_ptr,
+                               nullptr,
+                               sc.stream_id_);
+        };
+
+        float avg_time = ck_tile::launch_kernel(s_conf, callable);
+        return {true, avg_time, GetInstanceString()};
+    }
 };
-
-/// Launch the forward direct convolution kernel via the profiler / testing infrastructure.
-///
-/// This function follows the same pattern as the im2col detail::run() but uses
-/// ck_tile::launch_kernel() with a lambda that calls grouped_4c::launch() internally.
-template <int ConfigIdx>
-std::tuple<bool, float, std::string>
-run(DirectConvForward4CFp16Kernel<ConfigIdx>& conv,
-    const ck_tile::conv::ConvParam& param,
-    const void* in_ptr,
-    const void* wei_ptr,
-    void* out_ptr,
-    const ck_tile::stream_config& s_conf)
-{
-    using Kernel = DirectConvForward4CFp16Kernel<ConfigIdx>;
-
-    GroupedConvFwdHostArgs<> host_args(param, in_ptr, wei_ptr, {}, out_ptr, 1);
-    auto kargs = Kernel::MakeKernelArgs(host_args);
-
-    if(!Kernel::IsSupportedArgument(kargs))
-        return {false, 0.0f, conv.GetInstanceString()};
-
-    auto callable = [&](const ck_tile::stream_config& sc) {
-        grouped_4c::launch(ConfigIdx,
-                           kargs.lp,
-                           kargs.par,
-                           kargs.in_ptr,
-                           kargs.wei_ptr,
-                           kargs.out_ptr,
-                           nullptr,
-                           sc.stream_id_);
-    };
-
-    float avg_time = ck_tile::launch_kernel(s_conf, callable);
-    return {true, avg_time, conv.GetInstanceString()};
-}
 
 } // namespace ck_tile::direct_conv
