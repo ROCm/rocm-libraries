@@ -174,6 +174,13 @@ else()
   list(APPEND FMHA_FWD_INTERFACE_COMPILE_OPTIONS -DCK_TILE_FMHA_FWD_PAGEDKV_API=0)
 endif()
 
+# conditionally enable call to the batch_prefill API in fmha_fwd example and tests
+if("batch_prefill" IN_LIST FMHA_FWD_ENABLE_APIS)
+  list(APPEND FMHA_FWD_INTERFACE_COMPILE_OPTIONS -DCK_TILE_FMHA_FWD_BATCH_PREFILL_API=1)
+else()
+  list(APPEND FMHA_FWD_INTERFACE_COMPILE_OPTIONS -DCK_TILE_FMHA_FWD_BATCH_PREFILL_API=0)
+endif()
+
 # conditionally specify the use of OCP_FP8
 if(CK_USE_OCP_FP8)
   list(APPEND FMHA_FWD_PRIVATE_COMPILE_OPTIONS -DCK_TILE_USE_OCP_FP8)
