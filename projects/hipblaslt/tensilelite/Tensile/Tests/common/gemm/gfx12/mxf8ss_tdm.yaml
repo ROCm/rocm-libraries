@@ -61,7 +61,7 @@ BenchmarkProblems:
           - [16, 16, 128, 1,  1,  4, 4,  2, 2]
           - [16, 16, 128, 1,  1,  8, 4,  2, 2]
           # - [16, 16, 128, 1,  1,  8, 8,  2, 2] # too much sgpr
-        - DepthU: [256]
+        - DepthU: [128, 256]
         - ClusterLocalRead: [0]
         - TransposeLDS: [-1]
         - LdsPadA: [-1]
@@ -78,7 +78,7 @@ BenchmarkProblems:
         - StaggerU: [0]
         - ScheduleIterAlg: [0]
         - PrefetchLocalRead: [1]
-        - PrefetchGlobalRead: [1]
+        - PrefetchGlobalRead: [1, 2]
         - StoreRemapVectorWidth: [0]
         - GlobalSplitU: [1]
         - GlobalSplitUAlgorithm: [MultipleBuffer]
@@ -101,6 +101,6 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [512, 512, 1, 512]
+          - Exact: [512, 512, 1, 1024]
         - ActivationArgs:
           - [Enum: none]
