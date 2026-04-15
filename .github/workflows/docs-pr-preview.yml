@@ -150,4 +150,5 @@ jobs:
           preview_url="https://rocm.docs.amd.com/projects/${{ steps.extract.outputs.project_name }}/en/${{ steps.rtd.outputs.version_slug }}/"
           gh pr comment ${{ github.event.issue.number }} \
             --repo ${{ github.repository }} \
-            --body "Docs preview for **${{ steps.extract.outputs.project_name }}** is building on Read the Docs: $preview_url"
+            --body "Docs preview for **${{ steps.extract.outputs.project_name }}** is building on Read the Docs: $preview_url \
+            (Note: If a pull request includes multiple projects, only the preview for the first project will be built.)"
