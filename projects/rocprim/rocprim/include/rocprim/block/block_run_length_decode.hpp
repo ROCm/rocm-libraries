@@ -334,22 +334,34 @@ public:
               - static_cast<RunOffsetT>(1U);
 
         // Set the current_run_end to thread_decoded_offset to trigger new run branch in the first iteration
-        DecodedOffsetT current_run_begin, current_run_end = thread_decoded_offset;
+        DecodedOffsetT current_run_begin;
+        DecodedOffsetT current_run_end;
 
         ItemT val{};
 
 #pragma unroll
         for(DecodedOffsetT i = 0; i < DECODED_ITEMS_PER_THREAD; ++i, ++thread_decoded_offset)
         {
-            // If we are in a new run...
-            if(thread_decoded_offset == current_run_end)
+            // Check if we are in a new run. Short-circuit the check on 'i==0', since 'current_run_end'
+            // is uninitialized.
+            if(i == 0 || thread_decoded_offset == current_run_end)
             {
                 // The value of the new run
                 val = temp_storage.runs.run_values[current_run];
 
                 // The run bounds
                 current_run_begin = temp_storage.runs.run_offsets[current_run];
-                current_run_end   = temp_storage.runs.run_offsets[++current_run];
+                // Move the cursor to the next run if it exists.
+
+                // Otherwise just use the begin offset if we are the last run of the thread. On the next
+                // iteration, thread_decoded_offset will be moved away from the begin offset and we will
+                // emit infinite elements until the call-site detects we are outside the decoded values
+                // per thread.
+                if(current_run + 1 < BLOCK_RUNS)
+                {
+                    current_run++;
+                }
+                current_run_end = temp_storage.runs.run_offsets[current_run];
             }
 
             // Decode the current run by storing the run's value
