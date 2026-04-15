@@ -161,19 +161,12 @@ public:
     // will be provided with externally-managed work area(s):
     static std::vector<gpubuf> externally_managed_workareas;
 
-    size_t auto_allocated_extra_vram_footprint() const
+    static std::vector<size_t> externally_managed_extra_vram_footprint()
     {
-        return std::accumulate(auto_allocated_worksizes.begin(),
-                               auto_allocated_worksizes.end(),
-                               static_cast<size_t>(0));
-    }
-
-    static size_t externally_managed_extra_vram_footprint()
-    {
-        return std::accumulate(externally_managed_workareas.begin(),
-                               externally_managed_workareas.end(),
-                               static_cast<size_t>(0),
-                               [](size_t total, const gpubuf& buf) { return total + buf.size(); });
+        std::vector<size_t> footprint;
+        for(const auto& buf : externally_managed_workareas)
+            footprint.push_back(buf.size());
+        return footprint;
     }
 
     bool is_preventing_auto_allocation_at_generation() const
@@ -217,11 +210,19 @@ public:
     {
         auto footprint = fft_params::io_vram_footprint();
 
-        // hipFFT work memory is for the current HIP device
-        int device = hipInvalidDeviceId;
-        if(hipGetDevice(&device) != hipSuccess)
-            throw std::runtime_error("hipGetDevice failed");
-        size_t& cur_device_footprint = footprint[device];
+        auto add_work_footprint = [&footprint, this]() {
+            // io footprint has numbers for all devices, but work
+            // footprint might be smaller in length due to fewer
+            // devices being used
+            for(size_t i = 0; i < auto_allocated_worksizes.size(); ++i)
+            {
+                footprint[i] += auto_allocated_worksizes[i];
+            }
+            for(size_t i = 0; i < externally_managed_workareas.size(); ++i)
+            {
+                footprint[i] += externally_managed_workareas[i].size();
+            }
+        };
 
         // auto-allocated plans fail here if not enough VRAM, skip these tests
         try
@@ -233,15 +234,13 @@ public:
         }
         catch(fft_params::work_buffer_alloc_failure& e)
         {
-            cur_device_footprint += auto_allocated_extra_vram_footprint();
-            cur_device_footprint += externally_managed_extra_vram_footprint();
+            add_work_footprint();
             std::stringstream msg;
-            msg << "Plan work buffer size (" << cur_device_footprint
+            msg << "Plan work buffer size (" << byte_sizes_to_str(footprint)
                 << " bytes raw data) too large for device";
             throw ROCFFT_SKIP{msg.str()};
         }
-        cur_device_footprint += auto_allocated_extra_vram_footprint();
-        cur_device_footprint += externally_managed_extra_vram_footprint();
+        add_work_footprint();
         return footprint;
     }
 
@@ -434,7 +433,11 @@ public:
         // case failed.
         if(ret == HIPFFT_ALLOC_FAILED)
         {
-            if(!final_attempt_at_plan_creation && externally_managed_extra_vram_footprint() > 0)
+            bool has_external_footprint
+                = std::any_of(externally_managed_workareas.begin(),
+                              externally_managed_workareas.end(),
+                              [](const gpubuf& buf) { return buf.size() > 0; });
+            if(!final_attempt_at_plan_creation && has_external_footprint)
             {
                 final_attempt_at_plan_creation = true;
                 // device allocation(s) in externally_managed_workareas might be
@@ -447,8 +450,7 @@ public:
             {
                 throw fft_params::work_buffer_alloc_failure(
                     "plan create failed due to allocation failure",
-                    externally_managed_extra_vram_footprint()
-                        + auto_allocated_extra_vram_footprint());
+                    sum(externally_managed_extra_vram_footprint()) + sum(auto_allocated_worksizes));
             }
         }
 
