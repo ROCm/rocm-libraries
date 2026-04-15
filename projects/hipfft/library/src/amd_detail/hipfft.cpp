@@ -1833,9 +1833,19 @@ try
 
     if(format == HIPFFT_FORMAT_UNDEFINED)
         return HIPFFT_INVALID_VALUE;
+
+    // 1D transforms are not currently implemented.
+    if(format == HIPFFT_XT_FORMAT_1D_INPUT_SHUFFLED)
+        return HIPFFT_INVALID_VALUE;
     
     // Only in-place multi-gpu transforms are currently implemented.
     if(format == HIPFFT_XT_FORMAT_INPUT || format == HIPFFT_XT_FORMAT_OUTPUT)
+        return HIPFFT_NOT_IMPLEMENTED;
+
+    // Real-to-complex is HIPFFT_XT_FORMAT_INPLACE-to-HIPFFT_XT_FORMAT_INPLACE_SHUFFLED.
+    if(plan->type.is_real_to_complex() && format != HIPFFT_XT_FORMAT_INPLACE)
+        return HIPFFT_NOT_IMPLEMENTED;
+    if(plan->type.is_complex_to_real() && format != HIPFFT_XT_FORMAT_INPLACE_SHUFFLED)
         return HIPFFT_NOT_IMPLEMENTED;
     
     auto lib_desc = std::make_unique<hipLibXtDesc>();

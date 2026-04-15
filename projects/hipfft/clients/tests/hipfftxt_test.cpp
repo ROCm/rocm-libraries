@@ -947,6 +947,12 @@ TEST_P(hipfftxtformats, supportlist)
         GTEST_SKIP(); // Problematic unsupported case, so skip the test. 
 #endif
     
+#ifdef __HIP_PLATFORM_AMD__
+    const bool rocfft_backend = true;
+#else
+    const bool rocfft_backend = false;
+#endif
+    
     auto good_rdfs = all_directionformat();
     bool goodcase = false;
     for(const auto &val : good_rdfs)
@@ -976,7 +982,7 @@ TEST_P(hipfftxtformats, supportlist)
     {
         const int batchsize = 1;
         hipfft_rt = hipfftMakePlan1d(plan, Nx, ffttype, batchsize, workSize.data());
-        if(realcomplex)
+        if(realcomplex || rocfft_backend)
         {
             ASSERT_NE(hipfft_rt, HIPFFT_SUCCESS)
                 << "hipfftMakePlan1d should have failed for real/complex multi-gpu";
