@@ -30,6 +30,11 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.generate-token.outputs.token }}
         run: |
+          # Extract project identifier from the bot's comment. 
+          # The JSON output for a valid commit will have "assistant-librarian[bot]"
+          # for key `user.login` and contain "rocm.docs.amd.com/projects/" for key `body`
+          # and we need to parse "rocm.docs.amd.com/projects/project_slug/xyz..." to "project_slug"
+
           comment=$(gh api repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments \
             --jq '[.[] | select(.user.login == "assistant-librarian[bot]" and (.body | contains("rocm.docs.amd.com/projects/")))] | last | .body')
 
@@ -38,7 +43,8 @@ jobs:
             exit 0
           fi
 
-          project_alias=$(echo "$comment" | grep -oP 'projects/\K[^/]+')
+          # Extract the string immediately following "projects/" (up to the next "/") from $comment
+          project_alias=$(echo "$comment" | grep --only-matching --perl-regexp 'projects/\K[^/]+')
           echo "project_slug=advanced-micro-devices-${project_alias}" >> $GITHUB_OUTPUT
 
       - name: Deactivate RTD preview version
