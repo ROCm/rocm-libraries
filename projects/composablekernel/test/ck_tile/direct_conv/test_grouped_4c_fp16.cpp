@@ -13,10 +13,11 @@
 #include "ck_tile/ref/naive_grouped_conv_fwd_gpu.hpp"
 #include "ck_tile/ref/naive_grouped_conv_bwd_data_gpu.hpp"
 
-#include "ck_tile/ops/direct_convolution/kernel/grouped_4c_fp16_kernel.hpp"
+#include "ck_tile/ops/direct_convolution/kernel/grouped_4c_fp16_hip_conv_impl.hpp"
 
 using namespace ck_tile;
 using namespace ck_tile::direct_conv;
+using namespace ck_tile::direct_hip_conv;
 
 class DirectConvGrouped4cFp16Test : public ::testing::Test
 {
