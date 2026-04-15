@@ -31,6 +31,7 @@
 #include <string>
 #include <vector>
 
+#include "stinkytofu/analysis/AnalysisRegistration.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/serialization/asm/IRConverter.hpp"
@@ -318,6 +319,7 @@ int main(int argc, char** argv) {
     // Process each function independently
     for (auto& parsedFunc : parsed.functions) {
         stinkytofu::PassManager passManager;
+        stinkytofu::registerAllAnalyses(passManager.getAnalysisManager());
 
         passManager.addInstrumentation(createDebugPrintInstrumentation());
         if (!passFeatureConfig.passOrderSnapshot.jsonPath.empty()) {

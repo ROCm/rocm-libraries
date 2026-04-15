@@ -30,6 +30,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "stinkytofu/analysis/AnalysisRegistration.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 
 namespace {
@@ -269,7 +270,7 @@ class ScheduleFirstLRsPass : public StinkyInstPass {
         for (BasicBlock& bb : func) {
             if (passCtx.shouldProcessBasicBlock(bb)) runOnBasicBlock(bb, passCtx);
         }
-        return PreservedAnalyses::none();
+        return preserveCFGAnalyses();
     }
 };
 

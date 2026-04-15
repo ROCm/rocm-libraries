@@ -25,6 +25,7 @@
 #include <cassert>
 #include <string>
 
+#include "stinkytofu/analysis/AnalysisRegistration.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 
@@ -187,7 +188,7 @@ class InsertVgprMsbPassImpl : public Pass {
                                     hasVgprMsb16);
             }
         }
-        return PreservedAnalyses::none();
+        return preserveCFGAnalyses();
     }
 };
 

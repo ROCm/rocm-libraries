@@ -72,7 +72,7 @@ PreservedAnalyses DumpStinkyFunctionPass::run(Function& func, PassContext&,
         StinkyAsmEmitter emitter(config_.emitterOptions);
         emitter.emit(out, func);
     }
-    return PreservedAnalyses::none();
+    return PreservedAnalyses::all();
 }
 
 std::unique_ptr<Pass> createDumpStinkyFunctionPass(DumpStinkyFunctionPassConfig config) {

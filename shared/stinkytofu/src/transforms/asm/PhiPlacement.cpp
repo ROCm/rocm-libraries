@@ -26,7 +26,9 @@
 #include <unordered_set>
 #include <vector>
 
+#include "stinkytofu/analysis/AnalysisRegistration.hpp"
 #include "stinkytofu/analysis/controlflow/Dominance.hpp"
+#include "stinkytofu/analysis/controlflow/DominanceAnalysis.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/ir/asm/RegisterKey.hpp"
@@ -204,9 +206,10 @@ class InsertPhiPass : public Pass {
         return &InsertPhiPass::ID;
     }
 
-    PreservedAnalyses run(Function& func, PassContext&, AnalysisManager& /*AM*/) override {
-        insertPhiInstructions(func, true);
-        return PreservedAnalyses::none();
+    PreservedAnalyses run(Function& func, PassContext&, AnalysisManager& AM) override {
+        const auto& domInfo = AM.getResult<DominanceAnalysis>(func);
+        insertPhiInstructions(func, domInfo, true);
+        return preserveCFGAnalyses();
     }
 };
 

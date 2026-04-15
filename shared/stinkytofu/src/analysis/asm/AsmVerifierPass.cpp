@@ -42,7 +42,7 @@ PreservedAnalyses StinkyIRVerifierPass::run(Function& func, PassContext&, Analys
         }
         std::cerr << "[StinkyIRVerifier] " << error;
     }
-    return PreservedAnalyses::none();
+    return PreservedAnalyses::all();
 }
 
 // ===========================================================================

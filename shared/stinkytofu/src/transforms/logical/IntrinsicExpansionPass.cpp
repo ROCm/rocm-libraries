@@ -26,6 +26,7 @@
 #include <cstring>
 #include <iostream>
 
+#include "stinkytofu/analysis/AnalysisRegistration.hpp"
 #include "stinkytofu/ir/logical/IntrinsicCall.hpp"
 #include "stinkytofu/ir/logical/IntrinsicRegistry.hpp"
 #include "stinkytofu/ir/logical/LogicalInstructions.hpp"
@@ -46,7 +47,7 @@ PreservedAnalyses IntrinsicExpansionPass::run(Function& func, PassContext& passC
     if (!registry.isInitialized()) {
         std::cerr << "[IntrinsicExpansionPass] Warning: IntrinsicRegistry not initialized, "
                   << "skipping intrinsic expansion\n";
-        return PreservedAnalyses::none();
+        return preserveCFGAnalyses();
     }
 
     // Process all basic blocks
@@ -56,7 +57,7 @@ PreservedAnalyses IntrinsicExpansionPass::run(Function& func, PassContext& passC
 
         expandIntrinsicsInBlock(bb);
     }
-    return PreservedAnalyses::none();
+    return preserveCFGAnalyses();
 }
 
 void IntrinsicExpansionPass::expandIntrinsicsInBlock(BasicBlock& bb) {

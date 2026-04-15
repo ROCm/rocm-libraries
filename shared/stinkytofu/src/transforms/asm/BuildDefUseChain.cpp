@@ -196,8 +196,9 @@ class BuildUseDefChainPass : public Pass {
         return &BuildUseDefChainPass::ID;
     }
 
-    PreservedAnalyses run(Function& func, PassContext&, AnalysisManager& /*AM*/) override {
-        buildUseDefChain(func, clearExisting_);
+    PreservedAnalyses run(Function& func, PassContext&, AnalysisManager& AM) override {
+        const auto& domInfo = AM.getResult<DominanceAnalysis>(func);
+        buildUseDefChain(func, domInfo, clearExisting_);
         return PreservedAnalyses::none();
     }
 };

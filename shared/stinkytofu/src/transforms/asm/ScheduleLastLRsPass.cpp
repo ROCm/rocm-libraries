@@ -28,6 +28,7 @@
 #include <string>
 #include <unordered_map>
 
+#include "stinkytofu/analysis/AnalysisRegistration.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 
 namespace {
@@ -264,7 +265,7 @@ class ScheduleLastLRsPass : public StinkyInstPass {
         for (BasicBlock& bb : func) {
             if (passCtx.shouldProcessBasicBlock(bb)) runOnBasicBlock(bb, passCtx);
         }
-        return PreservedAnalyses::none();
+        return preserveCFGAnalyses();
     }
 };
 

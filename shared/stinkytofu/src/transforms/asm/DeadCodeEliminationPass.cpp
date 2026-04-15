@@ -25,6 +25,7 @@
 #include <set>
 #include <vector>
 
+#include "stinkytofu/analysis/AnalysisRegistration.hpp"
 #include "stinkytofu/ir/asm/DefUseChainUpdater.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/support/Casting.hpp"
@@ -73,7 +74,7 @@ class DeadCodeEliminationPassImpl : public Pass {
 
             totalRemoved += removedInBB;
         }
-        return PreservedAnalyses::none();
+        return preserveCFGAnalyses();
     }
 
    private:

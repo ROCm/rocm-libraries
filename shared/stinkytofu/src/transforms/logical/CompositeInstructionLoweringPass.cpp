@@ -26,6 +26,7 @@
 #include <string>
 #include <vector>
 
+#include "stinkytofu/analysis/AnalysisRegistration.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/ir/LogicalToAsmMappings_generated.inc"
@@ -70,7 +71,7 @@ class CompositeInstructionLoweringPassImpl : public Pass {
 
             expandCompositeInstructions(bb, arch);
         }
-        return PreservedAnalyses::none();
+        return preserveCFGAnalyses();
     }
 
    private:

@@ -23,6 +23,7 @@
 
 #include "stinkytofu/transforms/asm/StinkyRemoveWaitCntPass.hpp"
 
+#include "stinkytofu/analysis/AnalysisRegistration.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 
@@ -71,7 +72,7 @@ class StinkyRemoveWaitCntPass : public StinkyInstPass {
                 removeWaitCntsInBlock(bb, removeTensorWaitCnt);
             }
         }
-        return PreservedAnalyses::none();
+        return preserveCFGAnalyses();
     }
 
    private:

@@ -37,7 +37,7 @@ PreservedAnalyses LogicalIRVerifierPass::run(Function& func, PassContext&,
     if (!error.empty()) {
         STINKY_UNREACHABLE(error.c_str());
     }
-    return PreservedAnalyses::none();
+    return PreservedAnalyses::all();
 }
 
 std::string validateLogicalIR(Function& func, const LogicalIRVerifierConfig& config) {

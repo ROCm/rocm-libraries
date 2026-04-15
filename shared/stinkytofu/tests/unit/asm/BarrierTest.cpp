@@ -23,6 +23,7 @@
 #include <gtest/gtest.h>
 
 #include "TestHelpers.hpp"
+#include "stinkytofu/analysis/AnalysisRegistration.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/support/Casting.hpp"
@@ -39,6 +40,7 @@ class BarrierTest : public ::testing::Test {
     GemmTileConfig config;
     std::unique_ptr<Function> func;
     BasicBlock* bb = nullptr;
+    AnalysisManager am;
 
     void SetUp() override {
         config.arch[0] = 12;
@@ -47,6 +49,7 @@ class BarrierTest : public ::testing::Test {
         func = std::make_unique<Function>("barrier_test");
         setFunctionArch(*func, arch);
         bb = func->createBasicBlock("entry");
+        registerAllAnalyses(am);
     }
 
     void TearDown() override {
@@ -67,10 +70,10 @@ class BarrierTest : public ::testing::Test {
         }
 
         auto implicitDepPass = createStinkyBuildImplicitDependencyPass();
-        implicitDepPass->run(*func, ctx);
+        implicitDepPass->run(*func, ctx, am);
 
         auto dagSchedPass = createStinkyDAGSchedulerPass();
-        dagSchedPass->run(*func, ctx);
+        dagSchedPass->run(*func, ctx, am);
     }
 
     /// Create an s_barrier instruction in bb and return it.

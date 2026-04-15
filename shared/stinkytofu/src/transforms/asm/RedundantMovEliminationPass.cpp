@@ -27,6 +27,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "stinkytofu/analysis/AnalysisRegistration.hpp"
 #include "stinkytofu/ir/asm/DefUseChainUpdater.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/support/Casting.hpp"
@@ -106,7 +107,7 @@ class RedundantMovEliminationPassImpl : public Pass {
             int eliminated = runOnBasicBlock(bb);
             totalEliminated += eliminated;
         }
-        return PreservedAnalyses::none();
+        return preserveCFGAnalyses();
     }
 
    private:

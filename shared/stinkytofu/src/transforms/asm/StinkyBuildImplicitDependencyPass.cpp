@@ -25,6 +25,7 @@
 #include <cassert>
 #include <iostream>
 
+#include "stinkytofu/analysis/AnalysisRegistration.hpp"
 #include "stinkytofu/core/BasicBlock.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
@@ -155,7 +156,7 @@ class StinkyBuildImplicitDependencyPass : public StinkyInstPass {
         for (BasicBlock& bb : func) {
             if (passCtx.shouldProcessBasicBlock(bb)) setPseudoRegistersInBlock(bb, passCtx);
         }
-        return PreservedAnalyses::none();
+        return preserveCFGAnalyses();
     }
 };
 
