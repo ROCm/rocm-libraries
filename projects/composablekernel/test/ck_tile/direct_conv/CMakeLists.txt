@@ -23,4 +23,13 @@ if(GPU_TARGETS MATCHES "gfx950")
             -Wno-shadow
         )
     endif()
+
+    add_gtest_executable(test_direct_conv_grouped_4c_fp16_tile_conv test_grouped_4c_fp16_tile_conv.cpp)
+    if(TARGET test_direct_conv_grouped_4c_fp16_tile_conv)
+        target_compile_options(test_direct_conv_grouped_4c_fp16_tile_conv PRIVATE
+            -Wno-old-style-cast
+            -Wno-unused-parameter
+            -Wno-shadow
+        )
+    endif()
 endif()
