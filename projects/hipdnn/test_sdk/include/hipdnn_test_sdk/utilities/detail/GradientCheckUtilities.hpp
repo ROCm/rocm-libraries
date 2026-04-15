@@ -9,6 +9,7 @@
 #include <hipdnn_test_sdk/utilities/detail/CpuFpReferenceUtilities.hpp>
 #include <stdexcept>
 #include <type_traits>
+#include <vector>
 
 namespace hipdnn_test_sdk::detail
 {
@@ -19,6 +20,31 @@ struct GradCheckResult
     double maxAbsErr;
     int64_t failCount;
 };
+
+/// Convert a flat linear index to N-dimensional indices given tensor dimensions.
+/// Uses row-major (C-order) stride decomposition.
+inline std::vector<int64_t> flatToNdIndex(int64_t flatIdx, const std::vector<int64_t>& dims)
+{
+    const auto rank = dims.size();
+    std::vector<int64_t> indices(rank);
+    for(auto i = static_cast<int64_t>(rank) - 1; i >= 0; --i)
+    {
+        indices[static_cast<size_t>(i)] = flatIdx % dims[static_cast<size_t>(i)];
+        flatIdx /= dims[static_cast<size_t>(i)];
+    }
+    return indices;
+}
+
+/// Compute total number of elements from a dimensions vector.
+inline int64_t totalElements(const std::vector<int64_t>& dims)
+{
+    int64_t total = 1;
+    for(const auto d : dims)
+    {
+        total *= d;
+    }
+    return total;
+}
 
 /// Compute the scalar dot-product loss L = sum(a[i] * b[i]) for any rank tensor.
 /// Both tensors must have the same dimensions.
@@ -32,11 +58,13 @@ double computeDotProductLoss(const hipdnn_data_sdk::utilities::TensorBase<T>& a,
     }
 
     double loss = 0.0;
-    auto accumulate = [&](const std::vector<int64_t>& indices) {
+    const auto numElements = totalElements(a.dims());
+    for(int64_t i = 0; i < numElements; ++i)
+    {
+        const auto indices = flatToNdIndex(i, a.dims());
         loss += safeConvert<double>(a.getHostValue(indices))
                 * safeConvert<double>(b.getHostValue(indices));
-    };
-    makeParallelTensorFunctor(accumulate, a.dims())(1);
+    }
     return loss;
 }
 
@@ -55,7 +83,10 @@ GradCheckResult compareGradients(const hipdnn_data_sdk::utilities::TensorBase<T>
     }
 
     GradCheckResult result{0.0, 0.0, 0};
-    auto compare = [&](const std::vector<int64_t>& indices) {
+    const auto numElements = totalElements(analytical.dims());
+    for(int64_t i = 0; i < numElements; ++i)
+    {
+        const auto indices = flatToNdIndex(i, analytical.dims());
         const auto a = safeConvert<double>(analytical.getHostValue(indices));
         const auto n = safeConvert<double>(numerical.getHostValue(indices));
         const double absErr = std::abs(a - n);
@@ -69,8 +100,7 @@ GradCheckResult compareGradients(const hipdnn_data_sdk::utilities::TensorBase<T>
         {
             ++result.failCount;
         }
-    };
-    makeParallelTensorFunctor(compare, analytical.dims())(1);
+    }
     return result;
 }
 
@@ -84,8 +114,7 @@ GradCheckResult compareGradients(const hipdnn_data_sdk::utilities::TensorBase<T>
 /// runs the forward pass using the current state of @p perturbInput and returns
 /// a scalar loss value.
 ///
-/// @note Execution is sequential (single thread) because each iteration mutates
-///       @p perturbInput.
+/// @note Execution is sequential because each iteration mutates @p perturbInput.
 template <typename T, typename ForwardLossFunc>
 void numericalGradient(hipdnn_data_sdk::utilities::TensorBase<T>& perturbInput,
                        hipdnn_data_sdk::utilities::TensorBase<T>& numericalGrad,
@@ -97,7 +126,10 @@ void numericalGradient(hipdnn_data_sdk::utilities::TensorBase<T>& perturbInput,
         throw std::invalid_argument("numericalGradient: tensor dimensions must match");
     }
 
-    auto perturb = [&](const std::vector<int64_t>& indices) {
+    const auto numElements = totalElements(perturbInput.dims());
+    for(int64_t i = 0; i < numElements; ++i)
+    {
+        const auto indices = flatToNdIndex(i, perturbInput.dims());
         const auto orig = safeConvert<double>(perturbInput.getHostValue(indices));
 
         // L+
@@ -115,8 +147,7 @@ void numericalGradient(hipdnn_data_sdk::utilities::TensorBase<T>& perturbInput,
         perturbInput.memory().markHostModified();
 
         numericalGrad.setHostValue(safeConvert<T>((lPlus - lMinus) / (2.0 * eps)), indices);
-    };
-    makeParallelTensorFunctor(perturb, perturbInput.dims())(1);
+    }
     numericalGrad.memory().markHostModified();
 }
 

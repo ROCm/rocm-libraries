@@ -166,24 +166,9 @@ public:
             // Step 2: Add additive attention mask (if provided)
             if(attnMask != nullptr)
             {
-                const auto& maskDims = attnMask->dims();
-                const auto maskRank = static_cast<int64_t>(maskDims.size());
-
-                // Mask dims are right-aligned to the output context [b, h, sq, skv]
-                constexpr int64_t K_OUTPUT_CONTEXT_RANK = 4;
-
                 for(int64_t skv = 0; skv < seqKv; ++skv)
                 {
-                    const std::array<int64_t, K_OUTPUT_CONTEXT_RANK> ctxIdxs = {b, h, sq, skv};
-                    std::vector<int64_t> maskIndices(static_cast<size_t>(maskRank));
-                    for(int64_t i = 0; i < maskRank; ++i)
-                    {
-                        const auto outputDimIdx
-                            = static_cast<size_t>(K_OUTPUT_CONTEXT_RANK - maskRank + i);
-                        const auto outputIdx = ctxIdxs[outputDimIdx];
-                        maskIndices[static_cast<size_t>(i)]
-                            = (maskDims[static_cast<size_t>(i)] == 1) ? 0 : outputIdx;
-                    }
+                    const auto maskIndices = computeMaskIndex(attnMask->dims(), b, h, sq, skv);
                     scores[static_cast<size_t>(skv)]
                         += static_cast<ComputeDataType>(attnMask->getHostValue(maskIndices));
                 }
@@ -497,21 +482,8 @@ public:
                             // Apply additive attention mask if provided
                             if(attnMask != nullptr)
                             {
-                                const auto& maskDims = attnMask->dims();
-                                const auto maskRank = static_cast<int64_t>(maskDims.size());
-                                constexpr int64_t K_OUTPUT_CONTEXT_RANK = 4;
-
-                                const std::array<int64_t, K_OUTPUT_CONTEXT_RANK> ctxIdxs
-                                    = {b, hQ, sq, skv};
-                                std::vector<int64_t> maskIndices(static_cast<size_t>(maskRank));
-                                for(int64_t i = 0; i < maskRank; ++i)
-                                {
-                                    const auto outputDimIdx
-                                        = static_cast<size_t>(K_OUTPUT_CONTEXT_RANK - maskRank + i);
-                                    const auto outputIdx = ctxIdxs[outputDimIdx];
-                                    maskIndices[static_cast<size_t>(i)]
-                                        = (maskDims[static_cast<size_t>(i)] == 1) ? 0 : outputIdx;
-                                }
+                                const auto maskIndices
+                                    = computeMaskIndex(attnMask->dims(), b, hQ, sq, skv);
                                 scores[static_cast<size_t>(skv)] += static_cast<ComputeDataType>(
                                     attnMask->getHostValue(maskIndices));
                             }
@@ -554,21 +526,8 @@ public:
                             // Apply additive attention mask if provided
                             if(attnMask != nullptr)
                             {
-                                const auto& maskDims = attnMask->dims();
-                                const auto maskRank = static_cast<int64_t>(maskDims.size());
-                                constexpr int64_t K_OUTPUT_CONTEXT_RANK = 4;
-
-                                const std::array<int64_t, K_OUTPUT_CONTEXT_RANK> ctxIdxs
-                                    = {b, hQ, sq, skv};
-                                std::vector<int64_t> maskIndices(static_cast<size_t>(maskRank));
-                                for(int64_t i = 0; i < maskRank; ++i)
-                                {
-                                    const auto outputDimIdx
-                                        = static_cast<size_t>(K_OUTPUT_CONTEXT_RANK - maskRank + i);
-                                    const auto outputIdx = ctxIdxs[outputDimIdx];
-                                    maskIndices[static_cast<size_t>(i)]
-                                        = (maskDims[static_cast<size_t>(i)] == 1) ? 0 : outputIdx;
-                                }
+                                const auto maskIndices
+                                    = computeMaskIndex(attnMask->dims(), b, hQ, sq, skv);
                                 scores[static_cast<size_t>(skv)] += static_cast<ComputeDataType>(
                                     attnMask->getHostValue(maskIndices));
                             }
@@ -680,6 +639,27 @@ public:
         dQ.memory().markHostModified();
         dK.memory().markHostModified();
         dV.memory().markHostModified();
+    }
+
+private:
+    /// Compute broadcastable mask indices by right-aligning mask dims to [b, h, sq, skv].
+    /// Dimensions of size 1 are broadcast (index clamped to 0).
+    static std::vector<int64_t> computeMaskIndex(
+        const std::vector<int64_t>& maskDims, int64_t b, int64_t h, int64_t sq, int64_t skv)
+    {
+        constexpr int64_t K_OUTPUT_CONTEXT_RANK = 4;
+        const auto maskRank = static_cast<int64_t>(maskDims.size());
+        const std::array<int64_t, K_OUTPUT_CONTEXT_RANK> ctxIdxs = {b, h, sq, skv};
+
+        std::vector<int64_t> maskIndices(static_cast<size_t>(maskRank));
+        for(int64_t i = 0; i < maskRank; ++i)
+        {
+            const auto outputDimIdx = static_cast<size_t>(K_OUTPUT_CONTEXT_RANK - maskRank + i);
+            const auto outputIdx = ctxIdxs[outputDimIdx];
+            maskIndices[static_cast<size_t>(i)]
+                = (maskDims[static_cast<size_t>(i)] == 1) ? 0 : outputIdx;
+        }
+        return maskIndices;
     }
 };
 

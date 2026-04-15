@@ -834,12 +834,34 @@ TEST(TestCpuFpReferenceSdpaFp64, LseWithGqa)
 
 // ---------------------------------------------------------------------------
 // Backward pass tests
+//
+// These tests use Fp32 (unlike forward tests which use Fp64) because the GPU
+// backward kernels (AITER/Flash Attention) only support fp16/bf16 input/output
+// with fp32 internal compute precision. The CPU reference backward tests use
+// Fp32 to match the actual kernel compute precision.
 // ---------------------------------------------------------------------------
 
-TEST(TestCpuFpReferenceSdpaBackward, BackwardSanityFp32)
+TEST(TestCpuFpReferenceSdpaBwd, BackwardSanityFp32)
 {
-    // Simple sanity check for backward pass with small dimensions
+    // Hand-verified backward pass with small deterministic inputs.
     // [B=1, H=1, Sq=2, Skv=2, D=2, Dv=2]
+    //
+    // Q = [[1,0],[0,1]]  K = [[1,0],[0,1]]  V = [[1,2],[3,4]]  dO = [[1,1],[1,1]]
+    // scale = 1/sqrt(2)
+    //
+    // By symmetry of Q and K (identity matrices), the softmax probabilities
+    // for sq=0 are [pH, pL] and for sq=1 are [pL, pH], where:
+    //   pH = exp(scale) / (exp(scale) + 1)   (probability of the matching key)
+    //   pL = 1 / (exp(scale) + 1)            (probability of the non-matching key)
+    //
+    // With dO = ones, dP[sq,skv] = sum(V[skv,:]) = [3, 7].
+    // dS[sq,skv] = P[sq,skv] * (dP[sq,skv] - D[sq]) simplifies to:
+    //   dS[*,matching] = -4*pH*pL,  dS[*,non-matching] = +4*pH*pL
+    //
+    // Expected gradients (c = 4*pH*pL*scale):
+    //   dQ = [[-c, c], [-c, c]]
+    //   dK = [[-c, -c], [c, c]]
+    //   dV = [[1, 1], [1, 1]]
     Tensor<float> q({1, 1, 2, 2});
     Tensor<float> k({1, 1, 2, 2});
     Tensor<float> v({1, 1, 2, 2});
@@ -849,7 +871,6 @@ TEST(TestCpuFpReferenceSdpaBackward, BackwardSanityFp32)
     Tensor<float> dK({1, 1, 2, 2});
     Tensor<float> dV({1, 1, 2, 2});
 
-    // Set up simple input
     q.fillWithValue(0.0f);
     k.fillWithValue(0.0f);
     v.fillWithValue(0.0f);
@@ -863,7 +884,6 @@ TEST(TestCpuFpReferenceSdpaBackward, BackwardSanityFp32)
     v.setHostValue(3.0f, 0, 0, 1, 0);
     v.setHostValue(4.0f, 0, 0, 1, 1);
 
-    // Upstream gradient: ones
     dO.fillWithValue(1.0f);
 
     // Forward pass
@@ -872,22 +892,34 @@ TEST(TestCpuFpReferenceSdpaBackward, BackwardSanityFp32)
     // Backward pass
     CpuFpReferenceSdpa::backward(q, k, v, o, dO, dQ, dK, dV);
 
-    // Check that gradients are finite and non-zero
-    for(int sq = 0; sq < 2; ++sq)
-    {
-        for(int d = 0; d < 2; ++d)
-        {
-            EXPECT_TRUE(std::isfinite(dQ.getHostValue(0, 0, sq, d)))
-                << "dQ not finite at sq=" << sq << ", d=" << d;
-            EXPECT_TRUE(std::isfinite(dK.getHostValue(0, 0, sq, d)))
-                << "dK not finite at sq=" << sq << ", d=" << d;
-            EXPECT_TRUE(std::isfinite(dV.getHostValue(0, 0, sq, d)))
-                << "dV not finite at sq=" << sq << ", d=" << d;
-        }
-    }
+    // Compute expected values
+    const float scale = 1.0f / std::sqrt(2.0f);
+    const float eS = std::exp(scale);
+    const float pH = eS / (eS + 1.0f);
+    const float pL = 1.0f / (eS + 1.0f);
+    const float c = 4.0f * pH * pL * scale;
+    const float tol = 1e-5f;
+
+    // dQ = [[-c, c], [-c, c]]
+    EXPECT_NEAR(dQ.getHostValue(0, 0, 0, 0), -c, tol);
+    EXPECT_NEAR(dQ.getHostValue(0, 0, 0, 1), c, tol);
+    EXPECT_NEAR(dQ.getHostValue(0, 0, 1, 0), -c, tol);
+    EXPECT_NEAR(dQ.getHostValue(0, 0, 1, 1), c, tol);
+
+    // dK = [[-c, -c], [c, c]]
+    EXPECT_NEAR(dK.getHostValue(0, 0, 0, 0), -c, tol);
+    EXPECT_NEAR(dK.getHostValue(0, 0, 0, 1), -c, tol);
+    EXPECT_NEAR(dK.getHostValue(0, 0, 1, 0), c, tol);
+    EXPECT_NEAR(dK.getHostValue(0, 0, 1, 1), c, tol);
+
+    // dV = [[1, 1], [1, 1]]  (P columns sum to 1 by softmax symmetry)
+    EXPECT_NEAR(dV.getHostValue(0, 0, 0, 0), 1.0f, tol);
+    EXPECT_NEAR(dV.getHostValue(0, 0, 0, 1), 1.0f, tol);
+    EXPECT_NEAR(dV.getHostValue(0, 0, 1, 0), 1.0f, tol);
+    EXPECT_NEAR(dV.getHostValue(0, 0, 1, 1), 1.0f, tol);
 }
 
-TEST(TestCpuFpReferenceSdpaBackward, BackwardMHAFp32)
+TEST(TestCpuFpReferenceSdpaBwd, BackwardMHAFp32)
 {
     // Test Multi-Head Attention (H_q == H_kv)
     // [B=1, H=2, Sq=4, Skv=4, D=8, Dv=8]
@@ -929,7 +961,7 @@ TEST(TestCpuFpReferenceSdpaBackward, BackwardMHAFp32)
     }
 }
 
-TEST(TestCpuFpReferenceSdpaBackward, BackwardGQAFp32)
+TEST(TestCpuFpReferenceSdpaBwd, BackwardGQAFp32)
 {
     // Test Grouped Query Attention (H_q = 4, H_kv = 1)
     // [B=1, H_q=4, H_kv=1, Sq=4, Skv=4, D=8, Dv=8]
@@ -989,7 +1021,7 @@ TEST(TestCpuFpReferenceSdpaBackward, BackwardGQAFp32)
     EXPECT_GT(dkSum, 0.0f) << "dK should have non-zero gradients from GQA accumulation";
 }
 
-TEST(TestCpuFpReferenceSdpaBackward, BackwardCausalMaskFp32)
+TEST(TestCpuFpReferenceSdpaBwd, BackwardCausalMaskFp32)
 {
     // Test backward pass with causal masking
     // [B=1, H=1, Sq=4, Skv=4, D=4, Dv=4]
@@ -1035,7 +1067,7 @@ TEST(TestCpuFpReferenceSdpaBackward, BackwardCausalMaskFp32)
 // Compares LSE-based backward path against full softmax recomputation path.
 // Both paths must use float tensors (matching ComputeDataType = float default)
 // so that forward and backward compute at the same precision.
-TEST(TestCpuFpReferenceSdpaBackward, BackwardWithLSE)
+TEST(TestCpuFpReferenceSdpaBwd, BackwardWithLSE)
 {
     // [B=1, H=2, Sq=4, Skv=4, D=8, Dv=8]
     Tensor<float> q({1, 2, 4, 8});
@@ -1068,7 +1100,10 @@ TEST(TestCpuFpReferenceSdpaBackward, BackwardWithLSE)
     // Backward pass WITHOUT LSE (recompute from scratch)
     CpuFpReferenceSdpa::backward(q, k, v, o, dO, dQNoLse, dKNoLse, dVNoLse);
 
-    // Both paths compute in float, so results should be very close
+    // Both paths compute in float, so results should be very close.
+    // LSE path uses exp(score - lse) while no-LSE path uses exp(score - max) / sumExp.
+    // These differ by FP operation ordering. If this tolerance causes flaky failures,
+    // it can be relaxed to 1e-4f.
     const float tol = 1e-5f;
     for(int h = 0; h < 2; ++h)
     {
@@ -1523,7 +1558,7 @@ TEST(TestCpuFpReferenceSdpaGradCheck, GQACausalMask)
     }
 }
 
-TEST(TestCpuFpReferenceSdpaBackward, BackwardBfloat16)
+TEST(TestCpuFpReferenceSdpaBwd, BackwardBfloat16)
 {
     // Test backward pass with BFloat16 data type
     // [B=1, H=1, Sq=4, Skv=4, D=8, Dv=8]
@@ -1560,4 +1595,227 @@ TEST(TestCpuFpReferenceSdpaBackward, BackwardBfloat16)
             EXPECT_TRUE(std::isfinite(dvVal)) << "dV not finite at sq=" << sq << ", d=" << d;
         }
     }
+}
+
+TEST(TestCpuFpReferenceSdpaBwd, BackwardGqaDifferentKVHeadsFp32)
+{
+    // Test backward with independent K and V head counts: H_q=4, H_k=2, H_v=1
+    // Mirrors the forward GqaDifferentKVHeads test.
+    // [B=1, H_q=4, H_k=2, H_v=1, Sq=3, Skv=3, D=4, Dv=4]
+    Tensor<float> q({1, 4, 3, 4});
+    Tensor<float> k({1, 2, 3, 4});
+    Tensor<float> v({1, 1, 3, 4});
+    Tensor<float> o({1, 4, 3, 4});
+    Tensor<float> dO({1, 4, 3, 4});
+    Tensor<float> dQ({1, 4, 3, 4});
+    Tensor<float> dK({1, 2, 3, 4});
+    Tensor<float> dV({1, 1, 3, 4});
+
+    q.fillWithRandomValues(-1.0f, 1.0f, 600);
+    k.fillWithRandomValues(-1.0f, 1.0f, 601);
+    v.fillWithRandomValues(-1.0f, 1.0f, 602);
+    dO.fillWithRandomValues(-1.0f, 1.0f, 603);
+
+    // Forward pass
+    CpuFpReferenceSdpa::forward(q, k, v, o);
+
+    // Backward pass with different K and V head counts
+    CpuFpReferenceSdpa::backward(q, k, v, o, dO, dQ, dK, dV);
+
+    // Check dQ gradients are finite (4 Q heads)
+    for(int h = 0; h < 4; ++h)
+    {
+        for(int sq = 0; sq < 3; ++sq)
+        {
+            for(int d = 0; d < 4; ++d)
+            {
+                EXPECT_TRUE(std::isfinite(dQ.getHostValue(0, h, sq, d)))
+                    << "dQ not finite at h=" << h << ", sq=" << sq << ", d=" << d;
+            }
+        }
+    }
+
+    // Check dK gradients are finite (2 K heads)
+    for(int h = 0; h < 2; ++h)
+    {
+        for(int sq = 0; sq < 3; ++sq)
+        {
+            for(int d = 0; d < 4; ++d)
+            {
+                EXPECT_TRUE(std::isfinite(dK.getHostValue(0, h, sq, d)))
+                    << "dK not finite at h=" << h << ", sq=" << sq << ", d=" << d;
+            }
+        }
+    }
+
+    // Check dV gradients are finite (1 V head)
+    for(int sq = 0; sq < 3; ++sq)
+    {
+        for(int d = 0; d < 4; ++d)
+        {
+            EXPECT_TRUE(std::isfinite(dV.getHostValue(0, 0, sq, d)))
+                << "dV not finite at sq=" << sq << ", d=" << d;
+        }
+    }
+
+    // dK should accumulate from 2 Q heads per K head
+    float dkSum = 0.0f;
+    for(int h = 0; h < 2; ++h)
+    {
+        for(int sq = 0; sq < 3; ++sq)
+        {
+            for(int d = 0; d < 4; ++d)
+            {
+                dkSum += std::abs(dK.getHostValue(0, h, sq, d));
+            }
+        }
+    }
+    EXPECT_GT(dkSum, 0.0f) << "dK should have non-zero gradients from GQA accumulation";
+
+    // dV should accumulate from all 4 Q heads into the single V head
+    float dvSum = 0.0f;
+    for(int sq = 0; sq < 3; ++sq)
+    {
+        for(int d = 0; d < 4; ++d)
+        {
+            dvSum += std::abs(dV.getHostValue(0, 0, sq, d));
+        }
+    }
+    EXPECT_GT(dvSum, 0.0f) << "dV should have non-zero gradients from GQA accumulation";
+}
+
+// ---------------------------------------------------------------------------
+// Backward validation tests (error cases)
+// ---------------------------------------------------------------------------
+
+TEST(TestCpuFpReferenceSdpaBwd, BackwardWrongRankQ)
+{
+    const Tensor<float> q({1, 2, 4}); // rank-3 instead of rank-4
+    const Tensor<float> k({1, 1, 4, 8});
+    const Tensor<float> v({1, 1, 4, 8});
+    const Tensor<float> o({1, 1, 4, 8});
+    const Tensor<float> dO({1, 1, 4, 8});
+    Tensor<float> dQ({1, 2, 4});
+    Tensor<float> dK({1, 1, 4, 8});
+    Tensor<float> dV({1, 1, 4, 8});
+
+    EXPECT_THROW(CpuFpReferenceSdpa::backward(q, k, v, o, dO, dQ, dK, dV), std::invalid_argument);
+}
+
+TEST(TestCpuFpReferenceSdpaBwd, BackwardWrongRankDK)
+{
+    const Tensor<float> q({1, 1, 4, 8});
+    const Tensor<float> k({1, 1, 4, 8});
+    const Tensor<float> v({1, 1, 4, 8});
+    const Tensor<float> o({1, 1, 4, 8});
+    const Tensor<float> dO({1, 1, 4, 8});
+    Tensor<float> dQ({1, 1, 4, 8});
+    Tensor<float> dK({1, 4, 8}); // rank-3 instead of rank-4
+    Tensor<float> dV({1, 1, 4, 8});
+
+    EXPECT_THROW(CpuFpReferenceSdpa::backward(q, k, v, o, dO, dQ, dK, dV), std::invalid_argument);
+}
+
+TEST(TestCpuFpReferenceSdpaBwd, BackwardBatchMismatch)
+{
+    const Tensor<float> q({2, 1, 4, 8});
+    const Tensor<float> k({2, 1, 4, 8});
+    const Tensor<float> v({2, 1, 4, 8});
+    const Tensor<float> o({2, 1, 4, 8});
+    const Tensor<float> dO({2, 1, 4, 8});
+    Tensor<float> dQ({2, 1, 4, 8});
+    Tensor<float> dK({1, 1, 4, 8}); // batch=1 instead of batch=2
+    Tensor<float> dV({2, 1, 4, 8});
+
+    EXPECT_THROW(CpuFpReferenceSdpa::backward(q, k, v, o, dO, dQ, dK, dV), std::invalid_argument);
+}
+
+TEST(TestCpuFpReferenceSdpaBwd, BackwardHeadDimMismatch)
+{
+    const Tensor<float> q({1, 1, 4, 8});
+    const Tensor<float> k({1, 1, 4, 16}); // D=16 instead of D=8
+    const Tensor<float> v({1, 1, 4, 8});
+    const Tensor<float> o({1, 1, 4, 8});
+    const Tensor<float> dO({1, 1, 4, 8});
+    Tensor<float> dQ({1, 1, 4, 8});
+    Tensor<float> dK({1, 1, 4, 16});
+    Tensor<float> dV({1, 1, 4, 8});
+
+    EXPECT_THROW(CpuFpReferenceSdpa::backward(q, k, v, o, dO, dQ, dK, dV), std::invalid_argument);
+}
+
+TEST(TestCpuFpReferenceSdpaBwd, BackwardGqaNotDivisibleK)
+{
+    // H_q=3 is not divisible by H_k=2
+    const Tensor<float> q({1, 3, 4, 8});
+    const Tensor<float> k({1, 2, 4, 8});
+    const Tensor<float> v({1, 1, 4, 8});
+    const Tensor<float> o({1, 3, 4, 8});
+    const Tensor<float> dO({1, 3, 4, 8});
+    Tensor<float> dQ({1, 3, 4, 8});
+    Tensor<float> dK({1, 2, 4, 8});
+    Tensor<float> dV({1, 1, 4, 8});
+
+    EXPECT_THROW(CpuFpReferenceSdpa::backward(q, k, v, o, dO, dQ, dK, dV), std::invalid_argument);
+}
+
+TEST(TestCpuFpReferenceSdpaBwd, BackwardGqaNotDivisibleV)
+{
+    // H_q=4 is not divisible by H_v=3
+    const Tensor<float> q({1, 4, 4, 8});
+    const Tensor<float> k({1, 2, 4, 8});
+    const Tensor<float> v({1, 3, 4, 8});
+    const Tensor<float> o({1, 4, 4, 8});
+    const Tensor<float> dO({1, 4, 4, 8});
+    Tensor<float> dQ({1, 4, 4, 8});
+    Tensor<float> dK({1, 2, 4, 8});
+    Tensor<float> dV({1, 3, 4, 8});
+
+    EXPECT_THROW(CpuFpReferenceSdpa::backward(q, k, v, o, dO, dQ, dK, dV), std::invalid_argument);
+}
+
+TEST(TestCpuFpReferenceSdpaBwd, BackwardLseWrongRank)
+{
+    Tensor<float> q({1, 1, 4, 8});
+    Tensor<float> k({1, 1, 4, 8});
+    Tensor<float> v({1, 1, 4, 8});
+    Tensor<float> o({1, 1, 4, 8});
+    Tensor<float> dO({1, 1, 4, 8});
+    Tensor<float> dQ({1, 1, 4, 8});
+    Tensor<float> dK({1, 1, 4, 8});
+    Tensor<float> dV({1, 1, 4, 8});
+    Tensor<float> lseWrong({1, 1, 4, 1}); // rank-4 instead of rank-3
+
+    q.fillWithRandomValues(-1.0f, 1.0f, 700);
+    k.fillWithRandomValues(-1.0f, 1.0f, 701);
+    v.fillWithRandomValues(-1.0f, 1.0f, 702);
+    dO.fillWithValue(1.0f);
+
+    CpuFpReferenceSdpa::forward(q, k, v, o);
+
+    EXPECT_THROW(CpuFpReferenceSdpa::backward(q, k, v, o, dO, dQ, dK, dV, std::nullopt, &lseWrong),
+                 std::invalid_argument);
+}
+
+TEST(TestCpuFpReferenceSdpaBwd, BackwardLseWrongShape)
+{
+    Tensor<float> q({2, 4, 16, 8});
+    Tensor<float> k({2, 4, 16, 8});
+    Tensor<float> v({2, 4, 16, 8});
+    Tensor<float> o({2, 4, 16, 8});
+    Tensor<float> dO({2, 4, 16, 8});
+    Tensor<float> dQ({2, 4, 16, 8});
+    Tensor<float> dK({2, 4, 16, 8});
+    Tensor<float> dV({2, 4, 16, 8});
+    Tensor<float> lseWrong({2, 4, 8}); // Sq=8 instead of Sq=16
+
+    q.fillWithRandomValues(-1.0f, 1.0f, 710);
+    k.fillWithRandomValues(-1.0f, 1.0f, 711);
+    v.fillWithRandomValues(-1.0f, 1.0f, 712);
+    dO.fillWithValue(1.0f);
+
+    CpuFpReferenceSdpa::forward(q, k, v, o);
+
+    EXPECT_THROW(CpuFpReferenceSdpa::backward(q, k, v, o, dO, dQ, dK, dV, std::nullopt, &lseWrong),
+                 std::invalid_argument);
 }
