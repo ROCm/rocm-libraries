@@ -81,6 +81,11 @@ set(UNIT_LOGICAL_TEST_FILES
     unit/logical/LogicalIntrinsicFlowTest.cpp
 )
 
+# Core Infrastructure Tests
+set(UNIT_CORE_TEST_FILES
+    unit/core/AnalysisManagerTest.cpp
+)
+
 # Common/Shared Tests
 set(UNIT_COMMON_TEST_FILES
     unit/ErrorHandlingTest.cpp
@@ -92,6 +97,7 @@ set(UNIT_COMMON_TEST_FILES
 
 # Combine all unit tests
 set(UNIT_TEST_FILES
+    ${UNIT_CORE_TEST_FILES}
     ${UNIT_ASM_TEST_FILES}
     ${UNIT_LOGICAL_TEST_FILES}
     ${UNIT_COMMON_TEST_FILES}
