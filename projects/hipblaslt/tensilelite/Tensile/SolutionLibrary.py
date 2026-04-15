@@ -348,6 +348,7 @@ class MasterSolutionLibrary:
                           assembler,
                           isaInfoMap: Dict[str, IsaInfo],
                           lazyLibraryLoading: bool,
+                          logicFile=None,
                           solutionClass=Contractions.Solution,
                           libraryOrder=None,
                           placeholderName='TensileLibrary'):
@@ -357,16 +358,28 @@ class MasterSolutionLibrary:
             devicePart = d["ArchitectureName"]
             cuCount = d["CUCount"]
 
+            pciChipId = d.get("DeviceNames", None)
+
             newLib = PredicateLibrary(tag="Hardware")
             if devicePart == "fallback":
                 pred = Hardware.HardwarePredicate("TruePred")
             else:
-                pred = Hardware.HardwarePredicate.FromHardware(gfxToIsa(devicePart), cuCount)
+                pred = Hardware.HardwarePredicate.FromHardware(
+                    gfxToIsa(devicePart), cuCount, pciChipId, logicFile=logicFile
+                )
 
             newLib.rows.append({"predicate": pred, "library": library})
 
             if lazyLibrary:
                 if cuCount: placeholderName += "_CU" + str(cuCount)
+                if pciChipId:
+                    # Convert device names list to a sanitized string for filename
+                    # e.g., ['Device 75a0', 'Device 75b0'] -> 'ID75a0-75b0'
+                    if isinstance(pciChipId, list):
+                        chipIdStr = '-'.join([str(d).replace('Device ', '').strip() for d in pciChipId])
+                    else:
+                        chipIdStr = str(pciChipId).replace('Device ', '').strip()
+                    placeholderName += "_ID" + chipIdStr
                 placeholderName += "_" + str(devicePart)
 
             return newLib, placeholderName
@@ -523,6 +536,7 @@ class MasterSolutionLibrary:
                                                         assembler,
                                                         isaInfoMap,
                                                         lazyLibraryLoading,
+                                                        logicFile,
                                                         solutionClass,
                                                         libraryOrder[placeholderIndex:],
                                                         placeholderName)

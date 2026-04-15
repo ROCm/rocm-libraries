@@ -339,7 +339,7 @@ TEST_F(IntegrationLayerNormDescriptorLifting, LayernormLiftWithoutFinalization)
               toVec(ln_constants::K_LAYERNORM_TENSOR_Y_STRIDES));
 }
 
-// Exercises the deserialize_via_backend() path with a handle for a layernorm graph.
+// Exercises the deserialize() path with a handle for a layernorm graph.
 TEST_F(IntegrationLayerNormDescriptorLifting, LayernormDeserializeViaBackendWithHandle)
 {
     auto graph = buildTrainingGraph();
@@ -348,12 +348,12 @@ TEST_F(IntegrationLayerNormDescriptorLifting, LayernormDeserializeViaBackendWith
     auto result = graph->validate();
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
-    auto data = graph->toBinary();
-    ASSERT_FALSE(data.empty());
+    auto [data, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
 
-    // Create a new graph and use deserialize_via_backend with handle
+    // Create a new graph and use deserialize with handle
     auto liftedGraph = std::make_shared<TestableGraphLifting>();
-    result = liftedGraph->deserialize_via_backend(_handle, data);
+    result = liftedGraph->deserialize(_handle, data);
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
     // Verify graph-level data types

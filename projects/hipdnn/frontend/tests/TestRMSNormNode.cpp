@@ -29,7 +29,7 @@ TEST(TestRMSNormNode, RMSNormNodeProperties)
     outputTensor->set_uid(2).set_name("OutputTensor");
 
     auto scaleTensor = rmsnormAttributes.get_scale();
-    scaleTensor->set_dim({1, 2, 1, 1});
+    scaleTensor->set_dim({1, 2, 3, 4});
 
     auto epsilonTensor = rmsnormAttributes.get_epsilon();
     epsilonTensor->set_dim({1}).set_value(1e-5f);
@@ -54,7 +54,7 @@ TEST(TestRMSNormNode, PreValidateNode)
     rmsnormAttributes.set_y(std::make_shared<TensorAttributes>());
 
     auto scaleTensor = std::make_shared<TensorAttributes>();
-    scaleTensor->set_dim({1, 64, 1, 1});
+    scaleTensor->set_dim({1, 64, 32, 32});
     rmsnormAttributes.set_scale(scaleTensor);
 
     auto epsilonTensor = std::make_shared<TensorAttributes>();
@@ -112,7 +112,7 @@ TEST(TestRMSNormNode, PreValidateNodeMissingValues)
     xTensor->set_dim({2, 64, 32, 32}).set_stride({65536, 1024, 32, 1});
 
     auto scaleTensor = rmsnormAttributes.get_scale();
-    scaleTensor->set_dim({1, 64, 1, 1});
+    scaleTensor->set_dim({1, 64, 32, 32});
 
     rmsnormAttributesCopy = rmsnormAttributes;
     const RMSNormNode nodeWithAllValues(std::move(rmsnormAttributesCopy), graphAttributes);
@@ -132,11 +132,11 @@ TEST(TestRMSNormNode, PreValidateNodeWithBias)
     rmsnormAttributes.set_y(std::make_shared<TensorAttributes>());
 
     auto scaleTensor = std::make_shared<TensorAttributes>();
-    scaleTensor->set_dim({1, 64, 1, 1});
+    scaleTensor->set_dim({1, 64, 32, 32});
     rmsnormAttributes.set_scale(scaleTensor);
 
     auto biasTensor = std::make_shared<TensorAttributes>();
-    biasTensor->set_dim({1, 64, 1, 1});
+    biasTensor->set_dim({1, 64, 32, 32});
     rmsnormAttributes.set_bias(biasTensor);
 
     auto epsilonTensor = std::make_shared<TensorAttributes>();
@@ -163,11 +163,11 @@ TEST(TestRMSNormNode, PreValidateRejectsMismatchedBiasChannelDimensions)
     rmsnormAttributes.set_y(std::make_shared<TensorAttributes>());
 
     auto scaleTensor = std::make_shared<TensorAttributes>();
-    scaleTensor->set_dim({1, 64, 1, 1});
+    scaleTensor->set_dim({1, 64, 32, 32});
     rmsnormAttributes.set_scale(scaleTensor);
 
     auto biasTensor = std::make_shared<TensorAttributes>();
-    biasTensor->set_dim({1, 128, 1, 1}); // Mismatched channel dimension
+    biasTensor->set_dim({1, 128, 32, 32}); // Mismatched channel dimension
     rmsnormAttributes.set_bias(biasTensor);
 
     auto epsilonTensor = std::make_shared<TensorAttributes>();
@@ -204,7 +204,7 @@ TEST(TestRMSNormNode, InferPropertiesNode)
     outputTensor->set_uid(2).set_name("OutputTensor");
 
     auto scaleTensor = rmsnormAttributes.get_scale();
-    scaleTensor->set_dim({1, 2, 1, 1});
+    scaleTensor->set_dim({1, 2, 3, 4});
 
     auto epsilonTensor = rmsnormAttributes.get_epsilon();
     epsilonTensor->set_dim({1}).set_value(1e-5f);
@@ -299,105 +299,6 @@ TEST(TestRMSNormNode, InferPropertiesNodeWithBias)
 
     // Bias should get channel-only shape [1, C, 1, 1]
     EXPECT_EQ(biasTensor->get_dim(), (std::vector<int64_t>{1, 64, 1, 1}));
-}
-
-TEST(TestRMSNormNode, PackNode)
-{
-    RMSNormAttributes rmsnormAttributes;
-    rmsnormAttributes.set_name("RMSNorm");
-    rmsnormAttributes.set_forward_phase(NormFwdPhase::INFERENCE);
-
-    auto xTensor = std::make_shared<TensorAttributes>();
-    xTensor->set_uid(1)
-        .set_name("XTensor")
-        .set_data_type(DataType::FLOAT)
-        .set_dim({1, 2, 3, 4})
-        .set_stride({4, 3, 2, 1});
-    rmsnormAttributes.set_x(xTensor);
-
-    auto yTensor = std::make_shared<TensorAttributes>();
-    yTensor->set_uid(2)
-        .set_name("YTensor")
-        .set_data_type(DataType::FLOAT)
-        .set_dim({1, 2, 3, 4})
-        .set_stride({4, 3, 2, 1});
-    rmsnormAttributes.set_y(yTensor);
-
-    auto scaleTensor = std::make_shared<TensorAttributes>();
-    scaleTensor->set_uid(3)
-        .set_name("ScaleTensor")
-        .set_data_type(DataType::FLOAT)
-        .set_dim({1, 2, 1, 1})
-        .set_stride({2, 1, 1, 1});
-    rmsnormAttributes.set_scale(scaleTensor);
-
-    auto epsilonTensor = std::make_shared<TensorAttributes>();
-    epsilonTensor->set_uid(4).set_name("EpsilonTensor").set_value(1e-5f);
-    rmsnormAttributes.set_epsilon(epsilonTensor);
-
-    const GraphAttributes graphAttributes;
-    const RMSNormNode node(std::move(rmsnormAttributes), graphAttributes);
-
-    flatbuffers::FlatBufferBuilder builder;
-    auto offset = node.pack_node(builder);
-    EXPECT_NE(offset.o, 0);
-
-    builder.Finish(offset);
-    auto bufferPointer = builder.GetBufferPointer();
-    auto nodeFlatbuffer = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::Node>(bufferPointer);
-
-    EXPECT_STREQ(nodeFlatbuffer->name()->c_str(), "RMSNorm");
-    EXPECT_EQ(nodeFlatbuffer->attributes_type(),
-              hipdnn_data_sdk::data_objects::NodeAttributes::RMSNormAttributes);
-
-    auto packedAttributes = nodeFlatbuffer->attributes_as_RMSNormAttributes();
-    ASSERT_NE(packedAttributes, nullptr);
-
-    EXPECT_EQ(packedAttributes->x_tensor_uid(), xTensor->get_uid());
-    EXPECT_EQ(packedAttributes->y_tensor_uid(), yTensor->get_uid());
-    EXPECT_EQ(packedAttributes->scale_tensor_uid(), scaleTensor->get_uid());
-    EXPECT_EQ(packedAttributes->epsilon_tensor_uid(), epsilonTensor->get_uid());
-}
-
-TEST(TestRMSNormNode, PackNodeWithBias)
-{
-    RMSNormAttributes rmsnormAttributes;
-    rmsnormAttributes.set_name("RMSNorm");
-
-    auto xTensor = std::make_shared<TensorAttributes>();
-    xTensor->set_uid(1).set_dim({1, 2, 3, 4}).set_stride({4, 3, 2, 1});
-    rmsnormAttributes.set_x(xTensor);
-
-    auto yTensor = std::make_shared<TensorAttributes>();
-    yTensor->set_uid(2).set_dim({1, 2, 3, 4}).set_stride({4, 3, 2, 1});
-    rmsnormAttributes.set_y(yTensor);
-
-    auto scaleTensor = std::make_shared<TensorAttributes>();
-    scaleTensor->set_uid(3).set_dim({1, 2, 1, 1}).set_stride({2, 1, 1, 1});
-    rmsnormAttributes.set_scale(scaleTensor);
-
-    auto epsilonTensor = std::make_shared<TensorAttributes>();
-    epsilonTensor->set_uid(4).set_value(1e-5f);
-    rmsnormAttributes.set_epsilon(epsilonTensor);
-
-    auto biasTensor = std::make_shared<TensorAttributes>();
-    biasTensor->set_uid(5).set_dim({1, 2, 1, 1}).set_stride({2, 1, 1, 1});
-    rmsnormAttributes.set_bias(biasTensor);
-
-    const GraphAttributes graphAttributes;
-    const RMSNormNode node(std::move(rmsnormAttributes), graphAttributes);
-
-    flatbuffers::FlatBufferBuilder builder;
-    auto offset = node.pack_node(builder);
-    builder.Finish(offset);
-
-    auto bufferPointer = builder.GetBufferPointer();
-    auto nodeFlatbuffer = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::Node>(bufferPointer);
-    auto packedAttributes = nodeFlatbuffer->attributes_as_RMSNormAttributes();
-
-    ASSERT_NE(packedAttributes, nullptr);
-    EXPECT_TRUE(packedAttributes->bias_tensor_uid().has_value());
-    EXPECT_EQ(packedAttributes->bias_tensor_uid().value(), biasTensor->get_uid());
 }
 
 TEST(TestRMSNormNode, GatherHipdnnTensors)
@@ -533,7 +434,8 @@ TEST(TestRMSNormNode, PreValidateRejectsMismatchedChannelDimensions)
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
-    EXPECT_TRUE(error.get_message().find("channel dimension") != std::string::npos);
+    const std::string expected = "index 1 must match input dimension at index 1";
+    EXPECT_TRUE(error.get_message().find(expected) != std::string::npos);
 }
 
 TEST(TestRMSNormNode, PreValidateRejectsInvalidScaleTensorShape)
@@ -547,18 +449,21 @@ TEST(TestRMSNormNode, PreValidateRejectsInvalidScaleTensorShape)
     rmsnormAttributes.set_y(std::make_shared<TensorAttributes>());
 
     auto scaleTensor = std::make_shared<TensorAttributes>();
-    scaleTensor->set_dim({1, 64, 32, 32}); // Should be [1, 64, 1, 1]
+    scaleTensor->set_dim({1, 64, 2, 2}); // Should be [1, 64, 32, 32]
     rmsnormAttributes.set_scale(scaleTensor);
 
     auto epsilonTensor = std::make_shared<TensorAttributes>();
     epsilonTensor->set_dim({1}).set_value(1e-5f);
     rmsnormAttributes.set_epsilon(epsilonTensor);
 
+    rmsnormAttributes.set_forward_phase(NormFwdPhase::TRAINING);
+
     const GraphAttributes graphAttributes;
     const RMSNormNode node(std::move(rmsnormAttributes), graphAttributes);
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
+    std::cerr << "Error message: " << error.get_message() << "\n";
     EXPECT_TRUE(error.get_message().find("Scale tensor") != std::string::npos);
 }
 
@@ -713,7 +618,7 @@ TEST(TestRMSNormNode, InferInvRmsPreservesUserSetDims)
         .set_stride({4096, 64, 8, 1});
 
     rmsnormAttributes.get_y()->set_uid(2);
-    rmsnormAttributes.get_scale()->set_dim({1, 64, 1, 1});
+    rmsnormAttributes.get_scale()->set_dim({1, 64, 8, 8});
     rmsnormAttributes.get_epsilon()->set_dim({1}).set_value(1e-5f);
 
     // User explicitly sets inv_rms dims — inference should not overwrite

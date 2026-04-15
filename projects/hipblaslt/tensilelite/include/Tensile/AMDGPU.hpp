@@ -27,6 +27,7 @@
 #pragma once
 
 #include <Tensile/Tensile.hpp>
+#include <optional>
 
 namespace TensileLite
 {
@@ -240,7 +241,7 @@ namespace TensileLite
         }
 
         AMDGPU();
-        AMDGPU(Processor p, int computeUnitCount, std::string const& deviceName);
+        AMDGPU(Processor p, int computeUnitCount, std::string const& deviceName, std::optional<int> pciChipId = std::nullopt);
         ~AMDGPU();
 
         Processor   processor                = Processor::gfx900;
@@ -264,17 +265,22 @@ namespace TensileLite
 
         virtual bool   isStandardCU() const;
         virtual bool   runsKernelTargeting(Processor p) const;
-        virtual size_t id() const
+        virtual size_t id() const override
         {
             return (size_t)processor;
         }
 
-        virtual std::string archName() const
+        virtual std::string archName() const override
         {
             return toString(processor);
         }
 
-        virtual std::string description() const;
+        virtual std::optional<int> pciChipId() const override
+        {
+            return _pciChipId;
+        }
+
+        virtual std::string description() const override;
 
         const int getSKDynamicGrid() const
         {
@@ -362,8 +368,11 @@ namespace TensileLite
 
         bool operator==(AMDGPU const& rhs) const
         {
-            return processor == rhs.processor && computeUnitCount == rhs.computeUnitCount;
+            return processor == rhs.processor && computeUnitCount == rhs.computeUnitCount && _pciChipId == rhs._pciChipId;
         }
+
+    private:
+        std::optional<int> _pciChipId = std::nullopt;
     };
 
     inline bool operator<(AMDGPU::Processor l, AMDGPU::Processor r)
