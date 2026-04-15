@@ -9,10 +9,10 @@ namespace hipdnn_backend
 {
 
 std::shared_ptr<IBackendDescriptor> NodeFactory::createOperationFromNode(
-    const hipdnn_data_sdk::data_objects::NodeT& nodeT,
+    const hipdnn_flatbuffers_sdk::data_objects::NodeT& nodeT,
     const std::unordered_map<int64_t, std::shared_ptr<TensorDescriptor>>& tensorMap)
 {
-    using NodeAttributes = hipdnn_data_sdk::data_objects::NodeAttributes;
+    using NodeAttributes = hipdnn_flatbuffers_sdk::data_objects::NodeAttributes;
 
     switch(nodeT.attributes.type)
     {
@@ -54,13 +54,14 @@ std::shared_ptr<IBackendDescriptor> NodeFactory::createOperationFromNode(
         throw HipdnnException(
             HIPDNN_STATUS_NOT_SUPPORTED,
             "NodeFactory::createOperationFromNode: unsupported node type "
-                + std::string(
-                    hipdnn_data_sdk::data_objects::EnumNameNodeAttributes(nodeT.attributes.type)));
+                + std::string(hipdnn_flatbuffers_sdk::data_objects::EnumNameNodeAttributes(
+                    nodeT.attributes.type)));
     }
 }
 
 std::unordered_map<int64_t, std::shared_ptr<TensorDescriptor>> NodeFactory::buildTensorMap(
-    const std::vector<std::unique_ptr<hipdnn_data_sdk::data_objects::TensorAttributesT>>& tensors)
+    const std::vector<std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT>>&
+        tensors)
 {
     std::unordered_map<int64_t, std::shared_ptr<TensorDescriptor>> tensorMap;
     for(const auto& tensorT : tensors)

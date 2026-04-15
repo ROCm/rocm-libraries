@@ -52,7 +52,6 @@ set(__clang_cxx_compile_options
     -Wno-exit-time-destructors
     -Wno-extra-semi
     -Wno-extra-semi-stmt
-    -Wno-float-conversion
     -Wno-gnu-anonymous-struct
     -Wno-gnu-zero-variadic-macro-arguments
     -Wno-missing-prototypes
@@ -65,9 +64,9 @@ set(__clang_cxx_compile_options
     -Wno-unused-command-line-argument
     -Wno-weak-vtables
     -Wno-covered-switch-default
+    -Wno-unused-result
     -Wno-unsafe-buffer-usage
     -Wno-deprecated-declarations
-    -Wno-shadow-uncaptured-local
     -Wno-global-constructors
     -Wno-reserved-identifier
     -Wno-zero-as-null-pointer-constant
@@ -79,7 +78,6 @@ set(__clang_cxx_compile_options
     -Wno-microsoft-enum-value
     -Wno-language-extension-token
     -Wno-c++11-narrowing
-    -Wno-float-equal
     -Wno-redundant-parens
     -Wno-format-nonliteral
     -Wno-unused-template
@@ -105,7 +103,6 @@ endif()
 
 if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL "23")
     list(APPEND __clang_cxx_compile_options
-        -Wno-nrvo
         -Wno-lifetime-safety
         -Wno-lifetime-safety-suggestions
         -Wno-lifetime-safety-intra-tu-suggestions

@@ -88,6 +88,8 @@ BEGIN_ROCPRIM_NAMESPACE
 ///   represented by an array of unsigned integers and the key is also an array
 ///   of unsigned integers.
 ///
+/// The full example is [on GitHub](https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocprim/example/rocprim/device/example_device_find_end.cpp).
+///
 /// \code{.cpp}
 /// #include <rocprim/rocprim.hpp>
 ///

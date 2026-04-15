@@ -15,7 +15,7 @@
 #include "mocks/MockHandle.hpp"
 
 #include <gtest/gtest.h>
-#include <hipdnn_data_sdk/data_objects/engine_config_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/engine_config_generated.h>
 
 #include <memory>
 
@@ -298,11 +298,11 @@ static flatbuffers::DetachedBuffer createSerializedKnobSetting(const std::string
 {
     flatbuffers::FlatBufferBuilder builder;
     auto knobIdOffset = builder.CreateString(knobId);
-    auto intValue = hipdnn_data_sdk::data_objects::CreateIntValue(builder, value);
-    auto knobSetting = hipdnn_data_sdk::data_objects::CreateKnobSetting(
+    auto intValue = hipdnn_flatbuffers_sdk::data_objects::CreateIntValue(builder, value);
+    auto knobSetting = hipdnn_flatbuffers_sdk::data_objects::CreateKnobSetting(
         builder,
         knobIdOffset,
-        hipdnn_data_sdk::data_objects::KnobValue::IntValue,
+        hipdnn_flatbuffers_sdk::data_objects::KnobValue::IntValue,
         intValue.Union());
     builder.Finish(knobSetting);
     return builder.Release();

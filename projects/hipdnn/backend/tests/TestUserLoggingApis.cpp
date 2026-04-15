@@ -420,12 +420,14 @@ TEST_F(IntegrationBackendUserLoggingApis, DuplicateUpdatesExisting)
     auto recorder = IsolatedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
 
     // Register callback at INFO
-    registerIsolatedCallback(HIPDNN_SEV_INFO, HIPDNN_LOG_CALLBACK_ASYNC);
+    registerIsolatedCallback(HIPDNN_SEV_INFO, HIPDNN_LOG_CALLBACK_SYNC);
     ASSERT_EQ(hipdnnBackendSetGlobalLogLevel_ext(HIPDNN_SEV_INFO), HIPDNN_STATUS_SUCCESS);
 
     // Register again with same callback and handle but different level
     // This should UPDATE, not create second registration
-    registerIsolatedCallback(HIPDNN_SEV_WARN, HIPDNN_LOG_CALLBACK_ASYNC);
+    registerIsolatedCallback(HIPDNN_SEV_WARN, HIPDNN_LOG_CALLBACK_SYNC);
+
+    recorder.clearLogs();
 
     // Trigger INFO level log
     hipdnnHandle_t handle = nullptr;
@@ -436,7 +438,9 @@ TEST_F(IntegrationBackendUserLoggingApis, DuplicateUpdatesExisting)
     // Should NOT receive INFO logs (updated to WARN)
     // If there were 2 registrations, we'd get logs from the first one
     EXPECT_EQ(recorder.countLogsAtLevel(HIPDNN_SEV_INFO), 0)
-        << "Should not receive INFO logs after update to WARN level";
+        << "Should not receive INFO logs after update to WARN level.\n"
+        << "Captured logs:\n"
+        << recorder.getRecordedLogsAsString();
 
     ASSERT_EQ(hipdnnDestroy(handle), HIPDNN_STATUS_SUCCESS);
 }

@@ -26,7 +26,7 @@ from collections.abc import Callable
 from typing import Any, Optional
 import unittest
 
-from test_CustomSchedule import create_base_kernel, ScheduleInfo
+from test_CustomSchedule import create_base_kernel, update_kernel, ScheduleInfo
 from Tensile.Components.CMSValidator import (
     create_unified_timeline, ValidatorPassContext, validate_timeline,
 )
@@ -85,14 +85,7 @@ class CMSValidationTestBase(unittest.TestCase):
         """Initialize kernel and compute number of VMFMAs."""
         self.kernel = create_base_kernel()
         if kernel_updates:
-            # Handle nested ProblemType updates
-            if "ProblemType" in kernel_updates:
-                self.kernel["ProblemType"].update(kernel_updates["ProblemType"])
-                # Create a copy without ProblemType for top-level update
-                remaining_updates = {k: v for k, v in kernel_updates.items() if k != "ProblemType"}
-                self.kernel.update(remaining_updates)
-            else:
-                self.kernel.update(kernel_updates)
+            update_kernel(self.kernel, kernel_updates)
         
         self.num_vmfma = self.kernel["MIWaveTileA"] * self.kernel["MIWaveTileB"]
         self.num_vmfma *= self.kernel["DepthU"] // self.kernel["MatrixInstruction"][2]
