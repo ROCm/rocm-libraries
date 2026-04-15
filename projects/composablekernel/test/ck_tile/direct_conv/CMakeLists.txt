@@ -13,4 +13,14 @@ add_gtest_executable(test_direct_conv_transpose_lds test_transpose_lds_layout.cp
 # Integration test (gfx950 / CDNA4 only)
 if(GPU_TARGETS MATCHES "gfx950")
     add_gtest_executable(test_direct_conv_grouped_4c_fp16 test_grouped_4c_fp16.cpp)
+    # The direct conv kernels are ported from hipconv and use C-style casts, have unused
+    # parameters, and other patterns that trigger -Weverything. Suppress these warnings for now.
+    # TODO: Fix the code such that warnign can be re-enabled.
+    if(TARGET test_direct_conv_grouped_4c_fp16)
+        target_compile_options(test_direct_conv_grouped_4c_fp16 PRIVATE
+            -Wno-old-style-cast
+            -Wno-unused-parameter
+            -Wno-shadow
+        )
+    endif()
 endif()
