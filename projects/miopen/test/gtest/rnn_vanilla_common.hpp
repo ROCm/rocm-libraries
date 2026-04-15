@@ -33,6 +33,8 @@
 #include "miopen/rnn.hpp"
 #include "miopen/tensor.hpp"
 #include "workspace.hpp"
+#include "gtest_dropout_desc_guard.hpp"
+#include "gtest_rnn_desc_guard.hpp"
 
 #define MIO_RNN_TEST_DEBUG 0
 #define MIO_RNN_TIME_EVERYTHING 0
@@ -1199,10 +1201,8 @@ protected:
 
         int batch_n = std::accumulate(batchSeq.begin(), batchSeq.end(), 0);
 
-        miopenRNNDescriptor_t rnnDesc;
-        miopenCreateRNNDescriptor(&rnnDesc);
-        miopenDropoutDescriptor_t DropoutDesc;
-        miopenCreateDropoutDescriptor(&DropoutDesc);
+        RNNDescGuard rnnDesc;
+        DropoutDescGuard DropoutDesc;
         size_t statesSizeInBytes = 0;
 
         miopenRNNAlgo_t algoMode  = miopenRNNdefault;
@@ -1489,8 +1489,6 @@ protected:
 #endif
             miopenDestroy(mio_handle);
         }
-        miopenDestroyDropoutDescriptor(DropoutDesc);
-        miopenDestroyRNNDescriptor(rnnDesc);
     }
 
 private:
