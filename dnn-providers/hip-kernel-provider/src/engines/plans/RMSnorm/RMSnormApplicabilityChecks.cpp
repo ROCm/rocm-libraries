@@ -323,4 +323,31 @@ void checkRMSnormTensorConfigSupported(
     checkTensorShapesSupported(ioTensorIds, affineTensorIds, statTensorIds, tensorMap);
 }
 
+void checkRMSNormBwdTensorConfigSupported(
+    const hipdnn_data_sdk::data_objects::RMSNormBackwardAttributes& rmsNormBwdAttr,
+    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        tensorMap)
+{
+    std::vector<int64_t> ioTensorIds = {rmsNormBwdAttr.dy_tensor_uid(),
+                                        rmsNormBwdAttr.x_tensor_uid(),
+                                        rmsNormBwdAttr.dx_tensor_uid()};
+
+    std::vector<int64_t> affineTensorIds
+        = {rmsNormBwdAttr.scale_tensor_uid(), rmsNormBwdAttr.dscale_tensor_uid()};
+    if(rmsNormBwdAttr.dbias_tensor_uid().has_value())
+    {
+        affineTensorIds.push_back(rmsNormBwdAttr.dbias_tensor_uid().value());
+    }
+
+    std::vector<int64_t> statTensorIds;
+    if(rmsNormBwdAttr.inv_rms_tensor_uid().has_value())
+    {
+        statTensorIds.push_back(rmsNormBwdAttr.inv_rms_tensor_uid().value());
+    }
+
+    checkTensorLayoutsAndDimsSupported(tensorMap);
+    checkTensorDataTypesSupported(ioTensorIds, affineTensorIds, statTensorIds, tensorMap);
+    checkTensorShapesSupported(ioTensorIds, affineTensorIds, statTensorIds, tensorMap);
+}
+
 } // namespace hip_kernel_provider
