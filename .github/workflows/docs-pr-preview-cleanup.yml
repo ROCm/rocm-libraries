@@ -53,12 +53,17 @@ jobs:
           RTD_TOKEN: ${{ secrets.RTD_TOKEN }}
         run: |
           branch_name="${{ github.head_ref }}"
-         # Generate slug like 'user-me-my_test_branch' from 'user/me/my_test_branch'
+          # Generate slug like 'user-me-my_test_branch' from 'user/me/my_test_branch'
           version_slug="${branch_name//\//-}"
 
-          response=$(curl -s -o /dev/null -w "%{http_code}" -X PATCH \
-            -H "Authorization: Token $RTD_TOKEN" \
-            -H "Content-Type: application/json" \
-            -d '{"active": false}' \
+          response=$(curl \
+            --connect-timeout 180 \
+            --silent \
+            --output /dev/null \
+            --write-out "%{http_code}" \
+            --request PATCH \
+            --header "Authorization: Token $RTD_TOKEN" \
+            --header "Content-Type: application/json" \
+            --data '{"active": false}' \
             "https://app.readthedocs.com/api/v3/projects/${{ steps.rtd.outputs.project_slug }}/versions/${version_slug}/")
           echo "RTD PATCH responded with HTTP $response"
