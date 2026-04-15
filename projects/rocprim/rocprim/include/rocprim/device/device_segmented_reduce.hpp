@@ -60,6 +60,8 @@ inline hipError_t segmented_reduce_impl(void*          temporary_storage,
                                         hipStream_t    stream,
                                         bool           debug_synchronous)
 {
+    printf("4) segmented_reduce_impl()\n");
+
     using input_type  = typename std::iterator_traits<InputIterator>::value_type;
     using result_type = ::rocprim::accumulator_t<BinaryFunction, input_type>;
 
@@ -71,10 +73,21 @@ inline hipError_t segmented_reduce_impl(void*          temporary_storage,
 
     const unsigned int block_size = params.kernel_config.block_size;
 
+    
+if (static_cast<uint64_t>(segments) * static_cast<uint64_t>(block_size) > (1ULL << 32)) {
+    return hipErrorInvalidConfiguration;
+    // Error message: "num_segments × block_size exceeds HSA 2^32 thread limit.
+    //                 Please batch calls with max 2^24 segments (block_size=256)."
+    // There doesn't seem to be any way to set an error message.  It's not done anywhere else that
+    // I can find.
+}
+
+
     if(temporary_storage == nullptr)
     {
         // Make sure user won't try to allocate 0 bytes memory, because
         // hipMalloc will return nullptr when size is zero.
+        printf("    set temp storage size = 4\n");
         storage_size = 4;
         return hipSuccess;
     }
@@ -225,6 +238,8 @@ inline hipError_t segmented_reduce(void*          temporary_storage,
                                    hipStream_t    stream            = 0,
                                    bool           debug_synchronous = false)
 {
+    printf("3) segmented_reduce()\n");
+
     return detail::segmented_reduce_impl<Config>(temporary_storage,
                                                  storage_size,
                                                  input,

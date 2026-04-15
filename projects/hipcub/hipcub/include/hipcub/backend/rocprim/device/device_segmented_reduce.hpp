@@ -199,6 +199,7 @@ struct DeviceSegmentedReduce
                              T               initial_value,
                              hipStream_t     stream = 0)
     {
+        printf("2) Reduce()\n");
         return ::rocprim::segmented_reduce(
             d_temp_storage,
             temp_storage_bytes,
@@ -255,7 +256,7 @@ struct DeviceSegmentedReduce
                           hipStream_t     stream = 0)
     {
         using input_type = typename std::iterator_traits<InputIteratorT>::value_type;
-
+printf("1) Sum()\n");
         return Reduce(d_temp_storage,
                       temp_storage_bytes,
                       d_in,
