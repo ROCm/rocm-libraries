@@ -836,35 +836,35 @@ TEST(TestCpuFpReferenceSdpaFp64, LseWithGqa)
 // Backward pass tests
 // ---------------------------------------------------------------------------
 
-TEST(TestCpuFpReferenceSdpaBackward, BackwardSanityFp64)
+TEST(TestCpuFpReferenceSdpaBackward, BackwardSanityFp32)
 {
     // Simple sanity check for backward pass with small dimensions
     // [B=1, H=1, Sq=2, Skv=2, D=2, Dv=2]
-    Tensor<double> q({1, 1, 2, 2});
-    Tensor<double> k({1, 1, 2, 2});
-    Tensor<double> v({1, 1, 2, 2});
-    Tensor<double> o({1, 1, 2, 2});
-    Tensor<double> dO({1, 1, 2, 2});
-    Tensor<double> dQ({1, 1, 2, 2});
-    Tensor<double> dK({1, 1, 2, 2});
-    Tensor<double> dV({1, 1, 2, 2});
+    Tensor<float> q({1, 1, 2, 2});
+    Tensor<float> k({1, 1, 2, 2});
+    Tensor<float> v({1, 1, 2, 2});
+    Tensor<float> o({1, 1, 2, 2});
+    Tensor<float> dO({1, 1, 2, 2});
+    Tensor<float> dQ({1, 1, 2, 2});
+    Tensor<float> dK({1, 1, 2, 2});
+    Tensor<float> dV({1, 1, 2, 2});
 
     // Set up simple input
-    q.fillWithValue(0.0);
-    k.fillWithValue(0.0);
-    v.fillWithValue(0.0);
+    q.fillWithValue(0.0f);
+    k.fillWithValue(0.0f);
+    v.fillWithValue(0.0f);
 
-    q.setHostValue(1.0, 0, 0, 0, 0);
-    q.setHostValue(1.0, 0, 0, 1, 1);
-    k.setHostValue(1.0, 0, 0, 0, 0);
-    k.setHostValue(1.0, 0, 0, 1, 1);
-    v.setHostValue(1.0, 0, 0, 0, 0);
-    v.setHostValue(2.0, 0, 0, 0, 1);
-    v.setHostValue(3.0, 0, 0, 1, 0);
-    v.setHostValue(4.0, 0, 0, 1, 1);
+    q.setHostValue(1.0f, 0, 0, 0, 0);
+    q.setHostValue(1.0f, 0, 0, 1, 1);
+    k.setHostValue(1.0f, 0, 0, 0, 0);
+    k.setHostValue(1.0f, 0, 0, 1, 1);
+    v.setHostValue(1.0f, 0, 0, 0, 0);
+    v.setHostValue(2.0f, 0, 0, 0, 1);
+    v.setHostValue(3.0f, 0, 0, 1, 0);
+    v.setHostValue(4.0f, 0, 0, 1, 1);
 
     // Upstream gradient: ones
-    dO.fillWithValue(1.0);
+    dO.fillWithValue(1.0f);
 
     // Forward pass
     CpuFpReferenceSdpa::forward(q, k, v, o);
@@ -887,23 +887,23 @@ TEST(TestCpuFpReferenceSdpaBackward, BackwardSanityFp64)
     }
 }
 
-TEST(TestCpuFpReferenceSdpaBackward, BackwardMHAFp64)
+TEST(TestCpuFpReferenceSdpaBackward, BackwardMHAFp32)
 {
     // Test Multi-Head Attention (H_q == H_kv)
     // [B=1, H=2, Sq=4, Skv=4, D=8, Dv=8]
-    Tensor<double> q({1, 2, 4, 8});
-    Tensor<double> k({1, 2, 4, 8});
-    Tensor<double> v({1, 2, 4, 8});
-    Tensor<double> o({1, 2, 4, 8});
-    Tensor<double> dO({1, 2, 4, 8});
-    Tensor<double> dQ({1, 2, 4, 8});
-    Tensor<double> dK({1, 2, 4, 8});
-    Tensor<double> dV({1, 2, 4, 8});
+    Tensor<float> q({1, 2, 4, 8});
+    Tensor<float> k({1, 2, 4, 8});
+    Tensor<float> v({1, 2, 4, 8});
+    Tensor<float> o({1, 2, 4, 8});
+    Tensor<float> dO({1, 2, 4, 8});
+    Tensor<float> dQ({1, 2, 4, 8});
+    Tensor<float> dK({1, 2, 4, 8});
+    Tensor<float> dV({1, 2, 4, 8});
 
-    q.fillWithRandomValues(-1.0, 1.0, 100);
-    k.fillWithRandomValues(-1.0, 1.0, 101);
-    v.fillWithRandomValues(-1.0, 1.0, 102);
-    dO.fillWithRandomValues(-1.0, 1.0, 103);
+    q.fillWithRandomValues(-1.0f, 1.0f, 100);
+    k.fillWithRandomValues(-1.0f, 1.0f, 101);
+    v.fillWithRandomValues(-1.0f, 1.0f, 102);
+    dO.fillWithRandomValues(-1.0f, 1.0f, 103);
 
     // Forward pass
     CpuFpReferenceSdpa::forward(q, k, v, o);
@@ -929,23 +929,23 @@ TEST(TestCpuFpReferenceSdpaBackward, BackwardMHAFp64)
     }
 }
 
-TEST(TestCpuFpReferenceSdpaBackward, BackwardGQAFp64)
+TEST(TestCpuFpReferenceSdpaBackward, BackwardGQAFp32)
 {
     // Test Grouped Query Attention (H_q = 4, H_kv = 1)
     // [B=1, H_q=4, H_kv=1, Sq=4, Skv=4, D=8, Dv=8]
-    Tensor<double> q({1, 4, 4, 8});
-    Tensor<double> k({1, 1, 4, 8});
-    Tensor<double> v({1, 1, 4, 8});
-    Tensor<double> o({1, 4, 4, 8});
-    Tensor<double> dO({1, 4, 4, 8});
-    Tensor<double> dQ({1, 4, 4, 8});
-    Tensor<double> dK({1, 1, 4, 8});
-    Tensor<double> dV({1, 1, 4, 8});
+    Tensor<float> q({1, 4, 4, 8});
+    Tensor<float> k({1, 1, 4, 8});
+    Tensor<float> v({1, 1, 4, 8});
+    Tensor<float> o({1, 4, 4, 8});
+    Tensor<float> dO({1, 4, 4, 8});
+    Tensor<float> dQ({1, 4, 4, 8});
+    Tensor<float> dK({1, 1, 4, 8});
+    Tensor<float> dV({1, 1, 4, 8});
 
-    q.fillWithRandomValues(-1.0, 1.0, 200);
-    k.fillWithRandomValues(-1.0, 1.0, 201);
-    v.fillWithRandomValues(-1.0, 1.0, 202);
-    dO.fillWithRandomValues(-1.0, 1.0, 203);
+    q.fillWithRandomValues(-1.0f, 1.0f, 200);
+    k.fillWithRandomValues(-1.0f, 1.0f, 201);
+    v.fillWithRandomValues(-1.0f, 1.0f, 202);
+    dO.fillWithRandomValues(-1.0f, 1.0f, 203);
 
     // Forward pass
     CpuFpReferenceSdpa::forward(q, k, v, o);
@@ -978,7 +978,7 @@ TEST(TestCpuFpReferenceSdpaBackward, BackwardGQAFp64)
 
     // For GQA, dK and dV should accumulate contributions from multiple Q heads
     // Verify that gradients are non-zero (as they should accumulate from 4 Q heads)
-    double dkSum = 0.0;
+    float dkSum = 0.0f;
     for(int sq = 0; sq < 4; ++sq)
     {
         for(int d = 0; d < 8; ++d)
@@ -986,29 +986,29 @@ TEST(TestCpuFpReferenceSdpaBackward, BackwardGQAFp64)
             dkSum += std::abs(dK.getHostValue(0, 0, sq, d));
         }
     }
-    EXPECT_GT(dkSum, 0.0) << "dK should have non-zero gradients from GQA accumulation";
+    EXPECT_GT(dkSum, 0.0f) << "dK should have non-zero gradients from GQA accumulation";
 }
 
-TEST(TestCpuFpReferenceSdpaBackward, BackwardCausalMaskFp64)
+TEST(TestCpuFpReferenceSdpaBackward, BackwardCausalMaskFp32)
 {
     // Test backward pass with causal masking
     // [B=1, H=1, Sq=4, Skv=4, D=4, Dv=4]
-    Tensor<double> q({1, 1, 4, 4});
-    Tensor<double> k({1, 1, 4, 4});
-    Tensor<double> v({1, 1, 4, 4});
-    Tensor<double> o({1, 1, 4, 4});
-    Tensor<double> dO({1, 1, 4, 4});
-    Tensor<double> dQ({1, 1, 4, 4});
-    Tensor<double> dK({1, 1, 4, 4});
-    Tensor<double> dV({1, 1, 4, 4});
+    Tensor<float> q({1, 1, 4, 4});
+    Tensor<float> k({1, 1, 4, 4});
+    Tensor<float> v({1, 1, 4, 4});
+    Tensor<float> o({1, 1, 4, 4});
+    Tensor<float> dO({1, 1, 4, 4});
+    Tensor<float> dQ({1, 1, 4, 4});
+    Tensor<float> dK({1, 1, 4, 4});
+    Tensor<float> dV({1, 1, 4, 4});
 
-    q.fillWithRandomValues(-1.0, 1.0, 300);
-    k.fillWithRandomValues(-1.0, 1.0, 301);
-    v.fillWithRandomValues(-1.0, 1.0, 302);
-    dO.fillWithRandomValues(-1.0, 1.0, 303);
+    q.fillWithRandomValues(-1.0f, 1.0f, 300);
+    k.fillWithRandomValues(-1.0f, 1.0f, 301);
+    v.fillWithRandomValues(-1.0f, 1.0f, 302);
+    dO.fillWithRandomValues(-1.0f, 1.0f, 303);
 
     const bool causalMask = true;
-    const hipdnn_data_sdk::utilities::TensorBase<double>* noMask = nullptr;
+    const hipdnn_data_sdk::utilities::TensorBase<float>* noMask = nullptr;
 
     // Forward pass with causal mask
     CpuFpReferenceSdpa::forward(q, k, v, o, std::nullopt, noMask, causalMask);
