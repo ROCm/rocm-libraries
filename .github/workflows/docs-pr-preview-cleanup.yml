@@ -30,7 +30,7 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.generate-token.outputs.token }}
         run: |
-          # Extract project identifier from the bot's comment. 
+          # Extract project identifier from the bot's comment.
           # The JSON output for a valid commit will have "assistant-librarian[bot]"
           # for key `user.login` and contain "rocm.docs.amd.com/projects/" for key `body`
           # and we need to parse "rocm.docs.amd.com/projects/project_slug/xyz..." to "project_slug"
