@@ -4,6 +4,7 @@
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 #include <memory>
+#include <string>
 #include <unordered_set>
 #include <vector>
 
@@ -11,7 +12,9 @@
 #include <hipdnn_frontend/detail/ScopedHipdnnBackendDescriptor.hpp>
 #include <hipdnn_frontend/node/SdpaBwdNode.hpp>
 #include <hipdnn_test_sdk/constants/SdpaBwdConstants.hpp>
+#include <hipdnn_test_sdk/utilities/LiftingTestHelpers.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
+#include <hipdnn_test_sdk/utilities/TestableGraph.hpp>
 #include <hipdnn_test_sdk/utilities/ToVec.hpp>
 
 #include "test_plugins/TestPluginConstants.hpp"
@@ -24,20 +27,7 @@ using hipdnn_tests::toVec;
 namespace
 {
 
-// Exposes protected Graph methods for testing
-class TestableGraph : public Graph
-{
-public:
-    using Graph::build_operation_graph;
-    using Graph::deserialize_via_backend;
-    using Graph::fromBackendDescriptor;
-    using Graph::get_raw_graph_descriptor;
-
-    const std::vector<std::shared_ptr<INode>>& getSubNodes() const
-    {
-        return _sub_nodes;
-    }
-};
+using TestableGraph = hipdnn_tests::TestableGraphLifting;
 
 // Builds an SDPA backward graph via the frontend, lowers it through the backend C-API
 // via build_operation_graph(), then lifts it back with fromBackendDescriptor()
@@ -194,9 +184,11 @@ TEST_F(IntegrationSdpaBwdLifting, SdpaBwdRoundTripViaCApi)
 
     // Verify the lifted graph has 1 SDPA backward operation node with the correct name
     auto& subNodes = liftedGraph->getSubNodes();
+    // NOLINTNEXTLINE(readability-implicit-bool-conversion)
     ASSERT_EQ(subNodes.size(), 1u) << "Expected 1 operation node in lifted graph";
 
     auto* sdpaNode = dynamic_cast<SdpaBwdNode*>(subNodes[0].get());
+    // NOLINTNEXTLINE(readability-implicit-bool-conversion)
     ASSERT_NE(sdpaNode, nullptr) << "Expected a SdpaBwdNode";
     EXPECT_EQ(sdpaNode->attributes.get_name(), "sdpa_bwd_op");
 }
@@ -566,7 +558,8 @@ TEST_F(IntegrationSdpaBwdLifting, SdpaBwdLiftWithoutFinalization)
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
     // Serialize to binary via the frontend
-    auto data = originalGraph->toBinary();
+    auto [data, serErr] = originalGraph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
     ASSERT_FALSE(data.empty());
 
     // Create a backend graph descriptor from serialized bytes (no handle, no finalize)
@@ -610,11 +603,12 @@ TEST_F(IntegrationSdpaBwdLifting, SdpaBwdDeserializeViaBackendWithHandle)
     auto result = originalGraph->validate();
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
-    auto data = originalGraph->toBinary();
+    auto [data, serErr] = originalGraph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
     ASSERT_FALSE(data.empty());
 
     auto liftedGraph = std::make_shared<TestableGraph>();
-    result = liftedGraph->deserialize_via_backend(_handle, data);
+    result = liftedGraph->deserialize(_handle, data);
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
     // Verify graph-level data types and name
@@ -641,6 +635,102 @@ TEST_F(IntegrationSdpaBwdLifting, SdpaBwdDeserializeViaBackendWithHandle)
     EXPECT_EQ(sdpaNode->attributes.get_name(), "sdpa_bwd_op");
     EXPECT_EQ(sdpaNode->attributes.get_q()->get_uid(), K_SDPA_BWD_TENSOR_Q_UID);
     EXPECT_EQ(sdpaNode->attributes.get_dv()->get_uid(), K_SDPA_BWD_TENSOR_DV_UID);
+}
+
+// Exercises the JSON serialize/deserialize path with a handle (full finalization)
+// for an SDPA backward graph.
+TEST_F(IntegrationSdpaBwdLifting, JsonRoundTripWithHandle)
+{
+    auto originalGraph = buildSdpaBwdGraph();
+
+    auto result = originalGraph->validate();
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    // Serialize to JSON (auto-lowers internally)
+    std::string jsonData;
+    result = originalGraph->serialize(jsonData);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+    ASSERT_FALSE(jsonData.empty());
+
+    // Deserialize from JSON with handle
+    auto liftedGraph = std::make_shared<TestableGraph>();
+    result = liftedGraph->deserialize(_handle, jsonData);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    // Verify graph-level data types and name
+    EXPECT_EQ(liftedGraph->get_compute_data_type(), DataType::FLOAT);
+    EXPECT_EQ(liftedGraph->get_intermediate_data_type(), DataType::FLOAT);
+    EXPECT_EQ(liftedGraph->get_io_data_type(), DataType::FLOAT);
+    EXPECT_EQ(liftedGraph->get_name(), "LiftingSdpaBwdGraph");
+
+    // Verify tensors by UID — 9 required tensors
+    auto tensorMap = liftedGraph->getTensorsByUid();
+    ASSERT_EQ(tensorMap.size(), 9u) << "Expected 9 tensors in lifted SDPA backward graph";
+
+    hipdnn_tests::verifyTensorInGraph(tensorMap,
+                                      K_SDPA_BWD_TENSOR_Q_UID,
+                                      "Q",
+                                      toVec(K_SDPA_BWD_TENSOR_Q_DIMS),
+                                      toVec(K_SDPA_BWD_TENSOR_Q_STRIDES),
+                                      DataType::FLOAT);
+    hipdnn_tests::verifyTensorInGraph(tensorMap,
+                                      K_SDPA_BWD_TENSOR_K_UID,
+                                      "K",
+                                      toVec(K_SDPA_BWD_TENSOR_K_DIMS),
+                                      toVec(K_SDPA_BWD_TENSOR_K_STRIDES),
+                                      DataType::FLOAT);
+    hipdnn_tests::verifyTensorInGraph(tensorMap,
+                                      K_SDPA_BWD_TENSOR_V_UID,
+                                      "V",
+                                      toVec(K_SDPA_BWD_TENSOR_V_DIMS),
+                                      toVec(K_SDPA_BWD_TENSOR_V_STRIDES),
+                                      DataType::FLOAT);
+    hipdnn_tests::verifyTensorInGraph(tensorMap,
+                                      K_SDPA_BWD_TENSOR_O_UID,
+                                      "O",
+                                      toVec(K_SDPA_BWD_TENSOR_O_DIMS),
+                                      toVec(K_SDPA_BWD_TENSOR_O_STRIDES),
+                                      DataType::FLOAT);
+    hipdnn_tests::verifyTensorInGraph(tensorMap,
+                                      K_SDPA_BWD_TENSOR_DO_UID,
+                                      "dO",
+                                      toVec(K_SDPA_BWD_TENSOR_DO_DIMS),
+                                      toVec(K_SDPA_BWD_TENSOR_DO_STRIDES),
+                                      DataType::FLOAT);
+    hipdnn_tests::verifyTensorInGraph(tensorMap,
+                                      K_SDPA_BWD_TENSOR_STATS_UID,
+                                      "Stats",
+                                      toVec(K_SDPA_BWD_TENSOR_STATS_DIMS),
+                                      toVec(K_SDPA_BWD_TENSOR_STATS_STRIDES),
+                                      DataType::FLOAT);
+    hipdnn_tests::verifyTensorInGraph(tensorMap,
+                                      K_SDPA_BWD_TENSOR_DQ_UID,
+                                      "dQ",
+                                      toVec(K_SDPA_BWD_TENSOR_DQ_DIMS),
+                                      toVec(K_SDPA_BWD_TENSOR_DQ_STRIDES),
+                                      DataType::FLOAT);
+    hipdnn_tests::verifyTensorInGraph(tensorMap,
+                                      K_SDPA_BWD_TENSOR_DK_UID,
+                                      "dK",
+                                      toVec(K_SDPA_BWD_TENSOR_DK_DIMS),
+                                      toVec(K_SDPA_BWD_TENSOR_DK_STRIDES),
+                                      DataType::FLOAT);
+    hipdnn_tests::verifyTensorInGraph(tensorMap,
+                                      K_SDPA_BWD_TENSOR_DV_UID,
+                                      "dV",
+                                      toVec(K_SDPA_BWD_TENSOR_DV_DIMS),
+                                      toVec(K_SDPA_BWD_TENSOR_DV_STRIDES),
+                                      DataType::FLOAT);
+
+    // Verify the lifted graph has 1 SDPA backward operation node with the correct name
+    auto& subNodes = liftedGraph->getSubNodes();
+    // NOLINTNEXTLINE(readability-implicit-bool-conversion)
+    ASSERT_EQ(subNodes.size(), 1u) << "Expected 1 operation node in lifted graph";
+
+    auto* sdpaNode = dynamic_cast<SdpaBwdNode*>(subNodes[0].get());
+    // NOLINTNEXTLINE(readability-implicit-bool-conversion)
+    ASSERT_NE(sdpaNode, nullptr) << "Expected a SdpaBwdNode";
+    EXPECT_EQ(sdpaNode->attributes.get_name(), "sdpa_bwd_op");
 }
 
 } // namespace

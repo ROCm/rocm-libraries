@@ -220,6 +220,7 @@ def addCommonArguments(argParser):
     argParser.add_argument("--client-lock", default=None)
     argParser.add_argument("--prebuilt-client", default=str(TENSILE_CLIENT_PATH),
         type=os.path.abspath, help="Specify the full path to a pre-built tensilelite-client executable")
+    argParser.add_argument("--rocm-agent-enumerator", default=None, action="store", dest="rocm_agent_enumerator")
 
     argParser.add_argument("--global-parameters", nargs="+", type=splitExtraParameters, default=[])
 
@@ -588,7 +589,7 @@ def Tensile(userArgs):
     enumerator = validateToolchain(args.CxxCompiler,
                                    args.CCompiler,
                                    args.OffloadBundler,
-                                   ToolchainDefaults.DEVICE_ENUMERATOR)
+                                   ToolchainDefaults.DEVICE_ENUMERATOR if args.rocm_agent_enumerator is None else args.rocm_agent_enumerator)
     asmToolchain = makeAssemblyToolchain(
         cxxCompiler,
         offloadBundler,
@@ -606,8 +607,8 @@ def Tensile(userArgs):
     else:
         isaList = [detectGlobalCurrentISA(device_id, enumerator)]
 
-    if IsaVersion(9,5,0) in isaList:
-        printWarning("HardwareMonitor currently disabled for gfx950")
+    if IsaVersion(9, 5, 0) in isaList or IsaVersion(12, 5, 0) in isaList:
+        printWarning("HardwareMonitor currently disabled for gfx950 and gfx1250")
         globalParameters["HardwareMonitor"] = False
 
     isaInfoMap = makeIsaInfoMap(isaList, cxxCompiler)

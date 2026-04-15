@@ -4819,7 +4819,7 @@ struct ConvWinogradNHWCTransposingBase : TransposingSolver<Derived,
         // - For 4D tensors: Automatically interpreted as NCHW (D dimension is implicit/1)
         // - For 5D tensors: Full NCDHW layout for 3D convolutions
         // This makes the transposing solver future-proof for both 2D and 3D convolutions.
-        auto ret = std::array<ProblemTensorTransposeDescriptor<Problem, InvokeParams>, 3>{{
+        return std::array<ProblemTensorTransposeDescriptor<Problem, InvokeParams>, 3>{{
             {
                 &Problem::GetIn,
                 &InvokeParams::inDesc,
@@ -4845,8 +4845,6 @@ struct ConvWinogradNHWCTransposingBase : TransposingSolver<Derived,
                 is_wrw,  // Fwd/Bwd: output; WrW: input
             },
         }};
-
-        return ret;
     }
 };
 
