@@ -391,6 +391,20 @@ inline error_t memset_async(void* device, int value, size_t count, stream_t stre
     return PRIMBENCH_PREFIX_BACKEND(MemsetAsync)(device, value, count, stream);
 }
 
+template<typename F>
+inline error_t occupancy_max_potential_block_size(int*   min_grid_size,
+                                                  int*   block_size,
+                                                  F      kernel,
+                                                  size_t dynamic_shared_memory_per_block,
+                                                  int    block_size_limit)
+{
+    return PRIMBENCH_PREFIX_BACKEND(OccupancyMaxPotentialBlockSize)(min_grid_size,
+                                                                    block_size,
+                                                                    kernel,
+                                                                    dynamic_shared_memory_per_block,
+                                                                    block_size_limit);
+}
+
 inline error_t stream_create(stream_t* stream)
 {
     return PRIMBENCH_PREFIX_BACKEND(StreamCreate)(stream);
@@ -2218,15 +2232,24 @@ public:
         return instance;
     }
 
-    static constexpr int threads_per_block = 256;
-    static constexpr int num_items         = 1 << 20; // 1 million items.
+    gpu_warmer()
+    {
+        int grid_size;
+        PRIMBENCH_CHECK(occupancy_max_potential_block_size(
+            &grid_size, // Minimum grid size for full occupancy.
+            &m_threads_per_block, // Block size for full occupancy.
+            warmup_kernel,
+            0, // Dynamic shared memory.
+            0 // Block size limit (0 = no limit).
+            ));
 
-    gpu_warmer() : m_device_storage(num_items * sizeof(float)) {}
+        m_num_items = grid_size * m_threads_per_block;
+
+        m_device_storage = std::make_unique<device_storage>(m_num_items * sizeof(float));
+    }
 
     void warm_up(stream_t stream, uint16_t min_gpu_temp, double max_warming_secs) const
     {
-        auto ceil_div = [](int a, int b) -> int { return (a + b - 1) / b; };
-
         auto start = std::chrono::steady_clock::now();
 
         while(true)
@@ -2238,11 +2261,11 @@ public:
             if(use_color())
                 progress::print_warming(gpu_temp, min_gpu_temp);
 
-            dim3 threads(threads_per_block);
-            dim3 blocks(ceil_div(num_items, threads.x));
+            dim3 blocks(m_num_items / m_threads_per_block);
+            dim3 threads(m_threads_per_block);
 
-            warmup_kernel<<<blocks, threads, 0, stream>>>(m_device_storage.get_ptr<float>(),
-                                                          num_items);
+            warmup_kernel<<<blocks, threads, 0, stream>>>(m_device_storage->get_ptr<float>(),
+                                                          m_num_items);
 
             PRIMBENCH_CHECK(stream_synchronize(stream));
 
@@ -2259,8 +2282,11 @@ public:
     }
 
 private:
-    const device_storage m_device_storage;
-}; // struct gpu_warmer
+    int m_threads_per_block;
+    int m_num_items;
+
+    std::unique_ptr<device_storage> m_device_storage;
+}; // class gpu_warmer
 
 #endif // PRIMBENCH_HAS_MONITORING
 
