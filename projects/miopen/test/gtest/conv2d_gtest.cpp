@@ -1,6 +1,8 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#pragma once
+
 #include <utility>
 
 #include "conv_common_gtest.hpp"
@@ -27,8 +29,8 @@ using TestCase = ConvTestBaseTestCase<NamedParameter<size_t>,              // ba
 template <typename T>
 auto GenCases(bool smoke_test)
 {
-    using ct = conv_test<T, ConvApi::Find_2_0>;
-    BaseConvTestParameters<ConvApi::Find_2_0> baseParams;
+    using ct = conv_test<T>;
+    BaseConvTestParameters<> baseParams;
 
     auto batch_size = MakeNamedParameterCollectionValues<size_t>(
         "batch_size", generate_data_limited(ct::get_batch_sizes(), 1, !smoke_test));
@@ -101,8 +103,7 @@ auto GetCasesSmoke()
 } // namespace
 
 template <class T>
-struct conv2d_find2_test : public conv_test<T, ConvApi::Find_2_0>,
-                           public testing::TestWithParam<TestCase>
+struct conv2d_test : public conv_test<T>, public testing::TestWithParam<TestCase>
 {
     void SetUp() override
     {
@@ -127,9 +128,9 @@ struct conv2d_find2_test : public conv_test<T, ConvApi::Find_2_0>,
     }
 };
 
-using GPU_Conv2d_Find2_FP32  = conv2d_find2_test<float>;
-using GPU_Conv2d_Find2_FP16  = conv2d_find2_test<half_float::half>;
-using GPU_Conv2d_Find2_BFP16 = conv2d_find2_test<bfloat16>;
+using GPU_Conv2d_FP32  = conv2d_test<float>;
+using GPU_Conv2d_FP16  = conv2d_test<half_float::half>;
+using GPU_Conv2d_BFP16 = conv2d_test<bfloat16>;
 
 struct TestNameGenerator
 {
@@ -139,27 +140,21 @@ struct TestNameGenerator
     }
 };
 
-TEST_P(GPU_Conv2d_Find2_FP32, TestFloat) { run(); }
-TEST_P(GPU_Conv2d_Find2_FP16, TestFloat16) { run(); }
-TEST_P(GPU_Conv2d_Find2_BFP16, TestBFloat16) { run(); }
+TEST_P(GPU_Conv2d_FP32, TestFloat) { run(); }
+TEST_P(GPU_Conv2d_FP16, TestFloat16) { run(); }
+TEST_P(GPU_Conv2d_BFP16, TestBFloat16) { run(); }
 
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_Conv2d_Find2_FP32, GetCasesSmoke<float>(), TestNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(Full, GPU_Conv2d_Find2_FP32, GetCasesFull<float>(), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Smoke, GPU_Conv2d_FP32, GetCasesSmoke<float>(), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Full, GPU_Conv2d_FP32, GetCasesFull<float>(), TestNameGenerator{});
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
-                         GPU_Conv2d_Find2_FP16,
+                         GPU_Conv2d_FP16,
                          GetCasesSmoke<half_float::half>(),
                          TestNameGenerator{});
 INSTANTIATE_TEST_SUITE_P(Full,
-                         GPU_Conv2d_Find2_FP16,
+                         GPU_Conv2d_FP16,
                          GetCasesFull<half_float::half>(),
                          TestNameGenerator{});
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
-                         GPU_Conv2d_Find2_BFP16,
-                         GetCasesSmoke<bfloat16>(),
-                         TestNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(Full,
-                         GPU_Conv2d_Find2_BFP16,
-                         GetCasesFull<bfloat16>(),
-                         TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Smoke, GPU_Conv2d_BFP16, GetCasesSmoke<bfloat16>(), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Full, GPU_Conv2d_BFP16, GetCasesFull<bfloat16>(), TestNameGenerator{});

@@ -1,8 +1,9 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-#include "conv_common_gtest.hpp"
 #include <utility>
+
+#include "conv_common_gtest.hpp"
 
 namespace {
 
@@ -22,6 +23,7 @@ template <typename T>
 auto GenCases(bool smoke_test)
 {
     using ct = conv_test<T, ConvApi::Immediate>;
+    BaseConvTestParameters<ConvApi::Immediate> baseParams;
 
     auto batch_size = MakeNamedParameterCollectionValues<size_t>(
         "batch_size", generate_data_limited(ct::get_batch_sizes(), 1, {16}, !smoke_test));
@@ -50,7 +52,8 @@ auto GenCases(bool smoke_test)
     auto fil_layout = MakeNamedParameterValues<std::string>("fil_layout", std::string{"NCHW"});
     auto out_layout = MakeNamedParameterValues<std::string>("out_layout", std::string{"NCHW"});
 
-    return ct::GenTestParams(batch_size,
+    return ct::GenTestParams(baseParams,
+                             batch_size,
                              input_channels,
                              output_channels,
                              spatial_dim_elements,
@@ -75,6 +78,8 @@ auto GetCasesSmoke()
     static const auto cases = GenCases<T>(true);
     return cases;
 }
+
+} // namespace
 
 template <class T>
 struct immed_conv2d_test : public conv_test<T, ConvApi::Immediate>,
@@ -134,5 +139,3 @@ INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_Immed_Conv2d_BFP16,
                          GetCasesFull<bfloat16>(),
                          TestNameGenerator{});
-
-} // namespace

@@ -1,8 +1,9 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-#include "conv_common_gtest.hpp"
 #include <utility>
+
+#include "conv_common_gtest.hpp"
 
 namespace {
 
@@ -27,6 +28,7 @@ template <typename T>
 auto GenCases(bool smoke_test)
 {
     using ct = conv_test<T, ConvApi::Find_2_0>;
+    BaseConvTestParameters<ConvApi::Find_2_0> baseParams;
 
     auto batch_size = MakeNamedParameterCollectionValues<size_t>(
         "batch_size", generate_data_limited(ct::get_batch_sizes(), 1, {8}, !smoke_test));
@@ -62,7 +64,8 @@ auto GenCases(bool smoke_test)
     auto output_type = MakeNamedParameterValues<std::string>("output_type", std::string{"int32"});
     auto int8_vectorize = MakeNamedParameterValues<bool>("int8_vectorize", false);
 
-    return ct::GenTestParams(batch_size,
+    return ct::GenTestParams(baseParams,
+                             batch_size,
                              input_channels,
                              output_channels,
                              spatial_dim_elements,
@@ -92,6 +95,8 @@ auto GetCasesSmoke()
     static const auto cases = GenCases<T>(true);
     return cases;
 }
+
+} // namespace
 
 template <class T>
 struct conv3d_find2_test : public conv_test<T, ConvApi::Find_2_0>,
@@ -145,5 +150,3 @@ INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_Conv3d_Find2_FP16,
                          GetCasesFull<half_float::half>(),
                          TestNameGenerator{});
-
-} // namespace

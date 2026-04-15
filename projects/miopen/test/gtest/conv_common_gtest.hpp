@@ -1843,6 +1843,33 @@ using ConvTestBaseTestCase = std::tuple<NamedParameter<std::string>,
                                         NamedParameter<bool>,
                                         TParams...>;
 
+template <ConvApi api = ConvApi::Find_1_0>
+struct BaseConvTestParameters
+{
+    BaseConvTestParameters()
+    {
+        if constexpr(api == ConvApi::Immediate)
+        {
+            enable_fdb.emplace_back(false);
+        }
+        else if constexpr(api == ConvApi::Find_2_0)
+        {
+            preallocate.emplace_back(true);
+        }
+    }
+
+    std::vector<std::string> conv_mode{"conv"};
+    std::vector<std::string> pad_mode{"default", "same", "valid"};
+    std::vector<int> groupCount{1};
+    std::vector<bool> do_forward{false};
+    std::vector<bool> do_backward_data{false};
+    std::vector<bool> do_backward_weights{false};
+    std::vector<int> search{1};
+    std::vector<bool> gen_float{true};
+    std::vector<bool> enable_fdb{true};
+    std::vector<bool> preallocate{false};
+};
+
 template <class T, ConvApi api = ConvApi::Find_1_0, class Tout = T>
 struct conv_test
 {
@@ -1999,32 +2026,21 @@ struct conv_test
     }
 
     template <typename... TParams>
-    static auto GenTestParams(TParams&&... params)
+    static auto GenTestParams(const BaseConvTestParameters<api>& baseParams, TParams&&... params)
     {
-        std::vector<bool> enable_fdb_values{false};
-        std::vector<bool> preallocate_values{false};
-
-        if constexpr(api == ConvApi::Immediate)
-        {
-            enable_fdb_values.emplace_back(true);
-        }
-        else if constexpr(api == ConvApi::Find_2_0)
-        {
-            preallocate_values.emplace_back(true);
-        }
-
         return testing::Combine(
-            MakeNamedParameterValues<std::string>("cmode", std::string{"conv"}),
-            MakeNamedParameterValues<std::string>(
-                "pmode", std::string{"default"}, std::string{"same"}, std::string{"valid"}),
-            MakeNamedParameterValues<int>("group-count", 1),
-            MakeNamedParameterValues<bool>("enable-forward", false),
-            MakeNamedParameterValues<bool>("enable-backward-data", false),
-            MakeNamedParameterValues<bool>("enable-backward-weights", false),
-            MakeNamedParameterValues<int>("search", 1),
-            MakeNamedParameterValues<bool>("generate-float", true),
-            MakeNamedParameterCollectionValues<bool>("enable-fdb", enable_fdb_values),
-            MakeNamedParameterCollectionValues<bool>("preallocate", preallocate_values),
+            MakeNamedParameterCollectionValues<std::string>("conv-mode", baseParams.conv_mode),
+            MakeNamedParameterCollectionValues<std::string>("pad-mode", baseParams.pad_mode),
+            MakeNamedParameterCollectionValues<int>("group-count", baseParams.groupCount),
+            MakeNamedParameterCollectionValues<bool>("enable-forward", baseParams.do_forward),
+            MakeNamedParameterCollectionValues<bool>("enable-backward-data",
+                                                     baseParams.do_backward_data),
+            MakeNamedParameterCollectionValues<bool>("enable-backward-weights",
+                                                     baseParams.do_backward_weights),
+            MakeNamedParameterCollectionValues<int>("search", baseParams.search),
+            MakeNamedParameterCollectionValues<bool>("generate-float", baseParams.gen_float),
+            MakeNamedParameterCollectionValues<bool>("enable-fdb", baseParams.enable_fdb),
+            MakeNamedParameterCollectionValues<bool>("preallocate", baseParams.preallocate),
             std::forward<TParams>(params)...);
     }
 
