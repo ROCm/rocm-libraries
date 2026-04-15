@@ -4478,12 +4478,18 @@ class Solution(collections.abc.Mapping):
     return self._state
 
   def __hash__(self):
-    return hash(str(self) + self._state.get("codeObjectFile", ""))
-    #return hash(self.getAttributes())
+    deviceNames = str(self._state.get("DeviceNames", ""))
+    return hash(str(self) + self._state.get("codeObjectFile", "") + deviceNames)
 
   def __eq__(self, other):
-    #return isinstance(other, Solution) and self.getAttributes() == other.getAttributes()
-    return isinstance(other, Solution) and str(self) == str(other)
+    if not isinstance(other, Solution):
+      return False
+    if str(self) != str(other):
+      return False
+    # Check DeviceNames to prevent deduplication of solutions for different devices
+    selfDeviceNames = self._state.get("DeviceNames", None)
+    otherDeviceNames = other._state.get("DeviceNames", None)
+    return selfDeviceNames == otherDeviceNames
 
   def __ne__(self, other):
     result = self.__eq__(other)

@@ -14,7 +14,6 @@
 
 #include "GraphAttributes.hpp"
 #include "TensorAttributes.hpp"
-#include <hipdnn_data_sdk/data_objects/custom_op_attributes_generated.h>
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/Types.hpp>
 #include <memory>
@@ -162,62 +161,6 @@ public:
         }
 
         return {};
-    }
-
-    flatbuffers::Offset<hipdnn_data_sdk::data_objects::CustomOpAttributes>
-        pack_attributes(flatbuffers::FlatBufferBuilder& builder) const // NOLINT
-    {
-        std::vector<int64_t> inputUids;
-        inputUids.reserve(inputs.size());
-        for(const auto& tensor : inputs)
-        {
-            inputUids.push_back(tensor->get_uid());
-        }
-
-        std::vector<int64_t> outputUids;
-        outputUids.reserve(outputs.size());
-        for(const auto& tensor : outputs)
-        {
-            outputUids.push_back(tensor->get_uid());
-        }
-
-        return hipdnn_data_sdk::data_objects::CreateCustomOpAttributesDirect(
-            builder, custom_op_id.c_str(), &inputUids, &outputUids, &data);
-    }
-
-    static CustomOpAttributes fromFlatBuffer(
-        const hipdnn_data_sdk::data_objects::CustomOpAttributes* fb,
-        const std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>>& tensorMap)
-    {
-        CustomOpAttributes attr;
-
-        if(fb->custom_op_id() != nullptr)
-        {
-            attr.set_custom_op_id(fb->custom_op_id()->str());
-        }
-
-        if(fb->input_tensor_uids() != nullptr)
-        {
-            for(auto uid : *fb->input_tensor_uids())
-            {
-                attr.inputs.push_back(tensorMap.at(uid));
-            }
-        }
-
-        if(fb->output_tensor_uids() != nullptr)
-        {
-            for(auto uid : *fb->output_tensor_uids())
-            {
-                attr.outputs.push_back(tensorMap.at(uid));
-            }
-        }
-
-        if(fb->data() != nullptr)
-        {
-            attr.data.assign(fb->data()->begin(), fb->data()->end());
-        }
-
-        return attr;
     }
 };
 
