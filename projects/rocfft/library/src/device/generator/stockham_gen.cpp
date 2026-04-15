@@ -658,8 +658,13 @@ void validate_pp_grid_params(const StockhamPartialPassParams& params_1,
                              const StockhamGeneratorSpecs&    specs_1,
                              const StockhamGeneratorSpecs&    specs_2)
 {
-    if(specs_1.scheme == "CS_3D_PP" && specs_2.scheme == "CS_3D_PP")
+    if((specs_1.scheme == "CS_3D_PP" && specs_2.scheme == "CS_3D_PP")
+       || (specs_1.scheme == "CS_REAL_3D_PP" && specs_2.scheme == "CS_REAL_3D_PP"))
     {
+        // In kernel config file, kernels can be configured in either order,
+        // so we need to check both possibilities for which kernel is the SBRR_PP
+        // and which is the SBCC_PP (params_1.current_dim vs. params_2.current_dim).
+
         // SBRR_PP + SBCC_PP
         if((params_1.current_dim == 0 && params_2.current_dim == 2)
            || (params_1.current_dim == 2 && params_2.current_dim == 0))
@@ -672,7 +677,9 @@ void validate_pp_grid_params(const StockhamPartialPassParams& params_1,
                                 : specs_2.workgroup_size / specs_2.threads_per_transform;
 
             auto prod_factors_off_dim
-                = product(params_1.pp_factors_curr.begin(), params_1.pp_factors_curr.end());
+                = (params_1.current_dim == 0 && params_2.current_dim == 2)
+                      ? product(params_1.pp_factors_curr.begin(), params_1.pp_factors_curr.end())
+                      : product(params_2.pp_factors_curr.begin(), params_2.pp_factors_curr.end());
             if(tpb_sbrr != prod_factors_off_dim)
             {
                 throw std::runtime_error("CS_KERNEL_STOCKHAM_PP requires transform-per-block "
@@ -716,28 +723,6 @@ void validate_pp_grid_params(const StockhamPartialPassParams& params_1,
             throw std::runtime_error("CS_KERNEL_STOCKHAM_PP and CS_KERNEL_STOCKHAM_PP_BLOCK_CC "
                                      "require threads_per_transform_pp to be 1 when "
                                      "pp_factors has only one factor");
-        }
-    }
-    else if(specs_1.scheme == "CS_REAL_3D_PP" && specs_2.scheme == "CS_REAL_3D_PP")
-    {
-        // SBRR_PP + SBCC_PP
-        if((params_1.current_dim == 0 && params_2.current_dim == 2)
-           || (params_1.current_dim == 2 && params_2.current_dim == 0))
-        {
-            // SBRR needs tpb to be prod(pp_factors),
-            // so that it has the required off-dim data in LDS
-            // to perform partial passes
-            auto tpb_sbrr = (params_1.current_dim == 0 && params_2.current_dim == 2)
-                                ? specs_1.workgroup_size / specs_1.threads_per_transform
-                                : specs_2.workgroup_size / specs_2.threads_per_transform;
-
-            auto prod_factors_off_dim
-                = product(params_1.pp_factors_curr.begin(), params_1.pp_factors_curr.end());
-            if(tpb_sbrr != prod_factors_off_dim)
-            {
-                throw std::runtime_error("CS_KERNEL_STOCKHAM_PP requires transform-per-block "
-                                         "to be prod(pp_factors)");
-            }
         }
     }
     else
