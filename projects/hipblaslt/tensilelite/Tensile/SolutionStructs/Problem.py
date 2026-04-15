@@ -573,6 +573,7 @@ _validGEMMTypes = [
     ("F8B8N", "F8N", "S"),
     ("B8F8N", "F8N", "S"),
     ("F4", "S", "S"),
+    ("F4", "B", "S"),
     ("F6", "S", "S"),
     ("B6", "S", "S"),
 ]
@@ -683,8 +684,29 @@ _HPATypes = [
     ("F8B8N", "F8N", "S"),
     ("B8F8N", "F8N", "S"),
     ("F4", "S", "S"),
+    ("F4", "B", "S"),
+    ("F4", "H", "S"),
+    ("F4", "F8", "S"),
     ("F6", "S", "S"),
+    ("F6", "H", "S"),
+    ("F6", "B", "S"),
+    ("F6", "F8", "S"),
+    ("F6", "B8", "S"),
     ("B6", "S", "S"),
+    ("B6", "H", "S"),
+    ("B6", "B", "S"),
+    ("B6", "F8", "S"),
+    ("B6", "B8", "S"),
+    ("F6B6", "S", "S"),
+    ("F6B6", "H", "S"),
+    ("F6B6", "B", "S"),
+    ("F6B6", "F8", "S"),
+    ("F6B6", "B8", "S"),
+    ("B6F6", "S", "S"),
+    ("B6F6", "H", "S"),
+    ("B6F6", "B", "S"),
+    ("B6F6", "F8", "S"),
+    ("B6F6", "B8", "S"),
 ]
 
 def problemTypeToEnum(problemType):
@@ -1314,9 +1336,8 @@ def getBiasDataTypeListDefault(problem: ProblemType) -> List[DataType]:
   bList = []
   for d in ["DataType", "ComputeDataType", "DestDataType"]:
     dtype = DataType(problem[d])
-    # filter out int8/f8/b8, because it is not supported by bias datatype
-    # TODO
-    if not dtype.isInt8() and not dtype.is8bitFloat():
+    # filter out sizeof(dtype) <= 1, because it is not supported by bias datatype
+    if dtype.numBytes() > 1:
       bList.append(dtype)
 
   biasDataTypeList = list(set(bList))
