@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -174,7 +174,7 @@ install_packages( )
   local library_dependencies_fedora=( "make" "cmake" "gcc-c++" "libcxx-devel" "rpm-build" )
   local library_dependencies_sles=( "make" "cmake" "gcc-c++" "libcxxtools9" "rpm-build" )
 
-  if [[ "${build_cuda}" == true ]]; then
+  if [[ "${build_cuda}" == true || $HIP_PLATFORM == "nvidia" ]]; then
     # Ideally, this could be cuda-cublas-dev, but the package name has a version number in it
     library_dependencies_ubuntu+=( "cuda" )
     library_dependencies_centos+=( "" ) # how to install cuda on centos?
@@ -627,9 +627,9 @@ fi
 
   # cuda
   if [[ "${build_cuda}" == true ]]; then
-    cmake_common_options+=("-DUSE_CUDA=ON")
+    export HIP_PLATFORM="nvidia"
   else
-    cmake_common_options+=("-DUSE_CUDA=OFF")
+    export HIP_PLATFORM="$(${rocm_path}/bin/hipconfig --platform)"
   fi
 
   # clients

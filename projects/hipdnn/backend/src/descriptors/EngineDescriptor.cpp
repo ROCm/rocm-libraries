@@ -3,15 +3,19 @@
 
 #include "EngineDescriptor.hpp"
 #include "BackendEnumStringUtils.hpp"
+#include "DescriptorAttributeUtils.hpp"
 #include "GraphDescriptor.hpp"
 #include "HipdnnBackendDescriptorType.h"
 #include "HipdnnBackendFlatbufferData.h"
 #include "HipdnnException.hpp"
+#include "KnobDescriptor.hpp"
 #include "handle/Handle.hpp"
+#include "logging/Logging.hpp"
 #include "plugin/EnginePluginResourceManager.hpp"
 
-#include <hipdnn_data_sdk/data_objects/knob_value_generated.h>
-#include <hipdnn_data_sdk/flatbuffer_utilities/EngineDetailsWrapper.hpp>
+#include <algorithm>
+#include <hipdnn_flatbuffers_sdk/data_objects/knob_value_generated.h>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineDetailsWrapper.hpp>
 
 namespace hipdnn_backend
 {
@@ -46,7 +50,7 @@ void EngineDescriptor::finalize()
     auto engineDetailsPtr = _engineDetails->get();
     if(engineDetailsPtr != nullptr)
     {
-        hipdnn_data_sdk::flatbuffer_utilities::EngineDetailsWrapper detailsWrapper(
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineDetailsWrapper detailsWrapper(
             engineDetailsPtr);
         auto knobCount = detailsWrapper.knobCount();
 
@@ -57,11 +61,23 @@ void EngineDescriptor::finalize()
 
             for(const auto& knobWrapper : knobWrappers)
             {
+                hipdnn_flatbuffers_sdk::data_objects::KnobT knobNative;
+                knobWrapper->getKnob().UnPackTo(&knobNative);
+
+                // Serialize for the flatbuffer-based getAttribute path.
                 flatbuffers::FlatBufferBuilder builder;
-                auto knobOffset = hipdnn_data_sdk::data_objects::Knob::Pack(
-                    builder, knobWrapper->getKnob().UnPack());
+                auto knobOffset
+                    = hipdnn_flatbuffers_sdk::data_objects::Knob::Pack(builder, &knobNative);
                 builder.Finish(knobOffset);
                 _knobSerializedBuffers.push_back(builder.Release());
+
+                // Build KnobDescriptor eagerly so the descriptor is fully
+                // immutable after finalize() and safe to share across threads.
+                auto knobDesc = KnobDescriptor::fromKnobT(knobNative);
+                if(knobDesc)
+                {
+                    _knobDescriptors.push_back(std::move(knobDesc));
+                }
             }
         }
     }
@@ -87,14 +103,16 @@ void EngineDescriptor::getAttribute(hipdnnBackendAttributeName_t attributeName,
     case HIPDNN_ATTR_ENGINE_GLOBAL_INDEX:
         getGlobalId(attributeType, requestedElementCount, elementCount, arrayOfElements);
         break;
-    case HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE_EXT:
+    case HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE:
         getKnobInfo(attributeType, requestedElementCount, elementCount, arrayOfElements);
         break;
     case HIPDNN_ATTR_ENGINE_KNOB_INFO:
+        getKnobInfoDescriptors(attributeType, requestedElementCount, elementCount, arrayOfElements);
+        break;
     case HIPDNN_ATTR_ENGINE_NUMERICAL_NOTE:
     case HIPDNN_ATTR_ENGINE_LAYOUT_INFO:
     case HIPDNN_ATTR_ENGINE_BEHAVIOR_NOTE:
-    case HIPDNN_ATTR_ENGINE_SM_COUNT_TARGET:
+    case HIPDNN_ATTR_ENGINE_CU_COUNT_TARGET_EXT:
     case HIPDNN_ATTR_ENGINE_DEVICEPROP:
     default:
         throw HipdnnException(
@@ -180,7 +198,7 @@ void EngineDescriptor::setAttribute(hipdnnBackendAttributeName_t attributeName,
     case HIPDNN_ATTR_ENGINE_NUMERICAL_NOTE:
     case HIPDNN_ATTR_ENGINE_LAYOUT_INFO:
     case HIPDNN_ATTR_ENGINE_BEHAVIOR_NOTE:
-    case HIPDNN_ATTR_ENGINE_SM_COUNT_TARGET:
+    case HIPDNN_ATTR_ENGINE_CU_COUNT_TARGET_EXT:
     case HIPDNN_ATTR_ENGINE_DEVICEPROP:
     default:
         throw HipdnnException(
@@ -301,6 +319,41 @@ void EngineDescriptor::getKnobInfo(hipdnnBackendAttributeType_t attributeType,
     {
         *elementCount = elementsToReturn;
     }
+}
+
+void EngineDescriptor::getKnobInfoDescriptors(hipdnnBackendAttributeType_t attributeType,
+                                              int64_t requestedElementCount,
+                                              int64_t* elementCount,
+                                              void* arrayOfElements) const
+{
+    checkGetArgs(HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                 attributeType,
+                 "EngineDescriptor::getAttribute(HIPDNN_ATTR_ENGINE_KNOB_INFO)");
+
+    auto count = static_cast<int64_t>(_knobDescriptors.size());
+
+    if(arrayOfElements == nullptr || requestedElementCount == 0)
+    {
+        THROW_IF_NULL(elementCount,
+                      HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
+                      "EngineDescriptor::getAttribute(HIPDNN_ATTR_ENGINE_KNOB_INFO): "
+                      "elementCount is null");
+        *elementCount = count;
+        return;
+    }
+
+    THROW_IF_FALSE(requestedElementCount >= count,
+                   HIPDNN_STATUS_BAD_PARAM,
+                   "EngineDescriptor::getAttribute(HIPDNN_ATTR_ENGINE_KNOB_INFO): "
+                   "requestedElementCount < knob count");
+
+    if(elementCount != nullptr)
+    {
+        *elementCount = count;
+    }
+
+    HipdnnBackendDescriptor::packDescriptorArray(
+        _knobDescriptors, static_cast<HipdnnBackendDescriptor**>(arrayOfElements));
 }
 
 std::string EngineDescriptor::toString() const

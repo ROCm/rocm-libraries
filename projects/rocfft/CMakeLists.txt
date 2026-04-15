@@ -85,7 +85,10 @@ if( ROCM_PATH )
 endif()
 
 # Using standardized versioning from rocm-cmake
-set ( VERSION_STRING "1.0.37" )
+set ( ROCFFT_VERSION_MAJOR "1" )
+set ( ROCFFT_VERSION_MINOR "0" )
+set ( ROCFFT_VERSION_PATCH "37" )
+set ( VERSION_STRING "${ROCFFT_VERSION_MAJOR}.${ROCFFT_VERSION_MINOR}.${ROCFFT_VERSION_PATCH}" )
 rocm_setup_version( VERSION ${VERSION_STRING} )
 
 # Append our library helper cmake path and the cmake path for hip (for
@@ -173,6 +176,9 @@ endif()
 # tolerate comma as a value separator since the compiler does the
 # same
 string(REPLACE "," ";" GPU_TARGETS "${GPU_TARGETS}")
+# Filter out target flags as rocFFT builds generic code for each target.
+list(TRANSFORM GPU_TARGETS REPLACE ":[^;]+" "")
+list(REMOVE_DUPLICATES GPU_TARGETS)
 rocm_check_target_ids(GPU_TARGETS TARGETS "${GPU_TARGETS}")
   
 # HIP is required - library and clients use HIP to access the device

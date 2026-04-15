@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -30,7 +30,8 @@ Definitions:
     - { M:   1, N:   1 }
 
   - &M_N_range_checkin
-    - { M:   0, N:   0 }
+    - { M:   4, N:   4 }
+    - { M:   1024, N:  1024}
 
   - &M_N_range_nightly
     - { M:   9381, N:   9381 }
@@ -57,7 +58,7 @@ Tests:
 - name: sptrsv_coo
   category: pre_checkin
   function: sptrsv_coo
-  indextype: *i32i32_i64i32_i64i64
+  indextype: *i32_i64
   precision: *single_double_precisions_complex_real
   M_N: *M_N_range_checkin
   alpha_alphai: *alpha_range_checkin
@@ -198,7 +199,7 @@ Tests:
 - name: sptrsv_coo
   category: nightly
   function: sptrsv_coo
-  indextype: *i32i32_i64i32_i64i64
+  indextype: *i32_i64
   precision: *single_double_precisions_complex_real
   M_N: *M_N_range_nightly
   alpha_alphai: *alpha_range_nightly
@@ -213,7 +214,7 @@ Tests:
 - name: sptrsv_coo
   category: nightly
   function: sptrsv_coo
-  indextype: *i32i32_i64i32_i64i64
+  indextype: *i32_i64
   precision: *single_double_precisions
   M_N: *M_N_range_nightly
   alpha_alphai: *alpha_range_nightly

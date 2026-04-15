@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2019-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -23,6 +23,7 @@
  * ************************************************************************ */
 
 #include "rocsparse_clients_envariables.hpp"
+#include "rocsparse_data.hpp"
 #include "rocsparse_parse_data.hpp"
 #include "rocsparse_reproducibility.hpp"
 #include "rocsparse_test_listeners.hpp"
@@ -124,6 +125,9 @@ int main(int argc, char** argv)
     // Get user device id from command line
     int dev = 0;
 
+    // Override for showSkipped: -1 = auto, 0 = hide, 1 = show
+    int showSkippedOverride = -1;
+
     for(int i = 1; i < argc; ++i)
     {
         if(strcmp(argv[i], "--device") == 0 && argc > i + 1)
@@ -137,6 +141,14 @@ int main(int argc, char** argv)
                       << ver % 100 << "-" << rev << std::endl;
 
             return 0;
+        }
+        else if(strcmp(argv[i], "--show-skipped") == 0)
+        {
+            showSkippedOverride = 1;
+        }
+        else if(strcmp(argv[i], "--hide-skipped") == 0)
+        {
+            showSkippedOverride = 0;
         }
     }
 
@@ -237,12 +249,34 @@ int main(int argc, char** argv)
                 = false;
         }
 
+        // Suppress skipped test output when using yaml filter (unless overridden)
+        if(showSkippedOverride == 0
+           || (showSkippedOverride == -1 && RocSPARSE_TestData::is_yaml_filter_active()))
+        {
+            listener->showSkipped = false;
+        }
+        else if(showSkippedOverride == 1)
+        {
+            listener->showSkipped = true;
+        }
+
         listeners.Append(listener);
     }
     else
     {
         auto listener = new rocsparse_clients::configurable_event_listener(default_printer);
         listener->redirectOutput = false;
+
+        // Suppress skipped test output when using yaml filter (unless overridden)
+        if(showSkippedOverride == 0
+           || (showSkippedOverride == -1 && RocSPARSE_TestData::is_yaml_filter_active()))
+        {
+            listener->showSkipped = false;
+        }
+        else if(showSkippedOverride == 1)
+        {
+            listener->showSkipped = true;
+        }
 
         listeners.Append(listener);
     }
@@ -265,13 +299,6 @@ int main(int argc, char** argv)
         }
         reproducibility.config().set_gpu_name(prop.gcnArchName);
         rocsparse_reproducibility_write_report(reproducibility);
-    }
-
-    // Reset HIP device
-    if(hipDeviceReset() != hipSuccess)
-    {
-        std::cerr << "Error: cannot reset HIP device" << std::endl;
-        return rocsparse_status_internal_error;
     }
 
     return ret;

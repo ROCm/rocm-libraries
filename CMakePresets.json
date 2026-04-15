@@ -9,7 +9,7 @@
         {
             "name": "default:release",
             "description": "Configure release build with installation to /opt/rocm",
-            "toolchainFile": "${sourceDir}/cmake/toolchains/linux-amdclang.cmake",
+            "toolchainFile": "${sourceDir}/cmake/toolchains/rocm-clang.cmake",
             "binaryDir": "${sourceDir}/build",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Release",
@@ -56,6 +56,38 @@
             "inherits": ["default:release"],
             "cacheVariables": {
                 "ROCM_LIBS_ENABLE_COMPONENTS": "rocrand"
+            }
+        },
+        {
+            "name": "hipdnn",
+            "description": "Build hipdnn only",
+            "inherits": ["default:release"],
+            "cacheVariables": {
+                "ROCM_LIBS_ENABLE_COMPONENTS": "hipdnn"
+            }
+        },
+        {
+            "name": "hipdnn-integration-tests",
+            "description": "Build hipdnn and hipdnn-integration-tests",
+            "inherits": ["default:release"],
+            "cacheVariables": {
+                "ROCM_LIBS_ENABLE_COMPONENTS": "hipdnn;hipdnn-integration-tests"
+            }
+        },
+        {
+            "name": "miopen-provider",
+            "description": "Build hipdnn, miopen-provider and integration tests",
+            "inherits": ["default:release"],
+            "cacheVariables": {
+                "ROCM_LIBS_ENABLE_COMPONENTS": "hipdnn;hipdnn-integration-tests;miopen-provider"
+            }
+        },
+        {
+            "name": "hipblaslt-provider",
+            "description": "Build hipdnn and hipblaslt-provider",
+            "inherits": ["default:release"],
+            "cacheVariables": {
+                "ROCM_LIBS_ENABLE_COMPONENTS": "hipdnn;hipblaslt-provider"
             }
         }
     ],

@@ -46,9 +46,8 @@ namespace TensileLite
     template <typename MyProblem, typename MySolution = typename MyProblem::Solution>
     struct ProblemPredictionLibrary : public SolutionLibrary<MyProblem, MySolution>
     {
-        std::unordered_map<int, std::shared_ptr<MySolution>> solutionmap;
-        std::vector<origami::config_t>                       origami_config_list;
-        std::unordered_map<origami::config_t, int>           origami_config_map;
+        std::vector<std::pair<int, std::shared_ptr<MySolution>>> solution_list;
+        std::vector<origami::config_t>                           origami_config_list;
 
         mutable std::atomic<bool> lastFindTopRetAll = false;
 
@@ -62,17 +61,19 @@ namespace TensileLite
         }
         virtual std::string description() const override
         {
-            if(solutionmap.empty())
-                return concatenate(type(), ", solutionmap: empty");
-            return concatenate(type(), solutionmap.size());
+            if(solution_list.empty())
+                return concatenate(type(), ", solution_list: empty");
+            return concatenate(type(), solution_list.size());
         }
 
         virtual std::shared_ptr<MySolution> getSolutionByIndex(MyProblem const& problem,
                                                                Hardware const&  hardware,
                                                                const int index) const override
         {
-            auto indexMatch = solutionmap.find(index);
-            if(indexMatch != solutionmap.end())
+            auto indexMatch =
+                std::find_if(solution_list.begin(), solution_list.end(),
+                             [&index](auto& s){ return s.first == index; });
+            if(indexMatch != solution_list.end())
                 return indexMatch->second;
             return nullptr;
         }
@@ -102,7 +103,7 @@ namespace TensileLite
             if(searchType == SolutionLibrarySearchType::DEFAULT)
                 return rv;
 
-            for(auto const& row : this->solutionmap)
+            for(auto const& row : this->solution_list)
             {
                 if(debug)
                     std::cout << row.second->description() << std::endl;
@@ -123,7 +124,7 @@ namespace TensileLite
             if(searchType == SolutionLibrarySearchType::DEFAULT)
                 return rv;
 
-            for(auto const& row : this->solutionmap)
+            for(auto const& row : this->solution_list)
             {
                 if(debug)
                     std::cout << row.second->description() << std::endl;
@@ -162,7 +163,7 @@ namespace TensileLite
             hip::HipAMDGPU const* pAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(&hardware);
 
             const origami::hardware_t& analytical_hardware = *(pAMDGPU->analyticalHardware);
-            auto miDataType = datatypeToAnalyticalDatatype(problem.computeInputType());
+            auto miDataType = datatypeToAnalyticalDatatype(problem.computeInputTypeA());
 
             if(problem.f32XdlMathOp() == rocisa::DataType::XFloat32) // Check F32 compute type
                 miDataType = origami::data_type_t::XFloat32;
@@ -185,19 +186,14 @@ namespace TensileLite
 
             for(const auto& r : prediction_result)
             {
-                auto mapiter  = origami_config_map.find(r.config);
-                auto smapiter = solutionmap.find(mapiter->second);
-                if(mapiter != origami_config_map.end() && smapiter != solutionmap.end())
+                auto& solution = solution_list[r.config.index].second;
+                if((*(solution->hardwarePredicate))(hardware)
+                   && (*(solution->problemPredicate))(problem))
                 {
-                    auto solution = smapiter->second;
-                    if((*solution->hardwarePredicate)(hardware)
-                       && (*solution->problemPredicate)(problem))
+                    rv.emplace_back(solution);
+                    if(rv.size() == numSolutions)
                     {
-                        rv.emplace_back(solution);
-                        if(rv.size() == numSolutions)
-                        {
-                            break;
-                        }
+                        break;
                     }
                 }
             }

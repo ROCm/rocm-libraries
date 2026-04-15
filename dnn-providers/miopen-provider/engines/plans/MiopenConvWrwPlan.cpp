@@ -6,8 +6,6 @@
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
-#include "HipdnnEnginePluginExecutionContext.hpp"
-#include "HipdnnEnginePluginHandle.hpp"
 #include "MiopenConvWrwPlan.hpp"
 #include "MiopenUtils.hpp"
 
@@ -66,9 +64,9 @@ bool ConvWrwParams::validTensors() const
     return _tensorsValid;
 }
 
-ConvWrwPlan::ConvWrwPlan(const HipdnnEnginePluginHandle& handle,
+ConvWrwPlan::ConvWrwPlan(const HipdnnMiopenHandle& handle,
                          ConvWrwParams&& params,
-                         const MiopenExecutionSettings& executionSettings)
+                         const HipdnnMiopenSettings& executionSettings)
     : _params(std::move(params))
     , _executionSettings(executionSettings)
 {
@@ -93,6 +91,14 @@ ConvWrwPlan::ConvWrwPlan(const HipdnnEnginePluginHandle& handle,
     if(_executionSettings.workspaceSizeLimit().has_value())
     {
         _workspaceSize = _executionSettings.workspaceSizeLimit().value();
+        HIPDNN_PLUGIN_LOG_INFO(
+            "Convolution Wrw: Using knob settings workspace size: " << _workspaceSize);
+    }
+    else if(_executionSettings.defaultWorkspaceSize().has_value())
+    {
+        _workspaceSize = _executionSettings.defaultWorkspaceSize().value();
+        HIPDNN_PLUGIN_LOG_INFO(
+            "Convolution Wrw: Using default max workspace size: " << _workspaceSize);
     }
     else
     {
@@ -103,15 +109,16 @@ ConvWrwPlan::ConvWrwPlan(const HipdnnEnginePluginHandle& handle,
                                                              _params.conv().convDescriptor(),
                                                              _params.dw().tensorDescriptor(),
                                                              &_workspaceSize));
+        HIPDNN_PLUGIN_LOG_WARN("Convolution Wrw: Using queried workspace size: " << _workspaceSize);
     }
 }
 
-size_t ConvWrwPlan::getWorkspaceSize([[maybe_unused]] const HipdnnEnginePluginHandle& handle) const
+size_t ConvWrwPlan::getWorkspaceSize([[maybe_unused]] const HipdnnMiopenHandle& handle) const
 {
     return _workspaceSize;
 }
 
-void ConvWrwPlan::execute(const HipdnnEnginePluginHandle& handle,
+void ConvWrwPlan::execute(const HipdnnMiopenHandle& handle,
                           const hipdnnPluginDeviceBuffer_t* deviceBuffers,
                           uint32_t numDeviceBuffers,
                           void* workspace) const

@@ -31,6 +31,9 @@ inline const PointwiseModeBitset& getImplementedUnaryModesBitset()
         bitset.set(toBitPosition(data_objects::PointwiseMode::TANH_FWD));
         bitset.set(toBitPosition(data_objects::PointwiseMode::ABS));
         bitset.set(toBitPosition(data_objects::PointwiseMode::NEG));
+        bitset.set(toBitPosition(data_objects::PointwiseMode::GELU_FWD));
+        bitset.set(toBitPosition(data_objects::PointwiseMode::GELU_APPROX_TANH_FWD));
+        bitset.set(toBitPosition(data_objects::PointwiseMode::SWISH_FWD));
         return bitset;
     }();
     return s_implementedUnaryModes;

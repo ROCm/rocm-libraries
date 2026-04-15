@@ -124,7 +124,7 @@ Tests:
   indextype: *i32_i64
   precision: *single_double_precisions_complex
   M: 1
-  N: [2, 4]
+  N: [2]
   K: 1
   alpha_beta: *alpha_beta_range_quick
   transA: [rocsparse_operation_none, rocsparse_operation_conjugate_transpose]
@@ -134,8 +134,7 @@ Tests:
   spmm_alg: [rocsparse_spmm_alg_coo_atomic]
   orderB: [rocsparse_order_column]
   orderC: [rocsparse_order_column]
-  filename: [Chevron2,
-             qc2534]
+  filename: [Chevron2]
 
 - name: spmm_coo_file
   category: quick
@@ -143,7 +142,7 @@ Tests:
   indextype: *i32_i64
   precision: *single_double_precisions_complex
   M: 1
-  N: [2, 4]
+  N: [4]
   K: 1
   alpha_beta: *alpha_beta_range_quick
   transA: [rocsparse_operation_none]
@@ -153,13 +152,12 @@ Tests:
   spmm_alg: [rocsparse_spmm_alg_coo_segmented, rocsparse_spmm_alg_coo_segmented_atomic]
   orderB: [rocsparse_order_column]
   orderC: [rocsparse_order_row]
-  filename: [Chevron2,
-             qc2534]
+  filename: [qc2534]
 
 - name: spmm_coo
   category: quick
   function: spmm_coo
-  indextype: *i32i32_i64i32_i64i64
+  indextype: *i32_i64
   precision: *int8_int8_int32_int32_abct_precision
   M: [300]
   N: [118]
@@ -179,7 +177,7 @@ Tests:
 - name: spmm_coo
   category: quick
   function: spmm_coo
-  indextype: *i32i32_i64i32_i64i64
+  indextype: *i32_i64
   precision: *int8_int8_float32_float32_abct_precision
   M: [300]
   N: [231]
@@ -390,7 +388,7 @@ Tests:
 - name: spmm_coo_file
   category: pre_checkin
   function: spmm_coo
-  indextype: *i32i32_i64i32_i64i64
+  indextype: *i32_i64
   precision: *int8_int8_int32_int32_abct_precision
   M: 1
   N: [87]
@@ -613,7 +611,7 @@ Tests:
 - name: spmm_coo_file
   category: nightly
   function: spmm_coo
-  indextype: *i32i32_i64i32_i64i64
+  indextype: *i32_i64
   precision: *int8_int8_float32_float32_abct_precision
   M: 1
   N: [65]

@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -149,12 +149,11 @@ namespace rocsparse
             if(boost)
             {
                 const bool is_too_small = (abs_diag_val <= boost_tol);
-
                 if(is_too_small)
                 {
                     if(lid == 0)
                     {
-                        csr_val[row_diag] = boost_val;
+                        csr_val[row_diag] = rocsparse::assign_ilu0_boost_value(diag_val, boost_val);
                     };
                 };
             }
@@ -205,21 +204,36 @@ namespace rocsparse
                                   J* __restrict__ zero_pivot,
                                   int64_t zero_pivot_stride,
                                   J* __restrict__ singular_pivot,
-                                  int64_t              singular_pivot_stride,
-                                  double               tol,
+                                  int64_t            singular_pivot_stride,
+                                  rocsparse_datatype tolerance_datatype,
+                                  ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(float, tolerance_32),
+                                  ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(double, tolerance_64),
+                                  bool                 is_singular_tol_host_mode,
                                   rocsparse_index_base idx_base,
                                   int                  boost_enable,
                                   size_t               boost_tol_size,
                                   ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(float, boost_tol_32),
                                   ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(double, boost_tol_64),
+                                  bool is_tol_host_mode,
                                   ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, boost_val),
-                                  bool is_host_mode)
+                                  bool is_val_host_mode)
     {
         const auto i = hipBlockIdx_y;
-        ROCSPARSE_DEVICE_HOST_SCALAR_GET_IF(boost_enable, boost_tol_32);
-        ROCSPARSE_DEVICE_HOST_SCALAR_GET_IF(boost_enable, boost_tol_64);
-        ROCSPARSE_DEVICE_HOST_SCALAR_GET_IF(boost_enable, boost_val);
+
+        ROCSPARSE_SCALAR_HOST_DEVICE_GET(is_singular_tol_host_mode, tolerance_32);
+        ROCSPARSE_SCALAR_HOST_DEVICE_GET(is_singular_tol_host_mode, tolerance_64);
+
+        const double tolerance
+            = (tolerance_datatype == rocsparse_datatype_f64_r) ? tolerance_64 : tolerance_32;
+
+        ROCSPARSE_SCALAR_HOST_DEVICE_GET_IF(
+            boost_enable && (boost_tol_size == sizeof(float)), is_tol_host_mode, boost_tol_32);
+        ROCSPARSE_SCALAR_HOST_DEVICE_GET_IF(
+            boost_enable && (boost_tol_size == sizeof(double)), is_tol_host_mode, boost_tol_64);
+        ROCSPARSE_SCALAR_HOST_DEVICE_GET_IF(boost_enable, is_val_host_mode, boost_val);
+
         const double boost_tol = (boost_tol_size == sizeof(double)) ? boost_tol_64 : boost_tol_32;
+
         rocsparse::csrilu0_device_binsearch<BLOCKSIZE, WFSIZE, SLEEP, T, I, J>(
             m,
             csr_row_ptr,
@@ -230,7 +244,7 @@ namespace rocsparse
             map,
             zero_pivot + i * zero_pivot_stride,
             singular_pivot + i * singular_pivot_stride,
-            tol,
+            tolerance,
             idx_base,
             boost_enable,
             boost_tol,
@@ -238,15 +252,13 @@ namespace rocsparse
     }
 
     template <uint32_t BLOCKSIZE, uint32_t WFSIZE, bool SLEEP, typename T, typename I, typename J>
-    rocsparse_status csrilu0_kernel_binsearch_launch(rocsparse_handle       handle,
-                                                     rocsparse_csrilu0_info csrilu0_info,
-                                                     rocsparse_spmat_descr  A,
-                                                     int32_t                boost_enable,
-                                                     size_t                 boost_tol_size,
-                                                     const void*            gboost_tol,
-                                                     const void*            gboost_val,
-                                                     size_t                 buffer_size,
-                                                     void*                  buffer)
+    rocsparse_status csrilu0_kernel_binsearch_launch(rocsparse_handle          handle,
+                                                     rocsparse_csrilu0_info    csrilu0_info,
+                                                     rocsparse_spmat_descr     A,
+                                                     rocsparse::numeric_boost* boost,
+
+                                                     size_t buffer_size,
+                                                     void*  buffer)
     {
 
         auto trm_info = csrilu0_info->get(rocsparse_operation_none, rocsparse_fill_mode_lower);
@@ -254,11 +266,28 @@ namespace rocsparse
         int32_t* done_array = reinterpret_cast<int32_t*>(reinterpret_cast<char*>(buffer) + 256);
         const int64_t done_array_stride = A->rows;
 
-        const T*     boost_val = reinterpret_cast<const T*>(gboost_val);
-        const float* boost_tol_32
-            = reinterpret_cast<const float*>((boost_enable) ? gboost_tol : nullptr);
-        const double* boost_tol_64
-            = reinterpret_cast<const double*>((boost_enable) ? gboost_tol : nullptr);
+        auto                         numeric_exact = csrilu0_info->get_singularity_numeric_exact();
+        auto                         numeric_near  = csrilu0_info->get_singularity_numeric_near();
+        const rocsparse_pointer_mode tolerance_pointer_mode
+            = numeric_near->get_tolerance_pointer_mode();
+        const rocsparse_datatype tolerance_datatype = numeric_near->get_tolerance_datatype();
+        const float*             tolerance_pointer_32
+            = reinterpret_cast<const float*>(numeric_near->get_tolerance_pointer());
+        const double* tolerance_pointer_64
+            = reinterpret_cast<const double*>(numeric_near->get_tolerance_pointer());
+
+        const auto boost_enable           = boost->get_enable();
+        const auto boost_tol_size         = rocsparse::datatype_sizeof(boost->get_tol_datatype());
+        const auto boost_tol_pointer_mode = boost->get_tol_pointer_mode();
+        const auto boost_val_pointer_mode = boost->get_val_pointer_mode();
+
+        const float*  boost_tol_32 = (boost_tol_size == sizeof(float))
+                                         ? reinterpret_cast<const float*>(boost->get_tol())
+                                         : nullptr;
+        const double* boost_tol_64 = (boost_tol_size == sizeof(double))
+                                         ? reinterpret_cast<const double*>(boost->get_tol())
+                                         : nullptr;
+        const T*      boost_val    = reinterpret_cast<const T*>(boost->get_val());
 
         dim3 csrilu0_blocks((A->rows * handle->wavefront_size - 1) / BLOCKSIZE + 1, A->batch_count);
         dim3 csrilu0_threads(BLOCKSIZE);
@@ -278,18 +307,25 @@ namespace rocsparse
             done_array,
             done_array_stride,
             reinterpret_cast<const J*>(trm_info->get_row_map()),
-            reinterpret_cast<J*>(csrilu0_info->get_zero_pivot()),
-            csrilu0_info->get_zero_pivot_stride(),
-            reinterpret_cast<J*>(csrilu0_info->get_singular_pivot()),
-            csrilu0_info->get_singular_pivot_stride(),
-            csrilu0_info->get_singular_tol(),
+
+            reinterpret_cast<J*>(numeric_exact->get_position()),
+            numeric_exact->get_stride(),
+            reinterpret_cast<J*>(numeric_near->get_position()),
+            numeric_near->get_stride(),
+            //
+            tolerance_datatype,
+            ROCSPARSE_SCALAR_HOST_DEVICE_ARGUMENT(tolerance_pointer_mode, tolerance_pointer_32),
+            ROCSPARSE_SCALAR_HOST_DEVICE_ARGUMENT(tolerance_pointer_mode, tolerance_pointer_64),
+            (tolerance_pointer_mode == rocsparse_pointer_mode_host),
+            //
             A->descr->base,
             boost_enable,
             boost_tol_size,
-            ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, boost_tol_32),
-            ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, boost_tol_64),
-            ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, boost_val),
-            handle->pointer_mode == rocsparse_pointer_mode_host);
+            ROCSPARSE_SCALAR_HOST_DEVICE_PERMISSIVE_ARGUMENT(boost_tol_pointer_mode, boost_tol_32),
+            ROCSPARSE_SCALAR_HOST_DEVICE_PERMISSIVE_ARGUMENT(boost_tol_pointer_mode, boost_tol_64),
+            boost_tol_pointer_mode == rocsparse_pointer_mode_host,
+            ROCSPARSE_SCALAR_HOST_DEVICE_PERMISSIVE_ARGUMENT(boost_val_pointer_mode, boost_val),
+            boost_val_pointer_mode == rocsparse_pointer_mode_host);
 
         return rocsparse_status_success;
     }

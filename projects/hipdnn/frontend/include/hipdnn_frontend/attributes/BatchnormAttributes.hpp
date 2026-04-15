@@ -1,19 +1,75 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
-// SPDX-License-Identifier:  MIT
+// SPDX-License-Identifier: MIT
+
+/**
+ * @file BatchnormAttributes.hpp
+ * @brief Attributes for batch normalization forward training operation
+ *
+ * This file defines the BatchnormAttributes class used to configure
+ * batch normalization operations during training, including computing
+ * mean and variance statistics.
+ */
+
 #pragma once
 
 #include "Attributes.hpp"
 #include "TensorAttributes.hpp"
-#include <hipdnn_data_sdk/data_objects/batchnorm_attributes_generated.h>
 #include <memory>
 #include <unordered_map>
 #include <vector>
 
 namespace hipdnn_frontend::graph
 {
+
+/**
+ * @class BatchnormAttributes
+ * @brief Configuration attributes for batch normalization forward training
+ *
+ * BatchnormAttributes configures a batch normalization operation for training.
+ * This operation normalizes the input tensor across the batch dimension and
+ * computes running statistics for inference.
+ *
+ * **Tensor Shapes:**
+ * - **X** (input): `(N, C, H, W)` or `(N, C, D, H, W)` — batch, channels, spatial dims
+ * - **Scale, Bias**: `(1, C, 1, 1)` or `(1, C, 1, 1, 1)` — per-channel parameters
+ * - **Y** (output): Same shape as X
+ * - **Mean, Inv_variance**: `(1, C, 1, 1)` or `(1, C, 1, 1, 1)` — per-channel statistics
+ *
+ * **Required inputs:**
+ * - X: Input tensor to normalize
+ * - Scale: Per-channel scale (gamma) tensor
+ * - Bias: Per-channel bias (beta) tensor
+ *
+ * **Optional inputs (for running statistics):**
+ * - prev_running_mean: Previous running mean (for exponential moving average)
+ * - prev_running_variance: Previous running variance
+ * - momentum: Momentum for running statistics update
+ *
+ * **Outputs:**
+ * - Y: Normalized output tensor
+ * - Mean: Computed batch mean
+ * - Inv_variance: Computed inverse variance (1/sqrt(var + epsilon))
+ * - next_running_mean: Updated running mean (optional)
+ * - next_running_variance: Updated running variance (optional)
+ *
+ * @code{.cpp}
+ * BatchnormAttributes attr;
+ * attr.set_x(inputTensor)
+ *     .set_scale(scaleTensor)
+ *     .set_bias(biasTensor)
+ *     .set_epsilon(epsilonTensor);
+ *
+ * auto [y, mean, invVar, nextMean, nextVar] = graph.batchnorm(x, scale, bias, attr);
+ * @endcode
+ *
+ * @see BatchnormInferenceAttributes for inference-only batch normalization
+ * @see BatchnormBackwardAttributes for backward pass
+ */
 class BatchnormAttributes : public Attributes<BatchnormAttributes>
 {
 public:
+    BatchnormAttributes() = default;
+
     enum class InputNames
     {
         X = 0,
@@ -257,106 +313,6 @@ public:
         return set_prev_running_mean(std::move(mean))
             .set_prev_running_variance(std::move(variance))
             .set_momentum(std::move(momentum));
-    }
-
-    flatbuffers::Offset<hipdnn_data_sdk::data_objects::BatchnormAttributes>
-        pack_attributes(flatbuffers::FlatBufferBuilder& builder) const // NOLINT
-    {
-        auto peerStatsVector = std::vector<int64_t>{};
-        for(const auto& peerStat : peer_stats)
-        {
-            if(peerStat)
-            {
-                peerStatsVector.emplace_back(peerStat->get_uid());
-            }
-        }
-
-        auto prevRunningMean = get_prev_running_mean();
-        auto prevRunningVariance = get_prev_running_variance();
-        auto momentum = get_momentum();
-        auto mean = get_mean();
-        auto invVariance = get_inv_variance();
-        auto nextRunningMean = get_next_running_mean();
-        auto nextRunningVariance = get_next_running_variance();
-
-        return hipdnn_data_sdk::data_objects::CreateBatchnormAttributesDirect(
-            builder,
-            get_x()->get_uid(),
-            get_scale()->get_uid(),
-            get_bias()->get_uid(),
-            get_epsilon()->get_uid(),
-            &peerStatsVector,
-            prevRunningMean ? flatbuffers::Optional<int64_t>(prevRunningMean->get_uid())
-                            : flatbuffers::nullopt,
-            prevRunningVariance ? flatbuffers::Optional<int64_t>(prevRunningVariance->get_uid())
-                                : flatbuffers::nullopt,
-            momentum ? flatbuffers::Optional<int64_t>(momentum->get_uid()) : flatbuffers::nullopt,
-            get_y()->get_uid(),
-            mean ? flatbuffers::Optional<int64_t>(mean->get_uid()) : flatbuffers::nullopt,
-            invVariance ? flatbuffers::Optional<int64_t>(invVariance->get_uid())
-                        : flatbuffers::nullopt,
-            nextRunningMean ? flatbuffers::Optional<int64_t>(nextRunningMean->get_uid())
-                            : flatbuffers::nullopt,
-            nextRunningVariance ? flatbuffers::Optional<int64_t>(nextRunningVariance->get_uid())
-                                : flatbuffers::nullopt);
-    }
-
-    static BatchnormAttributes fromFlatBuffer(
-        const hipdnn_data_sdk::data_objects::BatchnormAttributes* fb,
-        const std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>>& tensorMap)
-    {
-        BatchnormAttributes attr;
-
-        attr.set_x(tensorMap.at(fb->x_tensor_uid()));
-        attr.set_scale(tensorMap.at(fb->scale_tensor_uid()));
-        attr.set_bias(tensorMap.at(fb->bias_tensor_uid()));
-        attr.set_epsilon(tensorMap.at(fb->epsilon_tensor_uid()));
-
-        std::vector<std::shared_ptr<TensorAttributes>> peerStats;
-        if(fb->peer_stats_tensor_uid() != nullptr)
-        {
-            for(auto uid : *fb->peer_stats_tensor_uid())
-            {
-                peerStats.push_back(tensorMap.at(uid));
-            }
-        }
-        attr.set_peer_stats(peerStats);
-
-        if(fb->prev_running_mean_tensor_uid().has_value())
-        {
-            attr.set_prev_running_mean(tensorMap.at(fb->prev_running_mean_tensor_uid().value()));
-        }
-        if(fb->prev_running_variance_tensor_uid().has_value())
-        {
-            attr.set_prev_running_variance(
-                tensorMap.at(fb->prev_running_variance_tensor_uid().value()));
-        }
-        if(fb->momentum_tensor_uid().has_value())
-        {
-            attr.set_momentum(tensorMap.at(fb->momentum_tensor_uid().value()));
-        }
-
-        attr.set_y(tensorMap.at(fb->y_tensor_uid()));
-
-        if(fb->mean_tensor_uid().has_value())
-        {
-            attr.set_mean(tensorMap.at(fb->mean_tensor_uid().value()));
-        }
-        if(fb->inv_variance_tensor_uid().has_value())
-        {
-            attr.set_inv_variance(tensorMap.at(fb->inv_variance_tensor_uid().value()));
-        }
-        if(fb->next_running_mean_tensor_uid().has_value())
-        {
-            attr.set_next_running_mean(tensorMap.at(fb->next_running_mean_tensor_uid().value()));
-        }
-        if(fb->next_running_variance_tensor_uid().has_value())
-        {
-            attr.set_next_running_variance(
-                tensorMap.at(fb->next_running_variance_tensor_uid().value()));
-        }
-
-        return attr;
     }
 };
 

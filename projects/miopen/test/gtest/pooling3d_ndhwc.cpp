@@ -46,6 +46,11 @@ class GPU_Pooling3d_NDHWC_FP16 : public testing::TestWithParam<std::vector<std::
     MIOPEN_DECLARE_GTEST_USES_TEST_DRIVE();
 };
 
+class GPU_Pooling3d_NDHWC_BFP16 : public testing::TestWithParam<std::vector<std::string>>
+{
+    MIOPEN_DECLARE_GTEST_USES_TEST_DRIVE();
+};
+
 void GetArgs(const std::string& param, std::vector<std::string>& tokens)
 {
     std::stringstream ss(param);
@@ -63,14 +68,14 @@ void Run3dDriver(miopenDataType_t prec)
     {
     case miopenFloat: params = GPU_Pooling3d_NDHWC_FP32::GetParam(); break;
     case miopenHalf: params = GPU_Pooling3d_NDHWC_FP16::GetParam(); break;
-    case miopenBFloat16:
+    case miopenBFloat16: params = GPU_Pooling3d_NDHWC_BFP16::GetParam(); break;
     case miopenInt8:
     case miopenFloat8_fnuz:
     case miopenBFloat8_fnuz:
     case miopenInt32:
     case miopenInt64:
     case miopenDouble:
-        FAIL() << "miopenBFloat16, miopenInt8, miopenInt32, miopenDouble, miopenFloat8_fnuz, "
+        FAIL() << "miopenInt8, miopenInt32, miopenDouble, miopenFloat8_fnuz, "
                   "miopenBFloat8_fnuz "
                   "data type not supported by "
                   "pooling3d_ndhwc test";
@@ -101,13 +106,14 @@ std::vector<std::string> GetTestCases(const std::string& precision)
 {
     const auto& flag_arg = env::value(MIOPEN_TEST_FLAGS_ARGS);
 
-    const std::vector<std::string> test_cases = {
+    return std::vector<std::string>{
         // clang-format off
-    {"test_pooling3d " + precision + " --all --in_layout NDHWC --out_layout NDHWC " + flag_arg}
+        // Forward pooling with NDHWC layout (universal transpose - 3D)
+        {"test_pooling3d " + precision + " --all --in_layout NDHWC --out_layout NDHWC " + flag_arg},
+        // Backward pooling with NDHWC layout (universal transpose - 3D)
+        {"test_pooling3d " + precision + " --forw 0 --in_layout NDHWC --out_layout NDHWC " + flag_arg}
         // clang-format on
     };
-
-    return test_cases;
 }
 
 } // namespace pooling3d_ndhwc
@@ -137,6 +143,22 @@ TEST_P(GPU_Pooling3d_NDHWC_FP16, HalfTest_pooling3d_ndhwc)
     }
 };
 
+TEST_P(GPU_Pooling3d_NDHWC_BFP16, BFloat16Test_pooling3d_ndhwc)
+{
+    if(IsTestSupportedForDevice())
+    {
+        Run3dDriver(miopenBFloat16);
+    }
+    else
+    {
+        GTEST_SKIP();
+    }
+};
+
 INSTANTIATE_TEST_SUITE_P(Full, GPU_Pooling3d_NDHWC_FP32, testing::Values(GetTestCases("--float")));
 
 INSTANTIATE_TEST_SUITE_P(Full, GPU_Pooling3d_NDHWC_FP16, testing::Values(GetTestCases("--half")));
+
+INSTANTIATE_TEST_SUITE_P(Full,
+                         GPU_Pooling3d_NDHWC_BFP16,
+                         testing::Values(GetTestCases("--bfloat16")));

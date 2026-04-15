@@ -107,6 +107,10 @@ protected:
     void SetUp() override
     {
         SKIP_IF_NO_DEVICES();
+
+        ASSERT_EQ(hipInit(0), hipSuccess);
+        int deviceId = 0;
+        ASSERT_EQ(hipGetDevice(&deviceId), hipSuccess);
     }
 
     void TearDown() override
@@ -119,10 +123,6 @@ protected:
 
     static hipdnnHandle_t setupEnvironmentWithPlugin(const std::string& pluginPath)
     {
-        EXPECT_EQ(hipInit(0), hipSuccess);
-        int deviceId = 0;
-        EXPECT_EQ(hipGetDevice(&deviceId), hipSuccess);
-
         // Load specific plugin
         const std::array<const char*, 1> paths = {pluginPath.c_str()};
         EXPECT_EQ(hipdnnSetEnginePluginPaths_ext(
@@ -251,14 +251,14 @@ protected:
 
         _handle = setupEnvironmentWithPlugin(testCase.pluginPath);
 
-        std::vector<int64_t> inputDims = {2, 3, 14, 14}; // X dimensions
-        std::vector<int64_t> filterDims = {3, 3, 3, 3}; // DW dimensions (K, C, R, S)
-        std::vector<int64_t> outputDims = {2, 3, 12, 12}; // DY dimensions
+        const std::vector<int64_t> inputDims = {2, 3, 14, 14}; // X dimensions
+        const std::vector<int64_t> filterDims = {3, 3, 3, 3}; // DW dimensions (K, C, R, S)
+        const std::vector<int64_t> outputDims = {2, 3, 12, 12}; // DY dimensions
 
-        std::vector<int64_t> prePadding = {0, 0};
-        std::vector<int64_t> postPadding = {0, 0};
-        std::vector<int64_t> stride = {1, 1};
-        std::vector<int64_t> dilation = {1, 1};
+        const std::vector<int64_t> prePadding = {0, 0};
+        const std::vector<int64_t> postPadding = {0, 0};
+        const std::vector<int64_t> stride = {1, 1};
+        const std::vector<int64_t> dilation = {1, 1};
 
         SimpleConvolution2DTensorBundle<float> tensorBundle(inputDims, filterDims, outputDims);
 

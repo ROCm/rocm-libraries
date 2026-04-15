@@ -245,17 +245,14 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadKRKTRVR
         const auto [seqlen_q_start, seqlen_q_end] =
             mask.GetTileRangeAlongY(k_origin.at(number<0>{}), number<kM0>{}, number<kN0>{});
 
-        const auto num_total_loop = integer_divide_ceil(seqlen_q_end - seqlen_q_start, kM0);
+        const auto num_total_loop =
+            amd_wave_read_first_lane(integer_divide_ceil(seqlen_q_end - seqlen_q_start, kM0));
 
-        // check early exit if masked and no work to do.
-        if constexpr(FmhaMask::IsMasking)
+        // check early exit if no work to do.
+        if(num_total_loop <= 0)
         {
-            if(num_total_loop <= 0)
-            {
-                // Note: here dk_acc&dv_acc are all cleard, return it
-                // Note: v loaded but no fence, ignore it.
-                return make_tuple(dk_acc, dv_acc);
-            }
+            // Note: here dk_acc&dv_acc are all cleared, return it
+            return make_tuple(dk_acc, dv_acc);
         }
 
         auto k_lds = make_tensor_view<address_space_enum::lds>(
@@ -530,7 +527,7 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadKRKTRVR
                 s_acc = gemm_0(q_reg_tensor, k_reg_tensor);
 
                 dot_lds_read_window.set_bottom_tensor_view_data_ptr(do_lds_ptr_curr);
-                dot_reg_tensor = load_tile_transpose(dot_lds_read_window);
+                load_tile_transpose(dot_reg_tensor, dot_lds_read_window);
             }
             if constexpr(is_epilogue)
             {
@@ -634,7 +631,7 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadKRKTRVR
                 dp_acc = gemm_2(do_reg_tensor, v_reg_tensor);
 
                 qt_lds_read_window.set_bottom_tensor_view_data_ptr(q_lds_ptr_curr);
-                qt_reg_tensor = load_tile_transpose(qt_lds_read_window);
+                load_tile_transpose(qt_reg_tensor, qt_lds_read_window);
 
                 // STAGE 3, P^T@OGrad^T Gemm1
                 auto pt_reg_tensor = make_static_distributed_tensor<GemmDataType>(
@@ -715,7 +712,7 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadKRKTRVR
             }
             if constexpr(is_epilogue)
             {
-                ds_reg_tensor = load_tile_transpose(ds_lds_read_window);
+                load_tile_transpose(ds_reg_tensor, ds_lds_read_window);
                 move_tile_window(ds_lds_read_window, {kK4, 0});
             }
             if constexpr(is_main_body)
@@ -728,7 +725,7 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadKRKTRVR
                 static_for<0, k4_loops, 1>{}([&](auto i_k4) {
                     if constexpr(i_k4 < k4_loops - 1)
                     {
-                        ds_reg_tensor_next = load_tile_transpose(ds_lds_read_window);
+                        load_tile_transpose(ds_reg_tensor_next, ds_lds_read_window);
                         move_tile_window(ds_lds_read_window, {kK4, 0});
                     }
                     auto kt_reg_tensor_slice = get_slice_tile( //
@@ -764,7 +761,8 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadKRKTRVR
                 {
                     tile_elementwise_inout([&raw_scale](auto& x) { x = x * raw_scale; }, dq_acc);
                 }
-                if constexpr(kIsDeterministic)
+                if constexpr(decltype(dq_dram_window)::BottomTensorView::DstInMemOp ==
+                             memory_operation_enum::set)
                 {
                     store_tile(dq_dram_window, dq_acc);
                 }

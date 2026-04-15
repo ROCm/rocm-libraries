@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -113,19 +90,16 @@ namespace rocRollerTest::Graphs
         AssertFatal(!m_useBeta);
 
         runtimeArgs.append("user0", x);
-        runtimeArgs.append("d_a_limit", nx);
         runtimeArgs.append("d_a_size", nx);
         runtimeArgs.append("d_a_stride", (size_t)1);
 
         runtimeArgs.append("user1", y);
-        runtimeArgs.append("d_b_limit", nx);
         runtimeArgs.append("d_b_size", nx);
         runtimeArgs.append("d_b_stride", (size_t)1);
 
         runtimeArgs.append("user2", alpha);
 
         runtimeArgs.append("user6", rv);
-        runtimeArgs.append("d_c_limit", nx);
         runtimeArgs.append("d_c_size", nx);
         runtimeArgs.append("d_c_stride", (size_t)1);
 
@@ -141,12 +115,10 @@ namespace rocRollerTest::Graphs
         AssertFatal(m_useBeta);
 
         runtimeArgs.append("user0", x);
-        runtimeArgs.append("d_a_limit", nx);
         runtimeArgs.append("d_a_size", nx);
         runtimeArgs.append("d_a_stride", (size_t)1);
 
         runtimeArgs.append("user1", y);
-        runtimeArgs.append("d_b_limit", nx);
         runtimeArgs.append("d_b_size", nx);
         runtimeArgs.append("d_b_stride", (size_t)1);
 
@@ -155,7 +127,6 @@ namespace rocRollerTest::Graphs
         runtimeArgs.append("user3", beta);
 
         runtimeArgs.append("user6", rv);
-        runtimeArgs.append("d_c_limit", nx);
         runtimeArgs.append("d_c_size", nx);
         runtimeArgs.append("d_c_stride", (size_t)1);
 
@@ -334,8 +305,10 @@ namespace rocRollerTest::Graphs
 
         auto params = std::make_shared<CommandParameters>();
 
-        auto macTileLDS  = MacroTile({m_macM, m_macN}, MemoryType::LDS, {m_thrM, m_thrN});
-        auto macTileVGPR = MacroTile({m_macM, m_macN}, MemoryType::VGPR, {m_thrM, m_thrN});
+        auto macTileLDS
+            = MacroTile({m_macM, m_macN}, LayoutType::ROW_MAJOR, {m_thrM, m_thrN}, MemoryType::LDS);
+        auto macTileVGPR = MacroTile(
+            {m_macM, m_macN}, LayoutType::ROW_MAJOR, {m_thrM, m_thrN}, MemoryType::VGPR);
 
         params->setDimensionInfo(m_tagA, macTileLDS);
         params->setDimensionInfo(m_tagB, macTileVGPR);
@@ -376,21 +349,18 @@ namespace rocRollerTest::Graphs
         KernelArguments runtimeArgs;
 
         runtimeArgs.append("user0", x);
-        runtimeArgs.append("d_a_limit", (size_t)nx * ny);
         runtimeArgs.append("d_a_size_0", (size_t)nx);
         runtimeArgs.append("d_a_size_1", (size_t)ny);
         runtimeArgs.append("d_a_stride_0", (size_t)ny);
         runtimeArgs.append("d_a_stride_1", (size_t)1);
 
         runtimeArgs.append("user1", y);
-        runtimeArgs.append("d_b_limit", (size_t)nx * ny);
         runtimeArgs.append("d_b_size_0", (size_t)nx);
         runtimeArgs.append("d_b_size_1", (size_t)ny);
         runtimeArgs.append("d_b_stride_0", (size_t)ny);
         runtimeArgs.append("d_b_stride_1", (size_t)1);
 
         runtimeArgs.append("user2", rv);
-        runtimeArgs.append("d_c_limit", (size_t)nx * ny);
         runtimeArgs.append("d_c_size_0", (size_t)nx);
         runtimeArgs.append("d_c_size_1", (size_t)ny);
         runtimeArgs.append("d_c_stride_0", (size_t)ny);
@@ -523,14 +493,12 @@ namespace rocRollerTest::Graphs
         KernelArguments runtimeArgs;
 
         runtimeArgs.append("user0", x);
-        runtimeArgs.append("d_a_limit", (size_t)nx * ny);
         runtimeArgs.append("d_a_size_0", (size_t)nx);
         runtimeArgs.append("d_a_size_1", (size_t)ny);
         runtimeArgs.append("d_a_stride_0", (size_t)ny);
         runtimeArgs.append("d_a_stride_1", (size_t)1);
 
         runtimeArgs.append("user2", rv);
-        runtimeArgs.append("d_c_limit", (size_t)nx * ny);
         runtimeArgs.append("d_c_size_0", (size_t)nx);
         runtimeArgs.append("d_c_size_1", (size_t)ny);
         runtimeArgs.append("d_c_stride_0", (size_t)ny);

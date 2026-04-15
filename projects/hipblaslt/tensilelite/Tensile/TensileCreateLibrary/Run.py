@@ -33,7 +33,7 @@ import pickle
 import zlib
 from pathlib import Path
 from timeit import default_timer as timer
-from typing import List, NamedTuple, Optional, Union
+from typing import Collection, List, NamedTuple, Optional, Union
 
 from Tensile import SOURCE_PATH, LibraryIO
 from Tensile.Common import (
@@ -56,6 +56,7 @@ from Tensile.Common import (
 from Tensile.Common.Architectures import gfxToIsa, isaToGfx, SUPPORTED_GFX, splitArchsFromPredicates, filterLogicFilesByPredicates
 from Tensile.Common.Capabilities import makeIsaInfoMap
 from Tensile.Common.GlobalParameters import assignGlobalParameters, globalParameters
+from Tensile.Common.TimingInstrumentation import timing_context
 from Tensile.SolutionStructs.Naming import getKernelFileBase, getKeyNoInternalArgs, getKernelNameMin
 
 from Tensile.CustomYamlLoader import load_logic_gfx_arch
@@ -67,6 +68,7 @@ from Tensile.KernelWriterBase import (
 )
 from Tensile.SolutionLibrary import MasterSolutionLibrary
 from Tensile.SolutionStructs import Solution
+from Tensile.SolutionStructs.Solution import printTypeMismatchSummary
 from Tensile.Toolchain.Assembly import makeAssemblyToolchain, buildAssemblyCodeObjectFiles
 from Tensile.Toolchain.Source import makeSourceToolchain, buildSourceCodeObjectFiles
 from Tensile.Toolchain.Validators import (
@@ -78,6 +80,20 @@ from Tensile.Utilities.Decorators.Profile import profile
 from Tensile.Utilities.Decorators.Timing import timing
 
 from .ParseArguments import parseArguments
+
+
+def libraryDir(outputPath: Union[str, Path], archs: Collection[str]) -> Path:
+    """Return the library output/input directory for the given target archs.
+
+    Single arch  → <outputPath>/library/<arch>/   (TheRock shard overlay safe)
+    Zero or multiple archs → <outputPath>/library/ (flat)
+    """
+    path = Path(outputPath)
+    archs = list(archs)
+    if len(archs) == 1:
+        return path / "library" / archs[0]
+    return path / "library"
+
 
 class KernelCodeGenResult(NamedTuple):
     err: int
@@ -320,53 +336,56 @@ def writeSolutionsAndKernels(
 
     codeObjectFiles = []
 
-    outputPath = Path(outputPath)
-    destLibPath = ensurePath(
-        outputPath / "library"
-    )  # Destination for code object library files (.co)
-    buildTmpPath = ensurePath(outputPath / "build_tmp" / outputPath.stem.upper())  #
-    assemblyTmpPath = ensurePath(
-        buildTmpPath / "assembly"
-    )  # Temp path for generated assembly files (.s)
-    objectTmpPath = ensurePath(
-        buildTmpPath / "code_object_tmp"
-    )  # Temp path for HSA code object files (.hsaco)
+    with timing_context("python_kernel_setup"):
+        outputPath = Path(outputPath)
+        destLibPath = ensurePath(
+            libraryDir(outputPath, cmdlineArchs)
+        )  # Destination for code object library files (.co)
+        buildTmpPath = ensurePath(outputPath / "build_tmp" / outputPath.stem.upper())  #
+        assemblyTmpPath = ensurePath(
+            buildTmpPath / "assembly"
+        )  # Temp path for generated assembly files (.s)
+        objectTmpPath = ensurePath(
+            buildTmpPath / "code_object_tmp"
+        )  # Temp path for HSA code object files (.hsaco)
 
-    asmKernels = [k for k in kernels if k["KernelLanguage"] == "Assembly"]
+        asmKernels = [k for k in kernels if k["KernelLanguage"] == "Assembly"]
 
-    visited = set()
-    duplicates = 0
-    for k in asmKernels:
-        base = getKernelFileBase(splitGSU, k)
-        k.duplicate = True if base in visited else False
-        if not k.duplicate:
-            k["BaseName"] = base
-        duplicates += k.duplicate
-        print2(f"Duplicate: {base}")
-        visited.add(base)
-    print1(f"Number of duplicate kernels: {duplicates}")
+        visited = set()
+        duplicates = 0
+        for k in asmKernels:
+            base = getKernelFileBase(splitGSU, k)
+            k.duplicate = True if base in visited else False
+            if not k.duplicate:
+                k["BaseName"] = base
+            duplicates += k.duplicate
+            print2(f"Duplicate: {base}")
+            visited.add(base)
+        print1(f"Number of duplicate kernels: {duplicates}")
 
-    outOptions = rocisa.rocIsa.getInstance().getOutputOptions()
-    outOptions.outputNoComment = disableAsmComments
+        outOptions = rocisa.rocIsa.getInstance().getOutputOptions()
+        outOptions.outputNoComment = disableAsmComments
 
-    numAsmKernels = len(asmKernels)
-    numKernels = len(asmKernels)
-    assert numKernels == numAsmKernels, "Only assembly kernels are supported in TensileLite"
-    asmIter = zip(
-        itertools.repeat(kernelWriterAssembly),
-        itertools.repeat(rocisa.rocIsa.getInstance().getData()),
-        itertools.repeat(outOptions),
-        itertools.repeat(splitGSU),
-        asmKernels
-    )
-    memcompress = numAsmKernels > 10000
-    asmResults = ParallelMap2(functools.partial(processKernelSource, compress=memcompress), asmIter, "Generating assembly kernels", return_as="list")
-    removeInvalidSolutionsAndKernels(
-        asmResults, asmKernels, solutions, errorTolerant, getVerbosity(), splitGSU
-    )
-    passPostKernelInfoToSolution(
-        asmResults, asmKernels, solutions, splitGSU
-    )
+        numAsmKernels = len(asmKernels)
+        numKernels = len(asmKernels)
+        assert numKernels == numAsmKernels, "Only assembly kernels are supported in TensileLite"
+        asmIter = zip(
+            itertools.repeat(kernelWriterAssembly),
+            itertools.repeat(rocisa.rocIsa.getInstance().getData()),
+            itertools.repeat(outOptions),
+            itertools.repeat(splitGSU),
+            asmKernels
+        )
+        memcompress = numAsmKernels > 10000
+    with timing_context("python_kernel_codegen"):
+        asmResults = ParallelMap2(functools.partial(processKernelSource, compress=memcompress), asmIter, "Generating assembly kernels", return_as="list")
+    with timing_context("python_kernel_validate"):
+        removeInvalidSolutionsAndKernels(
+            asmResults, asmKernels, solutions, errorTolerant, getVerbosity(), splitGSU
+        )
+        passPostKernelInfoToSolution(
+            asmResults, asmKernels, solutions, splitGSU
+        )
 
     def assemble(ret):
         p, isa, wavefrontsize, _ = ret
@@ -374,15 +393,17 @@ def writeSolutionsAndKernels(
 
     unaryWriteAssembly = functools.partial(writeAssembly, assemblyTmpPath)
     compose = lambda *F: functools.reduce(lambda f, g: lambda x: f(g(x)), F)
-    ret = ParallelMap2(
-        compose(assemble, unaryWriteAssembly),
-        asmResults,
-        "Writing assembly kernels",
-        return_as="list",
-        multiArg=False,
-    )
+    with timing_context("python_kernel_write_assemble"):
+        ret = ParallelMap2(
+            compose(assemble, unaryWriteAssembly),
+            asmResults,
+            "Writing assembly kernels",
+            return_as="list",
+            multiArg=False,
+        )
 
-    writeHelpers(outputPath, kernelHelperObjs, KERNEL_HELPER_FILENAME_CPP, KERNEL_HELPER_FILENAME_H)
+    with timing_context("python_kernel_write_helpers"):
+        writeHelpers(outputPath, kernelHelperObjs, KERNEL_HELPER_FILENAME_CPP, KERNEL_HELPER_FILENAME_H)
     srcKernelFile = Path(outputPath) / "Kernels.cpp"
 
     if globalParameters["PythonProfile"]:
@@ -395,24 +416,26 @@ def writeSolutionsAndKernels(
                 yappi.get_thread_stats().print_all(out=f)
 
     if not generateSourcesAndExit:
-        codeObjectFiles += buildAssemblyCodeObjectFiles(
-            asmToolchain.linker,
-            asmToolchain.bundler,
-            asmKernels,
-            destLibPath,
-            assemblyTmpPath,
-            compress,
-        )
-        
-        buildSourceCodeObjectFiles(
-            srcToolchain.compiler,
-            srcToolchain.bundler,
-            destLibPath,
-            objectTmpPath,
-            outputPath,
-            srcKernelFile,
-            cmdlineArchs,
-        )
+        with timing_context("python_kernel_build_co"):
+            codeObjectFiles += buildAssemblyCodeObjectFiles(
+                asmToolchain.linker,
+                asmToolchain.bundler,
+                asmKernels,
+                destLibPath,
+                assemblyTmpPath,
+                compress,
+            )
+
+        with timing_context("python_kernel_build_src_co"):
+            buildSourceCodeObjectFiles(
+                srcToolchain.compiler,
+                srcToolchain.bundler,
+                destLibPath,
+                objectTmpPath,
+                outputPath,
+                srcKernelFile,
+                cmdlineArchs,
+            )
 
     return codeObjectFiles, numKernels
 
@@ -431,9 +454,7 @@ def writeSolutionsAndKernelsTCL(
     removeTemporaries: bool=True
 ):
     outputPath = Path(outputPath)
-    destLibPath = ensurePath(
-        outputPath / "library"
-    )  # Destination for code object library files (.co)
+    destLibPath = ensurePath(libraryDir(outputPath, cmdlineArchs))
     buildTmpPath = ensurePath(outputPath / "build_tmp" / outputPath.stem.upper())
     assemblyTmpPath = ensurePath(
         buildTmpPath / "assembly"
@@ -643,6 +664,10 @@ def generateLogicDataAndSolutions(logicFiles, args, assembler: Assembler, isaInf
             masterLibraries[architectureName] = newLibrary
             masterLibraries[architectureName].version = args["CodeObjectVersion"]
 
+    # After all YAML files have been parsed and Solution objects created,
+    # print a summary of any type mismatches that were collected.
+    printTypeMismatchSummary()
+
     # Sort masterLibraries to make global soln index values deterministic
     solnReIndex = 0
     masterLibraries = dict(sorted(masterLibraries.items()))
@@ -845,7 +870,7 @@ def run():
         for arch in targetIsas
         if isaInfoMap[arch].asmCaps["SupportedISA"]
     ]
-    newLibraryDir = ensurePath(os.path.join(outputPath, "library"))
+    newLibraryDir = ensurePath(libraryDir(outputPath, archs))
     splitGSU = False
 
     start_pki = timer()

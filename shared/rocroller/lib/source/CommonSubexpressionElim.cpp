@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <rocRoller/CommonSubexpressionElim.hpp>
 #include <rocRoller/Expression.hpp>
@@ -739,19 +716,24 @@ namespace rocRoller
             }
 
             Register::ValuePtr resultPlaceholder(ResultType const& resType,
-                                                 bool              allowSpecial = true,
-                                                 int               valueCount   = 1) const
+                                                 bool              allowSpecial = true) const
             {
+                // Obtain the register count by dividing the value count of the result type by its packing
+                size_t count = resType.valueCount
+                               / (resType.varType.dataType == DataType::None
+                                      ? 1
+                                      : DataTypeInfo::Get(resType.varType).packing);
+
                 if(Register::IsSpecial(resType.regType) && resType.varType == DataType::Bool)
                 {
                     if(allowSpecial)
                         return m_context->getSCC();
                     else
                         return Register::Value::Placeholder(
-                            m_context, Register::Type::Scalar, resType.varType, valueCount);
+                            m_context, Register::Type::Scalar, resType.varType, count);
                 }
                 return Register::Value::Placeholder(
-                    m_context, resType.regType, resType.varType, valueCount);
+                    m_context, resType.regType, resType.varType, count);
             }
 
             /**

@@ -166,7 +166,7 @@ TEST_P(ExtOpSoftmaxTest, softmaxSuccess)
     auto hipblasltErr = hipblasltExtSoftmax(HIP_R_32F, m, n, 1, gpuOutput, gpuInput, nullptr);
     EXPECT_EQ(hipblasltErr, HIPBLAS_STATUS_SUCCESS);
     err = hipDeviceSynchronize();
-    EXPECT_EQ(err, hipSuccess);
+    ASSERT_EQ(err, hipSuccess);
     std::vector<float> cpuRef(m * n, 0.f);
     cpuSoftmax(cpuRef.data(), input.data(), m, n);
     err = hipMemcpyDtoH(output.data(), gpuOutput, m * n * sizeof(float));
@@ -227,7 +227,7 @@ TEST_P(ExtOpLayerNormTest, layernormSuccess)
                                               nullptr);
     EXPECT_EQ(hipblasltErr, HIPBLAS_STATUS_SUCCESS);
     err = hipDeviceSynchronize();
-    EXPECT_EQ(err, hipSuccess);
+    ASSERT_EQ(err, hipSuccess);
 
     std::vector<float> cpuRef(m * n, 0.0f);
     std::vector<float> cpuMean(m, 0.0f);

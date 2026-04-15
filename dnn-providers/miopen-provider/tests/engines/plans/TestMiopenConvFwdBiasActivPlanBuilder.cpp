@@ -3,17 +3,17 @@
 
 #include <gtest/gtest.h>
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
+#include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_frontend/Graph.hpp>
 #include <hipdnn_frontend/attributes/ConvolutionFpropAttributes.hpp>
 #include <hipdnn_frontend/attributes/PointwiseAttributes.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
+#include <hipdnn_test_sdk/utilities/MockEngineConfig.hpp>
 #include <hipdnn_test_sdk/utilities/MockGraph.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <miopen/miopen.h>
 
-#include <hipdnn_test_sdk/utilities/MockEngineConfig.hpp>
-
-#include "HipdnnEnginePluginHandle.hpp"
+#include "HipdnnMiopenHandle.hpp"
 #include "engines/plans/MiopenConvFwdBiasActivPlanBuilder.hpp"
 #include "tests/common/ActivationCommon.hpp"
 #include "tests/common/ConvolutionCommon.hpp"
@@ -30,7 +30,7 @@ class TestMiopenConvFwdBiasActivPlanBuilder : public ::testing::Test
 {
 protected:
     MiopenConvFwdBiasActivPlanBuilder _planBuilder;
-    HipdnnEnginePluginHandle _dummyHandle;
+    HipdnnMiopenHandle _dummyHandle;
 };
 
 enum class TypeKey
@@ -119,7 +119,6 @@ protected:
         SKIP_IF_WINDOWS();
 
         SKIP_IF_NO_DEVICES();
-        ASSERT_EQ(miopenCreate(&_handle.miopenHandle), miopenStatusSuccess);
 
         auto param = GetParam();
         auto& convTestCase = param.convTestCase;
@@ -235,16 +234,8 @@ protected:
         _isApplicable = param.isApplicable;
     }
 
-    void TearDown() override
-    {
-        if(_handle.miopenHandle != nullptr)
-        {
-            EXPECT_EQ(miopenDestroy(_handle.miopenHandle), miopenStatusSuccess);
-        }
-    }
-
     MiopenConvFwdBiasActivPlanBuilder _planBuilder;
-    HipdnnEnginePluginHandle _handle;
+    HipdnnMiopenHandle _handle;
 
     Graph _graphObj;
     bool _isApplicable;
@@ -582,18 +573,20 @@ std::vector<ConvolutionBiasActivationTestParam> testParams()
 
 TEST_P(TestGpuMiopenConvFwdBiasActivPlanBuilder, IsApplicableGetWorkspaceSizeAndBuildPlan)
 {
-    auto graphBuffer = _graphObj.buildFlatbufferOperationGraph();
+    auto [graphBuffer, serErr] = _graphObj.to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
     auto graph = GraphWrapper(graphBuffer.data(), graphBuffer.size());
+    MockEngineConfig mockEngineConfig;
 
     EXPECT_EQ(_planBuilder.isApplicable(_handle, graph), _isApplicable);
 
     if(_isApplicable)
     {
-        MiopenExecutionSettings settings;
+        HipdnnMiopenSettings settings;
         EXPECT_NO_THROW(_planBuilder.getMaxWorkspaceSize(_handle, graph, settings));
 
-        HipdnnEnginePluginExecutionContext ctx;
-        ASSERT_NO_THROW(_planBuilder.buildPlan(_handle, graph, ctx));
+        HipdnnMiopenContext ctx;
+        ASSERT_NO_THROW(_planBuilder.buildPlan(_handle, graph, mockEngineConfig, ctx));
         EXPECT_TRUE(ctx.hasValidPlan());
     }
 }
@@ -668,7 +661,7 @@ TEST_F(TestMiopenConvFwdBiasActivPlanBuilder, GetWorkspaceSizeThrowsForWrongNode
         MockGraph mockGraph;
         EXPECT_CALL(mockGraph, nodeCount()).WillRepeatedly(::testing::Return(1));
 
-        MiopenExecutionSettings settings;
+        HipdnnMiopenSettings settings;
         EXPECT_THROW(_planBuilder.getMaxWorkspaceSize(_dummyHandle, mockGraph, settings),
                      hipdnn_plugin_sdk::HipdnnPluginException);
     }
@@ -676,7 +669,7 @@ TEST_F(TestMiopenConvFwdBiasActivPlanBuilder, GetWorkspaceSizeThrowsForWrongNode
         MockGraph mockGraph;
         EXPECT_CALL(mockGraph, nodeCount()).WillRepeatedly(::testing::Return(4));
 
-        MiopenExecutionSettings settings;
+        HipdnnMiopenSettings settings;
         EXPECT_THROW(_planBuilder.getMaxWorkspaceSize(_dummyHandle, mockGraph, settings),
                      hipdnn_plugin_sdk::HipdnnPluginException);
     }
@@ -688,28 +681,30 @@ TEST_F(TestMiopenConvFwdBiasActivPlanBuilder, GetWorkspaceSizeThrowsForUnsupport
     hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                               builder.GetSize());
 
-    MiopenExecutionSettings settings;
+    HipdnnMiopenSettings settings;
     EXPECT_THROW(_planBuilder.getMaxWorkspaceSize(_dummyHandle, graph, settings),
                  hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 TEST_F(TestMiopenConvFwdBiasActivPlanBuilder, BuildPlanThrowsForWrongNodeCountGraph)
 {
+    MockEngineConfig mockConfig;
+
     {
         MockGraph mockGraph;
         EXPECT_CALL(mockGraph, nodeCount()).WillRepeatedly(::testing::Return(1));
-        HipdnnEnginePluginExecutionContext ctx;
+        HipdnnMiopenContext ctx;
 
-        EXPECT_THROW(_planBuilder.buildPlan(_dummyHandle, mockGraph, ctx),
+        EXPECT_THROW(_planBuilder.buildPlan(_dummyHandle, mockGraph, mockConfig, ctx),
                      hipdnn_plugin_sdk::HipdnnPluginException);
         EXPECT_FALSE(ctx.hasValidPlan());
     }
     {
         MockGraph mockGraph;
         EXPECT_CALL(mockGraph, nodeCount()).WillRepeatedly(::testing::Return(4));
-        HipdnnEnginePluginExecutionContext ctx;
+        HipdnnMiopenContext ctx;
 
-        EXPECT_THROW(_planBuilder.buildPlan(_dummyHandle, mockGraph, ctx),
+        EXPECT_THROW(_planBuilder.buildPlan(_dummyHandle, mockGraph, mockConfig, ctx),
                      hipdnn_plugin_sdk::HipdnnPluginException);
         EXPECT_FALSE(ctx.hasValidPlan());
     }
@@ -720,9 +715,10 @@ TEST_F(TestMiopenConvFwdBiasActivPlanBuilder, BuildPlanThrowsForUnsupportedGraph
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
     hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                               builder.GetSize());
-    HipdnnEnginePluginExecutionContext ctx;
+    HipdnnMiopenContext ctx;
+    MockEngineConfig mockConfig;
 
-    EXPECT_THROW(_planBuilder.buildPlan(_dummyHandle, graph, ctx),
+    EXPECT_THROW(_planBuilder.buildPlan(_dummyHandle, graph, mockConfig, ctx),
                  hipdnn_plugin_sdk::HipdnnPluginException);
     EXPECT_FALSE(ctx.hasValidPlan());
 }

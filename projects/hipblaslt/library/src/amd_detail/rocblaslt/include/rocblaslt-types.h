@@ -471,6 +471,11 @@ struct RocblasltContractionProblem
         Scalar,
         Vector,
         Block_32_UE8M0,
+        Block_16_UE8M0,
+        Block_32_UE4M3,
+        Block_16_UE4M3,
+        Block_32_UE5M3,
+        Block_16_UE5M3,
         Block_32_UE8M0_32_8_EXT,
     };
 

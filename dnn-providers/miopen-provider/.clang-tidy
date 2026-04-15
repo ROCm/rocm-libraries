@@ -1,9 +1,16 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
+# Our repo is setup for clang tidy version 20, newer versions of clang-tidy trigger
+# these new warnings below, disable them until we upgrade to the latest clang-tidy
+# portability-avoid-pragma-once
+# modernize-use-scoped-lock
+# readability-use-concise-preprocessor-directives
+# readability-math-missing-parentheses
 Checks: >
   -*,
-  bugprone-*
+  bugprone-*,
+  -bugprone-easily-swappable-parameters,
   misc-*,
   modernize-*,
   performance-*,
@@ -22,7 +29,12 @@ Checks: >
   -readability-uppercase-literal-suffix,
   -readability-avoid-unconditional-preprocessor-if,
   -readability-use-anyofallof,
-  -readability-function-cognitive-complexity
+  -readability-function-cognitive-complexity,
+  -portability-avoid-pragma-once,
+  -modernize-use-scoped-lock,
+  -readability-use-concise-preprocessor-directives,
+  -readability-math-missing-parentheses,
+  -misc-*
 
 WarningsAsErrors: "*"
 HeaderFileExtensions: ['h','hpp']

@@ -34,7 +34,6 @@
 #include <miopen/conv/heuristics/ai_heuristics.hpp>
 #include <miopen/conv/heuristics/ai_candidate_selection.hpp>
 #include <miopen/execution_context.hpp>
-#include <miopen/solver/implicitgemm_ck_util.hpp>
 #include <miopen/solver/implicitgemm_util.hpp>
 
 #if MIOPEN_ENABLE_AI_KERNEL_TUNING
@@ -43,7 +42,8 @@ namespace solver {
 namespace conv {
 const miopen::ExecutionContext& GetDummyCtx();
 
-MIOPEN_INTERNALS_EXPORT std::map<std::string, float>
+MIOPEN_INTERNALS_EXPORT
+std::map<std::string, float>
 GetFeatures3D(const miopen::conv::ProblemDescription&, int max_cu, const std::string& arch);
 
 MIOPEN_INTERNALS_EXPORT std::vector<std::string> GetKernelAsTokens(const std::string& kernel);
@@ -53,7 +53,8 @@ MIOPEN_INTERNALS_EXPORT void FillHeuristicKernels(const std::vector<std::string>
                                                   std::vector<int>& indexes,
                                                   std::vector<std::vector<std::string>>& kernels);
 
-MIOPEN_INTERNALS_EXPORT std::vector<int> GenerateSplitK(int max_split_k);
+MIOPEN_INTERNALS_EXPORT
+std::vector<int> GenerateSplitK(int max_split_k);
 
 // Main template implementation with validation function
 template <typename DataType, typename ValidationFunc>

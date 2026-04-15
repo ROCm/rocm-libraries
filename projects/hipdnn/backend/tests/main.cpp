@@ -11,22 +11,14 @@ SPDX-License-Identifier: MIT
 
 #include "logging/Logging.hpp"
 
-#include "plugin/EnginePluginResourceManager.hpp"
-
 int main(int argc, char** argv)
 {
-    hipdnn_backend::logging::initialize();
-
     ::testing::InitGoogleTest(&argc, argv);
-
-    hipdnn_backend::plugin::EnginePluginResourceManager::setPluginPaths(
-        {}, HIPDNN_PLUGIN_LOADING_ABSOLUTE);
 
     // Register HipErrorHandler to check and clear HIP errors after each test
     testing::TestEventListeners& listeners = testing::UnitTest::GetInstance()->listeners();
     listeners.Append(new hipdnn_test_sdk::utilities::HipErrorHandler);
 
     auto result = RUN_ALL_TESTS();
-    spdlog::shutdown();
     return result;
 }

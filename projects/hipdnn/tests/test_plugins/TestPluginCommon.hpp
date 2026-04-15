@@ -16,6 +16,7 @@
 #include <hipdnn_plugin_sdk/PluginHelpers.hpp>
 #include <hipdnn_plugin_sdk/PluginLastErrorManager.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
+#include <hipdnn_plugin_sdk/version.h>
 
 struct HipdnnEnginePluginHandle
 {
@@ -27,6 +28,14 @@ struct HipdnnEnginePluginExecutionContext
 {
 };
 
+inline const char* apiVersionWithoutTweak()
+{
+    static const std::string s_versionStr = std::to_string(HIPDNN_PLUGIN_SDK_VERSION_MAJOR) + "."
+                                            + std::to_string(HIPDNN_PLUGIN_SDK_VERSION_MINOR) + "."
+                                            + std::to_string(HIPDNN_PLUGIN_SDK_VERSION_PATCH);
+    return s_versionStr.c_str();
+}
+
 // Base class for test plugins
 class TestPluginBase
 {
@@ -36,6 +45,7 @@ public:
     // Virtual methods to be overridden by derived classes
     virtual const char* getPluginName() const = 0;
     virtual const char* getPluginVersion() const = 0;
+    virtual const char* getPluginApiVersion() const = 0;
     virtual int64_t getEngineId() const = 0;
     virtual uint32_t getNumEngines() const = 0;
     virtual uint32_t getNumApplicableEngines() const = 0;
@@ -90,6 +100,20 @@ public:
         });
     }
 
+    static hipdnnPluginStatus_t pluginGetApiVersion(const char** version)
+    {
+        LOG_API_ENTRY("versionPtr=" << static_cast<const void*>(version));
+
+        return hipdnn_plugin_sdk::tryCatch([&, apiName = __func__]() {
+            hipdnn_plugin_sdk::throwIfNull(version);
+            hipdnn_plugin_sdk::throwIfNull(getInstance());
+
+            *version = getInstance()->getPluginApiVersion();
+
+            LOG_API_SUCCESS(apiName, "version=" << static_cast<const void*>(version));
+        });
+    }
+
     static hipdnnPluginStatus_t pluginGetType(hipdnnPluginType_t* type)
     {
         LOG_API_ENTRY("typePtr=" << static_cast<void*>(type));
@@ -122,8 +146,36 @@ public:
             hipdnn_plugin_sdk::throwIfNull(callback);
             hipdnn_plugin_sdk::throwIfNull(getInstance());
 
-            hipdnn_data_sdk::logging::registerLoggingCallback(callback);
+            hipdnn_plugin_sdk::logging::initializeCallbackLogging(getInstance()->getPluginName(),
+                                                                  callback);
+
             LOG_API_SUCCESS(apiName, "callback registered");
+        });
+    }
+
+    static hipdnnPluginStatus_t pluginSetLogLevel(hipdnnSeverity_t level)
+    {
+        return hipdnn_plugin_sdk::tryCatch([&]() {
+            hipdnn_plugin_sdk::throwIfNull(getInstance());
+
+            hipdnn_plugin_sdk::logging::setLogLevel(level);
+
+            // Log at the level being set so tests can positively verify the call
+            // and the level value for each severity
+            switch(level)
+            {
+            case HIPDNN_SEV_INFO:
+                HIPDNN_PLUGIN_LOG_INFO("TEST: pluginSetLogLevel level=" << level);
+                break;
+            case HIPDNN_SEV_WARN:
+                HIPDNN_PLUGIN_LOG_WARN("TEST: pluginSetLogLevel level=" << level);
+                break;
+            case HIPDNN_SEV_ERROR: // Not used by tests
+            case HIPDNN_SEV_FATAL: // Not used by tests
+            case HIPDNN_SEV_OFF:
+            default:
+                break;
+            }
         });
     }
 
@@ -374,9 +426,9 @@ public:
                     "No engines available - cannot create execution context");
             }
 
-            hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper opGraphWrapper(opGraph->ptr,
-                                                                               opGraph->size);
-            hipdnn_data_sdk::flatbuffer_utilities::EngineConfigWrapper engineConfigWrapper(
+            const hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper opGraphWrapper(opGraph->ptr,
+                                                                                     opGraph->size);
+            const hipdnn_data_sdk::flatbuffer_utilities::EngineConfigWrapper engineConfigWrapper(
                 engineConfig->ptr, engineConfig->size);
 
             *executionContext = new HipdnnEnginePluginExecutionContext();
@@ -459,6 +511,11 @@ private:
         return TestPluginBase::pluginGetVersion(version);                                         \
     }                                                                                             \
                                                                                                   \
+    hipdnnPluginStatus_t hipdnnPluginGetApiVersion(const char** version)                          \
+    {                                                                                             \
+        return TestPluginBase::pluginGetApiVersion(version);                                      \
+    }                                                                                             \
+                                                                                                  \
     hipdnnPluginStatus_t hipdnnPluginGetType(hipdnnPluginType_t* type)                            \
     {                                                                                             \
         return TestPluginBase::pluginGetType(type);                                               \
@@ -472,6 +529,11 @@ private:
     hipdnnPluginStatus_t hipdnnPluginSetLoggingCallback(hipdnnCallback_t callback)                \
     {                                                                                             \
         return TestPluginBase::pluginSetLoggingCallback(callback);                                \
+    }                                                                                             \
+                                                                                                  \
+    hipdnnPluginStatus_t hipdnnPluginSetLogLevel(hipdnnSeverity_t level)                          \
+    {                                                                                             \
+        return TestPluginBase::pluginSetLogLevel(level);                                          \
     }                                                                                             \
                                                                                                   \
     hipdnnPluginStatus_t hipdnnEnginePluginGetAllEngineIds(int64_t* engineIds,                    \
