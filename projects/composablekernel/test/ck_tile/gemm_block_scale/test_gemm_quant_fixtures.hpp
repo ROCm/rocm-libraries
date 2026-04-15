@@ -1071,15 +1071,21 @@ class TestCkTileGemmABQuant : public TestCkTileGemmQuantBase<Tuple, TestCkTileGe
         // Initialize data with random values
         if constexpr(std::is_same_v<ADataType, ck_tile::pk_int4_t>)
         {
-            ck_tile::FillUniformDistribution<ADataType>{-5.0f, 5.0f}(a_m_k);
+            // ck_tile::FillUniformDistribution<ADataType>{-5.0f, 5.0f}(a_m_k);
+            ck_tile::FillConstant<ADataType>{1}(a_m_k);
         }
         else
         {
-            ck_tile::FillUniformDistribution<ADataType>{-2.0f, 3.0f}(a_m_k);
+            // ck_tile::FillUniformDistribution<ADataType>{-2.0f, 3.0f}(a_m_k);
+            ck_tile::FillConstant<ADataType>{1}(a_m_k);
         }
-        ck_tile::FillUniformDistribution<BDataType>{-5.0f, 5.0f}(b_k_n);
-        ck_tile::FillUniformDistribution<QDataType>{-2.0f, 2.0f}(aq_m_aqk);
-        ck_tile::FillUniformDistribution<QDataType>{-2.0f, 2.0f}(bq_bqk_bqn);
+        // ck_tile::FillUniformDistribution<BDataType>{-5.0f, 5.0f}(b_k_n);
+        // ck_tile::FillUniformDistribution<QDataType>{-2.0f, 2.0f}(aq_m_aqk);
+        // ck_tile::FillUniformDistribution<QDataType>{-2.0f, 2.0f}(bq_bqk_bqn);
+        ck_tile::FillConstant<BDataType>{1}(b_k_n);
+        ck_tile::FillConstant<QDataType>{1.f}(aq_m_aqk);
+        ck_tile::FillConstant<QDataType>{1.f}(bq_bqk_bqn);
+
         // Allocate device memory
         ck_tile::DeviceMem a_m_k_dev_buf(a_m_k.get_element_space_size() * sizeof(ADataType));
         ck_tile::DeviceMem aq_m_aqk_dev_buf(aq_m_aqk.get_element_space_size() *
