@@ -33,52 +33,6 @@ enum class {{ fe_type }}
 
 # ============================================================
 # Target: frontend/include/hipdnn_frontend/Types.hpp
-# — toSdkType overload (frontend -> SDK)
-# ============================================================
-
-inline {{ df.cpp_enum }} toSdkType(const {{ fe_type }}& type)
-{
-    switch(type)
-    {
-{% for v in df.enum_def.non_sentinel_values %}
-    case {{ fe_type }}::{{ v.effective_frontend_name }}:
-        return {{ sdk_ns }}::{{ sdk_type }}::{{ v.effective_sdk_name }};
-{% endfor %}
-    default:
-{% if first_sentinel %}
-        return {{ sdk_ns }}::{{ sdk_type }}::{{ first_sentinel.effective_sdk_name }};
-{% else %}
-{% set first_value = df.enum_def.non_sentinel_values[0] %}
-        return {{ sdk_ns }}::{{ sdk_type }}::{{ first_value.effective_sdk_name }};
-{% endif %}
-    }
-}
-
-# ============================================================
-# Target: frontend/include/hipdnn_frontend/Types.hpp
-# — fromSdkType overload (SDK -> frontend)
-# ============================================================
-
-inline {{ fe_type }} fromSdkType(const {{ df.cpp_enum }}& type)
-{
-    switch(type)
-    {
-{% for v in df.enum_def.non_sentinel_values %}
-    case {{ sdk_ns }}::{{ sdk_type }}::{{ v.effective_sdk_name }}:
-        return {{ fe_type }}::{{ v.effective_frontend_name }};
-{% endfor %}
-    default:
-{% if has_sentinel %}
-        return {{ fe_type }}::NOT_SET;
-{% else %}
-{% set first_value = df.enum_def.non_sentinel_values[0] %}
-        return {{ fe_type }}::{{ first_value.effective_frontend_name }};
-{% endif %}
-    }
-}
-
-# ============================================================
-# Target: frontend/include/hipdnn_frontend/Types.hpp
 # — toBackend converter (frontend -> backend C-API)
 # ============================================================
 
