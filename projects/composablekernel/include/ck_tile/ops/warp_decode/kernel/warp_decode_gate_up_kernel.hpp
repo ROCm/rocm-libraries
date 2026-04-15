@@ -242,6 +242,7 @@ struct WarpDecodeGateUpKernel
                         static_cast<uint8_t>(w_gate_tile[idx]), sub);
                     u_val = unpack_fp4_nibble(
                         static_cast<uint8_t>(w_up_tile[idx]), sub);
+                    sub ^= 1;
                 }
                 else
                 {
@@ -251,7 +252,6 @@ struct WarpDecodeGateUpKernel
 
                 gate_acc += (x_val * xs) * (g_val * gs);
                 up_acc   += (x_val * xs) * (u_val * us);
-                sub++;
             });
 
             move_tile_window(x_window, {0, kTileN});

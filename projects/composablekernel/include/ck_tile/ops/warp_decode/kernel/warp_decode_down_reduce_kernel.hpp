@@ -185,6 +185,7 @@ struct WarpDecodeDownReduceKernel
                     {
                         d_val = unpack_fp4_nibble(
                             static_cast<uint8_t>(w_down_tile[idx]), sub);
+                        sub ^= 1;
                     }
                     else
                     {
@@ -192,7 +193,6 @@ struct WarpDecodeDownReduceKernel
                     }
 
                     acc += w * act_val * (d_val * ds);
-                    sub++;
                 });
 
                 move_tile_window(intermediate_window, {0, kTileN});
