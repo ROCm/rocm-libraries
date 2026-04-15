@@ -10,6 +10,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
+#include <iomanip>
 #include <random>
 #include <sstream>
 #include <stdexcept>
@@ -28,6 +30,135 @@ struct WarpDecodeShape
     index_t TOP_K  = 2;
     index_t E      = 8;
 };
+
+struct KernelPerfMetrics
+{
+    std::string name;
+    double time_ms  = 0.0;
+    double tflops   = 0.0;
+    double gb_per_s = 0.0;
+};
+
+struct WarpDecodePerfMetrics
+{
+    KernelPerfMetrics gate_up;
+    KernelPerfMetrics down_reduce;
+    KernelPerfMetrics total;
+};
+
+bool IsVerbosePerfEnabled()
+{
+    if(const char* env = std::getenv("CK_WARP_DECODE_VERBOSE"))
+    {
+        const std::string value = env;
+        return value == "1" || value == "true" || value == "TRUE" || value == "on" ||
+               value == "ON";
+    }
+
+    return false;
+}
+
+template <typename DataType>
+constexpr double GetElementBytes()
+{
+    return static_cast<double>(sizeof(DataType)) /
+           static_cast<double>(numeric_traits<DataType>::PackedSize);
+}
+
+template <typename XDataType, typename WDataType, typename IntermediateDataType>
+double CalculateGateUpFlops(const WarpDecodeShape& shape)
+{
+    constexpr double kActivationOps = 5.0;
+
+    return static_cast<double>(shape.B) * static_cast<double>(shape.TOP_K) *
+           static_cast<double>(shape.INTER) *
+           (4.0 * static_cast<double>(shape.HIDDEN) + kActivationOps);
+}
+
+template <typename XDataType, typename WDataType, typename IntermediateDataType>
+double CalculateGateUpBytes(const WarpDecodeShape& shape)
+{
+    const double num_outputs = static_cast<double>(shape.B) * static_cast<double>(shape.TOP_K) *
+                               static_cast<double>(shape.INTER);
+    const double x_bytes = num_outputs * static_cast<double>(shape.HIDDEN) *
+                           GetElementBytes<XDataType>();
+    const double w_bytes = num_outputs * static_cast<double>(shape.HIDDEN) *
+                           GetElementBytes<WDataType>() * 2.0;
+    const double router_bytes = num_outputs * static_cast<double>(sizeof(int32_t));
+    const double intermediate_bytes =
+        num_outputs * GetElementBytes<IntermediateDataType>();
+
+    return x_bytes + w_bytes + router_bytes + intermediate_bytes;
+}
+
+template <typename IntermediateDataType, typename WDataType, typename YDataType>
+double CalculateDownReduceFlops(const WarpDecodeShape& shape)
+{
+    const double num_outputs =
+        static_cast<double>(shape.B) * static_cast<double>(shape.HIDDEN);
+    const double work_per_output = static_cast<double>(shape.TOP_K) *
+                                   static_cast<double>(shape.INTER) * 3.0;
+
+    return num_outputs * work_per_output;
+}
+
+template <typename IntermediateDataType, typename WDataType, typename YDataType>
+double CalculateDownReduceBytes(const WarpDecodeShape& shape)
+{
+    const double num_outputs =
+        static_cast<double>(shape.B) * static_cast<double>(shape.HIDDEN);
+    const double inter_bytes = num_outputs * static_cast<double>(shape.TOP_K) *
+                               static_cast<double>(shape.INTER) *
+                               GetElementBytes<IntermediateDataType>();
+    const double weight_bytes = num_outputs * static_cast<double>(shape.TOP_K) *
+                                static_cast<double>(shape.INTER) *
+                                GetElementBytes<WDataType>();
+    const double router_bytes =
+        num_outputs * static_cast<double>(shape.TOP_K) * static_cast<double>(sizeof(int32_t));
+    const double router_weight_bytes =
+        num_outputs * static_cast<double>(shape.TOP_K) * static_cast<double>(sizeof(float));
+    const double output_bytes = num_outputs * GetElementBytes<YDataType>();
+
+    return inter_bytes + weight_bytes + router_bytes + router_weight_bytes + output_bytes;
+}
+
+KernelPerfMetrics MakeKernelPerfMetrics(const std::string& name,
+                                        double time_ms,
+                                        double flops,
+                                        double bytes)
+{
+    KernelPerfMetrics metrics;
+    metrics.name    = name;
+    metrics.time_ms = time_ms;
+
+    if(time_ms > 0.0)
+    {
+        metrics.tflops   = flops / (time_ms * 1.0e9);
+        metrics.gb_per_s = bytes / (time_ms * 1.0e6);
+    }
+
+    return metrics;
+}
+
+void ReportPerfMetrics(const std::string& test_name, const WarpDecodePerfMetrics& metrics)
+{
+    auto old_flags     = std::cout.flags();
+    auto old_precision = std::cout.precision();
+
+    std::cout << std::fixed << std::setprecision(3);
+    std::cout << "[ PERF ] " << test_name << '\n';
+    std::cout << "  " << metrics.gate_up.name << ": " << metrics.gate_up.time_ms
+              << " ms, " << metrics.gate_up.tflops << " TFLOP/s, "
+              << metrics.gate_up.gb_per_s << " GB/s\n";
+    std::cout << "  " << metrics.down_reduce.name << ": " << metrics.down_reduce.time_ms
+              << " ms, " << metrics.down_reduce.tflops << " TFLOP/s, "
+              << metrics.down_reduce.gb_per_s << " GB/s\n";
+    std::cout << "  " << metrics.total.name << ": " << metrics.total.time_ms << " ms, "
+              << metrics.total.tflops << " TFLOP/s, " << metrics.total.gb_per_s << " GB/s\n";
+
+    std::cout.flags(old_flags);
+    std::cout.precision(old_precision);
+}
 
 template <typename DataType>
 void FillRandom(HostTensor<DataType>& tensor, float min_val, float max_val, unsigned seed = 42)
@@ -115,7 +246,8 @@ template <typename XDataType,
           typename XScaleDataType,
           typename WScaleDataType,
           typename XScaleLayout,
-          typename WScaleLayout>
+          typename WScaleLayout,
+          index_t kVector_ = 1>
 ::testing::AssertionResult RunPositiveCase(const std::string& test_name,
                                            float atol,
                                            const WarpDecodeShape& shape = {})
@@ -123,7 +255,7 @@ template <typename XDataType,
     constexpr bool is_fp8_x   = std::is_same_v<XDataType, fp8_t>;
     constexpr bool is_fp8_w   = std::is_same_v<WDataType, fp8_t>;
     constexpr bool is_mxfp4_w = std::is_same_v<WDataType, pk_fp4_t>;
-    constexpr index_t kVector = is_mxfp4_w ? 2 : 1;
+    constexpr index_t kVector = is_mxfp4_w ? (kVector_ == 1 ? 2 : kVector_) : kVector_;
 
     const float x_range = is_fp8_x ? 0.5f : 1.0f;
     const float w_range = is_fp8_w ? 0.25f : 1.0f;
@@ -381,9 +513,10 @@ template <typename XDataType,
                << test_name << ": down/reduce Kargs unexpectedly rejected by IsSupportedArgument().";
     }
 
-    const auto s = stream_config{};
-    launch_warp_decode_gate_up<GateUpKernel>(gate_up_args, s);
-    launch_warp_decode_down_reduce<DownKernel>(down_args, s);
+    const bool verbose_perf = IsVerbosePerfEnabled();
+    const auto s            = stream_config{nullptr, verbose_perf};
+    const float gate_up_ms  = launch_warp_decode_gate_up<GateUpKernel>(gate_up_args, s);
+    const float down_ms     = launch_warp_decode_down_reduce<DownKernel>(down_args, s);
 
     inter_buf.FromDevice(intermediate_dev.mData.data());
     y_buf.FromDevice(y_dev.mData.data());
@@ -421,6 +554,29 @@ template <typename XDataType,
     std::ostringstream oss;
     oss << test_name << " passed with inter_diff=" << inter_max_diff << " y_diff=" << y_max_diff
         << " atol=" << atol;
+
+    if(verbose_perf)
+    {
+        WarpDecodePerfMetrics perf_metrics;
+        const double gate_up_flops =
+            CalculateGateUpFlops<XDataType, WDataType, IntermediateDataType>(shape);
+        const double gate_up_bytes =
+            CalculateGateUpBytes<XDataType, WDataType, IntermediateDataType>(shape);
+        const double down_flops =
+            CalculateDownReduceFlops<IntermediateDataType, WDataType, YDataType>(shape);
+        const double down_bytes =
+            CalculateDownReduceBytes<IntermediateDataType, WDataType, YDataType>(shape);
+
+        perf_metrics.gate_up =
+            MakeKernelPerfMetrics("gate_up", gate_up_ms, gate_up_flops, gate_up_bytes);
+        perf_metrics.down_reduce =
+            MakeKernelPerfMetrics("down_reduce", down_ms, down_flops, down_bytes);
+        perf_metrics.total = MakeKernelPerfMetrics(
+            "total", gate_up_ms + down_ms, gate_up_flops + down_flops, gate_up_bytes + down_bytes);
+
+        ReportPerfMetrics(test_name, perf_metrics);
+    }
+
     return ::testing::AssertionSuccess() << oss.str();
 }
 
@@ -657,6 +813,44 @@ TEST(WarpDecodePositive, Bf16Fp8PerTensorBlock2DFourBy32FloatScale)
                                  WarpDecodeScaleLayout::PerTensor,
                                  WarpDecodeScaleLayout::Block2D<4, 32>>(
         "BF16xFP8 per-tensor/block2d<4,32> float scale", 0.3f)));
+}
+
+TEST(WarpDecodePositive, DeepSeekV3LikeDecodeShape)
+{
+    // DeepSeek-V3 uses hidden=7168, routed-intermediate=2048, topk=8.
+    // Keep E bounded in the unit test so the expert weight tensors stay manageable.
+    const WarpDecodeShape shape{1, 7168, 2048, 8, 8};
+
+    EXPECT_TRUE((RunPositiveCase<bf16_t,
+                                 fp8_t,
+                                 float,
+                                 bf16_t,
+                                 float,
+                                 float,
+                                 float,
+                                 WarpDecodeScaleLayout::PerTensor,
+                                 WarpDecodeScaleLayout::Block2D<128, 128>,
+                                 8>(
+        "DeepSeekV3-like decode shape", 5.0f, shape)));
+}
+
+TEST(WarpDecodePositive, MiniMaxLikeDecodeShape)
+{
+    // DeepSeek-V3 uses hidden=7168, routed-intermediate=2048, topk=8.
+    // Keep E bounded in the unit test so the expert weight tensors stay manageable.
+    const WarpDecodeShape shape{1, 3072, 1536, 8, 8};
+
+    EXPECT_TRUE((RunPositiveCase<bf16_t,
+                                 fp8_t,
+                                 float,
+                                 bf16_t,
+                                 float,
+                                 float,
+                                 float,
+                                 WarpDecodeScaleLayout::PerTensor,
+                                 WarpDecodeScaleLayout::Block2D<128, 128>,
+                                 8>(
+        "MiniMax-like decode shape", 5.0f, shape)));
 }
 
 TEST(WarpDecodeValidation, GateUpRejectsNonDivisibleHidden)
