@@ -11,7 +11,7 @@
 #include "IDevicePropertyProvider.hpp"
 #include "hip/IKernelCompiler.hpp"
 
-namespace hip_kernel_provider
+namespace hip_kernel_provider::batchnorm
 {
 
 class BatchnormFwdTrainingPlanBuilder
@@ -52,4 +52,5 @@ private:
     const IKernelCompiler& _kernelCompiler;
     const IDevicePropertyProvider& _devicePropertyProvider;
 };
-}
+
+} // namespace hip_kernel_provider::batchnorm

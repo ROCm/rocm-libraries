@@ -7,10 +7,10 @@
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
 #include "BatchnormFwdTrainingPlanBuilder.hpp"
-#include "engines/plans/BatchnormApplicabilityChecks.hpp"
-#include "engines/plans/BatchnormFwdTrainingPlan.hpp"
+#include "engines/plans/batchnorm/BatchnormApplicabilityChecks.hpp"
+#include "engines/plans/batchnorm/BatchnormFwdTrainingPlan.hpp"
 
-namespace hip_kernel_provider
+namespace hip_kernel_provider::batchnorm
 {
 
 namespace
@@ -381,4 +381,4 @@ std::vector<hipdnn_data_sdk::data_objects::KnobT> BatchnormFwdTrainingPlanBuilde
     return {};
 }
 
-} // namespace hip_kernel_provider
+} // namespace hip_kernel_provider::batchnorm

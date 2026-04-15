@@ -6,7 +6,7 @@
 
 #include "HipKernelContext.hpp"
 #include "HipKernelHandle.hpp"
-#include "engines/plans/BatchnormFwdTrainingPlanBuilder.hpp"
+#include "engines/plans/batchnorm/BatchnormFwdTrainingPlanBuilder.hpp"
 #include "mocks/MockCompiledProgram.hpp"
 #include "mocks/MockDevicePropertyProvider.hpp"
 #include "mocks/MockKernelCompiler.hpp"
@@ -18,10 +18,12 @@
 #include <hipdnn_test_sdk/utilities/MockGraph.hpp>
 #include <hipdnn_test_sdk/utilities/MockNode.hpp>
 
-using namespace hip_kernel_provider;
 using namespace hipdnn_test_sdk::utilities;
 using namespace hipdnn_data_sdk::flatbuffer_utilities;
 using hipdnn_test_sdk::utilities::MockEngineConfig;
+
+namespace hip_kernel_provider::batchnorm::test
+{
 
 class TestBatchnormFwdTrainingActivPlanBuilder : public ::testing::Test
 {
@@ -474,3 +476,5 @@ TEST_F(TestBatchnormFwdTrainingActivPlanBuilder,
 
     EXPECT_FALSE(_planBuilder.isApplicable(_dummyHandle, graph));
 }
+
+} // namespace hip_kernel_provider::batchnorm::test

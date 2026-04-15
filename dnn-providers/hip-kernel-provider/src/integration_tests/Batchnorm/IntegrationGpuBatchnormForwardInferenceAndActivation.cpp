@@ -17,12 +17,12 @@ using namespace hipdnn_frontend::graph;
 using namespace hipdnn_data_sdk::utilities;
 using namespace hipdnn_test_sdk::utilities::batchnorm;
 using namespace hip_kernel_provider::test_utilities;
+using namespace hip_kernel_provider::test_activation_common;
 
 namespace hip_kernel_provider::batchnorm::test
 {
 
 using namespace common;
-using namespace hip_kernel_provider::test_activation_common;
 
 namespace
 {

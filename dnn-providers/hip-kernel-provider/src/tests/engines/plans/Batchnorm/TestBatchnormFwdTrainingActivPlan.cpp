@@ -1,12 +1,13 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-#include "engines/plans/BatchnormFwdTrainingPlan.hpp"
+#include "engines/plans/batchnorm/BatchnormFwdTrainingPlan.hpp"
 #include <gtest/gtest.h>
 #include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 
-using namespace hip_kernel_provider;
+namespace hip_kernel_provider::batchnorm::test
+{
 
 // ============================================================================
 // Basic Functionality Tests
@@ -759,3 +760,5 @@ TEST(TestBatchnormFwdTrainingActivParams, RejectsUnsupportedSwishFwdActivation)
     EXPECT_THROW(BatchnormFwdTrainingParams(*bnAttrs, *activAttrs, graph.getTensorMap()),
                  hipdnn_plugin_sdk::HipdnnPluginException);
 }
+
+} // namespace hip_kernel_provider::batchnorm::test
