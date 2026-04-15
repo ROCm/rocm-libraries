@@ -985,6 +985,13 @@ def graTileAssignment(writer, kernel, useSwizzling=True):
   _grComputeAllOffsets(module, writer, tileInfoA, colIdA, rowId, rowOffsetA)
   _grComputeAllOffsets(module, writer, tileInfoB, colIdB, rowId, rowOffsetB)
 
+  # For pre-shuffled tensors, fold the HBM row-boundary correction into
+  # the GR offset VGPRs. Uses stride SGPR (set by graAddresses which runs
+  # before graTileAssignment).
+  for tile, rowOff in [(tileInfoA, rowOffsetA), (tileInfoB, rowOffsetB)]:
+    if tile.isPreShuffled:
+      _addPreShuffleCorrectionToGROffsets(module, writer, kernel, tile, rowOff)
+
   writer.vgprPool.checkIn(tmpVgpr)
 
   # Compute subtile offsets along the free dimension.
@@ -1356,26 +1363,7 @@ def emitSingleBufferLoad(tileInfo, writer, kernel, sId0, sId1):
     soffset = sgpr(regList.regValues[0]) if len(regList) > 0 and useSgpr else 0
     voff = tileInfo.sharedVgprGROffset[i] if useSgpr or len(regList) == 0 else regList.regValues[i]
 
-    # Pre-shuffled: in HBM, consecutive 16-row stripes are K elements apart,
-    # but in LDS they are only DepthU elements apart. The soffset correction
-    # bridges this gap for each wave. When soffset is already in use (SGPR
-    # path), add the correction before the load and restore it after.
-    matrixStates = writer.states.a if tc == 'A' else writer.states.b
-    needsRestore = False
-    if tileInfo.isPreShuffled:
-      correction = sgpr(matrixStates.preShuffleSoffsetCorrection)
-      if soffset == 0:
-        soffset = correction
-      else:
-        module.add(SAddU32(dst=soffset, src0=soffset, src1=correction,
-                           comment="Pre-shuffled %s: soffset += wave partition correction" % tc))
-        needsRestore = True
-
     module.add(BufferLoadB128(dst=None, vaddr=vgpr(voff), saddr=sgpr("Srd%s"%tc, 4), soffset=soffset, mubuf=mubuf, comment="grBaseId = %u, i= %u"%(grBaseId , i)))
-
-    if needsRestore:
-      module.add(SSubU32(dst=soffset, src0=soffset, src1=correction,
-                         comment="Pre-shuffled %s: restore soffset" % tc))
 
   return module
 
@@ -1462,60 +1450,44 @@ def localReadDoSubtile(tc, writer, kernel):
 ##################################################
 # Subroutine to generate DTL M0 LDS buffer swap
 #
-def _computePreShuffleSoffsetCorr(module, writer, kernel, tile, rowOffset):
-  """Compute per-wave HBM soffset correction for a pre-shuffled tensor.
+def _addPreShuffleCorrectionToGROffsets(module, writer, kernel, tile, rowOffset):
+  """Fold the HBM row-boundary correction into GR offset VGPRs.
 
-  The pre-shuffled layout tiles data into 16x16 byte blocks. In HBM, going
-  from B[k, n] to B[k, n+1] costs 16 bytes within a tile (n%16 < 15), but
-  K*8 - 240 bytes at a tile boundary (n%16 == 15). The vaddr offsets assume
-  a uniform stride (depthUBytes per wave-row), which is correct within a
-  tile but too small at boundaries. This function computes the cumulative
-  gap for waves whose rows cross one or more tile boundaries:
+  correction = floor(rowOffset/16) * 16 * (stride - DepthU) * bpe
 
-    correction = alignedRow * (K - DepthU) * bpe
-
-  rowOffset is the wave's starting row from _grComputeRowPartition (based
-  on waveId and the wave group config). alignedRow = rowOffset & ~15 zeros
-  out intra-tile rows so only boundary crossings contribute.
-
-  Example for WG 2x2, MIWT 2x2, FP4 (bpe=0.5), MT_N=64:
-    Waves are grouped into partitions of 32 rows (= partitionOffset).
-    Each wave loads 8 rows per buffer_load, and each partition has 2
-    subtile groups of 16 rows. Rows not covered by rowOffset are reached
-    via the subtile group soffset (from _grComputeSubtileOffsets).
-
-    wave 0: rowOffset=0,  loads rows 0-7  (+ rows 16-23 via subtile group 1)
-    wave 1: rowOffset=8,  loads rows 8-15 (+ rows 24-31 via subtile group 1)
-    wave 2: rowOffset=32, loads rows 32-39 (+ rows 48-55 via subtile group 1)
-    wave 3: rowOffset=40, loads rows 40-47 (+ rows 56-63 via subtile group 1)
-
-    Corrections (only rowOffset matters, not subtile group):
-      wave 0: alignedRow=0,  correction=0
-      wave 1: alignedRow=0,  correction=0
-      wave 2: alignedRow=32, correction=32*(K-256)*0.5
-      wave 3: alignedRow=32, correction=32*(K-256)*0.5
-    When K=DepthU, all corrections are zero.
-
-  Stored as an SGPR for use in emitSubtileBufferLoad's soffset field
-  (HBM-only, does not affect LDS).
+  Uses the stride SGPR (StrideA0I/StrideB1J), already set to
+  alignTo(SizeL, swizzleK) by graAddresses.
   """
   tc = tile.tc
   bpe = tile.bpe
-  nTileRows = tile.mmaTileShape[0]
-  correctionSgpr = writer.sgprPool.checkOut(1, preventOverflow=False)
-  correctionVgpr = writer.vgprPool.checkOut(1)
-  module.addComment0("Pre-shuffled %s: soffset correction = alignedRow*(SizeL-DepthU)*bpe" % tc)
-  module.add(VAndB32(dst=vgpr(correctionVgpr), src0=hex(~(nTileRows - 1) & 0xFFFFFFFF),
+  nTileRows = tile.mmaTileShape[0]  # 16
+  strideRef = "StrideA0I" if tc == 'A' else "StrideB1J"
+  depthU = kernel["_DepthU%s" % tc]
+
+  corrVgpr = writer.vgprPool.checkOut(1)
+  tmpSgpr = writer.sgprPool.checkOut(1, preventOverflow=False)
+
+  module.addComment0("Pre-shuffled %s: GR vaddr correction = alignedRow*(stride-DepthU)*bpe" % tc)
+  module.add(VAndB32(dst=vgpr(corrVgpr), src0=hex(~(nTileRows - 1) & 0xFFFFFFFF),
                      src1=vgpr(rowOffset),
-                     comment="alignedRow = rowOffset & ~%d (tile align)" % (nTileRows - 1)))
-  module.add(SSubU32(dst=sgpr(correctionSgpr), src0=sgpr("SizeL"), src1=hex(kernel["_DepthU%s" % tc]),
-                     comment="SizeL - DepthU"))
-  module.add(VMulLOU32(dst=vgpr(correctionVgpr), src0=sgpr(correctionSgpr), src1=vgpr(correctionVgpr),
-                       comment="alignedRow * (SizeL - DepthU)"))
+                     comment="alignedRow = rowOffset & ~%d" % (nTileRows - 1)))
+  module.add(SSubU32(dst=sgpr(tmpSgpr), src0=sgpr(strideRef), src1=hex(depthU),
+                     comment="stride - DepthU"))
+  module.add(VMulLOU32(dst=vgpr(corrVgpr), src0=sgpr(tmpSgpr), src1=vgpr(corrVgpr),
+                       comment="alignedRow * (stride - DepthU)"))
   if bpe == 0.5:
-    module.add(VLShiftRightB32(dst=vgpr(correctionVgpr), shiftHex=hex(1), src=vgpr(correctionVgpr),
+    module.add(VLShiftRightB32(dst=vgpr(corrVgpr), shiftHex=hex(1), src=vgpr(corrVgpr),
                                comment="* bpe (0.5 = >> 1)"))
-  return correctionSgpr, correctionVgpr
+
+  for i in range(len(tile.sharedVgprGROffset)):
+    module.add(VAddU32(dst=vgpr(tile.sharedVgprGROffset[i]),
+                       src0=vgpr(tile.sharedVgprGROffset[i]),
+                       src1=vgpr(corrVgpr),
+                       comment="Pre-shuffled %s: GR[%u] += correction" % (tc, i)))
+
+  writer.vgprPool.checkIn(corrVgpr)
+  writer.sgprPool.checkIn(tmpSgpr)
+
 
 def globalReadDTLInitCommonSgpr(writer, kernel):
   module = Module()
@@ -1537,12 +1509,6 @@ def globalReadDTLInitCommonSgpr(writer, kernel):
 
   subIterKBytes = atile.subIterKBytes
 
-  # Compute soffset corrections BEFORE rowOffsets get scaled by subIterKBytes.
-  correctionData = {}  # tc -> (correctionSgpr, correctionVgpr)
-  for tile, rowOffset in [(atile, rowOffsetA), (btile, rowOffsetB)]:
-    if tile.isPreShuffled:
-      correctionData[tile.tc] = _computePreShuffleSoffsetCorr(module, writer, kernel, tile, rowOffset)
-
   module.add(VLShiftLeftB32(dst=vgpr(rowOffsetA), shiftHex=hex((subIterKBytes).bit_length()-1), src=vgpr(rowOffsetA), comment="Apply wave-specific offset for A"))
   module.add(VLShiftLeftB32(dst=vgpr(rowOffsetB), shiftHex=hex((subIterKBytes).bit_length()-1), src=vgpr(rowOffsetB), comment="Apply wave-specific offset for B"))
 
@@ -1555,15 +1521,6 @@ def globalReadDTLInitCommonSgpr(writer, kernel):
   module.add(SXorB32(dst=sgpr("SwapA"), src0=sgpr("LocalWriteBaseAddrA"), src1=sgpr("SwapA"), comment=""))
   module.add(SAddU32(dst=sgpr("SwapB"), src0=sgpr("LocalWriteBaseAddrB"), src1=writer.ldsTotalSize, comment=""))
   module.add(SXorB32(dst=sgpr("SwapB"), src0=sgpr("LocalWriteBaseAddrB"), src1=sgpr("SwapB"), comment=""))
-
-  # Move corrections from VGPR to SGPR and store on writer.states
-  for tc, (correctionSgpr, correctionVgpr) in correctionData.items():
-    module.add(SNop(waitState=0))
-    module.add(VReadfirstlaneB32(dst=sgpr(correctionSgpr), src=vgpr(correctionVgpr),
-                                 comment="Pre-shuffled %s: per-wave soffset correction" % tc))
-    writer.vgprPool.checkIn(correctionVgpr)
-    matrixStates = writer.states.a if tc == 'A' else writer.states.b
-    matrixStates.preShuffleSoffsetCorrection = correctionSgpr
 
   writer.vgprPool.checkIn(vgprWaveId)
   writer.vgprPool.checkIn(tmpVgpr)
@@ -2042,11 +1999,5 @@ def mainLoop(writer, kernel):
     module.addComment0("MAINLOOP")
     module.add(mainLoopImplPGR0(writer, kernel))
     module.addComment("")
-
-  # Free pre-shuffle correction SGPRs after the K-loop (both PGR paths)
-  for matrixStates in [writer.states.a, writer.states.b]:
-    if hasattr(matrixStates, 'preShuffleSoffsetCorrection'):
-      writer.sgprPool.checkIn(matrixStates.preShuffleSoffsetCorrection)
-      del matrixStates.preShuffleSoffsetCorrection
 
   return module
