@@ -148,6 +148,9 @@ struct GemmQuantPipelineProblemBase
     }
 
     static constexpr index_t VectorSizeBQ = []() { return kPadK ? 1 : GetAlignmentBQ(); }();
+
+    // Async pipeline not supported for Quant Gemm yet
+    static constexpr bool Async = false;
 };
 
 template <typename ADataType_,

@@ -813,11 +813,16 @@ struct tile_window_with_static_distribution
                                 bool_constant<oob_conditional_check>{});
                     else
                     {
+                        bool is_valid = coordinate_has_valid_offset_assuming_top_index_is_valid(
+                            this->get_bottom_tensor_view().get_tensor_descriptor(),
+                            bottom_tensor_thread_coord);
+
                         this->get_bottom_tensor_view()
                             .template async_get_vectorized_elements<vector_t>(
                                 smem,
                                 bottom_tensor_thread_coord.get_offset() + offset,
                                 dram_ys_offset,
+                                is_valid,
                                 number<0>{},
                                 bool_constant<oob_conditional_check>{});
                     }

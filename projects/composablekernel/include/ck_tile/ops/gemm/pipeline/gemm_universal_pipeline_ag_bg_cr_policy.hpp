@@ -110,16 +110,7 @@ struct UniversalGemmBasePolicy
                                           tensor_layout::gemm::ColumnMajor>)
             return false;
         else
-        {
-#if defined(__gfx950__)
-            using WarpTile                  = typename Problem::BlockGemmShape::WarpTile;
-            constexpr index_t kKWarpTile    = WarpTile::at(number<2>{});
-            constexpr index_t kMaxKWarpTile = (sizeof(ADataType) == 1) ? 64 : 32;
-            return kKWarpTile <= kMaxKWarpTile;
-#else
             return true;
-#endif
-        }
     }();
 
     template <typename Problem>
@@ -132,16 +123,7 @@ struct UniversalGemmBasePolicy
                                           tensor_layout::gemm::RowMajor>)
             return false;
         else
-        {
-#if defined(__gfx950__)
-            using WarpTile                  = typename Problem::BlockGemmShape::WarpTile;
-            constexpr index_t kKWarpTile    = WarpTile::at(number<2>{});
-            constexpr index_t kMaxKWarpTile = (sizeof(BLdsDataType) == 1) ? 64 : 32;
-            return kKWarpTile <= kMaxKWarpTile;
-#else
             return true;
-#endif
-        }
     }();
 #else
     template <typename Problem>
@@ -938,6 +920,24 @@ struct UniversalGemmBasePolicy
     CK_TILE_HOST_DEVICE static constexpr auto IsTransposeC()
     {
         return Problem::TransposeC;
+    }
+
+    template <typename WindowTmp>
+    CK_TILE_HOST_DEVICE static constexpr auto MakeDramTensorView(const WindowTmp& window_tmp)
+    {
+        return window_tmp.get_bottom_tensor_view();
+    }
+
+    template <typename Problem, typename WindowTmp>
+    CK_TILE_HOST_DEVICE static constexpr auto MakeADramTensorView(const WindowTmp& window_tmp)
+    {
+        return MakeDramTensorView(window_tmp);
+    }
+
+    template <typename Problem, typename WindowTmp>
+    CK_TILE_HOST_DEVICE static constexpr auto MakeBDramTensorView(const WindowTmp& window_tmp)
+    {
+        return MakeDramTensorView(window_tmp);
     }
 
     template <typename Problem>
