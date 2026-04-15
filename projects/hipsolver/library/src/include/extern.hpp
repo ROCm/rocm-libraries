@@ -26,7 +26,10 @@
 #include <cmath>
 
 #include "hipsolver.h"
+#include "lib_macros.hpp"
 #include <hip/library_types.h>
+
+HIPSOLVER_BEGIN_NAMESPACE
 
 #ifdef __cplusplus
 extern "C" {
@@ -204,3 +207,5 @@ inline void cpu_geev(char              jobvl,
 
     zgeev_(&jobvl, &jobvr, &n, A, &lda, w, vl, &ldvl, vr, &ldvr, work, &lwork, rwork, info);
 }
+
+HIPSOLVER_END_NAMESPACE

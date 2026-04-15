@@ -431,74 +431,74 @@ try
     if(dataTypeA == HIP_R_32F && dataTypeW == HIP_R_32F && dataTypeVL == HIP_R_32F
        && dataTypeVR == HIP_R_32F && computeType == HIP_R_32F)
     {
-        cpu_geev(jobvlC,
-                 jobvrC,
-                 (int)n,
-                 (float*)hA,
-                 (int)lda,
-                 (float*)hW,
-                 (float*)hVL,
-                 (int)ldvl,
-                 (float*)hVR,
-                 (int)ldvr,
-                 (float*)work,
-                 (int)lwork_computed,
-                 (float*)rwork,
-                 &hInfo);
+        hipsolver::cpu_geev(jobvlC,
+                            jobvrC,
+                            (int)n,
+                            (float*)hA,
+                            (int)lda,
+                            (float*)hW,
+                            (float*)hVL,
+                            (int)ldvl,
+                            (float*)hVR,
+                            (int)ldvr,
+                            (float*)work,
+                            (int)lwork_computed,
+                            (float*)rwork,
+                            &hInfo);
     }
     else if(dataTypeA == HIP_R_64F && dataTypeW == HIP_R_64F && dataTypeVL == HIP_R_64F
             && dataTypeVR == HIP_R_64F && computeType == HIP_R_64F)
     {
-        cpu_geev(jobvlC,
-                 jobvrC,
-                 (int)n,
-                 (double*)hA,
-                 (int)lda,
-                 (double*)hW,
-                 (double*)hVL,
-                 (int)ldvl,
-                 (double*)hVR,
-                 (int)ldvr,
-                 (double*)work,
-                 (int)lwork_computed,
-                 (double*)rwork,
-                 &hInfo);
+        hipsolver::cpu_geev(jobvlC,
+                            jobvrC,
+                            (int)n,
+                            (double*)hA,
+                            (int)lda,
+                            (double*)hW,
+                            (double*)hVL,
+                            (int)ldvl,
+                            (double*)hVR,
+                            (int)ldvr,
+                            (double*)work,
+                            (int)lwork_computed,
+                            (double*)rwork,
+                            &hInfo);
     }
     else if(dataTypeA == HIP_C_32F && dataTypeW == HIP_C_32F && dataTypeVL == HIP_C_32F
             && dataTypeVR == HIP_C_32F && computeType == HIP_C_32F)
     {
-        cpu_geev(jobvlC,
-                 jobvrC,
-                 (int)n,
-                 (hipFloatComplex*)hA,
-                 (int)lda,
-                 (hipFloatComplex*)hW,
-                 (hipFloatComplex*)hVL,
-                 (int)ldvl,
-                 (hipFloatComplex*)hVR,
-                 (int)ldvr,
-                 (hipFloatComplex*)work,
-                 (int)lwork_computed,
-                 (float*)rwork,
-                 &hInfo);
+        hipsolver::cpu_geev(jobvlC,
+                            jobvrC,
+                            (int)n,
+                            (hipFloatComplex*)hA,
+                            (int)lda,
+                            (hipFloatComplex*)hW,
+                            (hipFloatComplex*)hVL,
+                            (int)ldvl,
+                            (hipFloatComplex*)hVR,
+                            (int)ldvr,
+                            (hipFloatComplex*)work,
+                            (int)lwork_computed,
+                            (float*)rwork,
+                            &hInfo);
     }
     else if(dataTypeA == HIP_C_64F && dataTypeW == HIP_C_64F && dataTypeVL == HIP_C_64F
             && dataTypeVR == HIP_C_64F && computeType == HIP_C_64F)
     {
-        cpu_geev(jobvlC,
-                 jobvrC,
-                 (int)n,
-                 (hipDoubleComplex*)hA,
-                 (int)lda,
-                 (hipDoubleComplex*)hW,
-                 (hipDoubleComplex*)hVL,
-                 (int)ldvl,
-                 (hipDoubleComplex*)hVR,
-                 (int)ldvr,
-                 (hipDoubleComplex*)work,
-                 (int)lwork_computed,
-                 (double*)rwork,
-                 &hInfo);
+        hipsolver::cpu_geev(jobvlC,
+                            jobvrC,
+                            (int)n,
+                            (hipDoubleComplex*)hA,
+                            (int)lda,
+                            (hipDoubleComplex*)hW,
+                            (hipDoubleComplex*)hVL,
+                            (int)ldvl,
+                            (hipDoubleComplex*)hVR,
+                            (int)ldvr,
+                            (hipDoubleComplex*)work,
+                            (int)lwork_computed,
+                            (double*)rwork,
+                            &hInfo);
     }
     else
         return HIPSOLVER_STATUS_INVALID_ENUM;
