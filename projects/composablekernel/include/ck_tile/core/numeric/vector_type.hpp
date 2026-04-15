@@ -83,7 +83,6 @@ using bf16x64_t = bfloat16_t __attribute__((ext_vector_type(64)));
 using int32x2_t  = int32_t __attribute__((ext_vector_type(2)));
 using int32x3_t  = int32_t __attribute__((ext_vector_type(3)));
 using int32x4_t  = int32_t __attribute__((ext_vector_type(4)));
-using int32x6_t  = int32_t __attribute__((ext_vector_type(6)));
 using int32x8_t  = int32_t __attribute__((ext_vector_type(8)));
 using int32x16_t = int32_t __attribute__((ext_vector_type(16)));
 using int32x32_t = int32_t __attribute__((ext_vector_type(32)));
