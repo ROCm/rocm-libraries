@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "ck_tile/core/arch/arch.hpp"
 #include <unordered_set>
 
 namespace testing {
@@ -57,5 +58,6 @@ static CK_TILE_HOST bool dispatchCompilerTarget(ck_tile::core::arch::amdgcn_targ
     case amdgcn_target_id::HOST:           return false;
     }
     // clang-format on
+    __builtin_unreachable();
 }
 } // namespace testing
