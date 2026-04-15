@@ -29,6 +29,7 @@
 
 #include <algorithm>
 
+#include "stinkytofu/analysis/AnalysisRegistration.hpp"
 #include "stinkytofu/analysis/asm/AsmVerifierPass.hpp"
 #include "stinkytofu/bindings/python/Module.hpp"
 #include "stinkytofu/pipeline/BackendRegistry.hpp"
@@ -79,6 +80,7 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module) {
     const auto& moduleOptions = module.getModuleOptions();
     const OptLevel optLevel = static_cast<OptLevel>(
         std::max(0, std::min(moduleOptions.OptLevel, static_cast<int>(OptLevel::O3))));
+    registerAllAnalyses(pm.getAnalysisManager());
 
     auto debugStreams = createDebugOutputStreams(moduleOptions);
     configureDebugOutput(pm, moduleOptions, "kernel-OuterPM", debugStreams);
@@ -97,6 +99,7 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module) {
         // Process both regions together so the scheduler sees the full CFG.
         {
             PassManager innerPM;
+            registerAllAnalyses(innerPM.getAnalysisManager());
             passFeatureConfig.passOrderSnapshot.titlePrefix = "loopWithPrefetch+noLoadLoopBody";
             innerPM.setPassFeatureConfig(passFeatureConfig);
             configurePassOrderSnapshot(innerPM, snapshotCollector);
@@ -110,6 +113,7 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module) {
         // Multi-region adapter for waitcnt reinsertion
         if (moduleOptions.EnableWaitCntInsertion) {
             PassManager waitcntPM;
+            registerAllAnalyses(waitcntPM.getAnalysisManager());
             configureDebugOutput(waitcntPM, moduleOptions, "loopWithPrefetch+noLoadLoopBody",
                                  debugStreams);
             waitcntPM.addPass(createCFGBuilderPass());

@@ -217,31 +217,28 @@ char InsertPhiPass::ID = 0;
 namespace stinkytofu {
 // Time: O(N*E + R*(N + F) + I), N = blocks, E = CFG edges,
 //       R = register keys, F = Sigma|DF[i]|, I = instructions.
-void insertPhiInstructions(Function& func, bool clearExisting) {
+void insertPhiInstructions(Function& func, const DominanceInfo& domInfo, bool clearExisting) {
     if (func.empty()) return;
 
     if (clearExisting) removeExistingPhis(func);
 
-    // --- 1. Dominance analysis ---
-
-    DominanceInfo domInfo = computeDominanceInfo(func);
     const auto& rpo = domInfo.rpo;
     const unsigned N = rpo.size();
     if (N == 0) return;
 
-    // --- 2. Per-block register definitions ---
+    // --- 1. Per-block register definitions ---
 
     auto blockDefs = gatherDefs(rpo);
 
-    // --- 3. Globally-used registers (semi-pruned SSA) ---
+    // --- 2. Globally-used registers (semi-pruned SSA) ---
 
     auto usedRegs = gatherUsedRegs(rpo);
 
-    // --- 4. PHI-placement sites (iterated DF, only for used registers) ---
+    // --- 3. PHI-placement sites (iterated DF, only for used registers) ---
 
     auto phiSites = computePhiSites(blockDefs, domInfo.df, usedRegs, N);
 
-    // --- 5. Create PHI instructions (operands initially nullptr) ---
+    // --- 4. Create PHI instructions (operands initially nullptr) ---
 
     std::vector<RegKeyMap<StinkyInstruction*>> phiInsts(N);
 
@@ -259,11 +256,11 @@ void insertPhiInstructions(Function& func, bool clearExisting) {
         }
     }
 
-    // --- 6. Reaching definitions at block exits ---
+    // --- 5. Reaching definitions at block exits ---
 
     auto reachOut = computeReachOut(rpo, domInfo.idom, blockDefs, phiInsts);
 
-    // --- 7. Resolve PHI operands from predecessor reaching defs ---
+    // --- 6. Resolve PHI operands from predecessor reaching defs ---
 
     for (unsigned i = 0; i < N; ++i) {
         if (phiInsts[i].empty()) continue;
@@ -283,6 +280,12 @@ void insertPhiInstructions(Function& func, bool clearExisting) {
             }
         }
     }
+}
+
+void insertPhiInstructions(Function& func, bool clearExisting) {
+    if (func.empty()) return;
+    DominanceInfo domInfo = computeDominanceInfo(func);
+    insertPhiInstructions(func, domInfo, clearExisting);
 }
 
 std::unique_ptr<Pass> createInsertPhiPass() {
