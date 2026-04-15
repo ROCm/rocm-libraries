@@ -4,7 +4,7 @@
 # Expected tool versions
 set(EXPECTED_CLANG_FORMAT_VERSION "18")
 set(EXPECTED_CLANG_TIDY_VERSION "20")
-set(EXPECTED_LLVM_VERSION "20")
+set(EXPECTED_LLVM_VERSION "22")
 
 # Helper function to generate version-specific search paths hints by concatenating the base path
 # with a list of versioned path names.
