@@ -67,11 +67,12 @@ class BoundIndex:
 
 
 class ProblemType:
-    StateKeys = ['operationIdentifier', 'transA', 'transB', 'computeInputType', 'aType', 'bType', 'cType', 'dType', 'eType', 'computeType',
+    StateKeys = ['operationIdentifier', 'transA', 'transB', 'computeInputTypeA', 'computeInputTypeB', 'aType', 'bType', 'cType', 'dType', 'eType', 'computeType',
                  'useBeta', 'useBias', 'biasSrcWhiteList', 'useE', 'useScaleAB', 'useScaleCD', 'useScaleAlphaVec', 'biasDataTypeWhiteList',
                  'highPrecisionAccumulate', 'useInitialStridesAB', 'useInitialStridesCD', 'stridedBatched', 'groupedGemm',
                  'useGradient', 'activationType', 'activationArgLength', 'activationComputeDataType', 'activationNoGuard',
-                 'sparse', 'f32XdlMathOp', 'supportDeviceUserArguments', 'outputAmaxD', 'swizzleTensorA', 'swizzleTensorB']
+                 'sparse', 'f32XdlMathOp', 'supportDeviceUserArguments', 'outputAmaxD', 'swizzleTensorA', 'swizzleTensorB', 'metadataLayout',
+                 'mxBlockA', 'mxBlockB', 'mxTypeA', 'mxTypeB']
     @classmethod
     def FromOriginalState(cls, d):
         indices = [None]*d['TotalIndices']
@@ -132,14 +133,24 @@ class ProblemType:
 
         rv.transA = bool(d['TransposeA'])
         rv.transB = bool(d['TransposeB'])
+        # it will either be set as d['MacDataType'] or a specified input
+        if 'MacDataTypeA' in d: 
+            rv.computeInputTypeA = DataType(d['MacDataTypeA'])
+        else:
+            rv.computeInputTypeA = srcType
+        if 'MacDataTypeB' in d:
+            rv.computeInputTypeB = DataType(d['MacDataTypeB'])
+        else:
+            rv.computeInputTypeB = srcType
+
         if 'DataTypeA' in d: #it will either be set as d['DataType'] or a specified input
             rv.aType = DataType(d['DataTypeA'])
         else:
-            rv.aType = srcType
+            rv.aType = rv.computeInputTypeA
         if 'DataTypeB' in d:
             rv.bType = DataType(d['DataTypeB'])
         else:
-            rv.bType = srcType
+            rv.bType = rv.computeInputTypeB
 
         if rv.aType.isFloat8BFloat8() or rv.bType.isFloat8BFloat8():
             rv.aType = DataType("F8")
@@ -164,7 +175,6 @@ class ProblemType:
         else:
             rv.amaxDType = computeType
 
-        rv.computeInputType = srcType
         rv.cType = dstType
         rv.dType = dstType
         # we already checked the src/dst/compute types are supported and well-assigned in SolutionStruct
@@ -269,6 +279,15 @@ class ProblemType:
 
         rv.swizzleTensorA = d.get('SwizzleTensorA', False)
         rv.swizzleTensorB = d.get('SwizzleTensorB', False)
+
+        rv.mxBlockA = d.get('MXBlockA', 0)
+        rv.mxBlockB = d.get('MXBlockB', 0)
+        rv.mxTypeA = DataType(d['DataTypeMXSA']) if 'DataTypeMXSA' in d else DataType(0)
+        rv.mxTypeB = DataType(d['DataTypeMXSB']) if 'DataTypeMXSB' in d else DataType(0)
+
+        rv.metadataLayout = 0
+        if 'MetadataLayout' in d:
+            rv.metadataLayout = d['MetadataLayout']
         return rv
 
     def __init__(self, freeIndices=None, batchIndices=None, boundIndices=None, aDims=None, bDims=None, cDims=None, dDims=None):
@@ -370,7 +389,7 @@ class ProblemType:
             # predicates.append(ProblemPredicate("GroupedGemm", value=self.groupedGemm))
 
         if includeType:
-            predicates.append(ProblemPredicate("TypesEqual", value=(self.aType, self.bType, self.cType, self.dType, self.computeInputType)))
+            predicates.append(ProblemPredicate("TypesEqual", value=(self.aType, self.bType, self.cType, self.dType, self.computeInputTypeA, self.computeInputTypeB)))
             predicates.append(ProblemPredicate("HighPrecisionAccumulate", value=self.highPrecisionAccumulate))
             predicates.append(ProblemPredicate("Activation", value=self.activationType))
             predicates.append(ProblemPredicate("ActivationComputeType", value=self.activationComputeDataType))
@@ -389,6 +408,12 @@ class ProblemType:
             predicates.append(ProblemPredicate("SupportDeviceUserArguments", value=self.supportDeviceUserArguments))
             predicates.append(ProblemPredicate("SwizzleTensorA", value=self.swizzleTensorA))
             predicates.append(ProblemPredicate("SwizzleTensorB", value=self.swizzleTensorB))
+            predicates.append(ProblemPredicate("MXBlockA", value=self.mxBlockA))
+            if self.mxBlockA:
+                predicates.append(ProblemPredicate("DataTypeMXSA", value=self.mxTypeA))
+            predicates.append(ProblemPredicate("MXBlockB", value=self.mxBlockB))
+            if self.mxBlockB:
+                predicates.append(ProblemPredicate("DataTypeMXSB", value=self.mxTypeB))
 
         return predicates
 
@@ -441,6 +466,16 @@ class ProblemPredicate(Properties.Predicate):
             return cls("AIGreaterThanEqual", value=value) if value > 0 else None
         if key == "AssertAILessThanEqual":
             return cls("AILessThanEqual", value=value) if value > 0 else None
+
+        # Address-interleave restriction:
+        # Require tiles1 = Free1Size / MT1 to be a power-of-two (and divisible).
+        if key == "AssertFree1DivByMT1LowbitGT1":
+            return cls("Free1SizeDivByValueLowbitGT1", index=0, value=value) if value > 0 else None
+
+        # KRingShift wrap restriction (packed value; see Solution.py):
+        # Require that any (k + KRingShift) wrap occurs only in tail loop (no main-loop wrap).
+        if key == "AssertKRingShiftTailWrapOnly":
+            return cls("KRingShiftTailWrapOnly", index=-1, value=value) if value > 0 else None
 
         if key.endswith('Multiple'):
             if value == 1:
@@ -609,6 +644,20 @@ class SizeMapping:
                  'nonTemporalA',
                  'nonTemporalB',
                  'customMainLoopScheduling',
+                 'NonTemporalD',
+                 'WaveSeparateGlobalReadA',
+                 'WaveSeparateGlobalReadB',
+                 'UnrollLoopSwapGlobalReadOrder',
+                 'DirectToVgprA',
+                 'DirectToVgprB',
+                 'NumLoadsCoalescedA',
+                 'NumLoadsCoalescedB',
+                 'WaveGroup',
+                 'VectorWidthA',
+                 'VectorWidthB',
+                 'LocalSplitU',
+                 'DirectToLdsA',
+                 'DirectToLdsB'
                  ]
 
     @classmethod
@@ -641,6 +690,10 @@ class SizeMapping:
             # WGM kernel param is interpreted as int so, 32bit output to 32b int
             return ctypes.c_int(output & 0xFFFFFFFF).value
 
+        dtva = bool(d['DirectToVgprA'])
+        dtvb = bool(d['DirectToVgprB'])
+        dtlA = bool(d['DirectToLdsA'])
+        dtlB = bool(d['DirectToLdsB'])
 
         return cls(waveNum                  = d['NumThreads'] // d['WavefrontSize'],
                    workGroup                = d['WorkGroup'],
@@ -679,6 +732,20 @@ class SizeMapping:
                    nonTemporalA             = d['NonTemporalA'],
                    nonTemporalB             = d['NonTemporalB'],
                    customMainLoopScheduling = d['UseCustomMainLoopSchedule'],
+                   NonTemporalD             = d['NonTemporalD'],
+                   WaveSeparateGlobalReadA  = d['WaveSeparateGlobalReadA'],
+                   WaveSeparateGlobalReadB  = d['WaveSeparateGlobalReadB'],
+                   UnrollLoopSwapGlobalReadOrder = d['UnrollLoopSwapGlobalReadOrder'],
+                   DirectToVgprA            = dtva,
+                   DirectToVgprB            = dtvb,
+                   NumLoadsCoalescedA       = d['NumLoadsCoalescedA'],
+                   NumLoadsCoalescedB       = d['NumLoadsCoalescedB'],
+                   WaveGroup                = d["MIWaveGroup"],
+                   VectorWidthA             = d["VectorWidthA"],
+                   VectorWidthB             = d["VectorWidthB"],
+                   LocalSplitU              = d["LocalSplitU"],
+                   DirectToLdsA             = dtlA,
+                   DirectToLdsB             = dtlB,
                    )
     @classmethod
     def ReadOriginalMacroTile(cls, d):
@@ -808,7 +875,9 @@ class Solution:
         if 'CUCount' not in d:
             d['CUCount'] = None
 
-        rv.hardwarePredicate = Hardware.HardwarePredicate.FromHardware(d['ISA'], d['CUCount'])
+        rv.hardwarePredicate = Hardware.HardwarePredicate.FromHardware(
+            d['ISA'], d['CUCount'], d.get('DeviceNames', None), logicFile=srcName
+        )
         rv.originalSolution = OriginalSolution(
                                   d,
                                   splitGSU,

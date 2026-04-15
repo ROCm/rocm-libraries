@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #ifdef ROCROLLER_USE_HIP
 #include <hip/hip_ext.h>
@@ -36,8 +13,12 @@ namespace GEMMTests
 {
     using namespace rocRoller;
 
-    // Params are: A & B type, K tile size, (transA, transB)
-    class GEMMTestWMMAGPU
+    // ========================================================================
+    // GEMMWMMATestSuite
+    // ========================================================================
+
+    // Params are: A & B type, K tile size, (transA, transB), loadPathA, loadPathB
+    class GEMMWMMATestSuite
         : public BaseGEMMContextFixture<std::tuple<std::pair<rocRoller::DataType, int>,
                                                    std::pair<std::string, std::string>,
                                                    SolutionParams::LoadPath,
@@ -45,27 +26,7 @@ namespace GEMMTests
     {
     };
 
-    // Params are: A & B type, K tile size, (transA, transB)
-    class GEMMTestWMMAF16AccumGPU
-        : public BaseGEMMContextFixture<std::tuple<std::pair<rocRoller::DataType, int>,
-                                                   std::pair<std::string, std::string>,
-                                                   SolutionParams::LoadPath,
-                                                   SolutionParams::LoadPath>>
-    {
-    };
-
-    // Params are: A type, B type, K tile size, (transA, transB)
-    class MixedGEMMTestWMMAGPU
-        : public BaseGEMMContextFixture<std::tuple<rocRoller::DataType,
-                                                   rocRoller::DataType,
-                                                   int,
-                                                   std::pair<std::string, std::string>,
-                                                   SolutionParams::LoadPath,
-                                                   SolutionParams::LoadPath>>
-    {
-    };
-
-    TEST_P(GEMMTestWMMAGPU, GPU_BasicGEMM)
+    TEST_P(GEMMWMMATestSuite, GPU_GEMM_WMMA_Basic)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasWMMA);
         auto [typeABAndWaveK, transOp, loadPathA, loadPathB] = std::get<1>(GetParam());
@@ -104,7 +65,37 @@ namespace GEMMTests
         }
     }
 
-    TEST_P(GEMMTestWMMAF16AccumGPU, GPU_BasicGEMM)
+    INSTANTIATE_TEST_SUITE_P(
+        GEMMWMMATest,
+        GEMMWMMATestSuite,
+        ::testing::Combine(
+            currentGPUISA(),
+            ::testing::Combine(
+                ::testing::Values(std::make_pair(rocRoller::DataType::Half, /*waveK*/ 16),
+                                  std::make_pair(rocRoller::DataType::BFloat16, /*waveK*/ 16)),
+                ::testing::Values(std::pair<std::string, std::string>("N", "N"),
+                                  std::pair<std::string, std::string>("N", "T"),
+                                  std::pair<std::string, std::string>("T", "N"),
+                                  std::pair<std::string, std::string>("T", "T")),
+                ::testing::Values(SolutionParams::LoadPath::BufferToLDSViaVGPR,
+                                  SolutionParams::LoadPath::GlobalToLDSViaVGPR),
+                ::testing::Values(SolutionParams::LoadPath::BufferToLDSViaVGPR,
+                                  SolutionParams::LoadPath::GlobalToLDSViaVGPR))));
+
+    // ========================================================================
+    // GEMMWMMAF16AccumTestSuite
+    // ========================================================================
+
+    // Params are: A & B type, K tile size, (transA, transB), loadPathA, loadPathB
+    class GEMMWMMAF16AccumTestSuite
+        : public BaseGEMMContextFixture<std::tuple<std::pair<rocRoller::DataType, int>,
+                                                   std::pair<std::string, std::string>,
+                                                   SolutionParams::LoadPath,
+                                                   SolutionParams::LoadPath>>
+    {
+    };
+
+    TEST_P(GEMMWMMAF16AccumTestSuite, GPU_GEMM_WMMA_F16Accum)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasWMMA_F16_ACC);
         auto [dataTypeAndWaveK, transOp, loadPathA, loadPathB] = std::get<1>(GetParam());
@@ -143,7 +134,39 @@ namespace GEMMTests
         }
     }
 
-    TEST_P(MixedGEMMTestWMMAGPU, GPU_BasicGEMM)
+    INSTANTIATE_TEST_SUITE_P(
+        GEMMWMMATest,
+        GEMMWMMAF16AccumTestSuite,
+        ::testing::Combine(
+            currentGPUISA(),
+            ::testing::Combine(
+                ::testing::Values(std::make_pair(rocRoller::DataType::Half, /*waveK*/ 16),
+                                  std::make_pair(rocRoller::DataType::BFloat16, /*waveK*/ 16)),
+                ::testing::Values(std::pair<std::string, std::string>("N", "N"),
+                                  std::pair<std::string, std::string>("N", "T"),
+                                  std::pair<std::string, std::string>("T", "N"),
+                                  std::pair<std::string, std::string>("T", "T")),
+                ::testing::Values(SolutionParams::LoadPath::BufferToLDSViaVGPR,
+                                  SolutionParams::LoadPath::GlobalToLDSViaVGPR),
+                ::testing::Values(SolutionParams::LoadPath::BufferToLDSViaVGPR,
+                                  SolutionParams::LoadPath::GlobalToLDSViaVGPR))));
+
+    // ========================================================================
+    // MixedGEMMWMMATestSuite
+    // ========================================================================
+
+    // Params are: A type, B type, K tile size, (transA, transB), loadPathA, loadPathB
+    class MixedGEMMWMMATestSuite
+        : public BaseGEMMContextFixture<std::tuple<rocRoller::DataType,
+                                                   rocRoller::DataType,
+                                                   int,
+                                                   std::pair<std::string, std::string>,
+                                                   SolutionParams::LoadPath,
+                                                   SolutionParams::LoadPath>>
+    {
+    };
+
+    TEST_P(MixedGEMMWMMATestSuite, GPU_GEMM_WMMA_Mixed)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasWMMA);
         auto [typeA, typeB, waveK, transOp, loadPathA, loadPathB] = std::get<1>(GetParam());
@@ -171,42 +194,8 @@ namespace GEMMTests
     }
 
     INSTANTIATE_TEST_SUITE_P(
-        GEMMTestWMMA,
-        GEMMTestWMMAGPU,
-        ::testing::Combine(
-            currentGPUISA(),
-            ::testing::Combine(
-                ::testing::Values(std::make_pair(rocRoller::DataType::Half, /*waveK*/ 16),
-                                  std::make_pair(rocRoller::DataType::BFloat16, /*waveK*/ 16)),
-                ::testing::Values(std::pair<std::string, std::string>("N", "N"),
-                                  std::pair<std::string, std::string>("N", "T"),
-                                  std::pair<std::string, std::string>("T", "N"),
-                                  std::pair<std::string, std::string>("T", "T")),
-                ::testing::Values(SolutionParams::LoadPath::BufferToLDSViaVGPR,
-                                  SolutionParams::LoadPath::GlobalToLDSViaVGPR),
-                ::testing::Values(SolutionParams::LoadPath::BufferToLDSViaVGPR,
-                                  SolutionParams::LoadPath::GlobalToLDSViaVGPR))));
-
-    INSTANTIATE_TEST_SUITE_P(
-        GEMMTestWMMA,
-        GEMMTestWMMAF16AccumGPU,
-        ::testing::Combine(
-            currentGPUISA(),
-            ::testing::Combine(
-                ::testing::Values(std::make_pair(rocRoller::DataType::Half, /*waveK*/ 16),
-                                  std::make_pair(rocRoller::DataType::BFloat16, /*waveK*/ 16)),
-                ::testing::Values(std::pair<std::string, std::string>("N", "N"),
-                                  std::pair<std::string, std::string>("N", "T"),
-                                  std::pair<std::string, std::string>("T", "N"),
-                                  std::pair<std::string, std::string>("T", "T")),
-                ::testing::Values(SolutionParams::LoadPath::BufferToLDSViaVGPR,
-                                  SolutionParams::LoadPath::GlobalToLDSViaVGPR),
-                ::testing::Values(SolutionParams::LoadPath::BufferToLDSViaVGPR,
-                                  SolutionParams::LoadPath::GlobalToLDSViaVGPR))));
-
-    INSTANTIATE_TEST_SUITE_P(
-        MixedGEMMTestWMMA,
-        MixedGEMMTestWMMAGPU,
+        GEMMWMMATest,
+        MixedGEMMWMMATestSuite,
         ::testing::Combine(
             currentGPUISA(),
             ::testing::Combine(

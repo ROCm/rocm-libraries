@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <rocRoller/KernelGraph/Transforms/CleanArguments.hpp>
 
@@ -46,111 +23,7 @@ namespace rocRoller
         using namespace Expression;
 
         /**
-         * Clean Graph
-         *
-         * Replaces all CommandArguments found within the graph with the appropriate
-         * AssemblyKernelArgument.
-         */
-
-        /**
-         * Removes all CommandArgruments found within an expression with the appropriate
-         * AssemblyKernel Argument. This is used by CleanArgumentsVisitor.
-         */
-        struct CleanExpressionVisitor
-        {
-            CleanExpressionVisitor(AssemblyKernelPtr kernel)
-                : m_kernel(kernel)
-            {
-            }
-
-            template <CUnary Expr>
-            ExpressionPtr operator()(Expr const& expr) const
-            {
-                Expr cpy = expr;
-                cpy.arg  = call(expr.arg);
-                return std::make_shared<Expression::Expression>(cpy);
-            }
-
-            template <CBinary Expr>
-            ExpressionPtr operator()(Expr const& expr) const
-            {
-                Expr cpy = expr;
-                cpy.lhs  = call(expr.lhs);
-                cpy.rhs  = call(expr.rhs);
-                return std::make_shared<Expression::Expression>(cpy);
-            }
-
-            ExpressionPtr operator()(ScaledMatrixMultiply const& expr) const
-            {
-                ScaledMatrixMultiply cpy = expr;
-                cpy.matA                 = call(expr.matA);
-                cpy.matB                 = call(expr.matB);
-                cpy.matC                 = call(expr.matC);
-                cpy.scaleA               = call(expr.scaleA);
-                cpy.scaleB               = call(expr.scaleB);
-                return std::make_shared<Expression::Expression>(cpy);
-            }
-
-            template <CTernary Expr>
-            ExpressionPtr operator()(Expr const& expr) const
-            {
-                Expr cpy = expr;
-                cpy.lhs  = call(expr.lhs);
-                cpy.r1hs = call(expr.r1hs);
-                cpy.r2hs = call(expr.r2hs);
-                return std::make_shared<Expression::Expression>(cpy);
-            }
-
-            template <CNary Expr>
-            ExpressionPtr operator()(Expr const& expr) const
-            {
-                auto cpy = expr;
-                std::ranges::for_each(cpy.operands, [this](auto& op) { op = call(op); });
-                return std::make_shared<Expression::Expression>(std::move(cpy));
-            }
-
-            // Finds the AssemblyKernelArgument with the same name as the provided
-            // CommandArgument.
-            ExpressionPtr operator()(CommandArgumentPtr const& expr) const
-            {
-                auto argument = m_kernel->findArgument(expr->name());
-                return std::make_shared<Expression::Expression>(
-                    std::make_shared<AssemblyKernelArgument>(argument));
-            }
-
-            template <CValue Value>
-            ExpressionPtr operator()(Value const& expr) const
-            {
-                return std::make_shared<Expression::Expression>(expr);
-            }
-
-            ExpressionPtr call(ExpressionPtr expr) const
-            {
-                if(!expr)
-                    return expr;
-
-                return std::visit(*this, *expr);
-            }
-
-        private:
-            AssemblyKernelPtr m_kernel;
-        };
-
-        /**
-         * Removes all CommandArgruments found within an expression with the appropriate
-         * AssemblyKernel Argument.
-         */
-        ExpressionPtr cleanArguments(ExpressionPtr expr, AssemblyKernelPtr kernel)
-        {
-            auto visitor = CleanExpressionVisitor(kernel);
-            return visitor.call(expr);
-        }
-
-        /**
          * Visitor for cleaning all of the Dimensions within a graph.
-         *
-         * Calls cleanArguments on all of the expressions stored
-         * within a Dimension.
          */
         struct CleanArgumentsVisitor
         {
@@ -171,31 +44,6 @@ namespace rocRoller
             rocRoller::KernelGraph::CoordinateGraph::Edge visitCoordinateEdge(int      tag,
                                                                               T const& edge)
             {
-                auto divideBySize = [&](int dimTag) {
-                    using ET  = Expression::EvaluationTime;
-                    auto dim  = m_graph.coordinates.getNode(dimTag);
-                    auto size = getSize(dim);
-                    if(size && !Expression::evaluationTimes(size)[ET::Translate])
-                    {
-                        auto resultType = resultVariableType(size);
-                        if(resultType == DataType::Int32 || resultType == DataType::Int64
-                           || resultType == DataType::UInt32 || resultType == DataType::UInt64)
-                            enableDivideBy(size, m_context);
-                    }
-                };
-                if constexpr(std::same_as<Tile, T>)
-                {
-                    auto loc = m_graph.coordinates.getLocation(tag);
-                    for(int i = 1; i < loc.outgoing.size(); i++)
-                        divideBySize(loc.outgoing[i]);
-                }
-
-                if constexpr(std::same_as<Flatten, T>)
-                {
-                    auto loc = m_graph.coordinates.getLocation(tag);
-                    for(int i = 1; i < loc.incoming.size(); i++)
-                        divideBySize(loc.incoming[i]);
-                }
                 return edge;
             }
 

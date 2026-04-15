@@ -1,29 +1,5 @@
-/*! \file */
-/* ************************************************************************
- *
- * MIT License
- *
- * Copyright (C) 2024-2025 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- *
- * ************************************************************************ */
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -90,13 +66,21 @@ struct SolutionIndexParameters
     WorkGroupTileSize workgroupTile;
     bool              workgroupMapping;
     bool              streamK;
-    bool              tailLoops = true;
+    bool              tailLoops     = true;
+    bool              nonTemporalA  = false;
+    bool              nonTemporalB  = false;
 
     auto operator<=>(const SolutionIndexParameters& other) const = default;
 };
 
 int                     parametersToIndex(const SolutionIndexParameters& params);
 SolutionIndexParameters indexToParameters(int index);
+
+/**
+ * Compact kernel label for rocRoller algo indices (negative signed int, bit 31 set).
+ * Format: rr_<M>x<N>x<K> with optional _wgm, _sk, _notl, _ntA, _ntB suffixes.
+ */
+std::string shortRocRollerKernelNameFromSolutionIndex(const SolutionIndexParameters& params);
 
 size_t maxNumberSolutions();
 
@@ -157,8 +141,7 @@ constexpr int preferredUnrolling(rocRoller::DataType typeA,
                                   rocRoller::DataType typeB,
                                   WorkGroupTileSize   wgt,
                                   bool hasPreSwizzle,
-                                  bool hasPreTile,
-                                  bool                isOrigamiConfig = false)
+                                  bool hasPreTile)
 {
     // Other datatypes run out of registers when prefetchInFlight is too
     // large.
@@ -167,11 +150,8 @@ constexpr int preferredUnrolling(rocRoller::DataType typeA,
     if(typeA == rocRoller::DataType::FP4 && typeB == rocRoller::DataType::FP4 && wgt.m > 32
        && wgt.n > 32)
     {
-        // When hasPreSwizzle and hasPreTile are true, use unroll=2 for 256x256x256 tile, otherwise 4 for 256x256x128 tile
-        // When isOrigamiConfig=true, check for origami K (256*2=512)
-        // When isOrigamiConfig=false, check for original K (256)
-        int targetK = isOrigamiConfig ? 512 : 256;
-        if(wgt.m == 256 && wgt.n == 256 && wgt.k == targetK && hasPreSwizzle && hasPreTile)
+        // When hasPreSwizzle and hasPreTile are true, use unroll=2
+        if(hasPreSwizzle && hasPreTile)
             return 2;
         return 4;
     }

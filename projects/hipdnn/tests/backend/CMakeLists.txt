@@ -7,10 +7,12 @@ find_package(Threads REQUIRED)
 
 # Main integration test executable WITH HipErrorHandler
 add_executable(
-    public_hipdnn_backend_tests
+    hipdnn_public_backend_tests
     main.cpp
     IntegrationBackendDescriptor.cpp
     IntegrationBackendExecuteApi.cpp
+    IntegrationConvOperationDescriptorApi.cpp
+    IntegrationGraphDescriptorApi.cpp
     IntegrationEngineApi.cpp
     IntegrationEngineConfigApi.cpp
     IntegrationEngineHeuristicApi.cpp
@@ -20,27 +22,34 @@ add_executable(
     IntegrationKnobsApi.cpp
     IntegrationLoggingPipeline.cpp
     IntegrationPluginLoading.cpp
+    IntegrationPluginLogLevel.cpp
     IntegrationSetPluginPathsExt.cpp
+    IntegrationSetPluginUnloadingModeExt.cpp
+    IntegrationTensorDescriptorApi.cpp
     IntegrationVariantPackApi.cpp
     TestUtil.cpp
 )
 
-target_compile_options(public_hipdnn_backend_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
+target_compile_options(hipdnn_public_backend_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
 target_link_libraries(
-    public_hipdnn_backend_tests
-    GTest::gtest
-    GTest::gtest_main
-    Threads::Threads
-    hipdnn_test_sdk
-    hipdnn_plugin_sdk
-    hipdnn_backend
-    hip::host
+    hipdnn_public_backend_tests
+    PRIVATE
+        GTest::gtest
+        GTest::gtest_main
+        Threads::Threads
+        hipdnn_test_sdk
+        hipdnn_plugin_sdk
+        hipdnn_backend
+        hip::host
 )
 
-target_include_directories(public_hipdnn_backend_tests PRIVATE ${HIPDNN_TEST_INCLUDE_DIRS})
+# Enable spdlog support (tests include backend internal headers that use spdlog/fmt)
+hipdnn_enable_spdlog(hipdnn_public_backend_tests)
+
+target_include_directories(hipdnn_public_backend_tests PRIVATE ${HIPDNN_TEST_INCLUDE_DIRS})
 
 target_compile_definitions(
-    public_hipdnn_backend_tests
+    hipdnn_public_backend_tests
     PRIVATE TEST_GOOD_PLUGIN_NAME="${TEST_GOOD_PLUGIN_NAME}"
             TEST_EXECUTE_FAILS_PLUGIN_NAME="${TEST_EXECUTE_FAILS_PLUGIN_NAME}"
             TEST_NO_APPLICABLE_ENGINES_A_PLUGIN_NAME="${TEST_NO_APPLICABLE_ENGINES_A_PLUGIN_NAME}"
@@ -51,11 +60,12 @@ target_compile_definitions(
             TEST_GOOD_DEFAULT_PLUGIN_NAME="${TEST_GOOD_DEFAULT_PLUGIN_NAME}"
             TEST_KNOBS_PLUGIN_NAME="${TEST_KNOBS_PLUGIN_NAME}"
             TEST_KNOB_CONSTRAINT_VALIDATION_PLUGIN_NAME="${TEST_KNOB_CONSTRAINT_VALIDATION_PLUGIN_NAME}"
+            TEST_INCOMPATIBLE_VERSION_PLUGIN_NAME="${TEST_INCOMPATIBLE_VERSION_PLUGIN_NAME}"
 )
 
 # Ensure test plugins are built before tests
 add_dependencies(
-    public_hipdnn_backend_tests
+    hipdnn_public_backend_tests
     test_good_plugin
     test_execute_fails_plugin
     test_no_applicable_engines_a_plugin
@@ -66,7 +76,8 @@ add_dependencies(
     test_incomplete_api_plugin
     test_knobs_plugin
     test_knob_constraint_validation_plugin
+    test_incompatible_version_plugin
 )
 
-clang_tidy_check(public_hipdnn_backend_tests)
-add_integration_test_target(public_hipdnn_backend_tests ${CMAKE_CURRENT_BINARY_DIR})
+clang_tidy_check(hipdnn_public_backend_tests)
+add_integration_test_target(hipdnn_public_backend_tests ${CMAKE_CURRENT_BINARY_DIR})

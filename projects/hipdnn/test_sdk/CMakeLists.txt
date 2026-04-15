@@ -6,8 +6,11 @@ include(CMakePackageConfigHelpers)
 # Version handling
 hipdnn_setup_version(hipdnn_test_sdk)
 
+# Set project with version
+project(hipdnn_test_sdk VERSION ${HIPDNN_TEST_SDK_VERSION} LANGUAGES CXX)
+
 # Read data_sdk version for minimum requirement
-hipdnn_get_data_sdk_version(HIPDNN_TEST_SDK_DATA_SDK_MIN_VERSION)
+hipdnn_get_component_version(hipdnn_data_sdk HIPDNN_TEST_SDK_DATA_SDK_MIN_VERSION)
 
 set(HIP_DNN_TEST_SDK_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include")
 
@@ -16,12 +19,8 @@ add_library(hipdnn_test_sdk INTERFACE)
 # Generate version header
 hipdnn_generate_version_header(hipdnn_test_sdk)
 
-# Add generated include directory for build interface
-target_include_directories(
-    hipdnn_test_sdk INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/include>
-)
-
-target_link_libraries(hipdnn_test_sdk INTERFACE hipdnn_data_sdk hipdnn_frontend)
+find_package(hip REQUIRED)
+target_link_libraries(hipdnn_test_sdk INTERFACE hipdnn_data_sdk hipdnn_frontend hip::host)
 
 set(HIP_DNN_TEST_SDK_INSTALL_INCLUDE_DIR "${CMAKE_INSTALL_INCLUDEDIR}/hipdnn/test_sdk")
 

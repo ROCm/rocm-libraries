@@ -10,7 +10,8 @@
 #include <hipdnn_frontend.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceConvolution.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
-#include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
+#include <hipdnn_test_sdk/utilities/DynamicTolerances.hpp>
+#include <hipdnn_test_sdk/utilities/TensorDiff.hpp>
 
 #include "../utils/Helpers.hpp"
 
@@ -107,15 +108,22 @@ bool SampleRunner::operator()(const TensorLayout& layout)
         hipdnn_test_sdk::utilities::CpuFpReferenceConvolution::dgrad(
             dxRefTensor, wTensor, dyTensor, {u, v}, {dilH, dilW}, {padH, padW});
 
-        auto tolerance = hipdnn_test_sdk::utilities::conv::getToleranceBwd<InputType>();
+        auto absoluteTolerance = hipdnn_test_sdk::utilities::conv::
+            calculateConvDgradTolerance<InputType, InputType, float>(
+                0.0, 1.0, 0.0, 1.0, wAttr->get_dim());
+        constexpr float relativeTolerance = 0.01f;
 
-        auto dxValidator
-            = hipdnn_test_sdk::utilities::CpuFpReferenceValidation<InputType>(tolerance, tolerance);
-
-        bool dxValid = dxValidator.allClose(dxRefTensor, dxTensor);
+        auto dxValidator = hipdnn_test_sdk::utilities::CpuFpReferenceValidation<InputType>(
+            absoluteTolerance, relativeTolerance);
 
         std::cout << "CPU reference validation:\n";
-        std::cout << "  dx: " << (dxValid ? "successful" : "failed") << "\n";
+        bool dxValid = hipdnn_test_sdk::utilities::validateAndReport<InputType>(std::cout,
+                                                                                "dx",
+                                                                                dxValidator,
+                                                                                dxRefTensor,
+                                                                                dxTensor,
+                                                                                absoluteTolerance,
+                                                                                relativeTolerance);
 
         validationPassed = dxValid;
     }
@@ -128,15 +136,10 @@ int main(int argc, char* argv[])
 {
     auto config = parseCommandLineArgs(argc, argv);
 
-    initializeFrontendLogging();
+    auto [handle, handleError] = createHipdnnHandle();
+    HIPDNN_FE_CHECK(handleError);
 
-    auto backend = hipdnnBackend();
-    hipdnnHandle_t handle;
-    HIPDNN_CHECK(backend->create(&handle));
-
-    bool allPassed = run(SampleRunner{handle, config});
-
-    HIPDNN_CHECK(backend->destroy(handle));
+    bool allPassed = run(SampleRunner{*handle, config});
 
     if(allPassed)
     {

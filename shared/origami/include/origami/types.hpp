@@ -35,6 +35,7 @@
 #include <tuple>
 #include <type_traits>
 #include <unordered_map>
+#include <variant>
 
 #include "origami/math.hpp"
 
@@ -261,6 +262,40 @@ struct dim3_t {
 };
 
 /**
+ * @brief 4-dimensional size/coordinate: (k, m, n, b).
+ *
+ * Used for tile coordinates and unique tile counts across the GEMM grid.
+ */
+struct dim4_t {
+  /// K dimension (reduction / split).
+  std::size_t k = 0;
+
+  /// M dimension (rows).
+  std::size_t m = 0;
+
+  /// N dimension (columns).
+  std::size_t n = 0;
+
+  /// B dimension (batch).
+  std::size_t b = 0;
+
+  constexpr bool operator==(const dim4_t& o) const noexcept {
+    return k == o.k && m == o.m && n == o.n && b == o.b;
+  }
+
+  constexpr bool operator!=(const dim4_t& o) const noexcept { return !(*this == o); }
+
+  /// @return Product m*n.
+  constexpr std::size_t mn() const noexcept { return m * n; }
+
+  /// @return Product m*n*k.
+  constexpr std::size_t mnk() const noexcept { return m * n * k; }
+
+  /// @return Product k*m*n*b.
+  constexpr std::size_t total() const noexcept { return k * m * n * b; }
+};
+
+/**
  * @brief Runtime options for controlling debug, heuristics, and other behaviors.
  *
  * Provides programmatic access to runtime configuration options that can be
@@ -275,11 +310,6 @@ struct runtime_options {
 
   /// Heuristics variance threshold (reads from ANALYTICAL_GEMM_HEURISTICS_VARIANCE env var)
   double heuristics_variance;
-
-  /**
-   * @brief Default constructor that reads from environment variables.
-   */
-  runtime_options();
 
   /**
    * @brief Constructor with explicit values (does not read from environment).
@@ -311,7 +341,7 @@ struct runtime_options {
 
   /**
    * @brief Read heuristics variance from environment variable.
-   * @return double Variance value from ANALYTICAL_GEMM_HEURISTICS_VARIANCE, or 0.0 if not set
+   * @return double Variance value from ANALYTICAL_GEMM_HEURISTICS_VARIANCE, or 0.01 if not set
    */
   static double read_heuristics_variance_from_env();
 
@@ -319,7 +349,115 @@ struct runtime_options {
    * @brief Update runtime options from environment variables.
    */
   void update_from_env();
+
+ private:
+  /**
+   * @brief Default constructor that reads from environment variables.
+   *
+   * This is made private because it should only be used through the static get() member.
+   */
+  runtime_options();
 };
+
+/**
+ * @brief Tensile/TensileLite-specific configuration parameters.
+ *
+ * Contains parameters specific to TensileLite-generated GEMM kernels,
+ * used by the Formocast simulation model. These parameters are ignored
+ * by the estimation-based prediction model.
+ */
+struct tensile_params_t {
+  /// Depth unroll factor (0 = use mt.k)
+  std::size_t depth_u = 0;
+
+  /// Global split-K factor
+  std::int16_t global_split_u = 1;
+
+  /// GSU accumulation method (0=none, 2=MultiBuffer, 3=MultiBufferSingleKernel)
+  int global_accumulation = 0;
+
+  /// Local split-K factor
+  int local_split_u = 1;
+
+  /// DirectToVGPR flags - bypass LDS for register file
+  bool direct_to_vgpr_a = false;
+  bool direct_to_vgpr_b = false;
+
+  /// DirectToLDS flags - direct global memory to LDS
+  bool direct_to_lds_a = false;
+  bool direct_to_lds_b = false;
+
+  /// Number of loads that can be coalesced
+  int num_loads_coalesced_a = 1;
+  int num_loads_coalesced_b = 1;
+
+  /// Number of waves per workgroup
+  std::size_t wave_num = 4;
+
+  /// Wave group dimensions [wave_group_m, wave_group_n]
+  int wave_group_m = 2;
+  int wave_group_n = 2;
+
+  /// Prefetch global read depth
+  int prefetch_global_read = 2;
+
+  /// Math clocks per unrolled loop iteration (0 = auto-calculate)
+  int math_clocks_unrolled_loop = 0;
+
+  /// Swizzled memory layout flags
+  bool swizzle_a = false;
+  bool swizzle_b = false;
+
+  /// Workgroup mapping XCC parameters
+  int workgroup_mapping_xcc = 1;
+  int workgroup_mapping_xcc_group = 0;
+  bool global_split_u_coalesced = false;
+  bool global_split_u_wgm_round_robin = false;
+
+  constexpr bool operator==(const tensile_params_t& o) const noexcept {
+    return depth_u == o.depth_u && global_split_u == o.global_split_u &&
+           global_accumulation == o.global_accumulation && local_split_u == o.local_split_u &&
+           direct_to_vgpr_a == o.direct_to_vgpr_a && direct_to_vgpr_b == o.direct_to_vgpr_b &&
+           direct_to_lds_a == o.direct_to_lds_a && direct_to_lds_b == o.direct_to_lds_b &&
+           num_loads_coalesced_a == o.num_loads_coalesced_a &&
+           num_loads_coalesced_b == o.num_loads_coalesced_b && wave_num == o.wave_num &&
+           wave_group_m == o.wave_group_m && wave_group_n == o.wave_group_n &&
+           prefetch_global_read == o.prefetch_global_read &&
+           math_clocks_unrolled_loop == o.math_clocks_unrolled_loop && swizzle_a == o.swizzle_a &&
+           swizzle_b == o.swizzle_b && workgroup_mapping_xcc == o.workgroup_mapping_xcc &&
+           workgroup_mapping_xcc_group == o.workgroup_mapping_xcc_group &&
+           global_split_u_coalesced == o.global_split_u_coalesced &&
+           global_split_u_wgm_round_robin == o.global_split_u_wgm_round_robin;
+  }
+
+  std::size_t hash() const {
+    return math::hash_combine(depth_u,
+                              global_split_u,
+                              global_accumulation,
+                              local_split_u,
+                              direct_to_vgpr_a,
+                              direct_to_vgpr_b,
+                              direct_to_lds_a,
+                              direct_to_lds_b,
+                              num_loads_coalesced_a,
+                              num_loads_coalesced_b,
+                              wave_num,
+                              wave_group_m,
+                              wave_group_n,
+                              prefetch_global_read,
+                              math_clocks_unrolled_loop,
+                              swizzle_a,
+                              swizzle_b,
+                              workgroup_mapping_xcc,
+                              workgroup_mapping_xcc_group,
+                              global_split_u_coalesced,
+                              global_split_u_wgm_round_robin);
+  }
+};
+
+/// Variant holding backend-specific parameters.
+/// std::monostate represents no backend-specific params (default).
+using backend_params_t = std::variant<std::monostate, tensile_params_t>;
 
 /**
  * @brief Full kernel configuration (tile shape + execution parameters).
@@ -332,8 +470,8 @@ struct config_t {
   dim3_t mt{0, 0, 0};
   dim3_t mi{0, 0, 0};
 
-  /// Custom mainloop scheduling flag
-  bool custom_mainloop_scheduling = false;
+  /// Main loop optimization flag (indicates use of any optimized kernel variant)
+  bool hand_optimized_main_loop = false;
 
   /// Occupancy (number of wavefronts resident per CU).
   int occupancy = -1;
@@ -362,27 +500,81 @@ struct config_t {
   /// Grid selection algorithm.
   grid_selection_t grid_selection = grid_selection_t::k_split_aware;
 
-  /// CMS kernel flag
-  bool cms_kernel = false;
+  /// Index of config, not used by Origami but can be used by the user
+  std::size_t index = 0;
 
-  constexpr bool operator==(const config_t& o) const noexcept {
-    return mt == o.mt && 
-           mi == o.mi && 
-           custom_mainloop_scheduling == o.custom_mainloop_scheduling &&
-           cache_hints_a == o.cache_hints_a &&
-           cache_hints_b == o.cache_hints_b && 
-           workgroup_mapping == o.workgroup_mapping &&
-           prediction_mode == o.prediction_mode && target == o.target;
+  /// Global read vector width for matrix A (elements per load)
+  std::size_t grvw_a = 1;
+
+  /// Global read vector width for matrix B (elements per load)
+  std::size_t grvw_b = 1;
+
+  /// Global write vector width for matrix D (elements per store)
+  std::size_t gwvw_d = 1;
+
+  /// LDS load vector width for matrix A (elements per LDS read)
+  int vector_width_a = 1;
+
+  /// LDS load vector width for matrix B (elements per LDS read)
+  int vector_width_b = 1;
+
+  /// Backend-specific parameters (type should match target).
+  /// Use tensile() accessor to get/set Tensile-specific params.
+  backend_params_t backend{};
+
+  /// Get mutable reference to Tensile params. Initializes if not already set.
+  tensile_params_t& tensile() {
+    if (!std::holds_alternative<tensile_params_t>(backend)) { backend = tensile_params_t{}; }
+    return std::get<tensile_params_t>(backend);
+  }
+
+  /// Get const reference to Tensile params. Throws if not set.
+  const tensile_params_t& tensile() const { return std::get<tensile_params_t>(backend); }
+
+  /// Check if Tensile params are currently set.
+  bool has_tensile_params() const noexcept {
+    return std::holds_alternative<tensile_params_t>(backend);
+  }
+
+  bool operator==(const config_t& o) const noexcept {
+    return mt == o.mt && mi == o.mi && hand_optimized_main_loop == o.hand_optimized_main_loop &&
+           cache_hints_a == o.cache_hints_a && cache_hints_b == o.cache_hints_b &&
+           workgroup_mapping == o.workgroup_mapping && reduction_strategy == o.reduction_strategy &&
+           prediction_mode == o.prediction_mode && target == o.target && grvw_a == o.grvw_a &&
+           grvw_b == o.grvw_b && gwvw_d == o.gwvw_d && vector_width_a == o.vector_width_a &&
+           vector_width_b == o.vector_width_b && backend == o.backend;
   }
 
   std::size_t hash() const {
-    return std::hash<size_t>()(mt.m) ^ std::hash<size_t>()(mt.n) ^ std::hash<size_t>()(mt.k) ^
-           std::hash<size_t>()(mi.m) ^ std::hash<size_t>()(mi.n) ^ std::hash<size_t>()(mi.k) ^
-           std::hash<int>()(custom_mainloop_scheduling) ^
-           std::hash<int>()(cache_hints_a) ^ std::hash<int>()(cache_hints_b) ^
-           std::hash<int>()(workgroup_mapping) ^
-           std::hash<std::uint32_t>()(static_cast<std::uint32_t>(prediction_mode)) ^
-           std::hash<std::uint32_t>()(static_cast<std::uint32_t>(target));
+    std::size_t seed = math::hash_combine(mt.m,
+                                          mt.n,
+                                          mt.k,
+                                          mi.m,
+                                          mi.n,
+                                          mi.k,
+                                          hand_optimized_main_loop,
+                                          cache_hints_a,
+                                          cache_hints_b,
+                                          workgroup_mapping,
+                                          static_cast<std::uint32_t>(reduction_strategy),
+                                          static_cast<std::uint32_t>(prediction_mode),
+                                          static_cast<std::uint32_t>(target),
+                                          grvw_a,
+                                          grvw_b,
+                                          gwvw_d,
+                                          vector_width_a,
+                                          vector_width_b);
+    // Hash backend-specific parameters if present. The visitor pattern allows
+    // automatic handling of any backend type that provides a hash() method,
+    // while std::monostate (no backend params) is a no-op.
+    std::visit(
+        [&seed](const auto& params) {
+          if constexpr (!std::is_same_v<std::decay_t<decltype(params)>, std::monostate>) {
+            math::hash_combine(seed, params.hash());
+          }
+        },
+        backend);
+    return seed;
   }
 
   void validate() const {
@@ -452,6 +644,22 @@ struct workgroup_mapping_t {
 };
 
 /**
+ * @brief Struct to define various staggerU parameters.
+ *
+ * Contains all the parameters needed to describe various staggerU parameters.
+ */
+struct staggerU_t {
+  /// StaggerU mapping size.
+  std::size_t staggerUMapping = 0;
+
+  /// StaggerU size.
+  std::size_t staggerU = 0;
+
+  /// StaggerUStrideShift size.
+  std::size_t staggerUStrideShift = 0;
+};
+
+/**
  * @brief Get runtime options (always uses global singleton).
  *
  * @param config Configuration struct (unused, kept for API compatibility)
@@ -462,64 +670,12 @@ inline const runtime_options& get_runtime_options(const config_t& config) {
   return runtime_options::get();
 }
 
-/**
- * @brief Struct to define CMS kernels.
- *
- * Contains the dimensions and data type of a matrix instruction.
- */
- struct CMS_kernel {
-  data_type_t mi_input_type;
-  transpose_t transA;
-  transpose_t transB;
-  dim3_t mt{0, 0, 0};
-
-  CMS_kernel()
-    : mi_input_type(data_type_t::Float)
-    , transA(transpose_t::N)
-    , transB(transpose_t::N)
-    , mt{0,0,0} 
-    {}
-
-  CMS_kernel(data_type_t mi_input_type, transpose_t transA, transpose_t transB, size_t MT_M, size_t MT_N, size_t MT_K)
-    : mi_input_type(mi_input_type)
-    , transA(transA)
-    , transB(transB)
-    , mt {MT_M, MT_N, MT_K}
-    {}
-
-  std::string to_string() const {
-    return "CMS_kernel(mi_input_type=" + datatype_to_string(mi_input_type) + 
-              ", transA=" + std::string(transA == transpose_t::T ? "T" : "N") + 
-              ", transB=" + std::string(transB == transpose_t::T ? "T" : "N") + 
-              ", MT_M=" + std::to_string(mt.m) + 
-              ", MT_N=" + std::to_string(mt.n) + 
-              ", MT_K=" + std::to_string(mt.k) + ")";
-  }
-
-  bool operator==(const CMS_kernel& other) const {
-    return mi_input_type == other.mi_input_type && transA == other.transA && transB == other.transB &&
-           mt.m == other.mt.m && mt.n == other.mt.n && mt.k == other.mt.k;
-  }
-
-  std::size_t hash() const {
-    return std::hash<data_type_t>()(mi_input_type) ^ 
-            std::hash<size_t>()(static_cast<size_t>(transA)) ^ std::hash<size_t>()(static_cast<size_t>(transB)) ^ 
-            std::hash<size_t>()(mt.m) ^ std::hash<size_t>()(mt.n) ^ std::hash<size_t>()(mt.k);
-  }
-};
-
 }  // namespace origami
 
 // Specialization of std::hash in the std namespace for use of std::unordered_map with
 // matrix_instruction and config_t as keys.
 // Inline to prevent ODR violations when included in multiple shared libraries. (PR#1862)
-// CMS_kernel, matrix_instruction, and config_t as keys.
 namespace std {
-template <>
-struct hash<origami::CMS_kernel> {
-  inline std::size_t operator()(const origami::CMS_kernel& k) const { return k.hash(); }
-};
-
 template <>
 struct hash<origami::matrix_instruction> {
   inline std::size_t operator()(const origami::matrix_instruction& k) const { return k.hash(); }
@@ -532,4 +688,3 @@ struct hash<origami::config_t> {
   }
 };
 }  // namespace std
-

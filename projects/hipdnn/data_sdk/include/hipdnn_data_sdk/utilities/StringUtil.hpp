@@ -24,22 +24,21 @@ namespace hipdnn_data_sdk::utilities
  * @param str The string to hash
  * @return uint64_t The hash value
  */
-inline uint64_t fnv1aHash(const char* str)
+inline uint64_t fnv1aHash(const uint8_t* data, size_t size) noexcept
 {
-    if(str == nullptr || str[0] == '\0')
+    if(data == nullptr || size == 0)
     {
         return 0;
     }
 
-    // FNV-1a hash algorithm constants for 64-bit
     constexpr uint64_t FNV_OFFSET_BASIS = 0xcbf29ce484222325ULL;
     constexpr uint64_t FNV_PRIME = 0x100000001b3ULL;
 
     uint64_t hash = FNV_OFFSET_BASIS;
 
-    for(const char* p = str; *p != '\0'; ++p)
+    for(size_t i = 0; i < size; ++i)
     {
-        hash ^= static_cast<uint64_t>(static_cast<unsigned char>(*p));
+        hash ^= static_cast<uint64_t>(data[i]);
         hash *= FNV_PRIME;
     }
 
@@ -47,9 +46,24 @@ inline uint64_t fnv1aHash(const char* str)
 }
 
 /**
+ * @brief Computes a FNV-1a hash of a null-terminated string
+ *
+ * @param str The string to hash
+ * @return uint64_t The hash value, or 0 for null/empty input
+ */
+inline uint64_t fnv1aHash(const char* str) noexcept
+{
+    if(str == nullptr)
+    {
+        return 0;
+    }
+    return fnv1aHash(reinterpret_cast<const uint8_t*>(str), std::strlen(str));
+}
+
+/**
  * @brief Overload for std::string
  */
-inline uint64_t fnv1aHash(const std::string& str)
+inline uint64_t fnv1aHash(const std::string& str) noexcept
 {
     return fnv1aHash(str.c_str());
 }
@@ -57,9 +71,9 @@ inline uint64_t fnv1aHash(const std::string& str)
 /**
  * @brief Overload for std::string_view
  */
-inline uint64_t fnv1aHash(std::string_view str)
+inline uint64_t fnv1aHash(std::string_view str) noexcept
 {
-    return fnv1aHash(std::string(str).c_str());
+    return fnv1aHash(reinterpret_cast<const uint8_t*>(str.data()), str.size());
 }
 
 inline void copyMaxSizeWithNullTerminator(char* destination, const char* source, size_t maxSize)
@@ -82,6 +96,17 @@ inline std::string toLower(const std::string& str)
     std::string lowerStr = str;
     std::transform(lowerStr.begin(), lowerStr.end(), lowerStr.begin(), ::tolower);
     return lowerStr;
+}
+
+inline std::string trim(const std::string& str)
+{
+    const auto start = str.find_first_not_of(" \t\n\r\f\v");
+    if(start == std::string::npos)
+    {
+        return "";
+    }
+    const auto end = str.find_last_not_of(" \t\n\r\f\v");
+    return str.substr(start, end - start + 1);
 }
 
 inline std::string removeNewlines(const std::string& str)
@@ -123,6 +148,21 @@ inline void vecToStream(std::ostream& os, const std::vector<T>& vec)
         }
     }
 
+    os << "]";
+}
+
+// Converts a vector of strings to an ostream "[ "A", "B" , "C" ...]".
+inline void stringVecToStream(std::ostream& os, const std::vector<std::string>& vec)
+{
+    os << "[";
+    for(size_t i = 0; i < vec.size(); ++i)
+    {
+        if(i > 0)
+        {
+            os << ", ";
+        }
+        os << "\"" << vec[i] << "\"";
+    }
     os << "]";
 }
 

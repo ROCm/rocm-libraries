@@ -37,6 +37,8 @@
 #include <miopen/search_options.hpp>
 #include <miopen/solver_id.hpp>
 #include <miopen/solver.hpp>
+#include <miopen/env.hpp>
+#include <miopen/generic_search_controls.hpp>
 
 #include <limits>
 #include <type_traits>
@@ -177,8 +179,8 @@ auto FindSolutionImpl(rank<0>,
                       Db&&,
                       const AnyInvokeParams&,
                       const std::string&,
-                      const std::optional<FindOptions>&)
-    -> decltype(s.GetSolution(context, problem))
+                      const std::optional<FindOptions>&) -> decltype(s.GetSolution(context,
+                                                                                   problem))
 {
     MIOPEN_LOG_I(s.SolverDbId() << " (not searchable)");
     return s.GetSolution(context, problem);
@@ -208,9 +210,11 @@ auto GetInvokeFactoryImpl(
 }
 
 template <class Solver, class Context, class Problem>
-auto GetInvokeFactoryImpl(
-    rank<0>, Solver s, const Context& context, const Problem& problem, const std::string&)
-    -> decltype(s.GetInvokerFactory(context, problem))
+auto GetInvokeFactoryImpl(rank<0>,
+                          Solver s,
+                          const Context& context,
+                          const Problem& problem,
+                          const std::string&) -> decltype(s.GetInvokerFactory(context, problem))
 {
     MIOPEN_LOG_I(s.SolverDbId() << " (not searchable)");
     return s.GetInvokerFactory(context, problem);
@@ -325,6 +329,10 @@ struct SolverContainer
                 {
                     MIOPEN_LOG_I2(solver.SolverDbId() << ": Not applicable");
                 }
+                else if(env::enabled(MIOPEN_SEARCH_CUTOFF) && solver.IsSlow(ctx, problem))
+                {
+                    MIOPEN_LOG_I2(solver.SolverDbId() << ": Skipped (slow, search cutoff active)");
+                }
                 else
                 {
                     const Solution s =
@@ -380,14 +388,18 @@ struct SolverContainer
                 {
                     MIOPEN_LOG_I2(solver.SolverDbId() << ": Not applicable");
                 }
+                else if(env::enabled(MIOPEN_SEARCH_CUTOFF) && solver.IsSlow(ctx, problem))
+                {
+                    MIOPEN_LOG_I2(solver.SolverDbId() << ": Skipped (slow, search cutoff active)");
+                }
                 else
                 {
                     auto db = [&]() -> PerformanceDb& {
                         constexpr auto db_getter =
-                            []([[maybe_unused]] const ExecutionContext& ctx,
-                               [[maybe_unused]] const auto& problem) -> PerformanceDb {
+                            []([[maybe_unused]] const ExecutionContext& ctx_,
+                               [[maybe_unused]] const auto& problem_) -> PerformanceDb {
                             if constexpr(IsTunable<decltype(solver)>())
-                                return GetDb(ctx, problem);
+                                return GetDb(ctx_, problem_);
                             else
                                 MIOPEN_THROW(miopenStatusInternalError);
                         };

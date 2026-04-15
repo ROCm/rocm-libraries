@@ -24,6 +24,8 @@
  *
  *******************************************************************************/
 
+#define CONV_BIN_WINO_RXS_CPP
+
 #include <miopen/conv/solvers.hpp>
 
 #include <miopen/buffer_info.hpp>
@@ -222,12 +224,25 @@ inline bool IsShaderConstraintsMetV21(const ProblemDescription& problem,
                                       const int OW,
                                       const int N)
 {
-    uint64_t o_K_stride      = static_cast<uint64_t>(OH) * OW;
-    uint64_t o_N_stride      = o_K_stride * K;
+    // Convert arguments to uint64_t
+    uint64_t N_    = N;
+    uint64_t C_    = C;
+    uint64_t H_    = H;
+    uint64_t W_    = W;
+    uint64_t K_    = K;
+    uint64_t S_    = S;
+    uint64_t R_    = R;
+    uint64_t OH_   = OH;
+    uint64_t OW_   = OW;
+    uint64_t padW_ = problem.GetPadW();
+    uint64_t padH_ = problem.GetPadH();
+
+    uint64_t o_K_stride      = OH_ * OW_;
+    uint64_t o_N_stride      = o_K_stride * K_;
     uint64_t o_N_stride_OHOW = o_N_stride + o_K_stride;
 
-    uint64_t d_C_stride    = static_cast<uint64_t>(H) * W;
-    uint64_t d_N_stride    = d_C_stride * C;
+    uint64_t d_C_stride    = H_ * W_;
+    uint64_t d_N_stride    = d_C_stride * C_;
     uint64_t d_N_stride_HW = d_N_stride + d_C_stride;
 
     auto num_tiles  = Ceil(OH, 2) * Ceil(OW, 2);
@@ -236,21 +251,21 @@ inline bool IsShaderConstraintsMetV21(const ProblemDescription& problem,
 
     // clang-format off
     // Check implementation limits.
-    return N < std::pow(2, 16)
-        && C < std::pow(2, 16)
-        && H < std::pow(2, 16)
-        && W < std::pow(2, 16)
-        && K < std::pow(2, 16)
-        && S < std::pow(2, 16)
-        && R < std::pow(2, 16)
-        && OH < std::pow(2, 16)
-        && OW < std::pow(2, 16)
-        && problem.GetPadW() < std::pow(2, 16)
-        && problem.GetPadH() < std::pow(2, 16)
-        && C * R * S < std::pow(2, 22)
-        && K * R * S < std::pow(2, 28)
-        && ((o_N_stride_OHOW < std::pow(2, 29) && d_N_stride_HW < std::pow(2, 29))
-           || (stride_one && o_N_stride < std::pow(2, 30) && d_N_stride < std::pow(2, 30)
+    return N_           < (uint64_t{1} << 16)
+        && C_           < (uint64_t{1} << 16)
+        && H_           < (uint64_t{1} << 16)
+        && W_           < (uint64_t{1} << 16)
+        && K_           < (uint64_t{1} << 16)
+        && S_           < (uint64_t{1} << 16)
+        && R_           < (uint64_t{1} << 16)
+        && OH_          < (uint64_t{1} << 16)
+        && OW_          < (uint64_t{1} << 16)
+        && padW_        < (uint64_t{1} << 16)
+        && padH_        < (uint64_t{1} << 16)
+        && C_ * R_ * S_ < (uint64_t{1} << 22)
+        && K_ * R_ * S_ < (uint64_t{1} << 28)
+        && ((o_N_stride_OHOW < (uint64_t{1} << 29) && d_N_stride_HW < (uint64_t{1} << 29))
+           || (stride_one && o_N_stride < (uint64_t{1} << 30) && d_N_stride < (uint64_t{1} << 30)
            && (N == 1 || num_tiles % 16 == 0)));
     // clang-format on
 }
@@ -266,24 +281,40 @@ inline bool IsShaderConstraintsMetV30(const ProblemDescription& problem,
                                       const int OW,
                                       const int N)
 {
+    // Convert arguments to uint64_t
+    uint64_t N_    = N;
+    uint64_t C_    = C;
+    uint64_t H_    = H;
+    uint64_t W_    = W;
+    uint64_t K_    = K;
+    uint64_t S_    = S;
+    uint64_t R_    = R;
+    uint64_t OH_   = OH;
+    uint64_t OW_   = OW;
+    uint64_t padW_ = problem.GetPadW();
+    uint64_t padH_ = problem.GetPadH();
+
     // clang-format off
     // Check implementation limits.
-    return N < std::pow(2, 16)
-        && C < std::pow(2, 16)
-        && H < std::pow(2, 16)
-        && W < std::pow(2, 16)
-        && K < std::pow(2, 16)
-        && S < std::pow(2, 16)
-        && R < std::pow(2, 16)
-        && OH < std::pow(2, 16)
-        && OW < std::pow(2, 16)
-        && problem.GetPadW() < std::pow(2, 16)
-        && problem.GetPadH() < std::pow(2, 16)
-        && H * W < std::pow(2, 29)
-        && K * R * S < std::pow(2, 28)
-        && (C + 1) * H * W < std::pow(2, 30)
-        && (C + 1) * R * S < std::pow(2, 22)
-        && (K + 1) * OH * OW < std::pow(2, 30);
+    return N_    < (uint64_t{1} << 16)
+        && C_    < (uint64_t{1} << 16)
+        && H_    < (uint64_t{1} << 16)
+        && W_    < (uint64_t{1} << 16)
+        && K_    < (uint64_t{1} << 16)
+        && S_    < (uint64_t{1} << 16)
+        && R_    < (uint64_t{1} << 16)
+        && OH_   < (uint64_t{1} << 16)
+        && OW_   < (uint64_t{1} << 16)
+        && padW_ < (uint64_t{1} << 16)
+        && padH_ < (uint64_t{1} << 16)
+        && H_ * W_              < (uint64_t{1} << 29)
+        && K_ * R_ * S_         < (uint64_t{1} << 28)
+        && (C_ + 1) * H_ * W_   < (uint64_t{1} << 30)
+        && (C_ + 1) * R_ * S_   < (uint64_t{1} << 22)
+        && (K_ + 1) * OH_ * OW_ < (uint64_t{1} << 30)
+        && (!problem.IsDirectionBackwardWrW()
+          || C_ == 1
+          || N_ * H_ * W_       < (uint64_t{1} << 28));
     // clang-format on
 }
 
@@ -304,14 +335,21 @@ inline bool IsShaderConstraintsMet(const ProblemDescription& problem,
     /// \todo Either remove WrW related code or re-use function from RxS
     if(problem.IsDirectionBackwardData())
     {
-        if(!(0 <= problem.GetBackwardPadW() && problem.GetBackwardPadW() < std::pow(2, 16)))
+        if(!(0 <= problem.GetBackwardPadW() && problem.GetBackwardPadW() < (1 << 16)))
             return false;
-        if(!(0 <= problem.GetBackwardPadH() && problem.GetBackwardPadH() < std::pow(2, 16)))
+        if(!(0 <= problem.GetBackwardPadH() && problem.GetBackwardPadH() < (1 << 16)))
             return false;
     }
 
-    if(!problem.IsLayoutDefault())
-        return false;
+    // Use IsPossibleLayout4D5D to check actual tensor strides rather than cached layout string
+    // This allows transposed solvers to work correctly when they modify tensor strides
+    {
+        static const auto strict = TensorDescriptor::LayoutValidationMode::StrictDecreasingStrides;
+        if(!(problem.GetIn().IsPossibleLayout4D5D("NCHW", strict) &&
+             problem.GetWeights().IsPossibleLayout4D5D("NCHW", strict) &&
+             problem.GetOut().IsPossibleLayout4D5D("NCHW", strict)))
+            return false;
+    }
 
     return IsWinogradV21Preferred<Winodata, Winofilter>(asic, problem)
                ? IsShaderConstraintsMetV21(problem, R, S, C, K, H, W, OH, OW, N)
@@ -474,24 +512,22 @@ public:
                                                       Ceil(R * out_h, input_stride_h))},
           is_fp16{problem.IsFp16()},
           is_2x3{IS2X3},
-          out_of_model_scope
-    {
-        !(problem.GetGroupCount() == 1) //
-            || !(U == 1)                //
-            || !(V == 1)                //
-            || !(input_stride_h == 1)   //
-            || !(input_stride_w == 1)   //
-            || !(filter_stride_h == 1)  //
-            || !(filter_stride_w == 1)  //
+          out_of_model_scope{!(problem.GetGroupCount() == 1) //
+                             || !(U == 1)                    //
+                             || !(V == 1)                    //
+                             || !(input_stride_h == 1)       //
+                             || !(input_stride_w == 1)       //
+                             || !(filter_stride_h == 1)      //
+                             || !(filter_stride_w == 1)      //
 #if !WTI_MODEL_ALLOW_ANY_RS
-            || !(R <= 5) //
-            || !(S <= 5) //
+                             || !(R <= 5) //
+                             || !(S <= 5) //
 #endif
 #if !WTI_MODEL_ALLOW_ANY_CK
-            || !(C >= 16) //
-            || !(K >= 16)
+                             || !(C >= 16) //
+                             || !(K >= 16)
 #endif
-    }
+          }
     {
         /// \todo add G to UnifiedDescriptionConv2d
         size_t G = static_cast<size_t>(problem.GetGroupCount());
@@ -686,13 +722,17 @@ static bool IsApplicableBase(const ExecutionContext& ctx, const ProblemDescripti
     if(name == "gfx90a" && problem.IsGfx90aFp16altRequired())
         return false;
 
+    // Use IsPossibleLayout4D5D to check actual tensor strides rather than cached layout string
+    // This allows transposed solvers to work correctly when they modify tensor strides
+    static const auto strict = TensorDescriptor::LayoutValidationMode::StrictDecreasingStrides;
+
     // clang-format off
     if (!((problem.GetKernelStrideW() == 1 || problem.GetKernelStrideW() == 2)
         && problem.GetKernelStrideW() == problem.GetKernelStrideH()
         && problem.GetDilationW() == 1
         && problem.GetDilationH() == 1
         && problem.GetBias() == 0
-        && problem.GetInLayout() == "NCHW"))
+        && problem.GetIn().IsPossibleLayout4D5D("NCHW", strict)))
         return false;
         // clang-format on
 
@@ -1150,6 +1190,7 @@ bool ConvBinWinogradRxSf2x3g1::IsApplicable(const ExecutionContext& ctx,
 {
     if(env::disabled(MIOPEN_DEBUG_AMD_WINOGRAD_RXS_F2X3_G1))
         return false;
+
     return IsApplicableBase<2, 3>(ctx, problem) && problem.GetGroupCount() == 1;
 }
 
@@ -1165,9 +1206,11 @@ ConvSolution ConvBinWinogradRxSf2x3g1::GetSolution(const ExecutionContext& ctx,
     const auto tunable = ConvBinWinoRxS<2, 3>{};
     return tunable.GetSolution(ctx, problem, tunable.GetDefaultPerformanceConfig(ctx, problem));
 }
+template struct MIOPEN_INTERNALS_EXPORT ConvBinWinoRxS<2, 3>;
+template struct MIOPEN_INTERNALS_EXPORT ConvBinWinoRxS<3, 2>;
 
-template struct ConvBinWinoRxS<2, 3>;
-template struct ConvBinWinoRxS<3, 2>;
+template struct MIOPEN_INTERNALS_EXPORT TransposedConvBinWinoRxS<2, 3>;
+template struct MIOPEN_INTERNALS_EXPORT TransposedConvBinWinoRxS<3, 2>;
 
 } // namespace conv
 } // namespace solver

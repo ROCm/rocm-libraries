@@ -73,6 +73,7 @@ struct mask_info
                 tmp.x     = r.at(ck_tile::number<1>{});
                 tmp.left  = left_size;
                 tmp.right = right_size;
+                tmp.sink  = 0;
             }
             else if(t == "t" || t == "b" || t == "g")
             {
@@ -147,7 +148,10 @@ struct mask_info
         }
         else if(str == "0")
         {
-            tmp.type = mask_enum::no_mask;
+            tmp.type  = mask_enum::no_mask;
+            tmp.left  = -1;
+            tmp.right = -1;
+            tmp.sink  = 0;
         }
         else if(str == "1" || str == "t")
         {
@@ -174,11 +178,11 @@ struct mask_info
         return tmp;
     }
 
-    ck_tile::index_t get_unmaskarea() const
+    std::size_t get_unmaskarea() const
     {
         if(type == mask_enum::no_mask)
-            return seqlen_q * seqlen_k;
-        ck_tile::index_t area = 0;
+            return static_cast<std::size_t>(seqlen_q) * seqlen_k;
+        std::size_t area = 0;
         for(ck_tile::index_t i_y = 0; i_y < seqlen_q; ++i_y)
         {
             ck_tile::index_t x_start = std::max(-y + i_y + 1, static_cast<ck_tile::index_t>(0));
@@ -191,7 +195,7 @@ struct mask_info
         return area;
     }
 
-    friend std::ostream& operator<<(std::ostream& os, const mask_info& mi)
+    friend std::ostream& operator<<([[clang::lifetimebound]] std::ostream& os, const mask_info& mi)
     {
         mi.serialize(os);
         return os;

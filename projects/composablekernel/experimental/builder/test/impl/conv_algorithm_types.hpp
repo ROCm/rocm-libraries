@@ -54,6 +54,13 @@ struct GridwiseBwdXdlGemm
 };
 static_assert(ckb::GridwiseBwdXdlGemmDescriptor<GridwiseBwdXdlGemm>);
 
+struct GridwiseBwdDataXdlGemm
+{
+    size_t ak1 = 0;
+    size_t bk1 = 0;
+    XdlParams xdl_params;
+};
+
 // Describe gridwise WMMA GEMM parameters.
 struct GridwiseWmmaGemm
 {
@@ -64,6 +71,16 @@ struct GridwiseWmmaGemm
     size_t n_wmma_per_wave = 0;
 };
 static_assert(ckb::GridwiseWmmaGemmDescriptor<GridwiseWmmaGemm>);
+struct GridwiseWmmaGemmABK1
+{
+    size_t ak1             = 0;
+    size_t bk1             = 0;
+    size_t m_per_wmma      = 0;
+    size_t n_per_wmma      = 0;
+    size_t m_wmma_per_wave = 0;
+    size_t n_wmma_per_wave = 0;
+};
+static_assert(ckb::GridwiseWmmaGemmDescriptor<GridwiseWmmaGemmABK1>);
 
 struct BlockGemmPipeline
 {
@@ -116,7 +133,7 @@ static_assert(LdsTransferDescriptor<LdsTransfer>);
 struct Epilogue
 {
     size_t m_xdl_per_wave_per_shuffle;
-    size_t n_per_wave_per_shuffle;
+    size_t n_xdl_per_wave_per_shuffle;
     size_t scalar_per_vector;
 };
 static_assert(EpilogueDescriptor<Epilogue>);
@@ -209,9 +226,19 @@ struct BwdXdlGemm_
     GridwiseBwdXdlGemm gridwise_gemm;
 };
 
+struct BwdDataXdlGemm_
+{
+    GridwiseBwdDataXdlGemm gridwise_gemm;
+};
+
 struct WmmaGemm_
 {
     GridwiseWmmaGemm gridwise_gemm;
+};
+
+struct WmmaGemmABK1_
+{
+    GridwiseWmmaGemmABK1 gridwise_gemm;
 };
 
 template <size_t ThreadSliceLength = 3>
@@ -231,10 +258,21 @@ struct ConvSpecializationBwdWeight_
     ConvSpecialization bwd_weight_specialization;
 };
 
+struct ConvSpecializationBwdData_
+{
+    ConvSpecialization bwd_data_specialization;
+};
+
 struct Prefetch_
 {
     size_t num_gemm_k_prefetch_stages;
     PipelineScheduler loop_scheduler;
+};
+
+struct GemmPad_
+{
+    size_t DoPadGemmM;
+    size_t DoPadGemmN;
 };
 
 struct TransposeParams_
@@ -339,8 +377,19 @@ struct TileOptimizations
     bool split_image;
     // Explicit gemm for 1x1, stride=0, pad=0 cases
     bool explicit_gemm;
+    // Two-stage kernels
+    bool two_stage;
 };
 static_assert(ckb::TileOptimizationsDescriptor<TileOptimizations>);
+
+struct TileStreamKConfig
+{
+    // StreamK reduction strategy (Linear or Tree).
+    StreamKReductionStrategy reduction_strategy;
+    // Use persistent DP (true) or non-persistent DP (false).
+    bool persistent;
+};
+static_assert(ckb::StreamKDescriptor<TileStreamKConfig>);
 
 struct TileConvSpecialization_
 {
@@ -365,6 +414,11 @@ struct TileBlockGemm_
 struct TileOptimizations_
 {
     TileOptimizations optimizations;
+};
+
+struct TileStreamK_
+{
+    TileStreamKConfig streamk;
 };
 
 // Factory
@@ -394,7 +448,15 @@ struct ConvAlgorithmTemplate : Components...
         {
             result.gridwise_gemm = gemm;
         }
+        else if constexpr(std::is_base_of_v<BwdDataXdlGemm_, ConvAlgorithmTemplate>)
+        {
+            result.gridwise_gemm = gemm;
+        }
         else if constexpr(std::is_base_of_v<WmmaGemm_, ConvAlgorithmTemplate>)
+        {
+            result.gridwise_gemm = gemm;
+        }
+        else if constexpr(std::is_base_of_v<WmmaGemmABK1_, ConvAlgorithmTemplate>)
         {
             result.gridwise_gemm = gemm;
         }
@@ -433,6 +495,14 @@ struct ConvAlgorithmTemplate : Components...
         return result;
     }
 
+    constexpr auto with_bwd_data_specialization(ConvSpecialization bwd_spec) const
+    {
+        static_assert(std::is_base_of_v<ConvSpecializationBwdData_, ConvAlgorithmTemplate>);
+        auto result                    = *this;
+        result.bwd_data_specialization = bwd_spec;
+        return result;
+    }
+
     constexpr auto with_prefetch_config(size_t k_prefetch_stages, PipelineScheduler scheduler) const
     {
         static_assert(std::is_base_of_v<Prefetch_, ConvAlgorithmTemplate>);
@@ -449,6 +519,15 @@ struct ConvAlgorithmTemplate : Components...
         auto result                                         = *this;
         result.max_transpose_transfer_src_scalar_per_vector = max_src_scalar_per_vector;
         result.max_transpose_transfer_dst_scalar_per_vector = max_dst_scalar_per_vector;
+        return result;
+    }
+
+    constexpr auto with_gemm_pad_params(size_t doPadGemmN_, size_t doPadGemmM_) const
+    {
+        static_assert(std::is_base_of_v<GemmPad_, ConvAlgorithmTemplate>);
+        auto result       = *this;
+        result.DoPadGemmN = doPadGemmN_;
+        result.DoPadGemmM = doPadGemmM_;
         return result;
     }
 
@@ -549,6 +628,15 @@ struct ConvAlgorithmTemplate : Components...
         result.optimizations = o;
         return result;
     }
+
+    template <typename SK>
+    constexpr auto with_streamk(const SK& sk) const
+    {
+        static_assert(std::is_base_of_v<TileStreamK_, ConvAlgorithmTemplate>);
+        auto result    = *this;
+        result.streamk = sk;
+        return result;
+    }
 };
 
 // Fwd algorithm types
@@ -566,7 +654,16 @@ using ConvAlgorithm_DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3 =
                           FwdXdlGemm_,
                           Transfer_<>,
                           ConvSpecializationFwd_,
-                          BlockGemm_>;
+                          BlockGemm_,
+                          GemmBatchOptions_>;
+
+using ConvAlgorithm_DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3 =
+    ConvAlgorithmTemplate<ThreadBlock_,
+                          WmmaGemmABK1_,
+                          Transfer_<>,
+                          ConvSpecializationFwd_,
+                          BlockGemm_,
+                          GemmBatchOptions_>;
 
 using ConvAlgorithm_DeviceGroupedConvFwdMultipleD_Wmma_CShuffle =
     ConvAlgorithmTemplate<ThreadBlock_,
@@ -599,6 +696,15 @@ using ConvAlgorithm_Tile_GroupedConvolutionKernel = ConvAlgorithmTemplate<TileTh
                                                                           TileTransfer_,
                                                                           TileConvSpecialization_,
                                                                           TileOptimizations_>;
+
+// CK Tile algorithm with StreamK work distribution
+using ConvAlgorithm_Tile_GroupedConvolutionKernel_StreamK =
+    ConvAlgorithmTemplate<TileThreadBlock_,
+                          TileBlockGemm_,
+                          TileTransfer_,
+                          TileConvSpecialization_,
+                          TileOptimizations_,
+                          TileStreamK_>;
 
 // Reference algorithm descriptor - for GPU reference validation
 // This is a simple algorithm that requires no complex configuration,
@@ -682,5 +788,36 @@ using ConvAlgorithm_DeviceGroupedConvBwdWeightMultipleD_Wmma_CShuffle_V3 =
                           ConvSpecializationBwdWeight_,
                           BlockGemm_,
                           MultipleDSpecialization_>;
+
+// Bwd Data algorithm types
+using ConvAlgorithm_DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle =
+    ConvAlgorithmTemplate<ThreadBlock_,
+                          BwdDataXdlGemm_,
+                          Transfer_<>,
+                          ConvSpecializationBwdData_,
+                          MultipleDSpecialization_,
+                          Prefetch_,
+                          TransposeParams_,
+                          GemmPad_>;
+
+using ConvAlgorithm_DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffle =
+    ConvAlgorithmTemplate<ThreadBlock_,
+                          WmmaGemm_,
+                          Transfer_<>,
+                          ConvSpecializationBwdData_,
+                          GridGemm_,
+                          MultipleDSpecialization_,
+                          Prefetch_>;
+
+using ConvAlgorithm_DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffle_V3 =
+    ConvAlgorithmTemplate<ThreadBlock_,
+                          WmmaGemmABK1_,
+                          Transfer_<>,
+                          ConvSpecializationBwdData_,
+                          BlockGemm_,
+                          MultipleDSpecialization_,
+                          Prefetch_,
+                          TransposeParams_,
+                          GemmPad_>;
 
 } // namespace ck_tile::builder::test

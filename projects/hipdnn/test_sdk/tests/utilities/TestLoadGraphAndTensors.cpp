@@ -3,14 +3,17 @@
 
 #include <gtest/gtest.h>
 
+#include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/LoadGraphAndTensors.hpp>
-#include <hipdnn_test_sdk/utilities/ScopedExecute.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
+#include <hipdnn_test_sdk/utilities/detail/ScopedExecute.hpp>
+#include <hipdnn_test_sdk/utilities/detail/TensorFileUtils.hpp>
 
 using namespace hipdnn_data_sdk;
 using namespace hipdnn_data_sdk::utilities;
+using namespace hipdnn_test_sdk::detail;
 
 namespace hipdnn_test_sdk::utilities
 {
@@ -18,18 +21,20 @@ namespace hipdnn_test_sdk::utilities
 TEST(TestFillTensorFromFile, InvalidPath)
 {
     Tensor<float> tensor({1});
-    std::filesystem::path filepath = "./ea0w399059.txt";
+    const std::filesystem::path filepath = "./ea0w399059.txt";
     EXPECT_FALSE(std::filesystem::exists(filepath));
-    EXPECT_THROW(detail::fillTensorFromFile(tensor, filepath), std::runtime_error);
+    EXPECT_THROW(fillTensorFromFile(tensor, filepath), std::runtime_error);
 }
 
 TEST(TestFillTensorFromFile, PathToDirectory)
 {
     Tensor<float> tensor({1});
-    hipdnn_test_sdk::utilities::ScopedDirectory dir("oijaweorij33");
-    EXPECT_THROW(detail::fillTensorFromFile(tensor, dir.path()), std::runtime_error);
+    const ScopedDirectory dir("oijaweorij33");
+    EXPECT_THROW(fillTensorFromFile(tensor, dir.path()), std::runtime_error);
 }
 
+namespace
+{
 template <class T>
 void writeVectorToFile(const std::filesystem::path& filename, const std::vector<T>& values)
 {
@@ -39,18 +44,18 @@ void writeVectorToFile(const std::filesystem::path& filename, const std::vector<
     f.write(reinterpret_cast<const char*>(values.data()),
             static_cast<std::streamsize>(values.size() * sizeof(int)));
 }
+} // namespace
 
 TEST(TestFillTensorFromFile, Valid)
 {
-    std::filesystem::path filename = "SimpleTensor0123.bin";
-    hipdnn_test_sdk::utilities::ScopedExecute fileDeleter(
-        [filename]() { std::filesystem::remove(filename); });
+    const std::filesystem::path filename = "SimpleTensor0123.bin";
+    const ScopedExecute fileDeleter([filename]() { std::filesystem::remove(filename); });
 
     std::vector<int> values{0, 1, 2, 3};
     writeVectorToFile(filename, values);
 
     Tensor<int> tensor({static_cast<int64_t>(values.size())});
-    ASSERT_NO_THROW(detail::fillTensorFromFile(tensor, filename));
+    ASSERT_NO_THROW(fillTensorFromFile(tensor, filename));
 
     ASSERT_EQ(tensor.memory().count(), values.size());
 
@@ -60,18 +65,20 @@ TEST(TestFillTensorFromFile, Valid)
     }
 }
 
+#ifndef HIPDNN_DATA_SDK_SKIP_JSON_LIB
+
 TEST(TestLoadGraphAndTensors, Valid)
 {
     SKIP_IF_NO_DEVICES();
 
-    std::filesystem::path filepath
-        = hipdnn_data_sdk::utilities::getCurrentExecutableDirectory()
+    const std::filesystem::path filepath
+        = getCurrentExecutableDirectory()
           / "../lib/hipdnn_reference_data/BatchnormFwdInference/nchw/fp32/Small.json";
 
     // TODO: Temporary fix until reference data can be properly installed
     if(!std::filesystem::exists(filepath))
     {
-        HIPDNN_LOG_WARN("Could not find {}", filepath.string());
+        HIPDNN_SDK_LOG_WARN("Could not find " << filepath.string());
         GTEST_SKIP();
     }
 
@@ -107,14 +114,14 @@ TEST(TestLoadGraphAndTensors, Valid)
 
 TEST(TestLoadGraphAndTensors, ExtractAndClearOutputTensorData)
 {
-    std::filesystem::path filepath
-        = hipdnn_data_sdk::utilities::getCurrentExecutableDirectory()
+    const std::filesystem::path filepath
+        = getCurrentExecutableDirectory()
           / "../lib/hipdnn_reference_data/BatchnormFwdInference/nchw/fp32/Small.json";
 
     // TODO: Temporary fix until reference data can be properly installed
     if(!std::filesystem::exists(filepath))
     {
-        HIPDNN_LOG_WARN("Could not find {}", filepath.string());
+        HIPDNN_SDK_LOG_WARN("Could not find " << filepath.string());
         GTEST_SKIP();
     }
 
@@ -126,7 +133,7 @@ TEST(TestLoadGraphAndTensors, ExtractAndClearOutputTensorData)
     for(auto id : res.outputTensorUids)
     {
         const auto& tensor = res.tensorMap.at(id);
-        size_t bytesInTensor = tensor->elementSpace() * tensor->elementSize();
+        const size_t bytesInTensor = tensor->elementSpace() * tensor->elementSize();
         auto& savedTensor = savedTensorOutputs[id]
             = std::unique_ptr<ITensor>(new Tensor<float>(tensor->dims(), tensor->strides()));
         savedTensor->fillWithData(tensor->rawHostData(), bytesInTensor);
@@ -139,8 +146,8 @@ TEST(TestLoadGraphAndTensors, ExtractAndClearOutputTensorData)
     for(auto id : res.outputTensorUids)
     {
         EXPECT_EQ(outputMap.count(id), 1);
-        TensorView<float> savedTensorView{*savedTensorOutputs[id]};
-        TensorView<float> extractedTensorView{*outputMap.at(id)};
+        const TensorView<float> savedTensorView{*savedTensorOutputs[id]};
+        const TensorView<float> extractedTensorView{*outputMap.at(id)};
 
         auto savedIter = savedTensorView.cbegin();
         auto extractedIter = extractedTensorView.cbegin();
@@ -157,4 +164,7 @@ TEST(TestLoadGraphAndTensors, ExtractAndClearOutputTensorData)
         }
     }
 }
+
+#endif // HIPDNN_DATA_SDK_SKIP_JSON_LIB
+
 }

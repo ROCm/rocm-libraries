@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <rocRoller/AssemblyKernel.hpp>
 #include <rocRoller/CodeGen/ArgumentLoader.hpp>
@@ -345,14 +322,12 @@ namespace rocRollerTest
 
             auto commandArgs = command->createArguments();
             commandArgs.setArgument(tagTensorA, ArgumentType::Value, d_a.get());
-            commandArgs.setArgument(tagTensorA, ArgumentType::Limit, (size_t)nx * ny);
             commandArgs.setArgument(tagTensorA, ArgumentType::Size, 0, (size_t)nx);
             commandArgs.setArgument(tagTensorA, ArgumentType::Size, 1, (size_t)ny);
             commandArgs.setArgument(tagTensorA, ArgumentType::Stride, 0, (size_t)ny);
             commandArgs.setArgument(tagTensorA, ArgumentType::Stride, 1, (size_t)1);
 
             commandArgs.setArgument(tagTensorB, ArgumentType::Value, d_b.get());
-            commandArgs.setArgument(tagTensorB, ArgumentType::Limit, (size_t)nx * ny);
             commandArgs.setArgument(tagTensorB, ArgumentType::Size, 0, (size_t)nx);
             commandArgs.setArgument(tagTensorB, ArgumentType::Size, 1, (size_t)ny);
             commandArgs.setArgument(tagTensorB, ArgumentType::Stride, 0, (size_t)ny);

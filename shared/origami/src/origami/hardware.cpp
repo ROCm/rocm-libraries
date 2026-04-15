@@ -35,6 +35,27 @@ hardware_t::hardware_t(architecture_t arch,
     , mem_bw_per_wg_coefficients(mem_bw_per_wg_coefficients)
     , NUM_XCD(NUM_XCD) {}
 
+hardware_t::hardware_t(architecture_t arch,
+                       size_t N_CU,
+                       size_t lds_capacity,
+                       const architecture_constants& constants,
+                       size_t num_xcds,
+                       size_t L2_capacity,
+                       double compute_clock_ghz,
+                       double memory_clock_ghz)
+   : hardware_t(
+          arch,
+          N_CU,
+          lds_capacity,
+          num_xcds,
+          1e9 * constants.mem1_perf_ratio / (compute_clock_ghz * 1e6),
+          1e9 * constants.mem2_perf_ratio / (memory_clock_ghz * 1e6 * constants.mem_clock_ratio),
+          1e9 * constants.mem3_perf_ratio / (memory_clock_ghz * 1e6),
+          L2_capacity,
+          compute_clock_ghz,
+          constants.parallel_mi_cu,
+          constants.mem_bw_per_wg_coefficients) {}
+
 hardware_t::hardware_t(hipDeviceProp_t properties)
     : hardware_t(get_hardware_for_properties(properties)) {}
 
@@ -52,7 +73,8 @@ hardware_t::hardware_t(const hardware_t& other)
     , mem_bw_per_wg_coefficients(other.mem_bw_per_wg_coefficients)
     , NUM_XCD(other.NUM_XCD) {}
 
-hardware_t hardware_t::get_hardware_for_properties(hipDeviceProp_t properties) {
+hardware_t hardware_t::get_hardware_for_properties(hipDeviceProp_t properties,
+                                                   size_t num_xcds_override) {
   auto arch_name = get_before_first_colon(properties.gcnArchName);
   auto arch_enum = arch_name_to_enum(arch_name);
   if (arch_enum == architecture_t::Count) {
@@ -60,32 +82,82 @@ hardware_t hardware_t::get_hardware_for_properties(hipDeviceProp_t properties) {
         std::string("Attempting to retrieve hardware constants for unsupported architecture: ") +
         std::string(arch_name));
   }
-  auto constants = get_arch_constants(arch_enum);
-  return hardware_t(
-      arch_enum,
-      properties.multiProcessorCount,
-      properties.sharedMemPerBlock,
-      constants.num_xcds,
-      1e9 * constants.mem1_perf_ratio / properties.clockRate,
-      1e9 * constants.mem2_perf_ratio / (properties.memoryClockRate * constants.mem_clock_ratio),
-      1e9 * constants.mem3_perf_ratio / properties.memoryClockRate,
-      properties.l2CacheSize,
-      properties.clockRate / 1e6,
-      constants.parallel_mi_cu,
-      constants.mem_bw_per_wg_coefficients);
+  auto constants  = get_arch_constants(arch_enum);
+  auto num_xcds   = (num_xcds_override > 0)
+                      ? num_xcds_override
+                      : get_default_num_xcds(arch_enum);
+  return hardware_t(arch_enum,
+                    properties.multiProcessorCount,
+                    properties.sharedMemPerBlock,
+                    constants,
+                    num_xcds,
+                    properties.l2CacheSize,
+                    properties.clockRate / 1.e6,
+                    properties.memoryClockRate / 1.e6);
 }
 
 hardware_t hardware_t::get_hardware_for_device(int deviceId) {
   hipDeviceProp_t prop;
   hipError_t e = hipGetDeviceProperties(&prop, deviceId);
   if (e) { throw std::runtime_error(hipGetErrorString(e)); }
-  return get_hardware_for_properties(prop);
+
+  size_t num_xcds = 0;
+#if HIP_VERSION_MAJOR >= 7
+  int queried_xccs = 0;
+  if (hipDeviceGetAttribute(&queried_xccs, hipDeviceAttributeNumberOfXccs, deviceId) == hipSuccess
+      && queried_xccs > 0) {
+    num_xcds = static_cast<size_t>(queried_xccs);
+  }
+#endif
+
+  return get_hardware_for_properties(prop, num_xcds);
+}
+
+hardware_t hardware_t::get_hardware_for_arch(architecture_t arch,
+                                             size_t N_CU,
+                                             size_t lds_capacity,
+                                             size_t L2_capacity,
+                                             int compute_clock_khz) {
+  if (arch == architecture_t::Count) {
+    throw std::runtime_error("Attempting to create hardware for unsupported architecture");
+  }
+
+  auto constants = get_arch_constants(arch);
+
+  return hardware_t(arch,
+                    N_CU,
+                    lds_capacity,
+                    constants,
+                    get_default_num_xcds(arch),
+                    L2_capacity,
+                    compute_clock_khz / 1.e6,
+                    compute_clock_khz / 1.e6 / constants.mem_clock_ratio);
 }
 
 bool hardware_t::is_hardware_supported(hipDeviceProp_t properties) {
   auto arch_name = get_before_first_colon(properties.gcnArchName);
   auto arch_enum = arch_name_to_enum(arch_name);
   return arch_enum != architecture_t::Count;
+}
+
+size_t hardware_t::get_default_num_xcds(architecture_t arch) {
+  // Do NOT add new architectures here — see declaration in hardware.hpp.
+  switch (arch) {
+    case architecture_t::gfx90a:  return 1;
+    case architecture_t::gfx942:  return 8;
+    case architecture_t::gfx950:  return 8;
+    case architecture_t::gfx1201: return 1;
+    case architecture_t::gfx1100: return 1;
+    case architecture_t::gfx1150: return 1;
+    case architecture_t::gfx1151: return 1;
+    case architecture_t::gfx1152: return 1;
+    case architecture_t::gfx1153: return 1;
+    default:
+      throw std::runtime_error(
+          std::string("No default XCD count for architecture ") +
+          std::string(arch_enum_to_name(arch)) +
+          ". Use get_hardware_for_device() with a live GPU to query at runtime.");
+  }
 }
 
 void hardware_t::print() const {
@@ -128,30 +200,11 @@ size_t hardware_t::get_mi_latency(size_t MI_M,
   if (it != instruction_map.end()) {
     return it->second / parallel_mi_cu;
   } else {
-    if (origami::runtime_options().get().debug_enabled)
+    if (origami::runtime_options::get().debug_enabled)
       std::cerr << "Warning: Latency not found for MI_M=" << MI_M << ", MI_N=" << MI_N
                 << ", MI_K=" << MI_K << ", mi_input_type=" << datatype_to_string(mi_input_type)
                 << ". Returning latency value of 32 (really slow).\n";
     return 32 / parallel_mi_cu;  // Default latency if instruction is not found
-  }
-}
-
-double hardware_t::get_adjusted_main_loop_efficiency(transpose_t transA,
-                                                     transpose_t transB,
-                                                     size_t MT_M,
-                                                     size_t MT_N,
-                                                     size_t MT_K,
-                                                     data_type_t mi_input_type) const {
-  const auto& cms_map = CMS_MAP.at(arch);
-  auto key            = CMS_kernel(mi_input_type, transA, transB, MT_M, MT_N, MT_K);
-  auto it = cms_map.find(key);
-  if (it != cms_map.end()) {
-    if (origami::runtime_options().get().debug_enabled) {
-      std::cout << "Found " << key.to_string() << " with efficiency " << it->second << "\n";
-    }
-    return it->second;
-  } else {
-    return 1.0;  // Default main loop efficiency
   }
 }
 
@@ -163,6 +216,9 @@ bool hardware_t::has_MALL() const {
     case architecture_t::gfx1201:
     case architecture_t::gfx1100:
     case architecture_t::gfx1151: return true;
+    case architecture_t::gfx1150:
+    case architecture_t::gfx1152:
+    case architecture_t::gfx1153: return false;
     case architecture_t::Count:
       // Count is not a valid architecture, this is to silence compiler warning
       return false;
@@ -177,45 +233,45 @@ std::string hardware_t::get_before_first_colon(const std::string& input) {
 
 std::vector<dim3_t> hardware_t::get_valid_matrix_instructions(data_type_t mi_input_type) const {
   std::vector<dim3_t> result;
-  
+
   const auto& instruction_map = INSTRUCTION_MAP.at(arch);
-  
+
   for (const auto& kv : instruction_map) {
     const matrix_instruction& mi = kv.first;
-    if (mi.mi_input_type == mi_input_type) {
-      result.push_back(dim3_t{mi.MI_M, mi.MI_N, mi.MI_K});
-    }
+    if (mi.mi_input_type == mi_input_type) { result.push_back(dim3_t{mi.MI_M, mi.MI_N, mi.MI_K}); }
   }
-  
+
   return result;
 }
 
 dim3_t hardware_t::get_recommended_matrix_instruction(data_type_t mi_input_type) const {
   const auto& instruction_map = INSTRUCTION_MAP.at(arch);
-  
-  dim3_t best_dim = {0, 0, 0};
+
+  dim3_t best_dim        = {0, 0, 0};
   double best_throughput = 0.0;
-  
+
   for (const auto& kv : instruction_map) {
     const matrix_instruction& mi = kv.first;
     if (mi.mi_input_type == mi_input_type) {
       size_t latency = kv.second / parallel_mi_cu;
       if (latency == 0) latency = std::numeric_limits<size_t>::max();  // Avoid division by zero
-      
+
       // Calculate throughput as M*N*K/latency
-      double throughput = static_cast<double>(mi.MI_M * mi.MI_N * mi.MI_K) / static_cast<double>(latency);
-      
+      double throughput =
+          static_cast<double>(mi.MI_M * mi.MI_N * mi.MI_K) / static_cast<double>(latency);
+
       // Update if throughput is better, or if equal, prefer instruction where M=16 (tiebreaker)
       bool is_better = throughput > best_throughput;
-      bool is_tie_with_m16 = (throughput == best_throughput) && (mi.MI_M == 16) && (best_dim.m != 16);
-      
+      bool is_tie_with_m16 =
+          (throughput == best_throughput) && (mi.MI_M == 16) && (best_dim.m != 16);
+
       if (is_better || is_tie_with_m16) {
         best_throughput = throughput;
-        best_dim = dim3_t{mi.MI_M, mi.MI_N, mi.MI_K};
+        best_dim        = dim3_t{mi.MI_M, mi.MI_N, mi.MI_K};
       }
     }
   }
-  
+
   return best_dim;
 }
 

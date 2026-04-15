@@ -10,6 +10,7 @@
 #include "EnginePlugin.hpp"
 #include "HipdnnException.hpp"
 #include "PluginCore.hpp"
+#include <hipdnn_backend/version.h>
 
 namespace hipdnn_backend::plugin
 {
@@ -23,9 +24,19 @@ public:
     {
     }
 
-private:
+protected:
     void validateBeforeAdding(const EnginePlugin& plugin) override
     {
+        using hipdnn_data_sdk::utilities::Version;
+        if(Version{plugin.apiVersion()}.major != HIPDNN_BACKEND_VERSION_MAJOR)
+        {
+            throw HipdnnException(HIPDNN_STATUS_PLUGIN_ERROR,
+                                  "Plugin " + std::string(plugin.name()) + "'s major API version ("
+                                      + plugin.apiVersion().data()
+                                      + ") does not match backend major version ("
+                                      + std::to_string(HIPDNN_BACKEND_VERSION_MAJOR) + ")");
+        }
+
         auto engineIds = plugin.getAllEngineIds();
         for(const auto id : engineIds)
         {

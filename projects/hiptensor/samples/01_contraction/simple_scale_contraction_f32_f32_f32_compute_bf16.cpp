@@ -31,7 +31,7 @@ int main(int argc, char* argv[])
     /***************************************
     * Check device support                 *
     **************************************/
-    if(!isF32Supported() || !isF16MatrixCoreSupported())
+    if(!isF32F16MatrixCoreSupported())
     {
         std::cout << "unsupported host device" << std::endl;
         exit(EXIT_FAILURE);

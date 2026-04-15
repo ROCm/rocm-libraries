@@ -1,28 +1,5 @@
-/* ************************************************************************
- *
- * MIT License
- *
- * Copyright (C) 2025 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- *
- * ************************************************************************ */
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include "parameter_selection.hpp"
 
@@ -40,8 +17,7 @@ std::string SolutionParameters::toString() const
     result << "StreamK: " << streamK << std::endl;
     result << "LoadA: " << loadPathA << std::endl;
     result << "LoadB: " << loadPathB << std::endl;
-    result << "LDS Usage";
-    result << " D:" << (storeLDSD ? "On" : "Off") << std::endl;
+    result << "StoreD:" << storePath << std::endl;
     result << "Workgroup Mapping: Dim:" << workgroupMappingDim << " RemapXCC:" << workgroupRemapXCC
            << std::endl;
     result << "Prefetch:" << prefetch << " InFlight:" << prefetchInFlight
@@ -68,22 +44,26 @@ std::pair<int, int> pickWorkgroupSize(std::shared_ptr<SolutionParameters> gemm)
     if(gemm->workgroupTile.n / gemm->machineInstruction.n == 1)
         requiredY = 1;
 
+    auto isPreSwizzle = gemm->kernelType.scaleTypeA.preSwizzleTile.size() == 3 && gemm->kernelType.scaleTypeB.preSwizzleTile.size() == 3;
+
+    auto swizzleBlockSize = isPreSwizzle ? gemm->kernelType.scaleTypeA.preSwizzleTile[0] : SWIZZLE_BLOCK_SIZE;
+
     //Swizzle Scale only works with certain combinations of workgroup sizes
-    if(gemm->swizzleScale && (gemm->workgroupTile.m / SWIZZLE_BLOCK_SIZE) % x != 0)
+    if(gemm->swizzleScale && (gemm->workgroupTile.m / swizzleBlockSize) % x != 0)
         requiredX = 1;
-    if(gemm->swizzleScale && (gemm->workgroupTile.n / SWIZZLE_BLOCK_SIZE) % y != 0)
+    if(gemm->swizzleScale && (gemm->workgroupTile.n / swizzleBlockSize) % y != 0)
         requiredY = 1;
 
     if(requiredX != -1 && requiredY == -1)
     {
         x = requiredX;
-        if(gemm->swizzleScale && (gemm->workgroupTile.n / SWIZZLE_BLOCK_SIZE) % 4 == 0)
+        if(gemm->swizzleScale && (gemm->workgroupTile.n / swizzleBlockSize) % 4 == 0)
             y = 4;
     }
     else if(requiredX == -1 && requiredY != -1)
     {
         y = requiredY;
-        if(gemm->swizzleScale && (gemm->workgroupTile.m / SWIZZLE_BLOCK_SIZE) % 4 == 0)
+        if(gemm->swizzleScale && (gemm->workgroupTile.m / swizzleBlockSize) % 4 == 0)
             x = 4;
     }
     else if(requiredX != -1 && requiredY != -1)
@@ -117,10 +97,8 @@ std::shared_ptr<SolutionParameters>
 
     // Get preSwizzleTileMN for MI selection (0 if no pre-swizzle)
     size_t preSwizzleTileMN = 0;
-    if(hasPreSwizzleA)
+    if(hasPreSwizzle)
     {
-        // AssertFatal(kernelType.scaleTypeA.preSwizzleTile[0] == kernelType.scaleTypeB.preSwizzleTile[0],
-        //            "preSwizzleTileMN must be the same for both scale types");
         preSwizzleTileMN = kernelType.scaleTypeA.preSwizzleTile[0];
     }
 
@@ -132,10 +110,8 @@ std::shared_ptr<SolutionParameters>
     if(gemm->prefetchInFlight <= 1)
         gemm->prefetch = false;
 
-    // Check if using 256x256x256 tile
-    bool is256Tile = (solutionIndexParameters.workgroupTile.m == 256
-                      && solutionIndexParameters.workgroupTile.n == 256
-                      && solutionIndexParameters.workgroupTile.k == 256);
+    // Check if the workgroup tile K dimension is 256
+    bool isWorkgroupTileK256 = solutionIndexParameters.workgroupTile.k == 256;
 
     // Swizzle Scale only support in certain situations
     // Swizzle Scale also runs out of registers with FP8
@@ -147,16 +123,28 @@ std::shared_ptr<SolutionParameters>
         gemm->loadPathAScale = SolutionParams::LoadPath::BufferToVGPR;
         gemm->loadPathBScale = SolutionParams::LoadPath::BufferToVGPR;
     }
-    else if(is256Tile)
+    else if(isWorkgroupTileK256)
     {
         // For 256x256x256 tile, use BufferToLDS for scale loading to reduce register pressure
         gemm->swizzleScale   = true;
         gemm->prefetchScale  = true;
-        gemm->loadPathAScale = SolutionParams::LoadPath::BufferToLDS;
-        gemm->loadPathBScale = SolutionParams::LoadPath::BufferToLDS;
+
+        auto isValidworkgroupTileMN = (solutionIndexParameters.workgroupTile.m >= 128 && solutionIndexParameters.workgroupTile.n >= 128)
+                                      || (solutionIndexParameters.workgroupTile.m == 32 && solutionIndexParameters.workgroupTile.n == 32);
+
+        if (isValidworkgroupTileMN)
+        {
+            gemm->loadPathAScale = SolutionParams::LoadPath::BufferToLDS;
+            gemm->loadPathBScale = SolutionParams::LoadPath::BufferToLDS;
+        }
+        else
+        {
+            gemm->loadPathAScale = SolutionParams::LoadPath::BufferToVGPR;
+            gemm->loadPathBScale = SolutionParams::LoadPath::BufferToVGPR;
+        }
     }
     else if(solutionIndexParameters.workgroupTile.m >= 128
-            && solutionIndexParameters.workgroupTile.n >= 128)
+        && solutionIndexParameters.workgroupTile.n >= 128)
     {
         gemm->swizzleScale = true;
         // Use BufferToVGPR for swizzle scale (matches rocRoller client --loadScale_A BufferToVGPR)
@@ -176,6 +164,10 @@ std::shared_ptr<SolutionParameters>
     gemm->workgroupSizeX = workgroupSize.first;
     gemm->workgroupSizeY = workgroupSize.second;
 
+    // Pass StreamK flag from solution index parameters
+    if(solutionIndexParameters.streamK)
+        gemm->streamK = rocRoller::StreamKMode::TwoTile;
+
     // Direct To LDS only supported in certain situations
     if(kernelType.typeA == rocRoller::DataType::FP6 || kernelType.typeA == rocRoller::DataType::BF6)
         gemm->loadPathA = SolutionParams::LoadPath::BufferToLDSViaVGPR;
@@ -186,14 +178,29 @@ std::shared_ptr<SolutionParameters>
        && (solutionIndexParameters.workgroupTile.m <= 64
            || solutionIndexParameters.workgroupTile.n <= 64))
     {
-        gemm->loadPathA = SolutionParams::LoadPath::BufferToLDSViaVGPR;
-        gemm->loadPathB = SolutionParams::LoadPath::BufferToLDSViaVGPR;
+        if (gemm->streamK == rocRoller::StreamKMode::None)
+        {
+            gemm->loadPathA = SolutionParams::LoadPath::BufferToLDSViaVGPR;
+            gemm->loadPathB = SolutionParams::LoadPath::BufferToLDSViaVGPR;
+        }
+        else
+        {
+            gemm->loadPathA = SolutionParams::LoadPath::BufferToVGPR;
+            gemm->loadPathB = SolutionParams::LoadPath::BufferToVGPR;
+        }
     }
 
     if(not(SolutionParams::IsBufferToLDS(gemm->loadPathA)
            and SolutionParams::IsBufferToLDS(gemm->loadPathB)))
     {
         gemm->prefetchLDSFactor = 2;
+    }
+
+    auto scaleIsBufferToLDS = SolutionParams::IsBufferToLDS(gemm->loadPathAScale) and SolutionParams::IsBufferToLDS(gemm->loadPathBScale);
+    auto is32MN = solutionIndexParameters.workgroupTile.m == 32 && solutionIndexParameters.workgroupTile.n == 32;
+    if (scaleIsBufferToLDS and is32MN)
+    {
+        gemm->prefetchLDSFactor = 1;
     }
 
     // LDS can only be used for scaling data with certain workgroup tile sizes
@@ -214,15 +221,15 @@ std::shared_ptr<SolutionParameters>
                                / (gemm->kernelType.scaleTypeB.blockRowSize
                                   * gemm->kernelType.scaleTypeB.blockColSize));
     }
-    if(numScaleElementsA % workgroupSizeTotal != 0)
-    {
-        gemm->loadPathAScale    = SolutionParams::LoadPath::BufferToVGPR;
-        gemm->prefetchMixMemOps = false;
-    }
-    if(numScaleElementsB % workgroupSizeTotal != 0)
-    {
-        gemm->loadPathBScale    = SolutionParams::LoadPath::BufferToVGPR;
-        gemm->prefetchMixMemOps = false;
+        if(numScaleElementsA % workgroupSizeTotal != 0)
+        {
+            gemm->loadPathAScale    = SolutionParams::LoadPath::BufferToVGPR;
+            gemm->prefetchMixMemOps = false;
+        }
+        if(numScaleElementsB % workgroupSizeTotal != 0)
+        {
+            gemm->loadPathBScale    = SolutionParams::LoadPath::BufferToVGPR;
+            gemm->prefetchMixMemOps = false;
     }
 
     if(!solutionIndexParameters.workgroupMapping)
@@ -236,14 +243,11 @@ std::shared_ptr<SolutionParameters>
         gemm->workgroupRemapXCC   = true;
     }
 
-    // Pass StreamK flag from solution index parameters
-    gemm->streamK = solutionIndexParameters.streamK;
-
     // Pass tailLoops flag from solution index parameters
     gemm->tailLoops = solutionIndexParameters.tailLoops;
 
     // StreamK is not currently working with workgroup mapping due to register pressure
-    if(gemm->streamK)
+    if(gemm->streamK != rocRoller::StreamKMode::None)
     {
         gemm->workgroupMappingDim = -1;
         gemm->workgroupRemapXCC   = false;

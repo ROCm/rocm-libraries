@@ -2,13 +2,10 @@
 // SPDX-License-Identifier:  MIT
 
 #include <gtest/gtest.h>
-#include <hipdnn_data_sdk/logging/ComponentFormatter.hpp>
+#include <hipdnn_data_sdk/logging/LogLevel.hpp>
 #include <hipdnn_data_sdk/logging/LoggingUtils.hpp>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
-#include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 #include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
-#include <spdlog/details/log_msg.h>
-#include <spdlog/pattern_formatter.h>
 
 using namespace hipdnn_data_sdk::logging;
 using namespace hipdnn_test_sdk::utilities;
@@ -32,12 +29,27 @@ TEST(TestLoggingUtils, IsValidLogLevelWithInvalidLevels)
     EXPECT_FALSE(isValidLogLevel("trace"));
     EXPECT_FALSE(isValidLogLevel("verbose"));
     EXPECT_FALSE(isValidLogLevel("invalid"));
-    EXPECT_FALSE(isValidLogLevel("INFO"));
-    EXPECT_FALSE(isValidLogLevel("Off"));
-    EXPECT_FALSE(isValidLogLevel("ERROR"));
     EXPECT_FALSE(isValidLogLevel("123"));
-    EXPECT_FALSE(isValidLogLevel(" info"));
-    EXPECT_FALSE(isValidLogLevel("info "));
+}
+
+TEST(TestLoggingUtils, IsValidLogLevelCaseInsensitive)
+{
+    // Log levels should be case-insensitive
+    EXPECT_TRUE(isValidLogLevel("INFO"));
+    EXPECT_TRUE(isValidLogLevel("Off"));
+    EXPECT_TRUE(isValidLogLevel("ERROR"));
+    EXPECT_TRUE(isValidLogLevel("Warn"));
+    EXPECT_TRUE(isValidLogLevel("FATAL"));
+}
+
+TEST(TestLoggingUtils, IsValidLogLevelTrimsWhitespace)
+{
+    // Log levels should trim leading/trailing whitespace
+    EXPECT_TRUE(isValidLogLevel(" info"));
+    EXPECT_TRUE(isValidLogLevel("info "));
+    EXPECT_TRUE(isValidLogLevel("  warn  "));
+    EXPECT_TRUE(isValidLogLevel("\terror\t"));
+    EXPECT_TRUE(isValidLogLevel("\n off \n"));
 }
 
 TEST(TestLoggingUtils, IsLoggingEnabledWithValidLevels)
@@ -56,7 +68,7 @@ TEST(TestLoggingUtils, IsLoggingEnabledWithValidLevels)
 
 TEST(TestLoggingUtils, IsLoggingEnabledWithInvalidOrUnsetLevels)
 {
-    ScopedEnvironmentVariableSetter guard("HIPDNN_LOG_LEVEL", "invalid");
+    const ScopedEnvironmentVariableSetter guard("HIPDNN_LOG_LEVEL", "invalid");
 
     EXPECT_FALSE(isLoggingEnabled());
 
@@ -64,63 +76,136 @@ TEST(TestLoggingUtils, IsLoggingEnabledWithInvalidOrUnsetLevels)
     EXPECT_FALSE(isLoggingEnabled());
 }
 
-TEST(TestLoggingUtils, GeneratePatternString)
-{
-    std::string pattern = generatePatternString("test_component");
+// ============================================================================
+// Tests for stringToSeverity() - returns std::optional<hipdnnSeverity_t>
+// ============================================================================
 
-    EXPECT_NE(pattern.find("[test_component]"), std::string::npos);
-    EXPECT_NE(pattern.find("%Y-%m-%d"), std::string::npos); // Date format
-    EXPECT_NE(pattern.find("%H:%M:%S"), std::string::npos); // Time format
-    EXPECT_NE(pattern.find("[tid %t]"), std::string::npos); // Thread ID
-    EXPECT_NE(pattern.find("[%l]"), std::string::npos); // Log level
-    EXPECT_NE(pattern.find("%v"), std::string::npos); // Message
+TEST(TestStringToSeverity, ValidOffReturnsOptionalWithOff)
+{
+    auto result = detail::stringToSeverity("off");
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(result.value(), HIPDNN_SEV_OFF);
 }
 
-TEST(TestLoggingUtils, ComponentFormatterPassThrough)
+TEST(TestStringToSeverity, ValidInfoReturnsOptionalWithInfo)
 {
-    ComponentFormatter formatter;
-
-    // Create a log message for "hipdnn_callback_receiver"
-    spdlog::details::log_msg msg("hipdnn_callback_receiver", spdlog::level::info, "Test message");
-    spdlog::memory_buf_t buf;
-
-    formatter.format(msg, buf);
-
-    // Should pass through without formatting (just the message)
-    std::string result(buf.data(), buf.size());
-    result = removeNewlines(result);
-    EXPECT_EQ(result, "Test message");
+    auto result = detail::stringToSeverity("info");
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(result.value(), HIPDNN_SEV_INFO);
 }
 
-TEST(TestLoggingUtils, ComponentFormatterStandard)
+TEST(TestStringToSeverity, ValidWarnReturnsOptionalWithWarn)
 {
-    ComponentFormatter formatter;
-
-    // Create a log message for any other logger
-    spdlog::details::log_msg msg("test_logger", spdlog::level::info, "Test message");
-    spdlog::memory_buf_t buf;
-
-    formatter.format(msg, buf);
-
-    // Should include formatting with component name
-    std::string result(buf.data(), buf.size());
-    EXPECT_NE(result.find("[test_logger]"), std::string::npos);
-    EXPECT_NE(result.find("Test message"), std::string::npos);
+    auto result = detail::stringToSeverity("warn");
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(result.value(), HIPDNN_SEV_WARN);
 }
 
-TEST(TestLoggingUtils, ComponentFormatterClone)
+TEST(TestStringToSeverity, ValidErrorReturnsOptionalWithError)
 {
-    ComponentFormatter formatter;
-    auto cloned = formatter.clone();
+    auto result = detail::stringToSeverity("error");
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(result.value(), HIPDNN_SEV_ERROR);
+}
 
-    EXPECT_NE(cloned, nullptr);
+TEST(TestStringToSeverity, ValidFatalReturnsOptionalWithFatal)
+{
+    auto result = detail::stringToSeverity("fatal");
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(result.value(), HIPDNN_SEV_FATAL);
+}
 
-    spdlog::details::log_msg msg("test_logger", spdlog::level::info, "Clone test");
-    spdlog::memory_buf_t buf;
+TEST(TestStringToSeverity, InvalidStringReturnsNullopt)
+{
+    EXPECT_FALSE(detail::stringToSeverity("invalid").has_value());
+    EXPECT_FALSE(detail::stringToSeverity("debug").has_value());
+    EXPECT_FALSE(detail::stringToSeverity("trace").has_value());
+    EXPECT_FALSE(detail::stringToSeverity("verbose").has_value());
+    EXPECT_FALSE(detail::stringToSeverity("123").has_value());
+}
 
-    cloned->format(msg, buf);
+TEST(TestStringToSeverity, EmptyStringReturnsNullopt)
+{
+    EXPECT_FALSE(detail::stringToSeverity("").has_value());
+}
 
-    std::string result(buf.data(), buf.size());
-    EXPECT_NE(result.find("[test_logger]"), std::string::npos);
-    EXPECT_NE(result.find("Clone test"), std::string::npos);
+TEST(TestStringToSeverity, CaseInsensitiveMatching)
+{
+    // Uppercase
+    ASSERT_TRUE(detail::stringToSeverity("OFF").has_value());
+    EXPECT_EQ(detail::stringToSeverity("OFF").value(), HIPDNN_SEV_OFF);
+
+    ASSERT_TRUE(detail::stringToSeverity("INFO").has_value());
+    EXPECT_EQ(detail::stringToSeverity("INFO").value(), HIPDNN_SEV_INFO);
+
+    ASSERT_TRUE(detail::stringToSeverity("WARN").has_value());
+    EXPECT_EQ(detail::stringToSeverity("WARN").value(), HIPDNN_SEV_WARN);
+
+    ASSERT_TRUE(detail::stringToSeverity("ERROR").has_value());
+    EXPECT_EQ(detail::stringToSeverity("ERROR").value(), HIPDNN_SEV_ERROR);
+
+    ASSERT_TRUE(detail::stringToSeverity("FATAL").has_value());
+    EXPECT_EQ(detail::stringToSeverity("FATAL").value(), HIPDNN_SEV_FATAL);
+
+    // Mixed case
+    ASSERT_TRUE(detail::stringToSeverity("Info").has_value());
+    EXPECT_EQ(detail::stringToSeverity("Info").value(), HIPDNN_SEV_INFO);
+
+    ASSERT_TRUE(detail::stringToSeverity("WaRn").has_value());
+    EXPECT_EQ(detail::stringToSeverity("WaRn").value(), HIPDNN_SEV_WARN);
+}
+
+TEST(TestStringToSeverity, TrimsWhitespace)
+{
+    // Leading whitespace
+    ASSERT_TRUE(detail::stringToSeverity("  info").has_value());
+    EXPECT_EQ(detail::stringToSeverity("  info").value(), HIPDNN_SEV_INFO);
+
+    // Trailing whitespace
+    ASSERT_TRUE(detail::stringToSeverity("warn  ").has_value());
+    EXPECT_EQ(detail::stringToSeverity("warn  ").value(), HIPDNN_SEV_WARN);
+
+    // Both ends
+    ASSERT_TRUE(detail::stringToSeverity("  error  ").has_value());
+    EXPECT_EQ(detail::stringToSeverity("  error  ").value(), HIPDNN_SEV_ERROR);
+
+    // Tabs and newlines
+    ASSERT_TRUE(detail::stringToSeverity("\tfatal\n").has_value());
+    EXPECT_EQ(detail::stringToSeverity("\tfatal\n").value(), HIPDNN_SEV_FATAL);
+
+    // Whitespace-only still invalid
+    EXPECT_FALSE(detail::stringToSeverity("   ").has_value());
+}
+
+// ============================================================================
+// Tests for stringToSeverityOrOff() - returns hipdnnSeverity_t (OFF on invalid)
+// ============================================================================
+
+TEST(TestStringToSeverityOrOff, ValidInputsReturnCorrectEnum)
+{
+    EXPECT_EQ(detail::stringToSeverityOrOff("off"), HIPDNN_SEV_OFF);
+    EXPECT_EQ(detail::stringToSeverityOrOff("info"), HIPDNN_SEV_INFO);
+    EXPECT_EQ(detail::stringToSeverityOrOff("warn"), HIPDNN_SEV_WARN);
+    EXPECT_EQ(detail::stringToSeverityOrOff("error"), HIPDNN_SEV_ERROR);
+    EXPECT_EQ(detail::stringToSeverityOrOff("fatal"), HIPDNN_SEV_FATAL);
+}
+
+TEST(TestStringToSeverityOrOff, InvalidInputReturnsOff)
+{
+    EXPECT_EQ(detail::stringToSeverityOrOff("invalid"), HIPDNN_SEV_OFF);
+    EXPECT_EQ(detail::stringToSeverityOrOff("debug"), HIPDNN_SEV_OFF);
+    EXPECT_EQ(detail::stringToSeverityOrOff("trace"), HIPDNN_SEV_OFF);
+    EXPECT_EQ(detail::stringToSeverityOrOff("123"), HIPDNN_SEV_OFF);
+}
+
+TEST(TestStringToSeverityOrOff, EmptyStringReturnsOff)
+{
+    EXPECT_EQ(detail::stringToSeverityOrOff(""), HIPDNN_SEV_OFF);
+}
+
+TEST(TestStringToSeverityOrOff, CaseInsensitiveAndTrimsWhitespace)
+{
+    EXPECT_EQ(detail::stringToSeverityOrOff("  INFO  "), HIPDNN_SEV_INFO);
+    EXPECT_EQ(detail::stringToSeverityOrOff("\tWARN\n"), HIPDNN_SEV_WARN);
+    EXPECT_EQ(detail::stringToSeverityOrOff("Error"), HIPDNN_SEV_ERROR);
 }

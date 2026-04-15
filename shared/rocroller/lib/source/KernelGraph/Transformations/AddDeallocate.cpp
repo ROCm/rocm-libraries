@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <variant>
 #include <vector>
@@ -86,11 +63,10 @@ namespace rocRoller::KernelGraph
                     else if(rel == NodeOrdering::LeftInBodyOfRight
                             || rel == NodeOrdering::RightInBodyOfLeft)
                     {
-                        AssertFatal(false,
-                                    "Unexpected body relationship between",
-                                    ShowValue(*iterA),
-                                    ShowValue(*iterB),
-                                    ShowValue(rel));
+                        Throw<FatalError>("Unexpected body relationship between",
+                                          ShowValue(*iterA),
+                                          ShowValue(*iterB),
+                                          ShowValue(rel));
                     }
                     else
                     {
@@ -205,19 +181,16 @@ namespace rocRoller::KernelGraph
             }
 
             auto referencedArgs = arguments | std::views::filter([&](auto const& arg) {
-                                      return !neverReferencedArguments.contains(arg.name);
+                                      return !neverReferencedArguments.contains(arg.getName());
                                   });
 
             for(auto& arg : referencedArgs)
             {
-                kernel->addArgument({std::move(arg.name),
-                                     arg.variableType,
-                                     arg.dataDirection,
-                                     std::move(arg.expression)});
+                kernel->addArgument({std::move(arg.getName()),
+                                     arg.getVariableType(),
+                                     arg.getDataDirection(),
+                                     arg.getExpression()});
             }
-
-            // Store launch-time-only args so ArgumentLoader can elide the load
-            kernel->setLaunchTimeOnlyArguments(argTracer.launchTimeOnlyArguments());
         }
     }
 

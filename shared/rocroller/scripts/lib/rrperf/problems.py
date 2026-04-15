@@ -1,36 +1,14 @@
-################################################################################
-#
-# MIT License
-#
-# Copyright 2024-2025 AMD ROCm(TM) Software
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell cop-
-# ies of the Software, and to permit persons to whom the Software is furnished
-# to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IM-
-# PLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNE-
-# CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-#
-################################################################################
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
 
-import pathlib
 from dataclasses import asdict, dataclass, field, fields
-from typing import Any, List, Optional
+from pathlib import Path
+from typing import Any
 
 import yaml
 from rrperf.utils import get_dataclass_id
 
-repo_dir = pathlib.Path(__file__).resolve().parent.parent.parent.parent
+repo_dir = Path(__file__).resolve().parent.parent.parent.parent
 
 
 def field_dict(cls, obj):
@@ -88,11 +66,11 @@ class RRPerfResult:
     """
 
     resultType: str = field(repr=False)
-    path: pathlib.Path = field(repr=False, hash=False)
+    path: Path = field(repr=False, hash=False)
 
     kernelGenerate: int = field(repr=False, hash=False)
     kernelAssemble: int = field(repr=False, hash=False)
-    kernelExecute: List[int] = field(repr=False, hash=False)
+    kernelExecute: list[int] = field(repr=False, hash=False)
 
     device: int = field(repr=False, hash=False, compare=False, default=0)
 
@@ -127,9 +105,9 @@ class TypeParameters:
     # If scale_A or scale_B is Separate, scaleBlockSize
     # needs to be set to a valid block size (e.g. 32)
     scaleBlockSize: int = -1
-    scaleSkipPermlane: bool = False
+    scaleSkipPermlane: str = "None"  # None, PreSwizzleScale, PreSwizzleScaleGFX950
 
-    def __init__(self, typeParams: Optional[Any] = None, **kwargs):
+    def __init__(self, typeParams: Any | None = None, **kwargs):
         if isinstance(typeParams, TypeParameters):
             for f in fields(self):
                 setattr(self, f.name, getattr(typeParams, f.name))
@@ -144,8 +122,8 @@ class TypeParameters:
             else:
                 raise AttributeError(f"Unknown field: {key}")
 
-    def asArgs(self) -> List[str]:
-        rv: List[str] = []
+    def asArgs(self) -> list[str]:
+        rv: list[str] = []
         for f in fields(self):
             rv.append(f"--{f.name}={self.__getattribute__(f.name)}")
         return rv
@@ -159,7 +137,7 @@ class GPUArchitectureTarget:
     Xnack: bool = False
     Sramecc: bool = False
 
-    def asArgs(self) -> List[str]:
+    def asArgs(self) -> list[str]:
         if len(self.ArchString) == 0:
             return []
         arch = self.ArchString
@@ -216,12 +194,9 @@ class GEMMSolution:
     workgroupRemapXCC: bool = False
     workgroupRemapXCCValue: int = -1
 
-    unroll_x: int = 0
-    unroll_y: int = 0
-
     load_A: str = "BufferToLDSViaVGPR"
     load_B: str = "BufferToLDSViaVGPR"
-    storeLDS_D: bool = True
+    store: str = "VGPRToGlobalMemoryViaLDSWithBuffer"
     betaInFma: bool = True
 
     padLDS_A: tuple[int, int] = (0, 0)
@@ -243,13 +218,12 @@ class GEMMSolution:
     prefetchScale: bool = False
     pretileScale: bool = False
 
-    streamK: bool = False
+    ldsBankSwizzle: str = "None"
+
+    streamK: str = "None"
     numWGs: int = 0
-    streamKTwoTile: bool = False
-    streamKTwoTileDPFirst: bool = False
 
     architecture: GPUArchitectureTarget = GPUArchitectureTarget()
-    matchMemoryAccess: bool = True
     tailLoops: bool = True
 
     version: str = ""
@@ -279,8 +253,12 @@ class GEMM(GEMMProblem, GEMMSolution):
 
     @property
     def run_invariant_token(self):
+        # Build metadata (e.g. git commit tag) should not affect cross-run matching.
+        # Excluding version keeps GEMM comparisons stable across different commits.
+        solution_fields = field_dict(GEMMSolution, self)
+        solution_fields.pop("version", None)
         return repr(GEMMProblem(**field_dict(GEMMProblem, self))) + repr(
-            GEMMSolution(**field_dict(GEMMSolution, self))
+            GEMMSolution(**solution_fields)
         )
 
     @property
@@ -329,18 +307,18 @@ class GEMM(GEMMProblem, GEMMSolution):
 class GEMMRun(GEMM):
     """GEMM run interface."""
 
-    output: pathlib.Path = field(repr=False, default=None, hash=False, compare=False)
+    output: Path = field(repr=False, default=None, hash=False, compare=False)
 
     @property
     def group(self):
         return "gemm"
 
-    def set_output(self, path: pathlib.Path):
+    def set_output(self, path: Path):
         self.output = path
 
     def command(
         self, generate_only=False, architecture=None, **extra_args
-    ) -> List[str]:
+    ) -> list[str]:
 
         specialNames = {
             "output": "yaml",
@@ -415,16 +393,14 @@ class GEMMResult(GEMM, RRPerfResult):
             "WG": str(self.workgroup_size_x) + "/" + str(self.workgroup_size_y),
             "Load_A": TF(self.load_A),
             "Load_B": TF(self.load_B),
-            "Store_D": TF(self.storeLDS_D),
+            "Store_D": self.store,
             "PF": TF(self.prefetch)
             + "/"
             + str(self.prefetchInFlight)
             + "/"
             + str(self.prefetchLDSFactor),
             "SCH": self.scheduler[0],
-            "SK": TF(self.streamK) + "/" + str(self.numWGs),
-            "2TSK": TF(self.streamKTwoTile),
-            "DPFirst": TF(self.streamKTwoTileDPFirst),
+            "SK": self.streamK + "/" + str(self.numWGs),
             "iters": "/".join(
                 [str(getattr(self, "num" + x)) for x in ["WarmUp", "Outer", "Inner"]]
             ),
@@ -498,16 +474,16 @@ class CodeGen:
 class CodeGenRun(CodeGen):
     """CodeGen run interface."""
 
-    output: pathlib.Path = field(repr=False, default=None, hash=False, compare=False)
+    output: Path = field(repr=False, default=None, hash=False, compare=False)
 
     @property
     def group(self):
         return "codegen"
 
-    def set_output(self, path: pathlib.Path):
+    def set_output(self, path: Path):
         self.output = path
 
-    def command(self) -> List[str]:
+    def command(self) -> list[str]:
         retval = [
             "client/rocroller-codegen-stress",
             "--inst_count=" + str(self.instCount),
@@ -531,18 +507,18 @@ class CodeGenResult(CodeGen, RRPerfResult):
 class TensileRun(GEMM):
     """Tensile run interface."""
 
-    config: pathlib.Path = field(repr=False, default=None, hash=False, compare=False)
-    output: pathlib.Path = field(repr=False, default=None, hash=False, compare=False)
+    config: Path = field(repr=False, default=None, hash=False, compare=False)
+    output: Path = field(repr=False, default=None, hash=False, compare=False)
     tensile_commit: str = "rocm-6.0.0"
 
     @property
     def group(self):
         return "gemm"
 
-    def set_output(self, path: pathlib.Path):
+    def set_output(self, path: Path):
         self.output = path
 
-    def command(self, **extra_args) -> List[str]:
+    def command(self, **extra_args) -> list[str]:
         command = str(repo_dir / "scripts" / "benchmark_tensile")
 
         arg_dict = asdict(self)
@@ -580,6 +556,31 @@ _base_to_run_class = {
 }
 
 
+def _is_nested_gemm_result(result: dict) -> bool:
+    return any(key in result for key in ("problem", "solution", "benchmark"))
+
+
+def _flatten_nested_gemm_result(result: dict) -> dict:
+    """
+    Flatten nested GEMM result sections into legacy top-level keys.
+
+    Merge order matches the old writer's effective behavior:
+    problem -> solution -> benchmark, where later sections override earlier values.
+    """
+    flattened = {
+        key: value
+        for key, value in result.items()
+        if key not in ("problem", "solution", "benchmark")
+    }
+
+    for key in ("problem", "solution", "benchmark"):
+        section = result.get(key)
+        if isinstance(section, dict):
+            flattened.update(section)
+
+    return flattened
+
+
 def cast_missing_parameters(result):
     """
     Cast parameters in previous GEMMResult version into existing parameters
@@ -602,14 +603,52 @@ def cast_missing_parameters(result):
         result["workgroupMappingDim"] = wgmDim
         result["workgroupMappingValue"] = wgmValue
 
+    # Remove old/deprecated
+    for attr in ["unroll_x", "unroll_y"]:
+        if attr in result:
+            del result[attr]
 
-def load_results(path: pathlib.Path):
+    if "storeLDS_D" in result:
+        storeLDS_D = result["storeLDS_D"]
+        del result["storeLDS_D"]
+        result["store"] = (
+            "VGPRToGlobalMemoryViaLDSWithBuffer"
+            if storeLDS_D
+            else "VGPRToGlobalMemoryWithBuffer"
+        )
+
+    # Convert old streamK bool fields to new streamK string enum
+    if "streamKTwoTile" in result or "streamKTwoTileDPFirst" in result:
+        old_streamK = result.get("streamK", False)
+        old_twoTile = result.pop("streamKTwoTile", False)
+        old_dpFirst = result.pop("streamKTwoTileDPFirst", False)
+
+        if old_twoTile:
+            result["streamK"] = "TwoTile"
+        elif old_dpFirst:
+            result["streamK"] = "TwoTileDPFirst"
+        elif old_streamK:
+            result["streamK"] = "Standard"
+        else:
+            result["streamK"] = "None"
+
+    if "matchMemoryAccess" in result:
+        del result["matchMemoryAccess"]
+
+
+def load_results(path: Path):
     """
     Load results from a YAML file `path` and return an array of RESULT objects.
     """
     rv = []
     for r in yaml.load_all(path.read_text(), Loader=yaml.FullLoader):
+        if r is None:
+            continue
+
+        r = dict(r)
         ResultClass = _client_to_result_class[r["resultType"]]
+        if r.get("resultType") == "GEMM" and _is_nested_gemm_result(r):
+            r = _flatten_nested_gemm_result(r)
         r.pop("path", None)
         cast_missing_parameters(r)
         rv.append(ResultClass(path=path, **r))

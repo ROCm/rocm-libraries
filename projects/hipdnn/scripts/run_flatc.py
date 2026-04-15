@@ -9,15 +9,28 @@ import os
 # Needs to subscribe to HIPDNN_FLATBUFFERS_VERSION CMake variable
 REQUIRED_VER = "25.9.23"
 
+# Supported SDKs and their namespace paths for generated output
+SDKS = {
+    "data_sdk": "hipdnn_data_sdk",
+    "flatbuffers_sdk": "hipdnn_flatbuffers_sdk",
+}
+
+
+def detect_sdk(schema_path):
+    """Detect which SDK a schema file belongs to based on its path."""
+    normalized = schema_path.replace("\\", "/")
+    for sdk_dir, namespace in SDKS.items():
+        if f"/{sdk_dir}/schemas/" in normalized or normalized.startswith(
+            f"{sdk_dir}/schemas/"
+        ):
+            return sdk_dir, namespace
+    return None, None
+
 
 def main():
     """Run flatc compiler on FlatBuffers schema files on Linux or Windows."""
     # Get the directory where this script is located
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    schemas_dir = os.path.join(script_dir, "..", "data_sdk", "schemas")
-    output_dir = os.path.join(
-        script_dir, "..", "data_sdk", "include", "hipdnn_data_sdk", "data_objects"
-    )
 
     # Find flatc in PATH and prepare to validate its version
     flatc_path = shutil.which("flatc")
@@ -50,7 +63,31 @@ def main():
         )
         sys.exit(1)
 
+    # Convert version to directory format (e.g., "25.9.23" -> "v25_9_23")
+    ver_tag = REQUIRED_VER.replace(".", "_")
+
     for f in sys.argv[1:]:
+        sdk_dir, namespace = detect_sdk(f)
+        if sdk_dir is None:
+            print(f"WARNING: Cannot determine SDK for {f}, skipping", file=sys.stderr)
+            continue
+
+        schemas_dir = os.path.join(script_dir, "..", sdk_dir, "schemas")
+
+        # Output path matches multi-version structure:
+        # include/.../data_objects/v{ver}/{namespace}/data_objects/
+        output_dir = os.path.join(
+            script_dir,
+            "..",
+            sdk_dir,
+            "include",
+            namespace,
+            "data_objects",
+            f"v{ver_tag}",
+            namespace,
+            "data_objects",
+        )
+
         try:
             subprocess.run(
                 [

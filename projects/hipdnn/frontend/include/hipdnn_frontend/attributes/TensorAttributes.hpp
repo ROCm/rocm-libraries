@@ -1,13 +1,19 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
-// SPDX-License-Identifier:  MIT
+// SPDX-License-Identifier: MIT
+
+/**
+ * @file TensorAttributes.hpp
+ * @brief Tensor configuration and attributes for hipDNN Frontend operations
+ *
+ * This file defines the TensorAttributes class which is used to configure
+ * tensor properties like dimensions, strides, data type, and unique identifiers.
+ * Tensors are the fundamental data containers in hipDNN computational graphs.
+ */
+
 #pragma once
 
 #include "GraphAttributes.hpp"
-#include <flatbuffers/flatbuffers.h>
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
-#include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
-#include <hipdnn_data_sdk/utilities/UtilsBfp16.hpp>
-#include <hipdnn_data_sdk/utilities/UtilsFp16.hpp>
+#include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/Types.hpp>
 #include <optional>
@@ -18,26 +24,86 @@
 
 namespace hipdnn_frontend::graph
 {
+using hipdnn_data_sdk::types::bfloat16;
+using hipdnn_data_sdk::types::half;
 
+/**
+ * @class TensorAttributes
+ * @brief Describes the properties and configuration of a tensor
+ *
+ * TensorAttributes is used to define tensors that participate in hipDNN operations.
+ * Each tensor has dimensions, strides, a data type, and optionally a unique identifier
+ * for mapping to device memory during execution.
+ *
+ * Tensors can be:
+ * - **Physical tensors**: Have a UID and map to actual device memory
+ * - **Virtual tensors**: Intermediate results that don't require explicit memory allocation
+ * - **Pass-by-value tensors**: Scalar values embedded directly in the tensor
+ *
+ * @note **Dimension Ordering**: The expected dimension ordering depends on the operation.
+ * Convolution and batch normalization tensors use `(N, C, H, W)` or `(N, C, D, H, W)`.
+ * Matmul tensors use `(...batch, M, K)` for A and `(...batch, K, N)` for B.
+ * Pointwise operations accept any shape with broadcasting support.
+ * In all cases, the memory layout is controlled by strides, not by dimension order in the tensor shape vector.
+ * Use `hipdnn_data_sdk::utilities::generateStrides()` to compute strides from a TensorLayout.
+ *
+ * @code{.cpp}
+ * // Create a 4D convolution input tensor
+ * // For convolution, dimensions follow (N, C, H, W) ordering
+ * auto x = Graph::tensor(TensorAttributes()
+ *              .set_dim({1, 64, 28, 28})   // dims: N=1, C=64, H=28, W=28
+ *              .set_stride({50176, 784, 28, 1})  // NCHW layout strides
+ *              .set_data_type(DataType::HALF)
+ *              .set_uid(0)
+ *              .set_name("input_x"));
+ *
+ * // Same dimensions with NHWC (channel-last) layout
+ * auto x_nhwc = Graph::tensor(TensorAttributes()
+ *              .set_dim({1, 64, 28, 28})   // dims: N=1, C=64, H=28, W=28
+ *              .set_stride({50176, 1, 1792, 64})  // NHWC layout strides
+ *              .set_data_type(DataType::HALF)
+ *              .set_uid(1)
+ *              .set_name("input_x_nhwc"));
+ *
+ * // Create a scalar tensor
+ * TensorAttributes scalar(2.0f);  // Pass-by-value float
+ * @endcode
+ */
 class TensorAttributes
 {
 public:
+    /// Variant type for storing pass-by-value scalar values
     using ValueVariant
-        = std::variant<std::monostate, double, float, half, hip_bfloat16, uint8_t, int32_t>;
+        = std::variant<std::monostate, double, float, half, bfloat16, uint8_t, int32_t, int64_t>;
 
+    /// @brief Default constructor
     TensorAttributes() = default;
 
+    /**
+     * @brief Construct a pass-by-value tensor from a scalar
+     * @tparam T Scalar type (float, double, half, hip_bfloat16, uint8_t, int32_t, int64_t)
+     * @param scalar The scalar value to store in the tensor
+     */
     template <typename T>
-    TensorAttributes(T const& scalar)
+    TensorAttributes(const T& scalar)
     {
         set_value(scalar);
     }
 
+    /**
+     * @brief Check if this tensor is a pass-by-value tensor
+     * @return true if the tensor contains an embedded scalar value
+     */
     bool get_pass_by_value() const // NOLINT(readability-identifier-naming)
     {
         return !std::holds_alternative<std::monostate>(_value);
     }
 
+    /**
+     * @brief Get the pass-by-value scalar of a specific type
+     * @tparam T The expected scalar type
+     * @return The scalar value if it matches type T, std::nullopt otherwise
+     */
     template <typename T>
     std::optional<T> get_pass_by_value() const // NOLINT(readability-identifier-naming)
     {
@@ -48,6 +114,12 @@ public:
         return std::nullopt;
     }
 
+    /**
+     * @brief Set a pass-by-value scalar in this tensor
+     * @tparam T Scalar type (float, double, half, hip_bfloat16, uint8_t, int32_t, int64_t)
+     * @param v The scalar value
+     * @return Reference to this for method chaining
+     */
     template <typename T>
     TensorAttributes& set_value(T v) // NOLINT(readability-identifier-naming)
     {
@@ -55,9 +127,10 @@ public:
         static_assert(std::disjunction_v<std::is_same<T, float>,
                                          std::is_same<T, double>,
                                          std::is_same<T, half>,
-                                         std::is_same<T, hip_bfloat16>,
+                                         std::is_same<T, bfloat16>,
                                          std::is_same<T, uint8_t>,
-                                         std::is_same<T, int32_t>>,
+                                         std::is_same<T, int32_t>,
+                                         std::is_same<T, int64_t>>,
                       "Unsupported type for Tensor_attributes::set_value");
         _value = v;
         _dataType = getDataTypeEnumFromType<T>();
@@ -65,37 +138,74 @@ public:
         return *this;
     }
 
+    /**
+     * @brief Get the raw value variant for type-erased access to the scalar value
+     * @return Const reference to the internal ValueVariant
+     */
+    const ValueVariant& get_value_variant() const // NOLINT(readability-identifier-naming)
+    {
+        return _value;
+    }
+
+    /**
+     * @brief Clear the pass-by-value scalar
+     * @return Reference to this for method chaining
+     */
     TensorAttributes& clear_value() // NOLINT(readability-identifier-naming)
     {
         _value = {};
         return *this;
     }
 
+    /**
+     * @brief Get the unique identifier of this tensor
+     * @return The tensor UID
+     */
     int64_t get_uid() const // NOLINT(readability-identifier-naming)
     {
         return _uid;
     }
 
+    /**
+     * @brief Get the name of this tensor
+     * @return The tensor name
+     */
     const std::string& get_name() const // NOLINT(readability-identifier-naming)
     {
         return _name;
     }
 
+    /**
+     * @brief Get the data type of this tensor
+     * @return The DataType enum value
+     */
     DataType get_data_type() const // NOLINT(readability-identifier-naming)
     {
         return _dataType;
     }
 
+    /**
+     * @brief Get the strides of this tensor
+     * @return Vector of strides for each dimension
+     */
     const std::vector<int64_t>& get_stride() const // NOLINT(readability-identifier-naming)
     {
         return _stride;
     }
 
+    /**
+     * @brief Get the dimensions of this tensor
+     * @return Vector of dimension sizes
+     */
     const std::vector<int64_t>& get_dim() const // NOLINT(readability-identifier-naming)
     {
         return _dim;
     }
 
+    /**
+     * @brief Get the total number of elements in this tensor
+     * @return Product of all dimension sizes
+     */
     int64_t get_volume() const // NOLINT(readability-identifier-naming)
     {
         int64_t volume = 1;
@@ -106,16 +216,29 @@ public:
         return volume;
     }
 
+    /**
+     * @brief Check if this tensor is virtual (intermediate result)
+     * @return true if virtual, false if physical (requires memory allocation)
+     */
     bool get_is_virtual() const // NOLINT(readability-identifier-naming)
     {
         return _isVirtual;
     }
 
+    /**
+     * @brief Check if this tensor has a UID assigned
+     * @return true if a UID has been set
+     */
     bool has_uid() const // NOLINT(readability-identifier-naming)
     {
         return _uidSet;
     }
 
+    /**
+     * @brief Set the unique identifier for this tensor
+     * @param uid The unique identifier (used for memory mapping during execution)
+     * @return Reference to this for method chaining
+     */
     TensorAttributes& set_uid(int64_t uid) // NOLINT(readability-identifier-naming)
     {
         _uid = uid;
@@ -123,18 +246,35 @@ public:
         return *this;
     }
 
+    /**
+     * @brief Set a human-readable name for this tensor
+     * @param name The tensor name (for debugging and logging)
+     * @return Reference to this for method chaining
+     */
     TensorAttributes& set_name(const std::string& name) // NOLINT(readability-identifier-naming)
     {
         _name = name;
         return *this;
     }
 
+    /**
+     * @brief Set the data type of this tensor
+     * @param dataType The DataType enum value
+     * @return Reference to this for method chaining
+     */
     TensorAttributes& set_data_type(DataType dataType) // NOLINT(readability-identifier-naming)
     {
         _dataType = dataType;
         return *this;
     }
 
+    /**
+     * @brief Set the strides for this tensor
+     * @param stride Vector of strides for each dimension
+     * @return Reference to this for method chaining
+     *
+     * @note Strides must have the same size as dimensions
+     */
     TensorAttributes&
         set_stride(const std::vector<int64_t>& stride) // NOLINT(readability-identifier-naming)
     {
@@ -142,6 +282,17 @@ public:
         return *this;
     }
 
+    /**
+     * @brief Set the dimensions for this tensor
+     * @param dim Vector of dimension sizes
+     * @return Reference to this for method chaining
+     *
+     * @note The expected dimension ordering depends on the operation type:
+     *       convolution and batch normalization use (N, C, H, W) / (N, C, D, H, W),
+     *       matmul uses (...batch, M, K) / (...batch, K, N),
+     *       and pointwise operations accept any shape.
+     *       Memory layout is always controlled by strides and stride order, not by dimension order in the tensor shape vector.
+     */
     TensorAttributes&
         set_dim(const std::vector<int64_t>& dim) // NOLINT(readability-identifier-naming)
     {
@@ -149,17 +300,31 @@ public:
         return *this;
     }
 
+    /**
+     * @brief Set whether this tensor is virtual
+     * @param isVirtual true for virtual tensors (intermediates), false for physical
+     * @return Reference to this for method chaining
+     */
     TensorAttributes& set_is_virtual(bool isVirtual) // NOLINT(readability-identifier-naming)
     {
         _isVirtual = isVirtual;
         return *this;
     }
 
+    /**
+     * @brief Convenience method to mark tensor as output (non-virtual)
+     * @param output true to mark as output, false to mark as virtual
+     * @return Reference to this for method chaining
+     */
     TensorAttributes& set_output(bool output) // NOLINT(readability-identifier-naming)
     {
         return set_is_virtual(!output);
     }
 
+    /**
+     * @brief Clear the UID from this tensor
+     * @return Reference to this for method chaining
+     */
     TensorAttributes& clear_uid() // NOLINT(readability-identifier-naming)
     {
         _uid = 0;
@@ -167,6 +332,14 @@ public:
         return *this;
     }
 
+    /**
+     * @brief Fill unset attributes from graph context
+     * @param graphAttributes The graph attributes to inherit from
+     * @return Reference to this for method chaining
+     *
+     * If data type is not set, it will be inferred from the graph's
+     * io_data_type (for physical tensors) or intermediate_data_type (for virtual tensors).
+     */
     // NOLINTNEXTLINE(readability-identifier-naming)
     TensorAttributes& fill_from_context(const GraphAttributes& graphAttributes)
     {
@@ -185,6 +358,16 @@ public:
         return *this;
     }
 
+    /**
+     * @brief Validate tensor attributes
+     * @return Error indicating success or describing what is invalid
+     *
+     * Checks that:
+     * - Data type is set
+     * - Virtual tensors are not pass-by-value
+     * - Dimensions and strides have matching sizes
+     * - Dimensions are non-empty and positive
+     */
     Error validate() const
     {
         if(_dataType == DataType::NOT_SET)
@@ -213,132 +396,6 @@ public:
         return {ErrorCode::OK, ""};
     }
 
-    flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>
-        pack_attributes(flatbuffers::FlatBufferBuilder& builder) const // NOLINT
-    {
-        auto result = std::visit(
-            [&](auto&& arg) -> std::pair<hipdnn_data_sdk::data_objects::TensorValue,
-                                         flatbuffers::Offset<void>> {
-                using T = std::decay_t<decltype(arg)>;
-                if constexpr(std::is_same_v<T, float>)
-                {
-                    hipdnn_data_sdk::data_objects::Float32Value floatVal(arg);
-                    return {hipdnn_data_sdk::data_objects::TensorValue::Float32Value,
-                            builder.CreateStruct(floatVal).Union()};
-                }
-                else if constexpr(std::is_same_v<T, double>)
-                {
-                    hipdnn_data_sdk::data_objects::Float64Value doubleVal(arg);
-                    return {hipdnn_data_sdk::data_objects::TensorValue::Float64Value,
-                            builder.CreateStruct(doubleVal).Union()};
-                }
-                else if constexpr(std::is_same_v<T, half>)
-                {
-                    hipdnn_data_sdk::data_objects::Float16Value halfVal(arg);
-                    return {hipdnn_data_sdk::data_objects::TensorValue::Float16Value,
-                            builder.CreateStruct(halfVal).Union()};
-                }
-                else if constexpr(std::is_same_v<T, hip_bfloat16>)
-                {
-                    hipdnn_data_sdk::data_objects::BFloat16Value bfVal(arg);
-                    return {hipdnn_data_sdk::data_objects::TensorValue::BFloat16Value,
-                            builder.CreateStruct(bfVal).Union()};
-                }
-                else if constexpr(std::is_same_v<T, uint8_t>)
-                {
-                    hipdnn_data_sdk::data_objects::Float8Value uint8Val(arg);
-                    return {hipdnn_data_sdk::data_objects::TensorValue::Float8Value,
-                            builder.CreateStruct(uint8Val).Union()};
-                }
-                else if constexpr(std::is_same_v<T, int32_t>)
-                {
-                    hipdnn_data_sdk::data_objects::Int32Value int32Val(arg);
-                    return {hipdnn_data_sdk::data_objects::TensorValue::Int32Value,
-                            builder.CreateStruct(int32Val).Union()};
-                }
-                else
-                {
-                    // For std::monostate case
-                    return {hipdnn_data_sdk::data_objects::TensorValue::NONE, 0};
-                }
-            },
-            _value);
-
-        return hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(builder,
-                                                                           _uid,
-                                                                           _name.c_str(),
-                                                                           toSdkType(_dataType),
-                                                                           &_stride,
-                                                                           &_dim,
-                                                                           _isVirtual,
-                                                                           result.first,
-                                                                           result.second);
-    }
-
-    static std::shared_ptr<TensorAttributes>
-        fromFlatBuffer(const hipdnn_data_sdk::data_objects::TensorAttributes* fb)
-    {
-        if(fb == nullptr)
-        {
-            return nullptr;
-        }
-
-        auto tensor = std::make_shared<TensorAttributes>();
-
-        tensor->set_uid(fb->uid());
-
-        if(fb->name() != nullptr)
-        {
-            tensor->set_name(fb->name()->c_str());
-        }
-
-        tensor->set_data_type(fromSdkType(fb->data_type()));
-
-        if(fb->dims() != nullptr)
-        {
-            std::vector<int64_t> dims(fb->dims()->begin(), fb->dims()->end());
-            tensor->set_dim(dims);
-        }
-
-        if(fb->strides() != nullptr)
-        {
-            std::vector<int64_t> strides(fb->strides()->begin(), fb->strides()->end());
-            tensor->set_stride(strides);
-        }
-
-        tensor->set_is_virtual(fb->virtual_());
-
-        auto valueType = fb->value_type();
-        if(valueType != hipdnn_data_sdk::data_objects::TensorValue::NONE)
-        {
-            switch(valueType)
-            {
-            case hipdnn_data_sdk::data_objects::TensorValue::Float32Value:
-                tensor->set_value(fb->value_as_Float32Value()->value());
-                break;
-            case hipdnn_data_sdk::data_objects::TensorValue::Float64Value:
-                tensor->set_value(fb->value_as_Float64Value()->value());
-                break;
-            case hipdnn_data_sdk::data_objects::TensorValue::Float16Value:
-                tensor->set_value(static_cast<half>(fb->value_as_Float16Value()->value()));
-                break;
-            case hipdnn_data_sdk::data_objects::TensorValue::BFloat16Value:
-                tensor->set_value(static_cast<hip_bfloat16>(fb->value_as_BFloat16Value()->value()));
-                break;
-            case hipdnn_data_sdk::data_objects::TensorValue::Float8Value:
-                tensor->set_value(fb->value_as_Float8Value()->value());
-                break;
-            case hipdnn_data_sdk::data_objects::TensorValue::Int32Value:
-                tensor->set_value(fb->value_as_Int32Value()->value());
-                break;
-            default:
-                break;
-            }
-        }
-
-        return tensor;
-    }
-
 private:
     int64_t _uid = 0;
     bool _uidSet = false;
@@ -349,5 +406,5 @@ private:
     bool _isVirtual = false;
     ValueVariant _value;
 };
-typedef TensorAttributes Tensor_attributes;
+typedef TensorAttributes Tensor_attributes; ///< @brief Compatibility alias
 } // namespace hipdnn_frontend::graph

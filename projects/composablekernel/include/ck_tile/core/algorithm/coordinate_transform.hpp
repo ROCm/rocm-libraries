@@ -11,6 +11,9 @@
 #include "ck_tile/core/utility/magic_div.hpp"
 #include "ck_tile/core/utility/print.hpp"
 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
+
 namespace ck_tile {
 
 enum struct coord_transform_enum
@@ -1295,7 +1298,7 @@ CK_TILE_HOST_DEVICE static void print(const modulo<Modulus, UpLength>& m)
 }
 
 // 2D XOR, NOTE: "xor" is a keyword
-template <typename LowLengths>
+template <typename LowLengths, bool ApplyModulo = true>
 struct xor_t : public base_transform<2, 2>
 {
     static constexpr auto type_enum = coord_transform_enum::xor_t;
@@ -1327,8 +1330,15 @@ struct xor_t : public base_transform<2, 2>
 
         idx_low(number<0>{}) = idx_up[number<0>{}];
 
-        idx_low(number<1>{}) =
-            idx_up[number<1>{}] ^ (idx_up[number<0>{}] % up_lengths_[number<1>{}]);
+        if constexpr(ApplyModulo)
+        {
+            idx_low(number<1>{}) =
+                idx_up[number<1>{}] ^ (idx_up[number<0>{}] % up_lengths_[number<1>{}]);
+        }
+        else
+        {
+            idx_low(number<1>{}) = idx_up[number<1>{}] ^ (idx_up[number<0>{}]);
+        }
     }
 
     template <typename LowIdxDiff, typename UpIdxDiff, typename LowIdx, typename UpIdx>
@@ -1379,8 +1389,8 @@ struct xor_t : public base_transform<2, 2>
     }
 };
 
-template <typename LowLengths>
-CK_TILE_HOST_DEVICE static void print(const xor_t<LowLengths>& x)
+template <typename LowLengths, bool ApplyModulo = true>
+CK_TILE_HOST_DEVICE static void print(const xor_t<LowLengths, ApplyModulo>& x)
 {
     printf("xor_t{");
     printf("up_lengths_: ");
@@ -1734,10 +1744,10 @@ CK_TILE_HOST_DEVICE constexpr auto make_modulo_transform(const Modulus& modulus,
     return modulo<Modulus, UpLength>{modulus, up_length};
 }
 
-template <typename LowLengths>
+template <typename LowLengths, bool ApplyModulo = true>
 CK_TILE_HOST_DEVICE constexpr auto make_xor_transform(const LowLengths& low_lengths)
 {
-    return xor_t<LowLengths>{low_lengths};
+    return xor_t<LowLengths, ApplyModulo>{low_lengths};
 }
 
 template <typename LowLength, typename OffsetLength>
@@ -1776,3 +1786,4 @@ make_indexing_transform_with_adaptor(const UpLength& up_lengths, const IndexingA
 }
 
 } // namespace ck_tile
+#pragma clang diagnostic pop

@@ -46,7 +46,8 @@ enum struct GemmPipelineType
     CompV3,
     CompV4,
     CompV6,
-    CompAsync
+    CompAsync,
+    CompAsyncEightWaves
 };
 
 template <GemmPipelineType PT, typename Problem>
@@ -97,6 +98,15 @@ struct GemmPipelineTypeSelector<GemmPipelineType::CompAsync, Problem>
     static constexpr auto GetName() { return "GemmPipelineAgBgCrCompAsync"; }
 };
 
+template <typename Problem>
+struct GemmPipelineTypeSelector<GemmPipelineType::CompAsyncEightWaves, Problem>
+{
+    using base_pipeline = ck_tile::BaseGemmPipelineAgBgCrCompV3<Problem>;
+    using pipeline      = ck_tile::GemmPipelineAgBgCrCompAsyncEightWaves<Problem>;
+
+    static constexpr auto GetName() { return "GemmPipelineAgBgCrCompAsyncEightWaves"; }
+};
+
 template <typename Tuple, typename Derived>
 class TestCkTileGemmPipeline : public ::testing::Test
 {
@@ -125,11 +135,16 @@ class TestCkTileGemmPipeline : public ::testing::Test
     static constexpr bool Persistent =
         ck_tile::tuple_element_or_default_t<Tuple, 15, std::false_type>::value;
 
+    // TF32 uses tf32_t as compute type but float as buffer/storage type
+    using ADataTypeBuf = ck_tile::if_select_t<ADataType, ck_tile::tf32_t, float, ADataType>;
+    using BDataTypeBuf = ck_tile::if_select_t<BDataType, ck_tile::tf32_t, float, BDataType>;
+
     protected:
     template <bool PadM, bool PadN, bool PadK, bool Preshuffle>
     void invoke_gemm(const ck_tile::GemmHostArgs& args, const ck_tile::stream_config& s)
     {
-        constexpr ck_tile::index_t M_Warp = 2;
+        constexpr ck_tile::index_t M_Warp =
+            PipelineType == GemmPipelineType::CompAsyncEightWaves ? 4 : 2;
         constexpr ck_tile::index_t N_Warp = 2;
         constexpr ck_tile::index_t K_Warp = 1;
 
@@ -172,12 +187,16 @@ class TestCkTileGemmPipeline : public ::testing::Test
                                                                      NumWaveGroup,
                                                                      preshuffle>;
 
-        using UniversalGemmProblem = ck_tile::UniversalGemmPipelineProblem<ADataType,
-                                                                           BDataType,
-                                                                           AccDataType,
-                                                                           GemmShape,
-                                                                           GemmUniversalTraits,
-                                                                           Scheduler>;
+        using UniversalGemmProblem =
+            ck_tile::UniversalGemmPipelineProblem<ADataTypeBuf,
+                                                  BDataTypeBuf,
+                                                  AccDataType,
+                                                  GemmShape,
+                                                  GemmUniversalTraits,
+                                                  Scheduler,
+                                                  ck_tile::element_wise::PassThrough,
+                                                  ck_tile::element_wise::PassThrough,
+                                                  ADataType>;
 
         using GemmPipeline =
             typename GemmPipelineTypeSelector<PipelineType, UniversalGemmProblem>::pipeline;
@@ -202,7 +221,6 @@ class TestCkTileGemmPipeline : public ::testing::Test
                                              1,     /*kNumWaveGroups_*/
                                              false, /*FixedVectorSize_*/
                                              1,     /*VectorSizeC_*/
-                                             false, /*TiledMMAPermuteN_*/
                                              1,     /*BlockedXDLN_PerWarp_*/
                                              DoubleSmemBuffer /*DoubleSmemBuffer*/>>;
 
@@ -246,6 +264,7 @@ class TestCkTileGemmPipeline : public ::testing::Test
             GTEST_SKIP() << "Unsupported data type combination for gemm pipeline test.";
         }
         if constexpr(PipelineType == GemmPipelineType::CompV4 ||
+                     PipelineType == GemmPipelineType::CompAsyncEightWaves ||
                      std::is_same_v<BDataType, ck_tile::pk_int4_t>)
         {
             // Only do k_batch = 1 when pipeline is CompV4, or BDataType is I4
@@ -292,24 +311,23 @@ class TestCkTileGemmPipeline : public ::testing::Test
         ck_tile::index_t stride_C =
             ck_tile::get_default_stride(M, N, StrideC, is_row_major(CLayout{}));
 
-        ck_tile::HostTensor<ADataType> a_m_k(
+        ck_tile::HostTensor<ADataTypeBuf> a_m_k(
             ck_tile::host_tensor_descriptor(M, K, stride_A, is_row_major(ALayout{})));
-        ck_tile::HostTensor<BDataType> b_k_n(
+        ck_tile::HostTensor<BDataTypeBuf> b_k_n(
             ck_tile::host_tensor_descriptor(K, N, stride_B, is_row_major(BLayout{})));
         ck_tile::HostTensor<CDataType> c_m_n_dev_result(
             ck_tile::host_tensor_descriptor(M, N, stride_C, is_row_major(CLayout{})));
 
-        ck_tile::FillUniformDistributionIntegerValue<ADataType>{-5, 5, 11939}(a_m_k);
-        ck_tile::FillUniformDistributionIntegerValue<BDataType>{-5, 5, 11940}(b_k_n);
+        ck_tile::FillUniformDistributionIntegerValue<ADataTypeBuf>{-5, 5, 11939}(a_m_k);
+        ck_tile::FillUniformDistributionIntegerValue<BDataTypeBuf>{-5, 5, 11940}(b_k_n);
 
         ck_tile::DeviceMem a_m_k_dev_buf(a_m_k.get_element_space_size_in_bytes());
         ck_tile::DeviceMem b_k_n_dev_buf(b_k_n.get_element_space_size_in_bytes());
         ck_tile::DeviceMem c_m_n_dev_buf(c_m_n_dev_result.get_element_space_size_in_bytes());
 
-        if constexpr(std::is_same_v<BDataType, ck_tile::pk_int4_t>)
+        if constexpr(std::is_same_v<BDataTypeBuf, ck_tile::pk_int4_t>)
         {
-            // Permute vector pk_i4x4 data for device implementation
-            ck_tile::HostTensor<BDataType> b_k_n_dev = b_k_n;
+            ck_tile::HostTensor<BDataTypeBuf> b_k_n_dev = b_k_n;
             permute_vectors_i4x4_b(b_k_n_dev);
             b_k_n_dev_buf.ToDevice(b_k_n_dev.data());
         }

@@ -1,29 +1,5 @@
-/*! \file */
-/* ************************************************************************
- *
- * MIT License
- *
- * Copyright (C) 2025 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- *
- * ************************************************************************ */
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -31,17 +7,45 @@
 #include "kernel_type.hpp"
 #include "solution_selection.hpp"
 
+struct ProblemDims
+{
+    size_t m, n, k;
+};
+
 class SolutionCache
 {
-    public:
-    void addKernel(const KernelType& kernelType, const SolutionIndexParameters& params, std::shared_ptr<GemmKernel> kernel);
-    std::optional<std::shared_ptr<GemmKernel>> getKernel(const KernelType& kernelType, const SolutionIndexParameters& params);
+public:
+    /// Register a kernel in the cache.
+    ///
+    /// Kernels with a ShapeCondition are appended alongside existing entries for
+    /// the same (KernelType, SolutionIndexParameters) bucket.  Unconditional
+    /// kernels (no ShapeCondition) replace any prior unconditional entry.
+    ///
+    /// During lookup, conditional kernels are checked first in the order they
+    /// were added; the first whose condition matches the problem dimensions
+    /// wins.  If none match, the unconditional kernel is returned as a fallback.
+    void addKernel(const KernelType&              kernelType,
+                   const SolutionIndexParameters& params,
+                   std::shared_ptr<GemmKernel>    kernel);
 
-    private:
+    /// Look up a kernel for a given (KernelType, SolutionIndexParameters) pair.
+    ///
+    /// When @p dims is provided the cache first checks conditional kernels
+    /// (in insertion order) and returns the first match.  If no conditional
+    /// kernel matches — or @p dims is not provided — the unconditional
+    /// fallback kernel is returned.
+    std::optional<std::shared_ptr<GemmKernel>> getKernel(const KernelType&              kernelType,
+                                                         const SolutionIndexParameters& params,
+                                                         std::optional<ProblemDims>     dims
+                                                         = std::nullopt);
+
+private:
     // Map of kernels that have already been generated.
-    // The first level of the map is indexed with a KernelType.
-    // The second level of the map is indexed with a hash value of a
-    // SolutionIndexParameters type.
-    // The value is a GemmKernel.
-    std::unordered_map<KernelType, std::unordered_map<int, std::shared_ptr<GemmKernel>>> m_generatedKernels;
+    // The first level is indexed by KernelType.
+    // The second level is indexed by a hash of SolutionIndexParameters.
+    // The value is a vector of GemmKernels: conditional (shape-heuristic)
+    // entries followed by at most one unconditional fallback entry.
+    std::unordered_map<KernelType,
+                       std::unordered_map<int, std::vector<std::shared_ptr<GemmKernel>>>>
+        m_generatedKernels;
 };

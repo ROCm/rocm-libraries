@@ -11,7 +11,7 @@
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceConvolution.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/DynamicTolerances.hpp>
-#include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
+#include <hipdnn_test_sdk/utilities/TensorDiff.hpp>
 
 #include "../utils/Helpers.hpp"
 
@@ -108,17 +108,22 @@ bool SampleRunner::operator()(const TensorLayout& layout)
         hipdnn_test_sdk::utilities::CpuFpReferenceConvolution::wgrad(
             xTensor, dwRefTensor, dyTensor, {u, v}, {dilH, dilW}, {padH, padW});
 
-        auto tolerance
-            = hipdnn_test_sdk::utilities::conv::calculateConvWrwTolerance<InputType, float>(
+        auto absoluteTolerance = hipdnn_test_sdk::utilities::conv::
+            calculateConvWrwTolerance<InputType, InputType, float>(
                 0.0, 1.0, 0.0, 1.0, dyAttr->get_dim());
+        constexpr float relativeTolerance = 0.01f;
 
-        auto dwValidator
-            = hipdnn_test_sdk::utilities::CpuFpReferenceValidation<InputType>(tolerance, tolerance);
-
-        bool dwValid = dwValidator.allClose(dwRefTensor, dwTensor);
+        auto dwValidator = hipdnn_test_sdk::utilities::CpuFpReferenceValidation<InputType>(
+            absoluteTolerance, relativeTolerance);
 
         std::cout << "CPU reference validation:\n";
-        std::cout << "  dw: " << (dwValid ? "successful" : "failed") << "\n";
+        bool dwValid = hipdnn_test_sdk::utilities::validateAndReport<InputType>(std::cout,
+                                                                                "dw",
+                                                                                dwValidator,
+                                                                                dwRefTensor,
+                                                                                dwTensor,
+                                                                                absoluteTolerance,
+                                                                                relativeTolerance);
 
         validationPassed = dwValid;
     }
@@ -132,15 +137,10 @@ int main(int argc, char* argv[])
 {
     auto config = parseCommandLineArgs(argc, argv);
 
-    initializeFrontendLogging();
+    auto [handle, handleError] = createHipdnnHandle();
+    HIPDNN_FE_CHECK(handleError);
 
-    auto backend = hipdnnBackend();
-    hipdnnHandle_t handle;
-    HIPDNN_CHECK(backend->create(&handle));
-
-    bool allPassed = run(SampleRunner{handle, config});
-
-    HIPDNN_CHECK(backend->destroy(handle));
+    bool allPassed = run(SampleRunner{*handle, config});
 
     if(allPassed)
     {

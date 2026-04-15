@@ -16,15 +16,21 @@ try:
         transpose_t,
         grid_selection_t,
         reduction_t,
+        prediction_modes_t,
         # Data structures
         dim3_t,
+        dim4_t,
+        tensile_params_t,
         config_t,
         prediction_result_t,
         workgroup_mapping_t,
+        staggerU_t,
         problem_t,
         hardware_t,
+        context_t,
         # Hardware functions
         get_hardware_for_device,
+        get_hardware_for_arch,
         # Data type functions
         int_to_data_type,
         datatype_to_bits,
@@ -45,6 +51,13 @@ try:
         estimate_l2_hit,
         estimate_mall_hit,
         compute_memory_latency,
+        compute_l2_tiles,
+        compute_mall_tiles,
+        predict_workgroup_mapping,
+        wgm_to_grid,
+        count_unique_tiles,
+        count_unique_tiles_timestep,
+        estimate_cache_hit_rates,
         # Latency functions
         compute_tile_latency,
         compute_timestep_latency,
@@ -73,15 +86,20 @@ __all__ = [
     "transpose_t",
     "grid_selection_t",
     "reduction_t",
+    "prediction_modes_t",
     # Data structures
     "dim3_t",
+    "dim4_t",
+    "tensile_params_t",
     "config_t",
     "prediction_result_t",
     "workgroup_mapping_t",
     "problem_t",
     "hardware_t",
+    "context_t",
     # Hardware functions
     "get_hardware_for_device",
+    "get_hardware_for_arch",
     # Data type functions
     "int_to_data_type",
     "datatype_to_bits",
@@ -98,6 +116,12 @@ __all__ = [
     "compute_number_matrix_instructions",
     "compute_mt_compute_latency",
     # Memory functions
+    "wgm_to_grid",
+    "compute_l2_tiles",
+    "compute_mall_tiles",
+    "count_unique_tiles",
+    "count_unique_tiles_timestep",
+    "estimate_cache_hit_rates",
     "check_lds_capacity",
     "estimate_l2_hit",
     "estimate_mall_hit",
@@ -113,3 +137,13 @@ __all__ = [
     # Reduction functions
     "int_to_reduction_t",
 ]
+
+try:
+    # Import the python selector if possible (requires torch)
+    from .selector import OrigamiMatmulSelector
+    __all__.append("OrigamiMatmulSelector")
+except ImportError:
+    # Do not raise this error if import fails - compiled Origami bindings still
+    # work without the dedicated Python selector
+    pass
+

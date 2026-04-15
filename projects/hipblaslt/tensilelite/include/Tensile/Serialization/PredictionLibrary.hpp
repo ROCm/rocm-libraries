@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -53,9 +53,9 @@ namespace TensileLite
                 std::vector<int> mappingIndices;
                 if(iot::outputting(io))
                 {
-                    mappingIndices.reserve(lib.solutionmap.size());
+                    mappingIndices.reserve(lib.solution_list.size());
 
-                    for(auto const& pair : lib.solutionmap)
+                    for(auto const& pair : lib.solution_list)
                         mappingIndices.push_back(pair.first);
 
                     iot::mapRequired(io, "table", mappingIndices);
@@ -68,8 +68,9 @@ namespace TensileLite
                                       "ProblemPredictionLibrary requires non empty "
                                       "mapping index set.");
 
-                    for(int index : mappingIndices)
+                    for(std::size_t local_index = 0; local_index < mappingIndices.size(); local_index++)
                     {
+                        int index = mappingIndices[local_index];
                         auto slnIter = ctx->solutions->find(index);
                         if(slnIter == ctx->solutions->end())
                         {
@@ -81,7 +82,7 @@ namespace TensileLite
                         else
                         {
                             auto solution = slnIter->second;
-                            lib.solutionmap.insert(std::make_pair(index, solution));
+                            lib.solution_list.emplace_back(index, solution);
 
                             origami::dim3_t origami_mi;
                             if(solution->sizeMapping.matrixInstruction[0] == 0
@@ -105,18 +106,20 @@ namespace TensileLite
                                        solution->sizeMapping.macroTile.y,
                                        solution->sizeMapping.depthU},
                                 .mi = origami_mi,
-                                .custom_mainloop_scheduling = (solution->sizeMapping.customMainLoopScheduling > 0) ? true : false,
+                                .hand_optimized_main_loop
+                                = (solution->sizeMapping.customMainLoopScheduling > 0) ? true
+                                                                                       : false,
                                 .occupancy
                                 = std::max(solution->sizeMapping.CUOccupancy, static_cast<int>(1)),
-                                .workgroup_mapping          = solution->sizeMapping.workGroupMapping,
-                                .cache_hints_a              = solution->sizeMapping.nonTemporalA,
-                                .cache_hints_b              = solution->sizeMapping.nonTemporalB,
-                                .workspace_size             = std::numeric_limits<size_t>::max(),
-                                .workspace_size_per_elem_c  = std::numeric_limits<size_t>::max(),
+                                .workgroup_mapping         = solution->sizeMapping.workGroupMapping,
+                                .cache_hints_a             = solution->sizeMapping.nonTemporalA,
+                                .cache_hints_b             = solution->sizeMapping.nonTemporalB,
+                                .workspace_size            = std::numeric_limits<size_t>::max(),
+                                .workspace_size_per_elem_c = std::numeric_limits<size_t>::max(),
+                                .index                     = local_index,
                             };
 
                             lib.origami_config_list.emplace_back(origami_config);
-                            lib.origami_config_map.insert(std::make_pair(origami_config, index));
                         }
                     }
                 }

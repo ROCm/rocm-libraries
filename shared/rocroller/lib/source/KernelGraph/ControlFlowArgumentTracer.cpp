@@ -1,36 +1,13 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <variant>
-#include <vector>
 
 #include <rocRoller/KernelGraph/ControlGraph/ControlFlowArgumentTracer.hpp>
 #include <rocRoller/KernelGraph/TopoVisitor.hpp>
 
 #include <rocRoller/ExpressionTransformations.hpp>
+#include <rocRoller/KernelGraph/CoordinateGraph/Dimension.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
 #include <rocRoller/KernelGraph/RegisterTagManager.hpp>
 #include <rocRoller/KernelGraph/Utils.hpp>
@@ -120,7 +97,7 @@ namespace rocRoller::KernelGraph
         {
             auto& dest = m_referencedArgs[node];
 
-            dest.insert(m_kernel->findArgument(arg).name);
+            dest.insert(m_kernel->findArgument(arg).getName());
         }
 
         void operator()(int node, CG::SetCoordinate const& op)
@@ -196,8 +173,22 @@ namespace rocRoller::KernelGraph
 
             auto [coords, path] = findAllRequiredCoordinates(node, m_graph);
 
+            auto subDimensionCoordinates
+                = filterCoordinates<CoordinateGraph::SubDimension>(path, m_graph);
+            auto isPretiled = subDimensionCoordinates.size() > 2;
+
             for(auto coord : path)
+            {
                 incorporate(node, m_tracer.trace(coord, true));
+
+                auto isSubDimension
+                    = m_graph.coordinates.get<CoordinateGraph::SubDimension>(coord).has_value();
+                if(isSubDimension && isPretiled)
+                {
+                    Log::debug("Pretiled coordinate: {}", coord);
+                    incorporate(node, m_tracer.trace(coord, false));
+                }
+            }
         }
 
         void operator()(int node, CIsAnyOf<CG::LoadVGPR, CG::StoreVGPR> auto const& op)
@@ -255,10 +246,10 @@ namespace rocRoller::KernelGraph
         {
             for(auto const& arg : m_kernel->arguments())
             {
-                auto argArgs = referencedKernelArguments(arg.expression);
+                auto argArgs = referencedKernelArguments(arg.getExpression());
                 for(auto const& argArg : argArgs)
                 {
-                    m_subReferencedArgs[argArg].insert(arg.name);
+                    m_subReferencedArgs[argArg].insert(arg.getName());
                 }
             }
 
@@ -305,33 +296,6 @@ namespace rocRoller::KernelGraph
                     m_directlyReferencedArgs.insert(arg);
                 }
             }
-
-            // Now propagate indirect references (args referenced by other args' expressions)
-            do
-            {
-                any = false;
-
-                for(auto& [node, referencedArgs] : m_referencedArgs)
-                {
-                    std::unordered_set<std::string> additions;
-
-                    for(auto const& arg : referencedArgs)
-                    {
-                        auto iter = m_subReferencedArgs.find(arg);
-                        if(iter != m_subReferencedArgs.end())
-                        {
-                            additions.insert(iter->second.begin(), iter->second.end());
-                        }
-                    }
-
-                    auto beforeSize = referencedArgs.size();
-                    referencedArgs.insert(additions.begin(), additions.end());
-                    auto afterSize = referencedArgs.size();
-
-                    if(afterSize > beforeSize)
-                        any = true;
-                }
-            } while(any);
         }
 
         // Arguments directly used in control flow (before propagation)
@@ -367,7 +331,7 @@ namespace rocRoller::KernelGraph
         m_referencedArguments = std::move(visitor.m_referencedArgs);
 
         for(auto arg : kernel->arguments())
-            m_neverReferencedArguments.insert(arg.name);
+            m_neverReferencedArguments.insert(arg.getName());
 
         // Collect all referenced args and compute launch-time-only args
         std::set<std::string> allReferenced;
@@ -378,15 +342,6 @@ namespace rocRoller::KernelGraph
                 m_neverReferencedArguments.erase(arg);
                 allReferenced.insert(arg);
             }
-        }
-
-        // Launch-time-only args: referenced but not directly referenced
-        // These were added via propagation from other argument expressions
-        // which are evaluated at kernel launch time, not execute time
-        for(auto const& arg : allReferenced)
-        {
-            if(!visitor.m_directlyReferencedArgs.contains(arg))
-                m_launchTimeOnlyArguments.insert(arg);
         }
 
         if(m_neverReferencedArguments.size() > 0)
@@ -403,14 +358,6 @@ namespace rocRoller::KernelGraph
             std::ostringstream msg;
             msg << "Directly referenced args (" << visitor.m_directlyReferencedArgs.size() << "): ";
             streamJoin(msg, visitor.m_directlyReferencedArgs, ", ");
-            Log::debug(msg.str());
-        }
-
-        if(m_launchTimeOnlyArguments.size() > 0)
-        {
-            std::ostringstream msg;
-            msg << "Launch-time-only argument(s) (skip loading): ";
-            streamJoin(msg, m_launchTimeOnlyArguments, ", ");
             Log::debug(msg.str());
         }
     }
@@ -433,10 +380,5 @@ namespace rocRoller::KernelGraph
     std::set<std::string> const& ControlFlowArgumentTracer::neverReferencedArguments() const
     {
         return m_neverReferencedArguments;
-    }
-
-    std::set<std::string> const& ControlFlowArgumentTracer::launchTimeOnlyArguments() const
-    {
-        return m_launchTimeOnlyArguments;
     }
 }

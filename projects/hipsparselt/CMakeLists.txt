@@ -5,7 +5,13 @@ cmake_minimum_required(VERSION 3.25.2)
 
 option(CMAKE_EXPORT_COMPILE_COMMANDS "Generate compile commands json file." ON)
 
-project(hipsparselt VERSION 0.2.6 LANGUAGES CXX)
+project(hipsparselt VERSION 0.2.7 LANGUAGES CXX)
+
+# ROCm libraries root (for shared/ctest and other shared resources)
+# Only set default when not already defined (e.g. by superproject / rocm-libraries).
+if(NOT DEFINED ROCM_LIBRARIES_ROOT)
+  set(ROCM_LIBRARIES_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../..")
+endif()
 
 if(POLICY CMP0135)
     cmake_policy(SET CMP0135 NEW) # FetchContent timestamp handling
@@ -120,6 +126,12 @@ if(HIPSPARSELT_ENABLE_MARKER)
         message(FATAL_ERROR "rocTracer marker is not supported with CUDA backend.")
     else()
         find_library(ROCTX64_LIBRARY REQUIRED HINTS lib NAMES roctx64 libroctx64)
+        get_filename_component(ROCTRACER_LIB_DIR ${ROCTX64_LIBRARY} DIRECTORY)
+        get_filename_component(ROCTRACER_ROOT_DIR ${ROCTRACER_LIB_DIR} DIRECTORY)
+        find_path(ROCTRACER_INCLUDE_DIR "roctracer/roctx.h"
+            HINTS ${ROCTRACER_ROOT_DIR}
+            PATH_SUFFIXES include
+            REQUIRED)
     endif()
 endif()
 
@@ -149,6 +161,9 @@ if(HIPSPARSELT_ENABLE_HIP)
     set(TENSILELITE_ENABLE_HOST ON CACHE BOOL "" FORCE)
     set(HIPBLASLT_ENABLE_ASAN ${HIPSPARSELT_ENABLE_ASAN} CACHE BOOL "" FORCE)
     set(HIPBLASLT_DEVICE_LIBRARY_PATH "${CMAKE_BINARY_DIR}/Tensile" CACHE PATH "" FORCE)
+    # hipSPARSELt does not use ExtOp or MatrixTransform artifacts
+    set(HIPBLASLT_ENABLE_EXTOPS OFF CACHE BOOL "" FORCE)
+    set(HIPBLASLT_ENABLE_MATRIX_TRANSFORM OFF CACHE BOOL "" FORCE)
     set(HIPBLASLT_LIBLOGIC_PATH
         "${CMAKE_CURRENT_SOURCE_DIR}/library/src/hcc_detail/rocsparselt/src/spmm/Tensile/Logic/asm_full"
         CACHE STRING "" FORCE
@@ -170,12 +185,26 @@ if(HIPSPARSELT_ENABLE_HIP)
 
     set(ORIGAMI_ENABLE_INSTALL OFF)
     add_subdirectory("${HIPBLASLT_PATH}" hipblaslt)
+    # Hide TensileLite symbols to prevent interposition with hipblaslt's copy
+    target_compile_definitions(tensilelite-host PRIVATE TENSILE_STATIC_ONLY)
     endblock()
 endif()
 
 add_subdirectory(library)
 
+if(HIPSPARSELT_BUILD_TESTING)
+  enable_testing()
+endif()
+
 if(HIPSPARSELT_ENABLE_CLIENT)
+    if(NOT HIPSPARSELT_ENABLE_THEROCK)
+        if(NOT DEFINED CMAKE_Fortran_COMPILER AND NOT DEFINED ENV{FC})
+            set(CMAKE_Fortran_COMPILER "gfortran")
+        endif()
+        enable_language(Fortran)
+        find_package(LAPACK)
+        include(fetch_lapack)
+    endif()
     add_subdirectory(clients)
 endif()
 

@@ -1,5 +1,5 @@
 TestParameters:
-  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201] # not supported by arch
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250] # not supported by arch
 
 GlobalParameters:
   NumElementsToValidate: -1
@@ -1145,9 +1145,10 @@ BenchmarkProblems:
         - MatrixInstruction:
            - [16, 16, 32, 1,  1, 2, 1,  4, 1 ]
            - [16, 16, 32, 1,  1, 2, 1,  2, 1 ]
+           - [32, 32, 16, 1,  1, 2, 1,  1, 1 ]
         - PrefetchGlobalRead: [2,3,4,5]
         - PrefetchLocalRead: [1]
-        - DepthU: [256]
+        - DepthU: [64, 256]
         - ScheduleIterAlg: [3]
         - ExpandPointerSwap: [0]
         - TransposeLDS: [2] #0,1
@@ -1179,6 +1180,43 @@ BenchmarkProblems:
         - WorkGroup:
            - [64, 4, 1]
            - [32, 4, 2]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 255]
+          - Exact: [160, 120, 1, 3072]
+    - # BenchmarkProblemSizeGroup - Standard - All problem
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+           - [16, 16, 32, 1, 1, 12, 4, 2, 2]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [0]
+        - DepthU: [32]
+        - ScheduleIterAlg: [3]
+        - ExpandPointerSwap: [0]
+        - ExtraMiLatencyLeft: [0]
+        - TransposeLDS: [2] #0,1
+        - LocalReadVectorWidth: [8]
+        - GlobalReadVectorWidthA: [8]
+        - GlobalReadVectorWidthB: [8]
+        - ClusterLocalRead: [0]
+        - DirectToLds: [1]
+        - StreamK: [3]
+        - StreamKXCCMapping: [8]
+        - StaggerU: [0]
+        - WorkGroupMapping: [8]
+        - WorkGroupMappingXCC: [4]
+        - 1LDSBuffer: [0]
+        - NonTemporalD: [4]
+        - SourceSwap: [1]
+        - UseSgprForGRO: [0]
+        - UseCustomMainLoopSchedule: [0]
+        - DtlPlusLdsBuf: [0, 1]
+        - ScheduleGROverBarrier: [1]
+        - MinGRIncPerMfma: [1]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:

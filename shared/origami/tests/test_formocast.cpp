@@ -168,7 +168,7 @@ TEST_CASE("Formocast: Performance prediction", "[formocast]") {
         
         // Check specific expected values for 2048x512x1024 on gfx942
         REQUIRE(perf.microSeconds == Approx(68.640434).epsilon(0.01));
-        REQUIRE(perf.hitRate == Approx(70.0).epsilon(0.01));
+        REQUIRE(perf.hitRate == Approx(17.5).epsilon(0.01));
     }
     
     SECTION("Performance prediction with batched problem") {
@@ -183,7 +183,7 @@ TEST_CASE("Formocast: Performance prediction", "[formocast]") {
         
         // Check specific expected values for batched 512x512x512 (4 batches)
         REQUIRE(perf.microSeconds == Approx(23.165081).epsilon(0.01));
-        REQUIRE(perf.hitRate == Approx(62.5).epsilon(0.01));
+        REQUIRE(perf.hitRate == Approx(25.0).epsilon(0.01));
     }
     
     SECTION("Performance prediction with GlobalSplitU") {
@@ -231,8 +231,8 @@ TEST_CASE("Formocast: Cache hit rate computation", "[formocast]") {
         );
         
         REQUIRE(l2_hit.totalHitRate == Approx(0.4375).epsilon(0.01));
-        REQUIRE(l2_hit.tile0HitRate == Approx(0.875).epsilon(0.01));
-        REQUIRE(l2_hit.tile1HitRate == Approx(0.0).epsilon(0.01));
+        REQUIRE(l2_hit.tile0HitRate == Approx(0.0).margin(0.01));
+        REQUIRE(l2_hit.tile1HitRate == Approx(0.875).epsilon(0.01));
     }
     
     SECTION("L3 cache hit rate computation") {
@@ -420,123 +420,41 @@ TEST_CASE("Formocast: LSU overhead calculation", "[formocast]") {
     }
 }
 
-TEST_CASE("Formocast: Intermediate metrics calculation", "[formocast]") {
-    Formocast simulator;
-    
-    auto problem = make_problem_info(1024, 1024, 1024);
-    auto mapping = make_size_mapping();
-    
-    simulator.setProblem(problem);
-    simulator.setSolution(mapping);
-    simulator.setHardware(hardware_t::architecture_t::gfx950);
-    
-    SECTION("Calculate intermediate metrics") {
-        auto metrics = simulator.calculateIntermediateMetrics();
-        
-        REQUIRE(metrics.compute_cycles == Approx(2048.0).epsilon(0.01));
-        REQUIRE(metrics.prefetch_cost == Approx(0.557778).epsilon(0.01));
-        REQUIRE(metrics.startup_cost == Approx(2.6).epsilon(0.01));
-        REQUIRE(metrics.output_write_cost == Approx(1.202859).epsilon(0.01));
-        REQUIRE(metrics.output_write_cost_edge == Approx(0.0).epsilon(0.01));
-        REQUIRE(metrics.split_accumulation_overhead == Approx(0.0).epsilon(0.01));
-        REQUIRE(metrics.local_split_overhead == Approx(0.0).epsilon(0.01));
-        REQUIRE(metrics.cache_hits.A_L1_hit == Approx(0.5).epsilon(0.01));
-        REQUIRE(metrics.cache_hits.B_L1_hit == Approx(0.5).epsilon(0.01));
-    }
-    
-    SECTION("Calculate final performance from intermediate metrics") {
-        auto metrics = simulator.calculateIntermediateMetrics();
-        auto perf = simulator.calculateFinalPerformance(metrics);
-        
-        REQUIRE(perf.microSeconds > 0);
-        REQUIRE(perf.hitRate >= 0);
-        REQUIRE(perf.hitRate <= 100);
-    }
-    
-    SECTION("Consistency between direct and two-stage prediction") {
-        // Test 1: Original problem (1024x1024x1024)
-        auto perf_direct = simulator.predictedPerformance();
-        
-        auto metrics = simulator.calculateIntermediateMetrics();
-        auto perf_twostage = simulator.calculateFinalPerformance(metrics);
-        
-        // Both methods should produce the same result
-        REQUIRE(perf_direct.microSeconds == Approx(perf_twostage.microSeconds).epsilon(0.01));
-        REQUIRE(perf_direct.hitRate == Approx(perf_twostage.hitRate).epsilon(0.01));
-        
-        // Check specific expected values for 1024x1024x1024
-        REQUIRE(perf_direct.microSeconds == Approx(44.5695).epsilon(0.01));
-        REQUIRE(perf_direct.hitRate == Approx(43.75).epsilon(0.01));
-        
-        // Test 2: Small problem (512x512x512)
-        auto problem_small = make_problem_info(512, 512, 512);
-        simulator.setProblem(problem_small);
-        
-        auto perf_direct_small = simulator.predictedPerformance();
-        auto metrics_small = simulator.calculateIntermediateMetrics();
-        auto perf_twostage_small = simulator.calculateFinalPerformance(metrics_small);
-        
-        REQUIRE(perf_direct_small.microSeconds == Approx(perf_twostage_small.microSeconds).epsilon(0.01));
-        REQUIRE(perf_direct_small.hitRate == Approx(perf_twostage_small.hitRate).epsilon(0.01));
-        
-        // Check specific expected values for 512x512x512
-        REQUIRE(perf_direct_small.microSeconds == Approx(22.9029).epsilon(0.01));
-        REQUIRE(perf_direct_small.hitRate == Approx(25.0).epsilon(0.01));
-        
-        // Test 3: Large problem (2048x2048x2048)
-        auto problem_large = make_problem_info(2048, 2048, 2048);
-        simulator.setProblem(problem_large);
-        
-        auto perf_direct_large = simulator.predictedPerformance();
-        auto metrics_large = simulator.calculateIntermediateMetrics();
-        auto perf_twostage_large = simulator.calculateFinalPerformance(metrics_large);
-        
-        REQUIRE(perf_direct_large.microSeconds == Approx(perf_twostage_large.microSeconds).epsilon(0.01));
-        REQUIRE(perf_direct_large.hitRate == Approx(perf_twostage_large.hitRate).epsilon(0.01));
-        
-        // Check specific expected values for 2048x2048x2048
-        REQUIRE(perf_direct_large.microSeconds == Approx(88.5218).epsilon(0.01));
-        REQUIRE(perf_direct_large.hitRate == Approx(81.25).epsilon(0.01));
-    }
-}
-
 TEST_CASE("Formocast: FIFO queue operations", "[formocast]") {
     Formocast simulator;
     simulator.setHardware(hardware_t::architecture_t::gfx950);
     
     SECTION("Check global read FIFO full - no stall") {
-        std::queue<int> fifo;
-        int result = simulator.getGlobalReadQueueFullStallCycles(100, fifo, 8, 4, false);
+        std::deque<int> fifo;
+        int result = simulator.getGlobalReadQueueFullStallCycles(100, fifo, 8, 4, false, false);
         REQUIRE(result == 100);
-        REQUIRE(fifo.size() == 1);
-        REQUIRE(fifo.back() == 100);
+        REQUIRE(fifo.size() == 0);
     }
     
     SECTION("Check global read FIFO full - with stall") {
-        std::queue<int> fifo;
-        fifo.push(10);
-        fifo.push(20);
-        fifo.push(30);
-        fifo.push(40);
-        // no stall
-        int result = simulator.getGlobalReadQueueFullStallCycles(100, fifo, 8, 4, true);
-        REQUIRE(result == 100);
-        REQUIRE(fifo.size() == 4);
+        std::deque<int> fifo;
+        fifo.push_back(10);
+        fifo.push_back(11);
+        fifo.push_back(12);
+        fifo.push_back(13);
+        fifo.push_back(15);
+        fifo.push_back(16);
+        fifo.push_back(17);
+        fifo.push_back(18);
+        fifo.push_back(20);
+        fifo.push_back(21);
+        fifo.push_back(22);
+        fifo.push_back(23);
+        fifo.push_back(25);
+        fifo.push_back(26);
+        fifo.push_back(27);
+        fifo.push_back(28);
+        // stall
+        int result = simulator.getGlobalReadQueueFullStallCycles(29, fifo, 8, 4, true, false);
+        REQUIRE(result == 32);
+        REQUIRE(fifo.size() == 20);
     }
-    
-    SECTION("Check global read FIFO full - causes stall") {
-        std::queue<int> fifo;
-        fifo.push(50);
-        fifo.push(60);
-        fifo.push(70);
-        fifo.push(80);
-        // stall to 130
-        int result = simulator.getGlobalReadQueueFullStallCycles(100, fifo, 8, 4, true);
-        REQUIRE(result == 130);
-        REQUIRE(fifo.size() == 4);
-        REQUIRE(fifo.back() == 130);
-    }
-    
+
     SECTION("Check local read FIFO full - no stall") {
         std::queue<int> fifo;
         // no stall
@@ -590,26 +508,10 @@ TEST_CASE("Formocast: FIFO queue operations", "[formocast]") {
         REQUIRE(fifo.size() == 1);
     }
     
-    SECTION("Push local read for gfx950 - bpr=8") {
-        std::queue<int> fifo;
-        simulator.pushLocalRead(100, fifo, 8, true);
-        
-        REQUIRE(fifo.size() == 1);
-        REQUIRE(fifo.front() == 111); // 100 + 11
-    }
-    
-    SECTION("Push local read for gfx950 - bpr=16") {
-        std::queue<int> fifo;
-        simulator.pushLocalRead(100, fifo, 16, true);
-        
-        REQUIRE(fifo.size() == 1);
-        REQUIRE(fifo.front() == 121); // 100 + 21
-    }
-    
     SECTION("Push local read write with bank conflict") {
         std::queue<int> fifo;
 
-        simulator.pushLocalReadWrite(100, fifo, 8, 1.5);
+        simulator.pushLocalReadWrite(100, fifo, 8, 1.5, true, 0);
         
         REQUIRE(fifo.size() == 1);
         REQUIRE(fifo.front() == 111); // 100 + 11
@@ -618,10 +520,100 @@ TEST_CASE("Formocast: FIFO queue operations", "[formocast]") {
     SECTION("Push local read write without bank conflict") {
         std::queue<int> fifo;
 
-        simulator.pushLocalReadWrite(100, fifo, 8, 1.0);
+        simulator.pushLocalReadWrite(100, fifo, 8, 1.0, true, 0);
         
         REQUIRE(fifo.size() == 1);
         REQUIRE(fifo.front() == 110); // 100 + 10
+    }
+    
+    SECTION("Push local write without bank conflict - bpr=8") {
+        std::queue<int> fifo;
+
+        simulator.pushLocalReadWrite(100, fifo, 8, 1.0, false, 0);
+        
+        REQUIRE(fifo.size() == 1);
+        // For local write: latency = baseLatency + bankConflict * conflictMultiplier
+        // With bankConflict=1.0: latency = baseLatency + conflictMultiplier
+        // For gfx950: LocalWriteBaseLatencyB64=10, LocalWriteConflictMultiplierB64=2
+        // So: latency = 10 + 1.0 * 2 = 12
+        REQUIRE(fifo.front() == 112); // 100 + 12
+    }
+    
+    SECTION("Push local write with bank conflict - bpr=8") {
+        std::queue<int> fifo;
+
+        simulator.pushLocalReadWrite(100, fifo, 8, 1.5, false, 0);
+        
+        REQUIRE(fifo.size() == 1);
+        // With bankConflict=1.5: latency = baseLatency + 1.5 * conflictMultiplier
+        // For gfx950: LocalWriteBaseLatencyB64=10, LocalWriteConflictMultiplierB64=2
+        // So: latency = 10 + 1.5 * 2 = 13
+        REQUIRE(fifo.front() == 113); // 100 + 13
+    }
+    
+    SECTION("Push local write without bank conflict - bpr=16") {
+        std::queue<int> fifo;
+
+        simulator.pushLocalReadWrite(100, fifo, 16, 1.0, false, 0);
+        
+        REQUIRE(fifo.size() == 1);
+        // For gfx950: LocalWriteBaseLatencyB128=10, LocalWriteConflictMultiplierB128=4
+        // So: latency = 10 + 1.0 * 4 = 14
+        REQUIRE(fifo.front() == 114); // 100 + 14
+    }
+    
+    SECTION("Push local write with bank conflict - bpr=16") {
+        std::queue<int> fifo;
+
+        simulator.pushLocalReadWrite(100, fifo, 16, 1.5, false, 0);
+        
+        REQUIRE(fifo.size() == 1);
+        // For gfx950: LocalWriteBaseLatencyB128=10, LocalWriteConflictMultiplierB128=4
+        // So: latency = 10 + 1.5 * 4 = 16
+        REQUIRE(fifo.front() == 116); // 100 + 16
+    }
+    
+    SECTION("Push local write without bank conflict - bpr=4") {
+        std::queue<int> fifo;
+
+        simulator.pushLocalReadWrite(100, fifo, 4, 1.0, false, 0);
+        
+        REQUIRE(fifo.size() == 1);
+        // For gfx950: LocalWriteBaseLatencyB32=10, LocalWriteConflictMultiplierB32=1
+        // So: latency = 10 + 1.0 * 1 = 11
+        REQUIRE(fifo.front() == 111); // 100 + 11
+    }
+    
+    SECTION("Get local write queue full stall cycles - numWaves != 4") {
+        // When numWaves != 4, no penalty is applied
+        // Test case 1: no penalty
+        int result1 = simulator.getLocalWriteQueueFullStallCycles(100, 50, 3, 8, 2);
+        REQUIRE(result1 == 103);
+
+        // Test case 2: previousLW dominates without penalty
+        int result2 = simulator.getLocalWriteQueueFullStallCycles(100, 70, 3, 8, 2);
+        REQUIRE(result2 == 103);
+
+        // Test case 3: closer previousLW dominates without penalty
+        int result3 = simulator.getLocalWriteQueueFullStallCycles(100, 99, 3, 8, 2);
+        REQUIRE(result3 == 103);
+    }
+
+    SECTION("Get local write queue full stall cycles - numWaves == 4, bpWrite == 16") {
+        // When numWaves == 4 and bpWrite == 16, penalty = issueCycles
+        // Test case 1: currentCycle dominates
+        int result1 = simulator.getLocalWriteQueueFullStallCycles(100, 50, 5, 16, 4);
+        REQUIRE(result1 == 105);
+        
+        // Test case 2: previousLW + penalty dominates
+        int result2 = simulator.getLocalWriteQueueFullStallCycles(100, 99, 5, 16, 4);
+        REQUIRE(result2 == 110);
+    }
+    
+    SECTION("Get local write queue full stall cycles - edge cases") {
+        // Edge case: previousLW == currentCycle
+        int result1 = simulator.getLocalWriteQueueFullStallCycles(100, 100, 10, 8, 2);
+        REQUIRE(result1 == 110);
     }
 }
 
@@ -820,7 +812,7 @@ TEST_CASE("Formocast: Edge cases and error handling", "[formocast]") {
         auto perf = simulator.predictedPerformance();
         
         // Check specific expected value for large problem (8192x8192x8192)
-        REQUIRE(perf.microSeconds == Approx(847.421).epsilon(0.01));
+        REQUIRE(perf.microSeconds == Approx(1123.903).epsilon(0.01));
     }
     
     SECTION("Problem with GlobalSplitU=2") {

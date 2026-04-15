@@ -31,7 +31,9 @@ dependencies = [
 test = [
     "pytest>=7.0.0",
     "pytest-cov>=4.0.0",
+    "pyyaml>=6.0",
 ]
+torch = ["torch>=2.0.0"]
 
 [tool.scikit-build]
 wheel.packages = ["src/origami"]
@@ -71,12 +73,14 @@ wheel.exclude = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "integration: marks tests as integration tests that require hardware",
+    "regression: marks tests as ranking regression tests",
 ]
 addopts = [
     "-ra",

@@ -97,7 +97,7 @@ BnBwdTrainingPerActivation::GetSolution(const ExecutionContext& context,
 
         auto kernel = KernelInfo{};
 
-        kernel.kernel_file = "MIOpenBatchNormBwdPerActHIP.cpp";
+        kernel.kernel_file = "MIOpenBatchNormBwdPerAct.cpp";
         kernel.kernel_name = "MIOpenBatchNormBwdPerActivation";
 
         if(problem.UseSaved())

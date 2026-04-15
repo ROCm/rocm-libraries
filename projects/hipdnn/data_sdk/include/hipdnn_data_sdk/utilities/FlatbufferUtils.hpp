@@ -5,14 +5,29 @@
 
 #include <flatbuffers/flatbuffers.h>
 #include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
-#include <hipdnn_data_sdk/utilities/UtilsBfp8.hpp>
-#include <hipdnn_data_sdk/utilities/UtilsFp8.hpp>
+#include <hipdnn_data_sdk/types.hpp>
+#include <optional>
 #include <stdexcept>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 namespace hipdnn_data_sdk::utilities
 {
+
+/// Convert std::optional<T> to flatbuffers::Optional<T>.
+template <typename T>
+flatbuffers::Optional<T> toFlatbufferOptional(const std::optional<T>& opt)
+{
+    return opt.has_value() ? flatbuffers::Optional<T>(*opt) : flatbuffers::nullopt;
+}
+
+/// Convert flatbuffers::Optional<T> to std::optional<T>.
+template <typename T>
+std::optional<T> toStdOptional(const flatbuffers::Optional<T>& opt)
+{
+    return opt.has_value() ? std::optional<T>(opt.value()) : std::nullopt;
+}
 
 template <typename T>
 inline std::vector<T> convertFlatBufferVectorToStdVector(const flatbuffers::Vector<T>* in)
@@ -72,6 +87,12 @@ TargetType extractValueFromTensorValue(const data_objects::TensorAttributesT& te
             return static_cast<TargetType>(val->value());
         }
         break;
+    case data_objects::DataType::INT64:
+        if(auto val = tensorAttr.value.AsInt64Value())
+        {
+            return static_cast<TargetType>(val->value());
+        }
+        break;
     case data_objects::DataType::UINT8:
         if(auto val = tensorAttr.value.AsFloat8Value())
         {
@@ -87,14 +108,14 @@ TargetType extractValueFromTensorValue(const data_objects::TensorAttributesT& te
     case data_objects::DataType::FP8_E4M3:
         if(auto val = tensorAttr.value.AsFloat8Value())
         {
-            auto fp8 = hipdnn_data_sdk::utilities::fp8::uchar_as_fp8(val->value());
+            auto fp8 = types::fp8_e4m3::from_bits(val->value());
             return static_cast<TargetType>(static_cast<float>(fp8));
         }
         break;
     case data_objects::DataType::FP8_E5M2:
         if(auto val = tensorAttr.value.AsFloat8Value())
         {
-            auto bfp8 = hipdnn_data_sdk::utilities::bfp8::uchar_as_bfp8(val->value());
+            auto bfp8 = types::fp8_e5m2::from_bits(val->value());
             return static_cast<TargetType>(static_cast<float>(bfp8));
         }
         break;

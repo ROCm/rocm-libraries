@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -48,80 +25,80 @@ namespace rocRoller
         {
             /// Does the instruction require a nop before it?
             /// One per nop.
-            float nops;
+            float nops = 0.0f;
 
             /// Does the instruction require a `s_waitcnt vmcnt()` before it?
             /// One per value less than the max vmcnt for the architecture.
-            float vmcnt;
+            float vmcnt = 0.0f;
 
             /// Does the instruction require a `s_waitcnt lgkmcnt()` before it?
             /// One per value less than the max lgkmcnt for the architecture.
-            float lgkmcnt;
+            float lgkmcnt = 0.0f;
 
             /// `vectorQueueSat` penalizes an instruction for how much it will
             /// make the vector memory queue longer than `vmQueueLen`.
-            int   vmQueueLen;
-            float vectorQueueSat;
+            int   vmQueueLen     = 0;
+            float vectorQueueSat = 0.0f;
 
             /// `ldsQueueSat` penalizes an instruction for how much it will
             /// make the vector memory queue longer than `vmQueueLen`.
-            float ldsQueueSat;
-            int   lgkmQueueLen;
+            float ldsQueueSat  = 0.0f;
+            int   lgkmQueueLen = 0;
 
             /// Does our model predict that the instruction will be able to
             /// issue immediately, or after a stall?
             /// One per predicted stall cycle.
-            float stallCycles;
+            float stallCycles = 0.0f;
 
             /// Penalizes instructions that are not MFMA, therefore prioritizing
             /// MFMA instructions.
-            float notMFMA;
+            float notMFMA = 0.0f;
 
             /// Penalizes instructions that are MFMA, therefore prioritizing
             /// other instructions.
-            float isMFMA;
+            float isMFMA = 0.0f;
 
-            float isSMEM;
-            float isSControl;
-            float isSALU;
+            float isSMEM     = 0.0f;
+            float isSControl = 0.0f;
+            float isSALU     = 0.0f;
 
-            float isVMEMRead;
-            float isVMEMWrite;
-            float isLDSRead;
-            float isLDSWrite;
-            float isVALU;
+            float isVMEMRead  = 0.0f;
+            float isVMEMWrite = 0.0f;
+            float isLDSRead   = 0.0f;
+            float isLDSWrite  = 0.0f;
+            float isVALU      = 0.0f;
 
-            float isACCVGPRWrite;
-            float isACCVGPRRead;
+            float isACCVGPRWrite = 0.0f;
+            float isACCVGPRRead  = 0.0f;
 
             /// How many new SGPRs will the instruction allocate?
-            float newSGPRs;
+            float newSGPRs = 0.0f;
 
             /// How many new VGPRs will the instruction allocate?
-            float newVGPRs;
+            float newVGPRs = 0.0f;
 
             /// By how much will the instruction increase the high water mark
             /// of SGPR allocation so far seen in the kernel?
-            float highWaterMarkSGPRs;
+            float highWaterMarkSGPRs = 0.0f;
 
             /// By how much will the instruction increase the high water mark
             /// of VGPR allocation so far seen in the kernel?
-            float highWaterMarkVGPRs;
+            float highWaterMarkVGPRs = 0.0f;
 
             /// What fraction of the remaining SGPRs will be newly allocated by
             /// this instruction?
-            float fractionOfSGPRs;
+            float fractionOfSGPRs = 0.0f;
 
             /// What fraction of the remaining VGPRs will be newly allocated by
             /// this instruction?
-            float fractionOfVGPRs;
+            float fractionOfVGPRs = 0.0f;
 
             /// Will this instruction cause the kernel to run out of registers
             /// if scheduled right now?
             /// This should be set relatively high in order to cause us to pick
             /// any other instruction which will (hopefully) eventually free some
             /// registers.
-            float outOfRegisters;
+            float outOfRegisters = 0.0f;
 
             /// If `true`, an `s_barrier` instruction that does not require a
             /// `s_waitcnt` will be given a cost of 0.  This will attempt to
@@ -129,7 +106,7 @@ namespace rocRoller
             /// hopefully reduce their impact on performance.
             /// TODO: Remove once we have removed the redundant barrier nodes
             /// from the control graph.
-            bool zeroFreeBarriers;
+            bool zeroFreeBarriers = false;
 
             int vmemCycles    = 75;
             int vmemQueueSize = 4;

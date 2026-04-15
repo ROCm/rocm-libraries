@@ -8,9 +8,13 @@ findandcheckclangtidy()
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+# Store hipdnn source directory at include time (CMAKE_CURRENT_LIST_DIR is stable)
+# This is needed because PROJECT_SOURCE_DIR can change if this is included from subdirectories
+get_filename_component(HIPDNN_SOURCE_DIR "${CMAKE_CURRENT_LIST_DIR}/.." ABSOLUTE)
+
 # Sets up clang-tidy command variables with appropriate compiler flags for C++ and HIP files
 function(setClangTidyVars)
-    set(CLANG_TIDY_COMMAND ${CLANG_TIDY_EXE} -config-file=${CMAKE_SOURCE_DIR}/.clang-tidy -p
+    set(CLANG_TIDY_COMMAND ${CLANG_TIDY_EXE} -config-file=${HIPDNN_SOURCE_DIR}/.clang-tidy -p
                            ${CMAKE_BINARY_DIR} PARENT_SCOPE
     )
     if(NOT CLANG_TIDY_HIP_ARGS)
@@ -53,29 +57,50 @@ function(add_clang_tidy_custom_target)
             set(CLANG_TIDY_JOBS 1)
         endif()
 
+        # Use prefixed target names in superbuild to avoid collisions
+        if(ROCM_LIBS_SUPERBUILD)
+            set(_TIDY_TARGET ${PROJECT_NAME}_tidy)
+            set(_TIDY_CXX_TARGET ${PROJECT_NAME}_tidy-cxx)
+        else()
+            set(_TIDY_TARGET tidy)
+            set(_TIDY_CXX_TARGET tidy-cxx)
+        endif()
+
         # Target for running tidy on all files using HIP args for all files.
         add_custom_target(
-            tidy
+            ${_TIDY_TARGET}
             COMMAND
                 ${RUN_CLANG_TIDY_EXE} -p ${CMAKE_BINARY_DIR}
-                -config-file=${CMAKE_SOURCE_DIR}/.clang-tidy -source-filter "^(?!.*_deps/).*" -quiet
+                -config-file=${HIPDNN_SOURCE_DIR}/.clang-tidy -source-filter "^(?!.*_deps/).*" -quiet
                 -j ${CLANG_TIDY_JOBS} ${CLANG_TIDY_HIP_ARGS}
-            WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+            WORKING_DIRECTORY ${HIPDNN_SOURCE_DIR}
             COMMENT
-                "Running clang-tidy on all source files and headers (${CLANG_TIDY_JOBS} parallel jobs)..."
+                "Running clang-tidy on ${PROJECT_NAME} source files and headers (${CLANG_TIDY_JOBS} parallel jobs)..."
             VERBATIM
         )
 
         # Target for running tidy on all C++ language files (no HIP args)
         add_custom_target(
-            tidy-cxx
+            ${_TIDY_CXX_TARGET}
             COMMAND
                 ${RUN_CLANG_TIDY_EXE} -p ${CMAKE_BINARY_DIR}
-                -config-file=${CMAKE_SOURCE_DIR}/.clang-tidy -source-filter
+                -config-file=${HIPDNN_SOURCE_DIR}/.clang-tidy -source-filter
                 "^(?!.*(_deps/)).*" -quiet -j ${CLANG_TIDY_JOBS}
-            WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-            COMMENT "Running clang-tidy on C++ files (${CLANG_TIDY_JOBS} parallel jobs)..."
+            WORKING_DIRECTORY ${HIPDNN_SOURCE_DIR}
+            COMMENT "Running clang-tidy on ${PROJECT_NAME} C++ files (${CLANG_TIDY_JOBS} parallel jobs)..."
             VERBATIM
+        )
+
+        # Alias targets with consistent hyphenated naming
+        add_custom_target(
+            ${PROJECT_NAME}-tidy
+            DEPENDS ${_TIDY_TARGET}
+            COMMENT "Alias for ${_TIDY_TARGET}"
+        )
+        add_custom_target(
+            ${PROJECT_NAME}-tidy-cxx
+            DEPENDS ${_TIDY_CXX_TARGET}
+            COMMENT "Alias for ${_TIDY_CXX_TARGET}"
         )
     else()
         message(${_not_found_log_level}

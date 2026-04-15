@@ -6,6 +6,8 @@
 #include <optional>
 #include <unordered_map>
 
+#include <hipdnn_plugin_sdk/PluginLogging.hpp>
+
 #include <hipdnn_data_sdk/data_objects/pointwise_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_data_sdk/flatbuffer_utilities/FlatbufferTypeHelpers.hpp>
@@ -15,19 +17,19 @@
 
 #include "MiopenTensor.hpp"
 
-#define LOG_ON_MIOPEN_FAILURE(status)                                                    \
-    do                                                                                   \
-    {                                                                                    \
-        if(status != miopenStatusSuccess)                                                \
-        {                                                                                \
-            HIPDNN_LOG_ERROR("MIOpen error occurred: {}", miopenGetErrorString(status)); \
-        }                                                                                \
+#define LOG_ON_MIOPEN_FAILURE(status)                                                           \
+    do                                                                                          \
+    {                                                                                           \
+        if((status) != miopenStatusSuccess)                                                     \
+        {                                                                                       \
+            HIPDNN_PLUGIN_LOG_ERROR("MIOpen error occurred: " << miopenGetErrorString(status)); \
+        }                                                                                       \
     } while(0)
 
 #define THROW_ON_MIOPEN_FAILURE(status)                                                 \
     do                                                                                  \
     {                                                                                   \
-        if(status != miopenStatusSuccess)                                               \
+        if((status) != miopenStatusSuccess)                                             \
         {                                                                               \
             throw hipdnn_plugin_sdk::HipdnnPluginException(                             \
                 HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,                                    \
@@ -64,7 +66,8 @@ public:
         auto status = miopenGetTuningPolicy(_handle, &_originalPolicy);
         if(status != miopenStatusSuccess)
         {
-            HIPDNN_LOG_ERROR("Failed to get tuning policy: {}", miopenGetErrorString(status));
+            HIPDNN_PLUGIN_LOG_ERROR(
+                "Failed to get tuning policy: " << miopenGetErrorString(status));
             _originalPolicy = miopenTuningPolicyNone; // Fallback
         }
 
@@ -73,7 +76,14 @@ public:
         status = miopenSetTuningPolicy(_handle, policy);
         if(status != miopenStatusSuccess)
         {
-            HIPDNN_LOG_ERROR("Failed to set tuning policy: {}", miopenGetErrorString(status));
+            HIPDNN_PLUGIN_LOG_ERROR(
+                "Failed to set tuning policy: " << miopenGetErrorString(status));
+        }
+        else
+        {
+            HIPDNN_PLUGIN_LOG_INFO("Tuning policy set to "
+                                   << static_cast<int>(policy)
+                                   << " (benchmarking=" << benchmarkingEnabled << ")");
         }
     }
 
@@ -83,7 +93,13 @@ public:
         auto status = miopenSetTuningPolicy(_handle, _originalPolicy);
         if(status != miopenStatusSuccess)
         {
-            HIPDNN_LOG_ERROR("Failed to restore tuning policy: {}", miopenGetErrorString(status));
+            HIPDNN_PLUGIN_LOG_ERROR(
+                "Failed to restore tuning policy: " << miopenGetErrorString(status));
+        }
+        else
+        {
+            HIPDNN_PLUGIN_LOG_INFO("Tuning policy restored to "
+                                   << static_cast<int>(_originalPolicy));
         }
     }
 
@@ -100,18 +116,18 @@ private:
     miopenTuningPolicy_t _originalPolicy{miopenTuningPolicyNone};
 };
 
-#define HIPDNN_PREPEND_MESSAGE_ON_THROW(statement, message)                               \
-    do                                                                                    \
-    {                                                                                     \
-        try                                                                               \
-        {                                                                                 \
-            statement;                                                                    \
-        }                                                                                 \
-        catch(hipdnn_plugin_sdk::HipdnnPluginException error)                             \
-        {                                                                                 \
-            throw hipdnn_plugin_sdk::HipdnnPluginException(error.getStatus(),             \
-                                                           message + error.getMessage()); \
-        }                                                                                 \
+#define HIPDNN_PREPEND_MESSAGE_ON_THROW(statement, message)                                 \
+    do                                                                                      \
+    {                                                                                       \
+        try                                                                                 \
+        {                                                                                   \
+            statement;                                                                      \
+        }                                                                                   \
+        catch(hipdnn_plugin_sdk::HipdnnPluginException error)                               \
+        {                                                                                   \
+            throw hipdnn_plugin_sdk::HipdnnPluginException(error.getStatus(),               \
+                                                           (message) + error.getMessage()); \
+        }                                                                                   \
     } while(0)
 
 namespace miopen_plugin::miopen_utils
@@ -141,6 +157,19 @@ const hipdnn_data_sdk::data_objects::TensorAttributes& findTensorAttributes(
     int64_t uid);
 
 MiopenTensor createTensor(
+    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        tensorMap,
+    int64_t uid);
+
+/// @brief Creates a MiopenTensor with automatic 3D→4D padding for batchnorm.
+///
+/// If the tensor has 3 dimensions, it will be padded to 4D before creating
+/// the MIOpen descriptor. 4D and 5D tensors are passed through unchanged.
+///
+/// @param tensorMap Map of tensor UIDs to TensorAttributes
+/// @param uid The tensor UID to look up
+/// @return MiopenTensor with potentially padded descriptor
+MiopenTensor createBatchnormTensor(
     const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
         tensorMap,
     int64_t uid);

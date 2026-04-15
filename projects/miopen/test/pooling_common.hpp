@@ -597,8 +597,9 @@ struct pooling_driver : test_driver
     void run_impl()
     {
         std::vector<Index> indices{};
-        auto input = tensor<T>{in_shape}.generate(tensor_elem_gen_integer{
-            (miopen_type<T>{} == miopenHalf || miopen_type<T>{} == miopenBFloat16) ? 5 : 17});
+        auto input = tensor<T>{in_shape};
+
+        // Set up tensor descriptor with correct layout BEFORE generating data
         if(in_layout != "NCHW" && in_layout != "NCDHW")
         {
             const std::vector<std::size_t> dim_lens = input.desc.GetLengths();
@@ -610,6 +611,10 @@ struct pooling_driver : test_driver
                 dim_strides);
             input.desc = miopen::TensorDescriptor(miopen_type<T>{}, dim_lens, dim_strides);
         }
+
+        input.generate(tensor_elem_gen_integer{
+            (miopen_type<T>{} == miopenHalf || miopen_type<T>{} == miopenBFloat16) ? 5 : 17});
+
         auto out  = verify(verify_forward_pooling<SptDim>{}, input, filter, indices);
         auto dout = out.first;
         dout.generate(tensor_elem_gen_integer{2503});
@@ -632,16 +637,15 @@ struct pooling_driver : test_driver
             (dataset_id == 0) && full_set; // Otherwise the default dataset takes too much time.
         const bool wide_dataset = (dataset_id == 2) && full_set;
 
-        filter = miopen::PoolingDescriptor
-        {
-            mode_lookup.at(miopen::ToUpper(mode)),
+        filter = miopen::PoolingDescriptor{mode_lookup.at(miopen::ToUpper(mode)),
 #if TEST_PADDING_MODE == 1
-                pmode_lookup.at(miopen::ToUpper(pmode)),
+                                           pmode_lookup.at(miopen::ToUpper(pmode)),
 #else
-                miopenPaddingDefault,
+                                           miopenPaddingDefault,
 #endif
-                lens, strides, pads
-        };
+                                           lens,
+                                           strides,
+                                           pads};
 
         filter.SetIndexType(idx_typ);
         filter.SetWorkspaceIndexMode(miopenPoolingWorkspaceIndexMode_t(wsidx));

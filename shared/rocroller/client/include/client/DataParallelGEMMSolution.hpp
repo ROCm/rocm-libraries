@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -43,7 +20,8 @@ namespace rocRoller
         {
             class DataParallelGEMMSolution : public GEMMSolution
             {
-                Operations::OperationTag m_tagA, m_tagB, m_tagC, m_tagD;
+                Operations::OperationTag                m_tagA, m_tagB, m_tagC, m_tagD;
+                std::optional<Operations::OperationTag> m_tagCvt;
                 Operations::OperationTag m_tagTensorA, m_tagTensorB, m_tagTensorC, m_tagScalarAlpha,
                     m_tagScalarBeta, m_tagTensorD;
 
@@ -90,11 +68,49 @@ namespace rocRoller
 
                     m_tagTensorA = command->addOperation(
                         Operations::Tensor(2, typeA, {}, unitStrides(solutionParams.types.transA)));
-                    m_tagA = command->addOperation(Operations::T_Load_Tiled(m_tagTensorA));
+
+                    auto loadInputA = m_tagTensorA;
+
+                    auto pretileA = not solutionParams.types.pretileA.empty();
+                    if(pretileA)
+                    {
+                        AssertFatal(solutionParams.types.transA
+                                        == Client::GEMMClient::TransposeType::T,
+                                    "Pretiling A is only supported when A is TransposeType::T.",
+                                    ShowValue(solutionParams.types.transA));
+
+                        AssertFatal(solutionParams.types.pretileA.size() == 2,
+                                    "pretileA must have size 2 (MxK tile dimensions).",
+                                    ShowValue(solutionParams.types.pretileA.size()));
+
+                        loadInputA = command->addOperation(Operations::SubTileTranspose(
+                            loadInputA, solutionParams.types.pretileA, true));
+                    }
+
+                    m_tagA = command->addOperation(Operations::T_Load_Tiled(loadInputA));
 
                     m_tagTensorB = command->addOperation(
                         Operations::Tensor(2, typeB, {}, unitStrides(solutionParams.types.transB)));
-                    m_tagB = command->addOperation(Operations::T_Load_Tiled(m_tagTensorB));
+
+                    auto loadInputB = m_tagTensorB;
+
+                    auto pretileB = not solutionParams.types.pretileB.empty();
+                    if(pretileB)
+                    {
+                        AssertFatal(solutionParams.types.transB
+                                        == Client::GEMMClient::TransposeType::N,
+                                    "Pretiling B is only supported when B is TransposeType::N.",
+                                    ShowValue(solutionParams.types.transB));
+
+                        AssertFatal(solutionParams.types.pretileB.size() == 2,
+                                    "pretileB must have size 2 (KxN tile dimensions).",
+                                    ShowValue(solutionParams.types.pretileB.size()));
+
+                        loadInputB = command->addOperation(Operations::SubTileTranspose(
+                            loadInputB, solutionParams.types.pretileB));
+                    }
+
+                    m_tagB = command->addOperation(Operations::T_Load_Tiled(loadInputB));
 
                     auto mulInputA = m_tagA;
                     auto mulInputB = m_tagB;
@@ -126,42 +142,52 @@ namespace rocRoller
 
                     if(solutionParams.types.scaleA == Operations::ScaleMode::Separate)
                     {
-                        if(not solutionParams.types.scalePretileA.empty())
+                        m_tagTensorScaleA = command->addOperation(rocRoller::Operations::Tensor(
+                            2,
+                            solutionParams.types.scaleTypeA,
+                            {},
+                            unitStrides(solutionParams.types.transA)));
+
+                        auto loadScaleInputA = m_tagTensorScaleA;
+
+                        auto isPreTiled = not solutionParams.types.scalePretileA.empty();
+                        if(isPreTiled)
                         {
-                            size_t stride = solutionParams.types.scalePretileA[1];
                             AssertFatal(solutionParams.types.transA == TransposeType::T);
-                            m_tagTensorScaleA = command->addOperation(rocRoller::Operations::Tensor(
-                                4,
-                                solutionParams.types.scaleTypeA,
-                                std::vector<size_t>{0ull,
-                                                    0ull,
-                                                    solutionParams.types.scalePretileA[0],
-                                                    solutionParams.types.scalePretileA[1]},
-                                std::vector<size_t>{0ull, 0ull, stride, 1ull}));
+                            AssertFatal(solutionParams.types.scalePretileA.size() == 2,
+                                        ShowValue(solutionParams.types.scalePretileA));
+                            loadScaleInputA
+                                = command->addOperation(rocRoller::Operations::SubTileTranspose(
+                                    loadScaleInputA.value(),
+                                    solutionParams.types.scalePretileA,
+                                    solutionParams.types.transA == TransposeType::T));
                         }
-                        else
-                        {
-                            m_tagTensorScaleA = command->addOperation(rocRoller::Operations::Tensor(
-                                2,
-                                solutionParams.types.scaleTypeA,
-                                {},
-                                unitStrides(solutionParams.types.transA)));
-                        }
+
                         m_tagLoadScaleA = command->addOperation(
-                            rocRoller::Operations::T_Load_Tiled(m_tagTensorScaleA.value()));
+                            rocRoller::Operations::T_Load_Tiled(loadScaleInputA.value()));
 
                         auto scaleInputA = m_tagLoadScaleA;
 
-                        if(solutionParams.types.scaleSkipPermlane)
+                        if(solutionParams.types.scaleSkipPermlane
+                           == rocRoller::ScaleSkipPermlaneMode::PreSwizzleScaleGFX950)
+                        {
+                            AssertFatal(
+                                not solutionParams.types.scalePretileA.empty()
+                                    && not solutionParams.types.scalePretileB.empty(),
+                                "PreSwizzleScaleGFX950 requires pretile scale (scalePretileA and "
+                                "scalePretileB non-empty).");
+                        }
+
+                        if(solutionParams.types.scaleSkipPermlane
+                           != rocRoller::ScaleSkipPermlaneMode::None)
                         {
                             AssertFatal(solutionParams.types.scaleShuffleTileA.size() == 3,
                                         ShowValue(solutionParams.types.scaleShuffleTileA));
 
                             scaleInputA
                                 = command->addOperation(rocRoller::Operations::SubTileTranspose(
-                                    *m_tagLoadScaleA, solutionParams.types.scaleShuffleTileA));
+                                    scaleInputA.value(), solutionParams.types.scaleShuffleTileA));
                         }
-
                         m_tagBlockScaleA = mulInputA
                             = command->addOperation(rocRoller::Operations::BlockScale(
                                 m_tagA,
@@ -182,40 +208,40 @@ namespace rocRoller
 
                     if(solutionParams.types.scaleB == Operations::ScaleMode::Separate)
                     {
-                        if(not solutionParams.types.scalePretileB.empty())
-                        {
-                            size_t stride = solutionParams.types.scalePretileB[0];
-                            AssertFatal(solutionParams.types.transB == TransposeType::N);
-                            m_tagTensorScaleB = command->addOperation(rocRoller::Operations::Tensor(
-                                4,
-                                solutionParams.types.scaleTypeB,
-                                std::vector<size_t>{0ull,
-                                                    0ull,
-                                                    solutionParams.types.scalePretileB[0],
-                                                    solutionParams.types.scalePretileB[1]},
+                        m_tagTensorScaleB = command->addOperation(rocRoller::Operations::Tensor(
+                            2,
+                            solutionParams.types.scaleTypeB,
+                            {},
+                            unitStrides(solutionParams.types.transB)));
 
-                                std::vector<size_t>{0ull, 0ull, 1ull, stride}));
-                        }
-                        else
+                        auto loadScaleInputB = m_tagTensorScaleB;
+
+                        auto isPreTiled = not solutionParams.types.scalePretileB.empty();
+                        if(isPreTiled)
                         {
-                            m_tagTensorScaleB = command->addOperation(rocRoller::Operations::Tensor(
-                                2,
-                                solutionParams.types.scaleTypeB,
-                                {},
-                                unitStrides(solutionParams.types.transB)));
+                            AssertFatal(solutionParams.types.transB == TransposeType::N);
+                            AssertFatal(solutionParams.types.scalePretileB.size() == 2,
+                                        ShowValue(solutionParams.types.scalePretileB));
+                            loadScaleInputB
+                                = command->addOperation(rocRoller::Operations::SubTileTranspose(
+                                    loadScaleInputB.value(),
+                                    solutionParams.types.scalePretileB,
+                                    solutionParams.types.transB == TransposeType::T));
                         }
+
                         m_tagLoadScaleB = command->addOperation(
-                            rocRoller::Operations::T_Load_Tiled(m_tagTensorScaleB.value()));
+                            rocRoller::Operations::T_Load_Tiled(loadScaleInputB.value()));
 
                         auto scaleInputB = m_tagLoadScaleB;
 
-                        if(solutionParams.types.scaleSkipPermlane)
+                        if(solutionParams.types.scaleSkipPermlane
+                           != rocRoller::ScaleSkipPermlaneMode::None)
                         {
                             AssertFatal(solutionParams.types.scaleShuffleTileB.size() == 3);
 
                             scaleInputB
                                 = command->addOperation(rocRoller::Operations::SubTileTranspose(
-                                    *m_tagLoadScaleB, solutionParams.types.scaleShuffleTileB));
+                                    *scaleInputB, solutionParams.types.scaleShuffleTileB));
                         }
 
                         m_tagBlockScaleB = mulInputB
@@ -272,7 +298,21 @@ namespace rocRoller
 
                     m_tagTensorD
                         = command->addOperation(Operations::Tensor(2, typeD, {}, {(size_t)1})); // D
-                    command->addOperation(Operations::T_Store_Tiled(m_tagD, m_tagTensorD));
+                    // command->addOperation(Operations::T_Store_Tiled(m_tagD, m_tagTensorD));
+                    if(solutionParams.types.typeAcc == solutionParams.types.typeD)
+                    {
+                        command->addOperation(Operations::T_Store_Tiled(m_tagD, m_tagTensorD));
+                    }
+                    else
+                    {
+                        // If Matrix C and D are of different types, an explicit type conversion is required
+
+                        auto cvtOp = Operations::T_Execute(command->getNextTag());
+                        // (SR)Convert( alpha * (A * B) + beta * C )
+                        auto tagCvt = cvtOp.addXOp(Operations::E_Cvt(m_tagD, typeD));
+                        command->addOperation(std::move(cvtOp));
+                        command->addOperation(Operations::T_Store_Tiled(tagCvt, m_tagTensorD));
+                    }
 
                     if(solutionParams.workgroupMappingDim != -1)
                     {
@@ -471,16 +511,36 @@ namespace rocRoller
                         {solutionParams.macM, solutionParams.macN},
                         LayoutType::MATRIX_ACCUMULATOR,
                         {wave_m, wave_n, wave_k, wave_b});
-                    auto macTileD = KernelGraph::CoordinateGraph::MacroTile(
+
+                    // Determine if type conversion is needed
+                    bool needsConversion
+                        = (solutionParams.types.typeAcc != solutionParams.types.typeD);
+
+                    // m_tagD: If conversion is needed, use WAVE (not LDS) since it won't be stored directly
+                    auto memoryTypeD = GetMemoryType(solutionParams.storePath);
+                    auto macTileD    = KernelGraph::CoordinateGraph::MacroTile(
                         {solutionParams.macM, solutionParams.macN},
                         LayoutType::MATRIX_ACCUMULATOR,
                         {wave_m, wave_n, wave_k, wave_b},
-                        solutionParams.storeLDSD ? MemoryType::WAVE_LDS : MemoryType::WAVE);
+                        (IsLDSStore(solutionParams.storePath) && !needsConversion)
+                               ? memoryTypeD
+                               : MemoryType::WAVE);
 
                     params->setDimensionInfo(m_tagA, macTileA);
                     params->setDimensionInfo(m_tagB, macTileB);
                     params->setDimensionInfo(m_tagC, macTileC);
                     params->setDimensionInfo(m_tagD, macTileD);
+
+                    if(m_tagCvt.has_value())
+                    {
+                        // For type conversion, this is what gets stored - use LDS store path if specified
+                        auto macTileCvt = KernelGraph::CoordinateGraph::MacroTile(
+                            {solutionParams.macM, solutionParams.macN},
+                            LayoutType::MATRIX_ACCUMULATOR,
+                            {wave_m, wave_n, wave_k, wave_b},
+                            IsLDSStore(solutionParams.storePath) ? memoryTypeD : MemoryType::WAVE);
+                        params->setDimensionInfo(*m_tagCvt, macTileCvt);
+                    }
 
                     if(solutionParams.types.scaleA == Operations::ScaleMode::Separate)
                     {
@@ -529,8 +589,6 @@ namespace rocRoller
                         params->setDimensionInfo(*m_tagLoadScaleB, macTileBScale);
                     }
 
-                    params->unrollX       = solutionParams.unrollX;
-                    params->unrollY       = solutionParams.unrollY;
                     params->swizzleScale  = solutionParams.swizzleScale;
                     params->prefetchScale = solutionParams.prefetchScale;
 
@@ -547,13 +605,10 @@ namespace rocRoller
                         params->prefetch = false;
                     }
 
-                    if(solutionParams.matchMemoryAccess)
-                    {
-                        params->transposeMemoryAccess.set(
-                            LayoutType::MATRIX_A, solutionParams.types.transA == TransposeType::T);
-                        params->transposeMemoryAccess.set(
-                            LayoutType::MATRIX_B, solutionParams.types.transB == TransposeType::T);
-                    }
+                    params->transposeMemoryAccess.set(
+                        LayoutType::MATRIX_A, solutionParams.types.transA == TransposeType::T);
+                    params->transposeMemoryAccess.set(
+                        LayoutType::MATRIX_B, solutionParams.types.transB == TransposeType::T);
 
                     uint workgroup_size_x
                         = solutionParams.workgroupSizeX * solutionParams.workgroupSizeY;

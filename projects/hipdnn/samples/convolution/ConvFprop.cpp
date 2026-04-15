@@ -10,6 +10,8 @@
 #include <hipdnn_frontend.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceConvolution.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_test_sdk/utilities/DynamicTolerances.hpp>
+#include <hipdnn_test_sdk/utilities/TensorDiff.hpp>
 #include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
 
 #include "../utils/Helpers.hpp"
@@ -102,15 +104,17 @@ bool SampleRunner::operator()(const TensorLayout& layout)
         hipdnn_test_sdk::utilities::CpuFpReferenceConvolution::fprop(
             xTensor, wTensor, yRefTensor, {u, v}, {dilH, dilW}, {padH, padW});
 
-        auto tolerance = hipdnn_test_sdk::utilities::conv::getToleranceFwd<InputType>();
+        // Use dynamic tolerance calculation instead of static tolerance
+        auto tolerance = hipdnn_test_sdk::utilities::conv::
+            calculateConvFpropTolerance<InputType, InputType, float>(
+                0.0, 1.0, 0.0, 1.0, wAttr->get_dim());
 
         auto yValidator
             = hipdnn_test_sdk::utilities::CpuFpReferenceValidation<InputType>(tolerance, tolerance);
 
-        bool yValid = yValidator.allClose(yRefTensor, yTensor);
-
         std::cout << "CPU reference validation:\n";
-        std::cout << "  y: " << (yValid ? "successful" : "failed") << "\n";
+        bool yValid = hipdnn_test_sdk::utilities::validateAndReport<InputType>(
+            std::cout, "y", yValidator, yRefTensor, yTensor, tolerance, tolerance);
 
         validationPassed = yValid;
     }
@@ -123,15 +127,10 @@ int main(int argc, char* argv[])
 {
     auto config = parseCommandLineArgs(argc, argv);
 
-    initializeFrontendLogging();
+    auto [handle, handleError] = createHipdnnHandle();
+    HIPDNN_FE_CHECK(handleError);
 
-    auto backend = hipdnnBackend();
-    hipdnnHandle_t handle;
-    HIPDNN_CHECK(backend->create(&handle));
-
-    bool allPassed = run(SampleRunner{handle, config});
-
-    HIPDNN_CHECK(backend->destroy(handle));
+    bool allPassed = run(SampleRunner{*handle, config});
 
     if(allPassed)
     {

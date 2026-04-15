@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright (c) 2017 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #ifndef GUARD_MIOPEN_TEST_DRIVER_HPP
 #define GUARD_MIOPEN_TEST_DRIVER_HPP
@@ -31,6 +8,7 @@
 #include "get_handle.hpp"
 #include "network_data.hpp"
 #include "serialize.hpp"
+#include "miopen/stringutils.hpp"
 #include "tensor_holder.hpp"
 #include "test.hpp"
 #include "verify.hpp"
@@ -47,8 +25,6 @@
 #include <miopen/env.hpp>
 #include <miopen/rank.hpp>
 #include <miopen/bfloat16.hpp>
-#include <boost/algorithm/string/classification.hpp>
-#include <boost/algorithm/string/split.hpp>
 
 namespace env = miopen::env;
 
@@ -102,8 +78,8 @@ MIOPEN_DECLARE_ENV_VAR_STR(MIOPEN_VERIFY_CACHE_PATH)
 
 struct test_driver
 {
-    test_driver()                   = default;
-    test_driver(const test_driver&) = delete;
+    test_driver()                              = default;
+    test_driver(const test_driver&)            = delete;
     test_driver& operator=(const test_driver&) = delete;
 
     struct argument
@@ -116,8 +92,8 @@ struct test_driver
         std::string name;
 
         // Function may refer to the argument by reference so this needs to be noncopyable
-        argument()                = default;
-        argument(const argument&) = delete;
+        argument()                           = default;
+        argument(const argument&)            = delete;
         argument& operator=(const argument&) = delete;
 
         void post_write()
@@ -151,9 +127,8 @@ struct test_driver
     {
         auto s = env::value(MIOPEN_VERIFY_CACHE_PATH);
         if(s.empty())
-            return "~/.cache/miopen/tests";
-        else
-            return s;
+            s = "~/.cache/miopen/tests";
+        return s;
     }
 
     std::string program_name;
@@ -320,9 +295,8 @@ struct test_driver
 
         for(auto&& arg : this->arguments)
         {
-            std::string value = arg.read_value();
-            std::vector<std::string> value_vector;
-            boost::split(value_vector, value, boost::is_any_of(" "), boost::token_compress_on);
+            std::string value                     = arg.read_value();
+            std::vector<std::string> value_vector = miopen::SplitSpaceSeparated(value);
             if(not value.empty())
             {
                 ret.emplace_back("--" + arg.name);
@@ -767,7 +741,7 @@ struct test_driver
             return miopen::detach_async([=] {
                 result_type result;
                 load(f.string(), result);
-                return result;
+                return std::move(result);
             });
         }
         else
@@ -789,8 +763,8 @@ struct test_driver
     /// Winograd-specific precision loss is roughly 2+2 bits.
     /// Let's adjust tolerance (only for FP32 WrW for now).
     template <class V>
-    auto adjust_parameters_impl(miopen::rank<1>, V&& v)
-        -> decltype(v.stats, v.is_conv_wrw_f32, void())
+    auto adjust_parameters_impl(miopen::rank<1>,
+                                V&& v) -> decltype(v.stats, v.is_conv_wrw_f32, void())
     {
         if(v.is_conv_wrw_f32 && v.stats->algorithm == miopenConvolutionAlgoWinograd)
             tolerance *= 16.0;
@@ -803,8 +777,8 @@ struct test_driver
     }
 
     template <class F, class V, class... Ts>
-    auto verify_impl(F&& f, V&& v, Ts&&... xs)
-        -> decltype(std::make_pair(v.cpu(xs...), v.gpu(xs...)))
+    auto verify_impl(F&& f, V&& v, Ts&&... xs) -> decltype(std::make_pair(v.cpu(xs...),
+                                                                          v.gpu(xs...)))
     {
         decltype(v.cpu(xs...)) cpu;
         decltype(v.gpu(xs...)) gpu;
@@ -1248,8 +1222,7 @@ void test_drive_impl_2(std::string program_name, std::vector<std::string> as)
             }(running_average, elapsed.count(), i + 1); // (avg_acc/N-1) * ((N-1)/N) + y/N;
         }
 
-        std::cout << "Elapsed time: " << elapsed.count() << " s"
-                  << ", "
+        std::cout << "Elapsed time: " << elapsed.count() << " s" << ", "
                   << "Running Average: " << running_average << " s" << std::endl;
     }
 }

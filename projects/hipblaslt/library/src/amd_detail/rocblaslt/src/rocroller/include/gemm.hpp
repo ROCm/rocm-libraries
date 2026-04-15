@@ -1,29 +1,5 @@
-/*! \file */
-/* ************************************************************************
- *
- * MIT License
- *
- * Copyright (C) 2024-2025 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- *
- * ************************************************************************ */
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -35,19 +11,145 @@
 #include <rocRoller/Operations/Scratch_fwd.hpp>
 #include <rocRoller/TensorDescriptor.hpp>
 
+#include <functional>
 #include <map>
+#include <optional>
+
+class GemmHipModuleWrapper
+{
+public:
+    GemmHipModuleWrapper(const std::string& functionName, const std::string& path)
+        : customModuleLoaded(false)
+        , customKernelName(functionName)
+        , customModulePath(path)
+    {
+    }
+
+    ~GemmHipModuleWrapper()
+    {
+        if(customModuleLoaded)
+        {
+            if(hipError_t error = hipModuleUnload(module))
+            {
+                std::cerr << "hipModuleUnload failed: " << std::endl
+                          << " error: " << hipGetErrorString(error) << std::endl;
+            }
+        }
+    }
+
+    hipError_t loadModule()
+    {
+        if(hipError_t error = hipModuleLoad(&module, customModulePath.c_str()))
+        {
+            std::cerr << "hipModuleLoad failed: " << customModulePath << std::endl
+                      << " error: " << hipGetErrorString(error) << std::endl;
+            return error;
+        }
+        customModuleLoaded = true;
+        return hipSuccess;
+    }
+
+    hipError_t getHipFunction(hipFunction_t& function)
+    {
+        if(!customModuleLoaded)
+        {
+            if(hipError_t error = loadModule())
+            {
+                return error;
+            }
+        }
+        return hipModuleGetFunction(&function, module, customKernelName.c_str());
+    }
+
+    std::string getKernelName() const
+    {
+        return customKernelName;
+    }
+
+private:
+    bool        customModuleLoaded;
+    std::string customKernelName;
+    std::string customModulePath;
+    hipModule_t module;
+};
+
+struct ShapeCondition
+{
+    std::optional<size_t> minM, maxM;
+    std::optional<size_t> minN, maxN;
+    std::optional<size_t> minK, maxK;
+
+    std::function<bool(size_t, size_t, size_t)> customMatcher;
+
+    bool matches(size_t m, size_t n, size_t k) const
+    {
+        if(minM && m < *minM)
+            return false;
+        if(maxM && m >= *maxM)
+            return false;
+        if(minN && n < *minN)
+            return false;
+        if(maxN && n >= *maxN)
+            return false;
+        if(minK && k < *minK)
+            return false;
+        if(maxK && k >= *maxK)
+            return false;
+        if(customMatcher && !customMatcher(m, n, k))
+            return false;
+        return true;
+    }
+};
 
 /**
- * @brief GemmKernel
+ * @brief GemmKernel - Base class
  *
- * Everything needed to launch a kernel
+ * Abstract base class for GEMM kernel implementations.
+ * Everything needed to launch a kernel.
  *
  */
-struct GemmKernel
+class GemmKernel
 {
-    rocRoller::CommandPtr                          command;
-    rocRoller::CommandKernelPtr                    commandKernel;
+public:
     std::shared_ptr<SolutionParameters> params;
+    int occupancy = 1;
+
+    std::optional<ShapeCondition>     shapeCondition;
+
+    virtual ~GemmKernel() = default;
+
+    /**
+     * @brief Return the amount of workspace that is required to execute a kernel.
+     *
+     * Note: This only takes into account the workspace required for StreamK kernels.
+     */
+    virtual size_t workspaceRequired(const RocblasltContractionProblem& prob) = 0;
+
+    /**
+     * @brief Return whether or not kernel can be used for a specific problem.
+     */
+    virtual bool isSupportedProblem(const RocblasltContractionProblem& prob) = 0;
+
+    /**
+     * @brief Execute a GEMM operation.
+     *
+     * @param prob
+     * @return rocblaslt_status
+     */
+    virtual rocblaslt_status run(const RocblasltContractionProblem& prob) = 0;
+};
+
+/**
+ * @brief RocRollerGemmKernel - RocRoller-generated kernels
+ *
+ * Kernels generated by the RocRoller code generator.
+ *
+ */
+class RocRollerGemmKernel : public GemmKernel,
+                            public std::enable_shared_from_this<RocRollerGemmKernel>
+{
+    rocRoller::CommandPtr       command;
+    rocRoller::CommandKernelPtr commandKernel;
 
     rocRoller::Operations::OperationTag tagTensorA;
     rocRoller::Operations::OperationTag tagTensorB;
@@ -61,49 +163,113 @@ struct GemmKernel
     rocRoller::Operations::OperationTag tagTensorScaleB;
 
     std::map<rocRoller::Operations::ScratchPolicy, rocRoller::Operations::OperationTag> tagScratch;
-    rocRoller::Operations::OperationTag tagSKGrid;
-    rocRoller::Operations::OperationTag tagWGM;
+    rocRoller::Operations::OperationTag                                                 tagSKGrid;
+    rocRoller::Operations::OperationTag                                                 tagWGM;
 
-    int occupancy;
+    /**
+     * @brief Set the required conditions in order to run this kernel
+     */
+    void setPredicates();
+
+public:
+    /**
+     * @brief Generate a RocRoller GEMM Kernel
+     *
+     * This involves creating the Command describing the KernelType
+     * and setting all of the parameters.
+     *
+     * @param gemm
+     * @return std::shared_ptr<RocRollerGemmKernel>
+     */
+    static std::shared_ptr<RocRollerGemmKernel> generate(std::shared_ptr<SolutionParameters> gemm);
+
+    size_t workspaceRequired(const RocblasltContractionProblem& prob) override;
+
+    bool isSupportedProblem(const RocblasltContractionProblem& prob) override;
+
+    /**
+     * @brief Set the arguments to call a rocRoller kernel
+     *
+     * @param prob
+     * @param wgm
+     * @return CommandArguments
+     */
+    rocRoller::CommandArguments createCommandArguments(const RocblasltContractionProblem& prob,
+                                                       int                                wgm);
+
+    rocblaslt_status run(const RocblasltContractionProblem& prob) override;
 };
 
 /**
- * @brief Generate a GEMM Kernel
+ * @brief CustomGemmKernel - Pre-compiled custom kernels
  *
- * This involves creating the Command describing the KernelType
- * and setting all of the parameters.
+ * Abstract base class for custom kernels loaded from pre-compiled code objects.
+ * Holds the HIP module wrapper for the embedded kernel symbol and \c .co path.
  *
- * @param gemm
- * @return std::shared_ptr<GemmKernel>
  */
-std::shared_ptr<GemmKernel> genGemmKernel(std::shared_ptr<SolutionParameters> gemm);
+class CustomGemmKernel : public GemmKernel
+{
+protected:
+    GemmHipModuleWrapper module;
+
+public:
+    CustomGemmKernel(const std::string& functionName, const std::string& path)
+        : module(functionName, path)
+    {
+    }
+
+    ~CustomGemmKernel() override = default;
+
+    size_t workspaceRequired(const RocblasltContractionProblem& prob) override = 0;
+
+    bool isSupportedProblem(const RocblasltContractionProblem& prob) override = 0;
+
+    rocblaslt_status run(const RocblasltContractionProblem& prob) override = 0;
+};
 
 /**
- * @brief Return the amount of workspace that is required to execute a kernel.
+ * @brief AssemblyStoreRowOrderGemm - Custom GEMM kernels with row-major output
  *
- * Note: This only takes into account the workspace required for StreamK kernels.
+ * Custom kernels from pre-compiled code objects that store output in row-major order.
+ * These kernels use a different argument layout than standard RocRoller kernels.
+ *
  */
-size_t workspaceRequired(std::shared_ptr<GemmKernel> gemm, const RocblasltContractionProblem& prob);
+class AssemblyStoreRowOrderGemm : public CustomGemmKernel
+{
+public:
+    AssemblyStoreRowOrderGemm(const std::string& functionName, const std::string& path)
+        : CustomGemmKernel(functionName, path)
+    {
+    }
+
+    size_t workspaceRequired(const RocblasltContractionProblem& prob) override;
+
+    bool isSupportedProblem(const RocblasltContractionProblem& prob) override;
+
+    rocblaslt_status run(const RocblasltContractionProblem& prob) override;
+};
 
 /**
- * @brief Set the arguments to call a rocRoller kernel
+ * @brief WaveKernel - Wave MXFP4 dynamic GEMM kernels (kernarg ABI and launch differ from AITER path)
  *
- * @param gemm
- * @param prob
- * @return CommandArguments
+ * Selected when the embedded kernel name starts with \c wave (see createCustomGemmKernel).
  */
-rocRoller::CommandArguments createCommandArguments(std::shared_ptr<GemmKernel>        gemm,
-    const RocblasltContractionProblem& prob,
-    int wgm);
+class WaveKernel : public CustomGemmKernel
+{
+    dim3 blockSize;
+
+public:
+    WaveKernel(const std::string& functionName, const std::string& path, dim3 blockSize)
+        : CustomGemmKernel(functionName, path)
+        , blockSize(blockSize)
+    {
+    }
+
+    size_t workspaceRequired(const RocblasltContractionProblem& prob) override;
+
+    bool isSupportedProblem(const RocblasltContractionProblem& prob) override;
+
+    rocblaslt_status run(const RocblasltContractionProblem& prob) override;
+};
 
 std::string genKernelName(std::shared_ptr<SolutionParameters> gemm);
-
-/**
- * @brief Execute a GEMM operation.
- *
- * @param gemm
- * @param prob
- * @return rocblaslt_status
- */
-rocblaslt_status runGemmKernel(std::shared_ptr<GemmKernel>        gemm,
-    const RocblasltContractionProblem& prob);
