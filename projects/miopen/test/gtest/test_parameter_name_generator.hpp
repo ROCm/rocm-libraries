@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright (c) 2025 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier:  MIT
 
 #include <algorithm>
 #include <concepts>
@@ -53,6 +30,10 @@ concept Container = std::ranges::range<T>;
 // Concept for non container types.
 template <typename T>
 concept NotContainer = !Container<T>;
+
+// Concept for std::string types.
+template <typename T>
+concept StdString = std::is_same_v<T, std::string>;
 
 // Template wrapper around a test parameter.
 // It defines the << operator as required by GTest, and the cast operator that returns the wrapped
@@ -161,11 +142,29 @@ template <typename... T>
 // The 'tensorSizes' collection of std::vector<int>'s is turned into a collection of
 // NamedContainer<std::vector<int>>, and then fed into 'testing::Combine()'.
 //
+// template <typename T>
+//     requires StdString<T>
+// static auto MakeNamedParameterCollectionValues(const std::string& name,
+//                                                const std::ranges::range auto& collection)
+// {
+//     std::vector<NamedParameter<T>> v;
+
+//     v.reserve(collection.size());
+
+//     for(const auto& x : collection)
+//     {
+//         v.emplace_back(name, x, separator);
+//     }
+
+//     return testing::ValuesIn(v);
+// }
+
 template <typename T>
-    requires Container<T> && PrintableElement<T> && std::is_move_constructible_v<T>
+    requires Container<T> && PrintableElement<T> && std::is_move_constructible_v<T> &&
+             (!StdString<T>)
 [[maybe_unused]] auto MakeNamedParameterCollectionValues(const std::string& name,
-                                                         const std::ranges::range auto& collection,
-                                                         const std::string& separator = " ")
+                                               const std::ranges::range auto& collection,
+                                               const std::string& separator = " ")
 {
     std::vector<NamedContainer<T>> v;
 
@@ -180,9 +179,9 @@ template <typename T>
 }
 
 template <typename T>
-    requires NotContainer<T> && Printable<T> && std::is_move_constructible_v<T>
+    requires(NotContainer<T> && Printable<T> && std::is_move_constructible_v<T>) || StdString<T>
 [[maybe_unused]] auto MakeNamedParameterCollectionValues(const std::string& name,
-                                                         const std::ranges::range auto& collection)
+                                               const std::ranges::range auto& collection)
 {
     std::vector<NamedParameter<T>> v;
 
