@@ -1,7 +1,6 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-
 #include <miopen/solver/conv_direct_naive_conv.hpp>
 #include <miopen/conv/solvers.hpp>
 #include <miopen/env.hpp>

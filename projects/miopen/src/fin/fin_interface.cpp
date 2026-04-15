@@ -1,7 +1,6 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-
 #include <miopen/config.h>
 
 #if MIOPEN_ENABLE_FIN_INTERFACE

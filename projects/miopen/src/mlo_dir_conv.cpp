@@ -1,7 +1,6 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-
 #include <miopen/config.h>
 #include <miopen/convolution.hpp>
 #include <miopen/db.hpp>
