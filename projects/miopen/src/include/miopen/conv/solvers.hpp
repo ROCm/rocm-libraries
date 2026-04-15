@@ -1719,24 +1719,6 @@ struct MIOPEN_INTERNALS_EXPORT ConvOclDirectFwd final : ConvOclDirectFwdLegacyEx
                                   const LegacyPerformanceConfig&) const override;
 };
 
-struct MIOPEN_INTERNALS_EXPORT ConvOclDirectFwd1x1 final : ConvOclDirectFwdLegacyExhaustiveSearch
-{
-    const std::string& SolverDbId() const override { return GetSolverDbId<ConvOclDirectFwd1x1>(); }
-
-    bool IsApplicable(const ExecutionContext&,
-                      const miopen::conv::ProblemDescription&) const override;
-    ConvSolution GetSolution(const ExecutionContext&,
-                             const miopen::conv::ProblemDescription&,
-                             const LegacyPerformanceConfig&) const override;
-
-    bool IsValidPerformanceConfig(const ExecutionContext&,
-                                  const miopen::conv::ProblemDescription&,
-                                  const LegacyPerformanceConfig&) const override
-    {
-        return true;
-    }
-};
-
 struct MIOPEN_INTERNALS_EXPORT ConvBinWinograd3x3U final : ConvSolver
 {
     const std::string& SolverDbId() const override { return GetSolverDbId<ConvBinWinograd3x3U>(); }

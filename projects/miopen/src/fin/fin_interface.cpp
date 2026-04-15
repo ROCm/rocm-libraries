@@ -286,7 +286,6 @@ AnySolver<miopen::ExecutionContext, miopen::conv::ProblemDescription>::AnySolver
     case 2: SetObject<miopen::solver::conv::ConvAsm1x1U>(); break;
     case 3: SetObject<miopen::solver::conv::ConvAsm1x1UV2>(); break;
     case 11: SetObject<miopen::solver::conv::ConvOclDirectFwd>(); break;
-    case 13: SetObject<miopen::solver::conv::ConvOclDirectFwd1x1>(); break;
     case 16: SetObject<miopen::solver::conv::ConvAsmBwdWrW3x3>(); break;
     case 17: SetObject<miopen::solver::conv::ConvAsmBwdWrW1x1>(); break;
     case 18: SetObject<miopen::solver::conv::ConvOclBwdWrW2<1>>(); break;

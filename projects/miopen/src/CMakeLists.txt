@@ -238,7 +238,6 @@ set( MIOpen_Source
     solver/conv/conv_ocl_dir2D11x11.cpp
     solver/conv/conv_ocl_dir2Dfwd.cpp
     solver/conv/conv_ocl_dir2Dfwd_exhaustive_search.cpp
-    solver/conv/conv_ocl_dir2Dfwd1x1.cpp
     solver/conv/conv_ocl_dir2Dfwdgen.cpp
     solver/conv/conv_wino_fury_RxS.cpp
     solver/conv/conv_wino_rage_RxS.cpp
@@ -566,9 +565,7 @@ if( MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN
         kernels/MIOpenPoolingBwdND.cpp
         kernels/MIOpenPoolingForwardNaive.cpp
         kernels/MIOpenPoolingND.cpp
-        kernels/MIOpenConv1x1S.cl
-        kernels/MIOpenConv1x1J1.cl
-        kernels/MIOpenConv1x1J1_stride.cl
+
         kernels/MIOpenReduceCalculation.cpp
         kernels/MIOpenReduceExtreme.cpp
         kernels/MIOpenReduceSum.cpp
