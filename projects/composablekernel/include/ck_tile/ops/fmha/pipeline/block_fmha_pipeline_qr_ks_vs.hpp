@@ -205,9 +205,9 @@ struct BlockFmhaPipelineQRKSVS
                const VScaleDramBlockWindowTmp&
                    v_scale_dram_block_window_tmp, // N1*(K1/kVScaleGranularity) tile
                const float sink_v,
-               const index_t valid_k0_loops = kQKHeaddim / kK0,
+               const index_t valid_k0_loops        = kQKHeaddim / kK0,
                const index_t valid_last_k0_columns = kK0,
-               const index_t valid_n1_columns = kN1) const
+               const index_t valid_n1_columns      = kN1) const
     {
         static_assert(
             std::is_same_v<QDataType, remove_cvref_t<typename QDramBlockWindowTmp::DataType>> &&
@@ -265,18 +265,17 @@ struct BlockFmhaPipelineQRKSVS
             v_lds, Policy::template MakeVLdsBlockDescriptor<Problem>().get_lengths(), {0, 0});
 
         // Block GEMM
-        constexpr auto gemm_0 = Policy::template GetQKBlockGemm<Problem>();
-        constexpr auto gemm_1 = Policy::template GetKVBlockGemm<Problem>();
-        using BlockGemm0      = remove_cvref_t<decltype(gemm_0)>;
-        constexpr bool kIsQKGemm0V2 =
-            std::is_same_v<BlockGemm0,
-                           BlockGemmARegBSmemCRegV2<typename BlockGemm0::Problem,
-                                                    typename BlockGemm0::Policy>>;
+        constexpr auto gemm_0       = Policy::template GetQKBlockGemm<Problem>();
+        constexpr auto gemm_1       = Policy::template GetKVBlockGemm<Problem>();
+        using BlockGemm0            = remove_cvref_t<decltype(gemm_0)>;
+        constexpr bool kIsQKGemm0V2 = std::is_same_v<
+            BlockGemm0,
+            BlockGemmARegBSmemCRegV2<typename BlockGemm0::Problem, typename BlockGemm0::Policy>>;
 
-        constexpr auto gemm_0_config = BlockGemm0::Policy::template GetWarpGemmMWarpNWarp<Problem>();
-        using Gemm0WarpGemm          = remove_cvref_t<decltype(gemm_0_config.template at<0>())>;
-        constexpr index_t kGemm0WarpK =
-            Gemm0WarpGemm::WarpGemmAttribute::Impl::kK;
+        constexpr auto gemm_0_config =
+            BlockGemm0::Policy::template GetWarpGemmMWarpNWarp<Problem>();
+        using Gemm0WarpGemm           = remove_cvref_t<decltype(gemm_0_config.template at<0>())>;
+        constexpr index_t kGemm0WarpK = Gemm0WarpGemm::WarpGemmAttribute::Impl::kK;
         constexpr index_t kGemm0KItersPerBlock = kK0 / kGemm0WarpK;
         constexpr bool kCanUsePartialGemm0Tail =
             kPadHeadDimQ && kIsQKGemm0V2 && (kGemm0KItersPerBlock > 1);
@@ -442,9 +441,9 @@ struct BlockFmhaPipelineQRKSVS
         }();
 
         // prefetch K tile
-        index_t i_total_loops      = 0;
-        constexpr index_t k0_loops = kQKHeaddim / kK0;
-        constexpr index_t k1_loops = kN0 / kK1;
+        index_t i_total_loops                = 0;
+        constexpr index_t k0_loops           = kQKHeaddim / kK0;
+        constexpr index_t k1_loops           = kN0 / kK1;
         const index_t clamped_valid_k0_loops = [&]() {
             if constexpr(!kPadHeadDimQ)
             {
@@ -594,19 +593,17 @@ struct BlockFmhaPipelineQRKSVS
 
                             if(partial_gemm_0_k_iters == kTailKIters)
                             {
-                                using Gemm0TailProblem =
-                                    BlockGemmProblem<QDataType,
-                                                     KDataType,
-                                                     SaccDataType,
-                                                     Problem::kNumGemm0Warps * get_warp_size(),
-                                                     TileGemmShape<
-                                                         sequence<kM0, kN0, kTailK0>,
-                                                         typename BlockFmhaShape::Gemm0BlockWarps,
-                                                         sequence<BlockFmhaShape::Gemm0WarpTile::at(
-                                                                      number<0>{}),
-                                                                  BlockFmhaShape::Gemm0WarpTile::at(
-                                                                      number<1>{}),
-                                                                  kGemm0WarpK>>>;
+                                using Gemm0TailProblem = BlockGemmProblem<
+                                    QDataType,
+                                    KDataType,
+                                    SaccDataType,
+                                    Problem::kNumGemm0Warps * get_warp_size(),
+                                    TileGemmShape<
+                                        sequence<kM0, kN0, kTailK0>,
+                                        typename BlockFmhaShape::Gemm0BlockWarps,
+                                        sequence<BlockFmhaShape::Gemm0WarpTile::at(number<0>{}),
+                                                 BlockFmhaShape::Gemm0WarpTile::at(number<1>{}),
+                                                 kGemm0WarpK>>>;
                                 constexpr auto gemm_0_tail =
                                     BlockGemmARegBSmemCRegV2<Gemm0TailProblem,
                                                              typename BlockGemm0::Policy>{};
@@ -615,10 +612,8 @@ struct BlockFmhaPipelineQRKSVS
                                     get_slice_tile(q_tile,
                                                    sequence<0, i_k0 * kK0>{},
                                                    sequence<kM0, i_k0 * kK0 + kTailK0>{});
-                                auto k_tail_window =
-                                    make_tile_window(k_lds,
-                                                     make_tuple(number<kN0>{}, number<kTailK0>{}),
-                                                     {0, 0});
+                                auto k_tail_window = make_tile_window(
+                                    k_lds, make_tuple(number<kN0>{}, number<kTailK0>{}), {0, 0});
 
                                 gemm_0_tail(s_acc, q_slice, k_tail_window);
                             }
@@ -1063,9 +1058,8 @@ struct BlockFmhaPipelineQRKSVS
                 {
                     constexpr auto gemm_1_config =
                         decltype(gemm_1)::Policy::template GetWarpGemmMWarpNWarp<Problem>();
-                    using Gemm1WarpGemm =
-                        remove_cvref_t<decltype(gemm_1_config.template at<0>())>;
-                    constexpr index_t kGemm1NWarp = gemm_1_config.template at<2>();
+                    using Gemm1WarpGemm = remove_cvref_t<decltype(gemm_1_config.template at<0>())>;
+                    constexpr index_t kGemm1NWarp    = gemm_1_config.template at<2>();
                     constexpr index_t kGemm1NPerIter = kGemm1NWarp * Gemm1WarpGemm::kN;
                     const index_t valid_gemm_1_n_iters =
                         ck_tile::integer_divide_ceil(clamped_valid_n1_columns, kGemm1NPerIter);
@@ -1247,9 +1241,9 @@ struct BlockFmhaPipelineQRKSVS
                void* smem_ptr,
                DropoutType& dropout,
                const float sink_v,
-               const index_t valid_k0_loops = kQKHeaddim / kK0,
+               const index_t valid_k0_loops        = kQKHeaddim / kK0,
                const index_t valid_last_k0_columns = kK0,
-               const index_t valid_n1_columns = kN1) const
+               const index_t valid_n1_columns      = kN1) const
     {
         return operator()(q_dram_block_window_tmp,
                           identity{},
