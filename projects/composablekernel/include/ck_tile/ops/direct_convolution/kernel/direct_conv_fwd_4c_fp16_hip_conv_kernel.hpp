@@ -12,6 +12,8 @@
 
 namespace ck_tile::direct_conv {
 
+namespace grouped_4c_hip = ck_tile::direct_hip_conv::grouped_4c;
+
 /// Wrapper struct that presents the grouped_4c Fprop kernel (at a specific config index)
 /// with the same public API as the im2col-based GroupedConvolutionForwardKernel.
 ///
@@ -63,14 +65,14 @@ struct DirectHipConvForward4CFp16Kernel
         par.order      = TensorOrder::NHWC;
         par.compute_output_size();
 
-        auto lp = grouped_4c::get_launch_params(ConfigIdx, par);
+        auto lp = grouped_4c_hip::get_launch_params(ConfigIdx, par);
 
         return {par, lp, host_args.in_ptr, host_args.wei_ptr, host_args.out_ptr};
     }
 
     static bool IsSupportedArgument(const KernelArgs& kargs)
     {
-        auto variant = grouped_4c::make_variant();
+        auto variant = grouped_4c_hip::make_variant();
         return variant.is_applicable(kargs.par) &&
                variant.config_is_compatible(kargs.par, ConfigIdx);
     }
@@ -79,7 +81,7 @@ struct DirectHipConvForward4CFp16Kernel
 
     static dim3 BlockSize()
     {
-        return dim3(static_cast<unsigned>(grouped_4c::configs[ConfigIdx].block_size()));
+        return dim3(static_cast<unsigned>(grouped_4c_hip::configs[ConfigIdx].block_size()));
     }
 
     static constexpr ck_tile::index_t GetSmemSize() { return 0; }
@@ -93,7 +95,7 @@ struct DirectHipConvForward4CFp16Kernel
             return {false, 0.0f, GetInstanceString()};
 
         auto callable = [&](const ck_tile::stream_config& sc) {
-            grouped_4c::launch(ConfigIdx,
+            grouped_4c_hip::launch(ConfigIdx,
                                kargs.lp,
                                kargs.par,
                                kargs.in_ptr,

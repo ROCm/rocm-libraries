@@ -15,15 +15,8 @@
 #include <hip/hip_fp16.h>
 #include <hip/hip_runtime.h>
 
-namespace ck_tile::direct_hip_conv::grouped_4c
+namespace ck_tile::direct_conv::grouped_4c_tile
 {
-
-using namespace ck_tile::direct_conv;
-
-// Resolve ambiguity with ck_tile:: types when included alongside CK Tile core headers
-using ck_tile::direct_conv::fp16x4_t;
-using ck_tile::direct_conv::fp32x4_t;
-using ck_tile::direct_conv::static_for;
 
 // 64 threads per wave.
 constexpr int WAVE_SIZE = 64;
@@ -686,4 +679,4 @@ constexpr KernelVariant make_variant()
     };
 }
 
-} // namespace ck_tile::direct_conv::grouped_4c_hip
+} // namespace ck_tile::direct_conv::grouped_4c_tile
