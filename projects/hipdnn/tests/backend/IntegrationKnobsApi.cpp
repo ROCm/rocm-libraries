@@ -8,8 +8,8 @@
 #include <array>
 #include <cstring>
 #include <gtest/gtest.h>
-#include <hipdnn_data_sdk/data_objects/engine_config_generated.h>
-#include <hipdnn_data_sdk/data_objects/knob_value_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/engine_config_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/knob_value_generated.h>
 #include <hipdnn_plugin_sdk/KnobSettingFactory.hpp>
 #include <test_plugins/TestPluginConstants.hpp>
 #include <unordered_set>
@@ -231,9 +231,10 @@ TEST_F(IntegrationKnobsApi, GetKnobInfoValidateIntKnob)
     {
         flatbuffers::Verifier verifier(static_cast<const uint8_t*>(knobData[i].ptr),
                                        knobData[i].size);
-        ASSERT_TRUE(verifier.VerifyBuffer<hipdnn_data_sdk::data_objects::Knob>());
+        ASSERT_TRUE(verifier.VerifyBuffer<hipdnn_flatbuffers_sdk::data_objects::Knob>());
 
-        auto knob = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::Knob>(knobData[i].ptr);
+        auto knob
+            = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::Knob>(knobData[i].ptr);
 
         if(knob->knob_id()->str() == "test.int_knob")
         {
@@ -244,14 +245,14 @@ TEST_F(IntegrationKnobsApi, GetKnobInfoValidateIntKnob)
 
             // Verify default value type and value
             EXPECT_EQ(knob->default_value_type(),
-                      hipdnn_data_sdk::data_objects::KnobValue::IntValue);
+                      hipdnn_flatbuffers_sdk::data_objects::KnobValue::IntValue);
             auto intValue = knob->default_value_as_IntValue();
             ASSERT_NE(intValue, nullptr);
             EXPECT_EQ(intValue->value(), 50);
 
             // Verify constraint
             EXPECT_EQ(knob->constraint_type(),
-                      hipdnn_data_sdk::data_objects::KnobConstraint::IntConstraint);
+                      hipdnn_flatbuffers_sdk::data_objects::KnobConstraint::IntConstraint);
             auto constraint = knob->constraint_as_IntConstraint();
             ASSERT_NE(constraint, nullptr);
             EXPECT_EQ(constraint->min_value(), 0);
@@ -294,7 +295,8 @@ TEST_F(IntegrationKnobsApi, GetKnobInfoValidateFloatKnob)
     bool foundFloatKnob = false;
     for(size_t i = 0; i < static_cast<size_t>(returnedCount); ++i)
     {
-        auto knob = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::Knob>(knobData[i].ptr);
+        auto knob
+            = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::Knob>(knobData[i].ptr);
 
         if(knob->knob_id()->str() == "test.float_knob")
         {
@@ -305,14 +307,14 @@ TEST_F(IntegrationKnobsApi, GetKnobInfoValidateFloatKnob)
 
             // Verify default value type and value
             EXPECT_EQ(knob->default_value_type(),
-                      hipdnn_data_sdk::data_objects::KnobValue::FloatValue);
+                      hipdnn_flatbuffers_sdk::data_objects::KnobValue::FloatValue);
             auto floatValue = knob->default_value_as_FloatValue();
             ASSERT_NE(floatValue, nullptr);
             EXPECT_DOUBLE_EQ(floatValue->value(), 0.5);
 
             // Verify constraint
             EXPECT_EQ(knob->constraint_type(),
-                      hipdnn_data_sdk::data_objects::KnobConstraint::FloatConstraint);
+                      hipdnn_flatbuffers_sdk::data_objects::KnobConstraint::FloatConstraint);
             auto constraint = knob->constraint_as_FloatConstraint();
             ASSERT_NE(constraint, nullptr);
             EXPECT_DOUBLE_EQ(constraint->min_value(), 0.0);
@@ -354,7 +356,8 @@ TEST_F(IntegrationKnobsApi, GetKnobInfoValidateStringKnob)
     bool foundStringKnob = false;
     for(size_t i = 0; i < static_cast<size_t>(returnedCount); ++i)
     {
-        auto knob = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::Knob>(knobData[i].ptr);
+        auto knob
+            = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::Knob>(knobData[i].ptr);
 
         if(knob->knob_id()->str() == "test.string_knob")
         {
@@ -365,14 +368,14 @@ TEST_F(IntegrationKnobsApi, GetKnobInfoValidateStringKnob)
 
             // Verify default value type and value
             EXPECT_EQ(knob->default_value_type(),
-                      hipdnn_data_sdk::data_objects::KnobValue::StringValue);
+                      hipdnn_flatbuffers_sdk::data_objects::KnobValue::StringValue);
             auto stringValue = knob->default_value_as_StringValue();
             ASSERT_NE(stringValue, nullptr);
             EXPECT_STREQ(stringValue->value()->c_str(), "fast");
 
             // Verify constraint
             EXPECT_EQ(knob->constraint_type(),
-                      hipdnn_data_sdk::data_objects::KnobConstraint::StringConstraint);
+                      hipdnn_flatbuffers_sdk::data_objects::KnobConstraint::StringConstraint);
             auto constraint = knob->constraint_as_StringConstraint();
             ASSERT_NE(constraint, nullptr);
             // Note: KnobFactory uses max_length=0 (no length limit) for string knobs
@@ -424,7 +427,8 @@ TEST_F(IntegrationKnobsApi, GetKnobInfoValidateDeprecatedKnob)
     bool foundDeprecatedKnob = false;
     for(size_t i = 0; i < static_cast<size_t>(returnedCount); ++i)
     {
-        auto knob = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::Knob>(knobData[i].ptr);
+        auto knob
+            = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::Knob>(knobData[i].ptr);
 
         if(knob->knob_id()->str() == "test.deprecated_knob")
         {
