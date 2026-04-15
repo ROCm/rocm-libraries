@@ -32,14 +32,18 @@ protected:
                                                      dims,
                                                      TensorLayout::NCHW);
 
-        auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
-        _flatbufferData = std::move(flatbufferGraph);
+        auto [serializedGraph, serErr] = graph->to_binary();
+        if(serErr.is_bad())
+        {
+            throw std::runtime_error("Graph serialization failed: " + serErr.get_message());
+        }
+        _serializedData = std::move(serializedGraph);
 
-        return std::make_unique<GraphWrapper>(_flatbufferData.data(), _flatbufferData.size());
+        return std::make_unique<GraphWrapper>(_serializedData.data(), _serializedData.size());
     }
 
 private:
-    flatbuffers::DetachedBuffer _flatbufferData;
+    std::vector<uint8_t> _serializedData;
 };
 
 TEST_F(TestGraphTensorBundle, ConstructorCreatesAllNonVirtualTensors)
@@ -69,8 +73,9 @@ TEST_F(TestGraphTensorBundle, ConstructorSkipsVirtualTensors)
                                                  TensorLayout::NCHW,
                                                  true);
 
-    auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
-    const GraphWrapper graphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+    const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());
     auto& tensorMap = graphWrapper.getTensorMap();
 
     GraphTensorBundle bundle(tensorMap);

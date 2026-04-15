@@ -49,8 +49,9 @@ TEST_F(TestBatchnormFwdPlan, ExecutePlan)
                                                  DataType::FLOAT,
                                                  dims,
                                                  TensorLayout::NHWC);
-    auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
-    const GraphWrapper graphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+    const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());
     const INodeWrapper& node = graphWrapper.getNodeWrapper(0);
     BatchnormFwdTensorBundle planTensorBundle(node, graphWrapper.getTensorMap(), seed);
     BatchnormFwdTensorBundle directTensorBundle(node, graphWrapper.getTensorMap(), seed);
@@ -107,8 +108,9 @@ TEST(TestBatchnormFwdInferencePlanBuilder, PlanConstruction)
                                                  DataType::FLOAT,
                                                  dims,
                                                  TensorLayout::NHWC);
-    auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
-    const GraphWrapper graphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+    const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());
 
     const BatchnormFwdInferencePlanBuilder<DataType::FLOAT,
                                            DataType::FLOAT,
@@ -134,8 +136,9 @@ TEST(TestBatchnormFwdInferencePlanBuilder, IsApplicable)
                                                  DataType::FLOAT,
                                                  dims,
                                                  TensorLayout::NHWC);
-    auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
-    const GraphWrapper graphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+    const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());
 
     const BatchnormFwdInferencePlanBuilder<DataType::FLOAT,
                                            DataType::FLOAT,
