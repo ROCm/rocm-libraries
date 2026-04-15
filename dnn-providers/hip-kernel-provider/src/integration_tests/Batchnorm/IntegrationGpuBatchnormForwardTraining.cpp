@@ -16,7 +16,7 @@ using namespace hipdnn_frontend::graph;
 using namespace hipdnn_data_sdk::utilities;
 using namespace hipdnn_test_sdk::utilities;
 using namespace hip_kernel_provider::test_utilities;
-using namespace hip_kernel_provider::test_bn_common;
+using namespace hip_kernel_provider::batchnorm::test::common;
 
 namespace
 {

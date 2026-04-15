@@ -140,7 +140,7 @@ Use `ConvolutionFpropNode.hpp` as the reference for this pattern. The `create_op
 
 ## Step 7: Add Lifting Support
 
-For operations that need lifting (reconstructing frontend graph attributes from serialized FlatBuffer data), use the `--lift-only` flag:
+For operations that need lifting (reconstructing frontend graph attributes from backend C API descriptors), use the `--lift-only` flag:
 
 ```bash
 .venv/bin/python generate.py --config configs/<op>.yaml --output-dir /tmp/lift-output --lift-only
@@ -185,7 +185,6 @@ Insert the content from each fragment into the corresponding shared file:
 | `operation_unpacker_test.txt` | `frontend/tests/TestOperationUnpacker.cpp` | Uncomment existing test or insert generated test in the `createNodeForType` tests section. Also uncomment the corresponding `#include` for the node header. |
 | `operation_type_enum.txt` | `backend/include/HipdnnOperationType.h` | Enum entry for this operation |
 | `node_unpack_override.txt` | Frontend node header (e.g., `ConvolutionFpropNode.hpp`) | `unpack_from_descriptor` override |
-| `packer_name_test.txt` | `frontend/tests/Test<NodeClass>.cpp` | Add after existing PackNode tests |
 
 ### 7d. Wire `unpack_from_descriptor` in the Frontend Node
 

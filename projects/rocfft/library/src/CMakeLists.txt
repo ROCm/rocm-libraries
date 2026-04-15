@@ -404,6 +404,11 @@ add_library( rocfft
   )
 rocfft_add_coverage_flags( rocfft )
 
+if( WIN32 )
+  configure_file(${CMAKE_CURRENT_SOURCE_DIR}/rocfft.rc.in ${CMAKE_CURRENT_BINARY_DIR}/rocfft.rc)
+  target_sources(rocfft PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/rocfft.rc)
+endif()
+
 # rocFFT contains default implementations of callback functions that
 # need to be built as relocatable device code (causes failure at link
 # stage on Windows)
