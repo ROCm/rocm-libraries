@@ -111,7 +111,7 @@ enum class block_load_method
 /// In the examples load operation is performed on block of 128 threads, using type
 /// \p int and 8 items per thread.
 ///
-/// The full example is [on GitHub](https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocprim/example/rocprim/block/block_load.cpp).
+/// The full example is [on GitHub](https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocprim/example/rocprim/block/example_block_load.cpp).
 ///
 /// \code{.cpp}
 /// __global__ void example_kernel(int * input, ...)

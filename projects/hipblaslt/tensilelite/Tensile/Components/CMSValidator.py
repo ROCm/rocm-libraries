@@ -503,6 +503,34 @@ class Timeline:
         has_lr3s = "LRA3" in available_keys or "LRB3" in available_keys
         assert not (has_lr1s and has_lr3s), "Can't mix LR1s and LR3s."
 
+        # Validate that sub-iteration suffixes are consistent with the kernel configuration.
+        # The valid suffixes depend on how numLoopIter is determined:
+        # - ForceUnrollSubIter=True: numLoopIter = numSubTiles² = 4 (KernelWriter.py:4592)
+        # - DepthU == matrixInstK (n_sub_iters == 1): split to numLoopIter = 2 (CustomSchedule.py:317)
+        # - DepthU > matrixInstK: numLoopIter = DepthU / matrixInstK
+        if "DepthU" in kernel and "MatrixInstruction" in kernel:
+            force_unroll = kernel.get("ForceUnrollSubIter", False)
+            if force_unroll:
+                valid_suffixes = {0, 1, 2, 3}
+            else:
+                n_sub_iters = kernel["DepthU"] // kernel["MatrixInstruction"][2]
+                if n_sub_iters == 1:
+                    valid_suffixes = {0, 1}
+                else:
+                    valid_suffixes = set(range(n_sub_iters))
+            for key in available_keys:
+                for prefix in ("LRA", "LRB", "PackA", "PackB"):
+                    if key.startswith(prefix):
+                        suffix_str = key[len(prefix):]
+                        if suffix_str.isdigit():
+                            suffix = int(suffix_str)
+                            assert suffix in valid_suffixes, (
+                                f"Schedule key '{key}' has sub-iteration index {suffix}, "
+                                f"but with DepthU={kernel['DepthU']} and matrixInstK={kernel['MatrixInstruction'][2]}, "
+                                f"valid sub-iteration indices are {sorted(valid_suffixes)}."
+                            )
+                        break
+
         self.num_vmfma = schedule_info.numMfma
         self.vlcnt_shift = defaultdict(int)
         self.vlcnt_shift[NO_GLOBAL_LOAD_LOOP] = schedule_info.nglshift
