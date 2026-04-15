@@ -137,8 +137,8 @@ miopenStatus_t CallGemm(const Handle& handle,
                         std::size_t b_offset,
                         Data_t C,
                         std::size_t c_offset,
-                        GemmBackend_t gemm_backend,
-                        miopenDataType_t cType);
+                        miopenDataType_t cType,
+                        GemmBackend_t gemm_backend = GemmBackend_t::rocblas);
 
 MIOPEN_EXPORT
 miopenStatus_t CallGemmStridedBatched(const Handle& handle,
@@ -161,8 +161,8 @@ miopenStatus_t CallGemmStridedBatched(const Handle& handle,
                                       std::size_t b_offset,
                                       Data_t C,
                                       std::size_t c_offset,
-                                      GemmBackend_t gemm_backend,
-                                      miopenDataType_t cType);
+                                      miopenDataType_t cType,
+                                      GemmBackend_t gemm_backend = GemmBackend_t::rocblas);
 
 miopenStatus_t
 CallGemmStridedBatchedSequential(const Handle& handle,

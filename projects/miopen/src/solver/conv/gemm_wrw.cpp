@@ -341,35 +341,36 @@ size_t GemmWrwUniversal::GetWorkspaceSize(const ExecutionContext& context,
         dwDesc.GetLengths() | std::views::drop(2) | std::views::take(spatial_dim);
     const auto wei_c = dwDesc.GetLengths()[1];
 
-    const auto ws_size = GetTypeSize(dyDesc.GetType()) * wei_c *
-                         std::accumulate(out_spatial.begin(),
-                                         out_spatial.end(),
-                                         std::size_t(1),
-                                         std::multiplies<std::size_t>()) *
-                         std::accumulate(wei_spatial.begin(),
-                                         wei_spatial.end(),
-                                         std::size_t(1),
-                                         std::multiplies<std::size_t>()) *
-                         conv.group_count;
+    auto ws_size = GetTypeSize(dyDesc.GetType()) * wei_c *
+                    std::accumulate(out_spatial.begin(),
+                                    out_spatial.end(),
+                                    std::size_t(1),
+                                    std::multiplies<std::size_t>()) *
+                    std::accumulate(wei_spatial.begin(),
+                                    wei_spatial.end(),
+                                    std::size_t(1),
+                                    std::multiplies<std::size_t>()) *
+                    conv.group_count;
 
     // For bf16: extra workspace for fp32 accumulation buffer (same shape as dw)
     const auto xDesc           = problem.GetOut();
     const auto in_n            = xDesc.GetLengths()[0];
     const auto need_fp32_accum = (dyDesc.GetType() == miopenBFloat16) && (in_n > 1);
-    const auto fp32_accum_size =
-        need_fp32_accum ? GetTypeSize(miopenFloat) * dwDesc.GetElementSize() : std::size_t{0};
-    // Use padded layout: im2col buffer at offset 0, fp32 accum buffer at offset ws_size
-    // (aligned to 256 bytes)
-    const auto total_ws_size =
-        need_fp32_accum ? ((ws_size + 255) & ~std::size_t{255}) + fp32_accum_size : ws_size;
-
-    if(total_ws_size > handle.GetMaxMemoryAllocSize())
+    if(need_fp32_accum)
     {
-        MIOPEN_LOG_I2("GemmWrwUniversal: " << total_ws_size << " > "
+        const auto fp32_accum_size = GetTypeSize(miopenFloat) * dwDesc.GetElementSize();
+        // Use padded layout: im2col buffer at offset 0, fp32 accum buffer at offset ws_size
+        // (aligned to 256 bytes)
+        ws_size = ((ws_size + 255) & ~std::size_t{255}) + fp32_accum_size;
+    }
+
+    if(ws_size > handle.GetMaxMemoryAllocSize())
+    {
+        MIOPEN_LOG_I2("GemmWrwUniversal: " << ws_size << " > "
                                            << handle.GetMaxMemoryAllocSize());
         return 0;
     }
-    return total_ws_size;
+    return ws_size;
 #else
     std::ignore = context;
     std::ignore = problem;
@@ -597,7 +598,6 @@ ConvSolution GemmWrwUniversal::GetSolution(const ExecutionContext& context,
                                                         0,
                                                         accum_buf,
                                                         0,
-                                                        GemmBackend_t::rocblas,
                                                         miopenFloat);
                     }
                     else
@@ -626,7 +626,6 @@ ConvSolution GemmWrwUniversal::GetSolution(const ExecutionContext& context,
                                           0,
                                           accum_buf,
                                           0,
-                                          GemmBackend_t::rocblas,
                                           miopenFloat);
                     }
                     else

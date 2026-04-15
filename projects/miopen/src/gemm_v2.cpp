@@ -933,8 +933,8 @@ miopenStatus_t CallGemm(const Handle& handle,
                         std::size_t b_offset,
                         Data_t C,
                         std::size_t c_offset,
-                        GemmBackend_t gemm_backend,
-                        miopenDataType_t cType)
+                        miopenDataType_t cType,
+                        GemmBackend_t gemm_backend)
 {
     // If C/D type matches A/B type, delegate to the standard overload
     if(cType == gemm_desc.dataType)
@@ -1332,8 +1332,8 @@ miopenStatus_t CallGemmStridedBatched(const Handle& handle,
                                       std::size_t b_offset,
                                       Data_t C,
                                       std::size_t c_offset,
-                                      GemmBackend_t gemm_backend,
-                                      miopenDataType_t cType)
+                                      miopenDataType_t cType,
+                                      GemmBackend_t gemm_backend)
 {
     // If C/D type matches A/B type, delegate to the standard overload
     if(cType == gemm_desc.dataType)
