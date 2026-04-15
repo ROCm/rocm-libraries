@@ -146,7 +146,12 @@ struct FusedAQuantBQuantGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCr
 
     CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSize()
     {
-        return Policy::template GetSmemSize<Problem>();
+        // We are not storing the original packed type in LDS, so we need to multiply the smem size
+        // by the packed size.
+        constexpr index_t smem_size_a = Policy::template GetSmemSizeA<Problem>() * APackedSize;
+        constexpr index_t smem_size_b = Policy::template GetSmemSizeB<Problem>() * BPackedSize;
+
+        return smem_size_a + smem_size_b;
     }
 
     template <GemmPipelineScheduler Scheduler>
