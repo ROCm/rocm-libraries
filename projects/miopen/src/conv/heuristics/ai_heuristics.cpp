@@ -738,7 +738,7 @@ std::vector<uint64_t> PredictSolver(const conv::ProblemDescription& problem,
     auto cached_result = GetCachedPrediction(problem, device, is3d);
     if(!cached_result.empty())
     {
-        return cached_result;
+        return std::move(cached_result);
     }
 
     // Strategy:

@@ -272,6 +272,7 @@ protected:
     }
 };
 
+// cppcheck-suppress syntaxError
 TEST_P(CPU_SplitKGenericTest_NONE, ValidatesSplitKSupport)
 {
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
