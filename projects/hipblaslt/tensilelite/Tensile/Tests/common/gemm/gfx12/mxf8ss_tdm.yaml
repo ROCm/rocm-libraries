@@ -70,8 +70,6 @@ BenchmarkProblems:
         - LdsPadMXSB: [-1]
         - LdsBlockSizePerPadA: [-1]
         - LdsBlockSizePerPadB: [-1]
-        - LdsBlockSizePerPadMXSA: [-1]
-        - LdsBlockSizePerPadMXSB: [-1]
         - LdsPadMetadata: [0]
         - LDSTrInst: [False]
         - TDMInst: [3]

@@ -781,7 +781,7 @@ def noSchedLocalWrite(writer, kernel, tensorParametersA, tensorParametersB, loca
     # if no scheduleLocalWrite - just add writes to localWritelocalWriteEndIter
     # If PGR=0, writes have to be done immediately following the loads - no opportunity to schedule
     #   so don't add to schedule, these will be added separately and before the first iter
-    if kernel["PrefetchGlobalRead"]:
+    if kernel["PrefetchGlobalRead"] and not kernel["NoLdsWriteCode"]:
         # do we need a module here? That would prevent these from being scheduled
         imod = writer.codes.perIterLocalWrite[localWriteEndIter][1].add(Module())
         imod.add(

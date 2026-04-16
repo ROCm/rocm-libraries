@@ -108,7 +108,8 @@ class TensorDataMoverLoad(TensorDataMover):
                 numMxKGroups = mxDU // mxUnit
                 if numMxKGroups >= numComp:
                     # K-splitting: offset by stride to next k_group
-                    mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), mxUnit, f"woffset = wCompId * mxUnit({mxUnit})"))
+                    scale = numMxKGroups // numComp
+                    mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), (mxUnit * numMxKGroups // numComp), f"woffset = wCompId * mxUnit({mxUnit}) * numMxKGroups({numMxKGroups}) // numComp({numComp})"))
                     mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), sgpr("Size%s"%INDEX_CHARS[tIdx]), f"woffset *= Size{INDEX_CHARS[tIdx]}"))
                 else:
                     # M/N-splitting: offset within same k_group along tile dimension
@@ -230,6 +231,45 @@ class TensorDataMoverLoad(TensorDataMover):
         mod.add(SAndB32(sgpr(group1), sgpr(group1), hex(mask)))
         return mod
 
+    def resetTensorDimForTail(self, group1: int | str, sgprTail: int, tdmDescIdx: int, writer: "KernelWriterAssembly", constShifter: int=0, isMXS: bool=False) -> Module:
+        mod = Module()
+        mod.addComment("TDM reset tensor dim for tail")
+
+        def descSgprName(idx: int) -> str:
+          assert idx < 4
+          return f"{group1}+{idx}"
+
+        # Clear the previous data for L
+        mod.add(SAndB32(sgpr(descSgprName(tdmDescIdx)), sgpr(descSgprName(tdmDescIdx)), hex(0x0000FFFF)))
+        mod.add(SAndB32(sgpr(descSgprName(tdmDescIdx+1)), sgpr(descSgprName(tdmDescIdx+1)), hex(0xFFFF0000)))
+
+        with writer.allocTmpSgpr(1) as tmpSgpr:
+            if isMXS:
+                tmp = (1 << constShifter) - 1
+                mod.add(SAddU32(sgpr(tmpSgpr.idx), sgpr(sgprTail), tmp))
+                mod.add(SLShiftRightB32(sgpr(tmpSgpr.idx), hex(constShifter), sgpr(tmpSgpr.idx)))
+                mod.add(SLShiftLeftB32(sgpr(tmpSgpr.idx), hex(16), sgpr(tmpSgpr.idx)))
+                mod.add(SOrB32(sgpr(descSgprName(tdmDescIdx)), sgpr(descSgprName(tdmDescIdx)), sgpr(tmpSgpr.idx)))
+                mod.add(SLShiftRightB32(sgpr(tmpSgpr.idx), hex(constShifter), sgpr(sgprTail)))
+                mod.add(SLShiftRightB32(sgpr(tmpSgpr.idx), hex(16), sgpr(tmpSgpr.idx)))
+                mod.add(SOrB32(sgpr(descSgprName(tdmDescIdx+1)), sgpr(descSgprName(tdmDescIdx+1)), sgpr(tmpSgpr.idx)))
+            else:
+              if constShifter:
+                  mod.add(SLShiftRightB32(sgpr(tmpSgpr.idx), hex(constShifter), sgpr(sgprTail)))
+                  mod.add(SLShiftLeftB32(sgpr(tmpSgpr.idx), hex(16), sgpr(tmpSgpr.idx)))
+              else:
+                  mod.add(SLShiftLeftB32(sgpr(tmpSgpr.idx), hex(16), sgpr(sgprTail)))
+              mod.add(SOrB32(sgpr(descSgprName(tdmDescIdx)), sgpr(descSgprName(tdmDescIdx)), sgpr(tmpSgpr.idx)))
+
+              if constShifter:
+                  mod.add(SLShiftRightB32(sgpr(tmpSgpr.idx), hex(constShifter), sgpr(sgprTail)))
+                  mod.add(SLShiftRightB32(sgpr(tmpSgpr.idx), hex(16), sgpr(tmpSgpr.idx)))
+              else:
+                  mod.add(SLShiftRightB32(sgpr(tmpSgpr.idx), hex(16), sgpr(sgprTail)))
+              mod.add(SOrB32(sgpr(descSgprName(tdmDescIdx+1)), sgpr(descSgprName(tdmDescIdx+1)), sgpr(tmpSgpr.idx)))
+
+        return mod
+
     def setTensorDim0(self, group1: int | str, sgprDim0: int | str, writer: "KernelWriterAssembly", constShifter: int=0, isMXS: bool=False) -> Module:
         mod = Module()
         mod.addComment("TDM set tensor dim 0")
@@ -251,7 +291,12 @@ class TensorDataMoverLoad(TensorDataMover):
                 else:
                     mod.add(SLShiftLeftB32(sgpr(tmpSgpr.idx), hex(16), sgpr(sgprDim0)))
                 mod.add(SOrB32(sgpr(f"{group1}+1"), sgpr(f"{group1}+1"), sgpr(tmpSgpr.idx)))
-                mod.add(SLShiftRightB32(sgpr(tmpSgpr.idx), hex(16), sgpr(sgprDim0)))
+    
+                if constShifter:
+                    mod.add(SLShiftRightB32(sgpr(tmpSgpr.idx), hex(constShifter), sgpr(sgprDim0)))
+                    mod.add(SLShiftRightB32(sgpr(tmpSgpr.idx), hex(16), sgpr(tmpSgpr.idx)))
+                else:
+                    mod.add(SLShiftRightB32(sgpr(tmpSgpr.idx), hex(16), sgpr(sgprDim0)))
                 mod.add(SOrB32(sgpr(f"{group1}+2"), sgpr(f"{group1}+2"), sgpr(tmpSgpr.idx)))
 
         return mod
@@ -279,7 +324,12 @@ class TensorDataMoverLoad(TensorDataMover):
                 else:
                     mod.add(SLShiftLeftB32(sgpr(tmpSgpr.idx), hex(16), sgpr(sgprDim1)))
                 mod.add(SOrB32(sgpr(f"{group1}+2"), sgpr(f"{group1}+2"), sgpr(tmpSgpr.idx)))
-                mod.add(SLShiftRightB32(sgpr(tmpSgpr.idx), hex(16), sgpr(sgprDim1)))
+    
+                if constShifter:
+                    mod.add(SLShiftRightB32(sgpr(tmpSgpr.idx), hex(constShifter), sgpr(sgprDim1)))
+                    mod.add(SLShiftRightB32(sgpr(tmpSgpr.idx), hex(16), sgpr(tmpSgpr.idx)))
+                else:
+                    mod.add(SLShiftRightB32(sgpr(tmpSgpr.idx), hex(16), sgpr(sgprDim1)))
                 mod.add(SOrB32(sgpr(f"{group1}+3"), sgpr(f"{group1}+3"), sgpr(tmpSgpr.idx)))
 
         return mod
