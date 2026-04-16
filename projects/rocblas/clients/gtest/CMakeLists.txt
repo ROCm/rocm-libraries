@@ -20,7 +20,7 @@
 #
 # ########################################################################
 
-# CTest categorization: see top-level ROCBLAS_ENABLE_CTEST / ROCBLAS_HAS_CTEST_CATEGORIES in projects/rocblas/CMakeLists.txt
+# CTest categorization: see ROCBLAS_ENABLE_CTEST / ROCBLAS_HAS_CTEST_CATEGORIES in cmake/build-options.cmake
 find_package( GTest REQUIRED )
 
 if( BUILD_WITH_TENSILE )
