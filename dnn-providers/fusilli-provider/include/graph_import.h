@@ -400,36 +400,45 @@ private:
       const hipdnn_data_sdk::data_objects::SdpaAttributes *hipDnnSdpaAttr) {
     // Reject hipDNN features not supported by the fusilli SDPA path.
     if (hipDnnSdpaAttr->dropout_probability().has_value() &&
-        *hipDnnSdpaAttr->dropout_probability() > 0.0f)
+        *hipDnnSdpaAttr->dropout_probability() > 0.0f) {
       return fusilli::error(fusilli::ErrorCode::NotImplemented,
                             "SDPA with dropout not supported.");
-    if (hipDnnSdpaAttr->alibi_mask())
+    }
+    if (hipDnnSdpaAttr->alibi_mask()) {
       return fusilli::error(fusilli::ErrorCode::NotImplemented,
                             "SDPA with alibi mask not supported.");
-    if (hipDnnSdpaAttr->padding_mask())
+    }
+    if (hipDnnSdpaAttr->padding_mask()) {
       return fusilli::error(fusilli::ErrorCode::NotImplemented,
                             "SDPA with padding mask not supported.");
-    if (hipDnnSdpaAttr->stats_tensor_uid().has_value())
+    }
+    if (hipDnnSdpaAttr->stats_tensor_uid().has_value()) {
       return fusilli::error(fusilli::ErrorCode::NotImplemented,
                             "SDPA with stats output not supported.");
+    }
     if (hipDnnSdpaAttr->seed_tensor_uid().has_value() ||
         hipDnnSdpaAttr->offset_tensor_uid().has_value() ||
         hipDnnSdpaAttr->dropout_mask_tensor_uid().has_value() ||
-        hipDnnSdpaAttr->dropout_scale_tensor_uid().has_value())
+        hipDnnSdpaAttr->dropout_scale_tensor_uid().has_value()) {
+
       return fusilli::error(fusilli::ErrorCode::NotImplemented,
                             "SDPA with dropout tensors not supported.");
+    }
     if (hipDnnSdpaAttr->page_table_k_tensor_uid().has_value() ||
-        hipDnnSdpaAttr->page_table_v_tensor_uid().has_value())
+        hipDnnSdpaAttr->page_table_v_tensor_uid().has_value()) {
       return fusilli::error(fusilli::ErrorCode::NotImplemented,
                             "SDPA with paged attention not supported.");
+    }
     if (hipDnnSdpaAttr->block_mask_tensor_uid().has_value() ||
-        hipDnnSdpaAttr->sink_token_tensor_uid().has_value())
+        hipDnnSdpaAttr->sink_token_tensor_uid().has_value()) {
       return fusilli::error(fusilli::ErrorCode::NotImplemented,
                             "SDPA with block mask not supported.");
+    }
     if (hipDnnSdpaAttr->left_bound().has_value() ||
-        hipDnnSdpaAttr->right_bound().has_value())
+        hipDnnSdpaAttr->right_bound().has_value()) {
       return fusilli::error(fusilli::ErrorCode::NotImplemented,
                             "SDPA with sliding window not supported.");
+    }
     if (hipDnnSdpaAttr->descale_q_tensor_uid().has_value() ||
         hipDnnSdpaAttr->descale_k_tensor_uid().has_value() ||
         hipDnnSdpaAttr->descale_v_tensor_uid().has_value() ||
@@ -437,29 +446,33 @@ private:
         hipDnnSdpaAttr->scale_s_tensor_uid().has_value() ||
         hipDnnSdpaAttr->scale_o_tensor_uid().has_value() ||
         hipDnnSdpaAttr->amax_s_tensor_uid().has_value() ||
-        hipDnnSdpaAttr->amax_o_tensor_uid().has_value())
+        hipDnnSdpaAttr->amax_o_tensor_uid().has_value()) {
       return fusilli::error(fusilli::ErrorCode::NotImplemented,
                             "SDPA with FP8 quantization not supported.");
+    }
     if (hipDnnSdpaAttr->diagonal_alignment() !=
-        hipdnn_data_sdk::data_objects::DiagonalAlignment::TOP_LEFT)
+        hipdnn_data_sdk::data_objects::DiagonalAlignment::TOP_LEFT) {
       return fusilli::error(
           fusilli::ErrorCode::NotImplemented,
           "SDPA with non-TOP_LEFT diagonal alignment not supported.");
+    }
     // This is out of an over-abundance of caution, IREE doesn't need a backend
     // implementation hint so if one is given the user is likely targeting a
     // different backend.
     if (hipDnnSdpaAttr->implementation() !=
-        hipdnn_data_sdk::data_objects::AttentionImplementation::AUTO)
+        hipdnn_data_sdk::data_objects::AttentionImplementation::AUTO) {
       return fusilli::error(
           fusilli::ErrorCode::NotImplemented,
           "SDPA with explicit implementation strategy not supported.");
+    }
     // Causal attention implies an explicit attn_mask, additional attention mask
     // doesn't make sense and torch dialect will reject it.
     if (hipDnnSdpaAttr->causal_mask() &&
-        hipDnnSdpaAttr->attn_mask_tensor_uid().has_value())
+        hipDnnSdpaAttr->attn_mask_tensor_uid().has_value()) {
       return fusilli::error(
           fusilli::ErrorCode::NotImplemented,
           "SDPA with both causal mask and attention mask not supported.");
+    }
     // mma_core_mode requests a specific accumulator precision. Fusilli's
     // lowering path accumulates in the query element type, so reject if the
     // requested mode doesn't match. UNSET (the default) is always fine.
@@ -470,10 +483,11 @@ private:
           opGraphWrapper.getTensorMap()
               .at(hipDnnSdpaAttr->q_tensor_uid())
               ->data_type();
-      if (mmaCoreMode != qDataType)
+      if (mmaCoreMode != qDataType) {
         return fusilli::error(
             fusilli::ErrorCode::NotImplemented,
             "SDPA mma_core_mode must match query tensor dtype.");
+      }
     }
 
     bool hasAttnMask = hipDnnSdpaAttr->attn_mask_tensor_uid().has_value();
