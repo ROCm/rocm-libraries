@@ -50,16 +50,16 @@ bool testJsonSerialization(const graph::Graph& originalGraph,
 {
     std::cout << "\n--- Testing JSON serialization/deserialization ---\n";
 
-    nlohmann::json jsonData;
+    std::string jsonData;
     HIPDNN_FE_CHECK(originalGraph.serialize(jsonData));
-    std::cout << "Serialized to JSON (" << jsonData.dump().size() << " bytes)\n";
+    std::cout << "Serialized to JSON (" << jsonData.size() << " bytes)\n";
 
     graph::Graph jsonGraph;
-    HIPDNN_FE_CHECK(jsonGraph.deserialize(jsonData));
+    // deserialize(handle, ...) produces a finalized, ready-to-use graph —
+    // no separate validate() or build_operation_graph() call is needed.
+    HIPDNN_FE_CHECK(jsonGraph.deserialize(handle, jsonData));
     std::cout << "Deserialized from JSON.\n";
 
-    HIPDNN_FE_CHECK(jsonGraph.validate());
-    HIPDNN_FE_CHECK(jsonGraph.build_operation_graph(handle));
     HIPDNN_FE_CHECK(jsonGraph.create_execution_plans());
     HIPDNN_FE_CHECK(jsonGraph.check_support());
     HIPDNN_FE_CHECK(jsonGraph.build_plans());
@@ -98,11 +98,11 @@ bool testBinarySerialization(const graph::Graph& originalGraph,
     std::cout << "Serialized to binary (" << binaryData.size() << " bytes)\n";
 
     graph::Graph binaryGraph;
+    // deserialize(handle, ...) produces a finalized, ready-to-use graph —
+    // no separate validate() or build_operation_graph() call is needed.
     HIPDNN_FE_CHECK(binaryGraph.deserialize(handle, binaryData));
     std::cout << "Deserialized from binary.\n";
 
-    HIPDNN_FE_CHECK(binaryGraph.validate());
-    HIPDNN_FE_CHECK(binaryGraph.build_operation_graph(handle));
     HIPDNN_FE_CHECK(binaryGraph.create_execution_plans());
     HIPDNN_FE_CHECK(binaryGraph.check_support());
     HIPDNN_FE_CHECK(binaryGraph.build_plans());
@@ -152,8 +152,9 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     std::cout << "\n--- Building and executing original graph ---\n";
     graph::Graph originalGraph;
     originalGraph.set_name("original_conv_graph");
-    originalGraph.set_io_data_type(inputType).set_compute_data_type(
-        hipdnn_frontend::DataType::FLOAT);
+    originalGraph.set_io_data_type(inputType)
+        .set_intermediate_data_type(hipdnn_frontend::DataType::FLOAT)
+        .set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
 
     graph::ConvFpropAttributes convAttrs;
     convAttrs.set_name("conv_fprop")

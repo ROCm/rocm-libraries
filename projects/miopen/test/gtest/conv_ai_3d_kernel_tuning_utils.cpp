@@ -35,8 +35,8 @@
 #include <miopen/filesystem.hpp>
 #include <miopen/handle.hpp>
 #include <miopen/solver/problem_description_interpreter.hpp>
-#include <miopen/solver/implicitgemm_ck_util.hpp>
 #include <miopen/conv/solvers.hpp>
+#include <miopen/solver/ck_impl_lib_loader.hpp>
 #include <miopen/filesystem.hpp>
 
 #if MIOPEN_ENABLE_AI_KERNEL_TUNING
@@ -624,20 +624,32 @@ TEST_F(GPU_Conv3DKernelTuningAI_FP32, RunParameterPredictionModel_Fallback_Test)
 
 TEST_F(GPU_Conv3DKernelTuningAI_FP32, MetadataEncodingValidation_AllCKInstances_Wrw_Test)
 {
+    const auto& loader = miopen::solver::CkImplLibLoader::Get(device_arch);
+    ASSERT_TRUE(loader.IsLoaded());
     ValidateMetadataEncoding(
-        "ConvHipImplicitGemm3DGroupWrwXdlops", GetAllWrwKernelTypeStrings(), device_arch);
+        "ConvHipImplicitGemm3DGroupWrwXdlops",
+        loader.GetAllKernelTypeStrings(miopen::solver::CKSolverType::GrpConv3dWrw),
+        device_arch);
 }
 
 TEST_F(GPU_Conv3DKernelTuningAI_FP32, MetadataEncodingValidation_AllCKInstances_Fwd_Test)
 {
+    const auto& loader = miopen::solver::CkImplLibLoader::Get(device_arch);
+    ASSERT_TRUE(loader.IsLoaded());
     ValidateMetadataEncoding(
-        "ConvHipImplicitGemm3DGroupFwdXdlops", GetAllFwdKernelTypeStrings(), device_arch);
+        "ConvHipImplicitGemm3DGroupFwdXdlops",
+        loader.GetAllKernelTypeStrings(miopen::solver::CKSolverType::GrpConv3dFwd),
+        device_arch);
 }
 
 TEST_F(GPU_Conv3DKernelTuningAI_FP32, MetadataEncodingValidation_AllCKInstances_Bwd_Test)
 {
+    const auto& loader = miopen::solver::CkImplLibLoader::Get(device_arch);
+    ASSERT_TRUE(loader.IsLoaded());
     ValidateMetadataEncoding(
-        "ConvHipImplicitGemm3DGroupBwdXdlops", GetAllBwdKernelTypeStrings(), device_arch);
+        "ConvHipImplicitGemm3DGroupBwdXdlops",
+        loader.GetAllKernelTypeStrings(miopen::solver::CKSolverType::GrpConv3dBwd),
+        device_arch);
 }
 
 #endif // MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL

@@ -11,17 +11,21 @@
 #include "hipdnn_backend.h"
 
 #include <gtest/gtest.h>
-#include <hipdnn_data_sdk/data_objects/convolution_wrw_attributes_generated.h>
-#include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/convolution_wrw_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
+#include <hipdnn_test_sdk/constants/ConvWgradConstants.hpp>
+#include <hipdnn_test_sdk/utilities/ToVec.hpp>
 
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 
 #include <memory>
 #include <vector>
 
 using namespace hipdnn_backend;
 using namespace hipdnn_backend::test_utilities;
-using namespace hipdnn_data_sdk::data_objects;
+using namespace hipdnn_flatbuffers_sdk::data_objects;
+using namespace hipdnn_tests::constants;
+using hipdnn_tests::toVec;
 
 class TestConvolutionWrwOperationDescriptor : public ::testing::Test
 {
@@ -94,9 +98,12 @@ protected:
     void SetUp() override
     {
         _wrapper = createDescriptor<ConvolutionWrwOperationDescriptor>();
-        _xDesc = createFinalizedTensor(20, {1, 3, 32, 32}, {3072, 1024, 32, 1});
-        _dyDesc = createFinalizedTensor(21, {1, 64, 32, 32}, {65536, 1024, 32, 1});
-        _dwDesc = createFinalizedTensor(22, {64, 3, 3, 3}, {27, 9, 3, 1});
+        _xDesc = createFinalizedTensor(
+            K_WGRAD_TENSOR_X_UID, toVec(K_WGRAD_TENSOR_X_DIMS), toVec(K_WGRAD_TENSOR_X_STRIDES));
+        _dyDesc = createFinalizedTensor(
+            K_WGRAD_TENSOR_DY_UID, toVec(K_WGRAD_TENSOR_DY_DIMS), toVec(K_WGRAD_TENSOR_DY_STRIDES));
+        _dwDesc = createFinalizedTensor(
+            K_WGRAD_TENSOR_DW_UID, toVec(K_WGRAD_TENSOR_DW_DIMS), toVec(K_WGRAD_TENSOR_DW_STRIDES));
         _unfinalizedTensor = createDescriptor<TensorDescriptor>();
     }
 
@@ -272,7 +279,7 @@ TEST_F(TestConvolutionWrwOperationDescriptor, SetTensorDescriptorX)
                                        &_xDesc));
 
     // Verify UID extracted via getData()
-    ASSERT_EQ(desc->getData().x_tensor_uid, 20);
+    ASSERT_EQ(desc->getData().x_tensor_uid, K_WGRAD_TENSOR_X_UID);
     ASSERT_NE(desc->getXDesc(), nullptr);
 }
 
@@ -284,7 +291,7 @@ TEST_F(TestConvolutionWrwOperationDescriptor, SetTensorDescriptorDy)
                                        1,
                                        &_dyDesc));
 
-    ASSERT_EQ(desc->getData().dy_tensor_uid, 21);
+    ASSERT_EQ(desc->getData().dy_tensor_uid, K_WGRAD_TENSOR_DY_UID);
     ASSERT_NE(desc->getDyDesc(), nullptr);
 }
 
@@ -296,7 +303,7 @@ TEST_F(TestConvolutionWrwOperationDescriptor, SetTensorDescriptorDw)
                                        1,
                                        &_dwDesc));
 
-    ASSERT_EQ(desc->getData().dw_tensor_uid, 22);
+    ASSERT_EQ(desc->getData().dw_tensor_uid, K_WGRAD_TENSOR_DW_UID);
     ASSERT_NE(desc->getDwDesc(), nullptr);
 }
 
@@ -765,9 +772,9 @@ TEST_F(TestConvolutionWrwOperationDescriptor, FinalizePreservesTensorReferences)
     ASSERT_NE(desc->getDwDesc(), nullptr);
 
     // Verify UIDs match
-    ASSERT_EQ(desc->getXDesc()->getData().uid, 20);
-    ASSERT_EQ(desc->getDyDesc()->getData().uid, 21);
-    ASSERT_EQ(desc->getDwDesc()->getData().uid, 22);
+    ASSERT_EQ(desc->getXDesc()->getData().uid, K_WGRAD_TENSOR_X_UID);
+    ASSERT_EQ(desc->getDyDesc()->getData().uid, K_WGRAD_TENSOR_DY_UID);
+    ASSERT_EQ(desc->getDwDesc()->getData().uid, K_WGRAD_TENSOR_DW_UID);
 }
 
 // =============================================================================
@@ -781,9 +788,9 @@ TEST_F(TestConvolutionWrwOperationDescriptor, ToStringContainsExpectedInfo)
 
     const std::string str = desc->toString();
     ASSERT_NE(str.find("ConvolutionWrwOperationDescriptor"), std::string::npos);
-    ASSERT_NE(str.find("x_uid=20"), std::string::npos);
-    ASSERT_NE(str.find("dy_uid=21"), std::string::npos);
-    ASSERT_NE(str.find("dw_uid=22"), std::string::npos);
+    ASSERT_NE(str.find("x_uid=1200"), std::string::npos);
+    ASSERT_NE(str.find("dy_uid=1201"), std::string::npos);
+    ASSERT_NE(str.find("dw_uid=1202"), std::string::npos);
     ASSERT_NE(str.find("compute_data_type="), std::string::npos);
 }
 
@@ -798,9 +805,9 @@ TEST_F(TestConvolutionWrwOperationDescriptor, GetTensorDescriptorsReturnsAllTens
 
     auto tensors = desc->getTensorDescriptors();
     ASSERT_EQ(tensors.size(), 3);
-    ASSERT_EQ(tensors[0]->getData().uid, 20);
-    ASSERT_EQ(tensors[1]->getData().uid, 21);
-    ASSERT_EQ(tensors[2]->getData().uid, 22);
+    ASSERT_EQ(tensors[0]->getData().uid, K_WGRAD_TENSOR_X_UID);
+    ASSERT_EQ(tensors[1]->getData().uid, K_WGRAD_TENSOR_DY_UID);
+    ASSERT_EQ(tensors[2]->getData().uid, K_WGRAD_TENSOR_DW_UID);
 }
 
 TEST_F(TestConvolutionWrwOperationDescriptor, BuildNodeProducesCorrectNodeT)
@@ -819,9 +826,9 @@ TEST_F(TestConvolutionWrwOperationDescriptor, BuildNodeProducesCorrectNodeT)
 
     auto* attrs = node->attributes.AsConvolutionWrwAttributes();
     ASSERT_NE(attrs, nullptr);
-    ASSERT_EQ(attrs->x_tensor_uid, 20);
-    ASSERT_EQ(attrs->dy_tensor_uid, 21);
-    ASSERT_EQ(attrs->dw_tensor_uid, 22);
+    ASSERT_EQ(attrs->x_tensor_uid, K_WGRAD_TENSOR_X_UID);
+    ASSERT_EQ(attrs->dy_tensor_uid, K_WGRAD_TENSOR_DY_UID);
+    ASSERT_EQ(attrs->dw_tensor_uid, K_WGRAD_TENSOR_DW_UID);
     ASSERT_EQ(attrs->pre_padding.size(), 2);
     ASSERT_EQ(attrs->post_padding.size(), 2);
     ASSERT_EQ(attrs->stride.size(), 2);
@@ -849,7 +856,7 @@ TEST_F(TestConvolutionWrwOperationDescriptor, GetTensorDescriptorsOrderIsXDyDw)
 
     auto tensors = desc->getTensorDescriptors();
     ASSERT_EQ(tensors.size(), 3);
-    // Verify ordering: [X, DY, DW] matches UIDs [20, 21, 22]
+    // Verify ordering: [X, DY, DW] matches UIDs [K_WGRAD_TENSOR_X_UID, K_WGRAD_TENSOR_DY_UID, K_WGRAD_TENSOR_DW_UID]
     EXPECT_EQ(tensors[0], desc->getXDesc());
     EXPECT_EQ(tensors[1], desc->getDyDesc());
     EXPECT_EQ(tensors[2], desc->getDwDesc());
@@ -865,7 +872,7 @@ TEST_F(TestConvolutionWrwOperationDescriptor, TryAsInterfaceReturnsValidGraphOp)
     // Verify the returned interface is the same underlying object
     auto tensors = graphOp->getTensorDescriptors();
     ASSERT_EQ(tensors.size(), 3);
-    ASSERT_EQ(tensors[0]->getData().uid, 20);
+    ASSERT_EQ(tensors[0]->getData().uid, K_WGRAD_TENSOR_X_UID);
 }
 
 TEST_F(TestConvolutionWrwOperationDescriptor, TryAsInterfaceReturnsNullForWrongType)

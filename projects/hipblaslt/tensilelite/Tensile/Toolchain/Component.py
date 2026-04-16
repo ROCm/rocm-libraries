@@ -169,6 +169,9 @@ class Assembler(Component):
             destPath: The destination path for the generated object file.
         """
         args = self._default_args
+        # Add gfx1250-specific parameters
+        if targetGfx == "gfx1250":
+            args = args + ["-Xclangas", "-target-feature", "-Xclangas", "+real-true16"]
         args = [
             *args,
             f"-mcpu={targetGfx}",
