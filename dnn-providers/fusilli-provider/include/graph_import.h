@@ -144,7 +144,7 @@ private:
       uidToVirtualTensor;
 
   // Helper class for reading from flatbuffer.
-  hipdnn_plugin_sdk::GraphWrapper opGraphWrapper;
+  hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper opGraphWrapper;
 
   GraphImport(const hipdnnPluginConstData_t *opGraph)
       : opGraphWrapper(opGraph->ptr, opGraph->size) {}
