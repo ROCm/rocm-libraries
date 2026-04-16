@@ -128,7 +128,11 @@ namespace TensileLite
                      Base::template Pair<Predicates::Contraction::SupportDeviceUserArguments>(),
                      Base::template Pair<Predicates::Contraction::WorkgroupMappingXCCCheck>(),
                      Base::template Pair<Predicates::Contraction::SwizzleTensorA>(),
-                     Base::template Pair<Predicates::Contraction::SwizzleTensorB>()});
+                     Base::template Pair<Predicates::Contraction::SwizzleTensorB>(),
+                     Base::template Pair<Predicates::Contraction::MXBlockA>(),
+                     Base::template Pair<Predicates::Contraction::MXBlockB>(),
+                     Base::template Pair<Predicates::Contraction::DataTypeMXSA>(),
+                     Base::template Pair<Predicates::Contraction::DataTypeMXSB>()});
 
                 auto gmap = Generic::GetSubclasses();
                 rv.insert(gmap.begin(), gmap.end());
@@ -576,6 +580,26 @@ namespace TensileLite
         template <typename IO>
         struct MappingTraits<Predicates::Contraction::WorkgroupMappingXCCCheck, IO>
             : public AutoMappingTraits<Predicates::Contraction::WorkgroupMappingXCCCheck, IO>
+        {
+        };
+        template <typename IO>
+        struct MappingTraits<Predicates::Contraction::MXBlockA, IO>
+            : public AutoMappingTraits<Predicates::Contraction::MXBlockA, IO>
+        {
+        };
+        template <typename IO>
+        struct MappingTraits<Predicates::Contraction::MXBlockB, IO>
+            : public AutoMappingTraits<Predicates::Contraction::MXBlockB, IO>
+        {
+        };
+        template <typename IO>
+        struct MappingTraits<Predicates::Contraction::DataTypeMXSA, IO>
+            : public AutoMappingTraits<Predicates::Contraction::DataTypeMXSA, IO>
+        {
+        };
+        template <typename IO>
+        struct MappingTraits<Predicates::Contraction::DataTypeMXSB, IO>
+            : public AutoMappingTraits<Predicates::Contraction::DataTypeMXSB, IO>
         {
         };
     } // namespace Serialization

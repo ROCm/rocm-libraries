@@ -369,7 +369,7 @@ Executes the forward pass of a scaled dot-product attention (SDPA) operation on 
 
 ### [**`SerializationRoundTrip`**](./serialization/SerializationRoundTrip.cpp)
 
-Demonstrates graph serialization and deserialization (round-trip) using hipDNN's FlatBuffer-based serialization format. The sample builds a convolution forward graph, serializes it to a binary format, deserializes it back, and then executes the deserialized graph to verify correctness. This shows how graphs can be saved, transmitted, and restored for deployment or caching scenarios.
+Demonstrates graph serialization and deserialization (round-trip) using hipDNN's JSON and binary serialization formats. The sample builds a convolution forward graph, serializes and deserializes it in both formats, then executes the deserialized graphs to verify correctness. This shows how graphs can be saved, transmitted, and restored for deployment or caching scenarios.
 
 ### [**`KnobsUsage`**](./knobs/KnobsUsage.cpp)
 

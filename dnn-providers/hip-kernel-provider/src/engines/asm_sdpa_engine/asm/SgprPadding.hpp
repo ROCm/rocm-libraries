@@ -29,12 +29,12 @@ namespace asm_sdpa_engine
 
 struct SgprPad2
 {
-    uint32_t pad[2]; // NOLINT(readability-identifier-naming)
+    uint32_t pad[2]; // NOLINT(modernize-avoid-c-arrays,readability-identifier-naming)
 };
 
 struct SgprPad3
 {
-    uint32_t pad[3]; // NOLINT(readability-identifier-naming)
+    uint32_t pad[3]; // NOLINT(modernize-avoid-c-arrays,readability-identifier-naming)
 };
 
 } // namespace asm_sdpa_engine

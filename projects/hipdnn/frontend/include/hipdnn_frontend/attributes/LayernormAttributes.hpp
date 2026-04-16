@@ -13,7 +13,6 @@
 
 #include "Attributes.hpp"
 #include "TensorAttributes.hpp"
-#include <hipdnn_data_sdk/data_objects/layernorm_attributes_generated.h>
 #include <memory>
 #include <unordered_map>
 
@@ -220,53 +219,6 @@ public:
         return _normalizedDimCount;
     }
     /// @endcond
-
-    flatbuffers::Offset<hipdnn_data_sdk::data_objects::LayernormAttributes>
-        pack_attributes(flatbuffers::FlatBufferBuilder& builder) const // NOLINT
-    {
-        const auto mean = get_mean();
-        const auto invVariance = get_inv_variance();
-
-        return hipdnn_data_sdk::data_objects::CreateLayernormAttributes(
-            builder,
-            get_x()->get_uid(),
-            get_scale()->get_uid(),
-            get_bias()->get_uid(),
-            get_epsilon()->get_uid(),
-            get_y()->get_uid(),
-            _normalizedDimCount,
-            mean ? flatbuffers::Optional<int64_t>(mean->get_uid())
-                 : flatbuffers::Optional<int64_t>(flatbuffers::nullopt),
-            invVariance ? flatbuffers::Optional<int64_t>(invVariance->get_uid())
-                        : flatbuffers::Optional<int64_t>(flatbuffers::nullopt),
-            toSdkType(_forwardPhase));
-    }
-
-    static LayernormAttributes fromFlatBuffer(
-        const hipdnn_data_sdk::data_objects::LayernormAttributes* fb,
-        const std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>>& tensorMap)
-    {
-        LayernormAttributes attr;
-
-        attr.set_x(tensorMap.at(fb->x_tensor_uid()));
-        attr.set_scale(tensorMap.at(fb->scale_tensor_uid()));
-        attr.set_bias(tensorMap.at(fb->bias_tensor_uid()));
-        attr.set_epsilon(tensorMap.at(fb->epsilon_tensor_uid()));
-        attr.set_y(tensorMap.at(fb->y_tensor_uid()));
-        attr.set_normalized_dim_count(fb->normalized_dim_count());
-        attr.set_forward_phase(fromSdkType(fb->forward_phase()));
-
-        if(fb->mean_tensor_uid().has_value())
-        {
-            attr.set_mean(tensorMap.at(fb->mean_tensor_uid().value()));
-        }
-        if(fb->inv_variance_tensor_uid().has_value())
-        {
-            attr.set_inv_variance(tensorMap.at(fb->inv_variance_tensor_uid().value()));
-        }
-
-        return attr;
-    }
 
 private:
     int64_t _normalizedDimCount = 0;

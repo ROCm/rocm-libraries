@@ -68,6 +68,64 @@ inline __device__ __host__ hip_bfloat16 negate(hip_bfloat16 x)
 #endif
 }
 
+#if defined(HIPBLASLT_USE_FP4)
+template <>
+inline __device__ __host__ hipblaslt_f4x2 negate(hipblaslt_f4x2 x)
+{
+    x.__x ^= 0x8; // left fp4 element
+    x.__x ^= 0x80; // right fp4 element
+    return x;
+}
+#endif
+
+#if defined(HIPBLASLT_USE_FP6)
+template <>
+inline __device__ __host__ hipblaslt_f6x16 negate(hipblaslt_f6x16 x)
+{
+    union
+    {
+        hipblaslt_f6x16_storage real;
+        uint8_t                 tmp[12];
+    } cvt;
+
+    cvt.real = x.data;
+
+    for(int i = 0; i < sizeof(cvt.tmp); i += 3)
+    {
+        cvt.tmp[i] ^= 0x20;
+        cvt.tmp[i + 1] ^= 0x8;
+        cvt.tmp[i + 2] ^= 0x82;
+    }
+
+    x.data = cvt.real;
+    return x;
+}
+#endif
+
+#if defined(HIPBLASLT_USE_BF6)
+template <>
+inline __device__ __host__ hipblaslt_bf6x16 negate(hipblaslt_bf6x16 x)
+{
+    union
+    {
+        hipblaslt_bf6x16_storage real;
+        uint8_t                  tmp[12];
+    } cvt;
+
+    cvt.real = x.data;
+
+    for(int i = 0; i < sizeof(cvt.tmp); i += 3)
+    {
+        cvt.tmp[i] ^= 0x20;
+        cvt.tmp[i + 1] ^= 0x8;
+        cvt.tmp[i + 2] ^= 0x82;
+    }
+
+    x.data = cvt.real;
+    return x;
+}
+#endif
+
 template <>
 inline __device__ __host__ hipblaslt_f8_fnuz negate(hipblaslt_f8_fnuz x)
 {

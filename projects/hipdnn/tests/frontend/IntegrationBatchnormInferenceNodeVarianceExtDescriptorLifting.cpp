@@ -233,7 +233,7 @@ TEST_F(IntegrationBatchnormInferenceVarianceExtDescriptorLifting,
 
 // Builds a BatchnormInferenceVarianceExt graph, serializes to binary, creates a backend descriptor
 // from bytes (no handle, no finalize), calls fromBackendDescriptor(), and verifies
-// all fields survive the FlatBuffer-direct path.
+// all fields survive the backend C API serialization path.
 TEST_F(IntegrationBatchnormInferenceVarianceExtDescriptorLifting,
        BatchnormInferenceVarianceExtLiftWithoutFinalization)
 {
@@ -409,6 +409,91 @@ TEST_F(IntegrationBatchnormInferenceVarianceExtDescriptorLifting,
     EXPECT_EQ(opNode->attributes.get_epsilon()->get_dim(), toVec(K_BN_INF_VAR_EXT_EPSILON_DIMS));
     EXPECT_EQ(opNode->attributes.get_epsilon()->get_stride(),
               toVec(K_BN_INF_VAR_EXT_EPSILON_STRIDES));
+}
+
+// Exercises the JSON serialize/deserialize path with a handle (full finalization)
+// for a batchnorm inference variance ext graph.
+TEST_F(IntegrationBatchnormInferenceVarianceExtDescriptorLifting, JsonRoundTripWithHandle)
+{
+    auto originalGraph = buildGraph();
+
+    auto result = originalGraph->validate();
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    // Serialize to JSON (auto-lowers internally)
+    std::string jsonData;
+    result = originalGraph->serialize(jsonData);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+    ASSERT_FALSE(jsonData.empty());
+
+    // Deserialize from JSON with handle
+    auto liftedGraph = std::make_shared<TestableGraphLifting>();
+    result = liftedGraph->deserialize(_handle, jsonData);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    // Verify graph-level attributes
+    EXPECT_EQ(liftedGraph->get_name(), "BatchnormInferenceVarianceExtLiftingTestGraph");
+    EXPECT_EQ(liftedGraph->get_compute_data_type(), DataType::FLOAT);
+    EXPECT_EQ(liftedGraph->get_intermediate_data_type(), DataType::FLOAT);
+    EXPECT_EQ(liftedGraph->get_io_data_type(), DataType::FLOAT);
+
+    // Verify tensor count (x, mean, variance, scale, bias, epsilon, y = 7)
+    auto tensorMap = liftedGraph->getTensorsByUid();
+    ASSERT_EQ(tensorMap.size(), 7u)
+        << "Expected 7 tensors in lifted batchnorm inference variance ext graph";
+
+    // Verify tensors
+    hipdnn_tests::verifyTensorInGraph(tensorMap,
+                                      K_BN_INF_VAR_EXT_X_UID,
+                                      "x",
+                                      toVec(K_BN_INF_VAR_EXT_X_DIMS),
+                                      toVec(K_BN_INF_VAR_EXT_X_STRIDES),
+                                      DataType::FLOAT);
+    hipdnn_tests::verifyTensorInGraph(tensorMap,
+                                      K_BN_INF_VAR_EXT_MEAN_UID,
+                                      "mean",
+                                      toVec(K_BN_INF_VAR_EXT_MEAN_DIMS),
+                                      toVec(K_BN_INF_VAR_EXT_MEAN_STRIDES),
+                                      DataType::FLOAT);
+    hipdnn_tests::verifyTensorInGraph(tensorMap,
+                                      K_BN_INF_VAR_EXT_VARIANCE_UID,
+                                      "variance",
+                                      toVec(K_BN_INF_VAR_EXT_VARIANCE_DIMS),
+                                      toVec(K_BN_INF_VAR_EXT_VARIANCE_STRIDES),
+                                      DataType::FLOAT);
+    hipdnn_tests::verifyTensorInGraph(tensorMap,
+                                      K_BN_INF_VAR_EXT_SCALE_UID,
+                                      "scale",
+                                      toVec(K_BN_INF_VAR_EXT_SCALE_DIMS),
+                                      toVec(K_BN_INF_VAR_EXT_SCALE_STRIDES),
+                                      DataType::FLOAT);
+    hipdnn_tests::verifyTensorInGraph(tensorMap,
+                                      K_BN_INF_VAR_EXT_BIAS_UID,
+                                      "bias",
+                                      toVec(K_BN_INF_VAR_EXT_BIAS_DIMS),
+                                      toVec(K_BN_INF_VAR_EXT_BIAS_STRIDES),
+                                      DataType::FLOAT);
+    hipdnn_tests::verifyTensorInGraph(tensorMap,
+                                      K_BN_INF_VAR_EXT_EPSILON_UID,
+                                      "epsilon",
+                                      toVec(K_BN_INF_VAR_EXT_EPSILON_DIMS),
+                                      toVec(K_BN_INF_VAR_EXT_EPSILON_STRIDES),
+                                      DataType::FLOAT);
+    hipdnn_tests::verifyTensorInGraph(tensorMap,
+                                      K_BN_INF_VAR_EXT_Y_UID,
+                                      "y",
+                                      toVec(K_BN_INF_VAR_EXT_Y_DIMS),
+                                      toVec(K_BN_INF_VAR_EXT_Y_STRIDES),
+                                      DataType::FLOAT);
+
+    // Verify sub-node count and type
+    auto& subNodes = liftedGraph->getSubNodes();
+    ASSERT_EQ(subNodes.size(), 1u) << "Expected 1 operation node in lifted graph";
+
+    auto* opNode = dynamic_cast<BatchnormInferenceNodeVarianceExt*>(subNodes[0].get());
+    ASSERT_NE(opNode, nullptr) << "Expected a BatchnormInferenceNodeVarianceExt";
+
+    EXPECT_EQ(opNode->attributes.get_name(), "test_op");
 }
 
 } // namespace

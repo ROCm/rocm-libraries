@@ -345,50 +345,43 @@ TYPED_TEST(TestGpuIntValidation, EmptyTensorsPasses)
 
 TEST(TestGpuValidatorFactory, CreatesFloatValidator)
 {
-    const auto validator
-        = createGpuAllCloseValidator(hipdnn_data_sdk::data_objects::DataType::FLOAT);
+    const auto validator = createGpuAllCloseValidator(hipdnn_frontend::DataType::FLOAT);
     ASSERT_NE(validator, nullptr);
 }
 
 TEST(TestGpuValidatorFactory, CreatesHalfValidator)
 {
-    const auto validator
-        = createGpuAllCloseValidator(hipdnn_data_sdk::data_objects::DataType::HALF);
+    const auto validator = createGpuAllCloseValidator(hipdnn_frontend::DataType::HALF);
     ASSERT_NE(validator, nullptr);
 }
 
 TEST(TestGpuValidatorFactory, CreatesBfloat16Validator)
 {
-    const auto validator
-        = createGpuAllCloseValidator(hipdnn_data_sdk::data_objects::DataType::BFLOAT16);
+    const auto validator = createGpuAllCloseValidator(hipdnn_frontend::DataType::BFLOAT16);
     ASSERT_NE(validator, nullptr);
 }
 
 TEST(TestGpuValidatorFactory, CreatesDoubleValidator)
 {
-    const auto validator
-        = createGpuAllCloseValidator(hipdnn_data_sdk::data_objects::DataType::DOUBLE);
+    const auto validator = createGpuAllCloseValidator(hipdnn_frontend::DataType::DOUBLE);
     ASSERT_NE(validator, nullptr);
 }
 
 TEST(TestGpuValidatorFactory, CreatesInt8Validator)
 {
-    const auto validator
-        = createGpuAllCloseValidator(hipdnn_data_sdk::data_objects::DataType::INT8);
+    const auto validator = createGpuAllCloseValidator(hipdnn_frontend::DataType::INT8);
     ASSERT_NE(validator, nullptr);
 }
 
 TEST(TestGpuValidatorFactory, CreatesUint8Validator)
 {
-    const auto validator
-        = createGpuAllCloseValidator(hipdnn_data_sdk::data_objects::DataType::UINT8);
+    const auto validator = createGpuAllCloseValidator(hipdnn_frontend::DataType::UINT8);
     ASSERT_NE(validator, nullptr);
 }
 
 TEST(TestGpuValidatorFactory, CreatesInt32Validator)
 {
-    const auto validator
-        = createGpuAllCloseValidator(hipdnn_data_sdk::data_objects::DataType::INT32);
+    const auto validator = createGpuAllCloseValidator(hipdnn_frontend::DataType::INT32);
     ASSERT_NE(validator, nullptr);
 }
 
@@ -396,8 +389,7 @@ TEST(TestGpuValidatorFactory, FloatValidatorPassesMatchingData)
 {
     SKIP_IF_NO_DEVICES();
 
-    auto validator
-        = createGpuAllCloseValidator(hipdnn_data_sdk::data_objects::DataType::FLOAT, 0.0f, 0.0f);
+    auto validator = createGpuAllCloseValidator(hipdnn_frontend::DataType::FLOAT, 0.0f, 0.0f);
     ASSERT_NE(validator, nullptr);
 
     Tensor<float> ref({4});
@@ -423,7 +415,7 @@ TEST(TestGpuValidatorFactory, Int32ValidatorPassesMatchingData)
 {
     SKIP_IF_NO_DEVICES();
 
-    auto validator = createGpuAllCloseValidator(hipdnn_data_sdk::data_objects::DataType::INT32);
+    auto validator = createGpuAllCloseValidator(hipdnn_frontend::DataType::INT32);
     ASSERT_NE(validator, nullptr);
 
     Tensor<int32_t> ref({4});
@@ -447,7 +439,7 @@ TEST(TestGpuValidatorFactory, Int32ValidatorPassesMatchingData)
 
 TEST(TestGpuValidatorFactory, ThrowsOnUnsupportedType)
 {
-    ASSERT_THROW(createGpuAllCloseValidator(hipdnn_data_sdk::data_objects::DataType::FP8_E4M3),
+    ASSERT_THROW(createGpuAllCloseValidator(hipdnn_frontend::DataType::FP8_E4M3),
                  std::runtime_error);
 }
 
