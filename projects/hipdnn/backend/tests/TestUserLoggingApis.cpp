@@ -467,15 +467,21 @@ TEST_F(IntegrationBackendUserLoggingApis, ConcurrentLoggingWithCallbackToggle)
     std::vector<std::thread> threads;
     threads.reserve(NUM_LOGGER_THREADS);
 
+    constexpr auto THREAD_SYNC_TIMEOUT = std::chrono::seconds(10);
+
     // Helper to wait until at least one log-generating thread has completed a full loop.
-    auto waitForIterations = [&](uint64_t snapshot) {
-        std::unique_lock<std::mutex> lock(mutex);
-        // The iteration count will need to increment by the number of threads plus one
-        // to ensure that at least one thread ran through the log generating section of code.
-        const uint64_t targetCount = snapshot + static_cast<uint64_t>(NUM_LOGGER_THREADS) + 1;
-        cvProgress.wait(lock, [&] { return iterationCount >= targetCount; });
-        return iterationCount;
-    };
+    auto waitForIterations
+        = [&](uint64_t snapshot) {
+              std::unique_lock<std::mutex> lock(mutex);
+              // The iteration count will need to increment by the number of threads plus one
+              // to ensure that at least one thread ran through the log generating section of code.
+              const uint64_t targetCount = snapshot + static_cast<uint64_t>(NUM_LOGGER_THREADS) + 1;
+              const bool completed = cvProgress.wait_for(
+                  lock, THREAD_SYNC_TIMEOUT, [&] { return iterationCount >= targetCount; });
+              EXPECT_TRUE(completed)
+                  << "Timeout waiting for log-generating threads to complete iterations";
+              return iterationCount;
+          };
 
     // Register the user callback and set log level
     registerIsolatedCallback(HIPDNN_SEV_INFO, HIPDNN_LOG_CALLBACK_ASYNC);
@@ -523,7 +529,9 @@ TEST_F(IntegrationBackendUserLoggingApis, ConcurrentLoggingWithCallbackToggle)
     // Wait for all log-generating threads to be ready, then start them
     {
         std::unique_lock<std::mutex> lock(mutex);
-        cvProgress.wait(lock, [&] { return threadsReady == NUM_LOGGER_THREADS; });
+        const bool allReady = cvProgress.wait_for(
+            lock, THREAD_SYNC_TIMEOUT, [&] { return threadsReady == NUM_LOGGER_THREADS; });
+        ASSERT_TRUE(allReady) << "Timeout waiting for log-generating threads to become ready";
         startFlag = true;
     }
     cvStart.notify_all();
