@@ -11,17 +11,22 @@
 #include "hipdnn_backend.h"
 
 #include <gtest/gtest.h>
-#include <hipdnn_data_sdk/data_objects/batchnorm_backward_attributes_generated.h>
-#include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/batchnorm_backward_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
+#include <hipdnn_test_sdk/constants/BatchnormBackwardConstants.hpp>
+#include <hipdnn_test_sdk/utilities/ToVec.hpp>
 
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 
 #include <memory>
+#include <string>
 #include <vector>
 
 using namespace hipdnn_backend;
 using namespace hipdnn_backend::test_utilities;
-using namespace hipdnn_data_sdk::data_objects;
+using namespace hipdnn_flatbuffers_sdk::data_objects;
+using namespace hipdnn_tests::constants;
+using hipdnn_tests::toVec;
 
 class TestBatchnormBackwardOperationDescriptor : public ::testing::Test
 {
@@ -112,16 +117,27 @@ protected:
     void SetUp() override
     {
         _wrapper = createDescriptor<BatchnormBackwardOperationDescriptor>();
-        _dyDesc = createFinalizedTensor(60, {1, 64, 32, 32}, {65536, 1024, 32, 1});
-        _xDesc = createFinalizedTensor(61, {1, 64, 32, 32}, {65536, 1024, 32, 1});
-        _scaleDesc = createFinalizedTensor(62, {1, 64, 1, 1}, {64, 1, 1, 1});
-        _dxDesc = createFinalizedTensor(63, {1, 64, 32, 32}, {65536, 1024, 32, 1});
-        _dscaleDesc = createFinalizedTensor(64, {1, 64, 1, 1}, {64, 1, 1, 1});
-        _dbiasDesc = createFinalizedTensor(65, {1, 64, 1, 1}, {64, 1, 1, 1});
-        _meanDesc = createFinalizedTensor(7);
-        _invVarianceDesc = createFinalizedTensor(8);
-        _peerStatsDesc0 = createFinalizedTensor(110);
-        _peerStatsDesc1 = createFinalizedTensor(111);
+        _dyDesc = createFinalizedTensor(K_BN_BWD_TENSOR_DY_UID,
+                                        toVec(K_BN_BWD_TENSOR_DY_DIMS),
+                                        toVec(K_BN_BWD_TENSOR_DY_STRIDES));
+        _xDesc = createFinalizedTensor(
+            K_BN_BWD_TENSOR_X_UID, toVec(K_BN_BWD_TENSOR_X_DIMS), toVec(K_BN_BWD_TENSOR_X_STRIDES));
+        _scaleDesc = createFinalizedTensor(K_BN_BWD_TENSOR_SCALE_UID,
+                                           toVec(K_BN_BWD_TENSOR_SCALE_DIMS),
+                                           toVec(K_BN_BWD_TENSOR_SCALE_STRIDES));
+        _dxDesc = createFinalizedTensor(K_BN_BWD_TENSOR_DX_UID,
+                                        toVec(K_BN_BWD_TENSOR_DX_DIMS),
+                                        toVec(K_BN_BWD_TENSOR_DX_STRIDES));
+        _dscaleDesc = createFinalizedTensor(K_BN_BWD_TENSOR_DSCALE_UID,
+                                            toVec(K_BN_BWD_TENSOR_DSCALE_DIMS),
+                                            toVec(K_BN_BWD_TENSOR_DSCALE_STRIDES));
+        _dbiasDesc = createFinalizedTensor(K_BN_BWD_TENSOR_DBIAS_UID,
+                                           toVec(K_BN_BWD_TENSOR_DBIAS_DIMS),
+                                           toVec(K_BN_BWD_TENSOR_DBIAS_STRIDES));
+        _meanDesc = createFinalizedTensor(K_BN_BWD_TENSOR_MEAN_UID);
+        _invVarianceDesc = createFinalizedTensor(K_BN_BWD_TENSOR_INV_VARIANCE_UID);
+        _peerStatsDesc0 = createFinalizedTensor(K_BN_BWD_TENSOR_PEER_STAT_0_UID);
+        _peerStatsDesc1 = createFinalizedTensor(K_BN_BWD_TENSOR_PEER_STAT_1_UID);
         _unfinalizedTensor = createDescriptor<TensorDescriptor>();
     }
 
@@ -324,7 +340,7 @@ TEST_F(TestBatchnormBackwardOperationDescriptor, SetTensorDescriptorDy)
                                        &_dyDesc));
 
     // Verify UID extracted via getData()
-    ASSERT_EQ(desc->getData().dy_tensor_uid, 60);
+    ASSERT_EQ(desc->getData().dy_tensor_uid, K_BN_BWD_TENSOR_DY_UID);
     ASSERT_NE(desc->getDyDesc(), nullptr);
 }
 
@@ -336,7 +352,7 @@ TEST_F(TestBatchnormBackwardOperationDescriptor, SetTensorDescriptorX)
                                        1,
                                        &_xDesc));
 
-    ASSERT_EQ(desc->getData().x_tensor_uid, 61);
+    ASSERT_EQ(desc->getData().x_tensor_uid, K_BN_BWD_TENSOR_X_UID);
     ASSERT_NE(desc->getXDesc(), nullptr);
 }
 
@@ -348,7 +364,7 @@ TEST_F(TestBatchnormBackwardOperationDescriptor, SetTensorDescriptorScale)
                                        1,
                                        &_scaleDesc));
 
-    ASSERT_EQ(desc->getData().scale_tensor_uid, 62);
+    ASSERT_EQ(desc->getData().scale_tensor_uid, K_BN_BWD_TENSOR_SCALE_UID);
     ASSERT_NE(desc->getScaleDesc(), nullptr);
 }
 
@@ -360,7 +376,7 @@ TEST_F(TestBatchnormBackwardOperationDescriptor, SetTensorDescriptorDx)
                                        1,
                                        &_dxDesc));
 
-    ASSERT_EQ(desc->getData().dx_tensor_uid, 63);
+    ASSERT_EQ(desc->getData().dx_tensor_uid, K_BN_BWD_TENSOR_DX_UID);
     ASSERT_NE(desc->getDxDesc(), nullptr);
 }
 
@@ -372,7 +388,7 @@ TEST_F(TestBatchnormBackwardOperationDescriptor, SetTensorDescriptorDscale)
                                        1,
                                        &_dscaleDesc));
 
-    ASSERT_EQ(desc->getData().dscale_tensor_uid, 64);
+    ASSERT_EQ(desc->getData().dscale_tensor_uid, K_BN_BWD_TENSOR_DSCALE_UID);
     ASSERT_NE(desc->getDscaleDesc(), nullptr);
 }
 
@@ -384,7 +400,7 @@ TEST_F(TestBatchnormBackwardOperationDescriptor, SetTensorDescriptorDbias)
                                        1,
                                        &_dbiasDesc));
 
-    ASSERT_EQ(desc->getData().dbias_tensor_uid, 65);
+    ASSERT_EQ(desc->getData().dbias_tensor_uid, K_BN_BWD_TENSOR_DBIAS_UID);
     ASSERT_NE(desc->getDbiasDesc(), nullptr);
 }
 
@@ -396,7 +412,7 @@ TEST_F(TestBatchnormBackwardOperationDescriptor, SetTensorDescriptorMean)
                                        1,
                                        &_meanDesc));
 
-    ASSERT_EQ(desc->getData().mean_tensor_uid, 7);
+    ASSERT_EQ(desc->getData().mean_tensor_uid, K_BN_BWD_TENSOR_MEAN_UID);
     ASSERT_NE(desc->getMeanDesc(), nullptr);
 }
 
@@ -408,7 +424,7 @@ TEST_F(TestBatchnormBackwardOperationDescriptor, SetTensorDescriptorInvVariance)
                                        1,
                                        &_invVarianceDesc));
 
-    ASSERT_EQ(desc->getData().inv_variance_tensor_uid, 8);
+    ASSERT_EQ(desc->getData().inv_variance_tensor_uid, K_BN_BWD_TENSOR_INV_VARIANCE_UID);
     ASSERT_NE(desc->getInvVarianceDesc(), nullptr);
 }
 
@@ -755,14 +771,14 @@ TEST_F(TestBatchnormBackwardOperationDescriptor, FinalizePreservesTensorReferenc
     ASSERT_NE(desc->getInvVarianceDesc(), nullptr);
 
     // Verify UIDs match
-    ASSERT_EQ(desc->getDyDesc()->getData().uid, 60);
-    ASSERT_EQ(desc->getXDesc()->getData().uid, 61);
-    ASSERT_EQ(desc->getScaleDesc()->getData().uid, 62);
-    ASSERT_EQ(desc->getDxDesc()->getData().uid, 63);
-    ASSERT_EQ(desc->getDscaleDesc()->getData().uid, 64);
-    ASSERT_EQ(desc->getDbiasDesc()->getData().uid, 65);
-    ASSERT_EQ(desc->getMeanDesc()->getData().uid, 7);
-    ASSERT_EQ(desc->getInvVarianceDesc()->getData().uid, 8);
+    ASSERT_EQ(desc->getDyDesc()->getData().uid, K_BN_BWD_TENSOR_DY_UID);
+    ASSERT_EQ(desc->getXDesc()->getData().uid, K_BN_BWD_TENSOR_X_UID);
+    ASSERT_EQ(desc->getScaleDesc()->getData().uid, K_BN_BWD_TENSOR_SCALE_UID);
+    ASSERT_EQ(desc->getDxDesc()->getData().uid, K_BN_BWD_TENSOR_DX_UID);
+    ASSERT_EQ(desc->getDscaleDesc()->getData().uid, K_BN_BWD_TENSOR_DSCALE_UID);
+    ASSERT_EQ(desc->getDbiasDesc()->getData().uid, K_BN_BWD_TENSOR_DBIAS_UID);
+    ASSERT_EQ(desc->getMeanDesc()->getData().uid, K_BN_BWD_TENSOR_MEAN_UID);
+    ASSERT_EQ(desc->getInvVarianceDesc()->getData().uid, K_BN_BWD_TENSOR_INV_VARIANCE_UID);
 }
 
 // =============================================================================
@@ -776,14 +792,18 @@ TEST_F(TestBatchnormBackwardOperationDescriptor, ToStringContainsExpectedInfo)
 
     const std::string str = desc->toString();
     ASSERT_NE(str.find("BatchnormBackwardOperationDescriptor"), std::string::npos);
-    ASSERT_NE(str.find("dy_uid=60"), std::string::npos);
-    ASSERT_NE(str.find("x_uid=61"), std::string::npos);
-    ASSERT_NE(str.find("scale_uid=62"), std::string::npos);
-    ASSERT_NE(str.find("dx_uid=63"), std::string::npos);
-    ASSERT_NE(str.find("dscale_uid=64"), std::string::npos);
-    ASSERT_NE(str.find("dbias_uid=65"), std::string::npos);
-    ASSERT_NE(str.find("mean_uid=7"), std::string::npos);
-    ASSERT_NE(str.find("inv_variance_uid=8"), std::string::npos);
+    ASSERT_NE(str.find("dy_uid=" + std::to_string(K_BN_BWD_TENSOR_DY_UID)), std::string::npos);
+    ASSERT_NE(str.find("x_uid=" + std::to_string(K_BN_BWD_TENSOR_X_UID)), std::string::npos);
+    ASSERT_NE(str.find("scale_uid=" + std::to_string(K_BN_BWD_TENSOR_SCALE_UID)),
+              std::string::npos);
+    ASSERT_NE(str.find("dx_uid=" + std::to_string(K_BN_BWD_TENSOR_DX_UID)), std::string::npos);
+    ASSERT_NE(str.find("dscale_uid=" + std::to_string(K_BN_BWD_TENSOR_DSCALE_UID)),
+              std::string::npos);
+    ASSERT_NE(str.find("dbias_uid=" + std::to_string(K_BN_BWD_TENSOR_DBIAS_UID)),
+              std::string::npos);
+    ASSERT_NE(str.find("mean_uid=" + std::to_string(K_BN_BWD_TENSOR_MEAN_UID)), std::string::npos);
+    ASSERT_NE(str.find("inv_variance_uid=" + std::to_string(K_BN_BWD_TENSOR_INV_VARIANCE_UID)),
+              std::string::npos);
     ASSERT_NE(str.find("compute_data_type="), std::string::npos);
 }
 
@@ -798,14 +818,14 @@ TEST_F(TestBatchnormBackwardOperationDescriptor, GetTensorDescriptorsReturnsAllT
 
     auto tensors = desc->getTensorDescriptors();
     ASSERT_EQ(tensors.size(), 8);
-    ASSERT_EQ(tensors[0]->getData().uid, 60);
-    ASSERT_EQ(tensors[1]->getData().uid, 61);
-    ASSERT_EQ(tensors[2]->getData().uid, 62);
-    ASSERT_EQ(tensors[3]->getData().uid, 63);
-    ASSERT_EQ(tensors[4]->getData().uid, 64);
-    ASSERT_EQ(tensors[5]->getData().uid, 65);
-    ASSERT_EQ(tensors[6]->getData().uid, 7);
-    ASSERT_EQ(tensors[7]->getData().uid, 8);
+    ASSERT_EQ(tensors[0]->getData().uid, K_BN_BWD_TENSOR_DY_UID);
+    ASSERT_EQ(tensors[1]->getData().uid, K_BN_BWD_TENSOR_X_UID);
+    ASSERT_EQ(tensors[2]->getData().uid, K_BN_BWD_TENSOR_SCALE_UID);
+    ASSERT_EQ(tensors[3]->getData().uid, K_BN_BWD_TENSOR_DX_UID);
+    ASSERT_EQ(tensors[4]->getData().uid, K_BN_BWD_TENSOR_DSCALE_UID);
+    ASSERT_EQ(tensors[5]->getData().uid, K_BN_BWD_TENSOR_DBIAS_UID);
+    ASSERT_EQ(tensors[6]->getData().uid, K_BN_BWD_TENSOR_MEAN_UID);
+    ASSERT_EQ(tensors[7]->getData().uid, K_BN_BWD_TENSOR_INV_VARIANCE_UID);
 }
 
 TEST_F(TestBatchnormBackwardOperationDescriptor, BuildNodeProducesCorrectNodeT)
@@ -825,14 +845,14 @@ TEST_F(TestBatchnormBackwardOperationDescriptor, BuildNodeProducesCorrectNodeT)
 
     auto* attrs = node->attributes.AsBatchnormBackwardAttributes();
     ASSERT_NE(attrs, nullptr);
-    ASSERT_EQ(attrs->dy_tensor_uid, 60);
-    ASSERT_EQ(attrs->x_tensor_uid, 61);
-    ASSERT_EQ(attrs->scale_tensor_uid, 62);
-    ASSERT_EQ(attrs->dx_tensor_uid, 63);
-    ASSERT_EQ(attrs->dscale_tensor_uid, 64);
-    ASSERT_EQ(attrs->dbias_tensor_uid, 65);
-    ASSERT_EQ(attrs->mean_tensor_uid, 7);
-    ASSERT_EQ(attrs->inv_variance_tensor_uid, 8);
+    ASSERT_EQ(attrs->dy_tensor_uid, K_BN_BWD_TENSOR_DY_UID);
+    ASSERT_EQ(attrs->x_tensor_uid, K_BN_BWD_TENSOR_X_UID);
+    ASSERT_EQ(attrs->scale_tensor_uid, K_BN_BWD_TENSOR_SCALE_UID);
+    ASSERT_EQ(attrs->dx_tensor_uid, K_BN_BWD_TENSOR_DX_UID);
+    ASSERT_EQ(attrs->dscale_tensor_uid, K_BN_BWD_TENSOR_DSCALE_UID);
+    ASSERT_EQ(attrs->dbias_tensor_uid, K_BN_BWD_TENSOR_DBIAS_UID);
+    ASSERT_EQ(attrs->mean_tensor_uid, K_BN_BWD_TENSOR_MEAN_UID);
+    ASSERT_EQ(attrs->inv_variance_tensor_uid, K_BN_BWD_TENSOR_INV_VARIANCE_UID);
 }
 
 TEST_F(TestBatchnormBackwardOperationDescriptor, BuildNodeWithHalfComputeType)
@@ -858,7 +878,7 @@ TEST_F(TestBatchnormBackwardOperationDescriptor,
 
     auto tensors = desc->getTensorDescriptors();
     ASSERT_EQ(tensors.size(), 8);
-    // Verify ordering: [DY, X, SCALE, DX, DSCALE, DBIAS, MEAN, INV_VARIANCE] matches UIDs [60, 61, 62, 63, 64, 65, 7, 8]
+    // Verify ordering: [DY, X, SCALE, DX, DSCALE, DBIAS, MEAN, INV_VARIANCE]
     EXPECT_EQ(tensors[0], desc->getDyDesc());
     EXPECT_EQ(tensors[1], desc->getXDesc());
     EXPECT_EQ(tensors[2], desc->getScaleDesc());
@@ -879,7 +899,7 @@ TEST_F(TestBatchnormBackwardOperationDescriptor, TryAsInterfaceReturnsValidGraph
     // Verify the returned interface is the same underlying object
     auto tensors = graphOp->getTensorDescriptors();
     ASSERT_EQ(tensors.size(), 8);
-    ASSERT_EQ(tensors[0]->getData().uid, 60);
+    ASSERT_EQ(tensors[0]->getData().uid, K_BN_BWD_TENSOR_DY_UID);
 }
 
 TEST_F(TestBatchnormBackwardOperationDescriptor, TryAsInterfaceReturnsNullForWrongType)
@@ -905,8 +925,8 @@ TEST_F(TestBatchnormBackwardOperationDescriptor, SetPeerStatsTensorArray)
 
     auto& data = desc->getData();
     ASSERT_EQ(data.peer_stats_tensor_uid.size(), 2);
-    EXPECT_EQ(data.peer_stats_tensor_uid[0], 110);
-    EXPECT_EQ(data.peer_stats_tensor_uid[1], 111);
+    EXPECT_EQ(data.peer_stats_tensor_uid[0], K_BN_BWD_TENSOR_PEER_STAT_0_UID);
+    EXPECT_EQ(data.peer_stats_tensor_uid[1], K_BN_BWD_TENSOR_PEER_STAT_1_UID);
 }
 
 TEST_F(TestBatchnormBackwardOperationDescriptor, SetPeerStatsTensorArrayFailsNotFinalized)

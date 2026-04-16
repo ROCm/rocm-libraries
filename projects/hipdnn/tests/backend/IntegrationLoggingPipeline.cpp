@@ -173,7 +173,7 @@ TEST_F(IntegrationGpuLoggingPipeline, ErrorStatusLogging)
 
     // Invalid descriptor type
     hipdnnBackendDescriptor_t descriptor = nullptr;
-    status = hipdnnBackendCreateDescriptor(HIPDNN_INVALID_TYPE, &descriptor);
+    status = hipdnnBackendCreateDescriptor(HIPDNN_INVALID_TYPE_EXT, &descriptor);
     ASSERT_EQ(status, HIPDNN_STATUS_NOT_SUPPORTED);
 }
 

@@ -20,9 +20,15 @@ add_executable(
     engines/plans/Batchnorm/TestBatchnormPlanBuilder.cpp
     engines/plans/Batchnorm/TestBatchnormFwdInferencePlan.cpp
     engines/plans/Batchnorm/TestBatchnormFwdInferenceWithVariancePlan.cpp
+    engines/plans/Batchnorm/TestBatchnormFwdTrainingPlan.cpp
+    engines/plans/Batchnorm/TestBatchnormCommon.cpp
+    engines/plans/Layernorm/TestLayernormPlanBuilder.cpp
+    engines/plans/Layernorm/TestLayernormFwdPlan.cpp
     engines/plans/TestPlanUtils.cpp
     engines/plans/RMSnorm/TestRMSnormPlanBuilder.cpp
     engines/plans/RMSnorm/TestRMSnormFwdPlan.cpp
+    engines/plans/RMSnorm/TestRMSnormBwdPlanBuilder.cpp
+    engines/plans/RMSnorm/TestRMSnormBwdPlan.cpp
     hip/TestHipProgramAndKernel.cpp
 )
 
@@ -34,7 +40,11 @@ target_link_libraries(
 )
 
 # make it so tests inside folders can find files without having to use a relative path.
-target_include_directories(hip_kernel_provider_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_include_directories(hip_kernel_provider_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_LIST_DIR}/../../include)
+
+if(ENABLE_ASM_SDPA_ENGINE)
+    add_subdirectory(engines/asm_sdpa_engine)
+endif()
 
 clang_tidy_check(hip_kernel_provider_tests)
 

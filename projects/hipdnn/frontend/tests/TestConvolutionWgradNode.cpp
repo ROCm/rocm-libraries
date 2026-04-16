@@ -368,83 +368,6 @@ TEST(TestConvolutionWgradNode, InferPropertiesNodeWithDilation2x2)
     EXPECT_EQ(inferredDims[3], 3);
 }
 
-TEST(TestConvolutionWgradNode, PackNode)
-{
-    ConvWgradAttributes convAttributes;
-    convAttributes.set_name("ConvolutionWgrad");
-
-    auto xTensor = std::make_shared<TensorAttributes>();
-    xTensor->set_uid(1)
-        .set_name("XTensor")
-        .set_data_type(DataType_t::FLOAT)
-        .set_dim({1, 3, 32, 32})
-        .set_stride({3072, 1024, 32, 1});
-    convAttributes.set_x(xTensor);
-
-    auto dyTensor = std::make_shared<TensorAttributes>();
-    dyTensor->set_uid(2)
-        .set_name("DyTensor")
-        .set_data_type(DataType_t::FLOAT)
-        .set_dim({1, 64, 32, 32})
-        .set_stride({65536, 1024, 32, 1});
-    convAttributes.set_dy(dyTensor);
-
-    auto dwTensor = std::make_shared<TensorAttributes>();
-    dwTensor->set_uid(3)
-        .set_name("DwTensor")
-        .set_data_type(DataType_t::FLOAT)
-        .set_dim({64, 3, 3, 3})
-        .set_stride({27, 9, 3, 1});
-    convAttributes.set_dw(dwTensor);
-
-    convAttributes.set_pre_padding({1, 1});
-    convAttributes.set_post_padding({1, 1});
-    convAttributes.set_stride({1, 1});
-    convAttributes.set_dilation({1, 1});
-    convAttributes.set_convolution_mode(hipdnn_frontend::ConvolutionMode_t::CROSS_CORRELATION);
-
-    const GraphAttributes graphAttributes;
-    const ConvolutionWgradNode node(std::move(convAttributes), graphAttributes);
-
-    flatbuffers::FlatBufferBuilder builder;
-    auto offset = node.pack_node(builder);
-    EXPECT_NE(offset.o, 0);
-
-    builder.Finish(offset);
-    auto bufferPointer = builder.GetBufferPointer();
-    auto nodeFlatbuffer = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::Node>(bufferPointer);
-
-    EXPECT_STREQ(nodeFlatbuffer->name()->c_str(), "ConvolutionWgrad");
-    EXPECT_EQ(nodeFlatbuffer->attributes_type(),
-              hipdnn_data_sdk::data_objects::NodeAttributes::ConvolutionWrwAttributes);
-
-    auto packedAttributes = nodeFlatbuffer->attributes_as_ConvolutionWrwAttributes();
-    ASSERT_NE(packedAttributes, nullptr);
-
-    EXPECT_EQ(packedAttributes->x_tensor_uid(), xTensor->get_uid());
-    EXPECT_EQ(packedAttributes->dy_tensor_uid(), dyTensor->get_uid());
-    EXPECT_EQ(packedAttributes->dw_tensor_uid(), dwTensor->get_uid());
-
-    ASSERT_EQ(packedAttributes->pre_padding()->size(), 2);
-    EXPECT_EQ(packedAttributes->pre_padding()->Get(0), 1);
-    EXPECT_EQ(packedAttributes->pre_padding()->Get(1), 1);
-
-    ASSERT_EQ(packedAttributes->post_padding()->size(), 2);
-    EXPECT_EQ(packedAttributes->post_padding()->Get(0), 1);
-    EXPECT_EQ(packedAttributes->post_padding()->Get(1), 1);
-
-    ASSERT_EQ(packedAttributes->stride()->size(), 2);
-    EXPECT_EQ(packedAttributes->stride()->Get(0), 1);
-    EXPECT_EQ(packedAttributes->stride()->Get(1), 1);
-
-    ASSERT_EQ(packedAttributes->dilation()->size(), 2);
-    EXPECT_EQ(packedAttributes->dilation()->Get(0), 1);
-    EXPECT_EQ(packedAttributes->dilation()->Get(1), 1);
-
-    EXPECT_EQ(packedAttributes->conv_mode(),
-              hipdnn_data_sdk::data_objects::ConvMode::CROSS_CORRELATION);
-}
-
 TEST(TestConvolutionWgradNode, GatherHipdnnTensor)
 {
     ConvWgradAttributes convAttributes;
@@ -1964,31 +1887,31 @@ protected:
     {
         ConvWgradAttributes attrs;
         auto x = std::make_shared<TensorAttributes>();
-        x->set_uid(K_TENSOR_X_UID)
+        x->set_uid(K_FPROP_TENSOR_X_UID)
             .set_name("X")
             .set_data_type(DataType::FLOAT)
-            .set_dim(toVec(K_TENSOR_X_DIMS))
-            .set_stride(toVec(K_TENSOR_X_STRIDES));
+            .set_dim(toVec(K_FPROP_TENSOR_X_DIMS))
+            .set_stride(toVec(K_FPROP_TENSOR_X_STRIDES));
         auto dy = std::make_shared<TensorAttributes>();
-        dy->set_uid(K_TENSOR_Y_UID)
+        dy->set_uid(K_FPROP_TENSOR_Y_UID)
             .set_name("DY")
             .set_data_type(DataType::FLOAT)
-            .set_dim(toVec(K_TENSOR_Y_DIMS))
-            .set_stride(toVec(K_TENSOR_Y_STRIDES));
+            .set_dim(toVec(K_FPROP_TENSOR_Y_DIMS))
+            .set_stride(toVec(K_FPROP_TENSOR_Y_STRIDES));
         auto dw = std::make_shared<TensorAttributes>();
-        dw->set_uid(K_TENSOR_W_UID)
+        dw->set_uid(K_FPROP_TENSOR_W_UID)
             .set_name("DW")
             .set_data_type(DataType::FLOAT)
-            .set_dim(toVec(K_TENSOR_W_DIMS))
-            .set_stride(toVec(K_TENSOR_W_STRIDES));
+            .set_dim(toVec(K_FPROP_TENSOR_W_DIMS))
+            .set_stride(toVec(K_FPROP_TENSOR_W_STRIDES));
 
         attrs.set_x(x);
         attrs.set_dy(dy);
         attrs.set_dw(dw);
-        attrs.set_pre_padding(toVec(K_CONV_PADDING));
-        attrs.set_post_padding(toVec(K_CONV_PADDING));
-        attrs.set_stride(toVec(K_CONV_STRIDE));
-        attrs.set_dilation(toVec(K_CONV_DILATION));
+        attrs.set_pre_padding(toVec(K_FPROP_CONV_PADDING));
+        attrs.set_post_padding(toVec(K_FPROP_CONV_PADDING));
+        attrs.set_stride(toVec(K_FPROP_CONV_STRIDE));
+        attrs.set_dilation(toVec(K_FPROP_CONV_DILATION));
         attrs.compute_data_type = DataType::FLOAT;
 
         const GraphAttributes graphAttrs;
