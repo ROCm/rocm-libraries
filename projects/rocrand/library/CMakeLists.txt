@@ -155,6 +155,7 @@ if (WIN32)
 		    COMMAND ${CMAKE_COMMAND} -E copy
 			    $<TARGET_FILE:rocrand>
 			    ${PROJECT_BINARY_DIR}/test/$<TARGET_FILE_NAME:rocrand>
+			COMMENT "Copy test files"
 	    )
     endif()
     if (BUILD_BENCHMARK)
