@@ -296,7 +296,7 @@ struct TiledTransposeSolver : TransposePseudoSolver
             transposeKernel.kernel_file  = "UniversalTranspose.cpp";
             transposeKernel.kernel_name  = "TiledTranspose";
             transposeKernel.comp_options = build_params.GenerateFor(kbp::HIP{});
-            return transposeKernel;
+            return std::move(transposeKernel);
         };
 
         sln.construction_params.emplace_back(create_kernel("uint32_t"));
@@ -404,7 +404,7 @@ struct VectorizedTransposeSolver : TransposePseudoSolver
             transposeKernel.kernel_file  = "UniversalTranspose.cpp";
             transposeKernel.kernel_name  = "VectorizedTranspose";
             transposeKernel.comp_options = build_params.GenerateFor(kbp::HIP{});
-            return transposeKernel;
+            return std::move(transposeKernel);
         };
 
         sln.construction_params.emplace_back(create_kernel("uint32_t"));
