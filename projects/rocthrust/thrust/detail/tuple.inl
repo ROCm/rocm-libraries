@@ -276,7 +276,7 @@ template <class T> struct wrap_non_storeable_type
 {
   // XXX is_function looks complicated; punt for now -jph
   //typedef typename IF<
-  //  ::thrust::detail::is_function<T>::value, non_storeable_type<T>, T
+  //  THRUST_NS_QUALIFIER::detail::is_function<T>::value, non_storeable_type<T>, T
   //>::RET type;
 
   using type = T;

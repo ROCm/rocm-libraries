@@ -1,4 +1,4 @@
-// Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -43,6 +43,7 @@
 #  include <rocprim/rocprim.hpp>
 
 #  include <thrust/count.h>
+#  include <thrust/detail/config/namespace.h>
 #  include <thrust/equal.h>
 #  include <thrust/execution_policy.h>
 #  include <thrust/find.h>
@@ -359,7 +360,7 @@ template <typename I,
 inline bool all_of(execution::parallel_unsequenced_policy, I f, I l, P p)
 {
   ::hipstd::warn_if_no_xnack();
-  return ::thrust::all_of(::thrust::device, f, l, ::std::move(p));
+  return THRUST_NS_QUALIFIER::all_of(THRUST_NS_QUALIFIER::device, f, l, ::std::move(p));
 }
 
 template <typename I,
@@ -387,7 +388,7 @@ template <typename I,
 inline bool any_of(execution::parallel_unsequenced_policy, I f, I l, P p)
 {
   ::hipstd::warn_if_no_xnack();
-  return ::thrust::any_of(::thrust::device, f, l, ::std::move(p));
+  return THRUST_NS_QUALIFIER::any_of(THRUST_NS_QUALIFIER::device, f, l, ::std::move(p));
 }
 
 template <typename I,
@@ -415,7 +416,7 @@ template <typename I,
 inline bool none_of(execution::parallel_unsequenced_policy, I f, I l, P p)
 {
   ::hipstd::warn_if_no_xnack();
-  return ::thrust::none_of(::thrust::device, f, l, ::std::move(p));
+  return THRUST_NS_QUALIFIER::none_of(THRUST_NS_QUALIFIER::device, f, l, ::std::move(p));
 }
 
 template <typename I,
@@ -441,7 +442,7 @@ template <typename I, typename T, enable_if_t<::hipstd::is_offloadable_iterator<
 inline I find(execution::parallel_unsequenced_policy, I f, I l, const T& x)
 {
   ::hipstd::warn_if_no_xnack();
-  return ::thrust::find(::thrust::device, f, l, x);
+  return THRUST_NS_QUALIFIER::find(THRUST_NS_QUALIFIER::device, f, l, x);
 }
 
 template <typename I, typename T, enable_if_t<!::hipstd::is_offloadable_iterator<I>()>* = nullptr>
@@ -460,7 +461,7 @@ template <typename I,
 inline I find_if(execution::parallel_unsequenced_policy, I f, I l, P p)
 {
   ::hipstd::warn_if_no_xnack();
-  return ::thrust::find_if(::thrust::device, f, l, ::std::move(p));
+  return THRUST_NS_QUALIFIER::find_if(THRUST_NS_QUALIFIER::device, f, l, ::std::move(p));
 }
 
 template <typename I,
@@ -488,7 +489,7 @@ template <typename I,
 inline I find_if_not(execution::parallel_unsequenced_policy, I f, I l, P p)
 {
   ::hipstd::warn_if_no_xnack();
-  return ::thrust::find_if_not(::thrust::device, f, l, ::std::move(p));
+  return THRUST_NS_QUALIFIER::find_if_not(THRUST_NS_QUALIFIER::device, f, l, ::std::move(p));
 }
 
 template <typename I,
@@ -518,7 +519,7 @@ inline ForwardIt1 find_end(
   execution::parallel_unsequenced_policy, ForwardIt1 first, ForwardIt1 last, ForwardIt2 s_first, ForwardIt2 s_last)
 {
   ::hipstd::warn_if_no_xnack();
-  return ::thrust::find_end(first, last, s_first, s_last, thrust::equal_to<>{});
+  return THRUST_NS_QUALIFIER::find_end(first, last, s_first, s_last, thrust::equal_to<>{});
 }
 
 template <class ForwardIt1,
@@ -545,7 +546,7 @@ inline ForwardIt1 find_end(
   BinaryPred p)
 {
   ::hipstd::warn_if_no_xnack();
-  return ::thrust::find_end(first, last, s_first, s_last, p);
+  return THRUST_NS_QUALIFIER::find_end(first, last, s_first, s_last, p);
 }
 
 template <class ForwardIt1,
@@ -574,7 +575,7 @@ inline ForwardIt1 find_first_of(
   execution::parallel_unsequenced_policy, ForwardIt1 first, ForwardIt1 last, ForwardIt2 s_first, ForwardIt2 s_last)
 {
   ::hipstd::warn_if_no_xnack();
-  return ::thrust::find_first_of(first, last, s_first, s_last, thrust::equal_to<>{});
+  return THRUST_NS_QUALIFIER::find_first_of(first, last, s_first, s_last, thrust::equal_to<>{});
 }
 
 template <class ForwardIt1,
@@ -601,7 +602,7 @@ inline ForwardIt1 find_first_of(
   BinaryPred p)
 {
   ::hipstd::warn_if_no_xnack();
-  return ::thrust::find_first_of(first, last, s_first, s_last, p);
+  return THRUST_NS_QUALIFIER::find_first_of(first, last, s_first, s_last, p);
 }
 
 template <class ForwardIt1,
@@ -626,7 +627,7 @@ template <typename I, enable_if_t<::hipstd::is_offloadable_iterator<I>()>* = nul
 inline I adjacent_find(execution::parallel_unsequenced_policy, I f, I l)
 {
   ::hipstd::warn_if_no_xnack();
-  return ::thrust::adjacent_find(f, l, thrust::equal_to<>{});
+  return THRUST_NS_QUALIFIER::adjacent_find(f, l, thrust::equal_to<>{});
 }
 
 template <typename I, typename P, enable_if_t<!::hipstd::is_offloadable_iterator<I>()>* = nullptr>
@@ -643,7 +644,7 @@ template <typename I,
 inline I adjacent_find(execution::parallel_unsequenced_policy, I f, I l, P p)
 {
   ::hipstd::warn_if_no_xnack();
-  return ::thrust::adjacent_find(f, l, p);
+  return THRUST_NS_QUALIFIER::adjacent_find(f, l, p);
 }
 
 template <typename I,
@@ -669,7 +670,7 @@ template <typename I, typename T, enable_if_t<::hipstd::is_offloadable_iterator<
 inline typename iterator_traits<I>::difference_type count(execution::parallel_unsequenced_policy, I f, I l, const T& x)
 {
   ::hipstd::warn_if_no_xnack();
-  return ::thrust::count(::thrust::device, f, l, x);
+  return THRUST_NS_QUALIFIER::count(THRUST_NS_QUALIFIER::device, f, l, x);
 }
 
 template <typename I, typename T, enable_if_t<!::hipstd::is_offloadable_iterator<I>()>* = nullptr>
@@ -688,7 +689,7 @@ template <typename I,
 inline typename iterator_traits<I>::difference_type count_if(execution::parallel_unsequenced_policy, I f, I l, P p)
 {
   ::hipstd::warn_if_no_xnack();
-  return ::thrust::count_if(::thrust::device, f, l, ::std::move(p));
+  return THRUST_NS_QUALIFIER::count_if(THRUST_NS_QUALIFIER::device, f, l, ::std::move(p));
 }
 
 template <typename I,
@@ -715,7 +716,7 @@ template <typename I0, typename I1, enable_if_t<::hipstd::is_offloadable_iterato
 inline pair<I0, I1> mismatch(execution::parallel_unsequenced_policy, I0 f0, I0 l0, I1 f1)
 {
   ::hipstd::warn_if_no_xnack();
-  auto [m0, m1] = ::thrust::mismatch(::thrust::device, f0, l0, f1);
+  auto [m0, m1] = THRUST_NS_QUALIFIER::mismatch(THRUST_NS_QUALIFIER::device, f0, l0, f1);
 
   return {::std::move(m0), ::std::move(m1)};
 }
@@ -736,7 +737,7 @@ template <typename I0,
 inline pair<I0, I1> mismatch(execution::parallel_unsequenced_policy, I0 f0, I0 l0, I1 f1, P p)
 {
   ::hipstd::warn_if_no_xnack();
-  auto [m0, m1] = ::thrust::mismatch(::thrust::device, f0, l0, f1, ::std::move(p));
+  auto [m0, m1] = THRUST_NS_QUALIFIER::mismatch(THRUST_NS_QUALIFIER::device, f0, l0, f1, ::std::move(p));
 
   return {::std::move(m0), ::std::move(m1)};
 }
@@ -766,7 +767,7 @@ inline pair<I0, I1> mismatch(execution::parallel_unsequenced_policy, I0 f0, I0 l
   ::hipstd::warn_if_no_xnack();
   const auto n = ::std::min(l0 - f0, l1 - f1);
 
-  auto [m0, m1] = ::thrust::mismatch(::thrust::device, f0, f0 + n, f1);
+  auto [m0, m1] = THRUST_NS_QUALIFIER::mismatch(THRUST_NS_QUALIFIER::device, f0, f0 + n, f1);
 
   return {::std::move(m0), ::std::move(m1)};
 }
@@ -789,7 +790,7 @@ inline pair<I0, I1> mismatch(execution::parallel_unsequenced_policy, I0 f0, I0 l
   ::hipstd::warn_if_no_xnack();
   const auto n = ::std::min(l0 - f0, l1 - f1);
 
-  auto [m0, m1] = ::thrust::mismatch(::thrust::device, f0, f0 + n, f1, ::std::move(p));
+  auto [m0, m1] = THRUST_NS_QUALIFIER::mismatch(THRUST_NS_QUALIFIER::device, f0, f0 + n, f1, ::std::move(p));
 
   return {::std::move(m0), ::std::move(m1)};
 }
@@ -819,7 +820,7 @@ template <typename I0, typename I1, enable_if_t<::hipstd::is_offloadable_iterato
 inline bool equal(execution::parallel_unsequenced_policy, I0 f0, I0 l0, I1 f1)
 {
   ::hipstd::warn_if_no_xnack();
-  return ::thrust::equal(::thrust::device, f0, l0, f1);
+  return THRUST_NS_QUALIFIER::equal(THRUST_NS_QUALIFIER::device, f0, l0, f1);
 }
 
 template <typename I0, typename I1, enable_if_t<!::hipstd::is_offloadable_iterator<I0, I1>()>* = nullptr>
@@ -838,7 +839,7 @@ template <typename I0,
 inline bool equal(execution::parallel_unsequenced_policy, I0 f0, I0 l0, I1 f1, R r)
 {
   ::hipstd::warn_if_no_xnack();
-  return ::thrust::equal(::thrust::device, f0, l0, f1, ::std::move(r));
+  return THRUST_NS_QUALIFIER::equal(THRUST_NS_QUALIFIER::device, f0, l0, f1, ::std::move(r));
 }
 
 template <typename I0,
@@ -868,7 +869,7 @@ inline bool equal(execution::parallel_unsequenced_policy, I0 f0, I0 l0, I1 f1, I
     return false;
   }
 
-  return ::thrust::equal(::thrust::device, f0, l0, f1);
+  return THRUST_NS_QUALIFIER::equal(THRUST_NS_QUALIFIER::device, f0, l0, f1);
 }
 
 template <typename I0, typename I1, enable_if_t<!::hipstd::is_offloadable_iterator<I0, I1>()>* = nullptr>
@@ -892,7 +893,7 @@ inline bool equal(execution::parallel_unsequenced_policy, I0 f0, I0 l0, I1 f1, I
     return false;
   }
 
-  return ::thrust::equal(::thrust::device, f0, l0, f1, ::std::move(r));
+  return THRUST_NS_QUALIFIER::equal(THRUST_NS_QUALIFIER::device, f0, l0, f1, ::std::move(r));
 }
 
 template <typename I0,
@@ -923,7 +924,7 @@ inline ForwardIt1
 search(execution::parallel_unsequenced_policy, ForwardIt1 first, ForwardIt1 last, ForwardIt2 s_first, ForwardIt2 s_last)
 {
   ::hipstd::warn_if_no_xnack();
-  return ::thrust::search(first, last, s_first, s_last, thrust::equal_to<>{});
+  return THRUST_NS_QUALIFIER::search(first, last, s_first, s_last, thrust::equal_to<>{});
 }
 
 template <class ForwardIt1,
@@ -950,7 +951,7 @@ inline ForwardIt1 search(
   BinaryPred p)
 {
   ::hipstd::warn_if_no_xnack();
-  return ::thrust::search(first, last, s_first, s_last, p);
+  return THRUST_NS_QUALIFIER::search(first, last, s_first, s_last, p);
 }
 
 template <class ForwardIt1,
@@ -980,7 +981,7 @@ inline ForwardIt search_n(
   typename std::iterator_traits<ForwardIt>::value_type const& value)
 {
   ::hipstd::warn_if_no_xnack();
-  return ::thrust::search_n(first, last, count, value, thrust::equal_to<>{});
+  return THRUST_NS_QUALIFIER::search_n(first, last, count, value, thrust::equal_to<>{});
 }
 
 template <class ForwardIt, enable_if_t<!::hipstd::is_offloadable_iterator<ForwardIt>()>* = nullptr>
@@ -1007,7 +1008,7 @@ inline ForwardIt search_n(
   BinaryPred p)
 {
   ::hipstd::warn_if_no_xnack();
-  return ::thrust::search_n(first, last, count, value, p);
+  return THRUST_NS_QUALIFIER::search_n(first, last, count, value, p);
 }
 
 template <class ForwardIt,

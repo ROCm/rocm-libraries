@@ -182,7 +182,7 @@ THRUST_HOST_DEVICE auto raw_reference_cast(detail::tuple_of_iterator_references<
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
     return _THRUST_STD::apply(
 #else
-    return ::thrust::apply(
+    return THRUST_NS_QUALIFIER::apply(
 #endif
       [](auto&&... refs) {
         return ResultTuple{raw_reference_cast(_THRUST_STD::forward<decltype(refs)>(refs))...};

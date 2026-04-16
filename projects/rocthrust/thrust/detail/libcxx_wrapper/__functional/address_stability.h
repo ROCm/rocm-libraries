@@ -12,7 +12,7 @@
 #define LIBCXX_WRAPPER_FUNCTIONAL_ADDRESS_STABILITY_H
 
 // TODO(libhipcxx): remove this file, check all the usage of proclaim_copyable_arguments and
-// proclaims_copyable_arguments, and replace ::thrust::detail::* with _THRUST_LIBCXX::* in rocThrust
+// proclaims_copyable_arguments, and replace THRUST_NS_QUALIFIER::detail::* with _THRUST_LIBCXX::* in rocThrust
 // once libhipcxx gets ready
 
 #include <thrust/detail/config/libcxx.h>

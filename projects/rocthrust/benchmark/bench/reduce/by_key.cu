@@ -30,6 +30,7 @@
 #include "../../bench_utils/bench_utils.hpp"
 
 // rocThrust
+#include <thrust/detail/config/namespace.h>
 #include <thrust/device_vector.h>
 #include <thrust/execution_policy.h>
 #include <thrust/reduce.h>
@@ -86,7 +87,7 @@ void run_benchmark(
     out_keys = in_keys;
     in_vals  = thrust::device_vector<ValueT>(elements);
   }
-  catch (const ::thrust::system::detail::bad_alloc& e)
+  catch (const THRUST_NS_QUALIFIER::system::detail::bad_alloc& e)
   {
     (void) hipGetLastError();
     state.SkipWithError(("thrust::system::detail::bad_alloc: " + std::string(e.what())).c_str());
@@ -98,7 +99,7 @@ void run_benchmark(
   {
     out_vals = thrust::device_vector<ValueT>(unique_keys);
   }
-  catch (const ::thrust::system::detail::bad_alloc& e)
+  catch (const THRUST_NS_QUALIFIER::system::detail::bad_alloc& e)
   {
     (void) hipGetLastError();
     state.SkipWithError(("thrust::system::detail::bad_alloc: " + std::string(e.what())).c_str());
