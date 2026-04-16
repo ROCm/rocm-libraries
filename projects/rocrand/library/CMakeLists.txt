@@ -155,8 +155,11 @@ endif()
 
 # install library to C:\hipSDK\bin
 if (WIN32)
+    # comment1
     install (TARGETS rocrand DESTINATION "${CMAKE_INSTALL_PREFIX}/bin")
+	# comment 2
     if (BUILD_TEST)
+	    # comment 3
 	    add_custom_command(
 		    TARGET rocrand
 		    POST_BUILD
@@ -165,7 +168,9 @@ if (WIN32)
 			    ${PROJECT_BINARY_DIR}/test/$<TARGET_FILE_NAME:rocrand>
 	    )
     endif()
+	# comment 4
     if (BUILD_BENCHMARK)
+	    # comment 5
 	    add_custom_command(
 		    TARGET rocrand
 		    POST_BUILD
