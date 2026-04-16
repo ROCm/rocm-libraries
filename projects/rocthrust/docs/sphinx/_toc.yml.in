@@ -40,6 +40,8 @@ subtrees:
   entries:
   - file: reference/rocThrust-bitwise-repro
     title: Bitwise reproducibility
+  - file: reference/rocThrust-env-vars
+    title: Environment variables
   - file: cpp_api
 
 - caption: About
