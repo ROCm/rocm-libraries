@@ -470,7 +470,7 @@ TEST_F(IntegrationBackendUserLoggingApis, ConcurrentLoggingWithCallbackToggle)
     // Helper to wait until at least one log-generating thread has completed a full loop.
     auto waitForIterations = [&](uint64_t snapshot) {
         std::unique_lock<std::mutex> lock(mutex);
-        // The iternation count will need to imcrement by the number of threads plus one
+        // The iteration count will need to increment by the number of threads plus one
         // to ensure that at least one thread ran through the log generating section of code.
         const uint64_t targetCount = snapshot + static_cast<uint64_t>(NUM_LOGGER_THREADS) + 1;
         cvProgress.wait(lock, [&] { return iterationCount >= targetCount; });
