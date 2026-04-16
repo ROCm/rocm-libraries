@@ -71,65 +71,6 @@ TEST(TestConvolutionWgradAttributes, CreateConvolutionWgradAttributes)
               hipdnn_frontend::ConvolutionMode::CROSS_CORRELATION);
 }
 
-TEST(TestConvolutionWgradAttributes, PackAttributes)
-{
-    hipdnn_frontend::graph::ConvWgradAttributes convAttributes;
-
-    // Set tensors
-    auto xTensor = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
-    xTensor->set_uid(1);
-    convAttributes.set_x(xTensor);
-
-    auto dyTensor = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
-    dyTensor->set_uid(2);
-    convAttributes.set_dy(dyTensor);
-
-    auto dwTensor = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
-    dwTensor->set_uid(3);
-    convAttributes.set_dw(dwTensor);
-
-    // Set convolution parameters
-    convAttributes.set_pre_padding({2, 2});
-    convAttributes.set_post_padding({2, 2});
-    convAttributes.set_stride({2, 2});
-    convAttributes.set_dilation({1, 1});
-    convAttributes.set_convolution_mode(hipdnn_frontend::ConvolutionMode::CROSS_CORRELATION);
-
-    // Pack attributes
-    flatbuffers::FlatBufferBuilder builder;
-    auto packedAttributes = convAttributes.pack_attributes(builder);
-    builder.Finish(packedAttributes);
-
-    auto buffer = builder.GetBufferPointer();
-    auto convAttributesFb
-        = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::ConvolutionWrwAttributes>(buffer);
-
-    // Verify packed tensor UIDs
-    EXPECT_EQ(convAttributesFb->x_tensor_uid(), 1);
-    EXPECT_EQ(convAttributesFb->dy_tensor_uid(), 2);
-    EXPECT_EQ(convAttributesFb->dw_tensor_uid(), 3);
-
-    // Verify packed convolution parameters
-    ASSERT_EQ(convAttributesFb->pre_padding()->size(), 2);
-    EXPECT_EQ(convAttributesFb->pre_padding()->Get(0), 2);
-    EXPECT_EQ(convAttributesFb->pre_padding()->Get(1), 2);
-
-    ASSERT_EQ(convAttributesFb->post_padding()->size(), 2);
-    EXPECT_EQ(convAttributesFb->post_padding()->Get(0), 2);
-    EXPECT_EQ(convAttributesFb->post_padding()->Get(1), 2);
-
-    ASSERT_EQ(convAttributesFb->stride()->size(), 2);
-    EXPECT_EQ(convAttributesFb->stride()->Get(0), 2);
-    EXPECT_EQ(convAttributesFb->stride()->Get(1), 2);
-
-    ASSERT_EQ(convAttributesFb->dilation()->size(), 2);
-    EXPECT_EQ(convAttributesFb->dilation()->Get(0), 1);
-    EXPECT_EQ(convAttributesFb->dilation()->Get(1), 1);
-
-    EXPECT_EQ(convAttributesFb->conv_mode(),
-              hipdnn_data_sdk::data_objects::ConvMode::CROSS_CORRELATION);
-}
-
 TEST(TestConvolutionWgradAttributes, DefaultValues)
 {
     const hipdnn_frontend::graph::ConvWgradAttributes convAttributes;

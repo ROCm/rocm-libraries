@@ -23,23 +23,33 @@ find_package(Threads REQUIRED)
 # Technically this is all found as part of hipdnn_test_sdk, but including these as an example for
 # consumers. hipdnn_test_sdk shouldn't be needed by normal users of hipDNN, and is only incuded here
 # for validation purposes.
-find_package(hipdnn_frontend CONFIG REQUIRED)
-find_package(hipdnn_data_sdk CONFIG REQUIRED)
+if(NOT TARGET hipdnn_frontend)
+    find_package(hipdnn_frontend CONFIG REQUIRED)
+endif()
+if(NOT TARGET hipdnn_data_sdk)
+    find_package(hipdnn_data_sdk CONFIG REQUIRED)
+endif()
 
 # !! NOTE !! - hipdnn_test_sdk is needed for sample validation, regular users of hipDNN do not need
 # this package.
-find_package(hipdnn_test_sdk CONFIG REQUIRED)
+if(NOT TARGET hipdnn_test_sdk)
+    find_package(hipdnn_test_sdk CONFIG REQUIRED)
+endif()
 
-# Helper function to add a hipDNN sample executable NAME: The name of the executable target SOURCE:
+# All sample targets are accumulated into this list for the umbrella build target
+set(HIPDNN_ALL_SAMPLES "")
+
+# Helper macro to add a hipDNN sample executable NAME: The name of the executable target SOURCE:
 # The source file for the sample
-function(add_hipdnn_sample NAME SOURCE)
+macro(add_hipdnn_sample NAME SOURCE)
     add_executable(${NAME} ${SOURCE})
     # !! NOTE !! - hipdnn_test_sdk is needed for sample validation, regular users of hipDNN do not
     # need this package. Linking against hipdnn_frontend would be sufficient for normal users
     # (brings in hipdnn_data_sdk as well).
     target_link_libraries(${NAME} PRIVATE hip::host Threads::Threads hipdnn_frontend hipdnn_test_sdk)
     target_compile_options(${NAME} PRIVATE ${HIPDNN_SAMPLE_NO_RTTI_OPTIONS})
-endfunction()
+    list(APPEND HIPDNN_ALL_SAMPLES ${NAME})
+endmacro()
 
 add_hipdnn_sample(hipdnn_sample_bn_inference batchnorm/BnInference.cpp)
 add_hipdnn_sample(hipdnn_sample_bn_inference_with_variance batchnorm/BnInferenceWithVariance.cpp)
@@ -124,6 +134,9 @@ add_hipdnn_sample_test(hipdnn_sample_serialization_roundtrip)
 # Register knobs sample
 # Note: knobs_usage is informational/educational, not validation
 install(TARGETS hipdnn_sample_knobs_usage RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+
+# Umbrella target for superbuild dependency tracking
+add_custom_target(hipdnn_samples COMMENT "Building all hipDNN samples" DEPENDS ${HIPDNN_ALL_SAMPLES})
 
 # Install the generated CTestTestfile.cmake to HIPDNN_SAMPLES_CTEST_FILE_INSTALL_PATH
 install(FILES "${INSTALLED_CTEST_FILE}" DESTINATION ${HIPDNN_SAMPLES_CTEST_FILE_INSTALL_PATH}
