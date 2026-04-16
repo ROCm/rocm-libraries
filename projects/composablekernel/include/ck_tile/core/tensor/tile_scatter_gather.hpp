@@ -45,16 +45,18 @@ template <typename BottomTensorView_,
           typename StaticValidArray_,
           index_t HsGatherDim   = 0,
           index_t NumCoord      = 1,
-          typename YsGatherDims = sequence<0>>
+          typename YsGatherDims = sequence<0>,
+          bool kUseFlatLoad_    = false>
 struct tile_scatter_gather
 {
-    using BottomTensorView = remove_reference_t<BottomTensorView_>;
-    using WindowLengths    = remove_cvref_t<WindowLengths_>;
-    using TileDstr         = remove_cvref_t<StaticTileDistribution_>;
-    using PageIdxArray     = remove_cvref_t<StaticPageIndexArray_>;
-    using ValidArray       = remove_cvref_t<StaticValidArray_>;
-    using WindowAdaptor    = typename TileDstr::PsYs2XsAdaptor;
-    using BottomTensorDesc = typename BottomTensorView::TensorDesc;
+    static constexpr bool kUseFlatLoad = kUseFlatLoad_;
+    using BottomTensorView             = remove_reference_t<BottomTensorView_>;
+    using WindowLengths                = remove_cvref_t<WindowLengths_>;
+    using TileDstr                     = remove_cvref_t<StaticTileDistribution_>;
+    using PageIdxArray                 = remove_cvref_t<StaticPageIndexArray_>;
+    using ValidArray                   = remove_cvref_t<StaticValidArray_>;
+    using WindowAdaptor                = typename TileDstr::PsYs2XsAdaptor;
+    using BottomTensorDesc             = typename BottomTensorView::TensorDesc;
 
     using DataType = remove_cvref_t<typename BottomTensorView::DataType>;
 
@@ -465,7 +467,21 @@ struct tile_scatter_gather
 
                 // read from bottom tensor
                 const vector_t vec_value = [&]() {
-                    if constexpr(std::is_same_v<ValidArray, std::nullptr_t>)
+                    if constexpr(kUseFlatLoad_)
+                    {
+                        // Global load mode: 64-bit typed pointer arithmetic
+                        const auto* base_ptr     = get_bottom_tensor_view().buf_.p_data_;
+                        const auto physical_page = physical_pages_[idx_gather];
+                        const auto coord_offset  = bottom_tensor_thread_coord.get_offset();
+                        const long_index_t total_offset =
+                            static_cast<long_index_t>(physical_page) * page_stride_elements_ +
+                            coord_offset + page_offset;
+                        const auto* addr = base_ptr + total_offset;
+                        vector_t v;
+                        __builtin_memcpy(&v, addr, sizeof(vector_t));
+                        return v;
+                    }
+                    else if constexpr(std::is_same_v<ValidArray, std::nullptr_t>)
                     {
                         return get_bottom_tensor_view().template get_vectorized_elements<vector_t>(
                             bottom_tensor_thread_coord,
@@ -524,90 +540,6 @@ struct tile_scatter_gather
                 }
             });
         });
-    }
-
-    // Flat load from global memory to VGPRs using 64-bit addressing.
-    // Replaces load() for the page_size < kN0 path where SRD-based buffer_load
-    // would overflow its 32-bit voffset for scattered pages.
-    //
-    // Uses physical_pages array + page_stride_bytes to compute 64-bit flat
-    // addresses per element, then loads via pointer dereference (flat_load).
-    template <typename PhysicalPagesArray,
-              index_t i_access_unsupport_ = -1>
-    CK_TILE_DEVICE auto load_flat(const PhysicalPagesArray& physical_pages,
-                                   long_index_t page_stride_bytes,
-                                   number<i_access_unsupport_> = {}) const
-    {
-        constexpr auto tile_dstr = TileDstr{};
-        auto dst_tensor          = make_static_distributed_tensor<DataType>(tile_dstr);
-
-        using Traits   = load_store_traits;
-        using vector_t = typename Traits::vector_t;
-        using SFC_Ys   = typename Traits::SFC_Ys;
-
-        const auto* base_ptr =
-            reinterpret_cast<const char*>(get_bottom_tensor_view().buf_.p_data_);
-
-        static_for<0, NumCoord, 1>{}([&](auto iCoord) {
-            auto window_adaptor_thread_coord = pre_computed_coords_[iCoord][I0];
-            auto bottom_tensor_thread_coord  = pre_computed_coords_[iCoord][I1];
-
-            static_for<0, NumAccessPerCoord, 1>{}([&](auto iCoordAccess) {
-                constexpr auto iAccess      = number<iCoord * NumAccessPerCoord + iCoordAccess>{};
-                constexpr auto idx_ys_start = SFC_Ys::get_index(iAccess);
-                constexpr auto idx_gather   = get_gather_index(idx_ys_start);
-
-                // within-page offset from page_idx_
-                const auto within_page_offset = page_idx_[idx_gather];
-                // physical page index
-                const auto physical_page = physical_pages[idx_gather];
-
-                // 64-bit flat address: base + page*stride + (coord+within_page)*sizeof(T)
-                const auto coord_offset = bottom_tensor_thread_coord.get_offset();
-                const auto* flat_addr =
-                    base_ptr +
-                    static_cast<long_index_t>(physical_page) * page_stride_bytes +
-                    static_cast<long_index_t>(coord_offset + within_page_offset) *
-                        sizeof(DataType);
-
-                // Load via pointer dereference (generates flat_load instruction)
-                vector_t vec_value;
-                __builtin_memcpy(&vec_value, flat_addr, sizeof(vector_t));
-
-                // Write into distributed tensor (same as load())
-                static_for<0, Traits::ScalarPerVector, Traits::PackedSize>{}([&](auto j) {
-                    constexpr auto idx_ys = generate_tuple(
-                        [&](auto jj) {
-                            return jj == Traits::VectorDimY ? (idx_ys_start[jj] + j)
-                                                            : idx_ys_start[jj];
-                        },
-                        number<NDimY>{});
-
-                    constexpr index_t d =
-                        tile_dstr.get_ys_to_d_descriptor().calculate_offset(idx_ys) /
-                        Traits::PackedSize;
-
-                    dst_tensor.get_thread_buffer().template at<d>() =
-                        vec_value.template get_as<DataType>()[j / Traits::PackedSize];
-                });
-
-                // Move thread coordinate
-                if constexpr(iCoordAccess != (NumAccessPerCoord - 1))
-                {
-                    constexpr auto idx_diff_ys = SFC_Ys::get_forward_step(iAccess);
-                    constexpr auto forward_step_scatter = generate_tuple(
-                        [&](auto i) { return is_gather_dim(i) ? 0 : idx_diff_ys[i]; },
-                        number<NDimY>{});
-                    constexpr auto idx_diff_ps_ys = container_concat(
-                        generate_tuple([&](auto) { return number<0>{}; }, number<NDimP>{}),
-                        forward_step_scatter);
-
-                    move_window_adaptor_and_bottom_tensor_thread_coordinate(
-                        window_adaptor_thread_coord, bottom_tensor_thread_coord, idx_diff_ps_ys);
-                }
-            });
-        });
-        return dst_tensor;
     }
 
     template <typename LdsTileWindow_,
@@ -771,7 +703,23 @@ struct tile_scatter_gather
                 const auto page_offset      = page_idx_[idx_gather];
 
                 // read from bottom tensor
-                if constexpr(std::is_same_v<ValidArray, std::nullptr_t>)
+                if constexpr(kUseFlatLoad_)
+                {
+                    // Global load mode: global_load_lds with 64-bit address
+                    constexpr index_t vector_size =
+                        sizeof(vector_t) / sizeof(uint32_t); // dwords per vector
+                    const auto* base_ptr     = get_bottom_tensor_view().buf_.p_data_;
+                    const auto physical_page = physical_pages_[idx_gather];
+                    const auto coord_offset  = bottom_tensor_thread_coord.get_offset();
+                    const long_index_t total_offset =
+                        static_cast<long_index_t>(physical_page) * page_stride_elements_ +
+                        coord_offset + page_offset;
+                    const auto* addr = base_ptr + total_offset;
+                    // global_load_lds takes byte address
+                    async_global_load_lds_dwordxn<vector_size>(
+                        smem, reinterpret_cast<const void*>(addr), pre_nop_);
+                }
+                else if constexpr(std::is_same_v<ValidArray, std::nullptr_t>)
                 {
                     get_bottom_tensor_view().template async_get_vectorized_elements_raw<vector_t>(
                         smem, bottom_tensor_thread_coord, page_offset, 0, pre_nop_);
@@ -796,115 +744,6 @@ struct tile_scatter_gather
                         [&](auto i) { return is_gather_dim(i) ? 0 : idx_diff_ys[i]; },
                         number<NDimY>{});
 
-                    constexpr auto idx_diff_ps_ys = container_concat(
-                        generate_tuple([&](auto) { return number<0>{}; }, number<NDimP>{}),
-                        forward_step_scatter);
-
-                    move_window_adaptor_and_bottom_tensor_thread_coordinate(
-                        window_adaptor_thread_coord, bottom_tensor_thread_coord, idx_diff_ps_ys);
-
-                    m0_inc_with_memory(size_per_issue);
-                }
-            });
-        });
-    }
-
-    // Flat async load from global memory to LDS using 64-bit addressing.
-    // Replaces async_load_raw for the page_size < kN0 path where SRD-based
-    // buffer_load_dword...lds would overflow its 32-bit offset.
-    //
-    // Instead of using SRD + voffset, computes a 64-bit flat address per element:
-    //   addr = base_ptr + (int64)physical_pages[idx] * page_stride_bytes
-    //          + (coord_offset + within_page_offset) * sizeof(DataType)
-    // Then issues global_load_lds_dwordx{1,4} which takes a 64-bit VGPR address.
-    //
-    // M0 register management is identical to async_load_raw.
-    template <typename LdsTileWindow_,
-              typename PhysicalPagesArray,
-              index_t i_access_unsupport_ = -1,
-              bool pre_nop                = false>
-    CK_TILE_DEVICE auto async_load_raw_flat(LdsTileWindow_&& lds_tile,
-                                            const PhysicalPagesArray& physical_pages,
-                                            long_index_t page_stride_bytes,
-                                            number<i_access_unsupport_> = {},
-                                            bool_constant<pre_nop>      = {}) const
-    {
-        using LdsTileWindow = remove_cvref_t<LdsTileWindow_>;
-        using LdsDataType   = typename LdsTileWindow::DataType;
-        using DataType      = typename BottomTensorView::DataType;
-
-        static_assert(LdsTileWindow::get_num_of_dimension() == 3);
-
-        const index_t size_per_buf =
-            lds_tile.get_bottom_tensor_view().get_tensor_descriptor().calculate_offset(
-                make_tuple(number<0>{}, number<0>{}, number<0>{})) *
-            sizeof(LdsDataType);
-
-        const index_t size_per_wave =
-            lds_tile.get_bottom_tensor_view().get_tensor_descriptor().calculate_offset(
-                make_tuple(number<0>{}, number<1>{}, number<0>{})) *
-                sizeof(LdsDataType) -
-            size_per_buf;
-
-        const index_t size_per_issue =
-            lds_tile.get_bottom_tensor_view().get_tensor_descriptor().calculate_offset(
-                make_tuple(number<1>{}, number<0>{}, number<0>{})) *
-                sizeof(LdsDataType) -
-            size_per_buf;
-
-        const index_t m0_init_value = size_per_buf + size_per_wave * get_warp_id();
-        m0_set_with_memory(amd_wave_read_first_lane(m0_init_value));
-
-        using Traits   = load_store_traits;
-        using vector_t = typename Traits::vector_t;
-        using SFC_Ys   = typename Traits::SFC_Ys;
-
-        LdsDataType* smem = lds_tile.get_bottom_tensor_view().get_buffer_view().p_data_;
-
-        // Base pointer for 64-bit address computation
-        const auto* base_ptr = reinterpret_cast<const char*>(get_bottom_tensor_view().buf_.p_data_);
-
-        // Number of dwords per vector element
-        constexpr index_t vector_size = sizeof(vector_t) / sizeof(uint32_t); // dwords per vector
-
-        static_for<0, NumCoord, 1>{}([&](auto iCoord) {
-            auto window_adaptor_thread_coord = pre_computed_coords_[iCoord][I0];
-            auto bottom_tensor_thread_coord  = pre_computed_coords_[iCoord][I1];
-
-            static_for<0, NumAccessPerCoord, 1>{}([&](auto iCoordAccess) {
-                constexpr auto iAccess  = number<iCoord * NumAccessPerCoord + iCoordAccess>{};
-                constexpr auto pre_nop_ = [&]() {
-                    if constexpr(pre_nop && iCoord == 0 && iCoordAccess == 0)
-                        return bool_constant<true>{};
-                    else
-                        return bool_constant<false>{};
-                }();
-
-                constexpr auto idx_ys_start = SFC_Ys::get_index(iAccess);
-                constexpr auto idx_gather   = get_gather_index(idx_ys_start);
-
-                // within-page offset from page_idx_ (set by kv_offset_array_transform)
-                const auto within_page_offset = page_idx_[idx_gather];
-                // physical page index
-                const auto physical_page = physical_pages[idx_gather];
-
-                // Compute 64-bit flat address:
-                // base + phys_page * page_stride_bytes
-                //      + (coord_offset + within_page_offset) * sizeof(DataType)
-                const auto coord_offset = bottom_tensor_thread_coord.get_offset();
-                const auto* flat_addr =
-                    base_ptr + static_cast<long_index_t>(physical_page) * page_stride_bytes +
-                    static_cast<long_index_t>(coord_offset + within_page_offset) * sizeof(DataType);
-
-                async_global_load_lds_dwordxn<vector_size>(smem, flat_addr, pre_nop_);
-
-                // move thread coordinate (same as async_load_raw)
-                if constexpr(iCoordAccess != (NumAccessPerCoord - 1))
-                {
-                    constexpr auto idx_diff_ys          = SFC_Ys::get_forward_step(iAccess);
-                    constexpr auto forward_step_scatter = generate_tuple(
-                        [&](auto i) { return is_gather_dim(i) ? 0 : idx_diff_ys[i]; },
-                        number<NDimY>{});
                     constexpr auto idx_diff_ps_ys = container_concat(
                         generate_tuple([&](auto) { return number<0>{}; }, number<NDimP>{}),
                         forward_step_scatter);
@@ -1246,6 +1085,13 @@ struct tile_scatter_gather
 
     CK_TILE_DEVICE void update_page_idx(const PageIdxArray& new_idx) { page_idx_ = new_idx; }
 
+    CK_TILE_DEVICE void update_physical_pages(const PageIdxArray& pages)
+    {
+        physical_pages_ = pages;
+    }
+
+    CK_TILE_DEVICE void set_page_stride_elements(index_t stride) { page_stride_elements_ = stride; }
+
     CK_TILE_DEVICE void update_valids(const ValidArray& new_valids)
     {
         if constexpr(std::is_same_v<ValidArray, std::nullptr_t> == false)
@@ -1339,7 +1185,24 @@ struct tile_scatter_gather
     //   2. thread descriptor for thread tensor in register: [y0, y1, ...] ==> [d]
     TileDstr tile_dstr_;
 
+    // Scatter/gather offsets for each element, set by update_page_idx().
+    // SRD mode (kUseFlatLoad=false): buffer_load(SRD, page_idx_[i] + coord).
+    //   page_idx_[i] = within-page offset when kPageBlockSize >= kN0 (SRD rebased to page base)
+    //   page_idx_[i] = page_base + within-page offset when kPageBlockSize < kN0 (full voffset)
+    // Global load mode (kUseFlatLoad=true): page_idx_[i] = within-page offset only.
+    //   Full address = base + physical_pages_[i] * page_stride_elements_ + page_idx_[i] + coord
     PageIdxArray page_idx_;
+
+    // Physical page indices for global load mode (kUseFlatLoad=true only).
+    // Maps each gather element to its physical page in a paged memory pool.
+    // Updated via update_physical_pages() before each load call.
+    // Unused in SRD mode — SRD rebase handles page addressing externally.
+    PageIdxArray physical_pages_;
+
+    // Page stride in elements for global load mode.
+    // physical_pages_[i] * page_stride_elements_ gives the page base offset in elements.
+    index_t page_stride_elements_ = 0;
+
     ValidArray valids_;
 
     // this contains:
@@ -1378,7 +1241,8 @@ template <typename TensorView_,
           typename StaticPageIndexArray_,
           index_t HsGatherDim,
           index_t NumCoord,
-          index_t... YsGatherDims>
+          index_t... YsGatherDims,
+          bool UseFlatLoad = false>
 CK_TILE_DEVICE constexpr auto
 make_tile_scatter_gather(const TensorView_& tensor_view,
                          const WindowLengths_& window_lengths,
@@ -1387,7 +1251,8 @@ make_tile_scatter_gather(const TensorView_& tensor_view,
                          const StaticPageIndexArray_& page_idx,
                          number<HsGatherDim>,
                          number<NumCoord>,
-                         sequence<YsGatherDims...>)
+                         sequence<YsGatherDims...>,
+                         bool_constant<UseFlatLoad> = {})
 {
     return tile_scatter_gather<remove_cvref_t<TensorView_>,
                                remove_cvref_t<WindowLengths_>,
@@ -1396,11 +1261,12 @@ make_tile_scatter_gather(const TensorView_& tensor_view,
                                std::nullptr_t,
                                HsGatherDim,
                                NumCoord,
-                               sequence<YsGatherDims...>>{
+                               sequence<YsGatherDims...>,
+                               UseFlatLoad>{
         tensor_view, window_lengths, origin, tile_distribution, page_idx, nullptr};
 }
 
-// Legacy overload (compatible with original API)
+// Legacy overload (compatible with original API, kUseFlatLoad=false)
 template <typename TensorView_,
           typename WindowLengths_,
           typename StaticTileDistribution_,
@@ -1424,6 +1290,32 @@ make_tile_scatter_gather(const TensorView_& tensor_view,
                                HsGatherDim,
                                NumCoord,
                                sequence<0>>{
+        tensor_view, window_lengths, origin, tile_distribution, page_idx, nullptr};
+}
+
+// Overload with kUseFlatLoad (simple, used by K cache)
+template <typename TensorView_,
+          typename WindowLengths_,
+          typename StaticTileDistribution_,
+          typename StaticPageIndexArray_,
+          bool UseFlatLoad>
+CK_TILE_DEVICE constexpr auto
+make_tile_scatter_gather(const TensorView_& tensor_view,
+                         const WindowLengths_& window_lengths,
+                         const multi_index<TensorView_::get_num_of_dimension()>& origin,
+                         const StaticTileDistribution_& tile_distribution,
+                         const StaticPageIndexArray_& page_idx,
+                         bool_constant<UseFlatLoad>)
+{
+    return tile_scatter_gather<remove_cvref_t<TensorView_>,
+                               remove_cvref_t<WindowLengths_>,
+                               remove_cvref_t<StaticTileDistribution_>,
+                               remove_cvref_t<StaticPageIndexArray_>,
+                               std::nullptr_t,
+                               0,
+                               1,
+                               sequence<0>,
+                               UseFlatLoad>{
         tensor_view, window_lengths, origin, tile_distribution, page_idx, nullptr};
 }
 

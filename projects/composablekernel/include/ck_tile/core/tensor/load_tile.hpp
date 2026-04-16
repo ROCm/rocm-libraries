@@ -40,19 +40,6 @@ CK_TILE_DEVICE auto load_tile(const TileWindow_& tile_window,
     return tile_window.load(number<i_access>{}, bool_constant<oob_conditional_check>{});
 }
 
-// Flat load variant using 64-bit addressing. For scatter/gather windows with
-// page_size < kN0 where SRD-based buffer_load would overflow its 32-bit voffset.
-template <typename TileWindow_,
-          typename PhysicalPagesArray,
-          index_t i_access = -1>
-CK_TILE_DEVICE auto load_tile_flat(const TileWindow_& tile_window,
-                                   const PhysicalPagesArray& physical_pages,
-                                   long_index_t page_stride_bytes,
-                                   number<i_access> = {})
-{
-    return tile_window.load_flat(physical_pages, page_stride_bytes, number<i_access>{});
-}
-
 /**
  * @brief Load tile with elementwise function
  *
@@ -204,24 +191,6 @@ CK_TILE_DEVICE void async_load_tile_raw(LdsTileWindow_&& lds_tile,
                                number<i_access>{},
                                bool_constant<oob_conditional_check>{},
                                bool_constant<pre_nop>{});
-}
-
-// Flat async load variant using 64-bit addressing (global_load_lds).
-// For page_size < kN0 with >4GB KV cache where SRD-based loads overflow.
-template <typename LdsTileWindow_,
-          typename TileWindow_,
-          typename PhysicalPagesArray,
-          index_t i_access = -1,
-          bool pre_nop     = false>
-CK_TILE_DEVICE void async_load_tile_raw_flat(LdsTileWindow_&& lds_tile,
-                                             const TileWindow_& tile_window,
-                                             const PhysicalPagesArray& physical_pages,
-                                             long_index_t page_stride_bytes,
-                                             number<i_access>       = {},
-                                             bool_constant<pre_nop> = {})
-{
-    tile_window.async_load_raw_flat(
-        lds_tile, physical_pages, page_stride_bytes, number<i_access>{}, bool_constant<pre_nop>{});
 }
 
 CK_TILE_DEVICE void async_load_fence(index_t cnt = 0)
