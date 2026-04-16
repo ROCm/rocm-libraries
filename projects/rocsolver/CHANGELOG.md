@@ -6,7 +6,6 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 
 ### Added
 
-* Add linear solver routine SYTRS and routine SYTRS2 for use with symmetric factorization SYTRF
 * Support added for the gfx1150, gfx1152, and gfx1153 architectures
 * Computation of different matrix norms
     * LANGE
@@ -14,6 +13,11 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 * Computation of different matrix condition numbers
     * GECON
     * GECON_64
+* Linear solver routines for symmetric matrices
+    * SYTRS (with batched and strided\_batched versions)
+    * SYTRS_64 (with batched and strided\_batched versions)
+    * SYTRS2 (with batched and strided\_batched versions)
+    * SYTRS2_64 (with batched and strided\_batched versions)
 
 ### Changed
 ### Removed
