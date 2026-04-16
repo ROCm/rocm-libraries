@@ -2728,7 +2728,6 @@ void cpu_syev_heev<float, float>(hipsolverEigMode_t  evect,
                                  float*              work,
                                  int                 lwork,
                                  float*              rwork,
-                                 int                 lrwork,
                                  int*                info)
 {
     char evectC = hipsolver2char_evect(evect);
@@ -2746,7 +2745,6 @@ void cpu_syev_heev<double, double>(hipsolverEigMode_t  evect,
                                    double*             work,
                                    int                 lwork,
                                    double*             rwork,
-                                   int                 lrwork,
                                    int*                info)
 {
     char evectC = hipsolver2char_evect(evect);
@@ -2764,7 +2762,6 @@ void cpu_syev_heev<hipsolverComplex, float>(hipsolverEigMode_t  evect,
                                             hipsolverComplex*   work,
                                             int                 lwork,
                                             float*              rwork,
-                                            int                 lrwork,
                                             int*                info)
 {
     char evectC = hipsolver2char_evect(evect);
@@ -2782,7 +2779,6 @@ void cpu_syev_heev<hipsolverDoubleComplex, double>(hipsolverEigMode_t      evect
                                                    hipsolverDoubleComplex* work,
                                                    int                     lwork,
                                                    double*                 rwork,
-                                                   int                     lrwork,
                                                    int*                    info)
 {
     char evectC = hipsolver2char_evect(evect);

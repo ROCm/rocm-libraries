@@ -356,8 +356,7 @@ void syev_heev_getError(const hipsolverHandle_t   handle,
 
     // CPU lapack
     for(int b = 0; b < bc; ++b)
-        cpu_syev_heev(
-            evect, uplo, n, hA[b], lda, hW[b], work.data(), ltwork, hE.data(), lrwork, hinfo[b]);
+        cpu_syev_heev(evect, uplo, n, hA[b], lda, hW[b], work.data(), ltwork, hE.data(), hinfo[b]);
 
     // Check info for non-convergence
     *max_err = 0;
@@ -479,17 +478,8 @@ void syev_heev_getPerfData(const hipsolverHandle_t   handle,
         // cpu-lapack performance (only if not in perf mode)
         *cpu_time_used = get_time_us_no_sync();
         for(int b = 0; b < bc; ++b)
-            cpu_syev_heev(evect,
-                          uplo,
-                          n,
-                          hA[b],
-                          lda,
-                          hW[b],
-                          work.data(),
-                          ltwork,
-                          hE.data(),
-                          lrwork,
-                          hinfo[b]);
+            cpu_syev_heev(
+                evect, uplo, n, hA[b], lda, hW[b], work.data(), ltwork, hE.data(), hinfo[b]);
         *cpu_time_used = get_time_us_no_sync() - *cpu_time_used;
     }
 

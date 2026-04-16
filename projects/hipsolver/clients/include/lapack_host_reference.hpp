@@ -250,7 +250,6 @@ void cpu_syev_heev(hipsolverEigMode_t  evect,
                    T*                  work,
                    int                 lwork,
                    S*                  rwork,
-                   int                 lrwork,
                    int*                info);
 
 template <typename T, typename S>
