@@ -329,7 +329,7 @@ TEST(TestCalculateConvWrwTolerance, DetectsFailure)
     EXPECT_GT(tol, 0.09f);
 
     auto validator = hipdnn_test_sdk::utilities::createAllCloseValidator(
-        hipdnn_data_sdk::data_objects::DataType::FLOAT, tol, 0);
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT, tol, 0);
 
     bool valid = validator->allClose(*baseline, *actualPassing);
     EXPECT_TRUE(valid);
@@ -708,7 +708,7 @@ TEST(TestCalculateConvDgradTolerance, DetectsFailure)
     EXPECT_GT(tol, 0.1f);
 
     auto validator = hipdnn_test_sdk::utilities::createAllCloseValidator(
-        hipdnn_data_sdk::data_objects::DataType::FLOAT, tol, 0);
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT, tol, 0);
 
     bool valid = validator->allClose(*baseline, *actualPassing);
     EXPECT_TRUE(valid);
@@ -1058,7 +1058,7 @@ TEST(TestCalculateConvFpropTolerance, DetectsFailure)
     EXPECT_GT(tol, 0.09f);
 
     auto validator = hipdnn_test_sdk::utilities::createAllCloseValidator(
-        hipdnn_data_sdk::data_objects::DataType::FLOAT, tol, 0);
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT, tol, 0);
 
     {
         SCOPED_TRACE("Validator should have passed");

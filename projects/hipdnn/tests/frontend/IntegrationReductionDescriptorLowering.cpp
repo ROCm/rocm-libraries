@@ -7,8 +7,8 @@
 #include <unordered_map>
 #include <vector>
 
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
-#include <hipdnn_data_sdk/data_objects/reduction_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/reduction_attributes_generated.h>
 #include <hipdnn_frontend.hpp>
 #include <hipdnn_test_sdk/constants/ReductionConstants.hpp>
 #include <hipdnn_test_sdk/utilities/IntegrationTestFixture.hpp>
@@ -23,9 +23,9 @@ using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
 using namespace hipdnn_tests::constants;
 using hipdnn_tests::toVec;
-using DataTypeSdk = hipdnn_data_sdk::data_objects::DataType;
-using NodeAttrType = hipdnn_data_sdk::data_objects::NodeAttributes;
-using ReductionModeSdk = hipdnn_data_sdk::data_objects::ReductionMode;
+using DataTypeSdk = hipdnn_flatbuffers_sdk::data_objects::DataType;
+using NodeAttrType = hipdnn_flatbuffers_sdk::data_objects::NodeAttributes;
+using ReductionModeSdk = hipdnn_flatbuffers_sdk::data_objects::ReductionMode;
 using hipdnn_tests::buildTensorMap;
 using hipdnn_tests::IntegrationTestFixture;
 using hipdnn_tests::lowerAndDeserialize;
@@ -42,7 +42,7 @@ protected:
     /// Builds and lowers a graph, returning the deserialized GraphT.
     /// Callers set up attrs before calling; this creates tensors, calls the
     /// graph method, validates, lowers, serializes, and deserializes.
-    hipdnn_data_sdk::data_objects::GraphT buildAndDeserialize(ReductionAttributes& attrs)
+    hipdnn_flatbuffers_sdk::data_objects::GraphT buildAndDeserialize(ReductionAttributes& attrs)
     {
         auto graph = std::make_shared<TestableGraphLowering>();
         graph->set_name("ReductionIntegrationTest")

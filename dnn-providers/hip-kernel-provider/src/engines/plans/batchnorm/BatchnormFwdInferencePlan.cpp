@@ -15,8 +15,9 @@ namespace hip_kernel_provider::batchnorm
 {
 
 BatchnormFwdInferenceParams::BatchnormFwdInferenceParams(
-    const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributes& attributes,
-    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+    const hipdnn_flatbuffers_sdk::data_objects::BatchnormInferenceAttributes& attributes,
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
         tensorMap)
     : _x(tensorMap.at(attributes.x_tensor_uid()))
     , _y(tensorMap.at(attributes.y_tensor_uid()))
@@ -29,9 +30,10 @@ BatchnormFwdInferenceParams::BatchnormFwdInferenceParams(
 }
 
 BatchnormFwdInferenceParams::BatchnormFwdInferenceParams(
-    const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributes& inferenceAttributes,
-    const hipdnn_data_sdk::data_objects::PointwiseAttributes& pointwiseAttributes,
-    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+    const hipdnn_flatbuffers_sdk::data_objects::BatchnormInferenceAttributes& inferenceAttributes,
+    const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& pointwiseAttributes,
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
         tensorMap)
     : _x(tensorMap.at(inferenceAttributes.x_tensor_uid()))
     , _y(tensorMap.at(inferenceAttributes.y_tensor_uid()))
@@ -44,32 +46,35 @@ BatchnormFwdInferenceParams::BatchnormFwdInferenceParams(
 {
 }
 
-const hipdnn_data_sdk::data_objects::TensorAttributes* BatchnormFwdInferenceParams::x() const
+const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* BatchnormFwdInferenceParams::x() const
 {
     return _x;
 }
 
-const hipdnn_data_sdk::data_objects::TensorAttributes* BatchnormFwdInferenceParams::y() const
+const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* BatchnormFwdInferenceParams::y() const
 {
     return _y;
 }
 
-const hipdnn_data_sdk::data_objects::TensorAttributes* BatchnormFwdInferenceParams::scale() const
+const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*
+    BatchnormFwdInferenceParams::scale() const
 {
     return _scale;
 }
 
-const hipdnn_data_sdk::data_objects::TensorAttributes* BatchnormFwdInferenceParams::bias() const
+const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*
+    BatchnormFwdInferenceParams::bias() const
 {
     return _bias;
 }
 
-const hipdnn_data_sdk::data_objects::TensorAttributes* BatchnormFwdInferenceParams::estMean() const
+const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*
+    BatchnormFwdInferenceParams::estMean() const
 {
     return _estMean;
 }
 
-const hipdnn_data_sdk::data_objects::TensorAttributes*
+const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*
     BatchnormFwdInferenceParams::invVariance() const
 {
     return _invVariance;
@@ -81,7 +86,7 @@ const std::optional<hip_kernel_utils::ActivationParams>&
     return _optActivation;
 }
 
-const hipdnn_data_sdk::data_objects::TensorAttributes*
+const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*
     BatchnormFwdInferenceParams::activationOut() const
 {
     return _activationOut;
@@ -106,10 +111,10 @@ void BatchnormFwdInferencePlan::compile(const IKernelCompiler& kernelCompiler,
     auto xDataType = _inferenceParams.x()->data_type();
     auto scaleDataType = _inferenceParams.scale()->data_type();
 
-    bool useFp16Mix = (xDataType == hipdnn_data_sdk::data_objects::DataType::HALF
-                       && scaleDataType == hipdnn_data_sdk::data_objects::DataType::FLOAT);
-    bool useBfp16Mix = (xDataType == hipdnn_data_sdk::data_objects::DataType::BFLOAT16
-                        && scaleDataType == hipdnn_data_sdk::data_objects::DataType::FLOAT);
+    bool useFp16Mix = (xDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::HALF
+                       && scaleDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
+    bool useBfp16Mix = (xDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16
+                        && scaleDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
     bool useFp32 = !useFp16Mix && !useBfp16Mix;
 
     // Extract dimensions from x tensor

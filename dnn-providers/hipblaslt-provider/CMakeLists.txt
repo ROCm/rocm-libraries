@@ -70,8 +70,8 @@ list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH}/llvm ${ROCM_PATH} ${ROCM_PATH}/hip)
 find_package(hip REQUIRED)
 
 # SDK dependencies - use targets directly in superbuild, find_package otherwise
-if(NOT TARGET hipdnn_data_sdk)
-    find_package(hipdnn_data_sdk CONFIG REQUIRED)
+if(NOT TARGET hipdnn_flatbuffers_sdk)
+    find_package(hipdnn_flatbuffers_sdk CONFIG REQUIRED)
 endif()
 
 if(NOT TARGET hipdnn_plugin_sdk)
@@ -122,7 +122,7 @@ target_include_directories(hipblaslt_plugin_private PUBLIC ${CMAKE_CURRENT_SOURC
 # hip::host triggers a hard ambiguous operator<< error in upstream hipBLASLt
 # headers (hipblaslt_e5m3.h / hipblaslt_e8.h) due to missing MSVC ABI flags.
 # See: https://github.com/ROCm/rocm-libraries/issues/6404
-target_link_libraries(hipblaslt_plugin_private PUBLIC roc::hipblaslt hipdnn_data_sdk hipdnn_plugin_sdk hip::device)
+target_link_libraries(hipblaslt_plugin_private PUBLIC roc::hipblaslt hipdnn_flatbuffers_sdk hipdnn_plugin_sdk hip::device)
 
 target_compile_options(hipblaslt_plugin_private PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
 

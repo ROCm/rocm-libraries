@@ -79,8 +79,8 @@
 
 #include <hip/hip_runtime.h>
 
-#include <hipdnn_data_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
-#include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_plugin_sdk/EngineManager.hpp>
 #include <hipdnn_plugin_sdk/EnginePluginApi.h>
@@ -303,7 +303,7 @@ hipdnnPluginStatus_t
 
         auto* typedHandle = static_cast<HIPDNN_PLUGIN_HANDLE_TYPE*>(handle);
         auto& engineManager = typedHandle->getEngineManager();
-        hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper opGraphWrapper(opGraph->ptr,
+        hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper opGraphWrapper(opGraph->ptr,
                                                                            opGraph->size);
 
         auto applicableEngines = engineManager.getApplicableEngineIds(*typedHandle, opGraphWrapper);
@@ -344,7 +344,7 @@ hipdnnPluginStatus_t hipdnnEnginePluginGetEngineDetails(hipdnnEnginePluginHandle
 
         auto* typedHandle = static_cast<HIPDNN_PLUGIN_HANDLE_TYPE*>(handle);
         auto& engineManager = typedHandle->getEngineManager();
-        hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper opGraphWrapper(opGraph->ptr,
+        hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper opGraphWrapper(opGraph->ptr,
                                                                            opGraph->size);
 
         engineManager.getEngineDetails(*typedHandle, opGraphWrapper, engineId, *engineDetails);
@@ -390,9 +390,9 @@ hipdnnPluginStatus_t hipdnnEnginePluginGetWorkspaceSize(hipdnnEnginePluginHandle
         auto* typedHandle = static_cast<HIPDNN_PLUGIN_HANDLE_TYPE*>(handle);
         auto& engineManager = typedHandle->getEngineManager();
 
-        hipdnn_data_sdk::flatbuffer_utilities::EngineConfigWrapper engineConfigWrapper(
+        hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper engineConfigWrapper(
             engineConfig->ptr, engineConfig->size);
-        hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper opGraphWrapper(opGraph->ptr,
+        hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper opGraphWrapper(opGraph->ptr,
                                                                            opGraph->size);
         *workspaceSize
             = engineManager.getMaxWorkspaceSize(*typedHandle, opGraphWrapper, engineConfigWrapper);
@@ -420,9 +420,9 @@ hipdnnPluginStatus_t
 
         auto* typedHandle = static_cast<HIPDNN_PLUGIN_HANDLE_TYPE*>(handle);
 
-        hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper opGraphWrapper(opGraph->ptr,
+        hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper opGraphWrapper(opGraph->ptr,
                                                                            opGraph->size);
-        hipdnn_data_sdk::flatbuffer_utilities::EngineConfigWrapper engineConfigWrapper(
+        hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper engineConfigWrapper(
             engineConfig->ptr, engineConfig->size);
 
         auto& engineManager = typedHandle->getEngineManager();

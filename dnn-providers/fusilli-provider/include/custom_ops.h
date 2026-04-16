@@ -24,7 +24,7 @@
 #define FUSILLI_PLUGIN_CUSTOM_OPS_H
 
 #include <fusilli.h>
-#include <hipdnn_data_sdk/data_objects/sdpa_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/sdpa_attributes_generated.h>
 
 #include <format>
 #include <memory>
@@ -94,8 +94,8 @@ static constexpr std::string_view kSdpaWithMask = R"mlir(
 namespace SdpaImport {
 // Check if the SDPA attributes use only features supported by the MLIR
 // template. Returns NotImplemented for unsupported configurations.
-inline fusilli::ErrorObject
-validateTemplate(const hipdnn_data_sdk::data_objects::SdpaAttributes *attrs) {
+inline fusilli::ErrorObject validateTemplate(
+    const hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes *attrs) {
   if (attrs->dropout_probability().has_value() &&
       *attrs->dropout_probability() > 0.0f)
     return fusilli::error(fusilli::ErrorCode::NotImplemented,
@@ -137,14 +137,14 @@ validateTemplate(const hipdnn_data_sdk::data_objects::SdpaAttributes *attrs) {
     return fusilli::error(fusilli::ErrorCode::NotImplemented,
                           "SDPA with FP8 quantization not supported.");
   if (attrs->diagonal_alignment() !=
-      hipdnn_data_sdk::data_objects::DiagonalAlignment::TOP_LEFT)
+      hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment::TOP_LEFT)
     return fusilli::error(
         fusilli::ErrorCode::NotImplemented,
         "SDPA with non-TOP_LEFT diagonal alignment not supported.");
   // This is out of an over-abundance of caution, IREE doesn't need a backend
   // implementation hit.
   if (attrs->implementation() !=
-      hipdnn_data_sdk::data_objects::AttentionImplementation::AUTO)
+      hipdnn_flatbuffers_sdk::data_objects::AttentionImplementation::AUTO)
     return fusilli::error(
         fusilli::ErrorCode::NotImplemented,
         "SDPA with explicit implementation strategy not supported.");

@@ -4,9 +4,9 @@
 #pragma once
 
 #include <functional>
-#include <hipdnn_data_sdk/data_objects/data_types_generated.h>
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
-#include <hipdnn_data_sdk/flatbuffer_utilities/FlatbufferTypeHelpers.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/FlatbufferTypeHelpers.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/RMSNormFwdPlan.hpp>
 #include <ostream>
 
@@ -15,18 +15,18 @@ namespace hipdnn_test_sdk::detail
 
 struct RMSNormFwdSignatureKey
 {
-    const hipdnn_data_sdk::data_objects::NodeAttributes nodeType
-        = hipdnn_data_sdk::data_objects::NodeAttributes::RMSNormAttributes;
-    hipdnn_data_sdk::data_objects::DataType xDataType;
-    hipdnn_data_sdk::data_objects::DataType scaleDataType;
-    hipdnn_data_sdk::data_objects::DataType outputDataType;
-    hipdnn_data_sdk::data_objects::DataType computeDataType;
+    const hipdnn_flatbuffers_sdk::data_objects::NodeAttributes nodeType
+        = hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::RMSNormAttributes;
+    hipdnn_flatbuffers_sdk::data_objects::DataType xDataType;
+    hipdnn_flatbuffers_sdk::data_objects::DataType scaleDataType;
+    hipdnn_flatbuffers_sdk::data_objects::DataType outputDataType;
+    hipdnn_flatbuffers_sdk::data_objects::DataType computeDataType;
 
     RMSNormFwdSignatureKey() = default;
-    constexpr RMSNormFwdSignatureKey(hipdnn_data_sdk::data_objects::DataType x,
-                                     hipdnn_data_sdk::data_objects::DataType scale,
-                                     hipdnn_data_sdk::data_objects::DataType output,
-                                     hipdnn_data_sdk::data_objects::DataType compute)
+    constexpr RMSNormFwdSignatureKey(hipdnn_flatbuffers_sdk::data_objects::DataType x,
+                                     hipdnn_flatbuffers_sdk::data_objects::DataType scale,
+                                     hipdnn_flatbuffers_sdk::data_objects::DataType output,
+                                     hipdnn_flatbuffers_sdk::data_objects::DataType compute)
         : xDataType(x)
         , scaleDataType(scale)
         , outputDataType(output)
@@ -35,8 +35,9 @@ struct RMSNormFwdSignatureKey
     }
 
     RMSNormFwdSignatureKey(
-        const hipdnn_data_sdk::data_objects::Node& node,
-        const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        const hipdnn_flatbuffers_sdk::data_objects::Node& node,
+        const std::unordered_map<int64_t,
+                                 const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
             tensorMap)
     {
         const auto* nodeAttributes = node.attributes_as_RMSNormAttributes();
@@ -92,42 +93,42 @@ struct RMSNormFwdSignatureKey
                            RMSNormFwdSignatureKey>
             map;
 
-        addPlanBuilder<hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                       hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                       hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                       hipdnn_data_sdk::data_objects::DataType::FLOAT>(map);
-        addPlanBuilder<hipdnn_data_sdk::data_objects::DataType::HALF,
-                       hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                       hipdnn_data_sdk::data_objects::DataType::HALF,
-                       hipdnn_data_sdk::data_objects::DataType::FLOAT>(map);
-        addPlanBuilder<hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
-                       hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                       hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
-                       hipdnn_data_sdk::data_objects::DataType::FLOAT>(map);
-        addPlanBuilder<hipdnn_data_sdk::data_objects::DataType::HALF,
-                       hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                       hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                       hipdnn_data_sdk::data_objects::DataType::FLOAT>(map);
-        addPlanBuilder<hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
-                       hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                       hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                       hipdnn_data_sdk::data_objects::DataType::FLOAT>(map);
-        addPlanBuilder<hipdnn_data_sdk::data_objects::DataType::HALF,
-                       hipdnn_data_sdk::data_objects::DataType::HALF,
-                       hipdnn_data_sdk::data_objects::DataType::HALF,
-                       hipdnn_data_sdk::data_objects::DataType::HALF>(map);
-        addPlanBuilder<hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
-                       hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
-                       hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
-                       hipdnn_data_sdk::data_objects::DataType::BFLOAT16>(map);
+        addPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT>(map);
+        addPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT>(map);
+        addPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT>(map);
+        addPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT>(map);
+        addPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT>(map);
+        addPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::HALF>(map);
+        addPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16>(map);
 
         return map;
     }
 
-    template <hipdnn_data_sdk::data_objects::DataType XDataTypeEnum,
-              hipdnn_data_sdk::data_objects::DataType ScaleDataTypeEnum,
-              hipdnn_data_sdk::data_objects::DataType OutputDataTypeEnum,
-              hipdnn_data_sdk::data_objects::DataType ComputeDataTypeEnum>
+    template <hipdnn_flatbuffers_sdk::data_objects::DataType XDataTypeEnum,
+              hipdnn_flatbuffers_sdk::data_objects::DataType ScaleDataTypeEnum,
+              hipdnn_flatbuffers_sdk::data_objects::DataType OutputDataTypeEnum,
+              hipdnn_flatbuffers_sdk::data_objects::DataType ComputeDataTypeEnum>
     static void addPlanBuilder(std::unordered_map<RMSNormFwdSignatureKey,
                                                   std::unique_ptr<IGraphNodePlanBuilder>,
                                                   RMSNormFwdSignatureKey>& map)

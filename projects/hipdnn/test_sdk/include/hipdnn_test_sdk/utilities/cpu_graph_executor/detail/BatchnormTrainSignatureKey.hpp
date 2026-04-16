@@ -4,9 +4,9 @@
 #pragma once
 
 #include <functional>
-#include <hipdnn_data_sdk/data_objects/data_types_generated.h>
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
-#include <hipdnn_data_sdk/flatbuffer_utilities/FlatbufferTypeHelpers.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/FlatbufferTypeHelpers.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/BatchnormTrainPlan.hpp>
 #include <ostream>
 
@@ -15,20 +15,21 @@ namespace hipdnn_test_sdk::detail
 
 struct BatchnormTrainSignatureKey
 {
-    const hipdnn_data_sdk::data_objects::NodeAttributes nodeType
-        = hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormAttributes;
-    hipdnn_data_sdk::data_objects::DataType xDataType;
-    hipdnn_data_sdk::data_objects::DataType scaleBiasDataType;
-    hipdnn_data_sdk::data_objects::DataType meanVarianceDataType;
-    hipdnn_data_sdk::data_objects::DataType outputDataType;
-    hipdnn_data_sdk::data_objects::DataType computeDataType;
+    const hipdnn_flatbuffers_sdk::data_objects::NodeAttributes nodeType
+        = hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::BatchnormAttributes;
+    hipdnn_flatbuffers_sdk::data_objects::DataType xDataType;
+    hipdnn_flatbuffers_sdk::data_objects::DataType scaleBiasDataType;
+    hipdnn_flatbuffers_sdk::data_objects::DataType meanVarianceDataType;
+    hipdnn_flatbuffers_sdk::data_objects::DataType outputDataType;
+    hipdnn_flatbuffers_sdk::data_objects::DataType computeDataType;
 
     BatchnormTrainSignatureKey() = default;
-    constexpr BatchnormTrainSignatureKey(hipdnn_data_sdk::data_objects::DataType input,
-                                         hipdnn_data_sdk::data_objects::DataType scaleBias,
-                                         hipdnn_data_sdk::data_objects::DataType meanVariance,
-                                         hipdnn_data_sdk::data_objects::DataType output,
-                                         hipdnn_data_sdk::data_objects::DataType compute)
+    constexpr BatchnormTrainSignatureKey(
+        hipdnn_flatbuffers_sdk::data_objects::DataType input,
+        hipdnn_flatbuffers_sdk::data_objects::DataType scaleBias,
+        hipdnn_flatbuffers_sdk::data_objects::DataType meanVariance,
+        hipdnn_flatbuffers_sdk::data_objects::DataType output,
+        hipdnn_flatbuffers_sdk::data_objects::DataType compute)
         : xDataType(input)
         , scaleBiasDataType(scaleBias)
         , meanVarianceDataType(meanVariance)
@@ -38,8 +39,9 @@ struct BatchnormTrainSignatureKey
     }
 
     BatchnormTrainSignatureKey(
-        const hipdnn_data_sdk::data_objects::Node& node,
-        const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        const hipdnn_flatbuffers_sdk::data_objects::Node& node,
+        const std::unordered_map<int64_t,
+                                 const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
             tensorMap)
     {
         const auto* nodeAttributes = node.attributes_as_BatchnormAttributes();
@@ -108,50 +110,50 @@ struct BatchnormTrainSignatureKey
                            BatchnormTrainSignatureKey>
             map;
 
-        addPlanBuilder<hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                       hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                       hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                       hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                       hipdnn_data_sdk::data_objects::DataType::FLOAT>(map);
-        addPlanBuilder<hipdnn_data_sdk::data_objects::DataType::HALF,
-                       hipdnn_data_sdk::data_objects::DataType::HALF,
-                       hipdnn_data_sdk::data_objects::DataType::HALF,
-                       hipdnn_data_sdk::data_objects::DataType::HALF,
-                       hipdnn_data_sdk::data_objects::DataType::HALF>(map);
-        addPlanBuilder<hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
-                       hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
-                       hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
-                       hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
-                       hipdnn_data_sdk::data_objects::DataType::BFLOAT16>(map);
-        addPlanBuilder<hipdnn_data_sdk::data_objects::DataType::HALF,
-                       hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                       hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                       hipdnn_data_sdk::data_objects::DataType::HALF,
-                       hipdnn_data_sdk::data_objects::DataType::FLOAT>(map);
-        addPlanBuilder<hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
-                       hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                       hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                       hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
-                       hipdnn_data_sdk::data_objects::DataType::FLOAT>(map);
-        addPlanBuilder<hipdnn_data_sdk::data_objects::DataType::HALF,
-                       hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                       hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                       hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                       hipdnn_data_sdk::data_objects::DataType::FLOAT>(map);
-        addPlanBuilder<hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
-                       hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                       hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                       hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                       hipdnn_data_sdk::data_objects::DataType::FLOAT>(map);
+        addPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT>(map);
+        addPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::HALF>(map);
+        addPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16>(map);
+        addPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT>(map);
+        addPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT>(map);
+        addPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT>(map);
+        addPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT>(map);
 
         return map;
     }
 
-    template <hipdnn_data_sdk::data_objects::DataType XDataTypeEnum,
-              hipdnn_data_sdk::data_objects::DataType ScaleBiasDataTypeEnum,
-              hipdnn_data_sdk::data_objects::DataType MeanVarianceDataTypeEnum,
-              hipdnn_data_sdk::data_objects::DataType OutputDataTypeEnum,
-              hipdnn_data_sdk::data_objects::DataType ComputeDataTypeEnum>
+    template <hipdnn_flatbuffers_sdk::data_objects::DataType XDataTypeEnum,
+              hipdnn_flatbuffers_sdk::data_objects::DataType ScaleBiasDataTypeEnum,
+              hipdnn_flatbuffers_sdk::data_objects::DataType MeanVarianceDataTypeEnum,
+              hipdnn_flatbuffers_sdk::data_objects::DataType OutputDataTypeEnum,
+              hipdnn_flatbuffers_sdk::data_objects::DataType ComputeDataTypeEnum>
     static void addPlanBuilder(std::unordered_map<BatchnormTrainSignatureKey,
                                                   std::unique_ptr<IGraphNodePlanBuilder>,
                                                   BatchnormTrainSignatureKey>& map)
