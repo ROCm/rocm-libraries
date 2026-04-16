@@ -1044,15 +1044,12 @@ class GSUOn(GSU):
     
         tmpS01 = tmpSgpr.idx
 
-        if kernel["ISA"][0] == 12:
-            # In gfx12, if not set scope=SCOPE_DEV, will cause infinite loop in lastGsuWgBusyWaiting
-            module.add(SLoadB32(dst=sgpr(tmpS01), base=sgpr("SrdSync",2), soffset=0, smem=SMEMModifiers(glc=True, scope=CacheScope.SCOPE_DEV), comment="get atomic_dec value"))
-        else:
-            module.add(SLoadB32(dst=sgpr(tmpS01), base=sgpr("SrdSync",2), soffset=0, smem=SMEMModifiers(glc=True), comment="get atomic_dec value"))
+        # If not set scope=SCOPE_DEV, will cause infinite loop in lastGsuWgBusyWaiting
+        module.add(SLoadB32(dst=sgpr(tmpS01), base=sgpr("SrdSync",2), soffset=0, smem=SMEMModifiers(glc=True, scope=CacheScope.SCOPE_DEV), comment="get atomic_dec value"))
         module.add(SWaitCnt(kmcnt=0, comment="wait for atomic_dec value load"))
         module.add(SCmpEQU32(src0=sgpr(tmpS01), src1=1, comment="last GSU WG?"))
         module.add(SCBranchSCC0(labelName=lastGsuWgBusyWaitingLabel.getLabelName(), comment="branch if false"))
-        if kernel["ISA"][0] == 12:
+        if not writer.states.asmCaps["HasSStore_b32"]:
             # In gfx12, no s_store_b32 instruction can be used
             tmpV01 = writer.vgprPool.checkOutAligned(2, 2, preventOverflow=False)
             tmpV02 = writer.vgprPool.checkOut(1, preventOverflow=False)
@@ -1423,7 +1420,7 @@ class GSUOn(GSU):
             module.add(SAndB32(dst=sgpr(tmpS02), src0=sgpr("GSU"), src1=hex(0x3FFF), comment="Restore GSU"))
             module.add(SSubU32(dst=sgpr(tmpS02), src0=sgpr(tmpS02), src1=1, comment=""))
             
-            if kernel["ISA"][0] == 12:
+            if not writer.states.asmCaps["HasSAtomic"]:
                 # Since gfx12 has no s_atomic_dec, here use flat_atomic_dec_u32 instead.
                 # flat_atomic_dec is not a scalar instruction, but we only need one dec per wavefront.
                 # Mask exec so that only lane 0 performs the atomic_dec, then restore exec.
@@ -1457,7 +1454,7 @@ class GSUOn(GSU):
 
             # wait for synchronizer and check whether to branch or not
             module.addComment("check synchronizer done")
-            if kernel["ISA"][0] == 12:
+            if not writer.states.asmCaps["HasSAtomic"]:
                 # Need to wait loadcnt to use the returned value from flat_atomic_dec_u32
                 module.add(SWaitCnt(vlcnt=0, comment="Wait for synchronizer"))
                 module.add(VReadfirstlaneB32(dst=sgpr(tmpS02), src=vgpr(tmpV01), comment=""))
@@ -1591,14 +1588,10 @@ class GSUOn(GSU):
 
                     module.add(SAddU32(dst=sgpr(tmpS06+0), src0=sgpr(tmpS06+0), src1="MTOffset", comment=""))
                     module.add(SAddCU32(dst=sgpr(tmpS06+1), src0=sgpr(tmpS06+1), src1="MTOffsetH32", comment=""))
-
-                    if kernel["ISA"][0] == 12:
-                        # Some of operands of gfx12's v_cmp_ge_i32 & v_cndmask_b32 can't be used as sgpr
-                        module.add(VCmpGEI32(dst=VCC(), src0=0, src1=sgpr("GSUSync"), comment=""))
-                        module.add(VCndMaskB32(dst=vgpr(GSUMvgpr), src1=vgpr(bufferOOB), src0=addr0, src2=VCC(), comment="protect if OOB"))
-                    else:
-                        module.add(VCmpGEI32(dst=sgpr(tmpS05,2), src0=0, src1=sgpr("GSUSync"), comment=""))
-                        module.add(VCndMaskB32(dst=vgpr(GSUMvgpr), src1=vgpr(bufferOOB), src0=addr0, src2=sgpr(tmpS05,2), comment="protect if OOB"))
+                    
+                    # Some of operands of gfx12's v_cmp_ge_i32 & v_cndmask_b32 can't be used as sgpr
+                    module.add(VCmpGEI32(dst=VCC(), src0=0, src1=sgpr("GSUSync"), comment=""))
+                    module.add(VCndMaskB32(dst=vgpr(GSUMvgpr), src1=vgpr(bufferOOB), src0=addr0, src2=VCC(), comment="protect if OOB"))
 
                     if(kernel["ProblemType"]["DestDataType"].numRegisters() > 1):
                         module.add(writer.chooseGlobalRead(True, bps, tmpVAdd+gwvw*kernel["ProblemType"]["DestDataType"].numRegisters()*i, \

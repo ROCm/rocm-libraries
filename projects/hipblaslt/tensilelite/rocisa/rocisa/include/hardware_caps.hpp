@@ -351,6 +351,24 @@ inline std::map<std::string, int>
                           assemblerPath,
                           "buffer_atomic_add_f32 v0, v1, s[0:3], null offen offset:0",
                           isDebug);
+    rv["HasSAtomic"]
+        = tryAssembler(isaVersion,
+                       assemblerPath,
+                       "s_atomic_dec s0, s[1:2]",
+                       isDebug);
+
+    rv["HasSStore_b32"]
+        = tryAssembler(isaVersion,
+                       assemblerPath,
+                       "s_store_b32 s0, s[1:2], 0",
+                       isDebug);
+
+    rv["HasVCndmask_b32_V1"]
+        = tryAssembler(isaVersion,
+                       assemblerPath,
+                       "v_cndmask_b32 v0, v1, v2, s[0:1]",
+                       isDebug);
+
     rv["HasGLCModifier"]
         = tryAssembler(isaVersion,
                        assemblerPath,
