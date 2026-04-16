@@ -103,6 +103,8 @@ jobs:
           echo "version_slug=$version_slug" >> $GITHUB_OUTPUT
           echo "project_slug=$project_slug" >> $GITHUB_OUTPUT
 
+          # The API call returns upto 300 projects information from RTD
+          # jq extracts the project slug from the list
           project_list=$(curl \
             --connect-timeout 180
             --header "Authorization: Token $RTD_TOKEN" \
