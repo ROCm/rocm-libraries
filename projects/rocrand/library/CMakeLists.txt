@@ -43,14 +43,13 @@ set(rocRAND_HIP_SRCS
     "src/rocrand_mt19937_precomputed.cpp"
     "src/rocrand.cpp")
 
-# Configure a header file to pass the rocRAND version
+# Configure aa header file to pass the rocRAND version
 configure_file(
     "${PROJECT_SOURCE_DIR}/library/include/rocrand/rocrand_version.h.in"
     "${PROJECT_BINARY_DIR}/library/include/rocrand/rocrand_version.h"
     @ONLY
 )
 
-# Build
 add_library(rocrand ${rocRAND_HIP_SRCS})
 
 set(SOBOL_PRECOMPUTED_SOURCES
