@@ -53,7 +53,7 @@ Create a virtual environment and install the Python build dependencies:
 Building the library dependencies and library
 ---------------------------------------------
 
-Some typical examples of how to build the library:
+Here are some typical examples showing how to build the library:
 
 .. csv-table::
    :header: "Command","Description"
