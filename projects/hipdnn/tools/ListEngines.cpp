@@ -75,8 +75,9 @@ bool printEngineInfo(hipdnnHandle_t handle, size_t engineIndex)
         return false;
     }
 
-    std::cout << "  " << engineName.data() << " (0x" << std::hex << std::uppercase << std::setw(16)
-              << std::setfill('0') << engineId << std::dec << ")\n"
+    std::cout << "  " << engineName.data() << " ID: " << engineId << " (0x" << std::hex
+              << std::uppercase << std::setw(16) << std::setfill('0') << engineId << std::dec
+              << ")\n"
               << "    Plugin:  " << pluginName.data() << "\n"
               << "    Version: " << version.data() << "\n"
               << "    Type:    " << type.data() << "\n";

@@ -51,4 +51,4 @@ target_include_directories(
 )
 
 include(GoogleTest)
-gtest_discover_tests(example_provider_tests)
+gtest_discover_tests(example_provider_tests DISCOVERY_MODE PRE_TEST)
