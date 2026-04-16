@@ -214,3 +214,33 @@ add_fusilli_plugin_test(
   COMPILE_DEFS
     FUSILLI_PLUGIN_PATH="../${FUSILLI_PLUGIN_RELATIVE_PATH}"
 )
+
+add_fusilli_plugin_test(
+  NAME fusilli_plugin_simple_custom_op_test
+  SRCS custom_op/simple_custom_op.cpp
+  DEPS
+    GTest::gtest_main
+    hip::host
+    hipdnn_frontend
+    hipdnn_plugin_sdk
+    hipdnn_data_sdk
+    hipdnn_test_sdk
+    Threads::Threads
+  COMPILE_DEFS
+    FUSILLI_PLUGIN_PATH="../${FUSILLI_PLUGIN_RELATIVE_PATH}"
+)
+
+add_fusilli_plugin_test(
+  NAME fusilli_plugin_simple_rmsnorm_test
+  SRCS rmsnorm/simple_rmsnorm.cpp
+  DEPS
+    GTest::gtest_main
+    hip::host
+    hipdnn_frontend
+    hipdnn_plugin_sdk
+    hipdnn_data_sdk
+    hipdnn_test_sdk
+    Threads::Threads
+  COMPILE_DEFS
+    FUSILLI_PLUGIN_PATH="../${FUSILLI_PLUGIN_RELATIVE_PATH}"
+)

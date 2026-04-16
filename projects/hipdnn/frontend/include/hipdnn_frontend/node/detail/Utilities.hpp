@@ -297,6 +297,59 @@ inline Error validateChannelOnlyTensorShape(const std::shared_ptr<graph::TensorA
     return {ErrorCode::OK, ""};
 }
 
+// Validates tensor has non-batch [1, C, D, H, ...] for rms norm parmeters
+// Uses tensor's name if set, otherwise uses fallbackName for error messages
+// NOTE: This function expects tensor dimensions to be set - it will fail if not set
+inline Error validateNonBatchShapeMatch(const std::shared_ptr<graph::TensorAttributes>& scale,
+                                        const std::shared_ptr<graph::TensorAttributes>& input,
+                                        const std::string& fallbackName = "Tensor")
+{
+    if(!scale)
+    {
+        return {ErrorCode::ATTRIBUTE_NOT_SET,
+                getTensorNameForError(scale, fallbackName) + " is not set"};
+    }
+
+    if(!input)
+    {
+        return {ErrorCode::ATTRIBUTE_NOT_SET,
+                getTensorNameForError(input, fallbackName) + " is not set"};
+    }
+
+    const auto& scaleDims = scale->get_dim();
+    const auto& inputDims = input->get_dim();
+
+    HIPDNN_RETURN_IF_LT(scaleDims.size(),
+                        inputDims.size(),
+                        ErrorCode::INVALID_VALUE,
+                        getTensorNameForError(scale, fallbackName) + " must match input rank");
+
+    // Check batch dimension is 1
+    HIPDNN_RETURN_IF_NE(scaleDims[0],
+                        1,
+                        ErrorCode::INVALID_VALUE,
+                        getTensorNameForError(scale, fallbackName)
+                            + " batch dimension (index 0) must be 1, got "
+                            + std::to_string(scaleDims[0]));
+
+    for(size_t i = 1, s = scaleDims.size(); i < s; ++i)
+    {
+        if(scaleDims[i] != 1)
+        {
+            // Check channel dimension matches expected
+            HIPDNN_RETURN_IF_NE(scaleDims[i],
+                                inputDims[i],
+                                ErrorCode::INVALID_VALUE,
+                                getTensorNameForError(scale, fallbackName) + " dimension at index "
+                                    + std::to_string(i) + " must match input dimension at index "
+                                    + std::to_string(i) + ", got " + std::to_string(scaleDims[i])
+                                    + " vs " + std::to_string(inputDims[i]));
+        }
+    }
+
+    return {ErrorCode::OK, ""};
+}
+
 // Validates channel-only shape for optional tensors (only validates if dimensions are set)
 // Uses tensor's name if set, otherwise uses fallbackName for error messages
 // Returns OK if tensor dimensions not yet set (will be inferred in infer_properties_node)
