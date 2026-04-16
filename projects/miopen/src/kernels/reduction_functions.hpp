@@ -416,10 +416,9 @@ welford_step_unroll4(typename mapped_vector_type<FpPrecType, 4>::type& read4Prec
     // merger step
 
     FpPrecType mean4     = read4Prec.x;
-    FpPrecType oldMean4  = cast<FpPrecType>(0.);
+    FpPrecType oldMean4  = mean4;
     FpPrecType variance4 = cast<FpPrecType>(0.);
 
-    oldMean4 = mean4;
     mean4 += read4Prec.y;
     mean4 *= 0.5f;
     variance4 = fma(read4Prec.y - mean4, read4Prec.y - oldMean4, variance4);
