@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <ostream>
 #include <unordered_map>
 
@@ -21,15 +21,15 @@ namespace hipdnn_integration_tests::gpu_graph_executor::detail
 struct GpuPointwiseDummySignatureKey
 {
     static constexpr auto NODE_TYPE
-        = hipdnn_data_sdk::data_objects::NodeAttributes::PointwiseAttributes;
+        = hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::PointwiseAttributes;
 
     GpuPointwiseDummySignatureKey() = default;
 
     GpuPointwiseDummySignatureKey(
-        [[maybe_unused]] const hipdnn_data_sdk::data_objects::Node& node,
+        [[maybe_unused]] const hipdnn_flatbuffers_sdk::data_objects::Node& node,
         [[maybe_unused]] const std::unordered_map<
             int64_t,
-            const hipdnn_data_sdk::data_objects::TensorAttributes*>& tensorMap)
+            const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>& tensorMap)
     {
         // Currently matches all pointwise nodes regardless of type/mode.
         // When real GPU plans are added, extract operation, data types, etc.
