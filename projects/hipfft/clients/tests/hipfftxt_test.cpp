@@ -228,9 +228,9 @@ static std::vector<directionformat_t> complex_directionformat =
     {HIPFFT_BACKWARD, HIPFFT_XT_FORMAT_INPLACE},
     {HIPFFT_FORWARD, HIPFFT_XT_FORMAT_INPLACE_SHUFFLED},
     //{HIPFFT_FORWARD, HIPFFT_XT_FORMAT_INPUT},
-    //{HIPFFT_BACKWARD, HIPFFT_XT_FORMAT_OUTPUT}
+    //{HIPFFT_BACKWARD, HIPFFT_XT_FORMAT_OUTPUT},
     //{HIPFFT_BACKWARD, HIPFFT_XT_FORMAT_INPUT},
-    //{HIPFFT_FORWARD, HIPFFT_XT_FORMAT_OUTPUT}
+    //{HIPFFT_FORWARD, HIPFFT_XT_FORMAT_OUTPUT},
 };
 
 // Combine the real/complex and complex/complex direction-format arrays, prepending a bool which is

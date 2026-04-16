@@ -893,14 +893,21 @@ try
     auto cufftret = cufftXtMalloc(
         plan, reinterpret_cast<cudaLibXtDesc**>(desc), hipfftXtSubFormatTocufftXtSubFormat(format));
 
-    // Verify that allocation actually occured.
-    const int nGPUs = (*(*reinterpret_cast<cudaLibXtDesc**>(desc))).descriptor->nGPUs;
-    if(nGPUs == 0)
-        return HIPFFT_ALLOC_FAILED;
-    const auto data = (*(*reinterpret_cast<cudaLibXtDesc**>(desc))).descriptor->data;
-    for(int idx = 0; idx < nGPUs; ++idx)
+    if(cufftret == CUFFT_SUCCESS)
     {
-        if(data[idx] == nullptr)
+        // Verify that allocation actually occured.
+        const int nGPUs = (*(*reinterpret_cast<cudaLibXtDesc**>(desc))).descriptor->nGPUs;
+        if(nGPUs == 0)
+            return HIPFFT_ALLOC_FAILED;
+        const auto data = (*(*reinterpret_cast<cudaLibXtDesc**>(desc))).descriptor->data;
+        // Computation requires that at least one GPU buffer is actually allocated.
+        bool allnull = true;
+        for(int idx = 0; idx < nGPUs; ++idx)
+        {
+            if(data[idx] != nullptr)
+                allnull = false;
+        }
+        if(allnull)
             return HIPFFT_ALLOC_FAILED;
     }
     
