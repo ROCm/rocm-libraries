@@ -6,7 +6,7 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 
 ### Added
 
-* General Batched GEMM Support.
+* General Batched GEMM support.
 
 ### Changed
 
