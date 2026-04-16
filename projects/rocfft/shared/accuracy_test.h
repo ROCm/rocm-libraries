@@ -94,7 +94,7 @@ inline void check_problem_fits_device_memory(Tparams& params, const int verbose)
     {
         std::stringstream ss;
         ss << "Raw problem size (" << byte_sizes_to_str(io_vram_footprint)
-           << ") exceeds usable memory on device (" << byte_sizes_to_str(vram_avail) << ")";
+           << ") exceeds usable memory on some device (" << byte_sizes_to_str(vram_avail) << ")";
         throw ROCFFT_SKIP{ss.str()};
     }
 
@@ -115,7 +115,7 @@ inline void check_problem_fits_device_memory(Tparams& params, const int verbose)
         }
         std::stringstream ss;
         ss << "Problem size (" << byte_sizes_to_str(vram_footprint)
-           << ") exceeds usable memory on device (" << byte_sizes_to_str(vram_avail) << ")";
+           << ") exceeds usable memory on some device (" << byte_sizes_to_str(vram_avail) << ")";
         throw ROCFFT_SKIP{ss.str()};
     }
 }
