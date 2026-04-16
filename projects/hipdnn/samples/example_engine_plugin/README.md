@@ -18,7 +18,7 @@ Runtime Compilation):
 | CMake >= 3.20 | Build system | |
 | C++17 compiler | GCC/G++ or MSVC | No GPU compiler needed at build time |
 | ROCm (HIP SDK + HIPRTC) | GPU kernel compilation and execution | `hipStream_t`, `hipMalloc`, HIPRTC APIs |
-| hipDNN (installed) | Plugin SDK, data SDK, frontend library, test SDK (for sample) | Typically installed at `/opt/rocm` (Linux) |
+| hipDNN (installed) | Plugin SDK, data SDK, frontend library | Typically installed at `/opt/rocm` (Linux) |
 | GPU hardware | Runtime execution of HIPRTC-compiled kernels | Any ROCm-supported GPU |
 | Internet access | GTest is downloaded via CMake `FetchContent` | Only needed for the first build |
 
@@ -619,7 +619,6 @@ changed. They are the same for every plugin:
 | `hipdnn_plugin_sdk` | CMake package (plugin SDK) |
 | `hipdnn_data_sdk` | CMake package (data SDK) |
 | `hipdnn_frontend` | CMake package (frontend library) |
-| `hipdnn_test_sdk` | CMake package (test SDK, for sample validation only) |
 | `HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR` | CMake variable exported by `hipdnn_data_sdk` |
 | `HIPDNN_PLUGIN_NAME`, `HIPDNN_PLUGIN_VERSION`, `HIPDNN_PLUGIN_CONTAINER_TYPE`, `HIPDNN_PLUGIN_HANDLE_TYPE`, `HIPDNN_PLUGIN_CONTEXT_TYPE` | Macro names expected by `EnginePluginImpl.inl` (values are plugin-specific) |
 | `EnginePluginImpl.inl` | Plugin SDK header that generates C entry points |
@@ -691,6 +690,22 @@ See `tests/TestReluPlan.cpp` for the complete pattern.
 The sample application (`sample/ExampleProviderSample.cpp`) serves as the
 acceptance test in this project. It is registered as a `ctest` and verifies
 end-to-end correctness on GPU hardware.
+
+### Numerical Accuracy Testing
+
+To verify the numerical accuracy of your plugin's engines against CPU reference
+implementations across a wide range of tensor configurations, data types, and
+convolution parameters, use the hipDNN
+[integration test harness](https://github.com/ROCm/rocm-libraries/tree/develop/dnn-providers/integration-tests).
+The integration test harness exercises engines through the hipDNN frontend API,
+covering cases that are not practical to validate with hardcoded expected values
+alone.
+
+For custom accuracy tests, the `hipdnn_test_sdk` package provides CPU reference
+implementations (e.g., `CpuFpReferenceConvolution`) that can be used to compute
+expected results for comparison against your plugin's GPU output. Link your test
+executable against `hipdnn_test_sdk` and use these references to validate
+correctness across arbitrary tensor shapes and convolution parameters.
 
 ## Integrating the Plugin into Your Application
 

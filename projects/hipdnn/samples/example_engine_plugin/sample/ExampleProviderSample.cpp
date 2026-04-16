@@ -16,8 +16,7 @@
 //   1. ReLU forward with engine selection and knob modification (explicit 6-step
 //      build, leaky ReLU via negative_slope knob, verification)
 //   2. Convolution forward with engine selection (build() convenience, Tensor
-//      class for GPU memory management, verification with hardcoded values +
-//      CPU reference)
+//      class for GPU memory management, verification with hardcoded values)
 //   3. Plugin loading modes (ADDITIVE, ABSOLUTE, presence verification)
 //
 // When no GPU is detected, only non-GPU portions run (plugin
@@ -51,8 +50,6 @@
 
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
-#include <hipdnn_test_sdk/utilities/CpuFpReferenceConvolution.hpp>
-
 #include <hipdnn_frontend.hpp>
 #include <hipdnn_frontend/Utilities.hpp>
 
@@ -445,8 +442,8 @@ static bool scenario2_ConvForward(const std::vector<std::string>& pluginPaths, b
     std::cout << "\n=== Scenario 2: Convolution Forward with Engine Selection ===\n";
     std::cout
         << "Demonstrates ConvFwd graph construction with NCHW/KCRS tensor layouts, the build()\n"
-        << "convenience method, Tensor class for GPU memory management, and two verification\n"
-        << "approaches: hardcoded expected values and CPU reference.\n\n";
+        << "convenience method, Tensor class for GPU memory management, and verification\n"
+        << "against hardcoded expected values.\n\n";
 
     // Use ABSOLUTE mode so the example plugin is loaded regardless of
     // system-installed plugins
@@ -554,69 +551,30 @@ static bool scenario2_ConvForward(const std::vector<std::string>& pluginPaths, b
     printMatrix("Filter (all ones)", weightData.data(), static_cast<int>(R), static_cast<int>(S));
     printMatrix("Output", yHostPtr, static_cast<int>(outH), static_cast<int>(outW));
 
-    // ---- Verification 1: Hardcoded expected values ----
     // With a 4x4 input (values 1-16) and a 3x3 all-ones filter (no padding,
     // stride 1), each output element is the sum of a 3x3 window:
     //   output[0,0] = 1+2+3+5+6+7+9+10+11       = 54
     //   output[0,1] = 2+3+4+6+7+8+10+11+12       = 63
     //   output[1,0] = 5+6+7+9+10+11+13+14+15     = 90
     //   output[1,1] = 6+7+8+10+11+12+14+15+16    = 99
-    std::cout << "  Verification 1: Hardcoded expected values\n";
-    std::vector<float> expectedHardcoded = {54.0f, 63.0f, 90.0f, 99.0f};
+    std::vector<float> expected = {54.0f, 63.0f, 90.0f, 99.0f};
 
-    bool hardcodedCorrect = true;
-    for(size_t i = 0; i < expectedHardcoded.size(); ++i)
+    bool correct = true;
+    for(size_t i = 0; i < expected.size(); ++i)
     {
-        if(std::abs(yHostPtr[i] - expectedHardcoded[i]) > 1e-5f)
+        if(std::abs(yHostPtr[i] - expected[i]) > 1e-5f)
         {
-            std::cerr << "  MISMATCH at [" << i << "]: expected " << expectedHardcoded[i]
-                      << ", got " << yHostPtr[i] << "\n";
-            hardcodedCorrect = false;
+            std::cerr << "  MISMATCH at [" << i << "]: expected " << expected[i] << ", got "
+                      << yHostPtr[i] << "\n";
+            correct = false;
         }
     }
-    if(hardcodedCorrect)
+    if(correct)
     {
         std::cout << "  All outputs match expected values {54, 63, 90, 99}\n";
     }
 
-    // ---- Verification 2: CPU reference via hipdnn_test_sdk ----
-    // This demonstrates the hipdnn_test_sdk CPU reference approach for
-    // operations where expected values are not trivially derivable. Plugin
-    // developers can use this pattern for testing more complex convolution
-    // configurations (larger kernels, padding, stride > 1). Requires linking
-    // the header-only hipdnn_test_sdk library.
-    std::cout << "\n  Verification 2: CPU reference (hipdnn_test_sdk)\n";
-
-    hipdnn_data_sdk::utilities::Tensor<float> yRef({N, K, outH, outW});
-    yRef.fillWithValue(0.0f);
-
-    hipdnn_test_sdk::utilities::CpuFpReferenceConvolution::fprop(xTensor,
-                                                                 wTensor,
-                                                                 yRef,
-                                                                 {int64_t{1}, int64_t{1}},
-                                                                 {int64_t{1}, int64_t{1}},
-                                                                 {int64_t{0}, int64_t{0}});
-
-    auto expectedCount = static_cast<size_t>(N * K * outH * outW);
-    auto cpuRefPtr = yRef.rawHostData();
-
-    bool cpuRefCorrect = true;
-    for(size_t i = 0; i < expectedCount; ++i)
-    {
-        auto cpuRefVal = static_cast<const float*>(cpuRefPtr)[i];
-        if(std::abs(yHostPtr[i] - cpuRefVal) > 1e-5f)
-        {
-            std::cerr << "  CPU ref MISMATCH at [" << i << "]: expected " << cpuRefVal << ", got "
-                      << yHostPtr[i] << "\n";
-            cpuRefCorrect = false;
-        }
-    }
-    if(cpuRefCorrect)
-    {
-        std::cout << "  All outputs match CPU reference convolution\n";
-    }
-
-    if(!hardcodedCorrect || !cpuRefCorrect)
+    if(!correct)
     {
         return false;
     }
