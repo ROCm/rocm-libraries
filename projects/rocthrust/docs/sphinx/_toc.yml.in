@@ -37,6 +37,8 @@ subtrees:
     title: hipGraph support
   - file: reference/rocThrust-hip-policies
     title: Policies
+  - file: reference/rocThrust-env-vars
+    title: Environment variables
   - file: cpp_api
 
 - caption: About

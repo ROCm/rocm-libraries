@@ -36,7 +36,7 @@ The rocThrust project is located in https://github.com/ROCm/rocm-libraries/tree/
     * :ref:`hipgraph-support`
     * :ref:`hip-execution-policies`
     * :ref:`api-reference`
-    * :ref:`genindex`
+    * :ref:`env-var`
 
 To contribute to the documentation, refer to
 `Contributing to ROCm <https://rocm.docs.amd.com/en/latest/contribute/contributing.html>`_.
