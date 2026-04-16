@@ -52,6 +52,13 @@ configure_file(
 
 add_library(rocrand ${rocRAND_HIP_SRCS})
 
+if(WIN32)
+    configure_file("${PROJECT_SOURCE_DIR}/library/include/rocrand/rocrand_in.rc.in"
+                   "${PROJECT_BINARY_DIR}/library/include/rocrand/rocrand_in.rc"
+                   @ONLY)
+    target_sources(rocrand PRIVATE "${PROJECT_BINARY_DIR}/library/include/rocrand/rocrand_in.rc")
+endif()
+
 set(SOBOL_PRECOMPUTED_SOURCES
     "src/rocrand_scrambled_sobol32_precomputed"
     "src/rocrand_scrambled_sobol64_precomputed"
@@ -159,13 +166,14 @@ if (WIN32)
 	    )
     endif()
     if (BUILD_BENCHMARK)
-#	    add_custom_command(
-#		    TARGET rocrand
-#		    POST_BUILD
-#		    COMMAND ${CMAKE_COMMAND} -E copy
-#			    $<TARGET_FILE:rocrand>
-#			    ${PROJECT_BINARY_DIR}/benchmark/$<TARGET_FILE_NAME:rocrand>
-#	    )
+	    add_custom_command(
+		    TARGET rocrand
+		    POST_BUILD
+		    COMMAND ${CMAKE_COMMAND} -E copy
+			    $<TARGET_FILE:rocrand>
+			    ${PROJECT_BINARY_DIR}/benchmark/$<TARGET_FILE_NAME:rocrand>
+			COMMENT "Copy benchmark files"
+	    )
     endif()
 endif()
 
