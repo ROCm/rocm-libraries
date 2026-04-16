@@ -111,29 +111,45 @@ cmake -B build -S .                                  \
 cmake --build build --parallel
 ```
 
-#### Using the installation script
+#### Using invoke
 
-Refer to the available build options using `./install.sh --help`:
+hipBLASLt provides an [invoke](https://www.pyinvoke.org/) task runner as an alternative to the
+installation script.
+
+**1. Create a virtual environment and install Python dependencies**
 
 ```bash
-# Command line options:
-#   -h|--help         - prints help message
-#   -i|--install      - install after build
-#   -d|--dependencies - install build dependencies
-#   -c|--clients      - build library clients too (combines with -i & -d)
-#   -g|--debug        - build with debug flag
-./install.sh -idc
-# build for gfx950 only without installation
-./install.sh -c -a gfx950
+python3 -m venv .venv
+source .venv/bin/activate        # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+```
+
+**2. Build with invoke**
+
+```bash
+# basic release build
+inv build --architecture gfx950
+
+# build with clients
+inv build --architecture gfx950 --clients
+
+# install system dependencies, build with clients, and install the package
+inv build --install-deps --clients --install-pkg --architecture gfx950
+
+# debug build
+inv build --debug --architecture gfx950
+
+# see all options
+inv --help build
 ```
 
 > [!NOTE]
-> To build hipBLASLt for ROCm <= 6.2, pass the `--legacy_hipblas_direct` flag to `install.sh`.
+> To build hipBLASLt for ROCm <= 6.2, pass `--legacy-hipblas-direct` to `inv build`.
 
 ### Options
 
 > [!NOTE]
-> When using the install script these variables are either hardcoded or set via its command line options.
+> When using invoke these variables are either hardcoded or set via its command line options.
 
 *CMake options*:
 * `CMAKE_BUILD_TYPE`: Any of Release, Debug, RelWithDebInfo, MinSizeRel
