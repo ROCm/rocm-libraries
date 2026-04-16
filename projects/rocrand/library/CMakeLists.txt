@@ -43,7 +43,7 @@ set(rocRAND_HIP_SRCS
     "src/rocrand_mt19937_precomputed.cpp"
     "src/rocrand.cpp")
 
-# Configure aa header file to pass the rocRAND version
+# Configure a header file to pass the rocRAND version
 configure_file(
     "${PROJECT_SOURCE_DIR}/library/include/rocrand/rocrand_version.h.in"
     "${PROJECT_BINARY_DIR}/library/include/rocrand/rocrand_version.h"
@@ -146,27 +146,27 @@ else()
 endif()
 
 # install library to C:\hipSDK\bin
-if (WIN32)
-    install (TARGETS rocrand DESTINATION "${CMAKE_INSTALL_PREFIX}/bin")
-    if (BUILD_TEST)
-	    add_custom_command(
-		    TARGET rocrand
-		    POST_BUILD
-		    COMMAND ${CMAKE_COMMAND} -E copy
-			    $<TARGET_FILE:rocrand>
-			    ${PROJECT_BINARY_DIR}/test/$<TARGET_FILE_NAME:rocrand>
-	    )
-    endif()
-    if (BUILD_BENCHMARK)
-	    add_custom_command(
-		    TARGET rocrand
-		    POST_BUILD
-		    COMMAND ${CMAKE_COMMAND} -E copy
-			    $<TARGET_FILE:rocrand>
-			    ${PROJECT_BINARY_DIR}/benchmark/$<TARGET_FILE_NAME:rocrand>
-	    )
-    endif()
-endif()
+#if (WIN32)
+#    install (TARGETS rocrand DESTINATION "${CMAKE_INSTALL_PREFIX}/bin")
+#    if (BUILD_TEST)
+#	    add_custom_command(
+#		    TARGET rocrand
+#		    POST_BUILD
+#		    COMMAND ${CMAKE_COMMAND} -E copy
+#			    $<TARGET_FILE:rocrand>
+#			    ${PROJECT_BINARY_DIR}/test/$<TARGET_FILE_NAME:rocrand>
+#	    )
+#    endif()
+#    if (BUILD_BENCHMARK)
+#	    add_custom_command(
+#		    TARGET rocrand
+#		    POST_BUILD
+#		    COMMAND ${CMAKE_COMMAND} -E copy
+#			    $<TARGET_FILE:rocrand>
+#			    ${PROJECT_BINARY_DIR}/benchmark/$<TARGET_FILE_NAME:rocrand>
+#	    )
+#    endif()
+#endif()
 
 # Fortran wrappers for rocRAND
 if(BUILD_FORTRAN_WRAPPER)
