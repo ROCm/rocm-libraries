@@ -8,8 +8,8 @@
 
 #include <memory>
 
-#include <hipdnn_data_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
-#include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 
 #include "TestHelpers.hpp"
 #include "engines/plans/ConvFwdPlan.hpp"
@@ -40,8 +40,8 @@ protected:
 TEST_F(ConvFwdPlanBuilderTest, IsApplicable_SingleNodeConvFwd_ReturnsTrue)
 {
     auto fbb = createConvFwdGraph();
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(fbb.GetBufferPointer(),
-                                                              fbb.GetSize());
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(fbb.GetBufferPointer(),
+                                                                     fbb.GetSize());
     ASSERT_TRUE(graph.isValid());
     EXPECT_TRUE(planBuilder->isApplicable(handle, graph));
 }
@@ -49,8 +49,8 @@ TEST_F(ConvFwdPlanBuilderTest, IsApplicable_SingleNodeConvFwd_ReturnsTrue)
 TEST_F(ConvFwdPlanBuilderTest, IsApplicable_ReluFwdGraph_ReturnsFalse)
 {
     auto fbb = createReluFwdGraph();
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(fbb.GetBufferPointer(),
-                                                              fbb.GetSize());
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(fbb.GetBufferPointer(),
+                                                                     fbb.GetSize());
     ASSERT_TRUE(graph.isValid());
     EXPECT_FALSE(planBuilder->isApplicable(handle, graph));
 }
@@ -58,8 +58,8 @@ TEST_F(ConvFwdPlanBuilderTest, IsApplicable_ReluFwdGraph_ReturnsFalse)
 TEST_F(ConvFwdPlanBuilderTest, IsApplicable_NonReluPointwise_ReturnsFalse)
 {
     auto fbb = createNonReluPointwiseGraph();
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(fbb.GetBufferPointer(),
-                                                              fbb.GetSize());
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(fbb.GetBufferPointer(),
+                                                                     fbb.GetSize());
     ASSERT_TRUE(graph.isValid());
     EXPECT_FALSE(planBuilder->isApplicable(handle, graph));
 }
@@ -69,8 +69,8 @@ TEST_F(ConvFwdPlanBuilderTest, IsApplicable_NonUnitDilation_ReturnsFalse)
     // Create a ConvFwd graph with dilation={2,2} on a large enough input (8x8)
     // so the output dimensions remain positive: outH = (8 - (2*(3-1)+1)) / 1 + 1 = 4
     auto fbb = createConvFwdGraph(1, 2, 3, 1, 1, 8, 8, 1, 3, 3, 0, 0, 1, 1, 2, 2);
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(fbb.GetBufferPointer(),
-                                                              fbb.GetSize());
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(fbb.GetBufferPointer(),
+                                                                     fbb.GetSize());
     ASSERT_TRUE(graph.isValid());
     EXPECT_FALSE(planBuilder->isApplicable(handle, graph));
 }
@@ -78,8 +78,8 @@ TEST_F(ConvFwdPlanBuilderTest, IsApplicable_NonUnitDilation_ReturnsFalse)
 TEST_F(ConvFwdPlanBuilderTest, GetMaxWorkspaceSize_ReturnsZero)
 {
     auto fbb = createConvFwdGraph();
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(fbb.GetBufferPointer(),
-                                                              fbb.GetSize());
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(fbb.GetBufferPointer(),
+                                                                     fbb.GetSize());
     ExampleProviderSettings settings;
     EXPECT_EQ(planBuilder->getMaxWorkspaceSize(handle, graph, settings), 0u);
 }
@@ -87,8 +87,8 @@ TEST_F(ConvFwdPlanBuilderTest, GetMaxWorkspaceSize_ReturnsZero)
 TEST_F(ConvFwdPlanBuilderTest, GetCustomKnobs_ReturnsBlockSizeKnob)
 {
     auto fbb = createConvFwdGraph();
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(fbb.GetBufferPointer(),
-                                                              fbb.GetSize());
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(fbb.GetBufferPointer(),
+                                                                     fbb.GetSize());
     auto knobs = planBuilder->getCustomKnobs(handle, graph);
     ASSERT_EQ(knobs.size(), 1u);
     EXPECT_EQ(knobs[0].knob_id, "BLOCK_SIZE");
@@ -97,12 +97,12 @@ TEST_F(ConvFwdPlanBuilderTest, GetCustomKnobs_ReturnsBlockSizeKnob)
 TEST_F(ConvFwdPlanBuilderTest, BuildPlan_SetsPlanOnContext)
 {
     auto graphFbb = createConvFwdGraph();
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(graphFbb.GetBufferPointer(),
-                                                              graphFbb.GetSize());
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(graphFbb.GetBufferPointer(),
+                                                                     graphFbb.GetSize());
 
     auto configFbb = createEngineConfig(0);
-    hipdnn_data_sdk::flatbuffer_utilities::EngineConfigWrapper config(configFbb.GetBufferPointer(),
-                                                                      configFbb.GetSize());
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper config(
+        configFbb.GetBufferPointer(), configFbb.GetSize());
 
     // Set up mock expectations for buildPlan
     auto compiledProgram = std::make_unique<MockCompiledProgram>();

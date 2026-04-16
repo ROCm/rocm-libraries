@@ -26,8 +26,8 @@ find_package(Threads REQUIRED)
 if(NOT TARGET hipdnn_frontend)
     find_package(hipdnn_frontend CONFIG REQUIRED)
 endif()
-if(NOT TARGET hipdnn_data_sdk)
-    find_package(hipdnn_data_sdk CONFIG REQUIRED)
+if(NOT TARGET hipdnn_flatbuffers_sdk)
+    find_package(hipdnn_flatbuffers_sdk CONFIG REQUIRED)
 endif()
 
 # !! NOTE !! - hipdnn_test_sdk is needed for sample validation, regular users of hipDNN do not need
@@ -45,7 +45,7 @@ macro(add_hipdnn_sample NAME SOURCE)
     add_executable(${NAME} ${SOURCE})
     # !! NOTE !! - hipdnn_test_sdk is needed for sample validation, regular users of hipDNN do not
     # need this package. Linking against hipdnn_frontend would be sufficient for normal users
-    # (brings in hipdnn_data_sdk as well).
+    # (brings in hipdnn_flatbuffers_sdk as well).
     target_link_libraries(${NAME} PRIVATE hip::host Threads::Threads hipdnn_frontend hipdnn_test_sdk)
     target_compile_options(${NAME} PRIVATE ${HIPDNN_SAMPLE_NO_RTTI_OPTIONS})
     list(APPEND HIPDNN_ALL_SAMPLES ${NAME})

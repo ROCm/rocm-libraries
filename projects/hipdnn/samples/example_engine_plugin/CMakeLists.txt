@@ -61,7 +61,7 @@ endif()
 list(APPEND CMAKE_PREFIX_PATH /opt/rocm /opt/rocm/hip)
 
 find_package(hipdnn_plugin_sdk CONFIG REQUIRED)
-# hipdnn_data_sdk is found transitively through hipdnn_plugin_sdk
+# hipdnn_flatbuffers_sdk is found transitively through hipdnn_plugin_sdk
 find_package(hip REQUIRED)
 find_package(hiprtc REQUIRED)
 
