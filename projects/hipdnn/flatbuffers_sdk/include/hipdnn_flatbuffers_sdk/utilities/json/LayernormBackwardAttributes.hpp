@@ -18,7 +18,7 @@ inline void to_json(nlohmann::json& layernormJson, const LayernormBackwardAttrib
     inputs["scale_tensor_uid"] = ln.scale_tensor_uid();
     inputs["mean_tensor_uid"] = ln.mean_tensor_uid();
     inputs["inv_variance_tensor_uid"] = ln.inv_variance_tensor_uid();
-    inputs["epsilon_uid"] = ln.epsilon_tensor_uid();
+    inputs["epsilon_tensor_uid"] = ln.epsilon_tensor_uid();
 
     outputs["dx_tensor_uid"] = ln.dx_tensor_uid();
     outputs["dscale_tensor_uid"] = ln.dscale_tensor_uid();
@@ -43,9 +43,9 @@ inline auto to<data_objects::LayernormBackwardAttributes>(flatbuffers::FlatBuffe
         inputs.at("dy_tensor_uid").get<int64_t>(),
         inputs.at("x_tensor_uid").get<int64_t>(),
         inputs.at("scale_tensor_uid").get<int64_t>(),
-        inputs.at("mean_tensor_uid").get<int64_t>(),
-        inputs.at("inv_variance_tensor_uid").get<int64_t>(),
-        inputs.at("epsilon_uid").get<int64_t>(),
+        inputs.at("mean_tensor_uid").get<std::optional<int64_t>>(),
+        inputs.at("inv_variance_tensor_uid").get<std::optional<int64_t>>(),
+        inputs.at("epsilon_tensor_uid").get<std::optional<int64_t>>(),
         outputs.at("dx_tensor_uid").get<int64_t>(),
         outputs.at("dscale_tensor_uid").get<int64_t>(),
         outputs.at("dbias_tensor_uid").get<int64_t>(),
