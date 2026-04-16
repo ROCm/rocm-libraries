@@ -130,44 +130,49 @@ namespace
     {
         if(status != expect)
         {
-            rocblas_cerr << "hipBLASLt status error: Expected " << hipblas_status_to_string(expect)
-                         << ", received " << hipblas_status_to_string(status) << " at " << __FILE__
-                         << ":" << __LINE__ << std::endl;
+            rocblas_internal_ostream msg;
+            print_if_verbose(msg << "hipBLASLt status error: Expected "
+                                 << hipblas_status_to_string(expect) << ", received "
+                                 << hipblas_status_to_string(status) << " at " << __FILE__ << ":"
+                                 << __LINE__ << std::endl);
             return rocblas_status_internal_error;
         }
         return rocblas_status_success;
     }
 #define EXPECT_HIPBLAS_STATUS hipblaslt_expect_status
-#define CHECK_SOLUTION_FOUND(SOL_COUNT)           \
-    do                                            \
-    {                                             \
-        if(SOL_COUNT == 0)                        \
-            return rocblas_status_internal_error; \
+#define CHECK_SOLUTION_FOUND(SOL_COUNT)                                                         \
+    do                                                                                          \
+    {                                                                                           \
+        if(SOL_COUNT == 0)                                                                      \
+        {                                                                                       \
+            rocblas_internal_ostream msg;                                                       \
+            print_if_verbose(msg << "rocBLAS warning: No solution found in hipblaslt. Falling " \
+                                    "back to Tensile backend.\n");                              \
+            return rocblas_status_not_implemented;                                              \
+        }                                                                                       \
     } while(0)
-#define CHECK_RETURNED_WORKSPACE_SIZE(WORKSPACE_SIZE, MAX_WORKSPACE_SIZE)               \
-    do                                                                                  \
-    {                                                                                   \
-        if(WORKSPACE_SIZE > MAX_WORKSPACE_SIZE)                                         \
-        {                                                                               \
-            rocblas_cerr << "Returned workspace size (" << WORKSPACE_SIZE << ") is "    \
-                         << "larger than user allocated(" << MAX_WORKSPACE_SIZE << ")!" \
-                         << " at " __FILE__ ":" << __LINE__ << std::endl;               \
-            return rocblas_status_internal_error;                                       \
-        }                                                                               \
+#define CHECK_RETURNED_WORKSPACE_SIZE(WORKSPACE_SIZE, MAX_WORKSPACE_SIZE)                       \
+    do                                                                                          \
+    {                                                                                           \
+        if(WORKSPACE_SIZE > MAX_WORKSPACE_SIZE)                                                 \
+        {                                                                                       \
+            rocblas_internal_ostream msg;                                                       \
+            print_if_verbose(msg << "Returned workspace size (" << WORKSPACE_SIZE << ") is "    \
+                                 << "larger than user allocated(" << MAX_WORKSPACE_SIZE << ")!" \
+                                 << " at " __FILE__ ":" << __LINE__ << std::endl);              \
+            return rocblas_status_internal_error;                                               \
+        }                                                                                       \
     } while(0)
     /********************************************************************
      * Variable template to map alpha and beta types to compute type    *
      ********************************************************************/
     template <typename T>
     using hipblaslt_alpha_beta_type = std::conditional_t<
-        std::is_same_v<T, rocblas_bfloat16>,
-        float,
-        std::conditional_t<
-            std::is_same_v<T, rocblas_float_complex>,
-            std::complex<float>,
-            std::conditional_t<std::is_same_v<T, rocblas_double_complex>,
-                               std::complex<double>,
-                               std::conditional_t<std::is_same_v<T, int8_t>, int32_t, T>>>>;
+        std::is_same_v<T, rocblas_float_complex>,
+        std::complex<float>,
+        std::conditional_t<std::is_same_v<T, rocblas_double_complex>,
+                           std::complex<double>,
+                           std::conditional_t<std::is_same_v<T, int8_t>, int32_t, T>>>;
 
     /****************************************************************
      * Construct a HipBlasLT GEMM from a RocblasContractionProblem *
@@ -603,6 +608,38 @@ rocblas_status runContractionProblemHipBlasLT(const RocblasContractionProblem<Ti
                                               sizeof(max_workspace_size)),
         HIPBLAS_STATUS_SUCCESS);
     hipblasLtMatmulHeuristicResult_t heuristicResult;
+
+    bool solution_query = algo == rocblas_gemm_algo_solution_index
+                          && prob.flags & rocblas_gemm_flags_check_solution_index;
+    std::vector<hipblasLtMatmulHeuristicResult_t> heuristicResults;
+    if(algo == rocblas_gemm_algo_solution_index && solution_index > 0)
+    {
+        std::vector<int> solution_index_vec(1, solution_index - 1);
+        if(hipblaslt_ext::getAlgosFromIndex(handle, solution_index_vec, heuristicResults)
+           != HIPBLAS_STATUS_SUCCESS)
+        {
+            if(!solution_query)
+            {
+                rocblas_internal_ostream msg;
+                print_if_verbose(
+                    msg << "rocBLAS warning: hipBLASLt cannot find specified solution index!");
+                return rocblas_status_invalid_value;
+            }
+        }
+        if(heuristicResults.empty())
+        {
+            if(!solution_query)
+            {
+                rocblas_internal_ostream msg;
+                print_if_verbose(msg << "rocBLAS warning: No hipBLASLt solution found");
+                return rocblas_status_invalid_value;
+            }
+        }
+        else
+        {
+            heuristicResult = heuristicResults[0];
+        }
+    }
     EXPECT_HIPBLAS_STATUS(hipblasLtMatmulAlgoGetHeuristic(handle,
                                                           matmulDesc,
                                                           matA,
@@ -625,6 +662,80 @@ rocblas_status runContractionProblemHipBlasLT(const RocblasContractionProblem<Ti
     beta                              = tmp;
     if(!prob.strided_batch)
     {
+        int              batch_count = prob.batch_count;
+        std::vector<Ti*> A(batch_count, nullptr);
+        std::vector<Ti*> B(batch_count, nullptr);
+        std::vector<To*> C(batch_count, nullptr);
+        std::vector<To*> D(batch_count, nullptr);
+        if(prob.buffer_offset_a > 0)
+        {
+            std::cout << "Applying buffer offset for A: " << prob.buffer_offset_a << std::endl;
+            THROW_IF_HIP_ERROR(hipMemcpy(
+                (void*)(&A[0]), prob.batch_A, sizeof(void*) * batch_count, hipMemcpyDeviceToHost));
+            for(int batch = 0; batch < batch_count; batch++)
+            {
+                std::cout << "Original A[" << batch << "] pointer: " << A[batch] << std::endl;
+                A[batch] += prob.buffer_offset_a;
+                std::cout << "Adjusted A[" << batch << "] pointer: " << A[batch] << std::endl;
+            }
+
+            THROW_IF_HIP_ERROR(hipMemcpy(const_cast<void*>(static_cast<const void*>(prob.batch_A)),
+                                         (void*)(&A[0]),
+                                         sizeof(void*) * batch_count,
+                                         hipMemcpyHostToDevice));
+        }
+        if(prob.buffer_offset_b > 0)
+        {
+            std::cout << "Applying buffer offset for B: " << prob.buffer_offset_b << std::endl;
+            THROW_IF_HIP_ERROR(hipMemcpy(
+                (void*)(&B[0]), prob.batch_B, sizeof(void*) * batch_count, hipMemcpyDeviceToHost));
+            for(int batch = 0; batch < batch_count; batch++)
+            {
+                std::cout << "Original B[" << batch << "] pointer: " << B[batch] << std::endl;
+                B[batch] += prob.buffer_offset_b;
+                std::cout << "Adjusted B[" << batch << "] pointer: " << B[batch] << std::endl;
+            }
+
+            THROW_IF_HIP_ERROR(hipMemcpy(const_cast<void*>(static_cast<const void*>(prob.batch_B)),
+                                         (void*)(&B[0]),
+                                         sizeof(void*) * batch_count,
+                                         hipMemcpyHostToDevice));
+        }
+        if(prob.buffer_offset_c > 0)
+        {
+            std::cout << "Applying buffer offset for C: " << prob.buffer_offset_c << std::endl;
+            THROW_IF_HIP_ERROR(hipMemcpy(
+                (void*)(&C[0]), prob.batch_C, sizeof(void*) * batch_count, hipMemcpyDeviceToHost));
+            for(int batch = 0; batch < batch_count; batch++)
+            {
+                std::cout << "Original C[" << batch << "] pointer: " << C[batch] << std::endl;
+                C[batch] += prob.buffer_offset_c;
+                std::cout << "Adjusted C[" << batch << "] pointer: " << C[batch] << std::endl;
+            }
+
+            THROW_IF_HIP_ERROR(hipMemcpy(const_cast<void*>(static_cast<const void*>(prob.batch_C)),
+                                         (void*)(&C[0]),
+                                         sizeof(void*) * batch_count,
+                                         hipMemcpyHostToDevice));
+        }
+        if(prob.buffer_offset_d > 0)
+        {
+            std::cout << "Applying buffer offset for D: " << prob.buffer_offset_d << std::endl;
+            THROW_IF_HIP_ERROR(hipMemcpy(
+                (void*)(&D[0]), prob.batch_D, sizeof(void*) * batch_count, hipMemcpyDeviceToHost));
+            for(int batch = 0; batch < batch_count; batch++)
+            {
+                std::cout << "Original D[" << batch << "] pointer: " << D[batch] << std::endl;
+                D[batch] += prob.buffer_offset_d;
+                std::cout << "Adjusted D[" << batch << "] pointer: " << D[batch] << std::endl;
+            }
+
+            THROW_IF_HIP_ERROR(hipMemcpy(const_cast<void*>(static_cast<const void*>(prob.batch_D)),
+                                         (void*)(&D[0]),
+                                         sizeof(void*) * batch_count,
+                                         hipMemcpyHostToDevice));
+        }
+
         EXPECT_HIPBLAS_STATUS(
             hipblasLtMatmul(handle,
                             matmulDesc,
@@ -649,14 +760,14 @@ rocblas_status runContractionProblemHipBlasLT(const RocblasContractionProblem<Ti
         EXPECT_HIPBLAS_STATUS(hipblasLtMatmul(handle,
                                               matmulDesc,
                                               &alpha,
-                                              prob.A,
+                                              prob.A + prob.buffer_offset_a,
                                               matA,
-                                              prob.B,
+                                              prob.B + prob.buffer_offset_b,
                                               matB,
                                               &beta,
-                                              prob.C,
+                                              prob.C + prob.buffer_offset_c,
                                               matC,
-                                              prob.D,
+                                              prob.D + prob.buffer_offset_d,
                                               matD,
                                               &heuristicResult.algo,
                                               workspace,

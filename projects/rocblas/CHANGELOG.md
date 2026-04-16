@@ -7,6 +7,7 @@ rocBLAS documentation is available at
 
 ### Optimized
 * Improved the performance of Level 3 geam for pure transpose scale use cases.
+* Improved the General Batched GEMM performance for hipblaslt backend by leveraging on hipBLASLt General Batched GEMM feature introduced in version 1.3.0.
 
 ## rocBLAS 5.3.0
 

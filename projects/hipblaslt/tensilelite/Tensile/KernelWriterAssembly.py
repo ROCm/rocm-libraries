@@ -4314,15 +4314,10 @@ class KernelWriterAssembly(KernelWriter):
       moduleLoadGeneralBatch.add(SAddCU32(dst=sgpr(stmp+1), src0=sgpr("Address%s+1"%tc), src1=0, comment="Offsetting to the location [Higher half of address]"))
       moduleLoadGeneralBatch.add(SMemLoadInstruction(instType=InstType.INST_B64, dst=sgpr("Srd%s"%tc, 2), base=sgpr(stmp, 2), soffset=0, comment="Load the Matrix Address in the Pointer Array"))
       moduleLoadGeneralBatch.add(SWaitCnt(kmcnt=0, comment="Wait for the Matrix Address Load from the Pointer Array"))
-      if self.states.groOffsetInMacroTile:
-        #if(tc == 'A'):
+      if self.states.groOffsetInMacroTile and ((tc == "A" and not kernel["enableTDMA"]) or (tc == "B" and not kernel["enableTDMB"])):
         prePad1 = int(self.states.srdShiftLeft[tc] * tP["bpeGR"]) # leave room in case we have to pointer shift
         moduleLoadGeneralBatch.add(SSubU32(dst=sgpr("Srd%s+0"%tc), src0=sgpr("Srd%s+0"%tc), src1=prePad1, comment="pre-pad to make room for possible pointer shift"))
-        moduleLoadGeneralBatch.add(SSubBU32(dst=sgpr("Srd%s+1"%tc), src0=sgpr("Srd%s+1"%tc), src1=0, comment="pre-pad to make room for possible pointer shift"))          
-        #if(tc == 'B'):
-          #prePad1 = self.states.srdShiftLeft[tc] * tP["bpeGR"] # leave room in case we have to pointer shift
-          #moduleLoadGeneralBatch.add(SSubU32(dst=sgpr("Srd%s+0"%tc), src0=sgpr("Srd%s+0"%tc), src1=prePad1, comment="pre-pad to make room for possible pointer shift"))
-          #moduleLoadGeneralBatch.add(SSubBU32(dst=sgpr("Srd%s+1"%tc), src0=sgpr("Srd%s+1"%tc), src1=0, comment="pre-pad to make room for possible pointer shift"))            
+        moduleLoadGeneralBatch.add(SSubBU32(dst=sgpr("Srd%s+1"%tc), src0=sgpr("Srd%s+1"%tc), src1=0, comment="pre-pad to make room for possible pointer shift"))                     
       moduleLoadGeneralBatch.add(scalarMultiply64Bpe(tileStart, tileStart, tP["bpeGR"], stmp, "tileStart"))
       moduleLoadGeneralBatch.add(SAddU32(dst=sgpr("Srd%s+0"%tc), src0=sgpr(tileStart+0), src1=sgpr("Srd%s+0"%tc), comment="SRD base = Address+ tileStart0"))
       moduleLoadGeneralBatch.add(SAddCU32(dst=sgpr("Srd%s+1"%tc), src0=sgpr(tileStart+1), src1=sgpr("Srd%s+1"%tc), comment="SRD base = Address+ tileStart1"))
@@ -4335,14 +4330,9 @@ class KernelWriterAssembly(KernelWriter):
       moduleLoadGeneralBatch.add(SMemLoadInstruction(instType=InstType.INST_B64, dst=sgpr("Srd%s"%tc, 2), base=sgpr(stmp, 2), soffset=0, comment="Load the Matrix Address in the Pointer Array"))
       moduleLoadGeneralBatch.add(SWaitCnt(kmcnt=0, comment="Wait for the Matrix Address Load from the Pointer Array"))    
       if self.states.groOffsetInMacroTile:
-        #if(tc == 'A'):
         prePad1 = int(self.states.srdShiftLeft[tc] * tP["bpeGR"]) # leave room in case we have to pointer shift
         moduleLoadGeneralBatch.add(SSubU32(dst=sgpr("Srd%s+0"%tc), src0=sgpr("Srd%s+0"%tc), src1=prePad1, comment="pre-pad to make room for possible pointer shift"))
         moduleLoadGeneralBatch.add(SSubBU32(dst=sgpr("Srd%s+1"%tc), src0=sgpr("Srd%s+1"%tc), src1=0, comment="pre-pad to make room for possible pointer shift"))          
-        #if(tc == 'B'):
-          #prePad1 = self.states.srdShiftLeft[tc] * tP["bpeGR"] # leave room in case we have to pointer shift
-          #moduleLoadGeneralBatch.add(SSubU32(dst=sgpr("Srd%s+0"%tc), src0=sgpr("Srd%s+0"%tc), src1=prePad1, comment="pre-pad to make room for possible pointer shift"))
-          #moduleLoadGeneralBatch.add(SSubBU32(dst=sgpr("Srd%s+1"%tc), src0=sgpr("Srd%s+1"%tc), src1=0, comment="pre-pad to make room for possible pointer shift"))
       moduleLoadGeneralBatch.add(SBranch(labelName = stridedBatchedGemmLoad_End.getLabelName()))
       moduleLoadGeneralBatch.add(stridedBatchedGemmLoad)                     
 
@@ -12108,11 +12098,10 @@ class KernelWriterAssembly(KernelWriter):
     # Keep tmp SGPR usage lean for the common path (same as develop).
     # BAddrInterleave needs additional temporaries for baseCol computation; allocate
     # those *only when enabled* so marginal kernels don't overflow MaxSgpr.
-    with self.allocTmpSgpr(4) as tmpSgprInfo:
+    with self.allocTmpSgpr(3) as tmpSgprInfo:
       tmpS0 = tmpSgprInfo.idx
       tmpS1 = tmpS0+1
-      tmpS2 = tmpS0+2
-      wgMT1 = tmpS0+3
+      wgMT1 = tmpS0+2
 
       # Compute and save the element offset for Index1 in output space.
       # Default is wg1*MT1. Interleave (if enabled) replaces this with baseCol:
@@ -12220,7 +12209,7 @@ class KernelWriterAssembly(KernelWriter):
             bpe = int(self.states.bpr * kernel["ProblemType"]["DestDataType"].numRegisters()) if kernel["_GlobalAccumulation"] == 'MultipleBuffer' and mat =="C" else bpe
             bpe = sgpr(sgprBpe) if sgprBpe else log2(bpe)  # sgprBpe cannot be 0
             if(kernel["GlobalSplitU"] != 0):
-              module.add(SAndB32(dst=sgpr(tmpS2), src0=sgpr("GSU"), src1=hex(0x3FFF), comment="Restore GSU"))
+              module.add(SAndB32(dst=sgpr(tmpS1), src0=sgpr("GSU"), src1=hex(0x3FFF), comment="Restore GSU"))
             # These are constant across all workitems, just add to the SRD:
             if us:
               if i == 0:
@@ -12235,7 +12224,7 @@ class KernelWriterAssembly(KernelWriter):
                   module.add(SMulI32(dst=sgpr(tmpS0), src0=sgpr(tmpS0), src1=sgpr(strideC)))
                 if(i == 2 and (mat == "C" or mat == "D")):
                   if(kernel["GlobalSplitU"] != 0):
-                    module.add(SCmpEQU32(src0=sgpr(tmpS2), src1=1, comment="GSU == 1 ?"))
+                    module.add(SCmpEQU32(src0=sgpr(tmpS1), src1=1, comment="GSU == 1 ?"))
                     module.add(SCBranchSCC0(labelName=multipleBufferChecks.getLabelName()))
                   module.add(SCmpEQU32(src0=sgpr("ArgType"), src1=3, comment="ArgType == 3 for General Batched GEMM"))
                   module.add(SCBranchSCC1(labelName=generalBatchedGemmLoad.getLabelName()))   
@@ -12252,7 +12241,7 @@ class KernelWriterAssembly(KernelWriter):
               strideC = "Stride%s%s"%(mat, self.states.indexChars[i])
               if(i == 2 and (mat == "C" or mat == "D")):
                 if(kernel["GlobalSplitU"] != 0):
-                  module.add(SCmpEQU32(src0=sgpr(tmpS2), src1=1, comment="GSU == 1 ?"))
+                  module.add(SCmpEQU32(src0=sgpr(tmpS1), src1=1, comment="GSU == 1 ?"))
                   if(kernel["_GlobalAccumulation"] == 'MultipleBufferSingleKernel' and mat == "C"):
                     module.add(SCBranchSCC0(labelName=multipleBufferChecks.getLabelName()))
                   else:
@@ -12273,10 +12262,10 @@ class KernelWriterAssembly(KernelWriter):
             if(i == 2 and (mat == "C" or mat == "D")):
               module.add(SBranch(labelName=generalBatchedGemmLoad_End.getLabelName()))
               module.add(generalBatchedGemmLoad)
-              module.add(SMulI32(dst=sgpr(tmpS2), src0=8, src1=coord, comment="Compute stride in bytes into Pointer Array"))
-              module.add(SAddU32(dst=sgpr(tmpS2), src0=sgpr(tmpS2), src1=sgpr("Address%s+0"%mat), comment="Offsetting to the location [Lower half of address]"))
-              module.add(SAddCU32(dst=sgpr(wgMT1), src0=sgpr("Address%s+1"%mat), src1=0, comment="Offsetting to the location [Higher half of address]"))
-              module.add(SMemLoadInstruction(instType=InstType.INST_B64, dst=sgpr(tmpS0, 2), base=sgpr(tmpS2, 2), soffset=0, comment="Load the Matrix Address in the Pointer Array"))
+              module.add(SMulI32(dst=sgpr(tmpS0), src0=8, src1=coord, comment="Compute stride in bytes into Pointer Array"))
+              module.add(SAddU32(dst=sgpr(tmpS0), src0=sgpr(tmpS0), src1=sgpr("Address%s+0"%mat), comment="Offsetting to the location [Lower half of address]"))
+              module.add(SAddCU32(dst=sgpr(tmpS1), src0=sgpr("Address%s+1"%mat), src1=0, comment="Offsetting to the location [Higher half of address]"))
+              module.add(SMemLoadInstruction(instType=InstType.INST_B64, dst=sgpr(tmpS0, 2), base=sgpr(tmpS0, 2), soffset=0, comment="Load the Matrix Address in the Pointer Array"))
               module.add(SWaitCnt(kmcnt=0, comment="Wait for the Matrix Address Load from the Pointer Array"))
               module.add(SAddU32(dst=sgpr("Srd%s+0"%mat), src0=sgpr("Srd%s+0"%mat), src1=sgpr(tmpS0), comment="Offsetting within the Batch Matrix [Lower half of address]"))
               module.add(SAddCU32(dst=sgpr("Srd%s+1"%mat), src0=sgpr("Srd%s+1"%mat), src1=sgpr(tmpS1), comment="Offsetting within the Batch Matrix [Higher half of address]")) 

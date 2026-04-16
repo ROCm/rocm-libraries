@@ -99,12 +99,16 @@ inline rocblaslt_status validateMatmulSwizzleArgs(const rocblaslt_matmul_desc   
 {
     rocblaslt_status status = rocblaslt_status_continue;
     
-    if(scaleAType != RocblasltContractionProblem::ScalingFormat::Scalar || 
-       scaleAType != RocblasltContractionProblem::ScalingFormat::None)
+    if(scaleAType == RocblasltContractionProblem::ScalingFormat::Scalar || 
+       scaleAType == RocblasltContractionProblem::ScalingFormat::None)
+        status = rocblaslt_status_continue;
+    else
         status = rocblaslt_status_invalid_value;
 
-    if(scaleBType != RocblasltContractionProblem::ScalingFormat::Scalar || 
-       scaleBType != RocblasltContractionProblem::ScalingFormat::None)
+    if(scaleBType == RocblasltContractionProblem::ScalingFormat::Scalar || 
+       scaleBType == RocblasltContractionProblem::ScalingFormat::None)
+        status = rocblaslt_status_continue;
+    else
         status = rocblaslt_status_invalid_value;
 
     if(epilogue != ROCBLASLT_EPILOGUE_DEFAULT)
