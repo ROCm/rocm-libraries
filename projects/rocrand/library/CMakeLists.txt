@@ -50,6 +50,7 @@ configure_file(
     @ONLY
 )
 
+# Build
 add_library(rocrand ${rocRAND_HIP_SRCS})
 
 set(SOBOL_PRECOMPUTED_SOURCES
