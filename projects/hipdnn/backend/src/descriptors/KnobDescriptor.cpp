@@ -27,7 +27,7 @@ void KnobDescriptor::finalize()
                   HIPDNN_STATUS_BAD_PARAM,
                   "KnobDescriptor::finalize() failed: Knob ID is not set.");
 
-    THROW_IF_TRUE(_defaultValue.type == hipdnn_data_sdk::data_objects::KnobValue::NONE,
+    THROW_IF_TRUE(_defaultValue.type == hipdnn_flatbuffers_sdk::data_objects::KnobValue::NONE,
                   HIPDNN_STATUS_BAD_PARAM,
                   "KnobDescriptor::finalize() failed: Default value is not set.");
 
@@ -35,7 +35,7 @@ void KnobDescriptor::finalize()
     // Reject mixed-type constraint sets that do not correspond to the default value type.
     switch(_defaultValue.type)
     {
-    case hipdnn_data_sdk::data_objects::KnobValue::IntValue:
+    case hipdnn_flatbuffers_sdk::data_objects::KnobValue::IntValue:
         THROW_IF_TRUE(_minValueDouble.has_value() || _maxValueDouble.has_value(),
                       HIPDNN_STATUS_BAD_PARAM,
                       "KnobDescriptor::finalize() failed: "
@@ -49,7 +49,7 @@ void KnobDescriptor::finalize()
                       "KnobDescriptor::finalize() failed: "
                       "STRING_MAX_LENGTH set on INT64 knob.");
         break;
-    case hipdnn_data_sdk::data_objects::KnobValue::FloatValue:
+    case hipdnn_flatbuffers_sdk::data_objects::KnobValue::FloatValue:
         THROW_IF_TRUE(_minValueInt.has_value() || _maxValueInt.has_value(),
                       HIPDNN_STATUS_BAD_PARAM,
                       "KnobDescriptor::finalize() failed: "
@@ -71,7 +71,7 @@ void KnobDescriptor::finalize()
                       "KnobDescriptor::finalize() failed: "
                       "STRING_MAX_LENGTH set on DOUBLE knob.");
         break;
-    case hipdnn_data_sdk::data_objects::KnobValue::StringValue:
+    case hipdnn_flatbuffers_sdk::data_objects::KnobValue::StringValue:
         THROW_IF_TRUE(_minValueInt.has_value() || _maxValueInt.has_value(),
                       HIPDNN_STATUS_BAD_PARAM,
                       "KnobDescriptor::finalize() failed: "
@@ -123,7 +123,7 @@ void KnobDescriptor::finalize()
     // Validate that the default value satisfies declared constraints.
     switch(_defaultValue.type)
     {
-    case hipdnn_data_sdk::data_objects::KnobValue::IntValue:
+    case hipdnn_flatbuffers_sdk::data_objects::KnobValue::IntValue:
     {
         auto defaultVal = _defaultValue.AsIntValue()->value;
         if(_minValueInt.has_value())
@@ -162,7 +162,7 @@ void KnobDescriptor::finalize()
         }
         break;
     }
-    case hipdnn_data_sdk::data_objects::KnobValue::FloatValue:
+    case hipdnn_flatbuffers_sdk::data_objects::KnobValue::FloatValue:
     {
         auto defaultVal = _defaultValue.AsFloatValue()->value;
         if(_minValueDouble.has_value())
@@ -178,7 +178,7 @@ void KnobDescriptor::finalize()
         }
         break;
     }
-    case hipdnn_data_sdk::data_objects::KnobValue::StringValue:
+    case hipdnn_flatbuffers_sdk::data_objects::KnobValue::StringValue:
     {
         const auto& defaultVal = _defaultValue.AsStringValue()->value;
         if(_stringMaxLength.has_value())
@@ -213,7 +213,7 @@ void KnobDescriptor::finalize()
 // ============================================================================
 
 std::shared_ptr<KnobDescriptor>
-    KnobDescriptor::fromKnobT(const hipdnn_data_sdk::data_objects::KnobT& knobNative)
+    KnobDescriptor::fromKnobT(const hipdnn_flatbuffers_sdk::data_objects::KnobT& knobNative)
 {
     auto knobDesc = std::make_shared<KnobDescriptor>();
 
@@ -239,13 +239,13 @@ std::shared_ptr<KnobDescriptor>
     // Set default value and matching constraint fields based on type
     switch(knobNative.default_value.type)
     {
-    case hipdnn_data_sdk::data_objects::KnobValue::IntValue:
+    case hipdnn_flatbuffers_sdk::data_objects::KnobValue::IntValue:
     {
         auto val = knobNative.default_value.AsIntValue()->value;
         knobDesc->setAttribute(HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE, HIPDNN_TYPE_INT64, 1, &val);
 
         if(knobNative.constraint.type
-           == hipdnn_data_sdk::data_objects::KnobConstraint::IntConstraint)
+           == hipdnn_flatbuffers_sdk::data_objects::KnobConstraint::IntConstraint)
         {
             const auto* c = knobNative.constraint.AsIntConstraint();
             // Only set range bounds when non-zero: {0,0} is the plugin SDK's
@@ -272,13 +272,13 @@ std::shared_ptr<KnobDescriptor>
         }
         break;
     }
-    case hipdnn_data_sdk::data_objects::KnobValue::FloatValue:
+    case hipdnn_flatbuffers_sdk::data_objects::KnobValue::FloatValue:
     {
         auto val = knobNative.default_value.AsFloatValue()->value;
         knobDesc->setAttribute(HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE, HIPDNN_TYPE_DOUBLE, 1, &val);
 
         if(knobNative.constraint.type
-           == hipdnn_data_sdk::data_objects::KnobConstraint::FloatConstraint)
+           == hipdnn_flatbuffers_sdk::data_objects::KnobConstraint::FloatConstraint)
         {
             const auto* c = knobNative.constraint.AsFloatConstraint();
             // Only set range bounds when non-zero: {0.0,0.0} is the plugin SDK's
@@ -293,7 +293,7 @@ std::shared_ptr<KnobDescriptor>
         }
         break;
     }
-    case hipdnn_data_sdk::data_objects::KnobValue::StringValue:
+    case hipdnn_flatbuffers_sdk::data_objects::KnobValue::StringValue:
     {
         const auto& val = knobNative.default_value.AsStringValue()->value;
         knobDesc->setAttribute(HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE,
@@ -302,7 +302,7 @@ std::shared_ptr<KnobDescriptor>
                                val.c_str());
 
         if(knobNative.constraint.type
-           == hipdnn_data_sdk::data_objects::KnobConstraint::StringConstraint)
+           == hipdnn_flatbuffers_sdk::data_objects::KnobConstraint::StringConstraint)
         {
             const auto* c = knobNative.constraint.AsStringConstraint();
             if(c->max_length > 0)
@@ -722,13 +722,13 @@ void KnobDescriptor::getDefaultValueType(hipdnnBackendAttributeType_t attributeT
     int64_t valueType;
     switch(_defaultValue.type)
     {
-    case hipdnn_data_sdk::data_objects::KnobValue::IntValue:
+    case hipdnn_flatbuffers_sdk::data_objects::KnobValue::IntValue:
         valueType = static_cast<int64_t>(HIPDNN_TYPE_INT64);
         break;
-    case hipdnn_data_sdk::data_objects::KnobValue::FloatValue:
+    case hipdnn_flatbuffers_sdk::data_objects::KnobValue::FloatValue:
         valueType = static_cast<int64_t>(HIPDNN_TYPE_DOUBLE);
         break;
-    case hipdnn_data_sdk::data_objects::KnobValue::StringValue:
+    case hipdnn_flatbuffers_sdk::data_objects::KnobValue::StringValue:
         valueType = static_cast<int64_t>(HIPDNN_TYPE_CHAR);
         break;
     default:
@@ -750,13 +750,13 @@ void KnobDescriptor::getDefaultValueType(hipdnnBackendAttributeType_t attributeT
 // Other methods
 // ============================================================================
 
-std::unique_ptr<hipdnn_data_sdk::data_objects::KnobT> KnobDescriptor::toKnobT() const
+std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::KnobT> KnobDescriptor::toKnobT() const
 {
     THROW_IF_FALSE(isFinalized(),
                    HIPDNN_STATUS_NOT_INITIALIZED,
                    "KnobDescriptor::toKnobT() failed: Not finalized.");
 
-    auto knob = std::make_unique<hipdnn_data_sdk::data_objects::KnobT>();
+    auto knob = std::make_unique<hipdnn_flatbuffers_sdk::data_objects::KnobT>();
     knob->knob_id = _knobId;
     knob->description = _description;
     knob->deprecated = _deprecated;
@@ -766,11 +766,11 @@ std::unique_ptr<hipdnn_data_sdk::data_objects::KnobT> KnobDescriptor::toKnobT() 
     // Build constraint based on default value type and set constraint fields
     switch(_defaultValue.type)
     {
-    case hipdnn_data_sdk::data_objects::KnobValue::IntValue:
+    case hipdnn_flatbuffers_sdk::data_objects::KnobValue::IntValue:
         if(_minValueInt.has_value() || _maxValueInt.has_value() || _stride.has_value()
            || !_validValuesInt.empty())
         {
-            hipdnn_data_sdk::data_objects::IntConstraintT intConstraint;
+            hipdnn_flatbuffers_sdk::data_objects::IntConstraintT intConstraint;
             intConstraint.min_value = _minValueInt.value_or(0);
             intConstraint.max_value = _maxValueInt.value_or(0);
             intConstraint.step = _stride.value_or(1);
@@ -779,20 +779,20 @@ std::unique_ptr<hipdnn_data_sdk::data_objects::KnobT> KnobDescriptor::toKnobT() 
         }
         break;
 
-    case hipdnn_data_sdk::data_objects::KnobValue::FloatValue:
+    case hipdnn_flatbuffers_sdk::data_objects::KnobValue::FloatValue:
         if(_minValueDouble.has_value() || _maxValueDouble.has_value())
         {
-            hipdnn_data_sdk::data_objects::FloatConstraintT floatConstraint;
+            hipdnn_flatbuffers_sdk::data_objects::FloatConstraintT floatConstraint;
             floatConstraint.min_value = _minValueDouble.value_or(0.0);
             floatConstraint.max_value = _maxValueDouble.value_or(0.0);
             knob->constraint.Set(floatConstraint);
         }
         break;
 
-    case hipdnn_data_sdk::data_objects::KnobValue::StringValue:
+    case hipdnn_flatbuffers_sdk::data_objects::KnobValue::StringValue:
         if(!_validValuesString.empty() || _stringMaxLength.has_value())
         {
-            hipdnn_data_sdk::data_objects::StringConstraintT stringConstraint;
+            hipdnn_flatbuffers_sdk::data_objects::StringConstraintT stringConstraint;
             stringConstraint.max_length = _stringMaxLength.value_or(0);
             stringConstraint.valid_values = _validValuesString;
             knob->constraint.Set(std::move(stringConstraint));

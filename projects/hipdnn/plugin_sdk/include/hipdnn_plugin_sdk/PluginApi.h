@@ -39,7 +39,8 @@ extern "C" {
 
 /**
  * @defgroup PluginFunctions Plugin API Functions
- * @brief Functions that every plugin must implement.
+ * @brief Functions that define the plugin API. Most are required; optional functions
+ * are marked in their documentation.
  * @{
  */
 
@@ -131,8 +132,9 @@ HIPDNN_PLUGIN_NODISCARD HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t
  *
  * @return A value of type `hipdnnPluginStatus_t` indicating the status of the operation.
  *
- * @note This function is optional. Plugins that do not implement it will continue to work
- *       but will not receive log level updates from the backend.
+ * @note This function is optional for backwards compatibility with plugins built against
+ *       earlier SDK versions. Plugins that do not implement this function will continue
+ *       to work but will not receive log level updates from the backend.
  */
 HIPDNN_PLUGIN_NODISCARD HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t
     hipdnnPluginSetLogLevel(hipdnnSeverity_t level);

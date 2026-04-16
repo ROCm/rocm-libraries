@@ -28,6 +28,8 @@
 
 #include <hip/hip_runtime.h>
 #include <hip/hip_runtime_api.h>
+#include <iostream>
+#include <mutex>
 #include <sstream>
 #include <stdexcept>
 
@@ -102,6 +104,52 @@ namespace TensileLite
 {
     namespace hip
     {
+        inline std::string pciChipIdUnsupportedErrorMessage(hipDeviceProp_t const& prop)
+        {
+            std::ostringstream msg;
+            msg << "\n"
+                << "********************************************************************************\n"
+                << "* FATAL ERROR: hipDeviceAttributePciChipId is not supported!\n"
+                << "*\n"
+                << "* The HIP runtime does not support hipDeviceAttributePciChipId.\n"
+                << "* This attribute is required for device-specific kernel selection.\n"
+                << "*\n"
+                << "* Device: " << prop.name << "\n"
+                << "* Architecture: " << prop.gcnArchName << "\n"
+                << "* HIP Version: " << HIP_VERSION << "\n"
+                << "*\n"
+                << "* Please update to a HIP runtime that supports PCI Chip ID queries,\n"
+                << "* or rebuild with an older version of this code that doesn't require it.\n"
+                << "********************************************************************************\n";
+            return msg.str();
+        }
+
+        inline std::string unregisteredPciChipIdWarningMessage(hipDeviceProp_t const& prop,
+                                                               int                    pciChipId)
+        {
+            std::ostringstream msg;
+            msg << "\n"
+                << "********************************************************************************\n"
+                << "* WARNING: Unregistered PCI Chip ID detected!\n"
+                << "*\n"
+                << "* Device: " << prop.name << "\n"
+                << "* Chip ID: 0x" << std::hex << pciChipId << std::dec << "\n"
+                << "* Architecture: " << prop.gcnArchName << "\n"
+                << "*\n"
+                << "* This chip ID is not registered in Tensile's ChipIdRegistry.\n"
+                << "* Using only fallback kernel selection for the detected architecture.\n"
+                << "********************************************************************************\n";
+            return msg.str();
+        }
+
+        inline void logUnregisteredPciChipIdWarningOnce(hipDeviceProp_t const& prop, int pciChipId)
+        {
+            static std::once_flag warningPrinted;
+            std::call_once(warningPrinted, [&]() {
+                std::cerr << unregisteredPciChipIdWarningMessage(prop, pciChipId) << std::endl;
+            });
+        }
+
         inline void CopyTensorVoid(void*                   dst,
                                    void const*             src,
                                    TensorDescriptor const& desc,
@@ -135,7 +183,7 @@ namespace TensileLite
 
             size_t maxStride
                 = *std::max_element(strides.begin(), strides.begin() + contiguousDimensions);
-            size_t copyBytes = maxStride * sizes.at(contiguousDimensions - 1) * desc.elementBytes();
+            size_t copyBytes = multiplyElementSize(maxStride * sizes.at(contiguousDimensions - 1), desc.elementBytes());
 
             for(size_t idx = 0; idx < copyCount; idx++)
             {
@@ -146,7 +194,7 @@ namespace TensileLite
                               sizes.end());
 
                 auto     beginOffset = desc.index(coord);
-                auto     bytesOffset = desc.elementBytes() * beginOffset;
+                size_t   bytesOffset = multiplyElementSize(beginOffset, desc.elementBytes());
                 uint8_t* dstBytes    = (uint8_t*)dst + bytesOffset;
                 uint8_t* srcBytes    = (uint8_t*)dst + bytesOffset;
 

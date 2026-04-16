@@ -15,13 +15,13 @@
 #include "HipdnnReduceTensorOp.h"
 #include "TensorDescriptor.hpp"
 #include <cstring>
-#include <hipdnn_data_sdk/data_objects/convolution_common_generated.h>
-#include <hipdnn_data_sdk/data_objects/data_types_generated.h>
-#include <hipdnn_data_sdk/data_objects/knob_value_generated.h>
-#include <hipdnn_data_sdk/data_objects/norm_common_generated.h>
-#include <hipdnn_data_sdk/data_objects/pointwise_attributes_generated.h>
-#include <hipdnn_data_sdk/data_objects/reduction_attributes_generated.h>
-#include <hipdnn_data_sdk/data_objects/sdpa_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/convolution_common_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/knob_value_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/norm_common_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/pointwise_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/reduction_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/sdpa_attributes_generated.h>
 #include <memory>
 #include <string>
 #include <type_traits>
@@ -188,26 +188,26 @@ void getScalar(const T& source,
     std::memcpy(arrayOfElements, &source, sizeof(T));
 }
 
-void setDataType(hipdnn_data_sdk::data_objects::DataType& target,
+void setDataType(hipdnn_flatbuffers_sdk::data_objects::DataType& target,
                  hipdnnBackendAttributeType_t attributeType,
                  int64_t elementCount,
                  const void* arrayOfElements,
                  const char* errorPrefix);
 
-void getDataType(hipdnn_data_sdk::data_objects::DataType source,
+void getDataType(hipdnn_flatbuffers_sdk::data_objects::DataType source,
                  hipdnnBackendAttributeType_t attributeType,
                  int64_t requestedElementCount,
                  int64_t* elementCount,
                  void* arrayOfElements,
                  const char* errorPrefix);
 
-void setConvMode(hipdnn_data_sdk::data_objects::ConvMode& target,
+void setConvMode(hipdnn_flatbuffers_sdk::data_objects::ConvMode& target,
                  hipdnnBackendAttributeType_t attributeType,
                  int64_t elementCount,
                  const void* arrayOfElements,
                  const char* errorPrefix);
 
-void getConvMode(hipdnn_data_sdk::data_objects::ConvMode source,
+void getConvMode(hipdnn_flatbuffers_sdk::data_objects::ConvMode source,
                  hipdnnBackendAttributeType_t attributeType,
                  int64_t requestedElementCount,
                  int64_t* elementCount,
@@ -221,13 +221,13 @@ void getOperationType(hipdnnOperationType_ext_t source,
                       void* arrayOfElements,
                       const char* errorPrefix);
 
-void setPointwiseMode(hipdnn_data_sdk::data_objects::PointwiseMode& target,
+void setPointwiseMode(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode& target,
                       hipdnnBackendAttributeType_t attributeType,
                       int64_t elementCount,
                       const void* arrayOfElements,
                       const char* errorPrefix);
 
-void getPointwiseMode(hipdnn_data_sdk::data_objects::PointwiseMode source,
+void getPointwiseMode(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode source,
                       hipdnnBackendAttributeType_t attributeType,
                       int64_t requestedElementCount,
                       int64_t* elementCount,
@@ -263,13 +263,13 @@ void setOptionalScalar(flatbuffers::Optional<T>& target,
 }
 
 // NormFwdPhase is passed as HIPDNN_TYPE_NORM_FWD_PHASE (hipdnnNormFwdPhase_t).
-void setNormFwdPhase(hipdnn_data_sdk::data_objects::NormFwdPhase& target,
+void setNormFwdPhase(hipdnn_flatbuffers_sdk::data_objects::NormFwdPhase& target,
                      hipdnnBackendAttributeType_t attributeType,
                      int64_t elementCount,
                      const void* arrayOfElements,
                      const char* errorPrefix);
 
-void getNormFwdPhase(hipdnn_data_sdk::data_objects::NormFwdPhase source,
+void getNormFwdPhase(hipdnn_flatbuffers_sdk::data_objects::NormFwdPhase source,
                      hipdnnBackendAttributeType_t attributeType,
                      int64_t requestedElementCount,
                      int64_t* elementCount,
@@ -367,39 +367,41 @@ void getTensorDescriptorArray(const std::vector<std::shared_ptr<TensorDescriptor
                               void* arrayOfElements,
                               const char* errorPrefix);
 
-void setDiagonalAlignment(hipdnn_data_sdk::data_objects::DiagonalAlignment& target,
+void setDiagonalAlignment(hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment& target,
                           hipdnnBackendAttributeType_t attributeType,
                           int64_t elementCount,
                           const void* arrayOfElements,
                           const char* errorPrefix);
 
-void getDiagonalAlignment(hipdnn_data_sdk::data_objects::DiagonalAlignment source,
+void getDiagonalAlignment(hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment source,
                           hipdnnBackendAttributeType_t attributeType,
                           int64_t requestedElementCount,
                           int64_t* elementCount,
                           void* arrayOfElements,
                           const char* errorPrefix);
 
-void setAttentionImplementation(hipdnn_data_sdk::data_objects::AttentionImplementation& target,
-                                hipdnnBackendAttributeType_t attributeType,
-                                int64_t elementCount,
-                                const void* arrayOfElements,
-                                const char* errorPrefix);
+void setAttentionImplementation(
+    hipdnn_flatbuffers_sdk::data_objects::AttentionImplementation& target,
+    hipdnnBackendAttributeType_t attributeType,
+    int64_t elementCount,
+    const void* arrayOfElements,
+    const char* errorPrefix);
 
-void getAttentionImplementation(hipdnn_data_sdk::data_objects::AttentionImplementation source,
-                                hipdnnBackendAttributeType_t attributeType,
-                                int64_t requestedElementCount,
-                                int64_t* elementCount,
-                                void* arrayOfElements,
-                                const char* errorPrefix);
+void getAttentionImplementation(
+    hipdnn_flatbuffers_sdk::data_objects::AttentionImplementation source,
+    hipdnnBackendAttributeType_t attributeType,
+    int64_t requestedElementCount,
+    int64_t* elementCount,
+    void* arrayOfElements,
+    const char* errorPrefix);
 
-void setReductionMode(hipdnn_data_sdk::data_objects::ReductionMode& target,
+void setReductionMode(hipdnn_flatbuffers_sdk::data_objects::ReductionMode& target,
                       hipdnnBackendAttributeType_t attributeType,
                       int64_t elementCount,
                       const void* arrayOfElements,
                       const char* errorPrefix);
 
-void getReductionMode(hipdnn_data_sdk::data_objects::ReductionMode source,
+void getReductionMode(hipdnn_flatbuffers_sdk::data_objects::ReductionMode source,
                       hipdnnBackendAttributeType_t attributeType,
                       int64_t requestedElementCount,
                       int64_t* elementCount,
@@ -451,13 +453,13 @@ inline std::string optionalBoolToString(const flatbuffers::Optional<bool>& opt)
 
 /// Deep-copy a KnobValueUnion into another KnobValueUnion.
 /// Used by both KnobDescriptor::toKnobT() and KnobSettingDescriptor::toKnobSettingT().
-void copyKnobValueUnion(const hipdnn_data_sdk::data_objects::KnobValueUnion& src,
-                        hipdnn_data_sdk::data_objects::KnobValueUnion& dst,
+void copyKnobValueUnion(const hipdnn_flatbuffers_sdk::data_objects::KnobValueUnion& src,
+                        hipdnn_flatbuffers_sdk::data_objects::KnobValueUnion& dst,
                         const char* errorPrefix);
 
 /// Set a KnobValueUnion from C-API setAttribute parameters.
 /// Switches on attributeType to store an int64, double, or bounded string.
-void setKnobValueUnion(hipdnn_data_sdk::data_objects::KnobValueUnion& target,
+void setKnobValueUnion(hipdnn_flatbuffers_sdk::data_objects::KnobValueUnion& target,
                        hipdnnBackendAttributeType_t attributeType,
                        int64_t elementCount,
                        const void* arrayOfElements,
@@ -466,7 +468,7 @@ void setKnobValueUnion(hipdnn_data_sdk::data_objects::KnobValueUnion& target,
 
 /// Get a KnobValueUnion into C-API getAttribute output parameters.
 /// Switches on source.type to retrieve an int64, double, or string.
-void getKnobValueUnion(const hipdnn_data_sdk::data_objects::KnobValueUnion& source,
+void getKnobValueUnion(const hipdnn_flatbuffers_sdk::data_objects::KnobValueUnion& source,
                        hipdnnBackendAttributeType_t attributeType,
                        int64_t requestedElementCount,
                        int64_t* elementCount,
@@ -486,7 +488,7 @@ void getKnobValueUnion(const hipdnn_data_sdk::data_objects::KnobValueUnion& sour
 /// Each descriptor calls this after its own tensor null-checks.
 template <typename DataT>
 void validateConvolutionFinalize(const DataT& data,
-                                 hipdnn_data_sdk::data_objects::DataType computeDataType,
+                                 hipdnn_flatbuffers_sdk::data_objects::DataType computeDataType,
                                  const char* className)
 {
     THROW_IF_TRUE(data.pre_padding.empty(),
@@ -501,10 +503,10 @@ void validateConvolutionFinalize(const DataT& data,
     THROW_IF_TRUE(data.dilation.empty(),
                   HIPDNN_STATUS_BAD_PARAM,
                   std::string(className) + "::finalize() failed: dilation not set");
-    THROW_IF_TRUE(computeDataType == hipdnn_data_sdk::data_objects::DataType::UNSET,
+    THROW_IF_TRUE(computeDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET,
                   HIPDNN_STATUS_BAD_PARAM,
                   std::string(className) + "::finalize() failed: compute data type not set");
-    THROW_IF_TRUE(data.conv_mode == hipdnn_data_sdk::data_objects::ConvMode::UNSET,
+    THROW_IF_TRUE(data.conv_mode == hipdnn_flatbuffers_sdk::data_objects::ConvMode::UNSET,
                   HIPDNN_STATUS_BAD_PARAM,
                   std::string(className) + "::finalize() failed: conv_mode not set");
 }
@@ -513,7 +515,7 @@ void validateConvolutionFinalize(const DataT& data,
 /// Called from the default branch of each descriptor's setAttribute switch.
 template <typename DataT>
 void setConvolutionAttribute(DataT& data,
-                             hipdnn_data_sdk::data_objects::DataType& computeDataType,
+                             hipdnn_flatbuffers_sdk::data_objects::DataType& computeDataType,
                              std::string& name,
                              hipdnnBackendAttributeName_t attributeName,
                              hipdnnBackendAttributeType_t attributeType,
@@ -555,7 +557,7 @@ void setConvolutionAttribute(DataT& data,
 /// Called from the default branch of each descriptor's getAttribute switch.
 template <typename DataT>
 void getConvolutionAttribute(const DataT& data,
-                             hipdnn_data_sdk::data_objects::DataType computeDataType,
+                             hipdnn_flatbuffers_sdk::data_objects::DataType computeDataType,
                              const std::string& name,
                              hipdnnOperationType_ext_t operationType,
                              hipdnnBackendAttributeName_t attributeName,
