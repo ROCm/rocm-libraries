@@ -76,7 +76,7 @@ Executable Name                Description
 ``hipblaslt-bench``            Executable to benchmark or test individual functions
 ============================= ========================================================
 
-Common ways to build the dependencies, library, and client:
+Here are some common ways to build the dependencies, library, and client:
 
 .. csv-table::
    :header: "Command","Description"
