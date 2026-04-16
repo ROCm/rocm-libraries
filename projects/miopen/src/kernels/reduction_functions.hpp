@@ -273,13 +273,13 @@ __forceinline__ __device__ void dpp_interleaved_reduction_welford(FloatAccum& te
             /* 7 */ "v_rcp_f32 %5 %2\n" /* prepare for division by n_a + n_b possibly also do v_div_scale_f32?*/ \
             /* 8 */ "v_cmp_eq_f32 vcc %2 0\n"/* Idea: move 0 if %2 is zero for specific lanes -- for the mean, the variance and the count */\
             /* 9 */ "v_cndmask_b32_e64 %5 %5 %2 vcc\n" \
-            /*10 */ "v_mul_f32 %0 %0 %5\n"/* normalize mean; %5 is 1/(n_a + n_b), it's the updated counts */ \
+            /*10 */ "v_mul_f32 %0 %0 %5\n" /* normalize mean; %5 is 1/(n_a + n_b), it's the updated counts */ \
             /*11 */ "v_add_f32 %1 %1 %1 " dpp "\n" /* part of the variance calculation -- sum up the two partitions, add the deltas in the next steps */ \
             /*12 */ "v_mul_f32 %5 %3 %5\n"\
             /*13 */ /* NOP is not necessary here, it's needed when the first instruction is non-DPP and the second one is, thus there should be no dependency between 11 and 14 or data corruption risk between 12 and 14 */ \
-            /*14 */ "v_fma_f32 %1 %4 %5 %1\n" /* %4, %5 and %1 should already have been properly offset with the required number of lanes for the reduciton */ \
+            /*14 */ "v_fma_f32 %1 %4 %5 %1\n" /* %4, %5 and %1 should already have been properly offset with the required number of lanes for the reduction */ \
             /*15 */ "v_nop\n"\
-            /*16 */ "v_nop\n"/* NOPs necessary because the next instr needs %4 and has DPP, dependency between 14 and 1 */\
+            /*16 */ "v_nop\n" /* NOPs necessary because the next instr needs %4 and has DPP, dependency between 14 and 1 */\
             
     __asm__ volatile(
         "s_nop 4\n" /* necessary because it's not guaranteed that the compiler puts a VALU instruction that writes EXEC */
@@ -303,7 +303,7 @@ __forceinline__ __device__ void dpp_interleaved_reduction_welford(FloatAccum& te
     // this can lead to bugs in some test cases, specifically when the 
     // vcc register is used to store some value needed after the execution 
     // of this block. After adding this register to the clobbers, the three
-    // input parameters to this funciton no longer need to be volatie.
+    // input parameters to this function no longer need to be volatile.
 
     // clang-format on
 }

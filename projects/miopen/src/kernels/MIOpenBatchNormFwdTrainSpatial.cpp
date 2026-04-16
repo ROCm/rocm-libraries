@@ -386,7 +386,7 @@ struct MIOpenBatchNormFwdTrainSpatialImpl<1, FpType, FpPrecType, FpAccumType>
         __shared__ FpAccumType lcl_data_c[lcl_data_size];
 
         // The assembly implementation is disabled due to a pending PR that
-        // implements warp-level intrinsics for the reducitons in the kernels.
+        // implements warp-level intrinsics for the reductions in the kernels.
         // Changes from it should be combined with the lds_reduce2_welford method,
         // which should be the cleanest and most efficient implementation.
         __builtin_amdgcn_sched_barrier(0);
