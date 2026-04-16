@@ -76,6 +76,10 @@ jobs:
       - name: Extract first project
         id: extract
         run: |
+          # pr_detect_changed_subtrees.py returns a string of project names
+          # separated by "\n", i.e. "projects/rocprim\nprojects/hipblaslt\nshared/tensile"
+          # head -n1: extracts the first project, i.e. "projects/rocprim"
+          # cut -d'/' -f2:  cuts the "projects/" prefix, leaving "rocprim" for project_name
           project=$(echo "${{ steps.detect.outputs.subtrees }}" | head -n1)
           echo "project=$project" >> $GITHUB_OUTPUT
           echo "project_name=$(echo "$project" | cut -d'/' -f2)" >> $GITHUB_OUTPUT
