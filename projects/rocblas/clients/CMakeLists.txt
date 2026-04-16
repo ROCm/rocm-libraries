@@ -347,6 +347,17 @@ if( BUILD_CLIENTS_BENCHMARKS OR BUILD_CLIENTS_TESTS)
     set( BLIS_CPP ../common/blis_interface.cpp )
   endif()
 
+  # One token for ROCBLAS_REFERENCE_LIB (runtime log stringification). BLAS_LIBRARY may be an
+  # imported target or a CMake list when falling back to BLAS_LIBRARIES; the latter breaks
+  # target_compile_definitions if passed through verbatim.
+  if( TARGET "${BLAS_LIBRARY}" )
+    set( ROCBLAS_REFERENCE_LIB_LABEL "${BLAS_LIBRARY}" )
+  elseif( BLAS_LIBRARIES )
+    list( GET BLAS_LIBRARIES 0 ROCBLAS_REFERENCE_LIB_LABEL )
+  else()
+    set( ROCBLAS_REFERENCE_LIB_LABEL "${BLAS_LIBRARY}" )
+  endif()
+
   message(STATUS "Linking reference BLAS LIB: ${BLAS_LIBRARY}")
 
   if ( WARN_NOT_ILP64_PREFERRED )

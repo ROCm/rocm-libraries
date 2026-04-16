@@ -164,7 +164,7 @@ if ( ROCBLAS_REFERENCE_BLAS_DEFINES )
   target_compile_definitions( rocblas_clients_common PRIVATE ${ROCBLAS_REFERENCE_BLAS_DEFINES} )
   target_compile_definitions( rocblas_clients_testing_common PRIVATE ${ROCBLAS_REFERENCE_BLAS_DEFINES} )
 endif()
-target_compile_definitions( rocblas_clients_common PRIVATE ROCBLAS_REFERENCE_LIB=${BLAS_LIBRARY} )
+target_compile_definitions( rocblas_clients_common PRIVATE ROCBLAS_REFERENCE_LIB=${ROCBLAS_REFERENCE_LIB_LABEL} )
 
 
 # target is not linked as OBJECT library but we want any interface flags from dependencies, e.g. COMMON_LINK_LIBS may bring OpenMP
