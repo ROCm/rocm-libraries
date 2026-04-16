@@ -703,16 +703,26 @@ TYPED_TEST(MathFloatTypes, Max)
     EXPECT_EQ(max(b, a), b);
 }
 
-TYPED_TEST(MathFloatTypes, MaxWithNaN)
+TYPED_TEST(MathFloatTypes, Fmax)
+{
+    using T = TypeParam;
+
+    const T a(1.0f);
+    const T b(2.0f);
+    EXPECT_EQ(fmax(a, b), b);
+    EXPECT_EQ(fmax(b, a), b);
+}
+
+TYPED_TEST(MathFloatTypes, FmaxWithNaN)
 {
     using T = TypeParam;
     using Traits = PortableTypeTraits<T>;
 
     const T a(1.0f);
     const T nan = Traits::fromBits(Traits::NAN_BITS);
-    EXPECT_EQ(max(a, nan), a);
-    EXPECT_EQ(max(nan, a), a);
-    EXPECT_TRUE(isnan(max(nan, nan)));
+    EXPECT_EQ(fmax(a, nan), a);
+    EXPECT_EQ(fmax(nan, a), a);
+    EXPECT_TRUE(isnan(fmax(nan, nan)));
 }
 
 TYPED_TEST(MathFloatTypes, Min)
@@ -725,16 +735,26 @@ TYPED_TEST(MathFloatTypes, Min)
     EXPECT_EQ(min(b, a), a);
 }
 
-TYPED_TEST(MathFloatTypes, MinWithNaN)
+TYPED_TEST(MathFloatTypes, Fmin)
+{
+    using T = TypeParam;
+
+    const T a(1.0f);
+    const T b(2.0f);
+    EXPECT_EQ(fmin(a, b), a);
+    EXPECT_EQ(fmin(b, a), a);
+}
+
+TYPED_TEST(MathFloatTypes, FminWithNaN)
 {
     using T = TypeParam;
     using Traits = PortableTypeTraits<T>;
 
     const T a(1.0f);
     const T nan = Traits::fromBits(Traits::NAN_BITS);
-    EXPECT_EQ(min(a, nan), a);
-    EXPECT_EQ(min(nan, a), a);
-    EXPECT_TRUE(isnan(min(nan, nan)));
+    EXPECT_EQ(fmin(a, nan), a);
+    EXPECT_EQ(fmin(nan, a), a);
+    EXPECT_TRUE(isnan(fmin(nan, nan)));
 }
 
 TYPED_TEST(MathFloatTypes, Sqrt)
