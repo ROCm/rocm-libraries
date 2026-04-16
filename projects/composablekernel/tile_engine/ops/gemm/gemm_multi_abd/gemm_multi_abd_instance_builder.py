@@ -140,8 +140,8 @@ class GemmMultiABDKernelBuilder(GemmKernelBuilder):
         lines.append("")
 
         # Base types (convenience aliases for the common type within each group)
-        lines.append("using ABaseDataType = A0DataType;")
-        lines.append("using BBaseDataType = B0DataType;")
+        lines.append("using ADataType = A0DataType;")
+        lines.append("using BDataType = B0DataType;")
         lines.append("using DBaseDataType = D0DataType;")
         lines.append("")
 
@@ -165,24 +165,35 @@ class GemmMultiABDKernelBuilder(GemmKernelBuilder):
         lines.append("")
 
         # Base layouts
-        lines.append("using ABaseLayout = A0Layout;")
-        lines.append("using BBaseLayout = B0Layout;")
-        lines.append("using DBaseLayout = D0Layout;")
+        lines.append("using ALayout = A0Layout;")
+        lines.append("using BLayout = B0Layout;")
+        lines.append("using DLayout = D0Layout;")
         lines.append("")
 
         # Tensor count constants
-        lines.append(f"static constexpr std::size_t NumATensors = {self.num_a_tensors};")
-        lines.append(f"static constexpr std::size_t NumBTensors = {self.num_b_tensors};")
-        lines.append(f"static constexpr std::size_t NumDTensors = {self.num_d_tensors};")
+        lines.append(
+            f"static constexpr std::size_t NumATensors = {self.num_a_tensors};"
+        )
+        lines.append(
+            f"static constexpr std::size_t NumBTensors = {self.num_b_tensors};"
+        )
+        lines.append(
+            f"static constexpr std::size_t NumDTensors = {self.num_d_tensors};"
+        )
         lines.append("")
 
         # Element-wise function types
-        lines.append(f"using AElementWiseFn = ck_tile::element_wise::{self.a_elementwise_function};")
-        lines.append(f"using BElementWiseFn = ck_tile::element_wise::{self.b_elementwise_function};")
-        lines.append(f"using CDEElementWiseFn = ck_tile::element_wise::{self.cde_elementwise_function};")
+        lines.append(
+            f"using AElementWiseFn = ck_tile::element_wise::{self.a_elementwise_function};"
+        )
+        lines.append(
+            f"using BElementWiseFn = ck_tile::element_wise::{self.b_elementwise_function};"
+        )
+        lines.append(
+            f"using CDEElementWiseFn = ck_tile::element_wise::{self.cde_elementwise_function};"
+        )
 
         return "\n" + "\n".join(lines) + "\n"
-
 
     def populate_initialization(self, base_pipeline_map, pipeline):
         instance_code = f"""  
@@ -344,19 +355,19 @@ class GemmMultiABDKernelBuilder(GemmKernelBuilder):
         using GemmEpilogue = ck_tile::DefaultGemm2DEpilogue<EpilogueProblem>;"""
         return instance_code
 
-
     def _generate_all_individual(self, num_workers=None):
         if num_workers is None:
             num_workers = min(multiprocessing.cpu_count(), 8)
 
         tile_configs = self._get_tile_configs()
         trait_combos = self._generate_trait_combinations()
-        warp_size = _validation_utils.get_warp_size(self.gpu_target)
 
         work_items = []
         for tile_config in tile_configs:
             for trait_combo in trait_combos:
-                (pipeline, _epilogue, scheduler, pad_m, pad_n, pad_k, persistent) = trait_combo
+                (pipeline, _epilogue, scheduler, pad_m, pad_n, pad_k, persistent) = (
+                    trait_combo
+                )
 
                 work_items.append(
                     (
@@ -377,11 +388,15 @@ class GemmMultiABDKernelBuilder(GemmKernelBuilder):
                     )
                 )
 
-        print(f"Generating {len(work_items)} individual kernel files using {num_workers} workers...")
+        print(
+            f"Generating {len(work_items)} individual kernel files using {num_workers} workers..."
+        )
         print(f"  Tile configs: {len(tile_configs)}")
         print(f"  Trait combinations: {len(trait_combos)}")
         print(f"  Total kernels: {len(work_items)}")
-        print(f"  NumA={self.num_a_tensors}, NumB={self.num_b_tensors}, NumD={self.num_d_tensors}")
+        print(
+            f"  NumA={self.num_a_tensors}, NumB={self.num_b_tensors}, NumD={self.num_d_tensors}"
+        )
 
         if work_items:
             print("  First work item example:")
@@ -392,7 +407,9 @@ class GemmMultiABDKernelBuilder(GemmKernelBuilder):
         kernel_list = []
         completed = 0
 
-        with concurrent.futures.ProcessPoolExecutor(max_workers=num_workers) as executor:
+        with concurrent.futures.ProcessPoolExecutor(
+            max_workers=num_workers
+        ) as executor:
             print(f"  Submitting {len(work_items)} tasks to executor...")
             future_to_item = {
                 executor.submit(_generate_single_kernel_individual, item): item
@@ -403,7 +420,9 @@ class GemmMultiABDKernelBuilder(GemmKernelBuilder):
             for future in concurrent.futures.as_completed(future_to_item):
                 completed += 1
                 if completed % 100 == 0 or completed == len(work_items):
-                    print(f"  Progress: {completed}/{len(work_items)} kernels generated")
+                    print(
+                        f"  Progress: {completed}/{len(work_items)} kernels generated"
+                    )
                 try:
                     result = future.result()
                     if result:
@@ -414,7 +433,9 @@ class GemmMultiABDKernelBuilder(GemmKernelBuilder):
 
         kernel_list.sort(key=lambda x: x[0])
         self._generate_cmake_individual_targets(kernel_list)
-        print(f"Generated {len(kernel_list)} individual kernel files in {self.working_path}")
+        print(
+            f"Generated {len(kernel_list)} individual kernel files in {self.working_path}"
+        )
 
 
 def _generate_single_kernel_individual(work_item):
@@ -456,7 +477,7 @@ def _generate_single_kernel_individual(work_item):
         )
         simplified_name = kernel_name
         if simplified_name.startswith("gemm_multi_abd_"):
-            simplified_name = simplified_name[len(kernel_name_prefix) + 1:]
+            simplified_name = simplified_name[len(kernel_name_prefix) + 1 :]
 
         header_file = working_path / f"gemm_multi_abd_single_{simplified_name}.hpp"
         with open(header_file, "w") as f:
@@ -474,38 +495,63 @@ def main():
     parser.add_argument("--working_path", required=True, help="Working directory path")
     parser.add_argument("--gpu_target", required=True, help="GPU target architecture")
     parser.add_argument("--datatype", required=True, choices=["fp16"], help="Data type")
-    parser.add_argument("--layout", required=True, choices=["rcrr"],
-                        help="Matrix layout (4 chars: A, B, E, D)")
-    parser.add_argument("--a_elementwise_function", default="PassThrough",
-                        help="Element-wise function for A tensors")
-    parser.add_argument("--b_elementwise_function", default="PassThrough",
-                        help="Element-wise function for B tensors")
-    parser.add_argument("--cde_elementwise_function", default="PassThrough",
-                        help="Element-wise function for CDE")
-    parser.add_argument("--num_a_tensors", type=int, default=2,
-                        help="Number of A tensors (>=1)")
-    parser.add_argument("--num_b_tensors", type=int, default=2,
-                        help="Number of B tensors (>=1)")
-    parser.add_argument("--num_d_tensors", type=int, default=2,
-                        help="Number of D tensors (>=1)")
+    parser.add_argument(
+        "--layout",
+        required=True,
+        choices=["rcrr"],
+        help="Matrix layout (4 chars: A, B, E, D)",
+    )
+    parser.add_argument(
+        "--a_elementwise_function",
+        default="PassThrough",
+        help="Element-wise function for A tensors",
+    )
+    parser.add_argument(
+        "--b_elementwise_function",
+        default="PassThrough",
+        help="Element-wise function for B tensors",
+    )
+    parser.add_argument(
+        "--cde_elementwise_function",
+        default="PassThrough",
+        help="Element-wise function for CDE",
+    )
+    parser.add_argument(
+        "--num_a_tensors", type=int, default=2, help="Number of A tensors (>=1)"
+    )
+    parser.add_argument(
+        "--num_b_tensors", type=int, default=2, help="Number of B tensors (>=1)"
+    )
+    parser.add_argument(
+        "--num_d_tensors", type=int, default=2, help="Number of D tensors (>=1)"
+    )
     parser.add_argument("--config_json", help="Configuration JSON file")
     parser.add_argument("--num_workers", type=int, help="Number of parallel workers")
-    parser.add_argument("--gen_all_individual", action="store_true",
-                        help="Generate individual kernel files")
-    parser.add_argument("--gen_single", action="store_true",
-                        help="Generate a single kernel file")
+    parser.add_argument(
+        "--gen_all_individual",
+        action="store_true",
+        help="Generate individual kernel files",
+    )
+    parser.add_argument(
+        "--gen_single", action="store_true", help="Generate a single kernel file"
+    )
     parser.add_argument("--kernel_name", help="Kernel name for single generation")
     parser.add_argument("--tile_config", help="Tile configuration string")
     parser.add_argument("--trait_combo", help="Trait combination string")
-    parser.add_argument("--list_kernels", action="store_true",
-                        help="List kernel configurations without generating files")
+    parser.add_argument(
+        "--list_kernels",
+        action="store_true",
+        help="List kernel configurations without generating files",
+    )
 
     args = parser.parse_args()
 
     assert args.datatype in ["fp16"], f"Invalid datatype: {args.datatype}"
 
     layout_parts = args.layout.lower()
-    assert len(layout_parts) == 4, f"Invalid layout string: {args.layout} (must be 4 characters)"
+    assert len(layout_parts) == 4, (
+        f"Invalid layout string: {args.layout} (must be 4 characters)"
+    )
     assert layout_parts[0] in ["r", "c"] and layout_parts[1] in ["r", "c"]
     assert layout_parts[2] == "r" and layout_parts[3] == "r"
 
@@ -514,11 +560,15 @@ def main():
     assert args.num_d_tensors >= 1, "num_d_tensors must be >= 1"
 
     valid_functions = ["PassThrough", "AddScale", "MultiDMultiply", "MultiDAdd"]
-    for fn_name, fn_val in [("a_elementwise_function", args.a_elementwise_function),
-                            ("b_elementwise_function", args.b_elementwise_function),
-                            ("cde_elementwise_function", args.cde_elementwise_function)]:
+    for fn_name, fn_val in [
+        ("a_elementwise_function", args.a_elementwise_function),
+        ("b_elementwise_function", args.b_elementwise_function),
+        ("cde_elementwise_function", args.cde_elementwise_function),
+    ]:
         if fn_val not in valid_functions:
-            raise ValueError(f"Invalid {fn_name}: {fn_val}. Valid: {', '.join(valid_functions)}")
+            raise ValueError(
+                f"Invalid {fn_name}: {fn_val}. Valid: {', '.join(valid_functions)}"
+            )
 
     kernel_name_prefix = "gemm_multi_abd"
     builder = GemmMultiABDKernelBuilder(
@@ -540,7 +590,9 @@ def main():
         builder._list_kernels()
     elif args.gen_single:
         if not args.kernel_name or not args.tile_config or not args.trait_combo:
-            parser.error("--gen_single requires --kernel_name, --tile_config, and --trait_combo")
+            parser.error(
+                "--gen_single requires --kernel_name, --tile_config, and --trait_combo"
+            )
 
         tile_parts = args.tile_config.split("_")
         tile_dims = tile_parts[0].split("x")
@@ -548,9 +600,14 @@ def main():
         warp_tile_dims = tile_parts[2].split("x")
 
         tile_config = {
-            "tile_m": int(tile_dims[0]), "tile_n": int(tile_dims[1]), "tile_k": int(tile_dims[2]),
-            "warp_m": int(warp_dims[0]), "warp_n": int(warp_dims[1]), "warp_k": int(warp_dims[2]),
-            "warp_tile_m": int(warp_tile_dims[0]), "warp_tile_n": int(warp_tile_dims[1]),
+            "tile_m": int(tile_dims[0]),
+            "tile_n": int(tile_dims[1]),
+            "tile_k": int(tile_dims[2]),
+            "warp_m": int(warp_dims[0]),
+            "warp_n": int(warp_dims[1]),
+            "warp_k": int(warp_dims[2]),
+            "warp_tile_m": int(warp_tile_dims[0]),
+            "warp_tile_n": int(warp_tile_dims[1]),
             "warp_tile_k": int(warp_tile_dims[2]),
         }
 
@@ -561,7 +618,9 @@ def main():
     elif args.gen_all_individual:
         builder._generate_all_individual(args.num_workers)
     else:
-        parser.error("Must specify one of: --list_kernels, --gen_all_individual, or --gen_single")
+        parser.error(
+            "Must specify one of: --list_kernels, --gen_all_individual, or --gen_single"
+        )
 
 
 if __name__ == "__main__":

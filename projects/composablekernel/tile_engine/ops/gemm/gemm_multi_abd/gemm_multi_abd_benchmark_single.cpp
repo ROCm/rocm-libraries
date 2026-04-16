@@ -16,9 +16,11 @@
 
 // The kernel header is included via the compile command line with -include flag
 // It defines SelectedKernel struct and KERNEL_NAME
-// DataTypeTraits are defined in gemm_multi_abd_common.hpp
 
-// Create argument parser
+// Create argument parser for multi ABD
+// Multi ABD uses stride_as/stride_bs/stride_e (vectors/different naming)
+// instead of the shared create_args stride_a/stride_b/stride_c,
+// so a custom parser is necessary.
 inline auto create_args(int argc, char* argv[])
 {
     ck_tile::ArgParser arg_parser;
@@ -73,15 +75,15 @@ inline auto create_args(int argc, char* argv[])
 
 void benchmark_single(const ck_tile::ArgParser& arg_parser)
 {
-    // Build vectors for dtypes (all A tensors share ABaseDataType, etc.)
-    std::vector<std::string> dtype_as(NumATensors, DataTypeTraits<ABaseDataType>::name);
-    std::vector<std::string> dtype_bs(NumBTensors, DataTypeTraits<BBaseDataType>::name);
-    std::vector<std::string> dtype_ds(NumDTensors, DataTypeTraits<DBaseDataType>::name);
+    // Build vectors for dtypes (all A tensors share ADataType, etc.)
+    std::vector<std::string> dtype_as(NumATensors, ck_tile::DataTypeTraits<ADataType>::name);
+    std::vector<std::string> dtype_bs(NumBTensors, ck_tile::DataTypeTraits<BDataType>::name);
+    std::vector<std::string> dtype_ds(NumDTensors, ck_tile::DataTypeTraits<DBaseDataType>::name);
 
     // Build vectors for layouts
-    std::vector<std::string> layout_as(NumATensors, std::string(ABaseLayout::name));
-    std::vector<std::string> layout_bs(NumBTensors, std::string(BBaseLayout::name));
-    std::vector<std::string> layout_ds(NumDTensors, std::string(DBaseLayout::name));
+    std::vector<std::string> layout_as(NumATensors, std::string(ALayout::name));
+    std::vector<std::string> layout_bs(NumBTensors, std::string(BLayout::name));
+    std::vector<std::string> layout_ds(NumDTensors, std::string(DLayout::name));
 
     // Build vectors for strides (same default stride for all tensors in each group)
     std::vector<int> stride_as(NumATensors, arg_parser.get_int("stride_as"));
@@ -99,8 +101,8 @@ void benchmark_single(const ck_tile::ArgParser& arg_parser)
                                 dtype_as,
                                 dtype_bs,
                                 dtype_ds,
-                                std::string(DataTypeTraits<AccDataType>::name),
-                                std::string(DataTypeTraits<EDataType>::name),
+                                std::string(ck_tile::DataTypeTraits<AccDataType>::name),
+                                std::string(ck_tile::DataTypeTraits<EDataType>::name),
                                 layout_as,
                                 layout_bs,
                                 layout_ds,
@@ -109,16 +111,16 @@ void benchmark_single(const ck_tile::ArgParser& arg_parser)
                                 std::string(BElementWiseFn::name),
                                 std::string(CDEElementWiseFn::name)};
 
-    Setting setting{arg_parser.get_int("warmup"),
-                    arg_parser.get_int("repeat"),
-                    arg_parser.get_bool("timer"),
-                    arg_parser.get_int("verify"),
-                    arg_parser.get_int("init"),
-                    arg_parser.get_bool("log"),
-                    arg_parser.get_str("csv_filename"),
-                    arg_parser.get_bool("flush_cache"),
-                    arg_parser.get_int("rotating_count"),
-                    arg_parser.get_bool("json_output")};
+    Settings setting{arg_parser.get_int("warmup"),
+                     arg_parser.get_int("repeat"),
+                     arg_parser.get_bool("timer"),
+                     arg_parser.get_int("verify"),
+                     arg_parser.get_int("init"),
+                     arg_parser.get_bool("log"),
+                     arg_parser.get_str("csv_filename"),
+                     arg_parser.get_bool("flush_cache"),
+                     arg_parser.get_int("rotating_count"),
+                     arg_parser.get_bool("json_output")};
 
     auto& profiler = GemmMultiABDProfiler::instance(setting);
 
