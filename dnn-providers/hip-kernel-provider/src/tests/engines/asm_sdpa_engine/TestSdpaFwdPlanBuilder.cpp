@@ -7,6 +7,7 @@
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 
+#include "GraphTest.hpp"
 #include "HipKernelHandle.hpp"
 #include "HipKernelSettings.hpp"
 #include "engines/asm_sdpa_engine/plans/SdpaFwdPlanBuilder.hpp"
@@ -34,24 +35,6 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableReturnsFalseForNonSdpaGraph)
 
     EXPECT_FALSE(_planBuilder.isApplicable(_handle, graphWrapper));
 }
-
-struct GraphTest
-{
-    std::shared_ptr<flatbuffers::DetachedBuffer> buffer;
-    std::string message;
-
-    GraphTest(flatbuffers::FlatBufferBuilder&& builder, std::string inMessage)
-        : buffer(std::make_shared<flatbuffers::DetachedBuffer>(builder.Release()))
-        , message(std::move(inMessage))
-    {
-    }
-
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper() const
-    {
-        return hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(buffer->data(),
-                                                                          buffer->size());
-    }
-};
 
 auto createSdpaFwdGraph(const std::vector<int64_t>& dims = {4, 8, 256, 128},
                         hipdnn_flatbuffers_sdk::data_objects::DataType dataType

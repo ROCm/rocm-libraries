@@ -7,6 +7,7 @@
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 
+#include "GraphTest.hpp"
 #include "HipKernelHandle.hpp"
 #include "HipKernelSettings.hpp"
 #include "engines/asm_sdpa_engine/plans/SdpaBwdPlanBuilder.hpp"
@@ -22,23 +23,6 @@ class TestSdpaBwdPlanBuilder : public ::testing::Test
 protected:
     SdpaBwdPlanBuilder _planBuilder;
     HipKernelHandle _handle;
-};
-
-struct GraphTest
-{
-    std::shared_ptr<flatbuffers::DetachedBuffer> buffer;
-    std::string message;
-
-    GraphTest(flatbuffers::FlatBufferBuilder&& builder, std::string inMessage)
-        : buffer(std::make_shared<flatbuffers::DetachedBuffer>(builder.Release()))
-        , message(std::move(inMessage))
-    {
-    }
-
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graphWrapper() const
-    {
-        return hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper(buffer->data(), buffer->size());
-    }
 };
 
 // Custom backward graph builder with BF16 tensors and FP32 stats by default
