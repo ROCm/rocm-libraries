@@ -275,7 +275,7 @@ struct BlockFmhaPipelineQRKSVS
         constexpr auto gemm_0_config =
             BlockGemm0::Policy::template GetWarpGemmMWarpNWarp<Problem>();
         using Gemm0WarpGemm           = remove_cvref_t<decltype(gemm_0_config.template at<0>())>;
-        constexpr index_t kGemm0WarpK = Gemm0WarpGemm::WarpGemmAttribute::Impl::kK;
+        constexpr index_t kGemm0WarpK = Gemm0WarpGemm::kK;
         constexpr index_t kGemm0KItersPerBlock = kK0 / kGemm0WarpK;
         constexpr bool kCanUsePartialGemm0Tail =
             kPadHeadDimQ && kIsQKGemm0V2 && (kGemm0KItersPerBlock > 1);
