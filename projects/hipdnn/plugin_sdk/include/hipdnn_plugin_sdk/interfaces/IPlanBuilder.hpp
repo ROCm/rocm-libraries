@@ -49,9 +49,10 @@ public:
      * @return true if this plan builder can handle the graph, false otherwise.
      */
     // NOLINTNEXTLINE(portability-template-virtual-member-function)
-    virtual bool isApplicable(const THandle& handle,
-                              const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph)
-        const = 0;
+    virtual bool
+        isApplicable(const THandle& handle,
+                     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
+        = 0;
 
     /**
      * @brief Returns the maximum workspace size required for the given graph.
@@ -62,10 +63,11 @@ public:
      * @return The maximum workspace size in bytes.
      */
     // NOLINTNEXTLINE(portability-template-virtual-member-function)
-    virtual size_t getMaxWorkspaceSize(
-        const THandle& handle,
-        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
-        const TSettings& executionSettings) const = 0;
+    virtual size_t
+        getMaxWorkspaceSize(const THandle& handle,
+                            const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
+                            const TSettings& executionSettings) const
+        = 0;
 
     /**
      * @brief Initializes execution settings from an engine configuration.
