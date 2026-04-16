@@ -57,8 +57,7 @@ if(WIN32)
                    "${PROJECT_BINARY_DIR}/library/include/rocrand/rocrand_in.rc"
 		   @ONLY)
     target_sources(rocrand PRIVATE "${PROJECT_BINARY_DIR}/library/include/rocrand/rocrand_in.rc")
-endif()	   
-
+endif()
 
 set(SOBOL_PRECOMPUTED_SOURCES
     "src/rocrand_scrambled_sobol32_precomputed"
