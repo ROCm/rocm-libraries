@@ -50,15 +50,7 @@ configure_file(
     @ONLY
 )
 
-# Build
 add_library(rocrand ${rocRAND_HIP_SRCS})
-
-#if(WIN32)
-#    configure_file("${PROJECT_SOURCE_DIR}/library/include/rocrand/rocrand_in.rc.in"
-#                   "${PROJECT_BINARY_DIR}/library/include/rocrand/rocrand_in.rc"
-#                   @ONLY)
-#    target_sources(rocrand PRIVATE "${PROJECT_BINARY_DIR}/library/include/rocrand/rocrand_in.rc")
-#endif()
 
 set(SOBOL_PRECOMPUTED_SOURCES
     "src/rocrand_scrambled_sobol32_precomputed"
@@ -155,25 +147,17 @@ endif()
 
 # install library to C:\hipSDK\bin
 if (WIN32)
-    # comment1
     install (TARGETS rocrand DESTINATION "${CMAKE_INSTALL_PREFIX}/bin")
-	# comment 2
     if (BUILD_TEST)
-	    # comment 3
 	    add_custom_command(
-		    # comment 4
-		    TARGET rocrand # comment 44
-			# comment 345
-		    POST_BUILD # comment 444
-			# comment 1234
+		    TARGET rocrand
+		    POST_BUILD
 		    COMMAND ${CMAKE_COMMAND} -E copy
 			    $<TARGET_FILE:rocrand>
 			    ${PROJECT_BINARY_DIR}/test/$<TARGET_FILE_NAME:rocrand>
 	    )
     endif()
-	# comment 4
     if (BUILD_BENCHMARK)
-	    # comment 5
 	    add_custom_command(
 		    TARGET rocrand
 		    POST_BUILD
