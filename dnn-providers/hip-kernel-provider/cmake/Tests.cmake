@@ -23,8 +23,23 @@ if(HIPKERNELPROVIDER_ENABLE_COVERAGE)
     )
 endif()
 
-# Internal helper function to record, configure, and register a ctest test target.
+# ~~~
+# Internal helper function to record, configure, and register a ctest test target. Assumes that the
+# test target is a gtest executable, setting up:
+# - Test name validation tracking (adds to global dependency and executable path lists)
+# - RPATH settings for relocatable test executables
+# - Installation rules for test binaries
+# - CTest registration with appropriate labels (e.g. unit / integration test labels)
+#
+# Parameters:
+#   APPEND_FUNCTION_SUFFIX - Primary label to apply to the test (e.g., "unit_test", "integration_test", "test")
+#   TARGET - Name of the test executable target (must already exist)
+#   WORKING_DIR - Working directory for test execution
+#   EXTRA_LABELS - (Optional) Additional labels to apply to the test (semicolon-separated list)
+# ~~~
 function(_add_test_target_internal APPEND_FUNCTION_SUFFIX TARGET WORKING_DIR)
+    # Parse optional extra labels from remaining arguments
+    set(EXTRA_LABELS ${ARGN})
     set(TARGET_EXE ${TARGET})
 
     if(CMAKE_EXECUTABLE_SUFFIX)
@@ -57,23 +72,41 @@ function(_add_test_target_internal APPEND_FUNCTION_SUFFIX TARGET WORKING_DIR)
 
     install(TARGETS ${TARGET} RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 
+    # Combine primary label with any extra labels
+    set(ALL_LABELS ${APPEND_FUNCTION_SUFFIX})
+    if(EXTRA_LABELS)
+        list(APPEND ALL_LABELS ${EXTRA_LABELS})
+    endif()
+
     add_test(NAME ${TARGET} COMMAND ${TARGET} WORKING_DIRECTORY ${WORKING_DIR})
-    set_tests_properties(${TARGET} PROPERTIES LABELS ${APPEND_FUNCTION_SUFFIX})
+    set_tests_properties(${TARGET} PROPERTIES LABELS "${ALL_LABELS}")
 
     if(COVERAGE_ENVIRONMENT)
         set_tests_properties(${TARGET} PROPERTIES ENVIRONMENT "${COVERAGE_ENVIRONMENT}")
     endif()
-endfunction()
+endfunction() # _add_test_target_internal
 
+# ~~~
 # Adds a unit test target
+#
+# Usage:
+#   add_unit_test_target(TARGET WORKING_DIR [LABELS label1 label2 ...])
+# ~~~
 function(add_unit_test_target TARGET WORKING_DIR)
-    _add_test_target_internal(unit_test ${TARGET} ${WORKING_DIR})
-endfunction()
+    cmake_parse_arguments(ARG "" "" "LABELS" ${ARGN})
+    _add_test_target_internal(unit_test ${TARGET} ${WORKING_DIR} ${ARG_LABELS})
+endfunction() # add_unit_test_target
 
+# ~~~
 # Adds an integration test target
+#
+# Usage:
+#   add_integration_test_target(TARGET WORKING_DIR [LABELS label1 label2 ...])
+# ~~~
 function(add_integration_test_target TARGET WORKING_DIR)
-    _add_test_target_internal(integration_test ${TARGET} ${WORKING_DIR})
-endfunction()
+    cmake_parse_arguments(ARG "" "" "LABELS" ${ARGN})
+    _add_test_target_internal(integration_test ${TARGET} ${WORKING_DIR} ${ARG_LABELS})
+endfunction() # add_integration_test_target
 
 # Finalizes and creates all of the test targets
 function(finalize_test_targets)
