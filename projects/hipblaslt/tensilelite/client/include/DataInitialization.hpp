@@ -2419,8 +2419,8 @@ namespace TensileLite
                 Float4x2 value;
             } x;
 
-            uint8_t val0 = static_cast<uint8_t>(rand() % 15);
-            uint8_t val1 = static_cast<uint8_t>(rand() % 15);
+            uint8_t val0 = static_cast<uint8_t>(rand() % 16);
+            uint8_t val1 = static_cast<uint8_t>(rand() % 16);
             x.bits       = (val1 << 4) | val0;
             return x.value;
         }

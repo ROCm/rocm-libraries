@@ -95,6 +95,9 @@ namespace TensileLite
 
             size_t m_benchmarkRun = 0;
             bool   m_runOnce      = false;
+
+            std::vector<std::vector<size_t>> m_originalProblemSizes;
+            size_t                           m_currentProblemIdx = 0;
         };
     } // namespace Client
 } // namespace TensileLite

@@ -394,7 +394,10 @@ def checkConstStride(constStrideMap, keyIdx):
   return finalVal
 
 
-def problemSizeParams(problemType, problem, factorDim):
+def _ceilTo(val, multiple):
+    return ((val + multiple - 1) // multiple) * multiple
+
+def problemSizeParams(problemType, problem, factorDim, macroTile=None):
 
     numIndices = len(problemType.indices)
     rv = []
@@ -461,8 +464,25 @@ def problemSizeParams(problemType, problem, factorDim):
             "Invalid number of problem type indices: {0} - Indices: {1}, problemSize: {2}".format(len(problem.sizes), numIndices,
             ', '.join(map(str, problem.sizes))))
 
-    problemSizeArg = ('problem-size', ','.join(map(str, problem.sizes[:numIndices])))
+    sizes = list(problem.sizes[:numIndices])
+    originalSizes = None
+    if macroTile is not None:
+        originalSizes = list(sizes)
+        mt0, mt1 = macroTile
+        padM = _ceilTo(sizes[0], mt0)
+        padN = _ceilTo(sizes[1], mt1)
+        if padM != sizes[0] or padN != sizes[1]:
+            sizes[0] = padM
+            sizes[1] = padN
+            if cstrides and cstrides[1] != -1:
+                cstrides[1] = max(cstrides[1], padM)
+            if dstrides and dstrides[1] != -1:
+                dstrides[1] = max(dstrides[1], padM)
+
+    problemSizeArg = ('problem-size', ','.join(map(str, sizes)))
     rv.insert(0, problemSizeArg)
+    if originalSizes is not None:
+        rv.append(('original-problem-size', ','.join(map(str, originalSizes))))
 
     rv.append(('a-strides', ",".join(map(str, astrides))))
     rv.append(('b-strides', ",".join(map(str, bstrides))))
@@ -551,7 +571,7 @@ def pruneModeName(mode):
     if mode == 5: return 'Prune0X0X'
     if mode == 6: return 'Prune00XX'
 
-def writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs, activationArgs, icacheFlushArgs, problemType, sourceDir, codeObjectFiles, resultsFileName, parametersFilePath, deviceId: int, gfxName: str, libraryFile=None, probSolMap={}):
+def writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs, activationArgs, icacheFlushArgs, problemType, sourceDir, codeObjectFiles, resultsFileName, parametersFilePath, deviceId: int, gfxName: str, libraryFile=None, probSolMap={}, macroTile=None):
 
     assert os.path.exists(sourceDir), f"sourceDir={sourceDir} does not exist"
 
@@ -622,7 +642,7 @@ def writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs
 
         probIdx = 0
         for problem in problemSizes.problems:
-            for key,value in problemSizeParams(problemType, problem, factorDimArgs.factorDims):
+            for key,value in problemSizeParams(problemType, problem, factorDimArgs.factorDims, macroTile):
                 param(key,value)
             if probIdx in probSolMap:
                 solutionIdx = probSolMap[probIdx]
@@ -729,7 +749,8 @@ def writeClientConfig(
       gfxName: str,
       configBase = "ClientParameters",
       libraryFile = None,
-      probSolMap = {}
+      probSolMap = {},
+      macroTile = None
     ):
 
     sourceDir = os.path.join(stepBaseDir, "source")
@@ -749,7 +770,7 @@ def writeClientConfig(
       resultsFileName = os.path.join(stepBaseDir, "../Data", stepName+".csv")
 
     newSolution = next(iter(newLibrary.solutions.values()))
-    writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs, activationArgs, icacheFlushArgs, newSolution.problemType, sourceDir, codeObjectFiles, resultsFileName, filename, deviceId, gfxName, libraryFile, probSolMap)
+    writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs, activationArgs, icacheFlushArgs, newSolution.problemType, sourceDir, codeObjectFiles, resultsFileName, filename, deviceId, gfxName, libraryFile, probSolMap, macroTile)
 
     return filename
 

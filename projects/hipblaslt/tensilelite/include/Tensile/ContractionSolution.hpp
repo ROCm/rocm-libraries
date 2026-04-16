@@ -59,6 +59,8 @@ namespace TensileLite
         X_MACRO(AddressB) \
         X_MACRO(AddressC) \
         X_MACRO(AddressD) \
+        X_MACRO(AddressScaleA) \
+        X_MACRO(AddressScaleB) \
         X_MACRO(StrideA0) \
         X_MACRO(StrideA1) \
         X_MACRO(StrideB0) \
@@ -67,14 +69,18 @@ namespace TensileLite
         X_MACRO(StrideC1) \
         X_MACRO(StrideD0) \
         X_MACRO(StrideD1) \
-        X_MACRO(Alpha) \
-        X_MACRO(Beta) \
-        X_MACRO(SplitK) \
-        X_MACRO(OutputBF16) \
+        X_MACRO(StrideScaleA0) \
+        X_MACRO(StrideScaleA1) \
+        X_MACRO(StrideScaleB0) \
+        X_MACRO(StrideScaleB1) \
         X_MACRO(StrideA0Bytes) \
         X_MACRO(StrideB0Bytes) \
         X_MACRO(StrideC0Bytes) \
         X_MACRO(StrideD0Bytes) \
+        X_MACRO(Alpha) \
+        X_MACRO(Beta) \
+        X_MACRO(SplitK) \
+        X_MACRO(OutputBF16) \
         X_MACRO(Padding) \
         X_MACRO(DebugPattern)
 
@@ -85,7 +91,7 @@ namespace TensileLite
         #undef X_MACRO
         COUNT,
     };
-    
+
     std::string toString(CustomArgSemantic arg);
     CustomArgSemantic fromStringCustomArgSemantic(std::string& str);
     std::ostream& operator<<(std::ostream& stream, const CustomArgSemantic& t);

@@ -61,6 +61,14 @@ namespace TensileLite
                          || m_printTensorRef || m_printTensorBias || m_printTensorAmaxD;
 
             m_enabled = m_elementsToValidate != 0 || m_printAny;
+
+            if(args.count("original-problem-size"))
+            {
+                auto const& parsed
+                    = args["original-problem-size"].as<std::vector<std::vector<size_t>>>();
+                if(!parsed.empty())
+                    m_originalProblemSizes = parsed;
+            }
         }
 
         bool ReferenceValidator::needMoreBenchmarkRuns() const
@@ -485,13 +493,51 @@ namespace TensileLite
                     throw std::runtime_error("Unrecognized output tensor.");
                 }
 
+                TensorDescriptor const* validationTensor = &tensor;
+                TensorDescriptor        slicedTensor;
+
+                if(static_cast<ContractionProblemGemm::TENSOR>(i)
+                       == ContractionProblemGemm::TENSOR::D
+                   && m_currentProblemIdx < m_originalProblemSizes.size())
+                {
+                    auto const& origSizes = m_originalProblemSizes[m_currentProblemIdx];
+                    if(origSizes.size() >= 2
+                       && (origSizes[0] != tensor.sizes()[0]
+                           || origSizes[1] != tensor.sizes()[1]))
+                    {
+                    auto newSizes = tensor.sizes();
+                    newSizes[0]   = origSizes[0];
+                    newSizes[1]   = origSizes[1];
+                        slicedTensor = TensorDescriptor(tensor.getName().c_str(),
+                                                        tensor.dataType(),
+                                                        newSizes.begin(),
+                                                        newSizes.end(),
+                                                        tensor.strides().begin(),
+                                                        tensor.strides().end());
+                        slicedTensor.setAsOutput(tensor.isOutput());
+                        validationTensor = &slicedTensor;
+
+                        if(m_elementsToValidate > 0
+                           && m_elementsToValidate
+                                  < slicedTensor.totalLogicalElements())
+                            validationStride = NextPrime(
+                                slicedTensor.totalAllocatedElements()
+                                / m_elementsToValidate);
+                    }
+                }
+
                 if(Debug::Instance().printTensorInfo())
-                    std::cout << "Validating tensor " << tensor.getName() << ", cpu pointer "
-                              << refPtr << ", gpu pointer " << resPtr
+                    std::cout << "Validating tensor " << validationTensor->getName()
+                              << ", cpu pointer " << refPtr << ", gpu pointer " << resPtr
                               << ", size = " << result.maxElements[i] << std::endl;
-                
-                rv &= checkResults(
-                    tensor, refPtr, resPtr, result.maxElements[i], result.gpu, validationStride, threshold);
+
+                rv &= checkResults(*validationTensor,
+                                   refPtr,
+                                   resPtr,
+                                   result.maxElements[i],
+                                   result.gpu,
+                                   validationStride,
+                                   threshold);
             }
             return rv;
         }
@@ -845,7 +891,10 @@ namespace TensileLite
             m_errorInSolution = false;
         }
 
-        void ReferenceValidator::postProblem() {}
+        void ReferenceValidator::postProblem()
+        {
+            m_currentProblemIdx++;
+        }
 
         void ReferenceValidator::finalizeReport() {}
 

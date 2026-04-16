@@ -300,6 +300,9 @@ namespace TensileLite
                 ("problem-size,p",           vector_default_empty<std::string>(), "Specify a problem size.  Comma-separated list of "
                                                                                   "sizes, in the order of the Einstein notation.")
 
+                ("original-problem-size",   vector_default_empty<std::string>(), "Original problem sizes before macrotile padding. "
+                                                                                  "When present, validation uses these sizes to slice output.")
+
                 ("prob-sol-map",             vector_default_empty<std::string>(), "[probIdx, solIdx]")
 
                 ("a-strides",                vector_default_empty<std::string>(), "Unspecified means default stride "
@@ -853,6 +856,7 @@ namespace TensileLite
             fix_data_types(args);
 
             parse_arg_ints(args, "problem-size");
+            parse_arg_ints(args, "original-problem-size");
             parse_arg_ints(args, "a-strides");
             parse_arg_ints(args, "b-strides");
             parse_arg_ints(args, "c-strides");
@@ -974,6 +978,8 @@ int main(int argc, const char* argv[])
 
     std::shared_ptr<DataInitialization> dataInit;
     {
+        // Re-seed before data init: HIP runtime init above may consume rand() non-deterministically
+        srand(seed);
         ScopedTimer timer("data_init_setup");
         dataInit = std::make_shared<DataInitialization>(args, problemFactory);
     }

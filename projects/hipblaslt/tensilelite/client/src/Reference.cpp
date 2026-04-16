@@ -2409,6 +2409,13 @@ namespace TensileLite
                     problem, inputs, elementsToValidate);
             }
 #endif //TENSILE_USE_FP4
+#if defined(TENSILE_USE_FP4) && defined(TENSILE_USE_BF16)
+            case TypedGemm_F4_B_S::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_F4_B_S, float>::SolveCPU(
+                    problem, inputs, elementsToValidate);
+            }
+#endif // defined(TENSILE_USE_FP4) && defined(TENSILE_USE_BF16)
 #if defined(TENSILE_USE_FP4) && defined(TENSILE_USE_FP6)
             case TypedGemm_F4F6_S_S::TypeId():
             {

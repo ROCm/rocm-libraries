@@ -135,6 +135,8 @@ namespace TensileLite
             case rocisa::DataType::E8:
             case rocisa::DataType::E5M3:
                 return 8;
+            case rocisa::DataType::Float4:
+                return 4;
             default:
                 throw std::runtime_error("unsupported datatype");
             }
@@ -377,6 +379,10 @@ namespace TensileLite
             case rocisa::DataType::E5M3:
                 MiK  = 32;
                 MiKv = 8;
+                break;
+            case rocisa::DataType::Float4:
+                MiK  = 32;
+                MiKv = 16;
                 break;
             default:
                 throw std::runtime_error("unsupported datatype for swizzling");
@@ -2113,28 +2119,47 @@ namespace TensileLite
                 if(needSwizzle)
                 {
                     using Tensor = Tensor::Manipulation::Tensor;
-                    // currently, if A then it means MiM = 16, if B then it means MiN = 16
                     size_t MiM_N = 16, MiK = 0, MiKv = 0, PackK = 0;
                     calculateKforSwizzling(desc.dataType(), MiK, MiKv, PackK);
-                    auto                          unrolledSize = desc.sizes()[0];
-                    auto                          tiledSize    = desc.sizes()[1];
+                    auto unrolledSize = desc.sizes()[0];
+                    auto tiledSize    = desc.sizes()[1];
+
+                    bool  isSubByte     = (desc.elementBytes() < 1.0f);
+                    float effectiveElem = isSubByte ? 1.0f : desc.elementBytes();
+                    size_t effUnrolled  = isSubByte
+                        ? multiplyElementSize(unrolledSize, desc.elementBytes())
+                        : unrolledSize;
+                    size_t effMiK  = isSubByte
+                        ? size_t(MiK * PackK * desc.elementBytes()) : MiK;
+                    size_t effMiKv = isSubByte
+                        ? size_t(MiKv * PackK * desc.elementBytes()) : MiKv;
+                    size_t effPackK = isSubByte ? size_t(1) : PackK;
+
                     ::Tensor::Manipulation::Shape paddedShape{
                         ((tiledSize / MiM_N) + !!(tiledSize % MiM_N)) * MiM_N,
-                        (unrolledSize / (MiK * PackK) + !!(unrolledSize % (MiK * PackK))) * MiK
-                            * PackK};
+                        (effUnrolled / (effMiK * effPackK)
+                         + !!(effUnrolled % (effMiK * effPackK)))
+                            * effMiK * effPackK};
                     auto swizzleKey
                         = std::make_tuple(toBitWidth(desc.dataType()), unrolledSize, tiledSize);
+
+                    auto flatToNativeElems = [&](size_t flatSize) -> size_t {
+                        return isSubByte
+                            ? size_t(flatSize / desc.elementBytes())
+                            : flatSize;
+                    };
 
                     if(g_swizzleCache.count(swizzleKey))
                     {
                         if(swizzleKey != g_swizzleCache.back())
                         {
                             Tensor& permuted = g_swizzleCache.at(swizzleKey);
-                            ptr              = copyInputBuffers(desc,
-                                                   p.gpuInput.valid.get(),
-                                                   permuted.as<void>(),
-                                                   permuted.getDesc().flattenSize(),
-                                                   hipMemcpyHostToDevice);
+                            ptr = copyInputBuffers(
+                                desc,
+                                p.gpuInput.valid.get(),
+                                permuted.as<void>(),
+                                flatToNativeElems(permuted.getDesc().flattenSize()),
+                                hipMemcpyHostToDevice);
                         }
                         else
                         {
@@ -2143,25 +2168,25 @@ namespace TensileLite
                     }
                     else
                     {
-                        auto tmpTensor = Tensor({tiledSize, unrolledSize}, desc.elementBytes());
-
-                        memcpy(
-                            tmpTensor.as<void>(), p.cpuInput.valid.get(), tmpTensor.getNumBytes());
-                        //Temporary hack
+                        auto tmpTensor = Tensor({tiledSize, effUnrolled}, effectiveElem);
+                        memcpy(tmpTensor.as<void>(),
+                               p.cpuInput.valid.get(),
+                               tmpTensor.getNumBytes());
                         uint64_t padVal{};
                         auto     paddedTensor = ::Tensor::Manipulation::pad(
-                            tmpTensor, paddedShape, &padVal, tmpTensor.getElementSize());
+                            tmpTensor, paddedShape, &padVal, effectiveElem);
                         paddedTensor.reshape({paddedShape[0] / MiM_N,
                                               MiM_N,
-                                              paddedShape[1] / (MiK * PackK),
-                                              MiK / MiKv,
-                                              MiKv * PackK});
+                                              paddedShape[1] / (effMiK * effPackK),
+                                              effMiK / effMiKv,
+                                              effMiKv * effPackK});
                         Tensor permuted = permute(paddedTensor, {0, 2, 3, 1, 4});
-                        ptr             = copyInputBuffers(desc,
-                                               p.gpuInput.valid.get(),
-                                               permuted.as<void>(),
-                                               permuted.getDesc().flattenSize(),
-                                               hipMemcpyHostToDevice);
+                        ptr             = copyInputBuffers(
+                            desc,
+                            p.gpuInput.valid.get(),
+                            permuted.as<void>(),
+                            flatToNativeElems(permuted.getDesc().flattenSize()),
+                            hipMemcpyHostToDevice);
                         g_swizzleCache.emplace(swizzleKey, std::move(permuted));
                     }
                 }

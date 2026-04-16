@@ -63,7 +63,7 @@ namespace TensileLite
         };
         return CustomArgSemanticStrings[static_cast<int>(arg)];
     }
-    
+
     CustomArgSemantic fromStringCustomArgSemantic(std::string& str)
     {
         static const std::map<std::string, CustomArgSemantic> CustomArgSemanticMap = {
@@ -71,7 +71,7 @@ namespace TensileLite
             CustomArgSemantic_MACRO
             #undef X_MACRO
         };
-        
+
         auto it = CustomArgSemanticMap.find(str);
         if (it == CustomArgSemanticMap.end())
             throw std::runtime_error(concatenate("Invalid CustomArgSemantic value: ", str));
@@ -1740,7 +1740,13 @@ namespace TensileLite
                     break;
                 case CustomArgSemantic::SplitK:
                 {
-                    uint32_t splitK = (sizeMapping.globalSplitU > 0) ? sizeMapping.globalSplitU : 0;
+                    uint32_t gsu = sizeMapping.globalSplitU;
+                    uint32_t splitK = 0;
+                    if(gsu > 1)
+                    {
+                        while(gsu >>= 1)
+                            splitK++;
+                    }
                     rv.args.appendCustomType("SplitK", splitK, arg.type);
                     break;
                 }
@@ -1773,6 +1779,42 @@ namespace TensileLite
                     rv.args.template append<uint32_t>("DebugPattern", debugPattern);
                     ++debugPattern;
                     break;
+                case CustomArgSemantic::AddressScaleA:
+                    rv.args.template append<void const*>("AddressScaleA", inputs.mxsa);
+                    break;
+                case CustomArgSemantic::AddressScaleB:
+                    rv.args.template append<void const*>("AddressScaleB", inputs.mxsb);
+                    break;
+                case CustomArgSemantic::StrideScaleA0:
+                {
+                    size_t scaleStride = problem.boundSize(0) / problem.mxBlockA();
+                    rv.args.appendCustomType("StrideScaleA0", scaleStride, arg.type);
+                    break;
+                }
+                case CustomArgSemantic::StrideScaleA1:
+                {
+                    auto const& t = problem.mxsa();
+                    size_t batchStride = 1;
+                    for(size_t i = 0; i < t.dimensions(); i++)
+                        batchStride *= t.sizes()[i];
+                    rv.args.appendCustomType("StrideScaleA1", batchStride, arg.type);
+                    break;
+                }
+                case CustomArgSemantic::StrideScaleB0:
+                {
+                    size_t scaleStride = problem.boundSize(0) / problem.mxBlockB();
+                    rv.args.appendCustomType("StrideScaleB0", scaleStride, arg.type);
+                    break;
+                }
+                case CustomArgSemantic::StrideScaleB1:
+                {
+                    auto const& t = problem.mxsb();
+                    size_t batchStride = 1;
+                    for(size_t i = 0; i < t.dimensions(); i++)
+                        batchStride *= t.sizes()[i];
+                    rv.args.appendCustomType("StrideScaleB1", batchStride, arg.type);
+                    break;
+                }
                 default:
                     throw std::runtime_error(concatenate("Invalid kernel argument type: ", arg));
             }

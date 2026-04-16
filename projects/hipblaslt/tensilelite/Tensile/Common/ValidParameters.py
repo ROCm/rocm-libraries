@@ -119,6 +119,7 @@ def makeValidMFMA():
     validMFMA["B8"] = validMFMA["F8"]
     validMFMA["F8B8"] = validMFMA["F8"]
     validMFMA["B8F8"] = validMFMA["F8"]
+    validMFMA["F4"] = [[32, 32, 64, 1], [16, 16, 128, 1]]
     validMFMA["F8N"] = [[32, 32, 16, 1], [16, 16, 32, 1]]
     validMFMA["B8N"] = validMFMA["F8N"]
     validMFMA["F8B8N"] = validMFMA["F8N"]
