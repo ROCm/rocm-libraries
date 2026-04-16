@@ -3,6 +3,7 @@
 
 add_executable(hipdnn_integration_tests_unit_tests
     main.cpp
+    TestPlatformUtils.cpp
     TestTestConfig.cpp
     TestTestSettings.cpp
     TestGpuReferenceGraphExecutor.cpp
@@ -20,6 +21,7 @@ target_link_libraries(hipdnn_integration_tests_unit_tests
         hipdnn_plugin_sdk
         GTest::gtest
         Threads::Threads
+        $<$<PLATFORM_ID:Windows>:shlwapi>
 )
 
 target_compile_options(hipdnn_integration_tests_unit_tests
