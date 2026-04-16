@@ -12,13 +12,21 @@ add_library(
     hip/HipKernel.cpp
     hip/HipProgram.cpp
     ${KERNEL_GENERATED_SOURCES}
-    engines/plans/BatchnormPlanBuilder.cpp
-    engines/plans/BatchnormFwdInferencePlan.cpp
-    engines/plans/BatchnormFwdInferenceWithVariancePlan.cpp
-    engines/plans/BatchnormApplicabilityChecks.cpp
+    engines/plans/batchnorm/BatchnormPlanBuilder.cpp
+    engines/plans/batchnorm/BatchnormFwdInferencePlan.cpp
+    engines/plans/batchnorm/BatchnormFwdInferenceWithVariancePlan.cpp
+    engines/plans/batchnorm/BatchnormFwdTrainingPlan.cpp
+    engines/plans/batchnorm/BatchnormApplicabilityChecks.cpp
     engines/plans/RMSnorm/RMSnormPlanBuilder.cpp
     engines/plans/RMSnorm/RMSnormFwdPlan.cpp
     engines/plans/RMSnorm/RMSnormApplicabilityChecks.cpp
+    engines/plans/RMSnorm/RMSnormBwdPlan.cpp
+    engines/plans/RMSnorm/RMSnormBwdPlanBuilder.cpp
+    engines/plans/layernorm/LayernormApplicabilityChecks.cpp
+    engines/plans/layernorm/LayernormFwdPlan.cpp
+    engines/plans/layernorm/LayernormPlanBuilder.cpp
+    engines/plans/layernorm/LayernormUtilities.cpp
+    engines/plans/ApplicabilityChecks.cpp
 )
 if(ENABLE_ASM_SDPA_ENGINE)
     add_subdirectory(engines/asm_sdpa_engine)

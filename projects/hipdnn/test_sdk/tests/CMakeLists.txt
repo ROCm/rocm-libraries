@@ -27,6 +27,7 @@ add_executable(
     utilities/TestCpuFpReferenceUtilities.cpp
     utilities/TestCpuFpReferenceValidation.cpp
     utilities/TestCpuTypeUtilities.cpp
+    utilities/TestSdkFrontendTypeConversions.cpp
     utilities/TestCpuReferencePointwise.cpp
     utilities/TestDynamicTolerancesCommon.cpp
     utilities/TestDynamicTolerancesConv.cpp
