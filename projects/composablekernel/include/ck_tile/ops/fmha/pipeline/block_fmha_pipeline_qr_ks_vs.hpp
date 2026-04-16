@@ -205,9 +205,9 @@ struct BlockFmhaPipelineQRKSVS
                const VScaleDramBlockWindowTmp&
                    v_scale_dram_block_window_tmp, // N1*(K1/kVScaleGranularity) tile
                const float sink_v,
-               const index_t valid_k0_loops        = kQKHeaddim / kK0,
-               const index_t valid_last_k0_columns = kK0,
-               const index_t valid_n1_columns      = kN1) const
+               const index_t valid_k0_loops,
+               const index_t valid_last_k0_columns,
+               const index_t valid_n1_columns) const
     {
         static_assert(
             std::is_same_v<QDataType, remove_cvref_t<typename QDramBlockWindowTmp::DataType>> &&
@@ -1222,6 +1222,94 @@ struct BlockFmhaPipelineQRKSVS
               typename BiasDramBlockWindowTmp,
               typename RandValDramBlockWindowTmp,
               typename LSEDramBlockWindowTmp,
+              typename QElementFunction,
+              typename KElementFunction,
+              typename VElementFunction,
+              typename BiasElementFunction,
+              typename LSEElementFunction,
+              typename SAccElementFunction,
+              typename PComputeElementFunction,
+              typename OAccElementFunction,
+              typename PositionEncoding,
+              typename AttentionVariantParams,
+              typename BlockIndices,
+              typename QScaleDramBlockWindowTmp,
+              typename KScaleDramBlockWindowTmp,
+              typename VScaleDramBlockWindowTmp>
+    CK_TILE_HOST_DEVICE auto
+    operator()(const QDramBlockWindowTmp& q_dram_block_window_tmp, // M0*K0 tile
+               const QElementFunction& q_element_func,
+               const KDramBlockWindowTmp& k_dram_block_window_tmp, // N0*K0 tile
+               const KElementFunction& k_element_func,
+               const VDramBlockWindowTmp& v_dram_block_window_tmp, // N1*K1 tile
+               const VElementFunction& v_element_func,
+               const BiasDramBlockWindowTmp& bias_dram_block_window_tmp, // M0*N0 tile
+               const BiasElementFunction& bias_element_func,
+               RandValDramBlockWindowTmp& randval_dram_block_window_tmp,
+               LSEDramBlockWindowTmp& lse_dram_window_tmp, // M0*1 tile
+               const LSEElementFunction& lse_element_func,
+               const SAccElementFunction& s_acc_element_func,
+               const PComputeElementFunction& p_compute_element_func,
+               const OAccElementFunction& o_acc_element_func,
+               FmhaMask mask,
+               PositionEncoding position_encoding,
+               float scale_s,
+               const AttentionVariant& variant,
+               const AttentionVariantParams& variant_params,
+               const BlockIndices& block_indices,
+               void* smem_ptr,
+               DropoutType& dropout,
+               const float* k_descale_ptr,
+               const float* v_descale_ptr,
+               const index_t block_scale_size_kv,
+               const QScaleDramBlockWindowTmp&
+                   q_scale_dram_block_window_tmp, // M0*(K0/kQKScaleGranularity) tile
+               const KScaleDramBlockWindowTmp&
+                   k_scale_dram_block_window_tmp, // N0*(K0/kQKScaleGranularity) tile
+               const VScaleDramBlockWindowTmp&
+                   v_scale_dram_block_window_tmp, // N1*(K1/kVScaleGranularity) tile
+               const float sink_v) const
+    {
+        return operator()(q_dram_block_window_tmp,
+                          q_element_func,
+                          k_dram_block_window_tmp,
+                          k_element_func,
+                          v_dram_block_window_tmp,
+                          v_element_func,
+                          bias_dram_block_window_tmp,
+                          bias_element_func,
+                          randval_dram_block_window_tmp,
+                          lse_dram_window_tmp,
+                          lse_element_func,
+                          s_acc_element_func,
+                          p_compute_element_func,
+                          o_acc_element_func,
+                          mask,
+                          position_encoding,
+                          scale_s,
+                          variant,
+                          variant_params,
+                          block_indices,
+                          smem_ptr,
+                          dropout,
+                          k_descale_ptr,
+                          v_descale_ptr,
+                          block_scale_size_kv,
+                          q_scale_dram_block_window_tmp,
+                          k_scale_dram_block_window_tmp,
+                          v_scale_dram_block_window_tmp,
+                          sink_v,
+                          kQKHeaddim / kK0,
+                          kK0,
+                          kN1);
+    }
+
+    template <typename QDramBlockWindowTmp,
+              typename KDramBlockWindowTmp,
+              typename VDramBlockWindowTmp,
+              typename BiasDramBlockWindowTmp,
+              typename RandValDramBlockWindowTmp,
+              typename LSEDramBlockWindowTmp,
               typename PositionEncoding,
               typename AttentionVariantParams,
               typename BlockIndices>
@@ -1241,9 +1329,9 @@ struct BlockFmhaPipelineQRKSVS
                void* smem_ptr,
                DropoutType& dropout,
                const float sink_v,
-               const index_t valid_k0_loops        = kQKHeaddim / kK0,
-               const index_t valid_last_k0_columns = kK0,
-               const index_t valid_n1_columns      = kN1) const
+               const index_t valid_k0_loops,
+               const index_t valid_last_k0_columns,
+               const index_t valid_n1_columns) const
     {
         return operator()(q_dram_block_window_tmp,
                           identity{},
@@ -1277,6 +1365,52 @@ struct BlockFmhaPipelineQRKSVS
                           valid_k0_loops,
                           valid_last_k0_columns,
                           valid_n1_columns);
+    }
+
+    template <typename QDramBlockWindowTmp,
+              typename KDramBlockWindowTmp,
+              typename VDramBlockWindowTmp,
+              typename BiasDramBlockWindowTmp,
+              typename RandValDramBlockWindowTmp,
+              typename LSEDramBlockWindowTmp,
+              typename PositionEncoding,
+              typename AttentionVariantParams,
+              typename BlockIndices>
+    CK_TILE_HOST_DEVICE auto
+    operator()(const QDramBlockWindowTmp& q_dram_block_window_tmp,       // M0*K0 tile
+               const KDramBlockWindowTmp& k_dram_block_window_tmp,       // N0*K0 tile
+               const VDramBlockWindowTmp& v_dram_block_window_tmp,       // N1*K1 tile
+               const BiasDramBlockWindowTmp& bias_dram_block_window_tmp, // M0*N0 tile
+               RandValDramBlockWindowTmp& randval_dram_block_window_tmp, // M0*N0 tile
+               LSEDramBlockWindowTmp& lse_dram_block_window_tmp,         // M0*1 tile
+               FmhaMask mask,
+               PositionEncoding position_encoding,
+               float scale_s,
+               const AttentionVariant& variant,
+               const AttentionVariantParams& variant_params,
+               const BlockIndices& block_indices,
+               void* smem_ptr,
+               DropoutType& dropout,
+               const float sink_v) const
+    {
+        return operator()(q_dram_block_window_tmp,
+                          k_dram_block_window_tmp,
+                          v_dram_block_window_tmp,
+                          bias_dram_block_window_tmp,
+                          randval_dram_block_window_tmp,
+                          lse_dram_block_window_tmp,
+                          mask,
+                          position_encoding,
+                          scale_s,
+                          variant,
+                          variant_params,
+                          block_indices,
+                          smem_ptr,
+                          dropout,
+                          sink_v,
+                          kQKHeaddim / kK0,
+                          kK0,
+                          kN1);
     }
 };
 
