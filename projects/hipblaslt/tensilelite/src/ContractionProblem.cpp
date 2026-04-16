@@ -695,7 +695,7 @@ namespace TensileLite
         if (mxBlockA)
         {
             std::vector<size_t> saSizes = m_tensors[ContractionProblemGemm::TENSOR::A].sizes();
-            saSizes[m_boundIndices[0].a] = saSizes[m_boundIndices[0].a] / mxBlockA;
+            saSizes[m_boundIndices[0].a] = (saSizes[m_boundIndices[0].a] + mxBlockA - 1) / mxBlockA;
             TensorDescriptor mxsa("mx-a", mxTypeA, saSizes.begin(), saSizes.end(), saStride.begin(), saStride.end());
             m_tensors[ContractionProblemGemm::TENSOR::MXSA] = mxsa;
         }
@@ -709,7 +709,7 @@ namespace TensileLite
         if (mxBlockB)
         {
             std::vector<size_t> sbSizes = m_tensors[ContractionProblemGemm::TENSOR::B].sizes();
-            sbSizes[m_boundIndices[0].b] = sbSizes[m_boundIndices[0].b] / mxBlockB;
+            sbSizes[m_boundIndices[0].b] = (sbSizes[m_boundIndices[0].b] + mxBlockB - 1) / mxBlockB;
             TensorDescriptor mxsb("mx-b", mxTypeB, sbSizes.begin(), sbSizes.end(), sbStride.begin(), sbStride.end());
             m_tensors[ContractionProblemGemm::TENSOR::MXSB] = mxsb;
         }
