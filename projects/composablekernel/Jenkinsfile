@@ -913,6 +913,10 @@ def Build_CK(Map conf=[:]){
                     //check whether to run performance tests on this node
                     def arch = check_arch_name()
                     cmake_build(conf)
+                    if ( params.RUN_INDUCTOR_TESTS && arch == "gfx90a" ){
+                            echo "Run inductor codegen tests"
+                            sh "projects/composablekernel/script/run_inductor_tests.sh"
+                    }
                     // run performance tests, stash the logs, results will be processed on the master node
 					dir("projects/composablekernel/script"){
                         if (params.RUN_PERFORMANCE_TESTS){
@@ -1474,39 +1478,6 @@ pipeline {
                 }
             }
         }
-
-        stage("Python Inductor Tests") {
-            when {
-                beforeAgent true
-                expression { env.SHOULD_RUN_CI.toBoolean() && params.RUN_INDUCTOR_TESTS.toBoolean() }
-            }
-            agent{ label rocmnode("nogpu") }
-            steps{
-                gitStatusWrapper(credentialsId: "${env.ck_git_creds}", gitHubContext: "Python Inductor Tests", account: 'ROCm', repo: 'rocm-libraries') {
-                    script {
-                        def dockerOpts = get_docker_options()
-                        def image = getDockerImageName()
-                        echo "Running inductor tests on CPU-only node with Docker: ${image}"
-
-                        docker.image("${image}").inside(dockerOpts) {
-                            checkoutComposableKernel()
-                            dir("projects/composablekernel"){
-                                sh """
-                                    python3 -m venv ${env.WORKSPACE}/ck-inductor-venv
-                                    . ${env.WORKSPACE}/ck-inductor-venv/bin/activate
-                                    pip install uv
-                                    uv pip install pytest build setuptools setuptools_scm
-                                    uv pip install .
-                                    python3 -m pytest python/test/test_gen_instances.py -v
-                                """
-                            }
-                        }
-                    }
-                }
-                cleanWs()
-            }
-        }
-
          stage("Run Downstream Tests")
         {
             when {
