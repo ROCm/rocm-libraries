@@ -57,8 +57,8 @@ bool RMSnormPlanBuilder::isApplicable(
 
         try
         {
-            rmsnorm::checkRMSnormTensorConfigSupported(*node.attributes_as_RMSNormAttributes(),
-                                                       opGraph.getTensorMap());
+            rmsnorm::RMSnormValidator validator(opGraph.getTensorMap());
+            validator.checkTensorConfigSupported(*node.attributes_as_RMSNormAttributes());
         }
         catch(const std::exception& e)
         {

@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include "engines/plans/ApplicabilityChecks.hpp"
+
 #include <array>
 #include <optional>
 #include <string>
@@ -17,121 +19,41 @@
 namespace hip_kernel_provider::layernorm
 {
 
-// --- Tensor Descriptor Value Object ---
-
-struct LayernormTensorDescriptor
+class LayernormValidator : public IValidator
 {
-    std::vector<int64_t> dims;
-    std::vector<int64_t> strides;
-    std::vector<int64_t> strideOrder;
+private:
+public:
+    LayernormValidator(
+        const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+            tensorMapLocal)
+        : IValidator(tensorMapLocal) {};
 
-    explicit LayernormTensorDescriptor(const hipdnn_data_sdk::data_objects::TensorAttributes* attr);
+    // --- Validation Utilities ---
 
-    size_t numDims() const
-    {
-        return dims.size();
-    }
-    bool isPacked() const;
+    void validateNormalizedDim(const std::vector<int64_t>& ioTensorIds,
+                               const std::vector<int64_t>& affineTensorIds,
+                               const std::vector<int64_t>& statTensorIds);
+
+    // --- Component Validators ---
+
+    void checkTensorLayoutsAndDimsSupported() override;
+
+    void checkTensorIDLayoutsAndDimsSupported(const std::vector<int64_t>& tensorIds);
+
+    void checkTensorDataTypesSupported(const std::vector<int64_t>& ioTensorIds,
+                                       const std::vector<int64_t>& affineTensorIds,
+                                       const std::vector<int64_t>& statTensorIds,
+                                       const std::vector<int64_t>& epsilonTensorIds);
+
+    void checkTensorShapesSupported(const std::vector<int64_t>& ioTensorIds,
+                                    const std::vector<int64_t>& affineTensorIds,
+                                    const std::vector<int64_t>& statTensorIds);
+
+    // --- High-level Configuration Validators ---
+
+    void checkTensorConfigSupported(
+        const hipdnn_data_sdk::data_objects::LayernormAttributes& lnAttr);
 };
-
-// --- Validation Utilities ---
-
-namespace validators
-{
-
-void validateDimensionCount(size_t numDims);
-
-void validateConsistentDimensions(const std::vector<LayernormTensorDescriptor>& tensors);
-
-void validatePackedTensors(const std::vector<LayernormTensorDescriptor>& tensors);
-
-void validateSupportedLayout(const std::vector<int64_t>& strideOrder, size_t numDims);
-
-void validateConsistentLayouts(const std::vector<LayernormTensorDescriptor>& tensors);
-
-void validateDataTypeIsSupported(
-    hipdnn_data_sdk::data_objects::DataType dataType,
-    const std::unordered_set<hipdnn_data_sdk::data_objects::DataType>& allowedTypes,
-    const std::string& errorMessage);
-
-void validateConsistentDataTypes(
-    const std::vector<int64_t>& tensorIds,
-    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
-        tensorMap,
-    const std::unordered_set<hipdnn_data_sdk::data_objects::DataType>& allowedTypes,
-    const std::string& typeErrorMessage,
-    const std::string& consistencyErrorMessage);
-
-void validateConsistentDataTypes(
-    const std::vector<std::optional<int64_t>>& tensorIds,
-    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
-        tensorMap,
-    const std::unordered_set<hipdnn_data_sdk::data_objects::DataType>& allowedTypes,
-    const std::string& typeErrorMessage,
-    const std::string& consistencyErrorMessage);
-
-void validateFixedDataType(
-    const std::vector<int64_t>& tensorIds,
-    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
-        tensorMap,
-    hipdnn_data_sdk::data_objects::DataType expectedType,
-    const std::string& errorMessage);
-
-void validateConsistentShapes(
-    const std::vector<int64_t>& tensorIds,
-    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
-        tensorMap,
-    const std::vector<int64_t>& referenceShape,
-    const std::string& errorMessage);
-
-void validateConsistentShapes(
-    const std::vector<std::optional<int64_t>>& tensorIds,
-    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
-        tensorMap,
-    const std::vector<int64_t>& referenceShape,
-    const std::string& errorMessage);
-
-void validateNormalizedDim(
-    const std::vector<int64_t>& ioTensorIds,
-    const std::vector<int64_t>& affineTensorIds,
-    const std::vector<std::optional<int64_t>>& statTensorIds,
-    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
-        tensorMap);
-
-} // namespace validators
-
-// --- Component Validators ---
-
-void checkTensorLayoutsAndDimsSupported(
-    const std::vector<int64_t>& tensorIds,
-    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
-        tensorMap);
-
-void checkTensorLayoutsAndDimsSupported(
-    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
-        tensorMap);
-
-void checkTensorDataTypesSupported(
-    const std::vector<int64_t>& ioTensorIds,
-    const std::vector<int64_t>& affineTensorIds,
-    const std::vector<std::optional<int64_t>>& statTensorIds,
-    const std::vector<int64_t>& epsilonTensorIds,
-    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
-        tensorMap);
-
-void checkTensorShapesSupported(
-    const std::vector<int64_t>& ioTensorIds,
-    const std::vector<int64_t>& affineTensorIds,
-    const std::vector<std::optional<int64_t>>& statTensorIds,
-    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
-        tensorMap);
-
-// --- High-level Configuration Validators ---
-
-void checkLayernormTensorConfigSupported(
-    const hipdnn_data_sdk::data_objects::LayernormAttributes& lnAttr,
-    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
-        tensorMap);
 
 // Layernorm Type Configuration ---
 
