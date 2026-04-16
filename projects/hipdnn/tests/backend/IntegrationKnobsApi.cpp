@@ -15,6 +15,11 @@
 #include <unordered_set>
 #include <vector>
 
+using hipdnn_flatbuffers_sdk::data_objects::Knob;
+using hipdnn_flatbuffers_sdk::data_objects::KnobConstraint;
+using hipdnn_flatbuffers_sdk::data_objects::KnobValue;
+using hipdnn_plugin_sdk::KnobSettingFactory;
+
 class IntegrationKnobsApi : public ::testing::Test
 {
 protected:
@@ -229,8 +234,9 @@ TEST_F(IntegrationKnobsApi, GetKnobInfoValidateIntKnob)
     bool foundIntKnob = false;
     for(size_t i = 0; i < static_cast<size_t>(returnedCount); ++i)
     {
-        flatbuffers::Verifier verifier(static_cast<const uint8_t*>(knobData[i].ptr),
-                                       knobData[i].size);
+        flatbuffers::Verifier verifier( // NOLINT(misc-const-correctness)
+            static_cast<const uint8_t*>(knobData[i].ptr),
+            knobData[i].size);
         ASSERT_TRUE(verifier.VerifyBuffer<Knob>());
 
         auto knob = flatbuffers::GetRoot<Knob>(knobData[i].ptr);
@@ -466,11 +472,6 @@ TEST_F(IntegrationKnobsApi, GetKnobInfoNotFinalizedEngine)
 // =============================================================================
 // EngineConfig Knob Choice Tests (via HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE)
 // =============================================================================
-
-using hipdnn_flatbuffers_sdk::data_objects::Knob;
-using hipdnn_flatbuffers_sdk::data_objects::KnobConstraint;
-using hipdnn_flatbuffers_sdk::data_objects::KnobValue;
-using hipdnn_plugin_sdk::KnobSettingFactory;
 
 TEST_F(IntegrationKnobsApi, SetKnobChoiceIntValue)
 {
