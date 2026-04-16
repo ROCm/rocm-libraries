@@ -46,7 +46,7 @@ add_library(hip::hiprand ALIAS hiprand)
 if(WIN32)
     configure_file("${PROJECT_SOURCE_DIR}/library/include/hiprand/hiprand_in.rc.in"
                    "${PROJECT_BINARY_DIR}/library/include/hiprand/hiprand_in.rc"
-                  @ONLY)
+                   @ONLY)
     target_sources(hiprand PRIVATE "${PROJECT_BINARY_DIR}/library/include/hiprand/hiprand_in.rc")
 endif()
 

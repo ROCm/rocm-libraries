@@ -56,7 +56,7 @@ add_library(rocrand ${rocRAND_HIP_SRCS})
 if(WIN32)
     configure_file("${PROJECT_SOURCE_DIR}/library/include/rocrand/rocrand_in.rc.in"
                    "${PROJECT_BINARY_DIR}/library/include/rocrand/rocrand_in.rc"
-		   @ONLY)
+                   @ONLY)
     target_sources(rocrand PRIVATE "${PROJECT_BINARY_DIR}/library/include/rocrand/rocrand_in.rc")
 endif()
 
