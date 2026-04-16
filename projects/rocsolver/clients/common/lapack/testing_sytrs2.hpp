@@ -256,14 +256,11 @@ void sytrs2_getError(const rocblas_handle handle,
                      Td& dA,
                      const I lda,
                      const rocblas_stride stA,
-
                      Id& dIpiv,
                      const rocblas_stride stP,
-
                      Td& dB,
                      const I ldb,
                      const rocblas_stride stB,
-
                      const I bc,
                      Th& hA,
                      Ih& hIpiv,

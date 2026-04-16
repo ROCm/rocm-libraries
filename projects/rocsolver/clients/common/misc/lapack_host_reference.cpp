@@ -485,28 +485,16 @@ void zgetrs_(char* trans,
              int* ldb,
              int* info);
 
-void zsytrs2_(char* uplo,
+void ssytrs2_(char* uplo,
               int* n,
               int* nrhs,
-              rocblas_double_complex* A,
+              float* A,
               int* lda,
               int* ipiv,
-              rocblas_double_complex* B,
+              float* B,
               int* ldb,
-              rocblas_double_complex* work,
+              float* work,
               int* info);
-
-void csytrs2_(char* uplo,
-              int* n,
-              int* nrhs,
-              rocblas_float_complex* A,
-              int* lda,
-              int* ipiv,
-              rocblas_float_complex* B,
-              int* ldb,
-              rocblas_float_complex* work,
-              int* info);
-
 void dsytrs2_(char* uplo,
               int* n,
               int* nrhs,
@@ -517,16 +505,25 @@ void dsytrs2_(char* uplo,
               int* ldb,
               double* work,
               int* info);
-
-void ssytrs2_(char* uplo,
+void csytrs2_(char* uplo,
               int* n,
               int* nrhs,
-              float* A,
+              rocblas_float_complex* A,
               int* lda,
               int* ipiv,
-              float* B,
+              rocblas_float_complex* B,
               int* ldb,
-              float* work,
+              rocblas_float_complex* work,
+              int* info);
+void zsytrs2_(char* uplo,
+              int* n,
+              int* nrhs,
+              rocblas_double_complex* A,
+              int* lda,
+              int* ipiv,
+              rocblas_double_complex* B,
+              int* ldb,
+              rocblas_double_complex* work,
               int* info);
 
 void ssytrs_(char* uplo, int* n, int* nrhs, float* A, int* lda, int* ipiv, float* B, int* ldb, int* info);

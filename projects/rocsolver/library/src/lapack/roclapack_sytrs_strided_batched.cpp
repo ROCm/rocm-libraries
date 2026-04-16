@@ -49,19 +49,13 @@ rocblas_status rocsolver_sytrs_strided_batched_impl(rocblas_handle handle,
                         strideB, "--batch_count", batch_count);
 
     if(!handle)
-    {
         return rocblas_status_invalid_handle;
-    }
 
     // argument checking
-    {
-        rocblas_status st
-            = rocsolver_sytrs_argCheck(handle, uplo, n, nrhs, lda, ldb, A, B, ipiv, batch_count);
-        if(st != rocblas_status_continue)
-        {
-            return st;
-        }
-    }
+    rocblas_status st
+        = rocsolver_sytrs_argCheck(handle, uplo, n, nrhs, lda, ldb, A, B, ipiv, batch_count);
+    if(st != rocblas_status_continue)
+        return st;
 
     // working with unshifted arrays
     rocblas_stride shiftA = 0;
@@ -71,23 +65,11 @@ rocblas_status rocsolver_sytrs_strided_batched_impl(rocblas_handle handle,
     // memory workspace sizes:
     // ----------------------
     size_t size_work = 0;
-    {
-        auto const istat
-            = rocsolver_sytrs_getMemorySize<T>(handle,
-
-                                               n, nrhs, batch_count, lda, ldb, &size_work);
-
-        bool const is_ok = (istat == rocblas_status_success) || (istat == rocblas_status_continue);
-        if(!is_ok)
-        {
-            return (istat);
-        }
-    }
+    ROCBLAS_CHECK(
+        rocsolver_sytrs_getMemorySize<T>(handle, n, nrhs, batch_count, lda, ldb, &size_work));
 
     if(rocblas_is_device_memory_size_query(handle))
-    {
         return rocblas_set_optimal_device_memory_size(handle, size_work);
-    }
 
     // ---------------------------
     // memory workspace allocation
@@ -95,22 +77,13 @@ rocblas_status rocsolver_sytrs_strided_batched_impl(rocblas_handle handle,
     rocblas_device_malloc mem(handle, size_work);
 
     if(!mem)
-    {
         return rocblas_status_memory_error;
-    }
 
     void* const work = static_cast<void*>(mem[0]);
 
     // execution
-    return rocsolver_sytrs_template<T>(handle, uplo, n, nrhs,
-
-                                       A, shiftA, lda, strideA,
-
-                                       ipiv, strideP,
-
-                                       B, shiftB, ldb, strideB,
-
-                                       batch_count, work, size_work);
+    return rocsolver_sytrs_template<T>(handle, uplo, n, nrhs, A, shiftA, lda, strideA, ipiv, strideP,
+                                       B, shiftB, ldb, strideB, batch_count, work, size_work);
 }
 
 ROCSOLVER_END_NAMESPACE
