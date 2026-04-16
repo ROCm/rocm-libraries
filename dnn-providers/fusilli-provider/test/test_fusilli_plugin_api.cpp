@@ -35,6 +35,7 @@
 #include "graph_import.h"
 #include "hipdnn_engine_plugin_execution_context.h"
 #include "utils.h"
+#include "version.h"
 
 bool loggingCallbackCalled = false;
 std::vector<std::string> capturedLogMessages;
@@ -283,7 +284,7 @@ TEST(TestFusilliPluginApi, GetVersionSuccess) {
   const char *version = nullptr;
   EXPECT_EQ(hipdnnPluginGetVersion(&version), HIPDNN_PLUGIN_STATUS_SUCCESS);
   ASSERT_NE(version, nullptr);
-  // TODO(#2317): check returned version against single source of truth.
+  EXPECT_STREQ(version, FUSILLI_PROVIDER_VERSION_STRING);
 }
 
 TEST(TestFusilliPluginApi, GetVersionNullptr) {
