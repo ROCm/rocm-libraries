@@ -39,6 +39,9 @@ struct FmhaFwdKernel
     using EpiloguePipeline                       = ck_tile::remove_cvref_t<EpiloguePipeline_>;
     static constexpr ck_tile::index_t kBlockSize = FmhaPipeline::kBlockSize;
 
+    template <typename T>
+    using has_enable_tail_skip = decltype(T::kEnableTailSkip);
+
     static constexpr ck_tile::index_t kBlockPerCu = FmhaPipeline::kBlockPerCu;
     static_assert(kBlockPerCu > 0);
     static constexpr ck_tile::index_t kBlockPerCuInput = FmhaPipeline::Problem::kBlockPerCu;
@@ -1892,14 +1895,10 @@ struct FmhaFwdKernel
 
             BlockIndices block_indices{i_batch, i_nhead, i_nhead_k};
             constexpr bool kPassTailReqs = [] {
-                if constexpr(requires { FmhaPipeline::kEnableTailSkip; })
-                {
-                    return FmhaPipeline::kEnableTailSkip;
-                }
+                if constexpr(ck_tile::is_detected<has_enable_tail_skip, FmhaPipeline>::value)
+                    return static_cast<bool>(FmhaPipeline::kEnableTailSkip);
                 else
-                {
                     return false;
-                }
             }();
             auto invoke_fmha_pipeline = [&](auto&&... args) -> decltype(auto) {
                 if constexpr(kPassTailReqs)
