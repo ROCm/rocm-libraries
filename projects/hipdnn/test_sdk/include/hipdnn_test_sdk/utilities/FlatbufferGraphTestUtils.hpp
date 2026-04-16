@@ -1957,7 +1957,12 @@ inline flatbuffers::FlatBufferBuilder
         const std::vector<int64_t> statsStrides = {qDims[1] * qDims[2], qDims[2], 1, 1};
         const auto stUid = uid++;
         tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
-            builder, stUid, "stats", dataType, &statsStrides, &statsDims));
+            builder,
+            stUid,
+            "stats",
+            hipdnn_data_sdk::data_objects::DataType::FLOAT,
+            &statsStrides,
+            &statsDims));
         statsUid = flatbuffers::Optional<int64_t>(stUid);
     }
 
@@ -2183,7 +2188,12 @@ inline flatbuffers::FlatBufferBuilder
     const std::vector<int64_t> statsStrides = {qDims[1] * qDims[2], qDims[2], 1, 1};
     const auto statsUid = uid++;
     tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
-        builder, statsUid, "stats", dataType, &statsStrides, &statsDims));
+        builder,
+        statsUid,
+        "stats",
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        &statsStrides,
+        &statsDims));
 
     // Output gradient tensors (same shapes as Q, K, V)
     const auto dqUid = uid++;
