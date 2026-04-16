@@ -161,8 +161,11 @@ if (WIN32)
     if (BUILD_TEST)
 	    # comment 3
 	    add_custom_command(
-		    TARGET rocrand
-		    POST_BUILD
+		    # comment 4
+		    TARGET rocrand # comment 44
+			# comment 345
+		    POST_BUILD # comment 444
+			# comment 1234
 		    COMMAND ${CMAKE_COMMAND} -E copy
 			    $<TARGET_FILE:rocrand>
 			    ${PROJECT_BINARY_DIR}/test/$<TARGET_FILE_NAME:rocrand>
