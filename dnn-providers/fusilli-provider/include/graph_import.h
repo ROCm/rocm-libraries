@@ -17,9 +17,13 @@
 #include <fusilli.h>
 #include <hipdnn_data_sdk/data_objects/convolution_bwd_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/convolution_wrw_attributes_generated.h>
+#include <hipdnn_data_sdk/data_objects/custom_op_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_data_sdk/data_objects/matmul_attributes_generated.h>
+#include <hipdnn_data_sdk/data_objects/norm_common_generated.h>
 #include <hipdnn_data_sdk/data_objects/pointwise_attributes_generated.h>
+#include <hipdnn_data_sdk/data_objects/reduction_attributes_generated.h>
+#include <hipdnn_data_sdk/data_objects/rmsnorm_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/sdpa_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
@@ -45,10 +49,14 @@ inline fusilli::ErrorOr<fusilli::DataType> hipDnnDataTypeToFusilliDataType(
     return ok(fusilli::DataType::Float);
   case hipdnn_data_sdk::data_objects::DataType::DOUBLE:
     return ok(fusilli::DataType::Double);
+  case hipdnn_data_sdk::data_objects::DataType::INT8:
+    return ok(fusilli::DataType::Int8);
   case hipdnn_data_sdk::data_objects::DataType::UINT8:
     return ok(fusilli::DataType::Uint8);
   case hipdnn_data_sdk::data_objects::DataType::INT32:
     return ok(fusilli::DataType::Int32);
+  case hipdnn_data_sdk::data_objects::DataType::INT4:
+    return ok(fusilli::DataType::Int4);
   case hipdnn_data_sdk::data_objects::DataType::UNSET:
     return ok(fusilli::DataType::NotSet);
   default:
@@ -70,6 +78,37 @@ hipDnnPointwiseModeToFusilliMode(
   default:
     return error(fusilli::ErrorCode::NotImplemented,
                  "Unsupported pointwise mode.");
+  }
+}
+
+// Convert from hipDNN NormFwdPhase to fusilli NormFwdPhase.
+inline fusilli::ErrorOr<fusilli::NormFwdPhase> hipDnnNormFwdPhaseToFusilliPhase(
+    hipdnn_data_sdk::data_objects::NormFwdPhase hipdnnPhase) {
+  switch (hipdnnPhase) {
+  case hipdnn_data_sdk::data_objects::NormFwdPhase::TRAINING:
+    return ok(fusilli::NormFwdPhase::TRAINING);
+  case hipdnn_data_sdk::data_objects::NormFwdPhase::INFERENCE:
+    return ok(fusilli::NormFwdPhase::INFERENCE);
+  default:
+    return error(fusilli::ErrorCode::NotImplemented,
+                 "Unsupported norm forward phase.");
+  }
+}
+
+// Convert from hipDNN ReductionMode to fusilli ReductionAttr::Mode.
+inline fusilli::ErrorOr<fusilli::ReductionAttr::Mode>
+hipDnnReductionModeToFusilliMode(
+    hipdnn_data_sdk::data_objects::ReductionMode hipdnnMode) {
+  switch (hipdnnMode) {
+  case hipdnn_data_sdk::data_objects::ReductionMode::ADD:
+    return ok(fusilli::ReductionAttr::Mode::SUM);
+  case hipdnn_data_sdk::data_objects::ReductionMode::MIN_OP:
+    return ok(fusilli::ReductionAttr::Mode::MIN);
+  case hipdnn_data_sdk::data_objects::ReductionMode::MAX_OP:
+    return ok(fusilli::ReductionAttr::Mode::MAX);
+  default:
+    return error(fusilli::ErrorCode::NotImplemented,
+                 "Unsupported reduction mode.");
   }
 }
 
@@ -174,6 +213,18 @@ private:
       break;
     case hipdnn_data_sdk::data_objects::NodeAttributes::SdpaAttributes:
       FUSILLI_CHECK_ERROR(importSdpaAttr(node.attributes_as_SdpaAttributes()));
+      break;
+    case hipdnn_data_sdk::data_objects::NodeAttributes::ReductionAttributes:
+      FUSILLI_CHECK_ERROR(
+          importReductionAttr(node.attributes_as_ReductionAttributes()));
+      break;
+    case hipdnn_data_sdk::data_objects::NodeAttributes::RMSNormAttributes:
+      FUSILLI_CHECK_ERROR(
+          importRmsnormAttr(node.attributes_as_RMSNormAttributes()));
+      break;
+    case hipdnn_data_sdk::data_objects::NodeAttributes::CustomOpAttributes:
+      FUSILLI_CHECK_ERROR(
+          importCustomOpAttr(node.attributes_as_CustomOpAttributes()));
       break;
     default:
       return fusilli::error(fusilli::ErrorCode::NotImplemented,
@@ -428,6 +479,131 @@ private:
     // flatbuffer tensor attributes.
     FUSILLI_CHECK_ERROR(
         importNodeOutput(hipDnnSdpaAttr->o_tensor_uid(), "o", outs[0]));
+
+    return fusilli::ok();
+  }
+
+  fusilli::ErrorObject importReductionAttr(
+      const hipdnn_data_sdk::data_objects::ReductionAttributes *hipDnnRedAttr) {
+    // Import node input.
+    FUSILLI_ASSIGN_OR_RETURN(
+        std::shared_ptr<fusilli::TensorAttr> x,
+        importNodeInput(hipDnnRedAttr->in_tensor_uid(), "x"));
+
+    // Convert reduction mode.
+    FUSILLI_ASSIGN_OR_RETURN(
+        fusilli::ReductionAttr::Mode mode,
+        hipDnnReductionModeToFusilliMode(hipDnnRedAttr->mode()));
+
+    // Import node.
+    auto fusilliRedAttr = fusilli::ReductionAttr().setMode(mode);
+    std::shared_ptr<fusilli::TensorAttr> y =
+        fusilliGraph.reduction(x, fusilliRedAttr);
+
+    // Import node output.
+    FUSILLI_CHECK_ERROR(
+        importNodeOutput(hipDnnRedAttr->out_tensor_uid(), "y", y));
+
+    return fusilli::ok();
+  }
+
+  fusilli::ErrorObject
+  importRmsnormAttr(const hipdnn_data_sdk::data_objects::RMSNormAttributes
+                        *hipDnnRmsnormAttr) {
+    // Fusilli's rmsnorm does not support the optional bias input.
+    if (hipDnnRmsnormAttr->bias_tensor_uid().has_value())
+      return fusilli::error(fusilli::ErrorCode::NotImplemented,
+                            "RmsNorm with bias input is not supported.");
+
+    // Import node inputs.
+    FUSILLI_ASSIGN_OR_RETURN(
+        std::shared_ptr<fusilli::TensorAttr> x,
+        importNodeInput(hipDnnRmsnormAttr->x_tensor_uid(), "x"));
+    FUSILLI_ASSIGN_OR_RETURN(
+        std::shared_ptr<fusilli::TensorAttr> scale,
+        importNodeInput(hipDnnRmsnormAttr->scale_tensor_uid(), "scale"));
+    FUSILLI_ASSIGN_OR_RETURN(
+        std::shared_ptr<fusilli::TensorAttr> epsilon,
+        importNodeInput(hipDnnRmsnormAttr->epsilon_tensor_uid(), "epsilon"));
+
+    // Fusilli requires epsilon to be a scalar constant (pass-by-value).
+    if (!epsilon->isScalar())
+      return fusilli::error(
+          fusilli::ErrorCode::NotImplemented,
+          "RmsNorm epsilon must be a pass-by-value scalar, not a device "
+          "tensor.");
+
+    bool hasInvRms = hipDnnRmsnormAttr->inv_rms_tensor_uid().has_value();
+    FUSILLI_ASSIGN_OR_RETURN(
+        fusilli::NormFwdPhase forwardPhase,
+        hipDnnNormFwdPhaseToFusilliPhase(hipDnnRmsnormAttr->forward_phase()));
+
+    // The hipDNN frontend should have already rejected this mismatch; this
+    // check exists as a defensive guard for the plugin boundary.
+    if ((forwardPhase == fusilli::NormFwdPhase::TRAINING) != hasInvRms)
+      return fusilli::error(
+          fusilli::ErrorCode::InvalidAttribute,
+          "RmsNorm inv_rms output must be set if and only if forward phase "
+          "is TRAINING.");
+
+    // Import node.
+    auto fusilliRmsnormAttr =
+        fusilli::RmsnormAttr().setEpsilon(epsilon).setForwardPhase(
+            forwardPhase);
+    auto [y, invRms] = fusilliGraph.rmsnorm(x, scale, fusilliRmsnormAttr);
+
+    // Import node outputs.
+    FUSILLI_CHECK_ERROR(
+        importNodeOutput(hipDnnRmsnormAttr->y_tensor_uid(), "y", y));
+    if (hasInvRms) {
+      FUSILLI_CHECK_ERROR(importNodeOutput(
+          *hipDnnRmsnormAttr->inv_rms_tensor_uid(), "inv_rms", invRms));
+    }
+
+    return fusilli::ok();
+  }
+
+  fusilli::ErrorObject importCustomOpAttr(
+      const hipdnn_data_sdk::data_objects::CustomOpAttributes *hipDnnAttr) {
+    // Only import custom ops targeting this plugin.
+    std::string customOpId = hipDnnAttr->custom_op_id()->str();
+    if (!customOpId.starts_with("fusilli.")) {
+      return fusilli::error(
+          fusilli::ErrorCode::NotImplemented,
+          std::format("Custom op id '{}' does not target the fusilli plugin. "
+                      "Expected 'fusilli.<operation>' prefix.",
+                      customOpId));
+    }
+
+    // The data byte array is the MLIR template string directly.
+    std::string mlirString(
+        reinterpret_cast<const char *>(hipDnnAttr->data()->data()),
+        hipDnnAttr->data()->size());
+
+    // Import input tensors (variable-length).
+    std::vector<std::shared_ptr<fusilli::TensorAttr>> inputs;
+    for (auto uid : *hipDnnAttr->input_tensor_uids()) {
+      FUSILLI_ASSIGN_OR_RETURN(auto tensor, importNodeInput(uid, "custom_in"));
+      inputs.push_back(std::move(tensor));
+    }
+
+    // Build fusilli CustomOpAttr. numOutputs derived from flatbuffer directly.
+    auto numOutputs = hipDnnAttr->output_tensor_uids()->size();
+    fusilli::CustomOpAttr fusilliAttr;
+    fusilliAttr.setName(customOpId)
+        .setMlir(mlirString)
+        .setNumOutputs(numOutputs);
+
+    // Create custom op node in fusilli graph.
+    auto outputTensors = fusilliGraph.customOp(inputs, fusilliAttr);
+
+    // Import output tensors.
+    auto *outputUids = hipDnnAttr->output_tensor_uids();
+    for (size_t i = 0; i < outputUids->size(); ++i) {
+      FUSILLI_CHECK_ERROR(importNodeOutput(
+          outputUids->Get(static_cast<flatbuffers::uoffset_t>(i)), "custom_out",
+          outputTensors[i]));
+    }
 
     return fusilli::ok();
   }

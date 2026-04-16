@@ -97,18 +97,9 @@ namespace TileTransposeAddTest
 
         CommandArguments commandArgs = command->createArguments();
 
-        TensorDescriptor descA(DataType::Int32,
-                               {size_t(transpose.a ? ny : nx), size_t(transpose.a ? nx : ny)},
-                               {(size_t)((ny * !transpose.a) + transpose.a),
-                                (size_t)((nx * transpose.a) + !transpose.a)});
-        TensorDescriptor descB(DataType::Int32,
-                               {size_t(transpose.b ? ny : nx), size_t(transpose.b ? nx : ny)},
-                               {(size_t)((ny * !transpose.b) + transpose.b),
-                                (size_t)((nx * transpose.b) + !transpose.b)});
-        TensorDescriptor descC(DataType::Int32,
-                               {size_t(transpose.c ? ny : nx), size_t(transpose.c ? nx : ny)},
-                               {(size_t)((ny * !transpose.c) + transpose.c),
-                                (size_t)((nx * transpose.c) + !transpose.c)});
+        TensorDescriptor descA(DataType::Int32, {nx, ny}, transpose.a ? "T" : "N");
+        TensorDescriptor descB(DataType::Int32, {nx, ny}, transpose.b ? "T" : "N");
+        TensorDescriptor descC(DataType::Int32, {nx, ny}, transpose.c ? "T" : "N");
 
         setCommandTensorArg(commandArgs, tagTensorA, descA, d_a.get());
         setCommandTensorArg(commandArgs, tagTensorB, descB, d_b.get());
@@ -117,10 +108,24 @@ namespace TileTransposeAddTest
         auto params = std::make_shared<CommandParameters>();
         params->setManualKernelDimension(2);
 
-        auto macTile
-            = KernelGraph::CoordinateGraph::MacroTile({m, n}, MemoryType::VGPR, {t_m, t_n});
-        params->setDimensionInfo(tagLoadA, macTile);
-        params->setDimensionInfo(tagLoadB, macTile);
+        auto macTileA = KernelGraph::CoordinateGraph::MacroTile(
+            {m, n},
+            transpose.a ? LayoutType::ROW_MAJOR : LayoutType::COLUMN_MAJOR,
+            {t_m, t_n},
+            MemoryType::VGPR);
+        auto macTileB = KernelGraph::CoordinateGraph::MacroTile(
+            {m, n},
+            transpose.b ? LayoutType::ROW_MAJOR : LayoutType::COLUMN_MAJOR,
+            {t_m, t_n},
+            MemoryType::VGPR);
+        auto macTileC = KernelGraph::CoordinateGraph::MacroTile(
+            {m, n},
+            transpose.c ? LayoutType::ROW_MAJOR : LayoutType::COLUMN_MAJOR,
+            {t_m, t_n},
+            MemoryType::VGPR);
+        params->setDimensionInfo(tagLoadA, macTileA);
+        params->setDimensionInfo(tagLoadB, macTileB);
+        params->setDimensionInfo(tagC, macTileC);
 
         params->setManualWorkgroupSize({workgroup_size_x, workgroup_size_y, 1});
         auto launch = std::make_shared<CommandLaunchParameters>();
@@ -138,11 +143,13 @@ namespace TileTransposeAddTest
                     HasHipSuccess(0));
 
         // reference solution
+        // TensorDescriptor with "N": strides=[1, nx], element [i,j] at offset j*nx + i
+        // TensorDescriptor with "T": strides=[ny, 1], element [i,j] at offset i*ny + j
         for(size_t i = 0; i < nx; ++i)
         {
             for(size_t j = 0; j < ny; ++j)
             {
-                auto idx = [i, j, nx, ny](bool t) { return t ? (j * nx + i) : (i * ny + j); };
+                auto idx = [i, j, nx, ny](bool t) { return t ? (i * ny + j) : (j * nx + i); };
                 x[idx(transpose.c)] = a[idx(transpose.a)] + a[idx(transpose.a)]
                                       + b[idx(transpose.b)] + b[idx(transpose.b)];
             }

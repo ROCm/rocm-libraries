@@ -99,6 +99,14 @@ private:
         case hipblaslt_initialization::zero:
             hipblaslt_init_zero<DType>(ref.data(), ref.size(), 1, 1);
             break;
+        // Matmul-oriented inits need proper M×K / K×N (GEMM ABC) layout; ext-op benches only flatten — zero-fill
+        // instead of silently skipping (ref would stay default-constructed).
+        case hipblaslt_initialization::integer_exact:
+        case hipblaslt_initialization::norm_dist:
+        case hipblaslt_initialization::uniform_01:
+        case hipblaslt_initialization::fp16_accumulator_probe:
+            hipblaslt_init_zero<DType>(ref.data(), ref.size(), 1, 1);
+            break;
         default:
             break;
         }

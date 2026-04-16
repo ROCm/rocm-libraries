@@ -198,7 +198,7 @@ void getByteArray(const std::vector<uint8_t>& source,
     std::memcpy(arrayOfElements, source.data(), static_cast<size_t>(copyCount));
 }
 
-void setDataType(hipdnn_data_sdk::data_objects::DataType& target,
+void setDataType(hipdnn_flatbuffers_sdk::data_objects::DataType& target,
                  hipdnnBackendAttributeType_t attributeType,
                  int64_t elementCount,
                  const void* arrayOfElements,
@@ -213,7 +213,7 @@ void setDataType(hipdnn_data_sdk::data_objects::DataType& target,
     target = toSdkDataType(tmp);
 }
 
-void getDataType(hipdnn_data_sdk::data_objects::DataType source,
+void getDataType(hipdnn_flatbuffers_sdk::data_objects::DataType source,
                  hipdnnBackendAttributeType_t attributeType,
                  int64_t requestedElementCount,
                  int64_t* elementCount,
@@ -242,7 +242,7 @@ void getDataType(hipdnn_data_sdk::data_objects::DataType source,
     }
 }
 
-void setConvMode(hipdnn_data_sdk::data_objects::ConvMode& target,
+void setConvMode(hipdnn_flatbuffers_sdk::data_objects::ConvMode& target,
                  hipdnnBackendAttributeType_t attributeType,
                  int64_t elementCount,
                  const void* arrayOfElements,
@@ -257,7 +257,7 @@ void setConvMode(hipdnn_data_sdk::data_objects::ConvMode& target,
     target = toSdkConvMode(tmp);
 }
 
-void getConvMode(hipdnn_data_sdk::data_objects::ConvMode source,
+void getConvMode(hipdnn_flatbuffers_sdk::data_objects::ConvMode source,
                  hipdnnBackendAttributeType_t attributeType,
                  int64_t requestedElementCount,
                  int64_t* elementCount,
@@ -286,7 +286,7 @@ void getConvMode(hipdnn_data_sdk::data_objects::ConvMode source,
     }
 }
 
-void setPointwiseMode(hipdnn_data_sdk::data_objects::PointwiseMode& target,
+void setPointwiseMode(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode& target,
                       hipdnnBackendAttributeType_t attributeType,
                       int64_t elementCount,
                       const void* arrayOfElements,
@@ -301,7 +301,7 @@ void setPointwiseMode(hipdnn_data_sdk::data_objects::PointwiseMode& target,
     target = toSdkPointwiseMode(tmp);
 }
 
-void getPointwiseMode(hipdnn_data_sdk::data_objects::PointwiseMode source,
+void getPointwiseMode(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode source,
                       hipdnnBackendAttributeType_t attributeType,
                       int64_t requestedElementCount,
                       int64_t* elementCount,
@@ -330,7 +330,7 @@ void getPointwiseMode(hipdnn_data_sdk::data_objects::PointwiseMode source,
     }
 }
 
-void setNormFwdPhase(hipdnn_data_sdk::data_objects::NormFwdPhase& target,
+void setNormFwdPhase(hipdnn_flatbuffers_sdk::data_objects::NormFwdPhase& target,
                      hipdnnBackendAttributeType_t attributeType,
                      int64_t elementCount,
                      const void* arrayOfElements,
@@ -345,7 +345,7 @@ void setNormFwdPhase(hipdnn_data_sdk::data_objects::NormFwdPhase& target,
     target = toSdkNormFwdPhase(tmp);
 }
 
-void getNormFwdPhase(hipdnn_data_sdk::data_objects::NormFwdPhase source,
+void getNormFwdPhase(hipdnn_flatbuffers_sdk::data_objects::NormFwdPhase source,
                      hipdnnBackendAttributeType_t attributeType,
                      int64_t requestedElementCount,
                      int64_t* elementCount,
@@ -375,7 +375,7 @@ void getNormFwdPhase(hipdnn_data_sdk::data_objects::NormFwdPhase source,
     std::memcpy(arrayOfElements, &tmp, sizeof(tmp));
 }
 
-void setReductionMode(hipdnn_data_sdk::data_objects::ReductionMode& target,
+void setReductionMode(hipdnn_flatbuffers_sdk::data_objects::ReductionMode& target,
                       hipdnnBackendAttributeType_t attributeType,
                       int64_t elementCount,
                       const void* arrayOfElements,
@@ -390,7 +390,7 @@ void setReductionMode(hipdnn_data_sdk::data_objects::ReductionMode& target,
     target = toSdkReductionMode(tmp);
 }
 
-void getReductionMode(hipdnn_data_sdk::data_objects::ReductionMode source,
+void getReductionMode(hipdnn_flatbuffers_sdk::data_objects::ReductionMode source,
                       hipdnnBackendAttributeType_t attributeType,
                       int64_t requestedElementCount,
                       int64_t* elementCount,
@@ -419,7 +419,7 @@ void getReductionMode(hipdnn_data_sdk::data_objects::ReductionMode source,
     }
 }
 
-void getOperationType(hipdnnOperationType_t source,
+void getOperationType(hipdnnOperationType_ext_t source,
                       hipdnnBackendAttributeType_t attributeType,
                       int64_t requestedElementCount,
                       int64_t* elementCount,
@@ -440,7 +440,7 @@ void getOperationType(hipdnnOperationType_t source,
     THROW_IF_FALSE(requestedElementCount >= 1,
                    HIPDNN_STATUS_BAD_PARAM,
                    std::string(errorPrefix) + ": requestedElementCount < 1");
-    std::memcpy(arrayOfElements, &source, sizeof(hipdnnOperationType_t));
+    std::memcpy(arrayOfElements, &source, sizeof(hipdnnOperationType_ext_t));
     if(elementCount != nullptr)
     {
         *elementCount = 1;
@@ -623,13 +623,13 @@ void getTensorDescriptorArray(const std::vector<std::shared_ptr<TensorDescriptor
     }
 }
 
-void setDiagonalAlignment(hipdnn_data_sdk::data_objects::DiagonalAlignment& target,
+void setDiagonalAlignment(hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment& target,
                           hipdnnBackendAttributeType_t attributeType,
                           int64_t elementCount,
                           const void* arrayOfElements,
                           const char* errorPrefix)
 {
-    checkSetArgs(HIPDNN_TYPE_DIAGONAL_ALIGNMENT, attributeType, arrayOfElements, errorPrefix);
+    checkSetArgs(HIPDNN_TYPE_DIAGONAL_ALIGNMENT_EXT, attributeType, arrayOfElements, errorPrefix);
     THROW_IF_FALSE(elementCount == 1,
                    HIPDNN_STATUS_BAD_PARAM,
                    std::string(errorPrefix) + ": elementCount is not 1");
@@ -638,14 +638,14 @@ void setDiagonalAlignment(hipdnn_data_sdk::data_objects::DiagonalAlignment& targ
     target = toSdkDiagonalAlignment(tmp);
 }
 
-void getDiagonalAlignment(hipdnn_data_sdk::data_objects::DiagonalAlignment source,
+void getDiagonalAlignment(hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment source,
                           hipdnnBackendAttributeType_t attributeType,
                           int64_t requestedElementCount,
                           int64_t* elementCount,
                           void* arrayOfElements,
                           const char* errorPrefix)
 {
-    checkGetArgs(HIPDNN_TYPE_DIAGONAL_ALIGNMENT, attributeType, errorPrefix);
+    checkGetArgs(HIPDNN_TYPE_DIAGONAL_ALIGNMENT_EXT, attributeType, errorPrefix);
 
     if(arrayOfElements == nullptr || requestedElementCount == 0)
     {
@@ -667,13 +667,15 @@ void getDiagonalAlignment(hipdnn_data_sdk::data_objects::DiagonalAlignment sourc
     }
 }
 
-void setAttentionImplementation(hipdnn_data_sdk::data_objects::AttentionImplementation& target,
-                                hipdnnBackendAttributeType_t attributeType,
-                                int64_t elementCount,
-                                const void* arrayOfElements,
-                                const char* errorPrefix)
+void setAttentionImplementation(
+    hipdnn_flatbuffers_sdk::data_objects::AttentionImplementation& target,
+    hipdnnBackendAttributeType_t attributeType,
+    int64_t elementCount,
+    const void* arrayOfElements,
+    const char* errorPrefix)
 {
-    checkSetArgs(HIPDNN_TYPE_ATTENTION_IMPLEMENTATION, attributeType, arrayOfElements, errorPrefix);
+    checkSetArgs(
+        HIPDNN_TYPE_ATTENTION_IMPLEMENTATION_EXT, attributeType, arrayOfElements, errorPrefix);
     THROW_IF_FALSE(elementCount == 1,
                    HIPDNN_STATUS_BAD_PARAM,
                    std::string(errorPrefix) + ": elementCount is not 1");
@@ -682,14 +684,15 @@ void setAttentionImplementation(hipdnn_data_sdk::data_objects::AttentionImplemen
     target = toSdkAttentionImplementation(tmp);
 }
 
-void getAttentionImplementation(hipdnn_data_sdk::data_objects::AttentionImplementation source,
-                                hipdnnBackendAttributeType_t attributeType,
-                                int64_t requestedElementCount,
-                                int64_t* elementCount,
-                                void* arrayOfElements,
-                                const char* errorPrefix)
+void getAttentionImplementation(
+    hipdnn_flatbuffers_sdk::data_objects::AttentionImplementation source,
+    hipdnnBackendAttributeType_t attributeType,
+    int64_t requestedElementCount,
+    int64_t* elementCount,
+    void* arrayOfElements,
+    const char* errorPrefix)
 {
-    checkGetArgs(HIPDNN_TYPE_ATTENTION_IMPLEMENTATION, attributeType, errorPrefix);
+    checkGetArgs(HIPDNN_TYPE_ATTENTION_IMPLEMENTATION_EXT, attributeType, errorPrefix);
 
     if(arrayOfElements == nullptr || requestedElementCount == 0)
     {
@@ -711,29 +714,29 @@ void getAttentionImplementation(hipdnn_data_sdk::data_objects::AttentionImplemen
     }
 }
 
-void copyKnobValueUnion(const hipdnn_data_sdk::data_objects::KnobValueUnion& src,
-                        hipdnn_data_sdk::data_objects::KnobValueUnion& dst,
+void copyKnobValueUnion(const hipdnn_flatbuffers_sdk::data_objects::KnobValueUnion& src,
+                        hipdnn_flatbuffers_sdk::data_objects::KnobValueUnion& dst,
                         const char* errorPrefix)
 {
     switch(src.type)
     {
-    case hipdnn_data_sdk::data_objects::KnobValue::IntValue:
+    case hipdnn_flatbuffers_sdk::data_objects::KnobValue::IntValue:
     {
-        hipdnn_data_sdk::data_objects::IntValueT intVal;
+        hipdnn_flatbuffers_sdk::data_objects::IntValueT intVal;
         intVal.value = src.AsIntValue()->value;
         dst.Set(intVal);
         break;
     }
-    case hipdnn_data_sdk::data_objects::KnobValue::FloatValue:
+    case hipdnn_flatbuffers_sdk::data_objects::KnobValue::FloatValue:
     {
-        hipdnn_data_sdk::data_objects::FloatValueT floatVal;
+        hipdnn_flatbuffers_sdk::data_objects::FloatValueT floatVal;
         floatVal.value = src.AsFloatValue()->value;
         dst.Set(floatVal);
         break;
     }
-    case hipdnn_data_sdk::data_objects::KnobValue::StringValue:
+    case hipdnn_flatbuffers_sdk::data_objects::KnobValue::StringValue:
     {
-        hipdnn_data_sdk::data_objects::StringValueT strVal;
+        hipdnn_flatbuffers_sdk::data_objects::StringValueT strVal;
         strVal.value = src.AsStringValue()->value;
         dst.Set(std::move(strVal));
         break;
@@ -745,7 +748,7 @@ void copyKnobValueUnion(const hipdnn_data_sdk::data_objects::KnobValueUnion& src
     }
 }
 
-void setKnobValueUnion(hipdnn_data_sdk::data_objects::KnobValueUnion& target,
+void setKnobValueUnion(hipdnn_flatbuffers_sdk::data_objects::KnobValueUnion& target,
                        hipdnnBackendAttributeType_t attributeType,
                        int64_t elementCount,
                        const void* arrayOfElements,
@@ -756,7 +759,7 @@ void setKnobValueUnion(hipdnn_data_sdk::data_objects::KnobValueUnion& target,
     {
     case HIPDNN_TYPE_INT64:
     {
-        hipdnn_data_sdk::data_objects::IntValueT intVal;
+        hipdnn_flatbuffers_sdk::data_objects::IntValueT intVal;
         setScalar(intVal.value,
                   HIPDNN_TYPE_INT64,
                   attributeType,
@@ -768,7 +771,7 @@ void setKnobValueUnion(hipdnn_data_sdk::data_objects::KnobValueUnion& target,
     }
     case HIPDNN_TYPE_DOUBLE:
     {
-        hipdnn_data_sdk::data_objects::FloatValueT floatVal;
+        hipdnn_flatbuffers_sdk::data_objects::FloatValueT floatVal;
         setScalar(floatVal.value,
                   HIPDNN_TYPE_DOUBLE,
                   attributeType,
@@ -780,7 +783,7 @@ void setKnobValueUnion(hipdnn_data_sdk::data_objects::KnobValueUnion& target,
     }
     case HIPDNN_TYPE_CHAR:
     {
-        hipdnn_data_sdk::data_objects::StringValueT strVal;
+        hipdnn_flatbuffers_sdk::data_objects::StringValueT strVal;
         setBoundedString(strVal.value,
                          attributeType,
                          elementCount,
@@ -798,7 +801,7 @@ void setKnobValueUnion(hipdnn_data_sdk::data_objects::KnobValueUnion& target,
     }
 }
 
-void getKnobValueUnion(const hipdnn_data_sdk::data_objects::KnobValueUnion& source,
+void getKnobValueUnion(const hipdnn_flatbuffers_sdk::data_objects::KnobValueUnion& source,
                        hipdnnBackendAttributeType_t attributeType,
                        int64_t requestedElementCount,
                        int64_t* elementCount,
@@ -807,7 +810,7 @@ void getKnobValueUnion(const hipdnn_data_sdk::data_objects::KnobValueUnion& sour
 {
     switch(source.type)
     {
-    case hipdnn_data_sdk::data_objects::KnobValue::IntValue:
+    case hipdnn_flatbuffers_sdk::data_objects::KnobValue::IntValue:
         getScalar(source.AsIntValue()->value,
                   HIPDNN_TYPE_INT64,
                   attributeType,
@@ -816,7 +819,7 @@ void getKnobValueUnion(const hipdnn_data_sdk::data_objects::KnobValueUnion& sour
                   arrayOfElements,
                   errorPrefix);
         break;
-    case hipdnn_data_sdk::data_objects::KnobValue::FloatValue:
+    case hipdnn_flatbuffers_sdk::data_objects::KnobValue::FloatValue:
         getScalar(source.AsFloatValue()->value,
                   HIPDNN_TYPE_DOUBLE,
                   attributeType,
@@ -825,7 +828,7 @@ void getKnobValueUnion(const hipdnn_data_sdk::data_objects::KnobValueUnion& sour
                   arrayOfElements,
                   errorPrefix);
         break;
-    case hipdnn_data_sdk::data_objects::KnobValue::StringValue:
+    case hipdnn_flatbuffers_sdk::data_objects::KnobValue::StringValue:
         getString(source.AsStringValue()->value,
                   attributeType,
                   requestedElementCount,

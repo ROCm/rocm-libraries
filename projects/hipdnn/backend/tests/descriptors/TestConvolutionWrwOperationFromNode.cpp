@@ -11,9 +11,9 @@
 #include "hipdnn_backend.h"
 
 #include <gtest/gtest.h>
-#include <hipdnn_data_sdk/data_objects/convolution_wrw_attributes_generated.h>
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
-#include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/convolution_wrw_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_test_sdk/constants/ConvWgradConstants.hpp>
 #include <hipdnn_test_sdk/utilities/ToVec.hpp>
 
@@ -22,8 +22,8 @@
 #include <vector>
 
 using namespace hipdnn_backend;
-using namespace hipdnn_data_sdk::data_objects;
-using namespace hipdnn_tests::constants::conv_wgrad;
+using namespace hipdnn_flatbuffers_sdk::data_objects;
+using namespace hipdnn_tests::constants;
 
 // =============================================================================
 // ConvolutionWrwOperationDescriptor::fromNode() Tests
@@ -37,39 +37,39 @@ protected:
     void SetUp() override
     {
         TensorAttributesT xAttrs;
-        xAttrs.uid = K_TENSOR_X_UID;
+        xAttrs.uid = K_WGRAD_TENSOR_X_UID;
         xAttrs.data_type = DataType::FLOAT;
-        xAttrs.dims = hipdnn_tests::toVec(K_TENSOR_X_DIMS);
-        xAttrs.strides = hipdnn_tests::toVec(K_TENSOR_X_STRIDES);
+        xAttrs.dims = hipdnn_tests::toVec(K_WGRAD_TENSOR_X_DIMS);
+        xAttrs.strides = hipdnn_tests::toVec(K_WGRAD_TENSOR_X_STRIDES);
 
-        _tensorMap[K_TENSOR_X_UID] = TensorDescriptor::fromFlatBuffer(xAttrs);
+        _tensorMap[K_WGRAD_TENSOR_X_UID] = TensorDescriptor::fromFlatBuffer(xAttrs);
         TensorAttributesT dyAttrs;
-        dyAttrs.uid = K_TENSOR_DY_UID;
+        dyAttrs.uid = K_WGRAD_TENSOR_DY_UID;
         dyAttrs.data_type = DataType::FLOAT;
-        dyAttrs.dims = hipdnn_tests::toVec(K_TENSOR_DY_DIMS);
-        dyAttrs.strides = hipdnn_tests::toVec(K_TENSOR_DY_STRIDES);
+        dyAttrs.dims = hipdnn_tests::toVec(K_WGRAD_TENSOR_DY_DIMS);
+        dyAttrs.strides = hipdnn_tests::toVec(K_WGRAD_TENSOR_DY_STRIDES);
 
-        _tensorMap[K_TENSOR_DY_UID] = TensorDescriptor::fromFlatBuffer(dyAttrs);
+        _tensorMap[K_WGRAD_TENSOR_DY_UID] = TensorDescriptor::fromFlatBuffer(dyAttrs);
         TensorAttributesT dwAttrs;
-        dwAttrs.uid = K_TENSOR_DW_UID;
+        dwAttrs.uid = K_WGRAD_TENSOR_DW_UID;
         dwAttrs.data_type = DataType::FLOAT;
-        dwAttrs.dims = hipdnn_tests::toVec(K_TENSOR_DW_DIMS);
-        dwAttrs.strides = hipdnn_tests::toVec(K_TENSOR_DW_STRIDES);
+        dwAttrs.dims = hipdnn_tests::toVec(K_WGRAD_TENSOR_DW_DIMS);
+        dwAttrs.strides = hipdnn_tests::toVec(K_WGRAD_TENSOR_DW_STRIDES);
 
-        _tensorMap[K_TENSOR_DW_UID] = TensorDescriptor::fromFlatBuffer(dwAttrs);
+        _tensorMap[K_WGRAD_TENSOR_DW_UID] = TensorDescriptor::fromFlatBuffer(dwAttrs);
     }
 
-    static hipdnn_data_sdk::data_objects::ConvolutionWrwAttributesT
+    static hipdnn_flatbuffers_sdk::data_objects::ConvolutionWrwAttributesT
         createStandardConvolutionWrwAttrs()
     {
-        hipdnn_data_sdk::data_objects::ConvolutionWrwAttributesT attrs;
-        attrs.x_tensor_uid = K_TENSOR_X_UID;
-        attrs.dy_tensor_uid = K_TENSOR_DY_UID;
-        attrs.dw_tensor_uid = K_TENSOR_DW_UID;
-        attrs.pre_padding = hipdnn_tests::toVec(K_CONV_PADDING);
-        attrs.post_padding = hipdnn_tests::toVec(K_CONV_PADDING);
-        attrs.stride = hipdnn_tests::toVec(K_CONV_STRIDE);
-        attrs.dilation = hipdnn_tests::toVec(K_CONV_DILATION);
+        hipdnn_flatbuffers_sdk::data_objects::ConvolutionWrwAttributesT attrs;
+        attrs.x_tensor_uid = K_WGRAD_TENSOR_X_UID;
+        attrs.dy_tensor_uid = K_WGRAD_TENSOR_DY_UID;
+        attrs.dw_tensor_uid = K_WGRAD_TENSOR_DW_UID;
+        attrs.pre_padding = hipdnn_tests::toVec(K_WGRAD_CONV_PADDING);
+        attrs.post_padding = hipdnn_tests::toVec(K_WGRAD_CONV_PADDING);
+        attrs.stride = hipdnn_tests::toVec(K_WGRAD_CONV_STRIDE);
+        attrs.dilation = hipdnn_tests::toVec(K_WGRAD_CONV_DILATION);
         attrs.conv_mode = ConvMode::CROSS_CORRELATION;
         return attrs;
     }
@@ -91,7 +91,7 @@ TEST_F(TestConvolutionWrwOperationFromNode, CreatesValidFinalizedDescriptor)
     ASSERT_NE(desc, nullptr);
     ASSERT_TRUE(desc->isFinalized());
     ASSERT_EQ(desc->getType(), HIPDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_FILTER_DESCRIPTOR);
-    EXPECT_EQ(desc->getData().x_tensor_uid, K_TENSOR_X_UID);
+    EXPECT_EQ(desc->getData().x_tensor_uid, K_WGRAD_TENSOR_X_UID);
 }
 
 TEST_F(TestConvolutionWrwOperationFromNode, NodeFactoryDelegatesCorrectly)
@@ -113,18 +113,18 @@ TEST_F(TestConvolutionWrwOperationFromNode, NodeFactoryDelegatesCorrectly)
     ASSERT_TRUE(desc->isFinalized());
 
     // Verify all attributes are correctly populated via the delegated path
-    EXPECT_EQ(desc->getData().x_tensor_uid, K_TENSOR_X_UID);
-    EXPECT_EQ(desc->getData().dy_tensor_uid, K_TENSOR_DY_UID);
-    EXPECT_EQ(desc->getData().dw_tensor_uid, K_TENSOR_DW_UID);
-    EXPECT_EQ(desc->getData().pre_padding, hipdnn_tests::toVec(K_CONV_PADDING));
-    EXPECT_EQ(desc->getData().post_padding, hipdnn_tests::toVec(K_CONV_PADDING));
-    EXPECT_EQ(desc->getData().stride, hipdnn_tests::toVec(K_CONV_STRIDE));
-    EXPECT_EQ(desc->getData().dilation, hipdnn_tests::toVec(K_CONV_DILATION));
+    EXPECT_EQ(desc->getData().x_tensor_uid, K_WGRAD_TENSOR_X_UID);
+    EXPECT_EQ(desc->getData().dy_tensor_uid, K_WGRAD_TENSOR_DY_UID);
+    EXPECT_EQ(desc->getData().dw_tensor_uid, K_WGRAD_TENSOR_DW_UID);
+    EXPECT_EQ(desc->getData().pre_padding, hipdnn_tests::toVec(K_WGRAD_CONV_PADDING));
+    EXPECT_EQ(desc->getData().post_padding, hipdnn_tests::toVec(K_WGRAD_CONV_PADDING));
+    EXPECT_EQ(desc->getData().stride, hipdnn_tests::toVec(K_WGRAD_CONV_STRIDE));
+    EXPECT_EQ(desc->getData().dilation, hipdnn_tests::toVec(K_WGRAD_CONV_DILATION));
     EXPECT_EQ(desc->getData().conv_mode, ConvMode::CROSS_CORRELATION);
     EXPECT_EQ(desc->getComputeDataType(), DataType::FLOAT);
-    EXPECT_EQ(desc->getXDesc()->getData().uid, K_TENSOR_X_UID);
-    EXPECT_EQ(desc->getDyDesc()->getData().uid, K_TENSOR_DY_UID);
-    EXPECT_EQ(desc->getDwDesc()->getData().uid, K_TENSOR_DW_UID);
+    EXPECT_EQ(desc->getXDesc()->getData().uid, K_WGRAD_TENSOR_X_UID);
+    EXPECT_EQ(desc->getDyDesc()->getData().uid, K_WGRAD_TENSOR_DY_UID);
+    EXPECT_EQ(desc->getDwDesc()->getData().uid, K_WGRAD_TENSOR_DW_UID);
 }
 
 TEST_F(TestConvolutionWrwOperationFromNode, PreservesComputeDataType)
@@ -151,10 +151,10 @@ TEST_F(TestConvolutionWrwOperationFromNode, PreservesDataFields)
     auto node = createStandardNode();
     auto desc = ConvolutionWrwOperationDescriptor::fromNode(node, _tensorMap);
 
-    EXPECT_EQ(desc->getData().pre_padding, hipdnn_tests::toVec(K_CONV_PADDING));
-    EXPECT_EQ(desc->getData().post_padding, hipdnn_tests::toVec(K_CONV_PADDING));
-    EXPECT_EQ(desc->getData().stride, hipdnn_tests::toVec(K_CONV_STRIDE));
-    EXPECT_EQ(desc->getData().dilation, hipdnn_tests::toVec(K_CONV_DILATION));
+    EXPECT_EQ(desc->getData().pre_padding, hipdnn_tests::toVec(K_WGRAD_CONV_PADDING));
+    EXPECT_EQ(desc->getData().post_padding, hipdnn_tests::toVec(K_WGRAD_CONV_PADDING));
+    EXPECT_EQ(desc->getData().stride, hipdnn_tests::toVec(K_WGRAD_CONV_STRIDE));
+    EXPECT_EQ(desc->getData().dilation, hipdnn_tests::toVec(K_WGRAD_CONV_DILATION));
     EXPECT_EQ(desc->getData().conv_mode, ConvMode::CROSS_CORRELATION);
 }
 
@@ -164,11 +164,11 @@ TEST_F(TestConvolutionWrwOperationFromNode, SetsTensorReferences)
     auto desc = ConvolutionWrwOperationDescriptor::fromNode(node, _tensorMap);
 
     ASSERT_NE(desc->getXDesc(), nullptr);
-    EXPECT_EQ(desc->getXDesc()->getData().uid, K_TENSOR_X_UID);
+    EXPECT_EQ(desc->getXDesc()->getData().uid, K_WGRAD_TENSOR_X_UID);
     ASSERT_NE(desc->getDyDesc(), nullptr);
-    EXPECT_EQ(desc->getDyDesc()->getData().uid, K_TENSOR_DY_UID);
+    EXPECT_EQ(desc->getDyDesc()->getData().uid, K_WGRAD_TENSOR_DY_UID);
     ASSERT_NE(desc->getDwDesc(), nullptr);
-    EXPECT_EQ(desc->getDwDesc()->getData().uid, K_TENSOR_DW_UID);
+    EXPECT_EQ(desc->getDwDesc()->getData().uid, K_WGRAD_TENSOR_DW_UID);
 }
 
 TEST_F(TestConvolutionWrwOperationFromNode, TensorReferencesMatchTensorMap)
@@ -176,9 +176,9 @@ TEST_F(TestConvolutionWrwOperationFromNode, TensorReferencesMatchTensorMap)
     auto node = createStandardNode();
     auto desc = ConvolutionWrwOperationDescriptor::fromNode(node, _tensorMap);
 
-    EXPECT_EQ(desc->getXDesc(), _tensorMap[K_TENSOR_X_UID]);
-    EXPECT_EQ(desc->getDyDesc(), _tensorMap[K_TENSOR_DY_UID]);
-    EXPECT_EQ(desc->getDwDesc(), _tensorMap[K_TENSOR_DW_UID]);
+    EXPECT_EQ(desc->getXDesc(), _tensorMap[K_WGRAD_TENSOR_X_UID]);
+    EXPECT_EQ(desc->getDyDesc(), _tensorMap[K_WGRAD_TENSOR_DY_UID]);
+    EXPECT_EQ(desc->getDwDesc(), _tensorMap[K_WGRAD_TENSOR_DW_UID]);
 }
 
 TEST_F(TestConvolutionWrwOperationFromNode, SetsTensorReferencesWithFullValues)
@@ -187,27 +187,27 @@ TEST_F(TestConvolutionWrwOperationFromNode, SetsTensorReferencesWithFullValues)
     auto desc = ConvolutionWrwOperationDescriptor::fromNode(node, _tensorMap);
 
     ASSERT_NE(desc->getXDesc(), nullptr);
-    EXPECT_EQ(desc->getXDesc()->getData().uid, K_TENSOR_X_UID);
+    EXPECT_EQ(desc->getXDesc()->getData().uid, K_WGRAD_TENSOR_X_UID);
     EXPECT_EQ(desc->getXDesc()->getData().data_type, DataType::FLOAT);
-    EXPECT_EQ(desc->getXDesc()->getData().dims, hipdnn_tests::toVec(K_TENSOR_X_DIMS));
-    EXPECT_EQ(desc->getXDesc()->getData().strides, hipdnn_tests::toVec(K_TENSOR_X_STRIDES));
+    EXPECT_EQ(desc->getXDesc()->getData().dims, hipdnn_tests::toVec(K_WGRAD_TENSOR_X_DIMS));
+    EXPECT_EQ(desc->getXDesc()->getData().strides, hipdnn_tests::toVec(K_WGRAD_TENSOR_X_STRIDES));
 
     ASSERT_NE(desc->getDyDesc(), nullptr);
-    EXPECT_EQ(desc->getDyDesc()->getData().uid, K_TENSOR_DY_UID);
+    EXPECT_EQ(desc->getDyDesc()->getData().uid, K_WGRAD_TENSOR_DY_UID);
     EXPECT_EQ(desc->getDyDesc()->getData().data_type, DataType::FLOAT);
-    EXPECT_EQ(desc->getDyDesc()->getData().dims, hipdnn_tests::toVec(K_TENSOR_DY_DIMS));
-    EXPECT_EQ(desc->getDyDesc()->getData().strides, hipdnn_tests::toVec(K_TENSOR_DY_STRIDES));
+    EXPECT_EQ(desc->getDyDesc()->getData().dims, hipdnn_tests::toVec(K_WGRAD_TENSOR_DY_DIMS));
+    EXPECT_EQ(desc->getDyDesc()->getData().strides, hipdnn_tests::toVec(K_WGRAD_TENSOR_DY_STRIDES));
 
     ASSERT_NE(desc->getDwDesc(), nullptr);
-    EXPECT_EQ(desc->getDwDesc()->getData().uid, K_TENSOR_DW_UID);
+    EXPECT_EQ(desc->getDwDesc()->getData().uid, K_WGRAD_TENSOR_DW_UID);
     EXPECT_EQ(desc->getDwDesc()->getData().data_type, DataType::FLOAT);
-    EXPECT_EQ(desc->getDwDesc()->getData().dims, hipdnn_tests::toVec(K_TENSOR_DW_DIMS));
-    EXPECT_EQ(desc->getDwDesc()->getData().strides, hipdnn_tests::toVec(K_TENSOR_DW_STRIDES));
+    EXPECT_EQ(desc->getDwDesc()->getData().dims, hipdnn_tests::toVec(K_WGRAD_TENSOR_DW_DIMS));
+    EXPECT_EQ(desc->getDwDesc()->getData().strides, hipdnn_tests::toVec(K_WGRAD_TENSOR_DW_STRIDES));
 }
 
 TEST_F(TestConvolutionWrwOperationFromNode, FailsWithMissingXTensor)
 {
-    _tensorMap.erase(K_TENSOR_X_UID);
+    _tensorMap.erase(K_WGRAD_TENSOR_X_UID);
     auto node = createStandardNode();
 
     ASSERT_THROW_HIPDNN_STATUS(ConvolutionWrwOperationDescriptor::fromNode(node, _tensorMap),
@@ -216,7 +216,7 @@ TEST_F(TestConvolutionWrwOperationFromNode, FailsWithMissingXTensor)
 
 TEST_F(TestConvolutionWrwOperationFromNode, FailsWithMissingDyTensor)
 {
-    _tensorMap.erase(K_TENSOR_DY_UID);
+    _tensorMap.erase(K_WGRAD_TENSOR_DY_UID);
     auto node = createStandardNode();
 
     ASSERT_THROW_HIPDNN_STATUS(ConvolutionWrwOperationDescriptor::fromNode(node, _tensorMap),
@@ -225,7 +225,7 @@ TEST_F(TestConvolutionWrwOperationFromNode, FailsWithMissingDyTensor)
 
 TEST_F(TestConvolutionWrwOperationFromNode, FailsWithMissingDwTensor)
 {
-    _tensorMap.erase(K_TENSOR_DW_UID);
+    _tensorMap.erase(K_WGRAD_TENSOR_DW_UID);
     auto node = createStandardNode();
 
     ASSERT_THROW_HIPDNN_STATUS(ConvolutionWrwOperationDescriptor::fromNode(node, _tensorMap),
@@ -239,9 +239,9 @@ TEST_F(TestConvolutionWrwOperationFromNode, GetTensorDescriptorsReturnsAllTensor
 
     auto tensors = desc->getTensorDescriptors();
     ASSERT_EQ(tensors.size(), 3);
-    EXPECT_EQ(tensors[0]->getData().uid, K_TENSOR_X_UID);
-    EXPECT_EQ(tensors[1]->getData().uid, K_TENSOR_DY_UID);
-    EXPECT_EQ(tensors[2]->getData().uid, K_TENSOR_DW_UID);
+    EXPECT_EQ(tensors[0]->getData().uid, K_WGRAD_TENSOR_X_UID);
+    EXPECT_EQ(tensors[1]->getData().uid, K_WGRAD_TENSOR_DY_UID);
+    EXPECT_EQ(tensors[2]->getData().uid, K_WGRAD_TENSOR_DW_UID);
 }
 
 TEST_F(TestConvolutionWrwOperationFromNode, BuildNodeRoundTrip)
@@ -256,13 +256,13 @@ TEST_F(TestConvolutionWrwOperationFromNode, BuildNodeRoundTrip)
 
     const auto* rebuiltAttrs = rebuiltNode->attributes.AsConvolutionWrwAttributes();
     ASSERT_NE(rebuiltAttrs, nullptr);
-    EXPECT_EQ(rebuiltAttrs->x_tensor_uid, K_TENSOR_X_UID);
-    EXPECT_EQ(rebuiltAttrs->dy_tensor_uid, K_TENSOR_DY_UID);
-    EXPECT_EQ(rebuiltAttrs->dw_tensor_uid, K_TENSOR_DW_UID);
-    EXPECT_EQ(rebuiltAttrs->pre_padding, hipdnn_tests::toVec(K_CONV_PADDING));
-    EXPECT_EQ(rebuiltAttrs->post_padding, hipdnn_tests::toVec(K_CONV_PADDING));
-    EXPECT_EQ(rebuiltAttrs->stride, hipdnn_tests::toVec(K_CONV_STRIDE));
-    EXPECT_EQ(rebuiltAttrs->dilation, hipdnn_tests::toVec(K_CONV_DILATION));
+    EXPECT_EQ(rebuiltAttrs->x_tensor_uid, K_WGRAD_TENSOR_X_UID);
+    EXPECT_EQ(rebuiltAttrs->dy_tensor_uid, K_WGRAD_TENSOR_DY_UID);
+    EXPECT_EQ(rebuiltAttrs->dw_tensor_uid, K_WGRAD_TENSOR_DW_UID);
+    EXPECT_EQ(rebuiltAttrs->pre_padding, hipdnn_tests::toVec(K_WGRAD_CONV_PADDING));
+    EXPECT_EQ(rebuiltAttrs->post_padding, hipdnn_tests::toVec(K_WGRAD_CONV_PADDING));
+    EXPECT_EQ(rebuiltAttrs->stride, hipdnn_tests::toVec(K_WGRAD_CONV_STRIDE));
+    EXPECT_EQ(rebuiltAttrs->dilation, hipdnn_tests::toVec(K_WGRAD_CONV_DILATION));
     EXPECT_EQ(rebuiltAttrs->conv_mode, ConvMode::CROSS_CORRELATION);
 }
 
@@ -280,7 +280,7 @@ TEST_F(TestConvolutionWrwOperationFromNode, GetAttributeWorksAfterFromNode)
                        &prePaddingCount,
                        prePadding.data());
     ASSERT_EQ(prePaddingCount, 2);
-    EXPECT_EQ(prePadding, hipdnn_tests::toVec(K_CONV_PADDING));
+    EXPECT_EQ(prePadding, hipdnn_tests::toVec(K_WGRAD_CONV_PADDING));
 
     // Verify post_padding
     std::vector<int64_t> postPadding(2);
@@ -291,7 +291,7 @@ TEST_F(TestConvolutionWrwOperationFromNode, GetAttributeWorksAfterFromNode)
                        &postPaddingCount,
                        postPadding.data());
     ASSERT_EQ(postPaddingCount, 2);
-    EXPECT_EQ(postPadding, hipdnn_tests::toVec(K_CONV_PADDING));
+    EXPECT_EQ(postPadding, hipdnn_tests::toVec(K_WGRAD_CONV_PADDING));
 
     // Verify stride
     std::vector<int64_t> stride(2);
@@ -299,7 +299,7 @@ TEST_F(TestConvolutionWrwOperationFromNode, GetAttributeWorksAfterFromNode)
     desc->getAttribute(
         HIPDNN_ATTR_CONVOLUTION_FILTER_STRIDES, HIPDNN_TYPE_INT64, 2, &strideCount, stride.data());
     ASSERT_EQ(strideCount, 2);
-    EXPECT_EQ(stride, hipdnn_tests::toVec(K_CONV_STRIDE));
+    EXPECT_EQ(stride, hipdnn_tests::toVec(K_WGRAD_CONV_STRIDE));
 
     // Verify dilation
     std::vector<int64_t> dilation(2);
@@ -307,7 +307,7 @@ TEST_F(TestConvolutionWrwOperationFromNode, GetAttributeWorksAfterFromNode)
     desc->getAttribute(
         HIPDNN_ATTR_CONVOLUTION_DILATIONS, HIPDNN_TYPE_INT64, 2, &dilationCount, dilation.data());
     ASSERT_EQ(dilationCount, 2);
-    EXPECT_EQ(dilation, hipdnn_tests::toVec(K_CONV_DILATION));
+    EXPECT_EQ(dilation, hipdnn_tests::toVec(K_WGRAD_CONV_DILATION));
 
     // Verify compute type
     hipdnnDataType_t computeType = {};
@@ -324,28 +324,29 @@ TEST_F(TestConvolutionWrwOperationFromNode, GetAttributeWorksAfterFromNode)
                        1,
                        &convModeCount,
                        &convMode);
-    ASSERT_EQ(convMode, HIPDNN_CONVOLUTION_MODE_CROSS_CORRELATION);
+    ASSERT_EQ(convMode, HIPDNN_CROSS_CORRELATION);
 
     // Verify x tensor
     hipdnn_backend::ScopedDescriptor xScoped;
     int64_t xCount = 0;
-    desc->getAttribute(HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_FILTER_X,
+    desc->getAttribute(HIPDNN_ATTR_OPERATION_CONVOLUTION_BWD_FILTER_X,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        &xCount,
                        static_cast<void*>(xScoped.getPtr()));
     ASSERT_EQ(xCount, 1);
     ASSERT_NE(xScoped.get(), nullptr);
-    hipdnn_backend::test_utilities::verifyTensorDescriptor(xScoped.get(),
-                                                           K_TENSOR_X_UID,
-                                                           HIPDNN_DATA_FLOAT,
-                                                           hipdnn_tests::toVec(K_TENSOR_X_DIMS),
-                                                           hipdnn_tests::toVec(K_TENSOR_X_STRIDES));
+    hipdnn_backend::test_utilities::verifyTensorDescriptor(
+        xScoped.get(),
+        K_WGRAD_TENSOR_X_UID,
+        HIPDNN_DATA_FLOAT,
+        hipdnn_tests::toVec(K_WGRAD_TENSOR_X_DIMS),
+        hipdnn_tests::toVec(K_WGRAD_TENSOR_X_STRIDES));
 
     // Verify dy tensor
     hipdnn_backend::ScopedDescriptor dyScoped;
     int64_t dyCount = 0;
-    desc->getAttribute(HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_FILTER_DY,
+    desc->getAttribute(HIPDNN_ATTR_OPERATION_CONVOLUTION_BWD_FILTER_DY,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        &dyCount,
@@ -354,15 +355,15 @@ TEST_F(TestConvolutionWrwOperationFromNode, GetAttributeWorksAfterFromNode)
     ASSERT_NE(dyScoped.get(), nullptr);
     hipdnn_backend::test_utilities::verifyTensorDescriptor(
         dyScoped.get(),
-        K_TENSOR_DY_UID,
+        K_WGRAD_TENSOR_DY_UID,
         HIPDNN_DATA_FLOAT,
-        hipdnn_tests::toVec(K_TENSOR_DY_DIMS),
-        hipdnn_tests::toVec(K_TENSOR_DY_STRIDES));
+        hipdnn_tests::toVec(K_WGRAD_TENSOR_DY_DIMS),
+        hipdnn_tests::toVec(K_WGRAD_TENSOR_DY_STRIDES));
 
     // Verify dw tensor
     hipdnn_backend::ScopedDescriptor dwScoped;
     int64_t dwCount = 0;
-    desc->getAttribute(HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_FILTER_DW,
+    desc->getAttribute(HIPDNN_ATTR_OPERATION_CONVOLUTION_BWD_FILTER_DW,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        &dwCount,
@@ -371,18 +372,18 @@ TEST_F(TestConvolutionWrwOperationFromNode, GetAttributeWorksAfterFromNode)
     ASSERT_NE(dwScoped.get(), nullptr);
     hipdnn_backend::test_utilities::verifyTensorDescriptor(
         dwScoped.get(),
-        K_TENSOR_DW_UID,
+        K_WGRAD_TENSOR_DW_UID,
         HIPDNN_DATA_FLOAT,
-        hipdnn_tests::toVec(K_TENSOR_DW_DIMS),
-        hipdnn_tests::toVec(K_TENSOR_DW_STRIDES));
+        hipdnn_tests::toVec(K_WGRAD_TENSOR_DW_DIMS),
+        hipdnn_tests::toVec(K_WGRAD_TENSOR_DW_STRIDES));
 
     // Verify operation type
-    hipdnnOperationType_t opType = HIPDNN_OPERATION_TYPE_NOT_SET;
+    hipdnnOperationType_ext_t opType = HIPDNN_OPERATION_TYPE_NOT_SET_EXT;
     int64_t opTypeCount = 0;
     desc->getAttribute(
         HIPDNN_ATTR_OPERATION_TYPE_EXT, HIPDNN_TYPE_OPERATION_TYPE_EXT, 1, &opTypeCount, &opType);
     ASSERT_EQ(opTypeCount, 1);
-    EXPECT_EQ(opType, HIPDNN_OPERATION_TYPE_CONVOLUTION_BACKWARD_WEIGHTS);
+    EXPECT_EQ(opType, HIPDNN_OPERATION_TYPE_CONVOLUTION_BACKWARD_WEIGHTS_EXT);
 }
 
 TEST_F(TestConvolutionWrwOperationFromNode, NamePreservedFromNode)

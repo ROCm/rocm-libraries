@@ -218,6 +218,8 @@ class GEMMSolution:
     prefetchScale: bool = False
     pretileScale: bool = False
 
+    ldsBankSwizzle: str = "None"
+
     streamK: str = "None"
     numWGs: int = 0
 
