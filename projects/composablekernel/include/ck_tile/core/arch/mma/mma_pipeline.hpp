@@ -9,6 +9,9 @@
 #include "mma_traits.hpp"
 #include "mma_transforms.hpp"
 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
+
 namespace ck_tile::core::arch::mma {
 
 /*! @enum MmaPipelineOptionFlag
@@ -149,7 +152,7 @@ struct MmaPipelineBase
      * @return A reference (or value) of type @p DstT corresponding to @p inputBuffer.
      */
     template <typename DstT, typename SrcT>
-    CK_TILE_DEVICE static decltype(auto) formatBuffer([[clang::lifetimebound]] SrcT&& inputBuffer)
+    CK_TILE_DEVICE static decltype(auto) formatBuffer(SrcT&& inputBuffer)
     {
         using DecayedSrcT = ck_tile::remove_cvref_t<SrcT>;
 
@@ -297,3 +300,5 @@ concept MmaPipelineInterface = std::derived_from<Derived, MmaPipelineBase<Flags,
 #endif // CK_TILE_CONCEPTS && CK_TILE_CONCEPTS_HEADER
 
 } // namespace ck_tile::core::arch::mma
+
+#pragma clang diagnostic pop
