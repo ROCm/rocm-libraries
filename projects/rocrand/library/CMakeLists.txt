@@ -146,8 +146,8 @@ else()
 endif()
 
 # install library to C:\hipSDK\bin
-#if (WIN32)
-#    install (TARGETS rocrand DESTINATION "${CMAKE_INSTALL_PREFIX}/bin")
+if (WIN32)
+    install (TARGETS rocrand DESTINATION "${CMAKE_INSTALL_PREFIX}/bin")
 #    if (BUILD_TEST)
 #	    add_custom_command(
 #		    TARGET rocrand
@@ -166,7 +166,7 @@ endif()
 #			    ${PROJECT_BINARY_DIR}/benchmark/$<TARGET_FILE_NAME:rocrand>
 #	    )
 #    endif()
-#endif()
+endif()
 
 # Fortran wrappers for rocRAND
 if(BUILD_FORTRAN_WRAPPER)
