@@ -1290,7 +1290,8 @@ class StreamK(Component):
                     module.add(self.fixupBatch(writer, kernel, ss, batchIdx, edge, gwvw, \
                             elementsThisBatch, writer.vgprs.addrD, writer.vgprs.addrC, \
                             tmpVgpr, cvtVgprStruct, \
-                            elementSgprs, tmpSgpr, codeAccVgprRead, codeAccVgprWrite))
+                            elementSgprs, tmpSgpr, codeAccVgprRead, codeAccVgprWrite,
+                            elementStartIdx))
                 # delay PreLoopVmcntCase code after globalWrite
                 # if self.canOptimizePreLoopLWVmcnt:
                 #     kStr += PreLoopVmcntCaseStr
@@ -1304,7 +1305,8 @@ class StreamK(Component):
 
     def fixupBatch(self, writer, kernel, ss, batchIdx, edge, gwvw, \
             batchElements, addrD, addrC, \
-            tmpVgpr, cvtVgprStruct, batchElementSgprs, tmpSgpr, codeAccVgprRead, codeAccVgprWrite):
+            tmpVgpr, cvtVgprStruct, batchElementSgprs, tmpSgpr, codeAccVgprRead, codeAccVgprWrite,
+            elementStartIdx=0):
         module = Module("StreamK Common fixupBatch")
 
         module.addComment0("optSingleColVgpr=%u optSharedColVgpr=%u optSGPRUsage=%s optSrdIncForRow=%u" % \
@@ -1330,7 +1332,7 @@ class StreamK(Component):
         # allow expanding vgpr pool for OptNLL
         # preventOverflow = True #(not isOptNLL)
         # ss.setupStoreElementsForBatch(kernel, gwvw, batchElements, batchElementSgprs, preventOverflow=preventOverflow, isWorkspace=True)
-        ss.setupStoreElementsForBatch(kernel, gwvw, batchElements, batchElementSgprs, isOptNLL=False, factorDim=0, isWorkspace=True)
+        ss.setupStoreElementsForBatch(kernel, gwvw, batchElements, batchElementSgprs, False, 0, True, elementStartIdx)
 
         loadsIssued = 0
         storesIssued = 0

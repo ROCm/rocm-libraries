@@ -3,6 +3,7 @@
 
 add_executable(hipdnn_integration_tests_unit_tests
     main.cpp
+    TestPlatformUtils.cpp
     TestTestConfig.cpp
     TestTestSettings.cpp
     TestGpuReferenceGraphExecutor.cpp
@@ -20,6 +21,7 @@ target_link_libraries(hipdnn_integration_tests_unit_tests
         hipdnn_plugin_sdk
         GTest::gtest
         Threads::Threads
+        $<$<PLATFORM_ID:Windows>:shlwapi>
 )
 
 target_compile_options(hipdnn_integration_tests_unit_tests
@@ -32,6 +34,7 @@ add_unit_test_target(hipdnn_integration_tests_unit_tests ${CMAKE_CURRENT_BINARY_
 add_executable(hipdnn_gpu_ref_tests
     gpu_ref/main.cpp
     gpu_ref/TestGpuFpReferenceConvolution.cpp
+    gpu_ref/TestGpuFpReferenceWgrad.cpp
     gpu_ref/TestGpuFpReferenceValidation.cpp
     gpu_ref/TestGpuRefHipError.cpp
     gpu_ref/TestGpuRefKernelCompiler.cpp

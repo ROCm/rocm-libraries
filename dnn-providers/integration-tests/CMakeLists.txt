@@ -125,6 +125,7 @@ target_link_libraries(${INTEGRATION_TESTS_EXE}
         hipdnn_plugin_sdk
         GTest::gtest
         Threads::Threads
+        $<$<PLATFORM_ID:Windows>:shlwapi>
 )
 
 target_compile_options(${INTEGRATION_TESTS_EXE} PRIVATE ${INTEGRATION_TESTS_WARNING_COMPILE_OPTIONS})

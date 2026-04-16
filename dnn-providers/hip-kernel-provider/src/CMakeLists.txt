@@ -26,6 +26,7 @@ add_library(
     engines/plans/layernorm/LayernormFwdPlan.cpp
     engines/plans/layernorm/LayernormPlanBuilder.cpp
     engines/plans/layernorm/LayernormUtilities.cpp
+    engines/plans/ApplicabilityChecks.cpp
 )
 if(ENABLE_ASM_SDPA_ENGINE)
     add_subdirectory(engines/asm_sdpa_engine)
