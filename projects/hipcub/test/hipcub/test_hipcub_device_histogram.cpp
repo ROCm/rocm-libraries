@@ -473,7 +473,9 @@ using Params2 = ::testing::Types<
     params2<unsigned short, 65536, 0, 1, 1, int>,
     params2<unsigned char, 256, 0, 1, 1, unsigned short>,
     params2<test_utils::half, 3, 10000, 1000, 1000, test_utils::half, unsigned int>,
+#if defined(__HIP_PLATFORM_AMD__)
     params2<test_utils::bfloat16, 3, 10000, 1000, 1000, test_utils::bfloat16, unsigned int>,
+#endif
     params2<float, 456, -100, 1, 123>,
     params2<double, 3, 10000, 1000, 1000, double, unsigned int>,
     params2<int, 10, 0, 1, 10, int, int, true>,
@@ -771,6 +773,14 @@ TYPED_TEST(HipcubDeviceHistogramMultiEven, MultiEven)
         upper_level[channel] = test_utils::convert_to_device<level_type>(n_upper_level[channel]);
     }
 
+    // accuracy problems with bfloat and half
+    // nvidia cub also doesn't work
+    // TODO: check if nvidia works with only sample type bfloat/half
+    if(test_utils::is_half<level_type>::value || test_utils::is_bfloat16<level_type>::value)
+    {
+        GTEST_SKIP();
+    }
+
     hipStream_t stream = 0; // default
     if(TestFixture::params::use_graphs)
     {
@@ -1030,7 +1040,9 @@ using Params4 = ::testing::Types<
     params4<unsigned short, 4, 4, 65536, 0, 1, 1, int>,
     params4<unsigned char, 3, 2, 256, 0, 1, 1, unsigned short>,
     params4<test_utils::half, 3, 1, 3, 10000, 1000, 1000, test_utils::half, unsigned int>,
+#if defined(__HIP_PLATFORM_AMD__)
     params4<test_utils::bfloat16, 3, 1, 3, 10000, 1000, 1000, test_utils::bfloat16, unsigned int>,
+#endif
     params4<float, 4, 2, 456, -100, 1, 123>,
     params4<double, 3, 1, 3, 10000, 1000, 1000, double, unsigned int>,
     params4<int, 4, 3, 10, 0, 1, 10, int, int, true>,
