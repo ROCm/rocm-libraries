@@ -280,11 +280,12 @@ ML-based kernel selection for grouped convolution operations (forward, bwd_data,
 
 #### Forward Pass Model
 - **Training Data**: 48,845 measurements across 1,372 unique problem shapes
-- **Cross-validation Performance**:
-  - Mean Efficiency: **96.1%**
-  - P10 Efficiency: **87.2%**
-  - R²: **0.9559**
-
+- **Validation Set**: 300 unseen problems from model crawler
+- **Validation Performance** (vs. oracle):
+  - Mean Efficiency: **93.05%**
+  - Median Efficiency: **96.8%**
+  - P10 Efficiency: **79.9%**
+  
 #### Backward Data Gradient (bwd_data) Model
 - **Training Data**: 18,773 measurements across 891 unique problem shapes
 - **Validation Set**: 300 unseen problems from model crawler
