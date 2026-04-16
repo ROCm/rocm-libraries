@@ -243,37 +243,10 @@ struct MIOpenBatchNormFwdTrainSpatialImpl<1, FpType, FpPrecType, FpAccumType>
                     hwidx = (k + (lid << 2)) - (nidx * mio_bn_config::hw);
                     index = nidx * mio_bn_config::chw + chwid + hwidx;
                     read4 = *(reinterpret_cast<const fp_type4*>(in + index));
-                    // Using Welford's algorithm for calculating variance
-                    // Manually unrolled calculation for the mean and variance of 4 elements, plus a
-                    // merger step
-
                     typename mapped_vector_type<FpPrecType, 4>::type read4Prec =
                         cast<typename mapped_vector_type<FpPrecType, 4>::type>(read4);
-                    FpPrecType mean4     = read4Prec.x;
-                    FpPrecType oldMean4  = cast<FpPrecType>(0.);
-                    FpPrecType variance4 = cast<FpPrecType>(0.);
 
-                    oldMean4 = mean4;
-                    mean4 += read4Prec.y;
-                    mean4 *= 0.5f;
-                    variance4 = fma(read4Prec.y - mean4, read4Prec.y - oldMean4, variance4);
-
-                    oldMean4 = mean4;
-                    mean4    = mean4 * 2.0f + read4Prec.z;
-                    mean4 *= 0.333333333f;
-                    variance4 = fma(read4Prec.z - mean4, read4Prec.z - oldMean4, variance4);
-
-                    oldMean4 = mean4;
-                    mean4    = mean4 * 3.0f + read4Prec.w;
-                    mean4 *= 0.25f;
-                    variance4 = fma(read4Prec.w - mean4, read4Prec.w - oldMean4, variance4);
-
-                    // merge the local mean and variance with the currently computed ones
-
-                    FpPrecType delta = mean4 - mean;
-                    mean             = (mean4 * 4.0f + mean * curN) / (curN + 4.f);
-                    variance += variance4 + delta * delta * 4.f * curN / (curN + 4.f);
-                    curN += 4.f;
+                    miopen::reduction::welford_step_unroll4(read4Prec, mean, variance, curN);
                 }
             }};
 
@@ -290,37 +263,10 @@ struct MIOpenBatchNormFwdTrainSpatialImpl<1, FpType, FpPrecType, FpAccumType>
                 if(index + 3 < (mio_bn_config::nchw))
                 {
                     read4 = *(reinterpret_cast<const fp_type4*>(in + index));
-                    // Using Welford's algorithm for calculating variance
-                    // Manually unrolled calculation for the mean and variance of 4 elements, plus a
-                    // merger step
-
                     typename mapped_vector_type<FpPrecType, 4>::type read4Prec =
                         cast<typename mapped_vector_type<FpPrecType, 4>::type>(read4);
-                    FpPrecType mean4     = read4Prec.x;
-                    FpPrecType oldMean4  = cast<FpPrecType>(0.);
-                    FpPrecType variance4 = cast<FpPrecType>(0.);
 
-                    oldMean4 = mean4;
-                    mean4 += read4Prec.y;
-                    mean4 *= 0.5f;
-                    variance4 = fma(read4Prec.y - mean4, read4Prec.y - oldMean4, variance4);
-
-                    oldMean4 = mean4;
-                    mean4    = mean4 * 2.0f + read4Prec.z;
-                    mean4 *= 0.333333333f;
-                    variance4 = fma(read4Prec.z - mean4, read4Prec.z - oldMean4, variance4);
-
-                    oldMean4 = mean4;
-                    mean4    = mean4 * 3.0f + read4Prec.w;
-                    mean4 *= 0.25f;
-                    variance4 = fma(read4Prec.w - mean4, read4Prec.w - oldMean4, variance4);
-
-                    // merge the local mean and variance with the currently computed ones
-
-                    FpPrecType delta = mean4 - mean;
-                    mean             = (mean4 * 4.0f + mean * curN) / (curN + 4.f);
-                    variance += variance4 + delta * delta * 4.f * curN / (curN + 4.f);
-                    curN += 4.f;
+                    miopen::reduction::welford_step_unroll4(read4Prec, mean, variance, curN);
                 }
             }
         }
