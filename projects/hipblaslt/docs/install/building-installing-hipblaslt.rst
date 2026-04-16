@@ -100,7 +100,7 @@ Dependencies
 ------------
 
 Python dependencies are listed in ``requirements.txt`` and installed via ``pip install -r requirements.txt``.
-System dependencies (compilers, numa, etc.) can be installed by passing ``--install-deps`` to ``inv build``.
+System dependencies (such as compilers and NUMA) can be installed by passing ``--install-deps`` to ``inv build``.
 
 Manual build for all supported platforms
 ========================================
