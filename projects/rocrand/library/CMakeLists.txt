@@ -50,6 +50,7 @@ configure_file(
     @ONLY
 )
 
+# Build
 add_library(rocrand ${rocRAND_HIP_SRCS})
 
 if(WIN32)
@@ -157,7 +158,6 @@ if (WIN32)
     install (TARGETS rocrand DESTINATION "${CMAKE_INSTALL_PREFIX}/bin")
     if (BUILD_TEST)
 	    add_custom_command(
-		    # install test files
 		    TARGET rocrand
 		    POST_BUILD
 		    COMMAND ${CMAKE_COMMAND} -E copy
@@ -167,7 +167,6 @@ if (WIN32)
     endif()
     if (BUILD_BENCHMARK)
 	    add_custom_command(
-		    # install benchmark files
 		    TARGET rocrand
 		    POST_BUILD
 		    COMMAND ${CMAKE_COMMAND} -E copy
