@@ -21,8 +21,8 @@
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
 #include <rocRoller/KernelGraph/RegisterTagManager.hpp>
 #include <rocRoller/KernelGraph/ScopeManager.hpp>
-#include <rocRoller/KernelGraph/Transforms/LowerTile_details.hpp>
 #include <rocRoller/KernelGraph/Utils.hpp>
+#include <rocRoller/KernelOptions_detail.hpp>
 #include <rocRoller/Scheduling/Scheduler.hpp>
 #include <rocRoller/Utilities/Error.hpp>
 
@@ -35,7 +35,6 @@ namespace rocRoller
         using namespace ControlGraph;
         using namespace CoordinateGraph;
         using namespace Expression;
-        using namespace LowerTileDetails;
 
         std::string toString(LoadStoreTileGenerator::LoadStoreTileInfo const& info)
         {
@@ -1272,8 +1271,8 @@ namespace rocRoller
                 {
                     inst.setModelledAddresses(modelledAddresses->second);
                     if(GPUInstructionInfo::isLDS(inst.getOpCode()))
-                        inst.addComment(
-                            fmt::format("Modelled addresses: {}", modelledAddresses->second));
+                        inst.addComment(fmt::format("Modelled addresses (normalized): {}",
+                                                    modelledAddresses->second));
                 }
                 return inst;
             };
@@ -1656,8 +1655,8 @@ namespace rocRoller
                 {
                     inst.setModelledAddresses(modelledAddresses->second);
                     if(GPUInstructionInfo::isLDS(inst.getOpCode()))
-                        inst.addComment(
-                            fmt::format("Modelled addresses: {}", modelledAddresses->second));
+                        inst.addComment(fmt::format("Modelled addresses (normalized): {}",
+                                                    modelledAddresses->second));
                 }
                 return inst;
             };

@@ -185,7 +185,7 @@ void PerformanceConfigHipImplicitGemm3DGroupBwdXdlops::HeuristicInit(
                                                                      is_kernel_split_k_valid);
             if(ai_result.first && !ai_result.second.IsEmpty())
                 use_tf32 = mode_use_tf32;
-            return ai_result;
+            return std::move(ai_result);
         };
         switch(problem.GetInDataType())
         {

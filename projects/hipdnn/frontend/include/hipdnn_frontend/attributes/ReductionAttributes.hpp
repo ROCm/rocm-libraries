@@ -13,7 +13,6 @@
 
 #include "Attributes.hpp"
 #include "TensorAttributes.hpp"
-#include <hipdnn_data_sdk/data_objects/reduction_attributes_generated.h>
 #include <hipdnn_frontend/Types.hpp>
 #include <memory>
 #include <optional>
@@ -143,34 +142,6 @@ public:
     ReductionAttributes& set_y(std::shared_ptr<TensorAttributes>&& y)
     {
         return setOutput(output_names::Y, std::move(y));
-    }
-
-    flatbuffers::Offset<hipdnn_data_sdk::data_objects::ReductionAttributes>
-        pack_attributes(flatbuffers::FlatBufferBuilder& builder) const // NOLINT
-    {
-        auto x = get_x();
-        auto y = get_y();
-
-        return hipdnn_data_sdk::data_objects::CreateReductionAttributes(
-            builder,
-            mode ? toSdkType(*mode) : hipdnn_data_sdk::data_objects::ReductionMode::NOT_SET,
-            x->get_uid(),
-            y->get_uid(),
-            is_deterministic);
-    }
-
-    static ReductionAttributes fromFlatBuffer(
-        const hipdnn_data_sdk::data_objects::ReductionAttributes* fb,
-        const std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>>& tensorMap)
-    {
-        ReductionAttributes attr;
-
-        attr.set_mode(fromSdkType(fb->mode()));
-        attr.set_x(tensorMap.at(fb->in_tensor_uid()));
-        attr.set_y(tensorMap.at(fb->out_tensor_uid()));
-        attr.set_is_deterministic(fb->is_deterministic());
-
-        return attr;
     }
 };
 

@@ -296,10 +296,6 @@ def getLocalWriteMFMAEnd(writer, kernel, tensorParametersA, tensorParametersB):
         # doPackPreSchedulingNextLoop only case (not doFullPackCodePrefetch), move syncPlrMfmaIndex to the top of 
         writer.states.syncPlrMfmaIndex = numMfmaPerIter*(kernel["LoopIters"]-writer.states.numItersPLR)
 
-    if kernel["ForceUnrollSubIter"]:
-        if ( kernel["ProblemType"]["DataType"].isComplex()):
-            writer.states.syncPlrMfmaIndex = writer.states.syncPlrMfmaIndex *4   # Complex
-
     numMfmaBetweenLWandBarrier = 2 if kernel["MatrixInstM"] == 32 else 3
     if kernel["NoLdsWriteCode"]:
         # no interval needed in no ds_write case
