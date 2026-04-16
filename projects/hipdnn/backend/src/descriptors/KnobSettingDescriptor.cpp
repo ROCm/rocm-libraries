@@ -20,7 +20,7 @@ void KnobSettingDescriptor::finalize()
                   HIPDNN_STATUS_BAD_PARAM,
                   "KnobSettingDescriptor::finalize() failed: Knob ID is not set.");
 
-    THROW_IF_TRUE(_value.type == hipdnn_data_sdk::data_objects::KnobValue::NONE,
+    THROW_IF_TRUE(_value.type == hipdnn_flatbuffers_sdk::data_objects::KnobValue::NONE,
                   HIPDNN_STATUS_BAD_PARAM,
                   "KnobSettingDescriptor::finalize() failed: Value is not set.");
 
@@ -111,14 +111,14 @@ void KnobSettingDescriptor::getAttribute(hipdnnBackendAttributeName_t attributeN
 // Other methods
 // ============================================================================
 
-std::unique_ptr<hipdnn_data_sdk::data_objects::KnobSettingT>
+std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::KnobSettingT>
     KnobSettingDescriptor::toKnobSettingT() const
 {
     THROW_IF_FALSE(isFinalized(),
                    HIPDNN_STATUS_NOT_INITIALIZED,
                    "KnobSettingDescriptor::toKnobSettingT() failed: Not finalized.");
 
-    auto knobSetting = std::make_unique<hipdnn_data_sdk::data_objects::KnobSettingT>();
+    auto knobSetting = std::make_unique<hipdnn_flatbuffers_sdk::data_objects::KnobSettingT>();
     knobSetting->knob_id = _knobId;
 
     copyKnobValueUnion(_value, knobSetting->value, "KnobSettingDescriptor::toKnobSettingT()");

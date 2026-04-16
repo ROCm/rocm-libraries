@@ -31,11 +31,34 @@ void heuristic_params_t::merge_with(const heuristic_params_t& other) {
   weight_tile_total    = other.weight_tile_total;
 
   // Empirical constants
-  l2_min_hit_rate_default    = other.l2_min_hit_rate_default;
-  main_memory_load_latency   = other.main_memory_load_latency;
-  occupancy_decay_base       = other.occupancy_decay_base;
-  k_split_reduction_overhead = other.k_split_reduction_overhead;
-  k_padding_penalty          = other.k_padding_penalty;
+  main_memory_load_latency            = other.main_memory_load_latency;
+  occupancy_decay_base                = other.occupancy_decay_base;
+  mall_depth_sq                       = other.mall_depth_sq;
+  mall_cold_floor                     = other.mall_cold_floor;
+  l2_depth_sq                         = other.l2_depth_sq;
+  l2_cold_floor                       = other.l2_cold_floor;
+  l2_pollution_penalty                = other.l2_pollution_penalty;
+  l2_amp_ceiling_batched              = other.l2_amp_ceiling_batched;
+  l2_amp_ceiling_k_split              = other.l2_amp_ceiling_k_split;
+  l2_amp_ceiling_skinny               = other.l2_amp_ceiling_skinny;
+  l2_depth_penalty                    = other.l2_depth_penalty;
+  l1_hit_rate_ceiling_skinny          = other.l1_hit_rate_ceiling_skinny;
+  epilogue_cycles_per_acc_read        = other.epilogue_cycles_per_acc_read;
+  epilogue_acc_read_parallelism       = other.epilogue_acc_read_parallelism;
+  epilogue_cycles_per_bounds_check    = other.epilogue_cycles_per_bounds_check;
+  epilogue_scalar_store_penalty       = other.epilogue_scalar_store_penalty;
+  epilogue_threads_per_wave           = other.epilogue_threads_per_wave;
+  epilogue_bytes_per_vectorized_store = other.epilogue_bytes_per_vectorized_store;
+  epilogue_cache_line_bytes           = other.epilogue_cache_line_bytes;
+  epilogue_workspace_bytes_per_elem   = other.epilogue_workspace_bytes_per_elem;
+  epilogue_salu_overhead              = other.epilogue_salu_overhead;
+  epilogue_l_barrier                  = other.epilogue_l_barrier;
+  epilogue_l_smem                     = other.epilogue_l_smem;
+  epilogue_k_padding_penalty          = other.epilogue_k_padding_penalty;
+  postgsu_compute_bytes               = other.postgsu_compute_bytes;
+  postgsu_kernel_launch_overhead      = other.postgsu_kernel_launch_overhead;
+  postgsu_threads_per_wg              = other.postgsu_threads_per_wg;
+  postgsu_wavefront_size              = other.postgsu_wavefront_size;
 
   // Main loop efficiency
   main_loop_efficiency = other.main_loop_efficiency;
@@ -191,8 +214,8 @@ heuristic_params_t heuristics_database_t::lookup(const problem_t& problem,
     auto it = hand_optimized_map_.find(fast_key);
     if (it != hand_optimized_map_.end()) {
       if (origami::runtime_options::get().debug_enabled) {
-        OLOG_DEBUG("Hand-optimized kernel " << fast_key.to_string() << ", efficiency: "
-                   << it->second.main_loop_efficiency);
+        OLOG_DEBUG("Hand-optimized kernel " << fast_key.to_string()
+                                            << ", efficiency: " << it->second.main_loop_efficiency);
       }
       result = it->second;
     }
@@ -240,6 +263,17 @@ void heuristics_database_t::add_entry(const heuristic_key_t& key,
   } else {
     entries_.push_back({key, params});
   }
+}
+
+bool heuristics_database_t::has_hand_optimized_entry(hardware_t::architecture_t arch,
+                                                     data_type_t mi_dtype,
+                                                     transpose_t transA,
+                                                     transpose_t transB,
+                                                     size_t mt_m,
+                                                     size_t mt_n,
+                                                     size_t mt_k) const {
+  hand_optimized_kernel_key_t key{arch, mi_dtype, transA, transB, mt_m, mt_n, mt_k};
+  return hand_optimized_map_.find(key) != hand_optimized_map_.end();
 }
 
 void heuristics_database_t::initialize_defaults() {
@@ -324,6 +358,24 @@ void heuristics_database_t::initialize_defaults() {
                                                 data_type_t::BFloat16,
                                                 transpose_t::T,
                                                 transpose_t::N,
+                                                cfg.m,
+                                                cfg.n,
+                                                cfg.k);
+      heuristic_params_t params;
+      params.main_loop_efficiency = cfg.eff;
+      add_entry(key, params);
+    }
+
+    // BF16 TT configurations
+    std::vector<cms_config> bf16_tt_configs = {
+        {256, 256, 64, 1.0 / 1.10},
+    };
+
+    for (const auto& cfg : bf16_tt_configs) {
+      auto key = make_hand_optimized_kernel_key(hardware_t::architecture_t::gfx950,
+                                                data_type_t::BFloat16,
+                                                transpose_t::T,
+                                                transpose_t::T,
                                                 cfg.m,
                                                 cfg.n,
                                                 cfg.k);
