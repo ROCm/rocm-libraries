@@ -4,14 +4,10 @@
 #pragma once
 
 #include <array>
-#include <ios>
 #include <iostream>
-#include <iterator>
-#include <limits>
-#include <memory>
-#include <sstream>
 #include <tuple>
 #include <utility>
+#include <vector>
 
 #include <miopen/algorithm.hpp>
 #include <miopen/any_solver.hpp>
@@ -33,7 +29,6 @@
 #include "driver.hpp"
 #include "get_handle.hpp"
 #include "gtest/gtest.h"
-#include <vector>
 #include "gpu_conv.hpp"
 #include "miopen/find_db.hpp"
 #include "random.hpp"
@@ -2550,95 +2545,5 @@ struct conv_test
                 }
             }
         }
-    }
-};
-
-// CONV BIAS
-//==========================
-template <class T>
-struct verify_backwards_bias
-{
-    tensor<T> output;
-    tensor<T> bias;
-
-    tensor<T> cpu() const
-    {
-        auto rbias = bias;
-        cpu_bias_backward_data(output, rbias);
-        return rbias;
-    }
-
-    tensor<T> gpu() const
-    {
-        auto&& handle = get_handle();
-        auto rbias    = bias;
-
-        auto out_dev  = handle.Write(output.data);
-        auto bias_dev = handle.Write(rbias.data);
-
-        float alpha = 1, beta = 0;
-        ConvolutionBackwardBias(
-            handle, &alpha, output.desc, out_dev.get(), &beta, rbias.desc, bias_dev.get());
-
-        rbias.data = handle.Read<T>(bias_dev, rbias.data.size());
-        return rbias;
-    }
-
-    void fail() const
-    {
-        ADD_FAILURE() << "Backwards bias: " << "\n"
-                      << "Output tensor: " << output.desc.ToString() << "\n"
-                      << "Bias tensor: " << bias.desc.ToString();
-    }
-};
-
-template <class T>
-struct conv_bias_test
-{
-    tensor<T> output;
-
-    int get_spatial_dim() const
-    {
-        for(int i = 2; i < 4; i++)
-        {
-            if(output.desc.GetNumDims() == i + 2)
-                return i;
-        }
-        return -1;
-    }
-
-    void run()
-    {
-        const int spatial_dim = get_spatial_dim();
-        if(spatial_dim < 0)
-        {
-            FAIL() << "FAILED: get_spatial_dim() can't calculate dims count.";
-        }
-
-        std::vector<std::size_t> bias_lens(2 + spatial_dim, 1);
-        bias_lens[1] = output.desc.GetLengths()[1];
-
-        tensor<T> bias(bias_lens);
-
-        if(!(bias.desc.GetLengths()[0] == 1 &&
-             bias.desc.GetLengths()[1] == output.desc.GetLengths()[0] &&
-             std::all_of(bias.desc.GetLengths().begin() + 2,
-                         bias.desc.GetLengths().end(),
-                         [](auto v) { return v == 1; })))
-        {
-            return;
-        }
-
-        size_t total_mem =
-            bias.desc.GetNumBytes() + output.desc.GetNumBytes(); // estimate based on backward pass
-        size_t device_mem = get_handle().GetGlobalMemorySize();
-        if(total_mem >= device_mem)
-        {
-            FAIL() << "Config requires " << total_mem
-                   << " Bytes to write all necessary tensors to GPU. GPU has " << device_mem
-                   << " Bytes of memory.";
-        }
-
-        test_helpers::CompareResults(verify_backwards_bias<T>{output, bias});
     }
 };

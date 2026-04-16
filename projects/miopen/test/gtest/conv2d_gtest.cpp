@@ -3,8 +3,6 @@
 
 #pragma once
 
-#include <utility>
-
 #include "conv_common_gtest.hpp"
 
 namespace {
