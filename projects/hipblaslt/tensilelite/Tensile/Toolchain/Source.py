@@ -22,8 +22,6 @@
 #
 ################################################################################
 
-import hashlib
-import os
 import re
 import shutil
 
@@ -35,6 +33,7 @@ from ..Common import print1, ensurePath
 from ..Common.TimingInstrumentation import timing_context
 
 from .Component import Compiler, Bundler
+from .HelperKernelCache import HelperKernelCache
 
 class SourceToolchain(NamedTuple):
    compiler: Compiler
@@ -45,63 +44,6 @@ def makeSourceToolchain(compiler_path, bundler_path, asan_build=False, build_id_
    compiler = Compiler(compiler_path, build_id_kind, asan_build, save_temps)
    bundler = Bundler(bundler_path)
    return SourceToolchain(compiler, bundler)
-
-
-_HELPER_CACHE_DIR_DEFAULT = Path.home() / ".tensile" / "helper_cache"
-
-_STATIC_HEADER_FILES = [
-    "KernelHeader.h",
-    "TensileTypes.h",
-    "tensile_bfloat16.h",
-    "tensile_float8_bfloat8.h",
-    "ReductionTemplate.h",
-    "memory_gfx.h",
-]
-
-
-def _computeCacheKey(kernelPath, includeDir, cmdlineArchs, compiler):
-    """Compute SHA256 cache key from source contents + build metadata."""
-    h = hashlib.sha256()
-    h.update(Path(kernelPath).read_bytes())
-    h.update(Path(includeDir, "Kernels.h").read_bytes())
-    for name in _STATIC_HEADER_FILES:
-        h.update(Path(includeDir, name).read_bytes())
-    h.update(",".join(sorted(cmdlineArchs)).encode())
-    v = compiler.version
-    h.update(f"{v.major}.{v.minor}.{v.patch}".encode())
-    rv = compiler.rocm_version
-    h.update(f"{rv.major}.{rv.minor}.{rv.patch}".encode())
-    h.update(b"asan" if "-fsanitize=address" in compiler.default_args else b"no-asan")
-    return h.hexdigest()
-
-
-def _checkCache(cacheDir, cacheKey):
-    """Check if a valid cache entry exists. Returns list of .hsaco Paths or None."""
-    entryDir = Path(cacheDir) / cacheKey
-    if not entryDir.is_dir():
-        return None
-    hsacoFiles = list(entryDir.glob("*.hsaco"))
-    if not hsacoFiles or any(f.stat().st_size == 0 for f in hsacoFiles):
-        return None
-    return hsacoFiles
-
-
-def _populateCache(cacheDir, cacheKey, hsacoFiles):
-    """Atomically populate a cache entry. Safe under concurrent writes."""
-    cacheDir = Path(cacheDir)
-    finalDir = cacheDir / cacheKey
-    if finalDir.exists():
-        return
-
-    tmpDir = cacheDir / f".tmp_{cacheKey}_{os.getpid()}"
-    tmpDir.mkdir(parents=True, exist_ok=True)
-    for f in hsacoFiles:
-        shutil.copy2(Path(f), tmpDir / Path(f).name)
-
-    try:
-        tmpDir.rename(finalDir)
-    except OSError:
-        shutil.rmtree(tmpDir, ignore_errors=True)
 
 
 def _computeSourceCodeObjectFilename(target: str, base: str, buildPath: Union[Path, str], arch: str) -> Union[Path, None]:
@@ -152,12 +94,7 @@ def buildSourceCodeObjectFiles(
         List of paths to the created code objects.
     """
     start = timer()
-
-    cacheEnabled = os.environ.get("TENSILE_DISABLE_HELPER_CACHE", "").upper() \
-                   not in ("1", "YES", "ON", "TRUE")
-    cacheDir = Path(os.environ.get("TENSILE_HELPER_CACHE_DIR",
-                                   str(_HELPER_CACHE_DIR_DEFAULT)))
-    cacheKey = None
+    cache = HelperKernelCache()
 
     with timing_context("python_kernel_build_src_co.setup"):
         tmpObjDir = Path(ensurePath(tmpObjDir))
@@ -168,22 +105,12 @@ def buildSourceCodeObjectFiles(
         coPathsRaw = []
         coPaths= []
 
-    if cacheEnabled:
-        with timing_context("python_kernel_build_src_co.cache_check"):
-            cacheKey = _computeCacheKey(kernelPath, includeDir, cmdlineArchs, compiler)
-            cachedFiles = _checkCache(cacheDir, cacheKey)
-
-        if cachedFiles:
-            with timing_context("python_kernel_build_src_co.cache_hit"):
-                for f in cachedFiles:
-                    dst = destDir / f.name
-                    shutil.copy2(f, dst)
-                    coPaths.append(str(dst))
-            stop = timer()
-            print1(f"buildSourceCodeObjectFile time (s): {(stop-start):3.2f}  [cache hit]")
-            return coPaths
-        else:
-            print1(f"# Helper kernel cache MISS ({cacheKey[:12]}...)")
+    with timing_context("python_kernel_build_src_co.cache_check"):
+        hit, coPaths = cache.restore(kernelPath, includeDir, cmdlineArchs, compiler, destDir)
+    if hit:
+        stop = timer()
+        print1(f"buildSourceCodeObjectFile time (s): {(stop-start):3.2f}  [cache hit]")
+        return coPaths
 
     objPath = str(tmpObjDir / objFilename)
     with timing_context("python_kernel_build_src_co.compile"):
@@ -206,10 +133,8 @@ def buildSourceCodeObjectFiles(
         for src, dst in zip(coPathsRaw, coPaths):
             shutil.move(src, dst)
 
-    if cacheEnabled and cacheKey:
-        with timing_context("python_kernel_build_src_co.cache_populate"):
-            cacheDir.mkdir(parents=True, exist_ok=True)
-            _populateCache(cacheDir, cacheKey, [Path(p) for p in coPaths])
+    with timing_context("python_kernel_build_src_co.cache_populate"):
+        cache.store(coPaths)
 
     stop = timer()
     print1(f"buildSourceCodeObjectFile time (s): {(stop-start):3.2f}")
