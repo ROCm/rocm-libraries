@@ -3,7 +3,6 @@
 
 #include <gtest/gtest.h>
 
-#include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 
 int main(int argc, char** argv)

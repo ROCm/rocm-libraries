@@ -180,7 +180,8 @@ namespace TensileLite
                 iot::mapRequired(io, "cType", s.cType);
                 iot::mapRequired(io, "dType", s.dType);
                 iot::mapOptional(io, "eType", s.eType);
-                iot::mapRequired(io, "computeInputType", s.computeInputType);
+                iot::mapRequired(io, "computeInputTypeA", s.computeInputTypeA);
+                iot::mapRequired(io, "computeInputTypeB", s.computeInputTypeB);
                 iot::mapRequired(io, "computeType", s.computeType);
                 iot::mapOptional(io, "useGradient", s.useGradient);
                 iot::mapRequired(io, "useBeta", s.useBeta);
@@ -204,8 +205,13 @@ namespace TensileLite
                 iot::mapOptional(io, "sparse", s.sparse);
                 iot::mapOptional(io, "f32XdlMathOp", s.f32XdlMathOp);
                 iot::mapOptional(io, "supportDeviceUserArguments", s.supportDeviceUserArguments);
+                iot::mapOptional(io, "mxBlockA", s.mxBlockA);
+                iot::mapOptional(io, "mxTypeA", s.mxTypeA);
+                iot::mapOptional(io, "mxBlockB", s.mxBlockB);
+                iot::mapOptional(io, "mxTypeB", s.mxTypeB);
                 iot::mapOptional(io, "swizzleTensorA", s.swizzleTensorA);
                 iot::mapOptional(io, "swizzleTensorB", s.swizzleTensorB);
+                iot::mapOptional(io, "metadataLayout", s.metadataLayout);
             }
 
             const static bool flow = false;

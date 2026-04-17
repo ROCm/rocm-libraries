@@ -97,9 +97,18 @@ if(HIPSPARSE_ENABLE_HOST)
     add_subdirectory(library)
 endif()
 
+# Must be set before add_subdirectory(clients): clients/tests needs it for CTest categories
+# (shared/ctest/TestCategories.cmake and test_categories.yaml).
+if(NOT DEFINED ROCM_LIBRARIES_ROOT)
+    set(ROCM_LIBRARIES_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../..")
+endif()
+
 # --- Client targets ---
 
 if(HIPSPARSE_ENABLE_CLIENT OR HIPSPARSE_BUILD_TESTING OR BUILD_TESTING)
+    # Required at project root so ${CMAKE_BINARY_DIR}/CTestTestfile.cmake exists.
+    # Otherwise ctest run from the build root finds no tests (they only lived under clients/).
+    enable_testing()
     include(rocm_client_prerequisites)
     add_subdirectory(clients)
 endif()

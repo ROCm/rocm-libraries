@@ -16,9 +16,9 @@
 
 #include <flatbuffers/flatbuffers.h>
 #include <gtest/gtest.h>
-#include <hipdnn_data_sdk/data_objects/convolution_fwd_attributes_generated.h>
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
-#include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/convolution_fwd_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_test_sdk/constants/ConvFpropConstants.hpp>
 #include <hipdnn_test_sdk/utilities/ToVec.hpp>
 
@@ -30,7 +30,7 @@
 
 using namespace hipdnn_backend;
 using namespace hipdnn_backend::test_utilities;
-using namespace hipdnn_data_sdk::data_objects;
+using namespace hipdnn_flatbuffers_sdk::data_objects;
 using namespace hipdnn_tests::constants;
 using hipdnn_tests::toVec;
 
@@ -1192,7 +1192,7 @@ public:
 
         auto flatbufferBuffer
             = buildGraphViaFlatBuffer(xTensor, wTensor, yTensor, convAttrs, sdkComputeDt);
-        auto flatbufferGraphT = UnPackGraph(flatbufferBuffer.data());
+        auto serializedGraphT = UnPackGraph(flatbufferBuffer.data());
 
         // Build via descriptor path
         auto descriptorGraphT = buildGraphViaDescriptors(p.xUid,
@@ -1212,12 +1212,12 @@ public:
                                                          p.computeDataType);
 
         // Verify structural equivalence
-        ASSERT_EQ(flatbufferGraphT->tensors.size(), descriptorGraphT->tensors.size());
-        ASSERT_EQ(flatbufferGraphT->nodes.size(), descriptorGraphT->nodes.size());
+        ASSERT_EQ(serializedGraphT->tensors.size(), descriptorGraphT->tensors.size());
+        ASSERT_EQ(serializedGraphT->nodes.size(), descriptorGraphT->nodes.size());
 
         // Compare tensors (order may differ, so compare by UID)
         std::map<int64_t, const TensorAttributesT*> fbTensors;
-        for(const auto& t : flatbufferGraphT->tensors)
+        for(const auto& t : serializedGraphT->tensors)
         {
             fbTensors[t->uid] = t.get();
         }
@@ -1236,10 +1236,10 @@ public:
         }
 
         // Compare nodes
-        ASSERT_EQ(flatbufferGraphT->nodes.size(), 1);
+        ASSERT_EQ(serializedGraphT->nodes.size(), 1);
         ASSERT_EQ(descriptorGraphT->nodes.size(), 1);
 
-        const auto& fbNode = flatbufferGraphT->nodes[0];
+        const auto& fbNode = serializedGraphT->nodes[0];
         const auto& descNode = descriptorGraphT->nodes[0];
 
         EXPECT_EQ(fbNode->compute_data_type, descNode->compute_data_type);
@@ -1971,6 +1971,58 @@ TEST_F(TestGraphDescriptorOps, GetAttributeNameCountWhenUnset)
     ASSERT_NO_THROW(desc->getAttribute(
         HIPDNN_ATTR_OPERATIONGRAPH_NAME_EXT, HIPDNN_TYPE_CHAR, 0, &elementCount, nullptr));
     EXPECT_EQ(elementCount, 1);
+}
+
+TEST_F(TestGraphDescriptorOps, AppendOpsAfterSerialization)
+{
+    // Set a single op, build the serialized buffer, then append more ops
+    auto conv1 = createDefaultConvOp();
+
+    auto desc = getDescriptor();
+    setHandle();
+
+    std::array<HipdnnBackendDescriptor*, 1> ops1 = {conv1.convOp.get()};
+    ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_OPS,
+                                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                       1,
+                                       static_cast<const void*>(ops1.data())));
+
+    // Build the serialized buffer explicitly
+    desc->buildSerializedGraph();
+    auto serialized1 = desc->getSerializedGraph();
+    ASSERT_NE(serialized1.ptr, nullptr);
+    ASSERT_GT(serialized1.size, 0UL);
+
+    // Append a second operation (should succeed and invalidate the cache)
+    auto xDesc2 = createFinalizedTensor(
+        K_ALT_TENSOR_X_UID, toVec(K_FPROP_TENSOR_X_DIMS), toVec(K_FPROP_TENSOR_X_STRIDES));
+    auto wDesc2 = createFinalizedTensor(
+        K_ALT_TENSOR_W_UID, toVec(K_FPROP_TENSOR_W_DIMS), toVec(K_FPROP_TENSOR_W_STRIDES));
+    auto yDesc2 = createFinalizedTensor(
+        K_ALT_TENSOR_Y_UID, toVec(K_FPROP_TENSOR_Y_DIMS), toVec(K_FPROP_TENSOR_Y_STRIDES));
+    auto convOp2 = createFinalizedConvOp(xDesc2.get(), wDesc2.get(), yDesc2.get());
+
+    std::array<HipdnnBackendDescriptor*, 1> ops2 = {convOp2.get()};
+    ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_OPS,
+                                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                       1,
+                                       static_cast<const void*>(ops2.data())));
+
+    // Verify cache was invalidated by the append
+    ASSERT_THROW_HIPDNN_STATUS(desc->getSerializedGraph(), HIPDNN_STATUS_BAD_PARAM);
+
+    // Verify operations count is 2
+    int64_t elementCount = 0;
+    ASSERT_NO_THROW(desc->getAttribute(
+        HIPDNN_ATTR_OPERATIONGRAPH_OPS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 0, &elementCount, nullptr));
+    EXPECT_EQ(elementCount, 2);
+
+    // Verify re-serialization reflects both operations
+    desc->buildSerializedGraph();
+    auto serialized2 = desc->getSerializedGraph();
+    auto graphT = UnPackGraph(serialized2.ptr);
+    ASSERT_EQ(graphT->nodes.size(), 2);
+    ASSERT_EQ(graphT->tensors.size(), 6);
 }
 
 TEST_F(TestGraphDescriptorOps, GetAttributeWrongTypeForName)
