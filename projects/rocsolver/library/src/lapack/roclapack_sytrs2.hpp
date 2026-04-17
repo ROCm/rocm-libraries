@@ -368,7 +368,8 @@ static __global__
     auto const offsetB = idx2D(0, jstart, ldb);
 
     // -------------------------------------------
-    // NOTE: each thread block swap locally nrhs columns
+    // NOTE: each thread block swap nrhs columns locally
+    // so check value of nrhs
     // -------------------------------------------
     if((nrhs == 0) || (n == 0) || (batch_count == 0))
     {
@@ -633,7 +634,7 @@ static __global__ __launch_bounds__(SYTRS1_MAX_THDS) void apply_pivot_lower_kern
     auto const offsetB = idx2D(0, jstart, ldb);
 
     // -------------------------------------------
-    // NOTE: each thread block swap locally nrhs columns
+    // NOTE: each thread block swap nrhs columns locally
     // so check value of nrhs
     // -------------------------------------------
     if((nrhs == 0) || (n == 0) || (batch_count == 0))

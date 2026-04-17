@@ -139,7 +139,7 @@ __device__ static T reduce_sum_shfl_wsize(I const wsize, T val)
 //
 // launch as dim3( nbx, 1, batch_count), dim3( SYTRS_MAX_THDS,1,1)
 //
-// nrhs_arg  columns of matrix B is spread across nbx thread blocks
+// nrhs_arg  columns of matrix B are  spread across nbx thread blocks
 // ------------------------------------------------
 
 template <typename T, typename I, typename Istride, typename UA, typename UB>
@@ -480,7 +480,20 @@ ROCSOLVER_KERNEL void __launch_bounds__(SYTRS_MAX_THDS) sytrs_kernel(bool const 
 
         auto ipiv = [=](auto i) -> I& { return (ipiv_bid[(i - 1)]); };
 
-        // simple heuristic
+        // -----------------------------------
+        // When each column is consistently accessed and modified by the
+        // *same* thread, then there is consistency in the memory order
+        // and the synchtread() is not needed.
+        //
+        // However, when nrhs is small, then most of the threads may be idle.
+        // In that case, we'll need a different distribution of work to threads
+        // and we'll need to call syncthread()
+        // -----------------------------------
+
+        // --------------------------------------------
+        // A simple heuristic to determine when nrhs is sufficiently large
+        // to use the algorithm for reducing number of syncthreads()
+        // --------------------------------------------
         bool use_reduce_sync = (nrhs >= warpSize);
 
         //   -------------------------------------------------------------------------------------
