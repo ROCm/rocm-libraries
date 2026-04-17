@@ -20,10 +20,13 @@ add_library(
     engines/plans/RMSnorm/RMSnormPlanBuilder.cpp
     engines/plans/RMSnorm/RMSnormFwdPlan.cpp
     engines/plans/RMSnorm/RMSnormApplicabilityChecks.cpp
+    engines/plans/RMSnorm/RMSnormBwdPlan.cpp
+    engines/plans/RMSnorm/RMSnormBwdPlanBuilder.cpp
     engines/plans/layernorm/LayernormApplicabilityChecks.cpp
     engines/plans/layernorm/LayernormFwdPlan.cpp
     engines/plans/layernorm/LayernormPlanBuilder.cpp
     engines/plans/layernorm/LayernormUtilities.cpp
+    engines/plans/ApplicabilityChecks.cpp
 )
 if(ENABLE_ASM_SDPA_ENGINE)
     add_subdirectory(engines/asm_sdpa_engine)

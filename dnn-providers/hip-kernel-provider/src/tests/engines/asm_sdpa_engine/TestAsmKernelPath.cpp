@@ -1,7 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-#include <cstdlib>
+#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 
 #include <gtest/gtest.h>
 
@@ -20,7 +20,7 @@ namespace
 TEST(TestAsmKernelPath, GetAsmKernelDirReturnsCompileTimeDefault)
 {
     // Ensure the env var is unset for this test
-    ::unsetenv("HIPDNN_AITER_ASM_DIR");
+    hipdnn_data_sdk::utilities::unsetEnv("HIPDNN_AITER_ASM_DIR");
 
     std::string dir = getAsmKernelDir();
     EXPECT_EQ(dir, AITER_ASM_DIR);
@@ -29,29 +29,29 @@ TEST(TestAsmKernelPath, GetAsmKernelDirReturnsCompileTimeDefault)
 TEST(TestAsmKernelPath, GetAsmKernelDirReturnsEnvVarWhenSet)
 {
     const char* customDir = "/custom/kernel/path";
-    ::setenv("HIPDNN_AITER_ASM_DIR", customDir, 1);
+    hipdnn_data_sdk::utilities::setEnv("HIPDNN_AITER_ASM_DIR", customDir);
 
     std::string dir = getAsmKernelDir();
     EXPECT_EQ(dir, customDir);
 
     // Clean up
-    ::unsetenv("HIPDNN_AITER_ASM_DIR");
+    hipdnn_data_sdk::utilities::unsetEnv("HIPDNN_AITER_ASM_DIR");
 }
 
 TEST(TestAsmKernelPath, GetAsmKernelDirIgnoresEmptyEnvVar)
 {
-    ::setenv("HIPDNN_AITER_ASM_DIR", "", 1);
+    hipdnn_data_sdk::utilities::setEnv("HIPDNN_AITER_ASM_DIR", "");
 
     std::string dir = getAsmKernelDir();
     EXPECT_EQ(dir, AITER_ASM_DIR);
 
     // Clean up
-    ::unsetenv("HIPDNN_AITER_ASM_DIR");
+    hipdnn_data_sdk::utilities::unsetEnv("HIPDNN_AITER_ASM_DIR");
 }
 
 TEST(TestAsmKernelPath, GetAsmKernelPathAppendsFilename)
 {
-    ::unsetenv("HIPDNN_AITER_ASM_DIR");
+    hipdnn_data_sdk::utilities::unsetEnv("HIPDNN_AITER_ASM_DIR");
 
     std::string path = getAsmKernelPath("kernel.co");
     std::string expected = std::string(AITER_ASM_DIR) + "/kernel.co";
@@ -61,13 +61,13 @@ TEST(TestAsmKernelPath, GetAsmKernelPathAppendsFilename)
 TEST(TestAsmKernelPath, GetAsmKernelPathUsesEnvVarDir)
 {
     const char* customDir = "/env/kernels";
-    ::setenv("HIPDNN_AITER_ASM_DIR", customDir, 1);
+    hipdnn_data_sdk::utilities::setEnv("HIPDNN_AITER_ASM_DIR", customDir);
 
     std::string path = getAsmKernelPath("gfx942/test.co");
     EXPECT_EQ(path, "/env/kernels/gfx942/test.co");
 
     // Clean up
-    ::unsetenv("HIPDNN_AITER_ASM_DIR");
+    hipdnn_data_sdk::utilities::unsetEnv("HIPDNN_AITER_ASM_DIR");
 }
 
 } // namespace
