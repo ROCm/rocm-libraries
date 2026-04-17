@@ -1994,9 +1994,13 @@ inline flatbuffers::FlatBufferBuilder
         const std::vector<int64_t> statsDims = {qDims[0], qDims[1], qDims[2], 1};
         const std::vector<int64_t> statsStrides = {qDims[1] * qDims[2], qDims[2], 1, 1};
         const auto stUid = uid++;
-        tensorAttributes.push_back(
-            hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
-                builder, stUid, "stats", dataType, &statsStrides, &statsDims));
+        tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+            builder,
+            stUid,
+            "stats",
+            hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+            &statsStrides,
+            &statsDims));
         statsUid = flatbuffers::Optional<int64_t>(stUid);
     }
 
@@ -2189,7 +2193,11 @@ inline flatbuffers::FlatBufferBuilder
                             const std::vector<int64_t>& oDims = {2, 8, 16, 64},
                             const std::vector<int64_t>& oStrides = {8192, 1024, 64, 1},
                             hipdnn_flatbuffers_sdk::data_objects::DataType dataType
-                            = hipdnn_flatbuffers_sdk::data_objects::DataType::HALF)
+                            = hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+                            bool withScale = false,
+                            bool alibiMask = false,
+                            bool paddingMask = false,
+                            bool causalMask = false)
 {
     flatbuffers::FlatBufferBuilder builder;
     std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>
@@ -2223,7 +2231,12 @@ inline flatbuffers::FlatBufferBuilder
     const std::vector<int64_t> statsStrides = {qDims[1] * qDims[2], qDims[2], 1, 1};
     const auto statsUid = uid++;
     tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
-        builder, statsUid, "stats", dataType, &statsStrides, &statsDims));
+        builder,
+        statsUid,
+        "stats",
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        &statsStrides,
+        &statsDims));
 
     // Output gradient tensors (same shapes as Q, K, V)
     const auto dqUid = uid++;
@@ -2238,8 +2251,49 @@ inline flatbuffers::FlatBufferBuilder
     tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
         builder, dvUid, "dv", dataType, &vStrides, &vDims));
 
+    flatbuffers::Optional<int64_t> scaleUid = flatbuffers::nullopt;
+    if(withScale)
+    {
+        const std::vector<int64_t> passByValueDims = {1};
+        const hipdnn_flatbuffers_sdk::data_objects::Float32Value scaleVal(1.0f);
+        const auto sUid = uid++;
+        tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+            builder,
+            sUid,
+            "scale",
+            hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+            &passByValueDims,
+            &passByValueDims,
+            false,
+            hipdnn_flatbuffers_sdk::data_objects::TensorValue::Float32Value,
+            builder.CreateStruct(scaleVal).Union()));
+        scaleUid = flatbuffers::Optional<int64_t>(sUid);
+    }
+
     auto sdpaBwdAttributes = hipdnn_flatbuffers_sdk::data_objects::CreateSdpaBackwardAttributes(
-        builder, qUid, kUid, vUid, oUid, doUid, statsUid, dqUid, dkUid, dvUid);
+        builder,
+        qUid,
+        kUid,
+        vUid,
+        oUid,
+        doUid,
+        statsUid,
+        dqUid,
+        dkUid,
+        dvUid,
+        scaleUid,
+        flatbuffers::nullopt, // attn_mask_tensor_uid
+        flatbuffers::nullopt, // seq_len_q_tensor_uid
+        flatbuffers::nullopt, // seq_len_kv_tensor_uid
+        flatbuffers::nullopt, // seed_tensor_uid
+        flatbuffers::nullopt, // offset_tensor_uid
+        flatbuffers::nullopt, // dropout_mask_tensor_uid
+        flatbuffers::nullopt, // dropout_scale_tensor_uid
+        flatbuffers::nullopt, // dropout_scale_inv_tensor_uid
+        flatbuffers::nullopt, // dbias_tensor_uid
+        alibiMask,
+        paddingMask,
+        causalMask);
 
     std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Node>> nodes;
     nodes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
