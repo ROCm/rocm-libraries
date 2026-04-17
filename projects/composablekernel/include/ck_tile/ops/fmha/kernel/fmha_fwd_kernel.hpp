@@ -40,7 +40,7 @@ struct FmhaFwdKernel
     static constexpr ck_tile::index_t kBlockSize = FmhaPipeline::kBlockSize;
 
     template <typename T>
-    using has_head_dim_tail_args = decltype(T::kUseHeadDimTailArgs);
+    using has_hdim_tail_args = decltype(T::kUseHdimTailArgs);
 
     static constexpr ck_tile::index_t kBlockPerCu = FmhaPipeline::kBlockPerCu;
     static_assert(kBlockPerCu > 0);
@@ -1894,14 +1894,14 @@ struct FmhaFwdKernel
             }();
 
             BlockIndices block_indices{i_batch, i_nhead, i_nhead_k};
-            constexpr bool kPassHeadDimTailArgs = [] {
-                if constexpr(ck_tile::is_detected<has_head_dim_tail_args, FmhaPipeline>::value)
-                    return static_cast<bool>(FmhaPipeline::kUseHeadDimTailArgs);
+            constexpr bool kPassHdimTailArgs = [] {
+                if constexpr(ck_tile::is_detected<has_hdim_tail_args, FmhaPipeline>::value)
+                    return static_cast<bool>(FmhaPipeline::kUseHdimTailArgs);
                 else
                     return false;
             }();
             auto invoke_fmha_pipeline = [&](auto&&... args) -> decltype(auto) {
-                if constexpr(kPassHeadDimTailArgs)
+                if constexpr(kPassHdimTailArgs)
                 {
                     const ck_tile::index_t valid_k0_loops =
                         ck_tile::integer_divide_ceil(kargs.hdim_q, FmhaPipeline::kK0);

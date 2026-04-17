@@ -71,7 +71,7 @@ struct BlockFmhaPipelineQRKSVS
     static constexpr auto QScaleEnum          = Problem::QScaleEnum;
     static constexpr bool kHasSink            = Problem::kHasSink;
     static constexpr bool kPaddedVecLoadStore = PaddedVecLoadStore_;
-    static constexpr bool kUseHeadDimTailArgs = kPadHeadDimQ || kPadHeadDimV;
+    static constexpr bool kUseHdimTailArgs = kPadHeadDimQ || kPadHeadDimV;
 
     static constexpr ck_tile::index_t kQKScaleGranularity = Problem::kQKScaleGranularity;
     static constexpr ck_tile::index_t kVScaleGranularity  = Problem::kVScaleGranularity;
