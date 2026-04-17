@@ -914,18 +914,18 @@ class TestDirectRenderMethods:
         output_dir = tmp_path / "output"
         output_dir.mkdir()
         result = generator.render_lift_only(matmul_config, output_dir)
-        # 3 lift templates + 7 lift fragments + 1 descriptor_lifting_additions = 11
-        assert len(result) == 11
+        # 3 lift templates + 6 lift fragments + 1 descriptor_lifting_additions = 10
+        assert len(result) == 10
 
     def test_render_frontend_file_count(
         self, convolution_fwd_config, generator, tmp_path
     ):
-        """render_frontend produces exactly 10 outputs (2 files + 3 tests + 5 fragments)."""
+        """render_frontend produces exactly 9 outputs (2 files + 3 tests + 4 fragments)."""
         output_dir = tmp_path / "output"
         output_dir.mkdir()
         result = generator.render_frontend(convolution_fwd_config, output_dir)
-        # 2 file templates + 3 test templates + 5 fragment templates = 10
-        assert len(result) == 10
+        # 2 file templates + 3 test templates + 4 fragment templates = 9
+        assert len(result) == 9
 
     def test_render_dispatches_correctly(
         self, convolution_fwd_config, generator, tmp_path
@@ -1353,7 +1353,7 @@ class TestConstantsGeneration:
         self, load_test_config, generator, tmp_path
     ):
         """Constants file IS generated in lift-only mode when not set."""
-        config = load_test_config("convolution_bwd.yaml")
+        config = load_test_config("batchnorm_backward.yaml")
         assert not config.test_data.constants_include
 
         output_dir = tmp_path / "output"
@@ -1516,7 +1516,8 @@ class TestLiftingTemplateImprovements:
         content = lifting_path.read_text()
 
         assert "K_TEST_" not in content
-        assert "K_TENSOR_X_UID" in content
+        prefix = convolution_fwd_config.tensor_const_prefix
+        assert f"{prefix}TENSOR_X_UID" in content
         assert "using namespace hipdnn_tests::constants;" in content
 
     def test_lowering_uses_constants_not_inline(
@@ -1535,7 +1536,8 @@ class TestLiftingTemplateImprovements:
         content = lowering_path.read_text()
 
         assert "K_TEST_" not in content
-        assert "K_TENSOR_X_UID" in content
+        prefix = convolution_fwd_config.tensor_const_prefix
+        assert f"{prefix}TENSOR_X_UID" in content
         assert "using namespace hipdnn_tests::constants;" in content
 
     def test_lowering_uses_assert_eq_not_ge(

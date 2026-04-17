@@ -285,8 +285,8 @@ void rocsparse_clients::spmat_descr<T, I, J>::init(const Arguments& arg,
     //
     std::visit(
         select_lambdas{[&](coo_t& that) {
-                           const bool                     to_int = arg.timing ? false : true;
-                           rocsparse_matrix_factory<T, I> matrix_factory(arg, to_int, full_rank);
+                           const bool                        to_int = arg.timing ? false : true;
+                           rocsparse_matrix_factory<T, I, I> matrix_factory(arg, to_int, full_rank);
                            matrix_factory.init_coo(that.host());
                        },
 

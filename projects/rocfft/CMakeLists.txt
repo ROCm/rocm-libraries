@@ -85,7 +85,10 @@ if( ROCM_PATH )
 endif()
 
 # Using standardized versioning from rocm-cmake
-set ( VERSION_STRING "1.0.37" )
+set ( ROCFFT_VERSION_MAJOR "1" )
+set ( ROCFFT_VERSION_MINOR "0" )
+set ( ROCFFT_VERSION_PATCH "37" )
+set ( VERSION_STRING "${ROCFFT_VERSION_MAJOR}.${ROCFFT_VERSION_MINOR}.${ROCFFT_VERSION_PATCH}" )
 rocm_setup_version( VERSION ${VERSION_STRING} )
 
 # Append our library helper cmake path and the cmake path for hip (for
