@@ -52,7 +52,6 @@ namespace TensileLite
 
         std::shared_ptr<Hardware> GetCurrentDevice();
         std::shared_ptr<Hardware> GetDevice(int deviceId);
-        std::shared_ptr<Hardware> GetDevice(hipDeviceProp_t const& prop);
         std::shared_ptr<Hardware> GetDevice(hipDeviceProp_t const& prop, int deviceId);
     } // namespace hip
 } // namespace TensileLite

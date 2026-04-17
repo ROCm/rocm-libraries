@@ -109,20 +109,5 @@ namespace TensileLite
 
             return std::make_shared<HipAMDGPU>(prop, deviceId, std::make_optional(pciChipId));
         }
-
-        std::shared_ptr<Hardware> GetDevice(hipDeviceProp_t const& prop)
-        {
-            // No device id was passed in. Assume the prop refers to the current
-            // device and recover the id via hipGetDevice so analyticalHardware
-            // can still route through Origami's runtime XCC query path. Caveat:
-            // if the caller changed the current device via hipSetDevice between
-            // getting `prop` and calling this overload, the recovered id will
-            // refer to the wrong device. There are no in-tree callers of this
-            // overload; it exists only for backwards compatibility. Prefer
-            // GetDevice(prop, deviceId).
-            int deviceId = 0;
-            HIP_CHECK_EXC(hipGetDevice(&deviceId));
-            return GetDevice(prop, deviceId);
-        }
     } // namespace hip
 } // namespace TensileLite
