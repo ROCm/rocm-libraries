@@ -18,7 +18,8 @@ typedef enum
 
 typedef enum
 {
-    HIPSOLVERDN_GETRF = 0,
+    HIPSOLVERDN_GETRF       = 0,
+    HIPSOLVERDN_SYEVBATCHED = 2,
 } hipsolverDnFunction_t;
 
 #ifdef __cplusplus
