@@ -4,7 +4,6 @@
 """Main entry point for dnn-benchmark CLI."""
 
 import glob
-import json
 import socket
 import sys
 from datetime import datetime, timezone
@@ -19,235 +18,18 @@ from ..config.benchmark_config import (
     ValidationConfig,
 )
 from ..execution.ab_runner import ABRunner
-from ..execution.buffer_manager import BufferManager
-from ..execution.executor import Executor
 from ..execution.suite_runner import run_graph_all_providers
 from ..graph.loader import GraphLoader
 from ..reporting.reporter import Reporter
-from ..reporting.statistics import BenchmarkStats, CombinedBenchmarkStats
+from ..reporting.statistics import CombinedBenchmarkStats
 from ..reporting.suite_results import (
-    CorrectnessResult,
     GraphResult,
     ProviderEngineResult,
     SuiteMetadata,
     SuiteResult,
     collect_environment_info,
 )
-from ..validation import ArrayComparator, ReferenceProviderRegistry
 from .parser import create_parser
-
-
-def run_benchmark(
-    config: BenchmarkConfig,
-    seed: Optional[int] = None,
-    validation_config: Optional[ValidationConfig] = None,
-    output_path: Optional[Path] = None,
-    gpu_backend: Literal["torch", "auto", "none"] = "auto",
-    plugin_path: Optional[Path] = None,
-) -> int:
-    """Run the benchmark workflow.
-
-    Args:
-        config: Benchmark configuration.
-        seed: Optional random seed for reproducibility.
-        validation_config: Optional validation configuration.
-        output_path: Optional path to export benchmark results as JSON.
-        gpu_backend: GPU timer backend to use (torch, auto, none).
-        plugin_path: Optional path to hipDNN engine plugin directory.
-
-    Returns:
-        Exit code (0 for success, 1 for error, 2 for validation failure).
-    """
-    reporter = Reporter()
-    validation_passed = True
-
-    try:
-        # Load and validate graph
-        loader = GraphLoader()
-        graph_json = loader.load_json(config.graph_path)
-        loader.validate(graph_json)
-
-        graph_name = loader.get_graph_name(graph_json)
-        tensor_infos = loader.extract_tensor_info(graph_json)
-
-        # Print header
-        reporter.print_header(config, graph_name)
-
-        # Import hipdnn after validation to give better error messages
-        try:
-            import hipdnn_frontend as hipdnn
-        except ImportError:
-            reporter.print_error(
-                "hipdnn_frontend not available. "
-                "Install hipDNN Python bindings first."
-            )
-            return 1
-
-        if plugin_path is not None:
-            hipdnn.set_engine_plugin_paths([str(plugin_path)])
-
-        # Create handle
-        handle = hipdnn.Handle()
-
-        # Prepare executor
-        graph_json_str = json.dumps(graph_json)
-        executor = Executor(graph_json_str, config, gpu_backend=gpu_backend)
-        executor.prepare(handle)
-
-        reporter.print_init_time(executor.init_time_ms)
-
-        # Allocate buffers
-        with BufferManager(tensor_infos) as buffer_manager:
-            buffer_manager.allocate_all()
-            buffer_manager.fill_inputs_random(seed=seed)
-            buffer_manager.zero_outputs()
-
-            variant_pack = buffer_manager.create_variant_pack()
-
-            # Run warmup
-            executor.warmup(handle, variant_pack)
-
-            # Run benchmark
-            result = executor.benchmark(handle, variant_pack, graph_name=graph_name)
-
-            # Calculate statistics
-            stats = CombinedBenchmarkStats.from_result(result)
-            reporter.print_combined_stats(stats)
-
-            # Export results if requested
-            if output_path:
-                result.save_json(str(output_path))
-                print(f"Results exported to: {output_path}")
-
-            # Validation
-            if validation_config is not None and validation_config.enabled:
-                validation_passed = _run_reference_validation(
-                    graph_json=graph_json,
-                    buffer_manager=buffer_manager,
-                    tensor_infos=tensor_infos,
-                    validation_config=validation_config,
-                    reporter=reporter,
-                )
-
-        reporter.print_footer()
-        return 0 if validation_passed else 2
-
-    except GraphLoadError as e:
-        reporter.print_error(f"Graph load error: {e}")
-        return 1
-
-    except ExecutionError as e:
-        reporter.print_error(f"Execution error: {e}")
-        return 1
-
-    except Exception as e:
-        reporter.print_error(f"Unexpected error: {e}")
-        return 1
-
-
-def _run_reference_validation(
-    graph_json: dict,
-    buffer_manager: BufferManager,
-    tensor_infos: list,
-    validation_config: ValidationConfig,
-    reporter: Reporter,
-) -> bool:
-    """Run reference validation against a provider.
-
-    Args:
-        graph_json: The graph as a parsed JSON dictionary.
-        buffer_manager: Buffer manager with allocated tensors.
-        tensor_infos: List of TensorInfo objects.
-        validation_config: Validation configuration.
-        reporter: Reporter for output.
-
-    Returns:
-        True if validation passed, False otherwise.
-    """
-    try:
-        # Get reference provider
-        provider = ReferenceProviderRegistry.get_provider(validation_config.provider)
-
-        if not provider.is_available():
-            reporter.print_error(
-                f"Reference provider '{validation_config.provider}' is not available. "
-                f"Available providers: {ReferenceProviderRegistry.list_available()}"
-            )
-            return False
-
-        # Check if provider supports all operations in graph
-        if not provider.supports_graph(graph_json):
-            unsupported = provider.get_unsupported_operations(graph_json)
-            reporter.print_error(
-                f"Reference provider '{validation_config.provider}' does not support "
-                f"operations: {unsupported}"
-            )
-            return False
-
-        # Collect input data from buffer manager
-        input_data = {}
-        for tensor_info in tensor_infos:
-            if not tensor_info.is_virtual and not tensor_info.is_output:
-                data = buffer_manager.get_input_data(tensor_info.uid)
-                if data is not None:
-                    input_data[tensor_info.uid] = data
-
-        # Compute reference outputs
-        reference_outputs = provider.compute_reference(graph_json, input_data)
-
-        # Compare each output tensor
-        comparator = ArrayComparator(
-            rtol=validation_config.rtol, atol=validation_config.atol
-        )
-
-        all_passed = True
-        for tensor_info in tensor_infos:
-            if not tensor_info.is_output:
-                continue
-
-            actual_data = buffer_manager.get_output_data(tensor_info.uid)
-            if actual_data is None:
-                reporter.print_error(
-                    f"Failed to get output data for tensor {tensor_info.uid}"
-                )
-                all_passed = False
-                continue
-
-            ref_output = reference_outputs.get(tensor_info.uid)
-            if ref_output is None:
-                reporter.print_error(
-                    f"Reference provider did not produce output for tensor {tensor_info.uid}"
-                )
-                all_passed = False
-                continue
-
-            comparison = comparator.compare(
-                actual_data, ref_output.data, "hipDNN", validation_config.provider
-            )
-
-            reporter.print_reference_validation(
-                provider_name=validation_config.provider,
-                passed=comparison.passed,
-                max_abs_diff=comparison.max_abs_diff,
-                max_rel_diff=comparison.max_rel_diff,
-                rtol=validation_config.rtol,
-                atol=validation_config.atol,
-            )
-
-            if not comparison.passed:
-                all_passed = False
-
-        return all_passed
-
-    except ValueError as e:
-        reporter.print_error(f"Validation error: {e}")
-        return False
-    except NotImplementedError as e:
-        reporter.print_error(f"Validation error: {e}")
-        return False
-    except ImportError as e:
-        reporter.print_error(f"Validation error: {e}")
-        return False
 
 
 def run_pytorch_benchmark(
@@ -535,8 +317,7 @@ def run_suite(
                 for r in result.results
                 if r.status == "success"
                 and (
-                    r.correctness is None
-                    or r.correctness.tolerance_match is not False
+                    r.correctness is None or r.correctness.tolerance_match is not False
                 )
             )
             # "fail" = success but correctness explicitly failed
@@ -550,7 +331,10 @@ def run_suite(
             n_skip = sum(1 for r in result.results if r.status == "skipped")
             n_error = sum(1 for r in result.results if r.status == "error")
 
-            reporter.print_suite_graph_result(n_pass, n_fail, n_skip, n_error)
+            if config.verbose:
+                reporter.print_verbose_graph_result(result, config)
+            else:
+                reporter.print_suite_graph_result(n_pass, n_fail, n_skip, n_error)
 
             if n_error > 0:
                 has_errors = True
@@ -664,7 +448,7 @@ def main() -> int:
         )
         return 1
 
-    # Check if A/B testing mode is enabled (either AId or BId specified)
+    # A/B testing mode: --AId or --BId specified (kept as a separate path for now)
     if args.AId is not None or args.BId is not None:
         if len(resolved_files) > 1:
             print(
@@ -673,7 +457,6 @@ def main() -> int:
             )
             return 1
 
-        # Both AId and BId should be specified for A/B testing
         if args.AId is None or args.BId is None:
             print(
                 "A/B testing requires both --AId and --BId to be specified",
@@ -682,11 +465,12 @@ def main() -> int:
             return 1
 
         try:
+            ab_engine_id = args.engine[0] if args.engine else 1
             config = BenchmarkConfig(
                 graph_path=Path(resolved_files[0]),
                 warmup_iters=args.warmup,
                 benchmark_iters=args.iters,
-                engine_id=args.engine if args.engine is not None else 1,
+                engine_id=ab_engine_id,
             )
         except ValueError as e:
             print(f"Configuration error: {e}", file=sys.stderr)
@@ -705,7 +489,6 @@ def main() -> int:
             print(f"A/B configuration error: {e}", file=sys.stderr)
             return 1
 
-        # Create validation config if validation is enabled for A/B test
         ab_validation_config = None
         if args.validate != "none":
             try:
@@ -726,76 +509,53 @@ def main() -> int:
             validation_config=ab_validation_config,
         )
 
-    # Suite mode: multiple files resolved (per D-05)
-    if len(resolved_files) > 1:
-        if args.backend == "pytorch":
+    # PyTorch backend: single-graph only, separate executor (no provider discovery)
+    if args.backend == "pytorch":
+        if len(resolved_files) > 1:
             print(
                 "Suite mode is not supported with --backend pytorch",
                 file=sys.stderr,
             )
             return 1
-
         try:
-            suite_config = SuiteConfig(
+            pt_engine_id = args.engine[0] if args.engine else 1
+            pt_config = BenchmarkConfig(
+                graph_path=Path(resolved_files[0]),
                 warmup_iters=args.warmup,
                 benchmark_iters=args.iters,
-                seed=args.seed,
-                engine_filter=args.engine,
-                rtol=args.rtol,
-                atol=args.atol,
-                gpu_backend=gpu_backend,
-                reference_provider=args.validate,
+                engine_id=pt_engine_id,
             )
         except ValueError as e:
-            print(f"Suite configuration error: {e}", file=sys.stderr)
+            print(f"Configuration error: {e}", file=sys.stderr)
             return 1
-
-        return run_suite(
-            graph_paths=[Path(p) for p in resolved_files],
-            config=suite_config,
-            output_path=args.output,
-            plugin_path=args.plugin_path,
-        )
-
-    # Single file mode (backward compatible)
-    try:
-        config = BenchmarkConfig(
-            graph_path=Path(resolved_files[0]),
-            warmup_iters=args.warmup,
-            benchmark_iters=args.iters,
-            engine_id=args.engine if args.engine is not None else 1,
-        )
-    except ValueError as e:
-        print(f"Configuration error: {e}", file=sys.stderr)
-        return 1
-
-    # Route based on execution backend
-    if args.backend == "pytorch":
         return run_pytorch_benchmark(
-            config,
+            pt_config,
             seed=args.seed,
             output_path=args.output,
         )
 
-    # Create validation config if validation is enabled
-    validation_config = None
-    if args.validate != "none":
-        try:
-            validation_config = ValidationConfig(
-                provider=args.validate,
-                rtol=args.rtol,
-                atol=args.atol,
-            )
-        except ValueError as e:
-            print(f"Validation configuration error: {e}", file=sys.stderr)
-            return 1
+    # Unified hipDNN path: handles 1..N graphs x 1..N engines.
+    # Single-graph is just a 1x1 instance; verbose flag selects rich vs summary.
+    try:
+        suite_config = SuiteConfig(
+            warmup_iters=args.warmup,
+            benchmark_iters=args.iters,
+            seed=args.seed,
+            engine_filter=args.engine,
+            rtol=args.rtol,
+            atol=args.atol,
+            gpu_backend=gpu_backend,
+            reference_provider=args.validate,
+            verbose=args.verbose,
+        )
+    except ValueError as e:
+        print(f"Suite configuration error: {e}", file=sys.stderr)
+        return 1
 
-    return run_benchmark(
-        config,
-        seed=args.seed,
-        validation_config=validation_config,
+    return run_suite(
+        graph_paths=[Path(p) for p in resolved_files],
+        config=suite_config,
         output_path=args.output,
-        gpu_backend=gpu_backend,
         plugin_path=args.plugin_path,
     )
 

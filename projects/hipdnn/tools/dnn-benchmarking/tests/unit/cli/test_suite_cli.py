@@ -36,28 +36,69 @@ class TestParserGlobAndFilters:
     """Tests for --graph glob pattern and --engine filter flags."""
 
     def test_graph_accepts_glob_pattern_string(self) -> None:
-        """Test 1: --graph accepts a glob pattern string and stores as-is."""
+        """--graph accepts a glob pattern string and stores as-is."""
         parser = create_parser()
         args = parser.parse_args(["--graph", "graphs/*.json"])
         assert isinstance(args.graph, str)
         assert args.graph == "graphs/*.json"
 
-    def test_engine_flag_stores_int(self) -> None:
-        """Test 2: --engine flag stores an int engine ID (default None)."""
+    def test_engine_flag_stores_single_id_as_list(self) -> None:
+        """--engine ID stores a one-element list."""
         parser = create_parser()
         args = parser.parse_args(["--graph", "g.json", "--engine", "3"])
-        assert args.engine == 3
-        assert isinstance(args.engine, int)
+        assert args.engine == [3]
+
+    def test_engine_flag_accepts_comma_separated_list(self) -> None:
+        """--engine 1,2,3 stores [1, 2, 3]."""
+        parser = create_parser()
+        args = parser.parse_args(["--graph", "g.json", "--engine", "1,2,3"])
+        assert args.engine == [1, 2, 3]
+
+    def test_engine_flag_strips_whitespace(self) -> None:
+        """--engine '1, 2' tolerates spaces around commas."""
+        parser = create_parser()
+        args = parser.parse_args(["--graph", "g.json", "--engine", "1, 2"])
+        assert args.engine == [1, 2]
+
+    def test_engine_flag_rejects_non_integer(self) -> None:
+        """--engine with a non-integer item raises SystemExit (argparse error)."""
+        parser = create_parser()
+        with pytest.raises(SystemExit):
+            parser.parse_args(["--graph", "g.json", "--engine", "1,abc"])
+
+    def test_engine_flag_rejects_negative(self) -> None:
+        """--engine rejects negative IDs."""
+        parser = create_parser()
+        with pytest.raises(SystemExit):
+            parser.parse_args(["--graph", "g.json", "--engine", "-1"])
 
     def test_engine_flag_default_none(self) -> None:
-        """Test 2b: --engine defaults to None."""
+        """--engine defaults to None (= run all discovered engines)."""
         parser = create_parser()
         args = parser.parse_args(["--graph", "g.json"])
         assert args.engine is None
 
+    def test_verbose_flag_default_false(self) -> None:
+        """No -v / --verbose => args.verbose is False."""
+        parser = create_parser()
+        args = parser.parse_args(["--graph", "g.json"])
+        assert args.verbose is False
+
+    def test_verbose_flag_short_form(self) -> None:
+        """-v sets args.verbose to True."""
+        parser = create_parser()
+        args = parser.parse_args(["--graph", "g.json", "-v"])
+        assert args.verbose is True
+
+    def test_verbose_flag_long_form(self) -> None:
+        """--verbose sets args.verbose to True."""
+        parser = create_parser()
+        args = parser.parse_args(["--graph", "g.json", "--verbose"])
+        assert args.verbose is True
+
 
 class TestMainRouting:
-    """Tests for main() routing logic (glob resolution -> run_suite vs run_benchmark)."""
+    """Tests for main() routing — single and multi files both go to unified run_suite."""
 
     def _create_graph_files(self, tmpdir: Path, count: int) -> list:
         """Create temporary graph JSON files."""
@@ -69,11 +110,10 @@ class TestMainRouting:
         return paths
 
     @patch("dnn_benchmarking.cli.main.run_suite")
-    @patch("dnn_benchmarking.cli.main.run_benchmark")
     def test_multi_file_glob_routes_to_run_suite(
-        self, mock_run_benchmark: MagicMock, mock_run_suite: MagicMock
+        self, mock_run_suite: MagicMock
     ) -> None:
-        """Test 4: When --graph resolves to multiple files, main() routes to run_suite()."""
+        """Multi-file glob routes to the unified run_suite()."""
         mock_run_suite.return_value = 0
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -86,16 +126,17 @@ class TestMainRouting:
                 result = main()
 
             mock_run_suite.assert_called_once()
-            mock_run_benchmark.assert_not_called()
+            # Three resolved files passed in
+            kwargs = mock_run_suite.call_args.kwargs
+            assert len(kwargs["graph_paths"]) == 3
             assert result == 0
 
     @patch("dnn_benchmarking.cli.main.run_suite")
-    @patch("dnn_benchmarking.cli.main.run_benchmark")
-    def test_single_file_routes_to_run_benchmark(
-        self, mock_run_benchmark: MagicMock, mock_run_suite: MagicMock
+    def test_single_file_also_routes_to_unified_run_suite(
+        self, mock_run_suite: MagicMock
     ) -> None:
-        """Test 5: Single file routes to existing run_benchmark() (backward compatible)."""
-        mock_run_benchmark.return_value = 0
+        """Single file now routes to unified run_suite (no separate run_benchmark)."""
+        mock_run_suite.return_value = 0
 
         with tempfile.TemporaryDirectory() as tmpdir:
             paths = self._create_graph_files(Path(tmpdir), 1)
@@ -105,12 +146,91 @@ class TestMainRouting:
             with patch("sys.argv", ["dnn-benchmark", "--graph", paths[0]]):
                 result = main()
 
-            mock_run_benchmark.assert_called_once()
+            mock_run_suite.assert_called_once()
+            kwargs = mock_run_suite.call_args.kwargs
+            assert len(kwargs["graph_paths"]) == 1
+            assert result == 0
+
+    @patch("dnn_benchmarking.cli.main.run_suite")
+    def test_verbose_flag_propagates_to_suite_config(
+        self, mock_run_suite: MagicMock
+    ) -> None:
+        """-v sets SuiteConfig.verbose=True when routing to run_suite."""
+        mock_run_suite.return_value = 0
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            paths = self._create_graph_files(Path(tmpdir), 1)
+
+            from dnn_benchmarking.cli.main import main
+
+            with patch("sys.argv", ["dnn-benchmark", "--graph", paths[0], "-v"]):
+                main()
+
+        suite_config = mock_run_suite.call_args.kwargs["config"]
+        assert suite_config.verbose is True
+
+    @patch("dnn_benchmarking.cli.main.run_suite")
+    def test_engine_list_propagates_to_suite_config(
+        self, mock_run_suite: MagicMock
+    ) -> None:
+        """--engine 1,2 lands in SuiteConfig.engine_filter as [1, 2]."""
+        mock_run_suite.return_value = 0
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            paths = self._create_graph_files(Path(tmpdir), 1)
+
+            from dnn_benchmarking.cli.main import main
+
+            with patch(
+                "sys.argv",
+                ["dnn-benchmark", "--graph", paths[0], "--engine", "1,2"],
+            ):
+                main()
+
+        suite_config = mock_run_suite.call_args.kwargs["config"]
+        assert suite_config.engine_filter == [1, 2]
+
+    @patch("dnn_benchmarking.cli.main.run_pytorch_benchmark")
+    @patch("dnn_benchmarking.cli.main.run_suite")
+    def test_pytorch_backend_single_file_uses_pytorch_path(
+        self, mock_run_suite: MagicMock, mock_run_pytorch: MagicMock
+    ) -> None:
+        """--backend pytorch on single file goes to run_pytorch_benchmark, not unified."""
+        mock_run_pytorch.return_value = 0
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            paths = self._create_graph_files(Path(tmpdir), 1)
+
+            from dnn_benchmarking.cli.main import main
+
+            with patch(
+                "sys.argv",
+                ["dnn-benchmark", "--graph", paths[0], "--backend", "pytorch"],
+            ):
+                result = main()
+
+            mock_run_pytorch.assert_called_once()
             mock_run_suite.assert_not_called()
             assert result == 0
 
+    def test_pytorch_backend_multi_file_rejected(self) -> None:
+        """--backend pytorch with a glob exits 1 (suite not supported)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._create_graph_files(Path(tmpdir), 3)
+            glob_pattern = os.path.join(tmpdir, "*.json")
+
+            from dnn_benchmarking.cli.main import main
+
+            with patch(
+                "sys.argv",
+                ["dnn-benchmark", "--graph", glob_pattern, "--backend", "pytorch"],
+            ):
+                result = main()
+
+            assert result == 1
+
     def test_zero_files_glob_returns_error(self) -> None:
-        """Test 6: When glob resolves to zero files, main() returns 1."""
+        """When glob resolves to zero files, main() returns 1."""
         from dnn_benchmarking.cli.main import main
 
         with patch(

@@ -225,9 +225,11 @@ class TestSuiteCLIIntegration:
             cwd=project_root,
         )
 
-        assert result.returncode in (0, 1, 2), (
-            f"Unexpected exit code {result.returncode}. stderr: {result.stderr}"
-        )
+        assert result.returncode in (
+            0,
+            1,
+            2,
+        ), f"Unexpected exit code {result.returncode}. stderr: {result.stderr}"
         assert "hipDNN Benchmark Suite" in result.stdout
         assert "Suite Summary" in result.stdout
         # Should show progress for each graph
@@ -261,9 +263,11 @@ class TestSuiteCLIIntegration:
             cwd=project_root,
         )
 
-        assert result.returncode in (0, 1, 2), (
-            f"Unexpected exit code {result.returncode}. stderr: {result.stderr}"
-        )
+        assert result.returncode in (
+            0,
+            1,
+            2,
+        ), f"Unexpected exit code {result.returncode}. stderr: {result.stderr}"
         assert output_file.exists(), f"JSON output not written. stderr: {result.stderr}"
 
         with open(output_file) as f:
@@ -307,9 +311,11 @@ class TestSuiteCLIIntegration:
             cwd=project_root,
         )
 
-        assert result.returncode in (0, 1, 2), (
-            f"Unexpected exit code {result.returncode}. stderr: {result.stderr}"
-        )
+        assert result.returncode in (
+            0,
+            1,
+            2,
+        ), f"Unexpected exit code {result.returncode}. stderr: {result.stderr}"
 
         with open(output_file) as f:
             data = json.load(f)
@@ -318,10 +324,10 @@ class TestSuiteCLIIntegration:
         graph_count = len(sorted(_graphs_dir().glob("*.json")))
         assert len(data["graphs"]) == graph_count
 
-    def test_single_graph_without_suite_flags_uses_legacy_mode(
+    def test_single_graph_uses_unified_suite_path(
         self, project_root: Path, cli_plugin_args: List[str]
     ) -> None:
-        """Single graph uses legacy run_benchmark."""
+        """Single graph now flows through the unified suite path (default summary)."""
         result = subprocess.run(
             [
                 sys.executable,
@@ -341,9 +347,155 @@ class TestSuiteCLIIntegration:
             cwd=project_root,
         )
 
-        assert result.returncode in (0, 1, 2), (
-            f"Unexpected exit code {result.returncode}. stderr: {result.stderr}"
+        assert result.returncode in (
+            0,
+            1,
+            2,
+        ), f"Unexpected exit code {result.returncode}. stderr: {result.stderr}"
+        # Suite header is now used for single-graph too
+        assert "hipDNN Benchmark Suite" in result.stdout
+        assert "Suite Summary" in result.stdout
+
+    def test_single_graph_verbose_renders_rich_block(
+        self, project_root: Path, cli_plugin_args: List[str]
+    ) -> None:
+        """Single graph + -v renders the legacy single-graph rich format inside the suite wrapper."""
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "dnn_benchmarking",
+                "--graph",
+                str(_graphs_dir() / "sample_conv_fwd.json"),
+                "--warmup",
+                "1",
+                "--iters",
+                "2",
+                "--no-kernel-timing",
+                "-v",
+            ]
+            + cli_plugin_args,
+            capture_output=True,
+            text=True,
+            cwd=project_root,
         )
-        # Single graph without suite flags should use legacy mode
+
+        assert result.returncode in (
+            0,
+            1,
+            2,
+        ), f"Unexpected exit code {result.returncode}. stderr: {result.stderr}"
+        # Suite wrapper still present
+        assert "hipDNN Benchmark Suite" in result.stdout
+        # Rich per-engine block also present
         assert "hipDNN Benchmark:" in result.stdout
+        assert "Execution Statistics" in result.stdout
+
+    def test_engine_comma_list_runs_multiple_engines(
+        self, project_root: Path, tmp_path: Path, cli_plugin_args: List[str]
+    ) -> None:
+        """--engine 0,1 produces results for both engines (when both are discovered)."""
+        output_file = tmp_path / "multi_engine.json"
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "dnn_benchmarking",
+                "--graph",
+                str(_graphs_dir() / "sample_conv_fwd.json"),
+                "--warmup",
+                "1",
+                "--iters",
+                "2",
+                "--no-kernel-timing",
+                "--engine",
+                "0,1",
+                "--output",
+                str(output_file),
+            ]
+            + cli_plugin_args,
+            capture_output=True,
+            text=True,
+            cwd=project_root,
+        )
+
+        assert result.returncode in (
+            0,
+            1,
+            2,
+        ), f"Unexpected exit code {result.returncode}. stderr: {result.stderr}"
+        if not output_file.exists():
+            pytest.skip(
+                "No JSON output written; provider/engine discovery may be empty"
+            )
+
+        data = json.loads(output_file.read_text())
+        assert len(data["graphs"]) == 1
+        engine_ids = sorted(r["engine_id"] for r in data["graphs"][0]["results"])
+        # The discovery on this system may produce just [1] or [0,1] depending on plugin.
+        # We require at least one of the requested IDs landed.
+        assert any(
+            eid in (0, 1) for eid in engine_ids
+        ), f"Expected engines 0 or 1, got {engine_ids}"
+
+    def test_pytorch_backend_single_graph_still_works(self, project_root: Path) -> None:
+        """--backend pytorch on a single graph remains on the dedicated PyTorch path."""
+        try:
+            import torch
+
+            if not torch.cuda.is_available():
+                pytest.skip("PyTorch GPU not available")
+        except ImportError:
+            pytest.skip("PyTorch not available")
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "dnn_benchmarking",
+                "--graph",
+                str(_graphs_dir() / "sample_conv_fwd.json"),
+                "--backend",
+                "pytorch",
+                "--warmup",
+                "1",
+                "--iters",
+                "2",
+                "--no-kernel-timing",
+            ],
+            capture_output=True,
+            text=True,
+            cwd=project_root,
+        )
+
+        assert result.returncode in (
+            0,
+            1,
+        ), f"Unexpected exit code {result.returncode}. stderr: {result.stderr}"
+        # PyTorch path uses its own header
+        assert "PyTorch CUDA Benchmark" in result.stdout
+        # And specifically does NOT use the suite wrapper
         assert "hipDNN Benchmark Suite" not in result.stdout
+
+    def test_pytorch_backend_multi_graph_rejected(self, project_root: Path) -> None:
+        """--backend pytorch with a glob exits 1 with the not-supported message."""
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "dnn_benchmarking",
+                "--graph",
+                str(_graphs_dir() / "*.json"),
+                "--backend",
+                "pytorch",
+                "--warmup",
+                "1",
+                "--iters",
+                "2",
+            ],
+            capture_output=True,
+            text=True,
+            cwd=project_root,
+        )
+        assert result.returncode == 1
+        assert "not supported with --backend pytorch" in result.stderr

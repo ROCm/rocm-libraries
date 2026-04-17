@@ -7,8 +7,9 @@ import sys
 from pathlib import Path
 from typing import Any, Optional, TextIO
 
-from ..config.benchmark_config import ABTestConfig, BenchmarkConfig
+from ..config.benchmark_config import ABTestConfig, BenchmarkConfig, SuiteConfig
 from .statistics import BenchmarkStats, CombinedBenchmarkStats
+from .suite_results import CorrectnessResult, GraphResult, ProviderEngineResult
 
 
 class Reporter:
@@ -453,6 +454,77 @@ class Reporter:
     def print_suite_footer(self) -> None:
         """Print suite footer."""
         self._print_line("=")
+
+    def print_verbose_graph_result(
+        self, graph_result: GraphResult, suite_config: SuiteConfig
+    ) -> None:
+        """Render a graph's per-engine results in the rich single-graph format.
+
+        For each ProviderEngineResult, prints a header + init time + execution
+        statistics + correctness block, matching the legacy run_benchmark output.
+        Used in verbose mode when the unified runner processes a graph.
+        """
+        for pe in graph_result.results:
+            cfg_view = BenchmarkConfig(
+                graph_path=Path(graph_result.graph_path),
+                warmup_iters=suite_config.warmup_iters,
+                benchmark_iters=suite_config.benchmark_iters,
+                engine_id=pe.engine_id,
+            )
+            self.print_header(cfg_view, graph_result.graph_name)
+
+            if pe.cpu_build_time_ms is not None:
+                self.print_init_time(pe.cpu_build_time_ms)
+
+            if pe.status == "success":
+                self._print_pe_stats(pe)
+                if pe.correctness is not None:
+                    self._print_pe_correctness(pe.correctness, suite_config)
+            elif pe.status == "skipped":
+                self._print(f"Status: SKIPPED ({pe.skip_reason or 'no reason given'})")
+                self._print("")
+            else:  # error
+                self.print_error(pe.error_message or "execution failed")
+                self._print("")
+
+            self.print_footer()
+            self._print("")
+
+    def _print_pe_stats(self, pe: ProviderEngineResult) -> None:
+        """Print E2E + kernel stats from a ProviderEngineResult."""
+        if pe.e2e_stats is not None:
+            self._print("E2E Execution Statistics:")
+            self._print_stats_block(pe.e2e_stats)
+            self._print("")
+        if pe.gpu_kernel_stats is not None:
+            self._print("Kernel Execution Statistics:")
+            self._print_stats_block(pe.gpu_kernel_stats)
+            self._print("")
+        elif pe.e2e_stats is not None:
+            self._print("Kernel Timing: Not available")
+            self._print("")
+
+    def _print_pe_correctness(
+        self, correctness: CorrectnessResult, suite_config: SuiteConfig
+    ) -> None:
+        """Print correctness block from a CorrectnessResult."""
+        if correctness.tolerance_match is None:
+            reason = correctness.error_message or "no reference comparison performed"
+            self._print(f"Reference Validation: SKIPPED ({reason})")
+            self._print(f"  Provider: {suite_config.reference_provider}")
+            self._print("")
+            return
+
+        status = "PASSED" if correctness.tolerance_match else "FAILED"
+        self._print(f"Reference Validation: {status}")
+        self._print(f"  Provider: {suite_config.reference_provider}")
+        self._print(f"  (rtol={correctness.rtol:.0e}, atol={correctness.atol:.0e})")
+        if not correctness.tolerance_match:
+            if correctness.max_abs_diff is not None:
+                self._print(f"  Max abs diff: {correctness.max_abs_diff:.2e}")
+            if correctness.max_rel_diff is not None:
+                self._print(f"  Max rel diff: {correctness.max_rel_diff:.2e}")
+        self._print("")
 
     def print_reference_validation(
         self,

@@ -3,9 +3,9 @@
 
 """Benchmark configuration dataclasses."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 
 
 @dataclass
@@ -131,21 +131,23 @@ class SuiteConfig:
         warmup_iters: Number of warmup iterations per provider/engine.
         benchmark_iters: Number of benchmark iterations for timing.
         seed: Optional random seed for reproducible inputs.
-        engine_filter: If set, only iterate this engine ID (per D-03).
+        engine_filter: If set, only iterate engine IDs in this list (per D-03).
         rtol: Relative tolerance for correctness comparison (per D-15).
         atol: Absolute tolerance for correctness comparison (per D-15).
         gpu_backend: GPU timer backend to use.
         reference_provider: Reference provider name for CORR-02.
+        verbose: If True, print rich per-engine block per graph instead of summary.
     """
 
     warmup_iters: int = 10
     benchmark_iters: int = 100
     seed: Optional[int] = None
-    engine_filter: Optional[int] = None
+    engine_filter: Optional[List[int]] = None
     rtol: float = 1e-5
     atol: float = 1e-8
     gpu_backend: str = "auto"
     reference_provider: str = "none"
+    verbose: bool = False
 
     def __post_init__(self) -> None:
         """Validate configuration values."""
@@ -157,3 +159,8 @@ class SuiteConfig:
             raise ValueError("rtol must be non-negative")
         if self.atol < 0:
             raise ValueError("atol must be non-negative")
+        if self.engine_filter is not None:
+            if len(self.engine_filter) == 0:
+                raise ValueError("engine_filter must be non-empty when set")
+            if any(e < 0 for e in self.engine_filter):
+                raise ValueError("engine_filter IDs must be non-negative")

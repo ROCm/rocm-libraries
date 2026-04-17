@@ -59,22 +59,32 @@ Test markers: `gpu` (requires GPU), `slow` (slow integration tests).
 
 ## Running the Tool
 
+Single-graph and multi-graph runs share one execution path. Default output is a
+summary table; `-v` switches to a rich per-engine block per graph (matches the
+legacy single-graph format).
+
 ```bash
-# Basic benchmark (single graph, single engine)
+# Single graph (default summary table, all discovered engines)
 python -m dnn_benchmarking --graph ./graphs/sample_conv_fwd.json --warmup 10 --iters 100
 
-# A/B testing (compare two engine configurations)
-python -m dnn_benchmarking --graph ./graphs/sample_conv_fwd.json --AId 1 --BId 2
+# Single graph, verbose per-engine block
+python -m dnn_benchmarking --graph ./graphs/sample_conv_fwd.json -v
 
-# Suite mode (multiple graphs, all providers/engines)
-# Triggered automatically when --graph resolves to multiple files
+# Filter to one or more engine IDs (comma-separated)
+python -m dnn_benchmarking --graph ./graphs/sample_conv_fwd.json --engine 1
+python -m dnn_benchmarking --graph ./graphs/sample_conv_fwd.json --engine 1,2
+
+# Multiple graphs via glob — same path, more rows
 python -m dnn_benchmarking --graph 'graphs/*.json' --warmup 10 --iters 100
 
-# Suite mode with JSON output
+# Multi-graph with JSON output (full SuiteResult, independent of -v)
 python -m dnn_benchmarking --graph 'graphs/*.json' --output results.json
 
-# Suite mode with engine filter
-python -m dnn_benchmarking --graph 'graphs/*.json' --engine 1
+# A/B testing (separate path, kept for now)
+python -m dnn_benchmarking --graph ./graphs/sample_conv_fwd.json --AId 1 --BId 2
+
+# PyTorch backend (separate executor; single graph only)
+python -m dnn_benchmarking --graph ./graphs/sample_conv_fwd.json --backend pytorch
 ```
 
 ## Architecture

@@ -65,12 +65,23 @@ pip install -e .
 
 ### Basic Benchmarking
 
+A single graph and a glob of graphs share the same execution path. By default
+results are printed as a summary table. Use `-v` for the rich per-engine block
+(useful for debugging a single graph or comparing engines).
+
 ```bash
-# Run benchmark on a serialized graph
+# Single graph (default summary output)
 python -m dnn_benchmarking --graph ./graphs/conv1_fwd.json --warmup 10 --iters 100
 
-# With custom engine ID
+# Single graph, verbose: rich per-engine block
+python -m dnn_benchmarking --graph ./graphs/conv1_fwd.json -v
+
+# Filter to specific engine(s) — comma-separated
 python -m dnn_benchmarking --graph ./graphs/conv1_fwd.json --engine 1
+python -m dnn_benchmarking --graph ./graphs/conv1_fwd.json --engine 1,2
+
+# Multiple graphs (glob): same path, default summary table
+python -m dnn_benchmarking --graph 'graphs/*.json' --warmup 10 --iters 100
 
 # With reproducible random seed
 python -m dnn_benchmarking --graph ./graphs/conv1_fwd.json --seed 42
@@ -100,10 +111,11 @@ python -m dnn_benchmarking --graph ./graphs/conv1_fwd.json \
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--graph`, `-g` | Path to JSON-serialized hipDNN graph file | Required |
+| `--graph`, `-g` | Path to JSON-serialized hipDNN graph file, or glob pattern | Required |
 | `--warmup`, `-w` | Number of warmup iterations | 10 |
 | `--iters`, `-i` | Number of benchmark iterations | 100 |
-| `--engine`, `-e` | Engine ID (default: 1, suite mode: all) | None |
+| `--engine`, `-e` | Engine ID or comma-separated list (e.g. `1` or `1,2,3`); default = all discovered engines | None |
+| `--verbose`, `-v` | Show detailed per-engine block per graph (default: summary table) | False |
 | `--seed` | Random seed for reproducibility | None |
 | `--no-kernel-timing` | Disable GPU kernel timing (E2E only) | False |
 

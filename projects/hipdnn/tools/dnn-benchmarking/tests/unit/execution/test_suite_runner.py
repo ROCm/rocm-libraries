@@ -321,6 +321,31 @@ class TestSuiteConfigValidation:
         with pytest.raises(ValueError, match="benchmark_iters"):
             SuiteConfig(warmup_iters=0, benchmark_iters=0)
 
+    def test_engine_filter_accepts_list(self):
+        """SuiteConfig accepts a list of engine IDs as engine_filter."""
+        config = SuiteConfig(engine_filter=[1, 2, 3])
+        assert config.engine_filter == [1, 2, 3]
+
+    def test_engine_filter_empty_list_raises(self):
+        """SuiteConfig rejects empty engine_filter (treat as user error)."""
+        with pytest.raises(ValueError, match="engine_filter"):
+            SuiteConfig(engine_filter=[])
+
+    def test_engine_filter_negative_id_raises(self):
+        """SuiteConfig rejects negative engine IDs in filter."""
+        with pytest.raises(ValueError, match="engine_filter"):
+            SuiteConfig(engine_filter=[1, -1])
+
+    def test_verbose_default_false(self):
+        """SuiteConfig.verbose defaults to False."""
+        config = SuiteConfig()
+        assert config.verbose is False
+
+    def test_verbose_can_be_set(self):
+        """SuiteConfig.verbose can be set to True."""
+        config = SuiteConfig(verbose=True)
+        assert config.verbose is True
+
 
 class TestEngineFilter:
     """Tests for engine filter behavior."""
@@ -358,7 +383,7 @@ class TestEngineFilter:
         mock_bm.create_variant_pack.return_value = {1: 100}
         mock_bm_cls.return_value = mock_bm
 
-        config = _make_config(engine_filter=2)
+        config = _make_config(engine_filter=[2])
         tensor_infos = [_make_tensor_info(1)]
         graph_json = _make_graph_json()
         handle = MagicMock()
@@ -373,6 +398,51 @@ class TestEngineFilter:
 
         assert len(result.results) == 1
         assert result.results[0].engine_id == 2
+
+    @patch("dnn_benchmarking.execution.suite_runner.discover_engines")
+    @patch("dnn_benchmarking.execution.suite_runner.discover_providers")
+    @patch("dnn_benchmarking.execution.suite_runner._get_reference_provider")
+    @patch("dnn_benchmarking.execution.suite_runner.Executor")
+    @patch("dnn_benchmarking.execution.suite_runner.BufferManager")
+    def test_engine_filter_list_keeps_intersection(
+        self,
+        mock_bm_cls,
+        mock_exec_cls,
+        mock_get_ref,
+        mock_disc_providers,
+        mock_disc_engines,
+    ):
+        """engine_filter=[1, 3, 99]: engines 1 and 3 run; 99 (not discovered) is dropped."""
+        mock_disc_providers.return_value = ["provA"]
+        mock_disc_engines.return_value = [0, 1, 2, 3]
+        mock_get_ref.return_value = None
+
+        mock_exec = MagicMock()
+        mock_exec.init_time_ms = 1.0
+        mock_result = MagicMock()
+        mock_result.e2e_timings = [1.0]
+        mock_result.kernel_timings = None
+        mock_result.has_kernel_timings = False
+        mock_exec.benchmark.return_value = mock_result
+        mock_exec_cls.return_value = mock_exec
+
+        mock_bm = MagicMock()
+        mock_bm.__enter__ = MagicMock(return_value=mock_bm)
+        mock_bm.__exit__ = MagicMock(return_value=False)
+        mock_bm.create_variant_pack.return_value = {1: 100}
+        mock_bm_cls.return_value = mock_bm
+
+        config = _make_config(engine_filter=[1, 3, 99])
+        result = run_graph_all_providers(
+            graph_path=Path("test.json"),
+            graph_json=_make_graph_json(),
+            tensor_infos=[_make_tensor_info(1)],
+            config=config,
+            handle=MagicMock(),
+        )
+
+        engine_ids = sorted(r.engine_id for r in result.results)
+        assert engine_ids == [1, 3]
 
 
 class TestNoRetryOnFailure:

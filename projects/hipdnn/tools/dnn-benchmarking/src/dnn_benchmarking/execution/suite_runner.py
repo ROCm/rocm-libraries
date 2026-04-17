@@ -294,9 +294,9 @@ def run_graph_all_providers(
         # Discover engines for this provider
         engines = discover_engines(handle, provider)
 
-        # Apply engine filter (D-03)
+        # Apply engine filter (D-03): keep only IDs the user explicitly requested.
         if config.engine_filter is not None:
-            engines = [e for e in engines if e == config.engine_filter]
+            engines = [e for e in engines if e in config.engine_filter]
 
         for engine_id in engines:
             pe_result = _run_single_provider_engine(

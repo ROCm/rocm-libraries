@@ -5,7 +5,46 @@
 
 import io
 
+from dnn_benchmarking.config.benchmark_config import SuiteConfig
 from dnn_benchmarking.reporting.reporter import Reporter
+from dnn_benchmarking.reporting.suite_results import (
+    CorrectnessResult,
+    GraphResult,
+    ProviderEngineResult,
+    TimingStats,
+)
+
+
+def _make_pe_success(
+    engine_id: int = 1,
+    correctness: object = None,
+) -> ProviderEngineResult:
+    """Helper: build a successful ProviderEngineResult with timing."""
+    e2e = TimingStats(
+        mean_ms=1.234,
+        std_ms=0.045,
+        min_ms=1.156,
+        max_ms=1.456,
+        p95_ms=1.312,
+        p99_ms=1.398,
+    )
+    kernel = TimingStats(
+        mean_ms=0.500,
+        std_ms=0.020,
+        min_ms=0.470,
+        max_ms=0.540,
+        p95_ms=0.520,
+        p99_ms=0.535,
+    )
+    return ProviderEngineResult(
+        provider="miopen",
+        engine_id=engine_id,
+        status="success",
+        cpu_build_time_ms=45.23,
+        e2e_stats=e2e,
+        gpu_kernel_stats=kernel,
+        correctness=correctness,
+    )
 
 
 class TestSuiteReporter:
@@ -160,3 +199,154 @@ class TestSuiteReporter:
 
         result = output.getvalue()
         assert "-" * Reporter.WIDTH in result
+
+
+class TestVerboseReporter:
+    """Tests for print_verbose_graph_result (rich per-engine block)."""
+
+    def test_verbose_success_renders_header_init_and_stats(self) -> None:
+        output = io.StringIO()
+        reporter = Reporter(output=output)
+        gr = GraphResult(
+            graph_name="conv1_fwd",
+            graph_path="/tmp/conv1_fwd.json",
+            results=[_make_pe_success(engine_id=1)],
+        )
+        reporter.print_verbose_graph_result(
+            gr, SuiteConfig(warmup_iters=10, benchmark_iters=100)
+        )
+        out = output.getvalue()
+
+        assert "hipDNN Benchmark: conv1_fwd" in out
+        assert "Engine ID:  1" in out
+        assert "Graph build time:" in out
+        assert "E2E Execution Statistics:" in out
+        assert "Kernel Execution Statistics:" in out
+        assert "Mean:" in out
+
+    def test_verbose_renders_block_per_engine(self) -> None:
+        """A GraphResult with multiple engines renders one block each."""
+        output = io.StringIO()
+        reporter = Reporter(output=output)
+        gr = GraphResult(
+            graph_name="g",
+            graph_path="/tmp/g.json",
+            results=[
+                _make_pe_success(engine_id=0),
+                _make_pe_success(engine_id=2),
+            ],
+        )
+        reporter.print_verbose_graph_result(gr, SuiteConfig())
+        out = output.getvalue()
+        assert "Engine ID:  0" in out
+        assert "Engine ID:  2" in out
+        # Two distinct rich blocks
+        assert out.count("hipDNN Benchmark: g") == 2
+
+    def test_verbose_correctness_pass_renders_passed(self) -> None:
+        output = io.StringIO()
+        reporter = Reporter(output=output)
+        correctness = CorrectnessResult(
+            execution_success=True,
+            tolerance_match=True,
+            rtol=1e-5,
+            atol=1e-8,
+            max_abs_diff=1e-6,
+            max_rel_diff=1e-6,
+        )
+        gr = GraphResult(
+            graph_name="g",
+            graph_path="/tmp/g.json",
+            results=[_make_pe_success(correctness=correctness)],
+        )
+        reporter.print_verbose_graph_result(
+            gr, SuiteConfig(reference_provider="pytorch")
+        )
+        out = output.getvalue()
+        assert "Reference Validation: PASSED" in out
+        assert "pytorch" in out
+
+    def test_verbose_correctness_fail_renders_failed_with_diffs(self) -> None:
+        output = io.StringIO()
+        reporter = Reporter(output=output)
+        correctness = CorrectnessResult(
+            execution_success=True,
+            tolerance_match=False,
+            rtol=1e-5,
+            atol=1e-8,
+            max_abs_diff=2.5e-3,
+            max_rel_diff=1.7e-2,
+        )
+        gr = GraphResult(
+            graph_name="g",
+            graph_path="/tmp/g.json",
+            results=[_make_pe_success(correctness=correctness)],
+        )
+        reporter.print_verbose_graph_result(
+            gr, SuiteConfig(reference_provider="pytorch")
+        )
+        out = output.getvalue()
+        assert "Reference Validation: FAILED" in out
+        assert "Max abs diff:" in out
+        assert "Max rel diff:" in out
+
+    def test_verbose_correctness_none_renders_skipped(self) -> None:
+        output = io.StringIO()
+        reporter = Reporter(output=output)
+        correctness = CorrectnessResult(
+            execution_success=True,
+            tolerance_match=None,
+            rtol=1e-5,
+            atol=1e-8,
+            error_message="reference provider unavailable",
+        )
+        gr = GraphResult(
+            graph_name="g",
+            graph_path="/tmp/g.json",
+            results=[_make_pe_success(correctness=correctness)],
+        )
+        reporter.print_verbose_graph_result(
+            gr, SuiteConfig(reference_provider="pytorch")
+        )
+        out = output.getvalue()
+        assert "Reference Validation: SKIPPED" in out
+        assert "reference provider unavailable" in out
+
+    def test_verbose_error_status_renders_error(self) -> None:
+        output = io.StringIO()
+        reporter = Reporter(output=output)
+        gr = GraphResult(
+            graph_name="g",
+            graph_path="/tmp/g.json",
+            results=[
+                ProviderEngineResult(
+                    provider="miopen",
+                    engine_id=1,
+                    status="error",
+                    error_message="boom",
+                )
+            ],
+        )
+        reporter.print_verbose_graph_result(gr, SuiteConfig())
+        out = output.getvalue()
+        assert "ERROR: boom" in out
+
+    def test_verbose_skipped_status_renders_skipped(self) -> None:
+        output = io.StringIO()
+        reporter = Reporter(output=output)
+        gr = GraphResult(
+            graph_name="g",
+            graph_path="/tmp/g.json",
+            results=[
+                ProviderEngineResult(
+                    provider="miopen",
+                    engine_id=1,
+                    status="skipped",
+                    skip_reason="not supported",
+                )
+            ],
+        )
+        reporter.print_verbose_graph_result(gr, SuiteConfig())
+        out = output.getvalue()
+        assert "SKIPPED" in out
+        assert "not supported" in out

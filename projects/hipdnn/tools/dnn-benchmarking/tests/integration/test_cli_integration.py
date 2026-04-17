@@ -65,9 +65,7 @@ class TestCLIIntegration:
         assert "no graph files found" in combined or "error" in combined
 
     @pytest.mark.gpu
-    def test_cli_full_run(
-        self, sample_graph_path: Path, plugin_path_cli_args
-    ) -> None:
+    def test_cli_full_run(self, sample_graph_path: Path, plugin_path_cli_args) -> None:
         """Test full CLI run with sample graph (requires GPU)."""
         if not sample_graph_path.exists():
             pytest.skip(f"Sample graph not found: {sample_graph_path}")
@@ -99,6 +97,7 @@ class TestCLIIntegration:
                 "1",
                 "--iters",
                 "2",
+                "-v",
             ]
             + plugin_path_cli_args,
             capture_output=True,
@@ -179,6 +178,7 @@ class TestCLIIntegration:
                 "1",
                 "--iters",
                 "2",
+                "-v",
             ]
             + plugin_path_cli_args,
             capture_output=True,
@@ -244,3 +244,65 @@ class TestCLIParser:
         assert config.warmup_iters == 5
         assert config.benchmark_iters == 50
         assert config.engine_id == 3
+
+    def test_engine_comma_list_parses_at_subprocess_level(self) -> None:
+        """A comma-separated --engine value is accepted by the CLI without error."""
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "dnn_benchmarking",
+                "--graph",
+                "/nonexistent/path/graph.json",
+                "--engine",
+                "1,2,3",
+            ],
+            capture_output=True,
+            text=True,
+            cwd=Path(__file__).parent.parent.parent,
+        )
+        # Should fail because graph doesn't exist (rc=1), not because of arg parse (rc=2)
+        assert result.returncode == 1, (
+            f"Expected rc=1 (graph not found), got {result.returncode}. "
+            f"stderr: {result.stderr}"
+        )
+
+    def test_engine_invalid_value_rejected(self) -> None:
+        """A non-integer --engine value is rejected by the parser (rc=2)."""
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "dnn_benchmarking",
+                "--graph",
+                "/x.json",
+                "--engine",
+                "abc",
+            ],
+            capture_output=True,
+            text=True,
+            cwd=Path(__file__).parent.parent.parent,
+        )
+        assert result.returncode == 2  # argparse error
+
+    def test_verbose_flag_accepted(self) -> None:
+        """The -v / --verbose flag is accepted by the parser."""
+        for flag in ("-v", "--verbose"):
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "dnn_benchmarking",
+                    "--graph",
+                    "/nonexistent/path/graph.json",
+                    flag,
+                ],
+                capture_output=True,
+                text=True,
+                cwd=Path(__file__).parent.parent.parent,
+            )
+            # Same as above: rc=1 means parser accepted the flag and we got past arg parse
+            assert result.returncode == 1, (
+                f"{flag}: expected rc=1 (graph not found), got {result.returncode}. "
+                f"stderr: {result.stderr}"
+            )

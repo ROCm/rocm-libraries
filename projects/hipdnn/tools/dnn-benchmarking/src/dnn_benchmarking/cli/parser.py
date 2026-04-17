@@ -5,8 +5,30 @@
 
 import argparse
 from pathlib import Path
+from typing import List
 
 from ..config.benchmark_config import BenchmarkConfig
+
+
+def _parse_engine_list(s: str) -> List[int]:
+    """Parse --engine value as a single ID or comma-separated list of IDs.
+
+    Examples:
+      "1"      -> [1]
+      "1,2,3"  -> [1, 2, 3]
+      "1, 2"   -> [1, 2]
+    """
+    parts = [p.strip() for p in s.split(",")]
+    parts = [p for p in parts if p]
+    if not parts:
+        raise argparse.ArgumentTypeError("--engine requires at least one ID")
+    try:
+        ids = [int(p) for p in parts]
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"--engine expects integer ID(s), got {s!r}")
+    if any(i < 0 for i in ids):
+        raise argparse.ArgumentTypeError("--engine IDs must be non-negative")
+    return ids
 
 
 def create_parser() -> argparse.ArgumentParser:
@@ -28,6 +50,8 @@ Examples:
   dnn-benchmark --graph ./graphs/conv1_fwd.json
   dnn-benchmark --graph ./graphs/conv1_fwd.json --warmup 20 --iters 200
   dnn-benchmark -g ./graphs/conv1_fwd.json -e 1
+  dnn-benchmark -g ./graphs/conv1_fwd.json -v        # verbose per-engine output
+  dnn-benchmark -g ./graphs/conv1_fwd.json -e 1,2    # compare engines 1 and 2
 
 PyTorch Backend (GPU via PyTorch):
   dnn-benchmark -g ./graph.json --backend pytorch
@@ -44,6 +68,7 @@ A/B Testing:
 Suite Mode (multiple graphs):
   dnn-benchmark --graph 'graphs/*.json' --warmup 10 --iters 100
   dnn-benchmark --graph 'graphs/*.json' -o results.json
+  dnn-benchmark --graph 'graphs/*.json' -v           # rich block per (graph, engine)
         """,
     )
 
@@ -78,11 +103,11 @@ Suite Mode (multiple graphs):
     parser.add_argument(
         "--engine",
         "-e",
-        type=int,
+        type=_parse_engine_list,
         default=None,
-        metavar="ID",
-        help="Engine ID (default: 1). "
-        "In suite mode, filters to this engine (default: all).",
+        metavar="IDS",
+        help="Engine ID or comma-separated list of IDs to run "
+        "(default: all discovered engines). Examples: -e 1, -e 1,2,3",
     )
 
     parser.add_argument(
@@ -120,6 +145,14 @@ Suite Mode (multiple graphs):
         action="store_true",
         default=False,
         help="Disable GPU kernel timing (E2E wall-clock only)",
+    )
+    output_group.add_argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        default=False,
+        help="Show detailed per-engine breakdown for each graph "
+        "(default: summary table)",
     )
 
     # A/B Testing arguments
@@ -209,9 +242,15 @@ def parse_args(args=None) -> BenchmarkConfig:
     parser = create_parser()
     parsed = parser.parse_args(args)
 
+    # parse_args() is a convenience wrapper used by external callers / tests for
+    # legacy single-graph BenchmarkConfig construction. main() does its own
+    # routing and does not call this. Map a list back to a scalar engine_id by
+    # taking the first ID, defaulting to 1 if unspecified.
+    engine_id = parsed.engine[0] if parsed.engine else 1
+
     return BenchmarkConfig(
         graph_path=parsed.graph,
         warmup_iters=parsed.warmup,
         benchmark_iters=parsed.iters,
-        engine_id=parsed.engine if parsed.engine is not None else 1,
+        engine_id=engine_id,
     )

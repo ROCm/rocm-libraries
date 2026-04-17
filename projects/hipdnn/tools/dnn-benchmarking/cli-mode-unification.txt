@@ -1,0 +1,42 @@
+CLI Mode Unification — Status
+=============================
+
+Done in current PR:
+- Single-graph hipDNN and suite paths collapsed into one. Single graph is now
+  just a 1-graph instance of the suite path.
+- `--engine` accepts comma-separated IDs (e.g. `--engine 1,2`) and runs each
+  selected engine. Replaces the need for A/B when comparing engines on the
+  same plugin folder.
+- `-v`/`--verbose` flag controls console detail:
+    default → summary table (one short line per graph)
+    -v      → rich per-engine block per graph (legacy single-graph format)
+  JSON output (`--output`) is independent of `-v` (always full SuiteResult).
+- `run_benchmark()` and `_run_reference_validation()` deleted.
+- Cross-plugin support is implicit: hipDNN loads every plugin in a folder
+  passed via `--plugin-path`, so `--engine 1,2` may span plugins automatically.
+
+Still to do (follow-up PR):
+- Collapse A/B testing into the unified path. With `--engine 1,2` already in
+  place, the only A/B-specific feature left is the side-by-side speedup output
+  (Reporter.print_ab_combined_stats) and per-config plugin paths (--APath,
+  --BPath). The unified path can already produce two ProviderEngineResults
+  for `--engine 1,2`; the missing piece is a "comparison" view of those two
+  results in the reporter and a way to specify per-engine plugin paths if
+  needed (currently --plugin-path applies to all).
+- Files to remove when A/B is collapsed:
+    src/dnn_benchmarking/execution/ab_runner.py
+    config/benchmark_config.py:ABTestConfig
+    cli/main.py:run_ab_test()
+    --APath / --BPath / --AId / --BId flags
+    Reporter.print_ab_*, ABRunner._validate_output, etc.
+
+Open questions:
+- For A/B-style comparison output, should the unified summary print a
+  speedup/winner column when --engine produces 2 results? Or only when an
+  explicit --compare flag is set?
+- Should `--plugin-path` accept multiple paths so per-engine plugin selection
+  is possible without --APath/--BPath?
+
+PyTorch backend stays on its own path (run_pytorch_benchmark) for now since it
+is a fundamentally different executor with no provider/engine concept. A future
+PR could expose pytorch as a "provider" and remove the separate path.
