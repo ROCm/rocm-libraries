@@ -24,7 +24,7 @@ jobs:
     permissions:
       id-token: write
     container:
-      image: ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:4443d9d710b9471e8ef658d509358bd92602498e67161b9280474bce0bb0decd
+      image: ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:d6ae5712a9c7e8b88281d021e907b312cd8a26295b95690baef3e8dde4805858
       options: -v /runner/config:/home/awsconfig/
     strategy:
       fail-fast: true
@@ -43,7 +43,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: TheRock
-          ref: b68757b3461145b85eabec29cea1223027a56da0 # 2026-04-01
+          ref: 2d9260c2b1c87175539a9fc45a2e9513ed36aff6 # 2026-04-16
 
       - name: Install python deps
         run: |
@@ -64,7 +64,7 @@ jobs:
       - name: Setup ccache
         run: |
           ./TheRock/build_tools/setup_ccache.py \
-            --config-preset "github-oss-presubmit" \
+            --config-preset "github-oss-dev" \
             --dir "$(dirname $CCACHE_CONFIGPATH)" \
             --local-path "$CACHE_DIR/ccache"
 
