@@ -977,9 +977,8 @@ fwd_result fmha_fwd_run(mode_enum mode,
     // Buffers for key/value per-sequence logical (unpadded) lengths (used in batch mode with
     // kvcache or group mode with padding enabled)
     // batch_prefill (group+kvcache) also needs per-batch seqlen_k for VLLM_BLOCK_TABLE_2D
-    const bool need_seqlen_k_buf =
-        (mode == mode_enum::batch && use_kvcache) || has_group_k_padding ||
-        (mode == mode_enum::group && use_kvcache);
+    const bool need_seqlen_k_buf = (mode == mode_enum::batch && use_kvcache) ||
+                                   has_group_k_padding || (mode == mode_enum::group && use_kvcache);
     ck_tile::DeviceMem seqlen_k_buf(need_seqlen_k_buf ? seqlen_ks.size() * sizeof(int32_t) : 0);
     ck_tile::DeviceMem cu_seqlen_q_buf(cuq_cum.empty() ? 0
                                                        : cuq_cum.size() * sizeof(ck_tile::index_t));
@@ -1153,8 +1152,8 @@ fwd_result fmha_fwd_run(mode_enum mode,
             else if constexpr(std::is_same_v<fmha_batch_prefill_traits,
                                              std::decay_t<decltype(traits)>>)
             {
-                traits.has_dropout      = (p_drop > 0.0f);
-                traits.qscale_type      = qscale.type;
+                traits.has_dropout = (p_drop > 0.0f);
+                traits.qscale_type = qscale.type;
                 traits.kv_memory_layout =
                     ck_tile::BlockAttentionKVCacheMemoryLayoutEnum::LINEAR_LAYOUT;
                 traits.kv_lookup_table =
@@ -1513,45 +1512,25 @@ fwd_result fmha_fwd_run(mode_enum mode,
                          ? seqlen_k_buf.GetDeviceBuffer()
                          : nullptr);
             }
-            else if constexpr(std::is_same_v<fmha_batch_prefill_args,
-                                             std::decay_t<decltype(args)>>)
+            else if constexpr(std::is_same_v<fmha_batch_prefill_args, std::decay_t<decltype(args)>>)
             {
-                args.bias_ptr = bias.type == bias_enum::alibi
-                                    ? alibi_slope_buf.GetDeviceBuffer()
-                                    : bias_buf.GetDeviceBuffer();
-                args.lse_ptr  = lse_buf.GetDeviceBuffer();
-                args.o_ptr    = o_buf.GetDeviceBuffer();
+                // Fields already set by the outer else block above:
+                //   bias_ptr, lse_ptr, o_ptr, seqlen_k, max_seqlen_q, scale_s,
+                //   logits_soft_cap, stride_bias/o, nhead/batch stride for bias/lse/o,
+                //   window_size_left/right, sink_size, mask_type.
 
-                args.seqlen_k     = shape_seqlen_k;
-                args.max_seqlen_q = max_seqlen_q;
-                args.scale_s      = scale_s;
-                args.scale_p      = 1.f;
-                args.scale_o      = 1.f;
-                args.logits_soft_cap = logits_soft_cap;
+                // scale_p/scale_o: batch_prefill-specific fields absent from fmha_fwd_args.
+                args.scale_p = 1.f;
+                args.scale_o = 1.f;
 
-                args.stride_bias = (bias.type == bias_enum::alibi
-                                        ? (bias.rank_info == 0 ? 0 : nhead)
-                                        : stride_bias);
-                args.stride_o          = stride_o;
-                args.nhead_stride_bias = nhead_stride_bias;
-                args.nhead_stride_lse  = nhead_stride_lse;
-                args.nhead_stride_o    = nhead_stride_o;
-                args.batch_stride_bias = batch_stride_bias;
-                args.batch_stride_lse  = batch_stride_lse;
-                args.batch_stride_o    = batch_stride_o;
-
-                args.window_size_left  = mask.left;
-                args.window_size_right = mask.right;
-                args.sink_size         = mask.sink;
-                args.mask_type         = static_cast<ck_tile::index_t>(mask.type);
-
+                // Dropout fields: the outer fmha_fwd_args branch sets these; set them here
+                // for batch_prefill since it takes a separate inner branch.
                 args.rand_val_ptr         = randval_buf.GetDeviceBuffer();
                 args.stride_randval       = stride_randval;
                 args.nhead_stride_randval = nhead_stride_randval;
                 args.batch_stride_randval = batch_stride_randval;
-
-                args.p_drop    = p_drop;
-                args.s_randval = s_randval;
+                args.p_drop               = p_drop;
+                args.s_randval            = s_randval;
                 if(drop_prefs)
                     args.drop_seed_offset = std::make_pair(drop_seed_buf.GetDeviceBuffer(),
                                                            drop_offset_buf.GetDeviceBuffer());
@@ -1561,8 +1540,8 @@ fwd_result fmha_fwd_run(mode_enum mode,
                 // Paged KV: LINEAR_LAYOUT + VLLM_BLOCK_TABLE_2D
                 // block_table_buf: [batch, max_blocks_per_seq] of physical page ids
                 // seqlen_k_buf: [batch] of per-batch seqlen_k values
-                args.num_total_pages          = max_num_page_blocks;
-                args.page_block_size          = page_block_size;
+                args.num_total_pages = max_num_page_blocks;
+                args.page_block_size = page_block_size;
                 args.kv_memory_layout =
                     ck_tile::BlockAttentionKVCacheMemoryLayoutEnum::LINEAR_LAYOUT;
                 args.kv_lookup_table =
@@ -1588,9 +1567,9 @@ fwd_result fmha_fwd_run(mode_enum mode,
                 args.nhead_stride_v = page_block_size * hdim_v;
 
                 // descale: not used for fp16/bf16
-                args.q_descale_ptr               = nullptr;
-                args.k_descale_ptr               = nullptr;
-                args.v_descale_ptr               = nullptr;
+                args.q_descale_ptr                  = nullptr;
+                args.k_descale_ptr                  = nullptr;
+                args.v_descale_ptr                  = nullptr;
                 args.nblock_stride_kv_block_descale = 0;
                 args.nhead_stride_kv_block_descale  = 0;
             }
