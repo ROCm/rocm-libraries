@@ -59,35 +59,22 @@ non-override graphs and are filtered out for override-enabled graphs.
 The public backend C-API surface is preserved unchanged: there is one
 `hipdnnBackendExecute` today and one after this RFC lands.
 
-**Binary-compatibility scope.** Phase 1: existing plugins remain
-binary-compatible (plugins missing the override entry continue to serve
-non-override graphs unchanged). Phase 2: the joint 1.0 SDK bump requires
-plugin rebuilds — see §6.9 Layer 1, which filters all pre-1.0 plugins out
-of `getApplicableEngineIds` for any 1.0-schema graph, including
-non-override graphs.
+**Binary-compatibility scope.** The backend computes the minimum schema
+version each graph requires based on the features the graph uses. Plugins
+report a single supported schema version. Graphs that do not use
+dynamic-tensor features map to 0.x and continue to be served by existing
+pre-1.0 plugins unchanged. Graphs that use the per-tensor dynamic feature
+map to 1.0, and only plugins reporting 1.0+ are eligible. The
+MIOpen-provider does not check for dynamic tensors today, so it is
+correctly mapped to 0.1.0 support; without per-graph filtering, it could
+falsely claim a dynamic-tensor graph and silently mishandle it.
 
 ### 1.1 Phased rollout
 
-Overridable-tensor support is delivered as a two-phase rollout, both
-phases committed in this RFC:
-
-- **Phase 1, Overridable tensor shapes (this RFC, §4).** A
-  graph-level flag opts a graph into execute-time override
-  semantics, and an execute-time mechanism re-supplies per-tensor
-  dims and strides without rebuilding the graph. All shapes are
-  concrete at graph build time; overrides must fit within the
-  declared max-shape.
-- **Phase 2, Dynamic tensors (this RFC, §6). Builds on Phase 1's
-  variant-pack override transport by adding declarative dynamism at
-  graph build time, which enables build-time applicability filtering
-  and closes the failure modes Phase 1 alone cannot address. Ships
-  under a major version bump; see §6.9 for the rollout.**
-
-The remainder of this RFC (§2 through §5, plus §7 through §10)
-covers both phases. §2 through §5 detail Phase 1; §6 details Phase 2;
-§7 through §9 cover risks, execution, and testing for both phases
-together; §10 enumerates remaining future work beyond what either
-phase commits to.
+Overridable-tensor support ships in two phases under this RFC: Phase 1
+(overridable tensor shapes via execute-time variant-pack overrides) and
+Phase 2 (per-tensor dynamic flag enabling build-time applicability
+filtering, gated by a schema major-version bump).
 
 ---
 
@@ -95,26 +82,10 @@ phase commits to.
 
 ### 2.1 Reference surface
 
-The desired end-user surface follows a well-established pattern for
-dynamic-shape graph runtimes:
-
-- At graph build time, a graph flag (e.g.
-  `set_dynamic_shape_enabled(true)`) declares intent to override
-  shapes at execute time.
-- At execute time, an overload of the graph's execute method accepts
-  three parallel vectors of override UIDs, shapes, and strides. The
-  graph is not rebuilt; the same compiled plan is reused.
-- The single backend execute entry is preserved: there is no sibling
-  execute-with-overrides function. The reference surface specifies
-  the frontend overload and the single-execute-entry constraint; how
-  each runtime carries the override payload to its plugin layer is
-  an implementation choice. hipDNN folds the payload into the
-  variant pack via dedicated variant-pack attributes (see §4.3).
-
-This RFC adopts the same shape so that user code translating between
-graph runtimes does not need per-runtime branching at every call site.
-SDPA workloads commonly run on multiple runtimes; divergence forces
-them to fork at every override call site.
+The desired end-user surface keeps the same execute API. Override values
+are specified on the variant pack descriptor and transported to plugins
+through a new optional plugin C-API used to filter plugin engines on
+dynamic graphs.
 
 ### 2.2 hipDNN gap
 
@@ -138,20 +109,19 @@ The design must:
    that contract.
 2. **Preserve the public backend C-API surface**. There is exactly
    one `hipdnnBackendExecute` today, and there will continue to be
-   exactly one after this RFC lands. The reference surface (§2.1)
-   keeps a single execute entry; this RFC follows that pattern.
+   exactly one after this RFC lands. The reference surface keeps a
+   single execute entry; this RFC follows that pattern.
 3. **Keep the graph descriptor read-only after build**. Per-tensor
    shapes declared at graph time must not be mutated at execute time;
    overrides travel via the variant pack only.
 4. **Stay off-by-default for end users** until at least one shipping
-   plugin implements the override path. See §4.7 for how this is
-   achieved without introducing a new hipDNN-owned gate.
+   plugin implements the override path. The new surface is gated behind
+   the SDPA feature flag; see PR
+   [#6493](https://github.com/ROCm/rocm-libraries/pull/6493).
 
 ---
 
 ## 3. Current System Overview
-
-### 3.1 Graph compile / execute today
 
 ```text
                 build()                     execute()
@@ -170,131 +140,28 @@ The design must:
                   hipdnnEnginePluginExecuteOpGraph (in plugin)
 ```
 
-`Graph::build()`
-(`frontend/include/hipdnn_frontend/Graph.hpp:1578`) materializes a
-backend `GraphDescriptor`, finalizes it, and finalizes an execution
-plan. `Graph::execute()`
-(`frontend/include/hipdnn_frontend/Graph.hpp:1643-1740`, where the
-`tensorLookup` overload starts at 1643) translates
-the caller's UID-to-pointer map and workspace into a
-`VariantDescriptor` and calls `hipdnnBackendExecute`
-(`backend/include/hipdnn_backend.h:178`). Frontend types and logging
-come from the Data SDK; the frontend never speaks FlatBuffers
-directly.
+- Frontend builds a graph descriptor describing tensors, operations, and
+  graph-level attributes.
+- Backend validates, finalizes, and lowers the graph for plugin
+  consumption.
+- Backend asks each loaded plugin which engines apply to the finalized
+  graph.
+- At execute time the variant pack maps `tensorId → devicePtr` (we are
+  adding `tensorId → override dims` and `tensorId → override strides`);
+  the backend flattens the pack into parallel arrays and calls the
+  plugin's execute entry. Plugins never see the variant pack directly.
 
-### 3.2 Backend descriptor model
+Two pieces of scaffolding already exist in the tree but are not yet
+wired: the `HIPDNN_ATTR_OPERATIONGRAPH_IS_DYNAMIC_SHAPE_ENABLED` enum
+value and the `tryAssignSymbol` optional-symbol pattern. We adopt both
+as-is.
 
-`GraphDescriptor` (`backend/src/descriptors/GraphDescriptor.{hpp,cpp}`)
-owns the operation list, finalization state, and the FlatBuffer
-serialization round-trip. The relevant attribute plumbing entry
-points are `setAttribute` (line 301), `getAttribute` (line 160),
-`finalize` (line 26), `buildGraphFromOperations` (line 47), and
-`deserializeGraph` (line 348). The serialized schema lives in
-`flatbuffers_sdk/schemas/graph.fbs`, in `table Graph` (lines 37–45).
-RFC 0005 §4.6.1 establishes that appending optional defaulted fields
-to existing tables is forwards- and backwards-compatible within a
-major version, which is what this RFC will rely on for the new
-graph flag.
+Plugins report a single supported schema version through
+`hipdnnPluginGetApiVersion`; missing symbols default to `"0.0.0"`. The
+optional-symbol resolution pattern is reused unchanged.
 
-### 3.3 Variant pack model
-
-`VariantDescriptor`
-(`backend/src/descriptors/VariantDescriptor.hpp:14-43`) is the
-runtime-only carrier of per-execution payload. It holds three fields
-today: `_dataPointers`, `_uniqueIds`, and `_workspace`. The attribute
-IDs already defined on the variant pack live in the **700–799
-reserved range**. There is no FlatBuffer schema for the variant
-pack: it is **runtime-only by design**, and this RFC does not change
-that. Direct inspection confirms there is no
-`flatbuffers_sdk/schemas/variant_pack.fbs` file in the tree.
-
-New variant-pack attributes are added by extending `setAttribute` /
-`getAttribute` only. This RFC adds three such attributes (see §4.3),
-each landing in the existing 700–799 reserved range and following the
-same in-process get/set discipline that already exists for variant
-pack fields today. The next free slot in that range is **704**, not
-703: `HIPDNN_ATTR_VARIANT_PACK_INTERMEDIATES = 702` already exists
-in `HipdnnBackendAttributeName.h:222` (although currently unwired in
-`VariantDescriptor`), so the §4.3 inventory step starts at 704.
-
-### 3.4 Plugin C-API surface today
-
-The plugin SDK's execute entry is `hipdnnEnginePluginExecuteOpGraph`
-in `plugin_sdk/include/hipdnn_plugin_sdk/EnginePluginApi.h:239-244`
-with signature:
-
-```c
-hipdnnPluginStatus_t
-hipdnnEnginePluginExecuteOpGraph(
-    hipdnnEnginePluginHandle_t handle,
-    hipdnnEnginePluginExecutionContext_t execution_context,
-    void* workspace,
-    const hipdnnPluginDeviceBuffer_t* device_buffers,
-    uint32_t num_device_buffers);
-```
-
-A key constraint that shapes the §4.4 plugin SDK extension: **plugins
-never see the variant pack**. The host extracts the pack
-into flat parallel arrays in
-`EnginePluginResourceManager::executeOpGraph`
-(`backend/src/plugin/EnginePluginResourceManager.cpp:569-614`),
-walking `getTensorIds()` and `getDataPointers()` to pack each pair
-into a `hipdnnPluginDeviceBuffer_t` before calling the plugin.
-Whatever the plugin needs from the variant pack must reach it through
-this flattening step. Any new payload traveling from the variant
-pack to the plugin must therefore appear as additional flat
-parameters on the plugin entry signature, not as a richer structure
-the plugin can introspect.
-
-### 3.5 Plugin versioning today (cf. RFC 0005 §4.6.3–4.6.4)
-
-Plugins report their plugin-SDK API version through the optional
-symbol `hipdnnPluginGetApiVersion`
-(`plugin_sdk/include/hipdnn_plugin_sdk/PluginApi.h:79`). The backend
-uses the `tryAssignSymbol` pattern at the canonical use site
-`backend/src/plugin/PluginCore.cpp:35-46`, where it currently resolves
-the base-plugin optional symbols (`hipdnnPluginGetApiVersion`,
-`hipdnnPluginSetLoggingCallback`, `hipdnnPluginSetLogLevel`); missing
-symbols are not load-fatal, and `apiVersion()` defaults to `"0.0.0"`
-for plugins that do not export the symbol. Engine entry points in
-`backend/src/plugin/EnginePlugin.cpp:29-84` currently use plain
-`_lib.getSymbol<>()` rather than `tryAssignSymbol`, so the new
-optional engine symbol introduced in §4.4 is the first engine entry
-to adopt the optional-symbol pattern. This RFC extends the
-symbol-resolution pattern (RFC 0002 precedent) to engine entries for
-capability detection; see §4.4 for the per-symbol gating policy.
-
-### 3.6 SDPA surface today
-
-hipDNN's SDPA frontend nodes (`Graph::sdpa()`,
-`Graph::sdpa_backward()`, `SdpaFwdNode`, `SdpaBwdNode`,
-`SdpaAttributes`, `SdpaBackwardAttributes`,
-`SdpaFwdOperationDescriptor`, `SdpaBwdOperationDescriptor`, and
-schemas `sdpa_attributes.fbs` and `sdpa_backward_attributes.fbs`)
-are all in place. However, **no SDPA feature flag exists**: there is
-no env var, no CMake option, and no runtime knob today that scopes
-the SDPA work. This RFC explicitly does not introduce one (see §4.7);
-the gating discussion is deferred to the SDPA team's RFC.
-
-### 3.7 Already-reserved scaffolding
-
-Two pieces of scaffolding are already in the tree but **not yet
-wired**, which materially shapes the design choices in §4 and §5:
-
-- `HIPDNN_ATTR_OPERATIONGRAPH_IS_DYNAMIC_SHAPE_ENABLED = 603` is
-  defined in `backend/include/HipdnnBackendAttributeName.h:190` and
-  string-mapped at `backend/src/BackendEnumStringUtils.hpp:306-307`,
-  but `GraphDescriptor::setAttribute` / `getAttribute` do not handle
-  it yet. Reusing this reserved enum value avoids a fresh
-  attribute-namespace allocation and a parallel naming debate
-  (see §5.2 trade-off).
-- The optional-symbol resolution pattern (`tryAssignSymbol`) is
-  already in production use for the base-plugin optional symbols at
-  `backend/src/plugin/PluginCore.cpp:35-46` (see §3.5). Engine entry
-  points in `EnginePlugin.cpp:29-84` use plain `_lib.getSymbol<>()`
-  today; this RFC extends the same `tryAssignSymbol` pattern to
-  engine entries for the first time, for the new optional plugin SDK
-  entry, without introducing any new resolution mechanism.
+For SDPA gating, see PR
+[#6493](https://github.com/ROCm/rocm-libraries/pull/6493).
 
 ---
 
@@ -302,10 +169,8 @@ wired**, which materially shapes the design choices in §4 and §5:
 
 ### 4.1 Graph flag (covers reqs 1, 4, 16)
 
-Add a graph-level boolean flag `_isDynamicShapeEnabled` to
-`GraphAttributes`
-(`frontend/include/hipdnn_frontend/attributes/GraphAttributes.hpp:42-170`)
-with frontend setter / getter:
+We add a graph-level boolean flag, update the FBS schema, and wire it
+through the existing C-API get/set attributes path for lowering/lifting.
 
 ```cpp
 class Graph {
@@ -315,20 +180,8 @@ public:
 };
 ```
 
-The attribute is packed into the `GraphDescriptor` via
-`GraphPacker`/`GraphUnpacker`
-(`frontend/include/hipdnn_frontend/detail/GraphPacker.hpp:22-134`)
-and lands on the backend through the already-reserved enum value
-`HIPDNN_ATTR_OPERATIONGRAPH_IS_DYNAMIC_SHAPE_ENABLED = 603`. Wiring
-extends `GraphDescriptor::setAttribute` (line 301), `getAttribute`
-(line 160), `finalize` (line 26), `buildGraphFromOperations` (line
-47), and `deserializeGraph` (line 348). `is_dynamic_shape_enabled` is the first
-graph-level boolean attribute on `GraphDescriptor`; each of these
-touchpoints follows the established attribute-handling pattern
-already used for non-bool graph attributes.
-
 The serialized graph schema gains one new field at the end of `table
-Graph` in `flatbuffers_sdk/schemas/graph.fbs:37-45`:
+Graph` in `flatbuffers_sdk/schemas/graph.fbs`:
 
 ```fbs
 table Graph {
@@ -339,16 +192,16 @@ table Graph {
 
 Per RFC 0005 §4.6.1, appending an optional defaulted field to an
 existing table is forwards-/backwards-compatible within a major
-version. No schema-version bump is required, and the already-reserved
-enum value 603 means no attribute-namespace conflict can arise either
-in the C-API enum range or in the `BackendEnumStringUtils` mapping
-table. No `BackendEnumStringUtils` change is needed for 603; per
-§3.7, the string mapping for this enum is already in place.
+version. The attribute lands on the backend through the
+already-reserved enum value
+`HIPDNN_ATTR_OPERATIONGRAPH_IS_DYNAMIC_SHAPE_ENABLED = 603`.
 
 ### 4.2 Frontend execute API (covers reqs 2, 3, 9, 15, 17)
 
-`Graph::execute()` gains an overload (the existing signature is
-preserved unchanged):
+We add an overload of `Graph::execute` that takes override shapes and
+strides. Frontend validates the overrides and returns an error if they
+don't match the graph's expectations. The next subsection details the
+validation rules.
 
 ```cpp
 error_t execute(hipdnnHandle_t handle,
@@ -359,107 +212,43 @@ error_t execute(hipdnnHandle_t handle,
                 std::vector<std::vector<int64_t>> const& override_strides) const;
 ```
 
-The three trailing parallel vectors mirror the reference surface
-(§2.1): positionally indexed, so for each `i`, `override_shapes[i]`
-and `override_strides[i]` are the override dims and strides for the
-tensor identified by `override_uids[i]`. The frontend does not invent
-a struct-based map for this; matching the reference surface is the
-constraint (see §5.3 and §5.8). The trade-off is documented in §5.3:
-the three vectors must remain length-consistent, validated by the
-frontend before any backend call.
+#### 4.2.1 Override input validation (covers reqs 3, 16)
 
-**Error semantics** (req 3): the override overload returns a non-OK
-`Error` (the frontend's status type; `error_t` at `Error.hpp:179` is a
-typedef of `Error`, used interchangeably in code samples below) and
-emits a log entry if `is_dynamic_shape_enabled()` was not set on the
-graph at compile time. The C-API surface (`hipdnnBackendExecute`)
-returns the underlying `hipdnnStatus_t`; the frontend overload returns
-`Error` to its caller. The frontend checks this before
-making any `setAttribute` calls on the variant pack, so a misuse
-never crosses the backend boundary. Setting the flag without
-supplying overrides at execute time is permitted (req 9): the graph
-still runs through the standard non-override dispatch path, with
-identical behavior to a graph that never set the flag.
-
-**Override translation**: the frontend translates the three vectors
-into `setAttribute` calls on the `VariantDescriptor`, populating the
-five new attributes defined in §4.3 (three payload attributes plus
-two per-UID lengths sidebands). The graph descriptor is **not**
-mutated at execute time; per-tensor shapes declared at graph build
-remain read-only, satisfying constraint 3 from §2.3. After the
-attribute writes, the frontend calls the existing
-`hipdnnBackendExecute` exactly as today; the override payload reaches
-the host through the variant pack.
-
-**Existing path unchanged**: callers that do not use the new overload
-see no behavior change. The existing `Graph::execute()` signature
-remains the entry point for non-override execution, and the bytes
-sent through `hipdnnBackendExecute` for non-override callers are
-identical to today.
-
-#### 4.2.1 Override input validation (covers reqs 3, 16; supports glossary §11 max-shape)
-
-Before issuing any `setAttribute` call on the variant pack, the frontend
-validates the override payload. Each violation listed below results in a
-`HIPDNN_STATUS_BAD_PARAM` return and a log entry; no backend call is
-made and no partial variant-pack state is constructed. The frontend's
-validation is the **single point of input policing** for the override
-surface; the backend assumes the variant pack carries well-formed
-override attributes once they are present.
-
-The following violations are checked in order, and the first failure
-returns:
+The frontend is the single point of input policing. Each violation
+returns `HIPDNN_STATUS_BAD_PARAM`; the first failure returns:
 
 1. **Length consistency.** `override_uids.size()`,
    `override_shapes.size()`, and `override_strides.size()` must be
-   equal, the central invariant of the parallel-array design (§5.3).
+   equal.
 2. **Unknown UID.** Each `override_uids[i]` must identify a tensor
-   declared in the graph (present in the graph descriptor's tensor-id
-   set built at finalize time). Unknown UIDs are not silently dropped;
-   they signal a structural mismatch the caller must resolve.
-   Workspace has no UID by construction
-   (`VariantDescriptor.hpp:19` carries `_workspace` separately from
-   `_uniqueIds`); validation enforces this by checking each
-   `override_uids[i]` against the graph's tensor-id set, which never
-   contains a workspace entry.
+   declared in the graph. Workspace is never overridable.
 3. **Rank mismatch.** `override_shapes[i].size()` and
    `override_strides[i].size()` must equal the declared rank of the
    tensor identified by `override_uids[i]`.
 4. **Max-shape exceeded.** Each `override_shapes[i][d]` must be `<=`
-   the declared graph-time dim. The graph-time dim is the
-   **max-shape** (see Glossary §11 "Max-shape semantics"), the
-   central invariant the engine relies on for buffer sizing.
-5. **Duplicate UIDs.** `override_uids` must contain no duplicates;
-   each tensor may be overridden at most once per execute call.
-6. **Positive dim values.** Each `override_shapes[i][d]` must be
-   `> 0`. Zero or negative dims are never legal under max-shape
-   semantics.
+   the declared graph-time dim (the max-shape).
+5. **Duplicate UIDs.** `override_uids` must contain no duplicates.
+6. **Positive dim values.** Each `override_shapes[i][d]` must be `> 0`.
 7. **Positive stride values.** Each `override_strides[i][d]` must be
    `> 0`. The frontend does not bound-check the implied buffer
-   footprint; engines must treat strides as plugin-side input that
-   may be invalid in pathological cases. The "single point of input
-   policing" applies to value-validity only, not to buffer-footprint
-   validity.
+   footprint.
+8. **Stride ordering preserved.** The relative ordering of strides
+   (which dimension is fastest-varying) must match the graph-time
+   strides; an override may shrink dims and rescale stride magnitudes,
+   but cannot reorder the layout. This is implied by the max-shape
+   size invariant but stated explicitly to forbid layout transposes
+   at execute time.
 
-An override call where all three vectors are empty (and length-
-consistent) is equivalent to a non-override execute call; the
-frontend skips the variant-pack attribute writes in this case so the
-§4.6 dispatch falls through to the existing entry.
-
-This validation runs in the frontend overload, before the
-`setAttribute` calls in §4.2 / §4.3. Backend descriptors do not
-re-validate; once an override attribute is set on the variant pack it
-is treated as authoritative.
+An override call where all three vectors are empty is equivalent to a
+non-override execute call; the frontend skips the variant-pack
+attribute writes so dispatch falls through to the existing entry.
 
 ### 4.3 Backend C-API and variant-pack attributes (covers reqs 5, 8, 16)
 
-The single existing `hipdnnBackendExecute` is preserved (see §2.1);
-override semantics fold into the variant pack via attributes, with
-no new public C-API entry exported.
-
-Five new variant-pack attribute enum values are added in the
-reserved 700–799 range, starting at the next free slot 704 (see
-§3.3) — three payload attributes plus two per-UID lengths sidebands:
+The single existing `hipdnnBackendExecute` is preserved; override
+semantics fold into the variant pack via five new attributes in the
+reserved 700–799 range — three payload attributes plus two per-UID
+lengths sidebands:
 
 ```c
 HIPDNN_ATTR_VARIANT_PACK_OVERRIDE_UNIQUE_IDS     = 704  // array of int64 UIDs
@@ -469,41 +258,12 @@ HIPDNN_ATTR_VARIANT_PACK_OVERRIDE_SHAPES_LENGTHS = 707  // per-UID rank sideband
 HIPDNN_ATTR_VARIANT_PACK_OVERRIDE_STRIDES_LENGTHS = 708 // per-UID rank sideband
 ```
 
-**Storage convention for jagged arrays.** Attributes 705
-(`OVERRIDE_SHAPES`) and 706 (`OVERRIDE_STRIDES`) are each set as a
-flat `int64_t[]` buffer (the concatenation of per-UID inner vectors).
-The parallel per-UID lengths attributes 707 and 708 (each an
-`int64_t[]`) carry the rank of each tensor in the same order as
-`OVERRIDE_UNIQUE_IDS`. This **flatten + per-UID lengths** convention
-matches the parallel-array form chosen for the plugin SDK signature in
-§4.4 (see `override_shapes_lengths` / `override_strides_lengths`),
-giving a single representation across both the variant-pack attribute
-surface and the plugin entry surface.
-
-These attribute-IDs realize the reference surface's variant-pack
-override semantics on the hipDNN side. The reference surface (§2.1)
-specifies the frontend overload and the single-execute-entry
-constraint; the choice to fold the override payload into dedicated
-variant-pack attributes is hipDNN's, motivated by clean separation
-from the existing variant-pack fields. End users porting between
-runtimes write against the frontend overload, not against these
-backend attribute-IDs directly.
-
-The attributes are wired through `VariantDescriptor::setAttribute` /
-`getAttribute` only; the variant pack remains runtime-only as
-established in §3.3. The implementation adds string mappings for the
-new enum values to `backend/src/BackendEnumStringUtils.hpp` alongside
-the existing 700-range entries, so attribute names appear correctly
-in error messages and logs.
-
-The override propagation path therefore lives in two places: the
-variant-pack attributes (frontend to backend descriptor) and the
-plugin SDK layer (host to plugin), which are wired together in §4.4
-and §4.6. Either layer in isolation is insufficient. The variant
-pack carries the payload across the backend boundary, and the plugin
-SDK entry conveys the same payload across the plugin boundary, with
-the host-side flattening step in §4.6 bridging the two
-representations.
+**Storage convention for jagged arrays.** `OVERRIDE_SHAPES` and
+`OVERRIDE_STRIDES` are flat `int64_t[]` buffers (the concatenation of
+per-UID inner vectors); the parallel `_LENGTHS` sidebands carry each
+tensor's rank in the same order as `OVERRIDE_UNIQUE_IDS`. This
+flatten-plus-per-UID-lengths form matches the plugin SDK signature so
+both layers share a single representation.
 
 ### 4.4 Plugin SDK extension (covers reqs 5, 6, 8, 18)
 
@@ -527,59 +287,46 @@ hipdnnEnginePluginExecuteOpGraphWithOverrides(
 ```
 
 The signature extends the existing `hipdnnEnginePluginExecuteOpGraph`
-(`EnginePluginApi.h:239-244`) with three additional flat parallel
-arrays plus their per-UID length sidebands. The flat-array shape is
-dictated by §3.4: plugins never see the variant pack, so the host
-extracts the override payload and passes it flat alongside the
-existing device-buffer array. For each `i` in `[0, num_override_uids)`,
-`override_shapes[i]` is an int64 array of length
-`override_shapes_lengths[i]` carrying the override dims for tensor
-`override_uids[i]`, and similarly for strides.
+in `EnginePluginApi.h` with three flat parallel arrays plus their
+per-UID length sidebands. Plugins never see the variant pack, so the
+host extracts the override payload and passes it flat alongside the
+existing device-buffer array. For each `i`, `override_shapes[i]` is an
+int64 array of length `override_shapes_lengths[i]` carrying the
+override dims for tensor `override_uids[i]`, and similarly for strides.
 
-The layout mirrors the existing non-override variant-pack API in
-`EnginePluginApi.h` so plugin authors can adopt the override entry by
-reusing their existing per-UID iteration code. A flattened-with-offsets
-alternative was rejected as divergent from the established convention.
-This commits the plugin ABI to the parallel-arrays form for the lifetime
-of the symbol; a future flattened-layout variant would require a
-separately versioned symbol.
+The layout mirrors the existing non-override variant-pack plugin API
+so plugin authors can reuse their per-UID iteration code. This commits
+the plugin ABI to the parallel-arrays form for the lifetime of the
+symbol; a flattened-with-offsets alternative was rejected as divergent
+from the established convention.
 
 **Pointer lifetime.** The `device_buffers`, `override_shapes`, and
 `override_strides` pointer-of-pointers (and their inner arrays) are
-valid for the duration of this call only; the host guarantees the
-underlying storage is not mutated mid-call. The plugin must not
-retain or dereference any of these pointers after returning,
-matching the existing `hipdnnPluginDeviceBuffer_t[]` contract.
+valid for the duration of this call only; the plugin must not retain
+or dereference them after returning, matching the existing
+`hipdnnPluginDeviceBuffer_t[]` contract.
 
 **Versioning.** The implementation bumps
-`HIPDNN_PLUGIN_SDK_VERSION_MINOR` in `plugin_sdk/version.h.in` per
-RFC 0005 §4.2 (minor bump for backwards-compatible API addition).
-Plugins compiled against the older SDK do not export the new symbol
-and continue to serve non-override graphs. **Capability detection is
-per-symbol via `hasOverrideExecute()`, never per-version-string** (per
-RFC 0002, with the `tryAssignSymbol` precedent at
-`backend/src/plugin/PluginCore.cpp:35-46`): the symbol either resolves
-or it does not. Any version string reported through
-`hipdnnPluginGetApiVersion` is for human consumption; a mismatch is a
-diagnostics issue, not a correctness issue for the dispatch path.
+`HIPDNN_PLUGIN_SDK_VERSION_MINOR` per RFC 0005 §4.2 (minor bump for
+backwards-compatible API addition). Plugins compiled against the older
+SDK do not export the new symbol and continue to serve non-override
+graphs. Capability detection is per-symbol via `hasOverrideExecute()`,
+never per-version-string: the symbol either resolves or it does not.
 
 **Resolution and detection.** The new symbol resolves through the
-optional-symbol pattern in `EnginePlugin::resolveSymbols`
-(`backend/src/plugin/EnginePlugin.cpp:29-84`) using `tryAssignSymbol`,
-the same machinery RFC 0002 already commits to for the base-plugin
-optional symbols (see §3.5); no new resolution path is introduced,
-but this is the first engine entry to use it. A new predicate
+optional-symbol pattern in `EnginePlugin::resolveSymbols` using
+`tryAssignSymbol`, the same machinery RFC 0002 already commits to for
+the base-plugin optional symbols. A new predicate
 `EnginePlugin::hasOverrideExecute()` returns true iff the symbol
-resolved. This predicate is the **authoritative capability gate**
-for §4.5 applicability filtering. §4.6 dispatch consults it once
-more as a fallback guard for the C-API bypass case (override
-attributes constructed on a flag-unset graph via direct backend
-C-API misuse). It is consulted nowhere else.
+resolved.
 
 ### 4.5 Applicability filtering (covers reqs 7, 10, 11)
 
-Modify `EnginePluginResourceManager::getApplicableEngineIds`
-(`backend/src/plugin/EnginePluginResourceManager.cpp:385-423`):
+Modify `EnginePluginResourceManager::getApplicableEngineIds`. The
+backend maps each graph to the minimum schema version it requires
+based on the features it uses; plugins are filtered against that
+mapping. For the override feature this reduces to a single check on
+the graph flag:
 
 ```cpp
 if (graphDesc.is_dynamic_shape_enabled()) {
@@ -597,47 +344,22 @@ if (graphDesc.is_dynamic_shape_enabled()) {
 }
 ```
 
-This satisfies three requirements simultaneously:
+Graphs that do not opt in see no plugin-eligibility change; old
+plugins continue to serve them. Graphs that opt in see only plugins
+that report the override symbol. Plugins implementing the override
+entry are still asked about applicability for **all** graphs; the
+override entry itself is invoked only when the variant pack carries
+override attributes.
 
-- **req 7**: when the flag is set, plugins lacking the override entry
-  are never asked about applicability. The optimization is exact:
-  the `continue` precedes any `isApplicable` call.
-- **req 10**: plugins implementing the override entry are still
-  asked about applicability for **all** graphs. The override entry
-  itself is only invoked when the variant pack carries override
-  attributes (§4.6), so non-override graphs see zero behavioral
-  change.
-- **req 11**: when the flag is set, plugins lacking the override
-  entry are filtered out before engine selection, so they cannot be
-  selected even by a stale cached engine-id list.
-
-The filter is the **authoritative pre-dispatch backstop**, layered
-on top of §4.4's per-plugin capability gate, for the §4.6 dispatch
-switch: as long as §4.5 runs before dispatch and the graph flag has
-the same value at applicability time and execute time (which it
-does, because the graph descriptor is read-only after build,
-constraint 3 of §2.3), the dispatch path can never select a plugin
-missing the symbol.
-
-**Invariant**: applicability filtering runs on every `Graph::execute()`
-call before host dispatch. The filter is not memoized across calls and
-does not rely on any cached engine-id list; re-evaluating cheaply per
-execute is the price paid for the §7.7 layered-detection guarantee.
-The §4.6 dispatch path is permitted to assume a non-empty result from
-§4.5 and a selected plugin that, when the graph flag is set, has
-`hasOverrideExecute() == true`.
-
-Plugin authors implementing the override entry must continue to
-support non-override graphs in their `isApplicable` implementation;
-the override entry is invoked only when the variant pack carries
-override attributes, but `isApplicable` is invoked for both.
+Applicability filtering runs on every `Graph::execute()` call before
+host dispatch and is not memoized; re-evaluating cheaply per execute
+keeps the layered-detection guarantee intact.
 
 ### 4.6 Host dispatch logic
 
-Modify `EnginePluginResourceManager::executeOpGraph`
-(`backend/src/plugin/EnginePluginResourceManager.cpp:569-614`).
-After extracting the existing tensor IDs / pointers into
-`hipdnnPluginDeviceBuffer_t[]`, inspect the variant pack for the new
+Modify `EnginePluginResourceManager::executeOpGraph`. After extracting
+the existing tensor IDs / pointers into `hipdnnPluginDeviceBuffer_t[]`,
+inspect the variant pack for the new
 `HIPDNN_ATTR_VARIANT_PACK_OVERRIDE_*` attributes:
 
 ```cpp
@@ -646,10 +368,10 @@ extract optional { override_uids, override_dims, override_strides }
   from variantPackDesc
 
 if (override attributes present) {
-    // §4.5 guarantees the selected plugin has the symbol when the
-    // graph flag is set; this guard catches the bypass case (caller
-    // constructed override attributes on a flag-unset graph via direct
-    // C-API) before we dereference a null pointer.
+    // Applicability filtering guarantees the selected plugin has the
+    // symbol when the graph flag is set; this guard catches the bypass
+    // case (caller constructed override attributes on a flag-unset
+    // graph via direct C-API) before we dereference a null pointer.
     if (!plugin.hasOverrideExecute()) {
         return HIPDNN_STATUS_NOT_SUPPORTED;  // loud, recoverable failure
     }
@@ -668,75 +390,35 @@ if (override attributes present) {
 }
 ```
 
-This is the **single dispatch switch** that distinguishes override
-from non-override execution at the plugin boundary. All
-override-aware plugin-dispatch logic lives in this one host-side
-extension; no other point in the host needs to branch on
-override-attribute presence.
+This is the single dispatch switch that distinguishes override from
+non-override execution at the plugin boundary; no other point in the
+host needs to branch on override-attribute presence.
 
-**Host-side conversion lifetime.** The temporary `int64_t*` arrays
-passed to the plugin are stack-built `std::vector<const int64_t*>` /
-`std::vector<uint32_t>` capturing `.data()` and `.size()` from the
-variant pack's `std::vector<std::vector<int64_t>>` attribute storage.
-The inner storage lives in the `VariantDescriptor` for the duration
-of the execute call (caller-owned, not modified mid-call), so the
-captured pointers remain valid for the plugin call. The plugin must
-not retain any pointers beyond the call: same contract as the
-existing `hipdnnPluginDeviceBuffer_t[]`. The lengths passed to the
-plugin entry are `uint32_t` while the frontend's `std::vector` sizes
-are `size_t`; the host inserts explicit `static_cast<uint32_t>` with
-a runtime size check, matching the `-Wconversion` discipline already
-in force.
-
-**Independence from the graph flag.** The dispatch switch keys on
-variant-pack-attribute presence, not on the graph flag. A graph
-compiled with the flag set may execute with no overrides (for
-example, a "default-shape" execution against an override-capable
-plan), and dispatch falls through to the existing entry. This
-satisfies req 9 and keeps req 8 ("flow is basically identical to
-before") true at the plugin boundary: when no overrides are
-supplied, an override-implementing plugin sees exactly the same
+The dispatch switch keys on variant-pack-attribute presence, **not**
+on the graph flag. A graph compiled with the flag set may execute with
+no overrides, and dispatch falls through to the existing entry — an
+override-implementing plugin sees exactly the same
 `hipdnnEnginePluginExecuteOpGraph` call it sees today.
 
-**Edge case: override attributes present but no implementing
-plugin.** Cannot occur in well-formed flow; §4.5 removes plugins
-lacking the symbol when the graph flag is set. The bypass case is
-the caller constructing override attributes on a flag-unset graph
-via direct C-API misuse. The explicit `hasOverrideExecute()` guard
-in the pseudocode above returns `HIPDNN_STATUS_NOT_SUPPORTED` before
-any null function pointer is invoked, ensuring a loud actionable
-failure rather than a segfault.
+**Lifetime.** Temporary `int64_t*` arrays passed to the plugin
+capture `.data()` / `.size()` from the variant pack's storage; the
+inner storage lives in the `VariantDescriptor` for the duration of the
+execute call. The plugin must not retain any pointers beyond the call.
+The host inserts explicit `static_cast<uint32_t>` with a runtime size
+check on the length parameters, matching the `-Wconversion` discipline
+already in force.
 
-**Plugin authors note.** The non-override `executeOpGraph` entry must
-handle the case where the graph descriptor reports
-`is_dynamic_shape_enabled() == true` (caller bypassed §4.5 via
-direct C-API). Recommended behavior: ignore the flag if no override
-variant-pack attributes are present — the dispatch switch (§5.5) keys
-on attribute presence, not on the graph flag, so a flag-set / no-
-overrides call is well-formed and should be served identically to a
-flag-unset call.
+**Plugin authors note.** The non-override `executeOpGraph` entry
+should ignore `is_dynamic_shape_enabled() == true` if no override
+variant-pack attributes are present — a flag-set / no-overrides call
+is well-formed and must be served identically to a flag-unset call.
 
 ### 4.7 SDPA feature-flag mechanism (covers reqs 12, 13, 14)
 
-This RFC **introduces no new env var, CMake option, or runtime
-knob**. The SDPA team's build-define gates the override surface
-(graph flag setter and the `Graph::execute()` overload). When that
-build-define is unset, the new public surface is conditionally
-compiled out and inaccessible from end-user code; when the SDPA
-team's first plugin implementation lands, the gate is flipped in
-the same release.
-
-The "additional flag to disable the public API until an engine
-implements override-execute" requirement is satisfied by reusing
-the SDPA gate, not by introducing a parallel knob. Divergence risk
-from the SDPA team's eventual choice is tracked in §7.5; the gate
-name and semantics should be confirmed against the SDPA RFC before
-the override plumbing ships. If the SDPA team selects a runtime gate
-rather than a build-define, the override surface ships live but
-§4.5 applicability filtering plus §7.4 mitigation ensure a clean "no
-applicable engines" error response when no implementing plugin is
-loaded; the §4.7 wording does not require a build-define
-specifically.
+The new override surface is gated behind the SDPA feature flag
+established in PR
+[#6493](https://github.com/ROCm/rocm-libraries/pull/6493). hipDNN does
+not introduce a separate gate.
 
 ---
 
@@ -750,24 +432,23 @@ tensors are not annotated.
 
 **Rationale**: SDPA opts in for the whole graph, so a graph-wide
 flag is sufficient for the immediate consumer. The reference surface
-(§2.1) uses the same graph flag, and matching it reduces
-friction for users porting between runtimes. A graph flag also
-keeps the attribute-namespace impact minimal: one new graph
-attribute (already reserved at 603) versus one per overridable
-tensor.
+uses the same graph flag, and matching it reduces friction for users
+porting between runtimes. A graph flag also keeps the attribute-
+namespace impact minimal: one new graph attribute (already reserved at
+603) versus one per overridable tensor.
 
 **Trade-off**: a future workload wanting override on only some
-tensors must opt the whole graph in, expanding the §4.5 filter
-surface and forcing users to reason about override semantics for
-tensors they will not vary. §10.1 keeps the door open to a per-tensor
-opt-in attribute that would store max-shape metadata on individual
-tensor descriptors.
+tensors must opt the whole graph in, expanding the applicability-
+filter surface and forcing users to reason about override semantics
+for tensors they will not vary. A future per-tensor opt-in attribute
+storing max-shape metadata on individual tensor descriptors remains
+an option.
 
 ### 5.2 Reuse of `HIPDNN_ATTR_OPERATIONGRAPH_IS_DYNAMIC_SHAPE_ENABLED` (603)
 
-**Decision**: wire the already-reserved enum value 603
-(string-mapped at `BackendEnumStringUtils.hpp:306-307`) for the
-flag; use the frontend method name `set_dynamic_shape_enabled(bool)`.
+**Decision**: wire the already-reserved enum value 603 (already
+string-mapped in `BackendEnumStringUtils.hpp`) for the flag; use the
+frontend method name `set_dynamic_shape_enabled(bool)`.
 
 **Rationale**: the value is already reserved and the string already
 mapped; reusing them avoids both a fresh enum-namespace allocation
@@ -780,9 +461,8 @@ this RFC implements. Two distinct semantics could live under that
 umbrella: kernel-cache reuse across shape-variant builds (build-time
 optimization) and single-plan execute-time override (per-call
 payload). This RFC implements the second only; a future expansion to
-cache-reuse would land awkwardly on the existing flag. §10.6 leaves
-room for a second flag if cache-reuse semantics arrive, but the cost
-of choosing differently now is nontrivial because enum 603 already
+cache-reuse would land awkwardly on the existing flag. The cost of
+choosing differently now is nontrivial because enum 603 already
 carries the "dynamic_shape" name.
 
 ### 5.3 Parallel-vector override payload
@@ -793,44 +473,40 @@ carries the "dynamic_shape" name.
 `override_shapes[i]` and `override_strides[i]` describe the tensor
 named by `override_uids[i]`.
 
-**Rationale**: match the reference surface (§2.1). Cross-runtime-
-portable user code is a significant value of matching the
-established surface in this RFC. SDPA workloads commonly run on
-multiple runtimes, and a divergent hipDNN signature would force
-per-runtime branches at every call site.
+**Rationale**: match the reference surface. Cross-runtime-portable
+user code is a significant value of matching the established surface.
+SDPA workloads commonly run on multiple runtimes, and a divergent
+hipDNN signature would force per-runtime branches at every call site.
 
 **Trade-off**: a `std::unordered_map<int64_t, OverrideEntry>` would
 be more idiomatic and would eliminate the length-consistency
 invariant. Positional indexing across three vectors is error-prone
 for users constructing overrides manually; the frontend mitigates by
 validating lengths before any `setAttribute` calls, but this is a
-runtime check rather than a compile-time guarantee. §10.1 may
-revisit this if generalization beyond SDPA also revisits the
-frontend ergonomics.
+runtime check rather than a compile-time guarantee.
 
 ### 5.4 Override transport: variant-pack attributes + plugin SDK entry
 
-**Decision**: keep a single `hipdnnBackendExecute` (see §2.1); add
-five new variant-pack attributes (`HIPDNN_ATTR_VARIANT_PACK_OVERRIDE_*` —
-three payload + two per-UID lengths sidebands) in the 700–799 range, AND add the optional plugin SDK entry
+**Decision**: keep a single `hipdnnBackendExecute`; add five new
+variant-pack attributes (`HIPDNN_ATTR_VARIANT_PACK_OVERRIDE_*` —
+three payload + two per-UID lengths sidebands) in the 700–799 range,
+AND add the optional plugin SDK entry
 `hipdnnEnginePluginExecuteOpGraphWithOverrides`. Both surfaces are
 required.
 
-**Rationale**: the reference surface (§2.1) constrains the frontend
-overload and the single-execute-entry shape; the dedicated variant-
-pack attributes are hipDNN's clean realization of that surface, not
-a documented reference mechanism. Two alternatives were rejected:
-(b) a sibling
-`hipdnnBackendExecute_with_overrides` entry diverges from the
-reference surface, and (c) a plugin-SDK-only path forces the
-frontend to bypass the backend descriptor model, breaking the
-layering RFC 0004 establishes. The plugin SDK entry is additionally
-required because of the §3.4 flattening constraint: plugins never
-see the variant pack.
+**Rationale**: the reference surface constrains the frontend overload
+and the single-execute-entry shape; the dedicated variant-pack
+attributes are hipDNN's clean realization of that surface. Two
+alternatives were rejected: a sibling `hipdnnBackendExecute_with_overrides`
+entry diverges from the reference surface, and a plugin-SDK-only path
+forces the frontend to bypass the backend descriptor model, breaking
+the layering RFC 0004 establishes. The plugin SDK entry is required
+because of the host's flattening step — plugins never see the variant
+pack directly.
 
 **Trade-off**: two surfaces must stay in sync across the host's
-flattening step. The risk of drift is bounded by the §7.7
-layered-detection coupling and by the §9.5 four-corner test matrix.
+flattening step. The risk of drift is bounded by the layered-
+detection coupling and by the four-corner test matrix.
 
 ### 5.5 Host-side dispatch switch
 
@@ -844,7 +520,7 @@ the flag set may still execute the non-override path when no
 overrides are supplied at execute time (req 9), and the cleanest
 way to express this is to key dispatch on the per-call payload
 rather than on the per-build flag. The switch is independent of the
-graph flag, simplifying the §9.5 four-corner matrix. The four cases
+graph flag, simplifying the four-corner matrix. The four cases
 (flag absent / flag present, crossed with overrides absent /
 overrides present) each have a single, well-defined dispatch outcome
 that does not require the host to consult both signals
@@ -863,9 +539,9 @@ case.
 **Decision**: optional symbol with minor-version bump
 (`HIPDNN_PLUGIN_SDK_VERSION_MINOR`).
 
-**Rationale**: per RFC 0002, with the `tryAssignSymbol` precedent at
-`backend/src/plugin/PluginCore.cpp:35-46`, missing optional symbols
-don't break loading; that model is already in production use for the
+**Rationale**: per RFC 0002, with the `tryAssignSymbol` precedent in
+`PluginCore.cpp`, missing optional symbols don't break loading; that
+model is already in production use for the
 base-plugin optional symbols. A major-version bump would force every
 plugin to recompile against the new SDK before it could be loaded
 again, which directly violates req 6 ("existing providers that don't
@@ -873,11 +549,10 @@ implement this API continue to work"). A minor bump signals the
 backwards-compatible API addition without invalidating any existing
 plugin binaries.
 
-**Trade-off**: capability detection is per-symbol (see §4.4); a
-plugin that implements the symbol but forgets to bump its reported
-version still dispatches correctly; only diagnostics under-report.
-This RFC inherits that caveat from the existing optional-symbol
-machinery.
+**Trade-off**: capability detection is per-symbol; a plugin that
+implements the symbol but forgets to bump its reported version still
+dispatches correctly; only diagnostics under-report. This RFC inherits
+that caveat from the existing optional-symbol machinery.
 
 ### 5.7 SDPA feature-flag mechanism
 
@@ -892,30 +567,28 @@ means there is one knob, owned by one team, that controls
 end-to-end visibility.
 
 **Trade-off**: this RFC does not specify the gate name, so
-divergence from the SDPA team's eventual choice is possible (§7.5).
-The gate name and semantics should be confirmed against the SDPA
-RFC; if the SDPA team chooses a build-define semantics that does not
-cleanly compile-out the new public surface, additional wiring may be
-needed.
+divergence from the SDPA team's eventual choice is possible. The gate
+name and semantics should be confirmed against the SDPA RFC; if the
+SDPA team chooses a build-define semantics that does not cleanly
+compile-out the new public surface, additional wiring may be needed.
 
 ### 5.8 Frontend overload rather than separate method
 
 **Decision**: overload `Graph::execute()` rather than add
 `Graph::execute_with_overrides()`.
 
-**Rationale**: match the reference surface (§2.1). The reference
-uses an overload, not a separate method, and porting code between
-runtimes is much smoother when method names match. Precedent in
-RFC 0004 §4.4
+**Rationale**: match the reference surface. The reference uses an
+overload, not a separate method, and porting code between runtimes is
+much smoother when method names match. Precedent in RFC 0004
 (`create_execution_plan` is overloaded for the knob-aware variant)
 also establishes that frontend overloads are an accepted pattern in
 the hipDNN frontend.
 
 **Trade-off**: disambiguation is by argument list, not method name;
 unfamiliar readers may miss that a call is the override variant.
-Mitigated by the throw-on-misuse semantic in §4.2: a misuse returns
-a non-OK error before any backend work, making the failure mode
-loud.
+Mitigated by the throw-on-misuse semantic on the frontend overload:
+misuse returns a non-OK error before any backend work, making the
+failure mode loud.
 
 ### 5.9 No reference implementation in initial rollout
 
@@ -927,31 +600,29 @@ plumbing must land first to unblock that work. Splitting the work
 this way also lets the plumbing be reviewed and merged on a
 schedule independent of provider readiness.
 
-**Trade-off**: design validation comes only from fake plugins
-(§9.1); a real engine may surface API gaps that fake plugins miss.
-The SDPA gate (§4.7) keeps the public surface dormant until a
-shipping provider exists, so users cannot stumble onto a
-non-functional API in the interim.
+**Trade-off**: design validation comes only from fake plugins; a real
+engine may surface API gaps that fake plugins miss. The SDPA gate
+keeps the public surface dormant until a shipping provider exists, so
+users cannot stumble onto a non-functional API in the interim.
 
 ### 5.10 Tensor rank is fixed at build time
 
 **Decision**: tensor rank is declared at graph build time and cannot
-vary per execute call. Wildcards (Phase 2, §6) apply to dim *values*
-within a fixed rank. Dynamic rank is out of scope for both phases of
-this RFC.
+vary per execute call. Phase 2 wildcards apply to dim *values* within
+a fixed rank. Dynamic rank is out of scope for both phases of this RFC.
 
-**Rationale**: §4.2.1 rule 3 already requires
+**Rationale**: the override-shapes validation already requires
 `override_shapes[i].size() == declared rank`, but that is a validation
 mechanic. Stating the commitment explicitly here makes the design
 intent unambiguous: the override transport is for value-level
 dynamism, not structural dynamism. Fixed-rank semantics also keep the
 backend descriptor model unchanged — every existing op validates and
-plans against a known operand rank — and bound the §6.6 / §7
-discussions to a tractable surface.
+plans against a known operand rank — and bound the validation-
+relaxation surface to a tractable size.
 
 **Trade-off**: workloads that need rank to vary per execute (rare in
 deep-learning serving, but not unknown) cannot use this transport.
-§10 records dynamic rank as an explicit out-of-scope future
+Dynamic rank is recorded as an explicit out-of-scope future
 consideration.
 
 ---
@@ -983,15 +654,15 @@ author of an SDPA-style workload feels acutely:
   to override it." The dispatch path treats both identically and
   discovers mismatches late.
 
-Phase 2 closes both gaps (this section) by making **declared intent**
-first-class in the schema: tensors marked dynamic are statements
-about *what the user will control at execute time and how*. The graph
-thereby carries enough information at build time for applicability
-checks, plan-cache decisions, and validation policy to be settled
-before the first execute call. The execute-time transport itself is
-unchanged (Phase 2 reuses the §4.3 / §4.4 surface), but the question
-"is this graph executable under override semantics?" becomes
-answerable at build, not at run.
+Phase 2 closes both gaps by making **declared intent** first-class in
+the schema: tensors marked dynamic are statements about *what the
+user will control at execute time and how*. The graph thereby
+carries enough information at build time for applicability checks,
+plan-cache decisions, and validation policy to be settled before the
+first execute call. The execute-time transport itself is unchanged
+— Phase 2 reuses the Phase-1 variant-pack and plugin-SDK surface —
+but the question "is this graph executable under override semantics?"
+becomes answerable at build, not at run.
 
 ### 6.2 Goal
 
@@ -999,8 +670,8 @@ Phase 2 extends Phase 1's override transport with a per-tensor
 `is_dynamic` flag that lets a graph declare wildcard dims and stride
 ordering at build time, with concrete values resolved at execute time
 through the Phase 1 transport. This pushes hipDNN toward a richer
-dynamic-shape declaration model than the reference surface (§2.1)
-exposes, while keeping the execute-time surface unchanged.
+dynamic-shape declaration model than the reference surface exposes,
+while keeping the execute-time surface unchanged.
 
 ### 6.3 Per-tensor `is_dynamic` flag (FBS, backend, frontend)
 
@@ -1012,14 +683,12 @@ per-tensor `is_dynamic` flag that travels alongside the existing
 `table TensorAttributes` in **both**
 `data_sdk/schemas/tensor_attributes.fbs` and
 `flatbuffers_sdk/schemas/tensor_attributes.fbs`. The bare-noun field
-name matches the existing `virtual: bool;` convention at
-`tensor_attributes.fbs:55`; the schema layer uses bare nouns while the
-frontend layer adds the `is_` / `get_is_` prefixes (see §6.3 Frontend
-below). Both schema files must update in lockstep — other paired
-schema files in those trees are unaffected by this change. Per RFC 0005
-§4.6.1, appending a defaulted bool to the table is wire-compatible, so
-a Phase 1 graph deserialized in a Phase 2 runtime sees `dynamic == false`
-on every tensor.
+name matches the existing `virtual: bool;` convention; the schema
+layer uses bare nouns while the frontend layer adds the `is_` /
+`get_is_` prefixes. Both schema files must update in lockstep. Per
+RFC 0005, appending a defaulted bool is wire-compatible, so a Phase 1
+graph deserialized in a Phase 2 runtime sees `dynamic == false` on
+every tensor.
 
 **Backend enum.** Add `HIPDNN_ATTR_TENSOR_IS_DYNAMIC = 1308` to
 `backend/include/HipdnnBackendAttributeName.h`. Slot 1308 is the next
@@ -1032,16 +701,15 @@ templated on the existing `is_virtual` plumbing.
 
 `GraphDescriptor::setAttribute`/`getAttribute` does not currently
 handle a `bool` attribute. Phase 1 introduces the first one (the
-graph-level dynamic-shape-enabled flag, §4.1); the implementation
-should add a typed helper following the existing per-type helper
-pattern (e.g., `getString`, `getOptionalScalar`) so this
-per-tensor `bool` and any future bool attributes reuse it.
+graph-level dynamic-shape-enabled flag); the implementation should
+add a typed helper following the existing per-type helper pattern
+(e.g., `getString`, `getOptionalScalar`) so this per-tensor `bool`
+and any future bool attributes reuse it.
 
 **Frontend.** Add an `_isDynamic` member next to `_isVirtual` in
 `TensorAttributes.hpp`. Add a `set_is_dynamic(bool)` setter and a
 `get_is_dynamic()` getter, templated directly on `set_is_virtual` /
-`get_is_virtual` (see `TensorAttributes.hpp:223` for the established
-`get_` prefix convention). Add a chaining helper `mark_dynamic()` for
+`get_is_virtual`. Add a chaining helper `mark_dynamic()` for
 ergonomics so callers can write `graph.tensor(...)->mark_dynamic()`.
 Pack and unpack the new flag via the same `DescriptorHelpers` and
 `DescriptorUnpackHelpers` thread already used for `is_virtual`.
@@ -1059,7 +727,7 @@ dynamic tensors only:
   `frontend/include/hipdnn_frontend/`; `TensorAttributes` is the
   natural home, alongside the `get_is_dynamic` peer member). Wildcard
   positions are declared at build; concrete values are supplied at
-  execute time via the Phase 1 override transport (§4.2).
+  execute time via the Phase 1 override transport.
 - **Stride-as-order.** When `is_dynamic == true`, the `strides`
   field is interpreted as **stride-order**: an axis-permutation in
   which lower index means inner (tighter packing) and higher index
@@ -1103,10 +771,10 @@ time combined with the declared ordering.
 During `lowerGraphToDescriptors()` (called from
 `build_operation_graph_via_descriptors()` → `Graph::build()`), the
 frontend scans the graph's tensor set; if any tensor has
-`is_dynamic == true`, the graph's dynamic-shape-enabled flag (Phase 1
-§4.1, enum 603) is auto-set before backend finalization. Users
-authoring graphs through the Phase 2 dynamic-tensor API do not need
-to call `set_dynamic_shape_enabled(true)` on the graph separately.
+`is_dynamic == true`, the graph's dynamic-shape-enabled flag (enum
+603, the Phase-1 graph flag) is auto-set before backend finalization.
+Users authoring graphs through the Phase 2 dynamic-tensor API do not
+need to call `set_dynamic_shape_enabled(true)` on the graph separately.
 
 `is_dynamic_shape_enabled()` returns true only after
 `Graph::build()` completes; before build, the auto-flag is unset.
@@ -1148,18 +816,17 @@ Examples include:
 gains an "any-dynamic-operand" early-return for value-dependent
 checks. The early-return is per-op and is added in the same change
 that wires Phase 2 for that op; the per-op enumeration of which
-checks are value-dependent lives in §8 and is not part of this RFC's
-prose.
+checks are value-dependent lives in the execution plan and is not
+part of this RFC's prose.
 
 **Broadcast resolution at execute time.** When operands have wildcards
 in the broadcast dim, the resolved override values are checked for
 broadcast compatibility per the standard rules (equal, or one is 1).
 Engines that do not support broadcasting can detect this via
 `get_wildcard_axes()` overlap on broadcast inputs and report `not
-applicable`. This partially closes the §6.1 applicability-decidability
-gap for broadcast ops, but it is only a partial close: engines still
-cannot express min/max ranges or correlated wildcards (deferred to
-§10).
+applicable`. This partially closes the applicability-decidability gap
+for broadcast ops, but it is only a partial close: engines still
+cannot express min/max ranges or correlated wildcards.
 
 ### 6.7 IsApplicable improvements
 
@@ -1189,10 +856,10 @@ declare per-engine support inside `isApplicable`:
 - An engine that does not support dynamic tensors at all rejects
   any graph with `has_dynamic_tensors() == true`.
 
-This closes the §6.1 "applicability decidable only at execute time"
-gap: graphs that look override-eligible structurally but would fail
-at execute time on a specific override now fail cleanly at
-applicability time instead.
+This closes the "applicability decidable only at execute time" gap:
+graphs that look override-eligible structurally but would fail at
+execute time on a specific override now fail cleanly at applicability
+time instead.
 
 **Helper insufficiency.** Phase 2 helpers (`has_dynamic_tensors`,
 `get_is_dynamic`, `get_wildcard_axes`) expose the *presence* and
@@ -1200,133 +867,103 @@ applicability time instead.
 (min/max ranges per axis, alignment, correlated-wildcard pairs).
 Engines must either over-accept and report `not applicable` at execute
 time, or reject any wildcard graph in `isApplicable`. Richer
-constraint expression is deferred to §10.
+constraint expression is deferred to a future RFC.
 
 ### 6.8 Major version bump strategy
 
-Both `plugin_sdk` and `data_sdk` bump from `0.0.1` to `1.0.0` as part
-of the Phase 2 ship. Files updated in lockstep: `plugin_sdk/version.json`,
-`data_sdk/version.json`, `plugin_sdk/version.h.in`,
-`data_sdk/version.h.in`.
+Phase 2 bumps the **graph schema** to major version 1.0. The four
+version files (`plugin_sdk`, `data_sdk`, `backend`, `frontend`) bump
+together — per RFC 0005, the `data_sdk` 1.0 bump transitively forces
+`backend` and `frontend` to follow.
 
-Per RFC 0005 §4.2 (public-dependency rule), the `data_sdk` 1.0 bump
-transitively forces the same major bump on `backend` and `frontend`.
-All four `version.json` files (`plugin_sdk`, `data_sdk`, `backend`,
-`frontend`) bump together.
+**What "major bump" means here.** It is the *schema* major version
+that bumps, not a hard ABI break. Old plugins still load; they
+continue to serve any graph whose required schema version is in their
+supported range. They are only filtered out for graphs that actually
+use Phase-2 features (per-tensor `is_dynamic`, wildcard dims,
+stride-as-order).
 
-**Why a major bump given the FBS change is wire-compatible.** Per RFC
-0005 §4.6.1, appending a defaulted bool to `table TensorAttributes`
-is wire-compatible. The bump is required because the **semantics** of
+**Why a major bump given the FBS change is additive.** Per RFC 0005,
+appending a defaulted bool to `table TensorAttributes` is
+wire-compatible. The bump is required because the **semantics** of
 two existing fields (`dims`, `strides`) change for dynamic tensors:
 `-1` becomes a valid `dims` entry, and `strides` becomes an
-axis-permutation when `is_dynamic == true`. Old plugins that do not
-understand these reinterpretations could mis-handle Phase-2 graphs
-silently if they read the fields under their Phase-1 meaning.
+axis-permutation when `is_dynamic == true`. A pre-1.0 plugin reading
+those fields under their Phase-1 meaning would mis-handle the tensor.
+Mapping each graph to a minimum required schema version (next section)
+ensures pre-1.0 plugins never see such a graph.
 
-**Phase-line alignment.** Phase 1 ships pre-1.0 (under the existing
-0.x line); Phase 2 is the 1.0 milestone. The 1.0 commitment also
-signals the broader plugin-SDK stability promise per RFC 0005 §4.2.
+Phase 1 ships pre-1.0 (under the existing 0.x line); Phase 2 is the
+1.0 milestone and signals the broader plugin-SDK stability promise.
 
 ### 6.9 Migration and rollout
 
-Two rollout options were considered:
+The runtime maps each graph to the **minimum schema version it
+requires**, based on the features the graph uses:
 
-- **Option A, breaking change with no version negotiation.** Land
-  the schema reinterpretation under the existing 0.x line and
-  require every provider to be rebuilt and updated in lockstep.
-  Simpler runtime (no version checks in the hot path), but every
-  out-of-tree consumer breaks silently the moment they pick up a
-  1.0-style graph; failures surface as misinterpretation of
-  `dims == -1` or strides-as-order rather than a clean rejection.
-- **Option B, version bump with explicit disqualification (chosen).**
-  Both `plugin_sdk` and `data_sdk` bump to 1.0.0 (§6.8). Plugins
-  declare which graph-schema major version they consume via a new
-  optional symbol; the backend disqualifies plugins that cannot
-  consume the running graph's schema. Failure mode is a clean "no
-  applicable engine" rather than silent misinterpretation, and
-  pre-1.0 plugins keep working for pre-1.0 graphs during transition.
+- A graph with no `is_dynamic` tensors → minimum schema 0.x → any
+  plugin that reports 0.x or 1.0 support is eligible.
+- A graph with at least one `is_dynamic` tensor (or wildcard dims, or
+  stride-as-order) → minimum schema 1.0 → only plugins reporting 1.0+
+  support are eligible.
 
-**Why Option B.** The codebase commits to plugin SDK stability per
-RFC 0005 §4.2; silent misinterpretation of `dims` or `strides` in an
-out-of-tree provider is the exact failure mode the versioning policy
-exists to prevent. The cost (one new plugin-reported field plus a
-one-line check at load time) is small relative to the safety it
-provides.
+**Plugin-reported schema version.** Plugins export a new optional
+symbol `hipdnnPluginGetSupportedGraphSchemaVersion(const char** version)`
+that returns the single schema version the plugin understands. The
+symbol is resolved through the same `tryAssignSymbol` machinery that
+already handles `hipdnnPluginGetApiVersion`. Plugins that omit the
+symbol are treated as reporting `0.1.0` (Phase-1-only); they continue
+to serve Phase-1 graphs unchanged.
 
-**Chosen approach: three composing layers of disqualification.**
+**Backend filter.** Inside `getApplicableEngineIds` the backend
+computes the graph's required schema version, then keeps only plugins
+whose reported version is `>=` that requirement. The check is
+per-graph, not per-plugin-load; an old plugin remains in the
+applicable set for the graphs it can actually serve.
 
-- **Layer 1, backend load-time pre-filter on supported graph-schema
-  version.** At plugin load the backend reads the plugin's reported
-  supported graph-schema version through a new optional symbol
-  `hipdnnPluginGetSupportedGraphSchemaVersion(const char** version)`,
-  resolved via the existing `tryAssignSymbol` precedent at
-  `backend/src/plugin/PluginCore.cpp:35-46` (the same mechanism
-  already used for `hipdnnPluginGetApiVersion`; see §3.5). The
-  signature mirrors the existing `hipdnnPluginGetApiVersion(const char**
-  version)` for consistency. The runtime owns the filter policy: a
-  plugin reporting schema version V is compatible with graphs of major
-  version `major(V)` (FlatBuffers additive forward-compat across
-  minors). Pre-1.0 plugins do not export the new symbol →
-  `tryAssignSymbol` resolves it to `nullptr` → such plugins are
-  filtered out for any 1.0+ graph by `getApplicableEngineIds`. The
-  existing `hipdnnPluginGetApiVersion` signature is unchanged, so
-  introducing the new symbol does not constitute an ABI break on the
-  existing one.
-- **Layer 2, plugin self-check inside `isApplicable`.** Plugins
-  reporting 1.0 support inspect the graph and return false if any
-  tensor has `is_dynamic == true` and the engine cannot serve
-  dynamic tensors. The data_sdk helpers (§6.7) make this a one-line
-  check.
-- **Layer 3, Phase 1 applicability filter (§4.5) still applies.**
-  Plugins lacking the override-execute symbol are skipped when the
-  graph flag is set, independent of dynamic-tensor status.
+**Why this matters.** miopen-provider (and any other Phase-1 plugin)
+does not check for `is_dynamic` today. If we did not filter, a
+Phase-2 graph could be dispatched to it and the plugin would
+silently misread `dims == -1` or treat stride-order entries as
+element-strides. The per-graph minimum-version filter is the
+mechanism that prevents this misdispatch while preserving the
+Phase-1 path for Phase-1 graphs.
 
-The three layers compose: load-time prefiltering removes pre-1.0
-plugins; per-call self-check removes 1.0-but-no-dynamic-support
-plugins; per-call applicability filter removes plugins lacking the
-override-execute symbol.
+**Composes with the Phase-1 applicability filter.** Plugins lacking
+the override-execute symbol are still skipped when the graph flag is
+set, regardless of schema version. Plugins reporting 1.0 also
+self-check inside `isApplicable` for specific dynamic-tensor
+capabilities (engine-side wildcard-axis constraints, stride ordering,
+etc.) using the data_sdk graph-handler helpers.
 
-**In-tree migration steps (no separate migration document).**
+**In-tree migration.** Bump the four version files together; add
+`hipdnnPluginGetSupportedGraphSchemaVersion` to each in-tree plugin
+(test plugins, miopen-provider, hipblaslt-provider) reporting the
+schema version it actually supports; rebuild against 1.0 headers.
 
-- Bump the two version files (`plugin_sdk/version.json`,
-  `data_sdk/version.json`) and the matching `.h.in` pair, plus the
-  transitively-bumped `backend/version.json` and
-  `frontend/version.json` per §6.8.
-- Implement the new optional symbol
-  `hipdnnPluginGetSupportedGraphSchemaVersion` in each in-tree plugin.
-- Rebuild and re-link the in-tree plugin set (test plugins,
-  miopen-provider, hipblaslt-provider) against 1.0 headers.
-- Out-of-tree consumers follow the same steps in their own trees;
-  they remain functional against 0.x graphs in the meantime via
-  Layer 1.
-
-**Out-of-tree plugins.** The 1.0 bump is announced via the project's
-release-note channel [TODO(implementation): pin the specific channel
-URL or distribution list]. Migration steps for downstream consumers:
-(1) rebuild against new `data_sdk` / `plugin_sdk` headers; (2)
-implement `hipdnnPluginGetSupportedGraphSchemaVersion`; (3) optionally
-implement the override entry. No deprecation window for 0.x plugins
-is offered — clean break at 1.0.
+**Out-of-tree plugins.** Untouched out-of-tree plugins keep working
+unchanged against Phase-1 graphs. Downstream consumers add the new
+symbol when they want to opt into serving Phase-2 graphs.
 
 ### 6.10 Reference-surface alignment
 
 Phase 1 deliberately matches the reference surface's existing
-override API (§2.1), so that user code translating between graph
-runtimes does not fork at the override call site. Phase 2 extends
+override API, so that user code translating between graph runtimes
+does not fork at the override call site. Phase 2 extends
 beyond the reference surface to support per-tensor declarative
 dynamism. Users writing Phase-1-only code see a portable surface;
 users opting into Phase 2's dynamic-tensor declarations see an
 hipDNN-extended surface that may not have a one-to-one analogue
 elsewhere.
 
-The §6.4 stride-as-order semantic specifically goes beyond the
+The Phase 2 stride-as-order semantic specifically goes beyond the
 reference surface: reusing the `strides` field as an axis-permutation
 is documented here as an intentional hipDNN extension, not an
 accidental divergence.
 
 ### 6.11 Phase 2 key design decisions
 
-This section mirrors the §5 KDD structure used for Phase 1.
+This section mirrors the Phase-1 KDD structure.
 
 **Sentinel-vs-bool-array (decision: `dims[d] == -1`).** Wildcard
 positions are encoded as `-1` entries inside the existing `dims`
@@ -1335,8 +972,8 @@ sentinel form keeps the FBS additive work to a single bool field
 (`is_dynamic`) without introducing a second per-tensor array that
 would have to be kept in lockstep with `dims`. The cost is that
 plugins reading raw FBS must check `is_dynamic` before treating any
-`dims` entry as a non-negative size; the §6.4 frontend constraint
-plus the §6.8 major bump together prevent silent misreads.
+`dims` entry as a non-negative size; the frontend constraint plus the
+schema major bump together prevent silent misreads.
 
 **Stride-reuse (decision: reinterpret existing `strides`).** When a
 tensor is dynamic, the existing `strides` field is reinterpreted as
@@ -1350,23 +987,25 @@ semantics, so reviewers see one semantic switch rather than two.
 **Major-bump (decision: 1.0 rather than continuing in 0.x).** The
 Phase 2 ship is the SDK's 1.0 milestone. The FBS additivity alone
 does not require a major bump; the semantic reinterpretation of
-`dims` and `strides` does. Continuing in 0.x would silently break
-out-of-tree plugins that read the fields under Phase-1 meaning
-(Option A in §6.9). The 1.0 commitment additionally signals the
-plugin-SDK stability promise per RFC 0005 §4.2 and gives a single
-recognizable line for downstream consumers to align against.
+`dims` and `strides` does. Without the bump, the per-graph minimum-
+schema-version filter has nothing to key on, and out-of-tree plugins
+would silently misread the fields under Phase-1 meaning. The 1.0
+commitment additionally signals the plugin-SDK stability promise per
+RFC 0005 and gives a single recognizable line for downstream
+consumers to align against.
 
-**Three-layer-compat (decision: load-time prefilter plus per-call
-self-check plus per-call symbol filter).** Disqualification is
-layered rather than collapsed into a single check because each layer
-catches a distinct class of mismatch: Layer 1 catches version
-mismatch (pre-1.0 plugin meets 1.0 graph), Layer 2 catches
-capability mismatch (1.0 plugin lacking dynamic-tensor support),
-Layer 3 catches symbol mismatch (1.0 plugin without override-execute).
-Collapsing them into one check would either over-reject (e.g., a 1.0
-plugin without dynamic-tensor support that could still serve static
-graphs) or require a richer per-plugin capability-vector field that
-both layers would have to consume.
+**Per-graph schema-version filter (decision: minimum-version mapping,
+not blanket pre-1.0 rejection).** The backend computes each graph's
+required schema version from the features it uses and keeps only
+plugins whose reported version meets the requirement. The alternative
+— blanket-rejecting pre-1.0 plugins once 1.0 ships — would over-reject
+old plugins for graphs they can perfectly well serve. The chosen model
+preserves Phase-1 dispatch for Phase-1 graphs while preventing
+Phase-2 graphs from reaching plugins that would silently misread
+`dims == -1` or stride-as-order. The filter composes with the per-call
+symbol filter (override-execute presence) and the per-call plugin
+self-check (capability-level rejection inside `isApplicable`); each
+catches a distinct class of mismatch.
 
 ---
 
@@ -1382,27 +1021,26 @@ without setting the flag.
 
 **Mitigation**: the frontend overload returns a non-OK `error_t`
 and emits a log entry before any `setAttribute` call on the variant
-pack, so misuse never reaches the backend. Integration test §9.5
-layer 4 covers this path.
+pack, so misuse never reaches the backend. The four-corner integration
+test covers this path.
 
 ### 7.2 Plugin reports inconsistent version
 
 **Risk**: a plugin reports a version through
 `hipdnnPluginGetApiVersion` that does not match the entry points it
 actually implements (the per-symbol-vs-per-version-string caveat
-inherited from the existing optional-symbol machinery; see RFC 0002
-and the `tryAssignSymbol` precedent at
-`backend/src/plugin/PluginCore.cpp:35-46`).
+inherited from the existing optional-symbol machinery in RFC 0002
+and the `tryAssignSymbol` precedent in `PluginCore.cpp`).
 
 **Mitigation**: capability detection is per-symbol via
-`hasOverrideExecute()`, never per version string; see §4.4.
+`hasOverrideExecute()`, never per version string.
 
 ### 7.3 Future execution-plan cache interaction
 
 **Risk**: hipDNN has no execution-plan cache keyed on graph contents
 today (`GraphDescriptor::invalidateCache()` is a per-descriptor
 serialized-buffer cache, not a cross-graph plan cache). If a future
-shape-variant-aware plan cache is added (§10.3), the new
+shape-variant-aware plan cache is added, the new
 `is_dynamic_shape_enabled` flag and the variant-pack override
 attributes must be cache-key inputs. Otherwise a non-override graph
 could silently inherit a plan compiled for an override-capable
@@ -1421,12 +1059,12 @@ plugin implements `hipdnnEnginePluginExecuteOpGraphWithOverrides`
 (the req 14 / req 15 dependency). They could write code against
 the surface, run it, and get nothing useful back.
 
-**Mitigation**: the SDPA gate (§4.7) hides the public surface until
-enabled. Coordination with the SDPA RFC owner is required so the
-gate ships in the same release as this plumbing. Worst case (gate
-slips, override path used with no implementing plugin): §4.5
-filtering returns a clean "no applicable engines" error rather than
-a silent incorrect result.
+**Mitigation**: the SDPA feature-flag gate hides the public surface
+until enabled. Coordination with the SDPA RFC owner is required so
+the gate ships in the same release as this plumbing. Worst case (gate
+slips, override path used with no implementing plugin): applicability
+filtering returns a clean "no applicable engines" error rather than a
+silent incorrect result.
 
 ### 7.5 Hidden divergence from SDPA gate
 
@@ -1436,40 +1074,34 @@ may choose a runtime gate where this RFC assumed a build-define,
 or may choose semantics that gate only the SDPA op rather than the
 override surface as a whole.
 
-**Mitigation**: cross-reference the SDPA RFC once it lands;
-revisit §4.7 and align gate wiring before implementation starts.
-The §4.7 wording is intentionally non-specific about the gate
-mechanism so that implementation can pick up the SDPA team's
-choice without amending this RFC.
+**Mitigation**: cross-reference the SDPA RFC once it lands; revisit
+the gate wording and align wiring before implementation starts. This
+RFC is intentionally non-specific about the gate mechanism so
+implementation can pick up the SDPA team's choice without amendment.
 
 ### 7.6 Reused-name semantic mismatch
 
 **Risk**: the `dynamic_shape_enabled` name is broader than the
-single-plan override semantic this RFC implements (see §5.2 for the
-trade-off rationale and §10.6 for the mitigation path via a future
-second flag).
+single-plan override semantic this RFC implements.
 
 **Commitment**: approving this RFC commits the project to enum 603's
 reuse semantics. A future Phase requiring a separate flag (e.g.,
 distinct "dynamic shapes enabled" vs "overrides allowed") would need a
-sibling enum, not a redefinition of 603. The string mapping at
-`BackendEnumStringUtils.hpp:306-307` carries the same name forward.
+sibling enum, not a redefinition of 603. The existing string mapping
+in `BackendEnumStringUtils.hpp` carries the same name forward.
 
 ### 7.7 Layered-detection coupling
 
-**Risk**: the detection chain has four independent layers (graph
-flag, applicability skip, variant-pack attributes, plugin entry dispatch)
-that can drift. A change to one layer that does not land in the
-others can produce a drift state. For example, the flag may be set
-but the applicability skip is not invoked, or the attributes are
-written but dispatch ignores them. (This is the runtime-execution order; the
-§4 prose introduces the layers in definition order: §4.1 graph flag,
-§4.3 variant-pack attributes, §4.4 plugin entry, §4.5 applicability skip,
-§4.6 dispatch.)
+**Risk**: the Phase-1 detection chain has four independent layers
+(graph flag, applicability skip, variant-pack attributes, plugin
+entry dispatch) that can drift. A change to one layer that does not
+land in the others can produce a drift state — for example, the flag
+is set but the applicability skip is not invoked, or the attributes
+are written but dispatch ignores them.
 
-**Mitigation**: applicability filtering (§4.5) is the authoritative
-pre-dispatch backstop. The §9.5 four-corner matrix plus the §9.2
-"C-API bypass path" test together form the structural mitigation
+**Mitigation**: applicability filtering is the authoritative
+pre-dispatch backstop. The four-corner matrix and the "C-API bypass
+path" test in the testing plan together form the structural defense
 against future drift; reviewers modifying any of the four layers
 should run both.
 
@@ -1479,11 +1111,11 @@ should run both.
 an additive change that needs disciplined enumeration to avoid silent
 breakage.
 
-- **FBS additivity.** Per RFC 0005 §4.6.1, appending a defaulted
-  bool to `table Graph` is forwards/backwards compatible. The field
-  defaults to `false`, so a graph that does not opt in is byte-
-  identical to today; downstream consumers that explicitly enumerate
-  fields rather than parse-and-ignore-unknowns may need a touch-up.
+- **FBS additivity.** Per RFC 0005, appending a defaulted bool to
+  `table Graph` is forwards/backwards compatible. The field defaults
+  to `false`, so a graph that does not opt in is byte-identical to
+  today; downstream consumers that explicitly enumerate fields rather
+  than parse-and-ignore-unknowns may need a touch-up.
 - **700–799 attribute-id inventory.** The reserved range is shared
   with other in-flight work; implementation must inventory current
   allocations in `HipdnnBackendAttributeName.h` and
@@ -1502,32 +1134,35 @@ small number of headers, so the inventory is straightforward.
 
 ### 7.9 Phase 2 backward-compatibility
 
-**Risk**: Phase 2 (see §6) introduces additional schema fields and
-an auto-flagging behavior that could in principle disturb the Phase 1
+**Risk**: Phase 2 introduces additional schema fields and an
+auto-flagging behavior that could in principle disturb the Phase 1
 contract, for example by silently changing the meaning of the graph
 flag for graphs authored against Phase 1.
 
 **Mitigation**: the Phase 2 schema additions are FBS additive (a
 per-tensor `is_dynamic` boolean defaulting to `false`), following the
-same RFC 0005 §4.6.1 forwards/backwards-compatibility discipline this
-RFC already relies on for the Phase 1 graph flag. A Phase 1 graph
+same RFC 0005 forwards/backwards-compatibility discipline this RFC
+already relies on for the Phase 1 graph flag. A Phase 1 graph
 deserialized in a Phase 2 runtime sees no per-tensor `is_dynamic`
 flags set (FBS default `false`), so the auto-flag does not fire and
 Phase 1 semantics are bit-preserved. Phase 2 additionally guarantees
 that no new validation gated solely on the graph flag rejects
 Phase 1-shaped graphs (which by definition have all-concrete tensors).
 
-### 7.10 Pre-1.0 plugin breakage at major bump
+### 7.10 Pre-1.0 plugin loses Phase-2 graphs
 
-**Risk**: every existing plugin must be recompiled against 1.0 SDK
-headers and report 1.0 support before it can serve 1.0-schema graphs
-(§6.8 / §6.9).
+**Risk**: a pre-1.0 plugin can no longer serve graphs that use Phase-2
+features (per-tensor `is_dynamic`, wildcard dims, stride-as-order)
+until it is rebuilt against 1.0 headers and reports 1.0 schema
+support.
 
-**Mitigation**: the in-tree plugin set is small (test plugins,
-miopen-provider, hipblaslt-provider) and is bumped in lockstep with
-the SDK version; out-of-tree plugins remain usable against 0.x graphs
-via the §6.9 Layer 1 pre-filter until they pick up the new headers.
-Migration steps live inline in §6.9.
+**Mitigation**: severity is bounded — pre-1.0 plugins continue to
+serve every Phase-1 graph unchanged. The per-graph minimum-schema-
+version filter only excludes them from the applicable set when the
+graph actually requires 1.0. The in-tree plugin set is small (test
+plugins, miopen-provider, hipblaslt-provider) and bumps with the SDK
+version; out-of-tree consumers update on their own schedule and
+remain functional for Phase-1 traffic in the meantime.
 
 ### 7.11 Stride-as-order misinterpretation
 
@@ -1536,27 +1171,27 @@ pattern of a stride-order. A plugin reading `strides` without first
 checking `is_dynamic` could mis-handle the tensor.
 
 **Mitigation**: three layers prevent this. The FBS `is_dynamic` field
-gates the reinterpretation; the §6.4 frontend validation constraint
+gates the reinterpretation; the frontend validation constraint
 rejects static tensors with malformed strides at build time; and the
-major version bump (§6.8) ensures no plugin reading a 1.0 graph
+schema major version bump ensures no plugin reading a 1.0 graph
 interprets a static tensor's strides as stride-order.
 
 ### 7.12 Per-execute overhead
 
-**Risk**: the §4.5 applicability filter and the per-execute
-attribute-presence check (§5.5) add cost on the SDPA hot path.
+**Risk**: the applicability filter and the per-execute attribute-
+presence check add cost on the SDPA hot path.
 
-**Mitigation**: (a) commit to a microbenchmark in Step 4 measuring
-`Graph::execute` overhead with and without the override path; (b)
-target overhead < 1µs / call (placeholder — adjust after measurement);
-(c) if exceeded, hoist the applicability check to plan-build time and
-cache the filtered engine list per plan.
+**Mitigation**: commit to a microbenchmark measuring `Graph::execute`
+overhead with and without the override path; target overhead < 1µs /
+call (placeholder — adjust after measurement). If exceeded, hoist the
+applicability check to plan-build time and cache the filtered engine
+list per plan.
 
 ### 7.13 Auto-flag and late tensor mutation
 
 **Risk**: if a caller marks a tensor dynamic after `Graph::build()`
-has run, the §6.5 auto-flag does not re-fire. The graph would then
-carry a dynamic tensor without the dynamic-shape-enabled flag set.
+has run, the auto-flag does not re-fire. The graph would then carry
+a dynamic tensor without the dynamic-shape-enabled flag set.
 
 **Mitigation**: tensor descriptors are read-only after
 `Graph::tensor()` returns the shared_ptr; the frontend rejects
@@ -1581,10 +1216,10 @@ implementation PRs.
   unpack).
 - Add the five new `HIPDNN_ATTR_VARIANT_PACK_OVERRIDE_*` attribute
   enum values at 704–708 (three payload + two per-UID lengths
-  sidebands; the next free slots in the 700–799 range, per §3.3 /
-  §4.3); add string mappings in `BackendEnumStringUtils.hpp`; wire
-  them through `VariantDescriptor::setAttribute` / `getAttribute`.
-  **No FBS schema** is added for the variant pack.
+  sidebands; the next free slots in the 700–799 range); add string
+  mappings in `BackendEnumStringUtils.hpp`; wire them through
+  `VariantDescriptor::setAttribute` / `getAttribute`. **No FBS
+  schema** is added for the variant pack.
 - Backend unit tests for round-trip on both the graph attribute and
   the variant-pack attributes.
 
@@ -1594,13 +1229,13 @@ implementation PRs.
   optional symbol in
   `plugin_sdk/include/hipdnn_plugin_sdk/EnginePluginApi.h`.
 - Add `tryAssignSymbol` resolution + `hasOverrideExecute()`
-  predicate in `EnginePlugin`
-  (`backend/src/plugin/EnginePlugin.cpp:29-84`).
-- Modify `getApplicableEngineIds`
-  (`EnginePluginResourceManager.cpp:385-423`) to skip
-  non-implementers when the flag is set.
-- Modify `EnginePluginResourceManager::executeOpGraph`
-  (`EnginePluginResourceManager.cpp:569-614`) to inspect the
+  predicate in `EnginePlugin` (`backend/src/plugin/EnginePlugin.cpp`).
+- Modify `getApplicableEngineIds` in
+  `EnginePluginResourceManager.cpp` to skip non-implementers when the
+  graph flag is set. The applicability skip is per-graph: a plugin
+  lacking the override symbol is excluded only for graphs that set
+  the flag, and continues to serve non-override graphs unchanged.
+- Modify `EnginePluginResourceManager::executeOpGraph` to inspect the
   variant pack for override attributes and dispatch to the new vs.
   existing plugin entry accordingly.
 - Bump `HIPDNN_PLUGIN_SDK_VERSION_MINOR` in
@@ -1619,7 +1254,7 @@ implementation PRs.
   before calling the existing `hipdnnBackendExecute`.
 - Pack/unpack the flag in `GraphPacker` / `GraphUnpacker`.
 - Wire the new public surface behind the SDPA team's build-define.
-- Frontend integration tests (§9.3).
+- Frontend integration tests.
 
 **SDPA-gate fallback.** Step 3 lands behind a hipDNN-owned
 compile-time flag (default off). The SDPA team's gate flips it on
@@ -1642,16 +1277,16 @@ untested code):
 
 Step 4 itself adds the tests that span both steps:
 
-- The §9.5 four-corner matrix (flag × overrides) end-to-end.
+- The four-corner matrix (flag × overrides) end-to-end (see [Layered-detection coverage](#95-layered-detection-coverage)).
 - Phase 1 end-to-end via the SDPA-gate-enabled fake.
 - Per RFC 0006: harness conventions for plugin-agnostic integration
   testing.
 
 ### Step 5: Phase 2 schema, backend descriptor, frontend wiring
 
-- Append `dynamic: bool = false;` (bare-noun, matching `virtual:
-  bool;` at `tensor_attributes.fbs:55`) to the end of `table
-  TensorAttributes` in `data_sdk/schemas/tensor_attributes.fbs` and
+- Append `dynamic: bool = false;` (bare-noun, matching the existing
+  `virtual: bool;` field) to the end of `table TensorAttributes` in
+  `data_sdk/schemas/tensor_attributes.fbs` and
   `flatbuffers_sdk/schemas/tensor_attributes.fbs` in lockstep.
 - Add `HIPDNN_ATTR_TENSOR_IS_DYNAMIC = 1308` in
   `HipdnnBackendAttributeName.h` (next free slot in the 1300 range
@@ -1668,31 +1303,37 @@ Step 4 itself adds the tests that span both steps:
 - Bump `plugin_sdk/version.json`, `data_sdk/version.json`,
   `plugin_sdk/version.h.in`, and `data_sdk/version.h.in` to
   `1.0.0`.
-- Backend and frontend round-trip tests for the new flag (§9.7).
+- Backend and frontend round-trip tests for the new flag.
 
 ### Step 6: data_sdk graph-handler helper queries
 
 - Add `has_dynamic_tensors()`, `tensor(uid).get_is_dynamic()`, and
   `tensor(uid).get_wildcard_axes()` to the data_sdk graph-handler
   interface.
-- Helper-query unit tests (§9.7).
+- Helper-query unit tests.
 
 ### Step 7: Backend load-time pre-filter, auto-flag, validation relaxation
 
 - Add the new optional plugin SDK symbol
   `hipdnnPluginGetSupportedGraphSchemaVersion(const char** version)`
   in `plugin_sdk/include/hipdnn_plugin_sdk/PluginApi.h`; resolve via
-  `tryAssignSymbol` (precedent: `PluginCore.cpp:35-46`); the backend
-  reads this at plugin load.
-- Implement Layer 1 pre-filter in
-  `EnginePluginResourceManager::getApplicableEngineIds`: plugins for
-  which the new symbol resolved to nullptr (or that report a major
-  version below the running graph's schema major) are excluded for
-  1.0-schema graphs.
-- Implement the §6.5 auto-flag in `lowerGraphToDescriptors()` (along
-  the `Graph::build()` chain).
+  `tryAssignSymbol` (same pattern used in `PluginCore.cpp` for
+  existing optional symbols). The backend reads this at plugin load
+  and caches the reported version per plugin.
+- Implement the per-graph minimum-schema-version filter in
+  `EnginePluginResourceManager::getApplicableEngineIds`. The backend
+  computes the graph's required schema version from the features it
+  uses (any `is_dynamic` tensor, wildcard dim, or stride-as-order
+  entry promotes the requirement to 1.0; otherwise 0.x). For a given
+  graph, the filter retains plugins whose reported version is
+  `>=` the graph's requirement. Plugins that omitted the symbol are
+  treated as `0.1.0` and continue serving 0.x graphs unchanged.
+- Implement the auto-flag in `lowerGraphToDescriptors()` along the
+  `Graph::build()` chain so a graph with any dynamic tensor implicitly
+  sets `is_dynamic_shape_enabled`.
 - Add the per-op `validate()` "any-dynamic-operand" early-return for
-  value-dependent checks across the ops listed in §6.6.
+  value-dependent checks across the ops covered by Phase 2 validation
+  relaxation.
 
 > TODO(implementation): enumerate all op `validate()` methods needing
 > the any-dynamic-operand early return. Audit
@@ -1703,8 +1344,9 @@ Step 4 itself adds the tests that span both steps:
 
 ### Step 8: Phase 2 tests
 
-See §9.7 for the full test list. Phase 2 testing is the
-synchronization point for Steps 5 through 7.
+See [Phase 2 test categories](#97-phase-2-test-categories) for the
+full list. Phase 2 testing is the synchronization point for Steps 5
+through 7.
 
 ### Step X (deferred)
 
@@ -1737,8 +1379,9 @@ Phase 2 work.
 
 All tests are plumbing / API tests; there is no shape-correctness
 validation in initial rollout (req 19). Test conventions follow
-RFC 0006. Phase 1 tests are §9.1 through §9.6. Phase 2 tests are
-§9.7.
+RFC 0006. Phase 1 tests cover fake plugins, backend integration,
+plugin loading, frontend lift/lower, layered detection, and the SDPA
+gate; Phase 2 tests are listed separately at the end.
 
 ### 9.1 Fake plugins
 
@@ -1747,11 +1390,11 @@ RFC 0006. Phase 1 tests are §9.1 through §9.6. Phase 2 tests are
   new minor API version. Verifies dispatch lands on the new entry
   and captures the override payload for assertions.
 - `TestNoOverrideExecutePlugin`: omits the new symbol. Verifies the
-  §4.5 applicability skip and confirms non-implementers continue to
+  applicability skip and confirms non-implementers continue to
   function for non-override graphs. Modeled on
   `TestIncompleteApiPlugin`.
-- Both share the existing `TestPluginCommon.hpp:40+` base, so the
-  fake plugins differ only in the optional-symbol exposure.
+- Both share the existing `TestPluginCommon.hpp` base, so the fake
+  plugins differ only in the optional-symbol exposure.
 - `TestNoOverrideExecutePlugin` is built with the new SDK headers but
   with the override symbol export deliberately omitted, simulating
   the binary-compat scenario where a plugin compiled against the
@@ -1787,7 +1430,7 @@ Files: `tests/backend/IntegrationBackendExecuteApi.cpp`,
   never invoked.
 - Negative test: a graph without the flag continues to behave
   exactly as before, regardless of the loaded plugin's override
-  capability: the regression guard for the §2.3 binary-compat
+  capability — the regression guard for the binary-compat
   constraint.
 - **No new public backend C-API entry is exercised**: there is
   no `hipdnnBackendExecuteWithOverrides_ext` or similar.
@@ -1799,16 +1442,15 @@ Files: `tests/backend/IntegrationBackendExecuteApi.cpp`,
   override-attribute state to subsequent execute calls.
 - **Mismatched override-vector lengths**: invoke the frontend
   overload with mismatched sizes; assert `HIPDNN_STATUS_BAD_PARAM`
-  per §4.2.1 rule 1 and that no `setAttribute` call is made.
+  and that no `setAttribute` call is made.
 - **Malformed override payload**: negative dim values return
-  `HIPDNN_STATUS_BAD_PARAM` per §4.2.1 rule 6, and empty inner
-  vectors (rank mismatch when declared rank > 0) return
-  `HIPDNN_STATUS_BAD_PARAM` per §4.2.1 rule 3.
+  `HIPDNN_STATUS_BAD_PARAM`, and empty inner vectors (rank mismatch
+  when declared rank > 0) return `HIPDNN_STATUS_BAD_PARAM`.
 - **C-API bypass path**: construct override variant-pack attributes
-  directly via `hipdnnBackendSetAttribute` without setting the
-  graph flag; verify the §4.6 `hasOverrideExecute()` guard fires
-  when the selected plugin lacks the symbol and dispatches to the
-  new entry when it has it.
+  directly via `hipdnnBackendSetAttribute` without setting the graph
+  flag; verify the `hasOverrideExecute()` guard fires when the
+  selected plugin lacks the symbol and dispatches to the new entry
+  when it has it.
 
 ### 9.3 Plugin loading + applicability tests
 
@@ -1844,7 +1486,7 @@ Files: `tests/frontend/IntegrationGraphLifting.cpp`,
   `setAttribute` translation: supply override vectors at the
   frontend, read back the variant-pack attributes, assert match.
 
-### 9.5 Layered-detection coverage (mitigates §7.7)
+### 9.5 Layered-detection coverage
 
 End-to-end test asserting the four layers cooperate as designed:
 
@@ -1863,9 +1505,9 @@ End-to-end test asserting the four layers cooperate as designed:
    activity: no `setAttribute`, no `hipdnnBackendExecute`, no
    plugin call.
 
-The four-corner matrix is the structural mitigation for the §7.7
-drift risk; running it should be a precondition for landing any
-change to §4.5 or §4.6.
+The four-corner matrix is the structural mitigation for layered-
+detection drift; running it should be a precondition for landing any
+change to applicability filtering or host dispatch logic.
 
 ### 9.6 SDPA gate interaction
 
@@ -1890,7 +1532,7 @@ work, not under this RFC or the initial implementation.
   `mark_dynamic()`.
 - **Auto-flag end-to-end.** A graph with one dynamic tensor sees
   `is_dynamic_shape_enabled()` return true after `build()` without
-  any explicit graph-flag call (§6.5).
+  any explicit graph-flag call.
 - **Validation relaxation.** For each per-op `validate()` that
   gains a dynamic-tensor early-return, a test constructs an op with
   a dynamic operand (containing a `-1` dim) and confirms validation
@@ -1900,12 +1542,20 @@ work, not under this RFC or the initial implementation.
   graph with at least one dynamic tensor and false on an
   all-static graph; `wildcard_axes()` returns the correct axis
   index list for a tensor with `dims == {1, 4, -1, -1}`.
-- **Load-time pre-filter.** A fake plugin reporting "0.x only"
-  support is filtered out for a 1.0-schema graph, even when it
-  implements the override entry. Asserted via fake-plugin
-  instrumentation that the plugin's `isApplicable` is never invoked
-  for the 1.0 graph.
-- **Self-check fake plugin.** A fake plugin reporting "1.0"
+- **Per-graph minimum-schema-version filter.** A fake plugin
+  reporting `0.1.0` support is filtered out for a graph that uses a
+  Phase-2 feature (dynamic tensor, wildcard dim, or stride-as-order)
+  even when it implements the override entry. Asserted via fake-
+  plugin instrumentation that the plugin's `isApplicable` is never
+  invoked for the dynamic-tensor graph.
+- **Pre-1.0 plugin still serves Phase-1 graphs.** A fake plugin
+  reporting `0.1.0` (or omitting the version symbol entirely, which
+  defaults to `0.1.0`) **continues to be eligible** for a graph that
+  uses no dynamic-tensor features. The backend computes the graph's
+  required schema version as 0.x and the plugin's `isApplicable` is
+  invoked exactly as before. Asserted via fake-plugin instrumentation
+  on `TestNoOverrideExecutePlugin` against a fully-static graph.
+- **Self-check fake plugin.** A fake plugin reporting `1.0.0`
   support but rejecting dynamic tensors via its own `isApplicable`
   is correctly filtered for a dynamic-tensor graph but not for a
   static-tensor graph.
@@ -1918,7 +1568,7 @@ work, not under this RFC or the initial implementation.
   tensor (`is_dynamic == false`) with `-1` in any `dims[d]` is
   rejected at build time with a non-OK status; the descriptor is
   never finalized.
-- **§7.11 stride-coincidence regression.** A static tensor whose
+- **Stride-coincidence regression.** A static tensor whose
   strides happen to look like a permutation `{3, 2, 1, 0}` is
   interpreted as element-strides, not stride-order. Cross-check that
   `extractStrideOrder` is not invoked on static tensors.
@@ -1934,12 +1584,13 @@ work, not under this RFC or the initial implementation.
 - **`TensorAttributes::DYNAMIC_DIM` constant equivalence.** Callers
   using the named constant produce byte-identical descriptors to
   callers using the literal `-1`.
-- **Layered-disqualification ordering.** A pre-1.0 plugin that
-  *also* lacks the override symbol — assert which layer (Layer 1
-  load-time pre-filter or Layer 3 §4.5 applicability skip) fires
-  first and that the user-visible diagnostic is unambiguous about the
-  reason for exclusion.
-- **No-leak after non-OK override entry.** The §9.2 "plugin returns
+- **Layered-disqualification ordering.** A plugin reporting a
+  pre-1.0 schema version that *also* lacks the override symbol —
+  assert which layer (per-graph schema-version filter or
+  applicability skip) fires first against a Phase-2 graph and that
+  the user-visible diagnostic is unambiguous about the reason for
+  exclusion.
+- **No-leak after non-OK override entry.** The "plugin returns
   non-OK from new entry" scenario is extended to verify subsequent
   execute calls (with and without overrides) succeed: no override
   state leaks across calls through the per-call `VariantDescriptor`
@@ -1951,13 +1602,13 @@ work, not under this RFC or the initial implementation.
 
 ### 10.1 Further generalization of declarative dynamism
 
-Phase 2 (§6) introduces per-tensor `is_dynamic` declarations and so
+Phase 2 introduces per-tensor `is_dynamic` declarations and so
 partially addresses the original "generalization beyond SDPA"
 question. A future RFC may extend the declarative-dynamism surface
 further: storing max-shape metadata on individual tensor descriptors
 (distinct from `is_dynamic`'s wildcard-dim semantic), or replacing
-the §4.2 parallel-vector override payload with a struct-keyed map
-once the frontend ergonomics are revisited per §5.3.
+the parallel-vector override payload with a struct-keyed map once the
+frontend ergonomics are revisited.
 
 ### 10.2 Reference implementation in real providers
 
@@ -1969,12 +1620,12 @@ override path is applicable.
 
 ### 10.3 Execution-plan caching strategy
 
-§7.3 raises the cache-key concern. A deeper plan-cache strategy
-for shape-variant plans (including whether to share plans across
-override-shape variants of the same graph or to key on the
-override-tensor metadata) is deferred to a future RFC. The
-current design ensures the override flag distinguishes cache keys
-correctly but does not attempt smart sharing across variants.
+A deeper plan-cache strategy for shape-variant plans (including
+whether to share plans across override-shape variants of the same
+graph or to key on the override-tensor metadata) is deferred to a
+future RFC. The current design ensures the override flag
+distinguishes cache keys correctly but does not attempt smart sharing
+across variants.
 
 Phase 2 makes the cache-key story slightly more involved: the
 per-tensor `is_dynamic` flag and, for dynamic tensors, the
@@ -1992,16 +1643,16 @@ guards in the frontend.
 
 ### 10.5 `data_sdk` schema impact beyond Phase 2
 
-Phase 2 (§6.3) already changes the `data_sdk` schema: the
+Phase 2 already changes the `data_sdk` schema: the
 `is_dynamic: bool = false;` field is appended to `table
 TensorAttributes` in both schema directories in lockstep. This is
 part of the RFC, not deferred future work.
 
 Future schema impact remains possible for unrelated needs. If
 override semantics ever need to be reflected in serialized execution
-plans or engine configs (e.g. for plan caching as in §10.3), the
-`data_sdk` FlatBuffer schemas would need a further additive update.
-The variant pack itself remains runtime-only.
+plans or engine configs (e.g. for plan caching), the `data_sdk`
+FlatBuffer schemas would need a further additive update. The variant
+pack itself remains runtime-only.
 
 ### 10.6 Possible future kernel-cache-reuse flag
 
@@ -2009,7 +1660,7 @@ A future RFC may introduce a second graph flag to surface
 kernel-cache-reuse semantics: sharing one set of compiled kernels
 across shape-variant graph builds. That flag would be distinct from
 the override-execute path this RFC introduces, and adding it would
-partially recover the §5.2 trade-off, where the reused
+partially recover the trade-off where the reused
 `dynamic_shape_enabled` name is broader than the override-only
 semantic actually implemented here.
 
@@ -2017,20 +1668,20 @@ semantic actually implemented here.
 
 - **Dynamic rank.** Tensors whose rank varies per execute. Out of
   scope for Phase 2; requires a variant-pack rank attribute,
-  descriptor changes, and an SDK helper. §5.10 records the fixed-rank
-  commitment for this RFC.
+  descriptor changes, and an SDK helper. This RFC commits to a
+  fixed-rank model.
 - **Partial-packing escape hatch for dynamic strides.** A third
   stride-mode where some inner-axis strides are declarative and outer-
-  axis stride is element-wise. Currently the dynamic-tensor stride
-  field is binary (axis-order or element-strides; see §6.4).
+  axis stride is element-wise. The dynamic-tensor stride field is
+  currently binary (axis-order or element-strides).
 - **Engine-side constraint expression.** SDK extensions letting
   plugins declare per-axis min/max ranges, alignment requirements, and
   correlated-wildcard pairs. Closes the remaining "applicability
-  decidable only at execute time" gap that §6.7's helper queries
+  decidable only at execute time" gap that the data_sdk helper queries
   cannot address.
 - **Plan-cache key includes auto-flag.** Explicit cache-key contract
-  for the build-time-derived `is_dynamic_shape_enabled` flag (already
-  noted as deferred in §7.3 — linked here for discoverability).
+  for the build-time-derived `is_dynamic_shape_enabled` flag (deferred
+  along with the broader plan-cache strategy above).
 
 ---
 
@@ -2058,7 +1709,7 @@ semantic actually implemented here.
   without causing plugin-load failure. The backend uses
   `tryAssignSymbol` to resolve them and per-symbol predicates
   (e.g. `hasOverrideExecute()`) to gate behavior. Precedent: RFC
-  0002 plus the `tryAssignSymbol` use at `PluginCore.cpp:35-46`.
+  0002 plus the `tryAssignSymbol` use in `PluginCore.cpp`.
 - **Applicability skip**: the optimization in
   `getApplicableEngineIds` that bypasses `isApplicable` for plugins
   that cannot possibly support the requested feature, used here
@@ -2085,10 +1736,15 @@ semantic actually implemented here.
   dynamic-shape-enabled flag if any tensor in the graph is declared
   dynamic.
 - **Supported graph-schema version**: a per-plugin declaration of the
-  single serialized-graph schema version the plugin can consume,
+  single serialized-graph schema version the plugin understands,
   reported via the optional symbol
-  `hipdnnPluginGetSupportedGraphSchemaVersion`. The runtime owns the
-  filter policy: a plugin reporting version V is compatible with
-  graphs of major version `major(V)` (FlatBuffers additive forward-
-  compat across minors). Consulted by the backend's load-time
-  pre-filter (§6.9 Layer 1).
+  `hipdnnPluginGetSupportedGraphSchemaVersion`. Plugins that omit the
+  symbol are treated as `0.1.0`.
+- **Required graph-schema version**: the per-graph minimum schema
+  version the backend computes from the features the graph uses
+  (any `is_dynamic` tensor, wildcard dim, or stride-as-order entry
+  promotes the requirement to 1.0; otherwise 0.x). The runtime keeps
+  a plugin in the applicable set for a given graph only when the
+  plugin's supported version is `>=` the graph's required version,
+  so old plugins continue to serve old graphs and only Phase-2-aware
+  plugins serve Phase-2 graphs.
