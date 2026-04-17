@@ -941,6 +941,7 @@ TYPED_TEST(MathFloatTypes, FminWithNaN)
 // Documents current implementation behavior. The C++ standard does not require
 // std::fmin/std::fmax to be sensitive to the sign of zero, and std::min/std::max
 // have no special +0/-0 handling specified.
+// NOTE: We compare bit patterns (not values) because +0 == -0 in IEEE 754 comparison.
 TYPED_TEST(MathFloatTypes, MaxZeroSigns)
 {
     using T = TypeParam;
@@ -950,8 +951,8 @@ TYPED_TEST(MathFloatTypes, MaxZeroSigns)
     const T negZero = Traits::fromBits(Traits::NEG_ZERO_BITS);
 
     // max uses `a < b ? b : a`, so returns first arg when equal
-    EXPECT_EQ(max(posZero, negZero), posZero);
-    EXPECT_EQ(max(negZero, posZero), negZero);
+    EXPECT_EQ(Traits::toBits(max(posZero, negZero)), Traits::ZERO_BITS);
+    EXPECT_EQ(Traits::toBits(max(negZero, posZero)), Traits::NEG_ZERO_BITS);
 }
 
 TYPED_TEST(MathFloatTypes, MinZeroSigns)
@@ -962,9 +963,9 @@ TYPED_TEST(MathFloatTypes, MinZeroSigns)
     const T posZero = Traits::fromBits(Traits::ZERO_BITS);
     const T negZero = Traits::fromBits(Traits::NEG_ZERO_BITS);
 
-    // min uses `b < a ? b : a`, so returns second arg when equal
-    EXPECT_EQ(min(posZero, negZero), negZero);
-    EXPECT_EQ(min(negZero, posZero), posZero);
+    // min uses `b < a ? b : a`, so returns first arg when equal
+    EXPECT_EQ(Traits::toBits(min(posZero, negZero)), Traits::ZERO_BITS);
+    EXPECT_EQ(Traits::toBits(min(negZero, posZero)), Traits::NEG_ZERO_BITS);
 }
 
 TYPED_TEST(MathFloatTypes, FmaxZeroSigns)
@@ -976,8 +977,8 @@ TYPED_TEST(MathFloatTypes, FmaxZeroSigns)
     const T negZero = Traits::fromBits(Traits::NEG_ZERO_BITS);
 
     // fmax uses `a > b ? a : b`, so returns second arg when equal
-    EXPECT_EQ(fmax(posZero, negZero), negZero);
-    EXPECT_EQ(fmax(negZero, posZero), posZero);
+    EXPECT_EQ(Traits::toBits(fmax(posZero, negZero)), Traits::NEG_ZERO_BITS);
+    EXPECT_EQ(Traits::toBits(fmax(negZero, posZero)), Traits::ZERO_BITS);
 }
 
 TYPED_TEST(MathFloatTypes, FminZeroSigns)
@@ -989,8 +990,8 @@ TYPED_TEST(MathFloatTypes, FminZeroSigns)
     const T negZero = Traits::fromBits(Traits::NEG_ZERO_BITS);
 
     // fmin uses `a < b ? a : b`, so returns second arg when equal
-    EXPECT_EQ(fmin(posZero, negZero), negZero);
-    EXPECT_EQ(fmin(negZero, posZero), posZero);
+    EXPECT_EQ(Traits::toBits(fmin(posZero, negZero)), Traits::NEG_ZERO_BITS);
+    EXPECT_EQ(Traits::toBits(fmin(negZero, posZero)), Traits::ZERO_BITS);
 }
 
 TYPED_TEST(MathFloatTypes, Sqrt)
