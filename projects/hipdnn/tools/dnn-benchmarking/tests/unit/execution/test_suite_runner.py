@@ -301,16 +301,15 @@ class TestSuiteConfigValidation:
     """Tests for SuiteConfig dataclass validation."""
 
     def test_valid_config(self):
-        """Test 6: SuiteConfig dataclass validates provider/engine filter fields."""
+        """Test 6: SuiteConfig dataclass validates engine filter fields."""
         config = SuiteConfig(warmup_iters=5, benchmark_iters=10)
         assert config.warmup_iters == 5
         assert config.benchmark_iters == 10
-        assert config.provider_filter is None
         assert config.engine_filter is None
         assert config.rtol == 1e-5
         assert config.atol == 1e-8
         assert config.gpu_backend == "auto"
-        assert config.reference_provider == "pytorch"
+        assert config.reference_provider == "none"
 
     def test_negative_warmup_raises(self):
         """SuiteConfig rejects negative warmup_iters."""
@@ -323,57 +322,8 @@ class TestSuiteConfigValidation:
             SuiteConfig(warmup_iters=0, benchmark_iters=0)
 
 
-class TestProviderFilter:
-    """Tests for provider/engine filter behavior."""
-
-    @patch("dnn_benchmarking.execution.suite_runner.discover_engines")
-    @patch("dnn_benchmarking.execution.suite_runner.discover_providers")
-    @patch("dnn_benchmarking.execution.suite_runner._get_reference_provider")
-    @patch("dnn_benchmarking.execution.suite_runner.Executor")
-    @patch("dnn_benchmarking.execution.suite_runner.BufferManager")
-    def test_provider_filter_limits_iteration(
-        self,
-        mock_bm_cls,
-        mock_exec_cls,
-        mock_get_ref,
-        mock_disc_providers,
-        mock_disc_engines,
-    ):
-        """Test 7: When --provider filter is set, only that provider is iterated."""
-        mock_disc_providers.return_value = ["provA", "provB", "provC"]
-        mock_disc_engines.return_value = [0]
-        mock_get_ref.return_value = None
-
-        mock_exec = MagicMock()
-        mock_exec.init_time_ms = 1.0
-        mock_result = MagicMock()
-        mock_result.e2e_timings = [1.0]
-        mock_result.kernel_timings = None
-        mock_result.has_kernel_timings = False
-        mock_exec.benchmark.return_value = mock_result
-        mock_exec_cls.return_value = mock_exec
-
-        mock_bm = MagicMock()
-        mock_bm.__enter__ = MagicMock(return_value=mock_bm)
-        mock_bm.__exit__ = MagicMock(return_value=False)
-        mock_bm.create_variant_pack.return_value = {1: 100}
-        mock_bm_cls.return_value = mock_bm
-
-        config = _make_config(provider_filter="provB")
-        tensor_infos = [_make_tensor_info(1)]
-        graph_json = _make_graph_json()
-        handle = MagicMock()
-
-        result = run_graph_all_providers(
-            graph_path=Path("test.json"),
-            graph_json=graph_json,
-            tensor_infos=tensor_infos,
-            config=config,
-            handle=handle,
-        )
-
-        assert len(result.results) == 1
-        assert result.results[0].provider == "provB"
+class TestEngineFilter:
+    """Tests for engine filter behavior."""
 
     @patch("dnn_benchmarking.execution.suite_runner.discover_engines")
     @patch("dnn_benchmarking.execution.suite_runner.discover_providers")

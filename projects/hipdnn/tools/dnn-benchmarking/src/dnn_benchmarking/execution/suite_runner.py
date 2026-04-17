@@ -285,10 +285,6 @@ def run_graph_all_providers(
     # Discover available providers
     providers = discover_providers(handle)
 
-    # Apply provider filter (D-03)
-    if config.provider_filter is not None:
-        providers = [p for p in providers if p == config.provider_filter]
-
     # Get reference provider once (outside the loop)
     ref_provider = _get_reference_provider(config, graph_json)
 

@@ -240,9 +240,11 @@ class TestSuiteResult:
             timestamp="2026-01-01T00:00:00Z",
             hostname="testhost",
             total_graphs=2,
-            pass_count=1,
-            fail_count=1,
-            skip_count=0,
+            total_combinations=2,
+            pass_combinations=1,
+            fail_combinations=1,
+            skip_combinations=0,
+            error_combinations=0,
             rocm_version="6.0",
             gpu_model="MI300X",
             python_version="3.12.3",
@@ -282,8 +284,11 @@ class TestSuiteResult:
         assert meta_d["timestamp"] == "2026-01-01T00:00:00Z"
         assert meta_d["hostname"] == "testhost"
         assert meta_d["total_graphs"] == 2
-        assert meta_d["pass_count"] == 1
-        assert meta_d["fail_count"] == 1
+        assert meta_d["total_combinations"] == 2
+        assert meta_d["pass_combinations"] == 1
+        assert meta_d["fail_combinations"] == 1
+        assert meta_d["skip_combinations"] == 0
+        assert meta_d["error_combinations"] == 0
         assert meta_d["rocm_version"] == "6.0"
         assert meta_d["gpu_model"] == "MI300X"
         assert meta_d["python_version"] == "3.12.3"

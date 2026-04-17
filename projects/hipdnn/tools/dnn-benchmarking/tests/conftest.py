@@ -162,3 +162,46 @@ def skip_if_no_gpu():
         hipdnn.Handle()
     except Exception:
         pytest.skip("No GPU available or hipdnn_frontend not installed")
+
+
+def _find_plugin_path() -> str:
+    """Find the hipDNN engine plugin directory.
+
+    Searches worktree build dir and standard install locations.
+    Returns the path as a string, or None if not found.
+    """
+    project_root = Path(__file__).parent.parent
+    candidates = [
+        # Worktree/superbuild: relative to dnn-benchmarking tool
+        project_root.parent.parent.parent.parent
+        / "dnn-providers"
+        / "miopen-provider"
+        / "build"
+        / "lib"
+        / "hipdnn_plugins"
+        / "engines",
+        # System install
+        Path("/opt/rocm/lib/hipdnn_plugins/engines"),
+    ]
+    for p in candidates:
+        if p.is_dir() and any(p.glob("*.so")):
+            return str(p)
+    return None
+
+
+@pytest.fixture
+def plugin_path():
+    """Get the hipDNN engine plugin path, or skip if not found."""
+    path = _find_plugin_path()
+    if path is None:
+        pytest.skip("No hipDNN engine plugin found")
+    return path
+
+
+@pytest.fixture
+def plugin_path_cli_args():
+    """Return CLI args for --plugin-path, or empty list if not needed."""
+    path = _find_plugin_path()
+    if path is None:
+        return []
+    return ["--plugin-path", path]

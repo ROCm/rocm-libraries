@@ -43,6 +43,7 @@ def run_benchmark(
     validation_config: Optional[ValidationConfig] = None,
     output_path: Optional[Path] = None,
     gpu_backend: Literal["torch", "auto", "none"] = "auto",
+    plugin_path: Optional[Path] = None,
 ) -> int:
     """Run the benchmark workflow.
 
@@ -52,6 +53,7 @@ def run_benchmark(
         validation_config: Optional validation configuration.
         output_path: Optional path to export benchmark results as JSON.
         gpu_backend: GPU timer backend to use (torch, auto, none).
+        plugin_path: Optional path to hipDNN engine plugin directory.
 
     Returns:
         Exit code (0 for success, 1 for error, 2 for validation failure).
@@ -80,6 +82,9 @@ def run_benchmark(
                 "Install hipDNN Python bindings first."
             )
             return 1
+
+        if plugin_path is not None:
+            hipdnn.set_engine_plugin_paths([str(plugin_path)])
 
         # Create handle
         handle = hipdnn.Handle()
@@ -446,6 +451,7 @@ def run_suite(
     graph_paths: List[Path],
     config: SuiteConfig,
     output_path: Optional[Path] = None,
+    plugin_path: Optional[Path] = None,
 ) -> int:
     """Run suite benchmark workflow (per D-04/D-05).
 
@@ -457,6 +463,7 @@ def run_suite(
         graph_paths: List of resolved graph file paths.
         config: Suite configuration.
         output_path: Optional JSON output path (per D-16).
+        plugin_path: Optional path to hipDNN engine plugin directory.
 
     Returns:
         Exit code: 0=all pass, 1=errors, 2=correctness failures (per D-09).
@@ -469,6 +476,9 @@ def run_suite(
     # Import hipdnn and create handle once for entire suite
     try:
         import hipdnn_frontend as hipdnn
+
+        if plugin_path is not None:
+            hipdnn.set_engine_plugin_paths([str(plugin_path)])
 
         handle = hipdnn.Handle()
     except ImportError:
@@ -493,22 +503,49 @@ def run_suite(
             result = run_graph_all_providers(
                 graph_path, graph_json, tensor_infos, config, handle
             )
+
+            # Check for zero combinations (bad filter)
+            if len(result.results) == 0:
+                reporter.print_suite_graph_error(
+                    graph_name,
+                    "No provider/engine combinations matched filters",
+                )
+                error_result = GraphResult(
+                    graph_name=graph_name,
+                    graph_path=str(graph_path),
+                    results=[
+                        ProviderEngineResult(
+                            provider="unknown",
+                            engine_id=0,
+                            status="error",
+                            error_message="No provider/engine combinations matched filters",
+                        )
+                    ],
+                )
+                graph_results.append(error_result)
+                has_errors = True
+                continue
+
             graph_results.append(result)
 
             # Count statuses
+            # "pass" = success + (correctness passed OR no validation done)
             n_pass = sum(
                 1
                 for r in result.results
                 if r.status == "success"
-                and r.correctness is not None
-                and r.correctness.passed
+                and (
+                    r.correctness is None
+                    or r.correctness.tolerance_match is not False
+                )
             )
+            # "fail" = success but correctness explicitly failed
             n_fail = sum(
                 1
                 for r in result.results
                 if r.status == "success"
                 and r.correctness is not None
-                and not r.correctness.passed
+                and r.correctness.tolerance_match is False
             )
             n_skip = sum(1 for r in result.results if r.status == "skipped")
             n_error = sum(1 for r in result.results if r.status == "error")
@@ -544,7 +581,8 @@ def run_suite(
         1
         for gr in graph_results
         for r in gr.results
-        if r.status == "success" and r.correctness is not None and r.correctness.passed
+        if r.status == "success"
+        and (r.correctness is None or r.correctness.tolerance_match is not False)
     )
     total_fail = sum(
         1
@@ -552,7 +590,7 @@ def run_suite(
         for r in gr.results
         if r.status == "success"
         and r.correctness is not None
-        and not r.correctness.passed
+        and r.correctness.tolerance_match is False
     )
     total_skip = sum(
         1 for gr in graph_results for r in gr.results if r.status == "skipped"
@@ -566,9 +604,11 @@ def run_suite(
         timestamp=datetime.now(timezone.utc).isoformat(),
         hostname=socket.gethostname(),
         total_graphs=total,
-        pass_count=total_pass,
-        fail_count=total_fail,
-        skip_count=total_skip,
+        total_combinations=total_combinations,
+        pass_combinations=total_pass,
+        fail_combinations=total_fail,
+        skip_combinations=total_skip,
+        error_combinations=total_error,
         rocm_version=env_info.get("rocm_version"),
         gpu_model=env_info.get("gpu_model"),
         python_version=env_info.get("python_version"),
@@ -608,6 +648,8 @@ def main() -> int:
     parser = create_parser()
     args = parser.parse_args()
 
+    gpu_backend = "none" if args.no_kernel_timing else "auto"
+
     # Resolve --graph: glob expansion for suite mode (per D-05)
     resolved_files = sorted(glob.glob(args.graph))
 
@@ -624,6 +666,13 @@ def main() -> int:
 
     # Check if A/B testing mode is enabled (either AId or BId specified)
     if args.AId is not None or args.BId is not None:
+        if len(resolved_files) > 1:
+            print(
+                "A/B testing requires a single graph file, not a glob pattern",
+                file=sys.stderr,
+            )
+            return 1
+
         # Both AId and BId should be specified for A/B testing
         if args.AId is None or args.BId is None:
             print(
@@ -637,7 +686,7 @@ def main() -> int:
                 graph_path=Path(resolved_files[0]),
                 warmup_iters=args.warmup,
                 benchmark_iters=args.iters,
-                engine_id=args.engine_id,
+                engine_id=args.engine if args.engine is not None else 1,
             )
         except ValueError as e:
             print(f"Configuration error: {e}", file=sys.stderr)
@@ -662,8 +711,8 @@ def main() -> int:
             try:
                 ab_validation_config = ValidationConfig(
                     provider=args.validate,
-                    rtol=args.validate_rtol,
-                    atol=args.validate_atol,
+                    rtol=args.rtol,
+                    atol=args.atol,
                 )
             except ValueError as e:
                 print(f"Validation configuration error: {e}", file=sys.stderr)
@@ -673,22 +722,29 @@ def main() -> int:
             config,
             ab_config,
             seed=args.seed,
-            gpu_backend=args.gpu_backend,
+            gpu_backend=gpu_backend,
             validation_config=ab_validation_config,
         )
 
-    # Suite mode: multiple files resolved (per D-05), or suite-specific flags used
-    if len(resolved_files) > 1 or args.provider is not None or args.engine is not None:
+    # Suite mode: multiple files resolved (per D-05)
+    if len(resolved_files) > 1:
+        if args.backend == "pytorch":
+            print(
+                "Suite mode is not supported with --backend pytorch",
+                file=sys.stderr,
+            )
+            return 1
+
         try:
             suite_config = SuiteConfig(
                 warmup_iters=args.warmup,
                 benchmark_iters=args.iters,
                 seed=args.seed,
-                provider_filter=args.provider,
                 engine_filter=args.engine,
                 rtol=args.rtol,
                 atol=args.atol,
-                gpu_backend=args.gpu_backend,
+                gpu_backend=gpu_backend,
+                reference_provider=args.validate,
             )
         except ValueError as e:
             print(f"Suite configuration error: {e}", file=sys.stderr)
@@ -698,6 +754,7 @@ def main() -> int:
             graph_paths=[Path(p) for p in resolved_files],
             config=suite_config,
             output_path=args.output,
+            plugin_path=args.plugin_path,
         )
 
     # Single file mode (backward compatible)
@@ -706,7 +763,7 @@ def main() -> int:
             graph_path=Path(resolved_files[0]),
             warmup_iters=args.warmup,
             benchmark_iters=args.iters,
-            engine_id=args.engine_id,
+            engine_id=args.engine if args.engine is not None else 1,
         )
     except ValueError as e:
         print(f"Configuration error: {e}", file=sys.stderr)
@@ -726,8 +783,8 @@ def main() -> int:
         try:
             validation_config = ValidationConfig(
                 provider=args.validate,
-                rtol=args.validate_rtol,
-                atol=args.validate_atol,
+                rtol=args.rtol,
+                atol=args.atol,
             )
         except ValueError as e:
             print(f"Validation configuration error: {e}", file=sys.stderr)
@@ -738,7 +795,8 @@ def main() -> int:
         seed=args.seed,
         validation_config=validation_config,
         output_path=args.output,
-        gpu_backend=args.gpu_backend,
+        gpu_backend=gpu_backend,
+        plugin_path=args.plugin_path,
     )
 
 

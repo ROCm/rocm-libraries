@@ -131,7 +131,6 @@ class SuiteConfig:
         warmup_iters: Number of warmup iterations per provider/engine.
         benchmark_iters: Number of benchmark iterations for timing.
         seed: Optional random seed for reproducible inputs.
-        provider_filter: If set, only iterate this provider (per D-03).
         engine_filter: If set, only iterate this engine ID (per D-03).
         rtol: Relative tolerance for correctness comparison (per D-15).
         atol: Absolute tolerance for correctness comparison (per D-15).
@@ -142,12 +141,11 @@ class SuiteConfig:
     warmup_iters: int = 10
     benchmark_iters: int = 100
     seed: Optional[int] = None
-    provider_filter: Optional[str] = None
     engine_filter: Optional[int] = None
     rtol: float = 1e-5
     atol: float = 1e-8
     gpu_backend: str = "auto"
-    reference_provider: str = "pytorch"
+    reference_provider: str = "none"
 
     def __post_init__(self) -> None:
         """Validate configuration values."""

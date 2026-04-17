@@ -28,10 +28,33 @@ def _require_gpu():
         pytest.skip(f"PyTorch not available: {e}")
 
 
+def _find_plugin_path():
+    """Find the hipDNN engine plugin directory."""
+    project_root = Path(__file__).parent.parent.parent
+    candidates = [
+        project_root.parent.parent.parent.parent
+        / "dnn-providers"
+        / "miopen-provider"
+        / "build"
+        / "lib"
+        / "hipdnn_plugins"
+        / "engines",
+        Path("/opt/rocm/lib/hipdnn_plugins/engines"),
+    ]
+    for p in candidates:
+        if p.is_dir() and any(p.glob("*.so")):
+            return str(p)
+    return None
+
+
 def _require_hipdnn():
     """Skip if hipdnn_frontend is not importable or no GPU handle can be created."""
     try:
         import hipdnn_frontend
+
+        plugin_path = _find_plugin_path()
+        if plugin_path is not None:
+            hipdnn_frontend.set_engine_plugin_paths([plugin_path])
 
         hipdnn_frontend.Handle()
         return hipdnn_frontend
@@ -164,6 +187,14 @@ class TestSuiteCLIIntegration:
         return Path(__file__).parent.parent.parent
 
     @pytest.fixture
+    def cli_plugin_args(self) -> List[str]:
+        """Return --plugin-path args for CLI, or empty list."""
+        path = _find_plugin_path()
+        if path is None:
+            return []
+        return ["--plugin-path", path]
+
+    @pytest.fixture
     def graph_paths(self) -> List[Path]:
         """Get available sample graph paths."""
         paths = sorted(_graphs_dir().glob("*.json"))
@@ -172,7 +203,7 @@ class TestSuiteCLIIntegration:
         return paths
 
     def test_suite_mode_multiple_graphs(
-        self, project_root: Path, graph_paths: List[Path]
+        self, project_root: Path, graph_paths: List[Path], cli_plugin_args: List[str]
     ) -> None:
         """CLI with glob pattern runs suite mode and produces output."""
         result = subprocess.run(
@@ -186,21 +217,26 @@ class TestSuiteCLIIntegration:
                 "1",
                 "--iters",
                 "2",
-                "--gpu-backend",
-                "none",
-            ],
+                "--no-kernel-timing",
+            ]
+            + cli_plugin_args,
             capture_output=True,
             text=True,
             cwd=project_root,
         )
 
+        assert result.returncode in (0, 1, 2), (
+            f"Unexpected exit code {result.returncode}. stderr: {result.stderr}"
+        )
         assert "hipDNN Benchmark Suite" in result.stdout
         assert "Suite Summary" in result.stdout
         # Should show progress for each graph
         for i, p in enumerate(graph_paths, 1):
             assert f"[{i}/{len(graph_paths)}]" in result.stdout
 
-    def test_suite_mode_json_output(self, project_root: Path, tmp_path: Path) -> None:
+    def test_suite_mode_json_output(
+        self, project_root: Path, tmp_path: Path, cli_plugin_args: List[str]
+    ) -> None:
         """Suite mode writes valid JSON when --output specified."""
         output_file = tmp_path / "suite_results.json"
 
@@ -215,16 +251,19 @@ class TestSuiteCLIIntegration:
                 "1",
                 "--iters",
                 "2",
-                "--gpu-backend",
-                "none",
+                "--no-kernel-timing",
                 "--output",
                 str(output_file),
-            ],
+            ]
+            + cli_plugin_args,
             capture_output=True,
             text=True,
             cwd=project_root,
         )
 
+        assert result.returncode in (0, 1, 2), (
+            f"Unexpected exit code {result.returncode}. stderr: {result.stderr}"
+        )
         assert output_file.exists(), f"JSON output not written. stderr: {result.stderr}"
 
         with open(output_file) as f:
@@ -242,7 +281,7 @@ class TestSuiteCLIIntegration:
             assert len(g["results"]) > 0
 
     def test_suite_mode_single_graph_failure_continues(
-        self, project_root: Path, tmp_path: Path
+        self, project_root: Path, tmp_path: Path, cli_plugin_args: List[str]
     ) -> None:
         """A single graph failure does not abort the suite."""
         output_file = tmp_path / "results.json"
@@ -258,14 +297,18 @@ class TestSuiteCLIIntegration:
                 "1",
                 "--iters",
                 "2",
-                "--gpu-backend",
-                "none",
+                "--no-kernel-timing",
                 "--output",
                 str(output_file),
-            ],
+            ]
+            + cli_plugin_args,
             capture_output=True,
             text=True,
             cwd=project_root,
+        )
+
+        assert result.returncode in (0, 1, 2), (
+            f"Unexpected exit code {result.returncode}. stderr: {result.stderr}"
         )
 
         with open(output_file) as f:
@@ -275,36 +318,10 @@ class TestSuiteCLIIntegration:
         graph_count = len(sorted(_graphs_dir().glob("*.json")))
         assert len(data["graphs"]) == graph_count
 
-    def test_suite_mode_provider_filter(self, project_root: Path) -> None:
-        """--provider flag is accepted and filters execution."""
-        result = subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "dnn_benchmarking",
-                "--graph",
-                str(_graphs_dir() / "sample_conv_fwd.json"),
-                "--provider",
-                "miopen",
-                "--warmup",
-                "1",
-                "--iters",
-                "2",
-                "--gpu-backend",
-                "none",
-            ],
-            capture_output=True,
-            text=True,
-            cwd=project_root,
-        )
-
-        # --provider on single file triggers suite mode
-        assert "hipDNN Benchmark Suite" in result.stdout
-
     def test_single_graph_without_suite_flags_uses_legacy_mode(
-        self, project_root: Path
+        self, project_root: Path, cli_plugin_args: List[str]
     ) -> None:
-        """Single graph without --provider/--engine uses legacy run_benchmark."""
+        """Single graph uses legacy run_benchmark."""
         result = subprocess.run(
             [
                 sys.executable,
@@ -316,14 +333,17 @@ class TestSuiteCLIIntegration:
                 "1",
                 "--iters",
                 "2",
-                "--gpu-backend",
-                "none",
-            ],
+                "--no-kernel-timing",
+            ]
+            + cli_plugin_args,
             capture_output=True,
             text=True,
             cwd=project_root,
         )
 
+        assert result.returncode in (0, 1, 2), (
+            f"Unexpected exit code {result.returncode}. stderr: {result.stderr}"
+        )
         # Single graph without suite flags should use legacy mode
         assert "hipDNN Benchmark:" in result.stdout
         assert "hipDNN Benchmark Suite" not in result.stdout

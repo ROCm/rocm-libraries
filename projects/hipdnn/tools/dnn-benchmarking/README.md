@@ -70,7 +70,7 @@ pip install -e .
 python -m dnn_benchmarking --graph ./graphs/conv1_fwd.json --warmup 10 --iters 100
 
 # With custom engine ID
-python -m dnn_benchmarking --graph ./graphs/conv1_fwd.json --engine-id 1
+python -m dnn_benchmarking --graph ./graphs/conv1_fwd.json --engine 1
 
 # With reproducible random seed
 python -m dnn_benchmarking --graph ./graphs/conv1_fwd.json --seed 42
@@ -103,9 +103,9 @@ python -m dnn_benchmarking --graph ./graphs/conv1_fwd.json \
 | `--graph`, `-g` | Path to JSON-serialized hipDNN graph file | Required |
 | `--warmup`, `-w` | Number of warmup iterations | 10 |
 | `--iters`, `-i` | Number of benchmark iterations | 100 |
-| `--engine-id`, `-e` | Engine ID (1 = MIOpen) | 1 |
+| `--engine`, `-e` | Engine ID (default: 1, suite mode: all) | None |
 | `--seed` | Random seed for reproducibility | None |
-| `--gpu-backend` | GPU kernel timer backend (`torch`, `auto`, `none`) | auto |
+| `--no-kernel-timing` | Disable GPU kernel timing (E2E only) | False |
 
 #### A/B Testing Options
 

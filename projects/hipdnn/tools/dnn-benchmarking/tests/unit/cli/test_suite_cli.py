@@ -33,37 +33,24 @@ def _mock_hipdnn():
 
 
 class TestParserGlobAndFilters:
-    """Tests for --graph glob pattern and --provider/--engine filter flags."""
+    """Tests for --graph glob pattern and --engine filter flags."""
 
     def test_graph_accepts_glob_pattern_string(self) -> None:
         """Test 1: --graph accepts a glob pattern string and stores as-is."""
         parser = create_parser()
         args = parser.parse_args(["--graph", "graphs/*.json"])
-        # Should be stored as a string, not converted to Path
         assert isinstance(args.graph, str)
         assert args.graph == "graphs/*.json"
 
-    def test_provider_flag_stores_string(self) -> None:
-        """Test 2: --provider flag stores a string provider name (default None)."""
-        parser = create_parser()
-        args = parser.parse_args(["--graph", "g.json", "--provider", "miopen"])
-        assert args.provider == "miopen"
-
-    def test_provider_flag_default_none(self) -> None:
-        """Test 2b: --provider defaults to None."""
-        parser = create_parser()
-        args = parser.parse_args(["--graph", "g.json"])
-        assert args.provider is None
-
     def test_engine_flag_stores_int(self) -> None:
-        """Test 3: --engine flag stores an int engine ID (default None)."""
+        """Test 2: --engine flag stores an int engine ID (default None)."""
         parser = create_parser()
         args = parser.parse_args(["--graph", "g.json", "--engine", "3"])
         assert args.engine == 3
         assert isinstance(args.engine, int)
 
     def test_engine_flag_default_none(self) -> None:
-        """Test 3b: --engine defaults to None."""
+        """Test 2b: --engine defaults to None."""
         parser = create_parser()
         args = parser.parse_args(["--graph", "g.json"])
         assert args.engine is None

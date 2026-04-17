@@ -61,10 +61,13 @@ class TestCLIIntegration:
         )
 
         assert result.returncode != 0
-        assert "not found" in result.stdout.lower() or "error" in result.stdout.lower()
+        combined = (result.stdout + result.stderr).lower()
+        assert "no graph files found" in combined or "error" in combined
 
     @pytest.mark.gpu
-    def test_cli_full_run(self, sample_graph_path: Path) -> None:
+    def test_cli_full_run(
+        self, sample_graph_path: Path, plugin_path_cli_args
+    ) -> None:
         """Test full CLI run with sample graph (requires GPU)."""
         if not sample_graph_path.exists():
             pytest.skip(f"Sample graph not found: {sample_graph_path}")
@@ -96,7 +99,8 @@ class TestCLIIntegration:
                 "1",
                 "--iters",
                 "2",
-            ],
+            ]
+            + plugin_path_cli_args,
             capture_output=True,
             text=True,
             cwd=Path(__file__).parent.parent.parent,
@@ -139,7 +143,9 @@ class TestCLIIntegration:
             ("sample_batchnorm.json", "sample_batchnorm_inference_32x64x28x28"),
         ],
     )
-    def test_cli_all_sample_graphs(self, graph_name: str, expected_name: str) -> None:
+    def test_cli_all_sample_graphs(
+        self, graph_name: str, expected_name: str, plugin_path_cli_args
+    ) -> None:
         """Test CLI execution with all sample graph types."""
         sample_path = Path(__file__).parent.parent.parent / "graphs" / graph_name
 
@@ -173,7 +179,8 @@ class TestCLIIntegration:
                 "1",
                 "--iters",
                 "2",
-            ],
+            ]
+            + plugin_path_cli_args,
             capture_output=True,
             text=True,
             cwd=Path(__file__).parent.parent.parent,
@@ -215,7 +222,7 @@ class TestCLIParser:
                 "20",
                 "--iters",
                 "200",
-                "--engine-id",
+                "--engine",
                 "2",
             ]
         )

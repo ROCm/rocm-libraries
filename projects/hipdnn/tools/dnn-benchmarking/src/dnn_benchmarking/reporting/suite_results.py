@@ -221,9 +221,11 @@ class SuiteMetadata:
         timestamp: UTC timestamp when suite was run.
         hostname: Machine hostname.
         total_graphs: Total number of graphs in suite.
-        pass_count: Number of passed graphs.
-        fail_count: Number of failed graphs.
-        skip_count: Number of skipped graphs.
+        total_combinations: Total provider/engine combinations across all graphs.
+        pass_combinations: Combinations that passed correctness.
+        fail_combinations: Combinations that failed correctness.
+        skip_combinations: Combinations skipped (unsupported).
+        error_combinations: Combinations that errored during execution.
         rocm_version: ROCm version string.
         gpu_model: GPU model name.
         python_version: Python version string.
@@ -233,9 +235,11 @@ class SuiteMetadata:
     timestamp: str
     hostname: str
     total_graphs: int
-    pass_count: int
-    fail_count: int
-    skip_count: int
+    total_combinations: int
+    pass_combinations: int
+    fail_combinations: int
+    skip_combinations: int
+    error_combinations: int
     rocm_version: Optional[str] = None
     gpu_model: Optional[str] = None
     python_version: Optional[str] = None
@@ -247,9 +251,11 @@ class SuiteMetadata:
             "timestamp": self.timestamp,
             "hostname": self.hostname,
             "total_graphs": self.total_graphs,
-            "pass_count": self.pass_count,
-            "fail_count": self.fail_count,
-            "skip_count": self.skip_count,
+            "total_combinations": self.total_combinations,
+            "pass_combinations": self.pass_combinations,
+            "fail_combinations": self.fail_combinations,
+            "skip_combinations": self.skip_combinations,
+            "error_combinations": self.error_combinations,
             "rocm_version": self.rocm_version,
             "gpu_model": self.gpu_model,
             "python_version": self.python_version,

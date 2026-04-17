@@ -73,11 +73,8 @@ python -m dnn_benchmarking --graph 'graphs/*.json' --warmup 10 --iters 100
 # Suite mode with JSON output
 python -m dnn_benchmarking --graph 'graphs/*.json' --output results.json
 
-# Suite mode with provider/engine filters
-python -m dnn_benchmarking --graph 'graphs/*.json' --provider miopen --engine 1
-
-# Suite mode also activates with --provider/--engine on a single graph
-python -m dnn_benchmarking --graph ./graphs/sample_conv_fwd.json --provider miopen
+# Suite mode with engine filter
+python -m dnn_benchmarking --graph 'graphs/*.json' --engine 1
 ```
 
 ## Architecture

@@ -35,11 +35,15 @@ PyTorch Backend (GPU via PyTorch):
 
 Reference Validation:
   dnn-benchmark -g ./graph.json --validate pytorch
-  dnn-benchmark -g ./graph.json --validate pytorch --validate-rtol 1e-3
+  dnn-benchmark -g ./graph.json --validate pytorch --rtol 1e-3
 
 A/B Testing:
   dnn-benchmark -g ./graph.json --AId 1 --BId 2
   dnn-benchmark -g ./graph.json --APath /path/pluginA --AId 1 --BPath /path/pluginB --BId 2
+
+Suite Mode (multiple graphs):
+  dnn-benchmark --graph 'graphs/*.json' --warmup 10 --iters 100
+  dnn-benchmark --graph 'graphs/*.json' -o results.json
         """,
     )
 
@@ -72,12 +76,13 @@ A/B Testing:
     )
 
     parser.add_argument(
-        "--engine-id",
+        "--engine",
         "-e",
         type=int,
-        default=1,
+        default=None,
         metavar="ID",
-        help="Engine ID to use (default: 1 for MIOpen)",
+        help="Engine ID (default: 1). "
+        "In suite mode, filters to this engine (default: all).",
     )
 
     parser.add_argument(
@@ -111,13 +116,10 @@ A/B Testing:
         help="Export benchmark results to JSON file for offline comparison",
     )
     output_group.add_argument(
-        "--gpu-backend",
-        type=str,
-        choices=["torch", "auto", "none"],
-        default="auto",
-        metavar="BACKEND",
-        help="GPU timer backend (default: auto). "
-        "Options: torch (PyTorch CUDA/ROCm), auto, none (E2E only)",
+        "--no-kernel-timing",
+        action="store_true",
+        default=False,
+        help="Disable GPU kernel timing (E2E wall-clock only)",
     )
 
     # A/B Testing arguments
@@ -150,19 +152,21 @@ A/B Testing:
         metavar="ID",
         help="Engine ID for configuration B",
     )
-    ab_group.add_argument(
+    # Comparison tolerances (used by A/B testing, validation, and suite mode)
+    comparison_group = parser.add_argument_group("Comparison")
+    comparison_group.add_argument(
         "--rtol",
         type=float,
         default=1e-5,
         metavar="TOL",
-        help="Relative tolerance for A/B comparison (default: 1e-5)",
+        help="Relative tolerance for output comparison (default: 1e-5)",
     )
-    ab_group.add_argument(
+    comparison_group.add_argument(
         "--atol",
         type=float,
         default=1e-8,
         metavar="TOL",
-        help="Absolute tolerance for A/B comparison (default: 1e-8)",
+        help="Absolute tolerance for output comparison (default: 1e-8)",
     )
 
     # Reference Validation arguments
@@ -176,36 +180,15 @@ A/B Testing:
         help="Reference provider for validation (default: none). "
         "Options: pytorch, cpu_plugin, none",
     )
-    val_group.add_argument(
-        "--validate-rtol",
-        type=float,
-        default=1e-5,
-        metavar="TOL",
-        help="Relative tolerance for validation (default: 1e-5)",
-    )
-    val_group.add_argument(
-        "--validate-atol",
-        type=float,
-        default=1e-8,
-        metavar="TOL",
-        help="Absolute tolerance for validation (default: 1e-8)",
-    )
 
     # Suite options
     suite_group = parser.add_argument_group("Suite Options")
     suite_group.add_argument(
-        "--provider",
-        type=str,
+        "--plugin-path",
+        type=Path,
         default=None,
-        metavar="NAME",
-        help="Filter to specific provider name (default: all available)",
-    )
-    suite_group.add_argument(
-        "--engine",
-        type=int,
-        default=None,
-        metavar="ID",
-        help="Filter to specific engine ID (default: all available)",
+        metavar="DIR",
+        help="Path to directory containing hipDNN engine plugin .so files",
     )
 
     return parser
@@ -230,5 +213,5 @@ def parse_args(args=None) -> BenchmarkConfig:
         graph_path=parsed.graph,
         warmup_iters=parsed.warmup,
         benchmark_iters=parsed.iters,
-        engine_id=parsed.engine_id,
+        engine_id=parsed.engine if parsed.engine is not None else 1,
     )
