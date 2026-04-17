@@ -381,10 +381,10 @@ using KernelTypesPersistentWmma = ::testing::Types<
 // Tile: 128x128x64, Warp tile: 32x32x16
 using KernelTypesTf32Mem = ::testing::Types<
     //         ALayout, BLayout, CLayout, ADataType, BDataType, AccDataType, CDataType, M_BlockSize, N_BlockSize, K_BlockSize, M_TileSize, N_TileSize, K_TileSize, Scheduler, PipelineType
-    std::tuple<    Row,     Row,     Row,      TF32,      TF32,         F32,       F32,        I128,        I128,         I64,        I32,        I32,        I16, Intrawave,         Mem>,
-    std::tuple<    Row,     Row,     Row,      TF32,      TF32,         F32,       F32,        I128,        I128,         I64,        I32,        I32,        I16, Interwave,         Mem>,
-    std::tuple<    Row,     Col,     Row,      TF32,      TF32,         F32,       F32,        I128,        I128,         I64,        I32,        I32,        I16, Intrawave,         Mem>,
-    std::tuple<    Row,     Col,     Row,      TF32,      TF32,         F32,       F32,        I128,        I128,         I64,        I32,        I32,        I16, Interwave,         Mem>
+    std::tuple<    Row,     Row,     Row,      TF32,      TF32,         F32,       F32,        I128,        I128,         I64,        I32,        I32,   Intrawave,         Mem>,
+    std::tuple<    Row,     Row,     Row,      TF32,      TF32,         F32,       F32,        I128,        I128,         I64,        I32,        I32,   Interwave,         Mem>,
+    std::tuple<    Row,     Col,     Row,      TF32,      TF32,         F32,       F32,        I128,        I128,         I64,        I32,        I32,   Intrawave,         Mem>,
+    std::tuple<    Row,     Col,     Row,      TF32,      TF32,         F32,       F32,        I128,        I128,         I64,        I32,        I32,   Interwave,         Mem>
 >;
 
 // clang-format on
