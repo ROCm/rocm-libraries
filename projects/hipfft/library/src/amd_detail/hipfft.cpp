@@ -500,11 +500,17 @@ static hipfftResult hipfftMakePlan_internal(hipfftHandle               plan,
     static rocfft_initializer init;
 
     plan->type = iotype;
-
-    // We currently do not support multi-batch multi-device transforms.
-    if(plan->singleProcMultiDevice && number_of_transforms > 1)
-        return HIPFFT_NOT_IMPLEMENTED;
-
+    if(plan->singleProcMultiDevice)
+    {
+        // We currently do not support multi-batch multi-device transforms.
+        if(number_of_transforms > 1)
+            return HIPFFT_NOT_IMPLEMENTED;
+        
+        // We currently do not support 1D multi-device transforms.
+        if(dim == 1)
+            return HIPFFT_NOT_IMPLEMENTED;
+    }
+    
     const bool isrealcomplex = !iotype.is_complex_to_complex();
 
     if(!plan || plan->initialized())
