@@ -717,20 +717,20 @@ def get_fwd_blobs(
     kernel_filter: Optional[str], receipt, optdim_list, mask_impl,
     targets: Optional[List[str]] = None
 ) -> Tuple[FmhaFwdApiPool, List[FmhaFwdKernel]]:
-    # gfx11 (wave32) is incompatible with VECTORIZED_LAYOUT for the current
-    # batch_prefill tile shapes (thread_buffer size mismatch in Gemm1).
-    # Skip VECTORIZED_LAYOUT when any gfx11 target is present.
-    has_gfx11 = targets is not None and any(t.startswith("gfx11") for t in targets)
+    # batch_prefill pipeline uses gfx9-specific async scatter-gather buffer addressing
+    # (amd_buffer_addressing.hpp raw buffer loads) that is not compatible with
+    # non-gfx9 architectures (gfx11/gfx12/gfx10 are wave32 and use different
+    # buffer instruction formats).  Skip all batch_prefill kernels for non-gfx9 targets.
+    has_non_gfx9 = targets is not None and any(
+        not t.startswith("gfx9") for t in targets
+    )
     # TODO: we don't support tuning yet, so pick up one value for vlayout/pipeline/pad
     #       support this in future
 
     gen = list()
     api_pool = FmhaFwdApiPool(mask_impl)
 
-    # batch_prefill pipeline uses gfx9-specific buffer addressing (async scatter-gather)
-    # that is incompatible with gfx11 (wave32, different buffer instruction format).
-    # Skip all batch_prefill kernels for gfx11 targets.
-    if has_gfx11:
+    if has_non_gfx9:
         return api_pool, gen
 
     for dtype in FWD_DTYPE_MAP.keys():
