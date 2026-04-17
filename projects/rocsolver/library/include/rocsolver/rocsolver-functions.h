@@ -4931,7 +4931,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgetf2_npvt_64(rocblas_handle handle,
     @param[in]
     n           rocblas_int. n >= 0.
                 The number of columns of all matrices A_l in the batch.
-    @param[in,out]
+    @param[inout]
     A           array of pointers to type. Each pointer points to an array on the GPU of dimension lda*n.
                 On entry, the m-by-n matrices A_l to be factored.
                 On exit, the factors L_l and U_l from the factorizations.
@@ -10575,7 +10575,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zsytrs_strided_batched_64(rocblas_hand
     nrhs        rocblas_int. nrhs >= 0.
                 The number of right hand sides, that is, the number of columns
                 of the matrix B.
-    @param[in,out]
+    @param[inout]
     A           pointer to type. Array on the GPU of dimension lda*n.
                 The factors L (or U) and D  of the factorization A  returned by \ref rocsolver_ssytrf "SYTRF".
                 On entry, A holds the factorization; on exit, A is restored to its input state.
@@ -10707,7 +10707,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zsytrs2_64(rocblas_handle handle,
     nrhs        rocblas_int. nrhs >= 0.
                 The number of right hand sides, that is, the number of columns
                 of all the matrices B_l.
-    @param[in,out]
+    @param[inout]
     A           Array of pointers to type. Each pointer points to an array on the GPU of dimension lda*n.
                 The factors L_l (or U_l) and D_l of the factorization A_l  returned by \ref rocsolver_ssytrf_batched "SYTRF_BATCHED".
                 On entry, A holds the factorization; on exit, A is restored to its input state.
@@ -10862,7 +10862,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zsytrs2_batched_64(rocblas_handle hand
     nrhs        rocblas_int. nrhs >= 0.
                 The number of right hand sides, that is, the number of columns
                 of all the matrices B_l.
-    @param[in,out]
+    @param[inout]
     A           pointer to type. Array on the GPU (the size depends on the value of strideA).
                 The factors L_l (or U_l) and D_l of the factorization A_l  returned by \ref rocsolver_ssytrf_strided_batched "SYTRF_STRIDED_BATCHED".
                 On entry, A holds the factorization; on exit, A is restored to its input state.
