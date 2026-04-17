@@ -72,7 +72,8 @@ struct KernelInstance
 };
 
 template <typename Problem>
-std::ostream& operator<<([[clang::lifetimebound]] std::ostream& os, const KernelInstance<Problem>& obj)
+std::ostream& operator<<([[clang::lifetimebound]] std::ostream& os,
+                         const KernelInstance<Problem>& obj)
 {
     os << "{\n"
        << " \"name\": \"" << obj.name_ << "\",\n"
