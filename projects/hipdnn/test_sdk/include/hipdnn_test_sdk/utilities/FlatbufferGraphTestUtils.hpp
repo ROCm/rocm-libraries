@@ -1994,13 +1994,14 @@ inline flatbuffers::FlatBufferBuilder
         const std::vector<int64_t> statsDims = {qDims[0], qDims[1], qDims[2], 1};
         const std::vector<int64_t> statsStrides = {qDims[1] * qDims[2], qDims[2], 1, 1};
         const auto stUid = uid++;
-        tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
-            builder,
-            stUid,
-            "stats",
-            hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
-            &statsStrides,
-            &statsDims));
+        tensorAttributes.push_back(
+            hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+                builder,
+                stUid,
+                "stats",
+                hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                &statsStrides,
+                &statsDims));
         statsUid = flatbuffers::Optional<int64_t>(stUid);
     }
 
@@ -2257,16 +2258,17 @@ inline flatbuffers::FlatBufferBuilder
         const std::vector<int64_t> passByValueDims = {1};
         const hipdnn_flatbuffers_sdk::data_objects::Float32Value scaleVal(1.0f);
         const auto sUid = uid++;
-        tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
-            builder,
-            sUid,
-            "scale",
-            hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
-            &passByValueDims,
-            &passByValueDims,
-            false,
-            hipdnn_flatbuffers_sdk::data_objects::TensorValue::Float32Value,
-            builder.CreateStruct(scaleVal).Union()));
+        tensorAttributes.push_back(
+            hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+                builder,
+                sUid,
+                "scale",
+                hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                &passByValueDims,
+                &passByValueDims,
+                false,
+                hipdnn_flatbuffers_sdk::data_objects::TensorValue::Float32Value,
+                builder.CreateStruct(scaleVal).Union()));
         scaleUid = flatbuffers::Optional<int64_t>(sUid);
     }
 

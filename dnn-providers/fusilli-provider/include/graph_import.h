@@ -402,8 +402,9 @@ private:
     return fusilli::ok();
   }
 
-  fusilli::ErrorObject importSdpaAttr(
-      const hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes *hipDnnSdpaAttr) {
+  fusilli::ErrorObject
+  importSdpaAttr(const hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes
+                     *hipDnnSdpaAttr) {
     // Reject hipDNN features not supported by the fusilli SDPA path.
     if (hipDnnSdpaAttr->dropout_probability().has_value() &&
         *hipDnnSdpaAttr->dropout_probability() > 0.0f) {
