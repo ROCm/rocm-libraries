@@ -106,7 +106,7 @@ void LayernormFwdPlan::compile(const IKernelCompiler& kernelCompiler,
     if(normalizedDim > 1
        && (strideOrder == layoutNHWC.strideOrder || strideOrder == layoutNDHWC.strideOrder))
     {
-        stride = xDims->Get(1);
+        stride = static_cast<long>(xDims->Get(1));
     }
 
     for(unsigned int i = 0; i < xDims->size(); ++i)
@@ -115,12 +115,12 @@ void LayernormFwdPlan::compile(const IKernelCompiler& kernelCompiler,
         {
             if(stride == 1 || i != 1) // Don't add C to outerSize if there is a stride
             {
-                outerSize *= xDims->Get(i);
+                outerSize *= static_cast<long>(xDims->Get(i));
             }
         }
         else
         {
-            innerSize *= xDims->Get(i);
+            innerSize *= static_cast<long>(xDims->Get(i));
         }
     }
 
