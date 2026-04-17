@@ -1,19 +1,22 @@
-# Copyright © Advanced Micro Devices, Inc., or its affiliates.
-# SPDX-License-Identifier:  MIT
+# Copyright 2025 Advanced Micro Devices, Inc.
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 # Function to find the version file path given the component name
-function(miopen_provider_version_file_dir COMPONENT_NAME OUTPUT_PATH)
+function(fusilli_provider_version_file_dir COMPONENT_NAME OUTPUT_PATH)
     set(${OUTPUT_PATH} "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../" PARENT_SCOPE)
 endfunction()
 
 
 # Function to setup versioning for a component
 # Reads version.json, gets git hash, and sets version variables in parent scope
-function(miopen_provider_setup_version COMPONENT_NAME)
+function(fusilli_provider_setup_version COMPONENT_NAME)
     string(TOUPPER ${COMPONENT_NAME} COMPONENT_NAME_UPPER)
 
     # Read version from version.json
-    miopen_provider_version_file_dir(${COMPONENT_NAME} _version_dir)
+    fusilli_provider_version_file_dir(${COMPONENT_NAME} _version_dir)
     file(READ "${_version_dir}/version.json" _version_json)
     string(JSON ${COMPONENT_NAME_UPPER}_VERSION GET ${_version_json} "${COMPONENT_NAME}_version")
 
@@ -52,8 +55,8 @@ function(miopen_provider_setup_version COMPONENT_NAME)
 endfunction()
 
 # Function to generate the version header
-function(miopen_provider_generate_version_header COMPONENT_NAME TARGET_NAME)
-    miopen_provider_version_file_dir(${COMPONENT_NAME} _version_dir)
+function(fusilli_provider_generate_version_header COMPONENT_NAME TARGET_NAME)
+    fusilli_provider_version_file_dir(${COMPONENT_NAME} _version_dir)
     configure_file(
         "${_version_dir}/version.h.in"
         "${CMAKE_CURRENT_BINARY_DIR}/include/version.h"

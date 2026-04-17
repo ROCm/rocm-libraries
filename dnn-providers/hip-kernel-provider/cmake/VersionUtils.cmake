@@ -2,18 +2,18 @@
 # SPDX-License-Identifier:  MIT
 
 # Function to find the version file path given the component name
-function(miopen_provider_version_file_dir COMPONENT_NAME OUTPUT_PATH)
+function(hip_kernel_provider_version_file_dir COMPONENT_NAME OUTPUT_PATH)
     set(${OUTPUT_PATH} "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../" PARENT_SCOPE)
 endfunction()
 
 
 # Function to setup versioning for a component
 # Reads version.json, gets git hash, and sets version variables in parent scope
-function(miopen_provider_setup_version COMPONENT_NAME)
+function(hip_kernel_provider_setup_version COMPONENT_NAME)
     string(TOUPPER ${COMPONENT_NAME} COMPONENT_NAME_UPPER)
 
     # Read version from version.json
-    miopen_provider_version_file_dir(${COMPONENT_NAME} _version_dir)
+    hip_kernel_provider_version_file_dir(${COMPONENT_NAME} _version_dir)
     file(READ "${_version_dir}/version.json" _version_json)
     string(JSON ${COMPONENT_NAME_UPPER}_VERSION GET ${_version_json} "${COMPONENT_NAME}_version")
 
@@ -52,8 +52,8 @@ function(miopen_provider_setup_version COMPONENT_NAME)
 endfunction()
 
 # Function to generate the version header
-function(miopen_provider_generate_version_header COMPONENT_NAME TARGET_NAME)
-    miopen_provider_version_file_dir(${COMPONENT_NAME} _version_dir)
+function(hip_kernel_provider_generate_version_header COMPONENT_NAME TARGET_NAME)
+    hip_kernel_provider_version_file_dir(${COMPONENT_NAME} _version_dir)
     configure_file(
         "${_version_dir}/version.h.in"
         "${CMAKE_CURRENT_BINARY_DIR}/include/version.h"
