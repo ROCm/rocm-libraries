@@ -50,8 +50,6 @@ def run_benchmarks(
     max_gpu_temp,
     max_warming_secs,
     max_cooling_secs,
-    output_hip_device_properties_context,
-    output_amdsmi_context,
     output_batches,
     spaces_per_indent,
     stream_blocking_timeout_secs,
@@ -148,10 +146,6 @@ def run_benchmarks(
             args += ["--max-warming-secs", max_warming_secs]
         if max_cooling_secs:
             args += ["--max-cooling-secs", max_cooling_secs]
-        if output_hip_device_properties_context:
-            args += ["--output-hip-device-properties-context"]
-        if output_amdsmi_context:
-            args += ["--output-amdsmi-context"]
         if output_batches:
             args += ["--output-batches"]
         if spaces_per_indent:
@@ -295,20 +289,6 @@ def main():
         required=False,
     )
     parser.add_argument(
-        "--output-hip-device-properties-context",
-        help="Output a `hip_device_properties` object in the context, containing GPU details",
-        default=False,
-        action="store_true",
-        required=False,
-    )
-    parser.add_argument(
-        "--output-amdsmi-context",
-        help="Output an `amdsmi` object in the context, containing GPU details",
-        default=False,
-        action="store_true",
-        required=False,
-    )
-    parser.add_argument(
         "--output-batches",
         help="Output a `batches` array for each specialization, containing per-batch details",
         default=False,
@@ -351,8 +331,6 @@ def main():
         args.max_gpu_temp,
         args.max_warming_secs,
         args.max_cooling_secs,
-        args.output_hip_device_properties_context,
-        args.output_amdsmi_context,
         args.output_batches,
         args.spaces_per_indent,
         args.stream_blocking_timeout_secs,
