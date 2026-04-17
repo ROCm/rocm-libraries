@@ -104,17 +104,18 @@ TEST(TestBatchnormTrainSignatureKey, CreateFromNodeAndTensorMap)
 {
     const BatchnormTrainSignatureKey expectedKey{
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
-    const std::vector<int64_t> dims = {1, 1, 1, 1};
+    const std::vector<int64_t> dims = {2, 1, 1, 1};
     BatchnormTrainTensorBundle<float, float, float> tensorBundle(dims, 1, TensorLayout::NCHW);
 
     auto graphTuple = buildBatchnormTrainGraph(
         tensorBundle, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, false);
 
     auto& graph = std::get<0>(graphTuple);
-    auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
 
-    auto graphWrap = hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper(flatbufferGraph.data(),
-                                                                         flatbufferGraph.size());
+    auto graphWrap = hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper(serializedGraph.data(),
+                                                                         serializedGraph.size());
 
     const BatchnormTrainSignatureKey keyFromNode(graphWrap.getNode(0), graphWrap.getTensorMap());
 

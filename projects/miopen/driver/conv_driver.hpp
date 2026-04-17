@@ -2540,17 +2540,22 @@ int ConvDriver<Tgpu, Tref>::RunBackwardGPU()
         float alpha = static_cast<float>(1), beta = static_cast<float>(0);
 
         int bias_return_code = CaptureKernel([&]() -> int {
-            miopenConvolutionBackwardBias(GetHandle(),
-                                          &alpha,
-                                          outputTensor,
-                                          dout.GetDevicePtr(),
-                                          &beta,
-                                          biasTensor,
-                                          db.GetDevicePtr());
-            return miopenStatusSuccess;
+            return miopenConvolutionBackwardBias(GetHandle(),
+                                                 &alpha,
+                                                 outputTensor,
+                                                 dout.GetDevicePtr(),
+                                                 &beta,
+                                                 biasTensor,
+                                                 db.GetDevicePtr());
         });
 
-        if(bias_return_code != miopenStatusSuccess)
+        if(bias_return_code == miopenStatusNotImplemented)
+        {
+            std::cout << "Skipping backward bias: miopenConvolutionBackwardBias is deprecated and "
+                         "not implemented."
+                      << std::endl;
+        }
+        else if(bias_return_code != miopenStatusSuccess)
         {
             ret |= bias_return_code;
         }

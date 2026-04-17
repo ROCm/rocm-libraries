@@ -13,9 +13,11 @@ Documentation for rocSPARSE is available at
 * Added the strided batched computations for `rocsparse_sptrsv`.
 
 ### Optimized
-* Significant performance improvement for `rocsparse_Xgtsv_no_pivot` when the system size is less than 2^17.
+* Significant performance improvement for `rocsparse_Xgtsv_no_pivot_strided_batch`.
+* Significant performance improvement for `rocsparse_Xgtsv_no_pivot`.
 
 ### Resolved issues
+* Fixed incorrect usage of `__syncthreads` in `csx2dense`, `dense2csx`, `prune_dense2csr`, `csrcolor`, and `csrmm` (nnz_split)
 * Fix `rocsparse_[s|d|c|z]csric0` where `rocsparse_status_invalid_value` was being returned when the maximum number of non-zeros in any row is between 513 and 1024.
 * Fix compilation when using `--rocsparse_ILP64`
 

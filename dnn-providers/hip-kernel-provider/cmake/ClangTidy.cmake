@@ -10,7 +10,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # Sets up clang-tidy command variables with appropriate compiler flags for C++ and HIP files
 function(setClangTidyVars)
-    set(CLANG_TIDY_COMMAND ${CLANG_TIDY_EXE} -config-file=${CMAKE_SOURCE_DIR}/.clang-tidy -p
+    set(CLANG_TIDY_COMMAND ${CLANG_TIDY_EXE} -config-file=${PROJECT_SOURCE_DIR}/.clang-tidy -p
                            ${CMAKE_BINARY_DIR} PARENT_SCOPE
     )
     if(NOT CLANG_TIDY_HIP_ARGS)
@@ -58,9 +58,9 @@ function(add_clang_tidy_custom_target)
             tidy
             COMMAND
                 ${RUN_CLANG_TIDY_EXE} -p ${CMAKE_BINARY_DIR}
-                -config-file=${CMAKE_SOURCE_DIR}/.clang-tidy -source-filter "^(?!.*_deps/).*" -quiet
+                -config-file=${PROJECT_SOURCE_DIR}/.clang-tidy -source-filter "^(?!.*_deps/).*" -quiet
                 -j ${CLANG_TIDY_JOBS} ${CLANG_TIDY_HIP_ARGS}
-            WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+            WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
             COMMENT
                 "Running clang-tidy on all source files and headers (${CLANG_TIDY_JOBS} parallel jobs)..."
             VERBATIM
@@ -71,9 +71,9 @@ function(add_clang_tidy_custom_target)
             tidy-cxx
             COMMAND
                 ${RUN_CLANG_TIDY_EXE} -p ${CMAKE_BINARY_DIR}
-                -config-file=${CMAKE_SOURCE_DIR}/.clang-tidy -source-filter
+                -config-file=${PROJECT_SOURCE_DIR}/.clang-tidy -source-filter
                 "^(?!.*(_deps/)).*" -quiet -j ${CLANG_TIDY_JOBS}
-            WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+            WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
             COMMENT "Running clang-tidy on C++ files (${CLANG_TIDY_JOBS} parallel jobs)..."
             VERBATIM
         )

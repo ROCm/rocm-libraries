@@ -14,8 +14,8 @@
 #include "mocks/MockHandle.hpp"
 
 #include <gtest/gtest.h>
-#include <hipdnn_data_sdk/data_objects/engine_details_generated.h>
-#include <hipdnn_data_sdk/data_objects/knob_value_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/engine_details_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/knob_value_generated.h>
 
 #include <memory>
 
@@ -107,7 +107,7 @@ private:
     void serializeEngineDetails(int64_t engineId)
     {
         flatbuffers::FlatBufferBuilder builder;
-        hipdnn_data_sdk::data_objects::EngineDetailsBuilder engineDetailsBuilder(builder);
+        hipdnn_flatbuffers_sdk::data_objects::EngineDetailsBuilder engineDetailsBuilder(builder);
         engineDetailsBuilder.add_engine_id(engineId);
         builder.Finish(engineDetailsBuilder.Finish());
         _engineDetailsBuffer = builder.Release();
@@ -367,28 +367,28 @@ protected:
     {
         flatbuffers::FlatBufferBuilder builder;
 
-        std::vector<flatbuffers::Offset<hipdnn_data_sdk::data_objects::Knob>> knobOffsets;
+        std::vector<flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Knob>> knobOffsets;
         for(size_t i = 0; i < knobCount; ++i)
         {
             auto knobIdStr = builder.CreateString("test_knob_" + std::to_string(i));
             auto description = builder.CreateString("Test knob description " + std::to_string(i));
 
             // Create a default int value
-            auto defaultValue = hipdnn_data_sdk::data_objects::CreateIntValue(
+            auto defaultValue = hipdnn_flatbuffers_sdk::data_objects::CreateIntValue(
                 builder, static_cast<int64_t>(i * 10));
 
-            auto knob = hipdnn_data_sdk::data_objects::CreateKnob(
+            auto knob = hipdnn_flatbuffers_sdk::data_objects::CreateKnob(
                 builder,
                 knobIdStr,
                 description,
-                hipdnn_data_sdk::data_objects::KnobValue::IntValue,
+                hipdnn_flatbuffers_sdk::data_objects::KnobValue::IntValue,
                 defaultValue.Union());
             knobOffsets.push_back(knob);
         }
 
         auto knobsVector = builder.CreateVector(knobOffsets);
-        auto engineDetails
-            = hipdnn_data_sdk::data_objects::CreateEngineDetails(builder, engineId, knobsVector);
+        auto engineDetails = hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetails(
+            builder, engineId, knobsVector);
         builder.Finish(engineDetails);
 
         _engineDetailsWithKnobsBuffer = builder.Release();
@@ -511,9 +511,10 @@ TEST_F(TestEngineDescriptorWithKnobs, GetKnobInfoReturnsSerializedKnobs)
         // Verify we can parse the flatbuffer
         flatbuffers::Verifier verifier(static_cast<const uint8_t*>(knobData[i].ptr),
                                        knobData[i].size);
-        ASSERT_TRUE(verifier.VerifyBuffer<hipdnn_data_sdk::data_objects::Knob>());
+        ASSERT_TRUE(verifier.VerifyBuffer<hipdnn_flatbuffers_sdk::data_objects::Knob>());
 
-        auto knob = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::Knob>(knobData[i].ptr);
+        auto knob
+            = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::Knob>(knobData[i].ptr);
         ASSERT_EQ(knob->knob_id()->str(), "test_knob_" + std::to_string(i));
     }
 }

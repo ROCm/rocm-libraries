@@ -64,7 +64,7 @@ struct LayernormFpropSignatureKey
         auto scaleTensorAttr = tensorMap.at(nodeAttributes->scale_tensor_uid());
         scaleBiasDataType = scaleTensorAttr->data_type();
 
-        // Mean/inv_variance type: use mean if present, otherwise default to compute type
+        // Mean/inv_variance type: use mean if present, otherwise default to IO type (x type)
         if(nodeAttributes->mean_tensor_uid().has_value())
         {
             auto meanTensorAttr = tensorMap.at(nodeAttributes->mean_tensor_uid().value());
@@ -72,7 +72,7 @@ struct LayernormFpropSignatureKey
         }
         else
         {
-            meanInvVarianceDataType = computeDataType;
+            meanInvVarianceDataType = xDataType;
         }
     }
 

@@ -43,12 +43,12 @@
 #include "hipdnn_engine_plugin_execution_context.h"
 #include "hipdnn_engine_plugin_handle.h"
 #include "utils.h"
+#include "version.h"
 
 using namespace hipdnn_plugin_sdk;
 using namespace fusilli_plugin;
 
-// TODO(#2317): ensure single source of truth for plugin version
-static const char *fusilliPluginVersion = "0.0.1";
+static const char *fusilliPluginVersion = FUSILLI_PROVIDER_VERSION_STRING;
 
 // s_lastError is thread_local static so can't be initialized in the header file
 // as the header file is included in many context. Clear the string here.
@@ -512,8 +512,8 @@ hipdnnPluginStatus_t hipdnnEnginePluginExecuteOpGraph(
     FUSILLI_PLUGIN_ASSIGN_OR_RETURN(
         auto elementType,
         fusilliDataTypeToIreeHalDataType(tensorAttr->getDataType()));
-    size_t sizeBytes = iree_hal_element_dense_byte_count(elementType) *
-                       static_cast<size_t>(tensorAttr->getVolume());
+    size_t sizeBytes = iree_hal_element_packed_byte_count(
+        elementType, static_cast<size_t>(tensorAttr->getVolume()));
     std::vector<int64_t> dims = tensorAttr->getPhysicalDim();
     std::vector<iree_hal_dim_t> shape(dims.begin(), dims.end());
     FUSILLI_PLUGIN_ASSIGN_OR_RETURN(

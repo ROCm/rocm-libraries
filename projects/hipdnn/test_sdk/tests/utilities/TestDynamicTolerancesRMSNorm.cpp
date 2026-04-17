@@ -288,12 +288,9 @@ TEST(TestCalculateRMSNormFwdTolerance, DetectsFailure)
     const std::vector<int64_t> dims = {1, 1, 10, 10};
     const std::vector<int64_t> strides = {100, 100, 10, 1};
 
-    auto baseline = hipdnn_data_sdk::utilities::createTensor(
-        hipdnn_data_sdk::data_objects::DataType::FLOAT, dims, strides);
-    auto actualPassing = hipdnn_data_sdk::utilities::createTensor(
-        hipdnn_data_sdk::data_objects::DataType::FLOAT, dims, strides);
-    auto actualFailing = hipdnn_data_sdk::utilities::createTensor(
-        hipdnn_data_sdk::data_objects::DataType::FLOAT, dims, strides);
+    auto baseline = hipdnn_data_sdk::utilities::createTensor<float>(dims, strides);
+    auto actualPassing = hipdnn_data_sdk::utilities::createTensor<float>(dims, strides);
+    auto actualFailing = hipdnn_data_sdk::utilities::createTensor<float>(dims, strides);
 
     baseline->fillTensorWithValue(1.0f);
     actualPassing->fillTensorWithValue(1.000001f); // Small error (1e-6 < tol ~1.25e-5)
