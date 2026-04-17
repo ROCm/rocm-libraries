@@ -714,8 +714,13 @@ class CustomFactory(KernelComponentFactory):
 
 
 def get_fwd_blobs(
-    kernel_filter: Optional[str], receipt, optdim_list, mask_impl
+    kernel_filter: Optional[str], receipt, optdim_list, mask_impl,
+    targets: Optional[List[str]] = None
 ) -> Tuple[FmhaFwdApiPool, List[FmhaFwdKernel]]:
+    # gfx11 (wave32) is incompatible with VECTORIZED_LAYOUT for the current
+    # batch_prefill tile shapes (thread_buffer size mismatch in Gemm1).
+    # Skip VECTORIZED_LAYOUT when any gfx11 target is present.
+    has_gfx11 = targets is not None and any(t.startswith("gfx11") for t in targets)
     # TODO: we don't support tuning yet, so pick up one value for vlayout/pipeline/pad
     #       support this in future
 
@@ -756,6 +761,10 @@ def get_fwd_blobs(
                 # Generate kernels for both page_size=16 and page_size=1024
                 for page_size in SUPPORTED_PAGE_SIZE:
                     if page_size == 1 and pipeline.F_kv_memory_layout != "linear":
+                        continue
+                    # gfx11 (wave32) is not compatible with VECTORIZED_LAYOUT for
+                    # current tile shapes - skip to avoid Gemm1 thread_buffer mismatch.
+                    if has_gfx11 and pipeline.F_kv_memory_layout == "vectorized":
                         continue
                     # kv_blockscale requires page_size >= kN0 (tile.F_bn0)
                     # This ensures all tokens in a main loop iteration belong to the same page
@@ -845,7 +854,7 @@ def write_blobs(
     optdim_list,
     mask_impl,
 ) -> None:
-    api_pool, kernels = get_fwd_blobs(kernel_filter, receipt, optdim_list, mask_impl)
+    api_pool, kernels = get_fwd_blobs(kernel_filter, receipt, optdim_list, mask_impl, targets)
     for kernel in kernels:
         write_single_fwd_kernel(kernel, output_dir)
     write_fwd_api(api_pool, output_dir)
@@ -860,7 +869,7 @@ def list_blobs(
     mask_impl,
 ) -> None:
     with file_path.open("a") as f:
-        _, kernels = get_fwd_blobs(kernel_filter, receipt, optdim_list, mask_impl)
+        _, kernels = get_fwd_blobs(kernel_filter, receipt, optdim_list, mask_impl, targets)
         for kernel in kernels:
             f.write((file_path.parent / GEN_DIR / kernel.filename).as_posix() + "\n")
         f.write((file_path.parent / GEN_DIR / FMHA_FWD_API_FILENAME).as_posix() + "\n")
