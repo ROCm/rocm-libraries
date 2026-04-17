@@ -4,7 +4,7 @@
 #include <gtest/gtest.h>
 
 #include "engines/plans/layernorm/LayernormApplicabilityChecks.hpp"
-#include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 
@@ -13,8 +13,8 @@ using namespace hip_kernel_provider::layernorm;
 TEST(TestLayernormValidator, ValidFprop)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidLayernormFpropGraph();
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                              builder.GetSize());
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                                     builder.GetSize());
     const auto& node = graph.getNode(0);
     const auto& attr = *node.attributes_as_LayernormAttributes();
 
@@ -26,8 +26,8 @@ TEST(TestLayernormValidator, UnsupportedDim)
 {
     auto builder
         = hipdnn_test_sdk::utilities::createValidLayernormFpropGraph({12, 4, 1}, {1, 3, 4});
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                              builder.GetSize());
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                                     builder.GetSize());
     const auto& node = graph.getNode(0);
     const auto& attr = *node.attributes_as_LayernormAttributes();
 
@@ -39,17 +39,17 @@ TEST(TestLayernormValidator, UnsupportedDim)
 namespace
 {
 
-flatbuffers::FlatBufferBuilder
-    createInvalidTypeLayernormFpropGraph(hipdnn_data_sdk::data_objects::DataType xType,
-                                         hipdnn_data_sdk::data_objects::DataType yType,
-                                         hipdnn_data_sdk::data_objects::DataType scaleType,
-                                         hipdnn_data_sdk::data_objects::DataType biasType,
-                                         hipdnn_data_sdk::data_objects::DataType epsilonType,
-                                         hipdnn_data_sdk::data_objects::DataType meanType,
-                                         hipdnn_data_sdk::data_objects::DataType invVarianceType)
+flatbuffers::FlatBufferBuilder createInvalidTypeLayernormFpropGraph(
+    hipdnn_flatbuffers_sdk::data_objects::DataType xType,
+    hipdnn_flatbuffers_sdk::data_objects::DataType yType,
+    hipdnn_flatbuffers_sdk::data_objects::DataType scaleType,
+    hipdnn_flatbuffers_sdk::data_objects::DataType biasType,
+    hipdnn_flatbuffers_sdk::data_objects::DataType epsilonType,
+    hipdnn_flatbuffers_sdk::data_objects::DataType meanType,
+    hipdnn_flatbuffers_sdk::data_objects::DataType invVarianceType)
 {
     flatbuffers::FlatBufferBuilder builder;
-    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
+    std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>
         tensorAttributes;
 
     const std::vector<int64_t> ioStrides = {588, 196, 14, 1};
@@ -63,22 +63,22 @@ flatbuffers::FlatBufferBuilder
     std::vector<int64_t> statsStrides = hipdnn_data_sdk::utilities::generateStrides(statsDims);
 
     // Required tensors
-    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
         builder, 1, "x", xType, &ioStrides, &ioDims));
 
-    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
         builder, 2, "y", yType, &ioStrides, &ioDims));
 
-    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
         builder, 3, "scale", scaleType, &affineStrides, &affineDims));
 
-    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
         builder, 4, "bias", biasType, &affineStrides, &affineDims));
 
     // Epsilon (pass-by-value)
     const std::vector<int64_t> epsilonDims = {1};
-    const hipdnn_data_sdk::data_objects::Float32Value epsilonVal(1e-5f);
-    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+    const hipdnn_flatbuffers_sdk::data_objects::Float32Value epsilonVal(1e-5f);
+    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
         builder,
         5,
         "epsilon",
@@ -86,42 +86,42 @@ flatbuffers::FlatBufferBuilder
         &epsilonDims,
         &epsilonDims,
         false,
-        hipdnn_data_sdk::data_objects::TensorValue::Float32Value,
+        hipdnn_flatbuffers_sdk::data_objects::TensorValue::Float32Value,
         builder.CreateStruct(epsilonVal).Union()));
 
-    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
         builder, 6, "mean", meanType, &statsDims, &statsDims));
 
-    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
         builder, 7, "inv_variance", invVarianceType, &statsDims, &statsDims));
 
-    auto layernormAttributes
-        = hipdnn_data_sdk::data_objects::CreateLayernormAttributes(builder,
-                                                                   1, // x tensor uid
-                                                                   3, // scale tensor uid
-                                                                   4, // bias tensor uid
-                                                                   5, // epsilon tensor uid
-                                                                   2, // y tensor uid
-                                                                   0, // normalized dim count
-                                                                   6, // mean tensor uid
-                                                                   7 // inv variance tensor uid
-        );
+    auto layernormAttributes = hipdnn_flatbuffers_sdk::data_objects::CreateLayernormAttributes(
+        builder,
+        1, // x tensor uid
+        3, // scale tensor uid
+        4, // bias tensor uid
+        5, // epsilon tensor uid
+        2, // y tensor uid
+        0, // normalized dim count
+        6, // mean tensor uid
+        7 // inv variance tensor uid
+    );
 
-    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> nodes;
-    auto node = hipdnn_data_sdk::data_objects::CreateNodeDirect(
+    std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Node>> nodes;
+    auto node = hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
         builder,
         "layernorm",
-        hipdnn_data_sdk::data_objects::DataType::FLOAT,
-        hipdnn_data_sdk::data_objects::NodeAttributes::LayernormAttributes,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::LayernormAttributes,
         layernormAttributes.Union());
     nodes.push_back(node);
 
-    auto graphOffset = hipdnn_data_sdk::data_objects::CreateGraphDirect(
+    auto graphOffset = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(
         builder,
         "test",
-        hipdnn_data_sdk::data_objects::DataType::FLOAT,
-        hipdnn_data_sdk::data_objects::DataType::HALF,
-        hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
         &tensorAttributes,
         &nodes);
     builder.Finish(graphOffset);
@@ -131,17 +131,17 @@ flatbuffers::FlatBufferBuilder
 
 TEST(TestLayernormValidator, MismatchIOTypes)
 {
-    auto builder
-        = createInvalidTypeLayernormFpropGraph(hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                                               hipdnn_data_sdk::data_objects::DataType::HALF,
-                                               hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                                               hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                                               hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                                               hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                                               hipdnn_data_sdk::data_objects::DataType::FLOAT);
+    auto builder = createInvalidTypeLayernormFpropGraph(
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
 
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                              builder.GetSize());
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                                     builder.GetSize());
 
     const auto& node = graph.getNode(0);
     const auto& attr = *node.attributes_as_LayernormAttributes();
@@ -153,17 +153,17 @@ TEST(TestLayernormValidator, MismatchIOTypes)
 
 TEST(TestLayernormValidator, InvalidEpsilonType)
 {
-    auto builder
-        = createInvalidTypeLayernormFpropGraph(hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                                               hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                                               hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                                               hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                                               hipdnn_data_sdk::data_objects::DataType::HALF,
-                                               hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                                               hipdnn_data_sdk::data_objects::DataType::FLOAT);
+    auto builder = createInvalidTypeLayernormFpropGraph(
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
 
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                              builder.GetSize());
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                                     builder.GetSize());
 
     const auto& node = graph.getNode(0);
     const auto& attr = *node.attributes_as_LayernormAttributes();
@@ -194,88 +194,88 @@ flatbuffers::FlatBufferBuilder
 {
 
     flatbuffers::FlatBufferBuilder builder;
-    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
+    std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>
         tensorAttributes;
 
     // Required tensors
-    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
-        builder, 1, "x", hipdnn_data_sdk::data_objects::DataType::FLOAT, &xStrides, &xDims));
+    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+        builder, 1, "x", hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT, &xStrides, &xDims));
 
-    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
-        builder, 2, "y", hipdnn_data_sdk::data_objects::DataType::FLOAT, &yStrides, &yDims));
+    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+        builder, 2, "y", hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT, &yStrides, &yDims));
 
-    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
         builder,
         3,
         "scale",
-        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
         &scaleStrides,
         &scaleDims));
 
-    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
         builder,
         4,
         "bias",
-        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
         &biasStrides,
         &biasDims));
 
     // Epsilon (pass-by-value)
-    const hipdnn_data_sdk::data_objects::Float32Value epsilonVal(1e-5f);
-    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+    const hipdnn_flatbuffers_sdk::data_objects::Float32Value epsilonVal(1e-5f);
+    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
         builder,
         5,
         "epsilon",
-        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
         &epsilonStrides,
         &epsilonDims,
         false,
-        hipdnn_data_sdk::data_objects::TensorValue::Float32Value,
+        hipdnn_flatbuffers_sdk::data_objects::TensorValue::Float32Value,
         builder.CreateStruct(epsilonVal).Union()));
 
-    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
         builder,
         6,
         "mean",
-        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
         &meanStrides,
         &meanDims));
 
-    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
         builder,
         7,
         "inv_variance",
-        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
         &invVarianceStrides,
         &invVarianceDims));
 
-    auto layernormAttributes
-        = hipdnn_data_sdk::data_objects::CreateLayernormAttributes(builder,
-                                                                   1, // x tensor uid
-                                                                   3, // scale tensor uid
-                                                                   4, // bias tensor uid
-                                                                   5, // epsilon tensor uid
-                                                                   2, // y tensor uid
-                                                                   0, // normalized dim count
-                                                                   6, // mean tensor uid
-                                                                   7 // inv variance tensor uid
-        );
+    auto layernormAttributes = hipdnn_flatbuffers_sdk::data_objects::CreateLayernormAttributes(
+        builder,
+        1, // x tensor uid
+        3, // scale tensor uid
+        4, // bias tensor uid
+        5, // epsilon tensor uid
+        2, // y tensor uid
+        0, // normalized dim count
+        6, // mean tensor uid
+        7 // inv variance tensor uid
+    );
 
-    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> nodes;
-    auto node = hipdnn_data_sdk::data_objects::CreateNodeDirect(
+    std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Node>> nodes;
+    auto node = hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
         builder,
         "layernorm",
-        hipdnn_data_sdk::data_objects::DataType::FLOAT,
-        hipdnn_data_sdk::data_objects::NodeAttributes::LayernormAttributes,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::LayernormAttributes,
         layernormAttributes.Union());
     nodes.push_back(node);
 
-    auto graphOffset = hipdnn_data_sdk::data_objects::CreateGraphDirect(
+    auto graphOffset = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(
         builder,
         "test",
-        hipdnn_data_sdk::data_objects::DataType::FLOAT,
-        hipdnn_data_sdk::data_objects::DataType::HALF,
-        hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
         &tensorAttributes,
         &nodes);
     builder.Finish(graphOffset);
@@ -320,8 +320,8 @@ TEST(TestLayernormValidator, MismatchIOShapes)
                                                          statsDims,
                                                          statsStrides);
     // NOLINTEND(readability-suspicious-call-argument)
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                              builder.GetSize());
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                                     builder.GetSize());
 
     const auto& node = graph.getNode(0);
     const auto& attr = *node.attributes_as_LayernormAttributes();
@@ -365,8 +365,8 @@ TEST(TestLayernormValidator, MismatchAffineShapes)
                                                          statsDims,
                                                          statsStrides);
     // NOLINTEND(readability-suspicious-call-argument)
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                              builder.GetSize());
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                                     builder.GetSize());
 
     const auto& node = graph.getNode(0);
     const auto& attr = *node.attributes_as_LayernormAttributes();
@@ -410,8 +410,8 @@ TEST(TestLayernormValidator, MismatchStatsShapes)
                                                          invVarDims,
                                                          invVarStrides);
     // NOLINTEND(readability-suspicious-call-argument)
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                              builder.GetSize());
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                                     builder.GetSize());
 
     const auto& node = graph.getNode(0);
     const auto& attr = *node.attributes_as_LayernormAttributes();
@@ -451,8 +451,8 @@ TEST(TestLayernormValidator, InvalidNormalization)
                                                          statsDims,
                                                          statsStrides);
     // NOLINTEND(readability-suspicious-call-argument)
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                              builder.GetSize());
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                                     builder.GetSize());
 
     const auto& node = graph.getNode(0);
     const auto& attr = *node.attributes_as_LayernormAttributes();
@@ -490,7 +490,7 @@ TEST(TestBatchnormValidator, MismatchAffineShapes)
                                                          dims,
                                                          strides);
 
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                               builder.GetSize());
 
     const auto& node = graph.getNode(0);
@@ -532,7 +532,7 @@ TEST(TestBatchnormValidator, MismatchStatShapes)
                                                          dims,
                                                          strides);
 
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                               builder.GetSize());
 
     const auto& node = graph.getNode(0);

@@ -200,21 +200,21 @@ bool BatchnormPlanBuilder::isApplicable(
 
         try
         {
+            BatchnormValidator validator(opGraph.getTensorMap());
             switch(node.attributes_type())
             {
             case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::BatchnormAttributes:
-                checkBatchnormFwdTrainingTensorConfigSupported(
-                    *node.attributes_as_BatchnormAttributes(), opGraph.getTensorMap());
+                validator.checkFwdTrainingTensorConfigSupported(
+                    *node.attributes_as_BatchnormAttributes());
                 break;
             case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes:
-                checkBatchnormInferenceTensorConfigSupported(
-                    *node.attributes_as_BatchnormInferenceAttributes(), opGraph.getTensorMap());
+                validator.checkInferenceTensorConfigSupported(
+                    *node.attributes_as_BatchnormInferenceAttributes());
                 break;
             case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::
                 BatchnormInferenceAttributesVarianceExt:
-                checkBatchnormInferenceVarianceExtTensorConfigSupported(
-                    *node.attributes_as_BatchnormInferenceAttributesVarianceExt(),
-                    opGraph.getTensorMap());
+                validator.checkInferenceVarianceExtTensorConfigSupported(
+                    *node.attributes_as_BatchnormInferenceAttributesVarianceExt());
                 break;
             default:
                 throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
@@ -259,6 +259,7 @@ bool BatchnormPlanBuilder::isApplicable(
             return false;
         }
 
+        BatchnormValidator validator(opGraph.getTensorMap());
         if(isFwdInferenceFirst)
         {
             const auto& bnInfAttr = node0.attributesAs<
@@ -272,8 +273,7 @@ bool BatchnormPlanBuilder::isApplicable(
 
             try
             {
-                checkBatchnormInferenceActivationTensorConfigSupported(
-                    bnInfAttr, actAttr, opGraph.getTensorMap());
+                validator.checkInferenceActivationTensorConfigSupported(bnInfAttr, actAttr);
             }
             catch(const std::exception& e)
             {
@@ -296,8 +296,8 @@ bool BatchnormPlanBuilder::isApplicable(
 
             try
             {
-                checkBatchnormInferenceVarianceExtActivationTensorConfigSupported(
-                    bnInfAttr, actAttr, opGraph.getTensorMap());
+                validator.checkInferenceVarianceExtActivationTensorConfigSupported(bnInfAttr,
+                                                                                   actAttr);
             }
             catch(const std::exception& e)
             {

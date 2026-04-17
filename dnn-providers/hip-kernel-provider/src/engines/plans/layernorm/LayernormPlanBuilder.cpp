@@ -58,11 +58,11 @@ bool LayernormPlanBuilder::isApplicable(
 
         try
         {
+            LayernormValidator validator(opGraph.getTensorMap());
             switch(node.attributes_type())
             {
             case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::LayernormAttributes:
-                checkLayernormTensorConfigSupported(*node.attributes_as_LayernormAttributes(),
-                                                    opGraph.getTensorMap());
+                validator.checkTensorConfigSupported(*node.attributes_as_LayernormAttributes());
                 break;
             default:
                 throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
