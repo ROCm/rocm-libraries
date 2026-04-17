@@ -383,9 +383,6 @@ struct GemmPipelineAgBgCrCompAsyncEightWavesPolicy
 struct GemmPipelineAgBgCrCompAsyncEightWavesPolicy
     : public UniversalGemmBasePolicy<GemmPipelineAgBgCrCompAsyncEightWavesPolicy>
 {
-    using Base = UniversalGemmBasePolicy<GemmPipelineAgBgCrCompAsyncEightWavesPolicy>;
-    using Base::is_a_load_tr;
-    using Base::is_b_load_tr;
 #define FORWARD_METHOD_(method)                                                      \
     template <typename Problem, typename... Args>                                    \
     CK_TILE_HOST_DEVICE static constexpr auto method(Args&&... args)                 \

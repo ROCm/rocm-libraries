@@ -258,9 +258,10 @@ struct UniversalWeightPreshufflePipelineAgBgCrPolicy
         using WarpTile   = typename Problem::BlockGemmShape::WarpTile;
 
         // Use ComputeDataType to detect tf32 mode for warp gemm selection
-        using ComputeDataType = remove_cvref_t<typename Problem::ComputeDataType>;
-        using ADataType       = remove_cvref_t<typename Problem::ADataType>;
-        using BDataType       = remove_cvref_t<typename Problem::BDataType>;
+        using AComputeDataType = remove_cvref_t<typename Problem::AComputeDataType>;
+        using BComputeDataType = remove_cvref_t<typename Problem::BComputeDataType>;
+        using ADataType        = remove_cvref_t<typename Problem::ADataType>;
+        using BDataType        = remove_cvref_t<typename Problem::BDataType>;
 
         // Determine compute types to use
         // This logic defaults to A/B DataType, but if one of them is packed falls back to the other

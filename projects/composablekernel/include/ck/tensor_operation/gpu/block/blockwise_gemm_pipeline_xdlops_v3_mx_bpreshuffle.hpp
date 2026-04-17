@@ -535,25 +535,23 @@ struct BlockwiseGemmXdlops_pipeline_v3_mx_bprehuffle<BlockGemmPipelineScheduler:
         block_sync_lds();
 #endif
 
-        static_for<0, LocalPrefetchStages, 1>{}([&](auto m0) {
-            static_for<0, KRepeat, 1>{}([&](auto k) {
-                constexpr auto k_step =
-                    k * xdlops_gemm.KPerXdlops * KPack / xdlops_gemm.K1PerXdlops;
-                static_for<0, xdlops_gemm.K1PerXdlops / (APackedSize * KThreadChunk), 1>{}(
-                    [&](auto chunk) {
-                        constexpr auto a_k_step_chunk =
-                            k_step + chunk * KThreadChunk * xdlops_gemm.mfma_instr.num_input_blks;
-                        a_thread_copy_.Run(
-                            a_block_desc_m0_m1_m2_m3_k,
-                            make_tuple(
-                                I0, I0, Number<m0 % MXdlPack>{}, I0, Number<a_k_step_chunk>{}),
-                            a_block_bufs(I0),
-                            a_thread_desc_,
-                            make_tuple(
-                                I0, I0, Number<m0 % MXdlPack>{}, k, Number<chunk * KThreadChunk>{}),
-                            a_thread_buf);
-                    });
-            });
+        static_ford<Sequence<LocalPrefetchStages, KRepeat>>{}([&](auto mk) {
+            constexpr auto m0     = Number<mk[Number<0>{}]>{};
+            constexpr auto k      = Number<mk[Number<1>{}]>{};
+            constexpr auto k_step = k * xdlops_gemm.KPerXdlops * KPack / xdlops_gemm.K1PerXdlops;
+            static_for<0, xdlops_gemm.K1PerXdlops / (APackedSize * KThreadChunk), 1>{}(
+                [&](auto chunk) {
+                    constexpr auto a_k_step_chunk =
+                        k_step + chunk * KThreadChunk * xdlops_gemm.mfma_instr.num_input_blks;
+                    a_thread_copy_.Run(
+                        a_block_desc_m0_m1_m2_m3_k,
+                        make_tuple(I0, I0, Number<m0 % MXdlPack>{}, I0, Number<a_k_step_chunk>{}),
+                        a_block_bufs(I0),
+                        a_thread_desc_,
+                        make_tuple(
+                            I0, I0, Number<m0 % MXdlPack>{}, k, Number<chunk * KThreadChunk>{}),
+                        a_thread_buf);
+                });
         });
 
         // Global prefetch 2

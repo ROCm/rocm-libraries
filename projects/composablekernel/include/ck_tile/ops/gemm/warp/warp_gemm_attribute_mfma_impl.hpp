@@ -228,11 +228,9 @@ struct WarpGemmAttributeMfmaImplF32F32F32M32N32K16Tf32Gfx950
     static constexpr index_t kCM1PerLane = 4;
 
     // c_vec += a_vec * b_vec
-    template <bool post_nop_ = false>
-    CK_TILE_DEVICE void operator()(CVecType& c_vec,
-                                   const AVecType& a_vec,
-                                   const BVecType& b_vec,
-                                   bool_constant<post_nop_> = {}) const
+    template <typename... Params>
+    CK_TILE_DEVICE void
+    operator()(CVecType& c_vec, const AVecType& a_vec, const BVecType& b_vec) const
     {
 #if defined(__gfx950__)
         // Convert float to bf16 pairs using packed instructions
@@ -293,11 +291,9 @@ struct WarpGemmAttributeMfmaImplF32F32F32M16N16K32Tf32Gfx950
     static constexpr index_t kCM1PerLane = 4;
 
     // c_vec += a_vec * b_vec
-    template <bool post_nop_ = false>
-    CK_TILE_DEVICE void operator()(CVecType& c_vec,
-                                   const AVecType& a_vec,
-                                   const BVecType& b_vec,
-                                   bool_constant<post_nop_> = {}) const
+    template <typename... Params>
+    CK_TILE_DEVICE void
+    operator()(CVecType& c_vec, const AVecType& a_vec, const BVecType& b_vec) const
     {
 #if defined(__gfx950__)
         // Convert float to bf16 pairs using packed instructions

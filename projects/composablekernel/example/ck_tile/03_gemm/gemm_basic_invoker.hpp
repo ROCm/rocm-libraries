@@ -53,8 +53,8 @@ struct BasicInvoker
         constexpr ck_tile::index_t M_Warp_Tile = 16;
         constexpr ck_tile::index_t N_Warp_Tile = 16;
         constexpr ck_tile::index_t K_Warp_Tile =
-            ck_tile::get_k_warp_tile<ADataType, M_Warp_Tile, true>();
-        ;
+            ck_tile::get_k_warp_tile<ADataType_, M_Warp_Tile, true>();
+        ck_tile::ignore = is_tf32_compute;
 #else
         // gfx950: fp32 uses 16x16x16 tile (native MFMA)
         //         tf32 uses 32x32x16 tile (3x bf16 32x32x16 MFMA emulation)
