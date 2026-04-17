@@ -703,6 +703,51 @@ TYPED_TEST(MathFloatTypes, Max)
     EXPECT_EQ(max(b, a), b);
 }
 
+TYPED_TEST(MathFloatTypes, MaxNegative)
+{
+    using T = TypeParam;
+
+    const T a(-1.0f);
+    const T b(-2.0f);
+    EXPECT_EQ(max(a, b), a);
+    EXPECT_EQ(max(b, a), a);
+}
+
+TYPED_TEST(MathFloatTypes, MaxMixed)
+{
+    using T = TypeParam;
+
+    const T neg(-1.0f);
+    const T pos(2.0f);
+    EXPECT_EQ(max(neg, pos), pos);
+    EXPECT_EQ(max(pos, neg), pos);
+}
+
+TYPED_TEST(MathFloatTypes, MaxEqual)
+{
+    using T = TypeParam;
+
+    const T a(2.0f);
+    EXPECT_EQ(max(a, a), a);
+}
+
+TYPED_TEST(MathFloatTypes, MaxWithInfinity)
+{
+    using T = TypeParam;
+    using Traits = PortableTypeTraits<T>;
+
+    const T a(1.0f);
+    const T inf = Traits::fromBits(Traits::INF_BITS);
+    const T negInf = Traits::fromBits(Traits::NEG_INF_BITS);
+
+    EXPECT_EQ(max(a, inf), inf);
+    EXPECT_EQ(max(inf, a), inf);
+    EXPECT_EQ(max(a, negInf), a);
+    EXPECT_EQ(max(negInf, a), a);
+    EXPECT_EQ(max(inf, negInf), inf);
+    EXPECT_EQ(max(negInf, inf), inf);
+}
+
 TYPED_TEST(MathFloatTypes, Fmax)
 {
     using T = TypeParam;
@@ -711,6 +756,51 @@ TYPED_TEST(MathFloatTypes, Fmax)
     const T b(2.0f);
     EXPECT_EQ(fmax(a, b), b);
     EXPECT_EQ(fmax(b, a), b);
+}
+
+TYPED_TEST(MathFloatTypes, FmaxNegative)
+{
+    using T = TypeParam;
+
+    const T a(-1.0f);
+    const T b(-2.0f);
+    EXPECT_EQ(fmax(a, b), a);
+    EXPECT_EQ(fmax(b, a), a);
+}
+
+TYPED_TEST(MathFloatTypes, FmaxMixed)
+{
+    using T = TypeParam;
+
+    const T neg(-1.0f);
+    const T pos(2.0f);
+    EXPECT_EQ(fmax(neg, pos), pos);
+    EXPECT_EQ(fmax(pos, neg), pos);
+}
+
+TYPED_TEST(MathFloatTypes, FmaxEqual)
+{
+    using T = TypeParam;
+
+    const T a(2.0f);
+    EXPECT_EQ(fmax(a, a), a);
+}
+
+TYPED_TEST(MathFloatTypes, FmaxWithInfinity)
+{
+    using T = TypeParam;
+    using Traits = PortableTypeTraits<T>;
+
+    const T a(1.0f);
+    const T inf = Traits::fromBits(Traits::INF_BITS);
+    const T negInf = Traits::fromBits(Traits::NEG_INF_BITS);
+
+    EXPECT_EQ(fmax(a, inf), inf);
+    EXPECT_EQ(fmax(inf, a), inf);
+    EXPECT_EQ(fmax(a, negInf), a);
+    EXPECT_EQ(fmax(negInf, a), a);
+    EXPECT_EQ(fmax(inf, negInf), inf);
+    EXPECT_EQ(fmax(negInf, inf), inf);
 }
 
 TYPED_TEST(MathFloatTypes, FmaxWithNaN)
@@ -735,6 +825,51 @@ TYPED_TEST(MathFloatTypes, Min)
     EXPECT_EQ(min(b, a), a);
 }
 
+TYPED_TEST(MathFloatTypes, MinNegative)
+{
+    using T = TypeParam;
+
+    const T a(-1.0f);
+    const T b(-2.0f);
+    EXPECT_EQ(min(a, b), b);
+    EXPECT_EQ(min(b, a), b);
+}
+
+TYPED_TEST(MathFloatTypes, MinMixed)
+{
+    using T = TypeParam;
+
+    const T neg(-1.0f);
+    const T pos(2.0f);
+    EXPECT_EQ(min(neg, pos), neg);
+    EXPECT_EQ(min(pos, neg), neg);
+}
+
+TYPED_TEST(MathFloatTypes, MinEqual)
+{
+    using T = TypeParam;
+
+    const T a(2.0f);
+    EXPECT_EQ(min(a, a), a);
+}
+
+TYPED_TEST(MathFloatTypes, MinWithInfinity)
+{
+    using T = TypeParam;
+    using Traits = PortableTypeTraits<T>;
+
+    const T a(1.0f);
+    const T inf = Traits::fromBits(Traits::INF_BITS);
+    const T negInf = Traits::fromBits(Traits::NEG_INF_BITS);
+
+    EXPECT_EQ(min(a, inf), a);
+    EXPECT_EQ(min(inf, a), a);
+    EXPECT_EQ(min(a, negInf), negInf);
+    EXPECT_EQ(min(negInf, a), negInf);
+    EXPECT_EQ(min(inf, negInf), negInf);
+    EXPECT_EQ(min(negInf, inf), negInf);
+}
+
 TYPED_TEST(MathFloatTypes, Fmin)
 {
     using T = TypeParam;
@@ -743,6 +878,51 @@ TYPED_TEST(MathFloatTypes, Fmin)
     const T b(2.0f);
     EXPECT_EQ(fmin(a, b), a);
     EXPECT_EQ(fmin(b, a), a);
+}
+
+TYPED_TEST(MathFloatTypes, FminNegative)
+{
+    using T = TypeParam;
+
+    const T a(-1.0f);
+    const T b(-2.0f);
+    EXPECT_EQ(fmin(a, b), b);
+    EXPECT_EQ(fmin(b, a), b);
+}
+
+TYPED_TEST(MathFloatTypes, FminMixed)
+{
+    using T = TypeParam;
+
+    const T neg(-1.0f);
+    const T pos(2.0f);
+    EXPECT_EQ(fmin(neg, pos), neg);
+    EXPECT_EQ(fmin(pos, neg), neg);
+}
+
+TYPED_TEST(MathFloatTypes, FminEqual)
+{
+    using T = TypeParam;
+
+    const T a(2.0f);
+    EXPECT_EQ(fmin(a, a), a);
+}
+
+TYPED_TEST(MathFloatTypes, FminWithInfinity)
+{
+    using T = TypeParam;
+    using Traits = PortableTypeTraits<T>;
+
+    const T a(1.0f);
+    const T inf = Traits::fromBits(Traits::INF_BITS);
+    const T negInf = Traits::fromBits(Traits::NEG_INF_BITS);
+
+    EXPECT_EQ(fmin(a, inf), a);
+    EXPECT_EQ(fmin(inf, a), a);
+    EXPECT_EQ(fmin(a, negInf), negInf);
+    EXPECT_EQ(fmin(negInf, a), negInf);
+    EXPECT_EQ(fmin(inf, negInf), negInf);
+    EXPECT_EQ(fmin(negInf, inf), negInf);
 }
 
 TYPED_TEST(MathFloatTypes, FminWithNaN)
@@ -755,6 +935,62 @@ TYPED_TEST(MathFloatTypes, FminWithNaN)
     EXPECT_EQ(fmin(a, nan), a);
     EXPECT_EQ(fmin(nan, a), a);
     EXPECT_TRUE(isnan(fmin(nan, nan)));
+}
+
+// Zero Sign Tests (+0/-0)
+// Documents current implementation behavior. The C++ standard does not require
+// std::fmin/std::fmax to be sensitive to the sign of zero, and std::min/std::max
+// have no special +0/-0 handling specified.
+TYPED_TEST(MathFloatTypes, MaxZeroSigns)
+{
+    using T = TypeParam;
+    using Traits = PortableTypeTraits<T>;
+
+    const T posZero = Traits::fromBits(Traits::ZERO_BITS);
+    const T negZero = Traits::fromBits(Traits::NEG_ZERO_BITS);
+
+    // max uses `a < b ? b : a`, so returns first arg when equal
+    EXPECT_EQ(max(posZero, negZero), posZero);
+    EXPECT_EQ(max(negZero, posZero), negZero);
+}
+
+TYPED_TEST(MathFloatTypes, MinZeroSigns)
+{
+    using T = TypeParam;
+    using Traits = PortableTypeTraits<T>;
+
+    const T posZero = Traits::fromBits(Traits::ZERO_BITS);
+    const T negZero = Traits::fromBits(Traits::NEG_ZERO_BITS);
+
+    // min uses `b < a ? b : a`, so returns second arg when equal
+    EXPECT_EQ(min(posZero, negZero), negZero);
+    EXPECT_EQ(min(negZero, posZero), posZero);
+}
+
+TYPED_TEST(MathFloatTypes, FmaxZeroSigns)
+{
+    using T = TypeParam;
+    using Traits = PortableTypeTraits<T>;
+
+    const T posZero = Traits::fromBits(Traits::ZERO_BITS);
+    const T negZero = Traits::fromBits(Traits::NEG_ZERO_BITS);
+
+    // fmax uses `a > b ? a : b`, so returns second arg when equal
+    EXPECT_EQ(fmax(posZero, negZero), negZero);
+    EXPECT_EQ(fmax(negZero, posZero), posZero);
+}
+
+TYPED_TEST(MathFloatTypes, FminZeroSigns)
+{
+    using T = TypeParam;
+    using Traits = PortableTypeTraits<T>;
+
+    const T posZero = Traits::fromBits(Traits::ZERO_BITS);
+    const T negZero = Traits::fromBits(Traits::NEG_ZERO_BITS);
+
+    // fmin uses `a < b ? a : b`, so returns second arg when equal
+    EXPECT_EQ(fmin(posZero, negZero), negZero);
+    EXPECT_EQ(fmin(negZero, posZero), posZero);
 }
 
 TYPED_TEST(MathFloatTypes, Sqrt)
