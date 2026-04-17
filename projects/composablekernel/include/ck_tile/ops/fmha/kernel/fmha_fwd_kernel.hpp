@@ -40,7 +40,7 @@ struct FmhaFwdKernel
     static constexpr ck_tile::index_t kBlockSize = FmhaPipeline::kBlockSize;
 
     template <typename T>
-    using has_enable_tail_skip = decltype(T::kEnableTailSkip);
+    using has_head_dim_tail_args = decltype(T::kUseHeadDimTailArgs);
 
     static constexpr ck_tile::index_t kBlockPerCu = FmhaPipeline::kBlockPerCu;
     static_assert(kBlockPerCu > 0);
@@ -1894,20 +1894,20 @@ struct FmhaFwdKernel
             }();
 
             BlockIndices block_indices{i_batch, i_nhead, i_nhead_k};
-            constexpr bool kPassTailReqs = [] {
-                if constexpr(ck_tile::is_detected<has_enable_tail_skip, FmhaPipeline>::value)
-                    return static_cast<bool>(FmhaPipeline::kEnableTailSkip);
+            constexpr bool kPassHeadDimTailArgs = [] {
+                if constexpr(ck_tile::is_detected<has_head_dim_tail_args, FmhaPipeline>::value)
+                    return static_cast<bool>(FmhaPipeline::kUseHeadDimTailArgs);
                 else
                     return false;
             }();
             auto invoke_fmha_pipeline = [&](auto&&... args) -> decltype(auto) {
-                if constexpr(kPassTailReqs)
+                if constexpr(kPassHeadDimTailArgs)
                 {
                     const ck_tile::index_t valid_k0_loops =
                         ck_tile::integer_divide_ceil(kargs.hdim_q, FmhaPipeline::kK0);
-                    const ck_tile::index_t valid_last_k0_columns =
+                    const ck_tile::index_t valid_last_k0_length =
                         kargs.hdim_q - (valid_k0_loops - 1) * FmhaPipeline::kK0;
-                    const ck_tile::index_t valid_n1_columns = [&]() {
+                    const ck_tile::index_t valid_n1_length = [&]() {
                         const ck_tile::index_t remaining_n1 = kargs.hdim_v - i_n1;
                         return ck_tile::min(remaining_n1,
                                             static_cast<ck_tile::index_t>(FmhaPipeline::kN1));
@@ -1915,8 +1915,8 @@ struct FmhaFwdKernel
                     return FmhaPipeline{}(static_cast<decltype(args)&&>(args)...,
                                           sink_value,
                                           valid_k0_loops,
-                                          valid_last_k0_columns,
-                                          valid_n1_columns);
+                                          valid_last_k0_length,
+                                          valid_n1_length);
                 }
                 else
                 {

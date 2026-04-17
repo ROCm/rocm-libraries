@@ -21,7 +21,8 @@ struct BlockGemmARegBSmemCRegV2
     using CDataType      = remove_cvref_t<typename Problem::CDataType>;
     using BlockGemmShape = remove_cvref_t<typename Problem::BlockGemmShape>;
 
-    static constexpr index_t kBlockSize = Problem::kBlockSize;
+    static constexpr index_t kBlockSize     = Problem::kBlockSize;
+    static constexpr bool kSupportsPartialK = true;
 
     template <bool UsePartialN,
               typename CBlockTensor,
@@ -171,21 +172,9 @@ struct BlockGemmARegBSmemCRegV2
         // hot loop:
         if constexpr(UsePartialN)
         {
-            const index_t clamped_valid_n_iters = [&]() {
-                if(valid_n_iters < 1)
-                {
-                    return index_t{1};
-                }
-                if(valid_n_iters > NIterPerWarp)
-                {
-                    return static_cast<index_t>(NIterPerWarp);
-                }
-                return valid_n_iters;
-            }();
-
             static_for<0, KIterPerWarp, 1>{}([&](auto kIter) {
                 static_for<0, NIterPerWarp, 1>{}([&](auto nIter) {
-                    if(static_cast<index_t>(nIter.value) < clamped_valid_n_iters)
+                    if(static_cast<index_t>(nIter.value) < valid_n_iters)
                     {
                         run_n_iter(kIter, nIter);
                     }
@@ -200,7 +189,7 @@ struct BlockGemmARegBSmemCRegV2
         }
     }
 
-    // C += A * B
+    // C += A * B (executing only the first valid_n_iters N sub-iterations)
     template <typename CBlockTensor, typename ABlockTensorTmp, typename BBlockWindowTmp>
     CK_TILE_DEVICE void operator()(CBlockTensor& c_block_tensor,
                                    const ABlockTensorTmp& a_block_tensor_tmp,
@@ -276,7 +265,7 @@ struct BlockGemmARegBSmemCRegV2
         return c_block_tensor;
     }
 
-    // C = A * B
+    // C = A * B (executing only the first valid_n_iters N sub-iterations)
     template <typename ABlockTensorTmp, typename BBlockWindowTmp>
     CK_TILE_DEVICE auto operator()(const ABlockTensorTmp& a_block_tensor_tmp,
                                    const BBlockWindowTmp& b_block_window_tmp,

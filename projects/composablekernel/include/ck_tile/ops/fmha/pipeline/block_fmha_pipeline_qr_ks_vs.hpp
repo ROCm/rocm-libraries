@@ -39,6 +39,9 @@ struct BlockFmhaPipelineQRKSVS
     using AttentionVariant      = remove_cvref_t<typename Problem::AttentionVariant>;
     using FmhaMask              = remove_cvref_t<typename Problem::FmhaMask>;
 
+    template <typename T>
+    using has_partial_k_support = decltype(T::kSupportsPartialK);
+
     using BlockFmhaShape             = remove_cvref_t<typename Problem::BlockFmhaShape>;
     using VLayout                    = remove_cvref_t<typename BlockFmhaShape::VLayout>;
     static constexpr bool kQLoadOnce = true; // if q_tile load whole block length (hdim) at once
@@ -68,7 +71,7 @@ struct BlockFmhaPipelineQRKSVS
     static constexpr auto QScaleEnum          = Problem::QScaleEnum;
     static constexpr bool kHasSink            = Problem::kHasSink;
     static constexpr bool kPaddedVecLoadStore = PaddedVecLoadStore_;
-    static constexpr bool kEnableTailSkip     = kPadHeadDimQ || kPadHeadDimV;
+    static constexpr bool kUseHeadDimTailArgs = kPadHeadDimQ || kPadHeadDimV;
 
     static constexpr ck_tile::index_t kQKScaleGranularity = Problem::kQKScaleGranularity;
     static constexpr ck_tile::index_t kVScaleGranularity  = Problem::kVScaleGranularity;
@@ -86,6 +89,8 @@ struct BlockFmhaPipelineQRKSVS
                   (!CK_TILE_FMHA_FWD_FAST_EXP2 && !kHasLogitsSoftCap));
     static_assert(!kPaddedVecLoadStore || (kPadHeadDimQ && kPadHeadDimV),
                   "padded vector load/store fast path only applies to padded head-dim kernels");
+    static_assert(!(kPadHeadDimV && QScaleEnum == BlockAttentionQuantScaleEnum::MX),
+                  "MX with padded hdim_v is not supported yet");
 
     // last dimension vector length used to create tensor view(and decide buffer_load vector length)
     // ... together with tensor distribution. tensor dist should able to overwrite this
@@ -206,8 +211,8 @@ struct BlockFmhaPipelineQRKSVS
                    v_scale_dram_block_window_tmp, // N1*(K1/kVScaleGranularity) tile
                const float sink_v,
                const index_t valid_k0_loops,
-               const index_t valid_last_k0_columns,
-               const index_t valid_n1_columns) const
+               const index_t valid_last_k0_length,
+               const index_t valid_n1_length) const
     {
         static_assert(
             std::is_same_v<QDataType, remove_cvref_t<typename QDramBlockWindowTmp::DataType>> &&
@@ -265,20 +270,23 @@ struct BlockFmhaPipelineQRKSVS
             v_lds, Policy::template MakeVLdsBlockDescriptor<Problem>().get_lengths(), {0, 0});
 
         // Block GEMM
-        constexpr auto gemm_0       = Policy::template GetQKBlockGemm<Problem>();
-        constexpr auto gemm_1       = Policy::template GetKVBlockGemm<Problem>();
-        using BlockGemm0            = remove_cvref_t<decltype(gemm_0)>;
-        constexpr bool kIsQKGemm0V2 = std::is_same_v<
-            BlockGemm0,
-            BlockGemmARegBSmemCRegV2<typename BlockGemm0::Problem, typename BlockGemm0::Policy>>;
+        constexpr auto gemm_0                      = Policy::template GetQKBlockGemm<Problem>();
+        constexpr auto gemm_1                      = Policy::template GetKVBlockGemm<Problem>();
+        using BlockGemm0                           = remove_cvref_t<decltype(gemm_0)>;
+        constexpr bool kBlockGemm0SupportsPartialK = [] {
+            if constexpr(ck_tile::is_detected<has_partial_k_support, BlockGemm0>::value)
+                return static_cast<bool>(BlockGemm0::kSupportsPartialK);
+            else
+                return false;
+        }();
 
         constexpr auto gemm_0_config =
             BlockGemm0::Policy::template GetWarpGemmMWarpNWarp<Problem>();
         using Gemm0WarpGemm           = remove_cvref_t<decltype(gemm_0_config.template at<0>())>;
         constexpr index_t kGemm0WarpK = Gemm0WarpGemm::kK;
         constexpr index_t kGemm0KItersPerBlock = kK0 / kGemm0WarpK;
-        constexpr bool kCanUsePartialGemm0Tail =
-            kPadHeadDimQ && kIsQKGemm0V2 && (kGemm0KItersPerBlock > 1);
+        constexpr bool kUsePartialKForTail =
+            kPadHeadDimQ && kBlockGemm0SupportsPartialK && (kGemm0KItersPerBlock > 1);
 
         auto q_dram_window = make_tile_window(q_dram_block_window_tmp.get_bottom_tensor_view(),
                                               q_dram_block_window_tmp.get_window_lengths(),
@@ -441,50 +449,23 @@ struct BlockFmhaPipelineQRKSVS
         }();
 
         // prefetch K tile
-        index_t i_total_loops                = 0;
-        constexpr index_t k0_loops           = kQKHeaddim / kK0;
-        constexpr index_t k1_loops           = kN0 / kK1;
-        const index_t clamped_valid_k0_loops = [&]() {
-            if constexpr(!kPadHeadDimQ)
+        index_t i_total_loops      = 0;
+        constexpr index_t k0_loops = kQKHeaddim / kK0;
+        constexpr index_t k1_loops = kN0 / kK1;
+        // Number of k0 iterations prefetched ahead of the current compute iteration.
+        // The skip decision must be made this many iterations before the last k0 loop.
+        constexpr index_t kK0PrefetchDepth = 2;
+        const index_t tail_k_iters         = [&]() {
+            if constexpr(kUsePartialKForTail)
             {
-                return static_cast<index_t>(k0_loops);
-            }
-            if(valid_k0_loops < 1)
-            {
-                return index_t{1};
-            }
-            if(valid_k0_loops > k0_loops)
-            {
-                return static_cast<index_t>(k0_loops);
-            }
-            return valid_k0_loops;
-        }();
-        const index_t clamped_valid_n1_columns = [&]() {
-            if constexpr(!kPadHeadDimV)
-            {
-                return static_cast<index_t>(kN1);
-            }
-            if(valid_n1_columns < 1)
-            {
-                return index_t{1};
-            }
-            if(valid_n1_columns > kN1)
-            {
-                return static_cast<index_t>(kN1);
-            }
-            return valid_n1_columns;
-        }();
-        const index_t partial_gemm_0_k_iters = [&]() {
-            if constexpr(kCanUsePartialGemm0Tail)
-            {
-                return ck_tile::integer_divide_ceil(valid_last_k0_columns, kGemm0WarpK);
+                return ck_tile::integer_divide_ceil(valid_last_k0_length, kGemm0WarpK);
             }
             return static_cast<index_t>(kGemm0KItersPerBlock);
         }();
         const bool skip_last_k0_loop = [&]() {
             if constexpr(kPadHeadDimQ)
             {
-                return clamped_valid_k0_loops == (k0_loops - 1);
+                return valid_k0_loops == (k0_loops - 1);
             }
             return false;
         }();
@@ -515,7 +496,7 @@ struct BlockFmhaPipelineQRKSVS
             }
         };
 
-        static_assert(2 <= k0_loops);
+        static_assert(kK0PrefetchDepth <= k0_loops);
         static_assert(1 <= k1_loops);
         do
         {
@@ -582,16 +563,16 @@ struct BlockFmhaPipelineQRKSVS
             }
 
             auto run_gemm_0 = [&](auto i_k0) {
-                if constexpr(kCanUsePartialGemm0Tail)
+                if constexpr(kUsePartialKForTail)
                 {
-                    if(static_cast<index_t>(i_k0.value) == (clamped_valid_k0_loops - 1) &&
-                       partial_gemm_0_k_iters < kGemm0KItersPerBlock)
+                    if(static_cast<index_t>(i_k0.value) == (valid_k0_loops - 1) &&
+                       tail_k_iters < kGemm0KItersPerBlock)
                     {
                         static_for<1, kGemm0KItersPerBlock, 1>{}([&](auto i_tail_k_iter) {
                             constexpr index_t kTailKIters = i_tail_k_iter;
                             constexpr index_t kTailK0     = kTailKIters * kGemm0WarpK;
 
-                            if(partial_gemm_0_k_iters == kTailKIters)
+                            if(tail_k_iters == kTailKIters)
                             {
                                 using Gemm0TailProblem = BlockGemmProblem<
                                     QDataType,
@@ -639,13 +620,13 @@ struct BlockFmhaPipelineQRKSVS
                 }
             };
 
-            if constexpr(k0_loops > 2)
+            if constexpr(k0_loops > kK0PrefetchDepth)
             {
-                static_for<0, k0_loops - 2, 1>{}([&](auto i_k0) {
+                static_for<0, k0_loops - kK0PrefetchDepth, 1>{}([&](auto i_k0) {
                     block_sync_lds();
                     run_gemm_0(number<i_k0>{});
                     block_sync_lds();
-                    if constexpr(kPadHeadDimQ && i_k0 == (k0_loops - 3))
+                    if constexpr(kPadHeadDimQ && i_k0 == (k0_loops - 1 - kK0PrefetchDepth))
                     {
                         if(!skip_last_k0_loop)
                         {
@@ -694,7 +675,7 @@ struct BlockFmhaPipelineQRKSVS
             }
             { // tail
                 block_sync_lds();
-                run_gemm_0(number<k0_loops - 2>{});
+                run_gemm_0(number<k0_loops - kK0PrefetchDepth>{});
                 if(!skip_last_k0_loop)
                 {
                     block_sync_lds();
@@ -1061,9 +1042,9 @@ struct BlockFmhaPipelineQRKSVS
                     using Gemm1WarpGemm = remove_cvref_t<decltype(gemm_1_config.template at<0>())>;
                     constexpr index_t kGemm1NWarp    = gemm_1_config.template at<2>();
                     constexpr index_t kGemm1NPerIter = kGemm1NWarp * Gemm1WarpGemm::kN;
-                    const index_t valid_gemm_1_n_iters =
-                        ck_tile::integer_divide_ceil(clamped_valid_n1_columns, kGemm1NPerIter);
-                    gemm_1(o_acc_tensor, p_slice, v_lds_window, valid_gemm_1_n_iters);
+                    const index_t valid_n_iters =
+                        ck_tile::integer_divide_ceil(valid_n1_length, kGemm1NPerIter);
+                    gemm_1(o_acc_tensor, p_slice, v_lds_window, valid_n_iters);
                 }
                 else
                 {
@@ -1330,8 +1311,8 @@ struct BlockFmhaPipelineQRKSVS
                DropoutType& dropout,
                const float sink_v,
                const index_t valid_k0_loops,
-               const index_t valid_last_k0_columns,
-               const index_t valid_n1_columns) const
+               const index_t valid_last_k0_length,
+               const index_t valid_n1_length) const
     {
         return operator()(q_dram_block_window_tmp,
                           identity{},
@@ -1363,8 +1344,8 @@ struct BlockFmhaPipelineQRKSVS
                           make_null_tile_window(make_tuple()),
                           sink_v,
                           valid_k0_loops,
-                          valid_last_k0_columns,
-                          valid_n1_columns);
+                          valid_last_k0_length,
+                          valid_n1_length);
     }
 
     template <typename QDramBlockWindowTmp,
