@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -22,7 +22,6 @@
  * ************************************************************************ */
 
 #include "rocsparse_sparse_to_csr_to_sparse.hpp"
-#include "rocsparse_internal_spmat_print.hpp"
 #include "rocsparse_utility.hpp"
 
 rocsparse_status rocsparse::sparse_to_csr_to_sparse(rocsparse_handle                 handle_,
