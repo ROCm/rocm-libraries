@@ -15,6 +15,9 @@
 #include "amd_transpose_load.hpp"
 #include "generic_memory_space_atomic.hpp"
 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
+
 namespace ck {
 
 // T may be scalar or vector
@@ -499,3 +502,5 @@ make_dynamic_buffer(T* p, ElementSpaceSize element_space_size, X invalid_element
 }
 
 } // namespace ck
+
+#pragma clang diagnostic pop
