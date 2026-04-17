@@ -210,9 +210,13 @@ struct BatchedContractionMultiABDKernel
         return UniversalGemmKernel::GetSmemSize();
     }
 
-    CK_TILE_HOST static constexpr auto GetBlockSize()
+    CK_TILE_HOST static auto GetBlockSize()
     {
-        return dim3(UniversalGemmKernel::kBlockSize);
+        // Delegate to UniversalGemmKernel::BlockSize() so that the launch uses the
+        // correct number of threads on both wave64 (CDNA) and wave32 (RDNA) targets.
+        // kBlockSize is computed assuming wave64; on wave32 the actual thread count
+        // must be halved to keep the same number of wavefronts (warps) per block.
+        return UniversalGemmKernel::BlockSize();
     }
 
     CK_TILE_HOST static constexpr auto GridSize(const KernelArgs& kargs)

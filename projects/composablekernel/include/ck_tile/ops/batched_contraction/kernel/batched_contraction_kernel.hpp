@@ -368,7 +368,11 @@ struct BatchedContractionKernel
 
     /// @brief Returns the GPU block size for kernel launch.
     /// @return 3D block dimensions for GPU kernel execution
-    CK_TILE_HOST static constexpr auto GetBlockSize() { return UniversalGemmKernel::BlockSize(); }
+    /// @details Delegates to UniversalGemmKernel::BlockSize() so that the launch uses the
+    ///          correct number of threads on both wave64 (CDNA) and wave32 (RDNA) targets.
+    ///          kBlockSize is computed assuming wave64; on wave32 the thread count must be
+    ///          halved to keep the same number of wavefronts (warps) per block.
+    CK_TILE_HOST static auto GetBlockSize() { return UniversalGemmKernel::BlockSize(); }
 
     CK_TILE_HOST static constexpr auto GridSize(const KernelArgs& kargs)
     {
