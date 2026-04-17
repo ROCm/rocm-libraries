@@ -1261,23 +1261,39 @@ struct FmhaFwdKernel
                                                 ck_tile::index_t hdim_v_,
                                                 bool has_padded_seqlen_k = false)
     {
-        // has_padded_seqlen_k is determined by checking (seqlen_k_ptr != nullptr)
-        if(has_padded_seqlen_k)
-        {
-            // TODO: this may need tuning
-            return dim3(nhead_,
-                        batch_size_,
-                        ck_tile::integer_divide_ceil(seqlen_q_, FmhaPipeline::kM0) *
-                            ck_tile::integer_divide_ceil(hdim_v_, FmhaPipeline::kN1));
-        }
-        else
-        {
-            // TODO: this may need tuning
-            return dim3(nhead_,
-                        ck_tile::integer_divide_ceil(seqlen_q_, FmhaPipeline::kM0) *
-                            ck_tile::integer_divide_ceil(hdim_v_, FmhaPipeline::kN1),
-                        batch_size_);
-        }
+        // L2 swizzle: swap head and block dims so that blocks (M-tiles) vary
+        // fastest, enabling adjacent heads to be grouped into L2 sections.
+        // Previously: dim3(nhead, blocks, batch) -- head was fastest.
+        // Now: dim3(blocks, nhead, batch) -- blocks are fastest.
+        (void)has_padded_seqlen_k; // unified layout for both paths
+        const auto num_blocks = ck_tile::integer_divide_ceil(seqlen_q_, FmhaPipeline::kM0) *
+                                ck_tile::integer_divide_ceil(hdim_v_, FmhaPipeline::kN1);
+        return dim3(num_blocks,
+                    nhead_,
+                    batch_size_);
+    }
+
+    /// Compute the number of Q-heads per L2 cache section.
+    /// Groups adjacent heads so their shared KV data fits in one XCD's L2.
+    /// Formula: floor_pow2(L2_per_XCD / (seqlen_k * hdim_q * sizeof(K) * 2)) * nhead_ratio_qk
+    CK_TILE_DEVICE static auto ComputeL2Swizzle(const Kargs& kargs)
+    {
+        // MI350X / MI300X: ~4MB L2 per XCD
+        constexpr index_t kL2PerXCD = 4 * 1024 * 1024;
+        // KV bytes per head = seqlen_k * hdim_q * sizeof(K_dtype) * 2 (K + V)
+        const index_t kv_bytes_per_head =
+            kargs.seqlen_k * kargs.hdim_q * static_cast<index_t>(sizeof(KDataType)) * 2;
+
+        index_t raw = (kv_bytes_per_head > 0) ? (kL2PerXCD / kv_bytes_per_head) : 1;
+        if(raw < 1) raw = 1;
+
+        // Round down to power of 2 for efficient modular arithmetic
+        index_t swizzle = 1;
+        while(swizzle * 2 <= raw)
+            swizzle *= 2;
+
+        // Scale by GQA ratio: multiple Q-heads share one KV head
+        return swizzle * kargs.nhead_ratio_qk;
     }
 
     CK_TILE_DEVICE static constexpr auto GetTileIndex(const Kargs& kargs)
@@ -1309,10 +1325,11 @@ struct FmhaFwdKernel
                 (kargs.stride_q == kargs.hdim_q) && (kargs.nhead_stride_q > kargs.hdim_q);
             if(is_bhsd_layout)
             {
+                // New grid layout: dim3(blocks, nhead, batch)
                 const index_t num_tile_n1 =
                     ck_tile::integer_divide_ceil(kargs.hdim_v, FmhaPipeline::kN1);
-                const index_t num_tile_total   = has_padded_seqlen_k ? gridDim.z : gridDim.y;
-                const index_t num_head         = gridDim.x;
+                const index_t num_tile_total   = gridDim.x;
+                const index_t num_head         = gridDim.y;
                 const index_t blocks_per_batch = num_head * num_tile_total;
                 const index_t linear_id =
                     blockIdx.x + gridDim.x * (blockIdx.y + gridDim.y * blockIdx.z);
@@ -1335,63 +1352,79 @@ struct FmhaFwdKernel
         }
 #endif
 
-        if(has_padded_seqlen_k)
+        // New grid layout: dim3(blocks, nhead, batch) for both paths.
+        // L2 swizzle: linearize across heads and M-blocks, then decompose
+        // so that within each L2 section, all M-blocks for one head complete
+        // before moving to the next head. This keeps KV data in L2.
+        const index_t num_tile_n1 =
+            ck_tile::integer_divide_ceil(kargs.hdim_v, FmhaPipeline::kN1);
+
+        index_t i_block = blockIdx.x;  // blocks now in x (fastest)
+        const index_t i_nhead = blockIdx.y;  // heads in y
+        const index_t i_batch = blockIdx.z;  // batch in z
+
+        // XCD-interleave scheduling: remap block indices so that adjacent
+        // Q-tiles land on the same XCD (chiplet), improving L2 cache
+        // locality for KV reuse. Adapted from FA4 (Tri Dao, 2025).
+        // MI300X/MI350X have 8 XCDs; CUs are assigned round-robin across
+        // XCDs, so without remapping adjacent tiles scatter across chiplets.
+        // Only activate when grid is large enough for balanced distribution
+        // (at least kMinTilesPerXCD tiles per XCD); small grids regress
+        // due to load imbalance from uneven tile distribution.
+        constexpr index_t kNumXCDs = 8;
+        constexpr index_t kMinTilesPerXCD = 16;
         {
-            // const index_t num_tile_m0 = seqlen_q / kM0;
-            const index_t num_tile_n1 =
-                ck_tile::integer_divide_ceil(kargs.hdim_v, FmhaPipeline::kN1);
-
-            const index_t i_block = blockIdx.z;
-            const index_t i_nhead = blockIdx.x;
-            const index_t i_batch = blockIdx.y;
-
-            const auto f = [](index_t dividend, index_t divisor) {
-                index_t quotient = dividend / divisor;
-                index_t modulus  = dividend - quotient * divisor;
-                return ck_tile::make_tuple(quotient, modulus);
-            };
-
-            const auto [i_tile_m, i_tile_n] = f(i_block, num_tile_n1);
-
-            if constexpr(kHasMask)
+            const index_t grid_x = gridDim.x;
+            const index_t cus_per_xdim_per_xcd = grid_x / kNumXCDs;
+            if(cus_per_xdim_per_xcd >= kMinTilesPerXCD)
             {
-                // assume that num_tile_n1 is always 1
-                return ck_tile::make_tuple(
-                    static_cast<index_t>(gridDim.z) - 1 - i_tile_m, i_tile_n, i_nhead, i_batch);
+                const index_t cu_id  = i_block / kNumXCDs;
+                const index_t xcd_id = i_block % kNumXCDs;
+                if(cu_id < cus_per_xdim_per_xcd)
+                {
+                    i_block = xcd_id * cus_per_xdim_per_xcd + cu_id;
+                }
             }
-            else
-            {
-                return ck_tile::make_tuple(i_tile_m, i_tile_n, i_nhead, i_batch);
-            }
+        }
+
+        const auto f = [](index_t dividend, index_t divisor) {
+            index_t quotient = dividend / divisor;
+            index_t modulus  = dividend - quotient * divisor;
+            return ck_tile::make_tuple(quotient, modulus);
+        };
+
+        const auto [i_tile_m_raw, i_tile_n] = f(i_block, num_tile_n1);
+
+        const index_t num_m_blocks = (num_tile_n1 > 0)
+            ? (gridDim.x / num_tile_n1)
+            : gridDim.x;
+
+        if constexpr(kHasMask)
+        {
+            // Skip L2 swizzle for causal masks: the head reordering conflicts
+            // with LPT (longest-processing-time) reversal, causing -12% regression
+            // on MI300X causal workloads. LPT reversal alone is sufficient.
+            return ck_tile::make_tuple(num_m_blocks - 1 - i_tile_m_raw, i_tile_n, i_nhead, i_batch);
         }
         else
         {
-            // const index_t num_tile_m0 = seqlen_q / kM0;
-            const index_t num_tile_n1 =
-                ck_tile::integer_divide_ceil(kargs.hdim_v, FmhaPipeline::kN1);
+            // L2 swizzle: reorder head iteration within L2 sections.
+            // Groups adjacent heads so their shared KV data stays in L2,
+            // giving +3-5% on non-causal and GQA workloads on MI300X.
+            const index_t l2_swizzle = ComputeL2Swizzle(kargs);
 
-            const index_t i_block = blockIdx.y; // blockIdx.x
-            const index_t i_nhead = blockIdx.x; // blockIdx.y
-            const index_t i_batch = blockIdx.z;
+            // Linearize across heads and M-blocks
+            const index_t linear = i_nhead * num_m_blocks + i_tile_m_raw;
 
-            const auto f = [](index_t dividend, index_t divisor) {
-                index_t quotient = dividend / divisor;
-                index_t modulus  = dividend - quotient * divisor;
-                return ck_tile::make_tuple(quotient, modulus);
-            };
+            // Decompose into L2 sections
+            const index_t section_size = l2_swizzle * num_m_blocks;
+            const index_t section = linear / section_size;
+            const index_t remainder = linear - section * section_size;
 
-            const auto [i_tile_m, i_tile_n] = f(i_block, num_tile_n1);
-
-            if constexpr(kHasMask)
-            {
-                // assume that num_tile_n1 is always 1
-                return ck_tile::make_tuple(
-                    static_cast<index_t>(gridDim.y) - 1 - i_tile_m, i_tile_n, i_nhead, i_batch);
-            }
-            else
-            {
-                return ck_tile::make_tuple(i_tile_m, i_tile_n, i_nhead, i_batch);
-            }
+            // Within each section: iterate all M-blocks for head 0, then head 1, etc.
+            const index_t i_nhead_new = section * l2_swizzle + remainder / num_m_blocks;
+            const index_t i_tile_m = remainder - (remainder / num_m_blocks) * num_m_blocks;
+            return ck_tile::make_tuple(i_tile_m, i_tile_n, i_nhead_new, i_batch);
         }
     }
 
