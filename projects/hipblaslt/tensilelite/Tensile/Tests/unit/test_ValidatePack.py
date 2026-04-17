@@ -1524,44 +1524,34 @@ class TestValidatePackTF32MFMA4x4x4SwapPacks(CMSValidationTestBase):
 
         return optSchedule, syncCode
 
-    def test_passing_vw2_a_only(self):
-        """VW_A=2 produces 4 swap packs before PackA0's 2 groups of 10 regular packs. VW_B=1 has no swaps."""
-        self.setUp({"VectorWidthA": 2, "VectorWidthB": 1})
+    def _build_swap_schedule(self, vw, base_idx):
+        """Build swap packs + regular pack groups for a given VectorWidth."""
+        n_swaps = 4 * (vw - 1)
+        return [base_idx] * n_swaps + self._make_valid_pack_group(base_idx) * vw
 
-        # PackA0: 4 swap packs + 2 groups of 10 regular packs = 24 total
-        # VW=2 requires 2 pack groups (16 regs) and 8 LRs (dsReadConvTable has 8 entries).
-        packA0 = [2] * 4 + self._make_valid_pack_group(2) * 2
-        packB0 = self._make_valid_pack_group(2)
-        pack_alt_a = [self.q4s+2] * 4 + self._make_valid_pack_group(self.q4s+2) * 2
+    @pytest.mark.parametrize("vw_a,vw_b,extra_kernel", [
+        pytest.param(1, 1, {}, id="vw1_both"),
+        pytest.param(2, 1, {}, id="vw2_a_only"),
+        pytest.param(4, 1, {}, id="vw4_a_only"),
+        pytest.param(2, 2, {"ProblemType": {"TLUB": True}}, id="vw2_both"),
+    ])
+    def test_passing_vw_combinations(self, vw_a, vw_b, extra_kernel):
+        """Valid schedules with various VectorWidth combinations."""
+        kernel = {"VectorWidthA": vw_a, "VectorWidthB": vw_b}
+        kernel.update(extra_kernel)
+        self.setUp(kernel)
 
-        optSchedule, syncCode = self._make_base_schedule(packA0, packB0, pack_alt_a=pack_alt_a, n_lrs_a=8)
-        self.validate(optSchedule, syncCode, 1, 2, 2, 0, None)
+        packA0 = self._build_swap_schedule(vw_a, 2)
+        packB0 = self._build_swap_schedule(vw_b, 2)
+        pack_alt_a = self._build_swap_schedule(vw_a, self.q4s + 2)
+        pack_alt_b = self._build_swap_schedule(vw_b, self.q3s + 2)
+        n_lrs_a = 8 if vw_a >= 2 else 2
+        n_lrs_b = 8 if vw_b >= 2 else 2
 
-    def test_passing_vw4_a_only(self):
-        """VW_A=4 produces 12 swap packs before PackA0's 4 groups of 10 regular packs."""
-        self.setUp({"VectorWidthA": 4, "VectorWidthB": 1})
-
-        # VW=4 requires at least 4 pack groups (32 regs = one transpose block).
-        packA0 = [2] * 12 + self._make_valid_pack_group(2) * 4
-        packB0 = self._make_valid_pack_group(2)
-        pack_alt_a = [self.q4s+2] * 12 + self._make_valid_pack_group(self.q4s+2) * 4
-
-        optSchedule, syncCode = self._make_base_schedule(packA0, packB0, pack_alt_a=pack_alt_a, n_lrs_a=8)
-        self.validate(optSchedule, syncCode, 1, 2, 2, 0, None)
-
-    def test_passing_vw2_both_sides(self):
-        """VW_A=2 and VW_B=2: both sides have 4 swap packs each with 2 groups."""
-        self.setUp({"VectorWidthA": 2, "VectorWidthB": 2, "ProblemType": {"TLUB": True}})
-
-        packA0 = [2] * 4 + self._make_valid_pack_group(2) * 2
-        packB0 = [2] * 4 + self._make_valid_pack_group(2) * 2
-        pack_alt_a = [self.q4s+2] * 4 + self._make_valid_pack_group(self.q4s+2) * 2
-        pack_alt_b = [self.q3s+2] * 4 + self._make_valid_pack_group(self.q3s+2) * 2
-
-        optSchedule, syncCode = self._make_base_schedule(packA0, packB0,
-                                                          pack_alt_a=pack_alt_a,
-                                                          pack_alt_b=pack_alt_b,
-                                                          n_lrs_a=8, n_lrs_b=8)
+        optSchedule, syncCode = self._make_base_schedule(
+            packA0, packB0,
+            pack_alt_a=pack_alt_a, pack_alt_b=pack_alt_b,
+            n_lrs_a=n_lrs_a, n_lrs_b=n_lrs_b)
         self.validate(optSchedule, syncCode, 1, 2, 2, 0, None)
 
     def test_passing_multiple_groups_with_swaps(self):
@@ -1623,16 +1613,6 @@ class TestValidatePackTF32MFMA4x4x4SwapPacks(CMSValidationTestBase):
 
         optSchedule, syncCode = self._make_base_schedule(packA0, packB0, pack_alt_a=pack_alt_a, n_lrs_a=8)
         self.validate(optSchedule, syncCode, 1, 2, 2, 0, "PackA0 @ idx=1 issued too early, must be issued after idx=2 (because of PackA0 issued @ idx=2).")
-
-    def test_no_swaps_vw1(self):
-        """VW_A=1, VW_B=1. No swap packs — identical to existing behavior."""
-        self.setUp({"VectorWidthA": 1, "VectorWidthB": 1})
-
-        packA0 = self._make_valid_pack_group(2)
-        packB0 = self._make_valid_pack_group(2)
-
-        optSchedule, syncCode = self._make_base_schedule(packA0, packB0)
-        self.validate(optSchedule, syncCode, 1, 2, 2, 0, None)
 
     def test_swap_depends_on_specific_lrs_vw4(self):
         """VW=4: T0 swaps (0,1,2) depend only on T0 LRs (LR0-LR3). Placing them
