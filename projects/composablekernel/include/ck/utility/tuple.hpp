@@ -43,7 +43,7 @@ struct TupleElementKeyData
 // for read access of tuple element
 template <typename Key, typename Data>
 __host__ __device__ constexpr const Data&
-get_tuple_element_data_reference(const TupleElementKeyData<Key, Data>& x)
+get_tuple_element_data_reference([[clang::lifetimebound]] const TupleElementKeyData<Key, Data>& x)
 {
     return static_cast<const Data&>(x.mData);
 }
