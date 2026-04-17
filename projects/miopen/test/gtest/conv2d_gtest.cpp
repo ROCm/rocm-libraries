@@ -11,7 +11,7 @@ using TestCase = Conv2DBaseTestCase<>;
 template <typename T>
 auto GenCases(bool smoke_test)
 {
-    return conv2d_test<T>::GenTestParams(Conv2DBaseTestParameters<T>(smoke_test));
+    return conv2d_test_base<T>::GenTestParams(Conv2DBaseTestParameters<T>(smoke_test));
 }
 
 template <typename T>
@@ -30,13 +30,26 @@ auto GetCasesSmoke()
 
 } // namespace
 
-using GPU_Conv2d_FP32  = conv2d_test<float>;
-using GPU_Conv2d_FP16  = conv2d_test<half_float::half>;
-using GPU_Conv2d_BFP16 = conv2d_test<bfloat16>;
+using GPU_Conv2d_FP32  = conv2d_test_base<float>;
+using GPU_Conv2d_FP16  = conv2d_test_base<half_float::half>;
+using GPU_Conv2d_BFP16 = conv2d_test_base<bfloat16>;
 
-TEST_P(GPU_Conv2d_FP32, TestFloat) { run(); }
-TEST_P(GPU_Conv2d_FP16, TestFloat16) { run(); }
-TEST_P(GPU_Conv2d_BFP16, TestBFloat16) { run(); }
+TEST_P(GPU_Conv2d_FP32, TestFloat)
+{
+    GetTestParams();
+    run();
+}
+
+TEST_P(GPU_Conv2d_FP16, TestFloat16)
+{
+    GetTestParams();
+    run();
+}
+TEST_P(GPU_Conv2d_BFP16, TestBFloat16)
+{
+    GetTestParams();
+    run();
+}
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_Conv2d_FP32,

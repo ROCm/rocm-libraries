@@ -27,7 +27,7 @@ using Conv2DBaseTestCase =
 template <typename T, ConvApi api = ConvApi::Find_1_0>
 struct Conv2DBaseTestParameters
 {
-    using ct = conv_test<T>;
+    using ct = conv_test<T, Conv2DBaseTestCase<>, api>;
 
     Conv2DBaseTestParameters(bool smoke_test)
         : batch_size(generate_data_limited(ct::get_batch_sizes(), 1, !smoke_test)),
@@ -70,29 +70,30 @@ struct Conv2DBaseTestParameters
     std::vector<bool> int8_vectorize;
 };
 
-template <class T, ConvApi api = ConvApi::Find_1_0>
-struct conv2d_test : public conv_test<T, api>, public testing::TestWithParam<Conv2DBaseTestCase<>>
+template <typename T, typename TestCase = Conv2DBaseTestCase<>, ConvApi api = ConvApi::Find_1_0>
+struct conv2d_test_base : public conv_test<T, TestCase, api>
 {
-    void SetUp() override
-    {
-        prng::reset_seed();
+    void SetUp() override { prng::reset_seed(); }
 
-        this->GetTestParams(this->GetParam(),
-                            this->batch_size,
-                            this->input_channels,
-                            this->output_channels,
-                            this->spatial_dim_elements,
-                            this->filter_dims,
-                            this->pads_strides_dilations,
-                            this->trans_output_pads,
-                            this->in_layout,
-                            this->fil_layout,
-                            this->out_layout,
-                            this->deterministic,
-                            this->tensor_vect,
-                            this->vector_length,
-                            this->output_type,
-                            this->int8_vectorize);
+    template <typename... TParams>
+    void GetTestParams(TParams&... params)
+    {
+        conv_test<T, TestCase, api>::GetTestParams(this->batch_size,
+                                                   this->input_channels,
+                                                   this->output_channels,
+                                                   this->spatial_dim_elements,
+                                                   this->filter_dims,
+                                                   this->pads_strides_dilations,
+                                                   this->trans_output_pads,
+                                                   this->in_layout,
+                                                   this->fil_layout,
+                                                   this->out_layout,
+                                                   this->deterministic,
+                                                   this->tensor_vect,
+                                                   this->vector_length,
+                                                   this->output_type,
+                                                   this->int8_vectorize,
+                                                   params...);
     }
 
     template <typename... TParams>

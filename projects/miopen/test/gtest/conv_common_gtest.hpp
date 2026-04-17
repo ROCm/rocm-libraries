@@ -1826,16 +1826,16 @@ std::vector<T> generate_data_limited(const std::vector<T>& dims,
 }
 
 template <typename... TParams>
-using ConvTestBaseTestCase = std::tuple<NamedParameter<std::string>,
-                                        NamedParameter<std::string>,
-                                        NamedParameter<int>,
-                                        NamedParameter<bool>,
-                                        NamedParameter<bool>,
-                                        NamedParameter<bool>,
-                                        NamedParameter<int>,
-                                        NamedParameter<bool>,
-                                        NamedParameter<bool>,
-                                        NamedParameter<bool>,
+using ConvTestBaseTestCase = std::tuple<NamedParameter<std::string>, // conv_mode
+                                        NamedParameter<std::string>, // pad_mode
+                                        NamedParameter<int>,         // groupCount
+                                        NamedParameter<bool>,        // do_forward
+                                        NamedParameter<bool>,        // do_backward_data
+                                        NamedParameter<bool>,        // do_backward_weights
+                                        NamedParameter<int>,         // search
+                                        NamedParameter<bool>,        // gen_float
+                                        NamedParameter<bool>,        // enable_fdb
+                                        NamedParameter<bool>,        // preallocate
                                         TParams...>;
 
 template <ConvApi api = ConvApi::Find_1_0>
@@ -1865,8 +1865,11 @@ struct BaseConvTestParameters
     std::vector<bool> preallocate{false};
 };
 
-template <class T, ConvApi api = ConvApi::Find_1_0, class Tout = T>
-struct conv_test
+template <typename T,
+          typename TestCase = ConvTestBaseTestCase<>,
+          ConvApi api       = ConvApi::Find_1_0,
+          typename Tout     = T>
+struct conv_test : public testing::TestWithParam<TestCase>
 {
     tensor<T> input;
     tensor<T> weights;
@@ -2039,8 +2042,8 @@ struct conv_test
             std::forward<TParams>(params)...);
     }
 
-    template <typename InputParams, typename... TParams>
-    void GetTestParams(const InputParams& inputParams, TParams&... params)
+    template <typename... TParams>
+    void GetTestParams(TParams&... params)
     {
         std::tie(conv_mode,
                  pad_mode,
@@ -2052,7 +2055,7 @@ struct conv_test
                  gen_float,
                  enable_fdb,
                  preallocate,
-                 params...) = inputParams;
+                 params...) = this->GetParam();
     }
 
     void run()

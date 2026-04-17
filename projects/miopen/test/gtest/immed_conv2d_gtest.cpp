@@ -20,7 +20,7 @@ using TestCase = ConvTestBaseTestCase<NamedParameter<size_t>,              // ba
 template <typename T>
 auto GenCases(bool smoke_test)
 {
-    using ct = conv_test<T, ConvApi::Immediate>;
+    using ct = conv_test<T, TestCase, ConvApi::Immediate>;
     BaseConvTestParameters<ConvApi::Immediate> baseParams;
 
     auto batch_size = MakeNamedParameterCollectionValues<size_t>(
@@ -80,15 +80,13 @@ auto GetCasesSmoke()
 } // namespace
 
 template <class T>
-struct immed_conv2d_test : public conv_test<T, ConvApi::Immediate>,
-                           public testing::TestWithParam<TestCase>
+struct immed_conv2d_test : public conv_test<T, TestCase, ConvApi::Immediate>
 {
     void SetUp() override
     {
         prng::reset_seed();
 
-        this->GetTestParams(GetParam(),
-                            this->batch_size,
+        this->GetTestParams(this->batch_size,
                             this->input_channels,
                             this->output_channels,
                             this->spatial_dim_elements,

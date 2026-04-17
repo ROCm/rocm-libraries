@@ -25,7 +25,7 @@ using TestCase = ConvTestBaseTestCase<NamedParameter<size_t>,              // ba
 template <typename T>
 auto GenCases(bool smoke_test)
 {
-    using ct = conv_test<T, ConvApi::Find_2_0>;
+    using ct = conv_test<T, TestCase, ConvApi::Find_2_0>;
     BaseConvTestParameters<ConvApi::Find_2_0> baseParams;
 
     auto batch_size = MakeNamedParameterCollectionValues<size_t>(
@@ -99,15 +99,13 @@ auto GetCasesSmoke()
 } // namespace
 
 template <class T>
-struct conv2d_find2_test : public conv_test<T, ConvApi::Find_2_0>,
-                           public testing::TestWithParam<TestCase>
+struct conv2d_find2_test : public conv_test<T, TestCase, ConvApi::Find_2_0>
 {
     void SetUp() override
     {
         prng::reset_seed();
 
-        this->GetTestParams(GetParam(),
-                            this->batch_size,
+        this->GetTestParams(this->batch_size,
                             this->input_channels,
                             this->output_channels,
                             this->spatial_dim_elements,
