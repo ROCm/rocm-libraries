@@ -727,6 +727,12 @@ def get_fwd_blobs(
     gen = list()
     api_pool = FmhaFwdApiPool(mask_impl)
 
+    # batch_prefill pipeline uses gfx9-specific buffer addressing (async scatter-gather)
+    # that is incompatible with gfx11 (wave32, different buffer instruction format).
+    # Skip all batch_prefill kernels for gfx11 targets.
+    if has_gfx11:
+        return api_pool, gen
+
     for dtype in FWD_DTYPE_MAP.keys():
         d = CustomFactory.get_hdim_tile_size_dict(dtype)
         if d is None:
@@ -739,11 +745,6 @@ def get_fwd_blobs(
             for tile, pipeline in itertools.product(
                 tiles, CustomFactory.get_pipelines(dtype, hdim, receipt, mask_impl)
             ):
-                # gfx11 (wave32): the b64x128 tile with w16x16x16 warp is not compatible
-                # (block_gemm_areg_bsmem_creg_v2 thread_buffer size mismatch).
-                # Only the b128x128 tile with w32x32x16 works on gfx11.
-                if has_gfx11 and tile.F_bm0 < 128:
-                    continue
                 if mode == "group":
                     if pipeline.F_spad != "t" or pipeline.F_skpad != "t":
                         # in group mode, spad/skpad must be true, since we can't predict if seqlen of current batch need pad or not
@@ -766,10 +767,6 @@ def get_fwd_blobs(
                 # Generate kernels for both page_size=16 and page_size=1024
                 for page_size in SUPPORTED_PAGE_SIZE:
                     if page_size == 1 and pipeline.F_kv_memory_layout != "linear":
-                        continue
-                    # gfx11 (wave32) is not compatible with VECTORIZED_LAYOUT for
-                    # current tile shapes - skip to avoid Gemm1 thread_buffer mismatch.
-                    if has_gfx11 and pipeline.F_kv_memory_layout == "vectorized":
                         continue
                     # kv_blockscale requires page_size >= kN0 (tile.F_bn0)
                     # This ensures all tokens in a main loop iteration belong to the same page
