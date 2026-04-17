@@ -1,4 +1,4 @@
-// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
 // TEMPLATE ADAPTATION: As needed, to assist with testing, replace createReluFwdGraph()
@@ -340,11 +340,150 @@ inline flatbuffers::FlatBufferBuilder createConvFwdGraph(int64_t inputUid = 1,
     return builder;
 }
 
+/// Build a two-node convolution graph (not single-node) to test multi-node rejection.
+inline flatbuffers::FlatBufferBuilder createMultiNodeConvGraph()
+{
+    flatbuffers::FlatBufferBuilder builder;
+
+    // Use small 4x4 input with 3x3 filter -> 2x2 output for first conv
+    // Second conv: 2x2 input with 1x1 filter -> 2x2 output
+    std::vector<int64_t> inputDims = {1, 1, 4, 4};
+    std::vector<int64_t> inputStrides = {16, 16, 4, 1};
+
+    std::vector<int64_t> weight1Dims = {1, 1, 3, 3};
+    std::vector<int64_t> weight1Strides = {9, 9, 3, 1};
+
+    std::vector<int64_t> interDims = {1, 1, 2, 2};
+    std::vector<int64_t> interStrides = {4, 4, 2, 1};
+
+    std::vector<int64_t> weight2Dims = {1, 1, 1, 1};
+    std::vector<int64_t> weight2Strides = {1, 1, 1, 1};
+
+    std::vector<int64_t> outputDims = {1, 1, 2, 2};
+    std::vector<int64_t> outputStrides = {4, 4, 2, 1};
+
+    std::vector<flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
+        tensorAttributes;
+
+    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+        builder,
+        1,
+        "input",
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        &inputStrides,
+        &inputDims));
+    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+        builder,
+        2,
+        "weight1",
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        &weight1Strides,
+        &weight1Dims));
+    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+        builder,
+        3,
+        "intermediate",
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        &interStrides,
+        &interDims,
+        true)); // virtual
+    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+        builder,
+        4,
+        "weight2",
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        &weight2Strides,
+        &weight2Dims));
+    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+        builder,
+        5,
+        "output",
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        &outputStrides,
+        &outputDims));
+
+    std::vector<int64_t> pad1 = {0, 0};
+    std::vector<int64_t> stride1 = {1, 1};
+    std::vector<int64_t> dilation1 = {1, 1};
+
+    auto conv1 = hipdnn_data_sdk::data_objects::CreateConvolutionFwdAttributesDirect(
+        builder,
+        1,
+        2,
+        3,
+        &pad1,
+        &pad1,
+        &stride1,
+        &dilation1,
+        hipdnn_data_sdk::data_objects::ConvMode::CROSS_CORRELATION);
+
+    std::vector<int64_t> pad2 = {0, 0};
+    std::vector<int64_t> stride2 = {1, 1};
+    std::vector<int64_t> dilation2 = {1, 1};
+
+    auto conv2 = hipdnn_data_sdk::data_objects::CreateConvolutionFwdAttributesDirect(
+        builder,
+        3,
+        4,
+        5,
+        &pad2,
+        &pad2,
+        &stride2,
+        &dilation2,
+        hipdnn_data_sdk::data_objects::ConvMode::CROSS_CORRELATION);
+
+    std::vector<flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> nodes;
+    nodes.push_back(hipdnn_data_sdk::data_objects::CreateNodeDirect(
+        builder,
+        "conv1",
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::NodeAttributes::ConvolutionFwdAttributes,
+        conv1.Union()));
+    nodes.push_back(hipdnn_data_sdk::data_objects::CreateNodeDirect(
+        builder,
+        "conv2",
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::NodeAttributes::ConvolutionFwdAttributes,
+        conv2.Union()));
+
+    auto graphOffset = hipdnn_data_sdk::data_objects::CreateGraphDirect(
+        builder,
+        "test_multi_node_conv",
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        &tensorAttributes,
+        &nodes);
+    builder.Finish(graphOffset);
+    return builder;
+}
+
 /// Create an EngineConfig FlatBuffer for testing.
 inline flatbuffers::FlatBufferBuilder createEngineConfig(int64_t engineId)
 {
     flatbuffers::FlatBufferBuilder builder;
     auto engineConfigOffset = hipdnn_data_sdk::data_objects::CreateEngineConfig(builder, engineId);
+    builder.Finish(engineConfigOffset);
+    return builder;
+}
+
+/// Create an EngineConfig FlatBuffer with a single float knob setting for testing.
+/// @param engineId The engine ID
+/// @param knobId The knob identifier string
+/// @param knobValue The float value for the knob
+inline flatbuffers::FlatBufferBuilder
+    createEngineConfigWithFloatKnob(int64_t engineId, const char* knobId, double knobValue)
+{
+    flatbuffers::FlatBufferBuilder builder;
+
+    auto floatVal = hipdnn_data_sdk::data_objects::CreateFloatValue(builder, knobValue);
+
+    std::vector<flatbuffers::Offset<hipdnn_data_sdk::data_objects::KnobSetting>> knobSettings;
+    knobSettings.push_back(hipdnn_data_sdk::data_objects::CreateKnobSettingDirect(
+        builder, knobId, hipdnn_data_sdk::data_objects::KnobValue::FloatValue, floatVal.Union()));
+
+    auto engineConfigOffset
+        = hipdnn_data_sdk::data_objects::CreateEngineConfigDirect(builder, engineId, &knobSettings);
     builder.Finish(engineConfigOffset);
     return builder;
 }

@@ -31,6 +31,7 @@
 #include "TypedId.hpp"
 
 #include <cstddef>
+#include <iostream>
 #include <omp.h>
 
 #define MAX_OMP_THREADS 64
@@ -828,9 +829,16 @@ namespace TensileLite
             // If we knew at this point that the data was initialized as whole number floats,
             // we could continue down this fast path, because there would be no rounding
             // errors incurred by f32 accumulation. But we do not.
+            auto rejectFast = [](const char* reason) {
+                if (false) {  // Re-enable when testing to find reason.
+                    std::clog << "FAST_PATH_REJECT: " << reason << std::endl;
+                }
+                return false;
+            };
+
             if(problem.f32XdlMathOp() == rocisa::DataType::XFloat32)
             {
-                return false;
+                return rejectFast("XFloat32");
             }
 
             // Guard rails to check that the fast path is appropriate to use.
@@ -844,48 +852,53 @@ namespace TensileLite
                || !isSupportedType(problem.c().dataType())
                || !isSupportedType(problem.d().dataType()))
             {
-                return false;
+                std::string detail = "unsupported_type"
+                    " A=" + TensileLite::ToString(problem.a().dataType())
+                    + " B=" + TensileLite::ToString(problem.b().dataType())
+                    + " C=" + TensileLite::ToString(problem.c().dataType())
+                    + " D=" + TensileLite::ToString(problem.d().dataType());
+                return rejectFast(detail.c_str());
             }
 
             if(problem.batchIndices().empty())
             {
-                return false;
+                return rejectFast("no_batch_indices");
             }
 
             if(problem.useGradient())
             {
-                return false;
+                return rejectFast("gradient");
             }
 
             if(problem.outputAmaxD())
             {
-                return false;
+                return rejectFast("amaxD");
             }
 
             if(problem.useE())
             {
-                return false;
+                return rejectFast("useE");
             }
 
             if(problem.useScaleCD())
             {
-                return false;
+                return rejectFast("scaleCD");
             }
 
             if(problem.useScaleAB() == "Scalar")
             {
-                return false;
+                return rejectFast("scaleAB_scalar");
             }
 
             if(problem.useScaleAB() == "Vector")
             {
-                return false;
+                return rejectFast("scaleAB_vector");
             }
 
             if(problem.boundIndices().size() != 1 || problem.freeIndicesA().size() != 1
                || problem.freeIndicesB().size() != 1)
             {
-                return false;
+                return rejectFast("multi_index");
             }
 
             bool               doActivation = false;
@@ -916,7 +929,7 @@ namespace TensileLite
             bool isPackedD = (problem.d().strides()[indexMD] == 1);
             if(!isPackedA || !isPackedB || !isPackedD)
             {
-                return false;
+                return rejectFast("layout");
             }
 
             size_t indexND  = problem.freeIndices()[1].d;
