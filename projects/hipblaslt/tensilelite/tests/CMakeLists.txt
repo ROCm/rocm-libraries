@@ -76,13 +76,13 @@ set(F32_SIZES -M 133 -N 147 -K 165)
 set(F16_SIZES -M 131 -N 141 -K 151)
 set(ADDITIONAL_SIZES -M 102 -N 103 -K 105)
 
-macro(get_test_sizes TYPE OUT_SIZES)
+function(get_test_sizes TYPE OUT_SIZES)
     if("${TYPE}" STREQUAL "f32")
-        set(${OUT_SIZES} ${F32_SIZES})
+        set(${OUT_SIZES} ${F32_SIZES} PARENT_SCOPE)
     else()
-        set(${OUT_SIZES} ${F16_SIZES})
+        set(${OUT_SIZES} ${F16_SIZES} PARENT_SCOPE)
     endif()
-endmacro()
+endfunction()
 
 # Helper: convert transpose tag (NN/TN/NT/TT) to flags
 macro(get_trans_flags TRANS OUT_FLAGS)
