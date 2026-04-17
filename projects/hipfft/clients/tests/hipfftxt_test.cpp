@@ -132,25 +132,40 @@ static std::string directionname(const int direction)
     }
 }
 
-// Params are direction and real/complex
-class hipfftxtunit : public ::testing::TestWithParam<std::tuple<int, bool>>
+// We may run tests on all visible devices; query how many devices with this function.
+static auto getdevcount()
+{
+    int deviceCount = 0;
+    const auto ret = hipGetDeviceCount(&deviceCount);
+    if (ret != hipSuccess)
+        throw std::runtime_error("hipGetDeviceCount failed");
+    return deviceCount;
+}
+
+#ifdef __HIP_PLATFORM_AMD__
+static const bool rocfft_backend = true;
+#else
+static const bool rocfft_backend = false;
+#endif
+
+// Params are direction and real/complex, is-single-batch
+class hipfftxtunit : public ::testing::TestWithParam<std::tuple<int, bool, bool>>
 {};
 
 TEST_P(hipfftxtunit, plancreation)
 {
     // Test whether we can just make plans.
-    
-    size_t    ngpus = 2;
 
-    // Just batch=1 for now.
+    size_t    ngpus = getdevcount();
+    if(ngpus < 2)
+        GTEST_SKIP();
 
-    // FIXME: handle 3D as well.
-    
     const int Nx    = 32;
     const int Ny    = 32;
 
     const int direction = std::get<0>(GetParam());
     const bool realcomplex = std::get<1>(GetParam());
+    const bool singlebatch = std::get<2>(GetParam());
     
     const hipfftType transform_type  = realcomplex ?
         ((direction == HIPFFT_FORWARD) ? HIPFFT_D2Z : HIPFFT_Z2D) : HIPFFT_Z2Z;
@@ -175,29 +190,55 @@ TEST_P(hipfftxtunit, plancreation)
     ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS) << "hipfftXtSetGPUs failed";
 
     std::vector<size_t> workSize(ngpus);
-    hipfft_rt = hipfftMakePlan2d(plan, Nx, Ny,
-                                 transform_type,
-                                 workSize.data());
-    ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS) << "hipfftMakePlan2d failed with return code "
-                                         << hipfft_rt << "=" << hipfftResult_string(hipfft_rt);
+    if(singlebatch)
+    {
+        hipfft_rt = hipfftMakePlan2d(plan, Nx, Ny,
+                                     transform_type,
+                                     workSize.data());
+        ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS) << "hipfftMakePlan2d failed with return code "
+                                             << hipfft_rt << "=" << hipfftResult_string(hipfft_rt);
+
+    }
+    else
+    {
+        std::vector<int> lengths = {Nx, Ny};
+        const int nbatch = ngpus;
+        hipfft_rt = hipfftMakePlanMany(plan,
+                                       lengths.size(),
+                                       lengths.data(),
+                                       nullptr, 0, 0,
+                                       nullptr, 0, 0,
+                                       transform_type,
+                                       nbatch,
+                                       workSize.data());
+        if(rocfft_backend)
+            ASSERT_NE(hipfft_rt, HIPFFT_SUCCESS)
+                << "multi-batch multi-gpu transforms should return not implemented";
+        else
+            ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS) << "hipfftMakePlanMany failed with return code "
+                                                 << hipfft_rt << "="
+                                                 << hipfftResult_string(hipfft_rt);
+    }
 
     hipfft_rt = hipfftDestroy(plan);
     ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS);
 }
-
 
 INSTANTIATE_TEST_SUITE_P(
     hipfftxttest,
     hipfftxtunit,
     ::testing::Combine(
         ::testing::Values(HIPFFT_FORWARD, HIPFFT_BACKWARD),
-        ::testing::Values(true, false)
+        ::testing::Values(true, false),
+        ::testing::Bool()
         ),
     [](const testing::TestParamInfo<hipfftxtunit::ParamType>& info) {
         const int direction = std::get<0>(info.param);
         const int realcomplex = std::get<1>(info.param);
+        const int singlebatch = std::get<2>(info.param);
         std::string name = direction == HIPFFT_FORWARD ? "forward" : "backward";
         name += realcomplex ? "rc" : "cc";
+        name += singlebatch ? "singlebatch" : "multibatch";
         return name;
     }
     );
@@ -242,16 +283,6 @@ static auto all_directionformat() {
     for(const auto &val : complex_directionformat)
         combined.push_back(std::make_tuple(false, val));
     return combined;
-}
-
-// We may run tests on all visible devices; query how many devices with this function.
-static auto getdevcount()
-{
-    int deviceCount = 0;
-    const auto ret = hipGetDeviceCount(&deviceCount);
-    if (ret != hipSuccess)
-        throw std::runtime_error("hipGetDeviceCount failed");
-    return deviceCount;
 }
 
 // 2D and 3D transforms single-batch multi-gpu FFTs are handled differently than 1D transforms.
@@ -915,7 +946,7 @@ class hipfftxtformats : public ::testing::TestWithParam<std::tuple<bool, int, hi
 {};
 
 // FIXME: documentation
-TEST_P(hipfftxtformats, supportlist)
+TEST_P(hipfftxtformats, supportlistsinglebatch)
 {
     size_t    ngpus = getdevcount();
 #ifdef __HIP_PLATFORM_NVIDIA__
@@ -945,12 +976,6 @@ TEST_P(hipfftxtformats, supportlist)
 #ifdef __HIP_PLATFORM_NVIDIA__
     if(realcomplex && format == HIPFFT_XT_FORMAT_1D_INPUT_SHUFFLED)
         GTEST_SKIP(); // Problematic unsupported case, so skip the test. 
-#endif
-    
-#ifdef __HIP_PLATFORM_AMD__
-    const bool rocfft_backend = true;
-#else
-    const bool rocfft_backend = false;
 #endif
     
     auto good_rdfs = all_directionformat();
