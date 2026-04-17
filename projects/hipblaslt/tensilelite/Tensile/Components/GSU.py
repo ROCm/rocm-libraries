@@ -1049,7 +1049,7 @@ class GSUOn(GSU):
         module.add(SWaitCnt(kmcnt=0, comment="wait for atomic_dec value load"))
         module.add(SCmpEQU32(src0=sgpr(tmpS01), src1=1, comment="last GSU WG?"))
         module.add(SCBranchSCC0(labelName=lastGsuWgBusyWaitingLabel.getLabelName(), comment="branch if false"))
-        if not writer.states.asmCaps["HasSStore_b32"]:
+        if not writer.states.asmCaps["s_store_b32"]:
             # In gfx12, no s_store_b32 instruction can be used
             tmpV01 = writer.vgprPool.checkOutAligned(2, 2, preventOverflow=False)
             tmpV02 = writer.vgprPool.checkOut(1, preventOverflow=False)

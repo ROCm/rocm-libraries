@@ -300,6 +300,9 @@ inline std::map<std::string, int>
     rv["s_sub_u64"]
         = tryAssembler(isaVersion, assemblerPath, "s_sub_u64 s[0:1], s[0:1], s[2:3]", isDebug);
 
+    rv["s_store_b32"] = tryAssembler(isaVersion, assemblerPath, "s_store_dword s32, s[60:61], 0 glc", isDebug)
+                     || tryAssembler(isaVersion, assemblerPath, "s_store_b32 s32, s[60:61], 0 glc", isDebug);
+
     rv["HasBF16CVT"] = tryAssembler(isaVersion, assemblerPath, "v_cvt_f32_bf16 v0, v1", isDebug);
 
     rv["HasPkF16CVT"] = tryAssembler(isaVersion, assemblerPath, "v_cvt_pk_f16_f32 v0, v1, v2", isDebug);
@@ -354,19 +357,7 @@ inline std::map<std::string, int>
     rv["HasSAtomic"]
         = tryAssembler(isaVersion,
                        assemblerPath,
-                       "s_atomic_dec s0, s[1:2]",
-                       isDebug);
-
-    rv["HasSStore_b32"]
-        = tryAssembler(isaVersion,
-                       assemblerPath,
-                       "s_store_b32 s0, s[1:2], 0",
-                       isDebug);
-
-    rv["HasVCndmask_b32_V1"]
-        = tryAssembler(isaVersion,
-                       assemblerPath,
-                       "v_cndmask_b32 v0, v1, v2, s[0:1]",
+                       "s_atomic_dec s35, s[60:61] glc",
                        isDebug);
 
     rv["HasGLCModifier"]
