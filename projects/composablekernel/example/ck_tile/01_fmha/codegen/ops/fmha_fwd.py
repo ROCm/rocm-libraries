@@ -1194,6 +1194,11 @@ class KernelComponentFactoryGfx11(CompatibilityRuleFactory):
             if (problem_ctx.hdim, problem_ctx.hdim_v) != (128, 128):
                 return True
 
+            # For (128, 128) head dims, partial-fragment support in qr_hpad removes the need
+            # for the previous qr_hpad-specific handling that was added to avoid register spill.
+            # qr_hpad now reuses the regular 128x64 tile choice.
+            # The 64x64 tile remains disabled for qr_hpad because it is consistently slower
+            # in our measurements.
             if kernel_ctx.tile.F_bm0 == 64 and kernel_ctx.tile.F_bn0 == 64:
                 return kernel_ctx.pipeline.tag != "qr_hpad"
 
