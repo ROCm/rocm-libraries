@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2021-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -728,11 +728,8 @@ ROCWMMA_KERNEL void __launch_bounds__(256) gemm_rocwmma_d(uint32_t       m,
         auto           localWarpOffset = localWarpCoord * warpTileSize;
 
         using MfmaFragDMap1d = GetDataLayout_t<MfmaFragD>;
-        // auto Out_macroTileCoord = make_coord2d(blockIdx.x, 0) * macroTileSize;
-        // auto Out_warpTileCoord  = Out_macroTileCoord + localWarpOffset;
-
+        
         const int iterations = (n + MACRO_TILE_Y - 1) / MACRO_TILE_Y;
-        // const int sv_iterations = (k + MACRO_TILE_Y - 1) / MACRO_TILE_Y;
 
         MfmaFragAcc fragsOut[SV_ITERS][BLOCKS_X][BLOCKS_Y];
         for(int i = 0; i < SV_ITERS; i++)
@@ -910,9 +907,6 @@ ROCWMMA_KERNEL void __launch_bounds__(256) gemm_rocwmma_d(uint32_t       m,
             auto ldsReadOffsetAcc = get<0>(localWarpOffset) * ldsld_new + get<1>(localWarpOffset);
 
             localWriteAcc(fragsTmp, ldsPtr + ldsReadOffsetAcc, ldsld_new);
-            synchronize_workgroup();
-
-            //load S like fragA
             synchronize_workgroup();
 
             ////    loop
