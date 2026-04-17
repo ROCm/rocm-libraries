@@ -46,12 +46,12 @@ int main()
     // Note that when using cuFFTXt with two or more GPUs, its latest version requires
     // a minimum size per dimension greater or equal than 32 and less equal than 4096
     // for single precision, and 2048 for double precision.
-    const int  Nx              = 32;
-    const int  Ny              = 32;
-    int        direction       = HIPFFT_FORWARD; // forward=-1, backward=1
-    hipfftType transform_type  = HIPFFT_D2Z;     // double to std::complex<double>
-    hipfftXtSubFormat_t subformat = HIPFFT_XT_FORMAT_INPLACE;
-    size_t     ngpus           = 2;
+    const int           Nx             = 32;
+    const int           Ny             = 32;
+    int                 direction      = HIPFFT_FORWARD; // forward=-1, backward=1
+    hipfftType          transform_type = HIPFFT_D2Z; // double to std::complex<double>
+    hipfftXtSubFormat_t subformat      = HIPFFT_XT_FORMAT_INPLACE;
+    size_t              ngpus          = 2;
 
     std::cout << "\tNx: " << Nx << "\n";
     std::cout << "\tNy: " << Ny << "\n";
@@ -63,7 +63,7 @@ int main()
     std::cout << "\tsubformat: " << subformat << " : " << subformat_to_name(subformat) << "\n";
 
     const size_t Nyp = Ny / 2 + 1;
-    
+
     // We only want to print a subset of the data:
     const int printlimit = 8;
 
@@ -79,20 +79,20 @@ int main()
     std::cout << "\n";
 
     // Initialize reference data
-    std::vector<double> rinput(Nx * (Ny + 2)); 
+    std::vector<double> rinput(Nx * (Ny + 2));
     for(size_t xidx = 0; xidx < Nx; ++xidx)
     {
         for(size_t yidx = 0; yidx < Ny; ++yidx)
         {
             const size_t pos = xidx * (Ny + 2) + yidx;
-            rinput[pos] = xidx * Nx + yidx;
+            rinput[pos]      = xidx * Nx + yidx;
         }
     }
 
     std::cout << "Input:\n";
     printarraylimit(rinput, Nx, Ny + 2, printlimit);
     std::cout << "\n";
-        
+
     hipfftHandle plan;
     if(hipfftCreate(&plan) != HIPFFT_SUCCESS)
         throw std::runtime_error("failed to create plan");
@@ -120,8 +120,8 @@ int main()
         throw std::runtime_error("hipfftMakePlan2d failed.");
 
     // Copy input data to GPUs
-    hipLibXtDesc*       inoutdesc = nullptr;
-    hipfft_rt                     = hipfftXtMalloc(plan, &inoutdesc, subformat);
+    hipLibXtDesc* inoutdesc = nullptr;
+    hipfft_rt               = hipfftXtMalloc(plan, &inoutdesc, subformat);
     if(hipfft_rt != HIPFFT_SUCCESS)
     {
         std::stringstream ss;
@@ -145,18 +145,18 @@ int main()
                                HIPFFT_COPY_HOST_TO_DEVICE);
     if(hipfft_rt != HIPFFT_SUCCESS)
         throw std::runtime_error("hipfftXtMemcpy failed withd code " + std::to_string(hipfft_rt));
-   
+
     std::cout << "Distributed input data on the GPUs:\n";
     for(size_t idx = 0; idx < ngpus; ++idx)
     {
-        const int Nxmax = Nx / ngpus + ((idx < Nx % ngpus) ? 1 : 0);
-        const int Nymax = Ny + 2;
+        const int    Nxmax = Nx / ngpus + ((idx < Nx % ngpus) ? 1 : 0);
+        const int    Nymax = Ny + 2;
         const size_t vsize
             = inoutdesc->descriptor->size[idx] / sizeof(decltype(rinput)::value_type);
         std::vector<decltype(rinput)::value_type> hbuf(vsize);
-        std::cout << "buffer " << idx << ": "
-                  << Nxmax << " x " << Nymax << ": "
-                  << Nxmax * Nymax <<" elements, buffer holds " << vsize << " elements\n";;
+        std::cout << "buffer " << idx << ": " << Nxmax << " x " << Nymax << ": " << Nxmax * Nymax
+                  << " elements, buffer holds " << vsize << " elements\n";
+        ;
         if(hipMemcpy(hbuf.data(),
                      inoutdesc->descriptor->data[idx],
                      inoutdesc->descriptor->size[idx],
@@ -167,10 +167,10 @@ int main()
         }
         printarraylimit(hbuf, Nxmax, Nymax, printlimit);
         std::cout << "\n";
-        
+
         //if(idx == 0)
         {
-            for(size_t hidx = 0; hidx < hbuf.size(); ++ hidx)
+            for(size_t hidx = 0; hidx < hbuf.size(); ++hidx)
             {
                 //std::cout << hidx << "\t" << hbuf[hidx] << "\t" << (hbuf[hidx] - hidx) << "\n";
             }
@@ -179,7 +179,7 @@ int main()
     }
 
     std::cout << "inoutdesc->subFormat: " << inoutdesc->subFormat << "\n";
-    
+
     // Execute the plan
     std::cout << "Executing the plan...\n";
     hipfft_rt = hipfftXtExecDescriptor(plan, inoutdesc, inoutdesc, direction);
@@ -189,15 +189,14 @@ int main()
     std::cout << "inoutdesc->subFormat: " << inoutdesc->subFormat << "\n";
 
     std::vector<std::complex<double>> coutput(Nx * Nyp);
-    
+
     std::cout << "Distributed output data on the GPUs:\n";
     for(size_t idx = 0; idx < ngpus; ++idx)
     {
         const int Nxmax = Nx;
         const int Nymax = Nyp / ngpus + ((idx < Nyp % ngpus) ? 1 : 0);
-        std::cout << "buffer " << idx << ": "
-                  << Nxmax << " x " << Nymax << ": "
-                  << Nxmax * Nymax <<" elements\n";
+        std::cout << "buffer " << idx << ": " << Nxmax << " x " << Nymax << ": " << Nxmax * Nymax
+                  << " elements\n";
         const size_t vsize
             = inoutdesc->descriptor->size[idx] / sizeof(decltype(coutput)::value_type);
 
@@ -213,7 +212,7 @@ int main()
         printarraylimit(hbuf, Nxmax, Nymax, printlimit);
         std::cout << "\n";
     }
-    
+
     // Move result to the host
     hipfft_rt = hipfftXtMemcpy(plan,
                                reinterpret_cast<void*>(coutput.data()),
@@ -224,7 +223,7 @@ int main()
 
     std::cout << "Collected output:\n";
     printarraylimit(coutput, Nx, Nyp, printlimit);
-    
+
     // Clean up
     if(hipfftXtFree(inoutdesc) != HIPFFT_SUCCESS)
         throw std::runtime_error("hipfftXtFree failed.");

@@ -35,7 +35,6 @@ DISABLE_WARNING_RETURN_TYPE
 #include <hip/hip_runtime_api.h>
 DISABLE_WARNING_POP
 
-
 int main()
 {
     std::cout << "Multi-gpu hipFFT in-place 2D double-precision complex-to-complex transform\n";
@@ -47,12 +46,12 @@ int main()
     // Note that when using cuFFTXt with two or more GPUs, its latest version requires
     // a minimum size per dimension greater or equal than 32 and less equal than 4096
     // for single precision, and 2048 for double precision.
-    const int  Nx              = 32;
-    const int  Ny              = 33;
-    int        direction       = HIPFFT_FORWARD; // forward=-1, backward=1
-    hipfftType transform_type  = HIPFFT_Z2Z;     // std::complex<double> to std::complex<double>
-    hipfftXtSubFormat_t format = HIPFFT_XT_FORMAT_INPLACE;
-    size_t     ngpus           = 2;
+    const int           Nx             = 32;
+    const int           Ny             = 33;
+    int                 direction      = HIPFFT_FORWARD; // forward=-1, backward=1
+    hipfftType          transform_type = HIPFFT_Z2Z; // std::complex<double> to std::complex<double>
+    hipfftXtSubFormat_t format         = HIPFFT_XT_FORMAT_INPLACE;
+    size_t              ngpus          = 2;
 
     // We only want to print a subset of the data:
     const int printlimit = 8;
@@ -74,14 +73,14 @@ int main()
     {
         for(size_t yidx = 0; yidx < Ny; ++yidx)
         {
-            cinput[xidx * Ny + yidx] = std::complex<double>(xidx,yidx);
+            cinput[xidx * Ny + yidx] = std::complex<double>(xidx, yidx);
         }
     }
 
     std::cout << "Input:\n";
     printarraylimit(cinput, Nx, Ny, printlimit);
     std::cout << "\n";
-        
+
     hipfftHandle plan;
     if(hipfftCreate(&plan) != HIPFFT_SUCCESS)
         throw std::runtime_error("failed to create plan");
@@ -108,8 +107,8 @@ int main()
         throw std::runtime_error("hipfftMakePlan2d failed.");
 
     // Copy input data to GPUs
-    hipLibXtDesc*       inoutdesc = nullptr;
-    hipfft_rt                     = hipfftXtMalloc(plan, &inoutdesc, format);
+    hipLibXtDesc* inoutdesc = nullptr;
+    hipfft_rt               = hipfftXtMalloc(plan, &inoutdesc, format);
     if(hipfft_rt != HIPFFT_SUCCESS)
     {
         std::stringstream ss;
@@ -139,9 +138,8 @@ int main()
     {
         const int Nxmax = Nx / ngpus + ((idx < Nx % ngpus) ? 1 : 0);
         const int Nymax = Ny;
-        std::cout << "buffer " << idx << ": "
-                  << Nxmax << " x " << Nymax << ": "
-                  << Nxmax * Nymax <<" elements\n";
+        std::cout << "buffer " << idx << ": " << Nxmax << " x " << Nymax << ": " << Nxmax * Nymax
+                  << " elements\n";
         const size_t vsize
             = inoutdesc->descriptor->size[idx] / sizeof(decltype(cinput)::value_type);
         std::vector<decltype(cinput)::value_type> hbuf(vsize);
@@ -156,8 +154,6 @@ int main()
         printarraylimit(hbuf, Nxmax, Nymax, printlimit);
         std::cout << "\n";
     }
-
-
 
     // Sneakily do a reverse FFT so that we can get identifiable data
     if(true)
@@ -172,24 +168,22 @@ int main()
                                      + std::to_string(hipfft_rt));
     }
 
-
     std::cout << "inoutdesc->subFormat: " << inoutdesc->subFormat << "\n";
-    
+
     // Execute the plan
     hipfft_rt = hipfftXtExecDescriptor(plan, inoutdesc, inoutdesc, direction);
     if(hipfft_rt != HIPFFT_SUCCESS)
         throw std::runtime_error("hipfftXtExecDescriptor failed.");
 
     std::cout << "inoutdesc->subFormat: " << inoutdesc->subFormat << "\n";
-    
+
     std::cout << "Distributed output data on the GPUs:\n";
     for(size_t idx = 0; idx < ngpus; ++idx)
     {
         const int Nxmax = Nx;
         const int Nymax = Ny / ngpus + ((idx < Ny % ngpus) ? 1 : 0);
-        std::cout << "buffer " << idx << ": "
-                  << Nxmax << " x " << Nymax << ": "
-                  << Nxmax * Nymax <<" elements\n";
+        std::cout << "buffer " << idx << ": " << Nxmax << " x " << Nymax << ": " << Nxmax * Nymax
+                  << " elements\n";
         const size_t vsize
             = inoutdesc->descriptor->size[idx] / sizeof(decltype(cinput)::value_type);
 
@@ -206,8 +200,6 @@ int main()
         std::cout << "\n";
     }
 
-
-    
     // Move result to the host
     hipfft_rt = hipfftXtMemcpy(plan,
                                reinterpret_cast<void*>(cinput.data()),

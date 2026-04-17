@@ -43,7 +43,6 @@ struct is_std_array<std::array<T, N>> : std::true_type
 {
 };
 
-
 /**
  * @brief calculates the default strides for a given Discrete Fourier transform (observing row-major
  * convention by default), lower/upper bounds version.
@@ -62,7 +61,7 @@ static C default_strides(fft_transform_type                        dft_type,
     C lengths;
     for(size_t i = 0; i < lower.size(); ++i)
         lengths.push_back(upper[i] - lower[i]);
-    
+
     return default_strides(dft_type, placement, io, lengths, dim_order);
 }
 

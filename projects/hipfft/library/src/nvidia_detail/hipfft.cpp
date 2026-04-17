@@ -910,7 +910,7 @@ try
         if(allnull)
             return HIPFFT_ALLOC_FAILED;
     }
-    
+
     return cufftResultToHipResult(cufftret);
 }
 catch(...)

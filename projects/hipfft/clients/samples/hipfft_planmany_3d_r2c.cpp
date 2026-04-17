@@ -40,9 +40,9 @@ int main()
     int howmany = 2;
 
     bool inplace = false;
-    
+
     int n2_complex_elements      = n[2] / 2 + 1;
-    int n2_padding_real_elements = inplace ? n2_complex_elements * 2 : n[2]; 
+    int n2_padding_real_elements = inplace ? n2_complex_elements * 2 : n[2];
 
     int istride    = 1;
     int ostride    = 1;
@@ -51,10 +51,10 @@ int main()
     int idist      = istride * inembed[0] * inembed[1] * inembed[2];
     int odist      = ostride * onembed[0] * onembed[1] * onembed[2];
 
-    const auto         total_inbytes = howmany * idist * sizeof(float);
-    const auto         total_outbytes = inplace ? total_inbytes :
-        howmany * odist * sizeof(std::complex<float>);
-    
+    const auto total_inbytes = howmany * idist * sizeof(float);
+    const auto total_outbytes
+        = inplace ? total_inbytes : howmany * odist * sizeof(std::complex<float>);
+
     std::cout << "rank :" << rank << "\n"
               << "n: " << n[0] << " " << n[1] << " " << n[2] << "\n"
               << "howmany: " << howmany << "\n"
@@ -72,13 +72,13 @@ int main()
     {
         for(int idx0 = 0; idx0 < n[0]; ++idx0)
         {
-            for(int idx1 = 0; idx1 <  n[1]; ++idx1)
+            for(int idx1 = 0; idx1 < n[1]; ++idx1)
             {
                 for(int idx2 = 0; idx2 < n[2]; ++idx2)
                 {
-                    const auto pos = idxb * idist
-                        + istride * (idx2 + inembed[2] * (idx1 + inembed[1] * idx0));
-                    indata[pos]      = idx0 + idx1 + idx2 + idxb;
+                    const auto pos
+                        = idxb * idist + istride * (idx2 + inembed[2] * (idx1 + inembed[1] * idx0));
+                    indata[pos] = idx0 + idx1 + idx2 + idxb;
                 }
             }
         }
@@ -88,15 +88,15 @@ int main()
         std::cout << "batch: " << idxb << "\n";
         for(int idx0 = 0; idx0 < inembed[0]; ++idx0)
         {
-            for(int idx1 = 0; idx1 <  inembed[1]; ++idx1)
+            for(int idx1 = 0; idx1 < inembed[1]; ++idx1)
             {
                 for(int idx2 = 0; idx2 < inembed[2]; ++idx2)
                 {
-                    const auto pos = idxb * idist
-                        + istride * (idx2 + inembed[2] * (idx1 + inembed[1] * idx0));
+                    const auto pos
+                        = idxb * idist + istride * (idx2 + inembed[2] * (idx1 + inembed[1] * idx0));
                     std::cout << indata[pos] << " ";
                 }
-                
+
                 std::cout << "\n";
             }
             std::cout << "\n";
@@ -122,7 +122,7 @@ int main()
     if(hipfft_rt != HIPFFT_SUCCESS)
         throw std::runtime_error("failed to create plan");
 
-    hipfftReal* gpu_indata;
+    hipfftReal*    gpu_indata;
     hipfftComplex* gpu_outdata;
 
     hipError_t hip_rt;
@@ -155,7 +155,8 @@ int main()
     std::vector<std::complex<float>> outdata(howmany * odist, 0.0);
     hip_rt = hipMemcpy((void*)outdata.data(),
                        inplace ? (void*)gpu_indata : (void*)gpu_outdata,
-                       total_outbytes, hipMemcpyDeviceToHost);
+                       total_outbytes,
+                       hipMemcpyDeviceToHost);
     if(hip_rt != hipSuccess)
         throw std::runtime_error("hipMemcpy failed");
 
@@ -165,12 +166,12 @@ int main()
         std::cout << "batch: " << idxb << "\n";
         for(int idx0 = 0; idx0 < n[0]; ++idx0)
         {
-            for(int idx1 = 0; idx1 <  n[1]; ++idx1)
+            for(int idx1 = 0; idx1 < n[1]; ++idx1)
             {
                 for(int idx2 = 0; idx2 < n2_complex_elements; ++idx2)
                 {
-                    const auto pos = idxb * odist
-                        + ostride * (idx2 + onembed[2] * (idx1 + onembed[1] * idx0));
+                    const auto pos
+                        = idxb * odist + ostride * (idx2 + onembed[2] * (idx1 + onembed[1] * idx0));
                     std::cout << outdata[pos] << " ";
                 }
                 std::cout << "\n";
@@ -193,6 +194,6 @@ int main()
         if(hip_rt != hipSuccess)
             throw std::runtime_error("hipFree failed");
     }
-    
+
     return 0;
 }

@@ -62,7 +62,7 @@ int main()
             for(size_t k = 0; k < Nz; k++)
             {
                 const auto pos = (i * Ny + j) * rstride + k;
-                rdata[pos] = i + j + k;
+                rdata[pos]     = i + j + k;
             }
         }
     }

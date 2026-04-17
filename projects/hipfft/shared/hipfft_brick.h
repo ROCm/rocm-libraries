@@ -28,10 +28,10 @@
 #include <numeric>
 #include <vector>
 
-#include "fft_enums.h"
-#include "data_layout.h"
 #include "../library/include/hipfft/hipfft.h"
 #include "../library/include/hipfft/hipfftXt.h"
+#include "data_layout.h"
+#include "fft_enums.h"
 
 // column-major ordering on indexes + strides, since these get passed
 // directly to rocFFT
@@ -74,7 +74,6 @@ struct hipfft_brick
     }
 };
 
-
 // lengths include batch dimension (col-major), split_dim is counted with 0 = fastest dim.
 static void set_bricks(const std::vector<size_t>& length,
                        std::vector<hipfft_brick>& bricks,
@@ -103,30 +102,30 @@ static void set_bricks(const std::vector<size_t>& length,
 // FIXME: documentation.
 static void hipfftxt_bricks(const std::vector<size_t>& batchlength,
                             std::vector<hipfft_brick>& bricks,
-                            const bool isrealcomplex,
-                            const hipfftXtSubFormat subformat)
+                            const bool                 isrealcomplex,
+                            const hipfftXtSubFormat    subformat)
 {
     // We assume that the brick vector has already been allocated, but the brick data is not yet
     // computed.
     if(bricks.size() == 0)
-        throw std::runtime_error("Bricks vector needs to be allocated before passing");        
-    
+        throw std::runtime_error("Bricks vector needs to be allocated before passing");
+
     // Format is row-major.
-    
+
     // batchlength includes the (single) batch dimension, so the batchlengths are {batch, X, Y, Z},
     // {batch, X, Y}, or {batch, X}.
     const size_t dim = batchlength.size();
     if(dim < 2)
         throw std::runtime_error("Need at least 1 length and batch dim");
-    
-    const size_t         nbatch   = batchlength[0];
+
+    const size_t         nbatch = batchlength[0];
     fft_result_placement placement;
     fft_io               io;
-    const bool isherm = isrealcomplex && subformat == HIPFFT_XT_FORMAT_INPLACE_SHUFFLED;
-    const bool isreal = isrealcomplex && subformat == HIPFFT_XT_FORMAT_INPLACE;
+    const bool           isherm = isrealcomplex && subformat == HIPFFT_XT_FORMAT_INPLACE_SHUFFLED;
+    const bool           isreal = isrealcomplex && subformat == HIPFFT_XT_FORMAT_INPLACE;
     const fft_transform_type dft_type
         = isreal ? fft_transform_type_real_forward : fft_transform_type_complex_forward;
-    
+
     // The subformat tells us which dimension is split.
     // Real in-place data needs extra padding.
     size_t splitdim = 0;
@@ -135,24 +134,24 @@ static void hipfftxt_bricks(const std::vector<size_t>& batchlength,
         switch(subformat)
         {
         case HIPFFT_XT_FORMAT_INPUT:
-            splitdim = 1; // X-axis is split
+            splitdim  = 1; // X-axis is split
             placement = fft_placement_notinplace;
-            io = fft_io_in;
+            io        = fft_io_in;
             break;
         case HIPFFT_XT_FORMAT_OUTPUT:
-            splitdim = 2; // Y-axis is split
+            splitdim  = 2; // Y-axis is split
             placement = fft_placement_notinplace;
-            io = fft_io_out;
+            io        = fft_io_out;
             break;
         case HIPFFT_XT_FORMAT_INPLACE:
-            splitdim = 1; // X-axis is split
+            splitdim  = 1; // X-axis is split
             placement = fft_placement_inplace;
-            io = fft_io_in;
+            io        = fft_io_in;
             break;
         case HIPFFT_XT_FORMAT_INPLACE_SHUFFLED:
-            splitdim = 2; // Y-axis is split
+            splitdim  = 2; // Y-axis is split
             placement = fft_placement_inplace;
-            io = fft_io_out;
+            io        = fft_io_out;
             break;
         case HIPFFT_XT_FORMAT_1D_INPUT_SHUFFLED:
             // TODO: impliment 1D version.
@@ -178,11 +177,11 @@ static void hipfftxt_bricks(const std::vector<size_t>& batchlength,
     if(isherm)
     {
         // We have Hermitian-symmetric data
-        const auto hindex = batchlengthdata.size() - 1;
-        const auto hlength = batchlengthdata[hindex];
+        const auto hindex       = batchlengthdata.size() - 1;
+        const auto hlength      = batchlengthdata[hindex];
         batchlengthdata[hindex] = hlength / 2 + 1;
     }
-    
+
     const auto ngpus = bricks.size();
     for(size_t ibrick = 0; ibrick < bricks.size(); ++ibrick)
     {
@@ -191,22 +190,19 @@ static void hipfftxt_bricks(const std::vector<size_t>& batchlength,
         brick.field_lower.resize(dim);
         std::fill(brick.field_lower.begin(), brick.field_lower.end(), 0);
         if(ibrick > 0)
-            brick.field_lower[splitdim] = bricks[ibrick-1].field_lower[splitdim];
+            brick.field_lower[splitdim] = bricks[ibrick - 1].field_lower[splitdim];
 
-        const size_t splitlen = batchlengthdata[splitdim];
-        const size_t bricksplitlen = splitlen / ngpus + (ibrick < splitlen %  bricks.size()? 1 : 0);
-        brick.field_upper = batchlengthdata;
+        const size_t splitlen      = batchlengthdata[splitdim];
+        const size_t bricksplitlen = splitlen / ngpus + (ibrick < splitlen % bricks.size() ? 1 : 0);
+        brick.field_upper          = batchlengthdata;
         if(ibrick > 0)
         {
             brick.field_lower[splitdim] = bricks[ibrick - 1].field_upper[splitdim];
         }
         brick.field_upper[splitdim] = brick.field_lower[splitdim] + bricksplitlen;
 
-        brick.brick_stride = default_strides(dft_type,
-                                             placement,
-                                             io,
-                                             brick.field_lower,
-                                             brick.field_upper);
+        brick.brick_stride
+            = default_strides(dft_type, placement, io, brick.field_lower, brick.field_upper);
     }
 }
 
