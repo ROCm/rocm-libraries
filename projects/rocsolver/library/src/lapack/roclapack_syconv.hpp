@@ -997,49 +997,43 @@ static rocblas_status rocsolver_syconv_template(rocblas_handle handle,
     // NOTE: icount now contains the prefix sum
     // ----------------------------------------
 
+    if(is_convert)
     {
-        if(is_convert)
-        {
-            syconv_convert_into_E<T, I, UA, Istride>
-                <<<dim3(nbx, nby, nbz), dim3(nx, ny, nz), 0, stream>>>(is_upper, n, batch_count,
+        syconv_convert_into_E<T, I, UA, Istride>
+            <<<dim3(nbx, nby, nbz), dim3(nx, ny, nz), 0, stream>>>(is_upper, n, batch_count,
 
-                                                                       A, shiftA, lda, strideA,
+                                                                   A, shiftA, lda, strideA,
 
-                                                                       ipiv, strideP,
+                                                                   ipiv, strideP,
 
-                                                                       E, strideE, icount);
-        }
+                                                                   E, strideE, icount);
     }
 
+    syconv_kernel<T, I, UA><<<dim3(nbx, nby, nbz), dim3(nx, ny, nz), 0, stream>>>(
+
+        is_upper, is_convert,
+
+        n,
+
+        A, shiftA, lda, strideA,
+
+        ipiv, strideP,
+
+        batch_count);
+
+    // --------------------------------------------------
+    // restore back to format initially produced by SYTRF
+    // --------------------------------------------------
+    if(!is_convert)
     {
-        syconv_kernel<T, I, UA><<<dim3(nbx, nby, nbz), dim3(nx, ny, nz), 0, stream>>>(
+        syconv_restore_from_E<T, I, UA, Istride>
+            <<<dim3(nbx, nby, nbz), dim3(nx, ny, nz), 0, stream>>>(is_upper, n, batch_count,
 
-            is_upper, is_convert,
+                                                                   A, shiftA, lda, strideA,
 
-            n,
+                                                                   ipiv, strideP,
 
-            A, shiftA, lda, strideA,
-
-            ipiv, strideP,
-
-            batch_count);
-    }
-
-    {
-        // --------------------------------------------------
-        // restore back to format initially produced by SYTRF
-        // --------------------------------------------------
-        if(!is_convert)
-        {
-            syconv_restore_from_E<T, I, UA, Istride>
-                <<<dim3(nbx, nby, nbz), dim3(nx, ny, nz), 0, stream>>>(is_upper, n, batch_count,
-
-                                                                       A, shiftA, lda, strideA,
-
-                                                                       ipiv, strideP,
-
-                                                                       E, strideE, icount);
-        }
+                                                                   E, strideE, icount);
     }
     return (rocblas_status_success);
 }
