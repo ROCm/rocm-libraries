@@ -20,9 +20,11 @@ permissions:
   contents: read
 
 jobs:
-  therock-coverage-linux:
-    name: Coverage (${{ inputs.project_name }} | ${{ inputs.amdgpu_families }})
-    runs-on: ${{ inputs.test_runs_on }}
+  therock-coverage-build:
+    name: Build Coverage (${{ inputs.project_name }} | ${{ inputs.amdgpu_families }})
+    runs-on: azure-linux-scale-rocm
+    permissions:
+      id-token: write
     container:
       image: ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:4443d9d710b9471e8ef658d509358bd92602498e67161b9280474bce0bb0decd
       options: -v /runner/config:/home/awsconfig/
@@ -93,6 +95,66 @@ jobs:
       - name: Build therock-archives and therock-dist
         run: cmake --build TheRock/build-coverage --target therock-archives therock-dist -- -k 0
 
-      - name: Build coverage for ${{ inputs.project_name }}
+      - name: Report
+        if: ${{ !cancelled() }}
+        run: |
+          echo "Full SDK du:"
+          echo "------------"
+          du -h -d 1 TheRock/build-coverage/dist/rocm
+          echo "Artifact Archives:"
+          echo "------------------"
+          ls -lh TheRock/build-coverage/artifacts/*.tar.xz
+          echo "Artifacts:"
+          echo "----------"
+          du -h -d 1 TheRock/build-coverage/artifacts
+          echo "CCache Stats:"
+          echo "-------------"
+          ccache -s -v
+
+      - name: Configure AWS Credentials for non-forked repos
+        if: ${{ always() && !github.event.pull_request.head.repo.fork }}
+        uses: aws-actions/configure-aws-credentials@8df5847569e6427dd6c4fb1cf565c83acfa8afa7 # v6.0.0
+        with:
+          aws-region: us-east-2
+          role-to-assume: arn:aws:iam::692859939525:role/therock-ci-external
+
+      - name: Post Build Upload
+        if: always()
+        run: |
+          python3 TheRock/build_tools/github_actions/post_build_upload.py \
+            --run-id ${{ github.run_id }} \
+            --artifact-group ${{ env.AMDGPU_FAMILIES }} \
+            --build-dir TheRock/build-coverage \
+            --upload
+
+  therock-coverage-test:
+    name: Test Coverage (${{ inputs.project_name }} | ${{ inputs.amdgpu_families }})
+    needs: [therock-coverage-build]
+    runs-on: ${{ inputs.test_runs_on }}
+    if: ${{ inputs.test_runs_on != '' }}
+    steps:
+      - name: "Checking out repository for rocm-libraries"
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Checkout TheRock repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: "ROCm/TheRock"
+          path: TheRock
+          ref: 9faa2ef2ebf9347d008d3057bd909a5c5be03e22
+
+      - name: Install python deps
+        run: |
+          pip install -r TheRock/requirements.txt
+
+      - name: Setup test environment and fetch artifacts
+        uses: ./.github/actions/setup_test_environment
+        with:
+          artifact_run_id: ${{ github.run_id }}
+          artifact_group: ${{ inputs.amdgpu_families }}
+          amdgpu_targets: ""
+          fetch_artifact_args: ""
+
+      - name: Run coverage tests and generate report
         run: |
           cmake --build ${{ inputs.build_dir }} --target coverage
