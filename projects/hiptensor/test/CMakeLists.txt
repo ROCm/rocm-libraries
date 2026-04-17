@@ -84,7 +84,7 @@ if(WIN32)
 
     if(EXISTS "${_hip_bin_dir}")
         file(MAKE_DIRECTORY "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}")
-        file(GLOB _hip_dlls "${_hip_bin_dir}/amd*.dll")
+        file(GLOB _hip_dlls "${_hip_bin_dir}/amdhip64_7.dll")
         if(_hip_dlls)
             foreach(_dll ${_hip_dlls})
                 get_filename_component(_dll_name "${_dll}" NAME)

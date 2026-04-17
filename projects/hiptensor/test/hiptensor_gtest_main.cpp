@@ -43,12 +43,14 @@ int main(int argc, char** argv)
     // cause all subsequent tests to deadlock ("resource deadlock would occur").
     int        deviceCount = 0;
     hipError_t hipErr      = hipGetDeviceCount(&deviceCount);
-    if(hipErr != hipSuccess)
+    if((hipErr != hipSuccess) || (deviceCount <= 0))
     {
-        fprintf(stderr,
-                "hipGetDeviceCount failed (%d: %s) — aborting before tests run.\n",
-                static_cast<int>(hipErr),
-                hipGetErrorString(hipErr));
+        fprintf(
+            stderr,
+            "hipGetDeviceCount failed (%d: %s) — Device count: %d — aborting before tests run.\n",
+            static_cast<int>(hipErr),
+            hipGetErrorString(hipErr),
+            deviceCount);
         return 1;
     }
 
