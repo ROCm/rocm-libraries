@@ -1449,10 +1449,10 @@ static inline rocblas_status rocsolver_sytrs2_argCheck(rocblas_handle handle,
     // ---------------
     // 0. check handle
     // ---------------
-	if (handle == nullptr) {
-            return (rocblas_status_invalid_handle);
-        }
-
+    if(handle == nullptr)
+    {
+        return (rocblas_status_invalid_handle);
+    }
 
     // -------------------------------
     // 1. invalid/non-supported values
@@ -1488,18 +1488,20 @@ static inline rocblas_status rocsolver_sytrs2_argCheck(rocblas_handle handle,
     // -------------------
     // 3. invalid pointers
     // -------------------
-    if (n >= 1) {
-	    if ( (A == nullptr) || (ipiv == nullptr) ) {
-		    return( rocblas_status_invalid_pointer );
-	    }
+    if(n >= 1)
+    {
+        if((A == nullptr) || (ipiv == nullptr))
+        {
+            return (rocblas_status_invalid_pointer);
+        }
     }
-    if ( (n >= 1) && (nrhs >= 1)) {
-	    if (B == nullptr) {
-		    return( rocblas_status_invalid_pointer );
-	    }
+    if((n >= 1) && (nrhs >= 1))
+    {
+        if(B == nullptr)
+        {
+            return (rocblas_status_invalid_pointer);
+        }
     }
-
-
 
     return (rocblas_status_continue);
 }

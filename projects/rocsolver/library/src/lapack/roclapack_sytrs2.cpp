@@ -155,20 +155,6 @@ rocblas_status rocsolver_dsytrs2(rocblas_handle handle,
     return rocsolver::rocsolver_sytrs2_impl<double>(handle, uplo, n, nrhs, A, lda, ipiv, B, ldb);
 }
 
-rocblas_status rocsolver_zsytrs2(rocblas_handle handle,
-                                 rocblas_fill const uplo,
-                                 rocblas_int const n,
-                                 rocblas_int const nrhs,
-                                 rocblas_double_complex* const A,
-                                 rocblas_int const lda,
-                                 rocblas_int* const ipiv,
-                                 rocblas_double_complex* const B,
-                                 rocblas_int const ldb)
-{
-    return rocsolver::rocsolver_sytrs2_impl<rocblas_double_complex>(handle, uplo, n, nrhs, A, lda,
-                                                                    ipiv, B, ldb);
-}
-
 rocblas_status rocsolver_csytrs2(rocblas_handle handle,
                                  rocblas_fill const uplo,
                                  rocblas_int const n,
@@ -181,6 +167,20 @@ rocblas_status rocsolver_csytrs2(rocblas_handle handle,
 {
     return rocsolver::rocsolver_sytrs2_impl<rocblas_float_complex>(handle, uplo, n, nrhs, A, lda,
                                                                    ipiv, B, ldb);
+}
+
+rocblas_status rocsolver_zsytrs2(rocblas_handle handle,
+                                 rocblas_fill const uplo,
+                                 rocblas_int const n,
+                                 rocblas_int const nrhs,
+                                 rocblas_double_complex* const A,
+                                 rocblas_int const lda,
+                                 rocblas_int* const ipiv,
+                                 rocblas_double_complex* const B,
+                                 rocblas_int const ldb)
+{
+    return rocsolver::rocsolver_sytrs2_impl<rocblas_double_complex>(handle, uplo, n, nrhs, A, lda,
+                                                                    ipiv, B, ldb);
 }
 
 rocblas_status rocsolver_ssytrs2_64(rocblas_handle handle,
@@ -219,24 +219,6 @@ rocblas_status rocsolver_dsytrs2_64(rocblas_handle handle,
 #endif
 }
 
-rocblas_status rocsolver_zsytrs2_64(rocblas_handle handle,
-                                    rocblas_fill const uplo,
-                                    int64_t const n,
-                                    int64_t const nrhs,
-                                    rocblas_double_complex* const A,
-                                    int64_t const lda,
-                                    int64_t* const ipiv,
-                                    rocblas_double_complex* const B,
-                                    int64_t const ldb)
-{
-#ifdef HAVE_ROCBLAS_64
-    return rocsolver::rocsolver_sytrs2_impl<rocblas_double_complex, int64_t>(handle, uplo, n, nrhs,
-                                                                             A, lda, ipiv, B, ldb);
-#else
-    return rocblas_status_not_implemented;
-#endif
-}
-
 rocblas_status rocsolver_csytrs2_64(rocblas_handle handle,
                                     rocblas_fill const uplo,
                                     int64_t const n,
@@ -250,6 +232,24 @@ rocblas_status rocsolver_csytrs2_64(rocblas_handle handle,
 #ifdef HAVE_ROCBLAS_64
     return rocsolver::rocsolver_sytrs2_impl<rocblas_float_complex, int64_t>(handle, uplo, n, nrhs,
                                                                             A, lda, ipiv, B, ldb);
+#else
+    return rocblas_status_not_implemented;
+#endif
+}
+
+rocblas_status rocsolver_zsytrs2_64(rocblas_handle handle,
+                                    rocblas_fill const uplo,
+                                    int64_t const n,
+                                    int64_t const nrhs,
+                                    rocblas_double_complex* const A,
+                                    int64_t const lda,
+                                    int64_t* const ipiv,
+                                    rocblas_double_complex* const B,
+                                    int64_t const ldb)
+{
+#ifdef HAVE_ROCBLAS_64
+    return rocsolver::rocsolver_sytrs2_impl<rocblas_double_complex, int64_t>(handle, uplo, n, nrhs,
+                                                                             A, lda, ipiv, B, ldb);
 #else
     return rocblas_status_not_implemented;
 #endif
