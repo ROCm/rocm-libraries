@@ -48,8 +48,8 @@ public:
      * @param opGraph The operation graph to check.
      * @return true if this plan builder can handle the graph, false otherwise.
      */
-    // NOLINTNEXTLINE(portability-template-virtual-member-function)
     virtual bool
+        // NOLINTNEXTLINE(portability-template-virtual-member-function)
         isApplicable(const THandle& handle,
                      const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
         = 0;
@@ -62,8 +62,8 @@ public:
      * @param executionSettings The plugin-specific execution settings.
      * @return The maximum workspace size in bytes.
      */
-    // NOLINTNEXTLINE(portability-template-virtual-member-function)
     virtual size_t
+        // NOLINTNEXTLINE(portability-template-virtual-member-function)
         getMaxWorkspaceSize(const THandle& handle,
                             const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
                             const TSettings& executionSettings) const

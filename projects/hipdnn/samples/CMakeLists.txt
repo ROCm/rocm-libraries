@@ -142,3 +142,43 @@ add_custom_target(hipdnn_samples COMMENT "Building all hipDNN samples" DEPENDS $
 install(FILES "${INSTALLED_CTEST_FILE}" DESTINATION ${HIPDNN_SAMPLES_CTEST_FILE_INSTALL_PATH}
         RENAME CTestTestfile.cmake
 )
+
+# =============================================================================
+# Example engine plugin — built as an external project to preserve its
+# standalone build capability. Tests are forwarded to this project's CTest.
+# =============================================================================
+find_package(hiprtc REQUIRED)
+include(ExternalProject)
+
+ExternalProject_Add(example_engine_plugin
+    SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/example_engine_plugin
+    CMAKE_CACHE_ARGS
+        "-DCMAKE_PREFIX_PATH:STRING=${CMAKE_PREFIX_PATH}"
+        "-DCMAKE_CXX_COMPILER:FILEPATH=${CMAKE_CXX_COMPILER}"
+        "-DCMAKE_BUILD_TYPE:STRING=${CMAKE_BUILD_TYPE}"
+        "-DCMAKE_MAKE_PROGRAM:FILEPATH=${CMAKE_MAKE_PROGRAM}"
+        "-DEXAMPLEPROVIDER_BUILD_UNIT_TESTS:BOOL=ON"
+        "-DEXAMPLEPROVIDER_BUILD_SAMPLE:BOOL=ON"
+        "-DHIP_PLATFORM:STRING=${HIP_PLATFORM}"
+        "-Dhip_DIR:PATH=${hip_DIR}"
+        "-Dhiprtc_DIR:PATH=${hiprtc_DIR}"
+        "-Dflatbuffers_DIR:PATH=${flatbuffers_DIR}"
+        "-Dnlohmann_json_DIR:PATH=${nlohmann_json_DIR}"
+    INSTALL_COMMAND ""
+)
+
+block(SCOPE_FOR VARIABLES)
+    ExternalProject_Get_Property(example_engine_plugin BINARY_DIR)
+
+    add_test(
+        NAME hipdnn_example_provider_unit_tests
+        COMMAND ${BINARY_DIR}/bin/example_provider_tests
+    )
+    set_tests_properties(hipdnn_example_provider_unit_tests PROPERTIES LABELS "sample_test")
+
+    add_test(
+        NAME hipdnn_example_provider_sample
+        COMMAND ${BINARY_DIR}/bin/example_provider_sample
+    )
+    set_tests_properties(hipdnn_example_provider_sample PROPERTIES LABELS "sample_test")
+endblock()

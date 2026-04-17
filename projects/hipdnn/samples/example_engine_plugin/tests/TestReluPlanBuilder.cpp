@@ -1,4 +1,4 @@
-// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
 // TEMPLATE ADAPTATION: Demonstrates the testing pattern for PlanBuilders. Key test categories:
@@ -93,6 +93,22 @@ TEST_F(ReluPlanBuilderTest, GetCustomKnobs_ReturnsNegativeSlopeKnob)
     auto knobs = planBuilder->getCustomKnobs(handle, graph);
     ASSERT_EQ(knobs.size(), 1u);
     EXPECT_EQ(knobs[0].knob_id, "example.relu.negative_slope");
+}
+
+TEST_F(ReluPlanBuilderTest, InitializeExecutionSettings_NegativeSlopeKnob_StoresInSettings)
+{
+    auto graphFbb = createReluFwdGraph();
+    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(graphFbb.GetBufferPointer(),
+                                                              graphFbb.GetSize());
+
+    auto configFbb = createEngineConfigWithFloatKnob(0, "example.relu.negative_slope", 0.5);
+    hipdnn_data_sdk::flatbuffer_utilities::EngineConfigWrapper config(configFbb.GetBufferPointer(),
+                                                                      configFbb.GetSize());
+
+    ExampleProviderSettings settings;
+    planBuilder->initializeExecutionSettings(handle, graph, config, settings);
+
+    EXPECT_DOUBLE_EQ(settings.reluNegativeSlope, 0.5);
 }
 
 TEST_F(ReluPlanBuilderTest, BuildPlan_SetsPlanOnContext)

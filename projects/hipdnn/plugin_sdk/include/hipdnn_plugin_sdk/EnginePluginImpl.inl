@@ -13,6 +13,7 @@
  *
  * - HIPDNN_PLUGIN_NAME: String literal for the plugin name (e.g., "my_plugin")
  * - HIPDNN_PLUGIN_VERSION: String literal for the plugin version (e.g., "1.0.0")
+ *   - This is typically defined in version.h for your project.
  * - HIPDNN_PLUGIN_CONTAINER_TYPE: The container class type
  * - HIPDNN_PLUGIN_HANDLE_TYPE: The handle struct type (inherits from HipdnnEnginePluginHandle)
  * - HIPDNN_PLUGIN_CONTEXT_TYPE: The context struct type (inherits from HipdnnEnginePluginExecutionContext)
@@ -41,11 +42,12 @@
  * // MiopenPluginPublic.cpp
  * #include "HipdnnMiopenTypes.hpp"
  * #include "MiopenContainer.hpp"
+ * #include "version.h"
  *
  * using namespace miopen_plugin;
  *
  * #define HIPDNN_PLUGIN_NAME "miopen_provider_plugin"
- * #define HIPDNN_PLUGIN_VERSION "1.0.0"
+ * #define HIPDNN_PLUGIN_VERSION MIOPEN_PROVIDER_VERSION_STRING // from version.h
  * #define HIPDNN_PLUGIN_CONTAINER_TYPE MiopenContainer
  * #define HIPDNN_PLUGIN_HANDLE_TYPE HipdnnMiopenHandle
  * #define HIPDNN_PLUGIN_CONTEXT_TYPE HipdnnMiopenContext
