@@ -83,6 +83,7 @@ option(BUILD_WITH_SPARSE "Build hipSOLVER with sparse functionality available at
 option(BUILD_VERBOSE "Output additional build information" OFF)
 option(HIPSOLVER_FIND_PACKAGE_LAPACK_CONFIG "Skip module mode search for LAPACK" ON)
 option(BUILD_FORTRAN_BINDINGS "Build the Fortran bindings" "${UNIX}")
+option(EXPORT_FORTRAN_BINDINGS "Install hipsolver_fortran as an exported CMake target" ON)
 
 if(NOT BUILD_SHARED_LIBS)
   add_compile_definitions(HIPSOLVER_STATIC_LIB)
