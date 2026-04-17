@@ -58,11 +58,11 @@ TEST_F(RegistryBasicTest, RegisterDuplicateKey)
 
     EXPECT_TRUE(Registry::instance().register_kernel(kernel1, Registry::Priority::Normal));
 
-    // Same priority should not replace
-    EXPECT_FALSE(Registry::instance().register_kernel(kernel2, Registry::Priority::Normal));
+    // Same priority DOES replace (last-writer-wins per BaseRegistry spec)
+    EXPECT_TRUE(Registry::instance().register_kernel(kernel2, Registry::Priority::Normal));
 
     auto found = Registry::instance().lookup(key);
-    EXPECT_EQ(found->get_name(), "kernel1");
+    EXPECT_EQ(found->get_name(), "kernel2");
 }
 
 // =============================================================================
@@ -108,7 +108,7 @@ TEST_F(RegistryPriorityTest, LowerPriorityDoesNotReplace)
     EXPECT_EQ(Registry::instance().lookup(key)->get_name(), "high");
 }
 
-TEST_F(RegistryPriorityTest, SamePriorityDoesNotReplace)
+TEST_F(RegistryPriorityTest, SamePriorityDoesReplace)
 {
     auto key = make_test_key(256);
 
@@ -116,9 +116,9 @@ TEST_F(RegistryPriorityTest, SamePriorityDoesNotReplace)
     auto second = std::make_shared<MockKernelInstance>(key, "second");
 
     EXPECT_TRUE(Registry::instance().register_kernel(first, Registry::Priority::Normal));
-    EXPECT_FALSE(Registry::instance().register_kernel(second, Registry::Priority::Normal));
+    EXPECT_TRUE(Registry::instance().register_kernel(second, Registry::Priority::Normal));
 
-    EXPECT_EQ(Registry::instance().lookup(key)->get_name(), "first");
+    EXPECT_EQ(Registry::instance().lookup(key)->get_name(), "second");
 }
 
 // =============================================================================
