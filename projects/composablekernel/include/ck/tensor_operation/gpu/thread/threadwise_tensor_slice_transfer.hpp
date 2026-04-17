@@ -2292,50 +2292,25 @@ struct ThreadwiseTensorSliceTransfer_StaticToStatic
         }
         else
         {
+            static_ford<Sequence<num_access, DstScalarPerVector>>{}([&](auto access_idx) {
+                constexpr auto idx_1d = Number<access_idx[Number<0>{}]>{};
+                constexpr auto i      = Number<access_idx[Number<1>{}]>{};
+                constexpr auto idx_md = SpaceFillingCurve::GetIndex(idx_1d);
 
-            // copy data from src_buf into dst_vector
-            if constexpr(is_same<SrcData, DstData>::value)
-            {
-                static_for<0, num_access, 1>{}([&](auto idx_1d) {
-                    constexpr auto idx_md = SpaceFillingCurve::GetIndex(idx_1d);
-                    using src_vector_t =
-                        typename vector_type_maker<SrcData, DstScalarPerVector>::type::type;
+                constexpr index_t src_offset = src_desc.CalculateOffset(
+                    src_slice_origin_idx + idx_md + i * dst_scalar_step_in_vector);
 
-                    constexpr index_t src_offset =
-                        src_desc.CalculateOffset(src_slice_origin_idx + idx_md);
+                constexpr index_t dst_offset = dst_desc.CalculateOffset(
+                    dst_slice_origin_idx + idx_md + i * dst_scalar_step_in_vector);
 
-                    constexpr index_t dst_offset =
-                        dst_desc.CalculateOffset(dst_slice_origin_idx + idx_md);
-                    src_vector_t* dst_buf_ptr =
-                        reinterpret_cast<src_vector_t*>(&dst_buf(Number<dst_offset>{}));
-                    const src_vector_t* src_buf_ptr =
-                        reinterpret_cast<const src_vector_t*>(&src_buf[Number<src_offset>{}]);
-                    *dst_buf_ptr = *src_buf_ptr;
-                });
-            }
-            else
-            {
-                static_ford<Sequence<num_access, DstScalarPerVector>>{}([&](auto access_idx) {
-                    constexpr auto idx_1d = Number<access_idx[Number<0>{}]>{};
-                    constexpr auto i      = Number<access_idx[Number<1>{}]>{};
-                    constexpr auto idx_md = SpaceFillingCurve::GetIndex(idx_1d);
-                    static_for<0, DstScalarPerVector, 1>{}([&](auto i) {
-                        constexpr index_t src_offset = src_desc.CalculateOffset(
-                            src_slice_origin_idx + idx_md + i * dst_scalar_step_in_vector);
+                DstData v;
 
-                        constexpr index_t dst_offset = dst_desc.CalculateOffset(
-                            dst_slice_origin_idx + idx_md + i * dst_scalar_step_in_vector);
+                // apply element-wise operation
+                element_op_(v, src_buf[Number<src_offset>{}]);
 
-                        DstData v;
-
-                        // apply element-wise operation
-                        element_op_(v, src_buf[Number<src_offset>{}]);
-
-                        // apply type convert
-                        dst_buf(Number<dst_offset>{}) = v;
-                    }
-                });
-            }
+                // apply type convert
+                dst_buf(Number<dst_offset>{}) = v;
+            });
         }
     }
 
