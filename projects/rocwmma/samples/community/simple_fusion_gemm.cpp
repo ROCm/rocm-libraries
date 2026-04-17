@@ -52,6 +52,27 @@
 * This sample showcases fusing two matmuls and serves as a basic reference for users opting
 * to use rocWMMA for attention-style architectures.
 *
+*
+* Performance (GFX9, int8, compared to two separate GEMM kernel invocations):
+* +---------+---------+---------+------------+---------------+---------+
+* |    M    |    N    |    K    | Fused (ms) | 2x GEMM (ms)  | Speedup |
+* +=========+=========+=========+============+===============+=========+
+* |   8192  |   8192  |   128   |   1.2466   |     1.523     |  1.22x  |
+* |   1024  |   1024  |   128   |   0.1655   |     0.1863    |  1.13x  |
+* |   8192  |   8192  |    64   |   0.6523   |     0.8456    |  1.30x  |
+* |   1024  |   1024  |    64   |   0.0927   |     0.1143    |  1.23x  |
+* |   2048  |   2048  |   256   |   0.6057   |     0.7000    |  1.16x  |
+* +---------+---------+---------+------------+---------------+---------+
+*
+* The fused kernel achieves 10-30% speedup by eliminating the intermediate
+* global memory round-trip: the first GEMM result (S = A x B) is kept in
+* LDS and consumed directly by the second GEMM (D = S x C), avoiding the
+* cost of writing S to global memory and reading it back.
+*
+* K corresponds to the attention head dimension (typically 64 or 128).
+* The baseline measures two consecutive GEMM kernel launches using the
+* same grid and rocWMMA tile configuration as the fused version.
+*  
 * Unlike the other samples, we use a 1D grid instead of a 2D grid.
 * Since tensors in neural networks are typically 4-D (B, H, N, D or B, N, H, D),
 * with batch and head usually serving as the parallel dimensions,
