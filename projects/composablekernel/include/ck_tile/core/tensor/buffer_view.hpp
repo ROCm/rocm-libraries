@@ -17,6 +17,9 @@
 #include "ck_tile/core/utility/type_traits.hpp"
 #include "ck_tile/core/utility/ignore.hpp"
 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
+
 namespace ck_tile {
 
 // T may be scalar or vector
@@ -1328,3 +1331,5 @@ CK_TILE_HOST_DEVICE void print(const buffer_view<BufferAddressSpace,
 }
 
 } // namespace ck_tile
+
+#pragma clang diagnostic pop
