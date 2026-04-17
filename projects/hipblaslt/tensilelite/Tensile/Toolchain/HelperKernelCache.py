@@ -25,6 +25,7 @@
 import hashlib
 import os
 import shutil
+import time
 
 from pathlib import Path
 
@@ -86,6 +87,24 @@ def _populateCache(cacheDir, cacheKey, hsacoFiles):
         shutil.rmtree(tmpDir, ignore_errors=True)
 
 
+def _evictStale(cacheDir, maxAgeDays):
+    """Remove cache entries whose directories are older than maxAgeDays."""
+    cacheDir = Path(cacheDir)
+    if not cacheDir.is_dir():
+        return
+    maxAgeSecs = maxAgeDays * 24 * 60 * 60
+    now = time.time()
+    for entry in cacheDir.iterdir():
+        if not entry.is_dir() or entry.name.startswith(".tmp_"):
+            continue
+        try:
+            age = now - entry.stat().st_mtime
+            if age > maxAgeSecs:
+                shutil.rmtree(entry, ignore_errors=True)
+        except OSError:
+            pass
+
+
 class HelperKernelCache:
     """Filesystem cache for compiled helper kernel .hsaco files.
 
@@ -93,6 +112,7 @@ class HelperKernelCache:
     """
 
     _DEFAULT_DIR = Path.home() / ".tensile" / "helper_cache"
+    _MAX_AGE_DAYS = 30
 
     def __init__(self):
         disabled = os.environ.get("TENSILE_DISABLE_HELPER_CACHE", "").upper() \
@@ -101,6 +121,7 @@ class HelperKernelCache:
         self.dir = Path(os.environ.get("TENSILE_HELPER_CACHE_DIR",
                                        str(self._DEFAULT_DIR)))
         self._cacheKey = None
+        _evictStale(self.dir, self._MAX_AGE_DAYS)
 
     def restore(self, kernelPath, includeDir, cmdlineArchs, compiler, destDir):
         """Try to restore cached .hsaco files into destDir.
@@ -117,11 +138,17 @@ class HelperKernelCache:
 
         if cachedFiles:
             coPaths = []
-            for f in cachedFiles:
-                dst = Path(destDir) / f.name
-                shutil.copy2(f, dst)
-                coPaths.append(str(dst))
-            return True, coPaths
+            try:
+                os.utime(Path(self.dir) / self._cacheKey)
+                for f in cachedFiles:
+                    dst = Path(destDir) / f.name
+                    shutil.copy2(f, dst)
+                    coPaths.append(str(dst))
+                return True, coPaths
+            except OSError:
+                for p in coPaths:
+                    Path(p).unlink(missing_ok=True)
+                # fall through to cache miss
 
         print1(f"# Helper kernel cache MISS ({self._cacheKey[:12]}...)")
         return False, []

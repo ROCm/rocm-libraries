@@ -28,6 +28,7 @@ pytestmark = pytest.mark.unit
 
 import hashlib
 import os
+import shutil
 from collections import namedtuple
 from pathlib import Path
 
@@ -205,6 +206,161 @@ class TestPopulateCache:
         src.write_bytes(b"\x7fELF")
         _populateCache(cache_dir, "abc123", [src])
         assert (cache_dir / "abc123" / "f.hsaco").exists()
+
+
+class TestEvictStale:
+    def test_removes_old_entries(self, tmp_path):
+        import time
+        from Tensile.Toolchain.HelperKernelCache import _evictStale
+        cache_dir = tmp_path / "cache"
+        old_entry = cache_dir / "old_hash"
+        old_entry.mkdir(parents=True)
+        (old_entry / "f.hsaco").write_bytes(b"\x7fELF")
+        # Backdate mtime by 31 days
+        old_time = time.time() - 31 * 24 * 60 * 60
+        os.utime(old_entry, (old_time, old_time))
+
+        _evictStale(cache_dir, 30)
+        assert not old_entry.exists()
+
+    def test_keeps_recent_entries(self, tmp_path):
+        from Tensile.Toolchain.HelperKernelCache import _evictStale
+        cache_dir = tmp_path / "cache"
+        recent = cache_dir / "recent_hash"
+        recent.mkdir(parents=True)
+        (recent / "f.hsaco").write_bytes(b"\x7fELF")
+        # mtime is now, well within 30 days
+
+        _evictStale(cache_dir, 30)
+        assert recent.exists()
+
+    def test_skips_tmp_dirs(self, tmp_path):
+        import time
+        from Tensile.Toolchain.HelperKernelCache import _evictStale
+        cache_dir = tmp_path / "cache"
+        tmp_dir = cache_dir / ".tmp_abc_1234"
+        tmp_dir.mkdir(parents=True)
+        old_time = time.time() - 31 * 24 * 60 * 60
+        os.utime(tmp_dir, (old_time, old_time))
+
+        _evictStale(cache_dir, 30)
+        assert tmp_dir.exists()
+
+    def test_noop_when_cache_dir_missing(self, tmp_path):
+        from Tensile.Toolchain.HelperKernelCache import _evictStale
+        # Should not raise
+        _evictStale(tmp_path / "nonexistent", 30)
+
+    def test_mixed_old_and_recent(self, tmp_path):
+        import time
+        from Tensile.Toolchain.HelperKernelCache import _evictStale
+        cache_dir = tmp_path / "cache"
+        old = cache_dir / "old_hash"
+        old.mkdir(parents=True)
+        (old / "f.hsaco").write_bytes(b"\x7fELF")
+        old_time = time.time() - 31 * 24 * 60 * 60
+        os.utime(old, (old_time, old_time))
+
+        recent = cache_dir / "recent_hash"
+        recent.mkdir(parents=True)
+        (recent / "f.hsaco").write_bytes(b"\x7fELF")
+
+        _evictStale(cache_dir, 30)
+        assert not old.exists()
+        assert recent.exists()
+
+
+class TestRestoreRobustness:
+    def test_restore_updates_mtime(self, tmp_path, monkeypatch):
+        """Cache hit should touch mtime so the entry is not evicted."""
+        import time
+        from Tensile.Toolchain.HelperKernelCache import HelperKernelCache, _computeCacheKey
+        cache_dir = tmp_path / "cache"
+        monkeypatch.setenv("TENSILE_HELPER_CACHE_DIR", str(cache_dir))
+        monkeypatch.delenv("TENSILE_DISABLE_HELPER_CACHE", raising=False)
+
+        kernel_path = _write_test_files(tmp_path)
+        compiler = MockCompiler()
+        key = _computeCacheKey(kernel_path, tmp_path, ["gfx942"], compiler)
+
+        entry = cache_dir / key
+        entry.mkdir(parents=True)
+        (entry / "Kernels.so-000-gfx942.hsaco").write_bytes(b"\x7fELF")
+        old_time = time.time() - 20 * 24 * 60 * 60
+        os.utime(entry, (old_time, old_time))
+
+        dest = tmp_path / "dest"
+        dest.mkdir()
+        cache = HelperKernelCache()
+        hit, coPaths = cache.restore(kernel_path, tmp_path, ["gfx942"], compiler, dest)
+        assert hit
+        # mtime should be refreshed to now, not 20 days ago
+        assert time.time() - entry.stat().st_mtime < 60
+
+    def test_restore_recovers_from_deleted_entry(self, tmp_path, monkeypatch):
+        """If cache entry is deleted mid-copy, restore returns a miss."""
+        from Tensile.Toolchain.HelperKernelCache import HelperKernelCache, _computeCacheKey, _checkCache
+        cache_dir = tmp_path / "cache"
+        monkeypatch.setenv("TENSILE_HELPER_CACHE_DIR", str(cache_dir))
+        monkeypatch.delenv("TENSILE_DISABLE_HELPER_CACHE", raising=False)
+
+        kernel_path = _write_test_files(tmp_path)
+        compiler = MockCompiler()
+        key = _computeCacheKey(kernel_path, tmp_path, ["gfx942"], compiler)
+
+        entry = cache_dir / key
+        entry.mkdir(parents=True)
+        (entry / "Kernels.so-000-gfx942.hsaco").write_bytes(b"\x7fELF")
+
+        dest = tmp_path / "dest"
+        dest.mkdir()
+
+        # Simulate deletion by making the source file unreadable after _checkCache
+        original_copy2 = shutil.copy2
+        def failing_copy2(src, dst):
+            raise OSError("file deleted")
+        monkeypatch.setattr(shutil, "copy2", failing_copy2)
+
+        cache = HelperKernelCache()
+        hit, coPaths = cache.restore(kernel_path, tmp_path, ["gfx942"], compiler, dest)
+        assert not hit
+        assert coPaths == []
+
+    def test_restore_cleans_partial_copies(self, tmp_path, monkeypatch):
+        """If copy fails mid-loop, already-copied files are cleaned up."""
+        from Tensile.Toolchain.HelperKernelCache import HelperKernelCache, _computeCacheKey
+        cache_dir = tmp_path / "cache"
+        monkeypatch.setenv("TENSILE_HELPER_CACHE_DIR", str(cache_dir))
+        monkeypatch.delenv("TENSILE_DISABLE_HELPER_CACHE", raising=False)
+
+        kernel_path = _write_test_files(tmp_path)
+        compiler = MockCompiler()
+        key = _computeCacheKey(kernel_path, tmp_path, ["gfx942"], compiler)
+
+        entry = cache_dir / key
+        entry.mkdir(parents=True)
+        (entry / "Kernels.so-000-gfx942.hsaco").write_bytes(b"\x7fELF")
+        (entry / "Kernels.so-000-gfx1100.hsaco").write_bytes(b"\x7fELF")
+
+        dest = tmp_path / "dest"
+        dest.mkdir()
+
+        # Let the first copy succeed, fail on the second
+        call_count = 0
+        original_copy2 = shutil.copy2
+        def copy2_fail_second(src, dst):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 2:
+                raise OSError("deleted mid-copy")
+            return original_copy2(src, dst)
+        monkeypatch.setattr(shutil, "copy2", copy2_fail_second)
+
+        cache = HelperKernelCache()
+        hit, coPaths = cache.restore(kernel_path, tmp_path, ["gfx942"], compiler, dest)
+        assert not hit
+        # No leftover partial files in dest
+        assert list(dest.glob("*.hsaco")) == []
 
 
 class TestBuildSourceCodeObjectFilesCache:
