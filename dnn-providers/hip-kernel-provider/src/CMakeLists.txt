@@ -37,6 +37,7 @@ target_include_directories(hip_kernel_provider_impl PUBLIC
     ${CMAKE_BINARY_DIR}
     ${CMAKE_CURRENT_BINARY_DIR}/../kernels
 )
+hip_kernel_provider_generate_version_header(hip_kernel_provider hip_kernel_provider_impl)
 target_link_libraries(hip_kernel_provider_impl PUBLIC hip::host hipdnn_data_sdk hipdnn_plugin_sdk hiprtc::hiprtc)
 
 target_compile_options(hip_kernel_provider_impl PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
@@ -49,8 +50,11 @@ add_clang_tidy_custom_target()
 
 # Static library for unit tests to link against (provides access to internal implementation)
 add_library(hip_kernel_provider_private STATIC $<TARGET_OBJECTS:hip_kernel_provider_impl>)
-target_include_directories(hip_kernel_provider_private PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(hip_kernel_provider_private PUBLIC hipdnn_data_sdk hipdnn_plugin_sdk hiprtc::hiprtc)
+target_include_directories(hip_kernel_provider_private PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_BINARY_DIR}/include
+)
+target_link_libraries(hip_kernel_provider_private PUBLIC hipdnn_data_sdk hipdnn_plugin_sdk hiprtc::hiprtc hip_kernel_provider_impl)
 if(ENABLE_ASM_SDPA_ENGINE)
     target_compile_definitions(hip_kernel_provider_private PUBLIC HIPDNN_ENGINE_ASM_SDPA=1)
 endif()

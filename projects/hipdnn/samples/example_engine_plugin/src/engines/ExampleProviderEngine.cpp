@@ -1,4 +1,4 @@
-// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
 #include "ExampleProviderEngine.hpp"
@@ -113,6 +113,10 @@ void ExampleProviderEngine::initializeExecutionContext(
             return;
         }
     }
+
+    throw hipdnn_plugin_sdk::HipdnnPluginException(
+        HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+        "No applicable PlanBuilder found in initializeExecutionContext");
 }
 
 void ExampleProviderEngine::addPlanBuilder(

@@ -356,11 +356,14 @@ namespace rocsparse
 
         const I col = hipBlockIdx_x;
 
-        for(I i = tid; i < nblocks; i += BLOCKSIZE)
+        for(I i = 0; i < nblocks; i += BLOCKSIZE)
         {
+            const I idx = i + tid;
+
             // Copy data to reduction buffers
-            shared_row[tid] = row_block_red[i];
-            shared_val[tid] = val_block_red[i + nblocks * col];
+            shared_row[tid] = (idx < nblocks) ? row_block_red[idx] : -1;
+            shared_val[tid]
+                = (idx < nblocks) ? val_block_red[idx + nblocks * col] : static_cast<T>(0);
 
             __syncthreads();
 

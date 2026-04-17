@@ -1,5 +1,7 @@
 #include "primbench.hpp"
 
+#include <cuda_runtime.h>
+
 // All benchmarked types must be declared
 // This allows you to for example format `long long` as `int64_t`, or `i64`
 PRIMBENCH_REGISTER_TYPE(char, "char")
@@ -54,15 +56,15 @@ struct copy_benchmark : public primbench::benchmark_interface
         primbench::log("Allocating device memory");
         T* d_input;
         T* d_output;
-        PRIMBENCH_HIP_CHECK(hipMalloc(&d_input, items * sizeof(T)));
-        PRIMBENCH_HIP_CHECK(hipMalloc(&d_output, items * sizeof(T)));
+        PRIMBENCH_CHECK(cudaMalloc(&d_input, items * sizeof(T)));
+        PRIMBENCH_CHECK(cudaMalloc(&d_output, items * sizeof(T)));
 
         primbench::log("Copying to device");
-        PRIMBENCH_HIP_CHECK(hipMemcpyAsync(d_input,
-                                           h_input.data(),
-                                           items * sizeof(T),
-                                           hipMemcpyHostToDevice,
-                                           stream));
+        PRIMBENCH_CHECK(cudaMemcpyAsync(d_input,
+                                        h_input.data(),
+                                        items * sizeof(T),
+                                        cudaMemcpyHostToDevice,
+                                        stream));
 
         dim3 grid(items / items_per_block);
         dim3 block(BlockSize);
@@ -80,8 +82,8 @@ struct copy_benchmark : public primbench::benchmark_interface
                     <<<grid, block, 0, stream>>>(d_input, d_output);
             });
 
-        PRIMBENCH_HIP_CHECK(hipFree(d_input));
-        PRIMBENCH_HIP_CHECK(hipFree(d_output));
+        PRIMBENCH_CHECK(cudaFree(d_input));
+        PRIMBENCH_CHECK(cudaFree(d_output));
     }
 };
 
