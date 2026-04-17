@@ -4931,7 +4931,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgetf2_npvt_64(rocblas_handle handle,
     @param[in]
     n           rocblas_int. n >= 0.
                 The number of columns of all matrices A_l in the batch.
-    @param[in,out]
+    @param[inout]
     A           array of pointers to type. Each pointer points to an array on the GPU of dimension lda*n.
                 On entry, the m-by-n matrices A_l to be factored.
                 On exit, the factors L_l and U_l from the factorizations.

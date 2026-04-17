@@ -102,12 +102,9 @@ static __global__
     // this thread block
     // ------------------------------------------------------
     I const nrhs = (col_end - col_start);
+    if((nrhs == 0) || (n == 0) || (batch_count == 0))
     {
-        bool const has_work_to_do = (nrhs >= 1) && (n >= 1) && (batch_count >= 1);
-        if(!has_work_to_do)
-        {
-            return;
-        }
+        return;
     }
 
     Istride const offsetB = idx2D(0, col_start, ldb);
@@ -287,12 +284,9 @@ static rocblas_status apply_diag_block(rocblas_handle handle,
 
                                        I const batch_count)
 {
+    if((n == 0) || (batch_count == 0) || (nrhs_arg == 0))
     {
-        bool const has_work_to_do = (n >= 1) && (batch_count >= 1) && (nrhs_arg >= 1);
-        if(!has_work_to_do)
-        {
-            return (rocblas_status_success);
-        }
+        return (rocblas_status_success);
     }
 
     auto ceildiv = [](auto n, auto b) { return ((n <= 0) ? 0 : (n - 1) / b + 1); };
@@ -374,19 +368,23 @@ static __global__
     auto const offsetB = idx2D(0, jstart, ldb);
 
     // -------------------------------------------
-    // NOTE: each thread block swap locally nrhs columns
+    // NOTE: each thread block swap nrhs columns locally
+    // so check value of nrhs
     // -------------------------------------------
+    if((nrhs == 0) || (n == 0) || (batch_count == 0))
     {
-        bool const has_work_to_do = (nrhs >= 1) && (n >= 1) && (batch_count >= 1);
-        if(!has_work_to_do)
-        {
-            return;
-        }
+        return;
     }
 
     // Fortran 1-based index value
     auto idx2F
         = [](auto i, auto j, auto ld) { return ((i - 1) + (j - 1) * static_cast<int64_t>(ld)); };
+
+    auto swap = [](T& x, T& y) {
+        auto const temp = x;
+        x = y;
+        y = temp;
+    };
 
     for(auto bid = 0 + bid_start; bid < batch_count; bid += bid_inc)
     {
@@ -411,9 +409,7 @@ static __global__
         auto swap_rows = [=](I const k, I const kp) {
             for(I j = 1 + ij_start; j <= nrhs; j += ij_inc)
             {
-                auto const temp = B(k, j);
-                B(k, j) = B(kp, j);
-                B(kp, j) = temp;
+                swap(B(k, j), B(kp, j));
             }
         };
 
@@ -554,12 +550,9 @@ static rocblas_status apply_pivot_upper(rocblas_handle handle,
 
                                         I const batch_count)
 {
+    if((n == 0) || (nrhs_arg == 0) || (batch_count == 0))
     {
-        bool const has_work_to_do = (n >= 1) && (nrhs_arg >= 1) && (batch_count >= 1);
-        if(!has_work_to_do)
-        {
-            return (rocblas_status_success);
-        }
+        return (rocblas_status_success);
     }
 
     auto ceildiv = [](auto const n, auto const b) { return (n <= 0) ? 0 : (((n - 1) / b + 1)); };
@@ -641,19 +634,23 @@ static __global__ __launch_bounds__(SYTRS1_MAX_THDS) void apply_pivot_lower_kern
     auto const offsetB = idx2D(0, jstart, ldb);
 
     // -------------------------------------------
-    // NOTE: each thread block swap locally nrhs columns
+    // NOTE: each thread block swap nrhs columns locally
+    // so check value of nrhs
     // -------------------------------------------
+    if((nrhs == 0) || (n == 0) || (batch_count == 0))
     {
-        bool const has_work_to_do = (nrhs >= 1) && (n >= 1) && (batch_count >= 1);
-        if(!has_work_to_do)
-        {
-            return;
-        }
+        return;
     }
 
     // Fortran 1-based index value
     auto idx2F
         = [](auto i, auto j, auto ld) { return ((i - 1) + (j - 1) * static_cast<int64_t>(ld)); };
+
+    auto swap = [](T& x, T& y) {
+        auto const temp = x;
+        x = y;
+        y = temp;
+    };
 
     for(auto bid = 0 + bid_start; bid < batch_count; bid += bid_inc)
     {
@@ -678,9 +675,7 @@ static __global__ __launch_bounds__(SYTRS1_MAX_THDS) void apply_pivot_lower_kern
         auto swap_rows = [=](I const k, I const kp) {
             for(I j = 1 + ij_start; j <= nrhs; j += ij_inc)
             {
-                auto const temp = B(k, j);
-                B(k, j) = B(kp, j);
-                B(kp, j) = temp;
+                swap(B(k, j), B(kp, j));
             }
         };
 
@@ -818,12 +813,9 @@ static rocblas_status apply_pivot_lower(rocblas_handle handle,
 
                                         I const batch_count)
 {
+    if((n == 0) || (nrhs_arg == 0) || (batch_count == 0))
     {
-        bool const has_work_to_do = (n >= 1) && (nrhs_arg >= 1) && (batch_count >= 1);
-        if(!has_work_to_do)
-        {
-            return (rocblas_status_success);
-        }
+        return (rocblas_status_success);
     }
 
     auto ceildiv = [](auto const n, auto const b) { return ((n <= 0) ? 0 : ((n - 1) / b) + 1); };
@@ -892,12 +884,9 @@ static rocblas_status sytrs1_template(rocblas_handle handle,
                                       void* const work,
                                       size_t const size_work)
 {
+    if((n == 0) || (nrhs == 0) || (batch_count == 0))
     {
-        bool const has_work_to_do = (n >= 1) && (nrhs >= 1) && (batch_count >= 1);
-        if(!has_work_to_do)
-        {
-            return (rocblas_status_success);
-        }
+        return (rocblas_status_success);
     }
 
     T const one = 1;
@@ -1344,12 +1333,10 @@ rocblas_status rocsolver_sytrs2_getMemorySize(rocblas_handle handle,
     // ----------------------------------
     // if quick return no workspace needed
     // ----------------------------------
+
+    if((n == 0) || (nrhs == 0) || (batch_count == 0))
     {
-        bool const has_work_to_do = (n >= 1) && (nrhs >= 1) && (batch_count >= 1);
-        if(!has_work_to_do)
-        {
-            return (rocblas_status_success);
-        }
+        return (rocblas_status_success);
     }
 
     size_t size_E = sizeof(T) * n * batch_count;
@@ -1458,14 +1445,19 @@ static inline rocblas_status rocsolver_sytrs2_argCheck(rocblas_handle handle,
 
                                                        I const batch_count = 1)
 {
+    // order is important for unit tests:
+
+    // ---------------
+    // 0. check handle
+    // ---------------
+    if(handle == nullptr)
     {
-        bool const is_valid_handle = (handle != nullptr);
-        if(!is_valid_handle)
-        {
-            return (rocblas_status_invalid_handle);
-        }
+        return (rocblas_status_invalid_handle);
     }
 
+    // -------------------------------
+    // 1. invalid/non-supported values
+    // -------------------------------
     {
         bool const is_value_ok = (uplo == rocblas_fill_upper) || (uplo == rocblas_fill_lower);
         if(!is_value_ok)
@@ -1474,20 +1466,15 @@ static inline rocblas_status rocsolver_sytrs2_argCheck(rocblas_handle handle,
         }
     }
 
+    // ---------------
+    // 2. invalid size
+    // ---------------
     {
         bool const is_size_ok
             = (n >= 0) && (lda >= n) && (ldb >= n) && (nrhs >= 0) && (batch_count >= 0);
         if(!is_size_ok)
         {
             return (rocblas_status_invalid_size);
-        }
-    }
-
-    {
-        bool const has_work = (n >= 1) && (nrhs >= 1) && (batch_count >= 1);
-        if(!has_work)
-        {
-            return (rocblas_status_continue);
         }
     }
 
@@ -1499,9 +1486,19 @@ static inline rocblas_status rocsolver_sytrs2_argCheck(rocblas_handle handle,
         return rocblas_status_continue;
     }
 
+    // -------------------
+    // 3. invalid pointers
+    // -------------------
+    if(n >= 1)
     {
-        bool const is_valid_pointers = (A != nullptr) && (B != nullptr) && (ipiv != nullptr);
-        if(!is_valid_pointers)
+        if((A == nullptr) || (ipiv == nullptr))
+        {
+            return (rocblas_status_invalid_pointer);
+        }
+    }
+    if((n >= 1) && (nrhs >= 1))
+    {
+        if(B == nullptr)
         {
             return (rocblas_status_invalid_pointer);
         }
@@ -1535,12 +1532,9 @@ static inline rocblas_status rocsolver_sytrs2_template(rocblas_handle handle,
                                                        void* const work,
                                                        size_t const size_work)
 {
+    if((n == 0) || (nrhs == 0) || (batch_count == 0))
     {
-        bool const has_work_to_do = (n >= 1) && (nrhs >= 1) && (batch_count >= 1);
-        if(!has_work_to_do)
-        {
-            return (rocblas_status_success);
-        }
+        return (rocblas_status_success);
     }
 
     bool const is_upper = (uplo == rocblas_fill_upper);
@@ -1644,3 +1638,4 @@ static inline rocblas_status rocsolver_sytrs2_template(rocblas_handle handle,
     return (rocblas_status_success);
 }
 ROCSOLVER_END_NAMESPACE
+#undef SYTRS1_MAX_THDS

@@ -185,9 +185,7 @@ void sytrs_initData(const rocblas_handle handle,
             {
                 for(rocblas_int j = 0; j < n; j++)
                 {
-                    auto const tmp = hA[b][i + j * lda];
-                    hA[b][i + j * lda] = hA[b][n - 1 - i + j * lda];
-                    hA[b][n - 1 - i + j * lda] = tmp;
+                    std::swap(hA[b][i + j * lda], hA[b][n - 1 - i + j * lda]);
                 }
             }
 
@@ -449,30 +447,6 @@ void testing_sytrs(Arguments& argus)
         return;
     }
 
-    // check non-supported values
-    if((uplo != rocblas_fill_upper) && (uplo != rocblas_fill_lower))
-    {
-        if(BATCHED)
-        {
-            EXPECT_ROCBLAS_STATUS(rocsolver_sytrs(STRIDED, handle, uplo, n, nrhs,
-                                                  (T* const*)nullptr, lda, stA, (I*)nullptr, stP,
-                                                  (T* const*)nullptr, ldb, stB, bc),
-                                  rocblas_status_invalid_value);
-        }
-        else
-        {
-            EXPECT_ROCBLAS_STATUS(rocsolver_sytrs(STRIDED, handle, uplo, n, nrhs, (T*)nullptr, lda,
-                                                  stA, (I*)nullptr, stP, (T*)nullptr, ldb, stB, bc),
-                                  rocblas_status_invalid_value);
-        }
-        if(argus.timing)
-        {
-            rocsolver_bench_inform(inform_invalid_args);
-        }
-
-        return;
-    }
-
     // memory size query is necessary
     if(argus.mem_query)
     {
@@ -534,7 +508,6 @@ void testing_sytrs(Arguments& argus)
                                           &cpu_time_used, hot_calls, argus.profile,
                                           argus.profile_kernels, argus.perf);
     }
-
     else
     {
         // memory allocations

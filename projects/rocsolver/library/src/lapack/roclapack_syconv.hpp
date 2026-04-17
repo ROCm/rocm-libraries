@@ -43,6 +43,19 @@ ROCSOLVER_BEGIN_NAMESPACE
 #define SYCONV_MAX_THDS 256
 #endif
 
+// -------------------------------------------------------------------------
+// SYCONV is an auxiliary computational routine that converts a complex
+// symmetric matrix A, which has already been factorized into L D L^t or U D
+// U^t by SYTRF, into a different representation where the optimized triangular
+// solver TRSM can be used. The off-diagonal entries in the 2x2 blocks are
+// stored in array "E".  The routine has an option to reverse the conversion
+// back into the original representation produced by SYTRF.
+// -------------------------------------------------------------------------
+
+// --------------------------------------------------------
+// Routine to restore from array E[] the off-diagonal entry
+// of 2x2 blocks into matrix A
+// --------------------------------------------------------
 template <typename T, typename I, typename UA, typename Istride>
 static __global__
     __launch_bounds__(SYCONV_MAX_THDS) void syconv_restore_from_E(bool const is_upper,
@@ -63,12 +76,9 @@ static __global__
 
                                                                   I const* const icount_arg)
 {
+    if((n == 0) || (batch_count == 0))
     {
-        bool const has_work_to_do = (n >= 1) && (batch_count >= 1);
-        if(!has_work_to_do)
-        {
-            return;
-        }
+        return;
     }
 
     auto idx2F
@@ -141,6 +151,10 @@ static __global__
     } // end for bid
 }
 
+//  ------------------------------------------------------
+//  Routine to copy the off-diagonal entry of 2x2 blocks into array E
+//  and zero the corresponding entry in matrix A
+//  ------------------------------------------------------
 template <typename T, typename I, typename UA, typename Istride>
 static __global__
     __launch_bounds__(SYCONV_MAX_THDS) void syconv_convert_into_E(bool const is_upper,
@@ -163,12 +177,9 @@ static __global__
 
     )
 {
+    if((n == 0) || (batch_count == 0))
     {
-        bool const has_work_to_do = (n >= 1) && (batch_count >= 1);
-        if(!has_work_to_do)
-        {
-            return;
-        }
+        return;
     }
 
     auto idx2F
@@ -257,6 +268,10 @@ static __global__
     } // end for bid
 }
 
+// --------------------------------------------------------------
+// Routine to setup array icount[] to count the number of
+// negative index entries, in preparation for the prefix sum scan
+// --------------------------------------------------------------
 template <typename I, typename Istride>
 static __global__
     __launch_bounds__(SYCONV_MAX_THDS) void syconv_setup_icount_kernel(I const n,
@@ -290,6 +305,11 @@ static __global__
     }
 }
 
+// --------------------------------------------------------------------------------------
+// Main kernel for syconv. This is called after E[] array has setup for conversion
+// or perform the recovery but the recovery of the off-diagonal entries in 2x2 blocks are
+// performed by kernel syconv_restore_from_E()
+// --------------------------------------------------------------------------------------
 template <typename T, typename I, typename UA, typename Istride>
 static __global__ __launch_bounds__(SYCONV_MAX_THDS) void syconv_kernel(
 
@@ -310,12 +330,9 @@ static __global__ __launch_bounds__(SYCONV_MAX_THDS) void syconv_kernel(
 
 )
 {
+    if((n == 0) || (batch_count == 0))
     {
-        bool const has_work = (n >= 1) && (batch_count >= 1);
-        if(!has_work)
-        {
-            return;
-        }
+        return;
     }
 
     I const bid_start = static_cast<I>(blockIdx.z);
@@ -333,7 +350,7 @@ static __global__ __launch_bounds__(SYCONV_MAX_THDS) void syconv_kernel(
     // ------------------------------------------------
     // note: this thread block handles only columns in
     // [gcol_start,gcol_end] inclusively and
-    // gcol_start using is 1-based indexing
+    // gcol_start is using 1-based indexing
     // ------------------------------------------------
     I const nb = ceildiv(n, nbx);
     I const gcol_start = 1 + ibx * nb;
@@ -344,6 +361,12 @@ static __global__ __launch_bounds__(SYCONV_MAX_THDS) void syconv_kernel(
     // ------------------------
     auto idx2F
         = [](auto i, auto j, auto ld) { return ((i - 1) + (j - 1) * static_cast<int64_t>(ld)); };
+
+    auto swap = [](T& x, T& y) {
+        auto const temp = x;
+        x = y;
+        y = temp;
+    };
 
     for(I bid = 0 + bid_start; bid < batch_count; bid += bid_inc)
     {
@@ -371,9 +394,7 @@ static __global__ __launch_bounds__(SYCONV_MAX_THDS) void syconv_kernel(
                       bool const is_in_range = (col_start <= icol) && (icol <= col_end);
                       if(is_in_range)
                       {
-                          auto const temp = A(row_k, icol);
-                          A(row_k, icol) = A(row_kp, icol);
-                          A(row_kp, icol) = temp;
+                          swap(A(row_k, icol), A(row_kp, icol));
                       }
                   }
               };
@@ -523,10 +544,6 @@ static __global__ __launch_bounds__(SYCONV_MAX_THDS) void syconv_kernel(
                     } // end while
                 }
 
-                // ----------------------
-                //           revert value
-                // ----------------------
-
             } // end if (is_revert)
         } // end if (is_upper)
         else
@@ -675,10 +692,6 @@ static __global__ __launch_bounds__(SYCONV_MAX_THDS) void syconv_kernel(
                         i = i - 1;
                     } // end while
                 }
-
-                // ------------------------
-                //             revert value
-                // ------------------------
             }
         }
         __syncthreads();
@@ -703,47 +716,51 @@ static inline rocblas_status rocsolver_syconv_argCheck(rocblas_handle handle,
                                                        void* const work,
                                                        size_t const size_work)
 {
+    // ---------------------------------
+    // order is important for unit tests:
+    // ---------------------------------
+
+    // -----------------
+    // 0. invalid handle
+    // -----------------
+    if(handle == nullptr)
     {
-        bool const is_valid_handle = (handle != nullptr);
-        if(!is_valid_handle)
-        {
-            return (rocblas_status_invalid_handle);
-        }
+        return (rocblas_status_invalid_handle);
     }
+
+    // -------------------------------
+    // 1. invalid/non-supported values
+    // -------------------------------
 
     // ---------------
-    // check arguments
+    // 2. invalid size
     // ---------------
+    bool const is_valid_size = (n >= 0) && (lda >= n) && (batch_count >= 0)
+        && (size_work >= sizeof(I) * n * batch_count);
 
+    if(!is_valid_size)
     {
-        bool const is_valid_size = (n >= 0) && (lda >= n) && (batch_count >= 0)
-            && (size_work >= sizeof(I) * n * batch_count);
-
-        if(!is_valid_size)
-        {
-            return (rocblas_status_invalid_size);
-        }
+        return (rocblas_status_invalid_size);
     }
 
+    // -----------------------------------------
+    // skip pointer check if querying memory size
+    // -----------------------------------------
+    if(rocblas_is_device_memory_size_query(handle))
     {
-        bool const has_work = (n >= 1) && (batch_count >= 1);
-        if(!has_work)
-        {
-            return (rocblas_status_success);
-        }
+        return rocblas_status_continue;
     }
 
-    {
-        bool const is_valid_pointers
-            = (A != nullptr) && (ipiv != nullptr) && (E != nullptr) && (work != nullptr);
+    // -------------------
+    // 3. invalid pointers
+    // -------------------
 
-        if(!is_valid_pointers)
-        {
-            return (rocblas_status_invalid_pointer);
-        }
+    if((n && !A) || (n && !ipiv) || (n && !E) || (n && !work))
+    {
+        return rocblas_status_invalid_pointer;
     }
 
-    return (rocblas_status_success);
+    return (rocblas_status_continue);
 }
 
 template <typename T, typename I>
@@ -755,12 +772,9 @@ static inline rocblas_status rocsolver_syconv_getMemorySize(rocblas_handle handl
 {
     *p_size_work = 0;
 
+    if((n == 0) || (batch_count == 0))
     {
-        bool const has_work_to_do = (n >= 1) && (batch_count >= 1);
-        if(!has_work_to_do)
-        {
-            return (rocblas_status_success);
-        }
+        return (rocblas_status_success);
     }
 
     size_t const size_icount = sizeof(I) * n * batch_count;
@@ -867,7 +881,8 @@ static rocblas_status rocsolver_syconv_template(rocblas_handle handle,
                                                                batch_count,
 
                                                                work, size_work);
-        if(istat != rocblas_status_success)
+        bool const is_ok = (istat == rocblas_status_success) || (istat == rocblas_status_continue);
+        if(!is_ok)
         {
             return (istat);
         }
@@ -982,49 +997,43 @@ static rocblas_status rocsolver_syconv_template(rocblas_handle handle,
     // NOTE: icount now contains the prefix sum
     // ----------------------------------------
 
+    if(is_convert)
     {
-        if(is_convert)
-        {
-            syconv_convert_into_E<T, I, UA, Istride>
-                <<<dim3(nbx, nby, nbz), dim3(nx, ny, nz), 0, stream>>>(is_upper, n, batch_count,
+        syconv_convert_into_E<T, I, UA, Istride>
+            <<<dim3(nbx, nby, nbz), dim3(nx, ny, nz), 0, stream>>>(is_upper, n, batch_count,
 
-                                                                       A, shiftA, lda, strideA,
+                                                                   A, shiftA, lda, strideA,
 
-                                                                       ipiv, strideP,
+                                                                   ipiv, strideP,
 
-                                                                       E, strideE, icount);
-        }
+                                                                   E, strideE, icount);
     }
 
+    syconv_kernel<T, I, UA><<<dim3(nbx, nby, nbz), dim3(nx, ny, nz), 0, stream>>>(
+
+        is_upper, is_convert,
+
+        n,
+
+        A, shiftA, lda, strideA,
+
+        ipiv, strideP,
+
+        batch_count);
+
+    // --------------------------------------------------
+    // restore back to format initially produced by SYTRF
+    // --------------------------------------------------
+    if(!is_convert)
     {
-        syconv_kernel<T, I, UA><<<dim3(nbx, nby, nbz), dim3(nx, ny, nz), 0, stream>>>(
+        syconv_restore_from_E<T, I, UA, Istride>
+            <<<dim3(nbx, nby, nbz), dim3(nx, ny, nz), 0, stream>>>(is_upper, n, batch_count,
 
-            is_upper, is_convert,
+                                                                   A, shiftA, lda, strideA,
 
-            n,
+                                                                   ipiv, strideP,
 
-            A, shiftA, lda, strideA,
-
-            ipiv, strideP,
-
-            batch_count);
-    }
-
-    {
-        // --------------------------------------------------
-        // restore back to format initially produced by SYTRF
-        // --------------------------------------------------
-        if(!is_convert)
-        {
-            syconv_restore_from_E<T, I, UA, Istride>
-                <<<dim3(nbx, nby, nbz), dim3(nx, ny, nz), 0, stream>>>(is_upper, n, batch_count,
-
-                                                                       A, shiftA, lda, strideA,
-
-                                                                       ipiv, strideP,
-
-                                                                       E, strideE, icount);
-        }
+                                                                   E, strideE, icount);
     }
     return (rocblas_status_success);
 }

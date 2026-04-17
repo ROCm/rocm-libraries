@@ -185,9 +185,7 @@ void sytrs2_initData(const rocblas_handle handle,
             {
                 for(rocblas_int j = 0; j < n; j++)
                 {
-                    auto const tmp = hA[b][i + j * lda];
-                    hA[b][i + j * lda] = hA[b][n - 1 - i + j * lda];
-                    hA[b][n - 1 - i + j * lda] = tmp;
+                    std::swap(hA[b][i + j * lda], hA[b][n - 1 - i + j * lda]);
                 }
             }
 
@@ -399,7 +397,28 @@ void testing_sytrs2(Arguments& argus)
     rocblas_stride stBRes = (argus.unit_check || argus.norm_check) ? stB : 0;
 
     // check non-supported values
-    // N/A
+    if((uplo != rocblas_fill_upper) && (uplo != rocblas_fill_lower))
+    {
+        if(BATCHED)
+        {
+            EXPECT_ROCBLAS_STATUS(rocsolver_sytrs2(STRIDED, handle, uplo, n, nrhs,
+                                                   (T* const*)nullptr, lda, stA, (I*)nullptr, stP,
+                                                   (T* const*)nullptr, ldb, stB, bc),
+                                  rocblas_status_invalid_value);
+        }
+        else
+        {
+            EXPECT_ROCBLAS_STATUS(rocsolver_sytrs2(STRIDED, handle, uplo, n, nrhs, (T*)nullptr, lda,
+                                                   stA, (I*)nullptr, stP, (T*)nullptr, ldb, stB, bc),
+                                  rocblas_status_invalid_value);
+        }
+        if(argus.timing)
+        {
+            rocsolver_bench_inform(inform_invalid_args);
+        }
+
+        return;
+    }
 
     // determine sizes
     size_t size_A = size_t(lda) * n;
@@ -425,30 +444,6 @@ void testing_sytrs2(Arguments& argus)
 
         if(argus.timing)
             rocsolver_bench_inform(inform_invalid_size);
-
-        return;
-    }
-
-    // check non-supported values
-    if((uplo != rocblas_fill_upper) && (uplo != rocblas_fill_lower))
-    {
-        if(BATCHED)
-        {
-            EXPECT_ROCBLAS_STATUS(rocsolver_sytrs2(STRIDED, handle, uplo, n, nrhs,
-                                                   (T* const*)nullptr, lda, stA, (I*)nullptr, stP,
-                                                   (T* const*)nullptr, ldb, stB, bc),
-                                  rocblas_status_invalid_value);
-        }
-        else
-        {
-            EXPECT_ROCBLAS_STATUS(rocsolver_sytrs2(STRIDED, handle, uplo, n, nrhs, (T*)nullptr, lda,
-                                                   stA, (I*)nullptr, stP, (T*)nullptr, ldb, stB, bc),
-                                  rocblas_status_invalid_value);
-        }
-        if(argus.timing)
-        {
-            rocsolver_bench_inform(inform_invalid_args);
-        }
 
         return;
     }
@@ -514,7 +509,6 @@ void testing_sytrs2(Arguments& argus)
                                            &cpu_time_used, hot_calls, argus.profile,
                                            argus.profile_kernels, argus.perf);
     }
-
     else
     {
         // memory allocations

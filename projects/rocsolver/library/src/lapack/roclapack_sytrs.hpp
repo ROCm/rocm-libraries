@@ -139,7 +139,7 @@ __device__ static T reduce_sum_shfl_wsize(I const wsize, T val)
 //
 // launch as dim3( nbx, 1, batch_count), dim3( SYTRS_MAX_THDS,1,1)
 //
-// nrhs_arg  columns of matrix B is spread across nbx thread blocks
+// nrhs_arg  columns of matrix B are  spread across nbx thread blocks
 // ------------------------------------------------
 
 template <typename T, typename I, typename Istride, typename UA, typename UB>
@@ -213,13 +213,16 @@ ROCSOLVER_KERNEL void __launch_bounds__(SYTRS_MAX_THDS) sytrs_kernel(bool const 
         nrhs = rhs_end - rhs_start;
     }
 
+    if((nrhs == 0) || (n == 0) || (batch_count == 0))
     {
-        bool const has_work_to_do = (nrhs >= 1) && (n >= 1) && (batch_count >= 1);
-        if(!has_work_to_do)
-        {
-            return;
-        }
+        return;
     }
+
+    auto swap = [](T& x, T& y) {
+        auto const temp = x;
+        x = y;
+        y = temp;
+    };
 
     T const one = 1;
 
@@ -293,9 +296,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(SYTRS_MAX_THDS) sytrs_kernel(bool const 
             auto const ix = (incx == 1) ? ij : ij * static_cast<int64_t>(incx);
             auto const iy = (incy == 1) ? ij : ij * static_cast<int64_t>(incy);
 
-            auto const temp = x[ix];
-            x[ix] = y[iy];
-            y[iy] = temp;
+            swap(x[ix], y[iy]);
         }
 
         __syncthreads();
@@ -307,6 +308,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(SYTRS_MAX_THDS) sytrs_kernel(bool const 
     auto sytrs_scal = [=](I const n, T const alpha, T* const x, I const incx) {
         {
             T const one = 1;
+
             bool const has_work_to_do = (n >= 1) && (alpha != one);
             if(!has_work_to_do)
             {
@@ -478,7 +480,20 @@ ROCSOLVER_KERNEL void __launch_bounds__(SYTRS_MAX_THDS) sytrs_kernel(bool const 
 
         auto ipiv = [=](auto i) -> I& { return (ipiv_bid[(i - 1)]); };
 
-        // simple heuristic
+        // -----------------------------------
+        // When each column is consistently accessed and modified by the
+        // *same* thread, then there is consistency in the memory order
+        // and the synchtread() is not needed.
+        //
+        // However, when nrhs is small, then most of the threads may be idle.
+        // In that case, we'll need a different distribution of work to threads
+        // and we'll need to call syncthread()
+        // -----------------------------------
+
+        // --------------------------------------------
+        // A simple heuristic to determine when nrhs is sufficiently large
+        // to use the algorithm for reducing number of syncthreads()
+        // --------------------------------------------
         bool use_reduce_sync = (nrhs >= warpSize);
 
         //   -------------------------------------------------------------------------------------
@@ -540,9 +555,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(SYTRS_MAX_THDS) sytrs_kernel(bool const 
         auto sytrs_swap_rows = [=](I const k, I const kp) {
             for(I j = 1 + ij_start; j <= nrhs; j += ij_inc)
             {
-                auto const temp = B(k, j);
-                B(k, j) = B(kp, j);
-                B(kp, j) = temp;
+                swap(B(k, j), B(kp, j));
             }
         };
 
@@ -1290,8 +1303,13 @@ rocblas_status rocsolver_sytrs_argCheck(rocblas_handle handle,
                                         I* const ipiv,
                                         I const batch_count = 1)
 {
+    // ----------------------------------
     // order is important for unit tests:
+    // ----------------------------------
 
+    // ---------------
+    // 0. check handle
+    // ---------------
     {
         bool const is_valid_handle = (handle != nullptr);
         if(!is_valid_handle)
@@ -1300,7 +1318,9 @@ rocblas_status rocsolver_sytrs_argCheck(rocblas_handle handle,
         }
     }
 
+    // -------------------------------
     // 1. invalid/non-supported values
+    // -------------------------------
     {
         bool const is_uplo_ok = (uplo == rocblas_fill_upper) || (uplo == rocblas_fill_lower);
         if(!is_uplo_ok)
@@ -1309,17 +1329,23 @@ rocblas_status rocsolver_sytrs_argCheck(rocblas_handle handle,
         }
     }
 
+    // ---------------
     // 2. invalid size
+    // ---------------
     if(n < 0 || nrhs < 0 || lda < n || ldb < n || batch_count < 0)
     {
         return rocblas_status_invalid_size;
     }
 
+    // ------------------------------------------
     // skip pointer check if querying memory size
+    // ------------------------------------------
     if(rocblas_is_device_memory_size_query(handle))
         return rocblas_status_continue;
 
+    // -------------------
     // 3. invalid pointers
+    // -------------------
     if((n && !A) || (n && !ipiv) || (nrhs && n && !B))
         return rocblas_status_invalid_pointer;
 
@@ -1398,13 +1424,12 @@ rocblas_status rocsolver_sytrs_template(rocblas_handle handle,
     rocblas_get_stream(handle, &stream);
 
     // quick return
+
+    if((n == 0) || (nrhs == 0) || (batch_count == 0))
     {
-        bool const has_work_to_do = (n >= 1) && (nrhs >= 1) && (batch_count >= 1);
-        if(!has_work_to_do)
-        {
-            return (rocblas_status_success);
-        }
+        return (rocblas_status_success);
     }
+
 #ifdef USE_SYTRS2
     if(use_sytrs2<T>(n, nrhs, batch_count))
     {
@@ -1472,3 +1497,4 @@ rocblas_status rocsolver_sytrs_template(rocblas_handle handle,
 }
 ROCSOLVER_END_NAMESPACE
 #undef USE_SYTRS2
+#undef SYTRS_MAX_THDS
