@@ -88,7 +88,7 @@ if( BUILD_CLIENTS_SAMPLES )
 endif( )
 
 if( BUILD_CLIENTS_TESTS )
-  find_package( GTest QUIET )
+  find_package( GTest 1.17 QUIET )
   include( ExternalProject )
   if( NOT GTest_FOUND )
     set( GTEST_INCLUDE_DIRS
