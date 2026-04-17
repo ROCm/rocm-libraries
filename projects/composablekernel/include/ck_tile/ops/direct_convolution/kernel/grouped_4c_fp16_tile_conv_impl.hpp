@@ -130,6 +130,293 @@ inline LaunchParams get_launch_params(int config_idx, const Conv2dParams& par)
     return launch;
 }
 
+// Tile constants derived from the kernel configuration.
+template <Config cfg>
+struct TileConstants
+{
+    static constexpr int MFMA_M     = 4;
+    static constexpr int MFMA_K     = 4;
+    static constexpr int MFMA_N     = 4;
+    static constexpr int MFMA_BATCH = 16;
+
+    using OperandLayout = MatrixLayout<MFMA_M, MFMA_K, MFMA_BATCH, __half>;
+    using ResultLayout  = MatrixLayout<MFMA_N, MFMA_K, MFMA_BATCH, float>;
+    using Sw            = SwizzleT<cfg.block_c()>;
+
+    static constexpr int GROUP_SIZE   = cfg.channels_per_group; // 4
+    static constexpr int GROUP_SIZE_4 = GROUP_SIZE / 4;         // 1
+
+    // Number of input columns loaded by each workgroup (output columns plus halo).
+    static constexpr int BLOCK_W = cfg.block_q() + (cfg.kw - 1);
+
+    // uint4 vectors per channel fiber (8 fp16 per uint4).
+    static constexpr int BLOCK_C8 = cfg.block_c() / 8;
+
+    // Number of uint4 vectors to store per output row.
+    static constexpr int STORE_VECS = cfg.block_q() * BLOCK_C8;
+
+    // LDS double buffering for input loads.
+    static constexpr int NUM_INPUT_LDS_BUFFERS    = 2;
+    static constexpr int INPUT_LDS_BUFFER_SIZE_C8 = BLOCK_C8 * BLOCK_W;
+    static constexpr int INPUT_LDS_BUFFER_SIZE_C4 = INPUT_LDS_BUFFER_SIZE_C8 * 2;
+    static constexpr int OUTPUT_LDS_BUFFER_SIZE   = BLOCK_C8 * cfg.block_q();
+
+    // Weight LDS staging: [kh*kw][block_groups][GROUP_SIZE] in uint2 units.
+    static constexpr int WEIGHT_LDS_SIZE_UINT2 = cfg.kh * cfg.kw * cfg.block_groups() * GROUP_SIZE;
+    static constexpr int WEIGHT_LDS_SIZE_UINT4 = WEIGHT_LDS_SIZE_UINT2 / 2;
+};
+
+// Workgroup-level coordinates derived from blockIdx.
+template <Config cfg>
+struct BlockCoords
+{
+    int block_n;
+    int block_q;
+    int block_group;
+    int block_k;
+    int block_c8;
+    int C;
+    int C8;
+
+    __device__ BlockCoords(int groups)
+        : C(groups * cfg.channels_per_group), C8(C / 8)
+    {
+        const int block_q_n_idx = blockIdx.x;
+        block_n     = static_cast<int>(blockIdx.z) * cfg.n_fold + block_q_n_idx % cfg.n_fold;
+        block_q     = (block_q_n_idx / cfg.n_fold) * cfg.block_q();
+        block_group = static_cast<int>(blockIdx.y) * cfg.block_groups();
+        block_k     = block_group * cfg.channels_per_group;
+        block_c8    = block_k / 8;
+    }
+};
+
+// Thread-level coordinates derived from threadIdx and MFMA lane mappings.
+template <Config cfg>
+struct ThreadMapping
+{
+    using TC = TileConstants<cfg>;
+
+    int tid;
+    int wave;
+    int lane;
+    int wave_c64;
+    int wave_q4;
+
+    // MFMA result coordinates for this thread.
+    int thread_q;
+    int lane_c4;
+    int lane_batch;
+
+    __device__ ThreadMapping()
+        : tid(threadIdx.x),
+          wave(tid / WAVE_SIZE),
+          lane(tid % WAVE_SIZE),
+          wave_c64(wave % cfg.waves_c64),
+          wave_q4(wave / cfg.waves_c64),
+          thread_q(wave_q4 * WARP_Q + TC::ResultLayout::outer(lane)),
+          lane_c4(TC::ResultLayout::inner(lane) / 4),
+          lane_batch(TC::ResultLayout::batch(lane))
+    {
+    }
+};
+
+// Handles asynchronous input loads from global memory into LDS.
+template <Config cfg>
+struct InputLoader
+{
+    using TC = TileConstants<cfg>;
+
+    uint4* store_input_lds;
+    decltype(ck_tile::make_builtin_buffer_resource(
+        static_cast<const _Float16*>(nullptr), uint32_t{})) input_rsrc;
+    bool load_active;
+    bool input_valid;
+    ck_tile::index_t input_voffset;
+    size_t wi_stride;
+
+    __device__ InputLoader(int tid,
+                           const BlockCoords<cfg>& bc,
+                           uint4* input_lds,
+                           const _Float16* __restrict__ in,
+                           int N,
+                           int hi,
+                           int wi,
+                           int px)
+        : store_input_lds(&input_lds[tid]),
+          input_rsrc(ck_tile::make_builtin_buffer_resource(
+              in,
+              static_cast<uint32_t>(
+                  static_cast<size_t>(N) * hi * wi * bc.C * sizeof(_Float16)))),
+          load_active(tid < TC::BLOCK_W * TC::BLOCK_C8),
+          wi_stride(static_cast<size_t>(wi) * bc.C8)
+    {
+        const int col        = TC::Sw::x(tid);
+        const int c8_thread  = TC::Sw::c8(tid);
+        const int global_col = (bc.block_q - px) + col;
+        input_valid          = (0 <= global_col && global_col < wi);
+
+        const size_t offset_block = static_cast<size_t>(bc.block_n) * hi * wi * bc.C8;
+        input_voffset = input_valid
+                            ? static_cast<ck_tile::index_t>(
+                                  (offset_block + static_cast<size_t>(global_col) * bc.C8 +
+                                   bc.block_c8 + c8_thread) *
+                                  sizeof(uint4))
+                            : 0;
+    }
+
+    // Issue an async load for input row y into the specified LDS buffer half.
+    __device__ void prefetch(int y, int lds_buffer) const
+    {
+        if(load_active)
+        {
+            ck_tile::amd_async_buffer_load<int32_t, 4>(
+                reinterpret_cast<CK_TILE_LDS_ADDR int32_t*>(
+                    store_input_lds + lds_buffer * TC::INPUT_LDS_BUFFER_SIZE_C8),
+                input_rsrc,
+                input_voffset +
+                    static_cast<ck_tile::index_t>(y * wi_stride * sizeof(uint4)),
+                0,
+                ck_tile::number<0>{},
+                input_valid);
+        }
+    }
+
+    // Issue the initial load for row 0 into LDS buffer 0.
+    __device__ void prefetch_first_row() const { prefetch(0, 0); }
+};
+
+// Handles weight loads from global memory into LDS and then into registers.
+template <Config cfg>
+struct WeightLoader
+{
+    using TC = TileConstants<cfg>;
+
+    // Load weights from global memory into LDS (output_lds is reused for weight staging).
+    __device__ static void load_to_lds(int tid,
+                                       const BlockCoords<cfg>& bc,
+                                       uint4* output_lds,
+                                       const _Float16* __restrict__ wei)
+    {
+        const auto weight_bytes = static_cast<uint32_t>(
+            static_cast<size_t>(bc.C) * cfg.kh * cfg.kw * TC::GROUP_SIZE * sizeof(_Float16));
+        auto weight_rsrc      = ck_tile::make_builtin_buffer_resource(wei, weight_bytes);
+        ck_tile::index_t base = bc.block_k * cfg.kh * cfg.kw * static_cast<ck_tile::index_t>(sizeof(uint2));
+
+        for(int j = tid; j < TC::WEIGHT_LDS_SIZE_UINT4; j += cfg.block_size())
+        {
+            ck_tile::amd_async_buffer_load<int32_t, 4,
+                ck_tile::amd_buffer_coherence_enum::coherence_default, false>(
+                reinterpret_cast<CK_TILE_LDS_ADDR int32_t*>(&output_lds[j]),
+                weight_rsrc,
+                base + j * static_cast<ck_tile::index_t>(sizeof(uint4)));
+        }
+    }
+
+    // Read weights from LDS into registers after sync.
+    __device__ static void read_from_lds(
+        fp16x4_t (&weights_reg)[cfg.kh * cfg.kw],
+        const ThreadMapping<cfg>& tm,
+        ck_tile::buffer_view<ck_tile::address_space_enum::lds, _Float16, ck_tile::index_t, true>&
+            output_lds_fp16)
+    {
+        if constexpr(cfg.direction == Direction::Dgrad)
+        {
+            using TransposeLayout = TransposeLDSLayout<4, 4, 16>;
+            const int tr_batch    = TransposeLayout::batch(tm.lane);
+            const int tr_row      = TransposeLayout::row(tm.lane);
+            int filter_local      = tm.wave_c64 * 64 + tr_batch * TC::GROUP_SIZE + tr_row;
+
+            const ck_tile::index_t weight_base =
+                filter_local * cfg.kh * cfg.kw * TC::GROUP_SIZE;
+
+            for(int khw = 0; khw < cfg.kh * cfg.kw; khw++)
+            {
+                weights_reg[khw] = output_lds_fp16.template transpose_get<ck_tile::fp16x4_t>(
+                    weight_base + khw * TC::GROUP_SIZE, 0, true);
+            }
+        }
+        else
+        {
+            auto lane_k      = TC::OperandLayout::outer(tm.lane);
+            auto lane_batch  = TC::OperandLayout::batch(tm.lane);
+            int filter_local = tm.wave_c64 * 64 + lane_batch * TC::GROUP_SIZE + lane_k;
+
+            const ck_tile::index_t weight_base = filter_local * cfg.kh * cfg.kw * 4;
+            for(int khw = 0; khw < cfg.kh * cfg.kw; khw++)
+            {
+                weights_reg[khw] = output_lds_fp16.template get<ck_tile::fp16x4_t>(
+                    weight_base + khw * 4, 0, true);
+            }
+        }
+    }
+};
+
+// Handles output staging through LDS and writing to global memory.
+template <Config cfg>
+struct OutputWriter
+{
+    using TC = TileConstants<cfg>;
+
+    bool store_active;
+    const uint4* load_output_lds;
+    uint4* store_output_global;
+    size_t wo_stride;
+    int output_lds_offset;
+
+    __device__ OutputWriter(const ThreadMapping<cfg>& tm,
+                            const BlockCoords<cfg>& bc,
+                            uint4* output_lds,
+                            _Float16* __restrict__ out,
+                            int ho,
+                            int wo)
+        : store_active(tm.tid < TC::STORE_VECS),
+          load_output_lds(nullptr),
+          store_output_global(nullptr),
+          wo_stride(static_cast<size_t>(wo) * bc.C8)
+    {
+        // Pre-compute the output LDS swizzle offset (thread-constant).
+        output_lds_offset = TC::Sw::offset_uint2(
+            tm.thread_q, tm.wave_c64 * 16 + tm.lane_batch * TC::GROUP_SIZE_4 + tm.lane_c4);
+
+        if(store_active)
+        {
+            const int col = TC::Sw::x(tm.tid);
+            const int c8  = tm.tid % TC::BLOCK_C8;
+            const int q   = bc.block_q + col;
+            load_output_lds = &output_lds[TC::Sw::offset_uint4(col, c8)];
+            if(q < wo)
+            {
+                const int K8    = bc.C / 8;
+                store_output_global =
+                    reinterpret_cast<uint4*>(out) +
+                    static_cast<size_t>(bc.block_n) * ho * wo * K8 +
+                    static_cast<size_t>(q) * K8 + bc.block_c8 + c8;
+            }
+        }
+    }
+
+    // Convert fp32x4 accumulator to fp16x4 and write through LDS to global memory.
+    __device__ void flush(
+        fp32x4_t acc_val,
+        int p_out,
+        ck_tile::buffer_view<ck_tile::address_space_enum::lds, _Float16, ck_tile::index_t, true>&
+            output_lds_fp16) const
+    {
+        __half2 halves[2];
+        halves[0]    = __float22half2_rn({acc_val[0], acc_val[1]});
+        halves[1]    = __float22half2_rn({acc_val[2], acc_val[3]});
+        auto out_reg = *reinterpret_cast<const fp16x4_t*>(halves);
+
+        output_lds_fp16.template set<ck_tile::fp16x4_t>(
+            output_lds_offset * 4, 0, true, out_reg);
+
+        __syncthreads();
+
+        if(store_output_global)
+            store_output_global[p_out * wo_stride] = *load_output_lds;
+    }
+};
+
 template <Config cfg>
 __device__ void conv2d_grouped_4c_fp16_cdna4_nhwc_impl(const _Float16* __restrict__ in,
                                                        const _Float16* __restrict__ wei,
@@ -153,237 +440,58 @@ __device__ void conv2d_grouped_4c_fp16_cdna4_nhwc_impl(const _Float16* __restric
                                                        int py,
                                                        int px)
 {
-    // We will use the 4x4x4 matrix, batch size 16 matrix multiply instruction.
-    constexpr int MFMA_M     = 4;
-    constexpr int MFMA_K     = 4;
-    constexpr int MFMA_N     = 4;
-    constexpr int MFMA_BATCH = 16;
-    using OperandLayout      = MatrixLayout<MFMA_M, MFMA_K, MFMA_BATCH, __half>;
-    using ResultLayout       = MatrixLayout<MFMA_N, MFMA_K, MFMA_BATCH, float>;
+    using TC = TileConstants<cfg>;
+    using Sw = typename TC::Sw;
 
-    constexpr int GROUP_SIZE = cfg.channels_per_group; // 4
+    // --- LDS buffers ---
+    __shared__ uint4 input_lds[TC::NUM_INPUT_LDS_BUFFERS * TC::INPUT_LDS_BUFFER_SIZE_C8];
+    __shared__ uint4 output_lds[maximum(TC::WEIGHT_LDS_SIZE_UINT4, TC::OUTPUT_LDS_BUFFER_SIZE)];
 
-    constexpr int GROUP_SIZE_4 = GROUP_SIZE / 4; // 1
-
-    // Number of input columns loaded by each workgroup (output columns plus halo)
-    constexpr int BLOCK_W = cfg.block_q() + (cfg.kw - 1);
-
-    // uint4 vectors per channels fiber - load in units of 8 channels
-    // uint4 = 8 fp16 elements, so BLOCK_C8 = number of uint4 elements per channel tile
-    constexpr int BLOCK_C8 = cfg.block_c() / 8;
-
-    // Vectors to store (output tensor)
-    constexpr int STORE_VECS = cfg.block_q() * BLOCK_C8;
-
-    // LDS double buffering approach for reading input tensor from global memory
-    constexpr int NUM_INPUT_LDS_BUFFERS = 2;
-
-    // Size of LDS buffer for inputs (num uint4 elements)
-    constexpr int INPUT_LDS_BUFFER_SIZE_C8 = BLOCK_C8 * BLOCK_W;
-
-    // Size of the LDS buffer for half vector size (uint2 units)
-    constexpr int INPUT_LDS_BUFFER_SIZE_C4 = INPUT_LDS_BUFFER_SIZE_C8 * 2;
-
-    // Size of LDS buffer for outputs (num elements)
-    constexpr int OUTPUT_LDS_BUFFER_SIZE = BLOCK_C8 * cfg.block_q();
-
-    // Size of LDS buffer for weight staging: [kh*kw][block_groups][GROUP_SIZE] in uint2 units.
-    constexpr int WEIGHT_LDS_SIZE_UINT2 = cfg.kh * cfg.kw * cfg.block_groups() * GROUP_SIZE;
-    constexpr int WEIGHT_LDS_SIZE_UINT4 = WEIGHT_LDS_SIZE_UINT2 / 2;
-
-    // LDS buffer for staging loads from global memory.
-    __shared__ uint4 input_lds[NUM_INPUT_LDS_BUFFERS * INPUT_LDS_BUFFER_SIZE_C8];
-
-    // LDS buffer for weight staging (prologue) and output staging (main loop).
-    __shared__ uint4 output_lds[maximum(WEIGHT_LDS_SIZE_UINT4, OUTPUT_LDS_BUFFER_SIZE)];
-
-    // Typed LDS buffer views for structured access.
     auto input_lds_fp16 =
         ck_tile::buffer_view<ck_tile::address_space_enum::lds, _Float16, ck_tile::index_t, true>{
             reinterpret_cast<_Float16*>(input_lds),
             static_cast<ck_tile::index_t>(
-                NUM_INPUT_LDS_BUFFERS * INPUT_LDS_BUFFER_SIZE_C8 * (sizeof(uint4) / sizeof(_Float16)))};
+                TC::NUM_INPUT_LDS_BUFFERS * TC::INPUT_LDS_BUFFER_SIZE_C8 *
+                (sizeof(uint4) / sizeof(_Float16)))};
 
     auto output_lds_fp16 =
         ck_tile::buffer_view<ck_tile::address_space_enum::lds, _Float16, ck_tile::index_t, true>{
             reinterpret_cast<_Float16*>(output_lds),
             static_cast<ck_tile::index_t>(
-                maximum(WEIGHT_LDS_SIZE_UINT4, OUTPUT_LDS_BUFFER_SIZE) *
+                maximum(TC::WEIGHT_LDS_SIZE_UINT4, TC::OUTPUT_LDS_BUFFER_SIZE) *
                 (sizeof(uint4) / sizeof(_Float16)))};
 
-    const int tid  = threadIdx.x;
-    const int wave = tid / WAVE_SIZE;
-    const int lane = tid % WAVE_SIZE;
-
-    // Workgroup coordinates.
-    const int block_q_n_idx   = blockIdx.x;
-    const int block_n_mod_idx = block_q_n_idx % cfg.n_fold;
-    const int block_q_idx     = block_q_n_idx / cfg.n_fold;
-    const int block_group_idx = blockIdx.y;
-    const int block_n_div_idx = blockIdx.z;
-    const int block_n_idx     = block_n_div_idx * cfg.n_fold + block_n_mod_idx;
-    if(block_n_idx >= N)
+    // --- Coordinate setup ---
+    BlockCoords<cfg> bc(groups);
+    if(bc.block_n >= N)
         return;
 
-    const int block_n     = block_n_idx;
-    const int block_q     = block_q_idx * cfg.block_q();
-    const int block_group = block_group_idx * cfg.block_groups();
-    const int block_k     = block_group * GROUP_SIZE;
-    const int block_c8    = block_k / 8; // in uint4 units
+    ThreadMapping<cfg> tm;
+    InputLoader<cfg> il(tm.tid, bc, input_lds, in, N, hi, wi, px);
+    OutputWriter<cfg> ow(tm, bc, output_lds, out, ho, wo);
 
-    // Base pointer for this batch image in NHWC layout (all in uint4 units)
-    const int C  = groups * GROUP_SIZE;
-    const int C8 = C / 8;
-
-    const size_t offset_block = (size_t)block_n * hi * wi * C8;
-    const size_t wi_stride    = (size_t)wi * C8;
-    const size_t wo_stride    = (size_t)wo * C8;
-
-    // Map threads to LDS input buffer addresses linearly.
-    // This supports __builtin_amdgcn_raw_ptr_buffer_load_lds
-    auto store_input_lds = &input_lds[tid];
-
-    // Create the input buffer resource using the CK Tile wrapper.
-    // make_builtin_buffer_resource sets the architecture-appropriate data format bits.
-    const auto input_bytes = static_cast<uint32_t>(
-        static_cast<size_t>(N) * hi * wi * C * sizeof(_Float16));
-    auto input_rsrc = ck_tile::make_builtin_buffer_resource(in, input_bytes);
-
-    // Map threads to global memory input buffer using a swizzle.
-    using Sw             = SwizzleT<cfg.block_c()>;
-    const int col        = Sw::x(tid);
-    const int c8_thread  = Sw::c8(tid);
-    const int global_col = (block_q - px) + col;
-    // Trailing threads in partial waves are masked by EXEC (buffer_load_lds
-    // honors the active mask; see ISA §9.1.9 "Memory Buffer Load to LDS").
-    const bool load_active = (tid < (BLOCK_W)*BLOCK_C8);
-
-    // Byte offset into the input buffer for this thread's column.
-    // input_valid tracks whether the column is in-bounds; OOB threads pass
-    // flag=false to amd_async_buffer_load which sets voffset = 0x7fffffff.
-    const bool input_valid = (0 <= global_col && global_col < wi);
-    const ck_tile::index_t input_voffset =
-        input_valid
-            ? static_cast<ck_tile::index_t>(
-                  (offset_block + (size_t)global_col * C8 + block_c8 + c8_thread) * sizeof(uint4))
-            : 0;
-
-    // Load weights from global memory through LDS into registers.
-    // Global layout: wei[k][kh*kw] in uint2 units (GROUP_SIZE_4 = 1).
-    // LDS mirrors the global layout: contiguous block of block_c * kh*kw uint2 elements.
+    // --- Weight prologue: global → LDS → registers ---
     fp16x4_t weights_reg[cfg.kh * cfg.kw];
-    {
-        const auto weight_bytes = static_cast<uint32_t>(
-            static_cast<size_t>(C) * cfg.kh * cfg.kw * GROUP_SIZE * sizeof(_Float16));
-        auto weight_rsrc = ck_tile::make_builtin_buffer_resource(wei, weight_bytes);
-        ck_tile::index_t voffset_base = block_k * cfg.kh * cfg.kw * sizeof(uint2);
-
-        for(int j = tid; j < WEIGHT_LDS_SIZE_UINT4; j += cfg.block_size())
-        {
-            // Weights are always in-bounds by construction; disable OOB check.
-            ck_tile::amd_async_buffer_load<int32_t, 4,
-                ck_tile::amd_buffer_coherence_enum::coherence_default, false>(
-                reinterpret_cast<CK_TILE_LDS_ADDR int32_t*>(&output_lds[j]),
-                weight_rsrc,
-                voffset_base + j * static_cast<ck_tile::index_t>(sizeof(uint4)));
-        }
-    }
-
-    // Load first chunk of inputs asynchronously.
-    if(load_active)
-    {
-        ck_tile::amd_async_buffer_load<int32_t, 4>(
-            reinterpret_cast<CK_TILE_LDS_ADDR int32_t*>(store_input_lds),
-            input_rsrc,
-            input_voffset,
-            0,
-            ck_tile::number<0>{},
-            input_valid);
-    }
-
-    // Each wave computes 16 groups of channels and 4 columns of the output tensor.
-    auto wave_c64 = wave % cfg.waves_c64;
-    auto wave_q4  = wave / cfg.waves_c64;
-
-    // Map lanes to MFMA matrix coordinates, incorporating the wave's Q offset.
-    const int thread_q   = wave_q4 * WARP_Q + ResultLayout::outer(lane);
-    const int lane_c4    = ResultLayout::inner(lane) / 4;
-    const int lane_batch = ResultLayout::batch(lane);
-
-    // Map threads to output addresses for transferring through LDS to global memory.
-    const bool store_active      = (tid < STORE_VECS);
-    const uint4* load_output_lds = nullptr;
-    uint4* store_output_global   = nullptr;
-    if(store_active)
-    {
-        const int c8    = tid % BLOCK_C8;
-        const int q     = block_q + col;
-        load_output_lds = &output_lds[Sw::offset_uint4(col, c8)];
-        if(q < wo)
-        {
-            const int K8        = C / 8;
-            store_output_global = reinterpret_cast<uint4*>(out) + (size_t)block_n * ho * wo * K8 +
-                                  (size_t)q * K8 + block_c8 + c8;
-        }
-    }
+    WeightLoader<cfg>::load_to_lds(tm.tid, bc, output_lds, wei);
+    il.prefetch_first_row();
 
     {
-        // Wait for all buffer_load_lds operations (weights + first input chunk)
-        // to complete before reading from LDS.
         wait_vmcnt<0>();
         __syncthreads();
-
-        if constexpr(cfg.direction == Direction::Dgrad)
-        {
-            using TransposeLayout = TransposeLDSLayout<4, 4, 16>;
-            const int tr_batch    = TransposeLayout::batch(lane);
-            const int tr_row      = TransposeLayout::row(lane);
-            int filter_local      = wave_c64 * 64 + tr_batch * GROUP_SIZE + tr_row;
-
-            // Weight base in fp16 units: filter_local * kh * kw * GROUP_SIZE.
-            const ck_tile::index_t weight_base_fp16 =
-                filter_local * cfg.kh * cfg.kw * GROUP_SIZE;
-
-            for(int khw = 0; khw < cfg.kh * cfg.kw; khw++)
-            {
-                weights_reg[khw] = output_lds_fp16.template transpose_get<ck_tile::fp16x4_t>(
-                    weight_base_fp16 + khw * GROUP_SIZE, 0, true);
-            }
-        }
-        else
-        {
-            auto lane_k      = OperandLayout::outer(lane);
-            auto lane_batch  = OperandLayout::batch(lane);
-            int filter_local = wave_c64 * 64 + lane_batch * GROUP_SIZE + lane_k;
-
-            // Weight base in fp16 units: filter_local * kh * kw * 4 (uint2 = 4 fp16).
-            const ck_tile::index_t weight_base_fp16 =
-                filter_local * cfg.kh * cfg.kw * 4;
-            for(int khw = 0; khw < cfg.kh * cfg.kw; khw++)
-            {
-                weights_reg[khw] = output_lds_fp16.template get<ck_tile::fp16x4_t>(
-                    weight_base_fp16 + khw * 4, 0, true);
-            }
-        }
+        WeightLoader<cfg>::read_from_lds(weights_reg, tm, output_lds_fp16);
     }
 
-    // Pre-compute the kw input LDS offsets (uint2 units) for this thread.
-    // lane_q, wave_group, and lane_c4 are constant per thread; hoisting avoids
-    // recomputing the swizzle (which contains %) inside the hot loop.
+    // --- Pre-compute per-thread LDS offsets ---
     int input_lds_offsets[cfg.kw];
     static_for<cfg.kw>(
         [&]<int S>()
         {
-            input_lds_offsets[S] =
-                Sw::offset_uint2(thread_q + S, wave_c64 * 16 + lane_batch * GROUP_SIZE_4 + lane_c4);
+            input_lds_offsets[S] = Sw::offset_uint2(
+                tm.thread_q + S,
+                tm.wave_c64 * 16 + tm.lane_batch * TC::GROUP_SIZE_4 + tm.lane_c4);
         });
 
-    // Pre-compute the output LDS swizzle offset (thread-constant).
-    const int output_lds_offset =
-        Sw::offset_uint2(thread_q, wave_c64 * 16 + lane_batch * GROUP_SIZE_4 + lane_c4);
-
-
-    // Circular buffer of accumulators.
+    // --- Circular accumulator buffer ---
     constexpr auto Zero = fp32x4_t{0.f, 0.f, 0.f, 0.f};
     fp32x4_t acc[cfg.kh];
     for(int i = 0; i < cfg.kh; i++)
@@ -392,12 +500,9 @@ __device__ void conv2d_grouped_4c_fp16_cdna4_nhwc_impl(const _Float16* __restric
     int tic = 1;
     int toc = 0;
 
-    // Main loop iterates over input rows.
+    // --- Main loop: iterate over input rows ---
     for(int y_base = 0; y_base + cfg.kh <= hi; y_base += cfg.kh)
     {
-        // Inner loop unrolls the main loop by a factor of kh, the number of filter rows.
-        // static_for makes the loop indices compile-time constants.
-
         static_for<cfg.kh>(
             [&]<int Y_LOCAL>()
             {
@@ -405,35 +510,21 @@ __device__ void conv2d_grouped_4c_fp16_cdna4_nhwc_impl(const _Float16* __restric
                 __syncthreads();
 
                 int y = y_base + Y_LOCAL;
+                if((y + 1) < hi)
+                    il.prefetch(y + 1, tic);
 
-                if(load_active && (y + 1) < hi)
-                {
-                    ck_tile::amd_async_buffer_load<int32_t, 4>(
-                        reinterpret_cast<CK_TILE_LDS_ADDR int32_t*>(
-                            store_input_lds + tic * INPUT_LDS_BUFFER_SIZE_C8),
-                        input_rsrc,
-                        input_voffset +
-                            static_cast<ck_tile::index_t>((y + 1) * wi_stride * sizeof(uint4)),
-                        0,
-                        ck_tile::number<0>{},
-                        input_valid);
-                }
-
+                // Accumulate MFMA products over filter width.
                 static_for<cfg.kw>(
                     [&]<int S>()
                     {
                         auto input_reg = input_lds_fp16.template get<ck_tile::fp16x4_t>(
                             0,
-                            (toc * INPUT_LDS_BUFFER_SIZE_C4 + input_lds_offsets[S]) * 4,
+                            (toc * TC::INPUT_LDS_BUFFER_SIZE_C4 + input_lds_offsets[S]) * 4,
                             true);
 
                         static_for<cfg.kh>(
                             [&]<int R>()
                             {
-                                // Compute the position of the output row in the circular buffer of
-                                // accumulators. This is a constexpr because of the Y_LOCAL and R
-                                // are compile-time constants. Therefore acc[p_idx] compiles to a
-                                // register address.
                                 constexpr int p_idx = (Y_LOCAL - R + cfg.kh) % cfg.kh;
                                 if constexpr(cfg.direction == Direction::Dgrad)
                                     acc[p_idx] = __builtin_amdgcn_mfma_f32_4x4x4f16(
@@ -457,29 +548,16 @@ __device__ void conv2d_grouped_4c_fp16_cdna4_nhwc_impl(const _Float16* __restric
                 tic ^= 1;
                 toc ^= 1;
 
+                // Flush completed output row.
                 constexpr int P_FLUSH = (Y_LOCAL + 1) % cfg.kh;
                 int p_out             = y + py - (cfg.kh - 1);
                 if(p_out >= 0 && p_out < ho)
-                {
-                    __half2 halves[2];
-                    halves[0]    = __float22half2_rn({acc[P_FLUSH][0], acc[P_FLUSH][1]});
-                    halves[1]    = __float22half2_rn({acc[P_FLUSH][2], acc[P_FLUSH][3]});
-                    auto out_reg = *reinterpret_cast<const fp16x4_t*>(halves);
-
-                    output_lds_fp16.template set<ck_tile::fp16x4_t>(
-                        output_lds_offset * 4, 0, true, out_reg);
-
-                    __syncthreads(); // load_output_lds fully written
-
-                    if(store_output_global)
-                        store_output_global[p_out * wo_stride] = *load_output_lds;
-                }
+                    ow.flush(acc[P_FLUSH], p_out, output_lds_fp16);
                 acc[P_FLUSH] = Zero;
             });
     }
 
-    // Remainder: the hi % kh leftover rows share the same structure as the main
-    // loop — y_base is a multiple of kh so Y_LOCAL = y % kh, giving constexpr P.
+    // --- Remainder loop: hi % kh leftover rows ---
     {
         int y_rem_base = (hi / cfg.kh) * cfg.kh;
         static_for<cfg.kh>(
@@ -492,25 +570,15 @@ __device__ void conv2d_grouped_4c_fp16_cdna4_nhwc_impl(const _Float16* __restric
                 wait_vmcnt<0>();
                 __syncthreads();
 
-                if(load_active && (y + 1) < hi)
-                {
-                    ck_tile::amd_async_buffer_load<int32_t, 4>(
-                        reinterpret_cast<CK_TILE_LDS_ADDR int32_t*>(
-                            store_input_lds + tic * INPUT_LDS_BUFFER_SIZE_C8),
-                        input_rsrc,
-                        input_voffset +
-                            static_cast<ck_tile::index_t>((y + 1) * wi_stride * sizeof(uint4)),
-                        0,
-                        ck_tile::number<0>{},
-                        input_valid);
-                }
+                if((y + 1) < hi)
+                    il.prefetch(y + 1, tic);
 
                 static_for<cfg.kw>(
                     [&]<int S>()
                     {
                         fp16x4_t input_reg = input_lds_fp16.template get<ck_tile::fp16x4_t>(
                             0,
-                            (toc * INPUT_LDS_BUFFER_SIZE_C4 + input_lds_offsets[S]) * 4,
+                            (toc * TC::INPUT_LDS_BUFFER_SIZE_C4 + input_lds_offsets[S]) * 4,
                             true);
 
                         static_for<cfg.kh>(
@@ -542,32 +610,15 @@ __device__ void conv2d_grouped_4c_fp16_cdna4_nhwc_impl(const _Float16* __restric
                 constexpr int P_FLUSH = (Y_LOCAL + 1) % cfg.kh;
                 int p_out             = y + py - (cfg.kh - 1);
                 if(p_out >= 0 && p_out < ho)
-                {
-                    __half2 halves[2];
-                    halves[0]    = __float22half2_rn({acc[P_FLUSH][0], acc[P_FLUSH][1]});
-                    halves[1]    = __float22half2_rn({acc[P_FLUSH][2], acc[P_FLUSH][3]});
-                    auto out_reg = *reinterpret_cast<const fp16x4_t*>(halves);
-
-                    output_lds_fp16.template set<ck_tile::fp16x4_t>(
-                        output_lds_offset * 4, 0, true, out_reg);
-
-                    __syncthreads(); // output_lds fully written
-
-                    if(store_output_global)
-                        store_output_global[p_out * wo_stride] = *load_output_lds;
-                }
+                    ow.flush(acc[P_FLUSH], p_out, output_lds_fp16);
                 acc[P_FLUSH] = Zero;
             });
     }
 
-    // Flush output rows whose last input contribution (at filter row kh-1) would land at
-    // y >= hi (out of bounds). These rows were never flushed by the main/remainder loops.
-    // An output row p_out is last touched at input row y = p_out + kh-1 - py; it needs
-    // flushing when that y >= hi, i.e. p_out >= hi - kh + 1 + py.
-    //
+    // --- Tail flush: output rows not flushed by the main/remainder loops ---
     for(int p_out = hi - cfg.kh + 1 + py; p_out < ho; p_out++)
     {
-        __syncthreads(); // separate prior LDS reads from this iteration's writes
+        __syncthreads();
         int p_idx = (p_out - py + cfg.kh) % cfg.kh;
         fp32x4_t slot;
         dispatch<cfg.kh>(p_idx,
@@ -576,19 +627,7 @@ __device__ void conv2d_grouped_4c_fp16_cdna4_nhwc_impl(const _Float16* __restric
                              slot   = acc[P];
                              acc[P] = Zero;
                          });
-
-        __half2 halves[2];
-        halves[0]    = __float22half2_rn({slot[0], slot[1]});
-        halves[1]    = __float22half2_rn({slot[2], slot[3]});
-        auto out_reg = *reinterpret_cast<const fp16x4_t*>(halves);
-
-        output_lds_fp16.template set<ck_tile::fp16x4_t>(
-            output_lds_offset * 4, 0, true, out_reg);
-
-        __syncthreads(); // output_lds fully written
-
-        if(store_output_global)
-            store_output_global[p_out * wo_stride] = *load_output_lds;
+        ow.flush(slot, p_out, output_lds_fp16);
     }
 }
 
