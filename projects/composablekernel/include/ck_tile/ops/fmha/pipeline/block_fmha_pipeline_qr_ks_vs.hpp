@@ -41,6 +41,8 @@ struct BlockFmhaPipelineQRKSVS
 
     template <typename T>
     using has_partial_k_support = decltype(T::kSupportsPartialK);
+    template <typename T>
+    using has_partial_n_support = decltype(T::kSupportsPartialN);
 
     using BlockFmhaShape             = remove_cvref_t<typename Problem::BlockFmhaShape>;
     using VLayout                    = remove_cvref_t<typename BlockFmhaShape::VLayout>;
@@ -89,8 +91,6 @@ struct BlockFmhaPipelineQRKSVS
                   (!CK_TILE_FMHA_FWD_FAST_EXP2 && !kHasLogitsSoftCap));
     static_assert(!kPaddedVecLoadStore || (kPadHeadDimQ && kPadHeadDimV),
                   "padded vector load/store fast path only applies to padded head-dim kernels");
-    static_assert(!(kPadHeadDimV && QScaleEnum == BlockAttentionQuantScaleEnum::MX),
-                  "MX with padded hdim_v is not supported yet");
 
     // last dimension vector length used to create tensor view(and decide buffer_load vector length)
     // ... together with tensor distribution. tensor dist should able to overwrite this
@@ -273,9 +273,16 @@ struct BlockFmhaPipelineQRKSVS
         constexpr auto gemm_0                      = Policy::template GetQKBlockGemm<Problem>();
         constexpr auto gemm_1                      = Policy::template GetKVBlockGemm<Problem>();
         using BlockGemm0                           = remove_cvref_t<decltype(gemm_0)>;
+        using BlockGemm1                           = remove_cvref_t<decltype(gemm_1)>;
         constexpr bool kBlockGemm0SupportsPartialK = [] {
             if constexpr(ck_tile::is_detected<has_partial_k_support, BlockGemm0>::value)
                 return static_cast<bool>(BlockGemm0::kSupportsPartialK);
+            else
+                return false;
+        }();
+        constexpr bool kBlockGemm1SupportsPartialN = [] {
+            if constexpr(ck_tile::is_detected<has_partial_n_support, BlockGemm1>::value)
+                return static_cast<bool>(BlockGemm1::kSupportsPartialN);
             else
                 return false;
         }();
@@ -285,7 +292,7 @@ struct BlockFmhaPipelineQRKSVS
         using Gemm0WarpGemm           = remove_cvref_t<decltype(gemm_0_config.template at<0>())>;
         constexpr index_t kGemm0WarpK = Gemm0WarpGemm::kK;
         constexpr index_t kGemm0KItersPerBlock = kK0 / kGemm0WarpK;
-        constexpr bool kUsePartialKForTail =
+        constexpr bool kUsePartialKForGemm0Tail =
             kPadHeadDimQ && kBlockGemm0SupportsPartialK && (kGemm0KItersPerBlock > 1);
 
         auto q_dram_window = make_tile_window(q_dram_block_window_tmp.get_bottom_tensor_view(),
@@ -455,8 +462,8 @@ struct BlockFmhaPipelineQRKSVS
         // Number of k0 iterations prefetched ahead of the current compute iteration.
         // The skip decision must be made this many iterations before the last k0 loop.
         constexpr index_t kK0PrefetchDepth = 2;
-        const index_t tail_k_iters         = [&]() {
-            if constexpr(kUsePartialKForTail)
+        const index_t gemm0_tail_k_iters   = [&]() {
+            if constexpr(kUsePartialKForGemm0Tail)
             {
                 return ck_tile::integer_divide_ceil(valid_last_k0_length, kGemm0WarpK);
             }
@@ -563,16 +570,16 @@ struct BlockFmhaPipelineQRKSVS
             }
 
             auto run_gemm_0 = [&](auto i_k0) {
-                if constexpr(kUsePartialKForTail)
+                if constexpr(kUsePartialKForGemm0Tail)
                 {
                     if(static_cast<index_t>(i_k0.value) == (valid_k0_loops - 1) &&
-                       tail_k_iters < kGemm0KItersPerBlock)
+                       gemm0_tail_k_iters < kGemm0KItersPerBlock)
                     {
                         static_for<1, kGemm0KItersPerBlock, 1>{}([&](auto i_tail_k_iter) {
                             constexpr index_t kTailKIters = i_tail_k_iter;
                             constexpr index_t kTailK0     = kTailKIters * kGemm0WarpK;
 
-                            if(tail_k_iters == kTailKIters)
+                            if(gemm0_tail_k_iters == kTailKIters)
                             {
                                 using Gemm0TailProblem = BlockGemmProblem<
                                     QDataType,
@@ -1034,23 +1041,30 @@ struct BlockFmhaPipelineQRKSVS
             auto o_acc0 = decltype(o_acc){};
             clear_tile(o_acc0);
 
-            auto run_gemm_1_impl = [&](auto& o_acc_tensor, const auto& p_slice) {
-                if constexpr(kPadHeadDimV)
+            constexpr auto gemm_1_config =
+                BlockGemm1::Policy::template GetWarpGemmMWarpNWarp<Problem>();
+            using Gemm1WarpGemm = remove_cvref_t<decltype(gemm_1_config.template at<0>())>;
+            constexpr index_t kGemm1NWarp    = gemm_1_config.template at<2>();
+            constexpr index_t kGemm1NPerIter = kGemm1NWarp * Gemm1WarpGemm::kN;
+            const index_t valid_n_iters      = [&]() {
+                if constexpr(kPadHeadDimV && kBlockGemm1SupportsPartialN)
                 {
-                    constexpr auto gemm_1_config =
-                        decltype(gemm_1)::Policy::template GetWarpGemmMWarpNWarp<Problem>();
-                    using Gemm1WarpGemm = remove_cvref_t<decltype(gemm_1_config.template at<0>())>;
-                    constexpr index_t kGemm1NWarp    = gemm_1_config.template at<2>();
-                    constexpr index_t kGemm1NPerIter = kGemm1NWarp * Gemm1WarpGemm::kN;
-                    const index_t valid_n_iters =
-                        ck_tile::integer_divide_ceil(valid_n1_length, kGemm1NPerIter);
-                    gemm_1(o_acc_tensor, p_slice, v_lds_window, valid_n_iters);
+                    return ck_tile::integer_divide_ceil(valid_n1_length, kGemm1NPerIter);
                 }
-                else
-                {
-                    gemm_1(o_acc_tensor, p_slice, v_lds_window);
-                }
-            };
+                return static_cast<index_t>(0);
+            }();
+
+            auto run_gemm_1_impl =
+                [&](auto& o_acc_tensor, const auto& p_slice, const auto&... gemm_1_args) {
+                    if constexpr(kPadHeadDimV && kBlockGemm1SupportsPartialN)
+                    {
+                        gemm_1(o_acc_tensor, p_slice, gemm_1_args..., valid_n_iters);
+                    }
+                    else
+                    {
+                        gemm_1(o_acc_tensor, p_slice, gemm_1_args...);
+                    }
+                };
 
             auto run_gemm_1 = [&](auto i_k1) {
                 auto p_slice =
@@ -1061,17 +1075,18 @@ struct BlockFmhaPipelineQRKSVS
                         get_slice_tile(p_scale,
                                        sequence<0, i_k1*(kK1 / kVScaleGranularity)>{},
                                        sequence<kM0, (i_k1 + 1) * (kK1 / kVScaleGranularity)>{});
-                    gemm_1(o_acc, p_slice, p_scale_slice, v_lds_window, v_scale_block_tile);
+                    run_gemm_1_impl(
+                        o_acc, p_slice, p_scale_slice, v_lds_window, v_scale_block_tile);
                 }
                 else
                 {
                     if constexpr(QScaleEnum == BlockAttentionQuantScaleEnum::BLOCKSCALE)
                     {
-                        run_gemm_1_impl(o_acc0, p_slice);
+                        run_gemm_1_impl(o_acc0, p_slice, v_lds_window);
                     }
                     else
                     {
-                        run_gemm_1_impl(o_acc, p_slice);
+                        run_gemm_1_impl(o_acc, p_slice, v_lds_window);
                     }
                 }
             };

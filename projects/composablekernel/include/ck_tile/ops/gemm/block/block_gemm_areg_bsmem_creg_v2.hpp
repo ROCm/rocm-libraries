@@ -23,6 +23,7 @@ struct BlockGemmARegBSmemCRegV2
 
     static constexpr index_t kBlockSize     = Problem::kBlockSize;
     static constexpr bool kSupportsPartialK = true;
+    static constexpr bool kSupportsPartialN = true;
 
     template <bool UsePartialN,
               typename CBlockTensor,
