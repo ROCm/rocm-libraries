@@ -733,19 +733,11 @@ def cmake_build(Map conf=[:]){
         }
 
         //run tests except when NO_CK_BUILD is set
-<<<<<<< HEAD
-        if(!setup_args.contains("NO_CK_BUILD")){
-=======
-        if(!setup_args.contains("NO_CK_BUILD")  && !setup_args.contains("gfx1250") && !setup_args.contains("gfx13")){
-            sh "python3 ../script/ninja_json_converter.py .ninja_log --legacy-format --output ck_build_trace_${arch_name}.json"
-            archiveArtifacts "ck_build_trace_${arch_name}.json"
-            sh "python3 ../script/parse_ninja_trace.py ck_build_trace_${arch_name}.json"
->>>>>>> gfx1310
+        if(!setup_args.contains("NO_CK_BUILD") && !setup_args.contains("gfx1250") && !setup_args.contains("gfx13")){
             if (params.NINJA_BUILD_TRACE || params.BUILD_INSTANCES_ONLY){
                 // do not run unit tests when building instances only
                 if(!params.BUILD_INSTANCES_ONLY){
                     if (!runAllUnitTests){
-<<<<<<< HEAD
                         // Smart Build: Run smart_build_and_test.sh
                         sh """
                             export WORKSPACE_ROOT=${env.WORKSPACE}
@@ -763,10 +755,6 @@ def cmake_build(Map conf=[:]){
                         }
                         if (fileExists("clang_build_analysis_${arch_name}.log")) {
                             archiveArtifacts "clang_build_analysis_${arch_name}.log"
-=======
-                        gitStatusWrapper(credentialsId: "${ck_githubemu_creds}", gitHubContext: "${env.STAGE_NAME}", account: 'AMD-ROCm-Internal', repo: 'rocm-libraries') {
-                            sh "../script/launch_tests.sh"
->>>>>>> gfx1310
                         }
                     }
                     else{
@@ -809,7 +797,6 @@ def cmake_build(Map conf=[:]){
                 // So no ninja trace processing needed here
                 if (!params.BUILD_INSTANCES_ONLY){
                     if (!runAllUnitTests){
-<<<<<<< HEAD
                         // Smart Build: Run smart_build_and_test.sh
                         sh """
                             export WORKSPACE_ROOT=${env.WORKSPACE}
@@ -820,11 +807,6 @@ def cmake_build(Map conf=[:]){
                             export NINJA_FTIME_TRACE=false
                             bash ../script/dependency-parser/smart_build_and_test.sh
                         """
-=======
-                        gitStatusWrapper(credentialsId: "${ck_githubemu_creds}", gitHubContext: "${env.STAGE_NAME}", account: 'AMD-ROCm-Internal', repo: 'rocm-libraries') {
-                            sh "../script/launch_tests.sh"
-                        }
->>>>>>> gfx1310
                     }
                     else{
                         echo "Full test suite requested (RUN_ALL_UNIT_TESTS=true or develop branch)"
@@ -1219,23 +1201,9 @@ def run_pytorch_tests(Map conf=[:]){
         }
     }
 }
-<<<<<<< HEAD
-
-//launch develop branch daily jobs
-CRON_SETTINGS = BRANCH_NAME == "develop" ? '''0 23 * * * % RUN_FULL_QA=true;RUN_CK_TILE_FMHA_TESTS=true;RUN_PERFORMANCE_TESTS=true;FORCE_CI=true
-                                              0 22 * * * % RUN_FULL_QA=true;DISABLE_DL_KERNELS=true;RUN_TILE_ENGINE_BASIC_TESTS=true;RUN_TILE_ENGINE_GEMM_TESTS=true;RUN_PERFORMANCE_TESTS=true;RUN_ALL_UNIT_TESTS=true;FORCE_CI=true
-                                              0 21 * * * % RUN_GROUPED_CONV_LARGE_CASES_TESTS=true;hipTensor_test=true;BUILD_GFX101=false;BUILD_GFX908=false;BUILD_GFX942=true;BUILD_GFX950=true;RUN_PERFORMANCE_TESTS=true;RUN_ALL_UNIT_TESTS=true;FORCE_CI=true;BUILD_PACKAGES=true
-                                              0 19 * * * % BUILD_DOCKER=true;COMPILER_VERSION=develop;BUILD_COMPILER=/llvm-project/build/bin/clang++;USE_SCCACHE=false;NINJA_BUILD_TRACE=true;RUN_ALL_UNIT_TESTS=true;FORCE_CI=true
-                                              0 17 * * * % BUILD_DOCKER=true;COMPILER_VERSION=amd-mainline;BUILD_COMPILER=/llvm-project/build/bin/clang++;USE_SCCACHE=false;NINJA_BUILD_TRACE=true;RUN_ALL_UNIT_TESTS=true;FORCE_CI=true
-                                              0 15 * * * % BUILD_DOCKER=true;COMPILER_VERSION=amd-staging;BUILD_COMPILER=/llvm-project/build/bin/clang++;USE_SCCACHE=false;NINJA_BUILD_TRACE=true;RUN_ALL_UNIT_TESTS=true;FORCE_CI=true
-                                              0 13 * * * % BUILD_INSTANCES_ONLY=true;USE_SCCACHE=false;NINJA_BUILD_TRACE=true;FORCE_CI=true
-                                              0 11 * * * % RUN_FULL_CONV_TILE_TESTS=true;RUN_AITER_TESTS=true;USE_SCCACHE=false;RUN_PERFORMANCE_TESTS=false;FORCE_CI=true
-                                              0 9 * * * % RUN_PYTORCH_TESTS=true;USE_SCCACHE=false;RUN_PERFORMANCE_TESTS=false;BUILD_GFX101=false;BUILD_GFX103=false;BUILD_GFX11=false;BUILD_GFX12=false;BUILD_GFX90A=false;FORCE_CI=true''' : ""
-=======
 */
 //launch gfx1250 branch daily jobs
 CRON_SETTINGS = BRANCH_NAME == "gfx1250" ? '''0 10 * * * % BUILD_INSTANCES_ONLY=true;USE_SCCACHE=false;NINJA_BUILD_TRACE=true;FORCE_CI=true''' : ""
->>>>>>> gfx1310
 
 pipeline {
     agent none
@@ -1262,7 +1230,7 @@ pipeline {
         string(
             name: 'COMPILER_VERSION',
             defaultValue: '',
-            description: 'Specify which version of compiler to use: release, develop, amd-staging, amd-mainline, or leave blank (default).')
+            description: 'Specify which version of compiler to use: release, develop, amd-mainline, or leave blank (default).')
         string(
             name: 'COMPILER_COMMIT',
             defaultValue: '',
@@ -1389,8 +1357,8 @@ pipeline {
             description: "Run codegen tests (default: ON)")
         booleanParam(
             name: "RUN_BUILDER_TESTS",
-            defaultValue: false,
-            description: "Run CK_BUILDER tests (default: OFF)")
+            defaultValue: true,
+            description: "Run CK_BUILDER tests (default: ON)")
         booleanParam(
             name: "RUN_ALL_UNIT_TESTS",
             defaultValue: true,
@@ -2123,10 +2091,7 @@ pipeline {
                          description: 'Some checks have failed'
             node(rocmnode("nogpu")) {
                 script {
-                    checkoutComposableKernel()
-                }
-                withCredentials([string(credentialsId: 'ck_ci_errors_webhook_url', variable: 'WEBHOOK_URL')]) {
-                    sh 'bash projects/composablekernel/script/infra_helper/send_failure_notifications.sh'
+                    sendFailureNotifications()
                 }
             }
         }
