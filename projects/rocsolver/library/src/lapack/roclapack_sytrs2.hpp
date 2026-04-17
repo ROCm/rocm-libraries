@@ -54,23 +54,18 @@ static __global__
     __launch_bounds__(SYTRS1_MAX_THDS) void apply_diag_block_kernel(bool const is_forward,
                                                                     I const n,
                                                                     I const nrhs_arg,
-
                                                                     UA A_arg,
                                                                     Istride const shiftA,
                                                                     I const lda,
                                                                     Istride strideA,
-
                                                                     I* const ipiv_arg,
                                                                     Istride const strideP,
-
                                                                     T* const E_arg,
                                                                     Istride const strideE,
-
                                                                     UB B_arg,
                                                                     Istride const shiftB,
                                                                     I const ldb,
                                                                     Istride strideB,
-
                                                                     I const batch_count)
 {
     I const bid_start = blockIdx.z;
@@ -144,26 +139,6 @@ static __global__
 
         if(is_forward)
         {
-            //          i=1
-            //          do while ( i .le. n )
-            //             if( ipiv(i) .gt. 0 ) then
-            //               call zscal( nrhs, one / a( i, i ), b( i, 1 ), ldb )
-            //             else
-            //                   akm1k = work(i)
-            //                   akm1 = a( i, i ) / akm1k
-            //                   ak = a( i+1, i+1 ) / akm1k
-            //                   denom = akm1*ak - one
-            //                   do 25 j = 1, nrhs
-            //                      bkm1 = b( i, j ) / akm1k
-            //                      bk = b( i+1, j ) / akm1k
-            //                      b( i, j ) = ( ak*bkm1-bk ) / denom
-            //                      b( i+1, j ) = ( akm1*bk-bkm1 ) / denom
-            //  25              continue
-            //                   i = i + 1
-            //             endif
-            //             i = i + 1
-            //          end do
-
             I i = 1;
             while(i <= n)
             {
@@ -199,29 +174,6 @@ static __global__
             // ----------------------
             // apply in reverse order
             // ----------------------
-
-            //         i=n
-            //         do while ( i .ge. 1 )
-            //            if( ipiv(i) .gt. 0 ) then
-            //              call zscal( nrhs, one / a( i, i ), b( i, 1 ), ldb )
-            //            elseif ( i .gt. 1) then
-            //               if ( ipiv(i-1) .eq. ipiv(i) ) then
-            //                  akm1k = work(i)
-            //                  akm1 = a( i-1, i-1 ) / akm1k
-            //                  ak = a( i, i ) / akm1k
-            //                  denom = akm1*ak - one
-            //                  do 15 j = 1, nrhs
-            //                     bkm1 = b( i-1, j ) / akm1k
-            //                     bk = b( i, j ) / akm1k
-            //                     b( i-1, j ) = ( ak*bkm1-bk ) / denom
-            //                     b( i, j ) = ( akm1*bk-bkm1 ) / denom
-            // 15              continue
-            //               i = i - 1
-            //               endif
-            //            endif
-            //            i = i - 1
-            //         end do
-
             I i = n;
             while(i >= 1)
             {
@@ -265,28 +217,23 @@ static rocblas_status apply_diag_block(rocblas_handle handle,
                                        bool const is_forward,
                                        I const n,
                                        I const nrhs_arg,
-
                                        UA A_arg,
                                        Istride const shiftA,
                                        I const lda,
                                        Istride strideA,
-
                                        I* const ipiv_arg,
                                        Istride const strideP,
-
                                        T* const E_arg,
                                        Istride const strideE,
-
                                        UB B_arg,
                                        Istride const shiftB,
                                        I const ldb,
                                        Istride strideB,
-
                                        I const batch_count)
 {
     if((n == 0) || (batch_count == 0) || (nrhs_arg == 0))
     {
-        return (rocblas_status_success);
+        return rocblas_status_success;
     }
 
     auto ceildiv = [](auto n, auto b) { return ((n <= 0) ? 0 : (n - 1) / b + 1); };
@@ -306,20 +253,12 @@ static rocblas_status apply_diag_block(rocblas_handle handle,
     hipStream_t stream;
     rocblas_get_stream(handle, &stream);
 
-    apply_diag_block_kernel<T, I, UA, UB, Istride>
-        <<<dim3(nbx, nby, nbz), dim3(nx, ny, nz), 0, stream>>>(is_forward, n, nrhs_arg,
+    ROCSOLVER_LAUNCH_KERNEL((apply_diag_block_kernel<T, I, UA, UB, Istride>), dim3(nbx, nby, nbz),
+                            dim3(nx, ny, nz), 0, stream, is_forward, n, nrhs_arg, A_arg, shiftA,
+                            lda, strideA, ipiv_arg, strideP, E_arg, strideE, B_arg, shiftB, ldb,
+                            strideB, batch_count);
 
-                                                               A_arg, shiftA, lda, strideA,
-
-                                                               ipiv_arg, strideP,
-
-                                                               E_arg, strideE,
-
-                                                               B_arg, shiftB, ldb, strideB,
-
-                                                               batch_count);
-
-    return (rocblas_status_success);
+    return rocblas_status_success;
 }
 
 // -------------------------------------------------
@@ -331,18 +270,14 @@ static rocblas_status apply_diag_block(rocblas_handle handle,
 template <typename T, typename I, typename UB, typename Istride>
 static __global__
     __launch_bounds__(SYTRS1_MAX_THDS) void apply_pivot_upper_kernel(bool const is_forward,
-
                                                                      I const n,
                                                                      I const nrhs_arg,
-
                                                                      UB B_arg,
                                                                      Istride const shiftB,
                                                                      I const ldb,
                                                                      Istride const strideB,
-
                                                                      I* const ipiv_arg,
                                                                      Istride const strideP,
-
                                                                      I const batch_count)
 {
     I const bid_start = blockIdx.z;
@@ -534,25 +469,20 @@ static __global__
 
 template <typename T, typename I, typename UB, typename Istride>
 static rocblas_status apply_pivot_upper(rocblas_handle handle,
-
                                         bool const is_forward,
-
                                         I const n,
                                         I const nrhs_arg,
-
                                         UB B,
                                         Istride const shiftB,
                                         I const ldb,
                                         Istride const strideB,
-
                                         I* const ipiv_arg,
                                         Istride const strideP,
-
                                         I const batch_count)
 {
     if((n == 0) || (nrhs_arg == 0) || (batch_count == 0))
     {
-        return (rocblas_status_success);
+        return rocblas_status_success;
     }
 
     auto ceildiv = [](auto const n, auto const b) { return (n <= 0) ? 0 : (((n - 1) / b + 1)); };
@@ -572,19 +502,11 @@ static rocblas_status apply_pivot_upper(rocblas_handle handle,
     I const ny = 1;
     I const nz = 1;
 
-    apply_pivot_upper_kernel<T, I, UB, Istride><<<dim3(nbx, nby, nbz), dim3(nx, ny, nz), 0, stream>>>(
+    ROCSOLVER_LAUNCH_KERNEL((apply_pivot_upper_kernel<T, I, UB, Istride>), dim3(nbx, nby, nbz),
+                            dim3(nx, ny, nz), 0, stream, is_forward, n, nrhs_arg, B, shiftB, ldb,
+                            strideB, ipiv_arg, strideP, batch_count);
 
-        is_forward,
-
-        n, nrhs_arg,
-
-        B, shiftB, ldb, strideB,
-
-        ipiv_arg, strideP,
-
-        batch_count);
-
-    return (rocblas_status_success);
+    return rocblas_status_success;
 }
 
 // -------------------------------------------------
@@ -594,22 +516,17 @@ static rocblas_status apply_pivot_upper(rocblas_handle handle,
 // each column panel is handled by a single thread block.
 // -------------------------------------------------
 template <typename T, typename I, typename UB, typename Istride>
-static __global__ __launch_bounds__(SYTRS1_MAX_THDS) void apply_pivot_lower_kernel(
-
-    bool const is_forward,
-
-    I const n,
-    I const nrhs_arg,
-
-    UB B_arg,
-    Istride const shiftB,
-    I const ldb,
-    Istride const strideB,
-
-    I* const ipiv_arg,
-    Istride const strideP,
-
-    I const batch_count)
+static __global__
+    __launch_bounds__(SYTRS1_MAX_THDS) void apply_pivot_lower_kernel(bool const is_forward,
+                                                                     I const n,
+                                                                     I const nrhs_arg,
+                                                                     UB B_arg,
+                                                                     Istride const shiftB,
+                                                                     I const ldb,
+                                                                     Istride const strideB,
+                                                                     I* const ipiv_arg,
+                                                                     Istride const strideP,
+                                                                     I const batch_count)
 {
     I const bid_start = blockIdx.z;
     I const bid_inc = gridDim.z;
@@ -797,25 +714,20 @@ static __global__ __launch_bounds__(SYTRS1_MAX_THDS) void apply_pivot_lower_kern
 
 template <typename T, typename I, typename UB, typename Istride>
 static rocblas_status apply_pivot_lower(rocblas_handle handle,
-
                                         bool const is_forward,
-
                                         I const n,
                                         I const nrhs_arg,
-
                                         UB B,
                                         Istride const shiftB,
                                         I const ldb,
                                         Istride const strideB,
-
                                         I* const ipiv_arg,
                                         Istride const strideP,
-
                                         I const batch_count)
 {
     if((n == 0) || (nrhs_arg == 0) || (batch_count == 0))
     {
-        return (rocblas_status_success);
+        return rocblas_status_success;
     }
 
     auto ceildiv = [](auto const n, auto const b) { return ((n <= 0) ? 0 : ((n - 1) / b) + 1); };
@@ -836,19 +748,11 @@ static rocblas_status apply_pivot_lower(rocblas_handle handle,
     I const ny = 1;
     I const nz = 1;
 
-    apply_pivot_lower_kernel<T, I, UB, Istride><<<dim3(nbx, nby, nbz), dim3(nx, ny, nz), 0, stream>>>(
+    ROCSOLVER_LAUNCH_KERNEL((apply_pivot_lower_kernel<T, I, UB, Istride>), dim3(nbx, nby, nbz),
+                            dim3(nx, ny, nz), 0, stream, is_forward, n, nrhs_arg, B, shiftB, ldb,
+                            strideB, ipiv_arg, strideP, batch_count);
 
-        is_forward,
-
-        n, nrhs_arg,
-
-        B, shiftB, ldb, strideB,
-
-        ipiv_arg, strideP,
-
-        batch_count);
-
-    return (rocblas_status_success);
+    return rocblas_status_success;
 }
 
 //  ----------------------------------------------------------
@@ -857,61 +761,40 @@ static rocblas_status apply_pivot_lower(rocblas_handle handle,
 //  but has been modified by SYCONV  to use TRSM
 //  ----------------------------------------------------------
 template <typename T, typename I, typename UA, typename UB, typename Istride>
-static rocblas_status sytrs1_template(rocblas_handle handle,
-
-                                      bool const is_upper,
-                                      I const n,
-                                      I const nrhs,
-
-                                      UA A_arg,
-                                      Istride const shiftA,
-                                      I const lda,
-                                      Istride const strideA,
-
-                                      I* const ipiv_arg,
-                                      Istride const strideP,
-
-                                      T* E_arg,
-                                      Istride const strideE,
-
-                                      UB B_arg,
-                                      Istride const shiftB,
-                                      I const ldb,
-                                      Istride const strideB,
-
-                                      I const batch_count,
-
-                                      void* const work,
-                                      size_t const size_work)
+static rocblas_status sytrs2_inner_template(rocblas_handle handle,
+                                            bool const is_upper,
+                                            I const n,
+                                            I const nrhs,
+                                            UA A_arg,
+                                            Istride const shiftA,
+                                            I const lda,
+                                            Istride const strideA,
+                                            I* const ipiv_arg,
+                                            Istride const strideP,
+                                            T* E_arg,
+                                            Istride const strideE,
+                                            UB B_arg,
+                                            Istride const shiftB,
+                                            I const ldb,
+                                            Istride const strideB,
+                                            I const batch_count,
+                                            void* const work,
+                                            size_t const size_work)
 {
-    if((n == 0) || (nrhs == 0) || (batch_count == 0))
-    {
-        return (rocblas_status_success);
-    }
+    if(n == 0 || nrhs == 0 || batch_count == 0)
+        return rocblas_status_success;
 
     T const one = 1;
 
     std::byte* const pwork = static_cast<std::byte*>(work);
     std::byte* pfree = pwork;
 
-    // everything must be executed with scalars on the host
-    rocblas_pointer_mode old_mode;
-    rocblas_get_pointer_mode(handle, &old_mode);
-    rocblas_set_pointer_mode(handle, rocblas_pointer_mode_host);
-
-    auto call_trsm = [=, &pfree](
-
-                         rocblas_side const side, rocblas_fill const uplo,
-
-                         rocblas_operation const trans, rocblas_diagonal const diag,
-
-                         I const n, I const nrhs, T alpha,
-
-                         UA A_arg, Istride const shiftA, I const lda, Istride const strideA,
-
-                         UB B_arg, Istride const shiftB, I const ldb, Istride const strideB,
-
-                         I const batch_count) -> rocblas_status {
+    auto call_trsm
+        = [=, &pfree](rocblas_side const side, rocblas_fill const uplo,
+                      rocblas_operation const trans, rocblas_diagonal const diag, I const n,
+                      I const nrhs, T alpha, UA A_arg, Istride const shiftA, I const lda,
+                      Istride const strideA, UB B_arg, Istride const shiftB, I const ldb,
+                      Istride const strideB, I const batch_count) -> rocblas_status {
         static_assert(std::is_pointer_v<decltype(A_arg)>, "invalid A type");
         static_assert(std::is_pointer_v<decltype(B_arg)>, "invalid B type");
         static_assert(std::is_pointer_v<decltype(A_arg)> == std::is_pointer_v<decltype(B_arg)>,
@@ -938,16 +821,14 @@ static rocblas_status sytrs1_template(rocblas_handle handle,
         // -----------------------------------
         {
             rocblas_status const istat = rocblasCall_trsm_mem<BATCHED, T>(
-
-                side, trans, n, nrhs, lda, ldb, batch_count,
-
-                &size_work1, &size_work2, &size_work3, &size_work4);
+                side, trans, n, nrhs, lda, ldb, batch_count, &size_work1, &size_work2, &size_work3,
+                &size_work4);
 
             bool const is_ok
                 = (istat == rocblas_status_success) || (istat == rocblas_status_continue);
             if(!is_ok)
             {
-                return (rocblas_status_internal_error);
+                return rocblas_status_internal_error;
             }
         }
 
@@ -960,37 +841,20 @@ static rocblas_status sytrs1_template(rocblas_handle handle,
         void* const work4 = static_cast<void*>(pfree);
         pfree += size_work4;
 
-        bool const is_memory_ok = (pfree <= (pwork + size_work));
-        if(!is_memory_ok)
-        {
-            return (rocblas_status_memory_error);
-        }
+        if(pfree > (pwork + size_work))
+            return rocblas_status_memory_error;
 
-        {
-            auto const istat = rocblasCall_trsm<T, I>(
-
-                handle, side, uplo, trans, diag, n, nrhs,
-
-                &alpha,
-
-                A_arg, shiftA, lda, strideA,
-
-                B_arg, shiftB, ldb, strideB,
-
-                batch_count,
-
-                optim_mem, work1, work2, work3, work4);
-
-            if(istat != rocblas_status_success)
-            {
-                return (rocblas_status_internal_error);
-            }
-        }
+        ROCBLAS_CHECK(rocblasCall_trsm<T, I>(handle, side, uplo, trans, diag, n, nrhs, &alpha, A_arg,
+                                             shiftA, lda, strideA, B_arg, shiftB, ldb, strideB,
+                                             batch_count, optim_mem, work1, work2, work3, work4));
 
         pfree = pfree_saved;
 
-        return (rocblas_status_success);
+        return rocblas_status_success;
     }; // end call_trsm
+
+    bool const is_forward = false;
+    T const alpha = one;
 
     if(is_upper)
     {
@@ -999,167 +863,36 @@ static rocblas_status sytrs1_template(rocblas_handle handle,
         //
         //        P**t * B
         // ------------------------------------------
-
-        //         k=n
-        //         do while ( k .ge. 1 )
-        //          if( ipiv( k ).gt.0 ) then
-        // *           1 x 1 diagonal block
-        // *           interchange rows k and ipiv(k).
-        //             kp = ipiv( k )
-        //             if( kp.ne.k )
-        //      $         call zswap( nrhs, b( k, 1 ), ldb, b( kp, 1 ), ldb )
-        //             k=k-1
-        //          else
-        // *           2 x 2 diagonal block
-        // *           interchange rows k-1 and -ipiv(k).
-        //             kp = -ipiv( k )
-        //             if( kp.eq.-ipiv( k-1 ) )
-        //      $         call zswap( nrhs, b( k-1, 1 ), ldb, b( kp, 1 ), ldb )
-        //             k=k-2
-        //          end if
-        //         end do
-
-        {
-            bool const is_forward = false;
-            rocblas_status const istat = apply_pivot_upper<T, I>(handle,
-
-                                                                 is_forward, n, nrhs,
-
-                                                                 B_arg, shiftB, ldb, strideB,
-
-                                                                 ipiv_arg, strideP,
-
-                                                                 batch_count);
-
-            if(istat != rocblas_status_success)
-            {
-                rocblas_set_pointer_mode(handle, old_mode);
-
-                return (rocblas_status_internal_error);
-            }
-        }
+        ROCBLAS_CHECK(apply_pivot_upper<T, I>(handle, is_forward, n, nrhs, B_arg, shiftB, ldb,
+                                              strideB, ipiv_arg, strideP, batch_count));
 
         // --------------------------------------------------
         //    compute (U \P**t * B) -> B    [ (U \P**t * B) ]
         // --------------------------------------------------
-        //        call
-        //        ztrsm(side='l',uplo='u',transA='n',diag='u',n,nrhs,one,a,lda,b,ldb)
-
-        {
-            rocblas_side const side = rocblas_side_left;
-            rocblas_fill const uplo = rocblas_fill_upper;
-            rocblas_operation const trans = rocblas_operation_none;
-            rocblas_diagonal const diag = rocblas_diagonal_unit;
-
-            T const alpha = one;
-
-            rocblas_status const istat = call_trsm(
-
-                side, uplo, trans, diag,
-
-                n, nrhs, alpha,
-
-                A_arg, shiftA, lda, strideA,
-
-                B_arg, shiftB, ldb, strideB,
-
-                batch_count);
-
-            if(istat != rocblas_status_success)
-            {
-                rocblas_set_pointer_mode(handle, old_mode);
-                return (istat);
-            }
-        }
+        ROCBLAS_CHECK(call_trsm(rocblas_side_left, rocblas_fill_upper, rocblas_operation_none,
+                                rocblas_diagonal_unit, n, nrhs, alpha, A_arg, shiftA, lda, strideA,
+                                B_arg, shiftB, ldb, strideB, batch_count));
 
         // ---------------------------------------------
         //    compute D \ B -> B   [ B \ (U \P**t * B) ]
         // ---------------------------------------------
+        ROCBLAS_CHECK(apply_diag_block<T, I>(handle, is_forward, n, nrhs, A_arg, shiftA, lda,
+                                             strideA, ipiv_arg, strideP, E_arg, strideE, B_arg,
+                                             shiftB, ldb, strideB, batch_count));
 
-        {
-            bool const is_forward = false;
-            rocblas_status const istat = apply_diag_block<T, I>(
-
-                handle, is_forward, n, nrhs,
-
-                A_arg, shiftA, lda, strideA,
-
-                ipiv_arg, strideP,
-
-                E_arg, strideE,
-
-                B_arg, shiftB, ldb, strideB,
-
-                batch_count);
-
-            if(istat != rocblas_status_success)
-            {
-                rocblas_set_pointer_mode(handle, old_mode);
-
-                return (rocblas_status_internal_error);
-            }
-        }
-
-        //       ---------------------------------------------------------
+        // --------------------------------------------------------------
         //      compute (U**t \ B) -> B   [ U**t \ (D \ (U \P**t * B) ) ]
-        //       ---------------------------------------------------------
-        //         call
-        //         ztrsm(side='l',uplo='u',transa='t',diag='u',n,nrhs,one,a,lda,b,ldb)
-
-        {
-            rocblas_side const side = rocblas_side_left;
-            rocblas_fill const uplo = rocblas_fill_upper;
-            rocblas_diagonal const diag = rocblas_diagonal_unit;
-
-            // --------------------------------------------------
-            // NOTE: need pure transpose, not conjugate transpose
-            // --------------------------------------------------
-            rocblas_operation const trans = rocblas_operation_transpose;
-
-            T const alpha = one;
-
-            rocblas_status const istat = call_trsm(
-
-                side, uplo, trans, diag,
-
-                n, nrhs, alpha,
-
-                A_arg, shiftA, lda, strideA,
-
-                B_arg, shiftB, ldb, strideB,
-
-                batch_count);
-
-            if(istat != rocblas_status_success)
-            {
-                rocblas_set_pointer_mode(handle, old_mode);
-                return (istat);
-            }
-        }
+        //      NOTE: need pure transpose, not conjugate transpose
+        // --------------------------------------------------------------
+        ROCBLAS_CHECK(call_trsm(rocblas_side_left, rocblas_fill_upper, rocblas_operation_transpose,
+                                rocblas_diagonal_unit, n, nrhs, alpha, A_arg, shiftA, lda, strideA,
+                                B_arg, shiftB, ldb, strideB, batch_count));
 
         //        --------------------------------------------
         //        P * B  [ P * (U**t \ (D \ (U \P**t * B) )) ]
         //        --------------------------------------------
-
-        {
-            bool const is_forward = true;
-            rocblas_status const istat = apply_pivot_upper<T, I>(handle,
-
-                                                                 is_forward, n, nrhs,
-
-                                                                 B_arg, shiftB, ldb, strideB,
-
-                                                                 ipiv_arg, strideP,
-
-                                                                 batch_count);
-
-            if(istat != rocblas_status_success)
-            {
-                rocblas_set_pointer_mode(handle, old_mode);
-
-                return (rocblas_status_internal_error);
-            }
-        }
+        ROCBLAS_CHECK(apply_pivot_upper<T, I>(handle, is_forward, n, nrhs, B_arg, shiftB, ldb,
+                                              strideB, ipiv_arg, strideP, batch_count));
     }
     else
     {
@@ -1168,150 +901,36 @@ static rocblas_status sytrs1_template(rocblas_handle handle,
         // *
         // *       P**t * B
         // -------------------------------------------
-
-        {
-            bool const is_forward = true;
-            rocblas_status const istat = apply_pivot_lower<T, I>(handle,
-
-                                                                 is_forward, n, nrhs,
-
-                                                                 B_arg, shiftB, ldb, strideB,
-
-                                                                 ipiv_arg, strideP,
-
-                                                                 batch_count);
-
-            if(istat != rocblas_status_success)
-            {
-                rocblas_set_pointer_mode(handle, old_mode);
-
-                return (rocblas_status_internal_error);
-            }
-        }
+        ROCBLAS_CHECK(apply_pivot_lower<T, I>(handle, is_forward, n, nrhs, B_arg, shiftB, ldb,
+                                              strideB, ipiv_arg, strideP, batch_count));
 
         // ---------------------------------------------------
         //    compute (L \P**t * B) -> B    [ (L \P**t * B) ]
         // ---------------------------------------------------
-        //        call
-        //        ztrsm(side='left',uplo='lower',transa='no_trans',diag='unit',n,nrhs,one,a,lda,b,ldb)
-
-        {
-            rocblas_side const side = rocblas_side_left;
-            rocblas_fill const uplo = rocblas_fill_lower;
-            rocblas_operation const trans = rocblas_operation_none;
-            rocblas_diagonal const diag = rocblas_diagonal_unit;
-
-            T const alpha = one;
-
-            rocblas_status const istat = call_trsm(
-
-                side, uplo, trans, diag,
-
-                n, nrhs, alpha,
-
-                A_arg, shiftA, lda, strideA,
-
-                B_arg, shiftB, ldb, strideB,
-
-                batch_count);
-
-            if(istat != rocblas_status_success)
-            {
-                rocblas_set_pointer_mode(handle, old_mode);
-                return (istat);
-            }
-        }
+        ROCBLAS_CHECK(call_trsm(rocblas_side_left, rocblas_fill_lower, rocblas_operation_none,
+                                rocblas_diagonal_unit, n, nrhs, alpha, A_arg, shiftA, lda, strideA,
+                                B_arg, shiftB, ldb, strideB, batch_count));
 
         // ---------------------------------------------
         //    compute D \ B -> B   [ D \ (L \P**t * B) ]
         // ---------------------------------------------
-
-        {
-            bool const is_forward = true;
-            rocblas_status const istat = apply_diag_block<T, I>(
-
-                handle, is_forward, n, nrhs,
-
-                A_arg, shiftA, lda, strideA,
-
-                ipiv_arg, strideP,
-
-                E_arg, strideE,
-
-                B_arg, shiftB, ldb, strideB,
-
-                batch_count);
-
-            if(istat != rocblas_status_success)
-            {
-                rocblas_set_pointer_mode(handle, old_mode);
-
-                return (rocblas_status_internal_error);
-            }
-        }
+        ROCBLAS_CHECK(apply_diag_block<T, I>(handle, is_forward, n, nrhs, A_arg, shiftA, lda,
+                                             strideA, ipiv_arg, strideP, E_arg, strideE, B_arg,
+                                             shiftB, ldb, strideB, batch_count));
 
         // ------------------------------------------------------------
-        // *  compute (L**t \ B) -> B   [ L**t \ (D \ (L \P**t * B) ) ]
+        //    compute (L**t \ B) -> B   [ L**t \ (D \ (L \P**t * B) ) ]
+        //    NOTE: need pure transpose, not conjugate transpose
         // ------------------------------------------------------------
-        //        call
-        //        ztrsm(side='left',uplo='lower',trans='transpose',diag='unit',n,nrhs,one,a,lda,b,ldb)
-
-        {
-            rocblas_side const side = rocblas_side_left;
-            rocblas_fill const uplo = rocblas_fill_lower;
-            rocblas_diagonal const diag = rocblas_diagonal_unit;
-
-            // --------------------------------------------------
-            // NOTE: need pure transpose, not conjugate transpose
-            // --------------------------------------------------
-            rocblas_operation const trans = rocblas_operation_transpose;
-
-            T const alpha = one;
-
-            rocblas_status const istat = call_trsm(
-
-                side, uplo, trans, diag,
-
-                n, nrhs, alpha,
-
-                A_arg, shiftA, lda, strideA,
-
-                B_arg, shiftB, ldb, strideB,
-
-                batch_count);
-
-            if(istat != rocblas_status_success)
-            {
-                rocblas_set_pointer_mode(handle, old_mode);
-                return (istat);
-            }
-        }
+        ROCBLAS_CHECK(call_trsm(rocblas_side_left, rocblas_fill_lower, rocblas_operation_transpose,
+                                rocblas_diagonal_unit, n, nrhs, alpha, A_arg, shiftA, lda, strideA,
+                                B_arg, shiftB, ldb, strideB, batch_count));
 
         // ----------------------------------------------------
         //         P * B  [ P * (L**t \ (D \ (L \P**t * B) )) ]
         // ----------------------------------------------------
-
-        {
-            bool const is_forward = false;
-            rocblas_status const istat = apply_pivot_lower<T, I>(
-
-                handle,
-
-                is_forward, n, nrhs,
-
-                B_arg, shiftB, ldb, strideB,
-
-                ipiv_arg, strideP,
-
-                batch_count);
-
-            if(istat != rocblas_status_success)
-            {
-                rocblas_set_pointer_mode(handle, old_mode);
-
-                return (rocblas_status_internal_error);
-            }
-        }
+        ROCBLAS_CHECK(apply_pivot_lower<T, I>(handle, is_forward, n, nrhs, B_arg, shiftB, ldb,
+                                              strideB, ipiv_arg, strideP, batch_count));
     }
 
     return (rocblas_status_success);
@@ -1330,14 +949,9 @@ rocblas_status rocsolver_sytrs2_getMemorySize(rocblas_handle handle,
 {
     *p_size_work = 0;
 
-    // ----------------------------------
     // if quick return no workspace needed
-    // ----------------------------------
-
-    if((n == 0) || (nrhs == 0) || (batch_count == 0))
-    {
-        return (rocblas_status_success);
-    }
+    if(n == 0 || nrhs == 0 || batch_count == 0)
+        return rocblas_status_success;
 
     size_t size_E = sizeof(T) * n * batch_count;
 
@@ -1368,9 +982,8 @@ rocblas_status rocsolver_sytrs2_getMemorySize(rocblas_handle handle,
                 size_t lsize_work4 = 0;
 
                 auto const istat = rocblasCall_trsm_mem<BATCHED, T, I>(
-                    side, trans, n, nrhs, lda, ldb, batch_count,
-
-                    &lsize_work1, &lsize_work2, &lsize_work3, &lsize_work4);
+                    side, trans, n, nrhs, lda, ldb, batch_count, &lsize_work1, &lsize_work2,
+                    &lsize_work3, &lsize_work4);
 
                 bool const is_ok
                     = (istat == rocblas_status_success) || (istat == rocblas_status_continue);
@@ -1395,9 +1008,9 @@ rocblas_status rocsolver_sytrs2_getMemorySize(rocblas_handle handle,
                 size_t lsize_work4 = 0;
 
                 auto const istat = rocblasCall_trsm_mem<BATCHED, T>(
-                    side, trans, n, nrhs, lda, ldb, batch_count,
+                    side, trans, n, nrhs, lda, ldb, batch_count, &lsize_work1, &lsize_work2,
+                    &lsize_work3, &lsize_work4);
 
-                    &lsize_work1, &lsize_work2, &lsize_work3, &lsize_work4);
                 if(istat != rocblas_status_success)
                 {
                     return (istat);
@@ -1415,18 +1028,11 @@ rocblas_status rocsolver_sytrs2_getMemorySize(rocblas_handle handle,
     }
 
     size_t size_syconv = 0;
-
-    {
-        auto const istat = rocsolver_syconv_getMemorySize<T>(handle, n, batch_count, &size_syconv);
-        if(istat != rocblas_status_success)
-        {
-            return (istat);
-        }
-    }
+    ROCBLAS_CHECK(rocsolver_syconv_getMemorySize<T>(handle, n, batch_count, &size_syconv));
 
     *p_size_work = size_E + std::max(size_syconv, size_trsm);
 
-    return (rocblas_status_success);
+    return rocblas_status_success;
 }
 
 template <typename UA, typename UB, typename I>
@@ -1434,108 +1040,59 @@ static inline rocblas_status rocsolver_sytrs2_argCheck(rocblas_handle handle,
                                                        rocblas_fill const uplo,
                                                        I const n,
                                                        I const nrhs,
-
                                                        I const lda,
                                                        I const ldb,
-
                                                        UA A,
                                                        UB B,
-
                                                        I* const ipiv,
-
                                                        I const batch_count = 1)
 {
     // order is important for unit tests:
 
-    // ---------------
     // 0. check handle
-    // ---------------
-    if(handle == nullptr)
-    {
-        return (rocblas_status_invalid_handle);
-    }
+    if(!handle)
+        return rocblas_status_invalid_handle;
 
-    // -------------------------------
     // 1. invalid/non-supported values
-    // -------------------------------
-    {
-        bool const is_value_ok = (uplo == rocblas_fill_upper) || (uplo == rocblas_fill_lower);
-        if(!is_value_ok)
-        {
-            return (rocblas_status_invalid_value);
-        }
-    }
+    if(uplo != rocblas_fill_upper && uplo != rocblas_fill_lower)
+        return rocblas_status_invalid_value;
 
-    // ---------------
     // 2. invalid size
-    // ---------------
-    {
-        bool const is_size_ok
-            = (n >= 0) && (lda >= n) && (ldb >= n) && (nrhs >= 0) && (batch_count >= 0);
-        if(!is_size_ok)
-        {
-            return (rocblas_status_invalid_size);
-        }
-    }
+    if(n < 0 || lda < n || ldb < n || nrhs < 0 || batch_count < 0)
+        return rocblas_status_invalid_size;
 
-    // ------------------------------------------
     // skip pointer check if querying memory size
-    // ------------------------------------------
     if(rocblas_is_device_memory_size_query(handle))
-    {
         return rocblas_status_continue;
-    }
 
-    // -------------------
     // 3. invalid pointers
-    // -------------------
-    if(n >= 1)
-    {
-        if((A == nullptr) || (ipiv == nullptr))
-        {
-            return (rocblas_status_invalid_pointer);
-        }
-    }
-    if((n >= 1) && (nrhs >= 1))
-    {
-        if(B == nullptr)
-        {
-            return (rocblas_status_invalid_pointer);
-        }
-    }
+    if((n && !A) || (n && !ipiv) || (nrhs && n && !B))
+        return rocblas_status_invalid_pointer;
 
-    return (rocblas_status_continue);
+    return rocblas_status_continue;
 }
 
 template <typename T, typename I, typename UA, typename UB, typename Istride = rocblas_stride>
 static inline rocblas_status rocsolver_sytrs2_template(rocblas_handle handle,
-
                                                        rocblas_fill const uplo,
                                                        I const n,
                                                        I const nrhs,
-
                                                        UA A,
                                                        Istride const shiftA,
                                                        I const lda,
                                                        Istride const strideA,
-
                                                        I* const ipiv,
                                                        Istride const strideP,
-
                                                        UB B,
                                                        Istride const shiftB,
                                                        I const ldb,
                                                        Istride const strideB,
-
                                                        I const batch_count,
-
                                                        void* const work,
                                                        size_t const size_work)
 {
-    if((n == 0) || (nrhs == 0) || (batch_count == 0))
-    {
-        return (rocblas_status_success);
-    }
+    if(n == 0 || nrhs == 0 || batch_count == 0)
+        return rocblas_status_success;
 
     bool const is_upper = (uplo == rocblas_fill_upper);
 
@@ -1550,27 +1107,11 @@ static inline rocblas_status rocsolver_sytrs2_template(rocblas_handle handle,
     // ----------------
     // convert matrix A
     // ----------------
-
-    {
-        size_t const size_remain = (pwork + size_work) - pfree;
-        bool is_convert = true;
-        auto const istat = rocsolver_syconv_template<T, I>(handle,
-
-                                                           is_upper, is_convert = true, n,
-
-                                                           A, shiftA, lda, strideA,
-
-                                                           ipiv, strideP,
-
-                                                           E, strideE,
-
-                                                           batch_count, pfree, size_remain);
-
-        if(istat != rocblas_status_success)
-        {
-            return (istat);
-        }
-    }
+    size_t const size_remain = (pwork + size_work) - pfree;
+    bool is_convert = true;
+    ROCBLAS_CHECK(rocsolver_syconv_template<T, I>(handle, is_upper, is_convert = true, n, A, shiftA,
+                                                  lda, strideA, ipiv, strideP, E, strideE,
+                                                  batch_count, pfree, size_remain));
 
     // -------------------------------------------------
     // solve linear system with converted storage format
@@ -1580,19 +1121,16 @@ static inline rocblas_status rocsolver_sytrs2_template(rocblas_handle handle,
         auto const pfree_save = pfree;
         size_t size_remain = (pwork + size_work) - pfree;
 
-        istat_sytrs1 = sytrs1_template<T, I>(handle, is_upper, n, nrhs,
+        // everything must be executed with scalars on the host
+        rocblas_pointer_mode old_mode;
+        rocblas_get_pointer_mode(handle, &old_mode);
+        rocblas_set_pointer_mode(handle, rocblas_pointer_mode_host);
 
-                                             A, shiftA, lda, strideA,
+        istat_sytrs1 = sytrs2_inner_template<T, I>(handle, is_upper, n, nrhs, A, shiftA, lda,
+                                                   strideA, ipiv, strideP, E, strideE, B, shiftB,
+                                                   ldb, strideB, batch_count, pfree, size_remain);
 
-                                             ipiv, strideP,
-
-                                             E, strideE,
-
-                                             B, shiftB, ldb, strideB,
-
-                                             batch_count,
-
-                                             pfree, size_remain);
+        rocblas_set_pointer_mode(handle, old_mode);
 
         pfree = pfree_save;
     }
@@ -1608,19 +1146,9 @@ static inline rocblas_status rocsolver_sytrs2_template(rocblas_handle handle,
 
         size_t const size_remain = (pwork + size_work) - pfree;
         bool is_convert = false;
-        istat_syconv = rocsolver_syconv_template<T, I>(handle,
-
-                                                       is_upper, is_convert = false, n,
-
-                                                       A, shiftA, lda, strideA,
-
-                                                       ipiv, strideP,
-
-                                                       E, strideE,
-
-                                                       batch_count,
-
-                                                       (void*)pfree, size_remain);
+        istat_syconv = rocsolver_syconv_template<T, I>(
+            handle, is_upper, is_convert = false, n, A, shiftA, lda, strideA, ipiv, strideP, E,
+            strideE, batch_count, (void*)pfree, size_remain);
 
         pfree = pfree_save;
     }
@@ -1635,7 +1163,7 @@ static inline rocblas_status rocsolver_sytrs2_template(rocblas_handle handle,
         return (istat_syconv);
     }
 
-    return (rocblas_status_success);
+    return rocblas_status_success;
 }
 ROCSOLVER_END_NAMESPACE
 #undef SYTRS1_MAX_THDS

@@ -59,27 +59,20 @@ ROCSOLVER_BEGIN_NAMESPACE
 template <typename T, typename I, typename UA, typename Istride>
 static __global__
     __launch_bounds__(SYCONV_MAX_THDS) void syconv_restore_from_E(bool const is_upper,
-
                                                                   I const n,
                                                                   I const batch_count,
-
                                                                   UA A_arg,
                                                                   Istride const shiftA,
                                                                   I const lda,
                                                                   Istride const strideA,
-
                                                                   I const* const ipiv_arg,
                                                                   Istride const strideP,
-
                                                                   T const* const E_arg,
                                                                   Istride const strideE,
-
                                                                   I const* const icount_arg)
 {
-    if((n == 0) || (batch_count == 0))
-    {
+    if(n == 0 || batch_count == 0)
         return;
-    }
 
     auto idx2F
         = [](auto i, auto j, auto ld) { return ((i - 1) + (j - 1) * static_cast<int64_t>(ld)); };
@@ -158,29 +151,22 @@ static __global__
 template <typename T, typename I, typename UA, typename Istride>
 static __global__
     __launch_bounds__(SYCONV_MAX_THDS) void syconv_convert_into_E(bool const is_upper,
-
                                                                   I const n,
                                                                   I const batch_count,
-
                                                                   UA A_arg,
                                                                   Istride const shiftA,
                                                                   I const lda,
                                                                   Istride const strideA,
-
                                                                   I const* const ipiv_arg,
                                                                   Istride const strideP,
-
                                                                   T* const E_arg,
                                                                   Istride const strideE,
-
                                                                   I const* const icount_arg
 
     )
 {
-    if((n == 0) || (batch_count == 0))
-    {
+    if(n == 0 || batch_count == 0)
         return;
-    }
 
     auto idx2F
         = [](auto i, auto j, auto ld) { return ((i - 1) + (j - 1) * static_cast<int64_t>(ld)); };
@@ -276,10 +262,8 @@ template <typename I, typename Istride>
 static __global__
     __launch_bounds__(SYCONV_MAX_THDS) void syconv_setup_icount_kernel(I const n,
                                                                        I const batch_count,
-
                                                                        I* const ipiv_arg,
                                                                        Istride const strideP,
-
                                                                        I* const icount_arg)
 {
     I const bid_start = blockIdx.z;
@@ -311,29 +295,19 @@ static __global__
 // performed by kernel syconv_restore_from_E()
 // --------------------------------------------------------------------------------------
 template <typename T, typename I, typename UA, typename Istride>
-static __global__ __launch_bounds__(SYCONV_MAX_THDS) void syconv_kernel(
-
-    bool const is_upper,
-    bool const is_convert,
-
-    I const n,
-
-    UA A_arg,
-    Istride const shiftA,
-    I const lda,
-    Istride const strideA,
-
-    I* const ipiv_arg,
-    Istride const strideP,
-
-    I const batch_count
-
-)
+static __global__ __launch_bounds__(SYCONV_MAX_THDS) void syconv_kernel(bool const is_upper,
+                                                                        bool const is_convert,
+                                                                        I const n,
+                                                                        UA A_arg,
+                                                                        Istride const shiftA,
+                                                                        I const lda,
+                                                                        Istride const strideA,
+                                                                        I* const ipiv_arg,
+                                                                        Istride const strideP,
+                                                                        I const batch_count)
 {
-    if((n == 0) || (batch_count == 0))
-    {
+    if(n == 0 || batch_count == 0)
         return;
-    }
 
     I const bid_start = static_cast<I>(blockIdx.z);
     I const bid_inc = static_cast<I>(gridDim.z);
@@ -415,65 +389,37 @@ static __global__ __launch_bounds__(SYCONV_MAX_THDS) void syconv_kernel(
                 // -------------------------------
                 //           convert permutations
                 // -------------------------------
-
-                //                 i = n
-                // 		do while(i.ge.1)
-                // 		   if(ipiv(i).gt.0) then
-                // 			ip = ipiv(i)
-                // 			if(i.lt.n) then
-                // 				do 12 j = i + 1, n
-                // 					temp = a(ip, j)
-                // 					a(ip, j) = a(i, j)
-                // 					a(i, j) = temp
-                // 12                              continue
-                // 			endif
-                //
-                // 		   else
-                // 			  ip = -ipiv(i)
-                // 			  if(i.lt.n) then
-                // 				  do 13 j = i + 1, n
-                // 					  temp = a(ip, j)
-                // 					  a(ip, j) = a(i - 1, j)
-                // 					  a(i - 1, j) = temp
-                // 13                                continue
-                //                           endif
-                // 			  i = i - 1
-                // 	          endif
-                // 		  i = i - 1
-                // 		  end do
+                I i = n;
+                while(i >= 1)
                 {
-                    I i = n;
-                    while(i >= 1)
+                    if(ipiv(i) > 0)
                     {
-                        if(ipiv(i) > 0)
+                        I const ip = ipiv(i);
+                        if(i < n)
                         {
-                            I const ip = ipiv(i);
-                            if(i < n)
-                            {
-                                auto const col_start = (i + 1);
-                                auto const col_end = n;
-                                auto const irow_k = i;
-                                auto const irow_kp = ip;
-                                syconv_swap_rows(irow_k, irow_kp, col_start, col_end);
-                            }
+                            auto const col_start = (i + 1);
+                            auto const col_end = n;
+                            auto const irow_k = i;
+                            auto const irow_kp = ip;
+                            syconv_swap_rows(irow_k, irow_kp, col_start, col_end);
                         }
-                        else
+                    }
+                    else
+                    {
+                        I const ip = -ipiv(i);
+                        if(i < n)
                         {
-                            I const ip = -ipiv(i);
-                            if(i < n)
-                            {
-                                auto const col_start = (i + 1);
-                                auto const col_end = n;
-                                auto const irow_k = (i - 1);
-                                auto const irow_kp = ip;
+                            auto const col_start = (i + 1);
+                            auto const col_end = n;
+                            auto const irow_k = (i - 1);
+                            auto const irow_kp = ip;
 
-                                syconv_swap_rows(irow_k, irow_kp, col_start, col_end);
-                            }
-                            i = i - 1;
+                            syconv_swap_rows(irow_k, irow_kp, col_start, col_end);
                         }
                         i = i - 1;
-                    } // end while
-                }
+                    }
+                    i = i - 1;
+                } // end while
             }
             else
             {
@@ -482,67 +428,39 @@ static __global__ __launch_bounds__(SYCONV_MAX_THDS) void syconv_kernel(
                 //
                 //           revert permutations
                 // ------------------------------------------
+                I i = 1;
 
-                //                 i = 1
-                // 		do while(i.le.n)
-                // 		   if(ipiv(i).gt.0) then
-                // 		      ip = ipiv(i)
-                // 		      if(i.lt.n) then
-                // 			   do j = i + 1, n,
-                // 				   temp = a(ip, j)
-                // 				   a(ip, j) = a(i, j)
-                // 				   a(i, j) = temp
-                // 			   end do
-                // 		      endif
-                //
-                // 		    else
-                // 		        ip = -ipiv(i)
-                // 			i = i + 1
-                // 			if(i.lt.n) then
-                // 				do j = i + 1, n
-                // 					temp = a(ip, j)
-                // 					a(ip, j) = a(i - 1, j)
-                // 					a(i - 1, j) = temp
-                // 				end do
-                // 			endif
-                // 		  endif
-                // 		  i = i + 1
-                // 		  end do
+                while(i <= n)
                 {
-                    I i = 1;
-
-                    while(i <= n)
+                    if(ipiv(i) > 0)
                     {
-                        if(ipiv(i) > 0)
+                        I const ip = ipiv(i);
+                        if(i < n)
                         {
-                            I const ip = ipiv(i);
-                            if(i < n)
-                            {
-                                auto const col_start = (i + 1);
-                                auto const col_end = n;
-                                auto const irow_k = i;
-                                auto const irow_kp = ip;
+                            auto const col_start = (i + 1);
+                            auto const col_end = n;
+                            auto const irow_k = i;
+                            auto const irow_kp = ip;
 
-                                syconv_swap_rows(irow_k, irow_kp, col_start, col_end);
-                            }
+                            syconv_swap_rows(irow_k, irow_kp, col_start, col_end);
                         }
-                        else
-                        {
-                            I const ip = -ipiv(i);
-                            i = i + 1;
-                            if(i < n)
-                            {
-                                auto const col_start = (i + 1);
-                                auto const col_end = n;
-                                auto const irow_k = (i - 1);
-                                auto const irow_kp = ip;
-
-                                syconv_swap_rows(irow_k, irow_kp, col_start, col_end);
-                            }
-                        }
+                    }
+                    else
+                    {
+                        I const ip = -ipiv(i);
                         i = i + 1;
-                    } // end while
-                }
+                        if(i < n)
+                        {
+                            auto const col_start = (i + 1);
+                            auto const col_end = n;
+                            auto const irow_k = (i - 1);
+                            auto const irow_kp = ip;
+
+                            syconv_swap_rows(irow_k, irow_kp, col_start, col_end);
+                        }
+                    }
+                    i = i + 1;
+                } // end while
 
             } // end if (is_revert)
         } // end if (is_upper)
@@ -563,67 +481,38 @@ static __global__ __launch_bounds__(SYCONV_MAX_THDS) void syconv_kernel(
                 // --------------------------------
                 //             convert permutations
                 // --------------------------------
-
-                //                 i = 1
-                // 		do while(i.le.n)
-                // 		   if(ipiv(i).gt.0) then
-                // 			ip = ipiv(i)
-                // 			if(i.gt.1) then
-                // 				do 22 j = 1, i - 1
-                // 					temp = a(ip, j)
-                // 					a(ip, j) = a(i, j)
-                // 					a(i, j) = temp
-                // 22                              continue
-                //                         endif
-                // 		   else
-                // 		     ip = -ipiv(i)
-                // 		     if(i.gt.1) then
-                // 		        do 23 j = 1, i - 1
-                // 			       temp = a(ip, j)
-                // 			       a(ip, j) = a(i + 1, j)
-                // 			       a(i + 1, j) = temp
-                // 23                      continue
-                //                       endif
-                //
-                // 		      i = i + 1
-                // 	           endif
-                // 		   i = i + 1
-                // 	       end do
-
+                I i = 1;
+                while(i <= n)
                 {
-                    I i = 1;
-                    while(i <= n)
+                    if(ipiv(i) > 0)
                     {
-                        if(ipiv(i) > 0)
+                        I const ip = ipiv(i);
+                        if(i > 1)
                         {
-                            I const ip = ipiv(i);
-                            if(i > 1)
-                            {
-                                auto const col_start = 1;
-                                auto const col_end = (i - 1);
-                                auto const irow_k = i;
-                                auto const irow_kp = ip;
+                            auto const col_start = 1;
+                            auto const col_end = (i - 1);
+                            auto const irow_k = i;
+                            auto const irow_kp = ip;
 
-                                syconv_swap_rows(irow_k, irow_kp, col_start, col_end);
-                            }
+                            syconv_swap_rows(irow_k, irow_kp, col_start, col_end);
                         }
-                        else
+                    }
+                    else
+                    {
+                        I const ip = -ipiv(i);
+                        if(i > 1)
                         {
-                            I const ip = -ipiv(i);
-                            if(i > 1)
-                            {
-                                auto const col_start = 1;
-                                auto const col_end = (i - 1);
-                                auto const irow_k = i + 1;
-                                auto const irow_kp = ip;
+                            auto const col_start = 1;
+                            auto const col_end = (i - 1);
+                            auto const irow_k = i + 1;
+                            auto const irow_kp = ip;
 
-                                syconv_swap_rows(irow_k, irow_kp, col_start, col_end);
-                            }
-                            i = i + 1;
+                            syconv_swap_rows(irow_k, irow_kp, col_start, col_end);
                         }
                         i = i + 1;
-                    } // end while
-                }
+                    }
+                    i = i + 1;
+                } // end while
             }
             else
             {
@@ -632,66 +521,38 @@ static __global__ __launch_bounds__(SYCONV_MAX_THDS) void syconv_kernel(
                 //
                 //            revert permutations
                 //  -------------------------------
-
-                //                 i = n
-                // 		do while(i.ge.1)
-                // 		   if(ipiv(i).gt.0) then
-                // 			   ip = ipiv(i)
-                // 			   if(i.gt.1) then
-                // 			      do j = 1, i - 1
-                // 				   temp = a(i, j)
-                // 				   a(i, j) = a(ip, j)
-                // 				   a(ip, j) = temp
-                // 			      end do
-                // 		            endif
-                // 		   else
-                // 		      ip = -ipiv(i)
-                // 		      i = i - 1
-                // 		      if(i.gt.1) then
-                // 		         do j = 1, i - 1
-                // 				 temp = a(i + 1, j)
-                // 				 a(i + 1, j) = a(ip, j)
-                // 				 a(ip, j) = temp
-                // 			 end do
-                // 		      endif
-                // 	           endif
-                // 		   i = i - 1
-                // 	        end do
-
+                I i = n;
+                while(i >= 1)
                 {
-                    I i = n;
-                    while(i >= 1)
+                    if(ipiv(i) > 0)
                     {
-                        if(ipiv(i) > 0)
+                        I const ip = ipiv(i);
+                        if(i > 1)
                         {
-                            I const ip = ipiv(i);
-                            if(i > 1)
-                            {
-                                auto const col_start = 1;
-                                auto const col_end = (i - 1);
-                                auto const irow_k = i;
-                                auto const irow_kp = ip;
+                            auto const col_start = 1;
+                            auto const col_end = (i - 1);
+                            auto const irow_k = i;
+                            auto const irow_kp = ip;
 
-                                syconv_swap_rows(irow_k, irow_kp, col_start, col_end);
-                            }
+                            syconv_swap_rows(irow_k, irow_kp, col_start, col_end);
                         }
-                        else
-                        {
-                            I const ip = -ipiv(i);
-                            i = i - 1;
-                            if(i > 1)
-                            {
-                                auto const col_start = 1;
-                                auto const col_end = (i - 1);
-                                auto const irow_k = (i + 1);
-                                auto const irow_kp = ip;
-
-                                syconv_swap_rows(irow_k, irow_kp, col_start, col_end);
-                            }
-                        }
+                    }
+                    else
+                    {
+                        I const ip = -ipiv(i);
                         i = i - 1;
-                    } // end while
-                }
+                        if(i > 1)
+                        {
+                            auto const col_start = 1;
+                            auto const col_end = (i - 1);
+                            auto const irow_k = (i + 1);
+                            auto const irow_kp = ip;
+
+                            syconv_swap_rows(irow_k, irow_kp, col_start, col_end);
+                        }
+                    }
+                    i = i - 1;
+                } // end while
             }
         }
         __syncthreads();
@@ -703,62 +564,37 @@ static inline rocblas_status rocsolver_syconv_argCheck(rocblas_handle handle,
                                                        bool const is_upper,
                                                        bool const is_convert,
                                                        I const n,
-
                                                        UA A,
                                                        Istride const shiftA,
                                                        I const lda,
-
                                                        I* const ipiv,
-
                                                        T* const E,
-
                                                        I const batch_count,
                                                        void* const work,
                                                        size_t const size_work)
 {
-    // ---------------------------------
     // order is important for unit tests:
-    // ---------------------------------
 
-    // -----------------
     // 0. invalid handle
-    // -----------------
     if(handle == nullptr)
-    {
-        return (rocblas_status_invalid_handle);
-    }
+        return rocblas_status_invalid_handle;
 
-    // -------------------------------
     // 1. invalid/non-supported values
-    // -------------------------------
+    // N/A
 
-    // ---------------
     // 2. invalid size
-    // ---------------
-    bool const is_valid_size = (n >= 0) && (lda >= n) && (batch_count >= 0)
-        && (size_work >= sizeof(I) * n * batch_count);
+    if(n < 0 || lda < n || batch_count < 0)
+        return rocblas_status_invalid_size;
+    if(size_work < sizeof(I) * n * batch_count)
+        return rocblas_status_invalid_size;
 
-    if(!is_valid_size)
-    {
-        return (rocblas_status_invalid_size);
-    }
-
-    // -----------------------------------------
     // skip pointer check if querying memory size
-    // -----------------------------------------
     if(rocblas_is_device_memory_size_query(handle))
-    {
         return rocblas_status_continue;
-    }
 
-    // -------------------
     // 3. invalid pointers
-    // -------------------
-
     if((n && !A) || (n && !ipiv) || (n && !E) || (n && !work))
-    {
         return rocblas_status_invalid_pointer;
-    }
 
     return (rocblas_status_continue);
 }
@@ -767,15 +603,12 @@ template <typename T, typename I>
 static inline rocblas_status rocsolver_syconv_getMemorySize(rocblas_handle handle,
                                                             I const n,
                                                             I const batch_count,
-
                                                             size_t* p_size_work)
 {
     *p_size_work = 0;
 
-    if((n == 0) || (batch_count == 0))
-    {
-        return (rocblas_status_success);
-    }
+    if(n == 0 || batch_count == 0)
+        return rocblas_status_success;
 
     size_t const size_icount = sizeof(I) * n * batch_count;
 
@@ -814,16 +647,11 @@ static inline rocblas_status rocsolver_syconv_getMemorySize(rocblas_handle handl
             // ------------------------------------------------
             I* const d_data = nullptr;
 
-            hipError_t const hstat = rocprim::segmented_inclusive_scan(
-                temp, temp_bytes,
-                d_data, // input
-                d_data, // output (same pointer)
-                batch_count, offsets, offsets + 1, rocprim::plus<I>(), stream);
-
-            if(hstat != hipSuccess)
-            {
-                return (rocblas_status_internal_error);
-            }
+            HIP_CHECK(rocprim::segmented_inclusive_scan(temp, temp_bytes,
+                                                        d_data, // input
+                                                        d_data, // output (same pointer)
+                                                        batch_count, offsets, offsets + 1,
+                                                        rocprim::plus<I>(), stream));
 
             size_rocprim = temp_bytes;
         }
@@ -831,7 +659,7 @@ static inline rocblas_status rocsolver_syconv_getMemorySize(rocblas_handle handl
 
     *p_size_work = size_icount + size_rocprim;
 
-    return (rocblas_status_success);
+    return rocblas_status_success;
 }
 
 //  -----------------------------------
@@ -844,49 +672,28 @@ static inline rocblas_status rocsolver_syconv_getMemorySize(rocblas_handle handl
 //  -----------------------------------
 template <typename T, typename I, typename UA, typename Istride = rocblas_stride>
 static rocblas_status rocsolver_syconv_template(rocblas_handle handle,
-
                                                 bool const is_upper,
                                                 bool const is_convert,
-
                                                 I const n,
-
                                                 UA A,
                                                 Istride const shiftA,
                                                 I const lda,
                                                 Istride const strideA,
-
                                                 I* const ipiv,
                                                 Istride const strideP,
-
                                                 T* const E,
                                                 Istride const strideE,
-
                                                 I const batch_count,
-
                                                 void* const work,
                                                 size_t const size_work)
 {
     // --------------
     // check arguments
     // --------------
-    {
-        rocblas_status const istat = rocsolver_syconv_argCheck(handle, is_upper, is_convert, n,
-
-                                                               A, shiftA, lda,
-
-                                                               ipiv,
-
-                                                               E,
-
-                                                               batch_count,
-
-                                                               work, size_work);
-        bool const is_ok = (istat == rocblas_status_success) || (istat == rocblas_status_continue);
-        if(!is_ok)
-        {
-            return (istat);
-        }
-    }
+    rocblas_status st = rocsolver_syconv_argCheck(handle, is_upper, is_convert, n, A, shiftA, lda,
+                                                  ipiv, E, batch_count, work, size_work);
+    if(st != rocblas_status_continue)
+        return st;
 
     auto ceildiv = [](auto n, auto b) { return ((n <= 0) ? 0 : (n - 1) / b + 1); };
 
@@ -912,10 +719,8 @@ static rocblas_status rocsolver_syconv_template(rocblas_handle handle,
     // -------------------------------------------------------------
     // setup icount[] to indicate whether there  is a negative pivot
     // -------------------------------------------------------------
-    {
-        syconv_setup_icount_kernel<<<dim3(nbx, nby, nbz), dim3(nx, ny, nz), 0, stream>>>(
-            n, batch_count, ipiv, strideP, icount);
-    }
+    ROCSOLVER_LAUNCH_KERNEL(syconv_setup_icount_kernel, dim3(nbx, nby, nbz), dim3(nx, ny, nz), 0,
+                            stream, n, batch_count, ipiv, strideP, icount);
 
     // -----------------------------------------------
     // compute segmented prefix sum scan using rocprim
@@ -923,119 +728,78 @@ static rocblas_status rocsolver_syconv_template(rocblas_handle handle,
     // there are batch_count number of segments
     // and each segment is  length n
     // -----------------------------------------------
+    // Functor to generate offsets
+    struct mul_n
     {
-        // Functor to generate offsets
-        struct mul_n
+        I n;
+        __host__ __device__ I operator()(I i) const
         {
-            I n;
-            __host__ __device__ I operator()(I i) const
-            {
-                return i * n;
-            }
-        };
-
-        auto segmented_inclusive_scan_inplace = [=](I* d_data, I const n, I const batch_count) {
-            auto counting = rocprim::make_counting_iterator<I>(0);
-            auto offsets = rocprim::make_transform_iterator(counting, mul_n{n});
-
-            void* temp = nullptr;
-            size_t temp_bytes = 0;
-
-            // ------------------------------
-            // size query for scratch storage in in-place prefix sum scan
-            //
-            // NOTE:  rocprim expect argument temp_bytes as  size_t&
-            //        and not as size_t *
-            //
-            // ------------------------------
-            {
-                hipError_t const hstat = rocprim::segmented_inclusive_scan(
-                    temp, temp_bytes,
-                    d_data, // input
-                    d_data, // output (same pointer)
-                    batch_count, offsets, offsets + 1, rocprim::plus<I>(), stream);
-
-                if(hstat != hipSuccess)
-                {
-                    return (rocblas_status_internal_error);
-                }
-            }
-
-            size_t const size_remain = (pwork + size_work) - pfree;
-            if(temp_bytes > size_remain)
-            {
-                return (rocblas_status_memory_error);
-            }
-
-            temp = reinterpret_cast<void*>(pfree);
-
-            {
-                // --------------------------------
-                // actual execution for (in place)
-                // prefix sum scan
-                // --------------------------------
-                hipError_t const hstat = rocprim::segmented_inclusive_scan(
-                    temp, temp_bytes, d_data, d_data, batch_count, offsets, offsets + 1,
-                    rocprim::plus<I>(), stream);
-
-                if(hstat != hipSuccess)
-                {
-                    return (rocblas_status_internal_error);
-                }
-            }
-
-            return (rocblas_status_success);
-        };
-
-        rocblas_status const istat = segmented_inclusive_scan_inplace(icount, n, batch_count);
-        if(istat != rocblas_status_success)
-        {
-            return (istat);
+            return i * n;
         }
-    }
+    };
+
+    auto segmented_inclusive_scan_inplace = [=](I* d_data, I const n, I const batch_count) {
+        auto counting = rocprim::make_counting_iterator<I>(0);
+        auto offsets = rocprim::make_transform_iterator(counting, mul_n{n});
+
+        void* temp = nullptr;
+        size_t temp_bytes = 0;
+
+        // ------------------------------
+        // size query for scratch storage in in-place prefix sum scan
+        //
+        // NOTE:  rocprim expect argument temp_bytes as  size_t&
+        //        and not as size_t *
+        // ------------------------------
+        HIP_CHECK(rocprim::segmented_inclusive_scan(temp, temp_bytes,
+                                                    d_data, // input
+                                                    d_data, // output (same pointer)
+                                                    batch_count, offsets, offsets + 1,
+                                                    rocprim::plus<I>(), stream));
+
+        size_t const size_remain = (pwork + size_work) - pfree;
+        if(temp_bytes > size_remain)
+            return rocblas_status_memory_error;
+
+        temp = reinterpret_cast<void*>(pfree);
+
+        // --------------------------------
+        // actual execution for (in place)
+        // prefix sum scan
+        // --------------------------------
+        HIP_CHECK(rocprim::segmented_inclusive_scan(temp, temp_bytes, d_data, d_data, batch_count,
+                                                    offsets, offsets + 1, rocprim::plus<I>(), stream));
+
+        return rocblas_status_success;
+    };
+
+    ROCBLAS_CHECK(segmented_inclusive_scan_inplace(icount, n, batch_count));
+
     // ----------------------------------------
     // NOTE: icount now contains the prefix sum
     // ----------------------------------------
-
     if(is_convert)
     {
-        syconv_convert_into_E<T, I, UA, Istride>
-            <<<dim3(nbx, nby, nbz), dim3(nx, ny, nz), 0, stream>>>(is_upper, n, batch_count,
-
-                                                                   A, shiftA, lda, strideA,
-
-                                                                   ipiv, strideP,
-
-                                                                   E, strideE, icount);
+        ROCSOLVER_LAUNCH_KERNEL((syconv_convert_into_E<T, I, UA, Istride>), dim3(nbx, nby, nbz),
+                                dim3(nx, ny, nz), 0, stream, is_upper, n, batch_count, A, shiftA,
+                                lda, strideA, ipiv, strideP, E, strideE, icount);
     }
 
-    syconv_kernel<T, I, UA><<<dim3(nbx, nby, nbz), dim3(nx, ny, nz), 0, stream>>>(
-
-        is_upper, is_convert,
-
-        n,
-
-        A, shiftA, lda, strideA,
-
-        ipiv, strideP,
-
-        batch_count);
+    ROCSOLVER_LAUNCH_KERNEL((syconv_kernel<T, I, UA>), dim3(nbx, nby, nbz), dim3(nx, ny, nz), 0,
+                            stream, is_upper, is_convert, n, A, shiftA, lda, strideA, ipiv, strideP,
+                            batch_count);
 
     // --------------------------------------------------
     // restore back to format initially produced by SYTRF
     // --------------------------------------------------
     if(!is_convert)
     {
-        syconv_restore_from_E<T, I, UA, Istride>
-            <<<dim3(nbx, nby, nbz), dim3(nx, ny, nz), 0, stream>>>(is_upper, n, batch_count,
-
-                                                                   A, shiftA, lda, strideA,
-
-                                                                   ipiv, strideP,
-
-                                                                   E, strideE, icount);
+        ROCSOLVER_LAUNCH_KERNEL((syconv_restore_from_E<T, I, UA, Istride>), dim3(nbx, nby, nbz),
+                                dim3(nx, ny, nz), 0, stream, is_upper, n, batch_count, A, shiftA,
+                                lda, strideA, ipiv, strideP, E, strideE, icount);
     }
-    return (rocblas_status_success);
+
+    return rocblas_status_success;
 }
 ROCSOLVER_END_NAMESPACE
 #undef SYCONV_MAX_THDS
