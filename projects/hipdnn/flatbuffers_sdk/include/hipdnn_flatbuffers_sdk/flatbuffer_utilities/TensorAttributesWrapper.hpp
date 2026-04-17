@@ -139,14 +139,3 @@ private:
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _shallowTensor = nullptr;
 };
 } // namespace hipdnn_flatbuffers_sdk::flatbuffer_utilities
-
-// Backward compatibility aliases - DEPRECATED
-// These aliases are deprecated and will be removed in a future release.
-// Use hipdnn_flatbuffers_sdk::flatbuffer_utilities::<TypeName> instead.
-namespace hipdnn_plugin_sdk
-{
-using ITensorAttributesWrapper
-    = hipdnn_flatbuffers_sdk::flatbuffer_utilities::ITensorAttributesWrapper;
-using TensorAttributesWrapper
-    = hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttributesWrapper;
-} // namespace hipdnn_plugin_sdk

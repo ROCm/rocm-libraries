@@ -153,12 +153,3 @@ private:
 };
 
 } // namespace hipdnn_flatbuffers_sdk::flatbuffer_utilities
-
-// Backward compatibility aliases - DEPRECATED
-// These aliases are deprecated and will be removed in a future release.
-// Use hipdnn_flatbuffers_sdk::flatbuffer_utilities::<TypeName> instead.
-namespace hipdnn_plugin_sdk
-{
-using IEngineDetails = hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineDetails;
-using EngineDetailsWrapper = hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineDetailsWrapper;
-} // namespace hipdnn_plugin_sdk

@@ -54,6 +54,7 @@ FetchContent_MakeAvailable(IREERuntime)
 
 # Other dependencies
 find_package(hip CONFIG REQUIRED)
+find_package(hipdnn_data_sdk CONFIG REQUIRED)
 find_package(hipdnn_flatbuffers_sdk CONFIG REQUIRED)
 find_package(hipdnn_plugin_sdk CONFIG REQUIRED)
 find_package(hipdnn_frontend CONFIG REQUIRED)
