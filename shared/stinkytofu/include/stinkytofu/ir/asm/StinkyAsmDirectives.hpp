@@ -25,6 +25,7 @@
 
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include <map>
+#include <ostream>
 #include <string>
 
 namespace stinkytofu

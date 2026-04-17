@@ -3,6 +3,7 @@
 
 find_package(Threads REQUIRED)
 find_package(GTest REQUIRED)
+include(GoogleTest)
 
 # Common test main entry point
 set(TEST_MAIN

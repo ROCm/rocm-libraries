@@ -34,6 +34,11 @@
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
+
+#ifdef _WIN32
+#define popen _popen
+#define pclose _pclose
+#endif
 #include <cstring>
 #include <regex>
 #include <fstream>

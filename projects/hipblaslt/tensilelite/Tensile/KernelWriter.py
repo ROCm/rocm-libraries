@@ -5224,7 +5224,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # Run StinkyTofu conversion for supported architectures
     t0_start = time.perf_counter()
     if globalParameters["StinkyTofuOptLevel"] is not None and rocisa.isSupportedByStinkyTofu(self.states.version):
-      print(f"StinkyTofu: Converting kernel to stinkytofu IR for gfx{self.states.version[0]}{self.states.version[1]}{self.states.version[2]}...")
+      print2(f"StinkyTofu: Converting kernel to stinkytofu IR for gfx{self.states.version[0]}{self.states.version[1]}{self.states.version[2]}...")
 
       moduleKernelBody.body.setParent()
 
@@ -5255,7 +5255,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
                                "UseSgprForGRO": kernel["_UseSgprForGRO"],
                               }
 
-      print(f"StinkyTofu module options: {stinky_module_options}")
+      print2(f"StinkyTofu module options: {stinky_module_options}")
       # Convert rocisa module to stinkytofu with signature
       # Returns a KernelBody wrapper that includes signature and instruction module
       # - runOptimizationPipeline() optimizes the instruction body
@@ -5265,14 +5265,14 @@ class KernelWriter(metaclass=abc.ABCMeta):
                                            signature=fs,
                                            options=stinky_module_options)
       t1a_end = time.perf_counter()
-      print(f"StinkyTofu (1a) toStinkyTofuModule: {t1a_end - t1a_start:.4f}s")
+      print2(f"StinkyTofu (1a) toStinkyTofuModule: {t1a_end - t1a_start:.4f}s")
 
       # Run pipeline — builder handles O0 internally (skips optimization,
       # still runs required passes like InsertVgprMsb)
       t1b_start = time.perf_counter()
       stModule.runOptimizationPipeline()
       t1b_end = time.perf_counter()
-      print(f"StinkyTofu (1b) pipeline: {t1b_end - t1b_start:.4f}s")
+      print2(f"StinkyTofu (1b) pipeline: {t1b_end - t1b_start:.4f}s")
 
     error = self.states.overflowedResources
     print2(f"  found error code {error} with overflowed resources set to {self.states.overflowedResources}")
@@ -5282,7 +5282,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       t2_start = time.perf_counter()
       st_asm = stModule.emitAssembly()
       t2_end = time.perf_counter()
-      print(f"StinkyTofu (2) emitAssembly: {t2_end - t2_start:.4f}s")
+      print2(f"StinkyTofu (2) emitAssembly: {t2_end - t2_start:.4f}s")
 
       if os.environ.get("ENABLE_DEBUG_STINKYTOFU_ASM") is not None:
         t3_start = time.perf_counter()
@@ -5305,7 +5305,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
         t_str_start = time.perf_counter()
         orig_asm_str = str(moduleKernelBody)
         t_str_end = time.perf_counter()
-        print(f"Rocisa::str(moduleKernelBody): {t_str_end - t_str_start:.4f}s")
+        print2(f"Rocisa::str(moduleKernelBody): {t_str_end - t_str_start:.4f}s")
 
         with open(orig_path, "w") as f:
           f.write(orig_asm_str)
@@ -5319,15 +5319,15 @@ class KernelWriter(metaclass=abc.ABCMeta):
           fcntl.flock(f, fcntl.LOCK_UN)
 
         t3_end = time.perf_counter()
-        print(f"StinkyTofu (3) debug file write: {t3_end - t3_start:.4f}s")
+        print2(f"StinkyTofu (3) debug file write: {t3_end - t3_start:.4f}s")
 
       t0_end = time.perf_counter()
-      print(f"StinkyTofu (0) total: {t0_end - t0_start:.4f}s")
+      print2(f"StinkyTofu (0) total: {t0_end - t0_start:.4f}s")
 
-      print(f"Using StinkyTofu Assembly")
+      print2(f"Using StinkyTofu Assembly")
       return (error, st_asm)
     else:
-      print(f"Using Original Rocisa Assembly")
+      print2(f"Using Original Rocisa Assembly")
       return (error, str(moduleKernelBody))
 
   ##############################################################################
