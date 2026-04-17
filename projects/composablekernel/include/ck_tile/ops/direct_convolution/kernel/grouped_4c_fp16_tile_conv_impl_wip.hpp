@@ -14,7 +14,6 @@
 #include "ck_tile/ops/direct_convolution/utils/detail.hpp"
 #include "ck_tile/core/numeric/vector_type.hpp"
 #include "ck_tile/core/tensor/buffer_view.hpp"
-#include "ck_tile/core/tensor/tensor_view.hpp"
 #include <hip/hip_fp16.h>
 #include <hip/hip_runtime.h>
 
@@ -227,44 +226,40 @@ struct InputLoader
 {
     using TC = TileConstants<cfg>;
 
-    // Global input tensor view: [hi, BLOCK_W, C8*8] slice in _Float16 elements.
-    // The tensor_view internally manages the buffer resource and computes offsets
-    // from tensor coordinates via the descriptor strides.
-    using InputTensorView = decltype(ck_tile::make_naive_tensor_view<
-                                     ck_tile::address_space_enum::global>(
-        static_cast<const _Float16*>(nullptr),
-        ck_tile::make_tuple(int{}, ck_tile::number<TC::BLOCK_W>{}, int{}),
-        ck_tile::make_tuple(int{}, int{}, ck_tile::number<1>{}),
-        ck_tile::number<8>{}));
-
-    InputTensorView input_view;
     uint4* store_input_lds;
+    decltype(ck_tile::make_builtin_buffer_resource(
+        static_cast<const _Float16*>(nullptr), uint32_t{})) input_rsrc;
     bool load_active;
     bool input_valid;
-    int col;
-    int c8_fp16; // c8_thread * 8, in fp16 element units
+
+    ck_tile::index_t input_voffset;
+    size_t wi_stride;
 
     __device__ InputLoader(int tid,
                            const BlockCoords<cfg>& bc,
                            uint4* input_lds,
                            const _Float16* __restrict__ in,
-                           int N,
-                           int hi,
-                           int wi,
-                           int px)
-        : input_view(ck_tile::make_naive_tensor_view<ck_tile::address_space_enum::global>(
-              in + static_cast<size_t>(bc.block_n) * hi * wi * bc.C +
-                  static_cast<size_t>(bc.block_q - px) * bc.C + bc.block_k,
-              ck_tile::make_tuple(hi, ck_tile::number<TC::BLOCK_W>{}, bc.C8 * 8),
-              ck_tile::make_tuple(wi * bc.C, bc.C, ck_tile::number<1>{}),
-              ck_tile::number<8>{})),
-          store_input_lds(&input_lds[tid]),
+                           const auto& input_desc)
+        : store_input_lds(&input_lds[tid]),
+          input_rsrc(ck_tile::make_builtin_buffer_resource(
+              in,
+              static_cast<uint32_t>(
+                  static_cast<size_t>(N) * hi * wi * bc.C * sizeof(_Float16)))),
           load_active(tid < TC::BLOCK_W * TC::BLOCK_C8),
-          col(TC::Sw::x(tid)),
-          c8_fp16(TC::Sw::c8(tid) * 8)
+          wi_stride(static_cast<size_t>(wi) * bc.C8)
     {
+        const int col        = TC::Sw::x(tid);
+        const int c8_thread  = TC::Sw::c8(tid);
         const int global_col = (bc.block_q - px) + col;
         input_valid          = (0 <= global_col && global_col < wi);
+
+        const size_t offset_block = static_cast<size_t>(bc.block_n) * hi * wi * bc.C8;
+        input_voffset = input_valid
+                            ? static_cast<ck_tile::index_t>(
+                                  (offset_block + static_cast<size_t>(global_col) * bc.C8 +
+                                   bc.block_c8 + c8_thread) *
+                                  sizeof(uint4))
+                            : 0;
     }
 
     // Issue an async load for input row y into the specified LDS buffer half.
@@ -272,14 +267,14 @@ struct InputLoader
     {
         if(load_active)
         {
-            auto coord = ck_tile::make_tensor_coordinate(
-                input_view.get_tensor_descriptor(),
-                ck_tile::make_tuple(y, col, c8_fp16));
-            input_view.template async_get_vectorized_elements<ck_tile::fp16x8_t>(
-                reinterpret_cast<CK_TILE_LDS_ADDR _Float16*>(
+            ck_tile::amd_async_buffer_load<int32_t, 4>(
+                reinterpret_cast<CK_TILE_LDS_ADDR int32_t*>(
                     store_input_lds + lds_buffer * TC::INPUT_LDS_BUFFER_SIZE_C8),
-                coord,
+                input_rsrc,
+                input_voffset +
+                    static_cast<ck_tile::index_t>(y * wi_stride * sizeof(uint4)),
                 0,
+                ck_tile::number<0>{},
                 input_valid);
         }
     }
@@ -300,31 +295,18 @@ struct WeightLoader
                                        uint4* output_lds,
                                        const _Float16* __restrict__ wei)
     {
-        // Weight tensor is [C_total * kh * kw * GROUP_SIZE] in fp16 elements.
-        // Each thread loads 8 contiguous fp16 (= 1 uint4 = 16 bytes) per iteration.
-        // block_k selects the starting filter index for this workgroup, i.e., 
-        // each workgroup loads weights for a single output group and all input filters.
-        // Note: bc.C is the total number of input channels.
-        constexpr int FP16_PER_UINT4 = 8;
-        const int weight_elements    = bc.C * cfg.kh * cfg.kw * TC::GROUP_SIZE;
-        const int base_fp16          = bc.block_k * cfg.kh * cfg.kw * TC::GROUP_SIZE;
-
-        auto weight_view = ck_tile::make_naive_tensor_view<ck_tile::address_space_enum::global>(
-            wei,
-            ck_tile::make_tuple(weight_elements), // Flat tensor
-            ck_tile::make_tuple(ck_tile::number<1>{}), // Stride doesn't matter since we only use linear indexing.
-            ck_tile::number<FP16_PER_UINT4>{}); // Vector size of 8 fp16 elements per uint4
+        const auto weight_bytes = static_cast<uint32_t>(
+            static_cast<size_t>(bc.C) * cfg.kh * cfg.kw * TC::GROUP_SIZE * sizeof(_Float16));
+        auto weight_rsrc      = ck_tile::make_builtin_buffer_resource(wei, weight_bytes);
+        ck_tile::index_t base = bc.block_k * cfg.kh * cfg.kw * static_cast<ck_tile::index_t>(sizeof(uint2));
 
         for(int j = tid; j < TC::WEIGHT_LDS_SIZE_UINT4; j += cfg.block_size())
         {
-            auto coord = ck_tile::make_tensor_coordinate(
-                weight_view.get_tensor_descriptor(),
-                ck_tile::make_tuple(base_fp16 + j * FP16_PER_UINT4));
-            weight_view.template async_get_vectorized_elements<ck_tile::fp16x8_t, false>(
-                reinterpret_cast<CK_TILE_LDS_ADDR _Float16*>(&output_lds[j]),
-                coord,
-                0,
-                ck_tile::bool_constant<false>{});
+            ck_tile::amd_async_buffer_load<int32_t, 4,
+                ck_tile::amd_buffer_coherence_enum::coherence_default, false>(
+                reinterpret_cast<CK_TILE_LDS_ADDR int32_t*>(&output_lds[j]),
+                weight_rsrc,
+                base + j * static_cast<ck_tile::index_t>(sizeof(uint4)));
         }
     }
 
@@ -373,20 +355,10 @@ struct OutputWriter
 {
     using TC = TileConstants<cfg>;
 
-    // Output tensor descriptor: [ho, wo, C] in _Float16 elements for this batch.
-    // Used only for offset computation; the actual store is a flat global write.
-    using OutputDesc = decltype(ck_tile::make_naive_tensor_descriptor(
-        ck_tile::make_tuple(int{}, int{}, int{}),
-        ck_tile::make_tuple(int{}, int{}, ck_tile::number<1>{}),
-        ck_tile::number<8>{}));
-
     bool store_active;
-    bool store_valid;
     const uint4* load_output_lds;
-    _Float16* out_base;   // output base pointer for this batch
-    OutputDesc out_desc;  // descriptor for coordinate → offset mapping
-    int out_q;            // output column coordinate
-    int out_c_fp16;       // output channel coordinate in fp16 units
+    uint4* store_output_global;
+    size_t wo_stride;
     int output_lds_offset;
 
     __device__ OutputWriter(const ThreadMapping<cfg>& tm,
@@ -396,15 +368,9 @@ struct OutputWriter
                             int ho,
                             int wo)
         : store_active(tm.tid < TC::STORE_VECS),
-          store_valid(false),
           load_output_lds(nullptr),
-          out_base(out + static_cast<size_t>(bc.block_n) * ho * wo * bc.C),
-          out_desc(ck_tile::make_naive_tensor_descriptor(
-              ck_tile::make_tuple(ho, wo, bc.C),
-              ck_tile::make_tuple(wo * bc.C, bc.C, ck_tile::number<1>{}),
-              ck_tile::number<8>{})),
-          out_q(0),
-          out_c_fp16(0)
+          store_output_global(nullptr),
+          wo_stride(static_cast<size_t>(wo) * bc.C8)
     {
         // Pre-compute the output LDS swizzle offset (thread-constant).
         output_lds_offset = TC::Sw::offset_uint2(
@@ -414,10 +380,16 @@ struct OutputWriter
         {
             const int col = TC::Sw::x(tm.tid);
             const int c8  = tm.tid % TC::BLOCK_C8;
-            out_q         = bc.block_q + col;
-            out_c_fp16    = (bc.block_c8 + c8) * 8;
+            const int q   = bc.block_q + col;
             load_output_lds = &output_lds[TC::Sw::offset_uint4(col, c8)];
-            store_valid     = (out_q < wo);
+            if(q < wo)
+            {
+                const int K8    = bc.C / 8;
+                store_output_global =
+                    reinterpret_cast<uint4*>(out) +
+                    static_cast<size_t>(bc.block_n) * ho * wo * K8 +
+                    static_cast<size_t>(q) * K8 + bc.block_c8 + c8;
+            }
         }
     }
 
@@ -438,13 +410,8 @@ struct OutputWriter
 
         __syncthreads();
 
-        if(store_valid)
-        {
-            // Compute the global offset from (p_out, out_q, out_c_fp16) coordinates.
-            auto coord = ck_tile::make_tensor_coordinate(
-                out_desc, ck_tile::make_tuple(p_out, out_q, out_c_fp16));
-            *reinterpret_cast<uint4*>(out_base + coord.get_offset()) = *load_output_lds;
-        }
+        if(store_output_global)
+            store_output_global[p_out * wo_stride] = *load_output_lds;
     }
 };
 
@@ -498,7 +465,8 @@ __device__ void conv2d_grouped_4c_fp16_cdna4_nhwc_impl(const _Float16* __restric
         return;
 
     ThreadMapping<cfg> tm;
-    InputLoader<cfg> il(tm.tid, bc, input_lds, in, N, hi, wi, px);
+    auto input_desc = make_naive_tensor_descriptor(make_tuple(N, hi, wi, C), make_tuple(hi*wi*C, wi*C, C, 1));
+    InputLoader<cfg> il(tm.tid, bc, input_lds, in, input_desc);
     OutputWriter<cfg> ow(tm, bc, output_lds, out, ho, wo);
 
     // --- Weight prologue: global → LDS → registers ---
