@@ -33,7 +33,7 @@ import argparse
 
 from datetime import datetime
 from pathlib import Path
-from typing import Dict
+from typing import Dict, Optional
 
 from Tensile import __version__
 from Tensile.Common import print1, printExit, printWarning, ensurePath, HR, isRhel8, \
@@ -327,9 +327,10 @@ def get_gpu_max_frequency(device_id):
 
     return freq // 1000 if freq else None
 
-def get_user_max_frequency():
+def get_user_max_frequency() -> Optional[int]:
     '''
-    Get the maximum frequency from the user when the GPU frequency cannot be determined
+    Get the maximum frequency from the user when the GPU frequency cannot be determined.
+    Returns None if the GPU frequency cannot be determined.
     '''
     # Non-interactive guard: when stdin is not a tty (CI, --build-only via
     # pytest, etc.) we cannot prompt.  Returning None is safe because:
