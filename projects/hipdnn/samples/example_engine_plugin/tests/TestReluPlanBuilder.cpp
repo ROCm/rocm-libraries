@@ -98,12 +98,12 @@ TEST_F(ReluPlanBuilderTest, GetCustomKnobs_ReturnsNegativeSlopeKnob)
 TEST_F(ReluPlanBuilderTest, InitializeExecutionSettings_NegativeSlopeKnob_StoresInSettings)
 {
     auto graphFbb = createReluFwdGraph();
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(graphFbb.GetBufferPointer(),
-                                                              graphFbb.GetSize());
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(graphFbb.GetBufferPointer(),
+                                                                     graphFbb.GetSize());
 
     auto configFbb = createEngineConfigWithFloatKnob(0, "example.relu.negative_slope", 0.5);
-    hipdnn_data_sdk::flatbuffer_utilities::EngineConfigWrapper config(configFbb.GetBufferPointer(),
-                                                                      configFbb.GetSize());
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper config(
+        configFbb.GetBufferPointer(), configFbb.GetSize());
 
     ExampleProviderSettings settings;
     planBuilder->initializeExecutionSettings(handle, graph, config, settings);

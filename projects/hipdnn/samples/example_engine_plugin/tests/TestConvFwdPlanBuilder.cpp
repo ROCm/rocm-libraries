@@ -66,8 +66,8 @@ TEST_F(ConvFwdPlanBuilderTest, IsApplicable_NonReluPointwise_ReturnsFalse)
 TEST_F(ConvFwdPlanBuilderTest, IsApplicable_MultiNodeGraph_ReturnsFalse)
 {
     auto fbb = createMultiNodeConvGraph();
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(fbb.GetBufferPointer(),
-                                                              fbb.GetSize());
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(fbb.GetBufferPointer(),
+                                                                     fbb.GetSize());
     ASSERT_TRUE(graph.isValid());
     EXPECT_FALSE(planBuilder->isApplicable(handle, graph));
 }
