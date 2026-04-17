@@ -108,17 +108,17 @@ TEST_F(RegressionPriorityTest, HighThenLowDoesNotReplace)
     EXPECT_EQ(found->get_name(), "high");
 }
 
-TEST_F(RegressionPriorityTest, SamePriorityDoesReplace)
+TEST_F(RegressionPriorityTest, SamePriorityDoesNotReplace)
 {
     auto key    = make_test_key(256);
     auto first  = std::make_shared<MockKernelInstance>(key, "first");
     auto second = std::make_shared<MockKernelInstance>(key, "second");
 
     EXPECT_TRUE(Registry::instance().register_kernel(first, Registry::Priority::Normal));
-    EXPECT_TRUE(Registry::instance().register_kernel(second, Registry::Priority::Normal));
+    EXPECT_FALSE(Registry::instance().register_kernel(second, Registry::Priority::Normal));
 
     auto found = Registry::instance().lookup(key);
-    EXPECT_EQ(found->get_name(), "second");
+    EXPECT_EQ(found->get_name(), "first");
 }
 
 // =============================================================================
