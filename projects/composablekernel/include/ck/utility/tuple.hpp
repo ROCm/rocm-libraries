@@ -100,6 +100,7 @@ struct TupleImpl<Sequence<Is...>, Xs...> : TupleElementKeyData<TupleElementKey<I
 
     template <index_t I>
     __host__ __device__ constexpr const auto& GetElementDataByKey(TupleElementKey<I>) const
+        [[clang::lifetimebound]]
     {
         return get_tuple_element_data_reference<TupleElementKey<I>>(*this);
     }
