@@ -283,6 +283,7 @@ int runGemm(size_t         m,
         // setUseScaleAB must be called before setScaleA/setScaleB,
         // because setScaleA/B silently skips tensor registration when
         // m_useScaleAB is still empty.
+        // See: https://github.com/ROCm/rocm-libraries/issues/6541
         contraction.setUseScaleAB("Scalar");
         contraction.setScaleA(rocisa::DataType::Float, 1);
         contraction.setScaleB(rocisa::DataType::Float, 1);
