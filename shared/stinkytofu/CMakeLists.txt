@@ -112,6 +112,9 @@ target_include_directories(stinkytofu
 # This ensures the build order is: gfxisa -> tablegen -> run tablegen -> stinkytofu
 add_dependencies(stinkytofu tablegen_generated)
 
+# dladdr() used in IntrinsicRegistry.cpp requires -ldl
+target_link_libraries(stinkytofu PRIVATE ${CMAKE_DL_LIBS})
+
 # Add source files from src/ subdirectory
 add_subdirectory(src)
 
@@ -119,7 +122,12 @@ add_subdirectory(src)
 # Unit tests
 ##===----------------------------------------------------------------------===##
 # Option to build unit tests
-option(STINKYTOFU_BUILD_TESTS "Build StinkyTofu unit tests" ON)
+if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+    set(_stinkytofu_build_tests_default ON)
+else()
+    set(_stinkytofu_build_tests_default OFF)
+endif()
+option(STINKYTOFU_BUILD_TESTS "Build StinkyTofu unit tests" ${_stinkytofu_build_tests_default})
 if(STINKYTOFU_BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)
@@ -128,8 +136,8 @@ endif()
 ##===----------------------------------------------------------------------===##
 # Python bindings
 ##===----------------------------------------------------------------------===##
-# Option to build Python bindings
-option(STINKYTOFU_BUILD_PYTHON "Build StinkyTofu Python bindings" ON)
+# Option to build Python bindings (default OFF when used as sub-project)
+option(STINKYTOFU_BUILD_PYTHON "Build StinkyTofu Python bindings" ${_stinkytofu_build_tests_default})
 if(STINKYTOFU_BUILD_PYTHON)
     add_subdirectory(python_module)
 endif()
