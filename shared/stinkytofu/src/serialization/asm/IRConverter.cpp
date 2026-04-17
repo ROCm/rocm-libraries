@@ -27,6 +27,7 @@
 #include "ModifierSerializer.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/hardware/GfxIsa.hpp"
+#include "stinkytofu/ir/asm/StinkyAsmDirectives.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/serialization/asm/IRParser.hpp"
 
@@ -39,6 +40,20 @@ static void convertInstruction(AsmIRBuilder& irBuilder,
                                const std::unique_ptr<ParsedInstruction>& inst, GfxArchID arch) {
     if (inst->isLabel) {
         irBuilder.createLabel(inst->opcodeStr);
+        return;
+    }
+
+    if (inst->opcodeStr == "asm_directive") {
+        AsmDirective* d = irBuilder.createIR<AsmDirective>();
+        if (!inst->srcRegs.empty() &&
+            inst->srcRegs[0].dataType == StinkyRegister::Type::LiteralString) {
+            d->name = inst->srcRegs[0].literalValue;
+            if (d->name == ".set") d->kind = AsmDirectiveKind::SET;
+        }
+        if (inst->srcRegs.size() > 1 &&
+            inst->srcRegs[1].dataType == StinkyRegister::Type::LiteralString) {
+            d->symbol = inst->srcRegs[1].literalValue;
+        }
         return;
     }
 

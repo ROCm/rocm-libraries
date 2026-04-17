@@ -31,6 +31,7 @@
 
 #include "stinkytofu/bindings/python/Module.hpp"
 #include "stinkytofu/core/PassManager.hpp"
+#include "stinkytofu/ir/asm/StinkyAsmDirectives.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/support/DAGScheduleJsonWriter.hpp"
 #include "stinkytofu/support/DebugPrintInstrumentation.hpp"
@@ -285,6 +286,27 @@ class ScopeAdaptor : public Pass {
     }
 
    private:
+    /// Move IR from [begin, end) into \p bb.
+    /// StinkyInstructions and non-TEXTBLOCK AsmDirectives are preserved;
+    /// TEXTBLOCK directives (comments) are erased.
+    static void moveIRToBlock(IntrusiveListIterator<IRBase> begin,
+                              IntrusiveListIterator<IRBase> end, BasicBlock* bb) {
+        for (auto it = begin; it != end;) {
+            IRBase* ir = it.getNodePtr();
+            it++;
+            if (dyn_cast<StinkyInstruction>(ir)) {
+                bb->appendIR(ir);
+            } else if (const auto* directive = dyn_cast<AsmDirective>(ir)) {
+                if (directive->kind == AsmDirectiveKind::TEXTBLOCK)
+                    ir->erase();
+                else
+                    bb->appendIR(ir);
+            } else {
+                assert(false && "Unexpected non-instruction IR type in scope adaptor");
+            }
+        }
+    }
+
     /// Extract a single group's instruction range to a temp Function,
     /// run the inner PM, and splice results back.
     void runSingleRegion(const std::string& groupName) {
@@ -298,16 +320,7 @@ class ScopeAdaptor : public Pass {
         Function tempFunc("temp");
         BasicBlock* bb = tempFunc.createBasicBlock("entry");
 
-        // Move StinkyInstructions from module to temporary function
-        for (auto it = begin; it != end;) {
-            IRBase* ir = it.getNodePtr();
-            it++;
-            if (dyn_cast<StinkyInstruction>(ir)) {
-                bb->appendIR(ir);
-            } else {
-                ir->erase();
-            }
-        }
+        moveIRToBlock(begin, end, bb);
 
         // Run the inner pipeline
         innerPM.run(tempFunc);
@@ -347,16 +360,7 @@ class ScopeAdaptor : public Pass {
         Function tempFunc("temp");
         BasicBlock* bb = tempFunc.createBasicBlock("entry");
 
-        // Move StinkyInstructions from the combined range
-        for (auto it = combinedBegin; it != combinedEnd;) {
-            IRBase* ir = it.getNodePtr();
-            it++;
-            if (dyn_cast<StinkyInstruction>(ir)) {
-                bb->appendIR(ir);
-            } else {
-                ir->erase();
-            }
-        }
+        moveIRToBlock(combinedBegin, combinedEnd, bb);
 
         // Run the inner pipeline
         innerPM.run(tempFunc);
@@ -399,16 +403,7 @@ class ScopeAdaptor : public Pass {
         Function tempFunc("temp");
         BasicBlock* bb = tempFunc.createBasicBlock("entry");
 
-        // Move all StinkyInstructions from module to temporary function
-        for (auto it = origBB->begin(); it != origBB->end();) {
-            IRBase* ir = it.getNodePtr();
-            it++;
-            if (dyn_cast<StinkyInstruction>(ir)) {
-                bb->appendIR(ir);
-            } else {
-                ir->erase();
-            }
-        }
+        moveIRToBlock(origBB->begin(), origBB->end(), bb);
 
         // Run the inner pipeline
         innerPM.run(tempFunc);
