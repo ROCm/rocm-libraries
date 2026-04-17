@@ -94,7 +94,16 @@ namespace
     // A naive, slow, golden reference implementation of GEMM.
     // Used strictly for validating the correctness of the optimized path.
     // Calculates D = activation(alpha * scaleA[i] * scaleB[j] * scaleAlphaVec[d] * (A * B) + beta * C + bias[i])
-    // where d = i (row/M) when factorDim==0, or d = j (col/N) when factorDim==1.
+  // Calculates, for each element (i, j):
+  //   D[i,j] = activation( effectiveAlpha * (A * B)[i,j] + beta * C[i,j] + bias[i] )
+  // where:
+  //   effectiveAlpha = alpha
+  //                  * scaleA[i]                              (if scaleAVec     != nullptr)
+  //                  * scaleB[j]                              (if scaleBVec     != nullptr)
+  //                  * scaleAlphaVec[factorDim == 0 ? i : j]  (if scaleAlphaVec != nullptr)
+  //
+  // scaleA is always indexed by row (M), scaleB always by col (N).
+  // factorDim only affects scaleAlphaVec: 0 = row-dim (length M), 1 = col-dim (length N).   
     void columnMajorGemm(const float*   a,
                          const float*   b,
                          const float*   c,
