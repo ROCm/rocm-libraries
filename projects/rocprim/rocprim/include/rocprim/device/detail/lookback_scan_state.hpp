@@ -636,10 +636,10 @@ public:
         this->set(block_id, lookback_scan_prefix_flag::complete, value);
     }
 
-    /// \brief This device function queries the value of the given prefix with the know flag.
+    /// \brief This device function queries the value of the given prefix, given a known flag.
     ///
     /// \param [in] block_id the index of the prefix to be queried.
-    /// \param [out] flag the flag of the prefix.
+    /// \param [in] flag the flag of the prefix.
     /// \param [out] value the value of the prefix.
     ROCPRIM_DEVICE ROCPRIM_INLINE
     void get_value_with_known_flag(const unsigned int              block_id,
