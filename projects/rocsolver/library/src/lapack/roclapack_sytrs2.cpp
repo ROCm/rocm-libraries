@@ -70,8 +70,8 @@ rocblas_status rocsolver_sytrs2_impl(rocblas_handle handle,
     rocblas_stride const shiftB = 0;
 
     // normal (non-batched non-strided) execution
-    rocblas_stride const strideA = rocblas_stride(lda) * n;
-    rocblas_stride const strideB = rocblas_stride(ldb) * nrhs;
+    rocblas_stride const strideA = 0;
+    rocblas_stride const strideB = 0;
     rocblas_stride const strideP = n;
     I const batch_count = 1;
 

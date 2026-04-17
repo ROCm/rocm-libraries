@@ -59,7 +59,10 @@ rocblas_status rocsolver_sytrs_batched_impl(rocblas_handle handle,
     {
         rocblas_status st
             = rocsolver_sytrs_argCheck(handle, uplo, n, nrhs, lda, ldb, A, B, ipiv, batch_count);
-        if(st != rocblas_status_continue)
+
+	bool const is_ok = (st == rocblas_status_continue) ||
+		           (st == rocblas_status_success);
+        if(!is_ok)
         {
             return st;
         }
