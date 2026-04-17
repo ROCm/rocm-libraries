@@ -46,7 +46,7 @@ struct DynamicBuffer
             return 1;
     }();
 
-    __host__ __device__ constexpr DynamicBuffer(T* p_data, ElementSpaceSize element_space_size)
+    __host__ __device__ constexpr DynamicBuffer([[clang::lifetimebound]] T* p_data, ElementSpaceSize element_space_size)
         : p_data_{p_data}, element_space_size_{element_space_size}
     {
     }
