@@ -739,6 +739,11 @@ def get_fwd_blobs(
             for tile, pipeline in itertools.product(
                 tiles, CustomFactory.get_pipelines(dtype, hdim, receipt, mask_impl)
             ):
+                # gfx11 (wave32): the b64x128 tile with w16x16x16 warp is not compatible
+                # (block_gemm_areg_bsmem_creg_v2 thread_buffer size mismatch).
+                # Only the b128x128 tile with w32x32x16 works on gfx11.
+                if has_gfx11 and tile.F_bm0 < 128:
+                    continue
                 if mode == "group":
                     if pipeline.F_spad != "t" or pipeline.F_skpad != "t":
                         # in group mode, spad/skpad must be true, since we can't predict if seqlen of current batch need pad or not
