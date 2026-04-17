@@ -19,9 +19,10 @@
 #include "HipblasltPlugin.hpp"
 #include "HipdnnEnginePluginExecutionContext.hpp"
 #include "HipdnnEnginePluginHandle.hpp"
+#include "version.h"
 
 static const char* pluginName = "hipblaslt_plugin";
-static const char* pluginVersion = "1.0.0";
+static const char* pluginVersion = HIPBLASLT_PROVIDER_VERSION_STRING;
 
 using namespace hipdnn_plugin_sdk;
 using namespace hipblaslt_plugin;

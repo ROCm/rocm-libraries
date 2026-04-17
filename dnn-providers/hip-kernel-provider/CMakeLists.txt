@@ -9,8 +9,10 @@ set(CMAKE_TOOLCHAIN_FILE "${CMAKE_SOURCE_DIR}/cmake/ClangToolChain.cmake"
 )
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
-set(HIP_KERNEL_PLUGIN_VERSION "0.0.1")
-project(hip-kernel-provider VERSION ${HIP_KERNEL_PLUGIN_VERSION} LANGUAGES CXX)
+include(${CMAKE_CURRENT_LIST_DIR}/cmake/VersionUtils.cmake)
+hip_kernel_provider_setup_version(hip_kernel_provider)
+
+project(hip-kernel-provider VERSION ${HIP_KERNEL_PROVIDER_VERSION} LANGUAGES CXX)
 
 if(NOT WIN32)
     # Only set if not already specified by user

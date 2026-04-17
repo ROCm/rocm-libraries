@@ -1,4 +1,4 @@
-// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
 // TEMPLATE REFERENCE: Second PlanBuilder test example. This uses the same testing
@@ -58,6 +58,15 @@ TEST_F(ConvFwdPlanBuilderTest, IsApplicable_ReluFwdGraph_ReturnsFalse)
 TEST_F(ConvFwdPlanBuilderTest, IsApplicable_NonReluPointwise_ReturnsFalse)
 {
     auto fbb = createNonReluPointwiseGraph();
+    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(fbb.GetBufferPointer(),
+                                                              fbb.GetSize());
+    ASSERT_TRUE(graph.isValid());
+    EXPECT_FALSE(planBuilder->isApplicable(handle, graph));
+}
+
+TEST_F(ConvFwdPlanBuilderTest, IsApplicable_MultiNodeGraph_ReturnsFalse)
+{
+    auto fbb = createMultiNodeConvGraph();
     hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(fbb.GetBufferPointer(),
                                                               fbb.GetSize());
     ASSERT_TRUE(graph.isValid());
