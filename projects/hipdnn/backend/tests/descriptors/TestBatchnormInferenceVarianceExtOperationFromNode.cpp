@@ -11,9 +11,9 @@
 #include "hipdnn_backend.h"
 
 #include <gtest/gtest.h>
-#include <hipdnn_data_sdk/data_objects/batchnorm_inference_attributes_variance_ext_generated.h>
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
-#include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/batchnorm_inference_attributes_variance_ext_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_test_sdk/constants/BnInfVarExtConstants.hpp>
 #include <hipdnn_test_sdk/utilities/ToVec.hpp>
 
@@ -24,7 +24,7 @@
 
 using namespace hipdnn_backend;
 using namespace hipdnn_backend::test_utilities;
-using namespace hipdnn_data_sdk::data_objects;
+using namespace hipdnn_flatbuffers_sdk::data_objects;
 using namespace hipdnn_tests::constants;
 using hipdnn_tests::toVec;
 
@@ -90,10 +90,10 @@ protected:
         _tensorMap[K_BN_INF_VAR_EXT_EPSILON_UID] = TensorDescriptor::fromFlatBuffer(epsilonAttrs);
     }
 
-    static hipdnn_data_sdk::data_objects::BatchnormInferenceAttributesVarianceExtT
+    static hipdnn_flatbuffers_sdk::data_objects::BatchnormInferenceAttributesVarianceExtT
         createStandardBatchnormInferenceVarianceExtAttrs()
     {
-        hipdnn_data_sdk::data_objects::BatchnormInferenceAttributesVarianceExtT attrs;
+        hipdnn_flatbuffers_sdk::data_objects::BatchnormInferenceAttributesVarianceExtT attrs;
         attrs.x_tensor_uid = K_BN_INF_VAR_EXT_X_UID;
         attrs.mean_tensor_uid = K_BN_INF_VAR_EXT_MEAN_UID;
         attrs.variance_tensor_uid = K_BN_INF_VAR_EXT_VARIANCE_UID;
@@ -489,12 +489,12 @@ TEST_F(TestBatchnormInferenceVarianceExtOperationFromNode, GetAttributeWorksAfte
                            toVec(K_BN_INF_VAR_EXT_EPSILON_STRIDES));
 
     // Verify operation type
-    hipdnnOperationType_t opType = HIPDNN_OPERATION_TYPE_NOT_SET;
+    hipdnnOperationType_ext_t opType = HIPDNN_OPERATION_TYPE_NOT_SET_EXT;
     int64_t opTypeCount = 0;
     desc->getAttribute(
         HIPDNN_ATTR_OPERATION_TYPE_EXT, HIPDNN_TYPE_OPERATION_TYPE_EXT, 1, &opTypeCount, &opType);
     ASSERT_EQ(opTypeCount, 1);
-    EXPECT_EQ(opType, HIPDNN_OPERATION_TYPE_BATCHNORM_INFERENCE_VARIANCE);
+    EXPECT_EQ(opType, HIPDNN_OPERATION_TYPE_BATCHNORM_INFERENCE_VARIANCE_EXT);
 }
 
 TEST_F(TestBatchnormInferenceVarianceExtOperationFromNode, NamePreservedFromNode)

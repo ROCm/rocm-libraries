@@ -12,7 +12,6 @@ namespace rocRoller
     enum class ArgumentType : int
     {
         Value = 0,
-        Limit,
         Size,
         Stride,
 

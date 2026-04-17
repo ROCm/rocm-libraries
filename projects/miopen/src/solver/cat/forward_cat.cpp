@@ -141,25 +141,25 @@ ConvSolution CatForward::GetSolution(const ExecutionContext& context,
         kernel.kernel_name     = "Cat2FwdPacked";
         result.invoker_factory = [](const std::vector<Kernel>& kernels) {
             return [=](const Handle& handle_, const AnyInvokeParams& raw_params) {
-                decltype(auto) kernel = handle_.Run(kernels.front());
-                decltype(auto) params = raw_params.CastTo<miopen::cat::CatInvokeParams>();
+                decltype(auto) kernel_ = handle_.Run(kernels.front());
+                decltype(auto) params  = raw_params.CastTo<miopen::cat::CatInvokeParams>();
 
-                auto ydims      = params.yDesc.GetLengths();
-                auto dim        = params.dim;
-                auto stride     = params.yDesc.GetStrides()[dim];
-                auto y_dim_size = ydims[dim];
-                auto outer_size = std::accumulate(
-                    ydims.begin(), ydims.begin() + dim, 1ULL, std::multiplies<size_t>());
-                auto data_size = get_data_size(params.yDesc.GetType());
+                auto ydims_      = params.yDesc.GetLengths();
+                auto dim_        = params.dim;
+                auto stride_     = params.yDesc.GetStrides()[dim_];
+                auto y_dim_size  = ydims_[dim_];
+                auto outer_size_ = std::accumulate(
+                    ydims_.begin(), ydims_.begin() + dim_, 1ULL, std::multiplies<size_t>());
+                auto data_size_ = get_data_size(params.yDesc.GetType());
 
-                kernel(params.GetX(0),
-                       params.GetX(1),
-                       params.y,
-                       params.GetXDimSize(0),
-                       params.GetXDimSize(1),
-                       outer_size,
-                       stride * data_size,
-                       y_dim_size);
+                kernel_(params.GetX(0),
+                        params.GetX(1),
+                        params.y,
+                        params.GetXDimSize(0),
+                        params.GetXDimSize(1),
+                        outer_size_,
+                        stride_ * data_size_,
+                        y_dim_size);
             };
         };
         break;
@@ -167,29 +167,29 @@ ConvSolution CatForward::GetSolution(const ExecutionContext& context,
         kernel.kernel_name     = "Cat4FwdPacked";
         result.invoker_factory = [](const std::vector<Kernel>& kernels) {
             return [=](const Handle& handle_, const AnyInvokeParams& raw_params) {
-                decltype(auto) kernel = handle_.Run(kernels.front());
-                decltype(auto) params = raw_params.CastTo<miopen::cat::CatInvokeParams>();
+                decltype(auto) kernel_ = handle_.Run(kernels.front());
+                decltype(auto) params  = raw_params.CastTo<miopen::cat::CatInvokeParams>();
 
-                auto ydims      = params.yDesc.GetLengths();
-                auto dim        = params.dim;
-                auto stride     = params.yDesc.GetStrides()[dim];
-                auto y_dim_size = ydims[dim];
-                auto outer_size = std::accumulate(
-                    ydims.begin(), ydims.begin() + dim, 1ULL, std::multiplies<size_t>());
-                auto data_size = get_data_size(params.yDesc.GetType());
+                auto ydims_      = params.yDesc.GetLengths();
+                auto dim_        = params.dim;
+                auto stride_     = params.yDesc.GetStrides()[dim_];
+                auto y_dim_size  = ydims_[dim_];
+                auto outer_size_ = std::accumulate(
+                    ydims_.begin(), ydims_.begin() + dim_, 1ULL, std::multiplies<size_t>());
+                auto data_size_ = get_data_size(params.yDesc.GetType());
 
-                kernel(params.GetX(0),
-                       params.GetX(1),
-                       params.GetX(2),
-                       params.GetX(3),
-                       params.y,
-                       params.GetXDimSize(0),
-                       params.GetXDimSize(1),
-                       params.GetXDimSize(2),
-                       params.GetXDimSize(3),
-                       outer_size,
-                       stride * data_size,
-                       y_dim_size);
+                kernel_(params.GetX(0),
+                        params.GetX(1),
+                        params.GetX(2),
+                        params.GetX(3),
+                        params.y,
+                        params.GetXDimSize(0),
+                        params.GetXDimSize(1),
+                        params.GetXDimSize(2),
+                        params.GetXDimSize(3),
+                        outer_size_,
+                        stride_ * data_size_,
+                        y_dim_size);
             };
         };
         break;
@@ -197,37 +197,37 @@ ConvSolution CatForward::GetSolution(const ExecutionContext& context,
         kernel.kernel_name     = "Cat8FwdPacked";
         result.invoker_factory = [](const std::vector<Kernel>& kernels) {
             return [=](const Handle& handle_, const AnyInvokeParams& raw_params) {
-                decltype(auto) kernel = handle_.Run(kernels.front());
-                decltype(auto) params = raw_params.CastTo<miopen::cat::CatInvokeParams>();
+                decltype(auto) kernel_ = handle_.Run(kernels.front());
+                decltype(auto) params  = raw_params.CastTo<miopen::cat::CatInvokeParams>();
 
-                auto ydims      = params.yDesc.GetLengths();
-                auto dim        = params.dim;
-                auto stride     = params.yDesc.GetStrides()[dim];
-                auto y_dim_size = ydims[dim];
-                auto outer_size = std::accumulate(
-                    ydims.begin(), ydims.begin() + dim, 1ULL, std::multiplies<size_t>());
-                auto data_size = get_data_size(params.yDesc.GetType());
+                auto ydims_      = params.yDesc.GetLengths();
+                auto dim_        = params.dim;
+                auto stride_     = params.yDesc.GetStrides()[dim_];
+                auto y_dim_size  = ydims_[dim_];
+                auto outer_size_ = std::accumulate(
+                    ydims_.begin(), ydims_.begin() + dim_, 1ULL, std::multiplies<size_t>());
+                auto data_size_ = get_data_size(params.yDesc.GetType());
 
-                kernel(params.GetX(0),
-                       params.GetX(1),
-                       params.GetX(2),
-                       params.GetX(3),
-                       params.GetX(4),
-                       params.GetX(5),
-                       params.GetX(6),
-                       params.GetX(7),
-                       params.y,
-                       params.GetXDimSize(0),
-                       params.GetXDimSize(1),
-                       params.GetXDimSize(2),
-                       params.GetXDimSize(3),
-                       params.GetXDimSize(4),
-                       params.GetXDimSize(5),
-                       params.GetXDimSize(6),
-                       params.GetXDimSize(7),
-                       outer_size,
-                       stride * data_size,
-                       y_dim_size);
+                kernel_(params.GetX(0),
+                        params.GetX(1),
+                        params.GetX(2),
+                        params.GetX(3),
+                        params.GetX(4),
+                        params.GetX(5),
+                        params.GetX(6),
+                        params.GetX(7),
+                        params.y,
+                        params.GetXDimSize(0),
+                        params.GetXDimSize(1),
+                        params.GetXDimSize(2),
+                        params.GetXDimSize(3),
+                        params.GetXDimSize(4),
+                        params.GetXDimSize(5),
+                        params.GetXDimSize(6),
+                        params.GetXDimSize(7),
+                        outer_size_,
+                        stride_ * data_size_,
+                        y_dim_size);
             };
         };
         break;
