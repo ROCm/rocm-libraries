@@ -24,6 +24,7 @@
 ################################################################################
 
 from typing import Any, Optional
+import pytest
 from rocisa.instruction import SWaitCnt, SNop, SBarrier
 
 from Tensile.Components.CMSValidator import (
@@ -1431,18 +1432,22 @@ class TestValidatePackTF32MFMA4x4x4SwapPacks(CMSValidationTestBase):
     When VW > 1, VSwapB32 instructions appear at the beginning of the pack sequence
     to transpose registers after wider local reads. Count: 4 * (vw - 1) per side.
 
-    Uses DepthU=64 (with matrixInstK=32) giving num_vmfma=96.
-
     With ForceUnrollSubIter, both LRA0 and LRB0 are needed by MFMAs starting at
     index 24 (q2s), so both must be issued and guaranteed before index 24. We place
     both LR groups and their SWaitCnt early in q1.
 
-    Subclasses can override DEPTH_U and SUB_ITER_SUFFIX to test different
-    DepthU / sub-iteration naming combinations (e.g. DepthU=32 with suffix "3").
+    Parametrized over (DepthU, SUB_ITER_SUFFIX, ForceUnrollSubIter):
+      - (64, "1", False): DepthU > matrixInstK, standard sub-iteration naming
+      - (32, "3", True):  DepthU == matrixInstK, ForceUnrollSubIter, A/B3 suffix
+      - (32, "1", False): DepthU == matrixInstK, no ForceUnrollSubIter, A/B1 suffix
     """
-    DEPTH_U = 64
-    SUB_ITER_SUFFIX = "1"
-    FORCE_UNROLL_SUB_ITER = False
+    @pytest.fixture(autouse=True, params=[
+        pytest.param((64, "1", False), id="DU64"),
+        pytest.param((32, "3", True), id="DU32_ForceUnroll"),
+        pytest.param((32, "1", False), id="DU32_NoForceUnroll"),
+    ])
+    def _config(self, request):
+        self.DEPTH_U, self.SUB_ITER_SUFFIX, self.FORCE_UNROLL_SUB_ITER = request.param
 
     def setUp(self, kernel_updates: Optional[dict[str, Any]] = None) -> None:
         kernel_updates = kernel_updates.copy() if kernel_updates else {}
@@ -1456,7 +1461,7 @@ class TestValidatePackTF32MFMA4x4x4SwapPacks(CMSValidationTestBase):
         kernel_updates.setdefault("MIWaveTileB", 4)
         kernel_updates.setdefault("VectorWidthA", 1)
         kernel_updates.setdefault("VectorWidthB", 1)
-        super().setUp(kernel_updates)
+        super().setup_method(kernel_updates=kernel_updates)
 
         self.q1s = 0
         self.q1e = self.num_vmfma // 4 - 1
@@ -1742,23 +1747,3 @@ class TestValidatePackTF32MFMA4x4x4SwapPacks(CMSValidationTestBase):
         optSchedule, syncCode = self._make_base_schedule(packA0, packB0, pack_alt_a=pack_alt_a, n_lrs_a=8)
         self.validate(optSchedule, syncCode, 1, 2, 2, 0, None)
 
-class TestValidatePackTF32MFMA4x4x4SwapPacksDUeqMIK(TestValidatePackTF32MFMA4x4x4SwapPacks):
-    """
-    Same as TestValidatePackTF32MFMA4x4x4SwapPacks but with DepthU == matrixInstK
-    (1 sub-iteration + ForceUnrollSubIter), using A/B3 suffix naming.
-    Inherits all test methods.
-    """
-    DEPTH_U = 32
-    SUB_ITER_SUFFIX = "3"
-    FORCE_UNROLL_SUB_ITER = True
-
-
-class TestValidatePackTF32MFMA4x4x4SwapPacksDUeqMIKNoForceUnroll(TestValidatePackTF32MFMA4x4x4SwapPacks):
-    """
-    Same as TestValidatePackTF32MFMA4x4x4SwapPacks but with DepthU == matrixInstK
-    and ForceUnrollSubIter=False (1 sub-iteration split to 2), using A/B1 suffix naming.
-    Inherits all test methods.
-    """
-    DEPTH_U = 32
-    SUB_ITER_SUFFIX = "1"
-    FORCE_UNROLL_SUB_ITER = False
