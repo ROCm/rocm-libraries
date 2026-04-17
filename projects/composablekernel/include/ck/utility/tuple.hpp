@@ -9,6 +9,9 @@
 #include "ck/utility/enable_if.hpp"
 #include <tuple>
 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
+
 namespace ck {
 
 namespace detail {
@@ -269,3 +272,5 @@ template <ck::index_t N, typename Tuple, typename Default>
 using tuple_element_or_t = typename detail::tuple_element_or_impl<N, Tuple, Default>::type;
 
 } // namespace ck
+
+#pragma clang diagnostic pop
