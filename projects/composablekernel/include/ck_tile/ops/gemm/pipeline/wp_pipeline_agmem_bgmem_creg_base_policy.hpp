@@ -267,12 +267,10 @@ struct UniversalWeightPreshufflePipelineAgBgCrPolicy
         // If both are packed, it falls back to the explicitly defined ComputeDataType in the
         // problem It might be a good idea to use ComputeDataType anyway, but that would break how
         // this behaviour used to work
-        using ATypeToUse = mixed_prec_compute_type_from_input_t<typename Problem::ADataType,
-                                                                typename Problem::BDataType,
-                                                                typename Problem::AComputeDataType>;
-        using BTypeToUse = mixed_prec_compute_type_from_input_t<typename Problem::BDataType,
-                                                                typename Problem::ADataType,
-                                                                typename Problem::BComputeDataType>;
+        using ATypeToUse =
+            mixed_prec_compute_type_from_input_t<ADataType, BDataType, AComputeDataType>;
+        using BTypeToUse =
+            mixed_prec_compute_type_from_input_t<BDataType, ADataType, BComputeDataType>;
 #if defined(__gfx11__) || defined(__gfx12__) || defined(__gfx13__)
         constexpr auto NumAccess = WGAttrNumAccessEnum::Default;
 #else

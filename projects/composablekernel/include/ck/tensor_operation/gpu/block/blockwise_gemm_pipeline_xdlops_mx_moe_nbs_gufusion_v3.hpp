@@ -947,7 +947,6 @@ struct BlockwiseGemmXdlops_pipeline_mx_moe_bns_gufusion_v3<BlockGemmPipelineSche
                     constexpr index_t b_scale_offset =
                         b_scale_thread_desc.CalculateOffset(make_tuple(n0, k0, I0));
 
-
                     vector_type<AScaleDataType, a_scale_thread_vec_size> a_scale_thread_vec;
                     vector_type<BScaleDataType, b_scale_thread_vec_size> b_scale_thread_vec;
                     vector_type<BScaleDataType, b_scale_thread_vec_size> b_scale_thread_vec_up;
@@ -1116,7 +1115,6 @@ struct BlockwiseGemmXdlops_pipeline_mx_moe_bns_gufusion_v3<BlockGemmPipelineSche
                         a_scale_thread_desc.CalculateOffset(make_tuple(m0, k0, I0));
                     constexpr index_t b_scale_offset =
                         b_scale_thread_desc.CalculateOffset(make_tuple(n0, k0, I0));
-
 
                     vector_type<AScaleDataType, a_scale_thread_vec_size> a_scale_thread_vec;
                     vector_type<BScaleDataType, b_scale_thread_vec_size> b_scale_thread_vec;

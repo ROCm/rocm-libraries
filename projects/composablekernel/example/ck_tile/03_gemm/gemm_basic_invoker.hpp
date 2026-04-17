@@ -81,8 +81,8 @@ struct BasicInvoker
                                                           BLayout,
                                                           CLayout>;
 
-        using AComputeDataType =
-            std::conditional_t<std::is_same_v<ADataType_, ck_tile::pk_int4_t>, BDataType_, ADataType_>;
+        using AComputeDataType = std::
+            conditional_t<std::is_same_v<ADataType_, ck_tile::pk_int4_t>, BDataType_, ADataType_>;
         using BComputeDataType =
             std::conditional_t<std::is_same_v<BDataType_, ck_tile::pk_int4_t> ||
                                    std::is_same_v<BDataType_, ck_tile::pk_fp4_raw_t>,

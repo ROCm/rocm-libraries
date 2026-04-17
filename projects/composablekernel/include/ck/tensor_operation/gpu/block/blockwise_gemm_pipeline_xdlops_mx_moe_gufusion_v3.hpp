@@ -924,9 +924,9 @@ struct BlockwiseGemmXdlops_pipeline_mx_moe_bns_gufusion_v3<BlockGemmPipelineSche
                     constexpr index_t b_scale_offset =
                         b_scale_thread_desc.CalculateOffset(make_tuple(n0, k0, I0));
 
-                        vector_type<AScaleDataType, a_scale_thread_vec_size> a_scale_thread_vec;
-                        vector_type<BScaleDataType, b_scale_thread_vec_size> b_scale_thread_vec;
-                        vector_type<BScaleDataType, b_scale_thread_vec_size> b_scale_thread_vec_up;
+                    vector_type<AScaleDataType, a_scale_thread_vec_size> a_scale_thread_vec;
+                    vector_type<BScaleDataType, b_scale_thread_vec_size> b_scale_thread_vec;
+                    vector_type<BScaleDataType, b_scale_thread_vec_size> b_scale_thread_vec_up;
 
                     // Pack scale_thread_buf into scale_thread_vec
                     static_for<0, a_scale_thread_vec_size, 1>{}([&](auto s) {
@@ -1094,9 +1094,9 @@ struct BlockwiseGemmXdlops_pipeline_mx_moe_bns_gufusion_v3<BlockGemmPipelineSche
                     constexpr index_t b_scale_offset =
                         b_scale_thread_desc.CalculateOffset(make_tuple(n0, k0, I0));
 
-                        vector_type<AScaleDataType, a_scale_thread_vec_size> a_scale_thread_vec;
-                        vector_type<BScaleDataType, b_scale_thread_vec_size> b_scale_thread_vec;
-                        vector_type<BScaleDataType, b_scale_thread_vec_size> b_scale_thread_vec_up;
+                    vector_type<AScaleDataType, a_scale_thread_vec_size> a_scale_thread_vec;
+                    vector_type<BScaleDataType, b_scale_thread_vec_size> b_scale_thread_vec;
+                    vector_type<BScaleDataType, b_scale_thread_vec_size> b_scale_thread_vec_up;
 
                     // Pack scale_thread_buf into scale_thread_vec
                     static_for<0, a_scale_thread_vec_size, 1>{}([&](auto s) {

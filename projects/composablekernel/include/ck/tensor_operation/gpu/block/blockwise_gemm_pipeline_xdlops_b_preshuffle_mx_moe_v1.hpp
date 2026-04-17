@@ -463,7 +463,6 @@ struct BlockwiseGemmXdlops_pipeline_bpreshuffle_mx_moe_v1<BlockGemmPipelineSched
                         constexpr index_t b_scale_offset =
                             b_scale_thread_desc.CalculateOffset(make_tuple(in_major, ik_major, I0));
 
-
                         vector_type<AScaleDataType, a_scale_thread_vec_size> a_scale_thread_vec;
                         vector_type<BScaleDataType, b_scale_thread_vec_size> b_scale_thread_vec;
 
@@ -614,7 +613,6 @@ struct BlockwiseGemmXdlops_pipeline_bpreshuffle_mx_moe_v1<BlockGemmPipelineSched
                 constexpr index_t b_scale_offset =
                     b_scale_thread_desc.CalculateOffset(make_tuple(in_major, ik_major, I0));
 
-
                 vector_type<AScaleDataType, a_scale_thread_vec_size> a_scale_thread_vec;
                 vector_type<BScaleDataType, b_scale_thread_vec_size> b_scale_thread_vec;
 
@@ -657,15 +655,15 @@ struct BlockwiseGemmXdlops_pipeline_bpreshuffle_mx_moe_v1<BlockGemmPipelineSched
                 constexpr index_t c_offset = c_thread_desc_.CalculateOffset(
                     make_tuple(im_major, in_major, im_minor, in_minor, 0));
 
-                        // MFMA accumulation
-                        xdlops_gemm.template Run<ik_minor * MXdlPack + im_minor,
-                                                 ik_minor * NXdlPack + in_minor>(
-                            a_thread_vec.template AsType<mfma_input_type_a>(),
-                            a_scale_thread_vec.template AsType<mfma_scale_input_type_a>(),
-                            b_thread_vec.template AsType<mfma_input_type_b>(),
-                            b_scale_thread_vec.template AsType<mfma_scale_input_type_b>(),
-                            c_thread_buf.GetVectorTypeReference(Number<c_offset>{}));
-                });
+                // MFMA accumulation
+                xdlops_gemm
+                    .template Run<ik_minor * MXdlPack + im_minor, ik_minor * NXdlPack + in_minor>(
+                        a_thread_vec.template AsType<mfma_input_type_a>(),
+                        a_scale_thread_vec.template AsType<mfma_scale_input_type_a>(),
+                        b_thread_vec.template AsType<mfma_input_type_b>(),
+                        b_scale_thread_vec.template AsType<mfma_scale_input_type_b>(),
+                        c_thread_buf.GetVectorTypeReference(Number<c_offset>{}));
+            });
 
 #if defined(__gfx125__) || defined(__gfx13__)
             block_sync_lds_async_load();

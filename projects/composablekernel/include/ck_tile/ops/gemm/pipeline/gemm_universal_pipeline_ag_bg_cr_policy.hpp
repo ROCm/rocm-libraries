@@ -1085,7 +1085,7 @@ struct UniversalGemmBasePolicy
         constexpr index_t KPack = static_cast<index_t>(BlockGemm::Traits::KPackA);
         constexpr index_t VecElems =
             static_cast<index_t>(Problem::VectorLoadSize / sizeof(A) * PackedSize) *
-                                     numeric_traits<A>::PackedSize;
+            numeric_traits<A>::PackedSize;
 
         return ck_tile::min(KPack, VecElems);
     }
@@ -1101,7 +1101,7 @@ struct UniversalGemmBasePolicy
         constexpr index_t KPack = static_cast<index_t>(BlockGemm::Traits::KPackB);
         constexpr index_t VecElems =
             static_cast<index_t>(Problem::VectorLoadSize / sizeof(B) * PackedSize) *
-                                     numeric_traits<B>::PackedSize;
+            numeric_traits<B>::PackedSize;
 
         return ck_tile::min(KPack, VecElems);
     }
@@ -1112,10 +1112,9 @@ struct UniversalGemmBasePolicy
         using ADataType                 = ALdsDataType_<Problem>;
         constexpr index_t PackedSize    = numeric_traits<ADataType>::PackedSize;
         constexpr auto a_lds_block_desc = Derived::template MakeALdsBlockDescriptor<Problem>();
-        constexpr index_t smem_size_a =
-            integer_least_multiple(a_lds_block_desc.get_element_space_size() *
-                                       lds_padded_sizeof<ADataType>() / PackedSize,
-                                   16);
+        constexpr index_t smem_size_a   = integer_least_multiple(
+            a_lds_block_desc.get_element_space_size() * lds_padded_sizeof<ADataType>() / PackedSize,
+            16);
         return smem_size_a;
     }
 

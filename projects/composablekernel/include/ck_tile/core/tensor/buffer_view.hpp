@@ -1058,8 +1058,8 @@ struct buffer_view<address_space_enum::lds,
                 using buf_t = ext_vector_t<typename vector_traits<remove_cvref_t<T>>::scalar_type,
                                            scalar_per_t_vector * scalar_per_x_vector>;
                 constexpr index_t padded_stride = lds_padded_sizeof<T>();
-                const char* base =
-                    reinterpret_cast<const char*>(p_data_) + (i + linear_offset + static_offset) * padded_stride;
+                const char* base                = reinterpret_cast<const char*>(p_data_) +
+                                   (i + linear_offset + static_offset) * padded_stride;
                 auto rtn = *c_style_pointer_cast<const buf_t*>(base);
                 return bit_cast<X>(rtn);
             }
