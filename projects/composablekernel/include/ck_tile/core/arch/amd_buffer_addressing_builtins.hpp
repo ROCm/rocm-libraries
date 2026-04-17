@@ -1329,6 +1329,15 @@ template <unsigned num_dwords, bool pre_nop = false>
 CK_TILE_DEVICE void
 async_global_load_lds_dwordxn(void* smem, const void* global_addr, bool_constant<pre_nop> = {})
 {
+#if !defined(__gfx94__) && !defined(__gfx950__)
+    // global_load_lds is only available on CDNA3+ (gfx940/gfx950).
+    // Use !num_dwords so the assert depends on a template parameter
+    // and is only checked at instantiation time.
+    static_assert(!num_dwords,
+                  "global_load_lds requires CDNA3+ (gfx940/gfx950). "
+                  "Ensure kUseFlatLoad is false on this architecture.");
+#endif
+
 // Use inline asm with VGPR pair for 64-bit flat address
 #define CK_TILE_GLOBAL_LOAD_LDS_INSTR(instr)                    \
     if constexpr(pre_nop)                                       \

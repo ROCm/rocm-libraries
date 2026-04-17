@@ -50,7 +50,16 @@ template <typename BottomTensorView_,
 struct tile_scatter_gather
 {
     static constexpr bool kUseFlatLoad = kUseFlatLoad_;
-    using BottomTensorView             = remove_reference_t<BottomTensorView_>;
+
+#if !defined(__gfx94__) && !defined(__gfx950__)
+    // global_load_lds instruction is only available on CDNA3+ (gfx940/gfx950).
+    // On other architectures, kUseFlatLoad must be false.
+    static_assert(!kUseFlatLoad_,
+                  "kUseFlatLoad requires global_load_lds (CDNA3+: gfx940/gfx950). "
+                  "This kernel should not be instantiated on this architecture.");
+#endif
+
+    using BottomTensorView = remove_reference_t<BottomTensorView_>;
     using WindowLengths                = remove_cvref_t<WindowLengths_>;
     using TileDstr                     = remove_cvref_t<StaticTileDistribution_>;
     using PageIdxArray                 = remove_cvref_t<StaticPageIndexArray_>;

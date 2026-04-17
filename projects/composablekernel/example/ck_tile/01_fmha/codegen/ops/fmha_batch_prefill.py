@@ -22,7 +22,15 @@ from codegen.cpp_symbol_map import (
     QSCALE_CHECK_MAP,
     QSCALE_MAP,
 )
+from codegen.arch import ArchTrait
 from codegen.utils import update_file
+
+# Architecture trait for kernels requiring global_load_lds (CDNA3+).
+# Only used for kUse64BitLoad=true variants; all other kernels are arch-agnostic.
+CDNA3_PLUS_ARCH = ArchTrait(
+    "cdna3_plus",
+    preprocessor_check="defined(__gfx94__) || defined(__gfx950__)",
+)
 
 DTYPE_BITS = {
     "fp32": 32,
@@ -61,6 +69,8 @@ FMHA_FWD_KERNEL_HEADER = """// SPDX-License-Identifier: MIT
 """
 
 FMHA_FWD_KERNEL_BODY = """
+#if !defined(__HIP_DEVICE_COMPILE__) || ({F_arch_check})
+
 using fmha_dtype_{F_idx} = {F_dtype};
 
 using fmha_block_tile_{F_idx} = ck_tile::sequence<{F_bm0}, {F_bn0}, {F_bk0}, {F_bn1}, {F_bk1}, {F_bk0max}>;
@@ -141,6 +151,8 @@ float fmha_batch_prefill_<trait_{F_idx}>(const ck_tile::stream_config& s, fmha_b
     constexpr ck_tile::index_t kBlockPerCu = k_::kBlockPerCu;
     return ck_tile::launch_kernel(s, ck_tile::make_kernel<kBlockPerCu>(k_{{}}, grids, blocks, 0, kargs));
 }}
+
+#endif // !defined(__HIP_DEVICE_COMPILE__) || ({F_arch_check})
 """
 
 FMHA_FWD_API_FILENAME = "fmha_batch_prefill_api.cpp"
@@ -594,6 +606,7 @@ class FmhaFwdKernel:
             F_page_size=self.F_page_size,
             F_sink=BOOL_MAP[self.F_pipeline.F_sink],
             F_use_64bit_load=BOOL_MAP["t" if self.F_use_64bit_load else "f"],
+            F_arch_check=CDNA3_PLUS_ARCH.preprocessor_check if self.F_use_64bit_load else "true",
         )
 
     @property
