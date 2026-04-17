@@ -333,15 +333,7 @@ protected:
     void verify() // verify if the output tensors are same
     {
         auto error = miopen::rms_range(tensC_ocl, tensC_hip);
-        std::cout << "error=" << error << std::endl;
-        std::cout << "OpenCL: ";
-        for(size_t i = 0; i < 16; ++i)
-            std::cout << tensC_ocl[i] << ' ';
-        std::cout << std::endl;
-        std::cout << "   HIP: ";
-        for(size_t i = 0; i < 16; ++i)
-            std::cout << tensC_hip[i] << ' ';
-        std::cout << std::endl;
+        MIOPEN_LOG_E("Divergence of OpenCL and HIP kernels: " << error);
         EXPECT_NEAR(error, 0, 0.001) << "GPU outputs do not match each other. Error: " << error;
     }
 
