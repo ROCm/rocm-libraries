@@ -620,6 +620,12 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSAsync
                 const auto* page_ptr =
                     base_ptr + static_cast<long_index_t>(physical_page) * page_stride_k;
                 window.set_bottom_tensor_view_data_ptr(page_ptr);
+                // Limit SRD num_records to one page worth of elements.
+                // Without this, the SRD claims validity for [page_ptr, page_ptr + full_buffer_size),
+                // which extends far beyond the allocated buffer when rebased to high pages.
+                // On gfx950, the hardware may validate the full SRD range against page table
+                // permissions, causing faults on freed/protected memory beyond the buffer.
+                window.set_bottom_tensor_view_buffer_size(page_stride_k);
                 window.init_raw();
             }
         };
@@ -635,6 +641,7 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSAsync
                 const auto* page_ptr =
                     base_ptr + static_cast<long_index_t>(physical_page) * page_stride_v;
                 window.set_bottom_tensor_view_data_ptr(page_ptr);
+                window.set_bottom_tensor_view_buffer_size(page_stride_v);
                 window.init_raw();
             }
         };
