@@ -1194,18 +1194,15 @@ class KernelComponentFactoryGfx11(CompatibilityRuleFactory):
             if (problem_ctx.hdim, problem_ctx.hdim_v) != (128, 128):
                 return True
 
-            is_64x32_tile = kernel_ctx.tile.F_bm0 == 64 and kernel_ctx.tile.F_bn0 == 32
-            pads_hdim = (
-                kernel_ctx.pipeline.F_dpad == "t" and kernel_ctx.pipeline.F_dvpad == "t"
-            )
-            exact_hdim = (
-                kernel_ctx.pipeline.F_dpad == "f" and kernel_ctx.pipeline.F_dvpad == "f"
-            )
+            # For (128, 128) head dims, partial-fragment support in qr_hpad removes the need
+            # for the previous qr_hpad-specific handling that was added to avoid register spill.
+            # qr_hpad now reuses the regular 128x64 tile choice.
+            # The 64x64 tile remains disabled for qr_hpad because it is consistently slower
+            # in our measurements.
+            if kernel_ctx.tile.F_bm0 == 64 and kernel_ctx.tile.F_bn0 == 64:
+                return kernel_ctx.pipeline.tag != "qr_hpad"
 
-            if is_64x32_tile:
-                return pads_hdim
-
-            return exact_hdim
+            return True
 
         rules.append(check_d128_tile_pipeline)
         return rules

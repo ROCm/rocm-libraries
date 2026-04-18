@@ -58,8 +58,9 @@ bool RMSnormBwdPlanBuilder::isApplicable(
 
         try
         {
-            rmsnorm::checkRMSNormBwdTensorConfigSupported(
-                *node.attributes_as_RMSNormBackwardAttributes(), opGraph.getTensorMap());
+            rmsnorm::RMSnormValidator validator(opGraph.getTensorMap());
+            validator.checkBwdTensorConfigSupported(
+                *node.attributes_as_RMSNormBackwardAttributes());
         }
         catch(const std::exception& e)
         {
