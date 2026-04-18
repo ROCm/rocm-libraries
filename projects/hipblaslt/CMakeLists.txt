@@ -226,25 +226,17 @@ if(HIPBLASLT_ENABLE_ROCROLLER)
 endif()
 
 if(NOT HIPBLASLT_ENABLE_YAML)
-    # Prefer 6.x (msgpack-cxx)
     # See: https://github.com/msgpack/msgpack-c/wiki/Q%26A#how-to-support-both-msgpack-c-c-version-5x-and-6x-
-    find_package(msgpack-cxx CONFIG QUIET)
+    # Prefer 6.x (msgpack-cxx)
+    find_package(msgpack-cxx CONFIG)
     if(msgpack-cxx_FOUND)
         message(STATUS "Found msgpack-cxx (>=6.x)")
         set(hipblaslt_msgpack_target "msgpack-cxx")
     else()
-        message(STATUS "msgpack-cxx not found, fetching via FetchContent")
-        include(FetchContent)
-        FetchContent_Declare(
-            msgpack-cxx
-            GIT_REPOSITORY https://github.com/msgpack/msgpack-c.git
-            GIT_TAG        cpp-6.1.0
-        )
-        set(MSGPACK_CXX20 ON)
-        set(MSGPACK_BUILD_TESTS OFF)
-        set(MSGPACK_BUILD_EXAMPLES OFF)
-        FetchContent_MakeAvailable(msgpack-cxx)
-        set(hipblaslt_msgpack_target "msgpack-cxx")
+        # TODO: set minimum version required for *-cxx library
+        find_package(msgpackc-cxx CONFIG REQUIRED NAMES msgpackc-cxx msgpack)
+        set(hipblaslt_msgpack_target "msgpackc-cxx")
+        message(STATUS "Found msgpack (<=5.x)")
     endif()
 endif()
 

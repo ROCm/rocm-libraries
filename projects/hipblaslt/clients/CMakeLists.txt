@@ -96,18 +96,7 @@ if(HIPBLASLT_ENABLE_YAML)
     target_include_directories(hipblaslt-sequence PRIVATE ${LLVM_INCLUDE_DIRS})
 endif()
 if(BUILD_TESTING OR HIPBLASLT_BUILD_TESTING)
-    find_package(GTest 1.14.0 QUIET CONFIG)
-    if(NOT GTest_FOUND)
-        message(STATUS "GTest 1.14.0 not found, fetching via FetchContent")
-        include(FetchContent)
-        FetchContent_Declare(
-            googletest
-            GIT_REPOSITORY https://github.com/google/googletest.git
-            GIT_TAG        v1.14.0
-        )
-        set(INSTALL_GTEST OFF)
-        FetchContent_MakeAvailable(googletest)
-    endif()
+    find_package(GTest CONFIG REQUIRED)
     add_executable(hipblaslt-test)
     if(amd_smi_FOUND)
         target_link_libraries(hipblaslt-test PRIVATE amd_smi)
