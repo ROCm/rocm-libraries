@@ -6,19 +6,15 @@
 #include <iostream>
 #include <string>
 
-namespace stinkytofu
-{
-    bool genInstructions(const std::string& arch,
-                         const std::string& inputDir,
-                         const std::string& outputDir);
-    // Generate for all archs (Gfx1250, Gfx942, Gfx950) and emit ISA .inc; no --arch needed.
-    bool genAllInstructions(const std::string& inputDir, const std::string& outputDir);
-}
+namespace stinkytofu {
+bool genInstructions(const std::string& arch, const std::string& inputDir,
+                     const std::string& outputDir);
+// Generate for all archs and emit ISA .inc; no --arch needed.
+bool genAllInstructions(const std::string& inputDir, const std::string& outputDir);
+}  // namespace stinkytofu
 
-int main(int argc, char** argv)
-{
-    if(argc < 3)
-    {
+int main(int argc, char** argv) {
+    if (argc < 3) {
         std::cerr << "Usage: " << argv[0]
                   << " --input-dir=<dir> --output-dir=<dir> [--arch=<arch>]\n"
                   << "  Without --arch: generate for all archs + ISA .inc (single-build mode).\n"
@@ -27,40 +23,35 @@ int main(int argc, char** argv)
     }
 
     std::string arch, inputDir, outputDir;
-    for(int i = 1; i < argc; ++i)
-    {
+    for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
-        if(arg.find("--arch=") == 0)
+        if (arg.find("--arch=") == 0)
             arch = arg.substr(7);
-        else if(arg.find("--input-dir=") == 0)
+        else if (arg.find("--input-dir=") == 0)
             inputDir = arg.substr(12);
-        else if(arg.find("--output-dir=") == 0)
+        else if (arg.find("--output-dir=") == 0)
             outputDir = arg.substr(13);
     }
 
     auto stripQuotes = [](std::string& s) {
-        if(s.size() >= 2 && s.front() == '"' && s.back() == '"')
+        if (s.size() >= 2 && s.front() == '"' && s.back() == '"')
             s = s.substr(1, s.size() - 2);
-        else if(s.size() >= 1 && (s.front() == '"' || s.back() == '"'))
-        {
-            if(s.front() == '"')
-                s.erase(0, 1);
-            if(!s.empty() && s.back() == '"')
-                s.pop_back();
+        else if (s.size() >= 1 && (s.front() == '"' || s.back() == '"')) {
+            if (s.front() == '"') s.erase(0, 1);
+            if (!s.empty() && s.back() == '"') s.pop_back();
         }
     };
     stripQuotes(arch);
     stripQuotes(inputDir);
     stripQuotes(outputDir);
 
-    if(inputDir.empty() || outputDir.empty())
-    {
+    if (inputDir.empty() || outputDir.empty()) {
         std::cerr << "Error: Missing --input-dir or --output-dir\n";
         return 1;
     }
 
     bool ok = false;
-    if(arch.empty())
+    if (arch.empty())
         ok = stinkytofu::genAllInstructions(inputDir, outputDir);
     else
         ok = stinkytofu::genInstructions(arch, inputDir, outputDir);

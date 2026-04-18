@@ -30,7 +30,6 @@
 // Before dag/CDNA*.hpp so PASS_DEBUG inside those headers uses this pass name.
 #define DEBUG_TYPE "StinkyDAGSchedulerPass"
 
-#include "dag/CDNA3.hpp"
 #include "dag/CDNA5.hpp"
 
 namespace
@@ -427,11 +426,6 @@ namespace
         {
             PASS_DEBUG(std::cerr << "Using CDNA5ReadyQueue for scheduling\n");
             return std::make_unique<CDNA5ReadyQueue>(passCtx);
-        }
-        else if(passCtx.getGemmTileConfig().arch[0] >= 9)
-        {
-            PASS_DEBUG(std::cerr << "Using CDNA3ReadyQueue for scheduling\n");
-            return std::make_unique<CDNA3ReadyQueue>(passCtx);
         }
         else
         {
