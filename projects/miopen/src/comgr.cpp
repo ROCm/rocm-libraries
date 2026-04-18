@@ -254,10 +254,7 @@ static bool PrintVersionImpl()
     return true;
 }
 
-static void PrintVersion()
-{
-    std::ignore = PrintVersionImpl();
-}
+static void PrintVersion() { std::ignore = PrintVersionImpl(); }
 
 static std::string GetStatusText(const amd_comgr_status_t status, const bool unknown_error = false)
 {
