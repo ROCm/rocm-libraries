@@ -27,16 +27,6 @@
 
 /* Begin architecture-specific ArchInfo headers */
 
-// GFX942
-#ifdef STINKYTOFU_ARCH_GFX942
-#include "Gfx942RocisaArchInfo.hpp"
-#endif
-
-// GFX950
-#ifdef STINKYTOFU_ARCH_GFX950
-#include "Gfx950RocisaArchInfo.hpp"
-#endif
-
 // GFX1250
 #ifdef STINKYTOFU_ARCH_GFX1250
 #include "Gfx1250RocisaArchInfo.hpp"

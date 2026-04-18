@@ -5,7 +5,5 @@
 # This file defines all supported architectures
 
 set(STINKYTOFU_ALL_ARCHS
-    Gfx942
-    Gfx950
     Gfx1250
 )

@@ -67,7 +67,7 @@ list(APPEND TABLEGEN_GENERATED_FILES "${TABLEGEN_OUTPUT_DIR}/PythonBindings_gene
 get_filename_component(INSTRUCTION_DEF_BASE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../hardware/src/gfx" ABSOLUTE)
 set(INSTRUCTION_GEN_DIR "${TABLEGEN_OUTPUT_DIR}/hardware/generated")
 set(INSTRUCTION_GEN_FILES "")
-foreach(arch Gfx1250 Gfx942 Gfx950)
+foreach(arch ${STINKYTOFU_ARCHS_TO_BUILD})
     list(APPEND INSTRUCTION_GEN_FILES "${INSTRUCTION_GEN_DIR}/${arch}_costs.inc")
     list(APPEND INSTRUCTION_GEN_FILES "${INSTRUCTION_GEN_DIR}/${arch}_init.inc")
     list(APPEND INSTRUCTION_GEN_FILES "${INSTRUCTION_GEN_DIR}/${arch}_operands.inc")
@@ -80,14 +80,13 @@ list(APPEND INSTRUCTION_GEN_FILES "${INSTRUCTION_GEN_DIR}/GfxArchDefines.cpp")
 list(APPEND INSTRUCTION_GEN_FILES "${INSTRUCTION_GEN_DIR}/GfxLogicalMaps.cpp")
 list(APPEND INSTRUCTION_GEN_FILES "${TABLEGEN_OUTPUT_DIR}/hardware/arch_headers/ArchHelper_includes.inc")
 list(APPEND TABLEGEN_GENERATED_FILES ${INSTRUCTION_GEN_FILES})
-set(INSTRUCTION_DEF_FILES
-    "${INSTRUCTION_DEF_BASE_DIR}/Gfx1250/Gfx1250Formats.def"
-    "${INSTRUCTION_DEF_BASE_DIR}/Gfx1250/Gfx1250Instructions.def"
-    "${INSTRUCTION_DEF_BASE_DIR}/Gfx942/Gfx942Formats.def"
-    "${INSTRUCTION_DEF_BASE_DIR}/Gfx942/Gfx942Instructions.def"
-    "${INSTRUCTION_DEF_BASE_DIR}/Gfx950/Gfx950Formats.def"
-    "${INSTRUCTION_DEF_BASE_DIR}/Gfx950/Gfx950Instructions.def"
-)
+set(INSTRUCTION_DEF_FILES "")
+foreach(arch ${STINKYTOFU_ARCHS_TO_BUILD})
+    list(APPEND INSTRUCTION_DEF_FILES
+        "${INSTRUCTION_DEF_BASE_DIR}/${arch}/${arch}Formats.def"
+        "${INSTRUCTION_DEF_BASE_DIR}/${arch}/${arch}Instructions.def"
+    )
+endforeach()
 
 # One tablegen_inst_gen run: all archs + ISA .inc (single build, no two-phase).
 add_custom_command(
