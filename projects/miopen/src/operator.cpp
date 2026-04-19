@@ -23,27 +23,12 @@
  * SOFTWARE.
  *
  *******************************************************************************/
+#include <ostream>
 #include <any>
-#include <cassert>
 
-#include <miopen/fusion.hpp>
-#include <miopen/logger.hpp>
+#include <miopen/miopen.h>
 
 namespace miopen {
-std::ostream& operator<<(std::ostream& stream, const FusionOpDescriptor& x)
-{
-    MIOPEN_LOG_ENUM(stream,
-                    x.kind(),
-                    miopenFusionOpConvForward,
-                    miopenFusionOpActivForward,
-                    miopenFusionOpBatchNormInference,
-                    miopenFusionOpBiasForward,
-                    miopenFusionOpBatchNormFwdTrain,
-                    miopenFusionOpBatchNormBwdTrain,
-                    miopenFusionOpActivBackward);
-    return stream;
-}
-
 std::ostream& operator<<(std::ostream& stream, const std::any& a)
 {
     // NOLINTBEGIN(*-braces-around-statements)

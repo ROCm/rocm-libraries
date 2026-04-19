@@ -38,8 +38,6 @@
 template <typename Tgpu, typename Tcheck>
 int32_t mloRoPEForwardRunHost(miopenTensorDescriptor_t xDesc,
                               miopenTensorDescriptor_t cosDesc,
-                              miopenTensorDescriptor_t /*sinDesc*/,
-                              miopenTensorDescriptor_t /*yDesc*/,
                               Tgpu* x,
                               Tgpu* cos,
                               Tgpu* sin,
@@ -75,6 +73,8 @@ int32_t mloRoPEForwardRunHost(miopenTensorDescriptor_t xDesc,
 template <typename Tgpu, typename Tcheck>
 int32_t mloRoPEBackwardRunHost(miopenTensorDescriptor_t dyDesc,
                                miopenTensorDescriptor_t cosDesc,
+                               miopenTensorDescriptor_t sinDesc,
+                               miopenTensorDescriptor_t dxDesc,
                                Tgpu* dy,
                                Tgpu* cos,
                                Tgpu* sin,
@@ -320,7 +320,7 @@ template <typename Tgpu, typename Tref>
 int RoPEDriver<Tgpu, Tref>::RunForwardCPU()
 {
     mloRoPEForwardRunHost<Tgpu, Tref>(
-        x_dyDesc, cosDesc, sinDesc, y_dxDesc, x_dy.data(), cos.data(), sin.data(), y_dxhost.data());
+        x_dyDesc, cosDesc, x_dy.data(), cos.data(), sin.data(), y_dxhost.data());
 
     return miopenStatusSuccess;
 }
