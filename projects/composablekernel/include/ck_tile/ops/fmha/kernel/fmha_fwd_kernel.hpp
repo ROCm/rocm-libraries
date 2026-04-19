@@ -57,6 +57,9 @@ struct has_ignore_fast_exp2_flag : std::false_type
 {
 };
 
+// IgnoreFastExp2 is used by some pipeline which explicitly chooses not to use FAST_EXP2;
+// By detecting the kIgnoreFastExp2 from the pipeline, the kernel's MakeKargsImpl() interface
+// is able to avoid passing an in-correct scale_s parameter to the kernel layer
 template <typename T>
 struct has_ignore_fast_exp2_flag<
     T,
