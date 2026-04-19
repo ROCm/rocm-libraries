@@ -62,7 +62,7 @@ void BackendRegistry::clearArch(const std::array<int, 3>& arch) {
 }
 
 std::string BackendRegistry::makeArchKey(const std::array<int, 3>& arch) {
-    return getArchName(getGfxArchID(arch[0], arch[1], arch[2]));
+    return "gfx" + std::to_string(arch[0] * 100 + arch[1] * 10 + arch[2]);
 }
 
 }  // namespace stinkytofu
