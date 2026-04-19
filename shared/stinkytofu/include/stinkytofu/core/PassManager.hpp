@@ -30,6 +30,7 @@
 #include <unordered_set>
 #include <vector>
 
+#include "stinkytofu/Export.hpp"
 #include "stinkytofu/core/BasicBlock.hpp"
 #include "stinkytofu/core/Function.hpp"
 #include "stinkytofu/core/PassInstrumentation.hpp"
@@ -168,7 +169,7 @@ bool isDebugOnlyEnabled(const char* TYPE);
 // and where to dump the output (stdout or file).
 //
 // Users can also configure a global debug-only list of passes to print.
-class PassManagerDebugConfig final {
+class STINKYTOFU_EXPORT PassManagerDebugConfig final {
     unsigned printAfterAll : 1;
     unsigned printBeforeAll : 1;
     unsigned dumpInitialIR : 1;
@@ -221,7 +222,7 @@ class PassManagerDebugConfig final {
 // Note: Even though StinkyInstruction is currently the only IR
 //       type, there could be more IR types (levels) like MLIR in
 //       the future.
-class PassManager {
+class STINKYTOFU_EXPORT PassManager {
    public:
     /// Run all passes on the given Function. PassContext is used for config and analysis.
     void run(Function& F);

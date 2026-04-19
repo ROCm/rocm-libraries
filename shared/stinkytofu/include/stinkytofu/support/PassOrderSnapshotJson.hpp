@@ -26,6 +26,7 @@
 #include <string>
 #include <vector>
 
+#include "stinkytofu/Export.hpp"
 #include "stinkytofu/core/PassInstrumentation.hpp"
 #include "stinkytofu/core/Types.hpp"
 
@@ -56,7 +57,7 @@ void appendPassOrderSnapshotJsonAfterPass(Function& func,
 ///
 /// The snapshot config (allow-list, title prefix) is read from the
 /// PassContext's PassFeatureConfig at callback time.
-class PassOrderSnapshotInstrumentation : public PassInstrumentation {
+class STINKYTOFU_EXPORT PassOrderSnapshotInstrumentation : public PassInstrumentation {
    public:
     explicit PassOrderSnapshotInstrumentation(std::shared_ptr<DAGScheduleJsonCollector> collector);
 

@@ -25,6 +25,8 @@
 
 #include <memory>
 
+#include "stinkytofu/Export.hpp"
+
 namespace stinkytofu {
 class Pass;
 
@@ -159,7 +161,7 @@ struct WaitCntConfig {
 };
 
 // Factory functions for different configurations
-std::unique_ptr<Pass> createStinkyUnrollWaitCntPass();
+STINKYTOFU_EXPORT std::unique_ptr<Pass> createStinkyUnrollWaitCntPass();
 std::unique_ptr<Pass> createStinkyConservativeWaitCntPass();
 std::unique_ptr<Pass> createStinkyMinimalWaitCntPass();
 std::unique_ptr<Pass> createStinkyCustomWaitCntPass(const WaitCntConfig& config);

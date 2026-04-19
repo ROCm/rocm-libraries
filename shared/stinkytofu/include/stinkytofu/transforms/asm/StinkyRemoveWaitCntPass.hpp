@@ -25,6 +25,8 @@
 
 #include <memory>
 
+#include "stinkytofu/Export.hpp"
+
 namespace stinkytofu {
 class Pass;
 
@@ -36,6 +38,7 @@ class Pass;
  *
  * @param removeTensorWaitCnt Whether to remove tensor waitcnt instructions.
  */
-std::unique_ptr<Pass> createStinkyRemoveWaitCntPass(bool removeTensorWaitCnt = false);
+STINKYTOFU_EXPORT std::unique_ptr<Pass> createStinkyRemoveWaitCntPass(
+    bool removeTensorWaitCnt = false);
 
 }  // namespace stinkytofu

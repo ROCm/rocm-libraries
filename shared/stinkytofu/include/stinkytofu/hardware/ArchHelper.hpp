@@ -29,6 +29,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "stinkytofu/Export.hpp"
 #include "stinkytofu/hardware/GfxIsa.hpp"
 
 namespace stinkytofu {
@@ -37,7 +38,7 @@ namespace stinkytofu {
 //
 // This class eliminates the need for scattered switch statements throughout the codebase
 // by encapsulating all architecture-specific queries in one place.
-class ArchHelper {
+class STINKYTOFU_EXPORT ArchHelper {
    public:
     struct ArchInfo {
         ArchInfo(uint32_t major, uint32_t minor, uint32_t stepping, uint32_t waveFrontSize)
@@ -73,6 +74,8 @@ class ArchHelper {
    private:
     // Private constructor: Populate the fixed list here
     ArchHelper();
+    ArchHelper(const ArchHelper&) = delete;
+    ArchHelper& operator=(const ArchHelper&) = delete;
 
     std::vector<std::unique_ptr<ArchInfo>> registeredArchInfos;
 };

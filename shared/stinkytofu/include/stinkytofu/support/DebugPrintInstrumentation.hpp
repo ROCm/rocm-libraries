@@ -24,13 +24,14 @@
 
 #include <memory>
 
+#include "stinkytofu/Export.hpp"
 #include "stinkytofu/core/PassInstrumentation.hpp"
 
 namespace stinkytofu {
 class PassManagerDebugConfig;
 
 /// Print IR before/after passes using PassManagerDebugConfig settings.
-class DebugPrintInstrumentation : public PassInstrumentation {
+class STINKYTOFU_EXPORT DebugPrintInstrumentation : public PassInstrumentation {
    public:
     explicit DebugPrintInstrumentation(std::unique_ptr<PassManagerDebugConfig> cfg);
     ~DebugPrintInstrumentation() override;

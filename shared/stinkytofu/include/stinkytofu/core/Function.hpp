@@ -25,6 +25,7 @@
 #include <iosfwd>
 #include <string>
 
+#include "stinkytofu/Export.hpp"
 #include "stinkytofu/core/BasicBlock.hpp"
 #include "stinkytofu/core/Types.hpp"
 
@@ -34,7 +35,7 @@ namespace stinkytofu {
 // This represents a function/kernel in the StinkyTofu IR.
 // BasicBlocks are organized as an intrusive list and can be
 // traversed in program order.
-class Function {
+class STINKYTOFU_EXPORT Function {
    private:
     std::string name;
     BasicBlockList basicBlocks;  // List parent is this so BasicBlock::getParent() works

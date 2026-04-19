@@ -25,6 +25,8 @@
 
 #include <memory>
 
+#include "stinkytofu/Export.hpp"
+
 namespace stinkytofu {
 class Pass;
 
@@ -40,6 +42,6 @@ class Pass;
  *
  * This creates the dependency chain:  writer → barrier → reader.
  */
-std::unique_ptr<Pass> createStinkyBuildImplicitDependencyPass();
+STINKYTOFU_EXPORT std::unique_ptr<Pass> createStinkyBuildImplicitDependencyPass();
 
 }  // namespace stinkytofu
