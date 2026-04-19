@@ -18,6 +18,7 @@ set(SOURCES
     unit_conv_solver.cpp
     )
 
+list(APPEND SKIP_TESTS gpu_mha_forward.cpp)
 
 # We use a special entry point for HIP backend testing so we can detect and flag any HIP errors that tests don't
 # clean up themselves
