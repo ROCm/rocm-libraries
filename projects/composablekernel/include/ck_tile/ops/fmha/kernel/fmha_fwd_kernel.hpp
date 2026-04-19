@@ -104,7 +104,7 @@ struct has_use_trload_flag<
 template <typename T>
 static inline constexpr bool is_using_trload_v = has_use_trload_flag<T>::value;
 
-}; // namespace detail
+} // namespace detail
 
 template <typename FmhaPipeline_, typename EpiloguePipeline_>
 struct FmhaFwdKernel

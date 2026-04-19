@@ -53,7 +53,7 @@ CK_TILE_HOST_DEVICE static constexpr auto GetDramTileAccessMaxVectorSize()
     return GetMaxVectorSize<DataType, ElemPerThread>();
 }
 
-}; // namespace detail
+} // namespace detail
 
 template <typename QDataType_,
           typename KDataType_,
