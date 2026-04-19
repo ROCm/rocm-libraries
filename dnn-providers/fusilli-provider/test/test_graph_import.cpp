@@ -9,7 +9,7 @@
 
 #include <fusilli.h>
 #include <gtest/gtest.h>
-#include <hipdnn_data_sdk/data_objects/data_types_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_frontend/Graph.hpp>
 #include <hipdnn_frontend/attributes/CustomOpAttributes.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
@@ -17,43 +17,45 @@
 TEST(TestGraphImport, ConvertHipDnnToFusilli) {
   FUSILLI_PLUGIN_EXPECT_OR_ASSIGN(
       auto halfDt, hipDnnDataTypeToFusilliDataType(
-                       hipdnn_data_sdk::data_objects::DataType::HALF));
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::HALF));
   EXPECT_EQ(halfDt, fusilli::DataType::Half);
   FUSILLI_PLUGIN_EXPECT_OR_ASSIGN(
-      auto bfloat16Dt, hipDnnDataTypeToFusilliDataType(
-                           hipdnn_data_sdk::data_objects::DataType::BFLOAT16));
+      auto bfloat16Dt,
+      hipDnnDataTypeToFusilliDataType(
+          hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16));
   EXPECT_EQ(bfloat16Dt, fusilli::DataType::BFloat16);
   FUSILLI_PLUGIN_EXPECT_OR_ASSIGN(
       auto floatDt, hipDnnDataTypeToFusilliDataType(
-                        hipdnn_data_sdk::data_objects::DataType::FLOAT));
+                        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT));
   EXPECT_EQ(floatDt, fusilli::DataType::Float);
   FUSILLI_PLUGIN_EXPECT_OR_ASSIGN(
-      auto doubleDt, hipDnnDataTypeToFusilliDataType(
-                         hipdnn_data_sdk::data_objects::DataType::DOUBLE));
+      auto doubleDt,
+      hipDnnDataTypeToFusilliDataType(
+          hipdnn_flatbuffers_sdk::data_objects::DataType::DOUBLE));
   EXPECT_EQ(doubleDt, fusilli::DataType::Double);
   FUSILLI_PLUGIN_EXPECT_OR_ASSIGN(
       auto uint8Dt, hipDnnDataTypeToFusilliDataType(
-                        hipdnn_data_sdk::data_objects::DataType::UINT8));
+                        hipdnn_flatbuffers_sdk::data_objects::DataType::UINT8));
   EXPECT_EQ(uint8Dt, fusilli::DataType::Uint8);
   FUSILLI_PLUGIN_EXPECT_OR_ASSIGN(
       auto int8Dt, hipDnnDataTypeToFusilliDataType(
-                       hipdnn_data_sdk::data_objects::DataType::INT8));
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::INT8));
   EXPECT_EQ(int8Dt, fusilli::DataType::Int8);
   FUSILLI_PLUGIN_EXPECT_OR_ASSIGN(
       auto int32Dt, hipDnnDataTypeToFusilliDataType(
-                        hipdnn_data_sdk::data_objects::DataType::INT32));
+                        hipdnn_flatbuffers_sdk::data_objects::DataType::INT32));
   EXPECT_EQ(int32Dt, fusilli::DataType::Int32);
   FUSILLI_PLUGIN_EXPECT_OR_ASSIGN(
       auto int4Dt, hipDnnDataTypeToFusilliDataType(
-                       hipdnn_data_sdk::data_objects::DataType::INT4));
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::INT4));
   EXPECT_EQ(int4Dt, fusilli::DataType::Int4);
   FUSILLI_PLUGIN_EXPECT_OR_ASSIGN(
       auto unsetDt, hipDnnDataTypeToFusilliDataType(
-                        hipdnn_data_sdk::data_objects::DataType::UNSET));
+                        hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET));
   EXPECT_EQ(unsetDt, fusilli::DataType::NotSet);
 
   auto invalidResult = hipDnnDataTypeToFusilliDataType(
-      static_cast<hipdnn_data_sdk::data_objects::DataType>(42));
+      static_cast<hipdnn_flatbuffers_sdk::data_objects::DataType>(42));
   EXPECT_TRUE(isError(invalidResult));
 }
 

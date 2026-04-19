@@ -3,7 +3,7 @@
 
 #include "engines/plans/layernorm/LayernormFwdPlan.hpp"
 #include <gtest/gtest.h>
-#include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 
 using namespace hip_kernel_provider::layernorm;
@@ -12,8 +12,8 @@ TEST(TestLayernormFwdParams, InitializesAllTensorsFromValidGraph)
 {
     // Create a valid layernorm graph
     auto builder = hipdnn_test_sdk::utilities::createValidLayernormFpropGraph();
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                              builder.GetSize());
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                                     builder.GetSize());
 
     // Get the layernorm node and attributes
     const auto& node = graph.getNode(0);

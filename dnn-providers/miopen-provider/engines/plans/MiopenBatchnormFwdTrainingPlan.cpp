@@ -13,8 +13,9 @@ namespace miopen_plugin
 const miopenBatchNormMode_t MIOPEN_BATCHNORM_MODE_TRAINING = miopenBNSpatial;
 
 BatchnormFwdTrainingParams::BatchnormFwdTrainingParams(
-    const hipdnn_data_sdk::data_objects::BatchnormAttributes& attributes,
-    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+    const hipdnn_flatbuffers_sdk::data_objects::BatchnormAttributes& attributes,
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
         tensorMap)
     : _x(miopen_utils::createBatchnormTensor(tensorMap, attributes.x_tensor_uid()))
     , _y(miopen_utils::createBatchnormTensor(tensorMap, attributes.y_tensor_uid()))
@@ -60,9 +61,10 @@ BatchnormFwdTrainingParams::BatchnormFwdTrainingParams(
 }
 
 BatchnormFwdTrainingParams::BatchnormFwdTrainingParams(
-    const hipdnn_data_sdk::data_objects::BatchnormAttributes& attributes,
-    const hipdnn_data_sdk::data_objects::PointwiseAttributes& pointwiseAttributes,
-    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+    const hipdnn_flatbuffers_sdk::data_objects::BatchnormAttributes& attributes,
+    const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& pointwiseAttributes,
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
         tensorMap)
     : _x(miopen_utils::createBatchnormTensor(tensorMap, attributes.x_tensor_uid()))
     , _y(miopen_utils::createBatchnormTensor(tensorMap, attributes.y_tensor_uid()))

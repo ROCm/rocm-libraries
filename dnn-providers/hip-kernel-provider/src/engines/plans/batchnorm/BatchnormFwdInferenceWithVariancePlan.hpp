@@ -26,15 +26,18 @@ class BatchnormFwdInferenceWithVarianceParams
 {
 public:
     BatchnormFwdInferenceWithVarianceParams(
-        const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributesVarianceExt& attributes,
-        const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        const hipdnn_flatbuffers_sdk::data_objects::BatchnormInferenceAttributesVarianceExt&
+            attributes,
+        const std::unordered_map<int64_t,
+                                 const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
             tensorMap);
 
     BatchnormFwdInferenceWithVarianceParams(
-        const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributesVarianceExt&
+        const hipdnn_flatbuffers_sdk::data_objects::BatchnormInferenceAttributesVarianceExt&
             inferenceAttributes,
-        const hipdnn_data_sdk::data_objects::PointwiseAttributes& pointwiseAttributes,
-        const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& pointwiseAttributes,
+        const std::unordered_map<int64_t,
+                                 const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
             tensorMap);
 
     BatchnormFwdInferenceWithVarianceParams(const BatchnormFwdInferenceWithVarianceParams&)
@@ -47,28 +50,28 @@ public:
     BatchnormFwdInferenceWithVarianceParams& operator=(BatchnormFwdInferenceWithVarianceParams&&)
         = default;
 
-    const hipdnn_data_sdk::data_objects::TensorAttributes* x() const;
-    const hipdnn_data_sdk::data_objects::TensorAttributes* y() const;
-    const hipdnn_data_sdk::data_objects::TensorAttributes* scale() const;
-    const hipdnn_data_sdk::data_objects::TensorAttributes* bias() const;
-    const hipdnn_data_sdk::data_objects::TensorAttributes* estMean() const;
-    const hipdnn_data_sdk::data_objects::TensorAttributes* estVariance() const;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* x() const;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* y() const;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* scale() const;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* bias() const;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* estMean() const;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* estVariance() const;
     double epsilonValue() const;
 
     const std::optional<hip_kernel_utils::ActivationParams>& optActivation() const;
-    const hipdnn_data_sdk::data_objects::TensorAttributes* activationOut() const;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* activationOut() const;
 
 private:
-    const hipdnn_data_sdk::data_objects::TensorAttributes* _x;
-    const hipdnn_data_sdk::data_objects::TensorAttributes* _y;
-    const hipdnn_data_sdk::data_objects::TensorAttributes* _scale;
-    const hipdnn_data_sdk::data_objects::TensorAttributes* _bias;
-    const hipdnn_data_sdk::data_objects::TensorAttributes* _estMean;
-    const hipdnn_data_sdk::data_objects::TensorAttributes* _estVariance;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _x;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _y;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _scale;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _bias;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _estMean;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _estVariance;
     double _epsilonValue;
 
     std::optional<hip_kernel_utils::ActivationParams> _optActivation;
-    const hipdnn_data_sdk::data_objects::TensorAttributes* _activationOut;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _activationOut;
 };
 
 class BatchnormFwdInferenceWithVariancePlan : public hipdnn_plugin_sdk::IPlan<HipKernelHandle>
