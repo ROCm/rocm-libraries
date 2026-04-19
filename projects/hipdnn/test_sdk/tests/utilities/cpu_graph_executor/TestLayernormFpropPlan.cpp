@@ -10,8 +10,8 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceLayernorm.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_test_sdk/utilities/DynamicTolerancesLayerNorm.hpp>
 #include <hipdnn_test_sdk/utilities/Seeds.hpp>
-#include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/LayernormFpropPlan.hpp>
 
 using namespace hipdnn_test_sdk::utilities;
@@ -28,9 +28,12 @@ class TestLayernormFpropPlan : public ::testing::Test
 
 TEST_F(TestLayernormFpropPlan, ExecutePlan)
 {
-    auto tolerance = layernorm::getTolerance<float>();
     const std::vector<int64_t> dims = {6, 3, 32, 32};
     const int64_t normalizedDimCount = 3;
+    // M = product of last normalizedDimCount dims = 3 * 32 * 32 = 3072
+    // Tensor init ranges from LayernormTensorBundles: x=[0,1], scale=[0,1], bias=[0,1]
+    auto tolerance = layernorm::calculateLayernormFpropTolerance<float, float, float>(
+        0.0, 1.0, 0.0, 1.0, 3072, 0.0, 1.0);
     const unsigned int seed = getGlobalTestSeed();
     auto graph = buildLayernormFpropGraph(DataType::FLOAT,
                                           DataType::FLOAT,
@@ -87,9 +90,11 @@ TEST_F(TestLayernormFpropPlan, ExecutePlan)
 
 TEST_F(TestLayernormFpropPlan, ExecutePlanOnePaddedNormalizedDimCount2)
 {
-    auto tolerance = layernorm::getTolerance<float>();
     const std::vector<int64_t> dims = {6, 3, 32, 32};
     const int64_t normalizedDimCount = 2;
+    // M = product of last 2 dims = 32 * 32 = 1024
+    auto tolerance = layernorm::calculateLayernormFpropTolerance<float, float, float>(
+        0.0, 1.0, 0.0, 1.0, 1024, 0.0, 1.0);
     const unsigned int seed = getGlobalTestSeed();
     auto graph = buildLayernormFpropGraph(DataType::FLOAT,
                                           DataType::FLOAT,
@@ -148,9 +153,11 @@ TEST_F(TestLayernormFpropPlan, ExecutePlanOnePaddedNormalizedDimCount2)
 
 TEST_F(TestLayernormFpropPlan, ExecutePlanTrainingPhase)
 {
-    auto tolerance = layernorm::getTolerance<float>();
     const std::vector<int64_t> dims = {6, 3, 32, 32};
     const int64_t normalizedDimCount = 3;
+    // M = 3 * 32 * 32 = 3072
+    auto tolerance = layernorm::calculateLayernormFpropTolerance<float, float, float>(
+        0.0, 1.0, 0.0, 1.0, 3072, 0.0, 1.0);
     const unsigned int seed = getGlobalTestSeed();
     auto graph = buildLayernormFpropGraph(DataType::FLOAT,
                                           DataType::FLOAT,

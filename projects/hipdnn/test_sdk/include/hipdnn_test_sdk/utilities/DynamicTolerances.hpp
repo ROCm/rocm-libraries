@@ -10,6 +10,7 @@
 
 #include <hipdnn_test_sdk/utilities/DynamicTolerancesCommon.hpp>
 #include <hipdnn_test_sdk/utilities/DynamicTolerancesConv.hpp>
+#include <hipdnn_test_sdk/utilities/DynamicTolerancesLayerNorm.hpp>
 #include <hipdnn_test_sdk/utilities/DynamicTolerancesMatmul.hpp>
 #include <hipdnn_test_sdk/utilities/DynamicTolerancesPointwise.hpp>
 #include <hipdnn_test_sdk/utilities/DynamicTolerancesRMSNorm.hpp>
