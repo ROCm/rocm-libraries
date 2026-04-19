@@ -22,53 +22,50 @@
  * ************************************************************************ */
 #pragma once
 
-#include "stinkytofu/core/PassInstrumentation.hpp"
-#include "stinkytofu/core/Types.hpp"
-
 #include <memory>
 #include <string>
 #include <vector>
 
-namespace stinkytofu
-{
-    class DAGScheduleJsonCollector;
-    class Function;
-    class PassContext;
-    class StinkyInstruction;
+#include "stinkytofu/core/PassInstrumentation.hpp"
+#include "stinkytofu/core/Types.hpp"
 
-    /// True if \p passName is in the configured allow-list and a non-empty snapshot path is set.
-    bool shouldEmitPassOrderSnapshotAfterPass(const PassFeatureConfig& cfg,
-                                              const std::string&       passName);
+namespace stinkytofu {
+class DAGScheduleJsonCollector;
+class Function;
+class PassContext;
+class StinkyInstruction;
 
-    /// Linearize all processed Stinky instructions in function basic-block order (pointer stability).
-    void snapshotProgramOrderStinkyLinear(Function&                        func,
-                                          const PassContext&               passCtx,
-                                          std::vector<StinkyInstruction*>& outOrder);
+/// True if \p passName is in the configured allow-list and a non-empty snapshot path is set.
+bool shouldEmitPassOrderSnapshotAfterPass(const PassFeatureConfig& cfg,
+                                          const std::string& passName);
 
-    /// One viewer region for the whole function (register deps + before/after order); skipped if size changes.
-    void appendPassOrderSnapshotJsonAfterPass(Function&                              func,
-                                              const std::vector<StinkyInstruction*>& beforeOrder,
-                                              const PassContext&                     passCtx,
-                                              const std::string&        passNameJustRan,
-                                              DAGScheduleJsonCollector& collector);
+/// Linearize all processed Stinky instructions in function basic-block order (pointer stability).
+void snapshotProgramOrderStinkyLinear(Function& func, const PassContext& passCtx,
+                                      std::vector<StinkyInstruction*>& outOrder);
 
-    /// Record before/after instruction ordering around each pass and emits
-    /// register-dependency DAG snapshots into a shared DAGScheduleJsonCollector.
-    ///
-    /// The snapshot config (allow-list, title prefix) is read from the
-    /// PassContext's PassFeatureConfig at callback time.
-    class PassOrderSnapshotInstrumentation : public PassInstrumentation
-    {
-    public:
-        explicit PassOrderSnapshotInstrumentation(
-            std::shared_ptr<DAGScheduleJsonCollector> collector);
+/// One viewer region for the whole function (register deps + before/after order); skipped if size
+/// changes.
+void appendPassOrderSnapshotJsonAfterPass(Function& func,
+                                          const std::vector<StinkyInstruction*>& beforeOrder,
+                                          const PassContext& passCtx,
+                                          const std::string& passNameJustRan,
+                                          DAGScheduleJsonCollector& collector);
 
-        void beforePass(const std::string& passName, Function& F, PassContext& ctx) override;
-        void afterPass(const std::string& passName, Function& F, PassContext& ctx) override;
+/// Record before/after instruction ordering around each pass and emits
+/// register-dependency DAG snapshots into a shared DAGScheduleJsonCollector.
+///
+/// The snapshot config (allow-list, title prefix) is read from the
+/// PassContext's PassFeatureConfig at callback time.
+class PassOrderSnapshotInstrumentation : public PassInstrumentation {
+   public:
+    explicit PassOrderSnapshotInstrumentation(std::shared_ptr<DAGScheduleJsonCollector> collector);
 
-    private:
-        std::shared_ptr<DAGScheduleJsonCollector> collector;
-        std::vector<StinkyInstruction*>           beforeOrder;
-    };
+    void beforePass(const std::string& passName, Function& F, PassContext& ctx) override;
+    void afterPass(const std::string& passName, Function& F, PassContext& ctx) override;
 
-} // namespace stinkytofu
+   private:
+    std::shared_ptr<DAGScheduleJsonCollector> collector;
+    std::vector<StinkyInstruction*> beforeOrder;
+};
+
+}  // namespace stinkytofu

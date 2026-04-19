@@ -23,53 +23,52 @@
 
 #pragma once
 
-#include "stinkytofu/serialization/asm/PatternParser.hpp"
 #include <string>
 #include <vector>
 
-namespace stinkytofu
-{
+#include "stinkytofu/serialization/asm/PatternParser.hpp"
 
-    //===----------------------------------------------------------------------===//
-    // Pattern Code Generator
-    //
-    // Generates C++ matcher code from parsed patterns.
-    // Uses the Pattern AST from PatternParser.hpp.
-    //===----------------------------------------------------------------------===//
+namespace stinkytofu {
 
-    class PatternCodeGen
-    {
-    public:
-        explicit PatternCodeGen(const std::string& outputDir);
+//===----------------------------------------------------------------------===//
+// Pattern Code Generator
+//
+// Generates C++ matcher code from parsed patterns.
+// Uses the Pattern AST from PatternParser.hpp.
+//===----------------------------------------------------------------------===//
 
-        // Generate C++ matcher code for patterns of a specific type
-        bool generateMatchers(const std::vector<Pattern>& patterns, PatternType type);
+class PatternCodeGen {
+   public:
+    explicit PatternCodeGen(const std::string& outputDir);
 
-    private:
-        std::string outputDir;
+    // Generate C++ matcher code for patterns of a specific type
+    bool generateMatchers(const std::vector<Pattern>& patterns, PatternType type);
 
-        // Code generation helpers (assembly IR)
-        std::string generateMatcherClass(const Pattern& pattern, PatternType type);
-        std::string generateMatchFunction(const Pattern& pattern, PatternType type);
+   private:
+    std::string outputDir;
 
-        // Code generation helpers (high-level IR)
-        std::string generateMatcherClassHLIR(const Pattern& pattern);
-        std::string generateMatchFunctionHLIR(const Pattern& pattern);
+    // Code generation helpers (assembly IR)
+    std::string generateMatcherClass(const Pattern& pattern, PatternType type);
+    std::string generateMatchFunction(const Pattern& pattern, PatternType type);
 
-        // Common helpers
-        std::string generateHeader(PatternType type);
-        std::string generateFooter(const std::vector<Pattern>& patterns, PatternType type);
+    // Code generation helpers (high-level IR)
+    std::string generateMatcherClassHLIR(const Pattern& pattern);
+    std::string generateMatchFunctionHLIR(const Pattern& pattern);
 
-        // Utility
-        std::string toCppIdentifier(const std::string& name);
-    };
+    // Common helpers
+    std::string generateHeader(PatternType type);
+    std::string generateFooter(const std::vector<Pattern>& patterns, PatternType type);
 
-    //===----------------------------------------------------------------------===//
-    // Public API
-    //===----------------------------------------------------------------------===//
+    // Utility
+    std::string toCppIdentifier(const std::string& name);
+};
 
-    // Generate pattern matchers from pattern file
-    // Returns true on success, false on error
-    bool genPeepholePatterns(const std::string& patternFile, const std::string& outdir);
+//===----------------------------------------------------------------------===//
+// Public API
+//===----------------------------------------------------------------------===//
 
-} // namespace stinkytofu
+// Generate pattern matchers from pattern file
+// Returns true on success, false on error
+bool genPeepholePatterns(const std::string& patternFile, const std::string& outdir);
+
+}  // namespace stinkytofu

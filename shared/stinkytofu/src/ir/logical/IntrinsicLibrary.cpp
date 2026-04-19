@@ -22,188 +22,160 @@
  * ************************************************************************ */
 
 #include "stinkytofu/ir/logical/IntrinsicLibrary.hpp"
-#include "stinkytofu/serialization/logical/IRSerializer.hpp"
+
 #include <algorithm>
 #include <iostream>
 
-namespace stinkytofu
-{
-    //===----------------------------------------------------------------------===//
-    // Factory Methods
-    //===----------------------------------------------------------------------===//
+#include "stinkytofu/serialization/logical/IRSerializer.hpp"
 
-    std::shared_ptr<IntrinsicLibrary> IntrinsicLibrary::loadFromFile(const std::string& bcFilePath)
-    {
-        // Deserialize intrinsics from .st.bc file
-        auto patterns = IRSerializer::deserializeFromFile(bcFilePath);
-        if(patterns.empty())
-        {
-            std::cerr << "Error: Failed to load intrinsics from " << bcFilePath << "\n";
-            return nullptr;
-        }
+namespace stinkytofu {
+//===----------------------------------------------------------------------===//
+// Factory Methods
+//===----------------------------------------------------------------------===//
 
-        // Create library
-        auto lib         = std::shared_ptr<IntrinsicLibrary>(new IntrinsicLibrary());
-        lib->sourcePath_ = bcFilePath;
-
-        // Build lookup map
-        for(const auto& pattern : patterns)
-        {
-            if(pattern.type == PatternType::Intrinsic)
-            {
-                lib->intrinsics_[pattern.name] = pattern;
-            }
-        }
-
-        return lib;
-    }
-
-    std::shared_ptr<IntrinsicLibrary> IntrinsicLibrary::create(const std::vector<Pattern>& patterns)
-    {
-        auto lib         = std::shared_ptr<IntrinsicLibrary>(new IntrinsicLibrary());
-        lib->sourcePath_ = "<in-memory>";
-
-        // Build lookup map
-        for(const auto& pattern : patterns)
-        {
-            if(pattern.type == PatternType::Intrinsic)
-            {
-                lib->intrinsics_[pattern.name] = pattern;
-            }
-        }
-
-        return lib;
-    }
-
-    //===----------------------------------------------------------------------===//
-    // Lookup Methods
-    //===----------------------------------------------------------------------===//
-
-    const Pattern* IntrinsicLibrary::lookup(const std::string& name) const
-    {
-        auto it = intrinsics_.find(name);
-        if(it != intrinsics_.end())
-        {
-            return &it->second;
-        }
+std::shared_ptr<IntrinsicLibrary> IntrinsicLibrary::loadFromFile(const std::string& bcFilePath) {
+    // Deserialize intrinsics from .st.bc file
+    auto patterns = IRSerializer::deserializeFromFile(bcFilePath);
+    if (patterns.empty()) {
+        std::cerr << "Error: Failed to load intrinsics from " << bcFilePath << "\n";
         return nullptr;
     }
 
-    bool IntrinsicLibrary::hasIntrinsic(const std::string& name) const
-    {
-        return intrinsics_.find(name) != intrinsics_.end();
-    }
+    // Create library
+    auto lib = std::shared_ptr<IntrinsicLibrary>(new IntrinsicLibrary());
+    lib->sourcePath_ = bcFilePath;
 
-    std::vector<std::string> IntrinsicLibrary::getIntrinsicNames() const
-    {
-        std::vector<std::string> names;
-        names.reserve(intrinsics_.size());
-
-        for(const auto& pair : intrinsics_)
-        {
-            names.push_back(pair.first);
+    // Build lookup map
+    for (const auto& pattern : patterns) {
+        if (pattern.type == PatternType::Intrinsic) {
+            lib->intrinsics_[pattern.name] = pattern;
         }
-
-        // Sort alphabetically for consistent output
-        std::sort(names.begin(), names.end());
-
-        return names;
     }
 
-    //===----------------------------------------------------------------------===//
-    // Accessor Methods
-    //===----------------------------------------------------------------------===//
+    return lib;
+}
 
-    std::vector<IntrinsicArgument> IntrinsicLibrary::getArguments(const std::string& name) const
-    {
+std::shared_ptr<IntrinsicLibrary> IntrinsicLibrary::create(const std::vector<Pattern>& patterns) {
+    auto lib = std::shared_ptr<IntrinsicLibrary>(new IntrinsicLibrary());
+    lib->sourcePath_ = "<in-memory>";
+
+    // Build lookup map
+    for (const auto& pattern : patterns) {
+        if (pattern.type == PatternType::Intrinsic) {
+            lib->intrinsics_[pattern.name] = pattern;
+        }
+    }
+
+    return lib;
+}
+
+//===----------------------------------------------------------------------===//
+// Lookup Methods
+//===----------------------------------------------------------------------===//
+
+const Pattern* IntrinsicLibrary::lookup(const std::string& name) const {
+    auto it = intrinsics_.find(name);
+    if (it != intrinsics_.end()) {
+        return &it->second;
+    }
+    return nullptr;
+}
+
+bool IntrinsicLibrary::hasIntrinsic(const std::string& name) const {
+    return intrinsics_.find(name) != intrinsics_.end();
+}
+
+std::vector<std::string> IntrinsicLibrary::getIntrinsicNames() const {
+    std::vector<std::string> names;
+    names.reserve(intrinsics_.size());
+
+    for (const auto& pair : intrinsics_) {
+        names.push_back(pair.first);
+    }
+
+    // Sort alphabetically for consistent output
+    std::sort(names.begin(), names.end());
+
+    return names;
+}
+
+//===----------------------------------------------------------------------===//
+// Accessor Methods
+//===----------------------------------------------------------------------===//
+
+std::vector<IntrinsicArgument> IntrinsicLibrary::getArguments(const std::string& name) const {
+    const Pattern* pattern = lookup(name);
+    if (pattern) {
+        return pattern->arguments;
+    }
+    return {};
+}
+
+std::vector<IntrinsicInstruction> IntrinsicLibrary::getBody(const std::string& name) const {
+    const Pattern* pattern = lookup(name);
+    if (pattern) {
+        return pattern->body;
+    }
+    return {};
+}
+
+std::string IntrinsicLibrary::getComment(const std::string& name) const {
+    const Pattern* pattern = lookup(name);
+    if (pattern) {
+        return pattern->comment;
+    }
+    return "";
+}
+
+bool IntrinsicLibrary::hasPythonBinding(const std::string& name) const {
+    const Pattern* pattern = lookup(name);
+    if (pattern) {
+        return pattern->pythonBinding;
+    }
+    return false;
+}
+
+//===----------------------------------------------------------------------===//
+// Utility Methods
+//===----------------------------------------------------------------------===//
+
+void IntrinsicLibrary::printStats() const {
+    std::cout << "=== IntrinsicLibrary Statistics ===\n";
+    std::cout << "Source: " << sourcePath_ << "\n";
+    std::cout << "Total Intrinsics: " << intrinsics_.size() << "\n\n";
+
+    // Count Python bindings
+    size_t pythonBindingCount = 0;
+    for (const auto& pair : intrinsics_) {
+        if (pair.second.pythonBinding) {
+            pythonBindingCount++;
+        }
+    }
+    std::cout << "Python Bindings: " << pythonBindingCount << "\n\n";
+
+    // List all intrinsics with details
+    auto names = getIntrinsicNames();
+    std::cout << "Intrinsics:\n";
+    for (const auto& name : names) {
         const Pattern* pattern = lookup(name);
-        if(pattern)
-        {
-            return pattern->arguments;
-        }
-        return {};
-    }
-
-    std::vector<IntrinsicInstruction> IntrinsicLibrary::getBody(const std::string& name) const
-    {
-        const Pattern* pattern = lookup(name);
-        if(pattern)
-        {
-            return pattern->body;
-        }
-        return {};
-    }
-
-    std::string IntrinsicLibrary::getComment(const std::string& name) const
-    {
-        const Pattern* pattern = lookup(name);
-        if(pattern)
-        {
-            return pattern->comment;
-        }
-        return "";
-    }
-
-    bool IntrinsicLibrary::hasPythonBinding(const std::string& name) const
-    {
-        const Pattern* pattern = lookup(name);
-        if(pattern)
-        {
-            return pattern->pythonBinding;
-        }
-        return false;
-    }
-
-    //===----------------------------------------------------------------------===//
-    // Utility Methods
-    //===----------------------------------------------------------------------===//
-
-    void IntrinsicLibrary::printStats() const
-    {
-        std::cout << "=== IntrinsicLibrary Statistics ===\n";
-        std::cout << "Source: " << sourcePath_ << "\n";
-        std::cout << "Total Intrinsics: " << intrinsics_.size() << "\n\n";
-
-        // Count Python bindings
-        size_t pythonBindingCount = 0;
-        for(const auto& pair : intrinsics_)
-        {
-            if(pair.second.pythonBinding)
-            {
-                pythonBindingCount++;
+        if (pattern) {
+            std::cout << "  " << name << "\n";
+            std::cout << "    Arguments: " << pattern->arguments.size();
+            std::cout << " (";
+            for (size_t i = 0; i < pattern->arguments.size(); ++i) {
+                if (i > 0) std::cout << ", ";
+                std::cout << pattern->arguments[i].name;
             }
-        }
-        std::cout << "Python Bindings: " << pythonBindingCount << "\n\n";
-
-        // List all intrinsics with details
-        auto names = getIntrinsicNames();
-        std::cout << "Intrinsics:\n";
-        for(const auto& name : names)
-        {
-            const Pattern* pattern = lookup(name);
-            if(pattern)
-            {
-                std::cout << "  " << name << "\n";
-                std::cout << "    Arguments: " << pattern->arguments.size();
-                std::cout << " (";
-                for(size_t i = 0; i < pattern->arguments.size(); ++i)
-                {
-                    if(i > 0)
-                        std::cout << ", ";
-                    std::cout << pattern->arguments[i].name;
-                }
-                std::cout << ")\n";
-                std::cout << "    Instructions: " << pattern->body.size() << "\n";
-                if(!pattern->comment.empty())
-                {
-                    std::cout << "    Comment: " << pattern->comment << "\n";
-                }
-                std::cout << "    Python Binding: " << (pattern->pythonBinding ? "yes" : "no")
-                          << "\n";
+            std::cout << ")\n";
+            std::cout << "    Instructions: " << pattern->body.size() << "\n";
+            if (!pattern->comment.empty()) {
+                std::cout << "    Comment: " << pattern->comment << "\n";
             }
+            std::cout << "    Python Binding: " << (pattern->pythonBinding ? "yes" : "no") << "\n";
         }
-
-        std::cout << "\n=== End Statistics ===\n";
     }
 
-} // namespace stinkytofu
+    std::cout << "\n=== End Statistics ===\n";
+}
+
+}  // namespace stinkytofu

@@ -21,54 +21,49 @@
  *
  * ************************************************************************ */
 
-#include "stinkytofu/transforms/logical/LogicalPeepholePass.hpp"
-#include "TestHelpers.hpp"
-#include "stinkytofu/ir/logical/LogicalInstructions.hpp"
-#include "stinkytofu/core/PassManager.hpp"
 #include <gtest/gtest.h>
+
+#include "TestHelpers.hpp"
+#include "stinkytofu/core/PassManager.hpp"
+#include "stinkytofu/ir/logical/LogicalInstructions.hpp"
+#include "stinkytofu/transforms/logical/LogicalPeepholePass.hpp"
 
 using namespace stinkytofu;
 using namespace stinkytofu::test;
 
-class LogicalPeepholePassTest : public ::testing::Test
-{
-protected:
-    void SetUp() override
-    {
+class LogicalPeepholePassTest : public ::testing::Test {
+   protected:
+    void SetUp() override {
         passCtx = std::make_unique<PassContext>();
-        arch    = GfxArchID::Gfx942;
+        arch = GfxArchID::Gfx942;
 
         bb = func.createBasicBlock("entry");
     }
 
-    void TearDown() override
-    {
+    void TearDown() override {
         passCtx.reset();
     }
 
-    void runPass()
-    {
+    void runPass() {
         auto pass = createLogicalPeepholePass();
         pass->run(func, *passCtx);
     }
 
-    Function                    func{"kernel"};
+    Function func{"kernel"};
     std::unique_ptr<PassContext> passCtx;
-    BasicBlock*                  bb;
-    GfxArchID                    arch;
+    BasicBlock* bb;
+    GfxArchID arch;
 };
 
 // Test: Pass can be instantiated and run
-TEST_F(LogicalPeepholePassTest, PassInstantiation)
-{
+TEST_F(LogicalPeepholePassTest, PassInstantiation) {
     auto pass = createLogicalPeepholePass();
 
     EXPECT_STREQ(pass->getName(), "LogicalPeepholePass");
 }
 
 // Test: Pass runs successfully on empty module
-TEST_F(LogicalPeepholePassTest, EmptyModule)
-{
+TEST_F(LogicalPeepholePassTest, EmptyModule) {
     // Run pass on empty function - should not crash
     runPass();
 
@@ -77,8 +72,7 @@ TEST_F(LogicalPeepholePassTest, EmptyModule)
 }
 
 // Test: Pass runs successfully on module with simple instructions
-TEST_F(LogicalPeepholePassTest, SimpleInstructions)
-{
+TEST_F(LogicalPeepholePassTest, SimpleInstructions) {
     // Create instructions using factory functions (returns raw pointers)
     StinkyRegister v0 = vgpr(0);
     StinkyRegister v1 = vgpr(1);
@@ -88,8 +82,7 @@ TEST_F(LogicalPeepholePassTest, SimpleInstructions)
     bb->appendIR(static_cast<IRBase*>(VAddF32(v1, v0, v0, std::nullopt, std::nullopt, "")));
 
     // v2 = v_mul_f32(v1, 2.0)
-    bb->appendIR(
-        static_cast<IRBase*>(VMulF32(v2, v1, vgpr(2), std::nullopt, std::nullopt, "")));
+    bb->appendIR(static_cast<IRBase*>(VMulF32(v2, v1, vgpr(2), std::nullopt, std::nullopt, "")));
 
     // Run pass - should not crash
     runPass();
@@ -99,8 +92,7 @@ TEST_F(LogicalPeepholePassTest, SimpleInstructions)
 
     // Count instructions
     size_t count = 0;
-    for(auto& ir : *bb)
-    {
+    for (auto& ir : *bb) {
         (void)ir;
         count++;
     }
@@ -108,8 +100,7 @@ TEST_F(LogicalPeepholePassTest, SimpleInstructions)
 }
 
 // Test: Pass can be run multiple times
-TEST_F(LogicalPeepholePassTest, MultipleRuns)
-{
+TEST_F(LogicalPeepholePassTest, MultipleRuns) {
     StinkyRegister v0 = vgpr(0);
     StinkyRegister v1 = vgpr(1);
 
@@ -120,8 +111,7 @@ TEST_F(LogicalPeepholePassTest, MultipleRuns)
 
     // Count instructions after first run
     size_t count1 = 0;
-    for(auto& ir : *bb)
-    {
+    for (auto& ir : *bb) {
         (void)ir;
         count1++;
     }
@@ -130,8 +120,7 @@ TEST_F(LogicalPeepholePassTest, MultipleRuns)
 
     // Count instructions after second run - should be the same
     size_t count2 = 0;
-    for(auto& ir : *bb)
-    {
+    for (auto& ir : *bb) {
         (void)ir;
         count2++;
     }
@@ -140,25 +129,21 @@ TEST_F(LogicalPeepholePassTest, MultipleRuns)
 }
 
 // Test: Mul-Mul fusion pattern (when implemented)
-TEST_F(LogicalPeepholePassTest, MulMulFusion)
-{
+TEST_F(LogicalPeepholePassTest, MulMulFusion) {
     // Create a pattern that could be optimized: mul(mul(x, c1), c2) -> mul(x, c1*c2)
     StinkyRegister v0 = vgpr(0);
     StinkyRegister v1 = vgpr(1);
     StinkyRegister v2 = vgpr(2);
 
     // v1 = v_mul_f32(v0, 2.0)
-    bb->appendIR(
-        static_cast<IRBase*>(VMulF32(v1, v0, vgpr(10), std::nullopt, std::nullopt, "")));
+    bb->appendIR(static_cast<IRBase*>(VMulF32(v1, v0, vgpr(10), std::nullopt, std::nullopt, "")));
 
     // v2 = v_mul_f32(v1, 3.0)
-    bb->appendIR(
-        static_cast<IRBase*>(VMulF32(v2, v1, vgpr(11), std::nullopt, std::nullopt, "")));
+    bb->appendIR(static_cast<IRBase*>(VMulF32(v2, v1, vgpr(11), std::nullopt, std::nullopt, "")));
 
     // Verify we start with 2 instructions
     size_t countBefore = 0;
-    for(auto& ir : *bb)
-    {
+    for (auto& ir : *bb) {
         (void)ir;
         countBefore++;
     }
@@ -169,8 +154,7 @@ TEST_F(LogicalPeepholePassTest, MulMulFusion)
 
     // Verify instructions after pass
     size_t countAfter = 0;
-    for(auto& ir : *bb)
-    {
+    for (auto& ir : *bb) {
         (void)ir;
         countAfter++;
     }
@@ -183,8 +167,7 @@ TEST_F(LogicalPeepholePassTest, MulMulFusion)
 }
 
 // Test: Add+Mul -> FMA fusion pattern (when implemented)
-TEST_F(LogicalPeepholePassTest, AddFMAFusion)
-{
+TEST_F(LogicalPeepholePassTest, AddFMAFusion) {
     // Create a pattern that could be optimized: add(mul(a, b), c) -> fma(a, b, c)
     StinkyRegister v0 = vgpr(0);
     StinkyRegister v1 = vgpr(1);
@@ -199,8 +182,7 @@ TEST_F(LogicalPeepholePassTest, AddFMAFusion)
 
     // Verify we start with 2 instructions
     size_t countBefore = 0;
-    for(auto& ir : *bb)
-    {
+    for (auto& ir : *bb) {
         (void)ir;
         countBefore++;
     }
@@ -211,8 +193,7 @@ TEST_F(LogicalPeepholePassTest, AddFMAFusion)
 
     // Verify instructions after pass
     size_t countAfter = 0;
-    for(auto& ir : *bb)
-    {
+    for (auto& ir : *bb) {
         (void)ir;
         countAfter++;
     }

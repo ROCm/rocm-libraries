@@ -22,6 +22,7 @@
  * ************************************************************************ */
 
 #include <gtest/gtest.h>
+
 #include <vector>
 
 #include "stinkytofu/hardware/ArchHelper.hpp"
@@ -32,171 +33,130 @@
 
 using namespace stinkytofu;
 
-class WaitCntInsertionTest : public ::testing::Test
-{
-protected:
-    void SetUp() override
-    {
+class WaitCntInsertionTest : public ::testing::Test {
+   protected:
+    void SetUp() override {
         gemmConfig.arch[0] = 12;
         gemmConfig.arch[1] = 5;
         gemmConfig.arch[2] = 0;
     }
 
-    const std::array<int, 3>& getArch() const
-    {
+    const std::array<int, 3>& getArch() const {
         return gemmConfig.arch;
     }
 
-    Function* parseIR(const std::string& irString, StinkyIRConverter& converter)
-    {
+    Function* parseIR(const std::string& irString, StinkyIRConverter& converter) {
         auto* func = converter.convertToFunction(irString);
-        if(func)
-            func->setGemmTileConfig(gemmConfig);
+        if (func) func->setGemmTileConfig(gemmConfig);
         return func;
     }
 
-    void runInsertionPass(Function& func)
-    {
+    void runInsertionPass(Function& func) {
         PassContext passCtx;
         passCtx.setGemmTileConfig(gemmConfig);
         auto pass = stinkytofu::createStinkyWaitCntInsertionPass();
         pass->run(func, passCtx);
     }
 
-    struct WaitCntInfo
-    {
+    struct WaitCntInfo {
         StinkyInstruction* inst;
-        SWaitCntData*      waitData;
-        int                position;
+        SWaitCntData* waitData;
+        int position;
 
         WaitCntInfo(StinkyInstruction* i, SWaitCntData* w, int p)
-            : inst(i)
-            , waitData(w)
-            , position(p)
-        {
-        }
+            : inst(i), waitData(w), position(p) {}
     };
 
-    struct TensorWaitCntInfo
-    {
-        StinkyInstruction*  inst;
+    struct TensorWaitCntInfo {
+        StinkyInstruction* inst;
         SWaitTensorCntData* tensorWaitData;
-        int                 position;
+        int position;
 
         TensorWaitCntInfo(StinkyInstruction* i, SWaitTensorCntData* t, int p)
-            : inst(i)
-            , tensorWaitData(t)
-            , position(p)
-        {
-        }
+            : inst(i), tensorWaitData(t), position(p) {}
     };
 
-    int countWaitCnt(BasicBlock& bb)
-    {
+    int countWaitCnt(BasicBlock& bb) {
         int count = 0;
-        for(auto& irBase : bb)
-        {
-            if(static_cast<StinkyInstruction&>(irBase).getModifier<SWaitCntData>())
-                count++;
+        for (auto& irBase : bb) {
+            if (static_cast<StinkyInstruction&>(irBase).getModifier<SWaitCntData>()) count++;
         }
         return count;
     }
 
-    int countTensorWaitCnt(BasicBlock& bb)
-    {
+    int countTensorWaitCnt(BasicBlock& bb) {
         int count = 0;
-        for(auto& irBase : bb)
-        {
-            if(static_cast<StinkyInstruction&>(irBase).getModifier<SWaitTensorCntData>())
-                count++;
+        for (auto& irBase : bb) {
+            if (static_cast<StinkyInstruction&>(irBase).getModifier<SWaitTensorCntData>()) count++;
         }
         return count;
     }
 
-    std::vector<WaitCntInfo> getAllWaitCnts(BasicBlock& bb)
-    {
+    std::vector<WaitCntInfo> getAllWaitCnts(BasicBlock& bb) {
         std::vector<WaitCntInfo> waitcnts;
-        int                      position = 0;
-        for(auto& irBase : bb)
-        {
+        int position = 0;
+        for (auto& irBase : bb) {
             StinkyInstruction& inst = static_cast<StinkyInstruction&>(irBase);
-            if(SWaitCntData* wait = inst.getModifier<SWaitCntData>())
+            if (SWaitCntData* wait = inst.getModifier<SWaitCntData>())
                 waitcnts.emplace_back(&inst, wait, position);
             position++;
         }
         return waitcnts;
     }
 
-    std::vector<TensorWaitCntInfo> getAllTensorWaitCnts(BasicBlock& bb)
-    {
+    std::vector<TensorWaitCntInfo> getAllTensorWaitCnts(BasicBlock& bb) {
         std::vector<TensorWaitCntInfo> tensorWaitcnts;
-        int                            position = 0;
-        for(auto& irBase : bb)
-        {
+        int position = 0;
+        for (auto& irBase : bb) {
             StinkyInstruction& inst = static_cast<StinkyInstruction&>(irBase);
-            if(SWaitTensorCntData* tw = inst.getModifier<SWaitTensorCntData>())
+            if (SWaitTensorCntData* tw = inst.getModifier<SWaitTensorCntData>())
                 tensorWaitcnts.emplace_back(&inst, tw, position);
             position++;
         }
         return tensorWaitcnts;
     }
 
-    int getInstructionPosition(BasicBlock& bb, StinkyInstruction* target)
-    {
+    int getInstructionPosition(BasicBlock& bb, StinkyInstruction* target) {
         int position = 0;
-        for(auto& irBase : bb)
-        {
-            if(&static_cast<StinkyInstruction&>(irBase) == target)
-                return position;
+        for (auto& irBase : bb) {
+            if (&static_cast<StinkyInstruction&>(irBase) == target) return position;
             position++;
         }
         return -1;
     }
 
     template <typename OpcodeT>
-    StinkyInstruction* findNthInst(BasicBlock& bb, OpcodeT opcode, int n = 0)
-    {
+    StinkyInstruction* findNthInst(BasicBlock& bb, OpcodeT opcode, int n = 0) {
         int count = 0;
-        for(auto& irBase : bb)
-        {
+        for (auto& irBase : bb) {
             auto& inst = static_cast<StinkyInstruction&>(irBase);
-            if(inst.getUnifiedOpcode() == opcode)
-            {
-                if(count == n)
-                    return &inst;
+            if (inst.getUnifiedOpcode() == opcode) {
+                if (count == n) return &inst;
                 count++;
             }
         }
         return nullptr;
     }
 
-    SWaitCntData* findWaitCntBefore(BasicBlock& bb, StinkyInstruction* target)
-    {
+    SWaitCntData* findWaitCntBefore(BasicBlock& bb, StinkyInstruction* target) {
         BasicBlock::iterator targetIt = bb.end();
-        for(auto it = bb.begin(); it != bb.end(); ++it)
-        {
-            if(&static_cast<StinkyInstruction&>(*it) == target)
-            {
+        for (auto it = bb.begin(); it != bb.end(); ++it) {
+            if (&static_cast<StinkyInstruction&>(*it) == target) {
                 targetIt = it;
                 break;
             }
         }
 
-        if(targetIt == bb.end() || targetIt == bb.begin())
-            return nullptr;
+        if (targetIt == bb.end() || targetIt == bb.begin()) return nullptr;
 
         auto prevIt = targetIt;
         --prevIt;
 
-        while(true)
-        {
+        while (true) {
             StinkyInstruction& prevInst = static_cast<StinkyInstruction&>(*prevIt);
-            if(SWaitCntData* wait = prevInst.getModifier<SWaitCntData>())
-                return wait;
-            if(prevInst.getModifier<SWaitTensorCntData>())
-            {
-                if(prevIt == bb.begin())
-                    return nullptr;
+            if (SWaitCntData* wait = prevInst.getModifier<SWaitCntData>()) return wait;
+            if (prevInst.getModifier<SWaitTensorCntData>()) {
+                if (prevIt == bb.begin()) return nullptr;
                 --prevIt;
                 continue;
             }
@@ -204,33 +164,25 @@ protected:
         }
     }
 
-    SWaitTensorCntData* findTensorWaitCntBefore(BasicBlock& bb, StinkyInstruction* target)
-    {
+    SWaitTensorCntData* findTensorWaitCntBefore(BasicBlock& bb, StinkyInstruction* target) {
         BasicBlock::iterator targetIt = bb.end();
-        for(auto it = bb.begin(); it != bb.end(); ++it)
-        {
-            if(&static_cast<StinkyInstruction&>(*it) == target)
-            {
+        for (auto it = bb.begin(); it != bb.end(); ++it) {
+            if (&static_cast<StinkyInstruction&>(*it) == target) {
                 targetIt = it;
                 break;
             }
         }
 
-        if(targetIt == bb.end() || targetIt == bb.begin())
-            return nullptr;
+        if (targetIt == bb.end() || targetIt == bb.begin()) return nullptr;
 
         auto prevIt = targetIt;
         --prevIt;
 
-        while(true)
-        {
+        while (true) {
             StinkyInstruction& prevInst = static_cast<StinkyInstruction&>(*prevIt);
-            if(SWaitTensorCntData* tw = prevInst.getModifier<SWaitTensorCntData>())
-                return tw;
-            if(prevInst.getModifier<SWaitCntData>())
-            {
-                if(prevIt == bb.begin())
-                    return nullptr;
+            if (SWaitTensorCntData* tw = prevInst.getModifier<SWaitTensorCntData>()) return tw;
+            if (prevInst.getModifier<SWaitCntData>()) {
+                if (prevIt == bb.begin()) return nullptr;
                 --prevIt;
                 continue;
             }
@@ -238,8 +190,7 @@ protected:
         }
     }
 
-    static bool hasLoopBackEdge(const BasicBlock* bb)
-    {
+    static bool hasLoopBackEdge(const BasicBlock* bb) {
         const auto& successors = bb->getSuccessors();
         return std::find(successors.begin(), successors.end(), bb) != successors.end();
     }
@@ -264,8 +215,7 @@ protected:
  *
  * The ds_load result v[0:1] is never consumed, so the pass inserts no waitcnt.
  */
-TEST_F(WaitCntInsertionTest, BarrierWithDSRead)
-{
+TEST_F(WaitCntInsertionTest, BarrierWithDSRead) {
     std::string irString = R"(
 st.func @test_barrier_ds_read() {
 ^entry:
@@ -275,7 +225,7 @@ st.func @test_barrier_ds_read() {
 )";
 
     StinkyIRConverter converter(getArch());
-    auto*             func = parseIR(irString, converter);
+    auto* func = parseIR(irString, converter);
     ASSERT_NE(func, nullptr);
 
     runInsertionPass(*func);
@@ -296,8 +246,7 @@ st.func @test_barrier_ds_read() {
  * Neither the tensor_load nor the ds_load results are consumed by any
  * subsequent instruction, so no waitcnts are inserted.
  */
-TEST_F(WaitCntInsertionTest, BarrierWithDSReadTensorLoad)
-{
+TEST_F(WaitCntInsertionTest, BarrierWithDSReadTensorLoad) {
     std::string irString = R"(
 st.func @test_barrier_tensor_ds() {
 ^entry:
@@ -308,7 +257,7 @@ st.func @test_barrier_tensor_ds() {
 )";
 
     StinkyIRConverter converter(getArch());
-    auto*             func = parseIR(irString, converter);
+    auto* func = parseIR(irString, converter);
     ASSERT_NE(func, nullptr);
 
     runInsertionPass(*func);
@@ -343,8 +292,7 @@ st.func @test_barrier_tensor_ds() {
  *   s_wait_dscnt 2 before wmma1 (wait for loads 0,1; leave loads 2,3)
  *   s_wait_dscnt 0 before wmma2 (wait for loads 2,3)
  */
-TEST_F(WaitCntInsertionTest, DSReadBeforeWMMA)
-{
+TEST_F(WaitCntInsertionTest, DSReadBeforeWMMA) {
     std::string irString = R"(
 st.func @test_ds_read_wmma() {
 ^entry:
@@ -360,13 +308,13 @@ st.func @test_ds_read_wmma() {
 )";
 
     StinkyIRConverter converter(getArch());
-    auto*             func = parseIR(irString, converter);
+    auto* func = parseIR(irString, converter);
     ASSERT_NE(func, nullptr);
 
     runInsertionPass(*func);
 
-    BasicBlock& entryBB  = *func->begin();
-    auto        waitcnts = getAllWaitCnts(entryBB);
+    BasicBlock& entryBB = *func->begin();
+    auto waitcnts = getAllWaitCnts(entryBB);
 
     ASSERT_EQ(waitcnts.size(), 2) << "Should have exactly 2 waitcnts (before each WMMA)";
 
@@ -427,8 +375,7 @@ st.func @test_ds_read_wmma() {
  *   s_wait_dscnt 4 before wmma2 (wait for loads 4-7, leave loads 8-11)
  *   No waitcnt before barriers (no MemTokenData, no def-use dependency)
  */
-TEST_F(WaitCntInsertionTest, CompleteTest)
-{
+TEST_F(WaitCntInsertionTest, CompleteTest) {
     std::string irString = R"(
 st.func @test_complete() {
 ^entry:
@@ -453,17 +400,17 @@ st.func @test_complete() {
 )";
 
     StinkyIRConverter converter(getArch());
-    auto*             func = parseIR(irString, converter);
+    auto* func = parseIR(irString, converter);
     ASSERT_NE(func, nullptr);
 
     runInsertionPass(*func);
 
-    BasicBlock& entryBB        = *func->begin();
-    auto        waitcnts       = getAllWaitCnts(entryBB);
-    auto        tensorWaitcnts = getAllTensorWaitCnts(entryBB);
+    BasicBlock& entryBB = *func->begin();
+    auto waitcnts = getAllWaitCnts(entryBB);
+    auto tensorWaitcnts = getAllTensorWaitCnts(entryBB);
 
-    StinkyInstruction* wmma1    = findNthInst(entryBB, GFX::v_wmma_f32_16x16x32_bf16, 0);
-    StinkyInstruction* wmma2    = findNthInst(entryBB, GFX::v_wmma_f32_16x16x32_bf16, 1);
+    StinkyInstruction* wmma1 = findNthInst(entryBB, GFX::v_wmma_f32_16x16x32_bf16, 0);
+    StinkyInstruction* wmma2 = findNthInst(entryBB, GFX::v_wmma_f32_16x16x32_bf16, 1);
     StinkyInstruction* barrier1 = findNthInst(entryBB, GFX::s_barrier, 0);
     StinkyInstruction* barrier2 = findNthInst(entryBB, GFX::s_barrier, 1);
     ASSERT_NE(wmma1, nullptr);
@@ -471,8 +418,8 @@ st.func @test_complete() {
     ASSERT_NE(barrier1, nullptr);
     ASSERT_NE(barrier2, nullptr);
 
-    int wmma1Pos    = getInstructionPosition(entryBB, wmma1);
-    int wmma2Pos    = getInstructionPosition(entryBB, wmma2);
+    int wmma1Pos = getInstructionPosition(entryBB, wmma1);
+    int wmma2Pos = getInstructionPosition(entryBB, wmma2);
     int barrier1Pos = getInstructionPosition(entryBB, barrier1);
     int barrier2Pos = getInstructionPosition(entryBB, barrier2);
 
@@ -494,8 +441,7 @@ st.func @test_complete() {
     EXPECT_EQ(waitcnts[1].waitData->dscnt, -1);
     EXPECT_EQ(waitcnts[1].waitData->kmcnt, -1);
 
-    for(const auto& wait : waitcnts)
-    {
+    for (const auto& wait : waitcnts) {
         EXPECT_NE(wait.position, barrier1Pos - 1)
             << "Should not have waitcnt right before barrier1";
         EXPECT_NE(wait.position, barrier2Pos - 1)
@@ -524,8 +470,7 @@ st.func @test_complete() {
  * Since this is NOT a loop, there is no dependency from a previous iteration.
  * The loads come after the uses, so no waitcnt is needed.
  */
-TEST_F(WaitCntInsertionTest, BasicBlockStateTracking_NoLoop)
-{
+TEST_F(WaitCntInsertionTest, BasicBlockStateTracking_NoLoop) {
     std::string irString = R"(
 st.func @test_no_loop() {
 ^entry:
@@ -539,7 +484,7 @@ st.func @test_no_loop() {
 )";
 
     StinkyIRConverter converter(getArch());
-    auto*             func = parseIR(irString, converter);
+    auto* func = parseIR(irString, converter);
     ASSERT_NE(func, nullptr);
 
     BasicBlock& entryBB = *func->begin();
@@ -573,8 +518,7 @@ st.func @test_no_loop() {
  *   s_wait_dscnt 2 before first v_add (wait for v0,v2; leave v1,v3)
  *   s_wait_dscnt 0 before second v_add (wait for v1,v3)
  */
-TEST_F(WaitCntInsertionTest, BasicBlockStateTracking_LoopOnly)
-{
+TEST_F(WaitCntInsertionTest, BasicBlockStateTracking_LoopOnly) {
     std::string irString = R"(
 st.func @test_loop_only() {
 ^entry:
@@ -591,7 +535,7 @@ st.func @test_loop_only() {
 )";
 
     StinkyIRConverter converter(getArch());
-    auto*             func = parseIR(irString, converter);
+    auto* func = parseIR(irString, converter);
     ASSERT_NE(func, nullptr);
 
     BasicBlock& loopBlock = *std::next(func->begin());
@@ -610,10 +554,8 @@ st.func @test_loop_only() {
     int fmac2Pos = getInstructionPosition(loopBlock, fmac2);
 
     SWaitCntData* waitBeforeFmac1 = nullptr;
-    for(const auto& wait : waitcnts)
-    {
-        if(wait.position < fmac1Pos && wait.position >= fmac1Pos - 2)
-        {
+    for (const auto& wait : waitcnts) {
+        if (wait.position < fmac1Pos && wait.position >= fmac1Pos - 2) {
             waitBeforeFmac1 = wait.waitData;
             break;
         }
@@ -624,29 +566,24 @@ st.func @test_loop_only() {
     EXPECT_EQ(waitBeforeFmac1->dlcnt, 2)
         << "Should wait for v0,v2 from previous iteration (leave v1,v3) -> dlcnt=2";
 
-    SWaitCntData* waitBeforeFmac2    = nullptr;
-    int           waitBeforeFmac1Pos = -1;
-    for(const auto& wait : waitcnts)
-    {
-        if(wait.waitData == waitBeforeFmac1)
-        {
+    SWaitCntData* waitBeforeFmac2 = nullptr;
+    int waitBeforeFmac1Pos = -1;
+    for (const auto& wait : waitcnts) {
+        if (wait.waitData == waitBeforeFmac1) {
             waitBeforeFmac1Pos = wait.position;
             break;
         }
     }
 
-    for(const auto& wait : waitcnts)
-    {
-        if(wait.position < fmac2Pos && wait.position >= fmac2Pos - 2
-           && wait.position != waitBeforeFmac1Pos)
-        {
+    for (const auto& wait : waitcnts) {
+        if (wait.position < fmac2Pos && wait.position >= fmac2Pos - 2 &&
+            wait.position != waitBeforeFmac1Pos) {
             waitBeforeFmac2 = wait.waitData;
             break;
         }
     }
 
-    if(waitBeforeFmac2)
-    {
+    if (waitBeforeFmac2) {
         EXPECT_EQ(waitBeforeFmac2->dlcnt, 0)
             << "Should wait for v1,v3 (all remaining loads) -> dlcnt=0";
     }
@@ -676,8 +613,7 @@ st.func @test_loop_only() {
  *   s_wait_dscnt 1 before first v_add (leave v3 outstanding) -> dlcnt=1
  *   s_wait_dscnt 0 before second v_add (wait for v3) -> dlcnt=0
  */
-TEST_F(WaitCntInsertionTest, BasicBlockStateTracking_TwoBlockChain)
-{
+TEST_F(WaitCntInsertionTest, BasicBlockStateTracking_TwoBlockChain) {
     std::string irString = R"(
 st.func @test_two_block_chain() {
 ^entry:
@@ -698,10 +634,10 @@ st.func @test_two_block_chain() {
 )";
 
     StinkyIRConverter converter(getArch());
-    auto*             func = parseIR(irString, converter);
+    auto* func = parseIR(irString, converter);
     ASSERT_NE(func, nullptr);
 
-    BasicBlock& entryBB   = *func->begin();
+    BasicBlock& entryBB = *func->begin();
     BasicBlock& loopBlock = *std::next(func->begin());
 
     EXPECT_FALSE(hasLoopBackEdge(&entryBB)) << "Entry should not have loop back-edge";
@@ -720,10 +656,8 @@ st.func @test_two_block_chain() {
     int fmac2Pos = getInstructionPosition(loopBlock, fmac2);
 
     SWaitCntData* waitBeforeFmac1 = nullptr;
-    for(const auto& wait : waitcnts)
-    {
-        if(wait.position < fmac1Pos && wait.position >= fmac1Pos - 2)
-        {
+    for (const auto& wait : waitcnts) {
+        if (wait.position < fmac1Pos && wait.position >= fmac1Pos - 2) {
             waitBeforeFmac1 = wait.waitData;
             break;
         }
@@ -734,22 +668,18 @@ st.func @test_two_block_chain() {
     EXPECT_EQ(waitBeforeFmac1->dlcnt, 1)
         << "Should wait for v0,v1,v2 from entry (leave v3) -> dlcnt=1";
 
-    SWaitCntData* waitBeforeFmac2    = nullptr;
-    int           waitBeforeFmac1Pos = -1;
-    for(const auto& wait : waitcnts)
-    {
-        if(wait.waitData == waitBeforeFmac1)
-        {
+    SWaitCntData* waitBeforeFmac2 = nullptr;
+    int waitBeforeFmac1Pos = -1;
+    for (const auto& wait : waitcnts) {
+        if (wait.waitData == waitBeforeFmac1) {
             waitBeforeFmac1Pos = wait.position;
             break;
         }
     }
 
-    for(const auto& wait : waitcnts)
-    {
-        if(wait.position < fmac2Pos && wait.position >= fmac2Pos - 2
-           && wait.position != waitBeforeFmac1Pos)
-        {
+    for (const auto& wait : waitcnts) {
+        if (wait.position < fmac2Pos && wait.position >= fmac2Pos - 2 &&
+            wait.position != waitBeforeFmac1Pos) {
             waitBeforeFmac2 = wait.waitData;
             break;
         }
@@ -784,8 +714,7 @@ st.func @test_two_block_chain() {
  *   s_wait_dscnt 1 before first v_add -> dlcnt=1
  *   s_wait_dscnt 0 before second v_add -> dlcnt=0
  */
-TEST_F(WaitCntInsertionTest, BasicBlockStateTracking_TwoBlockChain2)
-{
+TEST_F(WaitCntInsertionTest, BasicBlockStateTracking_TwoBlockChain2) {
     std::string irString = R"(
 st.func @test_two_block_chain2() {
 ^entry:
@@ -806,10 +735,10 @@ st.func @test_two_block_chain2() {
 )";
 
     StinkyIRConverter converter(getArch());
-    auto*             func = parseIR(irString, converter);
+    auto* func = parseIR(irString, converter);
     ASSERT_NE(func, nullptr);
 
-    BasicBlock& entryBB   = *func->begin();
+    BasicBlock& entryBB = *func->begin();
     BasicBlock& loopBlock = *std::next(func->begin());
 
     EXPECT_FALSE(hasLoopBackEdge(&entryBB)) << "Entry should not have loop back-edge";
@@ -828,10 +757,8 @@ st.func @test_two_block_chain2() {
     int fmac2Pos = getInstructionPosition(loopBlock, fmac2);
 
     SWaitCntData* waitBeforeFmac1 = nullptr;
-    for(const auto& wait : waitcnts)
-    {
-        if(wait.position < fmac1Pos && wait.position >= fmac1Pos - 2)
-        {
+    for (const auto& wait : waitcnts) {
+        if (wait.position < fmac1Pos && wait.position >= fmac1Pos - 2) {
             waitBeforeFmac1 = wait.waitData;
             break;
         }
@@ -842,22 +769,18 @@ st.func @test_two_block_chain2() {
     EXPECT_EQ(waitBeforeFmac1->dlcnt, 1)
         << "Should wait for v0,v1,v2 from itself (leave v3) -> dlcnt=1";
 
-    SWaitCntData* waitBeforeFmac2    = nullptr;
-    int           waitBeforeFmac1Pos = -1;
-    for(const auto& wait : waitcnts)
-    {
-        if(wait.waitData == waitBeforeFmac1)
-        {
+    SWaitCntData* waitBeforeFmac2 = nullptr;
+    int waitBeforeFmac1Pos = -1;
+    for (const auto& wait : waitcnts) {
+        if (wait.waitData == waitBeforeFmac1) {
             waitBeforeFmac1Pos = wait.position;
             break;
         }
     }
 
-    for(const auto& wait : waitcnts)
-    {
-        if(wait.position < fmac2Pos && wait.position >= fmac2Pos - 2
-           && wait.position != waitBeforeFmac1Pos)
-        {
+    for (const auto& wait : waitcnts) {
+        if (wait.position < fmac2Pos && wait.position >= fmac2Pos - 2 &&
+            wait.position != waitBeforeFmac1Pos) {
             waitBeforeFmac2 = wait.waitData;
             break;
         }
@@ -882,8 +805,7 @@ st.func @test_two_block_chain2() {
  * - Path 2 (b2): [v2, v3, v4] -> fmac uses v0, v1 (not present) -> no wait needed
  * - Result: min(0, IGNORE) = 0 -> Optimal for path 1, safe for path 2
  */
-TEST_F(WaitCntInsertionTest, BasicBlockStateTracking_MultiPredecessorMerge)
-{
+TEST_F(WaitCntInsertionTest, BasicBlockStateTracking_MultiPredecessorMerge) {
     std::string irString = R"(
 st.func @test_multi_pred() {
 ^entry:
@@ -903,13 +825,13 @@ st.func @test_multi_pred() {
 )";
 
     StinkyIRConverter converter(getArch());
-    auto*             func = parseIR(irString, converter);
+    auto* func = parseIR(irString, converter);
     ASSERT_NE(func, nullptr);
 
     runInsertionPass(*func);
 
     auto bbIt = func->begin();
-    std::advance(bbIt, 3); // skip entry, b1, b2 -> b3
+    std::advance(bbIt, 3);  // skip entry, b1, b2 -> b3
     BasicBlock& block3 = *bbIt;
 
     auto waitcnts = getAllWaitCnts(block3);
@@ -920,10 +842,8 @@ st.func @test_multi_pred() {
     int fmacPos = getInstructionPosition(block3, fmac);
 
     SWaitCntData* waitBeforeFmac = nullptr;
-    for(const auto& wait : waitcnts)
-    {
-        if(wait.position < fmacPos && wait.position >= fmacPos - 2)
-        {
+    for (const auto& wait : waitcnts) {
+        if (wait.position < fmacPos && wait.position >= fmacPos - 2) {
             waitBeforeFmac = wait.waitData;
             break;
         }
@@ -955,8 +875,7 @@ st.func @test_multi_pred() {
  * - Path via b1: v0, v1 still outstanding -> needs wait
  * - Expected: dlcnt=1
  */
-TEST_F(WaitCntInsertionTest, BasicBlockStateTracking_MultiPredecessorMerge2)
-{
+TEST_F(WaitCntInsertionTest, BasicBlockStateTracking_MultiPredecessorMerge2) {
     std::string irString = R"(
 st.func @test_multi_pred2() {
 ^entry:
@@ -980,7 +899,7 @@ st.func @test_multi_pred2() {
 )";
 
     StinkyIRConverter converter(getArch());
-    auto*             func = parseIR(irString, converter);
+    auto* func = parseIR(irString, converter);
     ASSERT_NE(func, nullptr);
 
     runInsertionPass(*func);
@@ -1003,10 +922,8 @@ st.func @test_multi_pred2() {
     int fmacPos = getInstructionPosition(block3, fmac);
 
     SWaitCntData* waitBeforeFmac = nullptr;
-    for(const auto& wait : waitcnts3)
-    {
-        if(wait.position < fmacPos && wait.position >= fmacPos - 2)
-        {
+    for (const auto& wait : waitcnts3) {
+        if (wait.position < fmacPos && wait.position >= fmacPos - 2) {
             waitBeforeFmac = wait.waitData;
             break;
         }
@@ -1026,10 +943,8 @@ st.func @test_multi_pred2() {
     int fmac2Pos = getInstructionPosition(block4, fmac2);
 
     SWaitCntData* waitBeforeFmac2 = nullptr;
-    for(const auto& wait : waitcnts4)
-    {
-        if(wait.position < fmac2Pos && wait.position >= fmac2Pos - 2)
-        {
+    for (const auto& wait : waitcnts4) {
+        if (wait.position < fmac2Pos && wait.position >= fmac2Pos - 2) {
             waitBeforeFmac2 = wait.waitData;
             break;
         }

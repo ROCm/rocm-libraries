@@ -101,7 +101,7 @@ gtest_discover_tests(unit_tests
 # =============================================================================
 # All Tests Target (convenience target to build all test executables)
 # =============================================================================
-add_custom_target(tests)
+add_custom_target(tests COMMENT "Build all test executables")
 add_dependencies(tests unit_tests)
 
 # Note: Future test executables can be added here, e.g.:

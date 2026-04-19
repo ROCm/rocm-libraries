@@ -22,27 +22,25 @@
  * ************************************************************************ */
 #pragma once
 
-#include "stinkytofu/core/PassInstrumentation.hpp"
-
 #include <memory>
 
-namespace stinkytofu
-{
-    class PassManagerDebugConfig;
+#include "stinkytofu/core/PassInstrumentation.hpp"
 
-    /// Print IR before/after passes using PassManagerDebugConfig settings.
-    class DebugPrintInstrumentation : public PassInstrumentation
-    {
-    public:
-        explicit DebugPrintInstrumentation(std::unique_ptr<PassManagerDebugConfig> cfg);
-        ~DebugPrintInstrumentation() override;
+namespace stinkytofu {
+class PassManagerDebugConfig;
 
-        void runBegin(Function& F, PassContext& ctx) override;
-        void beforePass(const std::string& passName, Function& F, PassContext& ctx) override;
-        void afterPass(const std::string& passName, Function& F, PassContext& ctx) override;
+/// Print IR before/after passes using PassManagerDebugConfig settings.
+class DebugPrintInstrumentation : public PassInstrumentation {
+   public:
+    explicit DebugPrintInstrumentation(std::unique_ptr<PassManagerDebugConfig> cfg);
+    ~DebugPrintInstrumentation() override;
 
-    private:
-        std::unique_ptr<PassManagerDebugConfig> dbgCfg;
-    };
+    void runBegin(Function& F, PassContext& ctx) override;
+    void beforePass(const std::string& passName, Function& F, PassContext& ctx) override;
+    void afterPass(const std::string& passName, Function& F, PassContext& ctx) override;
 
-} // namespace stinkytofu
+   private:
+    std::unique_ptr<PassManagerDebugConfig> dbgCfg;
+};
+
+}  // namespace stinkytofu

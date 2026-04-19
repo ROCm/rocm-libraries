@@ -24,51 +24,50 @@
 
 #include <memory>
 
-namespace stinkytofu
-{
-    class Pass;
+namespace stinkytofu {
+class Pass;
 
-    /// Creates a redundant mov elimination pass that removes duplicate mov-type
-    /// instructions within basic blocks.
-    ///
-    /// This pass finds mov-type instructions (v_mov_b32, s_mov_b32, etc.) that are
-    /// identical to previous instructions in the same basic block and removes them.
-    ///
-    /// Key features:
-    /// - Identifies mov instructions with identical opcodes and operands
-    /// - Removes redundant mov instructions
-    /// - Works within basic blocks only (no CFG analysis)
-    /// - Easy to extend to other instruction types
-    ///
-    /// Example:
-    /// ```
-    /// Before Redundant Mov Elimination:
-    ///   v_mov_b32 v0, 0x2222       // First assignment
-    ///   v_add_f32 v1, v0, 2
-    ///   v_mov_b32 v0, 0x2222       // Duplicate! Same instruction
-    ///   v_add_f32 v2, v0, 3
-    ///
-    /// After Redundant Mov Elimination:
-    ///   v_mov_b32 v0, 0x2222       // Original kept
-    ///   v_add_f32 v1, v0, 2
-    ///   // v_mov_b32 removed (redundant)
-    ///   v_add_f32 v2, v0, 3
-    /// ```
-    ///
-    /// Safety:
-    /// - Only processes eligible instruction types (configurable)
-    /// - Only operates within basic blocks
-    /// - Preserves all control flow and side-effect instructions
-    ///
-    /// Usage:
-    /// ```cpp
-    /// PassManager pm;
-    /// pm.addPass(createRedundantMovEliminationPass());
-    /// pm.run();
-    /// ```
-    ///
-    /// Note: This pass is designed to be simple and conservative. It can be extended
-    /// to handle more instruction types by modifying isEligibleForRedundantMovElimination().
-    std::unique_ptr<Pass> createRedundantMovEliminationPass();
+/// Creates a redundant mov elimination pass that removes duplicate mov-type
+/// instructions within basic blocks.
+///
+/// This pass finds mov-type instructions (v_mov_b32, s_mov_b32, etc.) that are
+/// identical to previous instructions in the same basic block and removes them.
+///
+/// Key features:
+/// - Identifies mov instructions with identical opcodes and operands
+/// - Removes redundant mov instructions
+/// - Works within basic blocks only (no CFG analysis)
+/// - Easy to extend to other instruction types
+///
+/// Example:
+/// ```
+/// Before Redundant Mov Elimination:
+///   v_mov_b32 v0, 0x2222       // First assignment
+///   v_add_f32 v1, v0, 2
+///   v_mov_b32 v0, 0x2222       // Duplicate! Same instruction
+///   v_add_f32 v2, v0, 3
+///
+/// After Redundant Mov Elimination:
+///   v_mov_b32 v0, 0x2222       // Original kept
+///   v_add_f32 v1, v0, 2
+///   // v_mov_b32 removed (redundant)
+///   v_add_f32 v2, v0, 3
+/// ```
+///
+/// Safety:
+/// - Only processes eligible instruction types (configurable)
+/// - Only operates within basic blocks
+/// - Preserves all control flow and side-effect instructions
+///
+/// Usage:
+/// ```cpp
+/// PassManager pm;
+/// pm.addPass(createRedundantMovEliminationPass());
+/// pm.run();
+/// ```
+///
+/// Note: This pass is designed to be simple and conservative. It can be extended
+/// to handle more instruction types by modifying isEligibleForRedundantMovElimination().
+std::unique_ptr<Pass> createRedundantMovEliminationPass();
 
-} // namespace stinkytofu
+}  // namespace stinkytofu

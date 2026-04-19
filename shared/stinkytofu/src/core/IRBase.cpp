@@ -17,36 +17,31 @@
  * THE SOFTWARE.
  *
  * ************************************************************************ */
+#include "stinkytofu/core/IRBase.hpp"
+
 #include <iostream>
 
 #include "stinkytofu/core/BasicBlock.hpp"
-#include "stinkytofu/core/IRBase.hpp"
 
-namespace stinkytofu
-{
-    void IRBase::dump()
-    {
-        dump(std::cerr);
-    }
-
-    const BasicBlock* IRBase::getParentBlock() const
-    {
-        return getParent();
-    }
-
-    void IRBase::remove()
-    {
-        BasicBlock* p = getParent();
-        if(p)
-            p->removeIR(this);
-    }
-
-    void IRBase::erase()
-    {
-        BasicBlock* p = getParent();
-        if(p)
-            p->eraseIR(IRList::iterator(this));
-        else
-            delete this;
-    }
+namespace stinkytofu {
+void IRBase::dump() {
+    dump(std::cerr);
 }
+
+const BasicBlock* IRBase::getParentBlock() const {
+    return getParent();
+}
+
+void IRBase::remove() {
+    BasicBlock* p = getParent();
+    if (p) p->removeIR(this);
+}
+
+void IRBase::erase() {
+    BasicBlock* p = getParent();
+    if (p)
+        p->eraseIR(IRList::iterator(this));
+    else
+        delete this;
+}
+}  // namespace stinkytofu

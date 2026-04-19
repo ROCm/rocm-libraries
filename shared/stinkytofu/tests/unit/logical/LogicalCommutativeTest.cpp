@@ -30,9 +30,8 @@ using namespace stinkytofu;
 /**
  * @brief Test that commutative operations are properly marked
  */
-TEST(CommutativeTest, VectorArithmeticCommutative)
-{
-    StinkyRegister dst  = StinkyRegister::Virtual(0);
+TEST(CommutativeTest, VectorArithmeticCommutative) {
+    StinkyRegister dst = StinkyRegister::Virtual(0);
     StinkyRegister src0 = StinkyRegister::Virtual(1);
     StinkyRegister src1 = StinkyRegister::Virtual(2);
 
@@ -78,9 +77,8 @@ TEST(CommutativeTest, VectorArithmeticCommutative)
 /**
  * @brief Test that min/max operations are properly marked as commutative
  */
-TEST(CommutativeTest, VectorMinMaxCommutative)
-{
-    StinkyRegister dst  = StinkyRegister::Virtual(0);
+TEST(CommutativeTest, VectorMinMaxCommutative) {
+    StinkyRegister dst = StinkyRegister::Virtual(0);
     StinkyRegister src0 = StinkyRegister::Virtual(1);
     StinkyRegister src1 = StinkyRegister::Virtual(2);
 
@@ -114,9 +112,8 @@ TEST(CommutativeTest, VectorMinMaxCommutative)
 /**
  * @brief Test that bitwise operations are properly marked as commutative
  */
-TEST(CommutativeTest, VectorBitwiseCommutative)
-{
-    StinkyRegister dst  = StinkyRegister::Virtual(0);
+TEST(CommutativeTest, VectorBitwiseCommutative) {
+    StinkyRegister dst = StinkyRegister::Virtual(0);
     StinkyRegister src0 = StinkyRegister::Virtual(1);
     StinkyRegister src1 = StinkyRegister::Virtual(2);
 
@@ -140,9 +137,8 @@ TEST(CommutativeTest, VectorBitwiseCommutative)
 /**
  * @brief Test that scalar operations are properly marked as commutative
  */
-TEST(CommutativeTest, ScalarCommutative)
-{
-    StinkyRegister dst  = StinkyRegister::VirtualSGPR(0);
+TEST(CommutativeTest, ScalarCommutative) {
+    StinkyRegister dst = StinkyRegister::VirtualSGPR(0);
     StinkyRegister src0 = StinkyRegister::VirtualSGPR(1);
     StinkyRegister src1 = StinkyRegister::VirtualSGPR(2);
 
@@ -194,9 +190,8 @@ TEST(CommutativeTest, ScalarCommutative)
 /**
  * @brief Test that non-commutative operations are NOT marked as commutative
  */
-TEST(CommutativeTest, NonCommutativeOperations)
-{
-    StinkyRegister dst  = StinkyRegister::Virtual(0);
+TEST(CommutativeTest, NonCommutativeOperations) {
+    StinkyRegister dst = StinkyRegister::Virtual(0);
     StinkyRegister src0 = StinkyRegister::Virtual(1);
     StinkyRegister src1 = StinkyRegister::Virtual(2);
 

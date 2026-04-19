@@ -22,61 +22,51 @@
  * ************************************************************************ */
 #include "stinkytofu/hardware/ArchHelper.hpp"
 
-#include "stinkytofu/Config/Config.h"
-
 #include <unordered_map>
 
-namespace
-{
+#include "stinkytofu/Config/Config.h"
+
+namespace {
 #define GET_ISAINFO_UNIFIED_OPCODES
 #include "hardware/gfxIsa.inc"
-}
+}  // namespace
 
-/* Architecture-specific headers (GfxXXX.hpp defines GfxXXXArchInfo) - auto-generated in build dir */
+/* Architecture-specific headers (GfxXXX.hpp defines GfxXXXArchInfo) - auto-generated in build dir
+ */
 #include "arch_headers/ArchHelper_includes.inc"
 
-namespace stinkytofu
-{
-    ArchHelper::ArchHelper()
-    {
+namespace stinkytofu {
+ArchHelper::ArchHelper() {
 // Populate the fixed list of architecture infos
 #define STINKYTOFU_ARCH(archName) \
     registeredArchInfos.push_back(std::make_unique<archName##ArchInfo>());
 #include "Config/Archs.def"
-    }
+}
 
-    const ArchHelper::ArchInfo* ArchHelper::getArchInfo(GfxArchID arch) const
-    {
-        return registeredArchInfos[static_cast<int>(arch)].get();
-    }
+const ArchHelper::ArchInfo* ArchHelper::getArchInfo(GfxArchID arch) const {
+    return registeredArchInfos[static_cast<int>(arch)].get();
+}
 
-    const ArchHelper::ArchInfo*
-        ArchHelper::getArchInfo(uint32_t major, uint32_t minor, uint32_t stepping) const
-    {
-        for(const auto& archInfo : registeredArchInfos)
-        {
-            if(archInfo->major == major && archInfo->minor == minor
-               && archInfo->stepping == stepping)
-            {
-                return archInfo.get();
-            }
+const ArchHelper::ArchInfo* ArchHelper::getArchInfo(uint32_t major, uint32_t minor,
+                                                    uint32_t stepping) const {
+    for (const auto& archInfo : registeredArchInfos) {
+        if (archInfo->major == major && archInfo->minor == minor &&
+            archInfo->stepping == stepping) {
+            return archInfo.get();
         }
-        return nullptr;
     }
+    return nullptr;
+}
 
-    const GfxArchID
-        ArchHelper::getGfxArchID(uint32_t major, uint32_t minor, uint32_t stepping) const
-    {
-        for(size_t i = 0; i < registeredArchInfos.size(); ++i)
-        {
-            const auto& archInfo = registeredArchInfos[i];
-            if(archInfo->major == major && archInfo->minor == minor
-               && archInfo->stepping == stepping)
-            {
-                return static_cast<GfxArchID>(i);
-            }
+const GfxArchID ArchHelper::getGfxArchID(uint32_t major, uint32_t minor, uint32_t stepping) const {
+    for (size_t i = 0; i < registeredArchInfos.size(); ++i) {
+        const auto& archInfo = registeredArchInfos[i];
+        if (archInfo->major == major && archInfo->minor == minor &&
+            archInfo->stepping == stepping) {
+            return static_cast<GfxArchID>(i);
         }
-        assert(false && "Unsupported GfxArchID");
     }
+    assert(false && "Unsupported GfxArchID");
+}
 
-} // namespace stinkytofu
+}  // namespace stinkytofu

@@ -22,58 +22,50 @@
  * ************************************************************************ */
 #include <gtest/gtest.h>
 
-#include "stinkytofu/transforms/asm/DeadCodeEliminationPass.hpp"
-#include "stinkytofu/transforms/asm/RedundantMovEliminationPass.hpp"
-#include "stinkytofu/serialization/asm/IRConverter.hpp"
-#include "stinkytofu/core/PassManager.hpp"
-#include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
-#include "stinkytofu/serialization/asm/StinkyAsmPrinter.hpp"
-
 #include <optional>
 #include <sstream>
 #include <string>
 
+#include "stinkytofu/core/PassManager.hpp"
+#include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
+#include "stinkytofu/serialization/asm/IRConverter.hpp"
+#include "stinkytofu/serialization/asm/StinkyAsmPrinter.hpp"
+#include "stinkytofu/transforms/asm/DeadCodeEliminationPass.hpp"
+#include "stinkytofu/transforms/asm/RedundantMovEliminationPass.hpp"
+
 using namespace stinkytofu;
 
-class RedundantMovEliminationPassTest : public ::testing::Test
-{
-protected:
-    void SetUp() override
-    {
+class RedundantMovEliminationPassTest : public ::testing::Test {
+   protected:
+    void SetUp() override {
         // Initialize GEMM config for GFX94X (gfx942)
-        gemmConfig.arch     = {9, 4, 2};
+        gemmConfig.arch = {9, 4, 2};
         gemmConfig.NumWaves = 2;
-        gemmConfig.TileA0   = 16;
-        gemmConfig.TileB0   = 16;
-        gemmConfig.TileM0   = 16;
-        gemmConfig.NumGRA   = 4;
-        gemmConfig.NumGRB   = 4;
-        gemmConfig.NumGRM   = 4;
+        gemmConfig.TileA0 = 16;
+        gemmConfig.TileB0 = 16;
+        gemmConfig.TileM0 = 16;
+        gemmConfig.NumGRA = 4;
+        gemmConfig.NumGRB = 4;
+        gemmConfig.NumGRM = 4;
     }
 
     // Parse IR and return a non-owning pointer
     // The converter must be kept alive for the lifetime of the Function
-    Function* parseIR(const std::string& irString, StinkyIRConverter& converter)
-    {
+    Function* parseIR(const std::string& irString, StinkyIRConverter& converter) {
         Function* func = converter.convertToFunction(irString);
-        if(!func)
-        {
+        if (!func) {
             std::cerr << "Failed to parse IR" << std::endl;
             return nullptr;
         }
         return func;
     }
 
-    std::string getFunctionIR(Function& func)
-    {
+    std::string getFunctionIR(Function& func) {
         std::ostringstream oss;
-        AsmPrinter         printer(oss);
-        for(BasicBlock& bb : func)
-        {
-            for(IRBase& ir : bb)
-            {
-                if(ir.getType() == IRBase::IRType::StinkyTofu)
-                {
+        AsmPrinter printer(oss);
+        for (BasicBlock& bb : func) {
+            for (IRBase& ir : bb) {
+                if (ir.getType() == IRBase::IRType::StinkyTofu) {
                     auto* inst = static_cast<StinkyInstruction*>(&ir);
                     printer.print(*inst);
                     oss << "\n";
@@ -83,12 +75,10 @@ protected:
         return oss.str();
     }
 
-    int countOccurrences(const std::string& str, const std::string& substr)
-    {
-        int                    count = 0;
-        std::string::size_type pos   = 0;
-        while((pos = str.find(substr, pos)) != std::string::npos)
-        {
+    int countOccurrences(const std::string& str, const std::string& substr) {
+        int count = 0;
+        std::string::size_type pos = 0;
+        while ((pos = str.find(substr, pos)) != std::string::npos) {
             count++;
             pos++;
         }
@@ -99,8 +89,7 @@ protected:
 };
 
 // Test 1: Eliminate redundant mov to same destination
-TEST_F(RedundantMovEliminationPassTest, EliminateSimpleDuplicate)
-{
+TEST_F(RedundantMovEliminationPassTest, EliminateSimpleDuplicate) {
     std::string irString = R"(
         v[0] = "st.v_mov_b32"(v[1])
         v[3] = "st.v_add_f32"(v[4], v[5])
@@ -126,8 +115,7 @@ TEST_F(RedundantMovEliminationPassTest, EliminateSimpleDuplicate)
 }
 
 // Test 2: Multiple redundant movs to same destination
-TEST_F(RedundantMovEliminationPassTest, MultipleDuplicates)
-{
+TEST_F(RedundantMovEliminationPassTest, MultipleDuplicates) {
     std::string irString = R"(
         v[0] = "st.v_mov_b32"(v[1])
         v[3] = "st.v_add_f32"(v[4], v[5])
@@ -155,8 +143,7 @@ TEST_F(RedundantMovEliminationPassTest, MultipleDuplicates)
 }
 
 // Test 3: Don't eliminate when operand is modified
-TEST_F(RedundantMovEliminationPassTest, DontEliminateWithModifiedOperand)
-{
+TEST_F(RedundantMovEliminationPassTest, DontEliminateWithModifiedOperand) {
     std::string irString = R"(
         v[0] = "st.v_mov_b32"(v[1])
         v[3] = "st.v_add_f32"(v[4], v[5])
@@ -182,8 +169,7 @@ TEST_F(RedundantMovEliminationPassTest, DontEliminateWithModifiedOperand)
 }
 
 // Test 4: Different operands - not duplicates
-TEST_F(RedundantMovEliminationPassTest, DifferentOperands)
-{
+TEST_F(RedundantMovEliminationPassTest, DifferentOperands) {
     std::string irString = R"(
         v[0] = "st.v_mov_b32"(v[1])
         v[3] = "st.v_mov_b32"(v[4])
@@ -208,8 +194,7 @@ TEST_F(RedundantMovEliminationPassTest, DifferentOperands)
 }
 
 // Test 8: Empty IR
-TEST_F(RedundantMovEliminationPassTest, EmptyIR)
-{
+TEST_F(RedundantMovEliminationPassTest, EmptyIR) {
     std::string irString = "";
 
     StinkyIRConverter converter;
@@ -226,8 +211,7 @@ TEST_F(RedundantMovEliminationPassTest, EmptyIR)
 }
 
 // Test 9: No duplicates (all different sources)
-TEST_F(RedundantMovEliminationPassTest, NoDuplicates)
-{
+TEST_F(RedundantMovEliminationPassTest, NoDuplicates) {
     std::string irString = R"(
         v[0] = "st.v_mov_b32"(v[1])
         v[3] = "st.v_mov_b32"(v[4])

@@ -23,62 +23,53 @@
 
 #pragma once
 
-#include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include <map>
 #include <string>
 #include <vector>
 
-namespace stinkytofu
-{
-    /**
-     * @brief Macro instruction struct (high-level IR)
-     * 
-     * Similar to StinkyInstruction - a simple struct with data.
-     * No virtual functions, no class hierarchy.
-     * 
-     * Factory functions in StinkyTofu.cpp create these.
-     * Expander functions (free functions) handle expansion based on kind.
-     */
-    struct MacroInstruction : public IRBase
-    {
-        friend class IRBase;
+#include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 
-        std::string name;
-        std::string comment;
+namespace stinkytofu {
+/**
+ * @brief Macro instruction struct (high-level IR)
+ *
+ * Similar to StinkyInstruction - a simple struct with data.
+ * No virtual functions, no class hierarchy.
+ *
+ * Factory functions in StinkyTofu.cpp create these.
+ * Expander functions (free functions) handle expansion based on kind.
+ */
+struct MacroInstruction : public IRBase {
+    friend class IRBase;
 
-        // Operands (like StinkyInstruction's srcRegs/destRegs)
-        std::vector<StinkyRegister> operands;
+    std::string name;
+    std::string comment;
 
-        // Flexible parameter storage
-        std::map<std::string, std::string> params;
+    // Operands (like StinkyInstruction's srcRegs/destRegs)
+    std::vector<StinkyRegister> operands;
 
-        // Common parameters
-        uint32_t    divisor; // For division macros
-        uint32_t    sizeBytes; // For DSInit, ArgumentLoader
-        uint32_t    offsetBytes; // For ArgumentLoader
-        uint32_t    value; // For DSInit
-        std::string label; // For branch macros
+    // Flexible parameter storage
+    std::map<std::string, std::string> params;
 
-    private:
-        MacroInstruction()
-            : IRBase(IRType::StinkyTofu)
-            , divisor(0)
-            , sizeBytes(0)
-            , offsetBytes(0)
-            , value(0)
-        {
-        }
+    // Common parameters
+    uint32_t divisor;      // For division macros
+    uint32_t sizeBytes;    // For DSInit, ArgumentLoader
+    uint32_t offsetBytes;  // For ArgumentLoader
+    uint32_t value;        // For DSInit
+    std::string label;     // For branch macros
 
-        ~MacroInstruction() = default;
+   private:
+    MacroInstruction()
+        : IRBase(IRType::StinkyTofu), divisor(0), sizeBytes(0), offsetBytes(0), value(0) {}
 
-    public:
-        // Implement IRBase::dump()
-        void dump(std::ostream& out) const override
-        {
-            out << "%macro." << name << "( " << operands.size() << " operands )";
-            if(!comment.empty())
-                out << "  // " << comment;
-        }
-    };
+    ~MacroInstruction() = default;
 
-} // namespace stinkytofu
+   public:
+    // Implement IRBase::dump()
+    void dump(std::ostream& out) const override {
+        out << "%macro." << name << "( " << operands.size() << " operands )";
+        if (!comment.empty()) out << "  // " << comment;
+    }
+};
+
+}  // namespace stinkytofu

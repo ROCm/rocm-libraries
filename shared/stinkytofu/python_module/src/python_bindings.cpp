@@ -21,6 +21,15 @@
  *
  * ************************************************************************ */
 
+#include <nanobind/nanobind.h>
+#include <nanobind/stl/optional.h>
+#include <nanobind/stl/shared_ptr.h>
+#include <nanobind/stl/string.h>
+#include <nanobind/stl/vector.h>
+#include <nanobind/trampoline.h>
+
+#include <sstream>
+
 #include "stinkytofu/bindings/python/LogicalModule.hpp"
 #include "stinkytofu/bindings/python/Module.hpp"
 #include "stinkytofu/hardware/GfxIsa.hpp"
@@ -30,22 +39,13 @@
 #include "stinkytofu/ir/logical/IntrinsicRegistry.hpp"
 #include "stinkytofu/ir/logical/LogicalInstructions.hpp"
 
-#include <nanobind/nanobind.h>
-#include <nanobind/stl/optional.h>
-#include <nanobind/stl/shared_ptr.h>
-#include <nanobind/stl/string.h>
-#include <nanobind/stl/vector.h>
-#include <nanobind/trampoline.h>
-#include <sstream>
-
 namespace nb = nanobind;
 using namespace stinkytofu;
 
 // Forward declaration for logical count bindings
 void init_logical_count(nb::module_& m);
 
-NB_MODULE(_stinkytofu, m)
-{
+NB_MODULE(_stinkytofu, m) {
     m.doc() = "StinkyTofu: High-Level IR for AMDGPU Assembly Generation (internal C++ module)";
 
     // ========================================================================
@@ -53,11 +53,9 @@ NB_MODULE(_stinkytofu, m)
     // ========================================================================
     nb::class_<StinkyAsmModule>(m, "StinkyAsmModule")
         .def("getName", &StinkyAsmModule::getName, "Get the name of this module")
-        .def("emitAssembly",
-             &StinkyAsmModule::emitAssembly,
+        .def("emitAssembly", &StinkyAsmModule::emitAssembly,
              "Emit the assembly code for all instructions in this module")
-        .def("runOptimizationPipeline",
-             &StinkyAsmModule::runOptimizationPipeline,
+        .def("runOptimizationPipeline", &StinkyAsmModule::runOptimizationPipeline,
              "Run the optimization pipeline on this module");
 
     // ========================================================================
@@ -87,18 +85,14 @@ NB_MODULE(_stinkytofu, m)
     // However, users typically don't construct Register directly - they use helper functions.
     nb::class_<StinkyRegister>(m, "Register")
         .def(nb::init<>(), "Create a null register")
-        .def(nb::init<const std::string&, uint32_t, uint16_t>(),
-             nb::arg("type"),
-             nb::arg("index"),
-             nb::arg("count") = 1,
-             "Create a register (e.g., Register('v', 0, 1) for v0)")
+        .def(nb::init<const std::string&, uint32_t, uint16_t>(), nb::arg("type"), nb::arg("index"),
+             nb::arg("count") = 1, "Create a register (e.g., Register('v', 0, 1) for v0)")
         .def(nb::init<float>(), nb::arg("value"), "Create a float literal")
         .def(nb::init<int>(), nb::arg("value"), "Create an int literal")
         .def_prop_ro(
             "reg_type",
             [](const StinkyRegister& r) -> RegType {
-                if(r.dataType == StinkyRegister::Type::Register)
-                {
+                if (r.dataType == StinkyRegister::Type::Register) {
                     return r.reg.type;
                 }
                 return RegType::UNKNOWN;
@@ -107,8 +101,7 @@ NB_MODULE(_stinkytofu, m)
         .def_prop_ro(
             "index",
             [](const StinkyRegister& r) -> int {
-                if(r.dataType == StinkyRegister::Type::Register)
-                {
+                if (r.dataType == StinkyRegister::Type::Register) {
                     return r.reg.idx;
                 }
                 return -1;
@@ -117,8 +110,7 @@ NB_MODULE(_stinkytofu, m)
         .def_prop_ro(
             "count",
             [](const StinkyRegister& r) -> int {
-                if(r.dataType == StinkyRegister::Type::Register)
-                {
+                if (r.dataType == StinkyRegister::Type::Register) {
                     return r.reg.num;
                 }
                 return 0;
@@ -127,45 +119,36 @@ NB_MODULE(_stinkytofu, m)
         .def_prop_ro(
             "is_literal",
             [](const StinkyRegister& r) -> bool {
-                return r.dataType == StinkyRegister::Type::LiteralInt
-                       || r.dataType == StinkyRegister::Type::LiteralDouble;
+                return r.dataType == StinkyRegister::Type::LiteralInt ||
+                       r.dataType == StinkyRegister::Type::LiteralDouble;
             },
             "Check if this is a literal value")
         .def("__repr__", [](const StinkyRegister& r) -> std::string {
-            if(r.dataType == StinkyRegister::Type::Register)
-            {
+            if (r.dataType == StinkyRegister::Type::Register) {
                 std::string typeStr;
-                switch(r.reg.type)
-                {
-                case RegType::V:
-                    typeStr = "v";
-                    break;
-                case RegType::S:
-                    typeStr = "s";
-                    break;
-                case RegType::A:
-                    typeStr = "a";
-                    break;
-                default:
-                    typeStr = "?";
-                    break;
+                switch (r.reg.type) {
+                    case RegType::V:
+                        typeStr = "v";
+                        break;
+                    case RegType::S:
+                        typeStr = "s";
+                        break;
+                    case RegType::A:
+                        typeStr = "a";
+                        break;
+                    default:
+                        typeStr = "?";
+                        break;
                 }
-                if(r.reg.num == 1)
-                {
+                if (r.reg.num == 1) {
                     return "<Register " + typeStr + std::to_string(r.reg.idx) + ">";
+                } else {
+                    return "<Register " + typeStr + "[" + std::to_string(r.reg.idx) + ":" +
+                           std::to_string(r.reg.idx + r.reg.num - 1) + "]>";
                 }
-                else
-                {
-                    return "<Register " + typeStr + "[" + std::to_string(r.reg.idx) + ":"
-                           + std::to_string(r.reg.idx + r.reg.num - 1) + "]>";
-                }
-            }
-            else if(r.dataType == StinkyRegister::Type::LiteralInt)
-            {
+            } else if (r.dataType == StinkyRegister::Type::LiteralInt) {
                 return "<Literal " + std::to_string(r.literalInt) + ">";
-            }
-            else if(r.dataType == StinkyRegister::Type::LiteralDouble)
-            {
+            } else if (r.dataType == StinkyRegister::Type::LiteralDouble) {
                 return "<Literal " + std::to_string(r.literalDouble) + ">";
             }
             return std::string("<Register (invalid)>");
@@ -175,37 +158,24 @@ NB_MODULE(_stinkytofu, m)
     // Register Helper Functions (rocisa-style API)
     // ========================================================================
     m.def(
-        "vgpr",
-        [](int index, int count) { return StinkyRegister("v", index, count); },
-        nb::arg("index"),
-        nb::arg("count") = 1,
-        "Create a VGPR register");
+        "vgpr", [](int index, int count) { return StinkyRegister("v", index, count); },
+        nb::arg("index"), nb::arg("count") = 1, "Create a VGPR register");
 
     m.def(
-        "sgpr",
-        [](int index, int count) { return StinkyRegister("s", index, count); },
-        nb::arg("index"),
-        nb::arg("count") = 1,
-        "Create an SGPR register");
+        "sgpr", [](int index, int count) { return StinkyRegister("s", index, count); },
+        nb::arg("index"), nb::arg("count") = 1, "Create an SGPR register");
 
     m.def(
-        "agpr",
-        [](int index, int count) { return StinkyRegister("a", index, count); },
-        nb::arg("index"),
-        nb::arg("count") = 1,
-        "Create an AGPR (Accumulator) register");
+        "agpr", [](int index, int count) { return StinkyRegister("a", index, count); },
+        nb::arg("index"), nb::arg("count") = 1, "Create an AGPR (Accumulator) register");
 
     m.def(
-        "accvgpr",
-        [](int index, int count) { return StinkyRegister("a", index, count); },
-        nb::arg("index"),
-        nb::arg("count") = 1,
+        "accvgpr", [](int index, int count) { return StinkyRegister("a", index, count); },
+        nb::arg("index"), nb::arg("count") = 1,
         "Create an accumulator VGPR register (alias for agpr)");
 
     m.def(
-        "literal",
-        [](float value) { return StinkyRegister(value); },
-        nb::arg("value"),
+        "literal", [](float value) { return StinkyRegister(value); }, nb::arg("value"),
         "Create a float literal");
 
     // ========================================================================
@@ -221,12 +191,9 @@ NB_MODULE(_stinkytofu, m)
     // ========================================================================
     // Note: Exposed as "LogicalModule" in Python for backward compatibility
     nb::class_<PyLogicalModule>(m, "LogicalModule")
-        .def(nb::init<const std::string&>(),
-             nb::arg("name"),
+        .def(nb::init<const std::string&>(), nb::arg("name"),
              "Create a new IR module with the given kernel name")
-        .def("add",
-             &PyLogicalModule::add,
-             nb::arg("instruction"),
+        .def("add", &PyLogicalModule::add, nb::arg("instruction"),
              "Add a high-level IR instruction to the module (shared ownership)")
         .def("getName", &PyLogicalModule::getName, "Get the kernel name")
         .def(
@@ -247,11 +214,9 @@ NB_MODULE(_stinkytofu, m)
     // Rocisa uses trampolines because it allows Python subclassing of instructions.
     nb::class_<LogicalInstruction>(m, "LogicalInstruction")
         .def_rw("comment", &LogicalInstruction::comment, "Optional comment")
-        .def("get_logical_name",
-             &LogicalInstruction::getLogicalName,
+        .def("get_logical_name", &LogicalInstruction::getLogicalName,
              "Get the logical name of this instruction")
-        .def("is_composite",
-             &LogicalInstruction::isComposite,
+        .def("is_composite", &LogicalInstruction::isComposite,
              "Check if this is a composite instruction")
         .def(
             "dump",
@@ -274,166 +239,69 @@ NB_MODULE(_stinkytofu, m)
     // MFMA - Matrix Fused Multiply-Add
     m.def(
         "MFMA",
-        [](const std::string&            instType,
-           const std::string&            accType,
-           int                           m,
-           int                           n,
-           int                           k,
-           int                           blocks,
-           bool                          mfma1k,
-           const StinkyRegister&         acc,
-           const StinkyRegister&         a,
-           const StinkyRegister&         b,
-           std::optional<StinkyRegister> acc2,
-           bool                          neg,
-           const std::string&            comment) {
-            return makeLogicalInstructionShared(MFMA(instType,
-                                                     accType,
-                                                     m,
-                                                     n,
-                                                     k,
-                                                     blocks,
-                                                     mfma1k,
-                                                     acc,
-                                                     a,
-                                                     b,
-                                                     acc2 ? &(*acc2) : nullptr,
-                                                     neg,
+        [](const std::string& instType, const std::string& accType, int m, int n, int k, int blocks,
+           bool mfma1k, const StinkyRegister& acc, const StinkyRegister& a, const StinkyRegister& b,
+           std::optional<StinkyRegister> acc2, bool neg, const std::string& comment) {
+            return makeLogicalInstructionShared(MFMA(instType, accType, m, n, k, blocks, mfma1k,
+                                                     acc, a, b, acc2 ? &(*acc2) : nullptr, neg,
                                                      comment));
         },
-        nb::arg("instType"),
-        nb::arg("accType"),
-        nb::arg("m"),
-        nb::arg("n"),
-        nb::arg("k"),
-        nb::arg("blocks"),
-        nb::arg("mfma1k"),
-        nb::arg("acc"),
-        nb::arg("a"),
-        nb::arg("b"),
-        nb::arg("acc2")    = std::nullopt,
-        nb::arg("neg")     = false,
-        nb::arg("comment") = "",
+        nb::arg("instType"), nb::arg("accType"), nb::arg("m"), nb::arg("n"), nb::arg("k"),
+        nb::arg("blocks"), nb::arg("mfma1k"), nb::arg("acc"), nb::arg("a"), nb::arg("b"),
+        nb::arg("acc2") = std::nullopt, nb::arg("neg") = false, nb::arg("comment") = "",
         "Create an MFMA instruction");
 
     // MXMFMA - Mixed-precision Matrix Fused Multiply-Add
     m.def(
         "MXMFMA",
-        [](const std::string&    instType,
-           const std::string&    accType,
-           const std::string&    mxScaleATypeStr,
-           const std::string&    mxScaleBTypeStr,
-           int                   m,
-           int                   n,
-           int                   k,
-           int                   block,
-           const StinkyRegister& acc,
-           const StinkyRegister& a,
-           const StinkyRegister& b,
-           const StinkyRegister& acc2,
-           const StinkyRegister& mxsa,
-           const StinkyRegister& mxsb,
-           bool                  reuseA,
-           bool                  reuseB,
-           const std::string&    comment) {
-            return makeLogicalInstructionShared(MXMFMA(instType,
-                                                       accType,
-                                                       mxScaleATypeStr,
-                                                       mxScaleBTypeStr,
-                                                       m,
-                                                       n,
-                                                       k,
-                                                       block,
-                                                       acc,
-                                                       a,
-                                                       b,
-                                                       acc2,
-                                                       mxsa,
-                                                       mxsb,
-                                                       reuseA,
-                                                       reuseB,
-                                                       comment));
+        [](const std::string& instType, const std::string& accType,
+           const std::string& mxScaleATypeStr, const std::string& mxScaleBTypeStr, int m, int n,
+           int k, int block, const StinkyRegister& acc, const StinkyRegister& a,
+           const StinkyRegister& b, const StinkyRegister& acc2, const StinkyRegister& mxsa,
+           const StinkyRegister& mxsb, bool reuseA, bool reuseB, const std::string& comment) {
+            return makeLogicalInstructionShared(MXMFMA(instType, accType, mxScaleATypeStr,
+                                                       mxScaleBTypeStr, m, n, k, block, acc, a, b,
+                                                       acc2, mxsa, mxsb, reuseA, reuseB, comment));
         },
-        nb::arg("instType"),
-        nb::arg("accType"),
-        nb::arg("mxScaleATypeStr"),
-        nb::arg("mxScaleBTypeStr"),
-        nb::arg("m"),
-        nb::arg("n"),
-        nb::arg("k"),
-        nb::arg("block"),
-        nb::arg("acc"),
-        nb::arg("a"),
-        nb::arg("b"),
-        nb::arg("acc2"),
-        nb::arg("mxsa"),
-        nb::arg("mxsb"),
-        nb::arg("reuseA")  = false,
-        nb::arg("reuseB")  = false,
-        nb::arg("comment") = "",
-        "Create an MXMFMA instruction");
+        nb::arg("instType"), nb::arg("accType"), nb::arg("mxScaleATypeStr"),
+        nb::arg("mxScaleBTypeStr"), nb::arg("m"), nb::arg("n"), nb::arg("k"), nb::arg("block"),
+        nb::arg("acc"), nb::arg("a"), nb::arg("b"), nb::arg("acc2"), nb::arg("mxsa"),
+        nb::arg("mxsb"), nb::arg("reuseA") = false, nb::arg("reuseB") = false,
+        nb::arg("comment") = "", "Create an MXMFMA instruction");
 
     // SMFMA - Sparse Matrix Fused Multiply-Add
     m.def(
         "SMFMA",
-        [](const std::string&    instType,
-           const std::string&    accType,
-           int                   m,
-           int                   n,
-           int                   k,
-           int                   blocks,
-           bool                  mfma1k,
-           const StinkyRegister& acc,
-           const StinkyRegister& a,
-           const StinkyRegister& b,
-           const StinkyRegister& metadata,
-           bool                  neg,
-           const std::string&    comment) {
-            return makeLogicalInstructionShared(SMFMA(
-                instType, accType, m, n, k, blocks, mfma1k, acc, a, b, metadata, neg, comment));
+        [](const std::string& instType, const std::string& accType, int m, int n, int k, int blocks,
+           bool mfma1k, const StinkyRegister& acc, const StinkyRegister& a, const StinkyRegister& b,
+           const StinkyRegister& metadata, bool neg, const std::string& comment) {
+            return makeLogicalInstructionShared(SMFMA(instType, accType, m, n, k, blocks, mfma1k,
+                                                      acc, a, b, metadata, neg, comment));
         },
-        nb::arg("instType"),
-        nb::arg("accType"),
-        nb::arg("m"),
-        nb::arg("n"),
-        nb::arg("k"),
-        nb::arg("blocks"),
-        nb::arg("mfma1k"),
-        nb::arg("acc"),
-        nb::arg("a"),
-        nb::arg("b"),
-        nb::arg("metadata"),
-        nb::arg("neg")     = false,
-        nb::arg("comment") = "",
+        nb::arg("instType"), nb::arg("accType"), nb::arg("m"), nb::arg("n"), nb::arg("k"),
+        nb::arg("blocks"), nb::arg("mfma1k"), nb::arg("acc"), nb::arg("a"), nb::arg("b"),
+        nb::arg("metadata"), nb::arg("neg") = false, nb::arg("comment") = "",
         "Create an SMFMA instruction");
 
     // TensorLoadToLds - Higher-level tensor load operation
     m.def(
         "TensorLoadToLds",
-        [](const StinkyRegister&         group0,
-           const StinkyRegister&         group1,
-           std::optional<StinkyRegister> group2,
-           std::optional<StinkyRegister> group3,
-           const std::string&            comment) {
-            return makeLogicalInstructionShared(TensorLoadToLds(group0,
-                                                                group1,
-                                                                group2 ? &(*group2) : nullptr,
-                                                                group3 ? &(*group3) : nullptr,
-                                                                comment));
+        [](const StinkyRegister& group0, const StinkyRegister& group1,
+           std::optional<StinkyRegister> group2, std::optional<StinkyRegister> group3,
+           const std::string& comment) {
+            return makeLogicalInstructionShared(
+                TensorLoadToLds(group0, group1, group2 ? &(*group2) : nullptr,
+                                group3 ? &(*group3) : nullptr, comment));
         },
-        nb::arg("group0"),
-        nb::arg("group1"),
-        nb::arg("group2")  = std::nullopt,
-        nb::arg("group3")  = std::nullopt,
-        nb::arg("comment") = "",
+        nb::arg("group0"), nb::arg("group1"), nb::arg("group2") = std::nullopt,
+        nb::arg("group3") = std::nullopt, nb::arg("comment") = "",
         "Create a TensorLoadToLds instruction");
 
     // Label - Control flow label
     m.def(
         "Label",
         [](const std::string& labelName) { return makeLogicalInstructionShared(Label(labelName)); },
-        nb::arg("labelName"),
-        "Create a Label");
+        nb::arg("labelName"), "Create a Label");
 
     // ========================================================================
     // IntrinsicCall - Placeholder for intrinsic function calls
@@ -453,24 +321,15 @@ NB_MODULE(_stinkytofu, m)
     // IntrinsicLibrary - Runtime library for intrinsic definitions
     // ========================================================================
     nb::class_<IntrinsicLibrary>(m, "IntrinsicLibrary")
-        .def_static("load",
-                    &IntrinsicLibrary::loadFromFile,
-                    nb::arg("path"),
+        .def_static("load", &IntrinsicLibrary::loadFromFile, nb::arg("path"),
                     "Load intrinsic library from .st.bc file")
-        .def("has_intrinsic",
-             &IntrinsicLibrary::hasIntrinsic,
-             nb::arg("name"),
+        .def("has_intrinsic", &IntrinsicLibrary::hasIntrinsic, nb::arg("name"),
              "Check if intrinsic exists")
-        .def("get_intrinsic_names",
-             &IntrinsicLibrary::getIntrinsicNames,
+        .def("get_intrinsic_names", &IntrinsicLibrary::getIntrinsicNames,
              "Get list of all intrinsic names")
-        .def("get_arguments",
-             &IntrinsicLibrary::getArguments,
-             nb::arg("name"),
+        .def("get_arguments", &IntrinsicLibrary::getArguments, nb::arg("name"),
              "Get arguments for an intrinsic")
-        .def("get_comment",
-             &IntrinsicLibrary::getComment,
-             nb::arg("name"),
+        .def("get_comment", &IntrinsicLibrary::getComment, nb::arg("name"),
              "Get comment for an intrinsic")
         .def("size", &IntrinsicLibrary::size, "Get number of intrinsics");
 
@@ -478,27 +337,18 @@ NB_MODULE(_stinkytofu, m)
     // IntrinsicRegistry - Singleton with automatic loading
     // ========================================================================
     nb::class_<IntrinsicRegistry>(m, "IntrinsicRegistry")
-        .def_static("instance",
-                    &IntrinsicRegistry::instance,
-                    nb::rv_policy::reference,
+        .def_static("instance", &IntrinsicRegistry::instance, nb::rv_policy::reference,
                     "Get singleton instance (auto-loads intrinsics.st.bc)")
-        .def("is_initialized",
-             &IntrinsicRegistry::isInitialized,
+        .def("is_initialized", &IntrinsicRegistry::isInitialized,
              "Check if intrinsics were loaded successfully")
-        .def("has_intrinsic",
-             &IntrinsicRegistry::hasIntrinsic,
-             nb::arg("name"),
+        .def("has_intrinsic", &IntrinsicRegistry::hasIntrinsic, nb::arg("name"),
              "Check if intrinsic exists")
-        .def("get_intrinsic_names",
-             &IntrinsicRegistry::getIntrinsicNames,
+        .def("get_intrinsic_names", &IntrinsicRegistry::getIntrinsicNames,
              "Get list of all intrinsic names")
-        .def("get_loaded_path",
-             &IntrinsicRegistry::getLoadedPath,
+        .def("get_loaded_path", &IntrinsicRegistry::getLoadedPath,
              "Get path where intrinsics.st.bc was loaded from")
         .def("get_library", &IntrinsicRegistry::getLibrary, "Get the underlying IntrinsicLibrary")
-        .def("reload",
-             &IntrinsicRegistry::reload,
-             nb::arg("path"),
+        .def("reload", &IntrinsicRegistry::reload, nb::arg("path"),
              "Reload intrinsics from a specific path");
 
     // Intrinsic helper function - cleaner API with kwargs
@@ -512,32 +362,25 @@ NB_MODULE(_stinkytofu, m)
             std::vector<StinkyRegister> args;
             args.reserve(kwargs.size());
 
-            for(auto item : kwargs)
-            {
+            for (auto item : kwargs) {
                 auto value = item.second;
 
                 // Try to cast to StinkyRegister first
-                if(nb::isinstance<StinkyRegister>(value))
-                {
+                if (nb::isinstance<StinkyRegister>(value)) {
                     args.push_back(nb::cast<StinkyRegister>(value));
                 }
                 // Handle int literals
-                else if(nb::isinstance<nb::int_>(value))
-                {
+                else if (nb::isinstance<nb::int_>(value)) {
                     args.push_back(StinkyRegister(nb::cast<int>(value)));
                 }
                 // Handle float literals
-                else if(nb::isinstance<nb::float_>(value))
-                {
+                else if (nb::isinstance<nb::float_>(value)) {
                     args.push_back(StinkyRegister(nb::cast<double>(value)));
                 }
                 // Handle string literals
-                else if(nb::isinstance<nb::str>(value))
-                {
+                else if (nb::isinstance<nb::str>(value)) {
                     args.push_back(StinkyRegister(nb::cast<std::string>(value)));
-                }
-                else
-                {
+                } else {
                     throw std::runtime_error(
                         "Intrinsic argument must be Register, int, float, or string");
                 }

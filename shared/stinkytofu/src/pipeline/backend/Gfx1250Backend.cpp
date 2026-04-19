@@ -27,14 +27,15 @@
 /// so that Backend(module).runOptimization() automatically picks it up for modules with
 /// arch {12, 5, 0}.
 
+#include <algorithm>
+
+#include "stinkytofu/analysis/asm/AsmVerifierPass.hpp"
 #include "stinkytofu/bindings/python/Module.hpp"
 #include "stinkytofu/pipeline/BackendRegistry.hpp"
 #include "stinkytofu/pipeline/OptimizationPasses.hpp"
 #include "stinkytofu/pipeline/ScopeAdaptor.hpp"
-#include "stinkytofu/transforms/asm/InsertVgprMsbPass.hpp"
-
-#include "stinkytofu/analysis/asm/AsmVerifierPass.hpp"
 #include "stinkytofu/transforms/asm/CFGBuilderPass.hpp"
+#include "stinkytofu/transforms/asm/InsertVgprMsbPass.hpp"
 #include "stinkytofu/transforms/asm/ScheduleFirstLRsPass.hpp"
 #include "stinkytofu/transforms/asm/ScheduleLastLRsPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyBuildImplicitDependencyPass.hpp"
@@ -42,112 +43,95 @@
 #include "stinkytofu/transforms/asm/StinkyRemoveWaitCntPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyWaitCntInsertionPass.hpp"
 
-#include <algorithm>
+namespace stinkytofu {
+namespace {
+constexpr std::array<int, 3> GFX1250_ARCH{12, 5, 0};
 
-namespace stinkytofu
-{
-    namespace
-    {
-        constexpr std::array<int, 3> GFX1250_ARCH{12, 5, 0};
+/// Build the gfx1250 per-region optimization passes into a PassManager.
+/// TODO: enableWaitCnt is a per-pass toggle for the
+/// bring-up phase. Once the pipeline stabilizes, pass selection should
+/// be controlled by OptLevel.
+void addGfx1250RegionPasses(PassManager& pm, const StinkyAsmModule& module, OptLevel optLevel,
+                            bool enableWaitCnt) {
+    // Verify IR integrity before running any passes
+    // This catches IR corruption early before it propagates through optimization
+    pm.addPass(createStinkyIRVerifierPass());
 
-        /// Build the gfx1250 per-region optimization passes into a PassManager.
-        /// TODO: enableWaitCnt is a per-pass toggle for the
-        /// bring-up phase. Once the pipeline stabilizes, pass selection should
-        /// be controlled by OptLevel.
-        void addGfx1250RegionPasses(PassManager&           pm,
-                                    const StinkyAsmModule& module,
-                                    OptLevel               optLevel,
-                                    bool                   enableWaitCnt)
+    pm.addPass(createCFGBuilderPass());
+    if (enableWaitCnt) {
+        pm.addPass(createStinkyRemoveWaitCntPass());
+    }
+
+    // addPeepholeOptPasses(pm, optLevel);
+
+    // ========== Phase 3: Instruction Scheduling ==========
+    pm.addPass(createStinkyBuildImplicitDependencyPass());
+    // pm.addPass(createScheduleFirstLRsPass());
+    pm.addPass(createStinkyDAGSchedulerPass());
+    // pm.addPass(createScheduleLastLRsPass());
+}
+
+/// Build the full gfx1250 pipeline into \p pm using ScopeAdaptors.
+/// TODO: EnableWaitCntInsertion is a per-pass toggle for the
+/// bring-up phase. Once the pipeline stabilizes, pass selection should
+/// be controlled by OptLevel.
+bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module) {
+    const auto& moduleOptions = module.getModuleOptions();
+    const OptLevel optLevel = static_cast<OptLevel>(
+        std::max(0, std::min(moduleOptions.OptLevel, static_cast<int>(OptLevel::O3))));
+
+    auto debugStreams = createDebugOutputStreams(moduleOptions);
+    configureDebugOutput(pm, moduleOptions, "kernel-OuterPM", debugStreams);
+
+    if (optLevel != OptLevel::O0) {
+        PassFeatureConfig passFeatureConfig;
+        passFeatureConfig.barrierConfig.unrollMovableBarrier = true;
+        passFeatureConfig.loopConfig.unrollGemm = true;
+        passFeatureConfig.dagFeatures.distributeGlobalRead = true;
+        passFeatureConfig.passOrderSnapshot.jsonPath = moduleOptions.PassOrderSnapshotJson;
+
+        auto snapshotCollector =
+            createPassOrderSnapshotCollector(passFeatureConfig, moduleOptions, module.getName());
+
+        // Combined adapter: loopWithPrefetch + noLoadLoopBody
+        // Process both regions together so the scheduler sees the full CFG.
         {
-            // Verify IR integrity before running any passes
-            // This catches IR corruption early before it propagates through optimization
-            pm.addPass(createStinkyIRVerifierPass());
-
-            pm.addPass(createCFGBuilderPass());
-            if(enableWaitCnt)
-            {
-                pm.addPass(createStinkyRemoveWaitCntPass());
-            }
-
-            // addPeepholeOptPasses(pm, optLevel);
-
-            // ========== Phase 3: Instruction Scheduling ==========
-            pm.addPass(createStinkyBuildImplicitDependencyPass());
-            // pm.addPass(createScheduleFirstLRsPass());
-            pm.addPass(createStinkyDAGSchedulerPass());
-            // pm.addPass(createScheduleLastLRsPass());
+            PassManager innerPM;
+            passFeatureConfig.passOrderSnapshot.titlePrefix = "loopWithPrefetch+noLoadLoopBody";
+            innerPM.setPassFeatureConfig(passFeatureConfig);
+            configurePassOrderSnapshot(innerPM, snapshotCollector);
+            configureDebugOutput(innerPM, moduleOptions, "loopWithPrefetch+noLoadLoopBody",
+                                 debugStreams);
+            addGfx1250RegionPasses(innerPM, module, optLevel, moduleOptions.EnableWaitCntInsertion);
+            pm.addPass(createKernelToRegionsPassAdaptor(
+                module, {"loopWithPrefetch", "noLoadLoopBody"}, std::move(innerPM)));
         }
 
-        /// Build the full gfx1250 pipeline into \p pm using ScopeAdaptors.
-        /// TODO: EnableWaitCntInsertion is a per-pass toggle for the
-        /// bring-up phase. Once the pipeline stabilizes, pass selection should
-        /// be controlled by OptLevel.
-        bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module)
-        {
-            const auto&    moduleOptions = module.getModuleOptions();
-            const OptLevel optLevel      = static_cast<OptLevel>(
-                std::max(0, std::min(moduleOptions.OptLevel, static_cast<int>(OptLevel::O3))));
-
-            auto debugStreams = createDebugOutputStreams(moduleOptions);
-            configureDebugOutput(pm, moduleOptions, "kernel-OuterPM", debugStreams);
-
-            if(optLevel != OptLevel::O0)
-            {
-                PassFeatureConfig passFeatureConfig;
-                passFeatureConfig.barrierConfig.unrollMovableBarrier = true;
-                passFeatureConfig.loopConfig.unrollGemm              = true;
-                passFeatureConfig.dagFeatures.distributeGlobalRead   = true;
-                passFeatureConfig.passOrderSnapshot.jsonPath = moduleOptions.PassOrderSnapshotJson;
-
-                auto snapshotCollector = createPassOrderSnapshotCollector(
-                    passFeatureConfig, moduleOptions, module.getName());
-
-                // Combined adapter: loopWithPrefetch + noLoadLoopBody
-                // Process both regions together so the scheduler sees the full CFG.
-                {
-                    PassManager innerPM;
-                    passFeatureConfig.passOrderSnapshot.titlePrefix
-                        = "loopWithPrefetch+noLoadLoopBody";
-                    innerPM.setPassFeatureConfig(passFeatureConfig);
-                    configurePassOrderSnapshot(innerPM, snapshotCollector);
-                    configureDebugOutput(innerPM, moduleOptions,
-                                         "loopWithPrefetch+noLoadLoopBody", debugStreams);
-                    addGfx1250RegionPasses(
-                        innerPM, module, optLevel, moduleOptions.EnableWaitCntInsertion);
-                    pm.addPass(createKernelToRegionsPassAdaptor(
-                        module,
-                        {"loopWithPrefetch", "noLoadLoopBody"},
-                        std::move(innerPM)));
-                }
-
-                // Multi-region adapter for waitcnt reinsertion
-                if(moduleOptions.EnableWaitCntInsertion)
-                {
-                    PassManager waitcntPM;
-                    configureDebugOutput(waitcntPM, moduleOptions,
-                                         "loopWithPrefetch+noLoadLoopBody", debugStreams);
-                    waitcntPM.addPass(createCFGBuilderPass());
-                    waitcntPM.addPass(createStinkyRemoveWaitCntPass());
-                    waitcntPM.addPass(createStinkyWaitCntInsertionPass(true));
-                    pm.addPass(createKernelToRegionsPassAdaptor(
-                        module, {"loopWithPrefetch", "noLoadLoopBody"}, std::move(waitcntPM)));
-                }
-            }
-
-            // Whole-kernel pass. Always run regardless of OptLevel.
-            pm.addPass(createInsertVgprMsbPass());
-
-            return true;
+        // Multi-region adapter for waitcnt reinsertion
+        if (moduleOptions.EnableWaitCntInsertion) {
+            PassManager waitcntPM;
+            configureDebugOutput(waitcntPM, moduleOptions, "loopWithPrefetch+noLoadLoopBody",
+                                 debugStreams);
+            waitcntPM.addPass(createCFGBuilderPass());
+            waitcntPM.addPass(createStinkyRemoveWaitCntPass());
+            waitcntPM.addPass(createStinkyWaitCntInsertionPass(true));
+            pm.addPass(createKernelToRegionsPassAdaptor(
+                module, {"loopWithPrefetch", "noLoadLoopBody"}, std::move(waitcntPM)));
         }
+    }
 
-        struct Gfx1250Registrar
-        {
-            Gfx1250Registrar()
-            {
-                BackendRegistry::setArchPipeline(
-                    GFX1250_ARCH, {buildGfx1250Pipeline, {"loopWithPrefetch", "noLoadLoopBody"}});
-            }
-        };
-        static Gfx1250Registrar s_gfx1250Registrar;
-    } // namespace
-} // namespace stinkytofu
+    // Whole-kernel pass. Always run regardless of OptLevel.
+    pm.addPass(createInsertVgprMsbPass());
+
+    return true;
+}
+
+struct Gfx1250Registrar {
+    Gfx1250Registrar() {
+        BackendRegistry::setArchPipeline(
+            GFX1250_ARCH, {buildGfx1250Pipeline, {"loopWithPrefetch", "noLoadLoopBody"}});
+    }
+};
+static Gfx1250Registrar s_gfx1250Registrar;
+}  // namespace
+}  // namespace stinkytofu

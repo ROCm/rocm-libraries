@@ -238,4 +238,3 @@ pytest python_module/tests/test_ir_basic.py::test_name -v -s --pdb
 - Each `test_*.py` file = one CTest entry
 - Tests are in `python_module/tests/`
 - CTest suppresses output by default (use `--output-on-failure` or `-V` to see details)
-

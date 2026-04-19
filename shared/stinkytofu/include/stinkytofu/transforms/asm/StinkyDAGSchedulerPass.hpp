@@ -25,12 +25,11 @@
 
 #include <memory>
 
-namespace stinkytofu
-{
-    class Pass;
+namespace stinkytofu {
+class Pass;
 
-    /// Creates a DAG scheduler pass that reorders instructions within basic blocks
-    /// using a dependency DAG and architecture-specific ready queues (e.g. CDNA3/CDNA5).
-    std::unique_ptr<Pass> createStinkyDAGSchedulerPass();
+/// Creates a DAG scheduler pass that reorders instructions within basic blocks
+/// using a dependency DAG and architecture-specific ready queues (e.g. CDNA3/CDNA5).
+std::unique_ptr<Pass> createStinkyDAGSchedulerPass();
 
-} // namespace stinkytofu
+}  // namespace stinkytofu

@@ -41,63 +41,56 @@
 
 using namespace stinkytofu;
 
-namespace
-{
-    bool genLogicalToAsmMappingsImpl(GpuArchManager& manager, const std::string& outdir)
-    {
-        std::filesystem::path path
-            = std::filesystem::path(outdir) / "stinkytofu/ir/LogicalToAsmMappings_generated.inc";
+namespace {
+bool genLogicalToAsmMappingsImpl(GpuArchManager& manager, const std::string& outdir) {
+    std::filesystem::path path =
+        std::filesystem::path(outdir) / "stinkytofu/ir/LogicalToAsmMappings_generated.inc";
 
-        std::ofstream os(path);
-        if(!os)
-        {
-            std::cerr << "Cannot write " << path << "\n";
-            return false;
-        }
-
-        os << "//===----------------------------------------------------------------------===//\n"
-           << "// Auto-generated Logical IR -> ASM mnemonic mapping (per-arch)\n"
-           << "// Used by ToStinkyAsmPass for correct lowering (e.g. ds_read vs ds_load).\n"
-           << "// DO NOT EDIT MANUALLY!\n"
-           << "//===----------------------------------------------------------------------===//\n\n"
-           << "#include <cstring>\n\n"
-           << "namespace stinkytofu {\n"
-           << "inline const char* getMnemonicForLogicalOnArch(const char* logicalName, GfxArchID "
-              "arch)\n"
-           << "{\n"
-           << "    switch(arch)\n"
-           << "    {\n";
-
-        for(const std::string& archName : manager.getRegisteredArchNames())
-        {
-            const GpuArch* arch = manager.getArch(archName);
-            const auto&    map  = arch->getLogicalToArchMap();
-
-            os << "        case GfxArchID::" << archName << ":\n";
-            for(const auto& [logicalName, mnemonic] : map)
-            {
-                os << "            if(std::strcmp(logicalName, \"" << logicalName
-                   << "\") == 0) return \"" << mnemonic << "\";\n";
-            }
-            os << "            break;\n";
-        }
-
-        os << "        default:\n"
-           << "            return nullptr;\n"
-           << "    }\n"
-           << "    return nullptr;\n"
-           << "}\n"
-           << "} // namespace stinkytofu\n";
-
-        std::cerr << "Generating Logical IR -> ASM mappings in " << path << "\n";
-        return true;
+    std::ofstream os(path);
+    if (!os) {
+        std::cerr << "Cannot write " << path << "\n";
+        return false;
     }
-} // namespace anonymous
 
-namespace stinkytofu
-{
-    bool genLogicalToAsmMappings(GpuArchManager& manager, const std::string& outdir)
-    {
-        return genLogicalToAsmMappingsImpl(manager, outdir);
+    os << "//===----------------------------------------------------------------------===//\n"
+       << "// Auto-generated Logical IR -> ASM mnemonic mapping (per-arch)\n"
+       << "// Used by ToStinkyAsmPass for correct lowering (e.g. ds_read vs ds_load).\n"
+       << "// DO NOT EDIT MANUALLY!\n"
+       << "//===----------------------------------------------------------------------===//\n\n"
+       << "#include <cstring>\n\n"
+       << "namespace stinkytofu {\n"
+       << "inline const char* getMnemonicForLogicalOnArch(const char* logicalName, GfxArchID "
+          "arch)\n"
+       << "{\n"
+       << "    switch(arch)\n"
+       << "    {\n";
+
+    for (const std::string& archName : manager.getRegisteredArchNames()) {
+        const GpuArch* arch = manager.getArch(archName);
+        const auto& map = arch->getLogicalToArchMap();
+
+        os << "        case GfxArchID::" << archName << ":\n";
+        for (const auto& [logicalName, mnemonic] : map) {
+            os << "            if(std::strcmp(logicalName, \"" << logicalName
+               << "\") == 0) return \"" << mnemonic << "\";\n";
+        }
+        os << "            break;\n";
     }
-} // namespace stinkytofu
+
+    os << "        default:\n"
+       << "            return nullptr;\n"
+       << "    }\n"
+       << "    return nullptr;\n"
+       << "}\n"
+       << "} // namespace stinkytofu\n";
+
+    std::cerr << "Generating Logical IR -> ASM mappings in " << path << "\n";
+    return true;
+}
+}  // namespace
+
+namespace stinkytofu {
+bool genLogicalToAsmMappings(GpuArchManager& manager, const std::string& outdir) {
+    return genLogicalToAsmMappingsImpl(manager, outdir);
+}
+}  // namespace stinkytofu

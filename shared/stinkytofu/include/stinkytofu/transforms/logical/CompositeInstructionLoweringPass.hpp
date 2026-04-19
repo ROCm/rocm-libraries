@@ -24,46 +24,45 @@
 
 #include <memory>
 
-namespace stinkytofu
-{
-    class Pass;
+namespace stinkytofu {
+class Pass;
 
-    /**
-     * @brief Expands composite IR instructions based on architecture capabilities
-     *
-     * Composite instructions are high-level operations that may map to:
-     * - Single instruction if architecture supports it (e.g., v_pk_add_f32)
-     * - Multiple instructions if architecture doesn't support it (e.g., 2x v_add_f32)
-     *
-     * Examples:
-     * - VAddPKF32:
-     *   - gfx9+: Single v_pk_add_f32 instruction
-     *   - Fallback: Two v_add_f32 instructions (low/high)
-     *
-     * - VMovB64:
-     *   - If supported: Single v_mov_b64 instruction
-     *   - Fallback: Two v_mov_b32 instructions
-     *
-     * - VLShiftLeftOrB32:
-     *   - If supported: Single v_lshl_or_b32 instruction
-     *   - Fallback: v_lshlrev_b32 + v_or_b32
-     *
-     * This pass runs BEFORE ToStinkyAsmPass and operates on IRList,
-     * expanding composite instructions in-place.
-     *
-     * Now uses unified Pass infrastructure:
-     * - Operates on Function -> BasicBlock -> IRList
-     * - Works with raw LogicalInstruction* pointers
-     * - Integrates with PassManager
-     *
-     * Usage:
-     * ```cpp
-     * PassManager pm;
-     * pm.addPass(createCompositeInstructionLoweringPass());
-     * pm.addPass(createToStinkyAsmPass());
-     * pm.run();
-     * ```
-     */
-    std::unique_ptr<Pass> createCompositeInstructionLoweringPass();
+/**
+ * @brief Expands composite IR instructions based on architecture capabilities
+ *
+ * Composite instructions are high-level operations that may map to:
+ * - Single instruction if architecture supports it (e.g., v_pk_add_f32)
+ * - Multiple instructions if architecture doesn't support it (e.g., 2x v_add_f32)
+ *
+ * Examples:
+ * - VAddPKF32:
+ *   - gfx9+: Single v_pk_add_f32 instruction
+ *   - Fallback: Two v_add_f32 instructions (low/high)
+ *
+ * - VMovB64:
+ *   - If supported: Single v_mov_b64 instruction
+ *   - Fallback: Two v_mov_b32 instructions
+ *
+ * - VLShiftLeftOrB32:
+ *   - If supported: Single v_lshl_or_b32 instruction
+ *   - Fallback: v_lshlrev_b32 + v_or_b32
+ *
+ * This pass runs BEFORE ToStinkyAsmPass and operates on IRList,
+ * expanding composite instructions in-place.
+ *
+ * Now uses unified Pass infrastructure:
+ * - Operates on Function -> BasicBlock -> IRList
+ * - Works with raw LogicalInstruction* pointers
+ * - Integrates with PassManager
+ *
+ * Usage:
+ * ```cpp
+ * PassManager pm;
+ * pm.addPass(createCompositeInstructionLoweringPass());
+ * pm.addPass(createToStinkyAsmPass());
+ * pm.run();
+ * ```
+ */
+std::unique_ptr<Pass> createCompositeInstructionLoweringPass();
 
-} // namespace stinkytofu
+}  // namespace stinkytofu

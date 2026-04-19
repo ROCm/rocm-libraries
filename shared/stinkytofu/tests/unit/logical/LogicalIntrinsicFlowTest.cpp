@@ -32,34 +32,32 @@
  *   4. Verifying intrinsic metadata
  */
 
-#include "stinkytofu/ir/logical/IntrinsicCall.hpp"
-#include "stinkytofu/ir/logical/IntrinsicLibrary.hpp"
+#include <gtest/gtest.h>
+
 #include <cstring>
 #include <fstream>
-#include <gtest/gtest.h>
 #include <vector>
+
+#include "stinkytofu/ir/logical/IntrinsicCall.hpp"
+#include "stinkytofu/ir/logical/IntrinsicLibrary.hpp"
 
 using namespace stinkytofu;
 
-class IntrinsicFlowTest : public ::testing::Test
-{
-protected:
-    void SetUp() override
-    {
+class IntrinsicFlowTest : public ::testing::Test {
+   protected:
+    void SetUp() override {
         // Load intrinsic library from .st.bc file
         // Try multiple paths since test working directory varies
         std::vector<std::string> paths = {
-            "intrinsics.st.bc", // Same directory
-            "../intrinsics.st.bc", // Parent directory
-            "../../intrinsics.st.bc", // Two levels up
-            "../../../intrinsics.st.bc" // Three levels up
+            "intrinsics.st.bc",          // Same directory
+            "../intrinsics.st.bc",       // Parent directory
+            "../../intrinsics.st.bc",    // Two levels up
+            "../../../intrinsics.st.bc"  // Three levels up
         };
 
-        for(const auto& bcFilePath : paths)
-        {
+        for (const auto& bcFilePath : paths) {
             library = IntrinsicLibrary::loadFromFile(bcFilePath);
-            if(library)
-            {
+            if (library) {
                 break;
             }
         }
@@ -71,8 +69,7 @@ protected:
     std::shared_ptr<IntrinsicLibrary> library;
 };
 
-TEST_F(IntrinsicFlowTest, LoadIntrinsicLibrary)
-{
+TEST_F(IntrinsicFlowTest, LoadIntrinsicLibrary) {
     // Verify library loaded correctly
     ASSERT_TRUE(library->hasIntrinsic("ReluF32"));
     ASSERT_TRUE(library->hasIntrinsic("ReluF16"));
@@ -84,15 +81,14 @@ TEST_F(IntrinsicFlowTest, LoadIntrinsicLibrary)
     library->printStats();
 }
 
-TEST_F(IntrinsicFlowTest, IntrinsicDefinitionStructure)
-{
+TEST_F(IntrinsicFlowTest, IntrinsicDefinitionStructure) {
     // Test ReluF32 structure
     const Pattern* relu = library->lookup("ReluF32");
     ASSERT_NE(relu, nullptr);
 
     EXPECT_EQ(relu->name, "ReluF32");
-    EXPECT_EQ(relu->arguments.size(), 2); // dest, src
-    EXPECT_EQ(relu->body.size(), 1); // 1 instruction: v_max_f32(dest, src, 0.0)
+    EXPECT_EQ(relu->arguments.size(), 2);  // dest, src
+    EXPECT_EQ(relu->body.size(), 1);       // 1 instruction: v_max_f32(dest, src, 0.0)
     EXPECT_TRUE(relu->pythonBinding);
 
     // Verify arguments
@@ -109,15 +105,14 @@ TEST_F(IntrinsicFlowTest, IntrinsicDefinitionStructure)
     EXPECT_DOUBLE_EQ(relu->body[0].operands[1].floatValue, 0.0);
 }
 
-TEST_F(IntrinsicFlowTest, CreateIntrinsicCall)
-{
+TEST_F(IntrinsicFlowTest, CreateIntrinsicCall) {
     // Create registers for ReluF32(dest=v0, src=v1)
     StinkyRegister v0(RegType::V, 0, 1);
     StinkyRegister v1(RegType::V, 1, 1);
 
     // Create IntrinsicCall
     std::vector<StinkyRegister> args = {v0, v1};
-    IntrinsicCall*              call = IRBase::createIR<IntrinsicCall>("ReluF32", args);
+    IntrinsicCall* call = IRBase::createIR<IntrinsicCall>("ReluF32", args);
 
     EXPECT_EQ(call->getFunctionName(), "ReluF32");
     EXPECT_TRUE(call->isComposite());
@@ -127,8 +122,7 @@ TEST_F(IntrinsicFlowTest, CreateIntrinsicCall)
     call->safeErase();
 }
 
-TEST_F(IntrinsicFlowTest, IntrinsicUsageExample_ReluF32)
-{
+TEST_F(IntrinsicFlowTest, IntrinsicUsageExample_ReluF32) {
     std::cout << "\n=== Example: Using ReluF32 Intrinsic ===\n\n";
 
     // Step 1: Look up the intrinsic
@@ -141,39 +135,28 @@ TEST_F(IntrinsicFlowTest, IntrinsicUsageExample_ReluF32)
 
     // Step 2: Show the arguments
     std::cout << "Arguments:\n";
-    for(const auto& arg : relu->arguments)
-    {
+    for (const auto& arg : relu->arguments) {
         std::cout << "  " << arg.name << ": " << arg.regType << "\n";
     }
     std::cout << "\n";
 
     // Step 3: Show the body instructions
     std::cout << "Body (expansion template):\n";
-    for(const auto& inst : relu->body)
-    {
+    for (const auto& inst : relu->body) {
         std::cout << "  " << inst.destReg << " = " << inst.operation << "(";
-        for(size_t i = 0; i < inst.operands.size(); ++i)
-        {
-            if(i > 0)
-                std::cout << ", ";
+        for (size_t i = 0; i < inst.operands.size(); ++i) {
+            if (i > 0) std::cout << ", ";
 
             const auto& op = inst.operands[i];
-            if(op.type == IntrinsicOperand::Register)
-            {
+            if (op.type == IntrinsicOperand::Register) {
                 std::cout << op.registerName;
-            }
-            else if(op.type == IntrinsicOperand::IntLiteral)
-            {
+            } else if (op.type == IntrinsicOperand::IntLiteral) {
                 std::cout << op.intValue;
-            }
-            else if(op.type == IntrinsicOperand::FloatLiteral)
-            {
+            } else if (op.type == IntrinsicOperand::FloatLiteral) {
                 std::cout << op.floatValue;
-            }
-            else if(op.type == IntrinsicOperand::HexLiteral)
-            {
-                float    floatVal = static_cast<float>(op.floatValue);
-                uint32_t bits     = *reinterpret_cast<uint32_t*>(&floatVal);
+            } else if (op.type == IntrinsicOperand::HexLiteral) {
+                float floatVal = static_cast<float>(op.floatValue);
+                uint32_t bits = *reinterpret_cast<uint32_t*>(&floatVal);
                 std::cout << "0x" << std::hex << bits << std::dec;
             }
         }
@@ -189,8 +172,7 @@ TEST_F(IntrinsicFlowTest, IntrinsicUsageExample_ReluF32)
     std::cout << "=== Example Complete ? ===\n";
 }
 
-TEST_F(IntrinsicFlowTest, IntrinsicUsageExample_ClampF32)
-{
+TEST_F(IntrinsicFlowTest, IntrinsicUsageExample_ClampF32) {
     std::cout << "\n=== Example: Using ClampF32 Intrinsic ===\n\n";
 
     const Pattern* clamp = library->lookup("ClampF32");
@@ -198,40 +180,28 @@ TEST_F(IntrinsicFlowTest, IntrinsicUsageExample_ClampF32)
 
     std::cout << "Intrinsic: " << clamp->name << "\n";
     std::cout << "Arguments: " << clamp->arguments.size() << " (";
-    for(size_t i = 0; i < clamp->arguments.size(); ++i)
-    {
-        if(i > 0)
-            std::cout << ", ";
+    for (size_t i = 0; i < clamp->arguments.size(); ++i) {
+        if (i > 0) std::cout << ", ";
         std::cout << clamp->arguments[i].name;
     }
     std::cout << ")\n\n";
 
     std::cout << "Expansion:\n";
-    for(const auto& inst : clamp->body)
-    {
+    for (const auto& inst : clamp->body) {
         std::cout << "  " << inst.destReg << " = " << inst.operation << "(";
-        for(size_t i = 0; i < inst.operands.size(); ++i)
-        {
-            if(i > 0)
-                std::cout << ", ";
+        for (size_t i = 0; i < inst.operands.size(); ++i) {
+            if (i > 0) std::cout << ", ";
 
             const auto& op = inst.operands[i];
-            if(op.type == IntrinsicOperand::Register)
-            {
+            if (op.type == IntrinsicOperand::Register) {
                 std::cout << op.registerName;
-            }
-            else if(op.type == IntrinsicOperand::IntLiteral)
-            {
+            } else if (op.type == IntrinsicOperand::IntLiteral) {
                 std::cout << op.intValue;
-            }
-            else if(op.type == IntrinsicOperand::FloatLiteral)
-            {
+            } else if (op.type == IntrinsicOperand::FloatLiteral) {
                 std::cout << op.floatValue;
-            }
-            else if(op.type == IntrinsicOperand::HexLiteral)
-            {
-                float    floatVal = static_cast<float>(op.floatValue);
-                uint32_t bits     = *reinterpret_cast<uint32_t*>(&floatVal);
+            } else if (op.type == IntrinsicOperand::HexLiteral) {
+                float floatVal = static_cast<float>(op.floatValue);
+                uint32_t bits = *reinterpret_cast<uint32_t*>(&floatVal);
                 std::cout << "0x" << std::hex << bits << std::dec;
             }
         }

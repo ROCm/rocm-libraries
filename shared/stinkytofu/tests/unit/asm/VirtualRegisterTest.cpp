@@ -25,6 +25,7 @@
 // Tests template-based code generation with register offset remapping
 
 #include <gtest/gtest.h>
+
 #include <vector>
 
 #include "stinkytofu/ir/asm/StinkyRegister.hpp"
@@ -35,17 +36,14 @@ using namespace stinkytofu;
 // StinkyRegister Virtual Register Tests
 // ============================================================================
 
-class VirtualisterTest : public ::testing::Test
-{
-protected:
-    void SetUp() override
-    {
+class VirtualisterTest : public ::testing::Test {
+   protected:
+    void SetUp() override {
         // Nothing to set up for now
     }
 };
 
-TEST_F(VirtualisterTest, VirtualVGPRCreation)
-{
+TEST_F(VirtualisterTest, VirtualVGPRCreation) {
     // Test creating virtual VGPR
     auto vTemp0 = StinkyRegister::Virtual(0);
 
@@ -57,8 +55,7 @@ TEST_F(VirtualisterTest, VirtualVGPRCreation)
     EXPECT_EQ(vTemp0.reg.num, 1);
 }
 
-TEST_F(VirtualisterTest, VirtualVGPRMultipleRegisters)
-{
+TEST_F(VirtualisterTest, VirtualVGPRMultipleRegisters) {
     // Test creating virtual VGPR with multiple consecutive registers
     auto vTemp = StinkyRegister::Virtual(5, 4);
 
@@ -68,8 +65,7 @@ TEST_F(VirtualisterTest, VirtualVGPRMultipleRegisters)
     EXPECT_EQ(vTemp.reg.num, 4);
 }
 
-TEST_F(VirtualisterTest, VirtualSGPRCreation)
-{
+TEST_F(VirtualisterTest, VirtualSGPRCreation) {
     // Test creating virtual SGPR
     auto sTemp = StinkyRegister::VirtualSGPR(2);
 
@@ -81,8 +77,7 @@ TEST_F(VirtualisterTest, VirtualSGPRCreation)
     EXPECT_EQ(sTemp.reg.num, 1);
 }
 
-TEST_F(VirtualisterTest, PhysicalRegisterNotVirtual)
-{
+TEST_F(VirtualisterTest, PhysicalRegisterNotVirtual) {
     // Test that normal registers are not virtual
     StinkyRegister physReg(RegType::V, 10, 1);
 
@@ -92,8 +87,7 @@ TEST_F(VirtualisterTest, PhysicalRegisterNotVirtual)
     EXPECT_EQ(physReg.reg.idx, 10);
 }
 
-TEST_F(VirtualisterTest, LiteralNotVirtual)
-{
+TEST_F(VirtualisterTest, LiteralNotVirtual) {
     // Test that literals are not virtual
     StinkyRegister lit(42);
 
@@ -102,64 +96,58 @@ TEST_F(VirtualisterTest, LiteralNotVirtual)
     EXPECT_EQ(lit.dataType, StinkyRegister::Type::LiteralInt);
 }
 
-TEST_F(VirtualisterTest, WithOffsetVGPR)
-{
+TEST_F(VirtualisterTest, WithOffsetVGPR) {
     // Test applying offset to virtual VGPR
     auto vTemp0 = StinkyRegister::Virtual(0);
-    auto v10    = vTemp0.resolveVirtualToPhysical(10);
+    auto v10 = vTemp0.resolveVirtualToPhysical(10);
 
-    EXPECT_FALSE(v10.isVirtualReg()); // No longer virtual after remapping
+    EXPECT_FALSE(v10.isVirtualReg());  // No longer virtual after remapping
     EXPECT_TRUE(v10.isRegister());
     EXPECT_EQ(v10.reg.type, RegType::V);
     EXPECT_EQ(v10.reg.idx, 10);
     EXPECT_EQ(v10.reg.num, 1);
 }
 
-TEST_F(VirtualisterTest, WithOffsetMultipleRegisters)
-{
+TEST_F(VirtualisterTest, WithOffsetMultipleRegisters) {
     // Test offset with multiple consecutive registers
     auto vTemp = StinkyRegister::Virtual(2, 3);
-    auto v20   = vTemp.resolveVirtualToPhysical(18); // v[2:4] -> v[20:22]
+    auto v20 = vTemp.resolveVirtualToPhysical(18);  // v[2:4] -> v[20:22]
 
     EXPECT_FALSE(v20.isVirtualReg());
     EXPECT_EQ(v20.reg.idx, 20);
     EXPECT_EQ(v20.reg.num, 3);
 }
 
-TEST_F(VirtualisterTest, WithOffsetSGPR)
-{
+TEST_F(VirtualisterTest, WithOffsetSGPR) {
     // Test applying offset to virtual SGPR
     auto sTemp = StinkyRegister::VirtualSGPR(1);
-    auto s5    = sTemp.resolveVirtualToPhysical(4);
+    auto s5 = sTemp.resolveVirtualToPhysical(4);
 
     EXPECT_FALSE(s5.isVirtualReg());
     EXPECT_EQ(s5.reg.type, RegType::S);
     EXPECT_EQ(s5.reg.idx, 5);
 }
 
-TEST_F(VirtualisterTest, WithOffsetOnPhysicalRegisterNoEffect)
-{
+TEST_F(VirtualisterTest, WithOffsetOnPhysicalRegisterNoEffect) {
     // Test that offset has no effect on physical registers
     StinkyRegister physReg(RegType::V, 10, 1);
-    auto           result = physReg.resolveVirtualToPhysical(100);
+    auto result = physReg.resolveVirtualToPhysical(100);
 
-    EXPECT_EQ(result.reg.idx, 10); // Should remain unchanged
+    EXPECT_EQ(result.reg.idx, 10);  // Should remain unchanged
     EXPECT_FALSE(result.isVirtualReg());
 }
 
-TEST_F(VirtualisterTest, WithOffsetOnLiteralNoEffect)
-{
+TEST_F(VirtualisterTest, WithOffsetOnLiteralNoEffect) {
     // Test that offset has no effect on literals
     StinkyRegister lit(42);
-    auto           result = lit.resolveVirtualToPhysical(100);
+    auto result = lit.resolveVirtualToPhysical(100);
 
     EXPECT_EQ(result.dataType, StinkyRegister::Type::LiteralInt);
     EXPECT_EQ(result.getLiteralInt(), 42);
     EXPECT_FALSE(result.isVirtualReg());
 }
 
-TEST_F(VirtualisterTest, MultipleInstantiationsFromSameTemplate)
-{
+TEST_F(VirtualisterTest, MultipleInstantiationsFromSameTemplate) {
     // Test that same virtual register can be remapped to different physical registers
     auto vTemp = StinkyRegister::Virtual(0);
 
@@ -182,8 +170,7 @@ TEST_F(VirtualisterTest, MultipleInstantiationsFromSameTemplate)
 // StinkyInstruction remapRegisters Tests
 // ============================================================================
 
-TEST_F(VirtualisterTest, InstructionRemapDestinationVGPR)
-{
+TEST_F(VirtualisterTest, InstructionRemapDestinationVGPR) {
     // Test the concept: Create virtual registers that would be in an instruction
     auto vDst = StinkyRegister::Virtual(0);
     auto vSrc = StinkyRegister::Virtual(1);
@@ -204,17 +191,16 @@ TEST_F(VirtualisterTest, InstructionRemapDestinationVGPR)
     EXPECT_EQ(mappedSrc.reg.idx, 11);
 }
 
-TEST_F(VirtualisterTest, InstructionRemapMixedVirtualAndPhysical)
-{
+TEST_F(VirtualisterTest, InstructionRemapMixedVirtualAndPhysical) {
     // Test remapping when instruction has both virtual and physical registers
     auto vTemp = StinkyRegister::Virtual(0);
     auto vPhys = StinkyRegister(RegType::V, 100, 1);
-    auto lit   = StinkyRegister(42);
+    auto lit = StinkyRegister(42);
 
     // Remap all with offset 20
     auto mappedTemp = vTemp.resolveVirtualToPhysical(20);
-    auto mappedPhys = vPhys.resolveVirtualToPhysical(20); // Should not change
-    auto mappedLit  = lit.resolveVirtualToPhysical(20); // Should not change
+    auto mappedPhys = vPhys.resolveVirtualToPhysical(20);  // Should not change
+    auto mappedLit = lit.resolveVirtualToPhysical(20);     // Should not change
 
     // Virtual should be remapped
     EXPECT_EQ(mappedTemp.reg.idx, 20);
@@ -229,21 +215,18 @@ TEST_F(VirtualisterTest, InstructionRemapMixedVirtualAndPhysical)
     EXPECT_EQ(mappedLit.getLiteralInt(), 42);
 }
 
-TEST_F(VirtualisterTest, TemplateInstantiationScenario)
-{
+TEST_F(VirtualisterTest, TemplateInstantiationScenario) {
     // Simulate a real-world scenario: activation function template
     // Template: v_add_u32 v0, v1, v2 (virtual registers)
 
     std::vector<StinkyRegister> templateDest = {StinkyRegister::Virtual(0)};
-    std::vector<StinkyRegister> templateSrc
-        = {StinkyRegister::Virtual(1), StinkyRegister::Virtual(2)};
+    std::vector<StinkyRegister> templateSrc = {StinkyRegister::Virtual(1),
+                                               StinkyRegister::Virtual(2)};
 
     // First instantiation: map to v[10:12]
     std::vector<StinkyRegister> inst1Dest, inst1Src;
-    for(auto& reg : templateDest)
-        inst1Dest.push_back(reg.resolveVirtualToPhysical(10));
-    for(auto& reg : templateSrc)
-        inst1Src.push_back(reg.resolveVirtualToPhysical(10));
+    for (auto& reg : templateDest) inst1Dest.push_back(reg.resolveVirtualToPhysical(10));
+    for (auto& reg : templateSrc) inst1Src.push_back(reg.resolveVirtualToPhysical(10));
 
     EXPECT_EQ(inst1Dest[0].reg.idx, 10);
     EXPECT_EQ(inst1Src[0].reg.idx, 11);
@@ -251,10 +234,8 @@ TEST_F(VirtualisterTest, TemplateInstantiationScenario)
 
     // Second instantiation: map to v[20:22]
     std::vector<StinkyRegister> inst2Dest, inst2Src;
-    for(auto& reg : templateDest)
-        inst2Dest.push_back(reg.resolveVirtualToPhysical(20));
-    for(auto& reg : templateSrc)
-        inst2Src.push_back(reg.resolveVirtualToPhysical(20));
+    for (auto& reg : templateDest) inst2Dest.push_back(reg.resolveVirtualToPhysical(20));
+    for (auto& reg : templateSrc) inst2Src.push_back(reg.resolveVirtualToPhysical(20));
 
     EXPECT_EQ(inst2Dest[0].reg.idx, 20);
     EXPECT_EQ(inst2Src[0].reg.idx, 21);
@@ -269,8 +250,7 @@ TEST_F(VirtualisterTest, TemplateInstantiationScenario)
     EXPECT_EQ(templateSrc[1].reg.idx, 2u | StinkyRegister::kVirtualBit);
 }
 
-TEST_F(VirtualisterTest, SeparateVGPRAndSGPROffsets)
-{
+TEST_F(VirtualisterTest, SeparateVGPRAndSGPROffsets) {
     // Test that VGPR and SGPR can have different offsets
     auto vTemp = StinkyRegister::Virtual(0);
     auto sTemp = StinkyRegister::VirtualSGPR(0);
@@ -289,18 +269,16 @@ TEST_F(VirtualisterTest, SeparateVGPRAndSGPROffsets)
 // Edge Cases and Validation
 // ============================================================================
 
-TEST_F(VirtualisterTest, ZeroOffset)
-{
+TEST_F(VirtualisterTest, ZeroOffset) {
     // Test that zero offset still marks register as non-virtual
     auto vTemp = StinkyRegister::Virtual(5);
-    auto v5    = vTemp.resolveVirtualToPhysical(0);
+    auto v5 = vTemp.resolveVirtualToPhysical(0);
 
     EXPECT_FALSE(v5.isVirtualReg());
     EXPECT_EQ(v5.reg.idx, 5);
 }
 
-TEST_F(VirtualisterTest, NegativeIndexInVirtual)
-{
+TEST_F(VirtualisterTest, NegativeIndexInVirtual) {
     // Edge case: can we create virtual register with negative index?
     // (This might be implementation-defined behavior)
     auto vTemp = StinkyRegister::Virtual(-1);
@@ -310,8 +288,7 @@ TEST_F(VirtualisterTest, NegativeIndexInVirtual)
     EXPECT_TRUE(vTemp.isVirtualReg());
 }
 
-TEST_F(VirtualisterTest, LargeOffset)
-{
+TEST_F(VirtualisterTest, LargeOffset) {
     // Test with large offset values
     auto vTemp = StinkyRegister::Virtual(10);
     auto v1000 = vTemp.resolveVirtualToPhysical(990);
@@ -320,13 +297,12 @@ TEST_F(VirtualisterTest, LargeOffset)
     EXPECT_FALSE(v1000.isVirtualReg());
 }
 
-TEST_F(VirtualisterTest, RegisterEquality)
-{
+TEST_F(VirtualisterTest, RegisterEquality) {
     // Test that remapped registers compare correctly
     auto vTemp = StinkyRegister::Virtual(0);
-    auto v10a  = vTemp.resolveVirtualToPhysical(10);
-    auto v10b  = vTemp.resolveVirtualToPhysical(10);
-    auto v20   = vTemp.resolveVirtualToPhysical(20);
+    auto v10a = vTemp.resolveVirtualToPhysical(10);
+    auto v10b = vTemp.resolveVirtualToPhysical(10);
+    auto v20 = vTemp.resolveVirtualToPhysical(20);
 
     // Same physical register
     EXPECT_TRUE(v10a == v10b);

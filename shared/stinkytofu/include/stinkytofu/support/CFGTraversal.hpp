@@ -30,54 +30,48 @@
 
 #include "stinkytofu/core/Function.hpp"
 
-namespace stinkytofu
-{
-    //----------------------------------------------------------------------
-    // CFG Traversal Utilities
-    //----------------------------------------------------------------------
+namespace stinkytofu {
+//----------------------------------------------------------------------
+// CFG Traversal Utilities
+//----------------------------------------------------------------------
 
-    // Traverse BasicBlocks in reverse post-order (RPO) starting from entry.
-    // RPO ensures that for most control flow, a block is visited after
-    // its predecessors (except for back edges in loops).
-    //
-    // This traversal order is optimal for forward dataflow analysis and
-    // ensures that information naturally flows from definitions to uses.
-    //
-    // Example usage:
-    //   traverseCFGInRPO(function, [&](BasicBlock* bb) {
-    //       // Process each BasicBlock in RPO order
-    //       processBlock(bb);
-    //   });
-    template <typename Visitor>
-    void traverseCFGInRPO(Function& func, Visitor&& visitor)
-    {
-        if(!func.getEntryBlock())
-            return;
+// Traverse BasicBlocks in reverse post-order (RPO) starting from entry.
+// RPO ensures that for most control flow, a block is visited after
+// its predecessors (except for back edges in loops).
+//
+// This traversal order is optimal for forward dataflow analysis and
+// ensures that information naturally flows from definitions to uses.
+//
+// Example usage:
+//   traverseCFGInRPO(function, [&](BasicBlock* bb) {
+//       // Process each BasicBlock in RPO order
+//       processBlock(bb);
+//   });
+template <typename Visitor>
+void traverseCFGInRPO(Function& func, Visitor&& visitor) {
+    if (!func.getEntryBlock()) return;
 
-        // Post-order DFS traversal
-        std::vector<BasicBlock*>        postOrder;
-        std::unordered_set<BasicBlock*> visited;
+    // Post-order DFS traversal
+    std::vector<BasicBlock*> postOrder;
+    std::unordered_set<BasicBlock*> visited;
 
-        std::function<void(BasicBlock*)> dfs = [&](BasicBlock* bb) {
-            if(!bb || visited.count(bb))
-                return;
-            visited.insert(bb);
+    std::function<void(BasicBlock*)> dfs = [&](BasicBlock* bb) {
+        if (!bb || visited.count(bb)) return;
+        visited.insert(bb);
 
-            // Visit successors first (post-order)
-            for(BasicBlock* succ : bb->getSuccessors())
-            {
-                dfs(succ);
-            }
-            postOrder.push_back(bb);
-        };
-
-        dfs(func.getEntryBlock());
-
-        // Reverse post-order
-        for(auto it = postOrder.rbegin(); it != postOrder.rend(); ++it)
-        {
-            visitor(*it);
+        // Visit successors first (post-order)
+        for (BasicBlock* succ : bb->getSuccessors()) {
+            dfs(succ);
         }
-    }
+        postOrder.push_back(bb);
+    };
 
-} // namespace stinkytofu
+    dfs(func.getEntryBlock());
+
+    // Reverse post-order
+    for (auto it = postOrder.rbegin(); it != postOrder.rend(); ++it) {
+        visitor(*it);
+    }
+}
+
+}  // namespace stinkytofu

@@ -29,21 +29,21 @@
  * into concrete LogicalInstructions using definitions from intrinsics.st.bc.
  */
 
-#include "stinkytofu/transforms/logical/IntrinsicExpansionPass.hpp"
-#include "stinkytofu/ir/logical/IntrinsicCall.hpp"
-#include "stinkytofu/ir/logical/IntrinsicRegistry.hpp"
+#include <gtest/gtest.h>
+
+#include <cstring>
+
 #include "stinkytofu/core/IRBase.hpp"
 #include "stinkytofu/core/PassManager.hpp"
-#include <cstring>
-#include <gtest/gtest.h>
+#include "stinkytofu/ir/logical/IntrinsicCall.hpp"
+#include "stinkytofu/ir/logical/IntrinsicRegistry.hpp"
+#include "stinkytofu/transforms/logical/IntrinsicExpansionPass.hpp"
 
 using namespace stinkytofu;
 
-class IntrinsicExpansionPassTest : public ::testing::Test
-{
-protected:
-    void SetUp() override
-    {
+class IntrinsicExpansionPassTest : public ::testing::Test {
+   protected:
+    void SetUp() override {
         // Verify intrinsic registry is initialized
         auto& registry = IntrinsicRegistry::instance();
         ASSERT_TRUE(registry.isInitialized())
@@ -54,12 +54,11 @@ protected:
     }
 
     GemmTileConfig defaultConfig = {{9, 4, 2}, 128, 128, 64, 0, 0, 0};
-    PassContext    passCtx;
+    PassContext passCtx;
 };
 
-TEST_F(IntrinsicExpansionPassTest, ExpandSimpleIntrinsic)
-{
-    Function    func("kernel");
+TEST_F(IntrinsicExpansionPassTest, ExpandSimpleIntrinsic) {
+    Function func("kernel");
     BasicBlock* bb = func.createBasicBlock("entry");
 
     // Create an IntrinsicCall for "ReluF32"
@@ -85,13 +84,10 @@ TEST_F(IntrinsicExpansionPassTest, ExpandSimpleIntrinsic)
 
     // Verify no IntrinsicCall remains
     bool hasIntrinsicCall = false;
-    for(auto& ir : *bb)
-    {
-        if(ir.getType() == IRBase::IRType::LogicalIR)
-        {
+    for (auto& ir : *bb) {
+        if (ir.getType() == IRBase::IRType::LogicalIR) {
             auto* logical = static_cast<LogicalInstruction*>(&ir);
-            if(std::strcmp(logical->getLogicalName(), "IntrinsicCall") == 0)
-            {
+            if (std::strcmp(logical->getLogicalName(), "IntrinsicCall") == 0) {
                 hasIntrinsicCall = true;
                 break;
             }
@@ -101,19 +97,16 @@ TEST_F(IntrinsicExpansionPassTest, ExpandSimpleIntrinsic)
 
     // Dump expanded instructions for debugging
     std::cout << "Expanded ReluF32 into " << numInsts << " instructions:\n";
-    for(auto& ir : *bb)
-    {
-        if(ir.getType() == IRBase::IRType::LogicalIR)
-        {
+    for (auto& ir : *bb) {
+        if (ir.getType() == IRBase::IRType::LogicalIR) {
             auto* logical = static_cast<LogicalInstruction*>(&ir);
             std::cout << "  - " << logical->getLogicalName() << "\n";
         }
     }
 }
 
-TEST_F(IntrinsicExpansionPassTest, UnknownIntrinsicFails)
-{
-    Function    func("kernel");
+TEST_F(IntrinsicExpansionPassTest, UnknownIntrinsicFails) {
+    Function func("kernel");
     BasicBlock* bb = func.createBasicBlock("entry");
 
     // Create an IntrinsicCall for non-existent intrinsic
@@ -128,13 +121,10 @@ TEST_F(IntrinsicExpansionPassTest, UnknownIntrinsicFails)
 
     // IntrinsicCall should still be there (expansion failed)
     bool hasIntrinsicCall = false;
-    for(auto& ir : *bb)
-    {
-        if(ir.getType() == IRBase::IRType::LogicalIR)
-        {
+    for (auto& ir : *bb) {
+        if (ir.getType() == IRBase::IRType::LogicalIR) {
             auto* logical = static_cast<LogicalInstruction*>(&ir);
-            if(std::strcmp(logical->getLogicalName(), "IntrinsicCall") == 0)
-            {
+            if (std::strcmp(logical->getLogicalName(), "IntrinsicCall") == 0) {
                 hasIntrinsicCall = true;
                 break;
             }
@@ -143,9 +133,8 @@ TEST_F(IntrinsicExpansionPassTest, UnknownIntrinsicFails)
     EXPECT_TRUE(hasIntrinsicCall) << "IntrinsicCall should remain when expansion fails";
 }
 
-TEST_F(IntrinsicExpansionPassTest, MultipleIntrinsicCalls)
-{
-    Function    func("kernel");
+TEST_F(IntrinsicExpansionPassTest, MultipleIntrinsicCalls) {
+    Function func("kernel");
     BasicBlock* bb = func.createBasicBlock("entry");
 
     // Add multiple IntrinsicCalls
@@ -171,13 +160,10 @@ TEST_F(IntrinsicExpansionPassTest, MultipleIntrinsicCalls)
 
     // Verify no IntrinsicCalls remain
     size_t intrinsicCallCount = 0;
-    for(auto& ir : *bb)
-    {
-        if(ir.getType() == IRBase::IRType::LogicalIR)
-        {
+    for (auto& ir : *bb) {
+        if (ir.getType() == IRBase::IRType::LogicalIR) {
             auto* logical = static_cast<LogicalInstruction*>(&ir);
-            if(std::strcmp(logical->getLogicalName(), "IntrinsicCall") == 0)
-            {
+            if (std::strcmp(logical->getLogicalName(), "IntrinsicCall") == 0) {
                 intrinsicCallCount++;
             }
         }

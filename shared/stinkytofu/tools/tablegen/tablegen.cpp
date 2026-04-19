@@ -21,26 +21,23 @@
  *
  * ************************************************************************ */
 
-#include <iostream> // fixme: don't use iostream.
+#include <iostream>  // fixme: don't use iostream.
 #include <string>
 
 #include "gfx/GpuArchManager.hpp"
 
-namespace stinkytofu
-{
-    bool genAllArchRocisaMappings(GpuArchManager& manager, const std::string& outdir);
-    bool genLogicalToAsmMappings(GpuArchManager& manager, const std::string& outdir);
-    bool genPeepholePatterns(const std::string& patternFile, const std::string& outdir);
-    bool genLogicalIR(const std::string& outdir);
-    bool genInstructions(const std::string& arch,
-                         const std::string& inputDir,
-                         const std::string& outputDir);
-}
+namespace stinkytofu {
+bool genAllArchRocisaMappings(GpuArchManager& manager, const std::string& outdir);
+bool genLogicalToAsmMappings(GpuArchManager& manager, const std::string& outdir);
+bool genPeepholePatterns(const std::string& patternFile, const std::string& outdir);
+bool genLogicalIR(const std::string& outdir);
+bool genInstructions(const std::string& arch, const std::string& inputDir,
+                     const std::string& outputDir);
+}  // namespace stinkytofu
 
 using namespace stinkytofu;
 
-void usage()
-{
+void usage() {
     std::cout
         << "Usage: tablegen <outdir> <hardwareDir>\n"
         << "       tablegen --gen-instructions --arch=<gfx> --input-dir=<dir> --output-dir=<dir>\n"
@@ -62,32 +59,28 @@ void usage()
            "--output-dir=hardware/generated\n";
 }
 
-int main(int argc, char** argv)
-{
+int main(int argc, char** argv) {
     constexpr int SUCCESS = 0;
     constexpr int FAILURE = 1;
 
     // Check for --gen-instructions mode
-    if(argc > 1 && std::string(argv[1]) == "--gen-instructions")
-    {
+    if (argc > 1 && std::string(argv[1]) == "--gen-instructions") {
         // Parse arguments
         std::string arch;
         std::string inputDir;
         std::string outputDir;
 
-        for(int i = 2; i < argc; ++i)
-        {
+        for (int i = 2; i < argc; ++i) {
             std::string arg = argv[i];
-            if(arg.find("--arch=") == 0)
+            if (arg.find("--arch=") == 0)
                 arch = arg.substr(7);
-            else if(arg.find("--input-dir=") == 0)
+            else if (arg.find("--input-dir=") == 0)
                 inputDir = arg.substr(12);
-            else if(arg.find("--output-dir=") == 0)
+            else if (arg.find("--output-dir=") == 0)
                 outputDir = arg.substr(13);
         }
 
-        if(arch.empty() || inputDir.empty() || outputDir.empty())
-        {
+        if (arch.empty() || inputDir.empty() || outputDir.empty()) {
             std::cerr << "Error: Missing required arguments for --gen-instructions\n\n";
             usage();
             return FAILURE;
@@ -98,12 +91,11 @@ int main(int argc, char** argv)
     }
 
     // Default mode
-    if(argc < 3)
-    {
+    if (argc < 3) {
         usage();
         return FAILURE;
     }
-    std::string outdir      = argv[1];
+    std::string outdir = argv[1];
     std::string hardwareDir = argv[2];
 
     bool success = true;
@@ -112,8 +104,7 @@ int main(int argc, char** argv)
 
     success &= GpuArchManager::initAllArchs(manager);
 
-    if(!success)
-    {
+    if (!success) {
         std::cerr << "Failed to initialize all architectures\n";
         return FAILURE;
     }
@@ -123,13 +114,12 @@ int main(int argc, char** argv)
     success &= genLogicalToAsmMappings(manager, outdir);
 
     // Generate peephole optimization patterns (assembly IR)
-    std::string asmPatternFile
-        = hardwareDir + "/../src/transforms/asm/PeepholePatterns.pattern";
+    std::string asmPatternFile = hardwareDir + "/../src/transforms/asm/PeepholePatterns.pattern";
     success &= genPeepholePatterns(asmPatternFile, outdir);
 
     // Generate high-level IR optimization patterns
-    std::string hlirPatternFile
-        = hardwareDir + "/../src/transforms/logical/LogicalIRPatterns.pattern";
+    std::string hlirPatternFile =
+        hardwareDir + "/../src/transforms/logical/LogicalIRPatterns.pattern";
     success &= genPeepholePatterns(hlirPatternFile, outdir);
 
     // Generate high-level IR instruction classes and mappings

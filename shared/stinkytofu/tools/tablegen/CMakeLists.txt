@@ -99,7 +99,10 @@ add_custom_command(
     COMMENT "Generating instruction metadata and ISA from .def files..."
     VERBATIM
 )
-add_custom_target(instruction_generated DEPENDS ${INSTRUCTION_GEN_FILES})
+add_custom_target(instruction_generated
+    DEPENDS ${INSTRUCTION_GEN_FILES}
+    COMMENT "Generate instruction metadata from .def files"
+)
 
 # Remaining tablegen outputs (ISA, patterns, etc.); tablegen links gfxisa
 set(TABLEGEN_OTHER_FILES ${TABLEGEN_GENERATED_FILES})
@@ -119,6 +122,7 @@ add_custom_command(
 # Custom target that depends on all generated files
 add_custom_target(tablegen_generated
     DEPENDS ${TABLEGEN_GENERATED_FILES}
+    COMMENT "Generate all tablegen outputs"
 )
 
 # Export variables for parent scope

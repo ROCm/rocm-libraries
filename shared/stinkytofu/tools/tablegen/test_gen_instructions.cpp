@@ -41,21 +41,17 @@
 #define STINKYTOFU_GETPID getpid
 #endif
 
-namespace stinkytofu
-{
-    extern bool genInstructions(const std::string& arch,
-                                const std::string& inputDir,
-                                const std::string& outputDir);
+namespace stinkytofu {
+extern bool genInstructions(const std::string& arch, const std::string& inputDir,
+                            const std::string& outputDir);
 }
 
 using namespace stinkytofu;
 
 // Helper: Check if file exists and contains expected string
-bool fileContains(const std::string& filepath, const std::string& expected)
-{
+bool fileContains(const std::string& filepath, const std::string& expected) {
     std::ifstream ifs(filepath);
-    if(!ifs)
-    {
+    if (!ifs) {
         std::cerr << "Error: Cannot open " << filepath << "\n";
         return false;
     }
@@ -64,8 +60,7 @@ bool fileContains(const std::string& filepath, const std::string& expected)
     return content.find(expected) != std::string::npos;
 }
 
-int main(int argc, char** argv)
-{
+int main(int argc, char** argv) {
     std::cout << "Running instruction generation test...\n";
 
     // Get source directory (passed as argument or use current dir)
@@ -74,13 +69,12 @@ int main(int argc, char** argv)
     // Output under build folder (WORKING_DIRECTORY is CMAKE_BINARY_DIR) with unique subdir
     // to avoid collisions when tests run in parallel and to keep paths portable.
     std::filesystem::path buildDir = std::filesystem::current_path();
-    std::ostringstream    uniqueName;
+    std::ostringstream uniqueName;
     uniqueName << "test_gen_instructions_" << STINKYTOFU_GETPID();
     std::filesystem::path outputPath = buildDir / uniqueName.str();
-    std::string           outputDir  = outputPath.string();
+    std::string outputDir = outputPath.string();
 
-    if(!std::filesystem::create_directories(outputPath))
-    {
+    if (!std::filesystem::create_directories(outputPath)) {
         std::cerr << "FAIL: Could not create output directory " << outputDir << "\n";
         return 1;
     }
@@ -88,50 +82,45 @@ int main(int argc, char** argv)
     // Test Gfx1250
     {
         std::string inputDir = sourceDir + "/hardware/src/gfx";
-        std::string arch     = "Gfx1250";
+        std::string arch = "Gfx1250";
 
         std::cout << "\nTesting " << arch << "...\n";
 
         bool success = genInstructions(arch, inputDir, outputDir);
-        if(!success)
-        {
+        if (!success) {
             std::cerr << "FAIL: genInstructions returned false for " << arch << "\n";
             return 1;
         }
 
         // Check generated files exist
         std::string costsFile = outputDir + "/" + arch + "_costs.inc";
-        std::string operFile  = outputDir + "/" + arch + "_operands.inc";
-        std::string initFile  = outputDir + "/" + arch + "_init.inc";
+        std::string operFile = outputDir + "/" + arch + "_operands.inc";
+        std::string initFile = outputDir + "/" + arch + "_init.inc";
 
-        if(!std::filesystem::exists(costsFile))
-        {
+        if (!std::filesystem::exists(costsFile)) {
             std::cerr << "FAIL: Cost file not generated: " << costsFile << "\n";
             return 1;
         }
 
-        if(!std::filesystem::exists(operFile))
-        {
+        if (!std::filesystem::exists(operFile)) {
             std::cerr << "FAIL: Operand file not generated: " << operFile << "\n";
             return 1;
         }
 
-        if(!std::filesystem::exists(initFile))
-        {
+        if (!std::filesystem::exists(initFile)) {
             std::cerr << "FAIL: Init file not generated: " << initFile << "\n";
             return 1;
         }
 
         // Check init file contains v_add_f32 (all instructions should be in init file)
-        if(!fileContains(initFile, "v_add_f32"))
-        {
+        if (!fileContains(initFile, "v_add_f32")) {
             std::cerr << "FAIL: Init file doesn't contain v_add_f32\n";
             return 1;
         }
 
-        // Check cost file has header (cost file may not contain all instructions, only non-default costs)
-        if(!fileContains(costsFile, "InstructionCost"))
-        {
+        // Check cost file has header (cost file may not contain all instructions, only non-default
+        // costs)
+        if (!fileContains(costsFile, "InstructionCost")) {
             std::cerr << "FAIL: Cost file missing header\n";
             return 1;
         }
@@ -142,7 +131,7 @@ int main(int argc, char** argv)
     // Clean up the temporary output directory
     std::error_code ec;
     std::filesystem::remove_all(outputPath, ec);
-    if(ec)
+    if (ec)
         std::cerr << "Note: Could not remove test output dir " << outputDir << ": " << ec.message()
                   << "\n";
 

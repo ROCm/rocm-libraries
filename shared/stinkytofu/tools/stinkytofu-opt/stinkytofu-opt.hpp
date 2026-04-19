@@ -22,11 +22,17 @@
  * ************************************************************************ */
 #pragma once
 
+#include <functional>
+#include <vector>
+
 #include "stinkytofu/core/PassManager.hpp"
+#include "stinkytofu/ir/DumpStinkyFunctionPass.hpp"
 #include "stinkytofu/pipeline/ScopeAdaptor.hpp"
 #include "stinkytofu/support/DebugPrintInstrumentation.hpp"
-#include "stinkytofu/ir/DumpStinkyFunctionPass.hpp"
 #include "stinkytofu/transforms/asm/BuildDefUseChain.hpp"
+#include "stinkytofu/transforms/asm/DeadCodeEliminationPass.hpp"
+#include "stinkytofu/transforms/asm/PeepholeOptimizationPass.hpp"
+#include "stinkytofu/transforms/asm/RedundantMovEliminationPass.hpp"
 #include "stinkytofu/transforms/asm/ScheduleFirstLRsPass.hpp"
 #include "stinkytofu/transforms/asm/ScheduleLastLRsPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyBuildImplicitDependencyPass.hpp"
@@ -34,45 +40,37 @@
 #include "stinkytofu/transforms/asm/StinkyDAGSchedulerPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyRemoveWaitCntPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyWaitCntInsertionPass.hpp"
-#include "stinkytofu/transforms/asm/PeepholeOptimizationPass.hpp"
-#include "stinkytofu/transforms/asm/DeadCodeEliminationPass.hpp"
-#include "stinkytofu/transforms/asm/RedundantMovEliminationPass.hpp"
-
-#include <functional>
-#include <vector>
 
 using namespace stinkytofu;
 
 // Structure to hold pass information
-struct PassInfo
-{
-    const char*                            name;
+struct PassInfo {
+    const char* name;
     std::function<std::unique_ptr<Pass>()> creator;
 };
 
 // List of available passes
-const std::vector<PassInfo> availablePasses
-    = {{"StinkyDAGSchedulerPass", []() { return createStinkyDAGSchedulerPass(); }},
-       {"StinkyUnrollWaitCntPass", []() { return createStinkyUnrollWaitCntPass(); }},
-       {"StinkyBuildImplicitDependencyPass",
-        []() { return createStinkyBuildImplicitDependencyPass(); }},
-       {"StinkyRemoveWaitCntPass", []() { return createStinkyRemoveWaitCntPass(); }},
-       {"StinkyWaitCntInsertionPass", []() { return createStinkyWaitCntInsertionPass(); }},
-       {"ScheduleLastLRsPass", []() { return createScheduleLastLRsPass(); }},
-       {"ScheduleFirstLRsPass", []() { return createScheduleFirstLRsPass(); }},
-       {"BuildUseDefChainPass", []() { return createBuildUseDefChainPass(); }},
-       {"DumpStinkyFunctionPass",
-        []() { return createDumpStinkyFunctionPass({.stirPath = "dump_function.stir"}); }},
-       {"PeepholeOptimizationPass", []() { return createPeepholeOptimizationPass(); }},
-       {"DeadCodeEliminationPass", []() { return createDeadCodeEliminationPass(); }},
-       {"RedundantMovEliminationPass", []() { return createRedundantMovEliminationPass(); }}};
+const std::vector<PassInfo> availablePasses = {
+    {"StinkyDAGSchedulerPass", []() { return createStinkyDAGSchedulerPass(); }},
+    {"StinkyUnrollWaitCntPass", []() { return createStinkyUnrollWaitCntPass(); }},
+    {"StinkyBuildImplicitDependencyPass",
+     []() { return createStinkyBuildImplicitDependencyPass(); }},
+    {"StinkyRemoveWaitCntPass", []() { return createStinkyRemoveWaitCntPass(); }},
+    {"StinkyWaitCntInsertionPass", []() { return createStinkyWaitCntInsertionPass(); }},
+    {"ScheduleLastLRsPass", []() { return createScheduleLastLRsPass(); }},
+    {"ScheduleFirstLRsPass", []() { return createScheduleFirstLRsPass(); }},
+    {"BuildUseDefChainPass", []() { return createBuildUseDefChainPass(); }},
+    {"DumpStinkyFunctionPass",
+     []() { return createDumpStinkyFunctionPass({.stirPath = "dump_function.stir"}); }},
+    {"PeepholeOptimizationPass", []() { return createPeepholeOptimizationPass(); }},
+    {"DeadCodeEliminationPass", []() { return createDeadCodeEliminationPass(); }},
+    {"RedundantMovEliminationPass", []() { return createRedundantMovEliminationPass(); }}};
 
 /**
  * Create default DebugPrintInstrumentation for stinkytofu-opt.
  */
-std::shared_ptr<stinkytofu::PassInstrumentation> createDebugPrintInstrumentation()
-{
-    auto streams     = std::make_shared<stinkytofu::DebugOutputStreams>();
+std::shared_ptr<stinkytofu::PassInstrumentation> createDebugPrintInstrumentation() {
+    auto streams = std::make_shared<stinkytofu::DebugOutputStreams>();
     auto debugConfig = std::make_unique<stinkytofu::PassManagerDebugConfig>();
     debugConfig->setPrintBeforeAll(true);
     debugConfig->setPrintAfterAll(true);
@@ -84,26 +82,18 @@ std::shared_ptr<stinkytofu::PassInstrumentation> createDebugPrintInstrumentation
 /**
  * Get default PassFeatureConfig configuration.
  */
-stinkytofu::PassFeatureConfig getPassFeatureConfig()
-{
+stinkytofu::PassFeatureConfig getPassFeatureConfig() {
     stinkytofu::PassFeatureConfig config;
     config.barrierConfig.unrollMovableBarrier = true;
-    config.loopConfig.unrollGemm              = true;
-    config.dagFeatures.distributeGlobalRead   = true;
+    config.loopConfig.unrollGemm = true;
+    config.dagFeatures.distributeGlobalRead = true;
     return config;
 }
 
 /**
  * Set default kernel configuration for the PassManager.
  */
-void setKernelConfig(stinkytofu::PassManager& passManager, const std::array<int, 3>& arch)
-{
-    passManager.setKernelConfig(arch /* arch */,
-                                0 /* ta0 */,
-                                0 /* tb0 */,
-                                0 /* tm0 */,
-                                0 /* nGRA */,
-                                0 /* nGRB */,
-                                0 /* nGRM */,
-                                0 /* numWaves */);
+void setKernelConfig(stinkytofu::PassManager& passManager, const std::array<int, 3>& arch) {
+    passManager.setKernelConfig(arch /* arch */, 0 /* ta0 */, 0 /* tb0 */, 0 /* tm0 */,
+                                0 /* nGRA */, 0 /* nGRB */, 0 /* nGRM */, 0 /* numWaves */);
 }

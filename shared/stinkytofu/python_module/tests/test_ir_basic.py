@@ -1,12 +1,13 @@
 """
 Basic tests for stinkytofu high-level IR Python bindings with shared_ptr
 """
+
 import pytest
 import sys
 import os
 
 # Add the build directory to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../build/lib'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../build/lib"))
 
 import stinkytofu
 
@@ -152,7 +153,7 @@ class TestSpecialInstructions:
             acc=acc,
             a=v0,
             b=v1,
-            comment="16x16x16 MFMA"
+            comment="16x16x16 MFMA",
         )
         module.add(mfma)
 
@@ -243,10 +244,21 @@ class TestComplexKernel:
 
         # Compute loop
         module.add(stinkytofu.Label("compute_loop"))
-        module.add(stinkytofu.MFMA(
-            "f32", "f32", 16, 16, 16, 1, False,
-            acc, v0, v2, comment="Matrix multiply"
-        ))
+        module.add(
+            stinkytofu.MFMA(
+                "f32",
+                "f32",
+                16,
+                16,
+                16,
+                1,
+                False,
+                acc,
+                v0,
+                v2,
+                comment="Matrix multiply",
+            )
+        )
         module.add(stinkytofu.VAddF32(v0, v0, v1, comment="Update A ptr"))
         module.add(stinkytofu.VAddF32(v2, v2, v3, comment="Update B ptr"))
 

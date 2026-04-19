@@ -22,44 +22,42 @@
  * ************************************************************************ */
 #pragma once
 
-#include "stinkytofu/core/Function.hpp"
-
 #include <unordered_map>
 #include <vector>
 
-namespace stinkytofu
-{
-    /// Dominator-tree and dominance-frontier analysis for a Function's CFG.
-    ///
-    /// Computed via the Cooper-Harvey-Kennedy iterative algorithm:
-    ///   - RPO ordering of basic blocks
-    ///   - Immediate dominator tree (indexed by RPO position)
-    ///   - Dominance frontiers (indexed by RPO position)
-    ///
-    /// Time: O(N*E) worst case; near-linear for reducible CFGs.
-    ///       N = blocks, E = CFG edges.
-    struct DominanceInfo
-    {
-        static constexpr unsigned kUndef = ~0u;
+#include "stinkytofu/core/Function.hpp"
 
-        /// Basic blocks in reverse post-order.
-        std::vector<BasicBlock*> rpo;
+namespace stinkytofu {
+/// Dominator-tree and dominance-frontier analysis for a Function's CFG.
+///
+/// Computed via the Cooper-Harvey-Kennedy iterative algorithm:
+///   - RPO ordering of basic blocks
+///   - Immediate dominator tree (indexed by RPO position)
+///   - Dominance frontiers (indexed by RPO position)
+///
+/// Time: O(N*E) worst case; near-linear for reducible CFGs.
+///       N = blocks, E = CFG edges.
+struct DominanceInfo {
+    static constexpr unsigned kUndef = ~0u;
 
-        /// Map from BasicBlock* to its RPO index.
-        std::unordered_map<const BasicBlock*, unsigned> rpoIndex;
+    /// Basic blocks in reverse post-order.
+    std::vector<BasicBlock*> rpo;
 
-        /// Immediate dominator of each block, indexed by RPO position.
-        /// Convention: idom[0] = 0 (entry dominates itself).
-        std::vector<unsigned> idom;
+    /// Map from BasicBlock* to its RPO index.
+    std::unordered_map<const BasicBlock*, unsigned> rpoIndex;
 
-        /// Dominance frontier of each block, indexed by RPO position.
-        /// df[b] = { j : b dominates a predecessor of j but does not
-        ///               strictly dominate j }
-        std::vector<std::vector<unsigned>> df;
-    };
+    /// Immediate dominator of each block, indexed by RPO position.
+    /// Convention: idom[0] = 0 (entry dominates itself).
+    std::vector<unsigned> idom;
 
-    /// Compute dominator tree and dominance frontiers for the given function.
-    /// Returns an empty DominanceInfo if the function has no blocks.
-    DominanceInfo computeDominanceInfo(Function& func);
+    /// Dominance frontier of each block, indexed by RPO position.
+    /// df[b] = { j : b dominates a predecessor of j but does not
+    ///               strictly dominate j }
+    std::vector<std::vector<unsigned>> df;
+};
 
-} // namespace stinkytofu
+/// Compute dominator tree and dominance frontiers for the given function.
+/// Returns an empty DominanceInfo if the function has no blocks.
+DominanceInfo computeDominanceInfo(Function& func);
+
+}  // namespace stinkytofu

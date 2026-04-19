@@ -117,4 +117,3 @@ int processIR(const std::string& irText) {
 ## Future Error Codes
 
 As the library evolves, additional error codes may be added to 'StinkyErrorCode'. Always check the return value against 'SUCCESS' rather than assuming any non-zero value is an error, as error codes may be expanded in the future.
-

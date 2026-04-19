@@ -302,4 +302,3 @@ if (baseOffset + requiredVGPRs <= availableVGPRs) {
 - [StinkyAsmEmitter User Guide](asm-emitter.md) - Converting IR to assembly
 - API Reference: 'include/stinkytofu/ir/asm/StinkyRegister.hpp'
 - Unit Tests: 'tests/unit/VirtualisterTest.cpp', 'tests/unit/VirtualisterRemappingTest.cpp'
-

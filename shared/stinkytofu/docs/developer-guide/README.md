@@ -82,4 +82,3 @@ Before working on library development, you should be familiar with:
 - [User Guide](../user-guide/) - For using the library
 - [TableGen Tool](../../tools/tablegen/README.md) - Code generation for instruction tables
 - [Instruction DEF_T System](../design/instruction-def-t-system.md) - Design doc for .def -> tablegen -> generated .inc (no manual DEF_T in .cpp)
-

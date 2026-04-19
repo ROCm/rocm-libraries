@@ -33,27 +33,25 @@
 
 #include <gtest/gtest.h>
 
-#include "stinkytofu/serialization/asm/PatternParser.hpp"
-
 #include <fstream>
 #include <sstream>
 #include <string>
+
+#include "stinkytofu/serialization/asm/PatternParser.hpp"
 
 using namespace stinkytofu;
 
 /**
  * Test fixture for Pattern Parser tests
  */
-class PatternParserTest : public ::testing::Test
-{
-protected:
+class PatternParserTest : public ::testing::Test {
+   protected:
     /**
      * Helper to parse pattern from string
      */
-    std::vector<Pattern> parsePatternString(const std::string& input)
-    {
+    std::vector<Pattern> parsePatternString(const std::string& input) {
         // Create temporary file
-        const char*   tmpFile = "/tmp/test_pattern.pattern";
+        const char* tmpFile = "/tmp/test_pattern.pattern";
         std::ofstream out(tmpFile);
         out << input;
         out.close();
@@ -70,10 +68,9 @@ protected:
     /**
      * Helper to parse pattern from string with diagnostics
      */
-    PatternParseResult parsePatternStringWithDiagnostics(const std::string& input)
-    {
+    PatternParseResult parsePatternStringWithDiagnostics(const std::string& input) {
         // Create temporary file
-        const char*   tmpFile = "/tmp/test_pattern_diag.pattern";
+        const char* tmpFile = "/tmp/test_pattern_diag.pattern";
         std::ofstream out(tmpFile);
         out << input;
         out.close();
@@ -92,8 +89,7 @@ protected:
 // HAPPY PATH TESTS - Valid Patterns
 // ============================================================================
 
-TEST_F(PatternParserTest, ParsesSimplePeepholePattern)
-{
+TEST_F(PatternParserTest, ParsesSimplePeepholePattern) {
     // Simplified test - just check pattern structure is recognized
     const std::string input = R"(
         peephole pattern AddZeroElimination {
@@ -121,8 +117,7 @@ TEST_F(PatternParserTest, ParsesSimplePeepholePattern)
     // EXPECT_FALSE(patterns[0].rewrite.empty());
 }
 
-TEST_F(PatternParserTest, ParsesIntrinsicPattern)
-{
+TEST_F(PatternParserTest, ParsesIntrinsicPattern) {
     const std::string input = R"(
         intrinsic ReluF32 {
             arguments {
@@ -147,8 +142,7 @@ TEST_F(PatternParserTest, ParsesIntrinsicPattern)
     EXPECT_TRUE(patterns[0].pythonBinding);
 }
 
-TEST_F(PatternParserTest, ParsesMultiplePatterns)
-{
+TEST_F(PatternParserTest, ParsesMultiplePatterns) {
     const std::string input = R"(
         peephole pattern Pattern1 {
             match { $x = v_add_f32 $a, $b, $c }
@@ -168,8 +162,7 @@ TEST_F(PatternParserTest, ParsesMultiplePatterns)
     EXPECT_EQ(patterns[1].name, "Pattern2");
 }
 
-TEST_F(PatternParserTest, ParsesPatternWithConstraints)
-{
+TEST_F(PatternParserTest, ParsesPatternWithConstraints) {
     const std::string input = R"(
         peephole pattern ConstrainedPattern {
             match {
@@ -196,8 +189,7 @@ TEST_F(PatternParserTest, ParsesPatternWithConstraints)
 // ERROR PATH TESTS - Invalid Syntax
 // ============================================================================
 
-TEST_F(PatternParserTest, HandlesMissingBraces)
-{
+TEST_F(PatternParserTest, HandlesMissingBraces) {
     const std::string input = R"(
         peephole pattern BadPattern {
             match {
@@ -211,16 +203,14 @@ TEST_F(PatternParserTest, HandlesMissingBraces)
     // Parser is lenient - accepts malformed input and continues
     // This allows incremental development and better error recovery
     // Validation happens at later stages
-    EXPECT_GE(patterns.size(), 0); // May succeed or fail
+    EXPECT_GE(patterns.size(), 0);  // May succeed or fail
     // If it succeeds, the pattern should have a name
-    if(!patterns.empty())
-    {
+    if (!patterns.empty()) {
         EXPECT_EQ(patterns[0].name, "BadPattern");
     }
 }
 
-TEST_F(PatternParserTest, HandlesMissingPatternName)
-{
+TEST_F(PatternParserTest, HandlesMissingPatternName) {
     const std::string input = R"(
         peephole pattern {
             match { $x = v_add_f32 $a, $b, $c }
@@ -234,13 +224,10 @@ TEST_F(PatternParserTest, HandlesMissingPatternName)
     // A) Return empty list (parsing failed due to missing name)
     // B) Return pattern with empty/default name
 
-    if(patterns.empty())
-    {
+    if (patterns.empty()) {
         // Parser rejected malformed pattern - acceptable
         SUCCEED() << "Lenient parser rejected pattern without name";
-    }
-    else
-    {
+    } else {
         // Parser accepted it with empty or default name - also acceptable
         ASSERT_EQ(patterns.size(), 1);
         // Name should be empty since none was provided
@@ -252,8 +239,7 @@ TEST_F(PatternParserTest, HandlesMissingPatternName)
     }
 }
 
-TEST_F(PatternParserTest, RejectsInvalidPatternType)
-{
+TEST_F(PatternParserTest, RejectsInvalidPatternType) {
     const std::string input = R"(
         invalid_type pattern MyPattern {
             match { $x = v_add_f32 $a, $b, $c }
@@ -264,8 +250,7 @@ TEST_F(PatternParserTest, RejectsInvalidPatternType)
     EXPECT_TRUE(patterns.empty());
 }
 
-TEST_F(PatternParserTest, HandlesMissingMatchBlock)
-{
+TEST_F(PatternParserTest, HandlesMissingMatchBlock) {
     const std::string input = R"(
         peephole pattern NoMatchBlock {
             rewrite {
@@ -278,13 +263,10 @@ TEST_F(PatternParserTest, HandlesMissingMatchBlock)
 
     // Parser is lenient - may accept patterns without required blocks
     // Validation of pattern completeness happens at usage time
-    if(patterns.empty())
-    {
+    if (patterns.empty()) {
         // Parser rejected incomplete pattern - acceptable
         SUCCEED() << "Parser rejected pattern without match block";
-    }
-    else
-    {
+    } else {
         // Parser accepted incomplete pattern - also acceptable for lenient parsing
         ASSERT_EQ(patterns.size(), 1);
         EXPECT_EQ(patterns[0].name, "NoMatchBlock");
@@ -300,8 +282,7 @@ TEST_F(PatternParserTest, HandlesMissingMatchBlock)
     }
 }
 
-TEST_F(PatternParserTest, HandlesDuplicatePatternNames)
-{
+TEST_F(PatternParserTest, HandlesDuplicatePatternNames) {
     // Two patterns with the same name
     const std::string input = R"(
         peephole pattern DuplicateName {
@@ -318,15 +299,12 @@ TEST_F(PatternParserTest, HandlesDuplicatePatternNames)
 
     // Parser may accept both patterns (validation happens at registration time)
     // or reject the duplicate
-    if(patterns.size() == 2)
-    {
+    if (patterns.size() == 2) {
         // Both patterns parsed - names may both be "DuplicateName"
         EXPECT_EQ(patterns[0].name, "DuplicateName");
         EXPECT_EQ(patterns[1].name, "DuplicateName");
         // Semantic validation should catch duplicate names later
-    }
-    else if(patterns.size() == 1)
-    {
+    } else if (patterns.size() == 1) {
         // Only first pattern parsed, second rejected
         EXPECT_EQ(patterns[0].name, "DuplicateName");
     }
@@ -335,8 +313,7 @@ TEST_F(PatternParserTest, HandlesDuplicatePatternNames)
     // Pattern registration phase should detect duplicates
 }
 
-TEST_F(PatternParserTest, HandlesInvalidIntrinsicSignature)
-{
+TEST_F(PatternParserTest, HandlesInvalidIntrinsicSignature) {
     // Intrinsic with malformed signature (missing closing paren)
     const std::string input = R"(
         intrinsic BadSignature {
@@ -349,12 +326,9 @@ TEST_F(PatternParserTest, HandlesInvalidIntrinsicSignature)
     auto patterns = parsePatternString(input);
 
     // Parser should handle malformed signature gracefully
-    if(patterns.empty())
-    {
+    if (patterns.empty()) {
         SUCCEED() << "Parser rejected malformed signature";
-    }
-    else
-    {
+    } else {
         // May parse with lenient rules
         ASSERT_EQ(patterns.size(), 1);
         EXPECT_EQ(patterns[0].type, PatternType::Intrinsic);
@@ -364,8 +338,7 @@ TEST_F(PatternParserTest, HandlesInvalidIntrinsicSignature)
     // Key requirement: Doesn't crash on malformed signatures
 }
 
-TEST_F(PatternParserTest, HandlesMissingRequiredFields)
-{
+TEST_F(PatternParserTest, HandlesMissingRequiredFields) {
     // Intrinsic missing required fields (e.g., cost)
     const std::string input = R"(
         intrinsic IncompleteDef {
@@ -376,12 +349,9 @@ TEST_F(PatternParserTest, HandlesMissingRequiredFields)
     auto patterns = parsePatternString(input);
 
     // Parser may accept incomplete definitions (validation at usage)
-    if(patterns.empty())
-    {
+    if (patterns.empty()) {
         SUCCEED() << "Parser rejected incomplete intrinsic";
-    }
-    else
-    {
+    } else {
         // Lenient parser accepted it
         ASSERT_EQ(patterns.size(), 1);
         EXPECT_EQ(patterns[0].type, PatternType::Intrinsic);
@@ -392,8 +362,7 @@ TEST_F(PatternParserTest, HandlesMissingRequiredFields)
     // Design decision: Accept incomplete patterns, validate at registration
 }
 
-TEST_F(PatternParserTest, HandlesInvalidKeywordNames)
-{
+TEST_F(PatternParserTest, HandlesInvalidKeywordNames) {
     // Pattern with unknown/invalid keyword
     const std::string input = R"(
         peephole pattern TestPattern {
@@ -405,12 +374,9 @@ TEST_F(PatternParserTest, HandlesInvalidKeywordNames)
     auto patterns = parsePatternString(input);
 
     // Parser should skip or error on unknown keywords
-    if(patterns.empty())
-    {
+    if (patterns.empty()) {
         SUCCEED() << "Parser rejected unknown keyword";
-    }
-    else
-    {
+    } else {
         // May parse and ignore unknown blocks
         ASSERT_EQ(patterns.size(), 1);
         EXPECT_EQ(patterns[0].name, "TestPattern");
@@ -421,8 +387,7 @@ TEST_F(PatternParserTest, HandlesInvalidKeywordNames)
     // Parser may skip unknown blocks or produce warnings
 }
 
-TEST_F(PatternParserTest, HandlesMismatchedBracesNesting)
-{
+TEST_F(PatternParserTest, HandlesMismatchedBracesNesting) {
     // Extra closing brace or missing opening brace
     const std::string input = R"(
         peephole pattern BraceError {
@@ -434,12 +399,9 @@ TEST_F(PatternParserTest, HandlesMismatchedBracesNesting)
     auto patterns = parsePatternString(input);
 
     // Parser should detect brace mismatch
-    if(patterns.empty())
-    {
+    if (patterns.empty()) {
         SUCCEED() << "Parser rejected mismatched braces";
-    }
-    else
-    {
+    } else {
         // Lenient parser may have recovered
         EXPECT_TRUE(true) << "Parser handled brace errors without crashing";
     }
@@ -448,8 +410,7 @@ TEST_F(PatternParserTest, HandlesMismatchedBracesNesting)
     // Proper brace balancing is critical for parser stability
 }
 
-TEST_F(PatternParserTest, HandlesInvalidVariableNames)
-{
+TEST_F(PatternParserTest, HandlesInvalidVariableNames) {
     // Variable names with invalid syntax
     const std::string input = R"(
         peephole pattern BadVars {
@@ -461,12 +422,9 @@ TEST_F(PatternParserTest, HandlesInvalidVariableNames)
     auto patterns = parsePatternString(input);
 
     // Parser may accept invalid variable names (semantic validation later)
-    if(patterns.empty())
-    {
+    if (patterns.empty()) {
         SUCCEED() << "Parser rejected invalid variable names";
-    }
-    else
-    {
+    } else {
         // Lenient parser accepted the pattern
         ASSERT_EQ(patterns.size(), 1);
         EXPECT_EQ(patterns[0].name, "BadVars");
@@ -481,15 +439,13 @@ TEST_F(PatternParserTest, HandlesInvalidVariableNames)
 // EDGE CASE TESTS
 // ============================================================================
 
-TEST_F(PatternParserTest, HandlesEmptyFile)
-{
-    const std::string input    = "";
-    auto              patterns = parsePatternString(input);
+TEST_F(PatternParserTest, HandlesEmptyFile) {
+    const std::string input = "";
+    auto patterns = parsePatternString(input);
     EXPECT_TRUE(patterns.empty());
 }
 
-TEST_F(PatternParserTest, HandlesCommentsOnly)
-{
+TEST_F(PatternParserTest, HandlesCommentsOnly) {
     const std::string input = R"(
         // This is a comment
         /* This is a block comment */
@@ -500,8 +456,7 @@ TEST_F(PatternParserTest, HandlesCommentsOnly)
     EXPECT_TRUE(patterns.empty());
 }
 
-TEST_F(PatternParserTest, HandlesTrailingComma)
-{
+TEST_F(PatternParserTest, HandlesTrailingComma) {
     const std::string input = R"(
         intrinsic TestIntrinsic {
             arguments {
@@ -521,8 +476,7 @@ TEST_F(PatternParserTest, HandlesTrailingComma)
     ASSERT_FALSE(patterns.empty());
 }
 
-TEST_F(PatternParserTest, HandlesLongPatternNames)
-{
+TEST_F(PatternParserTest, HandlesLongPatternNames) {
     const std::string input = R"(
         peephole pattern ThisIsAReallyLongPatternNameThatSomeoneDecidedToUseForSomeReason {
             match { $x = v_add_f32 $a, $b, $c }
@@ -535,8 +489,7 @@ TEST_F(PatternParserTest, HandlesLongPatternNames)
     EXPECT_GT(patterns[0].name.length(), 50);
 }
 
-TEST_F(PatternParserTest, HandlesUnicodeInComments)
-{
+TEST_F(PatternParserTest, HandlesUnicodeInComments) {
     const std::string input = R"(
         peephole pattern UnicodeTest {
             match { $x = v_add_f32 $a, $b, $c }
@@ -556,12 +509,10 @@ TEST_F(PatternParserTest, HandlesUnicodeInComments)
 // PERFORMANCE TESTS
 // ============================================================================
 
-TEST_F(PatternParserTest, HandlesLargeFile)
-{
+TEST_F(PatternParserTest, HandlesLargeFile) {
     // Generate pattern file with 100 patterns
     std::ostringstream input;
-    for(int i = 0; i < 100; ++i)
-    {
+    for (int i = 0; i < 100; ++i) {
         input << "peephole pattern Pattern" << i << " {\n";
         input << "    match { $x = v_add_f32 $a, $b, $c }\n";
         input << "    rewrite { replace $x with v_mov_b32 $a, $b }\n";
@@ -580,8 +531,7 @@ TEST_F(PatternParserTest, HandlesLargeFile)
 // CATEGORY 5: ERROR MESSAGE QUALITY TESTS
 // ============================================================================
 
-TEST_F(PatternParserTest, ErrorIncludesLineNumber)
-{
+TEST_F(PatternParserTest, ErrorIncludesLineNumber) {
     const std::string input = R"(
 peephole pattern Test {
     match {
@@ -597,10 +547,8 @@ peephole pattern Test {
 
     // Error should include line number (line 4 has the syntax error)
     bool foundLineNumber = false;
-    for(const auto& diag : result.diagnostics)
-    {
-        if(diag.getLine() > 0)
-        {
+    for (const auto& diag : result.diagnostics) {
+        if (diag.getLine() > 0) {
             foundLineNumber = true;
             break;
         }
@@ -608,8 +556,7 @@ peephole pattern Test {
     EXPECT_TRUE(foundLineNumber) << "Diagnostics should include non-zero line numbers";
 }
 
-TEST_F(PatternParserTest, ErrorIncludesColumnNumber)
-{
+TEST_F(PatternParserTest, ErrorIncludesColumnNumber) {
     const std::string input = R"(
 peephole pattern Test {
     match {
@@ -625,10 +572,8 @@ peephole pattern Test {
 
     // Error should include column number
     bool foundColumnNumber = false;
-    for(const auto& diag : result.diagnostics)
-    {
-        if(diag.getColumn() > 0)
-        {
+    for (const auto& diag : result.diagnostics) {
+        if (diag.getColumn() > 0) {
             foundColumnNumber = true;
             break;
         }
@@ -636,8 +581,7 @@ peephole pattern Test {
     EXPECT_TRUE(foundColumnNumber) << "Diagnostics should include non-zero column numbers";
 }
 
-TEST_F(PatternParserTest, ErrorIncludesDescriptiveMessage)
-{
+TEST_F(PatternParserTest, ErrorIncludesDescriptiveMessage) {
     const std::string input = R"(
 peephole pattern Test {
     match {
@@ -652,15 +596,13 @@ peephole pattern Test {
     ASSERT_GT(result.diagnostics.size(), 0);
 
     // Error message should be descriptive (not empty)
-    for(const auto& diag : result.diagnostics)
-    {
+    for (const auto& diag : result.diagnostics) {
         EXPECT_FALSE(diag.getMessage().empty()) << "Error messages should not be empty";
         EXPECT_GT(diag.getMessage().length(), 5) << "Error messages should be descriptive";
     }
 }
 
-TEST_F(PatternParserTest, CollectsMultipleErrors)
-{
+TEST_F(PatternParserTest, CollectsMultipleErrors) {
     const std::string input = R"(
 peephole pattern Test1 {
     match {
@@ -683,8 +625,7 @@ peephole pattern Test2 {
     EXPECT_GT(result.diagnostics.size(), 0);
 }
 
-TEST_F(PatternParserTest, ErrorCountMatchesActualErrors)
-{
+TEST_F(PatternParserTest, ErrorCountMatchesActualErrors) {
     const std::string input = R"(
 peephole pattern Test {
     match {
@@ -699,10 +640,8 @@ peephole pattern Test {
 
     // Count errors vs warnings
     size_t errorCount = 0;
-    for(const auto& diag : result.diagnostics)
-    {
-        if(diag.getLevel() == Diagnostic::Level::Error)
-        {
+    for (const auto& diag : result.diagnostics) {
+        if (diag.getLevel() == Diagnostic::Level::Error) {
             errorCount++;
         }
     }
@@ -711,8 +650,7 @@ peephole pattern Test {
     EXPECT_GT(errorCount, 0) << "Should have at least one error";
 }
 
-TEST_F(PatternParserTest, PartialParseWithErrors)
-{
+TEST_F(PatternParserTest, PartialParseWithErrors) {
     const std::string input = R"(
 peephole pattern ValidPattern {
     match { $x = v_add_f32 $a, $b, $c }
@@ -735,8 +673,7 @@ peephole pattern InvalidPattern {
 
     // If first pattern is valid, it should be parsed
     // (lenient parser behavior - semantic validation happens later)
-    if(result.patterns.size() > 0)
-    {
+    if (result.patterns.size() > 0) {
         EXPECT_EQ(result.patterns[0].name, "ValidPattern");
     }
 }

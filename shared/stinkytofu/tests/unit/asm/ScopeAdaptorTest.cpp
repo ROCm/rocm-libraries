@@ -31,30 +31,23 @@
 using namespace stinkytofu;
 
 // A simple counting pass: counts StinkyInstructions in the Function.
-class CountingPass : public Pass
-{
-public:
+class CountingPass : public Pass {
+   public:
     static char ID;
 
-    PassID getPassID() const override
-    {
+    PassID getPassID() const override {
         return &ID;
     }
 
-    const char* getName() const override
-    {
+    const char* getName() const override {
         return "CountingPass";
     }
 
-    void run(Function& func, PassContext& /*ctx*/) override
-    {
+    void run(Function& func, PassContext& /*ctx*/) override {
         count = 0;
-        for(auto& bb : func)
-        {
-            for(auto& ir : bb)
-            {
-                if(ir.getType() == IRBase::IRType::StinkyTofu)
-                    count++;
+        for (auto& bb : func) {
+            for (auto& ir : bb) {
+                if (ir.getType() == IRBase::IRType::StinkyTofu) count++;
             }
         }
     }
@@ -63,29 +56,24 @@ public:
 };
 char CountingPass::ID = 0;
 
-class ScopeAdaptorTest : public ::testing::Test
-{
-protected:
+class ScopeAdaptorTest : public ::testing::Test {
+   protected:
     static constexpr std::array<int, 3> ARCH{12, 5, 0};
 
-    StinkyAsmModule::ModuleOptions makeDefaultOptions()
-    {
+    StinkyAsmModule::ModuleOptions makeDefaultOptions() {
         StinkyAsmModule::ModuleOptions opts{};
         opts.OptLevel = 0;
         return opts;
     }
 
     /// Add one instruction to the module's entry BB and update group ranges.
-    StinkyInstruction* addInst(StinkyAsmModule&                       module,
-                               AsmIRBuilder&                          builder,
-                               int                                    destReg,
-                               const std::vector<const std::string*>& groups)
-    {
-        BasicBlock& bb     = *module.getFunction().getEntryBlock();
-        size_t      before = bb.size();
+    StinkyInstruction* addInst(StinkyAsmModule& module, AsmIRBuilder& builder, int destReg,
+                               const std::vector<const std::string*>& groups) {
+        BasicBlock& bb = *module.getFunction().getEntryBlock();
+        size_t before = bb.size();
 
-        StinkyInstruction* inst
-            = builder.create(getMCIDByUOp(GFX::v_mov_b32, getGfxArchID(12, 5, 0)));
+        StinkyInstruction* inst =
+            builder.create(getMCIDByUOp(GFX::v_mov_b32, getGfxArchID(12, 5, 0)));
         inst->addDestReg(StinkyRegister("v", destReg, 1));
 
         module.updateInstructionGroups(groups, before);
@@ -95,64 +83,55 @@ protected:
     /// Create a module with two groups:
     ///   [inst0]  [inst1 inst2]  [inst3 inst4]  [inst5]
     ///            ^--group0--^   ^--group1--^
-    std::unique_ptr<StinkyAsmModule> createModuleWithGroups()
-    {
-        auto opts   = makeDefaultOptions();
+    std::unique_ptr<StinkyAsmModule> createModuleWithGroups() {
+        auto opts = makeDefaultOptions();
         auto module = std::make_unique<StinkyAsmModule>("test", ARCH, opts);
 
         module->addGroup("group0");
         module->addGroup("group1");
 
-        BasicBlock&  bb     = *module->getFunction().getEntryBlock();
-        GfxArchID    archId = getGfxArchID(ARCH[0], ARCH[1], ARCH[2]);
+        BasicBlock& bb = *module->getFunction().getEntryBlock();
+        GfxArchID archId = getGfxArchID(ARCH[0], ARCH[1], ARCH[2]);
         AsmIRBuilder builder(bb, archId);
 
         std::vector<const std::string*> noGroups;
         std::vector<const std::string*> g0 = {&groupName0};
         std::vector<const std::string*> g1 = {&groupName1};
 
-        addInst(*module, builder, 10, noGroups); // inst0: before groups
-        addInst(*module, builder, 0, g0); // inst1: group0
-        addInst(*module, builder, 1, g0); // inst2: group0
-        addInst(*module, builder, 2, g1); // inst3: group1
-        addInst(*module, builder, 3, g1); // inst4: group1
-        addInst(*module, builder, 11, noGroups); // inst5: after groups
+        addInst(*module, builder, 10, noGroups);  // inst0: before groups
+        addInst(*module, builder, 0, g0);         // inst1: group0
+        addInst(*module, builder, 1, g0);         // inst2: group0
+        addInst(*module, builder, 2, g1);         // inst3: group1
+        addInst(*module, builder, 3, g1);         // inst4: group1
+        addInst(*module, builder, 11, noGroups);  // inst5: after groups
 
         return module;
     }
 
-    PassManager createOuterPM()
-    {
-        PassManager    pm;
+    PassManager createOuterPM() {
+        PassManager pm;
         GemmTileConfig config;
         config.arch = ARCH;
         pm.setGemmTileConfig(config);
         return pm;
     }
 
-    int countInstructions(Function& func)
-    {
+    int countInstructions(Function& func) {
         int count = 0;
-        for(auto& bb : func)
-        {
-            for(auto& ir : bb)
-            {
-                if(ir.getType() == IRBase::IRType::StinkyTofu)
-                    count++;
+        for (auto& bb : func) {
+            for (auto& ir : bb) {
+                if (ir.getType() == IRBase::IRType::StinkyTofu) count++;
             }
         }
         return count;
     }
 
-    int countGroupInstructions(StinkyAsmModule& module, const std::string& groupName)
-    {
+    int countGroupInstructions(StinkyAsmModule& module, const std::string& groupName) {
         auto range = module.findGroupRange(groupName);
-        if(!range)
-            return -1;
+        if (!range) return -1;
         auto [begin, end] = range.value();
-        int count         = 0;
-        for(auto it = begin; it != end; it++)
-            count++;
+        int count = 0;
+        for (auto it = begin; it != end; it++) count++;
         return count;
     }
 
@@ -163,10 +142,9 @@ protected:
 // Verify that single-region extraction and splice-back preserves all instructions.
 // Tests the basic round-trip: extract group0 to temp, run empty PM, splice back.
 // If extraction or splice-back has an off-by-one or iterator bug, instructions disappear.
-TEST_F(ScopeAdaptorTest, SingleRegionExtractAndSpliceBack)
-{
-    auto module      = createModuleWithGroups();
-    int  totalBefore = countInstructions(module->getFunction());
+TEST_F(ScopeAdaptorTest, SingleRegionExtractAndSpliceBack) {
+    auto module = createModuleWithGroups();
+    int totalBefore = countInstructions(module->getFunction());
     ASSERT_EQ(totalBefore, 6);
 
     auto outerPM = createOuterPM();
@@ -187,8 +165,7 @@ TEST_F(ScopeAdaptorTest, SingleRegionExtractAndSpliceBack)
 // After extraction and splice-back, the group range pointers must point to the
 // spliced-back instructions (not the original, now-moved ones). Checks the range
 // spans exactly 2 instructions.
-TEST_F(ScopeAdaptorTest, SingleRegionGroupRangeUpdated)
-{
+TEST_F(ScopeAdaptorTest, SingleRegionGroupRangeUpdated) {
     auto module = createModuleWithGroups();
 
     auto outerPM = createOuterPM();
@@ -203,10 +180,9 @@ TEST_F(ScopeAdaptorTest, SingleRegionGroupRangeUpdated)
 // Verify that multi-region extraction joins group0 and group1 ranges,
 // runs the inner PM on the combined range, and splices back without
 // losing instructions. Module stays single-BB afterward.
-TEST_F(ScopeAdaptorTest, MultiRegionExtractAndSpliceBack)
-{
-    auto module      = createModuleWithGroups();
-    int  totalBefore = countInstructions(module->getFunction());
+TEST_F(ScopeAdaptorTest, MultiRegionExtractAndSpliceBack) {
+    auto module = createModuleWithGroups();
+    int totalBefore = countInstructions(module->getFunction());
 
     auto outerPM = createOuterPM();
 
@@ -223,10 +199,9 @@ TEST_F(ScopeAdaptorTest, MultiRegionExtractAndSpliceBack)
 // runs the inner PM, and splices everything back. This mode restores
 // the flat single-BB invariant so subsequent scoped adapters can
 // call findGroupRange().
-TEST_F(ScopeAdaptorTest, WholeKernelExtractAndSpliceBack)
-{
-    auto module      = createModuleWithGroups();
-    int  totalBefore = countInstructions(module->getFunction());
+TEST_F(ScopeAdaptorTest, WholeKernelExtractAndSpliceBack) {
+    auto module = createModuleWithGroups();
+    int totalBefore = countInstructions(module->getFunction());
 
     auto outerPM = createOuterPM();
 
@@ -241,14 +216,13 @@ TEST_F(ScopeAdaptorTest, WholeKernelExtractAndSpliceBack)
 // the extracted group's instructions, not the entire module. Without
 // this test, a bug where extraction is skipped (inner PM runs on the
 // full module) would go undetected by the round-trip tests.
-TEST_F(ScopeAdaptorTest, InnerPassSeesExtractedGroup)
-{
+TEST_F(ScopeAdaptorTest, InnerPassSeesExtractedGroup) {
     auto module = createModuleWithGroups();
 
     auto outerPM = createOuterPM();
 
     auto* countingPassPtr = new CountingPass();
-    auto  countingPass    = std::unique_ptr<Pass>(countingPassPtr);
+    auto countingPass = std::unique_ptr<Pass>(countingPassPtr);
 
     PassManager innerPM;
     innerPM.addPass(std::move(countingPass));
@@ -263,8 +237,7 @@ TEST_F(ScopeAdaptorTest, InnerPassSeesExtractedGroup)
 // The first adapter must restore a single BB so the second adapter's
 // findGroupRange() works. If the first adapter leaves multiple BBs,
 // the second adapter breaks.
-TEST_F(ScopeAdaptorTest, SequentialSingleRegionAdapters)
-{
+TEST_F(ScopeAdaptorTest, SequentialSingleRegionAdapters) {
     auto module = createModuleWithGroups();
 
     auto outerPM = createOuterPM();
@@ -288,8 +261,7 @@ TEST_F(ScopeAdaptorTest, SequentialSingleRegionAdapters)
 // adapters (per-region optimization) followed by a multi-region adapter
 // (cross-region waitcnt reinsertion). Verifies the full sequence composes
 // without corrupting state.
-TEST_F(ScopeAdaptorTest, SingleRegionsThenMultiRegion)
-{
+TEST_F(ScopeAdaptorTest, SingleRegionsThenMultiRegion) {
     auto module = createModuleWithGroups();
 
     auto outerPM = createOuterPM();
@@ -305,7 +277,7 @@ TEST_F(ScopeAdaptorTest, SingleRegionsThenMultiRegion)
     {
         // Multi-region on both groups (like waitcnt reinsertion)
         auto* countingPassPtr = new CountingPass();
-        auto  countingPass    = std::unique_ptr<Pass>(countingPassPtr);
+        auto countingPass = std::unique_ptr<Pass>(countingPassPtr);
 
         PassManager multiPM;
         multiPM.addPass(std::move(countingPass));
@@ -321,8 +293,7 @@ TEST_F(ScopeAdaptorTest, SingleRegionsThenMultiRegion)
 // Edge case: adapter targeting a non-existent group name must not crash
 // and must not modify any instructions. Guards against null dereference
 // in the findGroupRange lookup path.
-TEST_F(ScopeAdaptorTest, MissingGroupDoesNotCrash)
-{
+TEST_F(ScopeAdaptorTest, MissingGroupDoesNotCrash) {
     auto module = createModuleWithGroups();
 
     auto outerPM = createOuterPM();

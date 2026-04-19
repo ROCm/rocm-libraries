@@ -25,12 +25,10 @@
 
 #include <cstdint>
 
-namespace stinkytofu
-{
-    struct InstructionCost
-    {
-        const char* opcode;
-        uint16_t    cycle;
-        uint16_t    latency;
-    };
-} // namespace stinkytofu
+namespace stinkytofu {
+struct InstructionCost {
+    const char* opcode;
+    uint16_t cycle;
+    uint16_t latency;
+};
+}  // namespace stinkytofu

@@ -28,101 +28,88 @@
 #include "stinkytofu/core/Function.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 
-namespace stinkytofu
-{
-    struct StinkyInstruction;
+namespace stinkytofu {
+struct StinkyInstruction;
 
-    /// Configuration options for assembly code emission.
-    struct AsmEmitterOptions
-    {
-        /// Whether to include comments in the output
-        bool emitComments = true;
+/// Configuration options for assembly code emission.
+struct AsmEmitterOptions {
+    /// Whether to include comments in the output
+    bool emitComments = true;
 
-        /// Whether to emit cycle count information as comments
-        bool emitCycleInfo = false;
+    /// Whether to emit cycle count information as comments
+    bool emitCycleInfo = false;
 
-        /// Indentation for instructions (spaces)
-        int indent = 4;
+    /// Indentation for instructions (spaces)
+    int indent = 4;
 
-        /// Whether to emit blank lines between instruction groups
-        bool emitBlankLines = false;
+    /// Whether to emit blank lines between instruction groups
+    bool emitBlankLines = false;
 
-        /// Whether to use symbolic register names when available
-        /// If true: v[vgprLocalWriteAddrA+0], v[vgprG2LA+0:vgprG2LA+3]
-        /// If false: v10, v[46:49]
-        bool useSymbolicNames = false;
+    /// Whether to use symbolic register names when available
+    /// If true: v[vgprLocalWriteAddrA+0], v[vgprG2LA+0:vgprG2LA+3]
+    /// If false: v10, v[46:49]
+    bool useSymbolicNames = false;
 
-        /// Column position for aligning comments (0 = no alignment)
-        /// When > 0, comments will be aligned at this column position
-        /// e.g., 50 will pad instruction to column 50 before adding comment
-        int commentAlignColumn = 51;
-    };
+    /// Column position for aligning comments (0 = no alignment)
+    /// When > 0, comments will be aligned at this column position
+    /// e.g., 50 will pad instruction to column 50 before adding comment
+    int commentAlignColumn = 51;
+};
 
-    /// StinkyAsmEmitter - Converts StinkyTofu IR to actual GPU assembly code.
-    ///
-    /// Example usage:
-    /// \code
-    /// Function func("my_kernel");
-    /// ... populate Function ...
-    ///
-    /// AsmEmitterOptions options;
-    /// options.emitComments = true;
-    /// options.emitCycleInfo = true;
-    ///
-    /// StinkyAsmEmitter emitter(options);
-    /// std::string assembly = emitter.emit(func);
-    ///
-    /// (or) emitter.emit(func, std::cout);
-    /// \endcode
-    class StinkyAsmEmitter
-    {
-    public:
-        StinkyAsmEmitter()
-            : options(AsmEmitterOptions())
-        {
-        }
+/// StinkyAsmEmitter - Converts StinkyTofu IR to actual GPU assembly code.
+///
+/// Example usage:
+/// \code
+/// Function func("my_kernel");
+/// ... populate Function ...
+///
+/// AsmEmitterOptions options;
+/// options.emitComments = true;
+/// options.emitCycleInfo = true;
+///
+/// StinkyAsmEmitter emitter(options);
+/// std::string assembly = emitter.emit(func);
+///
+/// (or) emitter.emit(func, std::cout);
+/// \endcode
+class StinkyAsmEmitter {
+   public:
+    StinkyAsmEmitter() : options(AsmEmitterOptions()) {}
 
-        StinkyAsmEmitter(const AsmEmitterOptions& opts)
-            : options(opts)
-        {
-        }
+    StinkyAsmEmitter(const AsmEmitterOptions& opts) : options(opts) {}
 
-        /// Emit assembly for a single instruction or an entire Function,
-        /// either to a stream or as a string.
-        void emit(std::ostream& os, const StinkyInstruction& inst);
-        void emit(std::ostream& os, const Function& function);
+    /// Emit assembly for a single instruction or an entire Function,
+    /// either to a stream or as a string.
+    void emit(std::ostream& os, const StinkyInstruction& inst);
+    void emit(std::ostream& os, const Function& function);
 
-        std::string emit(const StinkyInstruction& inst);
-        std::string emit(const Function& function);
+    std::string emit(const StinkyInstruction& inst);
+    std::string emit(const Function& function);
 
-        const AsmEmitterOptions& getOptions() const
-        {
-            return options;
-        }
-
-        void setOptions(const AsmEmitterOptions& opts)
-        {
-            options = opts;
-        }
-
-    private:
-        AsmEmitterOptions options;
-    };
-
-    /// Utility function to convert Function to assembly code string.
-    inline std::string toAssembly(const Function&          function,
-                                  const AsmEmitterOptions& options = AsmEmitterOptions())
-    {
-        StinkyAsmEmitter emitter(options);
-        return emitter.emit(function);
+    const AsmEmitterOptions& getOptions() const {
+        return options;
     }
 
-    /// Utility function to convert a single instruction to assembly code string.
-    inline std::string toAssembly(const StinkyInstruction& inst,
-                                  const AsmEmitterOptions& options = AsmEmitterOptions())
-    {
-        StinkyAsmEmitter emitter(options);
-        return emitter.emit(inst);
+    void setOptions(const AsmEmitterOptions& opts) {
+        options = opts;
     }
 
-} // namespace stinkytofu
+   private:
+    AsmEmitterOptions options;
+};
+
+/// Utility function to convert Function to assembly code string.
+inline std::string toAssembly(const Function& function,
+                              const AsmEmitterOptions& options = AsmEmitterOptions()) {
+    StinkyAsmEmitter emitter(options);
+    return emitter.emit(function);
+}
+
+/// Utility function to convert a single instruction to assembly code string.
+inline std::string toAssembly(const StinkyInstruction& inst,
+                              const AsmEmitterOptions& options = AsmEmitterOptions()) {
+    StinkyAsmEmitter emitter(options);
+    return emitter.emit(inst);
+}
+
+}  // namespace stinkytofu

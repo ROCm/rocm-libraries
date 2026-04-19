@@ -42,47 +42,38 @@ using namespace stinkytofu::test;
 //   - an "invalid" test: RW register missing from srcRegs  → verifier catches it
 // =============================================================================
 
-class ReadWriteOperandTest : public ::testing::Test
-{
-protected:
+class ReadWriteOperandTest : public ::testing::Test {
+   protected:
     GfxArchID arch;
 
-    void SetUp() override
-    {
+    void SetUp() override {
         arch = getGfxArchID(12, 5, 0);
     }
 
-    const HwInstDesc* getDescByMnemonic(const std::string& mnemonic)
-    {
+    const HwInstDesc* getDescByMnemonic(const std::string& mnemonic) {
         uint16_t isaOp = getMnemonicToIsaOpcode(mnemonic, arch);
-        if(isaOp == GFX::INVALID)
-            return nullptr;
+        if (isaOp == GFX::INVALID) return nullptr;
         return getMCIDByIsaOp(isaOp, arch);
     }
 
     /// Build a single-instruction function and run the read-write verifier.
     /// Returns the verifier error string (empty = pass).
-    std::string verifyRW(const std::string&                 mnemonic,
-                         const std::vector<StinkyRegister>& destRegs,
-                         const std::vector<StinkyRegister>& srcRegs)
-    {
+    std::string verifyRW(const std::string& mnemonic, const std::vector<StinkyRegister>& destRegs,
+                         const std::vector<StinkyRegister>& srcRegs) {
         Function func("test");
         setFunctionArch(func, arch);
         BasicBlock* bb = func.createBasicBlock("entry");
 
         const HwInstDesc* desc = getDescByMnemonic(mnemonic);
-        if(!desc)
-            return "Unknown mnemonic: " + mnemonic;
+        if (!desc) return "Unknown mnemonic: " + mnemonic;
 
-        AsmIRBuilder       builder(*bb, arch);
+        AsmIRBuilder builder(*bb, arch);
         StinkyInstruction* inst = builder.create(desc);
-        for(const auto& r : destRegs)
-            inst->addDestReg(r);
-        for(const auto& r : srcRegs)
-            inst->addSrcReg(r);
+        for (const auto& r : destRegs) inst->addDestReg(r);
+        for (const auto& r : srcRegs) inst->addSrcReg(r);
 
         AsmVerifierConfig config;
-        config.checkRegisterWidths    = false;
+        config.checkRegisterWidths = false;
         config.checkReadWriteOperands = true;
         return validateStinkyIR(func, config);
     }
@@ -93,19 +84,13 @@ protected:
 // HW fields: {D0, sdst, sdst, 32, RW}, {S0, ssrc0, ssrc, 32}
 // ---------------------------------------------------------------------------
 
-TEST_F(ReadWriteOperandTest, SCMovB32_Valid)
-{
-    std::string error = verifyRW("s_cmov_b32",
-                                 {sgpr(1)},
-                                 {sgpr(2), sgpr(1)});
+TEST_F(ReadWriteOperandTest, SCMovB32_Valid) {
+    std::string error = verifyRW("s_cmov_b32", {sgpr(1)}, {sgpr(2), sgpr(1)});
     EXPECT_TRUE(error.empty()) << error;
 }
 
-TEST_F(ReadWriteOperandTest, SCMovB32_MissingDstInSrc)
-{
-    std::string error = verifyRW("s_cmov_b32",
-                                 {sgpr(1)},
-                                 {sgpr(2)});
+TEST_F(ReadWriteOperandTest, SCMovB32_MissingDstInSrc) {
+    std::string error = verifyRW("s_cmov_b32", {sgpr(1)}, {sgpr(2)});
     EXPECT_NE(error.find("Read-write"), std::string::npos) << "Expected RW error, got: " << error;
 }
 
@@ -114,19 +99,13 @@ TEST_F(ReadWriteOperandTest, SCMovB32_MissingDstInSrc)
 // HW fields: {D0, sdst, sdst, 64, RW}, {S0, ssrc0, ssrc, 64}
 // ---------------------------------------------------------------------------
 
-TEST_F(ReadWriteOperandTest, SCMovB64_Valid)
-{
-    std::string error = verifyRW("s_cmov_b64",
-                                 {sgpr(2, 2)},
-                                 {sgpr(4, 2), sgpr(2, 2)});
+TEST_F(ReadWriteOperandTest, SCMovB64_Valid) {
+    std::string error = verifyRW("s_cmov_b64", {sgpr(2, 2)}, {sgpr(4, 2), sgpr(2, 2)});
     EXPECT_TRUE(error.empty()) << error;
 }
 
-TEST_F(ReadWriteOperandTest, SCMovB64_MissingDstInSrc)
-{
-    std::string error = verifyRW("s_cmov_b64",
-                                 {sgpr(2, 2)},
-                                 {sgpr(4, 2)});
+TEST_F(ReadWriteOperandTest, SCMovB64_MissingDstInSrc) {
+    std::string error = verifyRW("s_cmov_b64", {sgpr(2, 2)}, {sgpr(4, 2)});
     EXPECT_NE(error.find("Read-write"), std::string::npos) << "Expected RW error, got: " << error;
 }
 
@@ -135,19 +114,13 @@ TEST_F(ReadWriteOperandTest, SCMovB64_MissingDstInSrc)
 // HW fields: {D0, vdst, vgpr, 32, RW}, {S0, src0, src, 32}, {S1, vsrc1, vgpr, 32}
 // ---------------------------------------------------------------------------
 
-TEST_F(ReadWriteOperandTest, VFmacF32_Valid)
-{
-    std::string error = verifyRW("v_fmac_f32",
-                                 {vgpr(0)},
-                                 {vgpr(1), vgpr(2), vgpr(0)});
+TEST_F(ReadWriteOperandTest, VFmacF32_Valid) {
+    std::string error = verifyRW("v_fmac_f32", {vgpr(0)}, {vgpr(1), vgpr(2), vgpr(0)});
     EXPECT_TRUE(error.empty()) << error;
 }
 
-TEST_F(ReadWriteOperandTest, VFmacF32_MissingDstInSrc)
-{
-    std::string error = verifyRW("v_fmac_f32",
-                                 {vgpr(0)},
-                                 {vgpr(1), vgpr(2)});
+TEST_F(ReadWriteOperandTest, VFmacF32_MissingDstInSrc) {
+    std::string error = verifyRW("v_fmac_f32", {vgpr(0)}, {vgpr(1), vgpr(2)});
     EXPECT_NE(error.find("Read-write"), std::string::npos) << "Expected RW error, got: " << error;
 }
 
@@ -156,19 +129,13 @@ TEST_F(ReadWriteOperandTest, VFmacF32_MissingDstInSrc)
 // HW fields: {D0, vdst, vgpr, 8, RW}, {S0, src0, src, 32}, {S1, src1, src, 32}
 // ---------------------------------------------------------------------------
 
-TEST_F(ReadWriteOperandTest, VCvtSrFp8F32_Valid)
-{
-    std::string error = verifyRW("v_cvt_sr_fp8_f32",
-                                 {vgpr(0)},
-                                 {vgpr(1), vgpr(2), vgpr(0)});
+TEST_F(ReadWriteOperandTest, VCvtSrFp8F32_Valid) {
+    std::string error = verifyRW("v_cvt_sr_fp8_f32", {vgpr(0)}, {vgpr(1), vgpr(2), vgpr(0)});
     EXPECT_TRUE(error.empty()) << error;
 }
 
-TEST_F(ReadWriteOperandTest, VCvtSrFp8F32_MissingDstInSrc)
-{
-    std::string error = verifyRW("v_cvt_sr_fp8_f32",
-                                 {vgpr(0)},
-                                 {vgpr(1), vgpr(2)});
+TEST_F(ReadWriteOperandTest, VCvtSrFp8F32_MissingDstInSrc) {
+    std::string error = verifyRW("v_cvt_sr_fp8_f32", {vgpr(0)}, {vgpr(1), vgpr(2)});
     EXPECT_NE(error.find("Read-write"), std::string::npos) << "Expected RW error, got: " << error;
 }
 
@@ -177,19 +144,13 @@ TEST_F(ReadWriteOperandTest, VCvtSrFp8F32_MissingDstInSrc)
 // HW fields: {D0, vdst, vgpr, 8, RW}, {S0, src0, src, 32}, {S1, src1, src, 32}
 // ---------------------------------------------------------------------------
 
-TEST_F(ReadWriteOperandTest, VCvtSrBf8F32_Valid)
-{
-    std::string error = verifyRW("v_cvt_sr_bf8_f32",
-                                 {vgpr(0)},
-                                 {vgpr(1), vgpr(2), vgpr(0)});
+TEST_F(ReadWriteOperandTest, VCvtSrBf8F32_Valid) {
+    std::string error = verifyRW("v_cvt_sr_bf8_f32", {vgpr(0)}, {vgpr(1), vgpr(2), vgpr(0)});
     EXPECT_TRUE(error.empty()) << error;
 }
 
-TEST_F(ReadWriteOperandTest, VCvtSrBf8F32_MissingDstInSrc)
-{
-    std::string error = verifyRW("v_cvt_sr_bf8_f32",
-                                 {vgpr(0)},
-                                 {vgpr(1), vgpr(2)});
+TEST_F(ReadWriteOperandTest, VCvtSrBf8F32_MissingDstInSrc) {
+    std::string error = verifyRW("v_cvt_sr_bf8_f32", {vgpr(0)}, {vgpr(1), vgpr(2)});
     EXPECT_NE(error.find("Read-write"), std::string::npos) << "Expected RW error, got: " << error;
 }
 
@@ -199,19 +160,15 @@ TEST_F(ReadWriteOperandTest, VCvtSrBf8F32_MissingDstInSrc)
 //                       {S1, rsrc, sreg, 128}, {S2, soffset, sreg_m0, 32}
 // ---------------------------------------------------------------------------
 
-TEST_F(ReadWriteOperandTest, BufferAtomicAddF32_Valid)
-{
-    std::string error = verifyRW("buffer_atomic_add_f32",
-                                 {vgpr(0)},
-                                 {vgpr(0), vgpr(1), sgpr(0, 4), sgpr(4)});
+TEST_F(ReadWriteOperandTest, BufferAtomicAddF32_Valid) {
+    std::string error =
+        verifyRW("buffer_atomic_add_f32", {vgpr(0)}, {vgpr(0), vgpr(1), sgpr(0, 4), sgpr(4)});
     EXPECT_TRUE(error.empty()) << error;
 }
 
-TEST_F(ReadWriteOperandTest, BufferAtomicAddF32_MissingDstInSrc)
-{
-    std::string error = verifyRW("buffer_atomic_add_f32",
-                                 {vgpr(0)},
-                                 {vgpr(1), sgpr(0, 4), sgpr(4)});
+TEST_F(ReadWriteOperandTest, BufferAtomicAddF32_MissingDstInSrc) {
+    std::string error =
+        verifyRW("buffer_atomic_add_f32", {vgpr(0)}, {vgpr(1), sgpr(0, 4), sgpr(4)});
     EXPECT_NE(error.find("Read-write"), std::string::npos) << "Expected RW error, got: " << error;
 }
 
@@ -219,19 +176,15 @@ TEST_F(ReadWriteOperandTest, BufferAtomicAddF32_MissingDstInSrc)
 // buffer_atomic_cmpswap_b32  —  D0 (vdata) is RW, size overridden to 64
 // ---------------------------------------------------------------------------
 
-TEST_F(ReadWriteOperandTest, BufferAtomicCmpswapB32_Valid)
-{
-    std::string error = verifyRW("buffer_atomic_cmpswap_b32",
-                                 {vgpr(0, 2)},
+TEST_F(ReadWriteOperandTest, BufferAtomicCmpswapB32_Valid) {
+    std::string error = verifyRW("buffer_atomic_cmpswap_b32", {vgpr(0, 2)},
                                  {vgpr(0, 2), vgpr(2), sgpr(0, 4), sgpr(4)});
     EXPECT_TRUE(error.empty()) << error;
 }
 
-TEST_F(ReadWriteOperandTest, BufferAtomicCmpswapB32_MissingDstInSrc)
-{
-    std::string error = verifyRW("buffer_atomic_cmpswap_b32",
-                                 {vgpr(0, 2)},
-                                 {vgpr(2), sgpr(0, 4), sgpr(4)});
+TEST_F(ReadWriteOperandTest, BufferAtomicCmpswapB32_MissingDstInSrc) {
+    std::string error =
+        verifyRW("buffer_atomic_cmpswap_b32", {vgpr(0, 2)}, {vgpr(2), sgpr(0, 4), sgpr(4)});
     EXPECT_NE(error.find("Read-write"), std::string::npos) << "Expected RW error, got: " << error;
 }
 
@@ -239,19 +192,15 @@ TEST_F(ReadWriteOperandTest, BufferAtomicCmpswapB32_MissingDstInSrc)
 // buffer_atomic_cmpswap_b64  —  D0 (vdata) is RW, size overridden to 128
 // ---------------------------------------------------------------------------
 
-TEST_F(ReadWriteOperandTest, BufferAtomicCmpswapB64_Valid)
-{
-    std::string error = verifyRW("buffer_atomic_cmpswap_b64",
-                                 {vgpr(0, 4)},
+TEST_F(ReadWriteOperandTest, BufferAtomicCmpswapB64_Valid) {
+    std::string error = verifyRW("buffer_atomic_cmpswap_b64", {vgpr(0, 4)},
                                  {vgpr(0, 4), vgpr(4), sgpr(0, 4), sgpr(4)});
     EXPECT_TRUE(error.empty()) << error;
 }
 
-TEST_F(ReadWriteOperandTest, BufferAtomicCmpswapB64_MissingDstInSrc)
-{
-    std::string error = verifyRW("buffer_atomic_cmpswap_b64",
-                                 {vgpr(0, 4)},
-                                 {vgpr(4), sgpr(0, 4), sgpr(4)});
+TEST_F(ReadWriteOperandTest, BufferAtomicCmpswapB64_MissingDstInSrc) {
+    std::string error =
+        verifyRW("buffer_atomic_cmpswap_b64", {vgpr(0, 4)}, {vgpr(4), sgpr(0, 4), sgpr(4)});
     EXPECT_NE(error.find("Read-write"), std::string::npos) << "Expected RW error, got: " << error;
 }
 
@@ -262,19 +211,15 @@ TEST_F(ReadWriteOperandTest, BufferAtomicCmpswapB64_MissingDstInSrc)
 //  * S1 overridden to 512 for this instruction
 // ---------------------------------------------------------------------------
 
-TEST_F(ReadWriteOperandTest, SWMMA_F32_16x16x64_F16_Valid)
-{
-    std::string error = verifyRW("v_swmmac_f32_16x16x64_f16",
-                                 {vgpr(0, 8)},
+TEST_F(ReadWriteOperandTest, SWMMA_F32_16x16x64_F16_Valid) {
+    std::string error = verifyRW("v_swmmac_f32_16x16x64_f16", {vgpr(0, 8)},
                                  {vgpr(8, 8), vgpr(16, 16), vgpr(32), vgpr(0, 8)});
     EXPECT_TRUE(error.empty()) << error;
 }
 
-TEST_F(ReadWriteOperandTest, SWMMA_F32_16x16x64_F16_MissingAccInSrc)
-{
-    std::string error = verifyRW("v_swmmac_f32_16x16x64_f16",
-                                 {vgpr(0, 8)},
-                                 {vgpr(8, 8), vgpr(16, 16), vgpr(32)});
+TEST_F(ReadWriteOperandTest, SWMMA_F32_16x16x64_F16_MissingAccInSrc) {
+    std::string error =
+        verifyRW("v_swmmac_f32_16x16x64_f16", {vgpr(0, 8)}, {vgpr(8, 8), vgpr(16, 16), vgpr(32)});
     EXPECT_NE(error.find("Read-write"), std::string::npos) << "Expected RW error, got: " << error;
 }
 
@@ -283,18 +228,12 @@ TEST_F(ReadWriteOperandTest, SWMMA_F32_16x16x64_F16_MissingAccInSrc)
 // HW fields: {D0, vdst, vgpr, 32, RW}, {D1, src0, src_vgpr, 32, RW}
 // ---------------------------------------------------------------------------
 
-TEST_F(ReadWriteOperandTest, VSwapB32_Valid)
-{
-    std::string error = verifyRW("v_swap_b32",
-                                 {vgpr(0), vgpr(1)},
-                                 {vgpr(0), vgpr(1)});
+TEST_F(ReadWriteOperandTest, VSwapB32_Valid) {
+    std::string error = verifyRW("v_swap_b32", {vgpr(0), vgpr(1)}, {vgpr(0), vgpr(1)});
     EXPECT_TRUE(error.empty()) << error;
 }
 
-TEST_F(ReadWriteOperandTest, VSwapB32_MissingFirstRegInSrc)
-{
-    std::string error = verifyRW("v_swap_b32",
-                                 {vgpr(0), vgpr(1)},
-                                 {vgpr(1)});
+TEST_F(ReadWriteOperandTest, VSwapB32_MissingFirstRegInSrc) {
+    std::string error = verifyRW("v_swap_b32", {vgpr(0), vgpr(1)}, {vgpr(1)});
     EXPECT_NE(error.find("Read-write"), std::string::npos) << "Expected RW error, got: " << error;
 }

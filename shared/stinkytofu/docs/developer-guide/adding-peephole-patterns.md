@@ -485,4 +485,3 @@ pattern Name {
 ## Questions?
 
 Common patterns are already implemented. Just copy and modify them for your needs!
-

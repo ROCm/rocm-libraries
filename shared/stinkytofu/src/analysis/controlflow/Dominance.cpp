@@ -22,131 +22,109 @@
  * ************************************************************************ */
 #include "stinkytofu/analysis/controlflow/Dominance.hpp"
 
-#include "stinkytofu/support/CFGTraversal.hpp"
-
 #include <algorithm>
 #include <cassert>
 
-namespace
-{
-    using namespace stinkytofu;
-    using BlockIndex = std::unordered_map<const BasicBlock*, unsigned>;
+#include "stinkytofu/support/CFGTraversal.hpp"
 
-    std::vector<BasicBlock*> computeRPO(Function& func)
-    {
-        std::vector<BasicBlock*> rpo;
-        traverseCFGInRPO(func, [&](BasicBlock* bb) { rpo.push_back(bb); });
-        return rpo;
-    }
+namespace {
+using namespace stinkytofu;
+using BlockIndex = std::unordered_map<const BasicBlock*, unsigned>;
 
-    // Cooper-Harvey-Kennedy iterative dominator algorithm.
-    // Time: O(N*E) worst case; near-linear for reducible CFGs.
-    std::vector<unsigned> computeIDom(const std::vector<BasicBlock*>& rpo,
-                                      const BlockIndex&               blkIdx)
-    {
-        const unsigned        N = rpo.size();
-        std::vector<unsigned> idom(N, DominanceInfo::kUndef);
-        idom[0] = 0;
+std::vector<BasicBlock*> computeRPO(Function& func) {
+    std::vector<BasicBlock*> rpo;
+    traverseCFGInRPO(func, [&](BasicBlock* bb) { rpo.push_back(bb); });
+    return rpo;
+}
 
-        auto intersect = [&](unsigned a, unsigned b) {
-            while(a != b)
-            {
-                while(a > b)
-                    a = idom[a];
-                while(b > a)
-                    b = idom[b];
-            }
-            return a;
-        };
+// Cooper-Harvey-Kennedy iterative dominator algorithm.
+// Time: O(N*E) worst case; near-linear for reducible CFGs.
+std::vector<unsigned> computeIDom(const std::vector<BasicBlock*>& rpo, const BlockIndex& blkIdx) {
+    const unsigned N = rpo.size();
+    std::vector<unsigned> idom(N, DominanceInfo::kUndef);
+    idom[0] = 0;
 
-        bool changed = true;
-        while(changed)
-        {
-            changed = false;
-            for(unsigned i = 1; i < N; ++i)
-            {
-                unsigned newIdom = DominanceInfo::kUndef;
-                for(BasicBlock* p : rpo[i]->getPredecessors())
-                {
-                    auto it = blkIdx.find(p);
-                    assert(it != blkIdx.end() && "Block index not found");
-
-                    unsigned pi = it->second;
-                    if(idom[pi] == DominanceInfo::kUndef)
-                        continue;
-                    newIdom = (newIdom == DominanceInfo::kUndef) ? pi : intersect(pi, newIdom);
-                }
-                if(newIdom != DominanceInfo::kUndef && idom[i] != newIdom)
-                {
-                    idom[i] = newIdom;
-                    changed = true;
-                }
-            }
+    auto intersect = [&](unsigned a, unsigned b) {
+        while (a != b) {
+            while (a > b) a = idom[a];
+            while (b > a) b = idom[b];
         }
+        return a;
+    };
 
-        return idom;
-    }
-
-    // DF[b] = { j : b dominates a predecessor of j but does not
-    //               strictly dominate j }
-    // Time: O(N + E + F*log F), F = Sigma|DF[i]|.
-    std::vector<std::vector<unsigned>> computeDF(const std::vector<BasicBlock*>& rpo,
-                                                 const BlockIndex&               blkIdx,
-                                                 const std::vector<unsigned>&    idom)
-    {
-        const unsigned                     N = rpo.size();
-        std::vector<std::vector<unsigned>> df(N);
-
-        for(unsigned j = 0; j < N; ++j)
-        {
-            const auto& preds = rpo[j]->getPredecessors();
-            if(preds.size() < 2)
-                continue;
-
-            for(BasicBlock* p : preds)
-            {
+    bool changed = true;
+    while (changed) {
+        changed = false;
+        for (unsigned i = 1; i < N; ++i) {
+            unsigned newIdom = DominanceInfo::kUndef;
+            for (BasicBlock* p : rpo[i]->getPredecessors()) {
                 auto it = blkIdx.find(p);
                 assert(it != blkIdx.end() && "Block index not found");
 
-                unsigned runner = it->second;
-                while(runner != idom[j])
-                {
-                    df[runner].push_back(j);
-                    runner = idom[runner];
-                }
+                unsigned pi = it->second;
+                if (idom[pi] == DominanceInfo::kUndef) continue;
+                newIdom = (newIdom == DominanceInfo::kUndef) ? pi : intersect(pi, newIdom);
+            }
+            if (newIdom != DominanceInfo::kUndef && idom[i] != newIdom) {
+                idom[i] = newIdom;
+                changed = true;
             }
         }
+    }
 
-        for(auto& v : df)
-        {
-            std::sort(v.begin(), v.end());
-            v.erase(std::unique(v.begin(), v.end()), v.end());
+    return idom;
+}
+
+// DF[b] = { j : b dominates a predecessor of j but does not
+//               strictly dominate j }
+// Time: O(N + E + F*log F), F = Sigma|DF[i]|.
+std::vector<std::vector<unsigned>> computeDF(const std::vector<BasicBlock*>& rpo,
+                                             const BlockIndex& blkIdx,
+                                             const std::vector<unsigned>& idom) {
+    const unsigned N = rpo.size();
+    std::vector<std::vector<unsigned>> df(N);
+
+    for (unsigned j = 0; j < N; ++j) {
+        const auto& preds = rpo[j]->getPredecessors();
+        if (preds.size() < 2) continue;
+
+        for (BasicBlock* p : preds) {
+            auto it = blkIdx.find(p);
+            assert(it != blkIdx.end() && "Block index not found");
+
+            unsigned runner = it->second;
+            while (runner != idom[j]) {
+                df[runner].push_back(j);
+                runner = idom[runner];
+            }
         }
-
-        return df;
     }
 
-} // anonymous namespace
-
-namespace stinkytofu
-{
-    DominanceInfo computeDominanceInfo(Function& func)
-    {
-        DominanceInfo info;
-
-        info.rpo = computeRPO(func);
-        const unsigned N = info.rpo.size();
-        if(N == 0)
-            return info;
-
-        info.rpoIndex.reserve(N);
-        for(unsigned i = 0; i < N; ++i)
-            info.rpoIndex[info.rpo[i]] = i;
-
-        info.idom = computeIDom(info.rpo, info.rpoIndex);
-        info.df   = computeDF(info.rpo, info.rpoIndex, info.idom);
-
-        return info;
+    for (auto& v : df) {
+        std::sort(v.begin(), v.end());
+        v.erase(std::unique(v.begin(), v.end()), v.end());
     }
 
-} // namespace stinkytofu
+    return df;
+}
+
+}  // anonymous namespace
+
+namespace stinkytofu {
+DominanceInfo computeDominanceInfo(Function& func) {
+    DominanceInfo info;
+
+    info.rpo = computeRPO(func);
+    const unsigned N = info.rpo.size();
+    if (N == 0) return info;
+
+    info.rpoIndex.reserve(N);
+    for (unsigned i = 0; i < N; ++i) info.rpoIndex[info.rpo[i]] = i;
+
+    info.idom = computeIDom(info.rpo, info.rpoIndex);
+    info.df = computeDF(info.rpo, info.rpoIndex, info.idom);
+
+    return info;
+}
+
+}  // namespace stinkytofu

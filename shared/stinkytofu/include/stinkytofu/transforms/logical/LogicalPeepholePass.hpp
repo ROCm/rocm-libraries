@@ -25,33 +25,32 @@
 
 #include <memory>
 
-namespace stinkytofu
-{
-    class Pass;
+namespace stinkytofu {
+class Pass;
 
-    /// High-level IR peephole optimization pass
-    ///
-    /// Applies architecture-independent optimizations on high-level IR
-    /// before lowering to assembly IR. Includes:
-    ///   - Constant folding (e.g., mul(mul(x, c1), c2) -> mul(x, c1*c2))
-    ///   - Algebraic simplifications (e.g., mul(x, 1) -> mov(x))
-    ///   - Instruction fusion (e.g., add+mul -> fma)
-    ///   - Dead move elimination
-    ///
-    /// This pass operates on LogicalInstruction objects in IRList before they
-    /// are lowered to StinkyInstruction (assembly IR).
-    ///
-    /// Now uses the unified Pass infrastructure:
-    ///   - Operates on Function -> BasicBlock -> IRList
-    ///   - Works with raw LogicalInstruction* pointers
-    ///   - Integrates with PassManager
-    ///
-    /// Usage:
-    /// ```cpp
-    /// PassManager pm;
-    /// pm.addPass(createLogicalPeepholePass());
-    /// pm.run();
-    /// ```
-    std::unique_ptr<Pass> createLogicalPeepholePass();
+/// High-level IR peephole optimization pass
+///
+/// Applies architecture-independent optimizations on high-level IR
+/// before lowering to assembly IR. Includes:
+///   - Constant folding (e.g., mul(mul(x, c1), c2) -> mul(x, c1*c2))
+///   - Algebraic simplifications (e.g., mul(x, 1) -> mov(x))
+///   - Instruction fusion (e.g., add+mul -> fma)
+///   - Dead move elimination
+///
+/// This pass operates on LogicalInstruction objects in IRList before they
+/// are lowered to StinkyInstruction (assembly IR).
+///
+/// Now uses the unified Pass infrastructure:
+///   - Operates on Function -> BasicBlock -> IRList
+///   - Works with raw LogicalInstruction* pointers
+///   - Integrates with PassManager
+///
+/// Usage:
+/// ```cpp
+/// PassManager pm;
+/// pm.addPass(createLogicalPeepholePass());
+/// pm.run();
+/// ```
+std::unique_ptr<Pass> createLogicalPeepholePass();
 
-} // namespace stinkytofu
+}  // namespace stinkytofu

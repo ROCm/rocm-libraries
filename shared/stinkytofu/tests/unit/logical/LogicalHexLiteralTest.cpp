@@ -21,13 +21,15 @@
  *
  * ************************************************************************ */
 
-#include "stinkytofu/serialization/logical/IRSerializer.hpp"
-#include "stinkytofu/ir/logical/IntrinsicPatternConverter.hpp"
-#include "stinkytofu/serialization/asm/PatternParser.hpp"
-#include <cmath>
 #include <gtest/gtest.h>
+
+#include <cmath>
 #include <iomanip>
 #include <sstream>
+
+#include "stinkytofu/ir/logical/IntrinsicPatternConverter.hpp"
+#include "stinkytofu/serialization/asm/PatternParser.hpp"
+#include "stinkytofu/serialization/logical/IRSerializer.hpp"
 
 // Include IRLexer implementation (it's not in public headers)
 #include "../../src/serialization/asm/IRLexer.hpp"
@@ -37,8 +39,7 @@ using namespace stinkytofu;
 /**
  * Test hex literal parsing and round-trip conversion
  */
-TEST(HexLiteralTest, ParseHexLiteral)
-{
+TEST(HexLiteralTest, ParseHexLiteral) {
     // Define a test intrinsic with hex literal
     std::string testDef = R"(
 intrinsic TestHexLiteral {
@@ -62,7 +63,7 @@ intrinsic TestHexLiteral {
     IRLexer lexer(testDef);
     lexer.lex();
     PatternParser parser(lexer);
-    auto          patterns = parser.parsePatterns();
+    auto patterns = parser.parsePatterns();
 
     ASSERT_FALSE(parser.hasErrors()) << "Parser should not have errors";
     ASSERT_EQ(patterns.size(), 1) << "Should parse one pattern";
@@ -87,10 +88,10 @@ intrinsic TestHexLiteral {
 
     // Verify the hex literal was parsed correctly
     // 0x40ec7326 as float should be approximately 7.3890562
-    float    expectedFloat = 7.3890562f;
-    uint32_t expectedBits  = 0x40ec7326;
-    float    actualFloat   = static_cast<float>(inst1.operands[1].floatValue);
-    uint32_t actualBits    = *reinterpret_cast<uint32_t*>(&actualFloat);
+    float expectedFloat = 7.3890562f;
+    uint32_t expectedBits = 0x40ec7326;
+    float actualFloat = static_cast<float>(inst1.operands[1].floatValue);
+    uint32_t actualBits = *reinterpret_cast<uint32_t*>(&actualFloat);
 
     EXPECT_EQ(actualBits, expectedBits) << "Hex literal bits should match exactly";
     EXPECT_NEAR(actualFloat, expectedFloat, 0.0001f) << "Float value should be approximately 7.389";
@@ -99,8 +100,7 @@ intrinsic TestHexLiteral {
 /**
  * Test round-trip conversion: Text -> IR -> Text
  */
-TEST(HexLiteralTest, RoundTripConversion)
-{
+TEST(HexLiteralTest, RoundTripConversion) {
     // Define a test intrinsic with hex literal
     std::string testDef = R"(
 intrinsic RoundTripTest {
@@ -122,7 +122,7 @@ intrinsic RoundTripTest {
     IRLexer lexer(testDef);
     lexer.lex();
     PatternParser parser(lexer);
-    auto          patterns = parser.parsePatterns();
+    auto patterns = parser.parsePatterns();
 
     ASSERT_FALSE(parser.hasErrors()) << "Parser should not have errors";
     ASSERT_EQ(patterns.size(), 1);
@@ -145,16 +145,15 @@ intrinsic RoundTripTest {
         << "Operand should remain a hex literal after round-trip";
 
     // Verify bits are preserved
-    float    floatVal = static_cast<float>(backInst.operands[1].floatValue);
-    uint32_t bits     = *reinterpret_cast<uint32_t*>(&floatVal);
+    float floatVal = static_cast<float>(backInst.operands[1].floatValue);
+    uint32_t bits = *reinterpret_cast<uint32_t*>(&floatVal);
     EXPECT_EQ(bits, 0x40ec7326) << "Hex literal bits should be preserved";
 }
 
 /**
  * Test serialization and deserialization
  */
-TEST(HexLiteralTest, Serialization)
-{
+TEST(HexLiteralTest, Serialization) {
     // Define a test intrinsic with hex literal
     std::string testDef = R"(
 intrinsic SerializeTest {
@@ -176,18 +175,18 @@ intrinsic SerializeTest {
     IRLexer lexer(testDef);
     lexer.lex();
     PatternParser parser(lexer);
-    auto          patterns = parser.parsePatterns();
+    auto patterns = parser.parsePatterns();
 
     ASSERT_FALSE(parser.hasErrors());
     ASSERT_EQ(patterns.size(), 1);
 
     // Convert to IR and back to get clean patterns
-    auto irModules     = IntrinsicPatternConverter::patternsToIR(patterns);
+    auto irModules = IntrinsicPatternConverter::patternsToIR(patterns);
     auto cleanPatterns = IntrinsicPatternConverter::irToPatterns(irModules);
 
     // Serialize to file and deserialize back
-    std::string tempFile    = "/tmp/test_hex_literal.st.bc";
-    bool        serializeOk = IRSerializer::serializeToFile(cleanPatterns, tempFile);
+    std::string tempFile = "/tmp/test_hex_literal.st.bc";
+    bool serializeOk = IRSerializer::serializeToFile(cleanPatterns, tempFile);
     ASSERT_TRUE(serializeOk) << "Serialization should succeed";
 
     // Deserialize
@@ -207,8 +206,8 @@ intrinsic SerializeTest {
         << "Operand should be hex literal after deserialization";
 
     // Verify bits: 0x3f800000 = 1.0f
-    float    floatVal = static_cast<float>(deserInst.operands[1].floatValue);
-    uint32_t bits     = *reinterpret_cast<uint32_t*>(&floatVal);
+    float floatVal = static_cast<float>(deserInst.operands[1].floatValue);
+    uint32_t bits = *reinterpret_cast<uint32_t*>(&floatVal);
     EXPECT_EQ(bits, 0x3f800000) << "Hex literal bits should be 0x3f800000";
     EXPECT_FLOAT_EQ(floatVal, 1.0f) << "Float value should be 1.0";
 }
@@ -216,8 +215,7 @@ intrinsic SerializeTest {
 /**
  * Test mixed operand types (register, int, float, hex)
  */
-TEST(HexLiteralTest, MixedOperands)
-{
+TEST(HexLiteralTest, MixedOperands) {
     std::string testDef = R"(
 intrinsic MixedTest {
   arguments {
@@ -240,7 +238,7 @@ intrinsic MixedTest {
     IRLexer lexer(testDef);
     lexer.lex();
     PatternParser parser(lexer);
-    auto          patterns = parser.parsePatterns();
+    auto patterns = parser.parsePatterns();
 
     ASSERT_FALSE(parser.hasErrors());
     ASSERT_EQ(patterns.size(), 1);
@@ -262,20 +260,19 @@ intrinsic MixedTest {
     EXPECT_EQ(inst2.operands[1].type, IntrinsicOperand::HexLiteral);
 
     // 0x40490fdb = pi (3.14159274...)
-    float    piFloat = static_cast<float>(inst2.operands[1].floatValue);
-    uint32_t piBits  = *reinterpret_cast<uint32_t*>(&piFloat);
+    float piFloat = static_cast<float>(inst2.operands[1].floatValue);
+    uint32_t piBits = *reinterpret_cast<uint32_t*>(&piFloat);
     EXPECT_EQ(piBits, 0x40490fdb);
 }
 
 /**
  * Test GenericIRInstruction dump with hex literal
  */
-TEST(HexLiteralTest, GenericIRInstructionDump)
-{
+TEST(HexLiteralTest, GenericIRInstructionDump) {
     // Create operands
     std::vector<IntrinsicOperand> operands;
-    operands.push_back(IntrinsicOperand("src")); // Register
-    operands.push_back(IntrinsicOperand::hexLiteral(7.3890562)); // 0x40ec7326
+    operands.push_back(IntrinsicOperand("src"));                  // Register
+    operands.push_back(IntrinsicOperand::hexLiteral(7.3890562));  // 0x40ec7326
 
     // Create instruction via standard API
     GenericIRInstruction* inst =

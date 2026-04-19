@@ -24,28 +24,26 @@
 
 #include <string>
 
-namespace stinkytofu
-{
-    class Function;
-    class PassContext;
+namespace stinkytofu {
+class Function;
+class PassContext;
 
-    /// Callback interface for observing PassManager pass execution.
-    class PassInstrumentation
-    {
-    public:
-        virtual ~PassInstrumentation() = default;
+/// Callback interface for observing PassManager pass execution.
+class PassInstrumentation {
+   public:
+    virtual ~PassInstrumentation() = default;
 
-        /// Called once at the beginning of PassManager::run(), before any pass executes.
-        virtual void runBegin(Function& F, PassContext& ctx) {}
+    /// Called once at the beginning of PassManager::run(), before any pass executes.
+    virtual void runBegin(Function& F, PassContext& ctx) {}
 
-        /// Called immediately before each pass executes.
-        virtual void beforePass(const std::string& passName, Function& F, PassContext& ctx) {}
+    /// Called immediately before each pass executes.
+    virtual void beforePass(const std::string& passName, Function& F, PassContext& ctx) {}
 
-        /// Called immediately after each pass executes.
-        virtual void afterPass(const std::string& passName, Function& F, PassContext& ctx) {}
+    /// Called immediately after each pass executes.
+    virtual void afterPass(const std::string& passName, Function& F, PassContext& ctx) {}
 
-        /// Called once at the end of PassManager::run(), after all passes have executed.
-        virtual void runEnd(Function& F, PassContext& ctx) {}
-    };
+    /// Called once at the end of PassManager::run(), after all passes have executed.
+    virtual void runEnd(Function& F, PassContext& ctx) {}
+};
 
-} // namespace stinkytofu
+}  // namespace stinkytofu

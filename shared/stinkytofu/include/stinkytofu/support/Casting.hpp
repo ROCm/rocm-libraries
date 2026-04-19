@@ -26,35 +26,30 @@
 
 // isa<X>(ptr): true if ptr can be dynamically cast to X*
 template <typename To, typename From>
-inline bool isa(const From* ptr)
-{
+inline bool isa(const From* ptr) {
     return To::classof(ptr);
 }
 
 // cast<X>(ptr): dynamically cast ptr to X*. Asserts if !isa<X>(ptr).
 template <typename To, typename From>
-inline To* cast(From* ptr)
-{
+inline To* cast(From* ptr) {
     assert(isa<To>(ptr) && "cast<Ty>() argument of incompatible type!");
     return static_cast<To*>(ptr);
 }
 
 template <typename To, typename From>
-inline const To* cast(const From* ptr)
-{
+inline const To* cast(const From* ptr) {
     assert(isa<To>(ptr) && "cast<Ty>() argument of incompatible type!");
     return static_cast<const To*>(ptr);
 }
 
 // dyn_cast<X>(ptr): dynamically cast ptr to X* if isa<X>(ptr), else nullptr.
 template <class To, class From>
-inline To* dyn_cast(From* ptr)
-{
+inline To* dyn_cast(From* ptr) {
     return isa<To>(ptr) ? cast<To>(ptr) : nullptr;
 }
 
 template <class To, class From>
-inline const To* dyn_cast(const From* ptr)
-{
+inline const To* dyn_cast(const From* ptr) {
     return isa<To>(ptr) ? cast<To>(ptr) : nullptr;
 }

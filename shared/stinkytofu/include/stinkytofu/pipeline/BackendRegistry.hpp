@@ -22,61 +22,58 @@
  * ************************************************************************ */
 #pragma once
 
-#include "stinkytofu/core/PassManager.hpp"
-
 #include <array>
 #include <functional>
 #include <string>
 #include <vector>
 
-namespace stinkytofu
-{
-    class StinkyAsmModule;
+#include "stinkytofu/core/PassManager.hpp"
 
-    /// Global registry of per-architecture pipeline configuration.
-    ///
-    /// Each architecture registers an ArchPipeline (pipeline builder + group names)
-    /// at static init time. Backend::runOptimization() retrieves the builder, and
-    /// module construction code queries group names to set up instruction tracking.
-    ///
-    /// @code
-    /// // Static registrar (runs when TU is linked)
-    /// BackendRegistry::setArchPipeline({12, 5, 0}, {myBuilder, {"group0", "group1"}});
-    /// @endcode
-    class BackendRegistry
-    {
-    public:
-        /// Function type: builds the pipeline for a module into a PassManager.
-        /// Returns true if passes were added, false if nothing to do.
-        using PipelineBuilder = std::function<bool(PassManager&, StinkyAsmModule&)>;
+namespace stinkytofu {
+class StinkyAsmModule;
 
-        /// Per-architecture pipeline configuration.
-        struct ArchPipeline
-        {
-            PipelineBuilder          builder; ///< Populates a PM with ScopeAdaptor passes.
-            std::vector<std::string> groupNames; ///< Instruction groups the builder operates on.
-        };
+/// Global registry of per-architecture pipeline configuration.
+///
+/// Each architecture registers an ArchPipeline (pipeline builder + group names)
+/// at static init time. Backend::runOptimization() retrieves the builder, and
+/// module construction code queries group names to set up instruction tracking.
+///
+/// @code
+/// // Static registrar (runs when TU is linked)
+/// BackendRegistry::setArchPipeline({12, 5, 0}, {myBuilder, {"group0", "group1"}});
+/// @endcode
+class BackendRegistry {
+   public:
+    /// Function type: builds the pipeline for a module into a PassManager.
+    /// Returns true if passes were added, false if nothing to do.
+    using PipelineBuilder = std::function<bool(PassManager&, StinkyAsmModule&)>;
 
-        /// Register the pipeline for \p arch (one per arch).
-        static void setArchPipeline(const std::array<int, 3>& arch, ArchPipeline pipeline);
-
-        /// Return the pipeline for \p arch, or nullptr if none registered.
-        static const ArchPipeline* getArchPipeline(const std::array<int, 3>& arch);
-
-        /// Remove all registered entries (all architectures). Mainly for tests.
-        static void clear();
-
-        /// Remove all registered entries for \p arch.
-        static void clearArch(const std::array<int, 3>& arch);
-
-        /// Format arch as arch name.
-        static std::string makeArchKey(const std::array<int, 3>& arch);
-
-    private:
-        BackendRegistry() = default;
-
-        struct Registry;
-        static Registry& getRegistry();
+    /// Per-architecture pipeline configuration.
+    struct ArchPipeline {
+        PipelineBuilder builder;              ///< Populates a PM with ScopeAdaptor passes.
+        std::vector<std::string> groupNames;  ///< Instruction groups the builder operates on.
     };
 
-} // namespace stinkytofu
+    /// Register the pipeline for \p arch (one per arch).
+    static void setArchPipeline(const std::array<int, 3>& arch, ArchPipeline pipeline);
+
+    /// Return the pipeline for \p arch, or nullptr if none registered.
+    static const ArchPipeline* getArchPipeline(const std::array<int, 3>& arch);
+
+    /// Remove all registered entries (all architectures). Mainly for tests.
+    static void clear();
+
+    /// Remove all registered entries for \p arch.
+    static void clearArch(const std::array<int, 3>& arch);
+
+    /// Format arch as arch name.
+    static std::string makeArchKey(const std::array<int, 3>& arch);
+
+   private:
+    BackendRegistry() = default;
+
+    struct Registry;
+    static Registry& getRegistry();
+};
+
+}  // namespace stinkytofu

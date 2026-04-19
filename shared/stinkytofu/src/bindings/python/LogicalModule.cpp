@@ -19,125 +19,96 @@
  * ************************************************************************ */
 
 #include "stinkytofu/bindings/python/LogicalModule.hpp"
-#include "stinkytofu/ir/logical/LogicalInstructions.hpp"
-#include "stinkytofu/support/Casting.hpp"
+
 #include <algorithm>
 #include <iostream>
 
-namespace stinkytofu
-{
-    struct PyLogicalModule::Impl
-    {
-        std::string                                      name;
-        std::vector<std::shared_ptr<LogicalInstruction>> instructions;
+#include "stinkytofu/ir/logical/LogicalInstructions.hpp"
+#include "stinkytofu/support/Casting.hpp"
 
-        Impl(const std::string& name)
-            : name(name)
-        {
-        }
+namespace stinkytofu {
+struct PyLogicalModule::Impl {
+    std::string name;
+    std::vector<std::shared_ptr<LogicalInstruction>> instructions;
 
-        ~Impl()
-        {
-            // shared_ptr will automatically handle cleanup
-        }
-    };
+    Impl(const std::string& name) : name(name) {}
 
-    PyLogicalModule::PyLogicalModule(const std::string& name)
-        : pImpl(std::make_unique<Impl>(name))
-    {
+    ~Impl() {
+        // shared_ptr will automatically handle cleanup
     }
+};
 
-    PyLogicalModule::~PyLogicalModule() = default;
+PyLogicalModule::PyLogicalModule(const std::string& name) : pImpl(std::make_unique<Impl>(name)) {}
 
-    PyLogicalModule::PyLogicalModule(PyLogicalModule&&) noexcept            = default;
-    PyLogicalModule& PyLogicalModule::operator=(PyLogicalModule&&) noexcept = default;
+PyLogicalModule::~PyLogicalModule() = default;
 
-    std::string PyLogicalModule::getName() const
-    {
-        return pImpl->name;
+PyLogicalModule::PyLogicalModule(PyLogicalModule&&) noexcept = default;
+PyLogicalModule& PyLogicalModule::operator=(PyLogicalModule&&) noexcept = default;
+
+std::string PyLogicalModule::getName() const {
+    return pImpl->name;
+}
+
+std::shared_ptr<LogicalInstruction> PyLogicalModule::add(std::shared_ptr<LogicalInstruction> inst) {
+    if (inst) {
+        pImpl->instructions.push_back(inst);
     }
+    return inst;
+}
 
-    std::shared_ptr<LogicalInstruction>
-        PyLogicalModule::add(std::shared_ptr<LogicalInstruction> inst)
-    {
-        if(inst)
-        {
-            pImpl->instructions.push_back(inst);
-        }
-        return inst;
+const std::vector<std::shared_ptr<LogicalInstruction>>& PyLogicalModule::getInstructions() const {
+    return pImpl->instructions;
+}
+
+std::vector<std::shared_ptr<LogicalInstruction>>& PyLogicalModule::getMutableInstructions() {
+    return pImpl->instructions;
+}
+
+bool PyLogicalModule::removeInstruction(LogicalInstruction* inst) {
+    auto it = std::find_if(pImpl->instructions.begin(), pImpl->instructions.end(),
+                           [inst](const auto& ptr) { return ptr.get() == inst; });
+    if (it != pImpl->instructions.end()) {
+        pImpl->instructions.erase(it);
+        return true;
     }
+    return false;
+}
 
-    const std::vector<std::shared_ptr<LogicalInstruction>>& PyLogicalModule::getInstructions() const
-    {
-        return pImpl->instructions;
+size_t PyLogicalModule::size() const {
+    return pImpl->instructions.size();
+}
+
+void PyLogicalModule::dump(std::ostream& out) const {
+    out << "LogicalModule: " << pImpl->name << "\n";
+    out << "Instructions: " << pImpl->instructions.size() << "\n";
+    for (size_t i = 0; i < pImpl->instructions.size(); ++i) {
+        out << "  [" << i << "] ";
+        pImpl->instructions[i]->dump(out);
+        out << "\n";
     }
+}
 
-    std::vector<std::shared_ptr<LogicalInstruction>>& PyLogicalModule::getMutableInstructions()
-    {
-        return pImpl->instructions;
-    }
+// -------------------------------------------------------------------------
+// PyLogicalFunction
+// -------------------------------------------------------------------------
 
-    bool PyLogicalModule::removeInstruction(LogicalInstruction* inst)
-    {
-        auto it = std::find_if(pImpl->instructions.begin(),
-                               pImpl->instructions.end(),
-                               [inst](const auto& ptr) { return ptr.get() == inst; });
-        if(it != pImpl->instructions.end())
-        {
-            pImpl->instructions.erase(it);
-            return true;
-        }
-        return false;
-    }
+PyLogicalFunction::PyLogicalFunction(Function* func) : func(func) {}
 
-    size_t PyLogicalModule::size() const
-    {
-        return pImpl->instructions.size();
-    }
+PyLogicalFunction::~PyLogicalFunction() {
+    detachExternallyOwnedIRs();
+}
 
-    void PyLogicalModule::dump(std::ostream& out) const
-    {
-        out << "LogicalModule: " << pImpl->name << "\n";
-        out << "Instructions: " << pImpl->instructions.size() << "\n";
-        for(size_t i = 0; i < pImpl->instructions.size(); ++i)
-        {
-            out << "  [" << i << "] ";
-            pImpl->instructions[i]->dump(out);
-            out << "\n";
-        }
-    }
-
-    // -------------------------------------------------------------------------
-    // PyLogicalFunction
-    // -------------------------------------------------------------------------
-
-    PyLogicalFunction::PyLogicalFunction(Function* func)
-        : func(func)
-    {
-    }
-
-    PyLogicalFunction::~PyLogicalFunction()
-    {
-        detachExternallyOwnedIRs();
-    }
-
-    void PyLogicalFunction::detachExternallyOwnedIRs()
-    {
-        if(!func)
-            return;
-        for(BasicBlock& bb : *func)
-        {
-            for(auto it = bb.begin(); it != bb.end(); /* no increment */)
-            {
-                IRBase* ir = it.getNodePtr();
-                ++it;
-                if(LogicalInstruction* li = dyn_cast<LogicalInstruction>(ir))
-                {
-                    if(li->ownedExternally)
-                        li->remove();
-                }
+void PyLogicalFunction::detachExternallyOwnedIRs() {
+    if (!func) return;
+    for (BasicBlock& bb : *func) {
+        for (auto it = bb.begin(); it != bb.end(); /* no increment */) {
+            IRBase* ir = it.getNodePtr();
+            ++it;
+            if (LogicalInstruction* li = dyn_cast<LogicalInstruction>(ir)) {
+                if (li->ownedExternally) li->remove();
             }
         }
     }
+}
 
-} // namespace stinkytofu
+}  // namespace stinkytofu

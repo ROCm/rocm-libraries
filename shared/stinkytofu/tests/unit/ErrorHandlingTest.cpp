@@ -24,8 +24,9 @@
 // Unit tests for error handling mechanisms in StinkyTofu
 // Tests Expected<T> and STINKY_UNREACHABLE() functionality
 
-#include <chrono>
 #include <gtest/gtest.h>
+
+#include <chrono>
 #include <memory>
 #include <string>
 #include <vector>
@@ -38,15 +39,13 @@ using namespace stinkytofu;
 // Expected<T> - Basic Tests
 // ============================================================================
 
-class ExpectedTest : public ::testing::Test
-{
-protected:
+class ExpectedTest : public ::testing::Test {
+   protected:
     void SetUp() override {}
 };
 
 // Test successful Expected creation with primitive types
-TEST_F(ExpectedTest, SuccessWithInt)
-{
+TEST_F(ExpectedTest, SuccessWithInt) {
     Expected<int> result(42);
 
     EXPECT_TRUE(result.hasValue());
@@ -56,9 +55,8 @@ TEST_F(ExpectedTest, SuccessWithInt)
 }
 
 // Test successful Expected creation with pointer types
-TEST_F(ExpectedTest, SuccessWithPointer)
-{
-    int            value = 123;
+TEST_F(ExpectedTest, SuccessWithPointer) {
+    int value = 123;
     Expected<int*> result(&value);
 
     EXPECT_TRUE(result.hasValue());
@@ -68,8 +66,7 @@ TEST_F(ExpectedTest, SuccessWithPointer)
 }
 
 // Test successful Expected creation with std::string
-TEST_F(ExpectedTest, SuccessWithString)
-{
+TEST_F(ExpectedTest, SuccessWithString) {
     Expected<std::string> result("hello world");
 
     EXPECT_TRUE(result.hasValue());
@@ -78,9 +75,8 @@ TEST_F(ExpectedTest, SuccessWithString)
 }
 
 // Test successful Expected creation with std::vector
-TEST_F(ExpectedTest, SuccessWithVector)
-{
-    std::vector<int>           vec = {1, 2, 3, 4, 5};
+TEST_F(ExpectedTest, SuccessWithVector) {
+    std::vector<int> vec = {1, 2, 3, 4, 5};
     Expected<std::vector<int>> result(vec);
 
     EXPECT_TRUE(result.hasValue());
@@ -90,8 +86,7 @@ TEST_F(ExpectedTest, SuccessWithVector)
 }
 
 // Test error Expected creation
-TEST_F(ExpectedTest, ErrorCreation)
-{
+TEST_F(ExpectedTest, ErrorCreation) {
     Expected<int> result = Expected<int>::Error("Something went wrong");
 
     EXPECT_FALSE(result.hasValue());
@@ -101,11 +96,10 @@ TEST_F(ExpectedTest, ErrorCreation)
 }
 
 // Test error Expected with detailed message
-TEST_F(ExpectedTest, ErrorWithDetailedMessage)
-{
-    std::string     archName = "gfx900";
-    Expected<void*> result   = Expected<void*>::Error("Instruction s_mul_lo_u32 not supported on "
-                                                    + archName + " (requires gfx1250+)");
+TEST_F(ExpectedTest, ErrorWithDetailedMessage) {
+    std::string archName = "gfx900";
+    Expected<void*> result = Expected<void*>::Error("Instruction s_mul_lo_u32 not supported on " +
+                                                    archName + " (requires gfx1250+)");
 
     EXPECT_TRUE(result.hasError());
     EXPECT_TRUE(result.getError().find("gfx900") != std::string::npos);
@@ -116,8 +110,7 @@ TEST_F(ExpectedTest, ErrorWithDetailedMessage)
 // Expected<T> - Move Semantics Tests
 // ============================================================================
 
-TEST_F(ExpectedTest, MoveConstructorSuccess)
-{
+TEST_F(ExpectedTest, MoveConstructorSuccess) {
     Expected<std::string> original("test string");
     Expected<std::string> moved(std::move(original));
 
@@ -125,8 +118,7 @@ TEST_F(ExpectedTest, MoveConstructorSuccess)
     EXPECT_EQ(*moved, "test string");
 }
 
-TEST_F(ExpectedTest, MoveConstructorError)
-{
+TEST_F(ExpectedTest, MoveConstructorError) {
     Expected<int> original = Expected<int>::Error("error message");
     Expected<int> moved(std::move(original));
 
@@ -134,8 +126,7 @@ TEST_F(ExpectedTest, MoveConstructorError)
     EXPECT_EQ(moved.getError(), "error message");
 }
 
-TEST_F(ExpectedTest, MoveAssignmentSuccess)
-{
+TEST_F(ExpectedTest, MoveAssignmentSuccess) {
     Expected<int> original(999);
     Expected<int> assigned(0);
     assigned = std::move(original);
@@ -144,8 +135,7 @@ TEST_F(ExpectedTest, MoveAssignmentSuccess)
     EXPECT_EQ(*assigned, 999);
 }
 
-TEST_F(ExpectedTest, MoveAssignmentError)
-{
+TEST_F(ExpectedTest, MoveAssignmentError) {
     Expected<int> original = Expected<int>::Error("test error");
     Expected<int> assigned(0);
     assigned = std::move(original);
@@ -158,8 +148,7 @@ TEST_F(ExpectedTest, MoveAssignmentError)
 // Expected<T> - Access Operators Tests
 // ============================================================================
 
-TEST_F(ExpectedTest, DereferenceOperator)
-{
+TEST_F(ExpectedTest, DereferenceOperator) {
     Expected<int> result(42);
     EXPECT_EQ(*result, 42);
 
@@ -168,15 +157,13 @@ TEST_F(ExpectedTest, DereferenceOperator)
     EXPECT_EQ(*result, 100);
 }
 
-TEST_F(ExpectedTest, ArrowOperator)
-{
-    struct TestStruct
-    {
-        int         value;
+TEST_F(ExpectedTest, ArrowOperator) {
+    struct TestStruct {
+        int value;
         std::string name;
     };
 
-    TestStruct           obj{42, "test"};
+    TestStruct obj{42, "test"};
     Expected<TestStruct> result(obj);
 
     EXPECT_EQ(result->value, 42);
@@ -187,8 +174,7 @@ TEST_F(ExpectedTest, ArrowOperator)
     EXPECT_EQ(result->value, 100);
 }
 
-TEST_F(ExpectedTest, RValueDereference)
-{
+TEST_F(ExpectedTest, RValueDereference) {
     auto makeExpected = []() -> Expected<std::string> { return std::string("temporary"); };
 
     std::string value = *makeExpected();
@@ -200,39 +186,29 @@ TEST_F(ExpectedTest, RValueDereference)
 // ============================================================================
 
 // Helper function that returns Expected<int>
-Expected<int> divideOrError(int numerator, int denominator)
-{
-    if(denominator == 0)
-    {
+Expected<int> divideOrError(int numerator, int denominator) {
+    if (denominator == 0) {
         return Expected<int>::Error("Division by zero");
     }
     return numerator / denominator;
 }
 
-TEST_F(ExpectedTest, PatternMatchingSuccess)
-{
+TEST_F(ExpectedTest, PatternMatchingSuccess) {
     auto result = divideOrError(10, 2);
 
-    if(result)
-    {
+    if (result) {
         EXPECT_EQ(*result, 5);
-    }
-    else
-    {
+    } else {
         FAIL() << "Expected success but got error: " << result.getError();
     }
 }
 
-TEST_F(ExpectedTest, PatternMatchingError)
-{
+TEST_F(ExpectedTest, PatternMatchingError) {
     auto result = divideOrError(10, 0);
 
-    if(result)
-    {
+    if (result) {
         FAIL() << "Expected error but got success: " << *result;
-    }
-    else
-    {
+    } else {
         EXPECT_EQ(result.getError(), "Division by zero");
     }
 }
@@ -241,29 +217,23 @@ TEST_F(ExpectedTest, PatternMatchingError)
 // Expected<T> - Complex Type Tests
 // ============================================================================
 
-struct ComplexType
-{
-    std::vector<int>     data;
+struct ComplexType {
+    std::vector<int> data;
     std::unique_ptr<int> ptr;
-    std::string          name;
+    std::string name;
 
     ComplexType(std::vector<int> d, int val, std::string n)
-        : data(std::move(d))
-        , ptr(std::make_unique<int>(val))
-        , name(std::move(n))
-    {
-    }
+        : data(std::move(d)), ptr(std::make_unique<int>(val)), name(std::move(n)) {}
 
     // Move-only type
-    ComplexType(ComplexType&&) noexcept            = default;
+    ComplexType(ComplexType&&) noexcept = default;
     ComplexType& operator=(ComplexType&&) noexcept = default;
-    ComplexType(const ComplexType&)                = delete;
-    ComplexType& operator=(const ComplexType&)     = delete;
+    ComplexType(const ComplexType&) = delete;
+    ComplexType& operator=(const ComplexType&) = delete;
 };
 
-TEST_F(ExpectedTest, MoveOnlyType)
-{
-    ComplexType           obj({1, 2, 3}, 42, "test");
+TEST_F(ExpectedTest, MoveOnlyType) {
+    ComplexType obj({1, 2, 3}, 42, "test");
     Expected<ComplexType> result(std::move(obj));
 
     EXPECT_TRUE(result.hasValue());
@@ -272,9 +242,8 @@ TEST_F(ExpectedTest, MoveOnlyType)
     EXPECT_EQ(result->name, "test");
 }
 
-TEST_F(ExpectedTest, UniquePointer)
-{
-    auto                           ptr = std::make_unique<int>(999);
+TEST_F(ExpectedTest, UniquePointer) {
+    auto ptr = std::make_unique<int>(999);
     Expected<std::unique_ptr<int>> result(std::move(ptr));
 
     EXPECT_TRUE(result.hasValue());
@@ -286,21 +255,17 @@ TEST_F(ExpectedTest, UniquePointer)
 // ============================================================================
 
 // Simulate architecture check function
-Expected<void*> createInstructionForArch(const std::string& arch, const std::string& instruction)
-{
-    if(arch == "gfx900" && instruction == "s_mul_lo_u32")
-    {
+Expected<void*> createInstructionForArch(const std::string& arch, const std::string& instruction) {
+    if (arch == "gfx900" && instruction == "s_mul_lo_u32") {
         return Expected<void*>::Error("s_mul_lo_u32 not supported on gfx900 (requires gfx1250+)");
     }
-    if(arch == "gfx1250")
-    {
-        return static_cast<void*>(nullptr); // Placeholder
+    if (arch == "gfx1250") {
+        return static_cast<void*>(nullptr);  // Placeholder
     }
     return Expected<void*>::Error("Unknown architecture: " + arch);
 }
 
-TEST_F(ExpectedTest, ArchitectureLimitation)
-{
+TEST_F(ExpectedTest, ArchitectureLimitation) {
     auto result1 = createInstructionForArch("gfx900", "s_mul_lo_u32");
     EXPECT_TRUE(result1.hasError());
     EXPECT_TRUE(result1.getError().find("gfx1250") != std::string::npos);
@@ -309,16 +274,14 @@ TEST_F(ExpectedTest, ArchitectureLimitation)
     EXPECT_TRUE(result2.hasValue());
 }
 
-TEST_F(ExpectedTest, ChainedErrorPropagation)
-{
+TEST_F(ExpectedTest, ChainedErrorPropagation) {
     // Simulate function that depends on another Expected-returning function
     auto processInstruction = [](const std::string& arch) -> Expected<int> {
         auto inst = createInstructionForArch(arch, "s_mul_lo_u32");
-        if(!inst)
-        {
+        if (!inst) {
             return Expected<int>::Error("Failed to create instruction: " + inst.getError());
         }
-        return 42; // Success
+        return 42;  // Success
     };
 
     auto result1 = processInstruction("gfx900");
@@ -334,30 +297,26 @@ TEST_F(ExpectedTest, ChainedErrorPropagation)
 // Expected<T> - Edge Cases
 // ============================================================================
 
-TEST_F(ExpectedTest, EmptyString)
-{
+TEST_F(ExpectedTest, EmptyString) {
     Expected<std::string> result("");
     EXPECT_TRUE(result.hasValue());
     EXPECT_EQ(result->size(), 0);
 }
 
-TEST_F(ExpectedTest, EmptyErrorMessage)
-{
+TEST_F(ExpectedTest, EmptyErrorMessage) {
     Expected<int> result = Expected<int>::Error("");
     EXPECT_TRUE(result.hasError());
     EXPECT_EQ(result.getError(), "");
 }
 
-TEST_F(ExpectedTest, LargeErrorMessage)
-{
-    std::string   longMsg(10000, 'x');
+TEST_F(ExpectedTest, LargeErrorMessage) {
+    std::string longMsg(10000, 'x');
     Expected<int> result = Expected<int>::Error(longMsg);
     EXPECT_TRUE(result.hasError());
     EXPECT_EQ(result.getError().size(), 10000);
 }
 
-TEST_F(ExpectedTest, NullPointer)
-{
+TEST_F(ExpectedTest, NullPointer) {
     Expected<int*> result(nullptr);
     EXPECT_TRUE(result.hasValue());
     EXPECT_EQ(*result, nullptr);
@@ -370,35 +329,27 @@ TEST_F(ExpectedTest, NullPointer)
 // in unit tests. Instead, we test that the code compiles and that we can
 // use it in dead code paths.
 
-class UnreachableTest : public ::testing::Test
-{
-protected:
+class UnreachableTest : public ::testing::Test {
+   protected:
     void SetUp() override {}
 };
 
 // Test that STINKY_UNREACHABLE compiles and can be used in conditional branches
-TEST_F(UnreachableTest, CompilationTest)
-{
+TEST_F(UnreachableTest, CompilationTest) {
     auto testFunction = [](int value) -> int {
-        if(value == 0)
-        {
+        if (value == 0) {
             return 0;
-        }
-        else if(value == 1)
-        {
+        } else if (value == 1) {
             return 1;
-        }
-        else
-        {
+        } else {
             // This branch should never execute in this test
-            if(value == 2)
-            {
+            if (value == 2) {
                 return 2;
             }
             // If we somehow get here with value != 2, it's a bug
             // STINKY_UNREACHABLE("Unexpected value");
             // Note: Can't actually execute this in test, just verify compilation
-            return -1; // Placeholder for test
+            return -1;  // Placeholder for test
         }
     };
 
@@ -408,18 +359,15 @@ TEST_F(UnreachableTest, CompilationTest)
 }
 
 // Test pattern: validation followed by unreachable
-TEST_F(UnreachableTest, ValidationPattern)
-{
+TEST_F(UnreachableTest, ValidationPattern) {
     auto createWithValidation = [](bool isValid) -> Expected<int> {
-        if(!isValid)
-        {
+        if (!isValid) {
             return Expected<int>::Error("Validation failed");
         }
 
         // After validation, some operation that should never fail
         int* ptr = new int(42);
-        if(!ptr)
-        {
+        if (!ptr) {
             // This should never happen on modern systems
             // STINKY_UNREACHABLE("Failed to allocate memory after validation");
             // Can't execute in test, but pattern is correct
@@ -441,8 +389,7 @@ TEST_F(UnreachableTest, ValidationPattern)
 // Integration Tests - Expected + assert pattern
 // ============================================================================
 
-TEST_F(ExpectedTest, AssertPlusExpectedPattern)
-{
+TEST_F(ExpectedTest, AssertPlusExpectedPattern) {
     // Simulate function with precondition checks and recoverable errors
     auto processData = [](int* data, size_t size, bool supportedArch) -> Expected<int> {
         // Debug-time precondition check
@@ -450,22 +397,20 @@ TEST_F(ExpectedTest, AssertPlusExpectedPattern)
         assert(size > 0 && "Size must be positive");
 
         // Recoverable error (architecture limitation)
-        if(!supportedArch)
-        {
+        if (!supportedArch) {
             return Expected<int>::Error("Operation not supported on this architecture");
         }
 
         // Success
         int sum = 0;
-        for(size_t i = 0; i < size; i++)
-        {
+        for (size_t i = 0; i < size; i++) {
             sum += data[i];
         }
         return sum;
     };
 
-    int  testData[] = {1, 2, 3, 4, 5};
-    auto result1    = processData(testData, 5, true);
+    int testData[] = {1, 2, 3, 4, 5};
+    auto result1 = processData(testData, 5, true);
     EXPECT_TRUE(result1.hasValue());
     EXPECT_EQ(*result1, 15);
 
@@ -478,24 +423,21 @@ TEST_F(ExpectedTest, AssertPlusExpectedPattern)
 // Performance Tests (Sanity Check)
 // ============================================================================
 
-TEST_F(ExpectedTest, PerformanceSanity)
-{
+TEST_F(ExpectedTest, PerformanceSanity) {
     // Test that Expected doesn't have crazy overhead for simple types
     const int iterations = 10000;
 
     auto start = std::chrono::high_resolution_clock::now();
 
-    for(int i = 0; i < iterations; i++)
-    {
+    for (int i = 0; i < iterations; i++) {
         Expected<int> result(i);
-        if(result)
-        {
-            volatile int x = *result; // Prevent optimization
+        if (result) {
+            volatile int x = *result;  // Prevent optimization
             (void)x;
         }
     }
 
-    auto end      = std::chrono::high_resolution_clock::now();
+    auto end = std::chrono::high_resolution_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
 
     // This should complete in well under 1ms for 10k iterations
@@ -507,11 +449,9 @@ TEST_F(ExpectedTest, PerformanceSanity)
 // ============================================================================
 
 // Verify examples from ErrorHandling.hpp actually work
-TEST_F(ExpectedTest, DocumentationExample1)
-{
+TEST_F(ExpectedTest, DocumentationExample1) {
     auto createInstruction = [](bool arch_supports) -> Expected<int*> {
-        if(!arch_supports)
-        {
+        if (!arch_supports) {
             return Expected<int*>::Error("Not supported");
         }
         static int inst = 42;
@@ -520,22 +460,16 @@ TEST_F(ExpectedTest, DocumentationExample1)
 
     // Usage from documentation
     auto result = createInstruction(false);
-    if(!result)
-    {
+    if (!result) {
         EXPECT_EQ(result.getError(), "Not supported");
-    }
-    else
-    {
+    } else {
         FAIL() << "Should have failed";
     }
 }
 
-TEST_F(ExpectedTest, DocumentationExample2)
-{
-    struct StinkyRegister
-    {
-        bool isValid() const
-        {
+TEST_F(ExpectedTest, DocumentationExample2) {
+    struct StinkyRegister {
+        bool isValid() const {
             return true;
         }
     };
@@ -547,6 +481,6 @@ TEST_F(ExpectedTest, DocumentationExample2)
     };
 
     StinkyRegister reg;
-    auto           result = createInst(reg);
+    auto result = createInst(reg);
     EXPECT_TRUE(result.hasValue());
 }

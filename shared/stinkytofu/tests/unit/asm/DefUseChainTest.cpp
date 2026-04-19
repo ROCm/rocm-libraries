@@ -30,9 +30,9 @@ using namespace stinkytofu;
 using namespace stinkytofu::test;
 
 // Helper to create v_mov_b32 in a specific block
-static StinkyInstruction* createVMovInBlock(BasicBlock* bb, GfxArchID arch, int destReg, int srcReg)
-{
-    AsmIRBuilder       builder(*bb, arch);
+static StinkyInstruction* createVMovInBlock(BasicBlock* bb, GfxArchID arch, int destReg,
+                                            int srcReg) {
+    AsmIRBuilder builder(*bb, arch);
     StinkyInstruction* inst = builder.create(getMCIDByUOp(GFX::v_mov_b32, arch));
     inst->addDestReg(StinkyRegister("v", destReg, 1));
     inst->addSrcReg(StinkyRegister("v", srcReg, 1));
@@ -41,20 +41,18 @@ static StinkyInstruction* createVMovInBlock(BasicBlock* bb, GfxArchID arch, int 
 
 // Helper to create an instruction with BARRIER (pseudo register) as dest.
 // Simulates s_waitcnt-like instructions used for dependency tracking.
-static StinkyInstruction* createBarrierDestInBlock(BasicBlock* bb, GfxArchID arch)
-{
-    AsmIRBuilder       builder(*bb, arch);
+static StinkyInstruction* createBarrierDestInBlock(BasicBlock* bb, GfxArchID arch) {
+    AsmIRBuilder builder(*bb, arch);
     StinkyInstruction* inst = builder.create(getMCIDByUOp(GFX::s_waitcnt, arch));
     inst->addDestReg(StinkyRegister(RegType::LDS, 0, 1));
-    inst->addSrcReg(StinkyRegister(0)); // literal 0
+    inst->addSrcReg(StinkyRegister(0));  // literal 0
     return inst;
 }
 
 // Helper to create s_cmp_eq_u32 (writes SCC implicit register).
-static StinkyInstruction*
-    createSCmpEqU32InBlock(BasicBlock* bb, GfxArchID arch, int src0Reg, int src1Reg)
-{
-    AsmIRBuilder       builder(*bb, arch);
+static StinkyInstruction* createSCmpEqU32InBlock(BasicBlock* bb, GfxArchID arch, int src0Reg,
+                                                 int src1Reg) {
+    AsmIRBuilder builder(*bb, arch);
     StinkyInstruction* inst = builder.create(getMCIDByUOp(GFX::s_cmp_eq_u32, arch));
     inst->addDestReg(StinkyRegister::getSCCRegister());
     inst->addSrcReg(StinkyRegister("s", src0Reg, 1));
@@ -63,17 +61,15 @@ static StinkyInstruction*
 }
 
 // Helper to create s_cbranch_scc0 (reads SCC implicit register).
-static StinkyInstruction* createSCbranchScc0InBlock(BasicBlock* bb, GfxArchID arch)
-{
-    AsmIRBuilder       builder(*bb, arch);
+static StinkyInstruction* createSCbranchScc0InBlock(BasicBlock* bb, GfxArchID arch) {
+    AsmIRBuilder builder(*bb, arch);
     StinkyInstruction* inst = builder.create(getMCIDByUOp(GFX::s_cbranch_scc0, arch));
     inst->addSrcReg(StinkyRegister::getSCCRegister());
     return inst;
 }
 
-class DefUseChainTest : public ::testing::Test
-{
-protected:
+class DefUseChainTest : public ::testing::Test {
+   protected:
     GfxArchID arch = GfxArchID::Gfx1250;
 };
 
@@ -84,8 +80,7 @@ protected:
 //    v   |
 //    B --+       v0 = v0 + v3
 // =============================================================================
-TEST_F(DefUseChainTest, LoopBack_TwoBlocks)
-{
+TEST_F(DefUseChainTest, LoopBack_TwoBlocks) {
     Function func("loop_back_two");
     setFunctionArch(func, arch);
     BasicBlock* A = func.createBasicBlock("A");
@@ -120,8 +115,7 @@ TEST_F(DefUseChainTest, LoopBack_TwoBlocks)
 //    | \
 //    +--+
 // =============================================================================
-TEST_F(DefUseChainTest, LoopBack_SelfLoop)
-{
+TEST_F(DefUseChainTest, LoopBack_SelfLoop) {
     Function func("loop_self");
     setFunctionArch(func, arch);
     BasicBlock* A = func.createBasicBlock("A");
@@ -156,11 +150,10 @@ TEST_F(DefUseChainTest, LoopBack_SelfLoop)
 //    D --------+   v0 = v0 + v5
 // =============================================================================
 
-TEST_F(DefUseChainTest, ThreePredecessors_ABCBDA)
-{
+TEST_F(DefUseChainTest, ThreePredecessors_ABCBDA) {
     Function func("three_preds");
     setFunctionArch(func, arch);
-    BasicBlock* A = func.createBasicBlock("A"); // entry
+    BasicBlock* A = func.createBasicBlock("A");  // entry
     BasicBlock* B = func.createBasicBlock("B");
     BasicBlock* C = func.createBasicBlock("C");
     BasicBlock* D = func.createBasicBlock("D");
@@ -175,10 +168,10 @@ TEST_F(DefUseChainTest, ThreePredecessors_ABCBDA)
     func.addEdge(C, A);
     func.addEdge(D, A);
 
-    // A: First instruction USES v0 (from B/C/D), then defines v0. So we need PHI(v0_from_B, v0_from_C, v0_from_D).
-    // v10 = v0 + v1  (uses v0 - requires PHI to merge from B,C,D)
-    // v0 = v1 + v2   (redefines v0)
-    StinkyInstruction* aFirstAdd  = createVAddInBlock(A, arch, 10, 0, 1);
+    // A: First instruction USES v0 (from B/C/D), then defines v0. So we need PHI(v0_from_B,
+    // v0_from_C, v0_from_D). v10 = v0 + v1  (uses v0 - requires PHI to merge from B,C,D) v0 = v1 +
+    // v2   (redefines v0)
+    StinkyInstruction* aFirstAdd = createVAddInBlock(A, arch, 10, 0, 1);
     StinkyInstruction* aSecondAdd = createVAddInBlock(A, arch, 0, 1, 2);
 
     // B, C, D: v0 = v0 + v3/v4/v5 (uses v0 from predecessor, redefines)
@@ -207,13 +200,12 @@ TEST_F(DefUseChainTest, ThreePredecessors_ABCBDA)
 
     // PHI operands are ordered by A's predecessors: sources[i] = def from preds[i].
     const std::vector<BasicBlock*>& preds = A->getPredecessors();
-    for(size_t i = 0; i < preds.size(); ++i)
-    {
-        if(preds[i] == B)
+    for (size_t i = 0; i < preds.size(); ++i) {
+        if (preds[i] == B)
             EXPECT_EQ(phi->getSources()[i], bAdd) << "PHI operand for B should be B's add";
-        else if(preds[i] == C)
+        else if (preds[i] == C)
             EXPECT_EQ(phi->getSources()[i], cAdd) << "PHI operand for C should be C's add";
-        else if(preds[i] == D)
+        else if (preds[i] == D)
             EXPECT_EQ(phi->getSources()[i], dAdd) << "PHI operand for D should be D's add";
     }
 
@@ -233,15 +225,14 @@ TEST_F(DefUseChainTest, ThreePredecessors_ABCBDA)
 //      Exit       v10 = v0 + v11
 // =============================================================================
 
-TEST_F(DefUseChainTest, ThreePredecessors_DiamondMerge)
-{
+TEST_F(DefUseChainTest, ThreePredecessors_DiamondMerge) {
     Function func("diamond_three");
     setFunctionArch(func, arch);
     BasicBlock* entry = func.createBasicBlock("entry");
-    BasicBlock* B     = func.createBasicBlock("B");
-    BasicBlock* C     = func.createBasicBlock("C");
-    BasicBlock* D     = func.createBasicBlock("D");
-    BasicBlock* exit  = func.createBasicBlock("exit");
+    BasicBlock* B = func.createBasicBlock("B");
+    BasicBlock* C = func.createBasicBlock("C");
+    BasicBlock* D = func.createBasicBlock("D");
+    BasicBlock* exit = func.createBasicBlock("exit");
 
     func.addEdge(entry, B);
     func.addEdge(entry, C);
@@ -268,18 +259,19 @@ TEST_F(DefUseChainTest, ThreePredecessors_DiamondMerge)
     verifyDefUseChainConsistency(func);
     verifyUsersSourcesConsistency(func);
 
-    // Exit uses v0, which is defined in B, C, D. So Exit needs PHI(v0_from_B, v0_from_C, v0_from_D).
+    // Exit uses v0, which is defined in B, C, D. So Exit needs PHI(v0_from_B, v0_from_C,
+    // v0_from_D).
     StinkyInstruction* phi = &getStinkyInst(exit->begin());
     ASSERT_EQ(phi->getUnifiedOpcode(), GFX::PHI) << "Exit's first inst is PHI";
     EXPECT_EQ(exitAdd->getSources().size(), 1u) << "Exit uses v0 from PHI";
     EXPECT_EQ(exitAdd->getSources()[0], phi) << "Exit add's v0 defined by PHI";
     EXPECT_EQ(phi->getSources().size(), 3u) << "PHI in Exit should have 3 operand defs";
-    EXPECT_TRUE(std::find(phi->getSources().begin(), phi->getSources().end(), bAdd)
-                != phi->getSources().end());
-    EXPECT_TRUE(std::find(phi->getSources().begin(), phi->getSources().end(), cAdd)
-                != phi->getSources().end());
-    EXPECT_TRUE(std::find(phi->getSources().begin(), phi->getSources().end(), dAdd)
-                != phi->getSources().end());
+    EXPECT_TRUE(std::find(phi->getSources().begin(), phi->getSources().end(), bAdd) !=
+                phi->getSources().end());
+    EXPECT_TRUE(std::find(phi->getSources().begin(), phi->getSources().end(), cAdd) !=
+                phi->getSources().end());
+    EXPECT_TRUE(std::find(phi->getSources().begin(), phi->getSources().end(), dAdd) !=
+                phi->getSources().end());
 }
 
 // =============================================================================
@@ -296,14 +288,13 @@ TEST_F(DefUseChainTest, ThreePredecessors_DiamondMerge)
 //    C ----+    v20 = v0 + v21
 // =============================================================================
 
-TEST_F(DefUseChainTest, PassThrough_ValueUsedBySuccessorsSuccessor)
-{
+TEST_F(DefUseChainTest, PassThrough_ValueUsedBySuccessorsSuccessor) {
     Function func("pass_through");
     setFunctionArch(func, arch);
     BasicBlock* entry = func.createBasicBlock("entry");
-    BasicBlock* A     = func.createBasicBlock("A");
-    BasicBlock* B     = func.createBasicBlock("B");
-    BasicBlock* C     = func.createBasicBlock("C");
+    BasicBlock* A = func.createBasicBlock("A");
+    BasicBlock* B = func.createBasicBlock("B");
+    BasicBlock* C = func.createBasicBlock("C");
 
     func.addEdge(entry, A);
     func.addEdge(A, B);
@@ -315,7 +306,7 @@ TEST_F(DefUseChainTest, PassThrough_ValueUsedBySuccessorsSuccessor)
     // A: v0 = v1 + v2 (redefines v0)
     StinkyInstruction* aAdd = createVAddInBlock(A, arch, 0, 1, 2);
     // B: no v0 use/def (pass-through)
-    createVAddInBlock(B, arch, 10, 11, 12); // v10 = v11 + v12
+    createVAddInBlock(B, arch, 10, 11, 12);  // v10 = v11 + v12
     // C: uses v0 (from B, which passes through from A)
     StinkyInstruction* cAdd = createVAddInBlock(C, arch, 20, 0, 21);
 
@@ -357,17 +348,16 @@ TEST_F(DefUseChainTest, PassThrough_ValueUsedBySuccessorsSuccessor)
 //       D   E  (both use v0)
 // =============================================================================
 
-TEST_F(DefUseChainTest, CollapsePredDefs_PassThroughWithMultiplePredecessors)
-{
+TEST_F(DefUseChainTest, CollapsePredDefs_PassThroughWithMultiplePredecessors) {
     Function func("collapse_pred_defs");
     setFunctionArch(func, arch);
     BasicBlock* entry = func.createBasicBlock("entry");
-    BasicBlock* A     = func.createBasicBlock("A");
-    BasicBlock* F     = func.createBasicBlock("F");
-    BasicBlock* B     = func.createBasicBlock("B");
-    BasicBlock* C     = func.createBasicBlock("C");
-    BasicBlock* D     = func.createBasicBlock("D");
-    BasicBlock* E     = func.createBasicBlock("E");
+    BasicBlock* A = func.createBasicBlock("A");
+    BasicBlock* F = func.createBasicBlock("F");
+    BasicBlock* B = func.createBasicBlock("B");
+    BasicBlock* C = func.createBasicBlock("C");
+    BasicBlock* D = func.createBasicBlock("D");
+    BasicBlock* E = func.createBasicBlock("E");
 
     func.addEdge(entry, A);
     func.addEdge(entry, F);
@@ -382,9 +372,9 @@ TEST_F(DefUseChainTest, CollapsePredDefs_PassThroughWithMultiplePredecessors)
     StinkyInstruction* aAdd = createVAddInBlock(A, arch, 0, 1, 2);
     StinkyInstruction* bAdd = createVAddInBlock(B, arch, 0, 3, 4);
     // F: no v0 (pass-through from Entry, which has no v0)
-    createVAddInBlock(F, arch, 5, 6, 7); // v5 = v6 + v7
+    createVAddInBlock(F, arch, 5, 6, 7);  // v5 = v6 + v7
     // C: pass-through - will have defByPreds[v0] = [aAdd, nullptr, bAdd]
-    createVAddInBlock(C, arch, 10, 11, 12); // v10 = v11 + v12
+    createVAddInBlock(C, arch, 10, 11, 12);  // v10 = v11 + v12
     // D and E both use v0 - triggers collapsePredDefs(C, v0, [aAdd, nullptr, bAdd])
     StinkyInstruction* dAdd = createVAddInBlock(D, arch, 20, 0, 21);
     StinkyInstruction* eAdd = createVAddInBlock(E, arch, 30, 0, 31);
@@ -418,15 +408,14 @@ TEST_F(DefUseChainTest, CollapsePredDefs_PassThroughWithMultiplePredecessors)
 //    Entry      v0 = v1 + v2; s_waitcnt (BARRIER); v2 = v0 + v3
 // =============================================================================
 
-TEST_F(DefUseChainTest, PseudoRegistersIgnored)
-{
+TEST_F(DefUseChainTest, PseudoRegistersIgnored) {
     Function func("pseudo_regs");
     setFunctionArch(func, arch);
     BasicBlock* bb = func.createBasicBlock("entry");
 
-    StinkyInstruction* defV0       = createVAddInBlock(bb, arch, 0, 1, 2); // v0 = v1 + v2
-    StinkyInstruction* barrierInst = createBarrierDestInBlock(bb, arch); // BARRIER = s_waitcnt 0
-    StinkyInstruction* useV0       = createVAddInBlock(bb, arch, 2, 0, 3); // v2 = v0 + v3
+    StinkyInstruction* defV0 = createVAddInBlock(bb, arch, 0, 1, 2);      // v0 = v1 + v2
+    StinkyInstruction* barrierInst = createBarrierDestInBlock(bb, arch);  // BARRIER = s_waitcnt 0
+    StinkyInstruction* useV0 = createVAddInBlock(bb, arch, 2, 0, 3);      // v2 = v0 + v3
 
     buildUseDefChain(func, false);
 
@@ -447,16 +436,15 @@ TEST_F(DefUseChainTest, PseudoRegistersIgnored)
 //    Entry      s_cmp_eq_u32 s0,s1 -> SCC; s_cbranch_scc0 (uses SCC)
 // =============================================================================
 
-TEST_F(DefUseChainTest, ImplicitRegistersDefUseChain)
-{
+TEST_F(DefUseChainTest, ImplicitRegistersDefUseChain) {
     Function func("implicit_scc");
     setFunctionArch(func, arch);
     BasicBlock* bb = func.createBasicBlock("entry");
 
-    StinkyInstruction* cmpInst
-        = createSCmpEqU32InBlock(bb, arch, 0, 1); // s_cmp_eq_u32 s0, s1 -> SCC
-    StinkyInstruction* branchInst
-        = createSCbranchScc0InBlock(bb, arch); // s_cbranch_scc0 (uses SCC)
+    StinkyInstruction* cmpInst =
+        createSCmpEqU32InBlock(bb, arch, 0, 1);  // s_cmp_eq_u32 s0, s1 -> SCC
+    StinkyInstruction* branchInst =
+        createSCbranchScc0InBlock(bb, arch);  // s_cbranch_scc0 (uses SCC)
 
     buildUseDefChain(func, false);
 
@@ -472,9 +460,8 @@ TEST_F(DefUseChainTest, ImplicitRegistersDefUseChain)
 // 1. Iterated Dominance Frontier — verify chains through cascading PHIs
 // =============================================================================
 
-TEST_F(DefUseChainTest, IteratedDominanceFrontier)
-{
-    Function      func("iterated_df");
+TEST_F(DefUseChainTest, IteratedDominanceFrontier) {
+    Function func("iterated_df");
     IteratedDFCfg cfg = buildIteratedDFCfg(func, arch);
 
     buildUseDefChain(func, false);
@@ -522,9 +509,8 @@ TEST_F(DefUseChainTest, IteratedDominanceFrontier)
 // 2. Nested Loops — chains through both loop-header PHIs
 // =============================================================================
 
-TEST_F(DefUseChainTest, NestedLoops_DualPhiHeaderChains)
-{
-    Function      func("nested_loops");
+TEST_F(DefUseChainTest, NestedLoops_DualPhiHeaderChains) {
+    Function func("nested_loops");
     NestedLoopCfg cfg = buildNestedLoopCfg(func, arch);
 
     buildUseDefChain(func, false);
@@ -570,9 +556,8 @@ TEST_F(DefUseChainTest, NestedLoops_DualPhiHeaderChains)
 // 3. Self-loop at join — self-referential PHI in chain
 // =============================================================================
 
-TEST_F(DefUseChainTest, SelfLoopAtJoinPoint)
-{
-    Function        func("self_loop_join");
+TEST_F(DefUseChainTest, SelfLoopAtJoinPoint) {
+    Function func("self_loop_join");
     SelfLoopJoinCfg cfg = buildSelfLoopJoinCfg(func, arch);
 
     buildUseDefChain(func, false);
@@ -607,9 +592,8 @@ TEST_F(DefUseChainTest, SelfLoopAtJoinPoint)
 // 4. Irreducible CFG — mutually recursive PHI chains
 // =============================================================================
 
-TEST_F(DefUseChainTest, IrreducibleCFG_MutualRecursiveChains)
-{
-    Function       func("irreducible");
+TEST_F(DefUseChainTest, IrreducibleCFG_MutualRecursiveChains) {
+    Function func("irreducible");
     IrreducibleCfg cfg = buildIrreducibleCfg(func, arch);
 
     buildUseDefChain(func, false);
@@ -652,9 +636,8 @@ TEST_F(DefUseChainTest, IrreducibleCFG_MutualRecursiveChains)
 // 5. Multiple registers at same join — per-register chains
 // =============================================================================
 
-TEST_F(DefUseChainTest, MultipleRegistersAtSameJoin)
-{
-    Function        func("multi_reg_join");
+TEST_F(DefUseChainTest, MultipleRegistersAtSameJoin) {
+    Function func("multi_reg_join");
     MultiRegJoinCfg cfg = buildMultiRegJoinCfg(func, arch);
 
     buildUseDefChain(func, false);
@@ -682,9 +665,8 @@ TEST_F(DefUseChainTest, MultipleRegistersAtSameJoin)
 // 6. Chain of diamonds — chains through 3 levels of PHIs
 // =============================================================================
 
-TEST_F(DefUseChainTest, ChainOfDiamonds)
-{
-    Function           func("chain_diamonds");
+TEST_F(DefUseChainTest, ChainOfDiamonds) {
+    Function func("chain_diamonds");
     ChainOfDiamondsCfg cfg = buildChainOfDiamondsCfg(func, arch);
 
     buildUseDefChain(func, false);
@@ -726,9 +708,8 @@ TEST_F(DefUseChainTest, ChainOfDiamonds)
 // 7. Dead register — no PHIs, no v0 chains
 // =============================================================================
 
-TEST_F(DefUseChainTest, DeadRegister_NoChains)
-{
-    Function   func("dead_reg");
+TEST_F(DefUseChainTest, DeadRegister_NoChains) {
+    Function func("dead_reg");
     DeadRegCfg cfg = buildDeadRegCfg(func, arch);
 
     buildUseDefChain(func, false);
@@ -747,9 +728,8 @@ TEST_F(DefUseChainTest, DeadRegister_NoChains)
 // 8. Re-definition within same block — last def wins
 // =============================================================================
 
-TEST_F(DefUseChainTest, RedefinitionInSameBlock)
-{
-    Function          func("redef_same_block");
+TEST_F(DefUseChainTest, RedefinitionInSameBlock) {
+    Function func("redef_same_block");
     RedefSameBlockCfg cfg = buildRedefSameBlockCfg(func, arch);
 
     buildUseDefChain(func, false);
@@ -784,9 +764,8 @@ TEST_F(DefUseChainTest, RedefinitionInSameBlock)
 // v1, v2, v3 chain directly back to Entry's wide load with no PHIs.
 // =============================================================================
 
-TEST_F(DefUseChainTest, WideRegPartialSubregRedefine)
-{
-    Function               func("wide_partial_redef");
+TEST_F(DefUseChainTest, WideRegPartialSubregRedefine) {
+    Function func("wide_partial_redef");
     WideRegPartialRedefCfg cfg = buildWideRegPartialRedefCfg(func, arch);
 
     buildUseDefChain(func, false);

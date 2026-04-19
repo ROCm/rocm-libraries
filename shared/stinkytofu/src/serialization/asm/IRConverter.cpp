@@ -17,6 +17,8 @@
  * THE SOFTWARE.
  *
  * ************************************************************************ */
+#include "stinkytofu/serialization/asm/IRConverter.hpp"
+
 #include <climits>
 #include <cstdlib>
 #include <iostream>
@@ -26,202 +28,162 @@
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/hardware/GfxIsa.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
-#include "stinkytofu/serialization/asm/IRConverter.hpp"
 #include "stinkytofu/serialization/asm/IRParser.hpp"
 
-namespace stinkytofu
-{
-    StinkyIRConverter::StinkyIRConverter()
-        : arch({9, 4, 2})
-    {
+namespace stinkytofu {
+StinkyIRConverter::StinkyIRConverter() : arch({9, 4, 2}) {}
+
+StinkyIRConverter::StinkyIRConverter(const std::array<int, 3>& targetArch) : arch(targetArch) {}
+
+static void convertInstruction(AsmIRBuilder& irBuilder,
+                               const std::unique_ptr<ParsedInstruction>& inst, GfxArchID arch) {
+    if (inst->isLabel) {
+        irBuilder.createLabel(inst->opcodeStr);
+        return;
     }
 
-    StinkyIRConverter::StinkyIRConverter(const std::array<int, 3>& targetArch)
-        : arch(targetArch)
-    {
+    auto opcode = getMnemonicToIsaOpcode(inst->opcodeStr, arch);
+    const HwInstDesc* hwInstDesc = getMCIDByIsaOp(static_cast<IsaOpcode>(opcode), arch);
+
+    if (hwInstDesc == nullptr) {
+        std::cerr << "Warning: No hardware instruction descriptor found for opcode " << opcode
+                  << " in arch gfx" << static_cast<int>(arch) << "\n";
+        return;
     }
 
-    static void convertInstruction(AsmIRBuilder&                             irBuilder,
-                                   const std::unique_ptr<ParsedInstruction>& inst,
-                                   GfxArchID                                 arch)
-    {
-        if(inst->isLabel)
-        {
-            irBuilder.createLabel(inst->opcodeStr);
-            return;
-        }
+    StinkyInstruction* stinkyInst = irBuilder.create(hwInstDesc);
+    stinkyInst->setDestRegs(inst->destRegs);
+    stinkyInst->setSrcRegs(inst->srcRegs);
 
-        auto              opcode     = getMnemonicToIsaOpcode(inst->opcodeStr, arch);
-        const HwInstDesc* hwInstDesc = getMCIDByIsaOp(static_cast<IsaOpcode>(opcode), arch);
+    if (inst->issueCycles > 0) stinkyInst->issueCycles = inst->issueCycles;
+    if (inst->latencyCycles > 0) stinkyInst->latencyCycles = inst->latencyCycles;
 
-        if(hwInstDesc == nullptr)
-        {
-            std::cerr << "Warning: No hardware instruction descriptor found for opcode " << opcode
-                      << " in arch gfx" << static_cast<int>(arch) << "\n";
-            return;
-        }
+    if (!inst->modifiers.empty()) {
+        ModifierSerializer::deserialize(stinkyInst, inst->modifiers);
+    }
+}
 
-        StinkyInstruction* stinkyInst = irBuilder.create(hwInstDesc);
-        stinkyInst->setDestRegs(inst->destRegs);
-        stinkyInst->setSrcRegs(inst->srcRegs);
+StinkyErrorCode StinkyIRConverter::populateFunctionFromString(const std::string& irText,
+                                                              Function& func, PassContext& passCtx,
+                                                              GfxArchID arch) {
+    auto result = parseSourceStringWithDiagnostics(irText);
 
-        if(inst->issueCycles > 0)
-            stinkyInst->issueCycles = inst->issueCycles;
-        if(inst->latencyCycles > 0)
-            stinkyInst->latencyCycles = inst->latencyCycles;
+    if (result.hasErrors()) return StinkyErrorCode::PARSE_ERROR;
 
-        if(!inst->modifiers.empty())
-        {
-            ModifierSerializer::deserialize(stinkyInst, inst->modifiers);
+    if (!result.parsedFunction || result.parsedFunction->blocks.empty())
+        return StinkyErrorCode::PARSE_ERROR;
+
+    func.clear();
+    func.setName(result.parsedFunction->funcName);
+
+    std::unordered_map<std::string, BasicBlock*> blockMap;
+
+    for (auto& parsedBlock : result.parsedFunction->blocks) {
+        BasicBlock* bb = func.createBasicBlock(parsedBlock->blockId);
+        blockMap[parsedBlock->blockId] = bb;
+
+        AsmIRBuilder irBuilder(*bb, arch);
+        for (auto& inst : parsedBlock->instructions) {
+            convertInstruction(irBuilder, inst, arch);
         }
     }
 
-    StinkyErrorCode StinkyIRConverter::populateFunctionFromString(const std::string& irText,
-                                                                  Function&          func,
-                                                                  PassContext&       passCtx,
-                                                                  GfxArchID          arch)
-    {
-        auto result = parseSourceStringWithDiagnostics(irText);
+    // Wire successors
+    for (size_t i = 0; i < result.parsedFunction->blocks.size(); ++i) {
+        ParsedBlock& parsedBlock = *result.parsedFunction->blocks[i];
+        BasicBlock* bb = blockMap[parsedBlock.blockId];
+        if (!bb) continue;
 
-        if(result.hasErrors())
-            return StinkyErrorCode::PARSE_ERROR;
-
-        if(!result.parsedFunction || result.parsedFunction->blocks.empty())
-            return StinkyErrorCode::PARSE_ERROR;
-
-        func.clear();
-        func.setName(result.parsedFunction->funcName);
-
-        std::unordered_map<std::string, BasicBlock*> blockMap;
-
-        for(auto& parsedBlock : result.parsedFunction->blocks)
-        {
-            BasicBlock* bb                 = func.createBasicBlock(parsedBlock->blockId);
-            blockMap[parsedBlock->blockId] = bb;
-
-            AsmIRBuilder irBuilder(*bb, arch);
-            for(auto& inst : parsedBlock->instructions)
-            {
-                convertInstruction(irBuilder, inst, arch);
+        for (const std::string& succId : parsedBlock.successorIds) {
+            std::string key = succId;
+            if (!key.empty() && key[0] == '^') key = key.substr(1);
+            BasicBlock* succ = blockMap[key];
+            if (succ) {
+                bb->addSuccessor(succ);
+                succ->addPredecessor(bb);
             }
         }
+    }
 
-        // Wire successors
-        for(size_t i = 0; i < result.parsedFunction->blocks.size(); ++i)
-        {
-            ParsedBlock& parsedBlock = *result.parsedFunction->blocks[i];
-            BasicBlock*  bb          = blockMap[parsedBlock.blockId];
-            if(!bb)
-                continue;
+    return StinkyErrorCode::SUCCESS;
+}
 
-            for(const std::string& succId : parsedBlock.successorIds)
-            {
-                std::string key = succId;
-                if(!key.empty() && key[0] == '^')
-                    key = key.substr(1);
-                BasicBlock* succ = blockMap[key];
-                if(succ)
-                {
-                    bb->addSuccessor(succ);
-                    succ->addPredecessor(bb);
-                }
+StinkyErrorCode StinkyIRConverter::populateFunctionFromParsed(ParsedFunction& parsedFunc,
+                                                              Function& func, GfxArchID arch) {
+    if (parsedFunc.blocks.empty()) return StinkyErrorCode::PARSE_ERROR;
+
+    func.clear();
+    func.setName(parsedFunc.funcName);
+
+    std::unordered_map<std::string, BasicBlock*> blockMap;
+
+    for (auto& parsedBlock : parsedFunc.blocks) {
+        BasicBlock* bb = func.createBasicBlock(parsedBlock->blockId);
+        blockMap[parsedBlock->blockId] = bb;
+
+        AsmIRBuilder irBuilder(*bb, arch);
+        for (auto& inst : parsedBlock->instructions) {
+            convertInstruction(irBuilder, inst, arch);
+        }
+    }
+
+    for (size_t i = 0; i < parsedFunc.blocks.size(); ++i) {
+        ParsedBlock& parsedBlock = *parsedFunc.blocks[i];
+        BasicBlock* bb = blockMap[parsedBlock.blockId];
+        if (!bb) continue;
+
+        for (const std::string& succId : parsedBlock.successorIds) {
+            std::string key = succId;
+            if (!key.empty() && key[0] == '^') key = key.substr(1);
+            BasicBlock* succ = blockMap[key];
+            if (succ) {
+                bb->addSuccessor(succ);
+                succ->addPredecessor(bb);
             }
         }
-
-        return StinkyErrorCode::SUCCESS;
     }
 
-    StinkyErrorCode StinkyIRConverter::populateFunctionFromParsed(ParsedFunction& parsedFunc,
-                                                                  Function&       func,
-                                                                  GfxArchID       arch)
-    {
-        if(parsedFunc.blocks.empty())
-            return StinkyErrorCode::PARSE_ERROR;
+    return StinkyErrorCode::SUCCESS;
+}
 
-        func.clear();
-        func.setName(parsedFunc.funcName);
+Function* StinkyIRConverter::convertToFunction(const std::string& rawInstructions) {
+    function = std::make_unique<Function>("kernel");
+    passCtx = std::make_unique<PassContext>();
 
-        std::unordered_map<std::string, BasicBlock*> blockMap;
+    // Set up kernel configuration
+    GemmTileConfig config;
+    config.arch = arch;
+    config.TileA0 = 0;
+    config.TileB0 = 0;
+    config.TileM0 = 0;
+    config.NumGRA = 0;
+    config.NumGRB = 0;
+    config.NumGRM = 0;
+    config.NumWaves = 0;
+    passCtx->setGemmTileConfig(config);
 
-        for(auto& parsedBlock : parsedFunc.blocks)
-        {
-            BasicBlock* bb                 = func.createBasicBlock(parsedBlock->blockId);
-            blockMap[parsedBlock->blockId] = bb;
-
-            AsmIRBuilder irBuilder(*bb, arch);
-            for(auto& inst : parsedBlock->instructions)
-            {
-                convertInstruction(irBuilder, inst, arch);
-            }
-        }
-
-        for(size_t i = 0; i < parsedFunc.blocks.size(); ++i)
-        {
-            ParsedBlock& parsedBlock = *parsedFunc.blocks[i];
-            BasicBlock*  bb          = blockMap[parsedBlock.blockId];
-            if(!bb)
-                continue;
-
-            for(const std::string& succId : parsedBlock.successorIds)
-            {
-                std::string key = succId;
-                if(!key.empty() && key[0] == '^')
-                    key = key.substr(1);
-                BasicBlock* succ = blockMap[key];
-                if(succ)
-                {
-                    bb->addSuccessor(succ);
-                    succ->addPredecessor(bb);
-                }
-            }
-        }
-
-        return StinkyErrorCode::SUCCESS;
-    }
-
-    Function* StinkyIRConverter::convertToFunction(const std::string& rawInstructions)
-    {
-        function = std::make_unique<Function>("kernel");
-        passCtx  = std::make_unique<PassContext>();
-
-        // Set up kernel configuration
-        GemmTileConfig config;
-        config.arch     = arch;
-        config.TileA0   = 0;
-        config.TileB0   = 0;
-        config.TileM0   = 0;
-        config.NumGRA   = 0;
-        config.NumGRB   = 0;
-        config.NumGRM   = 0;
-        config.NumWaves = 0;
-        passCtx->setGemmTileConfig(config);
-
-        GfxArchID       archID = getGfxArchID(arch[0], arch[1], arch[2]);
-        StinkyErrorCode result
-            = populateFunctionFromString(rawInstructions, *function, *passCtx, archID);
-        if(result != StinkyErrorCode::SUCCESS)
-        {
-            function.reset();
-            passCtx.reset();
-            return nullptr;
-        }
-
-        return function.get();
-    }
-
-    PassContext* StinkyIRConverter::getPassContext()
-    {
-        return passCtx.get();
-    }
-
-    void StinkyIRConverter::cleanup()
-    {
+    GfxArchID archID = getGfxArchID(arch[0], arch[1], arch[2]);
+    StinkyErrorCode result =
+        populateFunctionFromString(rawInstructions, *function, *passCtx, archID);
+    if (result != StinkyErrorCode::SUCCESS) {
         function.reset();
         passCtx.reset();
+        return nullptr;
     }
 
-    StinkyIRConverter::~StinkyIRConverter()
-    {
-        cleanup();
-    }
-} // namespace stinkytofu
+    return function.get();
+}
+
+PassContext* StinkyIRConverter::getPassContext() {
+    return passCtx.get();
+}
+
+void StinkyIRConverter::cleanup() {
+    function.reset();
+    passCtx.reset();
+}
+
+StinkyIRConverter::~StinkyIRConverter() {
+    cleanup();
+}
+}  // namespace stinkytofu

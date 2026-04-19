@@ -23,52 +23,47 @@
 
 #pragma once
 
-#include "stinkytofu/core/Function.hpp"
-#include "stinkytofu/core/PassManager.hpp"
 #include <memory>
 #include <string>
 
-namespace stinkytofu
-{
-    /// Configuration for Logical IR verification only.
-    /// For ASM (StinkyTofu) verification use stinkytofu/analysis/asm/AsmVerifierPass.hpp and AsmVerifierConfig.
-    struct LogicalIRVerifierConfig
-    {
-        bool abortOnError = true;
-        bool verbose      = false;
-    };
+#include "stinkytofu/core/Function.hpp"
+#include "stinkytofu/core/PassManager.hpp"
 
-    /// Validate Logical IR structure only. Returns error message if invalid, empty string if valid.
-    /// For StinkyTofu Assembly IR use validateStinkyIR() from stinkytofu/analysis/asm/AsmVerifierPass.hpp.
-    std::string validateLogicalIR(Function& func, const LogicalIRVerifierConfig& config = {});
+namespace stinkytofu {
+/// Configuration for Logical IR verification only.
+/// For ASM (StinkyTofu) verification use stinkytofu/analysis/asm/AsmVerifierPass.hpp and
+/// AsmVerifierConfig.
+struct LogicalIRVerifierConfig {
+    bool abortOnError = true;
+    bool verbose = false;
+};
 
-    /// Pass that verifies Logical IR (high-level IR only). For ASM use StinkyIRVerifierPass.
-    class LogicalIRVerifierPass : public Pass
-    {
-    public:
-        static char ID;
+/// Validate Logical IR structure only. Returns error message if invalid, empty string if valid.
+/// For StinkyTofu Assembly IR use validateStinkyIR() from
+/// stinkytofu/analysis/asm/AsmVerifierPass.hpp.
+std::string validateLogicalIR(Function& func, const LogicalIRVerifierConfig& config = {});
 
-        explicit LogicalIRVerifierPass(LogicalIRVerifierConfig config = {})
-            : config_(std::move(config))
-        {
-        }
+/// Pass that verifies Logical IR (high-level IR only). For ASM use StinkyIRVerifierPass.
+class LogicalIRVerifierPass : public Pass {
+   public:
+    static char ID;
 
-        PassID getPassID() const override
-        {
-            return &ID;
-        }
-        const char* getName() const override
-        {
-            return "LogicalIRVerifier";
-        }
-        void run(Function& func, PassContext& ctx) override;
+    explicit LogicalIRVerifierPass(LogicalIRVerifierConfig config = {})
+        : config_(std::move(config)) {}
 
-    private:
-        LogicalIRVerifierConfig config_;
-    };
-
-    inline std::unique_ptr<Pass> createLogicalIRVerifierPass(LogicalIRVerifierConfig config = {})
-    {
-        return std::make_unique<LogicalIRVerifierPass>(std::move(config));
+    PassID getPassID() const override {
+        return &ID;
     }
-} // namespace stinkytofu
+    const char* getName() const override {
+        return "LogicalIRVerifier";
+    }
+    void run(Function& func, PassContext& ctx) override;
+
+   private:
+    LogicalIRVerifierConfig config_;
+};
+
+inline std::unique_ptr<Pass> createLogicalIRVerifierPass(LogicalIRVerifierConfig config = {}) {
+    return std::make_unique<LogicalIRVerifierPass>(std::move(config));
+}
+}  // namespace stinkytofu

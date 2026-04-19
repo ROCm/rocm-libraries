@@ -26,47 +26,38 @@
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/pipeline/BackendRegistry.hpp"
 
-namespace stinkytofu
-{
-    Backend::Backend(StinkyAsmModule& module)
-        : module(module)
-    {
-    }
+namespace stinkytofu {
+Backend::Backend(StinkyAsmModule& module) : module(module) {}
 
-    std::array<int, 3> Backend::getArch() const
-    {
-        return module.getArch();
-    }
+std::array<int, 3> Backend::getArch() const {
+    return module.getArch();
+}
 
-    bool Backend::runOptimization()
-    {
-        auto* pipeline = BackendRegistry::getArchPipeline(module.getArch());
-        if(!pipeline || !pipeline->builder)
-            return true;
+bool Backend::runOptimization() {
+    auto* pipeline = BackendRegistry::getArchPipeline(module.getArch());
+    if (!pipeline || !pipeline->builder) return true;
 
-        PassManager pm;
-        if(!pipeline->builder(pm, module))
-            return true;
+    PassManager pm;
+    if (!pipeline->builder(pm, module)) return true;
 
-        configurePassManager(pm);
-        pm.run(module.getFunction());
-        return true;
-    }
+    configurePassManager(pm);
+    pm.run(module.getFunction());
+    return true;
+}
 
-    void Backend::configurePassManager(PassManager& pm)
-    {
-        const auto& opts = module.getModuleOptions();
+void Backend::configurePassManager(PassManager& pm) {
+    const auto& opts = module.getModuleOptions();
 
-        GemmTileConfig gemmTileConfig;
-        gemmTileConfig.arch     = module.getArch();
-        gemmTileConfig.TileA0   = opts.TileA0;
-        gemmTileConfig.TileB0   = opts.TileB0;
-        gemmTileConfig.TileM0   = opts.TileM0;
-        gemmTileConfig.NumGRA   = opts.NumGRA;
-        gemmTileConfig.NumGRB   = opts.NumGRB;
-        gemmTileConfig.NumGRM   = opts.NumGRM;
-        gemmTileConfig.NumWaves = opts.WaveGroup0 * opts.WaveGroup1;
-        pm.setGemmTileConfig(gemmTileConfig);
-    }
+    GemmTileConfig gemmTileConfig;
+    gemmTileConfig.arch = module.getArch();
+    gemmTileConfig.TileA0 = opts.TileA0;
+    gemmTileConfig.TileB0 = opts.TileB0;
+    gemmTileConfig.TileM0 = opts.TileM0;
+    gemmTileConfig.NumGRA = opts.NumGRA;
+    gemmTileConfig.NumGRB = opts.NumGRB;
+    gemmTileConfig.NumGRM = opts.NumGRM;
+    gemmTileConfig.NumWaves = opts.WaveGroup0 * opts.WaveGroup1;
+    pm.setGemmTileConfig(gemmTileConfig);
+}
 
-} // namespace stinkytofu
+}  // namespace stinkytofu

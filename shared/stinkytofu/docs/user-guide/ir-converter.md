@@ -252,4 +252,3 @@ void processIRInThread(const std::string& irText) {
 - [Assembly Emitter Guide](asm-emitter.md) - Converting IR to assembly code
 - [Error Codes Reference](error-codes.md) - Error codes and handling
 - [Pass Manager](../developer-guide/pass-manager.md) - Running optimization passes
-

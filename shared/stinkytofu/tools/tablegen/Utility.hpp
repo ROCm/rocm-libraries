@@ -26,25 +26,19 @@
 #include <fstream>
 #include <string>
 
-namespace stinkytofu
-{
-    struct EmitMacroGuard
-    {
-        std::ofstream& os;
+namespace stinkytofu {
+struct EmitMacroGuard {
+    std::ofstream& os;
 
-        const std::string macroName;
+    const std::string macroName;
 
-        EmitMacroGuard(std::ofstream& os, const std::string& macroName)
-            : os(os)
-            , macroName(macroName)
-        {
-            os << "#ifdef " << macroName << "\n"
-               << "#undef " << macroName << "\n\n";
-        }
+    EmitMacroGuard(std::ofstream& os, const std::string& macroName) : os(os), macroName(macroName) {
+        os << "#ifdef " << macroName << "\n"
+           << "#undef " << macroName << "\n\n";
+    }
 
-        ~EmitMacroGuard()
-        {
-            os << "#endif // " << macroName << "\n\n";
-        }
-    };
-} // namespace stinkytofu
+    ~EmitMacroGuard() {
+        os << "#endif // " << macroName << "\n\n";
+    }
+};
+}  // namespace stinkytofu

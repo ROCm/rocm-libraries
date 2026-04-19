@@ -22,31 +22,30 @@
  * ************************************************************************ */
 
 #include <gtest/gtest.h>
+
 #include <memory>
 #include <sstream>
 
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
-#include "stinkytofu/transforms/asm/BuildDefUseChain.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/serialization/asm/StinkyAsmPrinter.hpp"
+#include "stinkytofu/transforms/asm/BuildDefUseChain.hpp"
 #include "stinkytofu/transforms/asm/PeepholeOptimizationPass.hpp"
 
 using namespace stinkytofu;
 
 // Test fixture for PeepholeOptimizationPass
-class PeepholeOptimizationPassTest : public ::testing::Test
-{
-protected:
-    GemmTileConfig            gemmConfig;
-    GfxArchID                 arch;
+class PeepholeOptimizationPassTest : public ::testing::Test {
+   protected:
+    GemmTileConfig gemmConfig;
+    GfxArchID arch;
     std::unique_ptr<Function> func;
-    BasicBlock*               bb;
-    std::unique_ptr<Pass>     peepholePass;
+    BasicBlock* bb;
+    std::unique_ptr<Pass> peepholePass;
 
-    void SetUp() override
-    {
-        arch               = getGfxArchID(12, 5, 0); // GFX1250
+    void SetUp() override {
+        arch = getGfxArchID(12, 5, 0);  // GFX1250
         gemmConfig.arch[0] = 12;
         gemmConfig.arch[1] = 5;
         gemmConfig.arch[2] = 0;
@@ -60,25 +59,22 @@ protected:
         peepholePass = createPeepholeOptimizationPass();
     }
 
-    void TearDown() override
-    {
+    void TearDown() override {
         func.reset();
         bb = nullptr;
         peepholePass.reset();
     }
 
     // Create IRBuilder for building test instructions
-    AsmIRBuilder getIRBuilder()
-    {
+    AsmIRBuilder getIRBuilder() {
         return AsmIRBuilder(*bb, arch);
     }
 
     // Helper to create v_fma_f32 instruction
     // v_fma_f32 dest, a, b, c  =>  dest = a * b + c
-    StinkyInstruction* createVFmaF32(int destReg, int aReg, int bReg, int cReg)
-    {
-        auto               builder = getIRBuilder();
-        StinkyInstruction* inst    = builder.create(getMCIDByUOp(GFX::v_fma_f32, arch));
+    StinkyInstruction* createVFmaF32(int destReg, int aReg, int bReg, int cReg) {
+        auto builder = getIRBuilder();
+        StinkyInstruction* inst = builder.create(getMCIDByUOp(GFX::v_fma_f32, arch));
 
         inst->addDestReg(StinkyRegister("v", destReg, 1));
         inst->addSrcReg(StinkyRegister("v", aReg, 1));
@@ -89,10 +85,9 @@ protected:
 
     // Helper to create v_fma_f32 with constant addend
     // v_fma_f32 dest, a, b, #const  =>  dest = a * b + const
-    StinkyInstruction* createVFmaF32WithConst(int destReg, int aReg, int bReg, float constVal)
-    {
-        auto               builder = getIRBuilder();
-        StinkyInstruction* inst    = builder.create(getMCIDByUOp(GFX::v_fma_f32, arch));
+    StinkyInstruction* createVFmaF32WithConst(int destReg, int aReg, int bReg, float constVal) {
+        auto builder = getIRBuilder();
+        StinkyInstruction* inst = builder.create(getMCIDByUOp(GFX::v_fma_f32, arch));
 
         inst->addDestReg(StinkyRegister("v", destReg, 1));
         inst->addSrcReg(StinkyRegister("v", aReg, 1));
@@ -100,34 +95,32 @@ protected:
 
         // Add constant operand
         StinkyRegister constReg;
-        constReg.dataType      = StinkyRegister::Type::LiteralDouble;
+        constReg.dataType = StinkyRegister::Type::LiteralDouble;
         constReg.literalDouble = constVal;
         inst->addSrcReg(constReg);
         return inst;
     }
 
     // Helper to create v_fma_f16 with constant addend
-    StinkyInstruction* createVFmaF16WithConst(int destReg, int aReg, int bReg, float constVal)
-    {
-        auto               builder = getIRBuilder();
-        StinkyInstruction* inst    = builder.create(getMCIDByUOp(GFX::v_fma_f16, arch));
+    StinkyInstruction* createVFmaF16WithConst(int destReg, int aReg, int bReg, float constVal) {
+        auto builder = getIRBuilder();
+        StinkyInstruction* inst = builder.create(getMCIDByUOp(GFX::v_fma_f16, arch));
 
         inst->addDestReg(StinkyRegister("v", destReg, 1));
         inst->addSrcReg(StinkyRegister("v", aReg, 1));
         inst->addSrcReg(StinkyRegister("v", bReg, 1));
 
         StinkyRegister constReg;
-        constReg.dataType      = StinkyRegister::Type::LiteralDouble;
+        constReg.dataType = StinkyRegister::Type::LiteralDouble;
         constReg.literalDouble = constVal;
         inst->addSrcReg(constReg);
         return inst;
     }
 
     // Helper to create v_add_f32 instruction
-    StinkyInstruction* createVAddF32(int destReg, int src0Reg, int src1Reg)
-    {
-        auto               builder = getIRBuilder();
-        StinkyInstruction* inst    = builder.create(getMCIDByUOp(GFX::v_add_f32, arch));
+    StinkyInstruction* createVAddF32(int destReg, int src0Reg, int src1Reg) {
+        auto builder = getIRBuilder();
+        StinkyInstruction* inst = builder.create(getMCIDByUOp(GFX::v_add_f32, arch));
 
         inst->addDestReg(StinkyRegister("v", destReg, 1));
         inst->addSrcReg(StinkyRegister("v", src0Reg, 1));
@@ -136,15 +129,14 @@ protected:
     }
 
     // Helper to create v_add_f32 with constant
-    StinkyInstruction* createVAddF32WithConst(int destReg, float constVal, int srcReg)
-    {
-        auto               builder = getIRBuilder();
-        StinkyInstruction* inst    = builder.create(getMCIDByUOp(GFX::v_add_f32, arch));
+    StinkyInstruction* createVAddF32WithConst(int destReg, float constVal, int srcReg) {
+        auto builder = getIRBuilder();
+        StinkyInstruction* inst = builder.create(getMCIDByUOp(GFX::v_add_f32, arch));
 
         inst->addDestReg(StinkyRegister("v", destReg, 1));
 
         StinkyRegister constRegister;
-        constRegister.dataType      = StinkyRegister::Type::LiteralDouble;
+        constRegister.dataType = StinkyRegister::Type::LiteralDouble;
         constRegister.literalDouble = constVal;
         inst->addSrcReg(constRegister);
         inst->addSrcReg(StinkyRegister("v", srcReg, 1));
@@ -152,15 +144,14 @@ protected:
     }
 
     // Helper to create v_add_f16 with constant
-    StinkyInstruction* createVAddF16WithConst(int destReg, float constVal, int srcReg)
-    {
-        auto               builder = getIRBuilder();
-        StinkyInstruction* inst    = builder.create(getMCIDByUOp(GFX::v_add_f16, arch));
+    StinkyInstruction* createVAddF16WithConst(int destReg, float constVal, int srcReg) {
+        auto builder = getIRBuilder();
+        StinkyInstruction* inst = builder.create(getMCIDByUOp(GFX::v_add_f16, arch));
 
         inst->addDestReg(StinkyRegister("v", destReg, 1));
 
         StinkyRegister constRegister;
-        constRegister.dataType      = StinkyRegister::Type::LiteralDouble;
+        constRegister.dataType = StinkyRegister::Type::LiteralDouble;
         constRegister.literalDouble = constVal;
         inst->addSrcReg(constRegister);
         inst->addSrcReg(StinkyRegister("v", srcReg, 1));
@@ -169,26 +160,24 @@ protected:
 
     // Helper to create v_add_f32 with swapped operands (register first, constant second)
     // Useful for testing commutative pattern matching
-    StinkyInstruction* createVAddF32WithConstSwapped(int destReg, int srcReg, float constVal)
-    {
-        auto               builder = getIRBuilder();
-        StinkyInstruction* inst    = builder.create(getMCIDByUOp(GFX::v_add_f32, arch));
+    StinkyInstruction* createVAddF32WithConstSwapped(int destReg, int srcReg, float constVal) {
+        auto builder = getIRBuilder();
+        StinkyInstruction* inst = builder.create(getMCIDByUOp(GFX::v_add_f32, arch));
 
         inst->addDestReg(StinkyRegister("v", destReg, 1));
         inst->addSrcReg(StinkyRegister("v", srcReg, 1));
 
         StinkyRegister constRegister;
-        constRegister.dataType      = StinkyRegister::Type::LiteralDouble;
+        constRegister.dataType = StinkyRegister::Type::LiteralDouble;
         constRegister.literalDouble = constVal;
         inst->addSrcReg(constRegister);
         return inst;
     }
 
     // Helper to create v_mul_f32 instruction
-    StinkyInstruction* createVMulF32(int destReg, int src0Reg, int src1Reg)
-    {
-        auto               builder = getIRBuilder();
-        StinkyInstruction* inst    = builder.create(getMCIDByUOp(GFX::v_mul_f32, arch));
+    StinkyInstruction* createVMulF32(int destReg, int src0Reg, int src1Reg) {
+        auto builder = getIRBuilder();
+        StinkyInstruction* inst = builder.create(getMCIDByUOp(GFX::v_mul_f32, arch));
 
         inst->addDestReg(StinkyRegister("v", destReg, 1));
         inst->addSrcReg(StinkyRegister("v", src0Reg, 1));
@@ -197,15 +186,14 @@ protected:
     }
 
     // Helper to create v_mul_f32 with constant operand
-    StinkyInstruction* createVMulF32WithConst(int destReg, float constVal, int srcReg)
-    {
-        auto               builder = getIRBuilder();
-        StinkyInstruction* inst    = builder.create(getMCIDByUOp(GFX::v_mul_f32, arch));
+    StinkyInstruction* createVMulF32WithConst(int destReg, float constVal, int srcReg) {
+        auto builder = getIRBuilder();
+        StinkyInstruction* inst = builder.create(getMCIDByUOp(GFX::v_mul_f32, arch));
 
         inst->addDestReg(StinkyRegister("v", destReg, 1));
 
         StinkyRegister constRegister;
-        constRegister.dataType      = StinkyRegister::Type::LiteralDouble;
+        constRegister.dataType = StinkyRegister::Type::LiteralDouble;
         constRegister.literalDouble = constVal;
         inst->addSrcReg(constRegister);
         inst->addSrcReg(StinkyRegister("v", srcReg, 1));
@@ -213,10 +201,9 @@ protected:
     }
 
     // Helper to create v_mul_f16
-    StinkyInstruction* createVMulF16(int destReg, int src0Reg, int src1Reg)
-    {
-        auto               builder = getIRBuilder();
-        StinkyInstruction* inst    = builder.create(getMCIDByUOp(GFX::v_mul_f16, arch));
+    StinkyInstruction* createVMulF16(int destReg, int src0Reg, int src1Reg) {
+        auto builder = getIRBuilder();
+        StinkyInstruction* inst = builder.create(getMCIDByUOp(GFX::v_mul_f16, arch));
 
         inst->addDestReg(StinkyRegister("v", destReg, 1));
         inst->addSrcReg(StinkyRegister("v", src0Reg, 1));
@@ -225,15 +212,14 @@ protected:
     }
 
     // Helper to create v_mul_f16 with constant operand
-    StinkyInstruction* createVMulF16WithConst(int destReg, float constVal, int srcReg)
-    {
-        auto               builder = getIRBuilder();
-        StinkyInstruction* inst    = builder.create(getMCIDByUOp(GFX::v_mul_f16, arch));
+    StinkyInstruction* createVMulF16WithConst(int destReg, float constVal, int srcReg) {
+        auto builder = getIRBuilder();
+        StinkyInstruction* inst = builder.create(getMCIDByUOp(GFX::v_mul_f16, arch));
 
         inst->addDestReg(StinkyRegister("v", destReg, 1));
 
         StinkyRegister constRegister;
-        constRegister.dataType      = StinkyRegister::Type::LiteralDouble;
+        constRegister.dataType = StinkyRegister::Type::LiteralDouble;
         constRegister.literalDouble = constVal;
         inst->addSrcReg(constRegister);
         inst->addSrcReg(StinkyRegister("v", srcReg, 1));
@@ -241,10 +227,9 @@ protected:
     }
 
     // Helper to create v_fma_f16 (base version)
-    StinkyInstruction* createVFmaF16(int destReg, int aReg, int bReg, int cReg)
-    {
-        auto               builder = getIRBuilder();
-        StinkyInstruction* inst    = builder.create(getMCIDByUOp(GFX::v_fma_f16, arch));
+    StinkyInstruction* createVFmaF16(int destReg, int aReg, int bReg, int cReg) {
+        auto builder = getIRBuilder();
+        StinkyInstruction* inst = builder.create(getMCIDByUOp(GFX::v_fma_f16, arch));
 
         inst->addDestReg(StinkyRegister("v", destReg, 1));
         inst->addSrcReg(StinkyRegister("v", aReg, 1));
@@ -254,10 +239,9 @@ protected:
     }
 
     // Helper to create v_mov_b32
-    StinkyInstruction* createVMovB32(int destReg, int srcReg)
-    {
-        auto               builder = getIRBuilder();
-        StinkyInstruction* inst    = builder.create(getMCIDByUOp(GFX::v_mov_b32, arch));
+    StinkyInstruction* createVMovB32(int destReg, int srcReg) {
+        auto builder = getIRBuilder();
+        StinkyInstruction* inst = builder.create(getMCIDByUOp(GFX::v_mov_b32, arch));
 
         inst->addDestReg(StinkyRegister("v", destReg, 1));
         inst->addSrcReg(StinkyRegister("v", srcReg, 1));
@@ -265,20 +249,17 @@ protected:
     }
 
     // Count instructions in the IRList
-    size_t countInstructions()
-    {
+    size_t countInstructions() {
         size_t count = 0;
-        for(auto& inst : *bb)
-        {
-            (void)inst; // Unused, just counting
+        for (auto& inst : *bb) {
+            (void)inst;  // Unused, just counting
             count++;
         }
         return count;
     }
 
     // Run the peephole pass
-    void runPass()
-    {
+    void runPass() {
         PassContext ctx;
         ctx.setGemmTileConfig(gemmConfig);
 
@@ -294,8 +275,7 @@ protected:
 // Pattern 1: Add+FMA Fusion (F32) - In-place variant
 // ============================================================================
 
-TEST_F(PeepholeOptimizationPassTest, AddFMAFusion_F32_InPlace)
-{
+TEST_F(PeepholeOptimizationPassTest, AddFMAFusion_F32_InPlace) {
     // Create pattern:
     //   v_fma_f32 v0, v1, v2, 1.0     // v0 = v1 * v2 + 1.0
     //   v_add_f32 v0, 1.0, v0         // v0 = 1.0 + v0
@@ -314,7 +294,7 @@ TEST_F(PeepholeOptimizationPassTest, AddFMAFusion_F32_InPlace)
 
     // The remaining instruction should be v_fma_f32 with constant 2.0
     auto& inst = *bb->begin();
-    auto* fma  = static_cast<StinkyInstruction*>(&inst);
+    auto* fma = static_cast<StinkyInstruction*>(&inst);
     ASSERT_NE(fma, nullptr);
     EXPECT_EQ(fma->getUnifiedOpcode(), static_cast<uint16_t>(GFX::v_fma_f32));
     EXPECT_EQ(fma->getDestRegs()[0].reg.idx, 0u);
@@ -324,8 +304,7 @@ TEST_F(PeepholeOptimizationPassTest, AddFMAFusion_F32_InPlace)
     EXPECT_FLOAT_EQ(fma->getSrcRegs()[2].literalDouble, 2.0f);
 }
 
-TEST_F(PeepholeOptimizationPassTest, AddFMAFusion_F32_NonInPlace)
-{
+TEST_F(PeepholeOptimizationPassTest, AddFMAFusion_F32_NonInPlace) {
     // Create pattern:
     //   v_fma_f32 v0, v1, v2, 1.5     // v0 = v1 * v2 + 1.5
     //   v_add_f32 v3, 0.5, v0         // v3 = 0.5 + v0
@@ -342,10 +321,10 @@ TEST_F(PeepholeOptimizationPassTest, AddFMAFusion_F32_NonInPlace)
     EXPECT_EQ(countInstructions(), 1);
 
     auto& inst = *bb->begin();
-    auto* fma  = static_cast<StinkyInstruction*>(&inst);
+    auto* fma = static_cast<StinkyInstruction*>(&inst);
     ASSERT_NE(fma, nullptr);
     EXPECT_EQ(fma->getUnifiedOpcode(), static_cast<uint16_t>(GFX::v_fma_f32));
-    EXPECT_EQ(fma->getDestRegs()[0].reg.idx, 3u); // Destination changed to v3
+    EXPECT_EQ(fma->getDestRegs()[0].reg.idx, 3u);  // Destination changed to v3
     EXPECT_EQ(fma->getSrcRegs()[0].reg.idx, 1u);
     EXPECT_EQ(fma->getSrcRegs()[1].reg.idx, 2u);
     EXPECT_EQ(fma->getSrcRegs()[2].dataType, StinkyRegister::Type::LiteralDouble);
@@ -356,8 +335,7 @@ TEST_F(PeepholeOptimizationPassTest, AddFMAFusion_F32_NonInPlace)
 // Pattern 2: Add+FMA Fusion (F16)
 // ============================================================================
 
-TEST_F(PeepholeOptimizationPassTest, AddFMAFusion_F16_InPlace)
-{
+TEST_F(PeepholeOptimizationPassTest, AddFMAFusion_F16_InPlace) {
     // Create pattern:
     //   v_fma_f16 v10, v11, v12, 0.5   // v10 = v11 * v12 + 0.5
     //   v_add_f16 v10, 0.5, v10        // v10 = 0.5 + v10
@@ -374,7 +352,7 @@ TEST_F(PeepholeOptimizationPassTest, AddFMAFusion_F16_InPlace)
     EXPECT_EQ(countInstructions(), 1);
 
     auto& inst = *bb->begin();
-    auto* fma  = static_cast<StinkyInstruction*>(&inst);
+    auto* fma = static_cast<StinkyInstruction*>(&inst);
     ASSERT_NE(fma, nullptr);
     EXPECT_EQ(fma->getUnifiedOpcode(), static_cast<uint16_t>(GFX::v_fma_f16));
     EXPECT_EQ(fma->getDestRegs()[0].reg.idx, 10u);
@@ -382,8 +360,7 @@ TEST_F(PeepholeOptimizationPassTest, AddFMAFusion_F16_InPlace)
     EXPECT_FLOAT_EQ(fma->getSrcRegs()[2].literalDouble, 1.0f);
 }
 
-TEST_F(PeepholeOptimizationPassTest, AddFMAFusion_F16_NonInPlace)
-{
+TEST_F(PeepholeOptimizationPassTest, AddFMAFusion_F16_NonInPlace) {
     // Create pattern:
     //   v_fma_f16 v5, v6, v7, 2.0     // v5 = v6 * v7 + 2.0
     //   v_add_f16 v8, 3.0, v5         // v8 = 3.0 + v5
@@ -400,7 +377,7 @@ TEST_F(PeepholeOptimizationPassTest, AddFMAFusion_F16_NonInPlace)
     EXPECT_EQ(countInstructions(), 1);
 
     auto& inst = *bb->begin();
-    auto* fma  = static_cast<StinkyInstruction*>(&inst);
+    auto* fma = static_cast<StinkyInstruction*>(&inst);
     ASSERT_NE(fma, nullptr);
     EXPECT_EQ(fma->getUnifiedOpcode(), static_cast<uint16_t>(GFX::v_fma_f16));
     EXPECT_EQ(fma->getDestRegs()[0].reg.idx, 8u);
@@ -412,8 +389,7 @@ TEST_F(PeepholeOptimizationPassTest, AddFMAFusion_F16_NonInPlace)
 // Negative Tests: Pattern Should NOT Match
 // ============================================================================
 
-TEST_F(PeepholeOptimizationPassTest, NoFusion_FMAResultHasMultipleUses)
-{
+TEST_F(PeepholeOptimizationPassTest, NoFusion_FMAResultHasMultipleUses) {
     // Create pattern:
     //   v_fma_f32 v0, v1, v2, 1.0
     //   v_add_f32 v3, 1.0, v0
@@ -432,14 +408,13 @@ TEST_F(PeepholeOptimizationPassTest, NoFusion_FMAResultHasMultipleUses)
     EXPECT_EQ(countInstructions(), 3);
 }
 
-TEST_F(PeepholeOptimizationPassTest, NoFusion_FMAConstantMissing)
-{
+TEST_F(PeepholeOptimizationPassTest, NoFusion_FMAConstantMissing) {
     // Create pattern:
     //   v_fma_f32 v0, v1, v2, v3     // Uses register v3, not constant
     //   v_add_f32 v0, 1.0, v0
     // Should NOT fuse because FMA doesn't have constant addend
 
-    createVFmaF32(0, 1, 2, 3); // All registers, no constant
+    createVFmaF32(0, 1, 2, 3);  // All registers, no constant
     createVAddF32WithConst(0, 1.0f, 0);
 
     ASSERT_EQ(countInstructions(), 2);
@@ -450,15 +425,14 @@ TEST_F(PeepholeOptimizationPassTest, NoFusion_FMAConstantMissing)
     EXPECT_EQ(countInstructions(), 2);
 }
 
-TEST_F(PeepholeOptimizationPassTest, NoFusion_AddConstantMissing)
-{
+TEST_F(PeepholeOptimizationPassTest, NoFusion_AddConstantMissing) {
     // Create pattern:
     //   v_fma_f32 v0, v1, v2, 1.0
     //   v_add_f32 v0, v3, v0         // Uses register v3, not constant
     // Should NOT fuse because ADD doesn't have constant addend
 
     createVFmaF32WithConst(0, 1, 2, 1.0f);
-    createVAddF32(0, 3, 0); // All registers, no constant
+    createVAddF32(0, 3, 0);  // All registers, no constant
 
     ASSERT_EQ(countInstructions(), 2);
 
@@ -468,8 +442,7 @@ TEST_F(PeepholeOptimizationPassTest, NoFusion_AddConstantMissing)
     EXPECT_EQ(countInstructions(), 2);
 }
 
-TEST_F(PeepholeOptimizationPassTest, NoFusion_WrongOrder)
-{
+TEST_F(PeepholeOptimizationPassTest, NoFusion_WrongOrder) {
     // Create pattern with wrong order:
     //   v_add_f32 v0, 1.0, v1        // ADD comes first
     //   v_fma_f32 v1, v2, v3, 1.0    // FMA comes second
@@ -486,8 +459,7 @@ TEST_F(PeepholeOptimizationPassTest, NoFusion_WrongOrder)
     EXPECT_EQ(countInstructions(), 2);
 }
 
-TEST_F(PeepholeOptimizationPassTest, Fusion_NonConsecutive)
-{
+TEST_F(PeepholeOptimizationPassTest, Fusion_NonConsecutive) {
     // Create pattern with intervening instruction:
     //   v_fma_f32 v0, v1, v2, 1.0
     //   v_mul_f32 v5, v6, v7         // Intervening instruction (doesn't touch v0)
@@ -509,8 +481,7 @@ TEST_F(PeepholeOptimizationPassTest, Fusion_NonConsecutive)
     EXPECT_EQ(countInstructions(), 2);
 }
 
-TEST_F(PeepholeOptimizationPassTest, NoFusion_InterveningDefOverwrites)
-{
+TEST_F(PeepholeOptimizationPassTest, NoFusion_InterveningDefOverwrites) {
     // Create pattern with intervening instruction that OVERWRITES the FMA result:
     //   v_fma_f32 v0, v1, v2, 1.0    // Defines v0
     //   v_mul_f32 v0, v6, v7         // Overwrites v0!
@@ -519,7 +490,7 @@ TEST_F(PeepholeOptimizationPassTest, NoFusion_InterveningDefOverwrites)
     // This should NOT fuse because the ADD uses the v_mul result, not the v_fma result
 
     createVFmaF32WithConst(0, 1, 2, 1.0f);
-    createVMulF32(0, 6, 7); // Overwrites v0!
+    createVMulF32(0, 6, 7);  // Overwrites v0!
     createVAddF32WithConst(3, 1.0f, 0);
 
     ASSERT_EQ(countInstructions(), 3);
@@ -534,8 +505,7 @@ TEST_F(PeepholeOptimizationPassTest, NoFusion_InterveningDefOverwrites)
 // Edge Cases
 // ============================================================================
 
-TEST_F(PeepholeOptimizationPassTest, EmptyIRList)
-{
+TEST_F(PeepholeOptimizationPassTest, EmptyIRList) {
     // Empty IR list should not crash
     ASSERT_EQ(countInstructions(), 0);
 
@@ -544,8 +514,7 @@ TEST_F(PeepholeOptimizationPassTest, EmptyIRList)
     EXPECT_EQ(countInstructions(), 0);
 }
 
-TEST_F(PeepholeOptimizationPassTest, SingleInstruction)
-{
+TEST_F(PeepholeOptimizationPassTest, SingleInstruction) {
     // Single instruction should not crash
     createVFmaF32WithConst(0, 1, 2, 1.0f);
 
@@ -556,8 +525,7 @@ TEST_F(PeepholeOptimizationPassTest, SingleInstruction)
     EXPECT_EQ(countInstructions(), 1);
 }
 
-TEST_F(PeepholeOptimizationPassTest, NegativeConstants)
-{
+TEST_F(PeepholeOptimizationPassTest, NegativeConstants) {
     // Test with negative constants
     //   v_fma_f32 v0, v1, v2, -1.0
     //   v_add_f32 v0, -2.0, v0
@@ -573,14 +541,13 @@ TEST_F(PeepholeOptimizationPassTest, NegativeConstants)
     EXPECT_EQ(countInstructions(), 1);
 
     auto& inst = *bb->begin();
-    auto* fma  = static_cast<StinkyInstruction*>(&inst);
+    auto* fma = static_cast<StinkyInstruction*>(&inst);
     ASSERT_NE(fma, nullptr);
     EXPECT_EQ(fma->getSrcRegs()[2].dataType, StinkyRegister::Type::LiteralDouble);
     EXPECT_FLOAT_EQ(fma->getSrcRegs()[2].literalDouble, -3.0f);
 }
 
-TEST_F(PeepholeOptimizationPassTest, ZeroConstants)
-{
+TEST_F(PeepholeOptimizationPassTest, ZeroConstants) {
     // Test with zero constants
     //   v_fma_f32 v0, v1, v2, 0.0
     //   v_add_f32 v0, 0.0, v0
@@ -596,7 +563,7 @@ TEST_F(PeepholeOptimizationPassTest, ZeroConstants)
     EXPECT_EQ(countInstructions(), 1);
 
     auto& inst = *bb->begin();
-    auto* fma  = static_cast<StinkyInstruction*>(&inst);
+    auto* fma = static_cast<StinkyInstruction*>(&inst);
     ASSERT_NE(fma, nullptr);
     EXPECT_EQ(fma->getSrcRegs()[2].dataType, StinkyRegister::Type::LiteralDouble);
     EXPECT_FLOAT_EQ(fma->getSrcRegs()[2].literalDouble, 0.0f);
@@ -606,8 +573,7 @@ TEST_F(PeepholeOptimizationPassTest, ZeroConstants)
 // Multiple Patterns in Same Block
 // ============================================================================
 
-TEST_F(PeepholeOptimizationPassTest, MultipleFusionOpportunities)
-{
+TEST_F(PeepholeOptimizationPassTest, MultipleFusionOpportunities) {
     // Create two independent fusion opportunities:
     //   v_fma_f32 v0, v1, v2, 1.0
     //   v_add_f32 v0, 1.0, v0
@@ -628,8 +594,7 @@ TEST_F(PeepholeOptimizationPassTest, MultipleFusionOpportunities)
     EXPECT_EQ(countInstructions(), 2);
 }
 
-TEST_F(PeepholeOptimizationPassTest, MixedF32AndF16)
-{
+TEST_F(PeepholeOptimizationPassTest, MixedF32AndF16) {
     // Create one F32 and one F16 fusion:
     //   v_fma_f32 v0, v1, v2, 1.0
     //   v_add_f32 v0, 1.0, v0
@@ -653,8 +618,7 @@ TEST_F(PeepholeOptimizationPassTest, MixedF32AndF16)
 // Register Reuse Tests
 // ============================================================================
 
-TEST_F(PeepholeOptimizationPassTest, Fusion_WithRegisterReuse)
-{
+TEST_F(PeepholeOptimizationPassTest, Fusion_WithRegisterReuse) {
     // Test the fix for def-use analysis with register reuse (GitHub issue #XXX)
     //
     // This tests the scenario from GELU where the same register is redefined
@@ -669,10 +633,10 @@ TEST_F(PeepholeOptimizationPassTest, Fusion_WithRegisterReuse)
     //
     // Expected: FMA+ADD fusion should succeed because def #1 has exactly one use.
 
-    createVFmaF32WithConst(10, 1, 2, 1.0f); // pos 0: v10 = v1*v2 + 1.0
-    createVAddF32WithConst(10, 1.0f, 10); // pos 1: v10 = 1.0 + v10  (uses pos 0's v10)
-    createVMulF32(10, 3, 10); // pos 2: v10 = v3 * v10   (uses pos 1's v10, redefines)
-    createVMulF32(5, 4, 10); // pos 3: v5  = v4 * v10   (uses pos 2's v10)
+    createVFmaF32WithConst(10, 1, 2, 1.0f);  // pos 0: v10 = v1*v2 + 1.0
+    createVAddF32WithConst(10, 1.0f, 10);    // pos 1: v10 = 1.0 + v10  (uses pos 0's v10)
+    createVMulF32(10, 3, 10);  // pos 2: v10 = v3 * v10   (uses pos 1's v10, redefines)
+    createVMulF32(5, 4, 10);   // pos 3: v5  = v4 * v10   (uses pos 2's v10)
 
     ASSERT_EQ(countInstructions(), 4);
 
@@ -683,15 +647,14 @@ TEST_F(PeepholeOptimizationPassTest, Fusion_WithRegisterReuse)
     EXPECT_EQ(countInstructions(), 3);
 
     // Verify the fused instruction has the correct constant
-    auto  it  = bb->begin();
+    auto it = bb->begin();
     auto* fma = static_cast<StinkyInstruction*>(&*it);
     EXPECT_EQ(fma->getUnifiedOpcode(), static_cast<uint16_t>(GFX::v_fma_f32));
     EXPECT_EQ(fma->getDestRegs()[0].reg.idx, 10u);
-    EXPECT_FLOAT_EQ(fma->getSrcRegs()[2].literalDouble, 2.0f); // 1.0 + 1.0 = 2.0
+    EXPECT_FLOAT_EQ(fma->getSrcRegs()[2].literalDouble, 2.0f);  // 1.0 + 1.0 = 2.0
 }
 
-TEST_F(PeepholeOptimizationPassTest, NoFusion_RegisterReuseWithMultipleUsesBeforeRedef)
-{
+TEST_F(PeepholeOptimizationPassTest, NoFusion_RegisterReuseWithMultipleUsesBeforeRedef) {
     // Test that fusion DOESN'T happen when the definition truly has multiple uses
     // before being redefined:
     //   v_fma_f32 v10, v1, v2, 1.0      // def #1
@@ -701,10 +664,10 @@ TEST_F(PeepholeOptimizationPassTest, NoFusion_RegisterReuseWithMultipleUsesBefor
     //
     // The FMA result has TWO uses before being redefined, so fusion should NOT happen.
 
-    createVFmaF32WithConst(10, 1, 2, 1.0f); // def v10
-    createVMulF32(5, 10, 10); // use v10 twice
-    createVAddF32WithConst(6, 1.0f, 10); // use v10 again (3rd use total)
-    createVMulF32(10, 3, 4); // redefine v10
+    createVFmaF32WithConst(10, 1, 2, 1.0f);  // def v10
+    createVMulF32(5, 10, 10);                // use v10 twice
+    createVAddF32WithConst(6, 1.0f, 10);     // use v10 again (3rd use total)
+    createVMulF32(10, 3, 4);                 // redefine v10
 
     ASSERT_EQ(countInstructions(), 4);
 
@@ -718,17 +681,15 @@ TEST_F(PeepholeOptimizationPassTest, NoFusion_RegisterReuseWithMultipleUsesBefor
 // Integration Test with PassManager
 // ============================================================================
 
-class PeepholePassManagerTest : public ::testing::Test, public stinkytofu::PassManager
-{
-protected:
+class PeepholePassManagerTest : public ::testing::Test, public stinkytofu::PassManager {
+   protected:
     stinkytofu::Function func{"kernel"};
-    GemmTileConfig       gemmConfig;
-    GfxArchID            arch;
-    BasicBlock*          bb;
+    GemmTileConfig gemmConfig;
+    GfxArchID arch;
+    BasicBlock* bb;
 
-    void SetUp() override
-    {
-        arch               = getGfxArchID(12, 5, 0); // GFX1250
+    void SetUp() override {
+        arch = getGfxArchID(12, 5, 0);  // GFX1250
         gemmConfig.arch[0] = 12;
         gemmConfig.arch[1] = 5;
         gemmConfig.arch[2] = 0;
@@ -739,52 +700,46 @@ protected:
         setGemmTileConfig(gemmConfig);
     }
 
-    void TearDown() override
-    {
+    void TearDown() override {
         bb = nullptr;
     }
 
-    AsmIRBuilder getIRBuilder()
-    {
+    AsmIRBuilder getIRBuilder() {
         return AsmIRBuilder(*bb, arch);
     }
 
-    StinkyInstruction* createVFmaF32WithConst(int destReg, int aReg, int bReg, float constVal)
-    {
-        auto               builder = getIRBuilder();
-        StinkyInstruction* inst    = builder.create(getMCIDByUOp(GFX::v_fma_f32, arch));
+    StinkyInstruction* createVFmaF32WithConst(int destReg, int aReg, int bReg, float constVal) {
+        auto builder = getIRBuilder();
+        StinkyInstruction* inst = builder.create(getMCIDByUOp(GFX::v_fma_f32, arch));
 
         inst->addDestReg(StinkyRegister("v", destReg, 1));
         inst->addSrcReg(StinkyRegister("v", aReg, 1));
         inst->addSrcReg(StinkyRegister("v", bReg, 1));
 
         StinkyRegister constReg;
-        constReg.dataType      = StinkyRegister::Type::LiteralDouble;
+        constReg.dataType = StinkyRegister::Type::LiteralDouble;
         constReg.literalDouble = constVal;
         inst->addSrcReg(constReg);
         return inst;
     }
 
-    StinkyInstruction* createVAddF32WithConst(int destReg, float constVal, int srcReg)
-    {
-        auto               builder = getIRBuilder();
-        StinkyInstruction* inst    = builder.create(getMCIDByUOp(GFX::v_add_f32, arch));
+    StinkyInstruction* createVAddF32WithConst(int destReg, float constVal, int srcReg) {
+        auto builder = getIRBuilder();
+        StinkyInstruction* inst = builder.create(getMCIDByUOp(GFX::v_add_f32, arch));
 
         inst->addDestReg(StinkyRegister("v", destReg, 1));
 
         StinkyRegister constRegister;
-        constRegister.dataType      = StinkyRegister::Type::LiteralDouble;
+        constRegister.dataType = StinkyRegister::Type::LiteralDouble;
         constRegister.literalDouble = constVal;
         inst->addSrcReg(constRegister);
         inst->addSrcReg(StinkyRegister("v", srcReg, 1));
         return inst;
     }
 
-    size_t countInstructions()
-    {
+    size_t countInstructions() {
         size_t count = 0;
-        for(auto& inst : *bb)
-        {
+        for (auto& inst : *bb) {
             (void)inst;
             count++;
         }
@@ -796,15 +751,14 @@ protected:
 // Test: Commutative Pattern Matching
 //===----------------------------------------------------------------------===//
 
-TEST_F(PeepholeOptimizationPassTest, Fusion_CommutativeOperandOrder)
-{
+TEST_F(PeepholeOptimizationPassTest, Fusion_CommutativeOperandOrder) {
     // Test that v_add_f32 fusion works when operands are swapped
     // Pattern expects: v_add_f32 $dst, $const, $reg
     // This test has:   v_add_f32 $dst, $reg, $const (swapped!)
     // Should still match because v_add_f32 is commutative
 
-    createVFmaF32WithConst(10, 1, 2, 1.0f); // v10 = v1*v2 + 1.0
-    createVAddF32WithConstSwapped(11, 10, 1.0f); // v11 = v10 + 1.0 (operands swapped!)
+    createVFmaF32WithConst(10, 1, 2, 1.0f);       // v10 = v1*v2 + 1.0
+    createVAddF32WithConstSwapped(11, 10, 1.0f);  // v11 = v10 + 1.0 (operands swapped!)
 
     ASSERT_EQ(countInstructions(), 2);
 
@@ -815,7 +769,7 @@ TEST_F(PeepholeOptimizationPassTest, Fusion_CommutativeOperandOrder)
 
     // Verify the FMA has the correct folded constant
     auto& irList = *bb;
-    auto  it     = irList.begin();
+    auto it = irList.begin();
     ASSERT_NE(it, irList.end());
 
     StinkyInstruction* fma = cast<StinkyInstruction>(&(*it));
@@ -831,14 +785,13 @@ TEST_F(PeepholeOptimizationPassTest, Fusion_CommutativeOperandOrder)
     EXPECT_DOUBLE_EQ(fma->getSrcRegs()[2].literalDouble, 2.0);
 }
 
-TEST_F(PeepholeOptimizationPassTest, Fusion_CommutativeInPlace)
-{
+TEST_F(PeepholeOptimizationPassTest, Fusion_CommutativeInPlace) {
     // Test commutative matching with in-place operation
     // v_fma_f32 v10, v1, v2, 1.0
     // v_add_f32 v10, v10, 1.0  (register first, constant second - swapped!)
 
-    createVFmaF32WithConst(10, 1, 2, 1.0f); // v10 = v1*v2 + 1.0
-    createVAddF32WithConstSwapped(10, 10, 1.0f); // v10 = v10 + 1.0 (swapped, in-place!)
+    createVFmaF32WithConst(10, 1, 2, 1.0f);       // v10 = v1*v2 + 1.0
+    createVAddF32WithConstSwapped(10, 10, 1.0f);  // v10 = v10 + 1.0 (swapped, in-place!)
 
     ASSERT_EQ(countInstructions(), 2);
 
@@ -848,7 +801,7 @@ TEST_F(PeepholeOptimizationPassTest, Fusion_CommutativeInPlace)
     EXPECT_EQ(countInstructions(), 1);
 
     auto& irList = *bb;
-    auto  it     = irList.begin();
+    auto it = irList.begin();
     ASSERT_NE(it, irList.end());
 
     StinkyInstruction* fma = cast<StinkyInstruction>(&(*it));
@@ -867,15 +820,14 @@ TEST_F(PeepholeOptimizationPassTest, Fusion_CommutativeInPlace)
 // Test: MUL+MUL Fusion
 //===----------------------------------------------------------------------===//
 
-TEST_F(PeepholeOptimizationPassTest, MULMULFusion_F32_Basic)
-{
+TEST_F(PeepholeOptimizationPassTest, MULMULFusion_F32_Basic) {
     // Test basic MUL+MUL fusion with constant folding
     // v_mul_f32 v0, 2.0, v1     // v0 = 2.0 * v1
     // v_mul_f32 v2, 3.0, v0     // v2 = 3.0 * v0
     // => v_mul_f32 v2, 6.0, v1  // v2 = 6.0 * v1 (folded: 2.0 * 3.0 = 6.0)
 
-    createVMulF32WithConst(0, 2.0f, 1); // v0 = 2.0 * v1
-    createVMulF32WithConst(2, 3.0f, 0); // v2 = 3.0 * v0
+    createVMulF32WithConst(0, 2.0f, 1);  // v0 = 2.0 * v1
+    createVMulF32WithConst(2, 3.0f, 0);  // v2 = 3.0 * v0
 
     ASSERT_EQ(countInstructions(), 2);
 
@@ -886,24 +838,23 @@ TEST_F(PeepholeOptimizationPassTest, MULMULFusion_F32_Basic)
 
     // Verify the result: v_mul_f32 v2, 6.0, v1
     auto& inst = *bb->begin();
-    auto* mul  = static_cast<StinkyInstruction*>(&inst);
+    auto* mul = static_cast<StinkyInstruction*>(&inst);
     ASSERT_NE(mul, nullptr);
     EXPECT_EQ(mul->getUnifiedOpcode(), static_cast<uint16_t>(GFX::v_mul_f32));
-    EXPECT_EQ(mul->getDestRegs()[0].reg.idx, 2u); // Destination is v2
-    EXPECT_EQ(mul->getSrcRegs()[1].reg.idx, 1u); // Source is v1
+    EXPECT_EQ(mul->getDestRegs()[0].reg.idx, 2u);  // Destination is v2
+    EXPECT_EQ(mul->getSrcRegs()[1].reg.idx, 1u);   // Source is v1
     EXPECT_EQ(mul->getSrcRegs()[0].dataType, StinkyRegister::Type::LiteralDouble);
-    EXPECT_FLOAT_EQ(mul->getSrcRegs()[0].literalDouble, 6.0f); // 2.0 * 3.0 = 6.0
+    EXPECT_FLOAT_EQ(mul->getSrcRegs()[0].literalDouble, 6.0f);  // 2.0 * 3.0 = 6.0
 }
 
-TEST_F(PeepholeOptimizationPassTest, MULMULFusion_F32_InPlace)
-{
+TEST_F(PeepholeOptimizationPassTest, MULMULFusion_F32_InPlace) {
     // Test in-place MUL+MUL fusion
     // v_mul_f32 v0, 2.0, v1     // v0 = 2.0 * v1
     // v_mul_f32 v0, 3.0, v0     // v0 = 3.0 * v0 (in-place)
     // => v_mul_f32 v0, 6.0, v1  // v0 = 6.0 * v1
 
-    createVMulF32WithConst(0, 2.0f, 1); // v0 = 2.0 * v1
-    createVMulF32WithConst(0, 3.0f, 0); // v0 = 3.0 * v0 (in-place)
+    createVMulF32WithConst(0, 2.0f, 1);  // v0 = 2.0 * v1
+    createVMulF32WithConst(0, 3.0f, 0);  // v0 = 3.0 * v0 (in-place)
 
     ASSERT_EQ(countInstructions(), 2);
 
@@ -912,22 +863,21 @@ TEST_F(PeepholeOptimizationPassTest, MULMULFusion_F32_InPlace)
     EXPECT_EQ(countInstructions(), 1);
 
     auto& inst = *bb->begin();
-    auto* mul  = static_cast<StinkyInstruction*>(&inst);
+    auto* mul = static_cast<StinkyInstruction*>(&inst);
     EXPECT_EQ(mul->getUnifiedOpcode(), static_cast<uint16_t>(GFX::v_mul_f32));
-    EXPECT_EQ(mul->getDestRegs()[0].reg.idx, 0u); // Destination is v0
-    EXPECT_EQ(mul->getSrcRegs()[1].reg.idx, 1u); // Source is v1
+    EXPECT_EQ(mul->getDestRegs()[0].reg.idx, 0u);  // Destination is v0
+    EXPECT_EQ(mul->getSrcRegs()[1].reg.idx, 1u);   // Source is v1
     EXPECT_FLOAT_EQ(mul->getSrcRegs()[0].literalDouble, 6.0f);
 }
 
-TEST_F(PeepholeOptimizationPassTest, MULMULFusion_F16_Basic)
-{
+TEST_F(PeepholeOptimizationPassTest, MULMULFusion_F16_Basic) {
     // Test MUL+MUL fusion for F16
     // v_mul_f16 v0, 2.5, v1     // v0 = 2.5 * v1
     // v_mul_f16 v2, 4.0, v0     // v2 = 4.0 * v0
     // => v_mul_f16 v2, 10.0, v1 // v2 = 10.0 * v1 (folded: 2.5 * 4.0 = 10.0)
 
-    createVMulF16WithConst(0, 2.5f, 1); // v0 = 2.5 * v1
-    createVMulF16WithConst(2, 4.0f, 0); // v2 = 4.0 * v0
+    createVMulF16WithConst(0, 2.5f, 1);  // v0 = 2.5 * v1
+    createVMulF16WithConst(2, 4.0f, 0);  // v2 = 4.0 * v0
 
     ASSERT_EQ(countInstructions(), 2);
 
@@ -936,23 +886,22 @@ TEST_F(PeepholeOptimizationPassTest, MULMULFusion_F16_Basic)
     EXPECT_EQ(countInstructions(), 1);
 
     auto& inst = *bb->begin();
-    auto* mul  = static_cast<StinkyInstruction*>(&inst);
+    auto* mul = static_cast<StinkyInstruction*>(&inst);
     EXPECT_EQ(mul->getUnifiedOpcode(), static_cast<uint16_t>(GFX::v_mul_f16));
     EXPECT_EQ(mul->getDestRegs()[0].reg.idx, 2u);
     EXPECT_EQ(mul->getSrcRegs()[1].reg.idx, 1u);
-    EXPECT_FLOAT_EQ(mul->getSrcRegs()[0].literalDouble, 10.0f); // 2.5 * 4.0 = 10.0
+    EXPECT_FLOAT_EQ(mul->getSrcRegs()[0].literalDouble, 10.0f);  // 2.5 * 4.0 = 10.0
 }
 
-TEST_F(PeepholeOptimizationPassTest, NoFusion_MUL_MultipleUses)
-{
+TEST_F(PeepholeOptimizationPassTest, NoFusion_MUL_MultipleUses) {
     // First MUL result has multiple uses - should NOT fuse
     // v_mul_f32 v0, 2.0, v1     // v0 = 2.0 * v1
     // v_mul_f32 v2, 3.0, v0     // v2 = 3.0 * v0
     // v_mul_f32 v3, 4.0, v0     // v3 = 4.0 * v0 (v0 used again!)
 
-    createVMulF32WithConst(0, 2.0f, 1); // v0 = 2.0 * v1
-    createVMulF32WithConst(2, 3.0f, 0); // v2 = 3.0 * v0
-    createVMulF32WithConst(3, 4.0f, 0); // v3 = 4.0 * v0 (v0 has 2 uses)
+    createVMulF32WithConst(0, 2.0f, 1);  // v0 = 2.0 * v1
+    createVMulF32WithConst(2, 3.0f, 0);  // v2 = 3.0 * v0
+    createVMulF32WithConst(3, 4.0f, 0);  // v3 = 4.0 * v0 (v0 has 2 uses)
 
     ASSERT_EQ(countInstructions(), 3);
 
@@ -962,14 +911,13 @@ TEST_F(PeepholeOptimizationPassTest, NoFusion_MUL_MultipleUses)
     EXPECT_EQ(countInstructions(), 3);
 }
 
-TEST_F(PeepholeOptimizationPassTest, NoFusion_MUL_MissingConstant)
-{
+TEST_F(PeepholeOptimizationPassTest, NoFusion_MUL_MissingConstant) {
     // Second MUL doesn't have a constant - should NOT fuse
     // v_mul_f32 v0, 2.0, v1     // v0 = 2.0 * v1
     // v_mul_f32 v2, v3, v0      // v2 = v3 * v0 (no constant!)
 
-    createVMulF32WithConst(0, 2.0f, 1); // v0 = 2.0 * v1
-    createVMulF32(2, 3, 0); // v2 = v3 * v0 (no constant)
+    createVMulF32WithConst(0, 2.0f, 1);  // v0 = 2.0 * v1
+    createVMulF32(2, 3, 0);              // v2 = v3 * v0 (no constant)
 
     ASSERT_EQ(countInstructions(), 2);
 
@@ -979,15 +927,14 @@ TEST_F(PeepholeOptimizationPassTest, NoFusion_MUL_MissingConstant)
     EXPECT_EQ(countInstructions(), 2);
 }
 
-TEST_F(PeepholeOptimizationPassTest, MULMULFusion_WithZero)
-{
+TEST_F(PeepholeOptimizationPassTest, MULMULFusion_WithZero) {
     // Test constant folding with zero
     // v_mul_f32 v0, 5.0, v1     // v0 = 5.0 * v1
     // v_mul_f32 v2, 0.0, v0     // v2 = 0.0 * v0
     // => v_mul_f32 v2, 0.0, v1  // v2 = 0.0 * v1 (folded: 5.0 * 0.0 = 0.0)
 
-    createVMulF32WithConst(0, 5.0f, 1); // v0 = 5.0 * v1
-    createVMulF32WithConst(2, 0.0f, 0); // v2 = 0.0 * v0
+    createVMulF32WithConst(0, 5.0f, 1);  // v0 = 5.0 * v1
+    createVMulF32WithConst(2, 0.0f, 0);  // v2 = 0.0 * v0
 
     ASSERT_EQ(countInstructions(), 2);
 
@@ -996,19 +943,18 @@ TEST_F(PeepholeOptimizationPassTest, MULMULFusion_WithZero)
     EXPECT_EQ(countInstructions(), 1);
 
     auto& inst = *bb->begin();
-    auto* mul  = static_cast<StinkyInstruction*>(&inst);
-    EXPECT_FLOAT_EQ(mul->getSrcRegs()[0].literalDouble, 0.0f); // 5.0 * 0.0 = 0.0
+    auto* mul = static_cast<StinkyInstruction*>(&inst);
+    EXPECT_FLOAT_EQ(mul->getSrcRegs()[0].literalDouble, 0.0f);  // 5.0 * 0.0 = 0.0
 }
 
-TEST_F(PeepholeOptimizationPassTest, MULMULFusion_Negative)
-{
+TEST_F(PeepholeOptimizationPassTest, MULMULFusion_Negative) {
     // Test constant folding with negative values
     // v_mul_f32 v0, -2.0, v1    // v0 = -2.0 * v1
     // v_mul_f32 v2, 3.0, v0     // v2 = 3.0 * v0
     // => v_mul_f32 v2, -6.0, v1 // v2 = -6.0 * v1 (folded: -2.0 * 3.0 = -6.0)
 
-    createVMulF32WithConst(0, -2.0f, 1); // v0 = -2.0 * v1
-    createVMulF32WithConst(2, 3.0f, 0); // v2 = 3.0 * v0
+    createVMulF32WithConst(0, -2.0f, 1);  // v0 = -2.0 * v1
+    createVMulF32WithConst(2, 3.0f, 0);   // v2 = 3.0 * v0
 
     ASSERT_EQ(countInstructions(), 2);
 
@@ -1017,30 +963,29 @@ TEST_F(PeepholeOptimizationPassTest, MULMULFusion_Negative)
     EXPECT_EQ(countInstructions(), 1);
 
     auto& inst = *bb->begin();
-    auto* mul  = static_cast<StinkyInstruction*>(&inst);
-    EXPECT_FLOAT_EQ(mul->getSrcRegs()[0].literalDouble, -6.0f); // -2.0 * 3.0 = -6.0
+    auto* mul = static_cast<StinkyInstruction*>(&inst);
+    EXPECT_FLOAT_EQ(mul->getSrcRegs()[0].literalDouble, -6.0f);  // -2.0 * 3.0 = -6.0
 }
 
 //===----------------------------------------------------------------------===//
 // Test: MUL+FMA Fusion
 //===----------------------------------------------------------------------===//
 
-TEST_F(PeepholeOptimizationPassTest, MULFMAFusion_F32_Basic)
-{
+TEST_F(PeepholeOptimizationPassTest, MULFMAFusion_F32_Basic) {
     // Pattern: v_mul followed by v_fma where MUL result is used in FMA
     // v_mul_f32 v0, 2.0, v1    // v0 = 2.0 * v1
     // v_fma_f32 v2, 3.0, v0, v3 // v2 = 3.0 * v0 + v3 = 3.0 * (2.0 * v1) + v3
     // => v_fma_f32 v2, 6.0, v1, v3 // v2 = 6.0 * v1 + v3 (folded: 2.0 * 3.0 = 6.0)
 
-    createVMulF32WithConst(0, 2.0f, 1); // v0 = 2.0 * v1
+    createVMulF32WithConst(0, 2.0f, 1);  // v0 = 2.0 * v1
 
     // Create v_fma_f32 v2, 3.0, v0, v3
-    auto* fma = createVFmaF32(2, 10, 0, 3); // Base FMA: v2 = v10 * v0 + v3
+    auto* fma = createVFmaF32(2, 10, 0, 3);  // Base FMA: v2 = v10 * v0 + v3
     {
         auto regs = fma->getSrcRegs();
-        regs[0]   = StinkyRegister(3.0);
+        regs[0] = StinkyRegister(3.0);
         fma->setSrcRegs(regs);
-    } // Change to: v2 = 3.0 * v0 + v3
+    }  // Change to: v2 = 3.0 * v0 + v3
 
     ASSERT_EQ(countInstructions(), 2);
 
@@ -1050,7 +995,7 @@ TEST_F(PeepholeOptimizationPassTest, MULFMAFusion_F32_Basic)
     EXPECT_EQ(countInstructions(), 1);
 
     auto& irList = *bb;
-    auto  it     = irList.begin();
+    auto it = irList.begin();
     ASSERT_NE(it, irList.end());
 
     StinkyInstruction* fma_result = cast<StinkyInstruction>(&(*it));
@@ -1072,22 +1017,21 @@ TEST_F(PeepholeOptimizationPassTest, MULFMAFusion_F32_Basic)
     EXPECT_EQ(fma_result->getSrcRegs()[2].reg.idx, 3u);
 }
 
-TEST_F(PeepholeOptimizationPassTest, MULFMAFusion_F32_Commutative_MulOperand)
-{
+TEST_F(PeepholeOptimizationPassTest, MULFMAFusion_F32_Commutative_MulOperand) {
     // Test commutative matching: MUL result used in different position of FMA multiply
     // v_mul_f32 v0, 2.0, v1    // v0 = 2.0 * v1
     // v_fma_f32 v2, v0, 3.0, v3 // v2 = v0 * 3.0 + v3 (MUL result in first position!)
     // Should still match because FMA multiply operands are commutative
 
-    createVMulF32WithConst(0, 2.0f, 1); // v0 = 2.0 * v1
+    createVMulF32WithConst(0, 2.0f, 1);  // v0 = 2.0 * v1
 
     // Create v_fma_f32 v2, v0, 3.0, v3
-    auto* fma = createVFmaF32(2, 0, 10, 3); // v2 = v0 * v10 + v3
+    auto* fma = createVFmaF32(2, 0, 10, 3);  // v2 = v0 * v10 + v3
     {
         auto regs = fma->getSrcRegs();
-        regs[1]   = StinkyRegister(3.0);
+        regs[1] = StinkyRegister(3.0);
         fma->setSrcRegs(regs);
-    } // Change to: v2 = v0 * 3.0 + v3
+    }  // Change to: v2 = v0 * 3.0 + v3
 
     ASSERT_EQ(countInstructions(), 2);
 
@@ -1096,7 +1040,7 @@ TEST_F(PeepholeOptimizationPassTest, MULFMAFusion_F32_Commutative_MulOperand)
     // Should fuse
     EXPECT_EQ(countInstructions(), 1);
 
-    auto& inst       = *bb->begin();
+    auto& inst = *bb->begin();
     auto* fma_result = static_cast<StinkyInstruction*>(&inst);
 
     // Check constant is folded: 2.0 * 3.0 = 6.0
@@ -1107,21 +1051,20 @@ TEST_F(PeepholeOptimizationPassTest, MULFMAFusion_F32_Commutative_MulOperand)
 // not for producer instructions found via def-use chains. This matches LLVM behavior.
 // Test removed: MULFMAFusion_F32_Commutative_MulConstant
 
-TEST_F(PeepholeOptimizationPassTest, MULFMAFusion_F16_Basic)
-{
+TEST_F(PeepholeOptimizationPassTest, MULFMAFusion_F16_Basic) {
     // Test F16 variant
     // v_mul_f16 v0, 2.0, v1
     // v_fma_f16 v2, 3.0, v0, v3
     // => v_fma_f16 v2, 6.0, v1, v3
 
-    createVMulF16WithConst(0, 2.0f, 1); // v0 = 2.0 * v1
+    createVMulF16WithConst(0, 2.0f, 1);  // v0 = 2.0 * v1
 
-    auto* fma = createVFmaF16(2, 10, 0, 3); // v2 = v10 * v0 + v3
+    auto* fma = createVFmaF16(2, 10, 0, 3);  // v2 = v10 * v0 + v3
     {
         auto regs = fma->getSrcRegs();
-        regs[0]   = StinkyRegister(3.0);
+        regs[0] = StinkyRegister(3.0);
         fma->setSrcRegs(regs);
-    } // Change: v2 = 3.0 * v0 + v3
+    }  // Change: v2 = 3.0 * v0 + v3
 
     ASSERT_EQ(countInstructions(), 2);
 
@@ -1129,15 +1072,14 @@ TEST_F(PeepholeOptimizationPassTest, MULFMAFusion_F16_Basic)
 
     EXPECT_EQ(countInstructions(), 1);
 
-    auto& inst       = *bb->begin();
+    auto& inst = *bb->begin();
     auto* fma_result = static_cast<StinkyInstruction*>(&inst);
 
     EXPECT_EQ(fma_result->getUnifiedOpcode(), static_cast<uint16_t>(GFX::v_fma_f16));
     EXPECT_FLOAT_EQ(fma_result->getSrcRegs()[0].literalDouble, 6.0f);
 }
 
-TEST_F(PeepholeOptimizationPassTest, NoFusion_MULFMA_MultipleUses)
-{
+TEST_F(PeepholeOptimizationPassTest, NoFusion_MULFMA_MultipleUses) {
     // MUL result has multiple uses - should NOT fuse
     // v_mul_f32 v0, 2.0, v1
     // v_fma_f32 v2, 3.0, v0, v3
@@ -1148,7 +1090,7 @@ TEST_F(PeepholeOptimizationPassTest, NoFusion_MULFMA_MultipleUses)
     auto* fma = createVFmaF32(2, 10, 0, 3);
     {
         auto regs = fma->getSrcRegs();
-        regs[0]   = StinkyRegister(3.0);
+        regs[0] = StinkyRegister(3.0);
         fma->setSrcRegs(regs);
     }
 
@@ -1163,18 +1105,17 @@ TEST_F(PeepholeOptimizationPassTest, NoFusion_MULFMA_MultipleUses)
     EXPECT_EQ(countInstructions(), 3);
 }
 
-TEST_F(PeepholeOptimizationPassTest, NoFusion_MULFMA_MissingConstant)
-{
+TEST_F(PeepholeOptimizationPassTest, NoFusion_MULFMA_MissingConstant) {
     // MUL doesn't have constant - should NOT fuse
     // v_mul_f32 v0, v1, v2        // No constant!
     // v_fma_f32 v3, 3.0, v0, v4
 
-    createVMulF32(0, 1, 2); // v0 = v1 * v2 (no constant)
+    createVMulF32(0, 1, 2);  // v0 = v1 * v2 (no constant)
 
     auto* fma = createVFmaF32(3, 10, 0, 4);
     {
         auto regs = fma->getSrcRegs();
-        regs[0]   = StinkyRegister(3.0);
+        regs[0] = StinkyRegister(3.0);
         fma->setSrcRegs(regs);
     }
 
@@ -1186,8 +1127,7 @@ TEST_F(PeepholeOptimizationPassTest, NoFusion_MULFMA_MissingConstant)
     EXPECT_EQ(countInstructions(), 2);
 }
 
-TEST_F(PeepholeOptimizationPassTest, MULFMAFusion_WithNegative)
-{
+TEST_F(PeepholeOptimizationPassTest, MULFMAFusion_WithNegative) {
     // Test with negative constants
     // v_mul_f32 v0, -2.0, v1
     // v_fma_f32 v2, 3.0, v0, v3
@@ -1198,7 +1138,7 @@ TEST_F(PeepholeOptimizationPassTest, MULFMAFusion_WithNegative)
     auto* fma = createVFmaF32(2, 10, 0, 3);
     {
         auto regs = fma->getSrcRegs();
-        regs[0]   = StinkyRegister(3.0);
+        regs[0] = StinkyRegister(3.0);
         fma->setSrcRegs(regs);
     }
 
@@ -1208,7 +1148,7 @@ TEST_F(PeepholeOptimizationPassTest, MULFMAFusion_WithNegative)
 
     EXPECT_EQ(countInstructions(), 1);
 
-    auto& inst       = *bb->begin();
+    auto& inst = *bb->begin();
     auto* fma_result = static_cast<StinkyInstruction*>(&inst);
 
     EXPECT_FLOAT_EQ(fma_result->getSrcRegs()[0].literalDouble, -6.0f);
@@ -1218,8 +1158,7 @@ TEST_F(PeepholeOptimizationPassTest, MULFMAFusion_WithNegative)
 // ADD+MUL Fusion Tests
 // ============================================================================
 
-TEST_F(PeepholeOptimizationPassTest, ADDMULFusion_F32_Basic)
-{
+TEST_F(PeepholeOptimizationPassTest, ADDMULFusion_F32_Basic) {
     // Basic ADD+MUL fusion with constant folding
     // v_add_f32 v0, 2.0, v1        // v0 = 2.0 + v1
     // v_mul_f32 v2, 3.0, v0        // v2 = 3.0 * v0
@@ -1237,7 +1176,7 @@ TEST_F(PeepholeOptimizationPassTest, ADDMULFusion_F32_Basic)
     EXPECT_EQ(countInstructions(), 1);
 
     // The remaining instruction should be v_fma_f32 with constant 6.0
-    auto& inst       = *bb->begin();
+    auto& inst = *bb->begin();
     auto* fma_result = static_cast<StinkyInstruction*>(&inst);
     ASSERT_NE(fma_result, nullptr);
 
@@ -1248,8 +1187,7 @@ TEST_F(PeepholeOptimizationPassTest, ADDMULFusion_F32_Basic)
     EXPECT_FLOAT_EQ(fma_result->getSrcRegs()[2].literalDouble, 6.0f);
 }
 
-TEST_F(PeepholeOptimizationPassTest, ADDMULFusion_F16_Basic)
-{
+TEST_F(PeepholeOptimizationPassTest, ADDMULFusion_F16_Basic) {
     // F16 variant of ADD+MUL fusion
     // v_add_f16 v0, 2.0, v1
     // v_mul_f16 v2, 3.0, v0
@@ -1264,15 +1202,14 @@ TEST_F(PeepholeOptimizationPassTest, ADDMULFusion_F16_Basic)
 
     EXPECT_EQ(countInstructions(), 1);
 
-    auto& inst       = *bb->begin();
+    auto& inst = *bb->begin();
     auto* fma_result = static_cast<StinkyInstruction*>(&inst);
 
     EXPECT_FLOAT_EQ(fma_result->getSrcRegs()[0].literalDouble, 3.0f);
     EXPECT_FLOAT_EQ(fma_result->getSrcRegs()[2].literalDouble, 6.0f);
 }
 
-TEST_F(PeepholeOptimizationPassTest, NoFusion_ADDMUL_MultipleUses)
-{
+TEST_F(PeepholeOptimizationPassTest, NoFusion_ADDMUL_MultipleUses) {
     // ADD result has multiple uses - should NOT fuse
     // v_add_f32 v0, 2.0, v1
     // v_mul_f32 v2, 3.0, v0
@@ -1291,13 +1228,12 @@ TEST_F(PeepholeOptimizationPassTest, NoFusion_ADDMUL_MultipleUses)
     EXPECT_EQ(countInstructions(), 3);
 }
 
-TEST_F(PeepholeOptimizationPassTest, NoFusion_ADDMUL_MissingConstant_Add)
-{
+TEST_F(PeepholeOptimizationPassTest, NoFusion_ADDMUL_MissingConstant_Add) {
     // ADD doesn't have constant - should NOT fuse
     // v_add_f32 v0, v1, v2        // No constant!
     // v_mul_f32 v3, 3.0, v0
 
-    createVAddF32(0, 1, 2); // v0 = v1 + v2 (no constant)
+    createVAddF32(0, 1, 2);  // v0 = v1 + v2 (no constant)
     createVMulF32WithConst(3, 3.0f, 0);
 
     ASSERT_EQ(countInstructions(), 2);
@@ -1308,14 +1244,13 @@ TEST_F(PeepholeOptimizationPassTest, NoFusion_ADDMUL_MissingConstant_Add)
     EXPECT_EQ(countInstructions(), 2);
 }
 
-TEST_F(PeepholeOptimizationPassTest, NoFusion_ADDMUL_MissingConstant_Mul)
-{
+TEST_F(PeepholeOptimizationPassTest, NoFusion_ADDMUL_MissingConstant_Mul) {
     // MUL doesn't have constant - should NOT fuse
     // v_add_f32 v0, 2.0, v1
     // v_mul_f32 v2, v3, v0        // No constant!
 
     createVAddF32WithConst(0, 2.0f, 1);
-    createVMulF32(2, 3, 0); // v2 = v3 * v0 (no constant)
+    createVMulF32(2, 3, 0);  // v2 = v3 * v0 (no constant)
 
     ASSERT_EQ(countInstructions(), 2);
 
@@ -1325,8 +1260,7 @@ TEST_F(PeepholeOptimizationPassTest, NoFusion_ADDMUL_MissingConstant_Mul)
     EXPECT_EQ(countInstructions(), 2);
 }
 
-TEST_F(PeepholeOptimizationPassTest, ADDMULFusion_WithNegative)
-{
+TEST_F(PeepholeOptimizationPassTest, ADDMULFusion_WithNegative) {
     // Test with negative constants
     // v_add_f32 v0, -2.0, v1
     // v_mul_f32 v2, 3.0, v0
@@ -1342,15 +1276,14 @@ TEST_F(PeepholeOptimizationPassTest, ADDMULFusion_WithNegative)
 
     EXPECT_EQ(countInstructions(), 1);
 
-    auto& inst       = *bb->begin();
+    auto& inst = *bb->begin();
     auto* fma_result = static_cast<StinkyInstruction*>(&inst);
 
     EXPECT_FLOAT_EQ(fma_result->getSrcRegs()[0].literalDouble, 3.0f);
     EXPECT_FLOAT_EQ(fma_result->getSrcRegs()[2].literalDouble, -6.0f);
 }
 
-TEST_F(PeepholeOptimizationPassTest, ADDMULFusion_BothNegative)
-{
+TEST_F(PeepholeOptimizationPassTest, ADDMULFusion_BothNegative) {
     // Test with both constants negative
     // v_add_f32 v0, -2.0, v1
     // v_mul_f32 v2, -3.0, v0
@@ -1366,7 +1299,7 @@ TEST_F(PeepholeOptimizationPassTest, ADDMULFusion_BothNegative)
 
     EXPECT_EQ(countInstructions(), 1);
 
-    auto& inst       = *bb->begin();
+    auto& inst = *bb->begin();
     auto* fma_result = static_cast<StinkyInstruction*>(&inst);
 
     EXPECT_FLOAT_EQ(fma_result->getSrcRegs()[0].literalDouble, -3.0f);
@@ -1377,8 +1310,7 @@ TEST_F(PeepholeOptimizationPassTest, ADDMULFusion_BothNegative)
 // Move Propagation Tests
 // ============================================================================
 
-TEST_F(PeepholeOptimizationPassTest, MovPropagation_F32_Add_Basic)
-{
+TEST_F(PeepholeOptimizationPassTest, MovPropagation_F32_Add_Basic) {
     // v_mov_b32 v1, v0
     // v_add_f32 v2, 2.0, v1
     // => v_add_f32 v2, 2.0, v0
@@ -1393,14 +1325,13 @@ TEST_F(PeepholeOptimizationPassTest, MovPropagation_F32_Add_Basic)
     EXPECT_EQ(countInstructions(), 1);
 
     auto& inst = *bb->begin();
-    auto* add  = static_cast<StinkyInstruction*>(&inst);
+    auto* add = static_cast<StinkyInstruction*>(&inst);
     EXPECT_EQ(add->getUnifiedOpcode(), static_cast<uint16_t>(GFX::v_add_f32));
     EXPECT_EQ(add->getDestRegs()[0].reg.idx, 2u);
-    EXPECT_EQ(add->getSrcRegs()[1].reg.idx, 0u); // Should use v0, not v1
+    EXPECT_EQ(add->getSrcRegs()[1].reg.idx, 0u);  // Should use v0, not v1
 }
 
-TEST_F(PeepholeOptimizationPassTest, MovPropagation_F16_Add_Basic)
-{
+TEST_F(PeepholeOptimizationPassTest, MovPropagation_F16_Add_Basic) {
     // v_mov_b32 v1, v0
     // v_add_f16 v2, 2.0, v1
     // => v_add_f16 v2, 2.0, v0
@@ -1415,14 +1346,13 @@ TEST_F(PeepholeOptimizationPassTest, MovPropagation_F16_Add_Basic)
     EXPECT_EQ(countInstructions(), 1);
 
     auto& inst = *bb->begin();
-    auto* add  = static_cast<StinkyInstruction*>(&inst);
+    auto* add = static_cast<StinkyInstruction*>(&inst);
     EXPECT_EQ(add->getUnifiedOpcode(), static_cast<uint16_t>(GFX::v_add_f16));
     EXPECT_EQ(add->getDestRegs()[0].reg.idx, 2u);
     EXPECT_EQ(add->getSrcRegs()[1].reg.idx, 0u);
 }
 
-TEST_F(PeepholeOptimizationPassTest, MovPropagation_F32_Mul_Basic)
-{
+TEST_F(PeepholeOptimizationPassTest, MovPropagation_F32_Mul_Basic) {
     // v_mov_b32 v1, v0
     // v_mul_f32 v2, 2.0, v1
     // => v_mul_f32 v2, 2.0, v0
@@ -1437,14 +1367,13 @@ TEST_F(PeepholeOptimizationPassTest, MovPropagation_F32_Mul_Basic)
     EXPECT_EQ(countInstructions(), 1);
 
     auto& inst = *bb->begin();
-    auto* mul  = static_cast<StinkyInstruction*>(&inst);
+    auto* mul = static_cast<StinkyInstruction*>(&inst);
     EXPECT_EQ(mul->getUnifiedOpcode(), static_cast<uint16_t>(GFX::v_mul_f32));
     EXPECT_EQ(mul->getDestRegs()[0].reg.idx, 2u);
     EXPECT_EQ(mul->getSrcRegs()[1].reg.idx, 0u);
 }
 
-TEST_F(PeepholeOptimizationPassTest, MovPropagation_F16_Mul_Basic)
-{
+TEST_F(PeepholeOptimizationPassTest, MovPropagation_F16_Mul_Basic) {
     // v_mov_b32 v1, v0
     // v_mul_f16 v2, 2.0, v1
     // => v_mul_f16 v2, 2.0, v0
@@ -1459,14 +1388,13 @@ TEST_F(PeepholeOptimizationPassTest, MovPropagation_F16_Mul_Basic)
     EXPECT_EQ(countInstructions(), 1);
 
     auto& inst = *bb->begin();
-    auto* mul  = static_cast<StinkyInstruction*>(&inst);
+    auto* mul = static_cast<StinkyInstruction*>(&inst);
     EXPECT_EQ(mul->getUnifiedOpcode(), static_cast<uint16_t>(GFX::v_mul_f16));
     EXPECT_EQ(mul->getDestRegs()[0].reg.idx, 2u);
     EXPECT_EQ(mul->getSrcRegs()[1].reg.idx, 0u);
 }
 
-TEST_F(PeepholeOptimizationPassTest, NoMovPropagation_MultipleUses)
-{
+TEST_F(PeepholeOptimizationPassTest, NoMovPropagation_MultipleUses) {
     // v_mov_b32 v1, v0
     // v_add_f32 v2, 2.0, v1
     // v_mul_f32 v3, 3.0, v1  // v1 used twice!
@@ -1484,8 +1412,7 @@ TEST_F(PeepholeOptimizationPassTest, NoMovPropagation_MultipleUses)
     EXPECT_EQ(countInstructions(), 3);
 }
 
-TEST_F(PeepholePassManagerTest, IntegrationWithPassManager)
-{
+TEST_F(PeepholePassManagerTest, IntegrationWithPassManager) {
     // Test that the pass integrates correctly with PassManager
     createVFmaF32WithConst(0, 1, 2, 1.0f);
     createVAddF32WithConst(0, 1.0f, 0);
@@ -1503,8 +1430,7 @@ TEST_F(PeepholePassManagerTest, IntegrationWithPassManager)
 // Test: HexLiteral x FloatLiteral Constant Folding
 // ============================================================================
 
-TEST_F(PeepholeOptimizationPassTest, HexLiteralTimesFloatLiteral_MulMulFusion)
-{
+TEST_F(PeepholeOptimizationPassTest, HexLiteralTimesFloatLiteral_MulMulFusion) {
     // Test constant folding with hex literal (0x40ec7326) x float literal (2.0)
     //
     // Simulates the intrinsic flow:
@@ -1527,14 +1453,14 @@ TEST_F(PeepholeOptimizationPassTest, HexLiteralTimesFloatLiteral_MulMulFusion)
     // In real flow, IntrinsicOperand::HexLiteral gets converted to StinkyRegister::LiteralDouble
 
     // temp = v_mul_f32(src, 7.3890562)  // Originally HexLiteral 0x40ec7326
-    uint32_t hexBits  = 0x40ec7326;
-    float    hexFloat = *reinterpret_cast<float*>(&hexBits);
+    uint32_t hexBits = 0x40ec7326;
+    float hexFloat = *reinterpret_cast<float*>(&hexBits);
     EXPECT_NEAR(hexFloat, 7.3890562f, 0.0001f) << "Verify hex literal value is e^2";
 
-    createVMulF32WithConst(0, hexFloat, 1); // v0 = 7.3890562 * v1
+    createVMulF32WithConst(0, hexFloat, 1);  // v0 = 7.3890562 * v1
 
     // dest = v_mul_f32(temp, 2.0)  // FloatLiteral
-    createVMulF32WithConst(2, 2.0f, 0); // v2 = 2.0 * v0
+    createVMulF32WithConst(2, 2.0f, 0);  // v2 = 2.0 * v0
 
     ASSERT_EQ(countInstructions(), 2);
 
@@ -1544,12 +1470,12 @@ TEST_F(PeepholeOptimizationPassTest, HexLiteralTimesFloatLiteral_MulMulFusion)
     EXPECT_EQ(countInstructions(), 1);
 
     auto& inst = *bb->begin();
-    auto* mul  = static_cast<StinkyInstruction*>(&inst);
+    auto* mul = static_cast<StinkyInstruction*>(&inst);
     ASSERT_NE(mul, nullptr);
 
     EXPECT_EQ(mul->getUnifiedOpcode(), static_cast<uint16_t>(GFX::v_mul_f32));
-    EXPECT_EQ(mul->getDestRegs()[0].reg.idx, 2u); // Destination is v2
-    EXPECT_EQ(mul->getSrcRegs()[1].reg.idx, 1u); // Source is v1
+    EXPECT_EQ(mul->getDestRegs()[0].reg.idx, 2u);  // Destination is v2
+    EXPECT_EQ(mul->getSrcRegs()[1].reg.idx, 1u);   // Source is v1
     EXPECT_EQ(mul->getSrcRegs()[0].dataType, StinkyRegister::Type::LiteralDouble);
 
     // Verify constant folding: 7.3890562 * 2.0 = 14.778112

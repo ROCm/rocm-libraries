@@ -48,4 +48,3 @@ REGISTER_TYPE(LDS,         "LDS",         "LDS dependency tracking pseudo-regist
 REGISTER_TYPE(UNKNOWN,     "UNKNOWN",     "Unknown/invalid register type")
 
 #undef REGISTER_TYPE
-

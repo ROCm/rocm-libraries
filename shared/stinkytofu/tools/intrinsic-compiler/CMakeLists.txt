@@ -42,6 +42,7 @@ add_custom_command(
 # Custom target for intrinsic compilation
 add_custom_target(intrinsics_compiled
     DEPENDS "${INTRINSIC_BC_FILE}"
+    COMMENT "Compile intrinsic patterns"
 )
 
 # Install the intrinsic-compiler tool

@@ -702,4 +702,3 @@ Rules:
 ## Questions?
 
 Just look at existing patterns in 'PeepholePatterns.pattern' and copy the structure!
-

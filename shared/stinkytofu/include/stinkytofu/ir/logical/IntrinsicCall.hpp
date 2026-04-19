@@ -23,65 +23,58 @@
 
 #pragma once
 
-#include "stinkytofu/ir/logical/LogicalInstructions.hpp"
 #include <string>
 #include <vector>
 
-namespace stinkytofu
-{
-    /**
-     * @brief High-level IR instruction for intrinsic function calls
-     *
-     * This instruction represents a call to a pre-compiled intrinsic from
-     * the IntrinsicLibrary. It will be expanded by IntrinsicExpansionPass
-     * into concrete high-level IR instructions.
-     *
-     * Example:
-     *   IntrinsicCall("ReluF32", {v0}, {v1, v2})
-     *   - functionName = "ReluF32"
-     *   - dests = [v0 (dest), v2 (temp)]
-     *   - srcs = [v1 (src)]
-     *
-     * Note: All registers (including temporaries) are part of the signature.
-     */
-    class IntrinsicCall : public LogicalInstruction
-    {
-    private:
-        friend class IRBase;
+#include "stinkytofu/ir/logical/LogicalInstructions.hpp"
 
-        IntrinsicCall(const std::string& name, const std::vector<StinkyRegister>& allRegs)
-            : LogicalInstruction(logical::IntrinsicCall)
-            , functionName(name)
-        {
-            // Store all registers - IntrinsicExpansionPass will map them
-            // to the intrinsic's argument list
-            dests = allRegs;
-        }
+namespace stinkytofu {
+/**
+ * @brief High-level IR instruction for intrinsic function calls
+ *
+ * This instruction represents a call to a pre-compiled intrinsic from
+ * the IntrinsicLibrary. It will be expanded by IntrinsicExpansionPass
+ * into concrete high-level IR instructions.
+ *
+ * Example:
+ *   IntrinsicCall("ReluF32", {v0}, {v1, v2})
+ *   - functionName = "ReluF32"
+ *   - dests = [v0 (dest), v2 (temp)]
+ *   - srcs = [v1 (src)]
+ *
+ * Note: All registers (including temporaries) are part of the signature.
+ */
+class IntrinsicCall : public LogicalInstruction {
+   private:
+    friend class IRBase;
 
-        ~IntrinsicCall() override = default;
+    IntrinsicCall(const std::string& name, const std::vector<StinkyRegister>& allRegs)
+        : LogicalInstruction(logical::IntrinsicCall), functionName(name) {
+        // Store all registers - IntrinsicExpansionPass will map them
+        // to the intrinsic's argument list
+        dests = allRegs;
+    }
 
-    public:
-        std::string functionName;
+    ~IntrinsicCall() override = default;
 
-        const char* getLogicalName() const override
-        {
-            return "IntrinsicCall";
-        }
+   public:
+    std::string functionName;
 
-        const std::string& getFunctionName() const
-        {
-            return functionName;
-        }
+    const char* getLogicalName() const override {
+        return "IntrinsicCall";
+    }
 
-        bool isComposite() const
-        {
-            return true; // Needs expansion by IntrinsicExpansionPass
-        }
+    const std::string& getFunctionName() const {
+        return functionName;
+    }
 
-        void dump(std::ostream& out) const override
-        {
-            out << "IntrinsicCall(" << functionName << ", " << dests.size() << " args)";
-        }
-    };
+    bool isComposite() const {
+        return true;  // Needs expansion by IntrinsicExpansionPass
+    }
 
-} // namespace stinkytofu
+    void dump(std::ostream& out) const override {
+        out << "IntrinsicCall(" << functionName << ", " << dests.size() << " args)";
+    }
+};
+
+}  // namespace stinkytofu
