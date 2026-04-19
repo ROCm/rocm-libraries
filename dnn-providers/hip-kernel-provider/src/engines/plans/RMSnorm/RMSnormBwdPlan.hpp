@@ -24,8 +24,9 @@ class RMSnormBwdParams
 {
 public:
     RMSnormBwdParams(
-        const hipdnn_data_sdk::data_objects::RMSNormBackwardAttributes& attributes,
-        const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        const hipdnn_flatbuffers_sdk::data_objects::RMSNormBackwardAttributes& attributes,
+        const std::unordered_map<int64_t,
+                                 const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
             tensorMap);
 
     RMSnormBwdParams(const RMSnormBwdParams&) = delete;
@@ -34,22 +35,22 @@ public:
     RMSnormBwdParams(RMSnormBwdParams&&) = default;
     RMSnormBwdParams& operator=(RMSnormBwdParams&&) = default;
 
-    const hipdnn_data_sdk::data_objects::TensorAttributes* dy() const;
-    const hipdnn_data_sdk::data_objects::TensorAttributes* x() const;
-    const hipdnn_data_sdk::data_objects::TensorAttributes* scale() const;
-    const hipdnn_data_sdk::data_objects::TensorAttributes* invRMS() const;
-    const hipdnn_data_sdk::data_objects::TensorAttributes* dx() const;
-    const hipdnn_data_sdk::data_objects::TensorAttributes* dscale() const;
-    const hipdnn_data_sdk::data_objects::TensorAttributes* dbias() const;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* dy() const;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* x() const;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* scale() const;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* invRMS() const;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* dx() const;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* dscale() const;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* dbias() const;
 
 private:
-    const hipdnn_data_sdk::data_objects::TensorAttributes* _dy;
-    const hipdnn_data_sdk::data_objects::TensorAttributes* _x;
-    const hipdnn_data_sdk::data_objects::TensorAttributes* _scale;
-    const hipdnn_data_sdk::data_objects::TensorAttributes* _invRMS;
-    const hipdnn_data_sdk::data_objects::TensorAttributes* _dx;
-    const hipdnn_data_sdk::data_objects::TensorAttributes* _dscale;
-    const hipdnn_data_sdk::data_objects::TensorAttributes* _dbias;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _dy;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _x;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _scale;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _invRMS;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _dx;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _dscale;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _dbias;
 };
 
 class RMSnormBwdPlan : public hipdnn_plugin_sdk::IPlan<HipKernelHandle>
