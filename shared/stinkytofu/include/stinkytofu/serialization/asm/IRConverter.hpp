@@ -26,6 +26,7 @@
 #include <memory>
 #include <string>
 
+#include "stinkytofu/Export.hpp"
 #include "stinkytofu/core/Function.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/core/Types.hpp"
@@ -58,7 +59,7 @@ struct ParsedFunction;
  * converter.cleanup();
  * ```
  */
-class StinkyIRConverter {
+class STINKYTOFU_EXPORT StinkyIRConverter {
    public:
     /**
      * Constructor with default architecture (gfx942).

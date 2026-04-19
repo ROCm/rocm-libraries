@@ -27,6 +27,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "stinkytofu/Export.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/support/Diagnostic.hpp"
 
@@ -103,7 +104,7 @@ struct ParseResult {
 /// Parses a StinkyTofu IR source string and returns instructions with diagnostic information.
 /// @param sourceStr The IR source text to parse.
 /// @return A ParseResult containing parsed instructions and any diagnostics (errors/warnings).
-ParseResult parseSourceStringWithDiagnostics(const std::string& sourceStr);
+STINKYTOFU_EXPORT ParseResult parseSourceStringWithDiagnostics(const std::string& sourceStr);
 
 /// Result of parsing multiple functions from an IR source string.
 struct MultiParseResult {
@@ -118,6 +119,7 @@ struct MultiParseResult {
 };
 
 /// Parse all st.func definitions from a source string.
-MultiParseResult parseAllSourceStringsWithDiagnostics(const std::string& sourceStr);
+STINKYTOFU_EXPORT MultiParseResult
+parseAllSourceStringsWithDiagnostics(const std::string& sourceStr);
 
 }  // namespace stinkytofu

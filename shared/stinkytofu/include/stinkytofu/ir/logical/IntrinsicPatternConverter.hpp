@@ -29,6 +29,7 @@
 #include <string>
 #include <vector>
 
+#include "stinkytofu/Export.hpp"
 #include "stinkytofu/ir/logical/LogicalInstructions.hpp"
 #include "stinkytofu/serialization/asm/PatternParser.hpp"
 
@@ -109,7 +110,7 @@ struct IntrinsicIRModule {
  * This enables the pipeline:
  *   Text -> IR -> Optimization -> Serialization
  */
-class IntrinsicPatternConverter {
+class STINKYTOFU_EXPORT IntrinsicPatternConverter {
    public:
     /**
      * @brief Convert text pattern to IR module
