@@ -150,6 +150,12 @@ struct FmhaFwdKernel
     static constexpr bool kUseAsyncCopy = FmhaPipeline::Policy::AsyncCopy;
     static constexpr bool kUseTrLoad    = detail::is_using_trload_v<FmhaPipeline>;
 
+#if defined(__gfx950__)
+    static constexpr bool kIsAvailable = true;
+#else
+    static constexpr bool kIsAvailable = !kUseTrLoad;
+#endif
+
     static constexpr std::string_view kPipelineName = FmhaPipeline::name;
 
     template <ck_tile::index_t I> // to avoid duplicated base class prblem, introduce an template
@@ -1489,7 +1495,11 @@ struct FmhaFwdKernel
         return ck_tile::max(FmhaPipeline::GetSmemSize(), EpiloguePipeline::GetSmemSize());
     }
 
-    CK_TILE_DEVICE void operator()(Kargs kargs) const { run_(std::move(kargs)); }
+    CK_TILE_DEVICE void operator()(Kargs kargs) const
+    {
+        if constexpr(kIsAvailable)
+            run_(std::move(kargs));
+    }
 
     CK_TILE_DEVICE void run_(Kargs kargs) const
     {
