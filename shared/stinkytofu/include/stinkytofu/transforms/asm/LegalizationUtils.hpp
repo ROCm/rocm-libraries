@@ -28,98 +28,88 @@
 #include <map>
 #include <string>
 
-namespace stinkytofu
-{
-    // Forward declarations
-    class StinkyInstruction;
-    class AsmIRBuilder;
-    enum class GfxArchID : uint32_t;
+namespace stinkytofu {
+// Forward declarations
+class StinkyInstruction;
+class AsmIRBuilder;
+enum class GfxArchID : uint32_t;
 
-    // Result of instruction legalization
-    struct Legalized
-    {
-        // First newly created instruction (nullptr if no legalization)
-        StinkyInstruction* first = nullptr;
+// Result of instruction legalization
+struct Legalized {
+    // First newly created instruction (nullptr if no legalization)
+    StinkyInstruction* first = nullptr;
 
-        // Last newly created instruction (nullptr if no legalization)
-        StinkyInstruction* last = nullptr;
-    };
+    // Last newly created instruction (nullptr if no legalization)
+    StinkyInstruction* last = nullptr;
+};
 
-    // Legalize v_nop instruction
-    // Expands v_nop N into N individual v_nop instructions.
-    // But if v_nop count is 0, the instruction is removed and <nullptr, nullptr> is returned.
-    //
-    // Example:
-    //      v_nop count=0  →  <removed>
-    //
-    //      v_nop count=3  →  v_nop
-    //                        v_nop
-    //                        v_nop
-    Legalized legalizeVNop(StinkyInstruction* inst, AsmIRBuilder& irBuilder, GfxArchID archId);
+// Legalize v_nop instruction
+// Expands v_nop N into N individual v_nop instructions.
+// But if v_nop count is 0, the instruction is removed and <nullptr, nullptr> is returned.
+//
+// Example:
+//      v_nop count=0  →  <removed>
+//
+//      v_nop count=3  →  v_nop
+//                        v_nop
+//                        v_nop
+Legalized legalizeVNop(StinkyInstruction* inst, AsmIRBuilder& irBuilder, GfxArchID archId);
 
-    // Legalize v_cmpx instruction
-    // On architectures without CMPX SGPR write support, expands into v_cmp + s_and_saveexec
-    //
-    // Example:
-    //      v_cmpx_lt_f32 exec_lo, v0, v1  →  v_cmp_lt_f32 vcc_lo, v0, v1
-    //                                        s_mov_b32 exec_lo, vcc_lo
-    Legalized legalizeVCmpX(StinkyInstruction*                inst,
-                            AsmIRBuilder&                     irBuilder,
-                            GfxArchID                         archId,
-                            const std::map<std::string, int>& archCaps);
+// Legalize v_cmpx instruction
+// On architectures without CMPX SGPR write support, expands into v_cmp + s_and_saveexec
+//
+// Example:
+//      v_cmpx_lt_f32 exec_lo, v0, v1  →  v_cmp_lt_f32 vcc_lo, v0, v1
+//                                        s_mov_b32 exec_lo, vcc_lo
+Legalized legalizeVCmpX(StinkyInstruction* inst, AsmIRBuilder& irBuilder, GfxArchID archId,
+                        const std::map<std::string, int>& archCaps);
 
-    // Legalize s_waitcnt instruction
-    // On gfx1250, expands into separate wait instructions
-    //
-    // Example:
-    //      s_waitcnt vmcnt(2) lgkmcnt(0)  →  s_wait_loadcnt_dscnt 0x0200
-    Legalized legalizeWaitCnt(StinkyInstruction* inst, AsmIRBuilder& irBuilder, GfxArchID archId);
+// Legalize s_waitcnt instruction
+// On gfx1250, expands into separate wait instructions
+//
+// Example:
+//      s_waitcnt vmcnt(2) lgkmcnt(0)  →  s_wait_loadcnt_dscnt 0x0200
+Legalized legalizeWaitCnt(StinkyInstruction* inst, AsmIRBuilder& irBuilder, GfxArchID archId);
 
-    // Legalize s_barrier instruction
-    // On gfx1250, expands into s_barrier_signal + s_barrier_wait
-    //
-    // Example:
-    //      s_barrier  →  s_barrier_signal -1
-    //                    s_barrier_wait -1
-    Legalized legalizeBarrier(StinkyInstruction* inst, AsmIRBuilder& irBuilder, GfxArchID archId);
+// Legalize s_barrier instruction
+// On gfx1250, expands into s_barrier_signal + s_barrier_wait
+//
+// Example:
+//      s_barrier  →  s_barrier_signal -1
+//                    s_barrier_wait -1
+Legalized legalizeBarrier(StinkyInstruction* inst, AsmIRBuilder& irBuilder, GfxArchID archId);
 
-    // Legalize ds_load_b192 instruction
-    // Expands into two ds_load instructions (b128 + b64).
-    // Caller must insert s_set_vgpr_msb between the two when they use VGPRs in different MSB
-    // ranges (e.g. b128 in 256~511, b64 in 512~767).
-    //
-    // Example:
-    //      ds_load_b192 v[0:5], v0 offset:0  →  ds_load_b128 v[0:3], v0 offset:0
-    //                                            ds_load_b64 v[4:5], v0 offset:16
-    Legalized legalizeDSLoadB192(StinkyInstruction* inst,
-                                 AsmIRBuilder&      irBuilder,
-                                 GfxArchID          archId,
-                                 bool               hasVgprMsb);
+// Legalize ds_load_b192 instruction
+// Expands into two ds_load instructions (b128 + b64).
+// Caller must insert s_set_vgpr_msb between the two when they use VGPRs in different MSB
+// ranges (e.g. b128 in 256~511, b64 in 512~767).
+//
+// Example:
+//      ds_load_b192 v[0:5], v0 offset:0  →  ds_load_b128 v[0:3], v0 offset:0
+//                                            ds_load_b64 v[4:5], v0 offset:16
+Legalized legalizeDSLoadB192(StinkyInstruction* inst, AsmIRBuilder& irBuilder, GfxArchID archId,
+                             bool hasVgprMsb);
 
-    // Legalize ds_store_b192 instruction
-    // Expands into two ds_store instructions (b128 + b64).
-    // Caller must insert s_set_vgpr_msb between the two when they use VGPRs in different MSB ranges.
-    //
-    // Example:
-    //      ds_store_b192 v[0:5], v0 offset:0  →  ds_store_b128 v[0:3], v0 offset:0
-    //                                            ds_store_b64 v[4:5], v0 offset:16
-    Legalized legalizeDSStoreB192(StinkyInstruction* inst,
-                                  AsmIRBuilder&      irBuilder,
-                                  GfxArchID          archId,
-                                  bool               hasVgprMsb);
+// Legalize ds_store_b192 instruction
+// Expands into two ds_store instructions (b128 + b64).
+// Caller must insert s_set_vgpr_msb between the two when they use VGPRs in different MSB ranges.
+//
+// Example:
+//      ds_store_b192 v[0:5], v0 offset:0  →  ds_store_b128 v[0:3], v0 offset:0
+//                                            ds_store_b64 v[4:5], v0 offset:16
+Legalized legalizeDSStoreB192(StinkyInstruction* inst, AsmIRBuilder& irBuilder, GfxArchID archId,
+                              bool hasVgprMsb);
 
-    // Legalize ds_store_b256 instruction
-    // Expands into two ds_store_b128 instructions.
-    // Caller must insert s_set_vgpr_msb between the two when they use VGPRs in different MSB ranges.
-    //
-    // Example:
-    //      ds_store_b256 v[0:7], v0 offset:0  →  ds_store_b128 v[0:3], v0 offset:0
-    //                                            ds_store_b128 v[4:7], v0 offset:16
-    Legalized legalizeDSStoreB256(StinkyInstruction* inst,
-                                  AsmIRBuilder&      irBuilder,
-                                  GfxArchID          archId,
-                                  bool               hasVgprMsb);
+// Legalize ds_store_b256 instruction
+// Expands into two ds_store_b128 instructions.
+// Caller must insert s_set_vgpr_msb between the two when they use VGPRs in different MSB ranges.
+//
+// Example:
+//      ds_store_b256 v[0:7], v0 offset:0  →  ds_store_b128 v[0:3], v0 offset:0
+//                                            ds_store_b128 v[4:7], v0 offset:16
+Legalized legalizeDSStoreB256(StinkyInstruction* inst, AsmIRBuilder& irBuilder, GfxArchID archId,
+                              bool hasVgprMsb);
 
-} // namespace stinkytofu
+}  // namespace stinkytofu
 
-#endif // STINKYTOFU_LEGALIZATION_UTILS_HPP
+#endif  // STINKYTOFU_LEGALIZATION_UTILS_HPP

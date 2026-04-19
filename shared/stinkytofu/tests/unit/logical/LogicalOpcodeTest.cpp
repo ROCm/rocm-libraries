@@ -21,21 +21,19 @@
  *
  * ************************************************************************ */
 
-#include "stinkytofu/ir/logical/LogicalOpcode.hpp"
+#include <gtest/gtest.h>
+
 #include "TestHelpers.hpp"
 #include "stinkytofu/ir/logical/LogicalInstructions.hpp"
-#include <gtest/gtest.h>
+#include "stinkytofu/ir/logical/LogicalOpcode.hpp"
 
 using namespace stinkytofu;
 using namespace stinkytofu::test;
 
-class IROpcodeTest : public ::testing::Test
-{
-};
+class IROpcodeTest : public ::testing::Test {};
 
 // Test: IR instructions have correct opcodes
-TEST_F(IROpcodeTest, InstructionOpcodes)
-{
+TEST_F(IROpcodeTest, InstructionOpcodes) {
     StinkyRegister v0 = vgpr(0);
     StinkyRegister v1 = vgpr(1);
     StinkyRegister v2 = vgpr(2);
@@ -58,8 +56,7 @@ TEST_F(IROpcodeTest, InstructionOpcodes)
 }
 
 // Test: Opcode to name mapping
-TEST_F(IROpcodeTest, OpcodeToName)
-{
+TEST_F(IROpcodeTest, OpcodeToName) {
     EXPECT_STREQ(logical::getOpcodeName(logical::UNKNOWN), "UNKNOWN");
     EXPECT_STREQ(logical::getOpcodeName(logical::VAddF32), "VAddF32");
     EXPECT_STREQ(logical::getOpcodeName(logical::VMulF32), "VMulF32");
@@ -69,8 +66,7 @@ TEST_F(IROpcodeTest, OpcodeToName)
 }
 
 // Test: Opcode to mnemonic mapping
-TEST_F(IROpcodeTest, OpcodeToMnemonic)
-{
+TEST_F(IROpcodeTest, OpcodeToMnemonic) {
     EXPECT_STREQ(logical::getOpcodeMnemonic(logical::UNKNOWN), "unknown");
     EXPECT_STREQ(logical::getOpcodeMnemonic(logical::VAddF32), "v_add_f32");
     EXPECT_STREQ(logical::getOpcodeMnemonic(logical::VMulF32), "v_mul_f32");
@@ -80,8 +76,7 @@ TEST_F(IROpcodeTest, OpcodeToMnemonic)
 }
 
 // Test: F16 variants
-TEST_F(IROpcodeTest, F16Variants)
-{
+TEST_F(IROpcodeTest, F16Variants) {
     StinkyRegister v0 = vgpr(0);
     StinkyRegister v1 = vgpr(1);
     StinkyRegister v2 = vgpr(2);
@@ -98,8 +93,7 @@ TEST_F(IROpcodeTest, F16Variants)
 }
 
 // Test: getLogicalName still works (backward compatibility)
-TEST_F(IROpcodeTest, LogicalNameBackwardCompatibility)
-{
+TEST_F(IROpcodeTest, LogicalNameBackwardCompatibility) {
     StinkyRegister v0 = vgpr(0);
     StinkyRegister v1 = vgpr(1);
     StinkyRegister v2 = vgpr(2);
@@ -112,8 +106,7 @@ TEST_F(IROpcodeTest, LogicalNameBackwardCompatibility)
 }
 
 // Test: String to opcode parsing (CamelCase)
-TEST_F(IROpcodeTest, ParseOpcodeCamelCase)
-{
+TEST_F(IROpcodeTest, ParseOpcodeCamelCase) {
     EXPECT_EQ(logical::parseOpcode("VAddF32"), logical::VAddF32);
     EXPECT_EQ(logical::parseOpcode("VMulF32"), logical::VMulF32);
     EXPECT_EQ(logical::parseOpcode("VMaxF32"), logical::VMaxF32);
@@ -124,8 +117,7 @@ TEST_F(IROpcodeTest, ParseOpcodeCamelCase)
 }
 
 // Test: String to opcode parsing (snake_case - using actual generated mnemonics)
-TEST_F(IROpcodeTest, ParseOpcodeSnakeCase)
-{
+TEST_F(IROpcodeTest, ParseOpcodeSnakeCase) {
     EXPECT_EQ(logical::parseOpcode("v_add_f32"), logical::VAddF32);
     EXPECT_EQ(logical::parseOpcode("v_mul_f32"), logical::VMulF32);
     EXPECT_EQ(logical::parseOpcode("v_max_f32"), logical::VMaxF32);
@@ -137,8 +129,7 @@ TEST_F(IROpcodeTest, ParseOpcodeSnakeCase)
 }
 
 // Test: Parse unknown/invalid opcodes
-TEST_F(IROpcodeTest, ParseOpcodeInvalid)
-{
+TEST_F(IROpcodeTest, ParseOpcodeInvalid) {
     EXPECT_EQ(logical::parseOpcode("invalid_instruction"), logical::UNKNOWN);
     EXPECT_EQ(logical::parseOpcode(""), logical::UNKNOWN);
     EXPECT_EQ(logical::parseOpcode(nullptr), logical::UNKNOWN);
@@ -146,8 +137,7 @@ TEST_F(IROpcodeTest, ParseOpcodeInvalid)
 }
 
 // Test: Round-trip conversion (opcode -> string -> opcode)
-TEST_F(IROpcodeTest, OpcodeRoundTrip)
-{
+TEST_F(IROpcodeTest, OpcodeRoundTrip) {
     // Test with CamelCase
     EXPECT_EQ(logical::parseOpcode(logical::getOpcodeName(logical::VAddF32)), logical::VAddF32);
     EXPECT_EQ(logical::parseOpcode(logical::getOpcodeName(logical::VMaxF32)), logical::VMaxF32);

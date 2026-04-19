@@ -19,21 +19,18 @@
  * ************************************************************************ */
 #include "stinkytofu/core/Function.hpp"
 
-#include "stinkytofu/serialization/asm/StinkyAsmPrinter.hpp"
-
 #include <iostream>
 #include <ostream>
 
-namespace stinkytofu
-{
-    void Function::dump(std::ostream& out) const
-    {
-        AsmPrinter printer(out, AsmPrinterOptions());
-        printer.print(*this);
-    }
+#include "stinkytofu/serialization/asm/StinkyAsmPrinter.hpp"
 
-    void Function::dump() const
-    {
-        dump(std::cerr);
-    }
+namespace stinkytofu {
+void Function::dump(std::ostream& out) const {
+    AsmPrinter printer(out, AsmPrinterOptions());
+    printer.print(*this);
 }
+
+void Function::dump() const {
+    dump(std::cerr);
+}
+}  // namespace stinkytofu

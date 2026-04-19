@@ -22,46 +22,44 @@
  * ************************************************************************ */
 #pragma once
 
-#include "stinkytofu/core/PassManager.hpp"
-
 #include <array>
 #include <string>
 
-namespace stinkytofu
-{
-    class StinkyAsmModule;
+#include "stinkytofu/core/PassManager.hpp"
 
-    /// Architecture-specific optimization entry point.
-    ///
-    /// Bound to a single StinkyAsmModule. Looks up the registered PipelineBuilder
-    /// for the module's architecture, creates a PassManager, calls the builder to
-    /// populate it with ScopeAdaptor passes, configures, and runs.
-    ///
-    /// @code
-    /// Backend backend(module);
-    /// backend.runOptimization();
-    /// @endcode
-    class Backend
-    {
-    public:
-        explicit Backend(StinkyAsmModule& module);
+namespace stinkytofu {
+class StinkyAsmModule;
 
-        Backend(const Backend&)            = delete;
-        Backend& operator=(const Backend&) = delete;
+/// Architecture-specific optimization entry point.
+///
+/// Bound to a single StinkyAsmModule. Looks up the registered PipelineBuilder
+/// for the module's architecture, creates a PassManager, calls the builder to
+/// populate it with ScopeAdaptor passes, configures, and runs.
+///
+/// @code
+/// Backend backend(module);
+/// backend.runOptimization();
+/// @endcode
+class Backend {
+   public:
+    explicit Backend(StinkyAsmModule& module);
 
-        /// Architecture of the member module [major, minor, stepping].
-        std::array<int, 3> getArch() const;
+    Backend(const Backend&) = delete;
+    Backend& operator=(const Backend&) = delete;
 
-        /// Run the full pipeline on the member module.
-        /// Looks up the PipelineBuilder, populates a PM, configures, and runs.
-        bool runOptimization();
+    /// Architecture of the member module [major, minor, stepping].
+    std::array<int, 3> getArch() const;
 
-    private:
-        /// Configure the PassManager with GemmTileConfig, PassFeatureConfig,
-        /// and debug options derived from the module.
-        void configurePassManager(PassManager& pm);
+    /// Run the full pipeline on the member module.
+    /// Looks up the PipelineBuilder, populates a PM, configures, and runs.
+    bool runOptimization();
 
-        StinkyAsmModule& module;
-    };
+   private:
+    /// Configure the PassManager with GemmTileConfig, PassFeatureConfig,
+    /// and debug options derived from the module.
+    void configurePassManager(PassManager& pm);
 
-} // namespace stinkytofu
+    StinkyAsmModule& module;
+};
+
+}  // namespace stinkytofu

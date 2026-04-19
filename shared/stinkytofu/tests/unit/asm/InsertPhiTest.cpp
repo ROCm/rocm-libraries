@@ -34,9 +34,8 @@ using namespace stinkytofu::test;
 // Fixture
 // ---------------------------------------------------------------------------
 
-class InsertPhiTest : public ::testing::Test
-{
-protected:
+class InsertPhiTest : public ::testing::Test {
+   protected:
     GfxArchID arch = GfxArchID::Gfx1250;
 };
 
@@ -57,17 +56,16 @@ protected:
 //       D   E  (both use v0)
 // =============================================================================
 
-TEST_F(InsertPhiTest, PassThroughJoinWithMultiplePredecessors)
-{
+TEST_F(InsertPhiTest, PassThroughJoinWithMultiplePredecessors) {
     Function func("pass_through_join");
     setFunctionArch(func, arch);
     BasicBlock* entry = func.createBasicBlock("entry");
-    BasicBlock* A     = func.createBasicBlock("A");
-    BasicBlock* F     = func.createBasicBlock("F");
-    BasicBlock* B     = func.createBasicBlock("B");
-    BasicBlock* C     = func.createBasicBlock("C");
-    BasicBlock* D     = func.createBasicBlock("D");
-    BasicBlock* E     = func.createBasicBlock("E");
+    BasicBlock* A = func.createBasicBlock("A");
+    BasicBlock* F = func.createBasicBlock("F");
+    BasicBlock* B = func.createBasicBlock("B");
+    BasicBlock* C = func.createBasicBlock("C");
+    BasicBlock* D = func.createBasicBlock("D");
+    BasicBlock* E = func.createBasicBlock("E");
 
     func.addEdge(entry, A);
     func.addEdge(entry, F);
@@ -82,9 +80,9 @@ TEST_F(InsertPhiTest, PassThroughJoinWithMultiplePredecessors)
     StinkyInstruction* aAdd = createVAddInBlock(A, arch, 0, 1, 2);
     StinkyInstruction* bAdd = createVAddInBlock(B, arch, 0, 3, 4);
     // F: no v0 definition (pass-through from Entry, which has no v0 either)
-    createVAddInBlock(F, arch, 5, 6, 7); // v5 = v6 + v7
+    createVAddInBlock(F, arch, 5, 6, 7);  // v5 = v6 + v7
     // C: pass-through (no v0 use or def)
-    createVAddInBlock(C, arch, 10, 11, 12); // v10 = v11 + v12
+    createVAddInBlock(C, arch, 10, 11, 12);  // v10 = v11 + v12
     // D and E both use v0
     createVAddInBlock(D, arch, 20, 0, 21);
     createVAddInBlock(E, arch, 30, 0, 31);
@@ -118,25 +116,17 @@ TEST_F(InsertPhiTest, PassThroughJoinWithMultiplePredecessors)
     const std::vector<BasicBlock*>& cPreds = C->getPredecessors();
     ASSERT_EQ(cPreds.size(), 3u);
 
-    for(size_t i = 0; i < cPreds.size(); ++i)
-    {
-        if(cPreds[i] == A)
-        {
+    for (size_t i = 0; i < cPreds.size(); ++i) {
+        if (cPreds[i] == A) {
             EXPECT_EQ(phi->getSrcReg(i), aAdd->getDestReg(0))
                 << "PHI src for A should match A's v_add dest (v0)";
-        }
-        else if(cPreds[i] == F)
-        {
+        } else if (cPreds[i] == F) {
             EXPECT_FALSE(phi->getSrcReg(i).isRegister())
                 << "PHI src for F should be non-register (v0 never defined on this path)";
-        }
-        else if(cPreds[i] == B)
-        {
+        } else if (cPreds[i] == B) {
             EXPECT_EQ(phi->getSrcReg(i), bAdd->getDestReg(0))
                 << "PHI src for B should match B's v_add dest (v0)";
-        }
-        else
-        {
+        } else {
             FAIL() << "Unexpected predecessor of C";
         }
     }
@@ -149,9 +139,8 @@ TEST_F(InsertPhiTest, PassThroughJoinWithMultiplePredecessors)
 // DF(G) = {H}, so a second PHI is placed at H by the iterated DF worklist.
 // =============================================================================
 
-TEST_F(InsertPhiTest, IteratedDominanceFrontier)
-{
-    Function      func("iterated_df");
+TEST_F(InsertPhiTest, IteratedDominanceFrontier) {
+    Function func("iterated_df");
     IteratedDFCfg cfg = buildIteratedDFCfg(func, arch);
 
     insertPhiInstructions(func, false);
@@ -186,9 +175,8 @@ TEST_F(InsertPhiTest, IteratedDominanceFrontier)
 // 2. Nested Loops — PHIs at both loop headers
 // =============================================================================
 
-TEST_F(InsertPhiTest, NestedLoops_DualPhiHeaders)
-{
-    Function      func("nested_loops");
+TEST_F(InsertPhiTest, NestedLoops_DualPhiHeaders) {
+    Function func("nested_loops");
     NestedLoopCfg cfg = buildNestedLoopCfg(func, arch);
 
     insertPhiInstructions(func, false);
@@ -218,9 +206,8 @@ TEST_F(InsertPhiTest, NestedLoops_DualPhiHeaders)
 // 3. Self-loop at a join point — self-referential PHI operand
 // =============================================================================
 
-TEST_F(InsertPhiTest, SelfLoopAtJoinPoint)
-{
-    Function        func("self_loop_join");
+TEST_F(InsertPhiTest, SelfLoopAtJoinPoint) {
+    Function func("self_loop_join");
     SelfLoopJoinCfg cfg = buildSelfLoopJoinCfg(func, arch);
 
     insertPhiInstructions(func, false);
@@ -242,9 +229,8 @@ TEST_F(InsertPhiTest, SelfLoopAtJoinPoint)
 // 4. Irreducible CFG — mutually recursive PHIs
 // =============================================================================
 
-TEST_F(InsertPhiTest, IrreducibleCFG_MutuallyRecursivePhis)
-{
-    Function       func("irreducible");
+TEST_F(InsertPhiTest, IrreducibleCFG_MutuallyRecursivePhis) {
+    Function func("irreducible");
     IrreducibleCfg cfg = buildIrreducibleCfg(func, arch);
 
     insertPhiInstructions(func, false);
@@ -278,9 +264,8 @@ TEST_F(InsertPhiTest, IrreducibleCFG_MutuallyRecursivePhis)
 // 5. Multiple registers at the same join point
 // =============================================================================
 
-TEST_F(InsertPhiTest, MultipleRegistersAtSameJoin)
-{
-    Function        func("multi_reg_join");
+TEST_F(InsertPhiTest, MultipleRegistersAtSameJoin) {
+    Function func("multi_reg_join");
     MultiRegJoinCfg cfg = buildMultiRegJoinCfg(func, arch);
 
     insertPhiInstructions(func, false);
@@ -308,9 +293,8 @@ TEST_F(InsertPhiTest, MultipleRegistersAtSameJoin)
 // 6. Chain of diamonds — 3 sequential merge points
 // =============================================================================
 
-TEST_F(InsertPhiTest, ChainOfDiamonds)
-{
-    Function           func("chain_diamonds");
+TEST_F(InsertPhiTest, ChainOfDiamonds) {
+    Function func("chain_diamonds");
     ChainOfDiamondsCfg cfg = buildChainOfDiamondsCfg(func, arch);
 
     insertPhiInstructions(func, false);
@@ -344,9 +328,8 @@ TEST_F(InsertPhiTest, ChainOfDiamonds)
 // 7. Dead register — semi-pruned SSA should skip v0 (never read)
 // =============================================================================
 
-TEST_F(InsertPhiTest, DeadRegister_SemiPrunedSSA)
-{
-    Function   func("dead_reg");
+TEST_F(InsertPhiTest, DeadRegister_SemiPrunedSSA) {
+    Function func("dead_reg");
     DeadRegCfg cfg = buildDeadRegCfg(func, arch);
 
     insertPhiInstructions(func, false);
@@ -359,9 +342,8 @@ TEST_F(InsertPhiTest, DeadRegister_SemiPrunedSSA)
 // 8. Re-definition within the same block — lastDef shadows first
 // =============================================================================
 
-TEST_F(InsertPhiTest, RedefinitionInSameBlock)
-{
-    Function          func("redef_same_block");
+TEST_F(InsertPhiTest, RedefinitionInSameBlock) {
+    Function func("redef_same_block");
     RedefSameBlockCfg cfg = buildRedefSameBlockCfg(func, arch);
 
     insertPhiInstructions(func, false);
@@ -386,9 +368,8 @@ TEST_F(InsertPhiTest, RedefinitionInSameBlock)
 // PHIs should appear only for v0 (at G and H); v1, v2, v3 are unchanged.
 // =============================================================================
 
-TEST_F(InsertPhiTest, WideRegPartialSubregRedefine)
-{
-    Function               func("wide_partial_redef");
+TEST_F(InsertPhiTest, WideRegPartialSubregRedefine) {
+    Function func("wide_partial_redef");
     WideRegPartialRedefCfg cfg = buildWideRegPartialRedefCfg(func, arch);
 
     insertPhiInstructions(func, false);

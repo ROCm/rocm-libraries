@@ -48,4 +48,3 @@ If you're new to StinkyTofu:
 
 - [stinkytofu-opt Tool](../../tools/stinkytofu-opt/README.md) - Command-line interface for IR optimization
 - [Developer Guide](../developer-guide/) - For contributing to the library
-

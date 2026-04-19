@@ -21,6 +21,10 @@
  *
  * ************************************************************************ */
 
+#include <gtest/gtest.h>
+
+#include <memory>
+
 #include "TestHelpers.hpp"
 #include "stinkytofu/bindings/python/LogicalModule.hpp"
 #include "stinkytofu/core/PassManager.hpp"
@@ -28,8 +32,6 @@
 #include "stinkytofu/ir/logical/LogicalToFunctionConverter.hpp"
 #include "stinkytofu/transforms/logical/CompositeInstructionLoweringPass.hpp"
 #include "stinkytofu/transforms/logical/ToStinkyAsmPass.hpp"
-#include <gtest/gtest.h>
-#include <memory>
 
 using namespace stinkytofu;
 using namespace stinkytofu::test;
@@ -43,13 +45,11 @@ using namespace stinkytofu::test;
  * 3. Running lowering passes that delete/replace instructions
  * 4. Destructing both PyLogicalModule and Function
  */
-class LogicalModuleOwnershipTest : public ::testing::Test
-{
-protected:
+class LogicalModuleOwnershipTest : public ::testing::Test {
+   protected:
     StinkyRegister v0, v1, v2, v3;
 
-    void SetUp() override
-    {
+    void SetUp() override {
         v0 = vgpr(0);
         v1 = vgpr(1);
         v2 = vgpr(2);
@@ -57,8 +57,7 @@ protected:
     }
 };
 
-TEST_F(LogicalModuleOwnershipTest, SharedPtrToRawPointerConversion)
-{
+TEST_F(LogicalModuleOwnershipTest, SharedPtrToRawPointerConversion) {
     // Step 1: Create PyLogicalModule with shared_ptr (simulating Python usage)
     auto module = std::make_shared<PyLogicalModule>("test_ownership");
 
@@ -69,26 +68,26 @@ TEST_F(LogicalModuleOwnershipTest, SharedPtrToRawPointerConversion)
 
     EXPECT_EQ(module->size(), 2);
 
-    // Step 2: Convert to PyLogicalFunction (external Function*; ~PyLogicalFunction detaches ownedExternally)
-    Function                   func("kernel");
-    PyLogicalFunction          pyFunc(&func);
+    // Step 2: Convert to PyLogicalFunction (external Function*; ~PyLogicalFunction detaches
+    // ownedExternally)
+    Function func("kernel");
+    PyLogicalFunction pyFunc(&func);
     LogicalToFunctionConverter converter(GfxArchID::Gfx942);
     converter.convertWithAutoBlocks(module.get(), pyFunc);
 
     // Verify instructions were added to Function.
     size_t instCount = 0;
-    for(BasicBlock& bb : func)
-    {
+    for (BasicBlock& bb : func) {
         instCount += bb.size();
     }
     EXPECT_EQ(instCount, 2) << "Function should have 2 instructions";
 
     // When pyFunc is destroyed it detaches ownedExternally IRs so the list does not delete them.
-    // Note: Do not run lowering passes here; see LogicalModuleSurvivesAfterConversion for full pipeline.
+    // Note: Do not run lowering passes here; see LogicalModuleSurvivesAfterConversion for full
+    // pipeline.
 }
 
-TEST_F(LogicalModuleOwnershipTest, LogicalModuleSurvivesAfterConversion)
-{
+TEST_F(LogicalModuleOwnershipTest, LogicalModuleSurvivesAfterConversion) {
     // Create PyLogicalModule (Python-owned instructions)
     auto module = std::make_shared<PyLogicalModule>("test_survival");
     module->add(makeLogicalInstructionShared(VAddF32(v0, v1, v2)));
@@ -97,21 +96,21 @@ TEST_F(LogicalModuleOwnershipTest, LogicalModuleSurvivesAfterConversion)
     EXPECT_EQ(module->size(), 2);
 
     {
-        Function                   func("kernel");
-        PyLogicalFunction          pyFunc(&func);
-        PassManager                pm;
+        Function func("kernel");
+        PyLogicalFunction pyFunc(&func);
+        PassManager pm;
         LogicalToFunctionConverter converter(GfxArchID::Gfx942);
         converter.convert(module.get(), pyFunc);
 
         // Verify conversion
         size_t count = 0;
-        for(BasicBlock& bb : func)
-        {
+        for (BasicBlock& bb : func) {
             count += bb.size();
         }
         EXPECT_EQ(count, 2);
 
-        // ~PyLogicalFunction detaches ownedExternally IRs. Caller owns func; shared_ptrs keep instructions alive.
+        // ~PyLogicalFunction detaches ownedExternally IRs. Caller owns func; shared_ptrs keep
+        // instructions alive.
     }
 
     // PyLogicalModule should still be valid
@@ -120,12 +119,11 @@ TEST_F(LogicalModuleOwnershipTest, LogicalModuleSurvivesAfterConversion)
     EXPECT_NE(module->getInstructions()[1], nullptr);
 }
 
-TEST_F(LogicalModuleOwnershipTest, NoDoubleFreeWithCompositeInstruction)
-{
+TEST_F(LogicalModuleOwnershipTest, NoDoubleFreeWithCompositeInstruction) {
     // Test with composite instruction that gets expanded
     auto module = std::make_shared<PyLogicalModule>("test_composite");
 
-    StinkyRegister dst  = vgpr(0, 2);
+    StinkyRegister dst = vgpr(0, 2);
     StinkyRegister src0 = vgpr(2, 2);
     StinkyRegister src1 = vgpr(4, 2);
 
@@ -135,20 +133,20 @@ TEST_F(LogicalModuleOwnershipTest, NoDoubleFreeWithCompositeInstruction)
 
     EXPECT_EQ(module->size(), 2);
 
-    Function                   func("kernel");
-    PyLogicalFunction          pyFunc(&func);
-    PassManager                pm;
+    Function func("kernel");
+    PyLogicalFunction pyFunc(&func);
+    PassManager pm;
     LogicalToFunctionConverter converter(GfxArchID::Gfx942);
     converter.convertWithAutoBlocks(module.get(), pyFunc);
 
     GemmTileConfig config;
-    config.arch     = {9, 4, 2};
-    config.TileA0   = 16;
-    config.TileB0   = 16;
-    config.TileM0   = 16;
-    config.NumGRA   = 4;
-    config.NumGRB   = 4;
-    config.NumGRM   = 4;
+    config.arch = {9, 4, 2};
+    config.TileA0 = 16;
+    config.TileB0 = 16;
+    config.TileM0 = 16;
+    config.NumGRA = 4;
+    config.NumGRB = 4;
+    config.NumGRM = 4;
     config.NumWaves = 1;
     pm.setGemmTileConfig(config);
 

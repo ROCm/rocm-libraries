@@ -27,61 +27,53 @@
 #include <fstream>
 #include <string>
 
-namespace
-{
-    std::string pathWithSuffix(const std::string& path, const std::string& newExtWithDot)
-    {
-        const auto dot   = path.find_last_of('.');
-        const auto slash = path.find_last_of("/\\");
-        if(dot != std::string::npos && (slash == std::string::npos || dot > slash))
-            return path.substr(0, dot) + newExtWithDot;
-        return path + newExtWithDot;
+namespace {
+std::string pathWithSuffix(const std::string& path, const std::string& newExtWithDot) {
+    const auto dot = path.find_last_of('.');
+    const auto slash = path.find_last_of("/\\");
+    if (dot != std::string::npos && (slash == std::string::npos || dot > slash))
+        return path.substr(0, dot) + newExtWithDot;
+    return path + newExtWithDot;
+}
+}  // namespace
+
+namespace stinkytofu {
+char DumpStinkyFunctionPass::ID = 0;
+
+void DumpStinkyFunctionPass::run(Function& func, PassContext&) {
+    if (!config_.stirPath.empty()) {
+        std::ofstream out(config_.stirPath, std::ios::out | std::ios::trunc);
+
+        // use assert
+        assert(out && "[DumpStinkyFunctionPass] Failed to open stirPath");
+        AsmPrinter printer(out, config_.printerOptions);
+        printer.print(func);
     }
-} // namespace
 
-namespace stinkytofu
-{
-    char DumpStinkyFunctionPass::ID = 0;
-
-    void DumpStinkyFunctionPass::run(Function& func, PassContext&)
-    {
-        if(!config_.stirPath.empty())
-        {
-            std::ofstream out(config_.stirPath, std::ios::out | std::ios::trunc);
-
-            // use assert
-            assert(out && "[DumpStinkyFunctionPass] Failed to open stirPath");
-            AsmPrinter printer(out, config_.printerOptions);
-            printer.print(func);
+    if (config_.emitAsm) {
+        std::string asmPath = config_.asmPath;
+        if (asmPath.empty()) {
+            if (!config_.stirPath.empty())
+                asmPath = pathWithSuffix(config_.stirPath, ".s");
+            else
+                asmPath = func.getName().empty() ? "dump.s" : func.getName() + ".s";
         }
 
-        if(config_.emitAsm)
-        {
-            std::string asmPath = config_.asmPath;
-            if(asmPath.empty())
-            {
-                if(!config_.stirPath.empty())
-                    asmPath = pathWithSuffix(config_.stirPath, ".s");
-                else
-                    asmPath = func.getName().empty() ? "dump.s" : func.getName() + ".s";
-            }
+        std::ofstream out(asmPath, std::ios::out | std::ios::trunc);
+        assert(out && "[DumpStinkyFunctionPass] Failed to open asmPath");
 
-            std::ofstream out(asmPath, std::ios::out | std::ios::trunc);
-            assert(out && "[DumpStinkyFunctionPass] Failed to open asmPath");
+        config_.emitterOptions.emitComments = true;
+        config_.emitterOptions.emitCycleInfo = false;
+        config_.emitterOptions.indent = 0;
+        config_.emitterOptions.emitBlankLines = false;
+        config_.emitterOptions.useSymbolicNames = false;  // Enable symbolic register names
 
-            config_.emitterOptions.emitComments     = true;
-            config_.emitterOptions.emitCycleInfo    = false;
-            config_.emitterOptions.indent           = 0;
-            config_.emitterOptions.emitBlankLines   = false;
-            config_.emitterOptions.useSymbolicNames = false; // Enable symbolic register names
-
-            StinkyAsmEmitter emitter(config_.emitterOptions);
-            emitter.emit(out, func);
-        }
+        StinkyAsmEmitter emitter(config_.emitterOptions);
+        emitter.emit(out, func);
     }
+}
 
-    std::unique_ptr<Pass> createDumpStinkyFunctionPass(DumpStinkyFunctionPassConfig config)
-    {
-        return std::make_unique<DumpStinkyFunctionPass>(std::move(config));
-    }
-} // namespace stinkytofu
+std::unique_ptr<Pass> createDumpStinkyFunctionPass(DumpStinkyFunctionPassConfig config) {
+    return std::make_unique<DumpStinkyFunctionPass>(std::move(config));
+}
+}  // namespace stinkytofu

@@ -31,62 +31,54 @@
  * (e.g. LSAN_OPTIONS=detect_leaks=1).
  */
 
-#include "stinkytofu/core/Function.hpp"
 #include <gtest/gtest.h>
+
 #include <string>
+
+#include "stinkytofu/core/Function.hpp"
 
 using namespace stinkytofu;
 
-namespace
-{
-    // Test-only IR type to verify that IR instances are deleted when the owning
-    // Function (and its BasicBlocks' IR lists) are destroyed.
-    class CountedTestIR : public IRBase
-    {
-    public:
-        static int s_alive;
+namespace {
+// Test-only IR type to verify that IR instances are deleted when the owning
+// Function (and its BasicBlocks' IR lists) are destroyed.
+class CountedTestIR : public IRBase {
+   public:
+    static int s_alive;
 
-        CountedTestIR()
-            : IRBase(IRType::LogicalIR)
-        {
-            ++s_alive;
-        }
+    CountedTestIR() : IRBase(IRType::LogicalIR) {
+        ++s_alive;
+    }
 
-        ~CountedTestIR() override
-        {
-            --s_alive;
-        }
+    ~CountedTestIR() override {
+        --s_alive;
+    }
 
-        void dump(std::ostream& out) const override
-        {
-            out << "CountedTestIR";
-        }
-    };
+    void dump(std::ostream& out) const override {
+        out << "CountedTestIR";
+    }
+};
 
-    int CountedTestIR::s_alive = 0;
-} // namespace
+int CountedTestIR::s_alive = 0;
+}  // namespace
 
-class FunctionDestructionTest : public ::testing::Test
-{
-protected:
-    void SetUp() override
-    {
+class FunctionDestructionTest : public ::testing::Test {
+   protected:
+    void SetUp() override {
         CountedTestIR::s_alive = 0;
     }
 
-    void TearDown() override
-    {
+    void TearDown() override {
         EXPECT_EQ(CountedTestIR::s_alive, 0)
             << "All CountedTestIR instances should be destroyed after each test";
     }
 };
 
-TEST_F(FunctionDestructionTest, DestructingFunctionDeletesAllIRs)
-{
+TEST_F(FunctionDestructionTest, DestructingFunctionDeletesAllIRs) {
     EXPECT_EQ(CountedTestIR::s_alive, 0);
 
     {
-        Function    func("kernel");
+        Function func("kernel");
         BasicBlock* bb = func.createBasicBlock("entry");
         ASSERT_NE(bb, nullptr);
 
@@ -101,12 +93,11 @@ TEST_F(FunctionDestructionTest, DestructingFunctionDeletesAllIRs)
     EXPECT_EQ(CountedTestIR::s_alive, 0);
 }
 
-TEST_F(FunctionDestructionTest, DestructingFunctionDeletesAllBasicBlocksAndIRs)
-{
+TEST_F(FunctionDestructionTest, DestructingFunctionDeletesAllBasicBlocksAndIRs) {
     EXPECT_EQ(CountedTestIR::s_alive, 0);
 
     {
-        Function    func("kernel");
+        Function func("kernel");
         BasicBlock* bb1 = func.createBasicBlock("bb1");
         BasicBlock* bb2 = func.createBasicBlock("bb2");
         BasicBlock* bb3 = func.createBasicBlock("bb3");
@@ -127,12 +118,11 @@ TEST_F(FunctionDestructionTest, DestructingFunctionDeletesAllBasicBlocksAndIRs)
     EXPECT_EQ(CountedTestIR::s_alive, 0);
 }
 
-TEST_F(FunctionDestructionTest, ClearThenDestructLeavesNoIRs)
-{
+TEST_F(FunctionDestructionTest, ClearThenDestructLeavesNoIRs) {
     EXPECT_EQ(CountedTestIR::s_alive, 0);
 
     {
-        Function    func("kernel");
+        Function func("kernel");
         BasicBlock* bb = func.createBasicBlock("entry");
         bb->appendIR(IRBase::createIR<CountedTestIR>());
         bb->appendIR(IRBase::createIR<CountedTestIR>());
@@ -146,16 +136,12 @@ TEST_F(FunctionDestructionTest, ClearThenDestructLeavesNoIRs)
     EXPECT_EQ(CountedTestIR::s_alive, 0);
 }
 
-TEST_F(FunctionDestructionTest, RepeatedCreateAndDestroyNoLeak)
-{
-    for(int iter = 0; iter < 3; ++iter)
-    {
+TEST_F(FunctionDestructionTest, RepeatedCreateAndDestroyNoLeak) {
+    for (int iter = 0; iter < 3; ++iter) {
         Function func("repeated");
-        for(int b = 0; b < 5; ++b)
-        {
+        for (int b = 0; b < 5; ++b) {
             BasicBlock* bb = func.createBasicBlock("bb" + std::to_string(b));
-            for(int i = 0; i < 3; ++i)
-            {
+            for (int i = 0; i < 3; ++i) {
                 bb->appendIR(IRBase::createIR<CountedTestIR>());
             }
         }

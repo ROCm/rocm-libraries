@@ -22,6 +22,7 @@
  * ************************************************************************ */
 
 #include <gtest/gtest.h>
+
 #include <sstream>
 #include <string>
 
@@ -33,22 +34,20 @@
 using namespace stinkytofu;
 
 // Helper class for building test IR
-class AsmEmitterTest : public ::testing::Test
-{
-protected:
-    void SetUp() override
-    {
-        arch               = getGfxArchID(9, 4, 2); // GFX942
+class AsmEmitterTest : public ::testing::Test {
+   protected:
+    void SetUp() override {
+        arch = getGfxArchID(9, 4, 2);  // GFX942
         gemmConfig.arch[0] = 9;
         gemmConfig.arch[1] = 4;
         gemmConfig.arch[2] = 2;
 
-        gemmConfig.TileA0   = 0;
-        gemmConfig.TileB0   = 0;
-        gemmConfig.TileM0   = 0;
-        gemmConfig.NumGRA   = 0;
-        gemmConfig.NumGRB   = 0;
-        gemmConfig.NumGRM   = 0;
+        gemmConfig.TileA0 = 0;
+        gemmConfig.TileB0 = 0;
+        gemmConfig.TileM0 = 0;
+        gemmConfig.NumGRA = 0;
+        gemmConfig.NumGRB = 0;
+        gemmConfig.NumGRM = 0;
         gemmConfig.NumWaves = 0;
 
         passCtx.setGemmTileConfig(gemmConfig);
@@ -58,24 +57,22 @@ protected:
         irBuilder = std::make_unique<AsmIRBuilder>(*bb, arch);
     }
 
-    StinkyInstruction* createInstruction(const std::string& mnemonic)
-    {
-        auto              opcode     = getMnemonicToIsaOpcode(mnemonic, arch);
+    StinkyInstruction* createInstruction(const std::string& mnemonic) {
+        auto opcode = getMnemonicToIsaOpcode(mnemonic, arch);
         const HwInstDesc* hwInstDesc = getMCIDByIsaOp(opcode, arch);
 
-        if(!hwInstDesc)
-        {
+        if (!hwInstDesc) {
             return nullptr;
         }
 
         return irBuilder->create(hwInstDesc);
     }
 
-    Function                             func;
-    BasicBlock*                          bb = nullptr;
-    PassContext                          passCtx;
-    GemmTileConfig                       gemmConfig;
-    GfxArchID                            arch;
+    Function func;
+    BasicBlock* bb = nullptr;
+    PassContext passCtx;
+    GemmTileConfig gemmConfig;
+    GfxArchID arch;
     std::unique_ptr<AsmIRBuilder> irBuilder;
 };
 
@@ -83,51 +80,48 @@ protected:
 // Basic Emission Tests
 // ============================================================================
 
-TEST_F(AsmEmitterTest, EmitSingleInstruction)
-{
+TEST_F(AsmEmitterTest, EmitSingleInstruction) {
     // Create a simple ds_read_b128 instruction
     StinkyInstruction* inst = createInstruction("ds_read_b128");
     ASSERT_NE(inst, nullptr);
 
     // Add destination and source registers
-    inst->addDestReg(StinkyRegister("v", 0, 4)); // v[0:3]
-    inst->addSrcReg(StinkyRegister("v", 40, 1)); // v[40]
+    inst->addDestReg(StinkyRegister("v", 0, 4));  // v[0:3]
+    inst->addSrcReg(StinkyRegister("v", 40, 1));  // v[40]
 
-    inst->issueCycles   = 4;
+    inst->issueCycles = 4;
     inst->latencyCycles = 52;
 
     // Emit with default options (emitCycleInfo = false by default)
     StinkyAsmEmitter emitter;
-    std::string      assembly = emitter.emit(*inst);
+    std::string assembly = emitter.emit(*inst);
 
     // Compare exact assembly output (no cycle info with default options)
     std::string expected = "    ds_read_b128 v[0:3], v40\n";
     EXPECT_EQ(assembly, expected);
 }
 
-TEST_F(AsmEmitterTest, EmitWithCycleInfo)
-{
+TEST_F(AsmEmitterTest, EmitWithCycleInfo) {
     StinkyInstruction* inst = createInstruction("ds_read_b128");
     ASSERT_NE(inst, nullptr);
 
     inst->addDestReg(StinkyRegister("v", 0, 4));
     inst->addSrcReg(StinkyRegister("v", 40, 1));
-    inst->issueCycles   = 4;
+    inst->issueCycles = 4;
     inst->latencyCycles = 52;
 
     AsmEmitterOptions options;
-    options.emitCycleInfo      = true;
-    options.commentAlignColumn = 0; // Disable comment alignment for this test
+    options.emitCycleInfo = true;
+    options.commentAlignColumn = 0;  // Disable comment alignment for this test
 
     StinkyAsmEmitter emitter(options);
-    std::string      assembly = emitter.emit(*inst);
+    std::string assembly = emitter.emit(*inst);
 
     std::string expected = "    ds_read_b128 v[0:3], v40 // issue=4 latency=52\n";
     EXPECT_EQ(assembly, expected);
 }
 
-TEST_F(AsmEmitterTest, EmitWithoutCycleInfo)
-{
+TEST_F(AsmEmitterTest, EmitWithoutCycleInfo) {
     StinkyInstruction* inst = createInstruction("ds_read_b128");
     ASSERT_NE(inst, nullptr);
 
@@ -138,7 +132,7 @@ TEST_F(AsmEmitterTest, EmitWithoutCycleInfo)
     options.emitCycleInfo = false;
 
     StinkyAsmEmitter emitter(options);
-    std::string      assembly = emitter.emit(*inst);
+    std::string assembly = emitter.emit(*inst);
 
     std::string expected = "    ds_read_b128 v[0:3], v40\n";
     EXPECT_EQ(assembly, expected);
@@ -148,90 +142,85 @@ TEST_F(AsmEmitterTest, EmitWithoutCycleInfo)
 // Register Format Tests
 // ============================================================================
 
-TEST_F(AsmEmitterTest, EmitVectorRegisterRange)
-{
+TEST_F(AsmEmitterTest, EmitVectorRegisterRange) {
     StinkyInstruction* inst = createInstruction("ds_read_b128");
     ASSERT_NE(inst, nullptr);
 
-    inst->addDestReg(StinkyRegister("v", 10, 4)); // v[10:13]
+    inst->addDestReg(StinkyRegister("v", 10, 4));  // v[10:13]
 
     AsmEmitterOptions options;
     options.emitCycleInfo = false;
 
     StinkyAsmEmitter emitter(options);
-    std::string      assembly = emitter.emit(*inst);
+    std::string assembly = emitter.emit(*inst);
 
     std::string expected = "    ds_read_b128 v[10:13]\n";
     EXPECT_EQ(assembly, expected);
 }
 
-TEST_F(AsmEmitterTest, EmitSingleVectorRegister)
-{
+TEST_F(AsmEmitterTest, EmitSingleVectorRegister) {
     StinkyInstruction* inst = createInstruction("v_mov_b32");
     ASSERT_NE(inst, nullptr);
 
-    inst->addDestReg(StinkyRegister("v", 5, 1)); // v5
-    inst->addSrcReg(StinkyRegister("v", 3, 1)); // v3
+    inst->addDestReg(StinkyRegister("v", 5, 1));  // v5
+    inst->addSrcReg(StinkyRegister("v", 3, 1));   // v3
 
     AsmEmitterOptions options;
     options.emitCycleInfo = false;
 
     StinkyAsmEmitter emitter(options);
-    std::string      assembly = emitter.emit(*inst);
+    std::string assembly = emitter.emit(*inst);
 
     std::string expected = "    v_mov_b32 v5, v3\n";
     EXPECT_EQ(assembly, expected);
 }
 
-TEST_F(AsmEmitterTest, EmitAccumulatorRegister)
-{
+TEST_F(AsmEmitterTest, EmitAccumulatorRegister) {
     StinkyInstruction* inst = createInstruction("v_mfma_f32_16x16x16_f16");
     ASSERT_NE(inst, nullptr);
 
-    inst->addDestReg(StinkyRegister("acc", 0, 16)); // acc[0:15]
-    inst->addSrcReg(StinkyRegister("v", 6, 2)); // v[6:7]
-    inst->addSrcReg(StinkyRegister("v", 22, 2)); // v[22:23]
-    inst->addSrcReg(StinkyRegister("acc", 0, 16)); // acc[0:15]
+    inst->addDestReg(StinkyRegister("acc", 0, 16));  // acc[0:15]
+    inst->addSrcReg(StinkyRegister("v", 6, 2));      // v[6:7]
+    inst->addSrcReg(StinkyRegister("v", 22, 2));     // v[22:23]
+    inst->addSrcReg(StinkyRegister("acc", 0, 16));   // acc[0:15]
 
     AsmEmitterOptions options;
     options.emitCycleInfo = false;
 
     StinkyAsmEmitter emitter(options);
-    std::string      assembly = emitter.emit(*inst);
+    std::string assembly = emitter.emit(*inst);
 
     std::string expected = "    v_mfma_f32_16x16x16_f16 acc[0:15], v[6:7], v[22:23], acc[0:15]\n";
     EXPECT_EQ(assembly, expected);
 }
 
-TEST_F(AsmEmitterTest, EmitScalarRegister)
-{
+TEST_F(AsmEmitterTest, EmitScalarRegister) {
     StinkyInstruction* inst = createInstruction("s_add_i32");
     ASSERT_NE(inst, nullptr);
 
-    inst->addDestReg(StinkyRegister("s", 10, 1)); // s10
+    inst->addDestReg(StinkyRegister("s", 10, 1));  // s10
 
     AsmEmitterOptions options;
     options.emitCycleInfo = false;
 
     StinkyAsmEmitter emitter(options);
-    std::string      assembly = emitter.emit(*inst);
+    std::string assembly = emitter.emit(*inst);
 
     std::string expected = "    s_add_i32 s10\n";
     EXPECT_EQ(assembly, expected);
 }
 
-TEST_F(AsmEmitterTest, EmitLiteralInt)
-{
+TEST_F(AsmEmitterTest, EmitLiteralInt) {
     StinkyInstruction* inst = createInstruction("s_waitcnt");
     ASSERT_NE(inst, nullptr);
 
-    inst->addSrcReg(StinkyRegister(0)); // literal int 0
+    inst->addSrcReg(StinkyRegister(0));  // literal int 0
 
     AsmEmitterOptions options;
     options.emitCycleInfo = false;
 
     StinkyAsmEmitter emitter(options);
-    std::string      assembly = emitter.emit(*inst);
+    std::string assembly = emitter.emit(*inst);
 
     std::string expected = "    s_waitcnt 0\n";
     EXPECT_EQ(assembly, expected);
@@ -241,8 +230,7 @@ TEST_F(AsmEmitterTest, EmitLiteralInt)
 // Label Tests
 // ============================================================================
 
-TEST_F(AsmEmitterTest, EmitLabel)
-{
+TEST_F(AsmEmitterTest, EmitLabel) {
     StinkyInstruction* label = irBuilder->createLabel("loop_start");
     ASSERT_NE(label, nullptr);
 
@@ -250,7 +238,7 @@ TEST_F(AsmEmitterTest, EmitLabel)
     options.emitCycleInfo = false;
 
     StinkyAsmEmitter emitter(options);
-    std::string      assembly = emitter.emit(*label);
+    std::string assembly = emitter.emit(*label);
 
     // Label should not be indented and should end with colon
     std::string expected = "loop_start:\n";
@@ -261,8 +249,7 @@ TEST_F(AsmEmitterTest, EmitLabel)
 // IRList Emission Tests
 // ============================================================================
 
-TEST_F(AsmEmitterTest, EmitIRList)
-{
+TEST_F(AsmEmitterTest, EmitIRList) {
     // Create a label
     irBuilder->createLabel("loop_start");
 
@@ -280,31 +267,31 @@ TEST_F(AsmEmitterTest, EmitIRList)
     ASSERT_EQ(bb->size(), 3);
 
     AsmEmitterOptions options;
-    options.emitComments  = true;
+    options.emitComments = true;
     options.emitCycleInfo = false;
 
     StinkyAsmEmitter emitter(options);
-    std::string      assembly = emitter.emit(func);
+    std::string assembly = emitter.emit(func);
 
-    std::string expected = "loop_start:\n"
-                           "    ds_read_b128 v[0:3], v40\n"
-                           "    ds_read_b128 v[4:7], v41\n";
+    std::string expected =
+        "loop_start:\n"
+        "    ds_read_b128 v[0:3], v40\n"
+        "    ds_read_b128 v[4:7], v41\n";
     EXPECT_EQ(assembly, expected);
 }
 
-TEST_F(AsmEmitterTest, EmitIRListWithoutComments)
-{
+TEST_F(AsmEmitterTest, EmitIRListWithoutComments) {
     StinkyInstruction* inst = createInstruction("ds_read_b128");
     ASSERT_NE(inst, nullptr);
     inst->addDestReg(StinkyRegister("v", 0, 4));
     inst->addSrcReg(StinkyRegister("v", 40, 1));
 
     AsmEmitterOptions options;
-    options.emitComments  = false;
+    options.emitComments = false;
     options.emitCycleInfo = false;
 
     StinkyAsmEmitter emitter(options);
-    std::string      assembly = emitter.emit(func);
+    std::string assembly = emitter.emit(func);
 
     std::string expected = "    ds_read_b128 v[0:3], v40\n";
     EXPECT_EQ(assembly, expected);
@@ -314,18 +301,17 @@ TEST_F(AsmEmitterTest, EmitIRListWithoutComments)
 // Indentation Tests
 // ============================================================================
 
-TEST_F(AsmEmitterTest, CustomIndentation)
-{
+TEST_F(AsmEmitterTest, CustomIndentation) {
     StinkyInstruction* inst = createInstruction("ds_read_b128");
     ASSERT_NE(inst, nullptr);
     inst->addDestReg(StinkyRegister("v", 0, 4));
 
     AsmEmitterOptions options;
-    options.indent        = 8;
+    options.indent = 8;
     options.emitCycleInfo = false;
 
     StinkyAsmEmitter emitter(options);
-    std::string      assembly = emitter.emit(*inst);
+    std::string assembly = emitter.emit(*inst);
 
     std::string expected = "        ds_read_b128 v[0:3]\n";
     EXPECT_EQ(assembly, expected);
@@ -335,17 +321,16 @@ TEST_F(AsmEmitterTest, CustomIndentation)
 // Stream Emission Tests
 // ============================================================================
 
-TEST_F(AsmEmitterTest, EmitToStream)
-{
+TEST_F(AsmEmitterTest, EmitToStream) {
     StinkyInstruction* inst = createInstruction("ds_read_b128");
     ASSERT_NE(inst, nullptr);
     inst->addDestReg(StinkyRegister("v", 0, 4));
     inst->addSrcReg(StinkyRegister("v", 40, 1));
-    inst->issueCycles   = 4;
+    inst->issueCycles = 4;
     inst->latencyCycles = 52;
 
     std::ostringstream oss;
-    StinkyAsmEmitter   emitter;
+    StinkyAsmEmitter emitter;
     emitter.emit(oss, *inst);
 
     std::string assembly = oss.str();
@@ -353,21 +338,20 @@ TEST_F(AsmEmitterTest, EmitToStream)
     EXPECT_EQ(assembly, expected);
 }
 
-TEST_F(AsmEmitterTest, EmitToStreamWithCycleInfo)
-{
+TEST_F(AsmEmitterTest, EmitToStreamWithCycleInfo) {
     StinkyInstruction* inst = createInstruction("ds_read_b128");
     ASSERT_NE(inst, nullptr);
     inst->addDestReg(StinkyRegister("v", 0, 4));
     inst->addSrcReg(StinkyRegister("v", 40, 1));
-    inst->issueCycles   = 4;
+    inst->issueCycles = 4;
     inst->latencyCycles = 52;
 
     AsmEmitterOptions options;
-    options.emitCycleInfo      = true;
-    options.commentAlignColumn = 0; // Disable comment alignment for this test
+    options.emitCycleInfo = true;
+    options.commentAlignColumn = 0;  // Disable comment alignment for this test
 
     std::ostringstream oss;
-    StinkyAsmEmitter   emitter(options);
+    StinkyAsmEmitter emitter(options);
     emitter.emit(oss, *inst);
 
     std::string assembly = oss.str();
@@ -379,13 +363,12 @@ TEST_F(AsmEmitterTest, EmitToStreamWithCycleInfo)
 // Utility Function Tests
 // ============================================================================
 
-TEST_F(AsmEmitterTest, ToAssemblyUtility)
-{
+TEST_F(AsmEmitterTest, ToAssemblyUtility) {
     StinkyInstruction* inst = createInstruction("ds_read_b128");
     ASSERT_NE(inst, nullptr);
     inst->addDestReg(StinkyRegister("v", 0, 4));
     inst->addSrcReg(StinkyRegister("v", 40, 1));
-    inst->issueCycles   = 4;
+    inst->issueCycles = 4;
     inst->latencyCycles = 52;
 
     AsmEmitterOptions options;
@@ -396,36 +379,34 @@ TEST_F(AsmEmitterTest, ToAssemblyUtility)
     EXPECT_EQ(assembly, expected);
 }
 
-TEST_F(AsmEmitterTest, ToAssemblyUtilityWithCycleInfo)
-{
+TEST_F(AsmEmitterTest, ToAssemblyUtilityWithCycleInfo) {
     StinkyInstruction* inst = createInstruction("ds_read_b128");
     ASSERT_NE(inst, nullptr);
     inst->addDestReg(StinkyRegister("v", 0, 4));
     inst->addSrcReg(StinkyRegister("v", 40, 1));
-    inst->issueCycles   = 4;
+    inst->issueCycles = 4;
     inst->latencyCycles = 52;
 
     AsmEmitterOptions options;
-    options.emitComments       = false;
-    options.emitCycleInfo      = true;
-    options.commentAlignColumn = 0; // Disable comment alignment for this test
+    options.emitComments = false;
+    options.emitCycleInfo = true;
+    options.commentAlignColumn = 0;  // Disable comment alignment for this test
 
     std::string assembly = toAssembly(func, options);
     std::string expected = "    ds_read_b128 v[0:3], v40 // issue=4 latency=52\n";
     EXPECT_EQ(assembly, expected);
 }
 
-TEST_F(AsmEmitterTest, ToAssemblyUtilityWithOptions)
-{
+TEST_F(AsmEmitterTest, ToAssemblyUtilityWithOptions) {
     StinkyInstruction* inst = createInstruction("ds_read_b128");
     ASSERT_NE(inst, nullptr);
     inst->addDestReg(StinkyRegister("v", 0, 4));
     inst->addSrcReg(StinkyRegister("v", 40, 1));
-    inst->issueCycles   = 4;
+    inst->issueCycles = 4;
     inst->latencyCycles = 52;
 
     AsmEmitterOptions options;
-    options.emitComments  = false;
+    options.emitComments = false;
     options.emitCycleInfo = false;
 
     std::string assembly = toAssembly(func, options);
@@ -437,14 +418,13 @@ TEST_F(AsmEmitterTest, ToAssemblyUtilityWithOptions)
 // Options Tests
 // ============================================================================
 
-TEST_F(AsmEmitterTest, GetSetOptions)
-{
+TEST_F(AsmEmitterTest, GetSetOptions) {
     StinkyAsmEmitter emitter;
 
     AsmEmitterOptions options;
-    options.emitComments  = false;
+    options.emitComments = false;
     options.emitCycleInfo = false;
-    options.indent        = 2;
+    options.indent = 2;
 
     emitter.setOptions(options);
 
@@ -458,8 +438,7 @@ TEST_F(AsmEmitterTest, GetSetOptions)
 // User Comment Tests
 // ============================================================================
 
-TEST_F(AsmEmitterTest, EmitWithUserComment)
-{
+TEST_F(AsmEmitterTest, EmitWithUserComment) {
     StinkyInstruction* inst = createInstruction("ds_read_b128");
     ASSERT_NE(inst, nullptr);
 
@@ -470,45 +449,43 @@ TEST_F(AsmEmitterTest, EmitWithUserComment)
     inst->addModifier(CommentData("load C"));
 
     AsmEmitterOptions options;
-    options.emitComments       = true;
-    options.emitCycleInfo      = false;
-    options.commentAlignColumn = 0; // Disable comment alignment for this test
+    options.emitComments = true;
+    options.emitCycleInfo = false;
+    options.commentAlignColumn = 0;  // Disable comment alignment for this test
 
     StinkyAsmEmitter emitter(options);
-    std::string      assembly = emitter.emit(*inst);
+    std::string assembly = emitter.emit(*inst);
 
     std::string expected = "    ds_read_b128 v[0:3], v40 // load C\n";
     EXPECT_EQ(assembly, expected);
 }
 
-TEST_F(AsmEmitterTest, EmitWithCycleInfoAndUserComment)
-{
+TEST_F(AsmEmitterTest, EmitWithCycleInfoAndUserComment) {
     StinkyInstruction* inst = createInstruction("ds_read_b128");
     ASSERT_NE(inst, nullptr);
 
     inst->addDestReg(StinkyRegister("v", 0, 4));
     inst->addSrcReg(StinkyRegister("v", 40, 1));
-    inst->issueCycles   = 4;
+    inst->issueCycles = 4;
     inst->latencyCycles = 52;
 
     // Add a user comment
     inst->addModifier(CommentData("load C"));
 
     AsmEmitterOptions options;
-    options.emitComments       = true;
-    options.emitCycleInfo      = true;
-    options.commentAlignColumn = 0; // Disable comment alignment for this test
+    options.emitComments = true;
+    options.emitCycleInfo = true;
+    options.commentAlignColumn = 0;  // Disable comment alignment for this test
 
     StinkyAsmEmitter emitter(options);
-    std::string      assembly = emitter.emit(*inst);
+    std::string assembly = emitter.emit(*inst);
 
     // Cycle info should come first, then user comment
     std::string expected = "    ds_read_b128 v[0:3], v40 // issue=4 latency=52, load C\n";
     EXPECT_EQ(assembly, expected);
 }
 
-TEST_F(AsmEmitterTest, EmitUserCommentDisabled)
-{
+TEST_F(AsmEmitterTest, EmitUserCommentDisabled) {
     StinkyInstruction* inst = createInstruction("ds_read_b128");
     ASSERT_NE(inst, nullptr);
 
@@ -519,45 +496,43 @@ TEST_F(AsmEmitterTest, EmitUserCommentDisabled)
     inst->addModifier(CommentData("load C"));
 
     AsmEmitterOptions options;
-    options.emitComments  = false; // Comments disabled
+    options.emitComments = false;  // Comments disabled
     options.emitCycleInfo = false;
 
     StinkyAsmEmitter emitter(options);
-    std::string      assembly = emitter.emit(*inst);
+    std::string assembly = emitter.emit(*inst);
 
     // User comment should not appear
     std::string expected = "    ds_read_b128 v[0:3], v40\n";
     EXPECT_EQ(assembly, expected);
 }
 
-TEST_F(AsmEmitterTest, EmitCycleInfoOnlyWithUserComment)
-{
+TEST_F(AsmEmitterTest, EmitCycleInfoOnlyWithUserComment) {
     StinkyInstruction* inst = createInstruction("ds_read_b128");
     ASSERT_NE(inst, nullptr);
 
     inst->setDestRegs({StinkyRegister("v", 0, 4)});
     inst->setSrcRegs({StinkyRegister("v", 40, 1)});
-    inst->issueCycles   = 4;
+    inst->issueCycles = 4;
     inst->latencyCycles = 52;
 
     // Add a user comment
     inst->addModifier(CommentData("load C"));
 
     AsmEmitterOptions options;
-    options.emitComments       = false; // User comments disabled
-    options.emitCycleInfo      = true; // But cycle info enabled
-    options.commentAlignColumn = 0; // Disable comment alignment for this test
+    options.emitComments = false;    // User comments disabled
+    options.emitCycleInfo = true;    // But cycle info enabled
+    options.commentAlignColumn = 0;  // Disable comment alignment for this test
 
     StinkyAsmEmitter emitter(options);
-    std::string      assembly = emitter.emit(*inst);
+    std::string assembly = emitter.emit(*inst);
 
     // Only cycle info should appear, no user comment
     std::string expected = "    ds_read_b128 v[0:3], v40 // issue=4 latency=52\n";
     EXPECT_EQ(assembly, expected);
 }
 
-TEST_F(AsmEmitterTest, VOP3ModifierNegation)
-{
+TEST_F(AsmEmitterTest, VOP3ModifierNegation) {
     StinkyInstruction* inst = createInstruction("v_add_f32");
     ASSERT_NE(inst, nullptr);
 
@@ -570,19 +545,18 @@ TEST_F(AsmEmitterTest, VOP3ModifierNegation)
     inst->addModifier(mod);
 
     AsmEmitterOptions options;
-    options.emitComments  = false;
+    options.emitComments = false;
     options.emitCycleInfo = false;
 
     StinkyAsmEmitter emitter(options);
-    std::string      assembly = emitter.emit(*inst);
+    std::string assembly = emitter.emit(*inst);
 
     // Should render as: v_add_f32 v0, -v1, v2
     std::string expected = "    v_add_f32 v0, -v1, v2\n";
     EXPECT_EQ(assembly, expected);
 }
 
-TEST_F(AsmEmitterTest, VOP3ModifierAbsoluteValue)
-{
+TEST_F(AsmEmitterTest, VOP3ModifierAbsoluteValue) {
     StinkyInstruction* inst = createInstruction("v_add_f32");
     ASSERT_NE(inst, nullptr);
 
@@ -595,19 +569,18 @@ TEST_F(AsmEmitterTest, VOP3ModifierAbsoluteValue)
     inst->addModifier(mod);
 
     AsmEmitterOptions options;
-    options.emitComments  = false;
+    options.emitComments = false;
     options.emitCycleInfo = false;
 
     StinkyAsmEmitter emitter(options);
-    std::string      assembly = emitter.emit(*inst);
+    std::string assembly = emitter.emit(*inst);
 
     // Should render as: v_add_f32 v10, abs(v11), v12
     std::string expected = "    v_add_f32 v10, abs(v11), v12\n";
     EXPECT_EQ(assembly, expected);
 }
 
-TEST_F(AsmEmitterTest, VOP3ModifierNegatedAbsoluteValue)
-{
+TEST_F(AsmEmitterTest, VOP3ModifierNegatedAbsoluteValue) {
     StinkyInstruction* inst = createInstruction("v_add_f32");
     ASSERT_NE(inst, nullptr);
 
@@ -621,11 +594,11 @@ TEST_F(AsmEmitterTest, VOP3ModifierNegatedAbsoluteValue)
     inst->addModifier(mod);
 
     AsmEmitterOptions options;
-    options.emitComments  = false;
+    options.emitComments = false;
     options.emitCycleInfo = false;
 
     StinkyAsmEmitter emitter(options);
-    std::string      assembly = emitter.emit(*inst);
+    std::string assembly = emitter.emit(*inst);
 
     // Should render as: v_add_f32 v20, -abs(v21), v22
     // This follows LLVM syntax: "-" before "abs()" is allowed
@@ -633,8 +606,7 @@ TEST_F(AsmEmitterTest, VOP3ModifierNegatedAbsoluteValue)
     EXPECT_EQ(assembly, expected);
 }
 
-TEST_F(AsmEmitterTest, VOP3ModifierMultipleSources)
-{
+TEST_F(AsmEmitterTest, VOP3ModifierMultipleSources) {
     StinkyInstruction* inst = createInstruction("v_fma_f32");
     ASSERT_NE(inst, nullptr);
 
@@ -651,11 +623,11 @@ TEST_F(AsmEmitterTest, VOP3ModifierMultipleSources)
     inst->addModifier(mod);
 
     AsmEmitterOptions options;
-    options.emitComments  = false;
+    options.emitComments = false;
     options.emitCycleInfo = false;
 
     StinkyAsmEmitter emitter(options);
-    std::string      assembly = emitter.emit(*inst);
+    std::string assembly = emitter.emit(*inst);
 
     // Should render with modifiers on each source according to LLVM syntax
     std::string expected = "    v_fma_f32 v30, -v31, abs(v32), -abs(v33)\n";

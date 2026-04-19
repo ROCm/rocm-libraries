@@ -205,5 +205,3 @@ This section shows how the `peephole` pattern type was added as a concrete examp
 - LLVM TableGen: https://llvm.org/docs/TableGen/
 - Peephole Pattern System: `docs/design/peephole-pattern-system.md`
 - Pattern Parser: `include/stinkytofu/serialization/asm/PatternParser.hpp`
-
-

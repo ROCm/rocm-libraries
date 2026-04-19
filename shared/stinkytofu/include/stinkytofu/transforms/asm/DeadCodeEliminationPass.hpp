@@ -24,49 +24,48 @@
 
 #include <memory>
 
-namespace stinkytofu
-{
-    class Pass;
+namespace stinkytofu {
+class Pass;
 
-    /// Creates a dead code elimination (DCE) pass that removes dead store instructions.
-    ///
-    /// This pass uses a simple forward-scan pattern to eliminate dead stores:
-    /// 1. Find an instruction that defines a register (e.g., v0)
-    /// 2. Scan forward to see if v0 is redefined before being used
-    /// 3. If redefined with no uses in between, remove the first definition
-    ///
-    /// This pattern is safe across blocks and function calls because:
-    /// - If a register is used in another block, we see it at the branch/jump
-    /// - If a register is used across function boundaries, we see it at the call site
-    /// - We only remove when there's a provable overwrite with no intervening uses
-    ///
-    /// Example:
-    /// ```
-    /// Before DCE:
-    ///   v_mul_f32 v0, v1, v2     // Dead store: v0 overwritten below
-    ///   v_add_f32 v3, v4, v5
-    ///   v_mov_b32 v0, v6         // Redefines v0
-    ///   global_store_dword v0    // Uses the second v0
-    ///
-    /// After DCE:
-    ///   v_add_f32 v3, v4, v5
-    ///   v_mov_b32 v0, v6
-    ///   global_store_dword v0
-    /// ```
-    ///
-    /// Key features:
-    /// - Simple forward scan - no complex def-use analysis needed
-    /// - Safe across basic blocks (scans entire function)
-    /// - Iteratively removes dead stores until fixpoint
-    /// - Preserves side-effecting instructions
-    ///
-    /// Usage:
-    /// ```cpp
-    /// PassManager pm;
-    /// pm.addPass(createPeepholeOptimizationPass());  // May create dead stores
-    /// pm.addPass(createDeadCodeEliminationPass());   // Clean up
-    /// pm.run();
-    /// ```
-    std::unique_ptr<Pass> createDeadCodeEliminationPass();
+/// Creates a dead code elimination (DCE) pass that removes dead store instructions.
+///
+/// This pass uses a simple forward-scan pattern to eliminate dead stores:
+/// 1. Find an instruction that defines a register (e.g., v0)
+/// 2. Scan forward to see if v0 is redefined before being used
+/// 3. If redefined with no uses in between, remove the first definition
+///
+/// This pattern is safe across blocks and function calls because:
+/// - If a register is used in another block, we see it at the branch/jump
+/// - If a register is used across function boundaries, we see it at the call site
+/// - We only remove when there's a provable overwrite with no intervening uses
+///
+/// Example:
+/// ```
+/// Before DCE:
+///   v_mul_f32 v0, v1, v2     // Dead store: v0 overwritten below
+///   v_add_f32 v3, v4, v5
+///   v_mov_b32 v0, v6         // Redefines v0
+///   global_store_dword v0    // Uses the second v0
+///
+/// After DCE:
+///   v_add_f32 v3, v4, v5
+///   v_mov_b32 v0, v6
+///   global_store_dword v0
+/// ```
+///
+/// Key features:
+/// - Simple forward scan - no complex def-use analysis needed
+/// - Safe across basic blocks (scans entire function)
+/// - Iteratively removes dead stores until fixpoint
+/// - Preserves side-effecting instructions
+///
+/// Usage:
+/// ```cpp
+/// PassManager pm;
+/// pm.addPass(createPeepholeOptimizationPass());  // May create dead stores
+/// pm.addPass(createDeadCodeEliminationPass());   // Clean up
+/// pm.run();
+/// ```
+std::unique_ptr<Pass> createDeadCodeEliminationPass();
 
-} // namespace stinkytofu
+}  // namespace stinkytofu

@@ -22,75 +22,59 @@
  * ************************************************************************ */
 #include "stinkytofu/support/DAGScheduleJsonWriter.hpp"
 
-#include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
-
 #include <cctype>
 #include <fstream>
 #include <iomanip>
 #include <sstream>
 #include <string_view>
 
-namespace stinkytofu
-{
-    std::string instructionJsonLabel(const StinkyInstruction& inst)
-    {
-        std::ostringstream oss;
-        inst.dump(oss);
-        std::string s = oss.str();
-        std::string out;
-        out.reserve(s.size());
-        bool lastSpace = false;
-        for(char c : s)
-        {
-            if(c == '\r' || c == '\n' || c == '\t')
-            {
-                if(!lastSpace && !out.empty())
-                {
-                    out += ' ';
-                    lastSpace = true;
-                }
-                continue;
+#include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
+
+namespace stinkytofu {
+std::string instructionJsonLabel(const StinkyInstruction& inst) {
+    std::ostringstream oss;
+    inst.dump(oss);
+    std::string s = oss.str();
+    std::string out;
+    out.reserve(s.size());
+    bool lastSpace = false;
+    for (char c : s) {
+        if (c == '\r' || c == '\n' || c == '\t') {
+            if (!lastSpace && !out.empty()) {
+                out += ' ';
+                lastSpace = true;
             }
-            if(std::isspace(static_cast<unsigned char>(c)))
-            {
-                if(!lastSpace && !out.empty())
-                {
-                    out += ' ';
-                    lastSpace = true;
-                }
-                continue;
-            }
-            out += c;
-            lastSpace = false;
+            continue;
         }
-        while(!out.empty() && out.back() == ' ')
-            out.pop_back();
-        constexpr size_t kMax = 512;
-        if(out.size() > kMax)
-            out.resize(kMax);
-        return out;
+        if (std::isspace(static_cast<unsigned char>(c))) {
+            if (!lastSpace && !out.empty()) {
+                out += ' ';
+                lastSpace = true;
+            }
+            continue;
+        }
+        out += c;
+        lastSpace = false;
     }
+    while (!out.empty() && out.back() == ' ') out.pop_back();
+    constexpr size_t kMax = 512;
+    if (out.size() > kMax) out.resize(kMax);
+    return out;
+}
 
-    DAGScheduleJsonCollector::DAGScheduleJsonCollector(std::string outputPath, std::string functionName)
-        : outputPath_(std::move(outputPath))
-        , functionName_(std::move(functionName))
-    {
-    }
+DAGScheduleJsonCollector::DAGScheduleJsonCollector(std::string outputPath, std::string functionName)
+    : outputPath_(std::move(outputPath)), functionName_(std::move(functionName)) {}
 
-    DAGScheduleJsonCollector::~DAGScheduleJsonCollector()
-    {
-        finalize();
-    }
+DAGScheduleJsonCollector::~DAGScheduleJsonCollector() {
+    finalize();
+}
 
-    std::string DAGScheduleJsonCollector::escapeJson(std::string_view s) const
-    {
-        std::string out;
-        out.reserve(s.size() + 8);
-        for(unsigned char uc : s)
-        {
-            char c = static_cast<char>(uc);
-            switch(c)
-            {
+std::string DAGScheduleJsonCollector::escapeJson(std::string_view s) const {
+    std::string out;
+    out.reserve(s.size() + 8);
+    for (unsigned char uc : s) {
+        char c = static_cast<char>(uc);
+        switch (c) {
             case '"':
                 out += "\\\"";
                 break;
@@ -113,85 +97,69 @@ namespace stinkytofu
                 out += "\\t";
                 break;
             default:
-                if(uc < 0x20u)
-                {
+                if (uc < 0x20u) {
                     std::ostringstream hex;
-                    hex << "\\u" << std::hex << std::setw(4) << std::setfill('0') << static_cast<int>(uc);
+                    hex << "\\u" << std::hex << std::setw(4) << std::setfill('0')
+                        << static_cast<int>(uc);
                     out += hex.str();
-                }
-                else
+                } else
                     out += c;
-            }
         }
-        return out;
     }
+    return out;
+}
 
-    static void appendIdArray(std::ostringstream& o, const std::vector<unsigned>& ids)
-    {
-        o << '[';
-        for(size_t i = 0; i < ids.size(); ++i)
-        {
-            if(i)
-                o << ',';
-            o << '"' << ids[i] << '"';
-        }
-        o << ']';
+static void appendIdArray(std::ostringstream& o, const std::vector<unsigned>& ids) {
+    o << '[';
+    for (size_t i = 0; i < ids.size(); ++i) {
+        if (i) o << ',';
+        o << '"' << ids[i] << '"';
     }
+    o << ']';
+}
 
-    void DAGScheduleJsonCollector::addRegion(const std::string& title,
-                                             const std::vector<std::pair<unsigned, std::string>>& nodeIdAndLabel,
-                                             const std::vector<std::pair<unsigned, unsigned>>&      edges,
-                                             const std::vector<unsigned>& programOrderNodeIds,
-                                             const std::vector<unsigned>& scheduledOrderNodeIds)
-    {
-        std::ostringstream o;
-        o << "{\"title\":\"" << escapeJson(title) << "\",\"nodes\":[";
-        for(size_t i = 0; i < nodeIdAndLabel.size(); ++i)
-        {
-            if(i)
-                o << ',';
-            o << "{\"id\":\"" << nodeIdAndLabel[i].first << "\",\"label\":\""
-              << escapeJson(nodeIdAndLabel[i].second) << "\"}";
-        }
-        o << "],\"before\":{\"edges\":[";
-        for(size_t i = 0; i < edges.size(); ++i)
-        {
-            if(i)
-                o << ',';
-            o << "{\"from\":\"" << edges[i].first << "\",\"to\":\"" << edges[i].second << "\"}";
-        }
-        o << "],\"order\":";
-        appendIdArray(o, programOrderNodeIds);
-        o << "},\"after\":{\"edges\":[";
-        for(size_t i = 0; i < edges.size(); ++i)
-        {
-            if(i)
-                o << ',';
-            o << "{\"from\":\"" << edges[i].first << "\",\"to\":\"" << edges[i].second << "\"}";
-        }
-        o << "],\"order\":";
-        appendIdArray(o, scheduledOrderNodeIds);
-        o << "}}";
-        regionsJson_.push_back(o.str());
+void DAGScheduleJsonCollector::addRegion(
+    const std::string& title, const std::vector<std::pair<unsigned, std::string>>& nodeIdAndLabel,
+    const std::vector<std::pair<unsigned, unsigned>>& edges,
+    const std::vector<unsigned>& programOrderNodeIds,
+    const std::vector<unsigned>& scheduledOrderNodeIds) {
+    std::ostringstream o;
+    o << "{\"title\":\"" << escapeJson(title) << "\",\"nodes\":[";
+    for (size_t i = 0; i < nodeIdAndLabel.size(); ++i) {
+        if (i) o << ',';
+        o << "{\"id\":\"" << nodeIdAndLabel[i].first << "\",\"label\":\""
+          << escapeJson(nodeIdAndLabel[i].second) << "\"}";
     }
-
-    void DAGScheduleJsonCollector::finalize()
-    {
-        if(finalized_)
-            return;
-        finalized_ = true;
-        std::ofstream out(outputPath_);
-        if(!out)
-            return;
-        out << "{\"schema\":\"stinkytofu-dag-schedule-v1\",\"function\":\"" << escapeJson(functionName_)
-            << "\",\"regions\":[";
-        for(size_t i = 0; i < regionsJson_.size(); ++i)
-        {
-            if(i)
-                out << ',';
-            out << regionsJson_[i];
-        }
-        out << "]}\n";
+    o << "],\"before\":{\"edges\":[";
+    for (size_t i = 0; i < edges.size(); ++i) {
+        if (i) o << ',';
+        o << "{\"from\":\"" << edges[i].first << "\",\"to\":\"" << edges[i].second << "\"}";
     }
+    o << "],\"order\":";
+    appendIdArray(o, programOrderNodeIds);
+    o << "},\"after\":{\"edges\":[";
+    for (size_t i = 0; i < edges.size(); ++i) {
+        if (i) o << ',';
+        o << "{\"from\":\"" << edges[i].first << "\",\"to\":\"" << edges[i].second << "\"}";
+    }
+    o << "],\"order\":";
+    appendIdArray(o, scheduledOrderNodeIds);
+    o << "}}";
+    regionsJson_.push_back(o.str());
+}
 
-} // namespace stinkytofu
+void DAGScheduleJsonCollector::finalize() {
+    if (finalized_) return;
+    finalized_ = true;
+    std::ofstream out(outputPath_);
+    if (!out) return;
+    out << "{\"schema\":\"stinkytofu-dag-schedule-v1\",\"function\":\"" << escapeJson(functionName_)
+        << "\",\"regions\":[";
+    for (size_t i = 0; i < regionsJson_.size(); ++i) {
+        if (i) out << ',';
+        out << regionsJson_[i];
+    }
+    out << "]}\n";
+}
+
+}  // namespace stinkytofu

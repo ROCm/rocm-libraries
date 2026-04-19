@@ -23,103 +23,90 @@
 
 #pragma once
 
-#include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include <map>
 #include <ostream>
 #include <string>
 
-namespace stinkytofu
-{
-    /**
-     * @brief Assembly directive kinds (low-level IR)
-     *
-     * These are REAL assembly directives that appear in assembly output.
-     * Similar to how StinkyInstruction has an opcode kind.
-     */
-    enum class AsmDirectiveKind
-    {
-        SET, // .set symbol, value
-        IF, // .if condition
-        ELSE, // .else
-        ELSEIF, // .elseif condition
-        ENDIF, // .endif
-        MACRO, // .macro name
-        ENDM, // .endm
-        INCLUDE, // .include "file"
-        SECTION, // .section name
-        TEXT, // .text
-        DATA, // .data
-        BSS, // .bss
-        ALIGN, // .align n
-        SKIP, // .skip n
-        BYTE, // .byte value
-        WORD, // .word value
-        LONG, // .long value
-        QUAD, // .quad value
-        ASCII, // .ascii "string"
-        ASCIZ, // .asciz "string"
-        GLOBAL, // .global symbol
-        LOCAL, // .local symbol
-        EQU, // .equ name, value
-        TEXTBLOCK // Raw text block (comments)
-    };
+#include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 
-    /**
-     * @brief Assembly directive struct (low-level IR)
-     *
-     * Similar to StinkyInstruction - a simple struct with data.
-     * No virtual functions, no class hierarchy.
-     *
-     * Factory functions in StinkyTofu.cpp create these.
-     * Emitter handles emission based on kind.
-     */
-    struct AsmDirective : public IRBase
-    {
-        friend class IRBase;
+namespace stinkytofu {
+/**
+ * @brief Assembly directive kinds (low-level IR)
+ *
+ * These are REAL assembly directives that appear in assembly output.
+ * Similar to how StinkyInstruction has an opcode kind.
+ */
+enum class AsmDirectiveKind {
+    SET,       // .set symbol, value
+    IF,        // .if condition
+    ELSE,      // .else
+    ELSEIF,    // .elseif condition
+    ENDIF,     // .endif
+    MACRO,     // .macro name
+    ENDM,      // .endm
+    INCLUDE,   // .include "file"
+    SECTION,   // .section name
+    TEXT,      // .text
+    DATA,      // .data
+    BSS,       // .bss
+    ALIGN,     // .align n
+    SKIP,      // .skip n
+    BYTE,      // .byte value
+    WORD,      // .word value
+    LONG,      // .long value
+    QUAD,      // .quad value
+    ASCII,     // .ascii "string"
+    ASCIZ,     // .asciz "string"
+    GLOBAL,    // .global symbol
+    LOCAL,     // .local symbol
+    EQU,       // .equ name, value
+    TEXTBLOCK  // Raw text block (comments)
+};
 
-        AsmDirectiveKind kind;
-        std::string      name; // ".set", ".if", etc.
-        std::string      comment;
+/**
+ * @brief Assembly directive struct (low-level IR)
+ *
+ * Similar to StinkyInstruction - a simple struct with data.
+ * No virtual functions, no class hierarchy.
+ *
+ * Factory functions in StinkyTofu.cpp create these.
+ * Emitter handles emission based on kind.
+ */
+struct AsmDirective : public IRBase {
+    friend class IRBase;
 
-        // Flexible data storage (like StinkyInstruction's modifiers)
-        std::map<std::string, std::string> params;
+    AsmDirectiveKind kind;
+    std::string name;  // ".set", ".if", etc.
+    std::string comment;
 
-        // Common fields
-        std::string symbol; // For .set, .equ
-        std::string value; // For .set, .equ
-        std::string condition; // For .if, .elseif
-        std::string filename; // For .include
-        int64_t     intValue; // For .align, .skip, etc.
+    // Flexible data storage (like StinkyInstruction's modifiers)
+    std::map<std::string, std::string> params;
 
-    private:
-        AsmDirective()
-            : IRBase(IRType::StinkyAsmDirective)
-            , kind(AsmDirectiveKind::SET)
-            , intValue(0)
-        {
-        }
+    // Common fields
+    std::string symbol;     // For .set, .equ
+    std::string value;      // For .set, .equ
+    std::string condition;  // For .if, .elseif
+    std::string filename;   // For .include
+    int64_t intValue;       // For .align, .skip, etc.
 
-        ~AsmDirective() = default;
+   private:
+    AsmDirective() : IRBase(IRType::StinkyAsmDirective), kind(AsmDirectiveKind::SET), intValue(0) {}
 
-    public:
-        // Implement IRBase::dump()
-        void dump(std::ostream& out) const override
-        {
-            out << name;
-            if(!symbol.empty())
-                out << " " << symbol;
-            if(!value.empty())
-                out << ", " << value;
-            if(!condition.empty())
-                out << " " << condition;
-            if(!comment.empty())
-                out << "  // " << comment;
-        }
+    ~AsmDirective() = default;
 
-        static bool classof(const IRBase* ir)
-        {
-            return ir->getType() == IRType::StinkyAsmDirective;
-        }
-    };
+   public:
+    // Implement IRBase::dump()
+    void dump(std::ostream& out) const override {
+        out << name;
+        if (!symbol.empty()) out << " " << symbol;
+        if (!value.empty()) out << ", " << value;
+        if (!condition.empty()) out << " " << condition;
+        if (!comment.empty()) out << "  // " << comment;
+    }
 
-} // namespace stinkytofu
+    static bool classof(const IRBase* ir) {
+        return ir->getType() == IRType::StinkyAsmDirective;
+    }
+};
+
+}  // namespace stinkytofu

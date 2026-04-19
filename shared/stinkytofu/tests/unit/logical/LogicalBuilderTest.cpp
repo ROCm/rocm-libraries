@@ -28,40 +28,32 @@
 using namespace stinkytofu;
 
 // Dummy IRBuilder for testing
-class TestIRBuilder : public IRBuilder
-{
-public:
-    TestIRBuilder(BasicBlock& bb)
-        : IRBuilder(bb)
-    {
-    }
+class TestIRBuilder : public IRBuilder {
+   public:
+    TestIRBuilder(BasicBlock& bb) : IRBuilder(bb) {}
 
-    BasicBlock* getBasicBlock() const
-    {
+    BasicBlock* getBasicBlock() const {
         return bb;
     }
 };
 
 // Test fixture for IRBuilder tests
-class IRBuilderTest : public ::testing::Test
-{
-protected:
-    Function    func;
+class IRBuilderTest : public ::testing::Test {
+   protected:
+    Function func;
     PassContext passCtx;
     BasicBlock* bb1;
     BasicBlock* bb2;
     BasicBlock* bb3;
 
-    void SetUp() override
-    {
+    void SetUp() override {
         // Create a function with three BasicBlocks
         bb1 = func.createBasicBlock("bb1");
         bb2 = func.createBasicBlock("bb2");
         bb3 = func.createBasicBlock("bb3");
     }
 
-    void TearDown() override
-    {
+    void TearDown() override {
         // Clean up is automatic via Function destructor
     }
 };
@@ -69,8 +61,7 @@ protected:
 // Test that IRBuilder correctly points to different BasicBlocks
 // This test would FAIL with the old cached implementation where
 // the builder would still point to the first BasicBlock
-TEST_F(IRBuilderTest, BuilderPointsToCorrectBasicBlockAcrossBasicBlocks)
-{
+TEST_F(IRBuilderTest, BuilderPointsToCorrectBasicBlockAcrossBasicBlocks) {
     // Get builder for first BasicBlock
     auto builder1 = TestIRBuilder(*bb1);
     EXPECT_EQ(builder1.getBasicBlock(), bb1);
@@ -96,14 +87,12 @@ TEST_F(IRBuilderTest, BuilderPointsToCorrectBasicBlockAcrossBasicBlocks)
 
 // Test that getting builders in a loop works correctly
 // This simulates the common pattern of iterating over BasicBlocks
-TEST_F(IRBuilderTest, BuilderInLoopPointsToCurrentBasicBlock)
-{
+TEST_F(IRBuilderTest, BuilderInLoopPointsToCurrentBasicBlock) {
     std::vector<BasicBlock*> expectedBBs = {bb1, bb2, bb3};
     std::vector<BasicBlock*> actualBBs;
 
     size_t index = 0;
-    for(BasicBlock& bb : func)
-    {
+    for (BasicBlock& bb : func) {
         // Get builder for current BasicBlock
         auto builder = TestIRBuilder(bb);
 
@@ -120,8 +109,7 @@ TEST_F(IRBuilderTest, BuilderInLoopPointsToCurrentBasicBlock)
 }
 
 // Test that builder can update insertion point
-TEST_F(IRBuilderTest, BuilderCanUpdateInsertionPoint)
-{
+TEST_F(IRBuilderTest, BuilderCanUpdateInsertionPoint) {
     // Create builder pointing to first BasicBlock
     auto builder = TestIRBuilder(*bb1);
     EXPECT_EQ(builder.getBasicBlock(), bb1);
@@ -136,8 +124,7 @@ TEST_F(IRBuilderTest, BuilderCanUpdateInsertionPoint)
 }
 
 // Test that multiple builders created in sequence don't interfere
-TEST_F(IRBuilderTest, MultipleSequentialBuildersAreIndependent)
-{
+TEST_F(IRBuilderTest, MultipleSequentialBuildersAreIndependent) {
     // Create multiple builders for different BasicBlocks
     auto builder1 = TestIRBuilder(*bb1);
     auto builder2 = TestIRBuilder(*bb2);
@@ -161,20 +148,19 @@ TEST_F(IRBuilderTest, MultipleSequentialBuildersAreIndependent)
 // Regression test: This would fail with a cached builder implementation
 // where multiple "get builder" calls would return a reference to a single
 // cached builder that still pointed to the first BasicBlock
-TEST_F(IRBuilderTest, RegressionTestForCachedBuilderBug)
-{
+TEST_F(IRBuilderTest, RegressionTestForCachedBuilderBug) {
     // Simulate the bug scenario: get builder for each BB in sequence
     // With old implementation: all would point to bb1
     // With new implementation: each points to correct BasicBlock
 
-    auto        builder_for_bb1 = TestIRBuilder(*bb1);
-    BasicBlock* block1          = builder_for_bb1.getBasicBlock();
+    auto builder_for_bb1 = TestIRBuilder(*bb1);
+    BasicBlock* block1 = builder_for_bb1.getBasicBlock();
 
-    auto        builder_for_bb2 = TestIRBuilder(*bb2);
-    BasicBlock* block2          = builder_for_bb2.getBasicBlock();
+    auto builder_for_bb2 = TestIRBuilder(*bb2);
+    BasicBlock* block2 = builder_for_bb2.getBasicBlock();
 
-    auto        builder_for_bb3 = TestIRBuilder(*bb3);
-    BasicBlock* block3          = builder_for_bb3.getBasicBlock();
+    auto builder_for_bb3 = TestIRBuilder(*bb3);
+    BasicBlock* block3 = builder_for_bb3.getBasicBlock();
 
     // The bug would cause all three to point to bb1
     // Verify this is not the case

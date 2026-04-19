@@ -23,162 +23,138 @@
 
 #pragma once
 
-#include "stinkytofu/ir/logical/LogicalInstructions.hpp"
-#include "stinkytofu/serialization/asm/PatternParser.hpp"
 #include <iomanip>
 #include <memory>
 #include <sstream>
 #include <string>
 #include <vector>
 
-namespace stinkytofu
-{
-    /**
-     * @brief Generic IR instruction for intrinsic body operations
-     *
-     * This is a lightweight IR instruction that holds text-based operation
-     * information. It serves as an intermediate representation before full
-     * IR instruction types (VAddF32, VMaxF32, etc.) are implemented.
-     *
-     * Future: Replace with concrete LogicalInstruction subclasses.
-     */
-    class GenericIRInstruction : public LogicalInstruction
-    {
-    private:
-        friend class IRBase;
+#include "stinkytofu/ir/logical/LogicalInstructions.hpp"
+#include "stinkytofu/serialization/asm/PatternParser.hpp"
 
-        GenericIRInstruction(const std::string&                   dest,
-                             const std::string&                   op,
-                             const std::vector<IntrinsicOperand>& ops)
-            : LogicalInstruction()
-            , destReg(dest)
-            , operation(op)
-            , operands(ops)
-        {
-        }
+namespace stinkytofu {
+/**
+ * @brief Generic IR instruction for intrinsic body operations
+ *
+ * This is a lightweight IR instruction that holds text-based operation
+ * information. It serves as an intermediate representation before full
+ * IR instruction types (VAddF32, VMaxF32, etc.) are implemented.
+ *
+ * Future: Replace with concrete LogicalInstruction subclasses.
+ */
+class GenericIRInstruction : public LogicalInstruction {
+   private:
+    friend class IRBase;
 
-        ~GenericIRInstruction() override = default;
+    GenericIRInstruction(const std::string& dest, const std::string& op,
+                         const std::vector<IntrinsicOperand>& ops)
+        : LogicalInstruction(), destReg(dest), operation(op), operands(ops) {}
 
-    public:
-        std::string                   destReg; ///< Destination register name
-        std::string                   operation; ///< Operation name (e.g., "v_add_f32")
-        std::vector<IntrinsicOperand> operands; ///< Typed operands
+    ~GenericIRInstruction() override = default;
 
-        const char* getLogicalName() const override
-        {
-            return operation.c_str();
-        }
+   public:
+    std::string destReg;                     ///< Destination register name
+    std::string operation;                   ///< Operation name (e.g., "v_add_f32")
+    std::vector<IntrinsicOperand> operands;  ///< Typed operands
 
-        void dump(std::ostream& out) const override
-        {
-            out << destReg << " = " << operation << "(";
-            for(size_t i = 0; i < operands.size(); ++i)
-            {
-                if(i > 0)
-                    out << ", ";
+    const char* getLogicalName() const override {
+        return operation.c_str();
+    }
 
-                const auto& op = operands[i];
-                if(op.type == IntrinsicOperand::Register)
-                {
-                    out << op.registerName;
-                }
-                else if(op.type == IntrinsicOperand::IntLiteral)
-                {
-                    out << op.intValue;
-                }
-                else if(op.type == IntrinsicOperand::FloatLiteral)
-                {
-                    out << op.floatValue;
-                }
-                else if(op.type == IntrinsicOperand::HexLiteral)
-                {
-                    // Output hex literal in hex format
-                    float    floatVal = static_cast<float>(op.floatValue);
-                    uint32_t bits     = *reinterpret_cast<uint32_t*>(&floatVal);
-                    out << "0x" << std::hex << bits << std::dec;
-                }
+    void dump(std::ostream& out) const override {
+        out << destReg << " = " << operation << "(";
+        for (size_t i = 0; i < operands.size(); ++i) {
+            if (i > 0) out << ", ";
+
+            const auto& op = operands[i];
+            if (op.type == IntrinsicOperand::Register) {
+                out << op.registerName;
+            } else if (op.type == IntrinsicOperand::IntLiteral) {
+                out << op.intValue;
+            } else if (op.type == IntrinsicOperand::FloatLiteral) {
+                out << op.floatValue;
+            } else if (op.type == IntrinsicOperand::HexLiteral) {
+                // Output hex literal in hex format
+                float floatVal = static_cast<float>(op.floatValue);
+                uint32_t bits = *reinterpret_cast<uint32_t*>(&floatVal);
+                out << "0x" << std::hex << bits << std::dec;
             }
-            out << ")";
         }
-    };
+        out << ")";
+    }
+};
+
+/**
+ * @brief Metadata container for intrinsic definitions
+ *
+ * Holds a vector of LogicalInstructions with additional metadata (arguments, comment,
+ * python_binding). This is for the intrinsic compiler (C++ tool), not Python.
+ */
+struct IntrinsicIRModule {
+    std::string name;
+    std::vector<IntrinsicArgument> arguments;
+    std::vector<std::shared_ptr<LogicalInstruction>> instructions;  // Intrinsic body
+    std::string comment;
+    bool pythonBinding;
+
+    IntrinsicIRModule(const std::string& n) : name(n), pythonBinding(false) {}
+};
+
+/**
+ * @brief Converts between text patterns and IR modules
+ *
+ * This converter transforms:
+ *   Text Pattern (IntrinsicPattern) <-> IR Module (IntrinsicIRModule)
+ *
+ * This enables the pipeline:
+ *   Text -> IR -> Optimization -> Serialization
+ */
+class IntrinsicPatternConverter {
+   public:
+    /**
+     * @brief Convert text pattern to IR module
+     *
+     * @param pattern Input text pattern
+     * @return IR module with metadata
+     */
+    static IntrinsicIRModule patternToIR(const Pattern& pattern);
 
     /**
-     * @brief Metadata container for intrinsic definitions
+     * @brief Convert IR module back to text pattern
      *
-     * Holds a vector of LogicalInstructions with additional metadata (arguments, comment, python_binding).
-     * This is for the intrinsic compiler (C++ tool), not Python.
+     * @param irModule IR module with metadata
+     * @return Text pattern
      */
-    struct IntrinsicIRModule
-    {
-        std::string                                      name;
-        std::vector<IntrinsicArgument>                   arguments;
-        std::vector<std::shared_ptr<LogicalInstruction>> instructions; // Intrinsic body
-        std::string                                      comment;
-        bool                                             pythonBinding;
-
-        IntrinsicIRModule(const std::string& n)
-            : name(n)
-            , pythonBinding(false)
-        {
-        }
-    };
+    static Pattern irToPattern(const IntrinsicIRModule& irModule);
 
     /**
-     * @brief Converts between text patterns and IR modules
+     * @brief Convert multiple patterns to IR modules
      *
-     * This converter transforms:
-     *   Text Pattern (IntrinsicPattern) <-> IR Module (IntrinsicIRModule)
-     *
-     * This enables the pipeline:
-     *   Text -> IR -> Optimization -> Serialization
+     * @param patterns Vector of text patterns
+     * @return Vector of IR modules
      */
-    class IntrinsicPatternConverter
-    {
-    public:
-        /**
-         * @brief Convert text pattern to IR module
-         *
-         * @param pattern Input text pattern
-         * @return IR module with metadata
-         */
-        static IntrinsicIRModule patternToIR(const Pattern& pattern);
+    static std::vector<IntrinsicIRModule> patternsToIR(const std::vector<Pattern>& patterns);
 
-        /**
-         * @brief Convert IR module back to text pattern
-         *
-         * @param irModule IR module with metadata
-         * @return Text pattern
-         */
-        static Pattern irToPattern(const IntrinsicIRModule& irModule);
+    /**
+     * @brief Convert multiple IR modules to patterns
+     *
+     * @param irModules Vector of IR modules
+     * @return Vector of text patterns
+     */
+    static std::vector<Pattern> irToPatterns(const std::vector<IntrinsicIRModule>& irModules);
 
-        /**
-         * @brief Convert multiple patterns to IR modules
-         *
-         * @param patterns Vector of text patterns
-         * @return Vector of IR modules
-         */
-        static std::vector<IntrinsicIRModule> patternsToIR(const std::vector<Pattern>& patterns);
+   private:
+    /**
+     * @brief Parse a register/literal operand string
+     *
+     * Handles:
+     *   - Register references: "v[name]", "src", "dest"
+     *   - Literals: "0.0", "1.0", "-1.0"
+     *
+     * @param operand Operand string
+     * @return Parsed register or literal
+     */
+    static StinkyRegister parseOperand(const std::string& operand);
+};
 
-        /**
-         * @brief Convert multiple IR modules to patterns
-         *
-         * @param irModules Vector of IR modules
-         * @return Vector of text patterns
-         */
-        static std::vector<Pattern> irToPatterns(const std::vector<IntrinsicIRModule>& irModules);
-
-    private:
-        /**
-         * @brief Parse a register/literal operand string
-         *
-         * Handles:
-         *   - Register references: "v[name]", "src", "dest"
-         *   - Literals: "0.0", "1.0", "-1.0"
-         *
-         * @param operand Operand string
-         * @return Parsed register or literal
-         */
-        static StinkyRegister parseOperand(const std::string& operand);
-    };
-
-} // namespace stinkytofu
+}  // namespace stinkytofu

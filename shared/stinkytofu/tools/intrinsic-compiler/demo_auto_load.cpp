@@ -29,21 +29,20 @@
  * path specification, similar to LLVM's device libraries.
  */
 
-#include "stinkytofu/ir/logical/IntrinsicRegistry.hpp"
 #include <iostream>
+
+#include "stinkytofu/ir/logical/IntrinsicRegistry.hpp"
 
 using namespace stinkytofu;
 
-int main()
-{
+int main() {
     std::cout << "=== StinkyTofu Automatic Intrinsic Loading Demo ===\n\n";
 
     // Get the global registry - intrinsics.st.bc is automatically loaded!
     // Similar to how LLVM's clang automatically finds ocml.bc, ockl.bc, etc.
     auto& registry = IntrinsicRegistry::instance();
 
-    if(!registry.isInitialized())
-    {
+    if (!registry.isInitialized()) {
         std::cerr << "ERROR: Failed to load intrinsics automatically.\n";
         std::cerr << "Make sure intrinsics.st.bc is in a standard location.\n";
         return 1;
@@ -55,12 +54,10 @@ int main()
 
     // Now you can use intrinsics anywhere without loading manually
     std::cout << "Available intrinsics:\n";
-    for(const auto& name : registry.getIntrinsicNames())
-    {
+    for (const auto& name : registry.getIntrinsicNames()) {
         std::cout << "  - " << name;
         auto pattern = registry.lookup(name);
-        if(pattern)
-        {
+        if (pattern) {
             std::cout << " (" << pattern->arguments.size() << " args, " << pattern->body.size()
                       << " instructions)";
         }

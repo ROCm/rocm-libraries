@@ -162,6 +162,7 @@ install(TARGETS stinkytofu
 
 # Install public header files with stinkytofu/ namespace
 # Exclude ir/python/ (Python-specific, internal headers)
+# cmake-lint: disable=E1122
 install(DIRECTORY include/
     DESTINATION include/stinkytofu
     FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp"

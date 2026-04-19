@@ -3,58 +3,40 @@
 #include <sstream>
 #include <string>
 
-namespace stinkytofu
-{
-    /// A diagnostic message with location information.
-    /// Used by parsers to report errors, warnings, and notes to users.
-    class Diagnostic
-    {
-    public:
-        enum class Level
-        {
-            Error,
-            Warning,
-            Note
-        };
+namespace stinkytofu {
+/// A diagnostic message with location information.
+/// Used by parsers to report errors, warnings, and notes to users.
+class Diagnostic {
+   public:
+    enum class Level { Error, Warning, Note };
 
-    private:
-        Level       level;
-        std::string message;
-        unsigned    line;
-        unsigned    column;
+   private:
+    Level level;
+    std::string message;
+    unsigned line;
+    unsigned column;
 
-    public:
-        Diagnostic(Level lvl, std::string msg, unsigned l, unsigned c)
-            : level(lvl)
-            , message(std::move(msg))
-            , line(l)
-            , column(c)
-        {
-        }
+   public:
+    Diagnostic(Level lvl, std::string msg, unsigned l, unsigned c)
+        : level(lvl), message(std::move(msg)), line(l), column(c) {}
 
-        Level getLevel() const
-        {
-            return level;
-        }
-        const std::string& getMessage() const
-        {
-            return message;
-        }
-        unsigned getLine() const
-        {
-            return line;
-        }
-        unsigned getColumn() const
-        {
-            return column;
-        }
+    Level getLevel() const {
+        return level;
+    }
+    const std::string& getMessage() const {
+        return message;
+    }
+    unsigned getLine() const {
+        return line;
+    }
+    unsigned getColumn() const {
+        return column;
+    }
 
-        std::string format() const
-        {
-            std::ostringstream oss;
-            oss << line << ":" << column << ": ";
-            switch(level)
-            {
+    std::string format() const {
+        std::ostringstream oss;
+        oss << line << ":" << column << ": ";
+        switch (level) {
             case Level::Error:
                 oss << "error: ";
                 break;
@@ -64,10 +46,10 @@ namespace stinkytofu
             case Level::Note:
                 oss << "note: ";
                 break;
-            }
-            oss << message;
-            return oss.str();
         }
-    };
+        oss << message;
+        return oss.str();
+    }
+};
 
-} // namespace stinkytofu
+}  // namespace stinkytofu

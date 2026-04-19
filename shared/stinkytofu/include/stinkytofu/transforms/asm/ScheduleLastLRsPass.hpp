@@ -25,12 +25,11 @@
 
 #include <memory>
 
-namespace stinkytofu
-{
-    class Pass;
+namespace stinkytofu {
+class Pass;
 
-    /// Creates a pass that schedules local reads later in the block to hide
-    /// latency (schedule-final-LRs-with-latency heuristic).
-    std::unique_ptr<Pass> createScheduleLastLRsPass();
+/// Creates a pass that schedules local reads later in the block to hide
+/// latency (schedule-final-LRs-with-latency heuristic).
+std::unique_ptr<Pass> createScheduleLastLRsPass();
 
-} // namespace stinkytofu
+}  // namespace stinkytofu

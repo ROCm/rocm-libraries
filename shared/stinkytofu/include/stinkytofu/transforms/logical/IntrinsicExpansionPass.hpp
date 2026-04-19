@@ -23,99 +23,96 @@
 
 #pragma once
 
-#include "stinkytofu/core/PassManager.hpp"
-#include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
-#include "stinkytofu/serialization/asm/PatternParser.hpp"
 #include <memory>
 #include <unordered_map>
 
-namespace stinkytofu
-{
-    class LogicalInstruction;
+#include "stinkytofu/core/PassManager.hpp"
+#include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
+#include "stinkytofu/serialization/asm/PatternParser.hpp"
+
+namespace stinkytofu {
+class LogicalInstruction;
+
+/**
+ * @brief Pass that expands IntrinsicCall instructions using IntrinsicRegistry
+ *
+ * This pass:
+ *   1. Finds all IntrinsicCall instructions in the function
+ *   2. Looks up the intrinsic definition from IntrinsicRegistry
+ *   3. Expands the call into concrete LogicalInstructions
+ *   4. Replaces the IntrinsicCall with the expanded instructions
+ *
+ * Example:
+ *   Before:
+ *     IntrinsicCall("ReluF32", [v0, v1, v2])  // dest, src, temp
+ *
+ *   After (expanded from intrinsics.st.bc):
+ *     v2 = VCmpGtF32(v1, 0.0)
+ *     v0 = VCndMaskB32(0.0, v1, v2)
+ *
+ * This pass must run BEFORE ToStinkyAsmPass, as it operates on LogicalIR.
+ */
+class IntrinsicExpansionPass : public Pass {
+   public:
+    IntrinsicExpansionPass();
+    ~IntrinsicExpansionPass() override;
+
+    void run(Function& func, PassContext& passCtx) override;
+
+    PassID getPassID() const override {
+        return &ID;
+    }
+
+    const char* getName() const override {
+        return "IntrinsicExpansion";
+    }
+
+   private:
+    static char ID;
 
     /**
-     * @brief Pass that expands IntrinsicCall instructions using IntrinsicRegistry
+     * @brief Expand all IntrinsicCall instructions in a BasicBlock
      *
-     * This pass:
-     *   1. Finds all IntrinsicCall instructions in the function
-     *   2. Looks up the intrinsic definition from IntrinsicRegistry
-     *   3. Expands the call into concrete LogicalInstructions
-     *   4. Replaces the IntrinsicCall with the expanded instructions
-     *
-     * Example:
-     *   Before:
-     *     IntrinsicCall("ReluF32", [v0, v1, v2])  // dest, src, temp
-     *
-     *   After (expanded from intrinsics.st.bc):
-     *     v2 = VCmpGtF32(v1, 0.0)
-     *     v0 = VCndMaskB32(0.0, v1, v2)
-     *
-     * This pass must run BEFORE ToStinkyAsmPass, as it operates on LogicalIR.
+     * @param bb BasicBlock to process
      */
-    class IntrinsicExpansionPass : public Pass
-    {
-    public:
-        IntrinsicExpansionPass();
-        ~IntrinsicExpansionPass() override;
-
-        void run(Function& func, PassContext& passCtx) override;
-
-        PassID getPassID() const override
-        {
-            return &ID;
-        }
-
-        const char* getName() const override
-        {
-            return "IntrinsicExpansion";
-        }
-
-    private:
-        static char ID;
-
-        /**
-         * @brief Expand all IntrinsicCall instructions in a BasicBlock
-         *
-         * @param bb BasicBlock to process
-         */
-        void expandIntrinsicsInBlock(BasicBlock& bb);
-
-        /**
-         * @brief Expand a single IntrinsicCall instruction
-         *
-         * @param call IntrinsicCall instruction to expand
-         * @return Vector of expanded LogicalInstructions (raw pointers for IRList)
-         */
-        std::vector<LogicalInstruction*> expandIntrinsic(LogicalInstruction* call);
-
-        /**
-         * @brief Create a LogicalInstruction from intrinsic body instruction
-         *
-         * @param instDef Intrinsic instruction definition
-         * @param regMap Map from intrinsic argument names to actual registers
-         * @return Created LogicalInstruction, or nullptr on error
-         */
-        LogicalInstruction* createInstructionFromIntrinsic(
-            const IntrinsicInstruction&                            instDef,
-            const std::unordered_map<std::string, StinkyRegister>& regMap);
-
-        /**
-         * @brief Resolve operand string to register
-         *
-         * @param operand Operand string (register name or immediate value)
-         * @param regMap Map from intrinsic argument names to actual registers
-         * @param outReg Output register if operand is a register
-         * @return true if operand is a register, false if it's an immediate
-         */
-        bool resolveOperand(const std::string&                                     operand,
-                            const std::unordered_map<std::string, StinkyRegister>& regMap,
-                            StinkyRegister&                                        outReg);
-    };
+    void expandIntrinsicsInBlock(BasicBlock& bb);
 
     /**
-     * @brief Factory function to create IntrinsicExpansionPass
-     * @return Unique pointer to IntrinsicExpansionPass
+     * @brief Expand a single IntrinsicCall instruction
+     *
+     * @param call IntrinsicCall instruction to expand
+     * @return Vector of expanded LogicalInstructions (raw pointers for IRList)
      */
-    std::unique_ptr<Pass> createIntrinsicExpansionPass();
+    std::vector<LogicalInstruction*> expandIntrinsic(LogicalInstruction* call);
 
-} // namespace stinkytofu
+    /**
+     * @brief Create a LogicalInstruction from intrinsic body instruction
+     *
+     * @param instDef Intrinsic instruction definition
+     * @param regMap Map from intrinsic argument names to actual registers
+     * @return Created LogicalInstruction, or nullptr on error
+     */
+    LogicalInstruction* createInstructionFromIntrinsic(
+        const IntrinsicInstruction& instDef,
+        const std::unordered_map<std::string, StinkyRegister>& regMap);
+
+    /**
+     * @brief Resolve operand string to register
+     *
+     * @param operand Operand string (register name or immediate value)
+     * @param regMap Map from intrinsic argument names to actual registers
+     * @param outReg Output register if operand is a register
+     * @return true if operand is a register, false if it's an immediate
+     */
+    bool resolveOperand(const std::string& operand,
+                        const std::unordered_map<std::string, StinkyRegister>& regMap,
+                        StinkyRegister& outReg);
+};
+
+/**
+ * @brief Factory function to create IntrinsicExpansionPass
+ * @return Unique pointer to IntrinsicExpansionPass
+ */
+std::unique_ptr<Pass> createIntrinsicExpansionPass();
+
+}  // namespace stinkytofu

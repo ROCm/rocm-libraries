@@ -22,57 +22,49 @@
  * ************************************************************************ */
 #include <gtest/gtest.h>
 
-#include "stinkytofu/transforms/asm/DeadCodeEliminationPass.hpp"
-#include "stinkytofu/serialization/asm/IRConverter.hpp"
-#include "stinkytofu/core/PassManager.hpp"
-#include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
-#include "stinkytofu/serialization/asm/StinkyAsmPrinter.hpp"
-
 #include <optional>
 #include <sstream>
 #include <string>
 
+#include "stinkytofu/core/PassManager.hpp"
+#include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
+#include "stinkytofu/serialization/asm/IRConverter.hpp"
+#include "stinkytofu/serialization/asm/StinkyAsmPrinter.hpp"
+#include "stinkytofu/transforms/asm/DeadCodeEliminationPass.hpp"
+
 using namespace stinkytofu;
 
-class DeadCodeEliminationPassTest : public ::testing::Test
-{
-protected:
-    void SetUp() override
-    {
+class DeadCodeEliminationPassTest : public ::testing::Test {
+   protected:
+    void SetUp() override {
         // Initialize GEMM config for GFX94X (gfx942)
-        gemmConfig.arch     = {9, 4, 2};
+        gemmConfig.arch = {9, 4, 2};
         gemmConfig.NumWaves = 2;
-        gemmConfig.TileA0   = 16;
-        gemmConfig.TileB0   = 16;
-        gemmConfig.TileM0   = 16;
-        gemmConfig.NumGRA   = 4;
-        gemmConfig.NumGRB   = 4;
-        gemmConfig.NumGRM   = 4;
+        gemmConfig.TileA0 = 16;
+        gemmConfig.TileB0 = 16;
+        gemmConfig.TileM0 = 16;
+        gemmConfig.NumGRA = 4;
+        gemmConfig.NumGRB = 4;
+        gemmConfig.NumGRM = 4;
     }
 
     // Parse IR and return a non-owning pointer
     // The converter must be kept alive for the lifetime of the Function
-    Function* parseIR(const std::string& irString, StinkyIRConverter& converter)
-    {
+    Function* parseIR(const std::string& irString, StinkyIRConverter& converter) {
         Function* func = converter.convertToFunction(irString);
-        if(!func)
-        {
+        if (!func) {
             std::cerr << "Failed to parse IR" << std::endl;
             return nullptr;
         }
         return func;
     }
 
-    std::string getFunctionIR(Function& func)
-    {
+    std::string getFunctionIR(Function& func) {
         std::ostringstream oss;
-        AsmPrinter         printer(oss);
-        for(BasicBlock& bb : func)
-        {
-            for(IRBase& ir : bb)
-            {
-                if(ir.getType() == IRBase::IRType::StinkyTofu)
-                {
+        AsmPrinter printer(oss);
+        for (BasicBlock& bb : func) {
+            for (IRBase& ir : bb) {
+                if (ir.getType() == IRBase::IRType::StinkyTofu) {
                     auto* inst = static_cast<StinkyInstruction*>(&ir);
                     printer.print(*inst);
                     oss << "\n";
@@ -86,8 +78,7 @@ protected:
 };
 
 // Test 1: Remove dead store (register overwritten before use)
-TEST_F(DeadCodeEliminationPassTest, RemoveSimpleDeadCode)
-{
+TEST_F(DeadCodeEliminationPassTest, RemoveSimpleDeadCode) {
     std::string irString = R"(
 v[0] = "st.v_mul_f32"(v[1], v[2])
 v[3] = "st.v_add_f32"(v[4], v[5])
@@ -120,8 +111,7 @@ v[6] = "st.v_sub_f32"(v[0], v[3])
 }
 
 // Test 2: Chain of dead stores (multiple overwrites)
-TEST_F(DeadCodeEliminationPassTest, ChainOfDeadCode)
-{
+TEST_F(DeadCodeEliminationPassTest, ChainOfDeadCode) {
     std::string irString = R"(
 v[0] = "st.v_mul_f32"(v[1], v[2])
 v[0] = "st.v_add_f32"(v[3], v[4])
@@ -154,8 +144,7 @@ v[0] = "st.v_sub_f32"(v[10], v[11])
 }
 
 // Test 3: Don't remove live code
-TEST_F(DeadCodeEliminationPassTest, DontRemoveLiveCode)
-{
+TEST_F(DeadCodeEliminationPassTest, DontRemoveLiveCode) {
     std::string irString = R"(
 v[0] = "st.v_mul_f32"(v[1], v[2])
 v[3] = "st.v_add_f32"(v[0], v[4])
@@ -184,8 +173,7 @@ v[5] = "st.v_fma_f32"(v[3], v[0], 1.0)
 }
 
 // Test 4: Multiple redefinitions, some with uses in between
-TEST_F(DeadCodeEliminationPassTest, MultipleUsesKeepAlive)
-{
+TEST_F(DeadCodeEliminationPassTest, MultipleUsesKeepAlive) {
     std::string irString = R"(
 v[0] = "st.v_mul_f32"(v[1], v[2])
 v[3] = "st.v_add_f32"(v[0], v[4])
@@ -217,8 +205,7 @@ v[7] = "st.v_fma_f32"(v[3], v[1], 1.0)
 }
 
 // Test 5: Don't remove memory operations
-TEST_F(DeadCodeEliminationPassTest, PreserveMemoryOperations)
-{
+TEST_F(DeadCodeEliminationPassTest, PreserveMemoryOperations) {
     std::string irString = R"(
 v[0] = "st.global_load_dword"(v[40])
 v[4] = "st.v_mul_f32"(v[1], v[2])
@@ -247,8 +234,7 @@ v[4] = "st.v_mul_f32"(v[1], v[2])
 }
 
 // Test 6: Empty IR
-TEST_F(DeadCodeEliminationPassTest, EmptyIR)
-{
+TEST_F(DeadCodeEliminationPassTest, EmptyIR) {
     std::string irString = "";
 
     StinkyIRConverter converter;
@@ -265,8 +251,7 @@ TEST_F(DeadCodeEliminationPassTest, EmptyIR)
 }
 
 // Test 7: Multiple dead stores to same register
-TEST_F(DeadCodeEliminationPassTest, AllDeadCode)
-{
+TEST_F(DeadCodeEliminationPassTest, AllDeadCode) {
     std::string irString = R"(
         v[0] = "st.v_mul_f32"(v[1], v[2])
         v[0] = "st.v_add_f32"(v[4], v[5])
@@ -296,8 +281,7 @@ TEST_F(DeadCodeEliminationPassTest, AllDeadCode)
 }
 
 // Test 8: Interleaved live and dead code
-TEST_F(DeadCodeEliminationPassTest, InterleavedLiveAndDead)
-{
+TEST_F(DeadCodeEliminationPassTest, InterleavedLiveAndDead) {
     std::string irString = R"(
 v[0] = "st.v_mul_f32"(v[1], v[2])
 v[3] = "st.v_add_f32"(v[4], v[5])
@@ -326,10 +310,9 @@ v[10] = "st.v_add_f32"(v[6], v[7])
     EXPECT_NE(result.find("st.v_fma_f32"), std::string::npos);
 
     // Should have 2 add instructions (v3 and v10)
-    std::string::size_type pos      = 0;
-    int                    addCount = 0;
-    while((pos = result.find("v_add_f32", pos)) != std::string::npos)
-    {
+    std::string::size_type pos = 0;
+    int addCount = 0;
+    while ((pos = result.find("v_add_f32", pos)) != std::string::npos) {
         addCount++;
         pos++;
     }
@@ -337,8 +320,7 @@ v[10] = "st.v_add_f32"(v[6], v[7])
 }
 
 // Test 9: Constant operands
-TEST_F(DeadCodeEliminationPassTest, ConstantOperands)
-{
+TEST_F(DeadCodeEliminationPassTest, ConstantOperands) {
     std::string irString = R"(
 v[0] = "st.v_mul_f32"(v[1], 2.0)
 v[3] = "st.v_add_f32"(v[4], 1.0)
@@ -366,8 +348,7 @@ v[6] = "st.v_fma_f32"(v[0], v[3], 3.0)
 }
 
 // Test 10: In-place operations
-TEST_F(DeadCodeEliminationPassTest, InPlaceOperations)
-{
+TEST_F(DeadCodeEliminationPassTest, InPlaceOperations) {
     std::string irString = R"(
 v[0] = "st.v_mul_f32"(v[1], v[2])
 v[0] = "st.v_add_f32"(v[0], v[3])

@@ -22,71 +22,60 @@
  * ************************************************************************ */
 
 #include "stinkytofu/analysis/logical/IRVerifierPass.hpp"
-#include "stinkytofu/support/ErrorHandling.hpp"
 
 #include <iostream>
 #include <sstream>
 
-namespace stinkytofu
-{
-    char LogicalIRVerifierPass::ID = 0;
+#include "stinkytofu/support/ErrorHandling.hpp"
 
-    void LogicalIRVerifierPass::run(Function& func, PassContext&)
-    {
-        std::string error = validateLogicalIR(func, config_);
-        if(!error.empty())
-        {
-            STINKY_UNREACHABLE(error.c_str());
+namespace stinkytofu {
+char LogicalIRVerifierPass::ID = 0;
+
+void LogicalIRVerifierPass::run(Function& func, PassContext&) {
+    std::string error = validateLogicalIR(func, config_);
+    if (!error.empty()) {
+        STINKY_UNREACHABLE(error.c_str());
+    }
+}
+
+std::string validateLogicalIR(Function& func, const LogicalIRVerifierConfig& config) {
+    if (config.verbose) {
+        std::cout << "[LogicalIRVerifier] Verifying Logical IR...\n";
+    }
+
+    if (func.empty()) return "Function is empty (no basic blocks)";
+
+    if (!func.getEntryBlock()) return "Function has no entry basic block";
+
+    size_t logicalCount = 0;
+    size_t stinkyCount = 0;
+    size_t totalBlocks = 0;
+
+    for (BasicBlock& bb : func) {
+        totalBlocks++;
+
+        for (IRBase& ir : bb) {
+            if (ir.getType() == IRBase::IRType::LogicalIR)
+                logicalCount++;
+            else if (ir.getType() == IRBase::IRType::StinkyTofu)
+                stinkyCount++;
         }
     }
 
-    std::string validateLogicalIR(Function& func, const LogicalIRVerifierConfig& config)
-    {
-        if(config.verbose)
-        {
-            std::cout << "[LogicalIRVerifier] Verifying Logical IR...\n";
-        }
-
-        if(func.empty())
-            return "Function is empty (no basic blocks)";
-
-        if(!func.getEntryBlock())
-            return "Function has no entry basic block";
-
-        size_t logicalCount = 0;
-        size_t stinkyCount  = 0;
-        size_t totalBlocks  = 0;
-
-        for(BasicBlock& bb : func)
-        {
-            totalBlocks++;
-
-            for(IRBase& ir : bb)
-            {
-                if(ir.getType() == IRBase::IRType::LogicalIR)
-                    logicalCount++;
-                else if(ir.getType() == IRBase::IRType::StinkyTofu)
-                    stinkyCount++;
-            }
-        }
-
-        if(stinkyCount > 0)
-        {
-            std::stringstream ss;
-            ss << "Logical IR contains " << stinkyCount << " StinkyTofu (assembly) instructions. "
-               << "This suggests IR is partially lowered or mixed.";
-            return ss.str();
-        }
-
-        if(logicalCount == 0)
-            return "Function contains no Logical instructions (empty IR)";
-
-        if(config.verbose)
-        {
-            std::cout << "[LogicalIRVerifier] OK: " << totalBlocks << " blocks, " << logicalCount
-                      << " logical instructions\n";
-        }
-
-        return "";
+    if (stinkyCount > 0) {
+        std::stringstream ss;
+        ss << "Logical IR contains " << stinkyCount << " StinkyTofu (assembly) instructions. "
+           << "This suggests IR is partially lowered or mixed.";
+        return ss.str();
     }
-} // namespace stinkytofu
+
+    if (logicalCount == 0) return "Function contains no Logical instructions (empty IR)";
+
+    if (config.verbose) {
+        std::cout << "[LogicalIRVerifier] OK: " << totalBlocks << " blocks, " << logicalCount
+                  << " logical instructions\n";
+    }
+
+    return "";
+}
+}  // namespace stinkytofu

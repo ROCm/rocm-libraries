@@ -22,16 +22,14 @@
  * ************************************************************************ */
 #pragma once
 
-namespace stinkytofu
-{
-    /// Optimization level for pipelines.
-    /// Used by backend populators to decide which passes to include.
-    enum class OptLevel
-    {
-        O0, ///< No optimization
-        O1, ///< Fast compile: Peephole only
-        O2, ///< Balanced: Peephole + DCE (default)
-        O3, ///< Aggressive: All optimization passes
-    };
+namespace stinkytofu {
+/// Optimization level for pipelines.
+/// Used by backend populators to decide which passes to include.
+enum class OptLevel {
+    O0,  ///< No optimization
+    O1,  ///< Fast compile: Peephole only
+    O2,  ///< Balanced: Peephole + DCE (default)
+    O3,  ///< Aggressive: All optimization passes
+};
 
-} // namespace stinkytofu
+}  // namespace stinkytofu

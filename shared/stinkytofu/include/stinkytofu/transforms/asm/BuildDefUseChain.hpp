@@ -24,50 +24,49 @@
 
 #include <memory>
 
-namespace stinkytofu
-{
-    class BasicBlock;
-    class Function;
-    class Pass;
+namespace stinkytofu {
+class BasicBlock;
+class Function;
+class Pass;
 
-    /// Builds def-use chains for all instructions in the given Function.
-    ///
-    /// Two phases:
-    ///   1. insertPhiInstructions() — places PHI pseudo-instructions at CFG join
-    ///      points using Cytron et al.'s dominance-frontier algorithm (semi-pruned).
-    ///   2. Chain construction — a single RPO traversal with dominator-inherited
-    ///      reaching definitions links every instruction's sources and users.
-    ///
-    /// sources layout:
-    ///   - Regular instructions: one entry per DWORD source register that has a
-    ///     reaching definition (skips undefined / pseudo registers).
-    ///   - PHI instructions: sources[j] = reaching def from predecessor j
-    ///     (nullptr if undefined on that edge).
-    ///
-    /// The chains are stored directly in StinkyInstruction objects:
-    ///   * inst->getSources()  — definitions consumed by this instruction
-    ///   * inst->getUsers()        — instructions that consume this instruction
-    ///
-    /// Dead PHIs (those with no users) are removed after chain construction.
-    ///
-    /// Usage:
-    ///   buildUseDefChain(function, true);   // rebuild (clears old PHIs/chains)
-    ///   buildUseDefChain(function, false);  // first time (no existing state)
-    ///   for(auto* def : inst->getSources()) { /* use operand def */ }
-    ///   for(auto* user : inst->getUsers()) { /* use user */ }
-    ///
-    /// @param clearExisting  When true, existing PHI instructions and def-use
-    ///                        chains are removed before rebuilding.  Pass false
-    ///                        on a fresh function that has no PHIs/chains yet.
-    ///
-    /// Note: Assumes non-SSA form (physical registers). Requires CFG to be built.
-    void buildUseDefChain(Function& func, bool clearExisting);
+/// Builds def-use chains for all instructions in the given Function.
+///
+/// Two phases:
+///   1. insertPhiInstructions() — places PHI pseudo-instructions at CFG join
+///      points using Cytron et al.'s dominance-frontier algorithm (semi-pruned).
+///   2. Chain construction — a single RPO traversal with dominator-inherited
+///      reaching definitions links every instruction's sources and users.
+///
+/// sources layout:
+///   - Regular instructions: one entry per DWORD source register that has a
+///     reaching definition (skips undefined / pseudo registers).
+///   - PHI instructions: sources[j] = reaching def from predecessor j
+///     (nullptr if undefined on that edge).
+///
+/// The chains are stored directly in StinkyInstruction objects:
+///   * inst->getSources()  — definitions consumed by this instruction
+///   * inst->getUsers()        — instructions that consume this instruction
+///
+/// Dead PHIs (those with no users) are removed after chain construction.
+///
+/// Usage:
+///   buildUseDefChain(function, true);   // rebuild (clears old PHIs/chains)
+///   buildUseDefChain(function, false);  // first time (no existing state)
+///   for(auto* def : inst->getSources()) { /* use operand def */ }
+///   for(auto* user : inst->getUsers()) { /* use user */ }
+///
+/// @param clearExisting  When true, existing PHI instructions and def-use
+///                        chains are removed before rebuilding.  Pass false
+///                        on a fresh function that has no PHIs/chains yet.
+///
+/// Note: Assumes non-SSA form (physical registers). Requires CFG to be built.
+void buildUseDefChain(Function& func, bool clearExisting);
 
-    /// Creates a Pass that builds the def-use chain for a Function.
-    /// Use this to run buildUseDefChain as part of a pass pipeline.
-    ///
-    /// @param clearExisting  Forwarded to buildUseDefChain(). When true,
-    ///                        existing PHIs and chains are removed first.
-    std::unique_ptr<Pass> createBuildUseDefChainPass(bool clearExisting = true);
+/// Creates a Pass that builds the def-use chain for a Function.
+/// Use this to run buildUseDefChain as part of a pass pipeline.
+///
+/// @param clearExisting  Forwarded to buildUseDefChain(). When true,
+///                        existing PHIs and chains are removed first.
+std::unique_ptr<Pass> createBuildUseDefChainPass(bool clearExisting = true);
 
-} // namespace stinkytofu
+}  // namespace stinkytofu

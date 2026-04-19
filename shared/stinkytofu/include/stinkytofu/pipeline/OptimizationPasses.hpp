@@ -24,26 +24,20 @@
 
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/pipeline/OptLevel.hpp"
-
 #include "stinkytofu/transforms/asm/DeadCodeEliminationPass.hpp"
 #include "stinkytofu/transforms/asm/PeepholeOptimizationPass.hpp"
 #include "stinkytofu/transforms/asm/RedundantMovEliminationPass.hpp"
 
-namespace stinkytofu
-{
-    /// Add optimization passes (Peephole, RedundantMovElim, DCE) to PassManager.
-    /// Pass selection depends on OptLevel.
-    /// Shared across backends.
-    inline void addPeepholeOptPasses(PassManager& pm, OptLevel optLevel)
-    {
-        if(optLevel >= OptLevel::O1)
-            pm.addPass(createPeepholeOptimizationPass());
+namespace stinkytofu {
+/// Add optimization passes (Peephole, RedundantMovElim, DCE) to PassManager.
+/// Pass selection depends on OptLevel.
+/// Shared across backends.
+inline void addPeepholeOptPasses(PassManager& pm, OptLevel optLevel) {
+    if (optLevel >= OptLevel::O1) pm.addPass(createPeepholeOptimizationPass());
 
-        if(optLevel >= OptLevel::O3)
-            pm.addPass(createRedundantMovEliminationPass());
+    if (optLevel >= OptLevel::O3) pm.addPass(createRedundantMovEliminationPass());
 
-        if(optLevel >= OptLevel::O2)
-            pm.addPass(createDeadCodeEliminationPass());
-    }
+    if (optLevel >= OptLevel::O2) pm.addPass(createDeadCodeEliminationPass());
+}
 
-} // namespace stinkytofu
+}  // namespace stinkytofu

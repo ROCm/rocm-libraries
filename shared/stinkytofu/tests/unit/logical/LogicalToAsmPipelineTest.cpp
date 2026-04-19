@@ -21,19 +21,21 @@
  *
  * ************************************************************************ */
 
-#include "TestHelpers.hpp"
-#include "stinkytofu/serialization/asm/StinkyAsmEmitter.hpp"
-#include "stinkytofu/ir/logical/LogicalInstructions.hpp"
-#include "stinkytofu/ir/logical/LogicalToFunctionConverter.hpp"
-#include "stinkytofu/transforms/logical/CompositeInstructionLoweringPass.hpp"
-#include "stinkytofu/transforms/logical/ToStinkyAsmPass.hpp"
-#include "stinkytofu/bindings/python/LogicalModule.hpp"
-#include "stinkytofu/hardware/ArchHelper.hpp"
-#include "stinkytofu/hardware/GfxIsa.hpp"
-#include "stinkytofu/core/PassManager.hpp"
 #include <gtest/gtest.h>
+
 #include <memory>
 #include <sstream>
+
+#include "TestHelpers.hpp"
+#include "stinkytofu/bindings/python/LogicalModule.hpp"
+#include "stinkytofu/core/PassManager.hpp"
+#include "stinkytofu/hardware/ArchHelper.hpp"
+#include "stinkytofu/hardware/GfxIsa.hpp"
+#include "stinkytofu/ir/logical/LogicalInstructions.hpp"
+#include "stinkytofu/ir/logical/LogicalToFunctionConverter.hpp"
+#include "stinkytofu/serialization/asm/StinkyAsmEmitter.hpp"
+#include "stinkytofu/transforms/logical/CompositeInstructionLoweringPass.hpp"
+#include "stinkytofu/transforms/logical/ToStinkyAsmPass.hpp"
 
 using namespace stinkytofu;
 
@@ -44,11 +46,9 @@ using namespace stinkytofu;
  * 3. Run logical lowering passes using unified PassManager
  * 4. Emit assembly string
  */
-class IRToAsmPipelineTest : public ::testing::Test
-{
-protected:
-    void SetUp() override
-    {
+class IRToAsmPipelineTest : public ::testing::Test {
+   protected:
+    void SetUp() override {
         // Helper registers
         using namespace stinkytofu::test;
         v0 = vgpr(0);
@@ -60,8 +60,7 @@ protected:
     StinkyRegister v0, v1, v2, v3;
 };
 
-TEST_F(IRToAsmPipelineTest, SimpleVectorALU)
-{
+TEST_F(IRToAsmPipelineTest, SimpleVectorALU) {
     Function func("kernel");
     BasicBlock* entryBB = func.createBasicBlock("entry");
 
@@ -74,21 +73,20 @@ TEST_F(IRToAsmPipelineTest, SimpleVectorALU)
 
     // Verify initial setup
     size_t instCount = 0;
-    for(BasicBlock& bb : func)
-    {
+    for (BasicBlock& bb : func) {
         instCount += bb.size();
     }
     EXPECT_EQ(instCount, 2) << "Should have 2 logical instructions in IRList";
 
     // Step 3: Set architecture config and run logical lowering passes
     GemmTileConfig config;
-    config.arch     = {9, 4, 2}; // Gfx942
-    config.TileA0   = 16;
-    config.TileB0   = 16;
-    config.TileM0   = 16;
-    config.NumGRA   = 4;
-    config.NumGRB   = 4;
-    config.NumGRM   = 4;
+    config.arch = {9, 4, 2};  // Gfx942
+    config.TileA0 = 16;
+    config.TileB0 = 16;
+    config.TileM0 = 16;
+    config.NumGRA = 4;
+    config.NumGRB = 4;
+    config.NumGRM = 4;
     config.NumWaves = 1;
     pm.setGemmTileConfig(config);
 
@@ -101,15 +99,12 @@ TEST_F(IRToAsmPipelineTest, SimpleVectorALU)
     pm.run(func);
 
     // Verify lowering (all instructions should now be StinkyInstruction)
-    instCount           = 0;
+    instCount = 0;
     size_t asmInstCount = 0;
-    for(BasicBlock& bb : func)
-    {
-        for(IRBase& ir : bb)
-        {
+    for (BasicBlock& bb : func) {
+        for (IRBase& ir : bb) {
             instCount++;
-            if(ir.getType() == IRBase::IRType::StinkyTofu)
-            {
+            if (ir.getType() == IRBase::IRType::StinkyTofu) {
                 asmInstCount++;
             }
         }

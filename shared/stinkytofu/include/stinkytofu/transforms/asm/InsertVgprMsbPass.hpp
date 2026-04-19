@@ -24,20 +24,19 @@
 
 #include <memory>
 
-namespace stinkytofu
-{
-    class Pass;
+namespace stinkytofu {
+class Pass;
 
-    /// Creates a pass that inserts s_set_vgpr_msb instructions before VOP instructions
-    /// whose VGPR operands require MSB configuration.
-    ///
-    /// For architectures with HasVgprMSB (e.g. gfx1250), VGPRs above index 255 require
-    /// the hardware VGPR_OFF register to be configured via s_set_vgpr_msb. This pass
-    /// scans instructions, computes the required MSB value per operand slot, and inserts
-    /// s_set_vgpr_msb when the required value differs from the current state.
-    ///
-    /// After a label (branch target), the pass conservatively resets MSB state and
-    /// inserts an s_nop before s_set_vgpr_msb to satisfy hardware constraints.
-    std::unique_ptr<Pass> createInsertVgprMsbPass();
+/// Creates a pass that inserts s_set_vgpr_msb instructions before VOP instructions
+/// whose VGPR operands require MSB configuration.
+///
+/// For architectures with HasVgprMSB (e.g. gfx1250), VGPRs above index 255 require
+/// the hardware VGPR_OFF register to be configured via s_set_vgpr_msb. This pass
+/// scans instructions, computes the required MSB value per operand slot, and inserts
+/// s_set_vgpr_msb when the required value differs from the current state.
+///
+/// After a label (branch target), the pass conservatively resets MSB state and
+/// inserts an s_nop before s_set_vgpr_msb to satisfy hardware constraints.
+std::unique_ptr<Pass> createInsertVgprMsbPass();
 
-} // namespace stinkytofu
+}  // namespace stinkytofu

@@ -23,126 +23,99 @@
 
 #pragma once
 
-#include "stinkytofu/core/IRBase.hpp"
 #include <memory>
 #include <string>
 #include <vector>
 
-namespace stinkytofu
-{
-    // Forward declaration
-    class IRListModule;
+#include "stinkytofu/core/IRBase.hpp"
 
-    /**
-     * @brief Assembly-level macro definition (.macro ... .endm)
-     * 
-     * Represents a reusable assembly template that appears in the final .s file.
-     * 
-     * Example:
-     *   .macro V_MAGIC_DIV vgprDstIdx:req, dividend:req, magicNumber:req, magicShift:req, magicA:req
-     *       s_set_vgpr_msb 0
-     *       v_mul_hi_u32 v[\vgprDstIdx+1], \dividend, \magicNumber
-     *       v_mul_lo_u32 v[\vgprDstIdx+0], \dividend, \magicA
-     *       v_add_nc_u32 v[\vgprDstIdx+0], v[\vgprDstIdx+0], v[\vgprDstIdx+1]
-     *       v_lshrrev_b32 v[\vgprDstIdx+0], \magicShift, v[\vgprDstIdx+0]
-     *   .endm
-     */
-    struct AsmMacroDefinition : public IRBase
-    {
-        friend class IRBase;
+namespace stinkytofu {
+// Forward declaration
+class IRListModule;
 
-        std::string name; // Macro name (e.g., "V_MAGIC_DIV")
-        std::vector<std::string>
-            parameters; // Parameter names (e.g., ["vgprDstIdx", "dividend", ...])
-        std::shared_ptr<IRListModule> body; // Instructions inside the macro
-        std::string                   comment;
+/**
+ * @brief Assembly-level macro definition (.macro ... .endm)
+ *
+ * Represents a reusable assembly template that appears in the final .s file.
+ *
+ * Example:
+ *   .macro V_MAGIC_DIV vgprDstIdx:req, dividend:req, magicNumber:req, magicShift:req, magicA:req
+ *       s_set_vgpr_msb 0
+ *       v_mul_hi_u32 v[\vgprDstIdx+1], \dividend, \magicNumber
+ *       v_mul_lo_u32 v[\vgprDstIdx+0], \dividend, \magicA
+ *       v_add_nc_u32 v[\vgprDstIdx+0], v[\vgprDstIdx+0], v[\vgprDstIdx+1]
+ *       v_lshrrev_b32 v[\vgprDstIdx+0], \magicShift, v[\vgprDstIdx+0]
+ *   .endm
+ */
+struct AsmMacroDefinition : public IRBase {
+    friend class IRBase;
 
-    private:
-        AsmMacroDefinition()
-            : IRBase(IRType::StinkyTofu)
-        {
+    std::string name;                     // Macro name (e.g., "V_MAGIC_DIV")
+    std::vector<std::string> parameters;  // Parameter names (e.g., ["vgprDstIdx", "dividend", ...])
+    std::shared_ptr<IRListModule> body;   // Instructions inside the macro
+    std::string comment;
+
+   private:
+    AsmMacroDefinition() : IRBase(IRType::StinkyTofu) {}
+
+    AsmMacroDefinition(const std::string& name, const std::vector<std::string>& parameters,
+                       std::shared_ptr<IRListModule> body, const std::string& comment = "")
+        : IRBase(IRType::StinkyTofu),
+          name(name),
+          parameters(parameters),
+          body(body),
+          comment(comment) {}
+
+    ~AsmMacroDefinition() = default;
+
+   public:
+    // Implement IRBase::dump()
+    void dump(std::ostream& out) const override {
+        out << ".macro " << name << "(";
+        for (size_t i = 0; i < parameters.size(); ++i) {
+            if (i > 0) out << ", ";
+            out << parameters[i];
         }
+        out << ")";
+        if (!comment.empty()) out << "  // " << comment;
+    }
+};
 
-        AsmMacroDefinition(const std::string&              name,
-                           const std::vector<std::string>& parameters,
-                           std::shared_ptr<IRListModule>   body,
-                           const std::string&              comment = "")
-            : IRBase(IRType::StinkyTofu)
-            , name(name)
-            , parameters(parameters)
-            , body(body)
-            , comment(comment)
-        {
+/**
+ * @brief Assembly-level macro invocation
+ *
+ * Represents a call to a defined macro with specific arguments.
+ *
+ * Example:
+ *   V_MAGIC_DIV 0, v1, s2, 8, 1
+ */
+struct AsmMacroInvocation : public IRBase {
+    friend class IRBase;
+
+    std::string name;                    // Macro name to invoke
+    std::vector<std::string> arguments;  // Actual argument values
+    std::string comment;
+
+   private:
+    AsmMacroInvocation() : IRBase(IRType::StinkyTofu) {}
+
+    AsmMacroInvocation(const std::string& name, const std::vector<std::string>& arguments,
+                       const std::string& comment = "")
+        : IRBase(IRType::StinkyTofu), name(name), arguments(arguments), comment(comment) {}
+
+    ~AsmMacroInvocation() = default;
+
+   public:
+    // Implement IRBase::dump()
+    void dump(std::ostream& out) const override {
+        out << name << "(";
+        for (size_t i = 0; i < arguments.size(); ++i) {
+            if (i > 0) out << ", ";
+            out << arguments[i];
         }
+        out << ")";
+        if (!comment.empty()) out << "  // " << comment;
+    }
+};
 
-        ~AsmMacroDefinition() = default;
-
-    public:
-        // Implement IRBase::dump()
-        void dump(std::ostream& out) const override
-        {
-            out << ".macro " << name << "(";
-            for(size_t i = 0; i < parameters.size(); ++i)
-            {
-                if(i > 0)
-                    out << ", ";
-                out << parameters[i];
-            }
-            out << ")";
-            if(!comment.empty())
-                out << "  // " << comment;
-        }
-    };
-
-    /**
-     * @brief Assembly-level macro invocation
-     * 
-     * Represents a call to a defined macro with specific arguments.
-     * 
-     * Example:
-     *   V_MAGIC_DIV 0, v1, s2, 8, 1
-     */
-    struct AsmMacroInvocation : public IRBase
-    {
-        friend class IRBase;
-
-        std::string              name; // Macro name to invoke
-        std::vector<std::string> arguments; // Actual argument values
-        std::string              comment;
-
-    private:
-        AsmMacroInvocation()
-            : IRBase(IRType::StinkyTofu)
-        {
-        }
-
-        AsmMacroInvocation(const std::string&              name,
-                           const std::vector<std::string>& arguments,
-                           const std::string&              comment = "")
-            : IRBase(IRType::StinkyTofu)
-            , name(name)
-            , arguments(arguments)
-            , comment(comment)
-        {
-        }
-
-        ~AsmMacroInvocation() = default;
-
-    public:
-        // Implement IRBase::dump()
-        void dump(std::ostream& out) const override
-        {
-            out << name << "(";
-            for(size_t i = 0; i < arguments.size(); ++i)
-            {
-                if(i > 0)
-                    out << ", ";
-                out << arguments[i];
-            }
-            out << ")";
-            if(!comment.empty())
-                out << "  // " << comment;
-        }
-    };
-
-} // namespace stinkytofu
+}  // namespace stinkytofu

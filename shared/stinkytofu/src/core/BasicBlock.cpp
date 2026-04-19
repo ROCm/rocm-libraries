@@ -18,64 +18,52 @@
  *
  * ************************************************************************ */
 #include "stinkytofu/core/BasicBlock.hpp"
-#include "stinkytofu/core/Function.hpp"
 
 #include <iostream>
 #include <ostream>
 
-namespace stinkytofu
-{
-    const Function* BasicBlock::getParentFunc() const
-    {
-        return getParent();
+#include "stinkytofu/core/Function.hpp"
+
+namespace stinkytofu {
+const Function* BasicBlock::getParentFunc() const {
+    return getParent();
+}
+
+void BasicBlock::remove() {
+    Function* p = getParent();
+    if (p) p->removeBasicBlock(this);
+}
+
+void BasicBlock::erase() {
+    Function* p = getParent();
+    if (p)
+        p->eraseBasicBlock(BasicBlockList::iterator(this));
+    else
+        delete this;
+}
+
+void BasicBlock::dump() const {
+    if (!label.empty()) {
+        std::cerr << label << ":\n";
+    } else {
+        std::cerr << "(unlabeled):";
     }
 
-    void BasicBlock::remove()
-    {
-        Function* p = getParent();
-        if(p)
-            p->removeBasicBlock(this);
+    for (const IRBase& irNode : ir) {
+        std::cerr << "  ";
+        irNode.dump(std::cerr);
     }
 
-    void BasicBlock::erase()
-    {
-        Function* p = getParent();
-        if(p)
-            p->eraseBasicBlock(BasicBlockList::iterator(this));
-        else
-            delete this;
-    }
-
-    void BasicBlock::dump() const
-    {
-        if(!label.empty())
-        {
-            std::cerr << label << ":\n";
+    if (!successors.empty()) {
+        std::cerr << "  ; successors: ";
+        for (size_t i = 0; i < successors.size(); ++i) {
+            if (i > 0) std::cerr << ", ";
+            if (!successors[i]->getLabel().empty())
+                std::cerr << successors[i]->getLabel();
+            else
+                std::cerr << "<unlabeled>";
         }
-        else
-        {
-            std::cerr << "(unlabeled):";
-        }
-
-        for(const IRBase& irNode : ir)
-        {
-            std::cerr << "  ";
-            irNode.dump(std::cerr);
-        }
-
-        if(!successors.empty())
-        {
-            std::cerr << "  ; successors: ";
-            for(size_t i = 0; i < successors.size(); ++i)
-            {
-                if(i > 0)
-                    std::cerr << ", ";
-                if(!successors[i]->getLabel().empty())
-                    std::cerr << successors[i]->getLabel();
-                else
-                    std::cerr << "<unlabeled>";
-            }
-            std::cerr << "\n";
-        }
+        std::cerr << "\n";
     }
 }
+}  // namespace stinkytofu

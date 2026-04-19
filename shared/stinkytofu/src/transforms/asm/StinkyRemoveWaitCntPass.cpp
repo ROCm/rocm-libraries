@@ -22,85 +22,66 @@
  * ************************************************************************ */
 
 #include "stinkytofu/transforms/asm/StinkyRemoveWaitCntPass.hpp"
+
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 
-namespace
-{
-    using namespace stinkytofu;
+namespace {
+using namespace stinkytofu;
 
-    bool tryRemoveTensorWaitCnt(StinkyInstruction* stinkyInst)
-    {
-        const auto& label = stinkyInst->getParent()->getLabel();
+bool tryRemoveTensorWaitCnt(StinkyInstruction* stinkyInst) {
+    const auto& label = stinkyInst->getParent()->getLabel();
 
-        if(stinkyInst && stinkyInst->is(InstFlag::IF_WaitTensorCnt))
-        {
-            return true;
-        }
-        return false;
+    if (stinkyInst && stinkyInst->is(InstFlag::IF_WaitTensorCnt)) {
+        return true;
     }
+    return false;
+}
 
-    void removeWaitCntsInBlock(BasicBlock& bb, bool removeTensorWaitCnt)
-    {
-        for(auto it = bb.begin(); it != bb.end();)
-        {
-            auto* stinkyInst = dyn_cast<StinkyInstruction>(it.getNodePtr());
+void removeWaitCntsInBlock(BasicBlock& bb, bool removeTensorWaitCnt) {
+    for (auto it = bb.begin(); it != bb.end();) {
+        auto* stinkyInst = dyn_cast<StinkyInstruction>(it.getNodePtr());
 
-            if(stinkyInst
-               && (isWaitCnt(*stinkyInst)
-                   || (removeTensorWaitCnt && tryRemoveTensorWaitCnt(stinkyInst))))
-            {
-                it = bb.eraseIR(it);
-            }
-            else
-            {
-                ++it;
-            }
+        if (stinkyInst && (isWaitCnt(*stinkyInst) ||
+                           (removeTensorWaitCnt && tryRemoveTensorWaitCnt(stinkyInst)))) {
+            it = bb.eraseIR(it);
+        } else {
+            ++it;
         }
-    }
-
-    class StinkyRemoveWaitCntPass : public StinkyInstPass
-    {
-    public:
-        StinkyRemoveWaitCntPass(bool removeTensorWaitCnt)
-            : removeTensorWaitCnt(removeTensorWaitCnt)
-        {
-        }
-
-        static char ID;
-
-        const char* getName() const override
-        {
-            return "StinkyRemoveWaitCntPass";
-        }
-
-        PassID getPassID() const override
-        {
-            return &StinkyRemoveWaitCntPass::ID;
-        }
-
-        void run(Function& func, PassContext& passCtx) override
-        {
-            for(BasicBlock& bb : func)
-            {
-                if(passCtx.shouldProcessBasicBlock(bb))
-                {
-                    removeWaitCntsInBlock(bb, removeTensorWaitCnt);
-                }
-            }
-        }
-
-    private:
-        bool removeTensorWaitCnt;
-    };
-
-    char StinkyRemoveWaitCntPass::ID = 0;
-} // namespace
-
-namespace stinkytofu
-{
-    std::unique_ptr<Pass> createStinkyRemoveWaitCntPass(bool removeTensorWaitCnt)
-    {
-        return std::make_unique<StinkyRemoveWaitCntPass>(removeTensorWaitCnt);
     }
 }
+
+class StinkyRemoveWaitCntPass : public StinkyInstPass {
+   public:
+    StinkyRemoveWaitCntPass(bool removeTensorWaitCnt) : removeTensorWaitCnt(removeTensorWaitCnt) {}
+
+    static char ID;
+
+    const char* getName() const override {
+        return "StinkyRemoveWaitCntPass";
+    }
+
+    PassID getPassID() const override {
+        return &StinkyRemoveWaitCntPass::ID;
+    }
+
+    void run(Function& func, PassContext& passCtx) override {
+        for (BasicBlock& bb : func) {
+            if (passCtx.shouldProcessBasicBlock(bb)) {
+                removeWaitCntsInBlock(bb, removeTensorWaitCnt);
+            }
+        }
+    }
+
+   private:
+    bool removeTensorWaitCnt;
+};
+
+char StinkyRemoveWaitCntPass::ID = 0;
+}  // namespace
+
+namespace stinkytofu {
+std::unique_ptr<Pass> createStinkyRemoveWaitCntPass(bool removeTensorWaitCnt) {
+    return std::make_unique<StinkyRemoveWaitCntPass>(removeTensorWaitCnt);
+}
+}  // namespace stinkytofu

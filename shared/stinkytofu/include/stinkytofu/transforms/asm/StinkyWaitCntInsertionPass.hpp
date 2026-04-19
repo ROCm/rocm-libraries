@@ -25,18 +25,17 @@
 
 #include <memory>
 
-namespace stinkytofu
-{
-    class Pass;
+namespace stinkytofu {
+class Pass;
 
-    /**
-     * @brief Creates a minimal wait-count insertion pass.
-     *
-     * Inserts architecture-specific wait instructions so asynchronous memory operations
-     * complete before their results are used.
-     *
-     * @param insertTensorWaitCnt Whether to insert tensor waitcnt instructions.
-     */
-    std::unique_ptr<Pass> createStinkyWaitCntInsertionPass(bool insertTensorWaitCnt = false);
+/**
+ * @brief Creates a minimal wait-count insertion pass.
+ *
+ * Inserts architecture-specific wait instructions so asynchronous memory operations
+ * complete before their results are used.
+ *
+ * @param insertTensorWaitCnt Whether to insert tensor waitcnt instructions.
+ */
+std::unique_ptr<Pass> createStinkyWaitCntInsertionPass(bool insertTensorWaitCnt = false);
 
-} // namespace stinkytofu
+}  // namespace stinkytofu

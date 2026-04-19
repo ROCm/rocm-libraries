@@ -23,56 +23,48 @@
 
 #pragma once
 
-#include "stinkytofu/core/Function.hpp"
-#include "stinkytofu/core/PassManager.hpp"
 #include <memory>
 #include <string>
 
-namespace stinkytofu
-{
-    /// Configuration for StinkyTofu Assembly IR verification only.
-    /// Used by the ASM pipeline; not shared with Logical IR.
-    struct AsmVerifierConfig
-    {
-        bool abortOnError        = true;
-        bool verbose             = false;
-        bool checkRegisterWidths    = true;
-        bool checkRegisterRanges    = false;
-        bool checkReadWriteOperands = true;
-    };
+#include "stinkytofu/core/Function.hpp"
+#include "stinkytofu/core/PassManager.hpp"
 
-    /// Validate StinkyTofu Assembly IR (structure, HwInstDesc, register widths).
-    /// Returns error message if invalid, empty string if valid.
-    /// Only for ASM; do not use for Logical IR.
-    std::string validateStinkyIR(Function& func, const AsmVerifierConfig& config = {});
+namespace stinkytofu {
+/// Configuration for StinkyTofu Assembly IR verification only.
+/// Used by the ASM pipeline; not shared with Logical IR.
+struct AsmVerifierConfig {
+    bool abortOnError = true;
+    bool verbose = false;
+    bool checkRegisterWidths = true;
+    bool checkRegisterRanges = false;
+    bool checkReadWriteOperands = true;
+};
 
-    /// Pass that verifies StinkyTofu Assembly IR. Used only in the ASM pass pipeline.
-    class StinkyIRVerifierPass : public Pass
-    {
-    public:
-        static char ID;
+/// Validate StinkyTofu Assembly IR (structure, HwInstDesc, register widths).
+/// Returns error message if invalid, empty string if valid.
+/// Only for ASM; do not use for Logical IR.
+std::string validateStinkyIR(Function& func, const AsmVerifierConfig& config = {});
 
-        explicit StinkyIRVerifierPass(AsmVerifierConfig config = {})
-            : config_(std::move(config))
-        {
-        }
+/// Pass that verifies StinkyTofu Assembly IR. Used only in the ASM pass pipeline.
+class StinkyIRVerifierPass : public Pass {
+   public:
+    static char ID;
 
-        PassID getPassID() const override
-        {
-            return &ID;
-        }
-        const char* getName() const override
-        {
-            return "StinkyIRVerifier";
-        }
-        void run(Function& func, PassContext& ctx) override;
+    explicit StinkyIRVerifierPass(AsmVerifierConfig config = {}) : config_(std::move(config)) {}
 
-    private:
-        AsmVerifierConfig config_;
-    };
-
-    inline std::unique_ptr<Pass> createStinkyIRVerifierPass(AsmVerifierConfig config = {})
-    {
-        return std::make_unique<StinkyIRVerifierPass>(std::move(config));
+    PassID getPassID() const override {
+        return &ID;
     }
-} // namespace stinkytofu
+    const char* getName() const override {
+        return "StinkyIRVerifier";
+    }
+    void run(Function& func, PassContext& ctx) override;
+
+   private:
+    AsmVerifierConfig config_;
+};
+
+inline std::unique_ptr<Pass> createStinkyIRVerifierPass(AsmVerifierConfig config = {}) {
+    return std::make_unique<StinkyIRVerifierPass>(std::move(config));
+}
+}  // namespace stinkytofu

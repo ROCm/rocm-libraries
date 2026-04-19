@@ -25,22 +25,21 @@
 
 #include <memory>
 
-namespace stinkytofu
-{
-    class Pass;
+namespace stinkytofu {
+class Pass;
 
-    /**
-     * @brief Attaches LDS pseudo-registers to instructions for implicit dependency tracking.
-     *
-     * Adds RegType::LDS pseudo-registers (keyed by MemTokenData token IDs) to LDS-related
-     * instructions so that the def-use chain enforces barrier ordering:
-     *
-     *   LDS writers (tensor_load, ds_write) — token to dest (defines)
-     *   LDS readers (ds_read)               — token to src  (uses)
-     *   Barriers                            — token to both src and dest
-     *
-     * This creates the dependency chain:  writer → barrier → reader.
-     */
-    std::unique_ptr<Pass> createStinkyBuildImplicitDependencyPass();
+/**
+ * @brief Attaches LDS pseudo-registers to instructions for implicit dependency tracking.
+ *
+ * Adds RegType::LDS pseudo-registers (keyed by MemTokenData token IDs) to LDS-related
+ * instructions so that the def-use chain enforces barrier ordering:
+ *
+ *   LDS writers (tensor_load, ds_write) — token to dest (defines)
+ *   LDS readers (ds_read)               — token to src  (uses)
+ *   Barriers                            — token to both src and dest
+ *
+ * This creates the dependency chain:  writer → barrier → reader.
+ */
+std::unique_ptr<Pass> createStinkyBuildImplicitDependencyPass();
 
-} // namespace stinkytofu
+}  // namespace stinkytofu

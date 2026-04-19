@@ -29,21 +29,17 @@
 
 using namespace stinkytofu;
 
-class HwInstDescTest : public ::testing::Test
-{
-protected:
+class HwInstDescTest : public ::testing::Test {
+   protected:
     GfxArchID arch;
 
-    void SetUp() override
-    {
+    void SetUp() override {
         arch = getGfxArchID(12, 5, 0);
     }
 
-    const HwInstDesc* getDescByMnemonic(const std::string& mnemonic)
-    {
+    const HwInstDesc* getDescByMnemonic(const std::string& mnemonic) {
         uint16_t isaOp = getMnemonicToIsaOpcode(mnemonic, arch);
-        if(isaOp == GFX::INVALID)
-            return nullptr;
+        if (isaOp == GFX::INVALID) return nullptr;
         return getMCIDByIsaOp(isaOp, arch);
     }
 };
@@ -51,22 +47,19 @@ protected:
 // ---------------------------------------------------------------------------
 // VOP2: v_add_f32 — basic vector ALU, 32-bit encoding, promotable to VOP3
 // ---------------------------------------------------------------------------
-TEST_F(HwInstDescTest, VOP2_VAddF32_Microcode)
-{
+TEST_F(HwInstDescTest, VOP2_VAddF32_Microcode) {
     auto* desc = getDescByMnemonic("v_add_f32");
     ASSERT_NE(desc, nullptr);
     EXPECT_EQ(desc->microcode, MicrocodeFormat::MC_VOP2);
 }
 
-TEST_F(HwInstDescTest, VOP2_VAddF32_Unit)
-{
+TEST_F(HwInstDescTest, VOP2_VAddF32_Unit) {
     auto* desc = getDescByMnemonic("v_add_f32");
     ASSERT_NE(desc, nullptr);
     EXPECT_EQ(desc->unit, ExecUnit::VALU);
 }
 
-TEST_F(HwInstDescTest, VOP2_VAddF32_Flags)
-{
+TEST_F(HwInstDescTest, VOP2_VAddF32_Flags) {
     auto* desc = getDescByMnemonic("v_add_f32");
     ASSERT_NE(desc, nullptr);
     EXPECT_TRUE(desc->has(IF_VALU));
@@ -74,8 +67,7 @@ TEST_F(HwInstDescTest, VOP2_VAddF32_Flags)
     EXPECT_FALSE(desc->has(IF_SALU));
 }
 
-TEST_F(HwInstDescTest, VOP2_VAddF32_OperandFields)
-{
+TEST_F(HwInstDescTest, VOP2_VAddF32_OperandFields) {
     auto* desc = getDescByMnemonic("v_add_f32");
     ASSERT_NE(desc, nullptr);
 
@@ -101,15 +93,13 @@ TEST_F(HwInstDescTest, VOP2_VAddF32_OperandFields)
     EXPECT_EQ(fields[2].fieldSizeBits, 32u);
 }
 
-TEST_F(HwInstDescTest, VOP2_VAddF32_PromotedFormat)
-{
+TEST_F(HwInstDescTest, VOP2_VAddF32_PromotedFormat) {
     auto* desc = getDescByMnemonic("v_add_f32");
     ASSERT_NE(desc, nullptr);
     EXPECT_EQ(desc->promotedFormat, MicrocodeFormat::MC_VOP3);
 }
 
-TEST_F(HwInstDescTest, VOP2_VAddF32_PromotedFields)
-{
+TEST_F(HwInstDescTest, VOP2_VAddF32_PromotedFields) {
     auto* desc = getDescByMnemonic("v_add_f32");
     ASSERT_NE(desc, nullptr);
 
@@ -124,8 +114,7 @@ TEST_F(HwInstDescTest, VOP2_VAddF32_PromotedFields)
 // ---------------------------------------------------------------------------
 // VOP3: v_fma_f32 — 64-bit encoding, no promotion
 // ---------------------------------------------------------------------------
-TEST_F(HwInstDescTest, VOP3_VFmaF32)
-{
+TEST_F(HwInstDescTest, VOP3_VFmaF32) {
     auto* desc = getDescByMnemonic("v_fma_f32");
     ASSERT_NE(desc, nullptr);
     EXPECT_EQ(desc->microcode, MicrocodeFormat::MC_VOP3);
@@ -137,8 +126,7 @@ TEST_F(HwInstDescTest, VOP3_VFmaF32)
 // ---------------------------------------------------------------------------
 // SOP2: s_add_u32 — scalar ALU, 32-bit encoding
 // ---------------------------------------------------------------------------
-TEST_F(HwInstDescTest, SOP2_SAddU32)
-{
+TEST_F(HwInstDescTest, SOP2_SAddU32) {
     auto* desc = getDescByMnemonic("s_add_u32");
     ASSERT_NE(desc, nullptr);
     EXPECT_EQ(desc->microcode, MicrocodeFormat::MC_SOP2);
@@ -166,8 +154,7 @@ TEST_F(HwInstDescTest, SOP2_SAddU32)
 // ---------------------------------------------------------------------------
 // MUBUF_LOAD: buffer_load_b32 — buffer memory, 96-bit encoding
 // ---------------------------------------------------------------------------
-TEST_F(HwInstDescTest, MUBUF_BufferLoadB32)
-{
+TEST_F(HwInstDescTest, MUBUF_BufferLoadB32) {
     auto* desc = getDescByMnemonic("buffer_load_b32");
     ASSERT_NE(desc, nullptr);
     EXPECT_EQ(desc->microcode, MicrocodeFormat::MC_VBUFFER);
@@ -192,8 +179,7 @@ TEST_F(HwInstDescTest, MUBUF_BufferLoadB32)
 // ---------------------------------------------------------------------------
 // MUBUF_LOAD per-instruction override: buffer_load_b64 — D0 size 32 -> 64
 // ---------------------------------------------------------------------------
-TEST_F(HwInstDescTest, MUBUF_BufferLoadB64_FieldOverride)
-{
+TEST_F(HwInstDescTest, MUBUF_BufferLoadB64_FieldOverride) {
     auto* desc = getDescByMnemonic("buffer_load_b64");
     ASSERT_NE(desc, nullptr);
     EXPECT_EQ(desc->microcode, MicrocodeFormat::MC_VBUFFER);
@@ -214,8 +200,7 @@ TEST_F(HwInstDescTest, MUBUF_BufferLoadB64_FieldOverride)
 // ---------------------------------------------------------------------------
 // FLAT_LOAD: flat_load_b32 — global memory, 96-bit encoding
 // ---------------------------------------------------------------------------
-TEST_F(HwInstDescTest, FLAT_FlatLoadB32)
-{
+TEST_F(HwInstDescTest, FLAT_FlatLoadB32) {
     auto* desc = getDescByMnemonic("flat_load_b32");
     ASSERT_NE(desc, nullptr);
     EXPECT_EQ(desc->microcode, MicrocodeFormat::MC_VFLAT);
@@ -226,8 +211,7 @@ TEST_F(HwInstDescTest, FLAT_FlatLoadB32)
 // ---------------------------------------------------------------------------
 // DS: ds_load_b32 — LDS memory, 64-bit encoding
 // ---------------------------------------------------------------------------
-TEST_F(HwInstDescTest, DS_DsLoadB32)
-{
+TEST_F(HwInstDescTest, DS_DsLoadB32) {
     auto* desc = getDescByMnemonic("ds_load_b32");
     ASSERT_NE(desc, nullptr);
     EXPECT_EQ(desc->microcode, MicrocodeFormat::MC_VDS);
@@ -238,8 +222,7 @@ TEST_F(HwInstDescTest, DS_DsLoadB32)
 // ---------------------------------------------------------------------------
 // SMEM: s_load_b32 — scalar memory, 64-bit encoding
 // ---------------------------------------------------------------------------
-TEST_F(HwInstDescTest, SMRD_SLoadB32)
-{
+TEST_F(HwInstDescTest, SMRD_SLoadB32) {
     auto* desc = getDescByMnemonic("s_load_b32");
     ASSERT_NE(desc, nullptr);
     EXPECT_EQ(desc->microcode, MicrocodeFormat::MC_SMEM);
@@ -250,8 +233,7 @@ TEST_F(HwInstDescTest, SMRD_SLoadB32)
 // ---------------------------------------------------------------------------
 // WMMA: v_wmma_f32_16x16x16_f16 — matrix unit, VOP3P encoding
 // ---------------------------------------------------------------------------
-TEST_F(HwInstDescTest, WMMA_F32_16x16x16_F16)
-{
+TEST_F(HwInstDescTest, WMMA_F32_16x16x16_F16) {
     auto* desc = getDescByMnemonic("v_wmma_f32_16x16x16_f16");
     ASSERT_NE(desc, nullptr);
     EXPECT_EQ(desc->microcode, MicrocodeFormat::MC_VOP3P);
@@ -270,8 +252,7 @@ TEST_F(HwInstDescTest, WMMA_F32_16x16x16_F16)
 // ---------------------------------------------------------------------------
 // SOPP_BRANCH: s_branch — branch unit, label operand
 // ---------------------------------------------------------------------------
-TEST_F(HwInstDescTest, SOPP_SBranch)
-{
+TEST_F(HwInstDescTest, SOPP_SBranch) {
     auto* desc = getDescByMnemonic("s_branch");
     ASSERT_NE(desc, nullptr);
     EXPECT_EQ(desc->microcode, MicrocodeFormat::MC_SOPP);
@@ -287,8 +268,7 @@ TEST_F(HwInstDescTest, SOPP_SBranch)
 // ---------------------------------------------------------------------------
 // VOPC: v_cmp_eq_f32 — compare, promotable to VOP3
 // ---------------------------------------------------------------------------
-TEST_F(HwInstDescTest, VOPC_VCmpEqF32)
-{
+TEST_F(HwInstDescTest, VOPC_VCmpEqF32) {
     auto* desc = getDescByMnemonic("v_cmp_eq_f32");
     ASSERT_NE(desc, nullptr);
     EXPECT_EQ(desc->microcode, MicrocodeFormat::MC_VOPC);

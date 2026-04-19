@@ -27,40 +27,39 @@
 #include <utility>
 #include <vector>
 
-namespace stinkytofu
-{
+namespace stinkytofu {
 
-    class StinkyInstruction;
+class StinkyInstruction;
 
-    /// One-line, JSON-safe label for a DAG node (opcode / mnemonic + trimmed operands).
-    std::string instructionJsonLabel(const StinkyInstruction& inst);
+/// One-line, JSON-safe label for a DAG node (opcode / mnemonic + trimmed operands).
+std::string instructionJsonLabel(const StinkyInstruction& inst);
 
-    /// UTF-8 JSON for tools/stinkytofu-analysis: register-dependency edges plus before/after instruction order
-    /// per region (schema stinkytofu-dag-schedule-v1). Used by PassManager pass-order snapshots.
-    class DAGScheduleJsonCollector
-    {
-    public:
-        DAGScheduleJsonCollector(std::string outputPath, std::string functionName);
-        ~DAGScheduleJsonCollector();
+/// UTF-8 JSON for tools/stinkytofu-analysis: register-dependency edges plus before/after
+/// instruction order per region (schema stinkytofu-dag-schedule-v1). Used by PassManager pass-order
+/// snapshots.
+class DAGScheduleJsonCollector {
+   public:
+    DAGScheduleJsonCollector(std::string outputPath, std::string functionName);
+    ~DAGScheduleJsonCollector();
 
-        DAGScheduleJsonCollector(const DAGScheduleJsonCollector&)            = delete;
-        DAGScheduleJsonCollector& operator=(const DAGScheduleJsonCollector&) = delete;
+    DAGScheduleJsonCollector(const DAGScheduleJsonCollector&) = delete;
+    DAGScheduleJsonCollector& operator=(const DAGScheduleJsonCollector&) = delete;
 
-        void addRegion(const std::string& title,
-                       const std::vector<std::pair<unsigned, std::string>>& nodeIdAndLabel,
-                       const std::vector<std::pair<unsigned, unsigned>>&      edges,
-                       const std::vector<unsigned>&                         programOrderNodeIds,
-                       const std::vector<unsigned>&                         scheduledOrderNodeIds);
+    void addRegion(const std::string& title,
+                   const std::vector<std::pair<unsigned, std::string>>& nodeIdAndLabel,
+                   const std::vector<std::pair<unsigned, unsigned>>& edges,
+                   const std::vector<unsigned>& programOrderNodeIds,
+                   const std::vector<unsigned>& scheduledOrderNodeIds);
 
-        void finalize();
+    void finalize();
 
-    private:
-        std::string escapeJson(std::string_view s) const;
+   private:
+    std::string escapeJson(std::string_view s) const;
 
-        std::string              outputPath_;
-        std::string              functionName_;
-        std::vector<std::string> regionsJson_;
-        bool                     finalized_ = false;
-    };
+    std::string outputPath_;
+    std::string functionName_;
+    std::vector<std::string> regionsJson_;
+    bool finalized_ = false;
+};
 
-} // namespace stinkytofu
+}  // namespace stinkytofu

@@ -22,232 +22,195 @@
  * ************************************************************************ */
 
 #include "stinkytofu/transforms/logical/IntrinsicExpansionPass.hpp"
+
+#include <cstring>
+#include <iostream>
+
 #include "stinkytofu/ir/logical/IntrinsicCall.hpp"
 #include "stinkytofu/ir/logical/IntrinsicRegistry.hpp"
 #include "stinkytofu/ir/logical/LogicalInstructions.hpp"
 #include "stinkytofu/ir/logical/LogicalOpcode.hpp"
 #include "stinkytofu/support/ErrorHandling.hpp"
-#include <cstring>
-#include <iostream>
 
-namespace stinkytofu
-{
-    char IntrinsicExpansionPass::ID = 0;
+namespace stinkytofu {
+char IntrinsicExpansionPass::ID = 0;
 
-    IntrinsicExpansionPass::IntrinsicExpansionPass() {}
+IntrinsicExpansionPass::IntrinsicExpansionPass() {}
 
-    IntrinsicExpansionPass::~IntrinsicExpansionPass() = default;
+IntrinsicExpansionPass::~IntrinsicExpansionPass() = default;
 
-    void IntrinsicExpansionPass::run(Function& func, PassContext& passCtx)
-    {
-        // Check if intrinsic registry is initialized
-        auto& registry = IntrinsicRegistry::instance();
-        if(!registry.isInitialized())
-        {
-            std::cerr << "[IntrinsicExpansionPass] Warning: IntrinsicRegistry not initialized, "
-                      << "skipping intrinsic expansion\n";
-            return;
-        }
-
-        // Process all basic blocks
-        for(auto& bb : func)
-        {
-            // Skip filtered basic blocks
-            if(!passCtx.shouldProcessBasicBlock(bb))
-                continue;
-
-            expandIntrinsicsInBlock(bb);
-        }
+void IntrinsicExpansionPass::run(Function& func, PassContext& passCtx) {
+    // Check if intrinsic registry is initialized
+    auto& registry = IntrinsicRegistry::instance();
+    if (!registry.isInitialized()) {
+        std::cerr << "[IntrinsicExpansionPass] Warning: IntrinsicRegistry not initialized, "
+                  << "skipping intrinsic expansion\n";
+        return;
     }
 
-    void IntrinsicExpansionPass::expandIntrinsicsInBlock(BasicBlock& bb)
-    {
-        // Find all IntrinsicCall instructions first (to avoid iterator invalidation)
-        std::vector<BasicBlock::iterator> intrinsicCalls;
+    // Process all basic blocks
+    for (auto& bb : func) {
+        // Skip filtered basic blocks
+        if (!passCtx.shouldProcessBasicBlock(bb)) continue;
 
-        for(auto it = bb.begin(); it != bb.end(); ++it)
-        {
-            IRBase* irNode = &(*it);
-            if(irNode->getType() == IRBase::IRType::LogicalIR)
-            {
-                LogicalInstruction* logicalInst = static_cast<LogicalInstruction*>(irNode);
-                if(std::strcmp(logicalInst->getLogicalName(), "IntrinsicCall") == 0)
-                {
-                    intrinsicCalls.push_back(it);
-                }
-            }
-        }
+        expandIntrinsicsInBlock(bb);
+    }
+}
 
-        // Expand each IntrinsicCall
-        for(auto it : intrinsicCalls)
-        {
-            LogicalInstruction* call     = static_cast<LogicalInstruction*>(&(*it));
-            auto                expanded = expandIntrinsic(call);
+void IntrinsicExpansionPass::expandIntrinsicsInBlock(BasicBlock& bb) {
+    // Find all IntrinsicCall instructions first (to avoid iterator invalidation)
+    std::vector<BasicBlock::iterator> intrinsicCalls;
 
-            if(!expanded.empty())
-            {
-                // Insert expanded instructions before the IntrinsicCall
-                for(auto* inst : expanded)
-                {
-                    bb.insertIR(it, inst);
-                }
-                call->safeErase();
+    for (auto it = bb.begin(); it != bb.end(); ++it) {
+        IRBase* irNode = &(*it);
+        if (irNode->getType() == IRBase::IRType::LogicalIR) {
+            LogicalInstruction* logicalInst = static_cast<LogicalInstruction*>(irNode);
+            if (std::strcmp(logicalInst->getLogicalName(), "IntrinsicCall") == 0) {
+                intrinsicCalls.push_back(it);
             }
         }
     }
 
-    std::vector<LogicalInstruction*>
-        IntrinsicExpansionPass::expandIntrinsic(LogicalInstruction* inst)
-    {
-        // Cast to IntrinsicCall - safe because we checked getLogicalName() == "IntrinsicCall"
-        IntrinsicCall* call = static_cast<IntrinsicCall*>(inst);
+    // Expand each IntrinsicCall
+    for (auto it : intrinsicCalls) {
+        LogicalInstruction* call = static_cast<LogicalInstruction*>(&(*it));
+        auto expanded = expandIntrinsic(call);
 
-        const std::string& funcName = call->getFunctionName();
-
-        // Look up intrinsic definition from registry
-        auto&          registry = IntrinsicRegistry::instance();
-        const Pattern* pattern  = registry.lookup(funcName);
-
-        if(!pattern)
-        {
-            std::cerr << "[IntrinsicExpansionPass] Error: Unknown intrinsic '" << funcName << "'\n";
-            std::cerr << "[IntrinsicExpansionPass] Available intrinsics: ";
-            for(const auto& name : registry.getIntrinsicNames())
-            {
-                std::cerr << name << " ";
+        if (!expanded.empty()) {
+            // Insert expanded instructions before the IntrinsicCall
+            for (auto* inst : expanded) {
+                bb.insertIR(it, inst);
             }
-            std::cerr << "\n";
+            call->safeErase();
+        }
+    }
+}
+
+std::vector<LogicalInstruction*> IntrinsicExpansionPass::expandIntrinsic(LogicalInstruction* inst) {
+    // Cast to IntrinsicCall - safe because we checked getLogicalName() == "IntrinsicCall"
+    IntrinsicCall* call = static_cast<IntrinsicCall*>(inst);
+
+    const std::string& funcName = call->getFunctionName();
+
+    // Look up intrinsic definition from registry
+    auto& registry = IntrinsicRegistry::instance();
+    const Pattern* pattern = registry.lookup(funcName);
+
+    if (!pattern) {
+        std::cerr << "[IntrinsicExpansionPass] Error: Unknown intrinsic '" << funcName << "'\n";
+        std::cerr << "[IntrinsicExpansionPass] Available intrinsics: ";
+        for (const auto& name : registry.getIntrinsicNames()) {
+            std::cerr << name << " ";
+        }
+        std::cerr << "\n";
+        return {};
+    }
+
+    // Validate argument count
+    const auto& callArgs = call->dests;  // All registers stored in dests
+    if (callArgs.size() != pattern->arguments.size()) {
+        std::cerr << "[IntrinsicExpansionPass] Error: Intrinsic '" << funcName << "' expects "
+                  << pattern->arguments.size() << " arguments, got " << callArgs.size() << "\n";
+        return {};
+    }
+
+    // Build register map from intrinsic argument names to actual registers
+    std::unordered_map<std::string, StinkyRegister> regMap;
+    for (size_t i = 0; i < pattern->arguments.size(); ++i) {
+        regMap[pattern->arguments[i].name] = callArgs[i];
+    }
+
+    // Create expanded instructions from intrinsic body
+    std::vector<LogicalInstruction*> expanded;
+
+    for (const auto& instDef : pattern->body) {
+        LogicalInstruction* newInst = createInstructionFromIntrinsic(instDef, regMap);
+        if (newInst) {
+            expanded.push_back(newInst);
+        } else {
+            std::cerr << "[IntrinsicExpansionPass] Error: Failed to create instruction: "
+                      << instDef.operation << "\n";
+            // Clean up and return empty
+            for (auto* i : expanded) {
+                i->safeErase();
+            }
             return {};
         }
-
-        // Validate argument count
-        const auto& callArgs = call->dests; // All registers stored in dests
-        if(callArgs.size() != pattern->arguments.size())
-        {
-            std::cerr << "[IntrinsicExpansionPass] Error: Intrinsic '" << funcName << "' expects "
-                      << pattern->arguments.size() << " arguments, got " << callArgs.size() << "\n";
-            return {};
-        }
-
-        // Build register map from intrinsic argument names to actual registers
-        std::unordered_map<std::string, StinkyRegister> regMap;
-        for(size_t i = 0; i < pattern->arguments.size(); ++i)
-        {
-            regMap[pattern->arguments[i].name] = callArgs[i];
-        }
-
-        // Create expanded instructions from intrinsic body
-        std::vector<LogicalInstruction*> expanded;
-
-        for(const auto& instDef : pattern->body)
-        {
-            LogicalInstruction* newInst = createInstructionFromIntrinsic(instDef, regMap);
-            if(newInst)
-            {
-                expanded.push_back(newInst);
-            }
-            else
-            {
-                std::cerr << "[IntrinsicExpansionPass] Error: Failed to create instruction: "
-                          << instDef.operation << "\n";
-                // Clean up and return empty
-                for(auto* i : expanded)
-                {
-                    i->safeErase();
-                }
-                return {};
-            }
-        }
-
-        return expanded;
     }
 
-    LogicalInstruction* IntrinsicExpansionPass::createInstructionFromIntrinsic(
-        const IntrinsicInstruction&                            instDef,
-        const std::unordered_map<std::string, StinkyRegister>& regMap)
-    {
-        // Parse instruction name to opcode (pure enum design!)
-        const std::string& opName = instDef.operation;
-        logical::Opcode    opcode = logical::parseOpcode(opName.c_str());
+    return expanded;
+}
 
-        if(opcode == logical::UNKNOWN)
-        {
-            std::cerr << "[IntrinsicExpansionPass] FATAL: Unknown instruction '" << opName
-                      << "' in intrinsic definition.\n"
-                      << "This indicates an error in the intrinsic definition or missing "
-                      << "instruction in LogicalOpcode enum.\n";
-            STINKY_UNREACHABLE("Unknown instruction in intrinsic body");
-        }
+LogicalInstruction* IntrinsicExpansionPass::createInstructionFromIntrinsic(
+    const IntrinsicInstruction& instDef,
+    const std::unordered_map<std::string, StinkyRegister>& regMap) {
+    // Parse instruction name to opcode (pure enum design!)
+    const std::string& opName = instDef.operation;
+    logical::Opcode opcode = logical::parseOpcode(opName.c_str());
 
-        // Create instruction directly (no factory needed!)
-        auto* inst = IRBase::createIR<LogicalInstruction>(opcode);
-
-        // Resolve and set destination register
-        StinkyRegister dest;
-        if(!resolveOperand(instDef.destReg, regMap, dest))
-        {
-            std::cerr << "[IntrinsicExpansionPass] Error: Destination must be a register: "
-                      << instDef.destReg << "\n";
-            inst->safeErase();
-            return nullptr;
-        }
-        inst->dests.push_back(dest);
-
-        // Resolve and set source registers and immediates
-        for(const auto& srcDef : instDef.operands)
-        {
-            if(srcDef.type == IntrinsicOperand::Register)
-            {
-                StinkyRegister srcReg;
-                if(!resolveOperand(srcDef.registerName, regMap, srcReg))
-                {
-                    std::cerr << "[IntrinsicExpansionPass] Error: Unknown register: "
-                              << srcDef.registerName << "\n";
-                    inst->safeErase();
-                    return nullptr;
-                }
-                inst->srcs.push_back(srcReg);
-            }
-            else if(srcDef.type == IntrinsicOperand::IntLiteral)
-            {
-                // Create integer literal
-                inst->srcs.push_back(StinkyRegister(static_cast<int>(srcDef.intValue)));
-            }
-            else if(srcDef.type == IntrinsicOperand::FloatLiteral)
-            {
-                // Create float literal
-                inst->srcs.push_back(StinkyRegister(srcDef.floatValue));
-            }
-            else if(srcDef.type == IntrinsicOperand::HexLiteral)
-            {
-                // Hex literal treated as float bits
-                inst->srcs.push_back(StinkyRegister(srcDef.floatValue));
-            }
-        }
-
-        return inst;
+    if (opcode == logical::UNKNOWN) {
+        std::cerr << "[IntrinsicExpansionPass] FATAL: Unknown instruction '" << opName
+                  << "' in intrinsic definition.\n"
+                  << "This indicates an error in the intrinsic definition or missing "
+                  << "instruction in LogicalOpcode enum.\n";
+        STINKY_UNREACHABLE("Unknown instruction in intrinsic body");
     }
 
-    bool IntrinsicExpansionPass::resolveOperand(
-        const std::string&                                     operand,
-        const std::unordered_map<std::string, StinkyRegister>& regMap,
-        StinkyRegister&                                        outReg)
-    {
-        // Check if operand is a register name from the intrinsic definition
-        auto it = regMap.find(operand);
-        if(it != regMap.end())
-        {
-            outReg = it->second;
-            return true;
+    // Create instruction directly (no factory needed!)
+    auto* inst = IRBase::createIR<LogicalInstruction>(opcode);
+
+    // Resolve and set destination register
+    StinkyRegister dest;
+    if (!resolveOperand(instDef.destReg, regMap, dest)) {
+        std::cerr << "[IntrinsicExpansionPass] Error: Destination must be a register: "
+                  << instDef.destReg << "\n";
+        inst->safeErase();
+        return nullptr;
+    }
+    inst->dests.push_back(dest);
+
+    // Resolve and set source registers and immediates
+    for (const auto& srcDef : instDef.operands) {
+        if (srcDef.type == IntrinsicOperand::Register) {
+            StinkyRegister srcReg;
+            if (!resolveOperand(srcDef.registerName, regMap, srcReg)) {
+                std::cerr << "[IntrinsicExpansionPass] Error: Unknown register: "
+                          << srcDef.registerName << "\n";
+                inst->safeErase();
+                return nullptr;
+            }
+            inst->srcs.push_back(srcReg);
+        } else if (srcDef.type == IntrinsicOperand::IntLiteral) {
+            // Create integer literal
+            inst->srcs.push_back(StinkyRegister(static_cast<int>(srcDef.intValue)));
+        } else if (srcDef.type == IntrinsicOperand::FloatLiteral) {
+            // Create float literal
+            inst->srcs.push_back(StinkyRegister(srcDef.floatValue));
+        } else if (srcDef.type == IntrinsicOperand::HexLiteral) {
+            // Hex literal treated as float bits
+            inst->srcs.push_back(StinkyRegister(srcDef.floatValue));
         }
-
-        // Not a mapped register, could be an immediate or constant
-        return false;
     }
 
-    std::unique_ptr<Pass> createIntrinsicExpansionPass()
-    {
-        return std::make_unique<IntrinsicExpansionPass>();
+    return inst;
+}
+
+bool IntrinsicExpansionPass::resolveOperand(
+    const std::string& operand, const std::unordered_map<std::string, StinkyRegister>& regMap,
+    StinkyRegister& outReg) {
+    // Check if operand is a register name from the intrinsic definition
+    auto it = regMap.find(operand);
+    if (it != regMap.end()) {
+        outReg = it->second;
+        return true;
     }
 
-} // namespace stinkytofu
+    // Not a mapped register, could be an immediate or constant
+    return false;
+}
+
+std::unique_ptr<Pass> createIntrinsicExpansionPass() {
+    return std::make_unique<IntrinsicExpansionPass>();
+}
+
+}  // namespace stinkytofu

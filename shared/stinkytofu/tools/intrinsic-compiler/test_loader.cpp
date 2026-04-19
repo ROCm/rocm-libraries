@@ -31,19 +31,18 @@
  *   3. Query and display intrinsic definitions
  */
 
-#include "stinkytofu/ir/logical/IntrinsicLibrary.hpp"
 #include <iomanip>
 #include <iostream>
 
+#include "stinkytofu/ir/logical/IntrinsicLibrary.hpp"
+
 using namespace stinkytofu;
 
-void printIntrinsicDetails(const IntrinsicLibrary& lib, const std::string& name)
-{
+void printIntrinsicDetails(const IntrinsicLibrary& lib, const std::string& name) {
     std::cout << "\n=== Intrinsic: " << name << " ===\n";
 
     const Pattern* pattern = lib.lookup(name);
-    if(!pattern)
-    {
+    if (!pattern) {
         std::cout << "  NOT FOUND\n";
         return;
     }
@@ -53,38 +52,27 @@ void printIntrinsicDetails(const IntrinsicLibrary& lib, const std::string& name)
 
     // Print arguments
     std::cout << "  Arguments (" << pattern->arguments.size() << "):\n";
-    for(const auto& arg : pattern->arguments)
-    {
+    for (const auto& arg : pattern->arguments) {
         std::cout << "    " << arg.name << ": " << arg.regType << "\n";
     }
 
     // Print body instructions
     std::cout << "  Body (" << pattern->body.size() << " instructions):\n";
-    for(const auto& inst : pattern->body)
-    {
+    for (const auto& inst : pattern->body) {
         std::cout << "    " << inst.destReg << " = " << inst.operation << "(";
-        for(size_t i = 0; i < inst.operands.size(); ++i)
-        {
-            if(i > 0)
-                std::cout << ", ";
+        for (size_t i = 0; i < inst.operands.size(); ++i) {
+            if (i > 0) std::cout << ", ";
 
             const auto& op = inst.operands[i];
-            if(op.type == IntrinsicOperand::Register)
-            {
+            if (op.type == IntrinsicOperand::Register) {
                 std::cout << op.registerName;
-            }
-            else if(op.type == IntrinsicOperand::IntLiteral)
-            {
+            } else if (op.type == IntrinsicOperand::IntLiteral) {
                 std::cout << op.intValue;
-            }
-            else if(op.type == IntrinsicOperand::FloatLiteral)
-            {
+            } else if (op.type == IntrinsicOperand::FloatLiteral) {
                 std::cout << op.floatValue;
-            }
-            else if(op.type == IntrinsicOperand::HexLiteral)
-            {
-                float    floatVal = static_cast<float>(op.floatValue);
-                uint32_t bits     = *reinterpret_cast<uint32_t*>(&floatVal);
+            } else if (op.type == IntrinsicOperand::HexLiteral) {
+                float floatVal = static_cast<float>(op.floatValue);
+                uint32_t bits = *reinterpret_cast<uint32_t*>(&floatVal);
                 std::cout << "0x" << std::hex << bits << std::dec;
             }
         }
@@ -95,10 +83,8 @@ void printIntrinsicDetails(const IntrinsicLibrary& lib, const std::string& name)
     std::cout << "  Python Binding: " << (pattern->pythonBinding ? "enabled" : "disabled") << "\n";
 }
 
-int main(int argc, char** argv)
-{
-    if(argc != 2)
-    {
+int main(int argc, char** argv) {
+    if (argc != 2) {
         std::cout << "Usage: " << argv[0] << " <intrinsics.st.bc>\n";
         return 1;
     }
@@ -110,8 +96,7 @@ int main(int argc, char** argv)
 
     // Step 1: Load intrinsics library
     auto lib = IntrinsicLibrary::loadFromFile(bcFilePath);
-    if(!lib)
-    {
+    if (!lib) {
         std::cerr << "Error: Failed to load intrinsic library\n";
         return 1;
     }
@@ -124,19 +109,15 @@ int main(int argc, char** argv)
     // Step 3: Test specific intrinsic lookups
     std::cout << "\n=== Testing Intrinsic Lookups ===\n";
 
-    std::vector<std::string> testNames
-        = {"ReluF32", "ClampF16", "SigmoidF32", "ExpF32", "NonExistent"};
+    std::vector<std::string> testNames = {"ReluF32", "ClampF16", "SigmoidF32", "ExpF32",
+                                          "NonExistent"};
 
-    for(const auto& name : testNames)
-    {
+    for (const auto& name : testNames) {
         std::cout << "\nLookup '" << name << "': ";
-        if(lib->hasIntrinsic(name))
-        {
+        if (lib->hasIntrinsic(name)) {
             std::cout << "FOUND ?\n";
             printIntrinsicDetails(*lib, name);
-        }
-        else
-        {
+        } else {
             std::cout << "NOT FOUND ?\n";
         }
     }
@@ -145,14 +126,12 @@ int main(int argc, char** argv)
     std::cout << "\n\n=== Testing Accessor Methods ===\n";
 
     std::string testIntrinsic = "ReluF32";
-    if(lib->hasIntrinsic(testIntrinsic))
-    {
+    if (lib->hasIntrinsic(testIntrinsic)) {
         std::cout << "\nTesting " << testIntrinsic << " accessors:\n";
 
         auto args = lib->getArguments(testIntrinsic);
         std::cout << "  getArguments(): " << args.size() << " argument(s)\n";
-        for(const auto& arg : args)
-        {
+        for (const auto& arg : args) {
             std::cout << "    - " << arg.name << "\n";
         }
 
@@ -169,8 +148,7 @@ int main(int argc, char** argv)
     // Step 5: List all intrinsics
     std::cout << "\n\n=== All Intrinsics ===\n";
     auto allNames = lib->getIntrinsicNames();
-    for(const auto& name : allNames)
-    {
+    for (const auto& name : allNames) {
         std::cout << "  - " << name << "\n";
     }
 

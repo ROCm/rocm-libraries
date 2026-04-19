@@ -24,24 +24,22 @@
 
 #pragma once
 
+#include <ostream>
+
 #include "stinkytofu/ir/asm/StinkyModifiers.hpp"
 #include "stinkytofu/serialization/asm/IRParser.hpp"
 
-#include <ostream>
+namespace stinkytofu {
+struct StinkyInstruction;
 
-namespace stinkytofu
-{
-    struct StinkyInstruction;
+/// Utility class: serialize (print) and deserialize (parse) modifiers.
+class ModifierSerializer {
+   public:
+    /// Serialize (print) a modifier to the stream. Returns false if modifier type is unknown.
+    static bool serialize(const Modifier& mod, std::ostream& os);
 
-    /// Utility class: serialize (print) and deserialize (parse) modifiers.
-    class ModifierSerializer
-    {
-    public:
-        /// Serialize (print) a modifier to the stream. Returns false if modifier type is unknown.
-        static bool serialize(const Modifier& mod, std::ostream& os);
+    /// Deserialize (parse): apply all entries in modifiers to inst (dispatches by attrKey).
+    static void deserialize(StinkyInstruction* inst, const ParsedModifierDict& modifiers);
+};
 
-        /// Deserialize (parse): apply all entries in modifiers to inst (dispatches by attrKey).
-        static void deserialize(StinkyInstruction* inst, const ParsedModifierDict& modifiers);
-    };
-
-} // namespace stinkytofu
+}  // namespace stinkytofu

@@ -270,4 +270,3 @@ std::cout << assembly << std::endl;
 - [StinkyAsmPrinter](../developer-guide/asm-printer.md) - For printing MLIR-style IR format
 - [Pass Manager Guide](pass-manager.md) - For running optimization passes
 - [Error Codes](error-codes.md) - Common error codes and their meanings
-

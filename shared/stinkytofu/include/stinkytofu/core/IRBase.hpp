@@ -26,73 +26,65 @@
 
 #include "stinkytofu/support/IntrusiveList.hpp"
 
-namespace stinkytofu
-{
-    class BasicBlock;
+namespace stinkytofu {
+class BasicBlock;
 
-    /// IRBase is in an IntrusiveList<IRBase, BasicBlock>; getParent() comes from IntrusiveListNode and returns the owning BasicBlock.
-    class IRBase : public IntrusiveListNode<IRBase, BasicBlock>
-    {
-    public:
-        // Stinky framework could support multiple IR types in the future,
-        // conceptually similar to MLIR but in much simpler framework.
-        enum class IRType
-        {
-            StinkyTofu, // Assembly-level IR (StinkyInstruction)
-            StinkyAsmDirective, // Assembly directives
-            LogicalIR, // High-level, architecture-independent IR (LogicalInstruction)
-        };
-
-        IRBase(const IRBase&)            = delete;
-        IRBase& operator=(const IRBase&) = delete;
-
-        /// Clone this IR (caller must add to a BasicBlock via Function::cloneIR or similar).
-        /// Default returns nullptr; override in derived types that support cloning.
-        virtual IRBase* clone() const
-        {
-            return nullptr;
-        }
-
-        const BasicBlock* getParentBlock() const;
-
-        virtual void dump(std::ostream& out) const = 0;
-
-        void dump();
-
-        IRType getType() const
-        {
-            return irType;
-        }
-
-        /// Create IR (caller owns; not in any BasicBlock). Add to a block with bb.appendIR(ir).
-        template <class IRType, class... Args>
-        static IRType* createIR(Args&&... args)
-        {
-            return new IRType(std::forward<Args>(args)...);
-        }
-
-        /// Parent block that owns this IR (from IntrusiveListNode); null if not in any block.
-        using IntrusiveListNode<IRBase, BasicBlock>::getParent;
-
-        /// Remove this IR from its parent block and delete it (list owns deletion via traits).
-        void erase();
-
-        /// Remove the IR from its parent block, but don't delete it.
-        void remove();
-
-    protected:
-        virtual ~IRBase() = default;
-        IRBase(IRType type)
-            : irType(type)
-        {
-        }
-
-    private:
-        const IRType irType;
-
-        friend struct IntrusiveListTraits<IRBase>;
-        friend struct IntrusiveListAllocTraits<IRBase>;
+/// IRBase is in an IntrusiveList<IRBase, BasicBlock>; getParent() comes from IntrusiveListNode and
+/// returns the owning BasicBlock.
+class IRBase : public IntrusiveListNode<IRBase, BasicBlock> {
+   public:
+    // Stinky framework could support multiple IR types in the future,
+    // conceptually similar to MLIR but in much simpler framework.
+    enum class IRType {
+        StinkyTofu,          // Assembly-level IR (StinkyInstruction)
+        StinkyAsmDirective,  // Assembly directives
+        LogicalIR,           // High-level, architecture-independent IR (LogicalInstruction)
     };
 
-    using IRList = IntrusiveList<IRBase, BasicBlock>;
-}
+    IRBase(const IRBase&) = delete;
+    IRBase& operator=(const IRBase&) = delete;
+
+    /// Clone this IR (caller must add to a BasicBlock via Function::cloneIR or similar).
+    /// Default returns nullptr; override in derived types that support cloning.
+    virtual IRBase* clone() const {
+        return nullptr;
+    }
+
+    const BasicBlock* getParentBlock() const;
+
+    virtual void dump(std::ostream& out) const = 0;
+
+    void dump();
+
+    IRType getType() const {
+        return irType;
+    }
+
+    /// Create IR (caller owns; not in any BasicBlock). Add to a block with bb.appendIR(ir).
+    template <class IRType, class... Args>
+    static IRType* createIR(Args&&... args) {
+        return new IRType(std::forward<Args>(args)...);
+    }
+
+    /// Parent block that owns this IR (from IntrusiveListNode); null if not in any block.
+    using IntrusiveListNode<IRBase, BasicBlock>::getParent;
+
+    /// Remove this IR from its parent block and delete it (list owns deletion via traits).
+    void erase();
+
+    /// Remove the IR from its parent block, but don't delete it.
+    void remove();
+
+   protected:
+    virtual ~IRBase() = default;
+    IRBase(IRType type) : irType(type) {}
+
+   private:
+    const IRType irType;
+
+    friend struct IntrusiveListTraits<IRBase>;
+    friend struct IntrusiveListAllocTraits<IRBase>;
+};
+
+using IRList = IntrusiveList<IRBase, BasicBlock>;
+}  // namespace stinkytofu

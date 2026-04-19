@@ -24,38 +24,37 @@
 
 #include <memory>
 
-namespace stinkytofu
-{
-    class Pass;
+namespace stinkytofu {
+class Pass;
 
-    /**
-     * @brief Converts simple IR instructions to assembly instructions (1:1 mapping)
-     *
-     * This pass handles non-composite IR instructions that map directly to
-     * a single assembly instruction. For example:
-     * - VAddF32 (IR) -> v_add_f32 (assembly)
-     * - VMulF32 (IR) -> v_mul_f32 (assembly)
-     * - SBarrier (IR) -> s_barrier (assembly)
-     *
-     * Composite instructions (like VAddPKF32, VMovB64) should be expanded
-     * by CompositeInstructionLoweringPass BEFORE this pass runs.
-     *
-     * The pass uses auto-generated IR mnemonic mappings to find the correct
-     * assembly mnemonic for the target architecture.
-     *
-     * Now uses unified Pass infrastructure:
-     * - Operates on Function -> BasicBlock -> IRList
-     * - Replaces LogicalInstruction* with StinkyInstruction* in-place
-     * - Integrates with PassManager
-     *
-     * Usage:
-     * ```cpp
-     * PassManager pm;
-     * pm.addPass(createCompositeInstructionLoweringPass());
-     * pm.addPass(createToStinkyAsmPass());
-     * pm.run();
-     * ```
-     */
-    std::unique_ptr<Pass> createToStinkyAsmPass();
+/**
+ * @brief Converts simple IR instructions to assembly instructions (1:1 mapping)
+ *
+ * This pass handles non-composite IR instructions that map directly to
+ * a single assembly instruction. For example:
+ * - VAddF32 (IR) -> v_add_f32 (assembly)
+ * - VMulF32 (IR) -> v_mul_f32 (assembly)
+ * - SBarrier (IR) -> s_barrier (assembly)
+ *
+ * Composite instructions (like VAddPKF32, VMovB64) should be expanded
+ * by CompositeInstructionLoweringPass BEFORE this pass runs.
+ *
+ * The pass uses auto-generated IR mnemonic mappings to find the correct
+ * assembly mnemonic for the target architecture.
+ *
+ * Now uses unified Pass infrastructure:
+ * - Operates on Function -> BasicBlock -> IRList
+ * - Replaces LogicalInstruction* with StinkyInstruction* in-place
+ * - Integrates with PassManager
+ *
+ * Usage:
+ * ```cpp
+ * PassManager pm;
+ * pm.addPass(createCompositeInstructionLoweringPass());
+ * pm.addPass(createToStinkyAsmPass());
+ * pm.run();
+ * ```
+ */
+std::unique_ptr<Pass> createToStinkyAsmPass();
 
-} // namespace stinkytofu
+}  // namespace stinkytofu

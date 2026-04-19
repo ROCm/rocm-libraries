@@ -21,10 +21,11 @@
  *
  * ************************************************************************ */
 
-#include "TestHelpers.hpp"
-#include "stinkytofu/ir/logical/LogicalInstructions.hpp"
-#include "stinkytofu/bindings/python/LogicalModule.hpp"
 #include <gtest/gtest.h>
+
+#include "TestHelpers.hpp"
+#include "stinkytofu/bindings/python/LogicalModule.hpp"
+#include "stinkytofu/ir/logical/LogicalInstructions.hpp"
 
 using namespace stinkytofu;
 using namespace stinkytofu::test;
@@ -35,8 +36,7 @@ using namespace stinkytofu::test;
  * The PyLogicalModule should be created without specifying an architecture.
  * Architecture is only needed when lowering to assembly.
  */
-TEST(IRModuleTest, ArchitectureIndependent)
-{
+TEST(IRModuleTest, ArchitectureIndependent) {
     // Create an architecture-independent IR module
     auto module = std::make_shared<PyLogicalModule>("test_kernel");
 
@@ -48,12 +48,11 @@ TEST(IRModuleTest, ArchitectureIndependent)
 /**
  * @brief Test adding instructions to PyLogicalModule
  */
-TEST(IRModuleTest, AddInstructions)
-{
+TEST(IRModuleTest, AddInstructions) {
     auto module = std::make_shared<PyLogicalModule>("test_kernel");
 
     // Create some IR instructions manually
-    StinkyRegister dst  = vgpr(0);
+    StinkyRegister dst = vgpr(0);
     StinkyRegister src0 = vgpr(1);
     StinkyRegister src1 = vgpr(2);
 

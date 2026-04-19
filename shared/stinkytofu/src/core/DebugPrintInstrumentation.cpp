@@ -22,55 +22,44 @@
  * ************************************************************************ */
 #include "stinkytofu/support/DebugPrintInstrumentation.hpp"
 
+#include <iostream>
+
 #include "stinkytofu/core/Function.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 
-#include <iostream>
+namespace stinkytofu {
+DebugPrintInstrumentation::DebugPrintInstrumentation(std::unique_ptr<PassManagerDebugConfig> cfg)
+    : dbgCfg(std::move(cfg)) {}
 
-namespace stinkytofu
-{
-    DebugPrintInstrumentation::DebugPrintInstrumentation(std::unique_ptr<PassManagerDebugConfig> cfg)
-        : dbgCfg(std::move(cfg))
-    {
+DebugPrintInstrumentation::~DebugPrintInstrumentation() = default;
+
+void DebugPrintInstrumentation::runBegin(Function& F, PassContext& /*ctx*/) {
+    if (dbgCfg->shouldDumpInitialIR()) {
+        dbgCfg->getOutputStreamInBefore() << "\n*** Initial IR (before all passes) ***\n";
+        F.dump(dbgCfg->getOutputStreamInBefore());
+        dbgCfg->getOutputStreamInBefore().flush();
     }
+}
 
-    DebugPrintInstrumentation::~DebugPrintInstrumentation() = default;
+void DebugPrintInstrumentation::beforePass(const std::string& passName, Function& F,
+                                           PassContext& /*ctx*/) {
+    if (dbgCfg->shouldPrintPassName())
+        std::cerr << "[StinkyTofu] Running pass: " << passName << "\n";
 
-    void DebugPrintInstrumentation::runBegin(Function& F, PassContext& /*ctx*/)
-    {
-        if(dbgCfg->shouldDumpInitialIR())
-        {
-            dbgCfg->getOutputStreamInBefore() << "\n*** Initial IR (before all passes) ***\n";
-            F.dump(dbgCfg->getOutputStreamInBefore());
-            dbgCfg->getOutputStreamInBefore().flush();
-        }
+    if (dbgCfg->shouldPrintBefore(passName)) {
+        dbgCfg->getOutputStreamInBefore() << "\n*** Before Pass: " << passName << " ***\n";
+        F.dump(dbgCfg->getOutputStreamInBefore());
+        dbgCfg->getOutputStreamInBefore().flush();
     }
+}
 
-    void DebugPrintInstrumentation::beforePass(const std::string& passName,
-                                               Function&          F,
-                                               PassContext&        /*ctx*/)
-    {
-        if(dbgCfg->shouldPrintPassName())
-            std::cerr << "[StinkyTofu] Running pass: " << passName << "\n";
-
-        if(dbgCfg->shouldPrintBefore(passName))
-        {
-            dbgCfg->getOutputStreamInBefore() << "\n*** Before Pass: " << passName << " ***\n";
-            F.dump(dbgCfg->getOutputStreamInBefore());
-            dbgCfg->getOutputStreamInBefore().flush();
-        }
+void DebugPrintInstrumentation::afterPass(const std::string& passName, Function& F,
+                                          PassContext& /*ctx*/) {
+    if (dbgCfg->shouldPrintAfter(passName)) {
+        dbgCfg->getOutputStreamInAfter() << "\n*** After Pass: " << passName << " ***\n";
+        F.dump(dbgCfg->getOutputStreamInAfter());
+        dbgCfg->getOutputStreamInAfter().flush();
     }
+}
 
-    void DebugPrintInstrumentation::afterPass(const std::string& passName,
-                                              Function&          F,
-                                              PassContext&        /*ctx*/)
-    {
-        if(dbgCfg->shouldPrintAfter(passName))
-        {
-            dbgCfg->getOutputStreamInAfter() << "\n*** After Pass: " << passName << " ***\n";
-            F.dump(dbgCfg->getOutputStreamInAfter());
-            dbgCfg->getOutputStreamInAfter().flush();
-        }
-    }
-
-} // namespace stinkytofu
+}  // namespace stinkytofu

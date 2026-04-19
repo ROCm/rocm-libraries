@@ -30,11 +30,11 @@ intrinsic ReluF32 {
     dest: vgpr
     src: vgpr
   }
-  
+
   body {
     dest = v_max_f32(src, 0.0)
   }
-  
+
   comment "ReLU F32 activation: max(x, 0)"
   python_binding true
 }
@@ -45,12 +45,12 @@ intrinsic ReluF16 {
     src: vgpr
     temp: vgpr
   }
-  
+
   body {
     temp = v_cmp_gt_f16(src, 0.0)
     dest = v_select_f16(temp, src, 0.0)
   }
-  
+
   comment "ReLU F16 activation: max(x, 0)"
   python_binding true
 }
@@ -67,12 +67,12 @@ intrinsic ClampF32 {
     max_val: vgpr
     temp: vgpr
   }
-  
+
   body {
     temp = v_max_f32(src, min_val)
     dest = v_min_f32(temp, max_val)
   }
-  
+
   comment "Clamp F32 to range [min, max]"
   python_binding true
 }
@@ -85,12 +85,12 @@ intrinsic ClampF16 {
     max_val: vgpr
     temp: vgpr
   }
-  
+
   body {
     temp = v_max_f16(src, min_val)
     dest = v_min_f16(temp, max_val)
   }
-  
+
   comment "Clamp F16 to range [min, max]"
   python_binding true
 }
@@ -106,14 +106,14 @@ intrinsic SigmoidF32 {
     temp1: vgpr
     temp2: vgpr
   }
-  
+
   body {
     temp1 = v_mul_f32(src, -1.0)
     temp1 = v_exp_f32(temp1)
     temp2 = v_add_f32(temp1, 1.0)
     dest = v_rcp_f32(temp2)
   }
-  
+
   comment "Sigmoid activation: 1/(1+exp(-x))"
   python_binding true
 }
@@ -131,12 +131,12 @@ intrinsic ClampedReluF32 {
     temp1: vgpr
     temp2: vgpr
   }
-  
+
   body {
     call ReluF32(dest=temp1, src=src)
     call ClampF32(dest=dest, src=temp1, min_val=min_val, max_val=max_val, temp=temp2)
   }
-  
+
   comment "ReLU followed by clamping: clamp(max(x, 0), min, max)"
   python_binding true
 }
@@ -151,12 +151,12 @@ intrinsic ExpF32 {
     src: vgpr
     temp: vgpr
   }
-  
+
   body {
     temp = v_mul_f32(src, 0x40ec7326)
     dest = v_exp_f32(temp)
   }
-  
+
   comment "Exp approximation using magic constant 0x40ec7326"
   python_binding false
 }

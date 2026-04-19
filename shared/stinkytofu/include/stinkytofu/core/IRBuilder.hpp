@@ -28,63 +28,52 @@
 #include "stinkytofu/core/BasicBlock.hpp"
 #include "stinkytofu/core/IRBase.hpp"
 
-namespace stinkytofu
-{
-    /// Base class for constructing IR. Holds a BasicBlock and an insertion point.
-    /// Derived builders (e.g. AsmIRBuilder) use createIR() and provide
-    /// type-specific create methods. IR is owned by the BasicBlock's IRList.
-    class IRBuilder
-    {
-    protected:
-        BasicBlock*      bb = nullptr;
-        IRList::iterator insertPoint;
+namespace stinkytofu {
+/// Base class for constructing IR. Holds a BasicBlock and an insertion point.
+/// Derived builders (e.g. AsmIRBuilder) use createIR() and provide
+/// type-specific create methods. IR is owned by the BasicBlock's IRList.
+class IRBuilder {
+   protected:
+    BasicBlock* bb = nullptr;
+    IRList::iterator insertPoint;
 
-    public:
-        explicit IRBuilder(BasicBlock& block)
-            : bb(&block)
-            , insertPoint(block.end())
-        {
-        }
+   public:
+    explicit IRBuilder(BasicBlock& block) : bb(&block), insertPoint(block.end()) {}
 
-        virtual ~IRBuilder() = default;
+    virtual ~IRBuilder() = default;
 
-        /// Create IR and insert at current insertion point.
-        template <class IRType, class... Args>
-        IRType* createIR(Args&&... args)
-        {
-            IRType* ir = IRBase::createIR<IRType>(std::forward<Args>(args)...);
-            bb->insertIR(insertPoint, ir);
-            return ir;
-        }
+    /// Create IR and insert at current insertion point.
+    template <class IRType, class... Args>
+    IRType* createIR(Args&&... args) {
+        IRType* ir = IRBase::createIR<IRType>(std::forward<Args>(args)...);
+        bb->insertIR(insertPoint, ir);
+        return ir;
+    }
 
-        /// Create IR and insert before insertBefore.
-        /// If insertBefore is nullptr, use current insertion point.
-        template <class IRType, class... Args>
-        IRType* createIR(IRBase* insertBefore, Args&&... args)
-        {
-            assert(insertBefore != nullptr
-                   && "Cannot create instruction with null insertBefore - insertBefore must be "
-                      "non-null");
-            assert(insertBefore->getParent() == bb
-                   && "Cannot create instruction with insertBefore from a different block");
-            IRType* ir = IRBase::createIR<IRType>(std::forward<Args>(args)...);
-            bb->insertIR(IRList::iterator(insertBefore), ir);
-            return ir;
-        }
+    /// Create IR and insert before insertBefore.
+    /// If insertBefore is nullptr, use current insertion point.
+    template <class IRType, class... Args>
+    IRType* createIR(IRBase* insertBefore, Args&&... args) {
+        assert(insertBefore != nullptr &&
+               "Cannot create instruction with null insertBefore - insertBefore must be "
+               "non-null");
+        assert(insertBefore->getParent() == bb &&
+               "Cannot create instruction with insertBefore from a different block");
+        IRType* ir = IRBase::createIR<IRType>(std::forward<Args>(args)...);
+        bb->insertIR(IRList::iterator(insertBefore), ir);
+        return ir;
+    }
 
-        /// Set insertion point to the end of the block.
-        void setInsertionPoint(BasicBlock& newBB)
-        {
-            bb          = &newBB;
-            insertPoint = newBB.end();
-        }
+    /// Set insertion point to the end of the block.
+    void setInsertionPoint(BasicBlock& newBB) {
+        bb = &newBB;
+        insertPoint = newBB.end();
+    }
 
-        /// Set insertion point to a specific position.
-        void setInsertionPoint(IRList::iterator it)
-        {
-            if(it != bb->end())
-                bb = it->getParent();
-            insertPoint = it;
-        }
-    };
-}
+    /// Set insertion point to a specific position.
+    void setInsertionPoint(IRList::iterator it) {
+        if (it != bb->end()) bb = it->getParent();
+        insertPoint = it;
+    }
+};
+}  // namespace stinkytofu

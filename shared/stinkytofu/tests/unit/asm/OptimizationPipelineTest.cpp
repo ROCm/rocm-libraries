@@ -22,59 +22,49 @@
  * ************************************************************************ */
 #include <gtest/gtest.h>
 
-#include "stinkytofu/core/PassManager.hpp"
-#include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
-#include "stinkytofu/serialization/asm/IRConverter.hpp"
-#include "stinkytofu/serialization/asm/StinkyAsmPrinter.hpp"
-
-#include "stinkytofu/pipeline/OptimizationPasses.hpp"
-
-#include "stinkytofu/analysis/asm/AsmVerifierPass.hpp"
-#include "stinkytofu/transforms/asm/CFGBuilderPass.hpp"
-
 #include <sstream>
 #include <string>
 
+#include "stinkytofu/analysis/asm/AsmVerifierPass.hpp"
+#include "stinkytofu/core/PassManager.hpp"
+#include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
+#include "stinkytofu/pipeline/OptimizationPasses.hpp"
+#include "stinkytofu/serialization/asm/IRConverter.hpp"
+#include "stinkytofu/serialization/asm/StinkyAsmPrinter.hpp"
+#include "stinkytofu/transforms/asm/CFGBuilderPass.hpp"
+
 using namespace stinkytofu;
 
-class OptimizationPipelineTest : public ::testing::Test
-{
-protected:
-    void SetUp() override
-    {
+class OptimizationPipelineTest : public ::testing::Test {
+   protected:
+    void SetUp() override {
         // Initialize GEMM config for GFX94X (gfx942)
-        gemmConfig.arch     = {9, 4, 2};
+        gemmConfig.arch = {9, 4, 2};
         gemmConfig.NumWaves = 2;
-        gemmConfig.TileA0   = 16;
-        gemmConfig.TileB0   = 16;
-        gemmConfig.TileM0   = 16;
-        gemmConfig.NumGRA   = 4;
-        gemmConfig.NumGRB   = 4;
-        gemmConfig.NumGRM   = 4;
+        gemmConfig.TileA0 = 16;
+        gemmConfig.TileB0 = 16;
+        gemmConfig.TileM0 = 16;
+        gemmConfig.NumGRA = 4;
+        gemmConfig.NumGRB = 4;
+        gemmConfig.NumGRM = 4;
     }
 
     // Parse IR and return a non-owning pointer
     // The converter must be kept alive for the lifetime of the Function
-    Function* parseIR(const std::string& irString, StinkyIRConverter& converter)
-    {
+    Function* parseIR(const std::string& irString, StinkyIRConverter& converter) {
         Function* func = converter.convertToFunction(irString);
-        if(!func)
-        {
+        if (!func) {
             std::cerr << "Failed to parse IR" << std::endl;
             return nullptr;
         }
         return func;
     }
 
-    int countInstructions(Function& func)
-    {
+    int countInstructions(Function& func) {
         int count = 0;
-        for(BasicBlock& bb : func)
-        {
-            for(IRBase& ir : bb)
-            {
-                if(ir.getType() == IRBase::IRType::StinkyTofu)
-                    count++;
+        for (BasicBlock& bb : func) {
+            for (IRBase& ir : bb) {
+                if (ir.getType() == IRBase::IRType::StinkyTofu) count++;
             }
         }
         return count;
@@ -84,14 +74,13 @@ protected:
 };
 
 // O0: no optimization passes, IR unchanged
-TEST_F(OptimizationPipelineTest, OptLevelO0)
-{
+TEST_F(OptimizationPipelineTest, OptLevelO0) {
     std::string irString = R"(
 v[0] = "st.v_add_f32"(v[1], v[2])
     )";
 
     StinkyIRConverter converter;
-    Function*         func = parseIR(irString, converter);
+    Function* func = parseIR(irString, converter);
     ASSERT_NE(func, nullptr);
 
     int instCountBefore = countInstructions(*func);
@@ -110,14 +99,13 @@ v[0] = "st.v_add_f32"(v[1], v[2])
 }
 
 // O1: peephole only, 1 iteration
-TEST_F(OptimizationPipelineTest, OptLevelO1)
-{
+TEST_F(OptimizationPipelineTest, OptLevelO1) {
     std::string irString = R"(
 v[0] = "st.v_add_f32"(v[1], v[2])
     )";
 
     StinkyIRConverter converter;
-    Function*         func = parseIR(irString, converter);
+    Function* func = parseIR(irString, converter);
     ASSERT_NE(func, nullptr);
 
     PassManager pm;
@@ -132,14 +120,13 @@ v[0] = "st.v_add_f32"(v[1], v[2])
 }
 
 // O2: peephole + DCE, 1 iteration
-TEST_F(OptimizationPipelineTest, OptLevelO2)
-{
+TEST_F(OptimizationPipelineTest, OptLevelO2) {
     std::string irString = R"(
 v[0] = "st.v_add_f32"(v[1], v[2])
     )";
 
     StinkyIRConverter converter;
-    Function*         func = parseIR(irString, converter);
+    Function* func = parseIR(irString, converter);
     ASSERT_NE(func, nullptr);
 
     PassManager pm;
@@ -154,14 +141,13 @@ v[0] = "st.v_add_f32"(v[1], v[2])
 }
 
 // O3: peephole + redundant mov elim + DCE, 3 iterations
-TEST_F(OptimizationPipelineTest, OptLevelO3)
-{
+TEST_F(OptimizationPipelineTest, OptLevelO3) {
     std::string irString = R"(
 v[0] = "st.v_add_f32"(v[1], v[2])
     )";
 
     StinkyIRConverter converter;
-    Function*         func = parseIR(irString, converter);
+    Function* func = parseIR(irString, converter);
     ASSERT_NE(func, nullptr);
 
     PassManager pm;

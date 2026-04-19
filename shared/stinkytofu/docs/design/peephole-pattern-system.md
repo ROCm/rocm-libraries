@@ -1021,4 +1021,3 @@ See 'tests/unit/PeepholeOptimizationPassTest.cpp':
 
 - **Fix:** commit '38b661d4fb' - Implements 'getUseCountForDef()'
 - **Tests:** commit '087930d10a' - Adds comprehensive test coverage
-

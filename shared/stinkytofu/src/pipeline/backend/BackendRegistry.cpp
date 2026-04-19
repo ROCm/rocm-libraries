@@ -22,56 +22,47 @@
  * ************************************************************************ */
 #include "stinkytofu/pipeline/BackendRegistry.hpp"
 
-#include "stinkytofu/hardware/ArchHelper.hpp"
-
 #include <unordered_map>
 
-namespace stinkytofu
-{
-    struct BackendRegistry::Registry
-    {
-        std::unordered_map<std::string, ArchPipeline> pipelines;
-    };
+#include "stinkytofu/hardware/ArchHelper.hpp"
 
-    BackendRegistry::Registry& BackendRegistry::getRegistry()
-    {
-        static Registry registry;
-        return registry;
+namespace stinkytofu {
+struct BackendRegistry::Registry {
+    std::unordered_map<std::string, ArchPipeline> pipelines;
+};
+
+BackendRegistry::Registry& BackendRegistry::getRegistry() {
+    static Registry registry;
+    return registry;
+}
+
+void BackendRegistry::setArchPipeline(const std::array<int, 3>& arch, ArchPipeline pipeline) {
+    auto& reg = getRegistry();
+    reg.pipelines[makeArchKey(arch)] = std::move(pipeline);
+}
+
+const BackendRegistry::ArchPipeline* BackendRegistry::getArchPipeline(
+    const std::array<int, 3>& arch) {
+    auto& reg = getRegistry();
+    auto it = reg.pipelines.find(makeArchKey(arch));
+    if (it != reg.pipelines.end()) {
+        return &it->second;
     }
+    return nullptr;
+}
 
-    void BackendRegistry::setArchPipeline(const std::array<int, 3>& arch, ArchPipeline pipeline)
-    {
-        auto& reg                        = getRegistry();
-        reg.pipelines[makeArchKey(arch)] = std::move(pipeline);
-    }
+void BackendRegistry::clear() {
+    auto& reg = getRegistry();
+    reg.pipelines.clear();
+}
 
-    const BackendRegistry::ArchPipeline*
-        BackendRegistry::getArchPipeline(const std::array<int, 3>& arch)
-    {
-        auto& reg = getRegistry();
-        auto  it  = reg.pipelines.find(makeArchKey(arch));
-        if(it != reg.pipelines.end())
-        {
-            return &it->second;
-        }
-        return nullptr;
-    }
+void BackendRegistry::clearArch(const std::array<int, 3>& arch) {
+    auto& reg = getRegistry();
+    reg.pipelines.erase(makeArchKey(arch));
+}
 
-    void BackendRegistry::clear()
-    {
-        auto& reg = getRegistry();
-        reg.pipelines.clear();
-    }
+std::string BackendRegistry::makeArchKey(const std::array<int, 3>& arch) {
+    return getArchName(getGfxArchID(arch[0], arch[1], arch[2]));
+}
 
-    void BackendRegistry::clearArch(const std::array<int, 3>& arch)
-    {
-        auto& reg = getRegistry();
-        reg.pipelines.erase(makeArchKey(arch));
-    }
-
-    std::string BackendRegistry::makeArchKey(const std::array<int, 3>& arch)
-    {
-        return getArchName(getGfxArchID(arch[0], arch[1], arch[2]));
-    }
-
-} // namespace stinkytofu
+}  // namespace stinkytofu

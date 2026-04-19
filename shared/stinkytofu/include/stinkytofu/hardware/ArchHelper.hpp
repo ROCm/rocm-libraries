@@ -23,93 +23,79 @@
 
 #pragma once
 
-#include "stinkytofu/hardware/GfxIsa.hpp"
-
 #include <cassert>
 #include <memory>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
-namespace stinkytofu
-{
-    // ArchHelper provides a centralized interface for querying architecture-specific
-    // information such as instruction descriptors, opcode mappings, and mnemonic lookups.
-    //
-    // This class eliminates the need for scattered switch statements throughout the codebase
-    // by encapsulating all architecture-specific queries in one place.
-    class ArchHelper
-    {
-    public:
-        struct ArchInfo
-        {
-            ArchInfo(uint32_t major, uint32_t minor, uint32_t stepping, uint32_t waveFrontSize)
-                : major(major)
-                , minor(minor)
-                , stepping(stepping)
-                , waveFrontSize(waveFrontSize)
-            {
-            }
+#include "stinkytofu/hardware/GfxIsa.hpp"
 
-            virtual ~ArchInfo() = default;
+namespace stinkytofu {
+// ArchHelper provides a centralized interface for querying architecture-specific
+// information such as instruction descriptors, opcode mappings, and mnemonic lookups.
+//
+// This class eliminates the need for scattered switch statements throughout the codebase
+// by encapsulating all architecture-specific queries in one place.
+class ArchHelper {
+   public:
+    struct ArchInfo {
+        ArchInfo(uint32_t major, uint32_t minor, uint32_t stepping, uint32_t waveFrontSize)
+            : major(major), minor(minor), stepping(stepping), waveFrontSize(waveFrontSize) {}
 
-            virtual stinkytofu::IsaOpcode
-                getIsaOpcode(stinkytofu::UnifiedOpcode unifiedOpcode) const = 0;
-            virtual const HwInstDesc* getMCIDTable() const                  = 0;
-            virtual const std::unordered_map<std::string, uint16_t>&
-                getMnemonicToIsaOpcodeMap() const = 0;
+        virtual ~ArchInfo() = default;
 
-            const uint32_t major;
-            const uint32_t minor;
-            const uint32_t stepping;
+        virtual stinkytofu::IsaOpcode getIsaOpcode(
+            stinkytofu::UnifiedOpcode unifiedOpcode) const = 0;
+        virtual const HwInstDesc* getMCIDTable() const = 0;
+        virtual const std::unordered_map<std::string, uint16_t>& getMnemonicToIsaOpcodeMap()
+            const = 0;
 
-            const uint32_t waveFrontSize;
-        };
+        const uint32_t major;
+        const uint32_t minor;
+        const uint32_t stepping;
 
-    public:
-        static const ArchHelper& getInstance()
-        {
-            static ArchHelper instance;
-            return instance;
-        }
-
-        const ArchInfo* getArchInfo(GfxArchID arch) const;
-
-        const ArchInfo* getArchInfo(uint32_t major, uint32_t minor, uint32_t stepping) const;
-
-        const GfxArchID getGfxArchID(uint32_t major, uint32_t minor, uint32_t stepping) const;
-
-    private:
-        // Private constructor: Populate the fixed list here
-        ArchHelper();
-
-        std::vector<std::unique_ptr<ArchInfo>> registeredArchInfos;
+        const uint32_t waveFrontSize;
     };
 
-    inline GfxArchID getGfxArchID(uint32_t major, uint32_t minor, uint32_t stepping)
-    {
-        return ArchHelper::getInstance().getGfxArchID(major, minor, stepping);
+   public:
+    static const ArchHelper& getInstance() {
+        static ArchHelper instance;
+        return instance;
     }
 
-    inline uint32_t getWaveFrontSize(GfxArchID archID)
-    {
-        const auto* archInfo = ArchHelper::getInstance().getArchInfo(archID);
-        assert(archInfo && "Invalid GfxArchID");
-        return archInfo->waveFrontSize;
-    }
+    const ArchInfo* getArchInfo(GfxArchID arch) const;
 
-    inline uint32_t getWaveFrontSize(uint32_t major, uint32_t minor, uint32_t stepping)
-    {
-        return getWaveFrontSize(getGfxArchID(major, minor, stepping));
-    }
+    const ArchInfo* getArchInfo(uint32_t major, uint32_t minor, uint32_t stepping) const;
 
-    inline std::string getArchName(GfxArchID archID)
-    {
-        const auto* archInfo = ArchHelper::getInstance().getArchInfo(archID);
-        if(!archInfo)
-            return "gfx_unknown";
-        return "gfx" + std::to_string(archInfo->major) + std::to_string(archInfo->minor)
-               + std::to_string(archInfo->stepping);
-    }
+    const GfxArchID getGfxArchID(uint32_t major, uint32_t minor, uint32_t stepping) const;
 
-} // namespace stinkytofu
+   private:
+    // Private constructor: Populate the fixed list here
+    ArchHelper();
+
+    std::vector<std::unique_ptr<ArchInfo>> registeredArchInfos;
+};
+
+inline GfxArchID getGfxArchID(uint32_t major, uint32_t minor, uint32_t stepping) {
+    return ArchHelper::getInstance().getGfxArchID(major, minor, stepping);
+}
+
+inline uint32_t getWaveFrontSize(GfxArchID archID) {
+    const auto* archInfo = ArchHelper::getInstance().getArchInfo(archID);
+    assert(archInfo && "Invalid GfxArchID");
+    return archInfo->waveFrontSize;
+}
+
+inline uint32_t getWaveFrontSize(uint32_t major, uint32_t minor, uint32_t stepping) {
+    return getWaveFrontSize(getGfxArchID(major, minor, stepping));
+}
+
+inline std::string getArchName(GfxArchID archID) {
+    const auto* archInfo = ArchHelper::getInstance().getArchInfo(archID);
+    if (!archInfo) return "gfx_unknown";
+    return "gfx" + std::to_string(archInfo->major) + std::to_string(archInfo->minor) +
+           std::to_string(archInfo->stepping);
+}
+
+}  // namespace stinkytofu

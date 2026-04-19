@@ -22,68 +22,59 @@
  * ************************************************************************ */
 #pragma once
 
+#include <memory>
+#include <string>
+
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/serialization/asm/StinkyAsmEmitter.hpp"
 #include "stinkytofu/serialization/asm/StinkyAsmPrinter.hpp"
 
-#include <memory>
-#include <string>
+namespace stinkytofu {
+/// Controls DumpStinkyFunctionPass output paths and printer/emitter options.
+struct DumpStinkyFunctionPassConfig {
+    /// If non-empty, write Stinky textual IR (AsmPrinter: st.func / op form) to this file.
+    std::string stirPath;
 
-namespace stinkytofu
-{
-    /// Controls DumpStinkyFunctionPass output paths and printer/emitter options.
-    struct DumpStinkyFunctionPassConfig
-    {
-        /// If non-empty, write Stinky textual IR (AsmPrinter: st.func / op form) to this file.
-        std::string stirPath;
+    /// When true, also emit assembly (StinkyAsmEmitter) to asmPath or a derived path.
+    bool emitAsm = false;
 
-        /// When true, also emit assembly (StinkyAsmEmitter) to asmPath or a derived path.
-        bool emitAsm = false;
+    /// Output path for StinkyAsmEmitter. If empty while emitAsm is true, uses stirPath with
+    /// its extension replaced by ".s", or "<stirPath>.s" if there is no extension.
+    std::string asmPath;
 
-        /// Output path for StinkyAsmEmitter. If empty while emitAsm is true, uses stirPath with
-        /// its extension replaced by ".s", or "<stirPath>.s" if there is no extension.
-        std::string asmPath;
+    AsmPrinterOptions printerOptions{};
+    AsmEmitterOptions emitterOptions{};
+};
 
-        AsmPrinterOptions printerOptions{};
-        AsmEmitterOptions emitterOptions{};
-    };
+/// Writes the current Function to disk as Stinky IR text and/or as emitted GPU assembly.
+class DumpStinkyFunctionPass : public Pass {
+   public:
+    static char ID;
 
-    /// Writes the current Function to disk as Stinky IR text and/or as emitted GPU assembly.
-    class DumpStinkyFunctionPass : public Pass
-    {
-    public:
-        static char ID;
+    explicit DumpStinkyFunctionPass(DumpStinkyFunctionPassConfig config = {})
+        : config_(std::move(config)) {}
 
-        explicit DumpStinkyFunctionPass(DumpStinkyFunctionPassConfig config = {})
-            : config_(std::move(config))
-        {
-        }
+    PassID getPassID() const override {
+        return &ID;
+    }
 
-        PassID getPassID() const override
-        {
-            return &ID;
-        }
+    const char* getName() const override {
+        return "DumpStinkyFunctionPass";
+    }
 
-        const char* getName() const override
-        {
-            return "DumpStinkyFunctionPass";
-        }
+    void run(Function& func, PassContext& passCtx) override;
 
-        void run(Function& func, PassContext& passCtx) override;
+    const DumpStinkyFunctionPassConfig& getConfig() const {
+        return config_;
+    }
 
-        const DumpStinkyFunctionPassConfig& getConfig() const
-        {
-            return config_;
-        }
+    void setConfig(DumpStinkyFunctionPassConfig config) {
+        config_ = std::move(config);
+    }
 
-        void setConfig(DumpStinkyFunctionPassConfig config)
-        {
-            config_ = std::move(config);
-        }
+   private:
+    DumpStinkyFunctionPassConfig config_;
+};
 
-    private:
-        DumpStinkyFunctionPassConfig config_;
-    };
-
-    std::unique_ptr<Pass> createDumpStinkyFunctionPass(DumpStinkyFunctionPassConfig config = {});
-} // namespace stinkytofu
+std::unique_ptr<Pass> createDumpStinkyFunctionPass(DumpStinkyFunctionPassConfig config = {});
+}  // namespace stinkytofu
