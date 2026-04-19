@@ -74,8 +74,8 @@ float calculateBatchnormTrainingTolerance(double xMin,
     const double maxAbsScale = std::max(std::abs(scaleMin), std::abs(scaleMax));
     const double maxAbsBias = std::max(std::abs(biasMin), std::abs(biasMax));
 
-    auto nhw = static_cast<uint64_t>(nElementsPerChannel);
-    auto epsilon = static_cast<double>(std::numeric_limits<ComputeType>::epsilon());
+    const auto nhw = static_cast<uint64_t>(nElementsPerChannel);
+    const auto epsilon = static_cast<double>(std::numeric_limits<ComputeType>::epsilon());
 
     const double gammaNHW = computeGamma(nhw, epsilon);
     validateGamma(gammaNHW);
@@ -148,8 +148,8 @@ float calculateBatchnormMeanTolerance(double xMin, double xMax, int64_t nElement
     }
 
     const double maxAbsX = std::max(std::abs(xMin), std::abs(xMax));
-    auto nhw = static_cast<uint64_t>(nElementsPerChannel);
-    auto epsilon = static_cast<double>(std::numeric_limits<ComputeType>::epsilon());
+    const auto nhw = static_cast<uint64_t>(nElementsPerChannel);
+    const auto epsilon = static_cast<double>(std::numeric_limits<ComputeType>::epsilon());
 
     const double gammaNHW = computeGamma(nhw, epsilon);
     validateGamma(gammaNHW);
@@ -188,7 +188,8 @@ float calculateBatchnormMeanTolerance(double xMin, double xMax, int64_t nElement
  * nonlinear op errors.
  *
  * @tparam OutputType  Data type of invVariance output tensor
- * @tparam InputType   Data type of x input tensor
+ * @tparam InputType   Data type of x input tensor (unused — invVar has no per-element
+ *                     input casting; retained for API consistency with other BN tolerances)
  * @tparam ComputeType Data type for intermediate computation (default: float)
  * @param xMin                Minimum value in input tensor x
  * @param xMax                Maximum value in input tensor x
@@ -210,8 +211,8 @@ float calculateBatchnormInvVarianceTolerance(double xMin,
     }
 
     const double maxAbsX = std::max(std::abs(xMin), std::abs(xMax));
-    auto nhw = static_cast<uint64_t>(nElementsPerChannel);
-    auto epsilon = static_cast<double>(std::numeric_limits<ComputeType>::epsilon());
+    const auto nhw = static_cast<uint64_t>(nElementsPerChannel);
+    const auto epsilon = static_cast<double>(std::numeric_limits<ComputeType>::epsilon());
 
     const double gammaNHW = computeGamma(nhw, epsilon);
     validateGamma(gammaNHW);

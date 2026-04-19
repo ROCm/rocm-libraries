@@ -875,6 +875,62 @@ TEST(TestCalculateBnInvVarTolerance, ZeroInput)
     EXPECT_LT(tol, 1.0f); // Should be a reasonable small value
 }
 
+// Asymmetric x range: maxAbsX = max(|xMin|, |xMax|)
+TEST(TestCalculateBnTrainTolerance, AsymmetricXRange)
+{
+    // xMin=-0.5, xMax=2.0 => maxAbsX=2.0 (same as symmetric [-2,2])
+    auto tolAsym = calculateBatchnormTrainingTolerance<float, float, float>(
+        -0.5, 2.0, -1.0, 1.0, 0.0, 0.0, 10);
+    auto tolSym = calculateBatchnormTrainingTolerance<float, float, float>(
+        -2.0, 2.0, -1.0, 1.0, 0.0, 0.0, 10);
+
+    // Both have same maxAbsX=2.0, so tolerance should be identical
+    EXPECT_EQ(tolAsym, tolSym);
+
+    // One-sided: xMin=0, xMax=5.0 => maxAbsX=5.0
+    auto tolOneSided = calculateBatchnormTrainingTolerance<float, float, float>(
+        0.0, 5.0, -1.0, 1.0, 0.0, 0.0, 10);
+    auto tolSymFive = calculateBatchnormTrainingTolerance<float, float, float>(
+        -5.0, 5.0, -1.0, 1.0, 0.0, 0.0, 10);
+
+    EXPECT_EQ(tolOneSided, tolSymFive);
+
+    // Mean tolerance: same behavior
+    auto meanAsym = calculateBatchnormMeanTolerance<float, float, float>(-0.5, 2.0, 10);
+    auto meanSym = calculateBatchnormMeanTolerance<float, float, float>(-2.0, 2.0, 10);
+    EXPECT_EQ(meanAsym, meanSym);
+
+    // InvVar tolerance: same behavior
+    auto invVarAsym = calculateBatchnormInvVarianceTolerance<float, float, float>(-0.5, 2.0, 10);
+    auto invVarSym = calculateBatchnormInvVarianceTolerance<float, float, float>(-2.0, 2.0, 10);
+    EXPECT_EQ(invVarAsym, invVarSym);
+}
+
+// Scale and bias both zero: y tolerance should be zero
+TEST(TestCalculateBnTrainTolerance, ZeroScaleAndBias)
+{
+    auto tol = calculateBatchnormTrainingTolerance<float, float, float>(
+        -1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 10);
+    EXPECT_EQ(tol, 0.0f);
+
+    // With half output casting: maxOutputMagnitude = 0 + 0 = 0, so cast term also 0
+    auto tolHalf = calculateBatchnormTrainingTolerance<half, float, float>(
+        -1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 10);
+    EXPECT_EQ(tolHalf, 0.0f);
+}
+
+// Negative NHW should throw (validates the < 1 check catches negatives)
+TEST(TestCalculateBnTrainTolerance, ThrowsOnNegativeNHW)
+{
+    EXPECT_THROW((calculateBatchnormTrainingTolerance<float, float, float>(
+                     -1.0, 1.0, -1.0, 1.0, 0.0, 0.0, -1)),
+                 std::invalid_argument);
+    EXPECT_THROW((calculateBatchnormMeanTolerance<float, float, float>(-1.0, 1.0, -1)),
+                 std::invalid_argument);
+    EXPECT_THROW((calculateBatchnormInvVarianceTolerance<float, float, float>(-1.0, 1.0, -1)),
+                 std::invalid_argument);
+}
+
 // Mean and invVar also throw on singularity
 TEST(TestCalculateBnMeanTolerance, ThrowsOnSingularity)
 {
