@@ -53,7 +53,7 @@ class IntrinsicExpansionPassTest : public ::testing::Test {
         passCtx.setGemmTileConfig(defaultConfig);
     }
 
-    GemmTileConfig defaultConfig = {{9, 4, 2}, 128, 128, 64, 0, 0, 0};
+    GemmTileConfig defaultConfig = {{12, 5, 0}, 128, 128, 64, 0, 0, 0};
     PassContext passCtx;
 };
 

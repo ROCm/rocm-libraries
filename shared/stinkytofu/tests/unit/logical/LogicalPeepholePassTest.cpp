@@ -35,7 +35,7 @@ class LogicalPeepholePassTest : public ::testing::Test {
    protected:
     void SetUp() override {
         passCtx = std::make_unique<PassContext>();
-        arch = GfxArchID::Gfx942;
+        arch = GfxArchID::Gfx1250;
 
         bb = func.createBasicBlock("entry");
     }

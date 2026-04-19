@@ -80,7 +80,7 @@ TEST_F(IRToAsmPipelineTest, SimpleVectorALU) {
 
     // Step 3: Set architecture config and run logical lowering passes
     GemmTileConfig config;
-    config.arch = {9, 4, 2};  // Gfx942
+    config.arch = {12, 5, 0};  // Gfx1250
     config.TileA0 = 16;
     config.TileB0 = 16;
     config.TileM0 = 16;

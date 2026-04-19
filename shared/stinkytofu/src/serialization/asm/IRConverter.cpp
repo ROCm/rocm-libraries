@@ -31,7 +31,7 @@
 #include "stinkytofu/serialization/asm/IRParser.hpp"
 
 namespace stinkytofu {
-StinkyIRConverter::StinkyIRConverter() : arch({9, 4, 2}) {}
+StinkyIRConverter::StinkyIRConverter() : arch({12, 5, 0}) {}
 
 StinkyIRConverter::StinkyIRConverter(const std::array<int, 3>& targetArch) : arch(targetArch) {}
 

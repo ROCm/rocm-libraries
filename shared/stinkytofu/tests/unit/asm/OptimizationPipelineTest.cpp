@@ -38,8 +38,8 @@ using namespace stinkytofu;
 class OptimizationPipelineTest : public ::testing::Test {
    protected:
     void SetUp() override {
-        // Initialize GEMM config for GFX94X (gfx942)
-        gemmConfig.arch = {9, 4, 2};
+        // Initialize GEMM config for gfx1250
+        gemmConfig.arch = {12, 5, 0};
         gemmConfig.NumWaves = 2;
         gemmConfig.TileA0 = 16;
         gemmConfig.TileB0 = 16;

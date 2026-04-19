@@ -181,10 +181,7 @@ NB_MODULE(_stinkytofu, m) {
     // ========================================================================
     // Architecture IDs
     // ========================================================================
-    nb::enum_<GfxArchID>(m, "GfxArch")
-        .value("Gfx942", GfxArchID::Gfx942, "GFX9.4.2 (MI210/MI250)")
-        .value("Gfx950", GfxArchID::Gfx950, "GFX9.5.0 (MI300)")
-        .value("Gfx1250", GfxArchID::Gfx1250, "GFX12.5.0 (RDNA4)");
+    nb::enum_<GfxArchID>(m, "GfxArch").value("Gfx1250", GfxArchID::Gfx1250, "GFX12.5.0");
 
     // ========================================================================
     // PyLogicalModule - Python-Specific High-Level IR Container

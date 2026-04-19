@@ -257,7 +257,7 @@ TEST_F(ScopeAdaptorTest, SequentialSingleRegionAdapters) {
     EXPECT_EQ(countInstructions(module->getFunction()), 6);
 }
 
-// End-to-end pipeline pattern matching gfx942/gfx1250: two single-region
+// End-to-end pipeline pattern matching gfx1250: two single-region
 // adapters (per-region optimization) followed by a multi-region adapter
 // (cross-region waitcnt reinsertion). Verifies the full sequence composes
 // without corrupting state.
