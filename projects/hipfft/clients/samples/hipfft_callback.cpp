@@ -1,4 +1,4 @@
-// Copyright (C) 2021 - 2025 Advanced Micro Devices, Inc. All rights
+// Copyright (C) 2021 - 2026 Advanced Micro Devices, Inc. All rights
 // reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -96,11 +96,9 @@ int main()
     }
     std::cout << std::endl;
 
-    // Create the plan
+    // Create the plan (hipfftPlan1d internally allocates the handle)
     hipfftHandle plan{};
-    hipfftResult hipfft_rt = hipfftCreate(&plan);
-    if(hipfft_rt != HIPFFT_SUCCESS)
-        throw std::runtime_error("failed to create plan");
+    hipfftResult hipfft_rt;
     hipfft_rt = hipfftPlan1d(&plan, // plan handle
                              Nx, // transform length
                              HIPFFT_Z2Z, // transform type (HIPFFT_C2C for single-precision)

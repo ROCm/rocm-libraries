@@ -1,4 +1,4 @@
-// Copyright (C) 2019 - 2025 Advanced Micro Devices, Inc. All rights
+// Copyright (C) 2019 - 2026 Advanced Micro Devices, Inc. All rights
 // reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -49,7 +49,7 @@ int main()
     if(hip_rt != hipSuccess)
         throw std::runtime_error("hipMalloc failed");
 
-    // Inititalize the data
+    // Initialize the data
     for(size_t i = 0; i < Nx; i++)
     {
         cdata[i] = i;
@@ -64,11 +64,9 @@ int main()
     if(hip_rt != hipSuccess)
         throw std::runtime_error("hipMemcpy failed");
 
-    // Create the plan
+    // Create the plan (hipfftPlan1d internally allocates the handle)
     hipfftHandle plan{};
-    hipfftResult hipfft_rt = hipfftCreate(&plan);
-    if(hipfft_rt != HIPFFT_SUCCESS)
-        throw std::runtime_error("failed to create plan");
+    hipfftResult hipfft_rt;
 
     hipfft_rt = hipfftPlan1d(&plan, // plan handle
                              Nx, // transform length

@@ -1,4 +1,4 @@
-// Copyright (C) 2019 - 2022 Advanced Micro Devices, Inc. All rights
+// Copyright (C) 2019 - 2026 Advanced Micro Devices, Inc. All rights
 // reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -132,6 +132,8 @@ int main()
         std::cout << "\n";
     }
     std::cout << std::endl;
+
+    hipfftDestroy(hipPlan);
 
     hip_rt = hipFree(d_in_out);
     if(hip_rt != hipSuccess)

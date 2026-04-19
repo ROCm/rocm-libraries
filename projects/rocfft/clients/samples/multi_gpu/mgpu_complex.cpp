@@ -1,4 +1,4 @@
-// Copyright (C) 2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2024 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -244,12 +244,12 @@ int main(int argc, char* argv[])
     if(fftrc != rocfft_status_success)
         throw std::runtime_error("failed to create plan");
 
-    // Get execution information and allocate work buffer for each device
+    // Allocate a work buffer on each device used by the transform
     rocfft_execution_info planinfo = nullptr;
-    std::vector<void*>    work_bufs(nDevices);
-    for(int device = 0; device < nDevices; ++device)
+    std::vector<void*>    work_bufs(devices.size(), nullptr);
+    for(size_t idx = 0; idx < devices.size(); ++idx)
     {
-        (void)hipSetDevice(device);
+        (void)hipSetDevice(devices[idx]);
         size_t work_buf_size = 0;
         if(rocfft_plan_get_work_buffer_size(gpu_plan, &work_buf_size) != rocfft_status_success)
             throw std::runtime_error("rocfft_plan_get_work_buffer_size failed.");
@@ -258,9 +258,9 @@ int main(int argc, char* argv[])
         {
             if(!planinfo && rocfft_execution_info_create(&planinfo) != rocfft_status_success)
                 throw std::runtime_error("failed to create execution info");
-            if(hipMalloc(&work_bufs[device], work_buf_size) != hipSuccess)
+            if(hipMalloc(&work_bufs[idx], work_buf_size) != hipSuccess)
                 throw std::runtime_error("hipMalloc failed");
-            if(rocfft_execution_info_set_work_buffer(planinfo, work_bufs[device], work_buf_size)
+            if(rocfft_execution_info_set_work_buffer(planinfo, work_bufs[idx], work_buf_size)
                != rocfft_status_success)
                 throw std::runtime_error("rocfft_execution_info_set_work_buffer failed.");
         }
@@ -318,18 +318,20 @@ int main(int argc, char* argv[])
     if(rocfft_cleanup() != rocfft_status_success)
         throw std::runtime_error("rocfft_cleanup failed.");
 
-    for(int device = 0; device < nDevices; ++device)
+    // Free work buffers
+    for(size_t idx = 0; idx < devices.size(); ++idx)
     {
-        (void)hipSetDevice(device);
-        if(work_bufs[device])
-            (void)hipFree(work_bufs[device]);
+        (void)hipSetDevice(devices[idx]);
+        if(work_bufs[idx])
+            (void)hipFree(work_bufs[idx]);
     }
 
-    for(const auto device : devices)
+    // Free input/output buffers (indexed by brick, not device id)
+    for(size_t idx = 0; idx < devices.size(); ++idx)
     {
-        (void)hipSetDevice(device);
-        (void)hipFree(gpu_in[device]);
-        (void)hipFree(gpu_out[device]);
+        (void)hipSetDevice(devices[idx]);
+        (void)hipFree(gpu_in[idx]);
+        (void)hipFree(gpu_out[idx]);
     }
 
     return 0;

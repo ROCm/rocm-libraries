@@ -1,4 +1,4 @@
-// Copyright (C) 2019 - 2025 Advanced Micro Devices, Inc. All rights
+// Copyright (C) 2019 - 2026 Advanced Micro Devices, Inc. All rights
 // reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -39,7 +39,7 @@ int main()
     const size_t Ny = 5;
     const size_t Nz = 6;
 
-    std::cout << "Nx: " << Nx << "\tNy " << Ny << "\tNz " << Nz << std::endl;
+    std::cout << "Nx: " << Nx << "\tNy: " << Ny << "\tNz: " << Nz << std::endl;
 
     const size_t Nzcomplex = Nz / 2 + 1;
     const size_t rstride   = Nzcomplex * 2; // Nz for out-of-place
@@ -53,7 +53,7 @@ int main()
     if(hip_rt != hipSuccess)
         throw std::runtime_error("hipMalloc failed");
 
-    // Inititalize the data
+    // Initialize the data
     std::vector<double> rdata(Nx * Ny * rstride);
     for(size_t i = 0; i < Nx * Ny * rstride; i++)
     {
@@ -78,11 +78,9 @@ int main()
     if(hip_rt != hipSuccess)
         throw std::runtime_error("hipMemcpy failed");
 
-    // Create plan:
+    // Create plan (hipfftPlan3d internally allocates the handle)
     hipfftHandle plan{};
-    hipfftResult hipfft_rt = hipfftCreate(&plan);
-    if(hipfft_rt != HIPFFT_SUCCESS)
-        throw std::runtime_error("failed to create plan");
+    hipfftResult hipfft_rt;
     hipfft_rt = hipfftPlan3d(&plan, // plan handle
                              Nx,
                              Ny,
@@ -98,7 +96,7 @@ int main()
         throw std::runtime_error("hipfftExecD2Z failed");
 
     std::cout << "output:\n";
-    std::vector<std::complex<double>> cdata(Nx * Ny * Nz);
+    std::vector<std::complex<double>> cdata(Nx * Ny * Nzcomplex);
     hip_rt = hipMemcpy(cdata.data(), x, complex_bytes, hipMemcpyDeviceToHost);
     if(hip_rt != hipSuccess)
         throw std::runtime_error("hipMemcpy failed");
