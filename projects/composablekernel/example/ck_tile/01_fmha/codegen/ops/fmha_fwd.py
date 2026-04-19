@@ -224,9 +224,7 @@ float {F_func_name}([[maybe_unused]] fmha_fwd_traits t, [[maybe_unused]] fmha_fw
 """
 FMHA_FWD_API_FOOTER = """
 float fmha_fwd(fmha_fwd_traits traits, fmha_fwd_args args, const ck_tile::stream_config& config) {
-    const char* v3_env = std::getenv("CK_FMHA_ENABLE_V3");
-    bool v3_enabled = v3_env && std::string(v3_env) == "1";
-    if (v3_enabled && args.seqlen_q > 1) {
+    if (args.max_seqlen_q > 1) {
         float r = fmha_fwd_v3(traits, args, config);
         if (r >= 0) return r;
     }
