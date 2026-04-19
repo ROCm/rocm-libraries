@@ -62,14 +62,14 @@ struct ParsedFunction;
 class STINKYTOFU_EXPORT StinkyIRConverter {
    public:
     /**
-     * Constructor with default architecture (gfx942).
+     * Constructor with default architecture (gfx1250).
      */
     StinkyIRConverter();
 
     /**
      * Constructor with specified architecture.
      *
-     * @param targetArch The target GPU architecture (e.g., {9, 4, 2} for gfx942)
+     * @param targetArch The target GPU architecture (e.g., {12, 5, 0} for gfx1250)
      */
     StinkyIRConverter(const std::array<int, 3>& targetArch);
 

@@ -37,8 +37,8 @@ using namespace stinkytofu;
 class DeadCodeEliminationPassTest : public ::testing::Test {
    protected:
     void SetUp() override {
-        // Initialize GEMM config for GFX94X (gfx942)
-        gemmConfig.arch = {9, 4, 2};
+        // Initialize GEMM config for gfx1250
+        gemmConfig.arch = {12, 5, 0};
         gemmConfig.NumWaves = 2;
         gemmConfig.TileA0 = 16;
         gemmConfig.TileB0 = 16;
@@ -84,7 +84,7 @@ v[0] = "st.v_mul_f32"(v[1], v[2])
 v[3] = "st.v_add_f32"(v[4], v[5])
 v[0] = "st.v_mov_b32"(v[7])
 v[6] = "st.v_sub_f32"(v[0], v[3])
-"st.global_store_dword"(v[40], v[6])
+"st.buffer_store_b32"(v[40], v[6])
     )";
 
     StinkyIRConverter converter;
@@ -107,7 +107,7 @@ v[6] = "st.v_sub_f32"(v[0], v[3])
     EXPECT_NE(result.find("st.v_add_f32"), std::string::npos);
     EXPECT_NE(result.find("st.v_mov_b32"), std::string::npos);
     EXPECT_NE(result.find("st.v_sub_f32"), std::string::npos);
-    EXPECT_NE(result.find("global_store_dword"), std::string::npos);
+    EXPECT_NE(result.find("buffer_store_b32"), std::string::npos);
 }
 
 // Test 2: Chain of dead stores (multiple overwrites)
@@ -117,7 +117,7 @@ v[0] = "st.v_mul_f32"(v[1], v[2])
 v[0] = "st.v_add_f32"(v[3], v[4])
 v[0] = "st.v_fma_f32"(v[5], v[6], 1.0)
 v[0] = "st.v_sub_f32"(v[10], v[11])
-"st.global_store_dword"(v[40], v[0])
+"st.buffer_store_b32"(v[40], v[0])
     )";
 
     StinkyIRConverter converter;
@@ -140,7 +140,7 @@ v[0] = "st.v_sub_f32"(v[10], v[11])
 
     // Last v0 definition is used by store -> kept
     EXPECT_NE(result.find("st.v_sub_f32"), std::string::npos);
-    EXPECT_NE(result.find("global_store_dword"), std::string::npos);
+    EXPECT_NE(result.find("buffer_store_b32"), std::string::npos);
 }
 
 // Test 3: Don't remove live code
@@ -149,7 +149,7 @@ TEST_F(DeadCodeEliminationPassTest, DontRemoveLiveCode) {
 v[0] = "st.v_mul_f32"(v[1], v[2])
 v[3] = "st.v_add_f32"(v[0], v[4])
 v[5] = "st.v_fma_f32"(v[3], v[0], 1.0)
-"st.global_store_dword"(v[40], v[5])
+"st.buffer_store_b32"(v[40], v[5])
     )";
 
     StinkyIRConverter converter;
@@ -169,7 +169,7 @@ v[5] = "st.v_fma_f32"(v[3], v[0], 1.0)
     EXPECT_NE(result.find("st.v_mul_f32"), std::string::npos);
     EXPECT_NE(result.find("st.v_add_f32"), std::string::npos);
     EXPECT_NE(result.find("st.v_fma_f32"), std::string::npos);
-    EXPECT_NE(result.find("global_store_dword"), std::string::npos);
+    EXPECT_NE(result.find("buffer_store_b32"), std::string::npos);
 }
 
 // Test 4: Multiple redefinitions, some with uses in between
@@ -179,7 +179,7 @@ v[0] = "st.v_mul_f32"(v[1], v[2])
 v[3] = "st.v_add_f32"(v[0], v[4])
 v[3] = "st.v_sub_f32"(v[5], v[6])
 v[7] = "st.v_fma_f32"(v[3], v[1], 1.0)
-"st.global_store_dword"(v[40], v[7])
+"st.buffer_store_b32"(v[40], v[7])
     )";
 
     StinkyIRConverter converter;
@@ -207,9 +207,9 @@ v[7] = "st.v_fma_f32"(v[3], v[1], 1.0)
 // Test 5: Don't remove memory operations
 TEST_F(DeadCodeEliminationPassTest, PreserveMemoryOperations) {
     std::string irString = R"(
-v[0] = "st.global_load_dword"(v[40])
+v[0] = "st.buffer_load_b32"(v[40])
 v[4] = "st.v_mul_f32"(v[1], v[2])
-"st.global_store_dword"(v[41], v[4])
+"st.buffer_store_b32"(v[41], v[4])
     )";
 
     StinkyIRConverter converter;
@@ -226,8 +226,8 @@ v[4] = "st.v_mul_f32"(v[1], v[2])
     std::string result = getFunctionIR(*func);
 
     // Memory operations should always be preserved
-    EXPECT_NE(result.find("global_load_dword"), std::string::npos);
-    EXPECT_NE(result.find("global_store_dword"), std::string::npos);
+    EXPECT_NE(result.find("buffer_load_b32"), std::string::npos);
+    EXPECT_NE(result.find("buffer_store_b32"), std::string::npos);
 
     // v4 is used by store, so mul should also be preserved
     EXPECT_NE(result.find("st.v_mul_f32"), std::string::npos);
@@ -288,7 +288,7 @@ v[3] = "st.v_add_f32"(v[4], v[5])
 v[6] = "st.v_sub_f32"(v[3], v[0])
 v[7] = "st.v_fma_f32"(v[8], v[9], 1.0)
 v[10] = "st.v_add_f32"(v[6], v[7])
-"st.global_store_dword"(v[40], v[10])
+"st.buffer_store_b32"(v[40], v[10])
     )";
 
     StinkyIRConverter converter;
@@ -325,7 +325,7 @@ TEST_F(DeadCodeEliminationPassTest, ConstantOperands) {
 v[0] = "st.v_mul_f32"(v[1], 2.0)
 v[3] = "st.v_add_f32"(v[4], 1.0)
 v[6] = "st.v_fma_f32"(v[0], v[3], 3.0)
-"st.global_store_dword"(v[40], v[6])
+"st.buffer_store_b32"(v[40], v[6])
     )";
 
     StinkyIRConverter converter;
@@ -353,7 +353,7 @@ TEST_F(DeadCodeEliminationPassTest, InPlaceOperations) {
 v[0] = "st.v_mul_f32"(v[1], v[2])
 v[0] = "st.v_add_f32"(v[0], v[3])
 v[4] = "st.v_sub_f32"(v[0], v[5])
-"st.global_store_dword"(v[40], v[4])
+"st.buffer_store_b32"(v[40], v[4])
     )";
 
     StinkyIRConverter converter;

@@ -118,7 +118,7 @@ TEST(RegisterWidthValidationTest, OtherInstructions_NoWidthChecks) {
 
     PassManager pm;
     GemmTileConfig config;
-    config.arch = {9, 4, 2};
+    config.arch = {12, 5, 0};
     config.TileA0 = 16;
     config.TileB0 = 16;
     config.TileM0 = 16;

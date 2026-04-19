@@ -1,4 +1,4 @@
-# RUN: %stinkytofu-opt --arch gfx942 %s --RedundantMovEliminationPass --print-output
+# RUN: %stinkytofu-opt --arch gfx1250 %s --RedundantMovEliminationPass --print-output
 #
 # Redundant MOV Elimination: remove duplicate v_mov_b32 instructions
 # that write the same value to the same destination.

@@ -129,13 +129,13 @@ TEST_F(IRParserTest, ParsesLabelReference) {
 }
 
 TEST_F(IRParserTest, ParsesMemoryInstruction) {
-    const std::string input = R"(v[0] = "st.global_load_dword"(v[1:2]))";
+    const std::string input = R"(v[0] = "st.buffer_load_b32"(v[1:2]))";
 
     auto instructions = parseAssemblyString(input);
 
     ASSERT_EQ(instructions.size(), 1);
     ASSERT_NE(instructions[0].opcodeStr, "");
-    EXPECT_EQ(instructions[0].opcodeStr, "global_load_dword");
+    EXPECT_EQ(instructions[0].opcodeStr, "buffer_load_b32");
 }
 
 TEST_F(IRParserTest, ParsesInstructionWithImmediate) {

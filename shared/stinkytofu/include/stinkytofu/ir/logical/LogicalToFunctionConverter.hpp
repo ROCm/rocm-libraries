@@ -36,7 +36,7 @@ namespace stinkytofu {
  *
  *   // C++ converts to Function; PyLogicalFunction wraps it and detaches Python-owned IRs on
  * destroy Function func("kernel"); PyLogicalFunction pyFunc(&func); LogicalToFunctionConverter
- * converter(GfxArchID::Gfx942); converter.convert(module.get(), pyFunc);
+ * converter(GfxArchID::Gfx1250); converter.convert(module.get(), pyFunc);
  *
  *   // Now run optimization pipeline on func
  *   OptimizationPipeline::run(func, config);

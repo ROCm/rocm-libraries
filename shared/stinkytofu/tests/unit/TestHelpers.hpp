@@ -67,12 +67,11 @@ inline StinkyInstruction* createVAddInBlock(BasicBlock* bb, GfxArchID arch, int 
 
 /// Create ds_read_b128 / ds_load_b128 in \p bb: v[destReg:destReg+3] = mem[v[addrReg]].
 /// Defines a 4-DWORD wide vector register.
-/// Gfx1250 uses ds_load_b128; Gfx942/Gfx950 use ds_read_b128.
+/// Gfx1250 uses ds_load_b128.
 inline StinkyInstruction* createDsReadB128InBlock(BasicBlock* bb, GfxArchID arch, int destReg,
                                                   int addrReg) {
     AsmIRBuilder builder(*bb, arch);
-    GFX op = (arch == GfxArchID::Gfx1250) ? GFX::ds_load_b128 : GFX::ds_read_b128;
-    StinkyInstruction* inst = builder.create(getMCIDByUOp(op, arch));
+    StinkyInstruction* inst = builder.create(getMCIDByUOp(GFX::ds_load_b128, arch));
     inst->addDestReg(StinkyRegister("v", destReg, 4));
     inst->addSrcReg(StinkyRegister("v", addrReg, 1));
     return inst;
@@ -106,7 +105,7 @@ inline StinkyInstruction* createTensorLoadInBlock(BasicBlock* bb, GfxArchID arch
 inline StinkyInstruction* createDSWriteInBlock(BasicBlock* bb, GfxArchID arch, int addrReg,
                                                int dataReg, std::vector<int> memTokens = {}) {
     AsmIRBuilder builder(*bb, arch);
-    StinkyInstruction* inst = builder.create(getMCIDByUOp(GFX::ds_write_b64, arch));
+    StinkyInstruction* inst = builder.create(getMCIDByUOp(GFX::ds_store_b64, arch));
     inst->addSrcReg(StinkyRegister("v", addrReg, 1));
     inst->addSrcReg(StinkyRegister("v", dataReg, 2));
     if (!memTokens.empty()) inst->addModifier<MemTokenData>(MemTokenData{memTokens});
@@ -220,7 +219,7 @@ inline void verifyUsersSourcesConsistency(const Function& func) {
  *
  * Usage (prefer BasicBlock's begin/end for iteration):
  * @code
- *   StinkyTofu builder({9, 4, 2});
+ *   StinkyTofu builder({12, 5, 0});
  *
  *   // Add single instruction
  *   auto* add = addToIRList(*bb, builder.VAddF32(vgpr(0), vgpr(1), vgpr(2)));

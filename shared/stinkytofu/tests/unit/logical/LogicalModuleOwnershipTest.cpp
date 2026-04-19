@@ -72,7 +72,7 @@ TEST_F(LogicalModuleOwnershipTest, SharedPtrToRawPointerConversion) {
     // ownedExternally)
     Function func("kernel");
     PyLogicalFunction pyFunc(&func);
-    LogicalToFunctionConverter converter(GfxArchID::Gfx942);
+    LogicalToFunctionConverter converter(GfxArchID::Gfx1250);
     converter.convertWithAutoBlocks(module.get(), pyFunc);
 
     // Verify instructions were added to Function.
@@ -99,7 +99,7 @@ TEST_F(LogicalModuleOwnershipTest, LogicalModuleSurvivesAfterConversion) {
         Function func("kernel");
         PyLogicalFunction pyFunc(&func);
         PassManager pm;
-        LogicalToFunctionConverter converter(GfxArchID::Gfx942);
+        LogicalToFunctionConverter converter(GfxArchID::Gfx1250);
         converter.convert(module.get(), pyFunc);
 
         // Verify conversion
@@ -136,11 +136,11 @@ TEST_F(LogicalModuleOwnershipTest, NoDoubleFreeWithCompositeInstruction) {
     Function func("kernel");
     PyLogicalFunction pyFunc(&func);
     PassManager pm;
-    LogicalToFunctionConverter converter(GfxArchID::Gfx942);
+    LogicalToFunctionConverter converter(GfxArchID::Gfx1250);
     converter.convertWithAutoBlocks(module.get(), pyFunc);
 
     GemmTileConfig config;
-    config.arch = {9, 4, 2};
+    config.arch = {12, 5, 0};
     config.TileA0 = 16;
     config.TileB0 = 16;
     config.TileM0 = 16;
