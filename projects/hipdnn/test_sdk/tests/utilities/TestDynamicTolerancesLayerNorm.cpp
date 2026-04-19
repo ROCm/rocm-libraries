@@ -172,7 +172,7 @@ std::vector<LayernormFpropToleranceTestCase>
 }
 
 // Bfloat16 / Bfloat16 / Bfloat16
-// bf16 epsilon = 2^-7.  2*M=2: nU=0.0156>=0.01 -> statistical.
+// bf16 epsilon = 2^-7.  2*M=2: nU=2*2*2^-7=0.03125>=0.01 -> statistical.
 template <>
 std::vector<LayernormFpropToleranceTestCase>
     getLayernormFpropToleranceTestCases<TypeTriple<bfloat16, bfloat16, bfloat16>>()
