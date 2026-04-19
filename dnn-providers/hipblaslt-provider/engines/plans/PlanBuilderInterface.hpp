@@ -5,8 +5,8 @@
 
 #include <stdint.h>
 
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
-#include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 
 #include "HipdnnEnginePluginExecutionContext.hpp"
@@ -20,17 +20,18 @@ class IPlanBuilder
 public:
     virtual ~IPlanBuilder() = default;
 
-    virtual bool isApplicable(const HipdnnEnginePluginHandle& handle,
-                              const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
+    virtual bool
+        isApplicable(const HipdnnEnginePluginHandle& handle,
+                     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
         = 0;
 
     virtual size_t
         getWorkspaceSize(const HipdnnEnginePluginHandle& handle,
-                         const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
+                         const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
         = 0;
 
     virtual void buildPlan(const HipdnnEnginePluginHandle& handle,
-                           const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+                           const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
                            HipdnnEnginePluginExecutionContext& executionContext) const
         = 0;
 };
