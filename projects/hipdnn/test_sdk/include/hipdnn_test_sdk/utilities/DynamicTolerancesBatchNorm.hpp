@@ -74,15 +74,15 @@ float calculateBatchnormTrainingTolerance(double xMin,
     const double maxAbsScale = std::max(std::abs(scaleMin), std::abs(scaleMax));
     const double maxAbsBias = std::max(std::abs(biasMin), std::abs(biasMax));
 
-    auto NHW = static_cast<uint64_t>(nElementsPerChannel);
+    auto nhw = static_cast<uint64_t>(nElementsPerChannel);
     auto epsilon = static_cast<double>(std::numeric_limits<ComputeType>::epsilon());
 
-    const double gammaNHW = computeGamma(NHW, epsilon);
+    const double gammaNHW = computeGamma(nhw, epsilon);
     validateGamma(gammaNHW);
 
     // Sum-of-squares accumulation error for variance path (same structure as RMSNorm).
     // S = sum_{i=0}^{NHW-1} x_i^2 (self-product)
-    const double sumAbsProductBound = static_cast<double>(NHW) * maxAbsX * maxAbsX;
+    const double sumAbsProductBound = static_cast<double>(nhw) * maxAbsX * maxAbsX;
 
     double accumulatedTolerance = gammaNHW * sumAbsProductBound;
 
@@ -148,10 +148,10 @@ float calculateBatchnormMeanTolerance(double xMin, double xMax, int64_t nElement
     }
 
     const double maxAbsX = std::max(std::abs(xMin), std::abs(xMax));
-    auto NHW = static_cast<uint64_t>(nElementsPerChannel);
+    auto nhw = static_cast<uint64_t>(nElementsPerChannel);
     auto epsilon = static_cast<double>(std::numeric_limits<ComputeType>::epsilon());
 
-    const double gammaNHW = computeGamma(NHW, epsilon);
+    const double gammaNHW = computeGamma(nhw, epsilon);
     validateGamma(gammaNHW);
 
     // mean = (sum x_i) / NHW
@@ -162,11 +162,11 @@ float calculateBatchnormMeanTolerance(double xMin, double xMax, int64_t nElement
 
     // Input casting (single tensor, factor 1): signalBound = NHW * maxAbsX.
     // After division by NHW, casting contribution is ~ computeEpsilon * maxAbsX.
-    double inputCastError
-        = computeInputCastingError<InputType, ComputeType>(static_cast<double>(NHW) * maxAbsX, 1);
+    const double inputCastError
+        = computeInputCastingError<InputType, ComputeType>(static_cast<double>(nhw) * maxAbsX, 1);
     if(maxAbsX > 0.0)
     {
-        tolerance += inputCastError / static_cast<double>(NHW);
+        tolerance += inputCastError / static_cast<double>(nhw);
     }
 
     // Output casting.
@@ -210,10 +210,10 @@ float calculateBatchnormInvVarianceTolerance(double xMin,
     }
 
     const double maxAbsX = std::max(std::abs(xMin), std::abs(xMax));
-    auto NHW = static_cast<uint64_t>(nElementsPerChannel);
+    auto nhw = static_cast<uint64_t>(nElementsPerChannel);
     auto epsilon = static_cast<double>(std::numeric_limits<ComputeType>::epsilon());
 
-    const double gammaNHW = computeGamma(NHW, epsilon);
+    const double gammaNHW = computeGamma(nhw, epsilon);
     validateGamma(gammaNHW);
 
     // Variance error (see plan Section 2, Stage 2):
@@ -221,7 +221,7 @@ float calculateBatchnormInvVarianceTolerance(double xMin,
     //                     + 2 * maxAbsX * deltaMean (mean^2 error)
     //                     + u * max|x|^2            (subtraction error)
     //   Simplified: ~ 3 * gamma * max|x|^2  (since deltaMean ~ gamma * maxAbsX)
-    double deltaVariance = 3.0 * gammaNHW * maxAbsX * maxAbsX;
+    const double deltaVariance = 3.0 * gammaNHW * maxAbsX * maxAbsX;
 
     // Nonlinear ops: add(epsilon_bn) + sqrt + reciprocal
     constexpr double NONLINEAR_OPS = 3.0;
@@ -241,7 +241,7 @@ float calculateBatchnormInvVarianceTolerance(double xMin,
     }
 
     // Output casting: invVar ~ sqrt(3)/maxAbsX for typical data, 1/sqrt(eps_bn) for x~0
-    double maxInvVar = maxAbsX > 0.0 ? std::sqrt(3.0) / maxAbsX : 1.0 / std::sqrt(epsilonBn);
+    const double maxInvVar = maxAbsX > 0.0 ? std::sqrt(3.0) / maxAbsX : 1.0 / std::sqrt(epsilonBn);
     tolerance += computeOutputCastingError<OutputType, ComputeType>(maxInvVar);
 
     validateToleranceRange<OutputType>(tolerance);
