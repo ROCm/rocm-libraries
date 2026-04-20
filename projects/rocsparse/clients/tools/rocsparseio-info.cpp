@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2024-2025 Advanced Micro Devices, Inc.
+// Copyright (C) 2024-2026 Advanced Micro Devices, Inc.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -37,8 +37,8 @@ typedef struct
     uint64_t max_nnz_per_seq;
     uint64_t median_nnz_per_seq;
     bool     full_diagonal;
-    bool     symbolic_symetric;
-    bool     numeric_symetric;
+    bool     symbolic_symmetric;
+    bool     numeric_symmetric;
 
 } rocsparseio_statistics_csx;
 
