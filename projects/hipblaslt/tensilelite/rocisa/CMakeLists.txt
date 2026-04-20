@@ -74,6 +74,10 @@ if(HIPBLASLT_BUNDLE_PYTHON_DEPS)
     endif()
 
     target_link_libraries(rocisa PUBLIC roc::origami)
-    target_link_libraries(rocisa PRIVATE hip::host)
+    target_link_libraries(rocisa PRIVATE hip::host stinkytofu)
+    # rocisa conversion sources include stinkytofu public headers that
+    # transitively include generated files (hardware/gfxIsa.inc) from
+    # stinkytofu's build directory.
+    target_include_directories(rocisa PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/stinkytofu")
     set_target_properties(rocisa PROPERTIES LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/lib")
 endif()
