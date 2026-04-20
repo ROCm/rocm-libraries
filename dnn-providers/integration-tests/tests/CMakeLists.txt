@@ -34,6 +34,7 @@ add_unit_test_target(hipdnn_integration_tests_unit_tests ${CMAKE_CURRENT_BINARY_
 add_executable(hipdnn_gpu_ref_tests
     gpu_ref/main.cpp
     gpu_ref/TestGpuFpReferenceConvolution.cpp
+    gpu_ref/TestGpuFpReferenceDgrad.cpp
     gpu_ref/TestGpuFpReferenceWgrad.cpp
     gpu_ref/TestGpuFpReferenceValidation.cpp
     gpu_ref/TestGpuRefHipError.cpp

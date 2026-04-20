@@ -10,9 +10,9 @@
 namespace hip_kernel_provider::layernorm
 {
 
-size_t
-    getMinNormalizedDimFromAffine(const hipdnn_data_sdk::data_objects::TensorAttributes* ioAttr,
-                                  const hipdnn_data_sdk::data_objects::TensorAttributes* affineAttr)
+size_t getMinNormalizedDimFromAffine(
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* ioAttr,
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* affineAttr)
 {
     const std::vector<int64_t> ioDims(ioAttr->dims()->begin(), ioAttr->dims()->end());
     const std::vector<int64_t> affineDims(affineAttr->dims()->begin(), affineAttr->dims()->end());
@@ -36,7 +36,8 @@ size_t
 size_t getMinNormalizedDimFromAffine(
     const int64_t ioTensorId,
     const int64_t affineTensorId,
-    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
         tensorMap)
 {
     const auto* ioAttr = &hip_kernel_utils::findTensorAttributes(tensorMap, ioTensorId);
@@ -45,9 +46,9 @@ size_t getMinNormalizedDimFromAffine(
     return getMinNormalizedDimFromAffine(ioAttr, affineAttr);
 }
 
-size_t
-    getMaxNormalizedDimFromAffine(const hipdnn_data_sdk::data_objects::TensorAttributes* ioAttr,
-                                  const hipdnn_data_sdk::data_objects::TensorAttributes* affineAttr)
+size_t getMaxNormalizedDimFromAffine(
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* ioAttr,
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* affineAttr)
 {
     const std::vector<int64_t> ioDims(ioAttr->dims()->begin(), ioAttr->dims()->end());
     const std::vector<int64_t> affineDims(affineAttr->dims()->begin(), affineAttr->dims()->end());
@@ -71,7 +72,8 @@ size_t
 size_t getMaxNormalizedDimFromAffine(
     const int64_t ioTensorId,
     const int64_t affineTensorId,
-    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
         tensorMap)
 {
     const auto* ioAttr = &hip_kernel_utils::findTensorAttributes(tensorMap, ioTensorId);
@@ -80,8 +82,9 @@ size_t getMaxNormalizedDimFromAffine(
     return getMaxNormalizedDimFromAffine(ioAttr, affineAttr);
 }
 
-size_t getMinNormalizedDimFromStat(const hipdnn_data_sdk::data_objects::TensorAttributes* ioAttr,
-                                   const hipdnn_data_sdk::data_objects::TensorAttributes* statAttr)
+size_t getMinNormalizedDimFromStat(
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* ioAttr,
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* statAttr)
 {
     if(ioAttr == nullptr || statAttr == nullptr)
     {
@@ -110,7 +113,8 @@ size_t getMinNormalizedDimFromStat(const hipdnn_data_sdk::data_objects::TensorAt
 size_t getMinNormalizedDimFromStat(
     const int64_t ioTensorId,
     const int64_t statTensorId,
-    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
         tensorMap)
 {
     const auto* ioAttr = &hip_kernel_utils::findTensorAttributes(tensorMap, ioTensorId);
@@ -119,8 +123,9 @@ size_t getMinNormalizedDimFromStat(
     return getMinNormalizedDimFromStat(ioAttr, statAttr);
 }
 
-size_t getMaxNormalizedDimFromStat(const hipdnn_data_sdk::data_objects::TensorAttributes* ioAttr,
-                                   const hipdnn_data_sdk::data_objects::TensorAttributes* statAttr)
+size_t getMaxNormalizedDimFromStat(
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* ioAttr,
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* statAttr)
 {
     const std::vector<int64_t> ioDims(ioAttr->dims()->begin(), ioAttr->dims()->end());
     if(statAttr == nullptr)
@@ -148,7 +153,8 @@ size_t getMaxNormalizedDimFromStat(const hipdnn_data_sdk::data_objects::TensorAt
 size_t getMaxNormalizedDimFromStat(
     const int64_t ioTensorId,
     const int64_t statTensorId,
-    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
         tensorMap)
 {
     const auto* ioAttr = &hip_kernel_utils::findTensorAttributes(tensorMap, ioTensorId);
@@ -158,9 +164,9 @@ size_t getMaxNormalizedDimFromStat(
 }
 
 size_t guessNormalizedDim(
-    const hipdnn_data_sdk::data_objects::TensorAttributes* ioAttr,
-    const std::optional<const hipdnn_data_sdk::data_objects::TensorAttributes*> affineAttr,
-    const std::optional<const hipdnn_data_sdk::data_objects::TensorAttributes*> statAttr)
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* ioAttr,
+    const std::optional<const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*> affineAttr,
+    const std::optional<const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*> statAttr)
 {
     size_t affineNormalizedDimMin
         = affineAttr.has_value() ? getMinNormalizedDimFromAffine(ioAttr, affineAttr.value()) : 0;
@@ -182,15 +188,16 @@ size_t guessNormalizedDim(
     const int64_t ioTensorId,
     const std::optional<int64_t> affineTensorId,
     const std::optional<int64_t> statTensorId,
-    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
         tensorMap)
 {
     const auto* ioAttr = &hip_kernel_utils::findTensorAttributes(tensorMap, ioTensorId);
-    const std::optional<const hipdnn_data_sdk::data_objects::TensorAttributes*> affineAttr
+    const std::optional<const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*> affineAttr
         = affineTensorId.has_value() ? std::optional(&hip_kernel_utils::findTensorAttributes(
                                            tensorMap, affineTensorId.value()))
                                      : std::nullopt;
-    const std::optional<const hipdnn_data_sdk::data_objects::TensorAttributes*> statAttr
+    const std::optional<const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*> statAttr
         = statTensorId.has_value() ? std::optional(&hip_kernel_utils::findTensorAttributes(
                                          tensorMap, statTensorId.value()))
                                    : std::nullopt;

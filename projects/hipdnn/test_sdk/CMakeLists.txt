@@ -20,7 +20,7 @@ add_library(hipdnn_test_sdk INTERFACE)
 hipdnn_generate_version_header(hipdnn_test_sdk)
 
 find_package(hip REQUIRED)
-target_link_libraries(hipdnn_test_sdk INTERFACE hipdnn_data_sdk hipdnn_frontend hip::host)
+target_link_libraries(hipdnn_test_sdk INTERFACE hipdnn_flatbuffers_sdk hipdnn_frontend hip::host)
 
 set(HIP_DNN_TEST_SDK_INSTALL_INCLUDE_DIR "${CMAKE_INSTALL_INCLUDEDIR}/hipdnn/test_sdk")
 

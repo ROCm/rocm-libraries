@@ -511,8 +511,7 @@ public:
                                            * compute_ptrdiff(obrick->length(), obrick->stride));
                     }
 
-                    // set device for the alloc, but we want to return to the
-                    // default device as the source of a following memcpy
+                    // scope for device-specific
                     {
                         rocfft_scoped_device dev(io_brick->device);
                         multi_gpu_data.emplace_back();
@@ -522,45 +521,46 @@ public:
                         io_buffer_vec.push_back(multi_gpu_data.back().data());
                         if(placement == fft_placement_inplace)
                             mgpu_obuffers.push_back(multi_gpu_data.back().data());
-                    }
-                    if(io == fft_io::fft_io_in)
-                    {
-                        // copy cpu input data to device buffer(s)
-                        const auto input_data_host_offset = io_brick->lower_field_offset(
-                            cpu_ref_params.istride, cpu_ref_params.idist);
 
-                        // transpose input data to the brick's shape in host memory, then
-                        // memcpy (as is) into allocated device buffer
-                        std::vector<hostbuf> host_tmp(1);
-                        host_tmp.front().alloc(alloc_byte_size);
-
-                        std::vector<size_t> cpu_istrides_with_idist(cpu_ref_params.istride);
-                        cpu_istrides_with_idist.insert(cpu_istrides_with_idist.begin(),
-                                                       cpu_ref_params.idist);
-
-                        copy_buffers(input_data_host,
-                                     host_tmp,
-                                     io_brick->length(),
-                                     /* "nbatch" = */ 1,
-                                     cpu_ref_params.precision,
-                                     cpu_ref_params.itype,
-                                     cpu_istrides_with_idist,
-                                     /* "idist" = */ 0,
-                                     array_type,
-                                     io_brick->stride,
-                                     /* "odist" =  */ 0,
-                                     {input_data_host_offset},
-                                     /* "ooffset" = */ {0});
-
-                        // memcpy the transposed brick to the device
-                        if(hipMemcpy(io_buffer_vec.back(),
-                                     host_tmp.front().data(),
-                                     alloc_byte_size,
-                                     hipMemcpyHostToDevice)
-                           != hipSuccess)
+                        if(io == fft_io::fft_io_in)
                         {
-                            throw std::runtime_error(
-                                "rocfft_params::multi_gpu_prepare: hipMemcpy failed");
+                            // copy cpu input data to device buffer(s)
+                            const auto input_data_host_offset = io_brick->lower_field_offset(
+                                cpu_ref_params.istride, cpu_ref_params.idist);
+
+                            // transpose input data to the brick's shape in host memory, then
+                            // memcpy (as is) into allocated device buffer
+                            std::vector<hostbuf> host_tmp(1);
+                            host_tmp.front().alloc(alloc_byte_size);
+
+                            std::vector<size_t> cpu_istrides_with_idist(cpu_ref_params.istride);
+                            cpu_istrides_with_idist.insert(cpu_istrides_with_idist.begin(),
+                                                           cpu_ref_params.idist);
+
+                            copy_buffers(input_data_host,
+                                         host_tmp,
+                                         io_brick->length(),
+                                         /* "nbatch" = */ 1,
+                                         cpu_ref_params.precision,
+                                         cpu_ref_params.itype,
+                                         cpu_istrides_with_idist,
+                                         /* "idist" = */ 0,
+                                         array_type,
+                                         io_brick->stride,
+                                         /* "odist" =  */ 0,
+                                         {input_data_host_offset},
+                                         /* "ooffset" = */ {0});
+
+                            // memcpy the transposed brick to the device
+                            if(hipMemcpy(io_buffer_vec.back(),
+                                         host_tmp.front().data(),
+                                         alloc_byte_size,
+                                         hipMemcpyHostToDevice)
+                               != hipSuccess)
+                            {
+                                throw std::runtime_error(
+                                    "rocfft_params::multi_gpu_prepare: hipMemcpy failed");
+                            }
                         }
                     }
                 }

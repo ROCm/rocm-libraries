@@ -12,9 +12,9 @@
 #include <unordered_set>
 #include <vector>
 
-#include <hipdnn_data_sdk/data_objects/layernorm_attributes_generated.h>
-#include <hipdnn_data_sdk/data_objects/pointwise_attributes_generated.h>
-#include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/layernorm_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/pointwise_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
 
 namespace hip_kernel_provider::layernorm
 {
@@ -24,7 +24,8 @@ class LayernormValidator : public IValidator
 private:
 public:
     LayernormValidator(
-        const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        const std::unordered_map<int64_t,
+                                 const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
             tensorMapLocal)
         : IValidator(tensorMapLocal) {};
 
@@ -52,7 +53,7 @@ public:
     // --- High-level Configuration Validators ---
 
     void checkTensorConfigSupported(
-        const hipdnn_data_sdk::data_objects::LayernormAttributes& lnAttr);
+        const hipdnn_flatbuffers_sdk::data_objects::LayernormAttributes& lnAttr);
 };
 
 // Layernorm Type Configuration ---
@@ -62,15 +63,15 @@ public:
 // - Epsilon tensors: FLOAT only
 struct TensorTypes
 {
-    hipdnn_data_sdk::data_objects::DataType io;
-    hipdnn_data_sdk::data_objects::DataType affine;
-    hipdnn_data_sdk::data_objects::DataType stat;
-    hipdnn_data_sdk::data_objects::DataType epsilon;
+    hipdnn_flatbuffers_sdk::data_objects::DataType io;
+    hipdnn_flatbuffers_sdk::data_objects::DataType affine;
+    hipdnn_flatbuffers_sdk::data_objects::DataType stat;
+    hipdnn_flatbuffers_sdk::data_objects::DataType epsilon;
 };
 
 namespace type_configs
 {
-using DT = hipdnn_data_sdk::data_objects::DataType;
+using DT = hipdnn_flatbuffers_sdk::data_objects::DataType;
 
 inline constexpr TensorTypes FLOAT = {DT::FLOAT, DT::FLOAT, DT::FLOAT, DT::FLOAT};
 inline constexpr TensorTypes HALF = {DT::HALF, DT::HALF, DT::HALF, DT::FLOAT};
@@ -78,10 +79,10 @@ inline constexpr TensorTypes BFLOAT16 = {DT::BFLOAT16, DT::BFLOAT16, DT::BFLOAT1
 
 inline constexpr std::array<TensorTypes, 3> VALID = {FLOAT, HALF, BFLOAT16};
 
-std::unordered_set<hipdnn_data_sdk::data_objects::DataType> getAllowedIoTypes();
-std::unordered_set<hipdnn_data_sdk::data_objects::DataType> getAllowedAffineTypes();
-std::unordered_set<hipdnn_data_sdk::data_objects::DataType> getAllowedStatTypes();
-std::unordered_set<hipdnn_data_sdk::data_objects::DataType> getAllowedEpsilonTypes();
+std::unordered_set<hipdnn_flatbuffers_sdk::data_objects::DataType> getAllowedIoTypes();
+std::unordered_set<hipdnn_flatbuffers_sdk::data_objects::DataType> getAllowedAffineTypes();
+std::unordered_set<hipdnn_flatbuffers_sdk::data_objects::DataType> getAllowedStatTypes();
+std::unordered_set<hipdnn_flatbuffers_sdk::data_objects::DataType> getAllowedEpsilonTypes();
 
 } // namespace type_configs
 

@@ -16,8 +16,8 @@ template <typename InputType>
 static std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
                   std::unordered_map<int64_t, void*>>
     buildConvolutionFwdGraph(ConvolutionFwdTensorBundle<InputType>& tensorBundle,
-                             hipdnn_data_sdk::data_objects::DataType inputDataType,
-                             hipdnn_data_sdk::data_objects::DataType accumulatorDataType)
+                             hipdnn_flatbuffers_sdk::data_objects::DataType inputDataType,
+                             hipdnn_flatbuffers_sdk::data_objects::DataType accumulatorDataType)
 {
     const std::vector<int64_t> strides = {1, 1};
     const std::vector<int64_t> dilation = {1, 1};
@@ -72,8 +72,8 @@ template <typename InputType>
 static std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
                   std::unordered_map<int64_t, void*>>
     buildConvolutionBwdGraph(ConvolutionBwdTensorBundle<InputType>& tensorBundle,
-                             hipdnn_data_sdk::data_objects::DataType inputDataType,
-                             hipdnn_data_sdk::data_objects::DataType accumulatorDataType)
+                             hipdnn_flatbuffers_sdk::data_objects::DataType inputDataType,
+                             hipdnn_flatbuffers_sdk::data_objects::DataType accumulatorDataType)
 {
     const std::vector<int64_t> strides = {1, 1};
     const std::vector<int64_t> dilation = {1, 1};
@@ -130,8 +130,8 @@ template <typename InputType>
 static std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
                   std::unordered_map<int64_t, void*>>
     buildConvolutionWrwGraph(ConvolutionWrwTensorBundle<InputType>& tensorBundle,
-                             hipdnn_data_sdk::data_objects::DataType inputDataType,
-                             hipdnn_data_sdk::data_objects::DataType accumulatorDataType)
+                             hipdnn_flatbuffers_sdk::data_objects::DataType inputDataType,
+                             hipdnn_flatbuffers_sdk::data_objects::DataType accumulatorDataType)
 {
     const std::vector<int64_t> strides = {1, 1};
     const std::vector<int64_t> dilation = {1, 1};

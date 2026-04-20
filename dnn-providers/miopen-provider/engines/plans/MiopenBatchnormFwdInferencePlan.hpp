@@ -20,14 +20,17 @@ class BatchnormFwdInferenceParams
 {
 public:
     BatchnormFwdInferenceParams(
-        const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributes& attributes,
-        const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        const hipdnn_flatbuffers_sdk::data_objects::BatchnormInferenceAttributes& attributes,
+        const std::unordered_map<int64_t,
+                                 const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
             tensorMap);
 
     BatchnormFwdInferenceParams(
-        const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributes& inferenceAttributes,
-        const hipdnn_data_sdk::data_objects::PointwiseAttributes& pointwiseAttributes,
-        const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        const hipdnn_flatbuffers_sdk::data_objects::BatchnormInferenceAttributes&
+            inferenceAttributes,
+        const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& pointwiseAttributes,
+        const std::unordered_map<int64_t,
+                                 const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
             tensorMap);
 
     BatchnormFwdInferenceParams(const BatchnormFwdInferenceParams&) = delete;
