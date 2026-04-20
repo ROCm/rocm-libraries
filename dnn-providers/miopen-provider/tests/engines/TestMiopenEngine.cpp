@@ -5,10 +5,10 @@
 #include <memory>
 #include <set>
 
-#include <hipdnn_data_sdk/data_objects/engine_config_generated.h>
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
-#include <hipdnn_data_sdk/flatbuffer_utilities/EngineDetailsWrapper.hpp>
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/engine_config_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineDetailsWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/MockGraph.hpp>
 
@@ -19,7 +19,7 @@
 
 using namespace miopen_plugin;
 using namespace hipdnn_test_sdk::utilities;
-using namespace hipdnn_data_sdk::flatbuffer_utilities;
+using namespace hipdnn_flatbuffers_sdk::flatbuffer_utilities;
 
 TEST(TestMiopenEngine, ConstructorAndId)
 {
@@ -184,8 +184,8 @@ TEST(TestMiopenEngine, GetDetailsReturnsSerializedEngineDetails)
     hipdnnPluginConstData_t result;
     engine.getDetails(dummyHandle, mockGraph, result);
 
-    hipdnn_data_sdk::flatbuffer_utilities::EngineDetailsWrapper engineDetails(result.ptr,
-                                                                              result.size);
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineDetailsWrapper engineDetails(result.ptr,
+                                                                                     result.size);
     EXPECT_EQ(engineDetails.engineId(), 1);
 }
 
@@ -198,8 +198,8 @@ TEST(TestMiopenEngine, GetDetailsContainsBenchmarkingKnob)
     hipdnnPluginConstData_t result;
     engine.getDetails(dummyHandle, mockGraph, result);
 
-    hipdnn_data_sdk::flatbuffer_utilities::EngineDetailsWrapper engineDetails(result.ptr,
-                                                                              result.size);
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineDetailsWrapper engineDetails(result.ptr,
+                                                                                     result.size);
     ASSERT_EQ(engineDetails.knobCount(), 1u);
 
     const auto& knob = engineDetails.getKnobByName("global.benchmarking");
@@ -207,13 +207,16 @@ TEST(TestMiopenEngine, GetDetailsContainsBenchmarkingKnob)
     EXPECT_EQ(knob.description(), "Enable benchmarking");
 
     ASSERT_TRUE(knob.hasDefaultValue());
-    EXPECT_EQ(knob.defaultValueType(), hipdnn_data_sdk::data_objects::KnobValue::IntValue);
-    const auto& defaultValue = knob.defaultValueAs<hipdnn_data_sdk::data_objects::IntValue>();
+    EXPECT_EQ(knob.defaultValueType(), hipdnn_flatbuffers_sdk::data_objects::KnobValue::IntValue);
+    const auto& defaultValue
+        = knob.defaultValueAs<hipdnn_flatbuffers_sdk::data_objects::IntValue>();
     EXPECT_EQ(defaultValue.value(), 0);
 
     ASSERT_TRUE(knob.hasConstraint());
-    EXPECT_EQ(knob.constraintType(), hipdnn_data_sdk::data_objects::KnobConstraint::IntConstraint);
-    const auto& constraint = knob.constraintAs<hipdnn_data_sdk::data_objects::IntConstraint>();
+    EXPECT_EQ(knob.constraintType(),
+              hipdnn_flatbuffers_sdk::data_objects::KnobConstraint::IntConstraint);
+    const auto& constraint
+        = knob.constraintAs<hipdnn_flatbuffers_sdk::data_objects::IntConstraint>();
     EXPECT_EQ(constraint.min_value(), 0);
     EXPECT_EQ(constraint.max_value(), 1);
     EXPECT_EQ(constraint.step(), 1);
@@ -225,28 +228,28 @@ TEST(TestMiopenEngine, GetDetailsOnlyUsesFirstPlanBuilderCustomKnobs)
     auto mockPlanBuilder2 = std::make_unique<MockPlanBuilder>();
 
     // Set up first plan builder to return a custom knob
-    hipdnn_data_sdk::data_objects::KnobT knob1;
+    hipdnn_flatbuffers_sdk::data_objects::KnobT knob1;
     knob1.knob_id = "custom.knob1";
     knob1.description = "First custom knob";
-    hipdnn_data_sdk::data_objects::IntValueT defaultValue1;
+    hipdnn_flatbuffers_sdk::data_objects::IntValueT defaultValue1;
     defaultValue1.value = 1;
     knob1.default_value.Set(defaultValue1);
 
-    std::vector<hipdnn_data_sdk::data_objects::KnobT> customKnobs1;
+    std::vector<hipdnn_flatbuffers_sdk::data_objects::KnobT> customKnobs1;
     customKnobs1.push_back(knob1);
 
     EXPECT_CALL(*mockPlanBuilder1, getCustomKnobs(::testing::_, ::testing::_))
         .WillOnce(::testing::Return(customKnobs1));
 
     // Set up second plan builder to also return a custom knob (this should be ignored)
-    hipdnn_data_sdk::data_objects::KnobT knob2;
+    hipdnn_flatbuffers_sdk::data_objects::KnobT knob2;
     knob2.knob_id = "custom.knob2";
     knob2.description = "Second custom knob";
-    hipdnn_data_sdk::data_objects::IntValueT defaultValue2;
+    hipdnn_flatbuffers_sdk::data_objects::IntValueT defaultValue2;
     defaultValue2.value = 2;
     knob2.default_value.Set(defaultValue2);
 
-    std::vector<hipdnn_data_sdk::data_objects::KnobT> customKnobs2;
+    std::vector<hipdnn_flatbuffers_sdk::data_objects::KnobT> customKnobs2;
     customKnobs2.push_back(knob2);
 
     // This should NOT be called because we break after first non-empty custom knobs
@@ -262,7 +265,8 @@ TEST(TestMiopenEngine, GetDetailsOnlyUsesFirstPlanBuilderCustomKnobs)
     hipdnnPluginConstData_t result;
     engine.getDetails(dummyHandle, mockGraph, result);
 
-    hipdnn_plugin_sdk::EngineDetailsWrapper engineDetails(result.ptr, result.size);
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineDetailsWrapper engineDetails(result.ptr,
+                                                                                     result.size);
 
     // Should have 2 knobs: benchmarking (always present) + custom.knob1 (from first builder)
     ASSERT_EQ(engineDetails.knobCount(), 2u);
@@ -323,23 +327,24 @@ TEST(TestMiopenEngine, InitializeExecutionContextThrowsOnInvalidBenchmarkingKnob
     flatbuffers::FlatBufferBuilder builder;
     auto knobIdOffset = builder.CreateString("global.benchmarking");
     auto stringValueOffset = builder.CreateString("invalid_value");
-    auto knobValue = hipdnn_data_sdk::data_objects::CreateStringValue(builder, stringValueOffset);
-    hipdnn_data_sdk::data_objects::KnobSettingBuilder knobSettingBuilder(builder);
+    auto knobValue
+        = hipdnn_flatbuffers_sdk::data_objects::CreateStringValue(builder, stringValueOffset);
+    hipdnn_flatbuffers_sdk::data_objects::KnobSettingBuilder knobSettingBuilder(builder);
     knobSettingBuilder.add_knob_id(knobIdOffset);
-    knobSettingBuilder.add_value_type(hipdnn_data_sdk::data_objects::KnobValue::StringValue);
+    knobSettingBuilder.add_value_type(hipdnn_flatbuffers_sdk::data_objects::KnobValue::StringValue);
     knobSettingBuilder.add_value(knobValue.Union());
     auto knobSetting = knobSettingBuilder.Finish();
 
-    std::vector<flatbuffers::Offset<hipdnn_data_sdk::data_objects::KnobSetting>> knobsVector;
+    std::vector<flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::KnobSetting>> knobsVector;
     knobsVector.push_back(knobSetting);
     auto knobs = builder.CreateVector(knobsVector);
 
-    auto engineConfig = hipdnn_data_sdk::data_objects::CreateEngineConfig(builder, 1, knobs);
+    auto engineConfig = hipdnn_flatbuffers_sdk::data_objects::CreateEngineConfig(builder, 1, knobs);
     builder.Finish(engineConfig);
 
     auto buffer = builder.Release();
-    hipdnn_data_sdk::flatbuffer_utilities::EngineConfigWrapper configWrapper(buffer.data(),
-                                                                             buffer.size());
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper configWrapper(buffer.data(),
+                                                                                    buffer.size());
 
     EXPECT_THROW(engine.initializeExecutionContext(dummyHandle, mockGraph, configWrapper, ctx),
                  hipdnn_plugin_sdk::HipdnnPluginException);
@@ -354,23 +359,23 @@ TEST(TestMiopenEngine, InitializeExecutionContextSetsBenchmarkingEnabled)
 
     flatbuffers::FlatBufferBuilder builder;
     auto knobIdOffset = builder.CreateString("global.benchmarking");
-    auto knobValue = hipdnn_data_sdk::data_objects::CreateIntValue(builder, 1);
-    hipdnn_data_sdk::data_objects::KnobSettingBuilder knobSettingBuilder(builder);
+    auto knobValue = hipdnn_flatbuffers_sdk::data_objects::CreateIntValue(builder, 1);
+    hipdnn_flatbuffers_sdk::data_objects::KnobSettingBuilder knobSettingBuilder(builder);
     knobSettingBuilder.add_knob_id(knobIdOffset);
-    knobSettingBuilder.add_value_type(hipdnn_data_sdk::data_objects::KnobValue::IntValue);
+    knobSettingBuilder.add_value_type(hipdnn_flatbuffers_sdk::data_objects::KnobValue::IntValue);
     knobSettingBuilder.add_value(knobValue.Union());
     auto knobSetting = knobSettingBuilder.Finish();
 
-    std::vector<flatbuffers::Offset<hipdnn_data_sdk::data_objects::KnobSetting>> knobsVector;
+    std::vector<flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::KnobSetting>> knobsVector;
     knobsVector.push_back(knobSetting);
     auto knobs = builder.CreateVector(knobsVector);
 
-    auto engineConfig = hipdnn_data_sdk::data_objects::CreateEngineConfig(builder, 1, knobs);
+    auto engineConfig = hipdnn_flatbuffers_sdk::data_objects::CreateEngineConfig(builder, 1, knobs);
     builder.Finish(engineConfig);
 
     auto buffer = builder.Release();
-    hipdnn_data_sdk::flatbuffer_utilities::EngineConfigWrapper configWrapper(buffer.data(),
-                                                                             buffer.size());
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper configWrapper(buffer.data(),
+                                                                                    buffer.size());
 
     engine.initializeExecutionContext(dummyHandle, mockGraph, configWrapper, ctx);
 
@@ -387,23 +392,23 @@ TEST(TestMiopenEngine, InitializeExecutionContextSetsBenchmarkingDisabled)
     flatbuffers::FlatBufferBuilder builder;
     auto knobIdOffset = builder.CreateString("global.benchmarking");
     auto knobValue
-        = hipdnn_data_sdk::data_objects::CreateIntValue(builder, static_cast<int64_t>(0));
-    hipdnn_data_sdk::data_objects::KnobSettingBuilder knobSettingBuilder(builder);
+        = hipdnn_flatbuffers_sdk::data_objects::CreateIntValue(builder, static_cast<int64_t>(0));
+    hipdnn_flatbuffers_sdk::data_objects::KnobSettingBuilder knobSettingBuilder(builder);
     knobSettingBuilder.add_knob_id(knobIdOffset);
-    knobSettingBuilder.add_value_type(hipdnn_data_sdk::data_objects::KnobValue::IntValue);
+    knobSettingBuilder.add_value_type(hipdnn_flatbuffers_sdk::data_objects::KnobValue::IntValue);
     knobSettingBuilder.add_value(knobValue.Union());
     auto knobSetting = knobSettingBuilder.Finish();
 
-    std::vector<flatbuffers::Offset<hipdnn_data_sdk::data_objects::KnobSetting>> knobsVector;
+    std::vector<flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::KnobSetting>> knobsVector;
     knobsVector.push_back(knobSetting);
     auto knobs = builder.CreateVector(knobsVector);
 
-    auto engineConfig = hipdnn_data_sdk::data_objects::CreateEngineConfig(builder, 1, knobs);
+    auto engineConfig = hipdnn_flatbuffers_sdk::data_objects::CreateEngineConfig(builder, 1, knobs);
     builder.Finish(engineConfig);
 
     auto buffer = builder.Release();
-    hipdnn_data_sdk::flatbuffer_utilities::EngineConfigWrapper configWrapper(buffer.data(),
-                                                                             buffer.size());
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper configWrapper(buffer.data(),
+                                                                                    buffer.size());
 
     engine.initializeExecutionContext(dummyHandle, mockGraph, configWrapper, ctx);
 
@@ -433,12 +438,12 @@ TEST(TestMiopenEngine, InitializeExecutionContextDefaultsBenchmarkingDisabledWhe
     MockHipdnnMiopenContext ctx;
 
     flatbuffers::FlatBufferBuilder builder;
-    auto engineConfig = hipdnn_data_sdk::data_objects::CreateEngineConfig(builder, 1, 0);
+    auto engineConfig = hipdnn_flatbuffers_sdk::data_objects::CreateEngineConfig(builder, 1, 0);
     builder.Finish(engineConfig);
 
     auto buffer = builder.Release();
-    hipdnn_data_sdk::flatbuffer_utilities::EngineConfigWrapper configWrapper(buffer.data(),
-                                                                             buffer.size());
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper configWrapper(buffer.data(),
+                                                                                    buffer.size());
 
     engine.initializeExecutionContext(dummyHandle, mockGraph, configWrapper, ctx);
 

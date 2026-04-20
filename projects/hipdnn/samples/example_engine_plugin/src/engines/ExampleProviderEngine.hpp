@@ -35,22 +35,23 @@ public:
 
     int64_t id() const override;
 
-    bool isApplicable(ExampleProviderHandle& handle,
-                      const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const override;
+    bool isApplicable(
+        ExampleProviderHandle& handle,
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const override;
 
     void getDetails(ExampleProviderHandle& handle,
-                    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+                    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
                     hipdnnPluginConstData_t& detailsOut) const override;
 
-    size_t getMaxWorkspaceSize(
-        const ExampleProviderHandle& handle,
-        const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
-        const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig) const override;
+    size_t getMaxWorkspaceSize(const ExampleProviderHandle& handle,
+                               const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
+                               const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig&
+                                   engineConfig) const override;
 
     void initializeExecutionContext(
         const ExampleProviderHandle& handle,
-        const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
-        const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
         ExampleProviderContext& executionContext) const override;
 
     void addPlanBuilder(

@@ -3,9 +3,9 @@
 
 #pragma once
 
-#include <hipdnn_data_sdk/data_objects/pointwise_attributes_generated.h>
-#include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
-#include <hipdnn_data_sdk/flatbuffer_utilities/NodeWrapper.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/pointwise_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/NodeWrapper.hpp>
 #include <hipdnn_frontend/Graph.hpp>
 #include <hipdnn_frontend/Utilities.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
@@ -23,9 +23,9 @@ inline std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
                   std::unordered_map<int64_t, void*>>
     buildPointwiseUnaryGraph(const std::vector<int64_t>& inputDims,
                              const std::vector<int64_t>& outputDims,
-                             hipdnn_data_sdk::data_objects::DataType input0DataType,
-                             hipdnn_data_sdk::data_objects::DataType accumulatorDataType,
-                             hipdnn_data_sdk::data_objects::DataType outputDataType,
+                             hipdnn_flatbuffers_sdk::data_objects::DataType input0DataType,
+                             hipdnn_flatbuffers_sdk::data_objects::DataType accumulatorDataType,
+                             hipdnn_flatbuffers_sdk::data_objects::DataType outputDataType,
                              hipdnn_frontend::PointwiseMode operation,
                              unsigned int seed = hipdnn_test_sdk::utilities::getGlobalTestSeed(),
                              const hipdnn_data_sdk::utilities::TensorLayout& layout
@@ -113,9 +113,10 @@ inline std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
     {
         throw std::runtime_error("Graph serialization failed: " + serErr.get_message());
     }
-    auto graphWrap = hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper(serializedGraph.data(),
-                                                                         serializedGraph.size());
-    auto nodeWrap = hipdnn_data_sdk::flatbuffer_utilities::NodeWrapper(&graphWrap.getNode(0));
+    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        serializedGraph.data(), serializedGraph.size());
+    auto nodeWrap
+        = hipdnn_flatbuffers_sdk::flatbuffer_utilities::NodeWrapper(&graphWrap.getNode(0));
 
     PointwiseUnaryTensorBundle tensorBundle(nodeWrap, graphWrap.getTensorMap(), seed);
     auto variantPack = tensorBundle.toHostVariantPack();
@@ -129,10 +130,10 @@ inline std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
     buildPointwiseBinaryGraph(const std::vector<int64_t>& input1Dims,
                               const std::vector<int64_t>& input2Dims,
                               const std::vector<int64_t>& outputDims,
-                              hipdnn_data_sdk::data_objects::DataType input0DataType,
-                              hipdnn_data_sdk::data_objects::DataType input1DataType,
-                              hipdnn_data_sdk::data_objects::DataType accumulatorDataType,
-                              hipdnn_data_sdk::data_objects::DataType outputDataType,
+                              hipdnn_flatbuffers_sdk::data_objects::DataType input0DataType,
+                              hipdnn_flatbuffers_sdk::data_objects::DataType input1DataType,
+                              hipdnn_flatbuffers_sdk::data_objects::DataType accumulatorDataType,
+                              hipdnn_flatbuffers_sdk::data_objects::DataType outputDataType,
                               hipdnn_frontend::PointwiseMode operation,
                               unsigned int seed = hipdnn_test_sdk::utilities::getGlobalTestSeed(),
                               const hipdnn_data_sdk::utilities::TensorLayout& layout
@@ -233,9 +234,10 @@ inline std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
     {
         throw std::runtime_error("Graph serialization failed: " + serErr.get_message());
     }
-    auto graphWrap = hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper(serializedGraph.data(),
-                                                                         serializedGraph.size());
-    auto nodeWrap = hipdnn_data_sdk::flatbuffer_utilities::NodeWrapper(&graphWrap.getNode(0));
+    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        serializedGraph.data(), serializedGraph.size());
+    auto nodeWrap
+        = hipdnn_flatbuffers_sdk::flatbuffer_utilities::NodeWrapper(&graphWrap.getNode(0));
 
     PointwiseBinaryTensorBundle tensorBundle(nodeWrap, graphWrap.getTensorMap(), seed);
     auto variantPack = tensorBundle.toHostVariantPack();

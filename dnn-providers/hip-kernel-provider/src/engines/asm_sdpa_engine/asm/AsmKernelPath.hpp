@@ -17,18 +17,19 @@
 #error "AITER_ASM_DIR must be defined (set via CMake compile definition)"
 #endif
 
-#include <cstdlib>
 #include <string>
+
+#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 
 namespace asm_sdpa_engine::asm_kernels
 {
 
 inline auto getAsmKernelDir() -> std::string
 {
-    const char* envDir = std::getenv("HIPDNN_AITER_ASM_DIR");
-    if(envDir != nullptr && envDir[0] != '\0')
+    auto envDir = hipdnn_data_sdk::utilities::getEnv("HIPDNN_AITER_ASM_DIR");
+    if(!envDir.empty())
     {
-        return {envDir};
+        return envDir;
     }
     return AITER_ASM_DIR;
 }

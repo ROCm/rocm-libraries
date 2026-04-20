@@ -76,6 +76,10 @@ if(NOT TARGET hipdnn_data_sdk)
     find_package(hipdnn_data_sdk CONFIG REQUIRED)
 endif()
 
+if(NOT TARGET hipdnn_flatbuffers_sdk)
+    find_package(hipdnn_flatbuffers_sdk CONFIG REQUIRED)
+endif()
+
 if(NOT TARGET hipdnn_plugin_sdk)
     find_package(hipdnn_plugin_sdk CONFIG REQUIRED)
 endif()
@@ -125,7 +129,7 @@ hipblaslt_provider_generate_version_header(hipblaslt_provider hipblaslt_plugin_p
 # hip::host triggers a hard ambiguous operator<< error in upstream hipBLASLt
 # headers (hipblaslt_e5m3.h / hipblaslt_e8.h) due to missing MSVC ABI flags.
 # See: https://github.com/ROCm/rocm-libraries/issues/6404
-target_link_libraries(hipblaslt_plugin_private PUBLIC roc::hipblaslt hipdnn_data_sdk hipdnn_plugin_sdk hip::device)
+target_link_libraries(hipblaslt_plugin_private PUBLIC roc::hipblaslt hipdnn_data_sdk hipdnn_flatbuffers_sdk hipdnn_plugin_sdk hip::device)
 
 target_compile_options(hipblaslt_plugin_private PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
 
