@@ -47,6 +47,12 @@ __device__ rocblas_int get_v_block_index(
     I nt, I i, I j );
 
 //------------------------------------------------------------------------------
+// Sets size_* and max_parallel for the maximum number of operations to do in
+// one batch.
+// If batch_count > 1, max_parallel = 1.
+// If batch_count = 1, max_parallel = ceildiv( nt, 2 ).
+// todo: if needed, limit max_parallel to limit workspace.
+//
 template <bool BATCHED, typename T>
 void rocsolver_ormtr_unmtr_hb2st_getMemorySize(
     const rocblas_side side,
@@ -55,6 +61,7 @@ void rocsolver_ormtr_unmtr_hb2st_getMemorySize(
     const rocblas_int n,
     const rocblas_int kd,
     const rocblas_int batch_count,
+    rocblas_int* max_parallel,
     size_t* size_scalars,
     size_t* size_T,
     size_t* size_W,
@@ -62,6 +69,7 @@ void rocsolver_ormtr_unmtr_hb2st_getMemorySize(
     size_t* size_work,
     size_t* size_workArr)
 {
+    *max_parallel = 1;
     *size_scalars = 0;
     *size_T = 0;
     *size_W = 0;
@@ -73,17 +81,26 @@ void rocsolver_ormtr_unmtr_hb2st_getMemorySize(
     if(m == 0 || n == 0 || kd == 0 || batch_count == 0)
         return;
 
-    rocblas_int nz = (side == rocblas_side_left ? n : m);
-    *size_Z = sizeof(T) * kd * nz * batch_count;
-    *size_T = sizeof(T) * kd * kd * batch_count;
-    *size_W = sizeof(T) * 2*kd * kd * batch_count;
+    rocblas_int nz = (side == rocblas_side_left ? n : m);  // cols in Z
+    rocblas_int nq = (side == rocblas_side_left ? m : n);  // rows in Q
+    rocblas_int nt = ceildiv( nq - 1, kd );  // block cols in conceptual V
+
+    // If batch_count = 1, use batched larft and gemm inside a single
+    // matrix. If batch_count > 1, set max_parallel = 1 and use batching for
+    // the user batch.
+    if (batch_count == 1)
+        max_parallel = ceildiv( nt, 2 );
+    *size_Z = sizeof(T) * kd * nz * batch_count * max_parallel;
+    *size_T = sizeof(T) * kd * kd * batch_count * max_parallel;
+    *size_W = sizeof(T) * 2*kd * kd * batch_count * max_parallel;
     *size_workArr = BATCHED ? sizeof(T*) * 2 * batch_count : 0;
 printf( "getMemSize1 scalars %lu, T %lu, W %lu, Z %lu, work %lu, workArr %lu\n",
         *size_scalars, *size_T, *size_W, *size_Z, *size_work, *size_workArr );
 
     // extra space for larft calls
     size_t w, wa;
-    rocsolver_larft_getMemorySize<BATCHED, T>(2*kd, kd, batch_count, size_scalars, &w, &wa);
+    rocsolver_larft_getMemorySize<BATCHED, T>(
+        2*kd, kd, batch_count*max_parallel, size_scalars, &w, &wa);
     *size_work = std::max(*size_work, w);
     *size_workArr = std::max(*size_workArr, wa);
 
@@ -188,6 +205,7 @@ rocblas_status rocsolver_ormtr_unmtr_hb2st_template(
     const rocblas_int ldc,
     const rocblas_stride strideC,
     const rocblas_int batch_count,
+    const rocblas_int max_parallel,
     T* scalars,
     T* Tr, const rocblas_int ldt,
     T* W,  const rocblas_int ldw,
@@ -196,9 +214,10 @@ rocblas_status rocsolver_ormtr_unmtr_hb2st_template(
     T** workArr)
 {
     ROCSOLVER_ENTER("ormtr_unmtr_hb2st", "side:", side, "trans:", trans,
-                    "m:", m, "n:", n, "kd:", kd, "shiftV:", shiftV,
-                    "ldv:", ldv, "shiftC:", shiftC, "ldc:", ldc,
-                    "bc:", batch_count);
+                    "m:", m, "n:", n, "kd:", kd,
+                    "shiftV:", shiftV, "ldv:", ldv,
+                    "shiftC:", shiftC, "ldc:", ldc,
+                    "mp:", max_parallel, "bc:", batch_count);
 
     const T zero = 0;
     const T one = 1;
@@ -213,7 +232,7 @@ rocblas_status rocsolver_ormtr_unmtr_hb2st_template(
 
     rocblas_int nz = (side == rocblas_side_left ? n : m);  // cols in Z
     rocblas_int nq = (side == rocblas_side_left ? m : n);  // rows in Q
-    rocblas_int nt = ceildiv( nq - 1, kd );  // block cols in A, excluding last column
+    rocblas_int nt = ceildiv( nq - 1, kd );  // block cols in conceptual V
 
     rocblas_stride strideTr = ldt*kd;
     rocblas_stride strideW  = ldw*kd;
@@ -249,10 +268,6 @@ printf( "unmtr_hb2st side %d, trans %d, m %d, n %d, kd %d, nq %d, nz %d, nt %d\n
 printf( "backward %d, k = %d:%d:%d\n",
         backward, k_begin, k_end, k_step );
 
-    // Maximum number of V blocks to apply in parallel. The biggest potential
-    // set is k = 0 with nt/2.
-    rocblas_int max_batch_size = ceildiv( nt, 2 );
-
     for (rocblas_int k = k_begin; k != k_end; k += k_step)
     {
         // i, j are block indices of the top of each conceptual V{i,j} block.
@@ -281,7 +296,7 @@ printf( "backward %d, k = %d:%d:%d\n",
             // Check dimensions (mv, kv) for last j in this batch. If it is
             // different, save that j for the next batch, which will be a
             // cleanup with batch_count = 1.
-            rocblas_int j_last = std::min( j + max_batch_size, j_end ) - 1;
+            rocblas_int j_last = std::min( j + max_parallel, j_end ) - 1;
             {
                 rocblas_int i_last = 2*j_last - k;
                 rocblas_int ii_last = i_last*kd + 1;
@@ -312,7 +327,7 @@ printf( "backward %d, k = %d:%d:%d\n",
                 // Z = [ Z0  ]
                 //     [ Z1  ]
                 //     [ ... ]
-                rocblas_int jp = 0;  // (j - j_begin)*kd;
+                rocblas_int jp = 0;  // (j_ - j) * kd;
 
                 // Generate T, dim: (kv x kv)
                 rocsolver_larft_template<T>(
@@ -332,7 +347,7 @@ printf( "backward %d, k = %d:%d:%d\n",
                     handle, rocblas_operation_none, opT,
                     mv, kv, kv,
                     &one,  V,  r*kd*ldv, ldv, strideV,
-                        Tr, jp*ldt,   ldt, strideTr,
+                           Tr, jp*ldt,   ldt, strideTr,
                     &zero, W,  jp*ldw,   ldw, strideW,
                     batch_count, workArr );
 
@@ -351,7 +366,7 @@ printf( "backward %d, k = %d:%d:%d\n",
                         rocblas_operation_none,
                         kv, n, mv,
                         &one,  V, r*kd*ldv, ldv, strideV,
-                            C, ii,       ldc, strideC,
+                               C, ii,       ldc, strideC,
                         &zero, Z, jp,       ldz, strideZ,
                         batch_count, workArr );
 
@@ -362,7 +377,7 @@ printf( "backward %d, k = %d:%d:%d\n",
                         rocblas_operation_none,
                         mv, n, kv,
                         &negone, W, jp*ldw, ldw, strideW,
-                                Z, jp,     ldz, strideZ,
+                                 Z, jp,     ldz, strideZ,
                         &one,    C, ii,     ldc, strideC,
                         batch_count, workArr );
                 }
@@ -384,7 +399,7 @@ printf( "backward %d, k = %d:%d:%d\n",
                         rocblas_operation_conjugate_transpose,
                         kv, n, mv,
                         &one,  V, r*kd*ldv, ldv, strideV,
-                            C, ii,       ldc, strideC,
+                               C, ii,       ldc, strideC,
                         &zero, Z, jp,       ldz, strideZ,
                         batch_count, workArr );
 
@@ -395,7 +410,7 @@ printf( "backward %d, k = %d:%d:%d\n",
                         rocblas_operation_conjugate_transpose,
                         m, mv, kv,
                         &negone, W, jp*ldw, ldw, strideW,
-                                Z, jp,     ldz, strideZ,
+                                 Z, jp,     ldz, strideZ,
                         &one,    C, ii,     ldc, strideC,
                         batch_count, workArr );
                 }
