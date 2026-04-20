@@ -117,6 +117,19 @@ class Executor:
             self._graph.set_intermediate_data_type(intermediate_dt)
             self._graph.set_compute_data_type(compute_dt)
 
+            # Normalise node compute_data_type: from_json rejects "unset", which
+            # hipDNN emits when the caller leaves the field unset. Promote to the
+            # graph-level compute type so the serialised form round-trips cleanly.
+            if graph_dict.get("nodes"):
+                graph_cdt = graph_dict.get("compute_data_type", "float")
+                changed = False
+                for node in graph_dict["nodes"]:
+                    if node.get("compute_data_type", "").lower() == "unset":
+                        node["compute_data_type"] = graph_cdt
+                        changed = True
+                if changed:
+                    self._graph_json_str = json.dumps(graph_dict)
+
             # Deserialize from JSON
             result = self._graph.from_json(self._graph_json_str)
             if result.is_bad():
@@ -232,8 +245,9 @@ class Executor:
                 )
             except RuntimeError as e:
                 raise ExecutionError(str(e)) from e
-            kernel_timings = []
-            backend_name = gpu_timer.backend_name
+            if gpu_timer is not None:
+                kernel_timings = []
+                backend_name = gpu_timer.backend_name
 
         for _ in range(self._config.benchmark_iters):
             with Timer() as t:
