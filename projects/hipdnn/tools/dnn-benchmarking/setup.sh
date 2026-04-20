@@ -12,21 +12,26 @@ MIOPEN_BUILD_DIR="$MIOPEN_PROVIDER_DIR/build"
 
 FORCE_BUILD=0
 usage() {
-    echo "Usage: $0 [--force-build]"
+    echo "Usage: $0 [--force-build] [--install-dir <path>]"
     echo ""
-    echo "  --force-build   Force rebuild of hipDNN and the MIOpen provider,"
-    echo "                      overwriting existing artifacts. The installed plugin"
-    echo "                      will be at:"
-    echo "                        $INSTALL_DIR/lib/hipdnn_plugins/engines/"
-    echo "                      Pass that path to --plugin-path when benchmarking."
+    echo "  --force-build        Force rebuild of hipDNN and the MIOpen provider,"
+    echo "                           overwriting existing artifacts."
+    echo "  --install-dir <path> Install prefix for hipDNN and the MIOpen provider."
+    echo "                           Default: $INSTALL_DIR"
+    echo ""
+    echo "  The installed plugin will be at:"
+    echo "    <install-dir>/lib/hipdnn_plugins/engines/"
+    echo "  Pass that path to --plugin-path when benchmarking."
 }
 
-for arg in "$@"; do
-    case "$arg" in
+while [[ $# -gt 0 ]]; do
+    case "$1" in
         --force-build) FORCE_BUILD=1 ;;
+        --install-dir) shift; INSTALL_DIR="$1" ;;
         -h|--help) usage; exit 0 ;;
-        *) echo "Unknown argument: $arg"; usage; exit 1 ;;
+        *) echo "Unknown argument: $1"; usage; exit 1 ;;
     esac
+    shift
 done
 
 # 1. Create or activate venv
