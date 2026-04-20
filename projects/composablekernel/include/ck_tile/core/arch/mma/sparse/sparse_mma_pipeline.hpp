@@ -147,7 +147,7 @@ struct SparseMmaPipeline : public MmaPipelineBase<sparse::detail::getPipelineFla
         checkATransformResult<ATransformResult>();
 
         // Reinterpret the full compressed vector as per-fragment arrays
-        auto* a_frags = std::launder(reinterpret_cast<FragAVecT(*)[FragsK]>(&a_compressed_whole));
+        auto* a_frags = ck_tile::bit_cast<FragAVecT(*)[FragsK]>(&a_compressed_whole);
 
         static_assert(FragsM * FragsK * InternalAFragSize * 2 <= 32,
                       "Total idx bits exceed int32_t capacity");
@@ -191,7 +191,7 @@ struct SparseMmaPipeline : public MmaPipelineBase<sparse::detail::getPipelineFla
         }
         else
         {
-            static_assert(false);
+            static_assert(false, "Invalid accumulation policy");
         }
     }
 
