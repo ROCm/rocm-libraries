@@ -605,7 +605,7 @@ struct GroupedConvolutionBackwardWeightKernel
                            GroupedConvBwdWeightKernelArgsSpecialized>,
                     BlockSize().x,
                     dynamic_smem_size));
-                occupancy = std::max(minimum_occupancy, max_occupancy);
+                occupancy = ck_tile::max(minimum_occupancy, max_occupancy);
             }
 
             const index_t grid = num_cu * occupancy;
