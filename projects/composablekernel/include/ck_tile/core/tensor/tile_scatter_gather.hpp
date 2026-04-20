@@ -60,12 +60,12 @@ struct tile_scatter_gather
 #endif
 
     using BottomTensorView = remove_reference_t<BottomTensorView_>;
-    using WindowLengths                = remove_cvref_t<WindowLengths_>;
-    using TileDstr                     = remove_cvref_t<StaticTileDistribution_>;
-    using PageIdxArray                 = remove_cvref_t<StaticPageIndexArray_>;
-    using ValidArray                   = remove_cvref_t<StaticValidArray_>;
-    using WindowAdaptor                = typename TileDstr::PsYs2XsAdaptor;
-    using BottomTensorDesc             = typename BottomTensorView::TensorDesc;
+    using WindowLengths    = remove_cvref_t<WindowLengths_>;
+    using TileDstr         = remove_cvref_t<StaticTileDistribution_>;
+    using PageIdxArray     = remove_cvref_t<StaticPageIndexArray_>;
+    using ValidArray       = remove_cvref_t<StaticValidArray_>;
+    using WindowAdaptor    = typename TileDstr::PsYs2XsAdaptor;
+    using BottomTensorDesc = typename BottomTensorView::TensorDesc;
 
     using DataType = remove_cvref_t<typename BottomTensorView::DataType>;
 
@@ -368,11 +368,23 @@ struct tile_scatter_gather
         bottom_tensor_view_.buf_.p_data_ = data;
     }
 
-    // Override buffer size (in elements) for SRD num_records control.
-    // Use to set max range when SRD is rebased per-tile (page_size < kN0 path).
-    CK_TILE_DEVICE constexpr void set_bottom_tensor_view_buffer_size(long_index_t size)
+    // Override buffer size (input in RAW elements, NOT pre-divided by PackedSize) for
+    // SRD num_records control. Use to set max range when SRD is rebased per-tile
+    // (page_size >= kN0 path): each rebased SRD only needs to cover one page; without
+    // this the SRD claims validity for memory beyond the allocated buffer, which can
+    // fault on gfx950 page-table validation.
+    //
+    // Matches buffer_view ctor convention (buffer_view.hpp:245): input is raw element
+    // count and is divided by PackedSize before being stored. For PackedSize=1
+    // (fp16/bf16/fp8) the division is a no-op; for PackedSize=2 (FP4 / packed int4)
+    // skipping it would over-report num_records by 2x and silently mask OOB on SRD
+    // reads. batch_prefill currently does not exercise the packed-type path, but this
+    // setter is generic infrastructure (lives in tile_scatter_gather.hpp) so it must
+    // honor the same invariant the ctor enforces.
+    CK_TILE_DEVICE constexpr void set_bottom_tensor_view_buffer_size(index_t size)
     {
-        bottom_tensor_view_.buf_.buffer_size_ = size;
+        using BufType                         = remove_cvref_t<decltype(bottom_tensor_view_.buf_)>;
+        bottom_tensor_view_.buf_.buffer_size_ = size / BufType::PackedSize;
     }
 
     // move thread's window adaptor coordinate and bottom tensor coordinate

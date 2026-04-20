@@ -162,7 +162,7 @@ CK_TILE_HOST_DEVICE void kv_offset_array_transform(const IndexArrayType& physica
     //   kPageBlockSize <  kN0 && kUseFlatLoad_: within-page offset (flat load uses
     //   physical_pages[]) kPageBlockSize <  kN0 && !kUseFlatLoad_: FULL offset (page * stride +
     //   within_page) for
-    //     direct buffer_load with 32-bit voffset — the original code path, fast but limited to <4GB
+    //     direct buffer_load with 32-bit voffset — the original code path, fast but limited to <2GB
     constexpr bool kNeedFullOffset = (kPageBlockSize < kN0) && !kUseFlatLoad_;
 
     static_for<0, kLoopCount, 1>{}([&](auto k0) {
@@ -184,11 +184,16 @@ CK_TILE_HOST_DEVICE void kv_offset_array_transform(const IndexArrayType& physica
             }
         }();
 
-        // SRD + page_size < kN0: add page base to form complete voffset for buffer_load
+        // SRD + page_size < kN0: add page base to form complete voffset for buffer_load.
+        //
+        // 32-bit by hardware: SRD buffer_load voffset is fundamentally 32-bit (CDNA3 MUBUF
+        // microcode format), so this branch is only reachable when total KV bytes fit in
+        // INT32_MAX. The kUseFlatLoad_ template path handles the >2GB case via 64-bit
+        // global_load_lds_*; widening kv_offset_vec here would not lift the 2GB ceiling
+        // because the hardware truncates voffset regardless.
         if constexpr(kNeedFullOffset)
         {
-            kv_offset_vec[k0] =
-                static_cast<long_index_t>(physical_pages[k0]) * stride_page_block + within_page;
+            kv_offset_vec[k0] = physical_pages[k0] * stride_page_block + within_page;
         }
         else
         {
@@ -621,10 +626,10 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSAsync
                     base_ptr + static_cast<long_index_t>(physical_page) * page_stride_k;
                 window.set_bottom_tensor_view_data_ptr(page_ptr);
                 // Limit SRD num_records to one page worth of elements.
-                // Without this, the SRD claims validity for [page_ptr, page_ptr + full_buffer_size),
-                // which extends far beyond the allocated buffer when rebased to high pages.
-                // On gfx950, the hardware may validate the full SRD range against page table
-                // permissions, causing faults on freed/protected memory beyond the buffer.
+                // Without this, the SRD claims validity for [page_ptr, page_ptr +
+                // full_buffer_size), which extends far beyond the allocated buffer when rebased to
+                // high pages. On gfx950, the hardware may validate the full SRD range against page
+                // table permissions, causing faults on freed/protected memory beyond the buffer.
                 window.set_bottom_tensor_view_buffer_size(page_stride_k);
                 window.init_raw();
             }
