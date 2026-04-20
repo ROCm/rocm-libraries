@@ -2277,10 +2277,12 @@ public:
         return fft_status_success;
     }
 
-    // return the per-device memory footprint of just the input/output data
-    std::vector<size_t> io_vram_footprint()
+    std::vector<size_t> footprint_on_devices_for(fft_io io) const
     {
         std::vector<size_t> sizes(rocfft_scoped_device::device_count());
+        const auto&         iofields = io == fft_io::fft_io_in ? ifields : ofields;
+        const auto          iobuffer_size
+            = io == fft_io::fft_io_in ? sum(ibuffer_sizes()) : sum(obuffer_sizes());
 
         // If this is library-decomposed multi-GPU, only the library
         // can really say what the footprint will be.  Estimate it
@@ -2291,11 +2293,7 @@ public:
             // We will use the first N devices for library-decomposed
             for(size_t device = 0; device < multiGPU; ++device)
             {
-                sizes.at(device) += DivRoundingUp(sum(ibuffer_sizes()), multiGPU);
-                if(placement == fft_placement_notinplace)
-                {
-                    sizes.at(device) += DivRoundingUp(sum(obuffer_sizes()), multiGPU);
-                }
+                sizes.at(device) += DivRoundingUp(iobuffer_size, multiGPU);
             }
             return sizes;
         }
@@ -2306,38 +2304,44 @@ public:
 
         // add sizes for field if specified, otherwise assume
         // single-device input/output buffer on current device
-        if(ifields.empty() && ofields.empty())
+        if(iofields.empty())
         {
-            sizes.at(currentDevice) += sum(ibuffer_sizes());
-            if(placement == fft_placement_notinplace)
-            {
-                sizes.at(currentDevice) += sum(obuffer_sizes());
-            }
+            sizes.at(currentDevice) += iobuffer_size;
         }
         else
         {
-            auto add_field = [=, &sizes](const std::vector<fft_field>& fields, auto buffer_sizes) {
-                if(fields.empty())
+            // add footprint of each brick to its device
+            for(const auto& field : iofields)
+            {
+                for(const auto& brick : field.bricks)
                 {
-                    // use buffer size calculation
-                    sizes.at(currentDevice) += sum(buffer_sizes);
+                    sizes.at(brick.device) += compute_ptrdiff(brick.length(), brick.stride);
                 }
-                else
-                {
-                    // add footprint of each brick to its device
-                    for(const auto& field : fields)
-                    {
-                        for(const auto& brick : field.bricks)
-                        {
-                            sizes.at(brick.device) += compute_ptrdiff(brick.length(), brick.stride);
-                        }
-                    }
-                }
-            };
-            add_field(ifields, ibuffer_sizes());
-            add_field(ofields, obuffer_sizes());
+            }
         }
+        return sizes;
+    }
 
+    // return the per-device memory footprint of just the input/output data
+    std::vector<size_t> io_vram_footprint() const
+    {
+        std::vector<size_t> sizes(rocfft_scoped_device::device_count());
+        const auto          input_footprints  = footprint_on_devices_for(fft_io::fft_io_in);
+        const auto          output_footprints = footprint_on_devices_for(fft_io::fft_io_out);
+
+        for(size_t i = 0; i < sizes.size(); ++i)
+        {
+            if(placement == fft_placement_inplace)
+            {
+                // inplace means we need the maximum of input and output for each device
+                sizes.at(i) = std::max(input_footprints.at(i), output_footprints.at(i));
+            }
+            else
+            {
+                // out of place means input and output are separate
+                sizes.at(i) = input_footprints.at(i) + output_footprints.at(i);
+            }
+        }
         return sizes;
     }
 
