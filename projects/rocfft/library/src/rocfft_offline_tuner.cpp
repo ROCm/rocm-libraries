@@ -136,7 +136,7 @@ int offline_tune_problems(rocfft_params& params, int verbose, int ntrial)
     {
         std::cout << "SKIPPED: Problem size (" << byte_sizes_to_str(io_vram_footprint)
                   << ") exceeds usable memory on some device (" << byte_sizes_to_str(vram_avail)
-                  << ")";
+                  << ")\n";
         return EXIT_SUCCESS;
     }
 
@@ -145,7 +145,7 @@ int offline_tune_problems(rocfft_params& params, int verbose, int ntrial)
     {
         std::cout << "SKIPPED: Problem size (" << byte_sizes_to_str(vram_footprint)
                   << ") exceeds usable memory on some device (" << byte_sizes_to_str(vram_avail)
-                  << ")";
+                  << ")\n";
         return EXIT_SUCCESS;
     }
 

@@ -314,7 +314,7 @@ int main(int argc, char* argv[])
     {
         std::cout << "SKIPPED: Problem size (" << byte_sizes_to_str(io_vram_footprint)
                   << ") exceeds usable memory on some device (" << byte_sizes_to_str(vram_avail)
-                  << ")";
+                  << ")\n";
         return EXIT_SUCCESS;
     }
 
@@ -323,7 +323,7 @@ int main(int argc, char* argv[])
     {
         std::cout << "SKIPPED: Problem size (" << byte_sizes_to_str(vram_footprint)
                   << ") exceeds usable memory on some device (" << byte_sizes_to_str(vram_avail)
-                  << ")";
+                  << ")\n";
         return EXIT_SUCCESS;
     }
 
