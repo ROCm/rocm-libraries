@@ -1864,9 +1864,10 @@ class Solution(collections.abc.Mapping):
       return
 
     if tdmInst > 0:
-      if state["PrefetchGlobalRead"] > 1:
-        reject(state, printRejectionReason, "Currently TDM only supports PGR=0, 1")
-        return
+      # TODO: remove this restriction when PGR=2 is fully supported
+      # if state["PrefetchGlobalRead"] > 1:
+      #   reject(state, printRejectionReason, "Currently TDM only supports PGR=0, 1")
+      #   return
 
       if (state["ProblemType"]["TransposeA"], state["ProblemType"]["TransposeB"]) != (True, False):
         reject(state, printRejectionReason, "Currently TDM only supports TN")
@@ -1914,7 +1915,7 @@ class Solution(collections.abc.Mapping):
         state["UseDirect32XEmulation"] = False
 
     # backup UsePLRPack from yaml before calling hasCustomSchedule
-    backup_UsePLRPack = state["UsePLRPack"] 
+    backup_UsePLRPack = state["UsePLRPack"]
     # Check if CMS is available for this solution
     if state["UseCustomMainLoopSchedule"] in [-1, 1]:
       # initialize CMS related config parameters (for CMS only)
@@ -2040,7 +2041,7 @@ class Solution(collections.abc.Mapping):
         if not state["enableLDSTrB"] and not state["UnrollMajorLDSB"]:
           reject(state, printRejectionReason, "Currently FP4 requires LDSTrInst == True for UnrolledMajorLDSB == False")
           return
-        
+
         # Currently we only support fp4 edge with AssertFree0(1)ElementMultiple = 2.
         # TODO: Enalbe edge with arbitrary number
         state["AssertFree0ElementMultiple"] = 2
@@ -2302,7 +2303,7 @@ class Solution(collections.abc.Mapping):
           vw = state["VectorWidthA"] if "A" in tc else state["VectorWidthB"]
           LdsBlockSizePerPad = roundUpToNearestMultiple(int(state["_DepthU%s"%tc] * bpe * vw), multiple)
         return LdsBlockSizePerPad
-      
+
       def getLdsBpe(tc: str) -> float:
         return state["ProblemType"]["DataType%s"%tc].numBytes() if state["ConvertAfterDS"] else state["ProblemType"]["MacDataType%s"%tc].numBytes()
 
@@ -4218,7 +4219,7 @@ class Solution(collections.abc.Mapping):
               not state["ClusterLocalRead"] and \
               not state["InnerUnroll"] >= state["LocalReadVectorWidth"] // state["MIInputPerThread"]:
             reject(state, printRejectionReason, "wider localRead only support ClusterLocalRead or (InnerUnroll > WiderLocalReadxN)")
-                    
+
 
     if state["GlobalReadPerMfma"] > 1 and state["PrefetchGlobalRead"] >= 2:
       reject(state, printRejectionReason, "GlobalReadPerMfma need to be 1 if PGR>=2")

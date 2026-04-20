@@ -1,4 +1,4 @@
-# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
 include(FetchContent)
@@ -10,6 +10,8 @@ FetchContent_Declare(
 )
 # Prevent GoogleTest from overriding our compiler/linker options on Windows
 set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+# Prevent GoogleTest from being installed with cmake --install
+set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(googletest)
 
 # Suppress warnings in GoogleTest targets (GoogleTest uses #if instead of #ifdef for
@@ -28,6 +30,7 @@ add_executable(
     TestReluPlan.cpp
     TestConvFwdPlanBuilder.cpp
     TestConvFwdPlan.cpp
+    TestExampleProviderEngine.cpp
 )
 
 target_link_libraries(
@@ -48,4 +51,4 @@ target_include_directories(
 )
 
 include(GoogleTest)
-gtest_discover_tests(example_provider_tests)
+gtest_discover_tests(example_provider_tests DISCOVERY_MODE PRE_TEST)

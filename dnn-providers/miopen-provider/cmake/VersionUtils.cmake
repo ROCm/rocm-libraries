@@ -8,7 +8,7 @@ endfunction()
 
 
 # Function to setup versioning for a component
-# Reads version.json, gets git hash, sets version variables, and calls project()
+# Reads version.json, gets git hash, and sets version variables in parent scope
 function(miopen_provider_setup_version COMPONENT_NAME)
     string(TOUPPER ${COMPONENT_NAME} COMPONENT_NAME_UPPER)
 

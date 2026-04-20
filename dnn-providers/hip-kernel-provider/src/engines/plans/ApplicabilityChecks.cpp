@@ -13,7 +13,8 @@ namespace hip_kernel_provider
 
 // --- Tensor Descriptor Implementation ---
 
-TensorDescriptor::TensorDescriptor(const hipdnn_data_sdk::data_objects::TensorAttributes* attr)
+TensorDescriptor::TensorDescriptor(
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* attr)
     : dims(attr->dims()->begin(), attr->dims()->end())
     , strides(attr->strides()->begin(), attr->strides()->end())
     , strideOrder(hipdnn_data_sdk::utilities::extractStrideOrder(strides))
@@ -132,8 +133,8 @@ void IValidator::validateConsistentLayouts(const std::vector<TensorDescriptor>& 
 }
 
 void IValidator::validateDataTypeIsSupported(
-    hipdnn_data_sdk::data_objects::DataType dataType,
-    const std::unordered_set<hipdnn_data_sdk::data_objects::DataType>& allowedTypes,
+    hipdnn_flatbuffers_sdk::data_objects::DataType dataType,
+    const std::unordered_set<hipdnn_flatbuffers_sdk::data_objects::DataType>& allowedTypes,
     const std::string& errorMessage)
 {
     if(allowedTypes.count(dataType) > 0)
@@ -145,7 +146,7 @@ void IValidator::validateDataTypeIsSupported(
 
 void IValidator::validateConsistentDataTypes(
     const std::vector<int64_t>& tensorIds,
-    const std::unordered_set<hipdnn_data_sdk::data_objects::DataType>& allowedTypes,
+    const std::unordered_set<hipdnn_flatbuffers_sdk::data_objects::DataType>& allowedTypes,
     const std::string& typeErrorMessage,
     const std::string& consistencyErrorMessage)
 {
@@ -171,7 +172,7 @@ void IValidator::validateConsistentDataTypes(
 }
 
 void IValidator::validateFixedDataType(const std::vector<int64_t>& tensorIds,
-                                       hipdnn_data_sdk::data_objects::DataType expectedType,
+                                       hipdnn_flatbuffers_sdk::data_objects::DataType expectedType,
                                        const std::string& errorMessage)
 {
     for(const auto tensorId : tensorIds)
