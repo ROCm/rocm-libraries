@@ -229,14 +229,12 @@ struct MmaPipelineBase
 
     /**
      * @brief Apply the post-transform and buffer formatting to the C (accumulator) output.
-     * @param vecs The (A, B, C) tuple after @c execImpl; only C is consumed.
+     * @param c_result The accumulator to post-process.
      * @return The final D output in the user-facing vector type.
      */
-    template <typename ATransformResult, typename BTransformResult, typename CTransformResult>
-    CK_TILE_DEVICE static auto
-    applyTransformToOutput(std::tuple<ATransformResult, BTransformResult, CTransformResult>&& vecs)
+    template <typename CTransformResult>
+    CK_TILE_DEVICE static auto applyTransformToOutput(CTransformResult&& c_result)
     {
-        auto&& [a_result, b_result, c_result] = vecs;
         static_assert(!is_std_tuple_v<decltype(c_result)>,
                       "If CTransform returns more than the vector, update this function.");
 
@@ -270,7 +268,8 @@ struct MmaPipelineBase
 
             Derived::execImpl(transformed_inputs);
 
-            return applyTransformToOutput(std::move(transformed_inputs));
+            auto&& [a_result, b_result, c_result] = std::move(transformed_inputs);
+            return applyTransformToOutput(std::move(c_result));
         }
         else
         {
