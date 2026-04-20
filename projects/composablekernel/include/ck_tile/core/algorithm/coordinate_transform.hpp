@@ -244,6 +244,19 @@ struct pad : public base_transform<1, 1>
                ck_tile::is_known_at_compile_time<LeftPadLength>::value &&
                ck_tile::is_known_at_compile_time<RightPadLength>::value;
     }
+
+    // Pad is a 1:1 transform that simply shifts the index; the physical
+    // stride is unchanged, so vector properties propagate as-is.
+    // (Callers must still ensure that any vectorized access does not
+    //  cross a pad boundary — the runtime validity check handles that.)
+    template <typename LowVectorLengths, typename LowVectorStrides>
+    CK_TILE_HOST_DEVICE static constexpr auto
+    calculate_upper_dimension_safe_vector_length_strides(
+        const LowVectorLengths& low_vector_lengths,
+        const LowVectorStrides& low_vector_strides)
+    {
+        return make_tuple(low_vector_lengths, low_vector_strides);
+    }
 };
 
 template <typename LowLength,

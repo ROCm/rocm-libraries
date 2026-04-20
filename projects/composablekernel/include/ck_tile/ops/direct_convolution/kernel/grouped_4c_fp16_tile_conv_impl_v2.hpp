@@ -11,10 +11,10 @@
 #include "ck_tile/ops/direct_convolution/utils/transpose_lds_layout.hpp"
 #include "ck_tile/ops/direct_convolution/utils/memory.hpp"
 #include "ck_tile/ops/direct_convolution/utils/detail.hpp"
+#include "ck_tile/ops/direct_convolution/utils/swizzle.hpp"
 #include "ck_tile/core/numeric/vector_type.hpp"
 #include "ck_tile/core/tensor/buffer_view.hpp"
 #include "ck_tile/core/tensor/tensor_view.hpp"
-#include "ck_tile/core/tensor/tile_distribution.hpp"
 #include <hip/hip_fp16.h>
 #include <hip/hip_runtime.h>
 #include <type_traits>
@@ -168,7 +168,7 @@ struct TileConstants
     static constexpr int WEIGHT_LDS_SIZE_UINT4 = WEIGHT_LDS_SIZE_UINT2 / 2;
 
     // -----------------------------------------------------------------------
-    // LDS descriptor with XOR swizzle.
+    // LDS descriptor with XOR swizzle (uint4 units, for MFMA read path).
     //
     // Logical layout: [BLOCK_W, BLOCK_C8] row-major (x = row, c8 = column)
     // Physical layout: xor_t transform maps (x, c8) → (x, c8 ^ (x % C8))
@@ -210,29 +210,48 @@ struct TileConstants
         return static_cast<int>(coord.get_offset());
     }
 
+    // Total channels per block in fp16 elements.
+    static constexpr int BLOCK_C = BLOCK_C8 * 8;
+
     // -----------------------------------------------------------------------
-    // Write-path tile distribution encoding.
+    // Global input descriptor: 3D [hi, wi_padded, C] in fp16 elements.
     //
-    // Thread tid writes to flat LDS slot tid (= physical offset).
-    // The logical coordinates for slot tid are:
-    //   x  = tid / C8      (row in the BLOCK_W × C8 tile)
-    //   c8 = tid % C8      (column before XOR; the physical slot has XOR applied)
+    // Construction chain:
+    //   1. Naive [hi, wi, C] with strides [wi*C, C, 1]  (fp16 units)
+    //   2. Pad W dimension: [hi, wi + px + (kw-1), C]
+    //      - Left pad = px (convolution padding)
+    //      - Right pad = kw - 1 (halo past right edge)
+    //      - OOB accesses in padded region automatically return zero
     //
-    // Decomposed over (P0=warp, P1=lane):
-    //   lane = lane_hi * C8 + lane_lo,  lane_hi = lane / C8,  lane_lo = lane % C8
-    //   x  = P0 * (64 / C8) + lane_hi
-    //   c8 = lane_lo
+    // Used by InputLoader for per-thread async loads with automatic
+    // OOB handling via the pad transform.
     // -----------------------------------------------------------------------
-    using InputLdsWriteDistribution = ck_tile::tile_distribution_encoding<
-        ck_tile::sequence<>,
-        ck_tile::tuple<ck_tile::sequence<64 / BLOCK_C8, cfg.num_waves()>,
-                        ck_tile::sequence<BLOCK_C8>>,
-        ck_tile::tuple<ck_tile::sequence<1>,
-                        ck_tile::sequence<1, 2>>,
-        ck_tile::tuple<ck_tile::sequence<1>,
-                        ck_tile::sequence<0, 0>>,
-        ck_tile::sequence<>,
-        ck_tile::sequence<>>;
+    static CK_TILE_DEVICE auto MakeInputGlobalDescriptor(int hi, int wi, int C, int px)
+    {
+        constexpr int right_pad_w = cfg.kw - 1;
+
+        // C is always a multiple of 8 fp16 (= one uint4).
+        // GuaranteedLastDimensionVectorLength = 8 enables 128-bit vectorized loads.
+        const auto desc_hwc = ck_tile::make_naive_tensor_descriptor(
+            ck_tile::make_tuple(hi, wi, C),
+            ck_tile::make_tuple(wi * C, C, ck_tile::number<1>{}),
+            ck_tile::number<8>{},
+            ck_tile::number<1>{});
+
+        const auto desc_padded = ck_tile::transform_tensor_descriptor(
+            desc_hwc,
+            ck_tile::make_tuple(ck_tile::make_pass_through_transform(hi),
+                                ck_tile::make_pad_transform(wi, px, right_pad_w),
+                                ck_tile::make_pass_through_transform(C)),
+            ck_tile::make_tuple(
+                ck_tile::sequence<0>{}, ck_tile::sequence<1>{}, ck_tile::sequence<2>{}),
+            ck_tile::make_tuple(
+                ck_tile::sequence<0>{}, ck_tile::sequence<1>{}, ck_tile::sequence<2>{}));
+
+        return desc_padded;
+    }
+
+    using Swizzle = SwizzleXOR<cfg.block_c()>;
 };
 
 // Workgroup-level coordinates derived from blockIdx.
@@ -290,65 +309,58 @@ struct ThreadMapping
 };
 
 // Handles asynchronous input loads from global memory into LDS.
+//
+// Each thread computes its own (col, c8) coordinate via the XOR swizzle,
+// reads from the padded global descriptor, and writes to its sequential
+// LDS slot.  The XOR swizzle scrambles the global read addresses so that
+// the data lands in LDS in the XOR-swizzled order expected by the MFMA
+// read path (lds_offset_uint2).
 template <Config cfg>
 struct InputLoader
 {
     using TC = TileConstants<cfg>;
-
-    // Global input tensor view: [hi, BLOCK_W, C8*8] slice in _Float16 elements.
-    // The tensor_view internally manages the buffer resource and computes offsets
-    // from tensor coordinates via the descriptor strides.
-    using InputTensorView = decltype(ck_tile::make_naive_tensor_view<
-                                     ck_tile::address_space_enum::global>(
+    using InputTensorView = decltype(ck_tile::make_tensor_view<ck_tile::address_space_enum::global>(
         static_cast<const _Float16*>(nullptr),
-        ck_tile::make_tuple(int{}, ck_tile::number<TC::BLOCK_W>{}, int{}),
-        ck_tile::make_tuple(int{}, int{}, ck_tile::number<1>{}),
-        ck_tile::number<8>{}));
+        TC::MakeInputGlobalDescriptor(int{}, int{}, int{}, int{})));
 
     InputTensorView input_view;
     uint4* store_input_lds;
     bool load_active;
-    bool input_valid;
-    int col;
-    int c8_fp16; // c8_thread * 8, in fp16 element units
+    int abs_padded_col;  // absolute column in padded space (block_q + tile-local col)
+    int abs_c8_fp16;  // absolute channel in fp16 units (block_k + c8_thread * 8)
 
     __device__ InputLoader(int tid,
                            const BlockCoords<cfg>& bc,
                            uint4* input_lds,
                            const _Float16* __restrict__ in,
-                           int N,
                            int hi,
                            int wi,
                            int px)
-        : input_view(ck_tile::make_naive_tensor_view<ck_tile::address_space_enum::global>(
-              in + static_cast<size_t>(bc.block_n) * hi * wi * bc.C +
-                  static_cast<size_t>(bc.block_q - px) * bc.C + bc.block_k,
-              ck_tile::make_tuple(hi, ck_tile::number<TC::BLOCK_W>{}, bc.C),
-              ck_tile::make_tuple(wi * bc.C, bc.C, ck_tile::number<1>{}),
-              ck_tile::number<8>{})),
+        : input_view(ck_tile::make_tensor_view<ck_tile::address_space_enum::global>(
+              in + static_cast<size_t>(bc.block_n) * hi * wi * bc.C,
+              TC::MakeInputGlobalDescriptor(hi, wi, bc.C, px))),
           store_input_lds(&input_lds[tid]),
           load_active(tid < TC::BLOCK_W * TC::BLOCK_C8),
-          col(tid / TC::BLOCK_C8),
-          c8_fp16(((tid % TC::BLOCK_C8) ^ (tid / TC::BLOCK_C8 % TC::BLOCK_C8)) * 8)
+          abs_padded_col(bc.block_q + TC::Swizzle::x(tid)),
+          abs_c8_fp16(bc.block_k + TC::Swizzle::c8(tid) * 8)
     {
-        const int global_col = (bc.block_q - px) + col;
-        input_valid          = (0 <= global_col && global_col < wi);
     }
 
     // Issue an async load for input row y into the specified LDS buffer half.
+    // The padded descriptor automatically returns zero for OOB column accesses.
     __device__ void prefetch(int y, int lds_buffer) const
     {
         if(load_active)
         {
             auto coord = ck_tile::make_tensor_coordinate(
                 input_view.get_tensor_descriptor(),
-                ck_tile::make_tuple(y, col, c8_fp16));
+                ck_tile::make_tuple(y, abs_padded_col, abs_c8_fp16));
             input_view.template async_get_vectorized_elements<ck_tile::fp16x8_t>(
                 reinterpret_cast<CK_TILE_LDS_ADDR _Float16*>(
                     store_input_lds + lds_buffer * TC::INPUT_LDS_BUFFER_SIZE_C8),
                 coord,
                 0,
-                input_valid);
+                ck_tile::bool_constant<true>{});
         }
     }
 
@@ -565,7 +577,7 @@ __device__ void conv2d_grouped_4c_fp16_cdna4_nhwc_impl(const _Float16* __restric
         return;
 
     ThreadMapping<cfg> tm;
-    InputLoader<cfg> il(tm.tid, bc, input_lds, in, N, hi, wi, px);
+    InputLoader<cfg> il(tm.tid, bc, input_lds, in, hi, wi, px);
     OutputWriter<cfg> ow(tm, bc, output_lds, out, ho, wo);
 
     // --- Weight prologue: global → LDS → registers ---
@@ -579,7 +591,7 @@ __device__ void conv2d_grouped_4c_fp16_cdna4_nhwc_impl(const _Float16* __restric
         WeightLoader<cfg>::read_from_lds(weights_reg, tm, output_lds_fp16);
     }
 
-    // --- Pre-compute per-thread LDS offsets ---
+    // --- Pre-compute per-thread LDS offsets (XOR-swizzled, uint2 units) ---
     int input_lds_offsets[cfg.kw];
     static_for<cfg.kw>(
         [&]<int S>()
@@ -609,7 +621,9 @@ __device__ void conv2d_grouped_4c_fp16_cdna4_nhwc_impl(const _Float16* __restric
 
                 int y = y_base + Y_LOCAL;
                 if((y + 1) < hi)
+                {
                     il.prefetch(y + 1, tic);
+                }
 
                 // Accumulate MFMA products over filter width.
                 static_for<cfg.kw>(
@@ -669,7 +683,9 @@ __device__ void conv2d_grouped_4c_fp16_cdna4_nhwc_impl(const _Float16* __restric
                 __syncthreads();
 
                 if((y + 1) < hi)
+                {
                     il.prefetch(y + 1, tic);
+                }
 
                 static_for<cfg.kw>(
                     [&]<int S>()
