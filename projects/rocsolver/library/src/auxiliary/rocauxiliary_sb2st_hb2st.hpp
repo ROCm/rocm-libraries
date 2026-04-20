@@ -271,20 +271,106 @@ __device__ void sb2st_helarf(
 }
 
 //------------------------------------------------------------------------------
-__device__ inline void get_vindex(
-    rocblas_int n,
-    rocblas_int kd,
-    rocblas_int sweep,
-    rocblas_int task,
-    rocblas_int& vi,
-    rocblas_int& vj )
+// Returns block index within V matrix for V{i,j} block.
+// The V blocks are conceptually stored in a lower triangular matrix.
+// nt is number of block columns in the conceptual triangular V.
+// i and j are block row and col in the conceptual triangular V.
+// Sweep j is in column j, with task 0 being in the top, diagonal block,
+// then task 1 in the 2nd block, and so on.
+// In unmtr_hb2st, these are applied in sets of independent V blocks, indexed
+// by k. Each set k is on a diagonal with slope -2.
+//
+//      |'.         independent sets, k
+//      | 0 '.
+//      |'.  |'.
+//      |-1'.| 1 '.
+//      |'.  |'.   |'.
+//      |-2'.| 0 '.| 2 '.
+//      |'.  |'.   |'.   |'.
+//      |-3'.|-1 '.| 1 '.| 3 '.
+//      |'.  |'.   |'.   |'.   |'.
+//      |-4'.|-2 '.| 0 '.| 2 '.| 4 '.
+//      '''''''''''''''''''''''''''''
+//
+// To facilitate batching, the V blocks in each set k are stored contiguously
+// in V, with block index r:
+//
+//      |'.        storage order, r
+//      | 6 '.
+//      |'.  |'.
+//      | 4'.| 9 '.
+//      |'.  |'.   |'.
+//      | 2'.| 7 '.|11 '.
+//      |'.  |'.   |'.   |'.
+//      | 1'.| 5 '.|10 '.|13 '.
+//      |'.  |'.   |'.   |'.   |'.
+//      | 0'.| 3 '.| 8 '.|12 '.|14 '.
+//      '''''''''''''''''''''''''''''
+//
+// That is, V is stored as a (2*kd)-by-(nt*kd) array like:
+//
+//      k =  -4   -3   -2   -2   -1   -1    0    0    0    1    1    2    2    3    4
+//      j =   0    0    0    1    0    1    0    1    2    1    2    2    3    3    4
+//      i =   4    3    2    4    1    3    0    2    4    1    3    2    4    3    4
+//          |'.  |'.  |'.  |'.  |'.  |'.  |'.  |'.  |'.  |'.  |'.  |'.  |'.  |'.  |'.  |
+//      r = | 0'.| 1'.| 2'.| 3'.| 4'.| 5'.| 6'.| 7'.| 8'.| 9'.|10'.|11'.|12'.|13'.|14'.|
+//          |''''|'.  |'.  |''''|'.  |'.  |'.  |'.  |''''|'.  |'.  |'.  |''''|'.  |''''|
+//          |    |  '.|  '.|    |  '.|  '.|  '.|  '.|    |  '.|  '.|  '.|    |  '.|    |
+//
+// with explicit 1's on the diagonals and 0's outside the trapezoids.
+//
+template <typename I>
+__device__ rocblas_int get_v_block_index(
+    I nt, I i, I j )
 {
-    rocblas_int k, kindex;
-    rocblas_int nt = ceildiv( n, kd );  // todo: compute once & pass?
-    vi = sweep % kd;               // row within V trapezoid
-    k  = sweep / kd;               // block k
-    kindex = k*nt - k*(k-1)/2;     // index of diagonal V{k,k} block
-    vj = vi + (kindex + task)*kd;  // col within V
+    I r;
+    // k in unmtr goes from -(nt-1) to (nt-1), inclusive. k2 = k + nt - 1.
+    I k2 = 2*j - i + nt - 1;
+    if (k2 < nt)
+    {
+        // Lower-left portion of conceptual V, where k <= 0.
+        // The number of V blocks in set k2 follows the pattern,
+        // for example with nt=8, k2=0 to 2*(nt-1):
+        //   1, 1, 2, 2, 3, 3, 4, 4, 4, 3, 3, 2, 2, 1, 1
+        // For k2 < nt, sum the first k2 terms.
+        // Recall sum( 1, 2, ..., L ) = L*(L+1)/2; double that.
+        I L = k2 // 2;
+        r = (k2 % 2 == 0 ? L*(L+1) : (L+1)*(L+1));
+        r += j;
+    }
+    else // k2 >= nt
+    {
+        // Upper-right portion of conceptual V, where k > 0.
+        // Take total number of V blocks and subtract
+        // last 2*nt - 1 - k2 terms of ( ..., 2, 2, 1, 1 ).
+        I total = nt*(nt+1)//2
+        I L = nt - 1 - k2//2
+        I sub = L*(L+1) if (k2 % 2 != 0) else (L+1)*(L+1)
+        r = total - sub + i - j;
+    }
+    return r;
+}
+
+//------------------------------------------------------------------------------
+// Returns (vi, vj) row and col index within V array for the current
+// Householder vector, determined by sweep and task.
+//
+template <typename I>
+__device__ void get_v_index(
+    I n,
+    I kd,
+    I sweep,
+    I task,
+    I& vi,
+    I& vj )
+{
+    // todo: compute nt once & pass?
+    I nt = ceildiv( n, kd );    // number of block-cols in conceptual V.
+    I j = sweep / kd;           // block-col j
+    I i = j + task;             // block-row i
+    I r = get_v_block_index( nt, i, j );
+    vi = sweep % kd;            // row within V array
+    vj = vi + r*kd;             // col within V array
 }
 
 //------------------------------------------------------------------------------
@@ -310,7 +396,7 @@ __device__ void sb2st_hb2st_task(
 
     // row, col index for current Householder vector vc within V.
     rocblas_int vi, vj;
-    get_vindex( n, kd, sweep, task, vi, vj );
+    get_v_index( n, kd, sweep, task, vi, vj );
 
     __shared__ T s_tau;
 
@@ -362,25 +448,23 @@ __device__ void sb2st_hb2st_task(
         }
         __syncthreads();
 
-        #if 1
-            if (s_tau != 0)
-            {
-                // Apply H on both sides to diagonal block, A{i,i} := H^H A{i,i} H.
-                // Using ldab-1 adjusts for band format.
-                #if 0
-                    sb2st_helarf( xid, yid, nc, s_housev, s_tau,
-                                  Aband + idiag + (sweep + 1)*ldab, ldab-1, s_work );
-                #else
-                    sb2st_larf( xid, yid, rocblas_side_left, nc, nc, s_housev, conj( s_tau ),
+        if (s_tau != 0)
+        {
+            // Apply H on both sides to diagonal block, A{i,i} := H^H A{i,i} H.
+            // Using ldab-1 adjusts for band format.
+            #if 0
+                sb2st_helarf( xid, yid, nc, s_housev, s_tau,
                                 Aband + idiag + (sweep + 1)*ldab, ldab-1, s_work );
-                    __syncthreads();
-                    sb2st_larf( xid, yid, rocblas_side_right, nc, nc, s_housev, s_tau,
-                                Aband + idiag + (sweep + 1)*ldab, ldab-1, s_work );
-                #endif
+            #else
+                sb2st_larf( xid, yid, rocblas_side_left, nc, nc, s_housev, conj( s_tau ),
+                            Aband + idiag + (sweep + 1)*ldab, ldab-1, s_work );
+                __syncthreads();
+                sb2st_larf( xid, yid, rocblas_side_right, nc, nc, s_housev, s_tau,
+                            Aband + idiag + (sweep + 1)*ldab, ldab-1, s_work );
+            #endif
 
-                // todo: copy A[ idiag + (sweep + 1)*ldab ] to D[s+1]?
-            }
-        #endif
+            // todo: copy A[ idiag + (sweep + 1)*ldab ] to D[s+1]?
+        }
     }
     else
     {
@@ -393,10 +477,12 @@ __device__ void sb2st_hb2st_task(
         if (yid == 0)
         {
             // Copy previous Householder vector, vp, to shared memory.
+            rocblas_int vpi, vpj;
+            get_v_index( n, kd, sweep, task, vpi, vpj );
             for (rocblas_int i = xid; i < kd; i += DIMX)
-                s_housev[i] = V[vi + i + (vj - kd)*ldv];
+                s_housev[i] = V[vpi + i + vpj*ldv];
             if (xid == 0)
-                s_tau = V[ldv - 1 + (vj - kd)*ldv];
+                s_tau = V[ldv - 1 + vpj*ldv];
         }
         __syncthreads();
 
@@ -409,63 +495,61 @@ __device__ void sb2st_hb2st_task(
             __syncthreads();
         }
 
-        #if 1
-            if (nc > 1)
+        if (nc > 1)
+        {
+            if (yid == 0)
             {
-                if (yid == 0)
+                // Copy 1st column of bulge to shared memory.
+                for (rocblas_int i = xid; i < nc; i += DIMX)
+                    s_housev[i] = Aband[idiag + kd + i + jp*ldab];
+
+                // Generate current Householder reflector, vc.
+                sb2st_larfg( xid, nc, s_housev, s_tau, (S*) s_work );
+
+                // Copy Householder vector and tau to column V,
+                // and copy 1st element of larfg back to A.
+                if (xid == 0)
                 {
-                    // Copy 1st column of bulge to shared memory.
-                    for (rocblas_int i = xid; i < nc; i += DIMX)
-                        s_housev[i] = Aband[idiag + kd + i + jp*ldab];
-
-                    // Generate current Householder reflector, vc.
-                    sb2st_larfg( xid, nc, s_housev, s_tau, (S*) s_work );
-
-                    // Copy Householder vector and tau to column V,
-                    // and copy 1st element of larfg back to A.
-                    if (xid == 0)
-                    {
-                        Aband[idiag + kd + jp*ldab] = s_housev[0];
-                        s_housev[0] = T( 1 );
-                        V[vi + vj*ldv] = s_housev[0];
-                        V[ldv - 1 + vj*ldv] = s_tau;
-                    }
-                    // hmm... if I did i = xid; then it copies the whole s_housev,
-                    // but 0's whole column of A; need to preserve the top element
-                    // assigned above, A[idiag+kd, jp].
-                    // todo: use 2 loops?
-                    // V needs to be 0'd out, so maybe set Vk = I and don't set V[vi,vj] = 1 above?
-                    for (rocblas_int i = xid+1; i < nc; i += DIMX)
-                    {
-                        V[vi + i + vj*ldv] = s_housev[i];
-                        Aband[idiag + kd + i + jp*ldab] = T( 0 );
-                    }
+                    Aband[idiag + kd + jp*ldab] = s_housev[0];
+                    s_housev[0] = T( 1 );
+                    V[vi + vj*ldv] = s_housev[0];
+                    V[ldv - 1 + vj*ldv] = s_tau;
                 }
-                __syncthreads();
-
-                if (s_tau != 0)
+                // hmm... if I did i = xid; then it copies the whole s_housev,
+                // but 0's whole column of A; need to preserve the top element
+                // assigned above, A[idiag+kd, jp].
+                // todo: use 2 loops?
+                // V needs to be 0'd out, so maybe set Vk = I and don't set V[vi,vj] = 1 above?
+                for (rocblas_int i = xid+1; i < nc; i += DIMX)
                 {
-                    // Apply vc on left of lower off-diagonal block, A{jc, jp+1} := H^H A{jc, jp+1}.
-                    // Skip 1st column that was eliminated above.
-                    sb2st_larf( xid, yid, rocblas_side_left, nc, kd-1, s_housev, conj( s_tau ),
-                                Aband + idiag + kd - 1 + (jp + 1)*ldab, ldab-1, s_work );
-                    __syncthreads();
-
-                    // Apply vc on left and right of diagonal, A{jc, jc} := H^H A{jc, jc} H.
-                    #if 0
-                        sb2st_helarf( xid, yid, nc, s_housev, s_tau,
-                                      Aband + idiag + jc*ldab, ldab-1, s_work );
-                    #else
-                        sb2st_larf( xid, yid, rocblas_side_left, nc, nc, s_housev, conj( s_tau ),
-                                    Aband + idiag + jc*ldab, ldab-1, s_work );
-                        __syncthreads();
-
-                        sb2st_larf( xid, yid, rocblas_side_right, nc, nc, s_housev, s_tau,
-                                    Aband + idiag + jc*ldab, ldab-1, s_work );
-                    #endif
+                    V[vi + i + vj*ldv] = s_housev[i];
+                    Aband[idiag + kd + i + jp*ldab] = T( 0 );
                 }
             }
-        #endif
+            __syncthreads();
+
+            if (s_tau != 0)
+            {
+                // Apply vc on left of lower off-diagonal block, A{jc, jp+1} := H^H A{jc, jp+1}.
+                // Skip 1st column that was eliminated above.
+                sb2st_larf( xid, yid, rocblas_side_left, nc, kd-1, s_housev, conj( s_tau ),
+                            Aband + idiag + kd - 1 + (jp + 1)*ldab, ldab-1, s_work );
+                __syncthreads();
+
+                // Apply vc on left and right of diagonal, A{jc, jc} := H^H A{jc, jc} H.
+                #if 0
+                    sb2st_helarf( xid, yid, nc, s_housev, s_tau,
+                                    Aband + idiag + jc*ldab, ldab-1, s_work );
+                #else
+                    sb2st_larf( xid, yid, rocblas_side_left, nc, nc, s_housev, conj( s_tau ),
+                                Aband + idiag + jc*ldab, ldab-1, s_work );
+                    __syncthreads();
+
+                    sb2st_larf( xid, yid, rocblas_side_right, nc, nc, s_housev, s_tau,
+                                Aband + idiag + jc*ldab, ldab-1, s_work );
+                #endif
+            }
+        }
 
         // Copy conj of top row of A{jc, jp} to 1st col of A{jp, jc} to maintain
         // symmetry for next task.
@@ -656,8 +740,9 @@ rocblas_status rocsolver_sb2st_hb2st_template(
     rocblas_int nv_blocks = nt*(nt + 1)/2;
     rocblas_int nv = nv_blocks*kd;
     rocblas_stride shiftV = 0;
-    laset( handle, 'g', 3*kd, nv, zero, zero, V, shiftV, ldv, strideV,
-           batch_count );
+    //laset( handle, 'g', 3*kd, nv, zero, zero, V, shiftV, ldv, strideV,
+    //       batch_count );
+    HIP_CHECK( hipMemsetAsync( V + shiftV, 0, sizeof(T) * ldv * 3*kd, stream ) );
 
     #ifdef PRINT
         print_matrix( "dA_in", ldab, n, Aband, ldab, 6 );
