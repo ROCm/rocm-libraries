@@ -28,10 +28,10 @@ source .venv/bin/activate
 
 # Install ROCm torch (from ROCm nightly index), then the package + PyPI deps.
 pip install -r requirements-rocm.txt
-pip install -e .
+pip install -e . --no-deps
 
 # Install hipDNN Python bindings (from your hipDNN build)
-cd /path/to/hipdnn/python && pip install -e . && cd -
+cd /path/to/hipdnn/python && pip install -e . --no-deps && cd -
 ```
 
 ### For CUDA/NVIDIA GPUs (PyTorch CUDA benchmarking)
@@ -43,7 +43,7 @@ source .venv/bin/activate
 
 # Install CUDA torch + PyPI deps
 pip install -r requirements-cuda.txt
-pip install -e .
+pip install -e . --no-deps
 ```
 
 ### Development Installation

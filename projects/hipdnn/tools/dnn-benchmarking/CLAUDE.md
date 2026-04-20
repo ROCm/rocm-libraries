@@ -20,7 +20,7 @@ pip install -r requirements-rocm.txt   # torch from ROCm nightly index
 pip install -e .                        # package + PyPI deps (numpy, pytest)
 
 # hipDNN bindings must be installed separately from your hipDNN build
-cd /path/to/hipdnn/python && pip install -e .
+cd /path/to/hipdnn/python && pip install -e . --no-deps
 ```
 
 `--force-build` installs hipDNN and the MIOpen plugin to `/opt/rocm` (prompts for confirmation).
