@@ -332,6 +332,20 @@ class DataField:
 
 
 @dataclass
+class DataFieldsHelper:
+    """Configuration for shared data field packing/unpacking helpers.
+
+    When set on an OperationConfig, the packer and unpacker templates call
+    the named helper functions instead of emitting per-field inline code.
+    """
+
+    pack_function: str = ""
+    unpack_function: str = ""
+    include: str = ""
+    label: str = ""
+
+
+@dataclass
 class TensorArrayField:
     """A tensor array field (e.g., peer_stats_tensor_uid: [long])."""
 
@@ -533,6 +547,8 @@ class OperationConfig:
     tensor_fields: list[TensorField] = field(default_factory=list)
     data_fields: list[DataField] = field(default_factory=list)
     tensor_array_fields: list[TensorArrayField] = field(default_factory=list)
+
+    data_fields_helper: Optional[DataFieldsHelper] = None
 
     has_compute_data_type: bool = True
     compute_data_type_attr: str = ""

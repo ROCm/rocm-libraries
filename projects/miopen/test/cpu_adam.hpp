@@ -28,6 +28,8 @@
 
 #include "tensor_holder.hpp"
 
+#include <miopen/float_equal.hpp>
+
 template <typename T1, typename T2>
 void cpu_adam(tensor<T1>& params,
               tensor<T2>& grads,
@@ -81,7 +83,7 @@ void cpu_adam(tensor<T1>& params,
             const float bias_correction1 = 1.0 - pow(beta1, step);
             const float bias_correction2 = 1.0 - pow(beta2, step);
 
-            if(weight_decay != 0)
+            if(!miopen::float_equal_sentinel(weight_decay, 0.f))
             {
                 if(adamw)
                     param *= one_minus_lr_by_weight_decay;

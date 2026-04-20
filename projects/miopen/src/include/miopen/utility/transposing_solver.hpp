@@ -32,6 +32,18 @@ struct TransposeProblem
 {
     TensorDescriptor input;
     const char* layout;
+    std::string target_layout;
+
+    TensorDescriptor GetOutputDescriptor() const
+    {
+        const auto labels    = tensor_layout_get_default(input.GetNumDims());
+        auto derived_strides = std::vector<size_t>{};
+        auto target          = target_layout;
+        if(strlen(layout) < 5)
+            target = ReplaceString(target, "D", "");
+        tensor_layout_to_strides(input.GetLengths(), labels, target, derived_strides);
+        return {input.GetType(), input.GetLengths(), derived_strides};
+    }
 };
 
 using OldStyleTransposeProblem = std::tuple<const ExecutionContext*, const TransposeProblem*>;
@@ -51,8 +63,8 @@ struct TransposeInvokeParams : InvokeParams
     {
     }
 
-    std::size_t GetWorkspaceSize() const { return 0; }
-    Data_t GetWorkspace() const { return nullptr; }
+    std::size_t GetWorkspaceSize() const noexcept { return 0; }
+    Data_t GetWorkspace() const noexcept { return nullptr; }
 };
 
 struct TransposePseudoSolver
@@ -94,17 +106,6 @@ struct AnyImplementation
         copy(rhs.buffer, buffer, &p);
     }
 
-    AnyImplementation& operator=(const AnyImplementation& rhs)
-    {
-        if(&rhs != this)
-        {
-            if(p)
-                p->~Interface();
-            copy(rhs.buffer, buffer, &p);
-        }
-        return *this;
-    }
-
     const Interface* get() const noexcept { return p; }
     const Interface& operator*() const noexcept { return *get(); }
     const Interface* operator->() const noexcept { return get(); }
@@ -116,8 +117,11 @@ struct AnyImplementation
     }
 
 private:
-    using Storage = std::aligned_storage_t<sizeof(Interface), alignof(Interface)>;
-    using Cloner  = void (*)(const Storage&, Storage&, Interface**);
+    struct alignas(Interface) Storage
+    {
+        unsigned char data[sizeof(Interface)];
+    };
+    using Cloner = void (*)(const Storage&, Storage&, Interface**);
 
     template <class T, class S>
     static T* StorageCast(S&& s)
@@ -150,21 +154,17 @@ struct UniversalTransposeSolver : TransposePseudoSolver
 {
     std::string GetTranspose() const override { return "*-*"; }
 
-    bool IsApplicable(const TransposeProblem& /*problem*/) const override
-    {
-        // Universal transpose supports all tensor types and layouts
-        return true;
-    }
+    bool IsApplicable(const TransposeProblem&) const override { return true; }
 
     ConvSolution GetSolution(const ExecutionContext& ctx,
                              const TransposeProblem& problem) const override
     {
         auto sln = ConvSolution{};
 
-        {
-            const auto tensor_space = problem.input.GetElementSpace();
+        auto create_kernel = [&](const std::string& index_type) {
+            const auto tensor_space = problem.input.GetElementSize();
             const auto cus          = ctx.GetStream().GetMaxComputeUnits();
-            const auto build_params = GetDataTypeKBP(problem.input.GetType());
+            auto build_params       = GetDataTypeKBP(problem.input.GetType());
 
             constexpr std::size_t max_block_size = 256;
             const auto local_size                = max_block_size;
@@ -175,6 +175,8 @@ struct UniversalTransposeSolver : TransposePseudoSolver
             const auto capped_blocks = std::min(num_blocks, cus * 4);
             const auto global_size   = capped_blocks * local_size;
 
+            build_params.Define("INDEX_TYPE", index_type);
+
             auto transposeKernel = KernelInfo{};
             transposeKernel.g_wk = {global_size, 1, 1};
             transposeKernel.l_wk = {local_size, 1, 1};
@@ -183,25 +185,279 @@ struct UniversalTransposeSolver : TransposePseudoSolver
             transposeKernel.kernel_name  = "UniversalTranspose";
             transposeKernel.comp_options = build_params.GenerateFor(kbp::HIP{});
 
-            sln.construction_params.emplace_back(std::move(transposeKernel));
-        }
+            return transposeKernel;
+        };
+
+        sln.construction_params.emplace_back(create_kernel("uint32_t"));
+        sln.construction_params.emplace_back(create_kernel("uint64_t"));
 
         sln.invoker_factory = [](const std::vector<Kernel>& kernels) {
-            const auto kernel = kernels.front();
-            return [kernel](const Handle& handle, const AnyInvokeParams& any_params) {
-                const auto& params      = any_params.CastTo<TransposeInvokeParams>();
-                const auto& lens        = GetNCDHW<uint64_t>(params.in_desc.GetLengths());
-                const auto& in_strides  = GetNCDHW<uint64_t>(params.in_desc.GetStrides());
-                const auto& out_strides = GetNCDHW<uint64_t>(params.out_desc.GetStrides());
+            return [kernels](const Handle& handle, const AnyInvokeParams& any_params) {
+                const auto& params = any_params.CastTo<TransposeInvokeParams>();
 
-                // clang-format off
-                handle.Run(kernel)(
-                    params.in, params.out,
-                    lens[0],        lens[1],        lens[2],        lens[3],        lens[4],
-                    in_strides[0],  in_strides[1],  in_strides[2],  in_strides[3],  in_strides[4],
-                    out_strides[0], out_strides[1], out_strides[2], out_strides[3], out_strides[4]
-                );
-                // clang-format on
+                uint64_t max_index =
+                    std::max(params.in_desc.GetElementSpace(), params.out_desc.GetElementSpace());
+
+                // Limit using uint32_t indices to about 4M elements as this seems to be the limit
+                // for where it helps performance
+                constexpr uint64_t u32_threshold = 4ull * 1024ull * 1024ull;
+                if(max_index <= u32_threshold)
+                {
+                    const auto& lens        = GetNCDHW<uint32_t>(params.in_desc.GetLengths());
+                    const auto& in_strides  = GetNCDHW<uint32_t>(params.in_desc.GetStrides());
+                    const auto& out_strides = GetNCDHW<uint32_t>(params.out_desc.GetStrides());
+
+                    // clang-format off
+                    handle.Run(kernels[0])(
+                        params.in, params.out,
+                        lens[0],        lens[1],        lens[2],        lens[3],        lens[4],
+                        in_strides[0],  in_strides[1],  in_strides[2],  in_strides[3],  in_strides[4],
+                        out_strides[0], out_strides[1], out_strides[2], out_strides[3], out_strides[4]
+                    );
+                    // clang-format on
+                }
+                else
+                {
+                    const auto& lens        = GetNCDHW<uint64_t>(params.in_desc.GetLengths());
+                    const auto& in_strides  = GetNCDHW<uint64_t>(params.in_desc.GetStrides());
+                    const auto& out_strides = GetNCDHW<uint64_t>(params.out_desc.GetStrides());
+
+                    // clang-format off
+                    handle.Run(kernels[1])(
+                        params.in, params.out,
+                        lens[0],        lens[1],        lens[2],        lens[3],        lens[4],
+                        in_strides[0],  in_strides[1],  in_strides[2],  in_strides[3],  in_strides[4],
+                        out_strides[0], out_strides[1], out_strides[2], out_strides[3], out_strides[4]
+                    );
+                    // clang-format on
+                }
+            };
+        };
+
+        return sln;
+    }
+};
+
+template <std::size_t TileSizeX, std::size_t TileSizeY, std::size_t BlockSize>
+struct TiledTransposeSolver : TransposePseudoSolver
+{
+    std::string GetTranspose() const override { return "*-*"; }
+
+    bool IsApplicable(const TransposeProblem& problem) const override
+    {
+        const auto& in_strides  = problem.input.GetStrides();
+        const auto out_desc     = problem.GetOutputDescriptor();
+        const auto& out_strides = out_desc.GetStrides();
+
+        const auto in_stride_w  = in_strides.back();
+        const auto out_stride_w = out_strides.back();
+        const auto in_stride_c  = in_strides.size() >= 2 ? in_strides[1] : 1;
+        const auto out_stride_c = out_strides.size() >= 2 ? out_strides[1] : 1;
+
+        const bool nchw_to_nhwc = (in_stride_w == 1 && out_stride_c == 1);
+        const bool nhwc_to_nchw = (in_stride_c == 1 && out_stride_w == 1);
+
+        return nchw_to_nhwc || nhwc_to_nchw;
+    }
+
+    ConvSolution GetSolution(const ExecutionContext& ctx,
+                             const TransposeProblem& problem) const override
+    {
+        auto sln = ConvSolution{};
+
+        auto create_kernel = [&](const std::string& index_type) {
+            const auto& lens  = problem.input.GetLengths();
+            const auto cus    = ctx.GetStream().GetMaxComputeUnits();
+            auto build_params = GetDataTypeKBP(problem.input.GetType());
+
+            const auto n = lens.size() >= 1 ? lens[0] : 1;
+            const auto c = lens.size() >= 2 ? lens[1] : 1;
+            const auto d = lens.size() >= 5 ? lens[2] : 1;
+            const auto h = lens.size() >= 4 ? lens[lens.size() - 2] : 1;
+            const auto w = lens.size() >= 3 ? lens[lens.size() - 1] : 1;
+
+            const auto tiles_c   = (c + TileSizeY - 1) / TileSizeY;
+            const auto tiles_w   = (w + TileSizeX - 1) / TileSizeX;
+            const auto num_tiles = n * d * h * tiles_c * tiles_w;
+
+            // Cap blocks at 8 waves per CU
+            const auto capped_blocks = std::min(num_tiles, cus * 8);
+            const auto global_size   = capped_blocks * BlockSize;
+
+            build_params.Define("INDEX_TYPE", index_type);
+            build_params.Define("TILE_SIZE_X", TileSizeX);
+            build_params.Define("TILE_SIZE_Y", TileSizeY);
+            build_params.Define("BLOCK_SIZE", BlockSize);
+
+            auto transposeKernel = KernelInfo{};
+            transposeKernel.g_wk = {global_size, 1, 1};
+            transposeKernel.l_wk = {BlockSize, 1, 1};
+
+            transposeKernel.kernel_file  = "UniversalTranspose.cpp";
+            transposeKernel.kernel_name  = "TiledTranspose";
+            transposeKernel.comp_options = build_params.GenerateFor(kbp::HIP{});
+            return std::move(transposeKernel);
+        };
+
+        sln.construction_params.emplace_back(create_kernel("uint32_t"));
+        sln.construction_params.emplace_back(create_kernel("uint64_t"));
+
+        sln.invoker_factory = [](const std::vector<Kernel>& kernels) {
+            return [kernels](const Handle& handle, const AnyInvokeParams& any_params) {
+                const auto& params = any_params.CastTo<TransposeInvokeParams>();
+
+                uint64_t max_index =
+                    std::max(params.in_desc.GetElementSpace(), params.out_desc.GetElementSpace());
+
+                constexpr uint64_t u32_threshold = 4ull * 1024ull * 1024ull;
+                if(max_index <= u32_threshold)
+                {
+                    const auto& lens    = GetNCDHW<uint32_t>(params.in_desc.GetLengths());
+                    const auto& in_str  = GetNCDHW<uint32_t>(params.in_desc.GetStrides());
+                    const auto& out_str = GetNCDHW<uint32_t>(params.out_desc.GetStrides());
+
+                    // clang-format off
+                    handle.Run(kernels[0])(
+                        params.in, params.out,
+                        lens[0],    lens[1],    lens[2],    lens[3],    lens[4],
+                        in_str[0],  in_str[1],  in_str[2],  in_str[3],  in_str[4],
+                        out_str[0], out_str[1], out_str[2], out_str[3], out_str[4]
+                    );
+                    // clang-format on
+                }
+                else
+                {
+                    const auto& lens    = GetNCDHW<uint64_t>(params.in_desc.GetLengths());
+                    const auto& in_str  = GetNCDHW<uint64_t>(params.in_desc.GetStrides());
+                    const auto& out_str = GetNCDHW<uint64_t>(params.out_desc.GetStrides());
+
+                    // clang-format off
+                    handle.Run(kernels[1])(
+                        params.in, params.out,
+                        lens[0],    lens[1],    lens[2],    lens[3],    lens[4],
+                        in_str[0],  in_str[1],  in_str[2],  in_str[3],  in_str[4],
+                        out_str[0], out_str[1], out_str[2], out_str[3], out_str[4]
+                    );
+                    // clang-format on
+                }
+            };
+        };
+
+        return sln;
+    }
+};
+
+template <std::size_t VectorSize, std::size_t BlockSize>
+struct VectorizedTransposeSolver : TransposePseudoSolver
+{
+    static_assert(VectorSize == 1 || VectorSize == 2 || VectorSize == 4,
+                  "Vector size must be 1, 2, or 4");
+
+    std::string GetTranspose() const override { return "*-*"; }
+
+    bool IsApplicable(const TransposeProblem& problem) const override
+    {
+        const auto& in_strides  = problem.input.GetStrides();
+        const auto& lens        = problem.input.GetLengths();
+        const auto out_desc     = problem.GetOutputDescriptor();
+        const auto& out_strides = out_desc.GetStrides();
+        const auto type         = problem.input.GetType();
+        if(type != miopenFloat && type != miopenHalf && type != miopenBFloat16)
+            return false;
+        if(in_strides.empty() || lens.empty())
+            return false;
+
+        const auto w_len        = lens.back();
+        const auto in_stride_w  = in_strides.back();
+        const auto out_stride_w = out_strides.back();
+
+        const bool can_vectorize_in  = (in_stride_w == 1) && (w_len % VectorSize == 0);
+        const bool can_vectorize_out = (out_stride_w == 1) && (w_len % VectorSize == 0);
+
+        return can_vectorize_in || can_vectorize_out;
+    }
+
+    ConvSolution GetSolution(const ExecutionContext& ctx,
+                             const TransposeProblem& problem) const override
+    {
+        auto sln = ConvSolution{};
+
+        auto create_kernel = [&](const std::string& index_type) {
+            const auto tensor_space = problem.input.GetElementSize();
+            const auto cus          = ctx.GetStream().GetMaxComputeUnits();
+            auto build_params       = GetDataTypeKBP(problem.input.GetType());
+
+            const auto num_blocks =
+                std::max(std::size_t{1}, (tensor_space + BlockSize - 1) / BlockSize);
+            // Cap blocks at 4 waves per CU
+            const auto capped_blocks = std::min(num_blocks, cus * 4);
+            const auto global_size   = capped_blocks * BlockSize;
+
+            build_params.Define("INDEX_TYPE", index_type);
+            build_params.Define("VECTOR_SIZE", VectorSize);
+            build_params.Define("BLOCK_SIZE", BlockSize);
+
+            auto transposeKernel = KernelInfo{};
+            transposeKernel.g_wk = {global_size, 1, 1};
+            transposeKernel.l_wk = {BlockSize, 1, 1};
+
+            transposeKernel.kernel_file  = "UniversalTranspose.cpp";
+            transposeKernel.kernel_name  = "VectorizedTranspose";
+            transposeKernel.comp_options = build_params.GenerateFor(kbp::HIP{});
+            return std::move(transposeKernel);
+        };
+
+        sln.construction_params.emplace_back(create_kernel("uint32_t"));
+        sln.construction_params.emplace_back(create_kernel("uint64_t"));
+
+        sln.invoker_factory = [](const std::vector<Kernel>& kernels) {
+            return [kernels](const Handle& handle, const AnyInvokeParams& any_params) {
+                const auto& params = any_params.CastTo<TransposeInvokeParams>();
+
+                uint64_t max_index =
+                    std::max(params.in_desc.GetElementSpace(), params.out_desc.GetElementSpace());
+
+                constexpr uint64_t u32_threshold = 4ull * 1024ull * 1024ull;
+                if(max_index <= u32_threshold)
+                {
+                    const auto& lens        = GetNCDHW<uint32_t>(params.in_desc.GetLengths());
+                    const auto& in_strides  = GetNCDHW<uint32_t>(params.in_desc.GetStrides());
+                    const auto& out_strides = GetNCDHW<uint32_t>(params.out_desc.GetStrides());
+                    const bool can_vectorize_in =
+                        (in_strides[4] == 1) && (lens[4] % VectorSize == 0);
+                    const bool can_vectorize_out =
+                        (out_strides[4] == 1) && (lens[4] % VectorSize == 0);
+
+                    // clang-format off
+                    handle.Run(kernels[0])(
+                        params.in, params.out,
+                        lens[0],        lens[1],        lens[2],        lens[3],        lens[4],
+                        in_strides[0],  in_strides[1],  in_strides[2],  in_strides[3],  in_strides[4],
+                        out_strides[0], out_strides[1], out_strides[2], out_strides[3], out_strides[4],
+                        can_vectorize_in, can_vectorize_out
+                    );
+                    // clang-format on
+                }
+                else
+                {
+                    const auto& lens        = GetNCDHW<uint64_t>(params.in_desc.GetLengths());
+                    const auto& in_strides  = GetNCDHW<uint64_t>(params.in_desc.GetStrides());
+                    const auto& out_strides = GetNCDHW<uint64_t>(params.out_desc.GetStrides());
+                    const bool can_vectorize_in =
+                        (in_strides[4] == 1) && (lens[4] % VectorSize == 0);
+                    const bool can_vectorize_out =
+                        (out_strides[4] == 1) && (lens[4] % VectorSize == 0);
+
+                    // clang-format off
+                    handle.Run(kernels[1])(
+                        params.in, params.out,
+                        lens[0],        lens[1],        lens[2],        lens[3],        lens[4],
+                        in_strides[0],  in_strides[1],  in_strides[2],  in_strides[3],  in_strides[4],
+                        out_strides[0], out_strides[1], out_strides[2], out_strides[3], out_strides[4],
+                        can_vectorize_in, can_vectorize_out
+                    );
+                    // clang-format on
+                }
             };
         };
 
@@ -257,12 +513,13 @@ struct BatchedTransposeSolverImpl : TransposePseudoSolver
 
     bool IsApplicable(const TransposeProblem& problem) const override
     {
+        auto pair = std::string(problem.layout) + "-" + problem.target_layout;
+        if(pair != BatchedTransposeTraits<TransposeSolution>::layout_transform)
+            return false;
+
         const auto& desc = problem.input;
         const auto& lens = desc.GetLengths();
 
-        // Delegate to BatchedTransposeSolution's validation which checks data type and dimensions
-        // For both 4D and 5D, we pass h*w (or d*h*w) as the spatial dimension
-        // Unified validation for both 4D and 5D
         return BatchedTransposeSolution::IsApplicable(desc.GetType(), lens);
     }
 
@@ -628,27 +885,32 @@ struct TransposingSolver : TransposingSolverGetSolution<Derived, Base, Problem, 
 
     static std::vector<AnyTransposePseudoSolver> GetTransposeSolvers()
     {
-        return {
-            BatchedNchw2NhwcTransposeSolver{},   // 4D: NCHW->NHWC
-            BatchedNhwc2NchwTransposeSolver{},   // 4D: NHWC->NCHW
-            BatchedNcdhw2NdhwcTransposeSolver{}, // 5D: NCDHW->NDHWC
-            BatchedNdhwc2NcdhwTransposeSolver{}, // 5D: NDHWC->NCDHW
-            UniversalTransposeSolver{}           // Fallback
-        };
+        return {BatchedNchw2NhwcTransposeSolver{},
+                BatchedNhwc2NchwTransposeSolver{},
+                BatchedNcdhw2NdhwcTransposeSolver{},
+                BatchedNdhwc2NcdhwTransposeSolver{},
+                TiledTransposeSolver<16, 16, 256>{},
+                VectorizedTransposeSolver<4, 64>{},
+                VectorizedTransposeSolver<2, 64>{},
+                UniversalTransposeSolver{}};
     }
 
-    static std::unordered_map<std::string, AnyTransposePseudoSolver> GetTransposeSolversMap()
+    static const AnyTransposePseudoSolver*
+    FindApplicableSolver(const TransposeProblem& problem,
+                         const std::vector<AnyTransposePseudoSolver>& solvers)
     {
-        auto ret = std::unordered_map<std::string, AnyTransposePseudoSolver>{};
-        for(const auto& transpose : Derived::GetTransposeSolvers())
-            ret.emplace(transpose->GetTranspose(), std::move(transpose));
-        return ret;
+        for(const auto& solver : solvers)
+        {
+            if(solver->IsApplicable(problem))
+                return &solver;
+        }
+        return nullptr;
     }
 
     // Check applicability for transposing solvers that wraps an inner solver
     bool IsApplicable(const ExecutionContext& ctx, const Problem& problem) const override
     {
-        const auto transpose_solvers = Derived::GetTransposeSolversMap();
+        const auto transpose_solvers = Derived::GetTransposeSolvers();
         auto any_difference          = false;
 
         for(auto transpose : Derived::GetTransposes(problem))
@@ -658,38 +920,13 @@ struct TransposingSolver : TransposingSolverGetSolution<Derived, Base, Problem, 
             const auto to             = SyncLayoutDims(layout.c_str(), transpose.to);
 
             if(layout == to)
-            {
                 continue;
-            }
 
             any_difference = true;
 
-            auto specific_pair = layout + "-";
-            specific_pair.append(to);
-
-            // Create a TransposeProblem for applicability checking
-            const auto transpose_problem = TransposeProblem{descriptor, layout.c_str()};
-
-            // Find an applicable transpose solver (specific first, then wildcards, then fallback)
-            auto transpose_solver = transpose_solvers.find(specific_pair);
-            if(transpose_solver != transpose_solvers.end() &&
-               transpose_solver->second->IsApplicable(transpose_problem))
-            {
-                continue;
-            }
-
-            // Place (layout + "-*") and ("*-" + to) wildcard combinations here, if implemented
-
-            transpose_solver = transpose_solvers.find("*-*");
-            if(transpose_solver != transpose_solvers.end() &&
-               transpose_solver->second->IsApplicable(transpose_problem))
-            {
-                continue;
-            }
-
-            // No applicable transpose solver found
-            MIOPEN_LOG_I("No applicable transpose solver found for '" << specific_pair << "'");
-            return false;
+            const auto transpose_problem = TransposeProblem{descriptor, layout.c_str(), to};
+            if(FindApplicableSolver(transpose_problem, transpose_solvers) == nullptr)
+                return false;
         }
 
         if(!any_difference)
@@ -748,7 +985,7 @@ struct TransposingSolver : TransposingSolverGetSolution<Derived, Base, Problem, 
         // NOLINTNEXTLINE (bugprone-unchecked-optional-access)
         auto old_factory             = sln.invoker_factory.value();
         const auto old_kernels_end   = sln.construction_params.size();
-        const auto transpose_solvers = Derived::GetTransposeSolversMap();
+        const auto transpose_solvers = Derived::GetTransposeSolvers();
 
         std::vector<std::tuple<TransposeDescriptor, InvokerFactory>> in_transpose_ifs,
             out_transpose_ifs;
@@ -772,34 +1009,13 @@ struct TransposingSolver : TransposingSolverGetSolution<Derived, Base, Problem, 
                 continue;
             }
 
-            auto specific_pair = layout + "-";
-            specific_pair.append(to);
-
-            const auto transpose_problem = TransposeProblem{src_descriptor, layout.c_str()};
-
-            // Find an applicable transpose solver (specific first, then wildcards, then fallback)
-            auto transpose_solver = transpose_solvers.end();
-
-            auto candidate = transpose_solvers.find(specific_pair);
-            if(candidate != transpose_solvers.end() &&
-               candidate->second->IsApplicable(transpose_problem))
-                transpose_solver = candidate;
-
-            // Place (layout + "-*") and ("*-" + to) wildcard combinations here, if implemented
-
-            if(transpose_solver == transpose_solvers.end())
-            {
-                candidate = transpose_solvers.find("*-*");
-                if(candidate != transpose_solvers.end() &&
-                   candidate->second->IsApplicable(transpose_problem))
-                    transpose_solver = candidate;
-            }
-
-            if(transpose_solver == transpose_solvers.end())
+            const auto transpose_problem = TransposeProblem{src_descriptor, layout.c_str(), to};
+            const auto* solver = FindApplicableSolver(transpose_problem, transpose_solvers);
+            if(solver == nullptr)
                 MIOPEN_THROW("No applicable transpose solver found for layout transformation: " +
-                             specific_pair);
+                             std::string(layout) + " -> " + std::string(to));
 
-            auto transpose_sln = transpose_solver->second->GetSolution(ctx, transpose_problem);
+            auto transpose_sln = (*solver)->GetSolution(ctx, transpose_problem);
 
             const auto kernels_begin = sln.construction_params.size();
             sln.construction_params.insert(sln.construction_params.end(),
@@ -874,7 +1090,6 @@ struct TransposingSolver : TransposingSolverGetSolution<Derived, Base, Problem, 
                                                                invoke_params,
                                                                transposed_params};
 
-                    // Execute the invoker provided by the inner solver
                     // Use Derived::ConvertForInnerSolver to convert params if needed
                     MIOPEN_LOG_I2("Executing the inner solver invoker");
                     const auto time = handle.GetKernelTime();

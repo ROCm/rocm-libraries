@@ -4,16 +4,16 @@
 #include <gtest/gtest.h>
 
 #include "BatchnormGraphUtils.hpp"
-#include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_data_sdk/utilities/TensorView.hpp>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/GraphTensorBundle.hpp>
 
 using namespace hipdnn_test_sdk::utilities;
-using namespace hipdnn_data_sdk::data_objects;
+using namespace hipdnn_flatbuffers_sdk::data_objects;
 using namespace hipdnn_data_sdk::utilities;
-using namespace hipdnn_data_sdk::flatbuffer_utilities;
+using namespace hipdnn_flatbuffers_sdk::flatbuffer_utilities;
 using namespace ::testing;
 using namespace hipdnn_sdk_test_utils;
 
@@ -32,14 +32,18 @@ protected:
                                                      dims,
                                                      TensorLayout::NCHW);
 
-        auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
-        _flatbufferData = std::move(flatbufferGraph);
+        auto [serializedGraph, serErr] = graph->to_binary();
+        if(serErr.is_bad())
+        {
+            throw std::runtime_error("Graph serialization failed: " + serErr.get_message());
+        }
+        _serializedData = std::move(serializedGraph);
 
-        return std::make_unique<GraphWrapper>(_flatbufferData.data(), _flatbufferData.size());
+        return std::make_unique<GraphWrapper>(_serializedData.data(), _serializedData.size());
     }
 
 private:
-    flatbuffers::DetachedBuffer _flatbufferData;
+    std::vector<uint8_t> _serializedData;
 };
 
 TEST_F(TestGraphTensorBundle, ConstructorCreatesAllNonVirtualTensors)
@@ -69,8 +73,9 @@ TEST_F(TestGraphTensorBundle, ConstructorSkipsVirtualTensors)
                                                  TensorLayout::NCHW,
                                                  true);
 
-    auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
-    const GraphWrapper graphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+    const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());
     auto& tensorMap = graphWrapper.getTensorMap();
 
     GraphTensorBundle bundle(tensorMap);

@@ -365,7 +365,11 @@ class GlobalWriteBatchWriter:
           regsPerScalar = self.parentWriter.states.bpeCinternal // self.parentWriter.states.bpr # register per scalar
           for elementIdx in range(len(self.batchElements)):
             for vi in range(self.gwvw):
-              module.add(replaceHolder(self.codeMulAlpha.popFirstItem(), self.ss.elementSumIdx[elementIdx]*regsPerScalar + regsPerScalar*vi))
+              rh = replaceHolder(self.codeMulAlpha.popFirstItem(), self.ss.elementSumIdx[elementIdx]*regsPerScalar + regsPerScalar*vi)
+              if (self.kernel["GlobalSplitU"] == 1) and (self.kernel["ProblemType"]["ComputeDataType"].isSingle() and self.kernel["ProblemType"]["DataType"].isInt8()):
+                srcRegName = rh.getParams()[2].getCompleteRegName()
+                module.add(VCvtI32toF32(dst=vgpr(srcRegName), src=vgpr(srcRegName), comment="Convert MI out reg to fp32"))
+              module.add(rh)
 
     loadInputCode    = Module("loadInputCode")
 
@@ -668,7 +672,11 @@ class GlobalWriteBatchWriter:
           regsPerScalar = self.parentWriter.states.bpeCinternal // self.parentWriter.states.bpr # register per scalar
           for elementIdx in range(len(self.batchElements)):
             for vi in range(self.gwvw):
-              module.add(replaceHolder(self.codeMulAlpha.popFirstItem(), self.ss.elementSumIdx[elementIdx]*regsPerScalar + regsPerScalar*vi - self.parentWriter.states.c.startVgprValu ))
+              rh = replaceHolder(self.codeMulAlpha.popFirstItem(), self.ss.elementSumIdx[elementIdx]*regsPerScalar + regsPerScalar*vi - self.parentWriter.states.c.startVgprValu)
+              if (self.kernel["GlobalSplitU"] == 1) and (self.kernel["ProblemType"]["ComputeDataType"].isSingle() and self.kernel["ProblemType"]["DataType"].isInt8()):
+                srcRegName = rh.getParams()[2].getCompleteRegName()
+                module.add(VCvtI32toF32(dst=vgpr(srcRegName), src=vgpr(srcRegName), comment="Convert MI out reg to fp32"))
+              module.add(rh)
 
   def _epilog(self, module: Module):
     # return registers to pool:
@@ -1015,13 +1023,19 @@ class GlobalWriteBatchWriter:
             for vi in range(0, self.gwvw):
               dataEV  = dataE + vi
               dataEV2 = dataE + vi // 2
-              selectbit = SelectBit.WORD_0 if (self.gwvw != 1 and vi % 2 == 0) or (self.gwvw == 1 and elementIdx % 2 == 0) else SelectBit.WORD_1
-              gradientCvtModule.add(VCvtF16toF32(dst=vgpr(dataEV), src=vgpr(dataEV2+loadOffset), sdwa=SDWAModifiers(src0_sel=selectbit), comment="gwvw %d, elementIdx %d"%(self.gwvw, elementIdx)))
+              if self.parentWriter.states.archCaps["NoSDWA"]:
+                selectbit = 0 if (self.gwvw != 1 and vi % 2 == 0) or (self.gwvw == 1 and elementIdx % 2 == 0) else 1
+                gradientCvtModule.add(VCvtF16toF32(dst=vgpr(dataEV), src=vgpr(dataEV2+loadOffset), true16=[-1, -1, selectbit], comment="gwvw %d, elementIdx %d"%(self.gwvw, elementIdx)))
+              else:
+                selectbit = SelectBit.WORD_0 if (self.gwvw != 1 and vi % 2 == 0) or (self.gwvw == 1 and elementIdx % 2 == 0) else SelectBit.WORD_1
+                gradientCvtModule.add(VCvtF16toF32(dst=vgpr(dataEV), src=vgpr(dataEV2+loadOffset), sdwa=SDWAModifiers(src0_sel=selectbit), comment="gwvw %d, elementIdx %d"%(self.gwvw, elementIdx)))
           elif activationCDataType.isSingle() and self.kernel["ProblemType"]["DataTypeE"].isBFloat16():
             for vi in range(0, self.gwvw):
               dataEV  = dataE + vi
               dataEV2 = dataE + vi // 2
-              selectWord = 0 if (self.gwvw != 1 and vi % 2 == 0) or (self.gwvw == 1 and elementIdx % 2 == 0) else 1
+              # Consider bf16 without packing (gwvw==1)
+              # TODO: check correctness for gfx950
+              selectWord = 0 if (self.gwvw != 1 and vi % 2 == 0) or (self.gwvw == 1) else 1
               module.add(VCvtBF16toFP32(dst=vgpr(dataEV), src=vgpr(dataEV2+loadOffset), vgprMask=vgpr(self.cvtVgprStruct.vgprBf16Mask), vi=(selectWord), comment="gwvw %d, elementIdx %d"%(self.gwvw, elementIdx)))
           else:
             printExit("[Gradient input] Unsupported conversion.")
@@ -1104,7 +1118,7 @@ class GlobalWriteBatchWriter:
             elif vi%2 == 1:
               assert (self.gwvw % 2 == 0)
             else:
-              activationModule.add(VMulPKF32(dst=vgpr("ValuC+%d"%vgprIdx, 2), src0=vgpr("ValuC+%d"%vgprIdx, 2), src1=sgpr("ScaleD", 2), comment="result *= ScaleD"))
+              activationModule.add(VMulPKF32(dst=vgpr("ValuC+%d"%vgprIdx, 2), src0=vgpr("ValuC+%d"%vgprIdx, 2), src1=sgpr("ScaleD", 2), vop3=VOP3PModifiers(op_sel_hi=[1,0,1]), comment="result *= ScaleD"))
           else:
             assert 0, "Unsupported scaleD type"
 

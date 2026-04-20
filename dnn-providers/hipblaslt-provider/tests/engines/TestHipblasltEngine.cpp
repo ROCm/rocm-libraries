@@ -5,9 +5,9 @@
 #include <memory>
 #include <set>
 
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
-#include <hipdnn_data_sdk/flatbuffer_utilities/EngineDetailsWrapper.hpp>
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineDetailsWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/MockGraph.hpp>
 
@@ -18,6 +18,7 @@
 using namespace hipblaslt_plugin;
 using namespace hipdnn_test_sdk::utilities;
 using namespace hipdnn_plugin_sdk;
+using namespace hipdnn_flatbuffers_sdk::flatbuffer_utilities;
 
 TEST(TestHipblasltEngine, ConstructorAndId)
 {
@@ -163,8 +164,8 @@ TEST(TestHipblasltEngine, GetDetailsReturnsSerializedEngineDetails)
     hipdnnPluginConstData_t result;
     engine.getDetails(dummyHandle, result);
 
-    hipdnn_data_sdk::flatbuffer_utilities::EngineDetailsWrapper engineDetails(result.ptr,
-                                                                              result.size);
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineDetailsWrapper engineDetails(result.ptr,
+                                                                                     result.size);
     EXPECT_EQ(engineDetails.engineId(), hipdnn_data_sdk::utilities::HIPBLASLT_ENGINE_ID);
 }
 
