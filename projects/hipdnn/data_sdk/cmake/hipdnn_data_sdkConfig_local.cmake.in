@@ -22,8 +22,8 @@ endif()
 # Subdirectory path for hipDNN engine plugins (relative to lib)
 set(HIPDNN_PLUGIN_ENGINE_SUBDIR "@HIPDNN_PLUGIN_ENGINE_SUBDIR@")
 
-# Full install path for engine plugins
-set(HIPDNN_FULL_INSTALL_PLUGIN_ENGINE_DIR "@HIPDNN_FULL_INSTALL_PLUGIN_ENGINE_DIR@")
+# Full install path for engine plugins (relocatable using PACKAGE_ prefix from configure_package_config_file)
+set(HIPDNN_FULL_INSTALL_PLUGIN_ENGINE_DIR "@PACKAGE_HIPDNN_FULL_INSTALL_PLUGIN_ENGINE_DIR@")
 set(HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR "@HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR@")
 
 # Local should assume flatbuffer is the primary flatbuffer version during configure and build.

@@ -361,21 +361,22 @@ COPY --from=build_ck /usr/local /usr/local
 
 # Install explicit version of tools that are supported for miopen development
 # (clang-format, clang-tidy)
+RUN wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add - && \
+    echo "deb http://apt.llvm.org/jammy/ llvm-toolchain-jammy-21 main" | sudo tee /etc/apt/sources.list.d/llvm21.list 
+
 RUN apt-get update && apt-get install -y \
     clang-format-18 \
-    clang-tidy-20 \
-    clang-tools-20 \
-    llvm-20 \
+    clang-tidy-21 \
     && rm -rf /var/lib/apt/lists/*
 
 # Workaround for broken clang-tidy in TheRock
 RUN mv /opt/rocm/llvm/bin/clang-tidy /opt/rocm/llvm/bin/clang-tidy.disabled || true
-RUN ln -sf /usr/bin/clang-tidy-20 /opt/rocm/llvm/bin/clang-tidy
+RUN ln -sf /usr/bin/clang-tidy-21 /opt/rocm/llvm/bin/clang-tidy
 
 # Use update-alternatives to set default versions
 RUN update-alternatives --install /usr/bin/clang-format clang-format /usr/bin/clang-format-18 100
-RUN update-alternatives --install /opt/rocm/llvm/bin/clang-tidy clang-tidy /usr/bin/clang-tidy-20 100
-RUN update-alternatives --set clang-tidy /usr/bin/clang-tidy-20
+RUN update-alternatives --install /opt/rocm/llvm/bin/clang-tidy clang-tidy /usr/bin/clang-tidy-21 100
+RUN update-alternatives --set clang-tidy /usr/bin/clang-tidy-21
 
 # Ensure the dynamic linker can find ROCm libraries by adding /opt/rocm/lib to the linker cache. 
 RUN printf '%s\n' /opt/rocm/lib > /etc/ld.so.conf.d/rocm.conf && ldconfig

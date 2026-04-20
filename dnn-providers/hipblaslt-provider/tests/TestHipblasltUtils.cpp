@@ -3,14 +3,14 @@
 
 #include "HipblasltUtils.hpp"
 #include <gtest/gtest.h>
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
-#include <hipdnn_data_sdk/data_objects/pointwise_attributes_generated.h>
-#include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/pointwise_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 
 using namespace hipblaslt_plugin;
 using namespace hipblaslt_utils;
-using PM = hipdnn_data_sdk::data_objects::PointwiseMode;
+using PM = hipdnn_flatbuffers_sdk::data_objects::PointwiseMode;
 
 namespace
 {
@@ -20,26 +20,27 @@ namespace
 struct PointwiseAttrsHolder
 {
     flatbuffers::FlatBufferBuilder builder;
-    const hipdnn_data_sdk::data_objects::PointwiseAttributes* attrs = nullptr;
+    const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes* attrs = nullptr;
 
     PointwiseAttrsHolder(PM operation,
                          flatbuffers::Optional<float> reluLowerClip = flatbuffers::nullopt,
                          flatbuffers::Optional<float> reluUpperClip = flatbuffers::nullopt,
                          flatbuffers::Optional<float> swishBeta = flatbuffers::nullopt)
     {
-        auto offset = hipdnn_data_sdk::data_objects::CreatePointwiseAttributes(builder,
-                                                                               operation,
-                                                                               reluLowerClip,
-                                                                               reluUpperClip,
-                                                                               flatbuffers::nullopt,
-                                                                               flatbuffers::nullopt,
-                                                                               0,
-                                                                               flatbuffers::nullopt,
-                                                                               flatbuffers::nullopt,
-                                                                               0,
-                                                                               swishBeta);
+        auto offset
+            = hipdnn_flatbuffers_sdk::data_objects::CreatePointwiseAttributes(builder,
+                                                                              operation,
+                                                                              reluLowerClip,
+                                                                              reluUpperClip,
+                                                                              flatbuffers::nullopt,
+                                                                              flatbuffers::nullopt,
+                                                                              0,
+                                                                              flatbuffers::nullopt,
+                                                                              flatbuffers::nullopt,
+                                                                              0,
+                                                                              swishBeta);
         builder.Finish(offset);
-        attrs = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::PointwiseAttributes>(
+        attrs = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes>(
             builder.GetBufferPointer());
     }
 };
@@ -160,7 +161,7 @@ TEST(TestHipblasltUtils, MapPointwiseModeToHipblasLtEpilogue)
 
 TEST(TestHipblasltUtils, TensorDataTypeToHipblasltDataType)
 {
-    using namespace hipdnn_data_sdk::data_objects;
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
 
     EXPECT_EQ(hipblaslt_utils::tensorDataTypeToHipDataType(DataType::FLOAT), HIP_R_32F);
     EXPECT_EQ(hipblaslt_utils::tensorDataTypeToHipDataType(DataType::INT32), HIP_R_32I);
@@ -173,7 +174,7 @@ TEST(TestHipblasltUtils, TensorDataTypeToHipblasltDataTypeThrowsOnUnsupported)
 {
     // Use a value not in the enum
     EXPECT_THROW(hipblaslt_utils::tensorDataTypeToHipDataType(
-                     static_cast<hipdnn_data_sdk::data_objects::DataType>(-1)),
+                     static_cast<hipdnn_flatbuffers_sdk::data_objects::DataType>(-1)),
                  hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
@@ -207,20 +208,23 @@ TEST(TestHipblasltUtils, FindDeviceBufferThrowsIfNotFound)
 TEST(TestHipblasltUtils, FindTensorAttributesReturnsCorrectValue)
 {
     flatbuffers::FlatBufferBuilder builder1;
-    auto attrOffset1 = hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(builder1, 1);
+    auto attrOffset1
+        = hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(builder1, 1);
     builder1.Finish(attrOffset1);
 
     flatbuffers::FlatBufferBuilder builder2;
-    auto attrOffset2 = hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(builder2, 2);
+    auto attrOffset2
+        = hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(builder2, 2);
     builder2.Finish(attrOffset2);
 
-    auto attrPtr1 = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::TensorAttributes>(
+    auto attrPtr1 = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>(
         builder1.GetBufferPointer());
-    auto attrPtr2 = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::TensorAttributes>(
+    auto attrPtr2 = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>(
         builder2.GetBufferPointer());
 
     auto attrMap
-        = std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>{
+        = std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>{
             {1, attrPtr1}, {2, attrPtr2}};
 
     EXPECT_EQ(hipblaslt_utils::findTensorAttributes(attrMap, 1).uid(), 1);
@@ -230,7 +234,8 @@ TEST(TestHipblasltUtils, FindTensorAttributesReturnsCorrectValue)
 TEST(TestHipblasltUtils, FindTensorAttributesThrowsIfNotFound)
 {
     auto attrMap
-        = std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>{};
+        = std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>{};
 
     EXPECT_THROW(hipblaslt_utils::findTensorAttributes(attrMap, 1),
                  hipdnn_plugin_sdk::HipdnnPluginException);

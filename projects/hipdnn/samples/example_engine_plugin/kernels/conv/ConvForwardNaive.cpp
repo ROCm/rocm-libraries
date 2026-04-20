@@ -1,4 +1,4 @@
-// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
 // GPU kernel for naive 2D forward convolution (cross-correlation).
@@ -35,8 +35,8 @@ extern "C" __global__ void conv_forward_naive_kernel(const float* input,
     // Decompose linear index into (n, k, oh, ow)
     int ow = idx % outW;
     int oh = (idx / outW) % outH;
-    int kk = (idx / (outW * outH)) % K;
-    int nn = idx / (outW * outH * K);
+    int kk = (idx / (static_cast<IndexType>(outW) * outH)) % K;
+    int nn = idx / (static_cast<IndexType>(outW) * outH * K);
 
     float sum = 0.0f;
     for(int cc = 0; cc < C; ++cc)

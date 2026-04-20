@@ -54,7 +54,7 @@ private:
 // Parsing
 // ---------------------------------------------------------------------------
 
-TEST(TestTestSettings, ParsesValidTomlWithOverrides)
+TEST(TestSettingsParser, ParsesValidTomlWithOverrides)
 {
     const TempTomlFile file(R"(
 [meta]
@@ -75,7 +75,7 @@ rtol = 1e-4
     EXPECT_EQ(settings.toleranceOverrideCount(), 2U);
 }
 
-TEST(TestTestSettings, ParsesValidTomlWithNoOverrides)
+TEST(TestSettingsParser, ParsesValidTomlWithNoOverrides)
 {
     const TempTomlFile file(R"(
 [meta]
@@ -86,7 +86,7 @@ version = 1
     EXPECT_EQ(settings.toleranceOverrideCount(), 0U);
 }
 
-TEST(TestTestSettings, ThrowsOnMissingVersion)
+TEST(TestSettingsParser, ThrowsOnMissingVersion)
 {
     const TempTomlFile file(R"(
 [meta]
@@ -95,7 +95,7 @@ TEST(TestTestSettings, ThrowsOnMissingVersion)
     EXPECT_THROW(const TestSettings settings(file.path()), std::runtime_error);
 }
 
-TEST(TestTestSettings, ThrowsOnUnsupportedVersion)
+TEST(TestSettingsParser, ThrowsOnUnsupportedVersion)
 {
     const TempTomlFile file(R"(
 [meta]
@@ -105,7 +105,7 @@ version = 99
     EXPECT_THROW(const TestSettings settings(file.path()), std::runtime_error);
 }
 
-TEST(TestTestSettings, ThrowsOnMissingFilters)
+TEST(TestSettingsParser, ThrowsOnMissingFilters)
 {
     const TempTomlFile file(R"(
 [meta]
@@ -119,7 +119,7 @@ rtol = 1e-2
     EXPECT_THROW(const TestSettings settings(file.path()), std::runtime_error);
 }
 
-TEST(TestTestSettings, ThrowsOnMissingAtol)
+TEST(TestSettingsParser, ThrowsOnMissingAtol)
 {
     const TempTomlFile file(R"(
 [meta]
@@ -133,7 +133,7 @@ rtol = 1e-2
     EXPECT_THROW(const TestSettings settings(file.path()), std::runtime_error);
 }
 
-TEST(TestTestSettings, ThrowsOnMissingRtol)
+TEST(TestSettingsParser, ThrowsOnMissingRtol)
 {
     const TempTomlFile file(R"(
 [meta]
@@ -147,7 +147,7 @@ atol = 1e-3
     EXPECT_THROW(const TestSettings settings(file.path()), std::runtime_error);
 }
 
-TEST(TestTestSettings, ThrowsOnNonexistentFile)
+TEST(TestSettingsParser, ThrowsOnNonexistentFile)
 {
     EXPECT_THROW(const TestSettings settings("/nonexistent/path.toml"), std::exception);
 }
@@ -156,7 +156,7 @@ TEST(TestTestSettings, ThrowsOnNonexistentFile)
 // Filter matching
 // ---------------------------------------------------------------------------
 
-TEST(TestTestSettings, FindOverrideMatchesWildcard)
+TEST(TestSettingsParser, FindOverrideMatchesWildcard)
 {
     const TempTomlFile file(R"(
 [meta]
@@ -177,7 +177,7 @@ rtol = 1e-2
     EXPECT_FLOAT_EQ(result->rtol, 1e-2F);
 }
 
-TEST(TestTestSettings, FindOverrideReturnsNulloptWhenNoMatch)
+TEST(TestSettingsParser, FindOverrideReturnsNulloptWhenNoMatch)
 {
     const TempTomlFile file(R"(
 [meta]
@@ -196,7 +196,7 @@ rtol = 1e-2
     EXPECT_FALSE(result.has_value());
 }
 
-TEST(TestTestSettings, FindOverrideReturnsNulloptWhenNoOverrides)
+TEST(TestSettingsParser, FindOverrideReturnsNulloptWhenNoOverrides)
 {
     const TempTomlFile file(R"(
 [meta]
@@ -209,7 +209,7 @@ version = 1
     EXPECT_FALSE(result.has_value());
 }
 
-TEST(TestTestSettings, FindOverrideMatchesMultipleFiltersInEntry)
+TEST(TestSettingsParser, FindOverrideMatchesMultipleFiltersInEntry)
 {
     const TempTomlFile file(R"(
 [meta]
@@ -238,7 +238,7 @@ rtol = 1e-2
 // Precedence: later entries win
 // ---------------------------------------------------------------------------
 
-TEST(TestTestSettings, LaterEntriesTakePrecedence)
+TEST(TestSettingsParser, LaterEntriesTakePrecedence)
 {
     const TempTomlFile file(R"(
 [meta]
@@ -265,7 +265,7 @@ rtol = 5e-2
     EXPECT_FLOAT_EQ(result->rtol, 5e-2F);
 }
 
-TEST(TestTestSettings, EarlierEntryUsedWhenLaterDoesNotMatch)
+TEST(TestSettingsParser, EarlierEntryUsedWhenLaterDoesNotMatch)
 {
     const TempTomlFile file(R"(
 [meta]
