@@ -1522,13 +1522,13 @@ TEST_F(GPU_CKValidatorIntegration_FP32, RestrictiveValidator_OnlyAcceptsSplitK1A
     };
 
     // Create validator with proper capture
-    CKSplitKValidatorCreatorFunc ck_validator_creator =
-        [&accepted_split_k, &validator_call_count](const miopen::conv::ProblemDescription&) {
-            return [&accepted_split_k, &validator_call_count](const std::string&, int sk) {
-                validator_call_count++;
-                return accepted_split_k.count(sk) > 0;
-            };
+    auto ck_validator_creator = [&accepted_split_k,
+                                 &validator_call_count](const miopen::conv::ProblemDescription&) {
+        return [&accepted_split_k, &validator_call_count](const std::string&, int sk) {
+            validator_call_count++;
+            return accepted_split_k.count(sk) > 0;
         };
+    };
 
     bool result = RunAIHeuristics(
         kWrwConfig, state, ctx, problem_, false, fill_kernels, nullptr, ck_validator_creator);
@@ -1557,13 +1557,12 @@ TEST_F(GPU_CKValidatorIntegration_FP32, RejectAllValidator_ReturnsFalse)
     };
 
     // Create validator that rejects all combinations
-    CKSplitKValidatorCreatorFunc ck_validator_creator =
-        [&validator_call_count](const miopen::conv::ProblemDescription&) {
-            return [&validator_call_count](const std::string&, int) {
-                validator_call_count++;
-                return false; // Reject everything
-            };
+    auto ck_validator_creator = [&validator_call_count](const miopen::conv::ProblemDescription&) {
+        return [&validator_call_count](const std::string&, int) {
+            validator_call_count++;
+            return false; // Reject everything
         };
+    };
 
     bool result = RunAIHeuristics(
         kWrwConfig, state, ctx, problem_, false, fill_kernels, nullptr, ck_validator_creator);
