@@ -510,6 +510,43 @@ namespace rocisa
         }
     };
 
+    struct True16Modifiers : public Container
+    {
+        True16Modifiers(HighBitSel high_bit = HighBitSel::NONE)
+            : Container()
+            , high_bit(high_bit)
+        {
+        }
+
+        True16Modifiers(const int high_bit = -1)
+            : Container()
+            , high_bit(static_cast<HighBitSel>(high_bit))
+        {
+        }
+
+        True16Modifiers(const True16Modifiers& other)
+            : Container()
+            , high_bit(other.high_bit)
+        {
+        }
+
+        std::shared_ptr<Container> clone() const override
+        {
+            return std::make_shared<True16Modifiers>(*this);
+        }
+
+        std::string toString() const override
+        {
+            if(high_bit == HighBitSel::NONE)
+            {
+                return "";
+            }
+            return high_bit == HighBitSel::HIGH ? ".h" : ".l";
+        }
+
+        const HighBitSel high_bit;
+    };
+
     struct EXEC : public Container
     {
         EXEC(bool setHi = false)
@@ -606,6 +643,7 @@ namespace rocisa
     {
         std::string      name;
         std::vector<int> offsets;
+        mutable int nameIdx;
 
         RegName(const std::string& name = "", const std::vector<int>& offsets = {})
             : name(name)
@@ -643,6 +681,17 @@ namespace rocisa
                 offsets = std::move(other.offsets);
             }
             return *this;
+        }
+
+        void setNameIdx() const
+        {
+            nameIdx = rocIsa::getInstance().getVgprIdx()[name];
+        }
+
+        int getTotalIdx() const
+        {
+            setNameIdx();
+            return getTotalOffsets() + nameIdx;
         }
 
         int getTotalOffsets() const
@@ -696,6 +745,7 @@ namespace rocisa
         std::optional<RegName> regName;
         int                    regIdx;
         int                    regNum;
+        mutable  int           msb;
         bool                   isInlineAsm;
         bool                   isMinus;
         bool                   isAbs;
@@ -711,6 +761,7 @@ namespace rocisa
             , regName(std::move(regName))
             , regIdx(regIdx)
             , regNum(int(ceil(regNum)))
+            , msb(0)
             , isInlineAsm(false)
             , isMinus(false)
             , isAbs(false)
@@ -731,6 +782,7 @@ namespace rocisa
             , regName(std::move(regName))
             , regIdx(regIdx)
             , regNum(int(ceil(regNum)))
+            , msb(0)
             , isInlineAsm(false)
             , isMinus(false)
             , isAbs(isAbs)
@@ -745,6 +797,7 @@ namespace rocisa
             , regName(other.regName)
             , regIdx(other.regIdx)
             , regNum(other.regNum)
+            , msb(other.msb)
             , isInlineAsm(other.isInlineAsm)
             , isMinus(other.isMinus)
             , isAbs(other.isAbs)
@@ -769,6 +822,7 @@ namespace rocisa
             , regName(std::move(other.regName))
             , regIdx(other.regIdx)
             , regNum(other.regNum)
+            , msb(other.msb)
             , isInlineAsm(other.isInlineAsm)
             , isMinus(other.isMinus)
             , isAbs(other.isAbs)
@@ -785,6 +839,7 @@ namespace rocisa
                 regName     = other.regName;
                 regIdx      = other.regIdx;
                 regNum      = other.regNum;
+                msb         = other.msb;
                 isInlineAsm = other.isInlineAsm;
                 isMinus     = other.isMinus;
                 isAbs       = other.isAbs;
@@ -802,6 +857,7 @@ namespace rocisa
                 regName     = std::move(other.regName);
                 regIdx      = other.regIdx;
                 regNum      = other.regNum;
+                msb         = other.msb;
                 isInlineAsm = other.isInlineAsm;
                 isMinus     = other.isMinus;
                 isAbs       = other.isAbs;
@@ -875,6 +931,11 @@ namespace rocisa
             return regType + "gpr" + regName->toString();
         }
 
+        std::string getCompleteRegName() const
+        {
+            return regName->toString();
+        }
+
         std::pair<std::shared_ptr<RegisterContainer>, std::shared_ptr<RegisterContainer>>
             splitRegContainer() const
         {
@@ -916,6 +977,18 @@ namespace rocisa
             return !(*this == other);
         }
 
+        void setMsb() const
+        {
+            if(regName)
+            {
+                msb = regName->getTotalIdx() / 256;
+            }
+            else
+            {
+                msb = regIdx / 256;
+            }
+        }
+
         std::string toString() const override
         {
             if(isOff)
@@ -926,24 +999,29 @@ namespace rocisa
             std::string minusStr = isMinus ? "-" : "";
             minusStr             = isAbs ? "abs(" + minusStr : minusStr;
             auto absStr          = isAbs ? ")" : "";
+            std::string msbStr = "";
+            if(rocIsa::getInstance().getAsmCaps()["HasVgprMSB"] && regType == "v")
+            {
+                setMsb();
+                if(msb > 0)
+                    msbStr = std::to_string(-256 * msb);
+            }
             if(isInlineAsm)
             {
                 return minusStr + "%" + std::to_string(regIdx) + absStr;
             }
-
             if(regName)
             {
                 std::string macroSlash = isMacro ? "\\" : "";
                 if(regNum == 1)
                 {
                     return minusStr + regType + "[" + macroSlash + regType + "gpr"
-                           + regName->toString() + "]" + absStr;
+                           + regName->toString() + msbStr + "]" + absStr;
                 }
                 else
                 {
                     return minusStr + regType + "[" + macroSlash + regType + "gpr"
-                           + regName->toString() + ":" + macroSlash + regType + "gpr"
-                           + regName->toString() + "+"
+                           + regName->toString() + msbStr + ":" + regType + "gpr" + regName->toString() + msbStr + "+"
                            + std::to_string(regNum - 1) + "]" + absStr;
                 }
             }
@@ -951,12 +1029,14 @@ namespace rocisa
             {
                 if(regNum == 1)
                 {
+                    if(msb > 0)
+                        return minusStr + regType + "["  + std::to_string(regIdx) + msbStr + "]" + absStr;
                     return minusStr + regType + std::to_string(regIdx) + absStr;
                 }
                 else
                 {
-                    return minusStr + regType + "[" + std::to_string(regIdx) + ":"
-                           + std::to_string(regIdx + regNum - 1) + "]" + absStr;
+                    return minusStr + regType + "[" + std::to_string(regIdx) + msbStr + ":"
+                           + std::to_string(regIdx + regNum - 1) + msbStr + "]" + absStr;
                 }
             }
         }

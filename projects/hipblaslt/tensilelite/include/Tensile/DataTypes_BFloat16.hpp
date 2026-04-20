@@ -267,6 +267,11 @@ namespace TensileLite
         return a;
     }
 
+    inline BFloat16 operator-(BFloat16& a)
+    {
+        return BFloat16(0) - a;
+    }
+
     inline BFloat16 operator++(BFloat16& a)
     {
         a += BFloat16(1);

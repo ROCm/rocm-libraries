@@ -246,14 +246,24 @@ namespace TensileLite
             return m_f32XdlMathOp;
         }
 
-        void setComputeInputType(rocisa::DataType value)
+        void setComputeInputTypeA(rocisa::DataType value)
         {
-            m_computeInputType = value;
+            m_computeInputTypeA = value;
         }
 
-        rocisa::DataType computeInputType() const
+        rocisa::DataType computeInputTypeA() const
         {
-            return m_computeInputType;
+            return m_computeInputTypeA;
+        }
+
+        void setComputeInputTypeB(rocisa::DataType value)
+        {
+            m_computeInputTypeB = value;
+        }
+
+        rocisa::DataType computeInputTypeB() const
+        {
+            return m_computeInputTypeB;
         }
 
         void setUseDeviceUserArguments(bool use)
@@ -275,7 +285,8 @@ namespace TensileLite
         size_t m_workspaceSizeGroupedGemm = std::numeric_limits<size_t>::max();
 
         rocisa::DataType m_f32XdlMathOp;
-        rocisa::DataType m_computeInputType;
+        rocisa::DataType m_computeInputTypeA;
+        rocisa::DataType m_computeInputTypeB;
 
         bool m_useDeviceUserArguments = false;
     };
@@ -306,6 +317,8 @@ namespace TensileLite
             Synchronizer  = 12,
             AMAXD         = 13,
             COMPRESSED    = 14,
+            MXSA          = 15,
+            MXSB          = 16,
             TENSOR_COUNT
         };
 
@@ -670,7 +683,7 @@ namespace TensileLite
             return m_betaType;
         }
 
-        size_t computeTypeElementSize() const
+        float computeTypeElementSize() const
         {
             return DataTypeInfo::Get(m_betaType).elementSize;
         }
@@ -916,15 +929,21 @@ namespace TensileLite
             return m_highPrecisionAccumulate;
         }
 
-        void setSparse(int value)
+        void setSparse(int value, int layout)
         {
             m_sparse = value;
+            m_metadataLayout = layout;
             normalizeSparse();
         }
 
         int sparse() const
         {
             return m_sparse;
+        }
+
+        int metadataLayout() const
+        {
+            return m_metadataLayout;
         }
 
         void setKernelLanguage(KernelLanguage value)
@@ -1029,6 +1048,30 @@ namespace TensileLite
             return m_maxProblemSize;
         }
 
+        void setMXScaleA(rocisa::DataType mxType, int mxBlock, std::vector<size_t> saStride = {});
+
+        size_t mxBlockA() const
+        {
+            return m_mxBlockA;
+        }
+
+        rocisa::DataType mxTypeA() const
+        {
+            return m_mxTypeA;
+        }
+
+        void setMXScaleB(rocisa::DataType mxType, int mxBlock, std::vector<size_t> sbStride = {});
+
+        size_t mxBlockB() const
+        {
+            return m_mxBlockB;
+        }
+
+        rocisa::DataType mxTypeB() const
+        {
+            return m_mxTypeB;
+        }
+
         bool swizzleTensorA() const
         {
             return m_swizzleTensorA;
@@ -1123,6 +1166,14 @@ namespace TensileLite
         TensorOps const& dOps() const
         {
             return m_dOps;
+        }
+        TensorDescriptor const& mxsa() const
+        {
+            return m_tensors[ContractionProblemGemm::TENSOR::MXSA];
+        }
+        TensorDescriptor const& mxsb() const
+        {
+            return m_tensors[ContractionProblemGemm::TENSOR::MXSB];
         }
         FreeIndices const& freeIndicesA() const
         {
@@ -1251,7 +1302,8 @@ namespace TensileLite
                                  rocisa::DataType               typeD,
                                  rocisa::DataType               typeAlpha,
                                  rocisa::DataType               typeBeta,
-                                 rocisa::DataType               typeComputeInput,
+                                 rocisa::DataType               typeComputeInputA,
+                                 rocisa::DataType               typeComputeInputB,
                                  rocisa::DataType               typeCompute,
                                  double                         alpha,
                                  double                         beta,
@@ -1293,6 +1345,11 @@ namespace TensileLite
         ActivationType   m_activationType          = ActivationType::None;
         bool             m_activationNoGuard       = false;
         int              m_sparse                  = 0;
+        int              m_metadataLayout          = 0;
+        int              m_mxBlockA                = 0;
+        int              m_mxBlockB                = 0;
+        rocisa::DataType m_mxTypeA                 = rocisa::DataType::None;
+        rocisa::DataType m_mxTypeB                 = rocisa::DataType::None;
 
         KernelLanguage    m_kernelLanguage    = KernelLanguage::Any;
         PerformanceMetric m_performanceMetric = PerformanceMetric::DeviceEfficiency;
@@ -1396,7 +1453,9 @@ namespace TensileLite
                           void*                _ws,
                           void*                _Synchronizer,
                           unsigned char const* _metadata,
-                          void const*          _compressed);
+                          void const*          _compressed,
+                          void const*          _mxsa,
+                          void const*          _mxsb);
 
         ContractionInputs(void const*     _a,
                           void const*     _b,
@@ -1425,6 +1484,8 @@ namespace TensileLite
         void const* scaleC        = nullptr;
         void const* scaleD        = nullptr;
         void const* scaleAlphaVec = nullptr;
+        void const* mxsa          = nullptr;
+        void const* mxsb          = nullptr;
 
         unsigned char const* metadata = nullptr;
         void const* compressed        = nullptr;

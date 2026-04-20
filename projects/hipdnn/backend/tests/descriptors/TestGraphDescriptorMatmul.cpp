@@ -12,9 +12,9 @@
 
 #include <flatbuffers/flatbuffers.h>
 #include <gtest/gtest.h>
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
-#include <hipdnn_data_sdk/data_objects/matmul_attributes_generated.h>
-#include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/matmul_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_test_sdk/constants/MatmulConstants.hpp>
 #include <hipdnn_test_sdk/utilities/ToVec.hpp>
 
@@ -24,7 +24,7 @@
 
 using namespace hipdnn_backend;
 using namespace hipdnn_backend::test_utilities;
-using namespace hipdnn_data_sdk::data_objects;
+using namespace hipdnn_flatbuffers_sdk::data_objects;
 using namespace hipdnn_tests::constants;
 using hipdnn_tests::toVec;
 
@@ -41,19 +41,19 @@ inline std::unique_ptr<HipdnnBackendDescriptor>
     auto wrapper = createDescriptor<MatmulOperationDescriptor>();
     auto desc = wrapper->asDescriptor<MatmulOperationDescriptor>();
 
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_MATMUL_A_EXT,
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_MATMUL_ADESC,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        static_cast<const void*>(&aDesc));
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_MATMUL_B_EXT,
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_MATMUL_BDESC,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        static_cast<const void*>(&bDesc));
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_MATMUL_C_EXT,
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_MATMUL_CDESC,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        static_cast<const void*>(&cDesc));
-    desc->setAttribute(HIPDNN_ATTR_MATMUL_MATH_PREC_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
+    desc->setAttribute(HIPDNN_ATTR_MATMUL_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
     if(!name.empty())
     {
         desc->setAttribute(HIPDNN_ATTR_OPERATION_NAME_EXT,

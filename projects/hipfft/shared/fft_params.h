@@ -148,6 +148,7 @@ inline void set_input(std::vector<gpubuf>&       input,
                       const std::vector<size_t>& length,
                       const std::vector<size_t>& ilength,
                       const std::vector<size_t>& istride,
+                      const std::vector<size_t>& ioffset,
                       const Tint1&               whole_length,
                       const Tint1&               whole_stride,
                       const size_t               idist,
@@ -174,7 +175,7 @@ inline void set_input(std::vector<gpubuf>&       input,
     case fft_array_type_complex_interleaved:
     case fft_array_type_hermitian_interleaved:
     {
-        auto ibuffer = (rocfft_complex<Tfloat>*)input[0].data();
+        auto ibuffer = (rocfft_complex<Tfloat>*)input[0].data() + ioffset[0];
 #ifdef USE_HIPRAND
         if(igen == fft_input_generator_device)
             generate_interleaved_data(
@@ -207,8 +208,8 @@ inline void set_input(std::vector<gpubuf>&       input,
     case fft_array_type_complex_planar:
     case fft_array_type_hermitian_planar:
     {
-        auto ibuffer_real = (Tfloat*)input[0].data();
-        auto ibuffer_imag = (Tfloat*)input[1].data();
+        auto ibuffer_real = (Tfloat*)input[0].data() + ioffset[0];
+        auto ibuffer_imag = (Tfloat*)input[1].data() + ioffset[1];
 
 #ifdef USE_HIPRAND
         if(igen == fft_input_generator_device)
@@ -251,7 +252,7 @@ inline void set_input(std::vector<gpubuf>&       input,
     }
     case fft_array_type_real:
     {
-        auto ibuffer = (Tfloat*)input[0].data();
+        auto ibuffer = (Tfloat*)input[0].data() + ioffset[0];
 
 #ifdef USE_HIPRAND
         if(igen == fft_input_generator_device)
@@ -300,6 +301,7 @@ inline void set_input(std::vector<hostbuf>&      input,
                       const std::vector<size_t>& length,
                       const std::vector<size_t>& ilength,
                       const std::vector<size_t>& istride,
+                      const std::vector<size_t>& ioffset,
                       const Tint1&               whole_length,
                       const Tint1&               whole_stride,
                       const size_t               idist,
@@ -320,9 +322,11 @@ inline void set_input(std::vector<hostbuf>&      input,
     case fft_array_type_hermitian_interleaved:
     {
         if(igen == fft_input_generator_host)
-            generate_interleaved_data<Tfloat>(input, whole_length, whole_stride, idist, nbatch);
+            generate_interleaved_data<Tfloat>(
+                input, ioffset, whole_length, whole_stride, idist, nbatch);
         else if(igen == fft_input_random_generator_host)
             generate_random_interleaved_data<Tfloat>(input,
+                                                     ioffset,
                                                      whole_length,
                                                      whole_stride,
                                                      idist,
@@ -333,7 +337,8 @@ inline void set_input(std::vector<hostbuf>&      input,
                                                      field_contig_dist);
 
         if(itype == fft_array_type_hermitian_interleaved)
-            impose_hermitian_symmetry_interleaved<Tfloat>(input, length, istride, idist, nbatch);
+            impose_hermitian_symmetry_interleaved<Tfloat>(
+                input, ioffset, length, istride, idist, nbatch);
 
         break;
     }
@@ -341,9 +346,10 @@ inline void set_input(std::vector<hostbuf>&      input,
     case fft_array_type_hermitian_planar:
     {
         if(igen == fft_input_generator_host)
-            generate_planar_data<Tfloat>(input, whole_length, whole_stride, idist, nbatch);
+            generate_planar_data<Tfloat>(input, ioffset, whole_length, whole_stride, idist, nbatch);
         else if(igen == fft_input_random_generator_host)
             generate_random_planar_data<Tfloat>(input,
+                                                ioffset,
                                                 whole_length,
                                                 whole_stride,
                                                 idist,
@@ -354,16 +360,18 @@ inline void set_input(std::vector<hostbuf>&      input,
                                                 field_contig_dist);
 
         if(itype == fft_array_type_hermitian_planar)
-            impose_hermitian_symmetry_planar<Tfloat>(input, length, istride, idist, nbatch);
+            impose_hermitian_symmetry_planar<Tfloat>(
+                input, ioffset, length, istride, idist, nbatch);
 
         break;
     }
     case fft_array_type_real:
     {
         if(igen == fft_input_generator_host)
-            generate_real_data<Tfloat>(input, whole_length, whole_stride, idist, nbatch);
+            generate_real_data<Tfloat>(input, ioffset, whole_length, whole_stride, idist, nbatch);
         else if(igen == fft_input_random_generator_host)
             generate_random_real_data<Tfloat>(input,
+                                              ioffset,
                                               whole_length,
                                               whole_stride,
                                               idist,
@@ -388,6 +396,7 @@ inline void set_input(std::vector<Tbuff>&        input,
                       const std::vector<size_t>& length,
                       const std::vector<size_t>& ilength,
                       const std::vector<size_t>& istride,
+                      const std::vector<size_t>& ioffset,
                       const size_t               idist,
                       const size_t               nbatch,
                       const hipDeviceProp_t&     deviceProp,
@@ -405,6 +414,7 @@ inline void set_input(std::vector<Tbuff>&        input,
                                   length,
                                   ilength,
                                   istride,
+                                  ioffset,
                                   ilength[0],
                                   istride[0],
                                   idist,
@@ -423,6 +433,7 @@ inline void set_input(std::vector<Tbuff>&        input,
             length,
             ilength,
             istride,
+            ioffset,
             std::make_tuple(ilength[0], ilength[1]),
             std::make_tuple(istride[0], istride[1]),
             idist,
@@ -441,6 +452,7 @@ inline void set_input(std::vector<Tbuff>&        input,
             length,
             ilength,
             istride,
+            ioffset,
             std::make_tuple(ilength[0], ilength[1], ilength[2]),
             std::make_tuple(istride[0], istride[1], istride[2]),
             idist,
@@ -1969,6 +1981,7 @@ public:
                                           length,
                                           ilength(),
                                           istride,
+                                          ioffset,
                                           idist,
                                           nbatch,
                                           deviceProp,
@@ -1984,6 +1997,7 @@ public:
                                      length,
                                      ilength(),
                                      istride,
+                                     ioffset,
                                      idist,
                                      nbatch,
                                      deviceProp,
@@ -1999,6 +2013,7 @@ public:
                                     length,
                                     ilength(),
                                     istride,
+                                    ioffset,
                                     idist,
                                     nbatch,
                                     deviceProp,
@@ -2483,6 +2498,18 @@ public:
                 "number of available device(s) per process.");
 
         const auto total_bricks = product(brick_count_along.begin(), brick_count_along.end());
+
+        if(total_bricks == 1 && mp_lib == fft_mp_lib_none && num_ranks == 1
+           && start_global_dev_idx == 0)
+        {
+            // Specifying a unique field with a lone brick on the current device may
+            // be omitted in favor of plan's data layout parameters: test that by not
+            // using a lone-brick field sometimes, in such cases.
+            const auto stable_hash_str
+                = token() + (io == fft_io::fft_io_in ? "_input_field" : "_output_field");
+            if(std::hash<std::string>()(stable_hash_str) % 2 == 1)
+                return;
+        }
 
         struct length_division
         {
@@ -4199,6 +4226,7 @@ void init_local_input(int                                       comm_rank,
                                           brick_len_nobatch,
                                           brick_len_nobatch,
                                           brick_stride_nobatch,
+                                          params.ioffset,
                                           brick_dist,
                                           brick_batch,
                                           get_curr_device_prop(),
@@ -4214,6 +4242,7 @@ void init_local_input(int                                       comm_rank,
                                     brick_len_nobatch,
                                     brick_len_nobatch,
                                     brick_stride_nobatch,
+                                    params.ioffset,
                                     brick_dist,
                                     brick_batch,
                                     get_curr_device_prop(),
@@ -4229,6 +4258,7 @@ void init_local_input(int                                       comm_rank,
                                      brick_len_nobatch,
                                      brick_len_nobatch,
                                      brick_stride_nobatch,
+                                     params.ioffset,
                                      brick_dist,
                                      brick_batch,
                                      get_curr_device_prop(),
