@@ -38,7 +38,6 @@ set(__default_cxx_compile_options
     -Wundef
     -Wuninitialized
     -Wunreachable-code
-    -Wunused
     -Wno-ignored-qualifiers
     -Wno-sign-compare
 )
@@ -62,7 +61,6 @@ set(__clang_cxx_compile_options
     -Wno-unused-command-line-argument
     -Wno-weak-vtables
     -Wno-covered-switch-default
-    -Wno-unused-result
     -Wno-unsafe-buffer-usage
     -Wno-deprecated-declarations
     -Wno-global-constructors
@@ -78,7 +76,6 @@ set(__clang_cxx_compile_options
     -Wno-nonportable-system-include-path
     -Wno-documentation
     -Wno-enum-constexpr-conversion
-    -Wno-unused-parameter
     -Wmissing-noreturn)
 
 if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL "19")
@@ -98,6 +95,7 @@ endif()
 
 if(WIN32)
     list(APPEND __clang_cxx_compile_options
+        -Wno-ignored-attributes
         -fms-extensions
         -fms-compatibility)
 endif()

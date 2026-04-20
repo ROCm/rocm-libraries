@@ -94,7 +94,7 @@ bool IsDeviceSupported(Gpu supported_devs, Gpu dev)
 // ConvTestCase
 //************************************************************************************
 
-ConvTestCase::ConvTestCase() : x(miopenHalf, {}), w(miopenHalf, {}), conv({}, {}, {}){};
+ConvTestCase::ConvTestCase() : x(miopenHalf, {}), w(miopenHalf, {}), conv({}, {}, {}) {};
 
 ConvTestCase::ConvTestCase(std::vector<size_t>&& x_,
                            std::vector<size_t>&& w_,
@@ -348,8 +348,8 @@ miopen::solver::ConvSolution FindSolution(const miopen::solver::conv::ConvSolver
 }
 
 template <typename T>
-double GetThreshold(miopenConvAlgorithm_t algo,
-                    miopen::conv::Direction direction,
+double GetThreshold(miopenConvAlgorithm_t /*algo*/,
+                    miopen::conv::Direction /*direction*/,
                     const Tolerances& tolerances,
                     const bool use_tf32_compute)
 {
