@@ -38,7 +38,7 @@ The rocThrust project is located in https://github.com/ROCm/rocm-libraries/tree/
   .. grid-item-card:: Reference
 
     * :ref:`bitwise-repro`
-    * :ref:`env-var`
+    * :ref:`atomic-path`
     * :ref:`rocThrust API reference <api-reference>`
 
 To contribute to the documentation, refer to
