@@ -4,11 +4,11 @@
 #include "hip/HipKernelCompileOptions.hpp"
 #include <gtest/gtest.h>
 #include <hipdnn_data_sdk/data_objects/data_types_generated.h>
-#include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 
-using namespace hipdnn_data_sdk::data_objects;
-using namespace hipdnn_data_sdk::flatbuffer_utilities;
+using namespace hipdnn_flatbuffers_sdk::data_objects;
+using namespace hipdnn_flatbuffers_sdk::flatbuffer_utilities;
 
 namespace hip_kernel_provider::tests
 {
@@ -59,15 +59,16 @@ protected:
 
         std::vector<flatbuffers::Offset<TensorAttributes>> tensorAttrs
             = {CreateTensorAttributesDirect(_fbb, 1, "tensor", dataType, &strides, &dims)};
-        std::vector<flatbuffers::Offset<Node>> nodes;
+        std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Node>> nodes;
 
-        auto graphOffset = CreateGraphDirect(_fbb,
-                                             "test",
-                                             DataType::FLOAT,
-                                             DataType::HALF,
-                                             DataType::BFLOAT16,
-                                             &tensorAttrs,
-                                             &nodes);
+        auto graphOffset
+            = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(_fbb,
+                                                                      "test",
+                                                                      DataType::FLOAT,
+                                                                      DataType::HALF,
+                                                                      DataType::BFLOAT16,
+                                                                      &tensorAttrs,
+                                                                      &nodes);
 
         _fbb.Finish(graphOffset);
         _graph = std::make_unique<GraphWrapper>(_fbb.GetBufferPointer(), _fbb.GetSize());

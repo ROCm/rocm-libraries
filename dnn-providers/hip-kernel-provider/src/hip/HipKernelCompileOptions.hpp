@@ -22,10 +22,10 @@ namespace hip_kernel_provider
 class HipKernelCompileOptions
 {
 public:
-    HipKernelCompileOptions(const hipdnn_data_sdk::data_objects::TensorAttributes* inputTensorAttrs,
-                            const hipDeviceProp_t& deviceProps,
-                            const std::optional<hip_kernel_utils::ActivationMode>& optActivationMode
-                            = std::nullopt)
+    HipKernelCompileOptions(
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* inputTensorAttrs,
+        const hipDeviceProp_t& deviceProps,
+        const std::optional<hip_kernel_utils::ActivationMode>& optActivationMode = std::nullopt)
     {
         // Add ROCm include path to compile options
 #ifdef ROCM_PATH
@@ -116,15 +116,17 @@ public:
 
 private:
     void addDataTypeAndLayoutOptions(
-        const hipdnn_data_sdk::data_objects::TensorAttributes* tensorAttrs)
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* tensorAttrs)
     {
         auto inputDataType = tensorAttrs->data_type();
         auto isLayoutNhwc = hip_kernel_utils::isChannelLastLayout(tensorAttrs);
 
-        add("HIP_PLUGIN_USE_FP32", inputDataType == hipdnn_data_sdk::data_objects::DataType::FLOAT);
-        add("HIP_PLUGIN_USE_FP16", inputDataType == hipdnn_data_sdk::data_objects::DataType::HALF);
+        add("HIP_PLUGIN_USE_FP32",
+            inputDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
+        add("HIP_PLUGIN_USE_FP16",
+            inputDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::HALF);
         add("HIP_PLUGIN_USE_BFP16",
-            inputDataType == hipdnn_data_sdk::data_objects::DataType::BFLOAT16);
+            inputDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16);
         add("HIP_PLUGIN_USE_RNE_BFLOAT16", true);
         add("HIP_PLUGIN_LAYOUT_NHWC", isLayoutNhwc);
     }
