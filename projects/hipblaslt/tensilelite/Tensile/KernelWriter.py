@@ -5206,7 +5206,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
     ripo = rocIsaPassOption()
     ripo.removeDupFunc = bool(kernel["ActivationFuncCall"])
     ripo.numWaves = kernel["NumThreads"] // kernel["WavefrontSize"]
-    bytesPerVGPR = 4
 
     if kernel["ProblemType"]["ActivationType"] == "all":
       ripo.removeDupAssign = False
