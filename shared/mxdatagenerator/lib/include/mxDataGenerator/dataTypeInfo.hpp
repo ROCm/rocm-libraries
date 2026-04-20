@@ -170,7 +170,7 @@ namespace DGen
     template<>
     inline constexpr uint getScaleOne<ScaleType::E4M3>()
     {
-        return 0b01110000;
+        return 0b00111000;
     }
 
     template<ScaleType T>
