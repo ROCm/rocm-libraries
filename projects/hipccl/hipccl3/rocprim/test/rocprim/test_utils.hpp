@@ -639,7 +639,12 @@ inline auto test_kernel_wrapper(F func, hipStream_t stream, const bool use_graph
     ASSERT_GT(temp_storage_size_bytes, 0);
 
     // allocate temporary storage
-    common::device_ptr<void> d_temp_storage(temp_storage_size_bytes);
+    common::device_ptr<void> d_temp_storage;
+    if(!d_temp_storage.resize_with_memory_check(temp_storage_size_bytes))
+    {
+        std::cout << "Out of memory. Skipping test" << std::endl;
+        return;
+    }
 
     test_utils::GraphHelper gHelper;
     if(use_graphs)
