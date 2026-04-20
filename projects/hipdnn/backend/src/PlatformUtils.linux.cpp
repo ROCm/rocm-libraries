@@ -18,7 +18,7 @@ std::filesystem::path getCurrentModuleDirectory()
     std::filesystem::path modulePath;
 
     Dl_info info;
-    if(dladdr(reinterpret_cast<void const*>(&getCurrentModuleDirectory), &info) != 0
+    if(dladdr(reinterpret_cast<const void*>(&getCurrentModuleDirectory), &info) != 0
        && info.dli_fname != nullptr && info.dli_fname[0] != '\0')
     {
         modulePath = std::filesystem::path(info.dli_fname).parent_path();
@@ -60,7 +60,9 @@ void closeLibrary(PluginLibHandle handle)
 
 void* getSymbol(PluginLibHandle handle, const char* symbolName)
 {
+    // NOLINTBEGIN(misc-const-correctness) converting this to a const void * would require changing the getSymbol signature, which would cascade down to large parts of the codebase
     void* symbol = dlsym(handle, symbolName);
+    // NOLINTEND(misc-const-correctness)
     if(symbol == nullptr)
     {
         const char* error = dlerror();

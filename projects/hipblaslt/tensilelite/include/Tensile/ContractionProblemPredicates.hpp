@@ -135,6 +135,186 @@ namespace TensileLite
                 }
             };
 
+            // Address-interleave restriction:
+            // Require tiles1 (=Free1Size/value) to have lowbit(tiles1) > 1 (i.e. even),
+            // and require Free1Size % value == 0.
+            // This matches the kernel's initBInterleaveG enable condition that G=min(lowbit, LVCB) must be > 1.
+            struct Free1SizeDivByValueLowbitGT1
+                : public Predicate_CRTP<Free1SizeDivByValueLowbitGT1, ContractionProblemGemm>
+            {
+                enum
+                {
+                    HasIndex = true,
+                    HasValue = true
+                };
+                size_t index;
+                size_t value;
+
+                Free1SizeDivByValueLowbitGT1() = default;
+                Free1SizeDivByValueLowbitGT1(size_t index, size_t value)
+                    : index(index)
+                    , value(value)
+                {
+                }
+
+                static std::string Type()
+                {
+                    return "Free1SizeDivByValueLowbitGT1";
+                }
+
+                virtual bool operator()(ContractionProblemGemm const& problem) const override
+                {
+                    if(value == 0)
+                        return false;
+                    size_t freeSize = (!problem.transposeC01() ? problem.freeSizeB(index)
+                                                              : problem.freeSizeA(index));
+                    if(freeSize % value != 0)
+                        return false;
+                    size_t tiles1 = freeSize / value;
+                    if(tiles1 == 0)
+                        return false;
+                    size_t lowbit = tiles1 & (~tiles1 + 1); // tiles1 & -tiles1
+                    return lowbit > 1;
+                }
+
+                virtual bool debugEval(ContractionProblemGemm const& problem,
+                                       std::ostream&                 stream) const override
+                {
+                    size_t freeSize = (!problem.transposeC01() ? problem.freeSizeB(index)
+                                                              : problem.freeSizeA(index));
+                    bool   okDiv    = (value != 0) && (freeSize % value == 0);
+                    size_t tiles1   = okDiv ? (freeSize / value) : 0;
+                    size_t lowbit   = tiles1 ? (tiles1 & (~tiles1 + 1)) : 0;
+                    bool   ok       = okDiv && (lowbit > 1);
+                    return debugEvalCmp(problem,
+                                        stream,
+                                        "free1",
+                                        freeSize,
+                                        "%",
+                                        "value",
+                                        value,
+                                        "lowbit",
+                                        lowbit,
+                                        ">",
+                                        "1",
+                                        size_t(1)) && ok;
+                }
+            };
+
+            // KRingShift wrap restriction:
+            // Require that any (k + KRingShift) wrap occurs only in tail loop (no main-loop wrap fix).
+            //
+            // We model the exact KRS enable/shift computation used in initKRingShift:
+            //   rem = StrideB1J % cacheLineElements
+            //   shift = (-WorkGroup1 * rem) mod cacheLineElements
+            //
+            // mainLoopElems = k - (k % DepthU)
+            // tailSize      = k % DepthU
+            //
+            // To guarantee no wrap in main loop for any WG1, require:
+            //   maxShift(wg1 in [0, tiles1-1]) <= tailSize
+            //
+            // Packed value format (size_t):
+            //   [63:48]=cacheLineBytes, [47:32]=depthU, [31:16]=mt1, [15:8]=lvcb, [7:0]=bpeB
+            struct KRingShiftTailWrapOnly
+                : public Predicate_CRTP<KRingShiftTailWrapOnly, ContractionProblemGemm>
+            {
+                enum
+                {
+                    HasIndex = true,
+                    HasValue = true
+                };
+                int64_t index;
+                size_t value;
+
+                KRingShiftTailWrapOnly() = default;
+                KRingShiftTailWrapOnly(int64_t index, size_t value)
+                    : index(index)
+                    , value(value)
+                {
+                }
+
+                static std::string Type()
+                {
+                    return "KRingShiftTailWrapOnly";
+                }
+
+                virtual bool operator()(ContractionProblemGemm const& problem) const override
+                {
+                    if(value == 0)
+                        return false;
+
+                    size_t bpeB          = (value & 0xFFu);
+                    size_t lvcb          = ((value >> 8) & 0xFFu);
+                    size_t mt1           = ((value >> 16) & 0xFFFFu);
+                    size_t depthU        = ((value >> 32) & 0xFFFFu);
+                    size_t cacheLineByte = ((value >> 48) & 0xFFFFu);
+
+                    if(mt1 == 0 || lvcb == 0 || bpeB == 0 || depthU == 0 || cacheLineByte == 0)
+                        return false;
+                    size_t cacheLineElems = cacheLineByte / bpeB;
+                    // Compute runtime G from Free1 size and MT1.
+                    size_t free1 = (!problem.transposeC01() ? problem.freeSizeB(0)
+                                                           : problem.freeSizeA(0));
+                    if(free1 % mt1 != 0)
+                        return false;
+                    size_t tiles1 = free1 / mt1;
+                    if(tiles1 == 0)
+                        return false;
+                    size_t lowbit = tiles1 & (~tiles1 + 1); // tiles1 & -tiles1
+                    size_t G      = (lowbit <= lvcb) ? lowbit : lvcb;
+                    if(G <= 1)
+                        return false;
+
+                    // StrideB1J: stride of B along Free1 (J) in elements.
+                    auto const& freeB = problem.freeIndicesB();
+                    if(freeB.empty())
+                        return false;
+                    size_t bDim = freeB[0].i;
+                    if(bDim >= problem.b().strides().size())
+                        return false;
+                    size_t strideB1J = problem.b().strides()[bDim];
+
+                    // Determine whether KRS shift can be enabled at runtime.
+                    size_t mask = cacheLineElems - 1;
+                    size_t rem  = strideB1J & mask; // mod cacheLineElems (pow2)
+
+                    // K is the (last) bound index (typically the summation dimension).
+                    auto const boundCount = static_cast<int64_t>(problem.boundIndices().size());
+                    int64_t    idx        = (index < 0) ? (boundCount + index) : index;
+                    if(idx < 0 || idx >= boundCount)
+                        return false;
+                    size_t k = problem.boundSize(static_cast<size_t>(idx));
+
+                    // tailSize = k % depthU. If depthU>k, tailSize=k and mainloop is empty => safe.
+                    size_t tailSize = (depthU != 0) ? (k % depthU) : 0;
+
+                    // Compute maxShift over wg1 in [0, tiles1-1] (cycle length <= cacheLineElems <= 256 typically, <=64 on gfx950).
+                    size_t wgCount = tiles1;
+                    size_t limit   = (wgCount < cacheLineElems) ? wgCount : cacheLineElems;
+                    size_t maxShift = 0;
+                    for(size_t wg1 = 0; wg1 < limit; ++wg1)
+                    {
+                        // shift = (-wg1*rem) mod cacheLineElems
+                        size_t prod  = (wg1 * rem) & mask;
+                        size_t shift = (prod == 0) ? 0 : ((cacheLineElems - prod) & mask);
+                        if(shift > maxShift)
+                            maxShift = shift;
+                    }
+
+                    return tailSize >= maxShift;
+                }
+
+                virtual bool debugEval(ContractionProblemGemm const& problem,
+                                       std::ostream&                 stream) const override
+                {
+                    // Reuse operator() and print a single boolean result for simplicity.
+                    bool ok = (*this)(problem);
+                    return debugEvalCmp(problem, stream, "KRingShiftTailWrapOnly", size_t(ok), "==", "true", size_t(1))
+                           && ok;
+                }
+            };
+
             struct BatchSizeMultiple
                 : public Predicate_CRTP<BatchSizeMultiple, ContractionProblemGemm>
             {
@@ -237,29 +417,33 @@ namespace TensileLite
 
                     // WorkGroup numbers x number of global write instruction x Wave numbers
                     // M/MT0 x N/MT1 x NumElementsPerThread/StoreVectorWidth x x Wavenumbers x batch
-                    bool ret = (std::ceil(static_cast<float>(problem.freeSizeA(0)) / value[0])
+                    uint32_t synchronizerUsage = (std::ceil(static_cast<float>(problem.freeSizeA(0)) / value[0])
                                 * std::ceil(static_cast<float>(problem.freeSizeB(0)) / value[1]))
-                                   * value[2] * value[4] * value[3] * problem.d().sizes()[2]
-                               <= 409600;
-                    if(problem.groupedGemm())
-                        ret = ret && (problem.groupedGemmCount() <= 16);
+                                   * value[2] * value[4] * value[3] * problem.d().sizes()[2];
 
-                    return ret;
+                    if(problem.groupedGemm())
+                        return synchronizerUsage <= 409600 * 16 / problem.groupedGemmCount();
+                    else
+                        return synchronizerUsage <= 409600 * 16;
                 }
 
                 virtual bool debugEval(ContractionProblemGemm const& problem,
                                        std::ostream&                 stream) const override
                 {
+                    uint32_t synchronizerSize = 409600 * 16;
+                    if(problem.groupedGemm())
+                        synchronizerSize /= problem.groupedGemmCount();
+
                     return debugEvalCmp(
                         problem,
                         stream,
                         "prob",
                         (std::ceil(static_cast<float>(problem.freeSizeA(0)) / value[0])
                          * std::ceil(static_cast<float>(problem.freeSizeB(0)) / value[1]))
-                            * (value[2]) * (value[4] / 64) * value[3],
-                        "==",
-                        "sol",
-                        40960);
+                            * (value[2]) * (value[4]) * value[3] * problem.d().sizes()[2],
+                        ">=",
+                        "limit",
+                        synchronizerSize);
                 }
             };
 
@@ -1233,7 +1417,7 @@ namespace TensileLite
                 };
                 TypesEqual() = default;
 
-                std::array<rocisa::DataType, 5> value;
+                std::array<rocisa::DataType, 6> value;
 
                 static std::string Type()
                 {
@@ -1245,7 +1429,8 @@ namespace TensileLite
                     return problem.a().dataType() == value[0] && problem.b().dataType() == value[1]
                            && problem.c().dataType() == value[2]
                            && problem.d().dataType() == value[3]
-                           && problem.computeInputType() == value[4];
+                           && problem.computeInputTypeA() == value[4]
+                           && problem.computeInputTypeB() == value[5];
                 }
 
                 virtual std::string toString() const override
@@ -1259,8 +1444,10 @@ namespace TensileLite
                                        value[2],
                                        ", d:",
                                        value[3],
-                                       ", compute input type:",
-                                       value[4]);
+                                       ", compute input typeA:",
+                                       value[4],
+                                       ", compute input typeB:",
+                                       value[5]);
                 }
 
                 virtual bool debugEval(ContractionProblemGemm const& problem,
@@ -1288,11 +1475,16 @@ namespace TensileLite
                                         "==",
                                         "sol_d",
                                         value[3],
-                                        "prob_compute",
-                                        problem.computeInputType(),
+                                        "prob_compute_a",
+                                        problem.computeInputTypeA(),
                                         "==",
-                                        "sol_compute",
-                                        value[4]);
+                                        "sol_compute_a",
+                                        value[4],
+                                        "prob_compute_b",
+                                        problem.computeInputTypeB(),
+                                        "==",
+                                        "sol_compute_b",
+                                        value[5]);
                 }
             };
 
@@ -1351,11 +1543,11 @@ namespace TensileLite
                 virtual bool operator()(ContractionProblemGemm const& problem) const override
                 {
                     const uint64_t TWO_POW_32 = 4294967296;
-                    return (problem.a().strides()[1] * min(value.depthUorMT0, problem.a().sizes()[1]) + value.shiftPtrElemA)
-                                   * problem.a().elementBytes()
+                    return multiplyElementSize((problem.a().strides()[1] * min(value.depthUorMT0, problem.a().sizes()[1]) + value.shiftPtrElemA),
+                                   problem.a().elementBytes())
                                < TWO_POW_32
-                           && (problem.b().strides()[1] * min(value.depthUorMT1, problem.b().sizes()[1]) + value.shiftPtrElemB)
-                                      * problem.b().elementBytes()
+                           && multiplyElementSize((problem.b().strides()[1] * min(value.depthUorMT1, problem.b().sizes()[1]) + value.shiftPtrElemB)
+                                      ,problem.b().elementBytes())
                                   < TWO_POW_32;
                 }
 
@@ -1419,7 +1611,7 @@ namespace TensileLite
                     else
                     {
                         const uint64_t TWO_POW_32 = 4294967296;
-                        return problem.c().strides()[1] * problem.c().elementBytes() * min(value, problem.c().sizes()[1])
+                        return multiplyElementSize(problem.c().strides()[1] * min(value, problem.c().sizes()[1]), problem.c().elementBytes())
                                < TWO_POW_32;
                     }
                 }
@@ -1466,7 +1658,7 @@ namespace TensileLite
                 virtual bool operator()(ContractionProblemGemm const& problem) const override
                 {
                     const uint64_t TWO_POW_32 = 4294967296;
-                    return problem.d().strides()[1] * problem.d().elementBytes() * min(value, problem.d().sizes()[1])
+                    return multiplyElementSize(problem.d().strides()[1] * min(value, problem.d().sizes()[1]), problem.d().elementBytes())
                            < TWO_POW_32;
                 }
 
@@ -2051,6 +2243,7 @@ namespace TensileLite
                         return true;
                     if(value == ActivationType::Hipblaslt_all
                        && (problem.activationType() == ActivationType::DGelu
+                           || problem.activationType() == ActivationType::DRelu
                            || problem.activationType() == ActivationType::Gelu
                            || problem.activationType() == ActivationType::Relu
                            || problem.activationType() == ActivationType::Silu
@@ -2815,6 +3008,143 @@ namespace TensileLite
                                         0);
                 }
             };
+
+            struct MXBlockA
+                : public Predicate_CRTP<MXBlockA, ContractionProblemGemm>
+            {
+                enum
+                {
+                    HasIndex = false,
+                    HasValue = true
+                };
+                int value;
+
+                MXBlockA() = default;
+                MXBlockA(int value)
+                    : value(value)
+                {
+                }
+
+                static std::string Type()
+                {
+                    return "MXBlockA";
+                }
+
+                virtual bool operator()(ContractionProblemGemm const& problem) const override
+                {
+                    return problem.mxBlockA() == value;
+                }
+
+                virtual bool debugEval(ContractionProblemGemm const& problem,
+                                       std::ostream&                 stream) const override
+                {
+                    return debugEvalCmp(
+                        problem, stream, "prob", problem.mxBlockA(), "==", "sol", value);
+                }
+            };
+
+            struct MXBlockB
+                : public Predicate_CRTP<MXBlockB, ContractionProblemGemm>
+            {
+                enum
+                {
+                    HasIndex = false,
+                    HasValue = true
+                };
+                int value;
+
+                MXBlockB() = default;
+                MXBlockB(int value)
+                    : value(value)
+                {
+                }
+
+                static std::string Type()
+                {
+                    return "MXBlockB";
+                }
+
+                virtual bool operator()(ContractionProblemGemm const& problem) const override
+                {
+                    return problem.mxBlockB() == value;
+                }
+
+                virtual bool debugEval(ContractionProblemGemm const& problem,
+                                       std::ostream&                 stream) const override
+                {
+                    return debugEvalCmp(
+                        problem, stream, "prob", problem.mxBlockB(), "==", "sol", value);
+                }
+            };
+
+            struct DataTypeMXSA
+                : public Predicate_CRTP<DataTypeMXSA, ContractionProblemGemm>
+            {
+                enum
+                {
+                    HasIndex = false,
+                    HasValue = true
+                };
+                rocisa::DataType value;
+
+                DataTypeMXSA() = default;
+                DataTypeMXSA(rocisa::DataType value)
+                    : value(value)
+                {
+                }
+
+                static std::string Type()
+                {
+                    return "DataTypeMXSA";
+                }
+
+                virtual bool operator()(ContractionProblemGemm const& problem) const override
+                {
+                    return problem.mxTypeA() == value;
+                }
+
+                virtual bool debugEval(ContractionProblemGemm const& problem,
+                                       std::ostream&                 stream) const override
+                {
+                    return debugEvalCmp(
+                        problem, stream, "prob", problem.mxTypeA(), "==", "sol", value);
+                }
+            };
+
+            struct DataTypeMXSB
+                : public Predicate_CRTP<DataTypeMXSB, ContractionProblemGemm>
+            {
+                enum
+                {
+                    HasIndex = false,
+                    HasValue = true
+                };
+                rocisa::DataType value;
+
+                DataTypeMXSB() = default;
+                DataTypeMXSB(rocisa::DataType value)
+                    : value(value)
+                {
+                }
+
+                static std::string Type()
+                {
+                    return "DataTypeMXSB";
+                }
+
+                virtual bool operator()(ContractionProblemGemm const& problem) const override
+                {
+                    return problem.mxTypeB() == value;
+                }
+
+                virtual bool debugEval(ContractionProblemGemm const& problem,
+                                       std::ostream&                 stream) const override
+                {
+                    return debugEvalCmp(
+                        problem, stream, "prob", problem.mxTypeB(), "==", "sol", value);
+                }
+            };
+
         } // namespace Contraction
 
         /**

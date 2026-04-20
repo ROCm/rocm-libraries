@@ -29,6 +29,7 @@
 #include <cstddef>
 #include <map>
 #include <memory>
+#include <optional>
 #include <shared_mutex>
 #include <string>
 #include <tuple>
@@ -148,9 +149,10 @@ namespace TensileLite
         Hardware();
         virtual ~Hardware();
 
-        virtual size_t      id() const          = 0;
-        virtual std::string description() const = 0;
-        virtual std::string archName() const    = 0;
+        virtual size_t                id() const            = 0;
+        virtual std::string           description() const   = 0;
+        virtual std::string           archName() const      = 0;
+        virtual std::optional<int>    pciChipId() const  { return std::nullopt; }
     };
 
     /**

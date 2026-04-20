@@ -1,28 +1,6 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright (c) 2017 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier:  MIT
+
 #ifndef GUARD_MIOPEN_LRN_DRIVER_HPP
 #define GUARD_MIOPEN_LRN_DRIVER_HPP
 
@@ -36,6 +14,7 @@
 
 #include "../test/verify.hpp"
 
+#include <miopen/errors.hpp>
 #include <miopen/miopen.h>
 #include <miopen/tensor.hpp>
 
@@ -118,6 +97,8 @@ private:
     std::vector<Tgpu> din;
     std::vector<Tgpu> dout;
     std::vector<Tref> dinhost;
+
+    bool use_multithread = false;
 };
 
 template <typename Tgpu, typename Tref>
@@ -134,10 +115,12 @@ int LRNDriver<Tgpu, Tref>::ParseCmdLineArgs(int argc, char* argv[])
     }
 #if 0
 	if(inflags.GetValueInt("back") == 0 && inflags.GetValueStr("mode") == "cross") {
-		printf("Cross channel LRN needs do_backward=1\n");
-		exit(0); // NOLINT (concurrency-mt-unsafe)
+		MIOPEN_THROW(miopenStatusBadParm, "Cross channel LRN needs do_backward=1");
 	}
 #endif
+
+    use_multithread = (inflags.GetValueInt("mt") != 0);
+
     return 0;
 }
 
@@ -179,6 +162,7 @@ int LRNDriver<Tgpu, Tref>::AddCmdLineArgs()
                          "within",
                          "LRN Mode (within_channel or cross_channel) (Default=within)",
                          "str");
+    inflags.AddInputFlag("mt", 'M', "0", "Use multithreaded version (Default=0)", "int");
 
     return 0;
 }
@@ -213,8 +197,7 @@ int LRNDriver<Tgpu, Tref>::SetLRNDescriptorFromCmdLineArgs()
     }
     else
     {
-        printf("Incorrect LRN Mode\n");
-        exit(0); // NOLINT (concurrency-mt-unsafe)
+        MIOPEN_THROW(miopenStatusBadParm, "Incorrect LRN Mode");
     }
 
     return (miopenSetLRNDescriptor(lrnDesc, mode, lrnN, lrnAlpha, lrnBeta, lrnK));
@@ -296,7 +279,6 @@ int LRNDriver<Tgpu, Tref>::AllocateBuffersAndCopy()
 template <typename Tgpu, typename Tref>
 int LRNDriver<Tgpu, Tref>::RunForwardGPU()
 {
-
     Tgpu alpha = static_cast<Tgpu>(1), beta = static_cast<Tgpu>(0);
 
     miopenLRNForward(GetHandle(),
@@ -414,7 +396,6 @@ int LRNDriver<Tgpu, Tref>::RunBackwardGPU()
 template <typename Tgpu, typename Tref>
 int LRNDriver<Tgpu, Tref>::VerifyForward()
 {
-
     int nInStride, cInStride, hInStride, wInStride;
     miopenGet4dTensorDescriptorStrides(inputTensor, &nInStride, &cInStride, &hInStride, &wInStride);
 
@@ -436,11 +417,11 @@ int LRNDriver<Tgpu, Tref>::VerifyForward()
 
     miopenGetLRNDescriptor(lrnDesc, &v_mode, &v_lrnN, &v_lrnAlpha, &v_lrnBeta, &v_lrnK);
 
-    Tref alphaoverarea =
+    const Tref alphaoverarea =
         (v_mode == miopenLRNCrossChannel) ? v_lrnAlpha / v_lrnN : v_lrnAlpha / (v_lrnN * v_lrnN);
 
-    int pre_pad = (v_lrnN - 1) / 2;
-    int pad     = v_lrnN - pre_pad - 1;
+    const int pre_pad = (v_lrnN - 1) / 2;
+    const int pad     = v_lrnN - pre_pad - 1;
 
     mloLRNForwardRunHost<Tgpu, Tref>(do_backward,
                                      v_mode,
@@ -468,18 +449,21 @@ int LRNDriver<Tgpu, Tref>::VerifyForward()
                                      nOutStride, // scale_v_batch_stride,
                                      in.data(),
                                      scalehost.data(),
-                                     outhost.data());
+                                     outhost.data(),
+                                     use_multithread);
 
-    auto error           = miopen::rms_range(outhost, out);
+    const auto error     = miopen::rms_range(outhost, out);
     const Tref tolerance = 1.5e-4; // 1e-6;
 
     if(!std::isfinite(error) || error > tolerance)
     {
-        std::cout << "Forward LRN FAILED: " << error << std::endl;
+        std::cout << "Forward " << (use_multithread ? "multi" : "single")
+                  << "-threaded LRN FAILED: " << error << std::endl;
     }
     else
     {
-        printf("Forward LRN Verifies on CPU and GPU (err=%f)\n", error);
+        std::cout << "Forward " << (use_multithread ? "multi" : "single")
+                  << "-threaded LRN verifies OK on CPU and GPU (err=" << error << ")" << std::endl;
     }
 
     return 0;
@@ -488,14 +472,12 @@ int LRNDriver<Tgpu, Tref>::VerifyForward()
 template <typename Tgpu, typename Tref>
 int LRNDriver<Tgpu, Tref>::RunBackwardCPU()
 {
-
     return 0;
 }
 
 template <typename Tgpu, typename Tref>
 int LRNDriver<Tgpu, Tref>::VerifyBackward()
 {
-
     int nInStride, cInStride, hInStride, wInStride;
     miopenGet4dTensorDescriptorStrides(inputTensor, &nInStride, &cInStride, &hInStride, &wInStride);
     int nIn, cIn, hIn, wIn;
@@ -525,11 +507,11 @@ int LRNDriver<Tgpu, Tref>::VerifyBackward()
 
     miopenGetLRNDescriptor(lrnDesc, &v_mode, &v_lrnN, &v_lrnAlpha, &v_lrnBeta, &v_lrnK);
 
-    Tref alphaoverarea =
+    const Tref alphaoverarea =
         (v_mode == miopenLRNCrossChannel) ? v_lrnAlpha / v_lrnN : v_lrnAlpha / (v_lrnN * v_lrnN);
 
-    int pre_pad = (v_lrnN - 1) / 2;
-    int pad     = v_lrnN - pre_pad - 1;
+    const int pre_pad = (v_lrnN - 1) / 2;
+    const int pad     = v_lrnN - pre_pad - 1;
 
     mloLRNBackwardRunHost<Tgpu, Tref>(static_cast<int>(v_mode),
                                       pad,
@@ -564,18 +546,21 @@ int LRNDriver<Tgpu, Tref>::VerifyBackward()
                                       dout.data(),
                                       scale.data(),
                                       in.data(),
-                                      dinhost.data());
+                                      dinhost.data(),
+                                      use_multithread);
 
-    auto error           = miopen::rms_range(dinhost, din);
+    const auto error     = miopen::rms_range(dinhost, din);
     const Tref tolerance = 6.0e-5;
 
     if(!std::isfinite(error) || error > tolerance)
     {
-        std::cout << "Backward LRN FAILED: " << error << std::endl;
+        std::cout << "Backward " << (use_multithread ? "multi" : "single")
+                  << "-threaded LRN FAILED: " << error << std::endl;
     }
     else
     {
-        printf("Backward LRN Verifies on CPU and GPU (err=%f)\n", error);
+        std::cout << "Backward " << (use_multithread ? "multi" : "single")
+                  << "-threaded LRN verifies OK on CPU and GPU (err=" << error << ")" << std::endl;
     }
 
     return 0;

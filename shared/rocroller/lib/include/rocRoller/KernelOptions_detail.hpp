@@ -1,32 +1,11 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
 #include "KernelOptions.hpp"
+#include <rocRoller/Parameters/Solution/LDSBankSwizzleMode.hpp>
+#include <rocRoller/Parameters/Solution/ScaleSkipPermlaneMode.hpp>
 
 namespace rocRoller
 {
@@ -39,7 +18,20 @@ namespace rocRoller
         bool alwaysWaitBeforeBranch      = false;
         bool alwaysWaitZeroBeforeBarrier = false;
 
-        bool preloadKernelArguments = true;
+        /**
+         * Maximum limit on the number of kernel arguments we will allow to be preloaded into
+         * SGPRs by the GPU at the beginning of the kernel. If it is set to -1, this is
+         * unlimited and we will use the maximum defined by the architecture.
+         */
+        int systemPreloadedKernelArguments = -1;
+
+        /**
+         * If enabled, kernel arguments that are not preloaded by the system will be lazily
+         * loaded as they are needed in the kernel. Note that this does not currently work well
+         * for complex kernels as we cannot efficiently overlap kernel argument loading with
+         * other memory traffic.
+         */
+        bool lazyLoadKernelArguments = false;
 
         unsigned int maxACCVGPRs      = 256;
         unsigned int maxSGPRs         = 102;
@@ -63,13 +55,6 @@ namespace rocRoller
          * added and we will return the existing one instead.
          */
         bool deduplicateArguments = true;
-
-        /**
-         * If enabled, command arguments are not necessarily added as kernel arguments.  We
-         * instead depend on the CleanArguments and other passes to add all necessary kernel
-         * arguments.
-         */
-        bool lazyAddArguments = true;
 
         /**
          * The minimum complexity of an expression before we will add a kernel argument to
@@ -96,7 +81,7 @@ namespace rocRoller
          * If you are running out of registers (particularly SGPRs), reducing this number
          * might help.
          */
-        int maxConcurrentSubExpressions = 2;
+        int maxConcurrentSubExpressions = 1;
 
         /**
          * The maximum number of concurrent control operations given at once to the scheduler
@@ -110,6 +95,13 @@ namespace rocRoller
         std::optional<int> maxConcurrentControlOps;
 
         /**
+         * Choose the LDS Memory observer to use for scheduling.
+         *
+         * Affects cycle count predictions for LDS instructions.
+         */
+        DSObserverType dsObserver = DSObserverType::DSMEMObserver;
+
+        /**
          * By default, we no longer allow full integer division or modulo in
          * kernels.  If this is needed for testing or some other reason, it can
          * be enabled via this option.
@@ -121,7 +113,7 @@ namespace rocRoller
          * This is experimental and requires that the input be specifically
          * modified, but will show better performance.
          */
-        bool scaleSkipPermlane = false;
+        ScaleSkipPermlaneMode scaleSkipPermlane = ScaleSkipPermlaneMode::None;
 
         /**
          * Which method to use to crash the kernel if an assertion fails.
@@ -132,6 +124,13 @@ namespace rocRoller
          * Enable/Disable the RemoveSetCoordinate transformation
          */
         bool removeSetCoordinate = false;
+
+        /**
+         * LDS bank conflict elimination via intra-wave column rotation + pair-swap swizzle.
+         * When set to Swizzle, remaps K-column indices on
+         * both the LoadTiled (write) and LoadLDSTile (read) sides to eliminate ds_read_b128 bank conflicts.
+         */
+        LDSBankSwizzleMode ldsSwizzleMode = LDSBankSwizzleMode::None;
 
         std::string toString() const;
     };

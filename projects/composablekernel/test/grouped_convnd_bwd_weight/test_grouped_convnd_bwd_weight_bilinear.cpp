@@ -140,6 +140,25 @@ class TestGroupedConvndBwdWeight : public ::testing::Test
         std::cout << "wei: " << wei_host.mDesc << std::endl;
         std::cout << "out: " << out.mDesc << std::endl;
 
+        using DeviceOp = ck::tensor_operation::device::DeviceGroupedConvBwdWeightMultipleD<
+            NDimSpatial,
+            InLayout,
+            WeiLayout,
+            OutLayout,
+            ck::Tuple<WeiLayout>,
+            InDataType,
+            WeiDataType,
+            OutDataType,
+            ck::Tuple<WeiDataType>,
+            InElementOp,
+            WeiElementOp,
+            OutElementOp>;
+
+        // get device op instances
+        const auto op_ptrs = ck::tensor_operation::device::instance::DeviceOperationInstanceFactory<
+            DeviceOp>::GetInstances();
+        std::cout << "found " << op_ptrs.size() << " instances" << std::endl;
+
         in.GenerateTensorValue(GeneratorTensor_2<InDataType>{-5, 5});
         out.GenerateTensorValue(GeneratorTensor_2<OutDataType>{-5, 5});
         d.GenerateTensorValue(GeneratorTensor_2<WeiDataType>{-5, 5});
@@ -179,23 +198,6 @@ class TestGroupedConvndBwdWeight : public ::testing::Test
 
         RunReference(conv_param, in, wei_host, out, d);
 
-        using DeviceOp = ck::tensor_operation::device::DeviceGroupedConvBwdWeightMultipleD<
-            NDimSpatial,
-            InLayout,
-            WeiLayout,
-            OutLayout,
-            ck::Tuple<WeiLayout>,
-            InDataType,
-            WeiDataType,
-            OutDataType,
-            ck::Tuple<WeiDataType>,
-            InElementOp,
-            WeiElementOp,
-            OutElementOp>;
-
-        // get device op instances
-        const auto op_ptrs = ck::tensor_operation::device::instance::DeviceOperationInstanceFactory<
-            DeviceOp>::GetInstances();
         int num_kernel = 0;
 
         for(std::size_t i = 0; i < op_ptrs.size(); ++i)
@@ -244,7 +246,8 @@ class TestGroupedConvndBwdWeight : public ::testing::Test
                 float max_accumulated_value =
                     *std::max_element(wei_host.mData.begin(), wei_host.mData.end());
 
-                const ck::index_t num_accums         = out.GetElementSize() / conv_param.K_;
+                const ck::index_t num_accums =
+                    out.GetElementSize() / (conv_param.K_ * conv_param.G_);
                 const ck::index_t num_accums_split_k = split_k;
                 double rtol =
                     ck::utils::get_relative_threshold<InDataType, WeiDataType, AccDataType>(

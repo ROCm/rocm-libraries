@@ -276,6 +276,58 @@ namespace rocisa
         }
         return module;
     }
+
+    std::shared_ptr<Module>
+        vectorAddMultiplyBpe(int dst,
+                             int src0,
+                             int src1,
+                             float bpe,
+                             const std::string&  comment)
+    {
+        auto module = std::make_shared<Module>("vectorAddMultiplyBpe");
+        std::string mcomment = comment + " (multiple bpe)";
+        auto dstVgpr  = vgpr(dst);
+        auto src0Vgpr = vgpr(src0);
+        auto src1Vgpr = vgpr(src1);
+        if (bpe == 0.5) {
+            module->addT<VAddU32>(dstVgpr, src0Vgpr, src1Vgpr, mcomment);
+            module->addT<VLShiftRightB32>(dstVgpr, 1, dstVgpr, mcomment); // mul 4 bits and div 8 bits
+        } else if (bpe == 0.75) {
+            module->addT<VAddU32>(dstVgpr, src0Vgpr, src1Vgpr, mcomment);
+            module->addT<VMulLOU32>(dstVgpr, 6, dstVgpr, mcomment); // mul 6 bits
+            module->addT<VLShiftRightB32>(dstVgpr, 3, dstVgpr, mcomment); // div 8 bits
+        } else {
+            int bpe_log2 = static_cast<int>(std::log2(bpe));
+            if (bpe_log2 == 0) {
+                module->addT<VAddU32>(dstVgpr, src0Vgpr, src1Vgpr, mcomment);
+                module->addCommentAlign(comment + " (bpe is 1, no mul)");
+            } else {
+                 module->addT<VAddLShiftLeftU32>(dstVgpr, bpe_log2, src0Vgpr, src1Vgpr, mcomment);
+            }
+        }
+        return module;
+    }
+
+    template std::shared_ptr<Module>
+        vectorMultiplyBpe<std::string, std::string>(std::string, std::string, float, const std::string&);
+    template std::shared_ptr<Module>
+        vectorMultiplyBpe<int, int>(int, int, float, const std::string&);
+
+    template std::shared_ptr<Module>
+        vectorMultiply64Bpe<int, int, int>(int, int, float, int, const std::string&);
+
+    template std::shared_ptr<Module>
+        scalarMultiplyBpe<int, int>(int, int, float, const std::string&);
+    template std::shared_ptr<Module>
+        scalarMultiplyBpe<std::string, std::string>(std::string, std::string, float, const std::string&);
+    template std::shared_ptr<Module>
+        scalarMultiplyBpe<int, std::string>(int, std::string, float, const std::string&);
+
+    template std::shared_ptr<Module>
+        scalarMultiply64Bpe<int, int, int>(int, int, float, int, const std::string&);
+    template std::shared_ptr<Module>
+        scalarMultiply64Bpe<std::string, std::string, int>(std::string, std::string, float, int, const std::string&);
+
 } // namespace rocisa
 
 void math_func(nb::module_ m)
@@ -623,4 +675,70 @@ void math_func(nb::module_ m)
           nb::arg("multiplier"),
           nb::arg("tmpSgprRes") = std::nullopt,
           nb::arg("comment")    = "");
+    m.def("vectorAddMultiplyBpe",
+          &rocisa::vectorAddMultiplyBpe,
+          nb::arg("dst"),
+          nb::arg("src0"),
+          nb::arg("src1"),
+          nb::arg("bpe"),
+          nb::arg("comment")    = "");
+    m.def("vectorMultiplyBpe",
+        nb::overload_cast<int, int, float, const std::string&>(
+            &rocisa::vectorMultiplyBpe<int, int>),
+        nb::arg("dst"),
+        nb::arg("src"),
+        nb::arg("bpe"),
+        nb::arg("comment")    = "");
+    m.def("vectorMultiplyBpe",
+        nb::overload_cast<std::string, std::string, float, const std::string&>(
+            &rocisa::vectorMultiplyBpe<std::string, std::string>),
+        nb::arg("dst"),
+        nb::arg("src"),
+        nb::arg("bpe"),
+        nb::arg("comment")    = "");
+    m.def("vectorMultiply64Bpe",
+          nb::overload_cast<int, int, float, int, const std::string&>(
+              &rocisa::vectorMultiply64Bpe<int, int, int>),
+          nb::arg("dst"),
+          nb::arg("src"),
+          nb::arg("bpe"),
+          nb::arg("tmp"),
+          nb::arg("comment")    = "");
+    m.def("scalarMultiplyBpe",
+        nb::overload_cast<int, int, float, const std::string&>(
+            &rocisa::scalarMultiplyBpe<int, int>),
+        nb::arg("dst"),
+        nb::arg("src"),
+        nb::arg("bpe"),
+        nb::arg("comment")    = "");
+    m.def("scalarMultiplyBpe",
+        nb::overload_cast<std::string, std::string, float, const std::string&>(
+            &rocisa::scalarMultiplyBpe<std::string, std::string>),
+        nb::arg("dst"),
+        nb::arg("src"),
+        nb::arg("bpe"),
+        nb::arg("comment")    = "");
+    m.def("scalarMultiplyBpe",
+        nb::overload_cast<int, std::string, float, const std::string&>(
+            &rocisa::scalarMultiplyBpe<int, std::string>),
+        nb::arg("dst"),
+        nb::arg("src"),
+        nb::arg("bpe"),
+        nb::arg("comment")    = "");
+    m.def("scalarMultiply64Bpe",
+          nb::overload_cast<int, int, float, int, const std::string&>(
+              &rocisa::scalarMultiply64Bpe<int, int, int>),
+          nb::arg("dst"),
+          nb::arg("src"),
+          nb::arg("bpe"),
+          nb::arg("tmp"),
+          nb::arg("comment")    = "");
+    m.def("scalarMultiply64Bpe",
+        nb::overload_cast<std::string, std::string, float, int, const std::string&>(
+            &rocisa::scalarMultiply64Bpe<std::string, std::string, int>),
+        nb::arg("dst"),
+        nb::arg("src"),
+        nb::arg("bpe"),
+        nb::arg("tmp"),
+        nb::arg("comment")    = "");
 }

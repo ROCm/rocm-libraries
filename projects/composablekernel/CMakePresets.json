@@ -43,12 +43,28 @@
                 "CMAKE_PREFIX_PATH": "/opt/rocm/",
                 "CMAKE_CXX_COMPILER": "/opt/rocm/llvm/bin/clang++",
                 "CMAKE_HIP_COMPILER": "/opt/rocm/llvm/bin/clang++",
-                "CMAKE_CXX_FLAGS": "-ftemplate-backtrace-limit=0 -fPIE -Wno-gnu-line-marker -fbracket-depth=512",
+                "CMAKE_CXX_FLAGS": "-ftemplate-backtrace-limit=0 -fPIE -Wno-gnu-line-marker -fbracket-depth=1024",
                 "CMAKE_BUILD_TYPE": "Release",
                 "BUILD_DEV": "ON",
                 "CMAKE_VERBOSE_MAKEFILE": "ON",
                 "USE_BITINT_EXTENSION_INT4": "OFF",
                 "GPU_TARGETS": "gfx908;gfx90a;gfx942"
+            }
+        },
+        {
+            "name": "dev-minimal",
+            "binaryDir": "${sourceDir}/build",
+            "displayName": "CK Dev - Minimal Build",
+            "description": "Fast iteration build with minimal components (configure ~5s vs ~150s)",
+            "inherits": ["dev"],
+            "cacheVariables": {
+                "BUILD_CK_DEVICE_INSTANCES": "OFF",
+                "BUILD_CK_PROFILER": "OFF",
+                "BUILD_CK_EXAMPLES": "OFF",
+                "BUILD_CK_TUTORIALS": "OFF",
+                "BUILD_CK_TILE_ENGINE": "OFF",
+                "BUILD_CK_TILE_ENGINE_TESTS": "OFF",
+                "BUILD_CK_TILE_FMHA_TESTS": "OFF"
             }
         },
         {

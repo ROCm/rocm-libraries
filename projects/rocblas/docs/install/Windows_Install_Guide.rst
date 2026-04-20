@@ -26,7 +26,8 @@ rocBLAS is supported on the same Windows versions and toolchains that HIP SDK su
 Installing prebuilt packages
 ============================
 
-rocBLAS can be installed on Windows 10 or 11 using the AMD HIP SDK installer.
+rocBLAS can be installed on Windows using the :doc:`AMD HIP SDK installer <rocm-install-on-windows:index>`.
+For version support information, see the :doc:`System requirements for Windows <rocm-install-on-windows:reference/system-requirements>`.
 
 The simplest way to use rocBLAS in your code is to use CMake. To install rocBLAS on Windows, follow these steps:
 

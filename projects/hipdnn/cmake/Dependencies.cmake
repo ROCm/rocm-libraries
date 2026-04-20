@@ -85,8 +85,10 @@ function(hipdnn_add_dependency_includes TARGET_NAME HEADER_LIB_TARGET_NAME)
 
     get_target_property(_dep_includes ${HEADER_LIB_TARGET_NAME} INTERFACE_INCLUDE_DIRECTORIES)
     if(_dep_includes)
-        message(VERBOSE "${TARGET_NAME} adding includes from ${HEADER_LIB_TARGET_NAME}: ${_dep_includes}")
-        target_include_directories(${TARGET_NAME} SYSTEM ${_visibility} ${_dep_includes})
+        foreach(_include IN LISTS _dep_includes)
+            message(VERBOSE "${TARGET_NAME} adding include from ${HEADER_LIB_TARGET_NAME}: ${_include}")
+            target_include_directories(${TARGET_NAME} SYSTEM ${_visibility} $<BUILD_INTERFACE:${_include}>)
+        endforeach()
     endif()
 
     if(ARG_COMPILE_DEFINITIONS)
@@ -129,7 +131,23 @@ function(_fetch_gtest VERSION HASH)
     _save_var(BUILD_SHARED_LIBS)
     set(BUILD_SHARED_LIBS ${HIPDNN_GTEST_SHARED} CACHE INTERNAL "")
     set(INSTALL_GTEST OFF)
+    # Suppress ROCMChecks warnings from GTest's internal cmake modifying
+    # CMAKE_C_FLAGS/CMAKE_CXX_FLAGS. ROCMChecks uses variable_watch() and always
+    # prints regardless of ROCM_WARN_TOOLCHAIN_VAR. Override the callback with a
+    # flag-gated macro wrapper (same pattern as composablekernel/cmake/gtest.cmake).
+    # Must be a macro (not function) so the flag is read in the caller's scope.
+    if(ROCM_LIBS_SUPERBUILD AND COMMAND rocm_check_toolchain_var
+            AND NOT COMMAND _rocm_check_toolchain_var)
+        # Overrides ROCMChecks callback to suppress warnings from third-party code
+        macro(rocm_check_toolchain_var var access value list_file)
+            if(NOT _HIPDNN_DISABLE_ROCM_CHECKS)
+                _rocm_check_toolchain_var("${var}" "${access}" "${value}" "${list_file}")
+            endif()
+        endmacro()
+    endif()
+    set(_HIPDNN_DISABLE_ROCM_CHECKS TRUE)
     fetchcontent_makeavailable(googletest)
+    set(_HIPDNN_DISABLE_ROCM_CHECKS FALSE)
     _restore_var(BUILD_SHARED_LIBS)
 
     _exclude_from_all(${googletest_SOURCE_DIR})

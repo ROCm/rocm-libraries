@@ -20,6 +20,18 @@
 - changed-files:
   - any-glob-to-any-file: 'dnn-providers/hipblaslt-provider/**/*'
 
+"project: hip-kernel-provider":
+- changed-files:
+  - any-glob-to-any-file: 'dnn-providers/hip-kernel-provider/**/*'
+
+"project: fusilli-provider":
+- changed-files:
+  - any-glob-to-any-file: 'dnn-providers/fusilli-provider/**/*'
+
+"project: hipdnn-integration-tests":
+- changed-files:
+  - any-glob-to-any-file: 'dnn-providers/integration-tests/**/*'
+
 "project: hipcub":
 - changed-files:
   - any-glob-to-any-file: 'projects/hipcub/**/*'
@@ -47,6 +59,11 @@
 "project: hipsparselt":
 - changed-files:
   - any-glob-to-any-file: 'projects/hipsparselt/**/*'
+  - any-glob-to-any-file: 'projects/hipblaslt/tensilelite/**/*'
+
+"ci:hipsparselt-fast":
+- changed-files:
+  - any-glob-to-any-file: 'projects/hipblaslt/tensilelite/**/*'
 
 "project: miopen":
 - changed-files:

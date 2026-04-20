@@ -22,46 +22,75 @@
 #
 # SPDX-License-Identifier: MIT
 ################################################################################
-from abc import abstractmethod
+from collections.abc import Callable
 from typing import Any, Optional
-import unittest
+from test_CustomSchedule import create_base_kernel, update_kernel, ScheduleInfo
+from Tensile.Components.CMSValidator import (
+    create_unified_timeline, ValidatorPassContext, validate_timeline,
+)
 
-from test_CustomSchedule import create_base_kernel, ScheduleInfo
 
-
-class CMSValidationTestBase(unittest.TestCase):
+class CMSValidationTestBase:
     """
     Base class for CMS validation tests that provides common setup and helper methods.
+
+    Timeline-based tests set ``validator_passes`` to a list of constraint
+    functions (e.g. ``[add_local_read_constraints]``).  The base
+    ``validation_function`` creates the ValidatorPassContext, calls each pass,
+    then runs ``validate_timeline``.
+
+    Structural-only tests (no Timeline needed) override ``validation_function``
+    directly and set ``needs_timeline = False``.
     """
-    @abstractmethod
-    def validation_function(self, sched, kernel_dict, codePathIdx):
+    # Structural-only tests (e.g. verify_ascending_order) should set this to False
+    # if their schedule format is incompatible with Timeline construction.
+    needs_timeline = True
+
+    # Subclasses set this to the list of add_*_constraints functions to run.
+    validator_passes: list[Callable[['Timeline', 'ValidatorPassContext'], None]] = []
+
+    def validation_function(self, sched, kernel_dict, codePathIdx, timeline=None):
         """
-        Method that must be implemented by subclasses.
-        NOTE: Don't use abstractmethod. Pytest will fail if this method is abstract since it tries instantiating this class.
-        Should call the appropriate validation function with the provided arguments.
-        
+        Run each pass in ``self.validator_passes`` on the timeline, then validate.
+
+        Structural-only tests override this method directly.
+
         Args:
             sched: ScheduleInfo object to validate
             kernel_dict: Dictionary containing kernel configuration
             codePathIdx: Code path index to validate
-            
+            timeline: Timeline object for timeline-based validation (None for structural checks)
+
         Returns:
             Tuple of (status: bool, message: str)
         """
-        raise NotImplementedError("Subclasses must implement validation_function")
+        if not self.validator_passes:
+            raise NotImplementedError("Subclasses must set validator_passes or override validation_function")
+        kernel = kernel_dict["kernel"]
+        ctx = ValidatorPassContext(
+            kernel=kernel,
+            mfma_reorder=sched.mfmaReorder or [],
+            swap_global_read_order=kernel.get("SwapGlobalReadOrder", False),
+        )
+        for pass_fn in self.validator_passes:
+            pass_fn(timeline, ctx)
+        message = validate_timeline(timeline)
+        if message:
+            return False, message
+        return True, ""
     
-    def setUp(self, kernel_updates: Optional[dict[str, Any]] = None):
-        """Initialize kernel and compute number of VMFMAs."""
+    def setup_method(self, method=None, *, kernel_updates: Optional[dict[str, Any]] = None):
+        """Initialize kernel and compute number of VMFMAs.
+
+        Args:
+            method: The test method about to run (passed by pytest automatically).
+                    Defaulted to None so subclasses can call super().setup_method(method)
+                    even when invoked without it.
+            kernel_updates: Optional dict of kernel config overrides.
+        """
         self.kernel = create_base_kernel()
         if kernel_updates:
-            # Handle nested ProblemType updates
-            if "ProblemType" in kernel_updates:
-                self.kernel["ProblemType"].update(kernel_updates["ProblemType"])
-                # Create a copy without ProblemType for top-level update
-                remaining_updates = {k: v for k, v in kernel_updates.items() if k != "ProblemType"}
-                self.kernel.update(remaining_updates)
-            else:
-                self.kernel.update(kernel_updates)
+            update_kernel(self.kernel, kernel_updates)
         
         self.num_vmfma = self.kernel["MIWaveTileA"] * self.kernel["MIWaveTileB"]
         self.num_vmfma *= self.kernel["DepthU"] // self.kernel["MatrixInstruction"][2]
@@ -103,7 +132,10 @@ class CMSValidationTestBase(unittest.TestCase):
         
         sched = ScheduleInfo(numCodePaths, self.num_vmfma, optSchedule, syncCode, nglshift, nllshift, nllZeroDscnt, mfmaReorder, snopCode)
 
-        status, message = self.validation_function(sched, {"kernel": self.kernel}, codePathIdx)
+        timeline = None
+        if self.needs_timeline:
+            timeline = create_unified_timeline(sched, self.kernel, codePathIdx)
+        status, message = self.validation_function(sched, {"kernel": self.kernel}, codePathIdx, timeline=timeline)
         
         if expected_message is None:
             assert status, f"Schedule should have passed validation but did not. {message}"

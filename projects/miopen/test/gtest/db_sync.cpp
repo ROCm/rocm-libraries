@@ -550,6 +550,11 @@ void SetupPaths(fs::path& fdb_file_path,
 
 TEST(CPU_DBSync_NONE, KDBTargetID)
 {
+#if defined(__SANITIZE_ADDRESS__) || (defined(__has_feature) && __has_feature(address_sanitizer))
+    // Skip kernel db test when AddressSanitizer is enabled as we have not built and cached
+    // the kernels with AddressSanitizer enabled.
+    GTEST_SKIP();
+#else
     // Skip this test for gfx11 and gfx12 to avoid test failure (we don't have databases for those
     // devices yet)
     const auto& handle = get_handle();
@@ -568,6 +573,7 @@ TEST(CPU_DBSync_NONE, KDBTargetID)
     std::ignore = pdb_file_path;
     EXPECT_TRUE(miopen::CheckKDBJournalMode(kdb_file_path));
     EXPECT_FALSE(!SKIP_KDB_PDB_TESTING && miopen::CheckKDBForTargetID(kdb_file_path));
+#endif
 }
 
 bool LogBuildMessage()
@@ -1024,10 +1030,16 @@ struct CPU_DBSync_NONE : testing::TestWithParam<std::pair<std::string, size_t>>
 
 TEST_P(CPU_DBSync_NONE, StaticFDBSync)
 {
+#if defined(__SANITIZE_ADDRESS__) || (defined(__has_feature) && __has_feature(address_sanitizer))
+    // Skip database sync tests when AddressSanitizer is enabled as the database
+    // file naming may not match the expected xnack configuration.
+    GTEST_SKIP();
+#else
     std::string arch;
     size_t num_cu;
     std::tie(arch, num_cu) = GetParam();
     StaticFDBSync(arch, num_cu);
+#endif
 }
 
 INSTANTIATE_TEST_SUITE_P(Smoke,

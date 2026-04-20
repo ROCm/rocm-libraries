@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright (c) 2024 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <miopen/conv/solvers.hpp>
 
@@ -33,7 +10,8 @@
 #include <miopen/tensor_ops.hpp>
 #include <miopen/util.hpp>
 
-#include <boost/range/adaptors.hpp>
+#include <ranges>
+#include <set>
 
 namespace miopen {
 namespace solver {
@@ -115,7 +93,7 @@ float GemmWrwBase::GetWti(const ExecutionContext&, const ProblemDescription& pro
     std::size_t in_n, in_c;
     std::tie(in_n, in_c) = tie_pick<0, 1>()(xDesc.GetLengths());
     const auto wei_spatial =
-        boost::adaptors::slice(dwDesc.GetLengths(), 2, 2 + conv.GetSpatialDimension());
+        dwDesc.GetLengths() | std::views::drop(2) | std::views::take(conv.GetSpatialDimension());
 
     // if not 1x1
     if((miopen::any_of(wei_spatial, [](auto v) { return v != 1; }) ||
@@ -147,6 +125,50 @@ float GemmWrwBase::GetWti(const ExecutionContext&, const ProblemDescription& pro
 #endif
 }
 
+bool GemmWrw1x1_stride1::IsSlow(const ExecutionContext& context,
+                                const ProblemDescription& problem) const
+{
+    const std::string& arch        = context.GetStream().GetDeviceName();
+    const std::set<std::string> mi = {"gfx942", "gfx955"};
+    const bool is_mi               = mi.find(arch) != mi.end();
+    const bool is_gfx11            = StartsWith(arch, "gfx11");
+    const bool is_gfx12            = StartsWith(arch, "gfx12");
+
+    auto b                  = problem.GetBatchSize();
+    auto s                  = problem.GetOutHeight() * problem.GetOutWidth();
+    auto c                  = problem.GetInChannels() + problem.GetOutChannels();
+    auto g                  = problem.GetGroupCount();
+    auto spatial_per_batch  = s / b;
+    auto channels_per_group = c / g;
+
+    if(is_gfx11 || is_gfx12)
+    {
+        // GemmWrw1x1_stride1 - Batch-based filtering
+        // Analysis: 8.4% terrible cases - moderate filtering benefit
+        //
+        // INVERTED PATTERN discovered: Terrible cases have HIGH batch but LOW channels
+        // - Batch separation: 16-32x (terrible > decent)
+        // - CPG separation: 0.12-0.60x (terrible < decent)
+        // - SWPG separation: 0.12-0.41x (terrible < decent)
+        //
+        // Physical interpretation: High batch + low channels = poor wave occupancy
+        //
+        // Threshold: batch > 16 AND cpg < 1400
+        // Performance: FPR=3-15%, TPR=73-87%, Score=1.65-1.79
+        if(b > 16 && channels_per_group < 1400)
+            return true;
+    }
+    else if(is_mi)
+    {
+        // SPB-ONLY: Batch fragmentation detection
+        // SPB < 48.0: Each batch item has < 48 pixels of spatial work
+        if(spatial_per_batch < 48.0)
+            return true;
+    }
+
+    return false;
+}
+
 bool GemmWrw1x1_stride1::IsApplicable(const ExecutionContext& context,
                                       const ProblemDescription& problem) const
 {
@@ -158,7 +180,7 @@ bool GemmWrw1x1_stride1::IsApplicable(const ExecutionContext& context,
     const auto& conv   = problem.GetConv();
 
     const auto wei_spatial =
-        boost::adaptors::slice(dwDesc.GetLengths(), 2, 2 + conv.GetSpatialDimension());
+        dwDesc.GetLengths() | std::views::drop(2) | std::views::take(conv.GetSpatialDimension());
 
     return miopen::all_of(wei_spatial, [](auto v) { return v == 1; }) &&
            miopen::all_of(conv.GetConvStrides(), [](auto v) { return v == 1; }) &&
@@ -208,9 +230,9 @@ ConvSolution GemmWrw1x1_stride1::GetSolution(const ExecutionContext&,
     }();
 
     const auto in_spatial =
-        boost::adaptors::slice(xDesc.GetLengths(), 2, 2 + conv.GetSpatialDimension());
+        xDesc.GetLengths() | std::views::drop(2) | std::views::take(conv.GetSpatialDimension());
     const auto out_spatial =
-        boost::adaptors::slice(dyDesc.GetLengths(), 2, 2 + conv.GetSpatialDimension());
+        dyDesc.GetLengths() | std::views::drop(2) | std::views::take(conv.GetSpatialDimension());
 
     const auto out_spatial_size = std::accumulate(
         out_spatial.begin(), out_spatial.end(), std::size_t(1), std::multiplies<std::size_t>());
@@ -313,20 +335,34 @@ size_t GemmWrwUniversal::GetWorkspaceSize(const ExecutionContext& context,
     const auto& conv   = problem.GetConv();
 
     const auto spatial_dim = conv.GetSpatialDimension();
-    const auto out_spatial = boost::adaptors::slice(dyDesc.GetLengths(), 2, 2 + spatial_dim);
-    const auto wei_spatial = boost::adaptors::slice(dwDesc.GetLengths(), 2, 2 + spatial_dim);
-    const auto wei_c       = dwDesc.GetLengths()[1];
+    const auto out_spatial =
+        dyDesc.GetLengths() | std::views::drop(2) | std::views::take(spatial_dim);
+    const auto wei_spatial =
+        dwDesc.GetLengths() | std::views::drop(2) | std::views::take(spatial_dim);
+    const auto wei_c = dwDesc.GetLengths()[1];
 
-    const auto ws_size = GetTypeSize(dyDesc.GetType()) * wei_c *
-                         std::accumulate(out_spatial.begin(),
-                                         out_spatial.end(),
-                                         std::size_t(1),
-                                         std::multiplies<std::size_t>()) *
-                         std::accumulate(wei_spatial.begin(),
-                                         wei_spatial.end(),
-                                         std::size_t(1),
-                                         std::multiplies<std::size_t>()) *
-                         conv.group_count;
+    auto ws_size = GetTypeSize(dyDesc.GetType()) * wei_c *
+                   std::accumulate(out_spatial.begin(),
+                                   out_spatial.end(),
+                                   std::size_t(1),
+                                   std::multiplies<std::size_t>()) *
+                   std::accumulate(wei_spatial.begin(),
+                                   wei_spatial.end(),
+                                   std::size_t(1),
+                                   std::multiplies<std::size_t>()) *
+                   conv.group_count;
+
+    // For bf16: extra workspace for fp32 accumulation buffer (same shape as dw)
+    const auto xDesc           = problem.GetOut();
+    const auto in_n            = xDesc.GetLengths()[0];
+    const auto need_fp32_accum = (dyDesc.GetType() == miopenBFloat16) && (in_n > 1);
+    if(need_fp32_accum)
+    {
+        const auto fp32_accum_size = GetTypeSize(miopenFloat) * dwDesc.GetElementSize();
+        // Use padded layout: im2col buffer at offset 0, fp32 accum buffer at offset ws_size
+        // (aligned to 256 bytes)
+        ws_size = ((ws_size + 255) & ~std::size_t{255}) + fp32_accum_size;
+    }
 
     if(ws_size > handle.GetMaxMemoryAllocSize())
     {
@@ -339,6 +375,43 @@ size_t GemmWrwUniversal::GetWorkspaceSize(const ExecutionContext& context,
     std::ignore = problem;
     return 0;
 #endif
+}
+
+bool GemmWrwUniversal::IsSlow(const ExecutionContext& context,
+                              const ProblemDescription& problem) const
+{
+    const std::string& arch        = context.GetStream().GetDeviceName();
+    const std::set<std::string> mi = {"gfx942", "gfx955"};
+    const bool is_mi               = mi.find(arch) != mi.end();
+    const bool is_gfx11            = StartsWith(arch, "gfx11");
+    const bool is_gfx12            = StartsWith(arch, "gfx12");
+
+    auto b                 = problem.GetBatchSize();
+    auto s                 = problem.GetOutHeight() * problem.GetOutWidth();
+    auto spatial_per_batch = s / b;
+
+    if(is_gfx11 || is_gfx12)
+    {
+        // GemmWrwUniversal - SPB-only filtering
+        // Analysis: 18.4% terrible cases - significant filtering benefit
+        //
+        // Terrible cases have high batch (16x) but very low SPB (0.00x)
+        // This indicates extreme batch fragmentation
+        //
+        // SPB < 100: Low spatial-per-batch = batch fragmentation
+        // Performance: FPR=19-27%, TPR=72-92%, Score=1.49-1.66
+        if(spatial_per_batch < 100)
+            return true;
+    }
+    else if(is_mi)
+    {
+        // SPB-ONLY: Batch fragmentation detection
+        // SPB < 48.0: Each batch item has < 48 pixels of spatial work
+        if(spatial_per_batch < 48.0)
+            return true;
+    }
+
+    return false;
 }
 
 bool GemmWrwUniversal::IsApplicable(const ExecutionContext& context,
@@ -394,12 +467,36 @@ ConvSolution GemmWrwUniversal::GetSolution(const ExecutionContext& context,
     const auto in_c           = xDesc.GetLengths()[1];
     const auto wei_k          = dwDesc.GetLengths()[0];
 
+    // bf16: accumulate in fp32 workspace when batch_size > 1
+    const auto data_type      = dyDesc.GetType();
+    const auto use_fp32_accum = (data_type == miopenBFloat16) && (in_n > 1);
+    const auto lowp_quant     = conv.lowp_quant;
+    const auto dw_lengths     = dwDesc.GetLengths();
+    const auto dw_strides     = dwDesc.GetStrides();
+    // im2col workspace size (before padding/alignment)
+    const auto im2col_ws_size = [&]() {
+        const auto wei_c = dwDesc.GetLengths()[1];
+        const auto out_sp =
+            dyDesc.GetLengths() | std::views::drop(2) | std::views::take(spatial_dims);
+        const auto wei_sp =
+            dwDesc.GetLengths() | std::views::drop(2) | std::views::take(spatial_dims);
+        return GetTypeSize(data_type) * wei_c *
+               std::accumulate(
+                   out_sp.begin(), out_sp.end(), std::size_t(1), std::multiplies<std::size_t>()) *
+               std::accumulate(
+                   wei_sp.begin(), wei_sp.end(), std::size_t(1), std::multiplies<std::size_t>()) *
+               conv.group_count;
+    }();
+    // Offset to fp32 accumulation buffer within workspace (256-byte aligned)
+    const auto fp32_accum_offset =
+        use_fp32_accum ? ((im2col_ws_size + 255) & ~std::size_t{255}) : std::size_t{0};
+
     const auto in_spatial_ =
-        boost::adaptors::slice(xDesc.GetLengths(), 2, 2 + conv.GetSpatialDimension());
+        xDesc.GetLengths() | std::views::drop(2) | std::views::take(conv.GetSpatialDimension());
     const auto wei_spatial_ =
-        boost::adaptors::slice(dwDesc.GetLengths(), 2, 2 + conv.GetSpatialDimension());
+        dwDesc.GetLengths() | std::views::drop(2) | std::views::take(conv.GetSpatialDimension());
     const auto out_spatial_ =
-        boost::adaptors::slice(dyDesc.GetLengths(), 2, 2 + conv.GetSpatialDimension());
+        dyDesc.GetLengths() | std::views::drop(2) | std::views::take(conv.GetSpatialDimension());
 
     const auto in_spatial  = std::vector<std::size_t>(in_spatial_.begin(), in_spatial_.end());
     const auto wei_spatial = std::vector<std::size_t>(wei_spatial_.begin(), wei_spatial_.end());
@@ -449,9 +546,23 @@ ConvSolution GemmWrwUniversal::GetSolution(const ExecutionContext& context,
 
             // Zeroing out the output buffer
             float zero = 0.0f;
-            SetTensor(handle, dwDesc_, dw, &zero);
-
             float time = 0;
+
+            // For bf16 with batch > 1: accumulate into fp32 workspace, then cast
+            Data_t accum_buf = dw;
+            if(use_fp32_accum)
+            {
+                accum_buf = static_cast<Data_t>(static_cast<char*>(workspace) + fp32_accum_offset);
+                TensorDescriptor fp32Desc(miopenFloat, dw_lengths, dw_strides);
+                SetTensor(handle, fp32Desc, accum_buf, &zero);
+            }
+            else
+            {
+                SetTensor(handle, dwDesc_, dw, &zero);
+            }
+
+            if(handle.IsProfilingEnabled())
+                time += handle.GetKernelTime();
 
             for(std::size_t i = 0; i < in_n; i++)
             {
@@ -476,34 +587,74 @@ ConvSolution GemmWrwUniversal::GetSolution(const ExecutionContext& context,
 
                 if(group_count > 1)
                 {
-                    status = CallGemmStridedBatched(handle,
-                                                    gemm_desc,
-                                                    dy,
-                                                    out_offset,
-                                                    workspace,
-                                                    0,
-                                                    dw,
-                                                    0,
-                                                    GemmBackend_t::rocblas);
+                    if(use_fp32_accum)
+                    {
+                        status = CallGemmStridedBatched(handle,
+                                                        gemm_desc,
+                                                        dy,
+                                                        out_offset,
+                                                        workspace,
+                                                        0,
+                                                        accum_buf,
+                                                        0,
+                                                        miopenFloat);
+                    }
+                    else
+                    {
+                        status = CallGemmStridedBatched(handle,
+                                                        gemm_desc,
+                                                        dy,
+                                                        out_offset,
+                                                        workspace,
+                                                        0,
+                                                        dw,
+                                                        0,
+                                                        GemmBackend_t::rocblas);
+                    }
                 }
                 else
                 {
-                    // dw = dy * transpose(Im2Col(x))
-                    status = CallGemm(handle,
-                                      gemm_desc,
-                                      dy,
-                                      out_offset,
-                                      workspace,
-                                      0,
-                                      dw,
-                                      0,
-                                      GemmBackend_t::rocblas);
+                    if(use_fp32_accum)
+                    {
+                        // dw = dy * transpose(Im2Col(x))  -- accumulated in fp32
+                        status = CallGemm(handle,
+                                          gemm_desc,
+                                          dy,
+                                          out_offset,
+                                          workspace,
+                                          0,
+                                          accum_buf,
+                                          0,
+                                          miopenFloat);
+                    }
+                    else
+                    {
+                        // dw = dy * transpose(Im2Col(x))
+                        status = CallGemm(handle,
+                                          gemm_desc,
+                                          dy,
+                                          out_offset,
+                                          workspace,
+                                          0,
+                                          dw,
+                                          0,
+                                          GemmBackend_t::rocblas);
+                    }
                 }
 
                 if(status != miopenStatusSuccess)
                     MIOPEN_THROW("GemmWrw1x1_stride1 execution failure.");
 
                 // Update times for both the kernels
+                if(handle.IsProfilingEnabled())
+                    time += handle.GetKernelTime();
+            }
+
+            // Cast fp32 accumulation buffer back to bf16
+            if(use_fp32_accum)
+            {
+                TensorDescriptor fp32Desc(miopenFloat, dw_lengths, dw_strides);
+                CastTensor(handle, &lowp_quant, false, fp32Desc, accum_buf, dwDesc_, dw, 0, 0);
                 if(handle.IsProfilingEnabled())
                     time += handle.GetKernelTime();
             }

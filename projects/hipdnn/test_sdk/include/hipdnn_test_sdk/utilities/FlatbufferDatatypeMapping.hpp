@@ -3,17 +3,22 @@
 
 #pragma once
 
-#include <hipdnn_data_sdk/data_objects/data_types_generated.h>
-#include <hipdnn_data_sdk/utilities/UtilsBfp16.hpp>
-#include <hipdnn_data_sdk/utilities/UtilsFp16.hpp>
+#include <hipdnn_data_sdk/types.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
+
+namespace hipdnn_test_sdk::utilities
+{
+using hipdnn_data_sdk::types::bfloat16;
+using hipdnn_data_sdk::types::half;
+}
 
 namespace hipdnn_test_sdk::utilities
 {
 
-template <hipdnn_data_sdk::data_objects::DataType DT>
+template <hipdnn_flatbuffers_sdk::data_objects::DataType DT>
 constexpr auto datatypeToNative()
 {
-    using DataType = hipdnn_data_sdk::data_objects::DataType;
+    using DataType = hipdnn_flatbuffers_sdk::data_objects::DataType;
 
     if constexpr(DT == DataType::FLOAT)
     {
@@ -33,18 +38,19 @@ constexpr auto datatypeToNative()
     }
     else if constexpr(DT == DataType::BFLOAT16)
     {
-        return hip_bfloat16{};
+        return bfloat16{};
     }
     else
     {
+        // NOLINTNEXTLINE(misc-redundant-expression) Intentional: DT != DT is a dependent false for constexpr-if
         static_assert(DT != DT, "Unsupported DataType");
     }
 }
 
-inline std::variant<float, half, double, int32_t, hip_bfloat16>
-    datatypeToNativeVariant(hipdnn_data_sdk::data_objects::DataType type)
+inline std::variant<float, half, double, int32_t, bfloat16>
+    datatypeToNativeVariant(hipdnn_flatbuffers_sdk::data_objects::DataType type)
 {
-    using DataType = hipdnn_data_sdk::data_objects::DataType;
+    using DataType = hipdnn_flatbuffers_sdk::data_objects::DataType;
 
     switch(type)
     {
@@ -61,7 +67,7 @@ inline std::variant<float, half, double, int32_t, hip_bfloat16>
         return int32_t{};
         break;
     case DataType::BFLOAT16:
-        return hip_bfloat16{};
+        return bfloat16{};
         break;
     default:
         throw std::runtime_error("Error: Invalid type");
@@ -69,27 +75,27 @@ inline std::variant<float, half, double, int32_t, hip_bfloat16>
 }
 
 template <typename T>
-constexpr hipdnn_data_sdk::data_objects::DataType nativeTypeToDataType()
+constexpr hipdnn_flatbuffers_sdk::data_objects::DataType nativeTypeToDataType()
 {
     if constexpr(std::is_same_v<T, float>)
     {
-        return hipdnn_data_sdk::data_objects::DataType::FLOAT;
+        return hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT;
     }
     else if constexpr(std::is_same_v<T, half>)
     {
-        return hipdnn_data_sdk::data_objects::DataType::HALF;
+        return hipdnn_flatbuffers_sdk::data_objects::DataType::HALF;
     }
     else if constexpr(std::is_same_v<T, double>)
     {
-        return hipdnn_data_sdk::data_objects::DataType::DOUBLE;
+        return hipdnn_flatbuffers_sdk::data_objects::DataType::DOUBLE;
     }
     else if constexpr(std::is_same_v<T, int32_t>)
     {
-        return hipdnn_data_sdk::data_objects::DataType::INT32;
+        return hipdnn_flatbuffers_sdk::data_objects::DataType::INT32;
     }
-    else if constexpr(std::is_same_v<T, hip_bfloat16>)
+    else if constexpr(std::is_same_v<T, bfloat16>)
     {
-        return hipdnn_data_sdk::data_objects::DataType::BFLOAT16;
+        return hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16;
     }
     else
     {
@@ -97,7 +103,7 @@ constexpr hipdnn_data_sdk::data_objects::DataType nativeTypeToDataType()
     }
 }
 
-template <hipdnn_data_sdk::data_objects::DataType DT>
+template <hipdnn_flatbuffers_sdk::data_objects::DataType DT>
 using DataTypeToNative = decltype(datatypeToNative<DT>());
 
 template <typename T>

@@ -1,6 +1,6 @@
 ################################################################################
 #
-# Copyright (C) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -127,7 +127,7 @@ class GSU(Component):
         return module
 
     @abc.abstractmethod
-    def noLoadLoop(self, writer, kernel, tensorParametersA, tensorParametersB, pack):
+    def noLoadLoop(self, writer, kernel, tensorParametersA, tensorParametersB, pack, packPre):
         pass
 
     @abc.abstractmethod
@@ -143,6 +143,14 @@ class GSU(Component):
         module.addComment1("global read addresses: increments a")
         for i in reversed(range(kernel["ProblemType"]["NumIndicesSummation"])):
             module.add(writer.graIncrements(kernel, i, tensorParametersA))
+        if kernel["ProblemType"]["MXBlockA"]:
+          module.addComment1("global read addresses: increments mxsa")
+          for i in reversed(range(kernel["ProblemType"]["NumIndicesSummation"])):
+              module.add(writer.graIncrements(kernel, i, tensorParametersA["MX"]))
+        if kernel["ProblemType"]["MXBlockB"]:
+          module.addComment1("global read addresses: increments mxsb")
+          for i in reversed(range(kernel["ProblemType"]["NumIndicesSummation"])):
+              module.add(writer.graIncrements(kernel, i, tensorParametersB["MX"]))
         if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
             module.addComment1("global read addresses: increments metadata")
             for i in reversed(range(kernel["ProblemType"]["NumIndicesSummation"])):
@@ -194,10 +202,9 @@ class GSUOff(GSU):
         loopChar = writer.states.indexChars[dimIdx]
         stride = writer.strideRef(tc, dimIdx)
         isMirrorIdx = dimIdx in kernel["ProblemType"]["MirrorDims%s"%tc]
-
-        m = "DepthU*Bpe%s"%(tcGR)
+        m = int(kernel["_DepthU%s"%tc] * tP["bpeGR"])
         if isMirrorIdx:
-          m = "-%s"%(m)
+          m = -m
 
         if writer.states.globalReadIncsUseVgpr:
             with writer.allocTmpSgpr(2) as tmpSgprInfo:
@@ -232,7 +239,7 @@ class GSUOff(GSU):
         module = Module("GSU Off computeStoreSrdStart")
         return module
 
-    def noLoadLoop(self, writer, kernel, tensorParametersA, tensorParametersB, pack):
+    def noLoadLoop(self, writer, kernel, tensorParametersA, tensorParametersB, pack, packPre):
         module = Module("GSU Off noLoadLoop")
         return module
 
@@ -340,9 +347,9 @@ class GSUOn(GSU):
         depthUDiv = kernel["DepthU"]
         # swizzle
         if (tP["isSwizzled"] and tc == 'A'):
-            depthUDiv = "%s%s"%(kernel["DepthU"], "*MI_M")
+            depthUDiv = kernel["DepthU"] * kernel["MatrixInstM"]
         elif (tP["isSwizzled"] and tc == 'B'):
-            depthUDiv = "%s%s"%(kernel["DepthU"], "*MI_N")
+            depthUDiv = kernel["DepthU"] * kernel["MatrixInstN"]
 
         gsuOffsetStr = "gsuOffset = DepthU*bpeGR*GSUSumIdx"
         divider = 1
@@ -355,9 +362,9 @@ class GSUOn(GSU):
             if divider != 1:
                 depthUDiv = depthU // divider
                 gsuOffsetStr = "gsuOffset = DepthU/%s*bpeGR*GSUSumIdx"%(divider)
-        gsucLabelStr = "GSUC_%s"%( "A" if tP["isA"] else "B" if tP["isB"] else "M" )
-        gsucLabel    = Label(label=writer.labels.getNameInc(gsucLabelStr), comment="")
-        gsucLabelEnd = Label(label=writer.labels.getNameInc("%s_End"%(gsucLabelStr)), comment="")
+
+        gsucLabel    = Label(label=writer.labels.getNameInc(f"GSUC_{tc}"), comment="")
+        gsucLabelEnd = Label(label=writer.labels.getNameInc(f"GSUC_{tc}_End"), comment="")
         module.add(SAndB32(dst=sgpr(stmp), src0=sgpr("GSU"), src1=hex(0x8000), comment="SCC = (GSUC == 1) ?"))
         module.add(SCBranchSCC1(labelName=gsucLabel.getLabelName(), comment="branch if GSUC == 1"))
         gsuOffsetStr = "gsuOffset = DepthU*GSUSumIdx"
@@ -398,10 +405,12 @@ class GSUOn(GSU):
             with writer.allocTmpSgpr(3) as tmpSgprInfo:
                 tmpSgpr = tmpSgprInfo.idx
                 gsuSgpr = tmpSgpr + 2
+                du = kernel["_DepthU%s"%tc]
+                duBpe = int(du * tP["bpeGR"])
                 module.add(SAndB32(dst=sgpr(tmpSgpr), src0=sgpr("GSU"), src1=hex(0x3FFF), comment="Restore GSU"))
-                module.add(SMulI32(dst=sgpr(gsuSgpr), src0=sgpr(tmpSgpr), src1="DepthU*%d"%(tP["bpeGR"]), comment="GSU*DepthU*Bpe"))
+                module.add(SMulI32(dst=sgpr(gsuSgpr), src0=sgpr(tmpSgpr), src1=duBpe, comment="GSU*DepthU*Bpe"))
                 module.add(SAndB32(dst=sgpr(tmpSgpr), src0=sgpr("GSU"), src1=hex(0x8000), comment="SCC = (GSUC == 1) ?"))
-                module.add(SCMovB32(dst=sgpr(gsuSgpr), src="DepthU*%d"%(tP["bpeGR"]), comment="DepthU*Bpe if GSUC = 1"))
+                module.add(SCMovB32(dst=sgpr(gsuSgpr), src=duBpe, comment="DepthU*Bpe if GSUC = 1"))
                 module.add(SMulI32(dst=sgpr(tmpSgpr+0), src0=sgpr(gsuSgpr), src1=stride, \
                     comment="incr%s%s = %s*DepthU*bpeGR (unrollIdx)"%(tc, loopChar, stride) ))
                 # TODO - this should be mul-H??
@@ -422,15 +431,17 @@ class GSUOn(GSU):
 
                 tcGR = tc if tc == "Metadata" else (tc + "GR")
 
-                # swizzle
-                mult_MI_Dim = ""
+                # swizzle: resolve MI dimension to numeric value
+                mi_dim = 1
                 if tc == "A" and kernel["ProblemType"]["SwizzleTensorA"]:
-                    mult_MI_Dim = "*MI_M"
+                    mi_dim = kernel["MatrixInstM"]
                 elif tc == "B" and kernel["ProblemType"]["SwizzleTensorB"]:
-                    mult_MI_Dim = "*MI_N"
+                    mi_dim = kernel["MatrixInstN"]
 
+                du = kernel["_DepthU%s"%tc]
+                duBpe = int(du * tP["bpeGR"]) * mi_dim
                 module.add(SAndB32(dst=sgpr(gsuSgpr), src0=sgpr("GSU"), src1=hex(0x3FFF), comment="Restore GSU"))
-                module.add(SMulI32(dst=sgpr(gsuSgpr), src0=sgpr(gsuSgpr), src1="DepthU*Bpe%s%s"%(tcGR, mult_MI_Dim), comment="GSU*DepthU*Bpe%s"%(mult_MI_Dim)))
+                module.add(SMulI32(dst=sgpr(gsuSgpr), src0=sgpr(gsuSgpr), src1=duBpe, comment="GSU*DepthU*Bpe*MI_dim(%d)"%(mi_dim)))
                 module.add(SAndB32(dst=sgpr(tmpSgpr), src0=sgpr("GSU"), src1=hex(0x8000), comment="SCC = (GSUC == 1) ?"))
 
                 m = sgpr(gsuSgpr)
@@ -439,19 +450,13 @@ class GSUOn(GSU):
                     m.setMinus(True)
 
                 incr = sgpr("GlobalReadIncs%s+%u"%(tc, loopIdx))
-                duBpe = "DepthU*Bpe%s%s"%(tcGR, mult_MI_Dim)
+                duBpe = int(du * tP["bpeGR"]) * mi_dim
                 # multiply by stride, optimizing if unit stride
                 if writer.isConstUnitStride(stride):
                     module.add(SCSelectB32(dst=incr, src0=duBpe, src1=m, comment="incr%s (unrollIdx)"%(tc)))
                 else:
                     module.add(SCMovB32(dst=m, src=duBpe, comment="DepthU*Bpe if GSUC = 1"))
                     module.add(SMulI32(dst=incr, src0=m, src1=stride, comment="incr%s unrollIdx)"%(tc) ))
-
-                if kernel["ProblemType"]["Sparse"]:
-                    if tP["is_sparse"]:
-                        module.add(SLShiftRightB32(dst=incr, shiftHex=hex(log2(2)), src=incr))
-                    elif tP["isM"]:
-                        module.add(SLShiftRightB32(dst=incr, shiftHex=hex(log2(8)), src=incr))
 
         return module
 
@@ -531,7 +536,7 @@ class GSUOn(GSU):
         module.add(self.computeStoreSrdStartCommon(writer, kernel))
         return module
 
-    def noLoadLoop(self, writer, kernel, tensorParametersA, tensorParametersB, pack):
+    def noLoadLoop(self, writer, kernel, tensorParametersA, tensorParametersB, pack, packPre):
         module = Module("GSU On noLoadLoop")
 
         isDTV = (kernel["DirectToVgprA"] or kernel["DirectToVgprB"])
@@ -568,10 +573,12 @@ class GSUOn(GSU):
                 # last NLL or  pack DTV case, no deep copy for pack
                 # pack code for local prefetch is generated in noLoadLoopBody and used for DTV even
                 deepCopyPack = pack
+                deepCopyPackPre = packPre
               else:
                 # deepCopy packCode for OptNLL noLoadLoop
                 deepCopyPack = deepcopy(pack)
-              noLoadLoopModules.add(writer.noLoadLoop(kernel, tensorParametersA, tensorParametersB, isOptNLL=True, isNGLL=False, pack=deepCopyPack, NLLindex=NLLindex, NLLnum=NLLnum))
+                deepCopyPackPre = deepcopy(packPre)
+              noLoadLoopModules.add(writer.noLoadLoop(kernel, tensorParametersA, tensorParametersB, isOptNLL=True, isNGLL=False, pack=deepCopyPack, packPre=deepCopyPackPre, NLLindex=NLLindex, NLLnum=NLLnum))
               writer.restoreLocalPointers(kernel, tensorParametersA, tensorParametersB)
 
             acclen = countInstruction(noLoadLoopModules)

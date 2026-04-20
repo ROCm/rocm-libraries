@@ -129,6 +129,7 @@ set( kgen_embed_files
      ${CMAKE_SOURCE_DIR}/library/src/device/generator/rtc_radix_functions/radix_17.h
 
      # extra files for generating standalone test harnesses for kernels
+     ${CMAKE_SOURCE_DIR}/shared/sys_mem.h
      ${CMAKE_SOURCE_DIR}/shared/device_properties.h
      ${CMAKE_SOURCE_DIR}/shared/rocfft_hip.h
      ${CMAKE_SOURCE_DIR}/shared/gpubuf.h
@@ -214,7 +215,6 @@ set( solship_py ${CMAKE_SOURCE_DIR}/library/src/device/solution-shipping.py )
 
 # default folder of solution maps that will be built in library,
 # user can specify their own arch and folder
-set( sol_gpu_arch ${GPU_TARGETS} )
 if( NOT ROCFFT_SOLUTION_MAP_DIR )
   set( ROCFFT_SOLUTION_MAP_DIR ${CMAKE_SOURCE_DIR}/library/solution_map CACHE STRING "RocFFT solution map directory" )
 endif()
@@ -224,8 +224,7 @@ file(GLOB solution_map_files "${ROCFFT_SOLUTION_MAP_DIR}/*.dat")
 add_custom_command(
   OUTPUT ${gen_solutions}
   COMMAND ${Python3_EXECUTABLE} ${solship_py}
-  --gpu-arch="${sol_gpu_arch}"
-  --data-folder=${ROCFFT_SOLUTION_MAP_DIR}
+  --solution_files ${solution_map_files}
   DEPENDS ${solution_map_files}
   COMMENT "Put solution map from external text file into library"
 )
@@ -233,6 +232,8 @@ add_custom_command(
 # The following is a list of implementation files defining the library
 set( rocfft_source
   auxiliary.cpp
+  data_layout.cpp
+  exec_info.cpp
   plan.cpp
   transform.cpp
   repo.cpp
@@ -403,6 +404,11 @@ add_library( rocfft
   )
 rocfft_add_coverage_flags( rocfft )
 
+if( WIN32 )
+  configure_file(${CMAKE_CURRENT_SOURCE_DIR}/rocfft.rc.in ${CMAKE_CURRENT_BINARY_DIR}/rocfft.rc)
+  target_sources(rocfft PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/rocfft.rc)
+endif()
+
 # rocFFT contains default implementations of callback functions that
 # need to be built as relocatable device code (causes failure at link
 # stage on Windows)
@@ -526,14 +532,6 @@ endif()
 # enable a configure-time option to skip kernel cache building
 option( ROCFFT_KERNEL_CACHE_ENABLE "Enable building rocFFT kernel cache" ON)
 
-# cache file should go next to the shared object - on Windows this
-# would be the DLL, not the import library.
-if( WIN32 )
-  set( ROCFFT_KERNEL_CACHE_PATH ${CMAKE_BINARY_DIR}/staging/rocfft_kernel_cache.db )
-else()
-  set( ROCFFT_KERNEL_CACHE_PATH ${CMAKE_BINARY_DIR}/library/src/rocfft_kernel_cache.db )
-endif()
-
 # ROCFFT_BUILD_KERNEL_CACHE_PATH may be specified as a temporary file
 # to collect compiled kernels before writing them out as part of the
 # build.  any kernels that already exist in this file will be reused
@@ -560,16 +558,41 @@ if ( ROCFFT_KERNEL_CACHE_ENABLE )
   list( REMOVE_ITEM GPU_TARGETS_AOT gfx1152 )
   list( REMOVE_ITEM GPU_TARGETS_AOT gfx1153 )
   list( REMOVE_ITEM GPU_TARGETS_AOT gfx1200 )
-  add_custom_command(
-    OUTPUT rocfft_kernel_cache.db
-    COMMAND "${CMAKE_CURRENT_BINARY_DIR}/rocfft_aot_helper" \"${ROCFFT_BUILD_KERNEL_CACHE_PATH}\" ${ROCFFT_KERNEL_CACHE_PATH} $<TARGET_FILE:rocfft_rtc_helper> ${GPU_TARGETS_AOT}
-    DEPENDS rocfft_aot_helper rocfft_rtc_helper
-    COMMENT "Compile kernels into shipped cache file"
-  )
-  add_custom_target( rocfft_kernel_cache_target ALL
-    DEPENDS rocfft_kernel_cache.db
-    VERBATIM
-  )
+
+  # build separate kernel cache for each target
+  foreach( arch IN ITEMS ${GPU_TARGETS_AOT} )
+    # cache file should go next to the shared object - on Windows this
+    # would be the DLL, not the import library.
+    if( WIN32 )
+      set( arch_kernel_cache_path ${CMAKE_BINARY_DIR}/staging/rocfft_kernel_cache_${arch}.db )
+    else()
+      set( arch_kernel_cache_path ${CMAKE_BINARY_DIR}/library/src/rocfft_kernel_cache_${arch}.db )
+    endif()
+
+    add_custom_command(
+      OUTPUT rocfft_kernel_cache_${arch}.db
+      COMMAND "${CMAKE_CURRENT_BINARY_DIR}/rocfft_aot_helper" \"${ROCFFT_BUILD_KERNEL_CACHE_PATH}\" ${arch_kernel_cache_path} $<TARGET_FILE:rocfft_rtc_helper> ${arch}
+      DEPENDS rocfft_aot_helper rocfft_rtc_helper
+      COMMENT "Compile ${arch} kernels into shipped cache file"
+    )
+    add_custom_target( rocfft_kernel_cache_${arch}_target ALL
+      DEPENDS rocfft_kernel_cache_${arch}.db
+      VERBATIM
+    )
+
+    # make each AOT build depend on the previous one, so that only one is
+    # running at a time.  The AOT build will itself spawn a bunch of
+    # processes to take advantage of multiple CPUs.
+    if( previous_arch )
+      add_dependencies( rocfft_kernel_cache_${arch}_target rocfft_kernel_cache_${previous_arch}_target )
+    endif()
+    set( previous_arch ${arch} )
+
+    # maintain a list of all cache files we produce for install
+    list( APPEND ROCFFT_KERNEL_CACHE_PATHS ${arch_kernel_cache_path} )
+
+  endforeach()
+
 endif()
 
 rocm_set_soversion( rocfft ${rocfft_SOVERSION} )
@@ -603,7 +626,7 @@ else()
 endif()
 
 if( NOT ENABLE_ASAN_PACKAGING AND ROCFFT_KERNEL_CACHE_ENABLE)
-  rocm_install(FILES ${ROCFFT_KERNEL_CACHE_PATH}
+  rocm_install(FILES ${ROCFFT_KERNEL_CACHE_PATHS}
     DESTINATION "${ROCFFT_KERNEL_CACHE_INSTALL_DIR}"
     COMPONENT runtime
   )

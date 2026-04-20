@@ -29,7 +29,7 @@
 #include <miopen/filesystem.hpp>
 #include <miopen/kernel.hpp>
 
-#ifndef MIOPEN_USE_CLANG_TIDY // Huge generated source
+#ifndef MIOPEN_USE_CLANG_TIDY
 // clang-format off
 ${KERNELS_DECLS}
 // clang-format on
@@ -37,23 +37,45 @@ ${KERNELS_DECLS}
 
 namespace miopen {
 
+namespace {
+
+#ifndef MIOPEN_USE_CLANG_TIDY
+inline void addKernel(std::unordered_map<fs::path, std::string_view, FsPathHash>& map,
+                      const char* name,
+                      const char* ptr,
+                      size_t size)
+{
+    map.emplace(fs::path(name), std::string_view(ptr, size));
+}
+
+#define ADD_KERNEL(map, name, ptr, size) addKernel(map, name, ptr, size)
+#endif
+
+// Build kernel map using emplace() to avoid stack overflow from large initializer_list
+std::unordered_map<fs::path, std::string_view, FsPathHash>* buildKernelMap()
+{
+    auto* map = new std::unordered_map<fs::path, std::string_view, FsPathHash>();
+#ifndef MIOPEN_USE_CLANG_TIDY
+    map->reserve(7000);
+    ${INSERT_KERNELS};
+#undef ADD_KERNEL
+#endif
+    return map;
+}
+
+} // anonymous namespace
+
 const std::unordered_map<fs::path, std::string_view, FsPathHash>& kernels()
 {
-    static const std::unordered_map<fs::path, std::string_view, FsPathHash> data{
-#ifndef MIOPEN_USE_CLANG_TIDY // Huge generated source
-        ${INIT_KERNELS}
-#endif
-    };
-    return data;
+    static auto* data_ptr = buildKernelMap();
+    return *data_ptr;
 }
 
 std::string_view GetKernelSrc(const fs::path& name)
 {
-    // Use the base name of the string
     auto it = kernels().find(name.filename());
     if(it == kernels().end())
         MIOPEN_THROW("Failed to load kernel source: " + name.filename());
-
     return it->second;
 }
 

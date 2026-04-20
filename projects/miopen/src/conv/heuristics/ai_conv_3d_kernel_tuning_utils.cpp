@@ -54,7 +54,6 @@ int LayoutStringToCode(const std::string& layout)
 }
 
 // Helper: Extract 3D convolution features
-MIOPEN_INTERNALS_EXPORT
 std::map<std::string, float>
 GetFeatures3D(const ProblemDescription& problem, int /*max_cu*/, const std::string& /*arch*/)
 {
@@ -189,7 +188,6 @@ std::vector<std::string> ProcessExplicitXdlParams(const std::vector<std::string>
 }
 
 // Helper: Tokenize kernel string
-MIOPEN_INTERNALS_EXPORT
 std::vector<std::string> GetKernelAsTokens(const std::string& kernel)
 {
     std::vector<std::string> tokens;
@@ -302,7 +300,6 @@ std::vector<std::string> GetKernelAsTokens(const std::string& kernel)
 }
 
 // Helper: Fill indexes and kernels from valid_kernels
-MIOPEN_INTERNALS_EXPORT
 void FillHeuristicKernels(const std::vector<std::string>& valid_kernels,
                           std::vector<int>& indexes,
                           std::vector<std::vector<std::string>>& kernels)
@@ -330,7 +327,6 @@ void FillHeuristicKernels(const std::vector<std::string>& valid_kernels,
 // TODO: new CK functionality will use -1 for autodeduction, so we could add -1 to the list.
 // Note that the current models have not been trained with -1 in mind, so it may not work as
 // expected.
-MIOPEN_INTERNALS_EXPORT
 std::vector<int> GenerateSplitK(int max_split_k)
 {
     std::vector<int> split_ks;
@@ -364,33 +360,6 @@ RunParameterPredictionModel<int8_t, bool (*)(int, int)>(
     std::function<std::vector<std::string>(const ProblemDescription&)>,
     std::string,
     bool (*&&)(int, int));
-#if MIOPEN_USE_COMPOSABLEKERNEL
-
-template std::pair<bool, miopen::ai::tuning::candidate_selection::CandidateSelectionResult>
-RunParameterPredictionModel<ck::half_t, bool (*)(int, int)>(
-    const miopen::ExecutionContext&,
-    const ProblemDescription&,
-    std::vector<std::string>&,
-    int&,
-    int&,
-    std::string&,
-    std::function<std::vector<std::string>(const ProblemDescription&)>,
-    std::string,
-    bool (*&&)(int, int));
-
-template std::pair<bool, miopen::ai::tuning::candidate_selection::CandidateSelectionResult>
-RunParameterPredictionModel<ck::bhalf_t, bool (*)(int, int)>(
-    const miopen::ExecutionContext&,
-    const ProblemDescription&,
-    std::vector<std::string>&,
-    int&,
-    int&,
-    std::string&,
-    std::function<std::vector<std::string>(const ProblemDescription&)>,
-    std::string,
-    bool (*&&)(int, int));
-#endif // MIOPEN_USE_COMPOSABLEKERNEL
-
 // helper function to get a dummy execution context for when we do not have a real context
 const miopen::ExecutionContext& GetDummyCtx()
 {

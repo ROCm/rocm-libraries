@@ -216,6 +216,17 @@ class LocalRead(Component):
     """
     Local read block.
     """
+    def _getLdsReadMemToken(self, writer, kernel, tP):
+        from rocisa.container import MemTokenData
+        tok = writer.states.ldsReadTokenIdx
+        return MemTokenData([tok]), tok
+
+    def _emitLdsRead(self, writer, kernel, tP, LocalReadX, dst, src, ds, module, comment=""):
+        ldsMemToken, ldsMemTokenIdx = self._getLdsReadMemToken(writer, kernel, tP)
+        fullComment = "%s sync LDS%u" % (comment, ldsMemTokenIdx) if comment else "sync LDS%u" % ldsMemTokenIdx
+        inst = LocalReadX(dst=dst, src=src, ds=ds, comment=fullComment)
+        inst.setMemToken(ldsMemToken)
+        module.add(inst)
 
 class SumUnroll(Component):
     """
@@ -270,6 +281,11 @@ class SIA(Component):
 
 class GlobalWriteComponents(Component):
     pass
+
+class TensorDataMover(Component):
+    """
+    TDM
+    """
 
 # Importing here allows auto-registry of components in the Components directory.
 # Each file must be listed in __all__ in Components/__init__.py

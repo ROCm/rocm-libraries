@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <rocRoller/CommonSubexpressionElim.hpp>
 #include <rocRoller/Expression.hpp>
@@ -739,19 +716,24 @@ namespace rocRoller
             }
 
             Register::ValuePtr resultPlaceholder(ResultType const& resType,
-                                                 bool              allowSpecial = true,
-                                                 int               valueCount   = 1) const
+                                                 bool              allowSpecial = true) const
             {
+                // Obtain the register count by dividing the value count of the result type by its packing
+                size_t count = resType.valueCount
+                               / (resType.varType.dataType == DataType::None
+                                      ? 1
+                                      : DataTypeInfo::Get(resType.varType).packing);
+
                 if(Register::IsSpecial(resType.regType) && resType.varType == DataType::Bool)
                 {
                     if(allowSpecial)
                         return m_context->getSCC();
                     else
                         return Register::Value::Placeholder(
-                            m_context, Register::Type::Scalar, resType.varType, valueCount);
+                            m_context, Register::Type::Scalar, resType.varType, count);
                 }
                 return Register::Value::Placeholder(
-                    m_context, resType.regType, resType.varType, valueCount);
+                    m_context, resType.regType, resType.varType, count);
             }
 
             /**
@@ -946,6 +928,7 @@ namespace rocRoller
             auto rv      = visitor.call(*expr);
 
             updateDistances(rv);
+            updatePriorityOrder(rv);
 
             return rv;
         }
@@ -1005,6 +988,126 @@ namespace rocRoller
                     if(tree.at(idxB).distanceFromRoot < newLevel)
                         tree[idxB].distanceFromRoot = newLevel;
                 }
+            }
+        }
+
+        namespace
+        {
+            /**
+             * @brief Computes Sethi-Ullman inspired weights for each node.
+             *
+             * Weights approximate the minimum number of registers needed to evaluate
+             * a subtree. The algorithm processes nodes bottom-up:
+             *
+             * - Leaf nodes: weight = 0 for literals (immediate operands),
+             *               weight = 1 for values needing a register
+             * - Internal nodes: sort dependency weights descending, then
+             *               weight = max(w[0], w[1]+1, w[2]+2, w[3]+3, ...)
+             */
+            std::vector<int> ComputeWeights(ExpressionTree const& tree)
+            {
+                std::vector<int> weights(tree.size());
+
+                // Process in topological order (the tree is already sorted this way)
+                for(size_t i = 0; i < tree.size(); ++i)
+                {
+                    auto const& node = tree.at(i);
+
+                    // Leaf node - base case
+                    if(node.deps.empty())
+                    {
+                        weights[i] = (node.regType() == Register::Type::Literal) ? 0 : 1;
+                        continue;
+                    }
+
+                    // Collect and sort dependency weights (heaviest first)
+                    std::vector<int> depWeights;
+                    depWeights.reserve(node.deps.size());
+                    for(int dep : node.deps)
+                        depWeights.push_back(weights[dep]);
+                    std::sort(depWeights.begin(), depWeights.end(), std::greater<int>());
+
+                    // Child j needs +j registers to hold results of children 0..j-1.
+                    weights[i] = depWeights[0];
+                    for(size_t j = 1; j < depWeights.size(); ++j)
+                        weights[i] = std::max(weights[i], depWeights[j] + static_cast<int>(j));
+                }
+
+                return weights;
+            }
+
+            /**
+             * @brief Recursive helper for computing Sethi-Ullman inspired traversal order.
+             *
+             * Visits nodes in post-order, with heavier children visited first.
+             */
+            void ComputeOrderRecursive(ExpressionTree const&   tree,
+                                       std::vector<int> const& weights,
+                                       std::vector<int>&       order,
+                                       int                     nodeIdx,
+                                       int&                    orderCounter)
+            {
+                if(order[nodeIdx] != -1) // already visited
+                    return;
+
+                auto const& node = tree.at(nodeIdx);
+
+                // Get dependencies sorted by weight (heaviest first)
+                std::vector<int> deps(node.deps.begin(), node.deps.end());
+                std::sort(deps.begin(), deps.end(), [&weights](int a, int b) {
+                    if(weights[a] != weights[b])
+                        return weights[a] > weights[b]; // heaviest first
+                    return a < b; // tie-breaker
+                });
+
+                for(int dep : deps)
+                    ComputeOrderRecursive(tree, weights, order, dep, orderCounter);
+
+                // Assign order to this node after all children are processed
+                order[nodeIdx] = orderCounter++;
+            }
+        } // namespace
+
+        void updatePriorityOrder(ExpressionTree& tree)
+        {
+            if(tree.empty())
+                return;
+
+            // Verify topological order
+            for(size_t idx = 0; idx < tree.size(); idx++)
+            {
+                auto const& node = tree[idx];
+                if(node.deps.empty())
+                    continue;
+
+                int maxDep = 0;
+                for(int dep : node.deps)
+                    maxDep = std::max(maxDep, dep);
+
+                AssertFatal(maxDep < static_cast<int>(idx),
+                            "ExpressionTree is not in topological order!!",
+                            ShowValue(maxDep),
+                            ShowValue(idx));
+            }
+
+            auto weights = ComputeWeights(tree);
+
+            // Compute traversal order: visit heavier subtrees first
+            std::vector<int> order(tree.size(), -1); // -1 means not visited
+            int              orderCounter = 0;
+
+            // Start from the root (last node in the tree)
+            int rootIdx = static_cast<int>(tree.size()) - 1;
+            ComputeOrderRecursive(tree, weights, order, rootIdx, orderCounter);
+
+            // Store the computed order in each node
+            for(size_t i = 0; i < tree.size(); ++i)
+            {
+                AssertFatal(order[i] != -1,
+                            "Node not visited in ExpressionTree!!",
+                            ShowValue(i),
+                            ShowValue(order[i]));
+                tree[i].priorityOrder = order[i];
             }
         }
 

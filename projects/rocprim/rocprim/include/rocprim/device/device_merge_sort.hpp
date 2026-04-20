@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -74,12 +74,7 @@ inline hipError_t merge_sort_block_merge_impl(
 
     using selector = merge_sort_block_merge_config_selector<key_type, value_type>;
 
-    detail::target_arch target_arch;
-    ROCPRIM_RETURN_ON_ERROR(host_target_arch(stream, target_arch));
-    detail::gpu target_gpu;
-    ROCPRIM_RETURN_ON_ERROR(host_target_gpu(stream, target_gpu));
-
-    const target current_target(target_arch, target_gpu);
+    const target current_target(stream);
 
     const auto         params                   = get_config<selector>(Config{}, current_target);
     const unsigned int merge_oddeven_block_size = params.merge_oddeven_config.block_size;
@@ -158,10 +153,10 @@ inline hipError_t merge_sort_block_merge_impl(
                     start = std::chrono::steady_clock::now();
                 }
 
-                auto device_block_merge_mergepath_partition_kernel = [=](auto arch_config)
+                auto device_block_merge_mergepath_partition_kernel = [=](auto target_config)
                 {
                     static constexpr merge_sort_block_merge_config_params params
-                        = decltype(arch_config)::params;
+                        = decltype(target_config)::params;
                     static constexpr unsigned int items_per_tile
                         = params.merge_mergepath_config.block_size
                           * params.merge_mergepath_config.items_per_thread;
@@ -228,16 +223,18 @@ inline hipError_t merge_sort_block_merge_impl(
                 {
                     start = std::chrono::steady_clock::now();
                 }
-                auto device_block_merge_mergepath_kernel = [=](auto arch_config) mutable
+                auto device_block_merge_mergepath_kernel = [=](auto target_config) mutable
                 {
+                    using TargetConfig = decltype(target_config);
                     static constexpr merge_sort_block_merge_config_params params
-                        = decltype(arch_config)::params;
+                        = TargetConfig::params;
 
                     using merge_impl
                         = block_merge_impl<key_type,
                                            value_type,
                                            params.merge_mergepath_config.block_size,
-                                           params.merge_mergepath_config.items_per_thread>;
+                                           params.merge_mergepath_config.items_per_thread,
+                                           TargetConfig::wavefront>;
 
                     using VSmemHelperT = detail::vsmem_helper_impl<merge_impl>;
                     ROCPRIM_SHARED_MEMORY
@@ -281,10 +278,10 @@ inline hipError_t merge_sort_block_merge_impl(
                 // for size and block.
                 // Note: shared memory is not used in this kernel so there is no need to pass vsmem
 
-                auto device_block_merge_oddeven_kernel = [=](auto arch_config)
+                auto device_block_merge_oddeven_kernel = [=](auto target_config)
                 {
                     static constexpr merge_sort_block_merge_config_params params
-                        = decltype(arch_config)::params;
+                        = decltype(target_config)::params;
                     block_merge_oddeven_kernel<params.merge_oddeven_config.block_size,
                                                params.merge_oddeven_config.items_per_thread>(
                         keys_input_,
@@ -380,12 +377,7 @@ inline hipError_t merge_sort_block_merge(
 
     using selector = merge_sort_block_merge_config_selector<key_type, value_type>;
 
-    detail::target_arch target_arch;
-    ROCPRIM_RETURN_ON_ERROR(host_target_arch(stream, target_arch));
-    detail::gpu target_gpu;
-    ROCPRIM_RETURN_ON_ERROR(host_target_gpu(stream, target_gpu));
-
-    const target current_target(target_arch, target_gpu);
+    const target current_target(stream);
 
     const auto         params                     = get_config<selector>(Config{}, current_target);
     const unsigned int merge_mergepath_block_size = params.merge_mergepath_config.block_size;
@@ -472,12 +464,7 @@ inline hipError_t merge_sort_block_sort(KeysInputIterator    keys_input,
 
     using selector = merge_sort_block_sort_config_selector<key_type, value_type>;
 
-    detail::target_arch target_arch;
-    ROCPRIM_RETURN_ON_ERROR(host_target_arch(stream, target_arch));
-    detail::gpu target_gpu;
-    ROCPRIM_RETURN_ON_ERROR(host_target_gpu(stream, target_gpu));
-
-    const target current_target(target_arch, target_gpu);
+    const target current_target(stream);
 
     const auto params    = get_config<selector>(Config{}, current_target);
     sort_items_per_block = params.kernel_config.block_size * params.kernel_config.items_per_thread;
@@ -500,9 +487,10 @@ inline hipError_t merge_sort_block_sort(KeysInputIterator    keys_input,
         start = std::chrono::steady_clock::now();
     }
 
-    auto block_sort_kernel = [=](auto arch_config) mutable
+    auto block_sort_kernel = [=](auto target_config) mutable
     {
-        constexpr auto params = decltype(arch_config)::params;
+        using TargetConfig    = decltype(target_config);
+        constexpr auto params = TargetConfig::params;
 
         constexpr unsigned int items_per_block
             = params.kernel_config.block_size * params.kernel_config.items_per_thread;
@@ -520,7 +508,8 @@ inline hipError_t merge_sort_block_sort(KeysInputIterator    keys_input,
         using sort_impl = block_sort_impl<key_type,
                                           value_type,
                                           params.kernel_config.block_size,
-                                          params.kernel_config.items_per_thread>;
+                                          params.kernel_config.items_per_thread,
+                                          TargetConfig::wavefront>;
         using VSmemHelperT = detail::vsmem_helper_impl<sort_impl>;
 
         ROCPRIM_SHARED_MEMORY typename VSmemHelperT::static_temp_storage_t static_temp_storage;
@@ -569,11 +558,11 @@ template<class BlockSortTarget,
 ROCPRIM_KERNEL
 void device_merge_sort_compile_time_verifier_arch()
 {
-    using BSArchConfig = target_config<BlockSortConfig, BlockSortSelector, BlockSortTarget>;
-    using BMArchConfig = target_config<BlockMergeConfig, BlockMergeSelector, BlockMergeTarget>;
+    using BSTargetConfig = target_config<BlockSortConfig, BlockSortSelector, BlockSortTarget>;
+    using BMTargetConfig = target_config<BlockMergeConfig, BlockMergeSelector, BlockMergeTarget>;
 
-    static constexpr auto bs_params = BSArchConfig::params;
-    static constexpr auto bm_params = BMArchConfig::params;
+    static constexpr auto bs_params = BSTargetConfig::params;
+    static constexpr auto bm_params = BMTargetConfig::params;
 
     static constexpr unsigned int sort_items_per_block
         = bs_params.kernel_config.block_size * bs_params.kernel_config.items_per_thread;
@@ -643,20 +632,22 @@ template<class BlockSortTarget,
          class Value>
 inline size_t merge_sort_vsmem_size_for_target(size_t size)
 {
-    using BSArchConfig = target_config<BlockSortConfig, BlockSortSelector, BlockSortTarget>;
-    using BMArchConfig = target_config<BlockMergeConfig, BlockMergeSelector, BlockMergeTarget>;
+    using BSTargetConfig = target_config<BlockSortConfig, BlockSortSelector, BlockSortTarget>;
+    using BMTargetConfig = target_config<BlockMergeConfig, BlockMergeSelector, BlockMergeTarget>;
 
-    static constexpr auto bs_params = BSArchConfig::params;
-    static constexpr auto bm_params = BMArchConfig::params;
+    static constexpr auto bs_params = BSTargetConfig::params;
+    static constexpr auto bm_params = BMTargetConfig::params;
 
     using bs_sort_impl = block_sort_impl<Key,
                                          Value,
                                          bs_params.kernel_config.block_size,
-                                         bs_params.kernel_config.items_per_thread>;
+                                         bs_params.kernel_config.items_per_thread,
+                                         BSTargetConfig::wavefront>;
     using bm_sort_impl = block_merge_impl<Key,
                                           Value,
                                           bm_params.merge_mergepath_config.block_size,
-                                          bm_params.merge_mergepath_config.items_per_thread>;
+                                          bm_params.merge_mergepath_config.items_per_thread,
+                                          BMTargetConfig::wavefront>;
 
     using BlockSortVSmemHelperT = detail::vsmem_helper_impl<bs_sort_impl>;
     using MergeSortVSmemHelperT = detail::vsmem_helper_impl<bm_sort_impl>;
@@ -774,12 +765,7 @@ inline hipError_t merge_sort_impl(
 
     unsigned int sort_items_per_block = 1; // We will get this later from the block_sort algorithm
 
-    detail::target_arch target_arch;
-    ROCPRIM_RETURN_ON_ERROR(host_target_arch(stream, target_arch));
-    detail::gpu target_gpu;
-    ROCPRIM_RETURN_ON_ERROR(host_target_gpu(stream, target_gpu));
-
-    const target current_target(target_arch, target_gpu);
+    const target current_target(stream);
 
     const auto         params = get_config<selector_bm>(block_merge_config{}, current_target);
     const bool         use_mergepath = size > params.merge_oddeven_config.size_limit;
@@ -926,6 +912,8 @@ inline hipError_t merge_sort_impl(
 /// \parblock
 /// In this example a device-level ascending merge sort is performed on an array of
 /// \p float values.
+///
+/// The full example is [on GitHub](https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocprim/example/rocprim/device/example_merge_sort.cpp).
 ///
 /// \code{.cpp}
 /// #include <rocprim/rocprim.hpp>

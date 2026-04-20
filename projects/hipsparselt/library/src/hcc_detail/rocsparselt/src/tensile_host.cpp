@@ -296,7 +296,7 @@ namespace
         TensileLite::TensorDescriptor scaleAlphaVec{"scaleAlphaVec"};
 
         // The ContractionProblemGemm
-        TensileLite::ContractionProblemGemm tensileProblem{a,
+        TensileLite::ContractionProblemGemm tensileProblem(a,
                                                        b,
                                                        c,
                                                        d,
@@ -310,9 +310,10 @@ namespace
                                                        freeIndex,
                                                        batchIndex,
                                                        boundIndex,
-                                                       *prob.beta,
-                                                       prob.workspaceSize};
-        tensileProblem.setComputeInputType(Tensile_Ti);
+                                                       static_cast<double>(*prob.beta),
+                                                       prob.workspaceSize);
+        tensileProblem.setComputeInputTypeA(Tensile_Ti);
+        tensileProblem.setComputeInputTypeB(Tensile_Ti);
         tensileProblem.setAlphaType(Tensile_Tc);
         tensileProblem.setBetaType(Tensile_Tc);
 
@@ -342,7 +343,8 @@ namespace
         // Add problem predicates for CEqualsD
         tensileProblem.setCEqualsD(prob.C == prob.D);
 
-        tensileProblem.setSparse(prob.sparseA ? 1 : 2);
+        // Workaround: metadata layout
+        tensileProblem.setSparse(prob.sparseA ? 1 : 2, 0);
 
         // set Actvation
         tensileProblem.setActivationType(TensileLite::ActivationType::All);
@@ -1011,6 +1013,7 @@ rocsparselt_status getBestSolutions(const RocsparseltContractionProblem<Ti, To, 
 
     hardware          = TensileLite::hip::GetDevice(*deviceProp);
     auto tensile_prob = ConstructTensileProblem(prob);
+
     // auto handle = prob.handle;
     auto solutions = library->findTopSolutions(tensile_prob, *hardware, requestConfigs);
 
