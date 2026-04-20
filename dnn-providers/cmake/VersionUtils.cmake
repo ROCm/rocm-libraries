@@ -48,7 +48,7 @@ endfunction()
 # Function to generate the version header from version.h.in in VERSION_DIR
 function(dnn_provider_generate_version_header COMPONENT_NAME TARGET_NAME VERSION_DIR)
     configure_file(
-        "${VERSION_DIR}/version.h.in"
+        "${VERSION_DIR}/templates/version.h.in"
         "${CMAKE_CURRENT_BINARY_DIR}/include/version.h"
         @ONLY
     )
