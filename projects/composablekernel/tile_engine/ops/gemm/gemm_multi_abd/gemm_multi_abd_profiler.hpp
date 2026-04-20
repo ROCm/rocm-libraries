@@ -231,11 +231,12 @@ class GemmMultiABDProfiler
         e_device_buf.FromDevice(e_dev_result.data());
         bool verified_correct =
             !setting_.verify ||
-            compare<GemmMultiABDProblem>(name,
-                                         problem.k_,
-                                         1, // Multi ABD currently supports only k_batch = 1
-                                         e_dev_result,
-                                         e_host_result);
+            compare<ADataType, BDataType, AccDataType, EDataType, DBaseDataType>(
+                name,
+                problem.k_,
+                1, // Multi ABD currently supports only k_batch = 1
+                e_dev_result,
+                e_host_result);
 
         if(verified_correct)
         {

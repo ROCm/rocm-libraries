@@ -15,10 +15,6 @@
 #include "ck_tile/ops/gemm.hpp"
 #include "ck_tile/ops/gemm/kernel/gemm_multi_abd_kernel.hpp"
 #include "ck_tile/ops/elementwise/unary_element_wise_operation.hpp"
-// CDataType alias needed because gemm_benchmark.hpp declares compare<Problem>
-// with HostTensor<CDataType>& parameters. Multi ABD uses EDataType as the output type.
-using CDataType = EDataType;
-
 #include "gemm/gemm_benchmark.hpp"
 
 #include "gemm_multi_abd_common.hpp"
@@ -30,7 +26,6 @@ using CDataType = EDataType;
 // No hardcoded type definitions here to avoid conflicts
 struct GemmMultiABDProblem
 {
-    using D0DataType = ::DBaseDataType; // enable shared compare<Problem> via SFINAE
 
     int split_k_;
     int m_, n_, k_;
