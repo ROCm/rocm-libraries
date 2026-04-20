@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -95,7 +95,7 @@ inline void sort_keys()
             SCOPED_TRACE(testing::Message() << "with size= " << size);
             // Generate data
             std::vector<key_type> keys_input;
-            if(std::is_floating_point<key_type>::value)
+            if constexpr(std::is_floating_point<key_type>::value)
             {
                 keys_input = test_utils::get_random_data<key_type>(size,
                                                                    (key_type)-1000,
@@ -169,7 +169,7 @@ inline void sort_keys()
             HIP_CHECK(
                 test_common_utils::hipMallocHelper(&d_temporary_storage, temporary_storage_bytes));
 
-            if(descending)
+            if constexpr(descending)
             {
                 HIP_CHECK(
                     hipcub::DeviceSegmentedRadixSort::SortKeysDescending(d_temporary_storage,
@@ -246,7 +246,7 @@ inline void sort_keys_empty_data()
 
             // Generate data
             std::vector<key_type> keys_input;
-            if(std::is_floating_point<key_type>::value)
+            if constexpr(std::is_floating_point<key_type>::value)
             {
                 keys_input = test_utils::get_random_data<key_type>(size,
                                                                    static_cast<key_type>(-1000),
@@ -300,7 +300,7 @@ inline void sort_keys_empty_data()
             HIP_CHECK(
                 test_common_utils::hipMallocHelper(&d_temporary_storage, temporary_storage_bytes));
 
-            if(descending)
+            if constexpr(descending)
             {
                 HIP_CHECK(
                     hipcub::DeviceSegmentedRadixSort::SortKeysDescending(d_temporary_storage,
@@ -373,7 +373,7 @@ inline void sort_keys_large_segments()
 
         // Generate data
         std::vector<key_type> keys_input;
-        if(std::is_floating_point<key_type>::value)
+        if constexpr(std::is_floating_point<key_type>::value)
         {
             keys_input = test_utils::get_random_data<key_type>(size,
                                                                static_cast<key_type>(-1000),
@@ -438,7 +438,7 @@ inline void sort_keys_large_segments()
         HIP_CHECK(
             test_common_utils::hipMallocHelper(&d_temporary_storage, temporary_storage_bytes));
 
-        if(descending)
+        if constexpr(descending)
         {
             HIP_CHECK(hipcub::DeviceSegmentedRadixSort::SortKeysDescending(d_temporary_storage,
                                                                            temporary_storage_bytes,
@@ -517,7 +517,7 @@ inline void sort_keys_unspecified_ranges()
 
             // Generate data
             std::vector<key_type> keys_input;
-            if(std::is_floating_point<key_type>::value)
+            if constexpr(std::is_floating_point<key_type>::value)
             {
                 keys_input = test_utils::get_random_data<key_type>(size,
                                                                    static_cast<key_type>(-1000),
@@ -618,7 +618,7 @@ inline void sort_keys_unspecified_ranges()
             HIP_CHECK(
                 test_common_utils::hipMallocHelper(&d_temporary_storage, temporary_storage_bytes));
 
-            if(descending)
+            if constexpr(descending)
             {
                 HIP_CHECK(
                     hipcub::DeviceSegmentedRadixSort::SortKeysDescending(d_temporary_storage,
@@ -700,7 +700,7 @@ inline void sort_pairs()
             SCOPED_TRACE(testing::Message() << "with size= " << size);
             // Generate data
             std::vector<key_type> keys_input;
-            if(std::is_floating_point<key_type>::value)
+            if constexpr(std::is_floating_point<key_type>::value)
             {
                 keys_input = test_utils::get_random_data<key_type>(size,
                                                                    (key_type)-1000,
@@ -799,7 +799,7 @@ inline void sort_pairs()
             HIP_CHECK(
                 test_common_utils::hipMallocHelper(&d_temporary_storage, temporary_storage_bytes));
 
-            if(descending)
+            if constexpr(descending)
             {
                 HIP_CHECK(
                     hipcub::DeviceSegmentedRadixSort::SortPairsDescending(d_temporary_storage,
@@ -897,7 +897,7 @@ inline void sort_pairs_unspecified_ranges()
 
             // Generate data
             std::vector<key_type> keys_input;
-            if(std::is_floating_point<key_type>::value)
+            if constexpr(std::is_floating_point<key_type>::value)
             {
                 keys_input = test_utils::get_random_data<key_type>(size,
                                                                    static_cast<key_type>(-1000),
@@ -1026,7 +1026,7 @@ inline void sort_pairs_unspecified_ranges()
             HIP_CHECK(
                 test_common_utils::hipMallocHelper(&d_temporary_storage, temporary_storage_bytes));
 
-            if(descending)
+            if constexpr(descending)
             {
                 HIP_CHECK(
                     hipcub::DeviceSegmentedRadixSort::SortPairsDescending(d_temporary_storage,
@@ -1123,7 +1123,7 @@ inline void sort_keys_double_buffer()
             SCOPED_TRACE(testing::Message() << "with size= " << size);
             // Generate data
             std::vector<key_type> keys_input;
-            if(std::is_floating_point<key_type>::value)
+            if constexpr(std::is_floating_point<key_type>::value)
             {
                 keys_input = test_utils::get_random_data<key_type>(size,
                                                                    (key_type)-1000,
@@ -1198,7 +1198,7 @@ inline void sort_keys_double_buffer()
             HIP_CHECK(
                 test_common_utils::hipMallocHelper(&d_temporary_storage, temporary_storage_bytes));
 
-            if(descending)
+            if constexpr(descending)
             {
                 HIP_CHECK(
                     hipcub::DeviceSegmentedRadixSort::SortKeysDescending(d_temporary_storage,
@@ -1280,7 +1280,7 @@ inline void sort_pairs_double_buffer()
             SCOPED_TRACE(testing::Message() << "with size= " << size);
             // Generate data
             std::vector<key_type> keys_input;
-            if(std::is_floating_point<key_type>::value)
+            if constexpr(std::is_floating_point<key_type>::value)
             {
                 keys_input = test_utils::get_random_data<key_type>(size,
                                                                    (key_type)-1000,
@@ -1380,7 +1380,7 @@ inline void sort_pairs_double_buffer()
             HIP_CHECK(
                 test_common_utils::hipMallocHelper(&d_temporary_storage, temporary_storage_bytes));
 
-            if(descending)
+            if constexpr(descending)
             {
                 HIP_CHECK(
                     hipcub::DeviceSegmentedRadixSort::SortPairsDescending(d_temporary_storage,

@@ -186,7 +186,7 @@ inline void sort_keys()
             test_utils::test_kernel_wrapper(
                 [&](void* d_temporary_storage, auto& temporary_storage_bytes)
                 {
-                    if(descending)
+                    if constexpr(descending)
                     {
                         return rocprim::segmented_radix_sort_keys_desc<config>(
                             d_temporary_storage,
