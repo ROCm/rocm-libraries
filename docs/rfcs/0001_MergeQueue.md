@@ -135,12 +135,17 @@ Two takeaways:
 
 ### 4.3 Opt-in
 
-Two centralized edits add a project to the queue:
+Dependencies between components are expressed through queue membership in the `PATH_TO_QUEUES` config. The rule: a PR enters its own component's queue plus the queue of every component it depends on. When a component's PR sits in another component's queue, it serializes with that component's PRs — that is the blocking relationship.
 
-1. Append a path → queue list to the path/queue config (`PATH_TO_QUEUES`).
-2. Append a corresponding scope block to the Mergify config (for CI status visibility).
+To opt in a new component, two edits are needed:
 
-There is no per-project file. Removing both entries opts a project out cleanly. The initial opt-in set is hipDNN core + four providers + integration-tests. Other rocm-libraries projects are explicitly out of scope for v1.
+1. **Add your path entry.** Map your path prefix to a list of queues: your own queue, plus the queue of anything you depend on. For example, a new provider that depends on `integration-tests`:
+   ```python
+   "dnn-providers/new-provider/": ["new-provider", "integration-tests"],
+   ```
+2. **Update upstream entries.** Any component that depends on *you* must add your queue to its list. For hipDNN core (which depends on all providers), add `"new-provider"` to the `projects/hipdnn/` entry so that core PRs serialize with the new provider.
+
+There is no per-project file. Removing the entry (and your queue from other entries) opts a project out cleanly. The initial opt-in set is hipDNN core + four providers + integration-tests. Other rocm-libraries projects are explicitly out of scope for v1.
 
 ### 4.4 PR lifecycle
 
@@ -235,9 +240,7 @@ Batch merging (`batch_size > 1`), a priority lane for short-running PRs, a dashb
 A working prototype implementing a near-cousin of this design exists on `fork/develop`. The configuration must be reshaped to match this RFC before adoption — specifically, the provider rows in `PATH_TO_QUEUES` must add `integration-tests`, the `dnn-providers/integration-tests/` row must add the four providers, and `merge_queue_command.py` must drop its hard write-access gate to allow PR authors per [§4.6](#46-permissions). The files involved:
 
 - `.github/workflows/merge-queue-{command,process,status}.yml`
-- `.github/workflows/mergify-scopes.yml`
 - `.github/scripts/merge_queue.py`
 - `.github/scripts/merge_queue_command.py`
 - `.github/scripts/merge_queue_config.py` — the path → queue table from [§4.2](#42-path--queue-mapping) lives here
 - `.github/scripts/merge_queue_process.py`
-- `.mergify.yml` — scopes for CI status visibility
