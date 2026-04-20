@@ -7,19 +7,45 @@
 #include <tuple>
 
 #include "ck_tile/ops/direct_convolution/kernel/grouped_4c_fp16_tile_conv_impl.hpp"
+#include "ck_tile/ops/direct_convolution/kernel/grouped_4c_fp16_tile_conv_impl_v2.hpp"
+#include "ck_tile/ops/direct_convolution/utils/common.hpp"
 #include "ck_tile/ops/grouped_convolution/utils/grouped_conv_host_args.hpp"
 #include "ck_tile/host/kernel_launch.hpp"
 
 namespace ck_tile::direct_conv {
+
+template <Version V>
+struct VersionTraits;
+
+template <>
+struct VersionTraits<Version::v1>
+{
+    static constexpr auto& configs = grouped_4c_tile::configs;
+    static constexpr auto get_launch_params = &grouped_4c_tile::get_launch_params;
+    static constexpr auto launch = &grouped_4c_tile::launch;
+    static constexpr auto make_variant = &grouped_4c_tile::make_variant;
+};
+
+template <>
+struct VersionTraits<Version::v2>
+{
+    static constexpr auto& configs = grouped_4c_tile::v2::configs;
+    static constexpr auto get_launch_params = &grouped_4c_tile::v2::get_launch_params;
+    static constexpr auto launch = &grouped_4c_tile::v2::launch;
+    static constexpr auto make_variant = &grouped_4c_tile::v2::make_variant;
+};
 
 /// Wrapper struct that presents the grouped_4c Fprop kernel (at a specific config index)
 /// with the same public API as the im2col-based GroupedConvolutionForwardKernel.
 ///
 /// This enables integration into the CK profiler and builder testing infrastructure
 /// which expects kernels to provide GetName(), IsSupportedArgument(), MakeKernelArgs(), etc.
-template <int ConfigIdx>
+template <int ConfigIdx, Version Ver = Version::v1>
 struct DirectTileConvForward4CFp16Kernel
 {
+
+    using V = VersionTraits<Ver>;
+
     struct KernelArgs
     {
         Conv2dParams par;
@@ -31,7 +57,7 @@ struct DirectTileConvForward4CFp16Kernel
 
     std::string GetName() const
     {
-        return "direct_tile_conv_fp16_fwd_" + grouped_4c_tile::configs[ConfigIdx].GetName();
+        return "direct_tile_conv_fp16_fwd_" + V::configs[ConfigIdx].GetName();
     }
 
     std::string GetTypeString() const { return GetName(); }
@@ -63,14 +89,13 @@ struct DirectTileConvForward4CFp16Kernel
         par.order      = TensorOrder::NHWC;
         par.compute_output_size();
 
-        auto lp = grouped_4c_tile::get_launch_params(ConfigIdx, par);
-
+        auto lp = V::get_launch_params(ConfigIdx, par);
         return {par, lp, host_args.in_ptr, host_args.wei_ptr, host_args.out_ptr};
     }
 
     static bool IsSupportedArgument(const KernelArgs& kargs)
     {
-        auto variant = grouped_4c_tile::make_variant();
+        auto variant = V::make_variant();
         return variant.is_applicable(kargs.par) &&
                variant.config_is_compatible(kargs.par, ConfigIdx);
     }
@@ -79,7 +104,7 @@ struct DirectTileConvForward4CFp16Kernel
 
     static dim3 BlockSize()
     {
-        return dim3(static_cast<unsigned>(grouped_4c_tile::configs[ConfigIdx].block_size()));
+        return dim3(static_cast<unsigned>(V::configs[ConfigIdx].block_size()));
     }
 
     static constexpr ck_tile::index_t GetSmemSize() { return 0; }
@@ -93,7 +118,7 @@ struct DirectTileConvForward4CFp16Kernel
             return {false, 0.0f, GetInstanceString()};
 
         auto callable = [&](const ck_tile::stream_config& sc) {
-            grouped_4c_tile::launch(ConfigIdx,
+            V::launch(ConfigIdx,
                                kargs.lp,
                                kargs.par,
                                kargs.in_ptr,

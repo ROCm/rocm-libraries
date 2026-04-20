@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "test_grouped_4c_fp16_harness.hpp"
+#include "ck_tile/ops/direct_convolution/utils/common.hpp"
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wold-style-cast"
@@ -11,18 +12,27 @@
 #include "ck_tile/ops/direct_convolution/kernel/direct_conv_bwd_data_4c_fp16_tile_conv_kernel.hpp"
 #pragma clang diagnostic pop
 
+template <ck_tile::direct_conv::Version Ver = ck_tile::direct_conv::Version::v1>
 struct TileConvKernelTraits
 {
     template <int ConfigIdx>
-    using FwdKernel = ck_tile::direct_conv::DirectTileConvForward4CFp16Kernel<ConfigIdx>;
+    using FwdKernel = ck_tile::direct_conv::DirectTileConvForward4CFp16Kernel<ConfigIdx, Ver>;
     template <int ConfigIdx>
     using BwdDataKernel = ck_tile::direct_conv::DirectTileConvBwdData4CFp16Kernel<ConfigIdx>;
 };
 
+constexpr auto v2 = ck_tile::direct_conv::Version::v2;
+
 class DirectConvGrouped4cFp16TileConvTest
-    : public DirectConvGrouped4cFp16TestHarness<TileConvKernelTraits>
+    : public DirectConvGrouped4cFp16TestHarness<TileConvKernelTraits<>>
 {
 };
+
+class DirectConvGrouped4cFp16TileConvTestV2
+    : public DirectConvGrouped4cFp16TestHarness<TileConvKernelTraits<v2>>
+{
+};
+
 
 // Config index reference:
 //   Fprop (cyclic-shift swizzle): 5 (wc64=2,wq4=8), 6 (2,4), 7 (2,2), 8 (2,1), 9 (1,1)
@@ -157,7 +167,7 @@ TEST_F(DirectConvGrouped4cFp16TileConvTest, Dgrad_Config4_LargerSpatial)
 // XOR swizzle — Fprop configs 10-14
 // =============================================================================
 
-// --- Fprop XOR: groups=16, only config 14 (waves_c64=1) is compatible ---
+// --- Fprop XOR: groups=32, only config 14 (waves_c64=1) is compatible ---
 
 TEST_F(DirectConvGrouped4cFp16TileConvTest, Fprop_XOR_Config14_Groups16_Pad1)
 {
@@ -223,4 +233,20 @@ TEST_F(DirectConvGrouped4cFp16TileConvTest, Fprop_XOR_Config13_ManyGroups)
 TEST_F(DirectConvGrouped4cFp16TileConvTest, Fprop_XOR_Config14_ManyGroups)
 {
     ASSERT_TRUE((RunFprop<14>(1, 8, 8, 64, 4, 4, 3, 3, 1, 1)));
+}
+
+// =============================================================================
+// V2 XOR swizzle — Fprop config 1
+// =============================================================================
+
+// --- Fprop XOR: groups=32 ---
+
+TEST_F(DirectConvGrouped4cFp16TileConvTestV2, Fprop_V2_Groups32_Pad1)
+{
+    ASSERT_TRUE((RunFprop<1>(1, 32, 32,32, 4, 4, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvGrouped4cFp16TileConvTestV2, Fprop_V2_Group32_NoPad)
+{
+    ASSERT_TRUE((RunFprop<1>(2, 64, 64, 32, 4, 4, 3, 3, 0, 0)));
 }

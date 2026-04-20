@@ -20,7 +20,7 @@
 #include <type_traits>
 #include <string>
 
-namespace ck_tile::direct_conv::grouped_4c_tile
+namespace ck_tile::direct_conv::grouped_4c_tile::v2
 {
 
 // 64 threads per wave.
@@ -65,8 +65,8 @@ struct Config
 
     Direction direction = Direction::Fprop;
 
-    // Swizzle pattern - by default use HIP conv SwizzleT.
-    SwizzleType swizzle_type = SwizzleType::CyclicShift;
+    // Swizzle pattern - v2 uses the XOR-based swizzle.
+    SwizzleType swizzle_type = SwizzleType::XOR;
 
     // Total number of waves.
     constexpr int num_waves() const { return waves_c64 * waves_q4; }
@@ -85,30 +85,14 @@ struct Config
 
     std::string GetName() const
     { 
-        if (swizzle_type == SwizzleType::CyclicShift)
-            return "v1_grouped_4c_swizzleT";
-        else
-            return "v1_grouped_4c_swizzleXOR"; 
+        return "v2_grouped_4c_swizzleXOR";  
     }
 };
 
 // All instantiated configurations. The first valid config is expected to be the fastest.
 constexpr Config configs[] = {
     {.waves_c64 = 2, .waves_q4 = 8, .direction = Direction::Dgrad},
-    {.waves_c64 = 2, .waves_q4 = 4, .direction = Direction::Dgrad},
-    {.waves_c64 = 2, .waves_q4 = 2, .direction = Direction::Dgrad},
-    {.waves_c64 = 2, .waves_q4 = 1, .direction = Direction::Dgrad},
-    {.waves_c64 = 1, .waves_q4 = 1, .direction = Direction::Dgrad},
-    {.waves_c64 = 2, .waves_q4 = 8},
-    {.waves_c64 = 2, .waves_q4 = 4},
-    {.waves_c64 = 2, .waves_q4 = 2},
-    {.waves_c64 = 2, .waves_q4 = 1},
-    {.waves_c64 = 1, .waves_q4 = 1},
-    {.waves_c64 = 2, .waves_q4 = 8, .swizzle_type = SwizzleType::XOR},
-    {.waves_c64 = 2, .waves_q4 = 4, .swizzle_type = SwizzleType::XOR},
-    {.waves_c64 = 2, .waves_q4 = 2, .swizzle_type = SwizzleType::XOR},
-    {.waves_c64 = 2, .waves_q4 = 1, .swizzle_type = SwizzleType::XOR},
-    {.waves_c64 = 1, .waves_q4 = 1, .swizzle_type = SwizzleType::XOR},
+    {.waves_c64 = 2, .waves_q4 = 8}
 };
 
 constexpr int NUM_CONFIGS = sizeof(configs) / sizeof(configs[0]);
@@ -825,4 +809,4 @@ constexpr KernelVariant make_variant()
     };
 }
 
-} // namespace ck_tile::direct_conv::grouped_4c_tile
+} // namespace ck_tile::direct_conv::grouped_4c_tile::v2
