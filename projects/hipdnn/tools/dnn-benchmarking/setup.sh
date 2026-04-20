@@ -42,11 +42,13 @@ fi
 # shellcheck disable=SC1091
 source "$VENV_DIR/bin/activate"
 
-# 2. Install requirements and package
-# Install ROCm torch first via its dedicated index, then install the package with
-# --no-deps so pip never resolves torch from PyPI (which would pull the CUDA build).
+# 2. Install requirements and package.
+# Install ROCm torch first from its dedicated index. Then editable-install the
+# package; pyproject.toml omits torch (so pip won't touch the already-installed
+# ROCm build) and lists the rest (numpy, pytest, pytest-cov) which resolve
+# cleanly from PyPI.
 pip install -r "$SCRIPT_DIR/requirements-rocm.txt"
-pip install -e "$SCRIPT_DIR" --no-deps
+pip install -e "$SCRIPT_DIR"
 
 # 3. Build and install hipdnn
 # The installed cmake configs use install-tree paths; pointing CMAKE_PREFIX_PATH at

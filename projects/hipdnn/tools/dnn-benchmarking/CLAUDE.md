@@ -16,13 +16,11 @@ Benchmarking and validation tool for hipDNN graphs. Loads JSON-serialized hipDNN
 ./setup.sh --force-build
 
 # Manual setup for ROCm/AMD GPU development
-# IMPORTANT: install ROCm torch first, then the package with --no-deps.
-# Reversing the order causes pip to pull the CUDA torch build from PyPI.
-pip install -r requirements-rocm.txt
-pip install -e . --no-deps
+pip install -r requirements-rocm.txt   # torch from ROCm nightly index
+pip install -e .                        # package + PyPI deps (numpy, pytest)
 
 # hipDNN bindings must be installed separately from your hipDNN build
-cd /path/to/hipdnn/python && pip install -e . --no-deps
+cd /path/to/hipdnn/python && pip install -e .
 ```
 
 `--force-build` installs hipDNN and the MIOpen plugin to `/opt/rocm` (prompts for confirmation).
