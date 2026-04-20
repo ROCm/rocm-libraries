@@ -8,6 +8,30 @@
 #include <hip_kernel_provider_common/HipDeviceUtils.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
+namespace
+{
+// In AITER (upstream), each workspace buffer (D buffer, dq_acc) is a separate PyTorch tensor
+// allocation. Each torch::empty() call invokes hipMalloc(), which guarantees 256-byte alignment
+// per allocation. So AITER never explicitly aligns — every buffer pointer is automatically aligned.
+//
+// In hip-kernel-provider, hipDNN provides a single contiguous workspace buffer (one hipMalloc).
+// The execute() method must carve this into sub-buffers using pointer arithmetic:
+//   D buffer    starts at: workspace + 0                     (aligned by hipMalloc)
+//   dq_acc      starts at: workspace + sizeof(D buffer)      (NOT automatically aligned)
+//
+// We round each sub-buffer size up to a 64-byte boundary (MI300X L2 cache line size) so the
+// next sub-buffer starts cache-line-aligned. This prevents false sharing between buffers and
+// ensures vector memory instructions (e.g. global_load_b128) don't span cache line boundaries.
+//
+// TODO(Task I8.9): POC hardcodes 64 bytes; production should query hipGetDeviceProperties()
+constexpr size_t K_WORKSPACE_ALIGNMENT_BYTES = 64;
+
+constexpr size_t alignUp(size_t size, size_t alignment)
+{
+    return (size + alignment - 1) & ~(alignment - 1);
+}
+} // namespace
+
 namespace asm_sdpa_engine
 {
 
@@ -160,14 +184,14 @@ size_t SdpaBwdPlanBuilder::getMaxWorkspaceSize(
     // D buffer: row-wise dot product output [B, H_q, S_q] in FP32
     // Always needed for both a16 and a32 accumulator variants
     size_t dBufferSize = batch * headsQ * seqLenQ * sizeof(float);
-    dBufferSize = (dBufferSize + 63) & ~size_t{63};
+    dBufferSize = alignUp(dBufferSize, K_WORKSPACE_ALIGNMENT_BYTES);
 
     // TODO(Task I8.2): POC assumes a32 accumulator — always allocates FP32 dq_acc buffer.
     // For a16 accumulator kernels, dQ is written directly in BF16 (no dq_acc buffer needed,
-    // no dq_convert kernel launched). Production should check accumulator type and skip
-    // dq_acc allocation for a16. See sdpa-bwd-poc-requirements_v2.md Task I8.2.
+    // no dq_convert kernel launched). Provider should check accumulator type and skip
+    // dq_acc allocation for a16.
     size_t dqAccSize = batch * headsQ * seqLenQ * headDim * sizeof(float);
-    dqAccSize = (dqAccSize + 63) & ~size_t{63};
+    dqAccSize = alignUp(dqAccSize, K_WORKSPACE_ALIGNMENT_BYTES);
 
     return dBufferSize + dqAccSize;
 }

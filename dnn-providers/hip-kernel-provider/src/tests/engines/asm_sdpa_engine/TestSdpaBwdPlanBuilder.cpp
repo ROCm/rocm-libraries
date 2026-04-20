@@ -107,18 +107,19 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableSdpaBwdVariations)
     }
 }
 
-TEST_F(TestSdpaBwdPlanBuilder, BackwardWorkspaceSizeSmall)
+TEST_F(TestSdpaBwdPlanBuilder, BackwardWorkspaceSizeSmallUnaligned)
 {
-    // B=1, H=1, S=256, D=128
-    auto builder = createSdpaBwdGraph({1, 1, 256, 128});
+    // B=1, H=3, S=255, D=128 — chosen so D buffer raw size (3060) is NOT a multiple of 64,
+    // exercising the alignUp() rounding: 3060 → 3072
+    auto builder = createSdpaBwdGraph({1, 3, 255, 128});
     hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(builder.GetBufferPointer(),
                                                                      builder.GetSize());
     HipKernelSettings settings;
     size_t workspaceSize = _planBuilder.getMaxWorkspaceSize(_handle, graphWrapper, settings);
 
-    // D buffer: 1*1*256*4 = 1024, aligned to 64 → 1024
-    // dq_acc:   1*1*256*128*4 = 131072, aligned to 64 → 131072
-    EXPECT_EQ(workspaceSize, 1024u + 131072u);
+    // D buffer: 1*3*255*4 = 3060, aligned to 64 → 3072  (exercises alignment rounding)
+    // dq_acc:   1*3*255*128*4 = 391680, aligned to 64 → 391680 (already aligned)
+    EXPECT_EQ(workspaceSize, 3072u + 391680u);
 }
 
 TEST_F(TestSdpaBwdPlanBuilder, BackwardWorkspaceSizeMedium)
