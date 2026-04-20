@@ -202,7 +202,7 @@ TEST_F(Integration{{ op.name }}DescriptorLifting, {{ op.name }}TensorSharingPres
 
 // Builds a {{ op.name }} graph, serializes to binary, creates a backend descriptor
 // from bytes (no handle, no finalize), calls fromBackendDescriptor(), and verifies
-// all fields survive the FlatBuffer-direct path.
+// all fields survive the backend C API serialization path.
 TEST_F(Integration{{ op.name }}DescriptorLifting, {{ op.name }}LiftWithoutFinalization)
 {
     auto originalGraph = buildGraph();

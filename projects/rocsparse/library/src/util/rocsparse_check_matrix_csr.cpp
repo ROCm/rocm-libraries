@@ -95,7 +95,6 @@ rocsparse_status rocsparse::check_matrix_csr_core(rocsparse_handle       handle,
 
     RETURN_IF_HIP_ERROR(
         hipMemsetAsync(d_data_status, 0, sizeof(rocsparse_data_status), handle->stream));
-    RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(handle->stream));
 
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::check_row_ptr_array<256>),
                                        dim3((m - 1) / 256 + 1),

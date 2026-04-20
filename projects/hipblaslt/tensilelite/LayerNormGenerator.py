@@ -59,7 +59,7 @@ def kernel_header(name: str, gfx_arch: str, vgpr: int, sgpr: int, lds: int):
     header += f'.p2align 6\n'
     header += f'.amdhsa_kernel {name}\n'
     header += f'  .amdhsa_user_sgpr_kernarg_segment_ptr 1\n'
-    if (gfx_arch not in ("gfx900", "gfx908", "gfx1030", "gfx1100", "gfx1101", "gfx1102", "gfx1103", "gfx1150", "gfx1151", "gfx1152", "gfx1153", "gfx1200", "gfx1201")):
+    if (gfx_arch not in ("gfx900", "gfx908", "gfx1030", "gfx1100", "gfx1101", "gfx1102", "gfx1103", "gfx1150", "gfx1151", "gfx1152", "gfx1153", "gfx1200", "gfx1201", "gfx1250")):
         header += f'  .amdhsa_accum_offset {vgpr} // accvgpr offset\n'
     header += f'  .amdhsa_next_free_vgpr {vgpr} // vgprs\n'
     header += f'  .amdhsa_next_free_sgpr {sgpr} // sgprs\n'
@@ -137,6 +137,7 @@ class LayerNormKernelGenerator:
         self.vgpr_pool.add(0, 39) #TODO: estimate this
         self.debug_label = True
         self.arch = arch
+        self.isa = isa
         self.op = 'LayerNorm'
         self.sgprs  = collections.OrderedDict()
         self.vgprs  = collections.OrderedDict()
@@ -275,6 +276,18 @@ class LayerNormKernelGenerator:
         mod.addSpaceLine()
         return mod
 
+    def shiftSrd(self, srdStr):
+        module = Module()
+        if self.isa[0] == 12 and self.isa[1] == 5:
+            stmp = self.sgpr_pool.checkOutAligned(1, 1)
+            module.add(ri.SAndB32(sgpr(stmp), sgpr(srdStr+"+2"), 0x7F))
+            module.add(ri.SLShiftLeftB32(sgpr(stmp), 25, sgpr(stmp)))
+            module.add(ri.SAndB32(sgpr(srdStr+"+1"), sgpr(srdStr+"+1"), 0x1FFFFFF))
+            module.add(ri.SOrB32(sgpr(srdStr+"+1"), sgpr(srdStr+"+1"), sgpr(stmp)))
+            module.add(ri.SLShiftRightB32(sgpr(srdStr+"+2"), 7, sgpr(srdStr+"+2")))
+            self.sgpr_pool.checkIn(stmp)
+        return module
+
     def init_param(self) -> Module:
         mod = Module("defineVariables")
         mod.addComment0("defineVariables")
@@ -311,6 +324,10 @@ class LayerNormKernelGenerator:
         mod.add(ri.SMovB32(sgpr("SrcGamma+2"), sgpr("Tmp")))
         mod.add(ri.SMovB32(sgpr("SrcBeta+2"), sgpr("Tmp")))
         mod.add(ri.SMovB32(sgpr("Dst+2"), sgpr("Tmp")))
+        mod.add(self.shiftSrd("Src"))
+        mod.add(self.shiftSrd("SrcGamma"))
+        mod.add(self.shiftSrd("SrcBeta"))
+        mod.add(self.shiftSrd("Dst"))
         mod.addSpaceLine()
 
         mod.add(ri.VMovB32(vgpr("Count"), 0.0))
@@ -817,6 +834,7 @@ class LayerNormKernelGenerator:
         mod.add(ri.SMovB32(sgpr("Dst+1"), sgpr("AddressMean+1")))
         mod.add(ri.SMovB32(sgpr("Dst+2"), "BufferLimit"))
         mod.add(ri.SMovB32(sgpr("Dst+3"), "Srd127_96"))
+        mod.add(self.shiftSrd("Dst"))
         mod.add(ri.BufferStoreB32(vgpr("Mean"), vgpr("Offset"), sgpr("Dst",4), 0, MUBUFModifiers(offen=True)))
         mod.addSpaceLine()
 
@@ -824,6 +842,7 @@ class LayerNormKernelGenerator:
         mod.add(ri.SMovB32(sgpr("Dst+1"), sgpr("AddressInvvar+1")))
         mod.add(ri.SMovB32(sgpr("Dst+2"), "BufferLimit"))
         mod.add(ri.SMovB32(sgpr("Dst+3"), "Srd127_96"))
+        mod.add(self.shiftSrd("Dst"))
         mod.add(ri.BufferStoreB32(vgpr("Invvar"), vgpr("Offset"), sgpr("Dst",4), 0, MUBUFModifiers(offen=True)))
         mod.addSpaceLine()
         return mod

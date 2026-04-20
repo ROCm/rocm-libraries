@@ -115,6 +115,7 @@ add_subdirectory(src/integration_tests)
 target_include_directories(${INTEGRATION_TESTS_EXE} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_include_directories(${INTEGRATION_TESTS_EXE} SYSTEM PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src/third_party/argparse
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/third_party/tomlplusplus
 )
 
 target_link_libraries(${INTEGRATION_TESTS_EXE}
@@ -124,6 +125,7 @@ target_link_libraries(${INTEGRATION_TESTS_EXE}
         hipdnn_plugin_sdk
         GTest::gtest
         Threads::Threads
+        $<$<PLATFORM_ID:Windows>:shlwapi>
 )
 
 target_compile_options(${INTEGRATION_TESTS_EXE} PRIVATE ${INTEGRATION_TESTS_WARNING_COMPILE_OPTIONS})

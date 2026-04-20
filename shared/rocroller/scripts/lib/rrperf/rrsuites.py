@@ -1206,6 +1206,12 @@ def addStreamK(suite: Generator[GEMMRun, None, None], value="Standard"):
         yield run
 
 
+def addLDSBankSwizzle(suite, value="Swizzle"):
+    for run in suite:
+        run.ldsBankSwizzle = value
+        yield run
+
+
 def fp4_target_d2lds_mi32x32x64_pf2x1_wgm():
     yield from add_wgm((0, 2), fp4_target_d2lds_mi32x32x64_pf2x1())
 
@@ -1685,6 +1691,10 @@ def fp4_target_d2lds_mi16x16x128_st32x8_pf2x1_wgm():
 def fp4_target_d2lds_mi16x16x128_st32x8_pf2x1_both():
     yield from fp4_target_d2lds_mi16x16x128_st32x8_pf2x1()
     yield from fp4_target_d2lds_mi16x16x128_st32x8_pf2x1_wgm()
+
+
+def fp4_target_d2lds_mi16x16x128_st32x8_pf2x1_wgm_lds_swizzle():
+    yield from addLDSBankSwizzle(fp4_target_d2lds_mi16x16x128_st32x8_pf2x1_wgm())
 
 
 def does_this_fail():

@@ -9,7 +9,6 @@
 #pragma once
 
 #include "Node.hpp"
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
@@ -25,7 +24,7 @@ namespace hipdnn_frontend::graph
  * @brief Graph node that performs layer normalization
  *
  * Validates input tensors, infers output shapes, and serializes the
- * layer normalization operation to FlatBuffer format.
+ * layer normalization operation to a backend descriptor.
  *
  * @see LayernormAttributes, Graph::layernorm()
  */
@@ -310,17 +309,6 @@ public:
         }
 
         return {};
-    }
-
-    flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>
-        pack_node(flatbuffers::FlatBufferBuilder& builder) const override
-    {
-        return hipdnn_data_sdk::data_objects::CreateNodeDirect(
-            builder,
-            attributes.get_name().c_str(),
-            toSdkType(attributes.compute_data_type),
-            hipdnn_data_sdk::data_objects::NodeAttributes::LayernormAttributes,
-            attributes.pack_attributes(builder).Union());
     }
 
     Error create_operation(

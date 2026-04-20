@@ -119,14 +119,15 @@ TEST(TestMiopenEngineManager, ReturnsEngineDetails)
     auto mockEngine = std::make_unique<MockEngine>();
     EXPECT_CALL(*mockEngine, id()).WillRepeatedly(Return(1));
     EXPECT_CALL(*mockEngine, getDetails(::testing::_, ::testing::_, ::testing::_))
-        .WillOnce([&engineDetails](HipdnnMiopenHandle& handle,
-                                   const hipdnn_data_sdk::flatbuffer_utilities::IGraph& graph,
-                                   hipdnnPluginConstData_t& out) {
-            (void)handle;
-            (void)graph;
-            out.ptr = engineDetails.ptr;
-            out.size = engineDetails.size;
-        });
+        .WillOnce(
+            [&engineDetails](HipdnnMiopenHandle& handle,
+                             const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph,
+                             hipdnnPluginConstData_t& out) {
+                (void)handle;
+                (void)graph;
+                out.ptr = engineDetails.ptr;
+                out.size = engineDetails.size;
+            });
 
     manager.addEngine(std::move(mockEngine));
 

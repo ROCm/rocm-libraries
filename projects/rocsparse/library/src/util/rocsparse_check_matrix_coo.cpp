@@ -54,7 +54,6 @@ rocsparse_status rocsparse::check_matrix_coo_core(rocsparse_handle       handle,
     ptr += ((sizeof(rocsparse_data_status) - 1) / 256 + 1) * 256;
 
     RETURN_IF_HIP_ERROR(hipMemsetAsync(d_data_status, 0, sizeof(int), handle->stream));
-    RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(handle->stream));
 
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::check_matrix_coo_device<256>),
                                        dim3((nnz - 1) / 256 + 1),

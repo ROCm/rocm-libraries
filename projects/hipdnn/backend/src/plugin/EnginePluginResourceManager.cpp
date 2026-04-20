@@ -2,8 +2,8 @@
 // SPDX-License-Identifier:  MIT
 
 #include <algorithm>
-#include <hipdnn_data_sdk/data_objects/engine_details_generated.h>
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/engine_details_generated.h>
 #include <mutex>
 #include <vector>
 
@@ -49,7 +49,13 @@ void EnginePluginResourceManager::setPluginLogLevel(hipdnnSeverity_t level)
     {
         for(const auto& plugin : pm->getPlugins())
         {
-            plugin->setLogLevel(level);
+            auto status = plugin->setLogLevel(level);
+            if(status != HIPDNN_PLUGIN_STATUS_SUCCESS)
+            {
+                HIPDNN_BACKEND_LOG_WARN("Failed to set log level for plugin '{}': status {}",
+                                        plugin->name(),
+                                        static_cast<int>(status));
+            }
         }
     }
 }
@@ -615,7 +621,7 @@ EngineDetailsWrapper::EngineDetailsWrapper(const std::shared_ptr<EnginePluginRes
     _rm->getEngineDetails(engineId, graphDesc, &_engineDetailsData);
     flatbuffers::Verifier verifier(static_cast<const uint8_t*>(_engineDetailsData.ptr),
                                    _engineDetailsData.size);
-    if(!verifier.VerifyBuffer<hipdnn_data_sdk::data_objects::EngineDetails>())
+    if(!verifier.VerifyBuffer<hipdnn_flatbuffers_sdk::data_objects::EngineDetails>())
     {
         throw HipdnnException(HIPDNN_STATUS_BAD_PARAM,
                               "EngineDetailsWrapper: unable to verify the flatbuffer schema.");
@@ -660,7 +666,7 @@ EngineDetailsWrapper& EngineDetailsWrapper::operator=(EngineDetailsWrapper&& oth
     return *this;
 }
 
-const hipdnn_data_sdk::data_objects::EngineDetails* EngineDetailsWrapper::get() const
+const hipdnn_flatbuffers_sdk::data_objects::EngineDetails* EngineDetailsWrapper::get() const
 {
     if(_engineDetailsData.ptr == nullptr)
     {
@@ -669,7 +675,7 @@ const hipdnn_data_sdk::data_objects::EngineDetails* EngineDetailsWrapper::get() 
                               "get() called on an empty object");
     }
 
-    return hipdnn_data_sdk::data_objects::GetEngineDetails(_engineDetailsData.ptr);
+    return hipdnn_flatbuffers_sdk::data_objects::GetEngineDetails(_engineDetailsData.ptr);
 }
 
 // TODO: Use engineId from engineConfig
