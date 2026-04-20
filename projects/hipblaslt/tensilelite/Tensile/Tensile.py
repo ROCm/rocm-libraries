@@ -33,7 +33,7 @@ import argparse
 
 from datetime import datetime
 from pathlib import Path
-from typing import Dict
+from typing import Dict, Optional
 
 from Tensile import __version__
 from Tensile.Common import print1, printExit, printWarning, ensurePath, HR, isRhel8, \
@@ -327,10 +327,22 @@ def get_gpu_max_frequency(device_id):
 
     return freq // 1000 if freq else None
 
-def get_user_max_frequency():
+def get_user_max_frequency() -> Optional[int]:
     '''
-    Get the maximum frequency from the user when the GPU frequency cannot be determined
+    Get the maximum frequency from the user when the GPU frequency cannot be determined.
+    Returns None if the GPU frequency cannot be determined.
     '''
+    # Non-interactive guard: when stdin is not a tty (CI, --build-only via
+    # pytest, etc.) we cannot prompt.  Returning None is safe because:
+    #   - The caller in Tensile() already handles None/<=0 with a warning and
+    #     skips store_max_frequency().
+    #   - The downstream consumer (LibraryLogic.read_max_freq) also handles a
+    #     missing MAX_FREQ env var gracefully (returns None, caller checks).
+    #   - The entire frequency block is gated on `not buildOnly`, so build-only
+    #     runs never reach this path.
+    if not sys.stdin.isatty():
+        printWarning("Cannot prompt for GPU frequency in non-interactive mode")
+        return None
     while True:
         try:
             user_input = input("Please enter the maximum frequency (MHz): ")
@@ -570,7 +582,7 @@ def Tensile(userArgs):
     UseEffLike = config["GlobalParameters"].get("UseEffLike", globalParameters["UseEffLike"])
     UseEffLike = False if isRhel8() else UseEffLike
 
-    if 'LibraryLogic' in config and UseEffLike:
+    if 'LibraryLogic' in config and UseEffLike and not buildOnly:
         max_frequency = get_gpu_max_frequency(device_id)
 
         if not max_frequency or max_frequency <= 0:
@@ -580,8 +592,13 @@ def Tensile(userArgs):
             print(f"Could not detect valid GPU frequency for device {device_id}")
             max_frequency = get_user_max_frequency()
 
-        print(f"Successfully retrieve Max frequency: {max_frequency} for device {device_id}")
-        store_max_frequency(max_frequency)
+        if not max_frequency or max_frequency <= 0:
+            printWarning("Could not determine GPU frequency. "
+                         "Skipping frequency-dependent configuration.")
+        else:
+            print(f"Successfully retrieved max frequency: "
+                  f"{max_frequency} for device {device_id}")
+            store_max_frequency(max_frequency)
 
     cxxCompiler, \
     cCompiler, \

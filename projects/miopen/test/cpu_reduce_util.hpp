@@ -297,7 +297,7 @@ static inline void binop_with_nan_check2(miopenNanPropagation_t nanOpt,
 }; // end of namespace reduce
 
 template <typename T>
-static std::vector<std::vector<T>> get_all_indexes(const std::vector<T>& lens)
+std::vector<std::vector<T>> get_all_indexes(const std::vector<T>& lens)
 {
     const std::size_t D = lens.size();
     assert(D > 0);
@@ -339,7 +339,7 @@ linear_to_offset(size_t li, const std::vector<T>& lens, const std::vector<T>& st
 }
 
 template <typename T>
-static T get_offset_from_index(const std::vector<T>& strides, const std::vector<T>& index)
+T get_offset_from_index(const std::vector<T>& strides, const std::vector<T>& index)
 {
     T offset = 0;
 
@@ -352,7 +352,7 @@ static T get_offset_from_index(const std::vector<T>& strides, const std::vector<
 };
 
 template <typename T>
-static T get_flatten_offset(const std::vector<T>& lengths, const std::vector<T>& index)
+T get_flatten_offset(const std::vector<T>& lengths, const std::vector<T>& index)
 {
     T offset = 0;
 
@@ -413,19 +413,18 @@ struct Reducer
 };
 
 template <typename Tgpu, typename Tref, typename compType, typename SizeT>
-static std::tuple<tensor<Tref>, tensor<int>>
-reduce_cpu_common(const miopenReduceTensorOp_t& reduceOp,
-                  const miopenNanPropagation_t& nanOpt,
-                  const std::vector<SizeT>& inLengths,
-                  const std::vector<SizeT>& outLengths,
-                  const std::vector<Tgpu>& input,
-                  const std::vector<SizeT>& inStrides,
-                  const std::vector<Tref>& output,
-                  const std::vector<SizeT>& outStrides,
-                  float alpha,
-                  float beta,
-                  bool parallel,
-                  bool withIdx)
+std::tuple<tensor<Tref>, tensor<int>> reduce_cpu_common(const miopenReduceTensorOp_t& reduceOp,
+                                                        const miopenNanPropagation_t& nanOpt,
+                                                        const std::vector<SizeT>& inLengths,
+                                                        const std::vector<SizeT>& outLengths,
+                                                        const std::vector<Tgpu>& input,
+                                                        const std::vector<SizeT>& inStrides,
+                                                        const std::vector<Tref>& output,
+                                                        const std::vector<SizeT>& outStrides,
+                                                        float alpha,
+                                                        float beta,
+                                                        bool parallel,
+                                                        bool withIdx)
 {
     using reduce::convert_type;
     using reduce::ReduceOpZeroVal;
@@ -616,7 +615,7 @@ reduce_cpu_common(const miopenReduceTensorOp_t& reduceOp,
 }
 
 template <typename T, typename compType>
-static std::tuple<tensor<T>, tensor<int>>
+std::tuple<tensor<T>, tensor<int>>
 reduce_cpu_common(const miopen::ReduceTensorDescriptor& reduceDesc,
                   const tensor<T>& input,
                   const tensor<T>& output,
