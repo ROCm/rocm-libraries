@@ -53,12 +53,10 @@ pip install -e . --no-deps
 # For ROCm development
 pip install -r requirements-rocm.txt
 pip install -e . --no-deps
-pip install "pytest>=7.0.0" "pytest-cov>=4.0.0"
 
 # For CUDA development
 pip install -r requirements-cuda.txt
 pip install -e . --no-deps
-pip install "pytest>=7.0.0" "pytest-cov>=4.0.0"
 ```
 
 **Note**: hipDNN Python bindings (`hipdnn_frontend`) must be installed separately for hipDNN benchmarking.

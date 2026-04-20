@@ -20,7 +20,6 @@ Benchmarking and validation tool for hipDNN graphs. Loads JSON-serialized hipDNN
 # Reversing the order causes pip to pull the CUDA torch build from PyPI.
 pip install -r requirements-rocm.txt
 pip install -e . --no-deps
-pip install "pytest>=7.0.0" "pytest-cov>=4.0.0"  # dev extras (no GPU deps)
 
 # hipDNN bindings must be installed separately from your hipDNN build
 cd /path/to/hipdnn/python && pip install -e . --no-deps

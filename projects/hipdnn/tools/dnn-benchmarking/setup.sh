@@ -43,7 +43,6 @@ source "$VENV_DIR/bin/activate"
 # Dev extras (pytest, pytest-cov) are installed separately as they have no GPU deps.
 pip install -r "$SCRIPT_DIR/requirements-rocm.txt"
 pip install -e "$SCRIPT_DIR" --no-deps
-pip install "pytest>=7.0.0" "pytest-cov>=4.0.0"
 
 # 3. Build and install hipdnn
 # The installed cmake configs use install-tree paths; pointing CMAKE_PREFIX_PATH at

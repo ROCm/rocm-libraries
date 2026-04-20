@@ -4,5 +4,9 @@
 # Core dependencies
 numpy>=1.19.0
 
+# Testing
+pytest>=7.0.0
+pytest-cov>=4.0.0
+
 # hipDNN Python bindings (must be installed separately)
 # See README for installation instructions
