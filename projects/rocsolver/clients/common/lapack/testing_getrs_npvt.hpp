@@ -83,9 +83,20 @@ void getrs_npvt_checkBadArgs(const rocblas_handle handle,
 
     // quick return with zero batch_count if applicable
     if(STRIDED)
+    {
         EXPECT_ROCBLAS_STATUS(
             rocsolver_getrs_npvt(STRIDED, handle, trans, n, nrhs, dA, lda, stA, dB, ldb, stB, I(0)),
             rocblas_status_success);
+
+        // zero batch and invalid pointers
+        EXPECT_ROCBLAS_STATUS(rocsolver_getrs_npvt(STRIDED, handle, trans, n, nrhs, (Td) nullptr,
+                                                   lda, stA, dB, ldb, stB, I(0)),
+                              rocblas_status_success);
+
+        EXPECT_ROCBLAS_STATUS(rocsolver_getrs_npvt(STRIDED, handle, trans, n, nrhs, dA, lda, stA,
+                                                   (Td) nullptr, ldb, stB, I(0)),
+                              rocblas_status_success);
+    }
 }
 
 template <bool BATCHED, bool STRIDED, typename T, typename I>
