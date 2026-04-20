@@ -9,7 +9,12 @@ from typing import Any, Optional, TextIO
 
 from ..config.benchmark_config import ABTestConfig, BenchmarkConfig, SuiteConfig
 from .statistics import BenchmarkStats, CombinedBenchmarkStats
-from .suite_results import CorrectnessResult, GraphResult, ProviderEngineResult
+from .suite_results import (
+    CorrectnessResult,
+    GraphResult,
+    ProviderEngineResult,
+    SuiteMetadata,
+)
 
 
 class Reporter:
@@ -431,25 +436,21 @@ class Reporter:
         """
         self._print(f"  ERROR: {error}")
 
-    def print_suite_summary(
-        self,
-        total_graphs: int,
-        total_combinations: int,
-        pass_count: int,
-        fail_count: int,
-        skip_count: int,
-        error_count: int,
-    ) -> None:
-        """Print suite execution summary."""
+    def print_suite_summary(self, metadata: SuiteMetadata) -> None:
+        """Print suite execution summary from suite metadata.
+
+        Args:
+            metadata: SuiteMetadata containing graph and combination totals.
+        """
         self._print("")
         self._print_line("-")
         self._print("Suite Summary:")
-        self._print(f"  Graphs:       {total_graphs}")
-        self._print(f"  Combinations: {total_combinations}")
-        self._print(f"  Passed:       {pass_count}")
-        self._print(f"  Failed:       {fail_count}")
-        self._print(f"  Skipped:      {skip_count}")
-        self._print(f"  Errors:       {error_count}")
+        self._print(f"  Graphs:       {metadata.total_graphs}")
+        self._print(f"  Combinations: {metadata.total_combinations}")
+        self._print(f"  Passed:       {metadata.pass_combinations}")
+        self._print(f"  Failed:       {metadata.fail_combinations}")
+        self._print(f"  Skipped:      {metadata.skip_combinations}")
+        self._print(f"  Errors:       {metadata.error_combinations}")
 
     def print_suite_footer(self) -> None:
         """Print suite footer."""

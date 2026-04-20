@@ -80,6 +80,17 @@ python -m dnn_benchmarking --graph 'graphs/*.json' --warmup 10 --iters 100
 # Multi-graph with JSON output (full SuiteResult, independent of -v)
 python -m dnn_benchmarking --graph 'graphs/*.json' --output results.json
 
+# Reference validation against a PyTorch reference implementation
+python -m dnn_benchmarking --graph ./graphs/sample_conv_fwd.json --validate pytorch
+
+# Reference validation with custom tolerances
+python -m dnn_benchmarking --graph ./graphs/sample_conv_fwd.json \
+  --validate pytorch --rtol 1e-3 --atol 1e-6
+
+# Point at a directory of plugin .so files for engine discovery
+python -m dnn_benchmarking --graph 'graphs/*.json' \
+  --plugin-path /path/to/hipdnn/plugins --output results.json
+
 # A/B testing (separate path, kept for now)
 python -m dnn_benchmarking --graph ./graphs/sample_conv_fwd.json --AId 1 --BId 2
 
@@ -92,11 +103,15 @@ python -m dnn_benchmarking --graph ./graphs/sample_conv_fwd.json --backend pytor
 ```
 src/dnn_benchmarking/
 ├── cli/              # Entry point (main.py, parser.py)
+├── common/           # Shared utilities (exceptions.py)
 ├── config/           # BenchmarkConfig, ABTestConfig, SuiteConfig dataclasses
-├── execution/        # executor.py, buffer_manager.py, ab_runner.py, suite_runner.py, timing.py
+├── execution/        # executor.py, buffer_manager.py, ab_runner.py,
+│                     # suite_runner.py, timing.py,
+│                     # pytorch_executor.py, pytorch_buffer_manager.py, pytorch_ops.py
 ├── graph/            # loader.py (JSON loading), validator.py, tensor_info.py
 ├── reporting/        # reporter.py (console output), statistics.py, suite_results.py
 └── validation/       # validator.py, comparison.py, reference_provider.py
+    └── providers/    # cpu_plugin_provider.py, pytorch_provider.py
 ```
 
 **Data flow (single graph):** CLI → Config → GraphLoader → Executor → BufferManager → Timing → BenchmarkStats → Reporter

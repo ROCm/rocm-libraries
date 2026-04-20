@@ -280,6 +280,7 @@ def run_suite(
         try:
             loader = GraphLoader()
             graph_json = loader.load_json(graph_path)
+            loader.validate(graph_json)
             tensor_infos = loader.extract_tensor_info(graph_json)
 
             result = run_graph_all_providers(
@@ -310,35 +311,18 @@ def run_suite(
 
             graph_results.append(result)
 
-            # Count statuses
-            # "pass" = success + (correctness passed OR no validation done)
-            n_pass = sum(
-                1
-                for r in result.results
-                if r.status == "success"
-                and (
-                    r.correctness is None or r.correctness.tolerance_match is not False
-                )
-            )
-            # "fail" = success but correctness explicitly failed
-            n_fail = sum(
-                1
-                for r in result.results
-                if r.status == "success"
-                and r.correctness is not None
-                and r.correctness.tolerance_match is False
-            )
-            n_skip = sum(1 for r in result.results if r.status == "skipped")
-            n_error = sum(1 for r in result.results if r.status == "error")
+            counts = result.count_by_status()
 
             if config.verbose:
                 reporter.print_verbose_graph_result(result, config)
             else:
-                reporter.print_suite_graph_result(n_pass, n_fail, n_skip, n_error)
+                reporter.print_suite_graph_result(
+                    counts.passed, counts.failed, counts.skipped, counts.errored
+                )
 
-            if n_error > 0:
+            if counts.errored > 0:
                 has_errors = True
-            if n_fail > 0:
+            if counts.failed > 0:
                 has_correctness_failures = True
 
         except (GraphLoadError, ExecutionError) as e:
@@ -361,27 +345,18 @@ def run_suite(
     # Collect environment info and build metadata
     env_info = collect_environment_info()
 
-    total_pass = sum(
-        1
-        for gr in graph_results
-        for r in gr.results
-        if r.status == "success"
-        and (r.correctness is None or r.correctness.tolerance_match is not False)
-    )
-    total_fail = sum(
-        1
-        for gr in graph_results
-        for r in gr.results
-        if r.status == "success"
-        and r.correctness is not None
-        and r.correctness.tolerance_match is False
-    )
-    total_skip = sum(
-        1 for gr in graph_results for r in gr.results if r.status == "skipped"
-    )
-    total_error = sum(
-        1 for gr in graph_results for r in gr.results if r.status == "error"
-    )
+    # Aggregate per-graph counts (uses the same classification as per-graph
+    # printing above to keep totals consistent).
+    total_pass = 0
+    total_fail = 0
+    total_skip = 0
+    total_error = 0
+    for gr in graph_results:
+        c = gr.count_by_status()
+        total_pass += c.passed
+        total_fail += c.failed
+        total_skip += c.skipped
+        total_error += c.errored
     total_combinations = total_pass + total_fail + total_skip + total_error
 
     metadata = SuiteMetadata(
@@ -405,14 +380,7 @@ def run_suite(
     if output_path is not None:
         suite_result.save_json(str(output_path))
 
-    reporter.print_suite_summary(
-        total_graphs=total,
-        total_combinations=total_combinations,
-        pass_count=total_pass,
-        fail_count=total_fail,
-        skip_count=total_skip,
-        error_count=total_error,
-    )
+    reporter.print_suite_summary(metadata)
     reporter.print_suite_footer()
 
     # Exit code per D-09
@@ -435,7 +403,8 @@ def main() -> int:
     gpu_backend = "none" if args.no_kernel_timing else "auto"
 
     # Resolve --graph: glob expansion for suite mode (per D-05)
-    resolved_files = sorted(glob.glob(args.graph))
+    # recursive=True so '**' patterns match nested directories.
+    resolved_files = sorted(glob.glob(args.graph, recursive=True))
 
     # Backward compatibility: if raw string is a single existing file
     if not resolved_files and Path(args.graph).is_file():

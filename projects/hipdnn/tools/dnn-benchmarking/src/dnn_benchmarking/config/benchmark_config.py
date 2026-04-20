@@ -164,3 +164,15 @@ class SuiteConfig:
                 raise ValueError("engine_filter must be non-empty when set")
             if any(e < 0 for e in self.engine_filter):
                 raise ValueError("engine_filter IDs must be non-negative")
+        valid_gpu_backends = {"torch", "auto", "none"}
+        if self.gpu_backend not in valid_gpu_backends:
+            raise ValueError(
+                f"Invalid gpu_backend: '{self.gpu_backend}'. "
+                f"Valid options: {valid_gpu_backends}"
+            )
+        valid_reference_providers = {"none", "pytorch", "cpu_plugin"}
+        if self.reference_provider not in valid_reference_providers:
+            raise ValueError(
+                f"Invalid reference_provider: '{self.reference_provider}'. "
+                f"Valid options: {valid_reference_providers}"
+            )

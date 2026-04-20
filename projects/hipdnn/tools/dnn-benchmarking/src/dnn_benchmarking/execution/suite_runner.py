@@ -19,11 +19,11 @@ from ..common.exceptions import ExecutionError
 from ..config.benchmark_config import BenchmarkConfig, SuiteConfig
 from ..execution.buffer_manager import BufferManager
 from ..execution.executor import Executor
+from ..reporting.statistics import BenchmarkStats
 from ..reporting.suite_results import (
     CorrectnessResult,
     GraphResult,
     ProviderEngineResult,
-    TimingStats,
 )
 from ..validation.comparison import ArrayComparator
 from ..validation.reference_provider import (
@@ -120,6 +120,12 @@ def discover_engines(handle: Any, provider: str) -> List[int]:
 
     # Fallback: return a reasonable default set of engine IDs to try.
     # The runner records skipped/error for unsupported ones.
+    logger.warning(
+        "Could not enumerate engines for provider '%s' via hipDNN API; "
+        "falling back to default engine IDs %s",
+        provider,
+        [0, 1],
+    )
     return [0, 1]
 
 
@@ -300,6 +306,7 @@ def run_graph_all_providers(
 
         for engine_id in engines:
             pe_result = _run_single_provider_engine(
+                graph_path=graph_path,
                 graph_json_str=graph_json_str,
                 graph_name=graph_name,
                 tensor_infos=tensor_infos,
@@ -320,6 +327,7 @@ def run_graph_all_providers(
 
 
 def _run_single_provider_engine(
+    graph_path: Path,
     graph_json_str: str,
     graph_name: str,
     tensor_infos: list,
@@ -335,6 +343,7 @@ def _run_single_provider_engine(
     Single attempt, no retry (per D-10).
 
     Args:
+        graph_path: Path to the graph JSON file (recorded in metadata).
         graph_json_str: Graph as JSON string.
         graph_name: Human-readable graph name.
         tensor_infos: List of TensorInfo objects.
@@ -351,7 +360,7 @@ def _run_single_provider_engine(
     try:
         # Create a fresh BenchmarkConfig for this combination
         bench_config = BenchmarkConfig(
-            graph_path=Path("unused"),  # graph_json_str used directly
+            graph_path=graph_path,
             warmup_iters=config.warmup_iters,
             benchmark_iters=config.benchmark_iters,
             engine_id=engine_id,
@@ -383,10 +392,12 @@ def _run_single_provider_engine(
             )
 
             # Build timing stats
-            e2e_stats = TimingStats.from_timings(bench_result.e2e_timings)
+            e2e_stats = BenchmarkStats.from_timings(bench_result.e2e_timings)
             gpu_kernel_stats = None
             if bench_result.has_kernel_timings:
-                gpu_kernel_stats = TimingStats.from_timings(bench_result.kernel_timings)
+                gpu_kernel_stats = BenchmarkStats.from_timings(
+                    bench_result.kernel_timings
+                )
 
             # Correctness check (CORR-02)
             if ref_provider is not None:
@@ -421,12 +432,8 @@ def _run_single_provider_engine(
                 engine_id=engine_id,
                 status="skipped",
                 skip_reason=error_msg,
-                correctness=CorrectnessResult(
-                    execution_success=False,
-                    tolerance_match=None,
-                    rtol=config.rtol,
-                    atol=config.atol,
-                    error_message=error_msg,
+                correctness=CorrectnessResult.failed(
+                    rtol=config.rtol, atol=config.atol, error_message=error_msg
                 ),
             )
         return ProviderEngineResult(
@@ -434,12 +441,8 @@ def _run_single_provider_engine(
             engine_id=engine_id,
             status="error",
             error_message=error_msg,
-            correctness=CorrectnessResult(
-                execution_success=False,
-                tolerance_match=None,
-                rtol=config.rtol,
-                atol=config.atol,
-                error_message=error_msg,
+            correctness=CorrectnessResult.failed(
+                rtol=config.rtol, atol=config.atol, error_message=error_msg
             ),
         )
 
@@ -450,11 +453,7 @@ def _run_single_provider_engine(
             engine_id=engine_id,
             status="error",
             error_message=error_msg,
-            correctness=CorrectnessResult(
-                execution_success=False,
-                tolerance_match=None,
-                rtol=config.rtol,
-                atol=config.atol,
-                error_message=error_msg,
+            correctness=CorrectnessResult.failed(
+                rtol=config.rtol, atol=config.atol, error_message=error_msg
             ),
         )

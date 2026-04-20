@@ -71,20 +71,20 @@ results are printed as a summary table. Use `-v` for the rich per-engine block
 
 ```bash
 # Single graph (default summary output)
-python -m dnn_benchmarking --graph ./graphs/conv1_fwd.json --warmup 10 --iters 100
+python -m dnn_benchmarking --graph ./graphs/sample_conv_fwd.json --warmup 10 --iters 100
 
 # Single graph, verbose: rich per-engine block
-python -m dnn_benchmarking --graph ./graphs/conv1_fwd.json -v
+python -m dnn_benchmarking --graph ./graphs/sample_conv_fwd.json -v
 
 # Filter to specific engine(s) — comma-separated
-python -m dnn_benchmarking --graph ./graphs/conv1_fwd.json --engine 1
-python -m dnn_benchmarking --graph ./graphs/conv1_fwd.json --engine 1,2
+python -m dnn_benchmarking --graph ./graphs/sample_conv_fwd.json --engine 1
+python -m dnn_benchmarking --graph ./graphs/sample_conv_fwd.json --engine 1,2
 
 # Multiple graphs (glob): same path, default summary table
 python -m dnn_benchmarking --graph 'graphs/*.json' --warmup 10 --iters 100
 
 # With reproducible random seed
-python -m dnn_benchmarking --graph ./graphs/conv1_fwd.json --seed 42
+python -m dnn_benchmarking --graph ./graphs/sample_conv_fwd.json --seed 42
 ```
 
 ### A/B Testing
@@ -93,15 +93,15 @@ Compare two different plugin/engine configurations and validate accuracy:
 
 ```bash
 # Compare two different engines on the default plugin
-python -m dnn_benchmarking --graph ./graphs/conv1_fwd.json --AId 1 --BId 2
+python -m dnn_benchmarking --graph ./graphs/sample_conv_fwd.json --AId 1 --BId 2
 
 # Compare two different plugins with specific engine IDs
-python -m dnn_benchmarking --graph ./graphs/conv1_fwd.json \
+python -m dnn_benchmarking --graph ./graphs/sample_conv_fwd.json \
   --APath /path/to/pluginA --AId 1 \
   --BPath /path/to/pluginB --BId 2
 
 # With custom tolerance for accuracy comparison
-python -m dnn_benchmarking --graph ./graphs/conv1_fwd.json \
+python -m dnn_benchmarking --graph ./graphs/sample_conv_fwd.json \
   --AId 1 --BId 2 --rtol 1e-3 --atol 1e-6
 ```
 
@@ -115,9 +115,28 @@ python -m dnn_benchmarking --graph ./graphs/conv1_fwd.json \
 | `--warmup`, `-w` | Number of warmup iterations | 10 |
 | `--iters`, `-i` | Number of benchmark iterations | 100 |
 | `--engine`, `-e` | Engine ID or comma-separated list (e.g. `1` or `1,2,3`); default = all discovered engines | None |
+| `--seed`, `-s` | Random seed for reproducible input data | None |
+| `--backend`, `-b` | Execution backend: `hipdnn` (AMD GPU via hipDNN) or `pytorch` (GPU via PyTorch) | `hipdnn` |
+
+#### Output Options
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--output`, `-o` | Export benchmark results to JSON file (full SuiteResult; independent of `-v`) | None |
 | `--verbose`, `-v` | Show detailed per-engine block per graph (default: summary table) | False |
-| `--seed` | Random seed for reproducibility | None |
-| `--no-kernel-timing` | Disable GPU kernel timing (E2E only) | False |
+| `--no-kernel-timing` | Disable GPU kernel timing (E2E wall-clock only) | False |
+
+#### Reference Validation Options
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--validate` | Reference provider for correctness validation: `pytorch`, `cpu_plugin`, or `none` | `none` |
+
+#### Suite Options
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--plugin-path` | Path to directory containing hipDNN engine plugin `.so` files | None (system default) |
 
 #### A/B Testing Options
 
@@ -127,14 +146,55 @@ python -m dnn_benchmarking --graph ./graphs/conv1_fwd.json \
 | `--AId` | Engine ID for configuration A | Required for A/B |
 | `--BPath` | Plugin path for configuration B | None (default) |
 | `--BId` | Engine ID for configuration B | Required for A/B |
-| `--rtol` | Relative tolerance for accuracy comparison | 1e-5 |
-| `--atol` | Absolute tolerance for accuracy comparison | 1e-8 |
 
 **Note**: A/B testing mode is enabled when both `--AId` and `--BId` are specified.
 
+#### Comparison Options
+
+Used by A/B testing, reference validation, and suite-mode tolerance checks.
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--rtol` | Relative tolerance for output comparison | 1e-5 |
+| `--atol` | Absolute tolerance for output comparison | 1e-8 |
+
 ## Output
 
-### Basic Benchmark Output
+### Default Output (summary table)
+
+The default console output is a compact, suite-style summary. One line per
+graph reports the per-engine pass/fail counts, followed by a final summary
+block. JSON output (`--output`) always contains the full per-engine
+`SuiteResult` regardless of console verbosity.
+
+```
+================================================================================
+hipDNN Benchmark Suite: 3 graph(s)
+================================================================================
+
+[1/3] sample_conv_fwd...
+  -> 2 passed, 0 failed, 0 skipped, 0 errored
+[2/3] sample_matmul...
+  -> 2 passed, 0 failed, 0 skipped, 0 errored
+[3/3] sample_relu...
+  -> 1 passed, 1 failed, 0 skipped, 0 errored
+
+--------------------------------------------------------------------------------
+Suite Summary:
+  Graphs:       3
+  Combinations: 6
+  Passed:       5
+  Failed:       1
+  Skipped:      0
+  Errors:       0
+================================================================================
+```
+
+### Verbose Output (`-v`)
+
+`-v` switches to a rich per-engine block per graph (matches the legacy
+single-graph format). Useful when debugging a single graph or comparing engines
+side-by-side.
 
 ```
 ================================================================================
@@ -149,7 +209,7 @@ Benchmark:  100 iterations
 Initialization:
   Graph build time:     45.23 ms
 
-Execution Statistics:
+E2E Execution Statistics:
   Mean:                 1.234 ms
   Std Dev:              0.045 ms
   Min:                  1.156 ms
@@ -157,7 +217,16 @@ Execution Statistics:
   P95:                  1.312 ms
   P99:                  1.398 ms
 
-Validation: SKIPPED (CPU reference not available)
+Kernel Execution Statistics:
+  Mean:                 0.872 ms
+  Std Dev:              0.012 ms
+  Min:                  0.851 ms
+  Max:                  0.921 ms
+  P95:                  0.897 ms
+  P99:                  0.910 ms
+
+Reference Validation: SKIPPED (no reference comparison performed)
+  Provider: none
 ================================================================================
 ```
 

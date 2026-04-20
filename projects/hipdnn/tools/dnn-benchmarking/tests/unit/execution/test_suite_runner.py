@@ -15,14 +15,15 @@ from dnn_benchmarking.execution.suite_runner import (
     discover_engines,
     _get_reference_provider,
     _check_correctness,
+    _is_support_error,
 )
 from dnn_benchmarking.config.benchmark_config import SuiteConfig
 from dnn_benchmarking.common.exceptions import ExecutionError
+from dnn_benchmarking.reporting.statistics import BenchmarkStats
 from dnn_benchmarking.reporting.suite_results import (
     CorrectnessResult,
     GraphResult,
     ProviderEngineResult,
-    TimingStats,
 )
 
 
@@ -245,8 +246,8 @@ class TestRunGraphAllProviders:
         r = result.results[0]
         assert r.status == "success"
         assert r.cpu_build_time_ms == 12.5
-        assert isinstance(r.gpu_kernel_stats, TimingStats)
-        assert isinstance(r.e2e_stats, TimingStats)
+        assert isinstance(r.gpu_kernel_stats, BenchmarkStats)
+        assert isinstance(r.e2e_stats, BenchmarkStats)
 
     @patch("dnn_benchmarking.execution.suite_runner.discover_engines")
     @patch("dnn_benchmarking.execution.suite_runner.discover_providers")
@@ -345,6 +346,56 @@ class TestSuiteConfigValidation:
         """SuiteConfig.verbose can be set to True."""
         config = SuiteConfig(verbose=True)
         assert config.verbose is True
+
+    def test_invalid_gpu_backend_raises(self):
+        """SuiteConfig rejects unknown gpu_backend strings."""
+        with pytest.raises(ValueError, match="gpu_backend"):
+            SuiteConfig(gpu_backend="bogus")
+
+    def test_invalid_reference_provider_raises(self):
+        """SuiteConfig rejects unknown reference_provider strings."""
+        with pytest.raises(ValueError, match="reference_provider"):
+            SuiteConfig(reference_provider="not_a_real_provider")
+
+    def test_default_gpu_backend_and_reference_provider_accepted(self):
+        """SuiteConfig defaults ('auto', 'none') validate cleanly,
+        and all documented valid options are accepted."""
+        # Defaults
+        config = SuiteConfig()
+        assert config.gpu_backend == "auto"
+        assert config.reference_provider == "none"
+        # Each valid gpu_backend
+        for backend in ("torch", "auto", "none"):
+            SuiteConfig(gpu_backend=backend)
+        # Each valid reference_provider
+        for provider in ("none", "pytorch", "cpu_plugin"):
+            SuiteConfig(reference_provider=provider)
+
+
+class TestIsSupportError:
+    """Tests for _is_support_error keyword classification (W-08)."""
+
+    def test_support_check_failed_is_support_error(self):
+        assert _is_support_error("Backend support check failed: bad config") is True
+
+    def test_not_supported_is_support_error(self):
+        assert _is_support_error("Operation not supported on this engine") is True
+
+    def test_unsupported_is_support_error(self):
+        assert _is_support_error("unsupported tensor layout") is True
+
+    def test_no_engine_is_support_error(self):
+        assert _is_support_error("no engine available for this graph") is True
+
+    def test_case_insensitive(self):
+        assert _is_support_error("UNSUPPORTED") is True
+        assert _is_support_error("Not Supported") is True
+
+    def test_unrelated_error_not_support_error(self):
+        assert _is_support_error("out of memory") is False
+
+    def test_empty_string_not_support_error(self):
+        assert _is_support_error("") is False
 
 
 class TestEngineFilter:

@@ -201,20 +201,21 @@ class TestCLIParser:
 
     def test_parse_default_values(self) -> None:
         """Test parsing with default values."""
-        from dnn_benchmarking.cli.parser import parse_args
+        from dnn_benchmarking.cli.parser import create_parser
 
-        config = parse_args(["--graph", "/test/graph.json"])
+        args = create_parser().parse_args(["--graph", "/test/graph.json"])
 
-        assert config.graph_path == Path("/test/graph.json")
-        assert config.warmup_iters == 10
-        assert config.benchmark_iters == 100
-        assert config.engine_id == 1
+        assert args.graph == "/test/graph.json"
+        assert args.warmup == 10
+        assert args.iters == 100
+        # --engine defaults to None (= run all discovered engines)
+        assert args.engine is None
 
     def test_parse_custom_values(self) -> None:
         """Test parsing with custom values."""
-        from dnn_benchmarking.cli.parser import parse_args
+        from dnn_benchmarking.cli.parser import create_parser
 
-        config = parse_args(
+        args = create_parser().parse_args(
             [
                 "--graph",
                 "/test/graph.json",
@@ -227,23 +228,23 @@ class TestCLIParser:
             ]
         )
 
-        assert config.graph_path == Path("/test/graph.json")
-        assert config.warmup_iters == 20
-        assert config.benchmark_iters == 200
-        assert config.engine_id == 2
+        assert args.graph == "/test/graph.json"
+        assert args.warmup == 20
+        assert args.iters == 200
+        assert args.engine == [2]
 
     def test_parse_short_options(self) -> None:
         """Test parsing with short option names."""
-        from dnn_benchmarking.cli.parser import parse_args
+        from dnn_benchmarking.cli.parser import create_parser
 
-        config = parse_args(
+        args = create_parser().parse_args(
             ["-g", "/test/graph.json", "-w", "5", "-i", "50", "-e", "3"]
         )
 
-        assert config.graph_path == Path("/test/graph.json")
-        assert config.warmup_iters == 5
-        assert config.benchmark_iters == 50
-        assert config.engine_id == 3
+        assert args.graph == "/test/graph.json"
+        assert args.warmup == 5
+        assert args.iters == 50
+        assert args.engine == [3]
 
     def test_engine_comma_list_parses_at_subprocess_level(self) -> None:
         """A comma-separated --engine value is accepted by the CLI without error."""

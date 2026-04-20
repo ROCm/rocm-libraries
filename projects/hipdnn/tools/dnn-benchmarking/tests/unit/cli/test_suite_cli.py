@@ -21,7 +21,6 @@ from dnn_benchmarking.reporting.suite_results import (
     ProviderEngineResult,
     SuiteMetadata,
     SuiteResult,
-    TimingStats,
 )
 
 
@@ -77,6 +76,15 @@ class TestParserGlobAndFilters:
         parser = create_parser()
         args = parser.parse_args(["--graph", "g.json"])
         assert args.engine is None
+
+    def test_engine_flag_deduplicates_preserving_order(self) -> None:
+        """--engine 1,1,1 -> [1]; '3,1,3,2' -> [3, 1, 2] (first-seen order)."""
+        parser = create_parser()
+        args = parser.parse_args(["--graph", "g.json", "--engine", "1,1,1"])
+        assert args.engine == [1]
+
+        args = parser.parse_args(["--graph", "g.json", "--engine", "3,1,3,2"])
+        assert args.engine == [3, 1, 2]
 
     def test_verbose_flag_default_false(self) -> None:
         """No -v / --verbose => args.verbose is False."""
@@ -228,6 +236,36 @@ class TestMainRouting:
                 result = main()
 
             assert result == 1
+
+    @patch("dnn_benchmarking.cli.main.run_suite")
+    def test_recursive_glob_matches_nested_directories(
+        self, mock_run_suite: MagicMock
+    ) -> None:
+        """`**` glob with recursive=True matches graphs in nested directories."""
+        mock_run_suite.return_value = 0
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            # Create nested structure: tmpdir/a/g0.json, tmpdir/a/b/g1.json
+            (root / "a" / "b").mkdir(parents=True)
+            (root / "a" / "g0.json").write_text(
+                json.dumps({"name": "g0", "nodes": [], "tensors": []})
+            )
+            (root / "a" / "b" / "g1.json").write_text(
+                json.dumps({"name": "g1", "nodes": [], "tensors": []})
+            )
+
+            glob_pattern = os.path.join(tmpdir, "**", "*.json")
+
+            from dnn_benchmarking.cli.main import main
+
+            with patch("sys.argv", ["dnn-benchmark", "--graph", glob_pattern]):
+                main()
+
+            mock_run_suite.assert_called_once()
+            kwargs = mock_run_suite.call_args.kwargs
+            # Both nested files should have been resolved
+            assert len(kwargs["graph_paths"]) == 2
 
     def test_zero_files_glob_returns_error(self) -> None:
         """When glob resolves to zero files, main() returns 1."""
@@ -449,12 +487,19 @@ class TestRunSuiteWorkflow:
         from dnn_benchmarking.cli.main import run_suite
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            paths = self._make_graph_files(Path(tmpdir), 1)
+            tmp_path = Path(tmpdir)
+            paths = self._make_graph_files(tmp_path, 1)
+            # Snapshot the JSON files that exist before the run (input graphs)
+            inputs_before = {p.resolve() for p in tmp_path.rglob("*.json")}
+
             config = SuiteConfig()
             # No output_path
             run_suite(paths, config)
 
-        # No crash, no file written -- just a smoke test that it completes
+            # Assert no NEW *.json files were created in tmpdir
+            inputs_after = {p.resolve() for p in tmp_path.rglob("*.json")}
+            new_files = inputs_after - inputs_before
+            assert new_files == set(), f"Unexpected JSON files written: {new_files}"
 
     @patch("dnn_benchmarking.cli.main.run_graph_all_providers")
     @patch("dnn_benchmarking.cli.main.collect_environment_info")
@@ -484,6 +529,41 @@ class TestRunSuiteWorkflow:
             passed_config = call_args[0][3]  # 4th positional arg is config
             assert passed_config.warmup_iters == 20
             assert passed_config.benchmark_iters == 200
+
+    @patch("dnn_benchmarking.cli.main.run_graph_all_providers")
+    @patch("dnn_benchmarking.cli.main.collect_environment_info")
+    @patch.dict(sys.modules, {"hipdnn_frontend": _mock_hipdnn()})
+    def test_empty_nodes_graph_records_error_and_continues(
+        self, mock_env: MagicMock, mock_run: MagicMock
+    ) -> None:
+        """Per W-03: graph with no operation nodes fails loader.validate(),
+        which produces an error entry and the suite continues to the next graph."""
+        mock_env.return_value = {
+            "rocm_version": None,
+            "gpu_model": None,
+            "python_version": "3.10.0",
+            "hipdnn_version": None,
+        }
+        mock_run.return_value = self._make_graph_result("g_good")
+
+        from dnn_benchmarking.cli.main import run_suite
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # First graph has empty nodes -> validator should reject it
+            empty_file = Path(tmpdir) / "empty_graph.json"
+            empty_file.write_text(
+                json.dumps({"name": "empty_graph", "nodes": [], "tensors": []})
+            )
+
+            good_paths = self._make_graph_files(Path(tmpdir), 1)
+            paths = [empty_file] + good_paths
+            config = SuiteConfig()
+            result = run_suite(paths, config)
+
+        # Good graph still got processed (run_graph_all_providers called once).
+        assert mock_run.call_count == 1
+        # Empty graph triggered an error path -> exit code 1
+        assert result == 1
 
     @patch("dnn_benchmarking.cli.main.run_graph_all_providers")
     @patch("dnn_benchmarking.cli.main.collect_environment_info")

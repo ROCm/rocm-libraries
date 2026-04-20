@@ -9,76 +9,12 @@ entries with message only.
 """
 
 import json
-import socket
 import sys
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, NamedTuple, Optional
 
-import numpy as np
-
-
-@dataclass
-class TimingStats:
-    """Statistical summary of timing measurements.
-
-    Per D-13: mean, std, min, max, p95, p99.
-
-    Attributes:
-        mean_ms: Mean execution time in milliseconds.
-        std_ms: Standard deviation in milliseconds.
-        min_ms: Minimum execution time in milliseconds.
-        max_ms: Maximum execution time in milliseconds.
-        p95_ms: 95th percentile in milliseconds.
-        p99_ms: 99th percentile in milliseconds.
-    """
-
-    mean_ms: float
-    std_ms: float
-    min_ms: float
-    max_ms: float
-    p95_ms: float
-    p99_ms: float
-
-    @classmethod
-    def from_timings(cls, timings: List[float]) -> "TimingStats":
-        """Calculate statistics from raw timing list.
-
-        Uses same numpy logic as BenchmarkStats.
-
-        Args:
-            timings: List of execution times in milliseconds.
-
-        Returns:
-            TimingStats with calculated statistics.
-
-        Raises:
-            ValueError: If timings list is empty.
-        """
-        if not timings:
-            raise ValueError("timings list cannot be empty")
-
-        arr = np.array(timings)
-        return cls(
-            mean_ms=float(np.mean(arr)),
-            std_ms=float(np.std(arr, ddof=1)) if len(arr) > 1 else 0.0,
-            min_ms=float(np.min(arr)),
-            max_ms=float(np.max(arr)),
-            p95_ms=float(np.percentile(arr, 95)),
-            p99_ms=float(np.percentile(arr, 99)),
-        )
-
-    def to_dict(self) -> Dict[str, float]:
-        """Convert to dictionary for JSON serialization."""
-        return {
-            "mean_ms": self.mean_ms,
-            "std_ms": self.std_ms,
-            "min_ms": self.min_ms,
-            "max_ms": self.max_ms,
-            "p95_ms": self.p95_ms,
-            "p99_ms": self.p99_ms,
-        }
+from .statistics import BenchmarkStats
 
 
 @dataclass
@@ -108,6 +44,32 @@ class CorrectnessResult:
     def passed(self) -> bool:
         """CORR-03: overall pass = executed successfully AND tolerance matched."""
         return self.execution_success and (self.tolerance_match is True)
+
+    @classmethod
+    def failed(
+        cls, rtol: float, atol: float, error_message: str
+    ) -> "CorrectnessResult":
+        """Build a CorrectnessResult representing an execution failure.
+
+        Used at error/skip sites where the GPU run did not complete and no
+        comparison was performed.
+
+        Args:
+            rtol: Relative tolerance configured for comparison.
+            atol: Absolute tolerance configured for comparison.
+            error_message: Explanation of the failure.
+
+        Returns:
+            CorrectnessResult with execution_success=False and
+            tolerance_match=None.
+        """
+        return cls(
+            execution_success=False,
+            tolerance_match=None,
+            rtol=rtol,
+            atol=atol,
+            error_message=error_message,
+        )
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
@@ -147,10 +109,10 @@ class ProviderEngineResult:
 
     provider: str
     engine_id: int
-    status: str
+    status: Literal["success", "error", "skipped"]
     cpu_build_time_ms: Optional[float] = None
-    gpu_kernel_stats: Optional[TimingStats] = None
-    e2e_stats: Optional[TimingStats] = None
+    gpu_kernel_stats: Optional[BenchmarkStats] = None
+    e2e_stats: Optional[BenchmarkStats] = None
     correctness: Optional[CorrectnessResult] = None
     error_message: Optional[str] = None
     skip_reason: Optional[str] = None
@@ -167,6 +129,8 @@ class ProviderEngineResult:
         """Convert to dictionary for JSON serialization.
 
         Per D-07: error entries have status + error_message only, no timing.
+        Correctness, when present, is always serialized regardless of status
+        so that error/skip entries can carry their failure context.
         """
         d: Dict[str, Any] = {
             "provider": self.provider,
@@ -179,12 +143,32 @@ class ProviderEngineResult:
                 self.gpu_kernel_stats.to_dict() if self.gpu_kernel_stats else None
             )
             d["e2e_stats"] = self.e2e_stats.to_dict() if self.e2e_stats else None
-            d["correctness"] = self.correctness.to_dict() if self.correctness else None
         elif self.status == "error":
             d["error_message"] = self.error_message
         elif self.status == "skipped":
             d["skip_reason"] = self.skip_reason
+
+        if self.correctness is not None:
+            d["correctness"] = self.correctness.to_dict()
         return d
+
+
+class StatusCounts(NamedTuple):
+    """Counts of provider/engine results bucketed by outcome.
+
+    Attributes:
+        passed: Successful runs whose correctness either matched or was not
+            checked (tolerance_match is True or None).
+        failed: Successful runs whose correctness comparison failed
+            (tolerance_match is False).
+        skipped: Runs marked as 'skipped' (unsupported combinations).
+        errored: Runs marked as 'error' (hard failure).
+    """
+
+    passed: int
+    failed: int
+    skipped: int
+    errored: int
 
 
 @dataclass
@@ -200,6 +184,36 @@ class GraphResult:
     graph_name: str
     graph_path: str
     results: List[ProviderEngineResult]
+
+    def count_by_status(self) -> StatusCounts:
+        """Bucket results into pass/fail/skip/error counts.
+
+        A 'pass' is a successful run whose correctness check either passed or
+        was not performed (tolerance_match is True or None). A 'fail' is a
+        successful run whose correctness check explicitly failed
+        (tolerance_match is False).
+
+        Returns:
+            StatusCounts with the four bucket counts.
+        """
+        passed = sum(
+            1
+            for r in self.results
+            if r.status == "success"
+            and (r.correctness is None or r.correctness.tolerance_match is not False)
+        )
+        failed = sum(
+            1
+            for r in self.results
+            if r.status == "success"
+            and r.correctness is not None
+            and r.correctness.tolerance_match is False
+        )
+        skipped = sum(1 for r in self.results if r.status == "skipped")
+        errored = sum(1 for r in self.results if r.status == "error")
+        return StatusCounts(
+            passed=passed, failed=failed, skipped=skipped, errored=errored
+        )
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON serialization.

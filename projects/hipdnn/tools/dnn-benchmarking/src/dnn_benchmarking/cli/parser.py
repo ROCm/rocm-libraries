@@ -7,16 +7,18 @@ import argparse
 from pathlib import Path
 from typing import List
 
-from ..config.benchmark_config import BenchmarkConfig
-
 
 def _parse_engine_list(s: str) -> List[int]:
     """Parse --engine value as a single ID or comma-separated list of IDs.
 
+    Duplicates are removed while preserving first-seen order.
+
     Examples:
-      "1"      -> [1]
-      "1,2,3"  -> [1, 2, 3]
-      "1, 2"   -> [1, 2]
+      "1"        -> [1]
+      "1,2,3"    -> [1, 2, 3]
+      "1, 2"     -> [1, 2]
+      "1,1,2"    -> [1, 2]
+      "3,1,3,2"  -> [3, 1, 2]
     """
     parts = [p.strip() for p in s.split(",")]
     parts = [p for p in parts if p]
@@ -28,7 +30,14 @@ def _parse_engine_list(s: str) -> List[int]:
         raise argparse.ArgumentTypeError(f"--engine expects integer ID(s), got {s!r}")
     if any(i < 0 for i in ids):
         raise argparse.ArgumentTypeError("--engine IDs must be non-negative")
-    return ids
+    # Deduplicate while preserving first-seen order
+    seen: set = set()
+    deduped: List[int] = []
+    for i in ids:
+        if i not in seen:
+            seen.add(i)
+            deduped.append(i)
+    return deduped
 
 
 def create_parser() -> argparse.ArgumentParser:
@@ -225,32 +234,3 @@ Suite Mode (multiple graphs):
     )
 
     return parser
-
-
-def parse_args(args=None) -> BenchmarkConfig:
-    """Parse command line arguments and return BenchmarkConfig.
-
-    Args:
-        args: Command line arguments (default: sys.argv).
-
-    Returns:
-        BenchmarkConfig with parsed values.
-
-    Raises:
-        SystemExit: If arguments are invalid.
-    """
-    parser = create_parser()
-    parsed = parser.parse_args(args)
-
-    # parse_args() is a convenience wrapper used by external callers / tests for
-    # legacy single-graph BenchmarkConfig construction. main() does its own
-    # routing and does not call this. Map a list back to a scalar engine_id by
-    # taking the first ID, defaulting to 1 if unspecified.
-    engine_id = parsed.engine[0] if parsed.engine else 1
-
-    return BenchmarkConfig(
-        graph_path=parsed.graph,
-        warmup_iters=parsed.warmup,
-        benchmark_iters=parsed.iters,
-        engine_id=engine_id,
-    )

@@ -6,5 +6,6 @@
 # available build at:
 #   https://rocm.nightlies.amd.com/v2-staging/gfx90X-dcgpu/torch/
 --index-url https://rocm.nightlies.amd.com/v2-staging/gfx90X-dcgpu/
+--extra-index-url https://pypi.org/simple
 --pre
-torch
+torch>=2.0.0

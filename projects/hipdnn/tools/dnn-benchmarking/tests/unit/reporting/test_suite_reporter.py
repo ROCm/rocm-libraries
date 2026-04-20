@@ -7,11 +7,12 @@ import io
 
 from dnn_benchmarking.config.benchmark_config import SuiteConfig
 from dnn_benchmarking.reporting.reporter import Reporter
+from dnn_benchmarking.reporting.statistics import BenchmarkStats
 from dnn_benchmarking.reporting.suite_results import (
     CorrectnessResult,
     GraphResult,
     ProviderEngineResult,
-    TimingStats,
+    SuiteMetadata,
 )
 
 
@@ -20,7 +21,7 @@ def _make_pe_success(
     correctness: object = None,
 ) -> ProviderEngineResult:
     """Helper: build a successful ProviderEngineResult with timing."""
-    e2e = TimingStats(
+    e2e = BenchmarkStats(
         mean_ms=1.234,
         std_ms=0.045,
         min_ms=1.156,
@@ -28,7 +29,7 @@ def _make_pe_success(
         p95_ms=1.312,
         p99_ms=1.398,
     )
-    kernel = TimingStats(
+    kernel = BenchmarkStats(
         mean_ms=0.500,
         std_ms=0.020,
         min_ms=0.470,
@@ -114,18 +115,21 @@ class TestSuiteReporter:
         assert "  ERROR: Graph file not found: /path/to/missing.json" in result
 
     def test_print_suite_summary(self) -> None:
-        """Test 5: print_suite_summary prints totals."""
+        """Test 5: print_suite_summary prints totals from SuiteMetadata."""
         output = io.StringIO()
         reporter = Reporter(output=output)
 
-        reporter.print_suite_summary(
+        meta = SuiteMetadata(
+            timestamp="2026-01-01T00:00:00Z",
+            hostname="testhost",
             total_graphs=3,
             total_combinations=9,
-            pass_count=6,
-            fail_count=2,
-            skip_count=1,
-            error_count=0,
+            pass_combinations=6,
+            fail_combinations=2,
+            skip_combinations=1,
+            error_combinations=0,
         )
+        reporter.print_suite_summary(meta)
 
         result = output.getvalue()
         assert "Suite Summary:" in result
@@ -157,12 +161,16 @@ class TestSuiteReporter:
         reporter.print_suite_graph_result(1, 0, 0, 0)
         reporter.print_suite_graph_error("bad_graph", "Load failed")
         reporter.print_suite_summary(
-            total_graphs=2,
-            total_combinations=4,
-            pass_count=3,
-            fail_count=0,
-            skip_count=1,
-            error_count=0,
+            SuiteMetadata(
+                timestamp="2026-01-01T00:00:00Z",
+                hostname="testhost",
+                total_graphs=2,
+                total_combinations=4,
+                pass_combinations=3,
+                fail_combinations=0,
+                skip_combinations=1,
+                error_combinations=0,
+            )
         )
         reporter.print_suite_footer()
 
@@ -189,12 +197,16 @@ class TestSuiteReporter:
         reporter = Reporter(output=output)
 
         reporter.print_suite_summary(
-            total_graphs=1,
-            total_combinations=2,
-            pass_count=1,
-            fail_count=0,
-            skip_count=1,
-            error_count=0,
+            SuiteMetadata(
+                timestamp="2026-01-01T00:00:00Z",
+                hostname="testhost",
+                total_graphs=1,
+                total_combinations=2,
+                pass_combinations=1,
+                fail_combinations=0,
+                skip_combinations=1,
+                error_combinations=0,
+            )
         )
 
         result = output.getvalue()
