@@ -5,7 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 HIPDNN_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 WORKSPACE_ROOT="$(cd "$HIPDNN_ROOT/../.." && pwd)"
 BUILD_DIR="$HIPDNN_ROOT/build"
-INSTALL_DIR="$BUILD_DIR/install"
+INSTALL_DIR="/opt/rocm"
 VENV_DIR="$SCRIPT_DIR/.venv"
 MIOPEN_PROVIDER_DIR="$WORKSPACE_ROOT/dnn-providers/miopen-provider"
 MIOPEN_BUILD_DIR="$MIOPEN_PROVIDER_DIR/build"
@@ -40,7 +40,6 @@ source "$VENV_DIR/bin/activate"
 # 2. Install requirements and package
 # Install ROCm torch first via its dedicated index, then install the package with
 # --no-deps so pip never resolves torch from PyPI (which would pull the CUDA build).
-# Dev extras (pytest, pytest-cov) are installed separately as they have no GPU deps.
 pip install -r "$SCRIPT_DIR/requirements-rocm.txt"
 pip install -e "$SCRIPT_DIR" --no-deps
 
@@ -49,6 +48,11 @@ pip install -e "$SCRIPT_DIR" --no-deps
 # the raw build dir causes "non-existent path" errors in hipdnn_data_sdkConfig.cmake.
 HIPDNN_CONFIG="$INSTALL_DIR/lib/cmake/hipdnn_frontend/hipdnn_frontendConfig.cmake"
 if [ "$FORCE_BUILD" -eq 1 ] || [ ! -f "$HIPDNN_CONFIG" ]; then
+    read -r -p "This will install hipDNN to $INSTALL_DIR. Continue? [y/N] " confirm
+    case "$confirm" in
+        [yY]) ;;
+        *) echo "Aborted."; exit 0 ;;
+    esac
     echo "Building and installing hipDNN..."
     cmake -G Ninja -S "$HIPDNN_ROOT" -B "$BUILD_DIR" \
         -DCMAKE_BUILD_TYPE=Release \

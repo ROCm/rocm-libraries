@@ -25,8 +25,8 @@ pip install -e . --no-deps
 cd /path/to/hipdnn/python && pip install -e . --no-deps
 ```
 
-`--force-build` installs the MIOpen plugin to `projects/hipdnn/build/install/lib/hipdnn_plugins/engines/`.
-Pass that directory to `--plugin-path` when running benchmarks.
+`--force-build` installs hipDNN and the MIOpen plugin to `/opt/rocm` (prompts for confirmation).
+Pass `/opt/rocm/lib/hipdnn_plugins/engines/` to `--plugin-path` when running benchmarks.
 
 ### ROCm PyTorch Setup
 
