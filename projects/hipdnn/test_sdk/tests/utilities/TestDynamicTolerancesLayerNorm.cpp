@@ -55,11 +55,11 @@ struct LayernormFpropToleranceTestCase
 template <typename T>
 std::vector<LayernormFpropToleranceTestCase> getLayernormFpropToleranceTestCases();
 
-// LayerNorm uses 2M effective accumulations (Welford mean + M2).
-// propTol = (computeGamma(2*M, u) * 2*M * maxAbsX^2 / (2 * 2*M * maxAbsX^2)) * maxAbsScale
-//         + NONLINEAR_OPS * u * maxAbsScale
-//         + maxAbsBias * u
-//         = (gamma(2M) / 2 + 5u) * maxAbsScale + maxAbsBias * u
+// LayerNorm tolerance has two error paths:
+//   Path A (variance): gammaVar(2M)/2 * maxAbsScale  (sumAbsProductBound cancels)
+//   Path B (mean):     gammaMean(M) * maxAbsScale
+//   + NONLINEAR_OPS * u * maxAbsScale + maxAbsBias * u
+// Combined: (gammaVar(2M)/2 + gammaMean(M) + 5u) * maxAbsScale + maxAbsBias * u
 
 // Float / Float / Float
 // For FP32 at small M, computeGamma uses linear bound: nU/(1-nU)
@@ -68,15 +68,16 @@ std::vector<LayernormFpropToleranceTestCase>
     getLayernormFpropToleranceTestCases<TypeTriple<float, float, float>>()
 {
     auto u = static_cast<double>(std::numeric_limits<float>::epsilon());
-    auto gamma = [&](int64_t m) {
+    auto gammaVar = [&](int64_t m) {
         return computeGamma(static_cast<uint64_t>(2) * static_cast<uint64_t>(m), u);
     };
+    auto gammaMean = [&](int64_t m) { return computeGamma(static_cast<uint64_t>(m), u); };
     return {// normalizedElementCount = 0 => throws
             {-1.0, 1.0, -1.0, 1.0, 0, 0.0, 0.0, 0.0, true},
             // M=1, x=[-1,1], scale=[-1,1], no bias
-            {-1.0, 1.0, -1.0, 1.0, 1, 0.0, 0.0, (gamma(1) / 2.0) + 5.0 * u},
+            {-1.0, 1.0, -1.0, 1.0, 1, 0.0, 0.0, (gammaVar(1) / 2.0) + gammaMean(1) + 5.0 * u},
             // M=10, x=[-1,1], scale=[-1,1], no bias
-            {-1.0, 1.0, -1.0, 1.0, 10, 0.0, 0.0, (gamma(10) / 2.0) + 5.0 * u},
+            {-1.0, 1.0, -1.0, 1.0, 10, 0.0, 0.0, (gammaVar(10) / 2.0) + gammaMean(10) + 5.0 * u},
             // M=10, x=[-1000,1000], scale=[-1000,1000], no bias
             {-1000.0,
              1000.0,
@@ -85,29 +86,39 @@ std::vector<LayernormFpropToleranceTestCase>
              10,
              0.0,
              0.0,
-             (gamma(10) / 2.0) * 1000.0 + 5.0 * u * 1000.0},
+             ((gammaVar(10) / 2.0) + gammaMean(10) + 5.0 * u) * 1000.0},
             // M=3, x=[-1,1], scale=[-1,1], bias=[-0.5,0.5]
-            {-1.0, 1.0, -1.0, 1.0, 3, -0.5, 0.5, (gamma(3) / 2.0) + 5.0 * u + 0.5 * u}};
+            {-1.0,
+             1.0,
+             -1.0,
+             1.0,
+             3,
+             -0.5,
+             0.5,
+             (gammaVar(3) / 2.0) + gammaMean(3) + 5.0 * u + 0.5 * u}};
 }
 
 // Float / Double / Float (Input casting error: inputEpsilon(double) < epsilon(float))
-// accTol = gamma * sumAbsProductBound + sumAbsProductBound * epsilon
+// Variance path accTol = gammaVar * S + S * epsilon → (gammaVar + u)/2 after propagation
+// Mean path unaffected by input casting (absorbed by NONLINEAR_OPS)
 template <>
 std::vector<LayernormFpropToleranceTestCase>
     getLayernormFpropToleranceTestCases<TypeTriple<float, double, float>>()
 {
     auto u = static_cast<double>(std::numeric_limits<float>::epsilon());
-    auto gamma = [&](int64_t m) {
+    auto gammaVar = [&](int64_t m) {
         return computeGamma(static_cast<uint64_t>(2) * static_cast<uint64_t>(m), u);
     };
-    return {// normalizedElementCount = 0 => throws
-            {-1.0, 1.0, -1.0, 1.0, 0, 0.0, 0.0, 0.0, true},
-            // M=1
-            {-1.0, 1.0, -1.0, 1.0, 1, 0.0, 0.0, ((gamma(1) + u) / 2.0) + 5.0 * u},
-            // M=10
-            {-1.0, 1.0, -1.0, 1.0, 10, 0.0, 0.0, ((gamma(10) + u) / 2.0) + 5.0 * u},
-            // Zero input: x=0, all terms vanish
-            {0.0, 0.0, -1.0, 1.0, 10, 0.0, 0.0, 0.0}};
+    auto gammaMean = [&](int64_t m) { return computeGamma(static_cast<uint64_t>(m), u); };
+    return {
+        // normalizedElementCount = 0 => throws
+        {-1.0, 1.0, -1.0, 1.0, 0, 0.0, 0.0, 0.0, true},
+        // M=1
+        {-1.0, 1.0, -1.0, 1.0, 1, 0.0, 0.0, ((gammaVar(1) + u) / 2.0) + gammaMean(1) + 5.0 * u},
+        // M=10
+        {-1.0, 1.0, -1.0, 1.0, 10, 0.0, 0.0, ((gammaVar(10) + u) / 2.0) + gammaMean(10) + 5.0 * u},
+        // Zero input: x=0, range=0, all terms vanish
+        {0.0, 0.0, -1.0, 1.0, 10, 0.0, 0.0, 0.0}};
 }
 
 // Half / Float / Float (Output casting error: outputEpsilon(half=2^-10) > epsilon(float=2^-23))
@@ -117,36 +128,55 @@ std::vector<LayernormFpropToleranceTestCase>
 {
     auto u = static_cast<double>(std::numeric_limits<float>::epsilon());
     auto uHalf = static_cast<double>(std::numeric_limits<half>::epsilon());
-    auto gamma = [&](int64_t m) {
+    auto gammaVar = [&](int64_t m) {
         return computeGamma(static_cast<uint64_t>(2) * static_cast<uint64_t>(m), u);
     };
+    auto gammaMean = [&](int64_t m) { return computeGamma(static_cast<uint64_t>(m), u); };
     return {// normalizedElementCount = 0 => throws
             {-1.0, 1.0, -1.0, 1.0, 0, 0.0, 0.0, 0.0, true},
             // M=1
-            {-1.0, 1.0, -1.0, 1.0, 1, 0.0, 0.0, (gamma(1) / 2.0) + 5.0 * u + 1.0 * uHalf},
+            {-1.0,
+             1.0,
+             -1.0,
+             1.0,
+             1,
+             0.0,
+             0.0,
+             (gammaVar(1) / 2.0) + gammaMean(1) + 5.0 * u + 1.0 * uHalf},
             // M=10
-            {-1.0, 1.0, -1.0, 1.0, 10, 0.0, 0.0, (gamma(10) / 2.0) + 5.0 * u + 1.0 * uHalf},
-            // Zero input: output cast term from maxOutputMagnitude=0 vanishes
+            {-1.0,
+             1.0,
+             -1.0,
+             1.0,
+             10,
+             0.0,
+             0.0,
+             (gammaVar(10) / 2.0) + gammaMean(10) + 5.0 * u + 1.0 * uHalf},
+            // Zero input: range=0, output cast term from maxOutputMagnitude=0 vanishes
             {0.0, 0.0, -1.0, 1.0, 10, 0.0, 0.0, 0.0}};
 }
 
 // Half / Half / Half
 // computeGamma selects linear vs statistical based on nU threshold (0.01).
-// half epsilon = 2^-10.  2*M=2: nU=0.0039<0.01 -> linear.  2*M=20: nU=0.039>=0.01 -> statistical.
+// half epsilon = 2^-10.  Variance path: 2*M=2 -> nU=0.0039<0.01 (linear).
+//                        Mean path:     M=1   -> nU=0.002<0.01 (linear).
+// At M=10: variance 2*M=20 -> nU=0.039>=0.01 (statistical).
+//          mean     M=10   -> nU=0.020>=0.01 (statistical).
 template <>
 std::vector<LayernormFpropToleranceTestCase>
     getLayernormFpropToleranceTestCases<TypeTriple<half, half, half>>()
 {
     auto u = static_cast<double>(std::numeric_limits<half>::epsilon());
-    auto gamma = [&](int64_t m) {
+    auto gammaVar = [&](int64_t m) {
         return computeGamma(static_cast<uint64_t>(2) * static_cast<uint64_t>(m), u);
     };
+    auto gammaMean = [&](int64_t m) { return computeGamma(static_cast<uint64_t>(m), u); };
     return {// normalizedElementCount = 0 => throws
             {-1.0, 1.0, -1.0, 1.0, 0, 0.0, 0.0, 0.0, true},
-            // M=1: gamma via computeGamma (linear at this nU, 2*1=2 accum)
-            {-1.0, 1.0, -1.0, 1.0, 1, 0.0, 0.0, (gamma(1) / 2.0) + 5.0 * u},
-            // M=10: gamma via computeGamma (statistical at this nU, 2*10=20 accum)
-            {-1.0, 1.0, -1.0, 1.0, 10, 0.0, 0.0, (gamma(10) / 2.0) + 5.0 * u},
+            // M=1
+            {-1.0, 1.0, -1.0, 1.0, 1, 0.0, 0.0, (gammaVar(1) / 2.0) + gammaMean(1) + 5.0 * u},
+            // M=10
+            {-1.0, 1.0, -1.0, 1.0, 10, 0.0, 0.0, (gammaVar(10) / 2.0) + gammaMean(10) + 5.0 * u},
             // Zero input: all terms vanish
             {0.0, 0.0, -1.0, 1.0, 10, 0.0, 0.0, 0.0}};
 }
@@ -158,35 +188,52 @@ std::vector<LayernormFpropToleranceTestCase>
 {
     auto u = static_cast<double>(std::numeric_limits<float>::epsilon());
     auto uBf16 = static_cast<double>(std::numeric_limits<bfloat16>::epsilon());
-    auto gamma = [&](int64_t m) {
+    auto gammaVar = [&](int64_t m) {
         return computeGamma(static_cast<uint64_t>(2) * static_cast<uint64_t>(m), u);
     };
+    auto gammaMean = [&](int64_t m) { return computeGamma(static_cast<uint64_t>(m), u); };
     return {// normalizedElementCount = 0 => throws
             {-1.0, 1.0, -1.0, 1.0, 0, 0.0, 0.0, 0.0, true},
             // M=1
-            {-1.0, 1.0, -1.0, 1.0, 1, 0.0, 0.0, (gamma(1) / 2.0) + 5.0 * u + 1.0 * uBf16},
+            {-1.0,
+             1.0,
+             -1.0,
+             1.0,
+             1,
+             0.0,
+             0.0,
+             (gammaVar(1) / 2.0) + gammaMean(1) + 5.0 * u + 1.0 * uBf16},
             // M=10
-            {-1.0, 1.0, -1.0, 1.0, 10, 0.0, 0.0, (gamma(10) / 2.0) + 5.0 * u + 1.0 * uBf16},
-            // Zero input: output cast from maxOutputMagnitude=0 vanishes
+            {-1.0,
+             1.0,
+             -1.0,
+             1.0,
+             10,
+             0.0,
+             0.0,
+             (gammaVar(10) / 2.0) + gammaMean(10) + 5.0 * u + 1.0 * uBf16},
+            // Zero input: range=0, output cast from maxOutputMagnitude=0 vanishes
             {0.0, 0.0, -1.0, 1.0, 10, 0.0, 0.0, 0.0}};
 }
 
 // Bfloat16 / Bfloat16 / Bfloat16
-// bf16 epsilon = 2^-7.  2*M=2: nU=2*2*2^-7=0.03125>=0.01 -> statistical.
+// bf16 epsilon = 2^-7.  Variance: 2*M=2 -> nU=2*2*2^-7=0.03125>=0.01 -> statistical.
+//                       Mean:     M=1   -> nU=2*1*2^-7=0.01563>=0.01 -> statistical.
 template <>
 std::vector<LayernormFpropToleranceTestCase>
     getLayernormFpropToleranceTestCases<TypeTriple<bfloat16, bfloat16, bfloat16>>()
 {
     auto u = static_cast<double>(std::numeric_limits<bfloat16>::epsilon());
-    auto gamma = [&](int64_t m) {
+    auto gammaVar = [&](int64_t m) {
         return computeGamma(static_cast<uint64_t>(2) * static_cast<uint64_t>(m), u);
     };
+    auto gammaMean = [&](int64_t m) { return computeGamma(static_cast<uint64_t>(m), u); };
     return {// normalizedElementCount = 0 => throws
             {-1.0, 1.0, -1.0, 1.0, 0, 0.0, 0.0, 0.0, true},
             // M=1
-            {-1.0, 1.0, -1.0, 1.0, 1, 0.0, 0.0, (gamma(1) / 2.0) + 5.0 * u},
+            {-1.0, 1.0, -1.0, 1.0, 1, 0.0, 0.0, (gammaVar(1) / 2.0) + gammaMean(1) + 5.0 * u},
             // M=10
-            {-1.0, 1.0, -1.0, 1.0, 10, 0.0, 0.0, (gamma(10) / 2.0) + 5.0 * u},
+            {-1.0, 1.0, -1.0, 1.0, 10, 0.0, 0.0, (gammaVar(10) / 2.0) + gammaMean(10) + 5.0 * u},
             // Zero input: all terms vanish
             {0.0, 0.0, -1.0, 1.0, 10, 0.0, 0.0, 0.0}};
 }
@@ -374,8 +421,8 @@ TEST(TestCalculateLayernormFpropTolerance, ThrowsOnOutputOverflow)
 // Test zero input (x=0) produces a valid small tolerance
 TEST(TestCalculateLayernormFpropTolerance, ZeroInput)
 {
-    // When x=0, maxAbsX=0, sumAbsProductBound=0, accTol=0
-    // propagatedTolerance = 0 + 0 + maxAbsBias * epsilon
+    // When x=0, range=0, all accumulation and mean path terms vanish.
+    // propagatedTolerance = maxAbsBias * epsilon
     auto tol = calculateLayernormFpropTolerance<float, float, float>(0.0, 0.0, -1.0, 1.0, 10);
     EXPECT_EQ(tol, 0.0f);
 

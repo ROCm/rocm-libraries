@@ -23,23 +23,24 @@ using hipdnn_data_sdk::types::half;
  * normalizedDimCount dimensions using Welford's online algorithm, then normalize:
  *   y[b,i] = scale[i] * (x[b,i] - mean_b) * invStd_b + bias[i]
  *
- * Error sources:
- * 1. Mean accumulation via Welford: M incremental updates (dominant for mean output)
- * 2. M2 (variance numerator) accumulation: M multiply-adds (dominant for variance)
- * 3. Nonlinear operations: div(M2,M), sqrt, reciprocal (O(u) each)
- * 4. Output normalization: sub(x,mean), mul(invStd), mul(scale), add(bias)
+ * Two independent error paths propagate into the output y:
  *
- * The combined error is modeled using computeGamma() for the accumulation stages
- * (2M effective accumulations covering both mean and M2), then propagated through
- * the nonlinear chain using derivative analysis identical to RMSNorm.
+ * Path A (variance): M2 accumulation error → invStd error → output error.
+ *   Modeled using computeGamma(2M) for the M2 accumulation (2M effective
+ *   accumulations: M multiply-adds for M2, M incremental updates for mean
+ *   that feed the delta values).  Propagated through the nonlinear chain
+ *   (div, sqrt, reciprocal) using the same derivative analysis as RMSNorm.
+ *   Contribution: gammaVar(2M) / 2 * maxAbsScale.
  *
- * Key insight: after normalization, |xHat| = |(x - mean) * invStd| is O(1) by
- * construction (zero mean, unit variance). Therefore |y| ~ |scale| + |bias|, and
- * the tolerance scales with |scale|, not with |x|. This cancellation is the same
- * mechanism as in RMSNorm and BatchNorm.
+ * Path B (mean): mean error propagates directly into (x - mean) * invStd.
+ *   |delta_mean| ~ gamma(M) * maxAbsX from M Welford incremental updates.
+ *   Under the invStd ~ 1/maxAbsX assumption (same as Path A), the output
+ *   contribution is gamma(M) * maxAbsScale.  This path does not exist in
+ *   RMSNorm (which has no mean subtraction).
  *
- * Uses the shared computeGamma() helper for the accumulation error growth factor,
- * then propagates that error through the nonlinear chain (div, sqrt, reciprocal).
+ * Key insight: after normalization, |xHat| = |(x - mean) * invStd| is O(1)
+ * (the RMS of xHat is exactly 1).  Therefore |y| ~ |scale| + |bias|, and
+ * the tolerance scales with |scale|, not with |x|.
  *
  * @tparam OutputType  Data type of y output tensor
  * @tparam InputType   Data type of x input tensor
@@ -55,11 +56,16 @@ using hipdnn_data_sdk::types::half;
  *
  * Known Limitations:
  * - Black-box: does not use kernel implementation details
- * - Conservative bound: assumes Welford errors accumulate at worst-case rate
- * - Uses 2M effective accumulations (mean + M2) which may overestimate for
- *   Welford's algorithm whose incremental mean update is more stable than naive sum
+ * - Mean path uses invStd ~ 1/maxAbsX assumption; for data with small variance
+ *   relative to magnitude (e.g. x in [100, 100.1]), actual invStd >> 1/maxAbsX,
+ *   and the mean error contribution is underestimated
+ * - |xHat| ~ O(1) is the RMS value; individual elements can reach O(sqrt(M)),
+ *   so tail elements may exceed the tolerance (rare for random data)
  * - NONLINEAR_OPS_UPPER_BOUND=5 models worst-case op count; hardware rsqrt fusion
  *   or multiply reordering may produce fewer rounding errors in practice
+ * - GPU parallel Welford (block-wise reduction + tree merge) has different error
+ *   characteristics than the sequential reference; this tolerance is designed for
+ *   CPU-reference vs CPU-reference comparison only
  * - No backward pass support (only forward)
  * - No mean/invVariance-specific tolerance functions (training mode outputs)
  */
@@ -80,72 +86,92 @@ float calculateLayernormFpropTolerance(double xMin,
     }
 
     // Compute bounds
-    const double maxAbsX = std::max(std::abs(xMin), std::abs(xMax));
     const double maxAbsScale = std::max(std::abs(scaleMin), std::abs(scaleMax));
     const double maxAbsBias = std::max(std::abs(biasMin), std::abs(biasMax));
 
-    // Welford accumulation error.
-    // Welford's algorithm accumulates both mean and M2 over M elements.
-    // Mean: M incremental updates (sub + div + add per step)
-    // M2:   M multiply-adds (delta * delta2 + accumulate)
-    // Combined effective accumulations: 2M (accounts for both passes).
-    //
-    // The M2 accumulation has products bounded by maxAbsX^2 (delta and delta2
-    // are each bounded by the input range). This is structurally identical
-    // to RMSNorm's sum-of-squares, with the same self-product bound.
-    auto numberOfAccumulations
+    // Input range: both x and mean lie in [xMin, xMax], so Welford's
+    // delta = x - mean has |delta| <= xMax - xMin.  For constant input
+    // (range = 0), all deltas are zero and M2 = 0.
+    const double range = std::max(xMax - xMin, 0.0);
+
+    // =================================================================
+    // Path A: Variance accumulation error (M2 → invStd → y)
+    // =================================================================
+    // Welford's M2 accumulates M products delta_i * delta2_i, each
+    // bounded by range^2.  We model this as 2M effective accumulations
+    // (M for M2 multiply-adds + M for mean incremental updates that
+    // feed into the delta values).
+    auto varianceAccumulations
         = static_cast<uint64_t>(2) * static_cast<uint64_t>(normalizedElementCount);
-    const double maxProduct = maxAbsX * maxAbsX; // Welford delta products
-    const double sumAbsProductBound = static_cast<double>(numberOfAccumulations) * maxProduct;
+    const double maxProduct = range * range;
+    const double sumAbsProductBound = static_cast<double>(varianceAccumulations) * maxProduct;
 
     auto epsilon = static_cast<double>(std::numeric_limits<ComputeType>::epsilon());
 
-    // Use shared computeGamma() for the error growth factor
-    const double gamma = computeGamma(numberOfAccumulations, epsilon);
-    validateGamma(gamma);
+    // Variance path: computeGamma for 2M effective accumulations
+    const double gammaVar = computeGamma(varianceAccumulations, epsilon);
+    validateGamma(gammaVar);
 
-    double accumulatedTolerance = gamma * sumAbsProductBound;
+    double varianceAccumTolerance = gammaVar * sumAbsProductBound;
 
-    // Input casting error (if InputType precision > ComputeType precision).
+    // Input casting error for the variance path (if InputType precision > ComputeType).
     // Welford squares a single tensor (delta * delta2, both from x), so only one
     // operand is cast per product term -- factor 1, same as RMSNorm.
-    accumulatedTolerance += computeInputCastingError<InputType, ComputeType>(sumAbsProductBound, 1);
+    varianceAccumTolerance
+        += computeInputCastingError<InputType, ComputeType>(sumAbsProductBound, 1);
 
-    // Propagate accumulation error through the nonlinear chain to get output error.
+    // =================================================================
+    // Path B: Mean error propagation (delta_mean → y)
+    // =================================================================
+    // The mean error propagates into the output as:
+    //   delta_y_from_mean = -scale * delta_mean * invStd
     //
-    // The derivation follows the same logic as RMSNorm:
-    //   invStd = (M2/M + eps)^(-1/2), so d(invStd)/d(M2) = -1/(2M) * (M2/M+eps)^(-3/2)
-    //   |delta_invStd / invStd| <= accTol / (2 * M2)    [since invStd = 1/std, eps << M2/M]
-    //                            = accTol / (2 * sumAbsProductBound)  [worst-case M2 = sumAbsBound]
+    // |delta_mean| ~ gamma(M) * maxAbsX  (M incremental Welford updates,
+    //   each contributing O(u * maxAbsX) from sub + div + add).
     //
-    // After normalization:
-    //   y = scale * (x - mean) * invStd + bias
-    //   |xHat| = |(x - mean) * invStd| is O(1) by construction
-    //   |delta_y| <= maxAbsScale * accTol / (2 * sumAbsProductBound)
-    //             =  maxAbsScale * gamma / 2
+    // Using the same invStd ~ 1/maxAbsX assumption as the variance path
+    // (RMS-like bound: std ~ maxAbsX for well-spread data):
+    //   |delta_y_from_mean| ~ gamma(M) * maxAbsX * (1/maxAbsX) * maxAbsScale
+    //                       = gamma(M) * maxAbsScale
     //
-    // Additional per-op rounding (div(M2,M) + sqrt + recip + mul(x-mean,invStd) + mul(*,scale)):
-    //   |delta_y| += NONLINEAR_OPS_UPPER_BOUND * u * maxAbsScale
-    //             += maxAbsBias * epsilon
+    // Note: the ratio maxAbsX/std is data-dependent (~ 1.7 for uniform [-a,a],
+    // ~ 3.5 for uniform [0,a]).  The invStd ~ 1/maxAbsX assumption gives an
+    // O(1) ratio, which is the same modelling choice the variance path makes.
+    auto meanAccumulations = static_cast<uint64_t>(normalizedElementCount);
+    const double gammaMean = computeGamma(meanAccumulations, epsilon);
+    // gammaMean < gammaVar always (M < 2M, computeGamma is monotonic),
+    // so if gammaVar passed validateGamma, gammaMean is also valid.
+
+    // =================================================================
+    // Combined propagation
+    // =================================================================
+    // Variance path: accTol / (2 * sumAbsProductBound) * maxAbsScale = gammaVar/2 * maxAbsScale
+    //   (the sumAbsProductBound cancels in numerator and denominator)
+    // Mean path:     gammaMean * maxAbsScale
+    // Nonlinear ops: NONLINEAR_OPS_UPPER_BOUND * u * maxAbsScale
+    // Bias:          u * maxAbsBias
     constexpr double NONLINEAR_OPS_UPPER_BOUND = 5.0;
 
     double propagatedTolerance = 0.0;
 
-    // When maxAbsX == 0, all inputs are zero. M2 = 0, mean = 0, invStd = 1/sqrt(eps),
-    // y = 0*invStd*scale + bias = bias.
-    // Accumulation error is zero, the nonlinear-ops term on the xHat*scale chain vanishes,
-    // and maxOutputMagnitude reduces to maxAbsBias, leaving only the bias-related terms.
-    if(maxAbsX > 0.0)
+    // When range == 0 (constant input), all deltas are zero: M2 = 0, mean = x_const,
+    // xHat = 0, y = bias.  Both accumulation paths produce zero error, the nonlinear-ops
+    // term on the xHat*scale chain vanishes, leaving only bias-related terms.
+    if(range > 0.0)
     {
-        propagatedTolerance = (accumulatedTolerance / (2.0 * sumAbsProductBound)) * maxAbsScale;
+        // Variance path (sumAbsProductBound cancels)
+        propagatedTolerance = (varianceAccumTolerance / (2.0 * sumAbsProductBound)) * maxAbsScale;
+        // Mean path
+        propagatedTolerance += gammaMean * maxAbsScale;
+        // Nonlinear ops rounding
         propagatedTolerance += NONLINEAR_OPS_UPPER_BOUND * epsilon * maxAbsScale;
     }
     propagatedTolerance += maxAbsBias * epsilon;
 
     // Output casting error (if OutputType precision < ComputeType precision).
     // Output magnitude bound: |y| <= maxAbsScale + maxAbsBias (since |xHat| ~ O(1)).
-    // When maxAbsX == 0, the xHat*scale term is zero, so |y| <= maxAbsBias.
-    const double maxOutputMagnitude = (maxAbsX > 0.0 ? maxAbsScale : 0.0) + maxAbsBias;
+    // When range == 0, the xHat*scale term is zero, so |y| <= maxAbsBias.
+    const double maxOutputMagnitude = (range > 0.0 ? maxAbsScale : 0.0) + maxAbsBias;
     propagatedTolerance += computeOutputCastingError<OutputType, ComputeType>(maxOutputMagnitude);
 
     validateToleranceRange<OutputType>(propagatedTolerance);
