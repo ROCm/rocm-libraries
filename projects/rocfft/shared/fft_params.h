@@ -2291,10 +2291,10 @@ public:
             // We will use the first N devices for library-decomposed
             for(size_t device = 0; device < multiGPU; ++device)
             {
-                sizes[device] += DivRoundingUp(sum(ibuffer_sizes()), multiGPU);
+                sizes.at(device) += DivRoundingUp(sum(ibuffer_sizes()), multiGPU);
                 if(placement == fft_placement_notinplace)
                 {
-                    sizes[device] += DivRoundingUp(sum(obuffer_sizes()), multiGPU);
+                    sizes.at(device) += DivRoundingUp(sum(obuffer_sizes()), multiGPU);
                 }
             }
             return sizes;
@@ -2308,10 +2308,10 @@ public:
         // single-device input/output buffer on current device
         if(ifields.empty() && ofields.empty())
         {
-            sizes[currentDevice] += sum(ibuffer_sizes());
+            sizes.at(currentDevice) += sum(ibuffer_sizes());
             if(placement == fft_placement_notinplace)
             {
-                sizes[currentDevice] += sum(obuffer_sizes());
+                sizes.at(currentDevice) += sum(obuffer_sizes());
             }
         }
         else
@@ -2320,7 +2320,7 @@ public:
                 if(fields.empty())
                 {
                     // use buffer size calculation
-                    sizes[currentDevice] += sum(buffer_sizes);
+                    sizes.at(currentDevice) += sum(buffer_sizes);
                 }
                 else
                 {
@@ -2329,7 +2329,7 @@ public:
                     {
                         for(const auto& brick : field.bricks)
                         {
-                            sizes[brick.device] += compute_ptrdiff(brick.length(), brick.stride);
+                            sizes.at(brick.device) += compute_ptrdiff(brick.length(), brick.stride);
                         }
                     }
                 }
