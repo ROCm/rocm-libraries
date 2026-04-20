@@ -48,10 +48,20 @@ using hipdnn_data_sdk::types::half;
  *
  * Known Limitations:
  * - Black-box: does not use kernel implementation details
- * - Conservative |xHat| ~ O(1) assumption (could be larger for outliers)
- * - Does not account for cancellation in variance computation
- *   (two-pass formula E[x^2] - E[x]^2 can lose precision for small variance)
- * - Running statistics tolerance not included (deferred)
+ * - Assumes |xHat| ~ O(1) after normalization. This holds statistically (E[xHat]=0,
+ *   Var(xHat)=1), but individual elements can be large when variance is small relative
+ *   to individual deviations (x_i - mean). For near-constant data with tiny variance,
+ *   the tolerance may underestimate error on the y output.
+ * - The variance bound (3*gamma*maxAbsX^2) is an absolute bound. The two-pass formula
+ *   E[x^2] - E[x]^2 can suffer catastrophic cancellation when variance << E[x^2],
+ *   making the relative error of variance arbitrarily large. The absolute bound remains
+ *   valid and sufficient for test tolerance validation, but users should be aware that
+ *   low-variance inputs may exhibit larger relative errors in intermediate quantities.
+ * - Nonlinear op count (6 = 3 chain + 3 element-wise) for the normalize path.
+ *   The variance division and subtraction rounding (2u terms) are tracked explicitly
+ *   in the accumulated tolerance.
+ * - Running statistics tolerance not included (Bessel's M/(M-1) amplification for
+ *   running variance is deferred to Phase 2).
  * - No backward pass support (only forward training)
  */
 template <typename OutputType, typename InputType, typename ComputeType = float>
@@ -84,7 +94,10 @@ float calculateBatchnormTrainingTolerance(double xMin,
     // S = sum_{i=0}^{NHW-1} x_i^2 (self-product)
     const double sumAbsProductBound = static_cast<double>(nhw) * maxAbsX * maxAbsX;
 
-    double accumulatedTolerance = gammaNHW * sumAbsProductBound;
+    // Variance accumulation error: gamma * S (Higham bound)
+    // Plus 2u * S for division-by-NHW and subtraction (E[x^2] - mu^2) rounding ops.
+    double accumulatedTolerance
+        = gammaNHW * sumAbsProductBound + 2.0 * epsilon * sumAbsProductBound;
 
     // Input casting error for variance path (single tensor self-product, factor 1).
     accumulatedTolerance += computeInputCastingError<InputType, ComputeType>(sumAbsProductBound, 1);
@@ -115,7 +128,14 @@ float calculateBatchnormTrainingTolerance(double xMin,
     propagatedTolerance += maxAbsBias * epsilon;
 
     // Output casting error.
-    const double maxOutputMagnitude = (maxAbsX > 0.0 ? maxAbsScale : 0.0) + maxAbsBias;
+    // Conservative bound: instead of assuming |xHat| ~ O(1) cancels input magnitude,
+    // use invVarEstimate from max(maxAbsX^2, eps_bn_default) to bound output magnitude.
+    // This handles the case where variance is small and |xHat| >> 1.
+    constexpr double EPSILON_BN_DEFAULT = 1e-5;
+    const double varEst = std::max(maxAbsX * maxAbsX, EPSILON_BN_DEFAULT);
+    const double invVarEst = 1.0 / std::sqrt(varEst + EPSILON_BN_DEFAULT);
+    const double maxOutputMagnitude
+        = (maxAbsX > 0.0 ? maxAbsScale * maxAbsX * invVarEst : 0.0) + maxAbsBias;
     propagatedTolerance += computeOutputCastingError<OutputType, ComputeType>(maxOutputMagnitude);
 
     validateToleranceRange<OutputType>(propagatedTolerance);
@@ -183,9 +203,10 @@ float calculateBatchnormMeanTolerance(double xMin, double xMax, int64_t nElement
  * invVar[c] = 1 / sqrt(var[c] + epsilon_bn)
  * Error from variance accumulation propagated through the nonlinear chain.
  *
- * Simplification: assumes variance ~ maxAbsX^2 (worst-case for large variance).
- * When maxAbsX = 0, falls back to invVar = 1/sqrt(epsilon_bn) with only
- * nonlinear op errors.
+ * Uses varEstimate = max(maxAbsX^2, epsilonBn) as the variance floor, which:
+ * - Avoids the O(eps_bn^{-3/2}) blowup from the raw (var+eps)^{-3/2} amplification
+ * - Handles the small-x regime where eps_bn dominates variance naturally
+ * - Provides correct scaling for large maxAbsX (tolerance decreases as 1/maxAbsX)
  *
  * @tparam OutputType  Data type of invVariance output tensor
  * @tparam InputType   Data type of x input tensor (unused — invVar has no per-element
@@ -217,33 +238,32 @@ float calculateBatchnormInvVarianceTolerance(double xMin,
     const double gammaNHW = computeGamma(nhw, epsilon);
     validateGamma(gammaNHW);
 
-    // Variance error (see plan Section 2, Stage 2):
+    // Variance error (see plan Section 2, Stage 2, and Section 15 Corrections):
     //   |delta_variance| <= gamma * max|x|^2       (varAccum/NHW error)
     //                     + 2 * maxAbsX * deltaMean (mean^2 error)
-    //                     + u * max|x|^2            (subtraction error)
-    //   Simplified: ~ 3 * gamma * max|x|^2  (since deltaMean ~ gamma * maxAbsX)
-    const double deltaVariance = 3.0 * gammaNHW * maxAbsX * maxAbsX;
+    //                     + 2u * max|x|^2           (division + subtraction rounding)
+    //   = 3 * gamma * max|x|^2 + 2u * max|x|^2    (since deltaMean ~ gamma * maxAbsX)
+    const double deltaVariance
+        = 3.0 * gammaNHW * maxAbsX * maxAbsX + 2.0 * epsilon * maxAbsX * maxAbsX;
 
     // Nonlinear ops: add(epsilon_bn) + sqrt + reciprocal
     constexpr double NONLINEAR_OPS = 3.0;
 
-    // Propagation through 1/sqrt(var + eps_bn):
-    //   |delta_invVar| ~ deltaVariance / (2 * maxAbsX^2) + NONLINEAR_OPS * u / maxAbsX
-    //                  = 3*gamma/2 + 3u/maxAbsX
-    double tolerance = 0.0;
-    if(maxAbsX > 0.0)
-    {
-        tolerance = deltaVariance / (2.0 * maxAbsX * maxAbsX) + NONLINEAR_OPS * epsilon / maxAbsX;
-    }
-    else
-    {
-        // x ~ 0: invVar = 1/sqrt(eps_bn), tolerance from nonlinear ops only
-        tolerance = NONLINEAR_OPS * epsilon / std::sqrt(epsilonBn);
-    }
+    // Variance floor: use max(maxAbsX^2, epsilonBn) to avoid blowup when var is small.
+    // When maxAbsX > 0 but maxAbsX^2 < epsilonBn, the eps_bn term dominates (var+eps).
+    const double varEstimate = std::max(maxAbsX * maxAbsX, epsilonBn);
 
-    // Output casting: invVar ~ sqrt(3)/maxAbsX for typical data, 1/sqrt(eps_bn) for x~0
-    const double maxInvVar = maxAbsX > 0.0 ? std::sqrt(3.0) / maxAbsX : 1.0 / std::sqrt(epsilonBn);
-    tolerance += computeOutputCastingError<OutputType, ComputeType>(maxInvVar);
+    // Propagation through invVar = 1/sqrt(var + eps_bn):
+    //   d(invVar)/d(var) = -1/2 * (var + eps)^{-3/2}
+    //   |delta_invVar| <= deltaVariance / (2 * (varEstimate + epsilonBn)^{3/2})
+    //                   + NONLINEAR_OPS * u * invVarEstimate
+    const double varPlusEps = varEstimate + epsilonBn;
+    const double invVarEstimate = 1.0 / std::sqrt(varPlusEps);
+    double tolerance = deltaVariance / (2.0 * varPlusEps * std::sqrt(varPlusEps))
+                       + NONLINEAR_OPS * epsilon * invVarEstimate;
+
+    // Output casting: invVar ~ 1/sqrt(varEstimate + eps_bn)
+    tolerance += computeOutputCastingError<OutputType, ComputeType>(invVarEstimate);
 
     validateToleranceRange<OutputType>(tolerance);
 

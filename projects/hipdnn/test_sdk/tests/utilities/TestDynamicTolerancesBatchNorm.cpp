@@ -54,13 +54,36 @@ struct BnTrainToleranceTestCase
 template <typename T>
 std::vector<BnTrainToleranceTestCase> getBnTrainToleranceTestCases();
 
-// BN Training tolerance formula (no casting):
-//   propTol = (gamma/2 + gamma + 6u) * maxAbsScale + u * maxAbsBias
-//           = (3/2 * gamma + 6u) * maxAbsScale + u * maxAbsBias
+// BN Training tolerance formula (no casting, maxAbsX>0):
+//   accTol = (gamma + 2u) * S     (Higham + 2u for div/sub variance ops)
+//   propTol = accTol/(2*S) * scale + gamma * scale + 6u * scale + u * bias
+//           = ((gamma + 2u)/2 + gamma + 6u) * maxAbsScale + u * maxAbsBias
+//           = (3/2*gamma + u + 6u) * maxAbsScale + u * maxAbsBias
+//           = (3/2*gamma + 7u) * maxAbsScale + u * maxAbsBias
+// Output casting: maxOutputMagnitude = maxAbsScale * maxAbsX * invVarEst + maxAbsBias
+//   where invVarEst = 1/sqrt(max(maxAbsX^2, 1e-5) + 1e-5)
 // With input casting (InputType=double, ComputeType=float):
-//   accTol has extra u term -> variance path becomes (gamma + u)/2
-//   total = ((gamma + u)/2 + gamma + 6u) * maxAbsScale + u * maxAbsBias
-//         = (3/2*gamma + u/2 + 6u) * maxAbsScale + u * maxAbsBias
+//   accTol = (gamma + 2u + u) * S -> variance path = (gamma + 3u)/2
+//   total = ((gamma + 3u)/2 + gamma + 6u) * maxAbsScale + u * maxAbsBias
+//         = (3/2*gamma + 3u/2 + 6u) * maxAbsScale + u * maxAbsBias
+
+// Helper to compute output cast contribution for y tolerance
+static double yOutputCast(double maxAbsX,
+                          double maxAbsScale,
+                          double maxAbsBias,
+                          double outputEpsilon,
+                          double computeEpsilon)
+{
+    if(outputEpsilon <= computeEpsilon)
+    {
+        return 0.0;
+    }
+    constexpr double EPS_BN = 1e-5;
+    const double varEst = std::max(maxAbsX * maxAbsX, EPS_BN);
+    const double invVarEst = 1.0 / std::sqrt(varEst + EPS_BN);
+    const double maxOut = (maxAbsX > 0.0 ? maxAbsScale * maxAbsX * invVarEst : 0.0) + maxAbsBias;
+    return maxOut * outputEpsilon;
+}
 
 // Float / Float / Float
 template <>
@@ -72,48 +95,81 @@ std::vector<BnTrainToleranceTestCase>
     return {// NHW = 0 => throws
             {-1.0, 1.0, -1.0, 1.0, 0.0, 0.0, 0, 0.0, true},
             // NHW=1, x=[-1,1], scale=[-1,1], no bias
-            {-1.0, 1.0, -1.0, 1.0, 0.0, 0.0, 1, (1.5 * gamma(1) + 6.0 * u) * 1.0},
+            {-1.0, 1.0, -1.0, 1.0, 0.0, 0.0, 1, (1.5 * gamma(1) + 7.0 * u) * 1.0},
             // NHW=10, x=[-1,1], scale=[-1,1], no bias
-            {-1.0, 1.0, -1.0, 1.0, 0.0, 0.0, 10, (1.5 * gamma(10) + 6.0 * u) * 1.0},
+            {-1.0, 1.0, -1.0, 1.0, 0.0, 0.0, 10, (1.5 * gamma(10) + 7.0 * u) * 1.0},
             // NHW=10, x=[-1000,1000], scale=[-1000,1000], no bias
             // Tolerance scales with |scale|, not |x| (normalization cancels |x|)
-            {-1000.0, 1000.0, -1000.0, 1000.0, 0.0, 0.0, 10, (1.5 * gamma(10) + 6.0 * u) * 1000.0},
+            {-1000.0, 1000.0, -1000.0, 1000.0, 0.0, 0.0, 10, (1.5 * gamma(10) + 7.0 * u) * 1000.0},
             // NHW=3, x=[-1,1], scale=[-1,1], bias=[-0.5,0.5]
-            {-1.0, 1.0, -1.0, 1.0, -0.5, 0.5, 3, (1.5 * gamma(3) + 6.0 * u) * 1.0 + 0.5 * u}};
+            {-1.0, 1.0, -1.0, 1.0, -0.5, 0.5, 3, (1.5 * gamma(3) + 7.0 * u) * 1.0 + 0.5 * u}};
 }
 
 // Float / Double / Float (Input casting: inputEpsilon(double) < epsilon(float))
-// accTol = gamma * S + S * u -> variance path = (gamma + u)/2 * maxAbsScale
+// accTol = (gamma + 2u) * S + u * S (input cast) = (gamma + 3u) * S
+// variance path = (gamma + 3u)/2, then + gamma (mean) + 6u (ops)
+// total = (3/2*gamma + 3u/2 + 6u) * scale
 template <>
 std::vector<BnTrainToleranceTestCase>
     getBnTrainToleranceTestCases<TypeTriple<float, double, float>>()
 {
     auto u = static_cast<double>(std::numeric_limits<float>::epsilon());
     auto gamma = [&](int64_t c) { return computeGamma(static_cast<uint64_t>(c), u); };
-    return {
-        // NHW = 0 => throws
-        {-1.0, 1.0, -1.0, 1.0, 0.0, 0.0, 0, 0.0, true},
-        // NHW=1
-        {-1.0, 1.0, -1.0, 1.0, 0.0, 0.0, 1, ((gamma(1) + u) / 2.0 + gamma(1) + 6.0 * u) * 1.0},
-        // NHW=10
-        {-1.0, 1.0, -1.0, 1.0, 0.0, 0.0, 10, ((gamma(10) + u) / 2.0 + gamma(10) + 6.0 * u) * 1.0},
-        // Zero input: all terms vanish
-        {0.0, 0.0, -1.0, 1.0, 0.0, 0.0, 10, 0.0}};
+    return {// NHW = 0 => throws
+            {-1.0, 1.0, -1.0, 1.0, 0.0, 0.0, 0, 0.0, true},
+            // NHW=1
+            {-1.0,
+             1.0,
+             -1.0,
+             1.0,
+             0.0,
+             0.0,
+             1,
+             ((gamma(1) + 3.0 * u) / 2.0 + gamma(1) + 6.0 * u) * 1.0},
+            // NHW=10
+            {-1.0,
+             1.0,
+             -1.0,
+             1.0,
+             0.0,
+             0.0,
+             10,
+             ((gamma(10) + 3.0 * u) / 2.0 + gamma(10) + 6.0 * u) * 1.0},
+            // Zero input: all terms vanish
+            {0.0, 0.0, -1.0, 1.0, 0.0, 0.0, 10, 0.0}};
 }
 
 // Half / Float / Float (Output casting: outputEpsilon(half=2^-10) > epsilon(float=2^-23))
+// maxOutputMagnitude = maxAbsScale * maxAbsX * invVarEst (conservative, not assuming xHat~O(1))
 template <>
 std::vector<BnTrainToleranceTestCase> getBnTrainToleranceTestCases<TypeTriple<half, float, float>>()
 {
     auto u = static_cast<double>(std::numeric_limits<float>::epsilon());
     auto uHalf = static_cast<double>(std::numeric_limits<half>::epsilon());
     auto gamma = [&](int64_t c) { return computeGamma(static_cast<uint64_t>(c), u); };
+    auto yCast = [&](double maxAbsX, double maxAbsScale, double maxAbsBias) {
+        return yOutputCast(maxAbsX, maxAbsScale, maxAbsBias, uHalf, u);
+    };
     return {// NHW = 0 => throws
             {-1.0, 1.0, -1.0, 1.0, 0.0, 0.0, 0, 0.0, true},
-            // NHW=1: base + output cast (maxOutputMagnitude = maxAbsScale = 1)
-            {-1.0, 1.0, -1.0, 1.0, 0.0, 0.0, 1, (1.5 * gamma(1) + 6.0 * u) * 1.0 + 1.0 * uHalf},
+            // NHW=1: base + output cast
+            {-1.0,
+             1.0,
+             -1.0,
+             1.0,
+             0.0,
+             0.0,
+             1,
+             (1.5 * gamma(1) + 7.0 * u) * 1.0 + yCast(1.0, 1.0, 0.0)},
             // NHW=10
-            {-1.0, 1.0, -1.0, 1.0, 0.0, 0.0, 10, (1.5 * gamma(10) + 6.0 * u) * 1.0 + 1.0 * uHalf},
+            {-1.0,
+             1.0,
+             -1.0,
+             1.0,
+             0.0,
+             0.0,
+             10,
+             (1.5 * gamma(10) + 7.0 * u) * 1.0 + yCast(1.0, 1.0, 0.0)},
             // Zero input: output cast from maxOutputMagnitude=0 vanishes
             {0.0, 0.0, -1.0, 1.0, 0.0, 0.0, 10, 0.0}};
 }
@@ -127,9 +183,9 @@ std::vector<BnTrainToleranceTestCase> getBnTrainToleranceTestCases<TypeTriple<ha
     return {// NHW = 0 => throws
             {-1.0, 1.0, -1.0, 1.0, 0.0, 0.0, 0, 0.0, true},
             // NHW=1
-            {-1.0, 1.0, -1.0, 1.0, 0.0, 0.0, 1, (1.5 * gamma(1) + 6.0 * u) * 1.0},
+            {-1.0, 1.0, -1.0, 1.0, 0.0, 0.0, 1, (1.5 * gamma(1) + 7.0 * u) * 1.0},
             // NHW=10
-            {-1.0, 1.0, -1.0, 1.0, 0.0, 0.0, 10, (1.5 * gamma(10) + 6.0 * u) * 1.0},
+            {-1.0, 1.0, -1.0, 1.0, 0.0, 0.0, 10, (1.5 * gamma(10) + 7.0 * u) * 1.0},
             // Zero input
             {0.0, 0.0, -1.0, 1.0, 0.0, 0.0, 10, 0.0}};
 }
@@ -142,12 +198,29 @@ std::vector<BnTrainToleranceTestCase>
     auto u = static_cast<double>(std::numeric_limits<float>::epsilon());
     auto uBf16 = static_cast<double>(std::numeric_limits<bfloat16>::epsilon());
     auto gamma = [&](int64_t c) { return computeGamma(static_cast<uint64_t>(c), u); };
+    auto yCast = [&](double maxAbsX, double maxAbsScale, double maxAbsBias) {
+        return yOutputCast(maxAbsX, maxAbsScale, maxAbsBias, uBf16, u);
+    };
     return {// NHW = 0 => throws
             {-1.0, 1.0, -1.0, 1.0, 0.0, 0.0, 0, 0.0, true},
             // NHW=1
-            {-1.0, 1.0, -1.0, 1.0, 0.0, 0.0, 1, (1.5 * gamma(1) + 6.0 * u) * 1.0 + 1.0 * uBf16},
+            {-1.0,
+             1.0,
+             -1.0,
+             1.0,
+             0.0,
+             0.0,
+             1,
+             (1.5 * gamma(1) + 7.0 * u) * 1.0 + yCast(1.0, 1.0, 0.0)},
             // NHW=10
-            {-1.0, 1.0, -1.0, 1.0, 0.0, 0.0, 10, (1.5 * gamma(10) + 6.0 * u) * 1.0 + 1.0 * uBf16},
+            {-1.0,
+             1.0,
+             -1.0,
+             1.0,
+             0.0,
+             0.0,
+             10,
+             (1.5 * gamma(10) + 7.0 * u) * 1.0 + yCast(1.0, 1.0, 0.0)},
             // Zero input
             {0.0, 0.0, -1.0, 1.0, 0.0, 0.0, 10, 0.0}};
 }
@@ -162,9 +235,9 @@ std::vector<BnTrainToleranceTestCase>
     return {// NHW = 0 => throws
             {-1.0, 1.0, -1.0, 1.0, 0.0, 0.0, 0, 0.0, true},
             // NHW=1
-            {-1.0, 1.0, -1.0, 1.0, 0.0, 0.0, 1, (1.5 * gamma(1) + 6.0 * u) * 1.0},
+            {-1.0, 1.0, -1.0, 1.0, 0.0, 0.0, 1, (1.5 * gamma(1) + 7.0 * u) * 1.0},
             // NHW=10
-            {-1.0, 1.0, -1.0, 1.0, 0.0, 0.0, 10, (1.5 * gamma(10) + 6.0 * u) * 1.0},
+            {-1.0, 1.0, -1.0, 1.0, 0.0, 0.0, 10, (1.5 * gamma(10) + 7.0 * u) * 1.0},
             // Zero input
             {0.0, 0.0, -1.0, 1.0, 0.0, 0.0, 10, 0.0}};
 }
@@ -512,14 +585,34 @@ struct BnInvVarToleranceTestCase
 template <typename T>
 std::vector<BnInvVarToleranceTestCase> getBnInvVarToleranceTestCases();
 
-// InvVar tolerance formula (no casting, maxAbsX > 0):
-//   deltaVariance = 3 * gamma * maxAbsX^2
-//   tolerance = deltaVariance / (2 * maxAbsX^2) + 3u / maxAbsX
-//             = 3*gamma/2 + 3u/maxAbsX
-// With output casting (e.g., half/float/float):
-//   + sqrt(3)/maxAbsX * uHalf
-// For x=0:
-//   tolerance = 3u / sqrt(epsilonBn)
+// InvVar tolerance formula (corrected, see plan Section 15):
+//   deltaVariance = (3*gamma + 2u) * maxAbsX^2
+//   varEstimate = max(maxAbsX^2, epsilonBn)
+//   varPlusEps = varEstimate + epsilonBn
+//   tolerance = deltaVariance / (2 * varPlusEps^{3/2}) + 3u / sqrt(varPlusEps)
+// With output casting: + invVarEstimate * outputEpsilon
+//   where invVarEstimate = 1/sqrt(varPlusEps)
+// For x=0: varEstimate = epsilonBn, varPlusEps = 2*epsilonBn
+
+// Helper to compute expected invVar tolerance
+static double expectedInvVarTol(double maxAbsX,
+                                double epsBn,
+                                double gamma,
+                                double u,
+                                double outputEpsilon = 0.0,
+                                double computeEpsilon = 0.0)
+{
+    const double varEst = std::max(maxAbsX * maxAbsX, epsBn);
+    const double varPlusEps = varEst + epsBn;
+    const double deltaVar = (3.0 * gamma + 2.0 * u) * maxAbsX * maxAbsX;
+    const double invVarEst = 1.0 / std::sqrt(varPlusEps);
+    double tol = deltaVar / (2.0 * varPlusEps * std::sqrt(varPlusEps)) + 3.0 * u * invVarEst;
+    if(outputEpsilon > computeEpsilon)
+    {
+        tol += invVarEst * outputEpsilon;
+    }
+    return tol;
+}
 
 // Float / Float / Float
 template <>
@@ -531,13 +624,13 @@ std::vector<BnInvVarToleranceTestCase>
     return {// NHW = 0 => throws
             {-1.0, 1.0, 0, 1e-5, 0.0, true},
             // NHW=1, x=[-1,1]
-            {-1.0, 1.0, 1, 1e-5, 1.5 * gamma(1) + 3.0 * u},
+            {-1.0, 1.0, 1, 1e-5, expectedInvVarTol(1.0, 1e-5, gamma(1), u)},
             // NHW=10
-            {-1.0, 1.0, 10, 1e-5, 1.5 * gamma(10) + 3.0 * u},
-            // Large x range: invVar ~ 1/maxAbsX -> tolerance terms scale down
-            {-1000.0, 1000.0, 10, 1e-5, 1.5 * gamma(10) + 3.0 * u / 1000.0},
-            // Zero input: tolerance = 3u / sqrt(eps_bn)
-            {0.0, 0.0, 10, 1e-5, 3.0 * u / std::sqrt(1e-5)}};
+            {-1.0, 1.0, 10, 1e-5, expectedInvVarTol(1.0, 1e-5, gamma(10), u)},
+            // Large x range: tolerance now properly scales down with maxAbsX
+            {-1000.0, 1000.0, 10, 1e-5, expectedInvVarTol(1000.0, 1e-5, gamma(10), u)},
+            // Zero input: varEstimate = epsBn, varPlusEps = 2*epsBn
+            {0.0, 0.0, 10, 1e-5, expectedInvVarTol(0.0, 1e-5, gamma(10), u)}};
 }
 
 // Float / Double / Float (no output casting, no input casting for invVar)
@@ -550,14 +643,14 @@ std::vector<BnInvVarToleranceTestCase>
     return {// NHW = 0 => throws
             {-1.0, 1.0, 0, 1e-5, 0.0, true},
             // NHW=1
-            {-1.0, 1.0, 1, 1e-5, 1.5 * gamma(1) + 3.0 * u},
+            {-1.0, 1.0, 1, 1e-5, expectedInvVarTol(1.0, 1e-5, gamma(1), u)},
             // NHW=10
-            {-1.0, 1.0, 10, 1e-5, 1.5 * gamma(10) + 3.0 * u},
+            {-1.0, 1.0, 10, 1e-5, expectedInvVarTol(1.0, 1e-5, gamma(10), u)},
             // Zero input
-            {0.0, 0.0, 10, 1e-5, 3.0 * u / std::sqrt(1e-5)}};
+            {0.0, 0.0, 10, 1e-5, expectedInvVarTol(0.0, 1e-5, gamma(10), u)}};
 }
 
-// Half / Float / Float (Output casting: maxInvVar = sqrt(3)/maxAbsX)
+// Half / Float / Float (Output casting)
 template <>
 std::vector<BnInvVarToleranceTestCase>
     getBnInvVarToleranceTestCases<TypeTriple<half, float, float>>()
@@ -567,12 +660,12 @@ std::vector<BnInvVarToleranceTestCase>
     auto gamma = [&](int64_t c) { return computeGamma(static_cast<uint64_t>(c), u); };
     return {// NHW = 0 => throws
             {-1.0, 1.0, 0, 1e-5, 0.0, true},
-            // NHW=1: base + sqrt(3) * uHalf
-            {-1.0, 1.0, 1, 1e-5, 1.5 * gamma(1) + 3.0 * u + std::sqrt(3.0) * uHalf},
+            // NHW=1
+            {-1.0, 1.0, 1, 1e-5, expectedInvVarTol(1.0, 1e-5, gamma(1), u, uHalf, u)},
             // NHW=10
-            {-1.0, 1.0, 10, 1e-5, 1.5 * gamma(10) + 3.0 * u + std::sqrt(3.0) * uHalf},
-            // Zero input: output cast uses maxInvVar = 1/sqrt(eps_bn)
-            {0.0, 0.0, 10, 1e-5, 3.0 * u / std::sqrt(1e-5) + (1.0 / std::sqrt(1e-5)) * uHalf}};
+            {-1.0, 1.0, 10, 1e-5, expectedInvVarTol(1.0, 1e-5, gamma(10), u, uHalf, u)},
+            // Zero input
+            {0.0, 0.0, 10, 1e-5, expectedInvVarTol(0.0, 1e-5, gamma(10), u, uHalf, u)}};
 }
 
 // Half / Half / Half
@@ -584,11 +677,11 @@ std::vector<BnInvVarToleranceTestCase> getBnInvVarToleranceTestCases<TypeTriple<
     return {// NHW = 0 => throws
             {-1.0, 1.0, 0, 1e-5, 0.0, true},
             // NHW=1
-            {-1.0, 1.0, 1, 1e-5, 1.5 * gamma(1) + 3.0 * u},
+            {-1.0, 1.0, 1, 1e-5, expectedInvVarTol(1.0, 1e-5, gamma(1), u)},
             // NHW=10
-            {-1.0, 1.0, 10, 1e-5, 1.5 * gamma(10) + 3.0 * u},
+            {-1.0, 1.0, 10, 1e-5, expectedInvVarTol(1.0, 1e-5, gamma(10), u)},
             // Zero input
-            {0.0, 0.0, 10, 1e-5, 3.0 * u / std::sqrt(1e-5)}};
+            {0.0, 0.0, 10, 1e-5, expectedInvVarTol(0.0, 1e-5, gamma(10), u)}};
 }
 
 // Bfloat16 / Float / Float
@@ -602,11 +695,11 @@ std::vector<BnInvVarToleranceTestCase>
     return {// NHW = 0 => throws
             {-1.0, 1.0, 0, 1e-5, 0.0, true},
             // NHW=1
-            {-1.0, 1.0, 1, 1e-5, 1.5 * gamma(1) + 3.0 * u + std::sqrt(3.0) * uBf16},
+            {-1.0, 1.0, 1, 1e-5, expectedInvVarTol(1.0, 1e-5, gamma(1), u, uBf16, u)},
             // NHW=10
-            {-1.0, 1.0, 10, 1e-5, 1.5 * gamma(10) + 3.0 * u + std::sqrt(3.0) * uBf16},
+            {-1.0, 1.0, 10, 1e-5, expectedInvVarTol(1.0, 1e-5, gamma(10), u, uBf16, u)},
             // Zero input
-            {0.0, 0.0, 10, 1e-5, 3.0 * u / std::sqrt(1e-5) + (1.0 / std::sqrt(1e-5)) * uBf16}};
+            {0.0, 0.0, 10, 1e-5, expectedInvVarTol(0.0, 1e-5, gamma(10), u, uBf16, u)}};
 }
 
 // Bfloat16 / Bfloat16 / Bfloat16
@@ -619,11 +712,11 @@ std::vector<BnInvVarToleranceTestCase>
     return {// NHW = 0 => throws
             {-1.0, 1.0, 0, 1e-5, 0.0, true},
             // NHW=1
-            {-1.0, 1.0, 1, 1e-5, 1.5 * gamma(1) + 3.0 * u},
+            {-1.0, 1.0, 1, 1e-5, expectedInvVarTol(1.0, 1e-5, gamma(1), u)},
             // NHW=10
-            {-1.0, 1.0, 10, 1e-5, 1.5 * gamma(10) + 3.0 * u},
+            {-1.0, 1.0, 10, 1e-5, expectedInvVarTol(1.0, 1e-5, gamma(10), u)},
             // Zero input
-            {0.0, 0.0, 10, 1e-5, 3.0 * u / std::sqrt(1e-5)}};
+            {0.0, 0.0, 10, 1e-5, expectedInvVarTol(0.0, 1e-5, gamma(10), u)}};
 }
 
 template <typename Out, typename In, typename Comp>
@@ -801,8 +894,9 @@ TEST(TestCalculateBnTrainTolerance, ZeroInput)
     auto tolHalfBias = calculateBatchnormTrainingTolerance<half, float, float>(
         0.0, 0.0, -1.0, 1.0, -0.5, 0.5, 10);
     // Expected: maxAbsBias * epsilon + maxOutputMagnitude * outputEpsilon
-    //         = 0.5 * uFloat + 0.5 * uHalf
-    auto expectedHalfBias = static_cast<float>(0.5 * uFloat + 0.5 * uHalf);
+    //         = 0.5 * uFloat + 0.5 * uHalf  (maxOutputMagnitude = 0 + maxAbsBias = 0.5)
+    auto expectedHalfBias
+        = static_cast<float>(0.5 * uFloat + yOutputCast(0.0, 1.0, 0.5, uHalf, uFloat));
     EXPECT_NEAR(tolHalfBias, expectedHalfBias, 1e-10f);
 }
 
@@ -929,6 +1023,45 @@ TEST(TestCalculateBnTrainTolerance, ThrowsOnNegativeNHW)
                  std::invalid_argument);
     EXPECT_THROW((calculateBatchnormInvVarianceTolerance<float, float, float>(-1.0, 1.0, -1)),
                  std::invalid_argument);
+}
+
+// InvVar: small x where eps_bn dominates variance estimate
+TEST(TestCalculateBnInvVarTolerance, SmallXEpsilonDominates)
+{
+    // maxAbsX = 0.001, eps_bn = 1e-5
+    // maxAbsX^2 = 1e-6 < eps_bn = 1e-5, so varEstimate = eps_bn
+    // varPlusEps = 2 * eps_bn = 2e-5
+    // This tests that the variance floor prevents underestimation
+    auto tol = calculateBatchnormInvVarianceTolerance<float, float, float>(-0.001, 0.001, 10, 1e-5);
+    EXPECT_GT(tol, 0.0f);
+
+    // Compare with zero-input case: should be similar magnitude since eps_bn dominates both
+    auto tolZero = calculateBatchnormInvVarianceTolerance<float, float, float>(0.0, 0.0, 10, 1e-5);
+    EXPECT_GT(tolZero, 0.0f);
+
+    // Small-x tolerance should be >= zero-input tolerance (has additional deltaVar contribution)
+    EXPECT_GE(tol, tolZero);
+
+    // InvVar tolerance should decrease as maxAbsX increases (larger var -> less amplification)
+    auto tolLargeX
+        = calculateBatchnormInvVarianceTolerance<float, float, float>(-10.0, 10.0, 10, 1e-5);
+    EXPECT_LT(tolLargeX, tol) << "Larger x should give smaller invVar tolerance";
+}
+
+// InvVar: tolerance properly scales down for large maxAbsX
+TEST(TestCalculateBnInvVarTolerance, LargeXScalesDown)
+{
+    auto tol1 = calculateBatchnormInvVarianceTolerance<float, float, float>(-1.0, 1.0, 10);
+    auto tol100 = calculateBatchnormInvVarianceTolerance<float, float, float>(-100.0, 100.0, 10);
+    auto tol1000 = calculateBatchnormInvVarianceTolerance<float, float, float>(-1000.0, 1000.0, 10);
+
+    // Tolerance should decrease as maxAbsX increases
+    EXPECT_LT(tol100, tol1) << "x=100 should give smaller invVar tolerance than x=1";
+    EXPECT_LT(tol1000, tol100) << "x=1000 should give smaller invVar tolerance than x=100";
+
+    // The ratio should reflect the 1/maxAbsX scaling in the gamma term
+    auto ratio = static_cast<double>(tol1) / static_cast<double>(tol100);
+    EXPECT_GT(ratio, 10.0) << "Tolerance ratio should reflect ~1/maxAbsX scaling";
 }
 
 // Mean and invVar also throw on singularity
