@@ -33,6 +33,7 @@ add_executable(
     engines/plans/RMSnorm/TestRMSnormBwdPlan.cpp
     engines/plans/RMSnorm/TestRMSnormApplicabilityChecks.cpp
     hip/TestHipProgramAndKernel.cpp
+    hip/TestHipKernelCompileOptions.cpp
 )
 
 target_compile_options(hip_kernel_provider_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
