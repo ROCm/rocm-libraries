@@ -1097,13 +1097,12 @@ class KernelComponentFactoryGfx950(
         elif dtype in cls._DT_FP8BF16:
             if (128, 128) in result.keys():
                 result[(128, 128)].append(
-                    FmhaFwdTileSize(256, 32, 128, 128, 32, 128,  8, 1, 1,  8, 1, 1,  32, 32, 16,  32, 32, 16,  -1))  # fmt: skip
+                    FmhaFwdTileSize(256, 64, 128, 128, 64, 128,  8, 1, 1,  8, 1, 1,  32, 32, 32,  32, 32, 32,  -1))  # fmt: skip
         elif dtype in cls._DT_MXFP8:
             return {
                 #                             bm0, bn0, bk0, bn1, bk1,
                 (128, 128) : [FmhaFwdTileSize(128, 128,  64, 128,  64, 128,  4, 1, 1,  4, 1, 1,  32, 32,  64,  32, 32,  64,  -1)],
                 (256, 256) : [FmhaFwdTileSize(128, 128, 128, 256, 128, 256,  4, 1, 1,  4, 1, 1,  16, 16, 128,  16, 16, 128,  -1)],
-              # (256, 256) : [FmhaFwdTileSize(128, 256,  64, 256,  64, 256,  4, 1, 1,  4, 1, 1,  32, 32,  64,  32, 32,  64,  -1)],
             }  # fmt: skip
         elif dtype in cls._DT_MXFP4:
             return {
