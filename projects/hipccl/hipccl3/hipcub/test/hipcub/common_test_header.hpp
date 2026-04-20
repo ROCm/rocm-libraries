@@ -83,6 +83,23 @@
     } \
 }
 
+#define HIP_CHECK_MEMORY(condition)                                                         \
+    {                                                                                       \
+        hipError_t error = condition;                                                       \
+        if(error == hipErrorOutOfMemory)                                                    \
+        {                                                                                   \
+            std::cout << "Out of memory. Skipping size = " << size << std::endl;            \
+            (void)hipGetLastError(); /*reset error code to hipSuccess*/                     \
+            break;                                                                          \
+        }                                                                                   \
+        if(error != hipSuccess)                                                             \
+        {                                                                                   \
+            std::cout << "HIP error: " << hipGetErrorString(error) << " line: " << __LINE__ \
+                      << std::endl;                                                         \
+            exit(error);                                                                    \
+        }                                                                                   \
+    }
+
 #define INSTANTIATE_TYPED_TEST_EXPANDED_1(line, test_suite_name, ...) \
     namespace Id##line {                                              \
         using test_type = __VA_ARGS__;                                \

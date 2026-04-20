@@ -8,8 +8,12 @@ Full documentation for hipCUB is available at [https://rocm.docs.amd.com/project
 
 * Fixed a build failure when libhipcxx is not on the include path. `radix_rank_sort_operations.hpp` included the libhipcxx `bit` header unconditionally, which does not exist in the standard library fallback.
 
-## hipCUB-5.0.0 for ROCm 10.2.0
+### Added
 
+* Added support for large number of segments and large number of items to `hipcub::DeviceSegmentedRadixSort::*`.
+
+## hipCUB-5.0.0 for ROCm 10.2.0
+ 
 ### Added
 
 * Feature parity with CCCL/CUB 3.0.0.
