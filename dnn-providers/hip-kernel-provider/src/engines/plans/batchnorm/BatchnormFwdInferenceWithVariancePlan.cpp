@@ -8,16 +8,17 @@
 
 #include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_data_sdk/utilities/Constants.hpp>
-#include <hipdnn_data_sdk/utilities/FlatbufferUtils.hpp>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
+#include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 
 namespace hip_kernel_provider::batchnorm
 {
 
 BatchnormFwdInferenceWithVarianceParams::BatchnormFwdInferenceWithVarianceParams(
-    const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributesVarianceExt& attributes,
-    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+    const hipdnn_flatbuffers_sdk::data_objects::BatchnormInferenceAttributesVarianceExt& attributes,
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
         tensorMap)
     : _x(tensorMap.at(attributes.x_tensor_uid()))
     , _y(tensorMap.at(attributes.y_tensor_uid()))
@@ -29,15 +30,16 @@ BatchnormFwdInferenceWithVarianceParams::BatchnormFwdInferenceWithVarianceParams
 {
     // Extract epsilon value from pass-by-value tensor (cast to double for kernel compatibility)
     auto epsilonTensorAttr = tensorMap.at(attributes.epsilon_tensor_uid());
-    _epsilonValue
-        = hipdnn_data_sdk::utilities::extractDoubleFromTensorValue(epsilonTensorAttr, "Epsilon");
+    _epsilonValue = hipdnn_flatbuffers_sdk::utilities::extractDoubleFromTensorValue(
+        epsilonTensorAttr, "Epsilon");
 }
 
 BatchnormFwdInferenceWithVarianceParams::BatchnormFwdInferenceWithVarianceParams(
-    const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributesVarianceExt&
+    const hipdnn_flatbuffers_sdk::data_objects::BatchnormInferenceAttributesVarianceExt&
         inferenceAttributes,
-    const hipdnn_data_sdk::data_objects::PointwiseAttributes& pointwiseAttributes,
-    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+    const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& pointwiseAttributes,
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
         tensorMap)
     : _x(tensorMap.at(inferenceAttributes.x_tensor_uid()))
     , _y(tensorMap.at(inferenceAttributes.y_tensor_uid()))
@@ -50,41 +52,41 @@ BatchnormFwdInferenceWithVarianceParams::BatchnormFwdInferenceWithVarianceParams
 {
     // Extract epsilon value from pass-by-value tensor (cast to double for kernel compatibility)
     auto epsilonTensorAttr = tensorMap.at(inferenceAttributes.epsilon_tensor_uid());
-    _epsilonValue
-        = hipdnn_data_sdk::utilities::extractDoubleFromTensorValue(epsilonTensorAttr, "Epsilon");
+    _epsilonValue = hipdnn_flatbuffers_sdk::utilities::extractDoubleFromTensorValue(
+        epsilonTensorAttr, "Epsilon");
 }
 
-const hipdnn_data_sdk::data_objects::TensorAttributes*
+const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*
     BatchnormFwdInferenceWithVarianceParams::x() const
 {
     return _x;
 }
 
-const hipdnn_data_sdk::data_objects::TensorAttributes*
+const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*
     BatchnormFwdInferenceWithVarianceParams::y() const
 {
     return _y;
 }
 
-const hipdnn_data_sdk::data_objects::TensorAttributes*
+const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*
     BatchnormFwdInferenceWithVarianceParams::scale() const
 {
     return _scale;
 }
 
-const hipdnn_data_sdk::data_objects::TensorAttributes*
+const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*
     BatchnormFwdInferenceWithVarianceParams::bias() const
 {
     return _bias;
 }
 
-const hipdnn_data_sdk::data_objects::TensorAttributes*
+const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*
     BatchnormFwdInferenceWithVarianceParams::estMean() const
 {
     return _estMean;
 }
 
-const hipdnn_data_sdk::data_objects::TensorAttributes*
+const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*
     BatchnormFwdInferenceWithVarianceParams::estVariance() const
 {
     return _estVariance;
@@ -101,7 +103,7 @@ const std::optional<hip_kernel_utils::ActivationParams>&
     return _optActivation;
 }
 
-const hipdnn_data_sdk::data_objects::TensorAttributes*
+const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*
     BatchnormFwdInferenceWithVarianceParams::activationOut() const
 {
     return _activationOut;
@@ -127,10 +129,10 @@ void BatchnormFwdInferenceWithVariancePlan::compile(const IKernelCompiler& kerne
     auto xDataType = _inferenceParams.x()->data_type();
     auto scaleDataType = _inferenceParams.scale()->data_type();
 
-    bool useFp16Mix = (xDataType == hipdnn_data_sdk::data_objects::DataType::HALF
-                       && scaleDataType == hipdnn_data_sdk::data_objects::DataType::FLOAT);
-    bool useBfp16Mix = (xDataType == hipdnn_data_sdk::data_objects::DataType::BFLOAT16
-                        && scaleDataType == hipdnn_data_sdk::data_objects::DataType::FLOAT);
+    bool useFp16Mix = (xDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::HALF
+                       && scaleDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
+    bool useBfp16Mix = (xDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16
+                        && scaleDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
     bool useFp32 = !useFp16Mix && !useBfp16Mix;
 
     // Extract dimensions from x tensor

@@ -4,8 +4,8 @@
 #pragma once
 
 #include <cstddef>
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
-#include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <stdexcept>
 
 #include "IGpuGraphNodePlanBuilder.hpp"
@@ -47,19 +47,19 @@ private:
 class GpuDummyAddOnePlanBuilder : public IGpuGraphNodePlanBuilder
 {
 public:
-    bool isApplicable(
-        const hipdnn_data_sdk::data_objects::Node& node,
-        [[maybe_unused]] const std::unordered_map<
-            int64_t,
-            const hipdnn_data_sdk::data_objects::TensorAttributes*>& tensorMap) const override
+    bool isApplicable(const hipdnn_flatbuffers_sdk::data_objects::Node& node,
+                      [[maybe_unused]] const std::unordered_map<
+                          int64_t,
+                          const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>& tensorMap)
+        const override
     {
         return node.attributes_type()
-               == hipdnn_data_sdk::data_objects::NodeAttributes::PointwiseAttributes;
+               == hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::PointwiseAttributes;
     }
 
     std::unique_ptr<IGpuGraphNodePlanExecutor>
-        buildNodePlan(const hipdnn_data_sdk::flatbuffer_utilities::IGraph& graph,
-                      const hipdnn_data_sdk::data_objects::Node& node) const override
+        buildNodePlan(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph,
+                      const hipdnn_flatbuffers_sdk::data_objects::Node& node) const override
     {
         const auto* attrs = node.attributes_as_PointwiseAttributes();
         if(attrs == nullptr)

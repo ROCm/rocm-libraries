@@ -10,7 +10,7 @@ using hipdnn_test_sdk::utilities::sdkToFrontendDataType;
 using hipdnn_test_sdk::utilities::sdkToFrontendPointwiseMode;
 
 namespace fe = hipdnn_frontend;
-namespace sdk = hipdnn_data_sdk::data_objects;
+namespace sdk = hipdnn_flatbuffers_sdk::data_objects;
 
 // ============================================================================
 // DataType round-trip tests

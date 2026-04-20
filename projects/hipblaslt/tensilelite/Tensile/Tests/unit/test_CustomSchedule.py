@@ -1041,7 +1041,6 @@ class TestCustomScheduleTF32:
         assert has_schedule
         assert isinstance(schedule_info, ScheduleInfo)
         assert schedule_info.numCodePaths == ncp
-        schedule_info.pretty_print()
         numMfma = (mi_wave_tile[0] * mi_wave_tile[1] *
                    3 *                      # tf32 emulated with 3 bf16
                    (1 if mi[0] == 16 else 2)   # two sub-iterations with mi32

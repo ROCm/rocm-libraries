@@ -11,7 +11,7 @@
 #include <string>
 #include <vector>
 
-#include <hipdnn_data_sdk/data_objects/engine_config_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/engine_config_generated.h>
 
 #ifdef _WIN32
 #ifndef NOMINMAX
@@ -25,8 +25,8 @@
 namespace hipdnn_tests
 {
 
-using hipdnn_data_sdk::data_objects::EngineConfigT;
-using hipdnn_data_sdk::data_objects::UnPackEngineConfig;
+using hipdnn_flatbuffers_sdk::data_objects::EngineConfigT;
+using hipdnn_flatbuffers_sdk::data_objects::UnPackEngineConfig;
 
 /// RAII wrapper for loading a test plugin and accessing its knob recording functions.
 ///

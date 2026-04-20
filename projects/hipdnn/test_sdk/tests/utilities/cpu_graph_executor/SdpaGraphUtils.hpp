@@ -18,7 +18,7 @@ template <typename InputType>
 static std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
                   std::unordered_map<int64_t, void*>>
     buildSdpaFwdGraph(SdpaFwdTensorBundle<InputType>& tensorBundle,
-                      hipdnn_data_sdk::data_objects::DataType dataType,
+                      hipdnn_flatbuffers_sdk::data_objects::DataType dataType,
                       bool causalMask = false)
 {
     const auto frontendDataType = hipdnn_test_sdk::utilities::sdkToFrontendDataType(dataType);
