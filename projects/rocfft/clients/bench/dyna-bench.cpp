@@ -199,7 +199,7 @@ size_t get_wbuffersize(ROCFFT_LIB libhandle, const rocfft_plan& plan)
 // work buffer requirements for all devices
 std::vector<size_t> get_wbuffersizes_all_devices(ROCFFT_LIB libhandle, const rocfft_plan& plan)
 {
-    int                 ndevices = rocfft_scoped_device::device_count();
+    const int           ndevices = rocfft_scoped_device::device_count();
     std::vector<size_t> sizes(ndevices);
 
     for(int device = 0; device < ndevices; ++device)
@@ -658,7 +658,7 @@ int main(int argc, char* argv[])
         std::vector<rocfft_plan> plan;
         // Allocate the work buffer: just one, big enough for any dloaded library.
         std::vector<rocfft_execution_info> info;
-        auto                               ndevices = rocfft_scoped_device::device_count();
+        const auto                         ndevices = rocfft_scoped_device::device_count();
         std::vector<size_t>                max_wbuffer_sizes(ndevices);
         for(unsigned int idx = 0; idx < lib_strings.size(); ++idx)
         {

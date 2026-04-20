@@ -304,7 +304,7 @@ public:
         }
 
         // Set work buffers for all HIP devices
-        int ndevices = rocfft_scoped_device::device_count();
+        const int ndevices = rocfft_scoped_device::device_count();
         workbuffersizes.resize(ndevices);
         wbuffers.resize(ndevices);
         for(int device = 0; device < ndevices; ++device)
@@ -331,7 +331,7 @@ public:
             workbuffersizes.begin(), workbuffersizes.end(), [](size_t s) { return s > 0; });
         if(need_workbuffers && auto_allocate != fft_auto_allocation_on)
         {
-            int ndevices = rocfft_scoped_device::device_count();
+            const int ndevices = rocfft_scoped_device::device_count();
             for(int device = 0; device < ndevices; ++device)
             {
                 rocfft_scoped_device dev(device);
