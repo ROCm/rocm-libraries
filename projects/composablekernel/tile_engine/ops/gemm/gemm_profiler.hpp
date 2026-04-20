@@ -208,8 +208,7 @@ class GemmProfiler
 
     virtual void write_csv_header(std::ostream& os) const
     {
-        os << "rocm_version,device_name,"
-           << "split_k,m,n,k,stride_a,stride_b,stride_c,"
+        os << "rocm_version,device_name," << "split_k,m,n,k,stride_a,stride_b,stride_c,"
            << "dtype_a,dtype_b,dtype_acc,dtype_c," << "layout_a,layout_b,layout_c,"
            << "structured_sparsity," << "name,"
            << "latency(ms),tflops(TFlops),bandwidth(GB/s),metric\n";
@@ -228,10 +227,9 @@ class GemmProfiler
            << problem.k_ << "," << problem.stride_a_ << "," << problem.stride_b_ << ","
            << problem.stride_c_ << "," << problem.dtype_a_ << "," << problem.dtype_b_ << ","
            << problem.dtype_acc_ << "," << problem.dtype_c_ << "," << problem.layout_a_ << ","
-           << problem.layout_b_ << "," << problem.layout_c_ << ","
-           << problem.structured_sparsity_ << "," << name << "," << std::fixed
-           << std::setprecision(4) << perf.latency_ << "," << std::fixed
-           << std::setprecision(4) << perf.tflops_ << "," << std::fixed
+           << problem.layout_b_ << "," << problem.layout_c_ << "," << problem.structured_sparsity_
+           << "," << name << "," << std::fixed << std::setprecision(4) << perf.latency_ << ","
+           << std::fixed << std::setprecision(4) << perf.tflops_ << "," << std::fixed
            << std::setprecision(4) << perf.bandwidth_ << "," << get_metric_name(metric) << "\n";
     }
 

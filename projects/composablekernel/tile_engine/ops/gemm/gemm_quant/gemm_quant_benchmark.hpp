@@ -61,8 +61,8 @@ struct GemmQuantProblem : GemmProblem
            << "   \"quant_profile\":\"" << problem.quant_profile_ << "\",\n"
            << "   \"aq_group\":\"" << problem.aq_group_ << "\",\n"
            << "   \"bq_group\":\"" << problem.bq_group_ << "\",\n"
-           << "   \"structured_sparsity\":"
-           << (problem.structured_sparsity_ ? "true" : "false") << "\n"
+           << "   \"structured_sparsity\":" << (problem.structured_sparsity_ ? "true" : "false")
+           << "\n"
            << "}";
         return os;
     }
@@ -93,13 +93,12 @@ inline auto create_quant_args(int argc, char* argv[])
     return create_args(argc, argv, 1, add_quant_benchmark_args);
 }
 
-inline void gemm_quant_host_reference(
-    int verify,
-    ck_tile::HostTensor<ADataType>& a_m_k,
-    ck_tile::HostTensor<AQDataType>* aq_tensor,
-    ck_tile::HostTensor<BDataType>& b_k_n,
-    ck_tile::HostTensor<BQDataType>* bq_tensor,
-    ck_tile::HostTensor<CDataType>& c_m_n_host_result)
+inline void gemm_quant_host_reference(int verify,
+                                      ck_tile::HostTensor<ADataType>& a_m_k,
+                                      ck_tile::HostTensor<AQDataType>* aq_tensor,
+                                      ck_tile::HostTensor<BDataType>& b_k_n,
+                                      ck_tile::HostTensor<BQDataType>* bq_tensor,
+                                      ck_tile::HostTensor<CDataType>& c_m_n_host_result)
 {
     if(verify == 0)
     {
@@ -116,8 +115,7 @@ inline void gemm_quant_host_reference(
                                       AccDataType,
                                       CDataType,
                                       AQuantGroupSize,
-                                      true>(
-            a_m_k, *aq_tensor, b_k_n, c_m_n_host_result);
+                                      true>(a_m_k, *aq_tensor, b_k_n, c_m_n_host_result);
     }
     else if constexpr(SelectedKernel::QuantMode == ck_tile::QuantType::BQuantGrouped)
     {
@@ -127,8 +125,7 @@ inline void gemm_quant_host_reference(
                                       AccDataType,
                                       CDataType,
                                       BQuantGroupSize,
-                                      false>(
-            a_m_k, *bq_tensor, b_k_n, c_m_n_host_result);
+                                      false>(a_m_k, *bq_tensor, b_k_n, c_m_n_host_result);
     }
     else if constexpr(SelectedKernel::QuantMode == ck_tile::QuantType::RowColQuant)
     {

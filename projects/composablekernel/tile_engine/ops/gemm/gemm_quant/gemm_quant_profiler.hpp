@@ -15,8 +15,7 @@ class GemmQuantProfiler
     : public GemmProfiler<GemmQuantProfiler, GemmQuantProblem, ck_tile::QuantGemmHostArgs>
 {
     public:
-    using BaseGemm =
-        GemmProfiler<GemmQuantProfiler, GemmQuantProblem, ck_tile::QuantGemmHostArgs>;
+    using BaseGemm = GemmProfiler<GemmQuantProfiler, GemmQuantProblem, ck_tile::QuantGemmHostArgs>;
     using BaseGemm::benchmark;
 
     GemmQuantProfiler(Settings setting)
@@ -24,16 +23,16 @@ class GemmQuantProfiler
     {
     }
 
-    void benchmark(
-        GemmQuantProblem& gemm_problem,
-        std::vector<std::function<std::tuple<std::string, float>(
-            ck_tile::QuantGemmHostArgs&, const ck_tile::stream_config&)>>& callables) override
+    void
+    benchmark(GemmQuantProblem& gemm_problem,
+              std::vector<std::function<std::tuple<std::string, float>(
+                  ck_tile::QuantGemmHostArgs&, const ck_tile::stream_config&)>>& callables) override
     {
-        const ALayout layout_a = ALayout{};
+        const ALayout layout_a   = ALayout{};
         const AQLayout layout_aq = AQLayout{};
-        const BLayout layout_b = BLayout{};
+        const BLayout layout_b   = BLayout{};
         const BQLayout layout_bq = BQLayout{};
-        const CLayout layout_c = CLayout{};
+        const CLayout layout_c   = CLayout{};
 
         gemm_problem.stride_a_ = ck_tile::get_default_stride(
             gemm_problem.m_, gemm_problem.k_, gemm_problem.stride_a_, is_row_major(layout_a));
@@ -54,33 +53,33 @@ class GemmQuantProfiler
         {
             gemm_problem.qk_a_ = ck_tile::integer_divide_ceil(gemm_problem.k_, aq_group[2]);
             gemm_problem.qk_b_ = 0;
-            aq_rows = gemm_problem.m_;
-            aq_cols = gemm_problem.qk_a_;
+            aq_rows            = gemm_problem.m_;
+            aq_cols            = gemm_problem.qk_a_;
         }
         else if(gemm_problem.quant_mode_ == "BQuantGrouped")
         {
             gemm_problem.qk_a_ = 0;
             gemm_problem.qk_b_ = ck_tile::integer_divide_ceil(gemm_problem.k_, bq_group[2]);
-            bq_rows = gemm_problem.qk_b_;
-            bq_cols = ck_tile::integer_divide_ceil(gemm_problem.n_, bq_group[1]);
+            bq_rows            = gemm_problem.qk_b_;
+            bq_cols            = ck_tile::integer_divide_ceil(gemm_problem.n_, bq_group[1]);
         }
         else if(gemm_problem.quant_mode_ == "RowColQuant")
         {
             gemm_problem.qk_a_ = 1;
             gemm_problem.qk_b_ = 1;
-            aq_rows = gemm_problem.m_;
-            aq_cols = 1;
-            bq_rows = 1;
-            bq_cols = gemm_problem.n_;
+            aq_rows            = gemm_problem.m_;
+            aq_cols            = 1;
+            bq_rows            = 1;
+            bq_cols            = gemm_problem.n_;
         }
         else if(gemm_problem.quant_mode_ == "TensorQuant")
         {
             gemm_problem.qk_a_ = 1;
             gemm_problem.qk_b_ = 1;
-            aq_rows = 1;
-            aq_cols = 1;
-            bq_rows = 1;
-            bq_cols = 1;
+            aq_rows            = 1;
+            aq_cols            = 1;
+            bq_rows            = 1;
+            bq_cols            = 1;
         }
         else
         {
@@ -117,16 +116,16 @@ class GemmQuantProfiler
         std::unique_ptr<ck_tile::HostTensor<AQDataType>> aq_tensor_ptr = nullptr;
         if(aq_rows > 0)
         {
-            aq_tensor_ptr = std::make_unique<ck_tile::HostTensor<AQDataType>>(
-                ck_tile::host_tensor_descriptor(
+            aq_tensor_ptr =
+                std::make_unique<ck_tile::HostTensor<AQDataType>>(ck_tile::host_tensor_descriptor(
                     aq_rows, aq_cols, gemm_problem.stride_aq_, is_row_major(layout_aq)));
         }
 
         std::unique_ptr<ck_tile::HostTensor<BQDataType>> bq_tensor_ptr = nullptr;
         if(bq_rows > 0)
         {
-            bq_tensor_ptr = std::make_unique<ck_tile::HostTensor<BQDataType>>(
-                ck_tile::host_tensor_descriptor(
+            bq_tensor_ptr =
+                std::make_unique<ck_tile::HostTensor<BQDataType>>(ck_tile::host_tensor_descriptor(
                     bq_rows, bq_cols, gemm_problem.stride_bq_, is_row_major(layout_bq)));
         }
 
@@ -270,7 +269,7 @@ class GemmQuantProfiler
         else if(problem.quant_mode_ == "BQuantGrouped")
         {
             const auto bq_group = parse_quant_group(problem.bq_group_);
-            const auto bq_cols = ck_tile::integer_divide_ceil(problem.n_, bq_group[1]);
+            const auto bq_cols  = ck_tile::integer_divide_ceil(problem.n_, bq_group[1]);
             num_byte += sizeof(BQDataType) * problem.qk_b_ * bq_cols;
         }
         else if(problem.quant_mode_ == "RowColQuant")
@@ -290,8 +289,7 @@ class GemmQuantProfiler
     void write_csv_header(std::ostream& os) const override
     {
         os << "rocm_version,device_name,"
-           << "split_k,m,n,k,stride_a,stride_aq,stride_b,stride_bq,stride_c,"
-           << "qk_a,qk_b,"
+           << "split_k,m,n,k,stride_a,stride_aq,stride_b,stride_bq,stride_c," << "qk_a,qk_b,"
            << "dtype_a,dtype_q,dtype_b,dtype_acc,dtype_c,"
            << "layout_a,layout_aq,layout_b,layout_bq,layout_c,"
            << "quant_mode,quant_profile,aq_group,bq_group,"
@@ -303,20 +301,19 @@ class GemmQuantProfiler
                        Metric metric) const override
     {
         const auto& problem = kernel_instance.problem_;
-        const auto& perf = kernel_instance.perf_result_;
+        const auto& perf    = kernel_instance.perf_result_;
 
-        os << get_rocm_version() << "," << ck_tile::get_device_name() << ","
-           << problem.split_k_ << "," << problem.m_ << "," << problem.n_ << ","
-           << problem.k_ << "," << problem.stride_a_ << "," << problem.stride_aq_ << ","
-           << problem.stride_b_ << "," << problem.stride_bq_ << "," << problem.stride_c_ << ","
-           << problem.qk_a_ << "," << problem.qk_b_ << "," << problem.dtype_a_ << ","
-           << problem.dtype_q_ << "," << problem.dtype_b_ << "," << problem.dtype_acc_ << ","
-           << problem.dtype_c_ << "," << problem.layout_a_ << "," << problem.layout_aq_ << ","
-           << problem.layout_b_ << "," << problem.layout_bq_ << "," << problem.layout_c_ << ","
-           << problem.quant_mode_ << "," << problem.quant_profile_ << "," << problem.aq_group_
-           << "," << problem.bq_group_ << "," << kernel_instance.name_ << "," << std::fixed
-           << std::setprecision(4) << perf.latency_ << "," << std::fixed
-           << std::setprecision(4) << perf.tflops_ << "," << std::fixed
+        os << get_rocm_version() << "," << ck_tile::get_device_name() << "," << problem.split_k_
+           << "," << problem.m_ << "," << problem.n_ << "," << problem.k_ << ","
+           << problem.stride_a_ << "," << problem.stride_aq_ << "," << problem.stride_b_ << ","
+           << problem.stride_bq_ << "," << problem.stride_c_ << "," << problem.qk_a_ << ","
+           << problem.qk_b_ << "," << problem.dtype_a_ << "," << problem.dtype_q_ << ","
+           << problem.dtype_b_ << "," << problem.dtype_acc_ << "," << problem.dtype_c_ << ","
+           << problem.layout_a_ << "," << problem.layout_aq_ << "," << problem.layout_b_ << ","
+           << problem.layout_bq_ << "," << problem.layout_c_ << "," << problem.quant_mode_ << ","
+           << problem.quant_profile_ << "," << problem.aq_group_ << "," << problem.bq_group_ << ","
+           << kernel_instance.name_ << "," << std::fixed << std::setprecision(4) << perf.latency_
+           << "," << std::fixed << std::setprecision(4) << perf.tflops_ << "," << std::fixed
            << std::setprecision(4) << perf.bandwidth_ << "," << get_metric_name(metric) << "\n";
     }
 };

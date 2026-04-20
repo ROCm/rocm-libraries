@@ -101,10 +101,7 @@ inline auto create_args(int argc, char* argv[], int default_verify = 2)
 }
 
 template <typename ConfigureArgs>
-inline auto create_args(int argc,
-                        char* argv[],
-                        int default_verify,
-                        ConfigureArgs configure_args)
+inline auto create_args(int argc, char* argv[], int default_verify, ConfigureArgs configure_args)
 {
     ck_tile::ArgParser arg_parser;
     add_common_benchmark_args(arg_parser, default_verify);
