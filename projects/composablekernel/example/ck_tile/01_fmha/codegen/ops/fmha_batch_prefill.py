@@ -42,6 +42,10 @@ DTYPE_BITS = {
     "bf8": 8,
 }
 
+# Element size in bytes per dtype, used by the auto-generated dispatcher to
+# decide use_64bit_load per-arm (total KV cache bytes vs INT32_MAX).
+DTYPE_BYTES = {k: v // 8 for k, v in DTYPE_BITS.items()}
+
 K0_MAX_SUBMAX_MAP = {32: 32, 64: 64, 96: 128, 128: 128, 256: 256}
 
 SUPPORTED_PAGE_SIZE = [1, 16, 1024]
@@ -157,6 +161,7 @@ float fmha_batch_prefill_<trait_{F_idx}>(const ck_tile::stream_config& s, fmha_b
 
 FMHA_FWD_API_FILENAME = "fmha_batch_prefill_api.cpp"
 FMHA_FWD_API = """
+#include <cstdint>
 #include <cstdio>
 
 namespace {{
@@ -207,6 +212,7 @@ float fmha_batch_prefill(fmha_batch_prefill_traits t, fmha_batch_prefill_args a,
 """
 
 FMHA_FWD_API_PER_DTYPE = """    {F_if}(t.data_type.compare(\"{F_dtype}\") == 0){{
+        constexpr int kElementBytes = {F_element_bytes};
 {F_hdim_case}
     }}
 """
@@ -216,7 +222,7 @@ FMHA_FWD_API_PER_HDIM_CASE = """        {F_if} (t.hdim_q <= {F_hdim} && t.hdim_v
 """
 
 FMHA_FWD_API_INNER_DISPATCH = """            {F_if}((t.is_group_mode == {F_mode}) && (t.is_v_rowmajor == {F_vlayout}) && (t.has_logits_soft_cap == {F_logits}) && ({F_mask_check}) && (t.bias_type == {F_bias_check}) && (t.has_lse == {F_lse})  && (t.has_dropout == {F_dropout}) && (t.qscale_type == {F_qscale_check}) && (t.has_sink == {F_sink}) &&
-                        ({F_scheck}) && ({F_skcheck}) && ({F_dcheck}) && ({F_dvcheck}) && ({F_constraint}) && (t.kv_memory_layout == {F_kv_memory_layout}) && (t.kv_lookup_table == {F_kv_lookup_table}) && (t.page_size == {F_page_size}) && (t.use_64bit_load == {F_use_64bit_load})) {{
+                        ({F_scheck}) && ({F_skcheck}) && ({F_dcheck}) && ({F_dvcheck}) && ({F_constraint}) && (t.kv_memory_layout == {F_kv_memory_layout}) && (t.kv_lookup_table == {F_kv_lookup_table}) && (t.page_size == {F_page_size}) && ((a.page_block_size < {F_bn0} && static_cast<ck_tile::long_index_t>(a.num_total_pages) * a.batch_stride_k * kElementBytes > INT32_MAX) == {F_use_64bit_load})) {{
                 using trait_ = fmha_fwd_batch_prefill_traits_<{F_hdim}, {F_dtype}, {F_mode}, {F_bm0}, {F_bn0}, {F_bk0}, {F_bn1}, {F_bk1}, {F_bk0max}, {F_vlayout}, {F_pipeline_enum}, {F_logits}, {F_mask}, {F_bias}, {F_lse}, {F_dropout}, {F_qscale}, {F_spad}, {F_skpad}, {F_dpad}, {F_dvpad}, false, false, {F_sink}, {F_page_size}, {F_kv_memory_layout}, {F_kv_lookup_table}, {F_use_64bit_load}>;
                 return fmha_batch_prefill_<trait_>(s, a);
             }}
@@ -504,7 +510,10 @@ class FmhaFwdApiPool:
                 )
             if_i = "if" if i == 0 else "else if"
             per_dtypes = per_dtypes + FMHA_FWD_API_PER_DTYPE.format(
-                F_if=if_i, F_dtype=dtype, F_hdim_case=per_hdim_case
+                F_if=if_i,
+                F_dtype=dtype,
+                F_element_bytes=DTYPE_BYTES[dtype],
+                F_hdim_case=per_hdim_case,
             )
         if not per_dtypes:
             # empty string we add some ignore to suppress warning in api

@@ -1743,8 +1743,7 @@ struct fmha_batch_prefill_traits : public fmha_fwd_traits
         ck_tile::BlockAttentionKVCacheMemoryLayoutEnum::VECTORIZED_LAYOUT;
     ck_tile::BlockAttentionKVCacheLookupTableEnum kv_lookup_table =
         ck_tile::BlockAttentionKVCacheLookupTableEnum::SGLANG_PAGE_TABLE_1D;
-    int page_size       = 1;
-    bool use_64bit_load = false;
+    int page_size = 1;
 };
 
 float fmha_batch_prefill(fmha_batch_prefill_traits,
