@@ -1933,6 +1933,7 @@ class KernelWriterAssembly(KernelWriter):
         sgprOffset = self.argLoader.getOffset()
         kernelArgs.add(self.argLoader.loadKernArg(self.states.tempESMSupportedWorkaroundSgpr, "KernArgAddress", sgprOffset=hex(sgprOffset), dword=1))
         sgprOffset += 4
+        self.argLoader.setOffset(sgprOffset)
     return kernelArgs
 
   def localReadAddresses(self, kernel, tPA, tPB, tPM):

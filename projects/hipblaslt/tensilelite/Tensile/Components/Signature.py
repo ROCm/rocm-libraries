@@ -212,6 +212,7 @@ class SignatureDefault(Signature):
 
         if kernel["ExpertSchedulingMode"] > 0:
             signature.addArg( "ESMsupportedWorkaround", SVK.SIG_VALUE,               "u32")
+            userArgumentsInfo.gemmArgumentSize += 4
 
         if kernel["StreamK"]:
             # StreamK args
