@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "hipdnn_data_sdk/utilities/ShapeUtilities.hpp"
 #include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_test_sdk/utilities/detail/CpuFpReferenceUtilities.hpp>
@@ -46,8 +47,8 @@ public:
                       const hipdnn_data_sdk::utilities::TensorBase<ScaleBiasDataType>* scale,
                       const hipdnn_data_sdk::utilities::TensorBase<ScaleBiasDataType>* bias,
                       hipdnn_data_sdk::utilities::TensorBase<YDataType>& y,
-                      double epsilon,
-                      int64_t normalizedDimCount,
+                      const double epsilon,
+                      const int64_t normalizedDimCount,
                       hipdnn_data_sdk::utilities::TensorBase<MeanRstdDataType>* mean = nullptr,
                       hipdnn_data_sdk::utilities::TensorBase<MeanRstdDataType>* rstd = nullptr)
     {
@@ -186,6 +187,191 @@ public:
         {
             rstd->memory().markHostModified();
         }
+    }
+
+    // Layer normalization backward pass.
+    // Calculates the gradients for a normalization over the last `normalizedDimCount` dimensions of the input tensor X
+    //
+    // For input dY, X with shape [d0, d1, ..., d_{n-1}] and normalizedDimCount = k:
+    //   - Batch dimensions:      [d0, ..., d_{n-k-1}]
+    //   - Normalized dimensions: [d_{n-k}, ..., d_{n-1}]
+    //   - Stage 1 (backward values):
+    //       For each batch position b:
+    //           For each element dy_b_n, x_b_n, scale_n (n = 1, 2, ..., N):
+    //               sum_dy_scale_x_n = sum_dy_scale_x_{n-1} + dy_b_n * scale_n * x_b_n
+    //               sum_dy_scale_n = sum_dy_scale_{n-1} + dy_b_n * scale_n
+    //           a = rstd_b * rstd_b * rstd_b * (sum_dy_scale_x - sum_dy_scale * mean_b) / N
+    //           b = rstd_b * sum_dy_scale / N - a * mean_b
+    //           For each element dy_b_n, x_b_n, dx_b_n (n = 1, 2, ..., N):
+    //               dx_b_n = rstd_b * dy_b_n * scale_n - a * x_b_n - b
+    //   - Stage 2 (backward weights):
+    //       For each normalized position n:
+    //           For each element dy_n_b, x_n_b, mean_b, rstd_b (b = 1, 2, ...):
+    //               dscale_sum_b = dscale_sum_{b-1} + dy_n_b * (x_n_b - mean_b) * rstd_b
+    //               dbias_sum_b = dbias_sum_{b-1} + dy_n_b
+    //           dscale_n = dscale_sum_b
+    //           dbias_n = dbias_sum_b
+    //
+    // Scale and bias have shape matching the normalized dimensions.
+    // Mean and rstd inputs, if provided, have shape matching the batch dimensions.
+    template <class DyDataType,
+              class ScaleBiasDataType,
+              class DxDataType = DyDataType,
+              class MeanRstdDataType = ScaleBiasDataType,
+              class ComputeDataType = float>
+    static void bprop(const hipdnn_data_sdk::utilities::TensorBase<DyDataType>& dy,
+                      const hipdnn_data_sdk::utilities::TensorBase<DyDataType>& x,
+                      const hipdnn_data_sdk::utilities::TensorBase<ScaleBiasDataType>& scale,
+                      const hipdnn_data_sdk::utilities::TensorBase<MeanRstdDataType>& mean,
+                      const hipdnn_data_sdk::utilities::TensorBase<MeanRstdDataType>& rstd,
+                      hipdnn_data_sdk::utilities::TensorBase<DxDataType>& dx,
+                      hipdnn_data_sdk::utilities::TensorBase<ScaleBiasDataType>& dscale,
+                      hipdnn_data_sdk::utilities::TensorBase<ScaleBiasDataType>& dbias,
+                      [[maybe_unused]] const double epsilon,
+                      const int64_t normalizedDimCount)
+    {
+        const auto& dims = dy.dims();
+        auto ndim = static_cast<int64_t>(dims.size());
+
+        if(ndim < 1)
+        {
+            throw std::runtime_error("Layernorm bprop requires at least 1D tensor.");
+        }
+
+        if(normalizedDimCount < 1 || normalizedDimCount > ndim)
+        {
+            throw std::runtime_error(
+                "normalizedDimCount must be between 1 and the number of tensor dimensions.");
+        }
+
+        if(scale.dims().size() != dscale.dims().size()
+           || scale.dims().size() != dbias.dims().size())
+        {
+            throw std::runtime_error("Scale, dscale and dbias tensors must have the same rank.");
+        }
+
+        if(mean.dims().size() != rstd.dims().size())
+        {
+            throw std::runtime_error("Mean and rstd tensors must have the same rank.");
+        }
+
+        for(auto d : dims)
+        {
+            if(d <= 0)
+            {
+                throw std::runtime_error(
+                    "Dimensions must all be positive (no zero-size dimensions).");
+            }
+        }
+
+        // Split dimensions into batch dims and normalized dims
+        std::vector<int64_t> batchDims;
+        int64_t batchDimsSize = 1;
+        std::vector<int64_t> normalizedDims;
+        int64_t normalizedDimsSize = 1;
+        if(scale.dims().size() == dims.size() && mean.dims().size() == dims.size()) // Pad with ones
+        {
+            batchDims = std::vector<int64_t>(dims.size(), 1);
+            normalizedDims = std::vector<int64_t>(dims.size(), 1);
+            for(size_t i = 0; i < dims.size(); ++i)
+            {
+                if(static_cast<int64_t>(i) < ndim - normalizedDimCount)
+                {
+                    batchDims[i] = dims[i];
+                    batchDimsSize *= dims[i];
+                }
+                else
+                {
+                    normalizedDims[i] = dims[i];
+                    normalizedDimsSize *= dims[i];
+                }
+            }
+        }
+        else // Don't pad with ones
+        {
+            batchDims
+                = std::vector<int64_t>(dims.begin(), dims.begin() + (ndim - normalizedDimCount));
+            for(auto d : batchDims)
+            {
+                batchDimsSize *= d;
+            }
+            normalizedDims
+                = std::vector<int64_t>(dims.begin() + (ndim - normalizedDimCount), dims.end());
+            for(auto d : normalizedDims)
+            {
+                normalizedDimsSize *= d;
+            }
+        }
+
+        // If batchDims is empty (entire tensor is normalized), use a single scalar iteration
+        if(batchDims.empty())
+        {
+            batchDims.push_back(1);
+        }
+
+        // Pass 1: backward values
+        auto layernormBpropValuesFunc = [&](const std::vector<int64_t>& batchIndices) {
+            auto sumDyScaleX = static_cast<ComputeDataType>(0.0);
+            auto sumDyScale = static_cast<ComputeDataType>(0.0);
+            hipdnn_data_sdk::utilities::iterateAlongDimensions(
+                normalizedDims, [&](const std::vector<int64_t>& normIndices) {
+                    auto fullIndices
+                        = buildFullIndices(batchIndices, normIndices, ndim, normalizedDimCount);
+                    auto dyVal = static_cast<ComputeDataType>(dy.getHostValue(fullIndices));
+                    auto scaleVal = static_cast<ComputeDataType>(scale.getHostValue(normIndices));
+                    auto xVal = static_cast<ComputeDataType>(x.getHostValue(fullIndices));
+
+                    sumDyScaleX += dyVal * scaleVal * xVal;
+                    sumDyScale += dyVal * scaleVal;
+                });
+            auto meanVal = static_cast<ComputeDataType>(mean.getHostValue(batchIndices));
+            auto rstdVal = static_cast<ComputeDataType>(rstd.getHostValue(batchIndices));
+            auto a = rstdVal * rstdVal * rstdVal * (sumDyScaleX - sumDyScale * meanVal)
+                     / static_cast<ComputeDataType>(normalizedDimsSize);
+            auto b = rstdVal * sumDyScale / static_cast<ComputeDataType>(normalizedDimsSize)
+                     - a * meanVal;
+            hipdnn_data_sdk::utilities::iterateAlongDimensions(
+                normalizedDims, [&](const std::vector<int64_t>& normIndices) {
+                    auto fullIndices
+                        = buildFullIndices(batchIndices, normIndices, ndim, normalizedDimCount);
+                    auto dyVal = static_cast<ComputeDataType>(dy.getHostValue(fullIndices));
+                    auto scaleVal = static_cast<ComputeDataType>(scale.getHostValue(normIndices));
+                    auto xVal = static_cast<ComputeDataType>(x.getHostValue(fullIndices));
+                    auto dxVal = rstdVal * dyVal * scaleVal - a * xVal - b;
+                    dx.setHostValue(static_cast<DxDataType>(dxVal), fullIndices);
+                });
+        };
+
+        // Pass 2: backward weights
+        auto layernormBpropWeightsFunc = [&](const std::vector<int64_t>& normIndices) {
+            auto dscaleVal = static_cast<ComputeDataType>(0.0);
+            auto dbiasVal = static_cast<ComputeDataType>(0.0);
+            hipdnn_data_sdk::utilities::iterateAlongDimensions(
+                batchDims, [&](const std::vector<int64_t>& batchIndices) {
+                    auto fullIndices
+                        = buildFullIndices(batchIndices, normIndices, ndim, normalizedDimCount);
+                    auto dyVal = static_cast<ComputeDataType>(dy.getHostValue(fullIndices));
+                    auto xVal = static_cast<ComputeDataType>(x.getHostValue(fullIndices));
+                    auto meanVal = static_cast<ComputeDataType>(mean.getHostValue(batchIndices));
+                    auto rstdVal = static_cast<ComputeDataType>(rstd.getHostValue(batchIndices));
+                    dscaleVal += dyVal * (xVal - meanVal) * rstdVal;
+                    dbiasVal += dyVal;
+                });
+            dscale.setHostValue(static_cast<ScaleBiasDataType>(dscaleVal), normIndices);
+            dbias.setHostValue(static_cast<ScaleBiasDataType>(dbiasVal), normIndices);
+        };
+
+        // Parallelize over batch dimensions
+        auto parallelValuesFunc = hipdnn_test_sdk::detail::makeParallelTensorFunctor(
+            layernormBpropValuesFunc, batchDims);
+        parallelValuesFunc(std::thread::hardware_concurrency());
+        auto parallelWeightsFunc = hipdnn_test_sdk::detail::makeParallelTensorFunctor(
+            layernormBpropWeightsFunc, normalizedDims);
+        parallelWeightsFunc(std::thread::hardware_concurrency());
+
+        dx.memory().markHostModified();
+        dscale.memory().markHostModified();
+        dbias.memory().markHostModified();
     }
 
 private:
