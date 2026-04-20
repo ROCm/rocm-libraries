@@ -73,7 +73,9 @@ inline hipError_t segmented_reduce_impl(void*          temporary_storage,
 
     const unsigned int block_size = params.kernel_config.block_size;
 
-    const size_t max_segments = (1ULL << 24) / static_cast<size_t>(block_size);
+    //const size_t max_segments = (1ULL << 32) / static_cast<size_t>(block_size); // fails
+    // 2^32 - 1 max threads
+    const size_t max_segments = (0xffffffff) / static_cast<size_t>(block_size);
 
 /*    
 if (static_cast<uint64_t>(segments) * static_cast<uint64_t>(block_size) > (1ULL << 32)) {
