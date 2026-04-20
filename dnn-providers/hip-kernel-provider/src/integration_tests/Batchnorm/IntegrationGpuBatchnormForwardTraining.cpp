@@ -93,8 +93,9 @@ protected:
         // Epsilon: use pass-by-value with double (matches kernel requirement)
         auto epsilonTensorAttr = std::make_shared<graph::TensorAttributes>();
         std::mt19937 gen(testCase.seed);
-        std::uniform_real_distribution<double> epsilonDist(1e-6, 1e-4);
-        epsilonTensorAttr->set_value(epsilonDist(gen)).set_name("epsilon");
+        std::uniform_real_distribution<double> epsilonExpDist(-6.0, -4.0);
+        auto epsilon = std::pow(10.0, epsilonExpDist(gen));
+        epsilonTensorAttr->set_value(epsilon).set_name("epsilon");
 
         // Conditionally setup running statistics based on scenario
         std::shared_ptr<graph::TensorAttributes> prevRunningMeanTensorAttr;

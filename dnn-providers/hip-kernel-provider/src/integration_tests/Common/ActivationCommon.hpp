@@ -170,4 +170,4 @@ inline std::vector<ActivTestCase> createFwdActivationFullCases()
     return cases;
 }
 
-} // namespace test_activation_common
+} // namespace hip_kernel_provider::test_activation_common
