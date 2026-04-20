@@ -194,6 +194,9 @@ void PerformanceConfigHipImplicitGemm3DGroupWrwXdlops::HeuristicInit(
                 CKSolverType::GrpConv3dWrw, p, p.GetInDataType(), try_tf32);
         };
 
+        auto ck_val_creator = MakeCKValidatorCreator(
+            loader, CKSolverType::GrpConv3dWrw, problem.GetInDataType(), mode_use_tf32);
+
         // Note: No KTN runner needed for 3D (supports_ktn = false)
         if(RunAIHeuristics(k3DWrwSolverConfig,
                            state,
@@ -202,7 +205,7 @@ void PerformanceConfigHipImplicitGemm3DGroupWrwXdlops::HeuristicInit(
                            is_deterministic,
                            fill_valid_kernels,
                            nullptr,
-                           nullptr,
+                           ck_val_creator,
                            mode_use_tf32))
         {
             return;

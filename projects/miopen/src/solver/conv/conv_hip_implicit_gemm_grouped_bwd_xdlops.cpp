@@ -330,6 +330,9 @@ void PerformanceConfigHipImplicitGemmGroupBwdXdlops::HeuristicInit(
             return RunKTNGeneric(*this, c, p);
         };
 
+        auto ck_val_creator = MakeCKValidatorCreator(
+            loader, CKSolverType::GrpConvBwd, problem.GetInDataType(), mode_use_tf32);
+
         if(RunAIHeuristics(k2DBwdSolverConfig,
                            state,
                            ctx,
@@ -337,7 +340,7 @@ void PerformanceConfigHipImplicitGemmGroupBwdXdlops::HeuristicInit(
                            is_deterministic,
                            fill_valid_kernels,
                            ktn_runner,
-                           nullptr,
+                           ck_val_creator,
                            mode_use_tf32))
         {
             return;

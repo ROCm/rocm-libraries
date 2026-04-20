@@ -345,6 +345,9 @@ void PerformanceConfigHipImplicitGemmGroupFwdXdlops::HeuristicInit(
             return RunKTNGeneric(*this, c, p);
         };
 
+        auto ck_val_creator = MakeCKValidatorCreator(
+            loader, CKSolverType::GrpConvFwd, problem.GetInDataType(), mode_use_tf32);
+
         if(RunAIHeuristics(k2DFwdSolverConfig,
                            state,
                            ctx,
@@ -352,7 +355,7 @@ void PerformanceConfigHipImplicitGemmGroupFwdXdlops::HeuristicInit(
                            false,
                            fill_valid_kernels,
                            ktn_runner,
-                           nullptr,
+                           ck_val_creator,
                            mode_use_tf32))
         {
             return;

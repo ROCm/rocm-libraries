@@ -341,15 +341,6 @@ bool RunKTNGeneric(ConfigType& config,
     }
 }
 
-/// @brief Type alias for CK split_k validation function
-/// Takes (kernel_id, split_k) and returns whether CK supports this combination
-using CKSplitKValidatorFunc = std::function<bool(const std::string& kernel_id, int split_k)>;
-
-/// @brief Type alias for CK validator creator function
-/// Takes a problem description and returns a CKSplitKValidatorFunc for that problem
-using CKSplitKValidatorCreatorFunc =
-    std::function<CKSplitKValidatorFunc(const miopen::conv::ProblemDescription&)>;
-
 /**
  * @brief Run AI-based heuristics to select optimal kernel configuration
  *
@@ -374,19 +365,16 @@ using CKSplitKValidatorCreatorFunc =
  * ```cpp
  * HeuristicInitState state(valid_kernels, index, split_k, kernel_id);
  *
- * auto fill_kernels = [&](const ProblemDescription& p) {
- *     return FillValidKernelsIDs<DeviceOpGFwdPtrs<DataType>, CKArgs>(p);
+ * auto fill_kernels = [&loader](const ProblemDescription& p, bool try_tf32) {
+ *     return loader.FillValidKernels(CKSolverType::GrpConvFwd, p, p.GetInDataType(), try_tf32);
  * };
  *
  * // Optional: Create CK validator for split_k support check
- * auto ck_validator_creator = [](const ProblemDescription& p) {
- *     return [p](const std::string& kernel_id, int split_k) {
- *         return IsCKSplitKSupportedGeneric<DeviceOpGBwdPtrs, CKArgs>(p, kernel_id, split_k);
- *     };
- * };
+ * auto ck_val_creator = MakeCKValidatorCreator(
+ *     loader, CKSolverType::GrpConvFwd, problem.GetInDataType(), mode_use_tf32);
  *
  * if(RunAIHeuristics(kFwdSolverConfig, state, ctx, problem,
- *                    is_deterministic, fill_kernels, ktn_runner, ck_validator_creator))
+ *                    is_deterministic, fill_kernels, ktn_runner, ck_val_creator))
  * {
  *     return; // AI heuristics succeeded
  * }
@@ -472,15 +460,12 @@ bool RunAIHeuristics(const SolverHeuristicConfig& solver_cfg,
                 // If CK validator creator is provided, use CK's IsSupportedBySplitK
                 if constexpr(!std::is_same_v<CKValidatorCreatorFunc, std::nullptr_t>)
                 {
-                    if(ck_val_creator)
+                    auto ck_validator = ck_val_creator(problem);
+                    if(!ck_validator(state.valid_kernels[ki], sk))
                     {
-                        auto ck_validator = ck_val_creator(problem);
-                        if(!ck_validator(state.valid_kernels[ki], sk))
-                        {
-                            MIOPEN_LOG_T("CK rejected kernel+split_k: " << state.valid_kernels[ki]
-                                                                        << "+" << sk);
-                            return false;
-                        }
+                        MIOPEN_LOG_T("CK rejected kernel+split_k: " << state.valid_kernels[ki]
+                                                                    << "+" << sk);
+                        return false;
                     }
                 }
                 return true;
