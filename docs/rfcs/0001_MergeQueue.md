@@ -57,7 +57,7 @@ The mapping encodes a single rule: a PR enters the queue of every component whos
 |---------------------------------------|---------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `projects/hipdnn/**`                  | `hipdnn`, `miopen-provider`, `hipblaslt-provider`, `hip-kernel-provider`, `fusilli-provider`, `integration-tests` (all 6) | Core touches every consumer's interface. Blocks anything queued behind it; blocked by anything ahead of it in any queue.                              |
 | `dnn-providers/<provider>/**`         | `<provider>`, `integration-tests`                                                                       | A provider depends on its own queue and the integration suite. Does **not** enter `hipdnn`; it blocks core only implicitly because core enters its queue. Blocks other providers only indirectly via shared `integration-tests` membership; never directly. |
-| `dnn-providers/integration-tests/**`  | `integration-tests`, `miopen-provider`, `hipblaslt-provider`, `hip-kernel-provider`, `fusilli-provider` | Integration tests depend on every provider, and providers depend on the integration suite to stay green. Does **not** enter `hipdnn`; core does not depend on integration tests. |
+| `dnn-providers/integration-tests/**`  | `integration-tests`                                                                                    | Integration-test changes enter only their own queue. Providers already enter `integration-tests` (row above), so an in-flight provider PR serializes with integration-test PRs through the shared queue. Does **not** enter `hipdnn` or any provider queue. |
 | Anything else                         | none                                                                                                    | Project not opted in.                                                                                                                                |
 
 A PR editing both `projects/hipdnn/api/foo.h` and `dnn-providers/miopen-provider/src/bar.cpp` enters all six queues — core's row is a superset of every provider's row.
@@ -65,29 +65,26 @@ A PR editing both `projects/hipdnn/api/foo.h` and `dnn-providers/miopen-provider
 #### Membership at a glance
 
 ```
-                                       QUEUES
-                            ┌─────┬─────┬─────┬─────┬─────┬──────┐
-                            │ hip │ mio │ hbl │ hkp │ fus │ intT │
-PR touches...               │ dnn │ pen │ ast │     │     │      │
-────────────────────────────┼─────┼─────┼─────┼─────┼─────┼──────┤
-projects/hipdnn/**          │  ●  │  ●  │  ●  │  ●  │  ●  │  ●   │
-dnn-providers/miopen-…/**   │  ·  │  ●  │  ·  │  ·  │  ·  │  ●   │
-dnn-providers/hipblaslt-…   │  ·  │  ·  │  ●  │  ·  │  ·  │  ●   │
-dnn-providers/hip-kernel-…  │  ·  │  ·  │  ·  │  ●  │  ·  │  ●   │
-dnn-providers/fusilli-…     │  ·  │  ·  │  ·  │  ·  │  ●  │  ●   │
-dnn-providers/integration-… │  ·  │  ●  │  ●  │  ●  │  ●  │  ●   │
-────────────────────────────┴─────┴─────┴─────┴─────┴─────┴──────┘
+                                                       QUEUES
+                    ┌────────┬──────────┬───────────┬────────────┬──────────┬─────────────┐
+                    │        │  miopen  │ hipblaslt │ hip-kernel │ fusilli  │ integration │
+PR touches          │ hipdnn │ provider │ provider  │  provider  │ provider │    tests    │
+────────────────────┼────────┼──────────┼───────────┼────────────┼──────────┼─────────────┤
+hipdnn core         │   ●    │    ●     │     ●     │     ●      │    ●     │      ●      │
+miopen-provider     │   ·    │    ●     │     ·     │     ·      │    ·     │      ●      │
+hipblaslt-provider  │   ·    │    ·     │     ●     │     ·      │    ·     │      ●      │
+hip-kernel-provider │   ·    │    ·     │     ·     │     ●      │    ·     │      ●      │
+fusilli-provider    │   ·    │    ·     │     ·     │     ·      │    ●     │      ●      │
+integration-tests   │   ·    │    ·     │     ·     │     ·      │    ·     │      ●      │
+────────────────────┴────────┴──────────┴───────────┴────────────┴──────────┴─────────────┘
    ● = PR enters this queue     · = PR does not enter this queue
-
-   hipdnn = hipdnn (core)        hkp  = hip-kernel-provider
-   mio    = miopen-provider      fus  = fusilli-provider
-   hbl    = hipblaslt-provider   intT = integration-tests
 ```
 
-Two patterns to read off the matrix:
+Three patterns to read off the matrix:
 
-- The `hipdnn` column has exactly one mark — only core PRs ever enter the core queue. Providers and integration tests block core *implicitly*, by sitting ahead of core PRs in the queues that core also enters (every other column).
-- The `projects/hipdnn/**` row is the only fully-marked row — core touches every consumer, so a core PR is gated by every other in-flight PR in the ecosystem.
+- The `hipdnn core` row is the only fully-marked row — core touches every consumer, so a core PR is gated by every other in-flight PR in the ecosystem.
+- Each provider row has exactly two marks — its own queue and `integration-tests`. Providers serialize with each other only through the shared `integration-tests` queue.
+- The `integration-tests` row has a single mark. Integration-test PRs enter only their own queue, but every provider and core PR also enters that queue, so serialization happens naturally.
 
 #### Worked example: four PRs enqueued in order
 
@@ -97,53 +94,43 @@ PRs of four distinct types enter the queue in order — A (core), B (miopen-prov
 T₀ — all four enqueued
 
   hipdnn              │ A
-  miopen-provider     │ A → B       → D
-  hipblaslt-provider  │ A      → C  → D
-  hip-kernel-provider │ A           → D
-  fusilli-provider    │ A           → D
+  miopen-provider     │ A → B
+  hipblaslt-provider  │ A      → C
+  hip-kernel-provider │ A
+  fusilli-provider    │ A
   integration-tests   │ A → B  → C  → D
 
   A is at the head of every queue → A merges next.
 
 T₁ — after A merges
 
-  hipdnn              │ (empty)
-  miopen-provider     │ B → D
-  hipblaslt-provider  │ C → D
-  hip-kernel-provider │ D
-  fusilli-provider    │ D
+  miopen-provider     │ B
+  hipblaslt-provider  │ C
   integration-tests   │ B → C → D
 
   B is at the head of {miopen-provider, integration-tests} → B merges next.
   C is at the head of hipblaslt-provider but blocked by B in integration-tests.
-  D is blocked behind B and C.
+  D is blocked behind B and C in integration-tests.
 
 T₂ — after B merges
 
-  miopen-provider     │ D
-  hipblaslt-provider  │ C → D
-  hip-kernel-provider │ D
-  fusilli-provider    │ D
+  hipblaslt-provider  │ C
   integration-tests   │ C → D
 
   C is at the head of {hipblaslt-provider, integration-tests} → C merges next.
-  D is still blocked by C.
+  D is still blocked by C in integration-tests.
 
 T₃ — after C merges
 
-  miopen-provider     │ D
-  hipblaslt-provider  │ D
-  hip-kernel-provider │ D
-  fusilli-provider    │ D
   integration-tests   │ D
 
-  D is at the head of all five queues it belongs to → D merges.
+  D is at the head of integration-tests (its only queue) → D merges.
 ```
 
 Two takeaways:
 
-- **B and C never run in parallel** even though they touch different providers — they share `integration-tests`, so the integration suite serializes them. This is the bidirectional integration-tests ↔ providers link doing its job.
-- **If a second core PR E were enqueued at T₂**, it would join the tail of *every* queue — including the ones C and D still sit in — and would have to wait for both to clear before merging. Core is never allowed to overtake an in-flight provider or integration-tests PR.
+- **B and C never run in parallel** even though they touch different providers — they share `integration-tests`, so the integration suite serializes them. No cross-entry into each other's provider queues needed; the shared queue is sufficient.
+- **If a second core PR E were enqueued at T₂**, it would join the tail of *every* queue — including `integration-tests` where C and D still sit — and would have to wait for both to clear before merging. Core is never allowed to overtake an in-flight provider or integration-tests PR.
 
 
 ### 4.3 Opt-in
@@ -232,6 +219,7 @@ Queue state is stored entirely in PR metadata — labels and a hidden JSON comme
 - **3-minute poll** is slow at low load. Acceptable; revisit if it pinches.
 - **Head-of-line stalls.** Cross-queue blocking means a slow core PR at the front of every queue holds up everything else. Mitigated by `/dequeue` (see [§4.4](#44-pr-lifecycle)) and reviewer discipline on core PRs.
 - **Maintenance debt.** Custom in-repo Python is a maintenance cost compared to a hosted service. Accepted; revisit if the scripts grow beyond a single maintainer's head.
+- **Serialization throughput.** CI runs often take 6+ hours. Because intersecting PRs (e.g. two provider PRs sharing `integration-tests`) must merge one at a time, each waiting for a full CI cycle, a queue of *n* intersecting PRs takes roughly *n × CI time* to drain. During high-activity periods this could become a significant bottleneck. Batch merging (see [§9](#9-future-work)) is the primary mitigation; until then, reviewers should be aware that queuing order matters and core PRs at the head will block the entire ecosystem for one full CI cycle.
 - **Surprise auto-eject** when an author pushes new commits mid-queue. The eject comment must be explicit about why and how to re-enqueue.
 
 ## 8. Open Questions
