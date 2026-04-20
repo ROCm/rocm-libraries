@@ -95,7 +95,6 @@ endif()
 
 if(WIN32)
     list(APPEND __clang_cxx_compile_options
-        -Wno-ignored-attributes
         -fms-extensions
         -fms-compatibility)
 endif()
