@@ -156,10 +156,13 @@ TEST(ScaleMMATrait, ScaleSelector)
 template <typename AType,
           typename BType,
           typename CType,
+          typename ScaleAType,
+          typename ScaleBType,
           std::uint32_t WaveTileM,
           std::uint32_t WaveTileN,
           std::uint32_t WaveTileK>
-__global__ void test_scale_accum_over_k(void* a, void* b, void* c, void* out)
+__global__ void
+test_scale_accum_over_k(void* a, void* b, void* c, void* out, void* scale_A, void* scale_B)
 {
     using Pipeline = ScaleMmaPipeline<AType, BType, CType, WaveTileM, WaveTileN, WaveTileK>;
 
@@ -177,8 +180,11 @@ __global__ void test_scale_accum_over_k(void* a, void* b, void* c, void* out)
     // Accumulate input AxB over WaveTileK/FragK iterations
     for(std::uint32_t i = 0; i < kIters; ++i)
     {
-        result = Pipeline::exec(
-            *reinterpret_cast<AVecType*>(a), *reinterpret_cast<BVecType*>(b), result);
+        result = Pipeline::exec(*reinterpret_cast<AVecType*>(a),
+                                *reinterpret_cast<BVecType*>(b),
+                                result,
+                                *reinterpret_cast<ScaleAType*>(scale_A),
+                                *reinterpret_cast<ScaleBType*>(scale_B));
     }
 
     *reinterpret_cast<CVecType*>(out) = result;
@@ -199,16 +205,30 @@ void MmaSelector_Scale_Real_impl()
         bool isSupportedMfma = (currentArchId == amdgcn_target_id::GFX950);
         return ((currentArchId == amdgcn_target_id::HOST) || !(isSupportedWmma || isSupportedMfma));
     };
-    const std::function<fp32_t(std::uint32_t)> validator = [](std::uint32_t fragK) {
-        return static_cast<fp32_t>(fragK);
-    };
-    const auto kernel = [](std::uint32_t waveSize, void* a, void* b, void* c, void* out) {
+    const std::function<fp32_t(
+        std::uint32_t, typename TestType::ScaleAType, typename TestType::ScaleBType)>
+        validator =
+            [](std::uint32_t fragK, TestType::ScaleAType scale_A, TestType::ScaleBType scale_B) {
+                fp32_t actual_scale_A = std::powf(2.0f, scale_A - 127.0f);
+                fp32_t actual_scale_B = std::powf(2.0f, scale_B - 127.0f);
+                return static_cast<fp32_t>(fragK) * actual_scale_A * actual_scale_B;
+            };
+    const auto kernel = [](std::uint32_t waveSize,
+                           void* a,
+                           void* b,
+                           void* c,
+                           void* out,
+                           void* scale_A,
+                           void* scale_B) {
         test_scale_accum_over_k<typename TestType::AType,
                                 typename TestType::BType,
                                 typename TestType::CType,
+                                typename TestType::ScaleAType,
+                                typename TestType::ScaleBType,
                                 TestType::WaveTileM,
                                 TestType::WaveTileN,
-                                TestType::WaveTileK><<<1, waveSize>>>(a, b, c, out);
+                                TestType::WaveTileK>
+            <<<1, waveSize>>>(a, b, c, out, scale_A, scale_B);
     };
     test.test_pipeline(should_skip, kernel, validator);
 }
