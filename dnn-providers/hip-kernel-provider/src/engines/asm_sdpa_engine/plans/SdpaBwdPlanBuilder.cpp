@@ -77,9 +77,6 @@ bool SdpaBwdPlanBuilder::isApplicable(
     int64_t dkUid = attrs.dk_tensor_uid();
     int64_t dvUid = attrs.dv_tensor_uid();
 
-    // STATS (LSE) tensor is required for backward
-    HIP_KERNEL_RETURN_FALSE_IF(statsUid == 0, "stats (LSE) tensor is required for backward");
-
     // Q tensor: BF16, rank-4, head dim 128
     auto* qTensor = tensorMap.at(qUid);
     HIP_KERNEL_RETURN_FALSE_IF(qTensor->data_type() != DataType::BFLOAT16,
