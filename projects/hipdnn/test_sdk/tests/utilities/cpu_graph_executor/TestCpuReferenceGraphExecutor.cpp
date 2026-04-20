@@ -9,10 +9,19 @@
 
 #include "BatchnormGraphUtils.hpp"
 #include "BatchnormTensorBundles.hpp"
+#include "BlockScaleDequantizeGraphUtils.hpp"
 #include "ConvolutionGraphUtils.hpp"
+#include "LayernormGraphUtils.hpp"
+#include "LayernormTensorBundles.hpp"
 #include "MatmulGraphUtils.hpp"
 #include "PointwiseGraphUtils.hpp"
 #include "PointwiseTensorBundles.hpp"
+#include "RMSNormGraphUtils.hpp"
+#include "RMSNormTensorBundles.hpp"
+#ifdef HIPDNN_ENABLE_SDPA
+#include "SdpaGraphUtils.hpp"
+#include "SdpaTensorBundles.hpp"
+#endif
 
 #include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_data_sdk/utilities/ShallowTensor.hpp>
@@ -239,6 +248,122 @@ public:
         CpuReferenceGraphExecutor().execute(
             serializedGraph.data(), serializedGraph.size(), variantPack);
     }
+
+    static void
+        runLayernormTest(hipdnn_flatbuffers_sdk::data_objects::DataType inputDataType,
+                         hipdnn_flatbuffers_sdk::data_objects::DataType scaleBiasDataType,
+                         hipdnn_flatbuffers_sdk::data_objects::DataType meanInvVarianceDataType,
+                         hipdnn_flatbuffers_sdk::data_objects::DataType computeDataType)
+    {
+        const unsigned int seed = getGlobalTestSeed();
+        const std::vector<int64_t> dims = {1, 3, 14, 14};
+
+        auto graph = buildLayernormFpropGraph(inputDataType,
+                                              scaleBiasDataType,
+                                              meanInvVarianceDataType,
+                                              computeDataType,
+                                              dims,
+                                              2, // normalize over last 2 dims
+                                              TensorLayout::NCHW);
+
+        auto result = graph->validate();
+        ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
+
+        auto [serializedGraph, serErr] = graph->to_binary();
+        ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+        const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());
+
+        LayernormFpropTensorBundle tensorBundle(
+            graphWrapper.getNodeWrapper(0), graphWrapper.getTensorMap(), seed);
+
+        auto variantPack = tensorBundle.toHostVariantPack();
+
+        CpuReferenceGraphExecutor().execute(
+            serializedGraph.data(), serializedGraph.size(), variantPack);
+    }
+
+    static void runRMSNormTest(hipdnn_flatbuffers_sdk::data_objects::DataType inputDataType,
+                               hipdnn_flatbuffers_sdk::data_objects::DataType scaleDataType,
+                               hipdnn_flatbuffers_sdk::data_objects::DataType computeDataType)
+    {
+        const unsigned int seed = getGlobalTestSeed();
+        const std::vector<int64_t> dims = {1, 3, 14, 14};
+
+        auto graph = buildRMSNormFwdGraph(
+            inputDataType, scaleDataType, computeDataType, dims, TensorLayout::NCHW);
+
+        auto result = graph->validate();
+        ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
+
+        auto [serializedGraph, serErr] = graph->to_binary();
+        ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+        const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());
+
+        RMSNormFwdTensorBundle tensorBundle(
+            graphWrapper.getNodeWrapper(0), graphWrapper.getTensorMap(), seed);
+
+        auto variantPack = tensorBundle.toHostVariantPack();
+
+        CpuReferenceGraphExecutor().execute(
+            serializedGraph.data(), serializedGraph.size(), variantPack);
+    }
+
+#ifdef HIPDNN_ENABLE_SDPA
+    template <typename InputType>
+    static void runSdpaTest(hipdnn_flatbuffers_sdk::data_objects::DataType dataType)
+    {
+        // Q/K/V: [batch=1, heads=2, seq=4, head_dim=8]
+        const std::vector<int64_t> qDims = {1, 2, 4, 8};
+        const std::vector<int64_t> kDims = {1, 2, 4, 8};
+        const std::vector<int64_t> vDims = {1, 2, 4, 8};
+
+        SdpaFwdTensorBundle<InputType> tensorBundle(qDims, kDims, vDims);
+
+        auto graphTuple = buildSdpaFwdGraph(tensorBundle, dataType);
+
+        auto& graph = std::get<0>(graphTuple);
+        auto& variantPack = std::get<1>(graphTuple);
+
+        auto result = graph->validate();
+        ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
+
+        auto [serializedGraph, serErr] = graph->to_binary();
+        ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+
+        CpuReferenceGraphExecutor().execute(
+            serializedGraph.data(), serializedGraph.size(), variantPack);
+    }
+#endif
+
+    template <typename XType, typename ScaleType>
+    static void
+        runBlockScaleDequantizeTest(hipdnn_flatbuffers_sdk::data_objects::DataType xDataType,
+                                    hipdnn_flatbuffers_sdk::data_objects::DataType scaleDataType,
+                                    hipdnn_flatbuffers_sdk::data_objects::DataType yDataType,
+                                    hipdnn_flatbuffers_sdk::data_objects::DataType computeDataType)
+    {
+        const std::vector<int64_t> xDims = {2, 32, 32, 64};
+        const std::vector<int32_t> blockSize = {32};
+        // scale dims: ceil(64/32) = 2 for the blocked trailing dim
+        const std::vector<int64_t> scaleDims = {2, 32, 32, 2};
+
+        BlockScaleDequantizeTensorBundle<XType, ScaleType> tensorBundle(xDims, scaleDims);
+
+        auto graphTuple = buildBlockScaleDequantizeGraph(
+            tensorBundle, xDataType, scaleDataType, yDataType, computeDataType, blockSize);
+
+        auto& graph = std::get<0>(graphTuple);
+        auto& variantPack = std::get<1>(graphTuple);
+
+        auto result = graph->validate();
+        ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
+
+        auto [serializedGraph2, serErr2] = graph->to_binary();
+        ASSERT_TRUE(serErr2.is_good()) << serErr2.get_message();
+
+        CpuReferenceGraphExecutor().execute(
+            serializedGraph2.data(), serializedGraph2.size(), variantPack);
+    }
 };
 
 TEST(TestCpuReferenceGraphExecutor, BatchnormFwdInferenceAllFloats)
@@ -386,3 +511,65 @@ TEST(TestCpuReferenceGraphExecutor, PointwiseBinaryAdd)
     CpuReferenceGraphExecutor().execute(
         serializedGraph.data(), serializedGraph.size(), variantPack);
 }
+
+TEST(TestCpuReferenceGraphExecutor, BlockScaleDequantizeAllFloats)
+{
+    TestCpuReferenceGraphExecutor::runBlockScaleDequantizeTest<float, float>(
+        DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT);
+}
+TEST(TestCpuReferenceGraphExecutor, BlockScaleDequantizeHalfInputFloatScale)
+{
+    TestCpuReferenceGraphExecutor::runBlockScaleDequantizeTest<half, float>(
+        DataType::HALF, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT);
+}
+TEST(TestCpuReferenceGraphExecutor, BlockScaleDequantizeBFloat16InputFloatScale)
+{
+    TestCpuReferenceGraphExecutor::runBlockScaleDequantizeTest<bfloat16, float>(
+        DataType::BFLOAT16, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT);
+}
+
+TEST(TestCpuReferenceGraphExecutor, LayernormAllFloats)
+{
+    TestCpuReferenceGraphExecutor::runLayernormTest(
+        DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT);
+}
+TEST(TestCpuReferenceGraphExecutor, LayernormAllHalfs)
+{
+    TestCpuReferenceGraphExecutor::runLayernormTest(
+        DataType::HALF, DataType::HALF, DataType::HALF, DataType::HALF);
+}
+TEST(TestCpuReferenceGraphExecutor, LayernormAllBFloat16)
+{
+    TestCpuReferenceGraphExecutor::runLayernormTest(
+        DataType::BFLOAT16, DataType::BFLOAT16, DataType::BFLOAT16, DataType::BFLOAT16);
+}
+
+TEST(TestCpuReferenceGraphExecutor, RMSNormAllFloats)
+{
+    TestCpuReferenceGraphExecutor::runRMSNormTest(
+        DataType::FLOAT, DataType::FLOAT, DataType::FLOAT);
+}
+TEST(TestCpuReferenceGraphExecutor, RMSNormAllHalfs)
+{
+    TestCpuReferenceGraphExecutor::runRMSNormTest(DataType::HALF, DataType::HALF, DataType::HALF);
+}
+TEST(TestCpuReferenceGraphExecutor, RMSNormAllBFloat16)
+{
+    TestCpuReferenceGraphExecutor::runRMSNormTest(
+        DataType::BFLOAT16, DataType::BFLOAT16, DataType::BFLOAT16);
+}
+
+#ifdef HIPDNN_ENABLE_SDPA
+TEST(TestCpuReferenceGraphExecutor, SdpaAllFloats)
+{
+    TestCpuReferenceGraphExecutor::runSdpaTest<float>(DataType::FLOAT);
+}
+TEST(TestCpuReferenceGraphExecutor, SdpaAllHalfs)
+{
+    TestCpuReferenceGraphExecutor::runSdpaTest<half>(DataType::HALF);
+}
+TEST(TestCpuReferenceGraphExecutor, SdpaAllBFloat16)
+{
+    TestCpuReferenceGraphExecutor::runSdpaTest<bfloat16>(DataType::BFLOAT16);
+}
+#endif
