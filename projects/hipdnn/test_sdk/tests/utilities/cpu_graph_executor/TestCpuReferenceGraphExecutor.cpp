@@ -14,32 +14,33 @@
 #include "PointwiseGraphUtils.hpp"
 #include "PointwiseTensorBundles.hpp"
 
-#include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_data_sdk/utilities/ShallowTensor.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_data_sdk/utilities/TensorView.hpp>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/Seeds.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
 
 using namespace hipdnn_test_sdk::utilities;
 using namespace hipdnn_test_sdk::detail;
-using namespace hipdnn_data_sdk::data_objects;
+using namespace hipdnn_flatbuffers_sdk::data_objects;
 using namespace hipdnn_data_sdk::utilities;
 using namespace ::testing;
 using namespace hipdnn_sdk_test_utils;
-using namespace hipdnn_data_sdk::flatbuffer_utilities;
+using namespace hipdnn_flatbuffers_sdk::flatbuffer_utilities;
 using hipdnn_data_sdk::types::bfloat16;
 using hipdnn_data_sdk::types::half;
 
 class TestCpuReferenceGraphExecutor
 {
 public:
-    static void runBatchnormFwdTest(hipdnn_data_sdk::data_objects::DataType inputDataType,
-                                    hipdnn_data_sdk::data_objects::DataType scaleBiasDataType,
-                                    hipdnn_data_sdk::data_objects::DataType meanVarianceDataType,
-                                    hipdnn_data_sdk::data_objects::DataType computeDataType)
+    static void
+        runBatchnormFwdTest(hipdnn_flatbuffers_sdk::data_objects::DataType inputDataType,
+                            hipdnn_flatbuffers_sdk::data_objects::DataType scaleBiasDataType,
+                            hipdnn_flatbuffers_sdk::data_objects::DataType meanVarianceDataType,
+                            hipdnn_flatbuffers_sdk::data_objects::DataType computeDataType)
     {
         const unsigned int seed = getGlobalTestSeed();
 
@@ -55,8 +56,9 @@ public:
         auto result = graph->validate();
         ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
 
-        auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
-        const GraphWrapper graphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
+        auto [serializedGraph, serErr] = graph->to_binary();
+        ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+        const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());
 
         BatchnormFwdTensorBundle tensorBundle(
             graphWrapper.getNodeWrapper(0), graphWrapper.getTensorMap(), seed);
@@ -64,7 +66,7 @@ public:
         auto variantPack = tensorBundle.toHostVariantPack();
 
         CpuReferenceGraphExecutor().execute(
-            flatbufferGraph.data(), flatbufferGraph.size(), variantPack);
+            serializedGraph.data(), serializedGraph.size(), variantPack);
     }
 
     template <typename InputType,
@@ -91,10 +93,11 @@ public:
         auto result = graph->validate();
         ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
 
-        auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
+        auto [serializedGraph, serErr] = graph->to_binary();
+        ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
 
         CpuReferenceGraphExecutor().execute(
-            flatbufferGraph.data(), flatbufferGraph.size(), variantPack);
+            serializedGraph.data(), serializedGraph.size(), variantPack);
     }
 
     template <typename InputType,
@@ -125,15 +128,17 @@ public:
         auto result = graph->validate();
         ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
 
-        auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
+        auto [serializedGraph, serErr] = graph->to_binary();
+        ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
 
         CpuReferenceGraphExecutor().execute(
-            flatbufferGraph.data(), flatbufferGraph.size(), variantPack);
+            serializedGraph.data(), serializedGraph.size(), variantPack);
     }
 
     template <typename InputType, typename AccumulatorType>
-    static void runConvolutionFwdTest(hipdnn_data_sdk::data_objects::DataType inputDataType,
-                                      hipdnn_data_sdk::data_objects::DataType accumulatorDataType)
+    static void
+        runConvolutionFwdTest(hipdnn_flatbuffers_sdk::data_objects::DataType inputDataType,
+                              hipdnn_flatbuffers_sdk::data_objects::DataType accumulatorDataType)
     {
         const std::vector<int64_t> xDims = {1, 1, 2, 2};
         const std::vector<int64_t> wDims = {1, 1, 1, 1};
@@ -150,15 +155,17 @@ public:
         auto result = graph->validate();
         ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
 
-        auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
+        auto [serializedGraph, serErr] = graph->to_binary();
+        ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
 
         CpuReferenceGraphExecutor().execute(
-            flatbufferGraph.data(), flatbufferGraph.size(), variantPack);
+            serializedGraph.data(), serializedGraph.size(), variantPack);
     }
 
     template <typename InputType, typename AccumulatorType>
-    static void runConvolutionBwdTest(hipdnn_data_sdk::data_objects::DataType inputDataType,
-                                      hipdnn_data_sdk::data_objects::DataType accumulatorDataType)
+    static void
+        runConvolutionBwdTest(hipdnn_flatbuffers_sdk::data_objects::DataType inputDataType,
+                              hipdnn_flatbuffers_sdk::data_objects::DataType accumulatorDataType)
     {
         const std::vector<int64_t> dxDims = {1, 1, 2, 2};
         const std::vector<int64_t> wDims = {1, 1, 1, 1};
@@ -175,15 +182,17 @@ public:
         auto result = graph->validate();
         ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
 
-        auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
+        auto [serializedGraph, serErr] = graph->to_binary();
+        ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
 
         CpuReferenceGraphExecutor().execute(
-            flatbufferGraph.data(), flatbufferGraph.size(), variantPack);
+            serializedGraph.data(), serializedGraph.size(), variantPack);
     }
 
     template <typename InputType, typename AccumulatorType>
-    static void runConvolutionWrwTest(hipdnn_data_sdk::data_objects::DataType inputDataType,
-                                      hipdnn_data_sdk::data_objects::DataType accumulatorDataType)
+    static void
+        runConvolutionWrwTest(hipdnn_flatbuffers_sdk::data_objects::DataType inputDataType,
+                              hipdnn_flatbuffers_sdk::data_objects::DataType accumulatorDataType)
     {
         const std::vector<int64_t> xDims = {1, 1, 2, 2};
         const std::vector<int64_t> dwDims = {1, 1, 1, 1};
@@ -200,15 +209,16 @@ public:
         auto result = graph->validate();
         ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
 
-        auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
+        auto [serializedGraph, serErr] = graph->to_binary();
+        ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
 
         CpuReferenceGraphExecutor().execute(
-            flatbufferGraph.data(), flatbufferGraph.size(), variantPack);
+            serializedGraph.data(), serializedGraph.size(), variantPack);
     }
 
     template <typename inputType, typename ComputeType>
-    static void runMatmulTest(hipdnn_data_sdk::data_objects::DataType inputDataType,
-                              hipdnn_data_sdk::data_objects::DataType computeDataType)
+    static void runMatmulTest(hipdnn_flatbuffers_sdk::data_objects::DataType inputDataType,
+                              hipdnn_flatbuffers_sdk::data_objects::DataType computeDataType)
     {
         const std::vector<int64_t> aDims = {2, 5, 3};
         const std::vector<int64_t> bDims = {2, 3, 4};
@@ -223,10 +233,11 @@ public:
         auto result = graph->validate();
         ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
 
-        auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
+        auto [serializedGraph, serErr] = graph->to_binary();
+        ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
 
         CpuReferenceGraphExecutor().execute(
-            flatbufferGraph.data(), flatbufferGraph.size(), variantPack);
+            serializedGraph.data(), serializedGraph.size(), variantPack);
     }
 };
 
@@ -370,7 +381,8 @@ TEST(TestCpuReferenceGraphExecutor, PointwiseBinaryAdd)
                                     1,
                                     TensorLayout::NCHW);
 
-    auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
     CpuReferenceGraphExecutor().execute(
-        flatbufferGraph.data(), flatbufferGraph.size(), variantPack);
+        serializedGraph.data(), serializedGraph.size(), variantPack);
 }

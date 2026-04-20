@@ -10,16 +10,20 @@
 #include "hipdnn_backend.h"
 
 #include <gtest/gtest.h>
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
-#include <hipdnn_data_sdk/data_objects/pointwise_attributes_generated.h>
-#include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/pointwise_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
+#include <hipdnn_test_sdk/constants/PointwiseConstants.hpp>
+#include <hipdnn_test_sdk/utilities/ToVec.hpp>
 
 #include <memory>
 #include <optional>
 #include <vector>
 
 using namespace hipdnn_backend;
-using namespace hipdnn_data_sdk::data_objects;
+using namespace hipdnn_flatbuffers_sdk::data_objects;
+using hipdnn_tests::toVec;
+using namespace hipdnn_tests::constants;
 
 // =============================================================================
 // PointwiseOperationDescriptor::fromNode() Tests
@@ -33,42 +37,42 @@ protected:
     void SetUp() override
     {
         TensorAttributesT in0Attrs;
-        in0Attrs.uid = 40;
+        in0Attrs.uid = K_PW_TENSOR_IN0_UID;
         in0Attrs.data_type = DataType::FLOAT;
-        in0Attrs.dims = {1, 64, 32, 32};
-        in0Attrs.strides = {65536, 1024, 32, 1};
+        in0Attrs.dims = toVec(K_PW_TENSOR_DIMS);
+        in0Attrs.strides = toVec(K_PW_TENSOR_STRIDES);
 
-        _tensorMap[40] = TensorDescriptor::fromFlatBuffer(in0Attrs);
+        _tensorMap[K_PW_TENSOR_IN0_UID] = TensorDescriptor::fromFlatBuffer(in0Attrs);
         TensorAttributesT out0Attrs;
-        out0Attrs.uid = 41;
+        out0Attrs.uid = K_PW_TENSOR_OUT0_UID;
         out0Attrs.data_type = DataType::FLOAT;
-        out0Attrs.dims = {1, 64, 32, 32};
-        out0Attrs.strides = {65536, 1024, 32, 1};
+        out0Attrs.dims = toVec(K_PW_TENSOR_DIMS);
+        out0Attrs.strides = toVec(K_PW_TENSOR_STRIDES);
 
-        _tensorMap[41] = TensorDescriptor::fromFlatBuffer(out0Attrs);
+        _tensorMap[K_PW_TENSOR_OUT0_UID] = TensorDescriptor::fromFlatBuffer(out0Attrs);
         TensorAttributesT in1Attrs;
-        in1Attrs.uid = 3;
+        in1Attrs.uid = K_PW_TENSOR_IN1_UID;
         in1Attrs.data_type = DataType::FLOAT;
         in1Attrs.dims = {1};
         in1Attrs.strides = {1};
 
-        _tensorMap[3] = TensorDescriptor::fromFlatBuffer(in1Attrs);
+        _tensorMap[K_PW_TENSOR_IN1_UID] = TensorDescriptor::fromFlatBuffer(in1Attrs);
         TensorAttributesT in2Attrs;
-        in2Attrs.uid = 4;
+        in2Attrs.uid = K_PW_TENSOR_IN2_UID;
         in2Attrs.data_type = DataType::FLOAT;
         in2Attrs.dims = {1};
         in2Attrs.strides = {1};
 
-        _tensorMap[4] = TensorDescriptor::fromFlatBuffer(in2Attrs);
+        _tensorMap[K_PW_TENSOR_IN2_UID] = TensorDescriptor::fromFlatBuffer(in2Attrs);
     }
 
-    static hipdnn_data_sdk::data_objects::PointwiseAttributesT createStandardPointwiseAttrs()
+    static hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributesT createStandardPointwiseAttrs()
     {
-        hipdnn_data_sdk::data_objects::PointwiseAttributesT attrs;
-        attrs.in_0_tensor_uid = 40;
-        attrs.out_0_tensor_uid = 41;
-        attrs.in_1_tensor_uid = 3;
-        attrs.in_2_tensor_uid = 4;
+        hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributesT attrs;
+        attrs.in_0_tensor_uid = K_PW_TENSOR_IN0_UID;
+        attrs.out_0_tensor_uid = K_PW_TENSOR_OUT0_UID;
+        attrs.in_1_tensor_uid = K_PW_TENSOR_IN1_UID;
+        attrs.in_2_tensor_uid = K_PW_TENSOR_IN2_UID;
         attrs.operation = PointwiseMode::ADD;
         return attrs;
     }
@@ -90,7 +94,7 @@ TEST_F(TestPointwiseOperationFromNode, CreatesValidFinalizedDescriptor)
     ASSERT_NE(desc, nullptr);
     ASSERT_TRUE(desc->isFinalized());
     ASSERT_EQ(desc->getType(), HIPDNN_BACKEND_OPERATION_POINTWISE_DESCRIPTOR);
-    EXPECT_EQ(desc->getData().in_0_tensor_uid, 40);
+    EXPECT_EQ(desc->getData().in_0_tensor_uid, K_PW_TENSOR_IN0_UID);
 }
 TEST_F(TestPointwiseOperationFromNode, NodeFactoryDelegatesCorrectly)
 {
@@ -111,18 +115,18 @@ TEST_F(TestPointwiseOperationFromNode, NodeFactoryDelegatesCorrectly)
     ASSERT_TRUE(desc->isFinalized());
 
     // Verify all attributes are correctly populated via the delegated path
-    EXPECT_EQ(desc->getData().in_0_tensor_uid, 40);
-    EXPECT_EQ(desc->getData().out_0_tensor_uid, 41);
-    EXPECT_EQ(desc->getData().in_1_tensor_uid, 3);
-    EXPECT_EQ(desc->getData().in_2_tensor_uid, 4);
+    EXPECT_EQ(desc->getData().in_0_tensor_uid, K_PW_TENSOR_IN0_UID);
+    EXPECT_EQ(desc->getData().out_0_tensor_uid, K_PW_TENSOR_OUT0_UID);
+    EXPECT_EQ(desc->getData().in_1_tensor_uid, K_PW_TENSOR_IN1_UID);
+    EXPECT_EQ(desc->getData().in_2_tensor_uid, K_PW_TENSOR_IN2_UID);
     EXPECT_EQ(desc->getData().operation, PointwiseMode::ADD);
     EXPECT_EQ(desc->getComputeDataType(), DataType::FLOAT);
-    EXPECT_EQ(desc->getIn0Desc()->getData().uid, 40);
-    EXPECT_EQ(desc->getOut0Desc()->getData().uid, 41);
+    EXPECT_EQ(desc->getIn0Desc()->getData().uid, K_PW_TENSOR_IN0_UID);
+    EXPECT_EQ(desc->getOut0Desc()->getData().uid, K_PW_TENSOR_OUT0_UID);
     ASSERT_NE(desc->getIn1Desc(), nullptr);
-    EXPECT_EQ(desc->getIn1Desc()->getData().uid, 3);
+    EXPECT_EQ(desc->getIn1Desc()->getData().uid, K_PW_TENSOR_IN1_UID);
     ASSERT_NE(desc->getIn2Desc(), nullptr);
-    EXPECT_EQ(desc->getIn2Desc()->getData().uid, 4);
+    EXPECT_EQ(desc->getIn2Desc()->getData().uid, K_PW_TENSOR_IN2_UID);
 }
 
 TEST_F(TestPointwiseOperationFromNode, PreservesComputeDataType)
@@ -150,13 +154,13 @@ TEST_F(TestPointwiseOperationFromNode, SetsTensorReferences)
     auto desc = PointwiseOperationDescriptor::fromNode(node, _tensorMap);
 
     ASSERT_NE(desc->getIn0Desc(), nullptr);
-    EXPECT_EQ(desc->getIn0Desc()->getData().uid, 40);
+    EXPECT_EQ(desc->getIn0Desc()->getData().uid, K_PW_TENSOR_IN0_UID);
     ASSERT_NE(desc->getOut0Desc(), nullptr);
-    EXPECT_EQ(desc->getOut0Desc()->getData().uid, 41);
+    EXPECT_EQ(desc->getOut0Desc()->getData().uid, K_PW_TENSOR_OUT0_UID);
     ASSERT_NE(desc->getIn1Desc(), nullptr);
-    EXPECT_EQ(desc->getIn1Desc()->getData().uid, 3);
+    EXPECT_EQ(desc->getIn1Desc()->getData().uid, K_PW_TENSOR_IN1_UID);
     ASSERT_NE(desc->getIn2Desc(), nullptr);
-    EXPECT_EQ(desc->getIn2Desc()->getData().uid, 4);
+    EXPECT_EQ(desc->getIn2Desc()->getData().uid, K_PW_TENSOR_IN2_UID);
 }
 
 TEST_F(TestPointwiseOperationFromNode, TensorReferencesMatchTensorMap)
@@ -164,15 +168,15 @@ TEST_F(TestPointwiseOperationFromNode, TensorReferencesMatchTensorMap)
     auto node = createStandardNode();
     auto desc = PointwiseOperationDescriptor::fromNode(node, _tensorMap);
 
-    EXPECT_EQ(desc->getIn0Desc(), _tensorMap[40]);
-    EXPECT_EQ(desc->getOut0Desc(), _tensorMap[41]);
-    EXPECT_EQ(desc->getIn1Desc(), _tensorMap[3]);
-    EXPECT_EQ(desc->getIn2Desc(), _tensorMap[4]);
+    EXPECT_EQ(desc->getIn0Desc(), _tensorMap[K_PW_TENSOR_IN0_UID]);
+    EXPECT_EQ(desc->getOut0Desc(), _tensorMap[K_PW_TENSOR_OUT0_UID]);
+    EXPECT_EQ(desc->getIn1Desc(), _tensorMap[K_PW_TENSOR_IN1_UID]);
+    EXPECT_EQ(desc->getIn2Desc(), _tensorMap[K_PW_TENSOR_IN2_UID]);
 }
 
 TEST_F(TestPointwiseOperationFromNode, FailsWithMissingIn0Tensor)
 {
-    _tensorMap.erase(40);
+    _tensorMap.erase(K_PW_TENSOR_IN0_UID);
     auto node = createStandardNode();
 
     ASSERT_THROW_HIPDNN_STATUS(PointwiseOperationDescriptor::fromNode(node, _tensorMap),
@@ -181,7 +185,7 @@ TEST_F(TestPointwiseOperationFromNode, FailsWithMissingIn0Tensor)
 
 TEST_F(TestPointwiseOperationFromNode, FailsWithMissingOut0Tensor)
 {
-    _tensorMap.erase(41);
+    _tensorMap.erase(K_PW_TENSOR_OUT0_UID);
     auto node = createStandardNode();
 
     ASSERT_THROW_HIPDNN_STATUS(PointwiseOperationDescriptor::fromNode(node, _tensorMap),
@@ -195,10 +199,10 @@ TEST_F(TestPointwiseOperationFromNode, GetTensorDescriptorsReturnsAllTensors)
 
     auto tensors = desc->getTensorDescriptors();
     ASSERT_EQ(tensors.size(), 4);
-    EXPECT_EQ(tensors[0]->getData().uid, 40);
-    EXPECT_EQ(tensors[1]->getData().uid, 41);
-    EXPECT_EQ(tensors[2]->getData().uid, 3);
-    EXPECT_EQ(tensors[3]->getData().uid, 4);
+    EXPECT_EQ(tensors[0]->getData().uid, K_PW_TENSOR_IN0_UID);
+    EXPECT_EQ(tensors[1]->getData().uid, K_PW_TENSOR_OUT0_UID);
+    EXPECT_EQ(tensors[2]->getData().uid, K_PW_TENSOR_IN1_UID);
+    EXPECT_EQ(tensors[3]->getData().uid, K_PW_TENSOR_IN2_UID);
 }
 
 TEST_F(TestPointwiseOperationFromNode, BuildNodeRoundTrip)
@@ -213,10 +217,10 @@ TEST_F(TestPointwiseOperationFromNode, BuildNodeRoundTrip)
 
     const auto* rebuiltAttrs = rebuiltNode->attributes.AsPointwiseAttributes();
     ASSERT_NE(rebuiltAttrs, nullptr);
-    EXPECT_EQ(rebuiltAttrs->in_0_tensor_uid, 40);
-    EXPECT_EQ(rebuiltAttrs->out_0_tensor_uid, 41);
-    EXPECT_EQ(rebuiltAttrs->in_1_tensor_uid, 3);
-    EXPECT_EQ(rebuiltAttrs->in_2_tensor_uid, 4);
+    EXPECT_EQ(rebuiltAttrs->in_0_tensor_uid, K_PW_TENSOR_IN0_UID);
+    EXPECT_EQ(rebuiltAttrs->out_0_tensor_uid, K_PW_TENSOR_OUT0_UID);
+    EXPECT_EQ(rebuiltAttrs->in_1_tensor_uid, K_PW_TENSOR_IN1_UID);
+    EXPECT_EQ(rebuiltAttrs->in_2_tensor_uid, K_PW_TENSOR_IN2_UID);
     EXPECT_EQ(rebuiltAttrs->operation, PointwiseMode::ADD);
 }
 
@@ -253,7 +257,7 @@ TEST_F(TestPointwiseOperationFromNode, GetAttributeWorksAfterFromNode)
     int64_t in0UidCount = 0;
     in0Scoped.get()->getAttribute(
         HIPDNN_ATTR_TENSOR_UNIQUE_ID, HIPDNN_TYPE_INT64, 1, &in0UidCount, &in0Uid);
-    EXPECT_EQ(in0Uid, 40);
+    EXPECT_EQ(in0Uid, K_PW_TENSOR_IN0_UID);
 
     // Verify out_0 tensor
     hipdnn_backend::ScopedDescriptor out0Scoped;
@@ -269,7 +273,7 @@ TEST_F(TestPointwiseOperationFromNode, GetAttributeWorksAfterFromNode)
     int64_t out0UidCount = 0;
     out0Scoped.get()->getAttribute(
         HIPDNN_ATTR_TENSOR_UNIQUE_ID, HIPDNN_TYPE_INT64, 1, &out0UidCount, &out0Uid);
-    EXPECT_EQ(out0Uid, 41);
+    EXPECT_EQ(out0Uid, K_PW_TENSOR_OUT0_UID);
 
     // Verify in_1 tensor (optional, set in standard fixture)
     hipdnn_backend::ScopedDescriptor in1Scoped;
@@ -285,7 +289,7 @@ TEST_F(TestPointwiseOperationFromNode, GetAttributeWorksAfterFromNode)
     int64_t in1UidCount = 0;
     in1Scoped.get()->getAttribute(
         HIPDNN_ATTR_TENSOR_UNIQUE_ID, HIPDNN_TYPE_INT64, 1, &in1UidCount, &in1Uid);
-    EXPECT_EQ(in1Uid, 3);
+    EXPECT_EQ(in1Uid, K_PW_TENSOR_IN1_UID);
 
     // Verify in_2 tensor (optional, set in standard fixture)
     hipdnn_backend::ScopedDescriptor in2Scoped;
@@ -301,15 +305,15 @@ TEST_F(TestPointwiseOperationFromNode, GetAttributeWorksAfterFromNode)
     int64_t in2UidCount = 0;
     in2Scoped.get()->getAttribute(
         HIPDNN_ATTR_TENSOR_UNIQUE_ID, HIPDNN_TYPE_INT64, 1, &in2UidCount, &in2Uid);
-    EXPECT_EQ(in2Uid, 4);
+    EXPECT_EQ(in2Uid, K_PW_TENSOR_IN2_UID);
 
     // Verify operation type
-    hipdnnOperationType_t opType = HIPDNN_OPERATION_TYPE_NOT_SET;
+    hipdnnOperationType_ext_t opType = HIPDNN_OPERATION_TYPE_NOT_SET_EXT;
     int64_t opTypeCount = 0;
     desc->getAttribute(
         HIPDNN_ATTR_OPERATION_TYPE_EXT, HIPDNN_TYPE_OPERATION_TYPE_EXT, 1, &opTypeCount, &opType);
     ASSERT_EQ(opTypeCount, 1);
-    EXPECT_EQ(opType, HIPDNN_OPERATION_TYPE_POINTWISE);
+    EXPECT_EQ(opType, HIPDNN_OPERATION_TYPE_POINTWISE_EXT);
 }
 
 TEST_F(TestPointwiseOperationFromNode, NamePreservedFromNode)
@@ -367,16 +371,16 @@ TEST_F(TestPointwiseOperationFromNode, SucceedsWithOnlyRequiredTensors)
     ASSERT_NE(desc, nullptr);
     ASSERT_TRUE(desc->isFinalized());
     ASSERT_NE(desc->getIn0Desc(), nullptr);
-    EXPECT_EQ(desc->getIn0Desc()->getData().uid, 40);
+    EXPECT_EQ(desc->getIn0Desc()->getData().uid, K_PW_TENSOR_IN0_UID);
     ASSERT_NE(desc->getOut0Desc(), nullptr);
-    EXPECT_EQ(desc->getOut0Desc()->getData().uid, 41);
+    EXPECT_EQ(desc->getOut0Desc()->getData().uid, K_PW_TENSOR_OUT0_UID);
     EXPECT_EQ(desc->getIn1Desc(), nullptr);
     EXPECT_EQ(desc->getIn2Desc(), nullptr);
 }
 
 TEST_F(TestPointwiseOperationFromNode, FailsWhenOptionalIn1UidSetButTensorMissing)
 {
-    _tensorMap.erase(3);
+    _tensorMap.erase(K_PW_TENSOR_IN1_UID);
     auto node = createStandardNode();
 
     ASSERT_THROW_HIPDNN_STATUS(PointwiseOperationDescriptor::fromNode(node, _tensorMap),
@@ -385,7 +389,7 @@ TEST_F(TestPointwiseOperationFromNode, FailsWhenOptionalIn1UidSetButTensorMissin
 
 TEST_F(TestPointwiseOperationFromNode, FailsWhenOptionalIn2UidSetButTensorMissing)
 {
-    _tensorMap.erase(4);
+    _tensorMap.erase(K_PW_TENSOR_IN2_UID);
     auto node = createStandardNode();
 
     ASSERT_THROW_HIPDNN_STATUS(PointwiseOperationDescriptor::fromNode(node, _tensorMap),

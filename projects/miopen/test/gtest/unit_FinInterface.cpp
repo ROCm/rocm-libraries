@@ -299,8 +299,6 @@ const auto& GetSolversInfo<ConvSolverInfo>()
         {"ConvAsmImplicitGemmGTCDynamicWrwXdlopsNHWC",          {110,   true,   true,   "miopenConvolutionFwdAlgoImplicitGEMM"}},
         {"ConvCkIgemmFwdV6r1DlopsNchw",                         {114,   false,  true,   "miopenConvolutionFwdAlgoImplicitGEMM"}},
         {"ConvAsmImplicitGemmGTCDynamicFwdDlopsNCHWC",          {127,   true,   true,   "miopenConvolutionFwdAlgoImplicitGEMM"}},
-        {"ConvHipImplicitGemmFwdXdlops",                        {128,   true,   true,   "miopenConvolutionFwdAlgoImplicitGEMM"}},
-        {"ConvHipImplicitGemmBwdXdlops",                        {129,   true,   true,   "miopenConvolutionFwdAlgoImplicitGEMM"}},
         {"ConvHipImplicitGemmGroupFwdXdlops",                   {137,   true,   true,   "miopenConvolutionFwdAlgoImplicitGEMM"}},
         {"ConvHipImplicitGemm3DGroupFwdXdlops",                 {138,   true,   true,   "miopenConvolutionFwdAlgoImplicitGEMM"}},
         {"ConvWinoFuryRxS<2-3>",                                {139,   true,   false,  "miopenConvolutionFwdAlgoWinograd"}},
@@ -371,20 +369,6 @@ const auto& GetSolverConfigs<BatchNormSolverConfig>()
     return configs;
 }
 
-template <class SolverInfo>
-const auto& GetSolverNames()
-{
-    static const auto names = [] {
-        std::vector<std::string> names;
-        const auto& sinfo = GetSolversInfo<SolverInfo>();
-        names.reserve(sinfo.size());
-        for(const auto& s : sinfo)
-            names.push_back(s.first);
-        return names;
-    }();
-    return names;
-}
-
 template <class TestCase>
 const auto GetTestCases()
 {
@@ -404,6 +388,20 @@ const auto GetTestCases()
 }
 
 #if MIOPEN_ENABLE_FIN_INTERFACE
+
+template <class SolverInfo>
+const auto& GetSolverNames()
+{
+    static const auto names = [] {
+        std::vector<std::string> names_;
+        const auto& sinfo = GetSolversInfo<SolverInfo>();
+        names_.reserve(sinfo.size());
+        for(const auto& s : sinfo)
+            names_.push_back(s.first);
+        return names_;
+    }();
+    return names;
+}
 
 // Context
 template <class Problem>

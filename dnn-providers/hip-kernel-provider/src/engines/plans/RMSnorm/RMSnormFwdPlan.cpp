@@ -10,8 +10,8 @@
 #include <cstdint>
 #include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_data_sdk/utilities/Constants.hpp>
-#include <hipdnn_data_sdk/utilities/FlatbufferUtils.hpp>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
+#include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
 
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 
@@ -19,8 +19,9 @@ namespace hip_kernel_provider::rmsnorm
 {
 
 RMSnormFwdParams::RMSnormFwdParams(
-    const hipdnn_data_sdk::data_objects::RMSNormAttributes& attributes,
-    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+    const hipdnn_flatbuffers_sdk::data_objects::RMSNormAttributes& attributes,
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
         tensorMap)
     : _x(tensorMap.at(attributes.x_tensor_uid()))
     , _scale(tensorMap.at(attributes.scale_tensor_uid()))
@@ -36,32 +37,32 @@ RMSnormFwdParams::RMSnormFwdParams(
 {
 }
 
-const hipdnn_data_sdk::data_objects::TensorAttributes* RMSnormFwdParams::x() const
+const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* RMSnormFwdParams::x() const
 {
     return _x;
 }
 
-const hipdnn_data_sdk::data_objects::TensorAttributes* RMSnormFwdParams::scale() const
+const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* RMSnormFwdParams::scale() const
 {
     return _scale;
 }
 
-const hipdnn_data_sdk::data_objects::TensorAttributes* RMSnormFwdParams::epsilon() const
+const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* RMSnormFwdParams::epsilon() const
 {
     return _epsilon;
 }
 
-const hipdnn_data_sdk::data_objects::TensorAttributes* RMSnormFwdParams::bias() const
+const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* RMSnormFwdParams::bias() const
 {
     return _bias;
 }
 
-const hipdnn_data_sdk::data_objects::TensorAttributes* RMSnormFwdParams::y() const
+const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* RMSnormFwdParams::y() const
 {
     return _y;
 }
 
-const hipdnn_data_sdk::data_objects::TensorAttributes* RMSnormFwdParams::invRMS() const
+const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* RMSnormFwdParams::invRMS() const
 {
     return _invRMS;
 }
@@ -122,8 +123,8 @@ void RMSnormFwdPlan::compile(const IKernelCompiler& kernelCompiler,
 
     // Determine input/output data type configuration
     auto ioDataType = _params.x()->data_type();
-    const bool useFp16 = ioDataType == hipdnn_data_sdk::data_objects::DataType::HALF;
-    const bool useBfp16 = ioDataType == hipdnn_data_sdk::data_objects::DataType::BFLOAT16;
+    const bool useFp16 = ioDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::HALF;
+    const bool useBfp16 = ioDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16;
     const bool useFp32 = !useFp16 && !useBfp16;
     std::string ioTypeString = getKernelParamTypeString(ioDataType);
 
@@ -176,10 +177,10 @@ void RMSnormFwdPlan::execute(const HipKernelHandle& handle,
                                       _params.invRMS()->uid(), deviceBuffers, numDeviceBuffers)
                                       .ptr;
 
-    hipdnn_data_sdk::data_objects::TensorAttributesT epsilonTensor;
+    hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT epsilonTensor;
     _params.epsilon()->UnPackTo(&epsilonTensor);
     double epsilon
-        = hipdnn_data_sdk::utilities::extractDoubleFromTensorValue(epsilonTensor, "Epsilon");
+        = hipdnn_flatbuffers_sdk::utilities::extractDoubleFromTensorValue(epsilonTensor, "Epsilon");
 
     _runnableKernel->launch(handle.getStream(),
                             xBuffer.ptr,

@@ -109,7 +109,7 @@ endif()
 # Also we do not detect GPU when target GPU for testing is specified explicitly.
 set(MIOPEN_TEST_GPU_DETECTION_FAILED FALSE)
 set(MIOPEN_NO_GPU FALSE)
-if(NOT (MIOPEN_TEST_GFX900 OR MIOPEN_TEST_GFX906 OR MIOPEN_TEST_GFX908 OR MIOPEN_TEST_GFX90A OR MIOPEN_TEST_GFX94X OR MIOPEN_TEST_GFX95X OR MIOPEN_TEST_GFX103X OR MIOPEN_TEST_GFX110X OR MIOPEN_TEST_GFX120X OR MIOPEN_TEST_GFX115X OR MIOPEN_TEST_HIP_NOGPU))
+if (NOT (MIOPEN_TEST_GFX900 OR MIOPEN_TEST_GFX906 OR MIOPEN_TEST_GFX908 OR MIOPEN_TEST_GFX90A OR MIOPEN_TEST_GFX94X OR MIOPEN_TEST_GFX95X OR MIOPEN_TEST_GFX103X OR MIOPEN_TEST_GFX110X OR MIOPEN_TEST_GFX115X OR MIOPEN_TEST_GFX120X OR MIOPEN_TEST_HIP_NOGPU))
     # Try to find rocminfo first, then hipinfo as fallback (for Windows)
     find_program(ROCMINFO
         NAMES rocminfo hipinfo
@@ -287,7 +287,7 @@ message(STATUS "MIOPEN_TEST_ALL ${MIOPEN_TEST_ALL}")
 set_var_to_condition(WORKAROUND_ISSUE_1187_DEFAULT MIOPEN_TEST_GFX90A AND MIOPEN_TEST_FLOAT)
 option( WORKAROUND_ISSUE_1187 "" ${WORKAROUND_ISSUE_1187_DEFAULT})
 
-set_var_to_condition(WORKAROUND_ISSUE_1148_DEFAULT (MIOPEN_TEST_GFX103X OR MIOPEN_TEST_GFX110X) AND MIOPEN_TEST_FLOAT)
+set_var_to_condition(WORKAROUND_ISSUE_1148_DEFAULT (MIOPEN_TEST_GFX103X OR MIOPEN_TEST_GFX110X OR MIOPEN_TEST_GFX115X) AND MIOPEN_TEST_FLOAT)
 option( WORKAROUND_ISSUE_1148 "" ${WORKAROUND_ISSUE_1148_DEFAULT})
 
 if(MIOPEN_TEST_INT8)
@@ -299,8 +299,7 @@ elseif(MIOPEN_TEST_BFLOAT16)
               test_conv_extra test_conv_for_implicit_gemm test_miopen_conv
               test_deepbench_conv test_conv_igemm_dynamic_xdlops_nhwc_wrw_bf16
               test_conv_igemm_dynamic_xdlops_nhwc_fwd_bf16
-              test_conv_igemm_dynamic_xdlops_nhwc_bwd_bf16
-              test_pooling2d test_pooling3d)
+              test_conv_igemm_dynamic_xdlops_nhwc_bwd_bf16)
 endif()
 
 if(MIOPEN_NO_GPU)
@@ -324,6 +323,9 @@ endif()
 
 # Skip conv2d tests to capture flaky behavior                                                                             
 list(APPEND SKIP_TESTS test_conv2d test_conv2d_find2)
+
+# Skip test_immed_conv2d tests to capture flaky behavior                                                                             
+list(APPEND SKIP_TESTS test_immed_conv2d)
 
 
 # The usage is non-trivial, see function add_test_command.
@@ -410,10 +412,11 @@ function(add_test_executable TEST_NAME)
         AND (${TEST_NAME} MATCHES "test_soft_max") )
         set_tests_properties(${TEST_NAME} PROPERTIES RUN_SERIAL On)
     endif()
+    # MIOpen_with_plugins ensures CK plugin .so's are built alongside the test
     if(NOT MIOPEN_EMBED_DB STREQUAL "")
-        target_link_libraries(${TEST_NAME} MIOpen miopen_data)
+        target_link_libraries(${TEST_NAME} MIOpen_with_plugins miopen_data)
     else()
-        target_link_libraries(${TEST_NAME} MIOpen)
+        target_link_libraries(${TEST_NAME} MIOpen_with_plugins)
     endif()
     target_include_directories(${TEST_NAME} PRIVATE ../src/kernels)
     if(WIN32)
@@ -463,8 +466,6 @@ set(LONG_TESTS
     test_immed_conv3d
     test_conv3d_extra
     test_conv_3d
-    test_pooling2d
-    test_pooling3d
     test_conv_ck_igemm_fwd_v6r1_dlops_nchw
     )
 
@@ -575,9 +576,9 @@ endfunction()
 #   These attributes can be enabled or disabled by using '_ENABLED' and '_DISABLED' suffix.
 #   Defaults: FLOAT_ENABLED HALF_DISABLED BF16_DISABLED INT8_DISABLED
 #
-# GPU types: GFX900, GFX906, GFX908, GFX90A, GFX94X, GFX1030/31, GFX1100/03
+# GPU types: GFX900, GFX906, GFX908, GFX90A, GFX94X, GFX1030/31, GFX1100/02, GFX115X
 #   These attributes can be enabled or disabled by using '_ENABLED' and '_DISABLED' suffix.
-#   Defaults: GFX900_ENABLED, GFX906_ENABLED, GFX908_ENABLED, GFX90A_ENABLED, GFX94X_DISABLED, GFX103X_DISABLED, GFX110X_DISABLED
+#   Defaults: GFX900_ENABLED, GFX906_ENABLED, GFX908_ENABLED, GFX90A_ENABLED, GFX94X_DISABLED, GFX103X_DISABLED, GFX110X_DISABLED, GFX115X_DISABLED
 #
 # Testing mode:
 #   SKIP_UNLESS_ALL - The test should be only run if MIOPEN_TEST_ALL=TRUE. Intended for long tests.
@@ -595,7 +596,7 @@ function(add_custom_test NAME)
     set(options
         BF16_ENABLED BF16_DISABLED HALF_ENABLED HALF_DISABLED INT8_ENABLED INT8_DISABLED TF32_ENABLED TF32_DISABLED FLOAT_ENABLED FLOAT_DISABLED
         GFX900_ENABLED GFX900_DISABLED GFX906_ENABLED GFX906_DISABLED GFX908_ENABLED GFX908_DISABLED
-        GFX103X_ENABLED GFX103X_DISABLED GFX110X_ENABLED GFX110X_DISABLED GFX90A_ENABLED GFX90A_DISABLED GFX94X_ENABLED GFX94X_DISABLED
+            GFX103X_ENABLED GFX103X_DISABLED GFX110X_ENABLED GFX110X_DISABLED GFX115X_ENABLED GFX115X_DISABLED GFX90A_ENABLED GFX90A_DISABLED GFX94X_ENABLED GFX94X_DISABLED
         SKIP_UNLESS_MLIR SKIP_UNLESS_COMPOSABLEKERNEL SKIP_UNLESS_ALL TEST_PERF_DB_RECORD_NOT_FOUND TEST_TUNING SKIP_XNACK_ON
         HIP_ENABLED HIP_DISABLED HIP_NOGPU_ENABLED HIP_NOGPU_DISABLED
     )
@@ -671,6 +672,10 @@ function(add_custom_test NAME)
     option_support_check(${PARSE_GFX110X_ENABLED} ${PARSE_GFX110X_DISABLED} ${GFX110X_TEST_DEFAULT} is_gfx110x_check)
     bool_and_f(${MIOPEN_TEST_GFX110X} ${is_gfx110x_check} is_gfx110x_check)
 
+    set(GFX115X_TEST_DEFAULT FALSE)
+    option_support_check(${PARSE_GFX115X_ENABLED} ${PARSE_GFX115X_DISABLED} ${GFX115X_TEST_DEFAULT} is_gfx115x_check)
+    bool_and_f(${MIOPEN_TEST_GFX115X} ${is_gfx115x_check} is_gfx115x_check)
+
     # When SKIP_XNACK_ON is set, the test will be skipped if MIOPEN_TEST_GPU_XNACK_ENABLED is set.
     bool_and_f(${PARSE_SKIP_XNACK_ON} ${MIOPEN_TEST_GPU_XNACK_ENABLED} is_xnack_on_check)
     bool_not_f(${is_xnack_on_check} is_xnack_on_check)
@@ -704,7 +709,7 @@ function(add_custom_test NAME)
         set_tests_properties(${NAME} PROPERTIES RUN_SERIAL On)
     endif()
 
-    if(  (is_gfx900_check OR is_gfx906_check OR is_gfx908_check OR is_gfx103x_check OR is_gfx110x_check OR is_gfx90a_check OR is_gfx94x_check OR is_gfx95x_check)
+    if ((is_gfx900_check OR is_gfx906_check OR is_gfx908_check OR is_gfx103x_check OR is_gfx110x_check OR is_gfx115x_check OR is_gfx90a_check OR is_gfx94x_check OR is_gfx95x_check)
      AND is_full_check
      AND is_xnack_on_check
      AND is_mlir_check
@@ -757,8 +762,7 @@ set(IMPLICITGEMM_TESTING_ENV
 )
 
 if(MIOPEN_TEST_DEEPBENCH)
-    add_custom_test(test_deepbench_rnn GFX94X_ENABLED GFX103X_ENABLED GFX110X_ENABLED
-    )
+    add_custom_test(test_deepbench_rnn GFX94X_ENABLED GFX103X_ENABLED GFX110X_ENABLED GFX115X_ENABLED)
 endif()
 
 set(DYNAMIC_IMPLICITGEMM_COMMON

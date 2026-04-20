@@ -348,9 +348,28 @@ Output: y (activated convolution result)
 - Eliminates kernel launch overhead between operations
 - Enables better cache utilization by processing data in a single pass
 
+### [**`SdpaFprop`**](./sdpa/SdpaFprop.cpp)
+
+Executes the forward pass of a scaled dot-product attention (SDPA) operation on rank-4 input tensors.
+
+- For query `Q`, key `K`, and value `V` tensors of shape `(B, H, S, D)`, the attention output is computed as:
+
+    ```python
+    O = softmax(Q @ K^T / sqrt(D)) @ V
+    ```
+
+    where:
+    - `B` = batch size
+    - `H` = number of attention heads
+    - `S` = sequence length
+    - `D` = head dimension
+
+- Supports both `BHSD` (row-major) and `BSHD` (sequence-major) memory layouts via strides.
+- Configurations without engine support are gracefully skipped.
+
 ### [**`SerializationRoundTrip`**](./serialization/SerializationRoundTrip.cpp)
 
-Demonstrates graph serialization and deserialization (round-trip) using hipDNN's FlatBuffer-based serialization format. The sample builds a convolution forward graph, serializes it to a binary format, deserializes it back, and then executes the deserialized graph to verify correctness. This shows how graphs can be saved, transmitted, and restored for deployment or caching scenarios.
+Demonstrates graph serialization and deserialization (round-trip) using hipDNN's JSON and binary serialization formats. The sample builds a convolution forward graph, serializes and deserializes it in both formats, then executes the deserialized graphs to verify correctness. This shows how graphs can be saved, transmitted, and restored for deployment or caching scenarios.
 
 ### [**`KnobsUsage`**](./knobs/KnobsUsage.cpp)
 
