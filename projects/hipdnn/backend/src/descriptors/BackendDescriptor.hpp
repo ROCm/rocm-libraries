@@ -61,7 +61,7 @@ class HipdnnBackendDescriptorImpl : public IBackendDescriptor
 {
 private:
     bool _finalized = false;
-    hipdnnBackendDescriptorType_t _type = HIPDNN_INVALID_TYPE;
+    hipdnnBackendDescriptorType_t _type = HIPDNN_INVALID_TYPE_EXT;
 
     friend T;
 

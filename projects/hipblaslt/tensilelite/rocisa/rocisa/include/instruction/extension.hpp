@@ -120,25 +120,41 @@ namespace rocisa
             module->addComment(comment);
         }
 
-        if(tmpSgprRes.size < 3)
+        if(rocIsa::getInstance().getAsmCaps()["HasAdd_PC_i64"])
         {
-            throw std::runtime_error("ContinuousRegister size must be at least 3.");
-        }
+            //what '.' does is to create a label right before that instruction
+            //So s_add_pc_i64 (target_label - .) effectively becomes:
+            //      .temp_label
+            //      s_add_pc_i64 (target_label - temp_label)
+            //the size of s_add_pc_i64 (target_label - temp_label) is 8 + 4 bytes, so you will need to do -12 as well
 
-        int tmpSgprX2, tmpSgprX1;
-        if(tmpSgprRes.idx % 2 == 0)
-        {
-            tmpSgprX2 = tmpSgprRes.idx;
-            tmpSgprX1 = tmpSgprRes.idx + 2;
+            //TODO: remove hardcore "-.-12" when compiler update for label value calculation
+            module->addT<SAddPCI64_SIMM>(
+                labelName + "-.-12",
+                "Add PC to " + labelName
+                    + ", the constant correction is dependent on the current assembler behavior.");
         }
         else
         {
-            tmpSgprX2 = tmpSgprRes.idx + 1;
-            tmpSgprX1 = tmpSgprRes.idx;
+            if(tmpSgprRes.size < 3)
+            {
+                throw std::runtime_error("ContinuousRegister size must be at least 3.");
+            }
+            int tmpSgprX2, tmpSgprX1;
+            if(tmpSgprRes.idx % 2 == 0)
+            {
+                tmpSgprX2 = tmpSgprRes.idx;
+                tmpSgprX1 = tmpSgprRes.idx + 2;
+            }
+            else
+            {
+                tmpSgprX2 = tmpSgprRes.idx + 1;
+                tmpSgprX1 = tmpSgprRes.idx;
+            }
+            auto cr = ContinuousRegister(tmpSgprX1, 1);
+            module->add(SGetPositivePCOffset(tmpSgprX2, label, cr));
+            module->addT<SSetPCB64>(sgpr(tmpSgprX2, 2), "branch to " + labelName);
         }
-        auto cr = ContinuousRegister(tmpSgprX1, 1);
-        module->add(SGetPositivePCOffset(tmpSgprX2, label, cr));
-        module->addT<SSetPCB64>(sgpr(tmpSgprX2, 2), "branch to " + labelName);
 
         return module;
     }
@@ -368,14 +384,25 @@ namespace rocisa
         auto& instance = rocIsa::getInstance();
         if(instance.getAsmCaps()["HasBF16CVT"])
         {
-            auto select_bit = SelectBit::WORD_0;
-            if(vi % 2 == 1)
+            if(instance.getArchCaps()["NoSDWA"])
             {
-                select_bit = SelectBit::WORD_1;
+                auto vop3 = VOP3PModifiers();
+                vop3.op_sel.push_back(vi % 2);
+                return std::make_shared<PVCvtBF16toFP32>(
+                    dst, src, std::nullopt, vop3, "cvt bf16 to fp32. " + comment);
             }
-            auto sdwa     = SDWAModifiers();
-            sdwa.src0_sel = select_bit;
-            return std::make_shared<PVCvtBF16toFP32>(dst, src, sdwa, "cvt bf16 to f32");
+            else
+            {
+                auto select_bit = SelectBit::WORD_0;
+                if(vi % 2 == 1)
+                {
+                    select_bit = SelectBit::WORD_1;
+                }
+                auto sdwa     = SDWAModifiers();
+                sdwa.src0_sel = select_bit;
+                return std::make_shared<PVCvtBF16toFP32>(
+                    dst, src, sdwa, std::nullopt, "cvt bf16 to fp32. " + comment);
+            }
         }
         else
         {

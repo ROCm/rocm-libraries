@@ -4,18 +4,20 @@
 #pragma once
 
 #include <hipdnn_data_sdk/utilities/Constants.hpp>
+#include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_frontend/Graph.hpp>
 #include <hipdnn_frontend/Utilities.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
+#include <hipdnn_test_sdk/utilities/SdkFrontendTypeConversions.hpp>
 
 namespace hipdnn_sdk_test_utils
 {
 
 inline std::shared_ptr<hipdnn_frontend::graph::Graph>
-    buildLayernormFpropGraph(hipdnn_data_sdk::data_objects::DataType inputDataType,
-                             hipdnn_data_sdk::data_objects::DataType scaleBiasDataType,
-                             hipdnn_data_sdk::data_objects::DataType meanInvVarianceDataType,
-                             hipdnn_data_sdk::data_objects::DataType computeDataType,
+    buildLayernormFpropGraph(hipdnn_flatbuffers_sdk::data_objects::DataType inputDataType,
+                             hipdnn_flatbuffers_sdk::data_objects::DataType scaleBiasDataType,
+                             hipdnn_flatbuffers_sdk::data_objects::DataType meanInvVarianceDataType,
+                             hipdnn_flatbuffers_sdk::data_objects::DataType computeDataType,
                              const std::vector<int64_t>& dims,
                              const int64_t normalizedDimCount,
                              const hipdnn_data_sdk::utilities::TensorLayout& layout,
@@ -24,6 +26,10 @@ inline std::shared_ptr<hipdnn_frontend::graph::Graph>
 {
     auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
     graph->set_name("LayernormFpropTest");
+    graph->set_io_data_type(hipdnn_test_sdk::utilities::sdkToFrontendDataType(inputDataType))
+        .set_compute_data_type(hipdnn_test_sdk::utilities::sdkToFrontendDataType(computeDataType))
+        .set_intermediate_data_type(
+            hipdnn_test_sdk::utilities::sdkToFrontendDataType(computeDataType));
 
     auto strides = hipdnn_data_sdk::utilities::generateStrides(dims, layout.strideOrder);
 
@@ -51,13 +57,13 @@ inline std::shared_ptr<hipdnn_frontend::graph::Graph>
 
     int64_t uid = 1;
     auto xAttr = hipdnn_frontend::graph::makeTensorAttributes(
-        "x", hipdnn_frontend::fromSdkType(inputDataType), dims, strides);
+        "x", hipdnn_test_sdk::utilities::sdkToFrontendDataType(inputDataType), dims, strides);
     xAttr.set_uid(uid++);
     auto xTensorAttr = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(xAttr));
 
     auto scaleAttr = hipdnn_frontend::graph::makeTensorAttributes(
         "scale",
-        hipdnn_frontend::fromSdkType(scaleBiasDataType),
+        hipdnn_test_sdk::utilities::sdkToFrontendDataType(scaleBiasDataType),
         normalizedDims,
         normalizedStrides);
     scaleAttr.set_uid(uid++);
@@ -65,7 +71,10 @@ inline std::shared_ptr<hipdnn_frontend::graph::Graph>
         = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(scaleAttr));
 
     auto biasAttr = hipdnn_frontend::graph::makeTensorAttributes(
-        "bias", hipdnn_frontend::fromSdkType(scaleBiasDataType), normalizedDims, normalizedStrides);
+        "bias",
+        hipdnn_test_sdk::utilities::sdkToFrontendDataType(scaleBiasDataType),
+        normalizedDims,
+        normalizedStrides);
     biasAttr.set_uid(uid++);
     auto biasTensorAttr
         = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(biasAttr));
@@ -81,7 +90,8 @@ inline std::shared_ptr<hipdnn_frontend::graph::Graph>
     hipdnn_frontend::graph::LayernormAttributes lnAttrs;
     lnAttrs.set_name("layernorm_fprop");
     lnAttrs.set_epsilon(epsilonTensor);
-    lnAttrs.set_compute_data_type(hipdnn_frontend::fromSdkType(computeDataType));
+    lnAttrs.set_compute_data_type(
+        hipdnn_test_sdk::utilities::sdkToFrontendDataType(computeDataType));
 
     if(useTrainingPhase)
     {
@@ -101,7 +111,7 @@ inline std::shared_ptr<hipdnn_frontend::graph::Graph>
         yTensorAttr->set_uid(uid++);
     }
     yTensorAttr->set_name("Y");
-    yTensorAttr->set_data_type(hipdnn_frontend::fromSdkType(inputDataType));
+    yTensorAttr->set_data_type(hipdnn_test_sdk::utilities::sdkToFrontendDataType(inputDataType));
     yTensorAttr->set_dim(dims);
     yTensorAttr->set_stride(strides);
     yTensorAttr->set_is_virtual(false);
@@ -125,7 +135,8 @@ inline std::shared_ptr<hipdnn_frontend::graph::Graph>
         }
         if(meanTensorAttr)
         {
-            meanTensorAttr->set_data_type(hipdnn_frontend::fromSdkType(meanInvVarianceDataType));
+            meanTensorAttr->set_data_type(
+                hipdnn_test_sdk::utilities::sdkToFrontendDataType(meanInvVarianceDataType));
             meanTensorAttr->set_dim(statsDims);
             meanTensorAttr->set_stride(statsStrides);
             meanTensorAttr->set_is_virtual(false);
@@ -139,7 +150,7 @@ inline std::shared_ptr<hipdnn_frontend::graph::Graph>
         if(invVarianceTensorAttr)
         {
             invVarianceTensorAttr->set_data_type(
-                hipdnn_frontend::fromSdkType(meanInvVarianceDataType));
+                hipdnn_test_sdk::utilities::sdkToFrontendDataType(meanInvVarianceDataType));
             invVarianceTensorAttr->set_dim(statsDims);
             invVarianceTensorAttr->set_stride(statsStrides);
             invVarianceTensorAttr->set_is_virtual(false);

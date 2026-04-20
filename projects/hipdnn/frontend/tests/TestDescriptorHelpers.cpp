@@ -213,16 +213,16 @@ TEST_F(TestDescriptorHelpers, SetDescriptorAttrVecReturnsErrorOnFailure)
 
 TEST_F(TestDescriptorHelpers, SetDescriptorAttrScalarSucceeds)
 {
-    EXPECT_CALL(*_mockBackend,
-                backendSetAttribute(_,
-                                    HIPDNN_ATTR_CONVOLUTION_CONV_MODE,
-                                    HIPDNN_TYPE_CONVOLUTION_MODE,
-                                    1,
-                                    pointsToScalar<hipdnnConvolutionMode_t>(
-                                        HIPDNN_CONVOLUTION_MODE_CROSS_CORRELATION)))
+    EXPECT_CALL(
+        *_mockBackend,
+        backendSetAttribute(_,
+                            HIPDNN_ATTR_CONVOLUTION_CONV_MODE,
+                            HIPDNN_TYPE_CONVOLUTION_MODE,
+                            1,
+                            pointsToScalar<hipdnnConvolutionMode_t>(HIPDNN_CROSS_CORRELATION)))
         .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
 
-    const hipdnnConvolutionMode_t value = HIPDNN_CONVOLUTION_MODE_CROSS_CORRELATION;
+    const hipdnnConvolutionMode_t value = HIPDNN_CROSS_CORRELATION;
     hipdnnBackendDescriptor_t desc = nullptr;
     auto err = setDescriptorAttrScalar(desc,
                                        HIPDNN_ATTR_CONVOLUTION_CONV_MODE,
@@ -287,7 +287,7 @@ TEST_F(TestDescriptorHelpers, SetDescriptorAttrScalarReturnsErrorOnFailure)
     EXPECT_CALL(*_mockBackend, backendSetAttribute(_, _, _, _, _))
         .WillOnce(Return(HIPDNN_STATUS_BAD_PARAM));
 
-    const hipdnnConvolutionMode_t value = HIPDNN_CONVOLUTION_MODE_CROSS_CORRELATION;
+    const hipdnnConvolutionMode_t value = HIPDNN_CROSS_CORRELATION;
     hipdnnBackendDescriptor_t desc = nullptr;
     auto err = setDescriptorAttrScalar(desc,
                                        HIPDNN_ATTR_CONVOLUTION_CONV_MODE,
@@ -650,7 +650,7 @@ TEST_F(TestDescriptorHelpers, CreateKnobSettingDescriptorInt64)
     // Expect: set knob ID (CHAR), set knob value (INT64), finalize
     EXPECT_CALL(*_mockBackend,
                 backendSetAttribute(_,
-                                    HIPDNN_ATTR_KNOB_CHOICE_KNOB_TYPE_EXT,
+                                    HIPDNN_ATTR_KNOB_CHOICE_KNOB_TYPE,
                                     HIPDNN_TYPE_CHAR,
                                     static_cast<int64_t>(std::string("test_knob").size()),
                                     pointsToString("test_knob")))
@@ -658,7 +658,7 @@ TEST_F(TestDescriptorHelpers, CreateKnobSettingDescriptorInt64)
 
     EXPECT_CALL(*_mockBackend,
                 backendSetAttribute(_,
-                                    HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE_EXT,
+                                    HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE,
                                     HIPDNN_TYPE_INT64,
                                     1,
                                     pointsToScalar<int64_t>(42)))
@@ -679,7 +679,7 @@ TEST_F(TestDescriptorHelpers, CreateKnobSettingDescriptorDouble)
 
     EXPECT_CALL(*_mockBackend,
                 backendSetAttribute(_,
-                                    HIPDNN_ATTR_KNOB_CHOICE_KNOB_TYPE_EXT,
+                                    HIPDNN_ATTR_KNOB_CHOICE_KNOB_TYPE,
                                     HIPDNN_TYPE_CHAR,
                                     static_cast<int64_t>(std::string("double_knob").size()),
                                     pointsToString("double_knob")))
@@ -687,7 +687,7 @@ TEST_F(TestDescriptorHelpers, CreateKnobSettingDescriptorDouble)
 
     EXPECT_CALL(*_mockBackend,
                 backendSetAttribute(_,
-                                    HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE_EXT,
+                                    HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE,
                                     HIPDNN_TYPE_DOUBLE,
                                     1,
                                     pointsToScalar<double>(3.14)))
@@ -708,7 +708,7 @@ TEST_F(TestDescriptorHelpers, CreateKnobSettingDescriptorString)
 
     EXPECT_CALL(*_mockBackend,
                 backendSetAttribute(_,
-                                    HIPDNN_ATTR_KNOB_CHOICE_KNOB_TYPE_EXT,
+                                    HIPDNN_ATTR_KNOB_CHOICE_KNOB_TYPE,
                                     HIPDNN_TYPE_CHAR,
                                     static_cast<int64_t>(std::string("str_knob").size()),
                                     pointsToString("str_knob")))
@@ -716,7 +716,7 @@ TEST_F(TestDescriptorHelpers, CreateKnobSettingDescriptorString)
 
     EXPECT_CALL(*_mockBackend,
                 backendSetAttribute(_,
-                                    HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE_EXT,
+                                    HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE,
                                     HIPDNN_TYPE_CHAR,
                                     static_cast<int64_t>(std::string("my_value").size()),
                                     pointsToString("my_value")))

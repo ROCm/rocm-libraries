@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-"""Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights reserved.
+"""Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights reserved.
 
    Permission is hereby granted, free of charge, to any person obtaining a copy
    of this software and associated documentation files (the "Software"), to deal
@@ -78,6 +78,10 @@ def parse_args():
     # Path to rocprim
     parser.add_argument('--rocprim-path', dest='rocprim_path', required=False, default="",
                         help='Path to rocprim')
+
+    # Path to gtest
+    parser.add_argument('--gtest-path', dest='gtest_path', required=False, default="",
+                        help='Path to gtest')
 
     # Path to directory containing matrices
     parser.add_argument('--matrices-dir', dest='matrices_dir', required=False, default="",
@@ -213,6 +217,10 @@ def config_cmd():
     if args.rocprim_path != "":
         rocprim_path = cmake_path(os.path.abspath(args.rocprim_path))
         cmake_options.append(f'-Drocprim_DIR=\"{rocprim_path}\"')
+
+    if args.gtest_path != "":
+        gtest_path = cmake_path(os.path.abspath(args.gtest_path))
+        cmake_options.append(f'-DGTest_DIR=\"{gtest_path}\"')
     
     if args.matrices_dir != "":
         matrices_dir = cmake_path(os.path.abspath(args.matrices_dir))

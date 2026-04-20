@@ -20,10 +20,20 @@ add_executable(
     engines/plans/Batchnorm/TestBatchnormPlanBuilder.cpp
     engines/plans/Batchnorm/TestBatchnormFwdInferencePlan.cpp
     engines/plans/Batchnorm/TestBatchnormFwdInferenceWithVariancePlan.cpp
+    engines/plans/Batchnorm/TestBatchnormFwdTrainingPlan.cpp
+    engines/plans/Batchnorm/TestBatchnormCommon.cpp
+    engines/plans/Batchnorm/TestBatchnormApplicabilityChecks.cpp
+    engines/plans/Layernorm/TestLayernormPlanBuilder.cpp
+    engines/plans/Layernorm/TestLayernormFwdPlan.cpp
+    engines/plans/Layernorm/TestLayernormApplicabilityChecks.cpp
     engines/plans/TestPlanUtils.cpp
     engines/plans/RMSnorm/TestRMSnormPlanBuilder.cpp
     engines/plans/RMSnorm/TestRMSnormFwdPlan.cpp
+    engines/plans/RMSnorm/TestRMSnormBwdPlanBuilder.cpp
+    engines/plans/RMSnorm/TestRMSnormBwdPlan.cpp
+    engines/plans/RMSnorm/TestRMSnormApplicabilityChecks.cpp
     hip/TestHipProgramAndKernel.cpp
+    hip/TestHipKernelCompileOptions.cpp
 )
 
 target_compile_options(hip_kernel_provider_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
@@ -34,10 +44,16 @@ target_link_libraries(
 )
 
 # make it so tests inside folders can find files without having to use a relative path.
-target_include_directories(hip_kernel_provider_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_include_directories(hip_kernel_provider_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_LIST_DIR}/../../include)
 
 if(ENABLE_ASM_SDPA_ENGINE)
-    add_subdirectory(engines/asm_sdpa_engine)
+    if(NOT HIPDNN_ENABLE_SDPA)
+        message(WARNING
+                "ENABLE_ASM_SDPA_ENGINE is ON but hipDNN was built with HIPDNN_ENABLE_SDPA=OFF. "
+                "Skipping SDPA unit tests. Rebuild hipDNN with -DHIPDNN_ENABLE_SDPA=ON to enable them.")
+    else()
+        add_subdirectory(engines/asm_sdpa_engine)
+    endif()
 endif()
 
 clang_tidy_check(hip_kernel_provider_tests)

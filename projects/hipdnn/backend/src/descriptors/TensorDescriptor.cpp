@@ -26,7 +26,7 @@ void TensorDescriptor::finalize()
                 _data.strides.size(),
                 HIPDNN_STATUS_BAD_PARAM,
                 "TensorDescriptor::finalize() failed: dims and strides size mismatch");
-    THROW_IF_TRUE(_data.data_type == hipdnn_data_sdk::data_objects::DataType::UNSET,
+    THROW_IF_TRUE(_data.data_type == hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET,
                   HIPDNN_STATUS_BAD_PARAM,
                   "TensorDescriptor::finalize() failed: data type not set");
 
@@ -97,9 +97,10 @@ void TensorDescriptor::getAttribute(hipdnnBackendAttributeName_t attributeName,
     case HIPDNN_ATTR_TENSOR_VALUE_EXT:
         getTensorValue(attributeType, requestedElementCount, elementCount, arrayOfElements);
         break;
-    case HIPDNN_ATTR_TENSOR_IS_BY_VALUE_EXT:
+    case HIPDNN_ATTR_TENSOR_IS_BY_VALUE:
     {
-        const bool isByValue = _data.value.type != hipdnn_data_sdk::data_objects::TensorValue::NONE;
+        const bool isByValue
+            = _data.value.type != hipdnn_flatbuffers_sdk::data_objects::TensorValue::NONE;
         getScalar(isByValue,
                   HIPDNN_TYPE_BOOLEAN,
                   attributeType,
@@ -210,7 +211,7 @@ void TensorDescriptor::setTensorValue(hipdnnBackendAttributeType_t attributeType
     THROW_IF_NULL(arrayOfElements,
                   HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
                   "TensorDescriptor::setAttribute(): arrayOfElements is null");
-    THROW_IF_TRUE(_data.data_type == hipdnn_data_sdk::data_objects::DataType::UNSET,
+    THROW_IF_TRUE(_data.data_type == hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET,
                   HIPDNN_STATUS_BAD_PARAM,
                   "TensorDescriptor::setAttribute(): data type must be set before tensor value");
 
@@ -221,7 +222,7 @@ void TensorDescriptor::setTensorValue(hipdnnBackendAttributeType_t attributeType
                        + ") does not match data type byte size (" + std::to_string(expectedSize)
                        + ")");
 
-    using namespace hipdnn_data_sdk::data_objects;
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
 
     auto bytes = static_cast<const uint8_t*>(arrayOfElements);
 
@@ -294,7 +295,7 @@ void TensorDescriptor::getTensorValue(hipdnnBackendAttributeType_t attributeType
                    "TensorDescriptor::getAttribute(): attributeType must be HIPDNN_TYPE_CHAR "
                    "for TENSOR_VALUE");
 
-    using namespace hipdnn_data_sdk::data_objects;
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
 
     if(arrayOfElements == nullptr || requestedElementCount == 0)
     {
@@ -416,7 +417,7 @@ void TensorDescriptor::getTensorValue(hipdnnBackendAttributeType_t attributeType
 }
 
 std::shared_ptr<TensorDescriptor> TensorDescriptor::fromFlatBuffer(
-    const hipdnn_data_sdk::data_objects::TensorAttributesT& tensorT)
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT& tensorT)
 {
     auto desc = std::make_shared<TensorDescriptor>();
     desc->_data = tensorT;
@@ -424,8 +425,8 @@ std::shared_ptr<TensorDescriptor> TensorDescriptor::fromFlatBuffer(
     return desc;
 }
 
-std::shared_ptr<TensorDescriptor>
-    TensorDescriptor::fromFlatBuffer(hipdnn_data_sdk::data_objects::TensorAttributesT&& tensorT)
+std::shared_ptr<TensorDescriptor> TensorDescriptor::fromFlatBuffer(
+    hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT&& tensorT)
 {
     auto desc = std::make_shared<TensorDescriptor>();
     desc->_data = std::move(tensorT);
@@ -443,7 +444,7 @@ std::string TensorDescriptor::toString() const
     using hipdnn_data_sdk::utilities::vecToString;
     std::string str = "TensorDescriptor: {uid=" + std::to_string(_data.uid);
     str += ", name=" + _data.name;
-    if(_data.data_type == hipdnn_data_sdk::data_objects::DataType::UNSET)
+    if(_data.data_type == hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET)
     {
         str += ", dataType=UNSET";
     }
@@ -455,7 +456,7 @@ std::string TensorDescriptor::toString() const
     str += ", dims=" + vecToString(_data.dims);
     str += ", strides=" + vecToString(_data.strides);
     str += ", virtual=" + std::string(_data.virtual_ ? "true" : "false");
-    using hipdnn_data_sdk::data_objects::TensorValue;
+    using hipdnn_flatbuffers_sdk::data_objects::TensorValue;
     if(_data.value.type != TensorValue::NONE)
     {
         str += ", value=";

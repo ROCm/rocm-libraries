@@ -227,6 +227,13 @@ endif()
 configure_file( "${CMAKE_CURRENT_SOURCE_DIR}/include/internal/rocblas-version.h.in"
 	"${PROJECT_BINARY_DIR}/include/rocblas/internal/rocblas-version.h" )
 
+# Configure Windows version resource file
+if(WIN32)
+  string(TIMESTAMP ROCBLAS_COPYRIGHT_YEAR "%Y")
+  configure_file( "${CMAKE_CURRENT_SOURCE_DIR}/src/version.rc.in"
+    "${PROJECT_BINARY_DIR}/version.rc" @ONLY )
+endif()
+
 
 set( rocblas_headers_public
   include/rocblas.h

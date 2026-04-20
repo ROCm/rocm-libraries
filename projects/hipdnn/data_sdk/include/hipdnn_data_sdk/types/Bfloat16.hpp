@@ -478,9 +478,10 @@ inline bfloat16_t<M> copysign(bfloat16_t<M> x, bfloat16_t<M> y)
     return bfloat16_t<M>::from_bits(xBits | ySign);
 }
 
-// Min/max with NaN handling
+// Equivalent to std::fmax/std::fmin
+// If one input is NaN and the other is not, returns the non-NaN value.
 template <Bfloat16RoundingMode M>
-inline bfloat16_t<M> max(bfloat16_t<M> a, bfloat16_t<M> b)
+inline bfloat16_t<M> fmax(bfloat16_t<M> a, bfloat16_t<M> b)
 {
     if(isnan(a))
     {
@@ -494,7 +495,7 @@ inline bfloat16_t<M> max(bfloat16_t<M> a, bfloat16_t<M> b)
 }
 
 template <Bfloat16RoundingMode M>
-inline bfloat16_t<M> min(bfloat16_t<M> a, bfloat16_t<M> b)
+inline bfloat16_t<M> fmin(bfloat16_t<M> a, bfloat16_t<M> b)
 {
     if(isnan(a))
     {
@@ -505,6 +506,20 @@ inline bfloat16_t<M> min(bfloat16_t<M> a, bfloat16_t<M> b)
         return a;
     }
     return a < b ? a : b;
+}
+
+// Equivalent to std::max/std::min
+// No NaN handling
+template <Bfloat16RoundingMode M>
+inline bfloat16_t<M> max(bfloat16_t<M> a, bfloat16_t<M> b)
+{
+    return a < b ? b : a;
+}
+
+template <Bfloat16RoundingMode M>
+inline bfloat16_t<M> min(bfloat16_t<M> a, bfloat16_t<M> b)
+{
+    return b < a ? b : a;
 }
 
 // Rounding functions

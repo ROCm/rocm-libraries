@@ -174,6 +174,7 @@ namespace rocisa
     {
         return createGPR("m", name, regNum);
     }
+
 } // namespace rocisa
 
 void init_containers(nb::module_ m)
@@ -456,6 +457,16 @@ void init_containers(nb::module_ m)
                  new(&self) rocisa::VOP3PModifiers(std::get<0>(t), std::get<1>(t), std::get<2>(t));
              });
 
+    nb::class_<rocisa::True16Modifiers, rocisa::Container>(m_con, "True16Modifiers")
+        .def(nb::init<const rocisa::HighBitSel>(),
+             nb::arg("high_bit")  = -1)
+        .def("__str__", &rocisa::True16Modifiers::toString)
+        .def("__deepcopy__", [](const rocisa::True16Modifiers& self, nb::dict&) { return rocisa::True16Modifiers(self); })
+        .def("__getstate__", [](const rocisa::True16Modifiers& self) { return std::make_tuple(self.high_bit); })
+        .def("__setstate__", [](rocisa::True16Modifiers& self, std::tuple<const rocisa::HighBitSel> t) {
+            new(&self) rocisa::True16Modifiers(std::get<0>(t));
+        });
+
     nb::class_<rocisa::EXEC, rocisa::Container>(m_con, "EXEC")
         .def(nb::init<bool>(), nb::arg("setHi") = false)
         .def("__str__", &rocisa::EXEC::toString)
@@ -506,6 +517,7 @@ void init_containers(nb::module_ m)
              })
         .def("addOffset", [](rocisa::RegName& self, int offset) { self.offsets.push_back(offset); })
         .def("getTotalOffsets", &rocisa::RegName::getTotalOffsets)
+        .def("getTotalIdx", &rocisa::RegName::getTotalIdx)
         .def("__eq__", &rocisa::RegName::operator==)
         .def("__ne__", &rocisa::RegName::operator!=)
         .def("__str__", &rocisa::RegName::toString)
@@ -540,7 +552,9 @@ void init_containers(nb::module_ m)
                  &rocisa::RegisterContainer::replaceRegName))
         .def("getRegNameWithType", &rocisa::RegisterContainer::getRegNameWithType)
         .def("getCompleteRegNameWithType", &rocisa::RegisterContainer::getCompleteRegNameWithType)
+        .def("getCompleteRegName", &rocisa::RegisterContainer::getCompleteRegName)
         .def("splitRegContainer", &rocisa::RegisterContainer::splitRegContainer)
+        .def("setMsb", &rocisa::RegisterContainer::setMsb)
         .def(
             "__eq__",
             [](const rocisa::RegisterContainer& self, nb::object other) {
@@ -619,6 +633,20 @@ void init_containers(nb::module_ m)
                  self.regIdx     = std::get<5>(t);
                  self.regNum     = std::get<6>(t);
              });
+
+    nb::class_<rocisa::MemTokenData, rocisa::Container>(m_con, "MemTokenData")
+        .def(nb::init<const std::vector<int>&>(), nb::arg("tokens") = std::vector<int>{})
+        .def_rw("tokens", &rocisa::MemTokenData::tokens)
+        .def("__str__", &rocisa::MemTokenData::toString)
+        .def("__deepcopy__",
+             [](const rocisa::MemTokenData& self, nb::dict) {
+                 return rocisa::MemTokenData(self);
+             })
+        .def("__getstate__",
+             [](const rocisa::MemTokenData& self) { return self.tokens; })
+        .def("__setstate__", [](rocisa::MemTokenData& self, std::vector<int> t) {
+            new(&self) rocisa::MemTokenData(t);
+        });
 
     nb::class_<rocisa::ContinuousRegister>(m_con, "ContinuousRegister")
         .def(
