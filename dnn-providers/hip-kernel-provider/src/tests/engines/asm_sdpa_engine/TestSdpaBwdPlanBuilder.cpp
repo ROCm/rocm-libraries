@@ -107,18 +107,46 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableSdpaBwdVariations)
     }
 }
 
-TEST_F(TestSdpaBwdPlanBuilder, GetMaxWorkspaceSizeReturnsZero)
+TEST_F(TestSdpaBwdPlanBuilder, BackwardWorkspaceSizeSmall)
 {
-    auto builder = createSdpaBwdGraph();
-
+    // B=1, H=1, S=256, D=128
+    auto builder = createSdpaBwdGraph({1, 1, 256, 128});
     hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(builder.GetBufferPointer(),
                                                                      builder.GetSize());
-
     HipKernelSettings settings;
     size_t workspaceSize = _planBuilder.getMaxWorkspaceSize(_handle, graphWrapper, settings);
 
-    // Stub: returns 0 until Task I4 implements actual workspace calculation
-    EXPECT_EQ(workspaceSize, 0u);
+    // D buffer: 1*1*256*4 = 1024, aligned to 64 → 1024
+    // dq_acc:   1*1*256*128*4 = 131072, aligned to 64 → 131072
+    EXPECT_EQ(workspaceSize, 1024u + 131072u);
+}
+
+TEST_F(TestSdpaBwdPlanBuilder, BackwardWorkspaceSizeMedium)
+{
+    // B=2, H=8, S=512, D=128
+    auto builder = createSdpaBwdGraph({2, 8, 512, 128});
+    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(builder.GetBufferPointer(),
+                                                                     builder.GetSize());
+    HipKernelSettings settings;
+    size_t workspaceSize = _planBuilder.getMaxWorkspaceSize(_handle, graphWrapper, settings);
+
+    // D buffer: 2*8*512*4 = 32768, aligned to 64 → 32768
+    // dq_acc:   2*8*512*128*4 = 4194304, aligned to 64 → 4194304
+    EXPECT_EQ(workspaceSize, 32768u + 4194304u);
+}
+
+TEST_F(TestSdpaBwdPlanBuilder, BackwardWorkspaceSizeLarge)
+{
+    // B=4, H=16, S=1024, D=128
+    auto builder = createSdpaBwdGraph({4, 16, 1024, 128});
+    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(builder.GetBufferPointer(),
+                                                                     builder.GetSize());
+    HipKernelSettings settings;
+    size_t workspaceSize = _planBuilder.getMaxWorkspaceSize(_handle, graphWrapper, settings);
+
+    // D buffer: 4*16*1024*4 = 262144, aligned to 64 → 262144
+    // dq_acc:   4*16*1024*128*4 = 33554432, aligned to 64 → 33554432
+    EXPECT_EQ(workspaceSize, 262144u + 33554432u);
 }
 
 } // namespace

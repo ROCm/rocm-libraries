@@ -142,12 +142,34 @@ bool SdpaBwdPlanBuilder::isApplicable(
 
 size_t SdpaBwdPlanBuilder::getMaxWorkspaceSize(
     const HipKernelHandle& /* handle */,
-    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& /* opGraph */,
+    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
     const HipKernelSettings& /* executionSettings */) const
 {
-    // TODO(Task I4): Compute actual workspace size for backward 3-kernel pipeline
-    // Backward requires workspace for D buffer and dq_acc accumulator
-    return 0;
+    using namespace hipdnn_data_sdk::data_objects;
+
+    const auto& attrs = opGraph.nodeWrappers().front()->attributesAs<SdpaBackwardAttributes>();
+    const auto& tensorMap = opGraph.getTensorMap();
+    const auto* qTensor = tensorMap.at(attrs.q_tensor_uid());
+
+    // Q tensor layout is [B, H_q, S_q, D_qk]
+    auto batch = static_cast<size_t>(qTensor->dims()->Get(0));
+    auto headsQ = static_cast<size_t>(qTensor->dims()->Get(1));
+    auto seqLenQ = static_cast<size_t>(qTensor->dims()->Get(2));
+    auto headDim = static_cast<size_t>(qTensor->dims()->Get(3));
+
+    // D buffer: row-wise dot product output [B, H_q, S_q] in FP32
+    // Always needed for both a16 and a32 accumulator variants
+    size_t dBufferSize = batch * headsQ * seqLenQ * sizeof(float);
+    dBufferSize = (dBufferSize + 63) & ~size_t{63};
+
+    // TODO(Task I8.2): POC assumes a32 accumulator — always allocates FP32 dq_acc buffer.
+    // For a16 accumulator kernels, dQ is written directly in BF16 (no dq_acc buffer needed,
+    // no dq_convert kernel launched). Production should check accumulator type and skip
+    // dq_acc allocation for a16. See sdpa-bwd-poc-requirements_v2.md Task I8.2.
+    size_t dqAccSize = batch * headsQ * seqLenQ * headDim * sizeof(float);
+    dqAccSize = (dqAccSize + 63) & ~size_t{63};
+
+    return dBufferSize + dqAccSize;
 }
 
 void SdpaBwdPlanBuilder::initializeExecutionSettings(
