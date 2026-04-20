@@ -18,6 +18,7 @@ set(SOURCES
     unit_conv_solver.cpp
     )
 
+
 # We use a special entry point for HIP backend testing so we can detect and flag any HIP errors that tests don't
 # clean up themselves
 if(MIOPEN_BACKEND_HIP)
@@ -27,7 +28,6 @@ endif()
 if(MIOPEN_BACKEND_OPENCL)
   list(APPEND SKIP_TESTS dumpTensorTest.cpp)
 endif()
-
 
 # Add files to SKIP_TESTS when ASAN packaging is enabled.  These are temporary until a fix is found for
 # the hang that occurs with CK kernels.
