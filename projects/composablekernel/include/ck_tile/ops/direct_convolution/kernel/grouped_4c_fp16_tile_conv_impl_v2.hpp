@@ -4,7 +4,6 @@
 #pragma once
 
 #include "ck_tile/ops/direct_convolution/utils/matrix_layout.hpp"
-#include "ck_tile/ops/direct_convolution/utils/swizzle.hpp"
 #include "ck_tile/ops/direct_convolution/utils/types.hpp"
 #include "ck_tile/ops/direct_convolution/utils/mathutil.hpp"
 #include "ck_tile/ops/direct_convolution/utils/launch_params.hpp"
@@ -15,6 +14,7 @@
 #include "ck_tile/core/numeric/vector_type.hpp"
 #include "ck_tile/core/tensor/buffer_view.hpp"
 #include "ck_tile/core/tensor/tensor_view.hpp"
+#include "ck_tile/core/tensor/tile_distribution.hpp"
 #include <hip/hip_fp16.h>
 #include <hip/hip_runtime.h>
 #include <type_traits>
@@ -144,9 +144,6 @@ struct TileConstants
 
     using OperandLayout = MatrixLayout<MFMA_M, MFMA_K, MFMA_BATCH, __half>;
     using ResultLayout  = MatrixLayout<MFMA_N, MFMA_K, MFMA_BATCH, float>;
-    using Swizzle = std::conditional_t<cfg.swizzle_type == SwizzleType::CyclicShift, 
-        SwizzleT<cfg.block_c()>, 
-        SwizzleXOR<cfg.block_c()>>;
 
     static constexpr int GROUP_SIZE   = cfg.channels_per_group; // 4
     static constexpr int GROUP_SIZE_4 = GROUP_SIZE / 4;         // 1
@@ -169,6 +166,73 @@ struct TileConstants
     // Weight LDS staging: [kh*kw][block_groups][GROUP_SIZE] in uint2 units.
     static constexpr int WEIGHT_LDS_SIZE_UINT2 = cfg.kh * cfg.kw * cfg.block_groups() * GROUP_SIZE;
     static constexpr int WEIGHT_LDS_SIZE_UINT4 = WEIGHT_LDS_SIZE_UINT2 / 2;
+
+    // -----------------------------------------------------------------------
+    // LDS descriptor with XOR swizzle.
+    //
+    // Logical layout: [BLOCK_W, BLOCK_C8] row-major (x = row, c8 = column)
+    // Physical layout: xor_t transform maps (x, c8) → (x, c8 ^ (x % C8))
+    //   which produces flat offset x * C8 + (c8 ^ (x % C8)).
+    //
+    // This is the CK Tile equivalent of SwizzleXOR::offset_uint4(x, c8).
+    // -----------------------------------------------------------------------
+    static constexpr auto MakeInputLdsBlockDescriptor()
+    {
+        constexpr auto desc_naive = ck_tile::make_naive_tensor_descriptor(
+            ck_tile::make_tuple(ck_tile::number<BLOCK_W>{}, ck_tile::number<BLOCK_C8>{}),
+            ck_tile::make_tuple(ck_tile::number<BLOCK_C8>{}, ck_tile::number<1>{}));
+
+        return ck_tile::transform_tensor_descriptor(
+            desc_naive,
+            ck_tile::make_tuple(ck_tile::make_xor_transform(
+                ck_tile::make_tuple(ck_tile::number<BLOCK_W>{}, ck_tile::number<BLOCK_C8>{}))),
+            ck_tile::make_tuple(ck_tile::sequence<0, 1>{}),
+            ck_tile::make_tuple(ck_tile::sequence<0, 1>{}));
+    }
+
+    // Compute uint2 offset from logical (x, c4) using the uint4 descriptor.
+    //   uint2_offset = descriptor_offset(x, c8) * 2 + c4 % 2
+    // where c8 = c4 / 2.
+    static CK_TILE_DEVICE int lds_offset_uint2(int x, int c4)
+    {
+        constexpr auto desc = MakeInputLdsBlockDescriptor();
+        const int c8    = c4 / 2;
+        const int c4_lo = c4 % 2;
+        auto coord = ck_tile::make_tensor_coordinate(desc, ck_tile::make_tuple(x, c8));
+        return static_cast<int>(coord.get_offset()) * 2 + c4_lo;
+    }
+
+    // Compute uint4 offset from logical (x, c8) using the descriptor.
+    static CK_TILE_DEVICE int lds_offset_uint4(int x, int c8)
+    {
+        constexpr auto desc = MakeInputLdsBlockDescriptor();
+        auto coord = ck_tile::make_tensor_coordinate(desc, ck_tile::make_tuple(x, c8));
+        return static_cast<int>(coord.get_offset());
+    }
+
+    // -----------------------------------------------------------------------
+    // Write-path tile distribution encoding.
+    //
+    // Thread tid writes to flat LDS slot tid (= physical offset).
+    // The logical coordinates for slot tid are:
+    //   x  = tid / C8      (row in the BLOCK_W × C8 tile)
+    //   c8 = tid % C8      (column before XOR; the physical slot has XOR applied)
+    //
+    // Decomposed over (P0=warp, P1=lane):
+    //   lane = lane_hi * C8 + lane_lo,  lane_hi = lane / C8,  lane_lo = lane % C8
+    //   x  = P0 * (64 / C8) + lane_hi
+    //   c8 = lane_lo
+    // -----------------------------------------------------------------------
+    using InputLdsWriteDistribution = ck_tile::tile_distribution_encoding<
+        ck_tile::sequence<>,
+        ck_tile::tuple<ck_tile::sequence<64 / BLOCK_C8, cfg.num_waves()>,
+                        ck_tile::sequence<BLOCK_C8>>,
+        ck_tile::tuple<ck_tile::sequence<1>,
+                        ck_tile::sequence<1, 2>>,
+        ck_tile::tuple<ck_tile::sequence<1>,
+                        ck_tile::sequence<0, 0>>,
+        ck_tile::sequence<>,
+        ck_tile::sequence<>>;
 };
 
 // Workgroup-level coordinates derived from blockIdx.
@@ -264,8 +328,8 @@ struct InputLoader
               ck_tile::number<8>{})),
           store_input_lds(&input_lds[tid]),
           load_active(tid < TC::BLOCK_W * TC::BLOCK_C8),
-          col(TC::Swizzle::x(tid)),
-          c8_fp16(TC::Swizzle::c8(tid) * 8)
+          col(tid / TC::BLOCK_C8),
+          c8_fp16(((tid % TC::BLOCK_C8) ^ (tid / TC::BLOCK_C8 % TC::BLOCK_C8)) * 8)
     {
         const int global_col = (bc.block_q - px) + col;
         input_valid          = (0 <= global_col && global_col < wi);
@@ -411,16 +475,16 @@ struct OutputWriter
           out_c_fp16(0)
     {
         // Pre-compute the output LDS swizzle offset (thread-constant).
-        output_lds_offset = TC::Swizzle::offset_uint2(
+        output_lds_offset = TC::lds_offset_uint2(
             tm.thread_q, tm.wave_c64 * 16 + tm.lane_batch * TC::GROUP_SIZE_4 + tm.lane_c4);
 
         if(store_active)
         {
-            const int col = TC::Swizzle::x(tm.tid);
+            const int col = tm.tid / TC::BLOCK_C8;
             const int c8  = tm.tid % TC::BLOCK_C8;
             out_q         = bc.block_q + col;
             out_c_fp16    = (bc.block_c8 + c8) * 8;
-            load_output_lds = &output_lds[TC::Swizzle::offset_uint4(col, c8)];
+            load_output_lds = &output_lds[TC::lds_offset_uint4(col, c8)];
             store_valid     = (out_q < wo);
         }
     }
@@ -476,7 +540,6 @@ __device__ void conv2d_grouped_4c_fp16_cdna4_nhwc_impl(const _Float16* __restric
                                                        int px)
 {
     using TC = TileConstants<cfg>;
-    using Sw = typename TC::Swizzle;
 
     // --- LDS buffers ---
     __shared__ uint4 input_lds[TC::NUM_INPUT_LDS_BUFFERS * TC::INPUT_LDS_BUFFER_SIZE_C8];
@@ -521,7 +584,7 @@ __device__ void conv2d_grouped_4c_fp16_cdna4_nhwc_impl(const _Float16* __restric
     static_for<cfg.kw>(
         [&]<int S>()
         {
-            input_lds_offsets[S] = Sw::offset_uint2(
+            input_lds_offsets[S] = TC::lds_offset_uint2(
                 tm.thread_q + S,
                 tm.wave_c64 * 16 + tm.lane_batch * TC::GROUP_SIZE_4 + tm.lane_c4);
         });
