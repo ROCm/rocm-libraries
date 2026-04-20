@@ -29,12 +29,12 @@ struct DirectTileConvForward4CFp16Kernel
         void* out_ptr;
     };
 
-    static std::string GetName()
+    std::string GetName() const
     {
-        return "direct_tile_conv_grouped_4c_fp16_fwd_" + std::to_string(ConfigIdx);
+        return "direct_tile_conv_fp16_fwd_" + grouped_4c_tile::configs[ConfigIdx].GetName();
     }
 
-    static std::string GetTypeString() { return GetName(); }
+    std::string GetTypeString() const { return GetName(); }
 
     std::string GetInstanceString() const { return GetName(); }
 

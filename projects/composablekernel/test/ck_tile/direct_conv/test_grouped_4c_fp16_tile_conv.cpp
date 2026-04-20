@@ -25,8 +25,9 @@ class DirectConvGrouped4cFp16TileConvTest
 };
 
 // Config index reference:
-//   Fprop: 5 (wc64=2,wq4=8), 6 (2,4), 7 (2,2), 8 (2,1), 9 (1,1)
-//   Dgrad: 0 (wc64=2,wq4=8), 1 (2,4), 2 (2,2), 3 (2,1), 4 (1,1)
+//   Fprop (cyclic-shift swizzle): 5 (wc64=2,wq4=8), 6 (2,4), 7 (2,2), 8 (2,1), 9 (1,1)
+//   Dgrad (cyclic-shift swizzle): 0 (wc64=2,wq4=8), 1 (2,4), 2 (2,2), 3 (2,1), 4 (1,1)
+//   Fprop (XOR swizzle):         10 (wc64=2,wq4=8),11 (2,4),12 (2,2),13 (2,1),14 (1,1)
 //
 // Compatibility:
 //   waves_c64=2 requires groups % 32 == 0
@@ -150,4 +151,76 @@ TEST_F(DirectConvGrouped4cFp16TileConvTest, Dgrad_Config3_LargerSpatial)
 TEST_F(DirectConvGrouped4cFp16TileConvTest, Dgrad_Config4_LargerSpatial)
 {
     ASSERT_TRUE((RunDgrad<4>(4, 16, 16, 32, 4, 4, 3, 3, 1, 1)));
+}
+
+// =============================================================================
+// XOR swizzle — Fprop configs 10-14
+// =============================================================================
+
+// --- Fprop XOR: groups=16, only config 14 (waves_c64=1) is compatible ---
+
+TEST_F(DirectConvGrouped4cFp16TileConvTest, Fprop_XOR_Config14_Groups16_Pad1)
+{
+    ASSERT_TRUE((RunFprop<14>(1, 8, 8, 16, 4, 4, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvGrouped4cFp16TileConvTest, Fprop_XOR_Config14_Groups16_NoPad)
+{
+    ASSERT_TRUE((RunFprop<14>(1, 8, 8, 16, 4, 4, 3, 3, 0, 0)));
+}
+
+// --- Fprop XOR: groups=32, configs 12-14 compatible (8x8 input, out_w=8) ---
+
+TEST_F(DirectConvGrouped4cFp16TileConvTest, Fprop_XOR_Config12_Groups32)
+{
+    ASSERT_TRUE((RunFprop<12>(1, 8, 8, 32, 4, 4, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvGrouped4cFp16TileConvTest, Fprop_XOR_Config13_Groups32)
+{
+    ASSERT_TRUE((RunFprop<13>(1, 8, 8, 32, 4, 4, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvGrouped4cFp16TileConvTest, Fprop_XOR_Config14_Groups32)
+{
+    ASSERT_TRUE((RunFprop<14>(1, 8, 8, 32, 4, 4, 3, 3, 1, 1)));
+}
+
+// --- Fprop XOR: groups=32, 16x16 input (out_w=16), configs 11-14 compatible ---
+
+TEST_F(DirectConvGrouped4cFp16TileConvTest, Fprop_XOR_Config11_LargerSpatial)
+{
+    ASSERT_TRUE((RunFprop<11>(4, 16, 16, 32, 4, 4, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvGrouped4cFp16TileConvTest, Fprop_XOR_Config12_LargerSpatial)
+{
+    ASSERT_TRUE((RunFprop<12>(4, 16, 16, 32, 4, 4, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvGrouped4cFp16TileConvTest, Fprop_XOR_Config13_LargerSpatial)
+{
+    ASSERT_TRUE((RunFprop<13>(4, 16, 16, 32, 4, 4, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvGrouped4cFp16TileConvTest, Fprop_XOR_Config14_LargerSpatial)
+{
+    ASSERT_TRUE((RunFprop<14>(4, 16, 16, 32, 4, 4, 3, 3, 1, 1)));
+}
+
+// --- Fprop XOR: groups=64, configs 12-14 compatible (8x8 input) ---
+
+TEST_F(DirectConvGrouped4cFp16TileConvTest, Fprop_XOR_Config12_ManyGroups)
+{
+    ASSERT_TRUE((RunFprop<12>(1, 8, 8, 64, 4, 4, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvGrouped4cFp16TileConvTest, Fprop_XOR_Config13_ManyGroups)
+{
+    ASSERT_TRUE((RunFprop<13>(1, 8, 8, 64, 4, 4, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvGrouped4cFp16TileConvTest, Fprop_XOR_Config14_ManyGroups)
+{
+    ASSERT_TRUE((RunFprop<14>(1, 8, 8, 64, 4, 4, 3, 3, 1, 1)));
 }

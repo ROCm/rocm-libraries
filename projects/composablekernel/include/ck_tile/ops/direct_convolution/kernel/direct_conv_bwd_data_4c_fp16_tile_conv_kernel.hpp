@@ -36,12 +36,12 @@ struct DirectTileConvBwdData4CFp16Kernel
         void* out_ptr;       // input gradient (kernel writes this)
     };
 
-    static std::string GetName()
+    std::string GetName() const
     {
-        return "direct_tile_conv_grouped_4c_fp16_bwd_data_" + std::to_string(ConfigIdx);
+        return "direct_tile_conv_fp16_bwd_data_" + grouped_4c_tile::configs[ConfigIdx].GetName();
     }
 
-    static std::string GetTypeString() { return GetName(); }
+    std::string GetTypeString() const { return GetName(); }
 
     std::string GetInstanceString() const { return GetName(); }
 

@@ -17,6 +17,8 @@
 #include "ck_tile/core/tensor/tensor_view.hpp"
 #include <hip/hip_fp16.h>
 #include <hip/hip_runtime.h>
+#include <type_traits>
+#include <string>
 
 namespace ck_tile::direct_conv::grouped_4c_tile
 {
@@ -63,6 +65,9 @@ struct Config
 
     Direction direction = Direction::Fprop;
 
+    // Swizzle pattern - by default use HIP conv SwizzleT.
+    SwizzleType swizzle_type = SwizzleType::CyclicShift;
+
     // Total number of waves.
     constexpr int num_waves() const { return waves_c64 * waves_q4; }
 
@@ -77,6 +82,14 @@ struct Config
 
     // Number of threads per workgroup (thread block).
     constexpr int block_size() const { return num_waves() * WAVE_SIZE; }
+
+    std::string GetName() const
+    { 
+        if (swizzle_type == SwizzleType::CyclicShift)
+            return "grouped_4c_swizzleT";
+        else
+            return "grouped_4c_swizzleXOR"; 
+    }
 };
 
 // All instantiated configurations. The first valid config is expected to be the fastest.
@@ -91,6 +104,11 @@ constexpr Config configs[] = {
     {.waves_c64 = 2, .waves_q4 = 2},
     {.waves_c64 = 2, .waves_q4 = 1},
     {.waves_c64 = 1, .waves_q4 = 1},
+    {.waves_c64 = 2, .waves_q4 = 8, .swizzle_type = SwizzleType::XOR},
+    {.waves_c64 = 2, .waves_q4 = 4, .swizzle_type = SwizzleType::XOR},
+    {.waves_c64 = 2, .waves_q4 = 2, .swizzle_type = SwizzleType::XOR},
+    {.waves_c64 = 2, .waves_q4 = 1, .swizzle_type = SwizzleType::XOR},
+    {.waves_c64 = 1, .waves_q4 = 1, .swizzle_type = SwizzleType::XOR},
 };
 
 constexpr int NUM_CONFIGS = sizeof(configs) / sizeof(configs[0]);
@@ -142,7 +160,9 @@ struct TileConstants
 
     using OperandLayout = MatrixLayout<MFMA_M, MFMA_K, MFMA_BATCH, __half>;
     using ResultLayout  = MatrixLayout<MFMA_N, MFMA_K, MFMA_BATCH, float>;
-    using Sw            = SwizzleT<cfg.block_c()>;
+    using Swizzle = std::conditional_t<cfg.swizzle_type == SwizzleType::CyclicShift, 
+        SwizzleT<cfg.block_c()>, 
+        SwizzleXOR<cfg.block_c()>>;
 
     static constexpr int GROUP_SIZE   = cfg.channels_per_group; // 4
     static constexpr int GROUP_SIZE_4 = GROUP_SIZE / 4;         // 1
@@ -176,8 +196,8 @@ struct BlockCoords
     int block_group;
     int block_k;
     int block_c8;
-    int C;
-    int C8;
+    int C; // Total number of input channels.
+    int C8; // Total number of input channels in uint4 vector units.
 
     __device__ BlockCoords(int groups)
         : C(groups * cfg.channels_per_group), C8(C / 8)
@@ -255,13 +275,13 @@ struct InputLoader
         : input_view(ck_tile::make_naive_tensor_view<ck_tile::address_space_enum::global>(
               in + static_cast<size_t>(bc.block_n) * hi * wi * bc.C +
                   static_cast<size_t>(bc.block_q - px) * bc.C + bc.block_k,
-              ck_tile::make_tuple(hi, ck_tile::number<TC::BLOCK_W>{}, bc.C8 * 8),
+              ck_tile::make_tuple(hi, ck_tile::number<TC::BLOCK_W>{}, bc.C),
               ck_tile::make_tuple(wi * bc.C, bc.C, ck_tile::number<1>{}),
               ck_tile::number<8>{})),
           store_input_lds(&input_lds[tid]),
           load_active(tid < TC::BLOCK_W * TC::BLOCK_C8),
-          col(TC::Sw::x(tid)),
-          c8_fp16(TC::Sw::c8(tid) * 8)
+          col(TC::Swizzle::x(tid)),
+          c8_fp16(TC::Swizzle::c8(tid) * 8)
     {
         const int global_col = (bc.block_q - px) + col;
         input_valid          = (0 <= global_col && global_col < wi);
@@ -407,16 +427,16 @@ struct OutputWriter
           out_c_fp16(0)
     {
         // Pre-compute the output LDS swizzle offset (thread-constant).
-        output_lds_offset = TC::Sw::offset_uint2(
+        output_lds_offset = TC::Swizzle::offset_uint2(
             tm.thread_q, tm.wave_c64 * 16 + tm.lane_batch * TC::GROUP_SIZE_4 + tm.lane_c4);
 
         if(store_active)
         {
-            const int col = TC::Sw::x(tm.tid);
+            const int col = TC::Swizzle::x(tm.tid);
             const int c8  = tm.tid % TC::BLOCK_C8;
             out_q         = bc.block_q + col;
             out_c_fp16    = (bc.block_c8 + c8) * 8;
-            load_output_lds = &output_lds[TC::Sw::offset_uint4(col, c8)];
+            load_output_lds = &output_lds[TC::Swizzle::offset_uint4(col, c8)];
             store_valid     = (out_q < wo);
         }
     }
@@ -472,7 +492,7 @@ __device__ void conv2d_grouped_4c_fp16_cdna4_nhwc_impl(const _Float16* __restric
                                                        int px)
 {
     using TC = TileConstants<cfg>;
-    using Sw = typename TC::Sw;
+    using Sw = typename TC::Swizzle;
 
     // --- LDS buffers ---
     __shared__ uint4 input_lds[TC::NUM_INPUT_LDS_BUFFERS * TC::INPUT_LDS_BUFFER_SIZE_C8];
