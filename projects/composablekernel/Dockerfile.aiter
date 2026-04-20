@@ -32,6 +32,7 @@ RUN pip install pandas zmq einops ninja tabulate vcs_versioning && \
     rm -rf 3rdparty/composable_kernel/ && \
     git clone -b "$CK_AITER_BRANCH" ../ck 3rdparty/composable_kernel/ && \
     python3 setup.py develop && \
+    groupadd -f render && \
     groupadd -g 1001 jenkins && \
     useradd -u 1001 -g 1001 -m -s /bin/bash jenkins && \
     chown -R jenkins:jenkins /home/jenkins && \
