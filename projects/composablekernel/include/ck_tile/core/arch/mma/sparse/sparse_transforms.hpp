@@ -96,9 +96,7 @@ struct SparseCompressTransform
 
         const auto idx = sparse::detail::compress_a_impl<ScalarT, CompressedSize>(v);
 
-        // TODO c++20: Use bit_cast
-        return std::tuple<VecCompressed&, int32_t>(
-            *std::launder(reinterpret_cast<VecCompressed*>(&v)), idx);
+        return std::tuple<VecCompressed&, int32_t>(*ck_tile::bit_cast<VecCompressed*>(&v), idx);
     }
 };
 
