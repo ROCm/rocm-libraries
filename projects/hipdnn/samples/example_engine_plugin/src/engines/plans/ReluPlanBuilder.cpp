@@ -53,12 +53,7 @@ bool ReluPlanBuilder::isApplicable(
 
     // Only FLOAT data type is supported; HALF/BFLOAT16 are not yet implemented
     const auto& nodeWrapper = opGraph.getNodeWrapper(0);
-    if(nodeWrapper.computeDataType() != DataType::FLOAT)
-    {
-        return false;
-    }
-
-    return true;
+    return nodeWrapper.computeDataType() == DataType::FLOAT;
 }
 
 size_t ReluPlanBuilder::getMaxWorkspaceSize(
@@ -132,8 +127,8 @@ void ReluPlanBuilder::buildPlan(
     // Get negative slope from execution settings
     const auto& settings = executionContext.executionSettings();
 
-    ReluParams params{inputUid, outputUid, numElements, settings.reluNegativeSlope};
-    auto plan = std::make_unique<ReluPlan>(std::move(params));
+    const ReluParams params{inputUid, outputUid, numElements, settings.reluNegativeSlope};
+    auto plan = std::make_unique<ReluPlan>(params);
     plan->compile(_compiler);
 
     executionContext.setPlan(std::move(plan));
@@ -152,13 +147,13 @@ std::vector<hipdnn_data_sdk::data_objects::KnobT> ReluPlanBuilder::getCustomKnob
     // Default value: 0.0 (standard ReLU)
     hipdnn_data_sdk::data_objects::FloatValueT defaultValue;
     defaultValue.value = 0.0;
-    knob.default_value.Set(std::move(defaultValue));
+    knob.default_value.Set(defaultValue);
 
     // Constraint: 0.0 to 1.0
     hipdnn_data_sdk::data_objects::FloatConstraintT constraint;
     constraint.min_value = 0.0;
     constraint.max_value = 1.0;
-    knob.constraint.Set(std::move(constraint));
+    knob.constraint.Set(constraint);
 
     knobs.push_back(std::move(knob));
     return knobs;
