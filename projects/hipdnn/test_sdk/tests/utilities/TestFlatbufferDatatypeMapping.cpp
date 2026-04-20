@@ -7,7 +7,7 @@
 #include <hipdnn_test_sdk/utilities/FlatbufferDatatypeMapping.hpp>
 
 using namespace hipdnn_test_sdk::utilities;
-using namespace hipdnn_data_sdk::data_objects;
+using namespace hipdnn_flatbuffers_sdk::data_objects;
 
 // Compile-time checks for DataType to Native type mapping
 static_assert(std::is_same_v<DataTypeToNative<DataType::FLOAT>, float>);
