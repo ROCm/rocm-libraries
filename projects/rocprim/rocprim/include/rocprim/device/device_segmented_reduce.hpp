@@ -73,7 +73,9 @@ inline hipError_t segmented_reduce_impl(void*          temporary_storage,
 
     const unsigned int block_size = params.kernel_config.block_size;
 
-    
+    const size_t max_segments = (1ULL << 24) / static_cast<size_t>(block_size);
+
+/*    
 if (static_cast<uint64_t>(segments) * static_cast<uint64_t>(block_size) > (1ULL << 32)) {
     return hipErrorInvalidConfiguration;
     // Error message: "num_segments × block_size exceeds HSA 2^32 thread limit.
@@ -81,7 +83,7 @@ if (static_cast<uint64_t>(segments) * static_cast<uint64_t>(block_size) > (1ULL 
     // There doesn't seem to be any way to set an error message.  It's not done anywhere else that
     // I can find.
 }
-
+*/
 
     if(temporary_storage == nullptr)
     {
@@ -101,6 +103,37 @@ if (static_cast<uint64_t>(segments) * static_cast<uint64_t>(block_size) > (1ULL 
     {
         start = std::chrono::steady_clock::now();
     }
+
+for (size_t offset = 0; offset < segments; offset += max_segments) {
+    printf("offset: %zu\n", offset);
+    printf("segments: %zu\n", segments);
+    size_t remaining_segments = segments - offset;
+    printf("remaining_segments: %zu\n", remaining_segments);
+    size_t batch = std::min(max_segments, remaining_segments);
+    printf("batch: %zu\n", batch);
+
+    auto segmented_reduce_kernel = [=](auto target_config)
+    {
+        segmented_reduce<decltype(target_config)>(input,
+                                                  output + offset,
+                                                  begin_offsets + offset,
+                                                  end_offsets + offset,
+                                                  reduce_op,
+                                                  static_cast<result_type>(initial_value));
+    };
+
+    ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<Config, Selector>(current_target,
+                                                                  segmented_reduce_kernel,
+                                                                  dim3(batch), //dim3(segments),
+                                                                  dim3(block_size),
+                                                                  0,
+                                                                  stream));
+    ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("segmented_reduce",
+                                                batch, //segments,
+                                                start);
+}
+
+/*
     auto segmented_reduce_kernel = [=](auto target_config)
     {
         segmented_reduce<decltype(target_config)>(input,
@@ -117,8 +150,10 @@ if (static_cast<uint64_t>(segments) * static_cast<uint64_t>(block_size) > (1ULL 
                                                                   dim3(block_size),
                                                                   0,
                                                                   stream));
-    ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("segmented_reduce", segments, start);
-
+    ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("segmented_reduce",
+                                                segments,
+                                                start);
+*/
     return hipSuccess;
 }
 
