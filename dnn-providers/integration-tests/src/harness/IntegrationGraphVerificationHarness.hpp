@@ -132,8 +132,6 @@ protected:
         // --skip-graph-validation: graph is confirmed supported, exit early with PASS
         if(TestConfig::get().skipGraphValidation())
         {
-            HIPDNN_PLUGIN_LOG_INFO("--skip-graph-validation: graph is supported, skipping "
-                                   "execution and validation");
             return;
         }
 
