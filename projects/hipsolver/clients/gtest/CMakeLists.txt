@@ -113,7 +113,7 @@ target_include_directories(hipsolver-test
 )
 
 target_link_libraries(hipsolver-test PRIVATE
-  ${LAPACK_LIBRARIES}
+  lapack_libraries
   hipsolver-common
   clients-common
   $<IF:$<TARGET_EXISTS:GTest::gtest>,GTest::gtest,GTest::GTest>

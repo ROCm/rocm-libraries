@@ -81,7 +81,7 @@ option(BUILD_HIPSPARSE_TESTS "Build additional tests to cover sparse functionali
 # BUILD_SHARED_LIBS is a cmake built-in; we make it an explicit option such that it shows in cmake-gui
 option(BUILD_WITH_SPARSE "Build hipSOLVER with sparse functionality available at build time (requires installed dependencies)" OFF)
 option(BUILD_VERBOSE "Output additional build information" OFF)
-option(HIPSOLVER_FIND_PACKAGE_LAPACK_CONFIG "Skip module mode search for LAPACK" ON)
+option(HIPSOLVER_FIND_PACKAGE_LAPACK_CONFIG "Skip module mode search for LAPACK" OFF)
 option(BUILD_FORTRAN_BINDINGS "Build the Fortran bindings" "${UNIX}")
 
 if(NOT BUILD_SHARED_LIBS)
@@ -144,26 +144,64 @@ if(HIP_PLATFORM STREQUAL nvidia)
 endif()
 
 if(NOT "${HIP_PLATFORM}" STREQUAL "nvidia")
-  # TODO: This LAPACK dependency is only required to support geev
-  # It should be removed once geev is implemented in rocSOLVER
+    # TODO: This LAPACK dependency is only required to support geev
+    # It should be removed once geev is implemented in rocSOLVER
+    option(HIPSOLVER_INTERNAL_LAPACK_BUILD "Link to a locally built, static, OpenBLAS library -- required to support geev, will be removed once geev is implemented in rocSOLVER" ON)
+    if(HIPSOLVER_INTERNAL_LAPACK_BUILD)
+        set(LAPACK_SOURCE_DIR ${CMAKE_CURRENT_BINARY_DIR}/lapack-src)
+        set(LAPACK_BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR}/lapack-bin)
+        set(LAPACK_BUILD_BYPRODUCTS ${LAPACK_BINARY_DIR}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}openblas${CMAKE_STATIC_LIBRARY_SUFFIX})
 
-  # Some CPU side functionality is provided by external lapack
-  # Linking lapack library requires fortran flags
-  set(THREADS_PREFER_PTHREAD_FLAG ON)
-  find_package(Threads REQUIRED)
-  if(HIPSOLVER_FIND_PACKAGE_LAPACK_CONFIG)
-    find_package(LAPACK 3.7 REQUIRED CONFIG)
-  else()
-    find_package(LAPACK 3.7 REQUIRED)
-  endif()
+        include(ExternalProject)
+        ExternalProject_Add(hipsolver-static-lapack
+            BUILD_BYPRODUCTS    ${LAPACK_BUILD_BYPRODUCTS}
+            GIT_REPOSITORY      https://github.com/OpenMathLib/OpenBLAS
+            GIT_TAG             develop
+            SOURCE_DIR          ${LAPACK_SOURCE_DIR}
+            BINARY_DIR          ${LAPACK_BINARY_DIR}
+            CMAKE_ARGS          -DC_LAPACK=ON
+                                -DNOFORTRAN=ON
+                                -DBUILD_STATIC_LIBS=ON
+                                -DBUILD_LAPACK_DEPRECATED=OFF
+                                -DBUILD_TESTING=OFF
+                                -DBUILD_BENCHMARKS=OFF
+                                -DUSE_OPENMP=OFF
+                                -DUSE_THREAD=OFF
+                                -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
+            INSTALL_COMMAND     ""
+        )
 
-  if(NOT LAPACK_LIBRARIES)
-    message("Using manually specified LAPACK")
-    set(LAPACK_LIBRARIES
-      ${LAPACK_blas_LIBRARIES}
-      ${LAPACK_lapack_LIBRARIES}
-    )
-  endif()
+        add_library(lapack_libraries STATIC IMPORTED)
+        set_target_properties(lapack_libraries PROPERTIES
+            IMPORTED_LOCATION ${LAPACK_BUILD_BYPRODUCTS}
+        )
+        add_dependencies(lapack_libraries hipsolver-static-lapack)
+    else() # NOT HIPSOLVER_INTERNAL_LAPACK_BUILD
+        # Some CPU side functionality is provided by external lapack
+        # Linking lapack library requires fortran flags
+        set(THREADS_PREFER_PTHREAD_FLAG ON)
+        find_package(Threads REQUIRED)
+        if(HIPSOLVER_FIND_PACKAGE_LAPACK_CONFIG)
+            find_package(LAPACK 3.7 REQUIRED CONFIG)
+        else()
+            find_package(LAPACK 3.7 REQUIRED)
+        endif()
+
+        if(NOT LAPACK_LIBRARIES)
+            set(LAPACK_LIBRARIES
+                ${LAPACK_blas_LIBRARIES}
+                ${LAPACK_lapack_LIBRARIES}
+            )
+        endif()
+
+        if(NOT TARGET lapack_libraries)
+            add_library(lapack_libraries INTERFACE)
+            message("Using manually specified LAPACK")
+            target_link_libraries(lapack_libraries INTERFACE
+                ${LAPACK_LIBRARIES}
+            )
+        endif()
+    endif()
 endif()
 
 
