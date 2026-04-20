@@ -335,7 +335,7 @@ TEST(TestCalculatePointwiseTolerance, DetectsFailure)
         1.0, PointwiseErrorClass::TRANSCENDENTAL_FWD);
 
     auto validator = hipdnn_test_sdk::utilities::createAllCloseValidator(
-        hipdnn_data_sdk::data_objects::DataType::FLOAT, tol, 0);
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT, tol, 0);
 
     bool valid = validator->allClose(*baseline, *actualPassing);
     EXPECT_TRUE(valid);
@@ -372,9 +372,9 @@ TEST(TestCalculatePointwiseTolerance, BackwardToleranceExceedsForward)
 // and isBoundedOutput for code coverage.
 // =================================================================================================
 
-using hipdnn_data_sdk::data_objects::EnumNamesPointwiseMode;
-using hipdnn_data_sdk::data_objects::EnumValuesPointwiseMode;
-using hipdnn_data_sdk::data_objects::PointwiseMode;
+using hipdnn_flatbuffers_sdk::data_objects::EnumNamesPointwiseMode;
+using hipdnn_flatbuffers_sdk::data_objects::EnumValuesPointwiseMode;
+using hipdnn_flatbuffers_sdk::data_objects::PointwiseMode;
 
 // Verify one representative per error class for correctness
 TEST(TestClassifyPointwiseOp, OnePerClassCorrect)

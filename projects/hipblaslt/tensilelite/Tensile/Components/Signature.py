@@ -318,4 +318,4 @@ class SignatureDefault(Signature):
         signature.addDescriptionBlock("GlobalReadVectorWidthA=%u, GlobalReadVectorWidthB=%u" % (glvwA, glvwB) )
         signature.addDescriptionBlock("DirectToLdsA=%s" % d2lA )
         signature.addDescriptionBlock("DirectToLdsB=%s" % d2lB )
-        signature.addDescriptionBlock("UseSgprForGRO=%s" % useSgprForGRO )
+        signature.addDescriptionBlock("UseSgprForGRO=%s" % ("True" if useSgprForGRO else "False") )

@@ -3,8 +3,8 @@
 
 #include <gtest/gtest.h>
 
-#include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 
 #include "HipKernelHandle.hpp"
@@ -29,8 +29,8 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableReturnsFalseForNonSdpaGraph)
     // Create a batchnorm inference graph - this does not use SDPA attributes
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
 
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
+        builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_FALSE(_planBuilder.isApplicable(_handle, graphWrapper));
 }
@@ -46,15 +46,16 @@ struct GraphTest
     {
     }
 
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graphWrapper() const
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper() const
     {
-        return hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper(buffer->data(), buffer->size());
+        return hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(buffer->data(),
+                                                                          buffer->size());
     }
 };
 
 auto createSdpaFwdGraph(const std::vector<int64_t>& dims = {4, 8, 256, 128},
-                        hipdnn_data_sdk::data_objects::DataType dataType
-                        = hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
+                        hipdnn_flatbuffers_sdk::data_objects::DataType dataType
+                        = hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
                         bool withAttnMask = false,
                         bool withScale = false,
                         bool withStats = false,
@@ -82,7 +83,7 @@ auto createSdpaFwdGraph(const std::vector<int64_t>& dims = {4, 8, 256, 128},
 
 TEST_F(TestSdpaFwdPlanBuilder, IsApplicableSdpaVariations)
 {
-    using namespace hipdnn_data_sdk::data_objects;
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
 
     if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
     {
@@ -127,8 +128,8 @@ TEST_F(TestSdpaFwdPlanBuilder, GetMaxWorkspaceSizeCalculatesCorrectly)
     // Create an SDPA graph with known dimensions (withStats = false by default)
     auto builder = hipdnn_test_sdk::utilities::createValidSdpaFwdGraph();
 
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
+        builder.GetBufferPointer(), builder.GetSize());
 
     // Get the workspace size from the plan builder
     HipKernelSettings settings;

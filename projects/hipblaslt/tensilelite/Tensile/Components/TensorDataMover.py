@@ -4,7 +4,7 @@ from typing import Mapping, Optional
 from rocisa.code import Module
 from rocisa.instruction import SMovB32, SMovB64, SOrB32, SAndB32, SLShiftLeftB32, \
     SLShiftRightB32, SAddU32, SAddCU32, SMulI32, TensorLoadToLds, VReadfirstlaneB32, SMulLOU32
-from rocisa.container import sgpr, vgpr, RegisterContainer
+from rocisa.container import sgpr, vgpr, RegisterContainer, MemTokenData
 from math import log2, ceil, prod
 # from ..KernelWriterAssembly import KernelWriterAssembly
 
@@ -15,6 +15,10 @@ class TensorDataMoverLoad(TensorDataMover):
     GROUP1_NUM_SGPR = 8
     GROUP2_NUM_SGPR = 4
     GROUP3_NUM_SGPR = 4
+    mem_token = None
+
+    def setMemToken(self, mem_token: list[int]):
+        self.mem_token = mem_token
 
     def __call__(self, writer: "KernelWriterAssembly", kernel: Mapping, tp: Mapping):
         pass
@@ -98,11 +102,16 @@ class TensorDataMoverLoad(TensorDataMover):
     def issueLoad(self, group0: int | str, group1: int | str, group2: Optional[int | str], group3: Optional[int | str]) -> Module:
         mod = Module("tensor load")
         if all(g is not None for g in [group2, group3]):
-            mod.add(TensorLoadToLds(sgpr(group0, self.GROUP0_NUM_SGPR), sgpr(group1, self.GROUP1_NUM_SGPR),\
-                                    sgpr(group2, self.GROUP2_NUM_SGPR), sgpr(group3, self.GROUP3_NUM_SGPR)))
+            tensorLoadToLds = TensorLoadToLds(sgpr(group0, self.GROUP0_NUM_SGPR), sgpr(group1, self.GROUP1_NUM_SGPR),\
+                                              sgpr(group2, self.GROUP2_NUM_SGPR), sgpr(group3, self.GROUP3_NUM_SGPR))
         else:
-            mod.add(TensorLoadToLds(sgpr(group0, self.GROUP0_NUM_SGPR), sgpr(group1, self.GROUP1_NUM_SGPR),\
-                                    None, None))
+            tensorLoadToLds = TensorLoadToLds(sgpr(group0, self.GROUP0_NUM_SGPR), sgpr(group1, self.GROUP1_NUM_SGPR),\
+                                              None, None)
+
+        if self.mem_token is not None:
+            tensorLoadToLds.setMemToken(MemTokenData(self.mem_token))
+
+        mod.add(tensorLoadToLds)
         return mod
 
     def initOperands(self, group0: int | str, group1: int | str, group2: Optional[int | str], group3: Optional[int | str]) -> Module:

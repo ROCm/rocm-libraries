@@ -5,9 +5,9 @@
 
 #include <optional>
 
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
-#include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
-#include <hipdnn_data_sdk/utilities/FlatbufferUtils.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceLayernorm.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferDatatypeMapping.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/IGraphNodePlanBuilder.hpp>
@@ -22,14 +22,15 @@ struct LayernormFpropParams
 {
     LayernormFpropParams() = default;
     LayernormFpropParams(
-        const hipdnn_data_sdk::data_objects::TensorAttributes& xAttributes,
-        const hipdnn_data_sdk::data_objects::TensorAttributes& yAttributes,
-        const hipdnn_data_sdk::data_objects::TensorAttributes& epsilonAttributes,
-        const hipdnn_data_sdk::data_objects::TensorAttributes& scaleAttributes,
-        const hipdnn_data_sdk::data_objects::TensorAttributes& biasAttributes,
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& xAttributes,
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& yAttributes,
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& epsilonAttributes,
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& scaleAttributes,
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& biasAttributes,
         const int64_t normalizedDimCount,
-        const hipdnn_data_sdk::data_objects::TensorAttributes* meanAttributes = nullptr,
-        const hipdnn_data_sdk::data_objects::TensorAttributes* invVarianceAttributes = nullptr)
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* meanAttributes = nullptr,
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* invVarianceAttributes
+        = nullptr)
         : xTensor(unpackTensorAttributes(xAttributes))
         , yTensor(unpackTensorAttributes(yAttributes))
         , epsilonTensor(unpackTensorAttributes(epsilonAttributes))
@@ -45,14 +46,14 @@ struct LayernormFpropParams
     {
     }
 
-    hipdnn_data_sdk::data_objects::TensorAttributesT xTensor;
-    hipdnn_data_sdk::data_objects::TensorAttributesT yTensor;
-    hipdnn_data_sdk::data_objects::TensorAttributesT epsilonTensor;
-    hipdnn_data_sdk::data_objects::TensorAttributesT scaleTensor;
-    hipdnn_data_sdk::data_objects::TensorAttributesT biasTensor;
+    hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT xTensor;
+    hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT yTensor;
+    hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT epsilonTensor;
+    hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT scaleTensor;
+    hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT biasTensor;
     int64_t normalizedDimCount;
-    std::optional<hipdnn_data_sdk::data_objects::TensorAttributesT> meanTensor;
-    std::optional<hipdnn_data_sdk::data_objects::TensorAttributesT> invVarianceTensor;
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> meanTensor;
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> invVarianceTensor;
 };
 
 template <typename XDataType,
@@ -91,7 +92,7 @@ public:
             _params.yTensor, variantPack.at(_params.yTensor.uid));
 
         // Extract epsilon from pass-by-value tensor (cast to double)
-        const double epsilon = hipdnn_data_sdk::utilities::extractDoubleFromTensorValue(
+        const double epsilon = hipdnn_flatbuffers_sdk::utilities::extractDoubleFromTensorValue(
             _params.epsilonTensor, "Epsilon");
 
         // Scale tensor (required)
@@ -138,11 +139,11 @@ private:
     LayernormFpropParams _params;
 };
 
-template <hipdnn_data_sdk::data_objects::DataType XDataTypeEnum,
-          hipdnn_data_sdk::data_objects::DataType ScaleBiasDataTypeEnum,
-          hipdnn_data_sdk::data_objects::DataType MeanInvVarianceDataTypeEnum,
-          hipdnn_data_sdk::data_objects::DataType OutputDataTypeEnum,
-          hipdnn_data_sdk::data_objects::DataType ComputeDataTypeEnum>
+template <hipdnn_flatbuffers_sdk::data_objects::DataType XDataTypeEnum,
+          hipdnn_flatbuffers_sdk::data_objects::DataType ScaleBiasDataTypeEnum,
+          hipdnn_flatbuffers_sdk::data_objects::DataType MeanInvVarianceDataTypeEnum,
+          hipdnn_flatbuffers_sdk::data_objects::DataType OutputDataTypeEnum,
+          hipdnn_flatbuffers_sdk::data_objects::DataType ComputeDataTypeEnum>
 class LayernormFpropPlanBuilder : public IGraphNodePlanBuilder
 {
 public:
@@ -153,8 +154,9 @@ public:
     using ComputeDataType = utilities::DataTypeToNative<ComputeDataTypeEnum>;
 
     bool isApplicable(
-        const hipdnn_data_sdk::data_objects::Node& node,
-        const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        const hipdnn_flatbuffers_sdk::data_objects::Node& node,
+        const std::unordered_map<int64_t,
+                                 const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
             tensorMap) const override
     {
         if(node.compute_data_type() != ComputeDataTypeEnum)
@@ -200,8 +202,8 @@ public:
     }
 
     std::unique_ptr<IGraphNodePlanExecutor>
-        buildNodePlan(const hipdnn_data_sdk::flatbuffer_utilities::IGraph& graph,
-                      const hipdnn_data_sdk::data_objects::Node& node) const override
+        buildNodePlan(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph,
+                      const hipdnn_flatbuffers_sdk::data_objects::Node& node) const override
     {
         const auto* nodeAttributes = node.attributes_as_LayernormAttributes();
         if(nodeAttributes == nullptr)
@@ -211,8 +213,8 @@ public:
 
         const auto& tensorMap = graph.getTensorMap();
 
-        const hipdnn_data_sdk::data_objects::TensorAttributes* mean = nullptr;
-        const hipdnn_data_sdk::data_objects::TensorAttributes* invVariance = nullptr;
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* mean = nullptr;
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* invVariance = nullptr;
 
         if(nodeAttributes->mean_tensor_uid().has_value())
         {
