@@ -301,7 +301,7 @@ int runGemm(size_t         m,
 
     if(activation != ActivationType::None)
     {
-        contraction.setActivationType(ActivationType::All);
+        contraction.setActivationType(activation);
         contraction.setParams().setActivationEnum(activation);
     }
 
