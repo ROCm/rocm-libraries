@@ -16,9 +16,9 @@ namespace asm_sdpa_engine
 
 bool SdpaFwdPlanBuilder::isApplicable(
     const HipKernelHandle& handle,
-    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
-    using namespace hipdnn_data_sdk::data_objects;
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
     // NOLINTNEXTLINE(readability-identifier-naming)
     static const char* HIP_KERNEL_LOG_PREFIX = "[SdpaFwdPlanBuilder::isApplicable] ";
 
@@ -103,7 +103,7 @@ bool SdpaFwdPlanBuilder::isApplicable(
 
 size_t SdpaFwdPlanBuilder::getMaxWorkspaceSize(
     const HipKernelHandle& /* handle */,
-    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& /* opGraph */,
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& /* opGraph */,
     const HipKernelSettings& /* executionSettings */) const
 {
     // Forward-only kernel uses 64KB LDS internally, no external workspace needed
@@ -113,8 +113,8 @@ size_t SdpaFwdPlanBuilder::getMaxWorkspaceSize(
 
 void SdpaFwdPlanBuilder::initializeExecutionSettings(
     const HipKernelHandle& /* handle */,
-    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& /* opGraph */,
-    const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& /* engineConfig */,
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& /* opGraph */,
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& /* engineConfig */,
     HipKernelSettings& /* executionSettings */) const
 {
     HIPDNN_PLUGIN_LOG_ERROR("SdpaFwdPlanBuilder::initializeExecutionContext not implemented");
@@ -122,8 +122,8 @@ void SdpaFwdPlanBuilder::initializeExecutionSettings(
 
 void SdpaFwdPlanBuilder::buildPlan(
     const HipKernelHandle& /* handle */,
-    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
-    const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& /* engineConfig */,
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& /* engineConfig */,
     HipKernelContext& executionContext) const
 {
     // Load kernel module
@@ -155,7 +155,7 @@ void SdpaFwdPlanBuilder::buildPlan(
 
     // Extract SDPA attributes and tensor metadata
     auto& sdpaNode = opGraph.getNodeWrapper(0);
-    auto& sdpaAttrs = sdpaNode.attributesAs<hipdnn_data_sdk::data_objects::SdpaAttributes>();
+    auto& sdpaAttrs = sdpaNode.attributesAs<hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes>();
     auto& tensorMap = opGraph.getTensorMap();
 
     // Get tensor UIDs
@@ -250,9 +250,9 @@ void SdpaFwdPlanBuilder::buildPlan(
     executionContext.setPlan(std::make_unique<SdpaFwdPlan>(module, function, params));
 }
 
-std::vector<hipdnn_data_sdk::data_objects::KnobT> SdpaFwdPlanBuilder::getCustomKnobs(
+std::vector<hipdnn_flatbuffers_sdk::data_objects::KnobT> SdpaFwdPlanBuilder::getCustomKnobs(
     const HipKernelHandle& /* handle */,
-    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& /* opGraph */) const
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& /* opGraph */) const
 {
     return {};
 }

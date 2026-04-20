@@ -25,26 +25,27 @@ hipdnnPluginDeviceBuffer_t findDeviceBuffer(int64_t uid,
 }
 
 miopenDataType_t
-    tensorDataTypeToMiopenDataType(const hipdnn_data_sdk::data_objects::DataType& dataType)
+    tensorDataTypeToMiopenDataType(const hipdnn_flatbuffers_sdk::data_objects::DataType& dataType)
 {
     switch(dataType)
     {
-    case hipdnn_data_sdk::data_objects::DataType::FLOAT:
+    case hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT:
         return miopenFloat;
-    case hipdnn_data_sdk::data_objects::DataType::HALF:
+    case hipdnn_flatbuffers_sdk::data_objects::DataType::HALF:
         return miopenHalf;
-    case hipdnn_data_sdk::data_objects::DataType::BFLOAT16:
+    case hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16:
         return miopenBFloat16;
     default:
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
             "Unsupported data type for MIOpen: "
-                + std::string(hipdnn_data_sdk::data_objects::toString(dataType)));
+                + std::string(hipdnn_flatbuffers_sdk::data_objects::toString(dataType)));
     }
 }
 
-const hipdnn_data_sdk::data_objects::TensorAttributes& findTensorAttributes(
-    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& findTensorAttributes(
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
         tensorMap,
     int64_t uid)
 {
@@ -59,7 +60,8 @@ const hipdnn_data_sdk::data_objects::TensorAttributes& findTensorAttributes(
 }
 
 MiopenTensor createTensor(
-    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
         tensorMap,
     int64_t uid)
 {
@@ -68,7 +70,8 @@ MiopenTensor createTensor(
 }
 
 MiopenTensor createBatchnormTensor(
-    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
         tensorMap,
     int64_t uid)
 {
@@ -109,7 +112,7 @@ MiopenTensor createBatchnormTensor(
     return {uid, tensorAttr.data_type(), dims, strides};
 }
 
-size_t getSpatialDimCount(const hipdnn_data_sdk::data_objects::TensorAttributes& attr)
+size_t getSpatialDimCount(const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& attr)
 {
     if(attr.dims()->size() < 3)
     {
@@ -123,9 +126,9 @@ size_t getSpatialDimCount(const hipdnn_data_sdk::data_objects::TensorAttributes&
 }
 
 ActivationParams mapPointwiseModeToMiopenActivation(
-    const hipdnn_data_sdk::data_objects::PointwiseAttributes& attrs)
+    const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& attrs)
 {
-    using PM = hipdnn_data_sdk::data_objects::PointwiseMode;
+    using PM = hipdnn_flatbuffers_sdk::data_objects::PointwiseMode;
 
     switch(attrs.operation())
     {

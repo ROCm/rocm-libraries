@@ -4,6 +4,7 @@
 #pragma once
 
 #include "ReductionTensorBundles.hpp"
+#include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_frontend/Graph.hpp>
 #include <hipdnn_frontend/Utilities.hpp>
 #include <hipdnn_frontend/attributes/ReductionAttributes.hpp>
@@ -17,8 +18,8 @@ template <typename InputType>
 static std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
                   std::unordered_map<int64_t, void*>>
     buildReductionGraph(ReductionTensorBundle<InputType>& tensorBundle,
-                        hipdnn_data_sdk::data_objects::DataType inputDataType,
-                        hipdnn_data_sdk::data_objects::DataType computeDataType,
+                        hipdnn_flatbuffers_sdk::data_objects::DataType inputDataType,
+                        hipdnn_flatbuffers_sdk::data_objects::DataType computeDataType,
                         hipdnn_frontend::ReductionMode mode = hipdnn_frontend::ReductionMode::ADD)
 {
     auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();

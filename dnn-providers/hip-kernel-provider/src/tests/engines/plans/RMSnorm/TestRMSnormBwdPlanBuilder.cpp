@@ -11,7 +11,7 @@
 #include "mocks/MockKernelCompiler.hpp"
 #include "mocks/MockRunnableKernel.hpp"
 
-#include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/MockEngineConfig.hpp>
@@ -37,8 +37,8 @@ protected:
 TEST_F(TestRMSnormBwdPlanBuilder, IsApplicableReturnsTrueForValidSingleNodeGraph)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdGraph();
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                              builder.GetSize());
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                                     builder.GetSize());
 
     EXPECT_TRUE(_planBuilder.isApplicable(_dummyHandle, graph));
 }
@@ -47,8 +47,8 @@ TEST_F(TestRMSnormBwdPlanBuilder, IsApplicableReturnsTrueWithoutOptionalAttribut
 {
     auto builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdGraph(
         {150528, 50176, 224, 1}, {1, 3, 224, 224}, false);
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                              builder.GetSize());
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                                     builder.GetSize());
 
     EXPECT_TRUE(_planBuilder.isApplicable(_dummyHandle, graph));
 }
@@ -60,8 +60,8 @@ TEST_F(TestRMSnormBwdPlanBuilder, IsApplicableReturnsTrueWithoutOptionalAttribut
 TEST_F(TestRMSnormBwdPlanBuilder, IsNotApplicableForBatchnormGraph)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                              builder.GetSize());
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                                     builder.GetSize());
 
     EXPECT_FALSE(_planBuilder.isApplicable(_dummyHandle, graph));
 }
@@ -72,10 +72,10 @@ TEST_F(TestRMSnormBwdPlanBuilder, IsNotApplicableForNonF32ComputeType)
         {150528, 50176, 224, 1},
         {1, 3, 224, 224},
         true,
-        hipdnn_data_sdk::data_objects::DataType::FLOAT,
-        hipdnn_data_sdk::data_objects::DataType::HALF);
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                              builder.GetSize());
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::HALF);
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                                     builder.GetSize());
 
     EXPECT_FALSE(_planBuilder.isApplicable(_dummyHandle, graph));
 }
@@ -87,8 +87,8 @@ TEST_F(TestRMSnormBwdPlanBuilder, IsNotApplicableForNonF32ComputeType)
 TEST_F(TestRMSnormBwdPlanBuilder, BuildPlanSetsPlanForSingleNodeGraph)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdGraph();
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                              builder.GetSize());
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                                     builder.GetSize());
     HipKernelContext ctx;
 
     EXPECT_CALL(_mockDevicePropertyProvider, getDeviceProperties())
@@ -105,8 +105,8 @@ TEST_F(TestRMSnormBwdPlanBuilder, BuildPlanSetsPlanForSingleNodeGraph)
 TEST_F(TestRMSnormBwdPlanBuilder, GetMaxWorkspaceSizeReturnsZero)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdGraph();
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                              builder.GetSize());
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                                     builder.GetSize());
     HipKernelSettings settings;
 
     EXPECT_EQ(_planBuilder.getMaxWorkspaceSize(_dummyHandle, graph, settings), 0u);
@@ -119,8 +119,8 @@ TEST_F(TestRMSnormBwdPlanBuilder, GetMaxWorkspaceSizeReturnsZero)
 TEST_F(TestRMSnormBwdPlanBuilder, GetCustomKnobsReturnsEmpty)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdGraph();
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                              builder.GetSize());
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                                     builder.GetSize());
 
     auto knobs = _planBuilder.getCustomKnobs(_dummyHandle, graph);
     EXPECT_TRUE(knobs.empty());

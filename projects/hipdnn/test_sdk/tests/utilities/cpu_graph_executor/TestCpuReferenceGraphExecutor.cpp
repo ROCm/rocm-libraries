@@ -14,32 +14,33 @@
 #include "PointwiseGraphUtils.hpp"
 #include "PointwiseTensorBundles.hpp"
 
-#include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_data_sdk/utilities/ShallowTensor.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_data_sdk/utilities/TensorView.hpp>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/Seeds.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
 
 using namespace hipdnn_test_sdk::utilities;
 using namespace hipdnn_test_sdk::detail;
-using namespace hipdnn_data_sdk::data_objects;
+using namespace hipdnn_flatbuffers_sdk::data_objects;
 using namespace hipdnn_data_sdk::utilities;
 using namespace ::testing;
 using namespace hipdnn_sdk_test_utils;
-using namespace hipdnn_data_sdk::flatbuffer_utilities;
+using namespace hipdnn_flatbuffers_sdk::flatbuffer_utilities;
 using hipdnn_data_sdk::types::bfloat16;
 using hipdnn_data_sdk::types::half;
 
 class TestCpuReferenceGraphExecutor
 {
 public:
-    static void runBatchnormFwdTest(hipdnn_data_sdk::data_objects::DataType inputDataType,
-                                    hipdnn_data_sdk::data_objects::DataType scaleBiasDataType,
-                                    hipdnn_data_sdk::data_objects::DataType meanVarianceDataType,
-                                    hipdnn_data_sdk::data_objects::DataType computeDataType)
+    static void
+        runBatchnormFwdTest(hipdnn_flatbuffers_sdk::data_objects::DataType inputDataType,
+                            hipdnn_flatbuffers_sdk::data_objects::DataType scaleBiasDataType,
+                            hipdnn_flatbuffers_sdk::data_objects::DataType meanVarianceDataType,
+                            hipdnn_flatbuffers_sdk::data_objects::DataType computeDataType)
     {
         const unsigned int seed = getGlobalTestSeed();
 
@@ -135,8 +136,9 @@ public:
     }
 
     template <typename InputType, typename AccumulatorType>
-    static void runConvolutionFwdTest(hipdnn_data_sdk::data_objects::DataType inputDataType,
-                                      hipdnn_data_sdk::data_objects::DataType accumulatorDataType)
+    static void
+        runConvolutionFwdTest(hipdnn_flatbuffers_sdk::data_objects::DataType inputDataType,
+                              hipdnn_flatbuffers_sdk::data_objects::DataType accumulatorDataType)
     {
         const std::vector<int64_t> xDims = {1, 1, 2, 2};
         const std::vector<int64_t> wDims = {1, 1, 1, 1};
@@ -161,8 +163,9 @@ public:
     }
 
     template <typename InputType, typename AccumulatorType>
-    static void runConvolutionBwdTest(hipdnn_data_sdk::data_objects::DataType inputDataType,
-                                      hipdnn_data_sdk::data_objects::DataType accumulatorDataType)
+    static void
+        runConvolutionBwdTest(hipdnn_flatbuffers_sdk::data_objects::DataType inputDataType,
+                              hipdnn_flatbuffers_sdk::data_objects::DataType accumulatorDataType)
     {
         const std::vector<int64_t> dxDims = {1, 1, 2, 2};
         const std::vector<int64_t> wDims = {1, 1, 1, 1};
@@ -187,8 +190,9 @@ public:
     }
 
     template <typename InputType, typename AccumulatorType>
-    static void runConvolutionWrwTest(hipdnn_data_sdk::data_objects::DataType inputDataType,
-                                      hipdnn_data_sdk::data_objects::DataType accumulatorDataType)
+    static void
+        runConvolutionWrwTest(hipdnn_flatbuffers_sdk::data_objects::DataType inputDataType,
+                              hipdnn_flatbuffers_sdk::data_objects::DataType accumulatorDataType)
     {
         const std::vector<int64_t> xDims = {1, 1, 2, 2};
         const std::vector<int64_t> dwDims = {1, 1, 1, 1};
@@ -213,8 +217,8 @@ public:
     }
 
     template <typename inputType, typename ComputeType>
-    static void runMatmulTest(hipdnn_data_sdk::data_objects::DataType inputDataType,
-                              hipdnn_data_sdk::data_objects::DataType computeDataType)
+    static void runMatmulTest(hipdnn_flatbuffers_sdk::data_objects::DataType inputDataType,
+                              hipdnn_flatbuffers_sdk::data_objects::DataType computeDataType)
     {
         const std::vector<int64_t> aDims = {2, 5, 3};
         const std::vector<int64_t> bDims = {2, 3, 4};

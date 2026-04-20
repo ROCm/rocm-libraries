@@ -5,7 +5,7 @@
 
 #include "engines/plans/RMSnorm/RMSnormBwdPlan.hpp"
 
-#include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_plugin_sdk/interfaces/IPlan.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 
@@ -19,8 +19,8 @@ using namespace hip_kernel_provider::rmsnorm;
 TEST(TestRMSnormBwdParams, ConstructsFromSingleNodeGraph)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdGraph();
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                              builder.GetSize());
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                                     builder.GetSize());
 
     const auto& node = graph.getNode(0);
     const auto& attr = *node.attributes_as_RMSNormBackwardAttributes();
@@ -32,8 +32,8 @@ TEST(TestRMSnormBwdParams, HasCorrectTensorPointersWithOptionalAttributes)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdGraph(
         {150528, 50176, 224, 1}, {1, 3, 224, 224}, true);
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                              builder.GetSize());
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                                     builder.GetSize());
 
     const auto& node = graph.getNode(0);
     const auto& attr = *node.attributes_as_RMSNormBackwardAttributes();
@@ -53,8 +53,8 @@ TEST(TestRMSnormBwdParams, TensorPointersMatchExpectedUids)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdGraph(
         {150528, 50176, 224, 1}, {1, 3, 224, 224}, true);
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                              builder.GetSize());
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                                     builder.GetSize());
 
     const auto& node = graph.getNode(0);
     const auto& attr = *node.attributes_as_RMSNormBackwardAttributes();
@@ -74,8 +74,8 @@ TEST(TestRMSnormBwdParams, OptionalTensorsAreNullWhenNotProvided)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdGraph(
         {150528, 50176, 224, 1}, {1, 3, 224, 224}, false);
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                              builder.GetSize());
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                                     builder.GetSize());
 
     const auto& node = graph.getNode(0);
     const auto& attr = *node.attributes_as_RMSNormBackwardAttributes();
@@ -94,8 +94,8 @@ TEST(TestRMSnormBwdParams, OptionalTensorsAreNullWhenNotProvided)
 TEST(TestRMSnormBwdParams, IsMoveConstructible)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdGraph();
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                              builder.GetSize());
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                                     builder.GetSize());
 
     const auto& node = graph.getNode(0);
     const auto& attr = *node.attributes_as_RMSNormBackwardAttributes();
@@ -123,8 +123,8 @@ RMSnormBwdPlan createPlanFromGraph(bool hasOptionalAttributes = true)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdGraph(
         {150528, 50176, 224, 1}, {1, 3, 224, 224}, hasOptionalAttributes);
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                              builder.GetSize());
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                                     builder.GetSize());
 
     const auto& node = graph.getNode(0);
     const auto& attr = *node.attributes_as_RMSNormBackwardAttributes();

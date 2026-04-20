@@ -2312,6 +2312,7 @@ def isValid(scheduleInfo: 'ScheduleInfo', context: dict) -> tuple[bool, str]:
                 continue
             status, message = check(scheduleInfo, context, code_path)
             if not status:
+                scheduleInfo.pretty_print()
                 return False, f"Code path {code_path}: {message}"
 
         # === Timeline-based checks ===
@@ -2328,6 +2329,7 @@ def isValid(scheduleInfo: 'ScheduleInfo', context: dict) -> tuple[bool, str]:
                 continue
             add_constraints(timeline, ctx)
             if error := validate_timeline(timeline):
+                scheduleInfo.pretty_print()
                 return False, f"Code path {code_path}: {error}"
 
     # All rules passed, considered valid.
