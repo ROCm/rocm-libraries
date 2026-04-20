@@ -12,36 +12,25 @@ std::shared_ptr<GemmKernel> createCustomGemmKernel(const std::string&           
                                                    const WorkGroupTileSize&     wgt,
                                                    const std::filesystem::path& path)
 {
-    auto gemmKernel = std::make_shared<GemmKernel>();
-
+    std::shared_ptr<GemmKernel> gemmKernel;
+    gemmKernel = std::make_shared<AssemblyStoreRowOrderGemm>(customKernelName, path.string());
     gemmKernel->params                = std::make_shared<SolutionParameters>();
     gemmKernel->params->kernelType    = kernelType;
     gemmKernel->params->workgroupTile = wgt;
-
-    gemmKernel->module = GemmHipModuleWrapper(customKernelName, path);
-
     return gemmKernel;
 }
 
-std::shared_ptr<GemmKernel> createCustomGemmKernel(const std::string&           customKernelName,
+std::shared_ptr<GemmKernel> createWaveGemmKernel(const std::string&           customKernelName,
                                                    const KernelType&            kernelType,
                                                    const WorkGroupTileSize&     wgt,
-                                                   const std::array<int, 3>&    blockSize,
-                                                   const std::filesystem::path& path)
-{
-    auto gemmKernel             = createCustomGemmKernel(customKernelName, kernelType, wgt, path);
-    gemmKernel->customBlockSize = blockSize;
-    return gemmKernel;
-}
-
-std::shared_ptr<GemmKernel> createCustomGemmKernel(const std::string&           customKernelName,
-                                                   const KernelType&            kernelType,
-                                                   const WorkGroupTileSize&     wgt,
-                                                   const std::array<int, 3>&    blockSize,
+                                                   const dim3&    blockSize,
                                                    const ShapeCondition&        condition,
                                                    const std::filesystem::path& path)
 {
-    auto gemmKernel = createCustomGemmKernel(customKernelName, kernelType, wgt, blockSize, path);
+    std::shared_ptr<GemmKernel> gemmKernel = std::make_shared<WaveKernel>(customKernelName, path.string(), blockSize);
+    gemmKernel->params                = std::make_shared<SolutionParameters>();
+    gemmKernel->params->kernelType    = kernelType;
+    gemmKernel->params->workgroupTile = wgt;
     gemmKernel->shapeCondition = condition;
     return gemmKernel;
 }
@@ -356,7 +345,7 @@ void preloadCustomKernels(SolutionCache& cache)
                     params.workgroupTile,
                     getCoPath() / "rr_custom_kernels.co"));            
 
-            params.workgroupTile    = {128, 256, 256};
+            /*params.workgroupTile    = {128, 256, 256};
             cache.addKernel(
                 mxfp4Kernel,
                 params,
@@ -364,7 +353,7 @@ void preloadCustomKernels(SolutionCache& cache)
                     getKernelName("f4gemm_bf16_per1x32Fp4_BpreShuffle_128x256", nonTemporalA, nonTemporalB),
                     mxfp4Kernel,
                     params.workgroupTile,
-                    getCoPath() / "rr_custom_kernels.co"));
+                    getCoPath() / "rr_custom_kernels.co"));*/
 
             params.workgroupTile    = {128, 384, 256};
             cache.addKernel(
@@ -509,7 +498,7 @@ void preloadCustomKernels(SolutionCache& cache)
                 cache.addKernel(
                     mxfp4Kernel,
                     params,
-                    createCustomGemmKernel("wave_mxfp4_dynamic_gemm_256x192x256",
+                    createWaveGemmKernel("wave_mxfp4_dynamic_gemm_256x192x256",
                                            mxfp4Kernel,
                                            params.workgroupTile,
                                            {128, 2, 1},
@@ -656,80 +645,41 @@ struct __attribute__((packed)) F4GemmKernelArgs
     }
 };
 
-rocblaslt_status runCustomKernel(std::shared_ptr<GemmKernel>        gemm,
-                                 const RocblasltContractionProblem& prob)
-{
-    if(!gemm->module.has_value())
-    {
-        std::cerr << "runCustomKernel failed: Module not loadable" << std::endl;
-        return rocblaslt_status_internal_error;
-    }
+// WaveKernel method implementations
 
-    if (prob.beta && *static_cast<const float*>(prob.beta) != 0)
+size_t WaveKernel::workspaceRequired(const RocblasltContractionProblem& prob)
+{
+    return 0;
+}
+
+bool WaveKernel::isSupportedProblem(const RocblasltContractionProblem& prob)
+{
+    if(shapeCondition.has_value()
+           && !shapeCondition->matches(prob.m, prob.n, prob.k))
+            return false;
+
+    const auto& wgt = params->workgroupTile;
+    return (prob.m % wgt.m == 0 && prob.n % wgt.n == 0 && prob.k % wgt.k == 0);
+}
+
+rocblaslt_status WaveKernel::run(const RocblasltContractionProblem& prob)
+{
+    if(prob.beta && *static_cast<const float*>(prob.beta) != 0)
     {
-        std::cerr << "Kernel only supports when beta is 0" << std::endl;;
+        std::cerr << "Kernel only supports when beta is 0" << std::endl;
         return rocblaslt_status_invalid_value;
     }
 
-    const std::string& kernelName   = gemm->module->getKernelName();
-    const bool         isWaveKernel = kernelName.rfind("wave", 0) == 0;
+    WaveGemmKernelArgs waveArgs = makeWaveGemmKernelArgs(prob);
+    void*              argsPtr  = &waveArgs;
+    size_t             argsSize = sizeof(WaveGemmKernelArgs);
 
-    static WaveGemmKernelArgs waveArgsStorage;
-    static F4GemmKernelArgs   aiterArgsStorage(prob);
+    const uint32_t tileM = params->workgroupTile.m;
+    const uint32_t tileN = params->workgroupTile.n;
 
-    void*  argsPtr;
-    size_t argsSize;
-
-    if(isWaveKernel)
-    {
-        waveArgsStorage = makeWaveGemmKernelArgs(prob);
-        argsPtr         = &waveArgsStorage;
-        argsSize        = sizeof(waveArgsStorage);
-    }
-    else
-    {
-        aiterArgsStorage = F4GemmKernelArgs(prob);
-        argsPtr          = &aiterArgsStorage;
-        argsSize         = sizeof(aiterArgsStorage);
-    }
-
-    const uint32_t tileM  = gemm->params->workgroupTile.m;
-    const uint32_t tileN  = gemm->params->workgroupTile.n;
-
-    dim3 grid;
-    dim3 block;
-
-    if(isWaveKernel)
-    {
-        if(!gemm->customBlockSize.has_value())
-        {
-            std::cerr << "runCustomKernel: wave kernel missing customBlockSize" << std::endl;
-            return rocblaslt_status_internal_error;
-        }
-        const auto& bs = *gemm->customBlockSize;
-        block.x        = bs[0];
-        block.y        = bs[1];
-        block.z        = bs[2];
-
-        uint32_t tilesM = (static_cast<uint32_t>(prob.n) + tileN - 1) / tileN;
-        uint32_t tilesN = (static_cast<uint32_t>(prob.m) + tileM - 1) / tileM;
-
-        grid.x = tilesM;
-        grid.y = tilesN;
-        grid.z = 1;
-    }
-    else
-    {
-        const uint32_t blockSize = 256;
-        block                    = {blockSize, 1, 1};
-
-        uint32_t tilesM = (static_cast<uint32_t>(prob.n) + tileM - 1) / tileM;
-        uint32_t tilesN = (static_cast<uint32_t>(prob.m) + tileN - 1) / tileN;
-
-        grid.x = tilesN * blockSize;
-        grid.y = tilesM;
-        grid.z = 1;
-    }
+    uint32_t tilesM = (static_cast<uint32_t>(prob.n) + tileN - 1) / tileN;
+    uint32_t tilesN = (static_cast<uint32_t>(prob.m) + tileM - 1) / tileM;
+    dim3     grid(tilesM, tilesN, 1);
 
     void* hipLaunchParams[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER,
                                argsPtr,
@@ -738,55 +688,109 @@ rocblaslt_status runCustomKernel(std::shared_ptr<GemmKernel>        gemm,
                                HIP_LAUNCH_PARAM_END};
 
     hipFunction_t function;
-    if(hipError_t error = gemm->module->getHipFunction(function))
+    if(hipError_t error = module.getHipFunction(function))
     {
         std::cerr << "GemmHipModuleWrapper::getHipFunction failed: " << std::endl
                   << " error: " << hipGetErrorString(error) << std::endl;
         return rocblaslt_status_internal_error;
     }
 
-    if(isWaveKernel)
+    const std::string& kernelName = module.getKernelName();
+    if(hipError_t error = hipModuleLaunchKernel(function,
+                                                grid.x,
+                                                grid.y,
+                                                grid.z,
+                                                blockSize.x,
+                                                blockSize.y,
+                                                blockSize.z,
+                                                0,
+                                                prob.stream,
+                                                nullptr,
+                                                (void**)&hipLaunchParams))
     {
-        if(hipError_t error = hipModuleLaunchKernel(function,
-                                                    grid.x,
-                                                    grid.y,
-                                                    grid.z,
-                                                    block.x,
-                                                    block.y,
-                                                    block.z,
-                                                    0,
-                                                    prob.stream,
-                                                    nullptr,
-                                                    (void**)&hipLaunchParams))
-        {
-            std::cerr << "hipModuleLaunchKernel in runCustomKernel failed: " << kernelName
-                      << std::endl
-                      << " error: " << hipGetErrorString(error) << std::endl;
-            return rocblaslt_status_internal_error;
-        }
+        std::cerr << "hipModuleLaunchKernel failed: " << kernelName << std::endl
+                  << " error: " << hipGetErrorString(error) << std::endl;
+        return rocblaslt_status_internal_error;
+    }
+
+    return rocblaslt_status_success;
+}
+
+// AssemblyStoreRowOrderGemm method implementations
+
+size_t AssemblyStoreRowOrderGemm::workspaceRequired(const RocblasltContractionProblem& prob)
+{
+    return 0;
+}
+
+bool AssemblyStoreRowOrderGemm::isSupportedProblem(const RocblasltContractionProblem& prob)
+{
+    const auto& wgt = params->workgroupTile;
+
+    if ((wgt.m == 192 && wgt.n == 256) || (wgt.m == 224 && wgt.n == 256) || (wgt.m == 128 && wgt.n == 512))
+    {
+        return (prob.m % wgt.m == 0 && prob.n % wgt.n == 0 && prob.k % wgt.k == 0);
     }
     else
     {
-        if(hipError_t error = hipExtModuleLaunchKernel(function,
-                                                       grid.x,
-                                                       grid.y,
-                                                       grid.z,
-                                                       block.x,
-                                                       block.y,
-                                                       block.z,
-                                                       0, // sharedMem
-                                                       prob.stream, // stream
-                                                       nullptr,
-                                                       (void**)&hipLaunchParams,
-                                                       nullptr, // event
-                                                       nullptr // event
-                                                       ))
-        {
-            std::cerr << "hipExtModuleLaunchKernel in runCustomKernel failed: "
-                      << gemm->module->getKernelName() << std::endl
-                      << " error: " << hipGetErrorString(error) << std::endl;
-            return rocblaslt_status_internal_error;
-        }
+        return (prob.m % 32 == 0 && prob.n % 32 == 0 && prob.k % wgt.k == 0);
+    }
+}
+
+rocblaslt_status AssemblyStoreRowOrderGemm::run(const RocblasltContractionProblem& prob)
+{
+    if(prob.beta && *static_cast<const float*>(prob.beta) != 0)
+    {
+        std::cerr << "Kernel only supports when beta is 0" << std::endl;
+        return rocblaslt_status_invalid_value;
+    }
+
+    F4GemmKernelArgs args(prob);
+    void*            argsPtr  = &args;
+    size_t           argsSize = sizeof(F4GemmKernelArgs);
+
+    const uint32_t tileM = params->workgroupTile.m;
+    const uint32_t tileN = params->workgroupTile.n;
+
+    const uint32_t blockSize = 256;
+    dim3           block(blockSize, 1, 1);
+
+    uint32_t tilesM = (static_cast<uint32_t>(prob.n) + tileM - 1) / tileM;
+    uint32_t tilesN = (static_cast<uint32_t>(prob.m) + tileN - 1) / tileN;
+
+    dim3 grid(tilesN * blockSize, tilesM, 1);
+
+    void* hipLaunchParams[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER,
+                               argsPtr,
+                               HIP_LAUNCH_PARAM_BUFFER_SIZE,
+                               &argsSize,
+                               HIP_LAUNCH_PARAM_END};
+
+    hipFunction_t function;
+    if(hipError_t error = module.getHipFunction(function))
+    {
+        std::cerr << "GemmHipModuleWrapper::getHipFunction failed: " << std::endl
+                  << " error: " << hipGetErrorString(error) << std::endl;
+        return rocblaslt_status_internal_error;
+    }
+
+    if(hipError_t error = hipExtModuleLaunchKernel(function,
+                                                     grid.x,
+                                                     grid.y,
+                                                     grid.z,
+                                                     block.x,
+                                                     block.y,
+                                                     block.z,
+                                                     0,
+                                                     prob.stream,
+                                                     nullptr,
+                                                     (void**)&hipLaunchParams,
+                                                     nullptr,
+                                                     nullptr))
+    {
+        std::cerr << "hipExtModuleLaunchKernel failed: " << module.getKernelName() << std::endl
+                  << " error: " << hipGetErrorString(error) << std::endl;
+        return rocblaslt_status_internal_error;
     }
 
     return rocblaslt_status_success;

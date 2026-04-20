@@ -312,9 +312,9 @@ struct ProblemDescription : ProblemDescriptionBase
         MIOPEN_THROW("Direction must be known!");
     }
 
-    bool IsLayoutDefault() const;
-    bool IsLayoutNHWC() const;
-    bool IsLayoutNCHWc() const;
+    MIOPEN_INTERNALS_EXPORT bool IsLayoutDefault() const;
+    MIOPEN_INTERNALS_EXPORT bool IsLayoutNHWC() const;
+    MIOPEN_INTERNALS_EXPORT bool IsLayoutNCHWc() const;
     bool IsNCHWc_NCHWc() const;
     bool IsNCHWc_CHWNc() const;
 

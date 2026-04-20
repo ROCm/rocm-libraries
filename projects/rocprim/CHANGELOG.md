@@ -16,6 +16,10 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 
 ## rocPRIM 4.3.0 for ROCm 7.12
 
+### Added
+
+* Added tested examples for all algorithms.
+
 ### Optimizations
 
 * Updated config system to pick better fallback configs for untuned GPUs.

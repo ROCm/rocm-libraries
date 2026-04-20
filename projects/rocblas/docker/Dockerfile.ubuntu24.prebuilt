@@ -1,0 +1,111 @@
+# syntax=docker/dockerfile:1
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier:  MIT
+
+# ============================================================================
+# Common base image with all dependencies
+# ============================================================================
+FROM ubuntu:24.04 AS base
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV HIP_PLATFORM=amd
+
+RUN apt-get update && apt-get install -y \
+    git \
+    gdb \
+    gfortran \
+    git-lfs \
+    ninja-build \
+    cmake \
+    g++ \
+    pkg-config \
+    xxd \
+    patchelf \
+    automake \
+    python3-venv \
+    python3-dev \
+    libegl1-mesa-dev \
+    texinfo \
+    bison \
+    flex \
+    curl \
+    unzip \
+    libtool \
+    python3-pip \
+    vim \
+    rsync \
+    ca-certificates \
+    wget \
+    libopenblas-dev \
+    libgtest-dev \
+    libzstd-dev \
+    clang-format-18 \
+    clang-tidy-20 \
+    llvm-20 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Use update-alternatives to set default versions
+RUN update-alternatives --install /usr/bin/clang-format clang-format /usr/bin/clang-format-18 100
+RUN update-alternatives --install /usr/bin/clang-tidy clang-tidy /usr/bin/clang-tidy-20 100
+
+# Set up update-alternatives for all LLVM tools
+RUN for tool in /usr/bin/llvm*-20; do \
+        if [ -f "$tool" ]; then \
+            base=$(basename "$tool" -20); \
+            update-alternatives --install "/usr/bin/$base" "$base" "$tool" 100; \
+            echo "Set alternative for $base -> $tool"; \
+        fi \
+    done
+
+# ============================================================================
+# Prebuilt stage - downloads and extracts dev env prebuilt binaries tarball
+#
+# Example build command for default tarball build using the ASIC and Git tag specified in the dockerfile:
+# docker build -f Dockerfile.ubuntu24 -t rocblas:prebuilt .
+# This will download and install prebuilt binaries using therock-dist-linux-<THEROCK_ASIC>-dcgpu-<THEROCK_GIT_TAG>.tar.gz
+#
+# Example build command when specifying a different ASIC and Git tag:
+# docker build -f Dockerfile.ubuntu24 --build-arg THEROCK_ASIC=gfx950 --build-arg THEROCK_GIT_TAG=7.13.0a20260401 -t rocblas:prebuilt .
+# This will download and install prebuilt binaries using the ASIC and Git tag you specified (note the tag format consists of <version>.0a<date>).
+# The prebuilt tar.gz is downloaded from the nightly builds in: https://rocm.nightlies.amd.com/tarball/
+#
+# It is also possible to manually specify THEROCK_PREBUILT_ID or THEROCK_TARBALL, and change THEROCK_URL_BASE, if you need more flexibility:
+# docker build -f Dockerfile.ubuntu24 --build-arg THEROCK_TARBALL=therock-dist-linux-gfx950-dcgpu-7.12.0.tar.gz --build-arg THEROCK_URL_BASE=https://repo.amd.com/rocm/tarball/ -t rocblas:prebuilt .
+#
+# Options for THEROCK_URL_BASE are (may not be available externally from AMD):
+# - Stable releases: https://repo.amd.com/rocm/tarball/
+# - Nightly builds: https://rocm.nightlies.amd.com/tarball/
+# - Prereleases (QA): https://rocm.prereleases.amd.com/tarball/
+# - Dev builds: https://rocm.devreleases.amd.com/tarball/
+# See https://github.com/ROCm/TheRock/blob/main/RELEASES.md#browsing-release-tarballs
+#
+# ============================================================================
+FROM base AS install_therock_prebuilt
+
+ARG THEROCK_ASIC=gfx94X
+ARG THEROCK_GIT_TAG=7.13.0a20260407
+ARG THEROCK_PREBUILT_ID=$THEROCK_ASIC-dcgpu-$THEROCK_GIT_TAG
+ARG THEROCK_TARBALL=therock-dist-linux-$THEROCK_PREBUILT_ID.tar.gz
+ARG THEROCK_URL_BASE=https://rocm.nightlies.amd.com/tarball/
+
+RUN mkdir -p /opt/rocm
+WORKDIR /tmp
+
+RUN wget --progress=dot:giga $THEROCK_URL_BASE$THEROCK_TARBALL
+RUN tar -xf $THEROCK_TARBALL -C /opt/rocm --strip-components=1
+
+# ============================================================================
+# rocblas development environment with prebuilt ROCm
+#
+# Build with:
+#   docker build -f Dockerfile.ubuntu24 -t rocblas:prebuilt .
+# ============================================================================
+FROM base AS prebuilt
+
+COPY --from=install_therock_prebuilt /opt/rocm /opt/rocm
+
+ENV PATH="/opt/rocm/bin:/opt/rocm:${PATH}"
+ENV CMAKE_GENERATOR="Ninja"
+ENV LD_LIBRARY_PATH="/opt/rocm/lib:${LD_LIBRARY_PATH}"
+
+WORKDIR /workspace

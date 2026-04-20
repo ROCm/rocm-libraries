@@ -43,6 +43,16 @@ namespace rocisa
         {
             NB_OVERRIDE_PURE(getParams);
         }
+
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            NB_OVERRIDE_PURE(getDstParams);
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            NB_OVERRIDE_PURE(getSrcParams);
+        }
     };
 
     struct PyCompositeInstruction : public CompositeInstruction
@@ -79,6 +89,9 @@ void init_inst(nb::module_ m)
         .def(nb::init<rocisa::InstType, const std::string&>())
         .def_rw("instType", &rocisa::Instruction::instType)
         .def_rw("comment", &rocisa::Instruction::comment)
+        .def_rw("memToken", &rocisa::Instruction::m_memToken)
+        .def("setMemToken", &rocisa::Instruction::setMemToken)
+        .def("getMemToken", &rocisa::Instruction::getMemToken)
         .def("setInlineAsm", &rocisa::Instruction::setInlineAsm)
         .def("getParams", &rocisa::Instruction::getParams)
         .def("__str__", &rocisa::Instruction::toString)

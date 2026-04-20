@@ -1,57 +1,36 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-#include <gtest/gtest.h>
 #include <hipdnn_frontend.hpp>
+#include <hipdnn_test_sdk/utilities/IntegrationTestFixture.hpp>
+#include <hipdnn_test_sdk/utilities/TestableGraph.hpp>
 #include <test_plugins/TestPluginConstants.hpp>
 
 #include <unordered_set>
 
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
+using hipdnn_tests::IntegrationTestFixture;
+using hipdnn_tests::TestableGraphKnobs;
 
 namespace
 {
-
-/// Exposes the descriptor-based knob lifting path for direct testing.
-class TestableGraph : public Graph
-{
-public:
-    using Graph::build_operation_graph;
-    using Graph::get_knobs_for_engine_via_descriptors;
-};
-
 /// Integration tests for the descriptor-based knob lifting path.
 /// Tests exercise detail::unpackKnobsFromDescriptors via
-/// TestableGraph::get_knobs_for_engine_via_descriptors().
-class IntegrationGraphKnobsDescriptorLifting : public ::testing::Test
+/// TestableGraphKnobs::get_knobs_for_engine_via_descriptors().
+class IntegrationGraphKnobsDescriptorLifting : public IntegrationTestFixture
 {
 protected:
-    void SetUp() override
+    std::vector<std::string> getPluginPaths() const override
     {
-        const std::array<const char*, 3> paths
-            = {hipdnn_tests::plugin_constants::testKnobsPluginPath().c_str(),
-               hipdnn_tests::plugin_constants::testKnobConstraintValidationPluginPath().c_str(),
-               hipdnn_tests::plugin_constants::testGoodPluginPath().c_str()};
-
-        ASSERT_EQ(hipdnnSetEnginePluginPaths_ext(
-                      paths.size(), paths.data(), HIPDNN_PLUGIN_LOADING_ABSOLUTE),
-                  HIPDNN_STATUS_SUCCESS);
-
-        ASSERT_EQ(hipdnnCreate(&_handle), HIPDNN_STATUS_SUCCESS);
+        return {hipdnn_tests::plugin_constants::testKnobsPluginPath(),
+                hipdnn_tests::plugin_constants::testKnobConstraintValidationPluginPath(),
+                hipdnn_tests::plugin_constants::testGoodPluginPath()};
     }
 
-    void TearDown() override
+    TestableGraphKnobs createAndBuildSimpleGraph()
     {
-        if(_handle != nullptr)
-        {
-            ASSERT_EQ(hipdnnDestroy(_handle), HIPDNN_STATUS_SUCCESS);
-        }
-    }
-
-    TestableGraph createAndBuildSimpleGraph()
-    {
-        TestableGraph graph;
+        TestableGraphKnobs graph;
         graph.set_compute_data_type(DataType::FLOAT)
             .set_intermediate_data_type(DataType::FLOAT)
             .set_io_data_type(DataType::FLOAT);
@@ -79,8 +58,6 @@ protected:
             knobs.begin(), knobs.end(), [&](const Knob& knob) { return knob.knobId() == knobId; });
         return it == knobs.end() ? nullptr : &(*it);
     }
-
-    hipdnnHandle_t _handle = nullptr;
 };
 
 TEST_F(IntegrationGraphKnobsDescriptorLifting, KnobsPluginHasExpectedKnobs)
@@ -237,7 +214,8 @@ TEST_F(IntegrationGraphKnobsDescriptorLifting, EngineWithNoKnobs)
     auto result = graph.get_knobs_for_engine_via_descriptors(engineId, knobs);
     ASSERT_TRUE(result.is_good()) << result.get_message();
 
-    EXPECT_TRUE(knobs.empty()) << "GoodPlugin should have no knobs";
+    EXPECT_TRUE(knobs.empty())
+        << "GoodPlugin should have no knobs"; // NOLINT(readability-implicit-bool-conversion)
 }
 
 TEST_F(IntegrationGraphKnobsDescriptorLifting, IntConstraintWithZeroMin)
@@ -257,7 +235,8 @@ TEST_F(IntegrationGraphKnobsDescriptorLifting, IntConstraintWithZeroMin)
 
     auto* intConstraint = dynamic_cast<const IntConstraint*>(it->constraint());
     ASSERT_NE(intConstraint, nullptr);
-    EXPECT_EQ(intConstraint->getMinValue(), 0) << "Zero min should be preserved";
+    EXPECT_EQ(intConstraint->getMinValue(), 0)
+        << "Zero min should be preserved"; // NOLINT(readability-implicit-bool-conversion)
     EXPECT_EQ(intConstraint->getMaxValue(), 100);
     EXPECT_EQ(intConstraint->getStep(), 10);
 }
@@ -279,7 +258,8 @@ TEST_F(IntegrationGraphKnobsDescriptorLifting, FloatConstraintWithZeroMin)
 
     auto* floatConstraint = dynamic_cast<const FloatConstraint*>(it->constraint());
     ASSERT_NE(floatConstraint, nullptr);
-    EXPECT_DOUBLE_EQ(floatConstraint->getMinValue(), 0.0) << "Zero min should be preserved";
+    EXPECT_DOUBLE_EQ(floatConstraint->getMinValue(), 0.0)
+        << "Zero min should be preserved"; // NOLINT(readability-implicit-bool-conversion)
     EXPECT_DOUBLE_EQ(floatConstraint->getMaxValue(), 1.0);
 }
 

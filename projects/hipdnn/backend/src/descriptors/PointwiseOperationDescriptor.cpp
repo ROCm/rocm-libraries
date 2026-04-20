@@ -19,11 +19,11 @@ void PointwiseOperationDescriptor::finalize()
     THROW_IF_NULL(_out0Desc,
                   HIPDNN_STATUS_BAD_PARAM,
                   "PointwiseOperationDescriptor::finalize() failed: OUT_0 tensor not set");
-    THROW_IF_TRUE(_computeDataType == hipdnn_data_sdk::data_objects::DataType::UNSET,
+    THROW_IF_TRUE(_computeDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET,
                   HIPDNN_STATUS_BAD_PARAM,
                   "PointwiseOperationDescriptor::finalize() failed: compute data type not "
                   "set");
-    THROW_IF_TRUE(_data.operation == hipdnn_data_sdk::data_objects::PointwiseMode::UNSET,
+    THROW_IF_TRUE(_data.operation == hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::UNSET,
                   HIPDNN_STATUS_BAD_PARAM,
                   "PointwiseOperationDescriptor::finalize() failed: operation not set");
 
@@ -295,7 +295,7 @@ void PointwiseOperationDescriptor::getAttribute(hipdnnBackendAttributeName_t att
                   "PointwiseOperationDescriptor::getAttribute()");
         break;
     case HIPDNN_ATTR_OPERATION_TYPE_EXT:
-        getOperationType(HIPDNN_OPERATION_TYPE_POINTWISE,
+        getOperationType(HIPDNN_OPERATION_TYPE_POINTWISE_EXT,
                          attributeType,
                          requestedElementCount,
                          elementCount,
@@ -328,13 +328,13 @@ std::vector<std::shared_ptr<TensorDescriptor>>
     return result;
 }
 
-std::unique_ptr<hipdnn_data_sdk::data_objects::NodeT>
+std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::NodeT>
     PointwiseOperationDescriptor::buildNode() const
 {
-    auto node = std::make_unique<hipdnn_data_sdk::data_objects::NodeT>();
+    auto node = std::make_unique<hipdnn_flatbuffers_sdk::data_objects::NodeT>();
     node->name = _name;
     node->compute_data_type = _computeDataType;
-    node->attributes.Set(hipdnn_data_sdk::data_objects::PointwiseAttributesT(_data));
+    node->attributes.Set(hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributesT(_data));
     return node;
 }
 
@@ -355,7 +355,7 @@ std::string PointwiseOperationDescriptor::toString() const
            + (_data.in_2_tensor_uid ? std::to_string(*_data.in_2_tensor_uid) : "nullopt");
     str += ", axis=" + (_data.axis_tensor_uid ? std::to_string(*_data.axis_tensor_uid) : "nullopt");
     str += ", operation=";
-    str += hipdnn_data_sdk::data_objects::EnumNamePointwiseMode(_data.operation);
+    str += hipdnn_flatbuffers_sdk::data_objects::EnumNamePointwiseMode(_data.operation);
     str += ", relu_lower_clip="
            + (_data.relu_lower_clip ? std::to_string(*_data.relu_lower_clip) : "nullopt");
     str += ", relu_upper_clip="
@@ -368,13 +368,13 @@ std::string PointwiseOperationDescriptor::toString() const
     str += ", softplus_beta="
            + (_data.softplus_beta ? std::to_string(*_data.softplus_beta) : "nullopt");
     str += ", compute_data_type=";
-    str += hipdnn_data_sdk::data_objects::EnumNameDataType(_computeDataType);
+    str += hipdnn_flatbuffers_sdk::data_objects::EnumNameDataType(_computeDataType);
     str += "}";
     return str;
 }
 
 std::shared_ptr<PointwiseOperationDescriptor> PointwiseOperationDescriptor::fromNode(
-    const hipdnn_data_sdk::data_objects::NodeT& nodeT,
+    const hipdnn_flatbuffers_sdk::data_objects::NodeT& nodeT,
     const std::unordered_map<int64_t, std::shared_ptr<TensorDescriptor>>& tensorMap)
 {
     const auto* attrs = nodeT.attributes.AsPointwiseAttributes();

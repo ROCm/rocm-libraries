@@ -8,6 +8,7 @@
 #include <rocRoller/Utilities/Utils.hpp>
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/interfaces/catch_interfaces_capture.hpp>
 
 template <typename... Params>
 TestContext TestContext::ForTestDevice(rocRoller::KernelOptions const& kernelOpts,
