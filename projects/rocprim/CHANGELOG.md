@@ -2,6 +2,12 @@
 
 Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projects/rocPRIM/en/latest/](https://rocm.docs.amd.com/projects/rocPRIM/en/latest/).
 
+## rocPRIM x.x.x for ROCm 10.1.0
+
+### Added
+
+* Added support for large number of segments and large number of items to `rocprim::device_segmented_radix_sort`.
+
 ## rocPRIM 5.0.0 for ROCm 10.0.0
 
 ### Added
