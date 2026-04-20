@@ -86,6 +86,7 @@ list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH}/llvm ${ROCM_PATH} ${ROCM_PATH}/hip)
 find_package(hip REQUIRED)
 find_package(hiprtc REQUIRED)
 find_package(hipdnn_data_sdk CONFIG REQUIRED)
+find_package(hipdnn_flatbuffers_sdk CONFIG REQUIRED)
 find_package(hipdnn_plugin_sdk CONFIG REQUIRED)
 
 include(CheckToolVersion)

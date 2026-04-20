@@ -4,9 +4,9 @@
 #pragma once
 
 #include <cstddef>
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
-#include <hipdnn_data_sdk/data_objects/reduction_attributes_generated.h>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/reduction_attributes_generated.h>
 #include <hipdnn_test_sdk/utilities/detail/CpuFpReferenceUtilities.hpp>
 
 #include <algorithm>
@@ -21,16 +21,16 @@ namespace hipdnn_test_sdk::utilities
 class CpuFpReferenceReduction
 {
 public:
-    static bool isApplicable(const hipdnn_data_sdk::data_objects::Node& node)
+    static bool isApplicable(const hipdnn_flatbuffers_sdk::data_objects::Node& node)
     {
-        using namespace hipdnn_data_sdk::data_objects;
+        using namespace hipdnn_flatbuffers_sdk::data_objects;
         return node.attributes_type() == NodeAttributes::ReductionAttributes;
     }
 
     template <class XDataType, class YDataType, class ComputeDataType = float>
     static void reduce(const hipdnn_data_sdk::utilities::TensorBase<XDataType>& x,
                        hipdnn_data_sdk::utilities::TensorBase<YDataType>& y,
-                       hipdnn_data_sdk::data_objects::ReductionMode mode)
+                       hipdnn_flatbuffers_sdk::data_objects::ReductionMode mode)
     {
         validateInput(x, y);
         // Validate mode is supported/set.
@@ -178,9 +178,9 @@ private:
     }
 
     template <class ComputeDataType>
-    static ComputeDataType initAccumulator(hipdnn_data_sdk::data_objects::ReductionMode mode)
+    static ComputeDataType initAccumulator(hipdnn_flatbuffers_sdk::data_objects::ReductionMode mode)
     {
-        using hipdnn_data_sdk::data_objects::ReductionMode;
+        using hipdnn_flatbuffers_sdk::data_objects::ReductionMode;
         switch(mode)
         {
         case ReductionMode::ADD:
@@ -204,9 +204,9 @@ private:
     template <class ComputeDataType>
     static void accumulate(ComputeDataType& acc,
                            ComputeDataType val,
-                           hipdnn_data_sdk::data_objects::ReductionMode mode)
+                           hipdnn_flatbuffers_sdk::data_objects::ReductionMode mode)
     {
-        using hipdnn_data_sdk::data_objects::ReductionMode;
+        using hipdnn_flatbuffers_sdk::data_objects::ReductionMode;
         switch(mode)
         {
         case ReductionMode::ADD:
@@ -245,9 +245,9 @@ private:
     template <class ComputeDataType>
     static ComputeDataType finalize(ComputeDataType acc,
                                     int64_t count,
-                                    hipdnn_data_sdk::data_objects::ReductionMode mode)
+                                    hipdnn_flatbuffers_sdk::data_objects::ReductionMode mode)
     {
-        using hipdnn_data_sdk::data_objects::ReductionMode;
+        using hipdnn_flatbuffers_sdk::data_objects::ReductionMode;
         switch(mode)
         {
         case ReductionMode::AVG:

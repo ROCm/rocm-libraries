@@ -11,8 +11,8 @@
 #include <hipdnn_test_sdk/utilities/detail/ScopedExecute.hpp>
 #include <hipdnn_test_sdk/utilities/detail/TensorFileUtils.hpp>
 
-using namespace hipdnn_data_sdk;
 using namespace hipdnn_data_sdk::utilities;
+using namespace hipdnn_flatbuffers_sdk::data_objects;
 using namespace hipdnn_test_sdk::detail;
 
 namespace hipdnn_test_sdk::utilities
@@ -84,9 +84,9 @@ TEST(TestLoadGraphAndTensors, Valid)
 
     auto res = loadGraphAndTensors(filepath);
 
-    EXPECT_EQ(res.graph().compute_data_type(), data_objects::DataType::FLOAT);
-    EXPECT_EQ(res.graph().io_data_type(), data_objects::DataType::FLOAT);
-    EXPECT_EQ(res.graph().intermediate_data_type(), data_objects::DataType::FLOAT);
+    EXPECT_EQ(res.graph().compute_data_type(), DataType::FLOAT);
+    EXPECT_EQ(res.graph().io_data_type(), DataType::FLOAT);
+    EXPECT_EQ(res.graph().intermediate_data_type(), DataType::FLOAT);
     EXPECT_EQ(res.graph().nodes()->size(), 1);
     EXPECT_EQ(res.graph().tensors()->size(), 6);
 
