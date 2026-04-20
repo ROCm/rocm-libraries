@@ -74,7 +74,6 @@ set(__clang_cxx_compile_options
     -Wno-language-extension-token
     -Wno-c++11-narrowing
     -Wno-redundant-parens
-    -Wno-unused-template
     -Wno-suggest-destructor-override
     -Wno-switch-enum
     -Wno-suggest-override
