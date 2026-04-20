@@ -26,12 +26,13 @@ This tool loads serialized hipDNN graphs, executes them via the MIOpen plugin, a
 python3 -m venv .venv
 source .venv/bin/activate
 
-# Install ROCm-compatible dependencies (ROCm nightly PyTorch for GPU timing)
+# Install ROCm torch first, then the package without re-resolving deps.
+# Reversing this order causes pip to pull the CUDA torch build from PyPI.
 pip install -r requirements-rocm.txt
-pip install -e .
+pip install -e . --no-deps
 
 # Install hipDNN Python bindings (from your hipDNN build)
-cd /path/to/hipdnn/python && pip install -e . && cd -
+cd /path/to/hipdnn/python && pip install -e . --no-deps && cd -
 ```
 
 ### For CUDA/NVIDIA GPUs (PyTorch CUDA benchmarking)
@@ -43,19 +44,21 @@ source .venv/bin/activate
 
 # Install CUDA-compatible dependencies
 pip install -r requirements-cuda.txt
-pip install -e .
+pip install -e . --no-deps
 ```
 
 ### Development Installation
 
 ```bash
 # For ROCm development
-pip install -r requirements-rocm.txt -r requirements-dev.txt
-pip install -e .
+pip install -r requirements-rocm.txt
+pip install -e . --no-deps
+pip install "pytest>=7.0.0" "pytest-cov>=4.0.0"
 
 # For CUDA development
-pip install -r requirements-cuda.txt -r requirements-dev.txt
-pip install -e .
+pip install -r requirements-cuda.txt
+pip install -e . --no-deps
+pip install "pytest>=7.0.0" "pytest-cov>=4.0.0"
 ```
 
 **Note**: hipDNN Python bindings (`hipdnn_frontend`) must be installed separately for hipDNN benchmarking.
