@@ -205,7 +205,7 @@ Documentation for rocSPARSE is available at
 * Fixed a race condition in `bsrgemm` that could on rare occasions cause incorrect results.
 * Fixed an issue in `hyb2csr` where the CSR row pointer array was not being properly filled when `n=0`, `coo_nnz=0`, or `ell_nnz=0`.
 * Fixed scaling in `rocsparse_Xhybmv` when only performing `y=beta*y`, for example, where `alpha==0` in `y=alpha*Ax+beta*y`.
-* Fixed `rocsparse_Xgemmi` failures when the y grid dimension is too large. This occured when n >= 65536.
+* Fixed `rocsparse_Xgemmi` failures when the y grid dimension is too large. This occurred when n >= 65536.
 
 ## rocSPARSE 3.2.0 for ROCm 6.2.0
 

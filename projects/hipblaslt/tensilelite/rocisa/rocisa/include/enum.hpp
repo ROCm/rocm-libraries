@@ -242,7 +242,8 @@ namespace rocisa
         INST_E8         = 64,
         INST_E5M3       = 65,
         INST_TDM        = 66,
-        INST_NOTYPE     = 67
+        INST_SWAIT      = 67,
+        INST_NOTYPE     = 68
     };
 
     enum class SelectBit : int
@@ -277,8 +278,8 @@ namespace rocisa
     enum class HighBitSel : int
     {
         NONE = -1,
-        LOW  =  0,
-        HIGH =  1
+        LOW  = 0,
+        HIGH = 1
     };
 
     enum class CvtType : int
