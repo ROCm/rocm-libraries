@@ -93,7 +93,7 @@ inline Error createLayernormOperation(
 
     // Set math precision (compute data type)
     HIPDNN_CHECK_ERROR(setDescriptorAttrDataType(opDesc.get(),
-                                                 HIPDNN_ATTR_LAYERNORM_MATH_PREC_EXT,
+                                                 HIPDNN_ATTR_LAYERNORM_COMP_TYPE_EXT,
                                                  attributes.compute_data_type,
                                                  "layernorm math precision"));
 

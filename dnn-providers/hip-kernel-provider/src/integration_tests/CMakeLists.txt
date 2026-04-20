@@ -13,7 +13,9 @@ add_executable(
     Batchnorm/IntegrationGpuBatchnormForwardInferenceWithVariance.cpp
     Batchnorm/IntegrationGpuBatchnormForwardInferenceAndActivation.cpp
     Batchnorm/IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivation.cpp
+    Batchnorm/IntegrationGpuBatchnormForwardTraining.cpp
     RMSnorm/IntegrationGpuRMSnormForward.cpp
+    Layernorm/IntegrationGpuLayernormForward.cpp
 )
 
 target_compile_options(hip_kernel_provider_integration_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
@@ -24,6 +26,10 @@ target_compile_definitions(
     hip_kernel_provider_integration_tests
     PRIVATE
         PLUGIN_PATH="../$<IF:$<PLATFORM_ID:Windows>,bin,lib>/${HIPDNN_PLUGIN_ENGINE_SUBDIR}/hip_kernel_provider"
+)
+
+target_include_directories(hip_kernel_provider_integration_tests PRIVATE
+    ${CMAKE_CURRENT_LIST_DIR}/../../include
 )
 
 target_link_libraries(
@@ -44,7 +50,8 @@ endif()
 
 clang_tidy_check(hip_kernel_provider_integration_tests)
 
-add_integration_test_target(hip_kernel_provider_integration_tests ${CMAKE_CURRENT_BINARY_DIR})
+add_integration_test_target(hip_kernel_provider_integration_tests ${CMAKE_CURRENT_BINARY_DIR}
+    LABELS slow)
 
 if(ENABLE_ASM_SDPA_ENGINE)
     set(ASM_KERNEL_ENV "HIPDNN_AITER_ASM_DIR=${CMAKE_BINARY_DIR}/hip_kernel_provider/asm_kernels")

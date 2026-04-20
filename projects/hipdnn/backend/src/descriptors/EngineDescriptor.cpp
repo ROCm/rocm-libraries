@@ -14,8 +14,8 @@
 #include "plugin/EnginePluginResourceManager.hpp"
 
 #include <algorithm>
-#include <hipdnn_data_sdk/data_objects/knob_value_generated.h>
-#include <hipdnn_data_sdk/flatbuffer_utilities/EngineDetailsWrapper.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/knob_value_generated.h>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineDetailsWrapper.hpp>
 
 namespace hipdnn_backend
 {
@@ -50,7 +50,7 @@ void EngineDescriptor::finalize()
     auto engineDetailsPtr = _engineDetails->get();
     if(engineDetailsPtr != nullptr)
     {
-        const hipdnn_data_sdk::flatbuffer_utilities::EngineDetailsWrapper detailsWrapper(
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineDetailsWrapper detailsWrapper(
             engineDetailsPtr);
         auto knobCount = detailsWrapper.knobCount();
 
@@ -61,12 +61,13 @@ void EngineDescriptor::finalize()
 
             for(const auto& knobWrapper : knobWrappers)
             {
-                hipdnn_data_sdk::data_objects::KnobT knobNative;
+                hipdnn_flatbuffers_sdk::data_objects::KnobT knobNative;
                 knobWrapper->getKnob().UnPackTo(&knobNative);
 
                 // Serialize for the flatbuffer-based getAttribute path.
                 flatbuffers::FlatBufferBuilder builder;
-                auto knobOffset = hipdnn_data_sdk::data_objects::Knob::Pack(builder, &knobNative);
+                auto knobOffset
+                    = hipdnn_flatbuffers_sdk::data_objects::Knob::Pack(builder, &knobNative);
                 builder.Finish(knobOffset);
                 _knobSerializedBuffers.push_back(builder.Release());
 
@@ -102,7 +103,7 @@ void EngineDescriptor::getAttribute(hipdnnBackendAttributeName_t attributeName,
     case HIPDNN_ATTR_ENGINE_GLOBAL_INDEX:
         getGlobalId(attributeType, requestedElementCount, elementCount, arrayOfElements);
         break;
-    case HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE_EXT:
+    case HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE:
         getKnobInfo(attributeType, requestedElementCount, elementCount, arrayOfElements);
         break;
     case HIPDNN_ATTR_ENGINE_KNOB_INFO:
@@ -111,7 +112,7 @@ void EngineDescriptor::getAttribute(hipdnnBackendAttributeName_t attributeName,
     case HIPDNN_ATTR_ENGINE_NUMERICAL_NOTE:
     case HIPDNN_ATTR_ENGINE_LAYOUT_INFO:
     case HIPDNN_ATTR_ENGINE_BEHAVIOR_NOTE:
-    case HIPDNN_ATTR_ENGINE_SM_COUNT_TARGET:
+    case HIPDNN_ATTR_ENGINE_CU_COUNT_TARGET_EXT:
     case HIPDNN_ATTR_ENGINE_DEVICEPROP:
     default:
         throw HipdnnException(
@@ -197,7 +198,7 @@ void EngineDescriptor::setAttribute(hipdnnBackendAttributeName_t attributeName,
     case HIPDNN_ATTR_ENGINE_NUMERICAL_NOTE:
     case HIPDNN_ATTR_ENGINE_LAYOUT_INFO:
     case HIPDNN_ATTR_ENGINE_BEHAVIOR_NOTE:
-    case HIPDNN_ATTR_ENGINE_SM_COUNT_TARGET:
+    case HIPDNN_ATTR_ENGINE_CU_COUNT_TARGET_EXT:
     case HIPDNN_ATTR_ENGINE_DEVICEPROP:
     default:
         throw HipdnnException(
