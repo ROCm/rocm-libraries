@@ -223,7 +223,7 @@ rocsparse_status rocsparse::csrgemm_nnz_calc(rocsparse_handle          handle,
     {
         // First group processes all rows
         h_group_size[0] = m;
-        RETURN_IF_HIP_ERROR(hipMemsetAsync(d_group_offset, 0, sizeof(J), stream));
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(d_group_offset, 0, sizeof(J), stream));
     }
 
     // Compute non-zero entries per row for each group

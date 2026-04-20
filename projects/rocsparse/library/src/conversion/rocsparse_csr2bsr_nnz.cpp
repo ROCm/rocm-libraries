@@ -94,7 +94,8 @@ rocsparse_status rocsparse::csr2bsr_nnz_quickreturn(rocsparse_handle          ha
         {
             if(handle->pointer_mode == rocsparse_pointer_mode_device)
             {
-                RETURN_IF_HIP_ERROR(hipMemsetAsync(bsr_nnz, 0, sizeof(I), handle->stream));
+                RETURN_IF_HIP_ERROR(
+                    rocsparse_hipMemsetAsync(bsr_nnz, 0, sizeof(I), handle->stream));
             }
             else
             {
@@ -233,7 +234,8 @@ rocsparse_status rocsparse::csr2bsr_nnz_core(rocsparse_handle          handle,
         {
             if(handle->pointer_mode == rocsparse_pointer_mode_device)
             {
-                RETURN_IF_HIP_ERROR(hipMemsetAsync(bsr_nnz, 0, sizeof(I), handle->stream));
+                RETURN_IF_HIP_ERROR(
+                    rocsparse_hipMemsetAsync(bsr_nnz, 0, sizeof(I), handle->stream));
             }
             else
             {

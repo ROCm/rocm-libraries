@@ -46,7 +46,7 @@ rocsparse_status rocsparse::csr2ell_width_quickreturn(rocsparse_handle          
     {
         if(handle->pointer_mode == rocsparse_pointer_mode_device)
         {
-            RETURN_IF_HIP_ERROR(hipMemsetAsync(ell_width, 0, sizeof(J), stream));
+            RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(ell_width, 0, sizeof(J), stream));
         }
         else
         {

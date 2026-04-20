@@ -66,9 +66,11 @@ rocsparse_status rocsparse::csrmv_analysis_lrb_template_dispatch(rocsparse_handl
         rocsparse_hipMallocAsync(&csrmv_info->lrb.n_rows_bins, sizeof(J) * 32, stream));
 
     RETURN_IF_HIP_ERROR(
-        hipMemsetAsync(csrmv_info->lrb.rows_offsets_scratch, 0, sizeof(J) * m, stream));
-    RETURN_IF_HIP_ERROR(hipMemsetAsync(csrmv_info->lrb.rows_bins, 0, sizeof(J) * m, stream));
-    RETURN_IF_HIP_ERROR(hipMemsetAsync(csrmv_info->lrb.n_rows_bins, 0, sizeof(J) * 32, stream));
+        rocsparse_hipMemsetAsync(csrmv_info->lrb.rows_offsets_scratch, 0, sizeof(J) * m, stream));
+    RETURN_IF_HIP_ERROR(
+        rocsparse_hipMemsetAsync(csrmv_info->lrb.rows_bins, 0, sizeof(J) * m, stream));
+    RETURN_IF_HIP_ERROR(
+        rocsparse_hipMemsetAsync(csrmv_info->lrb.n_rows_bins, 0, sizeof(J) * 32, stream));
 
     dim3 blocks(256);
     dim3 threads(WG_SIZE);
@@ -719,7 +721,7 @@ rocsparse_status rocsparse::csrmv_lrb_template_dispatch(rocsparse_handle        
         {
             if(info->lrb.nRowsBins[j] != 0)
             {
-                RETURN_IF_HIP_ERROR(hipMemsetAsync(
+                RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(
                     info->lrb.wg_flags, 0, sizeof(uint32_t) * info->lrb.size, stream));
 
                 uint32_t block_size      = WG_SIZE;

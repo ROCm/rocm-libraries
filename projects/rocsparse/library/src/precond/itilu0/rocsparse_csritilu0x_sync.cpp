@@ -825,8 +825,8 @@ public:
                     //
                     // Compute norm of residual.
                     //
-                    RETURN_IF_HIP_ERROR(
-                        hipMemsetAsync(p_nrm_residual, 0, sizeof(floating_data_t<T>), stream));
+                    RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(
+                        p_nrm_residual, 0, sizeof(floating_data_t<T>), stream));
 
                     rocsparse::kernel_nrm_residual_dispatch<BLOCKSIZE, T, I, J>(
                         m_,

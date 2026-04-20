@@ -45,7 +45,7 @@ namespace rocsparse
             return rocsparse_status_success;
         }
 
-        // Extract z pointers directly to device array using hipMemsetAsync and rocsparse_hipMemcpyAsync
+        // Extract z pointers directly to device array using rocsparse_hipMemsetAsync and rocsparse_hipMemcpyAsync
         for(rocsparse_int i = 0; i < num_extra; ++i)
         {
             if(z_vecs != nullptr && z_vecs[i] != nullptr)
@@ -59,9 +59,9 @@ namespace rocsparse
             }
             else
             {
-                // Set z_array[i] to nullptr using hipMemsetAsync
-                RETURN_IF_HIP_ERROR(
-                    hipMemsetAsync((void*)(&z_array[i]), 0, sizeof(const Z*), handle->stream));
+                // Set z_array[i] to nullptr using rocsparse_hipMemsetAsync
+                RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(
+                    (void*)(&z_array[i]), 0, sizeof(const Z*), handle->stream));
             }
         }
 
@@ -82,7 +82,7 @@ namespace rocsparse
         else
         {
             // If gamma_vec is null, set all gamma values to zero
-            RETURN_IF_HIP_ERROR(hipMemsetAsync(
+            RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(
                 (void*)gamma_device_array, 0, num_extra * sizeof(T), handle->stream));
         }
 

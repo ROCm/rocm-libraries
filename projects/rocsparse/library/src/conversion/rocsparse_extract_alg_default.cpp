@@ -242,7 +242,7 @@ namespace rocsparse
         // Setting count to 0.
         //
         RETURN_IF_HIP_ERROR(
-            hipMemsetAsync(target_ptr_, 0, sizeof(I) * (num_seq + 1), handle_->stream));
+            rocsparse_hipMemsetAsync(target_ptr_, 0, sizeof(I) * (num_seq + 1), handle_->stream));
 
         {
             const I base_value = static_cast<I>(target_base_);

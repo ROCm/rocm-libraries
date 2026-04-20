@@ -357,7 +357,7 @@ rocsparse_status rocsparse::csr2gebsr_template(rocsparse_handle          handle,
     //
     // Set bsr val to zero.
     //
-    RETURN_IF_HIP_ERROR(hipMemsetAsync(
+    RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(
         bsr_val, 0, sizeof(T) * nnzb * row_block_dim * col_block_dim, handle->stream));
 
     if(row_block_dim == 1)
@@ -839,8 +839,8 @@ try
         {
             if(handle->pointer_mode == rocsparse_pointer_mode_device)
             {
-                RETURN_IF_HIP_ERROR(
-                    hipMemsetAsync(bsr_nnz_devhost, 0, sizeof(rocsparse_int), handle->stream));
+                RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(
+                    bsr_nnz_devhost, 0, sizeof(rocsparse_int), handle->stream));
             }
             else
             {

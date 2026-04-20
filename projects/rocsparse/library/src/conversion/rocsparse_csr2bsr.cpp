@@ -158,8 +158,8 @@ rocsparse_status rocsparse::csr2bsr_core(rocsparse_handle          handle,
     //
     // TODO: should it be user responsibility ?
     //
-    RETURN_IF_HIP_ERROR(
-        hipMemsetAsync(bsr_val, 0, sizeof(T) * nnzb * block_dim * block_dim, handle->stream));
+    RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(
+        bsr_val, 0, sizeof(T) * nnzb * block_dim * block_dim, handle->stream));
     // Stream
     hipStream_t stream = handle->stream;
 

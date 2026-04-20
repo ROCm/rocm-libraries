@@ -175,13 +175,13 @@ namespace rocsparse
                 {
                 case rocsparse_direction_row:
                 {
-                    RETURN_IF_HIP_ERROR(
-                        hipMemsetAsync(nnz_per_row_columns, 0, sizeof(I) * m, handle->stream));
+                    RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(
+                        nnz_per_row_columns, 0, sizeof(I) * m, handle->stream));
                 }
                 case rocsparse_direction_column:
                 {
-                    RETURN_IF_HIP_ERROR(
-                        hipMemsetAsync(nnz_per_row_columns, 0, sizeof(I) * n, handle->stream));
+                    RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(
+                        nnz_per_row_columns, 0, sizeof(I) * n, handle->stream));
                 }
                 }
             }
@@ -192,8 +192,8 @@ namespace rocsparse
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse_get_pointer_mode(handle, &mode));
                 if(rocsparse_pointer_mode_device == mode)
                 {
-                    RETURN_IF_HIP_ERROR(
-                        hipMemsetAsync(nnz_total_dev_host_ptr, 0, sizeof(I), handle->stream));
+                    RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(
+                        nnz_total_dev_host_ptr, 0, sizeof(I), handle->stream));
                 }
                 else
                 {

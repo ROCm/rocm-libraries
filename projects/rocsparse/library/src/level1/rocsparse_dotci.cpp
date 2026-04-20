@@ -65,7 +65,7 @@ rocsparse_status rocsparse::dotci_template(rocsparse_handle     handle,
         {
             if(handle->pointer_mode == rocsparse_pointer_mode_device)
             {
-                RETURN_IF_HIP_ERROR(hipMemsetAsync(result, 0, sizeof(T), handle->stream));
+                RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(result, 0, sizeof(T), handle->stream));
             }
             else
             {

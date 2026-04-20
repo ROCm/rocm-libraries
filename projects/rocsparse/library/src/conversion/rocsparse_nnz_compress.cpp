@@ -91,7 +91,7 @@ rocsparse_status rocsparse::nnz_compress_template(rocsparse_handle          hand
             if(handle->pointer_mode == rocsparse_pointer_mode_device)
             {
                 RETURN_IF_HIP_ERROR(
-                    hipMemsetAsync(nnz_C, 0, sizeof(rocsparse_int), handle->stream));
+                    rocsparse_hipMemsetAsync(nnz_C, 0, sizeof(rocsparse_int), handle->stream));
             }
             else
             {

@@ -306,14 +306,14 @@ rocsparse_status rocsparse::csxsldu_compute_template(rocsparse_handle handle_,
             if(m_ == n_)
             {
                 RETURN_IF_HIP_ERROR(
-                    hipMemsetAsync(uptr_, 0, sizeof(I) * (sizet + 1), handle_->stream));
+                    rocsparse_hipMemsetAsync(uptr_, 0, sizeof(I) * (sizet + 1), handle_->stream));
             }
             else
             {
                 if(ubase_ == rocsparse_index_base_zero)
                 {
-                    RETURN_IF_HIP_ERROR(
-                        hipMemsetAsync(uptr_, 0, sizeof(I) * (sizet + 1), handle_->stream));
+                    RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(
+                        uptr_, 0, sizeof(I) * (sizet + 1), handle_->stream));
                 }
                 else
                 {
@@ -383,8 +383,8 @@ rocsparse_status rocsparse::csxsldu_compute_template(rocsparse_handle handle_,
             {
                 if(lbase_ == rocsparse_index_base_zero)
                 {
-                    RETURN_IF_HIP_ERROR(
-                        hipMemsetAsync(lptr_, 0, sizeof(I) * (sizet + 1), handle_->stream));
+                    RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(
+                        lptr_, 0, sizeof(I) * (sizet + 1), handle_->stream));
                 }
                 else
                 {

@@ -98,8 +98,8 @@ _rocsparse_handle::_rocsparse_handle()
         THROW_WITH_MESSAGE_IF_HIP_ERROR(hipGetLastError(), "'empty kernel scheduling failed'");
 
         // Execute memset for initialization
-        THROW_IF_HIP_ERROR(hipMemsetAsync(sone, 0, sizeof(float) * 2, stream));
-        THROW_IF_HIP_ERROR(hipMemsetAsync(done, 0, sizeof(double) * 2, stream));
+        THROW_IF_HIP_ERROR(rocsparse_hipMemsetAsync(sone, 0, sizeof(float) * 2, stream));
+        THROW_IF_HIP_ERROR(rocsparse_hipMemsetAsync(done, 0, sizeof(double) * 2, stream));
 
         const float  s_value = 1.0f;
         const double d_value = 1.0;

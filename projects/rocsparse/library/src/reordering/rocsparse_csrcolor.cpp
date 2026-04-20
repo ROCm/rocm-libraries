@@ -188,7 +188,7 @@ namespace rocsparse
         //
         // Set to 0.
         //
-        RETURN_IF_HIP_ERROR(hipMemsetAsync(seq_ptr, 0, sizeof(J) * (n + 1), stream));
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(seq_ptr, 0, sizeof(J) * (n + 1), stream));
 
         //
         // Count uncolored values.
@@ -339,7 +339,7 @@ rocsparse_status rocsparse::csrcolor_core(rocsparse_handle          handle,
     //
     // Initialize colors
     //
-    RETURN_IF_HIP_ERROR(hipMemsetAsync(colors, -1, sizeof(J) * m, stream));
+    RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(colors, -1, sizeof(J) * m, stream));
 
     //
     // Iterate until the desired fraction of colored vertices is reached

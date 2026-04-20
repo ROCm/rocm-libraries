@@ -211,8 +211,8 @@ namespace rocsparse
             rhs_pad,
             static_cast<T>(0));
 
-        RETURN_IF_HIP_ERROR(hipMemsetAsync(w_pad, 0, m_pad * sizeof(T), handle->stream));
-        RETURN_IF_HIP_ERROR(hipMemsetAsync(v_pad, 0, m_pad * sizeof(T), handle->stream));
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(w_pad, 0, m_pad * sizeof(T), handle->stream));
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(v_pad, 0, m_pad * sizeof(T), handle->stream));
 
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::gtsv_LBM_wv_kernel<BLOCKSIZE, BLOCKDIM>),
                                            dim3(gridsize),

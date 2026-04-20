@@ -50,7 +50,7 @@ rocsparse_status rocsparse::csrgemm_scal_nnz_quickreturn(rocsparse_handle       
     {
         if(handle->pointer_mode == rocsparse_pointer_mode_device)
         {
-            RETURN_IF_HIP_ERROR(hipMemsetAsync(nnz_C, 0, sizeof(I), handle->stream));
+            RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(nnz_C, 0, sizeof(I), handle->stream));
         }
         else
         {

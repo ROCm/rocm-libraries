@@ -339,7 +339,7 @@ rocsparse_status rocsparse::gebsr2gebsr_template(rocsparse_handle          handl
     ROCSPARSE_CHECKARG_ARRAY(12, nnzb_C, bsr_val_C);
     ROCSPARSE_CHECKARG_ARRAY(14, nnzb_C, bsr_col_ind_C);
 
-    RETURN_IF_HIP_ERROR(hipMemsetAsync(
+    RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(
         bsr_val_C, 0, sizeof(T) * nnzb_C * row_block_dim_C * col_block_dim_C, handle->stream));
 
     // Stream
@@ -748,8 +748,8 @@ try
 
             if(rocsparse_pointer_mode_device == mode)
             {
-                RETURN_IF_HIP_ERROR(
-                    hipMemsetAsync(nnz_total_dev_host_ptr, 0, sizeof(rocsparse_int), stream));
+                RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(
+                    nnz_total_dev_host_ptr, 0, sizeof(rocsparse_int), stream));
             }
             else
             {

@@ -434,10 +434,11 @@ rocsparse_status
                                                          sizeof(I) * csrmv_info->adaptive.size,
                                                          hipMemcpyHostToDevice,
                                                          stream));
-            RETURN_IF_HIP_ERROR(hipMemsetAsync(csrmv_info->adaptive.wg_flags,
-                                               0,
-                                               sizeof(uint32_t) * csrmv_info->adaptive.size,
-                                               stream));
+            RETURN_IF_HIP_ERROR(
+                rocsparse_hipMemsetAsync(csrmv_info->adaptive.wg_flags,
+                                         0,
+                                         sizeof(uint32_t) * csrmv_info->adaptive.size,
+                                         stream));
             RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(csrmv_info->adaptive.wg_ids,
                                                          wg_ids.data(),
                                                          sizeof(J) * csrmv_info->adaptive.size,

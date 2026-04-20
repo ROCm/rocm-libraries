@@ -337,7 +337,7 @@ rocsparse_status rocsparse::gtrm_analysis(rocsparse_handle          handle,
 
     // Initialize temporary buffer with 0
     size_t zero_size_in_bytes = 256 + ((sizeof(int32_t) * m - 1) / 256 + 1) * 256;
-    RETURN_IF_HIP_ERROR(hipMemsetAsync(temp_buffer, 0, zero_size_in_bytes, stream));
+    RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(temp_buffer, 0, zero_size_in_bytes, stream));
 
     // workspace
     const size_t              workspace_size_in_bytes = ((sizeof_J * m - 1) / 256 + 1) * 256;

@@ -515,7 +515,7 @@ namespace rocsparse
             }
             else
             {
-                RETURN_IF_HIP_ERROR(hipMemsetAsync(nnz_C, 0, sizeof(I), handle->stream));
+                RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(nnz_C, 0, sizeof(I), handle->stream));
             }
 
             if(nnz_A == 0 && nnz_B == 0)

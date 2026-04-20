@@ -94,8 +94,8 @@ rocsparse_status rocsparse::position_t::create_position_async(int64_t           
             rocsparse_hipMallocAsync(&this->m_position, sizeof(int64_t) * batch_count, stream));
         if(indextype == rocsparse_indextype_i32)
         {
-            RETURN_IF_HIP_ERROR(
-                hipMemsetAsync(this->m_position, 0, sizeof(int64_t) * batch_count, stream));
+            RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(
+                this->m_position, 0, sizeof(int64_t) * batch_count, stream));
         }
         this->m_batch_count        = batch_count;
         this->m_position_indextype = indextype;

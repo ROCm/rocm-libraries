@@ -231,7 +231,7 @@ rocsparse_status rocsparse::coomv_analysis_template(rocsparse_handle          ha
             RETURN_IF_HIP_ERROR(rocsparse_hipMallocAsync(&max_nnz, sizeof(I), handle->stream));
             RETURN_IF_HIP_ERROR(
                 rocsparse_hipMallocAsync(&csr_row_ptr, sizeof(I) * (m + 1), handle->stream));
-            RETURN_IF_HIP_ERROR(hipMemsetAsync(max_nnz, 0, sizeof(I), handle->stream));
+            RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(max_nnz, 0, sizeof(I), handle->stream));
 
             RETURN_IF_ROCSPARSE_ERROR(rocsparse::coo2csr_template(
                 handle, coo_row_ind, (I)nnz, m, csr_row_ptr, descr->base));
@@ -264,7 +264,8 @@ rocsparse_status rocsparse::coomv_analysis_template(rocsparse_handle          ha
 
             RETURN_IF_HIP_ERROR(
                 rocsparse_hipMallocAsync(&csr_row_ptr, sizeof(int64_t) * (m + 1), handle->stream));
-            RETURN_IF_HIP_ERROR(hipMemsetAsync(max_nnz, 0, sizeof(int64_t), handle->stream));
+            RETURN_IF_HIP_ERROR(
+                rocsparse_hipMemsetAsync(max_nnz, 0, sizeof(int64_t), handle->stream));
 
             RETURN_IF_ROCSPARSE_ERROR(
                 rocsparse::coo2csr_template(handle, coo_row_ind, nnz, m, csr_row_ptr, descr->base));

@@ -138,7 +138,8 @@ namespace rocsparse
         }
 
         // Initialize buffers
-        RETURN_IF_HIP_ERROR(hipMemsetAsync(done_array, 0, sizeof(int) * m * narrays, stream));
+        RETURN_IF_HIP_ERROR(
+            rocsparse_hipMemsetAsync(done_array, 0, sizeof(int) * m * narrays, stream));
 
         const rocsparse::trm_info_t* trm_info = csrsm_info->get(trans_A, descr->fill_mode);
 

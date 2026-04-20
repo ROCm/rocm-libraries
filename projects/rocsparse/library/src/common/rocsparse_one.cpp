@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -32,8 +32,8 @@ rocsparse_status rocsparse::set_minus_one_async(rocsparse_pointer_mode pointer_m
     {
     case rocsparse_pointer_mode_device:
     {
-        RETURN_IF_HIP_ERROR(
-            hipMemsetAsync(data, 0xFF, rocsparse::indextype_sizeof(data_indextype), stream));
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(
+            data, 0xFF, rocsparse::indextype_sizeof(data_indextype), stream));
         return rocsparse_status_success;
     }
     case rocsparse_pointer_mode_host:
@@ -57,7 +57,7 @@ rocsparse_status rocsparse::set_minus_one_async(rocsparse_pointer_mode pointer_m
     {
     case rocsparse_pointer_mode_device:
     {
-        RETURN_IF_HIP_ERROR(hipMemsetAsync(
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(
             data, 0xFF, rocsparse::indextype_sizeof(data_indextype) * data_size, stream));
         return rocsparse_status_success;
     }

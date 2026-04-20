@@ -705,7 +705,7 @@ public:
                     //
                     // Compute norm of residual.
                     //
-                    RETURN_IF_HIP_ERROR(hipMemsetAsync(
+                    RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(
                         p_nrm_residual, 0, sizeof(floating_data_t<T>), handle_->stream));
                 }
 

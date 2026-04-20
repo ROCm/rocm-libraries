@@ -266,7 +266,8 @@ namespace rocsparse
         if(diag_type == rocsparse_diag_type_non_unit)
         {
 
-            RETURN_IF_HIP_ERROR(hipMemsetAsync(temp_buffer, 0, sizeof(J), handle->stream));
+            RETURN_IF_HIP_ERROR(
+                rocsparse_hipMemsetAsync(temp_buffer, 0, sizeof(J), handle->stream));
             if(info->is_submatrix)
             {
                 const J ptr_shift = (fill_mode == rocsparse_fill_mode_upper) ? 0 : -1;
@@ -352,7 +353,7 @@ namespace rocsparse
                         // We nned to check diagonal element are not present.
                         //
                         RETURN_IF_HIP_ERROR(
-                            hipMemsetAsync(temp_buffer, 0, sizeof(J), handle->stream));
+                            rocsparse_hipMemsetAsync(temp_buffer, 0, sizeof(J), handle->stream));
 
                         dim3 blocks((m - 1) / BLOCKSIZE + 1);
                         dim3 threads(BLOCKSIZE);

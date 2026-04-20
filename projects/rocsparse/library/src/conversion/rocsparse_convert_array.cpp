@@ -132,7 +132,7 @@ namespace rocsparse
 
         size_t* dnum_out_of_range_values = (size_t*)handle_->buffer;
         RETURN_IF_HIP_ERROR(
-            hipMemsetAsync(dnum_out_of_range_values, 0, sizeof(size_t), handle_->stream));
+            rocsparse_hipMemsetAsync(dnum_out_of_range_values, 0, sizeof(size_t), handle_->stream));
 
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
             (rocsparse::copy_indexbase_iarray_mix_safe<BLOCKSIZE, TARGET, SOURCE>),
@@ -242,7 +242,7 @@ namespace rocsparse
 
         size_t* dnum_out_of_range_values = (size_t*)handle_->buffer;
         RETURN_IF_HIP_ERROR(
-            hipMemsetAsync(dnum_out_of_range_values, 0, sizeof(size_t), handle_->stream));
+            rocsparse_hipMemsetAsync(dnum_out_of_range_values, 0, sizeof(size_t), handle_->stream));
 
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
             (rocsparse::copy_iarray_mix_safe<BLOCKSIZE, TARGET, SOURCE>),
@@ -560,7 +560,7 @@ namespace rocsparse
         floating_data_t<SOURCE>*  derr      = (floating_data_t<SOURCE>*)handle_->buffer;
         floating_data_t<SOURCE>   herr;
         RETURN_IF_HIP_ERROR(
-            hipMemsetAsync(derr, 0, sizeof(floating_data_t<SOURCE>), handle_->stream));
+            rocsparse_hipMemsetAsync(derr, 0, sizeof(floating_data_t<SOURCE>), handle_->stream));
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
             (rocsparse::copy_farray_mix_safe_kernel_t<TARGET, SOURCE>::template run<BLOCKSIZE>),
             dim3((nitems_ - 1) / BLOCKSIZE + 1),

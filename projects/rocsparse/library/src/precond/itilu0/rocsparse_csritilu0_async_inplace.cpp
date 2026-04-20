@@ -615,8 +615,8 @@ namespace rocsparse
                 // Need to set to zero because of atomics.
                 // (And absolutely need to be aligned).
                 //
-                RETURN_IF_HIP_ERROR(
-                    hipMemsetAsync(p_nrm_residual, 0, sizeof(floating_data_t<T>), handle_->stream));
+                RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(
+                    p_nrm_residual, 0, sizeof(floating_data_t<T>), handle_->stream));
 
                 if(use_coo_format)
                 {
@@ -1290,7 +1290,8 @@ struct rocsparse::csritilu0_driver_t<rocsparse_itilu0_alg_async_inplace>
 
             size_t buffer_size = 0;
             // quick compute of unnz.
-            RETURN_IF_HIP_ERROR(hipMemsetAsync(handle_->buffer, 0, sizeof(I), handle_->stream));
+            RETURN_IF_HIP_ERROR(
+                rocsparse_hipMemsetAsync(handle_->buffer, 0, sizeof(I), handle_->stream));
             rocsparse::kernel_compute_unnz_dispatch<BLOCKSIZE, I, J>(m_,
                                                                      handle_->wavefront_size,
                                                                      handle_->stream,
@@ -1363,7 +1364,8 @@ struct rocsparse::csritilu0_driver_t<rocsparse_itilu0_alg_async_inplace>
         {
             void* __restrict__ buffer_ = buffer__;
             // quick compute of unnz.
-            RETURN_IF_HIP_ERROR(hipMemsetAsync(handle_->buffer, 0, sizeof(I) * 2, handle_->stream));
+            RETURN_IF_HIP_ERROR(
+                rocsparse_hipMemsetAsync(handle_->buffer, 0, sizeof(I) * 2, handle_->stream));
             rocsparse::kernel_compute_unnz_dispatch<BLOCKSIZE, I, J>(m_,
                                                                      handle_->wavefront_size,
                                                                      handle_->stream,

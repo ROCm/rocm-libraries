@@ -245,7 +245,8 @@ rocsparse_status rocsparse::csrgemm_symbolic_calc_preprocess_template(rocsparse_
 
     J* d_group_size = reinterpret_cast<J*>(buffer);
     buffer += sizeof(J) * 256 * CSRGEMM_MAXGROUPS;
-    RETURN_IF_HIP_ERROR(hipMemsetAsync(d_group_size, 0, sizeof(J) * CSRGEMM_MAXGROUPS, stream));
+    RETURN_IF_HIP_ERROR(
+        rocsparse_hipMemsetAsync(d_group_size, 0, sizeof(J) * CSRGEMM_MAXGROUPS, stream));
     if(nnz_max > 16)
     {
         // Group size buffer
@@ -327,7 +328,7 @@ rocsparse_status rocsparse::csrgemm_symbolic_calc_preprocess_template(rocsparse_
         // First group processes all rows
         RETURN_IF_HIP_ERROR(
             rocsparse_hipMemcpyAsync(d_group_size, &m, sizeof(J), hipMemcpyHostToDevice, stream));
-        RETURN_IF_HIP_ERROR(hipMemsetAsync(d_group_offset, 0, sizeof(J), stream));
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(d_group_offset, 0, sizeof(J), stream));
     }
     RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
         d_group_size + CSRGEMM_MAXGROUPS, &nnz_max, sizeof(J), hipMemcpyHostToDevice, stream));

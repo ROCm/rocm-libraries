@@ -2174,7 +2174,7 @@ rocsparse_status rocsparse::bsrgemm_calc_template_dispatch(rocsparse_handle    h
     {
         // First group processes all rows
         h_group_size[0] = mb;
-        RETURN_IF_HIP_ERROR(hipMemsetAsync(d_group_offset, 0, sizeof(J), stream));
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(d_group_offset, 0, sizeof(J), stream));
     }
 
     I* workspace2 = reinterpret_cast<I*>(buffer);
