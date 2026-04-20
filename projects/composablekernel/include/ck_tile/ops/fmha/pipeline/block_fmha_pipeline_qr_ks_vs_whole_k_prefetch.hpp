@@ -67,6 +67,10 @@ struct BlockFmhaPipelineQRKSVSWholeKPrefetch
     static constexpr bool kHasDropout       = Problem::kHasDropout;
     static constexpr bool kHasLogitsSoftCap = Problem::kHasLogitsSoftCap;
 
+    // since this pipeline is only used by the inference path of xformers, the Dropout function is
+    // not well tested with the pipeline, so here we have Dropout disabled
+    static_assert(kHasDropout == false, "Dropout is not supported by this pipeline at present!");
+
     // last dimension vector length used to create tensor view(and decide buffer_load vector length)
     // ... together with tensor distribution. tensor dist should able to overwrite this
     static constexpr index_t kAlignmentQ =
