@@ -292,8 +292,6 @@ cusolverDnFunction_t hip2cuda_function(hipsolverDnFunction_t func)
     {
     case HIPSOLVERDN_GETRF:
         return CUSOLVERDN_GETRF;
-    case HIPSOLVERDN_SYEVBATCHED:
-        return CUSOLVERDN_SYEVBATCHED;
     default:
         throw HIPSOLVER_STATUS_INVALID_ENUM;
     }
@@ -305,8 +303,6 @@ hipsolverDnFunction_t cuda2hip_function(cusolverDnFunction_t func)
     {
     case CUSOLVERDN_GETRF:
         return HIPSOLVERDN_GETRF;
-    case CUSOLVERDN_SYEVBATCHED:
-        return HIPSOLVERDN_SYEVBATCHED;
     default:
         throw HIPSOLVER_STATUS_INVALID_ENUM;
     }
