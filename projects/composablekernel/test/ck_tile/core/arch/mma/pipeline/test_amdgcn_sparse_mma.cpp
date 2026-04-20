@@ -161,15 +161,21 @@ TEST(SparseMMATrait, SparseSelector)
 }
 
 template <uint32_t CompressionRatio, typename Vec>
-__global__ void test_sparse_transform(void* a, void* idx)
+struct SparseTransformKernel
 {
-    using ResultT =
-        decltype(SparseCompressTransform<CompressionRatio>::exec(*static_cast<Vec*>(a)));
-    using FirstT         = std::tuple_element_t<0, ResultT>;
-    const auto& [vec, i] = SparseCompressTransform<CompressionRatio>::exec(*static_cast<Vec*>(a));
-    *reinterpret_cast<remove_cvref_t<FirstT>*>(a) = vec;
-    *reinterpret_cast<int32_t*>(idx)              = i;
-}
+    static constexpr int kBlockSize = 64;
+
+    __device__ void operator()(void* a, void* idx) const
+    {
+        using ResultT =
+            decltype(SparseCompressTransform<CompressionRatio>::exec(*static_cast<Vec*>(a)));
+        using FirstT = std::tuple_element_t<0, ResultT>;
+        const auto& [vec, i] =
+            SparseCompressTransform<CompressionRatio>::exec(*static_cast<Vec*>(a));
+        *reinterpret_cast<remove_cvref_t<FirstT>*>(a) = vec;
+        *reinterpret_cast<int32_t*>(idx)              = i;
+    }
+};
 
 // Generalized helper: runs the sparse transform kernel and verifies compressed output and index.
 template <int NUM, int RATIO, typename Type>
@@ -208,7 +214,9 @@ void sparse_transform_verify(const std::vector<Type>& input,
     // Copy inputs to device
     HIP_CHECK_ERROR(hipMemcpy(d_v, input.data(), Size, hipMemcpyHostToDevice));
 
-    test_sparse_transform<RATIO, ext_vector_t<Type, NUM>><<<1, 32>>>(d_v, d_idx);
+    using Kernel = SparseTransformKernel<RATIO, ext_vector_t<Type, NUM>>;
+    ck_tile::launch_kernel(ck_tile::stream_config{},
+                           ck_tile::make_kernel(Kernel{}, dim3(1), dim3(32), 0, d_v, d_idx));
     HIP_CHECK_ERROR(hipDeviceSynchronize());
 
     std::vector<Type> h_out(NUM / RATIO, static_cast<Type>(0));
@@ -463,41 +471,48 @@ template <typename AType,
           uint32_t WaveTileN,
           uint32_t WaveTileK,
           MmaAccumPolicy AccumPolicy>
-__global__ void
-sparse_pipeline_kernel(const void* a_per_lane, const void* b_per_lane, void* c_per_lane)
+struct SparsePipelineKernel
 {
-    using CompilerTarget = decltype(get_compiler_target());
-    using Pipeline       = SparseMmaPipeline<AType,
-                                             BType,
-                                             CType,
-                                             WaveTileM,
-                                             WaveTileN,
-                                             WaveTileK,
-                                             AccumPolicy,
-                                             CompilerTarget>;
+    static constexpr int kBlockSize = 64;
 
-    using AVecType = typename Pipeline::AVecType;
-    using BVecType = typename Pipeline::BVecType;
-    using CVecType = typename Pipeline::CVecType;
-
-    const uint32_t lane = threadIdx.x;
-
-    AVecType a;
-    BVecType b;
-    CVecType c;
-    __builtin_memcpy(
-        &a, static_cast<const uint8_t*>(a_per_lane) + lane * sizeof(AVecType), sizeof(AVecType));
-    __builtin_memcpy(
-        &b, static_cast<const uint8_t*>(b_per_lane) + lane * sizeof(BVecType), sizeof(BVecType));
-    __builtin_memset(&c, 0, sizeof(CVecType));
-
-    if constexpr(MmaOpTraits<typename Pipeline::MmaOp>::IsSupported)
+    __device__ void
+    operator()(const void* a_per_lane, const void* b_per_lane, void* c_per_lane) const
     {
-        Pipeline::exec(a, b, c);
-        __builtin_memcpy(
-            static_cast<uint8_t*>(c_per_lane) + lane * sizeof(CVecType), &c, sizeof(CVecType));
+        using CompilerTarget = decltype(get_compiler_target());
+        using Pipeline       = SparseMmaPipeline<AType,
+                                                 BType,
+                                                 CType,
+                                                 WaveTileM,
+                                                 WaveTileN,
+                                                 WaveTileK,
+                                                 AccumPolicy,
+                                                 CompilerTarget>;
+
+        using AVecType = typename Pipeline::AVecType;
+        using BVecType = typename Pipeline::BVecType;
+        using CVecType = typename Pipeline::CVecType;
+
+        const uint32_t lane = threadIdx.x;
+
+        AVecType a;
+        BVecType b;
+        CVecType c;
+        __builtin_memcpy(&a,
+                         static_cast<const uint8_t*>(a_per_lane) + lane * sizeof(AVecType),
+                         sizeof(AVecType));
+        __builtin_memcpy(&b,
+                         static_cast<const uint8_t*>(b_per_lane) + lane * sizeof(BVecType),
+                         sizeof(BVecType));
+        __builtin_memset(&c, 0, sizeof(CVecType));
+
+        if constexpr(MmaOpTraits<typename Pipeline::MmaOp>::IsSupported)
+        {
+            Pipeline::exec(a, b, c);
+            __builtin_memcpy(
+                static_cast<uint8_t*>(c_per_lane) + lane * sizeof(CVecType), &c, sizeof(CVecType));
+        }
     }
-}
+};
 
 namespace {
 const auto should_skip = [](amdgcn_target_id currentArchId) {
@@ -540,47 +555,39 @@ struct SparsePipelineFactory_16x16x64_ColMajor
 // Full matrix verification: 16x16x32 single-fragment sparse pipeline (ROW_MAJOR)
 TEST(SparseMmaPipeline, FullMatrixVerify_16x16x32)
 {
-    const auto kernel = [](uint32_t waveSize, void* a, void* b, void* c) {
-        sparse_pipeline_kernel<fp16_t, fp16_t, fp32_t, 16u, 16u, 32u, MmaAccumPolicy::ROW_MAJOR>
-            <<<1, waveSize>>>(a, b, c);
-    };
+    using Kernel =
+        SparsePipelineKernel<fp16_t, fp16_t, fp32_t, 16u, 16u, 32u, MmaAccumPolicy::ROW_MAJOR>;
 
     mma_pipeline_test::run_pipeline_matrix_test<SparsePipelineFactory_16x16x32>(
-        16u, 16u, 32u, should_skip, kernel, /*isSparse=*/true);
+        16u, 16u, 32u, should_skip, Kernel{}, /*isSparse=*/true);
 }
 
 // Multi-fragment K: 16x16x64 -> 2 K fragments, tests internal K iteration (ROW_MAJOR)
 TEST(SparseMmaPipeline, FullMatrixVerify_16x16x64)
 {
-    const auto kernel = [](uint32_t waveSize, void* a, void* b, void* c) {
-        sparse_pipeline_kernel<fp16_t, fp16_t, fp32_t, 16u, 16u, 64u, MmaAccumPolicy::ROW_MAJOR>
-            <<<1, waveSize>>>(a, b, c);
-    };
+    using Kernel =
+        SparsePipelineKernel<fp16_t, fp16_t, fp32_t, 16u, 16u, 64u, MmaAccumPolicy::ROW_MAJOR>;
 
     mma_pipeline_test::run_pipeline_matrix_test<SparsePipelineFactory_16x16x64>(
-        16u, 16u, 64u, should_skip, kernel, true);
+        16u, 16u, 64u, should_skip, Kernel{}, true);
 }
 
 // Full matrix verification: 16x16x32 single-fragment sparse pipeline (COL_MAJOR)
 TEST(SparseMmaPipeline, FullMatrixVerify_16x16x32_ColMajor)
 {
-    const auto kernel = [](uint32_t waveSize, void* a, void* b, void* c) {
-        sparse_pipeline_kernel<fp16_t, fp16_t, fp32_t, 16u, 16u, 32u, MmaAccumPolicy::COL_MAJOR>
-            <<<1, waveSize>>>(a, b, c);
-    };
+    using Kernel =
+        SparsePipelineKernel<fp16_t, fp16_t, fp32_t, 16u, 16u, 32u, MmaAccumPolicy::COL_MAJOR>;
 
     mma_pipeline_test::run_pipeline_matrix_test<SparsePipelineFactory_16x16x32_ColMajor>(
-        16u, 16u, 32u, should_skip, kernel, true);
+        16u, 16u, 32u, should_skip, Kernel{}, true);
 }
 
 // Multi-fragment K: 16x16x64 -> 2 K fragments, tests internal K iteration (COL_MAJOR)
 TEST(SparseMmaPipeline, FullMatrixVerify_16x16x64_ColMajor)
 {
-    const auto kernel = [](uint32_t waveSize, void* a, void* b, void* c) {
-        sparse_pipeline_kernel<fp16_t, fp16_t, fp32_t, 16u, 16u, 64u, MmaAccumPolicy::COL_MAJOR>
-            <<<1, waveSize>>>(a, b, c);
-    };
+    using Kernel =
+        SparsePipelineKernel<fp16_t, fp16_t, fp32_t, 16u, 16u, 64u, MmaAccumPolicy::COL_MAJOR>;
 
     mma_pipeline_test::run_pipeline_matrix_test<SparsePipelineFactory_16x16x64_ColMajor>(
-        16u, 16u, 64u, should_skip, kernel, true);
+        16u, 16u, 64u, should_skip, Kernel{}, true);
 }
