@@ -222,7 +222,7 @@ When building an external plugin, the hipDNN Data SDK provides CMake variables t
 
 - Absolute path: (``HIPDNN_FULL_INSTALL_PLUGIN_ENGINE_DIR``):
 
-  - Hardcoded at CMake configure time.
+  - Computed at ``find_package()`` time relative to the installed hipDNN location.
   - This is intended for *developer use only*.
 
 - Relative path (``HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR``):

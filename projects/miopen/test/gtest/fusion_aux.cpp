@@ -29,7 +29,7 @@
 #include <miopen/miopen.h>
 
 #include "gtest_common.hpp"
-#include "gtest_conv_desc_guard.hpp"
+#include "gtest_desc_guard.hpp"
 #include "test_parameter_name_generator.hpp"
 
 namespace {

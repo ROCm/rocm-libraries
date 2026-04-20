@@ -9,16 +9,17 @@
 
 #include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_data_sdk/utilities/Constants.hpp>
-#include <hipdnn_data_sdk/utilities/FlatbufferUtils.hpp>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
+#include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 
 namespace hip_kernel_provider::batchnorm
 {
 
 BatchnormFwdTrainingParams::BatchnormFwdTrainingParams(
-    const hipdnn_data_sdk::data_objects::BatchnormAttributes& attributes,
-    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+    const hipdnn_flatbuffers_sdk::data_objects::BatchnormAttributes& attributes,
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
         tensorMap)
     : _x(&(hip_kernel_utils::findTensorAttributes(tensorMap, attributes.x_tensor_uid())))
     , _y(&(hip_kernel_utils::findTensorAttributes(tensorMap, attributes.y_tensor_uid())))
@@ -27,8 +28,8 @@ BatchnormFwdTrainingParams::BatchnormFwdTrainingParams(
 {
     // Extract epsilon value from pass-by-value tensor (cast to double for kernel compatibility)
     auto epsilonTensorAttr = tensorMap.at(attributes.epsilon_tensor_uid());
-    _epsilonValue
-        = hipdnn_data_sdk::utilities::extractDoubleFromTensorValue(epsilonTensorAttr, "Epsilon");
+    _epsilonValue = hipdnn_flatbuffers_sdk::utilities::extractDoubleFromTensorValue(
+        epsilonTensorAttr, "Epsilon");
 
     // Save mean and inv_variance are optional
     if(attributes.mean_tensor_uid().has_value())
@@ -51,7 +52,7 @@ BatchnormFwdTrainingParams::BatchnormFwdTrainingParams(
     {
         // Extract momentum value from pass-by-value tensor (cast to double for kernel compatibility)
         auto momentumTensorAttr = tensorMap.at(attributes.momentum_tensor_uid().value());
-        _momentumValue = hipdnn_data_sdk::utilities::extractDoubleFromTensorValue(
+        _momentumValue = hipdnn_flatbuffers_sdk::utilities::extractDoubleFromTensorValue(
             momentumTensorAttr, "Momentum");
 
         _prevRunningMean = &(hip_kernel_utils::findTensorAttributes(
@@ -66,22 +67,24 @@ BatchnormFwdTrainingParams::BatchnormFwdTrainingParams(
     }
 }
 
-const hipdnn_data_sdk::data_objects::TensorAttributes* BatchnormFwdTrainingParams::x() const
+const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* BatchnormFwdTrainingParams::x() const
 {
     return _x;
 }
 
-const hipdnn_data_sdk::data_objects::TensorAttributes* BatchnormFwdTrainingParams::y() const
+const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* BatchnormFwdTrainingParams::y() const
 {
     return _y;
 }
 
-const hipdnn_data_sdk::data_objects::TensorAttributes* BatchnormFwdTrainingParams::scale() const
+const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*
+    BatchnormFwdTrainingParams::scale() const
 {
     return _scale;
 }
 
-const hipdnn_data_sdk::data_objects::TensorAttributes* BatchnormFwdTrainingParams::bias() const
+const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*
+    BatchnormFwdTrainingParams::bias() const
 {
     return _bias;
 }
@@ -96,12 +99,13 @@ bool BatchnormFwdTrainingParams::hasSaveMeanVariance() const
     return (_mean != nullptr) && (_invVariance != nullptr);
 }
 
-const hipdnn_data_sdk::data_objects::TensorAttributes* BatchnormFwdTrainingParams::mean() const
+const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*
+    BatchnormFwdTrainingParams::mean() const
 {
     return _mean;
 }
 
-const hipdnn_data_sdk::data_objects::TensorAttributes*
+const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*
     BatchnormFwdTrainingParams::invVariance() const
 {
     return _invVariance;
@@ -112,13 +116,13 @@ bool BatchnormFwdTrainingParams::hasRunningStats() const
     return _hasRunningStats;
 }
 
-const hipdnn_data_sdk::data_objects::TensorAttributes*
+const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*
     BatchnormFwdTrainingParams::prevRunningMean() const
 {
     return _prevRunningMean;
 }
 
-const hipdnn_data_sdk::data_objects::TensorAttributes*
+const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*
     BatchnormFwdTrainingParams::prevRunningVariance() const
 {
     return _prevRunningVariance;
@@ -129,13 +133,13 @@ double BatchnormFwdTrainingParams::momentumValue() const
     return _momentumValue.value();
 }
 
-const hipdnn_data_sdk::data_objects::TensorAttributes*
+const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*
     BatchnormFwdTrainingParams::nextRunningMean() const
 {
     return _nextRunningMean;
 }
 
-const hipdnn_data_sdk::data_objects::TensorAttributes*
+const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*
     BatchnormFwdTrainingParams::nextRunningVariance() const
 {
     return _nextRunningVariance;
@@ -164,10 +168,10 @@ void BatchnormFwdTrainingPlan::compile(const IKernelCompiler& kernelCompiler,
     // FP16 IO and FP16 scale/bias data types, the hip kernel plugin
     // applicability checks require the scale and bias tensors to be FP32.
     // So we are not using the USE_FP16 path in the kernel for now.
-    bool useFp16Mix = (xDataType == hipdnn_data_sdk::data_objects::DataType::HALF
-                       && scaleDataType == hipdnn_data_sdk::data_objects::DataType::FLOAT);
-    bool useBfp16Mix = (xDataType == hipdnn_data_sdk::data_objects::DataType::BFLOAT16
-                        && scaleDataType == hipdnn_data_sdk::data_objects::DataType::FLOAT);
+    bool useFp16Mix = (xDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::HALF
+                       && scaleDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
+    bool useBfp16Mix = (xDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16
+                        && scaleDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
     bool useFp32 = !useFp16Mix && !useBfp16Mix;
 
     // Extract dimensions from x tensor

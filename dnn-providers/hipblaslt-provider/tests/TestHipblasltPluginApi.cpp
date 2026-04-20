@@ -2,6 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 #include "hipdnn_plugin_sdk/PluginApi.h"
+#include "version.h"
 #include <HipblasltPlugin.hpp>
 #include <array>
 #include <gtest/gtest.h>
@@ -45,7 +46,7 @@ TEST_F(TestHipblasltPluginApi, GetVersionSuccess)
 {
     const char* version = nullptr;
     EXPECT_EQ(hipdnnPluginGetVersionImpl(&version), HIPDNN_PLUGIN_STATUS_SUCCESS);
-    EXPECT_STREQ(version, "1.0.0");
+    EXPECT_STREQ(version, HIPBLASLT_PROVIDER_VERSION_STRING);
 }
 
 TEST_F(TestHipblasltPluginApi, GetVersionNullptr)
