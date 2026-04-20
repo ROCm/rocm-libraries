@@ -48,7 +48,8 @@ from operator import mul
 
 from generator import (ArgumentList, BaseNode, Call, CommentBlock, Function,
                        Include, LineBreak, Map, StatementList, Variable,
-                       Assign, name_args, write, ForwardDeclaration, Declaration)
+                       Assign, name_args, write, ForwardDeclaration,
+                       Declaration)
 
 from collections import namedtuple
 
@@ -161,7 +162,8 @@ def merge_kernel_list(kernels, all_precisions):
                 kernel_cpy.precision = p
                 kernel_cpy.gcn_arch_name = a
 
-                key = (get_kernel_key(kernel_cpy), kernel_cpy.precision)
+                key = (get_kernel_key(kernel_cpy), kernel_cpy.precision,
+                       kernel_cpy.transform_type)
 
                 if key not in s:
                     s.add(key)
@@ -303,6 +305,12 @@ def generate_cpu_function_pool_pieces(functions, pp_functions, num_files):
         'dp': 'rocfft_precision_double',
         'hp': 'rocfft_precision_half',
     }
+    transform_types = {
+        'c2c_fwd': 'rocfft_transform_type_complex_forward',
+        'c2c_inv': 'rocfft_transform_type_complex_inverse',
+        'r2c': 'rocfft_transform_type_real_forward',
+        'c2r': 'rocfft_transform_type_real_inverse'
+    }
     var_kernel = Variable('kernel', 'FFTKernel')
     var_pp_kernel_1 = Variable('pp_kernel_1', 'FFTKernel')
     var_pp_kernel_2 = Variable('pp_kernel_2', 'FFTKernel')
@@ -347,7 +355,7 @@ def generate_cpu_function_pool_pieces(functions, pp_functions, num_files):
             # get first pp kernel
             f_pp_1 = pp_functions[counter_f_pp_1]
 
-            # PPFMKey entry needs two kernels with same length, precision, and arch, but different pp_current_dim
+            # PPFMKey entry needs two kernels with same length, precision, arch, and transform_type but different pp_current_dim
             counter_f_pp_2 = counter_f_pp_1 + 1
             if counter_f_pp_2 >= len(pp_functions):
                 break
@@ -357,14 +365,18 @@ def generate_cpu_function_pool_pieces(functions, pp_functions, num_files):
                 if (f_pp_1.meta.length == f_pp_2.meta.length
                         and f_pp_1.meta.precision == f_pp_2.meta.precision and
                         f_pp_1.meta.gcn_arch_name == f_pp_2.meta.gcn_arch_name
+                        and f_pp_1.meta.transform_type
+                        == f_pp_2.meta.transform_type
                         and f_pp_1.meta.pp_current_dim !=
                         f_pp_2.meta.pp_current_dim):
                     break
-                if (f_pp_1.meta.length != f_pp_2.meta.length or (
-                        f_pp_1.meta.length == f_pp_2.meta.length and
-                    (f_pp_1.meta.precision != f_pp_2.meta.precision or
-                     f_pp_1.meta.gcn_arch_name != f_pp_2.meta.gcn_arch_name))):
-                    # we hit a new kernel with different length/precision/arch
+                if (f_pp_1.meta.length != f_pp_2.meta.length or
+                    (f_pp_1.meta.length == f_pp_2.meta.length and
+                     (f_pp_1.meta.precision != f_pp_2.meta.precision
+                      or f_pp_1.meta.gcn_arch_name != f_pp_2.meta.gcn_arch_name
+                      or f_pp_1.meta.transform_type !=
+                      f_pp_2.meta.transform_type))):
+                    # we hit a new kernel with different length/precision/arch/transform_type
                     # start next iteration looking for the next pair
                     counter_f_pp_1 = counter_f_pp_2
                     skip_to_next_iter = True
@@ -386,12 +398,14 @@ def generate_cpu_function_pool_pieces(functions, pp_functions, num_files):
 
             length = f_pp_1.meta.length
             precision = f_pp_1.meta.precision
+            transform_type = f_pp_1.meta.transform_type
             scheme = f_pp_1.meta.scheme
             arch_name = f_pp_1.meta.gcn_arch_name
             key = Call(name='PPFMKey',
                        arguments=ArgumentList(
                            length[0], length[1], length[2],
-                           precisions[precision], scheme,
+                           precisions[precision],
+                           transform_types[transform_type], scheme,
                            'pp_kernel_1.get_kernel_config()',
                            'pp_kernel_2.get_kernel_config()',
                            ''.join(['"', arch_name, '"']))).inline()
@@ -436,6 +450,8 @@ def kernel_name(ns):
 
     postfix += f'_{ns.precision}'
 
+    postfix += f'_{ns.transform_type}'
+
     if hasattr(ns, 'lds_size_bytes'):
         postfix += f'_lds{ns.lds_size_bytes}'
 
@@ -449,8 +465,9 @@ def list_small_kernels():
     kernels1d = config_sbrr.sbrr_kernels
 
     kernels = [
-        NS(**kernel.__dict__, scheme='CS_KERNEL_STOCKHAM')
-        for kernel in kernels1d
+        NS(**kernel.__dict__,
+           scheme='CS_KERNEL_STOCKHAM',
+           transform_type='all') for kernel in kernels1d
     ]
 
     return kernels
@@ -465,6 +482,7 @@ def list_large_kernels():
     sbcc_kernels = config_sbcc.sbcc_kernels
     for k in sbcc_kernels:
         k.scheme = 'CS_KERNEL_STOCKHAM_BLOCK_CC'
+        k.transform_type = 'all'
         if not hasattr(k, 'workgroup_size'):
             k.workgroup_size = block_width * \
                 functools.reduce(mul, k.factors, 1) // min(k.factors)
@@ -476,6 +494,7 @@ def list_large_kernels():
     block_width = 16
     sbcr_kernels = config_sbcr.sbcr_kernels
     for k in sbcr_kernels:
+        k.transform_type = 'all'
         k.scheme = 'CS_KERNEL_STOCKHAM_BLOCK_CR'
         k.half_lds = False
         if not hasattr(k, 'workgroup_size'):
@@ -486,9 +505,10 @@ def list_large_kernels():
 
     sbrc_kernels = config_sbrc.sbrc_kernels
     for k in sbrc_kernels:
+        k.transform_type = 'all'
         k.half_lds = False
 
-    return config_sbcc.sbcc_kernels + config_sbcr.sbcr_kernels + config_sbrc.sbrc_kernels
+    return sbcc_kernels + sbcr_kernels + sbrc_kernels
 
 
 def list_2d_kernels():
@@ -500,6 +520,7 @@ def list_2d_kernels():
     expanded.extend(
         NS(**kernel.__dict__,
            scheme='CS_KERNEL_2D_SINGLE',
+           transform_type='all',
            runtime_compile=True) for kernel in fused_2d_kernels)
 
     return expanded
@@ -508,14 +529,43 @@ def list_2d_kernels():
 def list_3d_partial_pass_kernels():
     """Return list of partial-pass 3D kernels to generate."""
 
-    pp_3d_kernels = config_pp_3d.pp_3d_kernels
+    kernel_list = config_pp_3d.pp_3d_kernels
 
-    expanded = []
-    expanded.extend(
-        NS(**kernel.__dict__, scheme='CS_3D_PP', runtime_compile=True)
-        for kernel in pp_3d_kernels)
+    pp_3d_kernels = []
 
-    return expanded
+    complex_transform_types = ['c2c_fwd', 'c2c_inv']
+
+    for k in kernel_list:
+        if not hasattr(k, 'type'):
+            err_msg = "Error: missing partial-pass transform type: \n"
+            print(err_msg + str(k))
+            sys.exit(1)
+
+        k.runtime_compile = True
+
+        if not isinstance(k.type, list):
+            k.type = [k.type]
+
+        for t in k.type:
+            if t == 'r2c' or t == 'c2r':
+                k_cpy = copy.copy(k)
+                k_cpy.scheme = "CS_REAL_3D_PP"
+                k_cpy.transform_type = t
+                del k_cpy.type
+                pp_3d_kernels.append(k_cpy)
+            elif t == 'c2c':
+                for transform_type in complex_transform_types:
+                    k_cpy = copy.copy(k)
+                    k_cpy.scheme = "CS_3D_PP"
+                    k_cpy.transform_type = transform_type
+                    del k_cpy.type
+                    pp_3d_kernels.append(k_cpy)
+            else:
+                err_msg = "Error: invalid partial-pass transform type: \n"
+                print(err_msg + str(k))
+                sys.exit(1)
+
+    return pp_3d_kernels
 
 
 def default_runtime_compile(kernels, default_val):
@@ -536,7 +586,8 @@ def default_runtime_compile(kernels, default_val):
     return kernels
 
 
-def generate_kernel_functions(precisions_type_dict, kernels, launchers_json):
+def generate_kernel_functions(precisions_type_dict, transform_type_dict,
+                              kernels, launchers_json):
     """Generate CPU functions used to populate function pool with
     each kernel in `kernels`, and its variations.
     """
@@ -575,6 +626,7 @@ def generate_kernel_functions(precisions_type_dict, kernels, launchers_json):
             pp_off_dim = launcher.pp_off_dim
             sbrc_transpose_type = launcher.sbrc_transpose_type
             precision = precisions_type_dict[launcher.precision_type]
+            transform_type = transform_type_dict[launcher.transform_type]
             gcn_arch_name = launcher.gcn_arch_name
             runtime_compile = kernel.runtime_compile
             use_3steps_large_twd = getattr(kernel, 'use_3steps_large_twd',
@@ -595,6 +647,7 @@ def generate_kernel_functions(precisions_type_dict, kernels, launchers_json):
                              length=length,
                              params=params,
                              precision=precision,
+                             transform_type=transform_type,
                              gcn_arch_name=gcn_arch_name,
                              runtime_compile=runtime_compile,
                              scheme=scheme,
@@ -611,7 +664,7 @@ def generate_kernel_functions(precisions_type_dict, kernels, launchers_json):
                              pp_current_dim=pp_current_dim,
                              pp_off_dim=pp_off_dim))
 
-            if (scheme == 'CS_3D_PP'):
+            if (scheme == 'CS_3D_PP' or scheme == 'CS_REAL_3D_PP'):
                 pp_kernel_functions.append(f)
             else:
                 kernel_functions.append(f)
@@ -627,7 +680,8 @@ def read_subprocess(proc_output, output):
     output[0] = json_string
 
 
-def generate_kernels(precisions_dict, kernels, stockham_gen):
+def generate_kernels(precision_type_dict, transform_type_dict, kernels,
+                     stockham_gen):
     """Generate and write kernels from the kernel list.
 
     Entries in the kernel list are simple namespaces.  These are
@@ -663,7 +717,9 @@ def generate_kernels(precisions_dict, kernels, stockham_gen):
                                            for f in k.factors[0]]) + " ")
                 proc.stdin.write(','.join([str(f) for f in k.factors[1]]))
 
-                proc.stdin.write(f' {str(precisions_dict[k.precision])}')
+                proc.stdin.write(f' {str(precision_type_dict[k.precision])}')
+                proc.stdin.write(
+                    f' {str(transform_type_dict[k.transform_type])}')
 
                 proc.stdin.write(f' {k.gcn_arch_name}' + " ")
 
@@ -672,7 +728,8 @@ def generate_kernels(precisions_dict, kernels, stockham_gen):
             else:
                 proc.stdin.write(','.join([str(f) for f in k.factors]))
 
-                proc.stdin.write(f' {precisions_dict[k.precision]}')
+                proc.stdin.write(f' {precision_type_dict[k.precision]}')
+                proc.stdin.write(f' {transform_type_dict[k.transform_type]}')
 
                 proc.stdin.write(f' {k.gcn_arch_name}')
 
@@ -748,11 +805,12 @@ def generate_kernels(precisions_dict, kernels, stockham_gen):
     json_string = json_result[0]
     kernel_launchers = json.loads(json_string)
 
-    # Invert precisions dict for easy lookup
-    precisions_type_dict = {v: k for k, v in precisions_dict.items()}
+    # Invert dictionaries for easy lookup
+    precisions_type_dict = {v: k for k, v in precision_type_dict.items()}
+    transform_type_dict = {v: k for k, v in transform_type_dict.items()}
 
-    return generate_kernel_functions(precisions_type_dict, kernels,
-                                     kernel_launchers)
+    return generate_kernel_functions(precisions_type_dict, transform_type_dict,
+                                     kernels, kernel_launchers)
 
 
 def cli():
@@ -783,6 +841,15 @@ def cli():
     # dp: double-precision
     # hp: half-precision
     precisions_dict = {'sp': 0, 'dp': 1, 'hp': 2}
+
+    # transform type dictionary
+    transform_type_dict = {
+        'c2c_fwd': 0,
+        'c2c_inv': 1,
+        'r2c': 2,
+        'c2r': 3,
+        'all': 4  # for non-pp kernels
+    }
 
     #
     # kernel list
@@ -817,8 +884,9 @@ def cli():
     #
 
     if args.command == 'generate':
-        functions, pp_functions = generate_kernels(precisions_dict, kernels,
-                                                   args.stockham_gen)
+        functions, pp_functions = generate_kernels(precisions_dict,
+                                                   transform_type_dict,
+                                                   kernels, args.stockham_gen)
         func_files = generate_cpu_function_pool_pieces(functions, pp_functions,
                                                        args.num_files)
         for i in range(args.num_files):

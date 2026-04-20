@@ -148,11 +148,10 @@ target_compile_options(rocblas-test PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${COMMON_C
 target_compile_definitions( rocblas-test PRIVATE ROCM_USE_FLOAT16 ROCBLAS_INTERNAL_API ROCBLAS_NO_DEPRECATED_WARNINGS )
 
 if (CREATE_TEST_APP_LOCAL_DEPLOY AND WIN32)
-  # for now adding in all .dll as dependency chain is not cmake based on win32
+  # HIP and tooling (OpenBLAS DLLs come from the same install CMake linked when using ILP64).
   file( GLOB third_party_dlls
     LIST_DIRECTORIES OFF
     CONFIGURE_DEPENDS
-    ${OPENBLAS_DIR}/bin/*.dll
     ${HIP_DIR}/bin/amd*.dll
     ${HIP_DIR}/bin/hiprt*.dll
     ${HIP_DIR}/bin/hipinfo.exe
@@ -162,6 +161,30 @@ if (CREATE_TEST_APP_LOCAL_DEPLOY AND WIN32)
   foreach( file_i ${third_party_dlls})
     add_custom_command( TARGET rocblas-test POST_BUILD COMMAND ${CMAKE_COMMAND} ARGS -E copy ${file_i} ${PROJECT_BINARY_DIR}/staging/ )
   endforeach( file_i )
+
+  if( NOT LINK_BLIS AND ROCBLAS_CLIENTS_REFERENCE_ILP64 )
+    if( CMAKE_VERSION VERSION_GREATER_EQUAL "3.21" )
+      add_custom_command(
+        TARGET rocblas-test POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+          $<TARGET_RUNTIME_DLLS:rocblas-test>
+          $<TARGET_FILE_DIR:rocblas-test>
+        COMMAND_EXPAND_LISTS
+        COMMENT "Copying reference BLAS and other runtime DLLs for rocblas-test (ILP64)" )
+    elseif( DEFINED OpenBLAS64_DIR AND EXISTS "${OpenBLAS64_DIR}/bin" )
+      file( GLOB _openblas64_dlls LIST_DIRECTORIES OFF CONFIGURE_DEPENDS "${OpenBLAS64_DIR}/bin/*.dll" )
+      foreach( file_i ${_openblas64_dlls})
+        add_custom_command( TARGET rocblas-test POST_BUILD COMMAND ${CMAKE_COMMAND} ARGS -E copy ${file_i} ${PROJECT_BINARY_DIR}/staging/ )
+      endforeach()
+    else()
+      message( WARNING "rocblas-test local deploy: CMake < 3.21 and OpenBLAS64_DIR not set; reference OpenBLAS DLLs may be missing from staging. Set OpenBLAS64_DIR or use CMake 3.21+." )
+    endif()
+  elseif( NOT LINK_BLIS )
+    file( GLOB third_party_openblas_dlls LIST_DIRECTORIES OFF CONFIGURE_DEPENDS ${OPENBLAS_DIR}/bin/*.dll )
+    foreach( file_i ${third_party_openblas_dlls})
+      add_custom_command( TARGET rocblas-test POST_BUILD COMMAND ${CMAKE_COMMAND} ARGS -E copy ${file_i} ${PROJECT_BINARY_DIR}/staging/ )
+    endforeach()
+  endif()
 endif()
 
 set_target_properties( rocblas-test PROPERTIES
