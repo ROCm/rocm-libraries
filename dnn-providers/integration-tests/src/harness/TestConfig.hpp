@@ -46,6 +46,7 @@ public:
     static void initialize(std::optional<std::filesystem::path> articlePath,
                            std::optional<std::string> engineName,
                            bool failOnUnsupported = false,
+                           bool skipGraphValidation = false,
                            std::optional<std::filesystem::path> configPath = std::nullopt)
     {
         TestConfig& instance = get();
@@ -56,6 +57,7 @@ public:
         instance._articlePath = std::move(articlePath);
         instance._engineName = std::move(engineName);
         instance._failOnUnsupported = failOnUnsupported;
+        instance._skipGraphValidation = skipGraphValidation;
 
         if(configPath.has_value())
         {
@@ -81,6 +83,12 @@ public:
     {
         throwIfNotInitialized();
         return _failOnUnsupported;
+    }
+
+    bool skipGraphValidation() const
+    {
+        throwIfNotInitialized();
+        return _skipGraphValidation;
     }
 
     // Get the article (plugin .so) path. Throws if not provided.
@@ -157,6 +165,7 @@ private:
     std::optional<std::string> _engineName;
     std::optional<TestSettings> _testSettings;
     bool _failOnUnsupported = false;
+    bool _skipGraphValidation = false;
     bool _initialized = false;
 };
 
