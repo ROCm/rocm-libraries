@@ -1,6 +1,52 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
+# ============================================================================
+# ASM Kernel Code Generation
+# ============================================================================
+# Find Python interpreter for code generation
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
+
+# Define paths for code generation
+set(ASM_CODEGEN_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/asm/asm_kernels/codegen.py")
+set(ASM_CODEGEN_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")
+set(ASM_FMHA_FWD_CONFIG_HEADER "${ASM_CODEGEN_OUTPUT_DIR}/asm_fmha_v3_fwd_configs.hpp")
+
+# CSV files that the codegen script depends on
+file(GLOB_RECURSE ASM_KERNEL_CSV_FILES
+    "${CMAKE_CURRENT_SOURCE_DIR}/asm/asm_kernels/gfx942/**/*.csv"
+)
+
+# Create the output directory
+file(MAKE_DIRECTORY ${ASM_CODEGEN_OUTPUT_DIR})
+
+# Custom command to generate ASM kernel config headers
+add_custom_command(
+    OUTPUT ${ASM_FMHA_FWD_CONFIG_HEADER}
+    COMMAND ${CMAKE_COMMAND} -E env "AITER_GPU_ARCHS=gfx942"
+            ${Python3_EXECUTABLE} ${ASM_CODEGEN_SCRIPT}
+            -m fmha_v3_fwd
+            -o ${ASM_CODEGEN_OUTPUT_DIR}
+    DEPENDS ${ASM_CODEGEN_SCRIPT} ${ASM_KERNEL_CSV_FILES}
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/asm/asm_kernels
+    COMMENT "Generating ASM kernel configuration headers for gfx942"
+    VERBATIM
+)
+
+# Create a custom target for the generated headers
+add_custom_target(asm_kernel_codegen
+    DEPENDS ${ASM_FMHA_FWD_CONFIG_HEADER}
+    COMMENT "Generating headers for asm sdpa kernels..."
+)
+
+# Ensure codegen runs before compiling the implementation
+add_dependencies(hip_kernel_provider_impl asm_kernel_codegen)
+
+# Add generated headers to include directories
+target_include_directories(hip_kernel_provider_impl PRIVATE
+    ${ASM_CODEGEN_OUTPUT_DIR}
+)
+
 target_sources(hip_kernel_provider_impl PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/AsmSdpaEngine.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/plans/SdpaFwdPlanBuilder.cpp
