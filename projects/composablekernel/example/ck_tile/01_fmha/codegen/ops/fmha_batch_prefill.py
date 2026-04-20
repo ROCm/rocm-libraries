@@ -266,7 +266,7 @@ class FmhaFwdApiTrait:
     kv_memory_layout: str
     kv_lookup_table: str
     page_size: int = 1  # page block size
-    use_64bit_load: bool = False  # use flat 64-bit loads for >4GB KV cache
+    use_64bit_load: bool = False  # use flat 64-bit loads for >2GB KV cache
 
     @property
     def name(self) -> str:
@@ -555,7 +555,7 @@ class FmhaFwdKernel:
     F_pipeline: FmhaFwdPipeline
     mask_impl: str
     F_page_size: int = 1  # page block size
-    F_use_64bit_load: bool = False  # use flat 64-bit loads for >4GB KV cache
+    F_use_64bit_load: bool = False  # use flat 64-bit loads for >2GB KV cache
 
     @property
     def template(self) -> str:
@@ -606,7 +606,9 @@ class FmhaFwdKernel:
             F_page_size=self.F_page_size,
             F_sink=BOOL_MAP[self.F_pipeline.F_sink],
             F_use_64bit_load=BOOL_MAP["t" if self.F_use_64bit_load else "f"],
-            F_arch_check=CDNA3_PLUS_ARCH.preprocessor_check if self.F_use_64bit_load else "true",
+            F_arch_check=CDNA3_PLUS_ARCH.preprocessor_check
+            if self.F_use_64bit_load
+            else "true",
         )
 
     @property
@@ -859,8 +861,8 @@ def get_fwd_blobs(
                     gen.append(k)
 
                     # For page_size < kN0 (tile.F_bn0), also generate a kUse64BitLoad=true
-                    # variant for >4GB KV cache support. The default (false) uses SRD buffer_load
-                    # (fast, <4GB). The 64-bit variant uses flat loads (slower, handles >4GB).
+                    # variant for >2GB KV cache support. The default (false) uses SRD buffer_load
+                    # (fast, <2GB). The 64-bit variant uses flat loads (slower, handles >2GB).
                     if page_size < tile.F_bn0:
                         k_64bit = FmhaFwdKernel(
                             F_idx=0,
