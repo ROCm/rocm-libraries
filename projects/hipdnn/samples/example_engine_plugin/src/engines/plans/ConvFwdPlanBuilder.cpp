@@ -3,8 +3,8 @@
 
 #include "ConvFwdPlanBuilder.hpp"
 
-#include <hipdnn_data_sdk/data_objects/convolution_fwd_attributes_generated.h>
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/convolution_fwd_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
@@ -23,11 +23,11 @@ ConvFwdPlanBuilder::ConvFwdPlanBuilder(const IKernelCompiler& compiler)
 
 bool ConvFwdPlanBuilder::isApplicable(
     const ExampleProviderHandle& /*handle*/,
-    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
-    using NodeAttributes = hipdnn_data_sdk::data_objects::NodeAttributes;
-    using ConvMode = hipdnn_data_sdk::data_objects::ConvMode;
-    using DataType = hipdnn_data_sdk::data_objects::DataType;
+    using NodeAttributes = hipdnn_flatbuffers_sdk::data_objects::NodeAttributes;
+    using ConvMode = hipdnn_flatbuffers_sdk::data_objects::ConvMode;
+    using DataType = hipdnn_flatbuffers_sdk::data_objects::DataType;
 
     // Must contain only convolution forward attributes
     if(!opGraph.hasOnlySupportedAttributes({NodeAttributes::ConvolutionFwdAttributes}))
@@ -79,7 +79,7 @@ bool ConvFwdPlanBuilder::isApplicable(
 
 size_t ConvFwdPlanBuilder::getMaxWorkspaceSize(
     const ExampleProviderHandle& /*handle*/,
-    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& /*opGraph*/,
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& /*opGraph*/,
     const ExampleProviderSettings& /*executionSettings*/) const
 {
     // The convolution kernel in this engine does not require a workspace.
@@ -88,23 +88,24 @@ size_t ConvFwdPlanBuilder::getMaxWorkspaceSize(
 
 void ConvFwdPlanBuilder::initializeExecutionSettings(
     const ExampleProviderHandle& /*handle*/,
-    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& /*opGraph*/,
-    const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& /*opGraph*/,
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
     ExampleProviderSettings& executionSettings) const
 {
     // Read block size knob from engine config if present
     if(engineConfig.hasKnobSetting("BLOCK_SIZE"))
     {
         const auto& knobSetting = engineConfig.getKnobSettingByName("BLOCK_SIZE");
-        const auto& intVal = knobSetting.valueAs<hipdnn_data_sdk::data_objects::IntValue>();
+        const auto& intVal = knobSetting.valueAs<hipdnn_flatbuffers_sdk::data_objects::IntValue>();
         executionSettings.blockSize = intVal.value();
     }
 }
 
 void ConvFwdPlanBuilder::buildPlan(
     const ExampleProviderHandle& /*handle*/,
-    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
-    [[maybe_unused]] const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
+    [[maybe_unused]] const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig&
+        engineConfig,
     ExampleProviderContext& executionContext) const
 {
     const auto& node = opGraph.getNode(0);
@@ -222,23 +223,23 @@ void ConvFwdPlanBuilder::buildPlan(
     executionContext.setPlan(std::move(plan));
 }
 
-std::vector<hipdnn_data_sdk::data_objects::KnobT> ConvFwdPlanBuilder::getCustomKnobs(
+std::vector<hipdnn_flatbuffers_sdk::data_objects::KnobT> ConvFwdPlanBuilder::getCustomKnobs(
     const ExampleProviderHandle& /*handle*/,
-    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& /*opGraph*/) const
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& /*opGraph*/) const
 {
-    std::vector<hipdnn_data_sdk::data_objects::KnobT> knobs;
+    std::vector<hipdnn_flatbuffers_sdk::data_objects::KnobT> knobs;
 
-    hipdnn_data_sdk::data_objects::KnobT knob;
+    hipdnn_flatbuffers_sdk::data_objects::KnobT knob;
     knob.knob_id = "BLOCK_SIZE";
     knob.description = "Thread block size for convolution kernel";
 
     // Default value: 256
-    hipdnn_data_sdk::data_objects::IntValueT defaultValue;
+    hipdnn_flatbuffers_sdk::data_objects::IntValueT defaultValue;
     defaultValue.value = kDefaultBlockSize;
     knob.default_value.Set(std::move(defaultValue));
 
     // Constraint: valid values are 64, 128, 256
-    hipdnn_data_sdk::data_objects::IntConstraintT constraint;
+    hipdnn_flatbuffers_sdk::data_objects::IntConstraintT constraint;
     constraint.min_value = 64;
     constraint.max_value = 256;
     constraint.valid_values = {64, 128, 256};
