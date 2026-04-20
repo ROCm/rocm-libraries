@@ -2,7 +2,13 @@
 
 Full documentation for hipCUB is available at [https://rocm.docs.amd.com/projects/hipCUB/en/latest/](https://rocm.docs.amd.com/projects/hipCUB/en/latest/).
 
-## hipCUB-5.0.0 for ROCm 10.2.0 (unreleased)
+## hipCUB-5.1.0 for ROCm 10.3 (unreleased)
+
+### Added
+
+* Added support for large number of segments and large number of items to `hipcub::DeviceSegmentedRadixSort::*`.
+
+## hipCUB-5.0.0 for ROCm 10.2 (unreleased)
  
 ### Added
  
