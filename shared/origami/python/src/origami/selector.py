@@ -151,7 +151,8 @@ class OrigamiMatmulSelector:
         # Create list of Origami config_t objects based on generator.
         self._configs = self._generate_configs(config_gen)
 
-        # Run Origami solution selection
+        # Run Origami solution selection (arch-specific filtering is handled
+        # internally by select_config in C++)
         self._result = origami.select_config(self._problem,
                                              self._hardware,
                                              self._configs)
@@ -340,6 +341,7 @@ class OrigamiMatmulSelector:
             new_config.mt        = mt
             new_config.mi        = mi
             new_config.occupancy = config.kwargs['waves_per_eu']
+            new_config.target    = origami.target_t.triton
 
             configs_list.append(new_config)
 

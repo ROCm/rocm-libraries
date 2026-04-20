@@ -17,6 +17,7 @@ try:
         grid_selection_t,
         reduction_t,
         prediction_modes_t,
+        target_t,
         # Data structures
         dim3_t,
         dim4_t,
@@ -28,6 +29,8 @@ try:
         problem_t,
         hardware_t,
         context_t,
+        triton_ws_params_t,
+        triton_hierarchical_split_t,
         # Hardware functions
         get_hardware_for_device,
         get_hardware_for_arch,
@@ -48,6 +51,8 @@ try:
         compute_mt_compute_latency,
         # Memory functions
         check_lds_capacity,
+        estimate_triton_lds_bytes,
+        check_triton_lds_capacity,
         estimate_l2_hit,
         estimate_mall_hit,
         compute_memory_latency,
@@ -66,6 +71,12 @@ try:
         select_reduction,
         select_workgroup_mapping,
         compute_number_of_output_tiles,
+        # Triton primitive functions
+        select_triton_ws_params,
+        compute_triton_hierarchical_split,
+        compute_triton_sk_grid,
+        get_triton_default_tile_ranges,
+        triton_tile_ranges_t,
         # Reduction functions
         int_to_reduction_t,
     )
@@ -87,6 +98,7 @@ __all__ = [
     "grid_selection_t",
     "reduction_t",
     "prediction_modes_t",
+    "target_t",
     # Data structures
     "dim3_t",
     "dim4_t",
@@ -97,6 +109,8 @@ __all__ = [
     "problem_t",
     "hardware_t",
     "context_t",
+    "triton_ws_params_t",
+    "triton_hierarchical_split_t",
     # Hardware functions
     "get_hardware_for_device",
     "get_hardware_for_arch",
@@ -123,6 +137,8 @@ __all__ = [
     "count_unique_tiles_timestep",
     "estimate_cache_hit_rates",
     "check_lds_capacity",
+    "estimate_triton_lds_bytes",
+    "check_triton_lds_capacity",
     "estimate_l2_hit",
     "estimate_mall_hit",
     "compute_memory_latency",
@@ -134,6 +150,12 @@ __all__ = [
     "select_reduction",
     "select_workgroup_mapping",
     "compute_number_of_output_tiles",
+    # Triton primitive functions
+    "select_triton_ws_params",
+    "compute_triton_hierarchical_split",
+    "compute_triton_sk_grid",
+    "get_triton_default_tile_ranges",
+    "triton_tile_ranges_t",
     # Reduction functions
     "int_to_reduction_t",
 ]

@@ -11,6 +11,7 @@
 #include "origami/math.hpp"
 #include "origami/origami.hpp"
 #include "origami/streamk.hpp"
+#include "origami/targets/triton/gemm.hpp"
 #include "origami/types.hpp"
 
 namespace origami {
@@ -553,8 +554,15 @@ std::vector<prediction_result_t> rank_configs(const problem_t& problem,
   latencies_configs.reserve(configs.size());
 
   for (auto& config : configs) {
-    if (!check_lds_capacity(hardware, config.mt, problem.a_dtype, problem.b_dtype))
-      continue;
+    // Use Triton-aware LDS check (accounts for pipeline stages + padding) when target is Triton
+    if (config.target == target_t::triton) {
+      if (!check_triton_lds_capacity(hardware, config.mt, problem.a_dtype, problem.b_dtype))
+        continue;
+    } else {
+      if (!check_lds_capacity(hardware, config.mt, problem.a_dtype, problem.b_dtype))
+        continue;
+    }
+
     double latency = compute_total_latency(problem, hardware, config, hardware.N_CU);
     if (latency != std::numeric_limits<double>::max())
       latencies_configs.push_back({latency, std::cref(config)});
@@ -720,8 +728,6 @@ prediction_result_t select_config(const problem_t& problem,
                                   const hardware_t& hardware,
                                   const std::vector<config_t>& configs) {
   auto ranked_configs = rank_configs(problem, hardware, configs);
-
-  // Return the top configuration
   return ranked_configs[0];
 }
 
