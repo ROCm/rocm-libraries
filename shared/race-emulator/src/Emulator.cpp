@@ -159,6 +159,7 @@ WorkgroupConfig Emulator::buildWorkgroupConfig(int nWaves,
   wgConfig.raceChecks = config.raceChecks;
   wgConfig.completeEmulation = config.completeEmulation;
   wgConfig.waveSchedule = config.waveSchedule;
+  wgConfig.trace = config.trace;
   wgConfig.labels = &parsedAsm->labels;
   wgConfig.macros = &parsedAsm->macros;
   return wgConfig;

@@ -875,6 +875,51 @@ static RegisterVOP1<uint32_t> v_cvt_f16_f32("v_cvt_f16_f32", [](uint32_t v) {
   return static_cast<uint32_t>(floatToF16(std::bit_cast<float>(v)));
 });
 
+// BF16 <-> F32 conversions.
+// v_cvt_f32_bf16: convert bf16 in low 16 bits of src to f32.
+// Supports src0_sel:WORD_1 to select the high 16 bits instead.
+class VCvtF32Bf16 : public Instruction {
+public:
+  std::function<int()> getExecutor(Wave &wave,
+                                   std::string_view line) const final {
+    auto partitioned = getPartitioned(line);
+    auto dst = wave.getFirstRegister(partitioned[1]);
+    assert(dst.type == CommonRegister::Type::VGPR);
+    auto src = wave.parseOperand<uint32_t>(partitioned[2]);
+
+    // Check for src0_sel:WORD_1 modifier (selects upper 16 bits).
+    bool selectHigh = false;
+    for (size_t i = 3; i < partitioned.size(); ++i) {
+      if (partitioned[i].find("src0_sel:WORD_1") != std::string_view::npos) {
+        selectHigh = true;
+      }
+    }
+
+    int dstIdx = dst.index;
+    return [&wave, dstIdx, src, selectHigh]() {
+      wave.runExecConditionedForLanes([&](int lane) {
+        uint32_t raw = wave.getValue(src, lane);
+        uint16_t bf16 =
+            selectHigh ? static_cast<uint16_t>(raw >> 16)
+                       : static_cast<uint16_t>(raw & 0xFFFF);
+        wave.setVgpr(dstIdx, lane, std::bit_cast<uint32_t>(bf16ToFloat(bf16)));
+      });
+      return wave.getPc() + 1;
+    };
+  }
+};
+static Register<VCvtF32Bf16> v_cvt_f32_bf16("v_cvt_f32_bf16");
+
+// v_cvt_pk_bf16_f32: pack two f32 values into one VGPR as packed bf16.
+// dst[15:0] = bf16(src0), dst[31:16] = bf16(src1).
+static RegisterVOP2_32<uint32_t>
+    v_cvt_pk_bf16_f32("v_cvt_pk_bf16_f32",
+                      [](uint32_t a, uint32_t b, Wave &) -> uint32_t {
+                        uint16_t lo = floatToBf16(std::bit_cast<float>(a));
+                        uint16_t hi = floatToBf16(std::bit_cast<float>(b));
+                        return lo | (static_cast<uint32_t>(hi) << 16);
+                      });
+
 static Register<VOP1_VConvert<uint32_t, uint32_t>> v_mov_32("v_mov_b32");
 static Register<VOP1_VConvert<uint64_t, uint64_t>> v_mov_64("v_mov_b64");
 static Register<VOP1_VConvert<uint32_t, uint32_t>> v_acc_wr("v_accvgpr_write");
@@ -913,6 +958,8 @@ static RegisterVOP2_32<uint32_t> v_sub_u32("v_sub_u32",
 static RegisterVOP2_32<uint32_t> v_subrev_u32("v_subrev_u32",
                                               [](uint32_t a, uint32_t b,
                                                  Wave &) { return b - a; });
+static RegisterVOP2_32<float>
+    v_sub_f32("v_sub_f32", [](float a, float b, Wave &) { return a - b; });
 static RegisterVOP2_32<float>
     v_mul_f32("v_mul_f32", [](float a, float b, Wave &) { return a * b; });
 static RegisterVOP2_32<float> v_max_f32("v_max_f32",
@@ -994,6 +1041,8 @@ static RegisterVOP2_32<int32_t>
 static Register<VOP2_FMAC_F32> v_fmac("v_fmac_f32");
 static Register<VOP3P_PackedBinary<uint64_t, float>>
     v_pk_mul("v_pk_mul_f32", [](float a, float b) { return a * b; });
+static Register<VOP3P_PackedBinary<uint64_t, float>>
+    v_pk_add("v_pk_add_f32", [](float a, float b) { return a + b; });
 static Register<VCndMask> v_cndmask("v_cndmask_b32");
 static Register<VReadFirstLane> v_readfirst("v_readfirstlane_b32");
 static Register<VLshlAddU64> v_lshl_add64("v_lshl_add_u64");

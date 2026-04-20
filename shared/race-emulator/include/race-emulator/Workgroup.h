@@ -32,6 +32,7 @@ struct WorkgroupConfig {
   bool completeEmulation = true;
   WaveSchedule waveSchedule = WaveSchedule::Sequential;
   Dim3d workgroupId{0, 0, 0};
+  bool trace = false;
   std::function<void(RaceViolation)> raceHandler = {};
   Profiler *profiler = nullptr;
   const std::map<std::string, int> *labels = nullptr;
@@ -124,6 +125,7 @@ private:
   std::unique_ptr<RaceDetector> raceDetector;
 
   bool completeEmulation{true};
+  bool trace{false};
   Dim3d workgroupId;
 };
 

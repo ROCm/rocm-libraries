@@ -24,6 +24,13 @@
  *
  *******************************************************************************/
 
+
+// Cijk_Alik_Bljk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT64x128x64_MI16x16x1_SN_LDSB0_AFC1_AFEM1_AFEM1_ASEM1_CLR1_CADS0_DTLA1_DTLB1_DTVA0_DTVB0_EPS0_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU1_GSUAMB_GSUC0_GSUWGMRR0_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA1024_LBSPPB1024_LBSPPM0_LPA8_LPB8_LPM0_LRVW4_LWPMn1_MIAV0_MIWT4_2_MO40_NTn1_NTA0_NTB0_NTC4_NTD4_NTM0_NEPBS16_NLCA1_NLCB1_ONLL0_PGR2_PLR1_PKA1_SIA3_SS1_SU32_SUM0_SUS256_SPO0_SRVW0_SSO0_SVW4_SK0_SKFTR0_SKXCCM0_TLDS1_ULSGRO0_USL1_UIOFGRO0_USFGRO0_VSn1_VWA4_VWB2_WSGRA0_WSGRB0_WS64_WG16_16_1_WGM8_WGMXCC1_WGMXCCGn1
+
+
+// Cijk_Alik_Bljk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT64x128x64_MI16x16x1_SN_LDSB0_AFC0_AFEM1_AFEM1_ASEM1_CLR1_CADS0_DTLA1_DTLB1_DTVA0_DTVB0_EPS0_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA1024_LBSPPB1024_LBSPPM0_LPA8_LPB8_LPM0_LRVW4_LWPMn1_MIAV0_MIWT4_2_MO40_NTn1_NTA0_NTB0_NTC4_NTD4_NTM0_NEPBS16_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SIA3_SS1_SPO0_SRVW0_SSO0_SVW4_SK3_SKFTR0_SKXCCM0_TLDS1_ULSGRO0_USL1_UIOFGRO0_USFGRO0_VSn1_VWA4_VWB2_WSGRA0_WSGRB0_WS64_WG16_16_1
+
+
 #include <Tensile/Contractions.hpp>
 #include <Tensile/DataTypes.hpp>
 #include <Tensile/EmbeddedLibrary.hpp>
@@ -1042,6 +1049,7 @@ int main(int argc, const char* argv[])
     // GPU-free early-exit paths: --print-kernel-args and --validate-with-emulator.
     // Both share: construct hardware from --target-arch, load library, iterate
     // problems finding solutions and generating kernel invocations.
+#ifdef HIPBLASLT_HAS_RACE_EMULATOR
     bool printKernelArgs       = args["print-kernel-args"].as<bool>();
     bool validateWithEmulator  = args["validate-with-emulator"].as<int>() != 0;
 
@@ -1192,7 +1200,8 @@ int main(int argc, const char* argv[])
                           << ")..." << std::flush;
                 runEmulatorOnKernel(kernels[0], filename, arch, wgIds,
                                     {.raceChecks        = true,
-                                     .completeEmulation = true});
+                                     .completeEmulation = true,
+                                     .trace             = false});
                 std::cout << " done" << std::endl;
 
                 bool mismatch = validator->validate(
@@ -1222,6 +1231,7 @@ int main(int argc, const char* argv[])
         }
         return 0;
     }
+#endif // HIPBLASLT_HAS_RACE_EMULATOR
 
     std::shared_ptr<Hardware> hardware;
     hipStream_t               stream;

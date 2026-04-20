@@ -7,6 +7,7 @@
 #include "race-emulator/Util.h"
 #include "race-emulator/WaveRaceState.h"
 #include <algorithm>
+#include <iostream>
 #include <numeric>
 
 namespace raceemulator {
@@ -23,7 +24,7 @@ Workgroup &Workgroup::operator=(Workgroup &&) noexcept = default;
 Workgroup::Workgroup(const WorkgroupConfig &config)
     : profiler(config.profiler), waveSchedule(config.waveSchedule),
       completeEmulation(config.completeEmulation),
-      workgroupId(config.workgroupId) {
+      workgroupId(config.workgroupId), trace(config.trace) {
   if (config.ldsSize > 0) {
     lds.resize(config.ldsSize);
   }
@@ -121,6 +122,11 @@ void Workgroup::run(const std::vector<ParsedLine> &tokens) {
         return mnemonic;
       });
     }();
+
+    if (trace && !trimmedAndCommentFree.empty()) {
+      std::cerr << "w" << waveId << " L" << (wave.getPc() + 1) << ": "
+                << trimmedAndCommentFree << "\n";
+    }
 
     wave.tryExecute(token.commentFreeLine, true);
     dispatchPendingRaceEvents(WaveId{waveId});

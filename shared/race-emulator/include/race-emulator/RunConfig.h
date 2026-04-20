@@ -28,6 +28,8 @@ struct RunConfig {
   bool profiling = false;
   /// Order in which waves execute instructions within a workgroup.
   WaveSchedule waveSchedule = WaveSchedule::Sequential;
+  /// Print each executed instruction to stderr (wave id, line number, text).
+  bool trace = false;
 };
 
 } // namespace raceemulator
