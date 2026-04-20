@@ -189,7 +189,7 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
     requiredParametersTemp.discard("SpaceFillingAlgo")
 
   for key in sorted(requiredParametersTemp):
-    if key not in state:
+    if key not in state or key == "CustomKernelName":
       continue
     components.append(f'{getParameterNameAbbreviation(key)}{getParameterValueAbbreviation(key, state[key])}')
 
