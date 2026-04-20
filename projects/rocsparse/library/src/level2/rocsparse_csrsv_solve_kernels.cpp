@@ -44,7 +44,14 @@
 
 namespace rocsparse
 {
-    template <uint32_t BLOCKSIZE, uint32_t WF_SIZE, bool SLEEP, typename I, typename J, typename T>
+    template <uint32_t BLOCKSIZE,
+              uint32_t WF_SIZE,
+              bool     SLEEP,
+              bool     LOWER,
+              bool     UNIT_DIAG,
+              typename I,
+              typename J,
+              typename T>
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void csrsv_kernel(J m,
                       ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
@@ -54,6 +61,7 @@ namespace rocsparse
                       const T* __restrict__ csr_val,
                       int64_t csr_val_inc,
                       int64_t csr_val_stride,
+                      const I* __restrict__ csr_diag_ind,
                       const T* __restrict__ x,
                       int64_t x_inc,
                       int64_t x_stride,
@@ -66,30 +74,95 @@ namespace rocsparse
                       J* __restrict__ zero_pivot,
                       int64_t              zero_pivot_stride,
                       rocsparse_index_base idx_base,
-                      rocsparse_fill_mode  fill_mode,
-                      rocsparse_diag_type  diag_type,
                       bool                 is_host_mode)
     {
         const uint32_t batch_index = blockIdx.y;
         ROCSPARSE_DEVICE_HOST_SCALAR_GET(alpha);
-        rocsparse::csrsv_device<BLOCKSIZE, WF_SIZE, SLEEP>(m,
-                                                           alpha,
-                                                           csr_row_ptr,
-                                                           csr_col_ind,
-                                                           csr_val + batch_index * csr_val_stride,
-                                                           csr_val_inc,
-                                                           x + batch_index * x_stride,
-                                                           x_inc,
-                                                           y + batch_index * y_stride,
-                                                           y_inc,
-                                                           done_array + batch_index * m,
-                                                           map,
-                                                           offset,
-                                                           zero_pivot
-                                                               + batch_index * zero_pivot_stride,
-                                                           idx_base,
-                                                           fill_mode,
-                                                           diag_type);
+        rocsparse::csrsv_device<BLOCKSIZE, WF_SIZE, SLEEP, LOWER, UNIT_DIAG>(
+            m,
+            alpha,
+            csr_row_ptr,
+            csr_col_ind,
+            csr_val + batch_index * csr_val_stride,
+            csr_val_inc,
+            csr_diag_ind,
+            x + batch_index * x_stride,
+            x_inc,
+            y + batch_index * y_stride,
+            y_inc,
+            done_array + batch_index * m,
+            map,
+            offset,
+            zero_pivot + batch_index * zero_pivot_stride,
+            idx_base);
+    }
+
+    template <uint32_t BLOCKSIZE,
+              uint32_t WF_SIZE,
+              bool     SLEEP,
+              bool     LOWER,
+              bool     UNIT_DIAG,
+              typename I,
+              typename J,
+              typename T>
+    static rocsparse_status launch_csrsv_kernel_impl(rocsparse_handle handle,
+                                                     int64_t          batch_count,
+                                                     int64_t          m,
+                                                     const void*      alpha_,
+                                                     int64_t          alpha_stride,
+                                                     const void* __restrict__ csr_row_ptr,
+                                                     const void* __restrict__ csr_col_ind,
+                                                     const void* __restrict__ csr_val,
+                                                     int64_t csr_val_inc,
+                                                     int64_t csr_val_stride,
+                                                     const void* __restrict__ csr_diag_ind,
+                                                     const void* __restrict__ x,
+                                                     int64_t x_inc,
+                                                     int64_t x_stride,
+                                                     void* __restrict__ y,
+                                                     int64_t y_inc,
+                                                     int64_t y_stride,
+                                                     int32_t* __restrict__ done_array,
+                                                     const void* __restrict__ map,
+                                                     int64_t offset,
+                                                     void* __restrict__ zero_pivot,
+                                                     int64_t              zero_pivot_stride,
+                                                     rocsparse_index_base idx_base,
+                                                     bool                 is_host_mode)
+    {
+        auto alpha = reinterpret_cast<const T*>(alpha_);
+        dim3 csrsv_blocks((m * handle->wavefront_size - 1) / BLOCKSIZE + 1, batch_count);
+        dim3 csrsv_threads(BLOCKSIZE);
+        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+            (rocsparse::csrsv_kernel<BLOCKSIZE, WF_SIZE, SLEEP, LOWER, UNIT_DIAG, I, J, T>),
+            csrsv_blocks,
+            csrsv_threads,
+            0,
+            handle->stream,
+            static_cast<J>(m),
+            ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha),
+            alpha_stride,
+            reinterpret_cast<const I* __restrict__>(csr_row_ptr),
+            reinterpret_cast<const J* __restrict__>(csr_col_ind),
+            reinterpret_cast<const T* __restrict__>(csr_val),
+            csr_val_inc,
+            csr_val_stride,
+            reinterpret_cast<const I* __restrict__>(csr_diag_ind),
+            reinterpret_cast<const T* __restrict__>(x),
+            x_inc,
+            x_stride,
+            reinterpret_cast<T* __restrict__>(y),
+            y_inc,
+            y_stride,
+            done_array,
+            reinterpret_cast<const J* __restrict__>(map),
+            0,
+            reinterpret_cast<J* __restrict__>(zero_pivot),
+            zero_pivot_stride,
+            idx_base,
+            handle->pointer_mode == rocsparse_pointer_mode_host);
+
+        return rocsparse_status_success;
     }
 
     template <uint32_t BLOCKSIZE, uint32_t WF_SIZE, bool SLEEP, typename I, typename J, typename T>
@@ -103,6 +176,7 @@ namespace rocsparse
                                                 const void* __restrict__ csr_val,
                                                 int64_t csr_val_inc,
                                                 int64_t csr_val_stride,
+                                                const void* __restrict__ csr_diag_ind,
                                                 const void* __restrict__ x,
                                                 int64_t x_inc,
                                                 int64_t x_stride,
@@ -119,92 +193,46 @@ namespace rocsparse
                                                 rocsparse_diag_type  diag_type,
                                                 bool                 is_host_mode)
     {
-        auto alpha = reinterpret_cast<const T*>(alpha_);
-        dim3 csrsv_blocks((m * handle->wavefront_size - 1) / BLOCKSIZE + 1, batch_count);
-        dim3 csrsv_threads(BLOCKSIZE);
-        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-            (rocsparse::csrsv_kernel<BLOCKSIZE, WF_SIZE, SLEEP, I, J, T>),
-            csrsv_blocks,
-            csrsv_threads,
-            0,
-            handle->stream,
-            static_cast<J>(m),
-            ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha),
-            alpha_stride,
-            reinterpret_cast<const I* __restrict__>(csr_row_ptr),
-            reinterpret_cast<const J* __restrict__>(csr_col_ind),
-            reinterpret_cast<const T* __restrict__>(csr_val),
-            csr_val_inc,
-            csr_val_stride,
-            reinterpret_cast<const T* __restrict__>(x),
-            x_inc,
-            x_stride,
-            reinterpret_cast<T* __restrict__>(y),
-            y_inc,
-            y_stride,
-            done_array,
-            reinterpret_cast<const J* __restrict__>(map),
-            0,
-            reinterpret_cast<J* __restrict__>(zero_pivot),
-            zero_pivot_stride,
-            idx_base,
-            fill_mode,
-            diag_type,
-            handle->pointer_mode == rocsparse_pointer_mode_host);
+        const bool is_lower = (fill_mode == rocsparse_fill_mode_lower);
+        const bool is_unit  = (diag_type == rocsparse_diag_type_unit);
 
-        return rocsparse_status_success;
-    }
+#define CSRSV_IMPL(LOWER_, UNIT_DIAG_)                                              \
+    launch_csrsv_kernel_impl<BLOCKSIZE, WF_SIZE, SLEEP, LOWER_, UNIT_DIAG_, I, J, T>( \
+        handle,                                                                     \
+        batch_count,                                                                \
+        m,                                                                          \
+        alpha_,                                                                     \
+        alpha_stride,                                                               \
+        csr_row_ptr,                                                                \
+        csr_col_ind,                                                                \
+        csr_val,                                                                    \
+        csr_val_inc,                                                                \
+        csr_val_stride,                                                             \
+        csr_diag_ind,                                                               \
+        x,                                                                          \
+        x_inc,                                                                      \
+        x_stride,                                                                   \
+        y,                                                                          \
+        y_inc,                                                                      \
+        y_stride,                                                                   \
+        done_array,                                                                 \
+        map,                                                                        \
+        offset,                                                                     \
+        zero_pivot,                                                                 \
+        zero_pivot_stride,                                                          \
+        idx_base,                                                                   \
+        is_host_mode)
 
-    template <uint32_t BLOCKSIZE, uint32_t WF_SIZE, bool SLEEP, typename I, typename J, typename T>
-    static rocsparse_status launch_csrsv_kernel(rocsparse_handle            handle,
-                                                int64_t                     batch_count,
-                                                int64_t                     m,
-                                                const void*                 alpha_,
-                                                int64_t                     alpha_stride,
-                                                rocsparse_const_spmat_descr A,
-                                                rocsparse_const_dnvec_descr x,
-                                                rocsparse_dnvec_descr       y,
-                                                int32_t* __restrict__ done_array,
-                                                const void* __restrict__ map,
-                                                int64_t offset,
-                                                void* __restrict__ zero_pivot,
-                                                int64_t zero_pivot_stride,
-                                                bool    is_host_mode)
-    {
-        auto          alpha = reinterpret_cast<const T*>(alpha_);
-        dim3          csrsv_blocks((m * handle->wavefront_size - 1) / BLOCKSIZE + 1, batch_count);
-        dim3          csrsv_threads(BLOCKSIZE);
-        const int64_t csr_val_inc = static_cast<int64_t>(1);
-        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-            (rocsparse::csrsv_kernel<BLOCKSIZE, WF_SIZE, SLEEP, I, J, T>),
-            csrsv_blocks,
-            csrsv_threads,
-            0,
-            handle->stream,
-            static_cast<J>(m),
-            ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha),
-            alpha_stride,
-            A->const_row_data,
-            A->const_col_data,
-            A->const_val_data,
-            csr_val_inc,
-            A->batch_stride,
-            x->const_values,
-            x->inc,
-            x->batch_stride,
-            y->values,
-            y->inc,
-            y->batch_stride,
-            done_array,
-            map,
-            0,
-            zero_pivot,
-            zero_pivot_stride,
-            A->descr->base,
-            A->descr->fill_mode,
-            A->descr->diag_type,
-            handle->pointer_mode == rocsparse_pointer_mode_host);
-        return rocsparse_status_success;
+        if(is_lower && is_unit)
+            return CSRSV_IMPL(true, true);
+        else if(is_lower && !is_unit)
+            return CSRSV_IMPL(true, false);
+        else if(!is_lower && is_unit)
+            return CSRSV_IMPL(false, true);
+        else
+            return CSRSV_IMPL(false, false);
+
+#undef CSRSV_IMPL
     }
 
     using tpl_t = std::tuple<uint32_t,

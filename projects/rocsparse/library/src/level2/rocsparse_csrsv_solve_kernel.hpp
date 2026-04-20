@@ -39,6 +39,7 @@ namespace rocsparse
                                                       const void* __restrict__ csr_val,
                                                       int64_t csr_val_inc,
                                                       int64_t csr_val_stride,
+                                                      const void* __restrict__ csr_diag_ind,
                                                       const void* __restrict__ x,
                                                       int64_t x_inc,
                                                       int64_t x_stride,

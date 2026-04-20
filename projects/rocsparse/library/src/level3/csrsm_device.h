@@ -28,7 +28,13 @@
 
 namespace rocsparse
 {
-    template <uint32_t BLOCKSIZE, bool SLEEP, typename I, typename J, typename T>
+    template <uint32_t BLOCKSIZE,
+              bool     SLEEP,
+              bool     LOWER,
+              bool     UNIT_DIAG,
+              typename I,
+              typename J,
+              typename T>
     ROCSPARSE_DEVICE_ILF void csrsm_device(rocsparse_operation transB,
                                            J                   m,
                                            J                   nrhs,
@@ -36,21 +42,21 @@ namespace rocsparse
                                            const I* __restrict__ csr_row_ptr,
                                            const J* __restrict__ csr_col_ind,
                                            const T* __restrict__ csr_val,
+                                           const I* __restrict__ csr_diag_ind,
                                            T* __restrict__ B,
                                            int64_t ldb,
                                            int* __restrict__ done_array,
                                            const J* __restrict__ map,
                                            J* __restrict__ zero_pivot,
-                                           rocsparse_index_base idx_base,
-                                           rocsparse_fill_mode  fill_mode,
-                                           rocsparse_diag_type  diag_type)
+                                           rocsparse_index_base idx_base)
     {
         // Index into the row map
         const J idx = hipBlockIdx_x % m;
 
-        // Shared memory to hold columns and values
+        // Shared memory to hold columns, values, and (for non-unit diagonal) the diagonal inverse
         __shared__ J scsr_col_ind[BLOCKSIZE];
         __shared__ T scsr_val[BLOCKSIZE];
+        __shared__ T s_diagonal[1];
 
         // Get the row this warp will operate on
         const J row = map[idx];
@@ -79,8 +85,34 @@ namespace rocsparse
             local_sum = (col_B < nrhs) ? alpha * B[idx_B] : static_cast<T>(0);
         }
 
-        // Initialize diagonal entry
-        T diagonal = static_cast<T>(1);
+        // Pre-extract the diagonal value before the main loop.
+        // This avoids checking (local_col == row) on every non-zero in the hot loop.
+        if constexpr(!UNIT_DIAG)
+        {
+            if(hipThreadIdx_x == 0)
+            {
+                s_diagonal[0]  = static_cast<T>(1);
+                const I diag_j = csr_diag_ind[row];
+                if(diag_j >= static_cast<I>(0))
+                {
+                    T         diag_val = csr_val[diag_j];
+                    if(diag_val == static_cast<T>(0))
+                    {
+                        // Numerical zero pivot: report and leave s_diagonal[0] = 1
+                        rocsparse::atomic_min(zero_pivot, row + idx_base);
+                    }
+                    else
+                    {
+                        s_diagonal[0] = static_cast<T>(1) / diag_val;
+                    }
+                }
+                else
+                {
+                    // Structural zero (diagonal absent): report as numeric singularity too
+                    rocsparse::atomic_min(zero_pivot, row + idx_base);
+                }
+            }
+        }
 
         for(I j = row_begin; j < row_end; ++j)
         {
@@ -107,67 +139,22 @@ namespace rocsparse
             const J local_col = scsr_col_ind[k];
 
             // Local value this lane operates with
-            T local_val = scsr_val[k];
+            const T local_val = scsr_val[k];
 
-            // Check for numerical zero
-            if(local_val == static_cast<T>(0) && local_col == row
-               && diag_type == rocsparse_diag_type_non_unit)
+            if constexpr(LOWER)
             {
-                // Numerical zero pivot found, avoid division by 0
-                // and store index for later use.
-                if(hipThreadIdx_x == 0)
-                {
-                    rocsparse::atomic_min(zero_pivot, row + idx_base);
-                }
-
-                local_val = static_cast<T>(1);
-            }
-
-            // Differentiate upper and lower triangular mode
-            if(fill_mode == rocsparse_fill_mode_upper)
-            {
-                // Processing upper triangular
-
-                // Ignore all entries that are below the diagonal
-                if(local_col < row)
-                {
-                    continue;
-                }
-
-                // Diagonal entry
-                if(local_col == row)
-                {
-                    // If diagonal type is non unit, do division by diagonal entry
-                    if(diag_type == rocsparse_diag_type_non_unit)
-                    {
-                        diagonal = static_cast<T>(1) / local_val;
-                    }
-
-                    // Skip diagonal entry
-                    continue;
-                }
-            }
-            else if(fill_mode == rocsparse_fill_mode_lower)
-            {
-                // Processing lower triangular
-
-                // Ignore all entries that are above the diagonal
-                if(local_col > row)
+                // Lower triangular: skip the diagonal (pre-extracted) and above-diagonal entries.
+                if(local_col >= row)
                 {
                     break;
                 }
-
-                // Diagonal entry
-                if(local_col == row)
+            }
+            else
+            {
+                // Upper triangular: skip the diagonal (pre-extracted) and below-diagonal entries.
+                if(local_col <= row)
                 {
-                    // If diagonal type is non unit, do division by diagonal entry
-                    if(diag_type == rocsparse_diag_type_non_unit)
-                    {
-                        diagonal = static_cast<T>(1) / local_val;
-                    }
-
-                    // Skip diagonal entry
-                    break;
+                    continue;
                 }
             }
 
@@ -191,11 +178,14 @@ namespace rocsparse
                                        : static_cast<T>(0);
         }
 
-        // If we have non unit diagonal, take the diagonal into account
-        // For unit diagonal, this would be multiplication with one
-        if(diag_type == rocsparse_diag_type_non_unit)
+        // If we have non unit diagonal, take the diagonal into account.
+        // The __syncthreads below ensures the LDS write to s_diagonal[0] (done by thread 0
+        // before the loop) is visible to all threads in the block.
+        if constexpr(!UNIT_DIAG)
         {
-            local_sum = local_sum * diagonal;
+            __syncthreads();
+
+            local_sum = local_sum * s_diagonal[0];
         }
 
         // Store result in B
