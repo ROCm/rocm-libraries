@@ -34,9 +34,9 @@ RUN set -x ; \
     rm -rf csrc/composable_kernel/ && \
     git clone -b "$CK_FA_BRANCH" ../ck csrc/composable_kernel/ && git add csrc/composable_kernel && \
     MAX_JOBS=$(nproc) GPU_ARCHS="$GPU_ARCHS" /opt/venv/bin/python3 -u -m pip install --no-build-isolation -v . && \
-    groupadd -f render && \
     groupadd -g 1001 jenkins && \
     useradd -u 1001 -g 1001 -m -s /bin/bash jenkins && \
+    groupadd -f render && \
     chown -R jenkins:jenkins /home/jenkins && \
     chmod -R a+rwx /home/jenkins && \
     chown -R jenkins:jenkins /tmp && \
