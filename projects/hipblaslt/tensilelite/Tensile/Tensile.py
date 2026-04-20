@@ -631,10 +631,10 @@ def Tensile(userArgs):
         for arch in args.gpuTargets.split(";"):
             arch = arch.strip()
             if not arch:
-                continue
+                raise ValueError(f"Invalid GPU target: '{arch}'")
             isa = gfxToIsa(arch)
             if isa is None:
-                printExit(f"Unrecognized GPU target: '{arch}'")
+                raise ValueError(f"Unrecognized GPU target: '{arch}'")
             isaList.append(isa)
     elif "ISA" in config["GlobalParameters"]:
         isaList = [IsaVersion(isa[0], isa[1], isa[2]) for isa in config["GlobalParameters"]["ISA"]]
