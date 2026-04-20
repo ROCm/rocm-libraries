@@ -8,7 +8,6 @@
 #include "engines/plans/RMSnorm/RMSnormPlanBuilder.hpp"
 #include "engines/plans/batchnorm/BatchnormFwdTrainingPlanBuilder.hpp"
 #include "engines/plans/batchnorm/BatchnormPlanBuilder.hpp"
-#include "engines/plans/BatchnormFwdTrainingPlanBuilder.hpp"
 #include "engines/plans/layernorm/LayernormPlanBuilder.hpp"
 #include "hip/HipKernelCompiler.hpp"
 

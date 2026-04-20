@@ -30,8 +30,8 @@ BatchnormFwdTrainingParams::BatchnormFwdTrainingParams(
 {
     // Extract epsilon value from pass-by-value tensor (cast to double for kernel compatibility)
     auto epsilonTensorAttr = tensorMap.at(attributes.epsilon_tensor_uid());
-    _epsilonValue
-        = hipdnn_data_sdk::utilities::extractDoubleFromTensorValue(epsilonTensorAttr, "Epsilon");
+    _epsilonValue = hipdnn_flatbuffers_sdk::utilities::extractDoubleFromTensorValue(
+        epsilonTensorAttr, "Epsilon");
 
     // Save mean and inv_variance are optional
     if(attributes.mean_tensor_uid().has_value())
@@ -54,7 +54,7 @@ BatchnormFwdTrainingParams::BatchnormFwdTrainingParams(
     {
         // Extract momentum value from pass-by-value tensor (cast to double for kernel compatibility)
         auto momentumTensorAttr = tensorMap.at(attributes.momentum_tensor_uid().value());
-        _momentumValue = hipdnn_data_sdk::utilities::extractDoubleFromTensorValue(
+        _momentumValue = hipdnn_flatbuffers_sdk::utilities::extractDoubleFromTensorValue(
             momentumTensorAttr, "Momentum");
 
         _prevRunningMean = &(hip_kernel_utils::findTensorAttributes(
@@ -70,9 +70,10 @@ BatchnormFwdTrainingParams::BatchnormFwdTrainingParams(
 }
 
 BatchnormFwdTrainingParams::BatchnormFwdTrainingParams(
-    const hipdnn_data_sdk::data_objects::BatchnormAttributes& attributes,
-    const hipdnn_data_sdk::data_objects::PointwiseAttributes& pointwiseAttributes,
-    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+    const hipdnn_flatbuffers_sdk::data_objects::BatchnormAttributes& attributes,
+    const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& pointwiseAttributes,
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
         tensorMap)
     : _x(&(hip_kernel_utils::findTensorAttributes(tensorMap, attributes.x_tensor_uid())))
     , _y(&(hip_kernel_utils::findTensorAttributes(tensorMap, attributes.y_tensor_uid())))
@@ -214,7 +215,7 @@ const std::optional<hip_kernel_utils::ActivationParams>&
     return _optActivation;
 }
 
-const hipdnn_data_sdk::data_objects::TensorAttributes*
+const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*
     BatchnormFwdTrainingParams::activationOut() const
 {
     return _activationOut;
