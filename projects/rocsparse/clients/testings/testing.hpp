@@ -22,13 +22,13 @@
  *
  * ************************************************************************ */
 #pragma once
-#include "../tests/rocsparse_test_sync_wrappers.hpp"
 #include "auto_testing_bad_arg.hpp"
 #include "display.hpp"
 #include "flops.hpp"
 #include "gbyte.hpp"
 #include "rocsparse.hpp"
 #include "rocsparse_check.hpp"
+#include "rocsparse_clients_test_memory_debug_wrappers.hpp"
 #include "rocsparse_graph.hpp"
 #include "rocsparse_matrix_factory.hpp"
 #include "rocsparse_reproducibility.hpp"

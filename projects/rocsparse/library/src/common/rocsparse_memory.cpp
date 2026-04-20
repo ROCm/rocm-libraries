@@ -22,296 +22,170 @@
  *
  * ************************************************************************ */
 #include "rocsparse_memory.hpp"
-#include "rocsparse-export.h"
-#include "rocsparse-types.h"
 
-#include <iostream>
-
-int64_t rocsparse::execution_t::get_ncalls() const
+hipError_t rocsparse_hipMemcpy2DAsync(void*         target,
+                                      size_t        tpitch,
+                                      const void*   source,
+                                      size_t        spitch,
+                                      size_t        width,
+                                      size_t        height,
+                                      hipMemcpyKind kind,
+                                      hipStream_t   stream)
 {
-    return this->ncalls;
-}
-
-int64_t rocsparse::execution_t::count(func_t func) const
-{
-    return this->count_calls[func];
-}
-
-bool rocsparse::execution_t::is_memory_stack_clean() const
-{
-    return (this->stack_count == 0);
-}
-
-bool rocsparse::execution_t::hit_stream_synchronize() const
-{
-    return (this->count_calls[func_t::hip_stream_synchronize] > 0);
-}
-
-bool rocsparse::execution_t::hit_device_synchronize() const
-{
-    return (this->count_calls[func_t::hip_device_synchronize] > 0);
-}
-
-bool rocsparse::execution_t::hit_synchronize() const
-{
-    return this->hit_stream_synchronize() || this->hit_device_synchronize();
-}
-
-void rocsparse::execution_t::reset()
-{
-    this->stack_count = 0;
-    this->ncalls      = 0;
-    this->m_last_call = (func_t)-1;
-    for(int32_t i = 0; i < func_size; ++i)
+    if(false == rocsparse_debug_variables.get_debug())
     {
-        this->count_calls[i] = 0;
+        return hipMemcpy2DAsync(target, tpitch, source, spitch, width, height, kind, stream);
+    }
+    else
+    {
+        auto& info = rocsparse::memory_debug_t::get_info(stream);
+        return info.call_memcpy2D_async(
+            target, tpitch, source, spitch, width, height, kind, stream);
     }
 }
 
-extern "C" {
-ROCSPARSE_EXPORT void    rocsparse_execution_reset(rocsparse_handle handle);
-ROCSPARSE_EXPORT int32_t rocsparse_execution_is_stream_synchronized(rocsparse_handle handle);
-
-ROCSPARSE_EXPORT int32_t rocsparse_execution_is_asynchronous(rocsparse_handle handle);
-ROCSPARSE_EXPORT int32_t rocsparse_execution_is_synchronous(rocsparse_handle handle);
-ROCSPARSE_EXPORT int32_t rocsparse_execution_is_partially_synchronous(rocsparse_handle handle);
-ROCSPARSE_EXPORT int32_t rocsparse_execution_is_host(rocsparse_handle handle);
-}
-
-namespace rocsparse
+hipError_t rocsparse_hipDeviceSynchronize()
 {
-    static auto* exec = &rocsparse::execution_t::instance();
-}
-
-extern "C" int32_t rocsparse_execution_is_partially_synchronous(rocsparse_handle handle)
-{
-    const auto last_call = rocsparse::exec->get_last_call();
-    const auto ncalls    = rocsparse::exec->get_ncalls();
-    if(ncalls == 0)
-        return 0;
-    return (((rocsparse::exec->count(rocsparse::execution_t::hip_memcpy) > 0)
-             || (rocsparse::exec->count(rocsparse::execution_t::hip_malloc) > 0)
-             || (rocsparse::exec->count(rocsparse::execution_t::hip_free) > 0)
-             || (rocsparse::exec->count(rocsparse::execution_t::hip_memset) > 0)
-             || (rocsparse::exec->count(rocsparse::execution_t::hip_stream_synchronize) > 0)
-             || (rocsparse::exec->count(rocsparse::execution_t::hip_device_synchronize) > 0))
-            && ((last_call != rocsparse::execution_t::hip_memcpy)
-                && (last_call != rocsparse::execution_t::hip_malloc)
-                && (last_call != rocsparse::execution_t::hip_free)
-                && (last_call != rocsparse::execution_t::hip_memset)
-                && (last_call != rocsparse::execution_t::hip_stream_synchronize)
-                && (last_call != rocsparse::execution_t::hip_device_synchronize)))
-               ? 1
-               : 0;
-}
-
-extern "C" int32_t rocsparse_execution_is_asynchronous(rocsparse_handle handle)
-{
-    const auto ncalls = rocsparse::exec->get_ncalls();
-    if(ncalls == 0)
-        return 0;
-    return (((rocsparse::exec->count(rocsparse::execution_t::hip_memcpy) == 0)
-             && (rocsparse::exec->count(rocsparse::execution_t::hip_malloc) == 0)
-             && (rocsparse::exec->count(rocsparse::execution_t::hip_free) == 0)
-             && (rocsparse::exec->count(rocsparse::execution_t::hip_memset) == 0)
-             && (rocsparse::exec->count(rocsparse::execution_t::hip_stream_synchronize) == 0)
-             && (rocsparse::exec->count(rocsparse::execution_t::hip_device_synchronize) == 0))
-            && ((rocsparse::exec->count(rocsparse::execution_t::hip_memcpy_async) > 0)
-                || (rocsparse::exec->count(rocsparse::execution_t::hip_malloc_async) > 0)
-                || (rocsparse::exec->count(rocsparse::execution_t::hip_free_async) > 0)
-                || (rocsparse::exec->count(rocsparse::execution_t::hip_memset_async) > 0)
-                || (rocsparse::exec->count(rocsparse::execution_t::hip_launch_kernel) > 0)))
-               ? 1
-               : 0;
-}
-
-extern "C" int32_t rocsparse_execution_is_synchronous(rocsparse_handle handle)
-{
-    const auto last_call = rocsparse::exec->get_last_call();
-    const auto ncalls    = rocsparse::exec->get_ncalls();
-    if(ncalls == 0)
-        return 0;
-    return ((last_call == rocsparse::execution_t::hip_memcpy)
-            || (last_call == rocsparse::execution_t::hip_malloc)
-            || (last_call == rocsparse::execution_t::hip_free)
-            || (last_call == rocsparse::execution_t::hip_memset)
-            || (last_call == rocsparse::execution_t::hip_stream_synchronize)
-            || (last_call == rocsparse::execution_t::hip_device_synchronize))
-               ? 1
-               : 0;
-}
-
-extern "C" int32_t rocsparse_execution_is_host(rocsparse_handle handle)
-{
-    const auto ncalls = rocsparse::exec->get_ncalls();
-    return (ncalls == 0) ? 1 : 0;
-}
-
-extern "C" void rocsparse_execution_reset(rocsparse_handle handle)
-{
-    rocsparse::exec->reset();
-}
-
-extern "C" int32_t rocsparse_execution_is_stream_synchronized(rocsparse_handle handle)
-{
-
-    return ((rocsparse::exec->count(rocsparse::execution_t::hip_memcpy) > 0)
-            || (rocsparse::exec->count(rocsparse::execution_t::hip_malloc) > 0)
-            || (rocsparse::exec->count(rocsparse::execution_t::hip_free) > 0)
-            || (rocsparse::exec->count(rocsparse::execution_t::hip_memset) > 0)
-            || (rocsparse::exec->count(rocsparse::execution_t::hip_stream_synchronize) > 0)
-            || (rocsparse::exec->count(rocsparse::execution_t::hip_device_synchronize) > 0))
-               ? 1 // Yes, it synchronized.
-               : 0; // We can claim that maybe not
-}
-
-hipError_t rocsparse::execution_t::call_memcpy(void*         target,
-                                               const void*   source,
-                                               size_t        size,
-                                               hipMemcpyKind kind)
-{
-    ++this->count_calls[func_t::hip_memcpy];
-    this->m_last_call = func_t::hip_memcpy;
-    ++this->ncalls;
-    return hipMemcpy(target, source, size, kind);
-}
-
-hipError_t rocsparse::execution_t::call_memcpy_async(
-    void* target, const void* source, size_t size, hipMemcpyKind kind, hipStream_t stream)
-{
-    ++this->count_calls[func_t::hip_memcpy_async];
-    this->m_last_call = func_t::hip_memcpy_async;
-    ++this->ncalls;
-    return hipMemcpyAsync(target, source, size, kind, stream);
-}
-
-hipError_t rocsparse::execution_t::call_memset(void* target, int value, size_t size)
-{
-    ++this->count_calls[func_t::hip_memset];
-    this->m_last_call = func_t::hip_memset;
-    ++this->ncalls;
-    return hipMemset(target, value, size);
-}
-
-hipError_t rocsparse::execution_t::call_memset_async(void*       target,
-                                                     int         value,
-                                                     size_t      size,
-                                                     hipStream_t stream)
-{
-    ++this->count_calls[func_t::hip_memset_async];
-    this->m_last_call = func_t::hip_memset_async;
-    ++this->ncalls;
-    return hipMemsetAsync(target, value, size, stream);
-}
-
-rocsparse::execution_t::func_t rocsparse::execution_t::get_last_call() const
-{
-    return this->m_last_call;
-}
-
-void rocsparse::execution_t::set_last_call(func_t value)
-{
-    this->m_last_call = value;
-}
-
-rocsparse::execution_t::~execution_t() {}
-
-void rocsparse::execution_t::info() const
-{
-    const char* names[] = {"hip_malloc",
-                           "hip_free",
-                           "hip_malloc_async",
-                           "hip_free_async",
-                           "hip_memcpy",
-                           "hip_memcpy_async",
-                           "hip_memset",
-                           "hip_memset_async",
-                           "hip_stream_synchronize",
-                           "hip_device_synchronize",
-                           "hip_launch_kernel"};
-
-    for(int i = 0; i < func_size; ++i)
+    if(false == rocsparse_debug_variables.get_debug())
     {
-        std::cout << "[" << names[i] << "] = " << count_calls[i] << std::endl;
+        return hipDeviceSynchronize();
+    }
+    else
+    {
+        static constexpr hipStream_t default_stream{};
+        auto&                        info = rocsparse::memory_debug_t::get_info(default_stream);
+        return info.call_device_synchronize();
     }
 }
 
-rocsparse::execution_t& rocsparse::execution_t::instance()
+hipError_t rocsparse_hipStreamSynchronize(hipStream_t stream)
 {
-    static execution_t that{};
-    return that;
+    if(false == rocsparse_debug_variables.get_debug())
+    {
+        return hipStreamSynchronize(stream);
+    }
+    else
+    {
+        auto& info = rocsparse::memory_debug_t::get_info(stream);
+        return info.call_stream_synchronize(stream);
+    }
 }
 
-void rocsparse::execution_t::flag_kernel_launch()
+hipError_t
+    rocsparse_hipMemsetAsync(void* target, int value, size_t size_in_bytes, hipStream_t stream)
 {
-    ++this->count_calls[func_t::hip_launch_kernel];
-    this->set_last_call(func_t::hip_launch_kernel);
-    ++this->ncalls;
+    if(false == rocsparse_debug_variables.get_debug())
+    {
+        return hipMemsetAsync(target, value, size_in_bytes, stream);
+    }
+    else
+    {
+        auto& info = rocsparse::memory_debug_t::get_info(stream);
+        return info.call_memset_async(target, value, size_in_bytes, stream);
+    }
 }
 
-hipError_t rocsparse::execution_t::call_device_synchronize()
+hipError_t rocsparse_hipMemset(void* target, int value, size_t size_in_bytes)
 {
-    ++this->count_calls[func_t::hip_device_synchronize];
-    this->set_last_call(func_t::hip_device_synchronize);
-    ++this->ncalls;
-    return hipDeviceSynchronize();
+    if(false == rocsparse_debug_variables.get_debug())
+    {
+        return hipMemset(target, value, size_in_bytes);
+    }
+    else
+    {
+        static constexpr hipStream_t default_stream{};
+        auto&                        info = rocsparse::memory_debug_t::get_info(default_stream);
+        return info.call_memset(target, value, size_in_bytes);
+    }
 }
 
-hipError_t rocsparse::execution_t::call_stream_synchronize(hipStream_t stream)
+hipError_t
+    rocsparse_hipMemcpy(void* target, const void* source, size_t size_in_bytes, hipMemcpyKind kind)
 {
-    ++this->count_calls[func_t::hip_stream_synchronize];
-    this->set_last_call(func_t::hip_stream_synchronize);
-    ++this->ncalls;
-    return hipStreamSynchronize(stream);
+    if(false == rocsparse_debug_variables.get_debug())
+    {
+        return hipMemcpy(target, source, size_in_bytes, kind);
+    }
+    else
+    {
+        static constexpr hipStream_t default_stream{};
+        auto&                        info = rocsparse::memory_debug_t::get_info(default_stream);
+        return info.call_memcpy(target, source, size_in_bytes, kind);
+    }
 }
 
-hipError_t rocsparse::execution_t::call_malloc_async(void** p_that, size_t size, hipStream_t stream)
+hipError_t rocsparse_hipMemcpyAsync(
+    void* target, const void* source, size_t size_in_bytes, hipMemcpyKind kind, hipStream_t stream)
 {
-    ++stack_count;
-    ++this->count_calls[func_t::hip_malloc_async];
-    this->set_last_call(func_t::hip_malloc_async);
-    ++this->ncalls;
+    if(false == rocsparse_debug_variables.get_debug())
+    {
+        return hipMemcpyAsync(target, source, size_in_bytes, kind, stream);
+    }
+    else
+    {
+        auto& info = rocsparse::memory_debug_t::get_info(stream);
+        return info.call_memcpy_async(target, source, size_in_bytes, kind, stream);
+    }
+}
 
-// if hip version is atleast 5.3.0 hipMallocAsync and hipFreeAsync are defined
+hipError_t rocsparse_hipMalloc_impl(void** p, size_t size_in_bytes)
+{
+    if(false == rocsparse_debug_variables.get_debug())
+    {
+        return hipMalloc(p, size_in_bytes);
+    }
+    else
+    {
+        static constexpr hipStream_t default_stream{};
+        auto&                        info = rocsparse::memory_debug_t::get_info(default_stream);
+        return info.call_malloc(p, size_in_bytes);
+    }
+}
+
+hipError_t rocsparse_hipMallocAsync_impl(void** p, size_t size_in_bytes, hipStream_t stream)
+{
 #if HIP_VERSION >= 50300000
-    return hipMallocAsync(p_that, size, stream);
+    if(false == rocsparse_debug_variables.get_debug())
+    {
+        return hipMallocAsync(p, size_in_bytes, stream);
+    }
+    else
+    {
+        auto& info = rocsparse::memory_debug_t::get_info(stream);
+        return info.call_malloc_async(p, size_in_bytes, stream);
+    }
 #else
-    return hipMalloc(p_that, size);
+    return rocsparse_hipMalloc(p_, size_);
 #endif
 }
 
-hipError_t rocsparse::execution_t::call_free_async(void* that, hipStream_t stream)
+hipError_t rocsparse_hipFree(void* p)
 {
-    if(!that)
-        return hipSuccess;
-    --stack_count;
-    ++this->count_calls[func_t::hip_free_async];
-    this->set_last_call(func_t::hip_free_async);
-    ++this->ncalls;
-    // if hip version is atleast 5.3.0 hipMallocAsync and hipFreeAsync are defined
+    if(false == rocsparse_debug_variables.get_debug())
+    {
+        return hipFree(p);
+    }
+    else
+    {
+        static constexpr hipStream_t default_stream{};
+        auto&                        info = rocsparse::memory_debug_t::get_info(default_stream);
+        return info.call_free(p);
+    }
+}
+
+hipError_t rocsparse_hipFreeAsync(void* p, hipStream_t stream)
+{
 #if HIP_VERSION >= 50300000
-    return hipFreeAsync(that, stream);
+    if(false == rocsparse_debug_variables.get_debug())
+    {
+        return hipFreeAsync(p, stream);
+    }
+    else
+    {
+        auto& info = rocsparse::memory_debug_t::get_info(stream);
+        return info.call_free_async(p, stream);
+    }
 #else
-    return hipFree(that);
+    return rocsparse_hipFree(p);
 #endif
-}
-
-hipError_t rocsparse::execution_t::call_malloc(void** p_that, size_t size)
-{
-    ++stack_count;
-    ++this->count_calls[func_t::hip_malloc];
-    this->set_last_call(func_t::hip_malloc);
-    ++this->ncalls;
-    return hipMalloc(p_that, size);
-}
-
-hipError_t rocsparse::execution_t::call_free(void* that)
-{
-    if(!that)
-        return hipSuccess;
-    --stack_count;
-    ++this->count_calls[func_t::hip_free];
-    this->set_last_call(func_t::hip_free);
-    ++this->ncalls;
-    return hipFree(that);
 }

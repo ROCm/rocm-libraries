@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -21,28 +21,36 @@
  * THE SOFTWARE.
  *
  * ************************************************************************ */
-
-#include "rocsparse-types.h"
-
-#include "rocsparse_enum.hpp"
-
-constexpr rocsparse_matrix_type_t::value_t
-    rocsparse_matrix_type_t::values[rocsparse_matrix_type_t::nvalues];
-
-constexpr rocsparse_operation_t::value_t
-    rocsparse_operation_t::values[rocsparse_operation_t::nvalues];
-
-constexpr rocsparse_storage_mode_t::value_t
-    rocsparse_storage_mode_t::values[rocsparse_storage_mode_t::nvalues];
-
-std::ostream& operator<<(std::ostream& out, const rocsparse_operation& v)
+#pragma once
+#ifdef GOOGLE_TEST
+#include "rocsparse_clients_test_memory_debug_synchronicity.hpp"
+#include <map>
+namespace rocsparse_clients_test
 {
-    out << rocsparse_operation2string(v);
-    return out;
+    struct memory_debug_t
+    {
+    private:
+        bool        m_enabled{};
+        std::string m_filename{};
+        memory_debug_t() = default;
+
+    public:
+        const std::string&                 get_filename() const;
+        memory_debug_synchronicity_info_t& get_memory_debug_synchronicity_info(const char* name);
+
+        rocsparse_status       check(rocsparse_handle) const;
+        void                   report(rocsparse_handle) const;
+        static memory_debug_t& instance();
+        bool                   enabled() const;
+        void                   enable();
+        void                   disable();
+        void                   set_sync_report_filename(const char* filename);
+    };
 }
 
-std::ostream& operator<<(std::ostream& out, const rocsparse_direction& v)
+namespace rocsparse_clients_test
 {
-    out << rocsparse_direction2string(v);
-    return out;
+    void memory_debug_check_synchronicity(rocsparse_handle handle, const char* name);
 }
+
+#endif

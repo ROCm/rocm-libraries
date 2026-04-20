@@ -23,11 +23,11 @@
  * ************************************************************************ */
 
 #include "rocsparse_clients_envariables.hpp"
+#include "rocsparse_clients_test_memory_debug_wrappers.hpp"
 #include "rocsparse_data.hpp"
 #include "rocsparse_parse_data.hpp"
 #include "rocsparse_reproducibility.hpp"
 #include "rocsparse_test_listeners.hpp"
-#include "rocsparse_test_sync_wrappers.hpp"
 #include "utility.hpp"
 
 #include <gtest/gtest.h>
@@ -95,14 +95,13 @@ int main(int argc, char** argv)
                 std::cerr << "The " << argv[i] << " option requires an argument" << std::endl;
                 exit(EXIT_FAILURE);
             }
-            rocsparse_clients_test::function_properties_t::instance().enable();
-            rocsparse_clients_test::function_properties_t::instance().set_sync_report_filename(
-                argv[++i]);
+            rocsparse_clients_test::memory_debug_t::instance().enable();
+            rocsparse_clients_test::memory_debug_t::instance().set_sync_report_filename(argv[++i]);
         }
         else if(!strcmp(argv[i], "--test-sync"))
         {
-            rocsparse_clients_test::function_properties_t::instance().enable();
-            rocsparse_clients_test::function_properties_t::instance().set_sync_report_filename(
+            rocsparse_clients_test::memory_debug_t::instance().enable();
+            rocsparse_clients_test::memory_debug_t::instance().set_sync_report_filename(
                 "rocsparse_test_sync.json");
         }
     }
@@ -182,14 +181,13 @@ int main(int argc, char** argv)
                 std::cerr << "The " << argv[i] << " option requires an argument" << std::endl;
                 exit(EXIT_FAILURE);
             }
-            rocsparse_clients_test::function_properties_t::instance().enable();
-            rocsparse_clients_test::function_properties_t::instance().set_sync_report_filename(
-                argv[++i]);
+            rocsparse_clients_test::memory_debug_t::instance().enable();
+            rocsparse_clients_test::memory_debug_t::instance().set_sync_report_filename(argv[++i]);
         }
         else if(strcmp(argv[i], "--test-sync") == 0)
         {
-            rocsparse_clients_test::function_properties_t::instance().enable();
-            rocsparse_clients_test::function_properties_t::instance().set_sync_report_filename(
+            rocsparse_clients_test::memory_debug_t::instance().enable();
+            rocsparse_clients_test::memory_debug_t::instance().set_sync_report_filename(
                 "rocsparse_test_sync.json");
         }
     }
@@ -326,22 +324,20 @@ int main(int argc, char** argv)
     // Run all tests
     int ret = RUN_ALL_TESTS();
 
-    if(rocsparse_clients_test::function_properties_t::instance().enabled())
+    if(rocsparse_clients_test::memory_debug_t::instance().enabled())
     {
         //
         // Check function properties.
         //
-        auto status_info_prop
-            = rocsparse_clients_test::function_properties_t::instance().check(nullptr);
+        auto status_info_prop = rocsparse_clients_test::memory_debug_t::instance().check(nullptr);
         if(status_info_prop != rocsparse_status_success)
         {
-            ADD_FAILURE() << argv[0] << ": function_properties_t::check failed " << std::endl;
+            ADD_FAILURE() << argv[0] << ": memory_debug_t::check failed " << std::endl;
             return status_info_prop;
         }
-        std::cout << "report "
-                  << rocsparse_clients_test::function_properties_t::instance().get_filename()
+        std::cout << "report " << rocsparse_clients_test::memory_debug_t::instance().get_filename()
                   << std::endl;
-        rocsparse_clients_test::function_properties_t::instance().report(nullptr);
+        rocsparse_clients_test::memory_debug_t::instance().report(nullptr);
     }
 
     auto& reproducibility = rocsparse_reproducibility_t::instance();

@@ -33,6 +33,7 @@
 
 #include "rocsparse.h"
 #include "rocsparse_traits.hpp"
+#ifndef GOOGLE_TEST
 
 #define REAL_TEMPLATE(NAME_, ...)                                                       \
     template <typename T>                                                               \
@@ -71,6 +72,53 @@
     template <>                                                                           \
     inline rocsparse_##NAME_##_fn<rocsparse_double_complex>                               \
         rocsparse_##NAME_<rocsparse_double_complex> = rocsparse_z##NAME_
+
+#else
+
+#include "rocsparse_clients_test_memory_debug_wrappers.hpp"
+#define REAL_TEMPLATE(NAME_, ...)                                      \
+    template <typename T>                                              \
+    using rocsparse_##NAME_##_fn = rocsparse_status (*)(__VA_ARGS__);  \
+    template <typename T>                                              \
+    inline rocsparse_##NAME_##_fn<T> rocsparse_##NAME_;                \
+    template <>                                                        \
+    inline rocsparse_##NAME_##_fn<float>                               \
+        rocsparse_##NAME_<float> = rocsparse_wrap_s##NAME_##_t::apply; \
+    template <>                                                        \
+    inline rocsparse_##NAME_##_fn<double>                              \
+        rocsparse_##NAME_<double> = rocsparse_wrap_d##NAME_##_t::apply
+
+#define COMPLEX_TEMPLATE(NAME_, ...)                                                     \
+    template <typename T>                                                                \
+    using rocsparse_##NAME_##_fn = rocsparse_status (*)(__VA_ARGS__);                    \
+    template <typename T>                                                                \
+    inline rocsparse_##NAME_##_fn<T> rocsparse_##NAME_;                                  \
+    template <>                                                                          \
+    inline rocsparse_##NAME_##_fn<rocsparse_float_complex>                               \
+        rocsparse_##NAME_<rocsparse_float_complex> = rocsparse_wrap_c##NAME_##_t::apply; \
+    template <>                                                                          \
+    inline rocsparse_##NAME_##_fn<rocsparse_double_complex>                              \
+        rocsparse_##NAME_<rocsparse_double_complex> = rocsparse_wrap_z##NAME_##_t::apply
+
+#define REAL_COMPLEX_TEMPLATE(NAME_, ...)                                                \
+    template <typename T>                                                                \
+    using rocsparse_##NAME_##_fn = rocsparse_status (*)(__VA_ARGS__);                    \
+    template <typename T>                                                                \
+    inline rocsparse_##NAME_##_fn<T> rocsparse_##NAME_;                                  \
+    template <>                                                                          \
+    inline rocsparse_##NAME_##_fn<float>                                                 \
+        rocsparse_##NAME_<float> = rocsparse_wrap_s##NAME_##_t::apply;                   \
+    template <>                                                                          \
+    inline rocsparse_##NAME_##_fn<double>                                                \
+        rocsparse_##NAME_<double> = rocsparse_wrap_d##NAME_##_t::apply;                  \
+    template <>                                                                          \
+    inline rocsparse_##NAME_##_fn<rocsparse_float_complex>                               \
+        rocsparse_##NAME_<rocsparse_float_complex> = rocsparse_wrap_c##NAME_##_t::apply; \
+    template <>                                                                          \
+    inline rocsparse_##NAME_##_fn<rocsparse_double_complex>                              \
+        rocsparse_##NAME_<rocsparse_double_complex> = rocsparse_wrap_z##NAME_##_t::apply
+
+#endif
 
 /*
  * ===========================================================================

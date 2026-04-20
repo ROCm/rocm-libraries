@@ -26,7 +26,7 @@
 #ifndef ROCSPARSE_MATH_HPP
 #define ROCSPARSE_MATH_HPP
 
-#include "rocsparse.hpp"
+#include "rocsparse-types.h"
 #include <cmath>
 
 #include "rocsparse_traits.hpp"

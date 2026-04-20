@@ -24,164 +24,76 @@
 #pragma once
 #ifdef GOOGLE_TEST
 
-#include <rocsparse/rocsparse-types.h>
+#include "rocsparse-types.h"
+#include "rocsparse-auxiliary.h"
+#include "rocsparse-debugging.h"
+#include "rocsparse-functions.h"
+#include "rocsparse_clients_test_memory_debug.hpp"
 
-#include <rocsparse/rocsparse-auxiliary.h>
-#include <rocsparse/rocsparse-debugging.h>
-#include <rocsparse/rocsparse-functions.h>
+#define ROCSPARSE_CLIENTS_TEST_WRAP(NAME)				\
+  inline auto rocsparse_real_##NAME##_ptr = &::rocsparse_##NAME;	\
+  struct rocsparse_wrap_##NAME##_t					\
+  {									\
+    template <typename... P>						\
+    static inline rocsparse_status apply(rocsparse_handle handle, P... p) \
+    {									\
+      rocsparse_status status = rocsparse_memory_debug_reset(handle);	\
+      if(status != rocsparse_status_success)				\
+	return status;							\
+      status = rocsparse_real_##NAME##_ptr(handle, p...);		\
+      if(status != rocsparse_status_success)				\
+	return status;							\
+      rocsparse_clients_test::memory_debug_check_synchronicity(handle, #NAME); \
+      return status;							\
+    }									\
+    template <typename... P>						\
+    inline rocsparse_status operator()(rocsparse_handle handle, P&&... p) const \
+    {									\
+      rocsparse_status status = rocsparse_memory_debug_reset(handle);	\
+      if(status != rocsparse_status_success)				\
+	return status;							\
+      status = rocsparse_real_##NAME##_ptr(handle, p...);		\
+      if(status != rocsparse_status_success)				\
+	return status;							\
+      rocsparse_clients_test::memory_debug_check_synchronicity(handle, #NAME); \
+      return status;							\
+    }									\
+  };									\
+  inline rocsparse_wrap_##NAME##_t rocsparse_test_wrap_##NAME
 
-// Include the gtest-based rocsparse_test.hpp from clients/include/
-#include "../include/rocsparse_test.hpp"
+#define ROCSPARSE_CLIENTS_TEST_WRAP_NO_HANDLE(NAME)			\
+  inline auto rocsparse_real_##NAME##_ptr = &::rocsparse_##NAME;	\
+  struct rocsparse_wrap_##NAME##_t					\
+  {									\
+    template <typename... P>						\
+    static inline rocsparse_status apply(P... p)			\
+    {									\
+      rocsparse_status status = rocsparse_memory_debug_reset(nullptr);	\
+      if(status != rocsparse_status_success)				\
+	return status;							\
+      status = rocsparse_real_##NAME##_ptr(p...);			\
+      if(status != rocsparse_status_success)				\
+	return status;							\
+      rocsparse_clients_test::memory_debug_check_synchronicity(nullptr, #NAME); \
+      return status;							\
+    }									\
+    template <typename... P>						\
+    inline rocsparse_status operator()(P&&... p) const			\
+    {									\
+      rocsparse_status status = rocsparse_memory_debug_reset(nullptr);	\
+      if(status != rocsparse_status_success)				\
+	return status;							\
+      status = rocsparse_real_##NAME##_ptr(p...);			\
+      if(status != rocsparse_status_success)				\
+	return status;							\
+      rocsparse_clients_test::memory_debug_check_synchronicity(nullptr, #NAME); \
+      return status;							\
+    }									\
+  };									\
+  inline rocsparse_wrap_##NAME##_t rocsparse_test_wrap_##NAME
 
-namespace rocsparse_clients_test
-{
 
-    enum class sync_property
-    {
-        unknown, // It corresponds to unknown, or error depending on the context.
-        synchronous, // After the function returns, the queue of the stream is empty.
-        asynchronous, // After the function queues non-blocking only operation on the stream, there is no guarantee that the stream is empty.
-        partially_synchronous, // The function has a stream synchronization point, but as opposed to a synchronous function, the last operation queued on the stream is a non-blocking function. There is no guarantee that the stream is empty.
-        depends, // It depends on the input configuration of the routine.
-        host, // No operation on the stream is queued.
-        host_or_synchronous,
-        host_or_asynchronous,
-        host_or_partially_synchronous
-    };
-    static constexpr int32_t sync_property_size = 9;
 
-    inline const char* sync_property2string(sync_property sync)
-    {
-        switch(sync)
-        {
-
-        case sync_property::unknown:
-        {
-            return "unknown";
-        }
-
-        case sync_property::synchronous:
-        {
-            return "synchronous";
-        }
-
-        case sync_property::host_or_synchronous:
-        {
-            return "host_or_synchronous";
-        }
-
-        case sync_property::host_or_asynchronous:
-        {
-            return "host_or_asynchronous";
-        }
-
-        case sync_property::host_or_partially_synchronous:
-        {
-            return "host_or_partially_synchronous";
-        }
-
-        case sync_property::partially_synchronous:
-        {
-            return "partially_synchronous";
-        }
-
-        case sync_property::asynchronous:
-        {
-            return "asynchronous";
-        }
-
-        case sync_property::host:
-        {
-            return "host";
-        }
-        case sync_property::depends:
-        {
-            return "depends";
-        }
-        }
-        return "internal_error";
-    }
-
-    struct function_info
-    {
-    protected:
-        sync_property sync{};
-        uint64_t      ncalls{};
-        uint64_t      histo_calls[sync_property_size]{};
-
-    public:
-        sync_property get_sync() const;
-        uint64_t      get_ncalls() const;
-        uint64_t      get_calls(sync_property) const;
-        void          add_call(sync_property);
-        function_info(sync_property);
-        function_info() = default;
-    };
-
-    struct function_properties_t
-    {
-
-    protected:
-        bool        m_enabled{};
-        std::string filename{};
-
-    public:
-        const std::string&            get_filename() const;
-        const function_info&          get_info(const char* name) const;
-        function_info&                get_info(const char* name);
-        rocsparse_status              check(rocsparse_handle) const;
-        void                          report(rocsparse_handle) const;
-        static function_properties_t& instance();
-        bool                          enabled() const;
-        void                          enable();
-        void                          disable();
-        void                          set_sync_report_filename(const char* filename);
-    };
-}
-
-extern "C" void    rocsparse_execution_reset(rocsparse_handle handle);
-extern "C" int32_t rocsparse_execution_is_stream_synchronized(rocsparse_handle handle);
-extern "C" int32_t rocsparse_execution_is_asynchronous(rocsparse_handle handle);
-extern "C" int32_t rocsparse_execution_is_synchronous(rocsparse_handle handle);
-extern "C" int32_t rocsparse_execution_is_partially_synchronous(rocsparse_handle handle);
-extern "C" int32_t rocsparse_execution_is_host(rocsparse_handle handle);
-
-#include <iostream>
-void rocsparse_execution_check_sync_property(rocsparse_handle handle, const char* name);
-
-#define ROCSPARSE_CLIENTS_TEST_WRAP(NAME)                                           \
-    inline auto rocsparse_real_##NAME##_ptr = &::rocsparse_##NAME;                  \
-    struct rocsparse_wrap_##NAME##_t                                                \
-    {                                                                               \
-        template <typename... P>                                                    \
-        inline rocsparse_status operator()(rocsparse_handle handle, P&&... p) const \
-        {                                                                           \
-            rocsparse_execution_reset(handle);                                      \
-            rocsparse_status status = rocsparse_real_##NAME##_ptr(handle, p...);    \
-            if(status != rocsparse_status_success)                                  \
-                return status;                                                      \
-            rocsparse_execution_check_sync_property(handle, #NAME);                 \
-            return status;                                                          \
-        }                                                                           \
-    };                                                                              \
-    inline rocsparse_wrap_##NAME##_t rocsparse_test_wrap_##NAME
-
-#define ROCSPARSE_CLIENTS_TEST_WRAP_NO_HANDLE(NAME)                      \
-    inline auto rocsparse_real_##NAME##_ptr = &::rocsparse_##NAME;       \
-    struct rocsparse_wrap_##NAME##_t                                     \
-    {                                                                    \
-        template <typename... P>                                         \
-        inline rocsparse_status operator()(P&&... p) const               \
-        {                                                                \
-            rocsparse_execution_reset(nullptr);                          \
-            rocsparse_status status = rocsparse_real_##NAME##_ptr(p...); \
-            if(status != rocsparse_status_success)                       \
-                return status;                                           \
-            rocsparse_execution_check_sync_property(nullptr, #NAME);     \
-            return status;                                               \
-        }                                                                \
-    };                                                                   \
-    inline rocsparse_wrap_##NAME##_t rocsparse_test_wrap_##NAME
 
 ROCSPARSE_CLIENTS_TEST_WRAP(axpby);
 ROCSPARSE_CLIENTS_TEST_WRAP(bsrgeam_nnzb);
@@ -870,9 +782,6 @@ ROCSPARSE_CLIENTS_TEST_WRAP_NO_HANDLE(spvec_get);
 ROCSPARSE_CLIENTS_TEST_WRAP_NO_HANDLE(spvec_get_index_base);
 ROCSPARSE_CLIENTS_TEST_WRAP_NO_HANDLE(spvec_get_values);
 ROCSPARSE_CLIENTS_TEST_WRAP_NO_HANDLE(spvec_set_values);
-
-// Ensure rocsparse.hpp template variables are set up before redirecting names
-#include "rocsparse.hpp"
 
 // Redirect rocsparse C API names to test wrappers
 #define rocsparse_axpby rocsparse_test_wrap_axpby
@@ -1590,15 +1499,9 @@ ROCSPARSE_CLIENTS_TEST_WRAP_NO_HANDLE(spvec_set_values);
 #define rocsparse_spvec_get_index_base rocsparse_test_wrap_spvec_get_index_base
 #define rocsparse_spvec_get_values rocsparse_test_wrap_spvec_get_values
 #define rocsparse_spvec_set_values rocsparse_test_wrap_spvec_set_values
+
 #else
 
-#include <rocsparse/rocsparse-types.h>
-
-#include <rocsparse/rocsparse-auxiliary.h>
-#include <rocsparse/rocsparse-debugging.h>
-#include <rocsparse/rocsparse-functions.h>
-
-// Include the gtest-based rocsparse_test.hpp from clients/include/
-#include "../include/rocsparse_test.hpp"
+#include "rocsparse.h"
 
 #endif
