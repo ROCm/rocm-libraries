@@ -109,7 +109,6 @@ std::vector<fft_params> param_generator_multi_gpu(const std::optional<SplitType>
                                       run_callbacks,
                                       auto_alloc_setting);
         std::copy(params.begin(), params.end(), std::back_inserter(params_single));
-        
     }
 
     std::vector<fft_params> all_params;
