@@ -12,16 +12,15 @@
 #include "ck_tile/core.hpp"
 #include "ck_tile/host.hpp"
 #include "batched_contraction_profiler.hpp"
-#include "batched_contraction_common.hpp"
 
 // The kernel header is included via the compile command line with -include flag
 // It defines SelectedKernel struct and KERNEL_NAME, NUM_D_TENSORS,
 // NUM_DIM_G, NUM_DIM_M, NUM_DIM_N, NUM_DIM_K,
-// ADataType, BDataType, DDataType, AccDataType, EDataType,
+// ADataType, BDataType, DBaseDataType, AccDataType, EDataType,
 // ALayout, BLayout, ELayout, DsDataType, DsLayout, CDEElementWise
 
 // Create argument parser
-inline auto create_args(int argc, char* argv[])
+inline auto batched_contraction_create_args(int argc, char* argv[])
 {
     ck_tile::ArgParser arg_parser;
     arg_parser.insert("g_dims", "2", "G dimensions separated by comma (e.g., '4,2' for 2D batch)")
@@ -70,12 +69,12 @@ inline auto create_args(int argc, char* argv[])
 
 void benchmark_single(const ck_tile::ArgParser& arg_parser)
 {
-    // Use DataTypeTraits to get the actual type names from the generated header
-    std::string dtype_a   = DataTypeTraits<ADataType>::name;
-    std::string dtype_b   = DataTypeTraits<BDataType>::name;
-    std::string dtype_acc = DataTypeTraits<AccDataType>::name;
-    std::string dtype_e   = DataTypeTraits<EDataType>::name;
-    std::string dtype_d   = DataTypeTraits<DDataType>::name;
+    // Use ck_tile::DataTypeTraits to get the actual type names from the generated header
+    std::string dtype_a   = ck_tile::DataTypeTraits<ADataType>::name;
+    std::string dtype_b   = ck_tile::DataTypeTraits<BDataType>::name;
+    std::string dtype_acc = ck_tile::DataTypeTraits<AccDataType>::name;
+    std::string dtype_e   = ck_tile::DataTypeTraits<EDataType>::name;
+    std::string dtype_d   = ck_tile::DataTypeTraits<DBaseDataType>::name;
 
     // Layout names from the layout types
     std::string layout_a = ALayout::name;
@@ -105,17 +104,17 @@ void benchmark_single(const ck_tile::ArgParser& arg_parser)
     problem.layout_b_      = layout_b;
     problem.layout_e_      = layout_e;
 
-    // Create Setting struct
-    Setting setting{arg_parser.get_int("warmup"),
-                    arg_parser.get_int("repeat"),
-                    arg_parser.get_bool("timer"),
-                    arg_parser.get_int("verify"),
-                    arg_parser.get_int("init"),
-                    arg_parser.get_bool("log"),
-                    arg_parser.get_str("csv_filename"),
-                    arg_parser.get_bool("flush_cache"),
-                    arg_parser.get_int("rotating_count"),
-                    arg_parser.get_bool("json_output")};
+    // Create Settings struct
+    Settings setting{arg_parser.get_int("warmup"),
+                     arg_parser.get_int("repeat"),
+                     arg_parser.get_bool("timer"),
+                     arg_parser.get_int("verify"),
+                     arg_parser.get_int("init"),
+                     arg_parser.get_bool("log"),
+                     arg_parser.get_str("csv_filename"),
+                     arg_parser.get_bool("flush_cache"),
+                     arg_parser.get_int("rotating_count"),
+                     arg_parser.get_bool("json_output")};
 
     // Get the profiler instance
     auto& profiler = BatchedContractionProfiler::instance(setting);
@@ -144,7 +143,7 @@ int main(int argc, char* argv[])
 {
     try
     {
-        auto [result, parser] = create_args(argc, argv);
+        auto [result, parser] = batched_contraction_create_args(argc, argv);
         if(!result)
             return EXIT_FAILURE;
 

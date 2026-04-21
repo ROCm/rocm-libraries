@@ -208,13 +208,13 @@ using ADataType = {get_dtype_string(self.datatype)};
 using BDataType = {get_dtype_string(self.datatype)};
 using AccDataType = {acc_type};
 using EDataType = {get_dtype_string(e_type)};
-using DDataType = {get_dtype_string(self.datatype)};
+using DBaseDataType = {get_dtype_string(self.datatype)};
 """
         # Generate DsDataType tuple based on num_d_tensors
         if self.num_d_tensors == 0:
             instance_code += "using DsDataType = ck_tile::tuple<>;\n"
         else:
-            d_types = ", ".join(["DDataType"] * self.num_d_tensors)
+            d_types = ", ".join(["DBaseDataType"] * self.num_d_tensors)
             instance_code += f"using DsDataType = ck_tile::tuple<{d_types}>;\n"
 
         instance_code += f"""

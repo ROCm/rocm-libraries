@@ -17,7 +17,7 @@
 class BatchedContractionProfiler
 {
     public:
-    static BatchedContractionProfiler& instance(Setting setting)
+    static BatchedContractionProfiler& instance(Settings setting)
     {
         static BatchedContractionProfiler instance{setting};
         return instance;
@@ -84,14 +84,14 @@ class BatchedContractionProfiler
             ds_descs[d] = ck_tile::HostTensorDescriptor(E_dims);
         }
 
-        auto ds_tensors = make_ds_host_tensors<DDataType, NUM_D_TENSORS>(ds_descs);
+        auto ds_tensors = make_ds_host_tensors<DBaseDataType, NUM_D_TENSORS>(ds_descs);
 
         // Fill tensors with random data
         ck_tile::FillUniformDistribution<ADataType>{-5.f, 5.f}(a_tensor);
         ck_tile::FillUniformDistribution<BDataType>{-5.f, 5.f}(b_tensor);
         for(ck_tile::index_t d = 0; d < NUM_D_TENSORS; ++d)
         {
-            ck_tile::FillUniformDistribution<DDataType>{-1.f, 1.f}(ds_tensors[d]);
+            ck_tile::FillUniformDistribution<DBaseDataType>{-1.f, 1.f}(ds_tensors[d]);
         }
 
         // Allocate device memory
@@ -160,15 +160,15 @@ class BatchedContractionProfiler
 
         // Compute host reference if verification is requested
         ck_tile::HostTensor<EDataType> e_host_result(e_desc);
-        if(setting_.verify_)
+        if(setting_.verify)
         {
             batched_contraction_host_reference<ADataType,
                                                BDataType,
-                                               DDataType,
+                                               DBaseDataType,
                                                AccDataType,
                                                EDataType,
                                                CDEElementWise,
-                                               NUM_D_TENSORS>(setting_.verify_,
+                                               NUM_D_TENSORS>(setting_.verify,
                                                               a_tensor,
                                                               b_tensor,
                                                               ds_tensors,
@@ -189,7 +189,7 @@ class BatchedContractionProfiler
             auto kernel_run_result =
                 callable(contraction_args,
                          ck_tile::stream_config{
-                             nullptr, true, setting_.log_, setting_.n_warmup_, setting_.n_repeat_});
+                             nullptr, true, setting_.log, setting_.n_warmup, setting_.n_repeat});
             process_result(problem, e_dev_buf, e_host_result, e_dev_result, kernel_run_result);
         }
     }
@@ -202,7 +202,8 @@ class BatchedContractionProfiler
     {
         auto [name, avg_time] = kernel_run_result;
 
-        KernelInstance kernel_instance{name, problem, {-1.0f, -1.0f, -1.0f}};
+        KernelInstance<BatchedContractionProblem> kernel_instance{
+            name, problem, {-1.0f, -1.0f, -1.0f}};
 
         const auto M_total = problem.M_total();
         const auto N_total = problem.N_total();
@@ -210,18 +211,19 @@ class BatchedContractionProfiler
         const auto G_total = problem.G_total();
 
         // compute performance metric
-        std::size_t flop     = std::size_t(2) * G_total * M_total * N_total * K_total;
-        std::size_t num_byte = G_total * (sizeof(ADataType) * M_total * K_total +
-                                          sizeof(BDataType) * N_total * K_total +
-                                          sizeof(EDataType) * M_total * N_total +
-                                          NUM_D_TENSORS * sizeof(DDataType) * M_total * N_total);
+        std::size_t flop = std::size_t(2) * G_total * M_total * N_total * K_total;
+        std::size_t num_byte =
+            G_total *
+            (sizeof(ADataType) * M_total * K_total + sizeof(BDataType) * N_total * K_total +
+             sizeof(EDataType) * M_total * N_total +
+             NUM_D_TENSORS * sizeof(DBaseDataType) * M_total * N_total);
 
         // update
         kernel_instance.perf_result_.latency_   = avg_time;
         kernel_instance.perf_result_.tflops_    = static_cast<float>(flop) / 1.E9 / avg_time;
         kernel_instance.perf_result_.bandwidth_ = num_byte / 1.E6 / avg_time;
 
-        if(setting_.log_ > 0 && !setting_.json_output_)
+        if(setting_.log > 0 && !setting_.json_output)
         {
             std::cout << kernel_instance << std::endl;
         }
@@ -229,9 +231,8 @@ class BatchedContractionProfiler
         // verify result
         e_dev_buf.FromDevice(e_dev_result.data());
         bool verified_correct =
-            !setting_.verify_ ||
-            batched_contraction_compare<ADataType, BDataType, AccDataType, EDataType>(
-                name, K_total, problem.split_k_, e_dev_result, e_host_result);
+            !setting_.verify || compare<ADataType, BDataType, AccDataType, EDataType>(
+                                    name, K_total, problem.split_k_, e_dev_result, e_host_result);
 
         if(verified_correct)
         {
@@ -247,7 +248,7 @@ class BatchedContractionProfiler
         e_dev_result.SetZero();
     }
 
-    KernelInstance select_best_instance(Metric metric)
+    KernelInstance<BatchedContractionProblem> select_best_instance(Metric metric)
     {
         if(kernel_instances_.empty())
             throw std::runtime_error("Empty instances");
@@ -259,7 +260,7 @@ class BatchedContractionProfiler
                                                          b.perf_result_, a.perf_result_, metric);
                                                  });
 
-        if(setting_.json_output_)
+        if(setting_.json_output)
         {
             // Output clean JSON only
             std::cout << kernel_instance << std::endl;
@@ -272,9 +273,9 @@ class BatchedContractionProfiler
             std::cout << "**********************************" << std::endl;
         }
 
-        if(!setting_.csv_filename_.empty())
+        if(!setting_.csv_filename.empty())
         {
-            std::ofstream file(setting_.csv_filename_ + ".csv", std::ios::app);
+            std::ofstream file(setting_.csv_filename + ".csv", std::ios::app);
 
             if(!file.is_open())
             {
@@ -321,7 +322,7 @@ class BatchedContractionProfiler
 
     private:
     ~BatchedContractionProfiler() { kernel_instances_.clear(); }
-    BatchedContractionProfiler(Setting setting) : setting_(setting) {}
+    BatchedContractionProfiler(Settings setting) : setting_(setting) {}
 
     // Helper to create array of HostTensors from descriptors
     template <typename DType, std::size_t N, std::size_t... Is>
@@ -339,6 +340,6 @@ class BatchedContractionProfiler
         return make_ds_host_tensors_impl<DType, N>(descs, std::make_index_sequence<N>{});
     }
 
-    Setting setting_;
-    std::vector<KernelInstance> kernel_instances_;
+    Settings setting_;
+    std::vector<KernelInstance<BatchedContractionProblem>> kernel_instances_;
 };
