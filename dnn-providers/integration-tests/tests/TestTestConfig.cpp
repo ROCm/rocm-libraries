@@ -57,6 +57,11 @@ TEST(TestConfigUninitialized, FailOnUnsupportedThrowsWhenUninitialized)
     EXPECT_THROW(TestConfig::get().failOnUnsupported(), std::runtime_error);
 }
 
+TEST(TestConfigUninitialized, SkipGraphValidationThrowsWhenUninitialized)
+{
+    EXPECT_THROW(TestConfig::get().skipGraphValidation(), std::runtime_error);
+}
+
 // ---------------------------------------------------------------------------
 // Suite 2 – initialized singleton (all args provided)
 // ---------------------------------------------------------------------------
@@ -90,6 +95,11 @@ TEST_F(TestConfigInitialized, HasEngineNameReturnsTrue)
 TEST_F(TestConfigInitialized, FailOnUnsupportedReturnsTrue)
 {
     EXPECT_TRUE(TestConfig::get().failOnUnsupported());
+}
+
+TEST_F(TestConfigInitialized, SkipGraphValidationReturnsFalse)
+{
+    EXPECT_FALSE(TestConfig::get().skipGraphValidation());
 }
 
 TEST_F(TestConfigInitialized, InitializeSetsArticlePath)
