@@ -708,8 +708,14 @@ rocblaslt_status rocblaslt_matmul(rocblaslt_handle             handle,
     hipDataType alpha_type = matA->type;
     hipDataType beta_type  = matD->type;
 
-    auto alpha_scalar = get_alpha_beta_scalar(alpha_type, alpha);
-    auto beta_scalar  = get_alpha_beta_scalar(beta_type, beta);
+    // alpha is a device pointer when scaleAlpha_vector (pointermode != 0) is set;
+    // avoid CPU dereference which causes an access violation on Windows.
+    auto alpha_scalar = (!matmul_descr->pointermode && alpha)
+                        ? get_alpha_beta_scalar(alpha_type, alpha)
+                        : std::complex<double>{0.0, 0.0};
+    auto beta_scalar  = (!matmul_descr->pointermode && beta)
+                        ? get_alpha_beta_scalar(beta_type, beta)
+                        : std::complex<double>{0.0, 0.0};
 
     // Check if pointer is valid
     if(alpha == nullptr || beta == nullptr || C == nullptr || D == nullptr || alpha_A_B_violation)
