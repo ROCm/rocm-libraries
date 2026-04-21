@@ -1,20 +1,14 @@
-# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
-# Function to find the version file path given the component name
-function(hip_kernel_provider_version_file_dir COMPONENT_NAME OUTPUT_PATH)
-    set(${OUTPUT_PATH} "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../" PARENT_SCOPE)
-endfunction()
-
-
 # Function to setup versioning for a component
-# Reads version.json, gets git hash, and sets version variables in parent scope
-function(hip_kernel_provider_setup_version COMPONENT_NAME)
+# Reads version.json from VERSION_DIR, gets git hash, and sets version variables in parent scope
+function(dnn_provider_setup_version COMPONENT_NAME VERSION_DIR)
     string(TOUPPER ${COMPONENT_NAME} COMPONENT_NAME_UPPER)
 
     # Read version from version.json
-    hip_kernel_provider_version_file_dir(${COMPONENT_NAME} _version_dir)
-    file(READ "${_version_dir}/version.json" _version_json)
+    file(READ "${VERSION_DIR}/version.json" _version_json)
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${VERSION_DIR}/version.json")
     string(JSON ${COMPONENT_NAME_UPPER}_VERSION GET ${_version_json} "${COMPONENT_NAME}_version")
 
     # Parse version components
@@ -51,11 +45,10 @@ function(hip_kernel_provider_setup_version COMPONENT_NAME)
     set(${COMPONENT_NAME_UPPER}_VERSION ${${COMPONENT_NAME_UPPER}_VERSION} PARENT_SCOPE)
 endfunction()
 
-# Function to generate the version header
-function(hip_kernel_provider_generate_version_header COMPONENT_NAME TARGET_NAME)
-    hip_kernel_provider_version_file_dir(${COMPONENT_NAME} _version_dir)
+# Function to generate the version header from version.h.in in VERSION_DIR
+function(dnn_provider_generate_version_header COMPONENT_NAME TARGET_NAME VERSION_DIR)
     configure_file(
-        "${_version_dir}/version.h.in"
+        "${VERSION_DIR}/templates/version.h.in"
         "${CMAKE_CURRENT_BINARY_DIR}/include/version.h"
         @ONLY
     )
