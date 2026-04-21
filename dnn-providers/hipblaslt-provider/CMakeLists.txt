@@ -61,6 +61,7 @@ list(
     -Wunreachable-code # Warn about unreachable code
     -Wno-error=unused-command-line-argument # Disable error for unused command line arguments
     -Wswitch-default # Warn if a switch statement does not have a default case
+    -Wno-ignored-attributes # disable warning about unused declspec(dllexport)
 )
 
 # NOTE: Workaround until llvm & hip cmake modules fixes symlink logic in their config files;

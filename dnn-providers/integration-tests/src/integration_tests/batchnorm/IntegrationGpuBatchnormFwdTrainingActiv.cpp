@@ -302,6 +302,7 @@ protected:
                                     this->getTolerance(graphObj, outputs.nextRunningVariance));
         }
 
+        this->setTestCaseNote(bnTestCase.note);
         this->verifyGraph(graphObj, bnTestCase.seed);
     }
 };

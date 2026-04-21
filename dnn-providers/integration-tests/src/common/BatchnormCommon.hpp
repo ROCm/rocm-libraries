@@ -8,6 +8,7 @@
 #include <hipdnn_test_sdk/utilities/Seeds.hpp>
 #include <ostream>
 #include <random>
+#include <string>
 #include <vector>
 
 namespace test_bn_common
@@ -17,10 +18,14 @@ struct BatchnormTestCase
 {
     std::vector<int64_t> dims;
     unsigned int seed;
+    std::string note;
 
-    BatchnormTestCase(std::vector<int64_t>&& dimsLocal, unsigned int seedLocal)
+    BatchnormTestCase(std::vector<int64_t>&& dimsLocal,
+                      unsigned int seedLocal,
+                      std::string noteLocal = {})
         : dims(std::move(dimsLocal))
         , seed(seedLocal)
+        , note(std::move(noteLocal))
     {
         if(dims.size() < 3 || dims.size() > 5)
         {
@@ -34,6 +39,10 @@ struct BatchnormTestCase
         ss << "(dims:";
         hipdnn_data_sdk::utilities::vecToStream(ss, tc.dims);
         ss << " seed:" << tc.seed;
+        if(!tc.note.empty())
+        {
+            ss << " note:" << tc.note;
+        }
         ss << ")";
 
         return ss;
@@ -46,7 +55,7 @@ inline std::vector<BatchnormTestCase> getBnFwdInference1dTestCases()
 
     return {
         {{1, 3, 224}, seed},
-        {{2, 16, 512}, seed}, // Multi-batch
+        {{2, 16, 512}, seed, "Multi-batch"}, // Multi-batch
         {{1, 64, 1024}, seed}, // Longer sequence
         {{4, 3, 1}, seed}, // Minimal spatial (L=1)
     };

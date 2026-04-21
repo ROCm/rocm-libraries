@@ -8,6 +8,7 @@
 #include <exception>
 #include <hipdnn_data_sdk/flatbuffer_utilities/FlatbufferTypeHelpers.hpp>
 #include <optional>
+#include <string>
 
 namespace test_activation_common
 {
@@ -21,6 +22,7 @@ struct ActivTestCase
     std::optional<float> swishBeta;
     std::optional<float> eluAlpha;
     std::optional<float> softplusBeta;
+    std::string note;
 
     ActivTestCase(hipdnn_data_sdk::data_objects::PointwiseMode modeLocal,
                   std::optional<float> reluLowerClipLocal = std::nullopt,
@@ -28,7 +30,8 @@ struct ActivTestCase
                   std::optional<float> reluLowerClipSlopeLocal = std::nullopt,
                   std::optional<float> swishBetaLocal = std::nullopt,
                   std::optional<float> eluAlphaLocal = std::nullopt,
-                  std::optional<float> softplusBetaLocal = std::nullopt)
+                  std::optional<float> softplusBetaLocal = std::nullopt,
+                  std::string noteLocal = {})
         : mode(modeLocal)
         , reluLowerClip(reluLowerClipLocal)
         , reluUpperClip(reluUpperClipLocal)
@@ -36,6 +39,7 @@ struct ActivTestCase
         , swishBeta(swishBetaLocal)
         , eluAlpha(eluAlphaLocal)
         , softplusBeta(softplusBetaLocal)
+        , note(std::move(noteLocal))
     {
         using PointwiseMode = hipdnn_data_sdk::data_objects::PointwiseMode;
 
@@ -86,6 +90,10 @@ struct ActivTestCase
         {
             ss << " softplusBeta:" << tc.softplusBeta.value();
         }
+        if(!tc.note.empty())
+        {
+            ss << " note:" << tc.note;
+        }
         ss << ")";
 
         return ss;
@@ -134,7 +142,9 @@ inline std::vector<ActivTestCase> createFwdActivationFullCases()
                        std::nullopt, // reluLowerClipSlope
                        std::nullopt, // swishBeta
                        std::nullopt, // eluAlpha
-                       std::nullopt // softplusBeta
+                       std::nullopt, // softplusBeta
+                       "UpperClip"
+
     );
 
     // CLAMP: both lower and upper clips (e.g., clip to range [0.0, 0.5])
@@ -144,8 +154,8 @@ inline std::vector<ActivTestCase> createFwdActivationFullCases()
                        std::nullopt, // reluLowerClipSlope
                        std::nullopt, // swishBeta
                        std::nullopt, // eluAlpha
-                       std::nullopt // softplusBeta
-    );
+                       std::nullopt, // softplusBeta
+                       "LowerClip+UpperClip");
 
     // Leaky ReLU: ReLU but with a non-negative slope for negative inputs
     cases.emplace_back(PM::RELU_FWD,
@@ -154,8 +164,8 @@ inline std::vector<ActivTestCase> createFwdActivationFullCases()
                        0.01f, // reluLowerClipSlope
                        std::nullopt, // swishBeta
                        std::nullopt, // eluAlpha
-                       std::nullopt // softplusBeta
-    );
+                       std::nullopt, // softplusBeta
+                       "LowerClipSlope");
 
     return cases;
 }
@@ -177,7 +187,8 @@ inline std::vector<ActivTestCase> createBatchnormBwdActivationTestCases()
                           std::nullopt,
                           std::nullopt,
                           std::nullopt,
-                          std::nullopt),
+                          std::nullopt,
+                          "UpperClip"),
             // CLAMP Backward: d/dx Clamp(x, lower, upper)
             ActivTestCase(hipdnn_data_sdk::data_objects::PointwiseMode::RELU_BWD,
                           0.1f,
@@ -185,7 +196,8 @@ inline std::vector<ActivTestCase> createBatchnormBwdActivationTestCases()
                           std::nullopt,
                           std::nullopt,
                           std::nullopt,
-                          std::nullopt)};
+                          std::nullopt,
+                          "LowerClip+UpperClip")};
 }
 
 } // namespace test_activation_common

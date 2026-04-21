@@ -7,6 +7,7 @@
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 #include <hipdnn_test_sdk/utilities/Seeds.hpp>
 #include <ostream>
+#include <string>
 #include <vector>
 
 namespace test_conv_common
@@ -22,6 +23,7 @@ struct ConvTestCase
     std::vector<int64_t> convStride;
     std::vector<int64_t> convDilation;
     unsigned seed;
+    std::string note;
 
     ConvTestCase(std::vector<int64_t>&& xDimsLocal,
                  std::vector<int64_t>&& wDimsLocal,
@@ -29,7 +31,8 @@ struct ConvTestCase
                  std::vector<int64_t>&& convPostPaddingLocal,
                  std::vector<int64_t>&& convStrideLocal,
                  std::vector<int64_t>&& convDilationLocal,
-                 unsigned seedLocal)
+                 unsigned seedLocal,
+                 std::string noteLocal = {})
         : xDims(std::move(xDimsLocal))
         , wDims(std::move(wDimsLocal))
         , convPrePadding(std::move(convPrePaddingLocal))
@@ -37,6 +40,7 @@ struct ConvTestCase
         , convStride(std::move(convStrideLocal))
         , convDilation(std::move(convDilationLocal))
         , seed(seedLocal)
+        , note(std::move(noteLocal))
     {
         // Indices for dimensions
         // N - Batch size, always at index 0
@@ -105,6 +109,10 @@ struct ConvTestCase
         ss << " dilation:";
         vecToStream(ss, tc.convDilation);
         ss << " seed:" << tc.seed;
+        if(!tc.note.empty())
+        {
+            ss << " note:" << tc.note;
+        }
         ss << ")";
 
         return ss;
@@ -117,24 +125,30 @@ inline std::vector<ConvTestCase> getConvTestCases4D()
 
     return {
         // Filter 1x1
-        {{1, 16, 16, 16}, {1, 16, 1, 1}, {0, 0}, {0, 0}, {1, 1}, {1, 1}, seed},
-        // Filter 3x3
-        // No Padding
-        {{1, 16, 16, 16}, {1, 16, 3, 3}, {0, 0}, {0, 0}, {1, 1}, {1, 1}, seed},
-        // Padding = 1
-        {{1, 16, 16, 16}, {1, 16, 3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1}, seed},
-        // Stride = 2
-        {{1, 16, 16, 16}, {1, 16, 3, 3}, {1, 1}, {1, 1}, {2, 2}, {1, 1}, seed},
-        // Dilation = 2
-        {{1, 16, 16, 16}, {1, 16, 3, 3}, {2, 2}, {2, 2}, {1, 1}, {2, 2}, seed},
+        {{1, 16, 16, 16}, {1, 16, 1, 1}, {0, 0}, {0, 0}, {1, 1}, {1, 1}, seed, "1x1 Filter"},
+        // Filter 3x3, No Padding
+        {{1, 16, 16, 16}, {1, 16, 3, 3}, {0, 0}, {0, 0}, {1, 1}, {1, 1}, seed, "No Padding"},
+        // Padding
+        {{1, 16, 16, 16}, {1, 16, 3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1}, seed, "Padding"},
+        // Stride
+        {{1, 16, 16, 16}, {1, 16, 3, 3}, {1, 1}, {1, 1}, {2, 2}, {1, 1}, seed, "Padding+Stride"},
+        // Dilation
+        {{1, 16, 16, 16}, {1, 16, 3, 3}, {2, 2}, {2, 2}, {1, 1}, {2, 2}, seed, "Padding+Dilation"},
         // Batched convolution
-        {{8, 16, 16, 16}, {1, 16, 1, 1}, {0, 0}, {0, 0}, {1, 1}, {1, 1}, seed},
+        {{8, 16, 16, 16}, {1, 16, 1, 1}, {0, 0}, {0, 0}, {1, 1}, {1, 1}, seed, "Batched"},
         // Non-square
-        {{1, 16, 16, 8}, {1, 16, 3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1}, seed},
+        {{1, 16, 16, 8}, {1, 16, 3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1}, seed, "Non-square"},
         // Grouped convolution - 2 groups
-        {{1, 16, 16, 16}, {2, 8, 3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1}, seed},
+        {{1, 16, 16, 16}, {2, 8, 3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1}, seed, "Grouped"},
         // Grouped convolution - 2 batches, 4 groups, stride, padding, dilation
-        {{2, 32, 16, 16}, {4, 8, 3, 3}, {1, 1}, {1, 1}, {2, 2}, {2, 2}, seed},
+        {{2, 32, 16, 16},
+         {4, 8, 3, 3},
+         {1, 1},
+         {1, 1},
+         {2, 2},
+         {2, 2},
+         seed,
+         "Grouped+Stride+Dilation"},
     };
 }
 
@@ -144,24 +158,86 @@ inline std::vector<ConvTestCase> getConvTestCases5D()
 
     return {
         // Filter 1x1
-        {{1, 16, 16, 16, 16}, {1, 16, 1, 1, 1}, {0, 0, 0}, {0, 0, 0}, {1, 1, 1}, {1, 1, 1}, seed},
-        // Filter 3x3
-        // No Padding
-        {{1, 16, 16, 16, 16}, {1, 16, 3, 3, 3}, {0, 0, 0}, {0, 0, 0}, {1, 1, 1}, {1, 1, 1}, seed},
-        // Padding = 1
-        {{1, 16, 16, 16, 16}, {1, 16, 3, 3, 3}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, seed},
-        // Stride = 2
-        {{1, 16, 16, 16, 16}, {1, 16, 3, 3, 3}, {1, 1, 1}, {1, 1, 1}, {2, 2, 2}, {1, 1, 1}, seed},
-        // Dilation = 2
-        {{1, 16, 16, 16, 16}, {1, 16, 3, 3, 3}, {2, 2, 2}, {2, 2, 2}, {1, 1, 1}, {2, 2, 2}, seed},
+        {{1, 16, 16, 16, 16},
+         {1, 16, 1, 1, 1},
+         {0, 0, 0},
+         {0, 0, 0},
+         {1, 1, 1},
+         {1, 1, 1},
+         seed,
+         "1x1 Filter"},
+        // Filter 3x3, No Padding
+        {{1, 16, 16, 16, 16},
+         {1, 16, 3, 3, 3},
+         {0, 0, 0},
+         {0, 0, 0},
+         {1, 1, 1},
+         {1, 1, 1},
+         seed,
+         "No Padding"},
+        // Padding
+        {{1, 16, 16, 16, 16},
+         {1, 16, 3, 3, 3},
+         {1, 1, 1},
+         {1, 1, 1},
+         {1, 1, 1},
+         {1, 1, 1},
+         seed,
+         "Padding"},
+        // Stride
+        {{1, 16, 16, 16, 16},
+         {1, 16, 3, 3, 3},
+         {1, 1, 1},
+         {1, 1, 1},
+         {2, 2, 2},
+         {1, 1, 1},
+         seed,
+         "Padding+Stride"},
+        // Dilation
+        {{1, 16, 16, 16, 16},
+         {1, 16, 3, 3, 3},
+         {2, 2, 2},
+         {2, 2, 2},
+         {1, 1, 1},
+         {2, 2, 2},
+         seed,
+         "Padding+Dilation"},
         // Batched convolution
-        {{8, 16, 16, 16, 16}, {1, 16, 1, 1, 1}, {0, 0, 0}, {0, 0, 0}, {1, 1, 1}, {1, 1, 1}, seed},
+        {{8, 16, 16, 16, 16},
+         {1, 16, 1, 1, 1},
+         {0, 0, 0},
+         {0, 0, 0},
+         {1, 1, 1},
+         {1, 1, 1},
+         seed,
+         "Batched"},
         // Non-square
-        {{1, 16, 16, 8, 4}, {1, 16, 3, 3, 3}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, seed},
+        {{1, 16, 16, 8, 4},
+         {1, 16, 3, 3, 3},
+         {1, 1, 1},
+         {1, 1, 1},
+         {1, 1, 1},
+         {1, 1, 1},
+         seed,
+         "Non-square"},
         // Grouped convolution - 2 groups
-        {{1, 16, 16, 16, 16}, {2, 8, 3, 3, 3}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, seed},
+        {{1, 16, 16, 16, 16},
+         {2, 8, 3, 3, 3},
+         {1, 1, 1},
+         {1, 1, 1},
+         {1, 1, 1},
+         {1, 1, 1},
+         seed,
+         "Grouped"},
         // Grouped convolution - 2 batches, 4 groups, stride, padding, dilation
-        {{2, 32, 16, 16, 16}, {4, 8, 3, 3, 3}, {1, 1, 1}, {1, 1, 1}, {2, 2, 2}, {2, 2, 2}, seed},
+        {{2, 32, 16, 16, 16},
+         {4, 8, 3, 3, 3},
+         {1, 1, 1},
+         {1, 1, 1},
+         {2, 2, 2},
+         {2, 2, 2},
+         seed,
+         "Grouped+Stride+Dilation"},
     };
 }
 

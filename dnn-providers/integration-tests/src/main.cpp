@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "harness/SharedHandle.hpp"
+#include "harness/SupportMatrixCollector.hpp"
 #include "harness/TestConfig.hpp"
 
 namespace
@@ -100,6 +101,10 @@ int main(int argc, char** argv) noexcept
             .help("FAIL instead of SKIP when no engine supports a graph");
         parser.add_argument("--tc", "--test-config")
             .help("Path to a TOML configuration file for per-test tolerance overrides.");
+        parser.add_argument("--generate-support-matrix")
+            .default_value(std::string("support_matrix.md"))
+            .implicit_value(std::string("support_matrix.md"))
+            .help("Generate a markdown support matrix file (default: support_matrix.md).");
 
         std::vector<std::string> remainingArgs;
         try
@@ -163,6 +168,14 @@ int main(int argc, char** argv) noexcept
             }
         }
 
+        // Enable support matrix generation if requested
+        if(parser.is_used("--generate-support-matrix"))
+        {
+            auto outputFile = parser.get<std::string>("--generate-support-matrix");
+            hipdnn_integration_tests::SupportMatrixCollector::get().setEnabled(true);
+            hipdnn_integration_tests::SupportMatrixCollector::get().setOutputPath(outputFile);
+        }
+
         hipdnn_integration_tests::TestConfig::initialize(std::move(articlePath),
                                                          std::move(engineName),
                                                          failOnUnsupported,
@@ -221,6 +234,69 @@ int main(int argc, char** argv) noexcept
         }
 
         const int result = RUN_ALL_TESTS();
+
+        // Generate support matrix if requested
+        if(hipdnn_integration_tests::SupportMatrixCollector::get().isEnabled())
+        {
+            std::vector<std::string> allEngineNames;
+
+            if(hipdnn_integration_tests::TestConfig::get().hasEngineName())
+            {
+                allEngineNames.emplace_back(
+                    std::string(hipdnn_integration_tests::TestConfig::get().getEngineName()));
+            }
+            else
+            {
+                // Enumerate all loaded engines from the handle
+                size_t numEngines = 0;
+                if(hipdnnGetEngineCount_ext(handle, &numEngines) == HIPDNN_STATUS_SUCCESS)
+                {
+                    for(size_t i = 0; i < numEngines; ++i)
+                    {
+                        size_t engineNameLen = 0;
+                        size_t pluginNameLen = 0;
+                        size_t versionLen = 0;
+                        size_t typeLen = 0;
+                        int64_t engineId = 0;
+                        hipdnnGetEngineInfo_ext(handle,
+                                                i,
+                                                &engineId,
+                                                nullptr,
+                                                &engineNameLen,
+                                                nullptr,
+                                                &pluginNameLen,
+                                                nullptr,
+                                                &versionLen,
+                                                nullptr,
+                                                &typeLen);
+
+                        std::string eName(engineNameLen, '\0');
+                        std::string pName(pluginNameLen, '\0');
+                        std::string ver(versionLen, '\0');
+                        std::string typ(typeLen, '\0');
+                        hipdnnGetEngineInfo_ext(handle,
+                                                i,
+                                                &engineId,
+                                                eName.data(),
+                                                &engineNameLen,
+                                                pName.data(),
+                                                &pluginNameLen,
+                                                ver.data(),
+                                                &versionLen,
+                                                typ.data(),
+                                                &typeLen);
+
+                        if(!eName.empty() && eName.back() == '\0')
+                        {
+                            eName.pop_back();
+                        }
+                        allEngineNames.push_back(std::move(eName));
+                    }
+                }
+            }
+
+            hipdnn_integration_tests::SupportMatrixCollector::get().writeMarkdown(allEngineNames);
+        }
 
         // Clean up shared handle and stream
         static_cast<void>(hipStreamDestroy(stream));

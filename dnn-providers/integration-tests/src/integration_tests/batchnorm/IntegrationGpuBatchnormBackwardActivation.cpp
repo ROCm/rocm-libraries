@@ -212,6 +212,7 @@ protected:
         this->registerValidator(outputs.dscale, this->getTolerance(graphObj, outputs.dscale));
         this->registerValidator(outputs.dbias, this->getTolerance(graphObj, outputs.dbias));
 
+        this->setTestCaseNote(bnTestCase.note);
         this->verifyGraph(graphObj, bnTestCase.seed);
     }
 };
