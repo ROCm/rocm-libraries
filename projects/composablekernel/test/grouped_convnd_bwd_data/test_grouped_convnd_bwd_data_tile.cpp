@@ -72,12 +72,19 @@ class TestGroupedConvndBwdDataTile : public ::testing::Test
                 ckt::init_tensor_buffer_uniform_int(
                     inputs.get().output, args.make_output_descriptor(), -5, 5);
 
-                HIP_CHECK_ERROR(hipMemset(outputs.get().input, 0, args.make_input_descriptor().get_element_space_size_in_bytes()));
+                HIP_CHECK_ERROR(
+                    hipMemset(outputs.get().input,
+                              0,
+                              args.make_input_descriptor().get_element_space_size_in_bytes()));
 
                 std::cout << args.make_input_descriptor() << std::endl;
                 std::cout << args.make_weight_descriptor() << std::endl;
                 std::cout << args.make_output_descriptor() << std::endl;
-                [[maybe_unused]] auto&& [case_passed, avg_time, op_name, best_split_k, best_instance] =
+                [[maybe_unused]] auto&& [case_passed,
+                                         avg_time,
+                                         op_name,
+                                         best_split_k,
+                                         best_instance] =
 
                     ckp::run_grouped_conv_backward_data_tile_algs(
                         args,
