@@ -18,6 +18,7 @@ archs_supported = [
 
 content = """// SPDX-License-Identifier: MIT
 // Copyright (c) 2024, Advanced Micro Devices, Inc. All rights reserved.
+// NOLINTBEGIN(readability-identifier-naming)
 #pragma once
 #include <unordered_map>
 
@@ -98,14 +99,14 @@ if __name__ == "__main__":
                 sample_row = dfs[0]
                 other_columns_cpp_def = "\n".join(
                     [
-                        f"    {'int' if isinstance(sample_row[col], (int, float)) else 'std::string'} {col};"
+                        f"    {'int' if str(sample_row[col]).replace('.', '', 1).lstrip('-').isdigit() else 'std::string'} {col};"
                         for col in other_columns
                     ]
                 )
                 content += f"""
 #define ADD_CFG({other_columns_comma}, arch, path, knl_name, co_name)         \\
     {{                                         \\
-        arch knl_name, {{ knl_name, path co_name, arch, {other_columns_comma} }}         \\
+        std::string(arch) + knl_name, {{ knl_name, std::string(path) + co_name, arch, {other_columns_comma} }}         \\
     }}
 
 struct {args.module}Config
@@ -141,6 +142,7 @@ using CFG = std::unordered_map<std::string, {args.module}Config>;
             cfgs.append(txt)
 
     content += "\n".join(cfgs) + "\n"
+    content += "\n// NOLINTEND(readability-identifier-naming)\n"
 
     with open(f"{args.output_dir}/asm_{args.module}_configs.hpp", "w") as f:
         f.write(content)

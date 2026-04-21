@@ -4,6 +4,7 @@
 #include "plans/SdpaFwdPlanBuilder.hpp"
 #include "HipKernelUtils.hpp"
 #include "asm/AsmKernelPath.hpp"
+#include "asm_fmha_v3_fwd_configs.hpp"
 #include "plans/SdpaFwdPlan.hpp"
 
 #include <cmath>

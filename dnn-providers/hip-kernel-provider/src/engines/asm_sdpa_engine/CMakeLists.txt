@@ -23,7 +23,7 @@ file(MAKE_DIRECTORY ${ASM_CODEGEN_OUTPUT_DIR})
 # Custom command to generate ASM kernel config headers
 add_custom_command(
     OUTPUT ${ASM_FMHA_FWD_CONFIG_HEADER}
-    COMMAND ${CMAKE_COMMAND} -E env "AITER_GPU_ARCHS=gfx942"
+    COMMAND ${CMAKE_COMMAND} -E env "AITER_GPU_ARCHS=gfx942" --
             ${Python3_EXECUTABLE} ${ASM_CODEGEN_SCRIPT}
             -m fmha_v3_fwd
             -o ${ASM_CODEGEN_OUTPUT_DIR}
