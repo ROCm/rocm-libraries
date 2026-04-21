@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -56,12 +56,9 @@ namespace rocsparse
                                                             rocsparse_order      order_C,
                                                             rocsparse_index_base idx_base)
     {
-        constexpr uint32_t PADDED_BSR_BLOCK_DIM = (BSR_BLOCK_DIM + 1);
-
         const int32_t tid  = hipThreadIdx_x;
         const J       gid  = hipBlockIdx_x * hipBlockDim_x + tid;
         const int32_t lid  = gid & (WF_SIZE - 1);
-        const int32_t wid  = tid / WF_SIZE;
         const J       nwfb = hipGridDim_x * hipBlockDim_x / (WF_SIZE * BSR_BLOCK_DIM);
         const J       col  = lid + hipBlockIdx_y * WF_SIZE;
 
@@ -72,9 +69,6 @@ namespace rocsparse
 
         // local row within block row
         const J local_row = (gid / WF_SIZE) % BSR_BLOCK_DIM;
-
-        __shared__ J shared_col[BLOCKSIZE / WF_SIZE][WF_SIZE];
-        __shared__ A shared_val[BLOCKSIZE / WF_SIZE][WF_SIZE * PADDED_BSR_BLOCK_DIM];
 
         for(J block_row = gid / (WF_SIZE * BSR_BLOCK_DIM); block_row < Mb; block_row += nwfb)
         {
@@ -87,118 +81,96 @@ namespace rocsparse
             {
                 const I k = j + lid;
 
-                shared_col[wid][lid]
+                const J my_col
                     = (k < block_row_end) ? BSR_BLOCK_DIM * (bsr_col_ind[k] - idx_base) : 0;
 
+                T my_val[BSR_BLOCK_DIM];
                 if(direction == rocsparse_direction_row)
                 {
-                    // Perform:
-                    // for(uint32_t l = 0; l < BSR_BLOCK_DIM; l++)
-                    // {
-                    //     shared_val[wid][PADDED_BSR_BLOCK_DIM * lid + l]
-                    //         = (k < block_row_end) ? bsr_val[BSR_BLOCK_DIM * BSR_BLOCK_DIM * k
-                    //                                               + BSR_BLOCK_DIM * local_row + l]
-                    //                               : static_cast<T>(0);
-                    // }
-                    // as unrolled loop.
-                    shared_val[wid][PADDED_BSR_BLOCK_DIM * lid]
-                        = (k < block_row_end) ? bsr_val[BSR_BLOCK_DIM * BSR_BLOCK_DIM * k
-                                                        + BSR_BLOCK_DIM * local_row]
-                                              : static_cast<A>(0);
+                    my_val[0] = (k < block_row_end)
+                                    ? static_cast<T>(bsr_val[BSR_BLOCK_DIM * BSR_BLOCK_DIM * k
+                                                             + BSR_BLOCK_DIM * local_row])
+                                    : static_cast<T>(0);
                     if(BSR_BLOCK_DIM >= 2)
                     {
-                        shared_val[wid][PADDED_BSR_BLOCK_DIM * lid + 1]
-                            = (k < block_row_end) ? bsr_val[BSR_BLOCK_DIM * BSR_BLOCK_DIM * k
-                                                            + BSR_BLOCK_DIM * local_row + 1]
-                                                  : static_cast<A>(0);
+                        my_val[1] = (k < block_row_end)
+                                        ? static_cast<T>(bsr_val[BSR_BLOCK_DIM * BSR_BLOCK_DIM * k
+                                                                 + BSR_BLOCK_DIM * local_row + 1])
+                                        : static_cast<T>(0);
                     }
                     if(BSR_BLOCK_DIM >= 3)
                     {
-                        shared_val[wid][PADDED_BSR_BLOCK_DIM * lid + 2]
-                            = (k < block_row_end) ? bsr_val[BSR_BLOCK_DIM * BSR_BLOCK_DIM * k
-                                                            + BSR_BLOCK_DIM * local_row + 2]
-                                                  : static_cast<A>(0);
+                        my_val[2] = (k < block_row_end)
+                                        ? static_cast<T>(bsr_val[BSR_BLOCK_DIM * BSR_BLOCK_DIM * k
+                                                                 + BSR_BLOCK_DIM * local_row + 2])
+                                        : static_cast<T>(0);
                     }
                     if(BSR_BLOCK_DIM >= 4)
                     {
-                        shared_val[wid][PADDED_BSR_BLOCK_DIM * lid + 3]
-                            = (k < block_row_end) ? bsr_val[BSR_BLOCK_DIM * BSR_BLOCK_DIM * k
-                                                            + BSR_BLOCK_DIM * local_row + 3]
-                                                  : static_cast<A>(0);
+                        my_val[3] = (k < block_row_end)
+                                        ? static_cast<T>(bsr_val[BSR_BLOCK_DIM * BSR_BLOCK_DIM * k
+                                                                 + BSR_BLOCK_DIM * local_row + 3])
+                                        : static_cast<T>(0);
                     }
                 }
                 else
                 {
-                    // Perform:
-                    // for(uint32_t l = 0; l < BSR_BLOCK_DIM; l++)
-                    // {
-                    //     shared_val[wid][BSR_BLOCK_DIM * lid + l]
-                    //         = (k < block_row_end) ? bsr_val[BSR_BLOCK_DIM * BSR_BLOCK_DIM * k
-                    //                                               + BSR_BLOCK_DIM * l + local_row]
-                    //                               : static_cast<T>(0);
-                    // }
-                    // as unrolled loop.
-                    shared_val[wid][PADDED_BSR_BLOCK_DIM * lid]
-                        = (k < block_row_end)
-                              ? bsr_val[BSR_BLOCK_DIM * BSR_BLOCK_DIM * k + local_row]
-                              : static_cast<A>(0);
+                    my_val[0] = (k < block_row_end) ? static_cast<T>(
+                                    bsr_val[BSR_BLOCK_DIM * BSR_BLOCK_DIM * k + local_row])
+                                                    : static_cast<T>(0);
                     if(BSR_BLOCK_DIM >= 2)
                     {
-                        shared_val[wid][PADDED_BSR_BLOCK_DIM * lid + 1]
-                            = (k < block_row_end) ? bsr_val[BSR_BLOCK_DIM * BSR_BLOCK_DIM * k
-                                                            + BSR_BLOCK_DIM * 1 + local_row]
-                                                  : static_cast<A>(0);
+                        my_val[1] = (k < block_row_end)
+                                        ? static_cast<T>(bsr_val[BSR_BLOCK_DIM * BSR_BLOCK_DIM * k
+                                                                 + BSR_BLOCK_DIM * 1 + local_row])
+                                        : static_cast<T>(0);
                     }
                     if(BSR_BLOCK_DIM >= 3)
                     {
-                        shared_val[wid][PADDED_BSR_BLOCK_DIM * lid + 2]
-                            = (k < block_row_end) ? bsr_val[BSR_BLOCK_DIM * BSR_BLOCK_DIM * k
-                                                            + BSR_BLOCK_DIM * 2 + local_row]
-                                                  : static_cast<A>(0);
+                        my_val[2] = (k < block_row_end)
+                                        ? static_cast<T>(bsr_val[BSR_BLOCK_DIM * BSR_BLOCK_DIM * k
+                                                                 + BSR_BLOCK_DIM * 2 + local_row])
+                                        : static_cast<T>(0);
                     }
                     if(BSR_BLOCK_DIM >= 4)
                     {
-                        shared_val[wid][PADDED_BSR_BLOCK_DIM * lid + 3]
-                            = (k < block_row_end) ? bsr_val[BSR_BLOCK_DIM * BSR_BLOCK_DIM * k
-                                                            + BSR_BLOCK_DIM * 3 + local_row]
-                                                  : static_cast<A>(0);
+                        my_val[3] = (k < block_row_end)
+                                        ? static_cast<T>(bsr_val[BSR_BLOCK_DIM * BSR_BLOCK_DIM * k
+                                                                 + BSR_BLOCK_DIM * 3 + local_row])
+                                        : static_cast<T>(0);
                     }
                 }
 
-                __syncthreads();
-
-                if(col < N)
+                for(uint32_t i = 0; i < WF_SIZE; ++i)
                 {
-                    for(uint32_t i = 0; i < WF_SIZE; ++i)
+                    const J sc  = rocsparse::shfl(my_col, i, WF_SIZE);
+                    const T sv0 = rocsparse::shfl(my_val[0], i, WF_SIZE);
+                    if(col < N)
                     {
-                        // Perform:
-                        // for(uint32_t l = 0; l < BSR_BLOCK_DIM; l++)
-                        // {
-                        //     sum = rocsparse::fma<T>(shared_val[wid][PADDED_BSR_BLOCK_DIM * i + l],
-                        //                         dense_B[shared_col[wid][i] + l],
-                        //                         sum);
-                        // }
-                        // as unrolled loop.
-                        sum = rocsparse::fma<T>(shared_val[wid][PADDED_BSR_BLOCK_DIM * i],
-                                                dense_B[shared_col[wid][i] + colB],
-                                                sum);
-                        if(BSR_BLOCK_DIM >= 2)
+                        sum = rocsparse::fma<T>(sv0, dense_B[sc + colB], sum);
+                    }
+                    if(BSR_BLOCK_DIM >= 2)
+                    {
+                        const T sv1 = rocsparse::shfl(my_val[1], i, WF_SIZE);
+                        if(col < N)
                         {
-                            sum = rocsparse::fma<T>(shared_val[wid][PADDED_BSR_BLOCK_DIM * i + 1],
-                                                    dense_B[shared_col[wid][i] + 1 + colB],
-                                                    sum);
+                            sum = rocsparse::fma<T>(sv1, dense_B[sc + 1 + colB], sum);
                         }
-                        if(BSR_BLOCK_DIM >= 3)
+                    }
+                    if(BSR_BLOCK_DIM >= 3)
+                    {
+                        const T sv2 = rocsparse::shfl(my_val[2], i, WF_SIZE);
+                        if(col < N)
                         {
-                            sum = rocsparse::fma<T>(shared_val[wid][PADDED_BSR_BLOCK_DIM * i + 2],
-                                                    dense_B[shared_col[wid][i] + 2 + colB],
-                                                    sum);
+                            sum = rocsparse::fma<T>(sv2, dense_B[sc + 2 + colB], sum);
                         }
-                        if(BSR_BLOCK_DIM >= 4)
+                    }
+                    if(BSR_BLOCK_DIM >= 4)
+                    {
+                        const T sv3 = rocsparse::shfl(my_val[3], i, WF_SIZE);
+                        if(col < N)
                         {
-                            sum = rocsparse::fma<T>(shared_val[wid][PADDED_BSR_BLOCK_DIM * i + 3],
-                                                    dense_B[shared_col[wid][i] + 3 + colB],
-                                                    sum);
+                            sum = rocsparse::fma<T>(sv3, dense_B[sc + 3 + colB], sum);
                         }
                     }
                 }
@@ -262,23 +234,17 @@ namespace rocsparse
                                                             rocsparse_order      order_C,
                                                             rocsparse_index_base idx_base)
     {
-        constexpr uint32_t PADDED_BSR_BLOCK_DIM = (BSR_BLOCK_DIM + 1);
-
         const int tid        = hipThreadIdx_x;
         const J   gid        = hipBlockIdx_x * hipBlockDim_x + tid;
         const J   block_row  = gid / (WF_SIZE * BSR_BLOCK_DIM);
         const J   global_row = gid / WF_SIZE;
         const J   local_row  = (gid / WF_SIZE) % BSR_BLOCK_DIM;
         const int lid        = tid & (WF_SIZE - 1);
-        const int wid        = tid / WF_SIZE;
 
         if(block_row >= Mb)
         {
             return;
         }
-
-        __shared__ J shared_col[BLOCKSIZE / WF_SIZE][WF_SIZE];
-        __shared__ A shared_val[BLOCKSIZE / WF_SIZE][WF_SIZE * PADDED_BSR_BLOCK_DIM];
 
         const I block_row_start = bsr_row_ptr[block_row] - idx_base;
         const I block_row_end   = bsr_row_ptr[block_row + 1] - idx_base;
@@ -292,117 +258,100 @@ namespace rocsparse
             {
                 const I k = j + lid;
 
-                shared_col[wid][lid]
+                const J my_col
                     = (k < block_row_end) ? BSR_BLOCK_DIM * (bsr_col_ind[k] - idx_base) : 0;
 
+                T my_val[BSR_BLOCK_DIM];
                 if(direction == rocsparse_direction_row)
                 {
-                    // Perform:
-                    // for(uint32_t p = 0; p < BSR_BLOCK_DIM; p++)
-                    // {
-                    //     shared_val[wid][PADDED_BSR_BLOCK_DIM * lid + p]
-                    //         = (k < block_row_end) ? bsr_val[BSR_BLOCK_DIM * BSR_BLOCK_DIM * k
-                    //                                               + BSR_BLOCK_DIM * local_row + p]
-                    //                               : static_cast<T>(0);
-                    // }
-                    // as unrolled loop.
-                    shared_val[wid][PADDED_BSR_BLOCK_DIM * lid]
-                        = (k < block_row_end) ? bsr_val[BSR_BLOCK_DIM * BSR_BLOCK_DIM * k
-                                                        + BSR_BLOCK_DIM * local_row]
-                                              : static_cast<A>(0);
+                    my_val[0] = (k < block_row_end)
+                                    ? static_cast<T>(bsr_val[BSR_BLOCK_DIM * BSR_BLOCK_DIM * k
+                                                             + BSR_BLOCK_DIM * local_row])
+                                    : static_cast<T>(0);
                     if(BSR_BLOCK_DIM >= 2)
                     {
-                        shared_val[wid][PADDED_BSR_BLOCK_DIM * lid + 1]
-                            = (k < block_row_end) ? bsr_val[BSR_BLOCK_DIM * BSR_BLOCK_DIM * k
-                                                            + BSR_BLOCK_DIM * local_row + 1]
-                                                  : static_cast<A>(0);
+                        my_val[1] = (k < block_row_end)
+                                        ? static_cast<T>(bsr_val[BSR_BLOCK_DIM * BSR_BLOCK_DIM * k
+                                                                 + BSR_BLOCK_DIM * local_row + 1])
+                                        : static_cast<T>(0);
                     }
                     if(BSR_BLOCK_DIM >= 3)
                     {
-                        shared_val[wid][PADDED_BSR_BLOCK_DIM * lid + 2]
-                            = (k < block_row_end) ? bsr_val[BSR_BLOCK_DIM * BSR_BLOCK_DIM * k
-                                                            + BSR_BLOCK_DIM * local_row + 2]
-                                                  : static_cast<A>(0);
+                        my_val[2] = (k < block_row_end)
+                                        ? static_cast<T>(bsr_val[BSR_BLOCK_DIM * BSR_BLOCK_DIM * k
+                                                                 + BSR_BLOCK_DIM * local_row + 2])
+                                        : static_cast<T>(0);
                     }
                     if(BSR_BLOCK_DIM >= 4)
                     {
-                        shared_val[wid][PADDED_BSR_BLOCK_DIM * lid + 3]
-                            = (k < block_row_end) ? bsr_val[BSR_BLOCK_DIM * BSR_BLOCK_DIM * k
-                                                            + BSR_BLOCK_DIM * local_row + 3]
-                                                  : static_cast<A>(0);
+                        my_val[3] = (k < block_row_end)
+                                        ? static_cast<T>(bsr_val[BSR_BLOCK_DIM * BSR_BLOCK_DIM * k
+                                                                 + BSR_BLOCK_DIM * local_row + 3])
+                                        : static_cast<T>(0);
                     }
                 }
                 else
                 {
-                    // Perform:
-                    // for(uint32_t p = 0; p < BSR_BLOCK_DIM; p++)
-                    // {
-                    //     shared_val[wid][PADDED_BSR_BLOCK_DIM * lid + p]
-                    //         = (k < block_row_end) ? bsr_val[BSR_BLOCK_DIM * BSR_BLOCK_DIM * k
-                    //                                               + BSR_BLOCK_DIM * p + local_row]
-                    //                               : static_cast<T>(0);
-                    // }
-                    // as unrolled loop.
-                    shared_val[wid][PADDED_BSR_BLOCK_DIM * lid]
-                        = (k < block_row_end)
-                              ? bsr_val[BSR_BLOCK_DIM * BSR_BLOCK_DIM * k + local_row]
-                              : static_cast<A>(0);
+                    my_val[0] = (k < block_row_end) ? static_cast<T>(
+                                    bsr_val[BSR_BLOCK_DIM * BSR_BLOCK_DIM * k + local_row])
+                                                    : static_cast<T>(0);
                     if(BSR_BLOCK_DIM >= 2)
                     {
-                        shared_val[wid][PADDED_BSR_BLOCK_DIM * lid + 1]
-                            = (k < block_row_end) ? bsr_val[BSR_BLOCK_DIM * BSR_BLOCK_DIM * k
-                                                            + BSR_BLOCK_DIM * 1 + local_row]
-                                                  : static_cast<A>(0);
+                        my_val[1] = (k < block_row_end)
+                                        ? static_cast<T>(bsr_val[BSR_BLOCK_DIM * BSR_BLOCK_DIM * k
+                                                                 + BSR_BLOCK_DIM * 1 + local_row])
+                                        : static_cast<T>(0);
                     }
                     if(BSR_BLOCK_DIM >= 3)
                     {
-                        shared_val[wid][PADDED_BSR_BLOCK_DIM * lid + 2]
-                            = (k < block_row_end) ? bsr_val[BSR_BLOCK_DIM * BSR_BLOCK_DIM * k
-                                                            + BSR_BLOCK_DIM * 2 + local_row]
-                                                  : static_cast<A>(0);
+                        my_val[2] = (k < block_row_end)
+                                        ? static_cast<T>(bsr_val[BSR_BLOCK_DIM * BSR_BLOCK_DIM * k
+                                                                 + BSR_BLOCK_DIM * 2 + local_row])
+                                        : static_cast<T>(0);
                     }
                     if(BSR_BLOCK_DIM >= 4)
                     {
-                        shared_val[wid][PADDED_BSR_BLOCK_DIM * lid + 3]
-                            = (k < block_row_end) ? bsr_val[BSR_BLOCK_DIM * BSR_BLOCK_DIM * k
-                                                            + BSR_BLOCK_DIM * 3 + local_row]
-                                                  : static_cast<A>(0);
+                        my_val[3] = (k < block_row_end)
+                                        ? static_cast<T>(bsr_val[BSR_BLOCK_DIM * BSR_BLOCK_DIM * k
+                                                                 + BSR_BLOCK_DIM * 3 + local_row])
+                                        : static_cast<T>(0);
                     }
                 }
 
-                __syncthreads();
-
-                if(col < N)
+                for(uint32_t i = 0; i < WF_SIZE; ++i)
                 {
-                    for(uint32_t i = 0; i < WF_SIZE; ++i)
+                    const J sc  = rocsparse::shfl(my_col, i, WF_SIZE);
+                    const T sv0 = rocsparse::shfl(my_val[0], i, WF_SIZE);
+                    if(col < N)
                     {
-                        // Perform:
-                        // for(uint32_t p = 0; p < BSR_BLOCK_DIM; p++)
-                        // {
-                        //     T val_B = rocsparse::ldg(dense_B + col + ldb * (p + shared_col[wid][i]));
-                        //     sum = rocsparse::fma<T>(shared_val[wid][PADDED_BSR_BLOCK_DIM * i + p], val_B, sum);
-                        // }
-                        // as unrolled loop.
-                        T val_B = rocsparse::ldg(dense_B + col + ldb * shared_col[wid][i]);
-                        sum     = rocsparse::fma<T>(
-                            shared_val[wid][PADDED_BSR_BLOCK_DIM * i], val_B, sum);
-                        if(BSR_BLOCK_DIM >= 2)
+                        T val_B = rocsparse::ldg(dense_B + col + ldb * sc);
+                        sum     = rocsparse::fma<T>(sv0, val_B, sum);
+                    }
+                    if(BSR_BLOCK_DIM >= 2)
+                    {
+                        const T sv1 = rocsparse::shfl(my_val[1], i, WF_SIZE);
+                        if(col < N)
                         {
-                            val_B = rocsparse::ldg(dense_B + col + ldb * (1 + shared_col[wid][i]));
-                            sum   = rocsparse::fma<T>(
-                                shared_val[wid][PADDED_BSR_BLOCK_DIM * i + 1], val_B, sum);
+                            T val_B = rocsparse::ldg(dense_B + col + ldb * (1 + sc));
+                            sum     = rocsparse::fma<T>(sv1, val_B, sum);
                         }
-                        if(BSR_BLOCK_DIM >= 3)
+                    }
+                    if(BSR_BLOCK_DIM >= 3)
+                    {
+                        const T sv2 = rocsparse::shfl(my_val[2], i, WF_SIZE);
+                        if(col < N)
                         {
-                            val_B = rocsparse::ldg(dense_B + col + ldb * (2 + shared_col[wid][i]));
-                            sum   = rocsparse::fma<T>(
-                                shared_val[wid][PADDED_BSR_BLOCK_DIM * i + 2], val_B, sum);
+                            T val_B = rocsparse::ldg(dense_B + col + ldb * (2 + sc));
+                            sum     = rocsparse::fma<T>(sv2, val_B, sum);
                         }
-                        if(BSR_BLOCK_DIM >= 4)
+                    }
+                    if(BSR_BLOCK_DIM >= 4)
+                    {
+                        const T sv3 = rocsparse::shfl(my_val[3], i, WF_SIZE);
+                        if(col < N)
                         {
-                            val_B = rocsparse::ldg(dense_B + col + ldb * (3 + shared_col[wid][i]));
-                            sum   = rocsparse::fma<T>(
-                                shared_val[wid][PADDED_BSR_BLOCK_DIM * i + 3], val_B, sum);
+                            T val_B = rocsparse::ldg(dense_B + col + ldb * (3 + sc));
+                            sum     = rocsparse::fma<T>(sv3, val_B, sum);
                         }
                     }
                 }

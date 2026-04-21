@@ -98,6 +98,11 @@ int main(int argc, char** argv) noexcept
             .default_value(false)
             .implicit_value(true)
             .help("FAIL instead of SKIP when no engine supports a graph");
+        parser.add_argument("--skip-graph-validation")
+            .default_value(false)
+            .implicit_value(true)
+            .help("PASS immediately after confirming engine support, "
+                  "without executing or validating the graph");
         parser.add_argument("--tc", "--test-config")
             .help("Path to a TOML configuration file for per-test tolerance overrides.");
 
@@ -120,6 +125,7 @@ int main(int argc, char** argv) noexcept
             engineName = parser.get<std::string>("--test-engine");
         }
         auto failOnUnsupported = parser.get<bool>("--fail-on-unsupported");
+        auto skipGraphValidation = parser.get<bool>("--skip-graph-validation");
 
         std::optional<std::filesystem::path> configPath;
         if(parser.is_used("--test-config"))
@@ -166,6 +172,7 @@ int main(int argc, char** argv) noexcept
         hipdnn_integration_tests::TestConfig::initialize(std::move(articlePath),
                                                          std::move(engineName),
                                                          failOnUnsupported,
+                                                         skipGraphValidation,
                                                          std::move(configPath));
 
         // Reconstruct argc/argv for GTest from remaining (unknown) args.
