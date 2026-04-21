@@ -23,6 +23,7 @@
  * ************************************************************************ */
 
 #include "rocsparse_clients_envariables.hpp"
+#include "rocsparse_clients_test_memory_debug_wrappers.hpp"
 #include "rocsparse_data.hpp"
 #include "rocsparse_parse_data.hpp"
 #include "rocsparse_reproducibility.hpp"
@@ -80,6 +81,29 @@ int main(int argc, char** argv)
     {
         rocsparse_clients_envariables::set(rocsparse_clients_envariables::TEST_DEBUG_ARGUMENTS,
                                            true);
+    }
+
+    //
+    // Enable sync tests.
+    //
+    for(int i = 1; i < argc; ++i)
+    {
+        if(!strcmp(argv[i], "--test-sync-o"))
+        {
+            if(i + 1 >= argc || !argv[i + 1][0])
+            {
+                std::cerr << "The " << argv[i] << " option requires an argument" << std::endl;
+                exit(EXIT_FAILURE);
+            }
+            rocsparse_clients_test::memory_debug_t::instance().enable();
+            rocsparse_clients_test::memory_debug_t::instance().set_sync_report_filename(argv[++i]);
+        }
+        else if(!strcmp(argv[i], "--test-sync"))
+        {
+            rocsparse_clients_test::memory_debug_t::instance().enable();
+            rocsparse_clients_test::memory_debug_t::instance().set_sync_report_filename(
+                "rocsparse_test_sync.json");
+        }
     }
 
     // Get version
@@ -149,6 +173,22 @@ int main(int argc, char** argv)
         else if(strcmp(argv[i], "--hide-skipped") == 0)
         {
             showSkippedOverride = 0;
+        }
+        else if(strcmp(argv[i], "--test-sync-o") == 0)
+        {
+            if(i + 1 >= argc || !argv[i + 1][0])
+            {
+                std::cerr << "The " << argv[i] << " option requires an argument" << std::endl;
+                exit(EXIT_FAILURE);
+            }
+            rocsparse_clients_test::memory_debug_t::instance().enable();
+            rocsparse_clients_test::memory_debug_t::instance().set_sync_report_filename(argv[++i]);
+        }
+        else if(strcmp(argv[i], "--test-sync") == 0)
+        {
+            rocsparse_clients_test::memory_debug_t::instance().enable();
+            rocsparse_clients_test::memory_debug_t::instance().set_sync_report_filename(
+                "rocsparse_test_sync.json");
         }
     }
 
@@ -283,6 +323,22 @@ int main(int argc, char** argv)
 
     // Run all tests
     int ret = RUN_ALL_TESTS();
+
+    if(rocsparse_clients_test::memory_debug_t::instance().enabled())
+    {
+        //
+        // Check function properties.
+        //
+        auto status_info_prop = rocsparse_clients_test::memory_debug_t::instance().check(nullptr);
+        if(status_info_prop != rocsparse_status_success)
+        {
+            ADD_FAILURE() << argv[0] << ": memory_debug_t::check failed " << std::endl;
+            return status_info_prop;
+        }
+        std::cout << "report " << rocsparse_clients_test::memory_debug_t::instance().get_filename()
+                  << std::endl;
+        rocsparse_clients_test::memory_debug_t::instance().report(nullptr);
+    }
 
     auto& reproducibility = rocsparse_reproducibility_t::instance();
     if(reproducibility.config().is_enabled())

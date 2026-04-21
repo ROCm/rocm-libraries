@@ -335,6 +335,11 @@ bool rocsparse_parse_data(int& argc, char** argv, const std::string& default_fil
                           << std::endl;
 
                 std::cout << "" << std::endl;
+                std::cout << "Rocsparse synchronicity testing options:" << std::endl;
+                std::cout << "--test-sync      enable rocsparse synchronicity testing."
+                          << std::endl;
+                std::cout << "--test-sync-o    output filename for synchronicity report."
+                          << std::endl;
                 std::cout << "Rocsparse reproducibility options:" << std::endl;
                 std::cout << "--r          enable rocsparse reproducibility testing" << std::endl;
                 std::cout << "--r-niter    set the number of "
