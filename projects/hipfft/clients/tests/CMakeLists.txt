@@ -48,6 +48,7 @@ set( hipfft-test_source
   accuracy_test_callback.cpp
   hipfftw_test.cpp
   hipfftxt_test.cpp
+  multi_device_test.cpp
   multi_stream_test.cpp
   ../../shared/array_validator.cpp
   ../../shared/test_callbacks.cpp
