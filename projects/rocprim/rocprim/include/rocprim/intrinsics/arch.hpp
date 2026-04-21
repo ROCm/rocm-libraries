@@ -55,6 +55,9 @@ unsigned int size() noexcept
 /// \parblock
 /// The example below shows how shared memory can be allocated
 /// to collect per warp results.
+///
+/// The full example is [on GitHub](https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocprim/example/rocprim/intrinsics/example_arch.cpp).
+///
 /// \code{.cpp}
 /// constexpr auto total_items = 1024;
 /// constexpr auto max_warps   = total_items / arch::min_size();

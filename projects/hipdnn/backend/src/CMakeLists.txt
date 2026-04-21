@@ -41,9 +41,10 @@ add_library(
     descriptors/LayernormOperationDescriptor.cpp
     descriptors/MatmulOperationDescriptor.cpp
     descriptors/PointwiseOperationDescriptor.cpp
+    descriptors/ReductionOperationDescriptor.cpp
     descriptors/RMSNormOperationDescriptor.cpp
-    descriptors/SdpaBpropOperationDescriptor.cpp
-    descriptors/SdpaFpropOperationDescriptor.cpp
+    descriptors/SdpaBwdOperationDescriptor.cpp
+    descriptors/SdpaFwdOperationDescriptor.cpp
     descriptors/TensorDescriptor.cpp
     descriptors/NodeFactory.cpp
     descriptors/VariantDescriptor.cpp
@@ -68,7 +69,7 @@ target_include_directories(
 )
 
 target_compile_options(hipdnn_backend_private PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS} ${HIPDNN_NO_RTTI_OPTIONS})
-target_link_libraries(hipdnn_backend_private PUBLIC hip::host hipdnn_data_sdk hipdnn_plugin_sdk)
+target_link_libraries(hipdnn_backend_private PUBLIC hip::host hipdnn_data_sdk hipdnn_plugin_sdk hipdnn_flatbuffers_sdk)
 target_link_libraries(hipdnn_backend_private PRIVATE ${CMAKE_DL_LIBS})
 target_compile_definitions(hipdnn_backend_private PRIVATE HIPDNN_BACKEND_COMPILATION)
 

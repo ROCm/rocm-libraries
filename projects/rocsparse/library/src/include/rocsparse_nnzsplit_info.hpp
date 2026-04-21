@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -34,4 +34,7 @@ typedef struct _rocsparse_nnzsplit_info
     void* starting_ids{};
     void* starting_block_ids{};
 
+public:
+    ~_rocsparse_nnzsplit_info();
+    void clear();
 } * rocsparse_nnzsplit_info;

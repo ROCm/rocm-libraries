@@ -11,9 +11,9 @@
 #include "hipdnn_backend.h"
 
 #include <gtest/gtest.h>
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
-#include <hipdnn_data_sdk/data_objects/matmul_attributes_generated.h>
-#include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/matmul_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_test_sdk/constants/MatmulConstants.hpp>
 #include <hipdnn_test_sdk/utilities/ToVec.hpp>
 
@@ -24,7 +24,7 @@
 
 using namespace hipdnn_backend;
 using namespace hipdnn_backend::test_utilities;
-using namespace hipdnn_data_sdk::data_objects;
+using namespace hipdnn_flatbuffers_sdk::data_objects;
 using namespace hipdnn_tests::constants;
 using hipdnn_tests::toVec;
 
@@ -61,9 +61,9 @@ protected:
         _tensorMap[K_MATMUL_TENSOR_C_UID] = TensorDescriptor::fromFlatBuffer(cAttrs);
     }
 
-    static hipdnn_data_sdk::data_objects::MatmulAttributesT createStandardMatmulAttrs()
+    static hipdnn_flatbuffers_sdk::data_objects::MatmulAttributesT createStandardMatmulAttrs()
     {
-        hipdnn_data_sdk::data_objects::MatmulAttributesT attrs;
+        hipdnn_flatbuffers_sdk::data_objects::MatmulAttributesT attrs;
         attrs.a_tensor_uid = K_MATMUL_TENSOR_A_UID;
         attrs.b_tensor_uid = K_MATMUL_TENSOR_B_UID;
         attrs.c_tensor_uid = K_MATMUL_TENSOR_C_UID;
@@ -86,7 +86,7 @@ TEST_F(TestMatmulOperationFromNode, CreatesValidFinalizedDescriptor)
 
     ASSERT_NE(desc, nullptr);
     ASSERT_TRUE(desc->isFinalized());
-    ASSERT_EQ(desc->getType(), HIPDNN_BACKEND_OPERATION_MATMUL_DESCRIPTOR_EXT);
+    ASSERT_EQ(desc->getType(), HIPDNN_BACKEND_OPERATION_MATMUL_DESCRIPTOR);
     EXPECT_EQ(desc->getData().a_tensor_uid, K_MATMUL_TENSOR_A_UID);
 }
 
@@ -219,13 +219,13 @@ TEST_F(TestMatmulOperationFromNode, GetAttributeWorksAfterFromNode)
     hipdnnDataType_t computeType = {};
     int64_t dtCount = 0;
     desc->getAttribute(
-        HIPDNN_ATTR_MATMUL_MATH_PREC_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &dtCount, &computeType);
+        HIPDNN_ATTR_MATMUL_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &dtCount, &computeType);
     ASSERT_EQ(computeType, HIPDNN_DATA_FLOAT);
 
     // Verify a tensor
     hipdnn_backend::ScopedDescriptor aScoped;
     int64_t aCount = 0;
-    desc->getAttribute(HIPDNN_ATTR_OPERATION_MATMUL_A_EXT,
+    desc->getAttribute(HIPDNN_ATTR_OPERATION_MATMUL_ADESC,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        &aCount,
@@ -241,7 +241,7 @@ TEST_F(TestMatmulOperationFromNode, GetAttributeWorksAfterFromNode)
     // Verify b tensor
     hipdnn_backend::ScopedDescriptor bScoped;
     int64_t bCount = 0;
-    desc->getAttribute(HIPDNN_ATTR_OPERATION_MATMUL_B_EXT,
+    desc->getAttribute(HIPDNN_ATTR_OPERATION_MATMUL_BDESC,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        &bCount,
@@ -257,7 +257,7 @@ TEST_F(TestMatmulOperationFromNode, GetAttributeWorksAfterFromNode)
     // Verify c tensor
     hipdnn_backend::ScopedDescriptor cScoped;
     int64_t cCount = 0;
-    desc->getAttribute(HIPDNN_ATTR_OPERATION_MATMUL_C_EXT,
+    desc->getAttribute(HIPDNN_ATTR_OPERATION_MATMUL_CDESC,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        &cCount,
@@ -271,12 +271,12 @@ TEST_F(TestMatmulOperationFromNode, GetAttributeWorksAfterFromNode)
                            toVec(K_MATMUL_TENSOR_C_STRIDES));
 
     // Verify operation type
-    hipdnnOperationType_t opType = HIPDNN_OPERATION_TYPE_NOT_SET;
+    hipdnnOperationType_ext_t opType = HIPDNN_OPERATION_TYPE_NOT_SET_EXT;
     int64_t opTypeCount = 0;
     desc->getAttribute(
         HIPDNN_ATTR_OPERATION_TYPE_EXT, HIPDNN_TYPE_OPERATION_TYPE_EXT, 1, &opTypeCount, &opType);
     ASSERT_EQ(opTypeCount, 1);
-    EXPECT_EQ(opType, HIPDNN_OPERATION_TYPE_MATMUL);
+    EXPECT_EQ(opType, HIPDNN_OPERATION_TYPE_MATMUL_EXT);
 }
 
 TEST_F(TestMatmulOperationFromNode, NamePreservedFromNode)

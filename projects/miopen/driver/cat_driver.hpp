@@ -14,6 +14,7 @@
 #include <cstdlib>
 #include <memory>
 #include <miopen/miopen.h>
+#include <miopen/float_equal.hpp>
 #include <miopen/tensor.hpp>
 #include <numeric>
 #include <vector>
@@ -334,7 +335,7 @@ int CatDriver<Tgpu, Tref>::VerifyForward()
     const auto error     = miopen::rms_range(outhost, out);
     const char* pRefType = use_multithread ? "multi-threaded" : "single-threaded";
 
-    if(!std::isfinite(error) || error != 0)
+    if(!std::isfinite(error) || !miopen::float_equal_sentinel(error, 0))
     {
         std::cout << "Forward Cat FAILED against " << pRefType << " CPU reference: " << error
                   << " > 0" << std::endl;

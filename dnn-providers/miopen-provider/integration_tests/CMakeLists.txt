@@ -50,4 +50,4 @@ add_dependencies(miopen_plugin_integration_tests miopen_plugin)
 
 clang_tidy_check(miopen_plugin_integration_tests)
 
-add_integration_test_target(miopen_plugin_integration_tests ${CMAKE_CURRENT_BINARY_DIR})
+add_integration_test_target(miopen_plugin_integration_tests ${CMAKE_CURRENT_BINARY_DIR} LABELS slow)

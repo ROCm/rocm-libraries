@@ -28,7 +28,7 @@ import shutil
 import subprocess
 import tempfile
 from pathlib import Path
-from typing import List, Union
+from typing import List, Optional, Union
 
 from .. import Utils
 from ..Common import ensurePath, gfxName, globalParameters, printWarning, tPrint
@@ -84,6 +84,7 @@ def buildAssemblyCodeObjectFiles(
     writer: KernelWriterAssembly,
     outputPath: Union[Path, str],
     removeTemporaries: bool,
+    libraryPath: Optional[Union[Path, str]] = None,
 ):
 
     countAsmKernels = lambda kernels: sum(k["KernelLanguage"] == "Assembly" for k in kernels)
@@ -92,7 +93,9 @@ def buildAssemblyCodeObjectFiles(
     extCo = ".co"
     extCoRaw = ".co.raw"
 
-    destDir = Path(ensurePath(os.path.join(outputPath, "library")))
+    destDir = Path(
+        ensurePath(str(libraryPath) if libraryPath else os.path.join(outputPath, "library"))
+    )
     asmDir = Path(writer.getAssemblyDirectory())
 
     maxLineLength = (

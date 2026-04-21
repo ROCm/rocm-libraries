@@ -16,11 +16,11 @@
 
 #include "hipdnn_backend.h"
 
-namespace hipdnn_data_sdk::data_objects
+namespace hipdnn_flatbuffers_sdk::data_objects
 {
 // NOLINTNEXTLINE(readability-identifier-naming)
 struct EngineDetails;
-} // namespace hipdnn_data_sdk::data_objects
+} // namespace hipdnn_flatbuffers_sdk::data_objects
 
 namespace hipdnn_backend
 {
@@ -58,6 +58,10 @@ public:
 
     // Set plugin unloading mode (lazy keeps plugins loaded until app exit or path change)
     static void setPluginUnloadingMode(hipdnnPluginUnloadingMode_ext_t mode);
+
+    // Set the log level on all currently loaded plugins.
+    // This is a no-op if no plugins are loaded or if plugins don't support the API.
+    static void setPluginLogLevel(hipdnnSeverity_t level);
 
     static std::shared_ptr<EnginePluginResourceManager> create();
 
@@ -153,7 +157,7 @@ public:
     EngineDetailsWrapper(EngineDetailsWrapper&& other) noexcept;
     EngineDetailsWrapper& operator=(EngineDetailsWrapper&& other) noexcept;
 
-    const hipdnn_data_sdk::data_objects::EngineDetails* get() const;
+    const hipdnn_flatbuffers_sdk::data_objects::EngineDetails* get() const;
 
 private:
     std::shared_ptr<EnginePluginResourceManager> _rm;

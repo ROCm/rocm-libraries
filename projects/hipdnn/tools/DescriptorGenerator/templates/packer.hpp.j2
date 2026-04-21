@@ -4,6 +4,9 @@
 #pragma once
 
 #include <hipdnn_frontend/attributes/{{ op.frontend.effective_attributes_include }}.hpp>
+{% if op.data_fields_helper is defined and op.data_fields_helper %}
+#include <hipdnn_frontend/detail/{{ op.data_fields_helper.include }}.hpp>
+{% endif %}
 #include <hipdnn_frontend/detail/DescriptorHelpers.hpp>
 
 namespace hipdnn_frontend::detail
@@ -41,6 +44,10 @@ inline Error {{ op.frontend.packer_function }}(
 {% endif %}
 {% endfor %}
 
+{% if op.data_fields_helper is defined and op.data_fields_helper %}
+    // Pack shared {{ op.data_fields_helper.label }} parameters
+    HIPDNN_CHECK_ERROR({{ op.data_fields_helper.pack_function }}(opDesc.get(), attributes, "{{ op.effective_error_label }}"));
+{% else %}
     // Set {{ op.packer_params_label }} parameters
 {% for df in op.data_fields %}
 {% if df.is_vector %}
@@ -50,6 +57,24 @@ inline Error {{ op.frontend.packer_function }}(
                                             attributes.{{ df.frontend_getter }},
                                             "{{ op.effective_error_label }} {{ df.name }}"));
 {% elif df.is_mode %}
+{% if df.frontend_getter_returns_optional %}
+
+    // Set {{ op.effective_error_label }} mode
+    {
+        auto {{ df.camel_name }}Opt = attributes.{{ df.frontend_getter }};
+        if(!{{ df.camel_name }}Opt.has_value())
+        {
+            return {ErrorCode::INVALID_VALUE, "{{ df.name | replace('_', ' ') }} not set"};
+        }
+        auto {{ df.camel_name }} = hipdnn_frontend::{{ df.backend_converter }}(*{{ df.camel_name }}Opt);
+        if(!{{ df.camel_name }}.has_value())
+        {
+            return {ErrorCode::INVALID_VALUE, "Unsupported {{ df.name | replace('_', ' ') }}"};
+        }
+        HIPDNN_CHECK_ERROR(setDescriptorAttrScalar(
+            opDesc.get(), {{ df.attr_name }}, {{ df.backend_type }}, *{{ df.camel_name }}, "{{ op.effective_error_label }} mode"));
+    }
+{% else %}
 
     // Set {{ op.effective_error_label }} mode
     auto {{ df.camel_name }} = hipdnn_frontend::{{ df.backend_converter }}(attributes.{{ df.frontend_getter }});
@@ -59,6 +84,7 @@ inline Error {{ op.frontend.packer_function }}(
     }
     HIPDNN_CHECK_ERROR(setDescriptorAttrScalar(
         opDesc.get(), {{ df.attr_name }}, {{ df.backend_type }}, *{{ df.camel_name }}, "{{ op.effective_error_label }} mode"));
+{% endif %}
 {% elif df.is_enum %}
 
     // Set {{ op.effective_error_label }} mode and compute data type
@@ -84,6 +110,7 @@ inline Error {{ op.frontend.packer_function }}(
                                                  {{ op.compute_data_type_attr }},
                                                  attributes.compute_data_type,
                                                  "{{ op.effective_error_label }} compute data type"));
+{% endif %}
 {% endif %}
 {% for taf in op.tensor_array_fields %}
 

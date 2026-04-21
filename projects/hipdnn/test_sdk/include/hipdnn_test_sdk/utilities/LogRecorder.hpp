@@ -8,6 +8,8 @@
 #include <hipdnn_data_sdk/logging/Logger.hpp>
 
 #include <atomic>
+#include <chrono>
+#include <condition_variable>
 #include <iostream>
 #include <mutex>
 #include <sstream>
@@ -86,8 +88,11 @@ public:
             return;
         }
 
-        const std::lock_guard<std::mutex> lock(_logsMutex);
-        _recordedLogs.push_back({severity, message});
+        {
+            const std::lock_guard<std::mutex> lock(_logsMutex);
+            _recordedLogs.push_back({severity, message});
+        }
+        _cvLogRecorded.notify_all();
     }
 
     void clearLogs()
@@ -108,6 +113,19 @@ public:
         return _recordedLogs.size();
     }
 
+    /**
+     * @brief Wait until log count reaches target, with timeout
+     * @param targetCount The target log count to wait for
+     * @param timeout Maximum time to wait
+     * @return true if target reached, false if timed out
+     */
+    bool waitForLogCount(size_t targetCount, std::chrono::milliseconds timeout)
+    {
+        std::unique_lock<std::mutex> lock(_logsMutex);
+        return _cvLogRecorded.wait_for(
+            lock, timeout, [&] { return _recordedLogs.size() >= targetCount; });
+    }
+
     LogRecording(const LogRecording&) = delete;
     LogRecording& operator=(const LogRecording&) = delete;
 
@@ -116,6 +134,7 @@ private:
     ~LogRecording() = default;
 
     mutable std::mutex _logsMutex;
+    std::condition_variable _cvLogRecorded;
     std::atomic<bool> _isRecording{false};
     std::vector<RecordedLog> _recordedLogs;
 };
@@ -348,6 +367,25 @@ public:
     std::vector<RecordedLog> getRecordedLogs() const
     {
         return LogRecording::instance(_recordingId).getRecordedLogs();
+    }
+
+    /**
+     * @brief Clear all recorded logs for the current log recorder.
+     */
+    void clearLogs()
+    {
+        LogRecording::instance(_recordingId).clearLogs();
+    }
+
+    /**
+     * @brief Wait until log count reaches target, with timeout
+     * @param targetCount The target log count to wait for
+     * @param timeout Maximum time to wait
+     * @return true if target reached, false if timed out
+     */
+    bool waitForLogCount(size_t targetCount, std::chrono::milliseconds timeout)
+    {
+        return LogRecording::instance(_recordingId).waitForLogCount(targetCount, timeout);
     }
 
 protected:
