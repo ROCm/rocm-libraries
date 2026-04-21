@@ -28,6 +28,7 @@
 #ifndef ROCSPARSE_DEBUGGING_H
 #define ROCSPARSE_DEBUGGING_H
 
+#include "rocsparse-types.h"
 #include "rocsparse/rocsparse-export.h"
 
 #ifdef __cplusplus
@@ -186,6 +187,27 @@ void rocsparse_disable_debug_force_host_assert();
  */
 ROCSPARSE_EXPORT
 int rocsparse_state_debug_force_host_assert();
+
+typedef enum rocsparse_memory_debug_synchronicity_
+{
+    rocsparse_memory_debug_synchronicity_host  = 1,
+    rocsparse_memory_debug_synchronicity_sync  = 2,
+    rocsparse_memory_debug_synchronicity_psync = 4,
+    rocsparse_memory_debug_synchronicity_async = 8
+} rocsparse_memory_debug_synchronicity;
+
+typedef enum rocsparse_memory_debug_info_
+{
+    rocsparse_memory_debug_info_synchronicity,
+    rocsparse_memory_debug_info_transfer_nbytes,
+} rocsparse_memory_debug_info;
+
+ROCSPARSE_EXPORT rocsparse_status rocsparse_memory_debug_reset(rocsparse_handle handle);
+ROCSPARSE_EXPORT rocsparse_status
+    rocsparse_memory_debug_info_get(rocsparse_handle            handle,
+                                    rocsparse_memory_debug_info debug_info,
+                                    void*                       data,
+                                    size_t                      data_size_in_bytes);
 
 #ifdef __cplusplus
 }

@@ -29,6 +29,9 @@ set(rocsparse_source
   src/auxiliary/rocsparse_error.cpp
 
 # Common
+  src/common/rocsparse_memory.cpp
+  src/common/rocsparse_memory_debug.cpp
+  src/common/rocsparse_memory_debug_t.cpp
   src/common/rocsparse_singularity.cpp
   src/common/rocsparse_common.cpp
   src/common/rocsparse_valset.cpp
