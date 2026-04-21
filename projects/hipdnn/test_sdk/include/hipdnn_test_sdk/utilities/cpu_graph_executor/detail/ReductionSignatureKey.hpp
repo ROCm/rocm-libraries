@@ -6,9 +6,9 @@
 #include <functional>
 #include <ostream>
 
-#include <hipdnn_data_sdk/data_objects/data_types_generated.h>
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
-#include <hipdnn_data_sdk/flatbuffer_utilities/FlatbufferTypeHelpers.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/FlatbufferTypeHelpers.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/ReductionPlan.hpp>
 
 namespace hipdnn_test_sdk::detail
@@ -16,18 +16,18 @@ namespace hipdnn_test_sdk::detail
 
 struct ReductionSignatureKey
 {
-    const hipdnn_data_sdk::data_objects::NodeAttributes nodeType{
-        hipdnn_data_sdk::data_objects::NodeAttributes::ReductionAttributes};
+    const hipdnn_flatbuffers_sdk::data_objects::NodeAttributes nodeType{
+        hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::ReductionAttributes};
 
-    hipdnn_data_sdk::data_objects::DataType xDataType;
-    hipdnn_data_sdk::data_objects::DataType yDataType;
-    hipdnn_data_sdk::data_objects::DataType computeDataType;
+    hipdnn_flatbuffers_sdk::data_objects::DataType xDataType;
+    hipdnn_flatbuffers_sdk::data_objects::DataType yDataType;
+    hipdnn_flatbuffers_sdk::data_objects::DataType computeDataType;
 
     ReductionSignatureKey() = default;
 
-    constexpr ReductionSignatureKey(hipdnn_data_sdk::data_objects::DataType x,
-                                    hipdnn_data_sdk::data_objects::DataType y,
-                                    hipdnn_data_sdk::data_objects::DataType compute)
+    constexpr ReductionSignatureKey(hipdnn_flatbuffers_sdk::data_objects::DataType x,
+                                    hipdnn_flatbuffers_sdk::data_objects::DataType y,
+                                    hipdnn_flatbuffers_sdk::data_objects::DataType compute)
         : xDataType(x)
         , yDataType(y)
         , computeDataType(compute)
@@ -35,10 +35,11 @@ struct ReductionSignatureKey
     }
 
     ReductionSignatureKey(
-        const hipdnn_data_sdk::data_objects::Node& node,
-        const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        const hipdnn_flatbuffers_sdk::data_objects::Node& node,
+        const std::unordered_map<int64_t,
+                                 const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
             tensorMap,
-        const hipdnn_data_sdk::data_objects::DataType computeType)
+        const hipdnn_flatbuffers_sdk::data_objects::DataType computeType)
     {
         const auto* nodeAttributes = node.attributes_as_ReductionAttributes();
         if(nodeAttributes == nullptr)
@@ -88,32 +89,32 @@ struct ReductionSignatureKey
                            ReductionSignatureKey>
             map;
 
-        addPlanBuilder<hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                       hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                       hipdnn_data_sdk::data_objects::DataType::FLOAT>(map);
+        addPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT>(map);
 
-        addPlanBuilder<hipdnn_data_sdk::data_objects::DataType::HALF,
-                       hipdnn_data_sdk::data_objects::DataType::HALF,
-                       hipdnn_data_sdk::data_objects::DataType::FLOAT>(map);
+        addPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT>(map);
 
-        addPlanBuilder<hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
-                       hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
-                       hipdnn_data_sdk::data_objects::DataType::FLOAT>(map);
+        addPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT>(map);
 
-        addPlanBuilder<hipdnn_data_sdk::data_objects::DataType::HALF,
-                       hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                       hipdnn_data_sdk::data_objects::DataType::FLOAT>(map);
+        addPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT>(map);
 
-        addPlanBuilder<hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
-                       hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                       hipdnn_data_sdk::data_objects::DataType::FLOAT>(map);
+        addPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT>(map);
 
         return map;
     }
 
-    template <hipdnn_data_sdk::data_objects::DataType XDataTypeEnum,
-              hipdnn_data_sdk::data_objects::DataType YDataTypeEnum,
-              hipdnn_data_sdk::data_objects::DataType ComputeDataTypeEnum>
+    template <hipdnn_flatbuffers_sdk::data_objects::DataType XDataTypeEnum,
+              hipdnn_flatbuffers_sdk::data_objects::DataType YDataTypeEnum,
+              hipdnn_flatbuffers_sdk::data_objects::DataType ComputeDataTypeEnum>
     static void addPlanBuilder(std::unordered_map<ReductionSignatureKey,
                                                   std::unique_ptr<IGraphNodePlanBuilder>,
                                                   ReductionSignatureKey>& map)

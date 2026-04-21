@@ -1,4 +1,4 @@
-// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
 #include "HipCompiledProgram.hpp"
@@ -9,6 +9,7 @@
 #include "kernel_sources.hpp"
 
 #include <hip/hiprtc.h>
+#include <hipdnn_data_sdk/utilities/ScopedResource.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
 #include <vector>
@@ -45,6 +46,9 @@ HipCompiledProgram::HipCompiledProgram(const std::string& kernelFileName,
                                      includeTextPtrs.data(),
                                      includeNames.data()));
 
+    hipdnn_data_sdk::utilities::ScopedResource programGuard(
+        program, [](hiprtcProgram p) { hiprtcDestroyProgram(&p); });
+
     // Convert compiler options to C-strings
     std::vector<const char*> optionPtrs;
     optionPtrs.reserve(compilerOptions.size());
@@ -65,8 +69,6 @@ HipCompiledProgram::HipCompiledProgram(const std::string& kernelFileName,
         std::string compileLog(logSize, '\0');
         hiprtcGetProgramLog(program, compileLog.data());
 
-        hiprtcDestroyProgram(&program);
-
         throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
                                                        "HIPRTC compilation failed for "
                                                            + kernelFileName + ": " + compileLog);
@@ -77,7 +79,6 @@ HipCompiledProgram::HipCompiledProgram(const std::string& kernelFileName,
     HIPRTC_CHECK(hiprtcGetCodeSize(program, &codeSize));
     std::vector<char> code(codeSize);
     HIPRTC_CHECK(hiprtcGetCode(program, code.data()));
-    HIPRTC_CHECK(hiprtcDestroyProgram(&program));
 
     // Load the compiled binary as a HIP module
     HIP_CHECK(hipModuleLoadData(&_module, code.data()));

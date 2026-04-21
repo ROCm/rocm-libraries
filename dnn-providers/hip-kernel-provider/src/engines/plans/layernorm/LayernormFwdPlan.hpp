@@ -25,8 +25,9 @@ class LayernormFwdParams
 {
 public:
     LayernormFwdParams(
-        const hipdnn_data_sdk::data_objects::LayernormAttributes& attributes,
-        const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        const hipdnn_flatbuffers_sdk::data_objects::LayernormAttributes& attributes,
+        const std::unordered_map<int64_t,
+                                 const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
             tensorMap);
 
     LayernormFwdParams(const LayernormFwdParams&) = delete;
@@ -35,22 +36,22 @@ public:
     LayernormFwdParams(LayernormFwdParams&&) = default;
     LayernormFwdParams& operator=(LayernormFwdParams&&) = default;
 
-    const hipdnn_data_sdk::data_objects::TensorAttributes* x() const;
-    const hipdnn_data_sdk::data_objects::TensorAttributes* y() const;
-    const hipdnn_data_sdk::data_objects::TensorAttributes* scale() const;
-    const hipdnn_data_sdk::data_objects::TensorAttributes* bias() const;
-    const hipdnn_data_sdk::data_objects::TensorAttributes* mean() const;
-    const hipdnn_data_sdk::data_objects::TensorAttributes* invVariance() const;
-    const hipdnn_data_sdk::data_objects::TensorAttributes* epsilon() const;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* x() const;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* y() const;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* scale() const;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* bias() const;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* mean() const;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* invVariance() const;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* epsilon() const;
 
 private:
-    const hipdnn_data_sdk::data_objects::TensorAttributes* _x;
-    const hipdnn_data_sdk::data_objects::TensorAttributes* _y;
-    const hipdnn_data_sdk::data_objects::TensorAttributes* _scale;
-    const hipdnn_data_sdk::data_objects::TensorAttributes* _bias;
-    const hipdnn_data_sdk::data_objects::TensorAttributes* _mean;
-    const hipdnn_data_sdk::data_objects::TensorAttributes* _invVariance;
-    const hipdnn_data_sdk::data_objects::TensorAttributes* _epsilon;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _x;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _y;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _scale;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _bias;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _mean;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _invVariance;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _epsilon;
 };
 
 class LayernormFwdPlan : public hipdnn_plugin_sdk::IPlan<HipKernelHandle>

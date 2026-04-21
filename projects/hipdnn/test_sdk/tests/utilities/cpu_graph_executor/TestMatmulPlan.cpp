@@ -6,9 +6,9 @@
 #include "MatmulGraphUtils.hpp"
 #include "MatmulTensorBundles.hpp"
 #include "PointwiseGraphUtils.hpp"
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
-#include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceMatmul.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/DynamicTolerances.hpp>
@@ -19,18 +19,19 @@
 using namespace hipdnn_sdk_test_utils;
 using namespace hipdnn_test_sdk::utilities;
 using namespace hipdnn_test_sdk::detail;
-using namespace hipdnn_data_sdk::data_objects;
+using namespace hipdnn_flatbuffers_sdk::data_objects;
 using namespace hipdnn_data_sdk::utilities;
-using namespace hipdnn_data_sdk::flatbuffer_utilities;
+using namespace hipdnn_flatbuffers_sdk::flatbuffer_utilities;
 using namespace ::testing;
 
 class TestMatmulPlan : public ::testing::Test
 {
 protected:
-    static void initTensorValues(hipdnn_data_sdk::data_objects::TensorAttributesT& tensorAttr,
-                                 DataType dataType,
-                                 const Tensor<float>& tensor,
-                                 int64_t uid)
+    static void
+        initTensorValues(hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT& tensorAttr,
+                         DataType dataType,
+                         const Tensor<float>& tensor,
+                         int64_t uid)
     {
         tensorAttr.data_type = dataType;
         tensorAttr.dims = tensor.dims();

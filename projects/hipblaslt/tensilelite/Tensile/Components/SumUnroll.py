@@ -25,11 +25,12 @@
 from rocisa.code import RegSet, Module
 from rocisa.container import EXEC, vgpr, sgpr, SDWAModifiers, DSModifiers, ContinuousRegister
 from rocisa.enum import SelectBit
-from rocisa.instruction import DSStoreB16, DSStoreB32, DSStoreB64, SBarrier, \
+from rocisa.instruction import SBarrier, \
     SMovB32, SSetMask, VAddF32, VAddU32, VCmpXEqU32, VCvtPkBF8toF32, VCvtPkFP8toF32, \
     VDot2F32BF16, VDot2F32F16, VLShiftLeftB32, VMovB32, VCvtBF16toFP32, VCvtF16toF32
 from rocisa.functions import vectorStaticDivide, vectorStaticRemainder, vectorStaticMultiply
 from ..Component import SumUnroll
+from ..AsmMemoryHelpers import dsStore
 from ..Common import printExit, log2
 
 class SumUnrollMfma(SumUnroll):
@@ -324,14 +325,8 @@ class SumUnrollMfma(SumUnroll):
                 ds  = DSModifiers(offset=offset_val)
                 dst = vgpr(tReg)
                 vgprStr = "ValuSum+%u"%idx
-                if bps==2:
-                    imod.add(DSStoreB16(dstAddr=dst, src=vgpr(vgprStr), ds=ds, comment="local store bias"))
-                elif bps==4:
-                    imod.add(DSStoreB32(dstAddr=dst, src=vgpr(vgprStr), ds=ds, comment="local store bias"))
-                elif bps==8:
-                    imod.add(DSStoreB64(dstAddr=dst, src=vgpr(vgprStr, 2), ds=ds, comment="local store bias"))
-                else:
-                    assert 0
+                numRegs = max(1, bps // 4)
+                imod.add(dsStore(bps, dstAddr=dst, src=vgpr(vgprStr, numRegs), ds=ds, comment="local store bias"))
                 idx += 1
         # tReg
         writer.vgprPool.checkIn(tReg)

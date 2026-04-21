@@ -84,6 +84,64 @@ struct ConvFwdArgs3d
     long long groups;
     double alpha, beta;
 };
+
+// --- Convolution backward data (dgrad) argument structs ---
+// Shared between device kernels and host launch code for ABI compatibility.
+
+struct ConvBwdArgs1d
+{
+    void* dx;
+    const void* w;
+    const void* dy;
+    Strides3 dxStr;
+    Strides3 wStr;
+    Strides3 dyStr;
+    long long N, C, Wi;
+    long long K, Wo;
+    long long Kw;
+    long long strideW;
+    long long dilW;
+    long long padW;
+    long long groups;
+    double alpha, beta;
+};
+
+struct ConvBwdArgs2d
+{
+    void* dx;
+    const void* w;
+    const void* dy;
+    Strides4 dxStr;
+    Strides4 wStr;
+    Strides4 dyStr;
+    long long N, C, Hi, Wi;
+    long long K, Ho, Wo;
+    long long Kh, Kw;
+    long long strideH, strideW;
+    long long dilH, dilW;
+    long long padH, padW;
+    long long groups;
+    double alpha, beta;
+};
+
+struct ConvBwdArgs3d
+{
+    void* dx;
+    const void* w;
+    const void* dy;
+    Strides5 dxStr;
+    Strides5 wStr;
+    Strides5 dyStr;
+    long long N, C, Di, Hi, Wi;
+    long long K, Do, Ho, Wo;
+    long long Kd, Kh, Kw;
+    long long strideD, strideH, strideW;
+    long long dilD, dilH, dilW;
+    long long padD, padH, padW;
+    long long groups;
+    double alpha, beta;
+};
+
 // --- Convolution backward weight (wgrad) argument structs ---
 // Shared between device kernels and host launch code for ABI compatibility.
 
