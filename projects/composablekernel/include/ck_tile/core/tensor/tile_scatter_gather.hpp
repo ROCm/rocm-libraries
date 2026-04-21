@@ -745,9 +745,9 @@ struct tile_scatter_gather
                         static_cast<long_index_t>(physical_page) * page_stride_elements_ +
                         coord_offset + page_offset;
                     const auto* addr = base_ptr + total_offset;
-                    // global_load_lds takes byte address
-                    async_global_load_lds_dwordxn<vector_size>(
-                        smem, reinterpret_cast<const void*>(addr), pre_nop_);
+                    // global_load_lds takes a byte address; addr (const DataType*)
+                    // converts implicitly to const void*, no explicit cast needed.
+                    async_global_load_lds_dwordxn<vector_size>(smem, addr, pre_nop_);
                 }
                 else if constexpr(std::is_same_v<ValidArray, std::nullptr_t>)
                 {
@@ -1117,10 +1117,17 @@ struct tile_scatter_gather
 
     CK_TILE_DEVICE void update_physical_pages(const PageIdxArray& pages)
     {
+        static_assert(kUseGlobalLoad_,
+                      "global-load mode only; physical_pages_ is unused in SRD mode.");
         physical_pages_ = pages;
     }
 
-    CK_TILE_DEVICE void set_page_stride_elements(index_t stride) { page_stride_elements_ = stride; }
+    CK_TILE_DEVICE void set_page_stride_elements(index_t stride)
+    {
+        static_assert(kUseGlobalLoad_,
+                      "global-load mode only; page_stride_elements_ is unused in SRD mode.");
+        page_stride_elements_ = stride;
+    }
 
     CK_TILE_DEVICE void update_valids(const ValidArray& new_valids)
     {
