@@ -38,7 +38,6 @@
 #include "lapack_device_functions.hpp"
 #include "lib_device_helpers.hpp"
 #include "rocsolver_hybrid_storage.hpp"
-#include "laset.hpp"
 #include "print_matrix.hpp"
 
 ROCSOLVER_BEGIN_NAMESPACE
@@ -72,14 +71,18 @@ __device__ void sb2st_larfg(
     // was T, but should be real.
     S norm2 = 0;
     for (I i = xid; i < n; i += DIMX)
+    {
         norm2 += std::norm( x[i] );  // i.e., abs(xi)^2
+    }
     norm2 += shift_left( norm2, 16 );
     norm2 += shift_left( norm2, 8 );
     norm2 += shift_left( norm2, 4 );
     norm2 += shift_left( norm2, 2 );
     norm2 += shift_left( norm2, 1 );
     if (xid == 0)
+    {
         s_work[0] = norm2;
+    }
     __threadfence_block();
     norm2 = s_work[0];
 
@@ -121,7 +124,9 @@ __device__ void sb2st_larfg(
 
         // scal x[1:n]
         for (I i = xid+1; i < n; i += DIMX)
+        {
             x[i] *= s_scale;
+        }
     }
     else
     {
@@ -151,21 +156,27 @@ __device__ void sb2st_larf(
             // w = C^H v
             T value = 0;
             for (I i = xid; i < m; i += DIMX)
+            {
                 value += conj( C[i + j * ldc] ) * v[i];
+            }
             value += shift_left( value, 16 );
             value += shift_left( value, 8 );
             value += shift_left( value, 4 );
             value += shift_left( value, 2 );
             value += shift_left( value, 1 );
             if (xid == 0)
+            {
                 /// What about multiplying conj(tau) here?
                 s_work[yid] = value;
+            }
             __threadfence_block();  // threads are sync'd in one wavefront
 
             // ger
             // Cj = Cj - tau v conj( wj ) = C[:,j] - tau v (v^H Cj)
             for (I i = xid; i < m; i += DIMX)
+            {
                 C[i + j * ldc] -= tau * v[i] * conj( s_work[yid] );
+            }
         }
     }
     else
@@ -177,21 +188,27 @@ __device__ void sb2st_larf(
             // w = C v
             T value = 0;
             for (I j = xid; j < n; j += DIMX)
+            {
                 value += C[i + j * ldc] * v[j];
+            }
             value += shift_left( value, 16 );
             value += shift_left( value, 8 );
             value += shift_left( value, 4 );
             value += shift_left( value, 2 );
             value += shift_left( value, 1 );
             if (xid == 0)
+            {
                 /// What about multiplying tau here?
                 s_work[yid] = value;
+            }
             __threadfence_block();  // threads are sync'd in one wavefront
 
             // ger
             // Cj = Cj - tau wj v^H = Cj - tau (Cj v) v^H
             for (I j = xid; j < n; j += DIMX)
+            {
                 C[i + j * ldc] -= tau * conj( v[j] ) * s_work[yid];
+            }
         }
     }
 }
@@ -219,15 +236,19 @@ __device__ void sb2st_helarf(
         /// Why not do wj = v^H * Cj, i.e., conj( v )?
         T value = 0;
         for (I i = xid; i < n; i += DIMX)
+        {
             value += C[i + j*ldc] * v[i];
+        }
         value += shift_left( value, 16 );
         value += shift_left( value, 8 );
         value += shift_left( value, 4 );
         value += shift_left( value, 2 );
         value += shift_left( value, 1 );
         if (xid == 0)
+        {
             /// What about multiplying tau here?
             s_work[yid] = value;
+        }
     }
     __syncthreads();
 
@@ -238,14 +259,18 @@ __device__ void sb2st_helarf(
     {
         T value = 0;
         for (I i = xid; i < n; i += DIMX)
+        {
             value += conj( s_work[xid] ) * v[ xid ];
+        }
         value += shift_left( value, 16 );
         value += shift_left( value, 8 );
         value += shift_left( value, 4 );
         value += shift_left( value, 2 );
         value += shift_left( value, 1 );
         if (xid == 0)
+        {
             s_alpha = 0.5 * tau * value;
+        }
     }
     __syncthreads();
 
@@ -268,109 +293,6 @@ __device__ void sb2st_helarf(
                 + conj( tau ) * s_work[yid] * conj( v[i] );
         }
     }
-}
-
-//------------------------------------------------------------------------------
-// Returns block index within V matrix for V{i,j} block.
-// The V blocks are conceptually stored in a lower triangular matrix.
-// nt is number of block columns in the conceptual triangular V.
-// i and j are block row and col in the conceptual triangular V.
-// Sweep j is in column j, with task 0 being in the top, diagonal block,
-// then task 1 in the 2nd block, and so on.
-// In unmtr_hb2st, these are applied in sets of independent V blocks, indexed
-// by k. Each set k is on a diagonal with slope -2.
-//
-//      |'.         independent sets, k
-//      | 0 '.
-//      |'.  |'.
-//      |-1'.| 1 '.
-//      |'.  |'.   |'.
-//      |-2'.| 0 '.| 2 '.
-//      |'.  |'.   |'.   |'.
-//      |-3'.|-1 '.| 1 '.| 3 '.
-//      |'.  |'.   |'.   |'.   |'.
-//      |-4'.|-2 '.| 0 '.| 2 '.| 4 '.
-//      '''''''''''''''''''''''''''''
-//
-// To facilitate batching, the V blocks in each set k are stored contiguously
-// in V, with block index r:
-//
-//      |'.        storage order, r
-//      | 6 '.
-//      |'.  |'.
-//      | 4'.| 9 '.
-//      |'.  |'.   |'.
-//      | 2'.| 7 '.|11 '.
-//      |'.  |'.   |'.   |'.
-//      | 1'.| 5 '.|10 '.|13 '.
-//      |'.  |'.   |'.   |'.   |'.
-//      | 0'.| 3 '.| 8 '.|12 '.|14 '.
-//      '''''''''''''''''''''''''''''
-//
-// That is, V is stored as a (2*kd)-by-(nt*kd) array like:
-//
-//      k =  -4   -3   -2   -2   -1   -1    0    0    0    1    1    2    2    3    4
-//      j =   0    0    0    1    0    1    0    1    2    1    2    2    3    3    4
-//      i =   4    3    2    4    1    3    0    2    4    1    3    2    4    3    4
-//          |'.  |'.  |'.  |'.  |'.  |'.  |'.  |'.  |'.  |'.  |'.  |'.  |'.  |'.  |'.  |
-//      r = | 0'.| 1'.| 2'.| 3'.| 4'.| 5'.| 6'.| 7'.| 8'.| 9'.|10'.|11'.|12'.|13'.|14'.|
-//          |''''|'.  |'.  |''''|'.  |'.  |'.  |'.  |''''|'.  |'.  |'.  |''''|'.  |''''|
-//          |    |  '.|  '.|    |  '.|  '.|  '.|  '.|    |  '.|  '.|  '.|    |  '.|    |
-//
-// with explicit 1's on the diagonals and 0's outside the trapezoids.
-//
-template <typename I>
-__device__ rocblas_int get_v_block_index(
-    I nt, I i, I j )
-{
-    I r;
-    // k in unmtr goes from -(nt-1) to (nt-1), inclusive. k2 = k + nt - 1.
-    I k2 = 2*j - i + nt - 1;
-    if (k2 < nt)
-    {
-        // Lower-left portion of conceptual V, where k <= 0.
-        // The number of V blocks in set k2 follows the pattern,
-        // for example with nt=8, k2=0 to 2*(nt-1):
-        //   1, 1, 2, 2, 3, 3, 4, 4, 4, 3, 3, 2, 2, 1, 1
-        // For k2 < nt, sum the first k2 terms.
-        // Recall sum( 1, 2, ..., L ) = L*(L+1)/2; double that.
-        I L = k2 // 2;
-        r = (k2 % 2 == 0 ? L*(L+1) : (L+1)*(L+1));
-        r += j;
-    }
-    else // k2 >= nt
-    {
-        // Upper-right portion of conceptual V, where k > 0.
-        // Take total number of V blocks and subtract
-        // last 2*nt - 1 - k2 terms of ( ..., 2, 2, 1, 1 ).
-        I total = nt*(nt+1)//2
-        I L = nt - 1 - k2//2
-        I sub = L*(L+1) if (k2 % 2 != 0) else (L+1)*(L+1)
-        r = total - sub + i - j;
-    }
-    return r;
-}
-
-//------------------------------------------------------------------------------
-// Returns (vi, vj) row and col index within V array for the current
-// Householder vector, determined by sweep and task.
-//
-template <typename I>
-__device__ void get_v_index(
-    I n,
-    I kd,
-    I sweep,
-    I task,
-    I& vi,
-    I& vj )
-{
-    // todo: compute nt once & pass?
-    I nt = ceildiv( n, kd );    // number of block-cols in conceptual V.
-    I j = sweep / kd;           // block-col j
-    I i = j + task;             // block-row i
-    I r = get_v_block_index( nt, i, j );
-    vi = sweep % kd;            // row within V array
-    vj = vi + r*kd;             // col within V array
 }
 
 //------------------------------------------------------------------------------
@@ -420,7 +342,9 @@ __device__ void sb2st_hb2st_task(
         {
             // Copy column sweep to shared memory, A[j+1:j+1+nc, s].
             for (rocblas_int i = xid; i < nc; i += DIMX)
+            {
                 s_housev[i] = Aband[(idiag + 1 + i) + sweep*ldab];
+            }
 
             // Generate Householder reflector.
             sb2st_larfg( xid, nc, s_housev, s_tau, (S*) s_work );
@@ -443,7 +367,9 @@ __device__ void sb2st_hb2st_task(
             {
                 V[vi + i + vj*ldv] = s_housev[i];
                 if (xid > 0)
+                {
                     Aband[idiag + 1 + i + sweep*ldab] = 0;  // todo: only for clarity
+                }
             }
         }
         __syncthreads();
@@ -476,13 +402,17 @@ __device__ void sb2st_hb2st_task(
 
         if (yid == 0)
         {
-            // Copy previous Householder vector, vp, to shared memory.
+            // Copy previous task's Householder vector, vp, to shared memory.
             rocblas_int vpi, vpj;
-            get_v_index( n, kd, sweep, task, vpi, vpj );
+            get_v_index( n, kd, sweep, task-1, vpi, vpj );
             for (rocblas_int i = xid; i < kd; i += DIMX)
+            {
                 s_housev[i] = V[vpi + i + vpj*ldv];
+            }
             if (xid == 0)
+            {
                 s_tau = V[ldv - 1 + vpj*ldv];
+            }
         }
         __syncthreads();
 
@@ -501,7 +431,9 @@ __device__ void sb2st_hb2st_task(
             {
                 // Copy 1st column of bulge to shared memory.
                 for (rocblas_int i = xid; i < nc; i += DIMX)
+                {
                     s_housev[i] = Aband[idiag + kd + i + jp*ldab];
+                }
 
                 // Generate current Householder reflector, vc.
                 sb2st_larfg( xid, nc, s_housev, s_tau, (S*) s_work );
@@ -598,16 +530,13 @@ ROCSOLVER_KERNEL void sb2st_hb2st_round_kernel(
     const rocblas_int sid = blockIdx.y;
     const rocblas_int bid = blockIdx.z;
 
-    /// hmmm... SB2ST_HB2ST_MAX_THDS isn't defined anywhere.
-    /// I guess it should be == 1.
-    assert( blockDim.x == SB2ST_HB2ST_MAX_THDS );
-
     // select batch instance
     T* Aband = load_ptr_batch<T>( AAband, bid, shiftA, strideA );
     T* V = load_ptr_batch<T>( VV, bid, 0, strideV );
     S* E = load_ptr_batch<S>( EE, bid, 0, strideE );
 
     // shared memory setup
+    // todo: should s_mem be double, float, byte, T?
     extern __shared__ double s_mem[];
     T* s_housev = reinterpret_cast<T*>(s_mem);
     T* s_work   = reinterpret_cast<T*>(s_housev + kd);
@@ -662,6 +591,7 @@ void rocsolver_sb2st_hb2st_getMemorySize(
 }
 
 //------------------------------------------------------------------------------
+// todo: why not have these in same order as rocsolver_sb2st_hb2st_template args?
 template <typename T, typename S>
 rocblas_status rocsolver_sb2st_hb2st_argCheck(
     rocblas_handle handle,
@@ -692,9 +622,12 @@ rocblas_status rocsolver_sb2st_hb2st_argCheck(
     if (rocblas_is_device_memory_size_query( handle ))
         return rocblas_status_continue;
 
+    // skip pointer check if quick return
+    if (n == 0 || batch_count == 0)
+        return rocblas_status_continue;
+
     // 3. invalid pointers
-    // why not: if (n > 0 && (! Aband || ! D || ! E || ! V))
-    if ((n > 0 && ! Aband) || (n > 0 && ! D) || (n > 0 && ! E) || (n > 0 && ! V))
+    if (! Aband || ! D || ! E || ! V)
         return rocblas_status_invalid_pointer;
 
     return rocblas_status_continue;
