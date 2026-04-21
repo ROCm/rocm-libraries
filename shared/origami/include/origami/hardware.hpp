@@ -558,6 +558,27 @@ class hardware_t {
   static hardware_t get_hardware_for_device(int deviceId);
 
   /**
+   * @brief Create hardware_t instance for a specific HIP device using
+   *        caller-provided properties.
+   *
+   * Same as @ref get_hardware_for_device(int) but uses the supplied
+   * `hipDeviceProp_t` instead of re-querying via `hipGetDeviceProperties`.
+   * Callers that have already adjusted fields on `prop` (for example,
+   * overriding `multiProcessorCount` with
+   * `hipDeviceAttributePhysicalMultiProcessorCount` on multi-XCC
+   * architectures) should use this overload so those adjustments are
+   * preserved. The runtime XCC query
+   * (`hipDeviceAttributeNumberOfXccs` on HIP 7+) is still performed
+   * against `deviceId`.
+   *
+   * @param deviceId HIP device ID used to query the XCC count
+   * @param prop     Caller-owned device properties to model from
+   * @return hardware_t Configured hardware instance for the device
+   */
+  static hardware_t get_hardware_for_device(int deviceId,
+                                            hipDeviceProp_t const& prop);
+
+  /**
    * @brief Create hardware_t instance for a specific architecture with specified parameters.
    *
    * Creates a hardware instance using the specified architecture and hardware parameters.

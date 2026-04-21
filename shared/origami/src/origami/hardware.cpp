@@ -96,11 +96,8 @@ hardware_t hardware_t::get_hardware_for_properties(hipDeviceProp_t properties,
                     properties.memoryClockRate / 1.e6);
 }
 
-hardware_t hardware_t::get_hardware_for_device(int deviceId) {
-  hipDeviceProp_t prop;
-  hipError_t e = hipGetDeviceProperties(&prop, deviceId);
-  if (e) { throw std::runtime_error(hipGetErrorString(e)); }
-
+hardware_t hardware_t::get_hardware_for_device(int deviceId,
+                                               hipDeviceProp_t const& prop) {
   size_t num_xcds = 0;
 #if HIP_VERSION_MAJOR >= 7
   int queried_xccs = 0;
@@ -111,6 +108,14 @@ hardware_t hardware_t::get_hardware_for_device(int deviceId) {
 #endif
 
   return get_hardware_for_properties(prop, num_xcds);
+}
+
+hardware_t hardware_t::get_hardware_for_device(int deviceId) {
+  hipDeviceProp_t prop;
+  hipError_t e = hipGetDeviceProperties(&prop, deviceId);
+  if (e) { throw std::runtime_error(hipGetErrorString(e)); }
+
+  return get_hardware_for_device(deviceId, prop);
 }
 
 hardware_t hardware_t::get_hardware_for_arch(architecture_t arch,

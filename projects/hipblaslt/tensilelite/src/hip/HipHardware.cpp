@@ -51,8 +51,14 @@ namespace TensileLite
                 // entry point so selection uses the runtime-queried XCC count
                 // (hipDeviceAttributeNumberOfXccs on HIP 7+) instead of the hardcoded
                 // per-architecture default in get_default_num_xcds().
+                //
+                // Pass the caller-provided `prop` so any adjustments made upstream
+                // (e.g. overriding multiProcessorCount with
+                // hipDeviceAttributePhysicalMultiProcessorCount on multi-XCC
+                // architectures) are preserved. The int-only overload re-queries
+                // `hipGetDeviceProperties` and would discard those adjustments.
                 analyticalHardware = std::make_shared<origami::hardware_t>(
-                    origami::hardware_t::get_hardware_for_device(deviceId));
+                    origami::hardware_t::get_hardware_for_device(deviceId, prop));
             }
         }
 
