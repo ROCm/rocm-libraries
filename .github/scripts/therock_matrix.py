@@ -62,7 +62,7 @@ project_map = {
     "hip-kernel-provider": {
         "cmake_options": [
             "-DTHEROCK_ENABLE_HIPKERNELPROVIDER=ON",
-            "-DHIP_KERNEL_PROVIDER_ENABLE=ON"
+            "-DHIP_KERNEL_PROVIDER_ENABLE=ON",
         ],
         "projects_to_test": ["hipkernelprovider"],
     },
@@ -103,7 +103,7 @@ additional_options = {
             "hipdnn-samples",
             "miopenprovider",
             "hipblasltprovider",
-            "hipkernelprovider"
+            "hipkernelprovider",
         ],
         "project_to_add": "miopen",
     },
