@@ -67,8 +67,8 @@ struct Config
 
     Direction direction = Direction::Fprop;
 
-    // Swizzle pattern - currently no explicit swizzle.
-    static constexpr SwizzleType swizzle_type = SwizzleType::None;
+    // Swizzle pattern - by default no explicit swizzle.
+    SwizzleType swizzle_type = SwizzleType::None;
 
     EpilogueType epilogue = EpilogueType::RegistersToGlobalMemory;
 
@@ -88,15 +88,12 @@ struct Config
     constexpr int block_size() const { return num_waves() * WAVE_SIZE; }
 
     std::string GetName() const
-    { 
+    {
+        std::string swz = (swizzle_type == SwizzleType::XOR) ? "swizzleXOR" : "noswizzle";
         if (epilogue == EpilogueType::RegistersToGlobalMemory)
-        {
-            return "v3_grouped_4c_noswizzle_skip_lds_epilogue";
-        }
-        else 
-        {
-            return "v3_grouped_4c_noswizzle_lds_epilogue";
-        }
+            return "v3_grouped_4c_" + swz + "_skip_lds_epilogue";
+        else
+            return "v3_grouped_4c_" + swz + "_lds_epilogue";
     }
 };
 
@@ -109,6 +106,18 @@ constexpr Config configs[] = {
     {.waves_c64 = 2, .waves_q4 = 8, .direction = Direction::Dgrad,
      .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},
     {.waves_c64 = 2, .waves_q4 = 8,
+     .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},
+    // XOR swizzle + direct DRAM epilogue.
+    {.waves_c64 = 2, .waves_q4 = 8, .direction = Direction::Dgrad,
+     .swizzle_type = SwizzleType::XOR},
+    {.waves_c64 = 2, .waves_q4 = 8,
+     .swizzle_type = SwizzleType::XOR},
+    // XOR swizzle + LDS-staged epilogue.
+    {.waves_c64 = 2, .waves_q4 = 8, .direction = Direction::Dgrad,
+     .swizzle_type = SwizzleType::XOR,
+     .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},
+    {.waves_c64 = 2, .waves_q4 = 8,
+     .swizzle_type = SwizzleType::XOR,
      .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},
 };
 
@@ -189,14 +198,29 @@ struct TileConstants
     // LDS descriptor (uint4 units, for MFMA read path).
     //
     // Logical layout: [BLOCK_W, BLOCK_C8] row-major (x = row, c8 = column)
-    // Physical layout: plain row-major, offset = x * BLOCK_C8 + c8.
-    // No swizzle — simplified layout.
+    // Physical layout depends on swizzle_type:
+    //   None: plain row-major, offset = x * BLOCK_C8 + c8.
+    //   XOR:  xor_t transform, offset = x * BLOCK_C8 + (c8 ^ (x % BLOCK_C8)).
     // -----------------------------------------------------------------------
     static constexpr auto MakeInputLdsBlockDescriptor()
     {
-        return ck_tile::make_naive_tensor_descriptor(
+        constexpr auto desc_naive = ck_tile::make_naive_tensor_descriptor(
             ck_tile::make_tuple(ck_tile::number<BLOCK_W>{}, ck_tile::number<BLOCK_C8>{}),
             ck_tile::make_tuple(ck_tile::number<BLOCK_C8>{}, ck_tile::number<1>{}));
+
+        if constexpr(cfg.swizzle_type == SwizzleType::XOR)
+        {
+            return ck_tile::transform_tensor_descriptor(
+                desc_naive,
+                ck_tile::make_tuple(ck_tile::make_xor_transform(
+                    ck_tile::make_tuple(ck_tile::number<BLOCK_W>{}, ck_tile::number<BLOCK_C8>{}))),
+                ck_tile::make_tuple(ck_tile::sequence<0, 1>{}),
+                ck_tile::make_tuple(ck_tile::sequence<0, 1>{}));
+        }
+        else
+        {
+            return desc_naive;
+        }
     }
 
     // Compute uint2 offset from logical (x, c4) using the uint4 descriptor.
@@ -211,10 +235,13 @@ struct TileConstants
         return static_cast<int>(coord.get_offset()) * 2 + c4_lo;
     }
 
-    // Compute uint4 offset from logical (x, c8) using the descriptor (LDS epilogue path).
+    // Compute uint4 offset from logical (x, c8) using a plain row-major descriptor
+    // (used by the LDS epilogue path for output staging — no swizzle applied).
     static CK_TILE_DEVICE int lds_offset_uint4(int x, int c8)
     {
-        constexpr auto desc = MakeInputLdsBlockDescriptor();
+        constexpr auto desc = ck_tile::make_naive_tensor_descriptor(
+            ck_tile::make_tuple(ck_tile::number<cfg.block_q()>{}, ck_tile::number<BLOCK_C8>{}),
+            ck_tile::make_tuple(ck_tile::number<BLOCK_C8>{}, ck_tile::number<1>{}));
         auto coord = ck_tile::make_tensor_coordinate(desc, ck_tile::make_tuple(x, c8));
         return static_cast<int>(coord.get_offset());
     }
@@ -290,7 +317,12 @@ struct TileConstants
     // Row dimension allows advancing rows via move_tile_window({1, 0, 0, 0}).
     //
     // Base pointer: in + batch_offset + block_k  (shifted to tile's channel origin).
-    // No swizzle — plain row-major layout.
+    //
+    // When swizzle_type == XOR, an xor_t transform is applied on dims (1, 2)
+    // so that the DRAM read at tile coordinate (x_local, c8_local) fetches
+    // channel c8_local ^ (x_local % BLOCK_C8) from global memory.  The LDS
+    // store remains linear, so the data arrives in LDS in XOR-swizzled order
+    // matching the MFMA read path (MakeInputLdsBlockDescriptor with XOR).
     static CK_TILE_DEVICE auto MakeInputDramDescriptor(int hi, int wi, int C_total, int px)
     {
         constexpr int right_pad_w = cfg.kw - 1;
@@ -314,7 +346,27 @@ struct TileConstants
             ck_tile::make_tuple(ck_tile::sequence<0>{}, ck_tile::sequence<1>{},
                                 ck_tile::sequence<2>{}, ck_tile::sequence<3>{}));
 
-        return desc_padded;
+        if constexpr(cfg.swizzle_type == SwizzleType::XOR)
+        {
+            // Step 3: XOR transform on (spatial, channel) dims.
+            // Maps upper (x, c8) to lower (x, c8 ^ (x % BLOCK_C8)).
+            // This permutes the channel read so data lands in LDS in XOR order.
+            return ck_tile::transform_tensor_descriptor(
+                desc_padded,
+                ck_tile::make_tuple(
+                    ck_tile::make_pass_through_transform(hi),
+                    ck_tile::make_xor_transform(ck_tile::make_tuple(
+                        wi + px + right_pad_w, ck_tile::number<BLOCK_C8>{})),
+                    ck_tile::make_pass_through_transform(ck_tile::number<8>{})),
+                ck_tile::make_tuple(ck_tile::sequence<0>{}, ck_tile::sequence<1, 2>{},
+                                    ck_tile::sequence<3>{}),
+                ck_tile::make_tuple(ck_tile::sequence<0>{}, ck_tile::sequence<1, 2>{},
+                                    ck_tile::sequence<3>{}));
+        }
+        else
+        {
+            return desc_padded;
+        }
     }
 
     // LDS store descriptor for async_load_tile: [1, TOTAL_SPATIAL, BLOCK_C8, 8]

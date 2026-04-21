@@ -299,3 +299,51 @@ TEST_F(DirectConvGrouped4cFp16TileConvTestV3, Dgrad_V3_LdsEpilogue_Groups32_NoPa
 {
     ASSERT_TRUE((RunDgrad<2>(2, 64, 64, 32, 4, 4, 3, 3, 0, 0)));
 }
+
+// =============================================================================
+// V3 XOR swizzle + direct DRAM epilogue — Fprop config 5, Dgrad config 4
+// =============================================================================
+
+TEST_F(DirectConvGrouped4cFp16TileConvTestV3, Fprop_V3_XOR_Groups32_Pad1)
+{
+    ASSERT_TRUE((RunFprop<5>(1, 32, 32, 32, 4, 4, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvGrouped4cFp16TileConvTestV3, Fprop_V3_XOR_Groups32_NoPad)
+{
+    ASSERT_TRUE((RunFprop<5>(2, 64, 64, 32, 4, 4, 3, 3, 0, 0)));
+}
+
+TEST_F(DirectConvGrouped4cFp16TileConvTestV3, Dgrad_V3_XOR_Groups32_Pad1)
+{
+    ASSERT_TRUE((RunDgrad<4>(1, 32, 32, 32, 4, 4, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvGrouped4cFp16TileConvTestV3, Dgrad_V3_XOR_Groups32_NoPad)
+{
+    ASSERT_TRUE((RunDgrad<4>(2, 64, 64, 32, 4, 4, 3, 3, 0, 0)));
+}
+
+// =============================================================================
+// V3 XOR swizzle + LDS-staged epilogue — Fprop config 7, Dgrad config 6
+// =============================================================================
+
+TEST_F(DirectConvGrouped4cFp16TileConvTestV3, Fprop_V3_XOR_LdsEpilogue_Groups32_Pad1)
+{
+    ASSERT_TRUE((RunFprop<7>(1, 32, 32, 32, 4, 4, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvGrouped4cFp16TileConvTestV3, Fprop_V3_XOR_LdsEpilogue_Groups32_NoPad)
+{
+    ASSERT_TRUE((RunFprop<7>(2, 64, 64, 32, 4, 4, 3, 3, 0, 0)));
+}
+
+TEST_F(DirectConvGrouped4cFp16TileConvTestV3, Dgrad_V3_XOR_LdsEpilogue_Groups32_Pad1)
+{
+    ASSERT_TRUE((RunDgrad<6>(1, 32, 32, 32, 4, 4, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvGrouped4cFp16TileConvTestV3, Dgrad_V3_XOR_LdsEpilogue_Groups32_NoPad)
+{
+    ASSERT_TRUE((RunDgrad<6>(2, 64, 64, 32, 4, 4, 3, 3, 0, 0)));
+}
