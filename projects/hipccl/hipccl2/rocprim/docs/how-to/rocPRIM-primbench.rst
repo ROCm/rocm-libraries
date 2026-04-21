@@ -124,4 +124,4 @@ The output will be written to the terminal and to ``results.json``.
 .. _primbench.hpp: https://github.com/ROCm/rocm-libraries/blob/develop/shared/primbench/primbench.hpp
 
 .. |copy_benchmark.cpp| replace:: ``copy_benchmark.cpp``
-.. _copy_benchmark.cpp: https://github.com/ROCm/rocm-libraries/blob/develop/shared/primbench/examples/copy_benchmark.cpp
+.. _copy_benchmark.cpp: https://github.com/ROCm/rocm-libraries/blob/develop/shared/primbench/examples/hip/copy_benchmark.cpp
