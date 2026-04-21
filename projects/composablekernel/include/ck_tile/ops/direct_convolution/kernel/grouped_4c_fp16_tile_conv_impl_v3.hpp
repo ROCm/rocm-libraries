@@ -410,7 +410,6 @@ struct TileConstants
     // so that LDS offset = X1 * BLOCK_C8 * 8 + X2 * 8 = (warp*4 + lane/16)*128 + (lane%16)*8
     //                    = warp*512 + lane*8 = M0/elem_size + lane*vec_size.
     static constexpr int NUM_WAVES = cfg.num_waves();
-
     static constexpr auto MakeInputDramDistribution()
     {
         // RH-major indices: 0=R(empty), 1=X0(row), 2=X1(spatial), 3=X2(channel), 4=X3(sub)
@@ -904,7 +903,6 @@ struct OutputWriter
     }
 
     // Convert fp32x4 accumulator to fp16x4 and write directly to global memory.
-    // No LDS staging, no __syncthreads needed.
     __device__ void flush(fp32x4_t acc_val, int p_out)
     {
         // 1. Convert fp32→fp16 and pack into distributed tensor.
@@ -1101,181 +1099,181 @@ __device__ void conv2d_grouped_4c_fp16_cdna4_nhwc_impl(const _Float16* __restric
     ThreadMapping<cfg> tm;
     InputLoader<cfg> il(bc, input_lds, in, hi, wi, px);
 
-    // Compute body parameterized on the output writer.
+    // Compute body parameterized on the output writer (ow).
     auto run_compute = [&](auto& ow)
     {
-    fp16x4_t weights_reg[cfg.kh * cfg.kw];
-    WeightLoader<cfg>::load_to_lds(bc, output_lds, wei);
-    // Wait for weight loads to complete before reading from LDS.
-    wait_vmcnt<0>();
-    __syncthreads();
-
-    // We can use the output LDS storage for loading the weights as we don't yet compute any output.
-    // The output LDS is guaranteed to have sufficient space.
-    WeightLoader<cfg>::read_from_lds(weights_reg, tm, output_lds_fp16);
-    __syncthreads();
-
-    // Prefetch first input row (row 0) into LDS buffer 0.
-    il.prefetch_tile(0);
-    {
+        fp16x4_t weights_reg[cfg.kh * cfg.kw];
+        WeightLoader<cfg>::load_to_lds(bc, output_lds, wei);
+        // Wait for weight loads to complete before reading from LDS.
         wait_vmcnt<0>();
         __syncthreads();
-    }
 
-    // --- Pre-compute per-thread LDS offsets (row-major, uint2 units) ---
-    int input_lds_offsets[cfg.kw];
-    static_for<cfg.kw>(
-        [&]<int S>()
+        // We can use the output LDS storage for loading the weights as we don't yet compute any output.
+        // The output LDS is guaranteed to have sufficient space.
+        WeightLoader<cfg>::read_from_lds(weights_reg, tm, output_lds_fp16);
+        __syncthreads();
+
+        // Prefetch first input row (row 0) into LDS buffer 0.
+        il.prefetch_tile(0);
         {
-            input_lds_offsets[S] = TC::lds_offset_uint2(
-                tm.thread_q + S,
-                tm.wave_c64 * 16 + tm.lane_batch * TC::GROUP_SIZE_4 + tm.lane_c4);
-        });
+            wait_vmcnt<0>();
+            __syncthreads();
+        }
 
-    // --- Circular accumulator buffer ---
-    constexpr auto Zero = fp32x4_t{0.f, 0.f, 0.f, 0.f};
-    fp32x4_t acc[cfg.kh];
-    for(int i = 0; i < cfg.kh; i++)
-        acc[i] = Zero;
-
-    int tic = 1;
-    int toc = 0;
-
-    // --- Main loop: iterate over input rows ---
-    for(int y_base = 0; y_base + cfg.kh <= hi; y_base += cfg.kh)
-    {
-        static_for<cfg.kh>(
-            [&]<int Y_LOCAL>()
+        // --- Pre-compute per-thread LDS offsets (row-major, uint2 units) ---
+        int input_lds_offsets[cfg.kw];
+        static_for<cfg.kw>(
+            [&]<int S>()
             {
-                wait_vmcnt<0>();
-                __syncthreads();
-
-                int y = y_base + Y_LOCAL;
-                if((y + 1) < hi)
-                {
-                    il.fetch_tile(tic);
-                }
-
-                // Accumulate MFMA products over filter width.
-                static_for<cfg.kw>(
-                    [&]<int S>()
-                    {
-                        auto input_reg = input_lds_fp16.template get<ck_tile::fp16x4_t>(
-                            0,
-                            (toc * TC::INPUT_LDS_BUFFER_SIZE_PADDED_C4 + input_lds_offsets[S]) * 4,
-                            true);
-
-                        static_for<cfg.kh>(
-                            [&]<int R>()
-                            {
-                                constexpr int p_idx = (Y_LOCAL - R + cfg.kh) % cfg.kh;
-                                if constexpr(cfg.direction == Direction::Dgrad)
-                                    acc[p_idx] = __builtin_amdgcn_mfma_f32_4x4x4f16(
-                                        weights_reg[(cfg.kh - 1 - R) * cfg.kw + (cfg.kw - 1 - S)],
-                                        input_reg,
-                                        acc[p_idx],
-                                        0,
-                                        0,
-                                        0);
-                                else
-                                    acc[p_idx] = __builtin_amdgcn_mfma_f32_4x4x4f16(
-                                        weights_reg[R * cfg.kw + S],
-                                        input_reg,
-                                        acc[p_idx],
-                                        0,
-                                        0,
-                                        0);
-                            });
-                    });
-
-                tic ^= 1;
-                toc ^= 1;
-
-                // Flush completed output row.
-                constexpr int P_FLUSH = (Y_LOCAL + 1) % cfg.kh;
-                int p_out             = y + py - (cfg.kh - 1);
-                if(p_out >= 0 && p_out < ho)
-                    ow.flush(acc[P_FLUSH], p_out);
-                acc[P_FLUSH] = Zero;
+                input_lds_offsets[S] = TC::lds_offset_uint2(
+                    tm.thread_q + S,
+                    tm.wave_c64 * 16 + tm.lane_batch * TC::GROUP_SIZE_4 + tm.lane_c4);
             });
-    }
 
-    // --- Remainder loop: hi % kh leftover rows ---
-    {
-        int y_rem_base = (hi / cfg.kh) * cfg.kh;
-        static_for<cfg.kh>(
-            [&]<int Y_LOCAL>()
-            {
-                if(Y_LOCAL >= hi % cfg.kh)
-                    return;
-                int y = y_rem_base + Y_LOCAL;
+        // --- Circular accumulator buffer ---
+        constexpr auto Zero = fp32x4_t{0.f, 0.f, 0.f, 0.f};
+        fp32x4_t acc[cfg.kh];
+        for(int i = 0; i < cfg.kh; i++)
+            acc[i] = Zero;
 
-                wait_vmcnt<0>();
-                __syncthreads();
+        int tic = 1;
+        int toc = 0;
 
-                if((y + 1) < hi)
+        // --- Main loop: iterate over input rows ---
+        for(int y_base = 0; y_base + cfg.kh <= hi; y_base += cfg.kh)
+        {
+            static_for<cfg.kh>(
+                [&]<int Y_LOCAL>()
                 {
-                    il.fetch_tile(tic);
-                }
+                    wait_vmcnt<0>();
+                    __syncthreads();
 
-                static_for<cfg.kw>(
-                    [&]<int S>()
+                    int y = y_base + Y_LOCAL;
+                    if((y + 1) < hi)
                     {
-                        fp16x4_t input_reg = input_lds_fp16.template get<ck_tile::fp16x4_t>(
-                            0,
-                            (toc * TC::INPUT_LDS_BUFFER_SIZE_PADDED_C4 + input_lds_offsets[S]) * 4,
-                            true);
+                        il.fetch_tile(tic);
+                    }
 
-                        static_for<cfg.kh>(
-                            [&]<int R>()
+                    // Accumulate MFMA products over filter width.
+                    static_for<cfg.kw>(
+                        [&]<int S>()
+                        {
+                            auto input_reg = input_lds_fp16.template get<ck_tile::fp16x4_t>(
+                                0,
+                                (toc * TC::INPUT_LDS_BUFFER_SIZE_PADDED_C4 + input_lds_offsets[S]) * 4,
+                                true);
+
+                            static_for<cfg.kh>(
+                                [&]<int R>()
+                                {
+                                    constexpr int p_idx = (Y_LOCAL - R + cfg.kh) % cfg.kh;
+                                    if constexpr(cfg.direction == Direction::Dgrad)
+                                        acc[p_idx] = __builtin_amdgcn_mfma_f32_4x4x4f16(
+                                            weights_reg[(cfg.kh - 1 - R) * cfg.kw + (cfg.kw - 1 - S)],
+                                            input_reg,
+                                            acc[p_idx],
+                                            0,
+                                            0,
+                                            0);
+                                    else
+                                        acc[p_idx] = __builtin_amdgcn_mfma_f32_4x4x4f16(
+                                            weights_reg[R * cfg.kw + S],
+                                            input_reg,
+                                            acc[p_idx],
+                                            0,
+                                            0,
+                                            0);
+                                });
+                        });
+
+                    tic ^= 1;
+                    toc ^= 1;
+
+                    // Flush completed output row.
+                    constexpr int P_FLUSH = (Y_LOCAL + 1) % cfg.kh;
+                    int p_out             = y + py - (cfg.kh - 1);
+                    if(p_out >= 0 && p_out < ho)
+                        ow.flush(acc[P_FLUSH], p_out);
+                    acc[P_FLUSH] = Zero;
+                });
+        } // end of the main loop
+
+        // --- Remainder loop: hi % kh leftover rows ---
+        {
+            int y_rem_base = (hi / cfg.kh) * cfg.kh;
+            static_for<cfg.kh>(
+                [&]<int Y_LOCAL>()
+                {
+                    if(Y_LOCAL >= hi % cfg.kh)
+                        return;
+                    int y = y_rem_base + Y_LOCAL;
+
+                    wait_vmcnt<0>();
+                    __syncthreads();
+
+                    if((y + 1) < hi)
+                    {
+                        il.fetch_tile(tic);
+                    }
+
+                    static_for<cfg.kw>(
+                        [&]<int S>()
+                        {
+                            fp16x4_t input_reg = input_lds_fp16.template get<ck_tile::fp16x4_t>(
+                                0,
+                                (toc * TC::INPUT_LDS_BUFFER_SIZE_PADDED_C4 + input_lds_offsets[S]) * 4,
+                                true);
+
+                            static_for<cfg.kh>(
+                                [&]<int R>()
+                                {
+                                    constexpr int p_idx = (Y_LOCAL - R + cfg.kh) % cfg.kh;
+                                    if constexpr(cfg.direction == Direction::Dgrad)
+                                        acc[p_idx] = __builtin_amdgcn_mfma_f32_4x4x4f16(
+                                            weights_reg[(cfg.kh - 1 - R) * cfg.kw + (cfg.kw - 1 - S)],
+                                            input_reg,
+                                            acc[p_idx],
+                                            0,
+                                            0,
+                                            0);
+                                    else
+                                        acc[p_idx] = __builtin_amdgcn_mfma_f32_4x4x4f16(
+                                            weights_reg[R * cfg.kw + S],
+                                            input_reg,
+                                            acc[p_idx],
+                                            0,
+                                            0,
+                                            0);
+                                });
+                        });
+
+                    tic ^= 1;
+                    toc ^= 1;
+
+                    constexpr int P_FLUSH = (Y_LOCAL + 1) % cfg.kh;
+                    int p_out             = y + py - (cfg.kh - 1);
+                    if(p_out >= 0 && p_out < ho)
+                        ow.flush(acc[P_FLUSH], p_out);
+                    acc[P_FLUSH] = Zero;
+                });
+        }
+
+        // --- Tail flush: output rows not flushed by the main/remainder loops ---
+        for(int p_out = hi - cfg.kh + 1 + py; p_out < ho; p_out++)
+        {
+            int p_idx = (p_out - py + cfg.kh) % cfg.kh;
+            fp32x4_t slot;
+            dispatch<cfg.kh>(p_idx,
+                            [&]<int P>()
                             {
-                                constexpr int p_idx = (Y_LOCAL - R + cfg.kh) % cfg.kh;
-                                if constexpr(cfg.direction == Direction::Dgrad)
-                                    acc[p_idx] = __builtin_amdgcn_mfma_f32_4x4x4f16(
-                                        weights_reg[(cfg.kh - 1 - R) * cfg.kw + (cfg.kw - 1 - S)],
-                                        input_reg,
-                                        acc[p_idx],
-                                        0,
-                                        0,
-                                        0);
-                                else
-                                    acc[p_idx] = __builtin_amdgcn_mfma_f32_4x4x4f16(
-                                        weights_reg[R * cfg.kw + S],
-                                        input_reg,
-                                        acc[p_idx],
-                                        0,
-                                        0,
-                                        0);
+                                slot   = acc[P];
+                                acc[P] = Zero;
                             });
-                    });
-
-                tic ^= 1;
-                toc ^= 1;
-
-                constexpr int P_FLUSH = (Y_LOCAL + 1) % cfg.kh;
-                int p_out             = y + py - (cfg.kh - 1);
-                if(p_out >= 0 && p_out < ho)
-                    ow.flush(acc[P_FLUSH], p_out);
-                acc[P_FLUSH] = Zero;
-            });
-    }
-
-    // --- Tail flush: output rows not flushed by the main/remainder loops ---
-    for(int p_out = hi - cfg.kh + 1 + py; p_out < ho; p_out++)
-    {
-        int p_idx = (p_out - py + cfg.kh) % cfg.kh;
-        fp32x4_t slot;
-        dispatch<cfg.kh>(p_idx,
-                         [&]<int P>()
-                         {
-                             slot   = acc[P];
-                             acc[P] = Zero;
-                         });
-        ow.flush(slot, p_out);
-    }
+            ow.flush(slot, p_out);
+        }
     }; // end run_compute
 
-    // Select epilogue and run.
+    // Select epilogue and run the compute pipeline.
     if constexpr(use_lds_epilogue)
     {
         OutputWriterLds<cfg> ow(tm, bc, output_lds, out, ho, wo);
