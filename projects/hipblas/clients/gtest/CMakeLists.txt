@@ -255,3 +255,10 @@ add_dependencies( hipblas-test hipblas-test-data hipblas-clients-common )
 
 rocm_install(TARGETS hipblas-test COMPONENT tests)
 rocm_install(FILES ${HIPBLAS_TEST_DATA} DESTINATION "${CMAKE_INSTALL_BINDIR}" COMPONENT tests)
+
+# Optional: CTest test categorization when building in rocm-libraries with shared/ctest.
+# Skipped when shared/ is not present (e.g. standalone rocblas or sparse checkout in CI).
+if(DEFINED ROCM_LIBRARIES_ROOT AND EXISTS "${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake")
+  include("${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake")
+  set(HIPBLAS_HAS_CTEST_CATEGORIES ON)
+endif()
