@@ -40,6 +40,8 @@ subtrees:
   entries:
   - file: reference/rocThrust-bitwise-repro
     title: Bitwise reproducibility
+  - file: reference/rocThrust-using-atomic-path
+    title: Atomic path
   - file: cpp_api
 
 - caption: About
