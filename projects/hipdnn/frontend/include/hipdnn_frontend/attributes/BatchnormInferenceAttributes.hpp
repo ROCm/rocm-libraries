@@ -13,7 +13,6 @@
 
 #include "Attributes.hpp"
 #include "TensorAttributes.hpp"
-#include <hipdnn_data_sdk/data_objects/batchnorm_inference_attributes_generated.h>
 #include <memory>
 #include <unordered_map>
 
@@ -158,38 +157,6 @@ public:
     BatchnormInferenceAttributes& set_y(std::shared_ptr<TensorAttributes>&& value)
     {
         return setOutput(OutputNames::Y, std::move(value));
-    }
-
-    flatbuffers::Offset<hipdnn_data_sdk::data_objects::BatchnormInferenceAttributes>
-        pack_attributes(flatbuffers::FlatBufferBuilder& builder) const // NOLINT
-    {
-        auto mean = get_mean();
-        auto invVariance = get_inv_variance();
-
-        return hipdnn_data_sdk::data_objects::CreateBatchnormInferenceAttributes(
-            builder,
-            get_x()->get_uid(),
-            mean->get_uid(),
-            invVariance->get_uid(),
-            get_scale()->get_uid(),
-            get_bias()->get_uid(),
-            get_y()->get_uid());
-    }
-
-    static BatchnormInferenceAttributes fromFlatBuffer(
-        const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributes* fb,
-        const std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>>& tensorMap)
-    {
-        BatchnormInferenceAttributes attr;
-
-        attr.set_x(tensorMap.at(fb->x_tensor_uid()));
-        attr.set_mean(tensorMap.at(fb->mean_tensor_uid()));
-        attr.set_inv_variance(tensorMap.at(fb->inv_variance_tensor_uid()));
-        attr.set_scale(tensorMap.at(fb->scale_tensor_uid()));
-        attr.set_bias(tensorMap.at(fb->bias_tensor_uid()));
-        attr.set_y(tensorMap.at(fb->y_tensor_uid()));
-
-        return attr;
     }
 };
 

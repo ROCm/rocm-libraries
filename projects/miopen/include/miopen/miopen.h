@@ -2169,6 +2169,10 @@ miopenConvolutionBackwardWeights(miopenHandle_t handle,
 
 /*! @brief Calculates the gradient with respect to the bias.
  *
+ * @deprecated This function is deprecated and will be removed in a future release.
+ *             The underlying OpenCL kernel (MIOpenConvBwdBias.cl) has been removed.
+ *             This function now returns miopenStatusNotImplemented.
+ *
  * Compute the convolution backwards gradient with respect to the bias tensor.
  * The scaling parameter alpha (float) and shift parameter beta (float) are only supported for
  * alpha = 1 and beta = 0.

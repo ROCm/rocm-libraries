@@ -450,8 +450,9 @@ inline half copysign(half x, half y)
     return half::from_bits(xBits | ySign);
 }
 
-// Min/max with NaN handling
-inline half max(half a, half b)
+// Equivalent to std::fmax/std::fmin
+// If one input is NaN and the other is not, returns the non-NaN value.
+inline half fmax(half a, half b)
 {
     if(isnan(a))
     {
@@ -464,7 +465,7 @@ inline half max(half a, half b)
     return a > b ? a : b;
 }
 
-inline half min(half a, half b)
+inline half fmin(half a, half b)
 {
     if(isnan(a))
     {
@@ -475,6 +476,18 @@ inline half min(half a, half b)
         return a;
     }
     return a < b ? a : b;
+}
+
+// Equivalent to std::max/std::min
+// No NaN handling
+inline half max(half a, half b)
+{
+    return a < b ? b : a;
+}
+
+inline half min(half a, half b)
+{
+    return b < a ? b : a;
 }
 
 // Rounding functions

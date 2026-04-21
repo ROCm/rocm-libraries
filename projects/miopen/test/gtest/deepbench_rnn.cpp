@@ -75,7 +75,7 @@ std::vector<std::string> GetTestCases(const std::string& precision)
     std::string postFlags =
         "--num-layers 1 --in-mode 1 --bias-mode 0 -dir-mode 0 --rnn-mode 0 --flat-batch-fill";
 
-    const std::vector<std::string> test_cases = {
+    return {
         // clang-format off
     {flags + " --batch-size 16 --seq-len 50 --vector-len 176 --hidden-size 176 " + postFlags},
     {flags + " --batch-size 32 --seq-len 50 --vector-len 176 --hidden-size 176 " + postFlags},
@@ -88,8 +88,6 @@ std::vector<std::string> GetTestCases(const std::string& precision)
     {flags + " --batch-size 128 --seq-len 50 --vector-len 2560 --hidden-size 2560 " + postFlags}
         // clang-format on
     };
-
-    return test_cases;
 }
 
 } // namespace deepbench_rnn

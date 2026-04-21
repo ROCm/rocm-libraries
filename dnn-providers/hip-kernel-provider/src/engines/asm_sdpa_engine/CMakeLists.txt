@@ -3,6 +3,7 @@
 
 target_sources(hip_kernel_provider_impl PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/AsmSdpaEngine.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/plans/SdpaBwdPlanBuilder.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/plans/SdpaFwdPlanBuilder.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/plans/SdpaFwdPlan.cpp
 )

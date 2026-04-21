@@ -404,7 +404,7 @@ namespace hiptensor
                                                 &descC,
                                                 nmodeC,
                                                 extentCD.data(),
-                                                stridesCD.data() ? nullptr : stridesCD.data(),
+                                                stridesCD.empty() ? nullptr : stridesCD.data(),
                                                 acDataType,
                                                 0));
 
@@ -414,7 +414,7 @@ namespace hiptensor
                                                 &descD,
                                                 nmodeD,
                                                 extentCD.data(),
-                                                stridesCD.data() ? nullptr : stridesCD.data(),
+                                                stridesCD.empty() ? nullptr : stridesCD.data(),
                                                 acDataType,
                                                 0));
 

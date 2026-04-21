@@ -44,12 +44,22 @@ namespace rocisa
         {
         }
 
-        std::vector<InstructionInput> getParams() const
+        std::vector<InstructionInput> getParams() const override
         {
             return {labelName};
         }
 
-        std::string toString() const
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            return {};
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            return {labelName};
+        }
+
+        virtual std::string toString() const override
         {
             return formatWithComment(instStr + " " + labelName);
         }
@@ -189,6 +199,21 @@ namespace rocisa
             return std::make_shared<SSetPCB64>(*this);
         }
 
+        std::vector<InstructionInput> getParams() const override
+        {
+            return {srcs};
+        }
+
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            return {};
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            return {srcs};
+        }
+
         std::string toString() const override
         {
             return formatWithComment(instStr + " " + srcs->toString());
@@ -220,6 +245,21 @@ namespace rocisa
         std::shared_ptr<Item> clone() const override
         {
             return std::make_shared<SSwapPCB64>(*this);
+        }
+
+        std::vector<InstructionInput> getParams() const override
+        {
+            return {dst, srcs};
+        }
+
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            return {dst};
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            return {srcs};
         }
 
         std::string toString() const override
