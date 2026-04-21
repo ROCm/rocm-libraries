@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -22,19 +22,32 @@
  *
  * ************************************************************************ */
 
-#pragma once
+#include "rocsparse_control.hpp"
+#include "rocsparse_nnzsplit_info.hpp"
+#include "rocsparse_utility.hpp"
 
-typedef struct _rocsparse_nnzsplit_info
+_rocsparse_nnzsplit_info::~_rocsparse_nnzsplit_info()
 {
+    WARNING_IF_HIP_ERROR(hipDeviceSynchronize());
 
-    bool use_starting_block_ids{};
+    // starting_block_ids points into the starting_ids allocation, so only one free is needed.
+    WARNING_IF_HIP_ERROR(rocsparse_hipFree(this->starting_ids));
 
-    size_t size{};
+    this->starting_ids           = nullptr;
+    this->starting_block_ids     = nullptr;
+    this->size                   = 0;
+    this->use_starting_block_ids = false;
+}
 
-    void* starting_ids{};
-    void* starting_block_ids{};
+void _rocsparse_nnzsplit_info::clear()
+{
+    WARNING_IF_HIP_ERROR(hipDeviceSynchronize());
 
-public:
-    ~_rocsparse_nnzsplit_info();
-    void clear();
-} * rocsparse_nnzsplit_info;
+    // starting_block_ids points into the starting_ids allocation, so only one free is needed.
+    THROW_IF_HIP_ERROR(rocsparse_hipFree(this->starting_ids));
+
+    this->starting_ids           = nullptr;
+    this->starting_block_ids     = nullptr;
+    this->size                   = 0;
+    this->use_starting_block_ids = false;
+}
