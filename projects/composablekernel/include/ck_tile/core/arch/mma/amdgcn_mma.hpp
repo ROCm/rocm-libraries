@@ -391,10 +391,3 @@ CK_TILE_HOST_DEVICE void print(amdgcn_mma<ADataType,
 
 } // namespace ck_tile::core::arch::mma
 #pragma clang diagnostic pop
-
-// Include the implementations
-#include "wmma/wmma.hpp" // should be included before the below headers
-
-#include "mfma/mfma.hpp"
-#include "scale/scale.hpp"
-#include "sparse/sparse.hpp"
