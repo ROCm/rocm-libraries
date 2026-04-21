@@ -4,6 +4,7 @@
 #pragma once
 
 #include "ck_tile/core/numeric/math.hpp"
+#include "ck_tile/ops/direct_convolution/utils/common.hpp"
 
 namespace ck_tile::direct_conv
 {

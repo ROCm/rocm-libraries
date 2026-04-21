@@ -19,4 +19,10 @@ enum class Version
     v3, // CK Tile kernel using async_load_tile with tile windows for input loads.
 };
 
+enum class EpilogueType
+{
+    RegistersToLdsToGlobalMemory, // Use LDS to collect the MFMA results before writing to global memory
+    RegistersToGlobalMemory       // Write MFMA results directly from registers to global memory
+};
+
 } // namespace ck_tile::direct_conv

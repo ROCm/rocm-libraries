@@ -68,7 +68,9 @@ struct Config
     Direction direction = Direction::Fprop;
 
     // Swizzle pattern - currently no explicit swizzle.
-    SwizzleType swizzle_type = SwizzleType::None;
+    static constexpr SwizzleType swizzle_type = SwizzleType::None;
+
+    EpilogueType epilogue = EpilogueType::RegistersToGlobalMemory;
 
     // Total number of waves.
     constexpr int num_waves() const { return waves_c64 * waves_q4; }
@@ -87,7 +89,14 @@ struct Config
 
     std::string GetName() const
     { 
-        return "v3_grouped_4c_noswizzle";
+        if (epilogue == EpilogueType::RegistersToGlobalMemory)
+        {
+            return "v3_grouped_4c_noswizzle_skip_lds_epilogue";
+        }
+        else 
+        {
+            return "v3_grouped_4c_noswizzle_lds_epilogue";
+        }
     }
 };
 
@@ -156,15 +165,10 @@ struct TileConstants
     // uint4 vectors per channel fiber (8 fp16 per uint4).
     static constexpr int BLOCK_C8 = cfg.block_c() / 8;
 
-    // Number of uint4 vectors to store per output row.
-    static constexpr int STORE_VECS = cfg.block_q() * BLOCK_C8;
-
     // LDS double buffering for input loads.
     static constexpr int NUM_INPUT_LDS_BUFFERS    = 2;
     static constexpr int INPUT_LDS_BUFFER_SIZE_C8 = BLOCK_C8 * BLOCK_W;
     static constexpr int INPUT_LDS_BUFFER_SIZE_C4 = INPUT_LDS_BUFFER_SIZE_C8 * 2;
-    static constexpr int OUTPUT_LDS_BUFFER_SIZE   = BLOCK_C8 * cfg.block_q();
-
     // Weight LDS staging: [kh*kw][block_groups][GROUP_SIZE] in uint2 units.
     static constexpr int WEIGHT_LDS_SIZE_UINT2 = cfg.kh * cfg.kw * cfg.block_groups() * GROUP_SIZE;
     static constexpr int WEIGHT_LDS_SIZE_UINT4 = WEIGHT_LDS_SIZE_UINT2 / 2;
@@ -193,14 +197,6 @@ struct TileConstants
         const int c4_lo = c4 % 2;
         auto coord = ck_tile::make_tensor_coordinate(desc, ck_tile::make_tuple(x, c8));
         return static_cast<int>(coord.get_offset()) * 2 + c4_lo;
-    }
-
-    // Compute uint4 offset from logical (x, c8) using the descriptor.
-    static CK_TILE_DEVICE int lds_offset_uint4(int x, int c8)
-    {
-        constexpr auto desc = MakeInputLdsBlockDescriptor();
-        auto coord = ck_tile::make_tensor_coordinate(desc, ck_tile::make_tuple(x, c8));
-        return static_cast<int>(coord.get_offset());
     }
 
     // Total channels per block in fp16 elements.
@@ -443,73 +439,81 @@ struct TileConstants
     }
 
     // -----------------------------------------------------------------------
-    // Output LDS write descriptors (MFMA result → LDS staging).
+    // Direct DRAM output descriptors (no LDS staging).
     //
-    // The output LDS buffer is modeled as 3D [block_q, BLOCK_C4, 4] in fp16,
-    // where each thread writes its 4-element fp16x4_t MFMA result (one group's
-    // worth of channels) to the position determined by its MFMA coordinates.
+    // The MFMA result is written directly to global memory via store_tile.
+    // Descriptor: 4D [ho, wo_padded, BLOCK_C4, 4] in fp16 with pad on wo.
+    // The pad transform handles edge blocks where block_q + Q >= wo by
+    // suppressing OOB writes automatically.
     //
-    // Thread mapping (derived from MFMA result layout):
-    //   P0 = warp_id, merge of {waves_q4, waves_c64}:
-    //     wave_q4  = warp_id / waves_c64 → Q outer factor
-    //     wave_c64 = warp_id % waves_c64 → C outer factor
-    //   P1 = lane_id ∈ [0,64), merge of {16, 4}:
-    //     batch = lane_id / 4  → C inner factor (16 groups per wave)
-    //     col   = lane_id % 4  → Q inner factor (4 columns per wave)
-    //   Y0 = 4 (vectorization, the 4 fp16 channels within one group)
-    //
-    // Result coordinates:
-    //   Q       = wave_q4 * 4 + col
-    //   C_group = wave_c64 * 16 + batch
-    //   C_sub   ∈ [0, 4) — vectorization dimension
+    // Distribution: same MFMA mapping as LDS write, with a trivial row dim
+    // prepended. Window shape: [1, block_q, BLOCK_C4, 4].
     // -----------------------------------------------------------------------
 
-    // LDS descriptor for output staging: [block_q, BLOCK_C4, 4] row-major in fp16.
-    static constexpr auto MakeOutputLdsWriteDescriptor()
+    // DRAM descriptor for direct output writes.
+    // Base pointer: out + batch_offset + block_k (shifted to tile's channel origin).
+    static CK_TILE_DEVICE auto MakeOutputDramDescriptor(int ho, int wo, int C)
     {
-        return ck_tile::make_naive_tensor_descriptor(
-            ck_tile::make_tuple(ck_tile::number<cfg.block_q()>{},
-                                ck_tile::number<BLOCK_C4>{},
-                                ck_tile::number<4>{}),
-            ck_tile::make_tuple(ck_tile::number<BLOCK_C4 * 4>{},
-                                ck_tile::number<4>{},
-                                ck_tile::number<1>{}),
+        // Step 1: Naive [ho, wo, BLOCK_C4, 4] with strides [wo*C, C, 4, 1] in fp16.
+        const auto desc_raw = ck_tile::make_naive_tensor_descriptor(
+            ck_tile::make_tuple(ho, wo, ck_tile::number<BLOCK_C4>{}, ck_tile::number<4>{}),
+            ck_tile::make_tuple(wo * C, C, ck_tile::number<4>{}, ck_tile::number<1>{}),
             ck_tile::number<4>{},
             ck_tile::number<1>{});
+
+        // Step 2: Pad wo → wo + block_q so any block_q start has room.
+        // OOB positions (wo <= pos < wo + block_q) are suppressed by the pad transform.
+        constexpr int right_pad_w = cfg.block_q();
+        const auto desc_padded = ck_tile::transform_tensor_descriptor(
+            desc_raw,
+            ck_tile::make_tuple(ck_tile::make_pass_through_transform(ho),
+                                ck_tile::make_pad_transform(wo, 0, right_pad_w),
+                                ck_tile::make_pass_through_transform(ck_tile::number<BLOCK_C4>{}),
+                                ck_tile::make_pass_through_transform(ck_tile::number<4>{})),
+            ck_tile::make_tuple(
+                ck_tile::sequence<0>{}, ck_tile::sequence<1>{},
+                ck_tile::sequence<2>{}, ck_tile::sequence<3>{}),
+            ck_tile::make_tuple(
+                ck_tile::sequence<0>{}, ck_tile::sequence<1>{},
+                ck_tile::sequence<2>{}, ck_tile::sequence<3>{}));
+
+        return desc_padded;
     }
 
-    // Tile distribution for output LDS writes (MFMA result scatter).
-    static constexpr auto MakeOutputLdsWriteDistribution()
+    // Tile distribution for direct DRAM output writes.
+    // Maps MFMA result coordinates to a 4D tile with a trivial row dimension
+    // prepended (X0 = 1, for the single output row per flush call).
+    //
+    // 4D tile: [1, block_q, BLOCK_C4, 4]
+    //   X0 = 1 (row, trivial)           — Y0 iteration (length 1)
+    //   X1 = block_q [waves_q4, 4]      — Q spatial
+    //   X2 = BLOCK_C4 [waves_c64, 16]   — C groups
+    //   X3 = 4                           — C sub (vectorization, Y1)
+    static constexpr auto MakeOutputDramDistribution()
     {
-        // RH-major indices: 0=R(empty), 1=X0(Q), 2=X1(C_group), 3=X2(C_sub)
+        // RH-major indices: 0=R(empty), 1=X0(row), 2=X1(Q), 3=X2(C_group), 4=X3(C_sub)
         //
-        // X0 = block_q, unmerge [waves_q4, 4]:
-        //   factor 0 (waves_q4): P0 contributes (outer Q)
-        //   factor 1 (4):        P1 contributes (inner Q, col = lane%4)
+        // P0 (warp_id), merge {waves_q4, waves_c64}:
+        //   factor 0 → X1 factor 0 (waves_q4)  → major=2, minor=0
+        //   factor 1 → X2 factor 0 (waves_c64) → major=3, minor=0
         //
-        // X1 = BLOCK_C4, unmerge [waves_c64, 16]:
-        //   factor 0 (waves_c64): P0 contributes (outer C)
-        //   factor 1 (16):        P1 contributes (inner C, batch = lane/4)
+        // P1 (lane_id=64), merge {16, 4}:
+        //   factor 0 (16=batch) → X2 factor 1 → major=3, minor=1
+        //   factor 1 (4=col)    → X1 factor 1 → major=2, minor=1
         //
-        // P0 merge {waves_q4, waves_c64}: warp_id = wave_q4 * waves_c64 + wave_c64
-        //   factor 0 → X0 factor 0 → major=1, minor=0
-        //   factor 1 → X1 factor 0 → major=2, minor=0
-        //
-        // P1 merge {16, 4}: lane_id = batch * 4 + col
-        //   factor 0 (16=batch) → X1 factor 1 → major=2, minor=1
-        //   factor 1 (4=col)    → X0 factor 1 → major=1, minor=1
-        //
-        // Y0 (length 4) → X2 factor 0 → major=3, minor=0
+        // Y0 (length 1) → X0 → major=1, minor=0 (trivial row)
+        // Y1 (length 4) → X3 → major=4, minor=0 (vectorization)
         return ck_tile::make_static_tile_distribution(
             ck_tile::tile_distribution_encoding<
                 ck_tile::sequence<>,
-                ck_tile::tuple<ck_tile::sequence<cfg.waves_q4, 4>,
+                ck_tile::tuple<ck_tile::sequence<1>,
+                               ck_tile::sequence<cfg.waves_q4, 4>,
                                ck_tile::sequence<cfg.waves_c64, 16>,
                                ck_tile::sequence<4>>,
-                ck_tile::tuple<ck_tile::sequence<1, 2>, ck_tile::sequence<2, 1>>,
+                ck_tile::tuple<ck_tile::sequence<2, 3>, ck_tile::sequence<3, 2>>,
                 ck_tile::tuple<ck_tile::sequence<0, 0>, ck_tile::sequence<1, 1>>,
-                ck_tile::sequence<3>,
-                ck_tile::sequence<0>>{});
+                ck_tile::sequence<1, 4>,
+                ck_tile::sequence<0, 0>>{});
     }
 };
 
@@ -732,90 +736,64 @@ struct WeightLoader
     }
 };
 
-// Handles output staging through LDS and writing to global memory.
+// Handles writing MFMA accumulator results directly to global memory.
+// No LDS staging — store_tile writes directly from registers to DRAM.
+// OOB handling is done via the pad transform on the wo dimension.
 template <Config cfg>
 struct OutputWriter
 {
     using TC = TileConstants<cfg>;
 
-    // Output tile distribution and distributed tensor type for LDS writes.
-    static constexpr auto OutputLdsDist = TC::MakeOutputLdsWriteDistribution();
+    // Output tile distribution and distributed tensor type for direct DRAM writes.
+    static constexpr auto OutputDramDist = TC::MakeOutputDramDistribution();
     using OutputDstrTensor =
-        ck_tile::static_distributed_tensor<_Float16, ck_tile::remove_cvref_t<decltype(OutputLdsDist)>>;
+        ck_tile::static_distributed_tensor<_Float16, ck_tile::remove_cvref_t<decltype(OutputDramDist)>>;
 
-    // LDS write tile window type.
-    using OutputLdsDesc = ck_tile::remove_cvref_t<decltype(TC::MakeOutputLdsWriteDescriptor())>;
-    using OutputLdsBuf =
-        ck_tile::buffer_view<ck_tile::address_space_enum::lds, _Float16, ck_tile::index_t, true>;
-    using OutputLdsView = ck_tile::tensor_view<OutputLdsBuf, OutputLdsDesc>;
-    using OutputLdsWindow = ck_tile::remove_cvref_t<decltype(ck_tile::make_tile_window(
-        OutputLdsView{},
-        ck_tile::make_tuple(ck_tile::number<cfg.block_q()>{},
+    // DRAM tile window type — derived from MakeOutputDramDescriptor with dummy args.
+    using OutputDramDesc =
+        ck_tile::remove_cvref_t<decltype(TC::MakeOutputDramDescriptor(int{}, int{}, int{}))>;
+    using OutputDramBuf =
+        ck_tile::buffer_view<ck_tile::address_space_enum::global, _Float16, ck_tile::index_t, true>;
+    using OutputDramView = ck_tile::tensor_view<OutputDramBuf, OutputDramDesc>;
+    using OutputDramWindow = ck_tile::remove_cvref_t<decltype(ck_tile::make_tile_window(
+        OutputDramView{},
+        ck_tile::make_tuple(ck_tile::number<1>{},
+                            ck_tile::number<cfg.block_q()>{},
                             ck_tile::number<TC::BLOCK_C4>{},
                             ck_tile::number<4>{}),
-        {0, 0, 0}))>;
+        {0, 0, 0, 0},
+        OutputDramDist))>;
 
-    // Output tensor descriptor: [ho, wo, C] in _Float16 elements for this batch.
-    // Used only for offset computation; the actual store is a flat global write.
-    using OutputDesc = decltype(ck_tile::make_naive_tensor_descriptor(
-        ck_tile::make_tuple(int{}, int{}, int{}),
-        ck_tile::make_tuple(int{}, int{}, ck_tile::number<1>{}),
-        ck_tile::number<8>{}));
+    OutputDramWindow dram_window;
+    int last_p_out; // last row stored (for move_tile_window delta)
 
-    bool store_active;
-    bool store_valid;
-    const uint4* load_output_lds;
-    _Float16* out_base;            // output base pointer for this batch
-    OutputDesc out_desc;           // descriptor for coordinate → offset mapping
-    int out_q;                     // output column coordinate
-    int out_c_fp16;                // output channel coordinate in fp16 units
-    OutputLdsWindow lds_write_win; // tile window for MFMA → LDS writes
-
-    __device__ OutputWriter(const ThreadMapping<cfg>& tm,
-                            const BlockCoords<cfg>& bc,
-                            uint4* output_lds,
+    __device__ OutputWriter(const BlockCoords<cfg>& bc,
                             _Float16* __restrict__ out,
                             int ho,
                             int wo)
-        : store_active(tm.tid < TC::STORE_VECS),
-          store_valid(false),
-          load_output_lds(nullptr),
-          out_base(out + static_cast<size_t>(bc.block_n) * ho * wo * bc.C),
-          out_desc(ck_tile::make_naive_tensor_descriptor(
-              ck_tile::make_tuple(ho, wo, bc.C),
-              ck_tile::make_tuple(wo * bc.C, bc.C, ck_tile::number<1>{}),
-              ck_tile::number<8>{})),
-          out_q(0),
-          out_c_fp16(0),
-          lds_write_win([&]()
+        : dram_window([&]()
           {
-              constexpr auto lds_desc = TC::MakeOutputLdsWriteDescriptor();
-              auto lds_buf = OutputLdsBuf{
-                  reinterpret_cast<_Float16*>(output_lds),
-                  static_cast<ck_tile::index_t>(
-                      ck_tile::max(TC::WEIGHT_LDS_PADDED_UINT4, TC::OUTPUT_LDS_BUFFER_SIZE) *
-                      (sizeof(uint4) / sizeof(_Float16)))};
-              auto lds_view = OutputLdsView{lds_buf, lds_desc};
+              const auto out_desc = TC::MakeOutputDramDescriptor(ho, wo, bc.C);
+              auto out_buf = OutputDramBuf{
+                  out + static_cast<size_t>(bc.block_n) * ho * wo * bc.C + bc.block_k,
+                  static_cast<ck_tile::index_t>(out_desc.get_element_space_size())};
+              auto out_view = OutputDramView{out_buf, out_desc};
+              constexpr auto out_dist = TC::MakeOutputDramDistribution();
               return ck_tile::make_tile_window(
-                  lds_view,
-                  ck_tile::make_tuple(ck_tile::number<cfg.block_q()>{},
+                  out_view,
+                  ck_tile::make_tuple(ck_tile::number<1>{},
+                                      ck_tile::number<cfg.block_q()>{},
                                       ck_tile::number<TC::BLOCK_C4>{},
                                       ck_tile::number<4>{}),
-                  {0, 0, 0});
-          }())
+                  {0, bc.block_q, 0, 0},
+                  out_dist);
+          }()),
+          last_p_out(0)
     {
-        if(store_active)
-        {
-            const int col = tm.tid / TC::BLOCK_C8;
-            const int c8  = tm.tid % TC::BLOCK_C8;
-            out_q         = bc.block_q + col;
-            out_c_fp16    = (bc.block_c8 + c8) * 8;
-            load_output_lds = &output_lds[TC::lds_offset_uint4(col, c8)];
-            store_valid     = (out_q < wo);
-        }
     }
 
-    // Convert fp32x4 accumulator to fp16x4 and write through LDS to global memory.
+    // Convert fp32x4 accumulator to fp16x4 and write directly to global memory.
+    // No LDS staging, no __syncthreads needed.
     __device__ void flush(fp32x4_t acc_val, int p_out)
     {
         // 1. Convert fp32→fp16 and pack into distributed tensor.
@@ -830,19 +808,12 @@ struct OutputWriter
         output_tile.get_thread_buffer()(ck_tile::number<2>{}) = fp16_ptr[2];
         output_tile.get_thread_buffer()(ck_tile::number<3>{}) = fp16_ptr[3];
 
-        // 2. Store to LDS via tile window.
-        ck_tile::store_tile(lds_write_win, output_tile);
+        // 2. Move window to current output row.
+        ck_tile::move_tile_window(dram_window, {p_out - last_p_out, 0, 0, 0});
+        last_p_out = p_out;
 
-        // 3. Synchronize so all threads' LDS writes are visible.
-        __syncthreads();
-
-        // 4. Write from LDS to global memory (only active store threads).
-        if(store_valid)
-        {
-            auto coord = ck_tile::make_tensor_coordinate(
-                out_desc, ck_tile::make_tuple(p_out, out_q, out_c_fp16));
-            *reinterpret_cast<uint4*>(out_base + coord.get_offset()) = *load_output_lds;
-        }
+        // 3. Direct store to DRAM — pad transform handles OOB.
+        ck_tile::store_tile(dram_window, output_tile);
     }
 };
 
@@ -874,7 +845,8 @@ __device__ void conv2d_grouped_4c_fp16_cdna4_nhwc_impl(const _Float16* __restric
     // --- LDS buffers (padded to accommodate the full tile distribution span) ---
     // TODO: Optimize the LDS usage if occupancy get limited by the LDS usage.
     __shared__ uint4 input_lds[TC::NUM_INPUT_LDS_BUFFERS * TC::INPUT_LDS_BUFFER_SIZE_PADDED_C8];
-    __shared__ uint4 output_lds[ck_tile::max(TC::WEIGHT_LDS_PADDED_UINT4, TC::OUTPUT_LDS_BUFFER_SIZE)];
+    // Weight-only LDS: output no longer staged through LDS (direct DRAM store).
+    __shared__ uint4 output_lds[TC::WEIGHT_LDS_PADDED_UINT4];
 
     auto input_lds_fp16 =
         ck_tile::buffer_view<ck_tile::address_space_enum::lds, _Float16, ck_tile::index_t, true>{
@@ -887,8 +859,7 @@ __device__ void conv2d_grouped_4c_fp16_cdna4_nhwc_impl(const _Float16* __restric
         ck_tile::buffer_view<ck_tile::address_space_enum::lds, _Float16, ck_tile::index_t, true>{
             reinterpret_cast<_Float16*>(output_lds),
             static_cast<ck_tile::index_t>(
-                ck_tile::max(TC::WEIGHT_LDS_PADDED_UINT4, TC::OUTPUT_LDS_BUFFER_SIZE) *
-                (sizeof(uint4) / sizeof(_Float16)))};
+                TC::WEIGHT_LDS_PADDED_UINT4 * (sizeof(uint4) / sizeof(_Float16)))};
 
     // --- Coordinate setup ---
     BlockCoords<cfg> bc(groups);
@@ -897,7 +868,7 @@ __device__ void conv2d_grouped_4c_fp16_cdna4_nhwc_impl(const _Float16* __restric
 
     ThreadMapping<cfg> tm;
     InputLoader<cfg> il(bc, input_lds, in, hi, wi, px);
-    OutputWriter<cfg> ow(tm, bc, output_lds, out, ho, wo);
+    OutputWriter<cfg> ow(bc, out, ho, wo);
 
     // --- Weight prologue: global → LDS → registers ---
     fp16x4_t weights_reg[cfg.kh * cfg.kw];
@@ -1059,7 +1030,6 @@ __device__ void conv2d_grouped_4c_fp16_cdna4_nhwc_impl(const _Float16* __restric
     // --- Tail flush: output rows not flushed by the main/remainder loops ---
     for(int p_out = hi - cfg.kh + 1 + py; p_out < ho; p_out++)
     {
-        __syncthreads();
         int p_idx = (p_out - py + cfg.kh) % cfg.kh;
         fp32x4_t slot;
         dispatch<cfg.kh>(p_idx,
