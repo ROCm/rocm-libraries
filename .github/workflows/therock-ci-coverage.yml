@@ -132,6 +132,20 @@ jobs:
     needs: [therock-coverage-build]
     runs-on: ${{ inputs.test_runs_on }}
     if: ${{ inputs.test_runs_on != '' }}
+    timeout-minutes: 210
+    container:
+      image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
+      options: --ipc host
+        --group-add video
+        --device /dev/kfd
+        --device /dev/dri
+        --group-add 993
+        --group-add 992
+        --group-add 110
+        --env-file /etc/podinfo/gha-gpu-isolation-settings
+    defaults:
+      run:
+        shell: bash
     steps:
       - name: "Checking out repository for rocm-libraries"
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
