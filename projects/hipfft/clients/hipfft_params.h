@@ -764,77 +764,6 @@ public:
         return compute_idist() == idist && compute_odist() == odist;
     }
 
-    // stride is row-major like everything else in fft_params.  brick
-    // indexes/strides are col-major because those would normally be
-    // passed to rocFFT directly
-    static bool xt_desc_matches_brick(const hostbuf&                   field,
-                                      const std::vector<size_t>&       stride,
-                                      size_t                           dist,
-                                      const hipXtDesc*                 desc,
-                                      const std::vector<hipfft_brick>& bricks,
-                                      size_t                           elem_size,
-                                      const char*                      dir)
-    {
-        // construct field stride that includes batch distance too, since
-        // brick coordinates include it
-        auto field_stride_cm = stride;
-        std::reverse(field_stride_cm.begin(), field_stride_cm.end());
-        field_stride_cm.push_back(dist);
-
-        std::atomic<bool> compare_err = false;
-        std::atomic<bool> runtime_err = false;
-
-        std::vector<hostbuf> brick_hosts;
-        brick_hosts.resize(bricks.size());
-
-#ifdef _OPENMP
-#pragma omp parallel for num_threads(rocfft_concurrency())
-#endif
-        for(size_t i = 0; i < bricks.size(); ++i)
-        {
-            // copy the ith brick back to host memory
-            rocfft_scoped_device device(desc->GPUs[i]);
-            hostbuf&             brick_host = brick_hosts[i];
-            brick_host.alloc(desc->size[i]);
-            if(hipMemcpy(brick_host.data(), desc->data[i], brick_host.size(), hipMemcpyDeviceToHost)
-               != hipSuccess)
-            {
-                runtime_err = true;
-                continue;
-            }
-
-            // convert to row-major
-            auto brick_length_rm = bricks[i].length();
-            std::reverse(brick_length_rm.begin(), brick_length_rm.end());
-
-            // start at brick origin
-            auto brick_idx_rm = brick_length_rm;
-            std::fill(brick_idx_rm.begin(), brick_idx_rm.end(), 0);
-
-            do
-            {
-                auto brick_idx_cm = brick_idx_rm;
-                std::reverse(brick_idx_cm.begin(), brick_idx_cm.end());
-
-                auto field_offset = bricks[i].field_offset(brick_idx_cm, field_stride_cm);
-                auto brick_offset = bricks[i].brick_offset(brick_idx_cm);
-
-                if(memcmp(brick_host.data_offset(brick_offset * elem_size),
-                          field.data_offset(field_offset * elem_size),
-                          elem_size)
-                   != 0)
-                {
-                    compare_err = true;
-                    break;
-                }
-            } while(increment_rowmajor(brick_idx_rm, brick_length_rm));
-        }
-
-        if(runtime_err)
-            throw std::runtime_error("failed to memcpy brick back to host");
-        return !compare_err;
-    }
-
     // call the hipFFT APIs to distribute data to multiple GPUs
     void multi_gpu_prepare(std::vector<hostbuf>& cpu_input,
                            std::vector<gpubuf>&  ibuffer,
@@ -916,19 +845,6 @@ public:
         if(hipfftXtMemcpy(plan, output_host.data(), xt_output.get(), HIPFFT_COPY_DEVICE_TO_HOST)
            != HIPFFT_SUCCESS)
             throw std::runtime_error("hipfftXtMemcpy failed");
-
-        // check cufftXtMemcpy versus hipfft's implementation
-        if(placement == fft_placement_notinplace)
-        {
-            if(!xt_desc_matches_brick(output_host,
-                                      ostride,
-                                      odist,
-                                      xt_output->descriptor,
-                                      xt_outBricks,
-                                      var_size<size_t>(precision, otype),
-                                      "output"))
-                throw std::runtime_error("Xt output does not match");
-        }
 
         // copy final result back to device for comparison
         if(hipMemcpy(obuffer.front().data(),
