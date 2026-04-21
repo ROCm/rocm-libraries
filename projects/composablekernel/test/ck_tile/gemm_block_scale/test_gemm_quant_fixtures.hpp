@@ -1038,7 +1038,7 @@ class TestCkTileGemmABQuant : public TestCkTileGemmQuantBase<Tuple, TestCkTileGe
     void run_test_with_validation(ck_tile::index_t M,
                                   ck_tile::index_t N,
                                   ck_tile::index_t K,
-                                  ck_tile::index_t k_batch     = 1,
+                                  ck_tile::index_t k_batch      = 1,
                                   ck_tile::index_t stride_B_pad = 0)
     {
         const ck_tile::index_t stride_A =

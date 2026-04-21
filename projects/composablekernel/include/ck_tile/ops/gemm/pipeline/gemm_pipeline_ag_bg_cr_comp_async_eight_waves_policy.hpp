@@ -182,8 +182,7 @@ struct GemmPipelineAgBgCrCompAsyncEightWavesPolicy
         // its element_space_size for bounds checking.
         const auto desc_0 = transform_tensor_descriptor(
             tensor_view_tmp.get_tensor_descriptor(),
-            make_tuple(make_unmerge_transform(row_lens),
-                       make_unmerge_transform(col_lens)),
+            make_tuple(make_unmerge_transform(row_lens), make_unmerge_transform(col_lens)),
             make_tuple(sequence<0>{}, sequence<1>{}),
             make_tuple(sequence<0, 1>{}, sequence<2, 3, 4, 5>{}));
         const auto desc_1 = transform_tensor_descriptor(
