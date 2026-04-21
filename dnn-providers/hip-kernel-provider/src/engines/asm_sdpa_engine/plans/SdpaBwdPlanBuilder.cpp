@@ -37,9 +37,9 @@ namespace asm_sdpa_engine
 
 bool SdpaBwdPlanBuilder::isApplicable(
     const HipKernelHandle& handle,
-    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
-    using namespace hipdnn_data_sdk::data_objects;
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
     // NOLINTNEXTLINE(readability-identifier-naming)
     static const char* HIP_KERNEL_LOG_PREFIX = "[SdpaBwdPlanBuilder::isApplicable] ";
 
@@ -166,10 +166,10 @@ bool SdpaBwdPlanBuilder::isApplicable(
 
 size_t SdpaBwdPlanBuilder::getMaxWorkspaceSize(
     const HipKernelHandle& /* handle */,
-    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
     const HipKernelSettings& /* executionSettings */) const
 {
-    using namespace hipdnn_data_sdk::data_objects;
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
 
     const auto& attrs = opGraph.nodeWrappers().front()->attributesAs<SdpaBackwardAttributes>();
     const auto& tensorMap = opGraph.getTensorMap();
@@ -198,8 +198,8 @@ size_t SdpaBwdPlanBuilder::getMaxWorkspaceSize(
 
 void SdpaBwdPlanBuilder::initializeExecutionSettings(
     const HipKernelHandle& /* handle */,
-    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& /* opGraph */,
-    const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& /* engineConfig */,
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& /* opGraph */,
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& /* engineConfig */,
     HipKernelSettings& /* executionSettings */) const
 {
     HIPDNN_PLUGIN_LOG_ERROR("SdpaBwdPlanBuilder::initializeExecutionSettings not implemented");
@@ -207,17 +207,17 @@ void SdpaBwdPlanBuilder::initializeExecutionSettings(
 
 void SdpaBwdPlanBuilder::buildPlan(
     const HipKernelHandle& /* handle */,
-    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& /* opGraph */,
-    const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& /* engineConfig */,
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& /* opGraph */,
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& /* engineConfig */,
     HipKernelContext& /* executionContext */) const
 {
     // TODO(Task I5): Implement backward 3-kernel plan (odo -> dqdkdv -> dq_convert)
     HIPDNN_PLUGIN_LOG_ERROR("SdpaBwdPlanBuilder::buildPlan not implemented");
 }
 
-std::vector<hipdnn_data_sdk::data_objects::KnobT> SdpaBwdPlanBuilder::getCustomKnobs(
+std::vector<hipdnn_flatbuffers_sdk::data_objects::KnobT> SdpaBwdPlanBuilder::getCustomKnobs(
     const HipKernelHandle& /* handle */,
-    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& /* opGraph */) const
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& /* opGraph */) const
 {
     return {};
 }

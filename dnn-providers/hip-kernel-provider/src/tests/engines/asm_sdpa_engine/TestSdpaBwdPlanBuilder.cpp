@@ -3,8 +3,8 @@
 
 #include <gtest/gtest.h>
 
-#include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 
 #include "GraphTest.hpp"
@@ -29,15 +29,15 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableReturnsFalseForNonSdpaBwdGraph)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
 
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
+        builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_FALSE(_planBuilder.isApplicable(_handle, graphWrapper));
 }
 
 auto createSdpaBwdGraph(const std::vector<int64_t>& dims = {4, 8, 256, 128},
-                        hipdnn_data_sdk::data_objects::DataType dataType
-                        = hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
+                        hipdnn_flatbuffers_sdk::data_objects::DataType dataType
+                        = hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
                         bool withScale = false,
                         bool alibiMask = false,
                         bool paddingMask = false,
@@ -61,7 +61,7 @@ auto createSdpaBwdGraph(const std::vector<int64_t>& dims = {4, 8, 256, 128},
 
 TEST_F(TestSdpaBwdPlanBuilder, IsApplicableSdpaBwdVariations)
 {
-    using namespace hipdnn_data_sdk::data_objects;
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
 
     if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
     {
@@ -112,8 +112,8 @@ TEST_F(TestSdpaBwdPlanBuilder, BackwardWorkspaceSizeSmallUnaligned)
     // B=1, H=3, S=255, D=128 — chosen so D buffer raw size (3060) is NOT a multiple of 64,
     // exercising the alignUp() rounding: 3060 → 3072
     auto builder = createSdpaBwdGraph({1, 3, 255, 128});
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
+        builder.GetBufferPointer(), builder.GetSize());
     HipKernelSettings settings;
     size_t workspaceSize = _planBuilder.getMaxWorkspaceSize(_handle, graphWrapper, settings);
 
@@ -126,8 +126,8 @@ TEST_F(TestSdpaBwdPlanBuilder, BackwardWorkspaceSizeMedium)
 {
     // B=2, H=8, S=512, D=128
     auto builder = createSdpaBwdGraph({2, 8, 512, 128});
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
+        builder.GetBufferPointer(), builder.GetSize());
     HipKernelSettings settings;
     size_t workspaceSize = _planBuilder.getMaxWorkspaceSize(_handle, graphWrapper, settings);
 
@@ -140,8 +140,8 @@ TEST_F(TestSdpaBwdPlanBuilder, BackwardWorkspaceSizeLarge)
 {
     // B=4, H=16, S=1024, D=128
     auto builder = createSdpaBwdGraph({4, 16, 1024, 128});
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
+        builder.GetBufferPointer(), builder.GetSize());
     HipKernelSettings settings;
     size_t workspaceSize = _planBuilder.getMaxWorkspaceSize(_handle, graphWrapper, settings);
 
