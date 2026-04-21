@@ -48,6 +48,28 @@ using WarpGemmMfmaF32F32F32M16N16K16TransposedCDistribution =
         4,
         AttrNumAccess>>;
 
+// tf32
+// On gfx950: uses 3x bf16 MFMA emulation (no native xf32 support)
+
+#if defined(CK_GFX950_SUPPORT)
+// gfx950: tf32 emulated using 3x bf16 MFMA
+using WarpGemmMfmaTf32Tf32F32M32N32K16Native = WarpGemmImpl<WarpGemmAttributeMfma<
+    WarpGemmAttributeMfmaImplF32F32F32M32N32K16Tf32Gfx950<WGAttrCtlEnum::Default_>>>;
+
+using WarpGemmMfmaTf32Tf32F32M16N16K32Native = WarpGemmImpl<WarpGemmAttributeMfma<
+    WarpGemmAttributeMfmaImplF32F32F32M16N16K32Tf32Gfx950<WGAttrCtlEnum::Default_>>>;
+
+template <WGAttrNumAccessEnum AttrNumAccess = WGAttrNumAccessEnum::Single>
+using WarpGemmMfmaTf32Tf32F32M32N32K16 = WarpGemmImpl<WarpGemmAttributeMfma<
+    WarpGemmAttributeMfmaImplF32F32F32M32N32K16Tf32Gfx950<WGAttrCtlEnum::Default_>,
+    AttrNumAccess>>;
+
+template <WGAttrNumAccessEnum AttrNumAccess = WGAttrNumAccessEnum::Single>
+using WarpGemmMfmaTf32Tf32F32M16N16K32 = WarpGemmImpl<WarpGemmAttributeMfma<
+    WarpGemmAttributeMfmaImplF32F32F32M16N16K32Tf32Gfx950<WGAttrCtlEnum::Default_>,
+    AttrNumAccess>>;
+#endif
+
 // fp16
 
 using WarpGemmMfmaF16F16F32M32N32K8 = WarpGemmImpl<
@@ -346,6 +368,13 @@ using WarpGemmMfma_f32_32x32x16_bf8_fp8 = WarpGemmImpl<
 
 using WarpGemmMfma_f32_32x32x16_bf8_bf8 = WarpGemmImpl<
     WarpGemmAttributeMfma<WarpGemmAttributeMfmaImpl_f32_32x32x16_bf8_bf8<WGAttrCtlEnum::Default_>>>;
+
+template <WGAttrNumAccessEnum AttrNumAccess = WGAttrNumAccessEnum::Single>
+using WarpGemmMfma_f32_32x32x32_fp8_fp8_CTransposed =
+    WarpGemmImpl<WarpGemmAttributeMfmaIterateKAndTransposedCDistribution<
+        WarpGemmAttributeMfmaImpl_f32_32x32x16_fp8_fp8<WGAttrCtlEnum::Default_>,
+        2,
+        AttrNumAccess>>;
 
 using WarpGemmMfma_f32_32x32x32_fp8_bf8 = WarpGemmImpl<WarpGemmAttributeMfmaIterateK<
     WarpGemmAttributeMfmaImpl_f32_32x32x16_fp8_bf8<WGAttrCtlEnum::Default_>,

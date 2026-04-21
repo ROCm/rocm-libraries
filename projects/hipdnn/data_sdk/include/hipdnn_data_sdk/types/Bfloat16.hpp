@@ -17,6 +17,8 @@ namespace hipdnn_data_sdk::types
 // NOLINTBEGIN(readability-identifier-naming) - lowercase to match type definitions
 struct half;
 struct fp4_e2m1;
+struct fp6_e2m3;
+struct fp6_e3m2;
 struct fp8_e4m3;
 struct fp8_e5m2;
 struct fp8_e8m0;
@@ -102,10 +104,9 @@ constexpr uint16_t BFLOAT16_EPSILON = 0x3C00;
 /// Round error (0.5)
 constexpr uint16_t BFLOAT16_ROUND_ERROR = 0x3F00;
 
-// NOLINTBEGIN(readability-identifier-naming) - using snake_case for internal detail functions
-
 // Convert float to bfloat16 bits using simple truncation
 // This is faster than RNE and matches some HIP implementations
+// NOLINTNEXTLINE(readability-identifier-naming)
 inline uint16_t float_to_bfloat16_bits_truncate(float f) noexcept
 {
     uint32_t bits;
@@ -115,6 +116,7 @@ inline uint16_t float_to_bfloat16_bits_truncate(float f) noexcept
 
 // Convert float to bfloat16 bits using round-to-nearest-even (RNE)
 // This matches the rounding behavior of half and fp8 types
+// NOLINTNEXTLINE(readability-identifier-naming)
 inline uint16_t float_to_bfloat16_bits_rne(float f) noexcept
 {
     uint32_t bits;
@@ -125,8 +127,8 @@ inline uint16_t float_to_bfloat16_bits_rne(float f) noexcept
 
     // Check for NaN: if exponent is all 1s and mantissa is non-zero, preserve NaN
     // NaN bit patterns have exponent 0xFF and non-zero mantissa in the full float
-    uint32_t exp = (bits >> 23) & 0xFF;
-    uint32_t mant = bits & 0x007FFFFF;
+    const uint32_t exp = (bits >> 23) & 0xFF;
+    const uint32_t mant = bits & 0x007FFFFF;
     if(exp == 0xFF && mant != 0)
     {
         // Preserve NaN - ensure mantissa is non-zero in bfloat16
@@ -151,8 +153,10 @@ inline uint16_t float_to_bfloat16_bits_rne(float f) noexcept
 }
 
 // Templated conversion function that selects rounding mode at compile time
+// NOLINTBEGIN(readability-identifier-naming)
 template <Bfloat16RoundingMode Mode>
 inline uint16_t float_to_bfloat16_bits(float f) noexcept
+// NOLINTEND(readability-identifier-naming)
 {
     if constexpr(Mode == Bfloat16RoundingMode::Truncate)
     {
@@ -165,12 +169,14 @@ inline uint16_t float_to_bfloat16_bits(float f) noexcept
 }
 
 // Default conversion uses RNE for consistency with half and fp8 types
+// NOLINTNEXTLINE(readability-identifier-naming)
 inline uint16_t float_to_bfloat16_bits(float f) noexcept
 {
     return float_to_bfloat16_bits_rne(f);
 }
 
 // Convert bfloat16 bits to float
+// NOLINTNEXTLINE(readability-identifier-naming)
 inline float bfloat16_bits_to_float(uint16_t bits) noexcept
 {
     uint32_t floatBits = static_cast<uint32_t>(bits) << 16;
@@ -178,8 +184,6 @@ inline float bfloat16_bits_to_float(uint16_t bits) noexcept
     std::memcpy(&f, &floatBits, sizeof(float));
     return f;
 }
-
-// NOLINTEND(readability-identifier-naming)
 
 } // namespace detail
 
@@ -267,12 +271,14 @@ struct bfloat16_t
     // These are defined inline but require forward declarations above
     inline explicit bfloat16_t(half h) noexcept;
     inline explicit bfloat16_t(fp4_e2m1 f) noexcept;
+    inline explicit bfloat16_t(fp6_e2m3 f) noexcept;
+    inline explicit bfloat16_t(fp6_e3m2 f) noexcept;
     inline explicit bfloat16_t(fp8_e4m3 f) noexcept;
     inline explicit bfloat16_t(fp8_e5m2 f) noexcept;
     inline explicit bfloat16_t(fp8_e8m0 f) noexcept;
 
     // Factory for raw bits
-    // NOLINTNEXTLINE(readability-identifier-naming) - using snake_case for factory function
+    // NOLINTNEXTLINE(readability-identifier-naming)
     static constexpr bfloat16_t from_bits(uint16_t bits) noexcept
     {
         bfloat16_t val;
@@ -467,14 +473,15 @@ inline bool isfinite(bfloat16_t<M> x)
 template <Bfloat16RoundingMode M>
 inline bfloat16_t<M> copysign(bfloat16_t<M> x, bfloat16_t<M> y)
 {
-    uint16_t xBits = x.data & detail::BFLOAT16_ABS_MASK;
-    uint16_t ySign = y.data & detail::BFLOAT16_SIGN_MASK;
+    const uint16_t xBits = x.data & detail::BFLOAT16_ABS_MASK;
+    const uint16_t ySign = y.data & detail::BFLOAT16_SIGN_MASK;
     return bfloat16_t<M>::from_bits(xBits | ySign);
 }
 
-// Min/max with NaN handling
+// Equivalent to std::fmax/std::fmin
+// If one input is NaN and the other is not, returns the non-NaN value.
 template <Bfloat16RoundingMode M>
-inline bfloat16_t<M> max(bfloat16_t<M> a, bfloat16_t<M> b)
+inline bfloat16_t<M> fmax(bfloat16_t<M> a, bfloat16_t<M> b)
 {
     if(isnan(a))
     {
@@ -488,7 +495,7 @@ inline bfloat16_t<M> max(bfloat16_t<M> a, bfloat16_t<M> b)
 }
 
 template <Bfloat16RoundingMode M>
-inline bfloat16_t<M> min(bfloat16_t<M> a, bfloat16_t<M> b)
+inline bfloat16_t<M> fmin(bfloat16_t<M> a, bfloat16_t<M> b)
 {
     if(isnan(a))
     {
@@ -499,6 +506,20 @@ inline bfloat16_t<M> min(bfloat16_t<M> a, bfloat16_t<M> b)
         return a;
     }
     return a < b ? a : b;
+}
+
+// Equivalent to std::max/std::min
+// No NaN handling
+template <Bfloat16RoundingMode M>
+inline bfloat16_t<M> max(bfloat16_t<M> a, bfloat16_t<M> b)
+{
+    return a < b ? b : a;
+}
+
+template <Bfloat16RoundingMode M>
+inline bfloat16_t<M> min(bfloat16_t<M> a, bfloat16_t<M> b)
+{
+    return b < a ? b : a;
 }
 
 // Rounding functions

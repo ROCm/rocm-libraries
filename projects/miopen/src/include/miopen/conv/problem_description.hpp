@@ -312,9 +312,9 @@ struct ProblemDescription : ProblemDescriptionBase
         MIOPEN_THROW("Direction must be known!");
     }
 
-    bool IsLayoutDefault() const;
-    bool IsLayoutNHWC() const;
-    bool IsLayoutNCHWc() const;
+    MIOPEN_INTERNALS_EXPORT bool IsLayoutDefault() const;
+    MIOPEN_INTERNALS_EXPORT bool IsLayoutNHWC() const;
+    MIOPEN_INTERNALS_EXPORT bool IsLayoutNCHWc() const;
     bool IsNCHWc_NCHWc() const;
     bool IsNCHWc_CHWNc() const;
 
@@ -432,6 +432,60 @@ private:
     miopenAlphaBetaCase_t alpha_beta_case = DEFAULT;
     mutable bool use_tf32                 = false;
 };
+
+inline bool IsPointOutput3dStrideEqFilter(const ProblemDescription& problem,
+                                          Direction direction,
+                                          bool require_input_spatial_eq_filter)
+{
+    if(problem.GetDirection() != direction)
+        return false;
+
+    const auto& conv = problem.GetConv();
+    if(conv.GetSpatialDimension() != 3 || conv.group_count != 1)
+        return false;
+
+    const auto& in_desc    = problem.GetIn();
+    const auto& out_desc   = problem.GetOut();
+    const auto& point_desc = direction == Direction::Forward ? out_desc : in_desc;
+    const auto& w_desc     = problem.GetWeights();
+
+    const auto& point_lens = point_desc.GetLengths();
+    if(point_lens.size() != 5 || point_lens[2] != 1 || point_lens[3] != 1 || point_lens[4] != 1)
+        return false;
+
+    const auto& in_lens = in_desc.GetLengths();
+
+    const auto& pads      = conv.GetConvPads();
+    const auto& strides   = conv.GetConvStrides();
+    const auto& dilations = conv.GetConvDilations();
+    const auto& w_lens    = w_desc.GetLengths();
+    if(w_lens.size() != 5 || pads.size() != 3 || strides.size() != 3 || dilations.size() != 3)
+        return false;
+
+    for(int i = 0; i < 3; ++i)
+    {
+        if(pads[i] != 0 || dilations[i] != 1)
+            return false;
+        if(static_cast<int>(w_lens[2 + i]) != strides[i])
+            return false;
+        if(require_input_spatial_eq_filter &&
+           static_cast<int>(in_lens[2 + i]) != static_cast<int>(w_lens[2 + i]))
+            return false;
+    }
+
+    return true;
+}
+
+inline bool IsBwdDataPointOutput3dStrideEqFilter(const ProblemDescription& problem)
+{
+    return IsPointOutput3dStrideEqFilter(problem, Direction::BackwardData, false);
+}
+
+inline bool IsFwdDataPointOutput3dStrideEqFilter(const ProblemDescription& problem)
+{
+    // For direct GEMM without Im2Col, input spatial must equal filter spatial.
+    return IsPointOutput3dStrideEqFilter(problem, Direction::Forward, true);
+}
 
 } // namespace conv
 } // namespace miopen

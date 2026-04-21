@@ -251,7 +251,11 @@ option(MIOPEN_USE_COMPOSABLEKERNEL "Enable MIOpen to use composable kernels for 
 if(MIOPEN_BACKEND_OPENCL)
     set(MIOPEN_USE_COMPOSABLEKERNEL OFF)
 endif()
+option(MIOPEN_CK_UNBUNDLE_PER_ARCH
+    "Generate per-architecture CK static archives for MIOpenCKGroupedConv_<arch> shared libraries"
+    OFF)
 message(STATUS "Enable Composable Kernels: ${MIOPEN_USE_COMPOSABLEKERNEL}")
+message(STATUS "Enable per-arch CK unbundling: ${MIOPEN_CK_UNBUNDLE_PER_ARCH}")
 
 set_var_to_condition(MIOPEN_USE_COMGR_DEFAULT (NOT DEFINED MIOPEN_BACKEND_OPENCL) AND (NOT (MIOPEN_BACKEND STREQUAL "HIPNOGPU")))
 option(MIOPEN_USE_COMGR "Use comgr to build kernels instead of offline tools" ${MIOPEN_USE_COMGR_DEFAULT})
@@ -333,6 +337,78 @@ if( MIOPEN_BACKEND STREQUAL "HIP" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_B
             find_package(composable_kernel 1.0.0 COMPONENTS device_conv_operations)
         endif()
     endif()
+
+    # Arch name sanitization for CMake target names (used by ck_impl and unbundling)
+    function(miopen_sanitize_arch ARCH OUT_VAR)
+        string(REPLACE ":" "_" _r "${ARCH}")
+        string(REPLACE "+" "p" _r "${_r}")
+        string(REPLACE "-" "_" _r "${_r}")
+        set(${OUT_VAR} "${_r}" PARENT_SCOPE)
+    endfunction()
+
+    # --- Optional per-architecture CK archive unbundling ---
+    if(MIOPEN_USE_COMPOSABLEKERNEL AND MIOPEN_CK_UNBUNDLE_PER_ARCH)
+        # Unbundle the fat libdevice_conv_operations.a into per-arch .a files
+        # so each per-target MIOpen .so can link only the CK code it needs.
+
+        # Find unbundling tools
+        find_program(MIOPEN_OFFLOAD_BUNDLER clang-offload-bundler
+            HINTS ${CMAKE_HIP_COMPILER_TOOLKIT_ROOT}/bin
+                  ${ROCM_PATH}/llvm/bin
+                  /opt/rocm/llvm/bin)
+        find_program(MIOPEN_LLVM_OBJCOPY llvm-objcopy
+            HINTS ${CMAKE_HIP_COMPILER_TOOLKIT_ROOT}/bin
+                  ${ROCM_PATH}/llvm/bin
+                  /opt/rocm/llvm/bin)
+
+        if(NOT MIOPEN_OFFLOAD_BUNDLER OR NOT MIOPEN_LLVM_OBJCOPY)
+            message(FATAL_ERROR "Per-arch CK unbundling requires clang-offload-bundler and llvm-objcopy")
+        endif()
+
+        # Get the fat archive path
+        if(MIOPEN_BUILD_CK)
+            set(CK_FAT_ARCHIVE_TARGET device_conv_operations)
+            set(CK_FAT_ARCHIVE_PATH $<TARGET_FILE:device_conv_operations>)
+        else()
+            set(CK_FAT_ARCHIVE_PATH $<TARGET_FILE:composable_kernel::device_conv_operations>)
+            set(CK_FAT_ARCHIVE_TARGET composable_kernel::device_conv_operations)
+        endif()
+
+        set(CK_PER_ARCH_DIR "${CMAKE_CURRENT_BINARY_DIR}/lib")
+
+        foreach(arch IN LISTS GPU_TARGETS)
+            miopen_sanitize_arch("${arch}" arch_safe)
+            set(target_name "ck_conv_${arch_safe}")
+
+            # Skip if already created (GPU_TARGETS may contain duplicates)
+            if(TARGET ${target_name})
+                continue()
+            endif()
+
+            set(per_arch_lib "${CK_PER_ARCH_DIR}/libdevice_conv_operations_${arch_safe}.a")
+
+            add_custom_command(
+                OUTPUT "${per_arch_lib}"
+                DEPENDS ${CK_FAT_ARCHIVE_TARGET}
+                COMMAND ${CMAKE_COMMAND}
+                    -DFAT_ARCHIVE=${CK_FAT_ARCHIVE_PATH}
+                    -DARCH=${arch}
+                    -DOUTPUT=${per_arch_lib}
+                    -DBUNDLER=${MIOPEN_OFFLOAD_BUNDLER}
+                    -DAR=${CMAKE_AR}
+                    -DLLVM_OBJCOPY=${MIOPEN_LLVM_OBJCOPY}
+                    -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/unbundle_archive.cmake
+                COMMENT "Unbundling CK conv operations for ${arch}"
+            )
+
+            add_custom_target(${target_name}_unbundle ALL DEPENDS "${per_arch_lib}")
+            add_library(${target_name} STATIC IMPORTED GLOBAL)
+            set_target_properties(${target_name} PROPERTIES IMPORTED_LOCATION "${per_arch_lib}")
+            add_dependencies(${target_name} ${target_name}_unbundle)
+
+        endforeach()
+    endif() # optional per-arch CK unbundling
+
     if( MIOPEN_BACKEND STREQUAL "HIPNOGPU")
         set(MIOPEN_MODE_NOGPU 1)
     endif()
@@ -707,6 +783,7 @@ enable_clang_tidy(
         "\.hpp$"
     EXTRA_ARGS
         -DMIOPEN_USE_CLANG_TIDY
+        -D__builtin_elementwise_exp10=__builtin_elementwise_exp
 )
 
 include(CppCheck)

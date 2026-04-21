@@ -16,9 +16,9 @@ inline void to_json(nlohmann::json& tensorAttrJson,
 {
     tensorAttrJson["uid"] = tensorAttr.uid();
     tensorAttrJson["data_type"] = tensorAttr.data_type();
-    tensorAttrJson["dims"] = *tensorAttr.dims();
-    tensorAttrJson["strides"] = *tensorAttr.strides();
-    tensorAttrJson["name"] = tensorAttr.name()->c_str();
+    tensorAttrJson["dims"] = tensorAttr.dims();
+    tensorAttrJson["strides"] = tensorAttr.strides();
+    tensorAttrJson["name"] = flatbuffers::safeStr(tensorAttr.name());
     tensorAttrJson["virtual"] = tensorAttr.virtual_();
 
     // Serialize TensorValue union if present
@@ -43,6 +43,9 @@ inline void to_json(nlohmann::json& tensorAttrJson,
         case data_objects::TensorValue::Int32Value:
             tensorAttrJson["value"] = tensorAttr.value_as_Int32Value()->value();
             break;
+        case data_objects::TensorValue::Int64Value:
+            tensorAttrJson["value"] = tensorAttr.value_as_Int64Value()->value();
+            break;
         case data_objects::TensorValue::Float64Value:
             tensorAttrJson["value"] = tensorAttr.value_as_Float64Value()->value();
             break;
@@ -65,7 +68,7 @@ inline auto to<data_objects::TensorAttributes>(flatbuffers::FlatBufferBuilder& b
     auto dataType = entry.at("data_type").get<data_objects::DataType>();
     auto dims = entry.at("dims").get<std::vector<int64_t>>();
     auto strides = entry.at("strides").get<std::vector<int64_t>>();
-    bool isVirtual = entry.at("virtual").get<bool>();
+    const bool isVirtual = entry.at("virtual").get<bool>();
 
     // Check if TensorValue union is present
     if(entry.contains("value_type"))
@@ -79,42 +82,49 @@ inline auto to<data_objects::TensorAttributes>(flatbuffers::FlatBufferBuilder& b
         case data_objects::TensorValue::Float32Value:
         {
             auto val = entry.at("value").get<float>();
-            data_objects::Float32Value floatVal(val);
+            const data_objects::Float32Value floatVal(val);
             valueOffset = builder.CreateStruct(floatVal).Union();
             break;
         }
         case data_objects::TensorValue::Float16Value:
         {
             auto val = entry.at("value").get<float>();
-            data_objects::Float16Value halfVal(val);
+            const data_objects::Float16Value halfVal(val);
             valueOffset = builder.CreateStruct(halfVal).Union();
             break;
         }
         case data_objects::TensorValue::BFloat16Value:
         {
             auto val = entry.at("value").get<float>();
-            data_objects::BFloat16Value bfloatVal(val);
+            const data_objects::BFloat16Value bfloatVal(val);
             valueOffset = builder.CreateStruct(bfloatVal).Union();
             break;
         }
         case data_objects::TensorValue::Float8Value:
         {
             auto val = entry.at("value").get<uint8_t>();
-            data_objects::Float8Value float8Val(val);
+            const data_objects::Float8Value float8Val(val);
             valueOffset = builder.CreateStruct(float8Val).Union();
             break;
         }
         case data_objects::TensorValue::Int32Value:
         {
             auto val = entry.at("value").get<int32_t>();
-            data_objects::Int32Value intVal(val);
+            const data_objects::Int32Value intVal(val);
             valueOffset = builder.CreateStruct(intVal).Union();
+            break;
+        }
+        case data_objects::TensorValue::Int64Value:
+        {
+            auto val = entry.at("value").get<int64_t>();
+            const data_objects::Int64Value int64Val(val);
+            valueOffset = builder.CreateStruct(int64Val).Union();
             break;
         }
         case data_objects::TensorValue::Float64Value:
         {
             auto val = entry.at("value").get<double>();
-            data_objects::Float64Value doubleVal(val);
+            const data_objects::Float64Value doubleVal(val);
             valueOffset = builder.CreateStruct(doubleVal).Union();
             break;
         }

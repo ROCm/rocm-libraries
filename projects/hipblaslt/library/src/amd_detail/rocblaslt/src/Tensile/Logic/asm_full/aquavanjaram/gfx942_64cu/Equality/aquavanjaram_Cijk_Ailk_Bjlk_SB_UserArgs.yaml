@@ -89,15 +89,15 @@
     CodeObjectVersion: default
     CustomKernelName: ''
     DepthU: 64
-    DirectToLds: false
+    DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
     DirectToVgprSparseMetadata: false
     EdgeType: ShiftPtr
     EnableF32XdlMathOp: false
     EnableMatrixInstruction: true
-    ExpandPointerSwap: 0
-    GlobalReadPerMfma: 1
+    ExpandPointerSwap: false
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 4
     GlobalSplitU: 1
@@ -228,11 +228,11 @@
     ThreadTileA: 4
     ThreadTileB: 1
     TransposeLDS: 0
-    TransposeLDSMetadata: true
+    TransposeLDSMetadata: 1
     UnrollMajorLDSA: 0
     UnrollMajorLDSB: 0
     UnrollMajorLDSMetadata: true
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseInstOffsetForGRO: 0
     UseSgprForGRO: -1
     Valid: true
@@ -274,15 +274,15 @@
     CodeObjectVersion: default
     CustomKernelName: ''
     DepthU: 32
-    DirectToLds: false
+    DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
     DirectToVgprSparseMetadata: false
     EdgeType: ShiftPtr
     EnableF32XdlMathOp: false
     EnableMatrixInstruction: true
-    ExpandPointerSwap: 0
-    GlobalReadPerMfma: 1
+    ExpandPointerSwap: false
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 4
     GlobalSplitU: 1
@@ -413,11 +413,11 @@
     ThreadTileA: 8
     ThreadTileB: 2
     TransposeLDS: 0
-    TransposeLDSMetadata: true
+    TransposeLDSMetadata: 1
     UnrollMajorLDSA: 0
     UnrollMajorLDSB: 0
     UnrollMajorLDSMetadata: true
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseInstOffsetForGRO: 0
     UseSgprForGRO: -1
     Valid: true
@@ -459,15 +459,15 @@
     CodeObjectVersion: default
     CustomKernelName: ''
     DepthU: 32
-    DirectToLds: false
+    DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
     DirectToVgprSparseMetadata: false
     EdgeType: ShiftPtr
     EnableF32XdlMathOp: false
     EnableMatrixInstruction: true
-    ExpandPointerSwap: 0
-    GlobalReadPerMfma: 1
+    ExpandPointerSwap: false
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 2
     GlobalSplitU: 1
@@ -598,11 +598,11 @@
     ThreadTileA: 8
     ThreadTileB: 7
     TransposeLDS: 0
-    TransposeLDSMetadata: true
+    TransposeLDSMetadata: 1
     UnrollMajorLDSA: 0
     UnrollMajorLDSB: 0
     UnrollMajorLDSMetadata: true
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseInstOffsetForGRO: 0
     UseSgprForGRO: -1
     Valid: true

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 #include <gtest/gtest.h>
-#include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <miopen/miopen.h>
@@ -28,8 +28,8 @@ TEST(TestConvFwdParams, InitializesAllTensorsFromValidGraph)
 {
     // Create a valid convolution graph
     auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph();
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                              builder.GetSize());
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                                     builder.GetSize());
 
     // Get the convolution node and attributes
     const auto& node = graph.getNode(0);
@@ -68,8 +68,8 @@ TEST(TestConvFwdParams, ThrowsOnAssymetricPadding)
                                                                        convPostPadding,
                                                                        convStrides,
                                                                        convDilation);
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                              builder.GetSize());
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                                     builder.GetSize());
 
     // Get the convolution node and attributes
     const auto& node = graph.getNode(0);
@@ -103,8 +103,8 @@ TEST(TestConvFwdParams, ThrowsOnInvalidPostPaddingVectorSize)
                                                                        convPostPadding,
                                                                        convStrides,
                                                                        convDilation);
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                              builder.GetSize());
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                                     builder.GetSize());
 
     // Get the convolution node and attributes
     const auto& node = graph.getNode(0);
@@ -139,8 +139,8 @@ TEST(TestConvFwdParams, ThrowsOnInvalidPaddingVectorsSize)
                                                                        convPostPadding,
                                                                        convStrides,
                                                                        convDilation);
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                              builder.GetSize());
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                                     builder.GetSize());
 
     // Get the convolution node and attributes
     const auto& node = graph.getNode(0);
@@ -174,8 +174,8 @@ TEST(TestConvFwdParams, ThrowsOnInvalidStrideVectorSize)
                                                                        convPostPadding,
                                                                        convStrides,
                                                                        convDilation);
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                              builder.GetSize());
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                                     builder.GetSize());
 
     // Get the convolution node and attributes
     const auto& node = graph.getNode(0);
@@ -209,8 +209,8 @@ TEST(TestConvFwdParams, ThrowsOnInvalidDilationVectorSize)
                                                                        convPostPadding,
                                                                        convStrides,
                                                                        convDilation);
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                              builder.GetSize());
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                                     builder.GetSize());
 
     // Get the convolution node and attributes
     const auto& node = graph.getNode(0);
@@ -226,8 +226,8 @@ TEST_F(TestGpuConvFwdPlan, CreatesPlanWithValidGraph)
 {
     // Create a valid convolution graph
     auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph();
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                              builder.GetSize());
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                                     builder.GetSize());
 
     // Get the convolution node and attributes
     const auto& node = graph.getNode(0);
@@ -265,8 +265,8 @@ TEST_F(TestGpuConvFwdPlan, ThrowsOnInvalidDims)
                                                                        convPostPadding,
                                                                        convStrides,
                                                                        convDilation);
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                              builder.GetSize());
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                                     builder.GetSize());
 
     // Get the convolution node and attributes
     const auto& node = graph.getNode(0);
@@ -282,11 +282,54 @@ TEST_F(TestGpuConvFwdPlan, ThrowsOnInvalidDims)
                  hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
+TEST_F(TestGpuConvFwdPlan, PlanUsesDefaultWorkspaceSizeWhenNoLimitSet)
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph();
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                                     builder.GetSize());
+
+    const auto& node = graph.getNode(0);
+    auto* attrs = node.attributes_as_ConvolutionFwdAttributes();
+    ASSERT_NE(attrs, nullptr);
+
+    ConvFwdParams params(*attrs, graph.getTensorMap());
+
+    const size_t defaultSize = 4096;
+    HipdnnMiopenSettings settings;
+    settings.setDefaultWorkspaceSize(defaultSize);
+
+    ConvFwdPlan plan(_handle, std::move(params), settings);
+    EXPECT_EQ(plan.getWorkspaceSize(_handle), defaultSize);
+}
+
+TEST_F(TestGpuConvFwdPlan, PlanUsesKnobLimitOverDefault)
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph();
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                                     builder.GetSize());
+
+    const auto& node = graph.getNode(0);
+    auto* attrs = node.attributes_as_ConvolutionFwdAttributes();
+    ASSERT_NE(attrs, nullptr);
+
+    ConvFwdParams params(*attrs, graph.getTensorMap());
+
+    const size_t defaultSize = 4096;
+    const size_t knobLimit = 2048;
+    HipdnnMiopenSettings settings;
+    settings.setDefaultWorkspaceSize(defaultSize);
+    settings.setWorkspaceSizeLimit(knobLimit);
+
+    ConvFwdPlan plan(_handle, std::move(params), settings);
+    EXPECT_EQ(plan.getWorkspaceSize(_handle), knobLimit);
+}
+
 TEST(TestConvFwdParams, AcceptsDeterministicEnabledFlag)
 {
     // Create a valid convolution graph
     auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph();
-    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                                     builder.GetSize());
 
     // Get the convolution node and attributes
     const auto& node = graph.getNode(0);

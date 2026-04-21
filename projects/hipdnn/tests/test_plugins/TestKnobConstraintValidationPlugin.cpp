@@ -4,8 +4,8 @@
 #include "TestPluginCommon.hpp"
 #include "TestPluginEngineIdMap.hpp"
 
-#include <hipdnn_data_sdk/data_objects/knob_value_generated.h>
-#include <hipdnn_data_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/knob_value_generated.h>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
 #include <hipdnn_plugin_sdk/KnobFactory.hpp>
 
 // NOLINTNEXTLINE
@@ -72,7 +72,8 @@ public:
             flatbuffers::FlatBufferBuilder builder;
 
             // Create knobs vector using KnobFactory
-            std::vector<flatbuffers::Offset<hipdnn_data_sdk::data_objects::Knob>> knobOffsets;
+            std::vector<flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Knob>>
+                knobOffsets;
 
             // Knob 1: Integer knob with min/max/step constraints
             knobOffsets.push_back(hipdnn_plugin_sdk::KnobFactory::createIntKnob(
@@ -103,7 +104,7 @@ public:
                 {"alpha", "beta", "gamma"})); // valid values
 
             auto knobsVector = builder.CreateVector(knobOffsets);
-            auto newEngineDetails = hipdnn_data_sdk::data_objects::CreateEngineDetails(
+            auto newEngineDetails = hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetails(
                 builder, getInstance()->getEngineId(), knobsVector);
             builder.Finish(newEngineDetails);
             auto serializedDetails = builder.Release();
@@ -137,7 +138,7 @@ public:
             hipdnn_plugin_sdk::throwIfNull(executionContext);
 
             // Deserialize engineConfig to access knob settings
-            hipdnn_data_sdk::flatbuffer_utilities::EngineConfigWrapper configWrapper(
+            const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper configWrapper(
                 engineConfig->ptr, engineConfig->size);
 
             // Validate knob types
@@ -149,7 +150,7 @@ public:
                 // Match against known knobs and validate type
                 if(knobId == "constraint.int_knob")
                 {
-                    if(valueType != hipdnn_data_sdk::data_objects::KnobValue::IntValue)
+                    if(valueType != hipdnn_flatbuffers_sdk::data_objects::KnobValue::IntValue)
                     {
                         throw hipdnn_plugin_sdk::HipdnnPluginException(
                             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
@@ -158,7 +159,7 @@ public:
                 }
                 else if(knobId == "constraint.float_knob")
                 {
-                    if(valueType != hipdnn_data_sdk::data_objects::KnobValue::FloatValue)
+                    if(valueType != hipdnn_flatbuffers_sdk::data_objects::KnobValue::FloatValue)
                     {
                         throw hipdnn_plugin_sdk::HipdnnPluginException(
                             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
@@ -167,7 +168,7 @@ public:
                 }
                 else if(knobId == "constraint.string_knob")
                 {
-                    if(valueType != hipdnn_data_sdk::data_objects::KnobValue::StringValue)
+                    if(valueType != hipdnn_flatbuffers_sdk::data_objects::KnobValue::StringValue)
                     {
                         throw hipdnn_plugin_sdk::HipdnnPluginException(
                             HIPDNN_PLUGIN_STATUS_BAD_PARAM,

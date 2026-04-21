@@ -1,8 +1,8 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-#include <hipdnn_data_sdk/utilities/FlatbufferUtils.hpp>
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
+#include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
@@ -13,8 +13,9 @@ namespace miopen_plugin
 {
 
 ConvFwdParams::ConvFwdParams(
-    const hipdnn_data_sdk::data_objects::ConvolutionFwdAttributes& attributes,
-    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+    const hipdnn_flatbuffers_sdk::data_objects::ConvolutionFwdAttributes& attributes,
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
         tensorMap,
     bool deterministicEnabled)
     : _spatialDimCount(miopen_utils::getSpatialDimCount(
@@ -28,9 +29,9 @@ ConvFwdParams::ConvFwdParams(
     const auto& attrY = miopen_utils::findTensorAttributes(tensorMap, _y.uid());
 
     const auto inputDims
-        = hipdnn_data_sdk::utilities::convertFlatBufferVectorToStdVector(attrX.dims());
+        = hipdnn_flatbuffers_sdk::utilities::convertFlatBufferVectorToStdVector(attrX.dims());
     const auto weightDims
-        = hipdnn_data_sdk::utilities::convertFlatBufferVectorToStdVector(attrW.dims());
+        = hipdnn_flatbuffers_sdk::utilities::convertFlatBufferVectorToStdVector(attrW.dims());
     const auto groupCount = hipdnn_data_sdk::utilities::calculateGroupCount(inputDims, weightDims);
 
     _conv = MiopenConvDescriptor(
@@ -91,6 +92,14 @@ ConvFwdPlan::ConvFwdPlan(const HipdnnMiopenHandle& handle,
     if(_executionSettings.workspaceSizeLimit().has_value())
     {
         _workspaceSize = _executionSettings.workspaceSizeLimit().value();
+        HIPDNN_PLUGIN_LOG_INFO(
+            "Convolution Fwd: Using knob settings workspace size: " << _workspaceSize);
+    }
+    else if(_executionSettings.defaultWorkspaceSize().has_value())
+    {
+        _workspaceSize = _executionSettings.defaultWorkspaceSize().value();
+        HIPDNN_PLUGIN_LOG_INFO(
+            "Convolution Fwd: Using default max workspace size: " << _workspaceSize);
     }
     else
     {
@@ -101,6 +110,7 @@ ConvFwdPlan::ConvFwdPlan(const HipdnnMiopenHandle& handle,
                                                      _params.conv().convDescriptor(),
                                                      _params.y().tensorDescriptor(),
                                                      &_workspaceSize));
+        HIPDNN_PLUGIN_LOG_WARN("Convolution Fwd: Using queried workspace size: " << _workspaceSize);
     }
 }
 

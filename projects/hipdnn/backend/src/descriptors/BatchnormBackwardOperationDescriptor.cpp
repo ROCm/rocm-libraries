@@ -5,6 +5,7 @@
 #include "DescriptorAttributeUtils.hpp"
 #include "HipdnnBackendDescriptorType.h"
 #include "HipdnnException.hpp"
+#include "HipdnnOperationType.h"
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 
 namespace hipdnn_backend
@@ -30,13 +31,13 @@ void BatchnormBackwardOperationDescriptor::finalize()
     THROW_IF_NULL(_dbiasDesc,
                   HIPDNN_STATUS_BAD_PARAM,
                   "BatchnormBackwardOperationDescriptor::finalize() failed: DBIAS tensor not set");
-    THROW_IF_TRUE(_computeDataType == hipdnn_data_sdk::data_objects::DataType::UNSET,
+    THROW_IF_TRUE(_computeDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET,
                   HIPDNN_STATUS_BAD_PARAM,
                   "BatchnormBackwardOperationDescriptor::finalize() failed: compute data type not "
                   "set");
 
-    bool hasMean = _meanDesc != nullptr;
-    bool hasInvVariance = _invVarianceDesc != nullptr;
+    const bool hasMean = _meanDesc != nullptr;
+    const bool hasInvVariance = _invVarianceDesc != nullptr;
     THROW_IF_TRUE(
         hasMean != hasInvVariance,
         HIPDNN_STATUS_BAD_PARAM,
@@ -149,6 +150,13 @@ void BatchnormBackwardOperationDescriptor::setAttribute(hipdnnBackendAttributeNa
                                  arrayOfElements,
                                  "BatchnormBackwardOperationDescriptor::setAttribute()");
         break;
+    case HIPDNN_ATTR_OPERATION_NAME_EXT:
+        setString(_name,
+                  attributeType,
+                  elementCount,
+                  arrayOfElements,
+                  "BatchnormBackwardOperationDescriptor::setAttribute()");
+        break;
     default:
         throw HipdnnException(
             HIPDNN_STATUS_NOT_SUPPORTED,
@@ -222,20 +230,20 @@ void BatchnormBackwardOperationDescriptor::getAttribute(hipdnnBackendAttributeNa
                             "BatchnormBackwardOperationDescriptor::getAttribute()");
         break;
     case HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_MEAN_EXT:
-        getTensorDescriptor(_meanDesc,
-                            attributeType,
-                            requestedElementCount,
-                            elementCount,
-                            arrayOfElements,
-                            "BatchnormBackwardOperationDescriptor::getAttribute()");
+        getOptionalTensorDescriptor(_meanDesc,
+                                    attributeType,
+                                    requestedElementCount,
+                                    elementCount,
+                                    arrayOfElements,
+                                    "BatchnormBackwardOperationDescriptor::getAttribute()");
         break;
     case HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_INV_VARIANCE_EXT:
-        getTensorDescriptor(_invVarianceDesc,
-                            attributeType,
-                            requestedElementCount,
-                            elementCount,
-                            arrayOfElements,
-                            "BatchnormBackwardOperationDescriptor::getAttribute()");
+        getOptionalTensorDescriptor(_invVarianceDesc,
+                                    attributeType,
+                                    requestedElementCount,
+                                    elementCount,
+                                    arrayOfElements,
+                                    "BatchnormBackwardOperationDescriptor::getAttribute()");
         break;
     case HIPDNN_ATTR_BATCHNORM_BACKWARD_COMP_TYPE_EXT:
         getDataType(_computeDataType,
@@ -252,6 +260,22 @@ void BatchnormBackwardOperationDescriptor::getAttribute(hipdnnBackendAttributeNa
                                  elementCount,
                                  arrayOfElements,
                                  "BatchnormBackwardOperationDescriptor::getAttribute()");
+        break;
+    case HIPDNN_ATTR_OPERATION_NAME_EXT:
+        getString(_name,
+                  attributeType,
+                  requestedElementCount,
+                  elementCount,
+                  arrayOfElements,
+                  "BatchnormBackwardOperationDescriptor::getAttribute()");
+        break;
+    case HIPDNN_ATTR_OPERATION_TYPE_EXT:
+        getOperationType(HIPDNN_OPERATION_TYPE_BATCHNORM_BACKWARD_EXT,
+                         attributeType,
+                         requestedElementCount,
+                         elementCount,
+                         arrayOfElements,
+                         "BatchnormBackwardOperationDescriptor::getAttribute()");
         break;
     default:
         throw HipdnnException(
@@ -281,12 +305,13 @@ std::vector<std::shared_ptr<TensorDescriptor>>
     return result;
 }
 
-std::unique_ptr<hipdnn_data_sdk::data_objects::NodeT>
+std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::NodeT>
     BatchnormBackwardOperationDescriptor::buildNode() const
 {
-    auto node = std::make_unique<hipdnn_data_sdk::data_objects::NodeT>();
+    auto node = std::make_unique<hipdnn_flatbuffers_sdk::data_objects::NodeT>();
+    node->name = _name;
     node->compute_data_type = _computeDataType;
-    node->attributes.Set(hipdnn_data_sdk::data_objects::BatchnormBackwardAttributesT(_data));
+    node->attributes.Set(hipdnn_flatbuffers_sdk::data_objects::BatchnormBackwardAttributesT(_data));
     return node;
 }
 
@@ -299,6 +324,7 @@ std::string BatchnormBackwardOperationDescriptor::toString() const
 {
     using hipdnn_data_sdk::utilities::vecToString;
     std::string str = "BatchnormBackwardOperationDescriptor: {";
+    str += "name=" + _name + ", ";
     str += "dy_uid=" + std::to_string(_data.dy_tensor_uid);
     str += ", x_uid=" + std::to_string(_data.x_tensor_uid);
     str += ", scale_uid=" + std::to_string(_data.scale_tensor_uid);
@@ -314,9 +340,61 @@ std::string BatchnormBackwardOperationDescriptor::toString() const
                : "nullopt";
     str += ", peer_stats_uids=" + vecToString(_data.peer_stats_tensor_uid);
     str += ", compute_data_type=";
-    str += hipdnn_data_sdk::data_objects::EnumNameDataType(_computeDataType);
+    str += hipdnn_flatbuffers_sdk::data_objects::EnumNameDataType(_computeDataType);
     str += "}";
     return str;
+}
+
+std::shared_ptr<BatchnormBackwardOperationDescriptor>
+    BatchnormBackwardOperationDescriptor::fromNode(
+        const hipdnn_flatbuffers_sdk::data_objects::NodeT& nodeT,
+        const std::unordered_map<int64_t, std::shared_ptr<TensorDescriptor>>& tensorMap)
+{
+    const auto* attrs = nodeT.attributes.AsBatchnormBackwardAttributes();
+    THROW_IF_NULL(
+        attrs,
+        HIPDNN_STATUS_INTERNAL_ERROR,
+        "BatchnormBackwardOperationDescriptor::fromNode: BatchnormBackwardAttributes is null");
+
+    auto desc = std::make_shared<BatchnormBackwardOperationDescriptor>();
+    desc->_data = *attrs;
+    desc->_computeDataType = nodeT.compute_data_type;
+    desc->_name = nodeT.name;
+    desc->_dyDesc = findTensorInMap(
+        tensorMap, attrs->dy_tensor_uid, "BatchnormBackwardOperationDescriptor::fromNode: DY");
+    desc->_xDesc = findTensorInMap(
+        tensorMap, attrs->x_tensor_uid, "BatchnormBackwardOperationDescriptor::fromNode: X");
+    desc->_scaleDesc = findTensorInMap(tensorMap,
+                                       attrs->scale_tensor_uid,
+                                       "BatchnormBackwardOperationDescriptor::fromNode: Scale");
+    desc->_dxDesc = findTensorInMap(
+        tensorMap, attrs->dx_tensor_uid, "BatchnormBackwardOperationDescriptor::fromNode: DX");
+    desc->_dscaleDesc = findTensorInMap(tensorMap,
+                                        attrs->dscale_tensor_uid,
+                                        "BatchnormBackwardOperationDescriptor::fromNode: DScale");
+    desc->_dbiasDesc = findTensorInMap(tensorMap,
+                                       attrs->dbias_tensor_uid,
+                                       "BatchnormBackwardOperationDescriptor::fromNode: DBias");
+    if(attrs->mean_tensor_uid)
+    {
+        desc->_meanDesc = findTensorInMap(tensorMap,
+                                          *attrs->mean_tensor_uid,
+                                          "BatchnormBackwardOperationDescriptor::fromNode: Mean");
+    }
+    if(attrs->inv_variance_tensor_uid)
+    {
+        desc->_invVarianceDesc
+            = findTensorInMap(tensorMap,
+                              *attrs->inv_variance_tensor_uid,
+                              "BatchnormBackwardOperationDescriptor::fromNode: InvVariance");
+    }
+    for(auto uid : attrs->peer_stats_tensor_uid)
+    {
+        desc->_peerStatsDescs.push_back(findTensorInMap(
+            tensorMap, uid, "BatchnormBackwardOperationDescriptor::fromNode: peer_stats"));
+    }
+    desc->finalize();
+    return desc;
 }
 
 } // namespace hipdnn_backend

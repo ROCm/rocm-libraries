@@ -3,12 +3,12 @@
 #pragma once
 
 #include "Node.hpp"
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
 #include <hipdnn_frontend/attributes/RMSNormAttributes.hpp>
 #include <hipdnn_frontend/detail/RMSNormPacker.hpp>
+#include <hipdnn_frontend/detail/RMSNormUnpacker.hpp>
 #include <hipdnn_frontend/node/detail/Utilities.hpp>
 
 namespace hipdnn_frontend::graph
@@ -24,17 +24,26 @@ public:
     {
     }
 
+    Error unpack_from_descriptor(
+        hipdnnBackendDescriptor_t opDesc,
+        std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>>& tensorMap) override
+    {
+        RMSNormAttributes attrs;
+        HIPDNN_CHECK_ERROR(detail::unpackRMSNormOperation(opDesc, tensorMap, attrs));
+        attributes = std::move(attrs);
+        return {};
+    }
+
     Error pre_validate_node() const override
     {
         // ====================================================================
         // RMS NORMALIZATION FORWARD VALIDATION
-        // (Per-channel normalization without mean subtraction)
+        // (Normalization across channels without mean subtraction)
         // ====================================================================
         // Algorithm Overview:
-        // For each channel c, RMSNorm computes the root mean square:
-        //   rms_c = sqrt((1/m) * sum_{n,h,w} x[n,c,h,w]^2 + epsilon)
-        //
-        //   y[n,c,h,w] = (x[n,c,h,w] / rms_c) * scale_c + bias_c
+        // For each (batch, spatial) position, RMSNorm computes:
+        //   rms[n,h,w]  = sqrt((1/C) * sum_c x[n,c,h,w]^2 + epsilon)
+        //   y[n,c,h,w]  = scale[c] * (x[n,c,h,w] / rms[n,h,w]) + bias[c]
         // ====================================================================
 
         // SECTION 1: Validate Required Tensor Pointers
@@ -73,15 +82,15 @@ public:
             detail::validateTensorShapesMatchIfSet(x, y, "Input tensor (x)", "Output tensor (y)"));
 
         // SECTION 4: Validate Channel Dimensions and Scale Tensor Shape
-        // Scale is per-channel with shape [1, C, 1, 1, ...]
-        auto& xDims = x->get_dim();
-        int64_t channels = xDims[1];
+        // Scale is per-channel with shape [1, C, D, H, ...]
+        HIPDNN_CHECK_ERROR(detail::validateNonBatchShapeMatch(scale, x, "Scale tensor"));
 
-        HIPDNN_CHECK_ERROR(detail::validateChannelOnlyTensorShape(scale, channels, "Scale tensor"));
-
-        // Validate optional bias tensor (per-channel with shape [1, C, 1, 1, ...])
-        HIPDNN_CHECK_ERROR(
-            detail::validateChannelOnlyShapeIfSet(attributes.get_bias(), channels, "Bias tensor"));
+        // Validate optional bias tensor (per-channel with shape [1, C, D, H, ...])
+        auto bias = attributes.get_bias();
+        if(bias)
+        {
+            HIPDNN_CHECK_ERROR(detail::validateNonBatchShapeMatch(bias, x, "Bias tensor"));
+        }
 
         // Validate forward_phase is set
         HIPDNN_RETURN_IF_EQ(attributes.get_forward_phase(),
@@ -90,10 +99,11 @@ public:
                             "RMSNormNode forward_phase must be set to TRAINING or INFERENCE");
 
         // Validate inv_rms tensor based on forward_phase
+        // Stats shape is derived from scale: where scale is non-1, stats must be 1
         if(attributes.get_forward_phase() == NormFwdPhase::TRAINING)
         {
-            HIPDNN_CHECK_ERROR(detail::validateChannelOnlyShapeIfSet(
-                attributes.get_inv_rms(), channels, "Inverse RMS tensor"));
+            HIPDNN_CHECK_ERROR(detail::validateNormStatsShapeIfSet(
+                attributes.get_inv_rms(), x, scale, "Inverse RMS tensor"));
         }
 
         return {ErrorCode::OK, ""};
@@ -156,7 +166,50 @@ public:
             auto invRms = attributes.get_inv_rms();
             if(invRms)
             {
-                inferCTensor(invRms);
+                // Derive inv_rms dims from input and scale:
+                // Where scale has a non-1 dim, inv_rms gets 1 (normalized dimension collapses).
+                // Where scale has dim 1, inv_rms keeps the input dim.
+                // Fallback (no scale dims): all dims except batch become 1 → [N, 1, 1, 1].
+                if(invRms->get_dim().empty())
+                {
+                    auto invRmsDims = x->get_dim();
+                    auto scale = attributes.get_scale();
+                    if(scale && !scale->get_dim().empty())
+                    {
+                        const auto& scaleDims = scale->get_dim();
+                        for(size_t i = 0; i < invRmsDims.size(); ++i)
+                        {
+                            if(scaleDims[i] != 1)
+                            {
+                                invRmsDims[i] = 1;
+                            }
+                        }
+                    }
+                    else
+                    {
+                        for(size_t i = 1; i < invRmsDims.size(); ++i)
+                        {
+                            invRmsDims[i] = 1;
+                        }
+                    }
+                    invRms->set_dim(invRmsDims);
+                }
+
+                if(invRms->get_stride().empty())
+                {
+                    if(!x->get_stride().empty())
+                    {
+                        auto strideOrder
+                            = hipdnn_data_sdk::utilities::extractStrideOrder(x->get_stride());
+                        invRms->set_stride(hipdnn_data_sdk::utilities::generateStrides(
+                            invRms->get_dim(), strideOrder));
+                    }
+                    else
+                    {
+                        invRms->set_stride(
+                            hipdnn_data_sdk::utilities::generateStrides(invRms->get_dim()));
+                    }
+                }
             }
         }
 
@@ -167,17 +220,6 @@ public:
         }
 
         return {};
-    }
-
-    flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>
-        pack_node(flatbuffers::FlatBufferBuilder& builder) const override
-    {
-        return hipdnn_data_sdk::data_objects::CreateNodeDirect(
-            builder,
-            attributes.get_name().c_str(),
-            toSdkType(attributes.compute_data_type),
-            hipdnn_data_sdk::data_objects::NodeAttributes::RMSNormAttributes,
-            attributes.pack_attributes(builder).Union());
     }
 
     Error create_operation(

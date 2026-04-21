@@ -105,7 +105,7 @@
     CustomKernelName: ''
     DebugStreamK: 0
     DepthU: 32
-    DirectToLds: false
+    DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
     DirectToLdsMetadata: false
@@ -120,7 +120,7 @@
     ExtraLatencyForLR: 0
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 8
     GlobalReadVectorWidthMetadata: 2
@@ -252,7 +252,7 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 0
     SolutionNameMin: Cijk_Ailk_Bljk_BBS_BH_Bias_FDMN_SPB_A_S_SAV_MT32x32x32_MI32x32x1_SN_LDSB0_AFC1_AG0_AFEM8_AFEM1_ASEM8_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVSM0_DPLBn1_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB8_GSU1_GSUAMB_GSUC0_GSUWGMRR0_GLS0_ISA942_IU1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPM0_LPA0_LPB8_LPM0_LRVW8_LWPMn1_MIAV0_MIWT1_1_MO40_MGRIPMn1_NTn1_NTA0_NTB0_NTC0_NTD0_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA0_SGROBn1_SIA3_SS1_SU0_SUM0_SUS0_SPO0_SRVW0_SSO0_SVW1_SK0_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSM0_ULSGRO0_USL1_UIOFGRO0_USFGROn1_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG32_2_1_WGM18_WGMXCC1_WGMXCCGn1
-    SourceSwap: 1
+    SourceSwap: true
     SpaceFillingAlgo: []
     StaggerU: 0
     StaggerUMapping: 0
@@ -280,12 +280,12 @@
     ThreadTileB: 1
     ThreadTileMetadata: 1
     TransposeLDS: 1
-    TransposeLDSMetadata: false
+    TransposeLDSMetadata: 0
     UnrollLoopSwapGlobalReadOrder: 0
     UnrollMajorLDSA: false
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: false
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseCustomMainLoopSchedule: 0
     UseInstOffsetForGRO: 0
     UseSgprForGRO: -1
@@ -339,7 +339,7 @@
     CustomKernelName: ''
     DebugStreamK: 0
     DepthU: 64
-    DirectToLds: false
+    DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
     DirectToLdsMetadata: false
@@ -354,7 +354,7 @@
     ExtraLatencyForLR: 0
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 8
     GlobalReadVectorWidthMetadata: 4
@@ -486,7 +486,7 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 1
     SolutionNameMin: Cijk_Ailk_Bljk_BBS_BH_Bias_FDMN_SPB_A_S_SAV_MT32x32x64_MI32x32x1_SN_LDSB0_AFC1_AG0_AFEM8_AFEM1_ASEM8_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVSM0_DPLBn1_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA8_GRVWB8_GSU1_GSUAMB_GSUC0_GSUWGMRR0_GLS0_ISA942_IU1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPM0_LPA0_LPB8_LPM0_LRVW8_LWPMn1_MIAV0_MIWT1_1_MO40_MGRIPMn1_NTn1_NTA0_NTB0_NTC0_NTD0_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA0_SGROBn1_SIA3_SS1_SU0_SUM0_SUS0_SPO0_SRVW0_SSO0_SVW1_SK0_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSM0_ULSGRO0_USL1_UIOFGRO0_USFGROn1_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG32_2_1_WGM18_WGMXCC1_WGMXCCGn1
-    SourceSwap: 1
+    SourceSwap: true
     SpaceFillingAlgo: []
     StaggerU: 0
     StaggerUMapping: 0
@@ -514,12 +514,12 @@
     ThreadTileB: 1
     ThreadTileMetadata: 1
     TransposeLDS: 1
-    TransposeLDSMetadata: false
+    TransposeLDSMetadata: 0
     UnrollLoopSwapGlobalReadOrder: 0
     UnrollMajorLDSA: false
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: false
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseCustomMainLoopSchedule: 0
     UseInstOffsetForGRO: 0
     UseSgprForGRO: -1
@@ -573,7 +573,7 @@
     CustomKernelName: ''
     DebugStreamK: 0
     DepthU: 32
-    DirectToLds: false
+    DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
     DirectToLdsMetadata: false
@@ -588,7 +588,7 @@
     ExtraLatencyForLR: 0
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 8
     GlobalReadVectorWidthMetadata: 2
@@ -720,7 +720,7 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 2
     SolutionNameMin: Cijk_Ailk_Bljk_BBS_BH_Bias_FDMN_SPB_A_S_SAV_MT32x32x32_MI32x32x1_SN_LDSB0_AFC0_AG0_AFEM8_AFEM1_ASEM8_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVSM0_DPLBn1_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA8_GRVWB8_GSU2_GSUAMB_GSUC0_GSUWGMRR0_GLS0_ISA942_IU1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPM0_LPA0_LPB8_LPM0_LRVW8_LWPMn1_MIAV0_MIWT1_1_MO40_MGRIPMn1_NTn1_NTA0_NTB0_NTC0_NTD0_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA0_SGROBn1_SIA3_SS1_SU4_SUM0_SUS256_SPO0_SRVW0_SSO0_SVW1_SK0_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSM0_ULSGRO0_USL1_UIOFGRO0_USFGROn1_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG32_2_1_WGM18_WGMXCC1_WGMXCCGn1
-    SourceSwap: 1
+    SourceSwap: true
     SpaceFillingAlgo: []
     StaggerU: 4
     StaggerUMapping: 0
@@ -748,12 +748,12 @@
     ThreadTileB: 1
     ThreadTileMetadata: 1
     TransposeLDS: 1
-    TransposeLDSMetadata: false
+    TransposeLDSMetadata: 0
     UnrollLoopSwapGlobalReadOrder: 0
     UnrollMajorLDSA: false
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: false
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseCustomMainLoopSchedule: 0
     UseInstOffsetForGRO: 0
     UseSgprForGRO: -1
@@ -807,7 +807,7 @@
     CustomKernelName: ''
     DebugStreamK: 0
     DepthU: 32
-    DirectToLds: false
+    DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
     DirectToLdsMetadata: false
@@ -822,7 +822,7 @@
     ExtraLatencyForLR: 0
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 8
     GlobalReadVectorWidthMetadata: 2
@@ -954,7 +954,7 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 3
     SolutionNameMin: Cijk_Ailk_Bljk_BBS_BH_Bias_FDMN_SPB_A_S_SAV_MT32x32x32_MI32x32x1_SN_LDSB0_AFC0_AG0_AFEM8_AFEM1_ASEM8_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVSM0_DPLBn1_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB8_GSU2_GSUAMB_GSUC0_GSUWGMRR0_GLS0_ISA942_IU1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPM0_LPA0_LPB8_LPM0_LRVW8_LWPMn1_MIAV0_MIWT1_1_MO40_MGRIPMn1_NTn1_NTA0_NTB0_NTC0_NTD0_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA0_SGROBn1_SIA3_SS1_SU0_SUM0_SUS0_SPO0_SRVW0_SSO0_SVW1_SK0_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSM0_ULSGRO0_USL1_UIOFGRO0_USFGROn1_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG32_2_1_WGM18_WGMXCC1_WGMXCCGn1
-    SourceSwap: 1
+    SourceSwap: true
     SpaceFillingAlgo: []
     StaggerU: 0
     StaggerUMapping: 0
@@ -982,12 +982,12 @@
     ThreadTileB: 1
     ThreadTileMetadata: 1
     TransposeLDS: 1
-    TransposeLDSMetadata: false
+    TransposeLDSMetadata: 0
     UnrollLoopSwapGlobalReadOrder: 0
     UnrollMajorLDSA: false
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: false
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseCustomMainLoopSchedule: 0
     UseInstOffsetForGRO: 0
     UseSgprForGRO: -1
@@ -1041,7 +1041,7 @@
     CustomKernelName: ''
     DebugStreamK: 0
     DepthU: 32
-    DirectToLds: false
+    DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
     DirectToLdsMetadata: false
@@ -1056,7 +1056,7 @@
     ExtraLatencyForLR: 0
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 8
     GlobalReadVectorWidthMetadata: 2
@@ -1188,7 +1188,7 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 4
     SolutionNameMin: Cijk_Ailk_Bljk_BBS_BH_Bias_FDMN_SPB_A_S_SAV_MT32x32x32_MI32x32x1_SN_LDSB0_AFC1_AG0_AFEM8_AFEM1_ASEM8_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVSM0_DPLBn1_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB8_GSU1_GSUAMB_GSUC0_GSUWGMRR0_GLS0_ISA942_IU1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPM0_LPA0_LPB8_LPM0_LRVW8_LWPMn1_MIAV0_MIWT1_1_MO40_MGRIPMn1_NTn1_NTA0_NTB0_NTC0_NTD0_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA0_SGROBn1_SIA3_SS1_SU4_SUM0_SUS256_SPO0_SRVW0_SSO0_SVW1_SK0_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSM0_ULSGRO0_USL1_UIOFGRO0_USFGROn1_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG32_2_1_WGM18_WGMXCC1_WGMXCCGn1
-    SourceSwap: 1
+    SourceSwap: true
     SpaceFillingAlgo: []
     StaggerU: 4
     StaggerUMapping: 0
@@ -1216,12 +1216,12 @@
     ThreadTileB: 1
     ThreadTileMetadata: 1
     TransposeLDS: 1
-    TransposeLDSMetadata: false
+    TransposeLDSMetadata: 0
     UnrollLoopSwapGlobalReadOrder: 0
     UnrollMajorLDSA: false
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: false
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseCustomMainLoopSchedule: 0
     UseInstOffsetForGRO: 0
     UseSgprForGRO: -1
@@ -1275,7 +1275,7 @@
     CustomKernelName: ''
     DebugStreamK: 0
     DepthU: 64
-    DirectToLds: false
+    DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
     DirectToLdsMetadata: false
@@ -1290,7 +1290,7 @@
     ExtraLatencyForLR: 0
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 8
     GlobalReadVectorWidthMetadata: 4
@@ -1308,7 +1308,7 @@
     InterleaveAlpha: 0
     KRingShift: false
     KernelLanguage: Assembly
-    KernelNameMin: Cijk_Ailk_Bljk_BBS_BH_Bias_FDMN_SPB_A_S_SAV_MT32x32x64_MI32x32x1_SN_LDSB0_AFC1_AG0_AFEM8_AFEM1_ASEM8_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVSM0_DPLBn1_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA8_GRVWB8_GSUAMB_GLS0_ISA942_IU1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPM0_LPA0_LPB0_LPM0_LRVW8_LWPMn1_MIAV0_MIWT1_1_MO40_MGRIPMn1_NTn1_NTA0_NTB0_NTC0_NTD0_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR3_PKA0_SGROBn1_SIA3_SS1_SPO0_SRVW0_SSO0_SVW1_SK0_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS0_TLDSM0_ULSGRO0_USL1_UIOFGRO0_USFGROn1_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG32_2_1
+    KernelNameMin: Cijk_Ailk_Bljk_BBS_BH_Bias_FDMN_SPB_A_S_SAV_MT32x32x64_MI32x32x1_SN_LDSB0_AFC1_AG0_AFEM8_AFEM1_ASEM8_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVSM0_DPLBn1_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA8_GRVWB8_GSUAMB_GLS0_ISA942_IU1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPM0_LPA0_LPB0_LPM0_LRVW8_LWPMn1_MIAV0_MIWT1_1_MO40_MGRIPMn1_NTn1_NTA0_NTB0_NTC0_NTD0_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA0_SGROBn1_SIA3_SS1_SPO0_SRVW0_SSO0_SVW1_SK0_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS0_TLDSM0_ULSGRO0_USL1_UIOFGRO0_USFGROn1_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG32_2_1
     LDSTrInst: false
     LSCA: 32
     LSCB: 32
@@ -1411,7 +1411,7 @@
     PackedC1IdxChars: [J]
     PackedC1IndicesX: [1]
     PrefetchGlobalRead: 2
-    PrefetchLocalRead: 3
+    PrefetchLocalRead: 1
     PreloadKernArgs: false
     SFCWGM:
     - [1, 1]
@@ -1421,8 +1421,8 @@
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 5
-    SolutionNameMin: Cijk_Ailk_Bljk_BBS_BH_Bias_FDMN_SPB_A_S_SAV_MT32x32x64_MI32x32x1_SN_LDSB0_AFC1_AG0_AFEM8_AFEM1_ASEM8_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVSM0_DPLBn1_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA8_GRVWB8_GSU1_GSUAMB_GSUC0_GSUWGMRR0_GLS0_ISA942_IU1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPM0_LPA0_LPB0_LPM0_LRVW8_LWPMn1_MIAV0_MIWT1_1_MO40_MGRIPMn1_NTn1_NTA0_NTB0_NTC0_NTD0_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR3_PKA0_SGROBn1_SIA3_SS1_SU0_SUM0_SUS0_SPO0_SRVW0_SSO0_SVW1_SK0_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS0_TLDSM0_ULSGRO0_USL1_UIOFGRO0_USFGROn1_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG32_2_1_WGM18_WGMXCC1_WGMXCCGn1
-    SourceSwap: 1
+    SolutionNameMin: Cijk_Ailk_Bljk_BBS_BH_Bias_FDMN_SPB_A_S_SAV_MT32x32x64_MI32x32x1_SN_LDSB0_AFC1_AG0_AFEM8_AFEM1_ASEM8_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVSM0_DPLBn1_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA8_GRVWB8_GSU1_GSUAMB_GSUC0_GSUWGMRR0_GLS0_ISA942_IU1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPM0_LPA0_LPB0_LPM0_LRVW8_LWPMn1_MIAV0_MIWT1_1_MO40_MGRIPMn1_NTn1_NTA0_NTB0_NTC0_NTD0_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA0_SGROBn1_SIA3_SS1_SU0_SUM0_SUS0_SPO0_SRVW0_SSO0_SVW1_SK0_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS0_TLDSM0_ULSGRO0_USL1_UIOFGRO0_USFGROn1_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG32_2_1_WGM18_WGMXCC1_WGMXCCGn1
+    SourceSwap: true
     SpaceFillingAlgo: []
     StaggerU: 0
     StaggerUMapping: 0
@@ -1450,12 +1450,12 @@
     ThreadTileB: 1
     ThreadTileMetadata: 1
     TransposeLDS: 0
-    TransposeLDSMetadata: false
+    TransposeLDSMetadata: 0
     UnrollLoopSwapGlobalReadOrder: 0
     UnrollMajorLDSA: 0
     UnrollMajorLDSB: 0
     UnrollMajorLDSMetadata: false
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseCustomMainLoopSchedule: 0
     UseInstOffsetForGRO: 0
     UseSgprForGRO: -1
@@ -1509,7 +1509,7 @@
     CustomKernelName: ''
     DebugStreamK: 0
     DepthU: 32
-    DirectToLds: false
+    DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
     DirectToLdsMetadata: false
@@ -1524,7 +1524,7 @@
     ExtraLatencyForLR: 0
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 8
     GlobalReadVectorWidthMetadata: 2
@@ -1656,7 +1656,7 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 6
     SolutionNameMin: Cijk_Ailk_Bljk_BBS_BH_Bias_FDMN_SPB_A_S_SAV_MT128x128x32_MI32x32x1_SN_LDSB0_AFC1_AG0_AFEM8_AFEM1_ASEM8_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVSM0_DPLBn1_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA8_GRVWB8_GSU1_GSUAMB_GSUC0_GSUWGMRR0_GLS0_ISA942_IU1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPM0_LPA0_LPB8_LPM0_LRVW8_LWPMn1_MIAV0_MIWT2_2_MO40_MGRIPMn1_NTn1_NTA0_NTB0_NTC0_NTD0_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA0_SGROBn1_SIA3_SS1_SU4_SUM0_SUS256_SPO0_SRVW0_SSO0_SVW2_SK0_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSM0_ULSGRO0_USL1_UIOFGRO0_USFGROn1_VSn1_VWA2_VWB2_WSGRA0_WSGRB0_WS64_WG64_4_1_WGM18_WGMXCC1_WGMXCCGn1
-    SourceSwap: 1
+    SourceSwap: true
     SpaceFillingAlgo: []
     StaggerU: 4
     StaggerUMapping: 0
@@ -1684,12 +1684,12 @@
     ThreadTileB: 2
     ThreadTileMetadata: 2
     TransposeLDS: 1
-    TransposeLDSMetadata: false
+    TransposeLDSMetadata: 0
     UnrollLoopSwapGlobalReadOrder: 0
     UnrollMajorLDSA: false
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: false
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseCustomMainLoopSchedule: 0
     UseInstOffsetForGRO: 0
     UseSgprForGRO: -1
@@ -1743,7 +1743,7 @@
     CustomKernelName: ''
     DebugStreamK: 0
     DepthU: 32
-    DirectToLds: false
+    DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
     DirectToLdsMetadata: false
@@ -1758,7 +1758,7 @@
     ExtraLatencyForLR: 0
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 8
     GlobalReadVectorWidthMetadata: 2
@@ -1890,7 +1890,7 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 7
     SolutionNameMin: Cijk_Ailk_Bljk_BBS_BH_Bias_FDMN_SPB_A_S_SAV_MT32x32x32_MI32x32x1_SN_LDSB0_AFC1_AG0_AFEM8_AFEM1_ASEM8_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVSM0_DPLBn1_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA8_GRVWB8_GSU1_GSUAMB_GSUC0_GSUWGMRR0_GLS0_ISA942_IU1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPM0_LPA0_LPB8_LPM0_LRVW8_LWPMn1_MIAV0_MIWT1_1_MO40_MGRIPMn1_NTn1_NTA0_NTB0_NTC0_NTD0_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA0_SGROBn1_SIA3_SS1_SU0_SUM0_SUS0_SPO0_SRVW0_SSO0_SVW1_SK0_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSM0_ULSGRO0_USL1_UIOFGRO0_USFGROn1_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG32_2_1_WGM18_WGMXCC1_WGMXCCGn1
-    SourceSwap: 1
+    SourceSwap: true
     SpaceFillingAlgo: []
     StaggerU: 0
     StaggerUMapping: 0
@@ -1918,12 +1918,12 @@
     ThreadTileB: 1
     ThreadTileMetadata: 1
     TransposeLDS: 1
-    TransposeLDSMetadata: false
+    TransposeLDSMetadata: 0
     UnrollLoopSwapGlobalReadOrder: 0
     UnrollMajorLDSA: false
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: false
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseCustomMainLoopSchedule: 0
     UseInstOffsetForGRO: 0
     UseSgprForGRO: -1
@@ -1977,7 +1977,7 @@
     CustomKernelName: ''
     DebugStreamK: 0
     DepthU: 64
-    DirectToLds: false
+    DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
     DirectToLdsMetadata: false
@@ -1992,7 +1992,7 @@
     ExtraLatencyForLR: 0
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 8
     GlobalReadVectorWidthMetadata: 4
@@ -2010,7 +2010,7 @@
     InterleaveAlpha: 0
     KRingShift: false
     KernelLanguage: Assembly
-    KernelNameMin: Cijk_Ailk_Bljk_BBS_BH_Bias_FDMN_SPB_A_S_SAV_MT32x32x64_MI32x32x1_SN_LDSB0_AFC1_AG0_AFEM8_AFEM1_ASEM8_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVSM0_DPLBn1_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB8_GSUAMB_GLS0_ISA942_IU1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPM0_LPA0_LPB8_LPM0_LRVW8_LWPMn1_MIAV0_MIWT1_1_MO40_MGRIPMn1_NTn1_NTA0_NTB0_NTC0_NTD0_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR3_PKA0_SGROBn1_SIA3_SS1_SPO0_SRVW0_SSO0_SVW1_SK0_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSM0_ULSGRO0_USL1_UIOFGRO0_USFGROn1_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG32_2_1
+    KernelNameMin: Cijk_Ailk_Bljk_BBS_BH_Bias_FDMN_SPB_A_S_SAV_MT32x32x64_MI32x32x1_SN_LDSB0_AFC1_AG0_AFEM8_AFEM1_ASEM8_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVSM0_DPLBn1_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB8_GSUAMB_GLS0_ISA942_IU1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPM0_LPA0_LPB8_LPM0_LRVW8_LWPMn1_MIAV0_MIWT1_1_MO40_MGRIPMn1_NTn1_NTA0_NTB0_NTC0_NTD0_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA0_SGROBn1_SIA3_SS1_SPO0_SRVW0_SSO0_SVW1_SK0_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSM0_ULSGRO0_USL1_UIOFGRO0_USFGROn1_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG32_2_1
     LDSTrInst: false
     LSCA: 32
     LSCB: 32
@@ -2113,7 +2113,7 @@
     PackedC1IdxChars: [J]
     PackedC1IndicesX: [1]
     PrefetchGlobalRead: 2
-    PrefetchLocalRead: 3
+    PrefetchLocalRead: 1
     PreloadKernArgs: false
     SFCWGM:
     - [1, 1]
@@ -2123,8 +2123,8 @@
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 8
-    SolutionNameMin: Cijk_Ailk_Bljk_BBS_BH_Bias_FDMN_SPB_A_S_SAV_MT32x32x64_MI32x32x1_SN_LDSB0_AFC1_AG0_AFEM8_AFEM1_ASEM8_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVSM0_DPLBn1_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB8_GSU1_GSUAMB_GSUC0_GSUWGMRR0_GLS0_ISA942_IU1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPM0_LPA0_LPB8_LPM0_LRVW8_LWPMn1_MIAV0_MIWT1_1_MO40_MGRIPMn1_NTn1_NTA0_NTB0_NTC0_NTD0_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR3_PKA0_SGROBn1_SIA3_SS1_SU0_SUM0_SUS0_SPO0_SRVW0_SSO0_SVW1_SK0_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSM0_ULSGRO0_USL1_UIOFGRO0_USFGROn1_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG32_2_1_WGM18_WGMXCC1_WGMXCCGn1
-    SourceSwap: 1
+    SolutionNameMin: Cijk_Ailk_Bljk_BBS_BH_Bias_FDMN_SPB_A_S_SAV_MT32x32x64_MI32x32x1_SN_LDSB0_AFC1_AG0_AFEM8_AFEM1_ASEM8_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVSM0_DPLBn1_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB8_GSU1_GSUAMB_GSUC0_GSUWGMRR0_GLS0_ISA942_IU1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPM0_LPA0_LPB8_LPM0_LRVW8_LWPMn1_MIAV0_MIWT1_1_MO40_MGRIPMn1_NTn1_NTA0_NTB0_NTC0_NTD0_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA0_SGROBn1_SIA3_SS1_SU0_SUM0_SUS0_SPO0_SRVW0_SSO0_SVW1_SK0_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSM0_ULSGRO0_USL1_UIOFGRO0_USFGROn1_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG32_2_1_WGM18_WGMXCC1_WGMXCCGn1
+    SourceSwap: true
     SpaceFillingAlgo: []
     StaggerU: 0
     StaggerUMapping: 0
@@ -2152,12 +2152,12 @@
     ThreadTileB: 1
     ThreadTileMetadata: 1
     TransposeLDS: 1
-    TransposeLDSMetadata: false
+    TransposeLDSMetadata: 0
     UnrollLoopSwapGlobalReadOrder: 0
     UnrollMajorLDSA: false
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: false
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseCustomMainLoopSchedule: 0
     UseInstOffsetForGRO: 0
     UseSgprForGRO: -1
@@ -2212,7 +2212,7 @@
     CustomKernelName: ''
     DebugStreamK: 0
     DepthU: 64
-    DirectToLds: false
+    DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
     DirectToLdsMetadata: false
@@ -2229,7 +2229,7 @@
     ExtraLatencyForLR: 0
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 8
     GlobalReadVectorWidthMetadata: 8
@@ -2371,7 +2371,7 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 9
     SolutionNameMin: Cijk_Ailk_Bljk_BBS_BH_Bias_FDMN_SPB_A_S_SAV_MT256x256x64_MI16x16x1_SN_LDSB1_AFC1_AG0_AFEM1_AFEM1_ASEM8_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVSM0_DPLBn1_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA8_GRVWB8_GSU1_GSUAMB_GSUC0_GSUWGMRR0_GLS0_ISA942_IU1_K1_LDSTI0_LBSPPA4096_LBSPPB128_LBSPPM0_LPA0_LPB8_LPM0_LRVW8_LWPMn1_MIAV0_MIWT8_8_MO40_MGRIPMn1_NTn1_NTA0_NTB0_NTC0_NTD0_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROBn1_SIA3_SS1_SU0_SUM0_SUS0_SPO0_SRVW0_SSO0_SVW8_SK0_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSM0_ULSGRO0_USL1_UIOFGRO0_USFGROn1_VSn1_VWA8_VWB2_WSGRA0_WSGRB0_WS64_WG32_8_1_WGM8_WGMXCC8_WGMXCCGn1
-    SourceSwap: 1
+    SourceSwap: true
     SpaceFillingAlgo: []
     StaggerU: 0
     StaggerUMapping: 0
@@ -2400,13 +2400,13 @@
     ThreadTileB: 8
     ThreadTileMetadata: 8
     TransposeLDS: 1
-    TransposeLDSMetadata: false
+    TransposeLDSMetadata: 0
     ULSGRODoubleG2L: 0
     UnrollLoopSwapGlobalReadOrder: 0
     UnrollMajorLDSA: false
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: false
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseCustomMainLoopSchedule: 0
     UseDotInstruction: false
     UseF32XEmulation: false
@@ -2469,7 +2469,7 @@
     CustomKernelName: ''
     DebugStreamK: 0
     DepthU: 64
-    DirectToLds: false
+    DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
     DirectToLdsMetadata: false
@@ -2486,7 +2486,7 @@
     ExtraLatencyForLR: 0
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 8
     GlobalReadVectorWidthMetadata: 8
@@ -2628,7 +2628,7 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 10
     SolutionNameMin: Cijk_Ailk_Bljk_BBS_BH_Bias_FDMN_SPB_A_S_SAV_MT256x256x64_MI16x16x1_SN_LDSB1_AFC1_AG0_AFEM1_AFEM1_ASEM8_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVSM0_DPLBn1_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA8_GRVWB8_GSU1_GSUAMBSK_GSUC0_GSUWGMRR0_GLS0_ISA942_IU1_K1_LDSTI0_LBSPPA4096_LBSPPB128_LBSPPM0_LPA0_LPB8_LPM0_LRVW8_LWPMn1_MIAV0_MIWT8_8_MO40_MGRIPMn1_NTn1_NTA0_NTB0_NTC0_NTD0_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROBn1_SIA3_SS1_SU0_SUM0_SUS0_SPO0_SRVW0_SSO0_SVW4_SK0_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSM0_ULSGRO0_USL1_UIOFGRO0_USFGROn1_VSn1_VWA4_VWB2_WSGRA0_WSGRB0_WS64_WG32_8_1_WGM8_WGMXCC8_WGMXCCGn1
-    SourceSwap: 1
+    SourceSwap: true
     SpaceFillingAlgo: []
     StaggerU: 0
     StaggerUMapping: 0
@@ -2658,13 +2658,13 @@
     ThreadTileB: 8
     ThreadTileMetadata: 8
     TransposeLDS: 1
-    TransposeLDSMetadata: false
+    TransposeLDSMetadata: 0
     ULSGRODoubleG2L: 0
     UnrollLoopSwapGlobalReadOrder: 0
     UnrollMajorLDSA: false
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: false
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseCustomMainLoopSchedule: 0
     UseDotInstruction: false
     UseF32XEmulation: false
@@ -2727,7 +2727,7 @@
     CustomKernelName: ''
     DebugStreamK: 0
     DepthU: 64
-    DirectToLds: false
+    DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
     DirectToLdsMetadata: false
@@ -2744,7 +2744,7 @@
     ExtraLatencyForLR: 0
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 8
     GlobalReadVectorWidthMetadata: 8
@@ -2886,7 +2886,7 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 11
     SolutionNameMin: Cijk_Ailk_Bljk_BBS_BH_Bias_FDMN_SPB_A_S_SAV_MT256x256x64_MI16x16x1_SN_LDSB1_AFC1_AG0_AFEM1_AFEM1_ASEM8_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVSM0_DPLBn1_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA8_GRVWB8_GSU1_GSUAMBSK_GSUC0_GSUWGMRR0_GLS0_ISA942_IU1_K1_LDSTI0_LBSPPA4096_LBSPPB128_LBSPPM0_LPA0_LPB8_LPM0_LRVW8_LWPMn1_MIAV0_MIWT8_8_MO40_MGRIPMn1_NTn1_NTA0_NTB0_NTC0_NTD0_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROBn1_SIA3_SS1_SU0_SUM0_SUS0_SPO0_SRVW0_SSO0_SVW8_SK0_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSM0_ULSGRO0_USL1_UIOFGRO0_USFGROn1_VSn1_VWA8_VWB2_WSGRA0_WSGRB0_WS64_WG32_8_1_WGM4_WGMXCC8_WGMXCCGn1
-    SourceSwap: 1
+    SourceSwap: true
     SpaceFillingAlgo: []
     StaggerU: 0
     StaggerUMapping: 0
@@ -2916,13 +2916,13 @@
     ThreadTileB: 8
     ThreadTileMetadata: 8
     TransposeLDS: 1
-    TransposeLDSMetadata: false
+    TransposeLDSMetadata: 0
     ULSGRODoubleG2L: 0
     UnrollLoopSwapGlobalReadOrder: 0
     UnrollMajorLDSA: false
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: false
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseCustomMainLoopSchedule: 0
     UseDotInstruction: false
     UseF32XEmulation: false
@@ -2986,7 +2986,7 @@
     CustomKernelName: ''
     DebugStreamK: 0
     DepthU: 64
-    DirectToLds: false
+    DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
     DirectToLdsMetadata: false
@@ -3003,7 +3003,7 @@
     ExtraLatencyForLR: 0
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 8
     GlobalReadVectorWidthMetadata: 8
@@ -3145,7 +3145,7 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 12
     SolutionNameMin: Cijk_Ailk_Bljk_BBS_BH_Bias_FDMN_SPB_A_S_SAV_MT256x256x64_MI16x16x1_SN_LDSB1_AFC1_AG0_AFEM1_AFEM1_ASEM8_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVSM0_DPLBn1_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA8_GRVWB8_GSU1_GSUAMBSK_GSUC0_GSUWGMRR0_GLS0_ISA942_IU1_K1_LDSTI0_LBSPPA4096_LBSPPB128_LBSPPM0_LPA0_LPB8_LPM0_LRVW8_LWPMn1_MIAV0_MIWT8_8_MO40_MGRIPMn1_NTn1_NTA0_NTB0_NTC0_NTD0_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROBn1_SIA3_SS1_SU0_SUM0_SUS0_SPO0_SRVW0_SSO0_SVW8_SK0_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSM0_ULSGRO0_USL1_UIOFGRO0_USFGROn1_VSn1_VWA8_VWB2_WSGRA0_WSGRB0_WS64_WG32_8_1_WGM1_WGMXCC1_WGMXCCGn1
-    SourceSwap: 1
+    SourceSwap: true
     SpaceFillingAlgo: []
     StaggerU: 0
     StaggerUMapping: 0
@@ -3175,13 +3175,13 @@
     ThreadTileB: 8
     ThreadTileMetadata: 8
     TransposeLDS: 1
-    TransposeLDSMetadata: false
+    TransposeLDSMetadata: 0
     ULSGRODoubleG2L: 0
     UnrollLoopSwapGlobalReadOrder: 0
     UnrollMajorLDSA: false
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: false
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseCustomMainLoopSchedule: 0
     UseDotInstruction: false
     UseF32XEmulation: false
@@ -3244,7 +3244,7 @@
     CustomKernelName: ''
     DebugStreamK: 0
     DepthU: 64
-    DirectToLds: false
+    DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
     DirectToLdsMetadata: false
@@ -3261,7 +3261,7 @@
     ExtraLatencyForLR: 0
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 8
     GlobalReadVectorWidthMetadata: 8
@@ -3403,7 +3403,7 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 13
     SolutionNameMin: Cijk_Ailk_Bljk_BBS_BH_Bias_FDMN_SPB_A_S_SAV_MT256x256x64_MI16x16x1_SN_LDSB1_AFC1_AG0_AFEM1_AFEM1_ASEM8_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVSM0_DPLBn1_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA8_GRVWB8_GSU1_GSUAMB_GSUC0_GSUWGMRR0_GLS0_ISA942_IU1_K1_LDSTI0_LBSPPA4096_LBSPPB128_LBSPPM0_LPA0_LPB8_LPM0_LRVW8_LWPMn1_MIAV0_MIWT8_8_MO40_MGRIPMn1_NTn1_NTA0_NTB0_NTC0_NTD0_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROBn1_SIA3_SS1_SU0_SUM0_SUS0_SPO0_SRVW0_SSO0_SVW8_SK0_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSM0_ULSGRO0_USL1_UIOFGRO0_USFGROn1_VSn1_VWA8_VWB2_WSGRA0_WSGRB0_WS64_WG32_8_1_WGM4_WGMXCC8_WGMXCCGn1
-    SourceSwap: 1
+    SourceSwap: true
     SpaceFillingAlgo: []
     StaggerU: 0
     StaggerUMapping: 0
@@ -3432,13 +3432,13 @@
     ThreadTileB: 8
     ThreadTileMetadata: 8
     TransposeLDS: 1
-    TransposeLDSMetadata: false
+    TransposeLDSMetadata: 0
     ULSGRODoubleG2L: 0
     UnrollLoopSwapGlobalReadOrder: 0
     UnrollMajorLDSA: false
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: false
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseCustomMainLoopSchedule: 0
     UseDotInstruction: false
     UseF32XEmulation: false
@@ -3501,7 +3501,7 @@
     CustomKernelName: ''
     DebugStreamK: 0
     DepthU: 64
-    DirectToLds: false
+    DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
     DirectToLdsMetadata: false
@@ -3518,7 +3518,7 @@
     ExtraLatencyForLR: 0
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 8
     GlobalReadVectorWidthMetadata: 8
@@ -3660,7 +3660,7 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 14
     SolutionNameMin: Cijk_Ailk_Bljk_BBS_BH_Bias_FDMN_SPB_A_S_SAV_MT256x256x64_MI16x16x1_SN_LDSB1_AFC1_AG0_AFEM1_AFEM1_ASEM8_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVSM0_DPLBn1_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA8_GRVWB8_GSU1_GSUAMB_GSUC0_GSUWGMRR0_GLS0_ISA942_IU1_K1_LDSTI0_LBSPPA4096_LBSPPB128_LBSPPM0_LPA0_LPB8_LPM0_LRVW8_LWPMn1_MIAV0_MIWT8_8_MO40_MGRIPMn1_NTn1_NTA0_NTB0_NTC0_NTD0_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROBn1_SIA3_SS1_SU0_SUM0_SUS0_SPO0_SRVW0_SSO0_SVW4_SK0_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSM0_ULSGRO0_USL1_UIOFGRO0_USFGROn1_VSn1_VWA4_VWB2_WSGRA0_WSGRB0_WS64_WG32_8_1_WGM8_WGMXCC8_WGMXCCGn1
-    SourceSwap: 1
+    SourceSwap: true
     SpaceFillingAlgo: []
     StaggerU: 0
     StaggerUMapping: 0
@@ -3689,13 +3689,13 @@
     ThreadTileB: 8
     ThreadTileMetadata: 8
     TransposeLDS: 1
-    TransposeLDSMetadata: false
+    TransposeLDSMetadata: 0
     ULSGRODoubleG2L: 0
     UnrollLoopSwapGlobalReadOrder: 0
     UnrollMajorLDSA: false
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: false
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseCustomMainLoopSchedule: 0
     UseDotInstruction: false
     UseF32XEmulation: false
@@ -3758,7 +3758,7 @@
     CustomKernelName: ''
     DebugStreamK: 0
     DepthU: 64
-    DirectToLds: false
+    DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
     DirectToLdsMetadata: false
@@ -3775,7 +3775,7 @@
     ExtraLatencyForLR: 0
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 8
     GlobalReadVectorWidthMetadata: 8
@@ -3917,7 +3917,7 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 15
     SolutionNameMin: Cijk_Ailk_Bljk_BBS_BH_Bias_FDMN_SPB_A_S_SAV_MT256x256x64_MI16x16x1_SN_LDSB1_AFC1_AG0_AFEM1_AFEM1_ASEM8_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVSM0_DPLBn1_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA8_GRVWB8_GSU1_GSUAMB_GSUC0_GSUWGMRR0_GLS0_ISA942_IU1_K1_LDSTI0_LBSPPA4096_LBSPPB128_LBSPPM0_LPA0_LPB8_LPM0_LRVW8_LWPMn1_MIAV0_MIWT8_8_MO40_MGRIPMn1_NTn1_NTA0_NTB0_NTC0_NTD0_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROBn1_SIA3_SS1_SU0_SUM0_SUS0_SPO0_SRVW0_SSO0_SVW4_SK0_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSM0_ULSGRO0_USL1_UIOFGRO0_USFGROn1_VSn1_VWA4_VWB2_WSGRA0_WSGRB0_WS64_WG32_8_1_WGM4_WGMXCC1_WGMXCCGn1
-    SourceSwap: 1
+    SourceSwap: true
     SpaceFillingAlgo: []
     StaggerU: 0
     StaggerUMapping: 0
@@ -3946,13 +3946,13 @@
     ThreadTileB: 8
     ThreadTileMetadata: 8
     TransposeLDS: 1
-    TransposeLDSMetadata: false
+    TransposeLDSMetadata: 0
     ULSGRODoubleG2L: 0
     UnrollLoopSwapGlobalReadOrder: 0
     UnrollMajorLDSA: false
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: false
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseCustomMainLoopSchedule: 0
     UseDotInstruction: false
     UseF32XEmulation: false
@@ -4016,7 +4016,7 @@
     CustomKernelName: ''
     DebugStreamK: 0
     DepthU: 64
-    DirectToLds: false
+    DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
     DirectToLdsMetadata: false
@@ -4033,7 +4033,7 @@
     ExtraLatencyForLR: 0
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 8
     GlobalReadVectorWidthMetadata: 8
@@ -4175,7 +4175,7 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 16
     SolutionNameMin: Cijk_Ailk_Bljk_BBS_BH_Bias_FDMN_SPB_A_S_SAV_MT256x256x64_MI16x16x1_SN_LDSB1_AFC1_AG0_AFEM1_AFEM1_ASEM8_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVSM0_DPLBn1_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA8_GRVWB8_GSU1_GSUAMBSK_GSUC0_GSUWGMRR0_GLS0_ISA942_IU1_K1_LDSTI0_LBSPPA4096_LBSPPB128_LBSPPM0_LPA0_LPB8_LPM0_LRVW8_LWPMn1_MIAV0_MIWT8_8_MO40_MGRIPMn1_NTn1_NTA0_NTB0_NTC0_NTD0_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROBn1_SIA3_SS1_SU0_SUM0_SUS0_SPO0_SRVW0_SSO0_SVW4_SK0_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSM0_ULSGRO0_USL1_UIOFGRO0_USFGROn1_VSn1_VWA4_VWB2_WSGRA0_WSGRB0_WS64_WG32_8_1_WGM1_WGMXCC1_WGMXCCGn1
-    SourceSwap: 1
+    SourceSwap: true
     SpaceFillingAlgo: []
     StaggerU: 0
     StaggerUMapping: 0
@@ -4205,13 +4205,13 @@
     ThreadTileB: 8
     ThreadTileMetadata: 8
     TransposeLDS: 1
-    TransposeLDSMetadata: false
+    TransposeLDSMetadata: 0
     ULSGRODoubleG2L: 0
     UnrollLoopSwapGlobalReadOrder: 0
     UnrollMajorLDSA: false
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: false
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseCustomMainLoopSchedule: 0
     UseDotInstruction: false
     UseF32XEmulation: false
@@ -4274,7 +4274,7 @@
     CustomKernelName: ''
     DebugStreamK: 0
     DepthU: 64
-    DirectToLds: false
+    DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
     DirectToLdsMetadata: false
@@ -4291,7 +4291,7 @@
     ExtraLatencyForLR: 0
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 8
     GlobalReadVectorWidthMetadata: 4
@@ -4433,7 +4433,7 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 17
     SolutionNameMin: Cijk_Ailk_Bljk_BBS_BH_Bias_FDMN_SPB_A_S_SAV_MT256x128x64_MI16x16x1_SN_LDSB1_AFC1_AG0_AFEM1_AFEM1_ASEM8_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVSM0_DPLBn1_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA8_GRVWB8_GSU1_GSUAMBSK_GSUC0_GSUWGMRR0_GLS0_ISA942_IU1_K1_LDSTI0_LBSPPA4096_LBSPPB128_LBSPPM0_LPA0_LPB8_LPM0_LRVW8_LWPMn1_MIAV0_MIWT8_4_MO40_MGRIPMn1_NTn1_NTA0_NTB0_NTC0_NTD0_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROBn1_SIA3_SS1_SU0_SUM0_SUS0_SPO0_SRVW0_SSO0_SVW8_SK0_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSM0_ULSGRO0_USL1_UIOFGRO0_USFGROn1_VSn1_VWA8_VWB1_WSGRA0_WSGRB0_WS64_WG32_8_1_WGM4_WGMXCC1_WGMXCCGn1
-    SourceSwap: 1
+    SourceSwap: true
     SpaceFillingAlgo: []
     StaggerU: 0
     StaggerUMapping: 0
@@ -4463,13 +4463,13 @@
     ThreadTileB: 4
     ThreadTileMetadata: 4
     TransposeLDS: 1
-    TransposeLDSMetadata: false
+    TransposeLDSMetadata: 0
     ULSGRODoubleG2L: 0
     UnrollLoopSwapGlobalReadOrder: 0
     UnrollMajorLDSA: false
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: false
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseCustomMainLoopSchedule: 0
     UseDotInstruction: false
     UseF32XEmulation: false
@@ -4533,7 +4533,7 @@
     CustomKernelName: ''
     DebugStreamK: 0
     DepthU: 128
-    DirectToLds: false
+    DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
     DirectToLdsMetadata: false
@@ -4550,7 +4550,7 @@
     ExtraLatencyForLR: 0
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 8
     GlobalReadVectorWidthMetadata: 8
@@ -4692,7 +4692,7 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 18
     SolutionNameMin: Cijk_Ailk_Bljk_BBS_BH_Bias_FDMN_SPB_A_S_SAV_MT128x128x128_MI16x16x1_SN_LDSB1_AFC1_AG0_AFEM1_AFEM1_ASEM8_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVSM0_DPLBn1_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA8_GRVWB8_GSU1_GSUAMB_GSUC0_GSUWGMRR0_GLS0_ISA942_IU1_K1_LDSTI0_LBSPPA2048_LBSPPB512_LBSPPM0_LPA0_LPB8_LPM0_LRVW8_LWPMn1_MIAV0_MIWT4_4_MO40_MGRIPMn1_NTn1_NTA0_NTB0_NTC0_NTD0_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROBn1_SIA3_SS1_SU0_SUM0_SUS0_SPO0_SRVW0_SSO0_SVW4_SK0_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSM0_ULSGRO0_USL1_UIOFGRO0_USFGROn1_VSn1_VWA4_VWB4_WSGRA0_WSGRB0_WS64_WG32_8_1_WGM1_WGMXCC1_WGMXCCGn1
-    SourceSwap: 1
+    SourceSwap: true
     SpaceFillingAlgo: []
     StaggerU: 0
     StaggerUMapping: 0
@@ -4721,13 +4721,13 @@
     ThreadTileB: 4
     ThreadTileMetadata: 4
     TransposeLDS: 1
-    TransposeLDSMetadata: false
+    TransposeLDSMetadata: 0
     ULSGRODoubleG2L: 0
     UnrollLoopSwapGlobalReadOrder: 0
     UnrollMajorLDSA: false
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: false
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseCustomMainLoopSchedule: 0
     UseDotInstruction: false
     UseF32XEmulation: false
@@ -4791,7 +4791,7 @@
     CustomKernelName: ''
     DebugStreamK: 0
     DepthU: 64
-    DirectToLds: false
+    DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
     DirectToLdsMetadata: false
@@ -4808,7 +4808,7 @@
     ExtraLatencyForLR: 0
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 8
     GlobalReadVectorWidthMetadata: 8
@@ -4950,7 +4950,7 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 19
     SolutionNameMin: Cijk_Ailk_Bljk_BBS_BH_Bias_FDMN_SPB_A_S_SAV_MT256x256x64_MI16x16x1_SN_LDSB1_AFC1_AG0_AFEM1_AFEM1_ASEM8_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVSM0_DPLBn1_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA8_GRVWB8_GSU1_GSUAMB_GSUC0_GSUWGMRR0_GLS0_ISA942_IU1_K1_LDSTI0_LBSPPA4096_LBSPPB256_LBSPPM0_LPA0_LPB8_LPM0_LRVW8_LWPMn1_MIAV0_MIWT8_8_MO40_MGRIPMn1_NTn1_NTA0_NTB0_NTC0_NTD0_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROBn1_SIA3_SS1_SU0_SUM0_SUS0_SPO0_SRVW0_SSO0_SVW8_SK0_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSM0_ULSGRO0_USL1_UIOFGRO0_USFGROn1_VSn1_VWA8_VWB4_WSGRA0_WSGRB0_WS64_WG32_8_1_WGM1_WGMXCC1_WGMXCCGn1
-    SourceSwap: 1
+    SourceSwap: true
     SpaceFillingAlgo: []
     StaggerU: 0
     StaggerUMapping: 0
@@ -4979,13 +4979,13 @@
     ThreadTileB: 8
     ThreadTileMetadata: 8
     TransposeLDS: 1
-    TransposeLDSMetadata: false
+    TransposeLDSMetadata: 0
     ULSGRODoubleG2L: 0
     UnrollLoopSwapGlobalReadOrder: 0
     UnrollMajorLDSA: false
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: false
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseCustomMainLoopSchedule: 0
     UseDotInstruction: false
     UseF32XEmulation: false
@@ -5048,7 +5048,7 @@
     CustomKernelName: ''
     DebugStreamK: 0
     DepthU: 64
-    DirectToLds: false
+    DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
     DirectToLdsMetadata: false
@@ -5065,7 +5065,7 @@
     ExtraLatencyForLR: 0
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 8
     GlobalReadVectorWidthMetadata: 8
@@ -5207,7 +5207,7 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 20
     SolutionNameMin: Cijk_Ailk_Bljk_BBS_BH_Bias_FDMN_SPB_A_S_SAV_MT256x256x64_MI16x16x1_SN_LDSB1_AFC1_AG0_AFEM1_AFEM1_ASEM8_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVSM0_DPLBn1_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA8_GRVWB8_GSU1_GSUAMB_GSUC0_GSUWGMRR0_GLS0_ISA942_IU1_K1_LDSTI0_LBSPPA4096_LBSPPB512_LBSPPM0_LPA0_LPB8_LPM0_LRVW8_LWPMn1_MIAV0_MIWT8_8_MO40_MGRIPMn1_NTn1_NTA0_NTB0_NTC0_NTD0_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROBn1_SIA3_SS1_SU0_SUM0_SUS0_SPO0_SRVW0_SSO0_SVW8_SK0_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSM0_ULSGRO0_USL1_UIOFGRO0_USFGROn1_VSn1_VWA8_VWB8_WSGRA0_WSGRB0_WS64_WG32_8_1_WGM8_WGMXCC8_WGMXCCGn1
-    SourceSwap: 1
+    SourceSwap: true
     SpaceFillingAlgo: []
     StaggerU: 0
     StaggerUMapping: 0
@@ -5236,13 +5236,13 @@
     ThreadTileB: 8
     ThreadTileMetadata: 8
     TransposeLDS: 1
-    TransposeLDSMetadata: false
+    TransposeLDSMetadata: 0
     ULSGRODoubleG2L: 0
     UnrollLoopSwapGlobalReadOrder: 0
     UnrollMajorLDSA: false
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: false
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseCustomMainLoopSchedule: 0
     UseDotInstruction: false
     UseF32XEmulation: false
@@ -5305,7 +5305,7 @@
     CustomKernelName: ''
     DebugStreamK: 0
     DepthU: 64
-    DirectToLds: false
+    DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
     DirectToLdsMetadata: false
@@ -5322,7 +5322,7 @@
     ExtraLatencyForLR: 0
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 8
     GlobalReadVectorWidthMetadata: 8
@@ -5464,7 +5464,7 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 21
     SolutionNameMin: Cijk_Ailk_Bljk_BBS_BH_Bias_FDMN_SPB_A_S_SAV_MT256x256x64_MI16x16x1_SN_LDSB1_AFC1_AG0_AFEM1_AFEM1_ASEM8_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVSM0_DPLBn1_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA8_GRVWB8_GSU1_GSUAMBSK_GSUC0_GSUWGMRR0_GLS0_ISA942_IU1_K1_LDSTI0_LBSPPA4096_LBSPPB128_LBSPPM0_LPA0_LPB8_LPM0_LRVW8_LWPMn1_MIAV0_MIWT8_8_MO40_MGRIPMn1_NTn1_NTA0_NTB0_NTC0_NTD0_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROBn1_SIA3_SS1_SU0_SUM0_SUS0_SPO0_SRVW0_SSO0_SVW8_SK0_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSM0_ULSGRO0_USL1_UIOFGRO0_USFGROn1_VSn1_VWA8_VWB2_WSGRA0_WSGRB0_WS64_WG32_8_1_WGM8_WGMXCC8_WGMXCCGn1
-    SourceSwap: 1
+    SourceSwap: true
     SpaceFillingAlgo: []
     StaggerU: 0
     StaggerUMapping: 0
@@ -5494,13 +5494,13 @@
     ThreadTileB: 8
     ThreadTileMetadata: 8
     TransposeLDS: 1
-    TransposeLDSMetadata: false
+    TransposeLDSMetadata: 0
     ULSGRODoubleG2L: 0
     UnrollLoopSwapGlobalReadOrder: 0
     UnrollMajorLDSA: false
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: false
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseCustomMainLoopSchedule: 0
     UseDotInstruction: false
     UseF32XEmulation: false
@@ -5563,7 +5563,7 @@
     CustomKernelName: ''
     DebugStreamK: 0
     DepthU: 64
-    DirectToLds: false
+    DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
     DirectToLdsMetadata: false
@@ -5580,7 +5580,7 @@
     ExtraLatencyForLR: 0
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 8
     GlobalReadVectorWidthMetadata: 8
@@ -5722,7 +5722,7 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 22
     SolutionNameMin: Cijk_Ailk_Bljk_BBS_BH_Bias_FDMN_SPB_A_S_SAV_MT256x256x64_MI16x16x1_SN_LDSB1_AFC1_AG0_AFEM1_AFEM1_ASEM8_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVSM0_DPLBn1_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA8_GRVWB8_GSU1_GSUAMBSK_GSUC0_GSUWGMRR0_GLS0_ISA942_IU1_K1_LDSTI0_LBSPPA4096_LBSPPB512_LBSPPM0_LPA0_LPB8_LPM0_LRVW8_LWPMn1_MIAV0_MIWT8_8_MO40_MGRIPMn1_NTn1_NTA0_NTB0_NTC0_NTD0_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROBn1_SIA3_SS1_SU0_SUM0_SUS0_SPO0_SRVW0_SSO0_SVW8_SK0_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSM0_ULSGRO0_USL1_UIOFGRO0_USFGROn1_VSn1_VWA8_VWB8_WSGRA0_WSGRB0_WS64_WG32_8_1_WGM8_WGMXCC8_WGMXCCGn1
-    SourceSwap: 1
+    SourceSwap: true
     SpaceFillingAlgo: []
     StaggerU: 0
     StaggerUMapping: 0
@@ -5752,13 +5752,13 @@
     ThreadTileB: 8
     ThreadTileMetadata: 8
     TransposeLDS: 1
-    TransposeLDSMetadata: false
+    TransposeLDSMetadata: 0
     ULSGRODoubleG2L: 0
     UnrollLoopSwapGlobalReadOrder: 0
     UnrollMajorLDSA: false
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: false
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseCustomMainLoopSchedule: 0
     UseDotInstruction: false
     UseF32XEmulation: false
@@ -5822,7 +5822,7 @@
     CustomKernelName: ''
     DebugStreamK: 0
     DepthU: 64
-    DirectToLds: false
+    DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
     DirectToLdsMetadata: false
@@ -5839,7 +5839,7 @@
     ExtraLatencyForLR: 0
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 8
     GlobalReadVectorWidthMetadata: 8
@@ -5981,7 +5981,7 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 23
     SolutionNameMin: Cijk_Ailk_Bljk_BBS_BH_Bias_FDMN_SPB_A_S_SAV_MT256x256x64_MI16x16x1_SN_LDSB1_AFC1_AG0_AFEM1_AFEM1_ASEM8_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVSM0_DPLBn1_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA8_GRVWB8_GSU1_GSUAMB_GSUC0_GSUWGMRR0_GLS0_ISA942_IU1_K1_LDSTI0_LBSPPA4096_LBSPPB512_LBSPPM0_LPA0_LPB8_LPM0_LRVW8_LWPMn1_MIAV0_MIWT8_8_MO40_MGRIPMn1_NTn1_NTA0_NTB0_NTC0_NTD0_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROBn1_SIA3_SS1_SU0_SUM0_SUS0_SPO0_SRVW0_SSO0_SVW8_SK0_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSM0_ULSGRO0_USL1_UIOFGRO0_USFGROn1_VSn1_VWA8_VWB8_WSGRA0_WSGRB0_WS64_WG32_8_1_WGM1_WGMXCC1_WGMXCCGn1
-    SourceSwap: 1
+    SourceSwap: true
     SpaceFillingAlgo: []
     StaggerU: 0
     StaggerUMapping: 0
@@ -6010,13 +6010,13 @@
     ThreadTileB: 8
     ThreadTileMetadata: 8
     TransposeLDS: 1
-    TransposeLDSMetadata: false
+    TransposeLDSMetadata: 0
     ULSGRODoubleG2L: 0
     UnrollLoopSwapGlobalReadOrder: 0
     UnrollMajorLDSA: false
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: false
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseCustomMainLoopSchedule: 0
     UseDotInstruction: false
     UseF32XEmulation: false
@@ -6080,7 +6080,7 @@
     CustomKernelName: ''
     DebugStreamK: 0
     DepthU: 64
-    DirectToLds: false
+    DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
     DirectToLdsMetadata: false
@@ -6097,7 +6097,7 @@
     ExtraLatencyForLR: 0
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 8
     GlobalReadVectorWidthMetadata: 8
@@ -6239,7 +6239,7 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 24
     SolutionNameMin: Cijk_Ailk_Bljk_BBS_BH_Bias_FDMN_SPB_A_S_SAV_MT256x256x64_MI16x16x1_SN_LDSB1_AFC1_AG0_AFEM1_AFEM1_ASEM8_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVSM0_DPLBn1_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA8_GRVWB8_GSU1_GSUAMB_GSUC0_GSUWGMRR0_GLS0_ISA942_IU1_K1_LDSTI0_LBSPPA4096_LBSPPB512_LBSPPM0_LPA0_LPB8_LPM0_LRVW8_LWPMn1_MIAV0_MIWT8_8_MO40_MGRIPMn1_NTn1_NTA0_NTB0_NTC0_NTD0_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROBn1_SIA3_SS1_SU0_SUM0_SUS0_SPO0_SRVW0_SSO0_SVW4_SK0_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSM0_ULSGRO0_USL1_UIOFGRO0_USFGROn1_VSn1_VWA4_VWB8_WSGRA0_WSGRB0_WS64_WG32_8_1_WGM1_WGMXCC1_WGMXCCGn1
-    SourceSwap: 1
+    SourceSwap: true
     SpaceFillingAlgo: []
     StaggerU: 0
     StaggerUMapping: 0
@@ -6268,13 +6268,13 @@
     ThreadTileB: 8
     ThreadTileMetadata: 8
     TransposeLDS: 1
-    TransposeLDSMetadata: false
+    TransposeLDSMetadata: 0
     ULSGRODoubleG2L: 0
     UnrollLoopSwapGlobalReadOrder: 0
     UnrollMajorLDSA: false
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: false
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseCustomMainLoopSchedule: 0
     UseDotInstruction: false
     UseF32XEmulation: false
@@ -6338,7 +6338,7 @@
     CustomKernelName: ''
     DebugStreamK: 0
     DepthU: 64
-    DirectToLds: false
+    DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
     DirectToLdsMetadata: false
@@ -6355,7 +6355,7 @@
     ExtraLatencyForLR: 0
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 8
     GlobalReadVectorWidthMetadata: 8
@@ -6497,7 +6497,7 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 25
     SolutionNameMin: Cijk_Ailk_Bljk_BBS_BH_Bias_FDMN_SPB_A_S_SAV_MT256x256x64_MI16x16x1_SN_LDSB1_AFC1_AG0_AFEM1_AFEM1_ASEM8_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVSM0_DPLBn1_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA8_GRVWB8_GSU1_GSUAMBSK_GSUC0_GSUWGMRR0_GLS0_ISA942_IU1_K1_LDSTI0_LBSPPA4096_LBSPPB512_LBSPPM0_LPA0_LPB8_LPM0_LRVW8_LWPMn1_MIAV0_MIWT8_8_MO40_MGRIPMn1_NTn1_NTA0_NTB0_NTC0_NTD0_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROBn1_SIA3_SS1_SU0_SUM0_SUS0_SPO0_SRVW0_SSO0_SVW8_SK0_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSM0_ULSGRO0_USL1_UIOFGRO0_USFGROn1_VSn1_VWA8_VWB8_WSGRA0_WSGRB0_WS64_WG32_8_1_WGM1_WGMXCC1_WGMXCCGn1
-    SourceSwap: 1
+    SourceSwap: true
     SpaceFillingAlgo: []
     StaggerU: 0
     StaggerUMapping: 0
@@ -6527,13 +6527,13 @@
     ThreadTileB: 8
     ThreadTileMetadata: 8
     TransposeLDS: 1
-    TransposeLDSMetadata: false
+    TransposeLDSMetadata: 0
     ULSGRODoubleG2L: 0
     UnrollLoopSwapGlobalReadOrder: 0
     UnrollMajorLDSA: false
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: false
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseCustomMainLoopSchedule: 0
     UseDotInstruction: false
     UseF32XEmulation: false
@@ -6596,7 +6596,7 @@
     CustomKernelName: ''
     DebugStreamK: 0
     DepthU: 64
-    DirectToLds: false
+    DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
     DirectToLdsMetadata: false
@@ -6613,7 +6613,7 @@
     ExtraLatencyForLR: 0
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 8
     GlobalReadVectorWidthMetadata: 8
@@ -6755,7 +6755,7 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 26
     SolutionNameMin: Cijk_Ailk_Bljk_BBS_BH_Bias_FDMN_SPB_A_S_SAV_MT256x256x64_MI16x16x1_SN_LDSB1_AFC1_AG0_AFEM1_AFEM1_ASEM8_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVSM0_DPLBn1_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA8_GRVWB8_GSU1_GSUAMBSK_GSUC0_GSUWGMRR0_GLS0_ISA942_IU1_K1_LDSTI0_LBSPPA4096_LBSPPB256_LBSPPM0_LPA0_LPB8_LPM0_LRVW8_LWPMn1_MIAV0_MIWT8_8_MO40_MGRIPMn1_NTn1_NTA0_NTB0_NTC0_NTD0_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROBn1_SIA3_SS1_SU0_SUM0_SUS0_SPO0_SRVW0_SSO0_SVW4_SK0_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSM0_ULSGRO0_USL1_UIOFGRO0_USFGROn1_VSn1_VWA4_VWB4_WSGRA0_WSGRB0_WS64_WG32_8_1_WGM8_WGMXCC8_WGMXCCGn1
-    SourceSwap: 1
+    SourceSwap: true
     SpaceFillingAlgo: []
     StaggerU: 0
     StaggerUMapping: 0
@@ -6785,13 +6785,13 @@
     ThreadTileB: 8
     ThreadTileMetadata: 8
     TransposeLDS: 1
-    TransposeLDSMetadata: false
+    TransposeLDSMetadata: 0
     ULSGRODoubleG2L: 0
     UnrollLoopSwapGlobalReadOrder: 0
     UnrollMajorLDSA: false
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: false
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseCustomMainLoopSchedule: 0
     UseDotInstruction: false
     UseF32XEmulation: false
@@ -6855,7 +6855,7 @@
     CustomKernelName: ''
     DebugStreamK: 0
     DepthU: 64
-    DirectToLds: false
+    DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
     DirectToLdsMetadata: false
@@ -6872,7 +6872,7 @@
     ExtraLatencyForLR: 0
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 8
     GlobalReadVectorWidthMetadata: 8
@@ -7014,7 +7014,7 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 27
     SolutionNameMin: Cijk_Ailk_Bljk_BBS_BH_Bias_FDMN_SPB_A_S_SAV_MT256x256x64_MI16x16x1_SN_LDSB1_AFC1_AG0_AFEM1_AFEM1_ASEM8_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVSM0_DPLBn1_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA8_GRVWB8_GSU1_GSUAMB_GSUC0_GSUWGMRR0_GLS0_ISA942_IU1_K1_LDSTI0_LBSPPA4096_LBSPPB128_LBSPPM0_LPA0_LPB8_LPM0_LRVW8_LWPMn1_MIAV0_MIWT8_8_MO40_MGRIPMn1_NTn1_NTA0_NTB0_NTC0_NTD0_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROBn1_SIA3_SS1_SU0_SUM0_SUS0_SPO0_SRVW0_SSO0_SVW4_SK0_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSM0_ULSGRO0_USL1_UIOFGRO0_USFGROn1_VSn1_VWA4_VWB2_WSGRA0_WSGRB0_WS64_WG32_8_1_WGM1_WGMXCC1_WGMXCCGn1
-    SourceSwap: 1
+    SourceSwap: true
     SpaceFillingAlgo: []
     StaggerU: 0
     StaggerUMapping: 0
@@ -7043,13 +7043,13 @@
     ThreadTileB: 8
     ThreadTileMetadata: 8
     TransposeLDS: 1
-    TransposeLDSMetadata: false
+    TransposeLDSMetadata: 0
     ULSGRODoubleG2L: 0
     UnrollLoopSwapGlobalReadOrder: 0
     UnrollMajorLDSA: false
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: false
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseCustomMainLoopSchedule: 0
     UseDotInstruction: false
     UseF32XEmulation: false
@@ -7113,7 +7113,7 @@
     CustomKernelName: ''
     DebugStreamK: 0
     DepthU: 64
-    DirectToLds: false
+    DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
     DirectToLdsMetadata: false
@@ -7130,7 +7130,7 @@
     ExtraLatencyForLR: 0
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 8
     GlobalReadVectorWidthMetadata: 8
@@ -7272,7 +7272,7 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 28
     SolutionNameMin: Cijk_Ailk_Bljk_BBS_BH_Bias_FDMN_SPB_A_S_SAV_MT256x256x64_MI16x16x1_SN_LDSB1_AFC1_AG0_AFEM1_AFEM1_ASEM8_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVSM0_DPLBn1_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA8_GRVWB8_GSU1_GSUAMBSK_GSUC0_GSUWGMRR0_GLS0_ISA942_IU1_K1_LDSTI0_LBSPPA4096_LBSPPB256_LBSPPM0_LPA0_LPB8_LPM0_LRVW8_LWPMn1_MIAV0_MIWT8_8_MO40_MGRIPMn1_NTn1_NTA0_NTB0_NTC0_NTD0_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROBn1_SIA3_SS1_SU0_SUM0_SUS0_SPO0_SRVW0_SSO0_SVW8_SK0_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSM0_ULSGRO0_USL1_UIOFGRO0_USFGROn1_VSn1_VWA8_VWB4_WSGRA0_WSGRB0_WS64_WG32_8_1_WGM1_WGMXCC1_WGMXCCGn1
-    SourceSwap: 1
+    SourceSwap: true
     SpaceFillingAlgo: []
     StaggerU: 0
     StaggerUMapping: 0
@@ -7302,13 +7302,13 @@
     ThreadTileB: 8
     ThreadTileMetadata: 8
     TransposeLDS: 1
-    TransposeLDSMetadata: false
+    TransposeLDSMetadata: 0
     ULSGRODoubleG2L: 0
     UnrollLoopSwapGlobalReadOrder: 0
     UnrollMajorLDSA: false
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: false
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseCustomMainLoopSchedule: 0
     UseDotInstruction: false
     UseF32XEmulation: false
@@ -7371,7 +7371,7 @@
     CustomKernelName: ''
     DebugStreamK: 0
     DepthU: 64
-    DirectToLds: false
+    DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
     DirectToLdsMetadata: false
@@ -7388,7 +7388,7 @@
     ExtraLatencyForLR: 0
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 8
     GlobalReadVectorWidthMetadata: 8
@@ -7530,7 +7530,7 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 29
     SolutionNameMin: Cijk_Ailk_Bljk_BBS_BH_Bias_FDMN_SPB_A_S_SAV_MT256x256x64_MI16x16x1_SN_LDSB1_AFC1_AG0_AFEM1_AFEM1_ASEM8_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVSM0_DPLBn1_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA8_GRVWB8_GSU1_GSUAMB_GSUC0_GSUWGMRR0_GLS0_ISA942_IU1_K1_LDSTI0_LBSPPA4096_LBSPPB128_LBSPPM0_LPA0_LPB8_LPM0_LRVW8_LWPMn1_MIAV0_MIWT8_8_MO40_MGRIPMn1_NTn1_NTA0_NTB0_NTC0_NTD0_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROBn1_SIA3_SS1_SU8_SUM0_SUS256_SPO0_SRVW0_SSO0_SVW8_SK0_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSM0_ULSGRO0_USL1_UIOFGRO0_USFGROn1_VSn1_VWA8_VWB2_WSGRA0_WSGRB0_WS64_WG32_8_1_WGM4_WGMXCC8_WGMXCCGn1
-    SourceSwap: 1
+    SourceSwap: true
     SpaceFillingAlgo: []
     StaggerU: 8
     StaggerUMapping: 0
@@ -7559,13 +7559,13 @@
     ThreadTileB: 8
     ThreadTileMetadata: 8
     TransposeLDS: 1
-    TransposeLDSMetadata: false
+    TransposeLDSMetadata: 0
     ULSGRODoubleG2L: 0
     UnrollLoopSwapGlobalReadOrder: 0
     UnrollMajorLDSA: false
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: false
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseCustomMainLoopSchedule: 0
     UseDotInstruction: false
     UseF32XEmulation: false
@@ -7629,7 +7629,7 @@
     CustomKernelName: ''
     DebugStreamK: 0
     DepthU: 64
-    DirectToLds: false
+    DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
     DirectToLdsMetadata: false
@@ -7646,7 +7646,7 @@
     ExtraLatencyForLR: 0
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 8
     GlobalReadVectorWidthMetadata: 8
@@ -7788,7 +7788,7 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 30
     SolutionNameMin: Cijk_Ailk_Bljk_BBS_BH_Bias_FDMN_SPB_A_S_SAV_MT256x256x64_MI16x16x1_SN_LDSB1_AFC1_AG0_AFEM1_AFEM1_ASEM8_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVSM0_DPLBn1_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA8_GRVWB8_GSU1_GSUAMB_GSUC0_GSUWGMRR0_GLS0_ISA942_IU1_K1_LDSTI0_LBSPPA4096_LBSPPB256_LBSPPM0_LPA0_LPB8_LPM0_LRVW8_LWPMn1_MIAV0_MIWT8_8_MO40_MGRIPMn1_NTn1_NTA0_NTB0_NTC0_NTD0_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROBn1_SIA3_SS1_SU0_SUM0_SUS0_SPO0_SRVW0_SSO0_SVW4_SK0_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSM0_ULSGRO0_USL1_UIOFGRO0_USFGROn1_VSn1_VWA4_VWB4_WSGRA0_WSGRB0_WS64_WG32_8_1_WGM1_WGMXCC1_WGMXCCGn1
-    SourceSwap: 1
+    SourceSwap: true
     SpaceFillingAlgo: []
     StaggerU: 0
     StaggerUMapping: 0
@@ -7817,13 +7817,13 @@
     ThreadTileB: 8
     ThreadTileMetadata: 8
     TransposeLDS: 1
-    TransposeLDSMetadata: false
+    TransposeLDSMetadata: 0
     ULSGRODoubleG2L: 0
     UnrollLoopSwapGlobalReadOrder: 0
     UnrollMajorLDSA: false
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: false
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseCustomMainLoopSchedule: 0
     UseDotInstruction: false
     UseF32XEmulation: false
@@ -7886,7 +7886,7 @@
     CustomKernelName: ''
     DebugStreamK: 0
     DepthU: 64
-    DirectToLds: false
+    DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
     DirectToLdsMetadata: false
@@ -7903,7 +7903,7 @@
     ExtraLatencyForLR: 0
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 8
     GlobalReadVectorWidthMetadata: 8
@@ -8045,7 +8045,7 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 31
     SolutionNameMin: Cijk_Ailk_Bljk_BBS_BH_Bias_FDMN_SPB_A_S_SAV_MT256x256x64_MI16x16x1_SN_LDSB1_AFC1_AG0_AFEM1_AFEM1_ASEM8_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVSM0_DPLBn1_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA8_GRVWB8_GSU1_GSUAMBSK_GSUC0_GSUWGMRR0_GLS0_ISA942_IU1_K1_LDSTI0_LBSPPA4096_LBSPPB512_LBSPPM0_LPA0_LPB8_LPM0_LRVW8_LWPMn1_MIAV0_MIWT8_8_MO40_MGRIPMn1_NTn1_NTA0_NTB0_NTC0_NTD0_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROBn1_SIA3_SS1_SU0_SUM0_SUS0_SPO0_SRVW0_SSO0_SVW8_SK0_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSM0_ULSGRO0_USL1_UIOFGRO0_USFGROn1_VSn1_VWA8_VWB8_WSGRA0_WSGRB0_WS64_WG32_8_1_WGM4_WGMXCC8_WGMXCCGn1
-    SourceSwap: 1
+    SourceSwap: true
     SpaceFillingAlgo: []
     StaggerU: 0
     StaggerUMapping: 0
@@ -8075,13 +8075,13 @@
     ThreadTileB: 8
     ThreadTileMetadata: 8
     TransposeLDS: 1
-    TransposeLDSMetadata: false
+    TransposeLDSMetadata: 0
     ULSGRODoubleG2L: 0
     UnrollLoopSwapGlobalReadOrder: 0
     UnrollMajorLDSA: false
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: false
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseCustomMainLoopSchedule: 0
     UseDotInstruction: false
     UseF32XEmulation: false
@@ -8144,7 +8144,7 @@
     CustomKernelName: ''
     DebugStreamK: 0
     DepthU: 64
-    DirectToLds: false
+    DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
     DirectToLdsMetadata: false
@@ -8161,7 +8161,7 @@
     ExtraLatencyForLR: 0
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 8
     GlobalReadVectorWidthMetadata: 8
@@ -8303,7 +8303,7 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 32
     SolutionNameMin: Cijk_Ailk_Bljk_BBS_BH_Bias_FDMN_SPB_A_S_SAV_MT256x256x64_MI16x16x1_SN_LDSB1_AFC1_AG0_AFEM1_AFEM1_ASEM8_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVSM0_DPLBn1_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA8_GRVWB8_GSU1_GSUAMB_GSUC0_GSUWGMRR0_GLS0_ISA942_IU1_K1_LDSTI0_LBSPPA4096_LBSPPB256_LBSPPM0_LPA0_LPB8_LPM0_LRVW8_LWPMn1_MIAV0_MIWT8_8_MO40_MGRIPMn1_NTn1_NTA0_NTB0_NTC0_NTD0_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROBn1_SIA3_SS1_SU0_SUM0_SUS0_SPO0_SRVW0_SSO0_SVW8_SK0_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSM0_ULSGRO0_USL1_UIOFGRO0_USFGROn1_VSn1_VWA8_VWB4_WSGRA0_WSGRB0_WS64_WG32_8_1_WGM8_WGMXCC8_WGMXCCGn1
-    SourceSwap: 1
+    SourceSwap: true
     SpaceFillingAlgo: []
     StaggerU: 0
     StaggerUMapping: 0
@@ -8332,13 +8332,13 @@
     ThreadTileB: 8
     ThreadTileMetadata: 8
     TransposeLDS: 1
-    TransposeLDSMetadata: false
+    TransposeLDSMetadata: 0
     ULSGRODoubleG2L: 0
     UnrollLoopSwapGlobalReadOrder: 0
     UnrollMajorLDSA: false
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: false
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseCustomMainLoopSchedule: 0
     UseDotInstruction: false
     UseF32XEmulation: false
@@ -8401,7 +8401,7 @@
     CustomKernelName: ''
     DebugStreamK: 0
     DepthU: 64
-    DirectToLds: false
+    DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
     DirectToLdsMetadata: false
@@ -8418,7 +8418,7 @@
     ExtraLatencyForLR: 0
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 2
     GlobalReadVectorWidthB: 8
     GlobalReadVectorWidthMetadata: 8
@@ -8560,7 +8560,7 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 33
     SolutionNameMin: Cijk_Ailk_Bljk_BBS_BH_Bias_FDMN_SPB_A_S_SAV_MT256x256x64_MI16x16x1_SN_LDSB1_AFC1_AG0_AFEM1_AFEM1_ASEM8_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVSM0_DPLBn1_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA2_GRVWB8_GSU1_GSUAMB_GSUC0_GSUWGMRR0_GLS0_ISA942_IU1_K1_LDSTI0_LBSPPA4096_LBSPPB512_LBSPPM0_LPA0_LPB8_LPM0_LRVW8_LWPMn1_MIAV0_MIWT8_8_MO40_MGRIPMn1_NTn1_NTA0_NTB0_NTC0_NTD0_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROBn1_SIA3_SS1_SU0_SUM0_SUS0_SPO0_SRVW0_SSO0_SVW8_SK0_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSM0_ULSGRO0_USL1_UIOFGRO0_USFGROn1_VSn1_VWA8_VWB8_WSGRA0_WSGRB0_WS64_WG32_8_1_WGM4_WGMXCC8_WGMXCCGn1
-    SourceSwap: 1
+    SourceSwap: true
     SpaceFillingAlgo: []
     StaggerU: 0
     StaggerUMapping: 0
@@ -8589,13 +8589,13 @@
     ThreadTileB: 8
     ThreadTileMetadata: 8
     TransposeLDS: 1
-    TransposeLDSMetadata: false
+    TransposeLDSMetadata: 0
     ULSGRODoubleG2L: 0
     UnrollLoopSwapGlobalReadOrder: 0
     UnrollMajorLDSA: false
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: false
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseCustomMainLoopSchedule: 0
     UseDotInstruction: false
     UseF32XEmulation: false
@@ -8658,7 +8658,7 @@
     CustomKernelName: ''
     DebugStreamK: 0
     DepthU: 64
-    DirectToLds: false
+    DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
     DirectToLdsMetadata: false
@@ -8675,7 +8675,7 @@
     ExtraLatencyForLR: 0
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 8
     GlobalReadVectorWidthMetadata: 8
@@ -8817,7 +8817,7 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 34
     SolutionNameMin: Cijk_Ailk_Bljk_BBS_BH_Bias_FDMN_SPB_A_S_SAV_MT256x256x64_MI16x16x1_SN_LDSB1_AFC1_AG0_AFEM1_AFEM1_ASEM8_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVSM0_DPLBn1_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA8_GRVWB8_GSU1_GSUAMBSK_GSUC0_GSUWGMRR0_GLS0_ISA942_IU1_K1_LDSTI0_LBSPPA4096_LBSPPB256_LBSPPM0_LPA0_LPB8_LPM0_LRVW8_LWPMn1_MIAV0_MIWT8_8_MO40_MGRIPMn1_NTn1_NTA0_NTB0_NTC0_NTD0_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROBn1_SIA3_SS1_SU0_SUM0_SUS0_SPO0_SRVW0_SSO0_SVW8_SK0_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSM0_ULSGRO0_USL1_UIOFGRO0_USFGROn1_VSn1_VWA8_VWB4_WSGRA0_WSGRB0_WS64_WG32_8_1_WGM4_WGMXCC8_WGMXCCGn1
-    SourceSwap: 1
+    SourceSwap: true
     SpaceFillingAlgo: []
     StaggerU: 0
     StaggerUMapping: 0
@@ -8847,13 +8847,13 @@
     ThreadTileB: 8
     ThreadTileMetadata: 8
     TransposeLDS: 1
-    TransposeLDSMetadata: false
+    TransposeLDSMetadata: 0
     ULSGRODoubleG2L: 0
     UnrollLoopSwapGlobalReadOrder: 0
     UnrollMajorLDSA: false
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: false
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseCustomMainLoopSchedule: 0
     UseDotInstruction: false
     UseF32XEmulation: false
@@ -8916,7 +8916,7 @@
     CustomKernelName: ''
     DebugStreamK: 0
     DepthU: 64
-    DirectToLds: false
+    DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
     DirectToLdsMetadata: false
@@ -8933,7 +8933,7 @@
     ExtraLatencyForLR: 0
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 2
     GlobalReadVectorWidthB: 8
     GlobalReadVectorWidthMetadata: 8
@@ -9075,7 +9075,7 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 35
     SolutionNameMin: Cijk_Ailk_Bljk_BBS_BH_Bias_FDMN_SPB_A_S_SAV_MT256x256x64_MI16x16x1_SN_LDSB1_AFC1_AG0_AFEM1_AFEM1_ASEM8_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVSM0_DPLBn1_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA2_GRVWB8_GSU1_GSUAMB_GSUC0_GSUWGMRR0_GLS0_ISA942_IU1_K1_LDSTI0_LBSPPA4096_LBSPPB256_LBSPPM0_LPA0_LPB8_LPM0_LRVW8_LWPMn1_MIAV0_MIWT8_8_MO40_MGRIPMn1_NTn1_NTA0_NTB0_NTC0_NTD0_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROBn1_SIA3_SS1_SU0_SUM0_SUS0_SPO0_SRVW0_SSO0_SVW8_SK0_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSM0_ULSGRO0_USL1_UIOFGRO0_USFGROn1_VSn1_VWA8_VWB4_WSGRA0_WSGRB0_WS64_WG32_8_1_WGM4_WGMXCC8_WGMXCCGn1
-    SourceSwap: 1
+    SourceSwap: true
     SpaceFillingAlgo: []
     StaggerU: 0
     StaggerUMapping: 0
@@ -9104,13 +9104,13 @@
     ThreadTileB: 8
     ThreadTileMetadata: 8
     TransposeLDS: 1
-    TransposeLDSMetadata: false
+    TransposeLDSMetadata: 0
     ULSGRODoubleG2L: 0
     UnrollLoopSwapGlobalReadOrder: 0
     UnrollMajorLDSA: false
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: false
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseCustomMainLoopSchedule: 0
     UseDotInstruction: false
     UseF32XEmulation: false
@@ -9174,7 +9174,7 @@
     CustomKernelName: ''
     DebugStreamK: 0
     DepthU: 64
-    DirectToLds: false
+    DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
     DirectToLdsMetadata: false
@@ -9191,7 +9191,7 @@
     ExtraLatencyForLR: 0
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 8
     GlobalReadVectorWidthMetadata: 8
@@ -9333,7 +9333,7 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 36
     SolutionNameMin: Cijk_Ailk_Bljk_BBS_BH_Bias_FDMN_SPB_A_S_SAV_MT256x256x64_MI16x16x1_SN_LDSB1_AFC1_AG0_AFEM1_AFEM1_ASEM8_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVSM0_DPLBn1_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA8_GRVWB8_GSU1_GSUAMBSK_GSUC0_GSUWGMRR0_GLS0_ISA942_IU1_K1_LDSTI0_LBSPPA4096_LBSPPB256_LBSPPM0_LPA0_LPB8_LPM0_LRVW8_LWPMn1_MIAV0_MIWT8_8_MO40_MGRIPMn1_NTn1_NTA0_NTB0_NTC0_NTD0_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROBn1_SIA3_SS1_SU0_SUM0_SUS0_SPO0_SRVW0_SSO0_SVW4_SK0_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSM0_ULSGRO0_USL1_UIOFGRO0_USFGROn1_VSn1_VWA4_VWB4_WSGRA0_WSGRB0_WS64_WG32_8_1_WGM1_WGMXCC1_WGMXCCGn1
-    SourceSwap: 1
+    SourceSwap: true
     SpaceFillingAlgo: []
     StaggerU: 0
     StaggerUMapping: 0
@@ -9363,13 +9363,13 @@
     ThreadTileB: 8
     ThreadTileMetadata: 8
     TransposeLDS: 1
-    TransposeLDSMetadata: false
+    TransposeLDSMetadata: 0
     ULSGRODoubleG2L: 0
     UnrollLoopSwapGlobalReadOrder: 0
     UnrollMajorLDSA: false
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: false
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseCustomMainLoopSchedule: 0
     UseDotInstruction: false
     UseF32XEmulation: false
@@ -9432,7 +9432,7 @@
     CustomKernelName: ''
     DebugStreamK: 0
     DepthU: 128
-    DirectToLds: false
+    DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
     DirectToLdsMetadata: false
@@ -9449,7 +9449,7 @@
     ExtraLatencyForLR: 0
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 8
     GlobalReadVectorWidthMetadata: 4
@@ -9591,7 +9591,7 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 37
     SolutionNameMin: Cijk_Ailk_Bljk_BBS_BH_Bias_FDMN_SPB_A_S_SAV_MT64x64x128_MI16x16x1_SN_LDSB1_AFC1_AG0_AFEM1_AFEM1_ASEM8_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVSM0_DPLBn1_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA8_GRVWB8_GSU1_GSUAMB_GSUC0_GSUWGMRR0_GLS0_ISA942_IU1_K1_LDSTI0_LBSPPA1024_LBSPPB256_LBSPPM0_LPA32_LPB8_LPM0_LRVW8_LWPMn1_MIAV0_MIWT2_2_MO40_MGRIPMn1_NTn1_NTA0_NTB0_NTC0_NTD0_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROBn1_SIA3_SS1_SU8_SUM0_SUS256_SPO0_SRVW0_SSO0_SVW2_SK0_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSM0_ULSGRO0_USL1_UIOFGRO0_USFGROn1_VSn1_VWA2_VWB2_WSGRA0_WSGRB0_WS64_WG32_8_1_WGM1_WGMXCC1_WGMXCCGn1
-    SourceSwap: 1
+    SourceSwap: true
     SpaceFillingAlgo: []
     StaggerU: 8
     StaggerUMapping: 0
@@ -9620,13 +9620,13 @@
     ThreadTileB: 2
     ThreadTileMetadata: 2
     TransposeLDS: 1
-    TransposeLDSMetadata: false
+    TransposeLDSMetadata: 0
     ULSGRODoubleG2L: 0
     UnrollLoopSwapGlobalReadOrder: 0
     UnrollMajorLDSA: false
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: false
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseCustomMainLoopSchedule: 0
     UseDotInstruction: false
     UseF32XEmulation: false
@@ -9690,7 +9690,7 @@
     CustomKernelName: ''
     DebugStreamK: 0
     DepthU: 128
-    DirectToLds: false
+    DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
     DirectToLdsMetadata: false
@@ -9707,7 +9707,7 @@
     ExtraLatencyForLR: 0
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 8
     GlobalReadVectorWidthMetadata: 4
@@ -9849,7 +9849,7 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 38
     SolutionNameMin: Cijk_Ailk_Bljk_BBS_BH_Bias_FDMN_SPB_A_S_SAV_MT64x64x128_MI16x16x1_SN_LDSB1_AFC1_AG0_AFEM1_AFEM1_ASEM8_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVSM0_DPLBn1_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA8_GRVWB8_GSU1_GSUAMBSK_GSUC0_GSUWGMRR0_GLS0_ISA942_IU1_K1_LDSTI0_LBSPPA1024_LBSPPB256_LBSPPM0_LPA32_LPB8_LPM0_LRVW8_LWPMn1_MIAV0_MIWT2_2_MO40_MGRIPMn1_NTn1_NTA0_NTB0_NTC0_NTD0_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROBn1_SIA3_SS1_SU0_SUM0_SUS0_SPO0_SRVW0_SSO0_SVW2_SK0_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSM0_ULSGRO0_USL1_UIOFGRO0_USFGROn1_VSn1_VWA2_VWB2_WSGRA0_WSGRB0_WS64_WG32_8_1_WGM1_WGMXCC1_WGMXCCGn1
-    SourceSwap: 1
+    SourceSwap: true
     SpaceFillingAlgo: []
     StaggerU: 0
     StaggerUMapping: 0
@@ -9879,13 +9879,13 @@
     ThreadTileB: 2
     ThreadTileMetadata: 2
     TransposeLDS: 1
-    TransposeLDSMetadata: false
+    TransposeLDSMetadata: 0
     ULSGRODoubleG2L: 0
     UnrollLoopSwapGlobalReadOrder: 0
     UnrollMajorLDSA: false
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: false
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseCustomMainLoopSchedule: 0
     UseDotInstruction: false
     UseF32XEmulation: false
@@ -9948,7 +9948,7 @@
     CustomKernelName: ''
     DebugStreamK: 0
     DepthU: 128
-    DirectToLds: false
+    DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
     DirectToLdsMetadata: false
@@ -9965,7 +9965,7 @@
     ExtraLatencyForLR: 0
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 8
     GlobalReadVectorWidthMetadata: 8
@@ -10107,7 +10107,7 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 39
     SolutionNameMin: Cijk_Ailk_Bljk_BBS_BH_Bias_FDMN_SPB_A_S_SAV_MT128x128x128_MI16x16x1_SN_LDSB1_AFC1_AG0_AFEM1_AFEM1_ASEM8_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVSM0_DPLBn1_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA8_GRVWB8_GSU1_GSUAMB_GSUC0_GSUWGMRR0_GLS0_ISA942_IU1_K1_LDSTI0_LBSPPA2048_LBSPPB256_LBSPPM0_LPA0_LPB8_LPM0_LRVW8_LWPMn1_MIAV0_MIWT4_4_MO40_MGRIPMn1_NTn1_NTA0_NTB0_NTC0_NTD0_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROBn1_SIA3_SS1_SU16_SUM0_SUS256_SPO0_SRVW0_SSO0_SVW4_SK0_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSM0_ULSGRO0_USL1_UIOFGRO0_USFGROn1_VSn1_VWA4_VWB2_WSGRA0_WSGRB0_WS64_WG32_8_1_WGM1_WGMXCC1_WGMXCCGn1
-    SourceSwap: 1
+    SourceSwap: true
     SpaceFillingAlgo: []
     StaggerU: 16
     StaggerUMapping: 0
@@ -10136,13 +10136,13 @@
     ThreadTileB: 4
     ThreadTileMetadata: 4
     TransposeLDS: 1
-    TransposeLDSMetadata: false
+    TransposeLDSMetadata: 0
     ULSGRODoubleG2L: 0
     UnrollLoopSwapGlobalReadOrder: 0
     UnrollMajorLDSA: false
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: false
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseCustomMainLoopSchedule: 0
     UseDotInstruction: false
     UseF32XEmulation: false
@@ -10205,7 +10205,7 @@
     CustomKernelName: ''
     DebugStreamK: 0
     DepthU: 64
-    DirectToLds: false
+    DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
     DirectToLdsMetadata: false
@@ -10222,7 +10222,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 8
     GlobalReadVectorWidthMetadata: 8
@@ -10231,7 +10231,7 @@
     GlobalSplitUCoalesced: false
     GlobalSplitUWorkGroupMappingRoundRobin: false
     GlobalWriteVectorWidth: 8
-    GroupLoadStore: 0
+    GroupLoadStore: false
     GuaranteeNoPartialA: false
     GuaranteeNoPartialB: true
     GuaranteeNoPartialMetadata: false
@@ -10367,12 +10367,12 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 40
     SolutionNameMin: Cijk_Ailk_Bljk_BBS_BH_Bias_FDMN_SPB_A_S_SAV_MT256x256x64_MI16x16x1_SN_LDSB1_AFC1_AG0_AFEM1_AFEM1_ASEM8_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVSM0_DPLBn1_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA8_GRVWB8_GSUn1_GSUAMB_GSUC0_GSUWGMRR0_GLS0_ISA942_IU1_K1_LDSTI0_LBSPPA4096_LBSPPB128_LBSPPM0_LPA0_LPB8_LPM0_LRVW8_LWPMn1_MIAV0_MIWT8_8_MO40_MGRIPMn1_NTn1_NTA0_NTB0_NTC0_NTD4_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROBn1_SIA3_SS1_SU0_SUM0_SUS0_SPO0_SRVW0_SSO0_SVW8_SK0_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSM0_ULSGRO0_USL1_UIOFGRO0_USFGROn1_VSn1_VWA8_VWB2_WSGRA0_WSGRB0_WS64_WG32_8_1_WGM8_WGMXCC8_WGMXCCGn1
-    SourceSwap: 1
+    SourceSwap: true
     SpaceFillingAlgo: []
     StaggerU: 0
     StaggerUMapping: 0
     StaggerUStride: 0
-    StorePriorityOpt: 0
+    StorePriorityOpt: false
     StoreRemapVectorWidth: 0
     StoreSwapAddr: false
     StoreSyncOpt: 0
@@ -10387,7 +10387,7 @@
     SubGroupB: 32
     SubGroupMetadata: 32
     SuppressNoLoadLoop: false
-    SwapGlobalReadOrder: false
+    SwapGlobalReadOrder: 0
     TailloopInNll: false
     ThreadTile: [1, 1]
     ThreadTile0: 32
@@ -10396,13 +10396,13 @@
     ThreadTileB: 8
     ThreadTileMetadata: 8
     TransposeLDS: 1
-    TransposeLDSMetadata: false
+    TransposeLDSMetadata: 0
     ULSGRODoubleG2L: 0
     UnrollLoopSwapGlobalReadOrder: 0
     UnrollMajorLDSA: false
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: false
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseCustomMainLoopSchedule: 0
     UseDirect32XEmulation: false
     UseDot2F32XEmulation: false
@@ -10412,7 +10412,7 @@
     UseGeneralizedNLCOneB: false
     UseGeneralizedNLCOneMetadata: false
     UseInstOffsetForGRO: 0
-    UsePLRPack: false
+    UsePLRPack: 0
     UseSgprForGRO: -1
     Valid: true
     VectorStore: -1
@@ -10474,7 +10474,7 @@
     CustomKernelName: ''
     DebugStreamK: 0
     DepthU: 64
-    DirectToLds: false
+    DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
     DirectToLdsMetadata: false
@@ -10491,7 +10491,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 2
     GlobalReadVectorWidthB: 8
     GlobalReadVectorWidthMetadata: 8
@@ -10500,7 +10500,7 @@
     GlobalSplitUCoalesced: false
     GlobalSplitUWorkGroupMappingRoundRobin: false
     GlobalWriteVectorWidth: 8
-    GroupLoadStore: 0
+    GroupLoadStore: false
     GuaranteeNoPartialA: false
     GuaranteeNoPartialB: true
     GuaranteeNoPartialMetadata: false
@@ -10636,12 +10636,12 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 41
     SolutionNameMin: Cijk_Ailk_Bljk_BBS_BH_Bias_FDMN_SPB_A_S_SAV_MT256x256x64_MI16x16x1_SN_LDSB1_AFC1_AG0_AFEM1_AFEM1_ASEM8_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVSM0_DPLBn1_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA2_GRVWB8_GSUn1_GSUAMB_GSUC0_GSUWGMRR0_GLS0_ISA942_IU1_K1_LDSTI0_LBSPPA4096_LBSPPB128_LBSPPM0_LPA0_LPB8_LPM0_LRVW8_LWPMn1_MIAV0_MIWT8_8_MO40_MGRIPMn1_NTn1_NTA0_NTB0_NTC0_NTD4_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROBn1_SIA3_SS1_SU16_SUM0_SUS256_SPO0_SRVW0_SSO0_SVW8_SK0_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSM0_ULSGRO0_USL1_UIOFGRO0_USFGROn1_VSn1_VWA8_VWB2_WSGRA0_WSGRB0_WS64_WG32_8_1_WGM8_WGMXCC8_WGMXCCGn1
-    SourceSwap: 1
+    SourceSwap: true
     SpaceFillingAlgo: []
     StaggerU: 16
     StaggerUMapping: 0
     StaggerUStride: 256
-    StorePriorityOpt: 0
+    StorePriorityOpt: false
     StoreRemapVectorWidth: 0
     StoreSwapAddr: false
     StoreSyncOpt: 0
@@ -10656,7 +10656,7 @@
     SubGroupB: 32
     SubGroupMetadata: 32
     SuppressNoLoadLoop: false
-    SwapGlobalReadOrder: false
+    SwapGlobalReadOrder: 0
     TailloopInNll: false
     ThreadTile: [1, 1]
     ThreadTile0: 32
@@ -10665,13 +10665,13 @@
     ThreadTileB: 8
     ThreadTileMetadata: 8
     TransposeLDS: 1
-    TransposeLDSMetadata: false
+    TransposeLDSMetadata: 0
     ULSGRODoubleG2L: 0
     UnrollLoopSwapGlobalReadOrder: 0
     UnrollMajorLDSA: false
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: false
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseCustomMainLoopSchedule: 0
     UseDirect32XEmulation: false
     UseDot2F32XEmulation: false
@@ -10681,7 +10681,7 @@
     UseGeneralizedNLCOneB: false
     UseGeneralizedNLCOneMetadata: false
     UseInstOffsetForGRO: 0
-    UsePLRPack: false
+    UsePLRPack: 0
     UseSgprForGRO: -1
     Valid: true
     VectorStore: -1
@@ -10743,7 +10743,7 @@
     CustomKernelName: ''
     DebugStreamK: 0
     DepthU: 64
-    DirectToLds: false
+    DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
     DirectToLdsMetadata: false
@@ -10760,7 +10760,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 2
     GlobalReadVectorWidthB: 8
     GlobalReadVectorWidthMetadata: 8
@@ -10769,7 +10769,7 @@
     GlobalSplitUCoalesced: false
     GlobalSplitUWorkGroupMappingRoundRobin: false
     GlobalWriteVectorWidth: 8
-    GroupLoadStore: 0
+    GroupLoadStore: false
     GuaranteeNoPartialA: false
     GuaranteeNoPartialB: true
     GuaranteeNoPartialMetadata: false
@@ -10905,12 +10905,12 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 42
     SolutionNameMin: Cijk_Ailk_Bljk_BBS_BH_Bias_FDMN_SPB_A_S_SAV_MT256x256x64_MI16x16x1_SN_LDSB1_AFC1_AG0_AFEM1_AFEM1_ASEM8_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVSM0_DPLBn1_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA2_GRVWB8_GSUn1_GSUAMB_GSUC0_GSUWGMRR0_GLS0_ISA942_IU1_K1_LDSTI0_LBSPPA4096_LBSPPB128_LBSPPM0_LPA0_LPB8_LPM0_LRVW8_LWPMn1_MIAV0_MIWT8_8_MO40_MGRIPMn1_NTn1_NTA0_NTB0_NTC0_NTD4_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROBn1_SIA3_SS1_SU0_SUM0_SUS0_SPO0_SRVW0_SSO0_SVW8_SK0_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSM0_ULSGRO0_USL1_UIOFGRO0_USFGROn1_VSn1_VWA8_VWB2_WSGRA0_WSGRB0_WS64_WG32_8_1_WGM8_WGMXCC8_WGMXCCGn1
-    SourceSwap: 1
+    SourceSwap: true
     SpaceFillingAlgo: []
     StaggerU: 0
     StaggerUMapping: 0
     StaggerUStride: 0
-    StorePriorityOpt: 0
+    StorePriorityOpt: false
     StoreRemapVectorWidth: 0
     StoreSwapAddr: false
     StoreSyncOpt: 0
@@ -10925,7 +10925,7 @@
     SubGroupB: 32
     SubGroupMetadata: 32
     SuppressNoLoadLoop: false
-    SwapGlobalReadOrder: false
+    SwapGlobalReadOrder: 0
     TailloopInNll: false
     ThreadTile: [1, 1]
     ThreadTile0: 32
@@ -10934,13 +10934,13 @@
     ThreadTileB: 8
     ThreadTileMetadata: 8
     TransposeLDS: 1
-    TransposeLDSMetadata: false
+    TransposeLDSMetadata: 0
     ULSGRODoubleG2L: 0
     UnrollLoopSwapGlobalReadOrder: 0
     UnrollMajorLDSA: false
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: false
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseCustomMainLoopSchedule: 0
     UseDirect32XEmulation: false
     UseDot2F32XEmulation: false
@@ -10950,7 +10950,7 @@
     UseGeneralizedNLCOneB: false
     UseGeneralizedNLCOneMetadata: false
     UseInstOffsetForGRO: 0
-    UsePLRPack: false
+    UsePLRPack: 0
     UseSgprForGRO: -1
     Valid: true
     VectorStore: -1
@@ -11012,7 +11012,7 @@
     CustomKernelName: ''
     DebugStreamK: 0
     DepthU: 64
-    DirectToLds: false
+    DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
     DirectToLdsMetadata: false
@@ -11029,7 +11029,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 2
     GlobalReadVectorWidthB: 8
     GlobalReadVectorWidthMetadata: 8
@@ -11038,7 +11038,7 @@
     GlobalSplitUCoalesced: false
     GlobalSplitUWorkGroupMappingRoundRobin: false
     GlobalWriteVectorWidth: 8
-    GroupLoadStore: 0
+    GroupLoadStore: false
     GuaranteeNoPartialA: false
     GuaranteeNoPartialB: true
     GuaranteeNoPartialMetadata: false
@@ -11174,12 +11174,12 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 43
     SolutionNameMin: Cijk_Ailk_Bljk_BBS_BH_Bias_FDMN_SPB_A_S_SAV_MT256x256x64_MI16x16x1_SN_LDSB1_AFC1_AG0_AFEM1_AFEM1_ASEM8_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVSM0_DPLBn1_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA2_GRVWB8_GSUn1_GSUAMB_GSUC0_GSUWGMRR0_GLS0_ISA942_IU1_K1_LDSTI0_LBSPPA4096_LBSPPB128_LBSPPM0_LPA0_LPB8_LPM0_LRVW8_LWPMn1_MIAV0_MIWT8_8_MO40_MGRIPMn1_NTn1_NTA0_NTB0_NTC0_NTD0_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROBn1_SIA3_SS1_SU0_SUM0_SUS0_SPO0_SRVW0_SSO0_SVW8_SK0_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSM0_ULSGRO0_USL1_UIOFGRO0_USFGROn1_VSn1_VWA8_VWB2_WSGRA0_WSGRB0_WS64_WG32_8_1_WGM8_WGMXCC8_WGMXCCGn1
-    SourceSwap: 1
+    SourceSwap: true
     SpaceFillingAlgo: []
     StaggerU: 0
     StaggerUMapping: 0
     StaggerUStride: 0
-    StorePriorityOpt: 0
+    StorePriorityOpt: false
     StoreRemapVectorWidth: 0
     StoreSwapAddr: false
     StoreSyncOpt: 0
@@ -11194,7 +11194,7 @@
     SubGroupB: 32
     SubGroupMetadata: 32
     SuppressNoLoadLoop: false
-    SwapGlobalReadOrder: false
+    SwapGlobalReadOrder: 0
     TailloopInNll: false
     ThreadTile: [1, 1]
     ThreadTile0: 32
@@ -11203,13 +11203,13 @@
     ThreadTileB: 8
     ThreadTileMetadata: 8
     TransposeLDS: 1
-    TransposeLDSMetadata: false
+    TransposeLDSMetadata: 0
     ULSGRODoubleG2L: 0
     UnrollLoopSwapGlobalReadOrder: 0
     UnrollMajorLDSA: false
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: false
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseCustomMainLoopSchedule: 0
     UseDirect32XEmulation: false
     UseDot2F32XEmulation: false
@@ -11219,7 +11219,7 @@
     UseGeneralizedNLCOneB: false
     UseGeneralizedNLCOneMetadata: false
     UseInstOffsetForGRO: 0
-    UsePLRPack: false
+    UsePLRPack: 0
     UseSgprForGRO: -1
     Valid: true
     VectorStore: -1
@@ -11298,7 +11298,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 8
     GlobalReadVectorWidthMetadata: 8
@@ -11307,7 +11307,7 @@
     GlobalSplitUCoalesced: true
     GlobalSplitUWorkGroupMappingRoundRobin: false
     GlobalWriteVectorWidth: 8
-    GroupLoadStore: 0
+    GroupLoadStore: false
     GuaranteeNoPartialA: false
     GuaranteeNoPartialB: true
     GuaranteeNoPartialMetadata: false
@@ -11444,12 +11444,12 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 44
     SolutionNameMin: Cijk_Ailk_Bljk_BBS_BH_Bias_FDMN_SPB_A_S_SAV_MT256x256x64_MI16x16x1_SN_LDSB1_AFC1_AG0_AFEM1_AFEM1_ASEM8_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVSM0_DPLB0_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA8_GRVWB8_GSUn1_GSUAMB_GSUC1_GSUWGMRR0_GLS0_ISA942_IU1_K1_LDSTI0_LBSPPA0_LBSPPB128_LBSPPM0_LPA0_LPB8_LPM0_LRVW8_LWPMn1_MIAV0_MIWT8_8_MO40_MGRIPM1_NTn1_NTA0_NTB0_NTC0_NTD4_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROB0_SIA3_SS1_SU16_SUM0_SUS256_SPO0_SRVW0_SSO0_SVW8_SK0_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSM1_ULSGRO0_USL1_UIOFGRO0_USFGROn1_VSn1_VWA8_VWB1_WSGRA0_WSGRB0_WS64_WG32_8_1_WGM1_WGMXCC1_WGMXCCGn1
-    SourceSwap: 1
+    SourceSwap: true
     SpaceFillingAlgo: []
     StaggerU: 16
     StaggerUMapping: 0
     StaggerUStride: 256
-    StorePriorityOpt: 0
+    StorePriorityOpt: false
     StoreRemapVectorWidth: 0
     StoreSwapAddr: false
     StoreSyncOpt: 0
@@ -11464,7 +11464,7 @@
     SubGroupB: 32
     SubGroupMetadata: 32
     SuppressNoLoadLoop: false
-    SwapGlobalReadOrder: false
+    SwapGlobalReadOrder: 0
     TailloopInNll: false
     ThreadTile: [1, 1]
     ThreadTile0: 32
@@ -11479,7 +11479,7 @@
     UnrollMajorLDSA: false
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: 1
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseCustomMainLoopSchedule: 0
     UseDirect32XEmulation: false
     UseDot2F32XEmulation: false
@@ -11490,7 +11490,7 @@
     UseGeneralizedNLCOneMetadata: false
     UseInstOffsetForGRO: 0
     UseMFMAF32XEmulation: false
-    UsePLRPack: false
+    UsePLRPack: 0
     UseSgprForGRO: -1
     Valid: true
     VectorStore: -1
@@ -11569,7 +11569,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 8
     GlobalReadVectorWidthMetadata: 8
@@ -11578,7 +11578,7 @@
     GlobalSplitUCoalesced: false
     GlobalSplitUWorkGroupMappingRoundRobin: true
     GlobalWriteVectorWidth: 8
-    GroupLoadStore: 0
+    GroupLoadStore: false
     GuaranteeNoPartialA: false
     GuaranteeNoPartialB: true
     GuaranteeNoPartialMetadata: false
@@ -11715,12 +11715,12 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 45
     SolutionNameMin: Cijk_Ailk_Bljk_BBS_BH_Bias_FDMN_SPB_A_S_SAV_MT256x256x64_MI16x16x1_SN_LDSB1_AFC1_AG0_AFEM1_AFEM1_ASEM8_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVSM0_DPLB0_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA8_GRVWB8_GSUn1_GSUAMB_GSUC0_GSUWGMRR1_GLS0_ISA942_IU1_K1_LDSTI0_LBSPPA0_LBSPPB128_LBSPPM0_LPA0_LPB8_LPM0_LRVW8_LWPMn1_MIAV0_MIWT8_8_MO40_MGRIPM1_NTn1_NTA0_NTB0_NTC0_NTD4_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROB0_SIA3_SS1_SU8_SUM0_SUS256_SPO0_SRVW0_SSO0_SVW8_SK0_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSM1_ULSGRO0_USL1_UIOFGRO0_USFGROn1_VSn1_VWA8_VWB1_WSGRA0_WSGRB0_WS64_WG32_8_1_WGM1_WGMXCC1_WGMXCCGn1
-    SourceSwap: 1
+    SourceSwap: true
     SpaceFillingAlgo: []
     StaggerU: 8
     StaggerUMapping: 0
     StaggerUStride: 256
-    StorePriorityOpt: 0
+    StorePriorityOpt: false
     StoreRemapVectorWidth: 0
     StoreSwapAddr: false
     StoreSyncOpt: 0
@@ -11735,7 +11735,7 @@
     SubGroupB: 32
     SubGroupMetadata: 32
     SuppressNoLoadLoop: false
-    SwapGlobalReadOrder: false
+    SwapGlobalReadOrder: 0
     TailloopInNll: false
     ThreadTile: [1, 1]
     ThreadTile0: 32
@@ -11750,7 +11750,7 @@
     UnrollMajorLDSA: false
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: 1
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseCustomMainLoopSchedule: 0
     UseDirect32XEmulation: false
     UseDot2F32XEmulation: false
@@ -11761,7 +11761,7 @@
     UseGeneralizedNLCOneMetadata: false
     UseInstOffsetForGRO: 0
     UseMFMAF32XEmulation: false
-    UsePLRPack: false
+    UsePLRPack: 0
     UseSgprForGRO: -1
     Valid: true
     VectorStore: -1
@@ -11840,7 +11840,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 8
     GlobalReadVectorWidthMetadata: 8
@@ -11849,7 +11849,7 @@
     GlobalSplitUCoalesced: false
     GlobalSplitUWorkGroupMappingRoundRobin: true
     GlobalWriteVectorWidth: 8
-    GroupLoadStore: 0
+    GroupLoadStore: false
     GuaranteeNoPartialA: false
     GuaranteeNoPartialB: true
     GuaranteeNoPartialMetadata: false
@@ -11986,12 +11986,12 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 46
     SolutionNameMin: Cijk_Ailk_Bljk_BBS_BH_Bias_FDMN_SPB_A_S_SAV_MT256x256x64_MI16x16x1_SN_LDSB1_AFC1_AG0_AFEM1_AFEM1_ASEM8_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVSM0_DPLB0_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA8_GRVWB8_GSUn1_GSUAMB_GSUC0_GSUWGMRR1_GLS0_ISA942_IU1_K1_LDSTI0_LBSPPA0_LBSPPB128_LBSPPM0_LPA0_LPB8_LPM0_LRVW8_LWPMn1_MIAV0_MIWT8_8_MO40_MGRIPM1_NTn1_NTA0_NTB0_NTC0_NTD0_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROB0_SIA3_SS1_SU8_SUM0_SUS256_SPO0_SRVW0_SSO0_SVW8_SK0_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSM1_ULSGRO0_USL1_UIOFGRO0_USFGROn1_VSn1_VWA8_VWB1_WSGRA0_WSGRB0_WS64_WG32_8_1_WGM4_WGMXCC8_WGMXCCGn1
-    SourceSwap: 1
+    SourceSwap: true
     SpaceFillingAlgo: []
     StaggerU: 8
     StaggerUMapping: 0
     StaggerUStride: 256
-    StorePriorityOpt: 0
+    StorePriorityOpt: false
     StoreRemapVectorWidth: 0
     StoreSwapAddr: false
     StoreSyncOpt: 0
@@ -12006,7 +12006,7 @@
     SubGroupB: 32
     SubGroupMetadata: 32
     SuppressNoLoadLoop: false
-    SwapGlobalReadOrder: false
+    SwapGlobalReadOrder: 0
     TailloopInNll: false
     ThreadTile: [1, 1]
     ThreadTile0: 32
@@ -12021,7 +12021,7 @@
     UnrollMajorLDSA: false
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: 1
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseCustomMainLoopSchedule: 0
     UseDirect32XEmulation: false
     UseDot2F32XEmulation: false
@@ -12032,7 +12032,7 @@
     UseGeneralizedNLCOneMetadata: false
     UseInstOffsetForGRO: 0
     UseMFMAF32XEmulation: false
-    UsePLRPack: false
+    UsePLRPack: 0
     UseSgprForGRO: -1
     Valid: true
     VectorStore: -1
@@ -12111,7 +12111,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 2
     GlobalReadVectorWidthB: 8
     GlobalReadVectorWidthMetadata: 8
@@ -12120,7 +12120,7 @@
     GlobalSplitUCoalesced: false
     GlobalSplitUWorkGroupMappingRoundRobin: false
     GlobalWriteVectorWidth: 8
-    GroupLoadStore: 0
+    GroupLoadStore: false
     GuaranteeNoPartialA: false
     GuaranteeNoPartialB: true
     GuaranteeNoPartialMetadata: false
@@ -12257,12 +12257,12 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 47
     SolutionNameMin: Cijk_Ailk_Bljk_BBS_BH_Bias_FDMN_SPB_A_S_SAV_MT256x256x64_MI16x16x1_SN_LDSB1_AFC1_AG0_AFEM1_AFEM1_ASEM8_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVSM0_DPLB0_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA2_GRVWB8_GSUn1_GSUAMB_GSUC0_GSUWGMRR0_GLS0_ISA942_IU1_K1_LDSTI0_LBSPPA0_LBSPPB128_LBSPPM0_LPA0_LPB8_LPM0_LRVW8_LWPMn1_MIAV0_MIWT8_8_MO40_MGRIPM1_NTn1_NTA0_NTB0_NTC0_NTD4_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROB0_SIA3_SS1_SU0_SUM0_SUS0_SPO0_SRVW0_SSO0_SVW8_SK0_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSM1_ULSGRO0_USL1_UIOFGRO0_USFGROn1_VSn1_VWA8_VWB1_WSGRA0_WSGRB0_WS64_WG32_8_1_WGM4_WGMXCC8_WGMXCCGn1
-    SourceSwap: 1
+    SourceSwap: true
     SpaceFillingAlgo: []
     StaggerU: 0
     StaggerUMapping: 0
     StaggerUStride: 0
-    StorePriorityOpt: 0
+    StorePriorityOpt: false
     StoreRemapVectorWidth: 0
     StoreSwapAddr: false
     StoreSyncOpt: 0
@@ -12277,7 +12277,7 @@
     SubGroupB: 32
     SubGroupMetadata: 32
     SuppressNoLoadLoop: false
-    SwapGlobalReadOrder: false
+    SwapGlobalReadOrder: 0
     TailloopInNll: false
     ThreadTile: [1, 1]
     ThreadTile0: 32
@@ -12292,7 +12292,7 @@
     UnrollMajorLDSA: false
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: 1
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseCustomMainLoopSchedule: 0
     UseDirect32XEmulation: false
     UseDot2F32XEmulation: false
@@ -12303,7 +12303,7 @@
     UseGeneralizedNLCOneMetadata: false
     UseInstOffsetForGRO: 0
     UseMFMAF32XEmulation: false
-    UsePLRPack: false
+    UsePLRPack: 0
     UseSgprForGRO: -1
     Valid: true
     VectorStore: -1
@@ -12382,7 +12382,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 8
     GlobalReadVectorWidthMetadata: 8
@@ -12391,7 +12391,7 @@
     GlobalSplitUCoalesced: false
     GlobalSplitUWorkGroupMappingRoundRobin: true
     GlobalWriteVectorWidth: 4
-    GroupLoadStore: 0
+    GroupLoadStore: false
     GuaranteeNoPartialA: false
     GuaranteeNoPartialB: true
     GuaranteeNoPartialMetadata: false
@@ -12528,12 +12528,12 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 48
     SolutionNameMin: Cijk_Ailk_Bljk_BBS_BH_Bias_FDMN_SPB_A_S_SAV_MT192x256x64_MI16x16x1_SN_LDSB1_AFC1_AG0_AFEM1_AFEM1_ASEM8_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVSM0_DPLB0_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA8_GRVWB8_GSUn1_GSUAMB_GSUC0_GSUWGMRR1_GLS0_ISA942_IU1_K1_LDSTI0_LBSPPA0_LBSPPB128_LBSPPM0_LPA0_LPB8_LPM0_LRVW8_LWPMn1_MIAV0_MIWT12_4_MO40_MGRIPM1_NTn1_NTA0_NTB0_NTC0_NTD4_NTM0_NEPBS0_NLCA3_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROB0_SIA3_SS1_SU8_SUM0_SUS256_SPO0_SRVW0_SSO0_SVW4_SK0_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSM1_ULSGRO0_USL1_UIOFGRO0_USFGROn1_VSn1_VWA4_VWB1_WSGRA0_WSGRB0_WS64_WG16_16_1_WGM8_WGMXCC8_WGMXCCGn1
-    SourceSwap: 1
+    SourceSwap: true
     SpaceFillingAlgo: []
     StaggerU: 8
     StaggerUMapping: 0
     StaggerUStride: 256
-    StorePriorityOpt: 0
+    StorePriorityOpt: false
     StoreRemapVectorWidth: 0
     StoreSwapAddr: false
     StoreSyncOpt: 0
@@ -12548,7 +12548,7 @@
     SubGroupB: 64
     SubGroupMetadata: 64
     SuppressNoLoadLoop: false
-    SwapGlobalReadOrder: false
+    SwapGlobalReadOrder: 0
     TailloopInNll: false
     ThreadTile: [1, 1]
     ThreadTile0: 48
@@ -12563,7 +12563,7 @@
     UnrollMajorLDSA: false
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: 1
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseCustomMainLoopSchedule: 0
     UseDirect32XEmulation: false
     UseDot2F32XEmulation: false
@@ -12574,7 +12574,7 @@
     UseGeneralizedNLCOneMetadata: false
     UseInstOffsetForGRO: 0
     UseMFMAF32XEmulation: false
-    UsePLRPack: false
+    UsePLRPack: 0
     UseSgprForGRO: -1
     Valid: true
     VectorStore: -1
@@ -12653,7 +12653,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 8
     GlobalReadVectorWidthMetadata: 8
@@ -12662,7 +12662,7 @@
     GlobalSplitUCoalesced: true
     GlobalSplitUWorkGroupMappingRoundRobin: false
     GlobalWriteVectorWidth: 8
-    GroupLoadStore: 0
+    GroupLoadStore: false
     GuaranteeNoPartialA: false
     GuaranteeNoPartialB: true
     GuaranteeNoPartialMetadata: false
@@ -12799,12 +12799,12 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 49
     SolutionNameMin: Cijk_Ailk_Bljk_BBS_BH_Bias_FDMN_SPB_A_S_SAV_MT256x256x64_MI16x16x1_SN_LDSB1_AFC1_AG0_AFEM1_AFEM1_ASEM8_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVSM0_DPLB0_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA8_GRVWB8_GSUn1_GSUAMB_GSUC1_GSUWGMRR0_GLS0_ISA942_IU1_K1_LDSTI0_LBSPPA0_LBSPPB128_LBSPPM0_LPA0_LPB8_LPM0_LRVW8_LWPMn1_MIAV0_MIWT8_8_MO40_MGRIPM1_NTn1_NTA0_NTB0_NTC0_NTD4_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROB0_SIA3_SS1_SU16_SUM0_SUS256_SPO0_SRVW0_SSO0_SVW8_SK0_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSM1_ULSGRO0_USL1_UIOFGRO0_USFGROn1_VSn1_VWA8_VWB2_WSGRA0_WSGRB0_WS64_WG32_8_1_WGM8_WGMXCC8_WGMXCCGn1
-    SourceSwap: 1
+    SourceSwap: true
     SpaceFillingAlgo: []
     StaggerU: 16
     StaggerUMapping: 0
     StaggerUStride: 256
-    StorePriorityOpt: 0
+    StorePriorityOpt: false
     StoreRemapVectorWidth: 0
     StoreSwapAddr: false
     StoreSyncOpt: 0
@@ -12819,7 +12819,7 @@
     SubGroupB: 32
     SubGroupMetadata: 32
     SuppressNoLoadLoop: false
-    SwapGlobalReadOrder: false
+    SwapGlobalReadOrder: 0
     TailloopInNll: false
     ThreadTile: [1, 1]
     ThreadTile0: 32
@@ -12834,7 +12834,7 @@
     UnrollMajorLDSA: false
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: 1
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseCustomMainLoopSchedule: 0
     UseDirect32XEmulation: false
     UseDot2F32XEmulation: false
@@ -12845,7 +12845,7 @@
     UseGeneralizedNLCOneMetadata: false
     UseInstOffsetForGRO: 0
     UseMFMAF32XEmulation: false
-    UsePLRPack: false
+    UsePLRPack: 0
     UseSgprForGRO: -1
     Valid: true
     VectorStore: -1
@@ -12924,7 +12924,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 8
     GlobalReadVectorWidthMetadata: 8
@@ -12933,7 +12933,7 @@
     GlobalSplitUCoalesced: false
     GlobalSplitUWorkGroupMappingRoundRobin: true
     GlobalWriteVectorWidth: 8
-    GroupLoadStore: 0
+    GroupLoadStore: false
     GuaranteeNoPartialA: false
     GuaranteeNoPartialB: true
     GuaranteeNoPartialMetadata: false
@@ -13070,12 +13070,12 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 50
     SolutionNameMin: Cijk_Ailk_Bljk_BBS_BH_Bias_FDMN_SPB_A_S_SAV_MT256x256x64_MI16x16x1_SN_LDSB1_AFC1_AG0_AFEM1_AFEM1_ASEM8_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVSM0_DPLB0_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA8_GRVWB8_GSUn1_GSUAMB_GSUC0_GSUWGMRR1_GLS0_ISA942_IU1_K1_LDSTI0_LBSPPA0_LBSPPB128_LBSPPM0_LPA0_LPB8_LPM0_LRVW8_LWPMn1_MIAV0_MIWT8_8_MO40_MGRIPM1_NTn1_NTA0_NTB0_NTC0_NTD4_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROB0_SIA3_SS1_SU8_SUM0_SUS256_SPO0_SRVW0_SSO0_SVW8_SK0_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSM1_ULSGRO0_USL1_UIOFGRO0_USFGROn1_VSn1_VWA8_VWB2_WSGRA0_WSGRB0_WS64_WG32_8_1_WGM1_WGMXCC1_WGMXCCGn1
-    SourceSwap: 1
+    SourceSwap: true
     SpaceFillingAlgo: []
     StaggerU: 8
     StaggerUMapping: 0
     StaggerUStride: 256
-    StorePriorityOpt: 0
+    StorePriorityOpt: false
     StoreRemapVectorWidth: 0
     StoreSwapAddr: false
     StoreSyncOpt: 0
@@ -13090,7 +13090,7 @@
     SubGroupB: 32
     SubGroupMetadata: 32
     SuppressNoLoadLoop: false
-    SwapGlobalReadOrder: false
+    SwapGlobalReadOrder: 0
     TailloopInNll: false
     ThreadTile: [1, 1]
     ThreadTile0: 32
@@ -13105,7 +13105,7 @@
     UnrollMajorLDSA: false
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: 1
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseCustomMainLoopSchedule: 0
     UseDirect32XEmulation: false
     UseDot2F32XEmulation: false
@@ -13116,7 +13116,7 @@
     UseGeneralizedNLCOneMetadata: false
     UseInstOffsetForGRO: 0
     UseMFMAF32XEmulation: false
-    UsePLRPack: false
+    UsePLRPack: 0
     UseSgprForGRO: -1
     Valid: true
     VectorStore: -1
@@ -13195,7 +13195,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 8
     GlobalReadVectorWidthMetadata: 8
@@ -13204,7 +13204,7 @@
     GlobalSplitUCoalesced: false
     GlobalSplitUWorkGroupMappingRoundRobin: true
     GlobalWriteVectorWidth: 4
-    GroupLoadStore: 0
+    GroupLoadStore: false
     GuaranteeNoPartialA: false
     GuaranteeNoPartialB: true
     GuaranteeNoPartialMetadata: false
@@ -13341,12 +13341,12 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 51
     SolutionNameMin: Cijk_Ailk_Bljk_BBS_BH_Bias_FDMN_SPB_A_S_SAV_MT192x256x64_MI16x16x1_SN_LDSB1_AFC1_AG0_AFEM1_AFEM1_ASEM8_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVSM0_DPLB0_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA8_GRVWB8_GSUn1_GSUAMB_GSUC0_GSUWGMRR1_GLS0_ISA942_IU1_K1_LDSTI0_LBSPPA0_LBSPPB128_LBSPPM0_LPA0_LPB8_LPM0_LRVW8_LWPMn1_MIAV0_MIWT12_4_MO40_MGRIPM1_NTn1_NTA0_NTB0_NTC0_NTD4_NTM0_NEPBS0_NLCA3_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROB0_SIA3_SS1_SU0_SUM0_SUS0_SPO0_SRVW0_SSO0_SVW4_SK0_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSM1_ULSGRO0_USL1_UIOFGRO0_USFGROn1_VSn1_VWA4_VWB2_WSGRA0_WSGRB0_WS64_WG16_16_1_WGM4_WGMXCC8_WGMXCCGn1
-    SourceSwap: 1
+    SourceSwap: true
     SpaceFillingAlgo: []
     StaggerU: 0
     StaggerUMapping: 0
     StaggerUStride: 0
-    StorePriorityOpt: 0
+    StorePriorityOpt: false
     StoreRemapVectorWidth: 0
     StoreSwapAddr: false
     StoreSyncOpt: 0
@@ -13361,7 +13361,7 @@
     SubGroupB: 64
     SubGroupMetadata: 64
     SuppressNoLoadLoop: false
-    SwapGlobalReadOrder: false
+    SwapGlobalReadOrder: 0
     TailloopInNll: false
     ThreadTile: [1, 1]
     ThreadTile0: 48
@@ -13376,7 +13376,7 @@
     UnrollMajorLDSA: false
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: 1
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseCustomMainLoopSchedule: 0
     UseDirect32XEmulation: false
     UseDot2F32XEmulation: false
@@ -13387,7 +13387,7 @@
     UseGeneralizedNLCOneMetadata: false
     UseInstOffsetForGRO: 0
     UseMFMAF32XEmulation: false
-    UsePLRPack: false
+    UsePLRPack: 0
     UseSgprForGRO: -1
     Valid: true
     VectorStore: -1
@@ -13466,7 +13466,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 8
     GlobalReadVectorWidthMetadata: 8
@@ -13475,7 +13475,7 @@
     GlobalSplitUCoalesced: false
     GlobalSplitUWorkGroupMappingRoundRobin: true
     GlobalWriteVectorWidth: 8
-    GroupLoadStore: 0
+    GroupLoadStore: false
     GuaranteeNoPartialA: false
     GuaranteeNoPartialB: true
     GuaranteeNoPartialMetadata: false
@@ -13612,12 +13612,12 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 52
     SolutionNameMin: Cijk_Ailk_Bljk_BBS_BH_Bias_FDMN_SPB_A_S_SAV_MT256x256x64_MI16x16x1_SN_LDSB1_AFC1_AG0_AFEM1_AFEM1_ASEM8_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVSM0_DPLB0_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA8_GRVWB8_GSUn1_GSUAMB_GSUC0_GSUWGMRR1_GLS0_ISA942_IU1_K1_LDSTI0_LBSPPA0_LBSPPB128_LBSPPM0_LPA0_LPB8_LPM0_LRVW8_LWPMn1_MIAV0_MIWT8_8_MO40_MGRIPM1_NTn1_NTA0_NTB0_NTC0_NTD0_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROB0_SIA3_SS1_SU0_SUM0_SUS0_SPO0_SRVW0_SSO0_SVW8_SK0_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSM1_ULSGRO0_USL1_UIOFGRO0_USFGROn1_VSn1_VWA8_VWB2_WSGRA0_WSGRB0_WS64_WG32_8_1_WGM4_WGMXCC1_WGMXCCGn1
-    SourceSwap: 1
+    SourceSwap: true
     SpaceFillingAlgo: []
     StaggerU: 0
     StaggerUMapping: 0
     StaggerUStride: 0
-    StorePriorityOpt: 0
+    StorePriorityOpt: false
     StoreRemapVectorWidth: 0
     StoreSwapAddr: false
     StoreSyncOpt: 0
@@ -13632,7 +13632,7 @@
     SubGroupB: 32
     SubGroupMetadata: 32
     SuppressNoLoadLoop: false
-    SwapGlobalReadOrder: false
+    SwapGlobalReadOrder: 0
     TailloopInNll: false
     ThreadTile: [1, 1]
     ThreadTile0: 32
@@ -13647,7 +13647,7 @@
     UnrollMajorLDSA: false
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: 1
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseCustomMainLoopSchedule: 0
     UseDirect32XEmulation: false
     UseDot2F32XEmulation: false
@@ -13658,7 +13658,7 @@
     UseGeneralizedNLCOneMetadata: false
     UseInstOffsetForGRO: 0
     UseMFMAF32XEmulation: false
-    UsePLRPack: false
+    UsePLRPack: 0
     UseSgprForGRO: -1
     Valid: true
     VectorStore: -1
