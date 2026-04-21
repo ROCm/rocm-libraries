@@ -650,10 +650,10 @@ TEST_F(AsmEmitterTest, MUBUFStoreB32_OffVAddr) {
     ASSERT_NE(inst, nullptr);
 
     // buffer_store_b32 has no dest — only sources: vdata, vaddr, rsrc, soffset
-    inst->addSrcReg(StinkyRegister("v", 12, 1)); // vdata
-    inst->addSrcReg(StinkyRegister("off"));      // vaddr = off keyword
-    inst->addSrcReg(StinkyRegister("s", 60, 4)); // rsrc  s[60:63]
-    inst->addSrcReg(StinkyRegister("s", 46, 1)); // soffset s46
+    inst->addSrcReg(StinkyRegister("v", 12, 1));  // vdata
+    inst->addSrcReg(StinkyRegister("off"));       // vaddr = off keyword
+    inst->addSrcReg(StinkyRegister("s", 60, 4));  // rsrc  s[60:63]
+    inst->addSrcReg(StinkyRegister("s", 46, 1));  // soffset s46
 
     // glc+dlc on an arch that uses sc0/sc1 naming (gfx1250, hasMUBUFConst=false)
     MUBUFModifiers mubufMod(/*offen=*/false, /*offset12=*/0, /*glc=*/true, /*slc=*/true,
@@ -680,10 +680,10 @@ TEST_F(AsmEmitterTest, MUBUFLoadB32_OffVAddr) {
     StinkyInstruction* inst = createInstruction("buffer_load_b32");
     ASSERT_NE(inst, nullptr);
 
-    inst->addDestReg(StinkyRegister("v", 0, 1)); // vdst
-    inst->addSrcReg(StinkyRegister("off"));      // vaddr = off keyword
-    inst->addSrcReg(StinkyRegister("s", 4, 4));  // rsrc  s[4:7]
-    inst->addSrcReg(StinkyRegister("s", 3, 1));  // soffset s3
+    inst->addDestReg(StinkyRegister("v", 0, 1));  // vdst
+    inst->addSrcReg(StinkyRegister("off"));       // vaddr = off keyword
+    inst->addSrcReg(StinkyRegister("s", 4, 4));   // rsrc  s[4:7]
+    inst->addSrcReg(StinkyRegister("s", 3, 1));   // soffset s3
 
     MUBUFModifiers mubufMod(/*offen=*/false, /*offset12=*/0, /*glc=*/false, /*slc=*/false,
                             /*nt=*/false, /*lds=*/false, /*isStore=*/false,
