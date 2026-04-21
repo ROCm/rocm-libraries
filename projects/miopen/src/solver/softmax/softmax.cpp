@@ -139,13 +139,17 @@ ConvSolution Softmax::GetSolution([[maybe_unused]] const ExecutionContext& conte
         problem.inner_size < xlocalsize ? nextPow2(xlocalsize / problem.inner_size) : 1;
     auto batch_size       = xlocalsize / num_batch;
     auto vectorized_count = dtype == miopenFloat ? 4 : 8;
-    if(config.vectorized && num_batch > 1 && batch_size >= vectorized_count)
-    {
-        num_batch *= vectorized_count;
-        batch_size /= vectorized_count;
-    }
     auto u_batch_size =
         batch_size < problem.inner_size ? nextPow2(problem.inner_size / batch_size) : 1;
+    if(config.vectorized)
+    {
+        if(num_batch > 1 && batch_size >= vectorized_count)
+        {
+            num_batch *= vectorized_count;
+            batch_size /= vectorized_count;
+        }
+        u_batch_size *= vectorized_count;
+    }
     auto workgroups   = (grid_size + num_batch - 1) / num_batch;
     size_t xgridsize  = workgroups * xlocalsize;
     size_t ylocalsize = 1;
