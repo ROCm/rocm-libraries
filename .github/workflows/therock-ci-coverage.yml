@@ -157,10 +157,6 @@ jobs:
           path: TheRock
           ref: f629edc0b56da77fc0d29e6bc01e724aaf0be826
 
-      - name: Install python deps
-        run: |
-          pip install -r TheRock/requirements.txt
-
       - name: Setup test environment and fetch artifacts
         uses: ./.github/actions/setup_test_environment
         with:
