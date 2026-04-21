@@ -36,6 +36,7 @@
 #include "rocblas.hpp"
 #include "rocsolver/rocsolver.h"
 #include "lib_device_helpers.hpp"
+#include "print_matrix.hpp"
 
 ROCSOLVER_BEGIN_NAMESPACE
 
@@ -78,19 +79,20 @@ void rocsolver_ormtr_unmtr_hb2st_getMemorySize(
     rocblas_int nq = (side == rocblas_side_left ? m : n);  // rows in Q
     rocblas_int nt = ceildiv( nq - 1, kd );  // block cols in conceptual V
 
-    // If batch_count = 1, use batched larft and gemm inside a single
-    // matrix. If batch_count > 1, set max_parallel = 1 and use batching for
-    // the user batch.
+    // If batch_count = 1, set max_parallel > 1 and batch update block rows or
+    // cols of a single matrix.
+    // If batch_count > 1, set max_parallel = 1 and batch multiple matrices.
     if (batch_count == 1)
     {
         *max_parallel = ceildiv( nt, 2 );
+        std::cout << "# max parallel = " << *max_parallel << "\n";
     }
     *size_Z = sizeof(T) * kd * nz * batch_count * (*max_parallel);
     *size_T = sizeof(T) * kd * kd * batch_count * (*max_parallel);
     *size_W = sizeof(T) * 2*kd * kd * batch_count * (*max_parallel);
     *size_workArr = BATCHED ? sizeof(T*) * 2 * batch_count : 0;
-printf( "getMemSize1 scalars %lu, T %lu, W %lu, Z %lu, work %lu, workArr %lu\n",
-        *size_scalars, *size_T, *size_W, *size_Z, *size_work, *size_workArr );
+    // printf( "# getMemSize1 scalars %lu, T %lu, W %lu, Z %lu, work %lu, workArr %lu\n",
+    //         *size_scalars, *size_T, *size_W, *size_Z, *size_work, *size_workArr );
 
     // extra space for larft calls
     size_t w, wa;
@@ -99,8 +101,8 @@ printf( "getMemSize1 scalars %lu, T %lu, W %lu, Z %lu, work %lu, workArr %lu\n",
     *size_work = std::max(*size_work, w);
     *size_workArr = std::max(*size_workArr, wa);
 
-printf( "getMemSize2 scalars %lu, T %lu, W %lu, Z %lu, work %lu, workArr %lu\n",
-        *size_scalars, *size_T, *size_W, *size_Z, *size_work, *size_workArr );
+    // printf( "# getMemSize2 scalars %lu, T %lu, W %lu, Z %lu, work %lu, workArr %lu\n",
+    //         *size_scalars, *size_T, *size_W, *size_Z, *size_work, *size_workArr );
 }
 
 //------------------------------------------------------------------------------
@@ -160,14 +162,14 @@ rocblas_status rocsolver_ormtr_hb2st_argCheck(
     if(rocblas_is_device_memory_size_query(handle))
         return rocblas_status_continue;
 
-    // I would suggest quick return, then check pointers.
     // Skip pointer check if quick return.
+    // todo: no batch_count?
     if (m == 0 || n == 0 || kd == 0)
         return rocblas_status_continue;
 
     // 3. invalid pointers
     // Usually: (m > 0 && n > 0 && kd > 0 && (!V || !tau || !C))
-    if(!V || !tau || !C)
+    if(! V || ! tau || ! C)
     {
         std::cout << "ptr invalid"
                   << ", V: " << V
@@ -212,7 +214,11 @@ rocblas_status rocsolver_ormtr_unmtr_hb2st_template(
                     "m:", m, "n:", n, "kd:", kd,
                     "shiftV:", shiftV, "ldv:", ldv,
                     "shiftC:", shiftC, "ldc:", ldc,
-                    "mp:", max_parallel, "bc:", batch_count);
+                    "bc:", batch_count, "mp:", max_parallel);
+
+printf( "%s( %c, %c, m %d, n %d, kd %d, V %d, %d, C %d, %d, bc %d, mp %d )\n",
+        __func__, rocblas2char_side( side ), rocblas2char_operation( trans ),
+        m, n, kd, shiftV, ldv, shiftC, ldc, batch_count, max_parallel );
 
     const T zero = 0;
     const T one = 1;
@@ -232,14 +238,15 @@ rocblas_status rocsolver_ormtr_unmtr_hb2st_template(
     rocblas_stride strideTr = ldt*kd;
     rocblas_stride strideW  = ldw*kd;
     rocblas_stride strideZ  = ldz*nz;
-printf( "unmtr_hb2st side %d, trans %d, m %d, n %d, kd %d, nq %d, nz %d, nt %d\n",
-        int(side), int(trans), m, n, kd, nq, nz, nt );
+    printf( "# unmtr_hb2st side %d, trans %d, m %d, n %d, kd %d, nq %d, nz %d, nt %d, ldv %d, ldc %d, ldt %d, ldw %d, ldz %d\n",
+            rocblas2char_side(side), rocblas2char_operation(trans),
+            m, n, kd, nq, nz, nt, ldv, ldc, ldt, ldw, ldz );
 
     // k loop goes over sets of Vs that can be done in parallel.
     // j loop goes over columns within each set.
     // For instance, k = 0; j = 0, 1, 2 applies the (3) parallelograms for
     // k = 0 in the "k sets" figure, which can be done in parallel.
-    // See diagram for get_v_block_index in rocauxiliary_sb2st_hb2st.hpp.
+    // See diagram for get_v_block_index in lib_device_helpers.hpp.
     //
     // Apply backward (right to left) or forward (left to right)?
     // hmm... is this opposite direction in larft?
@@ -260,69 +267,64 @@ printf( "unmtr_hb2st side %d, trans %d, m %d, n %d, kd %d, nq %d, nz %d, nt %d\n
         k_end   = nt;
         k_step  = 1;
     }
-printf( "backward %d, k = %d:%d:%d\n",
-        backward, k_begin, k_end, k_step );
+    printf( "# backward %d, k = %d:%d:%d\n",
+            backward, k_begin, k_end, k_step );
 
     for (rocblas_int k = k_begin; k != k_end; k += k_step)
     {
         // i, j are block indices of the top of each conceptual V{i,j} block.
         rocblas_int j_begin = std::max( 0, k );
         rocblas_int j_end   = ceildiv( nt + k, 2 );
-        printf( "k = %d, j = %d:%d\n", k, j_begin, j_end );
+        printf( "# k = %d, j = %d:%d\n", k, j_begin, j_end );
 
+        // For given k, the j's are independent; we always go ascending.
         rocblas_int j = j_begin;
         while (j < j_end)
         {
             // r is storage index of V{i,j} block.
+            // todo: multiply r by kd
             rocblas_int i = 2*j - k;
             rocblas_int r = get_v_block_index( nt, i, j );
             // old: r = i - j + j*nt - j*(j-1)/2;
-            printf( "k = %d, j = %d, i = %d, r = %d\n",
+            printf( "# k = %d, j = %d, i = %d, r = %d\n",
                     k, j, i, r );
 
-            // For side = left,  ii is top row of C block.
-            // for side = right, ii is left col of C block.
+            // For side = left,  ii is top  row of C block.
+            // For side = right, ii is left col of C block.
             rocblas_int ii = i*kd + 1;
 
             // V block has dimensions mv-by-kv.
             rocblas_int mv = std::min( 2*kd - 1, nq - ii );
             rocblas_int kv = std::min( mv, kd );
 
-            // Check dimensions (mv, kv) for last j in this batch. If it is
-            // different, save that j for the next batch, which will be a
-            // cleanup with batch_count = 1.
-            rocblas_int j_last = std::min( j + max_parallel, j_end ) - 1;
-            {
-                rocblas_int i_last = 2*j_last - k;
-                rocblas_int ii_last = i_last*kd + 1;
-                rocblas_int mv_last = std::min( 2*kd - 1, nq - ii );
-                rocblas_int kv_last = std::min( mv, kd );
-                if (mv_last != mv || kv_last != kv)
-                {
-                    j_last -= 1;
-                }
-            }
-
-            for (rocblas_int j_ = j; j_ <= j_last; ++j_)
-            {
-                // verify batch parameters.
-                // todo: replace with batch calls.
-                assert( i == 2*j_ - k );
-                rocblas_int r_ = get_v_block_index( nt, i, j_ );
-                assert( r_ == r );
-                rocblas_int ii_ = i*kd + 1;
-                assert( ii_ == ii );
-                //rocblas_int vj_ = r_*kd;
-                //assert( vj_ == vj );
-
-                // jp indexes T, W, Z arrays for operations in parallel.
-                // T, W are block cols; Z is block rows.
-                // T = [ T0, T1, ... ]
-                // W = [ W0, W1, ... ]
-                // Z = [ Z0  ]
-                //     [ Z1  ]
-                //     [ ... ]
-                rocblas_int jp = 0;  // (j_ - j) * kd;
+            // // Check dimensions (mv, kv) for last j in this batch. If it is
+            // // different, save that j for the next batch, which will be a
+            // // cleanup with batch_count = 1.
+            // rocblas_int j_last = std::min( j + max_parallel, j_end ) - 1;
+            // {
+            //     rocblas_int i_last = 2*j_last - k;
+            //     rocblas_int ii_last = i_last*kd + 1;
+            //     rocblas_int mv_last = std::min( 2*kd - 1, nq - ii );
+            //     rocblas_int kv_last = std::min( mv, kd );
+            //     if (mv_last != mv || kv_last != kv)
+            //     {
+            //         j_last -= 1;
+            //     }
+            // }
+            // printf( "# k = %2d, j = %2d:%2d, bc = %2d\n",
+            //         k, j_begin, j_last, j_last + 1 - j_begin );
+            //
+            // for (rocblas_int j_ = j; j_ <= j_last; ++j_)
+            // {
+            //     // verify batch parameters.
+            //     // todo: replace with batch calls.
+            //     assert( i == 2*j_ - k );
+            //     rocblas_int r_ = get_v_block_index( nt, i, j_ );
+            //     assert( r_ == r );
+            //     rocblas_int ii_ = i*kd + 1;
+            //     assert( ii_ == ii );
+            //     //rocblas_int vj_ = r_*kd;
+            //     //assert( vj_ == vj );
 
                 // Generate T, dim: (kv x kv)
                 rocsolver_larft_template<T>(
@@ -330,7 +332,7 @@ printf( "backward %d, k = %d:%d:%d\n",
                     mv, kv,
                     V, r*kd*ldv, ldv, strideV,
                     &tau[ r*kd ], strideTau,
-                    &Tr[ jp*ldt ], ldt, strideTr,
+                    Tr, ldt, strideTr,
                     batch_count, scalars, work, workArr );
 
                 // Rest of code is equivalent to larfb to apply a block reflector,
@@ -342,17 +344,23 @@ printf( "backward %d, k = %d:%d:%d\n",
                     handle, rocblas_operation_none, opT,
                     mv, kv, kv,
                     &one,  V,  r*kd*ldv, ldv, strideV,
-                           Tr, jp*ldt,   ldt, strideTr,
-                    &zero, W,  jp*ldw,   ldw, strideW,
+                           Tr, 0,        ldt, strideTr,
+                    &zero, W,  0,        ldw, strideW,
                     batch_count, workArr );
+
+                print_matrix( "V" + std::to_string(r), mv, kv, V + r*kd*ldv, ldv, 6, stream );
+                print_matrix( "T" + std::to_string(r), kv, kv, Tr, ldt, 6, stream );
+                print_matrix( "W" + std::to_string(i), mv, kv, W, ldw, 6, stream );
 
                 if (left)
                 {
-                    printf( "left\n" );
                     // Update block row Ci.
                     // Ci = op(Q) Ci = (I - V op(T) V^H) Ci
                     //    = Ci - (V op(T)) (V^H Ci)
                     //    = Ci - W Z
+
+                    printf( "# left\n" );
+                    print_matrix( "C" + std::to_string(i), mv, n, C + ii, ldc, 6, stream );
 
                     // Z = V^H Ci  (kv x n) = (mv x kv)^H (mv x n)
                     rocsolver_gemm(
@@ -360,10 +368,12 @@ printf( "backward %d, k = %d:%d:%d\n",
                         rocblas_operation_conjugate_transpose,
                         rocblas_operation_none,
                         kv, n, mv,
-                        &one,  V, r*kd*ldv, ldv, strideV,
-                               C, ii,       ldc, strideC,
-                        &zero, Z, jp,       ldz, strideZ,
+                        &one,  V, r*kd*ldv, ldv, strideV,  // (mv x kv)^H
+                               C, ii,       ldc, strideC,  // (mv x n)
+                        &zero, Z, 0,        ldz, strideZ,  // (kv x n)
                         batch_count, workArr );
+
+                    print_matrix( "Z" + std::to_string(i), kv, n,  Z, ldz, 6, stream );
 
                     // Ci -= W Z  (mv x n) = (mv x kv) (kv x n)
                     rocsolver_gemm(
@@ -371,32 +381,38 @@ printf( "backward %d, k = %d:%d:%d\n",
                         rocblas_operation_none,
                         rocblas_operation_none,
                         mv, n, kv,
-                        &negone, W, jp*ldw, ldw, strideW,
-                                 Z, jp,     ldz, strideZ,
-                        &one,    C, ii,     ldc, strideC,
+                        &negone, W, 0,      ldw, strideW,  // (mv x kv)
+                                 Z, 0,      ldz, strideZ,  // (kv x n)
+                        &one,    C, ii,     ldc, strideC,  // (mv x n)
                         batch_count, workArr );
+
+                    print_matrix( "Cout" + std::to_string(i), mv, n, C + ii, ldc, 6, stream );
                 }
                 else // right
                 {
-                    printf( "right\n" );
                     // Update block col Ci.
                     // Ci = Ci op(Q) = Ci (I - V op(T) V^H)
                     //    = Ci - (Ci V) (op(T) V^H)
                     //    = Ci - Z^H W^H
                     // W = V op(T)^H, above.
 
-                    // Z = V^H Ci^H, dim: (kv x m) = (mv x kv)^H (m x mv)^H
+                    printf( "# right\n" );
+                    print_matrix( "C" + std::to_string(i), m,  mv, C + ii*ldc,   ldc, 6, stream );
+
+                    // Z = Vr^H Ci^H, dim: (kv x m) = (mv x kv)^H (m x mv)^H
                     // todo: perhaps different opA, opB would be better performance,
                     // but less important since side = right is not used in heev*.
                     rocsolver_gemm(
                         handle,
                         rocblas_operation_conjugate_transpose,
                         rocblas_operation_conjugate_transpose,
-                        kv, n, mv,
+                        kv, m, mv,
                         &one,  V, r*kd*ldv, ldv, strideV,
-                               C, ii,       ldc, strideC,
-                        &zero, Z, jp,       ldz, strideZ,
+                               C, ii*ldc,   ldc, strideC,
+                        &zero, Z, 0,        ldz, strideZ,
                         batch_count, workArr );
+
+                    print_matrix( "Z" + std::to_string(i), kv, m,  Z, ldz, 6, stream );
 
                     // Ci -= Z^H W^H, dim: (m x mv) = (kv x m)^H (mv x kv)^H
                     rocsolver_gemm(
@@ -404,21 +420,25 @@ printf( "backward %d, k = %d:%d:%d\n",
                         rocblas_operation_conjugate_transpose,
                         rocblas_operation_conjugate_transpose,
                         m, mv, kv,
-                        &negone, W, jp*ldw, ldw, strideW,
-                                 Z, jp,     ldz, strideZ,
-                        &one,    C, ii,     ldc, strideC,
+                        &negone, Z, 0,      ldz, strideZ,
+                                 W, 0,      ldw, strideW,
+                        &one,    C, ii*ldc, ldc, strideC,
                         batch_count, workArr );
+
+                    print_matrix( "Cout" + std::to_string(i), m,  mv, C + ii*ldc, ldc, 6, stream );
                 }
 
-                // Adjust parameters to next matrix in batch.
-                // todo: replace with stride in batch calls.
-                i += 2;
-                r += 1;
-                //vj += kd;
-                ii += 2*kd;
-            }
+            //     // Adjust parameters to next matrix in batch.
+            //     // todo: replace with stride in batch calls.
+            //     i += 2;
+            //     r += 1;
+            //     //vj += kd;
+            //     ii += 2*kd;
+            // }
+            //
+            // j = j_last + 1;
 
-            j = j_last + 1;
+            j += 1;
         }
     }
 

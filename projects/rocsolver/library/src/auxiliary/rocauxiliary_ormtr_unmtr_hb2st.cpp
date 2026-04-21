@@ -30,17 +30,18 @@
 ROCSOLVER_BEGIN_NAMESPACE
 
 template <typename T, bool COMPLEX = rocblas_is_complex<T>>
-rocblas_status rocsolver_ormtr_unmtr_hb2st_impl(rocblas_handle handle,
-                                                const rocblas_side side,
-                                                const rocblas_operation trans,
-                                                const rocblas_int m,
-                                                const rocblas_int n,
-                                                const rocblas_int kd,
-                                                T* V,
-                                                const rocblas_int ldv,
-                                                T* tau,
-                                                T* C,
-                                                const rocblas_int ldc)
+rocblas_status rocsolver_ormtr_unmtr_hb2st_impl(
+    rocblas_handle handle,
+    const rocblas_side side,
+    const rocblas_operation trans,
+    const rocblas_int m,
+    const rocblas_int n,
+    const rocblas_int kd,
+    T* V,
+    const rocblas_int ldv,
+    T* tau,
+    T* C,
+    const rocblas_int ldc)
 {
     const char* name = (!rocblas_is_complex<T> ? "ormtr_hb2st" : "unmtr_hb2st");
     ROCSOLVER_ENTER_TOP(name, "--side", side, "--trans", trans,
@@ -84,20 +85,19 @@ rocblas_status rocsolver_ormtr_unmtr_hb2st_impl(rocblas_handle handle,
     }
 
     // memory workspace allocation
-    T *scalars, *Tr, *W, *Z, *work, **workArr;
     rocblas_device_malloc mem(
         handle, size_scalars, size_Tr, size_W, size_Z, size_work, size_workArr);
     if(!mem)
         return rocblas_status_memory_error;
 
-    scalars = (T*) mem[0];
-    Tr      = (T*) mem[1];
-    W       = (T*) mem[2];
-    Z       = (T*) mem[3];
-    work    = (T*) mem[4];
-    workArr = (T**) mem[5];
+    T* scalars = (T*) mem[0];
+    T* Tr      = (T*) mem[1];
+    T* W       = (T*) mem[2];
+    T* Z       = (T*) mem[3];
+    T* work    = (T*) mem[4];
+    T** workArr = (T**) mem[5];
     if(size_scalars > 0)
-        init_scalars(handle, (T*)scalars);
+        init_scalars(handle, scalars);
 
     // execution
     // todo: these ld should come from getMemorySize.
@@ -109,7 +109,7 @@ rocblas_status rocsolver_ormtr_unmtr_hb2st_impl(rocblas_handle handle,
         V, shiftV, ldv, strideV,
         tau, strideT,
         C, shiftC, ldc, strideC,
-        max_parallel, batch_count,
+        batch_count, max_parallel,
         scalars, Tr, ldt, W, ldw, Z, ldz, work, workArr);
 }
 
@@ -123,65 +123,69 @@ ROCSOLVER_END_NAMESPACE
 
 extern "C" {
 
-rocblas_status rocsolver_sormtr_hb2st(rocblas_handle handle,
-                                      const rocblas_side side,
-                                      const rocblas_operation trans,
-                                      const rocblas_int m,
-                                      const rocblas_int n,
-                                      const rocblas_int kd,
-                                      float* V,
-                                      const rocblas_int ldv,
-                                      float* tau,
-                                      float* C,
-                                      const rocblas_int ldc)
+rocblas_status rocsolver_sormtr_hb2st(
+    rocblas_handle handle,
+    const rocblas_side side,
+    const rocblas_operation trans,
+    const rocblas_int m,
+    const rocblas_int n,
+    const rocblas_int kd,
+    float* V,
+    const rocblas_int ldv,
+    float* tau,
+    float* C,
+    const rocblas_int ldc)
 {
     return rocsolver::rocsolver_ormtr_unmtr_hb2st_impl<float>(
         handle, side, trans, m, n, kd, V, ldv, tau, C, ldc);
 }
 
-rocblas_status rocsolver_dormtr_hb2st(rocblas_handle handle,
-                                      const rocblas_side side,
-                                      const rocblas_operation trans,
-                                      const rocblas_int m,
-                                      const rocblas_int n,
-                                      const rocblas_int kd,
-                                      double* V,
-                                      const rocblas_int ldv,
-                                      double* tau,
-                                      double* C,
-                                      const rocblas_int ldc)
+rocblas_status rocsolver_dormtr_hb2st(
+    rocblas_handle handle,
+    const rocblas_side side,
+    const rocblas_operation trans,
+    const rocblas_int m,
+    const rocblas_int n,
+    const rocblas_int kd,
+    double* V,
+    const rocblas_int ldv,
+    double* tau,
+    double* C,
+    const rocblas_int ldc)
 {
     return rocsolver::rocsolver_ormtr_unmtr_hb2st_impl<double>(
         handle, side, trans, m, n, kd, V, ldv, tau, C, ldc);
 }
 
-rocblas_status rocsolver_cunmtr_hb2st(rocblas_handle handle,
-                                      const rocblas_side side,
-                                      const rocblas_operation trans,
-                                      const rocblas_int m,
-                                      const rocblas_int n,
-                                      const rocblas_int kd,
-                                      rocblas_float_complex* V,
-                                      const rocblas_int ldv,
-                                      rocblas_float_complex* tau,
-                                      rocblas_float_complex* C,
-                                      const rocblas_int ldc)
+rocblas_status rocsolver_cunmtr_hb2st(
+    rocblas_handle handle,
+    const rocblas_side side,
+    const rocblas_operation trans,
+    const rocblas_int m,
+    const rocblas_int n,
+    const rocblas_int kd,
+    rocblas_float_complex* V,
+    const rocblas_int ldv,
+    rocblas_float_complex* tau,
+    rocblas_float_complex* C,
+    const rocblas_int ldc)
 {
     return rocsolver::rocsolver_ormtr_unmtr_hb2st_impl<rocblas_float_complex>(
         handle, side, trans, m, n, kd, V, ldv, tau, C, ldc);
 }
 
-rocblas_status rocsolver_zunmtr_hb2st(rocblas_handle handle,
-                                      const rocblas_side side,
-                                      const rocblas_operation trans,
-                                      const rocblas_int m,
-                                      const rocblas_int n,
-                                      const rocblas_int kd,
-                                      rocblas_double_complex* V,
-                                      const rocblas_int ldv,
-                                      rocblas_double_complex* tau,
-                                      rocblas_double_complex* C,
-                                      const rocblas_int ldc)
+rocblas_status rocsolver_zunmtr_hb2st(
+    rocblas_handle handle,
+    const rocblas_side side,
+    const rocblas_operation trans,
+    const rocblas_int m,
+    const rocblas_int n,
+    const rocblas_int kd,
+    rocblas_double_complex* V,
+    const rocblas_int ldv,
+    rocblas_double_complex* tau,
+    rocblas_double_complex* C,
+    const rocblas_int ldc)
 {
     return rocsolver::rocsolver_ormtr_unmtr_hb2st_impl<rocblas_double_complex>(
         handle, side, trans, m, n, kd, V, ldv, tau, C, ldc);
