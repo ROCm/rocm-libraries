@@ -914,7 +914,7 @@ class hipfftxtformats : public ::testing::TestWithParam<std::tuple<bool, int, hi
 {
 };
 
-// FIXME: documentation
+// Test that we support exactly all of the data formats / FFT setups that we have implemented.
 TEST_P(hipfftxtformats, supportlistsinglebatch)
 {
     size_t ngpus = getdevcount();
