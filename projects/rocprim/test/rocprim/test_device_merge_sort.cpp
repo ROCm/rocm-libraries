@@ -331,11 +331,15 @@ TYPED_TEST(RocprimDeviceSortTests, SortKeyValue)
 
     for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
     {
+        printf("seed_index: %zu\n", seed_index);
+
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
         for(size_t size : test_utils::get_sizes(seed_value))
         {
+            printf("size: %zu\n", size);
+
             SCOPED_TRACE(testing::Message() << "with size = " << size);
 
             in_place = !in_place;
@@ -346,8 +350,10 @@ TYPED_TEST(RocprimDeviceSortTests, SortKeyValue)
                 -100,
                 100,
                 seed_value); // float16 can't exceed 65504
+            printf("    keys_input: %zu bytes\n", keys_input.size() * sizeof(key_type));
 
             std::vector<value_type> values_input(size);
+            printf("    values_input: %zu bytes\n", values_input.size() * sizeof(value_type));
             test_utils::iota(values_input.begin(), values_input.end(), 0);
 
             common::device_ptr<key_type>   d_keys_input;
@@ -378,6 +384,7 @@ TYPED_TEST(RocprimDeviceSortTests, SortKeyValue)
             // Calculate expected results on host
             using key_value = std::pair<key_type, value_type>;
             std::vector<key_value> expected(size);
+            printf("    expected: %zu bytes\n", expected.size() * sizeof(key_value));
             for(size_t i = 0; i < size; i++)
             {
                 expected[i] = key_value(keys_input[i], values_input[i]);
@@ -386,6 +393,9 @@ TYPED_TEST(RocprimDeviceSortTests, SortKeyValue)
                              expected.end(),
                              [compare_op](const key_value& a, const key_value& b)
                              { return compare_op(a.first, b.first); });
+
+keys_input = std::vector<key_type>();
+values_input = std::vector<value_type>();
 
             auto input_keys_it
                 = test_utils::wrap_in_indirect_iterator<TestFixture::use_indirect_iterator>(
@@ -403,7 +413,7 @@ TYPED_TEST(RocprimDeviceSortTests, SortKeyValue)
                                                   d_keys_output.get(),
                                                   d_values_input.get(),
                                                   input_values_it,
-                                                  keys_input.size(),
+                                                  size,
                                                   compare_op,
                                                   stream,
                                                   debug_synchronous));
@@ -433,7 +443,7 @@ TYPED_TEST(RocprimDeviceSortTests, SortKeyValue)
                                                   d_keys_output.get(),
                                                   input_values_it,
                                                   d_values_output.get(),
-                                                  keys_input.size(),
+                                                  size,
                                                   compare_op,
                                                   stream,
                                                   debug_synchronous));
@@ -447,20 +457,29 @@ TYPED_TEST(RocprimDeviceSortTests, SortKeyValue)
             HIP_CHECK(hipDeviceSynchronize());
 
             // Copy output to host
-            const auto keys_output   = d_keys_output.load();
-            const auto values_output = d_values_output.load();
+           // const auto keys_output   = d_keys_output.load();
+           // const auto values_output = d_values_output.load();
 
             // Check if output values are as expected
             std::vector<key_type> expected_key(expected.size());
+            printf("    expected_key: %zu bytes\n", expected_key.size() * sizeof(key_type));
             std::vector<value_type> expected_value(expected.size());
+            printf("    expected_value: %zu bytes\n", expected_value.size() * sizeof(value_type));
             for(size_t i = 0; i < expected.size(); i++)
             {
                 expected_key[i] = expected[i].first;
                 expected_value[i] = expected[i].second;
             }
+expected = std::vector<key_value>();
 
-            ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(keys_output, expected_key));
-            ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(values_output, expected_value));
+            {
+                const auto keys_output   = d_keys_output.load();
+                ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(keys_output, expected_key));
+            }
+            {
+                const auto values_output = d_values_output.load();
+                ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(values_output, expected_value));
+            }
         }
     }
 
