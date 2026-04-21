@@ -8,6 +8,7 @@
 
 #include "ck_tile/ops/direct_convolution/kernel/grouped_4c_fp16_tile_conv_impl.hpp"
 #include "ck_tile/ops/direct_convolution/kernel/grouped_4c_fp16_tile_conv_impl_v2.hpp"
+#include "ck_tile/ops/direct_convolution/kernel/grouped_4c_fp16_tile_conv_impl_v3.hpp"
 #include "ck_tile/ops/direct_convolution/utils/common.hpp"
 #include "ck_tile/ops/grouped_convolution/utils/grouped_conv_host_args.hpp"
 #include "ck_tile/host/kernel_launch.hpp"
@@ -33,6 +34,15 @@ struct VersionTraits<Version::v2>
     static constexpr auto get_launch_params = &grouped_4c_tile::v2::get_launch_params;
     static constexpr auto launch = &grouped_4c_tile::v2::launch;
     static constexpr auto make_variant = &grouped_4c_tile::v2::make_variant;
+};
+
+template <>
+struct VersionTraits<Version::v3>
+{
+    static constexpr auto& configs = grouped_4c_tile::v3::configs;
+    static constexpr auto get_launch_params = &grouped_4c_tile::v3::get_launch_params;
+    static constexpr auto launch = &grouped_4c_tile::v3::launch;
+    static constexpr auto make_variant = &grouped_4c_tile::v3::make_variant;
 };
 
 /// Wrapper struct that presents the grouped_4c Fprop kernel (at a specific config index)
