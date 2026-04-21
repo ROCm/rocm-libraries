@@ -383,6 +383,15 @@ struct tile_scatter_gather
     // honor the same invariant the ctor enforces.
     CK_TILE_DEVICE constexpr void set_bottom_tensor_view_buffer_size(index_t size)
     {
+        // Hint the optimizer that size is positive without inserting a runtime
+        // branch. Using <cassert> assert() here corrupted gfx950 batch_prefill
+        // output: the __assert_fail handler's SGPR pressure forced the K-SRD
+        // register window to be reused as scratch and scattered the SRD writes
+        // across two conditional branches, which gfx950's packed
+        // buffer_load_dwordx4 issue window doesn't tolerate (gfx942 absorbs it
+        // via per-tile single-dword loads). __builtin_assume is hint-only —
+        // no branch, no scratch SGPRs, no codegen impact.
+        __builtin_assume(size > 0);
         using BufType                         = remove_cvref_t<decltype(bottom_tensor_view_.buf_)>;
         bottom_tensor_view_.buf_.buffer_size_ = size / BufType::PackedSize;
     }

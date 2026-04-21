@@ -157,12 +157,28 @@ CK_TILE_HOST_DEVICE void kv_offset_array_transform(const IndexArrayType& physica
     const index_t& thread_coord_start   = coord_vec[kCoordAxis];
     constexpr index_t kInPageOffsetMask = (1 << kLog2PageSize) - 1;
 
-    // Offset strategy:
-    //   kPageBlockSize >= kN0: within-page offset (SRD rebased to page base)
-    //   kPageBlockSize <  kN0 && kUseGlobalLoad_: within-page offset (global_load_lds uses
-    //   physical_pages[]) kPageBlockSize <  kN0 && !kUseGlobalLoad_: FULL offset (page * stride +
-    //   within_page) for
-    //     direct buffer_load with 32-bit voffset — the original code path, fast but limited to <2GB
+    // Addressing strategy — four cases controlled by (kPageBlockSize vs kN0, kUseGlobalLoad_):
+    //
+    //   Case 1: kPageBlockSize >= kN0
+    //     SRD is rebased per-tile to the page base (rebase_{k,v}_window in caller).
+    //     Page base is absorbed into the SRD's 48-bit base pointer (SGPR-resident).
+    //     This function writes within-page offset only.
+    //
+    //   Case 2: kPageBlockSize <  kN0 && kUseGlobalLoad_
+    //     SRD cannot be rebased (multi-page wave). Loads use global_load_lds_*; the full
+    //     64-bit address is computed by tile_scatter_gather::load() in
+    //     include/ck_tile/core/tensor/tile_scatter_gather.hpp from physical_pages_ +
+    //     page_stride_elements_. This function writes within-page offset only.
+    //
+    //   Case 3: kPageBlockSize <  kN0 && !kUseGlobalLoad_   (kNeedFullOffset == true)
+    //     SRD base is the entire KV buffer; the only place to encode page identity
+    //     is the voffset itself. This function writes the FULL offset:
+    //       page * stride_page_block + within_page
+    //     Limited to <2GB total KV bytes by 32-bit voffset hardware width.
+    //
+    //   Case 4: kPageBlockSize >= kN0 && kUseGlobalLoad_
+    //     Not emitted by codegen. Backstop static_assert in
+    //     BlockFmhaBatchPrefillPipelineQRKSVSAsync.
     constexpr bool kNeedFullOffset = (kPageBlockSize < kN0) && !kUseGlobalLoad_;
 
     static_for<0, kLoopCount, 1>{}([&](auto k0) {
@@ -626,6 +642,8 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSAsync
         auto rebase_k_window = [&](auto& window, index_t physical_page) {
             if constexpr(kPageBlockSize >= kN0)
             {
+                // readfirstlane: make physical_page provably wave-uniform so the
+                // resulting SRD lands in SGPRs (required by buffer load instructions).
                 physical_page        = __builtin_amdgcn_readfirstlane(physical_page);
                 const auto* base_ptr = k_dram_block_window.get_bottom_tensor_view().buf_.p_data_;
                 const auto* page_ptr =
@@ -647,6 +665,8 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSAsync
         auto rebase_v_window = [&](auto& window, index_t physical_page) {
             if constexpr(kPageBlockSize >= kN0)
             {
+                // readfirstlane: make physical_page provably wave-uniform so the
+                // resulting SRD lands in SGPRs (required by buffer load instructions).
                 physical_page = __builtin_amdgcn_readfirstlane(physical_page);
                 const auto* base_ptr =
                     v_dram_block_window_tmp.get_bottom_tensor_view().buf_.p_data_;
@@ -897,8 +917,15 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSAsync
                     v_physical_pages, stride_v, page_stride_v, v_coord, v_offsets, current_seq_k);
             }
 
-            // For page_size < kN0 with kUseGlobalLoad: v_offsets contain within-page offsets;
-            // page base is handled by physical_pages_ in tile_scatter_gather::load().
+            // v_offsets semantics — see the four-case addressing-strategy block above
+            // kNeedFullOffset in kv_offset_array_transform. Three cases reach this lambda:
+            //   Case 1 (kPageBlockSize >= kN0):           within-page offset; page base in SRD.
+            //   Case 2 (page_size < kN0, kUseGlobalLoad): within-page offset; page base computed
+            //                                             by tile_scatter_gather::load() from
+            //                                             physical_pages_.
+            //   Case 3 (page_size < kN0, !kUseGlobalLoad, == kNeedFullOffset):
+            //                                             FULL offset (page * stride + within),
+            //                                             carried in the 32-bit voffset (<2GB cap).
         };
 
         // Prefetch V physical pages early to hide buffer load latency
@@ -920,11 +947,23 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSAsync
             v_dram_window.update_physical_pages(v_physical_pages);
         }
 
-        // For page_size >= kN0, use SRD rebase (all threads on same page)
-        if constexpr(kPageBlockSize >= kN0)
-        {
-            rebase_v_window(v_dram_window, v_physical_pages[number<0>{}]);
-        }
+        // Initial V SRD rebase. Single source of truth: rebase_v_window's own
+        // `if constexpr(kPageBlockSize >= kN0)` makes this a no-op for case 2/3.
+        // Do not re-add an outer guard here — it would duplicate the inner check
+        // and drift if the lambda's gating condition ever changes.
+        rebase_v_window(v_dram_window, v_physical_pages[number<0>{}]);
+
+        // Save the *current* tile's V physical pages into v_dram_window before
+        // prefetch_v_physical_pages overwrites the v_physical_pages buffer with the
+        // *next* tile's pages. Case-2 only (kUseGlobalLoad); case-1/3 don't read
+        // physical_pages_ from the window. Encapsulating the save+prefetch pair
+        // here makes the ordering invariant unmissable when a fourth prefetch site
+        // is added later.
+        auto save_and_prefetch_v_pages = [&](auto k_loop_start) {
+            if constexpr(kUseGlobalLoad)
+                v_dram_window.update_physical_pages(v_physical_pages);
+            prefetch_v_physical_pages(k_loop_start);
+        };
 
         // prefetch K tile
         async_load_tile_raw(
@@ -977,11 +1016,8 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSAsync
                 v_descale = v_descale_ptr[scale_offset];
             }
 
-            // Save current V physical pages before prefetch overwrites them
-            if constexpr(kUseGlobalLoad)
-                v_dram_window.update_physical_pages(v_physical_pages);
             // Prefetch V physical pages early - overlaps with GEMM0 computation
-            prefetch_v_physical_pages(number<kK1>{});
+            save_and_prefetch_v_pages(number<kK1>{});
 
             // STAGE 1, QK gemm
             clear_tile(s_acc); // initialize C
@@ -1175,9 +1211,7 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSAsync
                 // Prefetch V physical pages early - overlaps with softmax computation
                 if constexpr(k1_loops > 1)
                 {
-                    if constexpr(kUseGlobalLoad)
-                        v_dram_window.update_physical_pages(v_physical_pages);
-                    prefetch_v_physical_pages(number<2 * kK1>{});
+                    save_and_prefetch_v_pages(number<2 * kK1>{});
                 }
 
                 auto m_local = block_tile_reduce<SMPLComputeDataType>(
@@ -1410,9 +1444,7 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSAsync
                     // Prefetch V physical pages for NEXT iteration - overlaps with GEMM1
                     if constexpr(i_k1 + 1 < k1_loops - 1)
                     {
-                        if constexpr(kUseGlobalLoad)
-                            v_dram_window.update_physical_pages(v_physical_pages);
-                        prefetch_v_physical_pages(number<(2 + i_k1.value + 1) * kK1>{});
+                        save_and_prefetch_v_pages(number<(2 + i_k1.value + 1) * kK1>{});
                     }
 
                     block_sync_lds();
