@@ -181,6 +181,23 @@ struct MmaPipelineBase
         }
     }
 
+    template <typename Func, typename... Args>
+    CK_TILE_DEVICE static decltype(auto) invokeIfMmaOpIsSupported(Func&& f, Args&&... args)
+    {
+        if constexpr(MmaOpTraits<typename Derived::MmaOp>::IsSupported)
+        {
+            return f(std::forward<Args>(args)...);
+        }
+        else
+        {
+            // Return the unsupported exec. This should print a runtime warning. (amdgcn_mma.hpp)
+            // Code should not reach here, but HOST/DEVICE compile passes are
+            // weirdly intertwined and instead of having constexpr in the calling
+            // site (tests) we do this. See also changes by this commit.
+            return Derived::MmaOp::exec({}, {}, {});
+        }
+    }
+
     protected:
     /** @brief Query whether a specific @ref MmaPipelineOptionFlag is set. */
     template <MmaPipelineOptionFlag Flag>
@@ -268,37 +285,33 @@ struct MmaPipelineBase
     template <typename VecTA, typename VecTB, typename VecTC>
     CK_TILE_DEVICE static decltype(auto) exec(VecTA&& a, VecTB&& b, VecTC&& accum)
     {
-        if constexpr(MmaOpTraits<typename Derived::MmaOp>::IsSupported)
-        {
-            if constexpr(hasFlag<MmaPipelineOptionFlag::ABSwap>())
-            {
-                auto transformed_inputs = applyTransformsToInputs(
-                    std::forward<VecTB>(b), std::forward<VecTA>(a), std::forward<VecTC>(accum));
+        return invokeIfMmaOpIsSupported(
+            [](VecTA&& fa, VecTB&& fb, VecTC&& faccum) {
+                constexpr bool swap_a_and_b = hasFlag<MmaPipelineOptionFlag::ABSwap>();
+
+                auto transformed_inputs = [&]() {
+                    if constexpr(swap_a_and_b)
+                    {
+                        return applyTransformsToInputs(std::forward<VecTB>(fb),
+                                                       std::forward<VecTA>(fa),
+                                                       std::forward<VecTC>(faccum));
+                    }
+                    else
+                    {
+                        return applyTransformsToInputs(std::forward<VecTA>(fa),
+                                                       std::forward<VecTB>(fb),
+                                                       std::forward<VecTC>(faccum));
+                    }
+                }();
 
                 Derived::execImpl(transformed_inputs);
 
                 auto&& [a_result, b_result, c_result] = std::move(transformed_inputs);
                 return applyTransformToOutput(std::move(c_result));
-            }
-            else
-            {
-                auto transformed_inputs = applyTransformsToInputs(
-                    std::forward<VecTA>(a), std::forward<VecTB>(b), std::forward<VecTC>(accum));
-
-                Derived::execImpl(transformed_inputs);
-
-                auto&& [a_result, b_result, c_result] = std::move(transformed_inputs);
-                return applyTransformToOutput(std::move(c_result));
-            }
-        }
-        else
-        {
-            // Return the unsupported exec. This should print a runtime warning. (amdgcn_mma.hpp)
-            // Code should not reach here, but HOST/DEVICE compile passes are
-            // weirdly intertwined and instead of having constexpr in the calling
-            // site (tests) we do this. See also changes by this commit.
-            return Derived::MmaOp::exec({}, {}, {});
-        }
+            },
+            std::forward<VecTA>(a),
+            std::forward<VecTB>(b),
+            std::forward<VecTC>(accum));
     }
 
     template <typename VecTA,
@@ -309,34 +322,36 @@ struct MmaPipelineBase
     CK_TILE_DEVICE static decltype(auto)
     exec(VecTA&& a, VecTB&& b, VecTC&& accum, ScaleADataType&& scale_A, ScaleBDataType&& scale_B)
     {
-        if constexpr(MmaOpTraits<typename Derived::MmaOp>::IsSupported)
-        {
-            // TODO: c++20: Call template functions with MmaPipelineOptionFlags directly
-            auto transformed_inputs = applyTransformsToInputs(
-                hasFlag<MmaPipelineOptionFlag::ABSwap>() ? std::forward<VecTB>(b)
-                                                         : std::forward<VecTA>(a),
-                hasFlag<MmaPipelineOptionFlag::ABSwap>() ? std::forward<VecTA>(a)
-                                                         : std::forward<VecTB>(b),
-                std::forward<VecTC>(accum),
-                hasFlag<MmaPipelineOptionFlag::ABSwap>() ? std::forward<ScaleBDataType>(scale_B)
-                                                         : std::forward<ScaleADataType>(scale_A),
-                hasFlag<MmaPipelineOptionFlag::ABSwap>() ? std::forward<ScaleADataType>(scale_A)
-                                                         : std::forward<ScaleBDataType>(scale_B));
+        return invokeIfMmaOpIsSupported(
+            [](VecTA&& fa,
+               VecTB&& fb,
+               VecTC&& faccum,
+               ScaleADataType&& fscale_A,
+               ScaleBDataType&& fscale_B) {
+                static_assert(MmaOpTraits<typename Derived::MmaOp>::IsScale,
+                              "This exec variant is intended for scale policy structs");
+                constexpr bool swap_a_and_b = hasFlag<MmaPipelineOptionFlag::ABSwap>();
 
-            Derived::execImpl(transformed_inputs);
+                auto transformed_inputs = applyTransformsToInputs(
+                    swap_a_and_b ? std::forward<VecTB>(fb) : std::forward<VecTA>(fa),
+                    swap_a_and_b ? std::forward<VecTA>(fa) : std::forward<VecTB>(fb),
+                    std::forward<VecTC>(faccum),
+                    swap_a_and_b ? std::forward<ScaleBDataType>(fscale_B)
+                                 : std::forward<ScaleADataType>(fscale_A),
+                    swap_a_and_b ? std::forward<ScaleADataType>(fscale_A)
+                                 : std::forward<ScaleBDataType>(fscale_B));
 
-            auto&& [a_result, b_result, c_result, scale_A_result, scale_B_result] =
-                std::move(transformed_inputs);
-            return applyTransformToOutput(std::move(c_result));
-        }
-        else
-        {
-            // Return the unsupported exec. This should print a runtime warning. (amdgcn_mma.hpp)
-            // Code should not reach here, but HOST/DEVICE compile passes are
-            // weirdly intertwined and instead of having constexpr in the calling
-            // site (tests) we do this. See also changes by this commit.
-            return Derived::MmaOp::exec({}, {}, {});
-        }
+                Derived::execImpl(transformed_inputs);
+
+                auto&& [a_result, b_result, c_result, scale_A_result, scale_B_result] =
+                    std::move(transformed_inputs);
+                return applyTransformToOutput(std::move(c_result));
+            },
+            std::forward<VecTA>(a),
+            std::forward<VecTB>(b),
+            std::forward<VecTC>(accum),
+            std::forward<ScaleADataType>(scale_A),
+            std::forward<ScaleBDataType>(scale_B));
     }
 };
 
