@@ -30,18 +30,6 @@
 using rocsparseio_float_complex  = std::complex<float>;
 using rocsparseio_double_complex = std::complex<double>;
 
-typedef struct
-{
-    uint64_t mean_nnz_per_seq;
-    uint64_t min_nnz_per_seq;
-    uint64_t max_nnz_per_seq;
-    uint64_t median_nnz_per_seq;
-    bool     full_diagonal;
-    bool     symbolic_symmetric;
-    bool     numeric_symmetric;
-
-} rocsparseio_statistics_csx;
-
 template <typename J, typename T>
 struct transpose_pair_t
 {

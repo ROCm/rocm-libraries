@@ -17,6 +17,7 @@ Documentation for rocSPARSE is available at
 * Significant performance improvement for `rocsparse_Xgtsv_no_pivot`.
 
 ### Resolved issues
+* Fixed incorrect usage of `__syncthreads` in `bsrmm`, `csrmm` (row_split), and `csritilu0x`
 * Fixed incorrect usage of `__syncthreads` in `csx2dense`, `dense2csx`, `prune_dense2csr`, `csrcolor`, and `csrmm` (nnz_split)
 * Fix `rocsparse_[s|d|c|z]csric0` where `rocsparse_status_invalid_value` was being returned when the maximum number of non-zeros in any row is between 513 and 1024.
 * Fix compilation when using `--rocsparse_ILP64`

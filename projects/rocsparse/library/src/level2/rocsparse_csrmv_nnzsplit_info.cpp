@@ -1,5 +1,6 @@
+/*! \file */
 /* ************************************************************************
- * Copyright (C) 2023-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -20,18 +21,33 @@
  * THE SOFTWARE.
  *
  * ************************************************************************ */
-#pragma once
 
-#include "rocsparse-types.h"
-#include "rocsparse_sparse_to_sparse.hpp"
+#include "rocsparse_control.hpp"
+#include "rocsparse_nnzsplit_info.hpp"
+#include "rocsparse_utility.hpp"
 
-namespace rocsparse
+_rocsparse_nnzsplit_info::~_rocsparse_nnzsplit_info()
 {
-    rocsparse_status sparse_to_coo_to_sparse(rocsparse_handle                         handle_,
-                                             rocsparse_sparse_to_sparse_descr         descr,
-                                             const rocsparse_spmat_descr              source,
-                                             rocsparse_spmat_descr                    target,
-                                             _rocsparse_sparse_to_sparse_descr::stage stage,
-                                             size_t*                                  buffer_size,
-                                             void*                                    buffer);
+    WARNING_IF_HIP_ERROR(hipDeviceSynchronize());
+
+    // starting_block_ids points into the starting_ids allocation, so only one free is needed.
+    WARNING_IF_HIP_ERROR(rocsparse_hipFree(this->starting_ids));
+
+    this->starting_ids           = nullptr;
+    this->starting_block_ids     = nullptr;
+    this->size                   = 0;
+    this->use_starting_block_ids = false;
+}
+
+void _rocsparse_nnzsplit_info::clear()
+{
+    WARNING_IF_HIP_ERROR(hipDeviceSynchronize());
+
+    // starting_block_ids points into the starting_ids allocation, so only one free is needed.
+    THROW_IF_HIP_ERROR(rocsparse_hipFree(this->starting_ids));
+
+    this->starting_ids           = nullptr;
+    this->starting_block_ids     = nullptr;
+    this->size                   = 0;
+    this->use_starting_block_ids = false;
 }
