@@ -44,7 +44,7 @@ TEST_F(TestPointwisePlan, ExecutePlanUnaryReluFwd)
                                    TensorLayout::NCHW);
 
     // Execute using CpuReferenceGraphExecutor
-    CpuReferenceGraphExecutor graphExecutor;
+    CpuReferenceGraphExecutor graphExecutor; // NOLINT(misc-const-correctness)
     auto [serializedGraph, serErr] = graph->to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
     graphExecutor.execute(serializedGraph.data(), serializedGraph.size(), variantPack);
@@ -75,7 +75,7 @@ TEST_F(TestPointwisePlan, ExecutePlanBinaryAdd)
                                     TensorLayout::NCHW);
 
     // Execute using CpuReferenceGraphExecutor
-    CpuReferenceGraphExecutor graphExecutor;
+    CpuReferenceGraphExecutor graphExecutor; // NOLINT(misc-const-correctness)
     auto [serializedGraph, serErr] = graph->to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
     graphExecutor.execute(serializedGraph.data(), serializedGraph.size(), variantPack);
@@ -105,7 +105,7 @@ TEST_F(TestPointwisePlan, ExecutePlanBackwardReluBwd)
                                     TensorLayout::NCHW);
 
     // Execute using CpuReferenceGraphExecutor
-    CpuReferenceGraphExecutor graphExecutor;
+    CpuReferenceGraphExecutor graphExecutor; // NOLINT(misc-const-correctness)
     auto [serializedGraph, serErr] = graph->to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
     graphExecutor.execute(serializedGraph.data(), serializedGraph.size(), variantPack);
@@ -130,7 +130,7 @@ TEST_F(TestPointwisePlan, ExecutePlanUnaryGeluFwd)
                                    seed,
                                    TensorLayout::NCHW);
 
-    CpuReferenceGraphExecutor graphExecutor;
+    CpuReferenceGraphExecutor graphExecutor; // NOLINT(misc-const-correctness)
     auto [serializedGraph, serErr] = graph->to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
     graphExecutor.execute(serializedGraph.data(), serializedGraph.size(), variantPack);
@@ -154,7 +154,7 @@ TEST_F(TestPointwisePlan, ExecutePlanUnaryGeluApproxTanhFwd)
                                    seed,
                                    TensorLayout::NCHW);
 
-    CpuReferenceGraphExecutor graphExecutor;
+    CpuReferenceGraphExecutor graphExecutor; // NOLINT(misc-const-correctness)
     auto [serializedGraph, serErr] = graph->to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
     graphExecutor.execute(serializedGraph.data(), serializedGraph.size(), variantPack);
@@ -178,7 +178,7 @@ TEST_F(TestPointwisePlan, ExecutePlanUnarySwishFwd)
                                    seed,
                                    TensorLayout::NCHW);
 
-    CpuReferenceGraphExecutor graphExecutor;
+    CpuReferenceGraphExecutor graphExecutor; // NOLINT(misc-const-correctness)
     auto [serializedGraph, serErr] = graph->to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
     graphExecutor.execute(serializedGraph.data(), serializedGraph.size(), variantPack);
@@ -206,7 +206,7 @@ TEST_F(TestPointwisePlan, ExecutePlanUnarySwishFwdWithBeta)
                                    std::nullopt,
                                    0.5f);
 
-    CpuReferenceGraphExecutor graphExecutor;
+    CpuReferenceGraphExecutor graphExecutor; // NOLINT(misc-const-correctness)
     auto [serializedGraph, serErr] = graph->to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
     graphExecutor.execute(serializedGraph.data(), serializedGraph.size(), variantPack);

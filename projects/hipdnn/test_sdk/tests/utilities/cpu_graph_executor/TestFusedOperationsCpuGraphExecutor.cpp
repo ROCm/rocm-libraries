@@ -158,7 +158,7 @@ TEST_F(TestFusedOperationsCpuGraphExecutor, ConvAddMulFusedGraph)
     ASSERT_TRUE(validationResult.is_good()) << validationResult.get_message();
 
     // Execute the graph using CPU graph executor
-    CpuReferenceGraphExecutor graphExecutor;
+    CpuReferenceGraphExecutor graphExecutor; // NOLINT(misc-const-correctness)
     // Serialize the frontend graph to flatbuffer format
     auto [serializedGraph, serErr] = graph->to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();

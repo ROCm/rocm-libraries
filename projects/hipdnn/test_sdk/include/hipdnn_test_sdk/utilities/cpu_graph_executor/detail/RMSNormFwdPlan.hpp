@@ -191,12 +191,13 @@ public:
                                   ? tensorMap.at(nodeAttributes->bias_tensor_uid().value())
                                   : nullptr;
 
-        RMSNormFwdParams params(*tensorMap.at(nodeAttributes->x_tensor_uid()),
-                                *tensorMap.at(nodeAttributes->scale_tensor_uid()),
-                                *tensorMap.at(nodeAttributes->epsilon_tensor_uid()),
-                                *tensorMap.at(nodeAttributes->y_tensor_uid()),
-                                invRmsPtr,
-                                biasPtr);
+        RMSNormFwdParams params( // NOLINT(misc-const-correctness)
+            *tensorMap.at(nodeAttributes->x_tensor_uid()),
+            *tensorMap.at(nodeAttributes->scale_tensor_uid()),
+            *tensorMap.at(nodeAttributes->epsilon_tensor_uid()),
+            *tensorMap.at(nodeAttributes->y_tensor_uid()),
+            invRmsPtr,
+            biasPtr);
 
         return std::make_unique<
             RMSNormFwdPlan<XDataType, ScaleDataType, OutputDataType, ComputeDataType>>(

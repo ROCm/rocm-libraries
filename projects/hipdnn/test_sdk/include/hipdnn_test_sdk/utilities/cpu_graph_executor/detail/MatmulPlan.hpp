@@ -113,9 +113,10 @@ public:
         }
 
         const auto& tensorMap = graph.getTensorMap();
-        MatmulParams params(*tensorMap.at(nodeAttributes->a_tensor_uid()),
-                            *tensorMap.at(nodeAttributes->b_tensor_uid()),
-                            *tensorMap.at(nodeAttributes->c_tensor_uid()));
+        MatmulParams params( // NOLINT(misc-const-correctness)
+            *tensorMap.at(nodeAttributes->a_tensor_uid()),
+            *tensorMap.at(nodeAttributes->b_tensor_uid()),
+            *tensorMap.at(nodeAttributes->c_tensor_uid()));
 
         return std::make_unique<MatmulPlan<ADataType, BDataType, CDataType, ComputeDataType>>(
             std::move(params));

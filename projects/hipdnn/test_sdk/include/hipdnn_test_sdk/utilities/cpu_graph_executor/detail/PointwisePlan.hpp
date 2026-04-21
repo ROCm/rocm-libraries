@@ -80,7 +80,8 @@ public:
 
     void execute(const std::unordered_map<int64_t, void*>& variantPack) override
     {
-        if(_params.reluLowerClip.has_value() || _params.reluUpperClip.has_value()
+        if(_params.reluLowerClip.has_value()
+           || _params.reluUpperClip.has_value() // NOLINT(bugprone-branch-clone)
            || _params.reluLowerClipSlope.has_value() || _params.swishBeta.has_value())
         {
             executeParameterized(variantPack);
@@ -272,16 +273,17 @@ public:
                                      ? tensorMap.at(*nodeAttributes->in_1_tensor_uid())
                                      : nullptr);
 
-        PointwiseParams params(nodeAttributes->operation(),
-                               *in0Tensor,
-                               in1Tensor,
-                               *out0Tensor,
-                               nodeAttributes->relu_lower_clip(),
-                               nodeAttributes->relu_upper_clip(),
-                               nodeAttributes->relu_lower_clip_slope(),
-                               nodeAttributes->swish_beta(),
-                               nodeAttributes->elu_alpha(),
-                               nodeAttributes->softplus_beta());
+        PointwiseParams params( // NOLINT(misc-const-correctness)
+            nodeAttributes->operation(),
+            *in0Tensor,
+            in1Tensor,
+            *out0Tensor,
+            nodeAttributes->relu_lower_clip(),
+            nodeAttributes->relu_upper_clip(),
+            nodeAttributes->relu_lower_clip_slope(),
+            nodeAttributes->swish_beta(),
+            nodeAttributes->elu_alpha(),
+            nodeAttributes->softplus_beta());
 
         if(params.eluAlpha.has_value() || params.softplusBeta.has_value())
         {

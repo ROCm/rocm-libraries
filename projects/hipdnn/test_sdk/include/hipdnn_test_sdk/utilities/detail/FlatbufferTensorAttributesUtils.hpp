@@ -62,7 +62,7 @@ inline std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>
         return std::make_unique<Tensor<fp4_e2m1>>(dims, strides);
     case hipdnn_flatbuffers_sdk::data_objects::DataType::INT4:
         return std::make_unique<Tensor<uint8_t>>(dims, strides);
-    case hipdnn_flatbuffers_sdk::data_objects::DataType::FP6_E2M3:
+    case hipdnn_flatbuffers_sdk::data_objects::DataType::FP6_E2M3: // NOLINT(bugprone-branch-clone)
         return std::make_unique<Tensor<fp6_e2m3>>(dims, strides);
     case hipdnn_flatbuffers_sdk::data_objects::DataType::FP6_E3M2:
         return std::make_unique<Tensor<fp6_e3m2>>(dims, strides);
