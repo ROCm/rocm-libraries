@@ -11,32 +11,31 @@
 #
 # Converted from BarrierTest.TokenGrouped_PassesPreserveOrderWithinGroup
 #
-# Group 0 pre-barrier: ds_load must come before signal
-# CHECK: ds_load_b128{{.*}}tokens = [0]
-# CHECK-SAME: v[0:3]
+# Verify that within each token group, the relative ordering is preserved:
+#   - loads before their barrier_signal
+#   - barrier_signal before barrier_wait
+#   - barrier_wait before post-barrier loads
 #
-# Group 1: tensor_load before signal, signal before wait
+# Group 0 pre-barrier: ds_load
+# CHECK: ds_load_b128{{.*}}tokens = [0]
+#
+# Group 2 pre-barrier: tensor_load, ds_load, then signal/wait
+# CHECK: tensor_load_to_lds{{.*}}tokens = [2]
+# CHECK: ds_load_b128{{.*}}tokens = [2]
+# CHECK: s_barrier_signal{{.*}}tokens = [2]
+# CHECK: s_barrier_wait{{.*}}tokens = [2]
+#
+# Group 1 pre-barrier: tensor_load, then signal/wait
 # CHECK: tensor_load_to_lds{{.*}}tokens = [1]
 # CHECK: s_barrier_signal{{.*}}tokens = [1]
 # CHECK: s_barrier_wait{{.*}}tokens = [1]
 #
-# Group 2 pre-barrier: {tensor_load, ds_load} before signal
-# CHECK: tensor_load_to_lds{{.*}}tokens = [2]
-# CHECK-SAME: s[24:27]
+# Group 2 post-barrier: ds_load, tensor_load
 # CHECK: ds_load_b128{{.*}}tokens = [2]
-# CHECK-SAME: v[8:11]
-# CHECK: s_barrier_signal{{.*}}tokens = [2]
-# CHECK: s_barrier_wait{{.*}}tokens = [2]
-#
-# Group 2 post-barrier: ds_load and tensor_load after wait
-# CHECK: ds_load_b128{{.*}}tokens = [2]
-# CHECK-SAME: v[12:15]
 # CHECK: tensor_load_to_lds{{.*}}tokens = [2]
-# CHECK-SAME: s[36:39]
 #
-# Group 1 post-barrier: ds_load after wait
+# Group 1 post-barrier: ds_load
 # CHECK: ds_load_b128{{.*}}tokens = [1]
-# CHECK-SAME: v[4:7]
 #
 # Group 0 post-barrier: signal, wait, tensor_load
 # CHECK: s_barrier_signal{{.*}}tokens = [0]

@@ -8,14 +8,38 @@
 #include <hip_kernel_provider_common/HipDeviceUtils.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
+namespace
+{
+// In AITER (upstream), each workspace buffer (D buffer, dq_acc) is a separate PyTorch tensor
+// allocation. Each torch::empty() call invokes hipMalloc(), which guarantees 256-byte alignment
+// per allocation. So AITER never explicitly aligns — every buffer pointer is automatically aligned.
+//
+// In hip-kernel-provider, hipDNN provides a single contiguous workspace buffer (one hipMalloc).
+// The execute() method must carve this into sub-buffers using pointer arithmetic:
+//   D buffer    starts at: workspace + 0                     (aligned by hipMalloc)
+//   dq_acc      starts at: workspace + sizeof(D buffer)      (NOT automatically aligned)
+//
+// We round each sub-buffer size up to a 64-byte boundary (MI300X L2 cache line size) so the
+// next sub-buffer starts cache-line-aligned. This prevents false sharing between buffers and
+// ensures vector memory instructions (e.g. global_load_b128) don't span cache line boundaries.
+//
+// TODO(Task I8.9): POC hardcodes 64 bytes; production should query hipGetDeviceProperties()
+constexpr size_t K_WORKSPACE_ALIGNMENT_BYTES = 64;
+
+constexpr size_t alignUp(size_t size, size_t alignment)
+{
+    return (size + alignment - 1) & ~(alignment - 1);
+}
+} // namespace
+
 namespace asm_sdpa_engine
 {
 
 bool SdpaBwdPlanBuilder::isApplicable(
     const HipKernelHandle& handle,
-    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
-    using namespace hipdnn_data_sdk::data_objects;
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
     // NOLINTNEXTLINE(readability-identifier-naming)
     static const char* HIP_KERNEL_LOG_PREFIX = "[SdpaBwdPlanBuilder::isApplicable] ";
 
@@ -142,18 +166,40 @@ bool SdpaBwdPlanBuilder::isApplicable(
 
 size_t SdpaBwdPlanBuilder::getMaxWorkspaceSize(
     const HipKernelHandle& /* handle */,
-    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& /* opGraph */,
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
     const HipKernelSettings& /* executionSettings */) const
 {
-    // TODO(Task I4): Compute actual workspace size for backward 3-kernel pipeline
-    // Backward requires workspace for D buffer and dq_acc accumulator
-    return 0;
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    const auto& attrs = opGraph.nodeWrappers().front()->attributesAs<SdpaBackwardAttributes>();
+    const auto& tensorMap = opGraph.getTensorMap();
+    const auto* qTensor = tensorMap.at(attrs.q_tensor_uid());
+
+    // Q tensor layout is [B, H_q, S_q, D_qk]
+    auto batch = static_cast<size_t>(qTensor->dims()->Get(0));
+    auto headsQ = static_cast<size_t>(qTensor->dims()->Get(1));
+    auto seqLenQ = static_cast<size_t>(qTensor->dims()->Get(2));
+    auto headDim = static_cast<size_t>(qTensor->dims()->Get(3));
+
+    // D buffer: row-wise dot product output [B, H_q, S_q] in FP32
+    // Always needed for both a16 and a32 accumulator variants
+    size_t dBufferSize = batch * headsQ * seqLenQ * sizeof(float);
+    dBufferSize = alignUp(dBufferSize, K_WORKSPACE_ALIGNMENT_BYTES);
+
+    // TODO(Task I8.2): POC assumes a32 accumulator — always allocates FP32 dq_acc buffer.
+    // For a16 accumulator kernels, dQ is written directly in BF16 (no dq_acc buffer needed,
+    // no dq_convert kernel launched). Provider should check accumulator type and skip
+    // dq_acc allocation for a16.
+    size_t dqAccSize = batch * headsQ * seqLenQ * headDim * sizeof(float);
+    dqAccSize = alignUp(dqAccSize, K_WORKSPACE_ALIGNMENT_BYTES);
+
+    return dBufferSize + dqAccSize;
 }
 
 void SdpaBwdPlanBuilder::initializeExecutionSettings(
     const HipKernelHandle& /* handle */,
-    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& /* opGraph */,
-    const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& /* engineConfig */,
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& /* opGraph */,
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& /* engineConfig */,
     HipKernelSettings& /* executionSettings */) const
 {
     HIPDNN_PLUGIN_LOG_ERROR("SdpaBwdPlanBuilder::initializeExecutionSettings not implemented");
@@ -161,17 +207,17 @@ void SdpaBwdPlanBuilder::initializeExecutionSettings(
 
 void SdpaBwdPlanBuilder::buildPlan(
     const HipKernelHandle& /* handle */,
-    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& /* opGraph */,
-    const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& /* engineConfig */,
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& /* opGraph */,
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& /* engineConfig */,
     HipKernelContext& /* executionContext */) const
 {
     // TODO(Task I5): Implement backward 3-kernel plan (odo -> dqdkdv -> dq_convert)
     HIPDNN_PLUGIN_LOG_ERROR("SdpaBwdPlanBuilder::buildPlan not implemented");
 }
 
-std::vector<hipdnn_data_sdk::data_objects::KnobT> SdpaBwdPlanBuilder::getCustomKnobs(
+std::vector<hipdnn_flatbuffers_sdk::data_objects::KnobT> SdpaBwdPlanBuilder::getCustomKnobs(
     const HipKernelHandle& /* handle */,
-    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& /* opGraph */) const
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& /* opGraph */) const
 {
     return {};
 }
