@@ -37,7 +37,7 @@ void init_func(nb::module_ m);
 void init_register(nb::module_ m);
 void init_stinkytofu(nb::module_ m);
 
-NB_MODULE(rocisa, m)
+NB_MODULE(_rocisa, m)
 {
     m.doc() = "Module rocisa.";
     init_base(m);

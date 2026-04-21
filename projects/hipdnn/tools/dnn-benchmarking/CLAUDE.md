@@ -9,17 +9,33 @@ Benchmarking and validation tool for hipDNN graphs. Loads JSON-serialized hipDNN
 ## Build and Development Commands
 
 ```bash
-# For ROCm/AMD GPU development (hipDNN benchmarking)
-pip install -r requirements-rocm.txt -r requirements-dev.txt
-pip install -e .
+# Full setup (venv, requirements, hipDNN bindings) — skips hipDNN/provider build if already installed
+./setup.sh
 
-# For CUDA/NVIDIA GPU development (PyTorch CUDA benchmarking)
-pip install -r requirements-cuda.txt -r requirements-dev.txt
-pip install -e .
+# Full setup AND build hipDNN + MIOpen provider from source (overwrites existing artifacts)
+./setup.sh --force-build
+
+# Manual setup for ROCm/AMD GPU development
+pip install -r requirements-rocm.txt   # torch from ROCm nightly index
+pip install -e .                        # package + PyPI deps (numpy, pytest)
 
 # hipDNN bindings must be installed separately from your hipDNN build
 cd /path/to/hipdnn/python && pip install -e .
 ```
+
+`--force-build` installs hipDNN and the MIOpen plugin to `/opt/rocm` (prompts for confirmation).
+Pass `/opt/rocm/lib/hipdnn_plugins/engines/` to `--plugin-path` when running benchmarks.
+
+### ROCm PyTorch Setup
+
+The `requirements-rocm.txt` installs PyTorch from ROCm nightly indexes. The correct index depends on GPU architecture:
+
+| GPU | Architecture | Index |
+|-----|-------------|-------|
+| MI200/MI210/MI250 | gfx90X | `v2-staging/gfx90X-dcgpu` |
+| MI300X/MI300A | gfx94X | `v2/gfx94X-dcgpu` |
+
+To switch architectures, change the `--index-url` line in `requirements-rocm.txt`.
 
 ## Running Tests
 
