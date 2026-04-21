@@ -988,7 +988,7 @@ typedef enum rocsparse_singularity_
     rocsparse_singularity_none, /**< No singularity detected. */
     rocsparse_singularity_symbolic, /**< The sparsity pattern inherently prevents a full rank, for example, a missing diagonal element. */
     rocsparse_singularity_numeric_exact, /**< An exact zero was encountered during numerical calculation. */
-    rocsparse_singularity_numeric_near, /**< A near zero was encountered during numerical calculation, i.e. within a given tolerance. */
+    rocsparse_singularity_numeric_near, /**< A near zero was encountered during numerical calculation, that is, within a given tolerance. */
 } rocsparse_singularity;
 
 /*! \ingroup types_module
