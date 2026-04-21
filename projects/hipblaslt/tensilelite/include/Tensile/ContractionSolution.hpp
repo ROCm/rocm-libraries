@@ -544,7 +544,8 @@ namespace TensileLite
             rocisa::DataType cType                     = rocisa::DataType::Float;
             rocisa::DataType dType                     = rocisa::DataType::Float;
             rocisa::DataType eType                     = rocisa::DataType::Float;
-            rocisa::DataType computeInputType          = rocisa::DataType::Float;
+            rocisa::DataType computeInputTypeA         = rocisa::DataType::Float;
+            rocisa::DataType computeInputTypeB         = rocisa::DataType::Float;
             rocisa::DataType computeType               = rocisa::DataType::Float;
             rocisa::DataType f32XdlMathOp              = rocisa::DataType::Float;
             rocisa::DataType activationComputeDataType = rocisa::DataType::Float;
@@ -568,11 +569,16 @@ namespace TensileLite
             std::vector<int>              biasSrcWhiteList;
             std::vector<rocisa::DataType> biasDataTypeWhiteList;
 
-            int                    sparse                     = 0;
-            bool                   stochasticRounding         = false;
-            bool                   supportDeviceUserArguments = false;
-            bool                   swizzleTensorA             = false;
-            bool                   swizzleTensorB             = false;
+            int  sparse                     = 0;
+            bool stochasticRounding         = false;
+            bool supportDeviceUserArguments = false;
+            bool swizzleTensorA             = false;
+            bool swizzleTensorB             = false;
+            int  metadataLayout             = 0;
+            int  mxBlockA                   = 0;
+            int  mxBlockB                   = 0;
+            rocisa::DataType mxTypeA        = rocisa::DataType::E8;
+            rocisa::DataType mxTypeB        = rocisa::DataType::E8;
         };
 
         struct LinearModel

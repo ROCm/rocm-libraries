@@ -229,7 +229,7 @@ install_packages( )
   fi
 
   # wget and openssl are needed for cmake
-  if [ -z "$CMAKE_VERSION" ] || $(dpkg --compare-versions $CMAKE_VERSION lt 3.16.8); then
+  if [ -z "$CMAKE_VERSION" ] || $(dpkg --compare-versions $CMAKE_VERSION lt 3.25.2); then
     if $update_cmake == true; then
       library_dependencies_ubuntu+=("wget" "libssl-dev")
       library_dependencies_centos+=("wget" "openssl-devel")
@@ -260,7 +260,13 @@ install_packages( )
       if [[ "${build_clients}" == true ]]; then
         install_apt_packages "${client_dependencies_ubuntu[@]}"
       fi
-      pip3 install wheel
+      install_apt_packages "python3-venv" "python3-pip"
+      venv_dir="${build_dir}/venv"
+      python3 -m venv "${venv_dir}"
+      "${venv_dir}/bin/pip" install --upgrade pip wheel
+      "${venv_dir}/bin/pip" install -r "${root_path}/tensilelite/requirements.txt"
+      export PATH="${venv_dir}/bin:${PATH}"
+      export VIRTUAL_ENV="${venv_dir}"
       ;;
 
     centos|rhel|almalinux)
@@ -661,6 +667,12 @@ fi
 # Default cmake executable is called cmake
 cmake_executable=cmake
 
+# Activate virtualenv if it exists (created by -d on Ubuntu)
+venv_dir="${build_dir}/venv"
+if [[ -f "${venv_dir}/bin/activate" ]]; then
+  source "${venv_dir}/bin/activate"
+fi
+
 # If user provides custom ${rocm_path} path for hcc it has lesser priority,
 # but with hip-clang existing path has lesser priority to avoid use of installed clang++
 if [[ "${build_hip_clang}" == true ]]; then
@@ -679,7 +691,7 @@ if [[ "${install_dependencies}" == true ]]; then
   install_packages
 
   CMAKE_VERSION=$(cmake --version | grep -oP '(?<=version )[^ ]*' )
-  if [ -z "$CMAKE_VERSION" ] || $(dpkg --compare-versions $CMAKE_VERSION lt 3.22); then
+  if [ -z "$CMAKE_VERSION" ] || $(dpkg --compare-versions $CMAKE_VERSION lt 3.25.2); then
       if $update_cmake == true; then
         pushd
         printf "\033[32mBuilding \033[33mcmake\033[32m from source; installing into \033[33m/usr/local\033[0m\n"
@@ -694,7 +706,7 @@ if [[ "${install_dependencies}" == true ]]; then
         sudo make install
         popd
       else
-          echo "hipBLASLt requires CMake version >= 3.22 and CMake version ${CMAKE_VERSION} is installed. Run install.sh again with --cmake_install flag and CMake version 3.25.2 will be installed to /usr/local"
+          echo "hipBLASLt requires CMake version >= 3.25.2 and CMake version ${CMAKE_VERSION} is installed. Run install.sh again with --cmake_install flag and CMake version 3.25.2 will be installed to /usr/local"
           exit 2
       fi
   fi
@@ -710,7 +722,7 @@ if [[ "${install_dependencies}" == true ]]; then
 
   # The following builds googletest from source, installs into cmake default /usr/local
   build_lapack="ON"
-  if [ "${use_system_packages}" == true || "${cpu_ref_lib}" == "blis" ]; then
+  if [[ "${use_system_packages}" == true || "${cpu_ref_lib}" == "blis" ]]; then
     build_lapack="OFF"
   fi
   pushd .

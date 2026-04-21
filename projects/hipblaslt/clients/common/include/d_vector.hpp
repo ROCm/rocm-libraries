@@ -92,11 +92,9 @@ public:
         memStatus.dwLength = sizeof(memStatus);
         if(GlobalMemoryStatusEx(&memStatus))
         {
-            // In the windows system, the host memory(pinned memory)'s capacity is the half of the physical memory
-            // Use available physical memory with a safety margin to avoid OOM
-            // Dividing by 2 provides a conservative estimate for hipHostMalloc
-            // during heavy testing scenarios
-            return memStatus.ullAvailPhys / 2;
+            // In the windows system, the host memory's capacity is the half of the physical memory
+            // And previous allocation of host memory is got cleared before
+            return memStatus.ullTotalPhys / 2;
         }
         else
         {
@@ -110,10 +108,11 @@ public:
     }
 
 protected:
-    hip_memory(size_t size, size_t capacity, bool use_HMM = false)
+    hip_memory(size_t size, size_t capacity, bool use_HMM = false, size_t allocated_capacity = 0)
         : m_size(size)
         , m_capacity(capacity)
         , m_managed(use_HMM)
+        , m_allocated_capacity(allocated_capacity)
     {
     }
     virtual ~hip_memory() = default;
@@ -121,6 +120,7 @@ protected:
     size_t m_size     = 0;
     size_t m_capacity = 0;
     bool   m_managed  = false;
+    size_t m_allocated_capacity = 0;
 };
 
 /* ============================================================================================ */
@@ -140,8 +140,7 @@ public:
 
         if(use_HMM)
         {
-            // Keep 20% of the available system memory for room of emergency
-            size_t available_host_memory = get_available_host_memory() * 0.8;
+            size_t available_host_memory = get_available_host_memory();
             // Need to ensure sufficient host memory, otherwise hipMallocManaged may OOM and hip api won't return error code,
             // and will cause the gtest get aborted
             if(available_host_memory < capacity || hipMallocManaged(&d, capacity) != hipSuccess)
@@ -192,8 +191,7 @@ public:
     {
         char* d = nullptr;
 
-        // Keep 20% of the available system memory for room of emergency
-        size_t available_host_memory = get_available_host_memory() * 0.8;
+        size_t available_host_memory = get_available_host_memory();
         // Need to ensure sufficient host memory, otherwise hipHostMalloc may OOM and hip api won't return error code,
         // and will cause the gtest get aborted
         if(available_host_memory < capacity || hipHostMalloc(&d, capacity) != hipSuccess)
@@ -227,16 +225,19 @@ class memory_pool
 public:
     static M Get(size_t m_bytes, bool use_HMM = false)
     {
+        std::lock_guard<std::mutex> lock(Instance().m_mutex);
         return Instance().get(m_bytes, use_HMM);
     }
 
     static void Restore(M& dm)
     {
+        std::lock_guard<std::mutex> lock(Instance().m_mutex);
         Instance().restore(dm);
     }
 
 private:
     std::vector<M> m_pool, m_pool_managed;
+    std::mutex m_mutex;
 
     static memory_pool& Instance()
     {
@@ -247,6 +248,22 @@ private:
     M get(size_t bytes, bool use_HMM = false)
     {
         auto& pool = use_HMM ? m_pool_managed : m_pool;
+        
+        // For Windows system with not enough system memory, 
+        // not suitable for memory pool management when it needs another allocation
+        #ifdef _WIN32
+        MEMORYSTATUSEX memStatus = {};
+        memStatus.dwLength = sizeof(memStatus);
+        if(GlobalMemoryStatusEx(&memStatus))
+        {
+            // If the shared memory is less than 64GB(128 / 2), may not enough for the hipblaslt-test to run
+            if(memStatus.ullTotalPhys <= (128ULL << 30))
+            {
+                pool.clear();
+            }
+        }
+        #endif
+
         auto  it   = std::lower_bound(pool.begin(), pool.end(), bytes);
         if(it != pool.end() && // found a buffer that is large enough ..
            it->capacity() < 2 * bytes) // but not way too large
@@ -270,7 +287,7 @@ private:
                 pool.erase(it - 1);
 
             // Allocate 20% extra if it is not huge_request for later reuse
-            size_t alloc_capacity = huge_request ? bytes : static_cast<size_t>(bytes * 1.2); 
+            size_t alloc_capacity = huge_request ? bytes : static_cast<size_t>(bytes * 1.2);
 
             auto e = M(bytes, alloc_capacity, use_HMM);
             if(e.get())

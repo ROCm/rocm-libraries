@@ -10,6 +10,7 @@
 #include <hipdnn_data_sdk/utilities/Workspace.hpp>
 #include <hipdnn_frontend.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_test_sdk/utilities/TensorDiff.hpp>
 #include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
 
@@ -208,40 +209,68 @@ bool SampleRunner::operator()(const TensorLayout& layout)
         }
 
         // Execute on CPU using graph executor
-        auto serializedGraph = graph->buildFlatbufferOperationGraph();
+        auto [serializedGraph, serErr] = graph->to_binary();
+        if(serErr.is_bad())
+        {
+            std::cerr << "Failed to serialize graph: " << serErr.get_message() << std::endl;
+            return false;
+        }
         hipdnn_test_sdk::utilities::CpuReferenceGraphExecutor cpuExecutor;
         cpuExecutor.execute(serializedGraph.data(), serializedGraph.size(), cpuVariantPack);
 
         auto tolerance = hipdnn_test_sdk::utilities::batchnorm::getToleranceTraining<InputType>();
+        auto floatTolerance = static_cast<float>(tolerance);
         auto yValidator
             = hipdnn_test_sdk::utilities::CpuFpReferenceValidation<InputType>(tolerance, tolerance);
         auto statsValidator
             = hipdnn_test_sdk::utilities::CpuFpReferenceValidation<IntermediateType>(
                 static_cast<IntermediateType>(tolerance), static_cast<IntermediateType>(tolerance));
 
-        bool yValid = yValidator.allClose(activatedYRefTensor, activatedYTensor);
-        bool meanValid = statsValidator.allClose(savedMeanRefTensor, savedMeanTensor);
-        bool invVarValid = statsValidator.allClose(savedInvVarRefTensor, savedInvVarTensor);
+        std::cout << "CPU reference validation:\n";
+        bool yValid = hipdnn_test_sdk::utilities::validateAndReport<InputType>(std::cout,
+                                                                               "activated_y",
+                                                                               yValidator,
+                                                                               activatedYRefTensor,
+                                                                               activatedYTensor,
+                                                                               floatTolerance,
+                                                                               floatTolerance);
+        bool meanValid
+            = hipdnn_test_sdk::utilities::validateAndReport<IntermediateType>(std::cout,
+                                                                              "saved_mean",
+                                                                              statsValidator,
+                                                                              savedMeanRefTensor,
+                                                                              savedMeanTensor,
+                                                                              floatTolerance,
+                                                                              floatTolerance);
+        bool invVarValid
+            = hipdnn_test_sdk::utilities::validateAndReport<IntermediateType>(std::cout,
+                                                                              "saved_inv_variance",
+                                                                              statsValidator,
+                                                                              savedInvVarRefTensor,
+                                                                              savedInvVarTensor,
+                                                                              floatTolerance,
+                                                                              floatTolerance);
 
         bool nextMeanValid = true;
         bool nextVarValid = true;
         if(config.useRunningStats)
         {
-            nextMeanValid = statsValidator.allClose(nextMeanRefTensor, nextMeanTensor);
-            nextVarValid = statsValidator.allClose(nextVarRefTensor, nextVarTensor);
-        }
-
-        std::cout << "CPU reference validation:\n";
-        std::cout << "  activated_y: " << (yValid ? "successful" : "failed") << "\n";
-        std::cout << "  saved_mean: " << (meanValid ? "successful" : "failed") << "\n";
-        std::cout << "  saved_inv_variance: " << (invVarValid ? "successful" : "failed") << "\n";
-
-        if(config.useRunningStats)
-        {
-            std::cout << "  next_running_mean: " << (nextMeanValid ? "successful" : "failed")
-                      << "\n";
-            std::cout << "  next_running_variance: " << (nextVarValid ? "successful" : "failed")
-                      << "\n";
+            nextMeanValid = hipdnn_test_sdk::utilities::validateAndReport<IntermediateType>(
+                std::cout,
+                "next_running_mean",
+                statsValidator,
+                nextMeanRefTensor,
+                nextMeanTensor,
+                floatTolerance,
+                floatTolerance);
+            nextVarValid = hipdnn_test_sdk::utilities::validateAndReport<IntermediateType>(
+                std::cout,
+                "next_running_variance",
+                statsValidator,
+                nextVarRefTensor,
+                nextVarTensor,
+                floatTolerance,
+                floatTolerance);
         }
 
         validationPassed = yValid && meanValid && invVarValid && nextMeanValid && nextVarValid;

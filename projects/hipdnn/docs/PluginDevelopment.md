@@ -97,20 +97,20 @@ hipDNN uses a deterministic hash-based system for managing engine IDs. This syst
 ### Using Engine IDs
 
 ```cpp
-#include <hipdnn_plugin_sdk/EngineNames.hpp>
+#include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 
 // Option 1: Use a registered engine ID
-const int64_t engineId = hipdnn_plugin_sdk::engine_names::MIOPEN_PLUGIN_ID;
+const int64_t engineId = hipdnn_data_sdk::utilities::MIOPEN_ENGINE_ID;
 
 // Option 2: Generate ID from custom name
-const int64_t customEngineId = hipdnn_data_sdk::engineNameToId("MY_CUSTOM_ENGINE");
+const int64_t customEngineId = hipdnn_data_sdk::utilities::engineNameToId("MY_CUSTOM_ENGINE");
 
 // In your engine implementation
 class MyEngine {
     int64_t _id;
 public:
     MyEngine(const char* engineName)
-        : _id(hipdnn_data_sdk::engineNameToId(engineName)) {
+        : _id(hipdnn_data_sdk::utilities::engineNameToId(engineName)) {
         // Engine is now initialized with a unique ID
     }
 };
@@ -124,9 +124,9 @@ To add your engine name to the official registry:
    - Use UPPER_CASE with underscores
    - Make the name match the value.
 
-2. **Add to Registry**: Submit a PR to add your engine name to [`plugin_sdk/include/hipdnn_plugin_sdk/EngineNames.hpp`](../plugin_sdk/include/hipdnn_plugin_sdk/EngineNames.hpp):
+2. **Add to Registry**: Submit a PR to add your engine name to [`data_sdk/include/hipdnn_data_sdk/utilities/EngineNames.hpp`](../data_sdk/include/hipdnn_data_sdk/utilities/EngineNames.hpp):
    ```cpp
-   HIPDNN_REGISTER_ENGINE(MY_NEW_ENGINE, "MY_NEW_ENGINE")
+   HIPDNN_REGISTER_ENGINE(MY_NEW_ENGINE)
    ```
 
 3. **Test Locally First**: You can use unregistered names during development - they'll generate a warning but work correctly
@@ -139,7 +139,7 @@ To add your engine name to the official registry:
 - **Forward Compatible**: New engines can be used without registry updates
 
 > [!TIP]
-> 💡 The engine ID system ensures globally unique identifiers across all plugins. You can query registered engines using `hipdnn_plugin_sdk::engine_names::getAllEngineNames()` and check for name collisions using the provided test utilities.
+> 💡 The engine ID system ensures globally unique identifiers across all plugins. You can query registered engines using `hipdnn_data_sdk::utilities::getAllEngineNames()` and check for name collisions using the provided test utilities.
 
 
 ## Creating a Kernel Engine Plugin
@@ -163,7 +163,7 @@ Before creating a plugin, ensure you have **built and installed hipDNN**. Plugin
    - **Engine Manager**: Manages available engines and their capabilities
    - **Engine**: Implements graph execution for specific operations (each engine must have a globally unique `int64_t` ID)
    - **Execution Plans**: Define how operations are executed
-   - **Engine Name & ID**: Name your engine and place it in the [EngineNames](../plugin_sdk/include/hipdnn_plugin_sdk/EngineNames.hpp) registry
+   - **Engine Name & ID**: Name your engine and place it in the [EngineNames](../data_sdk/include/hipdnn_data_sdk/utilities/EngineNames.hpp) registry
 
 3. **Build and Deploy Plugin**
    - Configure CMake to build the plugin as a shared library
@@ -442,7 +442,7 @@ Your plugin's CMakeLists.txt should:
 When building an external plugin, the hipDNN Data SDK provides CMake variables to help you install your plugin in the correct location:
 
 - **Absolute path** (`HIPDNN_FULL_INSTALL_PLUGIN_ENGINE_DIR`):
-  - Hardcoded at CMake configure time
+  - Computed at `find_package()` time relative to the installed hipDNN location
   - This is intended for **developer use only**
 
 - **Relative path** (`HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR`):

@@ -66,13 +66,21 @@ struct SolutionIndexParameters
     WorkGroupTileSize workgroupTile;
     bool              workgroupMapping;
     bool              streamK;
-    bool              tailLoops = true;
+    bool              tailLoops     = true;
+    bool              nonTemporalA  = false;
+    bool              nonTemporalB  = false;
 
     auto operator<=>(const SolutionIndexParameters& other) const = default;
 };
 
 int                     parametersToIndex(const SolutionIndexParameters& params);
 SolutionIndexParameters indexToParameters(int index);
+
+/**
+ * Compact kernel label for rocRoller algo indices (negative signed int, bit 31 set).
+ * Format: rr_<M>x<N>x<K> with optional _wgm, _sk, _notl, _ntA, _ntB suffixes.
+ */
+std::string shortRocRollerKernelNameFromSolutionIndex(const SolutionIndexParameters& params);
 
 size_t maxNumberSolutions();
 

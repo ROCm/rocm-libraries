@@ -379,13 +379,13 @@ void ReorderTensorGPUData(const Handle& handle,
     if(tensor_lens[reordering_dim] != sample_order.size())
         MIOPEN_THROW(miopenStatusInternalError, "Wrong tensor lens");
 
-    auto get_single_samlpe_lens = [](const std::vector<size_t>& lens, int reordering_dim) {
+    auto get_single_sample_lens = [](const std::vector<size_t>& lens, int reordering_dim_) {
         std::vector<size_t> new_lens = lens;
-        new_lens[reordering_dim]     = 1;
+        new_lens[reordering_dim_]    = 1;
         return new_lens;
     };
 
-    const std::vector<size_t> copy_size = get_single_samlpe_lens(tensor_lens, reordering_dim);
+    const std::vector<size_t> copy_size = get_single_sample_lens(tensor_lens, reordering_dim);
 
     const auto src_desc = miopen::TensorDescriptor(data_type, copy_size, src_stride);
     const auto dst_desc = miopen::TensorDescriptor(data_type, copy_size, dst_stride);
@@ -411,15 +411,6 @@ void RNNTensorBaseLayoutConverter::ReorderInputTensorGPUData(
     if(!padded_tensor_desc.IsPaddedSeqLayout())
         MIOPEN_THROW(miopenStatusInternalError, "Wrong tensor layout");
 
-    // auto get_single_samlpe_lens = [](const std::vector<size_t>& SeqTensor_lens) {
-    //    std::vector<size_t> new_lens = SeqTensor_lens;
-    //    new_lens[0]                  = 1;
-    //    return new_lens;
-    //};
-    //
-    // const std::vector<size_t> copy_size =
-    // get_single_samlpe_lens(padded_tensor_desc.GetLengths());
-
     const std::vector<size_t> src_stride = padded_tensor_desc.GetPaddedStrides();
     const std::vector<size_t> dst_stride = dst_padded_tensor_desc.GetPaddedStrides();
 
@@ -432,20 +423,6 @@ void RNNTensorBaseLayoutConverter::ReorderInputTensorGPUData(
                          src,
                          dst,
                          padded_tensor_desc.GetType());
-
-    // const auto src_desc =
-    //    miopen::TensorDescriptor(padded_tensor_desc.GetType(), copy_size, src_stride);
-    // const auto dst_desc =
-    //    miopen::TensorDescriptor(padded_tensor_desc.GetType(), copy_size, dst_stride);
-    //
-    // const auto src_sample_stride = src_stride[0];
-    // const auto dst_sample_stride = dst_stride[0];
-    // for(size_t i = 0; i < sample_order.size(); i++)
-    //{
-    //    const auto dst_offset = i * dst_sample_stride;
-    //    const auto src_offset = sample_order[i] * src_sample_stride;
-    //    CopyTensor(handle, src_desc, src, dst_desc, dst, src_offset, dst_offset, true);
-    //}
 }
 
 void RNNTensorBaseLayoutConverter::ReorderHiddenTensorGPUData(const Handle& handle,

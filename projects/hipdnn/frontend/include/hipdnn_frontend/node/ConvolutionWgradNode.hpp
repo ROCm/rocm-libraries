@@ -3,18 +3,16 @@
 #pragma once
 
 #include "Node.hpp"
-#include <algorithm>
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
 #include <hipdnn_frontend/detail/ConvolutionWgradPacker.hpp>
-#include <numeric>
+#include <hipdnn_frontend/detail/ConvolutionWgradUnpacker.hpp>
 
 namespace hipdnn_frontend::graph
 {
-class ConvolutionWgradNode : public BaseNode<ConvolutionWgradNode>
+class ConvolutionWgradNode : public BaseNode<ConvolutionWgradNode, NodeType::CONVOLUTION_WGRAD>
 {
 public:
     ConvWgradAttributes attributes;
@@ -23,6 +21,16 @@ public:
         : BaseNode(graphAttrs)
         , attributes(std::move(convAttrs))
     {
+    }
+
+    Error unpack_from_descriptor(
+        hipdnnBackendDescriptor_t opDesc,
+        std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>>& tensorMap) override
+    {
+        ConvWgradAttributes attrs;
+        HIPDNN_CHECK_ERROR(detail::unpackConvWgradOperation(opDesc, tensorMap, attrs));
+        attributes = std::move(attrs);
+        return {};
     }
 
     Error pre_validate_node() const override
@@ -125,11 +133,11 @@ public:
             for(size_t i = 0; i < spatialDims; ++i)
             {
                 auto spatialIdx = i + 2;
-                int64_t xDim = xDims[spatialIdx];
-                int64_t dyDim = dyDims[spatialIdx];
-                int64_t kernelDim = dwDims[spatialIdx];
+                const int64_t xDim = xDims[spatialIdx];
+                const int64_t dyDim = dyDims[spatialIdx];
+                const int64_t kernelDim = dwDims[spatialIdx];
 
-                int64_t kernelSize = (dilation[i] * (kernelDim - 1)) + 1;
+                const int64_t kernelSize = (dilation[i] * (kernelDim - 1)) + 1;
                 auto numerator = xDim + prePadding[i] + postPadding[i] - kernelSize;
 
                 HIPDNN_RETURN_IF_LT(numerator,
@@ -141,7 +149,7 @@ public:
                                         + std::to_string(kernelDim) + ") and dilation ("
                                         + std::to_string(dilation[i]) + ")");
 
-                int64_t expectedDyDim = (numerator / stride[i]) + 1;
+                const int64_t expectedDyDim = (numerator / stride[i]) + 1;
 
                 // Verifying dy implicitly verifies dw and x
                 HIPDNN_RETURN_IF_NE(
@@ -347,17 +355,6 @@ public:
         }
 
         return {};
-    }
-
-    flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>
-        pack_node(flatbuffers::FlatBufferBuilder& builder) const override
-    {
-        return hipdnn_data_sdk::data_objects::CreateNodeDirect(
-            builder,
-            attributes.get_name().c_str(),
-            toSdkType(attributes.compute_data_type),
-            hipdnn_data_sdk::data_objects::NodeAttributes::ConvolutionWrwAttributes,
-            attributes.pack_attributes(builder).Union());
     }
 
     Error create_operation(

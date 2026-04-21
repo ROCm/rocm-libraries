@@ -214,6 +214,7 @@ namespace TensileLite
 
                 bool isComplexInput
                     = (pt.aType == rocisa::DataType::ComplexFloat || pt.aType == rocisa::DataType::ComplexDouble);
+                    
                 rocisa::DataType alphaBetaType = isComplexInput ? pt.aType : pt.computeType;
 
                 auto problem
@@ -225,7 +226,8 @@ namespace TensileLite
                                                       solution->problemType.dType,
                                                       alphaBetaType,
                                                       alphaBetaType,
-                                                      solution->problemType.computeInputType,
+                                                      solution->problemType.computeInputTypeA,
+                                                      solution->problemType.computeInputTypeB,
                                                       solution->problemType.computeType,
                                                       1.0,
                                                       1.0,

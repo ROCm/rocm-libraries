@@ -48,8 +48,11 @@ __global__ void prune_check_kernel(const Ti* in,
 {
     constexpr unsigned int MT0I = SG0I * TT0I;
     constexpr unsigned int MT1J = SG1J * TT1J;
-    using c_type = std::conditional_t<std::is_same<__hip_fp8_e4m3, Ti>::value || std::is_same<__hip_fp8_e5m2, Ti>::value, float, Ti>;
-    const c_type ZERO_C = static_cast<c_type>(0.0f);
+    using c_type                = std::conditional_t<std::is_same<__hip_fp8_e4m3, Ti>::value
+                                          || std::is_same<__hip_fp8_e5m2, Ti>::value,
+                                      float,
+                                      Ti>;
+    const c_type ZERO_C         = static_cast<c_type>(0.0f);
 
     unsigned int serial = hc_get_workitem_id(0);
     unsigned int sg0I   = serial % SG0I;
@@ -109,22 +112,12 @@ __host__ __device__ inline Tc norm1(Ti a, Ti b)
 }
 
 template <typename T>
-__host__ __device__ inline T sum(T a, T b, T c, T d, T e, T f, T g, T h)
-{
-    return a + b + c + d + e + f + g + h;
-}
-
-template <typename T>
 __host__ __device__ inline T acc_sum8(T* v, uint8_t* p, int v_offset, int p_offset)
 {
-    return sum<T>(v[v_offset + p[p_offset]],
-                  v[v_offset + p[p_offset + 1]],
-                  v[v_offset + 1 * 4 + p[p_offset + 2]],
-                  v[v_offset + 1 * 4 + p[p_offset + 3]],
-                  v[v_offset + 2 * 4 + p[p_offset + 4]],
-                  v[v_offset + 2 * 4 + p[p_offset + 5]],
-                  v[v_offset + 3 * 4 + p[p_offset + 6]],
-                  v[v_offset + 3 * 4 + p[p_offset + 7]]);
+    return (v[v_offset + p[p_offset]] + v[v_offset + p[p_offset + 1]])
+           + (v[v_offset + 1 * 4 + p[p_offset + 2]] + v[v_offset + 1 * 4 + p[p_offset + 3]])
+           + (v[v_offset + 2 * 4 + p[p_offset + 4]] + v[v_offset + 2 * 4 + p[p_offset + 5]])
+           + (v[v_offset + 3 * 4 + p[p_offset + 6]] + v[v_offset + 3 * 4 + p[p_offset + 7]]);
 }
 
 template <typename T, bool InPlace>
@@ -132,7 +125,7 @@ __host__ __device__ inline void prune_if(bool prune, T* a, T b)
 {
     if constexpr(InPlace)
     {
-        if(prune) 
+        if(prune)
             *a = static_cast<T>(0.0f);
     }
     else
@@ -233,10 +226,9 @@ __global__
                                                                          int64_t   batch_stride,
                                                                          int64_t   sizes)
 {
-    constexpr int  PAD = 0;
-    __shared__ Tc  value_abs[(16 + PAD) * SG0I * SG1J];
-    __shared__ Tc  norm_res[THREADS_PER_SG * SG0I * SG1J];
-    __shared__ int norm_idx[THREADS_PER_SG * SG0I * SG1J];
+    constexpr int      PAD = 1;
+    __shared__ Tc      value_abs[(16 + PAD) * SG0I * SG1J];
+    __shared__ uint8_t s_pos_patterns[PATTERNS_COUNT * 8];
 
     // 90 patterns, that pick 2 elements from each row and column from a 4x4 tile, total pick 8 elements.
     // the first pattern: 0, 2, 0, 2, 1, 3, 1, 3 => COL#(ROW#,ROW#) = 0(0,2), 1(0,2), 2(1,3), 3(1,3)
@@ -282,22 +274,31 @@ __global__
     const unsigned int wg1J    = hc_get_group_id(1);
     const unsigned int batchId = hc_get_group_id(2);
 
+    // Cooperatively load pos_patterns into shared memory to avoid serialized constant-cache reads
+    constexpr int pos_offset = 8;
+    constexpr int pos_blocks = (PATTERNS_COUNT * 8) / pos_offset;
+    int           pos_idx    = (serial % pos_blocks) * pos_offset;
+#pragma unroll pos_offset
+    for(int i = pos_idx; i < pos_idx + pos_offset && i < PATTERNS_COUNT * 8; i++)
+    {
+        s_pos_patterns[i] = pos_patterns[i];
+    }
+    __syncthreads();
+
     const int64_t wg_pos_x = MT0I * wg0I + sg0I * TT0I;
     const int64_t wg_pos_y = MT1J * wg1J + sg1J * TT1J;
     if((wg_pos_y) >= n || (wg_pos_x) >= m)
         return;
 
-    const int64_t wg_stride      = MT1J * wg1J * stride2 + MT0I * wg0I * stride1;
-    const int64_t b_stride       = batchId * batch_stride;
-    int           serial_gt_     = serial_gt > 15 ? 15 : serial_gt;
-    const int     x              = (serial_gt_) % 4;
-    const int     y              = (serial_gt_) / 4;
-    const int     value_offset   = serial_g * (16 + PAD);
-    const int     c_value_offset = value_offset + (serial_gt_);
+    const int64_t      wg_stride      = MT1J * wg1J * stride2 + MT0I * wg0I * stride1;
+    const int64_t      b_stride       = batchId * batch_stride;
+    const unsigned int serial_gt_     = serial_gt & 0xF;
+    const int          x              = (serial_gt_) % 4;
+    const int          y              = (serial_gt_) / 4;
+    const int          value_offset   = serial_g * (16 + PAD);
+    const int          c_value_offset = value_offset + (serial_gt_);
 
-    const int norm_res_offset   = serial_g * THREADS_PER_SG;
-    const int c_norm_res_offset = norm_res_offset + serial_gt;
-    int64_t   globalReadOffset  = b_stride + wg_stride + stride + x * stride1 + y * stride2;
+    int64_t globalReadOffset = b_stride + wg_stride + stride + x * stride1 + y * stride2;
 
     int64_t pos;
     for(int j = 0; j < TT1J; j += 4)
@@ -305,7 +306,9 @@ __global__
         pos = globalReadOffset;
         for(int i = 0; i < TT0I; i += 4)
         {
-            Ti c_value = static_cast<Ti>(0.0f);
+            Tc  max_norm      = static_cast<Tc>(-1.f);
+            int max_norm_idx_ = 0;
+            Ti  c_value       = static_cast<Ti>(0.0f);
             // read 4x4 from the in matrix.
             {
                 if((wg_pos_x + i + x) < m && (wg_pos_y + j + y) < n)
@@ -318,17 +321,15 @@ __global__
             {
                 int  offset             = min(serial_gt, PATTERNS_COUNT - 1);
                 auto pos_pattern_offset = offset << 3;
-                Tc   max_norm           = static_cast<Tc>(-1.f);
-                int  max_norm_idx_      = 0;
 
-                __syncthreads(); //wait until value_abs[] ready
+                __builtin_amdgcn_wave_barrier(); //wait until value_abs[] ready.
 
                 // caculate norm1 result for each pattern
 #pragma unroll PATTERNS_PER_THREAD
                 for(int k = 0; k < PATTERNS_PER_THREAD; k++)
                 {
                     Tc tmp_norm = acc_sum8(
-                        &value_abs[0], &pos_patterns[0], value_offset, pos_pattern_offset);
+                        &value_abs[0], &s_pos_patterns[0], value_offset, pos_pattern_offset);
                     bool update   = max_norm < tmp_norm;
                     max_norm      = update ? tmp_norm : max_norm;
                     max_norm_idx_ = update ? pos_pattern_offset : max_norm_idx_;
@@ -336,38 +337,34 @@ __global__
                     offset             = min(offset, PATTERNS_COUNT - 1);
                     pos_pattern_offset = offset << 3;
                 }
-
-                norm_res[c_norm_res_offset] = max_norm;
-                norm_idx[c_norm_res_offset] = max_norm_idx_;
-                __syncthreads(); //wait until norm_res[], norm_idx[] ready
             }
 
-// find the pattern who has the largest norm1 value
+            // Warp-shuffle reduction: find the pattern with the largest norm1 value.
+            // Each sub-group fits within one wavefront (THREADS_PER_SG=32), so shuffles
+            // replace 5 block-wide __syncthreads() barriers.
 #pragma unroll 5 //log2(THREADS_PER_SG)
             for(int tidxs = THREADS_PER_SG >> 1; tidxs > 0; tidxs >>= 1)
             {
-                Tc   a                      = norm_res[c_norm_res_offset];
-                Tc   b                      = norm_res[c_norm_res_offset + tidxs];
-                int  b_idx                  = norm_idx[c_norm_res_offset + tidxs];
-                bool update                 = serial_gt < tidxs && a < b;
-                norm_res[c_norm_res_offset] = update ? b : norm_res[c_norm_res_offset];
-                norm_idx[c_norm_res_offset] = update ? b_idx : norm_idx[c_norm_res_offset];
-                __syncthreads(); //wait until norm_res[], norm_idx[] ready
-            };
+                Tc   other_norm = __shfl_down(max_norm, tidxs, THREADS_PER_SG);
+                int  other_idx  = __shfl_down(max_norm_idx_, tidxs, THREADS_PER_SG);
+                bool update     = max_norm < other_norm;
+                max_norm        = update ? other_norm : max_norm;
+                max_norm_idx_   = update ? other_idx : max_norm_idx_;
+            }
+            // Broadcast the winning pattern index from lane 0 to all lanes in the sub-group
+            int best_pattern_idx = __shfl(max_norm_idx_, 0, THREADS_PER_SG);
 
             // write 4x4 to the out matrix.
             {
                 if((wg_pos_x + i + x) < m && (wg_pos_y + j + y) < n)
                 {
-                    prune_if<Ti, InPlace>(pos_patterns[norm_idx[norm_res_offset] + y * 2] != x
-                                              && pos_patterns[norm_idx[norm_res_offset] + y * 2 + 1]
-                                                     != x,
+                    prune_if<Ti, InPlace>(s_pos_patterns[best_pattern_idx + y * 2] != x
+                                              && s_pos_patterns[best_pattern_idx + y * 2 + 1] != x,
                                           &out[pos],
                                           c_value);
                 }
             }
             pos += (stride1 << 2);
-            __syncthreads(); // wait until norm_res[], norm_idx[] use completed.
         }
         globalReadOffset += (stride2 << 2);
     }

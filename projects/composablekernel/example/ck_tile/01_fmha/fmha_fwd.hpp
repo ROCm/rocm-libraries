@@ -299,6 +299,8 @@ struct fmha_fwd_args
     ck_tile::index_t hdim_v;
     ck_tile::index_t nhead_q;
     ck_tile::index_t nhead_k;
+    ck_tile::index_t num_head_q_total = 0;
+    ck_tile::index_t head_start       = 0;
 
     float scale_s;
     float logits_soft_cap;
@@ -733,7 +735,9 @@ auto fmha_fwd_create_kargs_and_grids(fmha_fwd_args args)
                                              args.block_scale_size_kv,
                                              args.cu_seqlen_q_ptr,
                                              args.cu_seqlen_k_ptr,
-                                             args.sink_ptr);
+                                             args.sink_ptr,
+                                             args.num_head_q_total,
+                                             args.head_start);
         }
         else
         { // create batch mode kernel arguments
@@ -795,7 +799,9 @@ auto fmha_fwd_create_kargs_and_grids(fmha_fwd_args args)
                                              args.block_scale_size_kv,
                                              args.cu_seqlen_q_ptr,
                                              args.cu_seqlen_k_ptr,
-                                             args.sink_ptr);
+                                             args.sink_ptr,
+                                             args.num_head_q_total,
+                                             args.head_start);
         }
     }();
 
@@ -838,6 +844,9 @@ auto fmha_fwd_v3_create_kargs_and_grids(fmha_fwd_args args)
             return FmhaKernel::MakeKargs(args.q_ptr,
                                          args.k_ptr,
                                          args.v_ptr,
+                                         args.q_descale_ptr,
+                                         args.k_descale_ptr,
+                                         args.v_descale_ptr,
                                          nullptr, // lse_ptr
                                          args.o_ptr,
                                          args.seqstart_q_ptr,
@@ -871,6 +880,9 @@ auto fmha_fwd_v3_create_kargs_and_grids(fmha_fwd_args args)
             return FmhaKernel::MakeKargs(args.q_ptr,
                                          args.k_ptr,
                                          args.v_ptr,
+                                         args.q_descale_ptr,
+                                         args.k_descale_ptr,
+                                         args.v_descale_ptr,
                                          nullptr, // lse_ptr
                                          args.o_ptr,
                                          args.seqlen_q,
@@ -1440,6 +1452,7 @@ template <ck_tile::index_t HDim_,
           bool kPadDv_,
           bool kUseTrLoad_,
           bool kSkipMinSeqlenQ_            = false,
+          bool kHasSink_                   = false,
           ck_tile::index_t kPageBlockSize_ = 1,
           ck_tile::BlockAttentionKVCacheMemoryLayoutEnum kKVMemoryLayout_ =
               ck_tile::BlockAttentionKVCacheMemoryLayoutEnum::VECTORIZED_LAYOUT,
@@ -1468,7 +1481,7 @@ struct fmha_fwd_batch_prefill_traits_ : public fmha_fwd_traits_<HDim_,
                                                                 kPadDv_,
                                                                 kUseTrLoad_,
                                                                 kSkipMinSeqlenQ_,
-                                                                false>
+                                                                kHasSink_>
 {
     static constexpr auto kKVMemoryLayout            = kKVMemoryLayout_;
     static constexpr auto kKVLookupTable             = kKVLookupTable_;

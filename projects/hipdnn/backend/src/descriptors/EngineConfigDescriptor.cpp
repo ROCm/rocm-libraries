@@ -11,15 +11,15 @@
 #include "KnobSettingDescriptor.hpp"
 #include "handle/Handle.hpp"
 
-#include <hipdnn_data_sdk/data_objects/engine_config_generated.h>
-#include <hipdnn_data_sdk/flatbuffer_utilities/KnobSettingWrapper.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/engine_config_generated.h>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/KnobSettingWrapper.hpp>
 
 namespace hipdnn_backend
 {
 
 EngineConfigDescriptor::EngineConfigDescriptor()
 {
-    _engineConfigData = std::make_unique<hipdnn_data_sdk::data_objects::EngineConfigT>();
+    _engineConfigData = std::make_unique<hipdnn_flatbuffers_sdk::data_objects::EngineConfigT>();
 }
 
 void EngineConfigDescriptor::finalize()
@@ -151,7 +151,7 @@ void EngineConfigDescriptor::setAttribute(hipdnnBackendAttributeName_t attribute
     case HIPDNN_ATTR_ENGINECFG_ENGINE:
         setEngine(attributeType, elementCount, arrayOfElements);
         break;
-    case HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE_EXT:
+    case HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE:
         setKnobChoice(attributeType, elementCount, arrayOfElements);
         break;
     case HIPDNN_ATTR_ENGINECFG_KNOB_CHOICES:
@@ -222,8 +222,8 @@ hipdnnPluginConstData_t EngineConfigDescriptor::getSerializedEngineConfig() cons
                       "EngineConfigDescriptor::getSerializedEngineConfig: engine is null");
 
         flatbuffers::FlatBufferBuilder builder;
-        builder.Finish(
-            hipdnn_data_sdk::data_objects::EngineConfig::Pack(builder, _engineConfigData.get()));
+        builder.Finish(hipdnn_flatbuffers_sdk::data_objects::EngineConfig::Pack(
+            builder, _engineConfigData.get()));
         _engineConfigSerializedBuffer = builder.Release();
     }
 
@@ -265,8 +265,8 @@ void EngineConfigDescriptor::setKnobChoice(hipdnnBackendAttributeType_t attribut
                     "EngineConfigDescriptor failed to set knob choice: "
                     "Flatbuffer data size must be > 0.");
 
-        hipdnn_data_sdk::flatbuffer_utilities::KnobSettingWrapper wrapper(flatbufferData.ptr,
-                                                                          flatbufferData.size);
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::KnobSettingWrapper wrapper(
+            flatbufferData.ptr, flatbufferData.size);
 
         THROW_IF_FALSE(wrapper.isValid(),
                        HIPDNN_STATUS_BAD_PARAM,

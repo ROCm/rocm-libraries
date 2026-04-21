@@ -6,9 +6,9 @@
 namespace hipdnn_backend
 {
 
-hipdnn_data_sdk::data_objects::DataType toSdkDataType(hipdnnDataType_t type)
+hipdnn_flatbuffers_sdk::data_objects::DataType toSdkDataType(hipdnnDataType_t type)
 {
-    using hipdnn_data_sdk::data_objects::DataType;
+    using hipdnn_flatbuffers_sdk::data_objects::DataType;
 
     switch(type)
     {
@@ -30,14 +30,26 @@ hipdnn_data_sdk::data_objects::DataType toSdkDataType(hipdnnDataType_t type)
         return DataType::FP8_E4M3;
     case HIPDNN_DATA_FP8_E5M2:
         return DataType::FP8_E5M2;
+    case HIPDNN_DATA_FP8_E8M0:
+        return DataType::FP8_E8M0;
+    case HIPDNN_DATA_FP4_E2M1:
+        return DataType::FP4_E2M1;
+    case HIPDNN_DATA_INT4:
+        return DataType::INT4;
+    case HIPDNN_DATA_FP6_E2M3_EXT:
+        return DataType::FP6_E2M3;
+    case HIPDNN_DATA_FP6_E3M2_EXT:
+        return DataType::FP6_E3M2;
+    case HIPDNN_DATA_INT64:
+        return DataType::INT64;
     default:
         throw HipdnnException(HIPDNN_STATUS_BAD_PARAM, "Unsupported hipdnnDataType_t value");
     }
 }
 
-hipdnnDataType_t fromSdkDataType(hipdnn_data_sdk::data_objects::DataType type)
+hipdnnDataType_t fromSdkDataType(hipdnn_flatbuffers_sdk::data_objects::DataType type)
 {
-    using hipdnn_data_sdk::data_objects::DataType;
+    using hipdnn_flatbuffers_sdk::data_objects::DataType;
 
     switch(type)
     {
@@ -59,14 +71,26 @@ hipdnnDataType_t fromSdkDataType(hipdnn_data_sdk::data_objects::DataType type)
         return HIPDNN_DATA_FP8_E4M3;
     case DataType::FP8_E5M2:
         return HIPDNN_DATA_FP8_E5M2;
+    case DataType::FP8_E8M0:
+        return HIPDNN_DATA_FP8_E8M0;
+    case DataType::FP4_E2M1:
+        return HIPDNN_DATA_FP4_E2M1;
+    case DataType::INT4:
+        return HIPDNN_DATA_INT4;
+    case DataType::FP6_E2M3:
+        return HIPDNN_DATA_FP6_E2M3_EXT;
+    case DataType::FP6_E3M2:
+        return HIPDNN_DATA_FP6_E3M2_EXT;
+    case DataType::INT64:
+        return HIPDNN_DATA_INT64;
     default:
         throw HipdnnException(HIPDNN_STATUS_BAD_PARAM, "Unsupported SDK DataType");
     }
 }
 
-int64_t getDataTypeByteSize(hipdnn_data_sdk::data_objects::DataType type)
+int64_t getDataTypeByteSize(hipdnn_flatbuffers_sdk::data_objects::DataType type)
 {
-    using hipdnn_data_sdk::data_objects::DataType;
+    using hipdnn_flatbuffers_sdk::data_objects::DataType;
     switch(type)
     {
     case DataType::FLOAT:
@@ -74,57 +98,55 @@ int64_t getDataTypeByteSize(hipdnn_data_sdk::data_objects::DataType type)
     case DataType::DOUBLE:
         return 8;
     case DataType::HALF:
-        return 2;
     case DataType::BFLOAT16:
         return 2;
     case DataType::INT32:
         return 4;
     case DataType::UINT8:
-        return 1;
     case DataType::INT8:
-        return 1;
     case DataType::FP8_E4M3:
-        return 1;
     case DataType::FP8_E5M2:
         return 1;
+    case DataType::INT64:
+        return 8;
     default:
         throw HipdnnException(HIPDNN_STATUS_BAD_PARAM, "Unsupported DataType for byte size");
     }
 }
 
-hipdnn_data_sdk::data_objects::ConvMode toSdkConvMode(hipdnnConvolutionMode_t mode)
+hipdnn_flatbuffers_sdk::data_objects::ConvMode toSdkConvMode(hipdnnConvolutionMode_t mode)
 {
-    using hipdnn_data_sdk::data_objects::ConvMode;
+    using hipdnn_flatbuffers_sdk::data_objects::ConvMode;
 
     switch(mode)
     {
-    case HIPDNN_CONVOLUTION_MODE_CONVOLUTION:
+    case HIPDNN_CONVOLUTION:
         return ConvMode::CONVOLUTION;
-    case HIPDNN_CONVOLUTION_MODE_CROSS_CORRELATION:
+    case HIPDNN_CROSS_CORRELATION:
         return ConvMode::CROSS_CORRELATION;
     default:
         throw HipdnnException(HIPDNN_STATUS_BAD_PARAM, "Unsupported hipdnnConvolutionMode_t value");
     }
 }
 
-hipdnnConvolutionMode_t fromSdkConvMode(hipdnn_data_sdk::data_objects::ConvMode mode)
+hipdnnConvolutionMode_t fromSdkConvMode(hipdnn_flatbuffers_sdk::data_objects::ConvMode mode)
 {
-    using hipdnn_data_sdk::data_objects::ConvMode;
+    using hipdnn_flatbuffers_sdk::data_objects::ConvMode;
 
     switch(mode)
     {
     case ConvMode::CONVOLUTION:
-        return HIPDNN_CONVOLUTION_MODE_CONVOLUTION;
+        return HIPDNN_CONVOLUTION;
     case ConvMode::CROSS_CORRELATION:
-        return HIPDNN_CONVOLUTION_MODE_CROSS_CORRELATION;
+        return HIPDNN_CROSS_CORRELATION;
     default:
         throw HipdnnException(HIPDNN_STATUS_BAD_PARAM, "Unsupported SDK ConvMode value");
     }
 }
 
-hipdnn_data_sdk::data_objects::PointwiseMode toSdkPointwiseMode(hipdnnPointwiseMode_t mode)
+hipdnn_flatbuffers_sdk::data_objects::PointwiseMode toSdkPointwiseMode(hipdnnPointwiseMode_t mode)
 {
-    using hipdnn_data_sdk::data_objects::PointwiseMode;
+    using hipdnn_flatbuffers_sdk::data_objects::PointwiseMode;
 
     switch(mode)
     {
@@ -227,9 +249,9 @@ hipdnn_data_sdk::data_objects::PointwiseMode toSdkPointwiseMode(hipdnnPointwiseM
     }
 }
 
-hipdnnPointwiseMode_t fromSdkPointwiseMode(hipdnn_data_sdk::data_objects::PointwiseMode mode)
+hipdnnPointwiseMode_t fromSdkPointwiseMode(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode mode)
 {
-    using hipdnn_data_sdk::data_objects::PointwiseMode;
+    using hipdnn_flatbuffers_sdk::data_objects::PointwiseMode;
 
     switch(mode)
     {
@@ -332,33 +354,163 @@ hipdnnPointwiseMode_t fromSdkPointwiseMode(hipdnn_data_sdk::data_objects::Pointw
     }
 }
 
-hipdnn_data_sdk::data_objects::NormFwdPhase toSdkNormFwdPhase(hipdnnNormFwdPhase_t phase)
+hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment
+    toSdkDiagonalAlignment(hipdnnDiagonalAlignment_t mode)
 {
-    using hipdnn_data_sdk::data_objects::NormFwdPhase;
+    using hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment;
+
+    switch(mode)
+    {
+    case HIPDNN_DIAGONAL_ALIGNMENT_TOP_LEFT_EXT:
+        return DiagonalAlignment::TOP_LEFT;
+    case HIPDNN_DIAGONAL_ALIGNMENT_BOTTOM_RIGHT_EXT:
+        return DiagonalAlignment::BOTTOM_RIGHT;
+    default:
+        throw HipdnnException(HIPDNN_STATUS_BAD_PARAM,
+                              "Unsupported hipdnnDiagonalAlignment_t value");
+    }
+}
+
+hipdnnDiagonalAlignment_t
+    fromSdkDiagonalAlignment(hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment mode)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment;
+
+    switch(mode)
+    {
+    case DiagonalAlignment::TOP_LEFT:
+        return HIPDNN_DIAGONAL_ALIGNMENT_TOP_LEFT_EXT;
+    case DiagonalAlignment::BOTTOM_RIGHT:
+        return HIPDNN_DIAGONAL_ALIGNMENT_BOTTOM_RIGHT_EXT;
+    default:
+        throw HipdnnException(HIPDNN_STATUS_BAD_PARAM, "Unsupported SDK DiagonalAlignment value");
+    }
+}
+
+hipdnn_flatbuffers_sdk::data_objects::AttentionImplementation
+    toSdkAttentionImplementation(hipdnnAttentionImplementation_t mode)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::AttentionImplementation;
+
+    switch(mode)
+    {
+    case HIPDNN_ATTENTION_IMPLEMENTATION_AUTO_EXT:
+        return AttentionImplementation::AUTO;
+    case HIPDNN_ATTENTION_IMPLEMENTATION_COMPOSITE_EXT:
+        return AttentionImplementation::COMPOSITE;
+    case HIPDNN_ATTENTION_IMPLEMENTATION_UNIFIED_EXT:
+        return AttentionImplementation::UNIFIED;
+    default:
+        throw HipdnnException(HIPDNN_STATUS_BAD_PARAM,
+                              "Unsupported hipdnnAttentionImplementation_t value");
+    }
+}
+
+hipdnnAttentionImplementation_t fromSdkAttentionImplementation(
+    hipdnn_flatbuffers_sdk::data_objects::AttentionImplementation mode)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::AttentionImplementation;
+
+    switch(mode)
+    {
+    case AttentionImplementation::AUTO:
+        return HIPDNN_ATTENTION_IMPLEMENTATION_AUTO_EXT;
+    case AttentionImplementation::COMPOSITE:
+        return HIPDNN_ATTENTION_IMPLEMENTATION_COMPOSITE_EXT;
+    case AttentionImplementation::UNIFIED:
+        return HIPDNN_ATTENTION_IMPLEMENTATION_UNIFIED_EXT;
+    default:
+        throw HipdnnException(HIPDNN_STATUS_BAD_PARAM,
+                              "Unsupported SDK AttentionImplementation value");
+    }
+}
+
+hipdnn_flatbuffers_sdk::data_objects::NormFwdPhase toSdkNormFwdPhase(hipdnnNormFwdPhase_t phase)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::NormFwdPhase;
 
     switch(phase)
     {
-    case HIPDNN_NORM_FWD_PHASE_INFERENCE:
+    case HIPDNN_NORM_FWD_INFERENCE:
         return NormFwdPhase::INFERENCE;
-    case HIPDNN_NORM_FWD_PHASE_TRAINING:
+    case HIPDNN_NORM_FWD_TRAINING:
         return NormFwdPhase::TRAINING;
     default:
         throw HipdnnException(HIPDNN_STATUS_BAD_PARAM, "Unsupported hipdnnNormFwdPhase_t value");
     }
 }
 
-hipdnnNormFwdPhase_t fromSdkNormFwdPhase(hipdnn_data_sdk::data_objects::NormFwdPhase phase)
+hipdnnNormFwdPhase_t fromSdkNormFwdPhase(hipdnn_flatbuffers_sdk::data_objects::NormFwdPhase phase)
 {
-    using hipdnn_data_sdk::data_objects::NormFwdPhase;
+    using hipdnn_flatbuffers_sdk::data_objects::NormFwdPhase;
 
     switch(phase)
     {
     case NormFwdPhase::INFERENCE:
-        return HIPDNN_NORM_FWD_PHASE_INFERENCE;
+        return HIPDNN_NORM_FWD_INFERENCE;
     case NormFwdPhase::TRAINING:
-        return HIPDNN_NORM_FWD_PHASE_TRAINING;
+        return HIPDNN_NORM_FWD_TRAINING;
     default:
         throw HipdnnException(HIPDNN_STATUS_BAD_PARAM, "Unsupported SDK NormFwdPhase value");
+    }
+}
+
+hipdnn_flatbuffers_sdk::data_objects::ReductionMode toSdkReductionMode(hipdnnReduceTensorOp_t mode)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::ReductionMode;
+
+    switch(mode)
+    {
+    case HIPDNN_REDUCE_TENSOR_ADD:
+        return ReductionMode::ADD;
+    case HIPDNN_REDUCE_TENSOR_MUL:
+        return ReductionMode::MUL;
+    case HIPDNN_REDUCE_TENSOR_MIN:
+        return ReductionMode::MIN_OP;
+    case HIPDNN_REDUCE_TENSOR_MAX:
+        return ReductionMode::MAX_OP;
+    case HIPDNN_REDUCE_TENSOR_AMAX:
+        return ReductionMode::AMAX;
+    case HIPDNN_REDUCE_TENSOR_AVG:
+        return ReductionMode::AVG;
+    case HIPDNN_REDUCE_TENSOR_NORM1:
+        return ReductionMode::NORM1;
+    case HIPDNN_REDUCE_TENSOR_NORM2:
+        return ReductionMode::NORM2;
+    case HIPDNN_REDUCE_TENSOR_MUL_NO_ZEROS:
+        return ReductionMode::MUL_NO_ZEROS;
+    default:
+        throw HipdnnException(HIPDNN_STATUS_BAD_PARAM, "Unsupported hipdnnReduceTensorOp_t value");
+    }
+}
+
+hipdnnReduceTensorOp_t
+    fromSdkReductionMode(hipdnn_flatbuffers_sdk::data_objects::ReductionMode mode)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::ReductionMode;
+
+    switch(mode)
+    {
+    case ReductionMode::ADD:
+        return HIPDNN_REDUCE_TENSOR_ADD;
+    case ReductionMode::MUL:
+        return HIPDNN_REDUCE_TENSOR_MUL;
+    case ReductionMode::MIN_OP:
+        return HIPDNN_REDUCE_TENSOR_MIN;
+    case ReductionMode::MAX_OP:
+        return HIPDNN_REDUCE_TENSOR_MAX;
+    case ReductionMode::AMAX:
+        return HIPDNN_REDUCE_TENSOR_AMAX;
+    case ReductionMode::AVG:
+        return HIPDNN_REDUCE_TENSOR_AVG;
+    case ReductionMode::NORM1:
+        return HIPDNN_REDUCE_TENSOR_NORM1;
+    case ReductionMode::NORM2:
+        return HIPDNN_REDUCE_TENSOR_NORM2;
+    case ReductionMode::MUL_NO_ZEROS:
+        return HIPDNN_REDUCE_TENSOR_MUL_NO_ZEROS;
+    default:
+        throw HipdnnException(HIPDNN_STATUS_BAD_PARAM, "Unsupported SDK ReductionMode value");
     }
 }
 

@@ -135,6 +135,8 @@ constexpr const char* hip_datatype_to_string(hipDataType type)
         return "f8_r";
     case HIP_R_8F_E5M2:
         return "bf8_r";
+    case HIP_R_8F_UE8M0:
+        return "e8_r";
     case HIP_R_6F_E2M3_EXT:
         return "f6_r";
     case HIP_R_6F_E3M2_EXT:
@@ -144,7 +146,9 @@ constexpr const char* hip_datatype_to_string(hipDataType type)
     case HIP_C_32F:
         return "f32_c";
     case HIP_C_64F: 
-        return "f64_c";
+        return "f64_c";    
+    case static_cast<hipDataType>(HIP_R_8F_E5M3_EXT):
+        return "e5m3_r";
     default:
         return "non-supported type";
     }
@@ -188,17 +192,23 @@ constexpr hipDataType string_to_hip_datatype(const std::string& value)
     }
 
     return
-        value == "f32_r" || value == "s" ? HIP_R_32F  :
-        value == "f64_r" || value == "d" ? HIP_R_64F  :
-        value == "f16_r" || value == "h" ? HIP_R_16F  :
-        value == "bf16_r"                ? HIP_R_16BF  :
-        value == "i8_r" || value == "i8" ? HIP_R_8I  :
+        value == "f32_r" || value == "s" ? HIP_R_32F :
+        value == "f64_r" || value == "d" ? HIP_R_64F :
+        value == "f16_r" || value == "h" ? HIP_R_16F :
+        value == "bf16_r"                ? HIP_R_16BF :
+        value == "i8_r" || value == "i8" ? HIP_R_8I :
         value == "f6_r"                  ? static_cast<hipDataType>(HIP_R_6F_E2M3_EXT) :
         value == "bf6_r"                 ? static_cast<hipDataType>(HIP_R_6F_E3M2_EXT) :
         value == "f4_r"                  ? static_cast<hipDataType>(HIP_R_4F_E2M1_EXT) :
         value == "f32_c" || value == "c" ? HIP_C_32F  :
         value == "f64_c" || value == "z" ? HIP_C_64F  :
-        value == "i32_r" || value == "i" ? HIP_R_32I  :
+        value == "i32_r" || value == "i" ? HIP_R_32I :
+        value == "f8_fnuz_r"             ? HIP_R_8F_E4M3_FNUZ :
+        value == "bf8_fnuz_r"            ? HIP_R_8F_E5M2_FNUZ :
+        value == "f8_r"                  ? HIP_R_8F_E4M3 :
+        value == "bf8_r"                 ? HIP_R_8F_E5M2 :
+        value == "e8_r"                  ? HIP_R_8F_UE8M0 :
+        value == "e5m3_r"                ? static_cast<hipDataType>(HIP_R_8F_E5M3_EXT) :
         HIPBLASLT_DATATYPE_INVALID;
 }
 

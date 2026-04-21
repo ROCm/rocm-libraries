@@ -33,6 +33,12 @@ unset(ENV{ROCM_BUILD_ID})
 
 project( rocblas LANGUAGES CXX )
 
+# ROCm libraries root (for shared/ctest and other shared resources)
+# Only set default when not already defined (e.g. by superproject / rocm-libraries).
+if(NOT DEFINED ROCM_LIBRARIES_ROOT)
+  set(ROCM_LIBRARIES_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../..")
+endif()
+
 # Append our library helper cmake path and the cmake path for hip (for convenience)
 list( APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake )
 include(build-options) # library and client
@@ -68,7 +74,7 @@ get_os_id(OS_ID)
 message (STATUS "OS detected is ${OS_ID}")
 
 # Versioning via rocm-cmake
-set ( VERSION_STRING "5.3.0" )
+set ( VERSION_STRING "5.4.0" )
 rocm_setup_version( VERSION ${VERSION_STRING} )
 
 # Users may override HIP path by specifying their own in CMAKE_MODULE_PATH
@@ -83,6 +89,7 @@ if (NOT BUILD_ADDRESS_SANITIZER)
   set( TARGET_LIST_ROCM_6.3 "gfx900;gfx906:xnack-;gfx908:xnack-;gfx90a;gfx942;gfx1010;gfx1012;gfx1030;gfx1100;gfx1101;gfx1102;gfx1151;gfx1200;gfx1201")
   set( TARGET_LIST_ROCM_7.0 "gfx900;gfx906:xnack-;gfx908:xnack-;gfx90a;gfx942;gfx950;gfx1010;gfx1012;gfx1030;gfx1100;gfx1101;gfx1102;gfx1150;gfx1151;gfx1200;gfx1201")
   set( TARGET_LIST_ROCM_7.1 "gfx900;gfx906:xnack-;gfx908:xnack-;gfx90a;gfx942;gfx950;gfx1010;gfx1012;gfx1030;gfx1100;gfx1101;gfx1102;gfx1103;gfx1150;gfx1151;gfx1200;gfx1201")
+  set( TARGET_LIST_ROCM_7.13 "gfx900;gfx906:xnack-;gfx908:xnack-;gfx90a;gfx942;gfx950;gfx1010;gfx1012;gfx1030;gfx1100;gfx1101;gfx1102;gfx1103;gfx1150;gfx1151;gfx1200;gfx1201;gfx1250")
 else()
   set( TARGET_LIST_ROCM_5.6 "gfx908:xnack+;gfx90a:xnack+")
   set( TARGET_LIST_ROCM_5.7 "gfx908:xnack+;gfx90a:xnack+;gfx942:xnack+")
@@ -90,6 +97,7 @@ else()
   set( TARGET_LIST_ROCM_6.3 "gfx908:xnack+;gfx90a:xnack+;gfx942:xnack+")
   set( TARGET_LIST_ROCM_7.0 "gfx908:xnack+;gfx90a:xnack+;gfx942:xnack+;gfx950:xnack+")
   set( TARGET_LIST_ROCM_7.1 "gfx908:xnack+;gfx90a:xnack+;gfx942:xnack+;gfx950:xnack+")
+  set( TARGET_LIST_ROCM_7.13 "gfx908:xnack+;gfx90a:xnack+;gfx942:xnack+;gfx950:xnack+;gfx1250:xnack+")
 endif()
 
 if(ROCM_PLATFORM_VERSION)
@@ -103,8 +111,10 @@ if(ROCM_PLATFORM_VERSION)
     set(SUPPORTED_TARGETS "${TARGET_LIST_ROCM_6.3}")
   elseif(${ROCM_PLATFORM_VERSION} VERSION_LESS 7.1.0)
     set(SUPPORTED_TARGETS "${TARGET_LIST_ROCM_7.0}")
-  else()
+  elseif(${ROCM_PLATFORM_VERSION} VERSION_LESS 7.13.0)
     set(SUPPORTED_TARGETS "${TARGET_LIST_ROCM_7.1}")
+  else()
+    set(SUPPORTED_TARGETS "${TARGET_LIST_ROCM_7.13}")
   endif()
   message(STATUS "ROCM Platform Version: ${ROCM_PLATFORM_VERSION} default supported gfx list")
 else()
@@ -147,7 +157,7 @@ set( AMDGPU_TARGETS "${GPU_TARGETS}" CACHE STRING "List of GPUs (gfx targets) to
 
 option( BUILD_WITH_HIPBLASLT "Build with HipBLASLt" ON )
 set( hipblaslt_path "/opt/rocm" CACHE PATH "Use local HipBLASLt directory" )
-set( HIPBLASLT_VERSION 1.2.0 CACHE STRING "The version of HipBLASLt to be used" )
+set( HIPBLASLT_VERSION 1.2.2 CACHE STRING "The version of HipBLASLt to be used" )
 
 if( NOT BUILD_WITH_TENSILE )
   set( BUILD_WITH_HIPBLASLT OFF )
@@ -176,7 +186,7 @@ if(NOT SKIP_LIBRARY)
     set( Tensile_ARCHITECTURE "${GPU_TARGETS}" CACHE STRING "Tensile to use which architecture?" FORCE)
     list_replace( Tensile_ARCHITECTURE "gfx90a" "gfx90a:xnack+\;gfx90a:xnack-")
 
-    set( TENSILE_VERSION 4.46.0 CACHE STRING "The version of Tensile to be used")
+    set( TENSILE_VERSION 4.47.0 CACHE STRING "The version of Tensile to be used")
 
     set( Tensile_NO_ENUMERATE ON CACHE BOOL "Disable enumerating GPU targets for Tensile builds" FORCE)
     
@@ -248,6 +258,10 @@ endif()
 if( BUILD_WITH_HIPBLASLT )
   list( APPEND HIPBLASLT_DEFINES BUILD_WITH_HIPBLASLT )
   rocm_package_add_dependencies(DEPENDS "hipblaslt >= ${HIPBLASLT_VERSION}")
+endif()
+
+if(BUILD_CLIENTS_TESTS)
+  enable_testing()
 endif()
 
 if( BUILD_CLIENTS_SAMPLES OR BUILD_CLIENTS_TESTS OR BUILD_CLIENTS_BENCHMARKS )

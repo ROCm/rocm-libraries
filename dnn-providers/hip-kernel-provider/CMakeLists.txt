@@ -9,8 +9,25 @@ set(CMAKE_TOOLCHAIN_FILE "${CMAKE_SOURCE_DIR}/cmake/ClangToolChain.cmake"
 )
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
-set(HIP_KERNEL_PLUGIN_VERSION "0.0.1")
-project(hip-kernel-provider VERSION ${HIP_KERNEL_PLUGIN_VERSION} LANGUAGES CXX)
+include(${CMAKE_CURRENT_LIST_DIR}/../cmake/VersionUtils.cmake)
+dnn_provider_setup_version(hip_kernel_provider ${CMAKE_CURRENT_LIST_DIR})
+
+project(hip-kernel-provider VERSION ${HIP_KERNEL_PROVIDER_VERSION} LANGUAGES CXX)
+
+# Get ROCM_PATH from configuration options as it is required to set include paths for hiprtc
+if(DEFINED ENV{ROCM_PATH} AND NOT "$ENV{ROCM_PATH}" STREQUAL "")
+    set(ROCM_PATH "$ENV{ROCM_PATH}" CACHE PATH "Path to ROCm installation" FORCE)
+    message(STATUS "ROCM_PATH detected from environment.")
+else()
+    if(NOT ROCM_PATH)
+        message(FATAL_ERROR "ROCM_PATH must be set. Please set the ROCM_PATH environment variable or provide -DROCM_PATH=/path/to/rocm to cmake.")
+    endif()
+    message(STATUS "ROCM_PATH detected from build option.")
+endif()
+file(TO_CMAKE_PATH "${ROCM_PATH}" ROCM_PATH)
+set(ROCM_PATH "${ROCM_PATH}" CACHE PATH "Path to ROCm installation" FORCE)
+message(STATUS "Using ROCM_PATH: ${ROCM_PATH}")
+add_compile_definitions(ROCM_PATH="${ROCM_PATH}")
 
 if(NOT WIN32)
     # Only set if not already specified by user
@@ -37,6 +54,7 @@ list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake ${ROCM_PATH}/lib
 )
 
 option(HIPKERNELPROVIDER_ENABLE_TESTS "Build tests" ON)
+option(ENABLE_ASM_SDPA_ENGINE "Build the ASM SDPA engine" ON)
 
 option(BUILD_ADDRESS_SANITIZER "Build with Address Sanitizer enabled" OFF)
 option(ENABLE_CLANG_FORMAT "Enable Clang-Format checks" ON)
@@ -81,7 +99,9 @@ list(
 list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH}/llvm ${ROCM_PATH} ${ROCM_PATH}/hip)
 
 find_package(hip REQUIRED)
+find_package(hiprtc REQUIRED)
 find_package(hipdnn_data_sdk CONFIG REQUIRED)
+find_package(hipdnn_flatbuffers_sdk CONFIG REQUIRED)
 find_package(hipdnn_plugin_sdk CONFIG REQUIRED)
 
 include(CheckToolVersion)
@@ -107,6 +127,11 @@ message(STATUS "Plugin install directory: ${HIPDNN_INSTALL_PLUGIN_ENGINE_DIR}")
 file(MAKE_DIRECTORY ${HIPDNN_BUILD_PLUGIN_ENGINE_DIR})
 
 # ============================================================================
+# Kernel embedding (must come before src so KERNEL_GENERATED_SOURCES is set)
+# ============================================================================
+add_subdirectory(kernels)
+
+# ============================================================================
 # Plugin library targets and tests
 # ============================================================================
 add_subdirectory(src)
@@ -119,9 +144,9 @@ if(HIPKERNELPROVIDER_ENABLE_COVERAGE)
 
     set(CODE_COVERAGE_IGNORE_REGEX ".*_deps.*|.*tests.*|.*integration_tests.*")
     set(CODE_COVERAGE_OBJECTS
-        -object ${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}/libhip_kernel_plugin.so
-        -object ./${CMAKE_INSTALL_BINDIR}/hip_kernel_plugin_tests
-        -object ./${CMAKE_INSTALL_BINDIR}/hip_kernel_plugin_integration_tests
+        -object ${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}/libhip_kernel_provider.so
+        -object ./${CMAKE_INSTALL_BINDIR}/hip_kernel_provider_tests
+        -object ./${CMAKE_INSTALL_BINDIR}/hip_kernel_provider_integration_tests
     )
 
     # Creates a coverage target that merges profraw files and generates reports.
@@ -177,7 +202,13 @@ endif()
 # ============================================================================
 # Install
 # ============================================================================
-install(TARGETS hip_kernel_plugin EXPORT hip-kernel-plugin
+install(TARGETS hip_kernel_provider EXPORT hip-kernel-provider
         LIBRARY DESTINATION ${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}
         RUNTIME DESTINATION ${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}
 )
+
+if(ENABLE_ASM_SDPA_ENGINE)
+    install(DIRECTORY src/engines/asm_sdpa_engine/asm/asm_kernels/
+            DESTINATION ${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/hip_kernel_provider/asm_kernels
+            FILES_MATCHING PATTERN "*.co")
+endif()

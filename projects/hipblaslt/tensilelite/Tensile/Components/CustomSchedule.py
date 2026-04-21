@@ -270,15 +270,31 @@ class ScheduleInfo:
         return self._disabledPasses.get(pass_id)
 
     def pretty_print(self):
-        klen = max(len(k) for k in self.optSchedule.keys())
-        for k,v in self.optSchedule.items():
-            print(f"{k:>{klen}}: {v}")
-        
+        print("{")
+        keys = list(self.optSchedule.keys())
+        maxKeyLen = max(len(k) for k in keys) if keys else 0
+        for i, k in enumerate(keys):
+            v = self.optSchedule[k]
+            comma = "," if i < len(keys) - 1 else ""
+            pad = " " * (maxKeyLen - len(k))
+            if len(v) == 1:
+                print(f"    '{k}':{pad} [{v[0]}]{comma}")
+            else:
+                # Align continuation rows after the opening bracket
+                bracketCol = 8 + maxKeyLen
+                indent = " " * (bracketCol + 1)
+                print(f"    '{k}':{pad} [")
+                for j, row in enumerate(v):
+                    row_comma = "," if j < len(v) - 1 else ""
+                    print(f"{indent}{row}{row_comma}")
+                print(f"{' ' * bracketCol}]{comma}")
+        print("}")
+
         if snops := self.optSchedule.get('SNOP', []):
             print("---- SNOP code ----")
             for idx, code in zip(snops[0], self.snopCode):
                 print(f"{idx:>2}: {str(code).strip()}")
-        
+
         if syncs := self.optSchedule.get('SYNC', []):
             print("---- SYNC code ----")
             for idx, code in zip(syncs[0], self.syncCode):
@@ -774,9 +790,11 @@ class RegisterSchedule:
                 return ScheduleMatchStatus.NO_MATCH, None
 
             GRVWA, GRVWB = kernel["GlobalReadVectorWidthA"], kernel["GlobalReadVectorWidthB"]
-            LRVW = kernel["LocalReadVectorWidth"]
-            kernel_vector_widths = [GRVWA, GRVWB, LRVW]            
-            if self.vector_widths != kernel_vector_widths:
+            LRVWA, LRVWB = kernel["LocalReadVectorWidthA"], kernel["LocalReadVectorWidthB"]
+            kernel_vector_widths = [GRVWA, GRVWB, LRVWA, LRVWB]
+            # WA: if need to support different LRVW for A and B, add a new parameter to vector_widths
+            extended_vector_widths = self.vector_widths + [self.vector_widths[2]]
+            if extended_vector_widths != kernel_vector_widths:
                 return ScheduleMatchStatus.NO_MATCH, None
             
             if self.matrix_inst != kernel["MatrixInstruction"]:
@@ -4587,7 +4605,7 @@ def _get_schedule_128x128x32_TF32_plr1(kernel, useLDSTr, TLDS):
                              4,5,5,5, 6,6, 7,7,7,7, 
                              5,5,6,6, 6,6, 8,8,8,8]
         # because of GR starting at 10, we need barrier at 9, will use that for sync too.
-        syncs.add(                               9, dscnt=0, comment="wait for LRBs before the packing them",
+        syncs.add(                               9, dscnt=0, comment="wait for LRBs",
                                                  barrier=True, barrier_comment="make sure all LRs are done before starting GR")
         pack_b0= [                               9,9, 9,9, # swap instructions, must come after LR and before other packs
                                                  10,10,10,10, 10,10, 11,11,11,11,
@@ -4614,8 +4632,7 @@ def _get_schedule_128x128x32_TF32_plr1(kernel, useLDSTr, TLDS):
         pack_a1 =[                                                            15,15,16,16, # swap instructions, must come after LR and before other packs
                                                                                 17,17,17,17, 20,20, 21,21,21,21,
                                                                                  18,18,18,18, 20,20, 21,21,21,21]
-        syncs.add(                                                                19, dscnt=4, comment="wait for the first 2 LRBs before the packing them")
-        syncs.add(                                                                 20, dscnt=0, comment="wait for the rest of LRBs")
+        syncs.add(                                                                19, dscnt=0, comment="wait for LRBs")
         pack_b1= [                                                                19,19,19,19, # swap instructions, must come after LR and before other packs
                                                                                   19,19,19,19, 20,20, 22,22,22,22,
                                                                                    20,20,20,20, 20,20, 22,22,22,22]
@@ -4660,9 +4677,10 @@ def _get_schedule_128x128x32_TF32_plr1(kernel, useLDSTr, TLDS):
     kernel["MfmaInitCVgprs"] = True
     kernel["UsePLRPack"] = True
     kernel["UseMFMAF32XEmulation"] = True
+    kernel["UseDot2F32XEmulation"] = False
     opt1 = ScheduleInfo(num_code_paths, n_mfma, optSchedule, syncCode, nglshift, nllshift)
     if disable_validation:
-        opt1.disableValidation("swap instructions included in pack are not supported yet")
+        opt1.disableValidationPass(cmsv.ValidatorPass.ADD_PACK_CONSTRAINTS, "swap instructions included in pack are not supported yet")
     return True, opt1
 
 @RegisterSchedule(

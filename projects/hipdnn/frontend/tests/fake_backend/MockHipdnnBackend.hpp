@@ -62,6 +62,26 @@ public:
                  const uint8_t* serialized_graph,
                  size_t graph_byte_size),
                 ());
+    MOCK_METHOD(hipdnnStatus_t,
+                backendGetSerializedBinaryGraphExt,
+                (hipdnnBackendDescriptor_t descriptor,
+                 size_t requestedByteSize,
+                 size_t* graphByteSize,
+                 uint8_t* serializedGraph),
+                (override));
+    MOCK_METHOD(hipdnnStatus_t,
+                backendGetSerializedJsonGraphExt,
+                (hipdnnBackendDescriptor_t descriptor,
+                 size_t requestedByteSize,
+                 size_t* graphByteSize,
+                 char* serializedJsonGraph),
+                (override));
+    MOCK_METHOD(hipdnnStatus_t,
+                backendCreateAndDeserializeJsonGraphExt,
+                (hipdnnBackendDescriptor_t * descriptor,
+                 const char* jsonGraph,
+                 size_t jsonByteSize),
+                (override));
     MOCK_METHOD(void, loggingCallbackExt, (hipdnnSeverity_t severity, const char* msg), ());
     MOCK_METHOD(hipdnnStatus_t,
                 setEnginePluginPathsExt,
@@ -69,6 +89,11 @@ public:
                  const char* const* plugin_paths,
                  hipdnnPluginLoadingMode_ext_t mode),
                 ());
+    MOCK_METHOD(
+        hipdnnStatus_t,
+        getLoadedEnginePluginPathsExt,
+        (hipdnnHandle_t handle, size_t* numPluginPaths, char** pluginPaths, size_t* maxStringLen),
+        ());
 };
 
 // NOLINTEND

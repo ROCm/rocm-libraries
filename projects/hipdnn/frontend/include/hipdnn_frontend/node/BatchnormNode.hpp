@@ -3,16 +3,17 @@
 #pragma once
 
 #include "Node.hpp"
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/attributes/BatchnormAttributes.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
+#include <hipdnn_frontend/detail/BatchnormPacker.hpp>
+#include <hipdnn_frontend/detail/BatchnormUnpacker.hpp>
 #include <hipdnn_frontend/node/detail/Utilities.hpp>
 
 namespace hipdnn_frontend::graph
 {
-class BatchnormNode : public BaseNode<BatchnormNode>
+class BatchnormNode : public BaseNode<BatchnormNode, NodeType::BATCHNORM>
 {
 public:
     BatchnormAttributes attributes;
@@ -21,6 +22,16 @@ public:
         : BaseNode(graphAttrs)
         , attributes(std::move(batchnormAttrs))
     {
+    }
+
+    Error unpack_from_descriptor(
+        hipdnnBackendDescriptor_t opDesc,
+        std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>>& tensorMap) override
+    {
+        BatchnormAttributes attrs;
+        HIPDNN_CHECK_ERROR(detail::unpackBatchnormOperation(opDesc, tensorMap, attrs));
+        attributes = std::move(attrs);
+        return {};
     }
 
     Error pre_validate_node() const override
@@ -99,7 +110,7 @@ public:
 
         // Extract channel count - safe to access xDims[1] after SECTION 2 validation
         auto& xDims = x->get_dim();
-        int64_t channels = xDims[1];
+        const int64_t channels = xDims[1];
 
         // Validate scale has correct channel-only shape (required user parameter)
         HIPDNN_CHECK_ERROR(detail::validateChannelOnlyTensorShape(scale, channels, "Scale tensor"));
@@ -125,10 +136,10 @@ public:
         auto nextRunningVar = attributes.get_next_running_variance();
 
         // If any running stat is provided, all must be provided
-        bool hasPrevRunningMean = prevRunningMean != nullptr;
-        bool hasPrevRunningVar = prevRunningVar != nullptr;
-        bool hasNextRunningMean = nextRunningMean != nullptr;
-        bool hasNextRunningVar = nextRunningVar != nullptr;
+        const bool hasPrevRunningMean = prevRunningMean != nullptr;
+        const bool hasPrevRunningVar = prevRunningVar != nullptr;
+        const bool hasNextRunningMean = nextRunningMean != nullptr;
+        const bool hasNextRunningVar = nextRunningVar != nullptr;
 
         if(hasPrevRunningMean || hasPrevRunningVar || hasNextRunningMean || hasNextRunningVar)
         {
@@ -235,7 +246,7 @@ public:
     void gather_hipdnn_tensors(
         std::unordered_set<std::shared_ptr<TensorAttributes>>& allTensors) const override
     {
-        BaseNode<BatchnormNode>::gather_hipdnn_tensors(allTensors);
+        BaseNode<BatchnormNode, NodeType::BATCHNORM>::gather_hipdnn_tensors(allTensors);
 
         for(auto& tensor : attributes.peer_stats)
         {
@@ -246,15 +257,11 @@ public:
         }
     }
 
-    flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>
-        pack_node(flatbuffers::FlatBufferBuilder& builder) const override
+    Error create_operation(
+        std::unordered_map<int64_t, detail::ScopedHipdnnBackendDescriptor>& tensorDescs,
+        std::vector<detail::ScopedHipdnnBackendDescriptor>& operations) const override
     {
-        return hipdnn_data_sdk::data_objects::CreateNodeDirect(
-            builder,
-            attributes.get_name().c_str(),
-            toSdkType(attributes.compute_data_type),
-            hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormAttributes,
-            attributes.pack_attributes(builder).Union());
+        return detail::createBatchnormOperation(attributes, tensorDescs, operations);
     }
 };
 

@@ -65,12 +65,12 @@ TEST(TestPointwiseValidation, MutualExclusivityOfCategories)
     {
         auto mode = static_cast<PointwiseMode>(i);
 
-        bool isUnary = isUnaryPointwiseMode(mode);
-        bool isBinary = isBinaryPointwiseMode(mode);
-        bool isTernary = isTernaryPointwiseMode(mode);
+        const bool isUnary = isUnaryPointwiseMode(mode);
+        const bool isBinary = isBinaryPointwiseMode(mode);
+        const bool isTernary = isTernaryPointwiseMode(mode);
 
         // Count how many categories this mode belongs to
-        int categoryCount = (isUnary ? 1 : 0) + (isBinary ? 1 : 0) + (isTernary ? 1 : 0);
+        const int categoryCount = (isUnary ? 1 : 0) + (isBinary ? 1 : 0) + (isTernary ? 1 : 0);
 
         // Each mode should belong to exactly one category
         EXPECT_LE(categoryCount, 1)
@@ -135,14 +135,14 @@ TEST(TestPointwiseValidation, ImplementedTernaryModesAreSubset)
 TEST(TestPointwiseValidation, KnownImplementedUnaryOperations)
 {
     // Define which unary operations are currently implemented
-    std::set<PointwiseMode> expectedImplementedUnary = {PointwiseMode::RELU_FWD,
-                                                        PointwiseMode::SIGMOID_FWD,
-                                                        PointwiseMode::TANH_FWD,
-                                                        PointwiseMode::ABS,
-                                                        PointwiseMode::NEG,
-                                                        PointwiseMode::GELU_FWD,
-                                                        PointwiseMode::GELU_APPROX_TANH_FWD,
-                                                        PointwiseMode::SWISH_FWD};
+    const std::set<PointwiseMode> expectedImplementedUnary = {PointwiseMode::RELU_FWD,
+                                                              PointwiseMode::SIGMOID_FWD,
+                                                              PointwiseMode::TANH_FWD,
+                                                              PointwiseMode::ABS,
+                                                              PointwiseMode::NEG,
+                                                              PointwiseMode::GELU_FWD,
+                                                              PointwiseMode::GELU_APPROX_TANH_FWD,
+                                                              PointwiseMode::SWISH_FWD};
 
     // Check all unary modes
     for(size_t i = 0; i < POINTWISE_MODE_COUNT; ++i)
@@ -155,8 +155,8 @@ TEST(TestPointwiseValidation, KnownImplementedUnaryOperations)
             continue;
         }
 
-        bool isExpectedImplemented = expectedImplementedUnary.count(mode) > 0;
-        bool isActuallyImplemented = isImplementedUnaryPointwiseMode(mode);
+        const bool isExpectedImplemented = expectedImplementedUnary.count(mode) > 0;
+        const bool isActuallyImplemented = isImplementedUnaryPointwiseMode(mode);
 
         EXPECT_EQ(isActuallyImplemented, isExpectedImplemented)
             << "Mode " << static_cast<int>(mode) << " implementation status mismatch";
@@ -166,12 +166,12 @@ TEST(TestPointwiseValidation, KnownImplementedUnaryOperations)
 TEST(TestPointwiseValidation, KnownImplementedBinaryOperations)
 {
     // Define which binary operations are currently implemented
-    std::set<PointwiseMode> expectedImplementedBinary = {PointwiseMode::ADD,
-                                                         PointwiseMode::SUB,
-                                                         PointwiseMode::MUL,
-                                                         PointwiseMode::RELU_BWD,
-                                                         PointwiseMode::SIGMOID_BWD,
-                                                         PointwiseMode::TANH_BWD};
+    const std::set<PointwiseMode> expectedImplementedBinary = {PointwiseMode::ADD,
+                                                               PointwiseMode::SUB,
+                                                               PointwiseMode::MUL,
+                                                               PointwiseMode::RELU_BWD,
+                                                               PointwiseMode::SIGMOID_BWD,
+                                                               PointwiseMode::TANH_BWD};
 
     // Check all binary modes
     for(size_t i = 0; i < POINTWISE_MODE_COUNT; ++i)
@@ -184,8 +184,8 @@ TEST(TestPointwiseValidation, KnownImplementedBinaryOperations)
             continue;
         }
 
-        bool isExpectedImplemented = expectedImplementedBinary.count(mode) > 0;
-        bool isActuallyImplemented = isImplementedBinaryPointwiseMode(mode);
+        const bool isExpectedImplemented = expectedImplementedBinary.count(mode) > 0;
+        const bool isActuallyImplemented = isImplementedBinaryPointwiseMode(mode);
 
         EXPECT_EQ(isActuallyImplemented, isExpectedImplemented)
             << "Mode " << static_cast<int>(mode) << " implementation status mismatch";
@@ -201,8 +201,8 @@ TEST(TestPointwiseValidation, BitsetConsistencyUnary)
     {
         auto mode = static_cast<PointwiseMode>(i);
 
-        bool isUnaryFromFunction = isUnaryPointwiseMode(mode);
-        bool isImplementedFromFunction = isImplementedUnaryPointwiseMode(mode);
+        const bool isUnaryFromFunction = isUnaryPointwiseMode(mode);
+        const bool isImplementedFromFunction = isImplementedUnaryPointwiseMode(mode);
 
         // If implemented, must be classified as unary
         if(isImplementedFromFunction)
@@ -222,8 +222,8 @@ TEST(TestPointwiseValidation, BitsetConsistencyBinary)
     {
         auto mode = static_cast<PointwiseMode>(i);
 
-        bool isBinaryFromFunction = isBinaryPointwiseMode(mode);
-        bool isImplementedFromFunction = isImplementedBinaryPointwiseMode(mode);
+        const bool isBinaryFromFunction = isBinaryPointwiseMode(mode);
+        const bool isImplementedFromFunction = isImplementedBinaryPointwiseMode(mode);
 
         // If implemented, must be classified as binary
         if(isImplementedFromFunction)
@@ -246,8 +246,8 @@ TEST(TestPointwiseValidation, AllModesAccountedFor)
     {
         auto mode = static_cast<PointwiseMode>(i);
 
-        bool isClassified = isUnaryPointwiseMode(mode) || isBinaryPointwiseMode(mode)
-                            || isTernaryPointwiseMode(mode);
+        const bool isClassified = isUnaryPointwiseMode(mode) || isBinaryPointwiseMode(mode)
+                                  || isTernaryPointwiseMode(mode);
 
         EXPECT_TRUE(isClassified) << "Mode " << static_cast<int>(mode)
                                   << " must be classified as unary, binary, or ternary";

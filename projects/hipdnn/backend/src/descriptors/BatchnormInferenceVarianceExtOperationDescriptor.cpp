@@ -5,6 +5,7 @@
 #include "DescriptorAttributeUtils.hpp"
 #include "HipdnnBackendDescriptorType.h"
 #include "HipdnnException.hpp"
+#include "HipdnnOperationType.h"
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 
 namespace hipdnn_backend
@@ -40,7 +41,7 @@ void BatchnormInferenceVarianceExtOperationDescriptor::finalize()
                   HIPDNN_STATUS_BAD_PARAM,
                   "BatchnormInferenceVarianceExtOperationDescriptor::finalize() failed: EPSILON "
                   "tensor not set");
-    THROW_IF_TRUE(_computeDataType == hipdnn_data_sdk::data_objects::DataType::UNSET,
+    THROW_IF_TRUE(_computeDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET,
                   HIPDNN_STATUS_BAD_PARAM,
                   "BatchnormInferenceVarianceExtOperationDescriptor::finalize() failed: compute "
                   "data type not "
@@ -128,6 +129,13 @@ void BatchnormInferenceVarianceExtOperationDescriptor::setAttribute(
                     elementCount,
                     arrayOfElements,
                     "BatchnormInferenceVarianceExtOperationDescriptor::setAttribute()");
+        break;
+    case HIPDNN_ATTR_OPERATION_NAME_EXT:
+        setString(_name,
+                  attributeType,
+                  elementCount,
+                  arrayOfElements,
+                  "BatchnormInferenceVarianceExtOperationDescriptor::setAttribute()");
         break;
     default:
         throw HipdnnException(
@@ -219,6 +227,22 @@ void BatchnormInferenceVarianceExtOperationDescriptor::getAttribute(
                     arrayOfElements,
                     "BatchnormInferenceVarianceExtOperationDescriptor::getAttribute()");
         break;
+    case HIPDNN_ATTR_OPERATION_NAME_EXT:
+        getString(_name,
+                  attributeType,
+                  requestedElementCount,
+                  elementCount,
+                  arrayOfElements,
+                  "BatchnormInferenceVarianceExtOperationDescriptor::getAttribute()");
+        break;
+    case HIPDNN_ATTR_OPERATION_TYPE_EXT:
+        getOperationType(HIPDNN_OPERATION_TYPE_BATCHNORM_INFERENCE_VARIANCE_EXT,
+                         attributeType,
+                         requestedElementCount,
+                         elementCount,
+                         arrayOfElements,
+                         "BatchnormInferenceVarianceExtOperationDescriptor::getAttribute()");
+        break;
     default:
         throw HipdnnException(
             HIPDNN_STATUS_NOT_SUPPORTED,
@@ -237,13 +261,14 @@ std::vector<std::shared_ptr<TensorDescriptor>>
     return {_xDesc, _meanDesc, _varianceDesc, _scaleDesc, _biasDesc, _yDesc, _epsilonDesc};
 }
 
-std::unique_ptr<hipdnn_data_sdk::data_objects::NodeT>
+std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::NodeT>
     BatchnormInferenceVarianceExtOperationDescriptor::buildNode() const
 {
-    auto node = std::make_unique<hipdnn_data_sdk::data_objects::NodeT>();
+    auto node = std::make_unique<hipdnn_flatbuffers_sdk::data_objects::NodeT>();
+    node->name = _name;
     node->compute_data_type = _computeDataType;
     node->attributes.Set(
-        hipdnn_data_sdk::data_objects::BatchnormInferenceAttributesVarianceExtT(_data));
+        hipdnn_flatbuffers_sdk::data_objects::BatchnormInferenceAttributesVarianceExtT(_data));
     return node;
 }
 
@@ -255,7 +280,8 @@ hipdnnBackendDescriptorType_t BatchnormInferenceVarianceExtOperationDescriptor::
 std::string BatchnormInferenceVarianceExtOperationDescriptor::toString() const
 {
     std::string str = "BatchnormInferenceVarianceExtOperationDescriptor: {";
-    str += "x_uid=" + std::to_string(_data.x_tensor_uid);
+    str += "name=" + _name;
+    str += ", x_uid=" + std::to_string(_data.x_tensor_uid);
     str += ", mean_uid=" + std::to_string(_data.mean_tensor_uid);
     str += ", variance_uid=" + std::to_string(_data.variance_tensor_uid);
     str += ", scale_uid=" + std::to_string(_data.scale_tensor_uid);
@@ -263,9 +289,54 @@ std::string BatchnormInferenceVarianceExtOperationDescriptor::toString() const
     str += ", y_uid=" + std::to_string(_data.y_tensor_uid);
     str += ", epsilon_uid=" + std::to_string(_data.epsilon_tensor_uid);
     str += ", compute_data_type=";
-    str += hipdnn_data_sdk::data_objects::EnumNameDataType(_computeDataType);
+    str += hipdnn_flatbuffers_sdk::data_objects::EnumNameDataType(_computeDataType);
     str += "}";
     return str;
+}
+
+std::shared_ptr<BatchnormInferenceVarianceExtOperationDescriptor>
+    BatchnormInferenceVarianceExtOperationDescriptor::fromNode(
+        const hipdnn_flatbuffers_sdk::data_objects::NodeT& nodeT,
+        const std::unordered_map<int64_t, std::shared_ptr<TensorDescriptor>>& tensorMap)
+{
+    const auto* attrs = nodeT.attributes.AsBatchnormInferenceAttributesVarianceExt();
+    THROW_IF_NULL(attrs,
+                  HIPDNN_STATUS_INTERNAL_ERROR,
+                  "BatchnormInferenceVarianceExtOperationDescriptor::fromNode: "
+                  "BatchnormInferenceAttributesVarianceExt is null");
+
+    auto desc = std::make_shared<BatchnormInferenceVarianceExtOperationDescriptor>();
+    desc->_data = *attrs;
+    desc->_computeDataType = nodeT.compute_data_type;
+    desc->_name = nodeT.name;
+    desc->_xDesc = findTensorInMap(tensorMap,
+                                   attrs->x_tensor_uid,
+                                   "BatchnormInferenceVarianceExtOperationDescriptor::fromNode: X");
+    desc->_meanDesc
+        = findTensorInMap(tensorMap,
+                          attrs->mean_tensor_uid,
+                          "BatchnormInferenceVarianceExtOperationDescriptor::fromNode: Mean");
+    desc->_varianceDesc
+        = findTensorInMap(tensorMap,
+                          attrs->variance_tensor_uid,
+                          "BatchnormInferenceVarianceExtOperationDescriptor::fromNode: Variance");
+    desc->_scaleDesc
+        = findTensorInMap(tensorMap,
+                          attrs->scale_tensor_uid,
+                          "BatchnormInferenceVarianceExtOperationDescriptor::fromNode: Scale");
+    desc->_biasDesc
+        = findTensorInMap(tensorMap,
+                          attrs->bias_tensor_uid,
+                          "BatchnormInferenceVarianceExtOperationDescriptor::fromNode: Bias");
+    desc->_yDesc = findTensorInMap(tensorMap,
+                                   attrs->y_tensor_uid,
+                                   "BatchnormInferenceVarianceExtOperationDescriptor::fromNode: Y");
+    desc->_epsilonDesc
+        = findTensorInMap(tensorMap,
+                          attrs->epsilon_tensor_uid,
+                          "BatchnormInferenceVarianceExtOperationDescriptor::fromNode: Epsilon");
+    desc->finalize();
+    return desc;
 }
 
 } // namespace hipdnn_backend
