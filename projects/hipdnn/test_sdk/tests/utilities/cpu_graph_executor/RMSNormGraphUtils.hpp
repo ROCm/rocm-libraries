@@ -13,9 +13,9 @@ namespace hipdnn_sdk_test_utils
 {
 
 inline std::shared_ptr<hipdnn_frontend::graph::Graph>
-    buildRMSNormFwdGraph(hipdnn_data_sdk::data_objects::DataType inputDataType,
-                         hipdnn_data_sdk::data_objects::DataType scaleDataType,
-                         hipdnn_data_sdk::data_objects::DataType computeDataType,
+    buildRMSNormFwdGraph(hipdnn_flatbuffers_sdk::data_objects::DataType inputDataType,
+                         hipdnn_flatbuffers_sdk::data_objects::DataType scaleDataType,
+                         hipdnn_flatbuffers_sdk::data_objects::DataType computeDataType,
                          const std::vector<int64_t>& dims,
                          const hipdnn_data_sdk::utilities::TensorLayout& layout)
 {
@@ -93,9 +93,9 @@ inline std::shared_ptr<hipdnn_frontend::graph::Graph>
 }
 
 inline std::shared_ptr<hipdnn_frontend::graph::Graph>
-    buildRMSNormFwdGraphWithBias(hipdnn_data_sdk::data_objects::DataType inputDataType,
-                                 hipdnn_data_sdk::data_objects::DataType scaleDataType,
-                                 hipdnn_data_sdk::data_objects::DataType computeDataType,
+    buildRMSNormFwdGraphWithBias(hipdnn_flatbuffers_sdk::data_objects::DataType inputDataType,
+                                 hipdnn_flatbuffers_sdk::data_objects::DataType scaleDataType,
+                                 hipdnn_flatbuffers_sdk::data_objects::DataType computeDataType,
                                  const std::vector<int64_t>& dims,
                                  const hipdnn_data_sdk::utilities::TensorLayout& layout)
 {

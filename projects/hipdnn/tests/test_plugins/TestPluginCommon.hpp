@@ -7,9 +7,9 @@
 #include <iostream>
 #include <memory>
 
-#include <hipdnn_data_sdk/data_objects/engine_details_generated.h>
-#include <hipdnn_data_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
-#include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/engine_details_generated.h>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_plugin_sdk/EnginePluginApi.h>
 #include <hipdnn_plugin_sdk/PluginApi.h>
 #include <hipdnn_plugin_sdk/PluginDataTypeHelpers.hpp>
@@ -302,7 +302,7 @@ public:
             }
 
             flatbuffers::FlatBufferBuilder builder;
-            auto newEngineDetails = hipdnn_data_sdk::data_objects::CreateEngineDetails(
+            auto newEngineDetails = hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetails(
                 builder, getInstance()->getEngineId());
             builder.Finish(newEngineDetails);
             auto serializedDetails = builder.Release();
@@ -426,10 +426,10 @@ public:
                     "No engines available - cannot create execution context");
             }
 
-            const hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper opGraphWrapper(opGraph->ptr,
-                                                                                     opGraph->size);
-            const hipdnn_data_sdk::flatbuffer_utilities::EngineConfigWrapper engineConfigWrapper(
-                engineConfig->ptr, engineConfig->size);
+            const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper opGraphWrapper(
+                opGraph->ptr, opGraph->size);
+            const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper
+                engineConfigWrapper(engineConfig->ptr, engineConfig->size);
 
             *executionContext = new HipdnnEnginePluginExecutionContext();
 
