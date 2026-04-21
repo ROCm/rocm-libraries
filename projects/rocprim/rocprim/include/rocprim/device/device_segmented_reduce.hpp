@@ -60,8 +60,6 @@ inline hipError_t segmented_reduce_impl(void*          temporary_storage,
                                         hipStream_t    stream,
                                         bool           debug_synchronous)
 {
-    printf("4) segmented_reduce_impl()\n");
-
     using input_type  = typename std::iterator_traits<InputIterator>::value_type;
     using result_type = ::rocprim::accumulator_t<BinaryFunction, input_type>;
 
@@ -73,31 +71,20 @@ inline hipError_t segmented_reduce_impl(void*          temporary_storage,
 
     const unsigned int block_size = params.kernel_config.block_size;
 
-    //const size_t max_segments = (1ULL << 32) / static_cast<size_t>(block_size); // fails
-    // 2^32 - 1 max threads
-    const size_t max_segments = (0xffffffff) / static_cast<size_t>(block_size);
-
-/*    
-if (static_cast<uint64_t>(segments) * static_cast<uint64_t>(block_size) > (1ULL << 32)) {
-    return hipErrorInvalidConfiguration;
-    // Error message: "num_segments × block_size exceeds HSA 2^32 thread limit.
-    //                 Please batch calls with max 2^24 segments (block_size=256)."
-    // There doesn't seem to be any way to set an error message.  It's not done anywhere else that
-    // I can find.
-}
-*/
-
     if(temporary_storage == nullptr)
     {
         // Make sure user won't try to allocate 0 bytes memory, because
         // hipMalloc will return nullptr when size is zero.
-        printf("    set temp storage size = 4\n");
         storage_size = 4;
         return hipSuccess;
     }
 
     if(segments == 0u)
         return hipSuccess;
+
+    // HIP supports (2^32 - 1) max threads.  We have to ensure block_size * segments
+    // doesn't exceed that.  Compute the maximum number of segments:
+    const size_t max_segments = 0xffffffff / static_cast<size_t>(block_size);
 
     std::chrono::steady_clock::time_point start;
 
@@ -106,56 +93,31 @@ if (static_cast<uint64_t>(segments) * static_cast<uint64_t>(block_size) > (1ULL 
         start = std::chrono::steady_clock::now();
     }
 
-for (size_t offset = 0; offset < segments; offset += max_segments) {
-    printf("offset: %zu\n", offset);
-    printf("segments: %zu\n", segments);
-    size_t remaining_segments = segments - offset;
-    printf("remaining_segments: %zu\n", remaining_segments);
-    size_t batch = std::min(max_segments, remaining_segments);
-    printf("batch: %zu\n", batch);
+    // If the number of segments is greater than max_segments, split the
+    // work into multiple kernel calls.
+    for (size_t offset = 0; offset < segments; offset += max_segments) {
+        size_t remaining_segments = segments - offset;
+        size_t batch_size = std::min(max_segments, remaining_segments);
 
-    auto segmented_reduce_kernel = [=](auto target_config)
-    {
-        segmented_reduce<decltype(target_config)>(input,
-                                                  output + offset,
-                                                  begin_offsets + offset,
-                                                  end_offsets + offset,
-                                                  reduce_op,
-                                                  static_cast<result_type>(initial_value));
-    };
+        auto segmented_reduce_kernel = [=](auto target_config)
+        {
+            segmented_reduce<decltype(target_config)>(input,
+                                                      output + offset,
+                                                      begin_offsets + offset,
+                                                      end_offsets + offset,
+                                                      reduce_op,
+                                                      static_cast<result_type>(initial_value));
+        };
 
-    ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<Config, Selector>(current_target,
-                                                                  segmented_reduce_kernel,
-                                                                  dim3(batch), //dim3(segments),
-                                                                  dim3(block_size),
-                                                                  0,
-                                                                  stream));
-    ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("segmented_reduce",
-                                                batch, //segments,
-                                                start);
-}
+        ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<Config, Selector>(current_target,
+                                                                      segmented_reduce_kernel,
+                                                                      dim3(batch_size),
+                                                                      dim3(block_size),
+                                                                      0,
+                                                                      stream));
+        ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("segmented_reduce", batch_size, start);
+    }
 
-/*
-    auto segmented_reduce_kernel = [=](auto target_config)
-    {
-        segmented_reduce<decltype(target_config)>(input,
-                                                  output,
-                                                  begin_offsets,
-                                                  end_offsets,
-                                                  reduce_op,
-                                                  static_cast<result_type>(initial_value));
-    };
-
-    ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<Config, Selector>(current_target,
-                                                                  segmented_reduce_kernel,
-                                                                  dim3(segments),
-                                                                  dim3(block_size),
-                                                                  0,
-                                                                  stream));
-    ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("segmented_reduce",
-                                                segments,
-                                                start);
-*/
     return hipSuccess;
 }
 
@@ -275,8 +237,6 @@ inline hipError_t segmented_reduce(void*          temporary_storage,
                                    hipStream_t    stream            = 0,
                                    bool           debug_synchronous = false)
 {
-    printf("3) segmented_reduce()\n");
-
     return detail::segmented_reduce_impl<Config>(temporary_storage,
                                                  storage_size,
                                                  input,

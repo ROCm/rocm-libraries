@@ -627,7 +627,6 @@ struct launch_plan
 
     void launch(dim3 grid_size, dim3 block_size, size_t shared_mem, hipStream_t stream) const
     {
-        printf("    launch()\n");
         hipLaunchKernelGGL(HIP_KERNEL_NAME(kernel),
                            grid_size,
                            block_size,
@@ -767,8 +766,6 @@ template<class Config,
          class Kernel>
 auto make_launch_plan(target target_current, Kernel kernel) -> launch_plan<Kernel>
 {
-    printf("    make_launch_plan()\n");
-
     using Targets = typename ConfigSelector::targets;
 
     std::optional<void (*)(Kernel)> tuned_kernel = std::nullopt;
@@ -822,7 +819,6 @@ template<class Config,
 hipError_t execute_launch_plan(
     target t, Kernel kernel, dim3 grid_size, dim3 block_size, size_t shmem, hipStream_t stream)
 {
-    printf("5) execute_launch_plan()\n");
     const auto launch_plan = make_launch_plan<Config, ConfigSelector, LaunchSelector>(t, kernel);
     launch_plan.launch(grid_size, block_size, shmem, stream);
     return hipGetLastError();
