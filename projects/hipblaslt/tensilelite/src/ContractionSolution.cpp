@@ -37,6 +37,7 @@
 
 #include <Tensile/UtilsOrigami.hpp>
 #include <iostream>
+#include <mxDataGenerator/PreSwizzle.hpp>
 #include <origami/streamk.hpp>
 
 #include <algorithm>
@@ -1794,9 +1795,8 @@ namespace TensileLite
                 case CustomArgSemantic::StrideScaleA1:
                 {
                     auto const& t = problem.mxsa();
-                    size_t batchStride = 1;
-                    for(size_t i = 0; i < t.dimensions(); i++)
-                        batchStride *= t.sizes()[i];
+                    size_t batchStride
+                        = DGen::preSwizzleScalesGFX950PaddedSize(t.sizes()[1], t.sizes()[0]);
                     rv.args.appendCustomType("StrideScaleA1", batchStride, arg.type);
                     break;
                 }
@@ -1809,9 +1809,8 @@ namespace TensileLite
                 case CustomArgSemantic::StrideScaleB1:
                 {
                     auto const& t = problem.mxsb();
-                    size_t batchStride = 1;
-                    for(size_t i = 0; i < t.dimensions(); i++)
-                        batchStride *= t.sizes()[i];
+                    size_t batchStride
+                        = DGen::preSwizzleScalesGFX950PaddedSize(t.sizes()[1], t.sizes()[0]);
                     rv.args.appendCustomType("StrideScaleB1", batchStride, arg.type);
                     break;
                 }

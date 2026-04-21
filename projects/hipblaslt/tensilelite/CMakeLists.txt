@@ -44,12 +44,22 @@ if(TENSILELITE_ENABLE_HOST)
             "${CMAKE_CURRENT_BINARY_DIR}/include"
     )
 
+    if(NOT TARGET roc::mxDataGenerator)
+        if(HIPBLASLT_ENABLE_THEROCK)
+            find_package(mxDataGenerator REQUIRED)
+        else()
+            add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../../shared/mxdatagenerator"
+                             "${CMAKE_CURRENT_BINARY_DIR}/mxdatagenerator")
+        endif()
+    endif()
+
     target_link_libraries(tensilelite-host
         PUBLIC
             $<BUILD_INTERFACE:rocisa::rocisa-cpp>
             roc::origami
         PRIVATE
             hip::device
+            roc::mxDataGenerator
     )
 
     add_subdirectory(src)

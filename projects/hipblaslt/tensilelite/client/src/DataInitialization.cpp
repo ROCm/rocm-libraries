@@ -32,6 +32,7 @@
 #include <Tensile/Utils.hpp>
 
 #include <hip/hip_runtime.h>
+#include <mxDataGenerator/PreSwizzle.hpp>
 
 #include <algorithm>
 #include <list>
@@ -886,8 +887,8 @@ namespace TensileLite
             const auto m_n       = desc.sizes()[1];
             const auto b         = desc.sizes()[2];
             const auto swizzleK  = miK * packK;
-            const auto paddedM_N = (m_n + miM_N - 1) / miM_N * miM_N;
-            const auto paddedK   = (k + swizzleK - 1) / swizzleK * swizzleK;
+            const auto paddedM_N = DGen::roundUp(m_n, miM_N);
+            const auto paddedK   = DGen::roundUp(k, swizzleK);
             return paddedM_N * paddedK * b;
         }
 
@@ -2136,10 +2137,8 @@ namespace TensileLite
                     size_t effPackK = isSubByte ? size_t(1) : PackK;
 
                     ::Tensor::Manipulation::Shape paddedShape{
-                        ((tiledSize / MiM_N) + !!(tiledSize % MiM_N)) * MiM_N,
-                        (effUnrolled / (effMiK * effPackK)
-                         + !!(effUnrolled % (effMiK * effPackK)))
-                            * effMiK * effPackK};
+                        DGen::roundUp(tiledSize, MiM_N),
+                        DGen::roundUp(effUnrolled, effMiK * effPackK)};
                     auto swizzleKey
                         = std::make_tuple(toBitWidth(desc.dataType()), unrolledSize, tiledSize);
 
