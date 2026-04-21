@@ -25,6 +25,7 @@
 #include <unistd.h>
 
 #include <array>
+#include <cassert>
 #include <fstream>
 #include <functional>
 #include <iomanip>
