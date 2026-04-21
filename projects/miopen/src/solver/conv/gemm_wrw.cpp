@@ -341,16 +341,28 @@ size_t GemmWrwUniversal::GetWorkspaceSize(const ExecutionContext& context,
         dwDesc.GetLengths() | std::views::drop(2) | std::views::take(spatial_dim);
     const auto wei_c = dwDesc.GetLengths()[1];
 
-    const auto ws_size = GetTypeSize(dyDesc.GetType()) * wei_c *
-                         std::accumulate(out_spatial.begin(),
-                                         out_spatial.end(),
-                                         std::size_t(1),
-                                         std::multiplies<std::size_t>()) *
-                         std::accumulate(wei_spatial.begin(),
-                                         wei_spatial.end(),
-                                         std::size_t(1),
-                                         std::multiplies<std::size_t>()) *
-                         conv.group_count;
+    auto ws_size = GetTypeSize(dyDesc.GetType()) * wei_c *
+                   std::accumulate(out_spatial.begin(),
+                                   out_spatial.end(),
+                                   std::size_t(1),
+                                   std::multiplies<std::size_t>()) *
+                   std::accumulate(wei_spatial.begin(),
+                                   wei_spatial.end(),
+                                   std::size_t(1),
+                                   std::multiplies<std::size_t>()) *
+                   conv.group_count;
+
+    // For bf16: extra workspace for fp32 accumulation buffer (same shape as dw)
+    const auto xDesc           = problem.GetOut();
+    const auto in_n            = xDesc.GetLengths()[0];
+    const auto need_fp32_accum = (dyDesc.GetType() == miopenBFloat16) && (in_n > 1);
+    if(need_fp32_accum)
+    {
+        const auto fp32_accum_size = GetTypeSize(miopenFloat) * dwDesc.GetElementSize();
+        // Use padded layout: im2col buffer at offset 0, fp32 accum buffer at offset ws_size
+        // (aligned to 256 bytes)
+        ws_size = ((ws_size + 255) & ~std::size_t{255}) + fp32_accum_size;
+    }
 
     if(ws_size > handle.GetMaxMemoryAllocSize())
     {
@@ -455,6 +467,30 @@ ConvSolution GemmWrwUniversal::GetSolution(const ExecutionContext& context,
     const auto in_c           = xDesc.GetLengths()[1];
     const auto wei_k          = dwDesc.GetLengths()[0];
 
+    // bf16: accumulate in fp32 workspace when batch_size > 1
+    const auto data_type      = dyDesc.GetType();
+    const auto use_fp32_accum = (data_type == miopenBFloat16) && (in_n > 1);
+    const auto lowp_quant     = conv.lowp_quant;
+    const auto dw_lengths     = dwDesc.GetLengths();
+    const auto dw_strides     = dwDesc.GetStrides();
+    // im2col workspace size (before padding/alignment)
+    const auto im2col_ws_size = [&]() {
+        const auto wei_c = dwDesc.GetLengths()[1];
+        const auto out_sp =
+            dyDesc.GetLengths() | std::views::drop(2) | std::views::take(spatial_dims);
+        const auto wei_sp =
+            dwDesc.GetLengths() | std::views::drop(2) | std::views::take(spatial_dims);
+        return GetTypeSize(data_type) * wei_c *
+               std::accumulate(
+                   out_sp.begin(), out_sp.end(), std::size_t(1), std::multiplies<std::size_t>()) *
+               std::accumulate(
+                   wei_sp.begin(), wei_sp.end(), std::size_t(1), std::multiplies<std::size_t>()) *
+               conv.group_count;
+    }();
+    // Offset to fp32 accumulation buffer within workspace (256-byte aligned)
+    const auto fp32_accum_offset =
+        use_fp32_accum ? ((im2col_ws_size + 255) & ~std::size_t{255}) : std::size_t{0};
+
     const auto in_spatial_ =
         xDesc.GetLengths() | std::views::drop(2) | std::views::take(conv.GetSpatialDimension());
     const auto wei_spatial_ =
@@ -510,9 +546,23 @@ ConvSolution GemmWrwUniversal::GetSolution(const ExecutionContext& context,
 
             // Zeroing out the output buffer
             float zero = 0.0f;
-            SetTensor(handle, dwDesc_, dw, &zero);
-
             float time = 0;
+
+            // For bf16 with batch > 1: accumulate into fp32 workspace, then cast
+            Data_t accum_buf = dw;
+            if(use_fp32_accum)
+            {
+                accum_buf = static_cast<Data_t>(static_cast<char*>(workspace) + fp32_accum_offset);
+                TensorDescriptor fp32Desc(miopenFloat, dw_lengths, dw_strides);
+                SetTensor(handle, fp32Desc, accum_buf, &zero);
+            }
+            else
+            {
+                SetTensor(handle, dwDesc_, dw, &zero);
+            }
+
+            if(handle.IsProfilingEnabled())
+                time += handle.GetKernelTime();
 
             for(std::size_t i = 0; i < in_n; i++)
             {
@@ -537,34 +587,74 @@ ConvSolution GemmWrwUniversal::GetSolution(const ExecutionContext& context,
 
                 if(group_count > 1)
                 {
-                    status = CallGemmStridedBatched(handle,
-                                                    gemm_desc,
-                                                    dy,
-                                                    out_offset,
-                                                    workspace,
-                                                    0,
-                                                    dw,
-                                                    0,
-                                                    GemmBackend_t::rocblas);
+                    if(use_fp32_accum)
+                    {
+                        status = CallGemmStridedBatched(handle,
+                                                        gemm_desc,
+                                                        dy,
+                                                        out_offset,
+                                                        workspace,
+                                                        0,
+                                                        accum_buf,
+                                                        0,
+                                                        miopenFloat);
+                    }
+                    else
+                    {
+                        status = CallGemmStridedBatched(handle,
+                                                        gemm_desc,
+                                                        dy,
+                                                        out_offset,
+                                                        workspace,
+                                                        0,
+                                                        dw,
+                                                        0,
+                                                        GemmBackend_t::rocblas);
+                    }
                 }
                 else
                 {
-                    // dw = dy * transpose(Im2Col(x))
-                    status = CallGemm(handle,
-                                      gemm_desc,
-                                      dy,
-                                      out_offset,
-                                      workspace,
-                                      0,
-                                      dw,
-                                      0,
-                                      GemmBackend_t::rocblas);
+                    if(use_fp32_accum)
+                    {
+                        // dw = dy * transpose(Im2Col(x))  -- accumulated in fp32
+                        status = CallGemm(handle,
+                                          gemm_desc,
+                                          dy,
+                                          out_offset,
+                                          workspace,
+                                          0,
+                                          accum_buf,
+                                          0,
+                                          miopenFloat);
+                    }
+                    else
+                    {
+                        // dw = dy * transpose(Im2Col(x))
+                        status = CallGemm(handle,
+                                          gemm_desc,
+                                          dy,
+                                          out_offset,
+                                          workspace,
+                                          0,
+                                          dw,
+                                          0,
+                                          GemmBackend_t::rocblas);
+                    }
                 }
 
                 if(status != miopenStatusSuccess)
                     MIOPEN_THROW("GemmWrw1x1_stride1 execution failure.");
 
                 // Update times for both the kernels
+                if(handle.IsProfilingEnabled())
+                    time += handle.GetKernelTime();
+            }
+
+            // Cast fp32 accumulation buffer back to bf16
+            if(use_fp32_accum)
+            {
+                TensorDescriptor fp32Desc(miopenFloat, dw_lengths, dw_strides);
+                CastTensor(handle, &lowp_quant, false, fp32Desc, accum_buf, dwDesc_, dw, 0, 0);
                 if(handle.IsProfilingEnabled())
                     time += handle.GetKernelTime();
             }

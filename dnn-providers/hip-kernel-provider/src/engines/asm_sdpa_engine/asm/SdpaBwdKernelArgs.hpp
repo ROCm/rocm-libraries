@@ -4,7 +4,7 @@
 // =============================================================================
 // AITER Provenance
 //
-// Commit:  (TBD - to be filled with actual AITER commit hash)
+// Commit:  17d4a33b6f9535e820353ebc6217769efc3766d6
 // Sources:
 //   - aiter/csrc/include/mha_bwd.h           (lines 149-305: backward kernel args)
 //   - aiter/csrc/include/aiter_hip_common.h  (lines 48-62: p2, p3 padding structs)
@@ -63,33 +63,41 @@ struct __attribute__((packed)) fmha_bwd_odo_args
     void* ptr_d; // co:ptr_d  Output D buffer [B, H_q, S_q] (FP32)
     SgprPad2 _p2;
 
-    // ---- O/dO tensor strides (in bytes) ------------------------------------
-    uint32_t Hs_odo; // co:Hs_odo  Head stride for O/dO tensors
+    // ---- O tensor strides (in bytes) ----------------------------------------
+    uint32_t Hs_o; // co:Hs_o  Head stride for O tensor
     SgprPad3 _p3;
-    uint32_t BAs_odo; // co:BAs_odo  Batch stride for O/dO tensors
+    uint32_t BAs_o; // co:BAs_o  Batch stride for O tensor
     SgprPad3 _p4;
-    uint32_t Seqs_odo; // co:Seqs_odo  Sequence stride for O/dO tensors
+    uint32_t Seqs_o; // co:Seqs_o  Sequence stride for O tensor
     SgprPad3 _p5;
+
+    // ---- dO tensor strides (in bytes) --------------------------------------
+    uint32_t Hs_do; // co:Hs_do  Head stride for dO tensor
+    SgprPad3 _p6;
+    uint32_t BAs_do; // co:BAs_do  Batch stride for dO tensor
+    SgprPad3 _p7;
+    uint32_t Seqs_do; // co:Seqs_do  Sequence stride for dO tensor
+    SgprPad3 _p8;
 
     // ---- D buffer strides (in bytes, FP32) ---------------------------------
     uint32_t Hs_d; // co:Hs_d  Head stride for D buffer
-    SgprPad3 _p6;
+    SgprPad3 _p9;
     uint32_t BAs_d; // co:BAs_d  Batch stride for D buffer
-    SgprPad3 _p7;
+    SgprPad3 _p10;
     uint32_t Seqs_d; // co:Seqs_d  Sequence stride for D (always 4 bytes)
-    SgprPad3 _p8;
+    SgprPad3 _p11;
 
     // ---- Dimensions --------------------------------------------------------
     uint32_t seqlen_q; // co:seqlen_q  Query sequence length
-    SgprPad3 _p9;
+    SgprPad3 _p12;
     uint32_t head_dim; // co:head_dim  Head dimension (D_v)
-    SgprPad3 _p10;
+    SgprPad3 _p13;
 
     // ---- Group mode sequence pointers (nullptr for batch mode) -------------
     const void* ptr_qseq; // co:ptr_qseq  Cumulative Q sequence starts
-    SgprPad2 _p11;
+    SgprPad2 _p14;
     const void* ptr_qseq_padded; // co:ptr_qseq_padded  Q padded seq starts
-    SgprPad2 _p12;
+    SgprPad2 _p15;
 };
 
 // =============================================================================
@@ -291,7 +299,7 @@ struct __attribute__((packed)) fmha_bwd_post_kernel_args
 static_assert(sizeof(fmha_bwd_dqdkdv_args) == 704,
               "fmha_bwd_dqdkdv_args size mismatch with AITER ABI");
 
-static_assert(sizeof(fmha_bwd_odo_args) == 208, "fmha_bwd_odo_args size mismatch with AITER ABI");
+static_assert(sizeof(fmha_bwd_odo_args) == 256, "fmha_bwd_odo_args size mismatch with AITER ABI");
 
 static_assert(sizeof(fmha_bwd_post_kernel_args) == 192,
               "fmha_bwd_post_kernel_args size mismatch with AITER ABI");

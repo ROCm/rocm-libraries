@@ -3,8 +3,8 @@
 
 #include "AsmSdpaEngine.hpp"
 
-#include <hipdnn_data_sdk/data_objects/engine_details_generated.h>
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/engine_details_generated.h>
 
 namespace asm_sdpa_engine
 {
@@ -26,8 +26,9 @@ int64_t AsmSdpaEngine::staticId()
     return hipdnn_data_sdk::utilities::ASM_SDPA_ENGINE_ID;
 }
 
-bool AsmSdpaEngine::isApplicable(HipKernelHandle& handle,
-                                 const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
+bool AsmSdpaEngine::isApplicable(
+    HipKernelHandle& handle,
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
     for(const auto& pb : _planBuilders)
     {
@@ -39,14 +40,15 @@ bool AsmSdpaEngine::isApplicable(HipKernelHandle& handle,
     return false;
 }
 
-void AsmSdpaEngine::getDetails(HipKernelHandle& handle,
-                               const hipdnn_data_sdk::flatbuffer_utilities::IGraph& /*opGraph*/,
-                               hipdnnPluginConstData_t& detailsOut) const
+void AsmSdpaEngine::getDetails(
+    HipKernelHandle& handle,
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& /*opGraph*/,
+    hipdnnPluginConstData_t& detailsOut) const
 {
     flatbuffers::FlatBufferBuilder builder;
 
     auto engineDetails
-        = hipdnn_data_sdk::data_objects::CreateEngineDetailsDirect(builder, id(), nullptr);
+        = hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetailsDirect(builder, id(), nullptr);
     builder.Finish(engineDetails);
     auto detachedBuffer = std::make_unique<flatbuffers::DetachedBuffer>(builder.Release());
     detailsOut.ptr = detachedBuffer->data();
@@ -57,8 +59,8 @@ void AsmSdpaEngine::getDetails(HipKernelHandle& handle,
 
 size_t AsmSdpaEngine::getMaxWorkspaceSize(
     const HipKernelHandle& handle,
-    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
-    const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& /*engineConfig*/) const
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& /*engineConfig*/) const
 {
     for(const auto& pb : _planBuilders)
     {
@@ -74,8 +76,8 @@ size_t AsmSdpaEngine::getMaxWorkspaceSize(
 
 void AsmSdpaEngine::initializeExecutionContext(
     const HipKernelHandle& handle,
-    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
-    const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
     HipKernelContext& executionContext) const
 {
     executionContext.setExecutionSettings(HipKernelSettings{});

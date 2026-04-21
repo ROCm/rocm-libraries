@@ -9,7 +9,9 @@
 #include <hipdnn_frontend/attributes/CustomOpAttributes.hpp>
 #include <hipdnn_frontend/attributes/LayernormAttributes.hpp>
 #include <hipdnn_frontend/attributes/PointwiseAttributes.hpp>
+#ifdef HIPDNN_ENABLE_SDPA
 #include <hipdnn_frontend/attributes/SdpaAttributes.hpp>
+#endif
 #include <hipdnn_test_sdk/constants/ConvFpropConstants.hpp>
 #include <hipdnn_test_sdk/utilities/FrontendGraphFactory.hpp>
 #include <hipdnn_test_sdk/utilities/ToVec.hpp>
@@ -4893,6 +4895,7 @@ TEST_F(TestGraph, EngineOverrideConfigFromContentMatchesConvFpropGraph)
     EXPECT_FALSE(config->matchOperation("conv_fprop", {x8, w}).has_value());
 }
 
+#ifdef HIPDNN_ENABLE_SDPA
 TEST_F(TestGraph, SdpaFwdNodeCreation)
 {
     Graph graph;
@@ -4953,6 +4956,7 @@ TEST_F(TestGraph, SdpaFwdNodeCreationWithStats)
     auto validationResult = graph.validate();
     EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
 }
+#endif // HIPDNN_ENABLE_SDPA
 
 TEST_F(TestGraph, CustomOpNodeCreation)
 {
@@ -6299,51 +6303,48 @@ TEST_P(TestGraphSerializationRoundTrip, JsonSerializeDeserializeForwardsData)
     EXPECT_EQ(capturedJson, jsonData);
 }
 
-// NOLINTNEXTLINE(cert-err58-cpp)
-INSTANTIATE_TEST_SUITE_P(
-    GraphTopologies,
-    TestGraphSerializationRoundTrip,
-    ::testing::Values(
+// This needs to be a helper function rather than being defined inline so that we can use preprocessor directives in it.
+// Embedding a directive within a macro has undefined behaviour.
+static std::vector<GraphTopologyParam> getGraphTopologyParams()
+{
+    std::vector<GraphTopologyParam> params = {
         // Single-node topologies via FrontendGraphFactory
-        GraphTopologyParam{
-            "BatchnormInference",
-            [](Graph& g) { g = FrontendGraphFactory::createBatchnormInferenceGraph(); }},
-        GraphTopologyParam{
-            "BatchnormTraining",
-            [](Graph& g) { g = FrontendGraphFactory::createBatchnormTrainingGraph(); }},
-        GraphTopologyParam{
-            "BatchnormBackward",
-            [](Graph& g) { g = FrontendGraphFactory::createBatchnormBackwardGraph(); }},
-        GraphTopologyParam{"ConvForward",
-                           [](Graph& g) { g = FrontendGraphFactory::createConvForwardGraph(); }},
-        GraphTopologyParam{
-            "ConvBackwardData",
-            [](Graph& g) { g = FrontendGraphFactory::createConvBackwardDataGraph(); }},
-        GraphTopologyParam{
-            "ConvBackwardWeights",
-            [](Graph& g) { g = FrontendGraphFactory::createConvBackwardWeightsGraph(); }},
-        GraphTopologyParam{"PointwiseUnary",
-                           [](Graph& g) { g = FrontendGraphFactory::createPointwiseUnaryGraph(); }},
-        GraphTopologyParam{
-            "PointwiseBinary",
-            [](Graph& g) { g = FrontendGraphFactory::createPointwiseBinaryGraph(); }},
-        GraphTopologyParam{"Matmul",
-                           [](Graph& g) { g = FrontendGraphFactory::createMatmulGraph(); }},
-        GraphTopologyParam{"Layernorm",
-                           [](Graph& g) { g = FrontendGraphFactory::createLayernormGraph(); }},
-        GraphTopologyParam{"Rmsnorm",
-                           [](Graph& g) { g = FrontendGraphFactory::createRmsnormGraph(); }},
-        GraphTopologyParam{"Reduction",
-                           [](Graph& g) { g = FrontendGraphFactory::createReductionGraph(); }},
-        GraphTopologyParam{"SdpaForward",
-                           [](Graph& g) { g = FrontendGraphFactory::createSdpaForwardGraph(); }},
-        GraphTopologyParam{"SdpaBackward",
-                           [](Graph& g) { g = FrontendGraphFactory::createSdpaBackwardGraph(); }},
+        {"BatchnormInference",
+         [](Graph& g) { g = FrontendGraphFactory::createBatchnormInferenceGraph(); }},
+        {"BatchnormTraining",
+         [](Graph& g) { g = FrontendGraphFactory::createBatchnormTrainingGraph(); }},
+        {"BatchnormBackward",
+         [](Graph& g) { g = FrontendGraphFactory::createBatchnormBackwardGraph(); }},
+        {"ConvForward", [](Graph& g) { g = FrontendGraphFactory::createConvForwardGraph(); }},
+        {"ConvBackwardData",
+         [](Graph& g) { g = FrontendGraphFactory::createConvBackwardDataGraph(); }},
+        {"ConvBackwardWeights",
+         [](Graph& g) { g = FrontendGraphFactory::createConvBackwardWeightsGraph(); }},
+        {"PointwiseUnary", [](Graph& g) { g = FrontendGraphFactory::createPointwiseUnaryGraph(); }},
+        {"PointwiseBinary",
+         [](Graph& g) { g = FrontendGraphFactory::createPointwiseBinaryGraph(); }},
+        {"Matmul", [](Graph& g) { g = FrontendGraphFactory::createMatmulGraph(); }},
+        {"Layernorm", [](Graph& g) { g = FrontendGraphFactory::createLayernormGraph(); }},
+        {"Rmsnorm", [](Graph& g) { g = FrontendGraphFactory::createRmsnormGraph(); }},
+        {"Reduction", [](Graph& g) { g = FrontendGraphFactory::createReductionGraph(); }},
+#ifdef HIPDNN_ENABLE_SDPA
+        {"SdpaForward", [](Graph& g) { g = FrontendGraphFactory::createSdpaForwardGraph(); }},
+        {"SdpaBackward", [](Graph& g) { g = FrontendGraphFactory::createSdpaBackwardGraph(); }},
+#endif
         // Multi-node topologies
-        GraphTopologyParam{
-            "ConvFwdBiasActiv",
-            [](Graph& g) { g = FrontendGraphFactory::createConvFwdBiasActivGraph(); }},
-        GraphTopologyParam{"ConvReluFusion", createConvReluFusionGraph},
-        GraphTopologyParam{"PointwiseChain", createPointwiseChainGraph},
-        GraphTopologyParam{"Diamond", createDiamondGraph}),
-    [](const ::testing::TestParamInfo<GraphTopologyParam>& info) { return info.param.name; });
+        {"ConvFwdBiasActiv",
+         [](Graph& g) { g = FrontendGraphFactory::createConvFwdBiasActivGraph(); }},
+        {"ConvReluFusion", createConvReluFusionGraph},
+        {"PointwiseChain", createPointwiseChainGraph},
+        {"Diamond", createDiamondGraph}};
+
+    return params;
+}
+
+// NOLINTNEXTLINE(cert-err58-cpp)
+INSTANTIATE_TEST_SUITE_P(GraphTopologies,
+                         TestGraphSerializationRoundTrip,
+                         ::testing::ValuesIn(getGraphTopologyParams()),
+                         [](const ::testing::TestParamInfo<GraphTopologyParam>& info) {
+                             return info.param.name;
+                         });

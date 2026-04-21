@@ -1,4 +1,4 @@
-# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
 # Standalone CMake script that embeds kernel source files as C++ string literals.
