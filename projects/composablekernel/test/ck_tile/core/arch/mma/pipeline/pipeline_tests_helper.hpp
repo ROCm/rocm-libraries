@@ -255,7 +255,8 @@ void run_pipeline_matrix_test_impl(uint32_t M,
                                    uint32_t waveSize,
                                    KernelType kernel,
                                    bool isSparse,
-                                   bool transposeExpected = false)
+                                   bool transposeExpected = false,
+                                   float referenceScale   = 1.0f)
 {
     std::vector<AScalar> A_matrix(M * K);
     std::vector<BScalar> B_matrix(K * N);
@@ -317,7 +318,8 @@ void run_pipeline_matrix_test_impl(uint32_t M,
             // so compare actual C[m][n] against reference C[n][m].
             float expected = transposeExpected ? static_cast<float>(C_expected[n * M + m])
                                                : static_cast<float>(C_expected[m * N + n]);
-            float actual   = static_cast<float>(C_actual[m * N + n]);
+            expected *= referenceScale;
+            float actual = static_cast<float>(C_actual[m * N + n]);
             EXPECT_NEAR(actual, expected, std::abs(expected) * 1e-2f + 1e-3f)
                 << "Mismatch at C[" << m << "][" << n << "]";
         }
@@ -342,6 +344,8 @@ void run_pipeline_matrix_test_impl(uint32_t M,
 /// @param  isSparse        Whether to apply 2:4 sparsity pattern to A
 /// @param  transposeExpected When true, compare against transposed reference (for
 /// SwapAB/TransposeC)
+/// @param  referenceScale  Scalar multiplier applied to the reference matmul result before
+///                         comparison (e.g., to account for scale-MMA scaling factors)
 template <template <typename> class PipelineFactory,
           typename KernelType,
           typename AScalar = fp16_t,
@@ -353,7 +357,8 @@ void run_pipeline_matrix_test(uint32_t M,
                               std::function<bool(ck_tile::core::arch::amdgcn_target_id)> shouldSkip,
                               KernelType kernel,
                               bool isSparse          = false,
-                              bool transposeExpected = false)
+                              bool transposeExpected = false,
+                              float referenceScale   = 1.0f)
 {
     int devCount;
     hipDevice_t dev;
@@ -382,7 +387,7 @@ void run_pipeline_matrix_test(uint32_t M,
         using Pipeline       = typename PipelineFactory<CompilerTarget>::type;
 
         run_pipeline_matrix_test_impl<Pipeline, KernelType, AScalar, BScalar, CScalar>(
-            M, N, K, waveSize, kernel, isSparse, transposeExpected);
+            M, N, K, waveSize, kernel, isSparse, transposeExpected, referenceScale);
     });
 
     if(!dispatched)
