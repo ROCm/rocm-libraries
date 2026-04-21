@@ -172,6 +172,18 @@ public:
         return setOutput(OutputNames::DBIAS, std::move(value));
     }
 
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    bool get_compute_dbias() const
+    {
+        return compute_dbias;
+    }
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    RMSNormBackwardAttributes& set_compute_dbias(bool value)
+    {
+        compute_dbias = value;
+        return *this;
+    }
+
     flatbuffers::Offset<hipdnn_data_sdk::data_objects::RMSNormBackwardAttributes>
         pack_attributes(flatbuffers::FlatBufferBuilder& builder) const // NOLINT
     {
@@ -210,10 +222,15 @@ public:
         if(fb->dbias_tensor_uid().has_value())
         {
             attr.set_dbias(tensorMap.at(fb->dbias_tensor_uid().value()));
+            attr.set_compute_dbias(true);
         }
 
         return attr;
     }
+
+private:
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    bool compute_dbias = false;
 };
 
 using Rmsnorm_backward_attributes

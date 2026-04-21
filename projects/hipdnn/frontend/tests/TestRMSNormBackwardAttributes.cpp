@@ -57,7 +57,22 @@ TEST(TestRMSNormBackwardAttributes, DefaultValues)
     EXPECT_EQ(attrs.get_scale(), nullptr);
     EXPECT_EQ(attrs.get_dx(), nullptr);
 
+    // dbias computation is opt-in
+    EXPECT_FALSE(attrs.get_compute_dbias());
+
     // Vector fields should be empty by default
+}
+
+TEST(TestRMSNormBackwardAttributes, SetComputeDbias)
+{
+    RMSNormBackwardAttributes attrs;
+    EXPECT_FALSE(attrs.get_compute_dbias());
+
+    attrs.set_compute_dbias(true);
+    EXPECT_TRUE(attrs.get_compute_dbias());
+
+    attrs.set_compute_dbias(false);
+    EXPECT_FALSE(attrs.get_compute_dbias());
 }
 
 TEST(TestRMSNormBackwardAttributes, PackAttributes)

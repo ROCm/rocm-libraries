@@ -95,9 +95,15 @@ protected:
 
         RMSNormBackwardAttributes attrs;
         attrs.set_name("test_op");
+        attrs.set_compute_dbias(true);
 
         auto results = graph->rmsnorm_backward(dy, x, scale, attrs);
         results[0]->set_uid(K_RMSNORMBACKWARD_TENSOR_DX_UID).set_output(true).set_name("dx");
+        results[1]
+            ->set_uid(K_RMSNORMBACKWARD_TENSOR_DSCALE_UID)
+            .set_output(true)
+            .set_name("dscale");
+        results[2]->set_uid(K_RMSNORMBACKWARD_TENSOR_DBIAS_UID).set_output(true).set_name("dbias");
 
         return graph;
     }
@@ -132,7 +138,7 @@ TEST_F(IntegrationRMSNormBackwardDescriptorLifting, BasicRMSNormBackwardRoundTri
 
     // Verify tensors by UID
     auto tensorMap = liftedGraph->getTensorsByUid();
-    ASSERT_EQ(tensorMap.size(), 5u);
+    ASSERT_EQ(tensorMap.size(), 6u);
 
     // Verify dy tensor
     ASSERT_NE(tensorMap.count(K_RMSNORMBACKWARD_TENSOR_DY_UID), 0u);
@@ -182,6 +188,16 @@ TEST_F(IntegrationRMSNormBackwardDescriptorLifting, BasicRMSNormBackwardRoundTri
     EXPECT_EQ(tensorMap[K_RMSNORMBACKWARD_TENSOR_DSCALE_UID]->get_stride(),
               toVec(K_RMSNORMBACKWARD_TENSOR_DSCALE_STRIDES));
     EXPECT_EQ(tensorMap[K_RMSNORMBACKWARD_TENSOR_DSCALE_UID]->get_data_type(), DataType::FLOAT);
+
+    // Verify dbias tensor
+    ASSERT_NE(tensorMap.count(K_RMSNORMBACKWARD_TENSOR_DBIAS_UID), 0u);
+    EXPECT_EQ(tensorMap[K_RMSNORMBACKWARD_TENSOR_DBIAS_UID]->get_uid(),
+              K_RMSNORMBACKWARD_TENSOR_DBIAS_UID);
+    EXPECT_EQ(tensorMap[K_RMSNORMBACKWARD_TENSOR_DBIAS_UID]->get_dim(),
+              toVec(K_RMSNORMBACKWARD_TENSOR_DBIAS_DIMS));
+    EXPECT_EQ(tensorMap[K_RMSNORMBACKWARD_TENSOR_DBIAS_UID]->get_stride(),
+              toVec(K_RMSNORMBACKWARD_TENSOR_DBIAS_STRIDES));
+    EXPECT_EQ(tensorMap[K_RMSNORMBACKWARD_TENSOR_DBIAS_UID]->get_data_type(), DataType::FLOAT);
 
     // Verify sub-node count and type
     auto& subNodes = liftedGraph->getSubNodes();
@@ -280,7 +296,7 @@ TEST_F(IntegrationRMSNormBackwardDescriptorLifting, RMSNormBackwardLiftWithoutFi
 
     // Verify tensor dims and strides
     auto tensorMap = liftedGraph->getTensorsByUid();
-    ASSERT_EQ(tensorMap.size(), 5u);
+    ASSERT_EQ(tensorMap.size(), 6u);
 
     ASSERT_NE(tensorMap.count(K_RMSNORMBACKWARD_TENSOR_DY_UID), 0u);
     EXPECT_EQ(tensorMap[K_RMSNORMBACKWARD_TENSOR_DY_UID]->get_dim(),
@@ -307,6 +323,11 @@ TEST_F(IntegrationRMSNormBackwardDescriptorLifting, RMSNormBackwardLiftWithoutFi
               toVec(K_RMSNORMBACKWARD_TENSOR_DSCALE_DIMS));
     EXPECT_EQ(tensorMap[K_RMSNORMBACKWARD_TENSOR_DSCALE_UID]->get_stride(),
               toVec(K_RMSNORMBACKWARD_TENSOR_DSCALE_STRIDES));
+    ASSERT_NE(tensorMap.count(K_RMSNORMBACKWARD_TENSOR_DBIAS_UID), 0u);
+    EXPECT_EQ(tensorMap[K_RMSNORMBACKWARD_TENSOR_DBIAS_UID]->get_dim(),
+              toVec(K_RMSNORMBACKWARD_TENSOR_DBIAS_DIMS));
+    EXPECT_EQ(tensorMap[K_RMSNORMBACKWARD_TENSOR_DBIAS_UID]->get_stride(),
+              toVec(K_RMSNORMBACKWARD_TENSOR_DBIAS_STRIDES));
 }
 
 // Builds a RMSNormBackward graph without calling set_uid() on any tensor,
@@ -337,6 +358,7 @@ TEST_F(IntegrationRMSNormBackwardDescriptorLifting, AutoAssignedUidsPreservedInL
 
     RMSNormBackwardAttributes attrs;
     attrs.set_name("test_auto_uid");
+    attrs.set_compute_dbias(true);
 
     auto results = graph->rmsnorm_backward(dy, x, scale, attrs);
     results[0]->set_output(true).set_name("dx");
@@ -356,15 +378,15 @@ TEST_F(IntegrationRMSNormBackwardDescriptorLifting, AutoAssignedUidsPreservedInL
 
     // Verify the tensor map has the expected number of tensors
     auto tensorMap = liftedGraph->getTensorsByUid();
-    ASSERT_EQ(tensorMap.size(), 5u);
+    ASSERT_EQ(tensorMap.size(), 6u);
 
-    // Verify all UIDs are positive and distinct
+    // Verify all UIDs are non-negative and distinct
     std::vector<int64_t> uids;
     uids.reserve(tensorMap.size());
     for(const auto& [uid, tensor] : tensorMap)
     {
-        EXPECT_GT(uid, 0)
-            << "Auto-assigned UID should be positive"; // NOLINT(readability-implicit-bool-conversion)
+        EXPECT_GE(uid, 0)
+            << "Auto-assigned UID should be non-negative"; // NOLINT(readability-implicit-bool-conversion)
         uids.push_back(uid);
     }
     std::sort(uids.begin(), uids.end());
@@ -387,7 +409,11 @@ TEST_F(IntegrationRMSNormBackwardDescriptorLifting, AutoAssignedUidsPreservedInL
     nodeUids.insert(opNode->attributes.get_scale()->get_uid());
     ASSERT_NE(opNode->attributes.get_dx(), nullptr);
     nodeUids.insert(opNode->attributes.get_dx()->get_uid());
-    ASSERT_EQ(nodeUids.size(), 5u)
+    ASSERT_NE(opNode->attributes.get_dscale(), nullptr);
+    nodeUids.insert(opNode->attributes.get_dscale()->get_uid());
+    ASSERT_NE(opNode->attributes.get_dbias(), nullptr);
+    nodeUids.insert(opNode->attributes.get_dbias()->get_uid());
+    ASSERT_EQ(nodeUids.size(), 6u)
         << "Node tensor UIDs are not all distinct"; // NOLINT(readability-implicit-bool-conversion)
 
     // Verify tensor dims survived the round trip

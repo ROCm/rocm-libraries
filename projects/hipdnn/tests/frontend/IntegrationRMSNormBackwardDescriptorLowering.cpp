@@ -90,7 +90,11 @@ protected:
         scale->set_dim(toVec(K_RMSNORMBACKWARD_TENSOR_SCALE_DIMS))
             .set_stride(toVec(K_RMSNORMBACKWARD_TENSOR_SCALE_STRIDES));
 
-        graph->rmsnorm_backward(dy, x, scale, std::move(attrs));
+        attrs.set_compute_dbias(true);
+        auto [dx, dscale, dbias] = graph->rmsnorm_backward(dy, x, scale, std::move(attrs));
+        dx->set_uid(K_RMSNORMBACKWARD_TENSOR_DX_UID).set_output(true).set_name("DX");
+        dscale->set_uid(K_RMSNORMBACKWARD_TENSOR_DSCALE_UID).set_output(true).set_name("DScale");
+        dbias->set_uid(K_RMSNORMBACKWARD_TENSOR_DBIAS_UID).set_output(true).set_name("DBias");
         auto result = graph->validate();
         EXPECT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
@@ -126,8 +130,8 @@ TEST_F(IntegrationRMSNormBackwardDescriptorLowering, RMSNormBackwardLoweringRoun
 
     auto graphT = buildAndDeserialize(attrs);
 
-    // Verify tensors
-    ASSERT_EQ(graphT.tensors.size(), 5u);
+    // Verify tensors: dy, x, scale, dx, dscale, dbias = 6 tensors
+    ASSERT_EQ(graphT.tensors.size(), 6u);
 
     // Verify tensor attributes
     std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributesT*> tensorMap;
@@ -165,6 +169,12 @@ TEST_F(IntegrationRMSNormBackwardDescriptorLowering, RMSNormBackwardLoweringRoun
     EXPECT_EQ(tensorMap[K_RMSNORMBACKWARD_TENSOR_DSCALE_UID]->strides,
               toVec(K_RMSNORMBACKWARD_TENSOR_DSCALE_STRIDES));
     EXPECT_EQ(tensorMap[K_RMSNORMBACKWARD_TENSOR_DSCALE_UID]->data_type, DataTypeSdk::FLOAT);
+    ASSERT_NE(tensorMap.count(K_RMSNORMBACKWARD_TENSOR_DBIAS_UID), 0u);
+    EXPECT_EQ(tensorMap[K_RMSNORMBACKWARD_TENSOR_DBIAS_UID]->dims,
+              toVec(K_RMSNORMBACKWARD_TENSOR_DBIAS_DIMS));
+    EXPECT_EQ(tensorMap[K_RMSNORMBACKWARD_TENSOR_DBIAS_UID]->strides,
+              toVec(K_RMSNORMBACKWARD_TENSOR_DBIAS_STRIDES));
+    EXPECT_EQ(tensorMap[K_RMSNORMBACKWARD_TENSOR_DBIAS_UID]->data_type, DataTypeSdk::FLOAT);
 
     // Verify operation node
     ASSERT_EQ(graphT.nodes.size(), 1u);
@@ -180,6 +190,7 @@ TEST_F(IntegrationRMSNormBackwardDescriptorLowering, RMSNormBackwardLoweringRoun
     EXPECT_EQ(opNode->scale_tensor_uid, K_RMSNORMBACKWARD_TENSOR_SCALE_UID);
     EXPECT_EQ(opNode->dx_tensor_uid, K_RMSNORMBACKWARD_TENSOR_DX_UID);
     EXPECT_EQ(opNode->dscale_tensor_uid, K_RMSNORMBACKWARD_TENSOR_DSCALE_UID);
+    EXPECT_EQ(opNode->dbias_tensor_uid, K_RMSNORMBACKWARD_TENSOR_DBIAS_UID);
 
     // Verify operation name preserved through lowering
     EXPECT_EQ(node->name, "test_op");

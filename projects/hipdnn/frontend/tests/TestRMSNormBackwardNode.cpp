@@ -239,14 +239,53 @@ TEST(TestRMSNormBackwardNode, PreValidateNodeAllValuesSet)
 
 TEST(TestRMSNormBackwardNode, InferPropertiesNode)
 {
-    auto attrs = createValidAttributes();
+    RMSNormBackwardAttributes attrs;
+    attrs.set_dy(std::make_shared<TensorAttributes>());
+    attrs.set_x(std::make_shared<TensorAttributes>());
+    attrs.set_scale(std::make_shared<TensorAttributes>());
+    attrs.set_dx(std::make_shared<TensorAttributes>());
+    attrs.set_dscale(std::make_shared<TensorAttributes>());
+    attrs.set_dbias(std::make_shared<TensorAttributes>());
+
+    auto dyTensor = attrs.get_dy();
+    dyTensor->set_uid(1)
+        .set_name("DyTensor")
+        .set_data_type(DataType::FLOAT)
+        .set_dim({1, 2, 3, 4})
+        .set_stride({24, 12, 4, 1}); // NCHW layout
+
+    auto scaleTensor = attrs.get_scale();
+    scaleTensor->set_uid(2)
+        .set_name("ScaleTensor")
+        .set_data_type(DataType::FLOAT)
+        .set_dim({1, 2, 1, 1})
+        .set_stride({2, 1, 1, 1});
+
+    auto dxTensor = attrs.get_dx();
+    dxTensor->set_uid(3).set_name("DxTensor");
+
+    auto dscaleTensor = attrs.get_dscale();
+    dscaleTensor->set_uid(4).set_name("DscaleTensor");
+
+    auto dbiasTensor = attrs.get_dbias();
+    dbiasTensor->set_uid(5).set_name("DbiasTensor");
 
     const GraphAttributes graphAttributes;
     RMSNormBackwardNode node(std::move(attrs), graphAttributes);
 
     auto error = node.infer_properties_node();
-    // Stub implementation: verify the method can be called without error
     EXPECT_EQ(error.code, error_code_t::OK) << error.err_msg;
+
+    EXPECT_EQ(dxTensor->get_dim(), (std::vector<int64_t>{1, 2, 3, 4}));
+    EXPECT_EQ(dxTensor->get_stride(), (std::vector<int64_t>{24, 12, 4, 1}));
+
+    EXPECT_EQ(dscaleTensor->get_dim(), (std::vector<int64_t>{1, 2, 1, 1}));
+    EXPECT_EQ(dscaleTensor->get_stride(),
+              (std::vector<int64_t>{2, 1, 1, 1})); // Inherits NCHW layout
+
+    EXPECT_EQ(dbiasTensor->get_dim(), (std::vector<int64_t>{1, 2, 1, 1}));
+    EXPECT_EQ(dbiasTensor->get_stride(),
+              (std::vector<int64_t>{2, 1, 1, 1})); // Inherits NCHW layout
 }
 
 // --- PackNode ---

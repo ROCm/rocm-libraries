@@ -2287,11 +2287,13 @@ public:
      * @param x Original input from forward pass
      * @param scale Per-channel scale (gamma)
      * @param attributes Configuration; optionally set saved inv_rms from
-     *        the forward pass via set_inv_rms()
+     *        the forward pass via set_inv_rms(), and opt into dbias
+     *        computation via set_compute_dbias(true)
      * @return Array of 3 output tensors:
      *         - [0] dx: Gradient w.r.t. input (same shape as x)
      *         - [1] dscale: Per-channel gradient w.r.t. scale
-     *         - [2] dbias: Per-channel gradient w.r.t. bias (nullptr if not requested)
+     *         - [2] dbias: Per-channel gradient w.r.t. bias; nullptr unless
+     *           attributes.set_compute_dbias(true) was called before this
      *
      * @see hipdnn_frontend::graph::RMSNormBackwardAttributes
      */
@@ -2310,14 +2312,19 @@ public:
 
         auto dx = outputTensor(attributes.get_name() + "::DX");
         auto dscale = outputTensor(attributes.get_name() + "::DSCALE");
-        auto dbias = outputTensor(attributes.get_name() + "::DBIAS");
+
+        std::shared_ptr<TensorAttributes> dbias;
+        if(attributes.get_compute_dbias())
+        {
+            dbias = outputTensor(attributes.get_name() + "::DBIAS");
+            attributes.set_dbias(dbias);
+        }
 
         attributes.set_dy(std::move(dy));
         attributes.set_x(std::move(x));
         attributes.set_scale(std::move(scale));
         attributes.set_dx(dx);
         attributes.set_dscale(dscale);
-        attributes.set_dbias(dbias);
 
         _sub_nodes.emplace_back(
             std::make_shared<RMSNormBackwardNode>(std::move(attributes), graph_attributes));
