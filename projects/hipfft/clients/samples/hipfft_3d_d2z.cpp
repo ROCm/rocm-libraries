@@ -48,8 +48,7 @@ int main()
     const size_t complex_bytes = 2 * sizeof(double) * Nx * Ny * Nzcomplex;
 
     double*    x;
-    hipError_t hip_rt;
-    hip_rt = hipMalloc(&x, real_bytes);
+    hipError_t hip_rt = hipMalloc(&x, real_bytes);
     if(hip_rt != hipSuccess)
         throw std::runtime_error("hipMalloc failed");
 
@@ -80,12 +79,12 @@ int main()
 
     // Create plan (hipfftPlan3d internally allocates the handle)
     hipfftHandle plan{};
-    hipfftResult hipfft_rt;
-    hipfft_rt = hipfftPlan3d(&plan, // plan handle
-                             Nx,
-                             Ny,
-                             Nz, // transform lengths
-                             HIPFFT_D2Z); // transform type (HIPFFT_R2C for single-precision)
+    hipfftResult hipfft_rt
+        = hipfftPlan3d(&plan, // plan handle
+                       Nx,
+                       Ny,
+                       Nz, // transform lengths
+                       HIPFFT_D2Z); // transform type (HIPFFT_R2C for single-precision)
     if(hipfft_rt != HIPFFT_SUCCESS)
         throw std::runtime_error("hipfftPlan3d failed");
 

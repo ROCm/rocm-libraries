@@ -318,18 +318,12 @@ int main(int argc, char* argv[])
     if(rocfft_cleanup() != rocfft_status_success)
         throw std::runtime_error("rocfft_cleanup failed.");
 
-    // Free work buffers
+    // Free work buffers and input/output buffers (indexed by brick, not device id)
     for(size_t idx = 0; idx < devices.size(); ++idx)
     {
         (void)hipSetDevice(devices[idx]);
         if(work_bufs[idx])
             (void)hipFree(work_bufs[idx]);
-    }
-
-    // Free input/output buffers (indexed by brick, not device id)
-    for(size_t idx = 0; idx < devices.size(); ++idx)
-    {
-        (void)hipSetDevice(devices[idx]);
         (void)hipFree(gpu_in[idx]);
         (void)hipFree(gpu_out[idx]);
     }

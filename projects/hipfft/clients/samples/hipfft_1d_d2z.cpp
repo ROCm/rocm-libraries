@@ -46,8 +46,7 @@ int main()
 
     // Create HIP device object
     double*    x;
-    hipError_t hip_rt;
-    hip_rt = hipMalloc(&x, complex_bytes);
+    hipError_t hip_rt = hipMalloc(&x, complex_bytes);
     if(hip_rt != hipSuccess)
         throw std::runtime_error("hipMalloc failed");
 
@@ -68,11 +67,11 @@ int main()
 
     // Create the plan (hipfftPlan1d internally allocates the handle)
     hipfftHandle plan{};
-    hipfftResult hipfft_rt;
-    hipfft_rt = hipfftPlan1d(&plan, // plan handle
-                             Nx, // transform length
-                             HIPFFT_D2Z, // transform type (HIPFFT_R2C for single-precision)
-                             1); // number of transforms (deprecated)
+    hipfftResult hipfft_rt
+        = hipfftPlan1d(&plan, // plan handle
+                       Nx, // transform length
+                       HIPFFT_D2Z, // transform type (HIPFFT_R2C for single-precision)
+                       1); // number of transforms (deprecated)
     if(hipfft_rt != HIPFFT_SUCCESS)
         throw std::runtime_error("hipfftPlan1d failed");
 

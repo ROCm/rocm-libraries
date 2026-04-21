@@ -90,25 +90,23 @@ int main()
     std::cout << std::endl;
 
     hipfftHandle hipForwardPlan;
-    hipfftResult hipfft_rt;
-    hipfft_rt = hipfftPlanMany(&hipForwardPlan,
-                               rank,
-                               n,
-                               inembed,
-                               istride,
-                               idist,
-                               onembed,
-                               ostride,
-                               odist,
-                               HIPFFT_R2C, // Use HIPFFT_D2Z for double-precsion.
-                               howmany);
+    hipfftResult hipfft_rt = hipfftPlanMany(&hipForwardPlan,
+                                            rank,
+                                            n,
+                                            inembed,
+                                            istride,
+                                            idist,
+                                            onembed,
+                                            ostride,
+                                            odist,
+                                            HIPFFT_R2C, // Use HIPFFT_D2Z for double-precsion.
+                                            howmany);
     if(hipfft_rt != HIPFFT_SUCCESS)
         throw std::runtime_error("failed to create plan");
 
     hipfftReal* gpu_data;
 
-    hipError_t hip_rt;
-    hip_rt = hipMalloc((void**)&gpu_data, total_bytes);
+    hipError_t hip_rt = hipMalloc((void**)&gpu_data, total_bytes);
     if(hip_rt != hipSuccess)
         throw std::runtime_error("hipMalloc failed");
 
