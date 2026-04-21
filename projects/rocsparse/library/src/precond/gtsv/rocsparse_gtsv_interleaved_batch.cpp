@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -198,7 +198,7 @@ namespace rocsparse
         rocsparse_int* p = reinterpret_cast<rocsparse_int*>(reinterpret_cast<void*>(ptr));
         // ptr += ((sizeof(rocsparse_int) * m * batch_count - 1) / 256 + 1) * 256;
 
-        RETURN_IF_HIP_ERROR(hipMemsetAsync(
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(
             u2, 0, ((sizeof(T) * m * batch_count - 1) / 256 + 1) * 256, handle->stream));
 
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::gtsv_interleaved_batch_lu_kernel<128>),
@@ -236,7 +236,7 @@ namespace rocsparse
         T*    r2  = reinterpret_cast<T*>(ptr);
         //   ptr += ((sizeof(T) * m * batch_count - 1) / 256 + 1) * 256;
 
-        RETURN_IF_HIP_ERROR(hipMemsetAsync(
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(
             r2, 0, ((sizeof(T) * m * batch_count - 1) / 256 + 1) * 256, handle->stream));
 
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::gtsv_interleaved_batch_qr_kernel<128>),

@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -45,23 +45,23 @@ namespace rocsparse
             return rocsparse_status_success;
         }
 
-        // Extract z pointers directly to device array using hipMemsetAsync and hipMemcpyAsync
+        // Extract z pointers directly to device array using rocsparse_hipMemsetAsync and rocsparse_hipMemcpyAsync
         for(rocsparse_int i = 0; i < num_extra; ++i)
         {
             if(z_vecs != nullptr && z_vecs[i] != nullptr)
             {
                 // Copy the pointer value directly to device array element
-                RETURN_IF_HIP_ERROR(hipMemcpyAsync((void*)(&z_array[i]),
-                                                   &(z_vecs[i]->const_values),
-                                                   sizeof(const Z*),
-                                                   hipMemcpyHostToDevice,
-                                                   handle->stream));
+                RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync((void*)(&z_array[i]),
+                                                             &(z_vecs[i]->const_values),
+                                                             sizeof(const Z*),
+                                                             hipMemcpyHostToDevice,
+                                                             handle->stream));
             }
             else
             {
-                // Set z_array[i] to nullptr using hipMemsetAsync
-                RETURN_IF_HIP_ERROR(
-                    hipMemsetAsync((void*)(&z_array[i]), 0, sizeof(const Z*), handle->stream));
+                // Set z_array[i] to nullptr using rocsparse_hipMemsetAsync
+                RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(
+                    (void*)(&z_array[i]), 0, sizeof(const Z*), handle->stream));
             }
         }
 
@@ -71,18 +71,18 @@ namespace rocsparse
             // The gamma values are in the dnvec, copy them to the device array
             const T* gamma_data = reinterpret_cast<const T*>(gamma_vec->const_values);
 
-            RETURN_IF_HIP_ERROR(hipMemcpyAsync((void*)gamma_device_array,
-                                               gamma_data,
-                                               num_extra * sizeof(T),
-                                               handle->pointer_mode == rocsparse_pointer_mode_host
-                                                   ? hipMemcpyHostToDevice
-                                                   : hipMemcpyDeviceToDevice,
-                                               handle->stream));
+            RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
+                (void*)gamma_device_array,
+                gamma_data,
+                num_extra * sizeof(T),
+                handle->pointer_mode == rocsparse_pointer_mode_host ? hipMemcpyHostToDevice
+                                                                    : hipMemcpyDeviceToDevice,
+                handle->stream));
         }
         else
         {
             // If gamma_vec is null, set all gamma values to zero
-            RETURN_IF_HIP_ERROR(hipMemsetAsync(
+            RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(
                 (void*)gamma_device_array, 0, num_extra * sizeof(T), handle->stream));
         }
 

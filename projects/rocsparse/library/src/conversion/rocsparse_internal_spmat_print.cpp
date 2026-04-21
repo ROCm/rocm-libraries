@@ -71,9 +71,9 @@ namespace rocsparse
         }
 
         const size_t indextype_sizeof = rocsparse::indextype_sizeof(indextype);
-        void*        hind;
-        RETURN_IF_HIP_ERROR(rocsparse_hipHostMalloc(&hind, indextype_sizeof * nmemb));
-        RETURN_IF_HIP_ERROR(hipMemcpy(hind, dind, indextype_sizeof * nmemb, hipMemcpyDeviceToHost));
+        void*        hind             = malloc(indextype_sizeof * nmemb);
+        RETURN_IF_HIP_ERROR(
+            rocsparse_hipMemcpy(hind, dind, indextype_sizeof * nmemb, hipMemcpyDeviceToHost));
         switch(indextype)
         {
         case rocsparse_indextype_i32:
@@ -91,7 +91,7 @@ namespace rocsparse
             break;
         }
         }
-        RETURN_IF_HIP_ERROR(rocsparse_hipFree(hind));
+        free(hind);
         return rocsparse_status_success;
     }
 
@@ -107,9 +107,9 @@ namespace rocsparse
         }
 
         const size_t indextype_sizeof = rocsparse::indextype_sizeof(indextype);
-        void*        hind;
-        RETURN_IF_HIP_ERROR(rocsparse_hipHostMalloc(&hind, indextype_sizeof * m * n));
-        RETURN_IF_HIP_ERROR(hipMemcpy(hind, dind, indextype_sizeof * m * n, hipMemcpyDeviceToHost));
+        void*        hind             = malloc(indextype_sizeof * m * n);
+        RETURN_IF_HIP_ERROR(
+            rocsparse_hipMemcpy(hind, dind, indextype_sizeof * m * n, hipMemcpyDeviceToHost));
         switch(indextype)
         {
         case rocsparse_indextype_i32:
@@ -127,7 +127,7 @@ namespace rocsparse
             break;
         }
         }
-        RETURN_IF_HIP_ERROR(rocsparse_hipFree(hind));
+        free(hind);
         return rocsparse_status_success;
     }
 
@@ -144,9 +144,9 @@ namespace rocsparse
             return rocsparse_status_success;
         }
         const size_t datatype_sizeof = rocsparse::datatype_sizeof(datatype);
-        void*        hind;
-        RETURN_IF_HIP_ERROR(rocsparse_hipHostMalloc(&hind, datatype_sizeof * nmemb));
-        RETURN_IF_HIP_ERROR(hipMemcpy(hind, dind, datatype_sizeof * nmemb, hipMemcpyDeviceToHost));
+        void*        hind            = malloc(datatype_sizeof * nmemb);
+        RETURN_IF_HIP_ERROR(
+            rocsparse_hipMemcpy(hind, dind, datatype_sizeof * nmemb, hipMemcpyDeviceToHost));
         switch(datatype)
         {
         case rocsparse_datatype_f16_r:
@@ -200,7 +200,7 @@ namespace rocsparse
             break;
         }
         }
-        RETURN_IF_HIP_ERROR(rocsparse_hipFree(hind));
+        free(hind);
         return rocsparse_status_success;
     }
 
@@ -214,10 +214,11 @@ namespace rocsparse
         {
             return rocsparse_status_success;
         }
+
         const size_t datatype_sizeof = rocsparse::datatype_sizeof(datatype);
-        void*        hind;
-        RETURN_IF_HIP_ERROR(rocsparse_hipHostMalloc(&hind, datatype_sizeof * m * n));
-        RETURN_IF_HIP_ERROR(hipMemcpy(hind, dind, datatype_sizeof * m * n, hipMemcpyDeviceToHost));
+        void*        hind            = malloc(datatype_sizeof * m * n);
+        RETURN_IF_HIP_ERROR(
+            rocsparse_hipMemcpy(hind, dind, datatype_sizeof * m * n, hipMemcpyDeviceToHost));
         switch(datatype)
         {
         case rocsparse_datatype_f16_r:
@@ -271,7 +272,7 @@ namespace rocsparse
             break;
         }
         }
-        RETURN_IF_HIP_ERROR(rocsparse_hipFree(hind));
+        free(hind);
         return rocsparse_status_success;
     }
 }

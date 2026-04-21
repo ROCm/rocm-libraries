@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -44,7 +44,7 @@ void _rocsparse_csritsv_info::copy(const _rocsparse_csritsv_info* that, hipStrea
     this->ptr_end_indextype = that->ptr_end_indextype;
     this->ptr_end           = that->ptr_end;
     this->rocsparse::pivot_info_t::copy_pivot_info_async(that, stream);
-    THROW_IF_HIP_ERROR(hipStreamSynchronize(stream));
+    THROW_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(stream));
 }
 
 /********************************************************************************
@@ -60,7 +60,7 @@ _rocsparse_csritsv_info::~_rocsparse_csritsv_info()
         // we need to introduce a device synchronize here as the below hipFree calls are now asynchronous.
         // hipFree() previously had an implicit wait for synchronization purpose which is applicable for all memory allocations.
         // This wait has been disabled in the HIP 7.0 runtime for allocations made with hipMallocAsync and hipMallocFromPoolAsync.
-        WARNING_IF_HIP_ERROR(hipDeviceSynchronize());
+        WARNING_IF_HIP_ERROR(rocsparse_hipDeviceSynchronize());
 
         WARNING_IF_HIP_ERROR(rocsparse_hipFree(this->ptr_end));
         this->ptr_end = nullptr;

@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -705,7 +705,7 @@ public:
                     //
                     // Compute norm of residual.
                     //
-                    RETURN_IF_HIP_ERROR(hipMemsetAsync(
+                    RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(
                         p_nrm_residual, 0, sizeof(floating_data_t<T>), handle_->stream));
                 }
 
@@ -756,7 +756,7 @@ public:
                         //
                         RETURN_IF_HIP_ERROR(
                             rocsparse::on_host(&nrm_residual, p_nrm_residual, stream));
-                        RETURN_IF_HIP_ERROR(hipStreamSynchronize(stream));
+                        RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(stream));
                     }
                 }
 

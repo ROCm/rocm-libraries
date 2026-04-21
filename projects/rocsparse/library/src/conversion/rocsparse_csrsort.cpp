@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -217,19 +217,19 @@ try
 
         if(keys.current() != csr_col_ind)
         {
-            RETURN_IF_HIP_ERROR(hipMemcpyAsync(csr_col_ind,
-                                               keys.current(),
-                                               sizeof(rocsparse_int) * nnz,
-                                               hipMemcpyDeviceToDevice,
-                                               stream));
+            RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(csr_col_ind,
+                                                         keys.current(),
+                                                         sizeof(rocsparse_int) * nnz,
+                                                         hipMemcpyDeviceToDevice,
+                                                         stream));
         }
         if(vals.current() != perm)
         {
-            RETURN_IF_HIP_ERROR(hipMemcpyAsync(perm,
-                                               vals.current(),
-                                               sizeof(rocsparse_int) * nnz,
-                                               hipMemcpyDeviceToDevice,
-                                               stream));
+            RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(perm,
+                                                         vals.current(),
+                                                         sizeof(rocsparse_int) * nnz,
+                                                         hipMemcpyDeviceToDevice,
+                                                         stream));
         }
     }
     else
@@ -242,11 +242,11 @@ try
 
         if(keys.current() != csr_col_ind)
         {
-            RETURN_IF_HIP_ERROR(hipMemcpyAsync(csr_col_ind,
-                                               keys.current(),
-                                               sizeof(rocsparse_int) * nnz,
-                                               hipMemcpyDeviceToDevice,
-                                               stream));
+            RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(csr_col_ind,
+                                                         keys.current(),
+                                                         sizeof(rocsparse_int) * nnz,
+                                                         hipMemcpyDeviceToDevice,
+                                                         stream));
         }
     }
     return rocsparse_status_success;
