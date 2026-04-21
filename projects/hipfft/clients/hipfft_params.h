@@ -899,23 +899,6 @@ public:
                         xt_output->descriptor->nGPUs,
                         std::back_inserter(pobuffer));
         }
-
-        // create bricks for this transform so we can confirm data layout
-        hipLibXtDesc* compare_desc
-            = placement == fft_placement_inplace ? xt_output.get() : xt_input.get();
-        xt_inBricks.resize(compare_desc->descriptor->nGPUs);
-        xt_outBricks.resize(compare_desc->descriptor->nGPUs);
-        set_io_bricks(ilength_cm(), olength_cm(), nbatch, xt_inBricks, xt_outBricks);
-
-        // check cufftXtMemcpy versus hipfft's implementation
-        if(!xt_desc_matches_brick(input_host,
-                                  istride,
-                                  idist,
-                                  compare_desc->descriptor,
-                                  xt_inBricks,
-                                  var_size<size_t>(precision, itype),
-                                  "input"))
-            throw std::runtime_error("Xt input does not match");
     }
 
     // call the hipFFT APIs to gather the data back from the multiple GPUs

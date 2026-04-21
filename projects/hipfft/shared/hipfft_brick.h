@@ -33,18 +33,17 @@
 #include "data_layout.h"
 #include "fft_enums.h"
 
-// column-major ordering on indexes + strides, since these get passed
-// directly to rocFFT
 struct hipfft_brick
 {
-    // device that the brick lives on
+    // Device that the brick lives on
     int device = 0;
 
+    // Row-major
     std::vector<size_t> field_lower;
     std::vector<size_t> field_upper;
     std::vector<size_t> brick_stride;
 
-    // compute the length of this brick
+    // Compute the length of this brick
     std::vector<size_t> length() const
     {
         std::vector<size_t> ret;
@@ -53,53 +52,28 @@ struct hipfft_brick
         return ret;
     }
 
-    // given a (column-major) brick index, return the offset in the field
+    // Given brick index, return the offset in the field
     size_t field_offset(const std::vector<size_t>& brick_idx,
                         const std::vector<size_t>& field_stride) const
     {
-        // find the index in the field
+        // Find the index in the field
         std::vector<size_t> field_idx;
         for(size_t i = 0; i < brick_idx.size(); ++i)
             field_idx.push_back(brick_idx[i] + field_lower[i]);
 
-        // based on the field's strides, return offset
+        // Based on the field's strides, return offset
         return std::inner_product(field_idx.begin(), field_idx.end(), field_stride.begin(), 0);
     }
 
-    // given a (column-major) brick index, return the offset in this brick
+    // Given abrick index, return the offset in this brick
     size_t brick_offset(const std::vector<size_t>& brick_idx) const
     {
-        // based on the brick's strides, return offset
+        // Based on the brick's strides, return offset
         return std::inner_product(brick_idx.begin(), brick_idx.end(), brick_stride.begin(), 0);
     }
 };
 
-// lengths include batch dimension (col-major), split_dim is counted with 0 = fastest dim.
-static void set_bricks(const std::vector<size_t>& length,
-                       std::vector<hipfft_brick>& bricks,
-                       const size_t               split_dim)
-{
-    const size_t dim = length.size();
-
-    for(size_t i = 0; i < bricks.size(); ++i)
-    {
-        auto& brick = bricks[i];
-
-        // lower idx starts at origin, upper is one-past-the-end
-        brick.field_lower.resize(dim);
-        std::fill(brick.field_lower.begin(), brick.field_lower.end(), 0);
-        brick.field_upper = length;
-
-        // length of the brick along the split dimension
-        size_t split_len             = length[split_dim] / bricks.size();
-        brick.field_lower[split_dim] = split_len * i;
-        if(i != bricks.size() - 1)
-            brick.field_upper[split_dim] = brick.field_lower[split_dim] + split_len;
-        //brick.set_contiguous_stride(); // FIXME
-    }
-}
-
-// FIXME: documentation.
+// Given an array of bricks, set the brick format
 static void hipfftxt_bricks(const std::vector<size_t>& batchlength,
                             std::vector<hipfft_brick>& bricks,
                             const bool                 isrealcomplex,
@@ -182,8 +156,8 @@ static void hipfftxt_bricks(const std::vector<size_t>& batchlength,
         batchlengthdata[hindex] = hlength / 2 + 1;
     }
 
-    const auto ngpus = bricks.size();
-    for(size_t ibrick = 0; ibrick < bricks.size(); ++ibrick)
+    const auto nbricks = bricks.size();
+    for(size_t ibrick = 0; ibrick < nbricks; ++ibrick)
     {
         auto& brick = bricks[ibrick];
 
@@ -193,7 +167,7 @@ static void hipfftxt_bricks(const std::vector<size_t>& batchlength,
             brick.field_lower[splitdim] = bricks[ibrick - 1].field_lower[splitdim];
 
         const size_t splitlen      = batchlengthdata[splitdim];
-        const size_t bricksplitlen = splitlen / ngpus + (ibrick < splitlen % bricks.size() ? 1 : 0);
+        const size_t bricksplitlen = splitlen / nbricks + (ibrick < splitlen % nbricks ? 1 : 0);
         brick.field_upper          = batchlengthdata;
         if(ibrick > 0)
         {
@@ -204,32 +178,6 @@ static void hipfftxt_bricks(const std::vector<size_t>& batchlength,
         brick.brick_stride
             = default_strides(dft_type, placement, io, brick.field_lower, brick.field_upper);
     }
-}
-
-// FIXME: remove this.
-// length/strides are column-major.  in/out brick vectors are
-// allocated by caller, but coordinates/strides of those bricks are
-// filled in by this function
-static void set_io_bricks(const std::vector<size_t>& inLength,
-                          const std::vector<size_t>& outLength,
-                          size_t                     batch,
-                          std::vector<hipfft_brick>& inBricks,
-                          std::vector<hipfft_brick>& outBricks)
-{
-    std::vector<size_t> inLengthWithBatch = inLength;
-    inLengthWithBatch.push_back(batch);
-    std::vector<size_t> outLengthWithBatch = outLength;
-    outLengthWithBatch.push_back(batch);
-
-    // for batched FFT, split input on batch, otherwise split input
-    // on fastest FFT dim and output on slowest FFT dim
-    const size_t in_split_dim
-        = batch > 1 ? inLengthWithBatch.size() - 1 : inLengthWithBatch.size() - 2;
-    const size_t out_split_dim
-        = batch > 1 ? outLengthWithBatch.size() - 1 : outLengthWithBatch.size() - 2;
-
-    set_bricks(inLengthWithBatch, inBricks, in_split_dim);
-    set_bricks(outLengthWithBatch, outBricks, out_split_dim);
 }
 
 #endif
