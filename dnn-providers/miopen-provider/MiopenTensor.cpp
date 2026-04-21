@@ -12,10 +12,11 @@ namespace miopen_plugin
 namespace
 {
 template <typename Container>
-miopenTensorDescriptor_t createTensorDescriptor(int64_t uid,
-                                                hipdnn_data_sdk::data_objects::DataType dataType,
-                                                const Container& inputDims,
-                                                const Container& inputStrides)
+miopenTensorDescriptor_t
+    createTensorDescriptor(int64_t uid,
+                           hipdnn_flatbuffers_sdk::data_objects::DataType dataType,
+                           const Container& inputDims,
+                           const Container& inputStrides)
 {
     // Validate dims and strides size match
     if(inputDims.size() != inputStrides.size())
@@ -87,7 +88,7 @@ miopenTensorDescriptor_t createTensorDescriptor(int64_t uid,
 }
 } // namespace
 
-MiopenTensor::MiopenTensor(const hipdnn_data_sdk::data_objects::TensorAttributes& tensor)
+MiopenTensor::MiopenTensor(const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& tensor)
     : _uid(tensor.uid())
 {
     PLUGIN_THROW_IF_NULL(tensor.dims(),
@@ -102,7 +103,7 @@ MiopenTensor::MiopenTensor(const hipdnn_data_sdk::data_objects::TensorAttributes
 }
 
 MiopenTensor::MiopenTensor(int64_t uid,
-                           hipdnn_data_sdk::data_objects::DataType dataType,
+                           hipdnn_flatbuffers_sdk::data_objects::DataType dataType,
                            const std::vector<int64_t>& inputDims,
                            const std::vector<int64_t>& inputStrides)
     : _uid(uid)

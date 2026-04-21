@@ -5,9 +5,9 @@
 #include "hipdnn_backend.h"
 #include <filesystem>
 #include <gtest/gtest.h>
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
 #include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <span>
 #include <stdexcept>
@@ -24,19 +24,8 @@ void createTestHandle(hipdnnHandle_t* handle)
 
 void createTestGraph(hipdnnBackendDescriptor_t* descriptor, hipdnnHandle_t handle)
 {
-    flatbuffers::FlatBufferBuilder builder;
-    const std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
-        tensorAttributes;
-    const std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> nodes;
-    auto graph = hipdnn_data_sdk::data_objects::CreateGraphDirect(
-        builder,
-        "Test GRAPH!",
-        hipdnn_data_sdk::data_objects::DataType::FLOAT,
-        hipdnn_data_sdk::data_objects::DataType::FLOAT,
-        hipdnn_data_sdk::data_objects::DataType::FLOAT,
-        &tensorAttributes,
-        &nodes);
-    builder.Finish(graph);
+    // Any valid graph with at least one node — the specific operation type doesn't matter
+    auto builder = hipdnn_test_sdk::utilities::createValidReductionGraph();
     flatbuffers::DetachedBuffer serializedGraph = builder.Release();
 
     ASSERT_EQ(hipdnnBackendCreateAndDeserializeGraph_ext(
@@ -282,7 +271,8 @@ void extractTensorInfoFromGraph(const flatbuffers::DetachedBuffer& serializedGra
     nameToUidMap.clear();
     uidToDimsMap.clear();
 
-    auto deserializedGraph = hipdnn_data_sdk::data_objects::UnPackGraph(serializedGraph.data());
+    auto deserializedGraph
+        = hipdnn_flatbuffers_sdk::data_objects::UnPackGraph(serializedGraph.data());
     ASSERT_NE(deserializedGraph, nullptr);
 
     // Extract all tensor information from the deserialized graph

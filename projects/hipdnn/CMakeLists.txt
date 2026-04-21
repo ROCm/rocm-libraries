@@ -19,9 +19,21 @@ else()
     message(STATUS "hipDNN: JSON serialization enabled (requires nlohmann_json)")
 endif()
 
+option(HIPDNN_ENABLE_SDPA "Enable SDPA (Scaled Dot-Product Attention) support" OFF)
+
+if(HIPDNN_ENABLE_SDPA)
+    message(STATUS "hipDNN: SDPA support enabled")
+else()
+    message(STATUS "hipDNN: SDPA support disabled")
+endif()
+
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 add_compile_definitions(__HIP_PLATFORM_AMD__)
+
+if(HIPDNN_ENABLE_SDPA)
+    add_compile_definitions(HIPDNN_ENABLE_SDPA)
+endif()
 
 if(NOT CMAKE_TOOLCHAIN_FILE)
     set(CMAKE_TOOLCHAIN_FILE "${CMAKE_CURRENT_SOURCE_DIR}/cmake/ClangToolChain.cmake"
@@ -202,8 +214,8 @@ list(
     -Wformat=2 # Enable stricter format string checks
     -Winit-self # Warn about variables initialized with itself
     -Wunreachable-code # Warn about unreachable code
-    $<$<CXX_COMPILER_ID:Clang>:-Wno-error=unused-command-line-argument> # Disable error for unused command line arguments (Clang-specific)
-    -Wno-error=null-dereference # Downgrade null-dereference to warning (too many false positives with flatbuffers)
+    $<$<CXX_COMPILER_ID:Clang>:-Wno-error=unused-command-line-argument> # Clang: disable error for unused command line arguments
+    -Wno-error=null-dereference # Downgrade null-dereference to warning (false positives with flatbuffers in backend/data_sdk)
     -Wswitch-default # Warn if a switch statement does not have a default case
 )
 

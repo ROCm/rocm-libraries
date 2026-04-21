@@ -117,7 +117,7 @@ bool SampleRunner::operator()(const TensorLayout& layout)
             xTensor, wTensor, yRefTensor, {u, v}, {dilH, dilW}, {padH, padW});
 
         hipdnn_test_sdk::utilities::CpuReferencePointwiseImpl<InputType>::pointwiseCompute(
-            hipdnn_data_sdk::data_objects::PointwiseMode::RELU_FWD,
+            hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD,
             pointwiseOutRefTensor,
             yRefTensor,
             pointwiseAttributes.get_relu_lower_clip().value(),

@@ -5,10 +5,11 @@
 
 #include "BatchnormGraphUtils.hpp"
 #include "BatchnormTensorBundles.hpp"
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
 #include <hipdnn_data_sdk/utilities/Constants.hpp>
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceBatchnorm.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/Seeds.hpp>
@@ -18,9 +19,9 @@
 
 using namespace hipdnn_test_sdk::utilities;
 using namespace hipdnn_test_sdk::detail;
-using namespace hipdnn_data_sdk::data_objects;
+using namespace hipdnn_flatbuffers_sdk::data_objects;
 using namespace hipdnn_data_sdk::utilities;
-using namespace hipdnn_data_sdk::flatbuffer_utilities;
+using namespace hipdnn_flatbuffers_sdk::flatbuffer_utilities;
 using namespace ::testing;
 using namespace hipdnn_sdk_test_utils;
 
@@ -39,15 +40,16 @@ TEST_F(TestBatchnormFwdWithVariancePlan, ExecutePlan)
                                                              DataType::FLOAT,
                                                              dims,
                                                              TensorLayout::NHWC);
-    auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
-    const GraphWrapper graphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+    const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());
     const INodeWrapper& node = graphWrapper.getNodeWrapper(0);
     BatchnormFwdWithVarianceTensorBundle planTensorBundle(node, graphWrapper.getTensorMap(), seed);
     BatchnormFwdWithVarianceTensorBundle directTensorBundle(
         node, graphWrapper.getTensorMap(), seed);
 
     const auto& attributes = node.attributesAs<
-        hipdnn_data_sdk::data_objects::BatchnormInferenceAttributesVarianceExt>();
+        hipdnn_flatbuffers_sdk::data_objects::BatchnormInferenceAttributesVarianceExt>();
     const auto& tensorMap = graphWrapper.getTensorMap();
     BatchnormFwdInferenceWithVarianceParams params(*tensorMap.at(attributes.x_tensor_uid()),
                                                    *tensorMap.at(attributes.y_tensor_uid()),
@@ -74,8 +76,8 @@ TEST_F(TestBatchnormFwdWithVariancePlan, ExecutePlan)
     auto shallowYTensor = createShallowTensor<float>(
         params.yTensor, directTensorBundle.tensors[attributes.y_tensor_uid()]->rawHostData());
 
-    const double epsilon
-        = hipdnn_data_sdk::utilities::extractDoubleFromTensorValue(params.epsilonTensor, "Epsilon");
+    const double epsilon = hipdnn_flatbuffers_sdk::utilities::extractDoubleFromTensorValue(
+        params.epsilonTensor, "Epsilon");
 
     CpuFpReferenceBatchnorm::fwdInferenceWithVariance(*shallowXTensor,
                                                       *shallowScaleTensor,
@@ -104,8 +106,9 @@ TEST(TestBatchnormFwdWithVariancePlanBuilder, PlanConstruction)
                                                              DataType::FLOAT,
                                                              dims,
                                                              TensorLayout::NHWC);
-    auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
-    const GraphWrapper graphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+    const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());
 
     const BatchnormFwdInferenceWithVariancePlanBuilder<DataType::FLOAT,
                                                        DataType::FLOAT,
@@ -132,8 +135,9 @@ TEST(TestBatchnormFwdWithVariancePlanBuilder, IsApplicable)
                                                              DataType::FLOAT,
                                                              dims,
                                                              TensorLayout::NHWC);
-    auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
-    const GraphWrapper graphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+    const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());
 
     const BatchnormFwdInferenceWithVariancePlanBuilder<DataType::FLOAT,
                                                        DataType::FLOAT,
