@@ -157,13 +157,42 @@ jobs:
           path: TheRock
           ref: f629edc0b56da77fc0d29e6bc01e724aaf0be826
 
-      - name: Setup test environment and fetch artifacts
-        uses: ./.github/actions/setup_test_environment
+      - name: Setting up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
-          artifact_run_id: ${{ github.run_id }}
-          artifact_group: ${{ inputs.amdgpu_families }}
-          amdgpu_targets: ""
-          fetch_artifact_args: ""
+          python-version: 3.12
+
+      - name: Install UV
+        run: curl -LsSf https://astral.sh/uv/install.sh | sh
+
+      - name: Create Python venv
+        env:
+          VENV_DIR: ${{ github.workspace }}/.venv
+        run: |
+          python TheRock/build_tools/setup_venv.py ${VENV_DIR} \
+            --activate-in-future-github-actions-steps \
+            --use-uv
+
+      - name: Install test requirements
+        run: |
+          uv pip install -r TheRock/requirements-test.txt
+          uv pip freeze
+
+      - name: Download and Unpack Artifacts
+        env:
+          OUTPUT_ARTIFACTS_DIR: ${{ github.workspace }}/build
+          ARTIFACT_GROUP: ${{ inputs.amdgpu_families }}
+          AMDGPU_TARGETS: ""
+          ARTIFACT_RUN_ID: ${{ github.run_id }}
+          FETCH_ARTIFACT_ARGS: ""
+          RELEASE_TYPE: ""
+        run: |
+          python ./TheRock/build_tools/install_rocm_from_artifacts.py \
+            --run-id=${ARTIFACT_RUN_ID} \
+            --artifact-group=${ARTIFACT_GROUP} \
+            --amdgpu-targets=${AMDGPU_TARGETS} \
+            --output-dir=${OUTPUT_ARTIFACTS_DIR} \
+            ${FETCH_ARTIFACT_ARGS}
 
       - name: Run coverage tests and generate report
         run: |
