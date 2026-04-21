@@ -350,5 +350,10 @@ int main(int argc, char** argv)
     (void)hipDeviceSynchronize();
     (void)hipDeviceReset();
 
-    return status;
+    // Use quick_exit() to bypass C++ static destructors and atexit() handlers.
+    // Post-main cleanup in linked DLLs (HIP runtime) crash in comgr
+    std::quick_exit(status);
+
+    // TODO restore
+    // return status
 }
