@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -71,10 +71,12 @@ const vector<vector<int>> matrix_sizeB_range = {
 };
 
 // for daily_lapack tests
-const vector<vector<int>> large_matrix_sizeA_range
-    = {{70, 70, 100}, {192, 192, 192}, {600, 700, 645}, {1000, 1000, 1000}, {1000, 2000, 2000}};
+const vector<vector<int>> large_matrix_sizeA_range = {
+    {70, 70, 100},      {192, 192, 192},    {600, 700, 645},
+    {1023, 1023, 1023}, {1024, 1024, 1024}, {1025, 1025, 1025},
+};
 const vector<vector<int>> large_matrix_sizeB_range = {
-    {100, 0}, {150, 0}, {200, 1}, {524, 1}, {1000, 1},
+    {100, 0}, {150, 0}, {200, 1}, {511, 1}, {512, 1}, {513, 1}, {511, 0}, {512, 0}, {513, 0},
 };
 
 Arguments sytrs2_setup_arguments(sytrs2_tuple tup)
