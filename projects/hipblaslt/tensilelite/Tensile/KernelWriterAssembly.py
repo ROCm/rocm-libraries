@@ -2537,6 +2537,11 @@ class KernelWriterAssembly(KernelWriter):
       self.sgprPool.checkIn(sgprNumsOfGemm)
       sgprNumsOfGemm = None
 
+    # gfx1250 moves SK constants to VGPRs and fully frees their SGPR slots
+    # before defineVariableSgprs so those slots can be reused.
+    if kernel["StreamK"] and self.isStreamKConstantsToVgprEnabled(kernel):
+      module.add(self.moveStreamKConstantsToVgpr(kernel))
+
     # define the rest of sgprs
     module.addModuleAsFlatItems(self.defineVariableSgprs(kernel))
 
@@ -4143,7 +4148,7 @@ class KernelWriterAssembly(KernelWriter):
                     strideF, comment="tlu=0, scaled tile-offset by stride"))
 
         skComponent = Component.StreamK.find(self)
-        module.add(skComponent.computeLoadSrd(self, kernel, tc, stmp))
+        module.add(skComponent.computeLoadSrd(self, kernel, tP, stmp))
 
         gsuComponent = Component.GSU.find(self)
         module.add(gsuComponent.computeLoadSrd(self, kernel, tP, stmp, tileStart))
@@ -5309,8 +5314,8 @@ class KernelWriterAssembly(KernelWriter):
       module.add(SLShiftLeftB32(dst=sgpr("StaggerUIter"), src=sgpr("StaggerUIter"), \
                 shiftHex=sgpr(staggerUStrideShift), comment="shift by StaggerUStride"))
 
-      skComponent = Component.StreamK.find(self)
-      module.add(skComponent.declareStaggerParms(self, kernel))
+    skComponent = Component.StreamK.find(self)
+    module.add(skComponent.declareStaggerParms(self, kernel))
 
     return module
 
@@ -6413,7 +6418,11 @@ class KernelWriterAssembly(KernelWriter):
             # StreamK + TailLoopINNLL case
             # skip TailLoopINNLL if StreamK WG not processing final iteration
             # Check if tile finished
-            module.add(SCmpLtU32(src0=sgpr("StreamKLocalEnd"), src1=sgpr("ItersPerTile"), comment="Check if WG processes final iteration of tile"))
+            sIpt = self.acquireStreamKConstSgpr(kernel, "ItersPerTile")
+            if self.isStreamKConstantsToVgprEnabled(kernel):
+              module.add(VReadfirstlaneB32(dst=sgpr(sIpt), src=vgpr(self.states.skConstVgprs["ItersPerTile"])))
+            module.add(SCmpLtU32(src0=sgpr("StreamKLocalEnd"), src1=sgpr(sIpt), comment="Check if WG processes final iteration of tile"))
+            self.releaseStreamKConstSgpr(sIpt)
             module.add(SCMovB32(dst=loopCounter, src=0, comment="This WG not completing tile"))
           module.add(SCmpEQU32(src0=loopCounter, src1=0, comment="numIter%s == 0"%loopChar))
           EndOfTailLoopInNLLLabel = Label("TailLoopInNLLEnd%s"%(loopChar), "" )
@@ -10022,7 +10031,12 @@ class KernelWriterAssembly(KernelWriter):
       comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)
       if "TensorLoadToLds" in self.states.setMemTokenInsts:
         comp.setMemToken(self.states.setMemTokenInsts["TensorLoadToLds"])
-      imod.add(comp.issueLoad("tdmAGroup0", "tdmAGroup1", None, None))
+      if self.states.inTailLoop and not kernel["1LDSBuffer"]:
+        ldsAddrSgprName = comp.getLdsAddrSgprName("tdmAGroup0")
+        clearMask = ~kernel["LdsOffsetA_Blk"] & 0xFFFFFFFF
+        imod.middle.add(SAndB32(dst=sgpr(ldsAddrSgprName), src0=sgpr(ldsAddrSgprName), src1=hex(clearMask),
+                         comment="Reset TDM LDS swap bit for tail loop"))
+      imod.middle.add(comp.issueLoad("tdmAGroup0", "tdmAGroup1", None, None))
       return imod
 
     if tc == "MXSA" and kernel["enableTDMA"]:
@@ -10030,7 +10044,12 @@ class KernelWriterAssembly(KernelWriter):
       if "TensorLoadToLds" in self.states.setMemTokenInsts:
         comp.setMemToken(self.states.setMemTokenInsts["TensorLoadToLds"])
       if kernel["ProblemType"]["MXBlockA"]:
-        imod.add(comp.issueLoad("tdmMXSAGroup0", "tdmMXSAGroup1", None, None))
+        if self.states.inTailLoop and not kernel["1LDSBuffer"]:
+          ldsAddrSgprName = comp.getLdsAddrSgprName("tdmMXSAGroup0")
+          clearMask = ~kernel["LdsOffsetA_Blk"] & 0xFFFFFFFF
+          imod.middle.add(SAndB32(dst=sgpr(ldsAddrSgprName), src0=sgpr(ldsAddrSgprName), src1=hex(clearMask),
+                                  comment="Reset TDM LDS swap bit for tail loop"))
+        imod.middle.add(comp.issueLoad("tdmMXSAGroup0", "tdmMXSAGroup1", None, None))
       return imod
 
     if tc == "B" and kernel["enableTDMB"]:
@@ -10039,7 +10058,12 @@ class KernelWriterAssembly(KernelWriter):
         comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)
         if "TensorLoadToLds" in self.states.setMemTokenInsts:
           comp.setMemToken(self.states.setMemTokenInsts["TensorLoadToLds"])
-        imod.add(comp.issueLoad("tdmBGroup0", "tdmBGroup1", None, None))
+        if self.states.inTailLoop and not kernel["1LDSBuffer"]:
+          ldsAddrSgprName = comp.getLdsAddrSgprName("tdmBGroup0")
+          clearMask = ~kernel["LdsOffsetA_Blk"] & 0xFFFFFFFF
+          imod.middle.add(SAndB32(dst=sgpr(ldsAddrSgprName), src0=sgpr(ldsAddrSgprName), src1=hex(clearMask),
+                           comment="Reset TDM LDS swap bit for tail loop"))
+        imod.middle.add(comp.issueLoad("tdmBGroup0", "tdmBGroup1", None, None))
       return imod
 
     if tc == "MXSB" and kernel["enableTDMB"]:
@@ -10048,7 +10072,12 @@ class KernelWriterAssembly(KernelWriter):
         comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)
         if "TensorLoadToLds" in self.states.setMemTokenInsts:
           comp.setMemToken(self.states.setMemTokenInsts["TensorLoadToLds"])
-        imod.add(comp.issueLoad("tdmMXSBGroup0", "tdmMXSBGroup1", None, None))
+        if self.states.inTailLoop and not kernel["1LDSBuffer"]:
+          ldsAddrSgprName = comp.getLdsAddrSgprName("tdmMXSBGroup0")
+          clearMask = ~kernel["LdsOffsetA_Blk"] & 0xFFFFFFFF
+          imod.middle.add(SAndB32(dst=sgpr(ldsAddrSgprName), src0=sgpr(ldsAddrSgprName), src1=hex(clearMask),
+                           comment="Reset TDM LDS swap bit for tail loop"))
+        imod.middle.add(comp.issueLoad("tdmMXSBGroup0", "tdmMXSBGroup1", None, None))
       return imod
 
     # sizeK % LOCAL_DEPTHU
@@ -12259,7 +12288,11 @@ class KernelWriterAssembly(KernelWriter):
 
         module.add(SCmpEQU64(src0=sgpr("AddressFlags", 2), src1=hex(0), comment="Check for synchronizer"))
         module.add(SCBranchSCC0(labelName=bpeDoneLabel.getLabelName(), comment="If synchronizer, use regular output BPE"))
-        module.add(SCmpEQU32(src0=sgpr("skTiles"), src1=1, comment="split == 1 ?"))
+        sSkt = self.acquireStreamKConstSgpr(kernel, "skTiles")
+        if self.isStreamKConstantsToVgprEnabled(kernel):
+          module.add(VReadfirstlaneB32(dst=sgpr(sSkt), src=vgpr(self.states.skConstVgprs["skTiles"])))
+        module.add(SCmpEQU32(src0=sgpr(sSkt), src1=1, comment="split == 1 ?"))
+        self.releaseStreamKConstSgpr(sSkt)
         module.add(SCBranchSCC1(labelName=bpeDoneLabel.getLabelName(), comment="If split == 1, use reguler output BPE"))
 
         # BPE for parallel reduction
@@ -13370,7 +13403,11 @@ class KernelWriterAssembly(KernelWriter):
       if kernel["StreamK"]:
         module.add(SCmpEQU64(src0=sgpr("AddressFlags", 2), src1=hex(0), comment="Check for synchronizer"))
         module.add(SCBranchSCC0(labelName=gsuLabel.getLabelName(), comment="Branch to stream-k store code"))
-        module.add(SCmpEQU32(src0=sgpr("skTiles"), src1=1, comment="split == 1 ?"))
+        sSkt = self.acquireStreamKConstSgpr(kernel, "skTiles")
+        if self.isStreamKConstantsToVgprEnabled(kernel):
+          module.add(VReadfirstlaneB32(dst=sgpr(sSkt), src=vgpr(self.states.skConstVgprs["skTiles"])))
+        module.add(SCmpEQU32(src0=sgpr(sSkt), src1=1, comment="split == 1 ?"))
+        self.releaseStreamKConstSgpr(sSkt)
         # TODO May need long branch??
         module.add(SCBranchSCC1(labelName=gsuLabel.getLabelName(), comment="branch if split == 1"))
       else:
@@ -16718,7 +16755,6 @@ class KernelWriterAssembly(KernelWriter):
     return comp.calculateStartAddr(self, kernel, tP, f"Address{tc}")
 
   def tdmGlobalOffsetWaveSeparated(self, kernel: Mapping, tPA: Mapping, tPB: Mapping) -> Module:
-    #TODO: TDM implement
     mod = Module("TDM Global Offset Wave Separated")
     comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)
     tcA: str = tPA["tensorChar"]
@@ -16736,11 +16772,29 @@ class KernelWriterAssembly(KernelWriter):
       mod.add(SBitcmp1B32(sgpr(waveIdSgprIdx), 0, "Check parity of wId"))
       mod.add(SCBranchSCC1(tdmGlobalOffsetLblB.getLabelName(), "Jump to B if wId is odd"))
 
-    mod.add(comp.calculateStartAddrWaveSeparated(self, kernel, tPA, f"Address{tcA}"))
+    dstGroup0A = f"tdm{tcA}Group0"
+    dstGroup0B = f"tdm{tcB}Group0"
+    mod.add(comp.calculateStartAddrWaveSeparated(self, kernel, tPA, f"Address{tcA}", dstGroup0A))
     mod.add(SBranch(tdmGlobalOffsetLblEnd.getLabelName()))
     mod.add(tdmGlobalOffsetLblB)
-    mod.add(comp.calculateStartAddrWaveSeparated(self, kernel, tPB, f"Address{tcB}"))
+    mod.add(comp.calculateStartAddrWaveSeparated(self, kernel, tPB, f"Address{tcB}", dstGroup0B))
     mod.add(tdmGlobalOffsetLblEnd)
+    return mod
+
+  def tdmApplyStreamKOffsetWaveSeparated(self, kernel: Mapping, tPA: Mapping, tPB: Mapping) -> Module:
+    mod = Module("TDM StreamK K-offset Wave Separated")
+    tcA: str = tPA["tensorChar"]
+    tcB: str = tPB["tensorChar"]
+    incSgprName = f"tdm{tcA}{tcB}Incs"
+    group0Name = f"tdm{tcA}Group0"
+
+    with self.allocTmpSgpr(1) as tmpSgprRes:
+      tmpSgpr = tmpSgprRes.idx
+      mod.add(SMulI32(dst=sgpr(tmpSgpr), src0=sgpr("StreamKLocalStart"), src1=sgpr(incSgprName),
+                       comment="StreamK K-offset = localStart * increment"))
+      mod.add(SAddU32(dst=sgpr(f"{group0Name}+2"), src0=sgpr(f"{group0Name}+2"), src1=sgpr(tmpSgpr),
+                       comment="Apply StreamK K-offset to TDM global addr"))
+
     return mod
 
   def tdmIncrementAB(self, kernel, tP) -> Module:
