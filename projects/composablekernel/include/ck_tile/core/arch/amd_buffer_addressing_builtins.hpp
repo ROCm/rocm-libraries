@@ -1368,7 +1368,7 @@ async_global_load_lds_dwordxn(void* smem, const void* global_addr, bool_constant
     // and is only checked at instantiation time.
     static_assert(!num_dwords,
                   "global_load_lds requires CDNA3+ (gfx940/gfx950). "
-                  "Ensure kUseFlatLoad is false on this architecture.");
+                  "Ensure kUseGlobalLoad is false on this architecture.");
 #endif
 
     static_assert(num_dwords == 1 || num_dwords == 4,

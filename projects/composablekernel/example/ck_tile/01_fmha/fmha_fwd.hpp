@@ -1458,7 +1458,7 @@ template <ck_tile::index_t HDim_,
               ck_tile::BlockAttentionKVCacheMemoryLayoutEnum::VECTORIZED_LAYOUT,
           ck_tile::BlockAttentionKVCacheLookupTableEnum kKVLookupTable_ =
               ck_tile::BlockAttentionKVCacheLookupTableEnum::SGLANG_PAGE_TABLE_1D,
-          bool kUse64BitLoad_ = false>
+          bool kUseGlobalLoad_ = false>
 struct fmha_fwd_batch_prefill_traits_ : public fmha_fwd_traits_<HDim_,
                                                                 DataType_,
                                                                 kIsGroupMode_,
@@ -1487,7 +1487,7 @@ struct fmha_fwd_batch_prefill_traits_ : public fmha_fwd_traits_<HDim_,
     static constexpr auto kKVMemoryLayout            = kKVMemoryLayout_;
     static constexpr auto kKVLookupTable             = kKVLookupTable_;
     static constexpr ck_tile::index_t kPageBlockSize = kPageBlockSize_;
-    static constexpr bool kUse64BitLoad              = kUse64BitLoad_;
+    static constexpr bool kUseGlobalLoad             = kUseGlobalLoad_;
     static_assert(kIsVLayoutRowMajor_, "Batch prefill only supports row-major V layout");
 };
 

@@ -59,7 +59,7 @@ template <bool kPadSeqLenQ_ /* padding for seqlen_q */,
               BlockAttentionKVCacheMemoryLayoutEnum::VECTORIZED_LAYOUT,
           BlockAttentionKVCacheLookupTableEnum kKVLookupTable_ =
               BlockAttentionKVCacheLookupTableEnum::SGLANG_PAGE_TABLE_1D,
-          bool kUse64BitLoad_ = false>
+          bool kUseGlobalLoad_ = false>
 struct TileFmhaBatchPrefillTraits : public TileFmhaTraits<kPadSeqLenQ_,
                                                           kPadSeqLenK_,
                                                           kPadHeadDimQ_,
@@ -77,7 +77,7 @@ struct TileFmhaBatchPrefillTraits : public TileFmhaTraits<kPadSeqLenQ_,
     static constexpr auto kKVMemoryLayout   = kKVMemoryLayout_;
     static constexpr auto kKVLookupTable    = kKVLookupTable_;
     static constexpr index_t kPageBlockSize = kPageBlockSize_;
-    static constexpr bool kUse64BitLoad     = kUse64BitLoad_;
+    static constexpr bool kUseGlobalLoad    = kUseGlobalLoad_;
     static_assert(kKVMemoryLayout == BlockAttentionKVCacheMemoryLayoutEnum::VECTORIZED_LAYOUT ||
                       kKVMemoryLayout == BlockAttentionKVCacheMemoryLayoutEnum::LINEAR_LAYOUT,
                   "Batch prefill only supports vectorized or linear KV cache layout.");
