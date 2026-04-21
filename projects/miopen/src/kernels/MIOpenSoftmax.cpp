@@ -441,7 +441,7 @@ softmaxfwd(const T* __restrict__ x, T* __restrict__ y, const float alpha, const 
         }
         const unsigned int offset = o * INNER_SIZE * STRIDE + s;
         FLOAT_ACCUM tmp           = -MAX_VAL_ACCUM;
-        FLOAT_ACCUM x_values[VECTORIZED ? U_BATCH_SIZE * load_factor<T> : U_BATCH_SIZE];
+        FLOAT_ACCUM x_values[U_BATCH_SIZE];
         for(FLOAT_ACCUM& x_value : x_values)
         {
             x_value = -MAX_VAL_ACCUM;
@@ -820,12 +820,12 @@ __forceinline__ __device__ void softmaxbwd(const T* __restrict__ y,
         s                         = (NUM_BATCH * gid + batch) % STRIDE;
         const unsigned int offset = o * INNER_SIZE * STRIDE + s;
         FLOAT_ACCUM channel_dot   = 0;
-        FLOAT_ACCUM y_values[VECTORIZED ? U_BATCH_SIZE * load_factor<T> : U_BATCH_SIZE];
+        FLOAT_ACCUM y_values[U_BATCH_SIZE];
         for(FLOAT_ACCUM& y_value : y_values)
         {
             y_value = 0;
         }
-        FLOAT_ACCUM dy_values[VECTORIZED ? U_BATCH_SIZE * load_factor<T> : U_BATCH_SIZE];
+        FLOAT_ACCUM dy_values[U_BATCH_SIZE];
         for(FLOAT_ACCUM& dy_value : dy_values)
         {
             dy_value = 0;
