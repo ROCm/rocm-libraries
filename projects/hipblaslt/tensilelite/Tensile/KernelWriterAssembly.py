@@ -17645,7 +17645,7 @@ class KernelWriterAssembly(KernelWriter):
     with self.allocTmpSgpr(1) as tmpSgprRes:
       waveOffsetSgprIdx: int = tmpSgprRes.idx
       mod.add(VReadfirstlaneB32(sgpr(waveOffsetSgprIdx), vgpr("Serial"), "first tId"))
-      mod.add(SLShiftRightB32(sgpr(waveOffsetSgprIdx), ceil(log2(wavelen*numComp)), sgpr(waveOffsetSgprIdx), "wId=fTid // wavelen // numComp"))
+      mod.add(SLShiftRightB32(sgpr(waveOffsetSgprIdx), ceil(log2(wavelen)) + 1, sgpr(waveOffsetSgprIdx), "wId=fTid // wavelen // 2"))
       if ldsBlockSizePerPad != 0 and ldsPadSize != 0:
         mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), round(mt // numComp * du * bpe // dim1Divisor) + round(mt // numComp * du * bpe // dim1Divisor) // ldsBlockSizePerPad * ldsPadSize, \
                 "woffset = wId * (mt // numComp * du * bpe + mt // numComp * du * bpe // ldsBlockSizePerPad * ldsPadSize)"))
@@ -17677,7 +17677,7 @@ class KernelWriterAssembly(KernelWriter):
           if numMxKGroups < numComp:
             # M/N-splitting: offset within same k_group along tile dimension
             mod.add(VReadfirstlaneB32(sgpr(tmpSgprWaveOffset), vgpr("Serial"), "first tId"))
-            mod.add(SLShiftRightB32(sgpr(tmpSgprWaveOffset), ceil(log2(wavelen*numComp)), sgpr(tmpSgprWaveOffset), "wId=fTid // wavelen // numComp"))
+            mod.add(SLShiftRightB32(sgpr(tmpSgprWaveOffset), ceil(log2(wavelen)) + 1, sgpr(tmpSgprWaveOffset), "wId=fTid // wavelen // 2"))
             mod.add(SMulI32(sgpr(tmpSgprWaveOffset), sgpr(tmpSgprWaveOffset), round(mt // numComp), "woffset = wId * (mt // numComp)"))
             mod.add(SSubU32(sgpr(dim0), sgpr(dim0), sgpr(tmpSgprWaveOffset), "consider multiple waves"))
             mod.add(SCMovB32(sgpr(dim0), 0, "set to 0 for waves that no enough data to load"))
@@ -17694,7 +17694,7 @@ class KernelWriterAssembly(KernelWriter):
           tmpSgprWaveOffset = tmpSgpr.idx
           if unrolledMajor:
             mod.add(VReadfirstlaneB32(sgpr(tmpSgprWaveOffset), vgpr("Serial"), "first tId"))
-            mod.add(SLShiftRightB32(sgpr(tmpSgprWaveOffset), ceil(log2(wavelen*numComp)), sgpr(tmpSgprWaveOffset), "wId=fTid // wavelen // numComp"))
+            mod.add(SLShiftRightB32(sgpr(tmpSgprWaveOffset), ceil(log2(wavelen)) + 1, sgpr(tmpSgprWaveOffset), "wId=fTid // wavelen // 2"))
             mod.add(SMulI32(sgpr(tmpSgprWaveOffset), sgpr(tmpSgprWaveOffset), round(mt // numComp), "woffset = wId * (mt // numComp)"))
             mod.add(SSubU32(sgpr(dim1), sgpr(dim1), sgpr(tmpSgprWaveOffset), "consider multiple waves"))
             mod.add(SCMovB32(sgpr(dim1), 0, "set to 0 for waves that no enough data to load"))
@@ -17865,6 +17865,10 @@ class KernelWriterAssembly(KernelWriter):
 
     sizeShifter = ceil(log2(duScale*mxUnit)) if isMXS else sizeShifter
 
+    # dim1 is in raw elements per Group 1 spec; only dim0 takes the FP4 shifter.
+    if tdmDescIdx == 2 and not isMXS:
+      sizeShifter = 0
+
     with self.allocTmpSgpr(1) as tmpSgpr:
       mod.add(SAndB32(sgpr(tmpSgpr.idx), sgpr("SizeL"), (du - 1)))
       if (not unrolledMajor or mxKSplitting) and tmpSgprWaveOffset != None:
@@ -17917,7 +17921,7 @@ class KernelWriterAssembly(KernelWriter):
 
       wOfstSgprId = None if unrolledMajorA and not isMXSA else waveOfstSgprIdx
       if not unrolledMajorA or mxKSplittingA:
-        mod.add(SLShiftRightB32(sgpr(waveOfstSgprIdx), ceil(log2(numComp)), sgpr(waveIdSgprIdx), "wOffset=wId // numComp"))
+        mod.add(SLShiftRightB32(sgpr(waveOfstSgprIdx), 1, sgpr(waveIdSgprIdx), "wOffset=wId // 2"))
         mod.add(SMulI32(sgpr(waveOfstSgprIdx), sgpr(waveOfstSgprIdx), int(du // numComp),
                         "wOffset = wOffset * du // numpComp"))
       mod.add(self.resetTDMDescriptorForTail(kernel, tPA, wOfstSgprId))
@@ -17926,7 +17930,7 @@ class KernelWriterAssembly(KernelWriter):
       mod.add(tdmResetTailLblB)
       wOfstSgprId = None if unrolledMajorB and not isMXSB else waveOfstSgprIdx
       if not unrolledMajorB or mxKSplittingB:
-        mod.add(SLShiftRightB32(sgpr(waveOfstSgprIdx), ceil(log2(numComp)), sgpr(waveIdSgprIdx), "wOffset=wId // numComp"))
+        mod.add(SLShiftRightB32(sgpr(waveOfstSgprIdx), 1, sgpr(waveIdSgprIdx), "wOffset=wId // 2"))
         mod.add(SMulI32(sgpr(waveOfstSgprIdx), sgpr(waveOfstSgprIdx), int(du // numComp),
                         "wOffset = wOffset * du // numpComp"))
       mod.add(self.resetTDMDescriptorForTail(kernel, tPB, wOfstSgprId))

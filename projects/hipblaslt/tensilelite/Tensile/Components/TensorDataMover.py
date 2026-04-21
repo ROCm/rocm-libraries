@@ -102,7 +102,7 @@ class TensorDataMoverLoad(TensorDataMover):
                 mod.add(SMulI32(sgpr(tmpSgprIdx), sgpr(tmpSgprIdx), sgpr(sgprWorkgroupName), "*= wgId)"))
             #add wave offset
             mod.add(VReadfirstlaneB32(sgpr(waveOffsetSgprIdx), vgpr(vgprThreadIdName), "first tId"))
-            mod.add(SLShiftRightB32(sgpr(waveOffsetSgprIdx), ceil(log2(wavelen*numComp)), sgpr(waveOffsetSgprIdx), f"wCompId = fTid // wavelen({wavelen}) // numComp({numComp})"))
+            mod.add(SLShiftRightB32(sgpr(waveOffsetSgprIdx), ceil(log2(wavelen)) + 1, sgpr(waveOffsetSgprIdx), f"wCompId = fTid // wavelen({wavelen}) // 2"))
             if ("MXS" in tc):
                 mxDU = kernel["DepthU"] // kernel["ProblemType"][f"MXBlock{subTc}"]
                 numMxKGroups = mxDU // mxUnit
