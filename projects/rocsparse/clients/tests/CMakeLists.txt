@@ -414,6 +414,8 @@ set(ROCSPARSE_CLIENTS_COMMON
   ../common/rocsparse_clients_matrices_dir.cpp
   ../common/rocsparse_clients_spmat_descr.cpp
   ../common/rocsparse_clients_dnvec_descr.cpp
+  ../common/rocsparse_clients_test_memory_debug.cpp
+  ../common/rocsparse_clients_test_memory_debug_synchronicity.cpp
  ../common/rocsparseio.cpp
   )
 
