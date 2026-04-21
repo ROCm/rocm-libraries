@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -131,7 +131,7 @@ namespace rocisa
         std::string typeConvert(InstType iType) const
         {
             size_t f8f6f4_k = getAsmCaps()["HasWMMA_V3"] ? 128 : 64;
-            size_t f4_t = getAsmCaps()["HasWMMA_V3"] ? 32 : 0;
+            size_t f4_t     = getAsmCaps()["HasWMMA_V3"] ? 32 : 0;
 
             switch(iType)
             {
@@ -197,6 +197,16 @@ namespace rocisa
             return {acc, a, b, acc2, negStr};
         }
 
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            return {acc};
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            return {a, b, acc2};
+        }
+
         std::string preStr() const override
         {
             std::string variantStr = std::to_string(variant[0]) + "x" + std::to_string(variant[1])
@@ -225,7 +235,7 @@ namespace rocisa
 
         std::string getArgStr() const
         {
-            size_t f4_t = getAsmCaps()["HasWMMA_V3"] ? 32 : 0;
+            size_t      f4_t = getAsmCaps()["HasWMMA_V3"] ? 32 : 0;
             std::string negStr
                 = !neg ? "" : (getAsmCaps()["HasWMMA_V1"] ? " neg_lo:[1,1,1]" : " neg_lo:[1,1]");
             std::string inputPermuteStr = "";
@@ -255,82 +265,156 @@ namespace rocisa
                 switch(instType)
                 {
                 case InstType::INST_F8:
-                    inputPermuteStr = (variant[2] > 64) ? " matrix_a_fmt:MATRIX_FMT_FP8 matrix_b_fmt:MATRIX_FMT_FP8" : "";
+                    inputPermuteStr
+                        = (variant[2] > 64)
+                              ? " matrix_a_fmt:MATRIX_FMT_FP8 matrix_b_fmt:MATRIX_FMT_FP8"
+                              : "";
                     break;
                 case InstType::INST_BF8:
-                    inputPermuteStr = (variant[2] > 64) ? " matrix_a_fmt:MATRIX_FMT_BF8 matrix_b_fmt:MATRIX_FMT_BF8" : "";
+                    inputPermuteStr
+                        = (variant[2] > 64)
+                              ? " matrix_a_fmt:MATRIX_FMT_BF8 matrix_b_fmt:MATRIX_FMT_BF8"
+                              : "";
                     break;
                 case InstType::INST_F8_BF8:
-                    inputPermuteStr = (variant[2] > 64) ? " matrix_a_fmt:MATRIX_FMT_FP8 matrix_b_fmt:MATRIX_FMT_BF8" : "";
+                    inputPermuteStr
+                        = (variant[2] > 64)
+                              ? " matrix_a_fmt:MATRIX_FMT_FP8 matrix_b_fmt:MATRIX_FMT_BF8"
+                              : "";
                     break;
                 case InstType::INST_BF8_F8:
-                    inputPermuteStr = (variant[2] > 64) ? " matrix_a_fmt:MATRIX_FMT_BF8 matrix_b_fmt:MATRIX_FMT_FP8" : "";
+                    inputPermuteStr
+                        = (variant[2] > 64)
+                              ? " matrix_a_fmt:MATRIX_FMT_BF8 matrix_b_fmt:MATRIX_FMT_FP8"
+                              : "";
                     break;
                 case InstType::INST_F6:
-                    inputPermuteStr = (variant[2] > 64) ? " matrix_a_fmt:MATRIX_FMT_FP6 matrix_b_fmt:MATRIX_FMT_FP6" : "";
+                    inputPermuteStr
+                        = (variant[2] > 64)
+                              ? " matrix_a_fmt:MATRIX_FMT_FP6 matrix_b_fmt:MATRIX_FMT_FP6"
+                              : "";
                     break;
                 case InstType::INST_BF6:
-                    inputPermuteStr = (variant[2] > 64) ? " matrix_a_fmt:MATRIX_FMT_BF6 matrix_b_fmt:MATRIX_FMT_BF6" : "";
+                    inputPermuteStr
+                        = (variant[2] > 64)
+                              ? " matrix_a_fmt:MATRIX_FMT_BF6 matrix_b_fmt:MATRIX_FMT_BF6"
+                              : "";
                     break;
                 case InstType::INST_F6_B6:
-                    inputPermuteStr = (variant[2] > 64) ? " matrix_a_fmt:MATRIX_FMT_FP6 matrix_b_fmt:MATRIX_FMT_BF6" : "";
+                    inputPermuteStr
+                        = (variant[2] > 64)
+                              ? " matrix_a_fmt:MATRIX_FMT_FP6 matrix_b_fmt:MATRIX_FMT_BF6"
+                              : "";
                     break;
                 case InstType::INST_B6_F6:
-                    inputPermuteStr = (variant[2] > 64) ? " matrix_a_fmt:MATRIX_FMT_BF6 matrix_b_fmt:MATRIX_FMT_FP6" : "";
+                    inputPermuteStr
+                        = (variant[2] > 64)
+                              ? " matrix_a_fmt:MATRIX_FMT_BF6 matrix_b_fmt:MATRIX_FMT_FP6"
+                              : "";
                     break;
                 case InstType::INST_F4:
                 {
                     bool useModifier = ((variant[0] < f4_t) && (variant[1] < f4_t));
-                    inputPermuteStr = useModifier ? " matrix_a_fmt:MATRIX_FMT_FP4 matrix_b_fmt:MATRIX_FMT_FP4" : "";
+                    inputPermuteStr
+                        = useModifier ? " matrix_a_fmt:MATRIX_FMT_FP4 matrix_b_fmt:MATRIX_FMT_FP4"
+                                      : "";
                     break;
                 }
                 case InstType::INST_F8_F4:
-                    inputPermuteStr = (variant[2] > 64) ? " matrix_a_fmt:MATRIX_FMT_FP8 matrix_b_fmt:MATRIX_FMT_FP4" : "";
+                    inputPermuteStr
+                        = (variant[2] > 64)
+                              ? " matrix_a_fmt:MATRIX_FMT_FP8 matrix_b_fmt:MATRIX_FMT_FP4"
+                              : "";
                     break;
                 case InstType::INST_F4_F8:
-                    inputPermuteStr = (variant[2] > 64) ? " matrix_a_fmt:MATRIX_FMT_FP4 matrix_b_fmt:MATRIX_FMT_FP8" : "";
+                    inputPermuteStr
+                        = (variant[2] > 64)
+                              ? " matrix_a_fmt:MATRIX_FMT_FP4 matrix_b_fmt:MATRIX_FMT_FP8"
+                              : "";
                     break;
                 case InstType::INST_F6_F4:
-                    inputPermuteStr = (variant[2] > 64) ? " matrix_a_fmt:MATRIX_FMT_FP6 matrix_b_fmt:MATRIX_FMT_FP4" : "";
+                    inputPermuteStr
+                        = (variant[2] > 64)
+                              ? " matrix_a_fmt:MATRIX_FMT_FP6 matrix_b_fmt:MATRIX_FMT_FP4"
+                              : "";
                     break;
                 case InstType::INST_F4_F6:
-                    inputPermuteStr = (variant[2] > 64) ? " matrix_a_fmt:MATRIX_FMT_FP4 matrix_b_fmt:MATRIX_FMT_FP6" : "";
+                    inputPermuteStr
+                        = (variant[2] > 64)
+                              ? " matrix_a_fmt:MATRIX_FMT_FP4 matrix_b_fmt:MATRIX_FMT_FP6"
+                              : "";
                     break;
                 case InstType::INST_F8_F6:
-                    inputPermuteStr = (variant[2] > 64) ? " matrix_a_fmt:MATRIX_FMT_FP8 matrix_b_fmt:MATRIX_FMT_FP6" : "";
+                    inputPermuteStr
+                        = (variant[2] > 64)
+                              ? " matrix_a_fmt:MATRIX_FMT_FP8 matrix_b_fmt:MATRIX_FMT_FP6"
+                              : "";
                     break;
                 case InstType::INST_F6_F8:
-                    inputPermuteStr = (variant[2] > 64) ? " matrix_a_fmt:MATRIX_FMT_FP6 matrix_b_fmt:MATRIX_FMT_FP8" : "";
+                    inputPermuteStr
+                        = (variant[2] > 64)
+                              ? " matrix_a_fmt:MATRIX_FMT_FP6 matrix_b_fmt:MATRIX_FMT_FP8"
+                              : "";
                     break;
                 case InstType::INST_F8_B6:
-                    inputPermuteStr = (variant[2] > 64) ? " matrix_a_fmt:MATRIX_FMT_FP8 matrix_b_fmt:MATRIX_FMT_BF6" : "";
+                    inputPermuteStr
+                        = (variant[2] > 64)
+                              ? " matrix_a_fmt:MATRIX_FMT_FP8 matrix_b_fmt:MATRIX_FMT_BF6"
+                              : "";
                     break;
                 case InstType::INST_B6_F8:
-                    inputPermuteStr = (variant[2] > 64) ? " matrix_a_fmt:MATRIX_FMT_BF6 matrix_b_fmt:MATRIX_FMT_FP8" : "";
+                    inputPermuteStr
+                        = (variant[2] > 64)
+                              ? " matrix_a_fmt:MATRIX_FMT_BF6 matrix_b_fmt:MATRIX_FMT_FP8"
+                              : "";
                     break;
                 case InstType::INST_B8_F4:
-                    inputPermuteStr = (variant[2] > 64) ? " matrix_a_fmt:MATRIX_FMT_BF8 matrix_b_fmt:MATRIX_FMT_FP4" : "";
+                    inputPermuteStr
+                        = (variant[2] > 64)
+                              ? " matrix_a_fmt:MATRIX_FMT_BF8 matrix_b_fmt:MATRIX_FMT_FP4"
+                              : "";
                     break;
                 case InstType::INST_F4_B8:
-                    inputPermuteStr = (variant[2] > 64) ? " matrix_a_fmt:MATRIX_FMT_FP4 matrix_b_fmt:MATRIX_FMT_BF8" : "";
+                    inputPermuteStr
+                        = (variant[2] > 64)
+                              ? " matrix_a_fmt:MATRIX_FMT_FP4 matrix_b_fmt:MATRIX_FMT_BF8"
+                              : "";
                     break;
                 case InstType::INST_B6_F4:
-                    inputPermuteStr = (variant[2] > 64) ? " matrix_a_fmt:MATRIX_FMT_BF6 matrix_b_fmt:MATRIX_FMT_FP4" : "";
+                    inputPermuteStr
+                        = (variant[2] > 64)
+                              ? " matrix_a_fmt:MATRIX_FMT_BF6 matrix_b_fmt:MATRIX_FMT_FP4"
+                              : "";
                     break;
                 case InstType::INST_F4_B6:
-                    inputPermuteStr = (variant[2] > 64) ? " matrix_a_fmt:MATRIX_FMT_FP4 matrix_b_fmt:MATRIX_FMT_BF6" : "";
+                    inputPermuteStr
+                        = (variant[2] > 64)
+                              ? " matrix_a_fmt:MATRIX_FMT_FP4 matrix_b_fmt:MATRIX_FMT_BF6"
+                              : "";
                     break;
                 case InstType::INST_B8_F6:
-                    inputPermuteStr = (variant[2] > 64) ? " matrix_a_fmt:MATRIX_FMT_BF8 matrix_b_fmt:MATRIX_FMT_FP6" : "";
+                    inputPermuteStr
+                        = (variant[2] > 64)
+                              ? " matrix_a_fmt:MATRIX_FMT_BF8 matrix_b_fmt:MATRIX_FMT_FP6"
+                              : "";
                     break;
                 case InstType::INST_F6_B8:
-                    inputPermuteStr = (variant[2] > 64) ? " matrix_a_fmt:MATRIX_FMT_FP6 matrix_b_fmt:MATRIX_FMT_BF8" : "";
+                    inputPermuteStr
+                        = (variant[2] > 64)
+                              ? " matrix_a_fmt:MATRIX_FMT_FP6 matrix_b_fmt:MATRIX_FMT_BF8"
+                              : "";
                     break;
                 case InstType::INST_B8_B6:
-                    inputPermuteStr = (variant[2] > 64) ? " matrix_a_fmt:MATRIX_FMT_BF8 matrix_b_fmt:MATRIX_FMT_BF6" : "";
+                    inputPermuteStr
+                        = (variant[2] > 64)
+                              ? " matrix_a_fmt:MATRIX_FMT_BF8 matrix_b_fmt:MATRIX_FMT_BF6"
+                              : "";
                     break;
                 case InstType::INST_B6_B8:
-                    inputPermuteStr = (variant[2] > 64) ? " matrix_a_fmt:MATRIX_FMT_BF6 matrix_b_fmt:MATRIX_FMT_BF8" : "";
+                    inputPermuteStr
+                        = (variant[2] > 64)
+                              ? " matrix_a_fmt:MATRIX_FMT_BF6 matrix_b_fmt:MATRIX_FMT_BF8"
+                              : "";
                     break;
                 default:
                     break;
@@ -436,10 +520,20 @@ namespace rocisa
             return {acc, a, b, acc2, mxsa, mxsb, block};
         }
 
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            return {acc};
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            // ignore block parameter since it's not an operand in mxmfma instruction.
+            return {a, b, acc2, mxsa, mxsb};
+        }
+
         std::string preStr() const override
         {
-            std::string variantStr = std::to_string(variant[0])
-                                     + "x" + std::to_string(variant[1])
+            std::string variantStr = std::to_string(variant[0]) + "x" + std::to_string(variant[1])
                                      + "x" + std::to_string(variant[2]);
             std::string blkStr = (block == 16) ? "16" : "";
             return "v_wmma_scale" + blkStr + "_f32_" + variantStr + "_" + typeConvert();
@@ -452,82 +546,131 @@ namespace rocisa
             switch(instType)
             {
             case InstType::INST_F8:
-                inputPermuteStr = variant[2] > 64 ? " matrix_a_fmt:MATRIX_FMT_FP8 matrix_b_fmt:MATRIX_FMT_FP8" : "";
+                inputPermuteStr = variant[2] > 64
+                                      ? " matrix_a_fmt:MATRIX_FMT_FP8 matrix_b_fmt:MATRIX_FMT_FP8"
+                                      : "";
                 break;
             case InstType::INST_BF8:
-                inputPermuteStr = variant[2] > 64 ? " matrix_a_fmt:MATRIX_FMT_BF8 matrix_b_fmt:MATRIX_FMT_BF8" : "";
+                inputPermuteStr = variant[2] > 64
+                                      ? " matrix_a_fmt:MATRIX_FMT_BF8 matrix_b_fmt:MATRIX_FMT_BF8"
+                                      : "";
                 break;
             case InstType::INST_F8_BF8:
-                inputPermuteStr = variant[2] > 64 ? " matrix_a_fmt:MATRIX_FMT_FP8 matrix_b_fmt:MATRIX_FMT_BF8" : "";
+                inputPermuteStr = variant[2] > 64
+                                      ? " matrix_a_fmt:MATRIX_FMT_FP8 matrix_b_fmt:MATRIX_FMT_BF8"
+                                      : "";
                 break;
             case InstType::INST_BF8_F8:
-                inputPermuteStr = variant[2] > 64 ? " matrix_a_fmt:MATRIX_FMT_BF8 matrix_b_fmt:MATRIX_FMT_FP8" : "";
+                inputPermuteStr = variant[2] > 64
+                                      ? " matrix_a_fmt:MATRIX_FMT_BF8 matrix_b_fmt:MATRIX_FMT_FP8"
+                                      : "";
                 break;
             case InstType::INST_F6:
-                inputPermuteStr = variant[2] > 64 ? " matrix_a_fmt:MATRIX_FMT_FP6 matrix_b_fmt:MATRIX_FMT_FP6" : "";
+                inputPermuteStr = variant[2] > 64
+                                      ? " matrix_a_fmt:MATRIX_FMT_FP6 matrix_b_fmt:MATRIX_FMT_FP6"
+                                      : "";
                 break;
             case InstType::INST_BF6:
-                inputPermuteStr = variant[2] > 64 ? " matrix_a_fmt:MATRIX_FMT_BF6 matrix_b_fmt:MATRIX_FMT_BF6" : "";
+                inputPermuteStr = variant[2] > 64
+                                      ? " matrix_a_fmt:MATRIX_FMT_BF6 matrix_b_fmt:MATRIX_FMT_BF6"
+                                      : "";
                 break;
             case InstType::INST_F6_B6:
-                inputPermuteStr = variant[2] > 64 ? " matrix_a_fmt:MATRIX_FMT_FP6 matrix_b_fmt:MATRIX_FMT_BF6" : "";
+                inputPermuteStr = variant[2] > 64
+                                      ? " matrix_a_fmt:MATRIX_FMT_FP6 matrix_b_fmt:MATRIX_FMT_BF6"
+                                      : "";
                 break;
             case InstType::INST_B6_F6:
-                inputPermuteStr = variant[2] > 64 ? " matrix_a_fmt:MATRIX_FMT_BF6 matrix_b_fmt:MATRIX_FMT_FP6" : "";
+                inputPermuteStr = variant[2] > 64
+                                      ? " matrix_a_fmt:MATRIX_FMT_BF6 matrix_b_fmt:MATRIX_FMT_FP6"
+                                      : "";
                 break;
             case InstType::INST_F4:
             {
                 bool useModifier = ((variant[0] < f4_t) && (variant[1] < f4_t));
-                inputPermuteStr = useModifier ? " matrix_a_fmt:MATRIX_FMT_FP4 matrix_b_fmt:MATRIX_FMT_FP4" : "";
+                inputPermuteStr
+                    = useModifier ? " matrix_a_fmt:MATRIX_FMT_FP4 matrix_b_fmt:MATRIX_FMT_FP4" : "";
                 break;
             }
             case InstType::INST_F8_F4:
-                inputPermuteStr = variant[2] > 64 ? " matrix_a_fmt:MATRIX_FMT_FP8 matrix_b_fmt:MATRIX_FMT_FP4" : "";
+                inputPermuteStr = variant[2] > 64
+                                      ? " matrix_a_fmt:MATRIX_FMT_FP8 matrix_b_fmt:MATRIX_FMT_FP4"
+                                      : "";
                 break;
             case InstType::INST_F4_F8:
-                inputPermuteStr = variant[2] > 64 ? " matrix_a_fmt:MATRIX_FMT_FP4 matrix_b_fmt:MATRIX_FMT_FP8" : "";
+                inputPermuteStr = variant[2] > 64
+                                      ? " matrix_a_fmt:MATRIX_FMT_FP4 matrix_b_fmt:MATRIX_FMT_FP8"
+                                      : "";
                 break;
             case InstType::INST_F6_F4:
-                inputPermuteStr = variant[2] > 64 ? " matrix_a_fmt:MATRIX_FMT_FP6 matrix_b_fmt:MATRIX_FMT_FP4" : "";
+                inputPermuteStr = variant[2] > 64
+                                      ? " matrix_a_fmt:MATRIX_FMT_FP6 matrix_b_fmt:MATRIX_FMT_FP4"
+                                      : "";
                 break;
             case InstType::INST_F4_F6:
-                inputPermuteStr = variant[2] > 64 ? " matrix_a_fmt:MATRIX_FMT_FP4 matrix_b_fmt:MATRIX_FMT_FP6" : "";
+                inputPermuteStr = variant[2] > 64
+                                      ? " matrix_a_fmt:MATRIX_FMT_FP4 matrix_b_fmt:MATRIX_FMT_FP6"
+                                      : "";
                 break;
             case InstType::INST_F8_F6:
-                inputPermuteStr = variant[2] > 64 ? " matrix_a_fmt:MATRIX_FMT_FP8 matrix_b_fmt:MATRIX_FMT_FP6" : "";
+                inputPermuteStr = variant[2] > 64
+                                      ? " matrix_a_fmt:MATRIX_FMT_FP8 matrix_b_fmt:MATRIX_FMT_FP6"
+                                      : "";
                 break;
             case InstType::INST_F6_F8:
-                inputPermuteStr = variant[2] > 64 ? " matrix_a_fmt:MATRIX_FMT_FP6 matrix_b_fmt:MATRIX_FMT_FP8" : "";
+                inputPermuteStr = variant[2] > 64
+                                      ? " matrix_a_fmt:MATRIX_FMT_FP6 matrix_b_fmt:MATRIX_FMT_FP8"
+                                      : "";
                 break;
             case InstType::INST_F8_B6:
-                inputPermuteStr = variant[2] > 64 ? " matrix_a_fmt:MATRIX_FMT_FP8 matrix_b_fmt:MATRIX_FMT_BF6" : "";
+                inputPermuteStr = variant[2] > 64
+                                      ? " matrix_a_fmt:MATRIX_FMT_FP8 matrix_b_fmt:MATRIX_FMT_BF6"
+                                      : "";
                 break;
             case InstType::INST_B6_F8:
-                inputPermuteStr = variant[2] > 64 ? " matrix_a_fmt:MATRIX_FMT_BF6 matrix_b_fmt:MATRIX_FMT_FP8" : "";
+                inputPermuteStr = variant[2] > 64
+                                      ? " matrix_a_fmt:MATRIX_FMT_BF6 matrix_b_fmt:MATRIX_FMT_FP8"
+                                      : "";
                 break;
             case InstType::INST_B8_F4:
-                inputPermuteStr = variant[2] > 64 ? " matrix_a_fmt:MATRIX_FMT_BF8 matrix_b_fmt:MATRIX_FMT_FP4" : "";
+                inputPermuteStr = variant[2] > 64
+                                      ? " matrix_a_fmt:MATRIX_FMT_BF8 matrix_b_fmt:MATRIX_FMT_FP4"
+                                      : "";
                 break;
             case InstType::INST_F4_B8:
-                inputPermuteStr = variant[2] > 64 ? " matrix_a_fmt:MATRIX_FMT_FP4 matrix_b_fmt:MATRIX_FMT_BF8" : "";
+                inputPermuteStr = variant[2] > 64
+                                      ? " matrix_a_fmt:MATRIX_FMT_FP4 matrix_b_fmt:MATRIX_FMT_BF8"
+                                      : "";
                 break;
             case InstType::INST_B6_F4:
-                inputPermuteStr = variant[2] > 64 ? " matrix_a_fmt:MATRIX_FMT_BF6 matrix_b_fmt:MATRIX_FMT_FP4" : "";
+                inputPermuteStr = variant[2] > 64
+                                      ? " matrix_a_fmt:MATRIX_FMT_BF6 matrix_b_fmt:MATRIX_FMT_FP4"
+                                      : "";
                 break;
             case InstType::INST_F4_B6:
-                inputPermuteStr = variant[2] > 64 ? " matrix_a_fmt:MATRIX_FMT_FP4 matrix_b_fmt:MATRIX_FMT_BF6" : "";
+                inputPermuteStr = variant[2] > 64
+                                      ? " matrix_a_fmt:MATRIX_FMT_FP4 matrix_b_fmt:MATRIX_FMT_BF6"
+                                      : "";
                 break;
             case InstType::INST_B8_F6:
-                inputPermuteStr = variant[2] > 64 ? " matrix_a_fmt:MATRIX_FMT_BF8 matrix_b_fmt:MATRIX_FMT_FP6" : "";
+                inputPermuteStr = variant[2] > 64
+                                      ? " matrix_a_fmt:MATRIX_FMT_BF8 matrix_b_fmt:MATRIX_FMT_FP6"
+                                      : "";
                 break;
             case InstType::INST_F6_B8:
-                inputPermuteStr = variant[2] > 64 ? " matrix_a_fmt:MATRIX_FMT_FP6 matrix_b_fmt:MATRIX_FMT_BF8" : "";
+                inputPermuteStr = variant[2] > 64
+                                      ? " matrix_a_fmt:MATRIX_FMT_FP6 matrix_b_fmt:MATRIX_FMT_BF8"
+                                      : "";
                 break;
             case InstType::INST_B8_B6:
-                inputPermuteStr = variant[2] > 64 ? " matrix_a_fmt:MATRIX_FMT_BF8 matrix_b_fmt:MATRIX_FMT_BF6" : "";
+                inputPermuteStr = variant[2] > 64
+                                      ? " matrix_a_fmt:MATRIX_FMT_BF8 matrix_b_fmt:MATRIX_FMT_BF6"
+                                      : "";
                 break;
             case InstType::INST_B6_B8:
-                inputPermuteStr = variant[2] > 64 ? " matrix_a_fmt:MATRIX_FMT_BF6 matrix_b_fmt:MATRIX_FMT_BF8" : "";
+                inputPermuteStr = variant[2] > 64
+                                      ? " matrix_a_fmt:MATRIX_FMT_BF6 matrix_b_fmt:MATRIX_FMT_BF8"
+                                      : "";
                 break;
             default:
                 break;
@@ -569,7 +712,6 @@ namespace rocisa
             return formatWithComment(kStr);
         }
     };
-
 
     struct SMFMAInstruction : public Instruction
     {
@@ -655,6 +797,16 @@ namespace rocisa
         {
             std::string negStr = !neg ? "" : " neg_lo:[1,1]";
             return {acc, a, b, metadata, negStr};
+        }
+
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            return {acc};
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            return {a, b, metadata, acc};
         }
 
         std::string preStr() const override

@@ -893,6 +893,7 @@ inline void fft_vs_reference_impl(Tparams& params, bool round_trip)
             if(params.itype != contiguous_params.itype
                || params.istride != contiguous_params.istride
                || params.idist != contiguous_params.idist
+               || params.ioffset != contiguous_params.ioffset
                || params.isize != contiguous_params.isize)
             {
                 // Copy input to CPU
@@ -966,6 +967,7 @@ inline void fft_vs_reference_impl(Tparams& params, bool round_trip)
             if(params.itype != contiguous_params.itype
                || params.istride != contiguous_params.istride
                || params.idist != contiguous_params.idist
+               || params.ioffset != contiguous_params.ioffset
                || params.isize != contiguous_params.isize)
             {
                 // Copy input to CPU and make input contiguous
@@ -1030,7 +1032,8 @@ inline void fft_vs_reference_impl(Tparams& params, bool round_trip)
         std::vector<hostbuf>* gpu_input = &cpu_input;
 
         if(params.itype != contiguous_params.itype || params.istride != contiguous_params.istride
-           || params.idist != contiguous_params.idist || params.isize != contiguous_params.isize)
+           || params.idist != contiguous_params.idist || params.isize != contiguous_params.isize
+           || params.ioffset != contiguous_params.ioffset)
         {
             copy_buffers(cpu_input,
                          gpu_input_data,
@@ -1043,7 +1046,7 @@ inline void fft_vs_reference_impl(Tparams& params, bool round_trip)
                          params.itype,
                          params.istride,
                          params.idist,
-                         {0},
+                         contiguous_params.ioffset,
                          params.ioffset);
             gpu_input = &gpu_input_data;
         }
