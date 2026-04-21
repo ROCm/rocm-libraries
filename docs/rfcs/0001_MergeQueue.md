@@ -51,13 +51,13 @@ Each PR enters zero or more queues based on the paths it touches. A PR merges on
 
 ### 4.2 Path → Queue mapping
 
-The mapping encodes a single rule: a PR enters the queue of every component whose state it depends on, so it is blocked by anything ahead of it in any of those queues.
+The mapping encodes a single rule: **a PR enters its own queue plus the queue of every downstream component** — those that depend on it and could break if it changes. This ensures the PR serializes with any in-flight work in components it could affect.
 
 | Path changed                          | Queues entered                                                                                          | Why                                                                                                                                                  |
 |---------------------------------------|---------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `projects/hipdnn/**`                  | `hipdnn`, `miopen-provider`, `hipblaslt-provider`, `hip-kernel-provider`, `fusilli-provider`, `integration-tests` (all 6) | Core touches every consumer's interface. Blocks anything queued behind it; blocked by anything ahead of it in any queue.                              |
-| `dnn-providers/<provider>/**`         | `<provider>`, `integration-tests`                                                                       | A provider depends on its own queue and the integration suite. Does **not** enter `hipdnn`; it blocks core only implicitly because core enters its queue. Blocks other providers only indirectly via shared `integration-tests` membership; never directly. |
-| `dnn-providers/integration-tests/**`  | `integration-tests`                                                                                    | Integration-test changes enter only their own queue. Providers already enter `integration-tests` (row above), so an in-flight provider PR serializes with integration-test PRs through the shared queue. Does **not** enter `hipdnn` or any provider queue. |
+| `projects/hipdnn/**`                  | `hipdnn`, `miopen-provider`, `hipblaslt-provider`, `hip-kernel-provider`, `fusilli-provider`, `integration-tests` (all 6) | Core is upstream of every other component — all providers and integration-tests are downstream. A core PR enters all six queues so it serializes with everything. |
+| `dnn-providers/<provider>/**`         | `<provider>`, `integration-tests`                                                                       | Each provider's only downstream component is `integration-tests`. Does **not** enter `hipdnn`; core PRs enter the provider's queue (because providers are downstream of core), which handles that serialization. Providers serialize with each other only indirectly via the shared `integration-tests` queue. |
+| `dnn-providers/integration-tests/**`  | `integration-tests`                                                                                    | Integration-tests has no downstream components, so it enters only its own queue. Upstream components (providers, core) already enter `integration-tests`, so serialization happens through the shared queue. |
 | Anything else                         | none                                                                                                    | Project not opted in.                                                                                                                                |
 
 A PR editing both `projects/hipdnn/api/foo.h` and `dnn-providers/miopen-provider/src/bar.cpp` enters all six queues — core's row is a superset of every provider's row.
@@ -82,9 +82,9 @@ integration-tests   │   ·    │    ·     │     ·     │     ·      │
 
 Three patterns to read off the matrix:
 
-- The `hipdnn core` row is the only fully-marked row — core touches every consumer, so a core PR is gated by every other in-flight PR in the ecosystem.
-- Each provider row has exactly two marks — its own queue and `integration-tests`. Providers serialize with each other only through the shared `integration-tests` queue.
-- The `integration-tests` row has a single mark. Integration-test PRs enter only their own queue, but every provider and core PR also enters that queue, so serialization happens naturally.
+- The `hipdnn core` row is the only fully-marked row — core is upstream of everything, so a core PR enters every downstream queue and is gated by every other in-flight PR in the ecosystem.
+- Each provider row has exactly two marks — its own queue and its one downstream component, `integration-tests`. Providers serialize with each other only through the shared `integration-tests` queue.
+- The `integration-tests` row has a single mark — it has no downstream components. Upstream PRs (providers, core) already enter the `integration-tests` queue, so serialization happens naturally.
 
 #### Worked example: four PRs enqueued in order
 
@@ -135,15 +135,15 @@ Two takeaways:
 
 ### 4.3 Opt-in
 
-Dependencies between components are expressed through queue membership in the `PATH_TO_QUEUES` config. The rule: a PR enters its own component's queue plus the queue of every component it depends on. When a component's PR sits in another component's queue, it serializes with that component's PRs — that is the blocking relationship.
+Dependencies between components are expressed through queue membership in the `PATH_TO_QUEUES` config. The rule: **a PR enters its own queue plus the queue of every downstream component** — those that depend on it. When a component's PR sits in a downstream queue, it serializes with that component's PRs — that is the blocking relationship.
 
 To opt in a new component, two edits are needed:
 
-1. **Add your path entry.** Map your path prefix to a list of queues: your own queue, plus the queue of anything you depend on. For example, a new provider that depends on `integration-tests`:
+1. **Add your path entry.** Map your path prefix to a list of queues: your own queue, plus the queue of every component downstream of you. For example, a new provider whose only downstream component is `integration-tests`:
    ```python
    "dnn-providers/new-provider/": ["new-provider", "integration-tests"],
    ```
-2. **Update upstream entries.** Any component that depends on *you* must add your queue to its list. For hipDNN core (which depends on all providers), add `"new-provider"` to the `projects/hipdnn/` entry so that core PRs serialize with the new provider.
+2. **Update entries of components upstream of you.** Any component that lists you as downstream must add your queue to its list. For hipDNN core (upstream of all providers), add `"new-provider"` to the `projects/hipdnn/` entry so that core PRs serialize with the new provider.
 
 There is no per-project file. Removing the entry (and your queue from other entries) opts a project out cleanly. The initial opt-in set is hipDNN core + four providers + integration-tests. Other rocm-libraries projects are explicitly out of scope for v1.
 
