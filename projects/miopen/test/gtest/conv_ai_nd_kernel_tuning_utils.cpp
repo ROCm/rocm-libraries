@@ -881,6 +881,16 @@ class GPU_ConvNDKernelTuningAI_Base : public GPU_ConvNDKernelTuning_Base
 {
 protected:
     bool RequiresAIModels() const override { return true; }
+
+    void SetUp() override
+    {
+        GPU_ConvNDKernelTuning_Base::SetUp();
+        if(device_arch != "gfx942" && device_arch != "gfx950")
+        {
+            GTEST_SKIP() << "AI tuning models only available for gfx942/gfx950, current: "
+                         << device_arch;
+        }
+    }
 };
 
 // Parameterized AI tests
