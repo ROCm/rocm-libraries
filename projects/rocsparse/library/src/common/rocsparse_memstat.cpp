@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -700,6 +700,8 @@ hipError_t memstat_allocator<MODE>::free_async(void* d_, hipStream_t stream)
 
 hipError_t rocsparse_free(void* mem, memstat_mode::value_t mode, const char* tag)
 {
+    if(!mem)
+        return hipSuccess;
     hipError_t err = hipErrorInvalidValue;
     switch(mode)
     {
@@ -737,7 +739,11 @@ hipError_t rocsparse_free(void* mem, memstat_mode::value_t mode, const char* tag
 
 hipError_t rocsparse_malloc(void** mem, size_t nbytes, memstat_mode::value_t mode, const char* tag)
 {
-
+    if(nbytes == 0)
+    {
+        mem[0] = nullptr;
+        return hipSuccess;
+    }
     hipError_t err = hipErrorInvalidValue;
     switch(mode)
     {
@@ -773,6 +779,8 @@ hipError_t rocsparse_malloc(void** mem, size_t nbytes, memstat_mode::value_t mod
 hipError_t
     rocsparse_free_async(void* mem, hipStream_t stream, memstat_mode::value_t mode, const char* tag)
 {
+    if(!mem)
+        return hipSuccess;
     hipError_t err = hipErrorInvalidValue;
     switch(mode)
     {
@@ -809,7 +817,11 @@ hipError_t
 hipError_t rocsparse_malloc_async(
     void** mem, size_t nbytes, hipStream_t stream, memstat_mode::value_t mode, const char* tag)
 {
-
+    if(nbytes == 0)
+    {
+        mem[0] = nullptr;
+        return hipSuccess;
+    }
     hipError_t err = hipErrorInvalidValue;
     switch(mode)
     {

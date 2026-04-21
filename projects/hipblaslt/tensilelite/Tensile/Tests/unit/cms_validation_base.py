@@ -24,15 +24,13 @@
 ################################################################################
 from collections.abc import Callable
 from typing import Any, Optional
-import unittest
-
 from test_CustomSchedule import create_base_kernel, update_kernel, ScheduleInfo
 from Tensile.Components.CMSValidator import (
     create_unified_timeline, ValidatorPassContext, validate_timeline,
 )
 
 
-class CMSValidationTestBase(unittest.TestCase):
+class CMSValidationTestBase:
     """
     Base class for CMS validation tests that provides common setup and helper methods.
 
@@ -81,8 +79,15 @@ class CMSValidationTestBase(unittest.TestCase):
             return False, message
         return True, ""
     
-    def setUp(self, kernel_updates: Optional[dict[str, Any]] = None):
-        """Initialize kernel and compute number of VMFMAs."""
+    def setup_method(self, method=None, *, kernel_updates: Optional[dict[str, Any]] = None):
+        """Initialize kernel and compute number of VMFMAs.
+
+        Args:
+            method: The test method about to run (passed by pytest automatically).
+                    Defaulted to None so subclasses can call super().setup_method(method)
+                    even when invoked without it.
+            kernel_updates: Optional dict of kernel config overrides.
+        """
         self.kernel = create_base_kernel()
         if kernel_updates:
             update_kernel(self.kernel, kernel_updates)

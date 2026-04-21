@@ -5,7 +5,7 @@
 #include <gtest/gtest.h>
 
 #include "engines/plans/RMSnorm/RMSnormApplicabilityChecks.hpp"
-#include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 
@@ -14,8 +14,8 @@ using namespace hip_kernel_provider::rmsnorm;
 TEST(TestRMSnormValidator, Valid)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidRMSNormGraph();
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                              builder.GetSize());
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                                     builder.GetSize());
     const auto& node = graph.getNode(0);
     const auto& attr = *node.attributes_as_RMSNormAttributes();
 
@@ -26,8 +26,8 @@ TEST(TestRMSnormValidator, Valid)
 TEST(TestRMSnormValidator, ValidBwd)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdGraph();
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                              builder.GetSize());
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                                     builder.GetSize());
     const auto& node = graph.getNode(0);
     const auto& attr = *node.attributes_as_RMSNormBackwardAttributes();
 
@@ -38,9 +38,9 @@ TEST(TestRMSnormValidator, ValidBwd)
 TEST(TestRMSnormValidator, UnsupportedDim)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidRMSNormGraph(
-        {12, 4, 1}, {1, 3, 4}, hipdnn_data_sdk::data_objects::DataType::FLOAT);
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                              builder.GetSize());
+        {12, 4, 1}, {1, 3, 4}, hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                                     builder.GetSize());
 
     const auto& node = graph.getNode(0);
     const auto& attr = *node.attributes_as_RMSNormAttributes();
@@ -54,33 +54,33 @@ TEST(TestRMSnormValidator, UnsupportedDim)
 namespace
 {
 flatbuffers::FlatBufferBuilder
-    createInvalidTypeRMSNormGraph(hipdnn_data_sdk::data_objects::DataType xType,
-                                  hipdnn_data_sdk::data_objects::DataType yType,
-                                  hipdnn_data_sdk::data_objects::DataType scaleType,
-                                  hipdnn_data_sdk::data_objects::DataType biasType,
-                                  hipdnn_data_sdk::data_objects::DataType invRMSType)
+    createInvalidTypeRMSNormGraph(hipdnn_flatbuffers_sdk::data_objects::DataType xType,
+                                  hipdnn_flatbuffers_sdk::data_objects::DataType yType,
+                                  hipdnn_flatbuffers_sdk::data_objects::DataType scaleType,
+                                  hipdnn_flatbuffers_sdk::data_objects::DataType biasType,
+                                  hipdnn_flatbuffers_sdk::data_objects::DataType invRMSType)
 {
     std::vector<int64_t> strides{48, 16, 4, 1};
     std::vector<int64_t> dims{1, 3, 4, 4};
 
     flatbuffers::FlatBufferBuilder builder;
-    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
+    std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>
         tensorAttributes;
 
     const std::vector<int64_t> derivedDims = hipdnn_data_sdk::utilities::getDerivedShape(dims);
     const std::vector<int64_t> derivedStrides = hipdnn_data_sdk::utilities::generateStrides(
         derivedDims, hipdnn_data_sdk::utilities::extractStrideOrder(strides));
 
-    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
         builder, 1, "x", xType, &strides, &dims));
 
-    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
         builder, 2, "y", yType, &strides, &dims));
 
-    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
         builder, 3, "scale", scaleType, &derivedStrides, &derivedDims));
 
-    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
         builder, 4, "bias", biasType, &derivedStrides, &derivedDims));
 
     // inv_rms should get norm stats shape [N, 1, H, W]
@@ -89,48 +89,48 @@ flatbuffers::FlatBufferBuilder
     std::vector<int64_t> invRMSStrides = strides;
     invRMSStrides[0] = invRMSStrides[1];
 
-    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
         builder, 5, "inv_rms", invRMSType, &invRMSStrides, &invRMSDims));
 
     // Epsilon (pass-by-value)
     const std::vector<int64_t> passByValueDims = {1};
-    const hipdnn_data_sdk::data_objects::Float32Value epsilonVal(1e-5f);
-    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+    const hipdnn_flatbuffers_sdk::data_objects::Float32Value epsilonVal(1e-5f);
+    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
         builder,
         6,
         "epsilon",
-        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
         &passByValueDims,
         &passByValueDims,
         false,
-        hipdnn_data_sdk::data_objects::TensorValue::Float32Value,
+        hipdnn_flatbuffers_sdk::data_objects::TensorValue::Float32Value,
         builder.CreateStruct(epsilonVal).Union()));
 
     auto rmsnormAttributes
-        = hipdnn_data_sdk::data_objects::CreateRMSNormAttributes(builder,
-                                                                 1, // x uid
-                                                                 3, // scale uid
-                                                                 6, // epsilon uid
-                                                                 2, // y uid
-                                                                 4, // bias uid
-                                                                 5 // invRMS
+        = hipdnn_flatbuffers_sdk::data_objects::CreateRMSNormAttributes(builder,
+                                                                        1, // x uid
+                                                                        3, // scale uid
+                                                                        6, // epsilon uid
+                                                                        2, // y uid
+                                                                        4, // bias uid
+                                                                        5 // invRMS
         );
 
-    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> nodes;
-    auto node = hipdnn_data_sdk::data_objects::CreateNodeDirect(
+    std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Node>> nodes;
+    auto node = hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
         builder,
         "rmsnorm",
-        hipdnn_data_sdk::data_objects::DataType::FLOAT,
-        hipdnn_data_sdk::data_objects::NodeAttributes::RMSNormAttributes,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::RMSNormAttributes,
         rmsnormAttributes.Union());
     nodes.push_back(node);
 
-    auto graphOffset = hipdnn_data_sdk::data_objects::CreateGraphDirect(
+    auto graphOffset = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(
         builder,
         "test",
-        hipdnn_data_sdk::data_objects::DataType::FLOAT,
-        hipdnn_data_sdk::data_objects::DataType::HALF,
-        hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
         &tensorAttributes,
         &nodes);
     builder.Finish(graphOffset);
@@ -140,14 +140,15 @@ flatbuffers::FlatBufferBuilder
 
 TEST(TestRMSnormValidator, MismatchIOTypes)
 {
-    auto builder = createInvalidTypeRMSNormGraph(hipdnn_data_sdk::data_objects::DataType::HALF,
-                                                 hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                                                 hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                                                 hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                                                 hipdnn_data_sdk::data_objects::DataType::FLOAT);
+    auto builder
+        = createInvalidTypeRMSNormGraph(hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+                                        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                                        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                                        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                                        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
 
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                              builder.GetSize());
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                                     builder.GetSize());
 
     const auto& graphNode = graph.getNode(0);
     const auto& attr = *graphNode.attributes_as_RMSNormAttributes();
@@ -160,14 +161,15 @@ TEST(TestRMSnormValidator, MismatchIOTypes)
 
 TEST(TestRMSnormValidator, UnsupportedScaleType)
 {
-    auto builder = createInvalidTypeRMSNormGraph(hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                                                 hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                                                 hipdnn_data_sdk::data_objects::DataType::HALF,
-                                                 hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                                                 hipdnn_data_sdk::data_objects::DataType::FLOAT);
+    auto builder
+        = createInvalidTypeRMSNormGraph(hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                                        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                                        hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+                                        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                                        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
 
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                              builder.GetSize());
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                                     builder.GetSize());
 
     const auto& graphNode = graph.getNode(0);
     const auto& attr = *graphNode.attributes_as_RMSNormAttributes();
@@ -180,14 +182,15 @@ TEST(TestRMSnormValidator, UnsupportedScaleType)
 
 TEST(TestRMSnormValidator, UnsupportedInvRMSType)
 {
-    auto builder = createInvalidTypeRMSNormGraph(hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                                                 hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                                                 hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                                                 hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                                                 hipdnn_data_sdk::data_objects::DataType::HALF);
+    auto builder
+        = createInvalidTypeRMSNormGraph(hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                                        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                                        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                                        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                                        hipdnn_flatbuffers_sdk::data_objects::DataType::HALF);
 
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                              builder.GetSize());
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                                     builder.GetSize());
 
     const auto& graphNode = graph.getNode(0);
     const auto& attr = *graphNode.attributes_as_RMSNormAttributes();
@@ -213,78 +216,78 @@ flatbuffers::FlatBufferBuilder
                                    const std::vector<int64_t>& invRMSStrides)
 {
     flatbuffers::FlatBufferBuilder builder;
-    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
+    std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>
         tensorAttributes;
 
-    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
-        builder, 1, "x", hipdnn_data_sdk::data_objects::DataType::FLOAT, &xStrides, &xDims));
+    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+        builder, 1, "x", hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT, &xStrides, &xDims));
 
-    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
-        builder, 2, "y", hipdnn_data_sdk::data_objects::DataType::FLOAT, &yStrides, &yDims));
+    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+        builder, 2, "y", hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT, &yStrides, &yDims));
 
-    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
         builder,
         3,
         "scale",
-        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
         &scaleStrides,
         &scaleDims));
 
-    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
         builder,
         4,
         "bias",
-        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
         &biasStrides,
         &biasDims));
 
-    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
         builder,
         5,
         "inv_rms",
-        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
         &invRMSStrides,
         &invRMSDims));
 
     // Epsilon (pass-by-value)
     const std::vector<int64_t> passByValueDims = {1};
-    const hipdnn_data_sdk::data_objects::Float32Value epsilonVal(1e-5f);
-    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+    const hipdnn_flatbuffers_sdk::data_objects::Float32Value epsilonVal(1e-5f);
+    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
         builder,
         6,
         "epsilon",
-        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
         &passByValueDims,
         &passByValueDims,
         false,
-        hipdnn_data_sdk::data_objects::TensorValue::Float32Value,
+        hipdnn_flatbuffers_sdk::data_objects::TensorValue::Float32Value,
         builder.CreateStruct(epsilonVal).Union()));
 
     auto rmsnormAttributes
-        = hipdnn_data_sdk::data_objects::CreateRMSNormAttributes(builder,
-                                                                 1, // x uid
-                                                                 3, // scale uid
-                                                                 6, // epsilon uid
-                                                                 2, // y uid
-                                                                 4, // bias uid
-                                                                 5 // invRMS
+        = hipdnn_flatbuffers_sdk::data_objects::CreateRMSNormAttributes(builder,
+                                                                        1, // x uid
+                                                                        3, // scale uid
+                                                                        6, // epsilon uid
+                                                                        2, // y uid
+                                                                        4, // bias uid
+                                                                        5 // invRMS
         );
 
-    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> nodes;
-    auto node = hipdnn_data_sdk::data_objects::CreateNodeDirect(
+    std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Node>> nodes;
+    auto node = hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
         builder,
         "rmsnorm",
-        hipdnn_data_sdk::data_objects::DataType::FLOAT,
-        hipdnn_data_sdk::data_objects::NodeAttributes::RMSNormAttributes,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::RMSNormAttributes,
         rmsnormAttributes.Union());
     nodes.push_back(node);
 
-    auto graphOffset = hipdnn_data_sdk::data_objects::CreateGraphDirect(
+    auto graphOffset = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(
         builder,
         "test",
-        hipdnn_data_sdk::data_objects::DataType::FLOAT,
-        hipdnn_data_sdk::data_objects::DataType::HALF,
-        hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
         &tensorAttributes,
         &nodes);
     builder.Finish(graphOffset);
@@ -321,8 +324,8 @@ TEST(TestRMSnormValidator, MismatchIOShapes)
                                                   invRMSDims,
                                                   invRMSStrides);
 
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                              builder.GetSize());
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                                     builder.GetSize());
 
     const auto& graphNode = graph.getNode(0);
     const auto& attr = *graphNode.attributes_as_RMSNormAttributes();
@@ -355,8 +358,8 @@ TEST(TestRMSnormValidator, UnsupportedScaleShape)
                                                   invRMSDims,
                                                   invRMSStrides);
 
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                              builder.GetSize());
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                                     builder.GetSize());
 
     const auto& graphNode = graph.getNode(0);
     const auto& attr = *graphNode.attributes_as_RMSNormAttributes();
@@ -387,8 +390,8 @@ TEST(TestRMSnormValidator, UnsupportedInvRMShape)
                                                   derivedStrides,
                                                   derivedDims,
                                                   derivedStrides);
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                              builder.GetSize());
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                                     builder.GetSize());
 
     const auto& graphNode = graph.getNode(0);
     const auto& attr = *graphNode.attributes_as_RMSNormAttributes();
