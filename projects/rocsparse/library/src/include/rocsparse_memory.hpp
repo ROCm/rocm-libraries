@@ -25,7 +25,6 @@
 #pragma once
 
 #include "rocsparse_memory_debug_t.hpp"
-#include <hip/hip_runtime_api.h>
 
 hipError_t rocsparse_hipFree(void* p);
 hipError_t rocsparse_hipFreeAsync(void* p, hipStream_t stream);

@@ -22,6 +22,7 @@
  *
  * ************************************************************************ */
 #include "rocsparse_memory.hpp"
+#include "rocsparse_control.hpp"
 
 hipError_t rocsparse_hipMemcpy2DAsync(void*         target,
                                       size_t        tpitch,
