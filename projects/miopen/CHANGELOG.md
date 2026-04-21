@@ -27,7 +27,6 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 
 ### Removed
 * Removed GraphAPI experimental feature and related code
-* Removed OpenCL kernel `MIOpenConvBwdBias.cl` and its implementation (`ConvolutionBackwardBias`)
 
 ### Resolved issues
 * [Conv] Fixed Winograd Fury grouped convolution correctness on gfx12 when G > 1.
