@@ -1,7 +1,6 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 #pragma once
-#include <chrono>
 #include <sstream>
 #include <gtest/gtest.h>
 
@@ -417,15 +416,18 @@ class TestCkTileMxGemmPipeline : public ::testing::Test
         }
 
         {
-            std::mt19937 gen(std::chrono::steady_clock::now().time_since_epoch().count());
-            std::uniform_int_distribution<int> dist(40, 60);
+            constexpr int a_bias = ck_tile::numeric_traits<AScaleDataType>::bias;
+            constexpr int b_bias = ck_tile::numeric_traits<BScaleDataType>::bias;
+            std::mt19937 gen(11941);
+            std::uniform_int_distribution<int> dist_a(a_bias - 3, a_bias + 1);
+            std::uniform_int_distribution<int> dist_b(b_bias - 3, b_bias + 1);
             for(auto& s : scale_a.mData)
             {
-                s = AScaleDataType(static_cast<typename AScaleDataType::type>(dist(gen)));
+                s = AScaleDataType(static_cast<typename AScaleDataType::type>(dist_a(gen)));
             }
             for(auto& s : scale_b.mData)
             {
-                s = BScaleDataType(static_cast<typename BScaleDataType::type>(dist(gen)));
+                s = BScaleDataType(static_cast<typename BScaleDataType::type>(dist_b(gen)));
             }
         }
 
