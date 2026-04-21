@@ -32,11 +32,6 @@
 
 #pragma once
 
-#include "auxiliary/rocauxiliary_laswp.hpp"
-#include "rocblas.hpp"
-#include "rocsolver/rocsolver.h"
-#include "rocsolver_run_specialized_kernels.hpp"
-
 #include "roclapack_getrs.hpp"
 
 ROCSOLVER_BEGIN_NAMESPACE
