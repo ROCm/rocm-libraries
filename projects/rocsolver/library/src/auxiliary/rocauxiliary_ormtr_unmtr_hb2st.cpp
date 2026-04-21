@@ -64,15 +64,15 @@ rocblas_status rocsolver_ormtr_unmtr_hb2st_impl(rocblas_handle handle,
     rocblas_int strideV = 0;
     rocblas_int strideT = 0;
     rocblas_int strideC = 0;
-    rocblas_int max_parallel = 1;
     rocblas_int batch_count = 1;
+    rocblas_int max_parallel = 1;
 
     // memory workspace sizes:
     size_t size_scalars;
     size_t size_Tr, size_W, size_Z;
     size_t size_work, size_workArr;
     rocsolver_ormtr_unmtr_hb2st_getMemorySize<false, T>(
-        side, trans, m, n, kd, max_parallel, batch_count,
+        side, trans, m, n, kd, batch_count, &max_parallel,
         &size_scalars, &size_Tr, &size_W, &size_Z,
         &size_work, &size_workArr);
 

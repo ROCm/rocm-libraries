@@ -35,16 +35,9 @@
 #include "auxiliary/rocauxiliary_larft.hpp"
 #include "rocblas.hpp"
 #include "rocsolver/rocsolver.h"
-#include "laset.hpp"  // todo: just for ceildiv
+#include "lib_device_helpers.hpp"
 
 ROCSOLVER_BEGIN_NAMESPACE
-
-//------------------------------------------------------------------------------
-// defined in rocauxiliary_sb2st_hb2st.hpp.
-// todo: should this go in a header somewhere?
-template <typename I>
-__device__ rocblas_int get_v_block_index(
-    I nt, I i, I j );
 
 //------------------------------------------------------------------------------
 // Sets size_* and max_parallel for the maximum number of operations to do in
@@ -89,10 +82,12 @@ void rocsolver_ormtr_unmtr_hb2st_getMemorySize(
     // matrix. If batch_count > 1, set max_parallel = 1 and use batching for
     // the user batch.
     if (batch_count == 1)
-        max_parallel = ceildiv( nt, 2 );
-    *size_Z = sizeof(T) * kd * nz * batch_count * max_parallel;
-    *size_T = sizeof(T) * kd * kd * batch_count * max_parallel;
-    *size_W = sizeof(T) * 2*kd * kd * batch_count * max_parallel;
+    {
+        *max_parallel = ceildiv( nt, 2 );
+    }
+    *size_Z = sizeof(T) * kd * nz * batch_count * (*max_parallel);
+    *size_T = sizeof(T) * kd * kd * batch_count * (*max_parallel);
+    *size_W = sizeof(T) * 2*kd * kd * batch_count * (*max_parallel);
     *size_workArr = BATCHED ? sizeof(T*) * 2 * batch_count : 0;
 printf( "getMemSize1 scalars %lu, T %lu, W %lu, Z %lu, work %lu, workArr %lu\n",
         *size_scalars, *size_T, *size_W, *size_Z, *size_work, *size_workArr );
@@ -100,7 +95,7 @@ printf( "getMemSize1 scalars %lu, T %lu, W %lu, Z %lu, work %lu, workArr %lu\n",
     // extra space for larft calls
     size_t w, wa;
     rocsolver_larft_getMemorySize<BATCHED, T>(
-        2*kd, kd, batch_count*max_parallel, size_scalars, &w, &wa);
+        2*kd, kd, batch_count*(*max_parallel), size_scalars, &w, &wa);
     *size_work = std::max(*size_work, w);
     *size_workArr = std::max(*size_workArr, wa);
 
@@ -317,8 +312,8 @@ printf( "backward %d, k = %d:%d:%d\n",
                 assert( r_ == r );
                 rocblas_int ii_ = i*kd + 1;
                 assert( ii_ == ii );
-                rocblas_int vj_ = r2*kd;
-                assert( vj_ == vj );
+                //rocblas_int vj_ = r_*kd;
+                //assert( vj_ == vj );
 
                 // jp indexes T, W, Z arrays for operations in parallel.
                 // T, W are block cols; Z is block rows.
@@ -419,9 +414,11 @@ printf( "backward %d, k = %d:%d:%d\n",
                 // todo: replace with stride in batch calls.
                 i += 2;
                 r += 1;
-                vj += kd;
+                //vj += kd;
                 ii += 2*kd;
             }
+
+            j = j_last + 1;
         }
     }
 
