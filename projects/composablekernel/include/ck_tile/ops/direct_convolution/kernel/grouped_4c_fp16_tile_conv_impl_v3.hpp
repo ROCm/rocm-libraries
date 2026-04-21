@@ -68,8 +68,8 @@ struct Config
 
     Direction direction = Direction::Fprop;
 
-    // Swizzle pattern - v2 uses the XOR-based swizzle.
-    SwizzleType swizzle_type = SwizzleType::XOR;
+    // Swizzle pattern - disabled for debugging.
+    SwizzleType swizzle_type = SwizzleType::None;
 
     // Total number of waves.
     constexpr int num_waves() const { return waves_c64 * waves_q4; }
@@ -88,7 +88,7 @@ struct Config
 
     std::string GetName() const
     { 
-        return "v3_grouped_4c_swizzleXOR";
+        return "v3_grouped_4c_noswizzle";
     }
 };
 
@@ -171,26 +171,17 @@ struct TileConstants
     static constexpr int WEIGHT_LDS_SIZE_UINT4 = WEIGHT_LDS_SIZE_UINT2 / 2;
 
     // -----------------------------------------------------------------------
-    // LDS descriptor with XOR swizzle (uint4 units, for MFMA read path).
+    // LDS descriptor (uint4 units, for MFMA read path).
     //
     // Logical layout: [BLOCK_W, BLOCK_C8] row-major (x = row, c8 = column)
-    // Physical layout: xor_t transform maps (x, c8) → (x, c8 ^ (x % C8))
-    //   which produces flat offset x * C8 + (c8 ^ (x % C8)).
-    //
-    // This is the CK Tile equivalent of SwizzleXOR::offset_uint4(x, c8).
+    // Physical layout: plain row-major, offset = x * BLOCK_C8 + c8.
+    // No swizzle — debugging simplified layout.
     // -----------------------------------------------------------------------
     static constexpr auto MakeInputLdsBlockDescriptor()
     {
-        constexpr auto desc_naive = ck_tile::make_naive_tensor_descriptor(
+        return ck_tile::make_naive_tensor_descriptor(
             ck_tile::make_tuple(ck_tile::number<BLOCK_W>{}, ck_tile::number<BLOCK_C8>{}),
             ck_tile::make_tuple(ck_tile::number<BLOCK_C8>{}, ck_tile::number<1>{}));
-
-        return ck_tile::transform_tensor_descriptor(
-            desc_naive,
-            ck_tile::make_tuple(ck_tile::make_xor_transform(
-                ck_tile::make_tuple(ck_tile::number<BLOCK_W>{}, ck_tile::number<BLOCK_C8>{}))),
-            ck_tile::make_tuple(ck_tile::sequence<0, 1>{}),
-            ck_tile::make_tuple(ck_tile::sequence<0, 1>{}));
     }
 
     // Compute uint2 offset from logical (x, c4) using the uint4 descriptor.
@@ -259,21 +250,17 @@ struct TileConstants
     // -----------------------------------------------------------------------
     // Tile-level async load constants and descriptors.
     //
-    // The tile distribution maps (warp_id, lane_id) to a 3D tile coordinate
-    // (x_local, c8_local, c_sub) where x_local ∈ [0, TOTAL_SPATIAL),
+    // The tile distribution maps (warp_id, lane_id) to a 4D tile coordinate
+    // (row, x_local, c8_local, c_sub) where x_local ∈ [0, TOTAL_SPATIAL),
     // c8_local ∈ [0, BLOCK_C8), c_sub ∈ [0, 8).  TOTAL_SPATIAL > BLOCK_W
     // in general; surplus threads (x_local >= BLOCK_W) produce OOB
     // coordinates that the pad transform suppresses automatically.
     //
-    // The DRAM descriptor applies an XOR transform so that lane
-    // (x_local, c8_local) reads from global coordinate
-    // (x_local, c8_local ^ (x_local % BLOCK_C8)), producing XOR-swizzled
-    // data in LDS that matches the MFMA read path (lds_offset_uint2).
+    // No swizzle: each thread loads from its natural (x_local, c8_local)
+    // coordinate and writes to the corresponding row-major LDS position.
     //
     // Element type: _Float16 (fp16). The 8-element sub-channel dimension
     // is the vectorization dimension (Y), producing 128-bit loads.
-    // Row advancement uses the linear offset parameter of
-    // async_load_tile_with_offset.
     // -----------------------------------------------------------------------
     static constexpr int LANES_PER_ROW = WAVE_SIZE / BLOCK_C8;
     static constexpr int TOTAL_SPATIAL = cfg.block_size() / BLOCK_C8;
@@ -283,20 +270,16 @@ struct TileConstants
     static constexpr int INPUT_LDS_BUFFER_SIZE_PADDED_FP16 = INPUT_LDS_BUFFER_SIZE_PADDED_C8 * 8;
 
     // DRAM descriptor for tile-level async loads: [hi, wi_padded, BLOCK_C8, 8]
-    // in fp16 units, with pad transform on W and XOR transform on (W, C8).
+    // in fp16 units, with pad transform on W.
     // Row dimension allows advancing rows via move_tile_window({1, 0, 0, 0}).
     //
     // Base pointer: in + batch_offset + block_k  (shifted to tile's channel origin).
-    // The XOR works because block_q is always a multiple of BLOCK_C8:
-    //   block_q = waves_q4 * 4 * tile_idx, and waves_q4 * 4 >= BLOCK_C8.
-    //   So (block_q + x_local) % BLOCK_C8 == x_local % BLOCK_C8.
-    static CK_TILE_DEVICE auto MakeInputDramDescriptorXOR(int hi, int wi, int C_total, int px)
+    // No swizzle — plain row-major layout for debugging.
+    static CK_TILE_DEVICE auto MakeInputDramDescriptor(int hi, int wi, int C_total, int px)
     {
         constexpr int right_pad_w = cfg.kw - 1;
-        const int wi_padded       = wi + px + right_pad_w;
 
         // Step 1: Naive [hi, wi, BLOCK_C8, 8] with global strides in fp16 units.
-        // stride_sub = 1, stride_c8 = 8, stride_w = C_total, stride_h = wi * C_total.
         const auto desc_raw = ck_tile::make_naive_tensor_descriptor(
             ck_tile::make_tuple(hi, wi, ck_tile::number<BLOCK_C8>{}, ck_tile::number<8>{}),
             ck_tile::make_tuple(wi * C_total, C_total, ck_tile::number<8>{}, ck_tile::number<1>{}),
@@ -315,23 +298,7 @@ struct TileConstants
             ck_tile::make_tuple(ck_tile::sequence<0>{}, ck_tile::sequence<1>{},
                                 ck_tile::sequence<2>{}, ck_tile::sequence<3>{}));
 
-        // Step 3: XOR transform on (W_padded, BLOCK_C8).
-        // XOR computes c8_phys = c8 ^ (col_padded % BLOCK_C8).
-        // Since block_q % BLOCK_C8 == 0, col_padded % BLOCK_C8 == x_local % BLOCK_C8.
-        // Row and sub-channel dimensions pass through unchanged.
-        const auto desc_xor = ck_tile::transform_tensor_descriptor(
-            desc_padded,
-            ck_tile::make_tuple(
-                ck_tile::make_pass_through_transform(hi),
-                ck_tile::make_xor_transform(
-                    ck_tile::make_tuple(wi_padded, ck_tile::number<BLOCK_C8>{})),
-                ck_tile::make_pass_through_transform(ck_tile::number<8>{})),
-            ck_tile::make_tuple(ck_tile::sequence<0>{}, ck_tile::sequence<1, 2>{},
-                                ck_tile::sequence<3>{}),
-            ck_tile::make_tuple(ck_tile::sequence<0>{}, ck_tile::sequence<1, 2>{},
-                                ck_tile::sequence<3>{}));
-
-        return desc_xor;
+        return desc_padded;
     }
 
     // LDS store descriptor for async_load_tile: [1, TOTAL_SPATIAL, BLOCK_C8, 8]
@@ -360,32 +327,47 @@ struct TileConstants
     //   c_sub ∈ [0, 8) — Y-iteration dimension (vectorization)
     //
     // X0 = 1 (row), Y0 iteration (trivial length 1)
-    // X1 = TOTAL_SPATIAL, decomposed as [LANES_PER_ROW, NUM_WAVES]:
-    //   P0 contributes NUM_WAVES factor, P1 contributes LANES_PER_ROW factor
+    // X1 = TOTAL_SPATIAL, decomposed as [NUM_WAVES, LANES_PER_ROW]:
+    //   factor 0 (NUM_WAVES) = outer spatial (big strides), contributed by P0
+    //   factor 1 (LANES_PER_ROW) = inner spatial (small strides), contributed by P1
+    //   Unmerge: X1 = factor0 * LANES_PER_ROW + factor1 = warp_id * 4 + lane_id/16
     // X2 = BLOCK_C8, decomposed as [BLOCK_C8]:
     //   P1 contributes BLOCK_C8 factor
     // X3 = 8, decomposed as [8]:
     //   Y1 iteration dimension (128-bit vectorized loads)
+    //
+    // LDS constraint: global_load_lds writes lane L at M0 + L * 16 bytes.
+    // LDS store descriptor is row-major [TOTAL_SPATIAL, BLOCK_C8, 8].
+    // For correct placement: X1 must equal warp_id * LANES_PER_ROW + lane_id/BLOCK_C8
+    // so that LDS offset = X1 * BLOCK_C8 * 8 + X2 * 8 = (warp*4 + lane/16)*128 + (lane%16)*8
+    //                    = warp*512 + lane*8 = M0/elem_size + lane*vec_size.
     static constexpr int NUM_WAVES = cfg.num_waves();
 
     static constexpr auto MakeInputDramDistribution()
     {
         // RH-major indices: 0=R(empty), 1=X0(row), 2=X1(spatial), 3=X2(channel), 4=X3(sub)
-        // P0 (warp_id=NUM_WAVES): maps to X1 H-factor 1 → major=2, minor=1
-        // P1 (lane_id=64=LANES_PER_ROW*BLOCK_C8):
-        //   factor 0 (LANES_PER_ROW): maps to X1 H-factor 0 → major=2, minor=0
-        //   factor 1 (BLOCK_C8):      maps to X2 H-factor 0 → major=3, minor=0
+        //
+        // X1 unmerge factors: [NUM_WAVES, LANES_PER_ROW]
+        //   factor 0 (NUM_WAVES, minor=0): outer spatial
+        //   factor 1 (LANES_PER_ROW, minor=1): inner spatial
+        //
+        // P0 (warp_id, single factor of NUM_WAVES):
+        //   maps to X1 factor 0 (NUM_WAVES) → major=2, minor=0
+        // P1 (lane_id=64, decomposed as [LANES_PER_ROW, BLOCK_C8]):
+        //   Merge low_lengths = {LANES_PER_ROW=4, BLOCK_C8=16}
+        //   lane_id / 16 → factor 0 → X1 factor 1 (LANES_PER_ROW) → major=2, minor=1
+        //   lane_id % 16 → factor 1 → X2 factor 0 (BLOCK_C8)      → major=3, minor=0
         // Y0 (length 1): maps to X0 H-factor 0 → major=1, minor=0 (trivial row)
         // Y1 (length 8): maps to X3 H-factor 0 → major=4, minor=0 (vectorization)
         return ck_tile::make_static_tile_distribution(
             ck_tile::tile_distribution_encoding<
                 ck_tile::sequence<>,
                 ck_tile::tuple<ck_tile::sequence<1>,
-                               ck_tile::sequence<LANES_PER_ROW, NUM_WAVES>,
+                               ck_tile::sequence<NUM_WAVES, LANES_PER_ROW>,
                                ck_tile::sequence<BLOCK_C8>,
                                ck_tile::sequence<8>>,
                 ck_tile::tuple<ck_tile::sequence<2>, ck_tile::sequence<2, 3>>,
-                ck_tile::tuple<ck_tile::sequence<1>, ck_tile::sequence<0, 0>>,
+                ck_tile::tuple<ck_tile::sequence<0>, ck_tile::sequence<1, 0>>,
                 ck_tile::sequence<1, 4>,
                 ck_tile::sequence<0, 0>>{});
     }
@@ -656,9 +638,9 @@ __device__ void conv2d_grouped_4c_fp16_cdna4_nhwc_impl(const _Float16* __restric
     OutputWriter<cfg> ow(tm, bc, output_lds, out, ho, wo);
 
     // --- Input tile windows for async_load_tile ---
-    // DRAM tensor view: fp16 data with XOR-swizzled 4D descriptor [hi, wi_padded, C8, 8].
+    // DRAM tensor view: fp16 data with 4D descriptor [hi, wi_padded, C8, 8].
     // Base pointer shifted to this tile's channel origin.
-    const auto input_dram_desc = TC::MakeInputDramDescriptorXOR(hi, wi, bc.C, px);
+    const auto input_dram_desc = TC::MakeInputDramDescriptor(hi, wi, bc.C, px);
     const auto input_dram_view = ck_tile::make_tensor_view<ck_tile::address_space_enum::global>(
         in + static_cast<size_t>(bc.block_n) * hi * wi * bc.C + bc.block_k,
         input_dram_desc);
@@ -694,16 +676,21 @@ __device__ void conv2d_grouped_4c_fp16_cdna4_nhwc_impl(const _Float16* __restric
     // --- Weight prologue: global → LDS → registers ---
     fp16x4_t weights_reg[cfg.kh * cfg.kw];
     WeightLoader<cfg>::load_to_lds(tm.tid, bc, output_lds, wei);
+    // Wait for weight loads to complete before issuing input loads.
+    wait_vmcnt<0>();
+    __syncthreads();
+    WeightLoader<cfg>::read_from_lds(weights_reg, tm, output_lds_fp16);
+    __syncthreads();
+
     // Prefetch first input row (row 0) into LDS buffer 0.
     ck_tile::async_load_tile(lds_window_0, input_dram_window);
 
     {
         wait_vmcnt<0>();
         __syncthreads();
-        WeightLoader<cfg>::read_from_lds(weights_reg, tm, output_lds_fp16);
     }
 
-    // --- Pre-compute per-thread LDS offsets (XOR-swizzled, uint2 units) ---
+    // --- Pre-compute per-thread LDS offsets (row-major, uint2 units) ---
     int input_lds_offsets[cfg.kw];
     static_for<cfg.kw>(
         [&]<int S>()

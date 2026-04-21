@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "ck_tile/core/tensor/tensor_descriptor.hpp"
 #include "ck_tile/ops/direct_convolution/utils/matrix_layout.hpp"
 #include "ck_tile/ops/direct_convolution/utils/types.hpp"
 #include "ck_tile/ops/direct_convolution/utils/mathutil.hpp"
@@ -167,6 +168,9 @@ struct TileConstants
     static constexpr int WEIGHT_LDS_SIZE_UINT2 = cfg.kh * cfg.kw * cfg.block_groups() * GROUP_SIZE;
     static constexpr int WEIGHT_LDS_SIZE_UINT4 = WEIGHT_LDS_SIZE_UINT2 / 2;
 
+    // Size of the vector load
+    static constexpr int ELEMENTS_PER_VECTOR_LOAD = 8;
+
     // -----------------------------------------------------------------------
     // LDS descriptor with XOR swizzle (uint4 units, for MFMA read path).
     //
@@ -214,7 +218,7 @@ struct TileConstants
     static constexpr int BLOCK_C = BLOCK_C8 * 8;
 
     // -----------------------------------------------------------------------
-    // Global input descriptor: 3D [hi, wi_padded, C] in fp16 elements.
+    // Global input tensor descriptor: 3D [hi, wi_padded, C] in fp16 elements.
     //
     // Construction chain:
     //   1. Naive [hi, wi, C] with strides [wi*C, C, 1]  (fp16 units)
@@ -235,7 +239,7 @@ struct TileConstants
         const auto desc_hwc = ck_tile::make_naive_tensor_descriptor(
             ck_tile::make_tuple(hi, wi, C),
             ck_tile::make_tuple(wi * C, C, ck_tile::number<1>{}),
-            ck_tile::number<8>{},
+            ck_tile::number<ELEMENTS_PER_VECTOR_LOAD>{},
             ck_tile::number<1>{});
 
         const auto desc_padded = ck_tile::transform_tensor_descriptor(
@@ -251,6 +255,24 @@ struct TileConstants
         return desc_padded;
     }
 
+    // -----------------------------------------------------------------------
+    // Global weight descriptor: 1D flat tensor in fp16 elements.
+    // Weight tensor layout is [K_tot, kh, kw, C_per_group] in fp16 elements.
+    //
+    // Used by WeightLoader for per-thread async loads.
+    // -----------------------------------------------------------------------
+    static CK_TILE_DEVICE auto MakeWeightGlobalDescriptor(int K)
+    {
+        const int weight_elements    = K * cfg.kh * cfg.kw * GROUP_SIZE;
+        const auto desc = make_naive_tensor_descriptor(
+            ck_tile::make_tuple(weight_elements),
+            ck_tile::make_tuple(ck_tile::number<1>{}), 
+            ck_tile::number<ELEMENTS_PER_VECTOR_LOAD>{},
+            ck_tile::number<1>{}
+        );
+        return desc;
+    }
+
     using Swizzle = SwizzleXOR<cfg.block_c()>;
 };
 
@@ -258,23 +280,24 @@ struct TileConstants
 template <Config cfg>
 struct BlockCoords
 {
-    int block_n;
-    int block_q;
-    int block_group;
-    int block_k;
-    int block_c8;
-    int C; // Total number of input channels.
-    int C8; // Total number of input channels in uint4 vector units.
+    int block_n;      // Batch index for this workgroup (unfolded from blockIdx).
+    int block_q;      // Starting output column (W dimension) for this workgroup.
+    int block_group;  // Starting convolution group index for this workgroup.
+    int block_k;      // Starting output channel index (= block_group * channels_per_group).
+    int block_k8;     // block_k expressed in uint4 vector units (block_k / 8).
+    int C;            // Total number of input channels (groups * channels_per_group).
+    int C8;           // Total number of input channels in uint4 vector units (C / 8).
+    int K;            // Total number of output channels (== C for this kernel since K_tot == C_tot).
 
     __device__ BlockCoords(int groups)
-        : C(groups * cfg.channels_per_group), C8(C / 8)
+        : C(groups * cfg.channels_per_group), C8(C / 8), K(C)
     {
         const int block_q_n_idx = blockIdx.x;
         block_n     = static_cast<int>(blockIdx.z) * cfg.n_fold + block_q_n_idx % cfg.n_fold;
         block_q     = (block_q_n_idx / cfg.n_fold) * cfg.block_q();
         block_group = static_cast<int>(blockIdx.y) * cfg.block_groups();
         block_k     = block_group * cfg.channels_per_group;
-        block_c8    = block_k / 8;
+        block_k8    = block_k / 8;
     }
 };
 
@@ -373,35 +396,42 @@ template <Config cfg>
 struct WeightLoader
 {
     using TC = TileConstants<cfg>;
+    using WeightTensorView = decltype(ck_tile::make_tensor_view<ck_tile::address_space_enum::global>(
+        static_cast<const _Float16*>(nullptr), TC::MakeWeightGlobalDescriptor(int{})));
+
+    WeightTensorView weight_view;
+    uint4* store_weight_lds;
+    int offset;
+    int num_threads_per_block;
+
+    __device__ WeightLoader(int tid,
+                           const BlockCoords<cfg>& bc,
+                           uint4* weight_lds,
+                           const _Float16* __restrict__ wei) 
+        // block_k selects the starting output channel for this workgroup.
+        : weight_view(ck_tile::make_tensor_view<ck_tile::address_space_enum::global>(
+              wei + static_cast<size_t>(bc.block_k) * cfg.kh * cfg.kw * TC::GROUP_SIZE,
+              TC::MakeWeightGlobalDescriptor(bc.K))),
+          store_weight_lds(weight_lds),
+          offset(tid),
+          num_threads_per_block(cfg.block_size())
+    {
+    }
 
     // Load weights from global memory into LDS (output_lds is reused for weight staging).
-    __device__ static void load_to_lds(int tid,
-                                       const BlockCoords<cfg>& bc,
-                                       uint4* output_lds,
-                                       const _Float16* __restrict__ wei)
+    __device__ void load_to_lds()
     {
-        // Weight tensor is [C_total * kh * kw * GROUP_SIZE] in fp16 elements.
         // Each thread loads 8 contiguous fp16 (= 1 uint4 = 16 bytes) per iteration.
-        // block_k selects the starting filter index for this workgroup, i.e., 
-        // each workgroup loads weights for a single output group and all input filters.
-        // Note: bc.C is the total number of input channels.
-        constexpr int FP16_PER_UINT4 = 8;
-        const int weight_elements    = bc.C * cfg.kh * cfg.kw * TC::GROUP_SIZE;
-        const int base_fp16          = bc.block_k * cfg.kh * cfg.kw * TC::GROUP_SIZE;
-
-        auto weight_view = ck_tile::make_naive_tensor_view<ck_tile::address_space_enum::global>(
-            wei,
-            ck_tile::make_tuple(weight_elements), // Flat tensor
-            ck_tile::make_tuple(ck_tile::number<1>{}), // Stride doesn't matter since we only use linear indexing.
-            ck_tile::number<FP16_PER_UINT4>{}); // Vector size of 8 fp16 elements per uint4
-
-        for(int j = tid; j < TC::WEIGHT_LDS_SIZE_UINT4; j += cfg.block_size())
+        // All threads in the workgroup (thread block) sweep once over the flat weight tensor.
+        // When the first batch is loaded, start loading the next batch of 8 values if the thread
+        // maps to a valid LDS address. 
+        for(int j = offset; j < TC::WEIGHT_LDS_SIZE_UINT4; j += num_threads_per_block)
         {
             auto coord = ck_tile::make_tensor_coordinate(
                 weight_view.get_tensor_descriptor(),
-                ck_tile::make_tuple(base_fp16 + j * FP16_PER_UINT4));
+                ck_tile::make_tuple(j * TC::ELEMENTS_PER_VECTOR_LOAD));
             weight_view.template async_get_vectorized_elements<ck_tile::fp16x8_t, false>(
-                reinterpret_cast<CK_TILE_LDS_ADDR _Float16*>(&output_lds[j]),
+                reinterpret_cast<CK_TILE_LDS_ADDR _Float16*>(&store_weight_lds[j]),
                 coord,
                 0,
                 ck_tile::bool_constant<false>{});
@@ -412,8 +442,7 @@ struct WeightLoader
     __device__ static void read_from_lds(
         fp16x4_t (&weights_reg)[cfg.kh * cfg.kw],
         const ThreadMapping<cfg>& tm,
-        ck_tile::buffer_view<ck_tile::address_space_enum::lds, _Float16, ck_tile::index_t, true>&
-            output_lds_fp16)
+        ck_tile::buffer_view<ck_tile::address_space_enum::lds, _Float16, ck_tile::index_t, true>& output_lds_fp16)
     {
         if constexpr(cfg.direction == Direction::Dgrad)
         {
@@ -495,7 +524,7 @@ struct OutputWriter
             const int col = tm.tid / TC::BLOCK_C8;
             const int c8  = tm.tid % TC::BLOCK_C8;
             out_q         = bc.block_q + col;
-            out_c_fp16    = (bc.block_c8 + c8) * 8;
+            out_c_fp16    = (bc.block_k8 + c8) * 8;
             load_output_lds = &output_lds[TC::lds_offset_uint4(col, c8)];
             store_valid     = (out_q < wo);
         }
@@ -578,11 +607,12 @@ __device__ void conv2d_grouped_4c_fp16_cdna4_nhwc_impl(const _Float16* __restric
 
     ThreadMapping<cfg> tm;
     InputLoader<cfg> il(tm.tid, bc, input_lds, in, hi, wi, px);
+    WeightLoader<cfg> wl(tm.tid, bc, output_lds, wei);
     OutputWriter<cfg> ow(tm, bc, output_lds, out, ho, wo);
 
     // --- Weight prologue: global → LDS → registers ---
     fp16x4_t weights_reg[cfg.kh * cfg.kw];
-    WeightLoader<cfg>::load_to_lds(tm.tid, bc, output_lds, wei);
+    wl.load_to_lds();
     il.prefetch_first_row();
 
     {

@@ -18,5 +18,7 @@ run_alg(run_direct_conv<direct_conv::DirectTileConvForward4CFp16Kernel<11>, SIGN
 run_alg(run_direct_conv<direct_conv::DirectTileConvForward4CFp16Kernel<12>, SIGNATURE>);
 run_alg(run_direct_conv<direct_conv::DirectTileConvForward4CFp16Kernel<13>, SIGNATURE>);
 run_alg(run_direct_conv<direct_conv::DirectTileConvForward4CFp16Kernel<14>, SIGNATURE>);
-// V2 instance - config 1 is Fprop
+// V2 instance (not using tile distribution and tile window) - config 1 is Fprop
 run_alg(run_direct_conv<direct_conv::DirectTileConvForward4CFp16Kernel<1, direct_conv::Version::v2>, SIGNATURE>);
+// V3 instance (native CK tile distribution implementation, no swizzle yet) - config 1 is Fprop
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward4CFp16Kernel<1, direct_conv::Version::v3>, SIGNATURE>);
