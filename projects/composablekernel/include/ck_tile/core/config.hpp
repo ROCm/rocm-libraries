@@ -74,6 +74,7 @@
 #define CK_TILE_FLOAT_TO_BFLOAT16_TRUNCATE 2
 #define CK_TILE_FLOAT_TO_BFLOAT16_STANDARD_ASM 3
 #define CK_TILE_FLOAT_TO_BFLOAT16_RTA_ASM 4
+#define CK_TILE_FLOAT_TO_BFLOAT16_STANDARD_CNAN 5
 
 #ifndef CK_TILE_FLOAT_TO_BFLOAT16_DEFAULT
 #define CK_TILE_FLOAT_TO_BFLOAT16_DEFAULT CK_TILE_FLOAT_TO_BFLOAT16_STANDARD
@@ -160,7 +161,7 @@
 // buffer atomic add: floating point
 #ifndef __HIP_DEVICE_COMPILE__ // for host code
 #define CK_TILE_USE_AMD_BUFFER_ATOMIC_ADD_FLOAT 1
-#elif defined(__gfx9__) || defined(__gfx12__) || defined(__SPIRV__) // for GPU code
+#elif defined(__gfx9__) || defined(__gfx12__) // for GPU code
 #define CK_TILE_USE_AMD_BUFFER_ATOMIC_ADD_FLOAT 1
 #else // for GPU code
 #define CK_TILE_USE_AMD_BUFFER_ATOMIC_ADD_FLOAT 0
@@ -218,6 +219,17 @@
 #define CK_TILE_AMDGCN_CONSTEXPR constexpr
 #endif
 
+// workaround for AMDGPU compiler VGPR aliasing bug in dropout codegen (ROCm >= 7.12)
+// Philox RNG VGPR parameters get aliased under high register pressure (d256 tile).
+// fp16 is affected; bf16 is not (different type conversion codegen path).
+#ifndef CK_TILE_WORKAROUND_ROCM_7_12_FP16_DROPOUT_MISCOMPILE
+#if(HIP_VERSION_MAJOR == 7 && HIP_VERSION_MINOR >= 12) || (HIP_VERSION_MAJOR > 7)
+#define CK_TILE_WORKAROUND_ROCM_7_12_FP16_DROPOUT_MISCOMPILE 1
+#else
+#define CK_TILE_WORKAROUND_ROCM_7_12_FP16_DROPOUT_MISCOMPILE 0
+#endif
+#endif
+
 #ifndef CK_TILE_DEBUG_LOG
 #define CK_TILE_DEBUG_LOG 0
 #endif
@@ -231,8 +243,19 @@
 #define CK_TILE_BUFFER_RESOURCE_3RD_DWORD 0x31014000
 #elif defined(__gfx11__) || defined(__gfx12__) // for GPU code
 #define CK_TILE_BUFFER_RESOURCE_3RD_DWORD 0x31004000
-#elif defined(__SPIRV__) // SPIR-V: safe default (gfx9-like), JIT will resolve at runtime
-#define CK_TILE_BUFFER_RESOURCE_3RD_DWORD 0x00020000
+#elif defined(__SPIRV__) // SPIR-V: dynamically select via ZCFS at runtime
+#define CK_TILE_BUFFER_RESOURCE_3RD_DWORD                                                         \
+    ((__builtin_amdgcn_processor_is("gfx1100") || __builtin_amdgcn_processor_is("gfx1101") ||     \
+      __builtin_amdgcn_processor_is("gfx1102") || __builtin_amdgcn_processor_is("gfx1103") ||     \
+      __builtin_amdgcn_processor_is("gfx1150") || __builtin_amdgcn_processor_is("gfx1151") ||     \
+      __builtin_amdgcn_processor_is("gfx1152") || __builtin_amdgcn_processor_is("gfx1153") ||     \
+      __builtin_amdgcn_processor_is("gfx1200") || __builtin_amdgcn_processor_is("gfx1201"))       \
+         ? 0x31004000                                                                              \
+     : ((__builtin_amdgcn_processor_is("gfx1030") || __builtin_amdgcn_processor_is("gfx1031") ||  \
+         __builtin_amdgcn_processor_is("gfx1032") || __builtin_amdgcn_processor_is("gfx1034") ||  \
+         __builtin_amdgcn_processor_is("gfx1035") || __builtin_amdgcn_processor_is("gfx1036"))    \
+            ? 0x31014000                                                                           \
+            : 0x00020000))
 #else
 #define CK_TILE_BUFFER_RESOURCE_3RD_DWORD 0xffffffff // Unknown device
 #endif

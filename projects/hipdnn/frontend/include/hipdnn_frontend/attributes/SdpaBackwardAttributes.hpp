@@ -13,7 +13,6 @@
 
 #include "Attributes.hpp"
 #include "TensorAttributes.hpp"
-#include <hipdnn_data_sdk/data_objects/sdpa_backward_attributes_generated.h>
 #include <hipdnn_frontend/Types.hpp>
 #include <memory>
 #include <optional>
@@ -474,130 +473,6 @@ public:
     {
         diagonal_alignment = value;
         return *this;
-    }
-
-    flatbuffers::Offset<hipdnn_data_sdk::data_objects::SdpaBackwardAttributes>
-        pack_attributes(flatbuffers::FlatBufferBuilder& builder) const // NOLINT
-    {
-        const auto optUid
-            = [](const std::shared_ptr<TensorAttributes>& t) -> flatbuffers::Optional<int64_t> {
-            return t ? flatbuffers::Optional<int64_t>(t->get_uid()) : flatbuffers::nullopt;
-        };
-
-        return hipdnn_data_sdk::data_objects::CreateSdpaBackwardAttributes(
-            builder,
-            get_q()->get_uid(),
-            get_k()->get_uid(),
-            get_v()->get_uid(),
-            get_o()->get_uid(),
-            get_do()->get_uid(),
-            get_stats()->get_uid(),
-            get_dq()->get_uid(),
-            get_dk()->get_uid(),
-            get_dv()->get_uid(),
-            optUid(get_attn_scale()),
-            optUid(get_bias()),
-            optUid(get_seq_len_q()),
-            optUid(get_seq_len_kv()),
-            optUid(get_seed()),
-            optUid(get_offset()),
-            optUid(get_dropout_mask()),
-            optUid(get_dropout_scale()),
-            optUid(get_dropout_scale_inv()),
-            optUid(get_dbias()),
-            alibi_mask,
-            padding_mask,
-            causal_mask,
-            causal_mask_bottom_right,
-            dropout_probability,
-            attn_scale_value,
-            left_bound,
-            right_bound,
-            toSdkType(diagonal_alignment));
-    }
-
-    static SdpaBackwardAttributes fromFlatBuffer(
-        const hipdnn_data_sdk::data_objects::SdpaBackwardAttributes* fb,
-        const std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>>& tensorMap)
-    {
-        SdpaBackwardAttributes attr;
-
-        attr.set_q(tensorMap.at(fb->q_tensor_uid()));
-        attr.set_k(tensorMap.at(fb->k_tensor_uid()));
-        attr.set_v(tensorMap.at(fb->v_tensor_uid()));
-        attr.set_o(tensorMap.at(fb->o_tensor_uid()));
-        attr.set_do(tensorMap.at(fb->do_tensor_uid()));
-        attr.set_stats(tensorMap.at(fb->stats_tensor_uid()));
-        attr.set_dq(tensorMap.at(fb->dq_tensor_uid()));
-        attr.set_dk(tensorMap.at(fb->dk_tensor_uid()));
-        attr.set_dv(tensorMap.at(fb->dv_tensor_uid()));
-
-        if(fb->scale_tensor_uid().has_value())
-        {
-            attr.set_attn_scale(tensorMap.at(fb->scale_tensor_uid().value()));
-        }
-        if(fb->attn_mask_tensor_uid().has_value())
-        {
-            attr.set_bias(tensorMap.at(fb->attn_mask_tensor_uid().value()));
-        }
-        if(fb->seq_len_q_tensor_uid().has_value())
-        {
-            attr.set_seq_len_q(tensorMap.at(fb->seq_len_q_tensor_uid().value()));
-        }
-        if(fb->seq_len_kv_tensor_uid().has_value())
-        {
-            attr.set_seq_len_kv(tensorMap.at(fb->seq_len_kv_tensor_uid().value()));
-        }
-        if(fb->seed_tensor_uid().has_value())
-        {
-            attr.set_seed(tensorMap.at(fb->seed_tensor_uid().value()));
-        }
-        if(fb->offset_tensor_uid().has_value())
-        {
-            attr.set_offset(tensorMap.at(fb->offset_tensor_uid().value()));
-        }
-        if(fb->dropout_mask_tensor_uid().has_value())
-        {
-            attr.set_dropout_mask(tensorMap.at(fb->dropout_mask_tensor_uid().value()));
-        }
-        if(fb->dropout_scale_tensor_uid().has_value())
-        {
-            attr.set_dropout_scale(tensorMap.at(fb->dropout_scale_tensor_uid().value()));
-        }
-        if(fb->dropout_scale_inv_tensor_uid().has_value())
-        {
-            attr.set_dropout_scale_inv(tensorMap.at(fb->dropout_scale_inv_tensor_uid().value()));
-        }
-        if(fb->dbias_tensor_uid().has_value())
-        {
-            attr.set_dbias(tensorMap.at(fb->dbias_tensor_uid().value()));
-        }
-
-        attr.alibi_mask = fb->alibi_mask();
-        attr.padding_mask = fb->padding_mask();
-        attr.causal_mask = fb->causal_mask();
-        attr.causal_mask_bottom_right = fb->causal_mask_bottom_right();
-
-        if(fb->dropout_probability().has_value())
-        {
-            attr.dropout_probability = fb->dropout_probability();
-        }
-        if(fb->attn_scale_value().has_value())
-        {
-            attr.attn_scale_value = fb->attn_scale_value();
-        }
-        if(fb->left_bound().has_value())
-        {
-            attr.left_bound = fb->left_bound();
-        }
-        if(fb->right_bound().has_value())
-        {
-            attr.right_bound = fb->right_bound();
-        }
-
-        attr.diagonal_alignment = fromSdkType(fb->diagonal_alignment());
-
-        return attr;
     }
 };
 

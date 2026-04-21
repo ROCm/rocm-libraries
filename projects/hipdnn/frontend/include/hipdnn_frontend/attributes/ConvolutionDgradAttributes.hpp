@@ -13,7 +13,6 @@
 
 #include "Attributes.hpp"
 #include "TensorAttributes.hpp"
-#include <hipdnn_data_sdk/data_objects/convolution_bwd_attributes_generated.h>
 #include <hipdnn_frontend/Types.hpp>
 #include <memory>
 #include <unordered_map>
@@ -232,57 +231,6 @@ public:
     ConvolutionMode get_convolution_mode() const
     {
         return math_mode;
-    }
-
-    flatbuffers::Offset<hipdnn_data_sdk::data_objects::ConvolutionBwdAttributes>
-        pack_attributes(flatbuffers::FlatBufferBuilder& builder) const // NOLINT
-    {
-        return hipdnn_data_sdk::data_objects::CreateConvolutionBwdAttributesDirect(
-            builder,
-            get_dy()->get_uid(),
-            get_w()->get_uid(),
-            get_dx()->get_uid(),
-            &pre_padding,
-            &post_padding,
-            &stride,
-            &dilation,
-            toSdkType(math_mode));
-    }
-
-    static ConvDgradAttributes fromFlatBuffer(
-        const hipdnn_data_sdk::data_objects::ConvolutionBwdAttributes* fb,
-        const std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>>& tensorMap)
-    {
-        ConvDgradAttributes attr;
-
-        attr.set_dy(tensorMap.at(fb->dy_tensor_uid()));
-        attr.set_w(tensorMap.at(fb->w_tensor_uid()));
-        attr.set_dx(tensorMap.at(fb->dx_tensor_uid()));
-
-        if(fb->pre_padding() != nullptr)
-        {
-            std::vector<int64_t> prePadding(fb->pre_padding()->begin(), fb->pre_padding()->end());
-            attr.set_pre_padding(std::move(prePadding));
-        }
-        if(fb->post_padding() != nullptr)
-        {
-            std::vector<int64_t> postPadding(fb->post_padding()->begin(),
-                                             fb->post_padding()->end());
-            attr.set_post_padding(std::move(postPadding));
-        }
-        if(fb->stride() != nullptr)
-        {
-            std::vector<int64_t> strideVec(fb->stride()->begin(), fb->stride()->end());
-            attr.set_stride(std::move(strideVec));
-        }
-        if(fb->dilation() != nullptr)
-        {
-            std::vector<int64_t> dilationVec(fb->dilation()->begin(), fb->dilation()->end());
-            attr.set_dilation(std::move(dilationVec));
-        }
-        attr.set_convolution_mode(fromSdkType(fb->conv_mode()));
-
-        return attr;
     }
 };
 

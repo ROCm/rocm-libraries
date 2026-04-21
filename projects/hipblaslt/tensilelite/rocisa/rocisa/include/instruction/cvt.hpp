@@ -474,6 +474,15 @@ namespace rocisa
         {
             return std::make_shared<VCvtSRF32toFP8>(*this);
         }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            // dst is also a src.
+            auto params = CommonInstruction::getSrcParams();
+            if(dst)
+                params.push_back(dst);
+            return params;
+        }
     };
 
     struct VCvtSRF32toBF8 : public VCvtInstruction
@@ -497,6 +506,15 @@ namespace rocisa
         std::shared_ptr<Item> clone() const override
         {
             return std::make_shared<VCvtSRF32toBF8>(*this);
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            // dst is also a src.
+            auto params = CommonInstruction::getSrcParams();
+            if(dst)
+                params.push_back(dst);
+            return params;
         }
     };
 
