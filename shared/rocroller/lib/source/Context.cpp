@@ -185,7 +185,13 @@ namespace rocRoller
             shared_from_this(), Register::Type::SCC, DataType::Bool, 1);
     }
 
-    Register::ValuePtr Context::getExec()
+    Register::ValuePtr Context::getEXECZ()
+    {
+        return std::make_shared<Register::Value>(
+            shared_from_this(), Register::Type::EXECZ, DataType::Bool, 1);
+    }
+
+    Register::ValuePtr Context::getEXEC()
     {
         auto wavefrontSize = kernel()->wavefront_size();
         if(wavefrontSize == 32)
@@ -200,7 +206,7 @@ namespace rocRoller
         }
         else
         {
-            Throw<FatalError>("getExec() is only implemented for wave32 or wave64");
+            Throw<FatalError>("getEXEC() is only implemented for wave32 or wave64");
         }
     }
 
@@ -232,10 +238,12 @@ namespace rocRoller
             return getVCC_LO();
         case Type::VCC_HI:
             return getVCC_HI();
+        case Type::EXECZ:
+            return getEXECZ();
         case Type::EXEC:
         case Type::EXEC_LO:
         case Type::EXEC_HI:
-            return getExec();
+            return getEXEC();
         case Type::TTMP7:
             return getTTMP7();
         case Type::TTMP9:

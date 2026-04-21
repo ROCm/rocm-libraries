@@ -58,7 +58,7 @@ static void set_complex_length(TreeNode&                   node,
 }
 
 // check if we have an SBCC kernel along the specified dimension
-static bool SBCC_dim_available(function_pool&             pool,
+static bool SBCC_dim_available(const function_pool&       pool,
                                const std::vector<size_t>& length,
                                size_t                     sbcc_dim,
                                rocfft_precision           precision)
@@ -979,6 +979,43 @@ void Real3DEvenNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
     }
 }
 
+// Check if we can use 2D_SINGLE kernel for the 3D real-even case.
+// The check is based on the input/output length and strides, precision
+// and kernel availability in the pool.
+bool Real3DEvenNode::use_real_2D_single_SBCC(const NodeMetaData&  nodeData,
+                                             const function_pool& pool,
+                                             const bool&          is_default_contiguous_layout)
+{
+    auto nodeDataCpy = nodeData;
+
+    const bool forward = nodeDataCpy.inArrayType == rocfft_array_type_real;
+
+    // but if we have 2D_SINGLE available, then we use it
+    // NB: use the check function in NodeFactory to make sure lds limit
+    // TODO- this part should be done in offline-tuning
+    if(forward)
+    {
+        auto lengthCpy     = nodeDataCpy.length;
+        nodeDataCpy.length = {lengthCpy[0] / 2, lengthCpy[1]};
+        if(NodeFactory::use_CS_2D_SINGLE(
+               pool, nodeDataCpy, nodeDataCpy.inArrayType, nodeDataCpy.outArrayType)
+           && SBCC_dim_available(pool, lengthCpy, 2, nodeDataCpy.precision)
+           && is_default_contiguous_layout)
+            return true;
+    }
+    else
+    {
+        nodeDataCpy.length = {nodeDataCpy.outputLength[1], nodeDataCpy.outputLength[0] / 2};
+        if(NodeFactory::use_CS_2D_SINGLE(
+               pool, nodeDataCpy, nodeDataCpy.inArrayType, nodeDataCpy.outArrayType)
+           && SBCC_dim_available(pool, nodeDataCpy.outputLength, 2, nodeDataCpy.precision)
+           && is_default_contiguous_layout)
+            return true;
+    }
+
+    return false;
+}
+
 void Real3DEvenNode::Build_solution()
 {
     const std::vector<size_t>* realLength    = nullptr;
@@ -991,34 +1028,22 @@ void Real3DEvenNode::Build_solution()
 
     const bool forward = inArrayType == rocfft_array_type_real;
 
-    const bool planInStrideUnit  = this->GetPlanRoot()->inStrideUnit;
-    const bool planOutStrideUnit = this->GetPlanRoot()->outStrideUnit;
-
     // but if we have 2D_SINGLE available, then we use it
     // NB: use the check function in NodeFactory to make sure lds limit
     // TODO- this part should be done in offline-tuning
     NodeMetaData nodeData(this);
-    if(forward)
+    nodeData.length       = length;
+    nodeData.outputLength = outputLength;
+    nodeData.inArrayType  = inArrayType;
+    nodeData.outArrayType = outArrayType;
+    nodeData.precision    = precision;
+
+    const bool is_default_contiguous_layout
+        = this->GetPlanRoot()->inStrideUnit && this->GetPlanRoot()->outStrideUnit;
+    if(use_real_2D_single_SBCC(nodeData, pool, is_default_contiguous_layout))
     {
-        nodeData.length = {length[0] / 2, length[1]};
-        if(NodeFactory::use_CS_2D_SINGLE(pool, nodeData, inArrayType, outArrayType)
-           && SBCC_dim_available(pool, length, 2, precision)
-           && (planInStrideUnit && planOutStrideUnit))
-        {
-            solution = REAL_2D_SINGLE_SBCC;
-            return;
-        }
-    }
-    else
-    {
-        nodeData.length = {outputLength[1], outputLength[0] / 2};
-        if(NodeFactory::use_CS_2D_SINGLE(pool, nodeData, inArrayType, outArrayType)
-           && SBCC_dim_available(pool, outputLength, 2, precision)
-           && (planInStrideUnit && planOutStrideUnit))
-        {
-            solution = REAL_2D_SINGLE_SBCC;
-            return;
-        }
+        solution = REAL_2D_SINGLE_SBCC;
+        return;
     }
 
     // NB:
@@ -1830,6 +1855,157 @@ void Real3DEvenNode::AssignParams_internal_TR_pairs()
             crplan->dimension = 1;
             crplan->AssignParams();
         }
+    }
+}
+
+/*****************************************************
+ * CS_REAL_3D_PP
+ *****************************************************/
+size_t Real3DPPNode::GetPPOffDim() const
+{
+    auto key
+        = PPFMKey(length[0], length[1], length[2], precision, GetRootPlanTransformType(), scheme);
+    if(!pool.has_function(key))
+        throw std::runtime_error("GetPPOffDim failed to find a valid kernel");
+
+    // CS_REAL_3D_PP will have two corresponding kernels in
+    // the function pool, both will have the same off-dim
+    // value, and at least of one them must be an SBCC PP
+    auto child_scheme = CS_KERNEL_STOCKHAM_PP_BLOCK_CC;
+    auto kernel       = pool.get_kernel(key, child_scheme);
+
+    return kernel.pp_params.off_dim;
+}
+
+void Real3DPPNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
+{
+    ppOffDim = GetPPOffDim();
+
+    const auto remainingLength = direction == -1 ? outputLength : length;
+
+    const std::vector<size_t>* realLength    = nullptr;
+    const std::vector<size_t>* complexLength = nullptr;
+    set_complex_length(*this, realLength, complexLength);
+
+    switch(ppOffDim)
+    {
+    case 0: // work along x will be split between y and z
+    {
+        // y col fft + partial pass along x
+        // partial pass along x + z col fft
+        throw std::runtime_error(
+            "Real3DPPNode::BuildTree_internal: partial-passes along x not currently supported");
+        break;
+    }
+    case 1: // work along y will be split between x and z
+    {
+        if(inArrayType != rocfft_array_type_real || direction != -1)
+            throw std::runtime_error("Real3DPPNode: c2r transform not yet implemented");
+
+        // use explicit SBRR partial-pass kernel
+        // x row fft + partial pass(es) along y
+        auto xPartialPassPlan    = NodeFactory::CreateNodeFromScheme(CS_KERNEL_STOCKHAM_PP, this);
+        xPartialPassPlan->length = *realLength;
+        xPartialPassPlan->length[0] /= 2;
+        xPartialPassPlan->dimension    = 1; // technically 1 < dimension < 2 for x node.
+        xPartialPassPlan->ppOffDim     = ppOffDim;
+        xPartialPassPlan->allowInplace = true;
+
+        // real-to-complex transform: complex transform then post-process
+        xPartialPassPlan->ebtype       = EmbeddedType::Real2C_POST;
+        xPartialPassPlan->outputLength = xPartialPassPlan->length;
+        xPartialPassPlan->outputLength.front() += 1;
+        xPartialPassPlan->comments.push_back("partial-pass enabled for second dimension.");
+
+        // use explicit SBCC partial-pass kernel
+        // partial pass(es) along y + z col fft
+        std::unique_ptr<TreeNode> zPartialPassPlan;
+        zPartialPassPlan = NodeFactory::CreateNodeFromScheme(CS_KERNEL_STOCKHAM_PP_BLOCK_CC, this);
+        zPartialPassPlan->length.push_back(remainingLength[2]);
+        zPartialPassPlan->length.push_back(remainingLength[0]);
+        zPartialPassPlan->length.push_back(remainingLength[1]);
+        zPartialPassPlan->dimension    = 1; // technically 1 < dimension < 2 for z node.
+        zPartialPassPlan->ppOffDim     = ppOffDim;
+        zPartialPassPlan->allowInplace = false;
+        zPartialPassPlan->comments.push_back("partial-pass enabled for second dimension.");
+
+        childNodes.emplace_back(std::move(xPartialPassPlan));
+        childNodes.emplace_back(std::move(zPartialPassPlan));
+
+        break;
+    }
+    case 2: // work along z will be split between x and y
+    {
+        // x row fft + partial pass along z
+        // partial pass along z + y col fft
+        throw std::runtime_error(
+            "Real3DPPNode::BuildTree_internal: partial-passes along z not currently supported");
+        break;
+    }
+    default:
+        throw std::runtime_error("Real3DPPNode::BuildTree_internal:: Unexpected ppOffDim");
+    }
+}
+
+void Real3DPPNode::AssignParams_internal()
+{
+    switch(ppOffDim)
+    {
+    case 0: // work along x will be split between y and z
+    {
+        // y col fft + partial pass along x
+        // partial pass along x + z col fft
+        throw std::runtime_error(
+            "Real3DPPNode::AssignParams_internal: partial-passes along x not currently supported");
+        break;
+    }
+    case 1: // work along y will be split between x and z
+    {
+        // xy plan is a x row 1D-FFT + plus partial pass(es) along y
+        // yz plan is partial pass(es) along y + z col 1D-FFT.
+        auto& xyPlan = childNodes[0];
+        auto& yzPlan = childNodes[1];
+
+        if(direction == -1)
+        {
+            // forward transform, r2c
+            xyPlan->inStride = inStride;
+            for(unsigned int i = 1; i < xyPlan->inStride.size(); ++i)
+            {
+                xyPlan->inStride[i] /= 2;
+            }
+            xyPlan->iDist = iDist / 2;
+
+            xyPlan->outStride = outStride;
+            xyPlan->oDist     = oDist;
+
+            xyPlan->AssignParams();
+        }
+        else
+            throw std::runtime_error("Real3DPPNode: c2r transform not yet implemented");
+
+        yzPlan->inStride.push_back(outStride[2]);
+        yzPlan->inStride.push_back(outStride[0]);
+        yzPlan->inStride.push_back(outStride[1]);
+
+        yzPlan->iDist = xyPlan->oDist;
+
+        yzPlan->outStride = yzPlan->inStride;
+        yzPlan->oDist     = yzPlan->iDist;
+
+        yzPlan->AssignParams();
+        break;
+    }
+    case 2: // work along z will be split between x and y
+    {
+        // x row fft + partial pass along z
+        // partial pass along z + y col fft
+        throw std::runtime_error(
+            "Real3DPPNode::AssignParams_internal: partial-passes along z not currently supported");
+        break;
+    }
+    default:
+        throw std::runtime_error("Real3DPPNode::AssignParams_internal: Unexpected ppOffDim");
     }
 }
 
