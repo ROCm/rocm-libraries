@@ -73,5 +73,4 @@ struct hipfft_brick
     }
 };
 
-
 #endif
