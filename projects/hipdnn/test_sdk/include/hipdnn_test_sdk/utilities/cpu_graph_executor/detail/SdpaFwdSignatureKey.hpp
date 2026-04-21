@@ -6,9 +6,9 @@
 #include <ostream>
 #include <unordered_map>
 
-#include <hipdnn_data_sdk/data_objects/data_types_generated.h>
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
-#include <hipdnn_data_sdk/flatbuffer_utilities/FlatbufferTypeHelpers.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/FlatbufferTypeHelpers.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/SdpaFwdPlan.hpp>
 
 namespace hipdnn_test_sdk::detail
@@ -16,18 +16,18 @@ namespace hipdnn_test_sdk::detail
 
 struct SdpaFwdSignatureKey
 {
-    const hipdnn_data_sdk::data_objects::NodeAttributes nodeType
-        = hipdnn_data_sdk::data_objects::NodeAttributes::SdpaAttributes;
-    hipdnn_data_sdk::data_objects::DataType qDataType;
-    hipdnn_data_sdk::data_objects::DataType kDataType;
-    hipdnn_data_sdk::data_objects::DataType vDataType;
-    hipdnn_data_sdk::data_objects::DataType oDataType;
+    const hipdnn_flatbuffers_sdk::data_objects::NodeAttributes nodeType
+        = hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::SdpaAttributes;
+    hipdnn_flatbuffers_sdk::data_objects::DataType qDataType;
+    hipdnn_flatbuffers_sdk::data_objects::DataType kDataType;
+    hipdnn_flatbuffers_sdk::data_objects::DataType vDataType;
+    hipdnn_flatbuffers_sdk::data_objects::DataType oDataType;
 
     SdpaFwdSignatureKey() = default;
-    constexpr SdpaFwdSignatureKey(hipdnn_data_sdk::data_objects::DataType q,
-                                  hipdnn_data_sdk::data_objects::DataType k,
-                                  hipdnn_data_sdk::data_objects::DataType v,
-                                  hipdnn_data_sdk::data_objects::DataType o)
+    constexpr SdpaFwdSignatureKey(hipdnn_flatbuffers_sdk::data_objects::DataType q,
+                                  hipdnn_flatbuffers_sdk::data_objects::DataType k,
+                                  hipdnn_flatbuffers_sdk::data_objects::DataType v,
+                                  hipdnn_flatbuffers_sdk::data_objects::DataType o)
         : qDataType(q)
         , kDataType(k)
         , vDataType(v)
@@ -36,8 +36,9 @@ struct SdpaFwdSignatureKey
     }
 
     SdpaFwdSignatureKey(
-        const hipdnn_data_sdk::data_objects::Node& node,
-        const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        const hipdnn_flatbuffers_sdk::data_objects::Node& node,
+        const std::unordered_map<int64_t,
+                                 const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
             tensorMap)
     {
         const auto* nodeAttributes = node.attributes_as_SdpaAttributes();
@@ -94,34 +95,34 @@ struct SdpaFwdSignatureKey
                            SdpaFwdSignatureKey>
             map;
 
-        addPlanBuilder<hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                       hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                       hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                       hipdnn_data_sdk::data_objects::DataType::FLOAT>(map);
-        addPlanBuilder<hipdnn_data_sdk::data_objects::DataType::HALF,
-                       hipdnn_data_sdk::data_objects::DataType::HALF,
-                       hipdnn_data_sdk::data_objects::DataType::HALF,
-                       hipdnn_data_sdk::data_objects::DataType::HALF>(map);
-        addPlanBuilder<hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
-                       hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
-                       hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
-                       hipdnn_data_sdk::data_objects::DataType::BFLOAT16>(map);
-        addPlanBuilder<hipdnn_data_sdk::data_objects::DataType::HALF,
-                       hipdnn_data_sdk::data_objects::DataType::HALF,
-                       hipdnn_data_sdk::data_objects::DataType::HALF,
-                       hipdnn_data_sdk::data_objects::DataType::FLOAT>(map);
-        addPlanBuilder<hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
-                       hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
-                       hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
-                       hipdnn_data_sdk::data_objects::DataType::FLOAT>(map);
+        addPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT>(map);
+        addPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::HALF>(map);
+        addPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16>(map);
+        addPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT>(map);
+        addPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT>(map);
 
         return map;
     }
 
-    template <hipdnn_data_sdk::data_objects::DataType QDataTypeEnum,
-              hipdnn_data_sdk::data_objects::DataType KDataTypeEnum,
-              hipdnn_data_sdk::data_objects::DataType VDataTypeEnum,
-              hipdnn_data_sdk::data_objects::DataType ODataTypeEnum>
+    template <hipdnn_flatbuffers_sdk::data_objects::DataType QDataTypeEnum,
+              hipdnn_flatbuffers_sdk::data_objects::DataType KDataTypeEnum,
+              hipdnn_flatbuffers_sdk::data_objects::DataType VDataTypeEnum,
+              hipdnn_flatbuffers_sdk::data_objects::DataType ODataTypeEnum>
     static void addPlanBuilder(std::unordered_map<SdpaFwdSignatureKey,
                                                   std::unique_ptr<IGraphNodePlanBuilder>,
                                                   SdpaFwdSignatureKey>& map)
