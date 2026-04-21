@@ -61,11 +61,11 @@ if [ "$FORCE_BUILD" -eq 1 ] || [ ! -f "$HIPDNN_CONFIG" ]; then
         *) echo "Aborted."; exit 0 ;;
     esac
     echo "Building and installing hipDNN..."
-    cmake -G Ninja -S "$HIPDNN_ROOT" -B "$BUILD_DIR" \
+    cmake -S "$HIPDNN_ROOT" -B "$BUILD_DIR" \
         -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" \
         -DHIPDNN_SKIP_TESTS=ON
-    ninja -C "$BUILD_DIR"
+    cmake --build "$BUILD_DIR"
     cmake --install "$BUILD_DIR"
 fi
 
@@ -77,11 +77,11 @@ if [ "$FORCE_BUILD" -eq 1 ]; then
     fi
     echo "Building and installing MIOpen provider..."
     rm -rf "$MIOPEN_BUILD_DIR"
-    cmake -G Ninja -S "$MIOPEN_PROVIDER_DIR" -B "$MIOPEN_BUILD_DIR" \
+    cmake -S "$MIOPEN_PROVIDER_DIR" -B "$MIOPEN_BUILD_DIR" \
         -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" \
         -DCMAKE_PREFIX_PATH="$INSTALL_DIR"
-    ninja -C "$MIOPEN_BUILD_DIR"
+    cmake --build "$MIOPEN_BUILD_DIR"
     cmake --install "$MIOPEN_BUILD_DIR"
     echo ""
     echo "MIOpen plugin installed to: $INSTALL_DIR/lib/hipdnn_plugins/engines/"
