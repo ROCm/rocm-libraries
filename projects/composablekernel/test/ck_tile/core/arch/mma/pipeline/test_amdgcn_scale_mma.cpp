@@ -16,7 +16,6 @@
 
 #include <gtest/gtest.h>
 
-#include <cmath>
 #include <cstdint>
 #include <iostream>
 #include <type_traits>
@@ -162,34 +161,62 @@ template <typename AType,
           std::uint32_t WaveTileM,
           std::uint32_t WaveTileN,
           std::uint32_t WaveTileK>
-__global__ void
-test_scale_accum_over_k(void* a, void* b, void* c, void* out, void* scale_A, void* scale_B)
+struct ScalePipelineKernel
 {
-    using Pipeline = ScaleMmaPipeline<AType, BType, CType, WaveTileM, WaveTileN, WaveTileK>;
+    static constexpr int kBlockSize = 64;
 
-    using AVecType = typename Pipeline::AVecType;
-    using BVecType = typename Pipeline::BVecType;
-    using CVecType = typename Pipeline::CVecType;
-
-    // NOTE: WaveTileK is used as a Pipeline template parameter, but the K iteration is
-    // happening outside the Pipeline. This is a bit incorrect currently.
-    static constexpr std::uint32_t kIters = WaveTileK / Pipeline::MmaOp::kK;
-
-    // Initialize the accumulator
-    CVecType result = *reinterpret_cast<CVecType*>(c);
-
-    // Accumulate input AxB over WaveTileK/FragK iterations
-    for(std::uint32_t i = 0; i < kIters; ++i)
+    __device__ void
+    operator()(const void* a_per_lane, const void* b_per_lane, void* c_per_lane) const
     {
-        result = Pipeline::exec(*reinterpret_cast<AVecType*>(a),
-                                *reinterpret_cast<BVecType*>(b),
-                                result,
-                                *reinterpret_cast<ScaleAType*>(scale_A),
-                                *reinterpret_cast<ScaleBType*>(scale_B));
-    }
+        using CompilerTarget = decltype(get_compiler_target());
+        using Pipeline =
+            ScaleMmaPipeline<AType, BType, CType, WaveTileM, WaveTileN, WaveTileK, CompilerTarget>;
 
-    *reinterpret_cast<CVecType*>(out) = result;
-}
+        using AVecType = typename Pipeline::AVecType;
+        using BVecType = typename Pipeline::BVecType;
+        using CVecType = typename Pipeline::CVecType;
+
+        const uint32_t lane = threadIdx.x;
+
+        AVecType a;
+        BVecType b;
+        CVecType c;
+        __builtin_memcpy(&a,
+                         static_cast<const uint8_t*>(a_per_lane) + lane * sizeof(AVecType),
+                         sizeof(AVecType));
+        __builtin_memcpy(&b,
+                         static_cast<const uint8_t*>(b_per_lane) + lane * sizeof(BVecType),
+                         sizeof(BVecType));
+        __builtin_memset(&c, 0, sizeof(CVecType));
+
+        if constexpr(MmaOpTraits<typename Pipeline::MmaOp>::IsSupported)
+        {
+            // scale_a = 126 → 2^(126-127) = 2^-1 = 0.5
+            // scale_b = 129 → 2^(129-127) = 2^2  = 4.0
+            // Combined scale factor = 0.5 * 4.0 = 2.0
+            ScaleAType scale_a = 126;
+            ScaleBType scale_b = 129;
+            Pipeline::exec(a, b, c, scale_a, scale_b);
+            __builtin_memcpy(
+                static_cast<uint8_t*>(c_per_lane) + lane * sizeof(CVecType), &c, sizeof(CVecType));
+        }
+    }
+};
+
+template <typename AType,
+          typename BType,
+          typename CType,
+          std::uint32_t WaveTileM,
+          std::uint32_t WaveTileN,
+          std::uint32_t WaveTileK>
+struct ScalePipelineFactory
+{
+    template <typename Target>
+    struct Create
+    {
+        using type = ScaleMmaPipeline<AType, BType, CType, WaveTileM, WaveTileN, WaveTileK, Target>;
+    };
+};
 
 template <typename AType,
           typename BType,
@@ -199,39 +226,37 @@ template <typename AType,
           std::uint32_t WaveTileK>
 void MmaSelector_Scale_Real_impl()
 {
-    using TestType = MmaPipelineTest<AType, BType, CType, WaveTileM, WaveTileN, WaveTileK>;
-    TestType test;
+    using ScaleAType = std::uint32_t;
+    using ScaleBType = std::uint32_t;
+
     const auto should_skip = [](amdgcn_target_id currentArchId) {
-        bool isSupportedWmma = false;
         bool isSupportedMfma = (currentArchId == amdgcn_target_id::GFX950);
-        return ((currentArchId == amdgcn_target_id::HOST) || !(isSupportedWmma || isSupportedMfma));
+        return ((currentArchId == amdgcn_target_id::HOST) || !isSupportedMfma);
     };
-    const std::function<fp32_t(
-        std::uint32_t, typename TestType::ScaleAType, typename TestType::ScaleBType)>
-        validator =
-            [](std::uint32_t fragK, TestType::ScaleAType scale_A, TestType::ScaleBType scale_B) {
-                fp32_t actual_scale_A = std::powf(2.0f, scale_A - 127.0f);
-                fp32_t actual_scale_B = std::powf(2.0f, scale_B - 127.0f);
-                return static_cast<fp32_t>(fragK) * actual_scale_A * actual_scale_B;
-            };
-    const auto kernel = [](std::uint32_t waveSize,
-                           void* a,
-                           void* b,
-                           void* c,
-                           void* out,
-                           void* scale_A,
-                           void* scale_B) {
-        test_scale_accum_over_k<typename TestType::AType,
-                                typename TestType::BType,
-                                typename TestType::CType,
-                                typename TestType::ScaleAType,
-                                typename TestType::ScaleBType,
-                                TestType::WaveTileM,
-                                TestType::WaveTileN,
-                                TestType::WaveTileK>
-            <<<1, waveSize>>>(a, b, c, out, scale_A, scale_B);
-    };
-    test.test_pipeline(should_skip, kernel, validator);
+
+    using Factory = ScalePipelineFactory<AType, BType, CType, WaveTileM, WaveTileN, WaveTileK>;
+    using Kernel  = ScalePipelineKernel<AType,
+                                        BType,
+                                        CType,
+                                        ScaleAType,
+                                        ScaleBType,
+                                        WaveTileM,
+                                        WaveTileN,
+                                        WaveTileK>;
+
+    // scale_a=126 → 2^-1=0.5, scale_b=129 → 2^2=4.0 → combined = 2.0
+    constexpr float reference_scale = 2.0f;
+
+    mma_pipeline_test::
+        run_pipeline_matrix_test<Factory::template Create, Kernel, AType, BType, CType>(
+            WaveTileM,
+            WaveTileN,
+            WaveTileK,
+            should_skip,
+            Kernel{},
+            /*isSparse=*/false,
+            /*transposeExpected=*/false,
+            reference_scale);
 }
 
 // Live test on real hardware for scale selection and execution.
