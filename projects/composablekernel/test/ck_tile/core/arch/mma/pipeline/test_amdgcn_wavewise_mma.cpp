@@ -5,6 +5,7 @@
 #include "ck_tile/core/arch/mma/mma_op_family.hpp"
 #include "ck_tile/core/arch/mma/mma_traits.hpp"
 #include "ck_tile/core/arch/mma/mma_wavewise.hpp"
+#include "ck_tile/core/arch/mma/mma.hpp"
 
 #include "pipeline_tests_helper.hpp"
 
