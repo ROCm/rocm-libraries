@@ -294,3 +294,211 @@ TEST(ScaleMMATrait, MmaSelector_Scale_F4_F4_F32_32x32x64_Real)
 {
     MmaSelector_Scale_Real_impl<pk_fp4_t, pk_fp4_t, fp32_t, 32u, 32u, 64u>();
 }
+
+// ---------------------------------------------------------------------------
+// Multi-fragment (WaveWise) scale pipeline tests
+// ---------------------------------------------------------------------------
+
+// Kernel functor with AccumPolicy support for multi-fragment scale pipeline tests.
+template <typename AType,
+          typename BType,
+          typename CType,
+          typename ScaleAType,
+          typename ScaleBType,
+          std::uint32_t WaveTileM,
+          std::uint32_t WaveTileN,
+          std::uint32_t WaveTileK,
+          MmaAccumPolicy AccumPolicy>
+struct ScaleWaveWisePipelineKernel
+{
+    static constexpr int kBlockSize = 64;
+
+    __device__ void
+    operator()(const void* a_per_lane, const void* b_per_lane, void* c_per_lane) const
+    {
+        using CompilerTarget = decltype(get_compiler_target());
+        using Pipeline       = ScaleMmaPipeline<AType,
+                                                BType,
+                                                CType,
+                                                WaveTileM,
+                                                WaveTileN,
+                                                WaveTileK,
+                                                CompilerTarget,
+                                                AccumPolicy>;
+
+        using AVecType = typename Pipeline::AVecType;
+        using BVecType = typename Pipeline::BVecType;
+        using CVecType = typename Pipeline::CVecType;
+
+        const uint32_t lane = threadIdx.x;
+
+        AVecType a;
+        BVecType b;
+        CVecType c;
+        __builtin_memcpy(&a,
+                         static_cast<const uint8_t*>(a_per_lane) + lane * sizeof(AVecType),
+                         sizeof(AVecType));
+        __builtin_memcpy(&b,
+                         static_cast<const uint8_t*>(b_per_lane) + lane * sizeof(BVecType),
+                         sizeof(BVecType));
+        __builtin_memset(&c, 0, sizeof(CVecType));
+
+        if constexpr(MmaOpTraits<typename Pipeline::MmaOp>::IsSupported)
+        {
+            // scale_a = 126 → 2^(126-127) = 2^-1 = 0.5
+            // scale_b = 129 → 2^(129-127) = 2^2  = 4.0
+            // Combined scale factor = 0.5 * 4.0 = 2.0
+            ScaleAType scale_a = 126;
+            ScaleBType scale_b = 129;
+            Pipeline::exec(a, b, c, scale_a, scale_b);
+            __builtin_memcpy(
+                static_cast<uint8_t*>(c_per_lane) + lane * sizeof(CVecType), &c, sizeof(CVecType));
+        }
+    }
+};
+
+template <typename AType,
+          typename BType,
+          typename CType,
+          std::uint32_t WaveTileM,
+          std::uint32_t WaveTileN,
+          std::uint32_t WaveTileK,
+          MmaAccumPolicy AccumPolicy>
+struct ScaleWaveWisePipelineFactory
+{
+    template <typename Target>
+    struct Create
+    {
+        using type = ScaleMmaPipeline<AType,
+                                      BType,
+                                      CType,
+                                      WaveTileM,
+                                      WaveTileN,
+                                      WaveTileK,
+                                      Target,
+                                      AccumPolicy>;
+    };
+};
+
+template <typename AType,
+          typename BType,
+          typename CType,
+          std::uint32_t WaveTileM,
+          std::uint32_t WaveTileN,
+          std::uint32_t WaveTileK,
+          MmaAccumPolicy AccumPolicy = MmaAccumPolicy::ROW_MAJOR>
+void MmaSelector_Scale_WaveWise_Real_impl()
+{
+    using ScaleAType = std::uint32_t;
+    using ScaleBType = std::uint32_t;
+
+    const auto should_skip = [](amdgcn_target_id currentArchId) {
+        bool isSupportedMfma = (currentArchId == amdgcn_target_id::GFX950);
+        return ((currentArchId == amdgcn_target_id::HOST) || !isSupportedMfma);
+    };
+
+    using Factory = ScaleWaveWisePipelineFactory<AType,
+                                                 BType,
+                                                 CType,
+                                                 WaveTileM,
+                                                 WaveTileN,
+                                                 WaveTileK,
+                                                 AccumPolicy>;
+    using Kernel  = ScaleWaveWisePipelineKernel<AType,
+                                                BType,
+                                                CType,
+                                                ScaleAType,
+                                                ScaleBType,
+                                                WaveTileM,
+                                                WaveTileN,
+                                                WaveTileK,
+                                                AccumPolicy>;
+
+    // scale_a=126 → 2^-1=0.5, scale_b=129 → 2^2=4.0 → combined = 2.0
+    constexpr float reference_scale = 2.0f;
+
+    mma_pipeline_test::
+        run_pipeline_matrix_test<Factory::template Create, Kernel, AType, BType, CType>(
+            WaveTileM,
+            WaveTileN,
+            WaveTileK,
+            should_skip,
+            Kernel{},
+            /*isSparse=*/false,
+            /*transposeExpected=*/false,
+            reference_scale);
+}
+
+// Multi-fragment tests: 64x64x64 uses 32x32x64 op → FragsM=2, FragsN=2, FragsK=1
+TEST(ScaleMMATrait, MmaSelector_Scale_F8_F8_F32_64x64x64_WaveWise_RowMajor_Real)
+{
+    MmaSelector_Scale_WaveWise_Real_impl<fp8_t,
+                                         fp8_t,
+                                         fp32_t,
+                                         64u,
+                                         64u,
+                                         64u,
+                                         MmaAccumPolicy::ROW_MAJOR>();
+}
+
+TEST(ScaleMMATrait, MmaSelector_Scale_F8_F8_F32_64x64x64_WaveWise_ColMajor_Real)
+{
+    MmaSelector_Scale_WaveWise_Real_impl<fp8_t,
+                                         fp8_t,
+                                         fp32_t,
+                                         64u,
+                                         64u,
+                                         64u,
+                                         MmaAccumPolicy::COL_MAJOR>();
+}
+
+TEST(ScaleMMATrait, MmaSelector_Scale_BF8_BF8_F32_64x64x64_WaveWise_RowMajor_Real)
+{
+    MmaSelector_Scale_WaveWise_Real_impl<bf8_t,
+                                         bf8_t,
+                                         fp32_t,
+                                         64u,
+                                         64u,
+                                         64u,
+                                         MmaAccumPolicy::ROW_MAJOR>();
+}
+
+// Multi-fragment tests: 32x32x128 uses 32x32x64 op → FragsM=1, FragsN=1, FragsK=2
+TEST(ScaleMMATrait, MmaSelector_Scale_F8_F8_F32_32x32x128_WaveWise_RowMajor_Real)
+{
+    MmaSelector_Scale_WaveWise_Real_impl<fp8_t, fp8_t, fp32_t, 32u, 32u, 128u>();
+}
+
+TEST(ScaleMMATrait, MmaSelector_Scale_BF8_BF8_F32_32x32x128_WaveWise_RowMajor_Real)
+{
+    MmaSelector_Scale_WaveWise_Real_impl<bf8_t, bf8_t, fp32_t, 32u, 32u, 128u>();
+}
+
+// Multi-fragment tests: 64x64x128 uses 32x32x64 op → FragsM=2, FragsN=2, FragsK=2
+TEST(ScaleMMATrait, MmaSelector_Scale_F8_F8_F32_64x64x128_WaveWise_RowMajor_Real)
+{
+    MmaSelector_Scale_WaveWise_Real_impl<fp8_t, fp8_t, fp32_t, 64u, 64u, 128u>();
+}
+
+TEST(ScaleMMATrait, MmaSelector_Scale_F8_F8_F32_64x64x128_WaveWise_ColMajor_Real)
+{
+    MmaSelector_Scale_WaveWise_Real_impl<fp8_t,
+                                         fp8_t,
+                                         fp32_t,
+                                         64u,
+                                         64u,
+                                         128u,
+                                         MmaAccumPolicy::COL_MAJOR>();
+}
+
+// Multi-fragment tests with 16x16x128 op: 32x16x128 → FragsM=2, FragsN=1, FragsK=1
+TEST(ScaleMMATrait, MmaSelector_Scale_F8_F8_F32_32x16x128_WaveWise_RowMajor_Real)
+{
+    MmaSelector_Scale_WaveWise_Real_impl<fp8_t, fp8_t, fp32_t, 32u, 16u, 128u>();
+}
+
+// Multi-fragment tests with 16x16x128 op: 16x32x128 → FragsM=1, FragsN=2, FragsK=1
+TEST(ScaleMMATrait, MmaSelector_Scale_F8_F8_F32_16x32x128_WaveWise_RowMajor_Real)
+{
+    MmaSelector_Scale_WaveWise_Real_impl<fp8_t, fp8_t, fp32_t, 16u, 32u, 128u>();
+}
