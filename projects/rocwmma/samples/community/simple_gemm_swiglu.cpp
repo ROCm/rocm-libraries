@@ -255,7 +255,7 @@ namespace gfx11Params
     };
 }
 
-#if (ROCWMMA_ARCH_GFX9)
+#if(ROCWMMA_ARCH_GFX9)
 using namespace gfx9Params;
 #else
 using namespace gfx11Params;
@@ -973,6 +973,7 @@ ROCWMMA_HOST void run_swiglu_sample(uint32_t m, uint32_t n, uint32_t k)
     std::cout << "Warming up...\n";
     for(uint32_t i = 0; i < warmups; ++i)
         kernelLambda();
+    CHECK_HIP_ERROR(hipDeviceSynchronize());
 
     std::cout << "Benchmarking...\n";
     hipEvent_t evStart, evStop;
