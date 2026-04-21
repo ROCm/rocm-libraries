@@ -507,7 +507,7 @@ typedef enum rocsparse_status_
     rocsparse_status_not_implemented         = 2, /**< function is not implemented. */
     rocsparse_status_invalid_pointer         = 3, /**< invalid pointer parameter. */
     rocsparse_status_invalid_size            = 4, /**< invalid size parameter. */
-    rocsparse_status_memory_error            = 5, /**< failed memory allocation, copy, or dealloc. */
+    rocsparse_status_memory_error            = 5, /**< failed memory allocation, copy or dealloc. */
     rocsparse_status_internal_error          = 6, /**< other internal library failure. */
     rocsparse_status_invalid_value           = 7, /**< invalid value parameter. */
     rocsparse_status_arch_mismatch           = 8, /**< device arch is not supported. */
