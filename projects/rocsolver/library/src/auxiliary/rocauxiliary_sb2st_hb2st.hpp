@@ -42,6 +42,8 @@
 
 ROCSOLVER_BEGIN_NAMESPACE
 
+//#define PRINT
+
 // Number of threads in x and y
 // Reductions in larfg and larf must be updated if DIMX is changed
 #define DIMX 32
@@ -310,7 +312,8 @@ __device__ void sb2st_hb2st_task(
     T* V,
     rocblas_int ldv,
     T* s_housev,
-    T* s_work)
+    T* s_work,
+    rocblas_int round)
 {
     const rocblas_int tid = xid + yid * DIMX;
 
@@ -333,6 +336,11 @@ __device__ void sb2st_hb2st_task(
     rocblas_int jn = std::min( jc + kd, n );
     rocblas_int nc = jn - jc;
     assert( nc > 0 );
+    if (tid == 0)
+    {
+        printf( "round %2d, sweep %2d, task %2d, jc %2d, jn %2d, nc %2d\n",
+                round, sweep, task, jc, jn, nc );
+    }
 
     if (task == 0)
     {
@@ -511,7 +519,7 @@ __device__ void sb2st_hb2st_task(
    Sweep n-1 is complete after 1 round, therefore the total number of rounds is 3*(n-1)+1.
 */
 template <typename T, typename S>
-ROCSOLVER_KERNEL void sb2st_hb2st_round_kernel(
+ROCSOLVER_KERNEL void sb2st_hb2st_kernel(
     rocblas_int n,
     rocblas_int kd,
     rocblas_int round,
@@ -547,11 +555,13 @@ ROCSOLVER_KERNEL void sb2st_hb2st_round_kernel(
     rocblas_int task = round - (2 * sweep);
     assert( task >= 0 );
     assert( sweep >= 0 );
+    // if (xid == 0 && yid == 0)
+    //     printf( "# round %2d, sweep %2d, task %2d\n", round, sweep, task );
 
     // execute sweep task
     sb2st_hb2st_task<T, S>(
         xid, yid, n, kd, sweep, task, Aband, ldab, E, V, ldv,
-        s_housev, s_work );
+        s_housev, s_work, round );
 }
 
 //------------------------------------------------------------------------------
@@ -669,13 +679,13 @@ rocblas_status rocsolver_sb2st_hb2st_template(
     // Set V = 0.
     // Ideally, set each Vk = I, but need to iterate over Vk.
     // Strided batch laset, with stride = kd*ldv?
-    rocblas_int nt = ceildiv( n, kd );
+    rocblas_int nt = ceildiv( n-1, kd );
     rocblas_int nv_blocks = nt*(nt + 1)/2;
     rocblas_int nv = nv_blocks*kd;
     rocblas_stride shiftV = 0;
     //laset( handle, 'g', 3*kd, nv, zero, zero, V, shiftV, ldv, strideV,
     //       batch_count );
-    HIP_CHECK( hipMemsetAsync( V + shiftV, 0, sizeof(T) * ldv * 3*kd, stream ) );
+    HIP_CHECK( hipMemsetAsync( V + shiftV, 0, sizeof(T) * ldv * nv, stream ) );
 
     #ifdef PRINT
         print_matrix( "dA_in", ldab, n, Aband, ldab, 6 );
@@ -726,7 +736,7 @@ rocblas_status rocsolver_sb2st_hb2st_template(
         if (parallel_sweeps > 0)
         {
             ROCSOLVER_LAUNCH_KERNEL(
-                sb2st_hb2st_round_kernel<T>,
+                sb2st_hb2st_kernel<T>,
                 dim3( 1, parallel_sweeps, batch_count ),
                 dim3( DIMX, DIMY, 1 ), s_mem_size, stream,
                 n, kd, round,
