@@ -63,7 +63,6 @@ void testStreamCapture()
 
     // Create a new graph
     hipGraph_t graph;
-    HIP_CHECK(hipGraphCreate(&graph, 0));
 
     // Note: currently, calls to hipMallocAsync do not work inside the stream capture section
     HIP_CHECK(hipMallocAsync(&d_data, sizeof(int), stream));
@@ -181,7 +180,6 @@ void testStreamCaptureWithAtomics()
 
     // Create a new graph
     hipGraph_t graph;
-    HIP_CHECK(hipGraphCreate(&graph, 0));
 
     // Note: currently, calls to hipMallocAsync do not work inside the stream capture section
     HIP_CHECK(hipMallocAsync(&d_data, sizeof(int), stream));
