@@ -18,7 +18,7 @@ struct TileConvKernelTraits
     template <int ConfigIdx>
     using FwdKernel = ck_tile::direct_conv::DirectTileConvForward4CFp16Kernel<ConfigIdx, Ver>;
     template <int ConfigIdx>
-    using BwdDataKernel = ck_tile::direct_conv::DirectTileConvBwdData4CFp16Kernel<ConfigIdx>;
+    using BwdDataKernel = ck_tile::direct_conv::DirectTileConvBwdData4CFp16Kernel<ConfigIdx, Ver>;
 };
 
 constexpr auto v2 = ck_tile::direct_conv::Version::v2;
@@ -264,4 +264,38 @@ TEST_F(DirectConvGrouped4cFp16TileConvTestV3, Fprop_V3_Groups32_Pad1)
 TEST_F(DirectConvGrouped4cFp16TileConvTestV3, Fprop_V3_Groups32_NoPad)
 {
     ASSERT_TRUE((RunFprop<1>(2, 64, 64, 32, 4, 4, 3, 3, 0, 0)));
+}
+
+TEST_F(DirectConvGrouped4cFp16TileConvTestV3, Dgrad_V3_Groups32_Pad1)
+{
+    ASSERT_TRUE((RunDgrad<0>(1, 32, 32, 32, 4, 4, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvGrouped4cFp16TileConvTestV3, Dgrad_V3_Groups32_NoPad)
+{
+    ASSERT_TRUE((RunDgrad<0>(2, 64, 64, 32, 4, 4, 3, 3, 0, 0)));
+}
+
+// =============================================================================
+// V3 LDS-staged epilogue — Fprop config 3, Dgrad config 2
+// =============================================================================
+
+TEST_F(DirectConvGrouped4cFp16TileConvTestV3, Fprop_V3_LdsEpilogue_Groups32_Pad1)
+{
+    ASSERT_TRUE((RunFprop<3>(1, 32, 32, 32, 4, 4, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvGrouped4cFp16TileConvTestV3, Fprop_V3_LdsEpilogue_Groups32_NoPad)
+{
+    ASSERT_TRUE((RunFprop<3>(2, 64, 64, 32, 4, 4, 3, 3, 0, 0)));
+}
+
+TEST_F(DirectConvGrouped4cFp16TileConvTestV3, Dgrad_V3_LdsEpilogue_Groups32_Pad1)
+{
+    ASSERT_TRUE((RunDgrad<2>(1, 32, 32, 32, 4, 4, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvGrouped4cFp16TileConvTestV3, Dgrad_V3_LdsEpilogue_Groups32_NoPad)
+{
+    ASSERT_TRUE((RunDgrad<2>(2, 64, 64, 32, 4, 4, 3, 3, 0, 0)));
 }

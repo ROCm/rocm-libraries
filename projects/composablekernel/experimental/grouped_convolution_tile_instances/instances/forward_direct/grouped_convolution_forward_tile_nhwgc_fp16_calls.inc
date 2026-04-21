@@ -20,5 +20,8 @@ run_alg(run_direct_conv<direct_conv::DirectTileConvForward4CFp16Kernel<13>, SIGN
 run_alg(run_direct_conv<direct_conv::DirectTileConvForward4CFp16Kernel<14>, SIGNATURE>);
 // V2 instance (not using tile distribution and tile window) - config 1 is Fprop
 run_alg(run_direct_conv<direct_conv::DirectTileConvForward4CFp16Kernel<1, direct_conv::Version::v2>, SIGNATURE>);
-// V3 instance (native CK tile distribution implementation, no swizzle yet) - config 1 is Fprop
+// V3 instances (native CK tile distribution implementation, no swizzle yet) - config 1 is Fprop
+// Config 1: direct DRAM epilogue (RegistersToGlobalMemory)
 run_alg(run_direct_conv<direct_conv::DirectTileConvForward4CFp16Kernel<1, direct_conv::Version::v3>, SIGNATURE>);
+// Config 3: LDS-staged epilogue (RegistersToLdsToGlobalMemory)
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward4CFp16Kernel<3, direct_conv::Version::v3>, SIGNATURE>);

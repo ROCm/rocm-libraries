@@ -102,8 +102,14 @@ struct Config
 
 // All instantiated configurations. The first valid config is expected to be the fastest.
 constexpr Config configs[] = {
+    // Direct DRAM epilogue (RegistersToGlobalMemory, default).
     {.waves_c64 = 2, .waves_q4 = 8, .direction = Direction::Dgrad},
-    {.waves_c64 = 2, .waves_q4 = 8}
+    {.waves_c64 = 2, .waves_q4 = 8},
+    // LDS-staged epilogue (RegistersToLdsToGlobalMemory).
+    {.waves_c64 = 2, .waves_q4 = 8, .direction = Direction::Dgrad,
+     .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},
+    {.waves_c64 = 2, .waves_q4 = 8,
+     .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},
 };
 
 constexpr int NUM_CONFIGS = sizeof(configs) / sizeof(configs[0]);
@@ -165,10 +171,16 @@ struct TileConstants
     // uint4 vectors per channel fiber (8 fp16 per uint4).
     static constexpr int BLOCK_C8 = cfg.block_c() / 8;
 
+    // Number of uint4 vectors to store per output row (LDS epilogue path).
+    static constexpr int STORE_VECS = cfg.block_q() * BLOCK_C8;
+
     // LDS double buffering for input loads.
     static constexpr int NUM_INPUT_LDS_BUFFERS    = 2;
     static constexpr int INPUT_LDS_BUFFER_SIZE_C8 = BLOCK_C8 * BLOCK_W;
     static constexpr int INPUT_LDS_BUFFER_SIZE_C4 = INPUT_LDS_BUFFER_SIZE_C8 * 2;
+    // Output LDS buffer size for LDS epilogue path.
+    static constexpr int OUTPUT_LDS_BUFFER_SIZE   = BLOCK_C8 * cfg.block_q();
+
     // Weight LDS staging: [kh*kw][block_groups][GROUP_SIZE] in uint2 units.
     static constexpr int WEIGHT_LDS_SIZE_UINT2 = cfg.kh * cfg.kw * cfg.block_groups() * GROUP_SIZE;
     static constexpr int WEIGHT_LDS_SIZE_UINT4 = WEIGHT_LDS_SIZE_UINT2 / 2;
@@ -197,6 +209,14 @@ struct TileConstants
         const int c4_lo = c4 % 2;
         auto coord = ck_tile::make_tensor_coordinate(desc, ck_tile::make_tuple(x, c8));
         return static_cast<int>(coord.get_offset()) * 2 + c4_lo;
+    }
+
+    // Compute uint4 offset from logical (x, c8) using the descriptor (LDS epilogue path).
+    static CK_TILE_DEVICE int lds_offset_uint4(int x, int c8)
+    {
+        constexpr auto desc = MakeInputLdsBlockDescriptor();
+        auto coord = ck_tile::make_tensor_coordinate(desc, ck_tile::make_tuple(x, c8));
+        return static_cast<int>(coord.get_offset());
     }
 
     // Total channels per block in fp16 elements.
@@ -435,6 +455,45 @@ struct TileConstants
                 ck_tile::tuple<ck_tile::sequence<1>, ck_tile::sequence<1>>,
                 ck_tile::tuple<ck_tile::sequence<0>, ck_tile::sequence<1>>,
                 ck_tile::sequence<2>,
+                ck_tile::sequence<0>>{});
+    }
+
+    // -----------------------------------------------------------------------
+    // Output LDS write descriptors (MFMA result → LDS staging).
+    // Used by the LDS epilogue path (RegistersToLdsToGlobalMemory).
+    //
+    // Thread mapping (derived from MFMA result layout):
+    //   P0 = warp_id, merge of {waves_q4, waves_c64}
+    //   P1 = lane_id ∈ [0,64), merge of {16, 4}
+    //   Y0 = 4 (vectorization, the 4 fp16 channels within one group)
+    // -----------------------------------------------------------------------
+
+    // LDS descriptor for output staging: [block_q, BLOCK_C4, 4] row-major in fp16.
+    static constexpr auto MakeOutputLdsWriteDescriptor()
+    {
+        return ck_tile::make_naive_tensor_descriptor(
+            ck_tile::make_tuple(ck_tile::number<cfg.block_q()>{},
+                                ck_tile::number<BLOCK_C4>{},
+                                ck_tile::number<4>{}),
+            ck_tile::make_tuple(ck_tile::number<BLOCK_C4 * 4>{},
+                                ck_tile::number<4>{},
+                                ck_tile::number<1>{}),
+            ck_tile::number<4>{},
+            ck_tile::number<1>{});
+    }
+
+    // Tile distribution for output LDS writes (MFMA result scatter).
+    static constexpr auto MakeOutputLdsWriteDistribution()
+    {
+        return ck_tile::make_static_tile_distribution(
+            ck_tile::tile_distribution_encoding<
+                ck_tile::sequence<>,
+                ck_tile::tuple<ck_tile::sequence<cfg.waves_q4, 4>,
+                               ck_tile::sequence<cfg.waves_c64, 16>,
+                               ck_tile::sequence<4>>,
+                ck_tile::tuple<ck_tile::sequence<1, 2>, ck_tile::sequence<2, 1>>,
+                ck_tile::tuple<ck_tile::sequence<0, 0>, ck_tile::sequence<1, 1>>,
+                ck_tile::sequence<3>,
                 ck_tile::sequence<0>>{});
     }
 
@@ -817,6 +876,120 @@ struct OutputWriter
     }
 };
 
+// Handles output staging through LDS and writing to global memory.
+// Used when epilogue == RegistersToLdsToGlobalMemory.
+template <Config cfg>
+struct OutputWriterLds
+{
+    using TC = TileConstants<cfg>;
+
+    // Output tile distribution and distributed tensor type for LDS writes.
+    static constexpr auto OutputLdsDist = TC::MakeOutputLdsWriteDistribution();
+    using OutputDstrTensor =
+        ck_tile::static_distributed_tensor<_Float16, ck_tile::remove_cvref_t<decltype(OutputLdsDist)>>;
+
+    // LDS write tile window type.
+    using OutputLdsDesc = ck_tile::remove_cvref_t<decltype(TC::MakeOutputLdsWriteDescriptor())>;
+    using OutputLdsBuf =
+        ck_tile::buffer_view<ck_tile::address_space_enum::lds, _Float16, ck_tile::index_t, true>;
+    using OutputLdsView = ck_tile::tensor_view<OutputLdsBuf, OutputLdsDesc>;
+    using OutputLdsWindow = ck_tile::remove_cvref_t<decltype(ck_tile::make_tile_window(
+        OutputLdsView{},
+        ck_tile::make_tuple(ck_tile::number<cfg.block_q()>{},
+                            ck_tile::number<TC::BLOCK_C4>{},
+                            ck_tile::number<4>{}),
+        {0, 0, 0}))>;
+
+    // Output tensor descriptor: [ho, wo, C] in _Float16 elements for this batch.
+    using OutputDesc = decltype(ck_tile::make_naive_tensor_descriptor(
+        ck_tile::make_tuple(int{}, int{}, int{}),
+        ck_tile::make_tuple(int{}, int{}, ck_tile::number<1>{}),
+        ck_tile::number<8>{}));
+
+    bool store_active;
+    bool store_valid;
+    const uint4* load_output_lds;
+    _Float16* out_base;
+    OutputDesc out_desc;
+    int out_q;
+    int out_c_fp16;
+    OutputLdsWindow lds_write_win;
+
+    __device__ OutputWriterLds(const ThreadMapping<cfg>& tm,
+                               const BlockCoords<cfg>& bc,
+                               uint4* output_lds,
+                               _Float16* __restrict__ out,
+                               int ho,
+                               int wo)
+        : store_active(tm.tid < TC::STORE_VECS),
+          store_valid(false),
+          load_output_lds(nullptr),
+          out_base(out + static_cast<size_t>(bc.block_n) * ho * wo * bc.C),
+          out_desc(ck_tile::make_naive_tensor_descriptor(
+              ck_tile::make_tuple(ho, wo, bc.C),
+              ck_tile::make_tuple(wo * bc.C, bc.C, ck_tile::number<1>{}),
+              ck_tile::number<8>{})),
+          out_q(0),
+          out_c_fp16(0),
+          lds_write_win([&]()
+          {
+              constexpr auto lds_desc = TC::MakeOutputLdsWriteDescriptor();
+              auto lds_buf = OutputLdsBuf{
+                  reinterpret_cast<_Float16*>(output_lds),
+                  static_cast<ck_tile::index_t>(
+                      ck_tile::max(TC::WEIGHT_LDS_PADDED_UINT4, TC::OUTPUT_LDS_BUFFER_SIZE) *
+                      (sizeof(uint4) / sizeof(_Float16)))};
+              auto lds_view = OutputLdsView{lds_buf, lds_desc};
+              return ck_tile::make_tile_window(
+                  lds_view,
+                  ck_tile::make_tuple(ck_tile::number<cfg.block_q()>{},
+                                      ck_tile::number<TC::BLOCK_C4>{},
+                                      ck_tile::number<4>{}),
+                  {0, 0, 0});
+          }())
+    {
+        if(store_active)
+        {
+            const int col = tm.tid / TC::BLOCK_C8;
+            const int c8  = tm.tid % TC::BLOCK_C8;
+            out_q         = bc.block_q + col;
+            out_c_fp16    = (bc.block_c8 + c8) * 8;
+            load_output_lds = &output_lds[TC::lds_offset_uint4(col, c8)];
+            store_valid     = (out_q < wo);
+        }
+    }
+
+    // Convert fp32x4 accumulator to fp16x4 and write through LDS to global memory.
+    __device__ void flush(fp32x4_t acc_val, int p_out)
+    {
+        // 1. Convert fp32→fp16 and pack into distributed tensor.
+        __half2 halves[2];
+        halves[0] = __float22half2_rn({acc_val[0], acc_val[1]});
+        halves[1] = __float22half2_rn({acc_val[2], acc_val[3]});
+        const auto* fp16_ptr = reinterpret_cast<const _Float16*>(halves);
+
+        OutputDstrTensor output_tile;
+        output_tile.get_thread_buffer()(ck_tile::number<0>{}) = fp16_ptr[0];
+        output_tile.get_thread_buffer()(ck_tile::number<1>{}) = fp16_ptr[1];
+        output_tile.get_thread_buffer()(ck_tile::number<2>{}) = fp16_ptr[2];
+        output_tile.get_thread_buffer()(ck_tile::number<3>{}) = fp16_ptr[3];
+
+        // 2. Store to LDS via tile window.
+        ck_tile::store_tile(lds_write_win, output_tile);
+
+        // 3. Synchronize so all threads' LDS writes are visible.
+        __syncthreads();
+
+        // 4. Write from LDS to global memory (only active store threads).
+        if(store_valid)
+        {
+            auto coord = ck_tile::make_tensor_coordinate(
+                out_desc, ck_tile::make_tuple(p_out, out_q, out_c_fp16));
+            *reinterpret_cast<uint4*>(out_base + coord.get_offset()) = *load_output_lds;
+        }
+    }
+};
+
 template <Config cfg>
 __device__ void conv2d_grouped_4c_fp16_cdna4_nhwc_impl(const _Float16* __restrict__ in,
                                                        const _Float16* __restrict__ wei,
@@ -842,11 +1015,18 @@ __device__ void conv2d_grouped_4c_fp16_cdna4_nhwc_impl(const _Float16* __restric
 {
     using TC = TileConstants<cfg>;
 
+    constexpr bool use_lds_epilogue =
+        (cfg.epilogue == EpilogueType::RegistersToLdsToGlobalMemory);
+
     // --- LDS buffers (padded to accommodate the full tile distribution span) ---
     // TODO: Optimize the LDS usage if occupancy get limited by the LDS usage.
     __shared__ uint4 input_lds[TC::NUM_INPUT_LDS_BUFFERS * TC::INPUT_LDS_BUFFER_SIZE_PADDED_C8];
-    // Weight-only LDS: output no longer staged through LDS (direct DRAM store).
-    __shared__ uint4 output_lds[TC::WEIGHT_LDS_PADDED_UINT4];
+    // LDS epilogue needs space for output staging; direct DRAM path needs weight-only.
+    static constexpr int OUTPUT_LDS_SIZE = use_lds_epilogue
+                                               ? ck_tile::max(TC::WEIGHT_LDS_PADDED_UINT4,
+                                                              TC::OUTPUT_LDS_BUFFER_SIZE)
+                                               : TC::WEIGHT_LDS_PADDED_UINT4;
+    __shared__ uint4 output_lds[OUTPUT_LDS_SIZE];
 
     auto input_lds_fp16 =
         ck_tile::buffer_view<ck_tile::address_space_enum::lds, _Float16, ck_tile::index_t, true>{
@@ -859,7 +1039,7 @@ __device__ void conv2d_grouped_4c_fp16_cdna4_nhwc_impl(const _Float16* __restric
         ck_tile::buffer_view<ck_tile::address_space_enum::lds, _Float16, ck_tile::index_t, true>{
             reinterpret_cast<_Float16*>(output_lds),
             static_cast<ck_tile::index_t>(
-                TC::WEIGHT_LDS_PADDED_UINT4 * (sizeof(uint4) / sizeof(_Float16)))};
+                OUTPUT_LDS_SIZE * (sizeof(uint4) / sizeof(_Float16)))};
 
     // --- Coordinate setup ---
     BlockCoords<cfg> bc(groups);
@@ -868,9 +1048,10 @@ __device__ void conv2d_grouped_4c_fp16_cdna4_nhwc_impl(const _Float16* __restric
 
     ThreadMapping<cfg> tm;
     InputLoader<cfg> il(bc, input_lds, in, hi, wi, px);
-    OutputWriter<cfg> ow(bc, out, ho, wo);
 
-    // --- Weight prologue: global → LDS → registers ---
+    // Compute body parameterized on the output writer.
+    auto run_compute = [&](auto& ow)
+    {
     fp16x4_t weights_reg[cfg.kh * cfg.kw];
     WeightLoader<cfg>::load_to_lds(bc, output_lds, wei);
     // Wait for weight loads to complete before reading from LDS.
@@ -1039,6 +1220,19 @@ __device__ void conv2d_grouped_4c_fp16_cdna4_nhwc_impl(const _Float16* __restric
                              acc[P] = Zero;
                          });
         ow.flush(slot, p_out);
+    }
+    }; // end run_compute
+
+    // Select epilogue and run.
+    if constexpr(use_lds_epilogue)
+    {
+        OutputWriterLds<cfg> ow(tm, bc, output_lds, out, ho, wo);
+        run_compute(ow);
+    }
+    else
+    {
+        OutputWriter<cfg> ow(bc, out, ho, wo);
+        run_compute(ow);
     }
 }
 

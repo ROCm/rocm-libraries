@@ -7,6 +7,8 @@
 #include <tuple>
 
 #include "ck_tile/ops/direct_convolution/kernel/grouped_4c_fp16_tile_conv_impl.hpp"
+#include "ck_tile/ops/direct_convolution/kernel/grouped_4c_fp16_tile_conv_impl_v3.hpp"
+#include "ck_tile/ops/direct_convolution/utils/common.hpp"
 #include "ck_tile/ops/grouped_convolution/utils/grouped_conv_host_args.hpp"
 #include "ck_tile/host/kernel_launch.hpp"
 
@@ -24,9 +26,11 @@ namespace ck_tile::direct_conv {
 ///   - in_ptr  = input gradient (output of backward, void*)
 ///   - wei_ptr = weights (const void*)
 ///   - out_ptr = output gradient (input to backward, const void*)
-template <int ConfigIdx>
+template <int ConfigIdx, Version Ver = Version::v1>
 struct DirectTileConvBwdData4CFp16Kernel
 {
+    using V = VersionTraits<Ver>;
+
     struct KernelArgs
     {
         Conv2dParams par;
@@ -38,7 +42,7 @@ struct DirectTileConvBwdData4CFp16Kernel
 
     std::string GetName() const
     {
-        return "direct_tile_conv_fp16_bwd_data_" + grouped_4c_tile::configs[ConfigIdx].GetName();
+        return "direct_tile_conv_fp16_bwd_data_" + V::configs[ConfigIdx].GetName();
     }
 
     std::string GetTypeString() const { return GetName(); }
@@ -77,7 +81,7 @@ struct DirectTileConvBwdData4CFp16Kernel
         par.order      = TensorOrder::NHWC;
         par.compute_output_size();
 
-        auto lp = grouped_4c_tile::get_launch_params(ConfigIdx, par);
+        auto lp = V::get_launch_params(ConfigIdx, par);
 
         // Swap pointers: kernel reads output gradient, writes input gradient
         return {par, lp, host_args.out_ptr, host_args.wei_ptr, host_args.in_ptr};
@@ -85,7 +89,7 @@ struct DirectTileConvBwdData4CFp16Kernel
 
     static bool IsSupportedArgument(const KernelArgs& kargs)
     {
-        auto variant = grouped_4c_tile::make_variant();
+        auto variant = V::make_variant();
         return variant.is_applicable(kargs.par) &&
                variant.config_is_compatible(kargs.par, ConfigIdx);
     }
@@ -94,7 +98,7 @@ struct DirectTileConvBwdData4CFp16Kernel
 
     static dim3 BlockSize()
     {
-        return dim3(static_cast<unsigned>(grouped_4c_tile::configs[ConfigIdx].block_size()));
+        return dim3(static_cast<unsigned>(V::configs[ConfigIdx].block_size()));
     }
 
     static constexpr ck_tile::index_t GetSmemSize() { return 0; }
@@ -108,7 +112,7 @@ struct DirectTileConvBwdData4CFp16Kernel
             return {false, 0.0f, GetInstanceString()};
 
         auto callable = [&](const ck_tile::stream_config& sc) {
-            grouped_4c_tile::launch(ConfigIdx,
+            V::launch(ConfigIdx,
                                kargs.lp,
                                kargs.par,
                                kargs.in_ptr,
