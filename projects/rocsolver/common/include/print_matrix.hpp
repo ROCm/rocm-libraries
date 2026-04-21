@@ -133,7 +133,7 @@ void print_value( PrintOptions const& opts, T value )
 //------------------------------------------------------------------------------
 template <typename T, typename I>
 void print_matrix(
-    const char* label, I m, I n, T* A, I lda, int p=3,
+    std::string const& label, I m, I n, T* A, I lda, int p=3,
     hipStream_t stream=nullptr )
 {
     PrintOptions opts( p+6, p );
@@ -142,7 +142,7 @@ void print_matrix(
     int ldha;
 #ifdef HIP
     if (is_devptr( A )) {
-        printf( "# copying device %s => host\n", label );
+        printf( "# copying device %s => host\n", label.c_str() );
         ldha = m;
         hA = new T[ ldha*n ];
         copy_matrix( m, n, A, lda, hA, ldha, stream );
@@ -156,7 +156,7 @@ void print_matrix(
 
     printf( "# %s %d x %d, ld %d, %s\n"
             "%s = numpy.array([\n",
-            label, m, n, lda, get_type_name<T>().c_str(), label );
+            label.c_str(), m, n, lda, get_type_name<T>().c_str(), label.c_str() );
     for (int i = 0; i < m; ++i) {
         printf( "  [  " );
         for (int j = 0; j < n; ++j) {
