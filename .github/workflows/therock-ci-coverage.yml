@@ -43,7 +43,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: TheRock
-          ref: f629edc0b56da77fc0d29e6bc01e724aaf0be826
+          ref: 6afcd5ac5298e9a5cdb3d2c45ae7605739ad2b94
 
       - name: Install python deps
         run: |
@@ -155,7 +155,12 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: TheRock
-          ref: f629edc0b56da77fc0d29e6bc01e724aaf0be826
+          ref: 6afcd5ac5298e9a5cdb3d2c45ae7605739ad2b94
+
+      - name: Checkout rocm-libraries repository for scripts
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          path: rocm-libraries
 
       - name: Setting up Python
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
@@ -193,6 +198,11 @@ jobs:
             --amdgpu-targets=${AMDGPU_TARGETS} \
             --output-dir=${OUTPUT_ARTIFACTS_DIR} \
             ${FETCH_ARTIFACT_ARGS}
+
+      - name: Driver / GPU sanity check
+        timeout-minutes: 3
+        run: |
+          python ./TheRock/build_tools/print_driver_gpu_info.py
 
       - name: Run coverage tests and generate report
         run: |
