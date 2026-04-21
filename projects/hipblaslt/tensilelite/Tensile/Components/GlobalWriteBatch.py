@@ -47,6 +47,7 @@ from ..Activation import ActivationModule
 from ..AsmStoreState import StoreState
 from ..AsmAddressCalculation import AddrCalculation
 from ..Components.PackData import formatting, PackData_F16, PackData_BF16, PackData_FLOAT8, PackData_FLOAT8_fnuz
+from ..True16Emit import emitPkFp8ToF32, emitPkBf8ToF32
 
 from math import ceil
 
@@ -1792,14 +1793,7 @@ class GlobalWriteBatchWriter:
             continue
           else:
             isPK = True
-            if self.parentWriter.states.archCaps["NoSDWA"]:
-              # Enable WORD_0 of 2-nd VGPR with vi=4 for vw=8
-              sb = 0 if vi%4 == 0 else 1
-              module.add(VCvtPkFP8toF32(dst=vgpr(tmpVgpr, 2), src=vgpr(dataV), vop3=VOP3PModifiers(op_sel=[sb])))
-            else:
-              # Enable WORD_0 of 2-nd VGPR with vi=4 for vw=8
-              sb = SelectBit.WORD_0 if vi%4 == 0 else SelectBit.WORD_1
-              module.add(VCvtPkFP8toF32(dst=vgpr(tmpVgpr, 2), src=vgpr(dataV), sdwa=SDWAModifiers(src0_sel=sb)))
+            emitPkFp8ToF32(module, self.parentWriter.states.archCaps["NoSDWA"], vgpr(tmpVgpr, 2), vgpr(dataV), 0 if vi%4 == 0 else 1)
           module.add(SNop(waitState=0))
           if kernel["ProblemType"]["ComputeDataType"].isSingle():
             module.add(VMacF32(dst=vgpr("ValuC+%u"%newSumIdxV), src0=vgpr(tmpVgpr), src1=sgpr("Beta"), comment="finalSum = sum*alpha + C*beta"))
@@ -1826,14 +1820,7 @@ class GlobalWriteBatchWriter:
             continue
           else:
             isPK = True
-            if self.parentWriter.states.archCaps["NoSDWA"]:
-              # Enable WORD_0 of 2-nd VGPR with vi=4 for vw=8
-              sb = 0 if vi%4 == 0 else 1
-              module.add(VCvtPkBF8toF32(dst=vgpr(tmpVgpr, 2), src=vgpr(dataV), vop3=VOP3PModifiers(op_sel=[sb])))
-            else:
-              # Enable WORD_0 of 2-nd VGPR with vi=4 for vw=8
-              sb = SelectBit.WORD_0 if vi%4 == 0 else SelectBit.WORD_1
-              module.add(VCvtPkBF8toF32(dst=vgpr(tmpVgpr, 2), src=vgpr(dataV), sdwa=SDWAModifiers(src0_sel=sb)))
+            emitPkBf8ToF32(module, self.parentWriter.states.archCaps["NoSDWA"], vgpr(tmpVgpr, 2), vgpr(dataV), 0 if vi%4 == 0 else 1)
           module.add(SNop(waitState=0))
           if kernel["ProblemType"]["ComputeDataType"].isSingle():
             module.add(VMacF32(dst=vgpr("ValuC+%u"%newSumIdxV), src0=vgpr(tmpVgpr), src1=sgpr("Beta"), comment="finalSum = sum*alpha + C*beta"))

@@ -389,7 +389,7 @@ namespace rocisa
                 auto vop3 = VOP3PModifiers();
                 vop3.op_sel.push_back(vi % 2);
                 return std::make_shared<PVCvtBF16toFP32>(
-                    dst, src, std::nullopt, vop3, "cvt bf16 to fp32. " + comment);
+                    dst, src, std::nullopt, vop3, std::vector<int>{-1, -1, vi % 2}, "cvt bf16 to f32");
             }
             else
             {
@@ -401,7 +401,7 @@ namespace rocisa
                 auto sdwa     = SDWAModifiers();
                 sdwa.src0_sel = select_bit;
                 return std::make_shared<PVCvtBF16toFP32>(
-                    dst, src, sdwa, std::nullopt, "cvt bf16 to fp32. " + comment);
+                    dst, src, sdwa, std::nullopt, std::vector<int>{}, "cvt bf16 to f32");
             }
         }
         else

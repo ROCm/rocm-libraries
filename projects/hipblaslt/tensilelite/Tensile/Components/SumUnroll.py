@@ -23,15 +23,17 @@
 ################################################################################
 
 from rocisa.code import RegSet, Module
-from rocisa.container import EXEC, vgpr, sgpr, SDWAModifiers, DSModifiers, ContinuousRegister
+from rocisa.container import EXEC, vgpr, sgpr, DSModifiers, ContinuousRegister
 from rocisa.enum import SelectBit
 from rocisa.instruction import SBarrier, \
-    SMovB32, SSetMask, VAddF32, VAddU32, VCmpXEqU32, VCvtPkBF8toF32, VCvtPkFP8toF32, \
-    VDot2F32BF16, VDot2F32F16, VLShiftLeftB32, VMovB32, VCvtBF16toFP32, VCvtF16toF32
+    SMovB32, SSetMask, VAddF32, VAddU32, VCmpXEqU32, \
+    VDot2F32BF16, VDot2F32F16, VLShiftLeftB32, VMovB32, VCvtBF16toFP32, VCvtF16toF32, \
+    VCvtPkBF8toF32, VCvtPkFP8toF32
 from rocisa.functions import vectorStaticDivide, vectorStaticRemainder, vectorStaticMultiply
 from ..Component import SumUnroll
 from ..AsmMemoryHelpers import dsStore
 from ..Common import printExit, log2
+from ..True16Emit import emitPkFp8ToF32, emitPkBf8ToF32
 
 class SumUnrollMfma(SumUnroll):
     kernel = {"EnableMatrixInstruction": True}
@@ -150,14 +152,9 @@ class SumUnrollMfma(SumUnroll):
                     tmpVgpr = writer.vgprPool.checkOutAligned(4,2)
                     if vgprPerInput > 1 and (vgprPerInput % 2 == 0):
                         for inputIdx in range(0, vgprPerInput):
-                            if writer.states.archCaps["NoSDWA"]:
-                                imod.add(VCvtPkFP8toF32(dst=vgpr(tmpVgpr,2), src=vgpr("%s+%s"%(valuStr, iui_new_offset + inputIdx)), vop3=VOP3PModifiers(op_sel=[0]), comment="convert to FP32"))
-                                imod.add(VCvtPkFP8toF32(dst=vgpr(tmpVgpr+2,2), src=vgpr("%s+%s"%(valuStr, iui_new_offset + inputIdx)), vop3=VOP3PModifiers(op_sel=[1]), comment="convert to FP32"))
-                            else:
-                                sdwa = SDWAModifiers(src0_sel=SelectBit.WORD_0)
-                                imod.add(VCvtPkFP8toF32(dst=vgpr(tmpVgpr,2), src=vgpr("%s+%s"%(valuStr, iui_new_offset + inputIdx)), sdwa=sdwa, comment="convert to FP32"))
-                                sdwa = SDWAModifiers(src0_sel=SelectBit.WORD_1)
-                                imod.add(VCvtPkFP8toF32(dst=vgpr(tmpVgpr+2,2), src=vgpr("%s+%s"%(valuStr, iui_new_offset + inputIdx)), sdwa=sdwa, comment="convert to FP32"))
+                            src = vgpr("%s+%s"%(valuStr, iui_new_offset + inputIdx))
+                            emitPkFp8ToF32(imod, writer.states.archCaps["NoSDWA"], vgpr(tmpVgpr,2), src, 0, "convert to FP32")
+                            emitPkFp8ToF32(imod, writer.states.archCaps["NoSDWA"], vgpr(tmpVgpr+2,2), src, 1, "convert to FP32")
                             imod.add(VAddF32(dst=vgpr(valuSumStr), src0=vgpr(tmpVgpr), src1=vgpr(valuSumStr), comment="sum K"))
                             imod.add(VAddF32(dst=vgpr(valuSumStr), src0=vgpr(tmpVgpr+1), src1=vgpr(valuSumStr), comment="sum K"))
                             imod.add(VAddF32(dst=vgpr(valuSumStr), src0=vgpr(tmpVgpr+2), src1=vgpr(valuSumStr), comment="sum K"))
@@ -171,14 +168,9 @@ class SumUnrollMfma(SumUnroll):
                     tmpVgpr = writer.vgprPool.checkOutAligned(4,2)
                     if vgprPerInput > 1 and (vgprPerInput % 2 == 0):
                         for inputIdx in range(0, vgprPerInput):
-                            if writer.states.archCaps["NoSDWA"]:
-                                imod.add(VCvtPkBF8toF32(dst=vgpr(tmpVgpr,2), src=vgpr("%s+%s"%(valuStr, iui_new_offset + inputIdx)), vop3=VOP3PModifiers(op_sel=[0]), comment="convert to FP32"))
-                                imod.add(VCvtPkBF8toF32(dst=vgpr(tmpVgpr+2,2), src=vgpr("%s+%s"%(valuStr, iui_new_offset + inputIdx)), vop3=VOP3PModifiers(op_sel=[1]), comment="convert to FP32"))
-                            else:
-                                sdwa = SDWAModifiers(src0_sel=SelectBit.WORD_0)
-                                imod.add(VCvtPkBF8toF32(dst=vgpr(tmpVgpr,2), src=vgpr("%s+%s"%(valuStr, iui_new_offset + inputIdx)), sdwa=sdwa, comment="convert to FP32"))
-                                sdwa = SDWAModifiers(src0_sel=SelectBit.WORD_1)
-                                imod.add(VCvtPkBF8toF32(dst=vgpr(tmpVgpr+2,2), src=vgpr("%s+%s"%(valuStr, iui_new_offset + inputIdx)), sdwa=sdwa, comment="convert to FP32"))
+                            src = vgpr("%s+%s"%(valuStr, iui_new_offset + inputIdx))
+                            emitPkBf8ToF32(imod, writer.states.archCaps["NoSDWA"], vgpr(tmpVgpr,2), src, 0, "convert to FP32")
+                            emitPkBf8ToF32(imod, writer.states.archCaps["NoSDWA"], vgpr(tmpVgpr+2,2), src, 1, "convert to FP32")
                             imod.add(VAddF32(dst=vgpr(valuSumStr), src0=vgpr(tmpVgpr), src1=vgpr(valuSumStr), comment="sum K"))
                             imod.add(VAddF32(dst=vgpr(valuSumStr), src0=vgpr(tmpVgpr+1), src1=vgpr(valuSumStr), comment="sum K"))
                             imod.add(VAddF32(dst=vgpr(valuSumStr), src0=vgpr(tmpVgpr+2), src1=vgpr(valuSumStr), comment="sum K"))
