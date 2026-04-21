@@ -40,18 +40,12 @@ target_link_libraries(
 add_dependencies(hip_kernel_provider_integration_tests hip_kernel_provider)
 
 if(ENABLE_ASM_SDPA_ENGINE)
-    if(NOT HIPDNN_ENABLE_SDPA)
-        message(WARNING
-                "ENABLE_ASM_SDPA_ENGINE is ON but hipDNN was built with HIPDNN_ENABLE_SDPA=OFF. "
-                "Skipping SDPA integration tests. Rebuild hipDNN with -DHIPDNN_ENABLE_SDPA=ON to enable them.")
-    else()
-        target_sources(hip_kernel_provider_integration_tests PRIVATE
-            asm_sdpa_engine/IntegrationGpuSdpaForward.cpp
-        )
-        target_compile_definitions(hip_kernel_provider_integration_tests PRIVATE
-            AITER_ASM_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../engines/asm_sdpa_engine/asm/asm_kernels"
-        )
-    endif()
+    target_sources(hip_kernel_provider_integration_tests PRIVATE
+        asm_sdpa_engine/IntegrationGpuSdpaForward.cpp
+    )
+    target_compile_definitions(hip_kernel_provider_integration_tests PRIVATE
+        AITER_ASM_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../engines/asm_sdpa_engine/asm/asm_kernels"
+    )
 endif()
 
 clang_tidy_check(hip_kernel_provider_integration_tests)
@@ -60,20 +54,14 @@ add_integration_test_target(hip_kernel_provider_integration_tests ${CMAKE_CURREN
     LABELS slow)
 
 if(ENABLE_ASM_SDPA_ENGINE)
-    if(NOT HIPDNN_ENABLE_SDPA)
-        message(WARNING
-                "ENABLE_ASM_SDPA_ENGINE is ON but hipDNN was built with HIPDNN_ENABLE_SDPA=OFF. "
-                "Skipping SDPA integration test environment setup.")
+    set(ASM_KERNEL_ENV "HIPDNN_AITER_ASM_DIR=${CMAKE_BINARY_DIR}/hip_kernel_provider/asm_kernels")
+    if(COVERAGE_ENVIRONMENT)
+        set_tests_properties(hip_kernel_provider_integration_tests PROPERTIES
+            ENVIRONMENT "${COVERAGE_ENVIRONMENT};${ASM_KERNEL_ENV}"
+        )
     else()
-        set(ASM_KERNEL_ENV "HIPDNN_AITER_ASM_DIR=${CMAKE_BINARY_DIR}/hip_kernel_provider/asm_kernels")
-        if(COVERAGE_ENVIRONMENT)
-            set_tests_properties(hip_kernel_provider_integration_tests PROPERTIES
-                ENVIRONMENT "${COVERAGE_ENVIRONMENT};${ASM_KERNEL_ENV}"
-            )
-        else()
-            set_tests_properties(hip_kernel_provider_integration_tests PROPERTIES
-                ENVIRONMENT "${ASM_KERNEL_ENV}"
-            )
-        endif()
+        set_tests_properties(hip_kernel_provider_integration_tests PROPERTIES
+            ENVIRONMENT "${ASM_KERNEL_ENV}"
+        )
     endif()
 endif()
