@@ -5,12 +5,8 @@ import argparse
 import glob
 import os
 import sys
+import csv
 from collections import defaultdict
-
-import numpy as np
-import pandas as pd
-
-pd.set_option("future.no_silent_downcasting", True)
 
 this_dir = os.path.dirname(os.path.abspath(__file__))
 base_dir = os.path.basename(this_dir)
@@ -63,39 +59,46 @@ if __name__ == "__main__":
     have_get_header = False
     for cfgname, file_info_list in csv_groups.items():
         dfs = []
+        headers_list = []
         for file_info in file_info_list:
             single_file = file_info["file_path"]
             arch = file_info["arch"]
-            df = pd.read_csv(single_file)
+            fieldnames = []
+            df = []
+            with open(single_file) as file:
+                dictreader = csv.DictReader(file)
+                fieldnames = dictreader.fieldnames
+                df = list(dictreader)
             # check headers
-            headers_list = df.columns.tolist()
             required_columns = {"knl_name", "co_name"}
-            if not required_columns.issubset(headers_list):
-                missing = required_columns - set(headers_list)
-                print(
-                    f"ERROR: Invalid assembly CSV format -- {single_file}. Missing required columns: {', '.join(missing)}"
-                )
+            if not headers_list:
+                headers_list = fieldnames
+                if not required_columns.issubset(headers_list):
+                    missing = required_columns - set(headers_list)
+                    print(
+                        f"ERROR: Invalid assembly CSV format -- {single_file}. Missing required columns: {', '.join(missing)}"
+                    )
+                    sys.exit(1)
+            elif headers_list != fieldnames:
+                print(f"ERROR: CSV headers don't match in -- {cfgname}.")
                 sys.exit(1)
-            df["arch"] = arch  # add arch into df
-            dfs.append(df)
+
+            dicts = [d | {"arch": arch} for d in df]
+            dfs += dicts
         if dfs:
             relpath = os.path.relpath(
                 os.path.dirname(single_file), f"{this_dir}/{arch}"
             )
-            combine_df = (
-                pd.concat(dfs, ignore_index=True).fillna(0).infer_objects(copy=False)
-            )
             if not have_get_header:
-                headers_list = combine_df.columns.tolist()
                 required_columns = {"knl_name", "co_name", "arch"}
                 other_columns = [
                     col for col in headers_list if col not in required_columns
                 ]
                 other_columns_comma = ", ".join(other_columns)
-                sample_row = combine_df.iloc[0]
+                sample_row = dfs[0]
                 other_columns_cpp_def = "\n".join(
                     [
-                        f"    {'int' if isinstance(sample_row[col], (int, float, np.integer)) else 'std::string'} {col};"
+                        f"    {'int' if isinstance(sample_row[col], (int, float)) else 'std::string'} {col};"
                         for col in other_columns
                     ]
                 )
@@ -121,15 +124,15 @@ using CFG = std::unordered_map<std::string, {args.module}Config>;
                 "ADD_CFG("
                 + ", ".join(
                     (
-                        f"{int(getattr(row, col)):>4}"
-                        if str(getattr(row, col)).replace(".", "", 1).isdigit()
-                        else f'"{getattr(row, col)}"'
+                        f"{int(row[col]):>4}"
+                        if str(row[col]).replace(".", "", 1).isdigit()
+                        else f'"{row[col]}"'
                     )
                     for col in other_columns
                 )
-                + f', "{row.arch}", "{relpath}/", "{row.knl_name}", "{row.co_name}"),'
-                for row in combine_df.itertuples(index=False)
-                if row.arch in archs
+                + f', "{row["arch"]}", "{relpath}/", "{row["knl_name"]}", "{row["co_name"]}"),'
+                for row in dfs
+                if row["arch"] in archs
             ]
             cfg_txt = "\n    ".join(cfg) + "\n"
 
