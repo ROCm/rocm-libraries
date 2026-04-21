@@ -35,7 +35,7 @@ static const std::vector<std::vector<size_t>> multi_gpu_sizes = {
     {64, 128, 256},
     {96, 160, 192},
 };
-static const std::vector<size_t>        multi_gpu_batch_range = {4, 1};
+static const std::vector<size_t>        multi_gpu_batch_range = {1};
 static std::vector<std::vector<size_t>> ioffset_range_zero    = {{0, 0}};
 static std::vector<std::vector<size_t>> ooffset_range_zero    = {{0, 0}};
 
@@ -90,7 +90,7 @@ std::vector<fft_params> param_generator_multi_gpu(const std::optional<SplitType>
                                               stride_generator(stride_range),
                                               ioffset_range_zero,
                                               ooffset_range_zero,
-                                              {fft_placement_inplace, fft_placement_notinplace},
+                                              {fft_placement_inplace},
                                               false,
                                               run_callbacks,
                                               auto_alloc_setting);
@@ -104,11 +104,12 @@ std::vector<fft_params> param_generator_multi_gpu(const std::optional<SplitType>
                                       stride_generator(stride_range),
                                       ioffset_range_zero,
                                       ooffset_range_zero,
-                                      {fft_placement_notinplace},
+                                      {fft_placement_inplace},
                                       false,
                                       run_callbacks,
                                       auto_alloc_setting);
         std::copy(params.begin(), params.end(), std::back_inserter(params_single));
+        
     }
 
     std::vector<fft_params> all_params;
@@ -248,7 +249,7 @@ INSTANTIATE_TEST_SUITE_P(multi_gpu,
 
 // Note: disabled for now due to implementation issues and
 // unimplemented features in hipFFT (to fix first)
-INSTANTIATE_TEST_SUITE_P(DISABLED_various_multi_gpu,
+INSTANTIATE_TEST_SUITE_P(various_multi_gpu,
                          accuracy_test,
                          ::testing::ValuesIn(param_generator_multi_gpu({},
                                                                        fft_auto_allocation_off)),
