@@ -238,3 +238,4 @@ struct ReferenceMXGemm : public device::BaseOperator
 } // namespace tensor_operation
 } // namespace ck
 #pragma clang diagnostic pop
+
