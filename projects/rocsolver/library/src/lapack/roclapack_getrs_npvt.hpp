@@ -52,37 +52,13 @@ rocblas_status rocsolver_getrs_npvt_argCheck(rocblas_handle handle,
                                              T B,
                                              const I batch_count = 1)
 {
-    // order is important for unit tests:
+    const I* ipiv = nullptr;
+    bool const pivot = false;
 
-    // 1. invalid/non-supported values
-    if(trans != rocblas_operation_none && trans != rocblas_operation_transpose
-       && trans != rocblas_operation_conjugate_transpose)
-        return rocblas_status_invalid_value;
+    rocblas_status const istat = rocsolver_getrs_argCheck(handle, trans, n, nrhs, lda, ldb,
 
-    // 2. invalid size
-    if(n < 0 || nrhs < 0 || lda < n || ldb < n || batch_count < 0)
-        return rocblas_status_invalid_size;
-
-    // skip pointer check if querying memory size
-    if(rocblas_is_device_memory_size_query(handle))
-        return rocblas_status_continue;
-
-    // 3. invalid pointers
-    {
-        bool const has_work = (n > 0) && (nrhs > 0) && (batch_count > 0);
-        if(has_work)
-        {
-            bool const is_valid_A = (A != nullptr);
-            bool const is_valid_B = (B != nullptr);
-            bool const is_valid_pointers = (is_valid_A && is_valid_B);
-            if(!is_valid_pointers)
-            {
-                return (rocblas_status_invalid_pointer);
-            }
-        }
-    }
-
-    return rocblas_status_continue;
+                                                          A, B, ipiv, batch_count, pivot);
+    return istat;
 }
 
 template <bool BATCHED, bool STRIDED, typename T, typename I>
@@ -100,21 +76,12 @@ void rocsolver_getrs_npvt_getMemorySize(rocblas_operation trans,
                                         const I inca = 1,
                                         const I incb = 1)
 {
-    *size_work1 = 0;
-    *size_work2 = 0;
-    *size_work3 = 0;
-    *size_work4 = 0;
-    *optim_mem = true;
-    // if quick return, no workspace is needed
-    if(n == 0 || nrhs == 0 || batch_count == 0)
-    {
-        return;
-    }
+    rocsolver_getrs_getMemorySize<BATCHED, STRIDED, T, I>(trans, n, nrhs, batch_count,
 
-    // workspace required for calling TRSM
-    rocsolver_trsm_mem<BATCHED, STRIDED, T>(rocblas_side_left, trans, n, nrhs, batch_count,
-                                            size_work1, size_work2, size_work3, size_work4,
-                                            optim_mem, lda, ldb, inca, incb);
+                                                          size_work1, size_work2, size_work3,
+                                                          size_work4, optim_mem,
+
+                                                          lda, ldb, inca, incb);
 }
 
 template <bool BATCHED, bool STRIDED, typename T, typename I, typename U>
@@ -140,7 +107,7 @@ rocblas_status rocsolver_getrs_npvt_template(rocblas_handle handle,
                                              const bool optim_mem)
 {
     bool const pivot = false;
-    I* const ipiv = nullptr;
+    const I* const ipiv = nullptr;
     rocblas_stride const strideP = 0;
 
     return (rocsolver_getrs_template<BATCHED, STRIDED, T, I, U>(handle, trans, n, nrhs,

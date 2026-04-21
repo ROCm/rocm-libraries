@@ -49,7 +49,8 @@ rocblas_status rocsolver_getrs_argCheck(rocblas_handle handle,
                                         T A,
                                         T B,
                                         const I* ipiv,
-                                        const I batch_count = 1)
+                                        const I batch_count = 1,
+                                        const bool pivot = true)
 {
     // order is important for unit tests:
 
@@ -67,8 +68,20 @@ rocblas_status rocsolver_getrs_argCheck(rocblas_handle handle,
         return rocblas_status_continue;
 
     // 3. invalid pointers
-    if((n && !A) || (n && !ipiv) || (nrhs && n && !B))
-        return rocblas_status_invalid_pointer;
+    if(pivot)
+    {
+        if((n && !A) || (n && !ipiv) || (nrhs && n && !B))
+        {
+            return rocblas_status_invalid_pointer;
+        }
+    }
+    else
+    {
+        if((n && !A) || (nrhs && n && !B))
+        {
+            return rocblas_status_invalid_pointer;
+        }
+    }
 
     return rocblas_status_continue;
 }
@@ -150,8 +163,15 @@ rocblas_status rocsolver_getrs_template(rocblas_handle handle,
     {
         // first apply row interchanges to the right hand sides
         if(pivot)
-            rocsolver_laswp_template<T, I>(handle, nrhs, B, shiftB, incb, ldb, strideB, 1, n, ipiv,
-                                           0, 1, strideP, batch_count);
+        {
+            rocblas_status const istat = rocsolver_laswp_template<T, I>(
+                handle, nrhs, B, shiftB, incb, ldb, strideB, 1, n, ipiv, 0, 1, strideP, batch_count);
+            if(istat != rocblas_status_success)
+            {
+                rocblas_set_pointer_mode(handle, old_mode);
+                return (istat);
+            }
+        }
 
         // solve L*X = B, overwriting B with X
         {
