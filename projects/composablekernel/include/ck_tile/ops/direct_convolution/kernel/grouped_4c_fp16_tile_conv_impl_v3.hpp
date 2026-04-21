@@ -428,6 +428,94 @@ struct ThreadMapping
     }
 };
 
+// Handles input loads from global memory into LDS and then into registers.
+template <Config cfg>
+struct InputLoader
+{
+    using TC = TileConstants<cfg>;
+
+    // Derive the DRAM window type from the factory functions with dummy args.
+    using InputDramWindowType = decltype(ck_tile::make_tile_window(
+        ck_tile::make_tensor_view<ck_tile::address_space_enum::global>(
+            static_cast<const _Float16*>(nullptr),
+            TC::MakeInputDramDescriptor(int{}, int{}, int{}, int{})),
+        ck_tile::make_tuple(ck_tile::number<1>{}, ck_tile::number<TC::TOTAL_SPATIAL>{},
+                            ck_tile::number<TC::BLOCK_C8>{}, ck_tile::number<8>{}),
+        ck_tile::multi_index<4>{},
+        TC::MakeInputDramDistribution()));
+
+    // LDS window has no distribution — same descriptor, no distribution arg.
+    using LdsWindowType = decltype(ck_tile::make_tile_window(
+        ck_tile::make_tensor_view<ck_tile::address_space_enum::lds>(
+            static_cast<_Float16*>(nullptr),
+            TC::MakeInputLdsStoreDescriptor()),
+        ck_tile::make_tuple(ck_tile::number<1>{}, ck_tile::number<TC::TOTAL_SPATIAL>{},
+                            ck_tile::number<TC::BLOCK_C8>{}, ck_tile::number<8>{}),
+        ck_tile::multi_index<4>{}));
+
+    InputDramWindowType input_dram_window;
+    LdsWindowType       lds_window_0;
+    LdsWindowType       lds_window_1;
+
+    __device__ InputLoader(const BlockCoords<cfg>& bc,
+                           uint4* input_lds,
+                           const _Float16* __restrict__ in,
+                           int hi,
+                           int wi,
+                           int px)
+    {
+        const auto input_dram_desc = TC::MakeInputDramDescriptor(hi, wi, bc.C, px);
+        const auto input_dram_view = ck_tile::make_tensor_view<ck_tile::address_space_enum::global>(
+            in + static_cast<size_t>(bc.block_n) * hi * wi * bc.C + bc.block_k,
+            input_dram_desc);
+
+        // DRAM tile window with distribution. Window = [1, TOTAL_SPATIAL, BLOCK_C8, 8].
+        constexpr auto input_dram_dist = TC::MakeInputDramDistribution();
+        input_dram_window         = ck_tile::make_tile_window(
+            input_dram_view,
+            ck_tile::make_tuple(ck_tile::number<1>{}, ck_tile::number<TC::TOTAL_SPATIAL>{},
+                                ck_tile::number<TC::BLOCK_C8>{}, ck_tile::number<8>{}),
+            {0, bc.block_q, 0, 0},
+            input_dram_dist);
+
+        // LDS tile windows for double-buffered store (no distribution needed).
+        // [1, TOTAL_SPATIAL, BLOCK_C8, 8] in fp16 units.
+        constexpr auto lds_store_desc = TC::MakeInputLdsStoreDescriptor();
+        auto lds_view_0 = ck_tile::make_tensor_view<ck_tile::address_space_enum::lds>(
+            reinterpret_cast<_Float16*>(&input_lds[0]), lds_store_desc);
+        auto lds_view_1 = ck_tile::make_tensor_view<ck_tile::address_space_enum::lds>(
+            reinterpret_cast<_Float16*>(&input_lds[TC::INPUT_LDS_BUFFER_SIZE_PADDED_C8]),
+            lds_store_desc);
+        lds_window_0 = ck_tile::make_tile_window(
+            lds_view_0,
+            ck_tile::make_tuple(ck_tile::number<1>{}, ck_tile::number<TC::TOTAL_SPATIAL>{},
+                                ck_tile::number<TC::BLOCK_C8>{}, ck_tile::number<8>{}),
+            {0, 0, 0, 0});
+        lds_window_1 = ck_tile::make_tile_window(
+            lds_view_1,
+            ck_tile::make_tuple(ck_tile::number<1>{}, ck_tile::number<TC::TOTAL_SPATIAL>{},
+                                ck_tile::number<TC::BLOCK_C8>{}, ck_tile::number<8>{}),
+            {0, 0, 0, 0});
+    }
+
+    __device__ void fetch_tile(int lds_buffer)
+    {
+        ck_tile::move_tile_window(input_dram_window, {1, 0, 0, 0});
+        if(lds_buffer == 0)
+            ck_tile::async_load_tile(lds_window_0, input_dram_window);
+        else
+            ck_tile::async_load_tile(lds_window_1, input_dram_window);
+    }
+
+    __device__ void prefetch_tile(int lds_buffer)
+    {
+        if(lds_buffer == 0)
+            ck_tile::async_load_tile(lds_window_0, input_dram_window);
+        else
+            ck_tile::async_load_tile(lds_window_1, input_dram_window);
+    }
+};
+
 // Handles weight loads from global memory into LDS and then into registers.
 template <Config cfg>
 struct WeightLoader
@@ -635,43 +723,8 @@ __device__ void conv2d_grouped_4c_fp16_cdna4_nhwc_impl(const _Float16* __restric
         return;
 
     ThreadMapping<cfg> tm;
+    InputLoader<cfg> il(bc, input_lds, in, hi, wi, px);
     OutputWriter<cfg> ow(tm, bc, output_lds, out, ho, wo);
-
-    // --- Input tile windows for async_load_tile ---
-    // DRAM tensor view: fp16 data with 4D descriptor [hi, wi_padded, C8, 8].
-    // Base pointer shifted to this tile's channel origin.
-    const auto input_dram_desc = TC::MakeInputDramDescriptor(hi, wi, bc.C, px);
-    const auto input_dram_view = ck_tile::make_tensor_view<ck_tile::address_space_enum::global>(
-        in + static_cast<size_t>(bc.block_n) * hi * wi * bc.C + bc.block_k,
-        input_dram_desc);
-
-    // DRAM tile window with distribution. Window = [1, TOTAL_SPATIAL, BLOCK_C8, 8].
-    constexpr auto input_dram_dist = TC::MakeInputDramDistribution();
-    auto input_dram_window         = ck_tile::make_tile_window(
-        input_dram_view,
-        ck_tile::make_tuple(ck_tile::number<1>{}, ck_tile::number<TC::TOTAL_SPATIAL>{},
-                            ck_tile::number<TC::BLOCK_C8>{}, ck_tile::number<8>{}),
-        {0, bc.block_q, 0, 0},
-        input_dram_dist);
-
-    // LDS tile windows for double-buffered store (no distribution needed).
-    // [1, TOTAL_SPATIAL, BLOCK_C8, 8] in fp16 units.
-    constexpr auto lds_store_desc = TC::MakeInputLdsStoreDescriptor();
-    auto lds_view_0 = ck_tile::make_tensor_view<ck_tile::address_space_enum::lds>(
-        reinterpret_cast<_Float16*>(&input_lds[0]), lds_store_desc);
-    auto lds_view_1 = ck_tile::make_tensor_view<ck_tile::address_space_enum::lds>(
-        reinterpret_cast<_Float16*>(&input_lds[TC::INPUT_LDS_BUFFER_SIZE_PADDED_C8]),
-        lds_store_desc);
-    auto lds_window_0 = ck_tile::make_tile_window(
-        lds_view_0,
-        ck_tile::make_tuple(ck_tile::number<1>{}, ck_tile::number<TC::TOTAL_SPATIAL>{},
-                            ck_tile::number<TC::BLOCK_C8>{}, ck_tile::number<8>{}),
-        {0, 0, 0, 0});
-    auto lds_window_1 = ck_tile::make_tile_window(
-        lds_view_1,
-        ck_tile::make_tuple(ck_tile::number<1>{}, ck_tile::number<TC::TOTAL_SPATIAL>{},
-                            ck_tile::number<TC::BLOCK_C8>{}, ck_tile::number<8>{}),
-        {0, 0, 0, 0});
 
     // --- Weight prologue: global → LDS → registers ---
     fp16x4_t weights_reg[cfg.kh * cfg.kw];
@@ -683,8 +736,7 @@ __device__ void conv2d_grouped_4c_fp16_cdna4_nhwc_impl(const _Float16* __restric
     __syncthreads();
 
     // Prefetch first input row (row 0) into LDS buffer 0.
-    ck_tile::async_load_tile(lds_window_0, input_dram_window);
-
+    il.prefetch_tile(0);
     {
         wait_vmcnt<0>();
         __syncthreads();
@@ -721,11 +773,7 @@ __device__ void conv2d_grouped_4c_fp16_cdna4_nhwc_impl(const _Float16* __restric
                 int y = y_base + Y_LOCAL;
                 if((y + 1) < hi)
                 {
-                    ck_tile::move_tile_window(input_dram_window, {1, 0, 0, 0});
-                    if(tic == 0)
-                        ck_tile::async_load_tile(lds_window_0, input_dram_window);
-                    else
-                        ck_tile::async_load_tile(lds_window_1, input_dram_window);
+                    il.fetch_tile(tic);
                 }
 
                 // Accumulate MFMA products over filter width.
@@ -787,11 +835,7 @@ __device__ void conv2d_grouped_4c_fp16_cdna4_nhwc_impl(const _Float16* __restric
 
                 if((y + 1) < hi)
                 {
-                    ck_tile::move_tile_window(input_dram_window, {1, 0, 0, 0});
-                    if(tic == 0)
-                        ck_tile::async_load_tile(lds_window_0, input_dram_window);
-                    else
-                        ck_tile::async_load_tile(lds_window_1, input_dram_window);
+                    il.fetch_tile(tic);
                 }
 
                 static_for<cfg.kw>(

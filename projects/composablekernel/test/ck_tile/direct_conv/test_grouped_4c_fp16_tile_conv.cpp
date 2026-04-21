@@ -22,6 +22,7 @@ struct TileConvKernelTraits
 };
 
 constexpr auto v2 = ck_tile::direct_conv::Version::v2;
+constexpr auto v3 = ck_tile::direct_conv::Version::v3;
 
 class DirectConvGrouped4cFp16TileConvTest
     : public DirectConvGrouped4cFp16TestHarness<TileConvKernelTraits<>>
@@ -33,6 +34,10 @@ class DirectConvGrouped4cFp16TileConvTestV2
 {
 };
 
+class DirectConvGrouped4cFp16TileConvTestV3
+    : public DirectConvGrouped4cFp16TestHarness<TileConvKernelTraits<v3>>
+{
+};
 
 // Config index reference:
 //   Fprop (cyclic-shift swizzle): 5 (wc64=2,wq4=8), 6 (2,4), 7 (2,2), 8 (2,1), 9 (1,1)
@@ -247,6 +252,16 @@ TEST_F(DirectConvGrouped4cFp16TileConvTestV2, Fprop_V2_Groups32_Pad1)
 }
 
 TEST_F(DirectConvGrouped4cFp16TileConvTestV2, Fprop_V2_Group32_NoPad)
+{
+    ASSERT_TRUE((RunFprop<1>(2, 64, 64, 32, 4, 4, 3, 3, 0, 0)));
+}
+
+TEST_F(DirectConvGrouped4cFp16TileConvTestV3, Fprop_V3_Groups32_Pad1)
+{
+    ASSERT_TRUE((RunFprop<1>(1, 32, 32, 32, 4, 4, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvGrouped4cFp16TileConvTestV3, Fprop_V3_Groups32_NoPad)
 {
     ASSERT_TRUE((RunFprop<1>(2, 64, 64, 32, 4, 4, 3, 3, 0, 0)));
 }
