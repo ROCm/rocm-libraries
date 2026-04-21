@@ -4,7 +4,7 @@
 #pragma once
 
 #include <flatbuffers/flatbuffers.h>
-#include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 
 #include <memory>
 #include <string>
@@ -21,8 +21,9 @@ struct GraphTest
     {
     }
 
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graphWrapper() const
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper() const
     {
-        return hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper(buffer->data(), buffer->size());
+        return hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(buffer->data(),
+                                                                          buffer->size());
     }
 };
