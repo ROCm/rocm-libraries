@@ -5,6 +5,13 @@
 
 namespace ck_tile::direct_conv {
 
+enum class SwizzleType
+{
+    None,   // No swizzling; direct mapping from global to LDS to registers.
+    CyclicShift, // Swizzling using cyclic-shift modular addition (SwizzleT).
+    XOR      // Swizzling using XOR (SwizzleXOR).
+};
+
 enum class Version
 {
     v1, // Default kernel version that uses either SwizzleT or SwizzleXOR but only primitve CK Tile abstractions.

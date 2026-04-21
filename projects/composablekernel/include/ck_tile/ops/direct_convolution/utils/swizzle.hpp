@@ -8,13 +8,6 @@
 namespace ck_tile::direct_conv
 {
 
-enum class SwizzleType
-{
-    None,   // No swizzling; direct mapping from global to LDS to registers.
-    CyclicShift, // Swizzling using cyclic-shift modular addition (SwizzleT).
-    XOR      // Swizzling using XOR (SwizzleXOR).
-};
-
 // LDS swizzle for global -> LDS -> MFMA register mapping.
 //
 // Global memory tensor is NHWC with 16-bit elements.

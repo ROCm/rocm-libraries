@@ -4,14 +4,12 @@
 #pragma once
 
 #include "ck_tile/ops/direct_convolution/utils/matrix_layout.hpp"
-#include "ck_tile/ops/direct_convolution/utils/types.hpp"
-#include "ck_tile/ops/direct_convolution/utils/mathutil.hpp"
+#include "ck_tile/ops/direct_convolution/utils/transpose_lds_layout.hpp"
+#include "ck_tile/ops/direct_convolution/utils/detail.hpp"
+#include "ck_tile/ops/direct_convolution/utils/common.hpp"
 #include "ck_tile/ops/direct_convolution/utils/launch_params.hpp"
 #include "ck_tile/ops/direct_convolution/utils/kernel_variant.hpp"
-#include "ck_tile/ops/direct_convolution/utils/transpose_lds_layout.hpp"
 #include "ck_tile/ops/direct_convolution/utils/memory.hpp"
-#include "ck_tile/ops/direct_convolution/utils/detail.hpp"
-#include "ck_tile/ops/direct_convolution/utils/swizzle.hpp"
 #include "ck_tile/core/numeric/vector_type.hpp"
 #include "ck_tile/core/tensor/buffer_view.hpp"
 #include "ck_tile/core/tensor/tensor_view.hpp"
@@ -19,10 +17,9 @@
 #include "ck_tile/core/tensor/tile_window.hpp"
 #include "ck_tile/core/tensor/load_tile.hpp"
 #include "ck_tile/core/tensor/store_tile.hpp"
-#include "ck_tile/core/tensor/static_distributed_tensor.hpp"
+#include "ck_tile/core/numeric/math.hpp"
 #include <hip/hip_fp16.h>
 #include <hip/hip_runtime.h>
-#include <type_traits>
 #include <string>
 
 namespace ck_tile::direct_conv::grouped_4c_tile::v3
@@ -70,7 +67,7 @@ struct Config
 
     Direction direction = Direction::Fprop;
 
-    // Swizzle pattern - disabled for debugging.
+    // Swizzle pattern - currently no explicit swizzle.
     SwizzleType swizzle_type = SwizzleType::None;
 
     // Total number of waves.
@@ -127,10 +124,10 @@ inline LaunchParams get_launch_params(int config_idx, const Conv2dParams& par)
     // Compute the grid size.
     // For Dgrad the output is the input gradient (width = par.w, not par.q).
     const int out_q    = (cfg.direction == Direction::Dgrad) ? par.w : par.q;
-    auto blocks_w      = divup(out_q, cfg.block_q());
+    auto blocks_w      = ck_tile::integer_divide_ceil(out_q, cfg.block_q());
     auto blocks_w_n    = blocks_w * cfg.n_fold;
-    auto blocks_c      = divup(par.c_tot, cfg.block_c());
-    auto blocks_n_fold = divup(par.n, cfg.n_fold);
+    auto blocks_c      = ck_tile::integer_divide_ceil(par.c_tot, cfg.block_c());
+    auto blocks_n_fold = ck_tile::integer_divide_ceil(par.n, cfg.n_fold);
 
     LaunchParams launch;
     launch.grid       = dim3(blocks_w_n, blocks_c, blocks_n_fold);
@@ -177,7 +174,7 @@ struct TileConstants
     //
     // Logical layout: [BLOCK_W, BLOCK_C8] row-major (x = row, c8 = column)
     // Physical layout: plain row-major, offset = x * BLOCK_C8 + c8.
-    // No swizzle — debugging simplified layout.
+    // No swizzle — simplified layout.
     // -----------------------------------------------------------------------
     static constexpr auto MakeInputLdsBlockDescriptor()
     {
@@ -250,8 +247,6 @@ struct TileConstants
         return desc_padded;
     }
 
-    using Swizzle = SwizzleXOR<cfg.block_c()>;
-
     // -----------------------------------------------------------------------
     // Tile-level async load constants and descriptors.
     //
@@ -279,7 +274,7 @@ struct TileConstants
     // Row dimension allows advancing rows via move_tile_window({1, 0, 0, 0}).
     //
     // Base pointer: in + batch_offset + block_k  (shifted to tile's channel origin).
-    // No swizzle — plain row-major layout for debugging.
+    // No swizzle — plain row-major layout.
     static CK_TILE_DEVICE auto MakeInputDramDescriptor(int hi, int wi, int C_total, int px)
     {
         constexpr int right_pad_w = cfg.kw - 1;
@@ -798,7 +793,7 @@ struct OutputWriter
               auto lds_buf = OutputLdsBuf{
                   reinterpret_cast<_Float16*>(output_lds),
                   static_cast<ck_tile::index_t>(
-                      maximum(TC::WEIGHT_LDS_PADDED_UINT4, TC::OUTPUT_LDS_BUFFER_SIZE) *
+                      ck_tile::max(TC::WEIGHT_LDS_PADDED_UINT4, TC::OUTPUT_LDS_BUFFER_SIZE) *
                       (sizeof(uint4) / sizeof(_Float16)))};
               auto lds_view = OutputLdsView{lds_buf, lds_desc};
               return ck_tile::make_tile_window(
@@ -879,7 +874,7 @@ __device__ void conv2d_grouped_4c_fp16_cdna4_nhwc_impl(const _Float16* __restric
     // --- LDS buffers (padded to accommodate the full tile distribution span) ---
     // TODO: Optimize the LDS usage if occupancy get limited by the LDS usage.
     __shared__ uint4 input_lds[TC::NUM_INPUT_LDS_BUFFERS * TC::INPUT_LDS_BUFFER_SIZE_PADDED_C8];
-    __shared__ uint4 output_lds[maximum(TC::WEIGHT_LDS_PADDED_UINT4, TC::OUTPUT_LDS_BUFFER_SIZE)];
+    __shared__ uint4 output_lds[ck_tile::max(TC::WEIGHT_LDS_PADDED_UINT4, TC::OUTPUT_LDS_BUFFER_SIZE)];
 
     auto input_lds_fp16 =
         ck_tile::buffer_view<ck_tile::address_space_enum::lds, _Float16, ck_tile::index_t, true>{
@@ -892,7 +887,7 @@ __device__ void conv2d_grouped_4c_fp16_cdna4_nhwc_impl(const _Float16* __restric
         ck_tile::buffer_view<ck_tile::address_space_enum::lds, _Float16, ck_tile::index_t, true>{
             reinterpret_cast<_Float16*>(output_lds),
             static_cast<ck_tile::index_t>(
-                maximum(TC::WEIGHT_LDS_PADDED_UINT4, TC::OUTPUT_LDS_BUFFER_SIZE) *
+                ck_tile::max(TC::WEIGHT_LDS_PADDED_UINT4, TC::OUTPUT_LDS_BUFFER_SIZE) *
                 (sizeof(uint4) / sizeof(_Float16)))};
 
     // --- Coordinate setup ---
@@ -910,7 +905,7 @@ __device__ void conv2d_grouped_4c_fp16_cdna4_nhwc_impl(const _Float16* __restric
     // Wait for weight loads to complete before reading from LDS.
     wait_vmcnt<0>();
     __syncthreads();
-    
+
     // We can use the output LDS storage for loading the weights as we don't yet compute any output.
     // The output LDS is guaranteed to have sufficient space.
     WeightLoader<cfg>::read_from_lds(weights_reg, tm, output_lds_fp16);
