@@ -11,10 +11,10 @@ set(CMAKE_TOOLCHAIN_FILE "${CMAKE_SOURCE_DIR}/cmake/ClangToolChain.cmake"
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 # Include version utilities (must be before project() call)
-include(${CMAKE_CURRENT_LIST_DIR}/cmake/VersionUtils.cmake)
+include(${CMAKE_CURRENT_LIST_DIR}/../cmake/VersionUtils.cmake)
 
 # Version handling
-miopen_provider_setup_version(miopen_provider)
+dnn_provider_setup_version(miopen_provider ${CMAKE_CURRENT_LIST_DIR})
 
 # Set project with version
 project(miopen-provider VERSION ${MIOPEN_PROVIDER_VERSION} LANGUAGES CXX)
@@ -213,7 +213,7 @@ set_target_properties(miopen_plugin PROPERTIES
     THEROCK_INSTALL_RPATH_ORIGIN "lib/hipdnn_plugins/engines")
 
 # Generate version header
-miopen_provider_generate_version_header(miopen_provider miopen_plugin_impl)
+dnn_provider_generate_version_header(miopen_provider miopen_plugin_impl ${CMAKE_CURRENT_LIST_DIR})
 
 if(NOT MIOPENPROVIDER_SKIP_TESTS)
     add_subdirectory(tests)
