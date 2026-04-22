@@ -167,8 +167,7 @@ void SdpaFwdPlan::execute(const HipKernelHandle& /*handle*/,
 
     // Compute grid dimensions
     // From AITER: gdx = (S_q + ts_qo - 1) / ts_qo, where ts_qo = 256
-    constexpr unsigned int K_TS_QO = 256;
-    unsigned int gridDimX = (_params.seqLenQ + K_TS_QO - 1) / K_TS_QO;
+    unsigned int gridDimX = (_params.seqLenQ + _params.tileSizeQo - 1) / _params.tileSizeQo;
     unsigned int gridDimY = _params.numHeadsQ;
     unsigned int gridDimZ = _params.batchSize;
 

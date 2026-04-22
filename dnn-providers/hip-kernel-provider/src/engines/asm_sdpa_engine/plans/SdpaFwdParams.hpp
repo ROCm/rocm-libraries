@@ -52,6 +52,9 @@ struct SdpaFwdParams
     unsigned int oStrideHead;
     unsigned int oStrideBatch;
 
+    // Tile size
+    unsigned int tileSizeQo;
+
     // Attention scale
     float attnScale;
 };

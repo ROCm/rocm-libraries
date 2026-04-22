@@ -61,7 +61,8 @@ struct SdpaTestCase
 
 std::vector<SdpaTestCase> getSdpaTestCases()
 {
-    return {SdpaTestCase({4, 8, 256, 128}, {4, 8, 256, 128}, {4, 8, 256, 128})};
+    return {SdpaTestCase({4, 8, 256, 128}, {4, 8, 256, 128}, {4, 8, 256, 128}),
+            SdpaTestCase({4, 8, 256, 192}, {4, 8, 256, 192}, {4, 8, 256, 128})};
 }
 
 template <typename DataType>

@@ -36,7 +36,8 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableReturnsFalseForNonSdpaGraph)
     EXPECT_FALSE(_planBuilder.isApplicable(_handle, graphWrapper));
 }
 
-auto createSdpaFwdGraph(const std::vector<int64_t>& dims = {4, 8, 256, 128},
+auto createSdpaFwdGraph(const std::vector<int64_t>& qkDims = {4, 8, 256, 128},
+                        const std::vector<int64_t>& vDims = {4, 8, 256, 128},
                         hipdnn_flatbuffers_sdk::data_objects::DataType dataType
                         = hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
                         bool withAttnMask = false,
@@ -46,15 +47,16 @@ auto createSdpaFwdGraph(const std::vector<int64_t>& dims = {4, 8, 256, 128},
                         bool paddingMask = false,
                         bool causalMask = false)
 {
-    auto strides = hipdnn_data_sdk::utilities::generateStrides(dims);
-    return hipdnn_test_sdk::utilities::createValidSdpaFwdGraph(dims,
-                                                               strides,
-                                                               dims,
-                                                               strides,
-                                                               dims,
-                                                               strides,
-                                                               dims,
-                                                               strides,
+    auto qkStrides = hipdnn_data_sdk::utilities::generateStrides(qkDims);
+    auto vStrides = hipdnn_data_sdk::utilities::generateStrides(vDims);
+    return hipdnn_test_sdk::utilities::createValidSdpaFwdGraph(qkDims,
+                                                               qkStrides,
+                                                               qkDims,
+                                                               qkStrides,
+                                                               vDims,
+                                                               vStrides,
+                                                               qkDims,
+                                                               qkStrides,
                                                                dataType,
                                                                withAttnMask,
                                                                withScale,
@@ -73,31 +75,46 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableSdpaVariations)
         GTEST_SKIP();
     }
 
-    std::vector<std::pair<GraphTest, bool>> applicabilityTests
-        = {{GraphTest{createSdpaFwdGraph(), "Valid test"}, true},
-           {GraphTest{createSdpaFwdGraph({4, 8, 256, 100}), "Final dimension not 128"}, false},
-           {GraphTest{createSdpaFwdGraph({4, 8, 256, 128}, DataType::HALF),
-                      "Half precision tensor data type"},
-            false},
-           {GraphTest{createSdpaFwdGraph({4, 8, 256, 128}, DataType::BFLOAT16, true),
-                      "attn_mask = true"},
-            false},
-           {GraphTest{createSdpaFwdGraph({4, 8, 256, 128}, DataType::BFLOAT16, false, true),
-                      "scale = true"},
-            true},
-           {GraphTest{
-                createSdpaFwdGraph({4, 8, 256, 128}, DataType::BFLOAT16, false, true, false, true),
-                "alibi_mask = true"},
-            false},
-           {GraphTest{createSdpaFwdGraph(
-                          {4, 8, 256, 128}, DataType::BFLOAT16, false, true, false, false, true),
-                      "padding_mask = true"},
-            false},
-           {GraphTest{
-                createSdpaFwdGraph(
-                    {4, 8, 256, 128}, DataType::BFLOAT16, false, true, false, false, false, true),
-                "causal_mask = true"},
-            false}};
+    std::vector<std::pair<GraphTest, bool>> applicabilityTests = {
+        {GraphTest{createSdpaFwdGraph(), "Valid test with q head dim 128"}, true},
+        {GraphTest{createSdpaFwdGraph({4, 8, 256, 192}), "Valid test with q head dim 192"}, true},
+        {GraphTest{createSdpaFwdGraph({4, 8, 256, 100}), "Final dimension not 128"}, false},
+        {GraphTest{createSdpaFwdGraph({4, 8, 256, 128}, {4, 8, 256, 128}, DataType::HALF),
+                   "Half precision tensor data type"},
+         false},
+        {GraphTest{createSdpaFwdGraph({4, 8, 256, 128}, {4, 8, 256, 128}, DataType::BFLOAT16, true),
+                   "attn_mask = true"},
+         false},
+        {GraphTest{createSdpaFwdGraph(
+                       {4, 8, 256, 128}, {4, 8, 256, 128}, DataType::BFLOAT16, false, true),
+                   "scale = true"},
+         true},
+        {GraphTest{
+             createSdpaFwdGraph(
+                 {4, 8, 256, 128}, {4, 8, 256, 128}, DataType::BFLOAT16, false, true, false, true),
+             "alibi_mask = true"},
+         false},
+        {GraphTest{createSdpaFwdGraph({4, 8, 256, 128},
+                                      {4, 8, 256, 128},
+                                      DataType::BFLOAT16,
+                                      false,
+                                      true,
+                                      false,
+                                      false,
+                                      true),
+                   "padding_mask = true"},
+         false},
+        {GraphTest{createSdpaFwdGraph({4, 8, 256, 128},
+                                      {4, 8, 256, 128},
+                                      DataType::BFLOAT16,
+                                      false,
+                                      true,
+                                      false,
+                                      false,
+                                      false,
+                                      true),
+                   "causal_mask = true"},
+         false}};
 
     for(const auto& [test, applicability] : applicabilityTests)
     {

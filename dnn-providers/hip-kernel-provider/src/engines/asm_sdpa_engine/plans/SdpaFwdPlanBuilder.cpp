@@ -214,10 +214,15 @@ bool SdpaFwdPlanBuilder::isApplicable(
     HIP_KERNEL_RETURN_FALSE_IF(
         qTensor->dims()->size() != 4,
         "q tensor must be rank 4 (Actual rank: " + std::to_string(qTensor->dims()->size()) + ")");
-
     HIP_KERNEL_RETURN_FALSE_IF(
         vTensor->dims()->size() != 4,
         "v tensor must be rank 4 (Actual rank: " + std::to_string(vTensor->dims()->size()) + ")");
+    HIP_KERNEL_RETURN_FALSE_IF(
+        kTensor->dims()->size() != 4,
+        "k tensor must be rank 4 (Actual rank: " + std::to_string(kTensor->dims()->size()) + ")");
+    HIP_KERNEL_RETURN_FALSE_IF(
+        oTensor->dims()->size() != 4,
+        "o tensor must be rank 4 (Actual rank: " + std::to_string(oTensor->dims()->size()) + ")");
 
     HIP_KERNEL_RETURN_FALSE_IF(
         qTensor->data_type() != kTensor->data_type() || qTensor->data_type() != vTensor->data_type()
@@ -225,6 +230,12 @@ bool SdpaFwdPlanBuilder::isApplicable(
         "Input tensors must all share a type (q tensor: " + EnumNameDataType(qTensor->data_type())
             + ", k tensor: " + EnumNameDataType(kTensor->data_type())
             + ", v tensor: " + EnumNameDataType(vTensor->data_type()) + ")");
+
+    HIP_KERNEL_RETURN_FALSE_IF(
+        kTensor->dims()->Get(1) != vTensor->dims()->Get(1),
+        "k tensor and v tensor must shared the same head count (Actual value: k = "
+            + std::to_string(kTensor->dims()->Get(1))
+            + " v = " + std::to_string(vTensor->dims()->Get(1)) + ")");
 
     auto dataTypeId = getDataTypeIdentifier(
         qTensor->data_type(), kTensor->data_type(), vTensor->data_type(), oTensor->data_type());
@@ -398,6 +409,8 @@ void SdpaFwdPlanBuilder::buildPlan(
         HIPDNN_PLUGIN_LOG_ERROR("Failed to find matching kernel with error:" << e.what());
         return;
     }
+
+    params.tileSizeQo = static_cast<unsigned int>(config.ts_qo);
 
     std::string deviceString;
     int multiProcessorCount;
