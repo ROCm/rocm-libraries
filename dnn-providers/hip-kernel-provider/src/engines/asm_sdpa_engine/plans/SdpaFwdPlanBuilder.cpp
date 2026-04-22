@@ -60,7 +60,7 @@ enum RoundingMode : int
 
 RoundingMode getRoundingMode(const hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes& /*attrs*/)
 {
-    // TODO Find out if we can specify this in the graph
+    // TODO Cannot be specified in the graph, this will require specialized handling
     return RoundingMode::RTNE;
 }
 
@@ -287,10 +287,6 @@ void SdpaFwdPlanBuilder::buildPlan(
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& /* engineConfig */,
     HipKernelContext& executionContext) const
 {
-    // Load kernel module
-    // std::string coPath
-    //     = asm_kernels::getAsmKernelPath("gfx942/fmha_v3_fwd/MI300/fwd_hd128_bf16_rtne.co");
-
     // Extract SDPA attributes and tensor metadata
     auto& sdpaNode = opGraph.getNodeWrapper(0);
     auto& sdpaAttrs = sdpaNode.attributesAs<hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes>();
@@ -425,6 +421,7 @@ void SdpaFwdPlanBuilder::buildPlan(
         HIPDNN_PLUGIN_LOG_ERROR("Failed to query device properties with error: " << e.what());
     }
 
+    // Load kernel module
     auto coPath = getKernelCoPath(config.co_name, deviceString, multiProcessorCount);
 
     HIPDNN_PLUGIN_LOG_INFO("Using kernel with path: " << coPath);
