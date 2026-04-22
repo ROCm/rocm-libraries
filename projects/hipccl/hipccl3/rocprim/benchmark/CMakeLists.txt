@@ -119,7 +119,11 @@ function(add_rocprim_benchmark BENCHMARK_SOURCE)
       hip::device)
   endif()
 
-  target_link_libraries(${BENCHMARK_TARGET} PRIVATE amd_smi)
+  if(WIN32)
+    target_compile_definitions(${BENCHMARK_TARGET} PUBLIC PRIMBENCH_NO_MONITORING)
+  else()
+    target_link_libraries(${BENCHMARK_TARGET} PRIVATE amd_smi)
+  endif()
 
   target_compile_options(${BENCHMARK_TARGET}
     PRIVATE

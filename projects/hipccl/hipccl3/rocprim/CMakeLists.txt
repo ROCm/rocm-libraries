@@ -90,10 +90,6 @@ if(BUILD_OFFLOAD_COMPRESS)
   endif()
 endif()
 
-if(WIN32 AND (BUILD_BENCHMARK OR BUILD_NAIVE_BENCHMARK))
-  message(FATAL_ERROR "rocPRIM benchmarks are not currently supported on Windows.")
-endif()
-
 if (CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
   set(ROCPRIM_PROJECT_IS_TOP_LEVEL TRUE)
 else()
