@@ -174,7 +174,19 @@ void getrs_npvt_initData(const rocblas_handle handle,
             }
         }
 
-        // do the LU decomposition of matrix A w/ the reference LAPACK routine
+        // ------------------------------------------------------------------------------
+        // Perform the LU decomposition of matrix A using the reference LAPACK routine.
+        //
+        // NOTE: LAPACK GETRF computes LU factorization with row pivoting to produce
+        // P * A = L * U, where the permutation matrix P is encoded in the ipivot vector
+        //
+        // Let matrix B = P * A, then we have
+        // B = L * U is the LU factorization of matrix B without pivoting
+        //
+        // Thus we can use GETRF to perform LU factorization then discard the  pivot sequence.
+        // It is as if we are generating matrix B, instead of the original matrix A.
+        //
+        // ------------------------------------------------------------------------------
         for(I b = 0; b < bc; ++b)
         {
             int info = 0;
@@ -218,7 +230,7 @@ void getrs_npvt_getError(const rocblas_handle handle,
                                              dB.data(), ldb, stB, bc));
     CHECK_HIP_ERROR(hBRes.transfer_from(dB));
 
-    // CPU lapack
+    // CPU LAPACK
     for(I b = 0; b < bc; ++b)
     {
         cpu_getrs_npvt(trans, n, nrhs, hA[b], lda, hB[b], ldb);
