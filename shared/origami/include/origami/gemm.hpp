@@ -126,6 +126,22 @@ double calculate_output_utilization(const problem_t& problem,
 size_t round_elements_to_128B(size_t elements, size_t element_size_bits);
 
 /**
+ * @brief Generic variant of `round_elements_to_128B` that rounds up to the
+ *        smallest value whose total size is an exact multiple of the supplied
+ *        number of transaction bytes.  A 64-byte alignment better matches the
+ *        natural coalesced load width (half cache line) and avoids inflating
+ *        the cost of sub-128B operands such as bf16 with DepthU=32.
+ *
+ * @param elements          Dimension whose natural stride we are rounding.
+ * @param element_size_bits Element width in bits.
+ * @param transaction_bytes Transaction/alignment size in bytes.
+ * @return size_t
+ */
+size_t round_elements_to_NB(size_t elements,
+                            size_t element_size_bits,
+                            size_t transaction_bytes);
+
+/**
  * @brief Fast WGM prediction based on last-XCD L2 working set minimization.
  *
  * Evaluates a small set of WGM candidates and picks the one that minimizes

@@ -66,9 +66,18 @@ struct heuristic_defaults_t {
   static constexpr double L2_AMP_CEILING_SKINNY            = 0.6;
   static constexpr double L2_DEPTH_PENALTY                 = 0.9;
   static constexpr double L1_HIT_RATE_CEILING_SKINNY       = 0.7;
-  static constexpr double EPILOGUE_CYCLES_PER_ACC_READ     = 8.0;
+  static constexpr double EPILOGUE_CYCLES_PER_ACC_READ     = 1.0;
   static constexpr double EPILOGUE_ACC_READ_PARALLELISM    = 0.9;
-  static constexpr double EPILOGUE_CYCLES_PER_BOUNDS_CHECK = 6.0;
+  // Each scalar-store wave-iter executes a short pipelined sequence of
+  // 4-5 instructions: v_cmp_lt bounds check, s_and_saveexec mask, the
+  // buffer_store itself, and s_mov_b64 exec restore (plus sometimes a
+  // v_cndmask for the bias path).  At 1 cycle/issue throughput these
+  // amortize to ~5 cycles per scalar wave-iter on gfx950.  Previously
+  // reduced to 1.0 under-predicted edge-tile epilogues for large
+  // scalar-path tiles (e.g. M=160 MT_M>=192 on large-N bf16 problems),
+  // which combined with the K-alignment change to pick MI32x32 NTD4
+  // kernels that are ~2x slower in HW.
+  static constexpr double EPILOGUE_CYCLES_PER_BOUNDS_CHECK = 5.0;
   static constexpr double EPILOGUE_SCALAR_STORE_PENALTY    = 1.1;
   static constexpr size_t EPILOGUE_THREADS_PER_WAVE        = 64;
   static constexpr size_t EPILOGUE_BYTES_PER_VECTORIZED_STORE = 16;  // buffer_store_dwordx4
@@ -106,6 +115,69 @@ struct heuristic_defaults_t {
   // Penalty per split factor (cycles).  0 = no penalty (non-split case).
   static constexpr double NTD_KSPLIT_PENALTY = 5000.0;
 
+  // Cached-D (cache_hints_d < 4) L2 pollution of the input working set.
+  // Fires only when ALL THREE conditions hold:
+  //   (A) D output overflows L2 capacity, AND
+  //   (B) per-tile input working set (k_iters x Ld_CU_bytes) exceeds the
+  //       CU's fair L2 share, AND
+  //   (C) the global working set (A + B + D) fits in MALL (last-level
+  //       cache) so that cached D writes actually evict something that
+  //       would otherwise be served from MALL.  When (A+B+D) >> MALL,
+  //       inputs are streaming from HBM regardless and NTD0 vs NTD4
+  //       behave identically at steady state -- no penalty applies.
+  // Physically captures:
+  //   * Small K / tiny tiles -> input WS fits in L2 -> cached D writes
+  //     coexist with A+B, no eviction, no penalty.
+  //   * Medium footprint (A+B+D <= MALL) with large K -> input loops
+  //     thrash L2 and reuse through MALL; cached D evicts MALL-cached
+  //     inputs -> penalty applies.
+  //   * Large footprint (A+B+D >> MALL) -> MALL already cold for inputs;
+  //     cached D neither hurts nor helps -> penalty attenuated to zero.
+  // Multiplier on L_mem_dram:
+  //   (1 + D_POLLUTION_PENALTY * d_overflow * input_overflow * mall_fit),
+  // where mall_fit fades linearly from 1.0 (at WS = MALL) to 0.0 past
+  // the fade point (default 1.5*MALL, controlled by
+  // MALL_OVERFLOW_FADE_SLOPE).  The linear, narrow transition matches
+  // the observed HW behavior: borderline overflows (WS just over MALL)
+  // already lose all benefit of cached writes because some of A/B must
+  // stream from HBM, so NTD0 and NTD4 converge quickly.
+  static constexpr double D_POLLUTION_PENALTY = 1.0;
+
+  // Cached-D (cache_hints_d < 4) write-allocate penalty in the epilogue.
+  // On GPUs with write-allocate L2, a cached store that misses L2 must
+  // first fetch the cache line from HBM, modify, and eventually write
+  // back -- effectively doubling HBM traffic for large outputs.
+  // NT writes (cache_hints_d >= 4) bypass this entirely.
+  // Applied to effective epilogue store bandwidth:
+  //   effective_store_bw =
+  //       store_bw / (1 + D_WRITEALLOC_FACTOR * intensity * mall_fit)
+  // when D overflows L2.  When D fits in L2, cached writes hit L2
+  // bandwidth (mem1) instead, which is typically 2-3x HBM -- modeled by
+  // switching the bandwidth tier, not by this factor.  The mall_fit
+  // factor (linear fade-out, see D_POLLUTION_PENALTY and
+  // MALL_OVERFLOW_FADE_SLOPE) attenuates the penalty when the GEMM's
+  // total footprint exceeds MALL, since there is no input reuse to
+  // protect.
+  static constexpr double D_WRITEALLOC_FACTOR = 1.0;
+
+  // Approximate MALL (Infinity Cache / last-level cache) capacity in
+  // bytes for archs that carry a MALL stage (gfx942/gfx950 = 256 MiB).
+  // Used only as a gate by the cached-D pollution penalty above -- it
+  // does not affect the existing H_mem_mall_* hit-rate estimation.
+  // Archs without MALL should not trigger the cached-D gate anyway since
+  // hardware.has_MALL() governs the MALL stage in the latency model.
+  static constexpr size_t MALL_CAPACITY_BYTES = 256u * 1024u * 1024u;
+
+  // Slope of the mall_fit linear fade-out past MALL capacity.
+  // mall_fit = clamp(1 + slope * (1 - WS/MALL), 0, 1).
+  // With slope = 2.0:  mall_fit = 1 at WS <= MALL, 0.5 at WS=1.25*MALL,
+  // 0 at WS >= 1.5*MALL.  A larger slope means the penalty disappears
+  // faster past the fit boundary.  Empirically tuned so borderline
+  // cases (WS just above MALL, where inputs are streaming from HBM)
+  // do not incur a penalty despite the global D footprint overflowing
+  // L2.
+  static constexpr double MALL_OVERFLOW_FADE_SLOPE = 2.0;
+
   // --- LDS Occupancy ---
   // Per additional workgroup that can co-reside on a CU (beyond the first),
   // effective timestep count is multiplied by this factor.
@@ -133,6 +205,74 @@ struct heuristic_defaults_t {
   // Covers WG dispatch, pipeline setup, address generation, and barriers.
   // Compresses the cost ratio between large and small tiles.
   static constexpr double TILE_FIXED_OVERHEAD = 1500.0;
+
+  // --- DepthU Waste (tail-only kernels) ---
+  // When k_iters==0 the full MT_K LDS allocation and register footprint are
+  // paid but only tail_k < MT_K is actually used.  Larger MT_K means more
+  // wasted LDS, higher register pressure, and heavier setup for zero benefit.
+  // Penalty = DU_WASTE_OVERHEAD * (MT_K / tail_k).
+  static constexpr double DU_WASTE_OVERHEAD = 500.0;
+
+  // --- VGPR Pressure / ACC Occupancy ---
+  // Larger MFMA tiles (especially MI32x32) allocate the full output
+  // accumulator tile as persistent ACC VGPRs for the entire K-loop.
+  // On gfx950 each SIMD has 512 ACC VGPRs; output tiles whose per-thread
+  // ACC footprint (MT_M * MT_N / wave_threads) exceeds this budget lose
+  // wave-level latency hiding because at most 1 wave can fit per SIMD.
+  // Physically this shows up as (a) unmasked mem-load latency in the
+  // main loop and (b) ACC spill/restore overhead in the epilogue.  The
+  // penalty is smooth, bounded, and fires only when the per-thread ACC
+  // footprint approaches or exceeds the budget (relative to a target
+  // of 2 waves/SIMD for good latency hiding).
+  // Multiplier on L_tile_total:
+  //   (1 + VGPR_PRESSURE_PENALTY * max(0, 2 - acc_waves_per_simd)).
+  // With budget 512 and strength 0.2, a MT192x256 MI32 tile
+  // (acc_per_thread=768, acc_waves=0.67) incurs ~27% penalty, while
+  // a MT160x192 MI16 tile (acc_per_thread=480, acc_waves=1.07) only
+  // ~19% and MT80x256 (acc_per_thread=320, acc_waves=1.6) only ~8%.
+  static constexpr double VGPR_PRESSURE_PENALTY = 0.2;
+  static constexpr double ACC_VGPR_BUDGET_PER_SIMD = 512.0;
+  static constexpr double ACC_WAVES_TARGET = 2.0;
+
+  // --- MFMA Pipeline Hazard (DepthU too shallow for back-to-back MI reuse) ---
+  // When MT_K <= MI_K each main-loop iteration contains exactly one (or fewer)
+  // MI K-fold, so there is no opportunity to issue back-to-back MFMAs within
+  // the iteration.  Every iteration restarts the MFMA pipeline, paying a
+  // fixed bubble at iteration boundaries (typically ~dep_latency MFMA cycles
+  // waiting on LDS + reg alloc).  On gfx950 MI16x16x32_bf16 (MI_K=32) this
+  // manifests as a ~20-25% slowdown at MT_K=32 relative to MT_K=64, holding
+  // all other tile dimensions constant.
+  // Multiplier on L_mainloop:
+  //   (1 + MI_PIPELINE_HAZARD_PENALTY * max(0, 2 - MT_K/MI_K)).
+  // Smooth, bounded, and zero once MT_K/MI_K >= 2 (the first back-to-back
+  // reuse opportunity kicks in).
+  static constexpr double MI_PIPELINE_HAZARD_PENALTY = 0.15;
+
+  // --- Spatial Waste ---
+  // Additive per-tile penalty (cycles per wasted output element) when the
+  // tile grid over-allocates in M or N.  Covers predicated-load overhead,
+  // MFMA waste, cache pollution from shifted-pointer reads, and imperfect
+  // overlap of wasted work.  Scales naturally with tile area so large tiles
+  // get a big penalty and small tiles almost none.
+  static constexpr double SPATIAL_WASTE_WEIGHT = 1.0;
+
+  // --- Effective Tile Under-Utilization Penalty Strength ---
+  // Softens the 1/utilization multiplier on L_tile_total.  The raw 1/util
+  // formula assumes every wasted launched element costs as much as a useful
+  // one, but HW pipelines and buffers hide a large fraction of the waste
+  // (predicated loads, MFMA bubbles, and edge-masked stores overlap with
+  // the surrounding useful work).  Empirically, on M=160 N-heavy problems,
+  // MT192x160 / MT160x96 / MT64x160 kernels (util 0.66-0.83) are over-
+  // predicted by +15-30% with alpha=1.0; dropping to alpha=0.5 roughly
+  // halves the over-charge while leaving perfect-fit (util=1.0) kernels
+  // untouched and still penalizing extreme dilution (util<<1) meaningfully.
+  //
+  //   effective_tile_penalty = 1 + alpha * (1/util - 1)
+  //     util=1.00  -> 1.00   (no change)
+  //     util=0.83  -> 1.10   (was 1.20 at alpha=1.0)
+  //     util=0.66  -> 1.25   (was 1.50)
+  //     util=0.50  -> 1.50   (was 2.00)
+  static constexpr double TILE_PENALTY_ALPHA = 0.5;
 };
 
 /**
@@ -193,11 +333,22 @@ struct heuristic_params_t {
   double prologue_setup_fraction  = heuristic_defaults_t::PROLOGUE_SETUP_FRACTION;
   double lsu_reduction_overhead = heuristic_defaults_t::LSU_REDUCTION_OVERHEAD;
   double ntd_ksplit_penalty     = heuristic_defaults_t::NTD_KSPLIT_PENALTY;
+  double d_pollution_penalty    = heuristic_defaults_t::D_POLLUTION_PENALTY;
+  double d_writealloc_factor    = heuristic_defaults_t::D_WRITEALLOC_FACTOR;
+  size_t mall_capacity_bytes    = heuristic_defaults_t::MALL_CAPACITY_BYTES;
+  double mall_overflow_fade_slope = heuristic_defaults_t::MALL_OVERFLOW_FADE_SLOPE;
   double occ_timestep_benefit    = heuristic_defaults_t::OCC_TIMESTEP_BENEFIT;
   double one_lds_buffer_overhead   = heuristic_defaults_t::ONE_LDS_BUFFER_OVERHEAD;
   double pack_transpose_overhead   = heuristic_defaults_t::PACK_TRANSPOSE_OVERHEAD;
   double tail_loop_overhead        = heuristic_defaults_t::TAIL_LOOP_OVERHEAD;
   double tile_fixed_overhead     = heuristic_defaults_t::TILE_FIXED_OVERHEAD;
+  double du_waste_overhead       = heuristic_defaults_t::DU_WASTE_OVERHEAD;
+  double spatial_waste_weight    = heuristic_defaults_t::SPATIAL_WASTE_WEIGHT;
+  double mi_pipeline_hazard_penalty = heuristic_defaults_t::MI_PIPELINE_HAZARD_PENALTY;
+  double vgpr_pressure_penalty       = heuristic_defaults_t::VGPR_PRESSURE_PENALTY;
+  double acc_vgpr_budget_per_simd    = heuristic_defaults_t::ACC_VGPR_BUDGET_PER_SIMD;
+  double acc_waves_target            = heuristic_defaults_t::ACC_WAVES_TARGET;
+  double tile_penalty_alpha          = heuristic_defaults_t::TILE_PENALTY_ALPHA;
 
   /**
    * @brief Merge this parameter set with another (for hierarchical lookup).

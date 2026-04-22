@@ -62,11 +62,22 @@ void heuristic_params_t::merge_with(const heuristic_params_t& other) {
   prologue_setup_fraction              = other.prologue_setup_fraction;
   lsu_reduction_overhead              = other.lsu_reduction_overhead;
   ntd_ksplit_penalty                  = other.ntd_ksplit_penalty;
+  d_pollution_penalty                 = other.d_pollution_penalty;
+  d_writealloc_factor                 = other.d_writealloc_factor;
+  mall_capacity_bytes                 = other.mall_capacity_bytes;
+  mall_overflow_fade_slope            = other.mall_overflow_fade_slope;
   occ_timestep_benefit                = other.occ_timestep_benefit;
   one_lds_buffer_overhead             = other.one_lds_buffer_overhead;
   pack_transpose_overhead             = other.pack_transpose_overhead;
   tail_loop_overhead                  = other.tail_loop_overhead;
   tile_fixed_overhead                 = other.tile_fixed_overhead;
+  du_waste_overhead                   = other.du_waste_overhead;
+  spatial_waste_weight                = other.spatial_waste_weight;
+  mi_pipeline_hazard_penalty          = other.mi_pipeline_hazard_penalty;
+  vgpr_pressure_penalty               = other.vgpr_pressure_penalty;
+  acc_vgpr_budget_per_simd            = other.acc_vgpr_budget_per_simd;
+  acc_waves_target                    = other.acc_waves_target;
+  tile_penalty_alpha                  = other.tile_penalty_alpha;
 
   // Main loop efficiency
   main_loop_efficiency = other.main_loop_efficiency;
