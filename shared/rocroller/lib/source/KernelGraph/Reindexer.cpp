@@ -135,8 +135,8 @@ namespace rocRoller
 
             void visitOperation(KernelGraph& graph, int tag, ConditionalOp const& op)
             {
-                auto newOp
-                    = ConditionalOp{reindexExpression(op.condition, m_reindexer), op.conditionName};
+                auto newOp = ConditionalOp{
+                    reindexExpression(op.condition, m_reindexer), op.mode, op.conditionName};
                 graph.control.setElement(tag, newOp);
             }
 

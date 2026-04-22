@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -383,4 +383,180 @@ catch(...)
 {
     return hipsolver::exception2hip_status();
 }
+
+/******************** SYEVD ********************/
+hipsolverStatus_t hipsolverDnXsyevd_bufferSize(hipsolverDnHandle_t handle,
+                                               hipsolverDnParams_t params,
+                                               hipsolverEigMode_t  jobz,
+                                               hipsolverFillMode_t uplo,
+                                               int64_t             n,
+                                               hipDataType         dataTypeA,
+                                               const void*         A,
+                                               int64_t             lda,
+                                               hipDataType         dataTypeW,
+                                               const void*         W,
+                                               hipDataType         computeType,
+                                               size_t*             lworkOnDevice,
+                                               size_t*             lworkOnHost)
+try
+{
+    if(!handle)
+        return HIPSOLVER_STATUS_NOT_INITIALIZED;
+    if(!params)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+
+    return hipsolver::cuda2hip_status(cusolverDnXsyevd_bufferSize((cusolverDnHandle_t)handle,
+                                                                  (cusolverDnParams_t)params,
+                                                                  hipsolver::hip2cuda_evect(jobz),
+                                                                  hipsolver::hip2cuda_fill(uplo),
+                                                                  n,
+                                                                  dataTypeA,
+                                                                  A,
+                                                                  lda,
+                                                                  dataTypeW,
+                                                                  W,
+                                                                  computeType,
+                                                                  lworkOnDevice,
+                                                                  lworkOnHost));
+}
+catch(...)
+{
+    return hipsolver::exception2hip_status();
+}
+
+hipsolverStatus_t hipsolverDnXsyevd(hipsolverDnHandle_t handle,
+                                    hipsolverDnParams_t params,
+                                    hipsolverEigMode_t  jobz,
+                                    hipsolverFillMode_t uplo,
+                                    int64_t             n,
+                                    hipDataType         dataTypeA,
+                                    void*               A,
+                                    int64_t             lda,
+                                    hipDataType         dataTypeW,
+                                    void*               W,
+                                    hipDataType         computeType,
+                                    void*               workOnDevice,
+                                    size_t              lworkOnDevice,
+                                    void*               workOnHost,
+                                    size_t              lworkOnHost,
+                                    int*                devInfo)
+try
+{
+    if(!handle)
+        return HIPSOLVER_STATUS_NOT_INITIALIZED;
+    if(!params)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+
+    return hipsolver::cuda2hip_status(cusolverDnXsyevd((cusolverDnHandle_t)handle,
+                                                       (cusolverDnParams_t)params,
+                                                       hipsolver::hip2cuda_evect(jobz),
+                                                       hipsolver::hip2cuda_fill(uplo),
+                                                       n,
+                                                       dataTypeA,
+                                                       A,
+                                                       lda,
+                                                       dataTypeW,
+                                                       W,
+                                                       computeType,
+                                                       workOnDevice,
+                                                       lworkOnDevice,
+                                                       workOnHost,
+                                                       lworkOnHost,
+                                                       devInfo));
+}
+catch(...)
+{
+    return hipsolver::exception2hip_status();
+}
+
+/******************** SYEV_BATCHED ********************/
+hipsolverStatus_t hipsolverDnXsyevBatched_bufferSize(hipsolverDnHandle_t handle,
+                                                     hipsolverDnParams_t params,
+                                                     hipsolverEigMode_t  jobz,
+                                                     hipsolverFillMode_t uplo,
+                                                     int64_t             n,
+                                                     hipDataType         dataTypeA,
+                                                     const void*         A,
+                                                     int64_t             lda,
+                                                     hipDataType         dataTypeW,
+                                                     const void*         W,
+                                                     hipDataType         computeType,
+                                                     size_t*             lworkOnDevice,
+                                                     size_t*             lworkOnHost,
+                                                     int64_t             batchSize)
+try
+{
+    if(!handle)
+        return HIPSOLVER_STATUS_NOT_INITIALIZED;
+    if(!params)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+
+    return hipsolver::cuda2hip_status(
+        cusolverDnXsyevBatched_bufferSize((cusolverDnHandle_t)handle,
+                                          (cusolverDnParams_t)params,
+                                          hipsolver::hip2cuda_evect(jobz),
+                                          hipsolver::hip2cuda_fill(uplo),
+                                          n,
+                                          dataTypeA,
+                                          A,
+                                          lda,
+                                          dataTypeW,
+                                          W,
+                                          computeType,
+                                          lworkOnDevice,
+                                          lworkOnHost,
+                                          batchSize));
+}
+catch(...)
+{
+    return hipsolver::exception2hip_status();
+}
+
+hipsolverStatus_t hipsolverDnXsyevBatched(hipsolverDnHandle_t handle,
+                                          hipsolverDnParams_t params,
+                                          hipsolverEigMode_t  jobz,
+                                          hipsolverFillMode_t uplo,
+                                          int64_t             n,
+                                          hipDataType         dataTypeA,
+                                          void*               A,
+                                          int64_t             lda,
+                                          hipDataType         dataTypeW,
+                                          void*               W,
+                                          hipDataType         computeType,
+                                          void*               workOnDevice,
+                                          size_t              lworkOnDevice,
+                                          void*               workOnHost,
+                                          size_t              lworkOnHost,
+                                          int*                devInfo,
+                                          int64_t             batchSize)
+try
+{
+    if(!handle)
+        return HIPSOLVER_STATUS_NOT_INITIALIZED;
+    if(!params)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+
+    return hipsolver::cuda2hip_status(cusolverDnXsyevBatched((cusolverDnHandle_t)handle,
+                                                             (cusolverDnParams_t)params,
+                                                             hipsolver::hip2cuda_evect(jobz),
+                                                             hipsolver::hip2cuda_fill(uplo),
+                                                             n,
+                                                             dataTypeA,
+                                                             A,
+                                                             lda,
+                                                             dataTypeW,
+                                                             W,
+                                                             computeType,
+                                                             workOnDevice,
+                                                             lworkOnDevice,
+                                                             workOnHost,
+                                                             lworkOnHost,
+                                                             devInfo,
+                                                             batchSize));
+}
+catch(...)
+{
+    return hipsolver::exception2hip_status();
+}
+
 } //extern C

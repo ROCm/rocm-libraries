@@ -587,7 +587,7 @@ struct PPFMKey : public FMKeyBase
         return true;
     }
 
-    rocfft_transform_type transform_type;
+    rocfft_transform_type transform_type{};
 };
 
 // Hash function for PPFMKey.

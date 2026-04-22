@@ -22,6 +22,7 @@
  * ************************************************************************ */
 #pragma once
 #include "code.hpp"
+#include <memory>
 
 namespace rocisa
 {
@@ -92,13 +93,11 @@ namespace rocisa
     void insertDelayAlu(std::shared_ptr<Module> module);
     void removeDuplicatedFunction(std::shared_ptr<Module> module);
     void compositeToInstruction(std::shared_ptr<Module>& module);
-    std::unordered_map<std::string, int>
-          getAssignmentDict(const std::shared_ptr<Module>& module); // Return value is std::move()d
+    void convertTextVariablesToRegisters(std::shared_ptr<Module> module);
     Graph buildGraph(
         std::shared_ptr<Module>               module,
         int                                   vgprMax,
-        int                                   sgprMax,
-        std::unordered_map<std::string, int>& assignmentDict); // Return value is std::move()d
+        int                                   sgprMax); // Return value is std::move()d
     void removeDuplicateAssignment(Graph& graph);
 
     int getCycles(std::shared_ptr<Module> module, int numWaves);

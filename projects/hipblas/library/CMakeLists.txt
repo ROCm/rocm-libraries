@@ -60,6 +60,13 @@ message( STATUS "*** Building hipBLAS commit: ${hipblas_VERSION_COMMIT_ID}" )
 # configure a header file to pass the CMake version settings to the source, and package the header files in the output archive
 configure_file( "${CMAKE_CURRENT_SOURCE_DIR}/include/hipblas-version.h.in" "${PROJECT_BINARY_DIR}/include/hipblas/hipblas-version.h" )
 
+# Configure Windows version resource file
+if(WIN32)
+  string(TIMESTAMP HIPBLAS_COPYRIGHT_YEAR "%Y")
+  configure_file( "${CMAKE_CURRENT_SOURCE_DIR}/src/version.rc.in"
+    "${PROJECT_BINARY_DIR}/version.rc" @ONLY )
+endif()
+
 # Copy Public Headers to Build Dir
 configure_file( "${CMAKE_CURRENT_SOURCE_DIR}/include/hipblas.h" "${PROJECT_BINARY_DIR}/include/hipblas/hipblas.h" COPYONLY)
 

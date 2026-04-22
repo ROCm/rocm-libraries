@@ -28,7 +28,7 @@ from rocisa.instruction import VAdd3U32, VCvtF32toF16, VLShiftRightB32, \
                             VCmpUF32, VCndMaskB32, VCvtPkF32toFP8, VCvtPkF32toBF8, \
                             VCmpClassF32, VOrB32, VPackF16toB32, \
                             VAndOrB32, VBfeU32, VLShiftLeftB16, SNop, VMed3F32, \
-                            VCvtPkF32toBF16, VAndB32, \
+                            VCvtPkF32toBF16, VCvtPkF32toF16, VAndB32, \
                             VMovB32, VLShiftLeftB32
 from rocisa.functions import VSaturateCastInt
 
@@ -45,6 +45,7 @@ class PackData_F16(PackData):
     kernel = {"ProblemType": {"ComputeDataType": DataType(DataTypeEnum.Float), "DestDataType": DataType(DataTypeEnum.Half)}}
     def __call__(self, gwvw, destIdx, elementSumIdx, tmpVgpr=None, inputPrefix="", prefixOffset=0):
         module = Module("PackData F16")
+        ti = rocIsa.getInstance()
         if gwvw == 1:
             formatVgpr = formatting(elementSumIdx, inputPrefix, prefixOffset)
             module.add(VCvtF32toF16(dst=vgpr(destIdx), src=vgpr(formatVgpr), comment="convert C to fp16"))
@@ -54,17 +55,25 @@ class PackData_F16(PackData):
         for vi in range(0, gwvw):
             sumIdxV = elementSumIdx + vi
             formatVgpr = formatting(sumIdxV, inputPrefix, prefixOffset)
+            formatVgpr_1 = formatting(sumIdxV - 1, inputPrefix, prefixOffset)
             if tmpVgpr:
                 tmpDst   = tmpVgpr + vi
                 tmpDst_1 = tmpVgpr + vi - 1
             else:
                 tmpDst   = formatVgpr
                 tmpDst_1 = formatting(sumIdxV-1, inputPrefix, prefixOffset)
-            module.add(VCvtF32toF16(dst=vgpr(tmpDst), src=vgpr(formatVgpr), comment="convert C to fp16"))
-            if vi%2 == 1:
-                d = destIdx + vi//2
-                module.add(VPackF16toB32(dst=vgpr(d), src0=vgpr(tmpDst_1), src1=vgpr(tmpDst), \
-                          comment="Pack with neighbor"))
+
+            if ti.getAsmCaps()["HasPkF16CVT"]:
+                # VCvtPkF32toF16: convert and pack a pair of elements by one instruction
+                if vi%2 == 1:
+                    d = destIdx + vi//2
+                    module.add(VCvtPkF32toF16(dst=vgpr(d), src0=vgpr(formatVgpr_1), src1=vgpr(formatVgpr), comment="convert C to fp16 and pack with neighbor"))
+            else:
+                module.add(VCvtF32toF16(dst=vgpr(tmpDst), src=vgpr(formatVgpr), comment="convert C to fp16"))
+                if vi%2 == 1:
+                    d = destIdx + vi//2
+                    module.add(VPackF16toB32(dst=vgpr(d), src0=vgpr(tmpDst_1), src1=vgpr(tmpDst), \
+                            comment="Pack with neighbor"))
         return module
 
 class PackData_BF16(PackData):
@@ -103,13 +112,10 @@ class PackData_BF16(PackData):
                 tmpDst_1 = formatting(sumIdxV-1, inputPrefix, prefixOffset)
 
             if ti.getAsmCaps()["HasBF16CVT"]:
-#                module.add(VCvtF32toBF16(dst=vgpr(tmpDst), src=vgpr(formatVgpr), comment="convert C to bf16"))
                 if vi%2 == 1:
                     d = destIdx + vi//2
                     module.add(VCvtPkF32toBF16(dst=vgpr(d), src0=vgpr(tmpDst_1), src1=vgpr(tmpDst), \
                                 comment="convert C to bf16 and Pack with neighbor"))
-#                    module.add(VAndOrB32(dst=vgpr(d), src0=vgpr(tmpDst), src1=vgpr(vgprBf16Mask), src2=vgpr(tmpDst_1), comment="pack two bf16 to dword"))
-
             else:
                 vgprBf16Temp = bf16CVTVgprStruct.vgprBf16Temp
                 vgprBf16Inc = bf16CVTVgprStruct.vgprBf16Inc

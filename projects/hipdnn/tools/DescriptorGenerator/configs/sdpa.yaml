@@ -517,35 +517,36 @@ operation:
 
   test_data:
     constants_include: "SdpaFwdConstants"
+    tensor_const_prefix: "K_SDPA_"
     tensor_uids:
-      q: 60
-      k: 61
-      v: 62
-      o: 63
-      attn_mask: 64
-      scale: 65
-      seq_len_q: 66
-      seq_len_kv: 67
-      seed: 68
-      offset: 69
-      dropout_mask: 70
-      dropout_scale: 71
-      page_table_k: 72
-      page_table_v: 73
-      block_mask: 74
-      sink_token: 75
-      descale_q: 76
-      descale_k: 77
-      descale_v: 78
-      descale_s: 79
-      scale_s: 80
-      scale_o: 81
-      stats: 82
-      max_output: 83
-      sum_exp: 84
-      rng_dump: 85
-      amax_s: 86
-      amax_o: 87
+      q: 1800
+      k: 1801
+      v: 1802
+      o: 1803
+      attn_mask: 1804
+      scale: 1805
+      seq_len_q: 1806
+      seq_len_kv: 1807
+      seed: 1808
+      offset: 1809
+      dropout_mask: 1810
+      dropout_scale: 1811
+      page_table_k: 1812
+      page_table_v: 1813
+      block_mask: 1814
+      sink_token: 1815
+      descale_q: 1816
+      descale_k: 1817
+      descale_v: 1818
+      descale_s: 1819
+      scale_s: 1820
+      scale_o: 1821
+      stats: 1822
+      max_output: 1823
+      sum_exp: 1824
+      rng_dump: 1825
+      amax_s: 1826
+      amax_o: 1827
     tensor_configs:
       q: { dims: [1, 8, 128, 64], strides: [65536, 8192, 64, 1] }
       k: { dims: [1, 8, 128, 64], strides: [65536, 8192, 64, 1] }

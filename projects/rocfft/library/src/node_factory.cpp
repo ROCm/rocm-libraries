@@ -1087,9 +1087,9 @@ auto check_pp_restrictions =
     checkiDist = product(inputLength.begin(), inputLength.end());
     checkoDist = product(nodeData.outputLength.begin(), nodeData.outputLength.end());
 
-    bool distCondition      = (nodeData.iDist == checkiDist && nodeData.oDist == checkoDist);
-    bool strideCondition    = ((nodeData.inStride.size() && nodeData.inStride[0]) == 1
-                            && (nodeData.outStride.size() && nodeData.outStride[0]) == 1);
+    bool distCondition   = (nodeData.iDist == checkiDist && nodeData.oDist == checkoDist);
+    bool strideCondition = (nodeData.inStride.size() && nodeData.inStride[0] == 1)
+                           && (nodeData.outStride.size() && nodeData.outStride[0] == 1);
     bool arrayTypeCondition = (nodeData.inArrayType != rocfft_array_type_complex_planar)
                               && (nodeData.inArrayType != rocfft_array_type_hermitian_planar)
                               && (nodeData.outArrayType != rocfft_array_type_complex_planar)

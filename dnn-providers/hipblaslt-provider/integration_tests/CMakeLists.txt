@@ -39,4 +39,4 @@ target_link_libraries(
 # integration tests depend on the hipBLASLt Provider Plugin
 add_dependencies(hipblaslt_plugin_integration_tests hipblaslt_plugin)
 
-add_integration_test_target(hipblaslt_plugin_integration_tests ${CMAKE_CURRENT_BINARY_DIR})
+add_integration_test_target(hipblaslt_plugin_integration_tests ${CMAKE_CURRENT_BINARY_DIR} LABELS slow)
