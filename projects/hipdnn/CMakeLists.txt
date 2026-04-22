@@ -217,6 +217,10 @@ set(HIPDNN_NO_RTTI_OPTIONS
     $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-fno-rtti>
 )
 
+if(NOT HIPDNN_FRONTEND_SKIP_JSON_LIB)
+    hipdnn_add_dependency(nlohmann_json VERSION ${HIPDNN_NLOHMANN_JSON_VERSION})
+endif()
+
 add_subdirectory(data_sdk)
 add_subdirectory(flatbuffers_sdk)
 

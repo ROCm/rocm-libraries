@@ -18,9 +18,9 @@ set(HIP_DNN_FLATBUFFERS_SDK_INSTALL_INCLUDE_DIR "${CMAKE_INSTALL_INCLUDEDIR}/hip
 # --- FlatBuffers dependency ---
 hipdnn_add_dependency(flatbuffers VERSION ${HIPDNN_FLATBUFFERS_VERSION})
 
-if(NOT HIPDNN_FRONTEND_SKIP_JSON_LIB)
-    hipdnn_add_dependency(nlohmann_json VERSION ${HIPDNN_NLOHMANN_JSON_VERSION})
-endif()
+# nlohmann_json is added at the top-level CMakeLists.txt so its imported target
+# is visible to both flatbuffers_sdk and frontend (which also includes nlohmann/json
+# directly in its public headers).
 
 # Supported FlatBuffers versions (oldest to newest)
 # 24.12.23 matches PyTorch's FlatBuffers version for compatibility
