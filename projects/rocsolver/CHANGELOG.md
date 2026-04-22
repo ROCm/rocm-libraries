@@ -16,8 +16,6 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 * Linear solver routines for symmetric matrices
     * SYTRS (with batched and strided\_batched versions)
     * SYTRS_64 (with batched and strided\_batched versions)
-    * SYTRS2 (with batched and strided\_batched versions)
-    * SYTRS2_64 (with batched and strided\_batched versions)
 
 ### Changed
 ### Removed
