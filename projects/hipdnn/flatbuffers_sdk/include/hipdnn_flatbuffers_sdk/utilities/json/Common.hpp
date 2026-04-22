@@ -33,10 +33,8 @@ void from_json(const BasicJsonType& j, std::optional<T>& opt)
 NLOHMANN_JSON_NAMESPACE_END
 #endif
 
-// These inline overloads mirror data_sdk's Common.hpp. Both SDKs need them independently
-// because the json headers are consumed directly (no transitive include path). Identical
-// inline definitions across TUs are explicitly permitted by C++ and do not violate ODR.
-// Once data_sdk drops its flatbuffers dependency, these become the sole definitions.
+// Phase 7e (remove FlatBuffers from data_sdk) makes these the sole definitions — data_sdk no
+// longer includes any FlatBuffers headers. ODR concern from the clone PR is resolved.
 namespace flatbuffers
 {
 
