@@ -308,12 +308,9 @@ TEST(TestCalculateConvWrwTolerance, DetectsFailure)
     const std::vector<int64_t> strides = {100, 100, 10, 1};
 
     // Create tensors
-    auto baseline = hipdnn_data_sdk::utilities::createTensor(
-        hipdnn_data_sdk::data_objects::DataType::FLOAT, dims, strides);
-    auto actualPassing = hipdnn_data_sdk::utilities::createTensor(
-        hipdnn_data_sdk::data_objects::DataType::FLOAT, dims, strides);
-    auto actualFailing = hipdnn_data_sdk::utilities::createTensor(
-        hipdnn_data_sdk::data_objects::DataType::FLOAT, dims, strides);
+    auto baseline = hipdnn_data_sdk::utilities::createTensor<float>(dims, strides);
+    auto actualPassing = hipdnn_data_sdk::utilities::createTensor<float>(dims, strides);
+    auto actualFailing = hipdnn_data_sdk::utilities::createTensor<float>(dims, strides);
 
     // Populate with values
     // Correct value: 1.0
@@ -332,7 +329,7 @@ TEST(TestCalculateConvWrwTolerance, DetectsFailure)
     EXPECT_GT(tol, 0.09f);
 
     auto validator = hipdnn_test_sdk::utilities::createAllCloseValidator(
-        hipdnn_data_sdk::data_objects::DataType::FLOAT, tol, 0);
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT, tol, 0);
 
     bool valid = validator->allClose(*baseline, *actualPassing);
     EXPECT_TRUE(valid);
@@ -693,12 +690,9 @@ TEST(TestCalculateConvDgradTolerance, DetectsFailure)
     const std::vector<int64_t> strides = {100, 100, 10, 1};
 
     // Create tensors
-    auto baseline = hipdnn_data_sdk::utilities::createTensor(
-        hipdnn_data_sdk::data_objects::DataType::FLOAT, dims, strides);
-    auto actualPassing = hipdnn_data_sdk::utilities::createTensor(
-        hipdnn_data_sdk::data_objects::DataType::FLOAT, dims, strides);
-    auto actualFailing = hipdnn_data_sdk::utilities::createTensor(
-        hipdnn_data_sdk::data_objects::DataType::FLOAT, dims, strides);
+    auto baseline = hipdnn_data_sdk::utilities::createTensor<float>(dims, strides);
+    auto actualPassing = hipdnn_data_sdk::utilities::createTensor<float>(dims, strides);
+    auto actualFailing = hipdnn_data_sdk::utilities::createTensor<float>(dims, strides);
 
     // Populate with values
     baseline->fillTensorWithValue(1.0f);
@@ -714,7 +708,7 @@ TEST(TestCalculateConvDgradTolerance, DetectsFailure)
     EXPECT_GT(tol, 0.1f);
 
     auto validator = hipdnn_test_sdk::utilities::createAllCloseValidator(
-        hipdnn_data_sdk::data_objects::DataType::FLOAT, tol, 0);
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT, tol, 0);
 
     bool valid = validator->allClose(*baseline, *actualPassing);
     EXPECT_TRUE(valid);
@@ -1049,12 +1043,9 @@ TEST(TestCalculateConvFpropTolerance, DetectsFailure)
     const std::vector<int64_t> strides = {100, 100, 10, 1};
 
     // Create tensors
-    auto baseline = hipdnn_data_sdk::utilities::createTensor(
-        hipdnn_data_sdk::data_objects::DataType::FLOAT, dims, strides);
-    auto actualPassing = hipdnn_data_sdk::utilities::createTensor(
-        hipdnn_data_sdk::data_objects::DataType::FLOAT, dims, strides);
-    auto actualFailing = hipdnn_data_sdk::utilities::createTensor(
-        hipdnn_data_sdk::data_objects::DataType::FLOAT, dims, strides);
+    auto baseline = hipdnn_data_sdk::utilities::createTensor<float>(dims, strides);
+    auto actualPassing = hipdnn_data_sdk::utilities::createTensor<float>(dims, strides);
+    auto actualFailing = hipdnn_data_sdk::utilities::createTensor<float>(dims, strides);
 
     baseline->fillTensorWithValue(1.0f);
     actualPassing->fillTensorWithValue(1.05f);
@@ -1067,7 +1058,7 @@ TEST(TestCalculateConvFpropTolerance, DetectsFailure)
     EXPECT_GT(tol, 0.09f);
 
     auto validator = hipdnn_test_sdk::utilities::createAllCloseValidator(
-        hipdnn_data_sdk::data_objects::DataType::FLOAT, tol, 0);
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT, tol, 0);
 
     {
         SCOPED_TRACE("Validator should have passed");

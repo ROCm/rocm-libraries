@@ -17,6 +17,9 @@
 #include "ck/tensor_operation/gpu/block/thread_group_tensor_slice_transfer_direct_load.hpp"
 #include "ck/tensor_operation/gpu/grid/gridwise_gemm_xdl_cshuffle_common.hpp"
 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
+
 namespace ck {
 
 // Currently we do not have a elegant way to put single lds buffer & double lds buffer pipe in same
@@ -669,45 +672,6 @@ struct GridwiseGemmMX_xdl_cshuffle_v3
                                                       make_right_pad_transform(N, NPad - N)),
                                            make_tuple(Sequence<0>{}, Sequence<1>{}),
                                            make_tuple(Sequence<0>{}, Sequence<1>{}));
-#if 0
-        using GemmSpecialization = tensor_operation::device::GemmSpecialization;
-
-        if constexpr(GemmSpec == GemmSpecialization::MNPadding ||
-                     GemmSpec == GemmSpecialization::MNKPadding)
-        {
-            // pad M and N
-            return transform_tensor_descriptor(c_grid_desc_mraw_nraw,
-                                               make_tuple(make_right_pad_transform(M, MPad - M),
-                                                          make_right_pad_transform(N, NPad - N)),
-                                               make_tuple(Sequence<0>{}, Sequence<1>{}),
-                                               make_tuple(Sequence<0>{}, Sequence<1>{}));
-        }
-        else if constexpr(GemmSpec == GemmSpecialization::MPadding ||
-                          GemmSpec == GemmSpecialization::MKPadding)
-        {
-            // pad M, but not N
-            return transform_tensor_descriptor(
-                c_grid_desc_mraw_nraw,
-                make_tuple(make_right_pad_transform(M, MPad - M), make_pass_through_transform(N)),
-                make_tuple(Sequence<0>{}, Sequence<1>{}),
-                make_tuple(Sequence<0>{}, Sequence<1>{}));
-        }
-        else if constexpr(GemmSpec == GemmSpecialization::NPadding ||
-                          GemmSpec == GemmSpecialization::NKPadding)
-        {
-            // pad N, but not M
-            return transform_tensor_descriptor(
-                c_grid_desc_mraw_nraw,
-                make_tuple(make_pass_through_transform(M), make_right_pad_transform(N, NPad - N)),
-                make_tuple(Sequence<0>{}, Sequence<1>{}),
-                make_tuple(Sequence<0>{}, Sequence<1>{}));
-        }
-        else
-        {
-            // not pad M or N
-            return c_grid_desc_mraw_nraw;
-        }
-#endif
     }
 
     struct Problem
@@ -1788,3 +1752,4 @@ struct GridwiseGemmMX_xdl_cshuffle_v3
 };
 
 } // namespace ck
+#pragma clang diagnostic pop

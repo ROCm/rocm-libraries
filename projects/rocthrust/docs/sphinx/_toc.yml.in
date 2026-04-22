@@ -18,10 +18,17 @@ subtrees:
     title: Installing on Linux and Windows with CMake
 
 
+- caption: Conceptual
+  entries:
+  - file: conceptual/rocThrust-synchronization-and-blocking
+    title: Synchronization and blocking
+
 - caption: How to
   entries:
   - file: how-to/rocThrust-build-for-backends.rst
     title: Build for different backends
+  - file: how-to/rocThrust-hip-policies
+    title: Avoid synchronization barriers
   - file: how-to/use-rocThrust-in-a-project.rst
     title: Add rocThrust to a CMake project
   - file: how-to/run-rocThrust-tests-on-multiple-gpus
@@ -33,10 +40,8 @@ subtrees:
   entries:
   - file: reference/rocThrust-bitwise-repro
     title: Bitwise reproducibility
-  - file: reference/rocThrust-hipgraph-support
-    title: hipGraph support
-  - file: reference/rocThrust-hip-policies
-    title: Policies
+  - file: reference/rocThrust-using-atomic-path
+    title: Atomic path
   - file: cpp_api
 
 - caption: About

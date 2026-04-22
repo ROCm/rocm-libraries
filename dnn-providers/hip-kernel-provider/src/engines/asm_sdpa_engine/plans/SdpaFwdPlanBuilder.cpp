@@ -2,37 +2,108 @@
 // SPDX-License-Identifier:  MIT
 
 #include "plans/SdpaFwdPlanBuilder.hpp"
+#include "HipKernelUtils.hpp"
 #include "asm/AsmKernelPath.hpp"
 #include "plans/SdpaFwdPlan.hpp"
+
 #include <cmath>
 #include <hip/hip_runtime.h>
+#include <hip_kernel_provider_common/HipDeviceUtils.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
 namespace asm_sdpa_engine
 {
 
 bool SdpaFwdPlanBuilder::isApplicable(
-    const HipKernelHandle& /*handle*/,
-    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
+    const HipKernelHandle& handle,
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    static const char* HIP_KERNEL_LOG_PREFIX = "[SdpaFwdPlanBuilder::isApplicable] ";
+
     auto& nodeWrappers = opGraph.nodeWrappers();
 
-    if(nodeWrappers.size() != 1
-       || nodeWrappers.front()->attributesType()
-              != hipdnn_data_sdk::data_objects::NodeAttributes::SdpaAttributes)
+    try
     {
+        auto deviceString = hip_kernel_provider_common::getDeviceString(handle.getStream());
+        HIP_KERNEL_RETURN_FALSE_IF(
+            deviceString != "gfx942",
+            "Device string does not match gfx942 (Actual value: " + deviceString + ")");
+    }
+    catch(const std::exception& e)
+    {
+        HIPDNN_PLUGIN_LOG_ERROR("Could not query device string: " << e.what());
         return false;
     }
 
-    // TODO: Add more expansive checks
-    HIPDNN_PLUGIN_LOG_WARN("SdpaFwdPlanBuilder::isApplicable not fully implemented");
+    HIP_KERNEL_RETURN_FALSE_IF(nodeWrappers.size() != 1, "Graph has more than one node");
+    HIP_KERNEL_RETURN_FALSE_IF(nodeWrappers.front()->attributesType()
+                                   != NodeAttributes::SdpaAttributes,
+                               "Node attribute type is not SdpaAttributes");
+
+    const auto& attrs = nodeWrappers.front()->attributesAs<SdpaAttributes>();
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.causal_mask(), "causal_mask must be false");
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.causal_mask_bottom_right(),
+                               "causal_mask_bottom_right must be false");
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.left_bound().has_value(), "left_bound must be unset");
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.right_bound().has_value(), "right_bound must be unset");
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.dropout_probability().has_value()
+                                   && attrs.dropout_probability().value() != 0.f,
+                               "dropout_probability must be unset or zero (Actual value: "
+                                   + std::to_string(attrs.dropout_probability().value()) + ")");
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.alibi_mask(), "alibi_mask must be false");
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.padding_mask(), "padding_mask must be false");
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.seq_len_q_tensor_uid(), "seq_len_q tensor not supported");
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.attn_mask_tensor_uid(), // Change to bias
+                               "attn_mask tensor not supported");
+
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.page_table_k_tensor_uid(),
+                               "page_table_k tensor not supported");
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.page_table_v_tensor_uid(),
+                               "page_table_v tensor not supported");
+
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.generate_stats(), "Stats output not supported");
+
+    const auto& tensorMap = opGraph.getTensorMap();
+
+    int64_t qUid = attrs.q_tensor_uid();
+    int64_t kUid = attrs.k_tensor_uid();
+    int64_t vUid = attrs.v_tensor_uid();
+    int64_t oUid = attrs.o_tensor_uid();
+
+    auto* qTensor = tensorMap.at(qUid);
+    HIP_KERNEL_RETURN_FALSE_IF(qTensor->data_type() != DataType::BFLOAT16,
+                               "q tensor datatype must be BF16 (Actual type: "
+                                   + EnumNameDataType(qTensor->data_type()) + ")");
+    HIP_KERNEL_RETURN_FALSE_IF(
+        qTensor->dims()->size() != 4,
+        "q tensor must be rank 4 (Actual rank: " + std::to_string(qTensor->dims()->size()) + ")");
+    HIP_KERNEL_RETURN_FALSE_IF(qTensor->dims()->Get(3) != 128,
+                               "q tensor head dimension must be 128 (Actual value: "
+                                   + std::to_string(qTensor->dims()->Get(3)) + ")");
+
+    auto* kTensor = tensorMap.at(kUid);
+    HIP_KERNEL_RETURN_FALSE_IF(kTensor->data_type() != DataType::BFLOAT16,
+                               "k tensor datatype must be BF16 (Actual type: "
+                                   + EnumNameDataType(kTensor->data_type()) + ")");
+
+    auto* vTensor = tensorMap.at(vUid);
+    HIP_KERNEL_RETURN_FALSE_IF(vTensor->data_type() != DataType::BFLOAT16,
+                               "v tensor datatype must be BF16 (Actual type: "
+                                   + EnumNameDataType(vTensor->data_type()) + ")");
+
+    auto* oTensor = tensorMap.at(oUid);
+    HIP_KERNEL_RETURN_FALSE_IF(oTensor->data_type() != DataType::BFLOAT16,
+                               "o tensor datatype must be BF16 (Actual type: "
+                                   + EnumNameDataType(oTensor->data_type()) + ")");
 
     return true;
 }
 
 size_t SdpaFwdPlanBuilder::getMaxWorkspaceSize(
     const HipKernelHandle& /* handle */,
-    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& /* opGraph */,
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& /* opGraph */,
     const HipKernelSettings& /* executionSettings */) const
 {
     // Forward-only kernel uses 64KB LDS internally, no external workspace needed
@@ -42,8 +113,8 @@ size_t SdpaFwdPlanBuilder::getMaxWorkspaceSize(
 
 void SdpaFwdPlanBuilder::initializeExecutionSettings(
     const HipKernelHandle& /* handle */,
-    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& /* opGraph */,
-    const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& /* engineConfig */,
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& /* opGraph */,
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& /* engineConfig */,
     HipKernelSettings& /* executionSettings */) const
 {
     HIPDNN_PLUGIN_LOG_ERROR("SdpaFwdPlanBuilder::initializeExecutionContext not implemented");
@@ -51,8 +122,8 @@ void SdpaFwdPlanBuilder::initializeExecutionSettings(
 
 void SdpaFwdPlanBuilder::buildPlan(
     const HipKernelHandle& /* handle */,
-    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
-    const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& /* engineConfig */,
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& /* engineConfig */,
     HipKernelContext& executionContext) const
 {
     // Load kernel module
@@ -84,7 +155,7 @@ void SdpaFwdPlanBuilder::buildPlan(
 
     // Extract SDPA attributes and tensor metadata
     auto& sdpaNode = opGraph.getNodeWrapper(0);
-    auto& sdpaAttrs = sdpaNode.attributesAs<hipdnn_data_sdk::data_objects::SdpaAttributes>();
+    auto& sdpaAttrs = sdpaNode.attributesAs<hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes>();
     auto& tensorMap = opGraph.getTensorMap();
 
     // Get tensor UIDs
@@ -179,9 +250,9 @@ void SdpaFwdPlanBuilder::buildPlan(
     executionContext.setPlan(std::make_unique<SdpaFwdPlan>(module, function, params));
 }
 
-std::vector<hipdnn_data_sdk::data_objects::KnobT> SdpaFwdPlanBuilder::getCustomKnobs(
+std::vector<hipdnn_flatbuffers_sdk::data_objects::KnobT> SdpaFwdPlanBuilder::getCustomKnobs(
     const HipKernelHandle& /* handle */,
-    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& /* opGraph */) const
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& /* opGraph */) const
 {
     return {};
 }

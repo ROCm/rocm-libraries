@@ -152,8 +152,8 @@ ConvSolution OpTensorFwdBias::GetSolution([[maybe_unused]] const ExecutionContex
                               incr_wg,
                               packed_tensor](const std::vector<Kernel> kernels) {
         return [=](const Handle& handle_, const AnyInvokeParams& raw_params) {
-            decltype(auto) kernel = handle_.Run(kernels.front());
-            decltype(auto) params = raw_params.CastTo<miopen::tensorOp::InvokeParams>();
+            decltype(auto) kernel_ = handle_.Run(kernels.front());
+            decltype(auto) params  = raw_params.CastTo<miopen::tensorOp::InvokeParams>();
 
             visit_float(data_type, [&](auto as_float) {
                 auto miopen_alpha0 = as_float(*(static_cast<const float*>(params.alpha0)));
@@ -162,47 +162,47 @@ ConvSolution OpTensorFwdBias::GetSolution([[maybe_unused]] const ExecutionContex
 
                 if(packed_tensor)
                 { // OpTensorFwdBias
-                    kernel(params.ATensor,
-                           params.BTensor,
-                           static_cast<int>(blens[1]),
-                           params.CTensor,
-                           static_cast<int>(clens[0]),
-                           static_cast<int>(cstrides[0]),
-                           static_cast<int>(cstrides[1]),
-                           work_per_wg,
-                           miopen_alpha0,
-                           miopen_alpha1,
-                           miopen_beta,
-                           static_cast<int64_t>(params.Aoffset),
-                           static_cast<int64_t>(params.Boffset),
-                           static_cast<int64_t>(params.Coffset),
-                           static_cast<int>(num_wg_orig),
-                           static_cast<int>(incr_wg));
+                    kernel_(params.ATensor,
+                            params.BTensor,
+                            static_cast<int>(blens[1]),
+                            params.CTensor,
+                            static_cast<int>(clens[0]),
+                            static_cast<int>(cstrides[0]),
+                            static_cast<int>(cstrides[1]),
+                            work_per_wg,
+                            miopen_alpha0,
+                            miopen_alpha1,
+                            miopen_beta,
+                            static_cast<int64_t>(params.Aoffset),
+                            static_cast<int64_t>(params.Boffset),
+                            static_cast<int64_t>(params.Coffset),
+                            static_cast<int>(num_wg_orig),
+                            static_cast<int>(incr_wg));
                 }
                 else
                 { // OpTensorFwdBiasGeneric
-                    kernel(params.ATensor,
-                           static_cast<int>(astrides[0]),
-                           static_cast<int>(astrides[1]),
-                           static_cast<int>(astrides[2]),
-                           params.BTensor,
-                           static_cast<int>(blens[1]),
-                           static_cast<int>(bstrides[1]),
-                           params.CTensor,
-                           static_cast<int>(clens[0]),
-                           static_cast<int>(clens[3]),
-                           static_cast<int>(cstrides[0]),
-                           static_cast<int>(cstrides[1]),
-                           static_cast<int>(cstrides[2]),
-                           miopen_alpha0,
-                           miopen_alpha1,
-                           miopen_beta,
-                           work_per_wg,
-                           static_cast<int64_t>(params.Aoffset),
-                           static_cast<int64_t>(params.Boffset),
-                           static_cast<int64_t>(params.Coffset),
-                           static_cast<int>(num_wg_orig),
-                           static_cast<int>(incr_wg));
+                    kernel_(params.ATensor,
+                            static_cast<int>(astrides[0]),
+                            static_cast<int>(astrides[1]),
+                            static_cast<int>(astrides[2]),
+                            params.BTensor,
+                            static_cast<int>(blens[1]),
+                            static_cast<int>(bstrides[1]),
+                            params.CTensor,
+                            static_cast<int>(clens[0]),
+                            static_cast<int>(clens[3]),
+                            static_cast<int>(cstrides[0]),
+                            static_cast<int>(cstrides[1]),
+                            static_cast<int>(cstrides[2]),
+                            miopen_alpha0,
+                            miopen_alpha1,
+                            miopen_beta,
+                            work_per_wg,
+                            static_cast<int64_t>(params.Aoffset),
+                            static_cast<int64_t>(params.Boffset),
+                            static_cast<int64_t>(params.Coffset),
+                            static_cast<int>(num_wg_orig),
+                            static_cast<int>(incr_wg));
                 }
             });
         };

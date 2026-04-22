@@ -312,8 +312,8 @@ namespace
                                                        boundIndex,
                                                        static_cast<double>(*prob.beta),
                                                        prob.workspaceSize);
-
-        tensileProblem.setComputeInputType(Tensile_Ti);
+        tensileProblem.setComputeInputTypeA(Tensile_Ti);
+        tensileProblem.setComputeInputTypeB(Tensile_Ti);
         tensileProblem.setAlphaType(Tensile_Tc);
         tensileProblem.setBetaType(Tensile_Tc);
 
@@ -343,7 +343,8 @@ namespace
         // Add problem predicates for CEqualsD
         tensileProblem.setCEqualsD(prob.C == prob.D);
 
-        tensileProblem.setSparse(prob.sparseA ? 1 : 2);
+        // Workaround: metadata layout
+        tensileProblem.setSparse(prob.sparseA ? 1 : 2, 0);
 
         // set Actvation
         tensileProblem.setActivationType(TensileLite::ActivationType::All);
@@ -868,7 +869,7 @@ rocsparselt_status runContractionProblem(const RocsparseltContractionProblem<Ti,
 
         auto& adapter = get_library_and_adapter(&library, &deviceProp, prob.handle->device);
 
-        hardware = TensileLite::hip::GetDevice(*deviceProp);
+        hardware = TensileLite::hip::GetDevice(prob.handle->device);
 
         if(!config_max_id || configs == nullptr)
         {
@@ -1010,7 +1011,7 @@ rocsparselt_status getBestSolutions(const RocsparseltContractionProblem<Ti, To, 
         return rocsparselt_status_invalid_pointer;
     }
 
-    hardware          = TensileLite::hip::GetDevice(*deviceProp);
+    hardware          = TensileLite::hip::GetDevice(prob.handle->device);
     auto tensile_prob = ConstructTensileProblem(prob);
 
     // auto handle = prob.handle;

@@ -415,6 +415,8 @@ inline hipError_t partition_impl(void*                       temporary_storage,
 /// values, even values are copied into the selected output and odd values are copied into rejected
 /// output.
 ///
+/// The full example is [on GitHub](https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocprim/example/rocprim/device/example_device_partition.cpp).
+///
 /// \code{.cpp}
 /// #include <rocprim/rocprim.hpp>///
 ///

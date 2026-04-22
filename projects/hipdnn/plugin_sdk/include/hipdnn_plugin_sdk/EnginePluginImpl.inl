@@ -13,6 +13,7 @@
  *
  * - HIPDNN_PLUGIN_NAME: String literal for the plugin name (e.g., "my_plugin")
  * - HIPDNN_PLUGIN_VERSION: String literal for the plugin version (e.g., "1.0.0")
+ *   - This is typically defined in version.h for your project.
  * - HIPDNN_PLUGIN_CONTAINER_TYPE: The container class type
  * - HIPDNN_PLUGIN_HANDLE_TYPE: The handle struct type (inherits from HipdnnEnginePluginHandle)
  * - HIPDNN_PLUGIN_CONTEXT_TYPE: The context struct type (inherits from HipdnnEnginePluginExecutionContext)
@@ -41,11 +42,12 @@
  * // MiopenPluginPublic.cpp
  * #include "HipdnnMiopenTypes.hpp"
  * #include "MiopenContainer.hpp"
+ * #include "version.h"
  *
  * using namespace miopen_plugin;
  *
  * #define HIPDNN_PLUGIN_NAME "miopen_provider_plugin"
- * #define HIPDNN_PLUGIN_VERSION "1.0.0"
+ * #define HIPDNN_PLUGIN_VERSION MIOPEN_PROVIDER_VERSION_STRING // from version.h
  * #define HIPDNN_PLUGIN_CONTAINER_TYPE MiopenContainer
  * #define HIPDNN_PLUGIN_HANDLE_TYPE HipdnnMiopenHandle
  * #define HIPDNN_PLUGIN_CONTEXT_TYPE HipdnnMiopenContext
@@ -79,8 +81,8 @@
 
 #include <hip/hip_runtime.h>
 
-#include <hipdnn_data_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
-#include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_plugin_sdk/EngineManager.hpp>
 #include <hipdnn_plugin_sdk/EnginePluginApi.h>
@@ -303,7 +305,7 @@ hipdnnPluginStatus_t
 
         auto* typedHandle = static_cast<HIPDNN_PLUGIN_HANDLE_TYPE*>(handle);
         auto& engineManager = typedHandle->getEngineManager();
-        hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper opGraphWrapper(opGraph->ptr,
+        hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper opGraphWrapper(opGraph->ptr,
                                                                            opGraph->size);
 
         auto applicableEngines = engineManager.getApplicableEngineIds(*typedHandle, opGraphWrapper);
@@ -344,7 +346,7 @@ hipdnnPluginStatus_t hipdnnEnginePluginGetEngineDetails(hipdnnEnginePluginHandle
 
         auto* typedHandle = static_cast<HIPDNN_PLUGIN_HANDLE_TYPE*>(handle);
         auto& engineManager = typedHandle->getEngineManager();
-        hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper opGraphWrapper(opGraph->ptr,
+        hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper opGraphWrapper(opGraph->ptr,
                                                                            opGraph->size);
 
         engineManager.getEngineDetails(*typedHandle, opGraphWrapper, engineId, *engineDetails);
@@ -390,9 +392,9 @@ hipdnnPluginStatus_t hipdnnEnginePluginGetWorkspaceSize(hipdnnEnginePluginHandle
         auto* typedHandle = static_cast<HIPDNN_PLUGIN_HANDLE_TYPE*>(handle);
         auto& engineManager = typedHandle->getEngineManager();
 
-        hipdnn_data_sdk::flatbuffer_utilities::EngineConfigWrapper engineConfigWrapper(
+        hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper engineConfigWrapper(
             engineConfig->ptr, engineConfig->size);
-        hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper opGraphWrapper(opGraph->ptr,
+        hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper opGraphWrapper(opGraph->ptr,
                                                                            opGraph->size);
         *workspaceSize
             = engineManager.getMaxWorkspaceSize(*typedHandle, opGraphWrapper, engineConfigWrapper);
@@ -420,9 +422,9 @@ hipdnnPluginStatus_t
 
         auto* typedHandle = static_cast<HIPDNN_PLUGIN_HANDLE_TYPE*>(handle);
 
-        hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper opGraphWrapper(opGraph->ptr,
+        hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper opGraphWrapper(opGraph->ptr,
                                                                            opGraph->size);
-        hipdnn_data_sdk::flatbuffer_utilities::EngineConfigWrapper engineConfigWrapper(
+        hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper engineConfigWrapper(
             engineConfig->ptr, engineConfig->size);
 
         auto& engineManager = typedHandle->getEngineManager();

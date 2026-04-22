@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -42,13 +42,6 @@ namespace rocsparse
                                                rocsparse_datatype datatype,
                                                void*              array,
                                                int64_t            array_stride);
-
-    rocsparse_status conjugate_batched(rocsparse_handle   handle,
-                                       int64_t            batch_count,
-                                       int64_t            length,
-                                       rocsparse_datatype datatype,
-                                       void**             array,
-                                       int64_t            array_stride);
 
     template <typename T>
     inline rocsparse_status conjugate(rocsparse_handle handle, int64_t length, T* array)

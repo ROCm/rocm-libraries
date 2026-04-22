@@ -1345,10 +1345,10 @@ using GPU_BN_Spatial_FP32 = batch_norm_spatial_test<float>;
 
 TEST_P(GPU_BN_Spatial_FP32, TestFloat32) { Run(); }
 
-INSTANTIATE_TEST_SUITE_P(Full, GPU_BN_Spatial_FP32, GetCases(), [](const auto& info) {
-    return NameGenerator(info);
+INSTANTIATE_TEST_SUITE_P(Full, GPU_BN_Spatial_FP32, GetCases(), [](const auto& info_) {
+    return NameGenerator(info_);
 });
 
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_BN_Spatial_FP32, GetCases(false), [](const auto& info) {
-    return NameGenerator(info);
+INSTANTIATE_TEST_SUITE_P(Smoke, GPU_BN_Spatial_FP32, GetCases(false), [](const auto& info_) {
+    return NameGenerator(info_);
 });

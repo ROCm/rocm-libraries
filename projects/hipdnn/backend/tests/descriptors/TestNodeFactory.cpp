@@ -9,11 +9,11 @@
 #include "descriptors/TensorDescriptor.hpp"
 
 #include <gtest/gtest.h>
-#include <hipdnn_data_sdk/data_objects/convolution_fwd_attributes_generated.h>
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
-#include <hipdnn_data_sdk/data_objects/layernorm_attributes_generated.h>
-#include <hipdnn_data_sdk/data_objects/sdpa_backward_attributes_generated.h>
-#include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/convolution_fwd_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/layernorm_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/sdpa_backward_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_test_sdk/constants/ConvFpropConstants.hpp>
 #include <hipdnn_test_sdk/constants/LayernormConstants.hpp>
 #include <hipdnn_test_sdk/constants/SdpaBwdConstants.hpp>
@@ -23,7 +23,7 @@
 #include <vector>
 
 using namespace hipdnn_backend;
-using namespace hipdnn_data_sdk::data_objects;
+using namespace hipdnn_flatbuffers_sdk::data_objects;
 using namespace hipdnn_tests::constants;
 using hipdnn_tests::toVec;
 
@@ -39,38 +39,38 @@ protected:
     void SetUp() override
     {
         TensorAttributesT xAttrs;
-        xAttrs.uid = K_TENSOR_X_UID;
+        xAttrs.uid = K_FPROP_TENSOR_X_UID;
         xAttrs.data_type = DataType::FLOAT;
-        xAttrs.dims = toVec(K_TENSOR_X_DIMS);
-        xAttrs.strides = toVec(K_TENSOR_X_STRIDES);
+        xAttrs.dims = toVec(K_FPROP_TENSOR_X_DIMS);
+        xAttrs.strides = toVec(K_FPROP_TENSOR_X_STRIDES);
 
         TensorAttributesT wAttrs;
-        wAttrs.uid = K_TENSOR_W_UID;
+        wAttrs.uid = K_FPROP_TENSOR_W_UID;
         wAttrs.data_type = DataType::FLOAT;
-        wAttrs.dims = toVec(K_TENSOR_W_DIMS);
-        wAttrs.strides = toVec(K_TENSOR_W_STRIDES);
+        wAttrs.dims = toVec(K_FPROP_TENSOR_W_DIMS);
+        wAttrs.strides = toVec(K_FPROP_TENSOR_W_STRIDES);
 
         TensorAttributesT yAttrs;
-        yAttrs.uid = K_TENSOR_Y_UID;
+        yAttrs.uid = K_FPROP_TENSOR_Y_UID;
         yAttrs.data_type = DataType::FLOAT;
-        yAttrs.dims = toVec(K_TENSOR_Y_DIMS);
-        yAttrs.strides = toVec(K_TENSOR_Y_STRIDES);
+        yAttrs.dims = toVec(K_FPROP_TENSOR_Y_DIMS);
+        yAttrs.strides = toVec(K_FPROP_TENSOR_Y_STRIDES);
 
-        _tensorMap[K_TENSOR_X_UID] = TensorDescriptor::fromFlatBuffer(xAttrs);
-        _tensorMap[K_TENSOR_W_UID] = TensorDescriptor::fromFlatBuffer(wAttrs);
-        _tensorMap[K_TENSOR_Y_UID] = TensorDescriptor::fromFlatBuffer(yAttrs);
+        _tensorMap[K_FPROP_TENSOR_X_UID] = TensorDescriptor::fromFlatBuffer(xAttrs);
+        _tensorMap[K_FPROP_TENSOR_W_UID] = TensorDescriptor::fromFlatBuffer(wAttrs);
+        _tensorMap[K_FPROP_TENSOR_Y_UID] = TensorDescriptor::fromFlatBuffer(yAttrs);
     }
 
     static ConvolutionFwdAttributesT createStandardConvAttrs()
     {
         ConvolutionFwdAttributesT attrs;
-        attrs.x_tensor_uid = K_TENSOR_X_UID;
-        attrs.w_tensor_uid = K_TENSOR_W_UID;
-        attrs.y_tensor_uid = K_TENSOR_Y_UID;
-        attrs.pre_padding = toVec(K_CONV_PADDING);
-        attrs.post_padding = toVec(K_CONV_PADDING);
-        attrs.stride = toVec(K_CONV_STRIDE);
-        attrs.dilation = toVec(K_CONV_DILATION);
+        attrs.x_tensor_uid = K_FPROP_TENSOR_X_UID;
+        attrs.w_tensor_uid = K_FPROP_TENSOR_W_UID;
+        attrs.y_tensor_uid = K_FPROP_TENSOR_Y_UID;
+        attrs.pre_padding = toVec(K_FPROP_CONV_PADDING);
+        attrs.post_padding = toVec(K_FPROP_CONV_PADDING);
+        attrs.stride = toVec(K_FPROP_CONV_STRIDE);
+        attrs.dilation = toVec(K_FPROP_CONV_DILATION);
         attrs.conv_mode = ConvMode::CROSS_CORRELATION;
         return attrs;
     }
@@ -99,9 +99,9 @@ TEST_F(TestNodeFactory, CreateOperationFromNodeConvFwd)
     ASSERT_EQ(rebuiltNode->attributes.type, NodeAttributes::ConvolutionFwdAttributes);
     auto desc = std::static_pointer_cast<ConvolutionFwdOperationDescriptor>(graphOp);
     ASSERT_TRUE(desc->isFinalized());
-    EXPECT_EQ(desc->getData().x_tensor_uid, K_TENSOR_X_UID);
-    EXPECT_EQ(desc->getData().w_tensor_uid, K_TENSOR_W_UID);
-    EXPECT_EQ(desc->getData().y_tensor_uid, K_TENSOR_Y_UID);
+    EXPECT_EQ(desc->getData().x_tensor_uid, K_FPROP_TENSOR_X_UID);
+    EXPECT_EQ(desc->getData().w_tensor_uid, K_FPROP_TENSOR_W_UID);
+    EXPECT_EQ(desc->getData().y_tensor_uid, K_FPROP_TENSOR_Y_UID);
 }
 
 TEST_F(TestNodeFactory, CreateOperationFromNodeLayernorm)

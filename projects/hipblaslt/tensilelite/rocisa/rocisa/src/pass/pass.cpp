@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -37,13 +37,15 @@ namespace rocisa
             removeDuplicatedFunction(kernel->body);
         }
 
-        auto assignDict = getAssignmentDict(kernel->body);
         compositeToInstruction(kernel->body);
+        // Convert text variables to registers
+        convertTextVariablesToRegisters(kernel->body);
+
         if(option.doOpt())
         {
             auto maxVgpr = kernel->totalVgprs;
             auto maxSgpr = kernel->totalSgprs;
-            auto graph   = buildGraph(kernel->body, maxVgpr, maxSgpr, assignDict);
+            auto graph   = buildGraph(kernel->body, maxVgpr, maxSgpr);
             if(option.removeDupAssign)
             {
                 removeDuplicateAssignment(graph);

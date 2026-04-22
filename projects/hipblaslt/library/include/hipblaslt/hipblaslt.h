@@ -175,6 +175,10 @@ typedef enum {
     HIPBLASLT_MATMUL_MATRIX_SCALE_VEC128_32F = 4,    /**<Not supported yet. Scaling factors are tensors that contain a dedicated ``FP32`` scaling factor for each 128-element block in the innermost dimension of the corresponding data tensor. */
     HIPBLASLT_MATMUL_MATRIX_SCALE_BLK128x128_32F = 5, /**<Not supported yet. Scaling factors are tensors that contain a dedicated ``FP32`` scaling factor for each 128x128-element block in the corresponding data tensor. */
     HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT = 1001, /**< Scaling factors are tensors that contain a dedicated 8-bit ``R_8F_UE8M0`` value for each 32-element block in the innermost dimension of the corresponding data tensor. The scale data is pre-swizzled to match the memory access pattern expected by the kernel. */
+    HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE8M0_EXT = 1002, /**<Not supported yet. Scaling factors are tensors that contain a dedicated scaling factor stored as an 8-bit ``R_8F_UE8M0`` value for each 16-element block in the innermost dimension of the corresponding data tensor. */
+    HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE4M3_EXT = 1003, /**<Not supported yet. Scaling factors are tensors that contain a dedicated scaling factor stored as an 8-bit ``HIP_R_8F_E4M3`` value for each 32-element block in the innermost dimension of the corresponding data tensor. */
+    HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE5M3_EXT = 1004, /**<Not supported yet. Scaling factors are tensors that contain a dedicated scaling factor stored as an 8-bit ``HIP_R_8F_E5M3_EXT`` value for each 16-element block in the innermost dimension of the corresponding data tensor. */
+    HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE5M3_EXT = 1005, /**<Not supported yet. Scaling factors are tensors that contain a dedicated scaling factor stored as an 8-bit ``HIP_R_8F_E5M3_EXT`` value for each 32-element block in the innermost dimension of the corresponding data tensor. */
     HIPBLASLT_MATMUL_MATRIX_SCALE_END
 } hipblasLtMatmulMatrixScale_t;
 
