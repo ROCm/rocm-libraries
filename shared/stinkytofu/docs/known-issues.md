@@ -16,8 +16,6 @@ This document describes known limitations of StinkyTofu that users and developer
 
 ## Other Limitations
 
-Individual design documents describe further limitations:
-- [Dead Code Elimination -- Limitations](design/dead-code-elimination.md#limitations)
-- [Redundant Mov Elimination -- Limitations](design/redundant-mov-elimination.md#limitations)
-- [Peephole Pattern System -- Limitations](design/peephole-pattern-system.md#limitations)
-- [StinkyConfigurableWaitCntPass -- Limitations](design/stinky-configurable-waitcnt-pass.md#limitations)
+- **DCE / RedundantMovElim**: Block-local only -- does not track dead stores or redundant movs across basic block boundaries.
+- **Peephole patterns**: Limited to 2-3 instruction sequences within a basic block. Fixed set of constraints (HasOneUse, IsConstant, SameValue, DifferentValue).
+- **WaitCntPass stores**: No address analysis -- stores use conservative "wait all" at barriers.
