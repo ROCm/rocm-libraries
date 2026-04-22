@@ -17,6 +17,7 @@ add_executable(
     main.cpp
     utilities/TestCpuFpReferenceBatchnorm.cpp
     utilities/TestCpuFpReferenceBatchnormWithVariance.cpp
+    utilities/TestCpuFpReferenceBlockScaleDequantize.cpp
     utilities/TestCpuFpReferenceRMSNorm.cpp
     utilities/TestCpuFpReferenceSdpa.cpp
     utilities/TestCpuFpReferenceConvolution.cpp
@@ -27,6 +28,7 @@ add_executable(
     utilities/TestCpuFpReferenceUtilities.cpp
     utilities/TestCpuFpReferenceValidation.cpp
     utilities/TestCpuTypeUtilities.cpp
+    utilities/TestSdkFrontendTypeConversions.cpp
     utilities/TestCpuReferencePointwise.cpp
     utilities/TestDynamicTolerancesCommon.cpp
     utilities/TestDynamicTolerancesConv.cpp
@@ -44,6 +46,8 @@ add_executable(
     utilities/TestSeeds.cpp
     utilities/TestTensorDiff.cpp
     utilities/TestVectorLoggingUtils.cpp
+    utilities/cpu_graph_executor/TestBlockScaleDequantizePlan.cpp
+    utilities/cpu_graph_executor/TestBlockScaleDequantizeSignatureKey.cpp
     utilities/cpu_graph_executor/TestBatchnormBwdPlan.cpp
     utilities/cpu_graph_executor/TestBatchnormBwdSignatureKey.cpp
     utilities/cpu_graph_executor/TestBatchnormFwdInferencePlan.cpp

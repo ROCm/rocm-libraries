@@ -5,9 +5,9 @@
 
 #include "LayernormGraphUtils.hpp"
 #include "LayernormTensorBundles.hpp"
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
 #include <hipdnn_data_sdk/utilities/Constants.hpp>
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceLayernorm.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/Seeds.hpp>
@@ -16,9 +16,9 @@
 
 using namespace hipdnn_test_sdk::utilities;
 using namespace hipdnn_test_sdk::detail;
-using namespace hipdnn_data_sdk::data_objects;
+using namespace hipdnn_flatbuffers_sdk::data_objects;
 using namespace hipdnn_data_sdk::utilities;
-using namespace hipdnn_data_sdk::flatbuffer_utilities;
+using namespace hipdnn_flatbuffers_sdk::flatbuffer_utilities;
 using namespace ::testing;
 using namespace hipdnn_sdk_test_utils;
 
@@ -39,14 +39,15 @@ TEST_F(TestLayernormFpropPlan, ExecutePlan)
                                           dims,
                                           normalizedDimCount,
                                           TensorLayout::NHWC);
-    auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
-    const GraphWrapper graphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+    const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());
     const INodeWrapper& node = graphWrapper.getNodeWrapper(0);
     LayernormFpropTensorBundle planTensorBundle(node, graphWrapper.getTensorMap(), seed);
     LayernormFpropTensorBundle directTensorBundle(node, graphWrapper.getTensorMap(), seed);
 
     const auto& attributes
-        = node.attributesAs<hipdnn_data_sdk::data_objects::LayernormAttributes>();
+        = node.attributesAs<hipdnn_flatbuffers_sdk::data_objects::LayernormAttributes>();
     const auto& tensorMap = graphWrapper.getTensorMap();
     LayernormFpropParams params(*tensorMap.at(attributes.x_tensor_uid()),
                                 *tensorMap.at(attributes.y_tensor_uid()),
@@ -99,14 +100,15 @@ TEST_F(TestLayernormFpropPlan, ExecutePlanOnePaddedNormalizedDimCount2)
                                           TensorLayout::NHWC,
                                           false,
                                           true);
-    auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
-    const GraphWrapper graphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+    const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());
     const INodeWrapper& node = graphWrapper.getNodeWrapper(0);
     LayernormFpropTensorBundle planTensorBundle(node, graphWrapper.getTensorMap(), seed);
     LayernormFpropTensorBundle directTensorBundle(node, graphWrapper.getTensorMap(), seed);
 
     const auto& attributes
-        = node.attributesAs<hipdnn_data_sdk::data_objects::LayernormAttributes>();
+        = node.attributesAs<hipdnn_flatbuffers_sdk::data_objects::LayernormAttributes>();
     const auto& tensorMap = graphWrapper.getTensorMap();
     LayernormFpropParams params(*tensorMap.at(attributes.x_tensor_uid()),
                                 *tensorMap.at(attributes.y_tensor_uid()),
@@ -158,18 +160,19 @@ TEST_F(TestLayernormFpropPlan, ExecutePlanTrainingPhase)
                                           normalizedDimCount,
                                           TensorLayout::NHWC,
                                           true);
-    auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
-    const GraphWrapper graphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+    const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());
     const INodeWrapper& node = graphWrapper.getNodeWrapper(0);
     LayernormFpropTensorBundle planTensorBundle(node, graphWrapper.getTensorMap(), seed);
     LayernormFpropTensorBundle directTensorBundle(node, graphWrapper.getTensorMap(), seed);
 
     const auto& attributes
-        = node.attributesAs<hipdnn_data_sdk::data_objects::LayernormAttributes>();
+        = node.attributesAs<hipdnn_flatbuffers_sdk::data_objects::LayernormAttributes>();
     const auto& tensorMap = graphWrapper.getTensorMap();
 
-    const hipdnn_data_sdk::data_objects::TensorAttributes* meanAttr = nullptr;
-    const hipdnn_data_sdk::data_objects::TensorAttributes* invVarianceAttr = nullptr;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* meanAttr = nullptr;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* invVarianceAttr = nullptr;
     if(attributes.mean_tensor_uid().has_value())
     {
         meanAttr = tensorMap.at(attributes.mean_tensor_uid().value());
@@ -265,8 +268,9 @@ TEST(TestLayernormFpropPlanBuilder, PlanConstruction)
                                           dims,
                                           normalizedDimCount,
                                           TensorLayout::NHWC);
-    auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
-    const GraphWrapper graphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+    const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());
 
     const LayernormFpropPlanBuilder<DataType::FLOAT,
                                     DataType::FLOAT,
@@ -294,8 +298,9 @@ TEST(TestLayernormFpropPlanBuilder, IsApplicable)
                                           dims,
                                           normalizedDimCount,
                                           TensorLayout::NHWC);
-    auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
-    const GraphWrapper graphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+    const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());
 
     const LayernormFpropPlanBuilder<DataType::FLOAT,
                                     DataType::FLOAT,
@@ -333,8 +338,9 @@ TEST(TestLayernormFpropPlanBuilder, PlanConstructionTrainingPhase)
                                           normalizedDimCount,
                                           TensorLayout::NHWC,
                                           true);
-    auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
-    const GraphWrapper graphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+    const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());
 
     const LayernormFpropPlanBuilder<DataType::FLOAT,
                                     DataType::FLOAT,
@@ -363,8 +369,9 @@ TEST(TestLayernormFpropPlanBuilder, IsApplicableTrainingPhase)
                                           normalizedDimCount,
                                           TensorLayout::NHWC,
                                           true);
-    auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
-    const GraphWrapper graphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+    const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());
 
     const LayernormFpropPlanBuilder<DataType::FLOAT,
                                     DataType::FLOAT,

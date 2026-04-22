@@ -11,6 +11,12 @@ Full documentation for hipSOLVER is available at the [hipSOLVER Documentation](h
   * sytrs
     * hipsolverDnXsytrs_bufferSize
     * hipsolverDnXsytrs
+  * syevBatched
+    * hipsolverDnXsyevBatched_bufferSize
+    * hipsolverDnXsyevBatched
+  * syevd
+    * hipsolverDnXsyevd_bufferSize
+    * hipsolverDnXsyevd
 
 ### Changed
 ### Removed

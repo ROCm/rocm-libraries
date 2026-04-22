@@ -241,6 +241,18 @@ template <typename T>
 void cpu_potrs(hipsolverFillMode_t uplo, int n, int nrhs, T* A, int lda, T* B, int ldb, int* info);
 
 template <typename T, typename S>
+void cpu_syev_heev(hipsolverEigMode_t  evect,
+                   hipsolverFillMode_t uplo,
+                   int                 n,
+                   T*                  A,
+                   int                 lda,
+                   S*                  W,
+                   T*                  work,
+                   int                 lwork,
+                   S*                  rwork,
+                   int*                info);
+
+template <typename T, typename S>
 void cpu_syevd_heevd(hipsolverEigMode_t  evect,
                      hipsolverFillMode_t uplo,
                      int                 n,

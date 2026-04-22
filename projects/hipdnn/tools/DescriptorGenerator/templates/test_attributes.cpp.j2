@@ -4,9 +4,6 @@
 #include <hipdnn_frontend/attributes/{{ op.frontend.effective_attributes_include }}.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
 
-#include <flatbuffers/flatbuffers.h>
-#include <hipdnn_data_sdk/data_objects/{{ op.fbs_generated_header }}>
-
 #include <memory>
 #include <vector>
 
@@ -69,62 +66,6 @@ TEST(Test{{ op.frontend.attributes_class }}, DefaultValues)
 {% endfor %}
 }
 
-TEST(Test{{ op.frontend.attributes_class }}, PackAttributes)
-{
-    {{ op.frontend.attributes_class }} attrs;
-
-    // Set tensors with UIDs
-{% for tensor in op.frontend.all_tensors %}
-    auto {{ tensor.name }}Tensor = std::make_shared<TensorAttributes>();
-    {{ tensor.name }}Tensor->set_uid({{ op.test_data.tensor_uids.get(tensor.name, loop.index) }});
-    attrs.{{ tensor.effective_setter_name }}({{ tensor.name }}Tensor);
-{% endfor %}
-
-    // Set data fields
-{% for df in op.data_fields %}
-{% if df.is_vector %}
-    attrs.{{ df.frontend_setter_name }}({{ '{' }}{{ op.test_data.field_values.get(df.name, [1, 1]) | join(', ') }}{{ '}' }});
-{% elif df.is_mode or df.is_enum %}
-{% if df.effective_frontend_type and df.test_enum_value %}
-    attrs.{{ df.frontend_setter_name }}({{ df.effective_frontend_type }}::{{ df.test_enum_value }});
-{% else %}
-    // TODO: Set {{ df.name }} — provide frontend_type and test_enum_value in YAML config
-{% endif %}
-{% endif %}
-{% endfor %}
-
-    // Pack attributes
-    flatbuffers::FlatBufferBuilder builder;
-    auto packedAttributes = attrs.pack_attributes(builder);
-    builder.Finish(packedAttributes);
-
-    auto buffer = builder.GetBufferPointer();
-    auto attrsFb
-        = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::{{ op.fbs_table }}>(buffer);
-
-    // Verify packed tensor UIDs
-{% for tf in op.tensor_fields %}
-{% set ft = op.tensor_field_frontend_map.get(tf.name) %}
-{% if ft %}
-    EXPECT_EQ(attrsFb->{{ tf.fbs_field }}(), {{ ft.name }}Tensor->get_uid());
-{% endif %}
-{% endfor %}
-
-    // Verify packed data fields
-{% for df in op.data_fields %}
-{% if df.is_vector %}
-{% set values = op.test_data.field_values.get(df.name, [1, 1]) %}
-    ASSERT_EQ(attrsFb->{{ df.fbs_field }}()->size(), {{ values | length }});
-{% for val in values %}
-    EXPECT_EQ(attrsFb->{{ df.fbs_field }}()->Get({{ loop.index0 }}), {{ val }});
-{% endfor %}
-{% elif df.is_mode or df.is_enum %}
-
-    EXPECT_EQ(attrsFb->{{ df.fbs_field }}(),
-              {{ df.cpp_enum }}::{{ df.test_enum_value }});
-{% endif %}
-{% endfor %}
-}
 {% for tensor in op.frontend.all_tensors %}
 
 TEST(Test{{ op.frontend.attributes_class }}, Set{{ tensor.name | replace('_', ' ') | title | replace(' ', '') }}Move)

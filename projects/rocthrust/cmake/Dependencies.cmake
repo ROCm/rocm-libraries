@@ -13,6 +13,14 @@
 include(cmake/DownloadProject.cmake)
 include(FetchContent)
 
+# Suppress ROCMChecks WARNING on third-party dependencies that modify CMAKE_CXX_FLAGS
+set(_ROCTHRUST_DISABLE_ROCM_CHECKS FALSE)
+macro(rocm_check_toolchain_var var access value list_file)
+  if(NOT _ROCTHRUST_DISABLE_ROCM_CHECKS)
+    _rocm_check_toolchain_var("${var}" "${access}" "${value}" "${list_file}")
+  endif()
+endmacro()
+
 # The option of using the SQLite provided by the system, instead of downloading a copy
 option( SQLITE_USE_SYSTEM_PACKAGE "Use SQLite3 from find_package" OFF )
 
@@ -288,7 +296,9 @@ if(BUILD_TEST OR BUILD_HIPSTDPAR_TEST)
         GIT_TAG        release-1.11.0
       )
     endif()
+    set(_ROCTHRUST_DISABLE_ROCM_CHECKS TRUE)
     FetchContent_MakeAvailable(googletest)
+    set(_ROCTHRUST_DISABLE_ROCM_CHECKS FALSE)
     add_library(GTest::GTest ALIAS gtest)
     add_library(GTest::Main  ALIAS gtest_main)
   endif()
@@ -398,7 +408,11 @@ if(BUILD_BENCHMARK)
       GIT_REPOSITORY https://github.com/google/benchmark.git
       GIT_TAG        v${BENCHMARK_VERSION}
     )
+    set(HAVE_STD_REGEX ON)
+    set(RUN_HAVE_STD_REGEX 1)
+    set(_ROCTHRUST_DISABLE_ROCM_CHECKS TRUE)
     FetchContent_MakeAvailable(googlebench)
+    set(_ROCTHRUST_DISABLE_ROCM_CHECKS FALSE)
 	# Clang on Windows throws the following warnings with Googlebenchmark v1.9.5 (along with Werror):
     # googlebench-src/src/string_util.cc:158:34: error: format string is not a string literal [-Werror,-Wformat-nonliteral]
 	if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND WIN32)  

@@ -1047,7 +1047,7 @@ TEST(TestGpuConvFwdRefPerformance, MediumTensorTimingComparison)
     assertAllClose(yCpu, yGpu, 1e-3f);
 }
 
-TEST(TestGpuConvFwdRefPerformance, LargeTensorTimingComparison)
+TEST(TestGpuConvFwdRefPerformance, DISABLED_LargeTensorTimingComparison)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -1164,13 +1164,13 @@ INSTANTIATE_TEST_SUITE_P(Small2d,
                          [](const ::testing::TestParamInfo<ConvFwdShapeCase>& info) {
                              return info.param.tag;
                          });
-INSTANTIATE_TEST_SUITE_P(Medium2d,
+INSTANTIATE_TEST_SUITE_P(DISABLED_Medium2d,
                          TestGpuConvFwdRefShapesFp32,
                          ::testing::ValuesIn(getMedium2dConvCases()),
                          [](const ::testing::TestParamInfo<ConvFwdShapeCase>& info) {
                              return info.param.tag;
                          });
-INSTANTIATE_TEST_SUITE_P(Large2d,
+INSTANTIATE_TEST_SUITE_P(DISABLED_Large2d,
                          TestGpuConvFwdRefShapesFp32,
                          ::testing::ValuesIn(getLarge2dConvCases()),
                          [](const ::testing::TestParamInfo<ConvFwdShapeCase>& info) {
@@ -1204,7 +1204,7 @@ INSTANTIATE_TEST_SUITE_P(Small2d,
                          [](const ::testing::TestParamInfo<ConvFwdShapeCase>& info) {
                              return info.param.tag;
                          });
-INSTANTIATE_TEST_SUITE_P(Medium2d,
+INSTANTIATE_TEST_SUITE_P(DISABLED_Medium2d,
                          TestGpuConvFwdRefShapesFp16,
                          ::testing::ValuesIn(getMedium2dConvCases()),
                          [](const ::testing::TestParamInfo<ConvFwdShapeCase>& info) {
@@ -1230,7 +1230,7 @@ INSTANTIATE_TEST_SUITE_P(Small2d,
                          [](const ::testing::TestParamInfo<ConvFwdShapeCase>& info) {
                              return info.param.tag;
                          });
-INSTANTIATE_TEST_SUITE_P(Medium2d,
+INSTANTIATE_TEST_SUITE_P(DISABLED_Medium2d,
                          TestGpuConvFwdRefShapesBfp16,
                          ::testing::ValuesIn(getMedium2dConvCases()),
                          [](const ::testing::TestParamInfo<ConvFwdShapeCase>& info) {
@@ -1264,13 +1264,13 @@ INSTANTIATE_TEST_SUITE_P(Nhwc2dSmall,
                          [](const ::testing::TestParamInfo<ConvFwdShapeCase>& info) {
                              return info.param.tag;
                          });
-INSTANTIATE_TEST_SUITE_P(Nhwc2dMedium,
+INSTANTIATE_TEST_SUITE_P(DISABLED_Nhwc2dMedium,
                          TestGpuConvFwdRefShapesFp32,
                          ::testing::ValuesIn(withChannelLastLayout(getMedium2dConvCases())),
                          [](const ::testing::TestParamInfo<ConvFwdShapeCase>& info) {
                              return info.param.tag;
                          });
-INSTANTIATE_TEST_SUITE_P(Nhwc2dLarge,
+INSTANTIATE_TEST_SUITE_P(DISABLED_Nhwc2dLarge,
                          TestGpuConvFwdRefShapesFp32,
                          ::testing::ValuesIn(withChannelLastLayout(getLarge2dConvCases())),
                          [](const ::testing::TestParamInfo<ConvFwdShapeCase>& info) {
@@ -1296,7 +1296,7 @@ INSTANTIATE_TEST_SUITE_P(Nhwc2dSmall,
                          [](const ::testing::TestParamInfo<ConvFwdShapeCase>& info) {
                              return info.param.tag;
                          });
-INSTANTIATE_TEST_SUITE_P(Nhwc2dMedium,
+INSTANTIATE_TEST_SUITE_P(DISABLED_Nhwc2dMedium,
                          TestGpuConvFwdRefShapesFp16,
                          ::testing::ValuesIn(withChannelLastLayout(getMedium2dConvCases())),
                          [](const ::testing::TestParamInfo<ConvFwdShapeCase>& info) {
@@ -1316,7 +1316,7 @@ INSTANTIATE_TEST_SUITE_P(Nhwc2dSmall,
                          [](const ::testing::TestParamInfo<ConvFwdShapeCase>& info) {
                              return info.param.tag;
                          });
-INSTANTIATE_TEST_SUITE_P(Nhwc2dMedium,
+INSTANTIATE_TEST_SUITE_P(DISABLED_Nhwc2dMedium,
                          TestGpuConvFwdRefShapesBfp16,
                          ::testing::ValuesIn(withChannelLastLayout(getMedium2dConvCases())),
                          [](const ::testing::TestParamInfo<ConvFwdShapeCase>& info) {

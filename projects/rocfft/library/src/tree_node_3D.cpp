@@ -681,7 +681,8 @@ void RC3DNode::AssignParams_internal()
  *****************************************************/
 size_t PP3DNode::GetPPOffDim() const
 {
-    auto key = PPFMKey(length[0], length[1], length[2], precision, scheme);
+    auto key
+        = PPFMKey(length[0], length[1], length[2], precision, GetRootPlanTransformType(), scheme);
     if(!pool.has_function(key))
         throw std::runtime_error("GetPPOffDim failed to find a valid kernel");
 

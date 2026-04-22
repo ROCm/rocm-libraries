@@ -26,6 +26,7 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <cstdlib>
 #include <fstream>
 #include <iterator>
 #include <numeric>
@@ -138,10 +139,19 @@ int main(int argc, char* argv[])
     hiptensor::YamlConfigLoader<hiptensor::ContractionTestParams>::storeToFile(tmpFile, yee);
     auto yee1
         = hiptensor::YamlConfigLoader<hiptensor::ContractionTestParams>::loadFromFile(tmpFile);
-    if(!yee1)
-    {
-        return -1;
-    }
 
-    return 0;
+    int result = yee1 ? 0 : -1;
+
+    // Remove temp file explicitly before quick_exit() bypasses the destructor.
+    ::remove(tmpFile.c_str());
+
+    // Flush LLVM's buffered streams and destroy ManagedStatic objects while all
+    // libraries are still loaded, before post-main cleanup runs.
+    hiptensor::llvmShutdown();
+
+    // Use quick_exit() to bypass C++ static destructors and atexit() handlers.
+    // Post-main cleanup in linked DLLs (hiptensor, HIP runtime) crashes under
+    // ctest due to DLL unload order differences vs a direct run. Our cleanup is
+    // already complete via llvmShutdown() above.
+    std::quick_exit(result);
 }

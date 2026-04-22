@@ -20,10 +20,20 @@ add_executable(
     engines/plans/Batchnorm/TestBatchnormPlanBuilder.cpp
     engines/plans/Batchnorm/TestBatchnormFwdInferencePlan.cpp
     engines/plans/Batchnorm/TestBatchnormFwdInferenceWithVariancePlan.cpp
+    engines/plans/Batchnorm/TestBatchnormFwdTrainingPlan.cpp
+    engines/plans/Batchnorm/TestBatchnormCommon.cpp
+    engines/plans/Batchnorm/TestBatchnormApplicabilityChecks.cpp
+    engines/plans/Layernorm/TestLayernormPlanBuilder.cpp
+    engines/plans/Layernorm/TestLayernormFwdPlan.cpp
+    engines/plans/Layernorm/TestLayernormApplicabilityChecks.cpp
     engines/plans/TestPlanUtils.cpp
     engines/plans/RMSnorm/TestRMSnormPlanBuilder.cpp
     engines/plans/RMSnorm/TestRMSnormFwdPlan.cpp
+    engines/plans/RMSnorm/TestRMSnormBwdPlanBuilder.cpp
+    engines/plans/RMSnorm/TestRMSnormBwdPlan.cpp
+    engines/plans/RMSnorm/TestRMSnormApplicabilityChecks.cpp
     hip/TestHipProgramAndKernel.cpp
+    hip/TestHipKernelCompileOptions.cpp
 )
 
 target_compile_options(hip_kernel_provider_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})

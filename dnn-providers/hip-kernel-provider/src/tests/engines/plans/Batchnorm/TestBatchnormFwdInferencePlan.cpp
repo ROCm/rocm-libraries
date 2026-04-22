@@ -4,17 +4,18 @@
 #include <cstdio>
 #include <gtest/gtest.h>
 
-#include "engines/plans/BatchnormFwdInferencePlan.hpp"
+#include "engines/plans/batchnorm/BatchnormFwdInferencePlan.hpp"
 #include "mocks/MockCompiledProgram.hpp"
 #include "mocks/MockKernelCompiler.hpp"
 #include "mocks/MockRunnableKernel.hpp"
 
-#include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/interfaces/IPlan.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 
-using namespace hip_kernel_provider;
+namespace hip_kernel_provider::batchnorm::test
+{
 
 // ============================================================================
 // BatchnormFwdInferenceParams - construction from valid graph data
@@ -23,8 +24,8 @@ using namespace hip_kernel_provider;
 TEST(TestBatchnormFwdInferenceParams, ConstructsFromSingleNodeGraph)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                              builder.GetSize());
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                                     builder.GetSize());
 
     const auto& node = graph.getNode(0);
     const auto& attr = *node.attributes_as_BatchnormInferenceAttributes();
@@ -35,8 +36,8 @@ TEST(TestBatchnormFwdInferenceParams, ConstructsFromSingleNodeGraph)
 TEST(TestBatchnormFwdInferenceParams, HasCorrectTensorPointersForSingleNode)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                              builder.GetSize());
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                                     builder.GetSize());
 
     const auto& node = graph.getNode(0);
     const auto& attr = *node.attributes_as_BatchnormInferenceAttributes();
@@ -58,8 +59,8 @@ TEST(TestBatchnormFwdInferenceParams, HasCorrectTensorPointersForSingleNode)
 TEST(TestBatchnormFwdInferenceParams, TensorPointersMatchExpectedUids)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                              builder.GetSize());
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                                     builder.GetSize());
 
     const auto& node = graph.getNode(0);
     const auto& attr = *node.attributes_as_BatchnormInferenceAttributes();
@@ -77,8 +78,8 @@ TEST(TestBatchnormFwdInferenceParams, TensorPointersMatchExpectedUids)
 TEST(TestBatchnormFwdInferenceParams, IsMoveConstructible)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                              builder.GetSize());
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                                     builder.GetSize());
 
     const auto& node = graph.getNode(0);
     const auto& attr = *node.attributes_as_BatchnormInferenceAttributes();
@@ -93,8 +94,8 @@ TEST(TestBatchnormFwdInferenceParams, IsMoveConstructible)
 TEST(TestBatchnormFwdInferenceParams, ConstructGraphWithActivation)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdInferActGraph();
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                              builder.GetSize());
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                                     builder.GetSize());
 
     const auto& node = graph.getNode(0);
     const auto& attr = *node.attributes_as_BatchnormInferenceAttributes();
@@ -108,8 +109,8 @@ TEST(TestBatchnormFwdInferenceParams, ConstructGraphWithActivation)
 TEST(TestBatchnormFwdInferenceParams, HasCorrectTensorPointersForGraphWithActivation)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdInferActGraph();
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                              builder.GetSize());
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                                     builder.GetSize());
 
     const auto& node = graph.getNode(0);
     const auto& attr = *node.attributes_as_BatchnormInferenceAttributes();
@@ -132,8 +133,8 @@ TEST(TestBatchnormFwdInferenceParams, HasCorrectTensorPointersForGraphWithActiva
 TEST(TestBatchnormFwdInferenceParams, TensorPointersMatchExpectedUidsForGraphWithActivation)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdInferActGraph();
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                              builder.GetSize());
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                                     builder.GetSize());
 
     const auto& node = graph.getNode(0);
     const auto& attr = *node.attributes_as_BatchnormInferenceAttributes();
@@ -164,16 +165,16 @@ TEST(TestBatchnormFwdInferenceParams, IsNotCopyConstructible)
 namespace
 {
 
-BatchnormFwdInferencePlan createPlanFromGraph(const std::vector<int64_t>& strides
-                                              = {150528, 50176, 224, 1},
-                                              const std::vector<int64_t>& dims = {1, 3, 224, 224},
-                                              hipdnn_data_sdk::data_objects::DataType inputDataType
-                                              = hipdnn_data_sdk::data_objects::DataType::FLOAT)
+BatchnormFwdInferencePlan
+    createPlanFromGraph(const std::vector<int64_t>& strides = {150528, 50176, 224, 1},
+                        const std::vector<int64_t>& dims = {1, 3, 224, 224},
+                        hipdnn_flatbuffers_sdk::data_objects::DataType inputDataType
+                        = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph(
         strides, dims, inputDataType);
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                              builder.GetSize());
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                                     builder.GetSize());
 
     const auto& node = graph.getNode(0);
     const auto& attr = *node.attributes_as_BatchnormInferenceAttributes();
@@ -321,8 +322,9 @@ TEST(TestBatchnormFwdInferencePlan, CompileFp16SetsCorrectDefines)
             return program;
         });
 
-    auto plan = createPlanFromGraph(
-        {150528, 50176, 224, 1}, {1, 3, 224, 224}, hipdnn_data_sdk::data_objects::DataType::HALF);
+    auto plan = createPlanFromGraph({150528, 50176, 224, 1},
+                                    {1, 3, 224, 224},
+                                    hipdnn_flatbuffers_sdk::data_objects::DataType::HALF);
     auto deviceProps = createTestDeviceProps();
 
     plan.compile(mockCompiler, deviceProps);
@@ -357,7 +359,7 @@ TEST(TestBatchnormFwdInferencePlan, CompileBfp16SetsCorrectDefines)
 
     auto plan = createPlanFromGraph({150528, 50176, 224, 1},
                                     {1, 3, 224, 224},
-                                    hipdnn_data_sdk::data_objects::DataType::BFLOAT16);
+                                    hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16);
     auto deviceProps = createTestDeviceProps();
 
     plan.compile(mockCompiler, deviceProps);
@@ -441,9 +443,9 @@ TEST(TestBatchnormFwdInferencePlan, CompileWithUnsupportedDimensionThrows)
 
     // 3D tensor is not supported
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph(
-        {12, 4, 1}, {1, 3, 4}, hipdnn_data_sdk::data_objects::DataType::FLOAT);
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                              builder.GetSize());
+        {12, 4, 1}, {1, 3, 4}, hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                                     builder.GetSize());
 
     const auto& node = graph.getNode(0);
     const auto& attr = *node.attributes_as_BatchnormInferenceAttributes();
@@ -455,3 +457,5 @@ TEST(TestBatchnormFwdInferencePlan, CompileWithUnsupportedDimensionThrows)
 
     EXPECT_THROW(plan.compile(mockCompiler, deviceProps), hipdnn_plugin_sdk::HipdnnPluginException);
 }
+
+} // namespace hip_kernel_provider::batchnorm::test

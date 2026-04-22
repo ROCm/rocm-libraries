@@ -658,7 +658,6 @@ if( MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN
         kernels/Conv_Winograd_v40_6_0_fp32_f3x2_dilation2.s
         kernels/Conv_Winograd_v40_6_0_fp32_f3x2_stride1.s
         kernels/Conv_Winograd_v40_6_0_fp32_f3x2_stride2.s
-        kernels/MIOpenConvBwdBias.cl
         kernels/MIOpenBatchNormActivInfer.cpp
         kernels/MIOpenCTCLoss.cpp
         kernels/MIOpenDropoutHIP.cpp
