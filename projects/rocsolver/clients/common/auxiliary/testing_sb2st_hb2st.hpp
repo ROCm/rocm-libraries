@@ -46,10 +46,6 @@ void sb2st_hb2st_initData(const rocblas_handle handle,
                           const rocblas_int ldab,
                           Uh& hAband)
 {
-//printf( "%s:%d\n", __func__, __LINE__ );
-    using foo::conjugate;
-    using S = decltype( std::real( T{} ) );
-
     // TODO: how to handle uplo? Easiest would be to convert upper to lower.
 
     // For bandwidth kd, need ku = kd-1 superdiagonals to cover the diagonal
@@ -142,14 +138,12 @@ void sb2st_hb2st_initData(const rocblas_handle handle,
             }
         #endif
     }
-//print_matrix( "hAband", ldab, n, hAband[0], ldab );
 
     if (GPU)
     {
         // now copy to the GPU
         CHECK_HIP_ERROR( dAband.transfer_from( hAband ) );
     }
-//printf( "%s:%d end\n", __func__, __LINE__ );
 }
 
 //------------------------------------------------------------------------------
@@ -171,7 +165,6 @@ void sb2st_hb2st_getError(const rocblas_handle handle,
                           Th& hW,
                           double* max_err)
 {
-printf( "%s:%d\n", __func__, __LINE__ );
     using S = decltype( std::real( T{} ) );
     using std::abs, std::imag, std::real, std::max;
 
@@ -185,7 +178,6 @@ printf( "%s:%d\n", __func__, __LINE__ );
     sb2st_hb2st_initData<true, true, T>(
         handle, uplo, n, kd, dAband, ldab, hAband );
 
-printf( "%s:%d error call\n", __func__, __LINE__ );
     // execute computations
     // GPU lapack
     double start, time;
@@ -197,14 +189,9 @@ printf( "%s:%d error call\n", __func__, __LINE__ );
             dD.data(), dE.data(),
             dV.data(), ldv ) );
     time = get_time_us_sync(stream) - start;
-    printf( "n %d, kd %d, getError time %.4f\n", n, kd, time );
-    CHECK_HIP_ERROR( hAbandRes.transfer_from( dAband ) );
+        CHECK_HIP_ERROR( hAbandRes.transfer_from( dAband ) );
     CHECK_HIP_ERROR( hDRes.transfer_from( dD ) );
     CHECK_HIP_ERROR( hERes.transfer_from( dE ) );
-
-// print_matrix( "dAband_out", ldab, n, hAbandRes.data(), ldab );
-// print_matrix( "D", 1, n,   hDRes.data(), 1 );
-// print_matrix( "E", 1, n-1, hERes.data(), 1 );
 
     S err = 0;
     S max_err_ = 0;
@@ -224,7 +211,6 @@ printf( "%s:%d error call\n", __func__, __LINE__ );
         {
             err = max( err, abs( imag( hAbandRes[0][idiag + 1 + j*ldab] ) ) );
         }
-        printf( "imag( E ) error %9.3g\n", err );
         max_err_ = max( err, max_err_ );
     }
 
@@ -234,7 +220,6 @@ printf( "%s:%d error call\n", __func__, __LINE__ );
     {
         err += hDRes[0][j] != real( hAbandRes[0][idiag + j*ldab] );
     }
-    printf( "diag( A ) == D error     %9.3g\n", err );
     max_err_ = max( err, max_err_ );
 
     // Check that diag( A, -1 ) == E.
@@ -307,7 +292,6 @@ printf( "%s:%d error call\n", __func__, __LINE__ );
     // todo: check orthogonality of V?
     // todo: check backwards error Q^H Aband - Atridiag or Aband - Q Atridiag?
     // cf. LAWN 41.
-printf( "%s:%d end\n", __func__, __LINE__ );
 }
 
 template <typename T, typename Td, typename Ud, typename Uh>
@@ -329,7 +313,6 @@ void sb2st_hb2st_getPerfData(const rocblas_handle handle,
                              const bool profile_kernels,
                              const bool perf)
 {
-printf( "%s:%d\n", __func__, __LINE__ );
     hipStream_t stream;
     CHECK_ROCBLAS_ERROR(
         rocblas_get_stream( handle, &stream ) );
@@ -347,7 +330,6 @@ printf( "%s:%d\n", __func__, __LINE__ );
     double start, time;
     for (int iter = 0; iter < 2; iter++)
     {
-printf( "%s:%d cold call %d ----------\n", __func__, __LINE__, iter );
         sb2st_hb2st_initData<false, true, T>(
             handle, uplo, n, kd, dAband, ldab, hAband );
 
@@ -375,7 +357,6 @@ printf( "%s:%d cold call %d ----------\n", __func__, __LINE__, iter );
 
     for (rocblas_int iter = 0; iter < hot_calls; iter++)
     {
-printf( "%s:%d hot call %d ----------\n", __func__, __LINE__, iter );
         sb2st_hb2st_initData<false, true, T>(
             handle, uplo, n, kd, dAband, ldab, hAband);
 
@@ -391,13 +372,11 @@ printf( "%s:%d hot call %d ----------\n", __func__, __LINE__, iter );
         printf( "n %d, kd %d, hot  iter %d, time %.4f\n", n, kd, iter, time );
     }
     *gpu_time_used /= hot_calls;
-printf( "%s:%d end\n", __func__, __LINE__ );
 }
 
 template <typename T>
 void testing_sb2st_hb2st( Arguments& argus )
 {
-printf( "%s:%d\n", __func__, __LINE__ );
     using S = decltype( std::real( T{} ) );
 
     // get arguments
@@ -567,7 +546,6 @@ printf( "%s:%d\n", __func__, __LINE__ );
 
     // ensure all arguments were consumed
     argus.validate_consumed();
-printf( "%s:%d end\n", __func__, __LINE__ );
 }
 
 #define EXTERN_TESTING_SB2ST_HB2ST( ... ) \

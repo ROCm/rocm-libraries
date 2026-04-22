@@ -335,12 +335,6 @@ __device__ void sb2st_hb2st_task(
     rocblas_int jc = sweep + 1 + task*kd;
     rocblas_int jn = std::min( jc + kd, n );
     rocblas_int nc = jn - jc;
-    assert( nc > 0 );
-    if (tid == 0)
-    {
-        printf( "round %2d, sweep %2d, task %2d, jc %2d, jn %2d, nc %2d\n",
-                round, sweep, task, jc, jn, nc );
-    }
 
     if (task == 0)
     {
@@ -553,10 +547,6 @@ ROCSOLVER_KERNEL void sb2st_hb2st_kernel(
     rocblas_int last_sweep = round / 2;
     rocblas_int sweep = last_sweep - sid;
     rocblas_int task = round - (2 * sweep);
-    assert( task >= 0 );
-    assert( sweep >= 0 );
-    // if (xid == 0 && yid == 0)
-    //     printf( "# round %2d, sweep %2d, task %2d\n", round, sweep, task );
 
     // execute sweep task
     sb2st_hb2st_task<T, S>(
@@ -624,7 +614,6 @@ rocblas_status rocsolver_sb2st_hb2st_argCheck(
         return rocblas_status_not_implemented;
 
     // 2. invalid size
-//printf( "%s: n %d, kd %d, ldab %d, ldv %d\n", __func__, n, kd, ldab, ldv );
     if (n < 0 || kd < 0 || ldab < 3*kd - 1 || ldv < 3*kd)
         return rocblas_status_invalid_size;
 
@@ -687,11 +676,6 @@ rocblas_status rocsolver_sb2st_hb2st_template(
     //       batch_count );
     HIP_CHECK( hipMemsetAsync( V + shiftV, 0, sizeof(T) * ldv * nv, stream ) );
 
-    #ifdef PRINT
-        print_matrix( "dA_in", ldab, n, Aband, ldab, 6 );
-        print_matrix( "dV_init", ldv, nv, V, ldv, 6 );
-    #endif
-
     // rocblas_pointer_mode old_mode;
     // rocblas_get_pointer_mode( handle, &old_mode );
     // rocblas_set_pointer_mode( handle, rocblas_pointer_mode_host );
@@ -729,10 +713,6 @@ rocblas_status rocsolver_sb2st_hb2st_template(
         rocblas_int sweep_end = rocblas_int( round / 2 ) + 1;
 
         rocblas_int parallel_sweeps = sweep_end - sweep_begin;
-        #ifdef PRINT
-            printf( "# round %d, sweeps %d : %d, parallel sweeps %d\n",
-                    round, sweep_begin, sweep_end, parallel_sweeps );
-        #endif
         if (parallel_sweeps > 0)
         {
             ROCSOLVER_LAUNCH_KERNEL(
@@ -743,14 +723,6 @@ rocblas_status rocsolver_sb2st_hb2st_template(
                 Aband, shiftA, ldab, strideA,
                 E, strideE,
                 V, ldv, strideV );
-
-            #ifdef PRINT
-                std::string lbl = "dA" + std::to_string( round );
-                print_matrix( lbl.c_str(), ldab, n, Aband, ldab, 6 );
-
-                lbl = "dV" + std::to_string( round );
-                print_matrix( lbl.c_str(), ldv, nv, V, ldv, 6 );
-            #endif
         }
         if (round == sweep_begin_finishes)
         {
