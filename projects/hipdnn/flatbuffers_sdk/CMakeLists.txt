@@ -18,9 +18,22 @@ set(HIP_DNN_FLATBUFFERS_SDK_INSTALL_INCLUDE_DIR "${CMAKE_INSTALL_INCLUDEDIR}/hip
 # --- FlatBuffers dependency ---
 hipdnn_add_dependency(flatbuffers VERSION ${HIPDNN_FLATBUFFERS_VERSION})
 
-# nlohmann_json is added at the top-level CMakeLists.txt so its imported target
-# is visible to both flatbuffers_sdk and frontend (which also includes nlohmann/json
-# directly in its public headers).
+# Per-library JSON gate. Defaults from the umbrella HIPDNN_SKIP_JSON_LIB when
+# building as part of the top-level project; can be set independently when
+# flatbuffers_sdk is built standalone.
+if(DEFINED HIPDNN_SKIP_JSON_LIB)
+    set(_hipdnn_flatbuffers_sdk_skip_default ${HIPDNN_SKIP_JSON_LIB})
+else()
+    set(_hipdnn_flatbuffers_sdk_skip_default OFF)
+endif()
+option(HIPDNN_FLATBUFFERS_SDK_SKIP_JSON_LIB
+    "Skip nlohmann/json.hpp from flatbuffers_sdk public headers."
+    ${_hipdnn_flatbuffers_sdk_skip_default})
+unset(_hipdnn_flatbuffers_sdk_skip_default)
+
+if(NOT HIPDNN_FLATBUFFERS_SDK_SKIP_JSON_LIB AND NOT TARGET nlohmann_json::nlohmann_json)
+    hipdnn_add_dependency(nlohmann_json VERSION ${HIPDNN_NLOHMANN_JSON_VERSION})
+endif()
 
 # Supported FlatBuffers versions (oldest to newest)
 # 24.12.23 matches PyTorch's FlatBuffers version for compatibility
@@ -92,7 +105,7 @@ if(TARGET FlatBuffers)
     )
 endif()
 
-if(NOT HIPDNN_FRONTEND_SKIP_JSON_LIB)
+if(NOT HIPDNN_FLATBUFFERS_SDK_SKIP_JSON_LIB)
     _hipdnn_flatbuffers_sdk_process_dependency(
         nlohmann_json nlohmann_json::nlohmann_json INCLUDE_DIR ${HIP_DNN_NLOHMANN_JSON_INCLUDE_DIR}
     )
@@ -110,13 +123,17 @@ target_link_libraries(hipdnn_flatbuffers_sdk INTERFACE hipdnn_data_sdk)
 
 # Add FlatBuffers includes
 hipdnn_add_dependency_includes(hipdnn_flatbuffers_sdk flatbuffers::flatbuffers)
-if(NOT HIPDNN_FRONTEND_SKIP_JSON_LIB)
+if(NOT HIPDNN_FLATBUFFERS_SDK_SKIP_JSON_LIB)
     hipdnn_add_dependency_includes(hipdnn_flatbuffers_sdk nlohmann_json::nlohmann_json)
 endif()
 
+# Scope the SKIP_JSON_LIB macro to installed (downstream) consumers only.
+# In-tree consumers (e.g. the backend, which always needs json) must not see it,
+# otherwise flatbuffers_sdk's to_json overloads in utilities/json/*.hpp disappear
+# and the backend fails to build.
 target_compile_definitions(
     hipdnn_flatbuffers_sdk INTERFACE
-    $<$<BOOL:${HIPDNN_FRONTEND_SKIP_JSON_LIB}>:HIPDNN_FLATBUFFERS_SDK_SKIP_JSON_LIB>
+    $<INSTALL_INTERFACE:$<$<BOOL:${HIPDNN_FLATBUFFERS_SDK_SKIP_JSON_LIB}>:HIPDNN_FLATBUFFERS_SDK_SKIP_JSON_LIB>>
 )
 
 target_include_directories(

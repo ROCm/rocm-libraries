@@ -8,8 +8,9 @@ find_dependency(hipdnn_data_sdk @HIPDNN_FRONTEND_DATA_SDK_MIN_VERSION@ CONFIG RE
 find_dependency(hipdnn_backend @HIPDNN_FRONTEND_BACKEND_MIN_VERSION@ CONFIG REQUIRED)
 
 # Frontend headers include <nlohmann/json.hpp> directly when JSON support is enabled.
-set(HIPDNN_FRONTEND_SKIP_JSON_LIB @HIPDNN_FRONTEND_SKIP_JSON_LIB@ CACHE BOOL
-    "Defines whether FE should not include nlohmann/json.hpp.")
+# This reflects how hipDNN was built; not consumer-overridable, since the imported
+# target's compile definitions are already baked in.
+set(HIPDNN_FRONTEND_SKIP_JSON_LIB @HIPDNN_FRONTEND_SKIP_JSON_LIB@)
 if(NOT HIPDNN_FRONTEND_SKIP_JSON_LIB)
     find_dependency(nlohmann_json REQUIRED)
 endif()

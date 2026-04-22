@@ -18,12 +18,12 @@ if(flatbuffers_VERSION AND NOT flatbuffers_VERSION IN_LIST _hipdnn_supported_fla
     )
 endif()
 
-# Export HIPDNN_FRONTEND_SKIP_JSON_LIB setting for consumers
-set(HIPDNN_FRONTEND_SKIP_JSON_LIB @HIPDNN_FRONTEND_SKIP_JSON_LIB@ CACHE BOOL
-    "Defines whether FE should not include nlohmann/json.hpp.")
+# Reflects how hipDNN was built; not consumer-overridable, since the imported
+# target's compile definitions are already baked in.
+set(HIPDNN_FLATBUFFERS_SDK_SKIP_JSON_LIB @HIPDNN_FLATBUFFERS_SDK_SKIP_JSON_LIB@)
 
-# nlohmann_json is optional based on HIPDNN_FRONTEND_SKIP_JSON_LIB
-if(NOT HIPDNN_FRONTEND_SKIP_JSON_LIB)
+# nlohmann_json is optional based on HIPDNN_FLATBUFFERS_SDK_SKIP_JSON_LIB
+if(NOT HIPDNN_FLATBUFFERS_SDK_SKIP_JSON_LIB)
     find_dependency(nlohmann_json REQUIRED)
 endif()
 
@@ -68,6 +68,6 @@ function(hipdnn_add_dependency_includes TARGET_NAME HEADER_LIB_TARGET_NAME)
 endfunction()
 
 hipdnn_add_dependency_includes(hipdnn_flatbuffers_sdk flatbuffers::flatbuffers)
-if(NOT HIPDNN_FRONTEND_SKIP_JSON_LIB)
+if(NOT HIPDNN_FLATBUFFERS_SDK_SKIP_JSON_LIB)
     hipdnn_add_dependency_includes(hipdnn_flatbuffers_sdk nlohmann_json::nlohmann_json)
 endif()
