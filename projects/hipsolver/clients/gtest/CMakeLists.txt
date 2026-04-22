@@ -112,14 +112,25 @@ target_include_directories(hipsolver-test
     $<BUILD_INTERFACE:${HIP_INCLUDE_DIRS}>
 )
 
+# TODO: This LAPACK dependency is only required to support geev
+# It should be removed once geev is implemented in rocSOLVER
+if(NOT "${HIP_PLATFORM}" STREQUAL "nvidia")
+    target_link_libraries(hipsolver-test PRIVATE
+        lapack_libraries
+        )
+else()
+    target_link_libraries(hipsolver-test PRIVATE
+        ${LAPACK_LIBRARIES}
+        )
+endif()
 target_link_libraries(hipsolver-test PRIVATE
-  lapack_libraries
   hipsolver-common
   clients-common
   $<IF:$<TARGET_EXISTS:GTest::gtest>,GTest::gtest,GTest::GTest>
   Threads::Threads
   roc::hipsolver
 )
+
 if(BUILD_HIPBLAS_TESTS)
   target_link_libraries(hipsolver-test PRIVATE roc::hipblas)
   target_sources(hipsolver-test PRIVATE hipblas_include1_gtest.cpp hipblas_include2_gtest.cpp)

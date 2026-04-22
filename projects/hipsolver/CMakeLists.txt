@@ -168,6 +168,9 @@ if(NOT "${HIP_PLATFORM}" STREQUAL "nvidia")
                                 -DUSE_OPENMP=OFF
                                 -DUSE_THREAD=OFF
                                 -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
+                                -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY="$<1:${LAPACK_BINARY_DIR}>"
+                                -DCMAKE_LIBRARY_OUTPUT_DIRECTORY="$<1:${LAPACK_BINARY_DIR}>"
+                                -DCMAKE_RUNTIME_OUTPUT_DIRECTORY="$<1:${LAPACK_BINARY_DIR}>"
             INSTALL_COMMAND     ""
         )
 
