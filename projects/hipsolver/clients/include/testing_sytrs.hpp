@@ -227,12 +227,14 @@ void testing_sytrs_bad_arg()
                                    &lworkOnHost);
 
         // NOTE: lworkOnDevice/lworkOnHost are in bytes when using the hipsolverDnX API,
-        // so allocating as T over-allocates by a factor of sizeof(T)
-        device_strided_batch_vector<T> dWork(lworkOnDevice, 1, lworkOnDevice, 1);
-        if(lworkOnDevice)
+        // so convert to a count of T elements (rounding up) before allocating
+        SIZE                           lworkOnDeviceT = (lworkOnDevice + sizeof(T) - 1) / sizeof(T);
+        SIZE                           lworkOnHostT   = (lworkOnHost + sizeof(T) - 1) / sizeof(T);
+        device_strided_batch_vector<T> dWork(lworkOnDeviceT, 1, lworkOnDeviceT, 1);
+        if(lworkOnDeviceT)
             CHECK_HIP_ERROR(dWork.memcheck());
 
-        std::vector<T> hWork(lworkOnHost);
+        std::vector<T> hWork(lworkOnHostT);
 
         // check bad arguments
         sytrs_checkBadArgs<API>(handle,
@@ -771,8 +773,10 @@ void testing_sytrs(Arguments& argus)
         device_strided_batch_vector<I>   dIpiv(size_P, 1, stP, bc);
         device_strided_batch_vector<int> dInfo(1, 1, 1, bc);
         // NOTE: lworkOnDevice/lworkOnHost are in bytes when using the hipsolverDnX API,
-        // so allocating as T over-allocates by a factor of sizeof(T)
-        device_strided_batch_vector<T> dWork(lworkOnDevice, 1, lworkOnDevice, 1);
+        // so convert to a count of T elements (rounding up) before allocating
+        SIZE                           lworkOnDeviceT = (lworkOnDevice + sizeof(T) - 1) / sizeof(T);
+        SIZE                           lworkOnHostT   = (lworkOnHost + sizeof(T) - 1) / sizeof(T);
+        device_strided_batch_vector<T> dWork(lworkOnDeviceT, 1, lworkOnDeviceT, 1);
         if(size_A)
             CHECK_HIP_ERROR(dA.memcheck());
         if(size_B)
@@ -780,10 +784,10 @@ void testing_sytrs(Arguments& argus)
         if(size_P)
             CHECK_HIP_ERROR(dIpiv.memcheck());
         CHECK_HIP_ERROR(dInfo.memcheck());
-        if(lworkOnDevice)
+        if(lworkOnDeviceT)
             CHECK_HIP_ERROR(dWork.memcheck());
 
-        std::vector<T> hWork(lworkOnHost);
+        std::vector<T> hWork(lworkOnHostT);
 
         // check computations
         if(argus.unit_check || argus.norm_check)
