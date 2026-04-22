@@ -16894,9 +16894,6 @@ class KernelWriterAssembly(KernelWriter):
     ldsBlockSizePerPad: int = kernel[f"LdsBlockSizePerPad{tc}"]
     ldsPadSize: int = int(kernel[f"LdsPad{tc}"] * bpe)
     dim1Divisor = 2 if (kernel["TDMSplit"] and not ("MXS" in tc)) else 1
-    if ("MXS" in tc):
-        subTc = tc[3]
-        mxUnit: int = kernel["MatrixInstK"] // kernel["ProblemType"][f"MXBlock{subTc}"]
 
     mod.add(comp.initOperands(descSgprName(0), descSgprName(1), None, None))
     mod.add(comp.setDataType(dtype, descSgprName(1)))
