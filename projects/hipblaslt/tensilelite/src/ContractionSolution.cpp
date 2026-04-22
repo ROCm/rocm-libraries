@@ -2874,20 +2874,10 @@ namespace TensileLite
         {
             auto tiles           = problem.getNumTiles(sizeMapping, 1);
             if (sizeMapping.streamK == 4)
-            {
                 sk.reduction = origami::reduction_t::tree;
-                AMDGPU const* pAMDGPU = dynamic_cast<AMDGPU const*>(&hardware);
-                assert(pAMDGPU != nullptr && pAMDGPU->computeUnitCount != 0);
-                size_t cuCount = pAMDGPU->computeUnitCount;
-                sk.grid = cuCount;
-                if(pAMDGPU->skFixedGrid > 0)
-                    sk.grid = pAMDGPU->skFixedGrid;
-            }
             else
-            {
-                sk.reduction         = getSKReduction(problem, hardware);
-                sk.grid              = getSKGrid(problem, hardware, tiles, sk.reduction);
-            }
+                sk.reduction = getSKReduction(problem, hardware);
+            sk.grid = getSKGrid(problem, hardware, tiles, sk.reduction);
             const bool streamKDP = Debug::Instance().useStreamKDataParrallel();
             if(sk.grid > 0
                && (sk.reduction == origami::reduction_t::parallel
@@ -3520,54 +3510,74 @@ namespace TensileLite
         }
         else if(pAMDGPU->skDynamicGrid > 0)
         {
-            size_t x     = 1;
-            size_t y     = 1;
-            size_t batch = 1;
-            for(size_t i = 0; i < problem.freeIndicesA().size(); i++)
+            if(sizeMapping.streamK == 4)
             {
-                x *= problem.freeSizeA(i);
+                // Grid for dynamic kernel
+                // Limit workgroups per CU to 3
+                // TODO Verify this limit is best
+                auto kernelOccupancy = std::min(sizeMapping.CUOccupancy, 3);
+                auto maxGrid = cuCount * kernelOccupancy;
+                if(pAMDGPU->skMaxCUs > 0)
+                {
+                    maxGrid = std::min(maxGrid, static_cast<size_t>(pAMDGPU->skMaxCUs));
+                }
+                // TODO Calculate total work items when dynamic queue works with stream-k
+                // For now, all work items are full tiles
+                auto workItems = tiles;
+                // Select grid to use all CUs, unless number of work items is less
+                skGrid = std::min(workItems, maxGrid);
             }
-            for(size_t i = 0; i < problem.freeIndicesB().size(); i++)
+            else
             {
-                y *= problem.freeSizeB(i);
+                size_t x     = 1;
+                size_t y     = 1;
+                size_t batch = 1;
+                for(size_t i = 0; i < problem.freeIndicesA().size(); i++)
+                {
+                    x *= problem.freeSizeA(i);
+                }
+                for(size_t i = 0; i < problem.freeIndicesB().size(); i++)
+                {
+                    y *= problem.freeSizeB(i);
+                }
+                for(size_t i = 0; i < problem.batchIndices().size(); ++i)
+                {
+                    batch *= problem.batchSize(i);
+                }
+                hip::HipAMDGPU const* hipAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(&hardware);
+
+                origami::problem_t origami_problem = {
+                    .size        = {x, y, z},
+                    .batch       = batch,
+                    .a_transpose = problem.transA() ? origami::transpose_t::T : origami::transpose_t::N,
+                    .b_transpose = problem.transB() ? origami::transpose_t::T : origami::transpose_t::N,
+                    .a_dtype     = datatypeToAnalyticalDatatype(problem.a().dataType()),
+                    .b_dtype     = datatypeToAnalyticalDatatype(problem.b().dataType()),
+                    .mi_dtype    = datatypeToAnalyticalDatatype(problem.computeInputTypeA()),
+                };
+                origami::config_t origami_config = {
+                    .mt                        = {static_cast<size_t>(sizeMapping.macroTile.x),
+                                                static_cast<size_t>(sizeMapping.macroTile.y),
+                                                static_cast<size_t>(sizeMapping.depthU)},
+                    .mi                        = {static_cast<size_t>(sizeMapping.matrixInstruction[0]),
+                                                static_cast<size_t>(sizeMapping.matrixInstruction[1]),
+                                                static_cast<size_t>(sizeMapping.matrixInstruction[2])},
+                    .occupancy                 = std::max(sizeMapping.CUOccupancy, static_cast<int>(1)),
+                    .workgroup_mapping         = sizeMapping.workGroupMapping,
+                    .workspace_size            = problem.workspaceSize(),
+                    .workspace_size_per_elem_c = sizeMapping.workspaceSizePerElemC,
+                    .reduction_strategy        = reductionStrat,
+                };
+
+                TENSILE_ASSERT_EXC(hipAMDGPU->analyticalHardware != nullptr);
+
+                skGrid = origami::streamk::select_grid_size(
+                    origami_problem,
+                    *(hipAMDGPU->analyticalHardware),
+                    origami_config,
+                    static_cast<origami::grid_selection_t>(pAMDGPU->skDynamicGrid),
+                    pAMDGPU->skMaxCUs);
             }
-            for(size_t i = 0; i < problem.batchIndices().size(); ++i)
-            {
-                batch *= problem.batchSize(i);
-            }
-            hip::HipAMDGPU const* hipAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(&hardware);
-
-            origami::problem_t origami_problem = {
-                .size        = {x, y, z},
-                .batch       = batch,
-                .a_transpose = problem.transA() ? origami::transpose_t::T : origami::transpose_t::N,
-                .b_transpose = problem.transB() ? origami::transpose_t::T : origami::transpose_t::N,
-                .a_dtype     = datatypeToAnalyticalDatatype(problem.a().dataType()),
-                .b_dtype     = datatypeToAnalyticalDatatype(problem.b().dataType()),
-                .mi_dtype    = datatypeToAnalyticalDatatype(problem.computeInputTypeA()),
-            };
-            origami::config_t origami_config = {
-                .mt                        = {static_cast<size_t>(sizeMapping.macroTile.x),
-                                              static_cast<size_t>(sizeMapping.macroTile.y),
-                                              static_cast<size_t>(sizeMapping.depthU)},
-                .mi                        = {static_cast<size_t>(sizeMapping.matrixInstruction[0]),
-                                              static_cast<size_t>(sizeMapping.matrixInstruction[1]),
-                                              static_cast<size_t>(sizeMapping.matrixInstruction[2])},
-                .occupancy                 = std::max(sizeMapping.CUOccupancy, static_cast<int>(1)),
-                .workgroup_mapping         = sizeMapping.workGroupMapping,
-                .workspace_size            = problem.workspaceSize(),
-                .workspace_size_per_elem_c = sizeMapping.workspaceSizePerElemC,
-                .reduction_strategy        = reductionStrat,
-            };
-
-            TENSILE_ASSERT_EXC(hipAMDGPU->analyticalHardware != nullptr);
-
-            skGrid = origami::streamk::select_grid_size(
-                origami_problem,
-                *(hipAMDGPU->analyticalHardware),
-                origami_config,
-                static_cast<origami::grid_selection_t>(pAMDGPU->skDynamicGrid),
-                pAMDGPU->skMaxCUs);
         }
         // Limit the CUs Stream-K is launched on either max or the specified,
         // whichever is minimum.
