@@ -3,7 +3,10 @@
 
 #include "plans/SdpaBwdPlanBuilder.hpp"
 #include "HipKernelUtils.hpp"
+#include "asm/AsmKernelPath.hpp"
+#include "plans/SdpaBwdPlan.hpp"
 
+#include <cmath>
 #include <hip/hip_runtime.h>
 #include <hip_kernel_provider_common/HipDeviceUtils.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
@@ -207,12 +210,251 @@ void SdpaBwdPlanBuilder::initializeExecutionSettings(
 
 void SdpaBwdPlanBuilder::buildPlan(
     const HipKernelHandle& /* handle */,
-    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& /* opGraph */,
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& /* engineConfig */,
-    HipKernelContext& /* executionContext */) const
+    HipKernelContext& executionContext) const
 {
-    // TODO(Task I5): Implement backward 3-kernel plan (odo -> dqdkdv -> dq_convert)
-    HIPDNN_PLUGIN_LOG_ERROR("SdpaBwdPlanBuilder::buildPlan not implemented");
+    // -------------------------------------------------------------------------
+    // 1. Load 3 kernel modules
+    // -------------------------------------------------------------------------
+    std::string odoCoPath
+        = asm_kernels::getAsmKernelPath("gfx942/fmha_v3_bwd/MI300/bwd_hd128_odo_bf16.co");
+    std::string dqdkdvCoPath = asm_kernels::getAsmKernelPath(
+        "gfx942/fmha_v3_bwd/MI300/bwd_hd128_bf16_a32_rtne_psskddv.co");
+    std::string postCoPath = asm_kernels::getAsmKernelPath(
+        "gfx942/fmha_v3_bwd/MI300/bwd_hd128_dq_convert_bf16_rtne.co");
+
+    hipModule_t odoModule = nullptr;
+    hipError_t err = hipModuleLoad(&odoModule, odoCoPath.c_str());
+    if(err != hipSuccess)
+    {
+        HIPDNN_PLUGIN_LOG_ERROR("Failed to load ODO kernel module: " << odoCoPath << " error: "
+                                                                     << hipGetErrorString(err));
+        return;
+    }
+
+    hipModule_t dqdkdvModule = nullptr;
+    err = hipModuleLoad(&dqdkdvModule, dqdkdvCoPath.c_str());
+    if(err != hipSuccess)
+    {
+        HIPDNN_PLUGIN_LOG_ERROR("Failed to load DQDKDV kernel module: "
+                                << dqdkdvCoPath << " error: " << hipGetErrorString(err));
+        (void)hipModuleUnload(odoModule);
+        return;
+    }
+
+    hipModule_t postModule = nullptr;
+    err = hipModuleLoad(&postModule, postCoPath.c_str());
+    if(err != hipSuccess)
+    {
+        HIPDNN_PLUGIN_LOG_ERROR("Failed to load DQ_CONVERT kernel module: "
+                                << postCoPath << " error: " << hipGetErrorString(err));
+        (void)hipModuleUnload(odoModule);
+        (void)hipModuleUnload(dqdkdvModule);
+        return;
+    }
+
+    // -------------------------------------------------------------------------
+    // 2. Get kernel functions from modules
+    // -------------------------------------------------------------------------
+    hipFunction_t odoFunc = nullptr;
+    err = hipModuleGetFunction(&odoFunc, odoModule, "_ZN5aiter23fmha_bwd_hd128_odo_bf16E");
+    if(err != hipSuccess)
+    {
+        HIPDNN_PLUGIN_LOG_ERROR("Failed to get ODO function, error: " << hipGetErrorString(err));
+        (void)hipModuleUnload(odoModule);
+        (void)hipModuleUnload(dqdkdvModule);
+        (void)hipModuleUnload(postModule);
+        return;
+    }
+
+    hipFunction_t dqdkdvFunc = nullptr;
+    err = hipModuleGetFunction(
+        &dqdkdvFunc, dqdkdvModule, "_ZN5aiter36fmha_bwd_hd128_bf16_a32_rtne_psskddvE");
+    if(err != hipSuccess)
+    {
+        HIPDNN_PLUGIN_LOG_ERROR("Failed to get DQDKDV function, error: " << hipGetErrorString(err));
+        (void)hipModuleUnload(odoModule);
+        (void)hipModuleUnload(dqdkdvModule);
+        (void)hipModuleUnload(postModule);
+        return;
+    }
+
+    hipFunction_t postFunc = nullptr;
+    err = hipModuleGetFunction(
+        &postFunc, postModule, "_ZN5aiter35fmha_bwd_hd128_dq_convert_bf16_rtneE");
+    if(err != hipSuccess)
+    {
+        HIPDNN_PLUGIN_LOG_ERROR(
+            "Failed to get DQ_CONVERT function, error: " << hipGetErrorString(err));
+        (void)hipModuleUnload(odoModule);
+        (void)hipModuleUnload(dqdkdvModule);
+        (void)hipModuleUnload(postModule);
+        return;
+    }
+
+    // -------------------------------------------------------------------------
+    // 3. Extract SDPA backward attributes and tensor metadata from graph
+    // -------------------------------------------------------------------------
+    auto& sdpaNode = opGraph.getNodeWrapper(0);
+    auto& sdpaAttrs
+        = sdpaNode.attributesAs<hipdnn_flatbuffers_sdk::data_objects::SdpaBackwardAttributes>();
+    auto& tensorMap = opGraph.getTensorMap();
+
+    // Tensor UIDs
+    int64_t qUid = sdpaAttrs.q_tensor_uid();
+    int64_t kUid = sdpaAttrs.k_tensor_uid();
+    int64_t vUid = sdpaAttrs.v_tensor_uid();
+    int64_t oUid = sdpaAttrs.o_tensor_uid();
+    int64_t doUid = sdpaAttrs.do_tensor_uid();
+    int64_t statsUid = sdpaAttrs.stats_tensor_uid();
+    int64_t dqUid = sdpaAttrs.dq_tensor_uid();
+    int64_t dkUid = sdpaAttrs.dk_tensor_uid();
+    int64_t dvUid = sdpaAttrs.dv_tensor_uid();
+
+    // Tensor objects
+    auto* qTensor = tensorMap.at(qUid);
+    auto* kTensor = tensorMap.at(kUid);
+    auto* vTensor = tensorMap.at(vUid);
+    auto* oTensor = tensorMap.at(oUid);
+    auto* doTensor = tensorMap.at(doUid);
+    auto* statsTensor = tensorMap.at(statsUid);
+    auto* dqTensor = tensorMap.at(dqUid);
+    auto* dkTensor = tensorMap.at(dkUid);
+    auto* dvTensor = tensorMap.at(dvUid);
+
+    // Dimensions from Q: [B, H_q, S_q, D_qk]
+    auto* qDims = qTensor->dims();
+    auto batchSize = static_cast<unsigned int>(qDims->Get(0));
+    auto numHeadsQ = static_cast<unsigned int>(qDims->Get(1));
+    auto seqLenQ = static_cast<unsigned int>(qDims->Get(2));
+    auto headDimQk = static_cast<unsigned int>(qDims->Get(3));
+
+    // Dimensions from K: [B, H_kv, S_kv, D_qk]
+    auto numHeadsKv = static_cast<unsigned int>(kTensor->dims()->Get(1));
+    auto seqLenKv = static_cast<unsigned int>(kTensor->dims()->Get(2));
+
+    // Dimensions from V: [B, H_kv, S_kv, D_v]
+    auto headDimV = static_cast<unsigned int>(vTensor->dims()->Get(3));
+
+    // -------------------------------------------------------------------------
+    // 4. Extract strides (in elements) from tensor metadata
+    // -------------------------------------------------------------------------
+    // Q: [B, H_q, S_q, D_qk]
+    auto* qStrides = qTensor->strides();
+    auto qStrideBatch = static_cast<unsigned int>(qStrides->Get(0));
+    auto qStrideHead = static_cast<unsigned int>(qStrides->Get(1));
+    auto qStrideSeq = static_cast<unsigned int>(qStrides->Get(2));
+
+    // K: [B, H_kv, S_kv, D_qk]
+    auto* kStrides = kTensor->strides();
+    auto kStrideBatch = static_cast<unsigned int>(kStrides->Get(0));
+    auto kStrideHead = static_cast<unsigned int>(kStrides->Get(1));
+    auto kStrideSeq = static_cast<unsigned int>(kStrides->Get(2));
+
+    // V: [B, H_kv, S_kv, D_v]
+    auto* vStrides = vTensor->strides();
+    auto vStrideBatch = static_cast<unsigned int>(vStrides->Get(0));
+    auto vStrideHead = static_cast<unsigned int>(vStrides->Get(1));
+    auto vStrideSeq = static_cast<unsigned int>(vStrides->Get(2));
+
+    // O: [B, H_q, S_q, D_v]
+    auto* oStrides = oTensor->strides();
+    auto oStrideBatch = static_cast<unsigned int>(oStrides->Get(0));
+    auto oStrideHead = static_cast<unsigned int>(oStrides->Get(1));
+    auto oStrideSeq = static_cast<unsigned int>(oStrides->Get(2));
+
+    // dO: [B, H_q, S_q, D_v]
+    auto* doStrides = doTensor->strides();
+    auto doStrideBatch = static_cast<unsigned int>(doStrides->Get(0));
+    auto doStrideHead = static_cast<unsigned int>(doStrides->Get(1));
+    auto doStrideSeq = static_cast<unsigned int>(doStrides->Get(2));
+
+    // dQ: [B, H_q, S_q, D_qk]
+    auto* dqStrides = dqTensor->strides();
+    auto dqStrideBatch = static_cast<unsigned int>(dqStrides->Get(0));
+    auto dqStrideHead = static_cast<unsigned int>(dqStrides->Get(1));
+    auto dqStrideSeq = static_cast<unsigned int>(dqStrides->Get(2));
+
+    // dK: [B, H_kv, S_kv, D_qk]
+    auto* dkStrides = dkTensor->strides();
+    auto dkStrideBatch = static_cast<unsigned int>(dkStrides->Get(0));
+    auto dkStrideHead = static_cast<unsigned int>(dkStrides->Get(1));
+    auto dkStrideSeq = static_cast<unsigned int>(dkStrides->Get(2));
+
+    // dV: [B, H_kv, S_kv, D_v]
+    auto* dvStrides = dvTensor->strides();
+    auto dvStrideBatch = static_cast<unsigned int>(dvStrides->Get(0));
+    auto dvStrideHead = static_cast<unsigned int>(dvStrides->Get(1));
+    auto dvStrideSeq = static_cast<unsigned int>(dvStrides->Get(2));
+
+    // Stats (LSE): [B, H_q, S_q] — rank 3, FP32
+    auto* statsStrides = statsTensor->strides();
+    auto statsStrideBatch = static_cast<unsigned int>(statsStrides->Get(0));
+    auto statsStrideHead = static_cast<unsigned int>(statsStrides->Get(1));
+
+    // -------------------------------------------------------------------------
+    // 5. Attention scale
+    // -------------------------------------------------------------------------
+    float attnScale = 1.0f / std::sqrt(static_cast<float>(headDimQk));
+    auto scaleValue = sdpaAttrs.attn_scale_value();
+    if(scaleValue.has_value())
+    {
+        attnScale = scaleValue.value();
+    }
+
+    // -------------------------------------------------------------------------
+    // 6. Build params and create plan
+    // -------------------------------------------------------------------------
+    SdpaBwdParams params{};
+    params.qUid = qUid;
+    params.kUid = kUid;
+    params.vUid = vUid;
+    params.oUid = oUid;
+    params.doUid = doUid;
+    params.statsUid = statsUid;
+    params.dqUid = dqUid;
+    params.dkUid = dkUid;
+    params.dvUid = dvUid;
+
+    params.batchSize = batchSize;
+    params.numHeadsQ = numHeadsQ;
+    params.numHeadsKv = numHeadsKv;
+    params.seqLenQ = seqLenQ;
+    params.seqLenKv = seqLenKv;
+    params.headDimQk = headDimQk;
+    params.headDimV = headDimV;
+
+    params.qStrideSeq = qStrideSeq;
+    params.qStrideHead = qStrideHead;
+    params.qStrideBatch = qStrideBatch;
+    params.kStrideSeq = kStrideSeq;
+    params.kStrideHead = kStrideHead;
+    params.kStrideBatch = kStrideBatch;
+    params.vStrideSeq = vStrideSeq;
+    params.vStrideHead = vStrideHead;
+    params.vStrideBatch = vStrideBatch;
+    params.oStrideSeq = oStrideSeq;
+    params.oStrideHead = oStrideHead;
+    params.oStrideBatch = oStrideBatch;
+    params.doStrideSeq = doStrideSeq;
+    params.doStrideHead = doStrideHead;
+    params.doStrideBatch = doStrideBatch;
+    params.dqStrideSeq = dqStrideSeq;
+    params.dqStrideHead = dqStrideHead;
+    params.dqStrideBatch = dqStrideBatch;
+    params.dkStrideSeq = dkStrideSeq;
+    params.dkStrideHead = dkStrideHead;
+    params.dkStrideBatch = dkStrideBatch;
+    params.dvStrideSeq = dvStrideSeq;
+    params.dvStrideHead = dvStrideHead;
+    params.dvStrideBatch = dvStrideBatch;
+    params.statsStrideHead = statsStrideHead;
+    params.statsStrideBatch = statsStrideBatch;
+    params.attnScale = attnScale;
+
+    executionContext.setPlan(std::make_unique<SdpaBwdPlan>(
+        odoModule, odoFunc, dqdkdvModule, dqdkdvFunc, postModule, postFunc, params));
 }
 
 std::vector<hipdnn_flatbuffers_sdk::data_objects::KnobT> SdpaBwdPlanBuilder::getCustomKnobs(
