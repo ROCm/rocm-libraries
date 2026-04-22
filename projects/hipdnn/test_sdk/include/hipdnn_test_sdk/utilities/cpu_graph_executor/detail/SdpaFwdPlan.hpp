@@ -214,14 +214,16 @@ public:
                                       ? tensorMap.at(nodeAttributes->attn_mask_tensor_uid().value())
                                       : nullptr;
 
+        SdpaFwdParams params(*tensorMap.at(nodeAttributes->q_tensor_uid()),
+                             *tensorMap.at(nodeAttributes->k_tensor_uid()),
+                             *tensorMap.at(nodeAttributes->v_tensor_uid()),
+                             *tensorMap.at(nodeAttributes->o_tensor_uid()),
+                             attnScaleValue,
+                             nodeAttributes->causal_mask(),
+                             attnMaskPtr);
+
         return std::make_unique<SdpaFwdPlan<QDataType, KDataType, VDataType, ODataType>>(
-            SdpaFwdParams(*tensorMap.at(nodeAttributes->q_tensor_uid()),
-                          *tensorMap.at(nodeAttributes->k_tensor_uid()),
-                          *tensorMap.at(nodeAttributes->v_tensor_uid()),
-                          *tensorMap.at(nodeAttributes->o_tensor_uid()),
-                          attnScaleValue,
-                          nodeAttributes->causal_mask(),
-                          attnMaskPtr));
+            std::move(params));
     }
 };
 

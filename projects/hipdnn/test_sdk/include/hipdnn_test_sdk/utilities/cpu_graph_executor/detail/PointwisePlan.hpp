@@ -80,8 +80,7 @@ public:
 
     void execute(const std::unordered_map<int64_t, void*>& variantPack) override
     {
-        if(_params.reluLowerClip.has_value()
-           || _params.reluUpperClip.has_value() // NOLINT(bugprone-branch-clone)
+        if(_params.reluLowerClip.has_value() || _params.reluUpperClip.has_value()
            || _params.reluLowerClipSlope.has_value() || _params.swishBeta.has_value())
         {
             executeParameterized(variantPack);
@@ -273,23 +272,25 @@ public:
                                      ? tensorMap.at(*nodeAttributes->in_1_tensor_uid())
                                      : nullptr);
 
-        if(nodeAttributes->elu_alpha().has_value() || nodeAttributes->softplus_beta().has_value())
+        PointwiseParams params(nodeAttributes->operation(),
+                               *in0Tensor,
+                               in1Tensor,
+                               *out0Tensor,
+                               nodeAttributes->relu_lower_clip(),
+                               nodeAttributes->relu_upper_clip(),
+                               nodeAttributes->relu_lower_clip_slope(),
+                               nodeAttributes->swish_beta(),
+                               nodeAttributes->elu_alpha(),
+                               nodeAttributes->softplus_beta());
+
+        if(params.eluAlpha.has_value() || params.softplusBeta.has_value())
         {
             throw std::runtime_error("ELU and Softplus parameters are not supported "
                                      "in PointwisePlanBuilder for the Cpu Graph Executor yet");
         }
 
         return std::make_unique<PointwisePlan<Input0Type, Input1Type, OutputType>>(
-            PointwiseParams(nodeAttributes->operation(),
-                            *in0Tensor,
-                            in1Tensor,
-                            *out0Tensor,
-                            nodeAttributes->relu_lower_clip(),
-                            nodeAttributes->relu_upper_clip(),
-                            nodeAttributes->relu_lower_clip_slope(),
-                            nodeAttributes->swish_beta(),
-                            nodeAttributes->elu_alpha(),
-                            nodeAttributes->softplus_beta()));
+            std::move(params));
     }
 };
 

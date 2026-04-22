@@ -225,19 +225,20 @@ public:
             invVariance = tensorMap.at(nodeAttributes->inv_variance_tensor_uid().value());
         }
 
+        LayernormFpropParams params(*tensorMap.at(nodeAttributes->x_tensor_uid()),
+                                    *tensorMap.at(nodeAttributes->y_tensor_uid()),
+                                    *tensorMap.at(nodeAttributes->epsilon_tensor_uid()),
+                                    *tensorMap.at(nodeAttributes->scale_tensor_uid()),
+                                    *tensorMap.at(nodeAttributes->bias_tensor_uid()),
+                                    nodeAttributes->normalized_dim_count(),
+                                    mean,
+                                    invVariance);
+
         return std::make_unique<LayernormFpropPlan<XDataType,
                                                    ScaleBiasDataType,
                                                    MeanInvVarianceDataType,
                                                    OutputDataType,
-                                                   ComputeDataType>>(
-            LayernormFpropParams(*tensorMap.at(nodeAttributes->x_tensor_uid()),
-                                 *tensorMap.at(nodeAttributes->y_tensor_uid()),
-                                 *tensorMap.at(nodeAttributes->epsilon_tensor_uid()),
-                                 *tensorMap.at(nodeAttributes->scale_tensor_uid()),
-                                 *tensorMap.at(nodeAttributes->bias_tensor_uid()),
-                                 nodeAttributes->normalized_dim_count(),
-                                 mean,
-                                 invVariance));
+                                                   ComputeDataType>>(std::move(params));
     }
 };
 } // namespace hipdnn_test_sdk::detail

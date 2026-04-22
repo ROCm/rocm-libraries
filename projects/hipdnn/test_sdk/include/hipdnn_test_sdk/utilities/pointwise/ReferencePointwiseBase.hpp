@@ -106,8 +106,7 @@ private:
 
         switch(operation)
         {
-        case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::
-            RELU_FWD: // NOLINT(bugprone-branch-clone)
+        case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD:
             policy.executeUnary(input, output, pointwise::ReluForward<ComputeType>{});
             break;
         case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::SIGMOID_FWD:
@@ -125,8 +124,7 @@ private:
         case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::IDENTITY:
             policy.executeUnary(input, output, pointwise::Identity{});
             break;
-        case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::
-            GELU_FWD: // NOLINT(bugprone-branch-clone)
+        case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::GELU_FWD:
             policy.executeUnary(input, output, pointwise::GeluForward<ComputeType>{});
             break;
         case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::GELU_APPROX_TANH_FWD:
@@ -157,8 +155,7 @@ private:
 
         switch(operation)
         {
-        case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::
-            RELU_FWD: // NOLINT(bugprone-branch-clone)
+        case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD:
             policy.executeUnary(
                 input,
                 output,
@@ -200,8 +197,7 @@ private:
         case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::MUL:
             policy.executeBinaryBroadcast(input1, input2, output, pointwise::Multiply{});
             break;
-        case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::
-            RELU_BWD: // NOLINT(bugprone-branch-clone)
+        case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_BWD:
             policy.executeBinaryBroadcast(
                 input1, input2, output, pointwise::ReluBackward<ComputeType>{});
             break;
