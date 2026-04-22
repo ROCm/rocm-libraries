@@ -39,4 +39,25 @@ inline std::string getDeviceString(hipStream_t stream)
     return archStr.substr(0, archStr.find(':'));
 }
 
+inline int getDeviceMultiProcessorCount(hipStream_t stream)
+{
+    hipDevice_t deviceId = -1;
+    hipDeviceProp_t props;
+    auto status = hipStreamGetDevice(stream, &deviceId);
+    if(status != hipSuccess)
+    {
+        throw std::runtime_error("hipStreamGetDevice failed with error code: "
+                                 + std::to_string(status));
+    }
+
+    status = hipGetDeviceProperties(&props, deviceId);
+    if(status != hipSuccess)
+    {
+        throw std::runtime_error("hipStreamGetDevice failed with error code: "
+                                 + std::to_string(status));
+    }
+
+    return props.multiProcessorCount;
+}
+
 } // namespace hip_kernel_provider_common

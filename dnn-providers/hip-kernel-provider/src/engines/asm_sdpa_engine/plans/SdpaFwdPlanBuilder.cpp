@@ -134,6 +134,24 @@ std::string getDataTypeIdentifier(hipdnn_flatbuffers_sdk::data_objects::DataType
     return "";
 }
 
+std::string getKernelCoPath(std::string coName, const std::string& archId, int processorCount)
+{
+    if(archId == "gfx942")
+    {
+
+        auto pos = coName.rfind('/');
+        if(processorCount == 304)
+        {
+            coName = coName.substr(0, pos + 1) + "MI300/" + coName.substr(pos + 1);
+        }
+        else if(processorCount == 80 || processorCount == 64)
+        {
+            coName = coName.substr(0, pos + 1) + "MI308/" + coName.substr(pos + 1);
+        }
+    }
+    return asm_kernels::getAsmKernelPath(coName);
+}
+
 bool SdpaFwdPlanBuilder::isApplicable(
     const HipKernelHandle& handle,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
@@ -381,7 +399,22 @@ void SdpaFwdPlanBuilder::buildPlan(
         return;
     }
 
-    std::string coPath = asm_kernels::getAsmKernelPath(config.co_name);
+    std::string deviceString;
+    int multiProcessorCount;
+    try
+    {
+        deviceString = hip_kernel_provider_common::getDeviceString(handle.getStream());
+        multiProcessorCount
+            = hip_kernel_provider_common::getDeviceMultiProcessorCount(handle.getStream());
+    }
+    catch(const std::exception& e)
+    {
+        HIPDNN_PLUGIN_LOG_ERROR("Failed to query device properties with error: " << e.what());
+    }
+
+    auto coPath = getKernelCoPath(config.co_name, deviceString, multiProcessorCount);
+
+    HIPDNN_PLUGIN_LOG_INFO("Using kernel with path: " << coPath);
 
     hipModule_t module;
     hipError_t err = hipModuleLoad(&module, coPath.c_str());
