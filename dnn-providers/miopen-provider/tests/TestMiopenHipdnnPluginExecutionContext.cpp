@@ -2,6 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 #include <gtest/gtest.h>
+#include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <memory>
 
 #include "mocks/MockPlan.hpp"
@@ -45,6 +46,8 @@ TEST(TestMiopenHipdnnMiopenContext, GetPlanThrowsIfNotSet)
 
 TEST(TestMiopenHipdnnMiopenContext, GetWorkspaceSize)
 {
+    SKIP_IF_NO_DEVICES();
+
     HipdnnMiopenContext ctx;
 
     auto mockPlan = std::make_unique<miopen_plugin::MockPlan>();
