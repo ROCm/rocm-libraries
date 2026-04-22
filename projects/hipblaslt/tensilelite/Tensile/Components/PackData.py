@@ -34,7 +34,7 @@ from rocisa.functions import VSaturateCastInt
 
 from ..Common.DataType import DataType
 from ..Component import PackData
-from ..True16Emit import emitCvtF32toF16
+from rocisa.instruction import ECvtF32toF16
 
 def formatting(idx, inputPrefix, prefixOffset):
     if inputPrefix:
@@ -49,7 +49,7 @@ class PackData_F16(PackData):
         ti = rocIsa.getInstance()
         if gwvw == 1:
             formatVgpr = formatting(elementSumIdx, inputPrefix, prefixOffset)
-            emitCvtF32toF16(module, ti.getArchCaps()["NoSDWA"], vgpr(destIdx), vgpr(formatVgpr), 0, "convert C to fp16", useSdwaLegacy=False)
+            module.add(ECvtF32toF16(dst=vgpr(destIdx), src=vgpr(formatVgpr), sel=0, useSdwaLegacy=False, comment="convert C to fp16"))
             return module
 
         assert (gwvw % 2 == 0)
@@ -70,7 +70,7 @@ class PackData_F16(PackData):
                     d = destIdx + vi//2
                     module.add(VCvtPkF32toF16(dst=vgpr(d), src0=vgpr(formatVgpr_1), src1=vgpr(formatVgpr), comment="convert C to fp16 and pack with neighbor"))
             else:
-                emitCvtF32toF16(module, ti.getArchCaps()["NoSDWA"], vgpr(tmpDst), vgpr(formatVgpr), 0, "convert C to fp16", useSdwaLegacy=False)
+                module.add(ECvtF32toF16(dst=vgpr(tmpDst), src=vgpr(formatVgpr), sel=0, useSdwaLegacy=False, comment="convert C to fp16"))
                 if vi%2 == 1:
                     d = destIdx + vi//2
                     module.add(VPackF16toB32(dst=vgpr(d), src0=vgpr(tmpDst_1), src1=vgpr(tmpDst), \

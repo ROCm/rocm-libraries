@@ -374,6 +374,107 @@ namespace rocisa
         return module;
     }
 
+    // Phase 2 true16 helpers: NoSDWA/SDWA decision is made internally
+    // based on ISA caps, so callers only pass semantic sel (0=low, 1=high).
+
+    inline std::shared_ptr<Item>
+        ECvtF16toF32(const std::shared_ptr<RegisterContainer>& dst,
+                     const InstructionInput&                   src,
+                     int                                       sel,
+                     const std::string&                        comment = "")
+    {
+        auto& instance = rocIsa::getInstance();
+        if(instance.getArchCaps()["NoSDWA"])
+        {
+            return std::make_shared<VCvtF16toF32>(
+                dst, src, std::nullopt, std::vector<int>{-1, -1, sel}, comment);
+        }
+        else
+        {
+            auto src_sel = sel ? SelectBit::WORD_1 : SelectBit::WORD_0;
+            auto sdwa    = SDWAModifiers();
+            sdwa.src0_sel = src_sel;
+            return std::make_shared<VCvtF16toF32>(
+                dst, src, sdwa, std::vector<int>{}, comment);
+        }
+    }
+
+    inline std::shared_ptr<Item>
+        ECvtF32toF16(const std::shared_ptr<RegisterContainer>& dst,
+                     const InstructionInput&                   src,
+                     int                                       sel,
+                     bool                                      useSdwaLegacy = true,
+                     const std::string&                        comment       = "")
+    {
+        auto& instance = rocIsa::getInstance();
+        if(instance.getArchCaps()["NoSDWA"])
+        {
+            return std::make_shared<VCvtF32toF16>(
+                dst, src, std::nullopt, std::vector<int>{sel}, comment);
+        }
+        else if(useSdwaLegacy)
+        {
+            auto dst_sel = sel ? SelectBit::WORD_1 : SelectBit::WORD_0;
+            auto sdwa    = SDWAModifiers();
+            sdwa.dst_sel = dst_sel;
+            return std::make_shared<VCvtF32toF16>(
+                dst, src, sdwa, std::vector<int>{}, comment);
+        }
+        else
+        {
+            return std::make_shared<VCvtF32toF16>(
+                dst, src, std::nullopt, std::vector<int>{}, comment);
+        }
+    }
+
+    inline std::shared_ptr<Item>
+        ECvtPkFP8toF32(const std::shared_ptr<RegisterContainer>& dst,
+                       const InstructionInput&                   src,
+                       int                                       sel,
+                       const std::string&                        comment = "")
+    {
+        auto& instance = rocIsa::getInstance();
+        if(instance.getArchCaps()["NoSDWA"])
+        {
+            auto vop3 = VOP3PModifiers();
+            vop3.op_sel.push_back(sel);
+            return std::make_shared<VCvtPkFP8toF32>(
+                dst, src, std::nullopt, vop3, std::vector<int>{-1, -1, sel}, comment);
+        }
+        else
+        {
+            auto src_sel = sel ? SelectBit::WORD_1 : SelectBit::WORD_0;
+            auto sdwa    = SDWAModifiers();
+            sdwa.src0_sel = src_sel;
+            return std::make_shared<VCvtPkFP8toF32>(
+                dst, src, sdwa, std::nullopt, std::vector<int>{}, comment);
+        }
+    }
+
+    inline std::shared_ptr<Item>
+        ECvtPkBF8toF32(const std::shared_ptr<RegisterContainer>& dst,
+                       const InstructionInput&                   src,
+                       int                                       sel,
+                       const std::string&                        comment = "")
+    {
+        auto& instance = rocIsa::getInstance();
+        if(instance.getArchCaps()["NoSDWA"])
+        {
+            auto vop3 = VOP3PModifiers();
+            vop3.op_sel.push_back(sel);
+            return std::make_shared<VCvtPkBF8toF32>(
+                dst, src, std::nullopt, vop3, std::vector<int>{-1, -1, sel}, comment);
+        }
+        else
+        {
+            auto src_sel = sel ? SelectBit::WORD_1 : SelectBit::WORD_0;
+            auto sdwa    = SDWAModifiers();
+            sdwa.src0_sel = src_sel;
+            return std::make_shared<VCvtPkBF8toF32>(
+                dst, src, sdwa, std::nullopt, std::vector<int>{}, comment);
+        }
+    }
+
     inline std::shared_ptr<Item>
         VCvtBF16toFP32(const std::shared_ptr<RegisterContainer>&         dst,
                        const std::shared_ptr<RegisterContainer>&         src,
