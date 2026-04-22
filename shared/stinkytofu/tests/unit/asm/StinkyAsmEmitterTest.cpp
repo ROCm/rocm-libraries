@@ -655,7 +655,7 @@ TEST_F(AsmEmitterTest, MUBUFStoreB32_OffVAddr) {
     inst->addSrcReg(StinkyRegister("s", 60, 4));  // rsrc  s[60:63]
     inst->addSrcReg(StinkyRegister("s", 46, 1));  // soffset s46
 
-    // glc+dlc on an arch that uses sc0/sc1 naming (gfx1250, hasMUBUFConst=false)
+    // glc+slc on an arch that uses sc0/sc1 naming (gfx1250, hasMUBUFConst=false)
     MUBUFModifiers mubufMod(/*offen=*/false, /*offset12=*/0, /*glc=*/true, /*slc=*/true,
                             /*nt=*/false, /*lds=*/false, /*isStore=*/true,
                             /*hasMUBUFConst=*/false, /*hasGLCModifier=*/false,
