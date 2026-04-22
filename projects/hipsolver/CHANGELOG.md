@@ -8,6 +8,9 @@ Full documentation for hipSOLVER is available at the [hipSOLVER Documentation](h
 ### Added
 
 * Added compatibility-only functions:
+  * syevBatched
+    * hipsolverDnXsyevBatched_bufferSize
+    * hipsolverDnXsyevBatched
   * syevd
     * hipsolverDnXsyevd_bufferSize
     * hipsolverDnXsyevd
