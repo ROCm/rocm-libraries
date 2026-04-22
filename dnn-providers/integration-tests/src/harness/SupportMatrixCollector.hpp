@@ -132,32 +132,67 @@ public:
 
         out << "# Engine Support Matrix\n\n";
 
-        // Table header
-        out << "| Operations | Notes |";
-        for(const auto& engine : allEngineNames)
-        {
-            out << " " << engine << " |";
-        }
-        out << "\n";
+        // Group entries by the first operation name (text before the first space).
+        // Preserve ordering from the sorted grouped map.
+        std::vector<
+            std::pair<std::string, std::vector<std::pair<GroupKey, const AggregatedEntry*>>>>
+            sections;
+        std::string currentSection;
 
-        // Separator
-        out << "|------------|-------|";
-        for(const auto& engine : allEngineNames)
-        {
-            out << std::string(engine.size() + 2, '-') << "|";
-        }
-        out << "\n";
-
-        // Rows
         for(const auto& [key, entry] : grouped)
         {
-            const auto& [description, note] = key;
-            out << "| " << description << " | " << note << " |";
+            const auto& description = key.first;
+            auto spacePos = description.find(' ');
+            std::string firstOp
+                = (spacePos != std::string::npos) ? description.substr(0, spacePos) : description;
+
+            // Strip attribute suffix (e.g., ":AVG", ":RELU_FWD") to group
+            // operations of the same base type under one section heading.
+            auto colonPos = firstOp.find(':');
+            std::string sectionKey
+                = (colonPos != std::string::npos) ? firstOp.substr(0, colonPos) : firstOp;
+
+            if(sectionKey != currentSection)
+            {
+                currentSection = sectionKey;
+                sections.push_back({sectionKey, {}});
+            }
+            sections.back().second.push_back({key, &entry});
+        }
+
+        auto writeTableHeader = [&]() {
+            out << "| Operations | Notes |";
             for(const auto& engine : allEngineNames)
             {
-                bool supported = entry.supportingEngines.count(engine) > 0;
-                out << " " << (supported ? "\xe2\x9c\x85" : "-") << " |";
+                out << " " << engine << " |";
             }
+            out << "\n";
+
+            out << "|------------|-------|";
+            for(const auto& engine : allEngineNames)
+            {
+                out << std::string(engine.size() + 2, '-') << "|";
+            }
+            out << "\n";
+        };
+
+        for(const auto& [sectionName, entries] : sections)
+        {
+            out << "## " << sectionName << "\n\n";
+            writeTableHeader();
+
+            for(const auto& [key, entryPtr] : entries)
+            {
+                const auto& [description, note] = key;
+                out << "| " << description << " | " << note << " |";
+                for(const auto& engine : allEngineNames)
+                {
+                    bool supported = entryPtr->supportingEngines.count(engine) > 0;
+                    out << " " << (supported ? "\xe2\x9c\x85" : "-") << " |";
+                }
+                out << "\n";
+            }
+
             out << "\n";
         }
 
