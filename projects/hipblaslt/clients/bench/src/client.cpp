@@ -946,12 +946,22 @@ try
      *  https://docs.nvidia.com/cuda/cublas/#narrow-precision-data-types-usage under the 
      *  Notes Section.
      */
-    if(arg.batch_mode == 1 && (arg.scaleA == hipblaslt_scaling_format::Vector \
-                            || arg.scaleA == hipblaslt_scaling_format::Block_32_UE8M0 \
+    if(arg.batch_mode == 1 && (arg.scaleA == hipblaslt_scaling_format::Vector
+                            || arg.scaleA == hipblaslt_scaling_format::Block_32_UE8M0
+                            || arg.scaleA == hipblaslt_scaling_format::Block_16_UE8M0
+                            || arg.scaleA == hipblaslt_scaling_format::Block_32_UE4M3
+                            || arg.scaleA == hipblaslt_scaling_format::Block_16_UE4M3
+                            || arg.scaleA == hipblaslt_scaling_format::Block_32_UE5M3
+                            || arg.scaleA == hipblaslt_scaling_format::Block_16_UE5M3
                             || arg.scaleA == hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT)) 
         throw std::invalid_argument("Only Tensorwide scaling is supported when batch_mode is HIPBLASLT_BATCH_MODE_POINTER_ARRAY (General Batched Gemm) for matrix A.");
-    if(arg.batch_mode == 1 && (arg.scaleB == hipblaslt_scaling_format::Vector \
-                            || arg.scaleB == hipblaslt_scaling_format::Block_32_UE8M0 \
+    if(arg.batch_mode == 1 && (arg.scaleB == hipblaslt_scaling_format::Vector
+                            || arg.scaleB == hipblaslt_scaling_format::Block_32_UE8M0
+                            || arg.scaleB == hipblaslt_scaling_format::Block_16_UE8M0
+                            || arg.scaleB == hipblaslt_scaling_format::Block_32_UE4M3
+                            || arg.scaleB == hipblaslt_scaling_format::Block_16_UE4M3
+                            || arg.scaleB == hipblaslt_scaling_format::Block_32_UE5M3
+                            || arg.scaleB == hipblaslt_scaling_format::Block_16_UE5M3
                             || arg.scaleB == hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT)) 
         throw std::invalid_argument("Only Tensorwide scaling is supported when batch_mode is HIPBLASLT_BATCH_MODE_POINTER_ARRAY (General Batched Gemm) for matrix B.");
 
