@@ -157,7 +157,6 @@ LAPACK main functions
     :ref:`rocsolver_potrs <potrs>`, x, x, x, x
     :ref:`rocsolver_posv <posv>`, x, x, x, x
     :ref:`rocsolver_sytrs <sytrs>`, x, x, x, x
-    :ref:`rocsolver_sytrs2 <sytrs2>`, x, x, x, x
 
 .. csv-table:: Least-square solvers
     :header: "Function", "single", "double", "single complex", "double complex"
