@@ -215,18 +215,6 @@ struct TileConstants
         }
     }
 
-    // Compute uint2 offset from logical (x, c4) using the uint4 descriptor.
-    //   uint2_offset = descriptor_offset(x, c8) * 2 + c4 % 2
-    // where c8 = c4 / 2.
-    static CK_TILE_DEVICE int lds_offset_uint2(int x, int c4)
-    {
-        constexpr auto desc = MakeInputLdsBlockDescriptor();
-        const int c8    = c4 / 2;
-        const int c4_lo = c4 % 2;
-        auto coord = ck_tile::make_tensor_coordinate(desc, ck_tile::make_tuple(x, c8));
-        return static_cast<int>(coord.get_offset()) * 2 + c4_lo;
-    }
-
     // Total channels per block in fp16 elements.
     static constexpr int BLOCK_C = BLOCK_C8 * 8;
 
@@ -624,6 +612,69 @@ struct TileConstants
                 ck_tile::sequence<0>>{});
     }
 
+    static constexpr auto MakeMfmaInputDistribution()
+    {
+        // same [block_q, BLOCK_C4, 4] mapping
+        return MakeMfmaOutputDistribution(); 
+    }
+
+    // Descriptor for MFMA input reads: [BLOCK_W, BLOCK_C4, 4] in fp16.
+    // Built from the raw [BLOCK_W, BLOCK_C8, 8] layout with XOR applied
+    // on (x, c8) if cfg.swizzle_type == XOR.
+    static constexpr auto MakeMfmaInputLdsReadDescriptor()
+    {
+        // Raw fp16 layout: [BLOCK_W, BLOCK_C8, 8]
+        constexpr auto desc_raw = ck_tile::make_naive_tensor_descriptor(
+            ck_tile::make_tuple(ck_tile::number<BLOCK_W>{},
+                                ck_tile::number<BLOCK_C8>{},
+                                ck_tile::number<8>{}),
+            ck_tile::make_tuple(ck_tile::number<BLOCK_C8 * 8>{},
+                                ck_tile::number<8>{},
+                                ck_tile::number<1>{}),
+            ck_tile::number<4>{},
+            ck_tile::number<1>{});
+
+        // Apply XOR on (x, c8), pass-through on fp16-sub dimension.
+        auto make_desc = [](auto desc_3d) constexpr {
+            // Merge {c8, 8} → c (size BLOCK_C), then unmerge → {c4, 4}.
+            // Converts uint4-granularity to fp16x4-granularity.
+            constexpr auto desc_merged = ck_tile::transform_tensor_descriptor(
+                desc_3d,
+                ck_tile::make_tuple(
+                    ck_tile::make_pass_through_transform(ck_tile::number<BLOCK_W>{}),
+                    ck_tile::make_merge_transform(
+                        ck_tile::make_tuple(ck_tile::number<BLOCK_C8>{}, ck_tile::number<8>{}))),
+                ck_tile::make_tuple(ck_tile::sequence<0>{}, ck_tile::sequence<1, 2>{}),
+                ck_tile::make_tuple(ck_tile::sequence<0>{}, ck_tile::sequence<1>{}));
+
+            return ck_tile::transform_tensor_descriptor(
+                desc_merged,
+                ck_tile::make_tuple(
+                    ck_tile::make_pass_through_transform(ck_tile::number<BLOCK_W>{}),
+                    ck_tile::make_unmerge_transform(
+                        ck_tile::make_tuple(ck_tile::number<BLOCK_C4>{}, ck_tile::number<4>{}))),
+                ck_tile::make_tuple(ck_tile::sequence<0>{}, ck_tile::sequence<1>{}),
+                ck_tile::make_tuple(ck_tile::sequence<0>{}, ck_tile::sequence<1, 2>{}));
+        };
+
+        if constexpr(cfg.swizzle_type == SwizzleType::XOR)
+        {
+            constexpr auto desc_xor = ck_tile::transform_tensor_descriptor(
+                desc_raw,
+                ck_tile::make_tuple(
+                    ck_tile::make_xor_transform(
+                        ck_tile::make_tuple(ck_tile::number<BLOCK_W>{}, ck_tile::number<BLOCK_C8>{})),
+                    ck_tile::make_pass_through_transform(ck_tile::number<8>{})),
+                ck_tile::make_tuple(ck_tile::sequence<0, 1>{}, ck_tile::sequence<2>{}),
+                ck_tile::make_tuple(ck_tile::sequence<0, 1>{}, ck_tile::sequence<2>{}));
+            return make_desc(desc_xor);
+        }
+        else
+        {
+            return make_desc(desc_raw);
+        }
+    }
+
     // Tile distribution for output LDS reads (LDS staging gather before DRAM store).
     static constexpr auto MakeOutputLdsReadDistribution()
     {
@@ -771,19 +822,26 @@ struct InputLoader
                             ck_tile::number<TC::BLOCK_C8>{}, ck_tile::number<8>{}),
         ck_tile::multi_index<4>{}));
 
+    static constexpr auto mfma_desc = TC::MakeMfmaInputLdsReadDescriptor();
+    static constexpr auto mfma_dist = TC::MakeMfmaInputDistribution();
+
+    using MfmaBuf  = ck_tile::buffer_view<ck_tile::address_space_enum::lds, _Float16, ck_tile::index_t, true>;
+    using MfmaView = ck_tile::tensor_view<MfmaBuf, ck_tile::remove_cvref_t<decltype(mfma_desc)>>;
+
     // Members
     InputDramWindowType input_dram_window;
     LdsWindowType       lds_window_0;
     LdsWindowType       lds_window_1;
-    int input_lds_offsets[cfg.kw];
-    ck_tile::buffer_view<ck_tile::address_space_enum::lds, _Float16, ck_tile::index_t, true> input_lds_buffer_view;
+    MfmaView            mfma_view_0;
+    MfmaView            mfma_view_1;
+    uint4* input_lds_ptr;
 
     __device__ InputLoader(const BlockCoords<cfg>& bc,
                            uint4* input_lds,
                            const _Float16* __restrict__ in,
                            int hi,
                            int wi,
-                           int px)
+                           int px) : input_lds_ptr(input_lds)
     {
         const auto input_dram_desc = TC::MakeInputDramDescriptor(hi, wi, bc.C, px);
         const auto input_dram_view = ck_tile::make_tensor_view<ck_tile::address_space_enum::global>(
@@ -818,35 +876,16 @@ struct InputLoader
                                 ck_tile::number<TC::BLOCK_C8>{}, ck_tile::number<8>{}),
             {0, 0, 0, 0});
 
-        // Compute per-thread MFMA result coordinates using the MFMA output
-        // tile distribution. This maps (warp_id, lane_id) to (thread_q, c4_group)
-        // which determines the input LDS read position for the MFMA A operand.
-        //
-        // The 3D output tile [block_q, BLOCK_C4, 4] distribution gives:
-        //   X0 (thread_q) = wave_q4 * 4 + lane % 4
-        //   X1 (c4_group) = wave_c64 * 16 + (lane / 4) % 16
-        //   X2 (c_sub)    = vectorization (not used for offset computation)
-        constexpr auto mfma_dist = TC::MakeMfmaOutputDistribution();
-        const auto mfma_p_idx    = mfma_dist.get_partition_index();
-        const auto mfma_x_idx    = mfma_dist.calculate_index(mfma_p_idx);
-        const int thread_q       = mfma_x_idx[ck_tile::number<0>{}];
-        const int thread_c4      = mfma_x_idx[ck_tile::number<1>{}];
+        // Create MFMA views for the two LDS buffers, to be used for register reads.
+        auto mfma_buf_0 = MfmaBuf{
+            reinterpret_cast<_Float16*>(input_lds_ptr),
+            static_cast<ck_tile::index_t>(TC::INPUT_LDS_BUFFER_SIZE_PADDED_FP16)};
+        mfma_view_0 = MfmaView{mfma_buf_0, mfma_desc};
 
-        // --- Pre-compute per-thread LDS offsets (row-major, uint2 units) ---
-        static_for<cfg.kw>(
-            [&]<int S>()
-            {
-                input_lds_offsets[S] = TC::lds_offset_uint2(thread_q + S, thread_c4);
-            });
-
-        // Create the input LDS buffer view
-        input_lds_buffer_view = ck_tile::buffer_view<ck_tile::address_space_enum::lds, _Float16, ck_tile::index_t, true>
-            {
-                reinterpret_cast<_Float16*>(input_lds),
-                static_cast<ck_tile::index_t>(
-                    TC::NUM_INPUT_LDS_BUFFERS * TC::INPUT_LDS_BUFFER_SIZE_PADDED_C8 *
-                    (sizeof(uint4) / sizeof(_Float16)))
-            };
+        auto mfma_buf_1 = MfmaBuf{
+            reinterpret_cast<_Float16*>(input_lds_ptr) + TC::INPUT_LDS_BUFFER_SIZE_PADDED_FP16,
+            static_cast<ck_tile::index_t>(TC::INPUT_LDS_BUFFER_SIZE_PADDED_FP16)};
+        mfma_view_1 = MfmaView{mfma_buf_1, mfma_desc};
     }
 
     __device__ void fetch_tile_to_lds(int lds_buffer_index)
@@ -866,12 +905,31 @@ struct InputLoader
             ck_tile::async_load_tile(lds_window_1, input_dram_window);
     }
 
-    __device__ ck_tile::fp16x4_t read_slice_from_lds(int kw_slice, int lds_buffer_index)
+    // Read all kw slices for this thread from LDS into registers. 
+    // Assumes the relevant tile is already loaded and synced in LDS.
+    __device__ void read_all_slices_from_lds(
+        ck_tile::fp16x4_t (&input_regs)[cfg.kw], 
+        int lds_buffer_index) const
     {
-        return input_lds_buffer_view.template get<ck_tile::fp16x4_t>(
-            0,
-            (lds_buffer_index * TC::INPUT_LDS_BUFFER_SIZE_PADDED_C4 + input_lds_offsets[kw_slice]) * 4,
-            true);
+        auto view = (lds_buffer_index == 0) ? mfma_view_0 : mfma_view_1;
+
+
+        // Issue all kw DS_READ instructions upfront.
+        static_for<cfg.kw>([&]<int S>() {
+            // Origin {S, 0, 0}: each thread reads at (thread_q + S, thread_c4, thread_c_sub).
+            auto window = ck_tile::make_tile_window(
+                view,
+                ck_tile::make_tuple(ck_tile::number<TC::BLOCK_W - cfg.kw + 1>{},  // = block_q
+                                    ck_tile::number<TC::BLOCK_C4>{},
+                                    ck_tile::number<4>{}),
+                {S, 0, 0},
+                mfma_dist);
+            auto tile  = ck_tile::load_tile(window);
+            
+            ck_tile::fp16x4_t reg;
+            __builtin_memcpy(&reg, &tile.get_thread_buffer()(ck_tile::number<0>{}), sizeof(ck_tile::fp16x4_t));
+            input_regs[S] = reg;
+        });
     }
 };
 
@@ -1298,11 +1356,16 @@ __device__ void conv2d_grouped_4c_fp16_cdna4_nhwc_impl(const _Float16* __restric
                     il.fetch_tile_to_lds(tic);
                 }
 
+                // Issue all LDS reads before any are consumed, giving the hardware
+                // maximum opportunity to hide LDS read latency before the MFMA loop.
+                ck_tile::fp16x4_t input_regs[cfg.kw];
+                il.read_all_slices_from_lds(input_regs, toc);
+
                 // Accumulate MFMA products over filter width.
                 static_for<cfg.kw>(
                     [&]<int S>()
                     {
-                        auto input_reg = il.read_slice_from_lds(S, toc);
+                        const fp16x4_t input_reg = input_regs[S];
 
                         static_for<cfg.kh>(
                             [&]<int R>()
@@ -1357,10 +1420,15 @@ __device__ void conv2d_grouped_4c_fp16_cdna4_nhwc_impl(const _Float16* __restric
                     il.fetch_tile_to_lds(tic);
                 }
 
+                // Issue all LDS reads before any are consumed, giving the hardware
+                // maximum opportunity to hide LDS read latency before the MFMA loop.
+                ck_tile::fp16x4_t input_regs[cfg.kw];
+                il.read_all_slices_from_lds(input_regs, toc);
+
                 static_for<cfg.kw>(
                     [&]<int S>()
                     {
-                        auto input_reg = il.read_slice_from_lds(S, toc);
+                        const fp16x4_t input_reg = input_regs[S];
 
                         static_for<cfg.kh>(
                             [&]<int R>()
