@@ -135,7 +135,7 @@ inline char* __get_env(const char* name)
     return env;
 }
 
-inline void clean_env(char* env)
+inline void clean_env([[maybe_unused]] char* env)
 {
 #ifdef _MSC_VER
     if(env != nullptr)
@@ -143,7 +143,6 @@ inline void clean_env(char* env)
         free(env);
     }
 #endif
-    (void)env;
 }
 
 inline int obtain_device_from_ctest()
