@@ -454,4 +454,7 @@ TEST(RocprimConfigDispatchTests, ExecuteLaunchPlan)
     HIP_CHECK(hipMemcpy(&h_output, d_output, sizeof(target), hipMemcpyDeviceToHost));
     // Should have the same targets as most_common_config.
     ASSERT_EQ(most_common_config<Targets>(current_target), h_output);
+
+	// Clean up
+	HIP_CHECK(hipFree(d_output));
 }

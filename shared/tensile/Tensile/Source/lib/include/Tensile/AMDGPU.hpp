@@ -57,6 +57,7 @@ namespace Tensile
             //gfx802  =  3,
             gfx803  = 803,
             gfx900  = 900,
+            gfx90c  = 912,
             gfx906  = 906,
             gfx908  = 908,
             gfx90a  = 910,
@@ -93,6 +94,8 @@ namespace Tensile
                 return "gfx803";
             case AMDGPU::Processor::gfx900:
                 return "gfx900";
+            case AMDGPU::Processor::gfx90c:
+                return "gfx90c";
             case AMDGPU::Processor::gfx906:
                 return "gfx906";
             case AMDGPU::Processor::gfx908:
@@ -158,6 +161,10 @@ namespace Tensile
             else if(deviceString.find("gfx900") != std::string::npos)
             {
                 return AMDGPU::Processor::gfx900;
+            }
+            else if(deviceString.find("gfx90c") != std::string::npos)
+            {
+                return AMDGPU::Processor::gfx90c;
             }
             else if(deviceString.find("gfx906") != std::string::npos)
             {

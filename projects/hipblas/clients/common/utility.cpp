@@ -459,6 +459,10 @@ hipblasClientProcessor getArch()
     {
         return hipblasClientProcessor::gfx90a;
     }
+    else if(deviceString.find("gfx90c") != std::string::npos)
+    {
+        return hipblasClientProcessor::gfx90c;
+    }
     else if(deviceString.find("gfx942") != std::string::npos)
     {
         return hipblasClientProcessor::gfx942;
