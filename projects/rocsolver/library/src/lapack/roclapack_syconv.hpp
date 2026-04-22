@@ -561,8 +561,8 @@ static __global__ __launch_bounds__(SYCONV_MAX_THDS) void syconv_kernel(bool con
 
 template <typename T, typename I, typename Istride, typename UA>
 static inline rocblas_status rocsolver_syconv_argCheck(rocblas_handle handle,
-                                                       bool const is_upper,
-                                                       bool const is_convert,
+                                                       [[maybe_unused]] bool const is_upper,
+                                                       [[maybe_unused]] bool const is_convert,
                                                        I const n,
                                                        UA A,
                                                        Istride const shiftA,
@@ -593,7 +593,8 @@ static inline rocblas_status rocsolver_syconv_argCheck(rocblas_handle handle,
         return rocblas_status_continue;
 
     // 3. invalid pointers
-    if((n && !A) || (n && !ipiv) || (n && !E) || (n && !work))
+    if((n && batch_count && !A) || (n && batch_count && !ipiv) || (n && batch_count && !E)
+       || (n && batch_count && !work))
         return rocblas_status_invalid_pointer;
 
     return (rocblas_status_continue);
