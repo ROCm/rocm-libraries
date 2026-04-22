@@ -3,14 +3,14 @@
 
 #pragma once
 
-#include <fnmatch.h>
-
 #include <filesystem>
 #include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 #include <vector>
+
+#include "common/PlatformUtils.hpp"
 
 // HIP's host_defines.h redefines __noinline__ as either
 // __attribute__((noinline)) or empty, which collides with tomlplusplus's
@@ -48,7 +48,7 @@ struct ToleranceOverride
 //   atol = 1e-3
 //   rtol = 1e-2
 //
-// Filters use GTest-style globs (fnmatch with * wildcards).
+// Filters use GTest-style globs (globMatch with * wildcards).
 // Later entries take precedence over earlier ones when multiple filters match.
 class TestSettings
 {
@@ -137,7 +137,7 @@ public:
         {
             for(const auto& filter : entry.filters)
             {
-                if(fnmatch(filter.c_str(), testNameStr.c_str(), 0) == 0)
+                if(globMatch(filter, testNameStr))
                 {
                     result = ToleranceOverride{entry.atol, entry.rtol};
                     break; // matched this entry, continue to next for precedence

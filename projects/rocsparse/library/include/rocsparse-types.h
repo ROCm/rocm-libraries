@@ -75,7 +75,7 @@ typedef struct _rocsparse_handle* rocsparse_handle;
  *
  *  \details
  *  The rocSPARSE error descriptor is a structure holding the information related to an error
- *  that occured during the execution of a rocSPARSE routine.
+ *  that occurred during the execution of a rocSPARSE routine.
  *  It should be destroyed using rocsparse_destroy_error().
  */
 typedef struct _rocsparse_error* rocsparse_error;
@@ -988,7 +988,7 @@ typedef enum rocsparse_singularity_
     rocsparse_singularity_none, /**< No singularity detected. */
     rocsparse_singularity_symbolic, /**< The sparsity pattern inherently prevents a full rank, e.g. missing diagonal element. */
     rocsparse_singularity_numeric_exact, /**< An exact zero was encountered during numerical calculation. */
-    rocsparse_singularity_numeric_near, /**< An near zero was encountered during numerical calculation, i.e. within a given tolerance. */
+    rocsparse_singularity_numeric_near, /**< A near zero was encountered during numerical calculation, i.e. within a given tolerance. */
 } rocsparse_singularity;
 
 /*! \ingroup types_module

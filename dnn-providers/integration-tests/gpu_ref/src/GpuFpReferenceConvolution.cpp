@@ -246,4 +246,322 @@ void GpuFpReferenceConvolution::launchFprop3d(const void* xPtr,
     launchKernel(kernel.function(), totalElements, &args, sizeof(args));
 }
 
+// --- 1D dgrad kernel launcher ---
+
+void GpuFpReferenceConvolution::launchDgrad1d(void* dxPtr,
+                                              const void* wPtr,
+                                              const void* dyPtr,
+                                              const std::vector<int64_t>& dxDims,
+                                              const std::vector<int64_t>& wDims,
+                                              const std::vector<int64_t>& dyDims,
+                                              const std::vector<int64_t>& dxTensorStrides,
+                                              const std::vector<int64_t>& wTensorStrides,
+                                              const std::vector<int64_t>& dyTensorStrides,
+                                              const std::vector<int64_t>& convStrides,
+                                              const std::vector<int64_t>& dilations,
+                                              const std::vector<int64_t>& padding,
+                                              const std::vector<std::string>& defines,
+                                              double alpha,
+                                              double beta)
+{
+    auto& compiler = detail::GpuRefKernelCompiler::instance();
+    auto& kernel = compiler.getOrCompile("GpuRefConvBwd.cpp", defines, "convBwdRef1d");
+
+    auto nGroups = dxDims[1] / wDims[1];
+
+    ConvBwdArgs1d args{};
+    args.dx = dxPtr;
+    args.w = wPtr;
+    args.dy = dyPtr;
+    args.dxStr = toStrides3(dxTensorStrides);
+    args.wStr = toStrides3(wTensorStrides);
+    args.dyStr = toStrides3(dyTensorStrides);
+    args.N = static_cast<long long>(dxDims[0]);
+    args.C = static_cast<long long>(dxDims[1]);
+    args.Wi = static_cast<long long>(dxDims[2]);
+    args.K = static_cast<long long>(wDims[0]);
+    args.Wo = static_cast<long long>(dyDims[2]);
+    args.Kw = static_cast<long long>(wDims[2]);
+    args.strideW = static_cast<long long>(convStrides[0]);
+    args.dilW = static_cast<long long>(dilations[0]);
+    args.padW = static_cast<long long>(padding[0]);
+    args.groups = static_cast<long long>(nGroups);
+    args.alpha = alpha;
+    args.beta = beta;
+
+    auto totalElements = dxDims[0] * dxDims[1] * dxDims[2];
+    launchKernel(kernel.function(), totalElements, &args, sizeof(args));
+}
+
+// --- 2D dgrad kernel launcher ---
+
+void GpuFpReferenceConvolution::launchDgrad2d(void* dxPtr,
+                                              const void* wPtr,
+                                              const void* dyPtr,
+                                              const std::vector<int64_t>& dxDims,
+                                              const std::vector<int64_t>& wDims,
+                                              const std::vector<int64_t>& dyDims,
+                                              const std::vector<int64_t>& dxTensorStrides,
+                                              const std::vector<int64_t>& wTensorStrides,
+                                              const std::vector<int64_t>& dyTensorStrides,
+                                              const std::vector<int64_t>& convStrides,
+                                              const std::vector<int64_t>& dilations,
+                                              const std::vector<int64_t>& padding,
+                                              const std::vector<std::string>& defines,
+                                              double alpha,
+                                              double beta)
+{
+    auto& compiler = detail::GpuRefKernelCompiler::instance();
+    auto& kernel = compiler.getOrCompile("GpuRefConvBwd.cpp", defines, "convBwdRef2d");
+
+    auto nGroups = dxDims[1] / wDims[1];
+
+    ConvBwdArgs2d args{};
+    args.dx = dxPtr;
+    args.w = wPtr;
+    args.dy = dyPtr;
+    args.dxStr = toStrides4(dxTensorStrides);
+    args.wStr = toStrides4(wTensorStrides);
+    args.dyStr = toStrides4(dyTensorStrides);
+    args.N = static_cast<long long>(dxDims[0]);
+    args.C = static_cast<long long>(dxDims[1]);
+    args.Hi = static_cast<long long>(dxDims[2]);
+    args.Wi = static_cast<long long>(dxDims[3]);
+    args.K = static_cast<long long>(wDims[0]);
+    args.Ho = static_cast<long long>(dyDims[2]);
+    args.Wo = static_cast<long long>(dyDims[3]);
+    args.Kh = static_cast<long long>(wDims[2]);
+    args.Kw = static_cast<long long>(wDims[3]);
+    args.strideH = static_cast<long long>(convStrides[0]);
+    args.strideW = static_cast<long long>(convStrides[1]);
+    args.dilH = static_cast<long long>(dilations[0]);
+    args.dilW = static_cast<long long>(dilations[1]);
+    args.padH = static_cast<long long>(padding[0]);
+    args.padW = static_cast<long long>(padding[1]);
+    args.groups = static_cast<long long>(nGroups);
+    args.alpha = alpha;
+    args.beta = beta;
+
+    auto totalElements = dxDims[0] * dxDims[1] * dxDims[2] * dxDims[3];
+    launchKernel(kernel.function(), totalElements, &args, sizeof(args));
+}
+
+// --- 3D dgrad kernel launcher ---
+
+void GpuFpReferenceConvolution::launchDgrad3d(void* dxPtr,
+                                              const void* wPtr,
+                                              const void* dyPtr,
+                                              const std::vector<int64_t>& dxDims,
+                                              const std::vector<int64_t>& wDims,
+                                              const std::vector<int64_t>& dyDims,
+                                              const std::vector<int64_t>& dxTensorStrides,
+                                              const std::vector<int64_t>& wTensorStrides,
+                                              const std::vector<int64_t>& dyTensorStrides,
+                                              const std::vector<int64_t>& convStrides,
+                                              const std::vector<int64_t>& dilations,
+                                              const std::vector<int64_t>& padding,
+                                              const std::vector<std::string>& defines,
+                                              double alpha,
+                                              double beta)
+{
+    auto& compiler = detail::GpuRefKernelCompiler::instance();
+    auto& kernel = compiler.getOrCompile("GpuRefConvBwd.cpp", defines, "convBwdRef3d");
+
+    auto nGroups = dxDims[1] / wDims[1];
+
+    ConvBwdArgs3d args{};
+    args.dx = dxPtr;
+    args.w = wPtr;
+    args.dy = dyPtr;
+    args.dxStr = toStrides5(dxTensorStrides);
+    args.wStr = toStrides5(wTensorStrides);
+    args.dyStr = toStrides5(dyTensorStrides);
+    args.N = static_cast<long long>(dxDims[0]);
+    args.C = static_cast<long long>(dxDims[1]);
+    args.Di = static_cast<long long>(dxDims[2]);
+    args.Hi = static_cast<long long>(dxDims[3]);
+    args.Wi = static_cast<long long>(dxDims[4]);
+    args.K = static_cast<long long>(wDims[0]);
+    args.Do = static_cast<long long>(dyDims[2]);
+    args.Ho = static_cast<long long>(dyDims[3]);
+    args.Wo = static_cast<long long>(dyDims[4]);
+    args.Kd = static_cast<long long>(wDims[2]);
+    args.Kh = static_cast<long long>(wDims[3]);
+    args.Kw = static_cast<long long>(wDims[4]);
+    args.strideD = static_cast<long long>(convStrides[0]);
+    args.strideH = static_cast<long long>(convStrides[1]);
+    args.strideW = static_cast<long long>(convStrides[2]);
+    args.dilD = static_cast<long long>(dilations[0]);
+    args.dilH = static_cast<long long>(dilations[1]);
+    args.dilW = static_cast<long long>(dilations[2]);
+    args.padD = static_cast<long long>(padding[0]);
+    args.padH = static_cast<long long>(padding[1]);
+    args.padW = static_cast<long long>(padding[2]);
+    args.groups = static_cast<long long>(nGroups);
+    args.alpha = alpha;
+    args.beta = beta;
+
+    auto totalElements = dxDims[0] * dxDims[1] * dxDims[2] * dxDims[3] * dxDims[4];
+    launchKernel(kernel.function(), totalElements, &args, sizeof(args));
+}
+
+// --- 1D wgrad kernel launcher ---
+
+void GpuFpReferenceConvolution::launchWgrad1d(const void* xPtr,
+                                              void* dwPtr,
+                                              const void* dyPtr,
+                                              const std::vector<int64_t>& xDims,
+                                              const std::vector<int64_t>& dwDims,
+                                              const std::vector<int64_t>& dyDims,
+                                              const std::vector<int64_t>& xTensorStrides,
+                                              const std::vector<int64_t>& dwTensorStrides,
+                                              const std::vector<int64_t>& dyTensorStrides,
+                                              const std::vector<int64_t>& convStrides,
+                                              const std::vector<int64_t>& dilations,
+                                              const std::vector<int64_t>& padding,
+                                              const std::vector<std::string>& defines,
+                                              double alpha,
+                                              double beta)
+{
+    auto& compiler = detail::GpuRefKernelCompiler::instance();
+    auto& kernel = compiler.getOrCompile("GpuRefConvWrw.cpp", defines, "convWrwRef1d");
+
+    auto nGroups = xDims[1] / dwDims[1];
+
+    ConvWrwArgs1d args{};
+    args.x = xPtr;
+    args.dw = dwPtr;
+    args.dy = dyPtr;
+    args.xStr = toStrides3(xTensorStrides);
+    args.dwStr = toStrides3(dwTensorStrides);
+    args.dyStr = toStrides3(dyTensorStrides);
+    args.N = static_cast<long long>(xDims[0]);
+    args.C = static_cast<long long>(xDims[1]);
+    args.Wi = static_cast<long long>(xDims[2]);
+    args.K = static_cast<long long>(dwDims[0]);
+    args.Wo = static_cast<long long>(dyDims[2]);
+    args.Kw = static_cast<long long>(dwDims[2]);
+    args.strideW = static_cast<long long>(convStrides[0]);
+    args.dilW = static_cast<long long>(dilations[0]);
+    args.padW = static_cast<long long>(padding[0]);
+    args.groups = static_cast<long long>(nGroups);
+    args.alpha = alpha;
+    args.beta = beta;
+
+    auto totalElements = dwDims[0] * dwDims[1] * dwDims[2];
+    launchKernel(kernel.function(), totalElements, &args, sizeof(args));
+}
+
+// --- 2D wgrad kernel launcher ---
+
+void GpuFpReferenceConvolution::launchWgrad2d(const void* xPtr,
+                                              void* dwPtr,
+                                              const void* dyPtr,
+                                              const std::vector<int64_t>& xDims,
+                                              const std::vector<int64_t>& dwDims,
+                                              const std::vector<int64_t>& dyDims,
+                                              const std::vector<int64_t>& xTensorStrides,
+                                              const std::vector<int64_t>& dwTensorStrides,
+                                              const std::vector<int64_t>& dyTensorStrides,
+                                              const std::vector<int64_t>& convStrides,
+                                              const std::vector<int64_t>& dilations,
+                                              const std::vector<int64_t>& padding,
+                                              const std::vector<std::string>& defines,
+                                              double alpha,
+                                              double beta)
+{
+    auto& compiler = detail::GpuRefKernelCompiler::instance();
+    auto& kernel = compiler.getOrCompile("GpuRefConvWrw.cpp", defines, "convWrwRef2d");
+
+    auto nGroups = xDims[1] / dwDims[1];
+
+    ConvWrwArgs2d args{};
+    args.x = xPtr;
+    args.dw = dwPtr;
+    args.dy = dyPtr;
+    args.xStr = toStrides4(xTensorStrides);
+    args.dwStr = toStrides4(dwTensorStrides);
+    args.dyStr = toStrides4(dyTensorStrides);
+    args.N = static_cast<long long>(xDims[0]);
+    args.C = static_cast<long long>(xDims[1]);
+    args.Hi = static_cast<long long>(xDims[2]);
+    args.Wi = static_cast<long long>(xDims[3]);
+    args.K = static_cast<long long>(dwDims[0]);
+    args.Ho = static_cast<long long>(dyDims[2]);
+    args.Wo = static_cast<long long>(dyDims[3]);
+    args.Kh = static_cast<long long>(dwDims[2]);
+    args.Kw = static_cast<long long>(dwDims[3]);
+    args.strideH = static_cast<long long>(convStrides[0]);
+    args.strideW = static_cast<long long>(convStrides[1]);
+    args.dilH = static_cast<long long>(dilations[0]);
+    args.dilW = static_cast<long long>(dilations[1]);
+    args.padH = static_cast<long long>(padding[0]);
+    args.padW = static_cast<long long>(padding[1]);
+    args.groups = static_cast<long long>(nGroups);
+    args.alpha = alpha;
+    args.beta = beta;
+
+    auto totalElements = dwDims[0] * dwDims[1] * dwDims[2] * dwDims[3];
+    launchKernel(kernel.function(), totalElements, &args, sizeof(args));
+}
+
+// --- 3D wgrad kernel launcher ---
+
+void GpuFpReferenceConvolution::launchWgrad3d(const void* xPtr,
+                                              void* dwPtr,
+                                              const void* dyPtr,
+                                              const std::vector<int64_t>& xDims,
+                                              const std::vector<int64_t>& dwDims,
+                                              const std::vector<int64_t>& dyDims,
+                                              const std::vector<int64_t>& xTensorStrides,
+                                              const std::vector<int64_t>& dwTensorStrides,
+                                              const std::vector<int64_t>& dyTensorStrides,
+                                              const std::vector<int64_t>& convStrides,
+                                              const std::vector<int64_t>& dilations,
+                                              const std::vector<int64_t>& padding,
+                                              const std::vector<std::string>& defines,
+                                              double alpha,
+                                              double beta)
+{
+    auto& compiler = detail::GpuRefKernelCompiler::instance();
+    auto& kernel = compiler.getOrCompile("GpuRefConvWrw.cpp", defines, "convWrwRef3d");
+
+    auto nGroups = xDims[1] / dwDims[1];
+
+    ConvWrwArgs3d args{};
+    args.x = xPtr;
+    args.dw = dwPtr;
+    args.dy = dyPtr;
+    args.xStr = toStrides5(xTensorStrides);
+    args.dwStr = toStrides5(dwTensorStrides);
+    args.dyStr = toStrides5(dyTensorStrides);
+    args.N = static_cast<long long>(xDims[0]);
+    args.C = static_cast<long long>(xDims[1]);
+    args.Di = static_cast<long long>(xDims[2]);
+    args.Hi = static_cast<long long>(xDims[3]);
+    args.Wi = static_cast<long long>(xDims[4]);
+    args.K = static_cast<long long>(dwDims[0]);
+    args.Do = static_cast<long long>(dyDims[2]);
+    args.Ho = static_cast<long long>(dyDims[3]);
+    args.Wo = static_cast<long long>(dyDims[4]);
+    args.Kd = static_cast<long long>(dwDims[2]);
+    args.Kh = static_cast<long long>(dwDims[3]);
+    args.Kw = static_cast<long long>(dwDims[4]);
+    args.strideD = static_cast<long long>(convStrides[0]);
+    args.strideH = static_cast<long long>(convStrides[1]);
+    args.strideW = static_cast<long long>(convStrides[2]);
+    args.dilD = static_cast<long long>(dilations[0]);
+    args.dilH = static_cast<long long>(dilations[1]);
+    args.dilW = static_cast<long long>(dilations[2]);
+    args.padD = static_cast<long long>(padding[0]);
+    args.padH = static_cast<long long>(padding[1]);
+    args.padW = static_cast<long long>(padding[2]);
+    args.groups = static_cast<long long>(nGroups);
+    args.alpha = alpha;
+    args.beta = beta;
+
+    auto totalElements = dwDims[0] * dwDims[1] * dwDims[2] * dwDims[3] * dwDims[4];
+    launchKernel(kernel.function(), totalElements, &args, sizeof(args));
+}
+
 } // namespace hipdnn_gpu_ref

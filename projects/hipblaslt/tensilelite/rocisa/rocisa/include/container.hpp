@@ -1291,6 +1291,39 @@ namespace rocisa
     std::shared_ptr<RegisterContainer> mgpr(const Holder& holder, float regNum = 1.f);
     std::shared_ptr<RegisterContainer> mgpr(int idx, float regNum = 1.f);
     std::shared_ptr<RegisterContainer> mgpr(const std::string& name, float regNum = 1.f);
+    struct MemTokenData : public Container
+    {
+        std::vector<int> tokens;
+
+        MemTokenData(const std::vector<int>& tokens = {})
+            : Container()
+            , tokens(tokens)
+        {
+        }
+
+        MemTokenData(const MemTokenData& other)
+            : Container()
+            , tokens(other.tokens)
+        {
+        }
+
+        std::shared_ptr<Container> clone() const override
+        {
+            return std::make_shared<MemTokenData>(*this);
+        }
+
+        std::string toString() const override
+        {
+            std::string result = "mem_token:";
+            for(size_t i = 0; i < tokens.size(); ++i)
+            {
+                if(i > 0)
+                    result += ",";
+                result += " " + std::to_string(tokens[i]);
+            }
+            return result;
+        }
+    };
 
     struct ContinuousRegister
     {

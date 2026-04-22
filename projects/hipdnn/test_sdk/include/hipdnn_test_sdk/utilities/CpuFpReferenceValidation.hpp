@@ -3,10 +3,10 @@
 
 #pragma once
 
-#include <hipdnn_data_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_data_sdk/utilities/TensorView.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_test_sdk/utilities/ReferenceValidationInterface.hpp>
 #include <hipdnn_test_sdk/utilities/VectorLoggingUtils.hpp>
 #include <hipdnn_test_sdk/utilities/detail/CpuFpReferenceUtilities.hpp>
@@ -67,7 +67,7 @@ public:
                 return result.load(std::memory_order_relaxed);
             }
 
-            auto absDiff = static_cast<float>(fabs(implValue - refValue));
+            auto absDiff = fabs(static_cast<float>(implValue) - static_cast<float>(refValue));
             auto threshold
                 = _absoluteTolerance + _relativeTolerance * fabs(static_cast<float>(refValue));
 
@@ -161,29 +161,29 @@ public:
 };
 
 inline std::unique_ptr<hipdnn_test_sdk::utilities::IReferenceValidation>
-    createAllCloseValidator(hipdnn_data_sdk::data_objects::DataType dataType,
+    createAllCloseValidator(hipdnn_flatbuffers_sdk::data_objects::DataType dataType,
                             float absoluteTolerance = std::numeric_limits<float>::epsilon(),
                             float relativeTolerance = std::numeric_limits<float>::epsilon())
 {
     switch(dataType)
     {
-    case hipdnn_data_sdk::data_objects::DataType::FLOAT:
+    case hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT:
         return std::make_unique<CpuFpReferenceValidation<float>>(absoluteTolerance,
                                                                  relativeTolerance);
-    case hipdnn_data_sdk::data_objects::DataType::HALF:
+    case hipdnn_flatbuffers_sdk::data_objects::DataType::HALF:
         return std::make_unique<CpuFpReferenceValidation<hipdnn_data_sdk::types::half>>(
             absoluteTolerance, relativeTolerance);
-    case hipdnn_data_sdk::data_objects::DataType::BFLOAT16:
+    case hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16:
         return std::make_unique<CpuFpReferenceValidation<hipdnn_data_sdk::types::bfloat16>>(
             absoluteTolerance, relativeTolerance);
-    case hipdnn_data_sdk::data_objects::DataType::DOUBLE:
+    case hipdnn_flatbuffers_sdk::data_objects::DataType::DOUBLE:
         return std::make_unique<CpuFpReferenceValidation<double>>(absoluteTolerance,
                                                                   relativeTolerance);
-    case hipdnn_data_sdk::data_objects::DataType::INT8:
+    case hipdnn_flatbuffers_sdk::data_objects::DataType::INT8:
         return std::make_unique<CpuIntReferenceValidation<int8_t>>();
-    case hipdnn_data_sdk::data_objects::DataType::UINT8:
+    case hipdnn_flatbuffers_sdk::data_objects::DataType::UINT8:
         return std::make_unique<CpuIntReferenceValidation<uint8_t>>();
-    case hipdnn_data_sdk::data_objects::DataType::INT32:
+    case hipdnn_flatbuffers_sdk::data_objects::DataType::INT32:
         return std::make_unique<CpuIntReferenceValidation<int32_t>>();
     default:
         throw std::runtime_error("Unsupported data type for allClose validator");

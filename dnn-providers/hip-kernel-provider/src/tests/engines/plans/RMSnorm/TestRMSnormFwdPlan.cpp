@@ -10,7 +10,7 @@
 #include "mocks/MockKernelCompiler.hpp"
 #include "mocks/MockRunnableKernel.hpp"
 
-#include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/interfaces/IPlan.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
@@ -24,8 +24,8 @@ using namespace hip_kernel_provider::rmsnorm;
 TEST(TestRMSnormFwdParams, ConstructsFromSingleNodeGraph)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidRMSNormGraph();
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                              builder.GetSize());
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                                     builder.GetSize());
 
     const auto& node = graph.getNode(0);
     const auto& attr = *node.attributes_as_RMSNormAttributes();
@@ -36,8 +36,8 @@ TEST(TestRMSnormFwdParams, ConstructsFromSingleNodeGraph)
 TEST(TestRMSnormFwdParams, HasCorrectTensorPointersForSingleNode)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidRMSNormGraph();
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                              builder.GetSize());
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                                     builder.GetSize());
 
     const auto& node = graph.getNode(0);
     const auto& attr = *node.attributes_as_RMSNormAttributes();
@@ -54,8 +54,8 @@ TEST(TestRMSnormFwdParams, HasCorrectTensorPointersForSingleNode)
 TEST(TestRMSnormFwdParams, TensorPointersMatchExpectedUids)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidRMSNormGraph();
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                              builder.GetSize());
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                                     builder.GetSize());
 
     const auto& node = graph.getNode(0);
     const auto& attr = *node.attributes_as_RMSNormAttributes();
@@ -70,8 +70,8 @@ TEST(TestRMSnormFwdParams, TensorPointersMatchExpectedUids)
 TEST(TestRMSnormFwdParams, IsMoveConstructible)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidRMSNormGraph();
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                              builder.GetSize());
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                                     builder.GetSize());
 
     const auto& node = graph.getNode(0);
     const auto& attr = *node.attributes_as_RMSNormAttributes();
@@ -96,13 +96,13 @@ namespace
 
 RMSnormFwdPlan createPlanFromGraph(const std::vector<int64_t>& strides = {150528, 50176, 224, 1},
                                    const std::vector<int64_t>& dims = {1, 3, 224, 224},
-                                   hipdnn_data_sdk::data_objects::DataType inputDataType
-                                   = hipdnn_data_sdk::data_objects::DataType::FLOAT)
+                                   hipdnn_flatbuffers_sdk::data_objects::DataType inputDataType
+                                   = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT)
 {
     auto builder
         = hipdnn_test_sdk::utilities::createValidRMSNormGraph(strides, dims, inputDataType);
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                              builder.GetSize());
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                                     builder.GetSize());
 
     const auto& node = graph.getNode(0);
     const auto& attr = *node.attributes_as_RMSNormAttributes();
@@ -251,8 +251,9 @@ TEST(TestRMSnormFwdPlan, CompileFp16SetsCorrectDefines)
             return program;
         });
 
-    auto plan = createPlanFromGraph(
-        {150528, 50176, 224, 1}, {1, 3, 224, 224}, hipdnn_data_sdk::data_objects::DataType::HALF);
+    auto plan = createPlanFromGraph({150528, 50176, 224, 1},
+                                    {1, 3, 224, 224},
+                                    hipdnn_flatbuffers_sdk::data_objects::DataType::HALF);
     auto deviceProps = createTestDeviceProps();
 
     plan.compile(mockCompiler, deviceProps);
@@ -287,7 +288,7 @@ TEST(TestRMSnormFwdPlan, CompileBfp16SetsCorrectDefines)
 
     auto plan = createPlanFromGraph({150528, 50176, 224, 1},
                                     {1, 3, 224, 224},
-                                    hipdnn_data_sdk::data_objects::DataType::BFLOAT16);
+                                    hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16);
     auto deviceProps = createTestDeviceProps();
 
     plan.compile(mockCompiler, deviceProps);
@@ -309,9 +310,9 @@ TEST(TestRMSnormFwdPlan, CompileWithUnsupportedDimensionThrows)
 
     // 3D tensor is not supported
     auto builder = hipdnn_test_sdk::utilities::createValidRMSNormGraph(
-        {12, 4, 1}, {1, 3, 4}, hipdnn_data_sdk::data_objects::DataType::FLOAT);
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                              builder.GetSize());
+        {12, 4, 1}, {1, 3, 4}, hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                                     builder.GetSize());
 
     const auto& node = graph.getNode(0);
     const auto& attr = *node.attributes_as_RMSNormAttributes();
@@ -330,9 +331,9 @@ TEST(TestRMSnormFwdPlan, CompileWithUnsupportedWorkgroupsThrows)
 
     // Number of workgroups exeeds UINT32_MAX
     auto builder = hipdnn_test_sdk::utilities::createValidRMSNormGraph(
-        {4, 4, 2, 1}, {UINT32_MAX, 1, 2, 2}, hipdnn_data_sdk::data_objects::DataType::FLOAT);
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                              builder.GetSize());
+        {4, 4, 2, 1}, {UINT32_MAX, 1, 2, 2}, hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                                     builder.GetSize());
 
     const auto& node = graph.getNode(0);
     const auto& attr = *node.attributes_as_RMSNormAttributes();

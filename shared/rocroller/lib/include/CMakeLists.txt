@@ -54,6 +54,7 @@ target_sources(rocroller
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/CodeGen/BranchGenerator_impl.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/CodeGen/Buffer.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/CodeGen/BufferInstructionOptions.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/CodeGen/ConditionalGenerator.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/CodeGen/CopyGenerator.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/CodeGen/CopyGenerator_fwd.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/CodeGen/CopyGenerator_impl.hpp"

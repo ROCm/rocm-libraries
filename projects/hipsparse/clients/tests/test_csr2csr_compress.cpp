@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -24,4 +24,4 @@
 #include "test.hpp"
 #include "testing_csr2csr_compress.hpp"
 
-TEST_ROUTINE(csr2csr_compress, conversion, arg.M, arg.N, arg.alpha, arg.baseA);
+TEST_ROUTINE(csr2csr_compress, conversion, arg.M, arg.N, arg.alpha, arg.alphai, arg.baseA);

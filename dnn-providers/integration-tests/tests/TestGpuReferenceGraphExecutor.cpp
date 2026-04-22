@@ -6,7 +6,7 @@
 #include <array>
 #include <cstdint>
 #include <hip/hip_runtime.h>
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <unordered_map>
 #include <vector>
@@ -16,7 +16,7 @@
 namespace
 {
 
-using namespace hipdnn_data_sdk::data_objects;
+using namespace hipdnn_flatbuffers_sdk::data_objects;
 using hipdnn_integration_tests::gpu_graph_executor::GpuReferenceGraphExecutor;
 
 // Creates a minimal pointwise graph with two FLOAT tensors (input + output).
