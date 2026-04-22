@@ -75,48 +75,6 @@ TEST(TestRMSNormBackwardAttributes, SetComputeDbias)
     EXPECT_FALSE(attrs.get_compute_dbias());
 }
 
-TEST(TestRMSNormBackwardAttributes, PackAttributes)
-{
-    RMSNormBackwardAttributes attrs;
-
-    // Set tensors with UIDs
-    auto dyTensor = std::make_shared<TensorAttributes>();
-    dyTensor->set_uid(70);
-    attrs.set_dy(dyTensor);
-    auto xTensor = std::make_shared<TensorAttributes>();
-    xTensor->set_uid(71);
-    attrs.set_x(xTensor);
-    auto scaleTensor = std::make_shared<TensorAttributes>();
-    scaleTensor->set_uid(72);
-    attrs.set_scale(scaleTensor);
-    auto dxTensor = std::make_shared<TensorAttributes>();
-    dxTensor->set_uid(74);
-    attrs.set_dx(dxTensor);
-    auto dscaleTensor = std::make_shared<TensorAttributes>();
-    dscaleTensor->set_uid(75);
-    attrs.set_dscale(dscaleTensor);
-
-    // Set data fields
-
-    // Pack attributes
-    flatbuffers::FlatBufferBuilder builder;
-    auto packedAttributes = attrs.pack_attributes(builder);
-    builder.Finish(packedAttributes);
-
-    auto buffer = builder.GetBufferPointer();
-    auto attrsFb
-        = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::RMSNormBackwardAttributes>(buffer);
-
-    // Verify packed tensor UIDs
-    EXPECT_EQ(attrsFb->dy_tensor_uid(), dyTensor->get_uid());
-    EXPECT_EQ(attrsFb->x_tensor_uid(), xTensor->get_uid());
-    EXPECT_EQ(attrsFb->scale_tensor_uid(), scaleTensor->get_uid());
-    EXPECT_EQ(attrsFb->dx_tensor_uid(), dxTensor->get_uid());
-    EXPECT_EQ(attrsFb->dscale_tensor_uid(), dscaleTensor->get_uid());
-
-    // Verify packed data fields
-}
-
 TEST(TestRMSNormBackwardAttributes, SetDyMove)
 {
     RMSNormBackwardAttributes attrs;

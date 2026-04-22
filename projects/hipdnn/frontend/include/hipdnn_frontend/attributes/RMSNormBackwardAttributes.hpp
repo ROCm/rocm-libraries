@@ -13,7 +13,6 @@
 
 #include "Attributes.hpp"
 #include "TensorAttributes.hpp"
-#include <hipdnn_data_sdk/data_objects/rmsnorm_backward_attributes_generated.h>
 #include <memory>
 #include <unordered_map>
 
@@ -182,50 +181,6 @@ public:
     {
         compute_dbias = value;
         return *this;
-    }
-
-    flatbuffers::Offset<hipdnn_data_sdk::data_objects::RMSNormBackwardAttributes>
-        pack_attributes(flatbuffers::FlatBufferBuilder& builder) const // NOLINT
-    {
-        auto invRms = get_inv_rms();
-        auto dbias = get_dbias();
-
-        return hipdnn_data_sdk::data_objects::CreateRMSNormBackwardAttributes(
-            builder,
-            get_dy()->get_uid(),
-            get_x()->get_uid(),
-            get_scale()->get_uid(),
-            invRms ? flatbuffers::Optional<int64_t>(invRms->get_uid()) : flatbuffers::nullopt,
-            get_dx()->get_uid(),
-            get_dscale()->get_uid(),
-            dbias ? flatbuffers::Optional<int64_t>(dbias->get_uid()) : flatbuffers::nullopt);
-    }
-
-    static RMSNormBackwardAttributes fromFlatBuffer(
-        const hipdnn_data_sdk::data_objects::RMSNormBackwardAttributes* fb,
-        const std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>>& tensorMap)
-    {
-        RMSNormBackwardAttributes attr;
-
-        attr.set_dy(tensorMap.at(fb->dy_tensor_uid()));
-        attr.set_x(tensorMap.at(fb->x_tensor_uid()));
-        attr.set_scale(tensorMap.at(fb->scale_tensor_uid()));
-
-        if(fb->inv_rms_tensor_uid().has_value())
-        {
-            attr.set_inv_rms(tensorMap.at(fb->inv_rms_tensor_uid().value()));
-        }
-
-        attr.set_dx(tensorMap.at(fb->dx_tensor_uid()));
-        attr.set_dscale(tensorMap.at(fb->dscale_tensor_uid()));
-
-        if(fb->dbias_tensor_uid().has_value())
-        {
-            attr.set_dbias(tensorMap.at(fb->dbias_tensor_uid().value()));
-            attr.set_compute_dbias(true);
-        }
-
-        return attr;
     }
 
 private:
