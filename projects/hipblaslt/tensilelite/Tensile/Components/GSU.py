@@ -27,7 +27,8 @@ from rocisa.instruction import SAddCU32, SAddU32, SAndB32, SLoadB32, SStoreB32, 
     SCBranchSCC0, SCBranchSCC1, SCMovB32, SCSelectB32, SCmpEQU32, SCmpLgU32, SCmpLtU32, SCmpGtI32, \
     SLShiftLeftB64, SLShiftRightB32, SMovB32, SMovB64, SMulI32, SSubU32, SCmpEQI32, SEndpgm, \
     SCmpLeI32, VCmpGEI32, SSubI32, SCBranchSCC0, VMovB32, SLShiftLeftB32, SWaitCnt, SBarrier, \
-    SNop, SSleep, VAddF32, VAddI32, VReadfirstlaneB32, SMulHIU32, VAddPKF32, VCndMaskB32, SAtomicDec
+    SNop, SSleep, VAddF32, VAddI32, VReadfirstlaneB32, SMulHIU32, VAddPKF32, VCndMaskB32, SAtomicDec, \
+    SCmpEQU64
 from rocisa.functions import scalarStaticMultiply64, scalarUInt32DivideAndRemainder, vectorStaticMultiply
 
 from ..Common import ceilDivide, log2, print2
@@ -271,7 +272,7 @@ class GSUOff(GSU):
         return module
 
 class GSUOn(GSU):
-    kernel = {"GlobalSplitUAlgorithm": "MultipleBufferSingleKernel"}
+    kernel = {"GlobalSplitUAlgorithm": ["MultipleBuffer", "MultipleBufferSingleKernel"]}
     # if GSU <= gsuThreshold, last wg does the reduction and no R/W to WS
     # else, atomic_dec chooses the wg to do the reduction
     gsuThreshold = 2
@@ -293,7 +294,7 @@ class GSUOn(GSU):
             module.add(SCmpEQU32(src0=sgpr(tmpSgprGSU.idx), src1=1, comment="GSU == 1 ?"))
             module.add(SCBranchSCC1(labelName=gsuLabel.getLabelName(), comment="branch if GSU == 1"))
 
-        if ((kernel["GlobalSplitUAlgorithm"] == 'MultipleBufferSingleKernel')):
+        if (kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel" or kernel["AdaptiveGemmGSUA"] == 1):
             extReadEpilogueLabeltmp    = Label(label=writer.labels.getNameInc("LoadExternalEpilogueStruct"), comment="")
             module.addComment0("Check if custom structure pointer is null")
             if kernel["ProblemType"]["SupportUserArgs"]:
@@ -675,7 +676,7 @@ class GSUOn(GSU):
     def defineAndResources(self, writer, kernel, tmpSgpr0, tmpSgprM, tmpSgprN, tmpSgprNumWG0, tmpSgprAccumTiles):
         module = Module("GSU On defineAndResources")
 
-        if ((kernel["GlobalSplitUAlgorithm"] == 'MultipleBufferSingleKernel')):
+        if (kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel" or kernel["AdaptiveGemmGSUA"] == 1):
             extReadEpilogueLabeltmp    = Label(label=writer.labels.getNameInc("LoadExternalEpilogueStruct"), comment="")
             module.addComment0("Check if custom structure pointer is null")
             if kernel["ProblemType"]["SupportUserArgs"]:
@@ -714,7 +715,7 @@ class GSUOn(GSU):
                 module.add(SAddU32(dst=sgpr(tmpSgpr+0), src0=sgpr(tmpSgpr+0), src1=sgpr(tmpSgpr+2), comment="sum tensor size"))
                 module.add(SAddCU32(dst=sgpr(tmpSgpr+1), src0=sgpr(tmpSgpr+1), src1=sgpr(tmpSgpr+3), comment="sum tensor size"))
             # SingleBuffer works on the same work space for every gsu
-            if kernel["GlobalSplitUAlgorithm"] == "MultipleBuffer":
+            if kernel["_GlobalAccumulation"] == "MultipleBuffer":
                 module.add(SAndB32(dst=sgpr(tmpSgpr+2), src0=sgpr("GSU"), src1=hex(0x3FFF), comment="Restore GSU"))
                 module.addModuleAsFlatItems(writer.s_mul_u64_u32(sgpr(tmpSgpr+0), sgpr(tmpSgpr+1), sgpr(tmpSgpr+2), \
                                 sgpr(tmpSgpr+0), comment="Recalculate gsu stride (size * gsu)"))
