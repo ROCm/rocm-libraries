@@ -68,6 +68,27 @@ Tests:
     matmul: *gfx13_precisions
   matrix_size: *gfx13_size_range
   transA_transB: *transA_transB_range
+  alpha: 2
+  beta: 2
+  scaleD: [1]
+  bias_vector: [1]
+  scaleAlpha_vector: [1]
+  gpu_arch: '13\d{2}'
+
+- name: gfx13_gelu
+  category: prebto
+  function:
+    matmul: *gfx13_precisions
+  matrix_size: *gfx13_size_range
+  transA_transB: *transA_transB_range
+  alpha: 2
+  beta: 2
+  scaleD: [1]
+  bias_vector: [1]
+  scaleAlpha_vector: [1]
+  activation_type: gelu
+  unit_check: 0
+  norm_check: 1
   gpu_arch: '13\d{2}'
 
 - name: matmul_one
@@ -139,6 +160,10 @@ Tests:
   transA_transB: *transA_transB_range
   alpha: 2
   beta: 3
+  # Before chip back, this test is blocked on gfx13
+  # due to the long runtime on FFM.
+  # If want to run on ffm -> export HIPBLASLT_TEST_TIMEOUT=6000
+  gpu_arch_exclude: '13\d{2}'
 
 - name: matmul_grid_limit_real
   category: nightly
