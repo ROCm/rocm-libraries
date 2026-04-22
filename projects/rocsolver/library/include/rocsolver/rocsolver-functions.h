@@ -10089,7 +10089,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgetrs_strided_batched_64(rocblas_hand
     \brief The SYTRS functions solve a system of ``n`` linear equations on ``n`` variables in its factorized form.
 
     \details
-    It solves the linear system \f$ A X = B \f$, where the n-by-n matrix A is symmetric indefinite, 
+    It solves the linear system \f$ A X = B \f$, where the n-by-n matrix A is symmetric and maybe indefinite, 
     using one of the following factorizations that depends on the value of ``uplo``:
 
     \f[
@@ -10220,7 +10220,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zsytrs_64(rocblas_handle handle,
 
     \details
     For each instance \f$ l \f$ in the batch, it solves the linear system \f$ A_l X_l = B_l \f$,
-    where the n-by-n matrix A is symmetric indefinite,
+    where the n-by-n matrix A is symmetric and maybe indefinite,
     using one of the following factorization, depending on the value of ``uplo``:
 
     \f[
@@ -10375,7 +10375,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zsytrs_batched_64(rocblas_handle handl
 
     \details
     For each instance \f$ l \f$ in the batch, it solves the linear system \f$ A_l X_l = B_l \f$,
-    where the n-by-n matrix A is symmetric indefinite,
+    where the n-by-n matrix A is symmetric and maybe indefinite,
     using one of the following factorizations, depending on the value of ``uplo``:
 
     \f[
@@ -25683,7 +25683,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_ztrtri_strided_batched(rocblas_handle 
 //! @}
 
 /*! @{
-    \brief The SYTF2 functions compute the factorization of a symmetric indefinite matrix \f$A\f$
+    \brief The SYTF2 functions compute the factorization of a symmetric and maybe indefinite matrix \f$A\f$
     using Bunch-Kaufman diagonal pivoting.
 
     \details
@@ -25809,7 +25809,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zsytf2(rocblas_handle handle,
 //! @}
 
 /*! @{
-    \brief The SYTF2_BATCHED functions computes the factorization of a batch of symmetric indefinite
+    \brief The SYTF2_BATCHED functions computes the factorization of a batch of symmetric and maybe indefinite
     matrices using Bunch-Kaufman diagonal pivoting.
 
     \details
@@ -25950,7 +25950,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zsytf2_batched(rocblas_handle handle,
 //! @}
 
 /*! @{
-    \brief The SYTF2_STRIDED_BATCHED functions compute the factorization of a batch of symmetric indefinite
+    \brief The SYTF2_STRIDED_BATCHED functions compute the factorization of a batch of symmetric and maybe indefinite
     matrices using Bunch-Kaufman diagonal pivoting.
 
     \details
@@ -26099,7 +26099,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zsytf2_strided_batched(rocblas_handle 
 //! @}
 
 /*! @{
-    \brief The SYTRF functions compute the factorization of a symmetric indefinite matrix \f$A\f$
+    \brief The SYTRF functions compute the factorization of a symmetric and maybe indefinite matrix \f$A\f$
     using Bunch-Kaufman diagonal pivoting.
 
     \details
@@ -26225,7 +26225,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zsytrf(rocblas_handle handle,
 //! @}
 
 /*! @{
-    \brief The SYTRF_BATCHED functions compute the factorization of a batch of symmetric indefinite
+    \brief The SYTRF_BATCHED functions compute the factorization of a batch of symmetric and maybe indefinite
     matrices using Bunch-Kaufman diagonal pivoting.
 
     \details
@@ -26366,7 +26366,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zsytrf_batched(rocblas_handle handle,
 //! @}
 
 /*! @{
-    \brief The SYTRF_STRIDED_BATCHED functions compute the factorization of a batch of symmetric indefinite
+    \brief The SYTRF_STRIDED_BATCHED functions compute the factorization of a batch of symmetric and maybe indefinite
     matrices using Bunch-Kaufman diagonal pivoting.
 
     \details
