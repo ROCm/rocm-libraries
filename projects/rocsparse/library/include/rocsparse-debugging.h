@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -58,7 +58,7 @@ ROCSPARSE_EXPORT int rocsparse_state_debug_kernel_launch();
 /*! \ingroup aux_module
  *  \brief Enable debug arguments.
  * \details If the debug arguments is enabled then messages are displayed when errors occur during argument checking.
- *          It provide information to the user depending of the setup of the verbosity
+ *          It provides information to the user depending on the setup of the verbosity
  * \ref rocsparse_enable_debug_arguments_verbose, \ref rocsparse_disable_debug_arguments_verbose and \ref rocsparse_state_debug_arguments_verbose.
  * \note This routine ignores the environment variable ROCSPARSE_DEBUG_ARGUMENTS.
  * \note This routine enables debug arguments verbose with \ref rocsparse_enable_debug_arguments_verbose.
@@ -84,7 +84,7 @@ int rocsparse_state_debug_arguments();
 /*! \ingroup aux_module
  *  \brief Enable debug arguments verbose.
  *  \details If the debug arguments (verbose) is enabled then messages are displayed when errors occur during argument checking.
- *           It provide information to the user depending of the setup of the verbosity
+ *           It provides information to the user depending on the setup of the verbosity
  *  \note This routine ignores the environment variable ROCSPARSE_DEBUG_ARGUMENTS_VERBOSE)
  */
 ROCSPARSE_EXPORT
@@ -106,7 +106,7 @@ int rocsparse_state_debug_arguments_verbose();
 
 /*! \ingroup aux_module
  *  \brief Enable debug.
- * \details If the debug is enabled then code traces are generated when unsuccessful status returns occur. It provides information to the user depending of the set of the verbosity
+ * \details If the debug is enabled then code traces are generated when unsuccessful status returns occur. It provides information to the user depending on the setup of the verbosity
  * (\ref rocsparse_enable_debug_verbose, \ref rocsparse_disable_debug_verbose and \ref rocsparse_state_debug_verbose).
  *  \note This routine ignores the environment variable ROCSPARSE_DEBUG.
  * \note \ref rocsparse_enable_debug_verbose and \ref rocsparse_enable_debug_arguments are called.
@@ -155,7 +155,7 @@ void rocsparse_enable_debug_verbose();
 
 /*! \ingroup aux_module
  *  \brief Disable debug verbose.
- *  \note This routine disables debug arguments verbose with  \ref rocsparse_disable_debug_arguments.
+ *  \note This routine disables debug arguments verbose with \ref rocsparse_disable_debug_arguments.
  *  \note This routine ignores the environment variable ROCSPARSE_DEBUG_VERBOSE.
  */
 ROCSPARSE_EXPORT

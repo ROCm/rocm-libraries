@@ -110,13 +110,14 @@ constexpr std::string_view type_name_bare()
     constexpr auto pos  = name.rfind(':');
     if constexpr(pos == std::string_view::npos)
     {
-        return name;
+        constexpr auto result = name;
+        return result;
     }
     else
     {
         constexpr auto bare_name = name.substr(pos + 1);
         static_assert(bare_name.size() > 0);
-        return name.substr(pos + 1);
+        return bare_name;
     }
 }
 

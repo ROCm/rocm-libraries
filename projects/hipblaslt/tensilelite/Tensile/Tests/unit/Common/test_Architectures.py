@@ -27,9 +27,9 @@ from unittest.mock import mock_open, patch
 from pathlib import Path
 from Tensile.Common.Utilities import isRhel8
 from Tensile.Common.Architectures import (
-    SUPPORTED_ARCH_DEVICE_IDS,
-    SUPPORTED_ARCH_CU_COUNTS,
-    ARCH_DEVICE_ID_FALLBACKS,
+    SUPPORTED_BUILD_CHIP_IDS,
+    SUPPORTED_BUILD_CU_COUNTS,
+    SUPPORTED_CHIP_ID_FALLBACKS,
     ArchInfo,
     splitArchsFromPredicates,
     LogicFileError,
@@ -249,13 +249,13 @@ def test_splitArchsFromPredicates_empty():
     assert variants is None
 
 def test_verifyPredicate_valid_device_id():
-    for device_id in SUPPORTED_ARCH_DEVICE_IDS:
-        arch = SUPPORTED_ARCH_DEVICE_IDS[device_id]
+    for device_id in SUPPORTED_BUILD_CHIP_IDS:
+        arch = SUPPORTED_BUILD_CHIP_IDS[device_id]
         assert _verifyPredicate(device_id, arch) == device_id
 
 def test_verifyPredicate_valid_cu_count():
-    for cu_count in SUPPORTED_ARCH_CU_COUNTS:
-        arch = SUPPORTED_ARCH_CU_COUNTS[cu_count]
+    for cu_count in SUPPORTED_BUILD_CU_COUNTS:
+        arch = SUPPORTED_BUILD_CU_COUNTS[cu_count]
         assert _verifyPredicate(cu_count, arch) == cu_count
 
 def test_verifyPredicate_invalid_device_id():

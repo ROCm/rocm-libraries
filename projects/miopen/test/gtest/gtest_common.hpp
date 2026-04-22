@@ -327,6 +327,7 @@ MIOPEN_LIB_ENV_VAR(MIOPEN_DEBUG_CONV_IMPLICIT_GEMM)
 MIOPEN_LIB_ENV_VAR(MIOPEN_LOG_LEVEL)
 MIOPEN_LIB_ENV_VAR(MIOPEN_LOG_BUFFER_SIZE)
 MIOPEN_LIB_ENV_VAR(MIOPEN_FIND_ENFORCE)
+MIOPEN_LIB_ENV_VAR(MIOPEN_SKIP_ASAN_DISABLED_TESTS)
 
 // TODO: GTests using test_drive<> disabled until gtest-aware version of test/driver.hpp is built
 #define MIOPEN_ENABLE_TEST_DRIVE_WITH_GTEST 0
@@ -342,6 +343,19 @@ protected:                                                                      
                         "test/driver.hpp is built ";                                          \
     }
 #endif
+
+// Returns true if the current build has ASAN enabled and the user has NOT
+// opted in to running ASAN-disabled tests via MIOPEN_SKIP_ASAN_DISABLED_TESTS=0.
+inline bool ShouldSkipForAsan()
+{
+#if defined(__SANITIZE_ADDRESS__) || (defined(__has_feature) && __has_feature(address_sanitizer))
+    if(!MIOPEN_SKIP_ASAN_DISABLED_TESTS)
+        return true; // Default to skipping if not set
+    return lib_env::value<bool>(MIOPEN_SKIP_ASAN_DISABLED_TESTS);
+#else
+    return false;
+#endif
+}
 
 /// \todo Remove workarounds
 namespace wa {
