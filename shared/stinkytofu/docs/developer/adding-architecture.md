@@ -2,7 +2,7 @@
 
 This guide walks through all the steps required to add support for a new GPU architecture to the StinkyTofu framework.
 
-> **Note:** This guide uses **Gfx942** (CDNA3/MI300) as a concrete example. When adding your own architecture, follow the same pattern using Gfx942, Gfx950, or Gfx1250 as your template.
+> **Note:** This guide uses **Gfx1250** as a concrete example. When adding your own architecture, follow the same pattern using Gfx1250 as your template.
 
 ## Overview
 
@@ -16,9 +16,7 @@ Adding a new architecture involves:
 
 | Architecture | Type | arch.cmake defaults | Notes |
 |--------------|------|--------------------|-------|
-| **Gfx942** | CDNA3/MI300 | cycle=4, latency=4, VGPR=256, SGPR=102, AGPR=256 | Has MFMA |
-| **Gfx950** | CDNA5 | cycle=4, latency=4, VGPR=256, SGPR=102, AGPR=256 | Has WMMA |
-| **Gfx1250** | RDNA4 | cycle=1, latency=1, VGPR=256, SGPR=102, AGPR=0 | Simpler ISA |
+| **Gfx1250** | RDNA4 | cycle=1, latency=1, VGPR=256, SGPR=102, AGPR=0 | Currently the only supported architecture |
 
 ## Step-by-Step Guide
 
@@ -28,8 +26,6 @@ Add the new architecture to `cmake/StinkytofuArchList.cmake`:
 
 ```cmake
 set(STINKYTOFU_ALL_ARCHS
-    Gfx942
-    Gfx950
     Gfx1250
     GfxYourArch    # <-- Add here
 )
@@ -40,8 +36,6 @@ set(STINKYTOFU_ALL_ARCHS
 Add a `#cmakedefine` entry in `include/stinkytofu/Config.h.in`:
 
 ```cpp
-#cmakedefine STINKYTOFU_ARCH_GFX942
-#cmakedefine STINKYTOFU_ARCH_GFX950
 #cmakedefine STINKYTOFU_ARCH_GFX1250
 #cmakedefine STINKYTOFU_ARCH_GFXYOURARCH    // <-- Add here
 ```
@@ -51,12 +45,11 @@ Add a `#cmakedefine` entry in `include/stinkytofu/Config.h.in`:
 **Best approach:** Copy an existing architecture folder and modify it.
 
 ```bash
-# For CDNA-like architecture
-cp -r hardware/src/gfx/Gfx942 hardware/src/gfx/GfxYourArch
+cp -r hardware/src/gfx/Gfx1250 hardware/src/gfx/GfxYourArch
 cd hardware/src/gfx/GfxYourArch
-mv Gfx942.cpp GfxYourArch.cpp
-mv Gfx942Formats.def GfxYourArchFormats.def
-mv Gfx942Instructions.def GfxYourArchInstructions.def
+mv Gfx1250.cpp GfxYourArch.cpp
+mv Gfx1250Formats.def GfxYourArchFormats.def
+mv Gfx1250Instructions.def GfxYourArchInstructions.def
 ```
 
 #### 3a. Create `arch.cmake`
@@ -79,7 +72,7 @@ set(ARCH_MAX_AGPR 256)        # May be 0 for RDNA
 #### 3b. Create `GfxYourArchInstructions.def` and `GfxYourArchFormats.def`
 
 - **Instructions**: Add `DEF_T(ClassName, "mnemonic", .format = X, .flags = {...}, .cost = {cycle, latency})` for each instruction. Tablegen generates `*_init.inc` and `*_costs.inc`.
-- **Formats**: Copy from a similar arch and adjust. See [Instruction DEF_T System](../design/instruction-def-t-system.md).
+- **Formats**: Copy from a similar arch and adjust. See [Adding Instructions](adding-instructions.md) for DEF_T syntax details.
 
 #### 3c. Create `GfxYourArch.cpp`
 
@@ -130,7 +123,7 @@ namespace stinkytofu
 Add your arch to the `INSTRUCTION_GEN_FILES` and `INSTRUCTION_DEF_FILES` lists:
 
 ```cmake
-foreach(arch Gfx1250 Gfx942 Gfx950 GfxYourArch)   # Add GfxYourArch
+foreach(arch Gfx1250 GfxYourArch)   # Add GfxYourArch
     ...
 endforeach()
 set(INSTRUCTION_DEF_FILES
@@ -148,7 +141,7 @@ set(INSTRUCTION_DEF_FILES
 
 #### 5a. Create `src/conversion/rocisa/GfxYourArchRocisaArchInfo.hpp`
 
-Copy from `Gfx942RocisaArchInfo.hpp` and replace `942` with your arch number.
+Copy from `Gfx1250RocisaArchInfo.hpp` and replace `1250` with your arch number.
 
 #### 5b. Update `src/conversion/rocisa/RocisaArchInfo.hpp`
 
@@ -181,6 +174,6 @@ Add:
 
 **Pro tip:** Use search-and-replace on copied files:
 ```bash
-sed -i 's/942/YourArch/g' hardware/src/gfx/GfxYourArch/GfxYourArch.cpp
-sed -i 's/9, 4, 2/X, Y, Z/g' hardware/src/gfx/GfxYourArch/arch.cmake
+sed -i 's/1250/YourArch/g' hardware/src/gfx/GfxYourArch/GfxYourArch.cpp
+sed -i 's/12, 5, 0/X, Y, Z/g' hardware/src/gfx/GfxYourArch/arch.cmake
 ```
