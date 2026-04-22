@@ -104,7 +104,7 @@ TEST(TestGlobMatch, LiteralDoesNotMatchEmptyText)
 // Practical patterns from integration tests
 // ---------------------------------------------------------------------------
 
-TEST(TestGlobMatch, IntegrationStyleConvFwdFp16)
+TEST(TestGlobMatch, ConvFwdStylePattern)
 {
     EXPECT_TRUE(
         globMatch("*ConvFwd*Fp16*", "IntegrationGpuConvFwd2dFp16/Smoke.Correctness/NCHW_params"));
@@ -112,7 +112,7 @@ TEST(TestGlobMatch, IntegrationStyleConvFwdFp16)
         globMatch("*ConvFwd*Fp16*", "IntegrationGpuConvFwd2dFp32/Smoke.Correctness/NCHW_params"));
 }
 
-TEST(TestGlobMatch, IntegrationStyleBroadWildcard)
+TEST(TestGlobMatch, BroadWildcardPattern)
 {
     EXPECT_TRUE(globMatch("*convolution*fp16*", "test_convolution_fwd_fp16_nchw"));
     EXPECT_FALSE(globMatch("*convolution*fp16*", "test_convolution_fwd_fp32_nchw"));

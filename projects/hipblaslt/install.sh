@@ -260,7 +260,13 @@ install_packages( )
       if [[ "${build_clients}" == true ]]; then
         install_apt_packages "${client_dependencies_ubuntu[@]}"
       fi
-      pip3 install wheel
+      install_apt_packages "python3-venv" "python3-pip"
+      venv_dir="${build_dir}/venv"
+      python3 -m venv "${venv_dir}"
+      "${venv_dir}/bin/pip" install --upgrade pip wheel
+      "${venv_dir}/bin/pip" install -r "${root_path}/tensilelite/requirements.txt"
+      export PATH="${venv_dir}/bin:${PATH}"
+      export VIRTUAL_ENV="${venv_dir}"
       ;;
 
     centos|rhel|almalinux)
@@ -660,6 +666,12 @@ fi
 
 # Default cmake executable is called cmake
 cmake_executable=cmake
+
+# Activate virtualenv if it exists (created by -d on Ubuntu)
+venv_dir="${build_dir}/venv"
+if [[ -f "${venv_dir}/bin/activate" ]]; then
+  source "${venv_dir}/bin/activate"
+fi
 
 # If user provides custom ${rocm_path} path for hcc it has lesser priority,
 # but with hip-clang existing path has lesser priority to avoid use of installed clang++

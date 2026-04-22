@@ -3,6 +3,7 @@
 
 #include "BatchnormFwdTrainingPlan.hpp"
 #include "BatchnormCommon.hpp"
+#include "hip/HipKernelCompileOptions.hpp"
 
 #include "HipKernelUtils.hpp"
 #include "hip/IKernelCompiler.hpp"
@@ -355,61 +356,39 @@ void BatchnormFwdTrainingPlan::compile(const IKernelCompiler& kernelCompiler,
     int nrnOpId = 0;
 
     // Prepare compilation options
-    std::vector<std::string> options;
-    auto rocmPath
-        = hipdnn_data_sdk::utilities::trim(hipdnn_data_sdk::utilities::getEnv("ROCM_PATH"));
-    if(!rocmPath.empty())
-    {
-        auto rocmIncludeArg = "-I" + rocmPath + "/include";
-        options.emplace_back(rocmIncludeArg);
-        HIPDNN_PLUGIN_LOG_INFO(
-            "BatchnormFwdTrainingPlan: HIPRTC compile ROCm include path: " << rocmIncludeArg);
-    }
-    options.emplace_back(std::string("-DHIP_PLUGIN_USE_FP32=") + (useFp32 ? "1" : "0"));
-    options.emplace_back(
-        "-DHIP_PLUGIN_USE_FP16=0"); // Not using this path due to scale/bias data type requirements
-    options.emplace_back(std::string("-DHIP_PLUGIN_USE_FPMIX=") + (useFp16Mix ? "1" : "0"));
-    options.emplace_back(std::string("-DHIP_PLUGIN_USE_BFPMIX=") + (useBfp16Mix ? "1" : "0"));
-    options.emplace_back(std::string("-DHIP_PLUGIN_SAVE_MEAN_VARIANCE=")
-                         + (_trainingParams.hasSaveMeanVariance() ? "1" : "0"));
-    options.emplace_back(std::string("-DHIP_PLUGIN_RUNNING_RESULT=")
-                         + (_trainingParams.hasRunningStats() ? "1" : "0"));
-    options.emplace_back(std::string("-DHIP_PLUGIN_BN_VARIANT=") + std::to_string(variant));
-    options.emplace_back(std::string("-DHIP_PLUGIN_BN_LDS_SIZE=") + std::to_string(ldsnogcn));
-    options.emplace_back(std::string("-DHIP_PLUGIN_BN_LDSGCN_SIZE=") + std::to_string(ldsgcn));
-    options.emplace_back(std::string("-DHIP_PLUGIN_BN_N=") + std::to_string(n));
-    options.emplace_back(std::string("-DHIP_PLUGIN_BN_C=") + std::to_string(c));
-    options.emplace_back(std::string("-DHIP_PLUGIN_BN_HW=") + std::to_string(inCstride));
-    options.emplace_back(std::string("-DHIP_PLUGIN_BN_NHW=") + std::to_string(inNhw));
-    options.emplace_back(std::string("-DHIP_PLUGIN_BN_CHW=") + std::to_string(c * inCstride));
-    options.emplace_back(std::string("-DHIP_PLUGIN_BN_NCHW=") + std::to_string(c * inNhw));
-    options.emplace_back(std::string("-DHIP_PLUGIN_BN_NGRPS=")
-                         + std::to_string(ygridsize / ylocalsize));
-    options.emplace_back(std::string("-DHIP_PLUGIN_BN_NGRPS2=")
-                         + std::to_string(zgridsize / zlocalsize));
-    options.emplace_back(std::string("-DHIP_PLUGIN_BN_N_ELEMENTS=") + std::to_string(nelements));
-    options.emplace_back(std::string("-DHIP_PLUGIN_BN_GRP0=") + std::to_string(xlocalsize));
-    options.emplace_back(std::string("-DHIP_PLUGIN_BN_GRP1=") + std::to_string(ylocalsize));
-    options.emplace_back(std::string("-DHIP_PLUGIN_BN_GRP2=") + std::to_string(zlocalsize));
-    options.emplace_back(std::string("-DHIP_PLUGIN_BN_GRP0_FINAL=")
-                         + std::to_string(xlocalsizeFinal));
-    options.emplace_back(std::string("-DHIP_PLUGIN_BN_GRP1_FINAL=")
-                         + std::to_string(ylocalsizeFinal));
-    options.emplace_back(std::string("-DHIP_PLUGIN_BN_GRP2_FINAL=")
-                         + std::to_string(zlocalsizeFinal));
-    options.emplace_back(std::string("-DHIP_PLUGIN_BN_GFX103X=") + (isGfx103X ? "1" : "0"));
-    options.emplace_back(std::string("-DHIP_PLUGIN_BN_GFX110X=") + (isGfx110X ? "1" : "0"));
-    options.emplace_back(std::string("-DHIP_PLUGIN_BN_GFX120X=") + (isGfx120X ? "1" : "0"));
-    options.emplace_back(std::string("-DHIP_PLUGIN_BN_GFX115X=") + (isGfx115X ? "1" : "0"));
-    options.emplace_back(std::string("-DHIP_PLUGIN_LAYOUT_NHWC=")
-                         + std::to_string(static_cast<int>(isLayoutNHWC)));
-    options.emplace_back(std::string("-DHIP_PLUGIN_BN_VECTORIZE=")
-                         + std::to_string(static_cast<int>(vectorsize > 1)));
-    options.emplace_back(std::string("-DHIP_PLUGIN_BN_VEC_SIZE=") + std::to_string(vectorsize));
-    options.emplace_back(std::string("-DHIP_PLUGIN_BN_STASH_METHOD=")
-                         + std::to_string(stashMethod));
-    options.emplace_back(std::string("-DHIP_PLUGIN_NRN_OP_ID=") + std::to_string(nrnOpId));
-    options.emplace_back(std::string("--offload-arch=") + deviceProperties.gcnArchName);
+    HipKernelCompileOptions options(_trainingParams.x(), deviceProperties);
+    options.add("HIP_PLUGIN_USE_FPMIX", useFp16Mix);
+    options.add("HIP_PLUGIN_USE_BFPMIX", useBfp16Mix);
+    options.update("HIP_PLUGIN_USE_FP16",
+                   0); // Not using this path due to scale/bias data type requirements
+    options.add("HIP_PLUGIN_SAVE_MEAN_VARIANCE", _trainingParams.hasSaveMeanVariance());
+    options.add("HIP_PLUGIN_RUNNING_RESULT", _trainingParams.hasRunningStats());
+    options.add("HIP_PLUGIN_BN_VARIANT", variant);
+    options.add("HIP_PLUGIN_BN_LDS_SIZE", ldsnogcn);
+    options.add("HIP_PLUGIN_BN_LDSGCN_SIZE", ldsgcn);
+    options.add("HIP_PLUGIN_BN_N", n);
+    options.add("HIP_PLUGIN_BN_C", c);
+    options.add("HIP_PLUGIN_BN_HW", inCstride);
+    options.add("HIP_PLUGIN_BN_NHW", inNhw);
+    options.add("HIP_PLUGIN_BN_CHW", c * inCstride);
+    options.add("HIP_PLUGIN_BN_NCHW", c * inNhw);
+    options.add("HIP_PLUGIN_BN_NGRPS", ygridsize / ylocalsize);
+    options.add("HIP_PLUGIN_BN_NGRPS2", zgridsize / zlocalsize);
+    options.add("HIP_PLUGIN_BN_N_ELEMENTS", nelements);
+    options.add("HIP_PLUGIN_BN_GRP0", xlocalsize);
+    options.add("HIP_PLUGIN_BN_GRP1", ylocalsize);
+    options.add("HIP_PLUGIN_BN_GRP2", zlocalsize);
+    options.add("HIP_PLUGIN_BN_GRP0_FINAL", xlocalsizeFinal);
+    options.add("HIP_PLUGIN_BN_GRP1_FINAL", ylocalsizeFinal);
+    options.add("HIP_PLUGIN_BN_GRP2_FINAL", zlocalsizeFinal);
+    options.add("HIP_PLUGIN_BN_GFX103X", isGfx103X);
+    options.add("HIP_PLUGIN_BN_GFX110X", isGfx110X);
+    options.add("HIP_PLUGIN_BN_GFX120X", isGfx120X);
+    options.add("HIP_PLUGIN_BN_GFX115X", isGfx115X);
+    options.add("HIP_PLUGIN_BN_VECTORIZE", vectorsize > 1);
+    options.add("HIP_PLUGIN_BN_VEC_SIZE", vectorsize);
+    options.add("HIP_PLUGIN_BN_STASH_METHOD", stashMethod);
+    options.add("HIP_PLUGIN_NRN_OP_ID", nrnOpId);
 
     // Compile the kernel and configure launch parameters based on the selected variant
     _compiledProgram = kernelCompiler.compile("BatchNormFwdTrainSpatial.cpp", options);

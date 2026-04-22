@@ -9,7 +9,7 @@ Documentation for rocFFT is available at
 
 * Allow plans to share hipModules if they use the same kernels.  This reduces time spent and memory used when
   creating plans that exist concurrently.
-* Improved performance of unit-strided, complex-interleaved, forward/inverse FFTs on gfx1201, gfx90a, gfx942, and gfx950.
+* Improved performance of unit-strided, interleaved, complex-to-complex and real-to-complex FFTs on gfx1201, gfx90a, gfx942, and gfx950.
   Single-precision lengths:
   * (160,72,72)
   * (160,80,72)
@@ -19,8 +19,11 @@ Documentation for rocFFT is available at
   * (84,84,72)
   * (96,96,96)
   * (108,108,80)
-  Double-precision length:
+  Double-precision lengths:
   * (72,72,52)
+  * (60,60,60)
+  * (64,64,52)
+  * (64,64,64)
 
 ### Changed
 
