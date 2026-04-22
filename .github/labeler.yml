@@ -114,6 +114,10 @@
 - changed-files:
   - any-glob-to-any-file: 'shared/origami/**/*'
 
+"shared: stinkytofu":
+- changed-files:
+  - any-glob-to-any-file: 'shared/stinkytofu/**/*'
+
 "shared: primbench":
 - changed-files:
   - any-glob-to-any-file: 'shared/primbench/**/*'
