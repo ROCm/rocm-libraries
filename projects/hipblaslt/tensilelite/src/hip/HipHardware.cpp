@@ -44,6 +44,7 @@ namespace TensileLite
                      std::string(prop.name),
                      pciChipId)
             , properties(prop)
+            , deviceId(deviceId)
         {
             if(origami::hardware_t::is_hardware_supported(prop))
             {
