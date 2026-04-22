@@ -100,6 +100,10 @@ The following dependencies are required:
 
    It's best to use ROCm packages from the same release where applicable.
 
+.. note::
+
+   If building Composable Kernel from source, adding the cmake parameter ``-DHIPTENSOR_BUILD_TESTS=ON`` will speed up the build by compiling only the targets required by hipTensor.
+
 Downloading hipTensor
 -------------------------------------------
 

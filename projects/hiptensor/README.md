@@ -28,6 +28,16 @@ Optional:
 
 * doxygen (for building documentation)
 
+### Building Composable Kernel
+
+In case the Composable Kernel library isn't included in your ROCm installation, please refer to the
+[Composable Kernel installation guide](https://rocm.docs.amd.com/projects/composable_kernel/en/latest/install/Composable-Kernel-install.html)
+in order to build and install the library.
+
+> [!TIP]
+> When building Composable Kernel, add `-DHIPTENSOR_BUILD_TESTS=ON` to the cmake configure command in order to only build the
+> targets required by hipTensor and speed-up the build time.
+
 ## Build with CMake
 
 For more detailed information, please refer to the [hipTensor installation guide](https://rocm.docs.amd.com/projects/hipTensor/en/latest/install/installation.html).
