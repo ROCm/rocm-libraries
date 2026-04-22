@@ -83,13 +83,11 @@ HIPCUB_FORCEINLINE uint64_t WarpMask(unsigned int warp_id)
 
 template<int LOGICAL_WARP_THREADS, typename T>
 HIPCUB_DEVICE
-HIPCUB_FORCEINLINE T ShuffleUp(T input, int src_offset, int first_thread, unsigned int member_mask)
+HIPCUB_FORCEINLINE T ShuffleUp(T                    input,
+                               int                  src_offset,
+                               [[maybe_unused]] int first_thread /*Not supported in rocPRIM*/,
+                               [[maybe_unused]] unsigned int member_mask /*Not supported in ROCm*/)
 {
-    // Not supported in rocPRIM.
-    (void) first_thread;
-    // Member mask is not supported in rocPRIM, because it's
-    // not supported in ROCm.
-    (void) member_mask;
     return ::rocprim::warp_shuffle_up(
         input, src_offset, LOGICAL_WARP_THREADS
     );
@@ -97,13 +95,12 @@ HIPCUB_FORCEINLINE T ShuffleUp(T input, int src_offset, int first_thread, unsign
 
 template<int LOGICAL_WARP_THREADS, typename T>
 HIPCUB_DEVICE
-HIPCUB_FORCEINLINE T ShuffleDown(T input, int src_offset, int last_thread, unsigned int member_mask)
+HIPCUB_FORCEINLINE
+    T ShuffleDown(T                             input,
+                  int                           src_offset,
+                  [[maybe_unused]] int          last_thread /*Not supported in rocPRIM*/,
+                  [[maybe_unused]] unsigned int member_mask /*Not supported in ROCm*/)
 {
-    // Not supported in rocPRIM.
-    (void) last_thread;
-    // Member mask is not supported in rocPRIM, because it's
-    // not supported in ROCm.
-    (void) member_mask;
     return ::rocprim::warp_shuffle_down(
         input, src_offset, LOGICAL_WARP_THREADS
     );
@@ -111,11 +108,9 @@ HIPCUB_FORCEINLINE T ShuffleDown(T input, int src_offset, int last_thread, unsig
 
 template<int LOGICAL_WARP_THREADS, typename T>
 HIPCUB_DEVICE
-HIPCUB_FORCEINLINE T ShuffleIndex(T input, int src_lane, unsigned int member_mask)
+HIPCUB_FORCEINLINE T ShuffleIndex(
+    T input, int src_lane, [[maybe_unused]] unsigned int member_mask /*Not supported in ROCm*/)
 {
-    // Member mask is not supported in rocPRIM, because it's
-    // not supported in ROCm.
-    (void) member_mask;
     return ::rocprim::warp_shuffle(
         input, src_lane, LOGICAL_WARP_THREADS
     );
