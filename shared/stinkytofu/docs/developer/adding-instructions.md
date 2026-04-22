@@ -4,7 +4,7 @@ This guide shows you how to add a new instruction from bottom (Assembly IR) to t
 
 **Note**: Python API is decoupled via a separate wrapper layer and is not directly affected by these changes.
 
-**Instruction definitions and costs** use the [DEF_T system](../design/instruction-def-t-system.md): they live in `hardware/src/gfx/GfxXXX/GfxXXXInstructions.def` (and optionally `GfxXXXFormats.def` in the same folder), using `DEF_T` for standalone instructions or `DEF_BATCH` for groups sharing a format. Tablegen generates `*_init.inc`, `*_costs.inc`, and `*_operands.inc`; the architecture `.cpp`/`.hpp` files only include those. Do not add DEF_T or cost tables manually in the `.cpp`.
+**Instruction definitions and costs** use the [DEF_T system](#chapter-1-assembly-ir-hardware-layer): they live in `hardware/src/gfx/GfxXXX/GfxXXXInstructions.def` (and optionally `GfxXXXFormats.def` in the same folder), using `DEF_T` for standalone instructions or `DEF_BATCH` for groups sharing a format. Tablegen generates `*_init.inc`, `*_costs.inc`, and `*_operands.inc`; the architecture `.cpp`/`.hpp` files only include those. Do not add DEF_T or cost tables manually in the `.cpp`.
 
 ---
 
@@ -119,7 +119,7 @@ DEF_BATCH(.format = MUBUF_LOAD,
 )
 ```
 
-Then rebuild so tablegen runs (e.g. `cmake --build .`). See [Instruction DEF_T System](../design/instruction-def-t-system.md) for full syntax and format inheritance.
+Then rebuild so tablegen runs (e.g. `cmake --build .`). See [Architecture Overview](architecture.md) for full syntax and format inheritance.
 
 ### Step 4. Rocisa LogicalToArch mapping (automatic via `.logical`)
 
@@ -166,7 +166,7 @@ Add to `shared/stinkytofu/tools/tablegen/LogicalInstructionDefs.inc`:
 
 Costs are defined in the **architecture .def file** and **arch.cmake**, not in the .cpp.
 
-- **Default cost**: Each arch sets a default in `arch.cmake` (ARCH_DEFAULT_CYCLE, ARCH_DEFAULT_LATENCY). E.g. Gfx1250 uses 1,1; Gfx942/Gfx950 use 4,4. Instructions without `.cost` in the .def use that default.
+- **Default cost**: Each arch sets a default in `arch.cmake` (ARCH_DEFAULT_CYCLE, ARCH_DEFAULT_LATENCY). E.g. Gfx1250 uses 1,1. Instructions without `.cost` in the .def use that default.
 - **Override**: In `hardware/src/gfx/GfxXXX/GfxXXXInstructions.def`, add `.cost = {cycle, latency}` to the instruction's `DEF_T(...)` or `DEF_BATCH` entry. Tablegen emits only non-default costs into `GfxXXX_costs.inc`; the generated block applies them.
 
 Example — standalone `DEF_T` with cost:
@@ -210,7 +210,7 @@ DEF_BATCH(.format = MXWMMA_SCALE16,
 )
 ```
 
-Do **not** add cost entries to any array in `GfxXXX.cpp`; they are generated from the .def. See [Instruction DEF_T System](../design/instruction-def-t-system.md).
+Do **not** add cost entries to any array in `GfxXXX.cpp`; they are generated from the .def. See [Architecture Overview](architecture.md).
 
 #### 6b. Add Operand Requirements (Optional)
 
@@ -310,10 +310,10 @@ Instruction **definitions** and **costs** live in `.def` files; tablegen generat
 | **Operand requirements** | `GfxXXXFormats.def` / `GfxXXXInstructions.def` | Define `.fields` in format or `.operand_fields` / `.alt_operand_fields` per-instruction; tablegen -> `*_operands.inc` (included by GfxXXX.hpp) |
 | **Modifier-dependent costs** | `GfxXXXInstructions.def` | `.costOverride = { { MatrixFmtData(...), cycle, latency } }` alongside `.cost` |
 
-### Gfx1250, Gfx942, Gfx950
+### Gfx1250
 
-Same pattern for all three: edit `hardware/src/gfx/GfxXXX/GfxXXXInstructions.def` (and optionally `GfxXXXFormats.def` in same folder), then rebuild. Use `DEF_T` for standalone instructions or `DEF_BATCH` for groups sharing a format. Add `.logical` in the `.def` to auto-generate the Rocisa LogicalToArch map. The corresponding `GfxXXX.cpp` only holds manually-added Rocisa maps if needed. Instruction definitions and costs come from the .def files and generated .inc files.
+Edit `hardware/src/gfx/Gfx1250/Gfx1250Instructions.def` (and optionally `Gfx1250Formats.def` in same folder), then rebuild. Use `DEF_T` for standalone instructions or `DEF_BATCH` for groups sharing a format. Add `.logical` in the `.def` to auto-generate the Rocisa LogicalToArch map. The corresponding `Gfx1250.cpp` only holds manually-added Rocisa maps if needed. Instruction definitions and costs come from the .def files and generated .inc files.
 
 ### See also
 
-- [Instruction DEF_T System](../design/instruction-def-t-system.md) -- design and data flow for .def -> tablegen -> .inc.
+- [Architecture Overview](architecture.md) -- design and data flow for .def -> tablegen -> .inc.
