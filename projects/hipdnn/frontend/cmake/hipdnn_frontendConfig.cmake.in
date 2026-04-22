@@ -7,8 +7,6 @@ include(CMakeFindDependencyMacro)
 find_dependency(hipdnn_data_sdk @HIPDNN_FRONTEND_DATA_SDK_MIN_VERSION@ CONFIG REQUIRED)
 find_dependency(hipdnn_backend @HIPDNN_FRONTEND_BACKEND_MIN_VERSION@ CONFIG REQUIRED)
 
-set(HIPDNN_ENABLE_SDPA @HIPDNN_ENABLE_SDPA@)
-
 # Frontend headers include <nlohmann/json.hpp> directly when JSON support is enabled.
 set(HIPDNN_FRONTEND_SKIP_JSON_LIB @HIPDNN_FRONTEND_SKIP_JSON_LIB@ CACHE BOOL
     "Defines whether FE should not include nlohmann/json.hpp.")

@@ -88,7 +88,8 @@ example_engine_plugin/
 ├── sample/                              # Demo app + acceptance test
 │   ├── CMakeLists.txt
 │   └── ExampleProviderSample.cpp
-├── version.h.in                        # Version header template
+├── templates/                          # Template files for code generation
+│   └── version.h.in                    # Version header template
 └── version.json                        # Authoritative plugin version
 ```
 
@@ -508,7 +509,7 @@ and `TEMPLATE REFERENCE` comment markers in the source files for per-file guidan
 | `tests/TestHelpers.hpp` | Replace graph construction helpers for your operations |
 | `sample/ExampleProviderSample.cpp` | Rename file, adapt scenarios to your operations |
 | `version.json` | Update version key name from `example_provider_version` to `your_name_provider_version` |
-| `version.h.in` | Rename header guard and macro prefix from `EXAMPLE_PROVIDER_VERSION_*` to `YOUR_NAME_PROVIDER_VERSION_*` |
+| `templates/version.h.in` | Rename header guard and macro prefix from `EXAMPLE_PROVIDER_VERSION_*` to `YOUR_NAME_PROVIDER_VERSION_*` |
 | `cmake/VersionUtils.cmake` | Rename three function names from `example_provider_*` to `your_name_provider_*` |
 
 **`TEMPLATE REFERENCE`** -- Study, then replace with your own implementations.
@@ -589,7 +590,7 @@ prefix. These are the `ExampleProvider`-prefixed files from the
 | `TestExampleProviderEngine.cpp` | `TestYourNameEngine.cpp` |
 | `ExampleProviderSample.cpp` | `YourNameSample.cpp` |
 | `version.json` (key inside) | Update key to `your_name_provider_version` |
-| `version.h.in` | Rename guard/macros to `YOUR_NAME_PROVIDER_VERSION_*` |
+| `templates/version.h.in` | Rename guard/macros to `YOUR_NAME_PROVIDER_VERSION_*` |
 
 #### CMake Targets and Options Requiring Rename
 
