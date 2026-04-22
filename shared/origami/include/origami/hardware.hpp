@@ -59,6 +59,7 @@ class hardware_t {
     gfx1151,
     gfx1152,
     gfx1153,
+    gfx1250,
     Count
   };
 
@@ -78,6 +79,7 @@ class hardware_t {
     if (str == "gfx1151") return architecture_t::gfx1151;
     if (str == "gfx1152") return architecture_t::gfx1152;
     if (str == "gfx1153") return architecture_t::gfx1153;
+    if (str == "gfx1250") return architecture_t::gfx1250;
     return architecture_t::Count;
   }
 
@@ -171,6 +173,9 @@ class hardware_t {
       case architecture_t::gfx1153:
         // AMD Radeon 820M iGPU
         return {0.240, NO_MALL_AVAILABLE, 0.066, 2, std::make_tuple(0, 0.19, 0), 1.5};
+      case architecture_t::gfx1250:
+        // TODO: Update this, but for now using gfx950 values
+        return {17, 1.21875121875121875122 * 7, 6, 4, std::make_tuple(0, 0.008, 0), 1.5};
       default: return {0, 0, 0, 0, std::make_tuple(0, 0, 0), 0};
     }
   }
