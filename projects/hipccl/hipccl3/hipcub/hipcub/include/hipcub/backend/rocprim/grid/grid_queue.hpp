@@ -107,13 +107,10 @@ public:
         d_counters((OffsetT*) d_storage)
     {}
 
-
     /// This operation sets the fill-size and resets the drain counter, preparing the GridQueue for draining in the next kernel instance.  To be called by the host or by a kernel prior to that which will be draining.
-    HIPCUB_DEVICE hipError_t FillAndResetDrain(
-        OffsetT fill_size,
-        hipStream_t stream = 0)
+    HIPCUB_DEVICE
+    hipError_t FillAndResetDrain(OffsetT fill_size, [[maybe_unused]] hipStream_t stream = 0)
     {
-        (void)stream;
         d_counters[FILL] = fill_size;
         d_counters[DRAIN] = 0;
         return hipSuccess;
@@ -133,9 +130,9 @@ public:
     }
 
     /// This operation resets the drain so that it may advance to meet the existing fill-size.  To be called by the host or by a kernel prior to that which will be draining.
-    HIPCUB_DEVICE hipError_t ResetDrain(hipStream_t stream = 0)
+    HIPCUB_DEVICE
+    hipError_t ResetDrain([[maybe_unused]] hipStream_t stream = 0)
     {
-        (void)stream;
         d_counters[DRAIN] = 0;
 
         return hipSuccess;
@@ -147,11 +144,10 @@ public:
         return HipcubDebug(hipMemsetAsync(d_counters + DRAIN, 0, sizeof(OffsetT), stream));
     }
 
-
     /// This operation resets the fill counter.  To be called by the host or by a kernel prior to that which will be filling.
-    HIPCUB_DEVICE hipError_t ResetFill(hipStream_t stream = 0)
+    HIPCUB_DEVICE
+    hipError_t ResetFill([[maybe_unused]] hipStream_t stream = 0)
     {
-        (void)stream;
         d_counters[FILL] = 0;
         return hipSuccess;
     }
@@ -162,13 +158,10 @@ public:
         return HipcubDebug(hipMemsetAsync(d_counters + FILL, 0, sizeof(OffsetT), stream));
     }
 
-
     /// Returns the fill-size established by the parent or by the previous kernel.
-    HIPCUB_DEVICE hipError_t FillSize(
-        OffsetT &fill_size,
-        hipStream_t stream = 0)
+    HIPCUB_DEVICE
+    hipError_t FillSize(OffsetT& fill_size, [[maybe_unused]] hipStream_t stream = 0)
     {
-        (void)stream;
         fill_size = d_counters[FILL];
 
         return hipSuccess;
