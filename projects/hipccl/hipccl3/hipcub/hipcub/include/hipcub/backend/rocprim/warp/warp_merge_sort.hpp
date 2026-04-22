@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2011-2021, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2017-2025, Advanced Micro Devices, Inc.  All
+ * Modifications Copyright (c) 2017-2026, Advanced Micro Devices, Inc.  All
  * rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -62,9 +62,6 @@ BEGIN_HIPCUB_NAMESPACE
  *   <b>[optional]</b> Value type (default: cub::NullType, which indicates a
  *   keys-only sort)
  *
- * @tparam PTX_ARCH
- *   <b>[optional]</b> ptx version
- *
  * @par Overview
  *   WarpMergeSort arranges items into ascending order using a comparison
  *   functor with less-than semantics. Merge sort can handle arbitrary types
@@ -117,20 +114,18 @@ BEGIN_HIPCUB_NAMESPACE
  * The corresponding output @p thread_keys in those threads will be
  * <tt>{ [0,1,2,3], [4,5,6,7], [8,9,10,11], ..., [508,509,510,511] }</tt>.
  */
-template <
-  typename    KeyT,
-  int         ITEMS_PER_THREAD,
-  int         LOGICAL_WARP_THREADS    = HIPCUB_DEVICE_WARP_THREADS,
-  typename    ValueT                  = NullType,
-  int         PTX_ARCH                = HIPCUB_ARCH>
+template<typename KeyT,
+         int ITEMS_PER_THREAD,
+         int LOGICAL_WARP_THREADS = HIPCUB_DEVICE_WARP_THREADS,
+         typename ValueT          = NullType>
 class WarpMergeSort
     : public BlockMergeSortStrategy<
-        KeyT,
-        ValueT,
-        LOGICAL_WARP_THREADS,
-        ITEMS_PER_THREAD,
-        WarpMergeSort<KeyT, ITEMS_PER_THREAD, LOGICAL_WARP_THREADS, ValueT, PTX_ARCH>,
-        true>
+          KeyT,
+          ValueT,
+          LOGICAL_WARP_THREADS,
+          ITEMS_PER_THREAD,
+          WarpMergeSort<KeyT, ITEMS_PER_THREAD, LOGICAL_WARP_THREADS, ValueT>,
+          true>
 {
 private:
   constexpr static bool IS_ARCH_WARP = LOGICAL_WARP_THREADS == HIPCUB_DEVICE_WARP_THREADS;
