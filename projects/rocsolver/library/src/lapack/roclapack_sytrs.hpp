@@ -436,7 +436,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(SYTRS_MAX_THDS) sytrs_kernel(bool const 
         // -----------------------------------
         // When each column is consistently accessed and modified by the
         // *same* thread, then there is consistency in the memory order
-        // and the synchtread() is not needed.
+        // and the syncthread() is not needed.
         //
         // However, when nrhs is small, then most of the threads may be idle.
         // In that case, we'll need a different distribution of work to threads
