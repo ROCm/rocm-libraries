@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -24,6 +24,7 @@
 // disable the warning because all warnings are threated as errors:
 
 #include "common_benchmark_header.hpp"
+#include "primbench.hpp"
 
 // HIP API
 #include <hipcub/device/device_for.hpp>
@@ -32,8 +33,7 @@
 const size_t DEFAULT_N = 1024 * 1024 * 32;
 #endif
 
-const unsigned int batch_size  = 10;
-const unsigned int warmup_size = 5;
+const unsigned int batch_size = 10;
 
 template<class T>
 struct op_t
@@ -51,110 +51,62 @@ struct op_t
     }
 };
 
-template<class Value>
-void run_benchmark(benchmark::State& state, hipStream_t stream, size_t size)
+template<class T>
+class for_each_benchmark : public primbench::benchmark_interface
 {
-    using T = Value;
-
-    // Generate data
-    std::vector<T> values_input(size, 4);
-
-    T* d_input;
-    HIP_CHECK(hipMalloc(&d_input, size * sizeof(T)));
-    HIP_CHECK(hipMemcpy(d_input, values_input.data(), size * sizeof(T), hipMemcpyHostToDevice));
-
-    unsigned int* d_count;
-    HIP_CHECK(hipMalloc(&d_count, sizeof(T)));
-    HIP_CHECK(hipMemset(d_count, 0, sizeof(T)));
-    op_t<T> device_op{d_count};
-
-    // Warm-up
-    for(size_t i = 0; i < warmup_size; i++)
+    primbench::json meta() const override
     {
-        HIP_CHECK(hipcub::DeviceFor::ForEach(d_input, d_input + size, device_op, stream));
+        return primbench::json{}.add("name", "for_each").add("lvl", "device").add("data_type", T);
     }
-    HIP_CHECK(hipDeviceSynchronize());
 
-    for(auto _ : state)
+    void run(primbench::state& state) override
     {
-        auto start = std::chrono::high_resolution_clock::now();
+        const size_t size   = state.size;
+        const auto&  stream = state.stream;
+
+        // Generate data
+        std::vector<T> values_input(size, 4);
+
+        T* d_input;
+        HIP_CHECK(hipMalloc(&d_input, size * sizeof(T)));
+        HIP_CHECK(hipMemcpy(d_input, values_input.data(), size * sizeof(T), hipMemcpyHostToDevice));
+
+        unsigned int* d_count;
+        HIP_CHECK(hipMalloc(&d_count, sizeof(T)));
+        HIP_CHECK(hipMemset(d_count, 0, sizeof(T)));
+        op_t<T> device_op{d_count};
 
         for(size_t i = 0; i < batch_size; i++)
         {
             HIP_CHECK(hipcub::DeviceFor::ForEach(d_input, d_input + size, device_op, stream));
         }
-        HIP_CHECK(hipStreamSynchronize(stream));
 
-        auto end = std::chrono::high_resolution_clock::now();
-        auto elapsed_seconds
-            = std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
-        state.SetIterationTime(elapsed_seconds.count());
+        state.set_items(batch_size * size);
+        state.add_writes<T>(batch_size * size);
+
+        HIP_CHECK(hipFree(d_count));
+        HIP_CHECK(hipFree(d_input));
     }
-    state.SetBytesProcessed(state.iterations() * batch_size * size * sizeof(T));
-    state.SetItemsProcessed(state.iterations() * batch_size * size);
+};
 
-    HIP_CHECK(hipFree(d_count));
-    HIP_CHECK(hipFree(d_input));
-}
-
-#define CREATE_BENCHMARK(Value)                                     \
-    benchmark::RegisterBenchmark(("for_each<Datatype:" #Value ">"), \
-                                 &run_benchmark<Value>,             \
-                                 stream,                            \
-                                 size)
+#define CREATE_BENCHMARK(Value) executor.queue<for_each_benchmark<Value>>()
 
 int main(int argc, char* argv[])
 {
-    cli::Parser parser(argc, argv);
-    parser.set_optional<size_t>("size", "size", DEFAULT_N, "number of values");
-    parser.set_optional<int>("trials", "trials", -1, "number of iterations");
-    parser.run_and_exit_if_error();
+    primbench::settings settings;
+    settings.size                 = DEFAULT_N;
+    settings.min_gpu_ms_per_batch = 100;
 
-    // Parse argv
-    benchmark::Initialize(&argc, argv);
-    const size_t size   = parser.get<size_t>("size");
-    const int    trials = parser.get<int>("trials");
-
-    std::cout << "benchmark_device_reduce_by_key" << std::endl;
-
-    // HIP
-    hipStream_t     stream = 0; // default
-    hipDeviceProp_t devProp;
-    int             device_id = 0;
-    HIP_CHECK(hipGetDevice(&device_id));
-    HIP_CHECK(hipGetDeviceProperties(&devProp, device_id));
-    std::cout << "[HIP] Device name: " << devProp.name << std::endl;
-
-    using custom_double2 = benchmark_utils::custom_type<double, double>;
+    primbench::executor executor(argc, argv, settings);
 
     // Add benchmarks
-    std::vector<benchmark::internal::Benchmark*> benchmarks = {
-        CREATE_BENCHMARK(float),
-        CREATE_BENCHMARK(double),
-        CREATE_BENCHMARK(custom_double2),
-        CREATE_BENCHMARK(int8_t),
-        CREATE_BENCHMARK(float),
-        CREATE_BENCHMARK(double),
-        CREATE_BENCHMARK(long long),
-    };
+    CREATE_BENCHMARK(float);
+    CREATE_BENCHMARK(double);
+    CREATE_BENCHMARK(custom_double2);
+    CREATE_BENCHMARK(int8_t);
+    CREATE_BENCHMARK(float);
+    CREATE_BENCHMARK(double);
+    CREATE_BENCHMARK(long long);
 
-    // Use manual timing
-    for(auto& b : benchmarks)
-    {
-        b->UseManualTime();
-        b->Unit(benchmark::kMillisecond);
-    }
-
-    // Force number of iterations
-    if(trials > 0)
-    {
-        for(auto& b : benchmarks)
-        {
-            b->Iterations(trials);
-        }
-    }
-
-    // Run benchmarks
-    benchmark::RunSpecifiedBenchmarks();
-    return 0;
+    executor.run();
 }

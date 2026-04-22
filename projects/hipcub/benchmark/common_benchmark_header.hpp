@@ -73,3 +73,10 @@ PRIMBENCH_REGISTER_TYPE(uint64_t, "u64")
 PRIMBENCH_REGISTER_TYPE(float, "f32")
 PRIMBENCH_REGISTER_TYPE(double, "f64")
 PRIMBENCH_REGISTER_TYPE(long long, "i64")
+
+// these are very commonly used in the benchmarks
+using custom_float2  = benchmark_utils::custom_type<float, float>;
+using custom_double2 = benchmark_utils::custom_type<double, double>;
+
+PRIMBENCH_REGISTER_TYPE(custom_float2, "custom<f32, f32>")
+PRIMBENCH_REGISTER_TYPE(custom_double2, "custom<f64, f64>")
