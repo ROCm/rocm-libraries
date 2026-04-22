@@ -121,13 +121,13 @@ struct Partitioner
 // Use this function to reduce code duplication for the iterative launching procedure
 template<typename Launcher>
 hipError_t launch_segmented_radix_sort_kernel(size_t      segment_type_grid_size,
+                                              size_t      segments_limit,
                                               const char* segment_type_str,
                                               hipStream_t stream,
                                               bool        debug_synchronous,
                                               Launcher&&  launch_fn)
 {
-    const size_t segments_limit = static_cast<size_t>(std::numeric_limits<unsigned int>::max());
-    const size_t num_launch     = ceiling_div(segment_type_grid_size, segments_limit);
+    const size_t num_launch = ceiling_div(segment_type_grid_size, segments_limit);
 
     for(size_t launch = 0, segments_offset = 0; launch < num_launch;
         ++launch, segments_offset += segments_limit)
@@ -214,6 +214,7 @@ inline hipError_t segmented_radix_sort_impl(
     const segment_index_type medium_segments_per_block
         = params.warp_sort_config.block_size_medium
           / params.warp_sort_config.logical_warp_size_medium;
+    const size_t segments_limit = static_cast<size_t>(params.kernel_config.size_limit);
 
     const bool  three_way_partitioning = max_small_segment_length < max_medium_segment_length;
     Partitioner partitioner(three_way_partitioning);
@@ -388,6 +389,7 @@ inline hipError_t segmented_radix_sort_impl(
         {
             ROCPRIM_RETURN_ON_ERROR(launch_segmented_radix_sort_kernel(
                 large_segment_count,
+                segments_limit,
                 "segmented_sort:large_segments",
                 stream,
                 debug_synchronous,
@@ -427,6 +429,7 @@ inline hipError_t segmented_radix_sort_impl(
                 = ::rocprim::detail::ceiling_div(medium_segment_count, medium_segments_per_block);
             ROCPRIM_RETURN_ON_ERROR(launch_segmented_radix_sort_kernel(
                 medium_segment_grid_size,
+                segments_limit,
                 "segmented_sort:medium_segments",
                 stream,
                 debug_synchronous,
@@ -471,6 +474,7 @@ inline hipError_t segmented_radix_sort_impl(
 
             ROCPRIM_RETURN_ON_ERROR(launch_segmented_radix_sort_kernel(
                 small_segment_grid_size,
+                segments_limit,
                 "segmented_sort:small_segments",
                 stream,
                 debug_synchronous,
