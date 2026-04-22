@@ -88,7 +88,7 @@ namespace rocRoller
         case GPUArchitectureGFX::GFX942:
             return "AMD CDNA 3";
         case GPUArchitectureGFX::GFX950:
-            return "AMD CDNA 3.5";
+            return "AMD CDNA 4";
         case GPUArchitectureGFX::GFX1012:
             return "AMD RDNA 1";
         case GPUArchitectureGFX::GFX1030:

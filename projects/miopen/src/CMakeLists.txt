@@ -576,7 +576,7 @@ if( MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN
         kernels/MIOpenBatchNormActivFwdTrainPerAct.cpp
         kernels/MIOpenBatchNormActivFwdTrainSpatial.cpp
         kernels/MIOpenBatchNormFwdTrainSpatial.cpp
-        kernels/MIOpenBatchNormFwdTrainPerAct.cl
+        kernels/MIOpenBatchNormFwdTrainPerAct.cpp
         kernels/MIOpenBatchNormFwdInferSpatial.cl
         kernels/MIOpenBatchNormFwdInferSpatialHIP.cpp
         kernels/MIOpenBatchNormFwdInferPerAct.cl
@@ -950,6 +950,12 @@ if(MIOPEN_USE_COMPOSABLEKERNEL)
     else()
         # Use the aliased targets when we pull CK from /opt/rocm or other place on disc.
         set(MIOPEN_CK_LINK_FLAGS composable_kernel::device_conv_operations hip::host)
+        
+        if(MIOPEN_CK_BUILDER_EXPERIMENTAL)
+            add_subdirectory(kernels/ck_builder)
+            list(APPEND MIOPEN_CK_LINK_FLAGS ck_builder)
+            add_definitions(-DCK_EXPERIMENTAL_BUILDER)
+        endif()
     endif()
     if(GPU_TARGETS MATCHES "gfx942" OR GPU_TARGETS MATCHES "gfx950")
         target_compile_definitions(MIOpen PRIVATE CK_ENABLE_TF32)
