@@ -65,7 +65,7 @@ using namespace stinkytofu;
 
 int processIR(const std::string& irText) {
     // Create a PassContext
-    auto ctx = PassContext::create(GfxArchID::gfx942);
+    auto ctx = PassContext::create(GfxArchID::gfx1250);
     if(!ctx) {
         std::cerr << "Failed to create PassContext\n";
         return -1;
@@ -89,7 +89,7 @@ int processIR(const std::string& irText) {
         return -1;
     }
 
-    GfxArchID arch = GfxArchID::gfx942;
+    GfxArchID arch = GfxArchID::gfx1250;
     StinkyErrorCode errorCode = StinkyIRConverter::populateFunctionFromString(
         irText, irlist, *passCtx, arch);
 

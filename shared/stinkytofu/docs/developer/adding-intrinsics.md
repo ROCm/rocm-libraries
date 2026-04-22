@@ -218,6 +218,6 @@ TEST_F(IntrinsicFlowTest, MyNewIntrinsic) {
 
 ## See Also
 
-- [Intrinsic System Design](../design/intrinsic-system.md) - Technical details
+- [Architecture Overview](architecture.md) - System architecture and intrinsic system overview
 - [IntrinsicRegistry API](../../include/stinkytofu/ir/logical/IntrinsicRegistry.hpp) - Runtime API
 - Example intrinsics: `src/ir/logical/Intrinsics.intrinsic`
