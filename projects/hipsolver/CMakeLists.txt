@@ -150,7 +150,51 @@ if(NOT "${HIP_PLATFORM}" STREQUAL "nvidia")
     if(HIPSOLVER_INTERNAL_LAPACK_BUILD)
         set(LAPACK_SOURCE_DIR ${CMAKE_CURRENT_BINARY_DIR}/lapack-src)
         set(LAPACK_BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR}/lapack-bin)
-        set(LAPACK_BUILD_BYPRODUCTS ${LAPACK_BINARY_DIR}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}openblas${CMAKE_STATIC_LIBRARY_SUFFIX})
+
+        # Detect if we're using a multi-config generator (focus on Ninja Multi-Config and Visual Studio)
+        get_property(IS_MULTI_CONFIG GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
+
+        # Set BYPRODUCTS based on generator type
+        if(IS_MULTI_CONFIG)
+            # NOTE: OpenBLAS converts the usual config-specific subdirectories
+            # to upper-case (e.g., lib/DEBUG/ instead of lib/Debug) in its
+            # CMakeLists.txt file.
+            if(NOT CMAKE_CONFIGURATION_TYPES)
+                set(CMAKE_CONFIGURATION_TYPES "Debug;Release;RelWithDebInfo;MinSizeRel")
+            endif()
+
+            set(LAPACK_BUILD_BYPRODUCTS)
+            foreach(config ${CMAKE_CONFIGURATION_TYPES})
+                string(TOUPPER ${config} config_upper)
+                list(APPEND LAPACK_BUILD_BYPRODUCTS
+                    ${LAPACK_BINARY_DIR}/lib/${config_upper}/${CMAKE_STATIC_LIBRARY_PREFIX}openblas${CMAKE_STATIC_LIBRARY_SUFFIX})
+            endforeach()
+        else()
+            set(LAPACK_BUILD_BYPRODUCTS
+                ${LAPACK_BINARY_DIR}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}openblas${CMAKE_STATIC_LIBRARY_SUFFIX})
+        endif()
+
+        set(LAPACK_CMAKE_ARGS
+            -DC_LAPACK=ON
+            -DNOFORTRAN=ON
+            -DBUILD_STATIC_LIBS=ON
+            -DBUILD_LAPACK_DEPRECATED=OFF
+            -DBUILD_TESTING=OFF
+            -DBUILD_BENCHMARKS=OFF
+            -DUSE_OPENMP=OFF
+            -DUSE_THREAD=OFF
+        )
+
+        # Only pass CMAKE_BUILD_TYPE for single-config generators (it is
+        # ignored in multi-config generators)
+        if(NOT IS_MULTI_CONFIG)
+            list(APPEND LAPACK_CMAKE_ARGS -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE})
+        endif()
+
+        # Build OpenBLAS with PIC if hipSOLVER is a shared library
+        if(BUILD_SHARED_LIBS)
+            list(APPEND LAPACK_CMAKE_ARGS -DCMAKE_POSITION_INDEPENDENT_CODE=ON)
+        endif()
 
         include(ExternalProject)
         ExternalProject_Add(hipsolver-static-lapack
@@ -159,25 +203,25 @@ if(NOT "${HIP_PLATFORM}" STREQUAL "nvidia")
             GIT_TAG             develop
             SOURCE_DIR          ${LAPACK_SOURCE_DIR}
             BINARY_DIR          ${LAPACK_BINARY_DIR}
-            CMAKE_ARGS          -DC_LAPACK=ON
-                                -DNOFORTRAN=ON
-                                -DBUILD_STATIC_LIBS=ON
-                                -DBUILD_LAPACK_DEPRECATED=OFF
-                                -DBUILD_TESTING=OFF
-                                -DBUILD_BENCHMARKS=OFF
-                                -DUSE_OPENMP=OFF
-                                -DUSE_THREAD=OFF
-                                -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
-                                -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY="$<1:${LAPACK_BINARY_DIR}>"
-                                -DCMAKE_LIBRARY_OUTPUT_DIRECTORY="$<1:${LAPACK_BINARY_DIR}>"
-                                -DCMAKE_RUNTIME_OUTPUT_DIRECTORY="$<1:${LAPACK_BINARY_DIR}>"
+            CMAKE_ARGS          ${LAPACK_CMAKE_ARGS}
             INSTALL_COMMAND     ""
         )
-
         add_library(lapack_libraries STATIC IMPORTED)
-        set_target_properties(lapack_libraries PROPERTIES
-            IMPORTED_LOCATION ${LAPACK_BUILD_BYPRODUCTS}
-        )
+
+        if(IS_MULTI_CONFIG)
+            foreach(config ${CMAKE_CONFIGURATION_TYPES})
+                string(TOUPPER ${config} config_upper)
+                set_property(TARGET lapack_libraries PROPERTY
+                    IMPORTED_LOCATION_${config_upper}
+                    ${LAPACK_BINARY_DIR}/lib/${config_upper}/${CMAKE_STATIC_LIBRARY_PREFIX}openblas${CMAKE_STATIC_LIBRARY_SUFFIX}
+                )
+            endforeach()
+        else()
+            set_target_properties(lapack_libraries PROPERTIES
+                IMPORTED_LOCATION ${LAPACK_BINARY_DIR}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}openblas${CMAKE_STATIC_LIBRARY_SUFFIX}
+            )
+        endif()
+
         add_dependencies(lapack_libraries hipsolver-static-lapack)
     else() # NOT HIPSOLVER_INTERNAL_LAPACK_BUILD
         # Some CPU side functionality is provided by external lapack
@@ -199,7 +243,7 @@ if(NOT "${HIP_PLATFORM}" STREQUAL "nvidia")
 
         if(NOT TARGET lapack_libraries)
             add_library(lapack_libraries INTERFACE)
-            message("Using manually specified LAPACK")
+            message(STATUS "Using manually specified LAPACK")
             target_link_libraries(lapack_libraries INTERFACE
                 ${LAPACK_LIBRARIES}
             )
