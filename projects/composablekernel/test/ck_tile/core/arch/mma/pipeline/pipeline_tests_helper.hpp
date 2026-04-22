@@ -12,6 +12,7 @@
 #include "ck_tile/core/arch/arch.hpp"
 #include "ck_tile/core/arch/mma/utility/tile_distribution_encoding_calculator.hpp"
 #include "ck_tile/core/arch/mma/utility/tile_distribution_encoding_register_mapper.hpp"
+#include "ck_tile/core/numeric/type_convert.hpp"
 #include "ck_tile/core/numeric/vector_type.hpp"
 #include "ck_tile/host/hip_check_error.hpp"
 #include "ck_tile/host/kernel_launch.hpp"
@@ -41,7 +42,7 @@ void reference_matmul(std::vector<CType>& C,
             float acc = 0.0f;
             for(uint32_t k = 0; k < K; ++k)
             {
-                acc += static_cast<float>(A[m * K + k]) * static_cast<float>(B[k * N + n]);
+                acc += type_convert<float>(A[m * K + k]) * type_convert<float>(B[k * N + n]);
             }
             C[m * N + n] = static_cast<CType>(acc);
         }
@@ -52,7 +53,7 @@ template <typename T>
 T deterministic_value(uint32_t row, uint32_t col, uint32_t minor_dim)
 {
     float v = static_cast<float>((row * minor_dim + col) % 7 + 1) * 0.25f;
-    return static_cast<T>(v);
+    return type_convert<T>(v);
 }
 
 // Apply 2:4 sparsity pattern to A matrix in-place (for sparse pipeline tests).
