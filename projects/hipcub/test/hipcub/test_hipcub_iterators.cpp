@@ -66,10 +66,9 @@ static std::vector<int32_t> base_values = {0, 99};
 
 // TODO need to implement the seeding like CUB
 template<typename T>
-__host__ __device__ __forceinline__ void
-InitValue(uint32_t seed, T& value, uint32_t index = 0)
+__host__ __device__ __forceinline__
+void InitValue([[maybe_unused]] uint32_t seed, T& value, uint32_t index = 0)
 {
-    (void) seed;
     value = (index > 0);
 }
 
@@ -87,10 +86,10 @@ struct TransformOp
 
 struct SelectOp
 {
-    template <typename T>
-    __host__ __device__ __forceinline__ bool operator()(T input) const
+    template<typename T>
+    __host__ __device__ __forceinline__
+    bool operator()([[maybe_unused]] T input) const
     {
-        (void) input;
         return true;
     }
 };

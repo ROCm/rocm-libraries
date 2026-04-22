@@ -43,9 +43,9 @@ template<hipcub::BlockScanAlgorithm Algorithm>
 struct inclusive_scan
 {
     template<class T, unsigned int BlockSize, unsigned int ItemsPerThread, unsigned int Trials>
-    __device__ static void run(const T* input, T* output, const T init)
+    __device__
+    static void run(const T* input, T* output, [[maybe_unused]] const T init)
     {
-        (void)init;
         const unsigned int i = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
 
         T values[ItemsPerThread];

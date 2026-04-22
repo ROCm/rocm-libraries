@@ -174,14 +174,9 @@ BEGIN_HIPCUB_NAMESPACE
 /// If `error` is not `hipSuccess`, prints an error message containing the source filename and
 /// line information to the standard error output.
 /// \note This only happens if `HIPCUB_STDERR` is defined.
-inline
-hipError_t Debug(
-    hipError_t      error,
-    const char*     filename,
-    int             line)
+inline hipError_t
+    Debug(hipError_t error, [[maybe_unused]] const char* filename, [[maybe_unused]] int line)
 {
-    (void)filename;
-    (void)line;
 #ifdef HIPCUB_STDERR
     if (error)
     {

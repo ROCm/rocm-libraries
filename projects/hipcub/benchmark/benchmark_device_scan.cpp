@@ -60,17 +60,16 @@ auto run_device_scan(void*             temporary_storage,
 }
 
 template<bool Exclusive, class T, class BinaryFunction>
-auto run_device_scan(void*             temporary_storage,
-                     size_t&           storage_size,
-                     T*                input,
-                     T*                output,
-                     const T           initial_value,
-                     const size_t      input_size,
-                     BinaryFunction    scan_op,
-                     const hipStream_t stream) ->
+auto run_device_scan(void*                    temporary_storage,
+                     size_t&                  storage_size,
+                     T*                       input,
+                     T*                       output,
+                     [[maybe_unused]] const T initial_value,
+                     const size_t             input_size,
+                     BinaryFunction           scan_op,
+                     const hipStream_t        stream) ->
     typename std::enable_if<!Exclusive, hipError_t>::type
 {
-    (void)initial_value;
     return hipcub::DeviceScan::InclusiveScan(temporary_storage,
                                              storage_size,
                                              input,

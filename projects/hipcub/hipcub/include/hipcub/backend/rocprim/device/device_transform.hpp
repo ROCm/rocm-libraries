@@ -1,6 +1,6 @@
 /******************************************************************************.
  * Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2025, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2025-2026, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -100,16 +100,14 @@ struct DeviceTransform
              typename NumItemsT,
              typename TransformOp>
     HIPCUB_RUNTIME_FUNCTION
-    static hipError_t Transform(void*                                     d_temp_storage,
-                                size_t&                                   temp_storage_bytes,
+    static hipError_t Transform([[maybe_unused]] void*                    d_temp_storage,
+                                [[maybe_unused]] size_t&                  temp_storage_bytes,
                                 hipcub::tuple<RandomAccessIteratorsIn...> inputs,
                                 RandomAccessIteratorOut                   output,
                                 NumItemsT                                 num_items,
                                 TransformOp                               transform_op,
                                 hipStream_t                               stream = nullptr)
     {
-        (void)d_temp_storage;
-        (void)temp_storage_bytes;
         return ::rocprim::transform(inputs,
                                     output,
                                     num_items,
@@ -142,16 +140,14 @@ struct DeviceTransform
              typename NumItemsT,
              typename TransformOp>
     HIPCUB_RUNTIME_FUNCTION
-    static hipError_t Transform(void*                   d_temp_storage,
-                                size_t&                 temp_storage_bytes,
-                                RandomAccessIteratorIn  input,
-                                RandomAccessIteratorOut output,
-                                NumItemsT               num_items,
-                                TransformOp             transform_op,
-                                hipStream_t             stream = nullptr)
+    static hipError_t Transform([[maybe_unused]] void*   d_temp_storage,
+                                [[maybe_unused]] size_t& temp_storage_bytes,
+                                RandomAccessIteratorIn   input,
+                                RandomAccessIteratorOut  output,
+                                NumItemsT                num_items,
+                                TransformOp              transform_op,
+                                hipStream_t              stream = nullptr)
     {
-        (void)d_temp_storage;
-        (void)temp_storage_bytes;
         return ::rocprim::transform(input,
                                     output,
                                     num_items,
@@ -186,16 +182,14 @@ struct DeviceTransform
              typename TransformOp>
     HIPCUB_RUNTIME_FUNCTION
     static hipError_t
-        TransformStableArgumentAddresses(void*   d_temp_storage,
-                                         size_t& temp_storage_bytes,
+        TransformStableArgumentAddresses([[maybe_unused]] void*   d_temp_storage,
+                                         [[maybe_unused]] size_t& temp_storage_bytes,
                                          hipcub::tuple<RandomAccessIteratorsIn...> inputs,
                                          RandomAccessIteratorOut                   output,
                                          NumItemsT                                 num_items,
                                          TransformOp                               transform_op,
                                          hipStream_t                               stream = nullptr)
     {
-        (void)d_temp_storage;
-        (void)temp_storage_bytes;
         return detail::TransformStableAddrsImpl{}.doit(inputs,
                                                        output,
                                                        num_items,
@@ -226,16 +220,14 @@ struct DeviceTransform
              typename NumItemsT,
              typename TransformOp>
     HIPCUB_RUNTIME_FUNCTION
-    static hipError_t TransformStableArgumentAddresses(void*                   d_temp_storage,
-                                                       size_t&                 temp_storage_bytes,
-                                                       RandomAccessIteratorIn  input,
-                                                       RandomAccessIteratorOut output,
-                                                       NumItemsT               num_items,
-                                                       TransformOp             transform_op,
-                                                       hipStream_t             stream = nullptr)
+    static hipError_t TransformStableArgumentAddresses([[maybe_unused]] void*   d_temp_storage,
+                                                       [[maybe_unused]] size_t& temp_storage_bytes,
+                                                       RandomAccessIteratorIn   input,
+                                                       RandomAccessIteratorOut  output,
+                                                       NumItemsT                num_items,
+                                                       TransformOp              transform_op,
+                                                       hipStream_t              stream = nullptr)
     {
-        (void)d_temp_storage;
-        (void)temp_storage_bytes;
         return detail::TransformStableAddrsImpl{}.doit(rocprim::make_tuple(input),
                                                        output,
                                                        num_items,
