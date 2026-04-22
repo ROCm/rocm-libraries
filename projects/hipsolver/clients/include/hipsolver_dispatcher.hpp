@@ -44,6 +44,7 @@
 #include "testing_potrf.hpp"
 #include "testing_potri.hpp"
 #include "testing_potrs.hpp"
+#include "testing_syev_heev.hpp"
 #include "testing_syevd_heevd.hpp"
 #include "testing_syevdx_heevdx.hpp"
 #include "testing_syevj_heevj.hpp"
@@ -123,7 +124,20 @@ class hipsolver_dispatcher
             {"syevd_64", testing_syevd_heevd<API_COMPAT, false, false, T, int64_t, size_t>},
             {"syevdx", testing_syevdx_heevdx<API_NORMAL, false, false, T>},
             {"syevj", testing_syevj_heevj<API_NORMAL, false, false, T>},
-            {"syevj_batched", testing_syevj_heevj<API_NORMAL, false, true, T>},
+            {"syev_batched_64",
+             testing_syev_heev<
+                 API_COMPAT,
+                 false,
+                 true,
+                 T,
+                 int64_t,
+                 size_t>}, // NOTE: batched boolean set to false and strided boolean set to true, since syev batched is actually strided batched
+            {"syevj_batched",
+             testing_syevj_heevj<
+                 API_NORMAL,
+                 false,
+                 true,
+                 T>}, // NOTE: batched boolean set to false and strided boolean set to true, since syevj batched is actually strided batched
             {"sygvd", testing_sygvd_hegvd<API_NORMAL, false, false, T>},
             {"sygvdx", testing_sygvdx_hegvdx<API_NORMAL, false, false, T>},
             {"sygvj", testing_sygvj_hegvj<API_NORMAL, false, false, T>},
@@ -161,7 +175,20 @@ class hipsolver_dispatcher
             {"heevd_64", testing_syevd_heevd<API_COMPAT, false, false, T, int64_t, size_t>},
             {"heevdx", testing_syevdx_heevdx<API_NORMAL, false, false, T>},
             {"heevj", testing_syevj_heevj<API_NORMAL, false, false, T>},
-            {"heevj_batched", testing_syevj_heevj<API_NORMAL, false, true, T>},
+            {"heev_batched_64",
+             testing_syev_heev<
+                 API_COMPAT,
+                 false,
+                 true,
+                 T,
+                 int64_t,
+                 size_t>}, // NOTE: batched boolean set to false and strided boolean set to true, since heev batched is actually strided batched
+            {"heevj_batched",
+             testing_syevj_heevj<
+                 API_NORMAL,
+                 false,
+                 true,
+                 T>}, // NOTE: batched boolean set to false and strided boolean set to true, since heevj batched is actually strided batched
             {"hegvd", testing_sygvd_hegvd<API_NORMAL, false, false, T>},
             {"hegvdx", testing_sygvdx_hegvdx<API_NORMAL, false, false, T>},
             {"hegvj", testing_sygvj_hegvj<API_NORMAL, false, false, T>},

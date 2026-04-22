@@ -2152,6 +2152,7 @@ void testing_matmul_with_bias(const Arguments& arg,
             auto preTileATmp = preTileSizeForScaleA(arg.scaleA);
             auto preTileA = (preTileATmp.size() == 2) ? std::vector<size_t>{preTileATmp[1], preTileATmp[0]} : std::vector<size_t>{};
             refA.emplace_back(generateMXInput(TiA,
+                                              scaleDataType(arg.scaleA),
                                               hA[i].buf(),
                                               hScaleA[i].buf(),
                                               A_row[i],
@@ -2233,6 +2234,7 @@ void testing_matmul_with_bias(const Arguments& arg,
             // preTile for B: {tileK, tileN}
             auto preTileB = preTileSizeForScaleB(arg.scaleB);
             refB.emplace_back(generateMXInput(TiB,
+                                              scaleDataType(arg.scaleB),
                                               hB[i].buf(),
                                               hScaleB[i].buf(),
                                               B_row[i],
