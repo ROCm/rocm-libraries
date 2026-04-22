@@ -58,8 +58,9 @@ After configuration, build with `cmake --build <build_dir> -- -j<nproc>`.
 
 Finally, install the built binaries with `cmake --install .`.
 
-> [!TIP]
-> Dockerfiles are available for Ubuntu 24.04 with prebuilt or source-built ROCm (using TheRock). See [docker/README.md](docker/README.md) for instructions.
+#### Docker
+
+Dockerfiles are available for Ubuntu 24.04 with prebuilt or source-built ROCm (using TheRock). See [docker/README.md](docker/README.md) for instructions.
 
 ### Building on Windows
 
