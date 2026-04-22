@@ -68,17 +68,14 @@ rocblas_status rocsolver_getrs_argCheck(rocblas_handle handle,
         return rocblas_status_continue;
 
     // 3. invalid pointers
+    if((n && batch_count && !A) || (nrhs && n && batch_count && !B))
+    {
+        return rocblas_status_invalid_pointer;
+    }
+
     if(pivot)
     {
-        if((n && batch_count && !A) || (n && batch_count && !ipiv)
-           || (nrhs && n && batch_count && !B))
-        {
-            return rocblas_status_invalid_pointer;
-        }
-    }
-    else
-    {
-        if((n && batch_count && !A) || (nrhs && n && batch_count && !B))
+        if(n && batch_count && !ipiv)
         {
             return rocblas_status_invalid_pointer;
         }
