@@ -106,10 +106,11 @@ void SdpaFwdPlan::execute(const HipKernelHandle& /*handle*/,
     args.scalar = _params.attnScale;
 
     // Q dimensions and strides (convert to bytes: stride * sizeof(bfloat16))
+    // TODO: When adding the fp8 kernels, modify this to check for the datatype
     constexpr unsigned int K_BF16_SIZE = 2;
     args.s_seq_len = _params.seqLenQ;
     args.s_Seqs = _params.qStrideSeq * K_BF16_SIZE;
-    args.s_Ts = _params.qStrideRow * K_BF16_SIZE;
+    args.s_Ts = _params.tileSizeQo * _params.qStrideRow * K_BF16_SIZE;
     args.s_Hs = _params.qStrideHead * K_BF16_SIZE;
     args.s_Bs = _params.qStrideBatch * K_BF16_SIZE;
 
@@ -171,8 +172,9 @@ void SdpaFwdPlan::execute(const HipKernelHandle& /*handle*/,
     unsigned int gridDimY = _params.numHeadsQ;
     unsigned int gridDimZ = _params.batchSize;
 
+    unsigned int blockDimX = _params.headDimQk == 192 && _params.headDimV == 128 ? 256 : 512;
+
     // Block dimensions (fixed for this kernel)
-    constexpr unsigned int K_BLOCK_DIM_X = 512;
     constexpr unsigned int K_BLOCK_DIM_Y = 1;
     constexpr unsigned int K_BLOCK_DIM_Z = 1;
 
@@ -190,7 +192,7 @@ void SdpaFwdPlan::execute(const HipKernelHandle& /*handle*/,
                                            gridDimX,
                                            gridDimY,
                                            gridDimZ, // grid dimensions
-                                           K_BLOCK_DIM_X,
+                                           blockDimX,
                                            K_BLOCK_DIM_Y,
                                            K_BLOCK_DIM_Z, // block dimensions
                                            0, // shared memory bytes (kernel uses LDS internally)
@@ -206,7 +208,7 @@ void SdpaFwdPlan::execute(const HipKernelHandle& /*handle*/,
 
     HIPDNN_PLUGIN_LOG_INFO("SDPA kernel launched: grid=["
                            << gridDimX << "," << gridDimY << "," << gridDimZ << "] block=["
-                           << K_BLOCK_DIM_X << "," << K_BLOCK_DIM_Y << "," << K_BLOCK_DIM_Z << "]");
+                           << blockDimX << "," << K_BLOCK_DIM_Y << "," << K_BLOCK_DIM_Z << "]");
 }
 
 } // namespace asm_sdpa_engine
