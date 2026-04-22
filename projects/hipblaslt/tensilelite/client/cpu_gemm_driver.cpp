@@ -29,6 +29,7 @@
 #include <cmath>
 #include <iostream>
 #include <random>
+#include <string>
 #include <vector>
 
 #include "ProgramOptions.hpp"
@@ -121,6 +122,17 @@ namespace
                          const float*   scaleBVec     = nullptr,
                          int            factorDim     = 0)
     {
+
+        switch(activation)
+        {
+        case ActivationType::None:
+        case ActivationType::Relu:
+            break;
+        default:
+            throw std::runtime_error(
+                "Unsupported activation for CPU reference GEMM "
+                "(supported: None, Relu).");
+        }
         size_t strideAK = transA ? 1 : m;
         size_t strideAM = transA ? k : 1;
         size_t strideBK = transB ? n : 1;
@@ -151,13 +163,7 @@ namespace
                     result += biasVec[i];
 
                 if(activation == ActivationType::Relu)
-                {
                     result = std::max(0.0f, result);
-                }
-                else
-                {
-                    assert(activation == ActivationType::None);
-                }
 
                 d[i + j * m] = result;
             }
