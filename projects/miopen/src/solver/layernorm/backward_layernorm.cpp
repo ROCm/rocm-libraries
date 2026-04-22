@@ -275,13 +275,7 @@ ConvSolution LayernormBackward::GetSolution(const ExecutionContext& context,
                     (void)hipEventRecord(start.get(), handle_.GetStream());
                 }
 
-                kernel(params.dy,
-                       params.x,
-                       params.weight,
-                       params.mean,
-                       params.rstd,
-                       params.dx,
-                       static_cast<int32_t>(params.mode));
+                kernel(params.dy, params.x, params.weight, params.mean, params.rstd, params.dx);
 
                 weight_bias_parallel_kernel(params.dy,
                                             params.x,
@@ -322,13 +316,7 @@ ConvSolution LayernormBackward::GetSolution(const ExecutionContext& context,
                     (void)hipEventRecord(start.get(), handle_.GetStream());
                 }
 
-                kernel(params.dy,
-                       params.x,
-                       params.weight,
-                       params.mean,
-                       params.rstd,
-                       params.dx,
-                       static_cast<int32_t>(params.mode));
+                kernel(params.dy, params.x, params.weight, params.mean, params.rstd, params.dx);
 
                 weight_bias_kernel(
                     params.dy, params.x, params.mean, params.rstd, params.dw, params.db);

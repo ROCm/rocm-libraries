@@ -178,8 +178,9 @@ bool PerformanceConfigLayernorm::IsValid(const ExecutionContext& context,
 
 bool PerformanceConfigLayernorm::operator==(const PerformanceConfigLayernorm& other) const
 {
-    return local_size == other.local_size && vectorized == other.vectorized && separate_stride &&
-           other.separate_stride && stride_in_local_size == other.stride_in_local_size;
+    return local_size == other.local_size && vectorized == other.vectorized &&
+           separate_stride == other.separate_stride &&
+           stride_in_local_size == other.stride_in_local_size;
 }
 
 } // namespace layernorm
