@@ -79,28 +79,19 @@ struct tuple_bit_size<::hipcub::tuple<Args...>>
 
 } // namespace detail
 
-template<
-    typename KeyT,
-    int BLOCK_DIM_X,
-    int ITEMS_PER_THREAD,
-    typename ValueT = NullType,
-    int RADIX_BITS = 4, /* ignored */
-    bool MEMOIZE_OUTER_SCAN = true, /* ignored */
-    BlockScanAlgorithm INNER_SCAN_ALGORITHM = BLOCK_SCAN_WARP_SCANS, /* ignored */
-    hipSharedMemConfig SMEM_CONFIG = hipSharedMemBankSizeFourByte, /* ignored */
-    int BLOCK_DIM_Y = 1,
-    int BLOCK_DIM_Z = 1,
-    int PTX_ARCH = HIPCUB_ARCH /* ignored */
->
+template<typename KeyT,
+         int BLOCK_DIM_X,
+         int ITEMS_PER_THREAD,
+         typename ValueT                         = NullType,
+         int                RADIX_BITS           = 4, /* ignored */
+         bool               MEMOIZE_OUTER_SCAN   = true, /* ignored */
+         BlockScanAlgorithm INNER_SCAN_ALGORITHM = BLOCK_SCAN_WARP_SCANS, /* ignored */
+         hipSharedMemConfig SMEM_CONFIG          = hipSharedMemBankSizeFourByte, /* ignored */
+         int                BLOCK_DIM_Y          = 1,
+         int                BLOCK_DIM_Z          = 1>
 class BlockRadixSort
-    : private ::rocprim::block_radix_sort<
-        KeyT,
-        BLOCK_DIM_X,
-        ITEMS_PER_THREAD,
-        ValueT,
-        BLOCK_DIM_Y,
-        BLOCK_DIM_Z
-      >
+    : private ::rocprim::
+          block_radix_sort<KeyT, BLOCK_DIM_X, ITEMS_PER_THREAD, ValueT, BLOCK_DIM_Y, BLOCK_DIM_Z>
 {
     static_assert(
         BLOCK_DIM_X * BLOCK_DIM_Y * BLOCK_DIM_Z > 0,

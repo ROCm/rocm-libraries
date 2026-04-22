@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2010-2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2017-2025, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2017-2026, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -59,26 +59,22 @@ enum BlockHistogramAlgorithm
         = detail::to_BlockHistogramAlgorithm_enum(::rocprim::block_histogram_algorithm::using_sort)
 };
 
-template<
-    typename T,
-    int BLOCK_DIM_X,
-    int ITEMS_PER_THREAD,
-    int BINS,
-    BlockHistogramAlgorithm ALGORITHM = BLOCK_HISTO_SORT,
-    int BLOCK_DIM_Y = 1,
-    int BLOCK_DIM_Z = 1,
-    int ARCH = HIPCUB_ARCH /* ignored */
->
+template<typename T,
+         int                     BLOCK_DIM_X,
+         int                     ITEMS_PER_THREAD,
+         int                     BINS,
+         BlockHistogramAlgorithm ALGORITHM   = BLOCK_HISTO_SORT,
+         int                     BLOCK_DIM_Y = 1,
+         int                     BLOCK_DIM_Z = 1>
 class BlockHistogram
-    : private ::rocprim::block_histogram<
-        T,
-        BLOCK_DIM_X,
-        ITEMS_PER_THREAD,
-        BINS,
-        static_cast<::rocprim::block_histogram_algorithm>(ALGORITHM),
-        BLOCK_DIM_Y,
-        BLOCK_DIM_Z
-      >
+    : private ::rocprim::block_histogram<T,
+                                         BLOCK_DIM_X,
+                                         ITEMS_PER_THREAD,
+                                         BINS,
+                                         static_cast<::rocprim::block_histogram_algorithm>(
+                                             ALGORITHM),
+                                         BLOCK_DIM_Y,
+                                         BLOCK_DIM_Z>
 {
     static_assert(
         BLOCK_DIM_X * BLOCK_DIM_Y * BLOCK_DIM_Z > 0,
