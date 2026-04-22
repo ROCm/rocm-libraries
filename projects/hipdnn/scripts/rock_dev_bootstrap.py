@@ -53,7 +53,10 @@ from pathlib import Path
 # ---------------------------------------------------------------------------
 
 ALL_COMPONENTS = [
-    "hipdnn", "hipkernelprovider", "miopenprovider", "hipblasltprovider",
+    "hipdnn",
+    "hipkernelprovider",
+    "miopenprovider",
+    "hipblasltprovider",
     "miopen",
 ]
 
@@ -113,8 +116,9 @@ def config_path(build_dir: Path) -> Path:
     return build_dir / CONFIG_FILENAME
 
 
-def save_config(build_dir: Path, gpu: str, components: list[str],
-                therock_dir: Path = None) -> None:
+def save_config(
+    build_dir: Path, gpu: str, components: list[str], therock_dir: Path = None
+) -> None:
     """Save current settings to the build directory for later commands."""
     build_dir.mkdir(parents=True, exist_ok=True)
     data = {"gpu": gpu, "components": components}
@@ -139,8 +143,9 @@ def venv_python(therock_dir: Path) -> Path:
     return venv_dir / "bin" / "python"
 
 
-def run_cmd(cmd: list, cwd: Path = None, check: bool = True,
-            env: dict = None) -> subprocess.CompletedProcess:
+def run_cmd(
+    cmd: list, cwd: Path = None, check: bool = True, env: dict = None
+) -> subprocess.CompletedProcess:
     """Run a command, printing it first. Exits on failure if check=True."""
     print(f"  $ {' '.join(str(c) for c in cmd)}")
     result = subprocess.run(cmd, cwd=cwd, env=env)
@@ -207,13 +212,13 @@ def get_msvc_env() -> dict:
     # Run vcvars64.bat in a cmd shell, then dump the resulting environment.
     # Use a .bat wrapper written to a temp file to avoid quoting issues.
     import tempfile
+
     bat_content = f'@call "{vcvars}" >nul 2>&1\n@if errorlevel 1 exit /b 1\n@set\n'
     bat_file = Path(tempfile.gettempdir()) / "_rock_dev_vcvars.bat"
     bat_file.write_text(bat_content)
     try:
         result = subprocess.run(
-            ["cmd.exe", "/c", str(bat_file)],
-            capture_output=True, text=True
+            ["cmd.exe", "/c", str(bat_file)], capture_output=True, text=True
         )
     finally:
         bat_file.unlink(missing_ok=True)
@@ -351,7 +356,9 @@ def do_bootstrap(args: argparse.Namespace) -> None:
         if shutil.which("dvc") is None:
             print()
             print("  WARNING: 'dvc' not found on PATH — skipping large file pulls.")
-            print("  Some components may fail to build if they require DVC-managed files.")
+            print(
+                "  Some components may fail to build if they require DVC-managed files."
+            )
             print("  Install DVC from https://dvc.org/doc/install if needed.")
             print()
             fetch_cmd.extend(["--dvc-projects", "_skip"])
@@ -371,9 +378,12 @@ def do_bootstrap(args: argparse.Namespace) -> None:
             [
                 str(python),
                 str(therock_dir / "build_tools" / "find_latest_artifacts.py"),
-                "--artifact-group", gpu,
-                "--workflow", workflow,
-                "--platform", platform,
+                "--artifact-group",
+                gpu,
+                "--workflow",
+                workflow,
+                "--platform",
+                platform,
                 "--verbose",
             ],
             cwd=therock_dir,
@@ -408,12 +418,17 @@ def do_bootstrap(args: argparse.Namespace) -> None:
             str(python),
             str(therock_dir / "build_tools" / "artifact_manager.py"),
             "fetch",
-            "--stage", "all",
-            "--run-id", run_id,
-            "--amdgpu-families", gpu,
-            "--output-dir", str(build_dir),
+            "--stage",
+            "all",
+            "--run-id",
+            run_id,
+            "--amdgpu-families",
+            gpu,
+            "--output-dir",
+            str(build_dir),
             "--bootstrap",
-            "--platform", platform,
+            "--platform",
+            platform,
         ],
         cwd=therock_dir,
     )
@@ -460,7 +475,8 @@ def do_configure(args: argparse.Namespace) -> None:
     # Build cmake args
     cmake_args = [
         "cmake",
-        "-B", str(build_dir),
+        "-B",
+        str(build_dir),
         "-GNinja",
         "-DTHEROCK_ENABLE_ALL=OFF",
         f"-DTHEROCK_AMDGPU_FAMILIES={gpu}",
@@ -492,7 +508,9 @@ def do_build(args: argparse.Namespace) -> None:
     if not components:
         components = cfg.get("components", [])
 
-    therock_dir = args.therock_dir or (Path(cfg["therock_dir"]) if "therock_dir" in cfg else None)
+    therock_dir = args.therock_dir or (
+        Path(cfg["therock_dir"]) if "therock_dir" in cfg else None
+    )
     build_env = get_build_env(therock_dir) if therock_dir else get_msvc_env()
 
     if not components:
@@ -530,7 +548,9 @@ def do_rebuild(args: argparse.Namespace) -> None:
     if not components:
         components = cfg.get("components", [])
 
-    therock_dir = args.therock_dir or (Path(cfg["therock_dir"]) if "therock_dir" in cfg else None)
+    therock_dir = args.therock_dir or (
+        Path(cfg["therock_dir"]) if "therock_dir" in cfg else None
+    )
     build_env = get_build_env(therock_dir) if therock_dir else get_msvc_env()
 
     if not components:
@@ -575,27 +595,37 @@ def parse_args(argv: list[str] = None) -> argparse.Namespace:
     # Shared parent parser so global options work before or after the command
     global_opts = argparse.ArgumentParser(add_help=False)
     global_opts.add_argument(
-        "--gpu", default=_DEFAULT_GPU,
+        "--gpu",
+        default=_DEFAULT_GPU,
         help=f"GPU family (default: {_DEFAULT_GPU})",
     )
     global_opts.add_argument(
-        "--build-dir", type=Path, default=None,
+        "--build-dir",
+        type=Path,
+        default=None,
         help="Build directory (default: <cwd>/build/therock-<gpu-short>)",
     )
     global_opts.add_argument(
-        "--therock-dir", type=Path, default=None,
+        "--therock-dir",
+        type=Path,
+        default=None,
         help="Path to TheRock checkout (required for bootstrap/configure)",
     )
     global_opts.add_argument(
-        "--workflow", default=_DEFAULT_WORKFLOW,
+        "--workflow",
+        default=_DEFAULT_WORKFLOW,
         help=f"CI workflow file for artifact lookup (default: {_DEFAULT_WORKFLOW})",
     )
     global_opts.add_argument(
-        "--platform", default=_DEFAULT_PLATFORM,
+        "--platform",
+        default=_DEFAULT_PLATFORM,
         help=f"Target platform (default: {_DEFAULT_PLATFORM})",
     )
     global_opts.add_argument(
-        "-j", "--jobs", type=int, default=None,
+        "-j",
+        "--jobs",
+        type=int,
+        default=None,
         help="Number of parallel build jobs (passed to ninja -j)",
     )
 
@@ -620,41 +650,53 @@ Per-component ninja targets (for manual use):
 
     # bootstrap
     bp = subparsers.add_parser(
-        "bootstrap", parents=[global_opts],
+        "bootstrap",
+        parents=[global_opts],
         help="Download CI artifacts (auto-detects latest if run-id omitted)",
     )
     bp.add_argument(
-        "run_id", nargs="?", default=None,
+        "run_id",
+        nargs="?",
+        default=None,
         help="GitHub Actions run ID (auto-detected if omitted)",
     )
 
     # configure
     cp = subparsers.add_parser(
-        "configure", parents=[global_opts],
+        "configure",
+        parents=[global_opts],
         help="Remove .prebuilt markers + run cmake",
     )
     cp.add_argument(
-        "components", nargs="*", default=[],
+        "components",
+        nargs="*",
+        default=[],
         help="Components to build from source (default: all)",
     )
 
     # build
     bp2 = subparsers.add_parser(
-        "build", parents=[global_opts],
+        "build",
+        parents=[global_opts],
         help="Build components with ninja",
     )
     bp2.add_argument(
-        "components", nargs="*", default=[],
+        "components",
+        nargs="*",
+        default=[],
         help="Components to build (default: from saved config)",
     )
 
     # rebuild
     rp = subparsers.add_parser(
-        "rebuild", parents=[global_opts],
+        "rebuild",
+        parents=[global_opts],
         help="Expunge + rebuild components",
     )
     rp.add_argument(
-        "components", nargs="*", default=[],
+        "components",
+        nargs="*",
+        default=[],
         help="Components to rebuild (default: from saved config)",
     )
 
@@ -679,7 +721,11 @@ Per-component ninja targets (for manual use):
     # Require therock-dir for commands that need it
     if args.command in ("bootstrap", "configure"):
         if args.therock_dir is None:
-            print("ERROR: --therock-dir is required for the '{}' command.".format(args.command))
+            print(
+                "ERROR: --therock-dir is required for the '{}' command.".format(
+                    args.command
+                )
+            )
             sys.exit(1)
         args.therock_dir = args.therock_dir.resolve()
         if not args.therock_dir.is_dir():
