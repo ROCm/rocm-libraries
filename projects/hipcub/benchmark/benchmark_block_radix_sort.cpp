@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #include "common_benchmark_header.hpp"
+#include "primbench.hpp"
 
 // HIP API
 #include <hipcub/block/block_load.hpp>
@@ -31,6 +32,8 @@
 const size_t DEFAULT_N = 128 * primbench::MiB;
 #endif
 
+constexpr unsigned int Trials = 10;
+
 enum class benchmark_kinds
 {
     sort_keys,
@@ -39,6 +42,17 @@ enum class benchmark_kinds
 
 struct helper_blocked_blocked
 {
+    static const char* get_algorithm_name(benchmark_kinds algorithm)
+    {
+        switch(algorithm)
+        {
+            case benchmark_kinds::sort_keys: return "sort(keys)";
+            case benchmark_kinds::sort_pairs: return "sort(keys, values)";
+        }
+
+        return "unknown algorithm";
+    }
+
     template<unsigned int BlockSize, class T, unsigned int ItemsPerThread, typename InputIteratorT>
     HIPCUB_DEVICE
     static void load(int linear_id, InputIteratorT block_iter, T (&items)[ItemsPerThread])
@@ -84,6 +98,17 @@ struct helper_blocked_blocked
 
 struct helper_blocked_striped
 {
+    static const char* get_algorithm_name(benchmark_kinds algorithm)
+    {
+        switch(algorithm)
+        {
+            case benchmark_kinds::sort_keys: return "sort_to_striped(keys)";
+            case benchmark_kinds::sort_pairs: return "sort_to_striped(keys, values)";
+        }
+
+        return "unknown algorithm";
+    }
+
     template<unsigned int BlockSize, class T, unsigned int ItemsPerThread, typename InputIteratorT>
     HIPCUB_DEVICE
     static void load(int linear_id, InputIteratorT block_iter, T (&items)[ItemsPerThread])
@@ -129,11 +154,7 @@ struct helper_blocked_striped
     }
 };
 
-template<class Helper,
-         class T,
-         unsigned int BlockSize,
-         unsigned int ItemsPerThread,
-         unsigned int Trials>
+template<class Helper, class T, unsigned int BlockSize, unsigned int ItemsPerThread>
 __global__ __launch_bounds__(BlockSize)
 void sort_keys_kernel(const T* input, T* output)
 {
@@ -152,11 +173,7 @@ void sort_keys_kernel(const T* input, T* output)
     hipcub::StoreDirectStriped<BlockSize>(lid, output + block_offset, keys);
 }
 
-template<class Helper,
-         class T,
-         unsigned int BlockSize,
-         unsigned int ItemsPerThread,
-         unsigned int Trials>
+template<class Helper, class T, unsigned int BlockSize, unsigned int ItemsPerThread>
 __global__ __launch_bounds__(BlockSize)
 void sort_pairs_kernel(const T* input, T* output)
 {
@@ -188,67 +205,69 @@ void sort_pairs_kernel(const T* input, T* output)
 
 template<class Helper,
          class T,
-         unsigned int BlockSize,
-         unsigned int ItemsPerThread,
-         unsigned int Trials = 10>
-void run_benchmark(benchmark::State& state,
-                   benchmark_kinds   benchmark_kind,
-                   hipStream_t       stream,
-                   size_t            N)
+         unsigned int    BlockSize,
+         unsigned int    ItemsPerThread,
+         benchmark_kinds BenchmarkKind>
+class block_radix_sort_benchmark : public primbench::benchmark_interface
 {
-    constexpr auto items_per_block = BlockSize * ItemsPerThread;
-    const auto     size = items_per_block * ((N + items_per_block - 1) / items_per_block);
-
-    std::vector<T> input
-        = benchmark_utils::get_random_data<T>(size,
-                                              benchmark_utils::generate_limits<T>::min(),
-                                              benchmark_utils::generate_limits<T>::max());
-
-    T* d_input;
-    T* d_output;
-    HIP_CHECK(hipMalloc(&d_input, size * sizeof(T)));
-    HIP_CHECK(hipMalloc(&d_output, size * sizeof(T)));
-    HIP_CHECK(hipMemcpy(d_input, input.data(), size * sizeof(T), hipMemcpyHostToDevice));
-    HIP_CHECK(hipDeviceSynchronize());
-
-    for(auto _ : state)
+    primbench::json meta() const override
     {
-        auto start = std::chrono::high_resolution_clock::now();
+        return primbench::json{}
+            .add("name", "block_radix_sort")
+            .add("subalgo", Helper::get_algorithm_name(BenchmarkKind))
+            .add("lvl", "block")
+            .add("data_type", primbench::name<T>())
+            .add("block_size", BlockSize)
+            .add("items_per_thread", ItemsPerThread);
+    }
 
-        if(benchmark_kind == benchmark_kinds::sort_keys)
-        {
-            sort_keys_kernel<Helper, T, BlockSize, ItemsPerThread, Trials>
-                <<<dim3(size / items_per_block), dim3(BlockSize), 0, stream>>>(d_input, d_output);
-        }
-        else if(benchmark_kind == benchmark_kinds::sort_pairs)
-        {
-            sort_pairs_kernel<Helper, T, BlockSize, ItemsPerThread, Trials>
-                <<<dim3(size / items_per_block), dim3(BlockSize), 0, stream>>>(d_input, d_output);
-        }
-        HIP_CHECK(hipPeekAtLastError());
+    void run(primbench::state& state) override
+    {
+        const size_t size   = state.size;
+        const auto&  stream = state.stream;
+
+        constexpr auto items_per_block = BlockSize * ItemsPerThread;
+        const size_t   items = items_per_block * ((size + items_per_block - 1) / items_per_block);
+
+        std::vector<T> input
+            = benchmark_utils::get_random_data<T>(size,
+                                                  benchmark_utils::generate_limits<T>::min(),
+                                                  benchmark_utils::generate_limits<T>::max());
+
+        T* d_input;
+        T* d_output;
+        HIP_CHECK(hipMalloc(&d_input, size * sizeof(T)));
+        HIP_CHECK(hipMalloc(&d_output, size * sizeof(T)));
+        HIP_CHECK(hipMemcpy(d_input, input.data(), size * sizeof(T), hipMemcpyHostToDevice));
         HIP_CHECK(hipDeviceSynchronize());
 
-        auto end = std::chrono::high_resolution_clock::now();
-        auto elapsed_seconds
-            = std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
-        state.SetIterationTime(elapsed_seconds.count());
+        state.run(
+            [&]
+            {
+                if constexpr(BenchmarkKind == benchmark_kinds::sort_keys)
+                {
+                    sort_keys_kernel<Helper, T, BlockSize, ItemsPerThread>
+                        <<<dim3(size / items_per_block), dim3(BlockSize), 0, stream>>>(d_input,
+                                                                                       d_output);
+                }
+                else if(BenchmarkKind == benchmark_kinds::sort_pairs)
+                {
+                    sort_pairs_kernel<Helper, T, BlockSize, ItemsPerThread>
+                        <<<dim3(size / items_per_block), dim3(BlockSize), 0, stream>>>(d_input,
+                                                                                       d_output);
+                }
+            });
+
+        state.set_items(Trials * items);
+        state.add_writes<T>(Trials * items);
+
+        HIP_CHECK(hipFree(d_input));
+        HIP_CHECK(hipFree(d_output));
     }
-    state.SetBytesProcessed(state.iterations() * Trials * size * sizeof(T));
-    state.SetItemsProcessed(state.iterations() * Trials * size);
+};
 
-    HIP_CHECK(hipFree(d_input));
-    HIP_CHECK(hipFree(d_output));
-}
-
-#define CREATE_BENCHMARK(T, BS, IPT)                                                             \
-    benchmark::RegisterBenchmark(std::string("block_radix_sort<data_type:" #T ",block_size:" #BS \
-                                             ",items_per_thread:" #IPT ">.sub_algorithm_name:"   \
-                                             + name)                                             \
-                                     .c_str(),                                                   \
-                                 &run_benchmark<Helper, T, BS, IPT>,                             \
-                                 benchmark_kind,                                                 \
-                                 stream,                                                         \
-                                 size)
+#define CREATE_BENCHMARK(T, BS, IPT) \
+    executor.queue<block_radix_sort_benchmark<Helper, T, BS, IPT, BenchmarkKind>>()
 
 // clang-format off
 #define BENCHMARK_TYPE(type, block)   \
@@ -262,14 +281,9 @@ using custom_int_t = benchmark_utils::custom_type<int>;
 
 PRIMBENCH_REGISTER_TYPE(custom_int_t, "custom<i32>");
 
-template<typename Helper>
-void add_benchmarks(benchmark_kinds                               benchmark_kind,
-                    const std::string&                            name,
-                    std::vector<benchmark::internal::Benchmark*>& benchmarks,
-                    hipStream_t                                   stream,
-                    size_t                                        size)
+template<typename Helper, benchmark_kinds BenchmarkKind>
+void add_benchmarks(primbench::executor& executor)
 {
-
     BENCHMARK_TYPE(int, 64);
     BENCHMARK_TYPE(int, 128);
     BENCHMARK_TYPE(int, 192);
@@ -301,56 +315,16 @@ void add_benchmarks(benchmark_kinds                               benchmark_kind
 
 int main(int argc, char* argv[])
 {
-    cli::Parser parser(argc, argv);
-    parser.set_optional<size_t>("size", "size", DEFAULT_N, "number of values");
-    parser.set_optional<int>("trials", "trials", -1, "number of iterations");
-    parser.run_and_exit_if_error();
+    primbench::settings settings;
+    settings.size                 = DEFAULT_N;
+    settings.min_gpu_ms_per_batch = 100;
 
-    // Parse argv
-    benchmark::Initialize(&argc, argv);
-    const size_t size   = parser.get<size_t>("size");
-    const int    trials = parser.get<int>("trials");
+    primbench::executor executor(argc, argv, settings);
 
-    std::cout << "benchmark_block_radix_sort" << std::endl;
+    add_benchmarks<helper_blocked_blocked, benchmark_kinds::sort_keys>(executor);
+    add_benchmarks<helper_blocked_blocked, benchmark_kinds::sort_pairs>(executor);
+    add_benchmarks<helper_blocked_striped, benchmark_kinds::sort_keys>(executor);
+    add_benchmarks<helper_blocked_striped, benchmark_kinds::sort_pairs>(executor);
 
-    // HIP
-    hipStream_t     stream = 0; // default
-    hipDeviceProp_t devProp;
-    int             device_id = 0;
-    HIP_CHECK(hipGetDevice(&device_id));
-    HIP_CHECK(hipGetDeviceProperties(&devProp, device_id));
-    std::cout << "[HIP] Device name: " << devProp.name << std::endl;
-
-    // Add benchmarks
-    std::vector<benchmark::internal::Benchmark*> benchmarks;
-    // clang-format off
-    add_benchmarks<helper_blocked_blocked>(
-        benchmark_kinds::sort_keys, "sort(keys)", benchmarks, stream, size);
-    add_benchmarks<helper_blocked_blocked>(
-        benchmark_kinds::sort_pairs, "sort(keys, values)", benchmarks, stream, size);
-    add_benchmarks<helper_blocked_striped>(
-        benchmark_kinds::sort_keys, "sort_to_striped(keys)", benchmarks, stream, size);
-    add_benchmarks<helper_blocked_striped>(
-        benchmark_kinds::sort_pairs, "sort_to_striped(keys, values)", benchmarks, stream, size);
-    // clang-format on
-
-    // Use manual timing
-    for(auto& b : benchmarks)
-    {
-        b->UseManualTime();
-        b->Unit(benchmark::kMillisecond);
-    }
-
-    // Force number of iterations
-    if(trials > 0)
-    {
-        for(auto& b : benchmarks)
-        {
-            b->Iterations(trials);
-        }
-    }
-
-    // Run benchmarks
-    benchmark::RunSpecifiedBenchmarks();
-    return 0;
+    executor.run();
 }
