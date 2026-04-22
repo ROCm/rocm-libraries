@@ -67,11 +67,11 @@ set(__clang_cxx_compile_options
     -Wno-suggest-override
     -Wno-nonportable-system-include-path
     -Wno-documentation
-    -Wno-enum-constexpr-conversion
     -Wmissing-noreturn)
 
 if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL "19")
     list(APPEND __clang_cxx_compile_options
+        -Wno-enum-constexpr-conversion
         -Wno-unique-object-duplication
         -Wno-switch-default
         -Wno-nontrivial-memcall)
