@@ -931,6 +931,9 @@ validParameters = { # we need to make sure this matches develop
     # 1  : enable  CMS, is set to 0 if not supported
     "UseCustomMainLoopSchedule" : [-1, 0, 1],
     "AdaptiveGemm": [0, 1],
+    # 0  : MB and MBSK generate different assembly code
+    # 1  : MB and MBSK generate same assembly code
+    "AdaptiveGemmGSUA": [0, 1],
     # Add extra latency to calculate number of MFMA to insert between local read and wait
     # Negative value means reduce interval between local read and wait (for DirectToVgpr only)
     "ExtraLatencyForLR":          list(range(0,17,2)) + list(range(-80,0,10)),

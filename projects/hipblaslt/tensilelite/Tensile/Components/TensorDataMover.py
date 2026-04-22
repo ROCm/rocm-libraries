@@ -59,7 +59,7 @@ class TensorDataMoverLoad(TensorDataMover):
             #TODO: support stagger U
         return mod
 
-    def calculateStartAddrWaveSeparated(self, writer: "KernelWriterAssembly", kernel: Mapping, tp: Mapping, sgprAddr: int | str) -> Module:
+    def calculateStartAddrWaveSeparated(self, writer: "KernelWriterAssembly", kernel: Mapping, tp: Mapping, sgprAddr: int | str, dstGroup0: str = None) -> Module:
         #TODO here we assume TN
         mod = Module()
         tc: str = tp["tensorChar"]
@@ -92,8 +92,12 @@ class TensorDataMoverLoad(TensorDataMover):
             mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), round(mt // numComp * bpe), f"woffset = wCompId * mt // numComp({numComp}) * bpe({bpe})"))
             mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), sgpr(sgprStrideName), f"woffset *= stride"))
             mod.add(SAddU32(sgpr(tmpSgprIdx), sgpr(tmpSgprIdx), sgpr(waveOffsetSgprIdx), "+= woffset"))
-            mod.add(SAddU32(sgpr(sgprAddr), sgpr(tmpSgprIdx), sgpr(sgprAddr), "+= baseAddr(lo)"))
-            mod.add(SAddCU32(sgpr(f"{sgprAddr}+1"), sgpr(tmpSgprIdx+1), sgpr(f"{sgprAddr}+1"), "+= baseAddr(hi)"))
+            if dstGroup0 is not None:
+                mod.add(SAddU32(sgpr(f"{dstGroup0}+2"), sgpr(f"{dstGroup0}+2"), sgpr(tmpSgprIdx), "+= tileOffset(lo)"))
+                mod.add(SAddCU32(sgpr(f"{dstGroup0}+3"), sgpr(f"{dstGroup0}+3"), sgpr(tmpSgprIdx+1), "+= tileOffset(hi)"))
+            else:
+                mod.add(SAddU32(sgpr(sgprAddr), sgpr(tmpSgprIdx), sgpr(sgprAddr), "+= baseAddr(lo)"))
+                mod.add(SAddCU32(sgpr(f"{sgprAddr}+1"), sgpr(tmpSgprIdx+1), sgpr(f"{sgprAddr}+1"), "+= baseAddr(hi)"))
             #TODO: support strided batch
             #TODO: support GSU
             #TODO: support stagger U
