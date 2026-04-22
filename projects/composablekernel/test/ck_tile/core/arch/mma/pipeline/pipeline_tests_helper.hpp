@@ -24,6 +24,7 @@ namespace mma_pipeline_test {
 using namespace ck_tile;
 using namespace ck_tile::core::arch;
 using namespace ck_tile::core::arch::mma;
+using namespace ck_tile::core::arch::testing;
 
 template <typename CType, typename AType, typename BType>
 void reference_matmul(std::vector<CType>& C,
@@ -130,7 +131,7 @@ void fill_a_fragments(typename Pipeline::AVecType* a_per_lane,
                 }
                 else
                 {
-                    // Dense: direct mapping
+                    // Dense/Scale: direct mapping
                     for(index_t v = 0; v < a_vec_size; ++v)
                     {
                         auto coords      = ARegMap::calc_matrix_indices_from_lane_vector(lane, v);
@@ -374,7 +375,7 @@ void run_pipeline_matrix_test(uint32_t M,
         GTEST_SKIP() << "No HIP device found or arch not supported. Skipping test.";
     }
 
-    if(testing::getCMakeGpuTargetIds().count(currentArchId) == 0)
+    if(getCMakeGpuTargetIds().count(currentArchId) == 0)
     {
         GTEST_SKIP()
             << "The HIP device found does not match the compiler target(s). Skipping test.";
@@ -382,7 +383,7 @@ void run_pipeline_matrix_test(uint32_t M,
 
     const uint32_t waveSize = static_cast<uint32_t>(devProp.warpSize);
 
-    bool dispatched = testing::dispatchCompilerTarget(currentArchId, [&](auto target) {
+    bool dispatched = dispatchCompilerTarget(currentArchId, [&](auto target) {
         using CompilerTarget = decltype(target);
         using Pipeline       = typename PipelineFactory<CompilerTarget>::type;
 
