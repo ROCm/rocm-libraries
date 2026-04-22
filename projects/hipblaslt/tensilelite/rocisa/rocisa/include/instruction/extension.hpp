@@ -374,9 +374,14 @@ namespace rocisa
         return module;
     }
 
-    // Phase 2 true16 helpers: NoSDWA/SDWA decision is made internally
-    // based on ISA caps, so callers only pass semantic sel (0=low, 1=high).
-
+    ////////////////////////////////////////////////////////////////////////////////
+    // True16 conversion helpers.
+    // These query the NoSDWA arch cap at runtime and emit either:
+    //   - true16 encoding (op_sel / byte_sel) on NoSDWA targets (gfx11+), or
+    //   - SDWA encoding (src0_sel / dst_sel)  on legacy targets.
+    // Callers only provide a semantic `sel` (0 = low half-word, 1 = high half-word).
+    ////////////////////////////////////////////////////////////////////////////////
+    /// Convert F16 → F32, selecting src half-word by `sel`.
     inline std::shared_ptr<Item>
         ECvtF16toF32(const std::shared_ptr<RegisterContainer>& dst,
                      const InstructionInput&                   src,
@@ -399,6 +404,9 @@ namespace rocisa
         }
     }
 
+    /// Convert F32 → F16, placing result in dst half-word selected by `sel`.
+    /// When `useSdwaLegacy` is false the legacy path emits a plain VCvtF32toF16
+    /// without any SDWA modifier (used by PackData where no half-word packing is needed).
     inline std::shared_ptr<Item>
         ECvtF32toF16(const std::shared_ptr<RegisterContainer>& dst,
                      const InstructionInput&                   src,
@@ -427,6 +435,7 @@ namespace rocisa
         }
     }
 
+    /// Unpack packed-FP8 → 2×F32, selecting src half-word by `sel`.
     inline std::shared_ptr<Item>
         ECvtPkFP8toF32(const std::shared_ptr<RegisterContainer>& dst,
                        const InstructionInput&                   src,
@@ -451,6 +460,7 @@ namespace rocisa
         }
     }
 
+    /// Unpack packed-BF8 → 2×F32, selecting src half-word by `sel`.
     inline std::shared_ptr<Item>
         ECvtPkBF8toF32(const std::shared_ptr<RegisterContainer>& dst,
                        const InstructionInput&                   src,
