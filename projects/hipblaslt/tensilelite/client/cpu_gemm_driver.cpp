@@ -91,19 +91,18 @@ namespace
         static constexpr rocisa::DataType value = rocisa::DataType::BFloat16;
     };
 
-    // A naive, slow, golden reference implementation of GEMM.
+    // A slow, easy to understand, golden reference implementation of GEMM.
     // Used strictly for validating the correctness of the optimized path.
-    // Calculates D = activation(alpha * scaleA[i] * scaleB[j] * scaleAlphaVec[d] * (A * B) + beta * C + bias[i])
-  // Calculates, for each element (i, j):
-  //   D[i,j] = activation( effectiveAlpha * (A * B)[i,j] + beta * C[i,j] + bias[i] )
-  // where:
-  //   effectiveAlpha = alpha
-  //                  * scaleA[i]                              (if scaleAVec     != nullptr)
-  //                  * scaleB[j]                              (if scaleBVec     != nullptr)
-  //                  * scaleAlphaVec[factorDim == 0 ? i : j]  (if scaleAlphaVec != nullptr)
-  //
-  // scaleA is always indexed by row (M), scaleB always by col (N).
-  // factorDim only affects scaleAlphaVec: 0 = row-dim (length M), 1 = col-dim (length N).   
+    // Calculates, for each element (i, j):
+    //   D[i,j] = activation( effectiveAlpha * (A * B)[i,j] + beta * C[i,j] + bias[i] )
+    // where:
+    //   effectiveAlpha = alpha
+    //                  * scaleA[i]                              (if scaleAVec     != nullptr)
+    //                  * scaleB[j]                              (if scaleBVec     != nullptr)
+    //                  * scaleAlphaVec[factorDim == 0 ? i : j]  (if scaleAlphaVec != nullptr)
+    //
+    // scaleA is always indexed by row (M), scaleB always by col (N).
+    // factorDim only affects scaleAlphaVec: 0 = row-dim (length M), 1 = col-dim (length N).   
     void columnMajorGemm(const float*   a,
                          const float*   b,
                          const float*   c,
