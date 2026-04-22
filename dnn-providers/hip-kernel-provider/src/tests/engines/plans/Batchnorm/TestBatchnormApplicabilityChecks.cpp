@@ -4,7 +4,7 @@
 #include <gtest/gtest.h>
 
 #include "engines/plans/batchnorm/BatchnormApplicabilityChecks.hpp"
-#include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 
@@ -13,8 +13,8 @@ using namespace hip_kernel_provider;
 TEST(TestBatchnormValidator, ValidInference)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                              builder.GetSize());
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                                     builder.GetSize());
     const auto& node = graph.getNode(0);
     const auto& attr = *node.attributes_as_BatchnormInferenceAttributes();
 
@@ -25,8 +25,8 @@ TEST(TestBatchnormValidator, ValidInference)
 TEST(TestBatchnormValidator, ValidInferenceActiv)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdInferActGraph();
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                              builder.GetSize());
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                                     builder.GetSize());
 
     const auto& node = graph.getNode(0);
     const auto& attr = *node.attributes_as_BatchnormInferenceAttributes();
@@ -41,8 +41,8 @@ TEST(TestBatchnormValidator, ValidInferenceActiv)
 TEST(TestBatchnormValidator, ValidVarianceExtInference)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormWithVarianceInferenceGraph();
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                              builder.GetSize());
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                                     builder.GetSize());
     const auto& node = graph.getNode(0);
     const auto& attr = *node.attributes_as_BatchnormInferenceAttributesVarianceExt();
 
@@ -54,8 +54,8 @@ TEST(TestBatchnormValidator, ValidVarianceExtInferenceActiv)
 {
     auto builder
         = hipdnn_test_sdk::utilities::createValidBatchnormWithVarianceInferenceActivGraph();
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                              builder.GetSize());
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                                     builder.GetSize());
 
     const auto& node = graph.getNode(0);
     const auto& attr = *node.attributes_as_BatchnormInferenceAttributesVarianceExt();
@@ -71,8 +71,8 @@ TEST(TestBatchnormValidator, ValidVarianceExtInferenceActiv)
 TEST(TestBatchnormValidator, ValidFwdTraining)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph();
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                              builder.GetSize());
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                                     builder.GetSize());
 
     const auto& node = graph.getNode(0);
     const auto& attr = *node.attributes_as_BatchnormAttributes();
@@ -84,8 +84,8 @@ TEST(TestBatchnormValidator, ValidFwdTraining)
 TEST(TestBatchnormValidator, MismatchShapes)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                              builder.GetSize());
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                                     builder.GetSize());
     const auto& node = graph.getNode(0);
     const auto& attr = *node.attributes_as_BatchnormInferenceAttributes();
 
@@ -96,20 +96,20 @@ TEST(TestBatchnormValidator, MismatchShapes)
 namespace
 {
 
-flatbuffers::FlatBufferBuilder
-    createInvalidTypeBatchnormActivGraph(hipdnn_data_sdk::data_objects::DataType xType,
-                                         hipdnn_data_sdk::data_objects::DataType scaleType,
-                                         hipdnn_data_sdk::data_objects::DataType biasType,
-                                         hipdnn_data_sdk::data_objects::DataType meanType,
-                                         hipdnn_data_sdk::data_objects::DataType invVarianceType,
-                                         hipdnn_data_sdk::data_objects::DataType yType,
-                                         hipdnn_data_sdk::data_objects::DataType dyType,
-                                         hipdnn_data_sdk::data_objects::DataType computeDataType,
-                                         hipdnn_data_sdk::data_objects::PointwiseMode activ
-                                         = hipdnn_data_sdk::data_objects::PointwiseMode::RELU_FWD)
+flatbuffers::FlatBufferBuilder createInvalidTypeBatchnormActivGraph(
+    hipdnn_flatbuffers_sdk::data_objects::DataType xType,
+    hipdnn_flatbuffers_sdk::data_objects::DataType scaleType,
+    hipdnn_flatbuffers_sdk::data_objects::DataType biasType,
+    hipdnn_flatbuffers_sdk::data_objects::DataType meanType,
+    hipdnn_flatbuffers_sdk::data_objects::DataType invVarianceType,
+    hipdnn_flatbuffers_sdk::data_objects::DataType yType,
+    hipdnn_flatbuffers_sdk::data_objects::DataType dyType,
+    hipdnn_flatbuffers_sdk::data_objects::DataType computeDataType,
+    hipdnn_flatbuffers_sdk::data_objects::PointwiseMode activ
+    = hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD)
 {
     flatbuffers::FlatBufferBuilder builder;
-    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
+    std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>
         tensorAttributes;
 
     std::vector<int64_t> strides{150528, 50176, 224, 1};
@@ -120,31 +120,31 @@ flatbuffers::FlatBufferBuilder
         derivedDims, hipdnn_data_sdk::utilities::extractStrideOrder(strides));
 
     // inputs
-    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
         builder, 1, "x", xType, &strides, &dims));
 
-    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
         builder, 2, "scale", scaleType, &derivedStrides, &derivedDims));
 
-    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
         builder, 3, "bias", biasType, &derivedStrides, &derivedDims));
 
-    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
         builder, 4, "mean", meanType, &derivedStrides, &derivedDims));
 
-    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
         builder, 5, "inv_variance", invVarianceType, &derivedStrides, &derivedDims));
 
-    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
         builder, 6, "y", yType, &strides, &dims, true));
 
-    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
         builder, 7, "Dy", dyType, &strides, &dims, false)); // is_virtual = true
 
-    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> nodes;
+    std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Node>> nodes;
 
     // Node 0: Batchnorm Inference
-    auto bnInfAttributes = hipdnn_data_sdk::data_objects::CreateBatchnormInferenceAttributes(
+    auto bnInfAttributes = hipdnn_flatbuffers_sdk::data_objects::CreateBatchnormInferenceAttributes(
         builder,
         1, // x_tensor_uid
         4, // mean_tensor_uid
@@ -154,15 +154,15 @@ flatbuffers::FlatBufferBuilder
         6 // y_tensor_uid (BN_Y - virtual)
     );
 
-    nodes.push_back(hipdnn_data_sdk::data_objects::CreateNodeDirect(
+    nodes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
         builder,
         "batchnorm_inference",
         computeDataType,
-        hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes,
+        hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes,
         bnInfAttributes.Union()));
 
     // Node 1: Pointwise
-    auto pointwiseAttributes = hipdnn_data_sdk::data_objects::CreatePointwiseAttributes(
+    auto pointwiseAttributes = hipdnn_flatbuffers_sdk::data_objects::CreatePointwiseAttributes(
         builder,
         activ,
         std::nullopt, // relu_lower_clip
@@ -175,19 +175,19 @@ flatbuffers::FlatBufferBuilder
         7 // out_0_tensor_uid (Dy - not virtual)
     );
 
-    nodes.push_back(hipdnn_data_sdk::data_objects::CreateNodeDirect(
+    nodes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
         builder,
         "relu_fwd",
         computeDataType,
-        hipdnn_data_sdk::data_objects::NodeAttributes::PointwiseAttributes,
+        hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::PointwiseAttributes,
         pointwiseAttributes.Union()));
 
-    auto graphOffset = hipdnn_data_sdk::data_objects::CreateGraphDirect(
+    auto graphOffset = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(
         builder,
         "test",
-        hipdnn_data_sdk::data_objects::DataType::FLOAT,
-        hipdnn_data_sdk::data_objects::DataType::FLOAT,
-        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
         &tensorAttributes,
         &nodes);
     builder.Finish(graphOffset);
@@ -197,18 +197,18 @@ flatbuffers::FlatBufferBuilder
 
 TEST(TestBatchnormValidator, MismatchIOTypes)
 {
-    auto builder
-        = createInvalidTypeBatchnormActivGraph(hipdnn_data_sdk::data_objects::DataType::HALF,
-                                               hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                                               hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                                               hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                                               hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                                               hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                                               hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                                               hipdnn_data_sdk::data_objects::DataType::FLOAT);
+    auto builder = createInvalidTypeBatchnormActivGraph(
+        hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
 
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                              builder.GetSize());
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                                     builder.GetSize());
 
     const auto& node = graph.getNode(0);
     const auto& attr = *node.attributes_as_BatchnormInferenceAttributes();
@@ -224,18 +224,18 @@ TEST(TestBatchnormValidator, MismatchIOTypes)
 
 TEST(TestBatchnormValidator, MismatchAffineTypes)
 {
-    auto builder
-        = createInvalidTypeBatchnormActivGraph(hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                                               hipdnn_data_sdk::data_objects::DataType::HALF,
-                                               hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                                               hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                                               hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                                               hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                                               hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                                               hipdnn_data_sdk::data_objects::DataType::FLOAT);
+    auto builder = createInvalidTypeBatchnormActivGraph(
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
 
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                              builder.GetSize());
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                                     builder.GetSize());
 
     const auto& node = graph.getNode(0);
     const auto& attr = *node.attributes_as_BatchnormInferenceAttributes();
@@ -251,18 +251,18 @@ TEST(TestBatchnormValidator, MismatchAffineTypes)
 
 TEST(TestBatchnormValidator, MismatchStatTypes)
 {
-    auto builder
-        = createInvalidTypeBatchnormActivGraph(hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                                               hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                                               hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                                               hipdnn_data_sdk::data_objects::DataType::HALF,
-                                               hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                                               hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                                               hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                                               hipdnn_data_sdk::data_objects::DataType::FLOAT);
+    auto builder = createInvalidTypeBatchnormActivGraph(
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
 
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                              builder.GetSize());
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                                     builder.GetSize());
 
     const auto& node = graph.getNode(0);
     const auto& attr = *node.attributes_as_BatchnormInferenceAttributes();
@@ -278,18 +278,18 @@ TEST(TestBatchnormValidator, MismatchStatTypes)
 
 TEST(TestBatchnormValidator, MismatchIntermediateTypes)
 {
-    auto builder
-        = createInvalidTypeBatchnormActivGraph(hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                                               hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                                               hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                                               hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                                               hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                                               hipdnn_data_sdk::data_objects::DataType::HALF,
-                                               hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                                               hipdnn_data_sdk::data_objects::DataType::FLOAT);
+    auto builder = createInvalidTypeBatchnormActivGraph(
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
 
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                              builder.GetSize());
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                                     builder.GetSize());
 
     const auto& node = graph.getNode(0);
     const auto& attr = *node.attributes_as_BatchnormInferenceAttributes();
@@ -306,18 +306,18 @@ TEST(TestBatchnormValidator, MismatchIntermediateTypes)
 TEST(TestBatchnormValidator, InvalidActivation)
 {
     auto builder = createInvalidTypeBatchnormActivGraph(
-        hipdnn_data_sdk::data_objects::DataType::FLOAT,
-        hipdnn_data_sdk::data_objects::DataType::FLOAT,
-        hipdnn_data_sdk::data_objects::DataType::FLOAT,
-        hipdnn_data_sdk::data_objects::DataType::FLOAT,
-        hipdnn_data_sdk::data_objects::DataType::FLOAT,
-        hipdnn_data_sdk::data_objects::DataType::FLOAT,
-        hipdnn_data_sdk::data_objects::DataType::FLOAT,
-        hipdnn_data_sdk::data_objects::DataType::FLOAT,
-        hipdnn_data_sdk::data_objects::PointwiseMode::RECIPROCAL);
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RECIPROCAL);
 
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                              builder.GetSize());
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                                     builder.GetSize());
 
     const auto& node = graph.getNode(0);
     const auto& attr = *node.attributes_as_BatchnormInferenceAttributes();
@@ -351,61 +351,67 @@ flatbuffers::FlatBufferBuilder
                                           const std::vector<int64_t>& dyStrides)
 {
     flatbuffers::FlatBufferBuilder builder;
-    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
+    std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>
         tensorAttributes;
 
     // inputs
-    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
-        builder, 1, "x", hipdnn_data_sdk::data_objects::DataType::FLOAT, &xStrides, &xDims));
+    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+        builder, 1, "x", hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT, &xStrides, &xDims));
 
-    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
         builder,
         2,
         "scale",
-        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
         &scaleStrides,
         &scaleDims));
 
-    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
         builder,
         3,
         "bias",
-        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
         &biasStrides,
         &biasDims));
 
-    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
         builder,
         4,
         "mean",
-        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
         &meansStrides,
         &meanDims));
 
-    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
         builder,
         5,
         "inv_variance",
-        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
         &invVarianceStrides,
         &invVarianceDims));
 
-    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
-        builder, 6, "y", hipdnn_data_sdk::data_objects::DataType::FLOAT, &yStrides, &yDims, true));
+    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+        builder,
+        6,
+        "y",
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        &yStrides,
+        &yDims,
+        true));
 
-    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
         builder,
         7,
         "Dy",
-        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
         &dyStrides,
         &dyDims,
         false)); // is_virtual = true
 
-    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> nodes;
+    std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Node>> nodes;
 
     // Node 0: Batchnorm Inference
-    auto bnInfAttributes = hipdnn_data_sdk::data_objects::CreateBatchnormInferenceAttributes(
+    auto bnInfAttributes = hipdnn_flatbuffers_sdk::data_objects::CreateBatchnormInferenceAttributes(
         builder,
         1, // x_tensor_uid
         4, // mean_tensor_uid
@@ -415,17 +421,17 @@ flatbuffers::FlatBufferBuilder
         6 // y_tensor_uid (BN_Y - virtual)
     );
 
-    nodes.push_back(hipdnn_data_sdk::data_objects::CreateNodeDirect(
+    nodes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
         builder,
         "batchnorm_inference",
-        hipdnn_data_sdk::data_objects::DataType::FLOAT,
-        hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes,
         bnInfAttributes.Union()));
 
     // Node 1: Pointwise
-    auto pointwiseAttributes = hipdnn_data_sdk::data_objects::CreatePointwiseAttributes(
+    auto pointwiseAttributes = hipdnn_flatbuffers_sdk::data_objects::CreatePointwiseAttributes(
         builder,
-        hipdnn_data_sdk::data_objects::PointwiseMode::RELU_FWD,
+        hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD,
         std::nullopt, // relu_lower_clip
         std::nullopt, // relu_upper_clip
         std::nullopt, // relu_lower_clip_slope
@@ -436,19 +442,19 @@ flatbuffers::FlatBufferBuilder
         7 // out_0_tensor_uid (Dy - not virtual)
     );
 
-    nodes.push_back(hipdnn_data_sdk::data_objects::CreateNodeDirect(
+    nodes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
         builder,
         "relu_fwd",
-        hipdnn_data_sdk::data_objects::DataType::FLOAT,
-        hipdnn_data_sdk::data_objects::NodeAttributes::PointwiseAttributes,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::PointwiseAttributes,
         pointwiseAttributes.Union()));
 
-    auto graphOffset = hipdnn_data_sdk::data_objects::CreateGraphDirect(
+    auto graphOffset = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(
         builder,
         "test",
-        hipdnn_data_sdk::data_objects::DataType::FLOAT,
-        hipdnn_data_sdk::data_objects::DataType::FLOAT,
-        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
         &tensorAttributes,
         &nodes);
     builder.Finish(graphOffset);
@@ -483,8 +489,8 @@ TEST(TestBatchnormValidator, MismatchIOShapes)
                                                          dims,
                                                          strides);
 
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                              builder.GetSize());
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                                     builder.GetSize());
 
     const auto& node = graph.getNode(0);
     const auto& attr = *node.attributes_as_BatchnormInferenceAttributes();
@@ -525,8 +531,8 @@ TEST(TestBatchnormValidator, MismatchAffineShapes)
                                                          dims,
                                                          strides);
 
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                              builder.GetSize());
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                                     builder.GetSize());
 
     const auto& node = graph.getNode(0);
     const auto& attr = *node.attributes_as_BatchnormInferenceAttributes();
@@ -567,8 +573,8 @@ TEST(TestBatchnormValidator, MismatchStatShapes)
                                                          dims,
                                                          strides);
 
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                              builder.GetSize());
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                                     builder.GetSize());
 
     const auto& node = graph.getNode(0);
     const auto& attr = *node.attributes_as_BatchnormInferenceAttributes();

@@ -4,8 +4,8 @@
 #pragma once
 
 #include "engines/plans/ApplicabilityChecks.hpp"
-#include <hipdnn_data_sdk/data_objects/rmsnorm_attributes_generated.h>
-#include <hipdnn_data_sdk/data_objects/rmsnorm_backward_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/rmsnorm_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/rmsnorm_backward_attributes_generated.h>
 
 namespace hip_kernel_provider::rmsnorm
 {
@@ -27,16 +27,17 @@ private:
 
 public:
     RMSnormValidator(
-        const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        const std::unordered_map<int64_t,
+                                 const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
             tensorMapLocal)
         : IValidator(tensorMapLocal) {};
 
     // --- High-Level Configuration Validators ---
     void checkTensorConfigSupported(
-        const hipdnn_data_sdk::data_objects::RMSNormAttributes& rmsNormAttr);
+        const hipdnn_flatbuffers_sdk::data_objects::RMSNormAttributes& rmsNormAttr);
 
     void checkBwdTensorConfigSupported(
-        const hipdnn_data_sdk::data_objects::RMSNormBackwardAttributes& rmsNormBwdAttr);
+        const hipdnn_flatbuffers_sdk::data_objects::RMSNormBackwardAttributes& rmsNormBwdAttr);
 };
 
 } // namespace hip_kernel_provider::rmsnorm

@@ -9,18 +9,18 @@
 #include <test_plugins/TestPluginConstants.hpp>
 #include <test_plugins/TestPluginKnobRecorder.hpp>
 
-#include <hipdnn_data_sdk/data_objects/engine_config_generated.h>
-#include <hipdnn_data_sdk/data_objects/knob_value_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/engine_config_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/knob_value_generated.h>
 #include <hipdnn_test_sdk/utilities/IntegrationTestFixture.hpp>
 #include <hipdnn_test_sdk/utilities/TestableGraph.hpp>
 
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
-using hipdnn_data_sdk::data_objects::EngineConfigT;
-using hipdnn_data_sdk::data_objects::FloatValueT;
-using hipdnn_data_sdk::data_objects::IntValueT;
-using hipdnn_data_sdk::data_objects::KnobSettingT;
-using hipdnn_data_sdk::data_objects::StringValueT;
+using hipdnn_flatbuffers_sdk::data_objects::EngineConfigT;
+using hipdnn_flatbuffers_sdk::data_objects::FloatValueT;
+using hipdnn_flatbuffers_sdk::data_objects::IntValueT;
+using hipdnn_flatbuffers_sdk::data_objects::KnobSettingT;
+using hipdnn_flatbuffers_sdk::data_objects::StringValueT;
 using hipdnn_tests::IntegrationTestFixture;
 using hipdnn_tests::TestableGraphKnobLowering;
 

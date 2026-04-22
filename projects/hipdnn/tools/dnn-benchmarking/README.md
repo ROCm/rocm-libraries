@@ -26,7 +26,7 @@ This tool loads serialized hipDNN graphs, executes them via the MIOpen plugin, a
 python3 -m venv .venv
 source .venv/bin/activate
 
-# Install ROCm-compatible dependencies (ROCm nightly PyTorch for GPU timing)
+# Install ROCm torch (from ROCm nightly index), then the package + PyPI deps.
 pip install -r requirements-rocm.txt
 pip install -e .
 
@@ -41,7 +41,7 @@ cd /path/to/hipdnn/python && pip install -e . && cd -
 python3 -m venv .venv
 source .venv/bin/activate
 
-# Install CUDA-compatible dependencies
+# Install CUDA torch + PyPI deps
 pip install -r requirements-cuda.txt
 pip install -e .
 ```
@@ -50,11 +50,11 @@ pip install -e .
 
 ```bash
 # For ROCm development
-pip install -r requirements-rocm.txt -r requirements-dev.txt
+pip install -r requirements-rocm.txt
 pip install -e .
 
 # For CUDA development
-pip install -r requirements-cuda.txt -r requirements-dev.txt
+pip install -r requirements-cuda.txt
 pip install -e .
 ```
 

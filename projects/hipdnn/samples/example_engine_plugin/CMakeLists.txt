@@ -54,7 +54,7 @@ add_compile_definitions(__HIP_PLATFORM_AMD__)
 # brings in the HIP, flatbuffers, and nlohmann_json include paths.
 # =============================================================================
 find_package(hipdnn_plugin_sdk CONFIG REQUIRED)
-# hipdnn_data_sdk is found transitively through hipdnn_plugin_sdk
+# hipdnn_flatbuffers_sdk is found transitively through hipdnn_plugin_sdk
 find_package(hip REQUIRED)
 find_package(hiprtc REQUIRED)
 
