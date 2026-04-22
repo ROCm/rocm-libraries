@@ -12,6 +12,7 @@
 #include "ck_tile/core/arch/arch.hpp"
 #include "ck_tile/core/arch/mma/utility/tile_distribution_encoding_calculator.hpp"
 #include "ck_tile/core/arch/mma/utility/tile_distribution_encoding_register_mapper.hpp"
+#include "ck_tile/core/numeric/pk_fp4.hpp"
 #include "ck_tile/core/numeric/type_convert.hpp"
 #include "ck_tile/core/numeric/vector_type.hpp"
 #include "ck_tile/host/hip_check_error.hpp"
@@ -42,7 +43,22 @@ void reference_matmul(std::vector<CType>& C,
             float acc = 0.0f;
             for(uint32_t k = 0; k < K; ++k)
             {
-                acc += type_convert<float>(A[m * K + k]) * type_convert<float>(B[k * N + n]);
+                if constexpr(std::is_same_v<AType, pk_fp4_t>)
+                {
+                    // pk_fp4_t packs 2 FP4 values per byte. The hardware MMA
+                    // processes both nibbles along K, so the reference must too.
+                    pk_fp4_t a_pk = A[m * K + k];
+                    pk_fp4_t b_pk = B[k * N + n];
+                    float a_lo    = type_convert<float>(a_pk.unpack(number<0>{}));
+                    float a_hi    = type_convert<float>(a_pk.unpack(number<1>{}));
+                    float b_lo    = type_convert<float>(b_pk.unpack(number<0>{}));
+                    float b_hi    = type_convert<float>(b_pk.unpack(number<1>{}));
+                    acc += a_lo * b_lo + a_hi * b_hi;
+                }
+                else
+                {
+                    acc += type_convert<float>(A[m * K + k]) * type_convert<float>(B[k * N + n]);
+                }
             }
             C[m * N + n] = static_cast<CType>(acc);
         }
@@ -276,6 +292,37 @@ void run_pipeline_matrix_test_impl(uint32_t M,
     if(isSparse)
     {
         apply_sparse_pattern(A_matrix, M, K);
+    }
+
+    // For pk_fp4_t (FP4), the scale MFMA instruction processes only the first
+    // 16 of every 32 bytes per lane (kABKPerLane=32, active=16).  Positions
+    // where (k % 32) >= 16 are inactive padding. Zero them so the reference
+    // matmul matches the hardware result.
+    // See WarpGemmAttributeMfmaImpl's arg256() which zero-pads the upper half.
+    if constexpr(std::is_same_v<AScalar, pk_fp4_t>)
+    {
+        constexpr uint32_t group_size = 32; // kABKPerLane for scale MMA
+        constexpr uint32_t active     = group_size / numeric_traits<pk_fp4_t>::PackedSize;
+        for(uint32_t m = 0; m < M; ++m)
+        {
+            for(uint32_t k = 0; k < K; ++k)
+            {
+                if((k % group_size) >= active)
+                {
+                    A_matrix[m * K + k] = AScalar(0);
+                }
+            }
+        }
+        for(uint32_t k = 0; k < K; ++k)
+        {
+            for(uint32_t n = 0; n < N; ++n)
+            {
+                if((k % group_size) >= active)
+                {
+                    B_matrix[k * N + n] = BScalar(0);
+                }
+            }
+        }
     }
 
     reference_matmul(C_expected, A_matrix, B_matrix, M, N, K);
