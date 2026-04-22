@@ -453,6 +453,7 @@ void ormtr_unmtr_hb2st_getError(
         errors[2] /= hnorm[0][0];
 
     timer.end( stream );
+    S eps = get_epsilon<T>();
     std::cout << "# getError"
             << ": m " << m << ", n " << n << ", kd " << kd
             << ", side " << rocblas2char_side( side )
@@ -461,7 +462,10 @@ void ormtr_unmtr_hb2st_getError(
             << ", ortho "   << errors[0]
             << ", A-QBQ^h " << errors[1]
             << ", QC-QC "   << errors[2]
-            << ", time " << timer.get_combined() << "\n\n";
+            << ", time " << timer.get_combined()
+            << (errors[0] < eps && errors[1] < eps && errors[2] < eps
+                ? " ok" : " FAILED")
+            << "\n\n";
 }
 
 //------------------------------------------------------------------------------
@@ -500,6 +504,10 @@ void ormtr_unmtr_hb2st_getPerfData(
 {
     using S = decltype( std::real( T{} ) );
 
+    hipStream_t stream;
+    CHECK_ROCBLAS_ERROR(rocblas_get_stream(handle, &stream));
+    rocsolver_timer timer;
+
     // todo: No CPU implementation readily available.
     // unmtr_hb2st is in PLASMA but not LAPACK.
 
@@ -510,6 +518,7 @@ void ormtr_unmtr_hb2st_getPerfData(
         hAband, hV, hTau, hC, hD, hE);
 
     // cold calls
+    double start, time;
     for(int iter = 0; iter < 2; iter++)
     {
         ormtr_unmtr_hb2st_initData<false, true, T>(
@@ -517,17 +526,16 @@ void ormtr_unmtr_hb2st_getPerfData(
             dAband, ldab, dV, ldv, dTau, dC, ldc, dD, dE,
             hAband, hV, hTau, hC, hD, hE);
 
+        start = get_time_us_sync( stream );
         CHECK_ROCBLAS_ERROR(
             rocsolver_ormtr_unmtr_hb2st(
                 handle, side, trans, m, n, kd,
                 dV.data(), ldv, dTau.data(), dC.data(), ldc));
+        time = get_time_us_sync(stream) - start;
+        printf( "m %d, n %d, kd %d, cold iter %d, time %.4f\n", m, n, kd, iter, time );
     }
 
     // gpu-lapack performance
-    hipStream_t stream;
-    CHECK_ROCBLAS_ERROR(rocblas_get_stream(handle, &stream));
-    rocsolver_timer timer;
-
     if(profile > 0)
     {
         if(profile_kernels)
@@ -546,11 +554,14 @@ void ormtr_unmtr_hb2st_getPerfData(
             hAband, hV, hTau, hC, hD, hE);
 
         timer.start(stream);
+        start = get_time_us_sync( stream );
         CHECK_ROCBLAS_ERROR(
             rocsolver_ormtr_unmtr_hb2st(
                 handle, side, trans, m, n, kd,
                 dV.data(), ldv, dTau.data(), dC.data(), ldc));
+        time = get_time_us_sync(stream) - start;
         timer.end(stream);
+        printf( "m %d, n %d, kd %d, hot  iter %d, time %.4f\n", m, n, kd, iter, time );
     }
     *gpu_time_used = timer.get_combined();
 }
