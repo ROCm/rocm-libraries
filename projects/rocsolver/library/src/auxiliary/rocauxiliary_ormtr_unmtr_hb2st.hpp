@@ -35,6 +35,7 @@
 #include "auxiliary/rocauxiliary_larft.hpp"
 #include "rocblas.hpp"
 #include "rocsolver/rocsolver.h"
+#include "rocsolver_datatype2string.hpp"
 #include "lib_device_helpers.hpp"
 #include "print_matrix.hpp"
 
@@ -87,22 +88,29 @@ void rocsolver_ormtr_unmtr_hb2st_getMemorySize(
         *max_parallel = ceildiv( nt, 2 );
         std::cout << "# max parallel = " << *max_parallel << "\n";
     }
-    *size_Z = sizeof(T) * kd * nz * batch_count * (*max_parallel);
-    *size_T = sizeof(T) * kd * kd * batch_count * (*max_parallel);
-    *size_W = sizeof(T) * 2*kd * kd * batch_count * (*max_parallel);
-    *size_workArr = BATCHED ? sizeof(T*) * 2 * batch_count : 0;
-    // printf( "# getMemSize1 scalars %lu, T %lu, W %lu, Z %lu, work %lu, workArr %lu\n",
-    //         *size_scalars, *size_T, *size_W, *size_Z, *size_work, *size_workArr );
+    rocblas_int bc = batch_count * (*max_parallel);
+    bool batched = bc > 1;
+    *size_Z = sizeof(T) * kd * nz * bc;
+    *size_T = sizeof(T) * kd * kd * bc;
+    *size_W = sizeof(T) * 2*kd * kd * bc;
+    // todo: is BATCHED mean pointer-batched, or also strided-batched?
+    *size_workArr = batched ? sizeof(T*) * 2 * bc: 0;
+    #if PRINT
+        printf( "# getMemSize1 scalars %lu, T %lu, W %lu, Z %lu, work %lu, workArr %lu\n",
+                *size_scalars, *size_T, *size_W, *size_Z, *size_work, *size_workArr );
+    #endif
 
     // extra space for larft calls
     size_t w, wa;
-    rocsolver_larft_getMemorySize<BATCHED, T>(
-        2*kd, kd, batch_count*(*max_parallel), size_scalars, &w, &wa);
+    rocsolver_larft_getMemorySize<true, T>(  // always (strided) batched
+        2*kd, kd, bc, size_scalars, &w, &wa);
     *size_work = std::max(*size_work, w);
     *size_workArr = std::max(*size_workArr, wa);
 
-    // printf( "# getMemSize2 scalars %lu, T %lu, W %lu, Z %lu, work %lu, workArr %lu\n",
-    //         *size_scalars, *size_T, *size_W, *size_Z, *size_work, *size_workArr );
+    #if PRINT
+        printf( "# getMemSize2 scalars %lu, T %lu, W %lu, Z %lu, work %lu, workArr %lu\n",
+                *size_scalars, *size_T, *size_W, *size_Z, *size_work, *size_workArr );
+    #endif
 }
 
 //------------------------------------------------------------------------------
@@ -194,15 +202,15 @@ rocblas_status rocsolver_ormtr_unmtr_hb2st_template(
     U V,
     const rocblas_int shiftV,  // todo
     const rocblas_int ldv,
-    const rocblas_stride strideV,
+    rocblas_stride strideV,
     T* tau,
-    const rocblas_stride strideTau,
+    rocblas_stride strideTau,
     U C,
     const rocblas_int shiftC,  // todo
     const rocblas_int ldc,
-    const rocblas_stride strideC,
+    rocblas_stride strideC,
     const rocblas_int batch_count,
-    const rocblas_int max_parallel,
+    rocblas_int max_parallel,
     T* scalars,
     T* Tr, const rocblas_int ldt,
     T* W,  const rocblas_int ldw,
@@ -215,10 +223,6 @@ rocblas_status rocsolver_ormtr_unmtr_hb2st_template(
                     "shiftV:", shiftV, "ldv:", ldv,
                     "shiftC:", shiftC, "ldc:", ldc,
                     "bc:", batch_count, "mp:", max_parallel);
-
-printf( "%s( %c, %c, m %d, n %d, kd %d, V %d, %d, C %d, %d, bc %d, mp %d )\n",
-        __func__, rocblas2char_side( side ), rocblas2char_operation( trans ),
-        m, n, kd, shiftV, ldv, shiftC, ldc, batch_count, max_parallel );
 
     const T zero = 0;
     const T one = 1;
@@ -235,12 +239,44 @@ printf( "%s( %c, %c, m %d, n %d, kd %d, V %d, %d, C %d, %d, bc %d, mp %d )\n",
     rocblas_int nq = (side == rocblas_side_left ? m : n);  // rows in Q
     rocblas_int nt = ceildiv( nq - 1, kd );  // block cols in conceptual V
 
-    rocblas_stride strideTr = ldt*kd;
-    rocblas_stride strideW  = ldw*kd;
-    rocblas_stride strideZ  = ldz*nz;
-    printf( "# unmtr_hb2st side %d, trans %d, m %d, n %d, kd %d, nq %d, nz %d, nt %d, ldv %d, ldc %d, ldt %d, ldw %d, ldz %d\n",
-            rocblas2char_side(side), rocblas2char_operation(trans),
-            m, n, kd, nq, nz, nt, ldv, ldc, ldt, ldw, ldz );
+    rocblas_stride strideT = ldt*kd;
+    rocblas_stride strideW = ldw*kd;
+    rocblas_stride strideZ = ldz*nz;
+
+    printf( "%s( %c, %c, m %d, n %d, kd %d, [nq %d, nz %d, nt %d], "
+            "V shift %d, ld %d, stride %ld, "
+            "tau %ld, "
+            "C %d, %d, %ld, "
+            "Tr %d, %ld, "
+            "W %d, %ld, "
+            "Z %d, %ld, "
+            "bc %d, mp %d )\n",
+            __func__, rocblas2char_side( side ), rocblas2char_operation( trans ),
+            m, n, kd,
+            nq, nz, nt,
+            shiftV, ldv, strideV,
+            strideTau,
+            shiftC, ldc, strideC,
+            ldt, strideT,
+            ldw, strideW,
+            ldz, strideZ,
+            batch_count, max_parallel );
+
+    rocblas_int bc = batch_count;
+    //max_parallel = 1;
+    if (max_parallel > 1)
+    {
+        strideV   = kd*ldv;
+        strideTau = kd;
+        strideC   = 2*kd;
+        // For side=right, C is strided by cols instead of rows.
+        if (side == rocblas_side_right)
+        {
+            strideC *= ldc;
+        }
+        printf( "mp %d > 1 ==> V stride %ld, tau %ld, C %ld\n",
+                max_parallel, strideV, strideTau, strideC );
+    }
 
     // k loop goes over sets of Vs that can be done in parallel.
     // j loop goes over columns within each set.
@@ -267,15 +303,19 @@ printf( "%s( %c, %c, m %d, n %d, kd %d, V %d, %d, C %d, %d, bc %d, mp %d )\n",
         k_end   = nt;
         k_step  = 1;
     }
-    printf( "# backward %d, k = %d:%d:%d\n",
-            backward, k_begin, k_end, k_step );
+    #if PRINT
+        printf( "# backward %d, k = %d:%d:%d\n",
+                backward, k_begin, k_end, k_step );
+    #endif
 
     for (rocblas_int k = k_begin; k != k_end; k += k_step)
     {
         // i, j are block indices of the top of each conceptual V{i,j} block.
         rocblas_int j_begin = std::max( 0, k );
         rocblas_int j_end   = ceildiv( nt + k, 2 );
-        printf( "# k = %d, j = %d:%d\n", k, j_begin, j_end );
+        #if PRINT
+            printf( "# k = %d, j = %d:%d\n", k, j_begin, j_end );
+        #endif
 
         // For given k, the j's are independent; we always go ascending.
         rocblas_int j = j_begin;
@@ -286,8 +326,8 @@ printf( "%s( %c, %c, m %d, n %d, kd %d, V %d, %d, C %d, %d, bc %d, mp %d )\n",
             rocblas_int i = 2*j - k;
             rocblas_int r = get_v_block_index( nt, i, j );
             // old: r = i - j + j*nt - j*(j-1)/2;
-            printf( "# k = %d, j = %d, i = %d, r = %d\n",
-                    k, j, i, r );
+            // printf( "# k = %d, j = %d, i = %d, r = %d\n",
+            //         k, j, i, r );
 
             // For side = left,  ii is top  row of C block.
             // For side = right, ii is left col of C block.
@@ -297,34 +337,46 @@ printf( "%s( %c, %c, m %d, n %d, kd %d, V %d, %d, C %d, %d, bc %d, mp %d )\n",
             rocblas_int mv = std::min( 2*kd - 1, nq - ii );
             rocblas_int kv = std::min( mv, kd );
 
-            // // Check dimensions (mv, kv) for last j in this batch. If it is
-            // // different, save that j for the next batch, which will be a
-            // // cleanup with batch_count = 1.
-            // rocblas_int j_last = std::min( j + max_parallel, j_end ) - 1;
-            // {
-            //     rocblas_int i_last = 2*j_last - k;
-            //     rocblas_int ii_last = i_last*kd + 1;
-            //     rocblas_int mv_last = std::min( 2*kd - 1, nq - ii );
-            //     rocblas_int kv_last = std::min( mv, kd );
-            //     if (mv_last != mv || kv_last != kv)
-            //     {
-            //         j_last -= 1;
-            //     }
-            // }
-            // printf( "# k = %2d, j = %2d:%2d, bc = %2d\n",
-            //         k, j_begin, j_last, j_last + 1 - j_begin );
-            //
-            // for (rocblas_int j_ = j; j_ <= j_last; ++j_)
-            // {
-            //     // verify batch parameters.
-            //     // todo: replace with batch calls.
-            //     assert( i == 2*j_ - k );
-            //     rocblas_int r_ = get_v_block_index( nt, i, j_ );
-            //     assert( r_ == r );
-            //     rocblas_int ii_ = i*kd + 1;
-            //     assert( ii_ == ii );
-            //     //rocblas_int vj_ = r_*kd;
-            //     //assert( vj_ == vj );
+            // Check dimensions (mv, kv) for last j in this batch. If it is
+            // different, save that j for the next batch, which will be a
+            // cleanup with batch_count = 1.
+            rocblas_int j_last = std::min( j + max_parallel, j_end ) - 1;
+            {
+                rocblas_int i_last = 2*j_last - k;
+                rocblas_int ii_last = i_last*kd + 1;
+                rocblas_int mv_last = std::min( 2*kd - 1, nq - ii );
+                rocblas_int kv_last = std::min( mv, kd );
+                if (mv_last != mv || kv_last != kv)
+                {
+                    j_last -= 1;
+                }
+            }
+            #if PRINT
+                printf( "# k = %2d, j = %2d:%2d (%2d), bc = %2d\n",
+                        k, j_begin, j_last, j_last + 1 - j_begin, bc );
+            #endif
+
+            #define BATCH 1
+            #if BATCH
+              if (max_parallel > 1)
+              {
+                  bc = j_last + 1 - j_begin;
+              }
+              printf( "# k %2d, j %2d:%2d, r %2d, bc %2d (%2d), mp %2d\n",
+                      k, j_begin, j_last, r, j_last + 1 - j_begin, bc, max_parallel );
+            #else
+              for (rocblas_int j_ = j; j_ <= j_last; ++j_)
+              {
+                // verify batch parameters.
+                // todo: replace with batch calls.
+                assert( i == 2*j_ - k );
+                rocblas_int r_ = get_v_block_index( nt, i, j_ );
+                assert( r_ == r );
+                rocblas_int ii_ = i*kd + 1;
+                assert( ii_ == ii );
+                //rocblas_int vj_ = r_*kd;
+                //assert( vj_ == vj );
+            #endif
 
                 // Generate T, dim: (kv x kv)
                 rocsolver_larft_template<T>(
@@ -332,11 +384,12 @@ printf( "%s( %c, %c, m %d, n %d, kd %d, V %d, %d, C %d, %d, bc %d, mp %d )\n",
                     mv, kv,
                     V, r*kd*ldv, ldv, strideV,
                     &tau[ r*kd ], strideTau,
-                    Tr, ldt, strideTr,
-                    batch_count, scalars, work, workArr );
+                    Tr, ldt, strideT,
+                    bc, scalars, work, workArr );
 
                 // Rest of code is equivalent to larfb to apply a block reflector,
                 // but using gemm instead of trmm.
+
                 // W = V * op(T), dim: (mv x kv) = (mv x kv) (kv x kv)
                 auto opT = backward ? rocblas_operation_none
                                     : rocblas_operation_conjugate_transpose;
@@ -344,13 +397,15 @@ printf( "%s( %c, %c, m %d, n %d, kd %d, V %d, %d, C %d, %d, bc %d, mp %d )\n",
                     handle, rocblas_operation_none, opT,
                     mv, kv, kv,
                     &one,  V,  r*kd*ldv, ldv, strideV,
-                           Tr, 0,        ldt, strideTr,
+                           Tr, 0,        ldt, strideT,
                     &zero, W,  0,        ldw, strideW,
-                    batch_count, workArr );
+                    bc, workArr );
 
-                print_matrix( "V" + std::to_string(r), mv, kv, V + r*kd*ldv, ldv, 6, stream );
-                print_matrix( "T" + std::to_string(r), kv, kv, Tr, ldt, 6, stream );
-                print_matrix( "W" + std::to_string(i), mv, kv, W, ldw, 6, stream );
+                #if PRINT
+                    print_matrix( "V" + std::to_string(r), mv, kv, V + r*kd*ldv, ldv, 6, stream );
+                    print_matrix( "T" + std::to_string(r), kv, kv, Tr, ldt, 6, stream );
+                    print_matrix( "W" + std::to_string(i), mv, kv, W, ldw, 6, stream );
+                #endif
 
                 if (left)
                 {
@@ -359,8 +414,10 @@ printf( "%s( %c, %c, m %d, n %d, kd %d, V %d, %d, C %d, %d, bc %d, mp %d )\n",
                     //    = Ci - (V op(T)) (V^H Ci)
                     //    = Ci - W Z
 
-                    printf( "# left\n" );
-                    print_matrix( "C" + std::to_string(i), mv, n, C + ii, ldc, 6, stream );
+                    #if PRINT
+                        printf( "# left\n" );
+                        print_matrix( "C" + std::to_string(i), mv, n, C + ii, ldc, 6, stream );
+                    #endif
 
                     // Z = V^H Ci  (kv x n) = (mv x kv)^H (mv x n)
                     rocsolver_gemm(
@@ -371,9 +428,11 @@ printf( "%s( %c, %c, m %d, n %d, kd %d, V %d, %d, C %d, %d, bc %d, mp %d )\n",
                         &one,  V, r*kd*ldv, ldv, strideV,  // (mv x kv)^H
                                C, ii,       ldc, strideC,  // (mv x n)
                         &zero, Z, 0,        ldz, strideZ,  // (kv x n)
-                        batch_count, workArr );
+                        bc, workArr );
 
-                    print_matrix( "Z" + std::to_string(i), kv, n,  Z, ldz, 6, stream );
+                    #if PRINT
+                        print_matrix( "Z" + std::to_string(i), kv, n,  Z, ldz, 6, stream );
+                    #endif
 
                     // Ci -= W Z  (mv x n) = (mv x kv) (kv x n)
                     rocsolver_gemm(
@@ -384,9 +443,11 @@ printf( "%s( %c, %c, m %d, n %d, kd %d, V %d, %d, C %d, %d, bc %d, mp %d )\n",
                         &negone, W, 0,      ldw, strideW,  // (mv x kv)
                                  Z, 0,      ldz, strideZ,  // (kv x n)
                         &one,    C, ii,     ldc, strideC,  // (mv x n)
-                        batch_count, workArr );
+                        bc, workArr );
 
-                    print_matrix( "Cout" + std::to_string(i), mv, n, C + ii, ldc, 6, stream );
+                    #if PRINT
+                        print_matrix( "Cout" + std::to_string(i), mv, n, C + ii, ldc, 6, stream );
+                    #endif
                 }
                 else // right
                 {
@@ -396,8 +457,10 @@ printf( "%s( %c, %c, m %d, n %d, kd %d, V %d, %d, C %d, %d, bc %d, mp %d )\n",
                     //    = Ci - Z^H W^H
                     // W = V op(T)^H, above.
 
-                    printf( "# right\n" );
-                    print_matrix( "C" + std::to_string(i), m,  mv, C + ii*ldc,   ldc, 6, stream );
+                    #if PRINT
+                        printf( "# right\n" );
+                        print_matrix( "C" + std::to_string(i), m,  mv, C + ii*ldc,   ldc, 6, stream );
+                    #endif
 
                     // Z = Vr^H Ci^H, dim: (kv x m) = (mv x kv)^H (m x mv)^H
                     // todo: perhaps different opA, opB would be better performance,
@@ -410,9 +473,11 @@ printf( "%s( %c, %c, m %d, n %d, kd %d, V %d, %d, C %d, %d, bc %d, mp %d )\n",
                         &one,  V, r*kd*ldv, ldv, strideV,
                                C, ii*ldc,   ldc, strideC,
                         &zero, Z, 0,        ldz, strideZ,
-                        batch_count, workArr );
+                        bc, workArr );
 
-                    print_matrix( "Z" + std::to_string(i), kv, m,  Z, ldz, 6, stream );
+                    #if PRINT
+                        print_matrix( "Z" + std::to_string(i), kv, m,  Z, ldz, 6, stream );
+                    #endif
 
                     // Ci -= Z^H W^H, dim: (m x mv) = (kv x m)^H (mv x kv)^H
                     rocsolver_gemm(
@@ -423,22 +488,25 @@ printf( "%s( %c, %c, m %d, n %d, kd %d, V %d, %d, C %d, %d, bc %d, mp %d )\n",
                         &negone, Z, 0,      ldz, strideZ,
                                  W, 0,      ldw, strideW,
                         &one,    C, ii*ldc, ldc, strideC,
-                        batch_count, workArr );
+                        bc, workArr );
 
-                    print_matrix( "Cout" + std::to_string(i), m,  mv, C + ii*ldc, ldc, 6, stream );
+                    #if PRINT
+                        print_matrix( "Cout" + std::to_string(i), m,  mv, C + ii*ldc, ldc, 6, stream );
+                    #endif
                 }
 
-            //     // Adjust parameters to next matrix in batch.
-            //     // todo: replace with stride in batch calls.
-            //     i += 2;
-            //     r += 1;
-            //     //vj += kd;
-            //     ii += 2*kd;
-            // }
-            //
-            // j = j_last + 1;
-
-            j += 1;
+            #if BATCH
+                j = j_last + 1;
+            #else
+                // Adjust parameters to next matrix in batch.
+                // todo: replace with stride in batch calls.
+                i += 2;
+                r += 1;
+                //vj += kd;
+                ii += 2*kd;
+              }
+              j += 1;
+            #endif
         }
     }
 

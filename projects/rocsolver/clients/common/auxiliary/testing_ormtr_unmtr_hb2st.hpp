@@ -40,6 +40,7 @@
 #include "print_matrix.hpp"
 
 //------------------------------------------------------------------------------
+// todo: where do these go?
 inline rocblas_status rocblas_copy(
     rocblas_handle handle, rocblas_int n,
     float const* x, rocblas_int incx,
@@ -181,6 +182,7 @@ void ormtr_unmtr_hb2st_initData(
     const rocblas_int n,
     const rocblas_int kd,
 
+    // todo: dAband is not actually used, but hAband with ldab is used.
     Td& dAband,
     const rocblas_int ldab,
     Td& dV,
@@ -209,8 +211,6 @@ std::cout << "# " << __func__ << "\n";
         gerand( m, n, hC[0], ldc );
         hbrand( nq, kd, hAband[0], ldab );
 
-        print_matrix( "C", m, n, hC[0], ldc, 6 );
-        print_matrix( "Aband", ldab, nq, hAband[0], ldab, 6 );
         // Call hb2st on GPU to compute dV. (dTau stored in dV.)
         CHECK_HIP_ERROR(dAband.transfer_from(hAband));
         CHECK_ROCBLAS_ERROR(
@@ -228,24 +228,31 @@ std::cout << "# " << __func__ << "\n";
         rocblas_int nt = ceildiv( nq - 1, kd );
         rocblas_int nv_blocks = nt*(nt + 1)/2;
         rocblas_int nv = nv_blocks*kd;
-        print_matrix( "V", 3*kd, nv, hV[0], ldv, 6 );
-        print_matrix( "D", 1, n,   hD[0], 1, 6 );
-        print_matrix( "E", 1, n-1, hE[0], 1, 6 );
 
+        // todo: remove Tau from V in hb2st
         CHECK_ROCBLAS_ERROR(
             rocblas_copy(
                 handle, nv, &dV[0][ldv-1], ldv, dTau[0], 1 ) );
-        print_matrix( "Tau", 1, nv, dTau[0], 1, 6 );
         CHECK_HIP_ERROR(hTau.transfer_from(dTau));
-        print_matrix( "hTau", 1, nv, hTau[0], 1, 6 );
+
+        #define PRINT 1
+        #if PRINT
+            print_matrix( "C", m, n, hC[0], ldc, 6 );
+            print_matrix( "Aband", ldab, nq, hAband[0], ldab, 6 );
+            print_matrix( "V", ldv, nv, hV[0], ldv, 6 );
+            print_matrix( "D", 1, n,   hD[0], 1, 6 );
+            print_matrix( "E", 1, n-1, hE[0], 1, 6 );
+            print_matrix( "Tau", 1, nv, dTau[0], 1, 6 );
+        #endif
     }
 
     if(GPU)
     {
         // copy data from CPU to device
-        CHECK_HIP_ERROR(dV.transfer_from(hV));
+        CHECK_HIP_ERROR(dC.transfer_from(hC));
         CHECK_HIP_ERROR(dD.transfer_from(hD));
         CHECK_HIP_ERROR(dE.transfer_from(hE));
+        CHECK_HIP_ERROR(dV.transfer_from(hV));
     }
     std::cout << "# " << __func__ << " done\n";
 }
@@ -340,42 +347,55 @@ void ormtr_unmtr_hb2st_getError(
     // cpu_lange, cpu_lanhb need rwork size n.
     std::vector<S> hrwork( nq );
 
-    // cpu_gemm needs hW size n*n.
+    // cpu_gemm needs hW size nq*nq.
     // todo: Should this be passed in?
     rocblas_int ldw = nq;
     std::vector<T> hW( ldw * nq );
 
+std::cout << "# " << __func__ << ":" << __LINE__ << " initData\n";
     // initialize data
     ormtr_unmtr_hb2st_initData<true, true, T>(
         handle, side, trans, m, n, kd,
         dAband, ldab, dV, ldv, dTau, dC, ldc, dD, dE,
         hAband, hV, hTau, hC, hD, hE);
 
+std::cout << "# " << __func__ << ":" << __LINE__ << " Q=I\n";
     // execute computations
     // Set Q = Identity, then generate Q = Q*I or I*Q. (Works for either side.)
+    // ungtr would be more efficient, but that isn't implemented.
     std::cout << "# Q = I\n";
     CHECK_ROCBLAS_ERROR(
         rocsolver_laset(
             handle, 'g' /*rocblas_fill_full*/, nq, nq, zero, one,
             dQ.data(), shift, ldq, stride, 1 ));
-    print_matrix( "Q_identity", nq, nq, dQ[0], ldq, 6 );
+    #if PRINT
+        print_matrix( "Q_identity", nq, nq, dQ[0], ldq, 6 );
+    #endif
 
+std::cout << "# " << __func__ << ":" << __LINE__ << " Q = unmtr\n";
     std::cout << "# unmtr( V, Q )\n";
     CHECK_ROCBLAS_ERROR(
         rocsolver_ormtr_unmtr_hb2st(
             handle, side, rocblas_operation_none, nq, nq, kd,
             dV.data(), ldv, dTau.data(), dQ.data(), ldq));
-    print_matrix( "Q", nq, nq, dQ[0], ldq, 6 );
+    #if PRINT
+        print_matrix( "Q", nq, nq, dQ[0], ldq, 6 );
+    #endif
 
-    // Check 0: || I - Q^H Q ||_1 / n
+std::cout << "# " << __func__ << ":" << __LINE__ << " R = I\n";
+    //--------------------
+    // Check 0: || I - Q^H Q ||_1 / nq
     // Set R = Identity.
     std::cout << "# R = I\n";
     CHECK_ROCBLAS_ERROR(
         rocsolver_laset(
             handle, 'g' /*rocblas_fill_full*/, nq, nq, zero, one,
             dR.data(), shift, ldr, stride, 1 ));
-    print_matrix( "R_identity", nq, nq, dR[0], ldr, 6 );
+    #if PRINT
+        print_matrix( "R_identity", nq, nq, dR[0], ldr, 6 );
+    #endif
 
+std::cout << "# " << __func__ << ":" << __LINE__ << " gemm R = I - QhQ\n";
     // Residual R = I - Q^H Q.
     std::cout << "# R = I - Q^H Q\n";
     CHECK_ROCBLAS_ERROR(
@@ -386,8 +406,11 @@ void ormtr_unmtr_hb2st_getError(
             &negone, dQ.data(), ldq, stride,
                      dQ.data(), ldq, stride,
             &one,    dR.data(), ldr, stride, 1 ));
-    print_matrix( "R_ortho", nq, nq, dR[0], ldr, 6 );
+    #if PRINT
+        print_matrix( "R_ortho", nq, nq, dR[0], ldr, 6 );
+    #endif
 
+std::cout << "# " << __func__ << ":" << __LINE__ << " norm R\n";
     // norm( R )
     std::cout << "norm( R )\n";
     CHECK_ROCBLAS_ERROR(
@@ -396,50 +419,75 @@ void ormtr_unmtr_hb2st_getError(
     CHECK_HIP_ERROR(
         hnorm.transfer_from( dnorm ) );
     std::cout << "hnorm( R ) = " << hnorm[0][0] << "\n";
-    errors[0] = hnorm[0][0] / n;
+    errors[0] = hnorm[0][0] / nq;
 
-    // Check 1: || Q B Q^H - A ||_1 / (n || A ||_1)
+    //--------------------
+    // Check 1: || Q B Q^H - A ||_1 / (nq || A ||_1)
     // Transfer Q to CPU. (We don't have needed band or tridiag kernels on GPU.)
     // Multiply C = Q B, then add C -= A.
     // Use only the diag and lower band of A; ignore that some part of the upper
     // band is also stored for hb2st.
     CHECK_HIP_ERROR(
         hQ.transfer_from( dQ ) );
-    print_matrix( "hQ", nq, nq, hQ[0], ldq, 6 );
+    #if PRINT
+        //print_matrix( "hQ", nq, nq, hQ[0], ldq, 6 );
+    #endif
 
+std::cout << "# " << __func__ << ":" << __LINE__ << " stmm R = QB\n";
     // R = Q B
     std::cout << "# R = Q*B, B is tridiagonal matrix\n";
     cpu_stmm( nq, nq, hQ.data(), ldq, hD.data(), hE.data(), hR.data(), ldr );
-    print_matrix( "R_QB", nq, nq, hR.data(), ldr, 6 );
+    #if PRINT
+        print_matrix( "R_QB", nq, nq, hR.data(), ldr, 6 );
+    #endif
 
+std::cout << "# " << __func__ << ":" << __LINE__ << " gemm W = (QB)Qh\n";
     // W = (Q B) Q^H
     std::cout << "# W = (Q B) Q^H\n";
     cpu_gemm( rocblas_operation_none, rocblas_operation_conjugate_transpose,
               nq, nq, nq,
               one, hR.data(), ldr, hQ.data(), ldq,
               zero, hW.data(), ldw );
-    print_matrix( "W_QBQh", nq, nq, hW.data(), ldw, 6 );
+    #if PRINT
+        print_matrix( "W_QBQh", nq, nq, hW.data(), ldw, 6 );
+    #endif
 
+std::cout << "# " << __func__ << ":" << __LINE__ << " hbadd W -= Aband\n";
     // W -= Aband
     std::cout << "# W -= Aband\n";
     cpu_hbadd( rocblas_fill_lower, nq, kd,
                negone, &hAband[0][idiag], ldab,
                one, hW.data(), ldw );
-    print_matrix( "W_QBQh_A", nq, nq, hW.data(), ldw, 6 );
+    #if PRINT
+        print_matrix( "W_QBQh_A", nq, nq, hW.data(), ldw, 6 );
+    #endif
 
+std::cout << "# " << __func__ << ":" << __LINE__ << " norm W\n";
     // Error = norm( W ) / (nq * norm( A ))
-    errors[1] = cpu_lange( '1', nq, nq, hW.data(), ldw, hrwork.data() ) / nq;
+    errors[1] = cpu_lange( '1', nq, nq, hW.data(), ldw, hrwork.data() )
+              / nq;
     S Anorm = cpu_lanhb( '1', 'L', nq, kd, &hAband[0][idiag], ldab, hrwork.data() );
-    std::cout << "# norm( W ) = " << errors[1] << "\n";
+    std::cout << "# norm( W )/nq = " << errors[1] << "\n";
     std::cout << "# norm( A ) = " << Anorm << "\n";
     if (Anorm != 0)
         errors[1] /= Anorm;
 
+std::cout << "# " << __func__ << ":" << __LINE__ << " R = C\n";
+    //--------------------
     // Check 2:
     // || op(Q#) C - op(Q) C ||_1 / (m || C ||_1) for left
     // || C op(Q#) - C op(Q) ||_1 / (m || C ||_1) for right
     // todo: normalize with m or n? LAWN 41 sec 7.1.3 has m in all 4 cases.
-    //
+    CHECK_HIP_ERROR(
+        hipMemcpy2DAsync(
+            dR[0], ldr*sizeof(T),
+            dC[0], ldc*sizeof(T),
+            m*sizeof(T), n, hipMemcpyDefault, stream ) );
+    #if PRINT
+        print_matrix( "R_C", m, n, dR[0], ldr, 6 );
+    #endif
+
+std::cout << "# " << __func__ << ":" << __LINE__ << " R = unmtr( C )\n";
     // R = op(Q#) C  or  C op(Q#)  using implicit Q# via unmtr.
     std::cout << "# R = op(Q) C (left) or C op(Q) (right)\n";
     CHECK_ROCBLAS_ERROR(
@@ -450,7 +498,9 @@ void ormtr_unmtr_hb2st_getError(
     if (side == rocblas_side_left)
     {
         // R -= op(Q) C
-        print_matrix( "R_QC", m, n, dR[0], ldr, 6 );
+        #if PRINT
+            print_matrix( "R_QC", m, n, dR[0], ldr, 6 );
+        #endif
         std::cout << "# R -= op(Q) C (left)\n";
         assert( nq == m );
         CHECK_ROCBLAS_ERROR(
@@ -459,12 +509,16 @@ void ormtr_unmtr_hb2st_getError(
                 &negone, dQ.data(), ldq, stride,
                          dC.data(), ldc, stride,
                 &one,    dR.data(), ldr, stride, 1 ));
-        print_matrix( "R_QC_QC", m, n, dR[0], ldr, 6 );
+        #if PRINT
+            print_matrix( "R_QC_QC", m, n, dR[0], ldr, 6 );
+        #endif
     }
     else // right
     {
         // R -= C op(Q)
-        print_matrix( "R_CQ", m, n, dR[0], ldr, 6 );
+        #if PRINT
+            print_matrix( "R_CQ", m, n, dR[0], ldr, 6 );
+        #endif
         std::cout << "# R -= C op(Q) (right)\n";
         assert( nq == n );
         CHECK_ROCBLAS_ERROR(
@@ -473,7 +527,9 @@ void ormtr_unmtr_hb2st_getError(
                 &negone, dC.data(), ldc, stride,
                          dQ.data(), ldq, stride,
                 &one,    dR.data(), ldr, stride, 1 ));
-        print_matrix( "R_CQ_CQ", m, n, dR.data(), ldr, 6 );
+        #if PRINT
+            print_matrix( "R_CQ_CQ", m, n, dR.data(), ldr, 6 );
+        #endif
     }
 
     // norm( R )
@@ -494,10 +550,16 @@ void ormtr_unmtr_hb2st_getError(
     std::cout << "# norm( C ) = " << hnorm[0][0] << "\n";
     if (hnorm[0][0] != 0)
         errors[2] /= hnorm[0][0];
+
     timer.end( stream );
-    std::cout << "# " << __func__ << " done, errors "
+    std::cout << "# " << __func__
+            << ": m " << m << ", n " << n << ", kd " << kd
+            << ", side " << rocblas2char_side( side )
+            << ", trans " << rocblas2char_operation( trans )
             << std::scientific << std::setprecision( 3 )
-            << errors[0] << ", " << errors[1] << ", " << errors[2]
+            << ", ortho "   << errors[0]
+            << ", A-QBQ^h " << errors[1]
+            << ", QC-QC "   << errors[2]
             << ", time " << timer.get_combined() << "\n\n";
 }
 
@@ -537,10 +599,6 @@ void ormtr_unmtr_hb2st_getPerfData(
 {
 std::cout << "\n" << __func__ << "\n";
     using S = decltype( std::real( T{} ) );
-
-    // todo: hW needed?
-    size_t size_W = (side == rocblas_side_left ? m : n) * 32;
-    std::vector<T> hW(size_W);
 
     // todo: No CPU implementation readily available.
     // unmtr_hb2st is in PLASMA but not LAPACK.
@@ -618,19 +676,9 @@ std::cout << "\n" << __func__ << "\n";
     rocblas_local_handle handle;
     char sideC = argus.get<char>("side");
     char transC = argus.get<char>("trans");
-    rocblas_int m, n, nq;
-    if(sideC == 'L')
-    {
-        m = argus.get<rocblas_int>("m");
-        n = argus.get<rocblas_int>("n", m);
-        nq = m;  // A is m-by-m on left.
-    }
-    else
-    {
-        n = argus.get<rocblas_int>("n");
-        m = argus.get<rocblas_int>("m", n);
-        nq = n;  // A is n-by-n on right.
-    }
+    rocblas_int m = argus.get<rocblas_int>("m");
+    rocblas_int n = argus.get<rocblas_int>("n", m);
+    rocblas_int nq = (sideC == 'L' ? m : n);
     rocblas_int kd = argus.get<rocblas_int>("kd", 1);
     rocblas_int ldv = argus.get<rocblas_int>("ldv", 3*kd);
     rocblas_int ldc = argus.get<rocblas_int>("ldc", m);
@@ -666,10 +714,10 @@ std::cout << __func__ << ":" << __LINE__ << "\n";
     rocblas_int nv = nv_blocks*kd;
 
     // determine sizes
-    size_t size_Aband = size_t(ldab) * n;
+    size_t size_Aband = size_t(ldab) * nq;
     size_t size_V = size_t(ldv) * nv;
-    size_t size_D = n;
-    size_t size_E = n - 1;
+    size_t size_D = nq;
+    size_t size_E = nq - 1;
     size_t size_tau = nv;
     size_t size_C = size_t(ldc) * n;
     size_t size_Q = size_t(ldq) * nq;
@@ -698,13 +746,13 @@ std::cout << __func__ << ":" << __LINE__ << "\n";
     // memory size query is necessary
     if(argus.mem_query)
     {
-std::cout << __func__ << ":" << __LINE__ << " rocsolver_ormtr_unmtr_hb2st query\n";
+std::cout << "# " << __func__ << ":" << __LINE__ << " rocsolver_ormtr_unmtr_hb2st query\n";
         CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query(handle));
         CHECK_ALLOC_QUERY(
             rocsolver_ormtr_unmtr_hb2st(
                 handle, side, trans, m, n, kd,
                 (T*)nullptr, ldv, (T*)nullptr, (T*)nullptr, ldc));
-std::cout << __func__ << ":" << __LINE__ << "\n";
+std::cout << "# " << __func__ << ":" << __LINE__ << "\n";
 
         size_t size;
         CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query(handle, &size));
@@ -713,7 +761,7 @@ std::cout << __func__ << ":" << __LINE__ << "\n";
         return;
     }
 
-std::cout << __func__ << ":" << __LINE__ << " memory\n";
+std::cout << "# " << __func__ << ":" << __LINE__ << " memory\n";
     // memory allocations
     host_strided_batch_vector<T> hAband( size_Aband, 1, size_Aband, 1 );
     host_strided_batch_vector<T> hV( size_V, 1, size_V, 1 );
@@ -754,11 +802,11 @@ std::cout << __func__ << ":" << __LINE__ << " memory\n";
     if (size_norm)
         CHECK_HIP_ERROR( dnorm.memcheck() );
 
-std::cout << __func__ << ":" << __LINE__ << "\n";
+std::cout << "# " << __func__ << ":" << __LINE__ << "\n";
     // check quick return
     if(m == 0 || n == 0 || kd == 0)
     {
-std::cout << __func__ << ":" << __LINE__ << " rocsolver_ormtr_unmtr_hb2st quick\n";
+std::cout << "# " << __func__ << ":" << __LINE__ << " rocsolver_ormtr_unmtr_hb2st quick\n";
         EXPECT_ROCBLAS_STATUS(
             rocsolver_ormtr_unmtr_hb2st(
                 handle, side, trans, m, n, kd,
@@ -774,7 +822,7 @@ std::cout << __func__ << ":" << __LINE__ << " rocsolver_ormtr_unmtr_hb2st quick\
     // check computations
     if(argus.unit_check || argus.norm_check)
     {
-std::cout << __func__ << ":" << __LINE__ << "\n";
+std::cout << "# " << __func__ << ":" << __LINE__ << "\n";
         ormtr_unmtr_hb2st_getError<T>(
             handle, side, trans, m, n, kd,
             dAband, ldab, dV, ldv, dTau, dC, ldc, dD, dE, dQ, ldq, dR, ldr, dnorm,
@@ -784,7 +832,7 @@ std::cout << __func__ << ":" << __LINE__ << "\n";
     // collect performance data
     if(argus.timing && hot_calls > 0)
     {
-std::cout << __func__ << ":" << __LINE__ << "\n";
+std::cout << "# " << __func__ << ":" << __LINE__ << "\n";
         ormtr_unmtr_hb2st_getPerfData<T>(
             handle, side, trans, m, n, kd,
             dAband, ldab, dV, ldv, dTau, dC, ldc, dD, dE,
@@ -793,7 +841,7 @@ std::cout << __func__ << ":" << __LINE__ << "\n";
             argus.profile, argus.profile_kernels, argus.perf);
     }
 
-std::cout << __func__ << ":" << __LINE__ << "\n";
+std::cout << "# " << __func__ << ":" << __LINE__ << "\n";
     // validate results for rocsolver-test
     // using machine_precision as tolerance
     // Normalization by m or n already baked into error.
@@ -837,7 +885,7 @@ std::cout << __func__ << ":" << __LINE__ << "\n";
 
     // ensure all arguments were consumed
     argus.validate_consumed();
-std::cout << __func__ << " done\n\n";
+std::cout << "# " << __func__ << " done\n\n";
 }
 
 #define EXTERN_TESTING_ORMTR_UNMTR_HB2ST(...) \
