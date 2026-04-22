@@ -6,7 +6,7 @@
 #include "ck_tile/core/arch/arch.hpp"
 #include <unordered_set>
 
-namespace testing {
+namespace ck_tile::core::arch::testing {
 
 static CK_TILE_HOST auto getCMakeGpuTargetIds()
 {
@@ -60,4 +60,4 @@ static CK_TILE_HOST bool dispatchCompilerTarget(ck_tile::core::arch::amdgcn_targ
     // clang-format on
     __builtin_unreachable();
 }
-} // namespace testing
+} // namespace ck_tile::core::arch::testing

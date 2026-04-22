@@ -10,7 +10,7 @@
 #include <hip/hip_runtime.h>
 #include "ck_tile/host/hip_check_error.hpp"
 
-namespace testing {
+namespace ck_tile::core::arch::testing {
 
 __global__ void getWaveSizeForSelectedOp(uint32_t* waveSize)
 {
@@ -34,4 +34,4 @@ static CK_TILE_HOST uint32_t getDeviceWaveSize()
     return wave_size;
 }
 
-} // namespace testing
+} // namespace ck_tile::core::arch::testing
