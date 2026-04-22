@@ -221,10 +221,6 @@ pipeline {
             defaultValue: false,
             description: "")
         booleanParam(
-            name: "BUILD_DEV_IMAGE",
-            defaultValue: false,
-            description: "Build and publish rocm/miopen-dev nightly image")
-        booleanParam(
             name: "BUILD_SMOKE_FP32",
             defaultValue: true,
             description: "")
@@ -666,7 +662,7 @@ pipeline {
         // Publishes rocm/miopen-dev:multiarch_dev_<date> and :latest after CI passes.
         stage('Publish Dev Image') {
             when {
-                expression { params.BUILD_THEROCK_DOCKER || params.BUILD_DEV_IMAGE }
+                expression { params.BUILD_THEROCK_DOCKER }
             }
             steps {
                 script {
