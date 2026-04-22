@@ -38,7 +38,6 @@ namespace detail
 {
 // we can retag an iterator if FromTag converts to ToTag or vice versa
 template <typename FromTag, typename ToTag>
-// TODO(libhipcxx): replace inline with _CCCL_INLINE_VAR once libhipcxx gets ready
 inline constexpr bool is_retaggable =
   _THRUST_STD::is_convertible_v<FromTag, ToTag> || _THRUST_STD::is_convertible_v<ToTag, FromTag>;
 } // namespace detail
