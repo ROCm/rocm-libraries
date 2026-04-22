@@ -81,7 +81,7 @@ using namespace stinkytofu;
 
 int main() {
     // Create a PassContext (manages IR and builders)
-    auto ctx = PassContext::create(GfxArchID::gfx942);
+    auto ctx = PassContext::create(GfxArchID::gfx1250);
 
     // Get the IRList and builder
     IRList& irlist = ctx->getIRList();
@@ -249,7 +249,7 @@ The emitter works seamlessly with the pass manager:
 
 '''cpp
 // Create context and run optimization passes
-auto ctx = PassContext::create(GfxArchID::gfx942);
+auto ctx = PassContext::create(GfxArchID::gfx1250);
 IRList& irlist = ctx->getIRList();
 
 // ... populate irlist and run passes ...
@@ -267,6 +267,4 @@ std::cout << assembly << std::endl;
 
 ## See Also
 
-- [StinkyAsmPrinter](../developer-guide/asm-printer.md) - For printing MLIR-style IR format
-- [Pass Manager Guide](pass-manager.md) - For running optimization passes
 - [Error Codes](error-codes.md) - Common error codes and their meanings

@@ -13,7 +13,7 @@ This guide shows you how to add new optimization patterns to the StinkyTofu comp
 
 ### Step 1: Write the Pattern
 
-Edit 'lib/Dialect/Transforms/PeepholePatterns.pattern':
+Edit 'src/transforms/asm/PeepholePatterns.pattern':
 
 '''
 //===----------------------------------------------------------------------===//
@@ -441,7 +441,7 @@ pattern SubFMAFusion_F32 { ... }
 
 | File | Purpose |
 |------|---------|
-| 'lib/Dialect/Transforms/PeepholePatterns.pattern' | **Your patterns go here** |
+| 'src/transforms/asm/PeepholePatterns.pattern' | **Your patterns go here** |
 | 'build/PeepholePatterns.inc' | Generated C++ code (auto) |
 | 'src/transforms/asm/PeepholeOptimizationPass.cpp' | Generic pass (never edit) |
 | 'tools/tablegen/GenPatterns.cpp' | Code generator (rarely edit) |
@@ -476,9 +476,9 @@ pattern Name {
 
 ## Next Steps
 
-- See [Peephole Pattern System Design](../design/peephole-pattern-system.md) for architecture details
+- See [Architecture Overview](architecture.md) for system architecture
 - See [Pattern Grammar Reference](pattern-grammar.md) for complete syntax reference
-- See 'lib/Dialect/Transforms/PeepholePatterns.pattern' for real examples
+- See 'src/transforms/asm/PeepholePatterns.pattern' for real examples
 
 ---
 

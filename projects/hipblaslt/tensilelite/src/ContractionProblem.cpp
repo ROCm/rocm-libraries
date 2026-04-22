@@ -32,6 +32,7 @@
 
 #include <cctype>
 #include <cstddef>
+#include <cstdio>
 #include <set>
 
 namespace TensileLite
@@ -775,6 +776,70 @@ namespace TensileLite
             problemTiles *= numWG.z;
 
         return problemTiles;
+    }
+
+    size_t ContractionProblemGemm::getAccumulation(Hardware const& hardware, SizeMapping const& sizeMapping, size_t gsu) const
+    {
+        size_t accumulation = 0;
+
+        // If adaptiveGemmGSUA is 0, use the original accumulation
+        if(sizeMapping.adaptiveGemmGSUA == 0)
+        {
+            accumulation = sizeMapping.globalAccumulation;
+        }
+        // If adaptiveGemmGSUA is not 0, use the adaptive accumulation
+        else
+        {
+            AMDGPU const* pAMDGPU = dynamic_cast<AMDGPU const*>(&hardware);
+            assert(pAMDGPU != nullptr && pAMDGPU->computeUnitCount != 0);
+
+            size_t x = 1, y = 1, z = 1, batch = 1;
+
+            // Compute M (row size)
+            for(size_t i = 0; i < m_freeSizesA.size(); ++i)
+                x *= m_freeSizesA[i];
+            // Compute N (column size)
+            for(size_t i = 0; i < m_freeSizesB.size(); ++i)
+                y *= m_freeSizesB[i];
+            // Compute K (summation size)
+            for(size_t i = 0; i < m_boundSizes.size(); ++i)
+                z *= m_boundSizes[i];
+            // Compute Batch size
+            for(size_t i = 0; i < m_batchSizes.size(); ++i)
+                batch *= m_batchSizes[i];
+
+            size_t m_tiles = CeilDivide(x, sizeMapping.macroTile.x);
+            size_t n_tiles = CeilDivide(y, sizeMapping.macroTile.y);
+            size_t numTiles = m_tiles * n_tiles * batch;
+            size_t numCUs   = pAMDGPU->computeUnitCount;
+            size_t itersPerTile = std::max(size_t(1), CeilDivide(z, sizeMapping.depthU));
+
+            // TODO: benchmark more on the thresholds
+            constexpr int MinItersForMB = 64; // DepthU-related: ceil(K/DepthU) >= this uses MB
+            constexpr int MaxTilesForMB = 64; // Tile-count-related: tiles <= this uses MB
+            constexpr int MinGSUForMB   = 64; // Sync-overhead-related: GSU >= this uses MB
+
+            // For problems with small MN (few tiles) and large K (many iterations), use MB
+            if(numTiles < numCUs && itersPerTile >= MinItersForMB && numTiles <= MaxTilesForMB)
+            {
+                accumulation = 2; // MB - better for large K with low tile count
+            }
+            else if(gsu >= MinGSUForMB)
+            {
+                accumulation = 2; // MB - high GSU
+            }
+            else
+            {
+                accumulation = sizeMapping.globalAccumulation; // Default
+            }
+
+            static const char* envStr = std::getenv("TENSILE_ADAPTIVE_GEMM_LOG");
+            if(envStr != NULL)
+                std::cout << "[AdaptiveGemmGSUA] accumulation is calculated: " << accumulation
+                          << " from original " << sizeMapping.globalAccumulation << std::endl;
+        }
+
+        return accumulation;
     }
 
     size_t ContractionProblemGemm::getItersPerTile(SizeMapping const& sizeMapping) const

@@ -42,7 +42,7 @@ Each PM writes to its own file, named by scope:
 | Multi-region adapter | `<group1>+<group2>` (e.g. `loopWithPrefetch+noLoadLoopBody`) |
 | Whole-kernel adapter | `wholeKernel` |
 
-Example files for a gfx942 kernel:
+Example files for a gfx1250 kernel:
 
 ```
 kernel-OuterPM-before_passes.txt

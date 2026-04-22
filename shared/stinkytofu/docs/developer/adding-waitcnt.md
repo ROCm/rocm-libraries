@@ -347,4 +347,4 @@ waitReq.sscnt = WAIT_COMPLETE;
 
 ## See Also
 
-- [StinkyConfigurableWaitCntPass Design Document](../design/stinky-configurable-waitcnt-pass.md)
+- [Architecture Overview](architecture.md) - System architecture and pass pipeline
