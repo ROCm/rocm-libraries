@@ -3,6 +3,7 @@
 
 #include "RMSnormFwdPlan.hpp"
 #include "../PlanUtils.hpp"
+#include "hip/HipKernelCompileOptions.hpp"
 
 #include "HipKernelUtils.hpp"
 #include "hip/IKernelCompiler.hpp"
@@ -109,35 +110,16 @@ void RMSnormFwdPlan::compile(const IKernelCompiler& kernelCompiler,
     const unsigned int zlocalsize = 1;
     const unsigned int zgridsize = 1;
 
-    // Prepare compilation options
-    std::vector<std::string> options;
-    auto rocmPath
-        = hipdnn_data_sdk::utilities::trim(hipdnn_data_sdk::utilities::getEnv("ROCM_PATH"));
-    if(!rocmPath.empty())
-    {
-        auto rocmIncludeArg = "-I" + rocmPath + "/include";
-        options.emplace_back(rocmIncludeArg);
-        HIPDNN_PLUGIN_LOG_INFO(
-            "RMSnormFwdPlan: HIPRTC compile ROCm include path: " << rocmIncludeArg);
-    }
-
     // Determine input/output data type configuration
     auto ioDataType = _params.x()->data_type();
-    const bool useFp16 = ioDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::HALF;
-    const bool useBfp16 = ioDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16;
-    const bool useFp32 = !useFp16 && !useBfp16;
     std::string ioTypeString = getKernelParamTypeString(ioDataType);
 
-    options.emplace_back(std::string("-DHIP_PLUGIN_USE_FP32=") + (useFp32 ? "1" : "0"));
-    options.emplace_back(std::string("-DHIP_PLUGIN_USE_FP16=") + (useFp16 ? "1" : "0"));
-    options.emplace_back(std::string("-DHIP_PLUGIN_USE_BFP16=") + (useBfp16 ? "1" : "0"));
-    options.emplace_back("-DHIP_PLUGIN_USE_RNE_BFLOAT16=1");
-    options.emplace_back(std::string("-DHIP_PLUGIN_RMSNORM_C_STRIDE=") + std::to_string(cStride));
-    options.emplace_back(std::string("-DHIP_PLUGIN_RMSNORM_C_SIZE=") + std::to_string(cSize));
-    options.emplace_back(std::string("-DHIP_PLUGIN_RMSNORM_IO_TYPE=") + ioTypeString);
-    options.emplace_back(std::string("-DHIP_PLUGIN_RMSNORM_LOCAL_SIZE=")
-                         + std::to_string(xlocalsize));
-    options.emplace_back(std::string("--offload-arch=") + deviceProperties.gcnArchName);
+    // Prepare compilation options
+    HipKernelCompileOptions options(_params.x(), deviceProperties);
+    options.add("HIP_PLUGIN_RMSNORM_C_STRIDE", cStride);
+    options.add("HIP_PLUGIN_RMSNORM_C_SIZE", cSize);
+    options.add("HIP_PLUGIN_RMSNORM_IO_TYPE", ioTypeString);
+    options.add("HIP_PLUGIN_RMSNORM_LOCAL_SIZE", xlocalsize);
 
     // Compile kernel and configure launch dimensions
     _compiledProgram = kernelCompiler.compile("RMSNormFwd.cpp", options);

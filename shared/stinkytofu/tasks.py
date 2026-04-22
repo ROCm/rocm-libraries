@@ -253,9 +253,11 @@ def build(
         else:
             cmake_opts.append("-G Ninja")
     else:
+        _cxx = shutil.which("amdclang++") or f"{rocm_s}/bin/amdclang++"
+        _cc = shutil.which("amdclang") or f"{rocm_s}/bin/amdclang"
         compiler_opts += [
-            f"-DCMAKE_CXX_COMPILER={rocm_s}/bin/amdclang++",
-            f"-DCMAKE_C_COMPILER={rocm_s}/bin/amdclang",
+            f"-DCMAKE_CXX_COMPILER={_cxx}",
+            f"-DCMAKE_C_COMPILER={_cc}",
         ]
 
     all_opts = " ".join(cmake_opts + compiler_opts)
