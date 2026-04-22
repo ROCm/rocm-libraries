@@ -253,37 +253,14 @@ void SdpaFwdPlanBuilder::initializeExecutionSettings(
 }
 
 void SdpaFwdPlanBuilder::buildPlan(
-    const HipKernelHandle& /* handle */,
+    const HipKernelHandle& handle,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& /* engineConfig */,
     HipKernelContext& executionContext) const
 {
     // Load kernel module
-    std::string coPath
-        = asm_kernels::getAsmKernelPath("gfx942/fmha_v3_fwd/MI300/fwd_hd128_bf16_rtne.co");
-
-    hipModule_t module;
-    hipError_t err = hipModuleLoad(&module, coPath.c_str());
-    if(err != hipSuccess)
-    {
-        HIPDNN_PLUGIN_LOG_ERROR(
-            "Failed to load kernel module: " << coPath << " error: " << hipGetErrorString(err));
-        return;
-    }
-
-    hipFunction_t function;
-    err = hipModuleGetFunction(&function, module, "_ZN5aiter24fmha_fwd_hd128_bf16_rtneE");
-    if(err != hipSuccess)
-    {
-        HIPDNN_PLUGIN_LOG_ERROR("Failed to get kernel function, error: " << hipGetErrorString(err));
-        err = hipModuleUnload(module);
-        if(err != hipSuccess)
-        {
-            HIPDNN_PLUGIN_LOG_ERROR(
-                "Failed to unload kernel module on error, error: " << hipGetErrorString(err));
-        }
-        return;
-    }
+    // std::string coPath
+    //     = asm_kernels::getAsmKernelPath("gfx942/fmha_v3_fwd/MI300/fwd_hd128_bf16_rtne.co");
 
     // Extract SDPA attributes and tensor metadata
     auto& sdpaNode = opGraph.getNodeWrapper(0);
@@ -378,6 +355,56 @@ void SdpaFwdPlanBuilder::buildPlan(
     params.oStrideHead = oStrideHead;
     params.oStrideBatch = oStrideBatch;
     params.attnScale = attnScale;
+
+    // Find matching kernel to graph
+    fmha_v3_fwdConfig config;
+    try
+    {
+        auto kernelKey
+            = getKernelNameKey(hip_kernel_provider_common::getDeviceString(handle.getStream()),
+                               getDataTypeIdentifier(qTensor->data_type(),
+                                                     kTensor->data_type(),
+                                                     vTensor->data_type(),
+                                                     oTensor->data_type()),
+                               static_cast<int>(headDimQk),
+                               static_cast<int>(headDimV),
+                               getMaskType(sdpaAttrs),
+                               getRoundingMode(sdpaAttrs),
+                               getBatchMode(sdpaAttrs),
+                               &cfg_fmha_fwd);
+
+        config = cfg_fmha_fwd.at(kernelKey);
+    }
+    catch(const std::exception& e)
+    {
+        HIPDNN_PLUGIN_LOG_ERROR("Failed to find matching kernel with error:" << e.what());
+        return;
+    }
+
+    std::string coPath = asm_kernels::getAsmKernelPath(config.co_name);
+
+    hipModule_t module;
+    hipError_t err = hipModuleLoad(&module, coPath.c_str());
+    if(err != hipSuccess)
+    {
+        HIPDNN_PLUGIN_LOG_ERROR(
+            "Failed to load kernel module: " << coPath << " error: " << hipGetErrorString(err));
+        return;
+    }
+
+    hipFunction_t function;
+    err = hipModuleGetFunction(&function, module, config.knl_name.c_str());
+    if(err != hipSuccess)
+    {
+        HIPDNN_PLUGIN_LOG_ERROR("Failed to get kernel function, error: " << hipGetErrorString(err));
+        err = hipModuleUnload(module);
+        if(err != hipSuccess)
+        {
+            HIPDNN_PLUGIN_LOG_ERROR(
+                "Failed to unload kernel module on error, error: " << hipGetErrorString(err));
+        }
+        return;
+    }
 
     executionContext.setPlan(std::make_unique<SdpaFwdPlan>(module, function, params));
 }
