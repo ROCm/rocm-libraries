@@ -447,7 +447,7 @@ inline void sort_keys_large_segments()
         ASSERT_GT(temporary_storage_bytes, 0U);
 
         void* d_temporary_storage;
-        HIP_CHECK(
+        HIP_CHECK_MEMORY(
             test_common_utils::hipMallocHelper(&d_temporary_storage, temporary_storage_bytes));
 
         if constexpr(descending)
@@ -494,6 +494,33 @@ inline void sort_keys_large_segments()
     }
 }
 
+template<typename offset_type, typename segment_index_type>
+struct segments_index_to_offset_op
+{
+    segment_index_type empty_segments_count;
+    segment_index_type segments_count;
+    offset_type        segment_length;
+    offset_type        size;
+
+    HIPCUB_HOST_DEVICE
+    HIPCUB_FORCEINLINE offset_type
+        operator()(segment_index_type i)
+    {
+        if(i < empty_segments_count)
+        {
+            return 0;
+        }
+        else if(i < segments_count)
+        {
+            return segment_length * static_cast<offset_type>(i - empty_segments_count);
+        }
+        else
+        {
+            return size;
+        }
+    }
+};
+
 template<typename TestFixture>
 inline void sort_keys_large_num_segments()
 {
@@ -507,14 +534,20 @@ inline void sort_keys_large_num_segments()
     constexpr unsigned int end_bit    = TestFixture::params::end_bit;
     constexpr std::size_t  uint_max   = ::std::numeric_limits<unsigned int>::max();
 
-    using offset_type = size_t;
+    using offset_type        = size_t;
+    using segment_index_type = size_t;
+    using segments_index_to_offset_op_t
+        = segments_index_to_offset_op<offset_type, segment_index_type>;
+    using iota_iterator_t = test_utils::counting_iterator<offset_type>;
 
     hipStream_t stream = 0;
 
-    constexpr size_t       size           = uint_max + size_t{1 << 20};
-    constexpr unsigned int segment_length = 1 << 9;
-    constexpr size_t       segments_count = test_utils::ceiling_div(size, segment_length);
-    constexpr size_t       offsets_count  = segments_count + 1;
+    constexpr offset_type        size           = uint_max + offset_type{1 << 22};
+    constexpr unsigned int       segment_length = 1 << 20;
+    constexpr segment_index_type full_segments_count
+        = test_utils::ceiling_div(size, segment_length);
+    constexpr segment_index_type empty_segments_count = uint_max - full_segments_count + 1;
+    constexpr segment_index_type segments_count       = empty_segments_count + full_segments_count;
 
     SCOPED_TRACE(testing::Message() << "with size= " << size);
 
@@ -542,14 +575,6 @@ inline void sort_keys_large_num_segments()
                 seed_value + seed_value_addition);
         }
 
-        std::vector<offset_type> offsets(offsets_count);
-        offset_type              i = 0;
-        for(; i < segments_count; ++i)
-        {
-            offsets[i] = i * segment_length;
-        }
-        offsets[i] = size;
-
         key_type* d_keys_input;
         key_type* d_keys_output;
         HIP_CHECK_MEMORY(
@@ -561,17 +586,17 @@ inline void sort_keys_large_num_segments()
                             size * sizeof(key_type),
                             hipMemcpyHostToDevice));
 
-        offset_type* d_offsets;
-        HIP_CHECK_MEMORY(
-            test_common_utils::hipMallocHelper(&d_offsets, offsets_count * sizeof(offset_type)));
-        HIP_CHECK(hipMemcpy(d_offsets,
-                            offsets.data(),
-                            offsets_count * sizeof(offset_type),
-                            hipMemcpyHostToDevice));
+        auto offsets
+            = test_utils::transform_iterator<iota_iterator_t, segments_index_to_offset_op_t>(
+                iota_iterator_t{0},
+                segments_index_to_offset_op_t{empty_segments_count,
+                                              segments_count,
+                                              segment_length,
+                                              size});
 
         // Calculate expected results on host
         std::vector<key_type> expected(keys_input);
-        for(size_t i = 0; i < segments_count; i++)
+        for(size_t i = empty_segments_count; i < segments_count; i++)
         {
             std::stable_sort(
                 expected.begin() + offsets[i],
@@ -586,15 +611,15 @@ inline void sort_keys_large_num_segments()
                                                              d_keys_output,
                                                              size,
                                                              segments_count,
-                                                             d_offsets,
-                                                             d_offsets + 1,
+                                                             offsets,
+                                                             offsets + 1,
                                                              start_bit,
                                                              end_bit));
 
         ASSERT_GT(temporary_storage_bytes, 0U);
 
         void* d_temporary_storage;
-        HIP_CHECK(
+        HIP_CHECK_MEMORY(
             test_common_utils::hipMallocHelper(&d_temporary_storage, temporary_storage_bytes));
 
         if constexpr(descending)
@@ -605,8 +630,8 @@ inline void sort_keys_large_num_segments()
                                                                            d_keys_output,
                                                                            size,
                                                                            segments_count,
-                                                                           d_offsets,
-                                                                           d_offsets + 1,
+                                                                           offsets,
+                                                                           offsets + 1,
                                                                            start_bit,
                                                                            end_bit,
                                                                            stream));
@@ -619,8 +644,8 @@ inline void sort_keys_large_num_segments()
                                                                  d_keys_output,
                                                                  size,
                                                                  segments_count,
-                                                                 d_offsets,
-                                                                 d_offsets + 1,
+                                                                 offsets,
+                                                                 offsets + 1,
                                                                  start_bit,
                                                                  end_bit,
                                                                  stream));
@@ -635,9 +660,14 @@ inline void sort_keys_large_num_segments()
         HIP_CHECK(hipFree(d_temporary_storage));
         HIP_CHECK(hipFree(d_keys_input));
         HIP_CHECK(hipFree(d_keys_output));
-        HIP_CHECK(hipFree(d_offsets));
 
-        ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(keys_output, expected));
+        for(segment_index_type s = empty_segments_count; s < segments_count; ++s)
+        {
+            for(size_t i = offsets[s]; i < offsets[s + 1]; ++i)
+            {
+                test_utils::assert_eq(keys_output[i], expected[i]);
+            }
+        }
     }
 }
 
