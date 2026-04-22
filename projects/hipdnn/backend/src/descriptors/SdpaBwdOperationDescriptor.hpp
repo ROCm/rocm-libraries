@@ -6,7 +6,7 @@
 #include "BackendDescriptor.hpp"
 #include "IGraphOperation.hpp"
 #include "TensorDescriptor.hpp"
-#include <hipdnn_data_sdk/data_objects/sdpa_backward_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/sdpa_backward_attributes_generated.h>
 
 namespace hipdnn_backend
 {
@@ -29,7 +29,7 @@ public:
                       const void* arrayOfElements) override;
 
     // Direct access to the underlying T struct for OperationGraphBuilder
-    const hipdnn_data_sdk::data_objects::SdpaBackwardAttributesT& getData() const
+    const hipdnn_flatbuffers_sdk::data_objects::SdpaBackwardAttributesT& getData() const
     {
         return _data;
     }
@@ -113,20 +113,20 @@ public:
     }
 
     // Get compute data type for the operation (used when building graph nodes)
-    hipdnn_data_sdk::data_objects::DataType getComputeDataType() const
+    hipdnn_flatbuffers_sdk::data_objects::DataType getComputeDataType() const
     {
         return _computeDataType;
     }
 
     // IGraphOperation interface
     std::vector<std::shared_ptr<TensorDescriptor>> getTensorDescriptors() const override;
-    std::unique_ptr<hipdnn_data_sdk::data_objects::NodeT> buildNode() const override;
+    std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::NodeT> buildNode() const override;
 
     // Creates a finalized SdpaBwdOperationDescriptor directly from a FlatBuffer NodeT.
     // Casts nodeT.attributes to SdpaBackwardAttributesT internally, then directly assigns
     // the data struct, looks up tensor descriptors from the tensor map, and calls finalize().
     static std::shared_ptr<SdpaBwdOperationDescriptor>
-        fromNode(const hipdnn_data_sdk::data_objects::NodeT& nodeT,
+        fromNode(const hipdnn_flatbuffers_sdk::data_objects::NodeT& nodeT,
                  const std::unordered_map<int64_t, std::shared_ptr<TensorDescriptor>>& tensorMap);
 
     static hipdnnBackendDescriptorType_t getStaticType();
@@ -134,7 +134,7 @@ public:
     std::string toString() const override;
 
 private:
-    hipdnn_data_sdk::data_objects::SdpaBackwardAttributesT _data;
+    hipdnn_flatbuffers_sdk::data_objects::SdpaBackwardAttributesT _data;
 
     // Required input tensor descriptor references
     std::shared_ptr<TensorDescriptor> _qDesc;
@@ -162,8 +162,8 @@ private:
     std::shared_ptr<TensorDescriptor> _dbiasDesc;
 
     // Compute data type for this operation (stored at node level in graph)
-    hipdnn_data_sdk::data_objects::DataType _computeDataType
-        = hipdnn_data_sdk::data_objects::DataType::UNSET;
+    hipdnn_flatbuffers_sdk::data_objects::DataType _computeDataType
+        = hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET;
 
     // Optional human-readable name for this operation
     std::string _name;

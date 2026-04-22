@@ -431,8 +431,16 @@ ROCFFT_EXPORT rocfft_status rocfft_plan_description_add_infield(rocfft_plan_desc
 ROCFFT_EXPORT rocfft_status
     rocfft_plan_description_add_outfield(rocfft_plan_description description, rocfft_field field);
 
-/*! @brief Get work buffer size
- *  @details Get the work buffer size required for a plan.
+/*! @brief Get work buffer size on current HIP device
+ *  @details Get the work buffer size required for a plan on the current HIP device.
+ *
+ *  Work memory may be required on any device(s) with input or output
+ *  data for the transform, and also the current device when the plan
+ *  was created.  If the FFT plan uses multiple devices then this
+ *  function can be called repeatedly with each of those devices as
+ *  the current HIP device, to know the complete work memory
+ *  requirements for all devices.
+ *
  *  @param[in] plan plan handle
  *  @param[out] size_in_bytes size of needed work buffer in bytes
  *  */
@@ -475,12 +483,18 @@ ROCFFT_EXPORT rocfft_status rocfft_execution_info_create(rocfft_execution_info* 
  *  */
 ROCFFT_EXPORT rocfft_status rocfft_execution_info_destroy(rocfft_execution_info info);
 
-/*! @brief Set work buffer in execution info
+/*! @brief Set work buffer in execution info for the current HIP device
  *
  *  @details This is one of the execution info functions to specify
  *  optional additional information to control execution.  This API
  *  provides a work buffer for the transform. It must be called
  *  before ::rocfft_execute.
+ *
+ *  Work memory may be required on any device(s) with input or output
+ *  data for the transform, and also the current device when the plan
+ *  was created.  If the FFT plan uses multiple devices then this
+ *  function can be called repeatedly with each of those devices as
+ *  the current HIP device, to set work memory for all devices.
  *
  *  When a non-zero value is obtained from
  *  ::rocfft_plan_get_work_buffer_size, that means the library needs a

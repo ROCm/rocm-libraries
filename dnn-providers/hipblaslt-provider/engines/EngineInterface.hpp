@@ -5,7 +5,7 @@
 
 #include <stdint.h>
 
-#include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 
@@ -19,8 +19,9 @@ public:
 
     virtual int64_t id() const = 0;
 
-    virtual bool isApplicable(HipdnnEnginePluginHandle& handle,
-                              const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
+    virtual bool
+        isApplicable(HipdnnEnginePluginHandle& handle,
+                     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
         = 0;
     virtual void getDetails(HipdnnEnginePluginHandle& handle,
                             hipdnnPluginConstData_t& detailsOut) const
@@ -28,13 +29,13 @@ public:
 
     virtual size_t
         getWorkspaceSize(const HipdnnEnginePluginHandle& handle,
-                         const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
+                         const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
         = 0;
 
-    virtual void
-        initializeExecutionContext(const HipdnnEnginePluginHandle& handle,
-                                   const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
-                                   HipdnnEnginePluginExecutionContext& executionContext) const
+    virtual void initializeExecutionContext(
+        const HipdnnEnginePluginHandle& handle,
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
+        HipdnnEnginePluginExecutionContext& executionContext) const
         = 0;
 };
 

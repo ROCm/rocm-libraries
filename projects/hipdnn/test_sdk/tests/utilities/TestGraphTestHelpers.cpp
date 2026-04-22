@@ -74,18 +74,18 @@ TEST(TestBuildConvFpropGraph, GraphHasOneNode)
 
 TEST(TestBuildTensorMap, EmptyGraph)
 {
-    const hipdnn_data_sdk::data_objects::GraphT graphT;
+    const hipdnn_flatbuffers_sdk::data_objects::GraphT graphT;
     auto tensorMap = hipdnn_tests::buildTensorMap(graphT);
     EXPECT_TRUE(tensorMap.empty());
 }
 
 TEST(TestBuildTensorMap, MapsUidsToTensors)
 {
-    hipdnn_data_sdk::data_objects::GraphT graphT;
+    hipdnn_flatbuffers_sdk::data_objects::GraphT graphT;
 
-    auto t1 = std::make_unique<hipdnn_data_sdk::data_objects::TensorAttributesT>();
+    auto t1 = std::make_unique<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT>();
     t1->uid = 10;
-    auto t2 = std::make_unique<hipdnn_data_sdk::data_objects::TensorAttributesT>();
+    auto t2 = std::make_unique<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT>();
     t2->uid = 20;
 
     graphT.tensors.push_back(std::move(t1));

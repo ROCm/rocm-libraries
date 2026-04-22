@@ -3,103 +3,83 @@
 
 // Self-contained device header for GPU reference kernels.
 // No host includes allowed - this is compiled by HipRTC.
-// X_TYPE, W_TYPE, Y_TYPE, COMPUTE_TYPE must be defined at compile time via
-// -DX_TYPE=<type> -DW_TYPE=<type> -DY_TYPE=<type> -DCOMPUTE_TYPE=<type>
+// COMPUTE_TYPE must be defined at compile time via -DCOMPUTE_TYPE=<type>.
+// Convolution kernels also require -DX_TYPE=<type> -DW_TYPE=<type> -DY_TYPE=<type>.
 
 #pragma once
 
 #include "GpuRefConvArgs.h"
 
-// --- float overloads ---
-
-__device__ inline COMPUTE_TYPE toAccum(float x)
+namespace gpu_ref
 {
-    return static_cast<COMPUTE_TYPE>(x);
-}
 
-__device__ inline float fromAccum(COMPUTE_TYPE x, float* /*tag*/)
+// --- safeConvert ---
+
+template <typename TargetType, typename SourceType>
+__device__ inline TargetType safeConvert(SourceType value)
 {
-    return static_cast<float>(x);
-}
-
-// --- _Float16 (fp16) overloads ---
-
-__device__ inline COMPUTE_TYPE toAccum(_Float16 x)
-{
-    return static_cast<COMPUTE_TYPE>(static_cast<float>(x));
-}
-
-__device__ inline _Float16 fromAccum(COMPUTE_TYPE x, _Float16* /*tag*/)
-{
-    return static_cast<_Float16>(static_cast<float>(x));
-}
-
-// --- unsigned short (bfloat16) overloads ---
-// Uses manual bit conversion matching the Bfloat16Dev.hpp pattern.
-
-typedef union
-{
-    unsigned int u32;
-    float f32;
-    unsigned short u16[2];
-} CvtBf16Fp32;
-
-__device__ inline COMPUTE_TYPE toAccum(unsigned short x)
-{
-    CvtBf16Fp32 cvt;
-    cvt.u16[0] = 0;
-    cvt.u16[1] = x;
-    return static_cast<COMPUTE_TYPE>(cvt.f32);
-}
-
-__device__ inline unsigned short fromAccum(COMPUTE_TYPE x, unsigned short* /*tag*/)
-{
-    CvtBf16Fp32 cvt;
-    cvt.f32 = static_cast<float>(x);
-    if((~cvt.u32 & 0x7f800000) == 0) // Inf or NaN
+    if constexpr(__is_same(TargetType, __bf16) || __is_same(TargetType, _Float16))
     {
-        if((cvt.u32 & 0xffff) != 0)
-        {
-            cvt.u32 |= 0x10000; // Preserve signaling NaN
-        }
+        return static_cast<TargetType>(static_cast<float>(value));
     }
-    return cvt.u16[1];
+    else
+    {
+        return static_cast<TargetType>(value);
+    }
 }
 
-// --- signed char (int8) overloads ---
+// --- toAccum: convert input data to accumulation precision ---
 
-__device__ inline COMPUTE_TYPE toAccum(signed char x)
+template <typename T>
+__device__ inline COMPUTE_TYPE toAccum(T x)
 {
-    return static_cast<COMPUTE_TYPE>(x);
+    return safeConvert<COMPUTE_TYPE>(x);
 }
 
-__device__ inline signed char fromAccum(COMPUTE_TYPE x, signed char* /*tag*/)
+// --- fromAccum: convert accumulation result back to output type ---
+
+template <typename T>
+__device__ inline T fromAccum(COMPUTE_TYPE x, T* /*tag*/)
 {
-    return static_cast<signed char>(x);
+    return safeConvert<T>(x);
 }
 
-// --- int overloads ---
+// --- fabs overloads ---
+// float and double overloads are provided by hiprtc_runtime.h;
+// only _Float16 and __bf16 need custom overloads.
 
-__device__ inline COMPUTE_TYPE toAccum(int x)
+__device__ inline _Float16 fabs(_Float16 x)
 {
-    return static_cast<COMPUTE_TYPE>(x);
+    return __builtin_fabsf16(x);
 }
 
-__device__ inline int fromAccum(COMPUTE_TYPE x, int* /*tag*/)
+__device__ inline __bf16 fabs(__bf16 x)
 {
-    return static_cast<int>(x);
+    return static_cast<__bf16>(__builtin_fabsf(static_cast<float>(x)));
 }
 
-// --- double overloads ---
+// --- isnan overloads ---
 
-__device__ inline COMPUTE_TYPE toAccum(double x)
+__device__ inline bool isnan(_Float16 x)
 {
-    return static_cast<COMPUTE_TYPE>(x);
+    return __builtin_isnan(x);
 }
 
-__device__ inline double fromAccum(COMPUTE_TYPE x, double* /*tag*/)
+__device__ inline bool isnan(__bf16 x)
 {
-    return static_cast<double>(x);
+    return __builtin_isnan(static_cast<float>(x));
+}
+
+// --- isinf overloads ---
+
+__device__ inline bool isinf(_Float16 x)
+{
+    return __builtin_isinf(x);
+}
+
+__device__ inline bool isinf(__bf16 x)
+{
+    return __builtin_isinf(static_cast<float>(x));
 }
 
 // --- TF32 truncation ---
@@ -118,3 +98,5 @@ __device__ inline float truncateToTf32(float x)
     return cvt.f32;
 }
 #endif
+
+} // namespace gpu_ref
