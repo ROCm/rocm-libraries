@@ -95,81 +95,81 @@ ROCSOLVER_END_NAMESPACE
 
 extern "C" {
 
-rocblas_status rocsolver_ssytrs2_batched(rocblas_handle handle,
-                                         const rocblas_fill uplo,
-                                         const rocblas_int n,
-                                         const rocblas_int nrhs,
-                                         float* const A[],
-                                         const rocblas_int lda,
-                                         rocblas_int* ipiv,
-                                         const rocblas_stride strideP,
-                                         float* const B[],
-                                         const rocblas_int ldb,
-                                         const rocblas_int batch_count)
+ROCSOLVER_EXPORT rocblas_status rocsolver_ssytrs2_batched(rocblas_handle handle,
+                                                          const rocblas_fill uplo,
+                                                          const rocblas_int n,
+                                                          const rocblas_int nrhs,
+                                                          float* const A[],
+                                                          const rocblas_int lda,
+                                                          rocblas_int* ipiv,
+                                                          const rocblas_stride strideP,
+                                                          float* const B[],
+                                                          const rocblas_int ldb,
+                                                          const rocblas_int batch_count)
 {
     return rocsolver::rocsolver_sytrs2_batched_impl<float>(handle, uplo, n, nrhs, A, lda, ipiv,
                                                            strideP, B, ldb, batch_count);
 }
 
-rocblas_status rocsolver_dsytrs2_batched(rocblas_handle handle,
-                                         const rocblas_fill uplo,
-                                         const rocblas_int n,
-                                         const rocblas_int nrhs,
-                                         double* const A[],
-                                         const rocblas_int lda,
-                                         rocblas_int* ipiv,
-                                         const rocblas_stride strideP,
-                                         double* const B[],
-                                         const rocblas_int ldb,
-                                         const rocblas_int batch_count)
+ROCSOLVER_EXPORT rocblas_status rocsolver_dsytrs2_batched(rocblas_handle handle,
+                                                          const rocblas_fill uplo,
+                                                          const rocblas_int n,
+                                                          const rocblas_int nrhs,
+                                                          double* const A[],
+                                                          const rocblas_int lda,
+                                                          rocblas_int* ipiv,
+                                                          const rocblas_stride strideP,
+                                                          double* const B[],
+                                                          const rocblas_int ldb,
+                                                          const rocblas_int batch_count)
 {
     return rocsolver::rocsolver_sytrs2_batched_impl<double>(handle, uplo, n, nrhs, A, lda, ipiv,
                                                             strideP, B, ldb, batch_count);
 }
 
-rocblas_status rocsolver_csytrs2_batched(rocblas_handle handle,
-                                         const rocblas_fill uplo,
-                                         const rocblas_int n,
-                                         const rocblas_int nrhs,
-                                         rocblas_float_complex* const A[],
-                                         const rocblas_int lda,
-                                         rocblas_int* ipiv,
-                                         const rocblas_stride strideP,
-                                         rocblas_float_complex* const B[],
-                                         const rocblas_int ldb,
-                                         const rocblas_int batch_count)
+ROCSOLVER_EXPORT rocblas_status rocsolver_csytrs2_batched(rocblas_handle handle,
+                                                          const rocblas_fill uplo,
+                                                          const rocblas_int n,
+                                                          const rocblas_int nrhs,
+                                                          rocblas_float_complex* const A[],
+                                                          const rocblas_int lda,
+                                                          rocblas_int* ipiv,
+                                                          const rocblas_stride strideP,
+                                                          rocblas_float_complex* const B[],
+                                                          const rocblas_int ldb,
+                                                          const rocblas_int batch_count)
 {
     return rocsolver::rocsolver_sytrs2_batched_impl<rocblas_float_complex>(
         handle, uplo, n, nrhs, A, lda, ipiv, strideP, B, ldb, batch_count);
 }
 
-rocblas_status rocsolver_zsytrs2_batched(rocblas_handle handle,
-                                         const rocblas_fill uplo,
-                                         const rocblas_int n,
-                                         const rocblas_int nrhs,
-                                         rocblas_double_complex* const A[],
-                                         const rocblas_int lda,
-                                         rocblas_int* ipiv,
-                                         const rocblas_stride strideP,
-                                         rocblas_double_complex* const B[],
-                                         const rocblas_int ldb,
-                                         const rocblas_int batch_count)
+ROCSOLVER_EXPORT rocblas_status rocsolver_zsytrs2_batched(rocblas_handle handle,
+                                                          const rocblas_fill uplo,
+                                                          const rocblas_int n,
+                                                          const rocblas_int nrhs,
+                                                          rocblas_double_complex* const A[],
+                                                          const rocblas_int lda,
+                                                          rocblas_int* ipiv,
+                                                          const rocblas_stride strideP,
+                                                          rocblas_double_complex* const B[],
+                                                          const rocblas_int ldb,
+                                                          const rocblas_int batch_count)
 {
     return rocsolver::rocsolver_sytrs2_batched_impl<rocblas_double_complex>(
         handle, uplo, n, nrhs, A, lda, ipiv, strideP, B, ldb, batch_count);
 }
 
-rocblas_status rocsolver_ssytrs2_batched_64(rocblas_handle handle,
-                                            const rocblas_fill uplo,
-                                            const int64_t n,
-                                            const int64_t nrhs,
-                                            float* const A[],
-                                            const int64_t lda,
-                                            int64_t* ipiv,
-                                            const rocblas_stride strideP,
-                                            float* const B[],
-                                            const int64_t ldb,
-                                            const int64_t batch_count)
+ROCSOLVER_EXPORT rocblas_status rocsolver_ssytrs2_batched_64(rocblas_handle handle,
+                                                             const rocblas_fill uplo,
+                                                             const int64_t n,
+                                                             const int64_t nrhs,
+                                                             float* const A[],
+                                                             const int64_t lda,
+                                                             int64_t* ipiv,
+                                                             const rocblas_stride strideP,
+                                                             float* const B[],
+                                                             const int64_t ldb,
+                                                             const int64_t batch_count)
 {
 #ifdef HAVE_ROCBLAS_64
     return rocsolver::rocsolver_sytrs2_batched_impl<float, int64_t>(
@@ -179,17 +179,17 @@ rocblas_status rocsolver_ssytrs2_batched_64(rocblas_handle handle,
 #endif
 }
 
-rocblas_status rocsolver_dsytrs2_batched_64(rocblas_handle handle,
-                                            const rocblas_fill uplo,
-                                            const int64_t n,
-                                            const int64_t nrhs,
-                                            double* const A[],
-                                            const int64_t lda,
-                                            int64_t* ipiv,
-                                            const rocblas_stride strideP,
-                                            double* const B[],
-                                            const int64_t ldb,
-                                            const int64_t batch_count)
+ROCSOLVER_EXPORT rocblas_status rocsolver_dsytrs2_batched_64(rocblas_handle handle,
+                                                             const rocblas_fill uplo,
+                                                             const int64_t n,
+                                                             const int64_t nrhs,
+                                                             double* const A[],
+                                                             const int64_t lda,
+                                                             int64_t* ipiv,
+                                                             const rocblas_stride strideP,
+                                                             double* const B[],
+                                                             const int64_t ldb,
+                                                             const int64_t batch_count)
 {
 #ifdef HAVE_ROCBLAS_64
     return rocsolver::rocsolver_sytrs2_batched_impl<double, int64_t>(
@@ -199,17 +199,17 @@ rocblas_status rocsolver_dsytrs2_batched_64(rocblas_handle handle,
 #endif
 }
 
-rocblas_status rocsolver_csytrs2_batched_64(rocblas_handle handle,
-                                            const rocblas_fill uplo,
-                                            const int64_t n,
-                                            const int64_t nrhs,
-                                            rocblas_float_complex* const A[],
-                                            const int64_t lda,
-                                            int64_t* ipiv,
-                                            const rocblas_stride strideP,
-                                            rocblas_float_complex* const B[],
-                                            const int64_t ldb,
-                                            const int64_t batch_count)
+ROCSOLVER_EXPORT rocblas_status rocsolver_csytrs2_batched_64(rocblas_handle handle,
+                                                             const rocblas_fill uplo,
+                                                             const int64_t n,
+                                                             const int64_t nrhs,
+                                                             rocblas_float_complex* const A[],
+                                                             const int64_t lda,
+                                                             int64_t* ipiv,
+                                                             const rocblas_stride strideP,
+                                                             rocblas_float_complex* const B[],
+                                                             const int64_t ldb,
+                                                             const int64_t batch_count)
 {
 #ifdef HAVE_ROCBLAS_64
     return rocsolver::rocsolver_sytrs2_batched_impl<rocblas_float_complex, int64_t>(
@@ -219,17 +219,17 @@ rocblas_status rocsolver_csytrs2_batched_64(rocblas_handle handle,
 #endif
 }
 
-rocblas_status rocsolver_zsytrs2_batched_64(rocblas_handle handle,
-                                            const rocblas_fill uplo,
-                                            const int64_t n,
-                                            const int64_t nrhs,
-                                            rocblas_double_complex* const A[],
-                                            const int64_t lda,
-                                            int64_t* ipiv,
-                                            const rocblas_stride strideP,
-                                            rocblas_double_complex* const B[],
-                                            const int64_t ldb,
-                                            const int64_t batch_count)
+ROCSOLVER_EXPORT rocblas_status rocsolver_zsytrs2_batched_64(rocblas_handle handle,
+                                                             const rocblas_fill uplo,
+                                                             const int64_t n,
+                                                             const int64_t nrhs,
+                                                             rocblas_double_complex* const A[],
+                                                             const int64_t lda,
+                                                             int64_t* ipiv,
+                                                             const rocblas_stride strideP,
+                                                             rocblas_double_complex* const B[],
+                                                             const int64_t ldb,
+                                                             const int64_t batch_count)
 {
 #ifdef HAVE_ROCBLAS_64
     return rocsolver::rocsolver_sytrs2_batched_impl<rocblas_double_complex, int64_t>(

@@ -95,69 +95,69 @@ ROCSOLVER_END_NAMESPACE
 
 extern "C" {
 
-rocblas_status rocsolver_ssytrs2(rocblas_handle handle,
-                                 const rocblas_fill uplo,
-                                 const rocblas_int n,
-                                 const rocblas_int nrhs,
-                                 float* A,
-                                 const rocblas_int lda,
-                                 rocblas_int* ipiv,
-                                 float* B,
-                                 const rocblas_int ldb)
+ROCSOLVER_EXPORT rocblas_status rocsolver_ssytrs2(rocblas_handle handle,
+                                                  const rocblas_fill uplo,
+                                                  const rocblas_int n,
+                                                  const rocblas_int nrhs,
+                                                  float* A,
+                                                  const rocblas_int lda,
+                                                  rocblas_int* ipiv,
+                                                  float* B,
+                                                  const rocblas_int ldb)
 {
     return rocsolver::rocsolver_sytrs2_impl<float>(handle, uplo, n, nrhs, A, lda, ipiv, B, ldb);
 }
 
-rocblas_status rocsolver_dsytrs2(rocblas_handle handle,
-                                 const rocblas_fill uplo,
-                                 const rocblas_int n,
-                                 const rocblas_int nrhs,
-                                 double* A,
-                                 const rocblas_int lda,
-                                 rocblas_int* ipiv,
-                                 double* B,
-                                 const rocblas_int ldb)
+ROCSOLVER_EXPORT rocblas_status rocsolver_dsytrs2(rocblas_handle handle,
+                                                  const rocblas_fill uplo,
+                                                  const rocblas_int n,
+                                                  const rocblas_int nrhs,
+                                                  double* A,
+                                                  const rocblas_int lda,
+                                                  rocblas_int* ipiv,
+                                                  double* B,
+                                                  const rocblas_int ldb)
 {
     return rocsolver::rocsolver_sytrs2_impl<double>(handle, uplo, n, nrhs, A, lda, ipiv, B, ldb);
 }
 
-rocblas_status rocsolver_csytrs2(rocblas_handle handle,
-                                 const rocblas_fill uplo,
-                                 const rocblas_int n,
-                                 const rocblas_int nrhs,
-                                 rocblas_float_complex* A,
-                                 const rocblas_int lda,
-                                 rocblas_int* ipiv,
-                                 rocblas_float_complex* B,
-                                 const rocblas_int ldb)
+ROCSOLVER_EXPORT rocblas_status rocsolver_csytrs2(rocblas_handle handle,
+                                                  const rocblas_fill uplo,
+                                                  const rocblas_int n,
+                                                  const rocblas_int nrhs,
+                                                  rocblas_float_complex* A,
+                                                  const rocblas_int lda,
+                                                  rocblas_int* ipiv,
+                                                  rocblas_float_complex* B,
+                                                  const rocblas_int ldb)
 {
     return rocsolver::rocsolver_sytrs2_impl<rocblas_float_complex>(handle, uplo, n, nrhs, A, lda,
                                                                    ipiv, B, ldb);
 }
 
-rocblas_status rocsolver_zsytrs2(rocblas_handle handle,
-                                 const rocblas_fill uplo,
-                                 const rocblas_int n,
-                                 const rocblas_int nrhs,
-                                 rocblas_double_complex* A,
-                                 const rocblas_int lda,
-                                 rocblas_int* ipiv,
-                                 rocblas_double_complex* B,
-                                 const rocblas_int ldb)
+ROCSOLVER_EXPORT rocblas_status rocsolver_zsytrs2(rocblas_handle handle,
+                                                  const rocblas_fill uplo,
+                                                  const rocblas_int n,
+                                                  const rocblas_int nrhs,
+                                                  rocblas_double_complex* A,
+                                                  const rocblas_int lda,
+                                                  rocblas_int* ipiv,
+                                                  rocblas_double_complex* B,
+                                                  const rocblas_int ldb)
 {
     return rocsolver::rocsolver_sytrs2_impl<rocblas_double_complex>(handle, uplo, n, nrhs, A, lda,
                                                                     ipiv, B, ldb);
 }
 
-rocblas_status rocsolver_ssytrs2_64(rocblas_handle handle,
-                                    const rocblas_fill uplo,
-                                    const int64_t n,
-                                    const int64_t nrhs,
-                                    float* A,
-                                    const int64_t lda,
-                                    int64_t* ipiv,
-                                    float* B,
-                                    const int64_t ldb)
+ROCSOLVER_EXPORT rocblas_status rocsolver_ssytrs2_64(rocblas_handle handle,
+                                                     const rocblas_fill uplo,
+                                                     const int64_t n,
+                                                     const int64_t nrhs,
+                                                     float* A,
+                                                     const int64_t lda,
+                                                     int64_t* ipiv,
+                                                     float* B,
+                                                     const int64_t ldb)
 {
 #ifdef HAVE_ROCBLAS_64
     return rocsolver::rocsolver_sytrs2_impl<float, int64_t>(handle, uplo, n, nrhs, A, lda, ipiv, B,
@@ -167,15 +167,15 @@ rocblas_status rocsolver_ssytrs2_64(rocblas_handle handle,
 #endif
 }
 
-rocblas_status rocsolver_dsytrs2_64(rocblas_handle handle,
-                                    const rocblas_fill uplo,
-                                    const int64_t n,
-                                    const int64_t nrhs,
-                                    double* A,
-                                    const int64_t lda,
-                                    int64_t* ipiv,
-                                    double* B,
-                                    const int64_t ldb)
+ROCSOLVER_EXPORT rocblas_status rocsolver_dsytrs2_64(rocblas_handle handle,
+                                                     const rocblas_fill uplo,
+                                                     const int64_t n,
+                                                     const int64_t nrhs,
+                                                     double* A,
+                                                     const int64_t lda,
+                                                     int64_t* ipiv,
+                                                     double* B,
+                                                     const int64_t ldb)
 {
 #ifdef HAVE_ROCBLAS_64
     return rocsolver::rocsolver_sytrs2_impl<double, int64_t>(handle, uplo, n, nrhs, A, lda, ipiv, B,
@@ -185,15 +185,15 @@ rocblas_status rocsolver_dsytrs2_64(rocblas_handle handle,
 #endif
 }
 
-rocblas_status rocsolver_csytrs2_64(rocblas_handle handle,
-                                    const rocblas_fill uplo,
-                                    const int64_t n,
-                                    const int64_t nrhs,
-                                    rocblas_float_complex* A,
-                                    const int64_t lda,
-                                    int64_t* ipiv,
-                                    rocblas_float_complex* B,
-                                    const int64_t ldb)
+ROCSOLVER_EXPORT rocblas_status rocsolver_csytrs2_64(rocblas_handle handle,
+                                                     const rocblas_fill uplo,
+                                                     const int64_t n,
+                                                     const int64_t nrhs,
+                                                     rocblas_float_complex* A,
+                                                     const int64_t lda,
+                                                     int64_t* ipiv,
+                                                     rocblas_float_complex* B,
+                                                     const int64_t ldb)
 {
 #ifdef HAVE_ROCBLAS_64
     return rocsolver::rocsolver_sytrs2_impl<rocblas_float_complex, int64_t>(handle, uplo, n, nrhs,
@@ -203,15 +203,15 @@ rocblas_status rocsolver_csytrs2_64(rocblas_handle handle,
 #endif
 }
 
-rocblas_status rocsolver_zsytrs2_64(rocblas_handle handle,
-                                    const rocblas_fill uplo,
-                                    const int64_t n,
-                                    const int64_t nrhs,
-                                    rocblas_double_complex* A,
-                                    const int64_t lda,
-                                    int64_t* ipiv,
-                                    rocblas_double_complex* B,
-                                    const int64_t ldb)
+ROCSOLVER_EXPORT rocblas_status rocsolver_zsytrs2_64(rocblas_handle handle,
+                                                     const rocblas_fill uplo,
+                                                     const int64_t n,
+                                                     const int64_t nrhs,
+                                                     rocblas_double_complex* A,
+                                                     const int64_t lda,
+                                                     int64_t* ipiv,
+                                                     rocblas_double_complex* B,
+                                                     const int64_t ldb)
 {
 #ifdef HAVE_ROCBLAS_64
     return rocsolver::rocsolver_sytrs2_impl<rocblas_double_complex, int64_t>(handle, uplo, n, nrhs,
