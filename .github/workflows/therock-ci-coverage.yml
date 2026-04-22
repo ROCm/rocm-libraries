@@ -185,7 +185,7 @@ jobs:
 
       - name: Download and Unpack Artifacts
         env:
-          OUTPUT_ARTIFACTS_DIR: ${{ github.workspace }}/build
+          OUTPUT_ARTIFACTS_DIR: ${{ github.workspace }}/TheRock/build-coverage
           ARTIFACT_GROUP: ${{ inputs.amdgpu_families }}
           AMDGPU_TARGETS: ""
           ARTIFACT_RUN_ID: ${{ github.run_id }}
