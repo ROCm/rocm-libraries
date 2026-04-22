@@ -10,10 +10,129 @@
 #include <cmath>
 #include <hip/hip_runtime.h>
 #include <hip_kernel_provider_common/HipDeviceUtils.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/sdpa_attributes_generated.h>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
 namespace asm_sdpa_engine
 {
+
+enum MaskType : int
+{
+    NO_MASK = 0,
+    TOP_LEFT_CAUSAL,
+    BOTTOM_RIGHT_CAUSAL,
+    WINDOW_GENERIC
+};
+
+MaskType getMaskType(const hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes& attrs)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    bool leftAndRightBoundsSet = attrs.left_bound().has_value() && attrs.right_bound().has_value();
+
+    if(leftAndRightBoundsSet && (attrs.left_bound() >= 0 || attrs.right_bound() >= 0))
+    {
+        return MaskType::WINDOW_GENERIC;
+    }
+
+    if(attrs.causal_mask() // Deprecated
+       || (leftAndRightBoundsSet && attrs.diagonal_alignment() == DiagonalAlignment::TOP_LEFT))
+    {
+        return MaskType::TOP_LEFT_CAUSAL;
+    }
+
+    if(attrs.causal_mask_bottom_right() // Deprecated
+       || (leftAndRightBoundsSet && attrs.diagonal_alignment() == DiagonalAlignment::BOTTOM_RIGHT))
+    {
+        return MaskType::BOTTOM_RIGHT_CAUSAL;
+    }
+
+    return MaskType::NO_MASK;
+}
+
+enum RoundingMode : int
+{
+    RTNE = 0, // Round to Nearest Even (IEEE default)
+    RTNA, // Round to Nearest Away from zero
+    RTZ // Round toward Zero
+};
+
+RoundingMode getRoundingMode(const hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes& /*attrs*/)
+{
+    // TODO Find out if we can specify this in the graph
+    return RoundingMode::RTNE;
+}
+
+enum BatchMode : int
+{
+    BATCH = 0, // All sequences have same length
+    GROUP // Variable sequence lengths
+};
+
+BatchMode getBatchMode(const hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes& attrs)
+{
+    return (attrs.seq_len_q_tensor_uid().has_value() || attrs.seq_len_kv_tensor_uid().has_value())
+               ? BatchMode::GROUP
+               : BatchMode::BATCH;
+}
+
+std::string getKernelNameKey(const std::string& archId,
+                             const std::string& dataType,
+                             int hdim_q, // NOLINT(readability-identifier-naming)
+                             int hdim_v, // NOLINT(readability-identifier-naming)
+                             MaskType maskType,
+                             RoundingMode bf16_cvt, // NOLINT(readability-identifier-naming)
+                             BatchMode mode,
+                             const CFG* cfgs)
+{
+    std::string kernelNameKey{};
+    for(const auto& el : *cfgs)
+    {
+        const auto& cfg = el.second;
+        if(cfg.arch != archId)
+        {
+            continue;
+        }
+
+        if(cfg.dtype == dataType && cfg.hdim_q == hdim_q && cfg.hdim_v == hdim_v
+           && static_cast<int>(cfg.mask) == maskType && static_cast<int>(cfg.mode) == mode)
+        {
+            if(archId == "gfx950")
+            {
+                kernelNameKey = el.first;
+                break;
+            }
+            if(archId == "gfx942" && cfg.bf16_cvt == bf16_cvt)
+            {
+                kernelNameKey = el.first;
+                break;
+            }
+        }
+    }
+
+    return kernelNameKey;
+}
+
+std::string getDataTypeIdentifier(hipdnn_flatbuffers_sdk::data_objects::DataType qType,
+                                  hipdnn_flatbuffers_sdk::data_objects::DataType kType,
+                                  hipdnn_flatbuffers_sdk::data_objects::DataType vType,
+                                  hipdnn_flatbuffers_sdk::data_objects::DataType oType)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+    if(qType == DataType::BFLOAT16 && kType == DataType::BFLOAT16 && vType == DataType::BFLOAT16
+       && oType == DataType::BFLOAT16)
+    {
+        return "bf16";
+    }
+    if(qType == DataType::FP8_E4M3 && kType == DataType::FP8_E4M3 && vType == DataType::FP8_E4M3
+       && oType == DataType::BFLOAT16)
+    {
+        return "fp8bf16";
+    }
+
+    return "";
+}
 
 bool SdpaFwdPlanBuilder::isApplicable(
     const HipKernelHandle& handle,
@@ -25,12 +144,14 @@ bool SdpaFwdPlanBuilder::isApplicable(
 
     auto& nodeWrappers = opGraph.nodeWrappers();
 
+    std::string deviceString;
+
     try
     {
-        auto deviceString = hip_kernel_provider_common::getDeviceString(handle.getStream());
+        deviceString = hip_kernel_provider_common::getDeviceString(handle.getStream());
         HIP_KERNEL_RETURN_FALSE_IF(
-            deviceString != "gfx942",
-            "Device string does not match gfx942 (Actual value: " + deviceString + ")");
+            deviceString != "gfx942" && deviceString != "gfx950",
+            "Device string does not match gfx942 or gfx950 (Actual value: " + deviceString + ")");
     }
     catch(const std::exception& e)
     {
@@ -44,18 +165,12 @@ bool SdpaFwdPlanBuilder::isApplicable(
                                "Node attribute type is not SdpaAttributes");
 
     const auto& attrs = nodeWrappers.front()->attributesAs<SdpaAttributes>();
-    HIP_KERNEL_RETURN_FALSE_IF(attrs.causal_mask(), "causal_mask must be false");
-    HIP_KERNEL_RETURN_FALSE_IF(attrs.causal_mask_bottom_right(),
-                               "causal_mask_bottom_right must be false");
-    HIP_KERNEL_RETURN_FALSE_IF(attrs.left_bound().has_value(), "left_bound must be unset");
-    HIP_KERNEL_RETURN_FALSE_IF(attrs.right_bound().has_value(), "right_bound must be unset");
     HIP_KERNEL_RETURN_FALSE_IF(attrs.dropout_probability().has_value()
                                    && attrs.dropout_probability().value() != 0.f,
                                "dropout_probability must be unset or zero (Actual value: "
                                    + std::to_string(attrs.dropout_probability().value()) + ")");
     HIP_KERNEL_RETURN_FALSE_IF(attrs.alibi_mask(), "alibi_mask must be false");
     HIP_KERNEL_RETURN_FALSE_IF(attrs.padding_mask(), "padding_mask must be false");
-    HIP_KERNEL_RETURN_FALSE_IF(attrs.seq_len_q_tensor_uid(), "seq_len_q tensor not supported");
     HIP_KERNEL_RETURN_FALSE_IF(attrs.attn_mask_tensor_uid(), // Change to bias
                                "attn_mask tensor not supported");
 
@@ -74,30 +189,46 @@ bool SdpaFwdPlanBuilder::isApplicable(
     int64_t oUid = attrs.o_tensor_uid();
 
     auto* qTensor = tensorMap.at(qUid);
-    HIP_KERNEL_RETURN_FALSE_IF(qTensor->data_type() != DataType::BFLOAT16,
-                               "q tensor datatype must be BF16 (Actual type: "
-                                   + EnumNameDataType(qTensor->data_type()) + ")");
+    auto* kTensor = tensorMap.at(kUid);
+    auto* vTensor = tensorMap.at(vUid);
+    auto* oTensor = tensorMap.at(oUid);
+
     HIP_KERNEL_RETURN_FALSE_IF(
         qTensor->dims()->size() != 4,
         "q tensor must be rank 4 (Actual rank: " + std::to_string(qTensor->dims()->size()) + ")");
-    HIP_KERNEL_RETURN_FALSE_IF(qTensor->dims()->Get(3) != 128,
-                               "q tensor head dimension must be 128 (Actual value: "
-                                   + std::to_string(qTensor->dims()->Get(3)) + ")");
 
-    auto* kTensor = tensorMap.at(kUid);
-    HIP_KERNEL_RETURN_FALSE_IF(kTensor->data_type() != DataType::BFLOAT16,
-                               "k tensor datatype must be BF16 (Actual type: "
-                                   + EnumNameDataType(kTensor->data_type()) + ")");
+    HIP_KERNEL_RETURN_FALSE_IF(
+        vTensor->dims()->size() != 4,
+        "v tensor must be rank 4 (Actual rank: " + std::to_string(vTensor->dims()->size()) + ")");
 
-    auto* vTensor = tensorMap.at(vUid);
-    HIP_KERNEL_RETURN_FALSE_IF(vTensor->data_type() != DataType::BFLOAT16,
-                               "v tensor datatype must be BF16 (Actual type: "
-                                   + EnumNameDataType(vTensor->data_type()) + ")");
+    HIP_KERNEL_RETURN_FALSE_IF(
+        qTensor->data_type() != kTensor->data_type() || qTensor->data_type() != vTensor->data_type()
+            || qTensor->data_type() != kTensor->data_type(),
+        "Input tensors must all share a type (q tensor: " + EnumNameDataType(qTensor->data_type())
+            + ", k tensor: " + EnumNameDataType(kTensor->data_type())
+            + ", v tensor: " + EnumNameDataType(vTensor->data_type()) + ")");
 
-    auto* oTensor = tensorMap.at(oUid);
-    HIP_KERNEL_RETURN_FALSE_IF(oTensor->data_type() != DataType::BFLOAT16,
-                               "o tensor datatype must be BF16 (Actual type: "
-                                   + EnumNameDataType(oTensor->data_type()) + ")");
+    auto dataTypeId = getDataTypeIdentifier(
+        qTensor->data_type(), kTensor->data_type(), vTensor->data_type(), oTensor->data_type());
+
+    HIP_KERNEL_RETURN_FALSE_IF(
+        dataTypeId.empty(),
+        "output tensor must have datatype BFLOAT16 (Actual type: "
+            + EnumNameDataType(oTensor->data_type())
+            + ") and input tensors must have datatype BFLOAT16 or FP8_E4M3 (Actual type: "
+            + EnumNameDataType(qTensor->data_type()) + ")");
+
+    auto key = getKernelNameKey(deviceString,
+                                dataTypeId,
+                                static_cast<int>(qTensor->dims()->Get(3)),
+                                static_cast<int>(vTensor->dims()->Get(3)),
+                                getMaskType(attrs),
+                                getRoundingMode(attrs),
+                                getBatchMode(attrs),
+                                &cfg_fmha_fwd);
+
+    HIP_KERNEL_RETURN_FALSE_IF(key.empty(),
+                               "Could not find matching kernel for parameter combination");
 
     return true;
 }
