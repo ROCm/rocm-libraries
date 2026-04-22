@@ -130,8 +130,9 @@ void emitVgprMsbIfNeeded(int requiredSetVal, bool hasVgpr, int& currentMsb, AsmI
     }
 
     int combinedSetVal = requiredSetVal;
-    if (currentMsb != VgprMsbState::NOT_REQUIRED && currentMsb != VgprMsbState::LABEL_BEGIN)
-        combinedSetVal += (currentMsb << 8);
+    /* if (currentMsb != VgprMsbState::NOT_REQUIRED && currentMsb != VgprMsbState::LABEL_BEGIN)
+        combinedSetVal += (currentMsb << 8); */
+    // Re-enable 16-bit MSB once compiler support is available.
 
     const HwInstDesc* desc = getMCIDByUOp(GFX::s_set_vgpr_msb, archId);
     assert(desc != nullptr && "s_set_vgpr_msb is not supported on this architecture");
