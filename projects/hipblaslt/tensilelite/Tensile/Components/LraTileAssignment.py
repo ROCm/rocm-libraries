@@ -22,8 +22,6 @@
 #
 ################################################################################
 
-import math
-
 from rocisa.code import Module, Label
 from rocisa.container import sgpr, vgpr, ContinuousRegister
 from rocisa.instruction import SMovB32, SMovB64, SNop, VAddU32, VAndB32, VMovB32, VLShiftLeftB32, VLShiftRightB32
@@ -772,29 +770,14 @@ class LraTileAssignmentMFMA(LraTileAssignment):
         tile01    = tP["tile01Idx"]
         waveWidth = writer.states.kernel["WavefrontSize"]
 
-        # If LocalReadVectorWidth{tc} does not exist, fall back to LocalReadVectorWidth
-        if "MXS" in tc:
-          lrvw = kernel["LocalReadVectorWidthMXS"]
-        elif f"LocalReadVectorWidth{tc}" in kernel:
-          lrvw = kernel["LocalReadVectorWidth%s"%tc]
-        else:
-          lrvw = kernel["LocalReadVectorWidth"]
-
+        lrvw             = kernel["LocalReadVectorWidthMXS"] if ("MXS" in tc) else kernel[f"LocalReadVectorWidth{tc}"]
+        inputPerThread   = lrvw if not writer.states.inTailLoop else kernel["MIInputPerThread%s"%tc]
         if kernel["ProblemType"]["Sparse"]:
           if (kernel["ProblemType"]["Sparse"] == 2 and tP["isB"]) or (kernel["ProblemType"]["Sparse"] == 1 and tP["isA"]):
-            lrvw = lrvw // 2
+            inputPerThread = inputPerThread // 2
           elif tP["isM"]:
-            lrvw = lrvw // 8
-          elif tc in ["MXSA", "MXSB"]:
-            lrvw = 1
-
-        miInputPerGroup = kernel["MIInputPerThread%s"%tc]
-        if writer.states.asmCaps["HasMFMA_f8f6f4"] and ((tP["bpeDS"] * miInputPerGroup) > 24):
-          miInputPerGroup = int(16 / tP["bpeDS"])
-        offsetK = lrvw if (lrvw > miInputPerGroup) else miInputPerGroup
-        offsetK = offsetK if not writer.states.inTailLoop else kernel["MIInputPerThread%s"%tc]
-
-        LdsPad = kernel["LdsPad%s" % tc] if kernel["LdsBlockSizePerPad%s" % tc] == 0 else 0
+            inputPerThread = inputPerThread // 8
+        LdsPad           = kernel["LdsPad%s" % tc] if kernel["LdsBlockSizePerPad%s" % tc] == 0 else 0
 
         # parameter for get each type index
         matrixInstT      = (kernel["MatrixInstM"] if (tile01 == 0) else kernel["MatrixInstN"])
@@ -825,12 +808,7 @@ class LraTileAssignmentMFMA(LraTileAssignment):
                                                                         vectorWidth=vectorWidth, \
                                                                         maxKId=maxKId)
 
-        if tc == 'A' or tc == 'MXSA' or (tc == 'Metadata' and tP["tensorIdx"] == 0):
-            abmatrixinfo = writer.states.a
-        elif tc == 'B' or tc == 'MXSB' or (tc == 'Metadata' and tP["tensorIdx"] != 0):
-            abmatrixinfo = writer.states.b
-        else:
-            raise Exception(f"unsupport tc {tc}")
+        abmatrixinfo = writer.states.a if tc == 'A' else writer.states.b
         perpStride = abmatrixinfo.gNLCPerpStride
         permBlock  = abmatrixinfo.gNLCPermBlock
         perpBlockSize  = abmatrixinfo.gRDtlSwizzlePerpBlockSize
@@ -845,13 +823,7 @@ class LraTileAssignmentMFMA(LraTileAssignment):
         if isDTVAB:
           strideTile = 1 # DTV case. Actual stride will be applied later.
 
-        strideK          = offsetK if umlds else (mt + LdsPad) * offsetK
-
-        # StrideK might be a float value due to sub-byte data types (e.g. fp4)
-        # and causes function signature error later.
-        # Use ceil to ensure no overlap between adjacent K groups in LDS.
-        strideK = int(math.ceil(strideK))
-
+        strideK = inputPerThread if umlds else (mt + LdsPad) * inputPerThread
         if enableLDSTr:
            if kernel["UseGeneralizedNLCOne%s"%tc] and perpStride > 1:
               strideK  = 8
@@ -859,15 +831,14 @@ class LraTileAssignmentMFMA(LraTileAssignment):
 
         # FIXME SPARSE
         if kernel["ProblemType"]["Sparse"] != 0:
-            isSparseTrack = False
-            if kernel["MIInputPerThread"] * kernel["ProblemType"]["MacDataTypeA"].numBytes() > 16:
-              isSparseTrack = (kernel["ProblemType"]["Sparse"] == 2 and tP["isB"]) or (kernel["ProblemType"]["Sparse"] == 1 and tP["isA"]) or tP["isM"]
-              strideK      = (offsetK if umlds else (mt + LdsPad) * offsetK) * (2 if isSparseTrack and kernel["MIInputPerThread%s"%tc] >  offsetK else 1)
+            if kernel["MIInputPerThread"] * kernel["ProblemType"]["DataType"].numBytes() > 16:
+                isSparseTrack = (kernel["ProblemType"]["Sparse"] == 2 and tP["isB"]) or (kernel["ProblemType"]["Sparse"] == 1 and tP["isA"]) or tP["isM"]
+                strideK       = (inputPerThread if umlds else (mt + LdsPad) * inputPerThread) * (2 if isSparseTrack and kernel["MIInputPerThread%s"%tc] > inputPerThread else 1)
             # GFX1250 Sparse
             if writer.states.asmCaps["HasSWMMAC"] and writer.states.asmCaps["HasSWMMAC_gfx1250"] and (not isSparseTrack or tP["isM"]):
                 strideK *= 2
-        #special case for new F8 MFMA -TODO:
-        elif  kernel["ProblemType"]["DataType"].is8bitFloat() and kernel["MatrixInstK"] > 32 and not kernel["ProblemType"]["MXBlockA"] and not kernel["ProblemType"]["MXBlockB"] and not writer.states.asmCaps["HasWMMA_V3"]:
+        # special case for new F8 MFMA, need to exclude wmma_v3
+        elif kernel["ProblemType"]["DataType"].is8bitFloat() and kernel["MatrixInstK"] > 32 and (not writer.states.asmCaps["HasWMMA_V3"]):
             if umlds:
                 strideK = 16
             else:
