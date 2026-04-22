@@ -392,6 +392,52 @@ hipsparseStatus_t hipsparseCreateConstSlicedEll(hipsparseConstSpMatDescr_t* spMa
 #endif
 
 /*! \ingroup generic_module
+*  \brief Create a sparse BSR matrix descriptor.
+*  \details
+*  \p hipsparseCreateBsr creates a sparse BSR matrix descriptor. It should be
+*  destroyed at the end using \p hipsparseDestroySpMat.
+*/
+#if(!defined(CUDART_VERSION))
+HIPSPARSE_EXPORT
+hipsparseStatus_t hipsparseCreateBsr(hipsparseSpMatDescr_t* spMatDescr,
+                                     int64_t                mb,
+                                     int64_t                nb,
+                                     int64_t                nnzb,
+                                     hipsparseDirection_t   blockDir,
+                                     int64_t                blockDim,
+                                     void*                  bsrRowPtr,
+                                     void*                  bsrColInd,
+                                     void*                  bsrValues,
+                                     hipsparseIndexType_t   bsrRowPtrType,
+                                     hipsparseIndexType_t   bsrColIndType,
+                                     hipsparseIndexBase_t   idxBase,
+                                     hipDataType            valueType);
+#endif
+
+/*! \ingroup generic_module
+*  \brief Create a sparse BSR matrix descriptor.
+*  \details
+*  \p hipsparseCreateConstBsr creates a sparse BSR matrix descriptor. It should be
+*  destroyed at the end using \p hipsparseDestroySpMat.
+*/
+#if(!defined(CUDART_VERSION))
+HIPSPARSE_EXPORT
+hipsparseStatus_t hipsparseCreateConstBsr(hipsparseConstSpMatDescr_t* spMatDescr,
+                                          int64_t                     mb,
+                                          int64_t                     nb,
+                                          int64_t                     nnzb,
+                                          hipsparseDirection_t        blockDir,
+                                          int64_t                     blockDim,
+                                          const void*                 bsrRowPtr,
+                                          const void*                 bsrColInd,
+                                          const void*                 bsrValues,
+                                          hipsparseIndexType_t        bsrRowPtrType,
+                                          hipsparseIndexType_t        bsrColIndType,
+                                          hipsparseIndexBase_t        idxBase,
+                                          hipDataType                 valueType);
+#endif
+
+/*! \ingroup generic_module
 *  \brief Destroy a sparse matrix descriptor.
 *  \details
 *  \p hipsparseDestroySpMat destroys a sparse matrix descriptor and releases all
@@ -578,6 +624,50 @@ hipsparseStatus_t hipsparseConstBlockedEllGet(hipsparseConstSpMatDescr_t spMatDe
                                               hipsparseIndexType_t*      ellIdxType,
                                               hipsparseIndexBase_t*      idxBase,
                                               hipDataType*               valueType);
+#endif
+
+/*! \ingroup generic_module
+*  \brief Get the pointers of a sparse BSR matrix.
+*  \details
+*  \p hipsparseBsrGet gets the fields of the sparse BSR matrix descriptor.
+*/
+#if(!defined(CUDART_VERSION))
+HIPSPARSE_EXPORT
+hipsparseStatus_t hipsparseBsrGet(const hipsparseSpMatDescr_t spMatDescr,
+                                  int64_t*                    brows,
+                                  int64_t*                    bcols,
+                                  int64_t*                    bnnz,
+                                  hipsparseDirection_t*       blockDir,
+                                  int64_t*                    blockDim,
+                                  void**                      bsrRowPtr,
+                                  void**                      bsrColInd,
+                                  void**                      bsrValues,
+                                  hipsparseIndexType_t*       bsrRowPtrType,
+                                  hipsparseIndexType_t*       bsrColIndType,
+                                  hipsparseIndexBase_t*       idxBase,
+                                  hipDataType*                valueType);
+#endif
+
+/*! \ingroup generic_module
+*  \brief Get the pointers of a sparse BSR matrix.
+*  \details
+*  \p hipsparseConstBsrGet gets the fields of the sparse BSR matrix descriptor.
+*/
+#if(!defined(CUDART_VERSION))
+HIPSPARSE_EXPORT
+hipsparseStatus_t hipsparseConstBsrGet(hipsparseConstSpMatDescr_t spMatDescr,
+                                       int64_t*                   brows,
+                                       int64_t*                   bcols,
+                                       int64_t*                   bnnz,
+                                       hipsparseDirection_t*      blockDir,
+                                       int64_t*                   blockDim,
+                                       const void**               bsrRowPtr,
+                                       const void**               bsrColInd,
+                                       const void**               bsrValues,
+                                       hipsparseIndexType_t*      bsrRowPtrType,
+                                       hipsparseIndexType_t*      bsrColIndType,
+                                       hipsparseIndexBase_t*      idxBase,
+                                       hipDataType*               valueType);
 #endif
 
 /*! \ingroup generic_module

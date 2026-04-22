@@ -650,6 +650,8 @@ namespace hipsparse
             return rocsparse_format_bell;
         case HIPSPARSE_FORMAT_SLICED_ELL:
             return rocsparse_format_sell;
+        case HIPSPARSE_FORMAT_BSR:
+            return rocsparse_format_bsr;
         default:
             throw "Non existent hipsparseFormat_t";
         }
@@ -671,6 +673,8 @@ namespace hipsparse
             return HIPSPARSE_FORMAT_BLOCKED_ELL;
         case rocsparse_format_sell:
             return HIPSPARSE_FORMAT_SLICED_ELL;
+        case rocsparse_format_bsr:
+            return HIPSPARSE_FORMAT_BSR;
         default:
             throw "Non existent rocsparse_format";
         }

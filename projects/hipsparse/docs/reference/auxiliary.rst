@@ -299,6 +299,11 @@ hipsparseCreateBlockedEll()
 
 .. doxygenfunction:: hipsparseCreateBlockedEll
 
+hipsparseCreateBsr()
+====================
+
+.. doxygenfunction:: hipsparseCreateBsr
+
 hipsparseDestroySpMat()
 =======================
 
@@ -323,6 +328,11 @@ hipsparseBlockedEllGet()
 ========================
 
 .. doxygenfunction:: hipsparseBlockedEllGet
+
+hipsparseBsrGet()
+=================
+
+.. doxygenfunction:: hipsparseBsrGet
 
 hipsparseCsrSetPointers()
 =========================

@@ -151,6 +151,8 @@ constexpr auto hipsparse_format2string(hipsparseFormat_t format)
         return "bell";
     case HIPSPARSE_FORMAT_SLICED_ELL:
         return "sell";
+    case HIPSPARSE_FORMAT_BSR:
+        return "bsr";
     }
     return "invalid";
 }
