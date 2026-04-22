@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2010-2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2017-2025, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2017-2026, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -67,24 +67,19 @@ enum BlockStoreAlgorithm
         = detail::to_BlockStoreAlgorithm_enum(::rocprim::block_store_method::block_store_warp_transpose)
 };
 
-template<
-    typename T,
-    int BLOCK_DIM_X,
-    int ITEMS_PER_THREAD,
-    BlockStoreAlgorithm ALGORITHM = BLOCK_STORE_DIRECT,
-    int BLOCK_DIM_Y = 1,
-    int BLOCK_DIM_Z = 1,
-    int ARCH = HIPCUB_ARCH /* ignored */
->
+template<typename T,
+         int                 BLOCK_DIM_X,
+         int                 ITEMS_PER_THREAD,
+         BlockStoreAlgorithm ALGORITHM   = BLOCK_STORE_DIRECT,
+         int                 BLOCK_DIM_Y = 1,
+         int                 BLOCK_DIM_Z = 1>
 class BlockStore
-    : private ::rocprim::block_store<
-        T,
-        BLOCK_DIM_X,
-        ITEMS_PER_THREAD,
-        static_cast<::rocprim::block_store_method>(ALGORITHM),
-        BLOCK_DIM_Y,
-        BLOCK_DIM_Z
-      >
+    : private ::rocprim::block_store<T,
+                                     BLOCK_DIM_X,
+                                     ITEMS_PER_THREAD,
+                                     static_cast<::rocprim::block_store_method>(ALGORITHM),
+                                     BLOCK_DIM_Y,
+                                     BLOCK_DIM_Z>
 {
     static_assert(
         BLOCK_DIM_X * BLOCK_DIM_Y * BLOCK_DIM_Z > 0,
