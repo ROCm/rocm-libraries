@@ -2178,8 +2178,8 @@ class KernelWriterAssembly(KernelWriter):
       # Commented the below condition since ArgType check is needed for General Batched GEMM
       # as well which reuses the Strided Batched GEMM logic after setting the Batched Matrix Pointers. 
       # Previously, ArgType was backed up for use of Grouped GEMM with External User Args structure only.
-      #if kernel["ProblemType"]["SupportUserArgs"]:
-      moduleRegInit.add(SMovB32(dst=sgpr("ArgType"),src=sgpr(sgprArgType)))
+      if kernel["ProblemType"]["SupportUserArgs"]:
+        moduleRegInit.add(SMovB32(dst=sgpr("ArgType"),src=sgpr(sgprArgType)))
 
       # B address interleave (restricted) - compute runtime G once and reuse later.
       if kernel["BAddrInterleave"]:
@@ -2597,8 +2597,9 @@ class KernelWriterAssembly(KernelWriter):
     if self.states.groOffsetInMacroTile:
       # Added logic to check for Pointer Array case (ArgType==3) and not prepad the double pointer addresses
       Skip_Address_Prepad_For_Pointer_Array = Label(label="Skip_Address_Prepad_For_Pointer_Array", comment="Skip pre-padding of address for pointer array case")
-      module.add(SCmpEQU32(src0=sgpr("ArgType"), src1=3, comment="ArgType == 3 for General Batched GEMM"))
-      module.add(SCBranchSCC1(labelName=Skip_Address_Prepad_For_Pointer_Array.getLabelName())) 
+      if kernel["ProblemType"]["SupportUserArgs"]:
+        module.add(SCmpEQU32(src0=sgpr("ArgType"), src1=3, comment="ArgType == 3 for General Batched GEMM"))
+        module.add(SCBranchSCC1(labelName=Skip_Address_Prepad_For_Pointer_Array.getLabelName())) 
       if not kernel["enableTDMA"]:       
         prePad = int(self.states.srdShiftLeft["A"] * tPA["bpeGR"]) # leave room in case we have to pointer shift
         module.add(SSubU32(dst=sgpr("AddressA+0"), src0=sgpr("AddressA+0"), src1=prePad, comment="pre-pad to make room for possible pointer shift"))
@@ -4293,8 +4294,11 @@ class KernelWriterAssembly(KernelWriter):
             stride = "Stride%s%s"%(tc,self.states.indexChars[tP['ia'][i]])
             stridedBatchedGemmLoad = Label(label="StridedBatchedGemmLoad"+tc, comment="Computing the Batch Matrix's base address for Strided Batched GEMM")
             stridedBatchedGemmLoad_End = Label(label="StridedBatchedGemmLoad"+tc+"_End", comment="End Computing the Batch Matrix's base address for Strided Batched")
-            module.add(SCmpEQU32(src0=sgpr("ArgType"), src1=3, comment="ArgType == 3 for General Batched GEMM"))
-            module.add(SCBranchSCC0(labelName=stridedBatchedGemmLoad.getLabelName()))
+            if kernel["ProblemType"]["SupportUserArgs"]:
+              module.add(SCmpEQU32(src0=sgpr("ArgType"), src1=3, comment="ArgType == 3 for General Batched GEMM"))
+              module.add(SCBranchSCC0(labelName=stridedBatchedGemmLoad.getLabelName()))
+            else:
+              module.add(SBranch(labelName=stridedBatchedGemmLoad.getLabelName()))
             moduleLoadGeneralBatch.add(SMulI32(dst=sgpr(stmp+0), src0=8, src1=sgpr("WorkGroup2"), comment="Compute Offset into Pointer Array"))             
             if not wroteTileStart:
               moduleLoadStridedBatch.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(tileStart+0), sgpr(tileStart+1), sgpr(stride), sgpr("WorkGroup2"), comment="Stride*WG"))
@@ -12226,13 +12230,15 @@ class KernelWriterAssembly(KernelWriter):
                   if(kernel["GlobalSplitU"] != 0):
                     module.add(SCmpEQU32(src0=sgpr(tmpS1), src1=1, comment="GSU == 1 ?"))
                     module.add(SCBranchSCC0(labelName=multipleBufferChecks.getLabelName()))
-                  module.add(SCmpEQU32(src0=sgpr("ArgType"), src1=3, comment="ArgType == 3 for General Batched GEMM"))
-                  module.add(SCBranchSCC1(labelName=generalBatchedGemmLoad.getLabelName()))   
+                  if kernel["ProblemType"]["SupportUserArgs"]:
+                    module.add(SCmpEQU32(src0=sgpr("ArgType"), src1=3, comment="ArgType == 3 for General Batched GEMM"))
+                    module.add(SCBranchSCC1(labelName=generalBatchedGemmLoad.getLabelName()))   
                   if(kernel["_GlobalAccumulation"] == 'MultipleBufferSingleKernel' and mat == "C"):
                     module.add(SBranch(labelName=stridedBatchedGemmLoad.getLabelName()))               
-                    module.add(multipleBufferChecks)                    
-                    module.add(SCmpEQU32(src0=sgpr("ArgType"), src1=3, comment="ArgType == 3 for General Batched GEMM"))
-                    module.add(SCBranchSCC1(labelName=generalBatchedGemmLoad.getLabelName()))                 
+                    module.add(multipleBufferChecks)    
+                    if kernel["ProblemType"]["SupportUserArgs"]:                
+                      module.add(SCmpEQU32(src0=sgpr("ArgType"), src1=3, comment="ArgType == 3 for General Batched GEMM"))
+                      module.add(SCBranchSCC1(labelName=generalBatchedGemmLoad.getLabelName()))                 
                 module.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(tmpS0), sgpr(tmpS1), coord, sgpr(tmpS0), comment="Scale%s %s by Stride"%(mat, coord)))
               else:
                 strideC = "Size%s"%(INDEX_CHARS[i-1])
@@ -12246,14 +12252,16 @@ class KernelWriterAssembly(KernelWriter):
                     module.add(SCBranchSCC0(labelName=multipleBufferChecks.getLabelName()))
                   else:
                     module.add(SCBranchSCC0(labelName=stridedBatchedGemmLoad.getLabelName()))
-                module.add(SCmpEQU32(src0=sgpr("ArgType"), src1=3, comment="ArgType == 3 for General Batched GEMM"))
-                module.add(SCBranchSCC1(labelName=generalBatchedGemmLoad.getLabelName())) 
+                if kernel["ProblemType"]["SupportUserArgs"]:
+                  module.add(SCmpEQU32(src0=sgpr("ArgType"), src1=3, comment="ArgType == 3 for General Batched GEMM"))
+                  module.add(SCBranchSCC1(labelName=generalBatchedGemmLoad.getLabelName())) 
                                 
                 if(kernel["_GlobalAccumulation"] == 'MultipleBufferSingleKernel' and mat == "C"):
                   module.add(SBranch(labelName=stridedBatchedGemmLoad.getLabelName()))
                   module.add(multipleBufferChecks)
-                  module.add(SCmpEQU32(src0=sgpr("ArgType"), src1=3, comment="ArgType == 3 for General Batched GEMM"))   
-                  module.add(SCBranchSCC1(labelName=generalBatchedGemmLoad.getLabelName()))                                
+                  if kernel["ProblemType"]["SupportUserArgs"]:
+                    module.add(SCmpEQU32(src0=sgpr("ArgType"), src1=3, comment="ArgType == 3 for General Batched GEMM"))   
+                    module.add(SCBranchSCC1(labelName=generalBatchedGemmLoad.getLabelName()))                                
                 module.add(stridedBatchedGemmLoad)
               module.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(tmpS0), sgpr(tmpS1), coord, sgpr(strideC), comment="Scale%s %s by Stride"%(mat, coord)))
             module.add(SLShiftLeftB64(dst=sgpr(tmpS0,2), src=sgpr(tmpS0,2), shiftHex=bpe, comment="scale by bpe"))
@@ -12365,8 +12373,9 @@ class KernelWriterAssembly(KernelWriter):
     SrdTDGeneralBatched = Label(label="SrdTDInit_GeneralBatched", comment="")
     SrdTDGeneralBatched_End = Label(label="SrdTDInit_GeneralBatched_End", comment="")
 
-    module.add(SCmpEQU32(src0=sgpr("ArgType"), src1=3, comment="ArgType == 3 for General Batched GEMM"))
-    module.add(SCBranchSCC1(labelName=SrdTDGeneralBatched.getLabelName(), comment="Initializing General Batched GEMM SrdTD differently"))
+    if kernel["ProblemType"]["SupportUserArgs"]:
+      module.add(SCmpEQU32(src0=sgpr("ArgType"), src1=3, comment="ArgType == 3 for General Batched GEMM"))
+      module.add(SCBranchSCC1(labelName=SrdTDGeneralBatched.getLabelName(), comment="Initializing General Batched GEMM SrdTD differently"))
 
     module.add(SAddU32(dst=sgpr("SrdTD+0"), src0=sgpr("AddressTD+0"), src1=sgpr(tmpspgr1+0), comment="add lo to SRTD" ))
     module.add(SAddCU32(dst=sgpr("SrdTD+1"), src0=sgpr("AddressTD+1"), src1=sgpr(tmpspgr1+1), comment="add hi to SRTD" ))
@@ -12608,8 +12617,9 @@ class KernelWriterAssembly(KernelWriter):
           module.add(SMovB64(dst=sgpr("Srd%s+0"%ch, 2), src=sgpr("Address%s+0"%ch, 2), comment="init SRD base address" )) 
           module.add(SBranch(labelName=GeneralBatchedGemmSrdInitiation_End.getLabelName(), comment="End of handling General Batched GEMM SRD initialization"))
         module.add(ArgTypeCheckLabel)
-    module.add(SCmpEQU32(src0=sgpr("ArgType"), src1=3, comment="ArgType == 3 for General Batched GEMM"))
-    module.add(SCBranchSCC1(labelName=GeneralBatchedGemmSrdInitiation.getLabelName()))
+    if kernel["ProblemType"]["SupportUserArgs"]:
+      module.add(SCmpEQU32(src0=sgpr("ArgType"), src1=3, comment="ArgType == 3 for General Batched GEMM"))
+      module.add(SCBranchSCC1(labelName=GeneralBatchedGemmSrdInitiation.getLabelName()))
     module.add(SMovB64(dst=sgpr("Srd%s+0"%ch, 2), src=sgpr("Address%s+0"%ch, 2), comment="init SRD base address" ))
     module.add(SBranch(labelName=GeneralBatchedGemmSrdInitiation_End.getLabelName()))
     module.add(GeneralBatchedGemmSrdInitiation)
