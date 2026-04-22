@@ -221,9 +221,7 @@ class TestCorrectnessFailed:
     """Tests for CorrectnessResult.failed factory (S-01)."""
 
     def test_failed_factory_sets_expected_fields(self):
-        cr = CorrectnessResult.failed(
-            rtol=1e-3, atol=1e-6, error_message="boom"
-        )
+        cr = CorrectnessResult.failed(rtol=1e-3, atol=1e-6, error_message="boom")
         assert cr.execution_success is False
         assert cr.tolerance_match is None
         assert cr.rtol == 1e-3

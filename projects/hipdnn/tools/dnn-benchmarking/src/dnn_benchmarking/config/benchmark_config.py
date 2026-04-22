@@ -25,7 +25,12 @@ class BenchmarkConfig:
     engine_id: int = 1
 
     def __post_init__(self) -> None:
-        """Validate configuration values."""
+        """Validate configuration values.
+
+        Note: engine_id is a 64-bit identifier (FNV-1a hash of the engine
+        name) and may be negative when interpreted as signed int64, so we
+        do not bound-check it.
+        """
         if isinstance(self.graph_path, str):
             self.graph_path = Path(self.graph_path)
 
@@ -34,9 +39,6 @@ class BenchmarkConfig:
 
         if self.benchmark_iters <= 0:
             raise ValueError("benchmark_iters must be positive")
-
-        if self.engine_id < 0:
-            raise ValueError("engine_id must be non-negative")
 
 
 @dataclass
@@ -66,10 +68,8 @@ class ABTestConfig:
         if isinstance(self.b_path, str):
             self.b_path = Path(self.b_path)
 
-        if self.a_id < 0:
-            raise ValueError("a_id must be non-negative")
-        if self.b_id < 0:
-            raise ValueError("b_id must be non-negative")
+        # a_id / b_id are FNV-1a engine ID hashes that may be negative when
+        # interpreted as signed int64; do not bound-check them.
         if self.rtol < 0:
             raise ValueError("rtol must be non-negative")
         if self.atol < 0:
@@ -162,8 +162,7 @@ class SuiteConfig:
         if self.engine_filter is not None:
             if len(self.engine_filter) == 0:
                 raise ValueError("engine_filter must be non-empty when set")
-            if any(e < 0 for e in self.engine_filter):
-                raise ValueError("engine_filter IDs must be non-negative")
+            # engine IDs are FNV-1a hashes -- may be negative as signed int64.
         valid_gpu_backends = {"torch", "auto", "none"}
         if self.gpu_backend not in valid_gpu_backends:
             raise ValueError(

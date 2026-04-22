@@ -29,6 +29,7 @@ from ..reporting.suite_results import (
     SuiteResult,
     collect_environment_info,
 )
+from ..validation.reference_provider import ReferenceProviderRegistry
 from .parser import create_parser
 
 
@@ -253,6 +254,24 @@ def run_suite(
     reporter = Reporter()
     total = len(graph_paths)
 
+    # Validation startup gate (W3): if --validate was requested, fail before
+    # iterating any graphs when the reference provider isn't registered or
+    # isn't available. Otherwise --validate silently degrades to a no-op.
+    if config.reference_provider != "none":
+        try:
+            ref = ReferenceProviderRegistry.get_provider(config.reference_provider)
+        except ValueError:
+            reporter.print_error(
+                f"Reference provider '{config.reference_provider}' is not registered."
+            )
+            return 1
+        if not ref.is_available():
+            reporter.print_error(
+                f"Reference provider '{config.reference_provider}' is not available "
+                "(check that its dependencies are installed)."
+            )
+            return 1
+
     reporter.print_suite_header(total)
 
     # Import hipdnn and create handle once for entire suite
@@ -417,7 +436,9 @@ def main() -> int:
         )
         return 1
 
-    # A/B testing mode: --AId or --BId specified (kept as a separate path for now)
+    # A/B testing mode: --AId or --BId specified (kept as a separate path for now).
+    # TODO(follow-up): --output is currently silently ignored in this mode -- run_ab_test
+    # has no JSON export. Either add export or reject --output here.
     if args.AId is not None or args.BId is not None:
         if len(resolved_files) > 1:
             print(
@@ -433,13 +454,24 @@ def main() -> int:
             )
             return 1
 
+        # W4: --engine is meaningless in A/B mode (configurations come from
+        # --AId / --BId). Reject rather than silently using args.engine[0].
+        if args.engine:
+            print(
+                "--engine is not supported in A/B testing mode "
+                "(use --AId and --BId instead)",
+                file=sys.stderr,
+            )
+            return 1
+
         try:
-            ab_engine_id = args.engine[0] if args.engine else 1
+            # engine_id is unused by the A/B path (it uses a_id / b_id
+            # from ABTestConfig); pass a benign default.
             config = BenchmarkConfig(
                 graph_path=Path(resolved_files[0]),
                 warmup_iters=args.warmup,
                 benchmark_iters=args.iters,
-                engine_id=ab_engine_id,
+                engine_id=args.AId,
             )
         except ValueError as e:
             print(f"Configuration error: {e}", file=sys.stderr)
@@ -483,6 +515,14 @@ def main() -> int:
         if len(resolved_files) > 1:
             print(
                 "Suite mode is not supported with --backend pytorch",
+                file=sys.stderr,
+            )
+            return 1
+        # W4: PyTorch backend executes one engine; a multi-ID list is ambiguous.
+        if args.engine and len(args.engine) > 1:
+            print(
+                "--engine accepts only a single ID with --backend pytorch "
+                "(got: " + ",".join(str(e) for e in args.engine) + ")",
                 file=sys.stderr,
             )
             return 1

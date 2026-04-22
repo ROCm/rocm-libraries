@@ -11,14 +11,17 @@ from typing import List
 def _parse_engine_list(s: str) -> List[int]:
     """Parse --engine value as a single ID or comma-separated list of IDs.
 
+    Engine IDs are deterministic FNV-1a hashes of the engine name and may
+    be negative when interpreted as signed int64, so we accept any int.
     Duplicates are removed while preserving first-seen order.
 
     Examples:
-      "1"        -> [1]
-      "1,2,3"    -> [1, 2, 3]
-      "1, 2"     -> [1, 2]
-      "1,1,2"    -> [1, 2]
-      "3,1,3,2"  -> [3, 1, 2]
+      "1"                      -> [1]
+      "1,2,3"                  -> [1, 2, 3]
+      "1, 2"                   -> [1, 2]
+      "1,1,2"                  -> [1, 2]
+      "3,1,3,2"                -> [3, 1, 2]
+      "-4567890123456789012"   -> [-4567890123456789012]
     """
     parts = [p.strip() for p in s.split(",")]
     parts = [p for p in parts if p]
@@ -28,8 +31,6 @@ def _parse_engine_list(s: str) -> List[int]:
         ids = [int(p) for p in parts]
     except ValueError:
         raise argparse.ArgumentTypeError(f"--engine expects integer ID(s), got {s!r}")
-    if any(i < 0 for i in ids):
-        raise argparse.ArgumentTypeError("--engine IDs must be non-negative")
     # Deduplicate while preserving first-seen order
     seen: set = set()
     deduped: List[int] = []

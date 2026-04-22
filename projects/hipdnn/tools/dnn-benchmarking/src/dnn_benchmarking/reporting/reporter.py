@@ -37,18 +37,27 @@ class Reporter:
         """
         self._output = output
 
-    def print_header(self, config: BenchmarkConfig, graph_name: str) -> None:
+    def print_header(
+        self,
+        config: BenchmarkConfig,
+        graph_name: str,
+        provider: Optional[str] = None,
+    ) -> None:
         """Print benchmark configuration header.
 
         Args:
             config: Benchmark configuration.
             graph_name: Name of the graph being benchmarked.
+            provider: Optional engine display name. When set, replaces the
+                legacy "(MIOpen)" literal so suite-mode verbose output can
+                show the actual engine for each result.
         """
+        engine_label = provider if provider else "MIOpen"
         self._print_line("=")
         self._print(f"hipDNN Benchmark: {graph_name}")
         self._print_line("=")
         self._print(f"Graph:      {config.graph_path}")
-        self._print(f"Engine ID:  {config.engine_id} (MIOpen)")
+        self._print(f"Engine ID:  {config.engine_id} ({engine_label})")
         self._print(f"Warmup:     {config.warmup_iters} iterations")
         self._print(f"Benchmark:  {config.benchmark_iters} iterations")
         self._print_line("-")
@@ -472,7 +481,7 @@ class Reporter:
                 benchmark_iters=suite_config.benchmark_iters,
                 engine_id=pe.engine_id,
             )
-            self.print_header(cfg_view, graph_result.graph_name)
+            self.print_header(cfg_view, graph_result.graph_name, provider=pe.provider)
 
             if pe.cpu_build_time_ms is not None:
                 self.print_init_time(pe.cpu_build_time_ms)

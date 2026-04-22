@@ -65,11 +65,12 @@ class TestParserGlobAndFilters:
         with pytest.raises(SystemExit):
             parser.parse_args(["--graph", "g.json", "--engine", "1,abc"])
 
-    def test_engine_flag_rejects_negative(self) -> None:
-        """--engine rejects negative IDs."""
+    def test_engine_flag_accepts_negative_id(self) -> None:
+        """--engine accepts negative IDs (FNV-1a engine hashes can have the
+        high bit set when interpreted as signed int64)."""
         parser = create_parser()
-        with pytest.raises(SystemExit):
-            parser.parse_args(["--graph", "g.json", "--engine", "-1"])
+        args = parser.parse_args(["--graph", "g.json", "--engine", "-1234567890"])
+        assert args.engine == [-1234567890]
 
     def test_engine_flag_default_none(self) -> None:
         """--engine defaults to None (= run all discovered engines)."""
@@ -596,3 +597,242 @@ class TestRunSuiteWorkflow:
         assert mock_run.call_count == 1
         # Returns 1 because of the error on first graph
         assert result == 1
+
+
+class TestEngineFlagModeRejection:
+    """W4: --engine list is incompatible with A/B and PyTorch single-engine modes."""
+
+    def _create_graph(self, tmpdir: Path) -> Path:
+        p = tmpdir / "g.json"
+        p.write_text(json.dumps({"name": "g", "nodes": [], "tensors": []}))
+        return p
+
+    def test_engine_list_with_ab_mode_rejected(self) -> None:
+        from dnn_benchmarking.cli.main import main
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            graph = self._create_graph(Path(tmpdir))
+            with patch(
+                "sys.argv",
+                [
+                    "dnn-benchmark",
+                    "--graph",
+                    str(graph),
+                    "--engine",
+                    "1,2",
+                    "--AId",
+                    "1",
+                    "--BId",
+                    "2",
+                ],
+            ):
+                result = main()
+        assert result == 1
+
+    def test_single_engine_with_ab_mode_also_rejected(self) -> None:
+        """Even a single-element --engine list is rejected in A/B (it has --AId/--BId)."""
+        from dnn_benchmarking.cli.main import main
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            graph = self._create_graph(Path(tmpdir))
+            with patch(
+                "sys.argv",
+                [
+                    "dnn-benchmark",
+                    "--graph",
+                    str(graph),
+                    "--engine",
+                    "5",
+                    "--AId",
+                    "1",
+                    "--BId",
+                    "2",
+                ],
+            ):
+                result = main()
+        assert result == 1
+
+    def test_engine_list_with_pytorch_backend_rejected(self) -> None:
+        from dnn_benchmarking.cli.main import main
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            graph = self._create_graph(Path(tmpdir))
+            with patch(
+                "sys.argv",
+                [
+                    "dnn-benchmark",
+                    "--graph",
+                    str(graph),
+                    "--engine",
+                    "1,2",
+                    "--backend",
+                    "pytorch",
+                ],
+            ):
+                result = main()
+        assert result == 1
+
+    @patch("dnn_benchmarking.cli.main.run_pytorch_benchmark")
+    def test_single_engine_with_pytorch_backend_accepted(
+        self, mock_run_pytorch: MagicMock
+    ) -> None:
+        """A single --engine ID is fine with --backend pytorch."""
+        mock_run_pytorch.return_value = 0
+        from dnn_benchmarking.cli.main import main
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            graph = self._create_graph(Path(tmpdir))
+            with patch(
+                "sys.argv",
+                [
+                    "dnn-benchmark",
+                    "--graph",
+                    str(graph),
+                    "--engine",
+                    "3",
+                    "--backend",
+                    "pytorch",
+                ],
+            ):
+                result = main()
+        assert result == 0
+        mock_run_pytorch.assert_called_once()
+        cfg = mock_run_pytorch.call_args.args[0]
+        assert cfg.engine_id == 3
+
+
+class TestValidationStartupGate:
+    """W3: --validate must be a hard gate. If the reference provider isn't
+    registered or available, run_suite returns 1 before iterating any graph."""
+
+    @patch("dnn_benchmarking.cli.main.run_graph_all_providers")
+    @patch.dict(sys.modules, {"hipdnn_frontend": _mock_hipdnn()})
+    def test_unregistered_reference_provider_fails_at_startup(
+        self, mock_run: MagicMock
+    ) -> None:
+        from dnn_benchmarking.cli.main import run_suite
+
+        config = SuiteConfig.__new__(SuiteConfig)
+        # Bypass the SuiteConfig validator (which restricts reference_provider
+        # to the known set) so we can simulate an unregistered name.
+        config.warmup_iters = 1
+        config.benchmark_iters = 1
+        config.seed = None
+        config.engine_filter = None
+        config.rtol = 1e-5
+        config.atol = 1e-8
+        config.gpu_backend = "none"
+        config.reference_provider = "definitely_not_registered"
+        config.verbose = False
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            graph = Path(tmpdir) / "g.json"
+            graph.write_text(json.dumps({"name": "g", "nodes": [], "tensors": []}))
+            result = run_suite([graph], config)
+
+        assert result == 1
+        # Startup gate fires before any graph runs.
+        mock_run.assert_not_called()
+
+    @patch("dnn_benchmarking.cli.main.ReferenceProviderRegistry")
+    @patch("dnn_benchmarking.cli.main.run_graph_all_providers")
+    @patch.dict(sys.modules, {"hipdnn_frontend": _mock_hipdnn()})
+    def test_unavailable_reference_provider_fails_at_startup(
+        self, mock_run: MagicMock, mock_registry: MagicMock
+    ) -> None:
+        from dnn_benchmarking.cli.main import run_suite
+
+        provider_mock = MagicMock()
+        provider_mock.is_available.return_value = False
+        mock_registry.get_provider.return_value = provider_mock
+
+        config = SuiteConfig(reference_provider="pytorch")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            graph = Path(tmpdir) / "g.json"
+            graph.write_text(json.dumps({"name": "g", "nodes": [], "tensors": []}))
+            result = run_suite([graph], config)
+
+        assert result == 1
+        mock_run.assert_not_called()
+
+    @patch("dnn_benchmarking.cli.main.ReferenceProviderRegistry")
+    @patch("dnn_benchmarking.cli.main.run_graph_all_providers")
+    @patch("dnn_benchmarking.cli.main.collect_environment_info")
+    @patch.dict(sys.modules, {"hipdnn_frontend": _mock_hipdnn()})
+    def test_available_reference_provider_proceeds_to_graph_iteration(
+        self,
+        mock_env: MagicMock,
+        mock_run: MagicMock,
+        mock_registry: MagicMock,
+    ) -> None:
+        from dnn_benchmarking.cli.main import run_suite
+
+        mock_env.return_value = {
+            "rocm_version": None,
+            "gpu_model": None,
+            "python_version": "3.10.0",
+            "hipdnn_version": None,
+        }
+        provider_mock = MagicMock()
+        provider_mock.is_available.return_value = True
+        mock_registry.get_provider.return_value = provider_mock
+
+        # Successful benchmark with passing correctness
+        mock_run.return_value = GraphResult(
+            graph_name="g",
+            graph_path="/tmp/g.json",
+            results=[
+                ProviderEngineResult(
+                    provider="MIOPEN_ENGINE",
+                    engine_id=0,
+                    status="success",
+                    cpu_build_time_ms=1.0,
+                    correctness=CorrectnessResult(
+                        execution_success=True,
+                        tolerance_match=True,
+                        rtol=1e-5,
+                        atol=1e-8,
+                    ),
+                )
+            ],
+        )
+
+        config = SuiteConfig(reference_provider="pytorch")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            graph = Path(tmpdir) / "g.json"
+            graph.write_text(
+                json.dumps(
+                    {
+                        "name": "g",
+                        "nodes": [
+                            {
+                                "op_type": "ConvolutionForward",
+                                "inputs": {},
+                                "outputs": {"y": 100},
+                            }
+                        ],
+                        "tensors": [
+                            {
+                                "uid": 1,
+                                "dims": [1, 3, 4, 4],
+                                "strides": [48, 16, 4, 1],
+                                "data_type": "FLOAT",
+                                "is_virtual": False,
+                            },
+                            {
+                                "uid": 100,
+                                "dims": [1, 3, 4, 4],
+                                "strides": [48, 16, 4, 1],
+                                "data_type": "FLOAT",
+                                "is_virtual": False,
+                            },
+                        ],
+                    }
+                )
+            )
+            result = run_suite([graph], config)
+
+        assert result == 0
+        mock_run.assert_called_once()

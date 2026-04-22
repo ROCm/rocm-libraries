@@ -19,6 +19,7 @@ from dnn_benchmarking.reporting.suite_results import (
 def _make_pe_success(
     engine_id: int = 1,
     correctness: object = None,
+    provider: str = "miopen",
 ) -> ProviderEngineResult:
     """Helper: build a successful ProviderEngineResult with timing."""
     e2e = BenchmarkStats(
@@ -38,7 +39,7 @@ def _make_pe_success(
         p99_ms=0.535,
     )
     return ProviderEngineResult(
-        provider="miopen",
+        provider=provider,
         engine_id=engine_id,
         status="success",
         cpu_build_time_ms=45.23,
@@ -362,3 +363,61 @@ class TestVerboseReporter:
         out = output.getvalue()
         assert "SKIPPED" in out
         assert "not supported" in out
+
+    def test_verbose_header_uses_per_engine_provider_name(self) -> None:
+        """W6: Verbose header must render the engine's actual provider, not '(MIOpen)'."""
+        output = io.StringIO()
+        reporter = Reporter(output=output)
+        gr = GraphResult(
+            graph_name="g",
+            graph_path="/tmp/g.json",
+            results=[
+                _make_pe_success(engine_id=1, provider="MIOPEN_ENGINE"),
+                _make_pe_success(engine_id=2, provider="HIPBLASLT_ENGINE"),
+            ],
+        )
+        reporter.print_verbose_graph_result(gr, SuiteConfig())
+        out = output.getvalue()
+        assert "Engine ID:  1 (MIOPEN_ENGINE)" in out
+        assert "Engine ID:  2 (HIPBLASLT_ENGINE)" in out
+        # The legacy literal must not appear anywhere in suite-mode verbose output.
+        assert "(MIOpen)" not in out
+
+
+class TestPrintHeader:
+    """Tests for print_header provider override (W6)."""
+
+    def test_print_header_default_is_miopen(self) -> None:
+        """When no provider is supplied, the legacy '(MIOpen)' literal is preserved."""
+        from pathlib import Path
+
+        from dnn_benchmarking.config.benchmark_config import BenchmarkConfig
+
+        output = io.StringIO()
+        reporter = Reporter(output=output)
+        cfg = BenchmarkConfig(
+            graph_path=Path("/tmp/x.json"),
+            warmup_iters=10,
+            benchmark_iters=100,
+            engine_id=1,
+        )
+        reporter.print_header(cfg, "graph")
+        assert "(MIOpen)" in output.getvalue()
+
+    def test_print_header_uses_provided_provider(self) -> None:
+        from pathlib import Path
+
+        from dnn_benchmarking.config.benchmark_config import BenchmarkConfig
+
+        output = io.StringIO()
+        reporter = Reporter(output=output)
+        cfg = BenchmarkConfig(
+            graph_path=Path("/tmp/x.json"),
+            warmup_iters=10,
+            benchmark_iters=100,
+            engine_id=42,
+        )
+        reporter.print_header(cfg, "graph", provider="HIPBLASLT_ENGINE")
+        out = output.getvalue()
+        assert "Engine ID:  42 (HIPBLASLT_ENGINE)" in out
+        assert "(MIOpen)" not in out

@@ -4,15 +4,14 @@
 """Unit tests for suite_runner module."""
 
 from pathlib import Path
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock, patch
 
-import numpy as np
 import pytest
 
 from dnn_benchmarking.execution.suite_runner import (
     run_graph_all_providers,
-    discover_providers,
-    discover_engines,
+    discover_engine_ids,
+    _resolve_engine_name,
     _get_reference_provider,
     _check_correctness,
     _is_support_error,
@@ -53,64 +52,71 @@ def _make_config(**overrides):
     return SuiteConfig(**defaults)
 
 
+def _make_bm_mock():
+    """Create a BufferManager mock that supports the context-manager protocol."""
+    mock_bm = MagicMock()
+    mock_bm.__enter__ = MagicMock(return_value=mock_bm)
+    mock_bm.__exit__ = MagicMock(return_value=False)
+    mock_bm.create_variant_pack.return_value = {1: 100}
+    return mock_bm
+
+
+def _make_exec_mock(init_time_ms: float = 1.0, has_kernel_timings: bool = False):
+    """Create an Executor mock with a working benchmark() return value."""
+    mock_exec = MagicMock()
+    mock_exec.init_time_ms = init_time_ms
+    mock_result = MagicMock()
+    mock_result.e2e_timings = [1.0]
+    mock_result.kernel_timings = [0.5] if has_kernel_timings else None
+    mock_result.has_kernel_timings = has_kernel_timings
+    mock_exec.benchmark.return_value = mock_result
+    return mock_exec
+
+
 class TestRunGraphAllProviders:
     """Tests for run_graph_all_providers function."""
 
-    @patch("dnn_benchmarking.execution.suite_runner.discover_engines")
-    @patch("dnn_benchmarking.execution.suite_runner.discover_providers")
+    @patch("dnn_benchmarking.execution.suite_runner._resolve_engine_name")
+    @patch("dnn_benchmarking.execution.suite_runner.discover_engine_ids")
     @patch("dnn_benchmarking.execution.suite_runner._get_reference_provider")
     @patch("dnn_benchmarking.execution.suite_runner.Executor")
     @patch("dnn_benchmarking.execution.suite_runner.BufferManager")
-    def test_returns_graph_result_with_one_result_per_provider_engine(
+    def test_one_result_per_discovered_engine(
         self,
         mock_bm_cls,
         mock_exec_cls,
         mock_get_ref,
-        mock_disc_providers,
-        mock_disc_engines,
+        mock_disc,
+        mock_resolve_name,
     ):
-        """Test 1: run_graph_all_providers returns a GraphResult with one
-        ProviderEngineResult per discovered provider/engine combo."""
-        mock_disc_providers.return_value = ["providerA", "providerB"]
-        mock_disc_engines.return_value = [0, 1]
+        """run_graph_all_providers returns one ProviderEngineResult per discovered engine ID."""
+        mock_disc.return_value = [0, 1, 2]
+        mock_resolve_name.side_effect = lambda eid: f"engine_{eid}"
         mock_get_ref.return_value = None
 
-        # Set up executor mock
-        mock_exec = MagicMock()
-        mock_exec.init_time_ms = 5.0
-        mock_result = MagicMock()
-        mock_result.e2e_timings = [1.0, 2.0, 3.0]
-        mock_result.kernel_timings = [0.5, 1.0, 1.5]
-        mock_result.has_kernel_timings = True
-        mock_exec.benchmark.return_value = mock_result
-        mock_exec_cls.return_value = mock_exec
-
-        # Set up buffer manager mock
-        mock_bm = MagicMock()
-        mock_bm.__enter__ = MagicMock(return_value=mock_bm)
-        mock_bm.__exit__ = MagicMock(return_value=False)
-        mock_bm.create_variant_pack.return_value = {1: 100}
-        mock_bm_cls.return_value = mock_bm
+        mock_exec_cls.return_value = _make_exec_mock(has_kernel_timings=True)
+        mock_bm_cls.return_value = _make_bm_mock()
 
         config = _make_config()
-        tensor_infos = [_make_tensor_info(1), _make_tensor_info(2, is_output=True)]
-        graph_json = _make_graph_json()
-        handle = MagicMock()
-
         result = run_graph_all_providers(
             graph_path=Path("test.json"),
-            graph_json=graph_json,
-            tensor_infos=tensor_infos,
+            graph_json=_make_graph_json(),
+            tensor_infos=[_make_tensor_info(1), _make_tensor_info(2, is_output=True)],
             config=config,
-            handle=handle,
+            handle=MagicMock(),
         )
 
         assert isinstance(result, GraphResult)
-        # 2 providers x 2 engines = 4 results
-        assert len(result.results) == 4
+        assert len(result.results) == 3
+        assert [r.engine_id for r in result.results] == [0, 1, 2]
+        assert [r.provider for r in result.results] == [
+            "engine_0",
+            "engine_1",
+            "engine_2",
+        ]
 
-    @patch("dnn_benchmarking.execution.suite_runner.discover_engines")
-    @patch("dnn_benchmarking.execution.suite_runner.discover_providers")
+    @patch("dnn_benchmarking.execution.suite_runner._resolve_engine_name")
+    @patch("dnn_benchmarking.execution.suite_runner.discover_engine_ids")
     @patch("dnn_benchmarking.execution.suite_runner._get_reference_provider")
     @patch("dnn_benchmarking.execution.suite_runner.Executor")
     @patch("dnn_benchmarking.execution.suite_runner.BufferManager")
@@ -119,30 +125,24 @@ class TestRunGraphAllProviders:
         mock_bm_cls,
         mock_exec_cls,
         mock_get_ref,
-        mock_disc_providers,
-        mock_disc_engines,
+        mock_disc,
+        mock_resolve_name,
     ):
-        """Test 2: When a provider/engine combo fails during prepare(), it records
-        status='error' with error message, no timing data."""
-        mock_disc_providers.return_value = ["provA"]
-        mock_disc_engines.return_value = [0]
+        """When Executor.prepare() fails, the result is status='error' with no timing."""
+        mock_disc.return_value = [0]
+        mock_resolve_name.return_value = "engine_0"
         mock_get_ref.return_value = None
 
         mock_exec = MagicMock()
         mock_exec.prepare.side_effect = ExecutionError("build failed")
         mock_exec_cls.return_value = mock_exec
 
-        config = _make_config()
-        tensor_infos = [_make_tensor_info(1)]
-        graph_json = _make_graph_json()
-        handle = MagicMock()
-
         result = run_graph_all_providers(
             graph_path=Path("test.json"),
-            graph_json=graph_json,
-            tensor_infos=tensor_infos,
-            config=config,
-            handle=handle,
+            graph_json=_make_graph_json(),
+            tensor_infos=[_make_tensor_info(1)],
+            config=_make_config(),
+            handle=MagicMock(),
         )
 
         assert len(result.results) == 1
@@ -153,8 +153,8 @@ class TestRunGraphAllProviders:
         assert r.gpu_kernel_stats is None
         assert r.e2e_stats is None
 
-    @patch("dnn_benchmarking.execution.suite_runner.discover_engines")
-    @patch("dnn_benchmarking.execution.suite_runner.discover_providers")
+    @patch("dnn_benchmarking.execution.suite_runner._resolve_engine_name")
+    @patch("dnn_benchmarking.execution.suite_runner.discover_engine_ids")
     @patch("dnn_benchmarking.execution.suite_runner._get_reference_provider")
     @patch("dnn_benchmarking.execution.suite_runner.Executor")
     @patch("dnn_benchmarking.execution.suite_runner.BufferManager")
@@ -163,13 +163,12 @@ class TestRunGraphAllProviders:
         mock_bm_cls,
         mock_exec_cls,
         mock_get_ref,
-        mock_disc_providers,
-        mock_disc_engines,
+        mock_disc,
+        mock_resolve_name,
     ):
-        """Test 3: When a provider/engine combo does not support the graph
-        (check_support fails), it records status='skipped' with reason."""
-        mock_disc_providers.return_value = ["provA"]
-        mock_disc_engines.return_value = [0]
+        """An ExecutionError that looks like a support-check failure is recorded as skipped."""
+        mock_disc.return_value = [0]
+        mock_resolve_name.return_value = "engine_0"
         mock_get_ref.return_value = None
 
         mock_exec = MagicMock()
@@ -178,17 +177,12 @@ class TestRunGraphAllProviders:
         )
         mock_exec_cls.return_value = mock_exec
 
-        config = _make_config()
-        tensor_infos = [_make_tensor_info(1)]
-        graph_json = _make_graph_json()
-        handle = MagicMock()
-
         result = run_graph_all_providers(
             graph_path=Path("test.json"),
-            graph_json=graph_json,
-            tensor_infos=tensor_infos,
-            config=config,
-            handle=handle,
+            graph_json=_make_graph_json(),
+            tensor_infos=[_make_tensor_info(1)],
+            config=_make_config(),
+            handle=MagicMock(),
         )
 
         assert len(result.results) == 1
@@ -196,8 +190,8 @@ class TestRunGraphAllProviders:
         assert r.status == "skipped"
         assert r.skip_reason is not None
 
-    @patch("dnn_benchmarking.execution.suite_runner.discover_engines")
-    @patch("dnn_benchmarking.execution.suite_runner.discover_providers")
+    @patch("dnn_benchmarking.execution.suite_runner._resolve_engine_name")
+    @patch("dnn_benchmarking.execution.suite_runner.discover_engine_ids")
     @patch("dnn_benchmarking.execution.suite_runner._get_reference_provider")
     @patch("dnn_benchmarking.execution.suite_runner.Executor")
     @patch("dnn_benchmarking.execution.suite_runner.BufferManager")
@@ -206,41 +200,25 @@ class TestRunGraphAllProviders:
         mock_bm_cls,
         mock_exec_cls,
         mock_get_ref,
-        mock_disc_providers,
-        mock_disc_engines,
+        mock_disc,
+        mock_resolve_name,
     ):
-        """Test 4: Successful execution records status='success' with separate
-        cpu_build_time_ms, gpu_kernel_stats, e2e_stats."""
-        mock_disc_providers.return_value = ["provA"]
-        mock_disc_engines.return_value = [0]
+        """Success: status='success' with separate cpu_build_time_ms / gpu_kernel_stats / e2e_stats."""
+        mock_disc.return_value = [0]
+        mock_resolve_name.return_value = "engine_0"
         mock_get_ref.return_value = None
 
-        mock_exec = MagicMock()
-        mock_exec.init_time_ms = 12.5
-        mock_result = MagicMock()
-        mock_result.e2e_timings = [1.0, 2.0, 3.0]
-        mock_result.kernel_timings = [0.5, 1.0, 1.5]
-        mock_result.has_kernel_timings = True
-        mock_exec.benchmark.return_value = mock_result
-        mock_exec_cls.return_value = mock_exec
-
-        mock_bm = MagicMock()
-        mock_bm.__enter__ = MagicMock(return_value=mock_bm)
-        mock_bm.__exit__ = MagicMock(return_value=False)
-        mock_bm.create_variant_pack.return_value = {1: 100}
-        mock_bm_cls.return_value = mock_bm
-
-        config = _make_config()
-        tensor_infos = [_make_tensor_info(1), _make_tensor_info(2, is_output=True)]
-        graph_json = _make_graph_json()
-        handle = MagicMock()
+        mock_exec_cls.return_value = _make_exec_mock(
+            init_time_ms=12.5, has_kernel_timings=True
+        )
+        mock_bm_cls.return_value = _make_bm_mock()
 
         result = run_graph_all_providers(
             graph_path=Path("test.json"),
-            graph_json=graph_json,
-            tensor_infos=tensor_infos,
-            config=config,
-            handle=handle,
+            graph_json=_make_graph_json(),
+            tensor_infos=[_make_tensor_info(1), _make_tensor_info(2, is_output=True)],
+            config=_make_config(),
+            handle=MagicMock(),
         )
 
         r = result.results[0]
@@ -249,8 +227,8 @@ class TestRunGraphAllProviders:
         assert isinstance(r.gpu_kernel_stats, BenchmarkStats)
         assert isinstance(r.e2e_stats, BenchmarkStats)
 
-    @patch("dnn_benchmarking.execution.suite_runner.discover_engines")
-    @patch("dnn_benchmarking.execution.suite_runner.discover_providers")
+    @patch("dnn_benchmarking.execution.suite_runner._resolve_engine_name")
+    @patch("dnn_benchmarking.execution.suite_runner.discover_engine_ids")
     @patch("dnn_benchmarking.execution.suite_runner._get_reference_provider")
     @patch("dnn_benchmarking.execution.suite_runner.Executor")
     @patch("dnn_benchmarking.execution.suite_runner.BufferManager")
@@ -259,50 +237,110 @@ class TestRunGraphAllProviders:
         mock_bm_cls,
         mock_exec_cls,
         mock_get_ref,
-        mock_disc_providers,
-        mock_disc_engines,
+        mock_disc,
+        mock_resolve_name,
     ):
-        """Test 5: cpu_build_time_ms comes from Executor.init_time_ms."""
-        mock_disc_providers.return_value = ["provA"]
-        mock_disc_engines.return_value = [0]
+        """cpu_build_time_ms comes from Executor.init_time_ms."""
+        mock_disc.return_value = [0]
+        mock_resolve_name.return_value = "engine_0"
         mock_get_ref.return_value = None
 
-        mock_exec = MagicMock()
-        mock_exec.init_time_ms = 42.0
-        mock_result = MagicMock()
-        mock_result.e2e_timings = [1.0]
-        mock_result.kernel_timings = None
-        mock_result.has_kernel_timings = False
-        mock_exec.benchmark.return_value = mock_result
-        mock_exec_cls.return_value = mock_exec
-
-        mock_bm = MagicMock()
-        mock_bm.__enter__ = MagicMock(return_value=mock_bm)
-        mock_bm.__exit__ = MagicMock(return_value=False)
-        mock_bm.create_variant_pack.return_value = {1: 100}
-        mock_bm_cls.return_value = mock_bm
-
-        config = _make_config()
-        tensor_infos = [_make_tensor_info(1)]
-        graph_json = _make_graph_json()
-        handle = MagicMock()
+        mock_exec_cls.return_value = _make_exec_mock(init_time_ms=42.0)
+        mock_bm_cls.return_value = _make_bm_mock()
 
         result = run_graph_all_providers(
             graph_path=Path("test.json"),
-            graph_json=graph_json,
-            tensor_infos=tensor_infos,
-            config=config,
-            handle=handle,
+            graph_json=_make_graph_json(),
+            tensor_infos=[_make_tensor_info(1)],
+            config=_make_config(),
+            handle=MagicMock(),
         )
 
         assert result.results[0].cpu_build_time_ms == 42.0
+
+
+class TestDiscoveryFailure:
+    """Discovery-level failures (W2) are surfaced as graph-level errors."""
+
+    @patch("dnn_benchmarking.execution.suite_runner.discover_engine_ids")
+    def test_discovery_exception_is_recorded_as_graph_error(self, mock_disc):
+        """When discover_engine_ids raises, the graph gets a single error entry."""
+        mock_disc.side_effect = ExecutionError("backend rejected graph")
+
+        result = run_graph_all_providers(
+            graph_path=Path("test.json"),
+            graph_json=_make_graph_json(),
+            tensor_infos=[_make_tensor_info(1)],
+            config=_make_config(),
+            handle=MagicMock(),
+        )
+
+        assert len(result.results) == 1
+        r = result.results[0]
+        assert r.status == "error"
+        assert "Engine discovery failed" in r.error_message
+        assert "backend rejected graph" in r.error_message
+
+    @patch("dnn_benchmarking.execution.suite_runner.discover_engine_ids")
+    def test_empty_discovery_recorded_as_graph_error(self, mock_disc):
+        """When discovery returns no engines, surface as a graph-level error."""
+        mock_disc.return_value = []
+
+        result = run_graph_all_providers(
+            graph_path=Path("test.json"),
+            graph_json=_make_graph_json(),
+            tensor_infos=[_make_tensor_info(1)],
+            config=_make_config(),
+            handle=MagicMock(),
+        )
+
+        assert len(result.results) == 1
+        assert result.results[0].status == "error"
+        assert "No engines discovered" in result.results[0].error_message
+
+    @patch("dnn_benchmarking.execution.suite_runner.discover_engine_ids")
+    def test_no_engines_runtime_error_recorded_as_skipped(self, mock_disc):
+        """C++ binding throws RuntimeError when no engines support the graph;
+        we classify that as 'skipped' (unsupported) rather than 'error'."""
+        mock_disc.side_effect = RuntimeError(
+            "Failed to get ranked engine ids: No engine configurations available for the graph."
+        )
+
+        result = run_graph_all_providers(
+            graph_path=Path("test.json"),
+            graph_json=_make_graph_json(),
+            tensor_infos=[_make_tensor_info(1)],
+            config=_make_config(),
+            handle=MagicMock(),
+        )
+
+        assert len(result.results) == 1
+        r = result.results[0]
+        assert r.status == "skipped"
+        assert "No engine configurations" in (r.skip_reason or "")
+
+    @patch("dnn_benchmarking.execution.suite_runner.discover_engine_ids")
+    def test_engine_filter_excludes_everything(self, mock_disc):
+        """When engine_filter excludes every discovered engine, surface as error."""
+        mock_disc.return_value = [0, 1]
+
+        result = run_graph_all_providers(
+            graph_path=Path("test.json"),
+            graph_json=_make_graph_json(),
+            tensor_infos=[_make_tensor_info(1)],
+            config=_make_config(engine_filter=[99]),
+            handle=MagicMock(),
+        )
+
+        assert len(result.results) == 1
+        assert result.results[0].status == "error"
+        assert "filter" in result.results[0].error_message.lower()
 
 
 class TestSuiteConfigValidation:
     """Tests for SuiteConfig dataclass validation."""
 
     def test_valid_config(self):
-        """Test 6: SuiteConfig dataclass validates engine filter fields."""
         config = SuiteConfig(warmup_iters=5, benchmark_iters=10)
         assert config.warmup_iters == 5
         assert config.benchmark_iters == 10
@@ -313,61 +351,48 @@ class TestSuiteConfigValidation:
         assert config.reference_provider == "none"
 
     def test_negative_warmup_raises(self):
-        """SuiteConfig rejects negative warmup_iters."""
         with pytest.raises(ValueError, match="warmup_iters"):
             SuiteConfig(warmup_iters=-1, benchmark_iters=10)
 
     def test_zero_benchmark_iters_raises(self):
-        """SuiteConfig rejects zero benchmark_iters."""
         with pytest.raises(ValueError, match="benchmark_iters"):
             SuiteConfig(warmup_iters=0, benchmark_iters=0)
 
     def test_engine_filter_accepts_list(self):
-        """SuiteConfig accepts a list of engine IDs as engine_filter."""
         config = SuiteConfig(engine_filter=[1, 2, 3])
         assert config.engine_filter == [1, 2, 3]
 
     def test_engine_filter_empty_list_raises(self):
-        """SuiteConfig rejects empty engine_filter (treat as user error)."""
         with pytest.raises(ValueError, match="engine_filter"):
             SuiteConfig(engine_filter=[])
 
-    def test_engine_filter_negative_id_raises(self):
-        """SuiteConfig rejects negative engine IDs in filter."""
-        with pytest.raises(ValueError, match="engine_filter"):
-            SuiteConfig(engine_filter=[1, -1])
+    def test_engine_filter_accepts_negative_ids(self):
+        """Engine IDs are FNV-1a hashes; negative values must be allowed."""
+        config = SuiteConfig(engine_filter=[1, -1234567890])
+        assert config.engine_filter == [1, -1234567890]
 
     def test_verbose_default_false(self):
-        """SuiteConfig.verbose defaults to False."""
         config = SuiteConfig()
         assert config.verbose is False
 
     def test_verbose_can_be_set(self):
-        """SuiteConfig.verbose can be set to True."""
         config = SuiteConfig(verbose=True)
         assert config.verbose is True
 
     def test_invalid_gpu_backend_raises(self):
-        """SuiteConfig rejects unknown gpu_backend strings."""
         with pytest.raises(ValueError, match="gpu_backend"):
             SuiteConfig(gpu_backend="bogus")
 
     def test_invalid_reference_provider_raises(self):
-        """SuiteConfig rejects unknown reference_provider strings."""
         with pytest.raises(ValueError, match="reference_provider"):
             SuiteConfig(reference_provider="not_a_real_provider")
 
     def test_default_gpu_backend_and_reference_provider_accepted(self):
-        """SuiteConfig defaults ('auto', 'none') validate cleanly,
-        and all documented valid options are accepted."""
-        # Defaults
         config = SuiteConfig()
         assert config.gpu_backend == "auto"
         assert config.reference_provider == "none"
-        # Each valid gpu_backend
         for backend in ("torch", "auto", "none"):
             SuiteConfig(gpu_backend=backend)
-        # Each valid reference_provider
         for provider in ("none", "pytorch", "cpu_plugin"):
             SuiteConfig(reference_provider=provider)
 
@@ -401,8 +426,8 @@ class TestIsSupportError:
 class TestEngineFilter:
     """Tests for engine filter behavior."""
 
-    @patch("dnn_benchmarking.execution.suite_runner.discover_engines")
-    @patch("dnn_benchmarking.execution.suite_runner.discover_providers")
+    @patch("dnn_benchmarking.execution.suite_runner._resolve_engine_name")
+    @patch("dnn_benchmarking.execution.suite_runner.discover_engine_ids")
     @patch("dnn_benchmarking.execution.suite_runner._get_reference_provider")
     @patch("dnn_benchmarking.execution.suite_runner.Executor")
     @patch("dnn_benchmarking.execution.suite_runner.BufferManager")
@@ -411,47 +436,30 @@ class TestEngineFilter:
         mock_bm_cls,
         mock_exec_cls,
         mock_get_ref,
-        mock_disc_providers,
-        mock_disc_engines,
+        mock_disc,
+        mock_resolve_name,
     ):
-        """Test 8: When --engine filter is set, only that engine ID is iterated per provider."""
-        mock_disc_providers.return_value = ["provA"]
-        mock_disc_engines.return_value = [0, 1, 2]
+        """When --engine filter is set, only that engine ID is iterated."""
+        mock_disc.return_value = [0, 1, 2]
+        mock_resolve_name.side_effect = lambda eid: f"engine_{eid}"
         mock_get_ref.return_value = None
 
-        mock_exec = MagicMock()
-        mock_exec.init_time_ms = 1.0
-        mock_result = MagicMock()
-        mock_result.e2e_timings = [1.0]
-        mock_result.kernel_timings = None
-        mock_result.has_kernel_timings = False
-        mock_exec.benchmark.return_value = mock_result
-        mock_exec_cls.return_value = mock_exec
-
-        mock_bm = MagicMock()
-        mock_bm.__enter__ = MagicMock(return_value=mock_bm)
-        mock_bm.__exit__ = MagicMock(return_value=False)
-        mock_bm.create_variant_pack.return_value = {1: 100}
-        mock_bm_cls.return_value = mock_bm
-
-        config = _make_config(engine_filter=[2])
-        tensor_infos = [_make_tensor_info(1)]
-        graph_json = _make_graph_json()
-        handle = MagicMock()
+        mock_exec_cls.return_value = _make_exec_mock()
+        mock_bm_cls.return_value = _make_bm_mock()
 
         result = run_graph_all_providers(
             graph_path=Path("test.json"),
-            graph_json=graph_json,
-            tensor_infos=tensor_infos,
-            config=config,
-            handle=handle,
+            graph_json=_make_graph_json(),
+            tensor_infos=[_make_tensor_info(1)],
+            config=_make_config(engine_filter=[2]),
+            handle=MagicMock(),
         )
 
         assert len(result.results) == 1
         assert result.results[0].engine_id == 2
 
-    @patch("dnn_benchmarking.execution.suite_runner.discover_engines")
-    @patch("dnn_benchmarking.execution.suite_runner.discover_providers")
+    @patch("dnn_benchmarking.execution.suite_runner._resolve_engine_name")
+    @patch("dnn_benchmarking.execution.suite_runner.discover_engine_ids")
     @patch("dnn_benchmarking.execution.suite_runner._get_reference_provider")
     @patch("dnn_benchmarking.execution.suite_runner.Executor")
     @patch("dnn_benchmarking.execution.suite_runner.BufferManager")
@@ -460,35 +468,22 @@ class TestEngineFilter:
         mock_bm_cls,
         mock_exec_cls,
         mock_get_ref,
-        mock_disc_providers,
-        mock_disc_engines,
+        mock_disc,
+        mock_resolve_name,
     ):
         """engine_filter=[1, 3, 99]: engines 1 and 3 run; 99 (not discovered) is dropped."""
-        mock_disc_providers.return_value = ["provA"]
-        mock_disc_engines.return_value = [0, 1, 2, 3]
+        mock_disc.return_value = [0, 1, 2, 3]
+        mock_resolve_name.side_effect = lambda eid: f"engine_{eid}"
         mock_get_ref.return_value = None
 
-        mock_exec = MagicMock()
-        mock_exec.init_time_ms = 1.0
-        mock_result = MagicMock()
-        mock_result.e2e_timings = [1.0]
-        mock_result.kernel_timings = None
-        mock_result.has_kernel_timings = False
-        mock_exec.benchmark.return_value = mock_result
-        mock_exec_cls.return_value = mock_exec
+        mock_exec_cls.return_value = _make_exec_mock()
+        mock_bm_cls.return_value = _make_bm_mock()
 
-        mock_bm = MagicMock()
-        mock_bm.__enter__ = MagicMock(return_value=mock_bm)
-        mock_bm.__exit__ = MagicMock(return_value=False)
-        mock_bm.create_variant_pack.return_value = {1: 100}
-        mock_bm_cls.return_value = mock_bm
-
-        config = _make_config(engine_filter=[1, 3, 99])
         result = run_graph_all_providers(
             graph_path=Path("test.json"),
             graph_json=_make_graph_json(),
             tensor_infos=[_make_tensor_info(1)],
-            config=config,
+            config=_make_config(engine_filter=[1, 3, 99]),
             handle=MagicMock(),
         )
 
@@ -499,8 +494,8 @@ class TestEngineFilter:
 class TestNoRetryOnFailure:
     """Tests for no-retry failure behavior (D-10)."""
 
-    @patch("dnn_benchmarking.execution.suite_runner.discover_engines")
-    @patch("dnn_benchmarking.execution.suite_runner.discover_providers")
+    @patch("dnn_benchmarking.execution.suite_runner._resolve_engine_name")
+    @patch("dnn_benchmarking.execution.suite_runner.discover_engine_ids")
     @patch("dnn_benchmarking.execution.suite_runner._get_reference_provider")
     @patch("dnn_benchmarking.execution.suite_runner.Executor")
     @patch("dnn_benchmarking.execution.suite_runner.BufferManager")
@@ -509,41 +504,35 @@ class TestNoRetryOnFailure:
         mock_bm_cls,
         mock_exec_cls,
         mock_get_ref,
-        mock_disc_providers,
-        mock_disc_engines,
+        mock_disc,
+        mock_resolve_name,
     ):
-        """Test 9: No retry on failure -- single attempt per provider/engine combination."""
-        mock_disc_providers.return_value = ["provA"]
-        mock_disc_engines.return_value = [0]
+        """No retry on failure -- single attempt per engine."""
+        mock_disc.return_value = [0]
+        mock_resolve_name.return_value = "engine_0"
         mock_get_ref.return_value = None
 
         mock_exec = MagicMock()
         mock_exec.prepare.side_effect = ExecutionError("fail")
         mock_exec_cls.return_value = mock_exec
 
-        config = _make_config()
-        tensor_infos = [_make_tensor_info(1)]
-        graph_json = _make_graph_json()
-        handle = MagicMock()
-
         result = run_graph_all_providers(
             graph_path=Path("test.json"),
-            graph_json=graph_json,
-            tensor_infos=tensor_infos,
-            config=config,
-            handle=handle,
+            graph_json=_make_graph_json(),
+            tensor_infos=[_make_tensor_info(1)],
+            config=_make_config(),
+            handle=MagicMock(),
         )
 
-        # Executor created exactly once (no retry)
         assert mock_exec_cls.call_count == 1
         assert result.results[0].status == "error"
 
 
 class TestCorrectnessChecking:
-    """Tests for correctness checking via ArrayComparator (CORR-01/02)."""
+    """Tests for correctness checking via ArrayComparator (CORR-01/02) and W3."""
 
-    @patch("dnn_benchmarking.execution.suite_runner.discover_engines")
-    @patch("dnn_benchmarking.execution.suite_runner.discover_providers")
+    @patch("dnn_benchmarking.execution.suite_runner._resolve_engine_name")
+    @patch("dnn_benchmarking.execution.suite_runner.discover_engine_ids")
     @patch("dnn_benchmarking.execution.suite_runner._get_reference_provider")
     @patch("dnn_benchmarking.execution.suite_runner._check_correctness")
     @patch("dnn_benchmarking.execution.suite_runner.Executor")
@@ -554,18 +543,15 @@ class TestCorrectnessChecking:
         mock_exec_cls,
         mock_check_corr,
         mock_get_ref,
-        mock_disc_providers,
-        mock_disc_engines,
+        mock_disc,
+        mock_resolve_name,
     ):
-        """Test 10: Successful execution populates correctness.tolerance_match
-        from ArrayComparator output (per CORR-02)."""
-        mock_disc_providers.return_value = ["provA"]
-        mock_disc_engines.return_value = [0]
+        """Successful execution populates correctness.tolerance_match from ArrayComparator (CORR-02)."""
+        mock_disc.return_value = [0]
+        mock_resolve_name.return_value = "engine_0"
 
-        mock_ref = MagicMock()
-        mock_get_ref.return_value = mock_ref
-
-        corr_result = CorrectnessResult(
+        mock_get_ref.return_value = MagicMock()
+        mock_check_corr.return_value = CorrectnessResult(
             execution_success=True,
             tolerance_match=True,
             rtol=1e-5,
@@ -573,34 +559,16 @@ class TestCorrectnessChecking:
             max_abs_diff=1e-7,
             max_rel_diff=1e-6,
         )
-        mock_check_corr.return_value = corr_result
 
-        mock_exec = MagicMock()
-        mock_exec.init_time_ms = 1.0
-        mock_result = MagicMock()
-        mock_result.e2e_timings = [1.0]
-        mock_result.kernel_timings = None
-        mock_result.has_kernel_timings = False
-        mock_exec.benchmark.return_value = mock_result
-        mock_exec_cls.return_value = mock_exec
-
-        mock_bm = MagicMock()
-        mock_bm.__enter__ = MagicMock(return_value=mock_bm)
-        mock_bm.__exit__ = MagicMock(return_value=False)
-        mock_bm.create_variant_pack.return_value = {1: 100}
-        mock_bm_cls.return_value = mock_bm
-
-        config = _make_config()
-        tensor_infos = [_make_tensor_info(1), _make_tensor_info(2, is_output=True)]
-        graph_json = _make_graph_json()
-        handle = MagicMock()
+        mock_exec_cls.return_value = _make_exec_mock()
+        mock_bm_cls.return_value = _make_bm_mock()
 
         result = run_graph_all_providers(
             graph_path=Path("test.json"),
-            graph_json=graph_json,
-            tensor_infos=tensor_infos,
-            config=config,
-            handle=handle,
+            graph_json=_make_graph_json(),
+            tensor_infos=[_make_tensor_info(1), _make_tensor_info(2, is_output=True)],
+            config=_make_config(),
+            handle=MagicMock(),
         )
 
         r = result.results[0]
@@ -608,61 +576,77 @@ class TestCorrectnessChecking:
         assert r.correctness.tolerance_match is True
         assert r.correctness.execution_success is True
 
-    @patch("dnn_benchmarking.execution.suite_runner.discover_engines")
-    @patch("dnn_benchmarking.execution.suite_runner.discover_providers")
+    @patch("dnn_benchmarking.execution.suite_runner._resolve_engine_name")
+    @patch("dnn_benchmarking.execution.suite_runner.discover_engine_ids")
     @patch("dnn_benchmarking.execution.suite_runner._get_reference_provider")
     @patch("dnn_benchmarking.execution.suite_runner.Executor")
     @patch("dnn_benchmarking.execution.suite_runner.BufferManager")
-    def test_tolerance_match_none_when_ref_unavailable(
+    def test_tolerance_match_none_when_not_requested(
         self,
         mock_bm_cls,
         mock_exec_cls,
         mock_get_ref,
-        mock_disc_providers,
-        mock_disc_engines,
+        mock_disc,
+        mock_resolve_name,
     ):
-        """Test 11: When reference provider is unavailable, correctness.tolerance_match
-        is None and correctness.error_message explains why."""
-        mock_disc_providers.return_value = ["provA"]
-        mock_disc_engines.return_value = [0]
-        mock_get_ref.return_value = None  # No reference provider
+        """When --validate is not requested, tolerance_match is None (no correctness performed)."""
+        mock_disc.return_value = [0]
+        mock_resolve_name.return_value = "engine_0"
+        mock_get_ref.return_value = None
 
-        mock_exec = MagicMock()
-        mock_exec.init_time_ms = 1.0
-        mock_result = MagicMock()
-        mock_result.e2e_timings = [1.0]
-        mock_result.kernel_timings = None
-        mock_result.has_kernel_timings = False
-        mock_exec.benchmark.return_value = mock_result
-        mock_exec_cls.return_value = mock_exec
-
-        mock_bm = MagicMock()
-        mock_bm.__enter__ = MagicMock(return_value=mock_bm)
-        mock_bm.__exit__ = MagicMock(return_value=False)
-        mock_bm.create_variant_pack.return_value = {1: 100}
-        mock_bm_cls.return_value = mock_bm
-
-        config = _make_config()
-        tensor_infos = [_make_tensor_info(1)]
-        graph_json = _make_graph_json()
-        handle = MagicMock()
+        mock_exec_cls.return_value = _make_exec_mock()
+        mock_bm_cls.return_value = _make_bm_mock()
 
         result = run_graph_all_providers(
             graph_path=Path("test.json"),
-            graph_json=graph_json,
-            tensor_infos=tensor_infos,
-            config=config,
-            handle=handle,
+            graph_json=_make_graph_json(),
+            tensor_infos=[_make_tensor_info(1)],
+            config=_make_config(),  # reference_provider defaults to "none"
+            handle=MagicMock(),
         )
 
         r = result.results[0]
         assert r.correctness is not None
         assert r.correctness.tolerance_match is None
         assert r.correctness.execution_success is True
-        assert r.correctness.error_message is not None
 
-    @patch("dnn_benchmarking.execution.suite_runner.discover_engines")
-    @patch("dnn_benchmarking.execution.suite_runner.discover_providers")
+    @patch("dnn_benchmarking.execution.suite_runner._resolve_engine_name")
+    @patch("dnn_benchmarking.execution.suite_runner.discover_engine_ids")
+    @patch("dnn_benchmarking.execution.suite_runner._get_reference_provider")
+    @patch("dnn_benchmarking.execution.suite_runner.Executor")
+    @patch("dnn_benchmarking.execution.suite_runner.BufferManager")
+    def test_tolerance_match_false_when_requested_but_unsupported(
+        self,
+        mock_bm_cls,
+        mock_exec_cls,
+        mock_get_ref,
+        mock_disc,
+        mock_resolve_name,
+    ):
+        """W3: --validate requested but provider doesn't support graph -> tolerance_match=False."""
+        mock_disc.return_value = [0]
+        mock_resolve_name.return_value = "engine_0"
+        mock_get_ref.return_value = None  # provider unavailable for this graph
+
+        mock_exec_cls.return_value = _make_exec_mock()
+        mock_bm_cls.return_value = _make_bm_mock()
+
+        result = run_graph_all_providers(
+            graph_path=Path("test.json"),
+            graph_json=_make_graph_json(),
+            tensor_infos=[_make_tensor_info(1)],
+            config=_make_config(reference_provider="pytorch"),
+            handle=MagicMock(),
+        )
+
+        r = result.results[0]
+        assert r.correctness is not None
+        assert r.correctness.tolerance_match is False
+        assert r.correctness.execution_success is True
+        assert "does not support" in (r.correctness.error_message or "")
+
+    @patch("dnn_benchmarking.execution.suite_runner._resolve_engine_name")
+    @patch("dnn_benchmarking.execution.suite_runner.discover_engine_ids")
     @patch("dnn_benchmarking.execution.suite_runner._get_reference_provider")
     @patch("dnn_benchmarking.execution.suite_runner.Executor")
     @patch("dnn_benchmarking.execution.suite_runner.BufferManager")
@@ -671,32 +655,74 @@ class TestCorrectnessChecking:
         mock_bm_cls,
         mock_exec_cls,
         mock_get_ref,
-        mock_disc_providers,
-        mock_disc_engines,
+        mock_disc,
+        mock_resolve_name,
     ):
-        """Test 12: correctness.execution_success is False when benchmark errors (CORR-01)."""
-        mock_disc_providers.return_value = ["provA"]
-        mock_disc_engines.return_value = [0]
+        """correctness.execution_success is False when benchmark errors (CORR-01)."""
+        mock_disc.return_value = [0]
+        mock_resolve_name.return_value = "engine_0"
         mock_get_ref.return_value = None
 
         mock_exec = MagicMock()
         mock_exec.prepare.side_effect = ExecutionError("boom")
         mock_exec_cls.return_value = mock_exec
 
-        config = _make_config()
-        tensor_infos = [_make_tensor_info(1)]
-        graph_json = _make_graph_json()
-        handle = MagicMock()
-
         result = run_graph_all_providers(
             graph_path=Path("test.json"),
-            graph_json=graph_json,
-            tensor_infos=tensor_infos,
-            config=config,
-            handle=handle,
+            graph_json=_make_graph_json(),
+            tensor_infos=[_make_tensor_info(1)],
+            config=_make_config(),
+            handle=MagicMock(),
         )
 
         r = result.results[0]
         assert r.correctness is not None
         assert r.correctness.execution_success is False
         assert r.correctness.tolerance_match is None
+
+
+class TestCheckCorrectnessOutputCount:
+    """W3: _check_correctness returns tolerance_match=False when no outputs are comparable."""
+
+    def test_no_outputs_returns_false(self):
+        bm = MagicMock()
+        bm.get_input_data.return_value = None
+        bm.get_output_data.return_value = None
+
+        ref_provider = MagicMock()
+        ref_provider.compute_reference.return_value = {}
+        ref_provider.name = "pytorch"
+
+        config = SuiteConfig(reference_provider="pytorch")
+        result = _check_correctness(
+            buffer_manager=bm,
+            tensor_infos=[],
+            graph_json=_make_graph_json(),
+            ref_provider=ref_provider,
+            config=config,
+        )
+
+        assert result.tolerance_match is False
+        assert result.execution_success is True
+        assert "No output tensors to compare" in (result.error_message or "")
+
+
+class TestResolveEngineName:
+    """Tests for _resolve_engine_name fallback behavior."""
+
+    def test_falls_back_to_hex_when_lookup_fails(self):
+        """If hipdnn_frontend isn't importable, the helper falls back to a hex display."""
+        # Force the import inside _resolve_engine_name to fail by injecting a
+        # missing module entry. We use unittest.mock.patch on builtins.__import__
+        # to surgically reject just hipdnn_frontend.
+        import builtins
+
+        real_import = builtins.__import__
+
+        def fake_import(name, *args, **kwargs):
+            if name == "hipdnn_frontend":
+                raise ImportError("simulated missing module")
+            return real_import(name, *args, **kwargs)
+
+        with patch("builtins.__import__", side_effect=fake_import):
+            assert _resolve_engine_name(0xABC) == "engine_0xabc"
