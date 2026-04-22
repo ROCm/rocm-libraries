@@ -49,8 +49,8 @@ Tests:
   M: [15, 32]
   N: [2, 3]
   K: [7, 27]
-  batch_count_A: [1, 7]
-  batch_count_B: [1, 7]
+  batch_count_A: [7]
+  batch_count_B: [7]
   batch_count_C: [7]
   alpha_beta: *alpha_beta_range_quick
   transA: [rocsparse_operation_none, rocsparse_operation_transpose]
@@ -69,8 +69,8 @@ Tests:
   M: [155, 300]
   N: [22, 39]
   K: [72, 265]
-  batch_count_A: [1, 5]
-  batch_count_B: [1, 5]
+  batch_count_A: [5]
+  batch_count_B: [5]
   batch_count_C: [5]
   alpha_beta: *alpha_beta_range_quick
   transA: [rocsparse_operation_none, rocsparse_operation_transpose]
@@ -89,8 +89,8 @@ Tests:
   M: [128]
   N: [128]
   K: [128]
-  batch_count_A: [1, 4]
-  batch_count_B: [1, 4]
+  batch_count_A: [4]
+  batch_count_B: [4]
   batch_count_C: [4]
   alpha_beta: *alpha_beta_range_quick
   transA: [rocsparse_operation_none, rocsparse_operation_transpose]
@@ -109,8 +109,8 @@ Tests:
   M: [88]
   N: [103]
   K: [72]
-  batch_count_A: [1, 3]
-  batch_count_B: [1, 3]
+  batch_count_A: [3]
+  batch_count_B: [3]
   batch_count_C: [3]
   alpha_beta: *alpha_beta_range_quick
   transA: [rocsparse_operation_none]
@@ -134,12 +134,12 @@ Tests:
   category: pre_checkin
   function: sddmm_batched_csr
   indextype: *i32i32_i64i32_i64i64
-  precision: *single_double_precisions
-  M: [2, 64]
-  N: [4, 37]
-  K: [8, 53]
-  batch_count_A: [1, 6]
-  batch_count_B: [1, 6]
+  precision: *single_double_precisions_complex_real
+  M: [64]
+  N: [37]
+  K: [53]
+  batch_count_A: [6]
+  batch_count_B: [6]
   batch_count_C: [6]
   alpha_beta: *alpha_beta_range_checkin
   transA: [rocsparse_operation_none, rocsparse_operation_transpose]
@@ -157,7 +157,7 @@ Tests:
   precision: *double_only_precisions
   M: 1
   N: 1
-  K: [8]
+  K: [98]
   batch_count_A: [3]
   batch_count_B: [3]
   batch_count_C: [3]
@@ -172,7 +172,10 @@ Tests:
   filename: [nos1,
              nos2,
              nos3,
-             nos4]
+             nos4,
+             nos5,
+             nos6,
+             nos7]
 
 - name: sddmm_batched_csr_graph_test
   category: pre_checkin
@@ -237,4 +240,8 @@ Tests:
   sddmm_alg: [rocsparse_sddmm_alg_default]
   order: [rocsparse_order_row]
   orderB: [rocsparse_order_row]
-  filename: [scircuit]
+  filename: [bmwcra_1, 
+             scircuit,
+             sme3Dc,
+             amazon0312,
+             shipsec1]

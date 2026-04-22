@@ -168,9 +168,8 @@ namespace
                 size_t available_host   = rocsparse_memory_check::get_available_host_memory_gb();
                 size_t available_device = rocsparse_memory_check::get_available_device_memory_gb();
 
-                // bool can_run = (arg.host_memory_gb <= available_host)
-                //                && (arg.device_memory_gb <= available_device);
-                bool can_run = (arg.device_memory_gb <= available_device);
+                bool can_run = (arg.host_memory_gb <= available_host)
+                               && (arg.device_memory_gb <= available_device);
 
                 if(!can_run)
                 {
