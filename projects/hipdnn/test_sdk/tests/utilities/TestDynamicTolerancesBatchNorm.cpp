@@ -72,15 +72,15 @@ static double yOutputCast(double maxAbsX,
                           double maxAbsScale,
                           double maxAbsBias,
                           double outputEpsilon,
-                          double computeEpsilon)
+                          double computeEpsilon,
+                          double epsBn = 1e-5)
 {
     if(outputEpsilon <= computeEpsilon)
     {
         return 0.0;
     }
-    constexpr double EPS_BN = 1e-5;
-    const double varEst = std::max(maxAbsX * maxAbsX, EPS_BN);
-    const double invVarEst = 1.0 / std::sqrt(varEst + EPS_BN);
+    const double varEst = std::max(maxAbsX * maxAbsX, epsBn);
+    const double invVarEst = 1.0 / std::sqrt(varEst + epsBn);
     const double maxOut = (maxAbsX > 0.0 ? maxAbsScale * maxAbsX * invVarEst : 0.0) + maxAbsBias;
     return maxOut * outputEpsilon;
 }
@@ -1076,4 +1076,79 @@ TEST(TestCalculateBnInvVarTolerance, ThrowsOnSingularity)
     EXPECT_THROW(
         (calculateBatchnormInvVarianceTolerance<bfloat16, bfloat16, bfloat16>(-1.0, 1.0, 100)),
         std::overflow_error);
+}
+
+// epsilonBn <= 0 should throw for both y and invVar
+TEST(TestCalculateBnTrainTolerance, ThrowsOnInvalidEpsilon)
+{
+    EXPECT_THROW((calculateBatchnormTrainingTolerance<float, float, float>(
+                     -1.0, 1.0, -1.0, 1.0, 0.0, 0.0, 10, 0.0)),
+                 std::invalid_argument);
+    EXPECT_THROW((calculateBatchnormTrainingTolerance<float, float, float>(
+                     -1.0, 1.0, -1.0, 1.0, 0.0, 0.0, 10, -1e-5)),
+                 std::invalid_argument);
+}
+
+TEST(TestCalculateBnInvVarTolerance, ThrowsOnInvalidEpsilon)
+{
+    EXPECT_THROW((calculateBatchnormInvVarianceTolerance<float, float, float>(-1.0, 1.0, 10, 0.0)),
+                 std::invalid_argument);
+    EXPECT_THROW(
+        (calculateBatchnormInvVarianceTolerance<float, float, float>(-1.0, 1.0, 10, -1e-5)),
+        std::invalid_argument);
+}
+
+// InvVar: tolerance changes with different epsilon values
+TEST(TestCalculateBnInvVarTolerance, NonDefaultEpsilon)
+{
+    auto u = static_cast<double>(std::numeric_limits<float>::epsilon());
+    auto gamma10 = computeGamma(10, u);
+
+    // Large epsilon (1e-3): larger variance floor -> smaller invVar -> smaller tolerance
+    auto tolLargeEps
+        = calculateBatchnormInvVarianceTolerance<float, float, float>(-1.0, 1.0, 10, 1e-3);
+    auto expectedLargeEps = expectedInvVarTol(1.0, 1e-3, gamma10, u);
+    EXPECT_NEAR(
+        tolLargeEps,
+        static_cast<float>(expectedLargeEps),
+        std::max(static_cast<float>(expectedLargeEps) * 0.01f, std::numeric_limits<float>::min()));
+
+    // Small epsilon (1e-8): varEstimate = maxAbsX^2 dominates, epsilon barely matters
+    auto tolSmallEps
+        = calculateBatchnormInvVarianceTolerance<float, float, float>(-1.0, 1.0, 10, 1e-8);
+    auto expectedSmallEps = expectedInvVarTol(1.0, 1e-8, gamma10, u);
+    EXPECT_NEAR(
+        tolSmallEps,
+        static_cast<float>(expectedSmallEps),
+        std::max(static_cast<float>(expectedSmallEps) * 0.01f, std::numeric_limits<float>::min()));
+
+    // With maxAbsX=0: epsilon dominates entirely, larger eps -> smaller tolerance
+    auto tolZeroLargeEps
+        = calculateBatchnormInvVarianceTolerance<float, float, float>(0.0, 0.0, 10, 1e-3);
+    auto tolZeroSmallEps
+        = calculateBatchnormInvVarianceTolerance<float, float, float>(0.0, 0.0, 10, 1e-8);
+    EXPECT_LT(tolZeroLargeEps, tolZeroSmallEps)
+        << "Larger eps_bn -> larger variance floor -> smaller invVar tolerance for zero input";
+}
+
+// Y tolerance: non-default epsilon affects output casting magnitude
+TEST(TestCalculateBnTrainTolerance, NonDefaultEpsilon)
+{
+    // For maxAbsX=1, scale=1, the main tolerance (3/2*gamma + 7u) is independent
+    // of eps_bn. Only the output casting magnitude changes via invVarEst.
+    auto tolDefault = calculateBatchnormTrainingTolerance<half, float, float>(
+        -1.0, 1.0, -1.0, 1.0, 0.0, 0.0, 10, 1e-5);
+    auto tolLargeEps = calculateBatchnormTrainingTolerance<half, float, float>(
+        -1.0, 1.0, -1.0, 1.0, 0.0, 0.0, 10, 1e-3);
+
+    // Larger eps_bn -> smaller invVarEst -> smaller maxOutputMagnitude -> smaller output cast
+    EXPECT_LT(tolLargeEps, tolDefault) << "Larger eps_bn should reduce output casting contribution";
+
+    // For float/float/float (no output casting), eps_bn has no effect
+    auto tolFp32Default = calculateBatchnormTrainingTolerance<float, float, float>(
+        -1.0, 1.0, -1.0, 1.0, 0.0, 0.0, 10, 1e-5);
+    auto tolFp32LargeEps = calculateBatchnormTrainingTolerance<float, float, float>(
+        -1.0, 1.0, -1.0, 1.0, 0.0, 0.0, 10, 1e-3);
+    EXPECT_EQ(tolFp32Default, tolFp32LargeEps)
+        << "Without output casting, eps_bn should not affect y tolerance";
 }

@@ -44,6 +44,7 @@ using hipdnn_data_sdk::types::half;
  * @param biasMin             Minimum value in bias tensor
  * @param biasMax             Maximum value in bias tensor
  * @param nElementsPerChannel Number of elements per channel: N * H * W (reduction dim)
+ * @param epsilonBn           Batch norm epsilon (added to variance before sqrt)
  * @return Calculated tolerance value as float
  *
  * Known Limitations:
@@ -71,13 +72,19 @@ float calculateBatchnormTrainingTolerance(double xMin,
                                           double scaleMax,
                                           double biasMin,
                                           double biasMax,
-                                          int64_t nElementsPerChannel)
+                                          int64_t nElementsPerChannel,
+                                          double epsilonBn = 1e-5)
 {
     validateComputeType<ComputeType>();
 
     if(nElementsPerChannel < 1)
     {
         throw std::invalid_argument("nElementsPerChannel must be at least 1.");
+    }
+
+    if(epsilonBn <= 0.0)
+    {
+        throw std::invalid_argument("epsilonBn must be positive.");
     }
 
     const double maxAbsX = std::max(std::abs(xMin), std::abs(xMax));
@@ -129,11 +136,10 @@ float calculateBatchnormTrainingTolerance(double xMin,
 
     // Output casting error.
     // Conservative bound: instead of assuming |xHat| ~ O(1) cancels input magnitude,
-    // use invVarEstimate from max(maxAbsX^2, eps_bn_default) to bound output magnitude.
+    // use invVarEstimate from max(maxAbsX^2, epsilonBn) to bound output magnitude.
     // This handles the case where variance is small and |xHat| >> 1.
-    constexpr double EPSILON_BN_DEFAULT = 1e-5;
-    const double varEst = std::max(maxAbsX * maxAbsX, EPSILON_BN_DEFAULT);
-    const double invVarEst = 1.0 / std::sqrt(varEst + EPSILON_BN_DEFAULT);
+    const double varEst = std::max(maxAbsX * maxAbsX, epsilonBn);
+    const double invVarEst = 1.0 / std::sqrt(varEst + epsilonBn);
     const double maxOutputMagnitude
         = (maxAbsX > 0.0 ? maxAbsScale * maxAbsX * invVarEst : 0.0) + maxAbsBias;
     propagatedTolerance += computeOutputCastingError<OutputType, ComputeType>(maxOutputMagnitude);
@@ -229,6 +235,11 @@ float calculateBatchnormInvVarianceTolerance(double xMin,
     if(nElementsPerChannel < 1)
     {
         throw std::invalid_argument("nElementsPerChannel must be at least 1.");
+    }
+
+    if(epsilonBn <= 0.0)
+    {
+        throw std::invalid_argument("epsilonBn must be positive.");
     }
 
     const double maxAbsX = std::max(std::abs(xMin), std::abs(xMax));
