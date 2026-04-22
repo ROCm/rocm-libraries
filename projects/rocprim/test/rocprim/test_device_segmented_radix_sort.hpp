@@ -373,117 +373,6 @@ inline void sort_keys_large_segments()
         offsets[1] = static_cast<offset_type>(size / 2);
         offsets[2] = static_cast<offset_type>(size);
 
-        common::device_ptr<key_type> d_keys_input;
-        common::device_ptr<key_type> d_keys_output;
-
-        if(!d_keys_input.resize_with_memory_check(size)
-           || !d_keys_output.resize_with_memory_check(size))
-        {
-            std::cout << "Out of memory. Skipping test for size = " << size << std::endl;
-            break;
-        }
-        d_keys_input.store(keys_input);
-
-        common::device_ptr<offset_type> d_offsets(offsets);
-
-        test_utils::test_kernel_wrapper(
-            [&](void* d_temporary_storage, auto& temporary_storage_bytes)
-            {
-                if constexpr(descending)
-                {
-                    return rocprim::segmented_radix_sort_keys_desc<config>(d_temporary_storage,
-                                                                           temporary_storage_bytes,
-                                                                           d_keys_input.get(),
-                                                                           d_keys_output.get(),
-                                                                           size,
-                                                                           segments_count,
-                                                                           d_offsets.get(),
-                                                                           d_offsets.get() + 1,
-                                                                           start_bit,
-                                                                           end_bit,
-                                                                           stream);
-                }
-                else
-                {
-                    return rocprim::segmented_radix_sort_keys<config>(d_temporary_storage,
-                                                                      temporary_storage_bytes,
-                                                                      d_keys_input.get(),
-                                                                      d_keys_output.get(),
-                                                                      size,
-                                                                      segments_count,
-                                                                      d_offsets.get(),
-                                                                      d_offsets.get() + 1,
-                                                                      start_bit,
-                                                                      end_bit,
-                                                                      stream);
-                }
-            },
-            stream,
-            use_graphs);
-
-        bool all_blocks_sorted = true;
-        for(size_t s = 0; s < segments_count; ++s)
-        {
-            all_blocks_sorted &= test_utils::device_sort_check(
-                d_keys_output.get() + offsets[s],
-                offsets[s + 1] - offsets[s],
-                test_utils::key_comparator<key_type, descending, start_bit, end_bit>());
-        }
-        ASSERT_TRUE(all_blocks_sorted);
-    }
-}
-
-template<typename TestFixture>
-inline void sort_keys_large_num_segments()
-{
-    int device_id = test_common_utils::obtain_device_from_ctest();
-    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
-    HIP_CHECK(hipSetDevice(device_id));
-
-    using key_type                    = typename TestFixture::params::key_type;
-    using config                      = typename TestFixture::params::config;
-    constexpr bool         descending = TestFixture::params::descending;
-    constexpr unsigned int start_bit  = TestFixture::params::start_bit;
-    constexpr unsigned int end_bit    = TestFixture::params::end_bit;
-    static constexpr bool  use_graphs = TestFixture::params::use_graph;
-    constexpr std::size_t  uint_max   = ::std::numeric_limits<unsigned int>::max();
-
-    using offset_type = size_t;
-
-    hipStream_t stream = 0;
-    if(use_graphs)
-    {
-        HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
-    }
-
-    constexpr size_t       size           = uint_max + size_t{1 << 20};
-    constexpr unsigned int segment_length = 1 << 9;
-    constexpr size_t       segments_count = ::rocprim::detail::ceiling_div(size, segment_length);
-    constexpr size_t       offsets_count  = segments_count + 1;
-
-    SCOPED_TRACE(testing::Message() << "with size= " << size);
-
-    for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
-    {
-        unsigned int seed_value
-            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
-
-        // Generate data
-        std::vector<key_type> keys_input = test_utils::get_random_data_wrapped<key_type>(
-            size,
-            common::generate_limits<key_type>::min(),
-            common::generate_limits<key_type>::max(),
-            seed_value);
-
-        std::vector<offset_type> offsets(offsets_count);
-        offset_type              i = 0;
-        for(; i < segments_count; ++i)
-        {
-            offsets[i] = i * segment_length;
-        }
-        offsets[i] = size;
-
         common::device_ptr<key_type>    d_keys_input;
         common::device_ptr<key_type>    d_keys_output;
 
@@ -534,6 +423,147 @@ inline void sort_keys_large_num_segments()
 
         bool all_blocks_sorted = true;
         for(size_t s = 0; s < segments_count; ++s)
+        {
+            all_blocks_sorted &= test_utils::device_sort_check(
+                d_keys_output.get() + offsets[s],
+                offsets[s + 1] - offsets[s],
+                test_utils::key_comparator<key_type, descending, start_bit, end_bit>());
+        }
+        ASSERT_TRUE(all_blocks_sorted);
+    }
+}
+
+template<typename offset_type, typename segment_index_type>
+struct segments_index_to_offset_op
+{
+    segment_index_type empty_segments_count;
+    segment_index_type segments_count;
+    offset_type        segment_length;
+    offset_type        size;
+
+    ROCPRIM_HOST_DEVICE ROCPRIM_INLINE
+    offset_type
+        operator()(segment_index_type i) const
+    {
+        if(i < empty_segments_count)
+        {
+            return 0;
+        }
+        else if(i < segments_count)
+        {
+            return segment_length * static_cast<offset_type>(i - empty_segments_count);
+        }
+        else
+        {
+            return size;
+        }
+    }
+};
+
+template<typename TestFixture>
+inline void sort_keys_large_num_segments()
+{
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
+    using key_type                    = typename TestFixture::params::key_type;
+    using config                      = typename TestFixture::params::config;
+    constexpr bool         descending = TestFixture::params::descending;
+    constexpr unsigned int start_bit  = TestFixture::params::start_bit;
+    constexpr unsigned int end_bit    = TestFixture::params::end_bit;
+    static constexpr bool  use_graphs = TestFixture::params::use_graph;
+    constexpr std::size_t  uint_max   = ::std::numeric_limits<unsigned int>::max();
+
+    using offset_type        = size_t;
+    using segment_index_type = size_t;
+    using segments_index_to_offset_op_t
+        = segments_index_to_offset_op<offset_type, segment_index_type>;
+
+    hipStream_t stream = 0;
+    if(use_graphs)
+    {
+        HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
+    }
+
+    constexpr offset_type        size           = uint_max + offset_type{1 << 22};
+    constexpr unsigned int       segment_length = 1 << 20;
+    constexpr segment_index_type full_segments_count
+        = ::rocprim::detail::ceiling_div(size, segment_length);
+    constexpr segment_index_type empty_segments_count = uint_max - full_segments_count + 1;
+    constexpr segment_index_type segments_count       = empty_segments_count + full_segments_count;
+
+    SCOPED_TRACE(testing::Message() << "with size= " << size);
+
+    for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
+    {
+        unsigned int seed_value
+            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+        SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
+
+        // Generate data
+        std::vector<key_type> keys_input = test_utils::get_random_data_wrapped<key_type>(
+            size,
+            common::generate_limits<key_type>::min(),
+            common::generate_limits<key_type>::max(),
+            seed_value);
+
+        common::device_ptr<key_type>    d_keys_input;
+        common::device_ptr<key_type>    d_keys_output;
+        common::device_ptr<offset_type> d_offsets;
+
+        if(!d_keys_input.resize_with_memory_check(size)
+           || !d_keys_output.resize_with_memory_check(size))
+        {
+            std::cout << "Out of memory. Skipping test for size = " << size << std::endl;
+            break;
+        }
+        d_keys_input.store(keys_input);
+
+        auto offsets
+            = ::rocprim::make_transform_iterator(::rocprim::make_counting_iterator(offset_type{0}),
+                                                 segments_index_to_offset_op_t{empty_segments_count,
+                                                                               segments_count,
+                                                                               segment_length,
+                                                                               size});
+
+        test_utils::test_kernel_wrapper(
+            [&](void* d_temporary_storage, auto& temporary_storage_bytes)
+            {
+                if constexpr(descending)
+                {
+                    return rocprim::segmented_radix_sort_keys_desc<config>(d_temporary_storage,
+                                                                           temporary_storage_bytes,
+                                                                           d_keys_input.get(),
+                                                                           d_keys_output.get(),
+                                                                           size,
+                                                                           segments_count,
+                                                                           offsets,
+                                                                           offsets + 1,
+                                                                           start_bit,
+                                                                           end_bit,
+                                                                           stream);
+                }
+                else
+                {
+                    return rocprim::segmented_radix_sort_keys<config>(d_temporary_storage,
+                                                                      temporary_storage_bytes,
+                                                                      d_keys_input.get(),
+                                                                      d_keys_output.get(),
+                                                                      size,
+                                                                      segments_count,
+                                                                      offsets,
+                                                                      offsets + 1,
+                                                                      start_bit,
+                                                                      end_bit,
+                                                                      stream);
+                }
+            },
+            stream,
+            use_graphs);
+
+        bool all_blocks_sorted = true;
+        for(segment_index_type s = empty_segments_count; s < segments_count; ++s)
         {
             all_blocks_sorted &= test_utils::device_sort_check(
                 d_keys_output.get() + offsets[s],
