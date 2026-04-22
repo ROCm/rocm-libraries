@@ -11391,6 +11391,7 @@ class KernelWriterAssembly(KernelWriter):
                   self.vgprPool.checkIn(vgprTmp)
 
               elif (kernel["ProblemType"]["DataType%s"%tc].isAnyFloat8() and kernel["ProblemType"]["DataType"].isHalf()):
+                noSDWA = ti.getArchCaps()["NoSDWA"]
                 newBlockWidth = tP["globalReadInstruction"].blockWidth
                 if newBlockWidth == 0.25:
                   new_src = deepcopy(paramList[0])
@@ -11401,16 +11402,13 @@ class KernelWriterAssembly(KernelWriter):
                       sel = [0,1,1,0] if isHigh16Bits else [0,0,0,0]
                       localWriteCVTCode.add(VCvtScaleFP8toF16(dst=paramList[0], src=new_src, scale=0x3f800000, vop3=VOP3PModifiers(op_sel=sel), comment="A convert fp8 to f16"))
                     else:
-                      if ti.getArchCaps()["NoSDWA"]:
-                        src_sel = 1 if isHigh16Bits else 0
-                        dst_sel = 1 if isHigh16Bits else 0
-                        localWriteCVTCode.add(VCvtFP8toF32(dst=vgpr(vgprTmp), src=new_src , vop3=VOP3PModifiers(byte_sel=[src_sel]), comment="convert C to fp32"))
-                        localWriteCVTCode.add(VCvtF32toF16(dst=paramList[0], src=vgpr(vgprTmp), true16=[dst_sel], comment="convert C to fp16"))
+                      sel = 1 if isHigh16Bits else 0
+                      if noSDWA:
+                        localWriteCVTCode.add(VCvtFP8toF32(dst=vgpr(vgprTmp), src=new_src, vop3=VOP3PModifiers(byte_sel=[sel]), comment="convert C to fp32"))
                       else:
                         src_sel = SelectBit.BYTE_2 if isHigh16Bits else SelectBit.BYTE_0
-                        dst_sel = SelectBit.WORD_1 if isHigh16Bits else SelectBit.WORD_0
-                        localWriteCVTCode.add(VCvtFP8toF32(dst=vgpr(vgprTmp), src=new_src , sdwa=SDWAModifiers(src0_sel=src_sel), comment="convert C to fp32"))
-                        localWriteCVTCode.add(VCvtF32toF16(dst=paramList[0], src=vgpr(vgprTmp), sdwa=SDWAModifiers(dst_sel=dst_sel), comment="convert C to fp16"))
+                        localWriteCVTCode.add(VCvtFP8toF32(dst=vgpr(vgprTmp), src=new_src, sdwa=SDWAModifiers(src0_sel=src_sel), comment="convert C to fp32"))
+                      emitCvtF32toF16(localWriteCVTCode, noSDWA, paramList[0], vgpr(vgprTmp), sel, "convert C to fp16")
                     self.vgprPool.checkIn(vgprTmp)
                   else:
                     if isCvtHighBits and isHigh16Bits:
@@ -11444,28 +11442,20 @@ class KernelWriterAssembly(KernelWriter):
                           if regTmpVgprBlock == None:
                             regTmpVgprBlock = self.vgprPool.checkOutAligned(2, 2)
                           src_sel2 = SelectBit.WORD_0 if src_sel == SelectBit.BYTE_0 else SelectBit.WORD_1
-                          if ti.getArchCaps()["NoSDWA"]:
-                            localWriteCVTCode.add(VCvtPkFP8toF32(dst=vgpr(regTmpVgprBlock, 2), src=new_src, true16=[-1, -1, 1 if src_sel2 == SelectBit.WORD_1 else 0], comment="convert C to fp32"))
-                            localWriteCVTCode.add(VCvtF32toF16(dst=paramList[0], src=vgpr(regTmpVgprBlock), true16=[1 if isHigh16Bits else 0], comment="convert C to fp16"))
-                          else:
-                            localWriteCVTCode.add(VCvtPkFP8toF32(dst=vgpr(regTmpVgprBlock, 2), src=new_src , sdwa=SDWAModifiers(src0_sel=src_sel2), comment="convert C to fp32"))
-                            localWriteCVTCode.add(VCvtF32toF16(dst=paramList[0], src=vgpr(regTmpVgprBlock), sdwa=SDWAModifiers(dst_sel=dst_sel), comment="convert C to fp16"))
+                          emitPkFp8ToF32(localWriteCVTCode, noSDWA, vgpr(regTmpVgprBlock, 2), new_src, 1 if src_sel2 == SelectBit.WORD_1 else 0, "convert C to fp32")
+                          emitCvtF32toF16(localWriteCVTCode, noSDWA, paramList[0], vgpr(regTmpVgprBlock), 1 if isHigh16Bits else 0, "convert C to fp16")
                         else:
-                          if ti.getArchCaps()["NoSDWA"]:
-                            localWriteCVTCode.add(VCvtF32toF16(dst=paramList[0], src=vgpr(regTmpVgprBlock + 1), true16=[1 if isHigh16Bits else 0], comment="convert C to fp16"))
-                          else:
-                            localWriteCVTCode.add(VCvtF32toF16(dst=paramList[0], src=vgpr(regTmpVgprBlock + 1), sdwa=SDWAModifiers(dst_sel=dst_sel), comment="convert C to fp16"))
+                          emitCvtF32toF16(localWriteCVTCode, noSDWA, paramList[0], vgpr(regTmpVgprBlock + 1), 1 if isHigh16Bits else 0, "convert C to fp16")
                     else:
                       vgprTmp = self.vgprPool.checkOut(1)
                       if self.states.asmCaps["Hascvtf16_fp8_sf32"]:
                         localWriteCVTCode.add(VCvtScaleFP8toF16(dst=paramList[0], src=new_src, scale=0x3f800000, vop3=VOP3PModifiers(op_sel=sel), comment="C convert fp8 to f16"))
                       else:
-                        if ti.getArchCaps()["NoSDWA"]:
+                        if noSDWA:
                           localWriteCVTCode.add(VCvtFP8toF32(dst=vgpr(vgprTmp), src=new_src, vop3=VOP3PModifiers(op_sel=[1 if isHigh16Bits else 0]), comment="convert C to fp32"))
-                          localWriteCVTCode.add(VCvtF32toF16(dst=paramList[0], src=vgpr(vgprTmp), true16=[1 if isHigh16Bits else 0], comment="convert C to fp16"))
                         else:
-                          localWriteCVTCode.add(VCvtFP8toF32(dst=vgpr(vgprTmp), src=new_src , sdwa=SDWAModifiers(src0_sel=src_sel), comment="convert C to fp32"))
-                          localWriteCVTCode.add(VCvtF32toF16(dst=paramList[0], src=vgpr(vgprTmp), sdwa=SDWAModifiers(dst_sel=dst_sel), comment="convert C to fp16"))
+                          localWriteCVTCode.add(VCvtFP8toF32(dst=vgpr(vgprTmp), src=new_src, sdwa=SDWAModifiers(src0_sel=src_sel), comment="convert C to fp32"))
+                        emitCvtF32toF16(localWriteCVTCode, noSDWA, paramList[0], vgpr(vgprTmp), 1 if isHigh16Bits else 0, "convert C to fp16")
                       self.vgprPool.checkIn(vgprTmp)
                 elif newBlockWidth == 0.5:
                   vgprTmp = self.vgprPool.checkOutAligned(2, 2)
@@ -11499,20 +11489,12 @@ class KernelWriterAssembly(KernelWriter):
                         localWriteCVTCode.add(VCvtScaleFP8toF16(dst=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx, vi * 2 + 1)), src=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx+tP["shiftGR"], vi)), scale=0x3f800000,\
                                                             vop3=VOP3PModifiers(op_sel=[1,1,1,0]), comment="E convert fp8 to f16"))
                       else:
-                        if ti.getArchCaps()["NoSDWA"]:
-                          emitPkFp8ToF32(localWriteCVTCode, True, vgpr(vgprTmp, 2), vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx+tP["shiftGR"], vi)), 0, "convert to F32")
-                          emitCvtF32toF16(localWriteCVTCode, True, vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx, vi * 2)), vgpr(vgprTmp), 0, "Convert to FP16")
-                          emitCvtF32toF16(localWriteCVTCode, True, vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx, vi * 2)), vgpr(vgprTmp+1), 1, "Convert to FP16")
-                          emitPkFp8ToF32(localWriteCVTCode, True, vgpr(vgprTmp, 2), vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx+tP["shiftGR"], vi)), 1, "convert to F32")
-                          emitCvtF32toF16(localWriteCVTCode, True, vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx, vi * 2 + 1)), vgpr(vgprTmp), 0, "Convert to FP16")
-                          emitCvtF32toF16(localWriteCVTCode, True, vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx, vi * 2 + 1)), vgpr(vgprTmp+1), 1, "Convert to FP16")
-                        else:
-                          localWriteCVTCode.add(VCvtPkFP8toF32(dst=vgpr(vgprTmp, 2), src=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx+tP["shiftGR"], vi)), sdwa=SDWAModifiers(src0_sel=SelectBit.WORD_0), comment="convert to F32"))
-                          localWriteCVTCode.add(VCvtF32toF16(dst=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx, vi * 2)), src=vgpr(vgprTmp), sdwa=SDWAModifiers(dst_sel=SelectBit.WORD_0), comment="Convert to FP16"))
-                          localWriteCVTCode.add(VCvtF32toF16(dst=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx, vi * 2)), src=vgpr(vgprTmp+1), sdwa=SDWAModifiers(dst_sel=SelectBit.WORD_1), comment="Convert to FP16"))
-                          localWriteCVTCode.add(VCvtPkFP8toF32(dst=vgpr(vgprTmp, 2), src=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx+tP["shiftGR"], vi)), sdwa=SDWAModifiers(src0_sel=SelectBit.WORD_1), comment="convert to F32"))
-                          localWriteCVTCode.add(VCvtF32toF16(dst=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx, vi * 2 + 1)), src=vgpr(vgprTmp), sdwa=SDWAModifiers(dst_sel=SelectBit.WORD_0), comment="Convert to FP16"))
-                          localWriteCVTCode.add(VCvtF32toF16(dst=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx, vi * 2 + 1)), src=vgpr(vgprTmp+1), sdwa=SDWAModifiers(dst_sel=SelectBit.WORD_1), comment="Convert to FP16"))
+                        emitPkFp8ToF32(localWriteCVTCode, noSDWA, vgpr(vgprTmp, 2), vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx+tP["shiftGR"], vi)), 0, "convert to F32")
+                        emitCvtF32toF16(localWriteCVTCode, noSDWA, vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx, vi * 2)), vgpr(vgprTmp), 0, "Convert to FP16")
+                        emitCvtF32toF16(localWriteCVTCode, noSDWA, vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx, vi * 2)), vgpr(vgprTmp+1), 1, "Convert to FP16")
+                        emitPkFp8ToF32(localWriteCVTCode, noSDWA, vgpr(vgprTmp, 2), vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx+tP["shiftGR"], vi)), 1, "convert to F32")
+                        emitCvtF32toF16(localWriteCVTCode, noSDWA, vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx, vi * 2 + 1)), vgpr(vgprTmp), 0, "Convert to FP16")
+                        emitCvtF32toF16(localWriteCVTCode, noSDWA, vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx, vi * 2 + 1)), vgpr(vgprTmp+1), 1, "Convert to FP16")
                   else:
                     if (not isHigh16Bits):
                       idxMod = g2lIdx % modNum
@@ -11526,21 +11508,12 @@ class KernelWriterAssembly(KernelWriter):
                                                               src=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdxTmp+tP["shiftGR"], vi)), scale=0x3f800000,\
                                                               vop3=VOP3PModifiers(op_sel=[0,0,0,sel]), comment="F convert fp8 to f16"))
                       else:
-                        if ti.getArchCaps()["NoSDWA"]:
-                          emitPkFp8ToF32(localWriteCVTCode, True, vgpr(vgprTmp, 2), vgpr(destVgprPrefix + "+%u+%u"%(g2lIdxTmp+tP["shiftGR"], vi)), 1 if selectBit == SelectBit.WORD_1 else 0, "convert to F32")
-                          emitCvtF32toF16(localWriteCVTCode, True, vgpr(destVgprPrefix + "+%u+%u"%(g2lIdxTmp, vi * 2 + interOffset)), vgpr(vgprTmp), 0, "Convert to FP16")
-                          if blockWidth != 0.5:
-                            emitCvtF32toF16(localWriteCVTCode, True, vgpr(destVgprPrefix + "+%u+%u"%(g2lIdxTmp, vi * 2 + interOffset)), vgpr(vgprTmp+1), 1, "Convert to FP16")
-                        else:
-                          localWriteCVTCode.add(VCvtPkFP8toF32(dst=vgpr(vgprTmp, 2), src=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdxTmp+tP["shiftGR"], vi)), sdwa=SDWAModifiers(src0_sel=selectBit), comment="convert to F32"))
-                          localWriteCVTCode.add(VCvtF32toF16(dst=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdxTmp, vi * 2 + interOffset)), src=vgpr(vgprTmp), sdwa=SDWAModifiers(dst_sel=SelectBit.WORD_0), comment="Convert to FP16"))
-                          if blockWidth != 0.5:
-                            localWriteCVTCode.add(VCvtF32toF16(dst=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdxTmp, vi * 2 + interOffset)), src=vgpr(vgprTmp+1), sdwa=SDWAModifiers(dst_sel=SelectBit.WORD_1), comment="Convert to FP16"))
+                        emitPkFp8ToF32(localWriteCVTCode, noSDWA, vgpr(vgprTmp, 2), vgpr(destVgprPrefix + "+%u+%u"%(g2lIdxTmp+tP["shiftGR"], vi)), 1 if selectBit == SelectBit.WORD_1 else 0, "convert to F32")
+                        emitCvtF32toF16(localWriteCVTCode, noSDWA, vgpr(destVgprPrefix + "+%u+%u"%(g2lIdxTmp, vi * 2 + interOffset)), vgpr(vgprTmp), 0, "Convert to FP16")
+                        if blockWidth != 0.5:
+                          emitCvtF32toF16(localWriteCVTCode, noSDWA, vgpr(destVgprPrefix + "+%u+%u"%(g2lIdxTmp, vi * 2 + interOffset)), vgpr(vgprTmp+1), 1, "Convert to FP16")
                     elif blockWidth == 0.5:
-                      if ti.getArchCaps()["NoSDWA"]:
-                        emitCvtF32toF16(localWriteCVTCode, True, vgpr(destVgprPrefix + "+%u+%u"%(g2lIdxTmp, vi * 2 + interOffset)), vgpr(vgprTmp+1), 1, "Convert to FP16")
-                      else:
-                        localWriteCVTCode.add(VCvtF32toF16(dst=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdxTmp, vi * 2 + interOffset)), src=vgpr(vgprTmp+1), sdwa=SDWAModifiers(dst_sel=SelectBit.WORD_1), comment="Convert to FP16"))
+                      emitCvtF32toF16(localWriteCVTCode, noSDWA, vgpr(destVgprPrefix + "+%u+%u"%(g2lIdxTmp, vi * 2 + interOffset)), vgpr(vgprTmp+1), 1, "Convert to FP16")
                   self.vgprPool.checkIn(vgprTmp)
               elif (kernel["ProblemType"]["DataType%s"%tc].isSingle() and kernel["ProblemType"]["DataType"].isBFloat16()):
                 newBlockWidth = (tP["bpeGR"] / tP["bpe"]) * blockWidth
