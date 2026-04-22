@@ -52,12 +52,16 @@ namespace rocsparse
                                                ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
                                                const A* __restrict__ dense_A,
                                                int64_t lda,
+                                               int64_t batch_stride_A,
                                                const B* __restrict__ dense_B,
                                                int64_t ldb,
+                                               int64_t batch_stride_B,
                                                ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, beta),
                                                C* __restrict__ csx_val,
                                                const I* __restrict__ csx_ptr,
                                                const J* __restrict__ csx_ind,
+                                               int64_t              offsets_batch_stride_C,
+                                               int64_t              columns_values_batch_stride_C,
                                                rocsparse_index_base csx_base,
                                                bool                 is_host_mode)
     {
@@ -85,6 +89,15 @@ namespace rocsparse
         {
             return;
         }
+
+        // Offset pointers for the current batch so the rest of the kernel
+        // can address the batched inputs as though they were single matrices.
+        const uint32_t batch = hipBlockIdx_y;
+        dense_A              = dense_A + batch_stride_A * batch;
+        dense_B              = dense_B + batch_stride_B * batch;
+        csx_ptr              = csx_ptr + offsets_batch_stride_C * batch;
+        csx_ind              = csx_ind + columns_values_batch_stride_C * batch;
+        csx_val              = csx_val + columns_values_batch_stride_C * batch;
 
         const int64_t incx = (orderA == rocsparse_order_column)
                                  ? ((transA == rocsparse_operation_none) ? lda : 1)

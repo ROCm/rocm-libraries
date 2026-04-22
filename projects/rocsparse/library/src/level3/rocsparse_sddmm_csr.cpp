@@ -123,12 +123,17 @@ struct rocsparse::rocsparse_sddmm_st<rocsparse_format_csr, T, I, J, A, B, C>
                                     const T*             alpha,
                                     const A*             A_val,
                                     int64_t              A_ld,
+                                    int64_t              batch_stride_A,
                                     const B*             B_val,
                                     int64_t              B_ld,
+                                    int64_t              batch_stride_B,
                                     const T*             beta,
                                     const I*             C_row_data,
                                     const J*             C_col_data,
                                     C*                   C_val_data,
+                                    int64_t              offsets_batch_stride_C,
+                                    int64_t              columns_values_batch_stride_C,
+                                    int64_t              batch_count,
                                     rocsparse_index_base C_base,
                                     rocsparse_mat_descr  C_descr,
                                     rocsparse_sddmm_alg  alg,
@@ -149,6 +154,12 @@ struct rocsparse::rocsparse_sddmm_st<rocsparse_format_csr, T, I, J, A, B, C>
             if(buffer == nullptr)
             {
                 return rocsparse_status_invalid_pointer;
+            }
+
+            // Batched computation is not supported for the dense algorithm.
+            if(batch_count > 1)
+            {
+                return rocsparse_status_not_implemented;
             }
 
             char* ptr   = reinterpret_cast<char*>(buffer);
@@ -269,7 +280,7 @@ struct rocsparse::rocsparse_sddmm_st<rocsparse_format_csr, T, I, J, A, B, C>
         case rocsparse_sddmm_alg_default:
         {
 #define LAUNCH_WAVEFRONT_PER_ROWCOL(BLOCKSIZE, WFSIZE, NTHREADS_PER_DOTPRODUCT)    \
-    dim3 blocks((m - 1) / (BLOCKSIZE / WFSIZE) + 1);                               \
+    dim3 blocks((m - 1) / (BLOCKSIZE / WFSIZE) + 1, batch_count);                  \
     dim3 threads(BLOCKSIZE);                                                       \
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                            \
         (rocsparse::sddmm_csx_kernel_wavefront_per_rowcol<BLOCKSIZE,               \
@@ -292,12 +303,16 @@ struct rocsparse::rocsparse_sddmm_st<rocsparse_format_csr, T, I, J, A, B, C>
         ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha),                          \
         A_val,                                                                     \
         A_ld,                                                                      \
+        batch_stride_A,                                                            \
         B_val,                                                                     \
         B_ld,                                                                      \
+        batch_stride_B,                                                            \
         ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta),                           \
         C_val_data,                                                                \
         C_row_data,                                                                \
         C_col_data,                                                                \
+        offsets_batch_stride_C,                                                    \
+        columns_values_batch_stride_C,                                             \
         C_base,                                                                    \
         handle->pointer_mode == rocsparse_pointer_mode_host)
 
