@@ -3050,8 +3050,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
       doReadB = doReadB or (hasLiveLdsData and doNext)
       doReadM = doReadM or (hasLiveLdsData and doNext)
       doReadM = doReadM and (kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"])
-      if (hasLiveLdsData and doNext) or self.states.numItersPLR == 0:
-        # swap LR buffer
+      if (hasLiveLdsData and doNext) or (self.states.numItersPLR == 0 and isSwapLroIter):
+        # swap LR buffer token only when the LR buffer actually changes
         self.states.ldsReadTokenIdx = self.states.memTokenLdsBuffer1 if self.states.ldsReadTokenIdx == self.states.memTokenLdsBuffer0 else self.states.memTokenLdsBuffer0
       for iui in range(0,kernel["InnerUnroll"]):
         # use full prefetch only for next loop
