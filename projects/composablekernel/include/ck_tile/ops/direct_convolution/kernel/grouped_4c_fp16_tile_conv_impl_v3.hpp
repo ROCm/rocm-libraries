@@ -18,6 +18,7 @@
 #include "ck_tile/core/tensor/load_tile.hpp"
 #include "ck_tile/core/tensor/store_tile.hpp"
 #include "ck_tile/core/numeric/math.hpp"
+#include "ck_tile/core/arch/arch.hpp"
 #include <hip/hip_fp16.h>
 #include <hip/hip_runtime.h>
 #include <string>
@@ -905,15 +906,16 @@ struct OutputWriter
                             _Float16* __restrict__ out,
                             int ho,
                             int wo)
-        : dram_window([&]()
-          {
-              const auto out_desc = TC::MakeOutputDramDescriptor(ho, wo, bc.C);
-              auto out_buf = OutputDramBuf{
-                  out + static_cast<size_t>(bc.block_n) * ho * wo * bc.C + bc.block_k,
-                  static_cast<ck_tile::index_t>(out_desc.get_element_space_size())};
-              auto out_view = OutputDramView{out_buf, out_desc};
-              constexpr auto out_dist = TC::MakeOutputDramDistribution();
-              return ck_tile::make_tile_window(
+        : last_p_out(0)
+    {
+        constexpr auto out_dist = TC::MakeOutputDramDistribution();
+        const auto out_desc = TC::MakeOutputDramDescriptor(ho, wo, bc.C);
+        auto out_buf = OutputDramBuf{
+            out + static_cast<size_t>(bc.block_n) * ho * wo * bc.C + bc.block_k,
+            static_cast<ck_tile::index_t>(out_desc.get_element_space_size())};
+        auto out_view = OutputDramView{out_buf, out_desc};
+        
+        dram_window =  ck_tile::make_tile_window(
                   out_view,
                   ck_tile::make_tuple(ck_tile::number<1>{},
                                       ck_tile::number<cfg.block_q()>{},
@@ -921,9 +923,6 @@ struct OutputWriter
                                       ck_tile::number<4>{}),
                   {0, bc.block_q, 0, 0},
                   out_dist);
-          }()),
-          last_p_out(0)
-    {
     }
 
     // Convert fp32x4 accumulator to fp16x4 and write directly to global memory.
@@ -1091,7 +1090,7 @@ struct OutputWriterLds
         ck_tile::store_tile(lds_write_window, output_tile);
 
         // 3. Synchronize such that all threads' LDS writes are visible.
-        ck_tile::block_sync_lds();
+        ck_tile::s_waitcnt_lgkm<0>();
 
         // 4. LDS back to registers for coalesced store to DRAM.
         const auto lds_tile = ck_tile::load_tile(lds_read_window);
