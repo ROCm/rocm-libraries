@@ -235,17 +235,6 @@ struct TileConstants
         return static_cast<int>(coord.get_offset()) * 2 + c4_lo;
     }
 
-    // Compute uint4 offset from logical (x, c8) using a plain row-major descriptor
-    // (used by the LDS epilogue path for output staging — no swizzle applied).
-    static CK_TILE_DEVICE int lds_offset_uint4(int x, int c8)
-    {
-        constexpr auto desc = ck_tile::make_naive_tensor_descriptor(
-            ck_tile::make_tuple(ck_tile::number<cfg.block_q()>{}, ck_tile::number<BLOCK_C8>{}),
-            ck_tile::make_tuple(ck_tile::number<BLOCK_C8>{}, ck_tile::number<1>{}));
-        auto coord = ck_tile::make_tensor_coordinate(desc, ck_tile::make_tuple(x, c8));
-        return static_cast<int>(coord.get_offset());
-    }
-
     // Total channels per block in fp16 elements.
     static constexpr int BLOCK_C = BLOCK_C8 * 8;
 
@@ -533,6 +522,23 @@ struct TileConstants
             ck_tile::number<1>{});
     }
 
+    static constexpr auto MakeOutputLdsReadDescriptor()
+    {
+        // 4D view of the flat LDS buffer, matching the DRAM window shape.
+        // The LDS write descriptor is 3D [block_q, BLOCK_C4, 4]; we add a trivial row dimension for the DRAM read.
+        return ck_tile::make_naive_tensor_descriptor(
+            ck_tile::make_tuple(ck_tile::number<1>{},
+                                ck_tile::number<cfg.block_q()>{},
+                                ck_tile::number<BLOCK_C4>{},
+                                ck_tile::number<4>{}),
+            ck_tile::make_tuple(ck_tile::number<cfg.block_q() * BLOCK_C4 * 4>{},
+                                ck_tile::number<BLOCK_C4 * 4>{},
+                                ck_tile::number<4>{},
+                                ck_tile::number<1>{}),
+            ck_tile::number<4>{},
+            ck_tile::number<1>{});
+    }
+
     // Tile distribution for output LDS writes (MFMA result scatter).
     static constexpr auto MakeOutputLdsWriteDistribution()
     {
@@ -545,6 +551,24 @@ struct TileConstants
                 ck_tile::tuple<ck_tile::sequence<1, 2>, ck_tile::sequence<2, 1>>,
                 ck_tile::tuple<ck_tile::sequence<0, 0>, ck_tile::sequence<1, 1>>,
                 ck_tile::sequence<3>,
+                ck_tile::sequence<0>>{});
+    }
+
+    // Tile distribution for output LDS reads (LDS staging gather before DRAM store).
+    static constexpr auto MakeOutputLdsReadDistribution()
+    {
+        // Same mapping as DRAM distribution but over 3D LDS tile [block_q, BLOCK_C4, 4],
+        // i.e., but without the trivial row dimension.
+        // See, MakeOutputDramDistribution().
+        return ck_tile::make_static_tile_distribution(
+            ck_tile::tile_distribution_encoding<
+                ck_tile::sequence<>,
+                ck_tile::tuple<ck_tile::sequence<cfg.waves_q4, 4>,
+                            ck_tile::sequence<cfg.waves_c64, 16>,
+                            ck_tile::sequence<4>>,
+                ck_tile::tuple<ck_tile::sequence<2, 3>, ck_tile::sequence<3, 2>>,
+                ck_tile::tuple<ck_tile::sequence<0, 0>, ck_tile::sequence<1, 1>>,
+                ck_tile::sequence<4>,
                 ck_tile::sequence<0>>{});
     }
 
@@ -935,78 +959,117 @@ struct OutputWriterLds
 
     // Output tile distribution and distributed tensor type for LDS writes.
     static constexpr auto OutputLdsDist = TC::MakeOutputLdsWriteDistribution();
+    static constexpr auto OutputDramDist = TC::MakeOutputDramDistribution();
+
     using OutputDstrTensor =
         ck_tile::static_distributed_tensor<_Float16, ck_tile::remove_cvref_t<decltype(OutputLdsDist)>>;
 
+    // LDS buffer - same for read and write
+    using OutputLdsBuf    = ck_tile::buffer_view<ck_tile::address_space_enum::lds, _Float16, ck_tile::index_t, true>;
+
     // LDS write tile window type.
-    using OutputLdsDesc = ck_tile::remove_cvref_t<decltype(TC::MakeOutputLdsWriteDescriptor())>;
-    using OutputLdsBuf =
-        ck_tile::buffer_view<ck_tile::address_space_enum::lds, _Float16, ck_tile::index_t, true>;
-    using OutputLdsView = ck_tile::tensor_view<OutputLdsBuf, OutputLdsDesc>;
-    using OutputLdsWindow = ck_tile::remove_cvref_t<decltype(ck_tile::make_tile_window(
-        OutputLdsView{},
+    using OutputLdsWriteDesc   = ck_tile::remove_cvref_t<decltype(TC::MakeOutputLdsWriteDescriptor())>;
+    using OutputLdsWriteView   = ck_tile::tensor_view<OutputLdsBuf, OutputLdsWriteDesc>;
+    using OutputLdsWriteWindow = ck_tile::remove_cvref_t<decltype(ck_tile::make_tile_window(
+        OutputLdsWriteView{},
         ck_tile::make_tuple(ck_tile::number<cfg.block_q()>{},
                             ck_tile::number<TC::BLOCK_C4>{},
                             ck_tile::number<4>{}),
-        {0, 0, 0}))>;
+        {0, 0, 0},
+        // This ensures that tensor coordinates are pre-computed at construction time.
+        TC::MakeOutputLdsWriteDistribution()))>;
 
-    // Output tensor descriptor: [ho, wo, C] in _Float16 elements for this batch.
-    using OutputDesc = decltype(ck_tile::make_naive_tensor_descriptor(
-        ck_tile::make_tuple(int{}, int{}, int{}),
-        ck_tile::make_tuple(int{}, int{}, ck_tile::number<1>{}),
-        ck_tile::number<8>{}));
+    // Output tile distribution and distributed tensor for LDS reads before DRAM store.
+    using OutputLdsReadDesc   = ck_tile::remove_cvref_t<decltype(TC::MakeOutputLdsReadDescriptor())>;
+    using OutputLdsReadView   = ck_tile::tensor_view<OutputLdsBuf, OutputLdsReadDesc>;
+    using OutputLdsReadWindow = ck_tile::remove_cvref_t<decltype(ck_tile::make_tile_window(
+        OutputLdsReadView{},
+        ck_tile::make_tuple(ck_tile::number<1>{},
+                            ck_tile::number<cfg.block_q()>{},
+                            ck_tile::number<TC::BLOCK_C4>{},
+                            ck_tile::number<4>{}),
+        {0, 0, 0, 0},
+        // LDS read must match with DRAM write distribution. 
+        // Pass DRAM distribution to pre-compute the mapping from tensor coordinates to thread coordinates.
+        OutputDramDist))>; 
 
-    bool store_active;
-    bool store_valid;
-    const uint4* load_output_lds;
-    _Float16* out_base;
-    OutputDesc out_desc;
-    int out_q;
-    int out_c_fp16;
-    OutputLdsWindow lds_write_win;
+    // DRAM tile window type — derived from MakeOutputDramDescriptor with dummy args.
+    using OutputDramDesc =
+        ck_tile::remove_cvref_t<decltype(TC::MakeOutputDramDescriptor(int{}, int{}, int{}))>;
+    using OutputDramBuf =
+        ck_tile::buffer_view<ck_tile::address_space_enum::global, _Float16, ck_tile::index_t, true>;
+    using OutputDramView = ck_tile::tensor_view<OutputDramBuf, OutputDramDesc>;
+    using OutputDramWindow = ck_tile::remove_cvref_t<decltype(ck_tile::make_tile_window(
+        OutputDramView{},
+        ck_tile::make_tuple(ck_tile::number<1>{},
+                            ck_tile::number<cfg.block_q()>{},
+                            ck_tile::number<TC::BLOCK_C4>{},
+                            ck_tile::number<4>{}),
+        {0, 0, 0, 0},
+        OutputDramDist))>;
 
-    __device__ OutputWriterLds(const ThreadMapping<cfg>& tm,
-                               const BlockCoords<cfg>& bc,
+    OutputLdsWriteWindow lds_write_window;
+    OutputLdsReadWindow lds_read_window;
+    OutputDramWindow dram_window;
+    int last_p_out;
+
+    __device__ OutputWriterLds(const BlockCoords<cfg>& bc,
                                uint4* output_lds,
                                _Float16* __restrict__ out,
                                int ho,
                                int wo)
-        : store_active(tm.tid < TC::STORE_VECS),
-          store_valid(false),
-          load_output_lds(nullptr),
-          out_base(out + static_cast<size_t>(bc.block_n) * ho * wo * bc.C),
-          out_desc(ck_tile::make_naive_tensor_descriptor(
-              ck_tile::make_tuple(ho, wo, bc.C),
-              ck_tile::make_tuple(wo * bc.C, bc.C, ck_tile::number<1>{}),
-              ck_tile::number<8>{})),
-          out_q(0),
-          out_c_fp16(0),
-          lds_write_win([&]()
-          {
-              constexpr auto lds_desc = TC::MakeOutputLdsWriteDescriptor();
-              auto lds_buf = OutputLdsBuf{
-                  reinterpret_cast<_Float16*>(output_lds),
-                  static_cast<ck_tile::index_t>(
-                      ck_tile::max(TC::WEIGHT_LDS_PADDED_UINT4, TC::OUTPUT_LDS_BUFFER_SIZE) *
-                      (sizeof(uint4) / sizeof(_Float16)))};
-              auto lds_view = OutputLdsView{lds_buf, lds_desc};
-              return ck_tile::make_tile_window(
-                  lds_view,
-                  ck_tile::make_tuple(ck_tile::number<cfg.block_q()>{},
+        : last_p_out(0)
+    {
+        // Construct the common LDS buffer for write and read.
+        auto lds_buf = OutputLdsBuf{
+            reinterpret_cast<_Float16*>(output_lds),
+            static_cast<ck_tile::index_t>(
+                ck_tile::max(TC::WEIGHT_LDS_PADDED_UINT4, TC::OUTPUT_LDS_BUFFER_SIZE) *
+                (sizeof(uint4) / sizeof(_Float16)))};
+
+        // Construct LDS write window for output staging.
+        constexpr auto lds_write_desc = TC::MakeOutputLdsWriteDescriptor();
+        constexpr auto lds_write_dist = TC::MakeOutputLdsWriteDistribution();
+        auto lds_write_view = OutputLdsWriteView{lds_buf, lds_write_desc};
+        lds_write_window = ck_tile::make_tile_window(
+            lds_write_view,
+            ck_tile::make_tuple(ck_tile::number<cfg.block_q()>{},
+                                ck_tile::number<TC::BLOCK_C4>{},
+                                ck_tile::number<4>{}),
+            {0, 0, 0},
+            // If we don't pass the distribution, the coordinate-to-thread mapping will be computed at store time, causing overhead.
+            lds_write_dist);
+
+        // Construct LDS read window for staging before DRAM store.
+        constexpr auto lds_read_desc = TC::MakeOutputLdsReadDescriptor();
+        constexpr auto lds_read_dist = TC::MakeOutputDramDistribution(); // LDS read must match DRAM distribution for correct thread mapping.
+        auto lds_read_view = OutputLdsReadView{lds_buf, lds_read_desc};
+        lds_read_window = ck_tile::make_tile_window(
+            lds_read_view,
+            ck_tile::make_tuple(ck_tile::number<1>{},
+                                ck_tile::number<cfg.block_q()>{},
+                                ck_tile::number<TC::BLOCK_C4>{},
+                                ck_tile::number<4>{}),
+            {0, 0, 0, 0},
+            // If we don't pass the distribution, the coordinate-to-thread mapping will be computed at store time, causing overhead.
+            lds_read_dist);
+
+        // Construct output DRAM window for global memory writes.
+        constexpr auto out_dist = TC::MakeOutputDramDistribution();
+        const auto out_desc = TC::MakeOutputDramDescriptor(ho, wo, bc.C);
+        auto out_buf = OutputDramBuf{
+            out + static_cast<size_t>(bc.block_n) * ho * wo * bc.C + bc.block_k,
+            static_cast<ck_tile::index_t>(out_desc.get_element_space_size())};
+        auto out_view = OutputDramView{out_buf, out_desc};
+        
+        dram_window = ck_tile::make_tile_window(
+                  out_view,
+                  ck_tile::make_tuple(ck_tile::number<1>{},
+                                      ck_tile::number<cfg.block_q()>{},
                                       ck_tile::number<TC::BLOCK_C4>{},
                                       ck_tile::number<4>{}),
-                  {0, 0, 0});
-          }())
-    {
-        if(store_active)
-        {
-            const int col = tm.tid / TC::BLOCK_C8;
-            const int c8  = tm.tid % TC::BLOCK_C8;
-            out_q         = bc.block_q + col;
-            out_c_fp16    = (bc.block_c8 + c8) * 8;
-            load_output_lds = &output_lds[TC::lds_offset_uint4(col, c8)];
-            store_valid     = (out_q < wo);
-        }
+                  {0, bc.block_q, 0, 0},
+                  out_dist);
     }
 
     // Convert fp32x4 accumulator to fp16x4 and write through LDS to global memory.
@@ -1025,18 +1088,20 @@ struct OutputWriterLds
         output_tile.get_thread_buffer()(ck_tile::number<3>{}) = fp16_ptr[3];
 
         // 2. Store to LDS via tile window.
-        ck_tile::store_tile(lds_write_win, output_tile);
+        ck_tile::store_tile(lds_write_window, output_tile);
 
-        // 3. Synchronize so all threads' LDS writes are visible.
-        __syncthreads();
+        // 3. Synchronize such that all threads' LDS writes are visible.
+        ck_tile::block_sync_lds();
 
-        // 4. Write from LDS to global memory (only active store threads).
-        if(store_valid)
-        {
-            auto coord = ck_tile::make_tensor_coordinate(
-                out_desc, ck_tile::make_tuple(p_out, out_q, out_c_fp16));
-            *reinterpret_cast<uint4*>(out_base + coord.get_offset()) = *load_output_lds;
-        }
+        // 4. LDS back to registers for coalesced store to DRAM.
+        const auto lds_tile = ck_tile::load_tile(lds_read_window);
+
+        // 5. Move window to current output row.
+        ck_tile::move_tile_window(dram_window, {p_out - last_p_out, 0, 0, 0});
+        last_p_out = p_out;
+
+        // 6. Store LDS tile to DRAM — pad transform handles OOB.
+        ck_tile::store_tile(dram_window, lds_tile);
     }
 };
 
@@ -1276,7 +1341,7 @@ __device__ void conv2d_grouped_4c_fp16_cdna4_nhwc_impl(const _Float16* __restric
     // Select epilogue and run the compute pipeline.
     if constexpr(use_lds_epilogue)
     {
-        OutputWriterLds<cfg> ow(tm, bc, output_lds, out, ho, wo);
+        OutputWriterLds<cfg> ow(bc, output_lds, out, ho, wo);
         run_compute(ow);
     }
     else
