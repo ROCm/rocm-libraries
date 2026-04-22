@@ -48,7 +48,7 @@ ROCSOLVER_BEGIN_NAMESPACE
 // when nrhs is sufficiently large
 // ----------------------------------------
 template <typename T, typename I>
-static inline bool use_sytrs2(I const n, I const nrhs, I const batch_count)
+static inline bool use_sytrs2(I const n, I const nrhs, [[maybe_unused]] I const batch_count)
 {
     return (nrhs >= ((n / 2) + (n % 2)));
 }
