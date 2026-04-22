@@ -22,7 +22,7 @@
  * ************************************************************************ */
 
 /*! \file
- *  \brief rocsparse-auxiliary.h provides auxilary functions in rocsparse
+ *  \brief rocsparse-auxiliary.h provides auxiliary functions in rocsparse
  */
 
 #ifndef ROCSPARSE_AUXILIARY_H
@@ -2365,7 +2365,7 @@ rocsparse_status rocsparse_const_bell_get(rocsparse_const_spmat_descr descr,
  *  @param[out]
  *  cols                   number of columns in the sliced ELL matrix
  *  @param[out]
- *  nnz                    number of non-zeros in the sliced ELL matix.
+ *  nnz                    number of non-zeros in the sliced ELL matrix.
  *  @param[out]
  *  sell_slice_size        slice size in the sliced ELL matrix.
  *  @param[out]

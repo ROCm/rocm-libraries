@@ -94,7 +94,7 @@ inline Error createBatchnormOperation(
 
     // Compute data type
     HIPDNN_CHECK_ERROR(setDescriptorAttrDataType(opDesc.get(),
-                                                 HIPDNN_ATTR_BATCHNORM_MATH_PREC_EXT,
+                                                 HIPDNN_ATTR_BATCHNORM_COMP_TYPE_EXT,
                                                  attributes.compute_data_type,
                                                  "batchnorm compute data type"));
 
@@ -110,6 +110,14 @@ inline Error createBatchnormOperation(
                                            tensorDescs,
                                            "batchnorm peer_stats"));
         }
+    }
+
+    // Set operation name if provided
+    auto& opName = attributes.get_name();
+    if(!opName.empty())
+    {
+        HIPDNN_CHECK_ERROR(setDescriptorAttrString(
+            opDesc.get(), HIPDNN_ATTR_OPERATION_NAME_EXT, opName, "operation name"));
     }
 
     // Finalize operation descriptor

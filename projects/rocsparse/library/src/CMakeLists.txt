@@ -127,6 +127,7 @@ set(rocsparse_source
   src/level2/rocsparse_csrmv_info.cpp
   src/level2/rocsparse_csrmv_adaptive_info.cpp
   src/level2/rocsparse_csrmv_lrb_info.cpp
+  src/level2/rocsparse_csrmv_nnzsplit_info.cpp
   src/level2/rocsparse_csrmv_analysis.cpp
   #
   src/level2/rocsparse_cscmv_impl.cpp

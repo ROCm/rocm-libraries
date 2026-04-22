@@ -17,17 +17,25 @@ add_executable(
     main.cpp
     utilities/TestCpuFpReferenceBatchnorm.cpp
     utilities/TestCpuFpReferenceBatchnormWithVariance.cpp
+    utilities/TestCpuFpReferenceBlockScaleDequantize.cpp
     utilities/TestCpuFpReferenceRMSNorm.cpp
     utilities/TestCpuFpReferenceSdpa.cpp
     utilities/TestCpuFpReferenceConvolution.cpp
     utilities/TestCpuFpReferenceLayernorm.cpp
     utilities/TestCpuFpReferenceMatmul.cpp
+    utilities/TestCpuFpReferenceReduction.cpp
     utilities/TestCpuFpReferenceMiopenRmsValidation.cpp
     utilities/TestCpuFpReferenceUtilities.cpp
     utilities/TestCpuFpReferenceValidation.cpp
     utilities/TestCpuTypeUtilities.cpp
+    utilities/TestSdkFrontendTypeConversions.cpp
     utilities/TestCpuReferencePointwise.cpp
-    utilities/TestDynamicTolerances.cpp
+    utilities/TestDynamicTolerancesCommon.cpp
+    utilities/TestDynamicTolerancesConv.cpp
+    utilities/TestDynamicTolerancesMatmul.cpp
+    utilities/TestDynamicTolerancesPointwise.cpp
+    utilities/TestDynamicTolerancesRMSNorm.cpp
+    utilities/TestGraphTestHelpers.cpp
     utilities/TestFlatbufferDatatypeMapping.cpp
     utilities/TestFlatbufferTensorAttributesUtils.cpp
     utilities/TestLoadGraphAndTensors.cpp
@@ -36,7 +44,10 @@ add_executable(
     utilities/TestScopedDirectory.cpp
     utilities/TestScopedEnvironmentVariableSetter.cpp
     utilities/TestSeeds.cpp
+    utilities/TestTensorDiff.cpp
     utilities/TestVectorLoggingUtils.cpp
+    utilities/cpu_graph_executor/TestBlockScaleDequantizePlan.cpp
+    utilities/cpu_graph_executor/TestBlockScaleDequantizeSignatureKey.cpp
     utilities/cpu_graph_executor/TestBatchnormBwdPlan.cpp
     utilities/cpu_graph_executor/TestBatchnormBwdSignatureKey.cpp
     utilities/cpu_graph_executor/TestBatchnormFwdInferencePlan.cpp
@@ -61,6 +72,8 @@ add_executable(
     utilities/cpu_graph_executor/TestPlanRegistrySignatureKey.cpp
     utilities/cpu_graph_executor/TestPointwisePlan.cpp
     utilities/cpu_graph_executor/TestPointwiseSignatureKey.cpp
+    utilities/cpu_graph_executor/TestReductionPlan.cpp
+    utilities/cpu_graph_executor/TestReductionSignatureKey.cpp
     utilities/cpu_graph_executor/TestRMSNormFwdPlan.cpp
     utilities/cpu_graph_executor/TestRMSNormFwdSignatureKey.cpp
     utilities/cpu_graph_executor/TestSdpaFwdPlan.cpp
@@ -71,7 +84,7 @@ add_executable(
 target_compile_options(hipdnn_test_sdk_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
 
 target_link_libraries(
-    hipdnn_test_sdk_tests GTest::gtest GTest::gmock Threads::Threads hipdnn_test_sdk hipdnn_plugin_sdk hip::host
+    hipdnn_test_sdk_tests GTest::gtest GTest::gmock Threads::Threads hipdnn_test_sdk hipdnn_plugin_sdk
 )
 
 clang_tidy_check(hipdnn_test_sdk_tests)

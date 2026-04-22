@@ -79,6 +79,7 @@ enum class Processor : int
     // only including supported types
     gfx803  = 803,
     gfx900  = 900,
+    gfx90c  = 912,
     gfx906  = 906,
     gfx908  = 908,
     gfx90a  = 910,
@@ -103,7 +104,8 @@ enum class Processor : int
     gfx1152 = 1152,
     gfx1153 = 1153,
     gfx1200 = 1200,
-    gfx1201 = 1201
+    gfx1201 = 1201,
+    gfx1250 = 1250
 };
 
 // helper function in handle.cpp

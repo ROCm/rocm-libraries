@@ -5,6 +5,7 @@
 #include "DescriptorAttributeUtils.hpp"
 #include "HipdnnBackendDescriptorType.h"
 #include "HipdnnException.hpp"
+#include "HipdnnOperationType.h"
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 
 namespace hipdnn_backend
@@ -27,11 +28,12 @@ void LayernormOperationDescriptor::finalize()
     THROW_IF_NULL(_yDesc,
                   HIPDNN_STATUS_BAD_PARAM,
                   "LayernormOperationDescriptor::finalize() failed: Y tensor not set");
-    THROW_IF_TRUE(_computeDataType == hipdnn_data_sdk::data_objects::DataType::UNSET,
+    THROW_IF_TRUE(_computeDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET,
                   HIPDNN_STATUS_BAD_PARAM,
                   "LayernormOperationDescriptor::finalize() failed: compute data type not "
                   "set");
-    THROW_IF_TRUE(_data.forward_phase == hipdnn_data_sdk::data_objects::NormFwdPhase::NOT_SET,
+    THROW_IF_TRUE(_data.forward_phase
+                      == hipdnn_flatbuffers_sdk::data_objects::NormFwdPhase::NOT_SET,
                   HIPDNN_STATUS_BAD_PARAM,
                   "LayernormOperationDescriptor::finalize() failed: forward_phase not set");
 
@@ -124,12 +126,27 @@ void LayernormOperationDescriptor::setAttribute(hipdnnBackendAttributeName_t att
                         arrayOfElements,
                         "LayernormOperationDescriptor::setAttribute()");
         break;
-    case HIPDNN_ATTR_LAYERNORM_MATH_PREC_EXT:
+    case HIPDNN_ATTR_LAYERNORM_COMP_TYPE_EXT:
         setDataType(_computeDataType,
                     attributeType,
                     elementCount,
                     arrayOfElements,
                     "LayernormOperationDescriptor::setAttribute()");
+        break;
+    case HIPDNN_ATTR_OPERATION_LAYERNORM_NORMALIZED_DIM_COUNT_EXT:
+        setScalar(_data.normalized_dim_count,
+                  HIPDNN_TYPE_INT64,
+                  attributeType,
+                  elementCount,
+                  arrayOfElements,
+                  "LayernormOperationDescriptor::setAttribute()");
+        break;
+    case HIPDNN_ATTR_OPERATION_NAME_EXT:
+        setString(_name,
+                  attributeType,
+                  elementCount,
+                  arrayOfElements,
+                  "LayernormOperationDescriptor::setAttribute()");
         break;
     default:
         throw HipdnnException(HIPDNN_STATUS_NOT_SUPPORTED,
@@ -218,13 +235,38 @@ void LayernormOperationDescriptor::getAttribute(hipdnnBackendAttributeName_t att
                         arrayOfElements,
                         "LayernormOperationDescriptor::getAttribute()");
         break;
-    case HIPDNN_ATTR_LAYERNORM_MATH_PREC_EXT:
+    case HIPDNN_ATTR_LAYERNORM_COMP_TYPE_EXT:
         getDataType(_computeDataType,
                     attributeType,
                     requestedElementCount,
                     elementCount,
                     arrayOfElements,
                     "LayernormOperationDescriptor::getAttribute()");
+        break;
+    case HIPDNN_ATTR_OPERATION_LAYERNORM_NORMALIZED_DIM_COUNT_EXT:
+        getScalar(_data.normalized_dim_count,
+                  HIPDNN_TYPE_INT64,
+                  attributeType,
+                  requestedElementCount,
+                  elementCount,
+                  arrayOfElements,
+                  "LayernormOperationDescriptor::getAttribute()");
+        break;
+    case HIPDNN_ATTR_OPERATION_NAME_EXT:
+        getString(_name,
+                  attributeType,
+                  requestedElementCount,
+                  elementCount,
+                  arrayOfElements,
+                  "LayernormOperationDescriptor::getAttribute()");
+        break;
+    case HIPDNN_ATTR_OPERATION_TYPE_EXT:
+        getOperationType(HIPDNN_OPERATION_TYPE_LAYERNORM_EXT,
+                         attributeType,
+                         requestedElementCount,
+                         elementCount,
+                         arrayOfElements,
+                         "LayernormOperationDescriptor::getAttribute()");
         break;
     default:
         throw HipdnnException(HIPDNN_STATUS_NOT_SUPPORTED,
@@ -250,25 +292,59 @@ std::vector<std::shared_ptr<TensorDescriptor>>
     return result;
 }
 
-std::unique_ptr<hipdnn_data_sdk::data_objects::NodeT>
+std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::NodeT>
     LayernormOperationDescriptor::buildNode() const
 {
-    auto node = std::make_unique<hipdnn_data_sdk::data_objects::NodeT>();
+    auto node = std::make_unique<hipdnn_flatbuffers_sdk::data_objects::NodeT>();
+    node->name = _name;
     node->compute_data_type = _computeDataType;
-
-    hipdnn_data_sdk::data_objects::LayernormAttributesT attrs;
-    attrs.x_tensor_uid = _data.x_tensor_uid;
-    attrs.scale_tensor_uid = _data.scale_tensor_uid;
-    attrs.bias_tensor_uid = _data.bias_tensor_uid;
-    attrs.epsilon_tensor_uid = _data.epsilon_tensor_uid;
-    attrs.y_tensor_uid = _data.y_tensor_uid;
-    attrs.forward_phase = _data.forward_phase;
-
-    attrs.mean_tensor_uid = _data.mean_tensor_uid;
-    attrs.inv_variance_tensor_uid = _data.inv_variance_tensor_uid;
-
-    node->attributes.Set(attrs);
+    node->attributes.Set(hipdnn_flatbuffers_sdk::data_objects::LayernormAttributesT(_data));
     return node;
+}
+
+std::shared_ptr<LayernormOperationDescriptor> LayernormOperationDescriptor::fromNode(
+    const hipdnn_flatbuffers_sdk::data_objects::NodeT& nodeT,
+    const std::unordered_map<int64_t, std::shared_ptr<TensorDescriptor>>& tensorMap)
+{
+    const auto* attrs = nodeT.attributes.AsLayernormAttributes();
+    THROW_IF_NULL(attrs,
+                  HIPDNN_STATUS_INTERNAL_ERROR,
+                  "LayernormOperationDescriptor::fromNode: LayernormAttributes is null");
+
+    auto desc = std::make_shared<LayernormOperationDescriptor>();
+    desc->_data = *attrs;
+    desc->_computeDataType = nodeT.compute_data_type;
+    desc->_name = nodeT.name;
+
+    // Required tensors
+    desc->_xDesc = findTensorInMap(
+        tensorMap, attrs->x_tensor_uid, "LayernormOperationDescriptor::fromNode: X");
+    desc->_scaleDesc = findTensorInMap(
+        tensorMap, attrs->scale_tensor_uid, "LayernormOperationDescriptor::fromNode: Scale");
+    desc->_biasDesc = findTensorInMap(
+        tensorMap, attrs->bias_tensor_uid, "LayernormOperationDescriptor::fromNode: Bias");
+    desc->_epsilonDesc = findTensorInMap(
+        tensorMap, attrs->epsilon_tensor_uid, "LayernormOperationDescriptor::fromNode: Epsilon");
+    desc->_yDesc = findTensorInMap(
+        tensorMap, attrs->y_tensor_uid, "LayernormOperationDescriptor::fromNode: Y");
+
+    // Optional tensors
+    if(attrs->mean_tensor_uid.has_value())
+    {
+        desc->_meanDesc = findTensorInMap(tensorMap,
+                                          attrs->mean_tensor_uid.value(),
+                                          "LayernormOperationDescriptor::fromNode: Mean");
+    }
+    if(attrs->inv_variance_tensor_uid.has_value())
+    {
+        desc->_invVarianceDesc
+            = findTensorInMap(tensorMap,
+                              attrs->inv_variance_tensor_uid.value(),
+                              "LayernormOperationDescriptor::fromNode: InvVariance");
+    }
+
+    desc->finalize();
+    return desc;
 }
 
 hipdnnBackendDescriptorType_t LayernormOperationDescriptor::getStaticType()
@@ -279,11 +355,13 @@ hipdnnBackendDescriptorType_t LayernormOperationDescriptor::getStaticType()
 std::string LayernormOperationDescriptor::toString() const
 {
     std::string str = "LayernormOperationDescriptor: {";
-    str += "x_uid=" + std::to_string(_data.x_tensor_uid);
+    str += "name=" + _name;
+    str += ", x_uid=" + std::to_string(_data.x_tensor_uid);
     str += ", scale_uid=" + std::to_string(_data.scale_tensor_uid);
     str += ", bias_uid=" + std::to_string(_data.bias_tensor_uid);
     str += ", epsilon_uid=" + std::to_string(_data.epsilon_tensor_uid);
     str += ", y_uid=" + std::to_string(_data.y_tensor_uid);
+    str += ", normalized_dim_count=" + std::to_string(_data.normalized_dim_count);
     if(_data.mean_tensor_uid.has_value())
     {
         str += ", mean_uid=" + std::to_string(_data.mean_tensor_uid.value());
@@ -294,7 +372,7 @@ std::string LayernormOperationDescriptor::toString() const
     }
     str += ", forward_phase=" + std::to_string(static_cast<int>(_data.forward_phase));
     str += ", compute_data_type=";
-    str += hipdnn_data_sdk::data_objects::EnumNameDataType(_computeDataType);
+    str += hipdnn_flatbuffers_sdk::data_objects::EnumNameDataType(_computeDataType);
     str += "}";
     return str;
 }

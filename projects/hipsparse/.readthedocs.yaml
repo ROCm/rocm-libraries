@@ -4,13 +4,13 @@
 version: 2
 
 sphinx:
-   configuration: docs/conf.py
+   configuration: projects/hipsparse/docs/conf.py
 
 formats: [htmlzip]
 
 python:
    install:
-   - requirements: docs/sphinx/requirements.txt
+   - requirements: projects/hipsparse/docs/sphinx/requirements.txt
 
 build:
    os: ubuntu-22.04

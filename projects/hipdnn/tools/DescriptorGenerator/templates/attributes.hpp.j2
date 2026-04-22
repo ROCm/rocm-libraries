@@ -1,0 +1,273 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
+/**
+ * @file {{ op.attributes_header_filename }}
+ * @brief Attributes for {{ op.name }} operations
+ *
+ * This file defines the {{ op.frontend.attributes_class }} class for configuring
+ * {{ op.name }} operations in hipDNN computational graphs.
+ */
+
+#pragma once
+
+#include "Attributes.hpp"
+#include "TensorAttributes.hpp"
+{% if op.has_mode_fields or op.has_enum_fields %}
+#include <hipdnn_frontend/Types.hpp>
+{% endif %}
+#include <memory>
+{% set ns = namespace(has_optional=false) %}
+{% for df in op.data_fields %}
+{% if df.is_optional_scalar and not ns.has_optional %}
+{% set ns.has_optional = true %}
+#include <optional>
+{% endif %}
+{% endfor %}
+#include <unordered_map>
+{% if op.has_vector_fields %}
+#include <vector>
+{% endif %}
+
+namespace hipdnn_frontend::graph
+{
+
+/**
+ * @class {{ op.frontend.attributes_class }}
+ * @brief Configuration for {{ op.name }} operations
+ */
+class {{ op.frontend.attributes_class }} : public Attributes<{{ op.frontend.attributes_class }}>
+{
+public:
+    {{ op.frontend.attributes_class }}() = default;
+
+    /// Input tensor identifiers
+    enum class InputNames
+    {
+{% for tensor in op.frontend.inputs %}
+        {{ tensor.effective_enum_name }} = {{ tensor.enum_value }}{% if not loop.last %},{% endif %}
+
+{% endfor %}
+    };
+    typedef InputNames input_names; ///< @brief Type alias for InputNames
+
+    /// Output tensor identifiers
+    enum class OutputNames
+    {
+{% for tensor in op.frontend.outputs %}
+        {{ tensor.effective_enum_name }} = {{ tensor.enum_value }}{% if not loop.last %},{% endif %}
+
+{% endfor %}
+    };
+    typedef OutputNames output_names; ///< @brief Type alias for OutputNames
+
+    std::unordered_map<InputNames, std::shared_ptr<TensorAttributes>> inputs; ///< Input tensors
+    std::unordered_map<OutputNames, std::shared_ptr<TensorAttributes>> outputs; ///< Output tensors
+
+{% if op.data_fields %}
+    // NOLINTBEGIN(readability-identifier-naming)
+{% for df in op.data_fields %}
+{% if df.is_vector %}
+    std::vector<int64_t> {{ df.name }}; ///< {{ df.name | replace('_', ' ') | title }}
+{% elif df.is_enum %}
+    {{ df.cpp_enum }} {{ df.name }} = {{ df.cpp_enum }}(0); ///< {{ df.name | replace('_', ' ') | title }}
+{% elif df.is_mode %}
+    {{ df.effective_frontend_type }} {{ df.name }}{% if df.default_value %} = {{ df.default_value }}{% endif %}; ///< {{ df.name | replace('_', ' ') | title }}
+{% elif df.type == "scalar_float" %}
+{% if df.is_optional_scalar %}
+    std::optional<float> {{ df.name }} = std::nullopt; ///< {{ df.name | replace('_', ' ') | title }}
+{% else %}
+    float {{ df.name }}{% if df.default_value %} = {{ df.default_value }}{% else %} = 0.0f{% endif %}; ///< {{ df.name | replace('_', ' ') | title }}
+{% endif %}
+{% elif df.type == "scalar_int64" %}
+{% if df.is_optional_scalar %}
+    std::optional<int64_t> {{ df.name }} = std::nullopt; ///< {{ df.name | replace('_', ' ') | title }}
+{% else %}
+    int64_t {{ df.name }}{% if df.default_value %} = {{ df.default_value }}{% else %} = 0{% endif %}; ///< {{ df.name | replace('_', ' ') | title }}
+{% endif %}
+{% elif df.type == "bool" %}
+{% if df.is_optional_scalar %}
+    std::optional<bool> {{ df.name }} = std::nullopt; ///< {{ df.name | replace('_', ' ') | title }}
+{% else %}
+    bool {{ df.name }}{% if df.default_value %} = {{ df.default_value }}{% else %} = false{% endif %}; ///< {{ df.name | replace('_', ' ') | title }}
+{% endif %}
+{% endif %}
+{% endfor %}
+    // NOLINTEND(readability-identifier-naming)
+
+{% endif %}
+{% for tensor in op.frontend.inputs %}
+    /// @brief Get the {{ tensor.name }} input tensor
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    std::shared_ptr<TensorAttributes> {{ tensor.effective_getter_name }}() const
+    {
+        return getInput(InputNames::{{ tensor.effective_enum_name }});
+    }
+{% endfor %}
+{% for tensor in op.frontend.outputs %}
+    /// @brief Get the {{ tensor.name }} output tensor
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    std::shared_ptr<TensorAttributes> {{ tensor.effective_getter_name }}() const
+    {
+        return getOutput(OutputNames::{{ tensor.effective_enum_name }});
+    }
+{% endfor %}
+
+{% for tensor in op.frontend.inputs %}
+    /// @brief Set the {{ tensor.name }} input tensor (move)
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    {{ op.frontend.attributes_class }}& {{ tensor.effective_setter_name }}(std::shared_ptr<TensorAttributes>&& value)
+    {
+        return setInput(InputNames::{{ tensor.effective_enum_name }}, std::move(value));
+    }
+    /// @brief Set the {{ tensor.name }} input tensor (copy)
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    {{ op.frontend.attributes_class }}& {{ tensor.effective_setter_name }}(const std::shared_ptr<TensorAttributes>& value)
+    {
+        return setInput(InputNames::{{ tensor.effective_enum_name }}, value);
+    }
+{% endfor %}
+{% for tensor in op.frontend.outputs %}
+    /// @brief Set the {{ tensor.name }} output tensor (move)
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    {{ op.frontend.attributes_class }}& {{ tensor.effective_setter_name }}(std::shared_ptr<TensorAttributes>&& value)
+    {
+        return setOutput(OutputNames::{{ tensor.effective_enum_name }}, std::move(value));
+    }
+    /// @brief Set the {{ tensor.name }} output tensor (copy)
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    {{ op.frontend.attributes_class }}& {{ tensor.effective_setter_name }}(const std::shared_ptr<TensorAttributes>& value)
+    {
+        return setOutput(OutputNames::{{ tensor.effective_enum_name }}, value);
+    }
+{% endfor %}
+{% for df in op.data_fields %}
+{% if df.is_vector %}
+
+    /**
+     * @brief Set {{ df.name | replace('_', ' ') }}
+     * @param value {{ df.name | replace('_', ' ') | title }} values
+     * @return Reference to this for method chaining
+     */
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    {{ op.frontend.attributes_class }}& {{ df.frontend_setter_name }}(const std::vector<int64_t>& value)
+    {
+        {{ df.name }} = value;
+        return *this;
+    }
+
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    {{ op.frontend.attributes_class }}& {{ df.frontend_setter_name }}(std::vector<int64_t>&& value)
+    {
+        {{ df.name }} = std::move(value);
+        return *this;
+    }
+
+    /// @brief Get {{ df.name | replace('_', ' ') }}
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    const std::vector<int64_t>& {{ df.frontend_getter | replace('()', '') }}() const
+    {
+        return {{ df.name }};
+    }
+{% elif df.is_mode %}
+{% set mode_type = df.effective_frontend_type %}
+
+    /**
+     * @brief Set {{ df.name | replace('_', ' ') }}
+     * @param value {{ df.name | replace('_', ' ') | title }}
+     * @return Reference to this for method chaining
+     */
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    {{ op.frontend.attributes_class }}& {{ df.frontend_setter_name }}({{ mode_type }} value)
+    {
+        {{ df.name }} = value;
+        return *this;
+    }
+
+    /// @brief Get {{ df.name | replace('_', ' ') }}
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    {{ mode_type }} {{ df.frontend_getter | replace('()', '') }}() const
+    {
+        return {{ df.name }};
+    }
+{% elif df.is_enum %}
+
+    /**
+     * @brief Set {{ df.name | replace('_', ' ') }}
+     * @param value {{ df.name | replace('_', ' ') | title }}
+     * @return Reference to this for method chaining
+     */
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    {{ op.frontend.attributes_class }}& {{ df.frontend_setter_name }}({{ df.cpp_enum }} value)
+    {
+        {{ df.name }} = value;
+        return *this;
+    }
+
+    /// @brief Get {{ df.name | replace('_', ' ') }}
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    {{ df.cpp_enum }} {{ df.frontend_getter | replace('()', '') }}() const
+    {
+        return {{ df.name }};
+    }
+{% elif df.type == "scalar_float" %}
+
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    {{ op.frontend.attributes_class }}& {{ df.frontend_setter_name }}(float value)
+    {
+        {{ df.name }} = value;
+        return *this;
+    }
+
+    // NOLINTNEXTLINE(readability-identifier-naming)
+{% if df.is_optional_scalar %}
+    std::optional<float> {{ df.frontend_getter | replace('()', '') }}() const
+{% else %}
+    float {{ df.frontend_getter | replace('()', '') }}() const
+{% endif %}
+    {
+        return {{ df.name }};
+    }
+{% elif df.type == "scalar_int64" %}
+
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    {{ op.frontend.attributes_class }}& {{ df.frontend_setter_name }}(int64_t value)
+    {
+        {{ df.name }} = value;
+        return *this;
+    }
+
+    // NOLINTNEXTLINE(readability-identifier-naming)
+{% if df.is_optional_scalar %}
+    std::optional<int64_t> {{ df.frontend_getter | replace('()', '') }}() const
+{% else %}
+    int64_t {{ df.frontend_getter | replace('()', '') }}() const
+{% endif %}
+    {
+        return {{ df.name }};
+    }
+{% elif df.type == "bool" %}
+
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    {{ op.frontend.attributes_class }}& {{ df.frontend_setter_name }}(bool value)
+    {
+        {{ df.name }} = value;
+        return *this;
+    }
+
+    // NOLINTNEXTLINE(readability-identifier-naming)
+{% if df.is_optional_scalar %}
+    std::optional<bool> {{ df.frontend_getter | replace('()', '') }}() const
+{% else %}
+    bool {{ df.frontend_getter | replace('()', '') }}() const
+{% endif %}
+    {
+        return {{ df.name }};
+    }
+{% endif %}
+{% endfor %}
+};
+{% if op.frontend.compatibility_typedef %}
+typedef {{ op.frontend.attributes_class }} {{ op.frontend.compatibility_typedef }}; ///< @brief Compatibility alias
+{% endif %}
+} // namespace hipdnn_frontend::graph

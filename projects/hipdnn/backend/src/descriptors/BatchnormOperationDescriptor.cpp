@@ -5,6 +5,7 @@
 #include "DescriptorAttributeUtils.hpp"
 #include "HipdnnBackendDescriptorType.h"
 #include "HipdnnException.hpp"
+#include "HipdnnOperationType.h"
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 
 namespace hipdnn_backend
@@ -27,7 +28,7 @@ void BatchnormOperationDescriptor::finalize()
     THROW_IF_NULL(_yDesc,
                   HIPDNN_STATUS_BAD_PARAM,
                   "BatchnormOperationDescriptor::finalize() failed: Y tensor not set");
-    THROW_IF_TRUE(_computeDataType == hipdnn_data_sdk::data_objects::DataType::UNSET,
+    THROW_IF_TRUE(_computeDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET,
                   HIPDNN_STATUS_BAD_PARAM,
                   "BatchnormOperationDescriptor::finalize() failed: compute data type not "
                   "set");
@@ -170,7 +171,7 @@ void BatchnormOperationDescriptor::setAttribute(hipdnnBackendAttributeName_t att
                                     arrayOfElements,
                                     "BatchnormOperationDescriptor::setAttribute()");
         break;
-    case HIPDNN_ATTR_BATCHNORM_MATH_PREC_EXT:
+    case HIPDNN_ATTR_BATCHNORM_COMP_TYPE_EXT:
         setDataType(_computeDataType,
                     attributeType,
                     elementCount,
@@ -184,6 +185,13 @@ void BatchnormOperationDescriptor::setAttribute(hipdnnBackendAttributeName_t att
                                  elementCount,
                                  arrayOfElements,
                                  "BatchnormOperationDescriptor::setAttribute()");
+        break;
+    case HIPDNN_ATTR_OPERATION_NAME_EXT:
+        setString(_name,
+                  attributeType,
+                  elementCount,
+                  arrayOfElements,
+                  "BatchnormOperationDescriptor::setAttribute()");
         break;
     default:
         throw HipdnnException(HIPDNN_STATUS_NOT_SUPPORTED,
@@ -304,7 +312,7 @@ void BatchnormOperationDescriptor::getAttribute(hipdnnBackendAttributeName_t att
                                     arrayOfElements,
                                     "BatchnormOperationDescriptor::getAttribute()");
         break;
-    case HIPDNN_ATTR_BATCHNORM_MATH_PREC_EXT:
+    case HIPDNN_ATTR_BATCHNORM_COMP_TYPE_EXT:
         getDataType(_computeDataType,
                     attributeType,
                     requestedElementCount,
@@ -319,6 +327,22 @@ void BatchnormOperationDescriptor::getAttribute(hipdnnBackendAttributeName_t att
                                  elementCount,
                                  arrayOfElements,
                                  "BatchnormOperationDescriptor::getAttribute()");
+        break;
+    case HIPDNN_ATTR_OPERATION_NAME_EXT:
+        getString(_name,
+                  attributeType,
+                  requestedElementCount,
+                  elementCount,
+                  arrayOfElements,
+                  "BatchnormOperationDescriptor::getAttribute()");
+        break;
+    case HIPDNN_ATTR_OPERATION_TYPE_EXT:
+        getOperationType(HIPDNN_OPERATION_TYPE_BATCHNORM_EXT,
+                         attributeType,
+                         requestedElementCount,
+                         elementCount,
+                         arrayOfElements,
+                         "BatchnormOperationDescriptor::getAttribute()");
         break;
     default:
         throw HipdnnException(HIPDNN_STATUS_NOT_SUPPORTED,
@@ -372,12 +396,13 @@ std::vector<std::shared_ptr<TensorDescriptor>>
     return result;
 }
 
-std::unique_ptr<hipdnn_data_sdk::data_objects::NodeT>
+std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::NodeT>
     BatchnormOperationDescriptor::buildNode() const
 {
-    auto node = std::make_unique<hipdnn_data_sdk::data_objects::NodeT>();
+    auto node = std::make_unique<hipdnn_flatbuffers_sdk::data_objects::NodeT>();
+    node->name = _name;
     node->compute_data_type = _computeDataType;
-    node->attributes.Set(hipdnn_data_sdk::data_objects::BatchnormAttributesT(_data));
+    node->attributes.Set(hipdnn_flatbuffers_sdk::data_objects::BatchnormAttributesT(_data));
     return node;
 }
 
@@ -390,6 +415,7 @@ std::string BatchnormOperationDescriptor::toString() const
 {
     using hipdnn_data_sdk::utilities::vecToString;
     std::string str = "BatchnormOperationDescriptor: {";
+    str += "name=" + _name + ", ";
     str += "x_uid=" + std::to_string(_data.x_tensor_uid);
     str += ", scale_uid=" + std::to_string(_data.scale_tensor_uid);
     str += ", bias_uid=" + std::to_string(_data.bias_tensor_uid);
@@ -423,9 +449,87 @@ std::string BatchnormOperationDescriptor::toString() const
                : "nullopt";
     str += ", peer_stats_uids=" + vecToString(_data.peer_stats_tensor_uid);
     str += ", compute_data_type=";
-    str += hipdnn_data_sdk::data_objects::EnumNameDataType(_computeDataType);
+    str += hipdnn_flatbuffers_sdk::data_objects::EnumNameDataType(_computeDataType);
     str += "}";
     return str;
+}
+
+std::shared_ptr<BatchnormOperationDescriptor> BatchnormOperationDescriptor::fromNode(
+    const hipdnn_flatbuffers_sdk::data_objects::NodeT& nodeT,
+    const std::unordered_map<int64_t, std::shared_ptr<TensorDescriptor>>& tensorMap)
+{
+    const auto* attrs = nodeT.attributes.AsBatchnormAttributes();
+    THROW_IF_NULL(attrs,
+                  HIPDNN_STATUS_INTERNAL_ERROR,
+                  "BatchnormOperationDescriptor::fromNode: BatchnormAttributes is null");
+
+    auto desc = std::make_shared<BatchnormOperationDescriptor>();
+    desc->_data = *attrs;
+    desc->_computeDataType = nodeT.compute_data_type;
+    desc->_name = nodeT.name;
+    desc->_xDesc = findTensorInMap(
+        tensorMap, attrs->x_tensor_uid, "BatchnormOperationDescriptor::fromNode: X");
+    desc->_scaleDesc = findTensorInMap(
+        tensorMap, attrs->scale_tensor_uid, "BatchnormOperationDescriptor::fromNode: Scale");
+    desc->_biasDesc = findTensorInMap(
+        tensorMap, attrs->bias_tensor_uid, "BatchnormOperationDescriptor::fromNode: Bias");
+    desc->_epsilonDesc = findTensorInMap(
+        tensorMap, attrs->epsilon_tensor_uid, "BatchnormOperationDescriptor::fromNode: Epsilon");
+    desc->_yDesc = findTensorInMap(
+        tensorMap, attrs->y_tensor_uid, "BatchnormOperationDescriptor::fromNode: Y");
+    if(attrs->prev_running_mean_tensor_uid)
+    {
+        desc->_prevRunningMeanDesc
+            = findTensorInMap(tensorMap,
+                              *attrs->prev_running_mean_tensor_uid,
+                              "BatchnormOperationDescriptor::fromNode: PrevRunningMean");
+    }
+    if(attrs->prev_running_variance_tensor_uid)
+    {
+        desc->_prevRunningVarianceDesc
+            = findTensorInMap(tensorMap,
+                              *attrs->prev_running_variance_tensor_uid,
+                              "BatchnormOperationDescriptor::fromNode: PrevRunningVariance");
+    }
+    if(attrs->momentum_tensor_uid)
+    {
+        desc->_momentumDesc = findTensorInMap(tensorMap,
+                                              *attrs->momentum_tensor_uid,
+                                              "BatchnormOperationDescriptor::fromNode: Momentum");
+    }
+    if(attrs->mean_tensor_uid)
+    {
+        desc->_meanDesc = findTensorInMap(
+            tensorMap, *attrs->mean_tensor_uid, "BatchnormOperationDescriptor::fromNode: Mean");
+    }
+    if(attrs->inv_variance_tensor_uid)
+    {
+        desc->_invVarianceDesc
+            = findTensorInMap(tensorMap,
+                              *attrs->inv_variance_tensor_uid,
+                              "BatchnormOperationDescriptor::fromNode: InvVariance");
+    }
+    if(attrs->next_running_mean_tensor_uid)
+    {
+        desc->_nextRunningMeanDesc
+            = findTensorInMap(tensorMap,
+                              *attrs->next_running_mean_tensor_uid,
+                              "BatchnormOperationDescriptor::fromNode: NextRunningMean");
+    }
+    if(attrs->next_running_variance_tensor_uid)
+    {
+        desc->_nextRunningVarianceDesc
+            = findTensorInMap(tensorMap,
+                              *attrs->next_running_variance_tensor_uid,
+                              "BatchnormOperationDescriptor::fromNode: NextRunningVariance");
+    }
+    for(auto uid : attrs->peer_stats_tensor_uid)
+    {
+        desc->_peerStatsDescs.push_back(
+            findTensorInMap(tensorMap, uid, "BatchnormOperationDescriptor::fromNode: peer_stats"));
+    }
+    desc->finalize();
+    return desc;
 }
 
 } // namespace hipdnn_backend

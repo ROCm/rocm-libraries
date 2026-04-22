@@ -3,10 +3,11 @@
 #pragma once
 
 #include "Node.hpp"
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/attributes/CustomOpAttributes.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
+#include <hipdnn_frontend/detail/CustomOpPacker.hpp>
+#include <hipdnn_frontend/detail/CustomOpUnpacker.hpp>
 
 namespace hipdnn_frontend::graph
 {
@@ -19,6 +20,16 @@ public:
         : INode(graphAttrs)
         , attributes(std::move(customOpAttributes))
     {
+    }
+
+    Error unpack_from_descriptor(
+        hipdnnBackendDescriptor_t opDesc,
+        std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>>& tensorMap) override
+    {
+        CustomOpAttributes customOpAttr;
+        HIPDNN_CHECK_ERROR(detail::unpackCustomOpOperation(opDesc, tensorMap, customOpAttr));
+        attributes = std::move(customOpAttr);
+        return {};
     }
 
     NodeType getNodeType() const override
@@ -130,15 +141,11 @@ public:
         return {ErrorCode::OK, ""};
     }
 
-    flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>
-        pack_node(flatbuffers::FlatBufferBuilder& builder) const override
+    Error create_operation(
+        std::unordered_map<int64_t, detail::ScopedHipdnnBackendDescriptor>& tensorDescs,
+        std::vector<detail::ScopedHipdnnBackendDescriptor>& operations) const override
     {
-        return hipdnn_data_sdk::data_objects::CreateNodeDirect(
-            builder,
-            attributes.get_name().c_str(),
-            toSdkType(attributes.compute_data_type),
-            hipdnn_data_sdk::data_objects::NodeAttributes::CustomOpAttributes,
-            attributes.pack_attributes(builder).Union());
+        return detail::createCustomOpOperation(attributes, tensorDescs, operations);
     }
 };
 } // namespace hipdnn_frontend::graph

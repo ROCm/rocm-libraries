@@ -3,26 +3,26 @@
 
 #pragma once
 
-// Uncomment when fromNode() is implemented in the lifting PR:
-// #include "BatchnormBackwardOperationDescriptor.hpp"
-// #include "BatchnormInferenceOperationDescriptor.hpp"
-// #include "BatchnormInferenceVarianceExtOperationDescriptor.hpp"
-// #include "BatchnormOperationDescriptor.hpp"
-// #include "BlockScaleDequantizeOperationDescriptor.hpp"
-// #include "BlockScaleQuantizeOperationDescriptor.hpp"
-// #include "ConvolutionBwdOperationDescriptor.hpp"
+#include "BatchnormBackwardOperationDescriptor.hpp"
+#include "BatchnormInferenceOperationDescriptor.hpp"
+#include "BatchnormInferenceVarianceExtOperationDescriptor.hpp"
+#include "BatchnormOperationDescriptor.hpp"
+#include "BlockScaleDequantizeOperationDescriptor.hpp"
+#include "BlockScaleQuantizeOperationDescriptor.hpp"
+#include "ConvolutionBwdOperationDescriptor.hpp"
 #include "ConvolutionFwdOperationDescriptor.hpp"
-// #include "ConvolutionWrwOperationDescriptor.hpp"
-// #include "CustomOpOperationDescriptor.hpp"
-// #include "LayernormOperationDescriptor.hpp"
-// #include "MatmulOperationDescriptor.hpp"
-#include "PointwiseOperationDescriptor.hpp"
-// #include "RMSNormOperationDescriptor.hpp"
-// #include "SdpaBackwardOperationDescriptor.hpp"
-// #include "SdpaFpropOperationDescriptor.hpp"
+#include "ConvolutionWrwOperationDescriptor.hpp"
+#include "CustomOpOperationDescriptor.hpp"
 #include "IGraphOperation.hpp"
+#include "LayernormOperationDescriptor.hpp"
+#include "MatmulOperationDescriptor.hpp"
+#include "PointwiseOperationDescriptor.hpp"
+#include "RMSNormOperationDescriptor.hpp"
+#include "ReductionOperationDescriptor.hpp"
+#include "SdpaBwdOperationDescriptor.hpp"
+#include "SdpaFwdOperationDescriptor.hpp"
 #include "TensorDescriptor.hpp"
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <memory>
 
 namespace hipdnn_backend
@@ -39,14 +39,14 @@ public:
     // attribute casting internally.
     // Throws HIPDNN_STATUS_NOT_SUPPORTED for unsupported node types.
     static std::shared_ptr<IBackendDescriptor> createOperationFromNode(
-        const hipdnn_data_sdk::data_objects::NodeT& nodeT,
+        const hipdnn_flatbuffers_sdk::data_objects::NodeT& nodeT,
         const std::unordered_map<int64_t, std::shared_ptr<TensorDescriptor>>& tensorMap);
 
     // Builds a tensor map from a vector of FlatBuffer TensorAttributesT.
     // Each tensor is created via TensorDescriptor::fromFlatBuffer() and indexed by UID.
     // Throws on null tensors or duplicate UIDs.
     static std::unordered_map<int64_t, std::shared_ptr<TensorDescriptor>> buildTensorMap(
-        const std::vector<std::unique_ptr<hipdnn_data_sdk::data_objects::TensorAttributesT>>&
+        const std::vector<std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT>>&
             tensors);
 };
 

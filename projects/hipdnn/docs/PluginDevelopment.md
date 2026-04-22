@@ -126,7 +126,7 @@ To add your engine name to the official registry:
 
 2. **Add to Registry**: Submit a PR to add your engine name to [`data_sdk/include/hipdnn_data_sdk/utilities/EngineNames.hpp`](../data_sdk/include/hipdnn_data_sdk/utilities/EngineNames.hpp):
    ```cpp
-   HIPDNN_REGISTER_ENGINE(MY_NEW_ENGINE, "MY_NEW_ENGINE")
+   HIPDNN_REGISTER_ENGINE(MY_NEW_ENGINE)
    ```
 
 3. **Test Locally First**: You can use unregistered names during development - they'll generate a warning but work correctly
@@ -442,7 +442,7 @@ Your plugin's CMakeLists.txt should:
 When building an external plugin, the hipDNN Data SDK provides CMake variables to help you install your plugin in the correct location:
 
 - **Absolute path** (`HIPDNN_FULL_INSTALL_PLUGIN_ENGINE_DIR`):
-  - Hardcoded at CMake configure time
+  - Computed at `find_package()` time relative to the installed hipDNN location
   - This is intended for **developer use only**
 
 - **Relative path** (`HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR`):

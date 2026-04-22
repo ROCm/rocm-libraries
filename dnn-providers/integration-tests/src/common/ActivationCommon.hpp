@@ -3,16 +3,18 @@
 
 #pragma once
 
-#include <hipdnn_data_sdk/data_objects/pointwise_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/pointwise_attributes_generated.h>
 
 #include <exception>
-#include <hipdnn_data_sdk/flatbuffer_utilities/FlatbufferTypeHelpers.hpp>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/FlatbufferTypeHelpers.hpp>
 #include <optional>
 
-namespace test_activation_common {
+namespace test_activation_common
+{
 
-struct ActivTestCase {
-    hipdnn_data_sdk::data_objects::PointwiseMode mode;
+struct ActivTestCase
+{
+    hipdnn_flatbuffers_sdk::data_objects::PointwiseMode mode;
     std::optional<float> reluLowerClip;
     std::optional<float> reluUpperClip;
     std::optional<float> reluLowerClipSlope;
@@ -20,59 +22,68 @@ struct ActivTestCase {
     std::optional<float> eluAlpha;
     std::optional<float> softplusBeta;
 
-    ActivTestCase(hipdnn_data_sdk::data_objects::PointwiseMode modeLocal,
+    ActivTestCase(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode modeLocal,
                   std::optional<float> reluLowerClipLocal = std::nullopt,
                   std::optional<float> reluUpperClipLocal = std::nullopt,
                   std::optional<float> reluLowerClipSlopeLocal = std::nullopt,
                   std::optional<float> swishBetaLocal = std::nullopt,
                   std::optional<float> eluAlphaLocal = std::nullopt,
                   std::optional<float> softplusBetaLocal = std::nullopt)
-        : mode(modeLocal),
-          reluLowerClip(reluLowerClipLocal),
-          reluUpperClip(reluUpperClipLocal),
-          reluLowerClipSlope(reluLowerClipSlopeLocal),
-          swishBeta(swishBetaLocal),
-          eluAlpha(eluAlphaLocal),
-          softplusBeta(softplusBetaLocal) {
-        using PointwiseMode = hipdnn_data_sdk::data_objects::PointwiseMode;
+        : mode(modeLocal)
+        , reluLowerClip(reluLowerClipLocal)
+        , reluUpperClip(reluUpperClipLocal)
+        , reluLowerClipSlope(reluLowerClipSlopeLocal)
+        , swishBeta(swishBetaLocal)
+        , eluAlpha(eluAlphaLocal)
+        , softplusBeta(softplusBetaLocal)
+    {
+        using PointwiseMode = hipdnn_flatbuffers_sdk::data_objects::PointwiseMode;
 
-        switch (mode) {
-            case PointwiseMode::RELU_FWD:
-            case PointwiseMode::RELU_BWD:
-            case PointwiseMode::SIGMOID_FWD:
-            case PointwiseMode::SIGMOID_BWD:
-            case PointwiseMode::TANH_FWD:
-            case PointwiseMode::TANH_BWD:
-            case PointwiseMode::ELU_FWD:
-            case PointwiseMode::ELU_BWD:
-            case PointwiseMode::SOFTPLUS_FWD:
-            case PointwiseMode::SOFTPLUS_BWD:
-            case PointwiseMode::ABS:
-            case PointwiseMode::IDENTITY:
-                break;
-            default:
-                throw std::invalid_argument("Unknown activation mode");
+        switch(mode)
+        {
+        case PointwiseMode::RELU_FWD:
+        case PointwiseMode::RELU_BWD:
+        case PointwiseMode::SIGMOID_FWD:
+        case PointwiseMode::SIGMOID_BWD:
+        case PointwiseMode::TANH_FWD:
+        case PointwiseMode::TANH_BWD:
+        case PointwiseMode::ELU_FWD:
+        case PointwiseMode::ELU_BWD:
+        case PointwiseMode::SOFTPLUS_FWD:
+        case PointwiseMode::SOFTPLUS_BWD:
+        case PointwiseMode::ABS:
+        case PointwiseMode::IDENTITY:
+            break;
+        default:
+            throw std::invalid_argument("Unknown activation mode");
         }
     }
 
-    friend std::ostream& operator<<(std::ostream& ss, const ActivTestCase& tc) {
+    friend std::ostream& operator<<(std::ostream& ss, const ActivTestCase& tc)
+    {
         ss << "(mode:" << tc.mode;
-        if (tc.reluLowerClip) {
+        if(tc.reluLowerClip)
+        {
             ss << " reluLowerClip:" << tc.reluLowerClip.value();
         }
-        if (tc.reluUpperClip) {
+        if(tc.reluUpperClip)
+        {
             ss << " reluUpperClip:" << tc.reluUpperClip.value();
         }
-        if (tc.reluLowerClipSlope) {
+        if(tc.reluLowerClipSlope)
+        {
             ss << " reluLowerClipSlope:" << tc.reluLowerClipSlope.value();
         }
-        if (tc.swishBeta) {
+        if(tc.swishBeta)
+        {
             ss << " swishBeta:" << tc.swishBeta.value();
         }
-        if (tc.eluAlpha) {
+        if(tc.eluAlpha)
+        {
             ss << " eluAlpha:" << tc.eluAlpha.value();
         }
-        if (tc.softplusBeta) {
+        if(tc.softplusBeta)
+        {
             ss << " softplusBeta:" << tc.softplusBeta.value();
         }
         ss << ")";
@@ -81,82 +92,100 @@ struct ActivTestCase {
     }
 };
 
-inline std::vector<ActivTestCase> createFwdActivationSmokeCases() {
-    using PM = hipdnn_data_sdk::data_objects::PointwiseMode;
+inline std::vector<ActivTestCase> createFwdActivationSmokeCases()
+{
+    using PM = hipdnn_flatbuffers_sdk::data_objects::PointwiseMode;
 
     std::vector<ActivTestCase> cases;
 
     // RELU_FWD (standard ReLU)
     cases.emplace_back(PM::RELU_FWD,
-                       std::nullopt,  // reluLowerClip
-                       std::nullopt,  // reluUpperClip
-                       std::nullopt,  // reluLowerClipSlope
-                       std::nullopt,  // swishBeta
-                       std::nullopt,  // eluAlpha
-                       std::nullopt   // softplusBeta
+                       std::nullopt, // reluLowerClip
+                       std::nullopt, // reluUpperClip
+                       std::nullopt, // reluLowerClipSlope
+                       std::nullopt, // swishBeta
+                       std::nullopt, // eluAlpha
+                       std::nullopt // softplusBeta
     );
 
     return cases;
 }
 
-inline std::vector<ActivTestCase> createFwdActivationFullCases() {
-    using PM = hipdnn_data_sdk::data_objects::PointwiseMode;
+inline std::vector<ActivTestCase> createFwdActivationFullCases()
+{
+    using PM = hipdnn_flatbuffers_sdk::data_objects::PointwiseMode;
 
     std::vector<ActivTestCase> cases;
 
     // RELU_FWD (standard ReLU)
     cases.emplace_back(PM::RELU_FWD,
-                       0.0f,          // reluLowerClip
-                       std::nullopt,  // reluUpperClip
-                       std::nullopt,  // reluLowerClipSlope
-                       std::nullopt,  // swishBeta
-                       std::nullopt,  // eluAlpha
-                       std::nullopt   // softplusBeta
+                       0.0f, // reluLowerClip
+                       std::nullopt, // reluUpperClip
+                       std::nullopt, // reluLowerClipSlope
+                       std::nullopt, // swishBeta
+                       std::nullopt, // eluAlpha
+                       std::nullopt // softplusBeta
     );
 
     // ReLU6: upper clip at 6.0 (Clipped ReLU)
     cases.emplace_back(PM::RELU_FWD,
-                       std::nullopt,  // reluLowerClip
-                       6.0f,          // reluUpperClip
-                       std::nullopt,  // reluLowerClipSlope
-                       std::nullopt,  // swishBeta
-                       std::nullopt,  // eluAlpha
-                       std::nullopt   // softplusBeta
+                       std::nullopt, // reluLowerClip
+                       6.0f, // reluUpperClip
+                       std::nullopt, // reluLowerClipSlope
+                       std::nullopt, // swishBeta
+                       std::nullopt, // eluAlpha
+                       std::nullopt // softplusBeta
     );
 
     // CLAMP: both lower and upper clips (e.g., clip to range [0.0, 0.5])
     cases.emplace_back(PM::RELU_FWD,
-                       0.1f,          // reluLowerClip
-                       0.5f,          // reluUpperClip
-                       std::nullopt,  // reluLowerClipSlope
-                       std::nullopt,  // swishBeta
-                       std::nullopt,  // eluAlpha
-                       std::nullopt   // softplusBeta
+                       0.1f, // reluLowerClip
+                       0.5f, // reluUpperClip
+                       std::nullopt, // reluLowerClipSlope
+                       std::nullopt, // swishBeta
+                       std::nullopt, // eluAlpha
+                       std::nullopt // softplusBeta
     );
 
     // Leaky ReLU: ReLU but with a non-negative slope for negative inputs
     cases.emplace_back(PM::RELU_FWD,
-                       std::nullopt,  // reluLowerClip
-                       std::nullopt,  // reluUpperClip
-                       0.01f,         // reluLowerClipSlope
-                       std::nullopt,  // swishBeta
-                       std::nullopt,  // eluAlpha
-                       std::nullopt   // softplusBeta
+                       std::nullopt, // reluLowerClip
+                       std::nullopt, // reluUpperClip
+                       0.01f, // reluLowerClipSlope
+                       std::nullopt, // swishBeta
+                       std::nullopt, // eluAlpha
+                       std::nullopt // softplusBeta
     );
 
     return cases;
 }
 
-inline std::vector<ActivTestCase> createBatchnormBwdActivationTestCases() {
+inline std::vector<ActivTestCase> createBatchnormBwdActivationTestCases()
+{
     return {// ReLU Backward: d/dx Max(0, x) = 1 * (x > 0)
-            ActivTestCase(hipdnn_data_sdk::data_objects::PointwiseMode::RELU_BWD, 0.0f,
-                          std::nullopt, std::nullopt, std::nullopt, std::nullopt, std::nullopt),
+            ActivTestCase(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_BWD,
+                          0.0f,
+                          std::nullopt,
+                          std::nullopt,
+                          std::nullopt,
+                          std::nullopt,
+                          std::nullopt),
             // Clipped ReLU Backward: d/dx Clamp(x, -inf, upper)
-            ActivTestCase(hipdnn_data_sdk::data_objects::PointwiseMode::RELU_BWD, std::nullopt,
-                          0.5f, std::nullopt, std::nullopt, std::nullopt, std::nullopt),
+            ActivTestCase(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_BWD,
+                          std::nullopt,
+                          0.5f,
+                          std::nullopt,
+                          std::nullopt,
+                          std::nullopt,
+                          std::nullopt),
             // CLAMP Backward: d/dx Clamp(x, lower, upper)
-            ActivTestCase(hipdnn_data_sdk::data_objects::PointwiseMode::RELU_BWD, 0.1f, 0.5f,
-                          std::nullopt, std::nullopt, std::nullopt, std::nullopt)};
+            ActivTestCase(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_BWD,
+                          0.1f,
+                          0.5f,
+                          std::nullopt,
+                          std::nullopt,
+                          std::nullopt,
+                          std::nullopt)};
 }
 
-}  // namespace test_activation_common
+} // namespace test_activation_common

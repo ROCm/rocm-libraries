@@ -2,8 +2,8 @@
 // SPDX-License-Identifier:  MIT
 
 #include <algorithm>
-#include <hipdnn_data_sdk/data_objects/engine_details_generated.h>
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/engine_details_generated.h>
 #include <mutex>
 #include <vector>
 
@@ -41,6 +41,24 @@ std::weak_ptr<EnginePluginManager> pmPtr;
 std::shared_ptr<EnginePluginManager> persistentPmPtr;
 
 } // namespace
+
+void EnginePluginResourceManager::setPluginLogLevel(hipdnnSeverity_t level)
+{
+    const std::lock_guard<std::mutex> lock(pluginMutex);
+    if(auto pm = pmPtr.lock())
+    {
+        for(const auto& plugin : pm->getPlugins())
+        {
+            auto status = plugin->setLogLevel(level);
+            if(status != HIPDNN_PLUGIN_STATUS_SUCCESS)
+            {
+                HIPDNN_BACKEND_LOG_WARN("Failed to set log level for plugin '{}': status {}",
+                                        plugin->name(),
+                                        static_cast<int>(status));
+            }
+        }
+    }
+}
 
 void EnginePluginResourceManager::setPluginPaths(
     const std::vector<std::filesystem::path>& pluginPaths,
@@ -365,7 +383,8 @@ void EnginePluginResourceManager::setStream(hipStream_t stream) const
 }
 
 std::vector<int64_t>
-    EnginePluginResourceManager::getApplicableEngineIds(const GraphDescriptor* graphDesc) const
+    EnginePluginResourceManager::getApplicableEngineIds(const GraphDescriptor* graphDesc,
+                                                        bool findFirst) const
 {
     THROW_IF_NULL(graphDesc, HIPDNN_STATUS_INTERNAL_ERROR, "Graph descriptor cannot be null");
 
@@ -392,6 +411,11 @@ std::vector<int64_t>
                                       "Engine ID " + std::to_string(id)
                                           + " is already associated with a different plugin");
             }
+        }
+
+        if(findFirst && !engineIds.empty())
+        {
+            break;
         }
     }
 
@@ -597,7 +621,7 @@ EngineDetailsWrapper::EngineDetailsWrapper(const std::shared_ptr<EnginePluginRes
     _rm->getEngineDetails(engineId, graphDesc, &_engineDetailsData);
     flatbuffers::Verifier verifier(static_cast<const uint8_t*>(_engineDetailsData.ptr),
                                    _engineDetailsData.size);
-    if(!verifier.VerifyBuffer<hipdnn_data_sdk::data_objects::EngineDetails>())
+    if(!verifier.VerifyBuffer<hipdnn_flatbuffers_sdk::data_objects::EngineDetails>())
     {
         throw HipdnnException(HIPDNN_STATUS_BAD_PARAM,
                               "EngineDetailsWrapper: unable to verify the flatbuffer schema.");
@@ -642,7 +666,7 @@ EngineDetailsWrapper& EngineDetailsWrapper::operator=(EngineDetailsWrapper&& oth
     return *this;
 }
 
-const hipdnn_data_sdk::data_objects::EngineDetails* EngineDetailsWrapper::get() const
+const hipdnn_flatbuffers_sdk::data_objects::EngineDetails* EngineDetailsWrapper::get() const
 {
     if(_engineDetailsData.ptr == nullptr)
     {
@@ -651,7 +675,7 @@ const hipdnn_data_sdk::data_objects::EngineDetails* EngineDetailsWrapper::get() 
                               "get() called on an empty object");
     }
 
-    return hipdnn_data_sdk::data_objects::GetEngineDetails(_engineDetailsData.ptr);
+    return hipdnn_flatbuffers_sdk::data_objects::GetEngineDetails(_engineDetailsData.ptr);
 }
 
 // TODO: Use engineId from engineConfig
