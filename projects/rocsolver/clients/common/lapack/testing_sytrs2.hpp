@@ -165,9 +165,6 @@ void sytrs2_initData(const rocblas_handle handle,
         // scale A to avoid singularities
         for(I b = 0; b < bc; ++b)
         {
-            bool const singular = false;
-
-            // scale A to avoid singularities
             for(rocblas_int i = 0; i < n; i++)
             {
                 for(rocblas_int j = 0; j < n; j++)
@@ -186,35 +183,6 @@ void sytrs2_initData(const rocblas_handle handle,
                 for(rocblas_int j = 0; j < n; j++)
                 {
                     std::swap(hA[b][i + j * lda], hA[b][n - 1 - i + j * lda]);
-                }
-            }
-
-            if(singular && (b == bc / 4 || b == bc / 2 || b == bc - 1))
-            {
-                // add some singularities
-                // always the same elements for debugging purposes
-                // the algorithm must detect the first zero pivot in those
-                // matrices in the batch that are singular
-                rocblas_int j = n / 4 + b;
-                j -= (j / n) * n;
-                for(rocblas_int i = 0; i < n; i++)
-                {
-                    hA[b][i + j * lda] = 0;
-                    hA[b][j + i * lda] = 0;
-                }
-                j = n / 2 + b;
-                j -= (j / n) * n;
-                for(rocblas_int i = 0; i < n; i++)
-                {
-                    hA[b][i + j * lda] = 0;
-                    hA[b][j + i * lda] = 0;
-                }
-                j = n - 1 + b;
-                j -= (j / n) * n;
-                for(rocblas_int i = 0; i < n; i++)
-                {
-                    hA[b][i + j * lda] = 0;
-                    hA[b][j + i * lda] = 0;
                 }
             }
 
