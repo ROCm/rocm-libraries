@@ -24,6 +24,10 @@ hipdnn_generate_version_header(hipdnn_frontend)
 
 target_link_libraries(hipdnn_frontend INTERFACE hipdnn_data_sdk hipdnn_backend)
 
+if(NOT HIPDNN_FRONTEND_SKIP_JSON_LIB)
+    hipdnn_add_dependency_includes(hipdnn_frontend nlohmann_json::nlohmann_json)
+endif()
+
 set(HIP_DNN_FRONTEND_INSTALL_INCLUDE_DIR "${CMAKE_INSTALL_INCLUDEDIR}/hipdnn/frontend")
 
 target_include_directories(
