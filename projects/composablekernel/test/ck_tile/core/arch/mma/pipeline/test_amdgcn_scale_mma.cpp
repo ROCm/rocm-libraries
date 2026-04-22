@@ -191,11 +191,15 @@ struct ScalePipelineKernel
 
         if constexpr(MmaOpTraits<typename Pipeline::MmaOp>::IsSupported)
         {
-            // scale_a = 126 → 2^(126-127) = 2^-1 = 0.5
-            // scale_b = 129 → 2^(129-127) = 2^2  = 4.0
+            // Each int32_t packs 4 E8M0 scale bytes, one per K-group.
+            // Replicate the scale byte across all 4 positions so every K-group
+            // receives the same scaling factor.
+            // scale_a byte = 126 → 2^(126-127) = 2^-1 = 0.5
+            // scale_b byte = 129 → 2^(129-127) = 2^2  = 4.0
             // Combined scale factor = 0.5 * 4.0 = 2.0
-            ScaleAType scale_a = 126;
-            ScaleBType scale_b = 129;
+            constexpr int32_t replicate_byte = 0x01010101;
+            ScaleAType scale_a               = 126u * replicate_byte;
+            ScaleBType scale_b               = 129u * replicate_byte;
             Pipeline::exec(a, b, c, scale_a, scale_b);
             __builtin_memcpy(
                 static_cast<uint8_t*>(c_per_lane) + lane * sizeof(CVecType), &c, sizeof(CVecType));
@@ -226,8 +230,8 @@ template <typename AType,
           std::uint32_t WaveTileK>
 void MmaSelector_Scale_Real_impl()
 {
-    using ScaleAType = std::uint32_t;
-    using ScaleBType = std::uint32_t;
+    using ScaleAType = std::int32_t;
+    using ScaleBType = std::int32_t;
 
     const auto should_skip = [](amdgcn_target_id currentArchId) {
         bool isSupportedMfma = (currentArchId == amdgcn_target_id::GFX950);
@@ -345,11 +349,15 @@ struct ScaleWaveWisePipelineKernel
 
         if constexpr(MmaOpTraits<typename Pipeline::MmaOp>::IsSupported)
         {
-            // scale_a = 126 → 2^(126-127) = 2^-1 = 0.5
-            // scale_b = 129 → 2^(129-127) = 2^2  = 4.0
+            // Each int32_t packs 4 E8M0 scale bytes, one per K-group.
+            // Replicate the scale byte across all 4 positions so every K-group
+            // receives the same scaling factor.
+            // scale_a byte = 126 → 2^(126-127) = 2^-1 = 0.5
+            // scale_b byte = 129 → 2^(129-127) = 2^2  = 4.0
             // Combined scale factor = 0.5 * 4.0 = 2.0
-            ScaleAType scale_a = 126;
-            ScaleBType scale_b = 129;
+            constexpr int32_t replicate_byte = 0x01010101;
+            ScaleAType scale_a               = 126u * replicate_byte;
+            ScaleBType scale_b               = 129u * replicate_byte;
             Pipeline::exec(a, b, c, scale_a, scale_b);
             __builtin_memcpy(
                 static_cast<uint8_t*>(c_per_lane) + lane * sizeof(CVecType), &c, sizeof(CVecType));
@@ -389,8 +397,8 @@ template <typename AType,
           MmaAccumPolicy AccumPolicy = MmaAccumPolicy::ROW_MAJOR>
 void MmaSelector_Scale_WaveWise_Real_impl()
 {
-    using ScaleAType = std::uint32_t;
-    using ScaleBType = std::uint32_t;
+    using ScaleAType = std::int32_t;
+    using ScaleBType = std::int32_t;
 
     const auto should_skip = [](amdgcn_target_id currentArchId) {
         bool isSupportedMfma = (currentArchId == amdgcn_target_id::GFX950);
