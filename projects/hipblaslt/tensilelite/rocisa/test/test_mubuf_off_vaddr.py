@@ -67,7 +67,9 @@ def _mubuf_off_asm() -> str:
         flatWorkGroupSize=64,
         preloadKernArgs=False,
     )
-    st = rocisa.toStinkyTofuModule(mod, _ISA, "mubuf_off_vaddr", signature=sig)
+
+    stinky_module_options = {"OptLevel": 0}
+    st = rocisa.toStinkyTofuModule(mod, _ISA, "mubuf_off_vaddr", signature=sig, options=stinky_module_options)
     st.runOptimizationPipeline()
     return st.emitAssembly()
 
