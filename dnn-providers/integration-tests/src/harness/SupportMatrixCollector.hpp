@@ -24,6 +24,7 @@ struct GraphSupportRecord
     std::string testName;
     std::set<std::string> supportingEngines;
     std::string note;
+    std::string layout;
 };
 
 // Singleton that collects graph-support information during test execution
@@ -68,7 +69,8 @@ public:
                             const std::string& graphDescription,
                             const std::string& testName,
                             const std::vector<int64_t>& supportingEngineIds,
-                            const std::string& note = {})
+                            const std::string& note = {},
+                            const std::string& layout = {})
     {
         if(!_enabled)
         {
@@ -89,7 +91,8 @@ public:
         }
 
         std::lock_guard<std::mutex> lock(_mutex);
-        _records.push_back({graphName, graphDescription, testName, std::move(engineNames), note});
+        _records.push_back(
+            {graphName, graphDescription, testName, std::move(engineNames), note, layout});
     }
 
     const std::vector<GraphSupportRecord>& getRecords() const
@@ -107,7 +110,8 @@ public:
         struct AggregatedEntry
         {
             std::string graphName;
-            std::set<std::string> supportingEngines;
+            // Maps engine name -> set of layout names that engine supports.
+            std::map<std::string, std::set<std::string>> engineLayouts;
         };
         std::map<GroupKey, AggregatedEntry> grouped;
 
@@ -119,8 +123,14 @@ public:
             {
                 entry.graphName = record.graphName;
             }
-            entry.supportingEngines.insert(record.supportingEngines.begin(),
-                                           record.supportingEngines.end());
+            for(const auto& engine : record.supportingEngines)
+            {
+                auto& layouts = entry.engineLayouts[engine];
+                if(!record.layout.empty())
+                {
+                    layouts.insert(record.layout);
+                }
+            }
         }
 
         std::ofstream out(_outputPath);
@@ -187,8 +197,30 @@ public:
                 out << "| " << description << " | " << note << " |";
                 for(const auto& engine : allEngineNames)
                 {
-                    bool supported = entryPtr->supportingEngines.count(engine) > 0;
-                    out << " " << (supported ? "\xe2\x9c\x85" : "-") << " |";
+                    auto it = entryPtr->engineLayouts.find(engine);
+                    if(it != entryPtr->engineLayouts.end())
+                    {
+                        out << " \xe2\x9c\x85";
+                        if(!it->second.empty())
+                        {
+                            bool first = true;
+                            out << " ";
+                            for(const auto& layout : it->second)
+                            {
+                                if(!first)
+                                {
+                                    out << ", ";
+                                }
+                                first = false;
+                                out << layout;
+                            }
+                        }
+                        out << " |";
+                    }
+                    else
+                    {
+                        out << " - |";
+                    }
                 }
                 out << "\n";
             }

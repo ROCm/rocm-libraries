@@ -91,6 +91,7 @@ protected:
 
         this->registerValidator(outputs.dx, this->getTolerance(graphObj, outputs.dx));
 
+        this->setTestCaseLayout(layout.name);
         this->setTestCaseNote(convTestCase.note);
         this->verifyGraph(graphObj, convTestCase.seed);
     }

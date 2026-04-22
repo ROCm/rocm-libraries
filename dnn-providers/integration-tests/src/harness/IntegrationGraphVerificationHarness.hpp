@@ -41,6 +41,7 @@ class IntegrationGraphVerificationHarness : public ::testing::TestWithParam<Test
 protected:
     int _deviceId = 0;
     std::string _testCaseNote;
+    std::string _testCaseLayout;
     std::unordered_map<int64_t, std::string> _tensorIdToNameMap;
     std::unordered_map<int64_t, std::unique_ptr<hipdnn_test_sdk::utilities::IReferenceValidation>>
         _tensorIdToValidatorMap;
@@ -58,6 +59,11 @@ protected:
     void setTestCaseNote(std::string note)
     {
         _testCaseNote = std::move(note);
+    }
+
+    void setTestCaseLayout(std::string layout)
+    {
+        _testCaseLayout = std::move(layout);
     }
 
     virtual void runGraphTest() = 0;
@@ -123,7 +129,8 @@ protected:
                 describeGraph(graph),
                 testName,
                 status.is_good() ? engineIds : std::vector<int64_t>{},
-                _testCaseNote);
+                _testCaseNote,
+                _testCaseLayout);
         }
 
         if(TestConfig::get().hasEngineName())
