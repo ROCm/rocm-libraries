@@ -16,7 +16,7 @@ std::string irText = R"(
   v[4:7] = "st.ds_load_b128"(v40) { issueCycles = 4, latencyCycles = 56 }
 )";
 
-// Create converter with default architecture (gfx942)
+// Create converter with default architecture (gfx1250)
 StinkyIRConverter converter;
 
 // Convert string to IRList
@@ -35,8 +35,8 @@ if(irlist) {
 You can specify a different target architecture:
 
 '''cpp
-// For gfx950
-std::array<int, 3> arch = {9, 5, 0};
+// For gfx1250
+std::array<int, 3> arch = {12, 5, 0};
 StinkyIRConverter converter(arch);
 
 IRList* irlist = converter.convertToIRList(irText);
@@ -67,12 +67,12 @@ For more control, use the static 'populateFunctionFromString' method:
 
 '''cpp
 // Create your own PassContext
-auto ctx = PassContext::create(GfxArchID::gfx942);
+auto ctx = PassContext::create(GfxArchID::gfx1250);
 IRList& irlist = ctx->getIRList();
 
 // Populate it with instructions from string
 std::string irText = /* ... */;
-GfxArchID arch = GfxArchID::gfx942;
+GfxArchID arch = GfxArchID::gfx1250;
 
 StinkyErrorCode result = StinkyIRConverter::populateFunctionFromString(
     irText, irlist, *ctx, arch);
@@ -251,4 +251,3 @@ void processIRInThread(const std::string& irText) {
 
 - [Assembly Emitter Guide](asm-emitter.md) - Converting IR to assembly code
 - [Error Codes Reference](error-codes.md) - Error codes and handling
-- [Pass Manager](../developer-guide/pass-manager.md) - Running optimization passes

@@ -790,12 +790,12 @@ class KernelWriterAssembly(KernelWriter):
     self.states.numStoreSgprNameSizes2 = []
     storeSgprLoad2 = 0
 
-    if kernel["_GlobalAccumulation"] == 'MultipleBufferSingleKernel':
+    if kernel["_GlobalAccumulation"] == 'MultipleBufferSingleKernel' or kernel["AdaptiveGemmGSUA"] == 1:
       storeSgprLoad2 += self.states.rpga
       self.states.numStoreSgprNames2.append("AddressTD")
       self.states.numStoreSgprNameSizes2.append(self.states.rpga)
 
-    if kernel["_GlobalAccumulation"] == 'MultipleBufferSingleKernel':
+    if kernel["_GlobalAccumulation"] == 'MultipleBufferSingleKernel' or kernel["AdaptiveGemmGSUA"] == 1:
       storeSgprLoad2 += self.states.rpga
       self.states.numStoreSgprNames2.append("Synchronizer")
       self.states.numStoreSgprNameSizes2.append(self.states.rpga)
@@ -1433,8 +1433,8 @@ class KernelWriterAssembly(KernelWriter):
       srdUpperValue = SrdUpperValue(self.states.version)
       module.addComment2("Bits 127:96 of SRD.\n" + srdUpperValue.desc())
       module.add(ValueSet("Srd127_96", srdUpperValue.getValue(), format=1))
-
-    if ((kernel["GlobalSplitUAlgorithm"] == 'MultipleBufferSingleKernel')):
+    
+    if ((kernel["GlobalSplitU"] == -1 or kernel["GlobalSplitU"] > 0) and (kernel["GlobalSplitUAlgorithm"] == "MultipleBufferSingleKernel" or kernel["AdaptiveGemmGSUA"] == 1)):
       module.addComment0("MT offset for 64b address (=MT0*MT1*bpeC)")
       reductionOffset = int(kernel["MacroTile0"]*kernel["MacroTile1"]*self.states.bpeCinternal)
       reductionOffsetLow32 = reductionOffset & 0xFFFFFFFF
@@ -2068,7 +2068,7 @@ class KernelWriterAssembly(KernelWriter):
       moduleArgs.add(SLShiftRightB32(dst=sgpr(sgprArgType), shiftHex=hex(30), src=sgpr(sgprNumsOfGemm), comment="Get arg type"))
       moduleArgs.add(SAndB32(dst=sgpr(sgprNumsOfGemm), src0=hex(0x3FFFFFFF), src1=sgpr(sgprNumsOfGemm), comment="Get nums of gemm"))
 
-      if ((kernel["GlobalSplitUAlgorithm"] == 'MultipleBufferSingleKernel')):
+      if ((kernel["GlobalSplitU"] == -1 or kernel["GlobalSplitU"] > 0) and (kernel["GlobalSplitUAlgorithm"] == "MultipleBufferSingleKernel" or kernel["AdaptiveGemmGSUA"] == 1)):
         extReadEpilogueLabeltmp    = Label(label=self.labels.getNameInc("LoadExternalEpilogueStruct"), comment="")
         moduleArgs.addComment0("Check if custom structure pointer is null")
         if kernel["ProblemType"]["SupportUserArgs"]:
@@ -2116,7 +2116,7 @@ class KernelWriterAssembly(KernelWriter):
         moduleArgs.add(SAndB32(dst=sgpr(sgprNumsOfGemm), src0=hex(0x3FFFFFFF), src1=sgpr(preloadSgprStartIdx), comment="Get nums of gemm"))
         moduleArgs.add(SLShiftRightB32(dst=sgpr(sgprArgType), shiftHex=hex(30), src=sgpr(preloadSgprStartIdx), comment="Get arg type"))
 
-        if ((kernel["GlobalSplitUAlgorithm"] == 'MultipleBufferSingleKernel')):
+        if ((kernel["GlobalSplitU"] == -1 or kernel["GlobalSplitU"] > 0) and (kernel["GlobalSplitUAlgorithm"] == "MultipleBufferSingleKernel" or kernel["AdaptiveGemmGSUA"] == 1)):
           extReadEpilogueLabeltmp    = Label(label=self.labels.getNameInc("LoadExternalEpilogueStruct"), comment="")
           moduleArgs.addComment0("Check if custom structure pointer is null")
           if kernel["ProblemType"]["SupportUserArgs"]:
@@ -2364,10 +2364,10 @@ class KernelWriterAssembly(KernelWriter):
           module.addComment1("Check if custom structure pointer is null")
           module.add(SCmpEQU32(src0=sgpr("ArgType"), src1=2, comment="ArgType == 2 ?"))
           module.add(SCBranchSCC1(labelName=extValidLabel.getLabelName(), comment="branch if ArgType == 2"))
-          if ((kernel["GlobalSplitUAlgorithm"] == 'MultipleBufferSingleKernel')):
-            module.add(SMovB32(dst=sgpr(tmpSgprArgOffsett), src=(self.argLoader.getOffset() + (numStoreSgprToLoad * 4) + (self.states.numSgprAddressGSUSync)*4)))
+          if ((kernel["GlobalSplitU"] == -1 or kernel["GlobalSplitU"] > 0) and (kernel["GlobalSplitUAlgorithm"] == 'MultipleBufferSingleKernel' or kernel["AdaptiveGemmGSUA"] == 1)):
+            module.add(SMovB32(dst=sgpr(tmpSgprArgOffsett), src=(self.argLoader.getOffset() + (numStoreSgprToLoad * 4) + (self.states.numSgprAddressGSUSync)*4), comment="KernArgAddressOffset"))
           else:
-            module.add(SMovB32(dst=sgpr(tmpSgprArgOffsett), src=(self.argLoader.getOffset() + (numStoreSgprToLoad * 4))))
+            module.add(SMovB32(dst=sgpr(tmpSgprArgOffsett), src=(self.argLoader.getOffset() + (numStoreSgprToLoad * 4)), comment="KernArgAddressOffset"))
           module.add(SMulI32(dst=sgpr(tmpSgprAddrM), src0=sgpr(sgprNumsOfGemm), src1=4)) # offset wgTable
           module.add(SMovB64(dst=sgpr(tmpSgprArgAddress0,2), src=sgpr("KernArgAddress",2)))
           module.add(SBranch(extValidLabelEnd.getLabelName()))
@@ -2463,12 +2463,12 @@ class KernelWriterAssembly(KernelWriter):
         module.add(SLShiftLeft2AddU32(dst=sgpr("KernArgAddress"), src0=sgpr(sgprNumsOfGemm), src1=sgpr("KernArgAddress")))
         module.add(SAddCU32(dst=sgpr("KernArgAddress+1"), src0=sgpr("KernArgAddress+1"), src1=0))
         module.addComment0("Grouped Gemm: offset address from args_start to gemm_start")
-        if ((kernel["GlobalSplitUAlgorithm"] == 'MultipleBufferSingleKernel')):
+        if ((kernel["GlobalSplitU"] == -1 or kernel["GlobalSplitU"] > 0) and (kernel["GlobalSplitUAlgorithm"] == 'MultipleBufferSingleKernel' or kernel["AdaptiveGemmGSUA"] == 1)):
           module.add(SMulI32(dst=sgpr(tmpSgprGemmIdxLeft), src0=sgpr(tmpSgprGemmIdxLeft),\
-                            src1=(self.argLoader.getOffset() + (numStoreSgprToLoad * 4) + (self.states.numSgprAddressGSUSync)*4)))
+                            src1=(self.argLoader.getOffset() + (numStoreSgprToLoad * 4) + (self.states.numSgprAddressGSUSync)*4), comment="KernArgAddressOffset"))
         else:
           module.add(SMulI32(dst=sgpr(tmpSgprGemmIdxLeft), src0=sgpr(tmpSgprGemmIdxLeft),\
-                            src1=(self.argLoader.getOffset() + (numStoreSgprToLoad * 4))))
+                            src1=(self.argLoader.getOffset() + (numStoreSgprToLoad * 4)), comment="KernArgAddressOffset"))
         module.add(SAddU32(dst=sgpr("KernArgAddress"), src0=sgpr("KernArgAddress"), src1=sgpr(tmpSgprGemmIdxLeft)))
         module.add(SAddCU32(dst=sgpr("KernArgAddress+1"), src0=sgpr("KernArgAddress+1"), src1=0))
         module.add(self.getKernelArgLoadModule(kernel, sgprStart, load, 4))
@@ -7282,7 +7282,7 @@ class KernelWriterAssembly(KernelWriter):
       self.defineSgpr("SrdBias", 4, 4)
       module.add(RegSet("s", "sgprSrdBias", self.sgprs["SrdBias"]))
 
-    if (kernel["GlobalSplitUAlgorithm"] == 'MultipleBufferSingleKernel'):
+    if ((kernel["GlobalSplitU"] == -1 or kernel["GlobalSplitU"] > 0) and (kernel["GlobalSplitUAlgorithm"] == "MultipleBufferSingleKernel" or kernel["AdaptiveGemmGSUA"] == 1)):
       self.defineSgpr("SrdTD", 4, 4)
       module.add(RegSet("s", "sgprSrdTD", self.sgprs["SrdTD"]))
       self.defineSgpr("GSUSync", 1)
@@ -7306,7 +7306,7 @@ class KernelWriterAssembly(KernelWriter):
       self.defineSgpr("ScaleD", 2, 2)
       module.add(RegSet("s", "sgprScaleD", self.sgprs["ScaleD"]))
 
-    if kernel["_GlobalAccumulation"] == 'MultipleBufferSingleKernel':
+    if kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel" or kernel["AdaptiveGemmGSUA"] == 1:
       self.defineSgpr("SrdSync", 4, 4)
       module.add(RegSet("s", "sgprSrdSync", self.sgprs["SrdSync"]))
 
@@ -7321,7 +7321,7 @@ class KernelWriterAssembly(KernelWriter):
       module.addComment1("Mapping of Acc register -> C Vgpr register")
       self.codes.accVgprRead = mapAcctoArchRegs(kernel, self.states.maxLimitAgprs, write=False)
       if (kernel["StreamK"] > 0 and kernel["StreamKAtomic"] == 0) or \
-         (kernel["GlobalSplitUAlgorithm"] == "MultipleBufferSingleKernel"):
+         ((kernel["GlobalSplitU"] == -1 or kernel["GlobalSplitU"] > 0) and (kernel["GlobalSplitUAlgorithm"] == "MultipleBufferSingleKernel" or kernel["AdaptiveGemmGSUA"] == 1)):
         self.codes.accVgprWrite = mapAcctoArchRegs(kernel, self.states.maxLimitAgprs, write=True)
       if kernel["MIArchVgpr"]:
         module.addComment1("Multiply MI out register with Alpha -> C Vgpr register")
@@ -12747,7 +12747,7 @@ class KernelWriterAssembly(KernelWriter):
     isGlc = bool(kernel["NonTemporalD"] & 0x1)
     isSlc = bool(kernel["NonTemporalD"] & 0x2)
     isNT  = bool(kernel["NonTemporalD"] & 0x4)
-    if kernel["GlobalSplitUAlgorithm"] == "MultipleBufferSingleKernel":
+    if kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel":
       isGlc = True
       isSlc = True
 
@@ -13089,7 +13089,7 @@ class KernelWriterAssembly(KernelWriter):
                           vectorWidths, elements, activationLabelList, tmpVgpr, cvtVgprStruct,
                           activationSetPCStruct, activationEnumStrList, actPCMaxTempSgpr,
                           isInsertActFunctionCallAddrCalc, toActModuleList, writeLabels, endLabel,
-                          vectorDataTypes, factorDims):
+                          vectorDataTypes, factorDims, globalWriteMode, hasMultipleGlobalWriteModes):
     betaModules = Module("Betas")
     currentInstLength = 0
     for betaIdx in reversed(range(len(betas))):
@@ -13116,13 +13116,13 @@ class KernelWriterAssembly(KernelWriter):
                                         vectorWidth, element, activationLabelList,
                                         tmpVgpr, cvtVgprStruct, activationSetPCStruct, activationEnumStrList,
                                         actPCMaxTempSgpr, isInsertActFunctionCallAddrCalc, toActModuleList,
-                                        edgeModule, writeLabels[beta][factorDim][vectorWidth]["Then"], endLabel,
-                                        currentInstLength, betaIdx, fdIdx, vectorDataTypes, factorDims)
+                                        edgeModule, writeLabels[beta][factorDim][vectorWidth][globalWriteMode]["Then"], endLabel,
+                                        currentInstLength, betaIdx, fdIdx, vectorDataTypes, factorDims, hasMultipleGlobalWriteModes)
           # Edge conditions and branches
           if edge == True:
             # Else label
             elseLabelPos = 0 if vectorWidth == min(vectorWidths) else -1
-            edgeModule.add(writeLabels[beta][factorDim][vectorWidth]["Else"], pos=elseLabelPos)
+            edgeModule.add(writeLabels[beta][factorDim][vectorWidth][globalWriteMode]["Else"], pos=elseLabelPos)
             currentInstLength += 1
             # This check is dedicated to adaptive kernel
             if kernel["AdaptiveGemm"] == 1 and vectorWidth != min(vectorWidths):
@@ -13130,12 +13130,12 @@ class KernelWriterAssembly(KernelWriter):
               isLongBranch = True if currentInstLength >= self.states.asmCaps["ShortBranchMaxLength"] else False
               with self.allocTmpSgpr(4) as tmpSgprInfo:
                 checkIsEdge = edgeModule.add(self.checkIsEdge(kernel, tmpSgprInfo, \
-                  writeLabels[beta][factorDim][vectorWidth]["Else"], vectorWidth, isLongBranch=isLongBranch), pos=0)
+                  writeLabels[beta][factorDim][vectorWidth][globalWriteMode]["Else"], vectorWidth, isLongBranch=isLongBranch), pos=0)
                 currentInstLength += countInstruction(checkIsEdge)
             # Longest vectorWidth should have non edge module
             if vectorWidth == max(vectorWidths):
               # NonEdgeEnd label
-              edgeModule.add(writeLabels[beta][factorDim][vectorWidth]["NonEdgeEnd"], pos=0)
+              edgeModule.add(writeLabels[beta][factorDim][vectorWidth][globalWriteMode]["NonEdgeEnd"], pos=0)
               currentInstLength += 1
               # Non edge module
               nonEdgeModule = Module("Non_Edge_B%u_FD%u_VW%u" % (beta, factorDim, vectorWidth))
@@ -13145,13 +13145,13 @@ class KernelWriterAssembly(KernelWriter):
                                             vectorWidth, element, activationLabelList,
                                             tmpVgpr, cvtVgprStruct, activationSetPCStruct, activationEnumStrList,
                                             actPCMaxTempSgpr, isInsertActFunctionCallAddrCalc, toActModuleList,
-                                            nonEdgeModule, writeLabels[beta][factorDim][vectorWidth]["NonEdge"], endLabel,
-                                            currentInstLength, betaIdx, fdIdx, vectorDataTypes, factorDims)
+                                            nonEdgeModule, writeLabels[beta][factorDim][vectorWidth][globalWriteMode]["NonEdge"], endLabel,
+                                            currentInstLength, betaIdx, fdIdx, vectorDataTypes, factorDims, hasMultipleGlobalWriteModes)
               edgeModule.add(nonEdgeModule, pos=0)
               # NOTE: isEdgeTarget of normal and adaptive kernels are different
               #   Normal kernel: to Then/Else label, followed by edge store
               #   Adaptive kernel: to NonEdgeEnd label, followed by Size0 % vectorWidth check
-              isEdgeTarget = writeLabels[beta][factorDim][vectorWidth]
+              isEdgeTarget = writeLabels[beta][factorDim][vectorWidth][globalWriteMode]
               # If module, checking Size1 % MT1 > 0
               isLongBranch = True if currentInstLength >= self.states.asmCaps["ShortBranchMaxLength"] else False
               with self.allocTmpSgpr(4) as tmpSgprInfo:
@@ -13169,7 +13169,7 @@ class KernelWriterAssembly(KernelWriter):
           betaModule.add(edgeModule, pos=0)
 
         # FactorDim label
-        betaModule.add(writeLabels[beta][factorDim]["Label"], pos=0)
+        betaModule.add(writeLabels[beta][factorDim][globalWriteMode]["Label"], pos=0)
         currentInstLength += 1
 
       # If module, checking factorDim is zero
@@ -13177,11 +13177,11 @@ class KernelWriterAssembly(KernelWriter):
         isLongBranch = True if currentInstLength >= self.states.asmCaps["ShortBranchMaxLength"] else False
         with self.allocTmpSgpr(3) as tmpSgprInfo:
           checkIsFactorDimZero = betaModule.add(self.checkIsFactorDimZero(kernel, tmpSgprInfo, \
-            writeLabels[beta][factorDims[1]]["Label"], isLongBranch=isLongBranch), pos=0)
+            writeLabels[beta][factorDims[1]][globalWriteMode]["Label"], isLongBranch=isLongBranch), pos=0)
           currentInstLength += countInstruction(checkIsFactorDimZero)
 
       # Beta label
-      betaModule.add(writeLabels[beta]["Label"], pos=0)
+      betaModule.add(writeLabels[beta][globalWriteMode]["Label"], pos=0)
       currentInstLength += 1
 
       betaModules.add(betaModule, pos=0)
@@ -13193,20 +13193,20 @@ class KernelWriterAssembly(KernelWriter):
   # Check if branch exceeds and add beta zero check if needed
   # Returns a module to be added to the main module
   ##############################################################################
-  def checkBetaBranchExceeds(self, kernel, betas, betaModules, writeLabels):
+  def checkBetaBranchExceeds(self, kernel, betas, betaModules, writeLabels, globalWriteMode):
     module = Module("BetaBranchCheck")
 
     # Check if branch exceeds
     if False in betas and True in betas:
       isBetaLongBranch = False
       count = 0
-      count, found = findInstCount(betaModules, writeLabels[1]["Label"], count)
+      count, found = findInstCount(betaModules, writeLabels[1][globalWriteMode]["Label"], count)
       if found:
         if count >= self.states.asmCaps["ShortBranchMaxLength"]:
           isBetaLongBranch = True
         with self.allocTmpSgpr(3 if isBetaLongBranch else 1) as tmpSgprInfo:
-          module.add(self.checkIsBetaZero(kernel, tmpSgprInfo, writeLabels[1]["Label"], isBetaLongBranch, posNeg=1))
-
+          module.add(self.checkIsBetaZero(kernel, tmpSgprInfo, writeLabels[1][globalWriteMode]["Label"], isBetaLongBranch, posNeg=1))
+    
     return module
 
   ##############################################################################
@@ -13373,9 +13373,10 @@ class KernelWriterAssembly(KernelWriter):
         module.add(VMovB32(dst=vgpr("AmaxOut"), src="0"))
     if self.states.numStoreSgprToLoad or self.states.numStoreSgprToLoad2: # Wait for kernel args
       module.add(SWaitCnt(kmcnt=0, comment="wait for %u bytes of kern args."%((self.states.numStoreSgprToLoad+self.states.numStoreSgprToLoad2) * 4)))
-    if (kernel["_GlobalAccumulation"] == 'MultipleBufferSingleKernel'):
-      reductionStartLabel = Label(self.labels.getNameInc("Reduction_Start"), comment="Reduction start")
-      reductionEndLabel = Label(self.labels.getNameInc("Reduction_End"), comment="Reduction end")
+
+    if not noGSUBranch:
+      labelMB = Label(self.labels.getNameInc("GW_MB"), comment="Global Write MB")
+      labelMBSK = Label(self.labels.getNameInc("GW_MBSK"), comment="Global Write MBSK")
 
     skBackup           = kernel["StreamK"]
     gsuBackup          = kernel["GlobalSplitU"]
@@ -13414,9 +13415,8 @@ class KernelWriterAssembly(KernelWriter):
         with self.allocTmpSgpr(1) as tmpSgprGSU:
           module.add(SAndB32(dst=sgpr(tmpSgprGSU.idx), src0=sgpr("GSU"), src1=hex(0x3FFF), comment="Restore GSU"))
           module.add(SCmpEQU32(src0=sgpr(tmpSgprGSU.idx), src1=1, comment="GSU == 1 ?"))
-        if (kernel["_GlobalAccumulation"] == 'MultipleBufferSingleKernel'):
+        if (kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel" or kernel["AdaptiveGemmGSUA"] == 1):
           module.add(self.longBranchScc1(label=gsuLabel, posNeg=1, comment="long branch if GSU == 1"))
-          module.add(self.SrdTDInit(kernel))
         else:
           module.add(SCBranchSCC1(labelName=gsuLabel.getLabelName(), comment="branch if GSU == 1"))
 
@@ -13646,7 +13646,7 @@ class KernelWriterAssembly(KernelWriter):
           #module.add(SCmpKLGU32(sgpr("WorkGroup%d"%wgIdx), 0, "WorkGroup%d != 0"%wgIdx))
           module.add(self.getSCMPKInstruction("LGU32", "WorkGroup%d"%wgIdx, 0, comment="WorkGroup%d != 0"%wgIdx))
           module.add(SCBranchSCC1(skipGlobalStoreLabel.getLabelName(), "Branch if true"))
-          if (kernel["GlobalSplitU"] > 1 or kernel["GlobalSplitU"] == -1) and kernel["GlobalSplitUAlgorithm"] == "MultipleBuffer":
+          if (kernel["GlobalSplitU"] > 1 or kernel["GlobalSplitU"] == -1) and kernel["_GlobalAccumulation"] == "MultipleBuffer":
             sourceAddress = "D"
           else:
             sourceAddress = "Bias"
@@ -13954,8 +13954,19 @@ class KernelWriterAssembly(KernelWriter):
       skComponent = Component.StreamK.find(self)
       module.add(skComponent.storeBranches(self, kernel, skPartialsLabel, vectorWidths_1, elements_1, tmpVgpr.idx, cvtVgprStruct))
 
+      # support dynamic MBSK/MB selection by checking synchronizer after bias write
+      if kernel["AdaptiveGemmGSUA"] == 1:
+        if skBackup == 0:
+          if gsuLimit > 1 and gsuLimitIdx == 0:
+            if (kernel["_GlobalAccumulation"] == "MultipleBuffer" or kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel"):
+              module.add(SCmpEQU64(src0=sgpr("Synchronizer", 2), src1=hex(0), comment="Check for synchronizer"))
+              module.add(self.longBranchScc1(label=labelMB, posNeg=1, comment="long branch if Synchronizer is null"))
+
       gsuComponent = Component.GSU.find(self)
       if kernel["GlobalSplitU"] > 1 and kernel["GlobalSplitUAlgorithm"] == "MultipleBufferSingleKernel":
+        module.add(self.SrdTDInit(kernel))
+        reductionStartLabel = Label(self.labels.getNameInc("Reduction_Start"), comment="Reduction start")
+        reductionEndLabel = Label(self.labels.getNameInc("Reduction_End"), comment="Reduction end")
         module.add(reductionStartLabel)
         self.defineSgpr("GSUStartWGIdx", 1)
         module.add(RegSet("s", "sgprGSUStartWGIdx", self.sgprs["GSUStartWGIdx"]))
@@ -13965,20 +13976,101 @@ class KernelWriterAssembly(KernelWriter):
         module.add(reductionEndLabel)
         module.addSpaceLine()
 
+      # Generate write labels for different global write modes
+      globalWriteModes = []
+      hasMultipleGlobalWriteModes = False
+      if gsuLimitIdx == 0 and kernel["GlobalSplitU"] > 0:
+        if kernel["AdaptiveGemmGSUA"] == 0:
+          if kernel["GlobalSplitUAlgorithm"] == "MultipleBuffer":
+            globalWriteModes = ["OptNLL_MB"] if noGSUBranch else ["MB"]
+          elif kernel["GlobalSplitUAlgorithm"] == "MultipleBufferSingleKernel":
+            globalWriteModes = ["OptNLL_MBSK"] if noGSUBranch else ["MBSK"]
+          elif kernel["GlobalSplitUAlgorithm"] == "SingleBuffer":
+            globalWriteModes = ["OptNLL_SB"] if noGSUBranch else ["SB"]
+        else:
+          if kernel["GlobalSplitUAlgorithm"] == "MultipleBuffer":
+            # StreamK and dot2 cannot be enabled with MBSK
+            globalWriteModes = ["OptNLL_MB"] if noGSUBranch else ["MB"] if skBackup or kernel["UseDotInstruction"] else ["MBSK", "MB"]
+            hasMultipleGlobalWriteModes = False if noGSUBranch else False if skBackup or kernel["UseDotInstruction"] else True
+            if kernel["NumElementsPerBatchStore"] == 1:
+              # too many store at MultipleBufferSingleKernel direct reject
+              globalWriteModes = ["OptNLL_MB"] if noGSUBranch else ["MB"]
+              hasMultipleGlobalWriteModes = False
+            if kernel["ProblemType"]["UseScaleCD"]:
+              # MultipleBufferSingleKernel not support UseScaleCD yet
+              globalWriteModes = ["OptNLL_MB"] if noGSUBranch else ["MB"]
+              hasMultipleGlobalWriteModes = False
+            if kernel["ProblemType"]["UseE"]:
+              # MultipleBufferSingleKernel not support UseE yet
+              globalWriteModes = ["OptNLL_MB"] if noGSUBranch else ["MB"]
+              hasMultipleGlobalWriteModes = False
+            if kernel["ProblemType"]["BiasSrc"] != "D":
+              # MultipleBufferSingleKernel not support BiasSrc not D yet
+              globalWriteModes = ["OptNLL_MB"] if noGSUBranch else ["MB"]
+              hasMultipleGlobalWriteModes = False
+            if kernel["ProblemType"]["DataType"].isDouble():
+              # MultipleBufferSingleKernel not support double yet
+              globalWriteModes = ["OptNLL_MB"] if noGSUBranch else ["MB"]
+              hasMultipleGlobalWriteModes = False
+          elif kernel["GlobalSplitUAlgorithm"] == "MultipleBufferSingleKernel":
+            globalWriteModes = ["OptNLL_MBSK"] if noGSUBranch else ["MBSK", "MB"]
+            hasMultipleGlobalWriteModes = False if noGSUBranch else True
+          elif kernel["GlobalSplitUAlgorithm"] == "SingleBuffer":
+            globalWriteModes = ["OptNLL_SB"] if noGSUBranch else ["SB"]
+            hasMultipleGlobalWriteModes = False
+      else:
+        globalWriteModes = ["GSU1"]
+        hasMultipleGlobalWriteModes = False
+
+      for globalWriteMode in globalWriteModes:
+        for beta in betas:
+          writeLabels[beta][globalWriteMode] = {}
+          writeLabels[beta][globalWriteMode]["Label"] = Label(self.labels.getNameInc("GW_B%u_%s" % (beta, globalWriteMode) ), "")
+          for factorDim in factorDims:
+            writeLabels[beta][factorDim][globalWriteMode]= {}
+            writeLabels[beta][factorDim][globalWriteMode]["Label"] = Label(self.labels.getNameInc("GW_B%u_FD%u_%s" % (beta, factorDim, globalWriteMode) ), "")
+            for vectorWidthIdx, vectorWidth in enumerate(reversed(vectorWidths)):
+              writeLabels[beta][factorDim][vectorWidth][globalWriteMode] = {}
+              writeLabels[beta][factorDim][vectorWidth][globalWriteMode]["NonEdge"] = Label(self.labels.getNameInc("GW_B%u_FD%u_VW%u_%s_NonEdge" % (beta, factorDim, vectorWidth, globalWriteMode) ), "")
+              writeLabels[beta][factorDim][vectorWidth][globalWriteMode]["NonEdgeEnd"] = Label(self.labels.getNameInc("GW_B%u_FD%u_VW%u_%s_NonEdgeEnd" % (beta, factorDim, vectorWidth, globalWriteMode) ), "")
+              writeLabels[beta][factorDim][vectorWidth][globalWriteMode]["Then"] = Label(self.labels.getNameInc("GW_B%u_FD%u_VW%u_%s_Then" % (beta, factorDim, vectorWidth, globalWriteMode) ), "")
+              writeLabels[beta][factorDim][vectorWidth][globalWriteMode]["Else"] = Label(self.labels.getNameInc("GW_B%u_FD%u_VW%u_%s_Else" % (beta, factorDim, vectorWidth, globalWriteMode) ), "")
+
       # Generate beta modules for each global write mode
-      betaModules, currentInstLength = self.generateBetaModules(
-          kernel, tPA, tPB, activation, applyAlpha, betas, edge, atomic,
-          vectorWidths, elements, activationLabelList, tmpVgpr, cvtVgprStruct,
-          activationSetPCStruct, activationEnumStrList, actPCMaxTempSgpr,
-          isInsertActFunctionCallAddrCalc, toActModuleList, writeLabels, endLabel,
-          vectorDataTypes, factorDims)
+      activationLabelListBackup = activationLabelList
+      for globalWriteMode in globalWriteModes:
+        if kernel["AdaptiveGemmGSUA"] == 1:
+          if not noGSUBranch:
+            if globalWriteMode == "MBSK":
+              module.add(labelMBSK)
+              kernel["_GlobalAccumulation"] = "MultipleBufferSingleKernel"
+            elif globalWriteMode == "MB":
+              module.add(labelMB)
+              kernel["_GlobalAccumulation"] = "MultipleBuffer"
+              if hasMultipleGlobalWriteModes:
+                self.states.useBias = DataDirection.NONE
+              kernel["ActivationFuncCall"] = False
+              activationLabelList = {}
 
-      # Check if branch exceeds and add beta zero check
-      betaBranchCheckModule = self.checkBetaBranchExceeds(kernel, betas, betaModules, writeLabels)
+        betaModules, currentInstLength = self.generateBetaModules(
+            kernel, tPA, tPB, activation, applyAlpha, betas, edge, atomic,
+            vectorWidths, elements, activationLabelList, tmpVgpr, cvtVgprStruct,
+            activationSetPCStruct, activationEnumStrList, actPCMaxTempSgpr,
+            isInsertActFunctionCallAddrCalc, toActModuleList, writeLabels, endLabel,
+            vectorDataTypes, factorDims, globalWriteMode, hasMultipleGlobalWriteModes)
 
-      # Append the beta modules to the main module
-      module.appendModule(betaBranchCheckModule)
-      module.appendModule(betaModules)
+        # Check if branch exceeds and add beta zero check
+        betaBranchCheckModule = self.checkBetaBranchExceeds(kernel, betas, betaModules, writeLabels, globalWriteMode)
+
+        # Append the beta modules to the main module
+        module.appendModule(betaBranchCheckModule)
+        module.appendModule(betaModules)
+
+        if kernel["AdaptiveGemmGSUA"] == 1:
+          kernel["ActivationFuncCall"] = afcBackup
+          kernel["_GlobalAccumulation"] =gsuAccumBackup
+          self.states.useBias = useBiasBackup
+          activationLabelList = activationLabelListBackup
 
       # Generate activation modules
       if activationLabelList:
@@ -14001,7 +14093,7 @@ class KernelWriterAssembly(KernelWriter):
         module.add(SMovB32(dst=sgpr("Alpha"), src=sgpr(oldAlpha), comment="Restore alpha value"))
         self.sgprPool.checkIn(oldAlpha)
 
-      if self.states.FactorDim == 3:
+      if self.states.FactorDim == 3 or hasMultipleGlobalWriteModes:
         self.updateBranchPlaceHolder(module, ["end_placeholder"], [endLabel.label], ["SBranch"])
       self.vgprPool.checkIn(tmpVgpr.idx)
       if cvtVgpr is not None:
@@ -14172,7 +14264,7 @@ class KernelWriterAssembly(KernelWriter):
                               actPCMaxTempSgpr, isInsertActFunctionCallAddrCalc, toActModuleList, \
                               edgeModule, writeLabel, endLabel, \
                               currentInstLength, \
-                              betaIdx, fdIdx, vectorDataTypes, factorDims):
+                              betaIdx, fdIdx, vectorDataTypes, factorDims, hasMultipleGlobalWriteModes):
     factorDim = factorDims[fdIdx]
     edgeModule.add(writeLabel)
 
@@ -14335,7 +14427,7 @@ class KernelWriterAssembly(KernelWriter):
     if len(actLoopLabelModules) > 1:
       edgeModule.add(actLoopEndLabel)
 
-    if len(factorDims) == 1:
+    if len(factorDims) == 1 and not hasMultipleGlobalWriteModes:
       if currentInstLength >= self.states.asmCaps["ShortBranchMaxLength"]:
         with self.allocTmpSgpr(3) as tmpSgprInfo:
           edgeModule.add(SLongBranchPositive(endLabel, tmpSgprInfo, comment="jump to end"))
@@ -15536,7 +15628,7 @@ class KernelWriterAssembly(KernelWriter):
 
     # TODO- why we don't directly update the offset in the last argLoader ?
     argOffset = self.argLoader.getOffset()
-    argOffset += (self.states.numStoreSgprToLoad + self.states.numStoreSgprToLoad2) * 4
+    argOffset += (self.states.numStoreSgprToLoad) * 4
     module.add(self.argLoader.loadKernArg("AddrAmaxOut", "KernArgAddress", sgprOffset=hex(argOffset), dword=4))
     argOffset += 16 # advance dwordx4
     module.add(self.argLoader.loadKernArg("AddressSy", "KernArgAddress", sgprOffset=hex(argOffset), dword=2))
@@ -15795,7 +15887,7 @@ class KernelWriterAssembly(KernelWriter):
     if kernel["ActivationFuncCall"]:
       activationLabelModules.append("")
       activationEnumStrList.append("none")
-    elif (((kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1) or kernel["GlobalSplitUAlgorithm"] == 'MultipleBufferSingleKernel' or kernel["StreamK"] > 0) and kernel["ActivationFused"]) and \
+    elif (((kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1) or kernel["_GlobalAccumulation"] == 'MultipleBufferSingleKernel' or kernel["StreamK"] > 0) and kernel["ActivationFused"]) and \
       (activationType != 'none'):
       if activationType in ['all', 'hipblaslt_all']:
         exportType = ActivationType.Export.GRADONLY if kernel["ProblemType"]["Gradient"] else ActivationType.Export.NORMAL

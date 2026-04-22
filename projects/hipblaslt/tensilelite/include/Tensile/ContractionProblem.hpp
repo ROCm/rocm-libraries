@@ -1248,6 +1248,7 @@ namespace TensileLite
 
         size_t getNumTiles(SizeMapping const& sizeMapping, size_t gsu) const;
         size_t getItersPerTile(SizeMapping const& sizeMapping) const;
+        size_t getAccumulation(Hardware const& hardware, SizeMapping const& sizeMapping, size_t gsu) const;
 
         void checkPersistentKernelEligibility(ContractionSolution const& solution,
                                               Hardware const&            hardware);

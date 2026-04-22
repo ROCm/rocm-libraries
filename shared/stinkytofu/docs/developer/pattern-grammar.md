@@ -645,7 +645,7 @@ match {
 
 **Where to write patterns:**
 '''
-lib/Dialect/Transforms/PeepholePatterns.pattern
+src/transforms/asm/PeepholePatterns.pattern
 '''
 
 **Generated code (auto):**
@@ -658,8 +658,8 @@ build/PeepholePatterns.inc
 ## See Also
 
 - **[Adding Peephole Patterns](adding-peephole-patterns.md)** - How-to guide with examples
-- **[Peephole Pattern System Design](../design/peephole-pattern-system.md)** - Architecture and generated code
-- **'lib/Dialect/Transforms/PeepholePatterns.pattern'** - Real pattern examples
+- **[Architecture Overview](architecture.md)** - System architecture and pass pipeline
+- **'src/transforms/asm/PeepholePatterns.pattern'** - Real pattern examples
 
 ---
 
