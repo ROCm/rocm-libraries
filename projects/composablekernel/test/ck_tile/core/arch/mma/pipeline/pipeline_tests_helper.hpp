@@ -425,8 +425,7 @@ void run_pipeline_matrix_test(uint32_t M,
 
     if(getCMakeGpuTargetIds().count(currentArchId) == 0)
     {
-        GTEST_SKIP()
-            << "The HIP device found does not match the compiler target(s). Skipping test.";
+        FAIL() << "The HIP device found does not match the compiler target(s).";
     }
 
     const uint32_t waveSize = static_cast<uint32_t>(devProp.warpSize);
