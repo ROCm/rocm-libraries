@@ -4401,8 +4401,8 @@ rocfft_status rocfft_plan_create_internal(rocfft_plan                   plan,
         log_bench(rocfft_bench_command(plan));
 
         // Construct the plan
-        if(plan->desc.has_undistributed_io_on_current_location() || !plan->BuildOptMultiDevicePlan()
-           || !plan->BuildMultiDevicePlan())
+        if(plan->desc.has_undistributed_io_on_current_location()
+           || !(plan->BuildOptMultiDevicePlan() || plan->BuildMultiDevicePlan()))
         {
             // Plan is configured for single-device operations or the multi-device plan
             // creation failed. Either way, a single-device execution is used, possibly
