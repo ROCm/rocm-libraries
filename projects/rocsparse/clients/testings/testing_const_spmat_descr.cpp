@@ -205,8 +205,8 @@ void testing_const_spmat_descr_bad_arg(const Arguments& arg)
         void* bsr_col_ind = (void*)0x4;
         void* bsr_val     = (void*)0x4;
 
-#define PARAMS_CREATE_BSR                                                                       \
-    descr, brows, bcols, bnnz, block_dir, block_dim, bsr_row_ptr, bsr_col_ind, bsr_val,         \
+#define PARAMS_CREATE_BSR                                                               \
+    descr, brows, bcols, bnnz, block_dir, block_dim, bsr_row_ptr, bsr_col_ind, bsr_val, \
         row_ptr_type, col_ind_type, idx_base, data_type
         bad_arg_analysis(rocsparse_create_const_bsr_descr, PARAMS_CREATE_BSR);
 #undef PARAMS_CREATE_BSR
@@ -789,8 +789,8 @@ void testing_const_spmat_descr_bad_arg(const Arguments& arg)
             const void** bsr_col_ind = (const void**)0x4;
             const void** bsr_val     = (const void**)0x4;
 
-#define PARAMS_GET_BSR                                                                          \
-    descr, brows, bcols, bnnz, block_dir, block_dim, bsr_row_ptr, bsr_col_ind, bsr_val,         \
+#define PARAMS_GET_BSR                                                                  \
+    descr, brows, bcols, bnnz, block_dir, block_dim, bsr_row_ptr, bsr_col_ind, bsr_val, \
         row_ptr_type, col_ind_type, idx_base, data_type
             bad_arg_analysis(rocsparse_const_bsr_get, PARAMS_GET_BSR);
 #undef PARAMS_GET_BSR
