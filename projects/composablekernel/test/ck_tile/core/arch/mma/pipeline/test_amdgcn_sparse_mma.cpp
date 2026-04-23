@@ -171,22 +171,29 @@ struct SparseTransformKernel
         using ResultT =
             decltype(SparseCompressTransform<CompressionRatio>::exec(*static_cast<Vec*>(a)));
         using FirstT = std::tuple_element_t<0, ResultT>;
+        using IdxT   = std::tuple_element_t<1, ResultT>;
         const auto& [vec, i] =
             SparseCompressTransform<CompressionRatio>::exec(*static_cast<Vec*>(a));
         *reinterpret_cast<remove_cvref_t<FirstT>*>(a) = vec;
-        *reinterpret_cast<int32_t*>(idx)              = i;
+        __builtin_memcpy(idx, &i, sizeof(IdxT));
     }
 };
 
 // Generalized helper: runs the sparse transform kernel and verifies compressed output and index.
 template <int NUM, int RATIO, typename Type>
-void sparse_transform_verify(const std::vector<Type>& input,
-                             const std::vector<Type>& expected_output,
-                             int32_t expected_idx)
+void sparse_transform_verify(
+    const std::vector<Type>& input,
+    const std::vector<Type>& expected_output,
+    const sparse::detail::SparseIdxPack<sparse::detail::idx_words_needed<NUM / RATIO>>&
+        expected_idx)
 {
     static_assert(RATIO == 2, "Extend functionality if other ratio is used.");
     ASSERT_EQ(static_cast<int>(input.size()), NUM);
     ASSERT_EQ(static_cast<int>(expected_output.size()), NUM / RATIO);
+
+    constexpr int CompressedSize = NUM / RATIO;
+    constexpr int IdxNumWords    = sparse::detail::idx_words_needed<CompressedSize>;
+    using IdxType                = sparse::detail::SparseIdxPack<IdxNumWords>;
 
     int devCount;
     hipDevice_t dev;
@@ -206,11 +213,11 @@ void sparse_transform_verify(const std::vector<Type>& input,
     }
 
     float* d_v;
-    int32_t* d_idx;
+    void* d_idx;
 
     static constexpr auto Size = sizeof(Type) * NUM;
     HIP_CHECK_ERROR(hipMalloc(&d_v, Size));
-    HIP_CHECK_ERROR(hipMalloc(&d_idx, sizeof(int32_t)));
+    HIP_CHECK_ERROR(hipMalloc(&d_idx, sizeof(IdxType)));
 
     // Copy inputs to device
     HIP_CHECK_ERROR(hipMemcpy(d_v, input.data(), Size, hipMemcpyHostToDevice));
@@ -222,10 +229,15 @@ void sparse_transform_verify(const std::vector<Type>& input,
 
     std::vector<Type> h_out(NUM / RATIO, static_cast<Type>(0));
     HIP_CHECK_ERROR(hipMemcpy(h_out.data(), d_v, Size / RATIO, hipMemcpyDeviceToHost));
-    int32_t h_idx;
-    HIP_CHECK_ERROR(hipMemcpy(&h_idx, d_idx, sizeof(int32_t), hipMemcpyDeviceToHost));
+    IdxType h_idx{};
+    HIP_CHECK_ERROR(hipMemcpy(&h_idx, d_idx, sizeof(IdxType), hipMemcpyDeviceToHost));
 
-    EXPECT_EQ(h_idx, expected_idx) << "Index mask mismatch";
+    EXPECT_EQ(h_idx.words[0], expected_idx.words[0]) << "Index mask mismatch (word 0)";
+    for(int w = 1; w < IdxNumWords; ++w)
+    {
+        EXPECT_EQ(h_idx.words[w], expected_idx.words[w])
+            << "Index mask mismatch (word " << w << ")";
+    }
     for(int i = 0; i < NUM / RATIO; ++i)
     {
         EXPECT_EQ(h_out[i], expected_output[i]) << "Output mismatch at position " << i;
@@ -239,10 +251,11 @@ void sparse_transform_verify(const std::vector<Type>& input,
     // initialization values (from nonzero_elems init) that don't correspond to the
     // default index (slot 2). We only validate entries where the index was explicitly
     // set, i.e. where input[slot] is non-zero.
-    constexpr int CompressedSize = NUM / RATIO;
     for(int i = 0; i < CompressedSize; ++i)
     {
-        int slot           = (h_idx >> (2 * i)) & 0b11;
+        const int word     = (2 * i) / 32;
+        const int shift    = (2 * i) % 32;
+        int slot           = (h_idx.words[word] >> shift) & 0b11;
         int group          = i / 2;
         Type input_at_slot = input[group * 4 + slot];
         // Only check when input at the indexed slot is non-zero (explicitly assigned)
@@ -262,20 +275,36 @@ void sparse_transform_verify(const std::vector<Type>& input,
 // Helper: build expected index from a per-group 4-bit pattern, repeated for all groups.
 // Each group of 4 input elements contributes 2 compressed elements -> 2 x 2-bit index fields = 4
 // bits.
-static int32_t build_repeated_group_idx(int num_groups, int32_t group_bits_4)
+template <int NumGroups>
+static auto build_repeated_group_idx(int32_t group_bits_4)
 {
-    int32_t idx = 0;
-    for(int g = 0; g < num_groups; ++g)
-        idx |= (group_bits_4 << (4 * g));
+    constexpr int CompressedSize = NumGroups * 2;
+    constexpr int NumWords       = sparse::detail::idx_words_needed<CompressedSize>;
+    sparse::detail::SparseIdxPack<NumWords> idx{};
+    for(int g = 0; g < NumGroups; ++g)
+    {
+        const int bit_pos = g * 4;
+        const int word    = bit_pos / 32;
+        const int shift   = bit_pos % 32;
+        idx.words[word] |= (group_bits_4 << shift);
+    }
     return idx;
 }
 
 // Helper: build expected index from alternating even/odd 4-bit group patterns.
-static int32_t build_alternating_group_idx(int num_groups, int32_t even_bits_4, int32_t odd_bits_4)
+template <int NumGroups>
+static auto build_alternating_group_idx(int32_t even_bits_4, int32_t odd_bits_4)
 {
-    int32_t idx = 0;
-    for(int g = 0; g < num_groups; ++g)
-        idx |= ((g % 2 == 0 ? even_bits_4 : odd_bits_4) << (4 * g));
+    constexpr int CompressedSize = NumGroups * 2;
+    constexpr int NumWords       = sparse::detail::idx_words_needed<CompressedSize>;
+    sparse::detail::SparseIdxPack<NumWords> idx{};
+    for(int g = 0; g < NumGroups; ++g)
+    {
+        const int bit_pos = g * 4;
+        const int word    = bit_pos / 32;
+        const int shift   = bit_pos % 32;
+        idx.words[word] |= ((g % 2 == 0 ? even_bits_4 : odd_bits_4) << shift);
+    }
     return idx;
 }
 
@@ -297,7 +326,7 @@ void sparse_transform_test_case()
         expected_out[i] = v[i * 2];
     }
 
-    int32_t expected_idx = build_repeated_group_idx(NUM / 4, 0b1000);
+    auto expected_idx = build_repeated_group_idx<NUM / 4>(0b1000);
     sparse_transform_verify<NUM, RATIO, Type>(v, expected_out, expected_idx);
 }
 
@@ -308,6 +337,7 @@ TEST(SparseTransformsTest, ValidCompressionRatio)
     sparse_transform_test_case<8, 2, fp16_t>();
     sparse_transform_test_case<16, 2, fp16_t>();
     sparse_transform_test_case<32, 2, fp16_t>();
+    sparse_transform_test_case<64, 2, fp16_t>(); // multi-word SparseIdxPack
 }
 
 // All-zero input: no non-zeros in any group of 4.
@@ -320,7 +350,7 @@ void sparse_transform_all_zero()
     using T = fp16_t;
     std::vector<T> input(NUM, static_cast<T>(0));
     std::vector<T> expected_output(NUM / 2, static_cast<T>(0));
-    int32_t expected_idx = build_repeated_group_idx(NUM / 4, 0b1010);
+    auto expected_idx = build_repeated_group_idx<NUM / 4>(0b1010);
     sparse_transform_verify<NUM, 2, T>(input, expected_output, expected_idx);
 }
 
@@ -329,6 +359,7 @@ TEST(SparseTransformsTest, AllZeroInput)
     sparse_transform_all_zero<8>();
     sparse_transform_all_zero<16>();
     sparse_transform_all_zero<32>();
+    sparse_transform_all_zero<64>(); // multi-word SparseIdxPack
 }
 
 // Single non-zero per group of 4 (at slot 3).
@@ -351,7 +382,7 @@ void sparse_transform_single_nonzero()
         expected_output[g * 2 + 1] = val;
     }
 
-    int32_t expected_idx = build_repeated_group_idx(NUM / 4, 0b1011);
+    auto expected_idx = build_repeated_group_idx<NUM / 4>(0b1011);
     sparse_transform_verify<NUM, 2, T>(input, expected_output, expected_idx);
 }
 
@@ -360,6 +391,7 @@ TEST(SparseTransformsTest, SingleNonZeroPerGroup)
     sparse_transform_single_nonzero<8>();
     sparse_transform_single_nonzero<16>();
     sparse_transform_single_nonzero<32>();
+    sparse_transform_single_nonzero<64>(); // multi-word SparseIdxPack
 }
 
 // Non-zeros at slots 1 and 3 in each group.
@@ -382,7 +414,7 @@ void sparse_transform_slots_1_and_3()
         expected_output[g * 2 + 1] = b;
     }
 
-    int32_t expected_idx = build_repeated_group_idx(NUM / 4, 0b1101);
+    auto expected_idx = build_repeated_group_idx<NUM / 4>(0b1101);
     sparse_transform_verify<NUM, 2, T>(input, expected_output, expected_idx);
 }
 
@@ -391,6 +423,7 @@ TEST(SparseTransformsTest, NonZerosAtSlots1And3)
     sparse_transform_slots_1_and_3<8>();
     sparse_transform_slots_1_and_3<16>();
     sparse_transform_slots_1_and_3<32>();
+    sparse_transform_slots_1_and_3<64>(); // multi-word SparseIdxPack
 }
 
 // Non-zeros at slots 0 and 3 in each group (non-adjacent).
@@ -413,7 +446,7 @@ void sparse_transform_slots_0_and_3()
         expected_output[g * 2 + 1] = b;
     }
 
-    int32_t expected_idx = build_repeated_group_idx(NUM / 4, 0b1100);
+    auto expected_idx = build_repeated_group_idx<NUM / 4>(0b1100);
     sparse_transform_verify<NUM, 2, T>(input, expected_output, expected_idx);
 }
 
@@ -422,6 +455,7 @@ TEST(SparseTransformsTest, NonZerosAtSlots0And3)
     sparse_transform_slots_0_and_3<8>();
     sparse_transform_slots_0_and_3<16>();
     sparse_transform_slots_0_and_3<32>();
+    sparse_transform_slots_0_and_3<64>(); // multi-word SparseIdxPack
 }
 
 // Mixed sparsity pattern: even groups have non-zeros at slots 0,2; odd groups at slots 1,3.
@@ -454,7 +488,7 @@ void sparse_transform_mixed()
         expected_output[g * 2 + 1] = b;
     }
 
-    int32_t expected_idx = build_alternating_group_idx(NUM / 4, 0b1000, 0b1101);
+    auto expected_idx = build_alternating_group_idx<NUM / 4>(0b1000, 0b1101);
     sparse_transform_verify<NUM, 2, T>(input, expected_output, expected_idx);
 }
 
@@ -463,6 +497,7 @@ TEST(SparseTransformsTest, MixedSparsityPattern)
     sparse_transform_mixed<8>();
     sparse_transform_mixed<16>();
     sparse_transform_mixed<32>();
+    sparse_transform_mixed<64>(); // multi-word SparseIdxPack
 }
 
 template <typename AType,
@@ -553,6 +588,58 @@ struct SparsePipelineFactory_16x16x64_ColMajor
         SparseMmaPipeline<fp16_t, fp16_t, fp32_t, 16u, 16u, 64u, MmaAccumPolicy::COL_MAJOR, Target>;
 };
 
+template <typename Target>
+struct SparsePipelineFactory_16x16x128
+{
+    using type = SparseMmaPipeline<fp16_t,
+                                   fp16_t,
+                                   fp32_t,
+                                   16u,
+                                   16u,
+                                   128u,
+                                   MmaAccumPolicy::ROW_MAJOR,
+                                   Target>;
+};
+
+template <typename Target>
+struct SparsePipelineFactory_16x16x256
+{
+    using type = SparseMmaPipeline<fp16_t,
+                                   fp16_t,
+                                   fp32_t,
+                                   16u,
+                                   16u,
+                                   256u,
+                                   MmaAccumPolicy::ROW_MAJOR,
+                                   Target>;
+};
+
+template <typename Target>
+struct SparsePipelineFactory_16x16x128_ColMajor
+{
+    using type = SparseMmaPipeline<fp16_t,
+                                   fp16_t,
+                                   fp32_t,
+                                   16u,
+                                   16u,
+                                   128u,
+                                   MmaAccumPolicy::COL_MAJOR,
+                                   Target>;
+};
+
+template <typename Target>
+struct SparsePipelineFactory_16x16x256_ColMajor
+{
+    using type = SparseMmaPipeline<fp16_t,
+                                   fp16_t,
+                                   fp32_t,
+                                   16u,
+                                   16u,
+                                   256u,
+                                   MmaAccumPolicy::COL_MAJOR,
+                                   Target>;
+};
+
 // Full matrix verification: 16x16x32 single-fragment sparse pipeline (ROW_MAJOR)
 TEST(SparseMmaPipeline, FullMatrixVerify_16x16x32)
 {
@@ -591,4 +678,45 @@ TEST(SparseMmaPipeline, FullMatrixVerify_16x16x64_ColMajor)
 
     mma_pipeline_test::run_pipeline_matrix_test<SparsePipelineFactory_16x16x64_ColMajor>(
         16u, 16u, 64u, should_skip, Kernel{}, true);
+}
+
+// Multi-fragment K: 16x16x128 -> 4 K fragments, exercises multi-word SparseIdxPack (ROW_MAJOR)
+TEST(SparseMmaPipeline, FullMatrixVerify_16x16x128)
+{
+    using Kernel =
+        SparsePipelineKernel<fp16_t, fp16_t, fp32_t, 16u, 16u, 128u, MmaAccumPolicy::ROW_MAJOR>;
+
+    mma_pipeline_test::run_pipeline_matrix_test<SparsePipelineFactory_16x16x128>(
+        16u, 16u, 128u, should_skip, Kernel{}, true);
+}
+
+// Multi-fragment K: 16x16x256 -> 8 K fragments, exercises larger multi-word SparseIdxPack
+// (ROW_MAJOR)
+TEST(SparseMmaPipeline, FullMatrixVerify_16x16x256)
+{
+    using Kernel =
+        SparsePipelineKernel<fp16_t, fp16_t, fp32_t, 16u, 16u, 256u, MmaAccumPolicy::ROW_MAJOR>;
+
+    mma_pipeline_test::run_pipeline_matrix_test<SparsePipelineFactory_16x16x256>(
+        16u, 16u, 256u, should_skip, Kernel{}, true);
+}
+
+// Multi-fragment K: 16x16x128 -> 4 K fragments (COL_MAJOR)
+TEST(SparseMmaPipeline, FullMatrixVerify_16x16x128_ColMajor)
+{
+    using Kernel =
+        SparsePipelineKernel<fp16_t, fp16_t, fp32_t, 16u, 16u, 128u, MmaAccumPolicy::COL_MAJOR>;
+
+    mma_pipeline_test::run_pipeline_matrix_test<SparsePipelineFactory_16x16x128_ColMajor>(
+        16u, 16u, 128u, should_skip, Kernel{}, true);
+}
+
+// Multi-fragment K: 16x16x256 -> 8 K fragments (COL_MAJOR)
+TEST(SparseMmaPipeline, FullMatrixVerify_16x16x256_ColMajor)
+{
+    using Kernel =
+        SparsePipelineKernel<fp16_t, fp16_t, fp32_t, 16u, 16u, 256u, MmaAccumPolicy::COL_MAJOR>;
+
+    mma_pipeline_test::run_pipeline_matrix_test<SparsePipelineFactory_16x16x256_ColMajor>(
+        16u, 16u, 256u, should_skip, Kernel{}, true);
 }
