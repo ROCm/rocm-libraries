@@ -153,4 +153,8 @@ void PassManager::setKernelConfig(std::array<int, 3> arch, uint32_t ta0, uint32_
 void PassManager::setPassFeatureConfig(const PassFeatureConfig& config) {
     passCtx.setPassFeatureConfig(config);
 }
+
+void PassManager::setAsmCapsConfig(const AsmCapsConfig& config) {
+    passCtx.setAsmCapsConfig(config);
+}
 }  // namespace stinkytofu

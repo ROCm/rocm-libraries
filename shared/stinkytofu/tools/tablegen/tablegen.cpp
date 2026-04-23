@@ -48,7 +48,7 @@ void usage() {
         << "\n"
         << "Mode 2 (instruction generation):\n"
         << "  --gen-instructions: Generate instruction metadata from .def files\n"
-        << "  --arch=<gfx>: Architecture (e.g. gfx1250, gfx942, gfx950); normalized to GfxXXX for "
+        << "  --arch=<gfx>: Architecture (e.g. gfx1250); normalized to GfxXXX for "
            ".def filenames\n"
         << "  --input-dir=<dir>: Input directory containing .def files\n"
         << "  --output-dir=<dir>: Output directory for generated .inc files\n"

@@ -2290,23 +2290,81 @@ public:
     virtual fft_status execute(void** in, void** out)
     {
         return fft_status_success;
-    };
-
-    size_t fft_params_vram_footprint()
-    {
-        return fft_params::vram_footprint();
     }
 
-    virtual size_t vram_footprint()
+    std::vector<size_t> footprint_on_devices_for(fft_io io) const
     {
-        const auto ibuf_size = ibuffer_sizes();
-        size_t val = std::accumulate(ibuf_size.begin(), ibuf_size.end(), static_cast<size_t>(1));
-        if(placement == fft_placement_notinplace)
+        std::vector<size_t> sizes(rocfft_scoped_device::device_count());
+        const auto&         iofields = io == fft_io::fft_io_in ? ifields : ofields;
+        const auto          iobuffer_size
+            = io == fft_io::fft_io_in ? sum(ibuffer_sizes()) : sum(obuffer_sizes());
+
+        // If this is library-decomposed multi-GPU, only the library
+        // can really say what the footprint will be.  Estimate it
+        // here by assuming the input/output size will be evenly
+        // divided across all of the devices.
+        if(multiGPU > 1)
         {
-            const auto obuf_size = obuffer_sizes();
-            val += std::accumulate(obuf_size.begin(), obuf_size.end(), static_cast<size_t>(1));
+            // We will use the first N devices for library-decomposed
+            for(size_t device = 0; device < multiGPU; ++device)
+            {
+                sizes.at(device) += DivRoundingUp(iobuffer_size, multiGPU);
+            }
+            return sizes;
         }
-        return val;
+
+        int currentDevice = hipInvalidDeviceId;
+        if(hipGetDevice(&currentDevice) != hipSuccess)
+            throw std::runtime_error("hipGetDevice failed");
+
+        // add sizes for field if specified, otherwise assume
+        // single-device input/output buffer on current device
+        if(iofields.empty())
+        {
+            sizes.at(currentDevice) += iobuffer_size;
+        }
+        else
+        {
+            // add footprint of each brick to its device
+            for(const auto& field : iofields)
+            {
+                for(const auto& brick : field.bricks)
+                {
+                    sizes.at(brick.device) += compute_ptrdiff(brick.length(), brick.stride);
+                }
+            }
+        }
+        return sizes;
+    }
+
+    // return the per-device memory footprint of just the input/output data
+    std::vector<size_t> io_vram_footprint() const
+    {
+        std::vector<size_t> sizes(rocfft_scoped_device::device_count());
+        const auto          input_footprints  = footprint_on_devices_for(fft_io::fft_io_in);
+        const auto          output_footprints = footprint_on_devices_for(fft_io::fft_io_out);
+
+        for(size_t i = 0; i < sizes.size(); ++i)
+        {
+            if(placement == fft_placement_inplace)
+            {
+                // inplace means we need the maximum of input and output for each device
+                sizes.at(i) = std::max(input_footprints.at(i), output_footprints.at(i));
+            }
+            else
+            {
+                // out of place means input and output are separate
+                sizes.at(i) = input_footprints.at(i) + output_footprints.at(i);
+            }
+        }
+        return sizes;
+    }
+
+    // return the full per-device memory footprint of the FFT including
+    // any work buffers required by the FFT library
+    virtual std::vector<size_t> vram_footprint()
+    {
+        return io_vram_footprint();
     }
 
     // Specific exception type for work buffer allocation failure.
@@ -4124,36 +4182,21 @@ static std::vector<hostbuf> allocate_host_buffer(const fft_precision        prec
 }
 
 // Check if the required buffers fit in the device vram.
-inline bool vram_fits_problem(const size_t prob_size, const size_t vram_avail, int deviceId = 0)
+inline bool vram_fits_problem(const std::vector<size_t>& prob_size,
+                              const std::vector<size_t>& vram_avail)
 {
+    if(prob_size.size() != vram_avail.size())
+        throw std::runtime_error("prob/vram size mismatch");
+
     // We keep a small margin of error for fitting the problem into vram:
     const size_t extra = 1 << 27;
 
-    return vram_avail > prob_size + extra;
-}
-
-// Computes the twiddle table VRAM footprint for r2c/c2r transforms.
-// This function will return 0 for the other transform types, since
-// the VRAM footprint in rocFFT is negligible for the other cases.
-inline size_t twiddle_table_vram_footprint(const fft_params& params)
-{
-    size_t vram_footprint = 0;
-
-    // Add vram footprint from real/complex even twiddle buffer size.
-    if(params.transform_type == fft_transform_type_real_forward
-       || params.transform_type == fft_transform_type_real_inverse)
+    for(size_t i = 0; i < prob_size.size(); ++i)
     {
-        const auto realdim = params.length.back();
-        if(realdim % 2 == 0)
-        {
-            const auto complex_size = params.precision == fft_precision_single ? 8 : 16;
-            // even length twiddle size is 1/4 of the real size, but
-            // in complex elements
-            vram_footprint += realdim * complex_size / 4;
-        }
+        if(prob_size[i] + extra > vram_avail[i])
+            return false;
     }
-
-    return vram_footprint;
+    return true;
 }
 
 // set input for a brick in a field
