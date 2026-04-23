@@ -140,6 +140,11 @@ class ValidatorInstruction(ABC):
     issued_at: SchedulePosition
     # The minimum number of quad-cycles that this instruction takes to issue.
     min_issue_quad_cycles_base: ClassVar[int] = 1
+    # Reference to the rocisa instruction object this was created from.
+    # None when constructed from mock/test data without real instructions.
+    # init=False: set via _insert after construction to avoid dataclass
+    # ordering issues (non-default following default in subclasses).
+    rocisa_inst: object = field(default=None, init=False, repr=False, compare=False)
 
     @abstractmethod
     def validate(self) -> Optional[str]:
@@ -463,16 +468,30 @@ ALL_INSTRUCTION_NAMES = [
 def create_unified_timeline(
     schedule_info: 'ScheduleInfo',
     kernel: 'Solution',
-    code_path: int
+    code_path: int,
+    id_map: Optional[dict] = None,
+    mfma_code: Optional[list] = None,
 ) -> 'Timeline':
-    """Create a single Timeline with all instruction types."""
+    """Create a single Timeline with all instruction types.
+
+    Args:
+        schedule_info:  The schedule to validate.
+        kernel:         Kernel configuration dict.
+        code_path:      Which code path to build the timeline for.
+        id_map:         Maps schedule keys to lists of rocisa instruction objects.
+                        When provided, each ValidatorInstruction gets a rocisa_inst reference.
+        mfma_code:      Flat list of MFMA rocisa instruction objects in execution order
+                        (already reordered by mfmaReorder). When provided, MFMA
+                        ValidatorInstructions get rocisa_inst references.
+    """
     available_names = set(schedule_info.optSchedule.keys())
     names_to_add = [n for n in ALL_INSTRUCTION_NAMES if n in available_names]
-    return Timeline(names_to_add, code_path, schedule_info, kernel)
+    return Timeline(names_to_add, code_path, schedule_info, kernel, id_map=id_map, mfma_code=mfma_code)
 
 
 class Timeline:
-    def __init__(self, instruction_names_to_add: list[str], code_path: int, schedule_info: 'ScheduleInfo', kernel: 'Solution'):
+    def __init__(self, instruction_names_to_add: list[str], code_path: int, schedule_info: 'ScheduleInfo', kernel: 'Solution',
+                 id_map: Optional[dict] = None, mfma_code: Optional[list] = None):
         """
         Create a timeline from the provided schedule_info which contains only the instructions inside `instruction_names_to_add`.
         Organized as a list of lists indexed by vmfma_index + 1.
@@ -493,7 +512,8 @@ class Timeline:
             code_path:                  The code path to create a timeline out of.
             schedule_info:              The schedule information to add to the timeline.
             kernel:                     The kernel to add to the timeline.
-            num_iterations:             Number of iterations to consider for cross-iteration effects (default 2).
+            id_map:                     Maps schedule keys to lists of rocisa instruction objects.
+            mfma_code:                  Flat list of MFMA rocisa instructions in execution order.
         """
         
         available_keys = schedule_info.optSchedule.keys()
@@ -530,6 +550,8 @@ class Timeline:
                         break
 
         self.num_vmfma = schedule_info.numMfma
+        self.id_map = id_map
+        self.mfma_code = mfma_code
         self.vlcnt_shift = defaultdict(int)
         self.vlcnt_shift[NO_GLOBAL_LOAD_LOOP] = schedule_info.nglshift
         self.vlcnt_shift[NO_LOCAL_LOAD_LOOP] = schedule_info.nllshift
@@ -577,10 +599,24 @@ class Timeline:
         # Explicitly add MFMAs to timeline.
         # Do at the top here so they are the first ones scheduled at each vmfma index.
         for i_vmfma in range(self.num_vmfma):
+            # mfmaReorder[new_pos] = original_pos. i_vmfma is the new (execution) position.
+            vmfma_slot = i_vmfma
             if schedule_info.mfmaReorder:
-                i_vmfma = schedule_info.mfmaReorder[i_vmfma]
+                vmfma_slot = schedule_info.mfmaReorder[i_vmfma]
 
-            self._insert(i_vmfma, MFMA, {"name": "MFMA"}, kernel)
+            mfma_kwargs = {"name": "MFMA"}
+            # mfma_code is indexed by new position (already reordered in CustomSchedule.py)
+            if self.mfma_code and i_vmfma < len(self.mfma_code):
+                mfma_kwargs["rocisa_inst"] = self.mfma_code[i_vmfma]
+            self._insert(vmfma_slot, MFMA, mfma_kwargs, kernel)
+
+        def _get_rocisa(name: str, idx: int) -> object:
+            """Look up the rocisa instruction from id_map, or None if unavailable."""
+            if self.id_map and name in self.id_map:
+                items = self.id_map[name]
+                if idx < len(items):
+                    return items[idx]
+            return None
 
         # NOTE: Relative ordering of instructions must be preserved.
         #       Order dictates the order in which instructions are scheduled if they are scheduled at the same vmfmaindex.
@@ -591,11 +627,11 @@ class Timeline:
             if name == "SYNC":
                 for idx_sync, (idx_vmfma, sync) in enumerate(zip(schedule_get(name, code_path, schedule_info), schedule_info.syncCode)):
                     assert idx_vmfma >= -1, f"Code path {code_path}: SWaitCnt at index {idx_sync} is not valid. Must be >= -1."
-
+                    ri = _get_rocisa("SYNC", idx_sync)
                     if isinstance(sync, SWaitCnt):
-                        self._insert(idx_vmfma, SWait, {"name": "SWaitCnt", "dscnt": sync.dscnt, "vlcnt": sync.vlcnt, "vscnt": sync.vscnt, "comment": sync.comment}, kernel)
+                        self._insert(idx_vmfma, SWait, {"name": "SWaitCnt", "dscnt": sync.dscnt, "vlcnt": sync.vlcnt, "vscnt": sync.vscnt, "comment": sync.comment, "rocisa_inst": ri}, kernel)
                     elif isinstance(sync, SBarrier):
-                        self._insert(idx_vmfma, Barrier, {"name": "SBarrier", "comment": sync.comment}, kernel)
+                        self._insert(idx_vmfma, Barrier, {"name": "SBarrier", "comment": sync.comment, "rocisa_inst": ri}, kernel)
                     else:
                         raise ValueError(f"Unexpected sync instruction type: {type(sync)}")
             elif name == "SNOP":
@@ -603,18 +639,18 @@ class Timeline:
                     assert idx_vmfma >= -1, f"Code path {code_path}: SNop at index {idx_snop} is not valid. Must be >= -1."
                     # The waitState is stored as the first parameter in the rocisa SNop instruction
                     wait_state = snop.getParams()[0]
-                    self._insert(idx_vmfma, SNop, {"name": "SNop", "wait_state": wait_state}, kernel)
+                    self._insert(idx_vmfma, SNop, {"name": "SNop", "wait_state": wait_state, "rocisa_inst": _get_rocisa("SNOP", idx_snop)}, kernel)
             elif name.startswith("LRA") or name.startswith("LRB"):
                 for idx_LR, idx_vmfma in enumerate(schedule_get(name, code_path, schedule_info)):
                     assert idx_vmfma >= -1, f"Code path {code_path}: LocalRead {name} at index {idx_LR} is not valid. Must be >= -1."
 
                     # TODO: For ForceUnrollSubIter, need to account for register reuse and the fact that the LR0/LR1/LR3s must start after a certain point in the iteration.
-                    self._insert(idx_vmfma, LocalRead, {"name": name, "issue_index": idx_LR}, kernel)
+                    self._insert(idx_vmfma, LocalRead, {"name": name, "issue_index": idx_LR, "rocisa_inst": _get_rocisa(name, idx_LR)}, kernel)
             elif name.startswith("GRInc"):
                 grincs = schedule_get(name, code_path, schedule_info)
                 for idx_grinc, idx_vmfma in enumerate(grincs):
                     assert idx_vmfma >= -1, f"Code path {code_path}: GRInc {name} at index {idx_grinc} is not valid. Must be >= -1."
-                    self._insert(idx_vmfma, GRInc, {"name": name}, kernel)
+                    self._insert(idx_vmfma, GRInc, {"name": name, "rocisa_inst": _get_rocisa(name, idx_grinc)}, kernel)
             elif name.startswith("GRA") or name.startswith("GRB"):
                 global_reads = schedule_get(name, code_path, schedule_info)
                 assert len(global_reads) % 2 == 0, f"Code path {code_path}: {name} has an odd number of indices. Must be even if DirectToLds is True."
@@ -626,35 +662,36 @@ class Timeline:
                     if idx_GR % 2 == 0:
                         continue
 
-                    self._insert(idx_vmfma, GlobalRead, {"name": name, "swap_global_read_order": swap_global_read_order}, kernel)
+                    self._insert(idx_vmfma, GlobalRead, {"name": name, "swap_global_read_order": swap_global_read_order, "rocisa_inst": _get_rocisa(name, idx_GR)}, kernel)
             elif name.startswith("Pack"):
                 packs = schedule_get(name, code_path, schedule_info)
                 n_swaps = _compute_swap_pack_count(kernel, name) if is_4x4mfma_tf32 else 0
 
                 for idx_pack, idx_vmfma in enumerate(packs):
                     assert idx_vmfma >= -1, f"Code path {code_path}: Pack {name} at index {idx_pack} is not valid. Must be >= -1."
+                    ri = _get_rocisa(name, idx_pack)
                     if is_4x4mfma_tf32:
                         if idx_pack < n_swaps:
-                            self._insert(idx_vmfma, SwapPack, {"name": name, "issue_index": idx_pack, "group_index": None}, kernel)
+                            self._insert(idx_vmfma, SwapPack, {"name": name, "issue_index": idx_pack, "group_index": None, "rocisa_inst": ri}, kernel)
                         else:
                             adjusted_idx = idx_pack - n_swaps
                             # Construction-time constants: PACK_GROUP_SIZE_TF32_4X4, TF32_4X4_MFMA_START/END
                             idx_in_group = adjusted_idx % PACK_GROUP_SIZE_TF32_4X4
                             group_idx = adjusted_idx // PACK_GROUP_SIZE_TF32_4X4
                             if TF32_4X4_MFMA_START <= idx_in_group < TF32_4X4_MFMA_END:
-                                self._insert(idx_vmfma, MFMAPack, {"name": name, "issue_index": idx_pack, "group_index": group_idx}, kernel)
+                                self._insert(idx_vmfma, MFMAPack, {"name": name, "issue_index": idx_pack, "group_index": group_idx, "rocisa_inst": ri}, kernel)
                             else:
-                                self._insert(idx_vmfma, CVTPack, {"name": name, "issue_index": idx_pack, "group_index": group_idx}, kernel)
+                                self._insert(idx_vmfma, CVTPack, {"name": name, "issue_index": idx_pack, "group_index": group_idx, "rocisa_inst": ri}, kernel)
                     elif is_tf32_emulation:
                         # Construction-time constants: PACK_GROUP_SIZE_TF32, TF32_MIDDLE_16_START/END
                         idx_in_group = idx_pack % PACK_GROUP_SIZE_TF32
                         group_idx = idx_pack // PACK_GROUP_SIZE_TF32
                         if TF32_MIDDLE_16_START <= idx_in_group < TF32_MIDDLE_16_END:
-                            self._insert(idx_vmfma, MiddlePack, {"name": name, "issue_index": idx_pack, "group_index": group_idx}, kernel)
+                            self._insert(idx_vmfma, MiddlePack, {"name": name, "issue_index": idx_pack, "group_index": group_idx, "rocisa_inst": ri}, kernel)
                         else:
-                            self._insert(idx_vmfma, CVTPack, {"name": name, "issue_index": idx_pack, "group_index": group_idx}, kernel)
+                            self._insert(idx_vmfma, CVTPack, {"name": name, "issue_index": idx_pack, "group_index": group_idx, "rocisa_inst": ri}, kernel)
                     else:
-                        self._insert(idx_vmfma, Pack, {"name": name, "issue_index": idx_pack}, kernel)
+                        self._insert(idx_vmfma, Pack, {"name": name, "issue_index": idx_pack, "rocisa_inst": ri}, kernel)
             else:
                 raise NotImplementedError(f"Instruction {name} not implemented")
 
@@ -669,8 +706,13 @@ class Timeline:
             cls:          The instruction class to instantiate (e.g. LocalRead, MFMA).
             kwargs:       Constructor keyword arguments **excluding** ``issued_at``
                           (which is set per-loop by this method).
+                          ``rocisa_inst`` is extracted and set post-construction
+                          (it uses init=False on the dataclass).
             kernel:       The kernel configuration dict.
         """
+        # Extract rocisa_inst before passing kwargs to constructor (init=False field).
+        rocisa_inst = kwargs.pop("rocisa_inst", None)
+
         for loop in self.loops:
             if self._should_add(cls, kwargs.get("name", ""), loop, kernel):
                 loop_index = self.loops.index(loop)
@@ -678,6 +720,7 @@ class Timeline:
                 kwargs["issued_at"] = SchedulePosition(loop_index=loop_index, vmfma_index=vmfma_index, sub_index=sub_index)
 
                 _instruction = cls(**kwargs)
+                _instruction.rocisa_inst = rocisa_inst
 
                 # Adjust for NLL/NGL shifts.
                 if isinstance(_instruction, SWait):
@@ -2494,7 +2537,11 @@ def isValid(scheduleInfo: 'ScheduleInfo', context: dict) -> tuple[bool, str]:
             swap_global_read_order=kernel.get("SwapGlobalReadOrder", False),
         )
 
-        timeline = create_unified_timeline(scheduleInfo, kernel, code_path)
+        timeline = create_unified_timeline(
+            scheduleInfo, kernel, code_path,
+            id_map=context.get("idMap"),
+            mfma_code=context.get("mfmaCode"),
+        )
 
         for pass_id, add_constraints in TIMELINE_PASSES.items():
             if pass_id in disabled_timeline:

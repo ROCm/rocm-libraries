@@ -399,7 +399,7 @@ def customMainLoopSchedule(writer, kernel, tensorParametersA, tensorParametersB,
     idMap['SYNC'] = opt1.syncCode
     idMap['SNOP'] = opt1.snopCode
 
-    status, message = cmsv.isValid(opt1, {'kernel' : kernel, "idMap": idMap})
+    status, message = cmsv.isValid(opt1, {'kernel' : kernel, "idMap": idMap, "mfmaCode": mfmaCode})
     # create the case str (TN, NT, TT, or NN)
     if isTN(kernel):
         case_str = "TN"
