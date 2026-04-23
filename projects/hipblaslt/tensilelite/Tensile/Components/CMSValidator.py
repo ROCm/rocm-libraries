@@ -2208,6 +2208,14 @@ def verify_scc_overlap(scheduleInfo, context: dict, code_path: int) -> tuple[boo
                     return f"{name} at index {v} can't be between {grIncData.name} {interval[0]}-{interval[1]} due to SCC usage."
         return None
 
+    # SCC-overlap validation is only meaningful when the schedule emits GRIncA and GRIncB.
+    # Some schedule variants (e.g. wave32 PGR=2 schedules that bake the pointer increment
+    # into GRA/GRB themselves) do not emit separate GRInc groups; there is nothing to check
+    # in that case.
+    missing_grincs = [n for n in GRIncNames if n not in scheduleInfo.optSchedule]
+    if missing_grincs:
+        return True, ""
+
     GRIncs = []
     for GRIncName in GRIncNames:
         GRInc = schedule_get(GRIncName, code_path, scheduleInfo)
@@ -2219,9 +2227,13 @@ def verify_scc_overlap(scheduleInfo, context: dict, code_path: int) -> tuple[boo
     if errorMessage:
         return False, errorMessage
 
-    # Then, check GR and LW on all GRIncs
+    # Then, check GR and LW on all GRIncs. Skip names that are not emitted by this
+    # schedule variant: for example, schedules that use PGR=2 buffer alternation
+    # may not emit LWSA/LWSB swap instructions.
     for grIncData in GRIncs:
         for name in names:
+            if name not in scheduleInfo.optSchedule:
+                continue
             insts = schedule_get(name, code_path, scheduleInfo)
             # In case of GRA/GRB, just take m0 updates indices
             if name.startswith("GR"):
@@ -2467,6 +2479,13 @@ def isValid(scheduleInfo: 'ScheduleInfo', context: dict) -> tuple[bool, str]:
             disabled_timeline[pass_id] = reason
             printWarning(f"Skipping {pass_id.name} on {kernel_desc}: {reason}")
 
+    # If every timeline pass is disabled, skip timeline construction entirely.
+    # create_unified_timeline currently asserts CDNA-4 layout invariants (DTL=1,
+    # LR suffix range) which do not hold for schedules that opted out of all
+    # timeline checks (e.g. gfx1151 WMMA schedules). This lets those schedules
+    # still exercise the ISA-agnostic structural passes above.
+    all_timeline_disabled = len(disabled_timeline) == len(TIMELINE_PASSES)
+
     for code_path in range(scheduleInfo.numCodePaths):
         # === Structural checks (no Timeline needed) ===
         for pass_id, check in STRUCTURAL_CHECKS.items():
@@ -2476,6 +2495,9 @@ def isValid(scheduleInfo: 'ScheduleInfo', context: dict) -> tuple[bool, str]:
             if not status:
                 scheduleInfo.pretty_print()
                 return False, f"Code path {code_path}: {message}"
+
+        if all_timeline_disabled:
+            continue
 
         # === Timeline-based checks ===
         ctx = ValidatorPassContext(

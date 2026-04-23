@@ -1308,3 +1308,209 @@ class TestSchedulePositionOrdering:
         c = SchedulePosition(loop_index=0, vmfma_index=2, sub_index=10)
         assert a < b < c
         assert c > b > a
+
+
+# ----------------------------------------------------------------------------
+# gfx1151 (RDNA 3.5) WMMA schedule tests
+# ----------------------------------------------------------------------------
+# These cover the schedules defined at the bottom of CustomSchedule.py.
+# Coverage goals:
+#   - dispatcher: hasCustomSchedule picks a gfx1151 schedule for gfx1151 kernels
+#     and does NOT mis-dispatch CDNA 4 kernels to a gfx1151 schedule.
+#   - predicate  : non-TN kernels and non-16bit dtypes are not routed to
+#     TN-only fp16/bf16 gfx1151 schedules.
+#   - validator  : the granular disable helper leaves the ISA-agnostic
+#     structural passes enabled and disables only the CDNA-4-specific ones,
+#     so isValid returns True with real coverage (not a blanket bypass).
+
+from Tensile.Components.CustomSchedule import _disable_cdna4_only_passes_for_gfx1151
+import Tensile.Components.CMSValidator as cmsv
+
+
+def _gfx1151_base_kernel():
+    """Canonical gfx1151 kernel shell (MT / tile params filled in per case)."""
+    dt = _mock_dtype(is_16bit=True, num_bytes=2)
+    return {
+        "UseCustomMainLoopSchedule": True,
+        "EnableMatrixInstruction": True,
+        "UnrollLoopSwapGlobalReadOrder": False,
+        "ISA": IsaVersion(11, 5, 1),
+        "WavefrontSize": 32,
+        "ProblemType": {
+            "DataType": dt, "DataTypeA": dt, "DataTypeB": dt,
+            "TransposeA": True, "TransposeB": False,
+            "TLUA": False, "TLUB": False,
+        },
+        "MacroTile0": 0, "MacroTile1": 0, "DepthU": 32,
+        "PrefetchGlobalRead": 2, "PrefetchLocalRead": 1,
+        "DirectToLds": 0, "DtlPlusLdsBuf": False,
+        "GlobalReadVectorWidthA": 8, "GlobalReadVectorWidthB": 8,
+        "LocalReadVectorWidthA": 16, "LocalReadVectorWidthB": 16,
+        "WaveSeparateGlobalReadA": 0, "WaveSeparateGlobalReadB": 0,
+        "Use64bShadowLimit": 1,
+        "MatrixInstruction": [16, 16, 16, 1],
+        "MIWaveGroup": [2, 2],
+        "LDSTrInst": False, "TransposeLDS": 1,
+        "ForceUnrollSubIter": False,
+        "SwapGlobalReadOrder": False,
+        "UsePLRPack": False,
+        "UseF32XEmulation": False,
+        "MIWaveTileA": 1, "MIWaveTileB": 1,
+        "1LDSBuffer": 0,
+    }
+
+
+# Tile parameters for a representative subset of gfx1151 schedules.
+# Format: (MT0, MT1, DU, PGR, PLR, MIWG, WTA, WTB, MIK)
+#   MIK=matrixInstK (16 for the bulk of fp16 tiles, 128 for the 16x16x128 case).
+GFX1151_TILES = [
+    (96,  128, 32,  2, 1, [2, 2], 3, 4, 16),
+    (128, 96,  32,  2, 1, [2, 2], 4, 3, 16),
+    (192, 64,  32,  2, 1, [4, 1], 3, 4, 16),
+    (64,  192, 32,  2, 1, [1, 4], 4, 3, 16),
+    (64,  128, 32,  2, 1, [2, 2], 2, 4, 16),
+    (128, 64,  64,  2, 1, [2, 2], 4, 2, 16),
+    (32,  128, 64,  2, 1, [1, 4], 2, 2, 16),
+    (16,  16,  128, 2, 1, [1, 1], 1, 1, 16),
+]
+
+
+class TestCustomScheduleGfx1151:
+    """Tests for gfx1151 (RDNA 3.5) WMMA schedules."""
+
+    # ---- Dispatcher / predicate ----
+
+    def test_dispatch_gfx1151_TN_16bit(self):
+        """A TN fp16 gfx1151 kernel should pick up a gfx1151 schedule."""
+        k = _gfx1151_base_kernel()
+        update_kernel(k, {
+            "MacroTile0": 96, "MacroTile1": 128, "DepthU": 32,
+            "MIWaveTileA": 3, "MIWaveTileB": 4,
+        })
+        has, info = hasCustomSchedule(k)
+        assert has
+        assert isinstance(info, ScheduleInfo)
+
+    def test_non_TN_does_not_dispatch(self):
+        """gfx1151 schedules in this commit are TN-only; NN kernels must not match."""
+        k = _gfx1151_base_kernel()
+        update_kernel(k, {
+            "ProblemType": {"TransposeA": False, "TransposeB": False},
+            "MacroTile0": 96, "MacroTile1": 128, "DepthU": 32,
+            "MIWaveTileA": 3, "MIWaveTileB": 4,
+        })
+        has, info = hasCustomSchedule(k)
+        assert not has
+        assert info is None
+
+    def test_cdna4_isa_does_not_dispatch_to_gfx1151(self):
+        """A CDNA 4 (gfx950) kernel must not match a gfx1151-registered tile."""
+        k = _gfx1151_base_kernel()
+        update_kernel(k, {
+            "ISA": IsaVersion(9, 5, 0),
+            "WavefrontSize": 64,
+            "DirectToLds": 1,
+            "MacroTile0": 96, "MacroTile1": 128, "DepthU": 32,
+            "MIWaveTileA": 3, "MIWaveTileB": 4,
+        })
+        has, info = hasCustomSchedule(k)
+        assert not has
+
+    def test_fp32_does_not_dispatch_to_16bit_gfx1151(self):
+        """The 16-bit gfx1151 schedules must not match a fp32 kernel."""
+        k = _gfx1151_base_kernel()
+        dt32 = _mock_dtype(is_16bit=False, is_8bit=False, num_bytes=4)
+        update_kernel(k, {
+            "ProblemType": {
+                "DataType": dt32, "DataTypeA": dt32, "DataTypeB": dt32,
+            },
+            "MacroTile0": 96, "MacroTile1": 128, "DepthU": 32,
+            "MIWaveTileA": 3, "MIWaveTileB": 4,
+        })
+        has, info = hasCustomSchedule(k)
+        assert not has
+
+    # ---- Schedule shape ----
+
+    @pytest.mark.parametrize("MT0, MT1, DU, PGR, PLR, MIWG, WTA, WTB, MIK", GFX1151_TILES)
+    def test_schedule_shape(self, MT0, MT1, DU, PGR, PLR, MIWG, WTA, WTB, MIK):
+        """Each gfx1151 tile produces a well-formed ScheduleInfo."""
+        k = _gfx1151_base_kernel()
+        update_kernel(k, {
+            "MacroTile0": MT0, "MacroTile1": MT1, "DepthU": DU,
+            "PrefetchGlobalRead": PGR, "PrefetchLocalRead": PLR,
+            "MatrixInstruction": [16, 16, MIK, 1],
+            "MIWaveGroup": MIWG, "MIWaveTileA": WTA, "MIWaveTileB": WTB,
+        })
+        has, info = hasCustomSchedule(k)
+        assert has, f"no schedule dispatched for MT{MT0}x{MT1}x{DU}"
+        assert isinstance(info, ScheduleInfo)
+        assert info.numMfma > 0
+        assert info.numCodePaths >= 1
+        assert "SYNC" in info.optSchedule
+
+    # ---- Validator coverage (this is the whole point of the helper) ----
+
+    @pytest.mark.parametrize("MT0, MT1, DU, PGR, PLR, MIWG, WTA, WTB, MIK", GFX1151_TILES)
+    def test_validator_passes_with_granular_disables(
+            self, MT0, MT1, DU, PGR, PLR, MIWG, WTA, WTB, MIK):
+        """Structural validator passes must still run and succeed on gfx1151."""
+        k = _gfx1151_base_kernel()
+        update_kernel(k, {
+            "MacroTile0": MT0, "MacroTile1": MT1, "DepthU": DU,
+            "PrefetchGlobalRead": PGR, "PrefetchLocalRead": PLR,
+            "MatrixInstruction": [16, 16, MIK, 1],
+            "MIWaveGroup": MIWG, "MIWaveTileA": WTA, "MIWaveTileB": WTB,
+        })
+        has, info = hasCustomSchedule(k)
+        assert has
+        valid, msg = isValid(info, {"kernel": k})
+        assert valid, f"MT{MT0}x{MT1}x{DU}: isValid said: {msg}"
+
+    @staticmethod
+    def _empty_schedule_info():
+        return ScheduleInfo(numCodePaths=1, numMfma=1, optSchedule={}, syncCode=[],
+                            nglshift=0, nllshift=0)
+
+    def test_helper_keeps_ascending_order_enabled(self):
+        """_disable_cdna4_only_passes_for_gfx1151 must leave ORDER enabled.
+
+        VERIFY_ASCENDING_ORDER is the only pass that is truly ISA-agnostic
+        (it checks non-decreasing vmfmaIndex sequences, which is a
+        CMS-authoring discipline rule regardless of GPU).
+        """
+        info = self._empty_schedule_info()
+        _disable_cdna4_only_passes_for_gfx1151(info)
+        assert info.reasonForDisablingValidationPass(
+            cmsv.ValidatorPass.VERIFY_ASCENDING_ORDER) is None
+
+    def test_helper_disables_instruction_count_with_reason(self):
+        """COUNT is off until CMS instruction counts are calibrated for wave32."""
+        info = self._empty_schedule_info()
+        _disable_cdna4_only_passes_for_gfx1151(info)
+        reason = info.reasonForDisablingValidationPass(
+            cmsv.ValidatorPass.VERIFY_CORRECT_NUMBER_OF_INSTRUCTIONS)
+        assert reason is not None
+        assert "wave32" in reason
+
+    def test_helper_disables_timeline_passes_with_reasons(self):
+        """All 4 CDNA-4 timeline passes must be disabled with non-empty reasons."""
+        info = self._empty_schedule_info()
+        _disable_cdna4_only_passes_for_gfx1151(info)
+        for pass_id in (
+            cmsv.ValidatorPass.ADD_LOCAL_READ_CONSTRAINTS,
+            cmsv.ValidatorPass.ADD_PACK_CONSTRAINTS,
+            cmsv.ValidatorPass.ADD_GR_NOT_TOO_EARLY_CONSTRAINTS,
+            cmsv.ValidatorPass.ADD_GR_FINISH_BEFORE_LR_CONSTRAINTS,
+        ):
+            reason = info.reasonForDisablingValidationPass(pass_id)
+            assert reason is not None and reason.strip(), pass_id.name
+            assert "CDNA 4" in reason or "CDNA-4" in reason
+
+    def test_helper_disables_scc_overlap_with_reason(self):
+        """SCC-overlap is off until audited against RDNA 3.5 scalar semantics."""
+        info = self._empty_schedule_info()
+        _disable_cdna4_only_passes_for_gfx1151(info)
+        reason = info.reasonForDisablingValidationPass(cmsv.ValidatorPass.VERIFY_SCC_OVERLAP)
+        assert reason is not None
+        assert "RDNA 3.5" in reason or "RDNA3.5" in reason

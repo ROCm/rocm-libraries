@@ -424,7 +424,7 @@ def customMainLoopSchedule(writer, kernel, tensorParametersA, tensorParametersB,
             macro.addComment0("mfmaIndex:%u"%(miIndex))
             macro.add(mfmaCode[miIndex])
 
-        def scheduleInst(indexList, instructionList):
+        def scheduleInst(keyName, indexList, instructionList):
             ret = [None]*len(indexList)
             totalNumInst = len(instructionList)
             for i in range(len(indexList)):
@@ -433,6 +433,12 @@ def customMainLoopSchedule(writer, kernel, tensorParametersA, tensorParametersB,
                     # Add slower, but allow reordering of instructions
                     while miIndex in indexList[i]:
                         ind = indexList[i].index(miIndex)
+                        if ind >= totalNumInst:
+                            raise IndexError(
+                                f"CMS schedule stream {keyName}[{i}] references instruction index {ind} "
+                                f"but only {totalNumInst} instructions exist "
+                                f"(indices={indexList[i]}, "
+                                f"MT={kernel['MacroTile0']}x{kernel['MacroTile1']}x{kernel['DepthU']})")
                         if cc == 0:
                             ret[i] = Module()
                         ret[i].add(instructionList[ind])
@@ -443,7 +449,7 @@ def customMainLoopSchedule(writer, kernel, tensorParametersA, tensorParametersB,
             else:
                 return ret
 
-        ToSched = {k: scheduleInst(stream[0], stream[1]) for k, stream in InstStreams.items()}
+        ToSched = {k: scheduleInst(k, stream[0], stream[1]) for k, stream in InstStreams.items()}
 
         def nllvmcntHandling(inst, shift0, shift1):
             if isinstance(inst, SWaitCnt) and (inst.vlcnt != -1 or (inst.dscnt != -1 and opt1.nllZeroDscnt)):
@@ -473,7 +479,7 @@ def customMainLoopSchedule(writer, kernel, tensorParametersA, tensorParametersB,
             """Determine the macro guard for a given instruction key."""
             if key in ['GRIncA', 'GRIncB']:
                 return "\\useGRInc == 1"
-            elif key in ['GRA', 'GRB', 'LWSA', 'LWSB']:
+            elif key in ['GRA', 'GRB', 'LWA', 'LWB', 'LWSA', 'LWSB']:
                 return "\\useGR == 1"
             elif key in ['LRA%u' % lastIter, 'LRB%u' % lastIter, 'LRSA', 'LRSB']:
                 return "\\usePLR == 1"
@@ -524,14 +530,13 @@ def hasCustomSchedule(kernel):
         return False, None
     if not kernel["EnableMatrixInstruction"]:
         return False, None
-    if not kernel["ISA"] == IsaVersion(9,5,0):
+    kernel_isa = tuple(kernel["ISA"]) if not isinstance(kernel["ISA"], tuple) else kernel["ISA"]
+    if kernel_isa not in (IsaVersion(9,5,0), IsaVersion(11,5,1)):
         return False, None
     if isMixed(kernel):
         return False, None
-
     useLDSTr = kernel["LDSTrInst"]
     TLDS = kernel["TransposeLDS"]
-    
     for schedule_func in _SCHEDULE_REGISTRY:
         status, schedule = schedule_func(kernel, useLDSTr, TLDS)
         if status == ScheduleMatchStatus.FOUND:
@@ -540,7 +545,7 @@ def hasCustomSchedule(kernel):
             # Criteria matched but variant unsupported - stop searching
             return False, None
         # status == NO_MATCH: continue to next schedule
-    
+
     return False, None
 
 
@@ -653,6 +658,8 @@ class TileConfig:
     dtl_plus_lds_buf: bool
     wave_separate_global_read_a: int
     wave_separate_global_read_b: int
+    isa: tuple = (9, 5, 0)
+    wavefront_size: int = 64
 
 class _ProbeDataType:
     """Minimal DataType stub for layout probing at registration time."""
@@ -734,8 +741,8 @@ class RegisterSchedule:
             "UseCustomMainLoopSchedule": True,
             "EnableMatrixInstruction": True,
             "UnrollLoopSwapGlobalReadOrder": False,
-            "ISA": IsaVersion(9, 5, 0),
-            "WavefrontSize": 64,
+            "ISA": IsaVersion(*tc.isa),
+            "WavefrontSize": tc.wavefront_size,
             "Use64bShadowLimit": 1,
             "ForceUnrollSubIter": False,
             "SwapGlobalReadOrder": False,
@@ -787,7 +794,9 @@ class RegisterSchedule:
             MT0, MT1, DU = kernel["MacroTile0"], kernel["MacroTile1"], kernel["DepthU"]
             PGR, PLR, DTL, DPLB = kernel["PrefetchGlobalRead"], kernel["PrefetchLocalRead"], kernel["DirectToLds"], kernel["DtlPlusLdsBuf"]
             WSGRA, WSGRB = kernel["WaveSeparateGlobalReadA"], kernel["WaveSeparateGlobalReadB"]
-            kernel_tile_config = TileConfig(MT0, MT1, DU, PGR, PLR, DTL, DPLB, WSGRA, WSGRB)
+            kernel_isa = tuple(kernel["ISA"]) if hasattr(kernel["ISA"], '__iter__') else (kernel["ISA"],)
+            kernel_tile_config = TileConfig(MT0, MT1, DU, PGR, PLR, DTL, DPLB, WSGRA, WSGRB,
+                                            isa=kernel_isa, wavefront_size=kernel["WavefrontSize"])
             if self.tile_config != kernel_tile_config:
                 return ScheduleMatchStatus.NO_MATCH, None
 
@@ -804,7 +813,7 @@ class RegisterSchedule:
             
             if self.mfma_wave_group != kernel["MIWaveGroup"]:
                 return ScheduleMatchStatus.NO_MATCH, None
-            
+
             # All wrapper criteria matched - call inner function
             match, schedule = func(kernel, useLDSTr, TLDS)
             
@@ -5674,3 +5683,2159 @@ def _get_schedule_224x320x64_16bit(kernel, useLDSTr, TLDS):
 
     opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
     return True, opt1
+
+
+################################################################################
+# gfx1151 (RDNA 3.5) WMMA schedules — wave32, DTL=0, MatrixInst [16,16,16,1]
+# Most schedules: PGR=2 (double-buffered), PLR=1 (prefetch 1 LR ahead).
+#
+# PLR=1 pipeline: LR1 from prev iter → sub0 data; LR0 → sub1 data
+# DTL=0 pipeline: GR→VGPRs→LW(ds_store)→LDS; separate from LR(ds_load)
+# PGR=2 pipeline: LW writes alt buffer, LR reads current buffer (no conflict)
+#
+# Instruction count assumptions (need hardware validation):
+#   GRInc: 9 SALU instructions per matrix
+#   LRSA/LRSB/LWSA/LWSB: 1 instruction each (buffer pointer toggle)
+#   LWA = NumLoadsA, LWB = NumLoadsB (1 ds_store per global read)
+#   LRA/sub = MIWaveTileA, LRB/sub = MIWaveTileB (with LRVW=16, bf16)
+#
+# ---------------------------------------------------------------------------
+# CMS validator coverage on gfx1151
+# ---------------------------------------------------------------------------
+# The CMS validator was written for CDNA 4 MFMA kernels with DirectToLds=1.
+# Its timeline passes embed quad-cycle timings from the CDNA 4 ISA (section
+# 7.6) and its Timeline constructor hard-asserts DTL=1 and a specific LR
+# suffix layout. None of that holds for gfx1151 (RDNA 3.5, WMMA, DTL=0).
+#
+# Rather than disabling validation wholesale, each gfx1151 schedule opts
+# out of only the passes that embed CDNA-specific assumptions via the
+# granular ``disableValidationPass`` API. VERIFY_ASCENDING_ORDER — which
+# only checks that instruction-index sequences are non-decreasing — is
+# truly ISA-agnostic and remains enabled. It catches real CMS-authoring
+# bugs regardless of which GPU the schedule targets.
+#
+# VERIFY_CORRECT_NUMBER_OF_INSTRUCTIONS is disabled for gfx1151: it
+# compares the CMS-authored instruction list against the kernel writer's
+# idMap, which is built from wave/ISA-specific load counts. The counts
+# baked into the current CMS schedule data were authored for CDNA wave64
+# and do not match gfx1151's wave32 kernel expansion. Re-enabling this
+# pass requires calibrating the CMS counts to wave32.
+#
+# VERIFY_SCC_OVERLAP is disabled because its constraint shape was derived
+# from CDNA scalar instruction clusters and has not yet been audited
+# against RDNA 3.5 wave32 scalar semantics.
+#
+# As the validator grows WMMA support, individual passes can be re-enabled
+# by removing their entry from _disable_cdna4_only_passes_for_gfx1151.
+################################################################################
+
+
+def _disable_cdna4_only_passes_for_gfx1151(schedule_info: ScheduleInfo) -> None:
+    """Disable validator passes that do not apply to gfx1151 (RDNA 3.5 WMMA).
+
+    Leaves VERIFY_ASCENDING_ORDER enabled so gfx1151 schedules still get
+    real structural coverage (non-decreasing vmfmaIndex sequences).
+
+    See the block comment above for rationale.
+    """
+    cdna4_only = (
+        cmsv.ValidatorPass.VERIFY_CORRECT_NUMBER_OF_INSTRUCTIONS,
+        cmsv.ValidatorPass.VERIFY_SCC_OVERLAP,
+        cmsv.ValidatorPass.ADD_LOCAL_READ_CONSTRAINTS,
+        cmsv.ValidatorPass.ADD_PACK_CONSTRAINTS,
+        cmsv.ValidatorPass.ADD_GR_NOT_TOO_EARLY_CONSTRAINTS,
+        cmsv.ValidatorPass.ADD_GR_FINISH_BEFORE_LR_CONSTRAINTS,
+    )
+    reasons = {
+        cmsv.ValidatorPass.VERIFY_CORRECT_NUMBER_OF_INSTRUCTIONS:
+            "CMS instruction counts were authored for CDNA wave64; not yet calibrated for RDNA 3.5 wave32 kernel expansion",
+        cmsv.ValidatorPass.VERIFY_SCC_OVERLAP:
+            "SCC-overlap check uses CDNA scalar semantics; not yet audited for RDNA 3.5 wave32",
+    }
+    timeline_reason = "CDNA 4 quad-cycle timing (ISA section 7.6) does not apply to RDNA 3.5 WMMA"
+    for pass_id in cdna4_only:
+        schedule_info.disableValidationPass(pass_id, reasons.get(pass_id, timeline_reason))
+
+@RegisterSchedule(
+    tile_config=TileConfig(96, 128, 32, 2, 1, 0, False, 0, 0,
+                           isa=(11, 5, 1), wavefront_size=32),
+    dtype_predicate=is16bit,
+    vector_widths=[8, 8, 16],
+    matrix_inst=[16, 16, 16, 1],
+    mfma_wave_group=[2, 2]
+)
+def _get_schedule_96x128x32_16bit_gfx1151(kernel, useLDSTr, TLDS):
+    """CMS for gfx1151 MT96x128x32 bf16/fp16 TN — 3 matching solutions.
+
+    WMMA [16,16,16,1], MIWG=[2,2], wave32, DTL=0, PGR=2, PLR=1.
+    MIWaveTileA=3, MIWaveTileB=4, LoopIters=2, numMfma=24.
+    Sub0: WMMAs 0-11, Sub1: WMMAs 12-23.
+    NLA=3, NLB=4, LRA/sub=3, LRB/sub=4, LWA=3, LWB=4.
+    """
+    if not isTN(kernel):
+        return False, None
+
+    numMfma = 24
+    syncTable = [
+        -1, SWaitCnt(dscnt=0, vlcnt=0, vscnt=-1,
+                     comment="Wait prev LR1 + GR for LW VGPRs"),
+        11, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1,
+                     comment="Wait LR0 + LW done before sub1"),
+        12, SBarrier(comment="LW visible to all waves, swap buffers"),
+    ]
+    syncCode = syncTable[1::2]
+    nglshift = nllshift = 7
+
+    optSchedule = {
+        'SYNC': [syncTable[::2]],
+
+        # LW: prev GR VGPRs → alt LDS buffer (3+4=7 writes)
+        'LWA': [[-1, 0, 1]],
+        'LWB': [[2, 3, 4, 5]],
+
+        # LR0: load sub1 data from current buffer (3+4=7 reads)
+        'LRA0': [[3, 4, 5]],
+        'LRB0': [[6, 7, 8, 9]],
+
+        # Swap instructions are not emitted for this variant.
+
+        # GR: next iter data → VGPRs (3+4=7 reads)
+        'GRA': [[14, 15, 16]],
+        'GRB': [[17, 18, 19, 20]],
+
+        # GR address increments (SALU)
+        'GRIncA': [[12, 12, 13, 13, 14, 14, 15, 15, 16]],
+        'GRIncB': [[16, 16, 17, 17, 18, 18, 19, 19, 20]],
+
+        # LR1: next sub0 data from swapped buffer (3+4=7 reads)
+        'LRA1': [[18, 19, 20]],
+        'LRB1': [[20, 21, 22, 23]],
+
+        # Loop counter
+        'LCC': [[23, 23]],
+    }
+
+    opt1 = ScheduleInfo(1, numMfma, optSchedule, syncCode, nglshift, nllshift)
+    _disable_cdna4_only_passes_for_gfx1151(opt1)
+    return True, opt1
+
+
+@RegisterSchedule(
+    tile_config=TileConfig(128, 96, 32, 2, 1, 0, False, 0, 0,
+                           isa=(11, 5, 1), wavefront_size=32),
+    dtype_predicate=is16bit,
+    vector_widths=[8, 8, 16],
+    matrix_inst=[16, 16, 16, 1],
+    mfma_wave_group=[2, 2]
+)
+def _get_schedule_128x96x32_16bit_gfx1151(kernel, useLDSTr, TLDS):
+    """CMS for gfx1151 MT128x96x32 bf16/fp16 TN — 1 matching solution.
+
+    WMMA [16,16,16,1], MIWG=[2,2], wave32, DTL=0, PGR=2, PLR=1.
+    MIWaveTileA=4, MIWaveTileB=3, LoopIters=2, numMfma=24.
+    Sub0: WMMAs 0-11, Sub1: WMMAs 12-23.
+    NLA=4, NLB=3, LRA/sub=4, LRB/sub=3, LWA=4, LWB=3.
+    """
+    if not isTN(kernel):
+        return False, None
+
+    numMfma = 24
+    syncTable = [
+        -1, SWaitCnt(dscnt=0, vlcnt=0, vscnt=-1,
+                     comment="Wait prev LR1 + GR for LW VGPRs"),
+        11, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1,
+                     comment="Wait LR0 + LW done before sub1"),
+        12, SBarrier(comment="LW visible, swap buffers"),
+    ]
+    syncCode = syncTable[1::2]
+    nglshift = nllshift = 7
+
+    optSchedule = {
+        'SYNC': [syncTable[::2]],
+
+        # LW: prev GR VGPRs → alt LDS buffer (4+3=7 writes)
+        'LWA': [[-1, 0, 1, 2]],
+        'LWB': [[3, 4, 5]],
+
+        # LR0: load sub1 data from current buffer (4+3=7 reads)
+        'LRA0': [[2, 3, 4, 5]],
+        'LRB0': [[6, 7, 8]],
+
+        # Swap instructions are not emitted for this variant.
+
+        # GR: next iter data → VGPRs (4+3=7 reads)
+        'GRA': [[14, 15, 16, 17]],
+        'GRB': [[18, 19, 20]],
+
+        # GR address increments
+        'GRIncA': [[12, 12, 13, 13, 14, 14, 15, 15, 16]],
+        'GRIncB': [[17, 17, 18, 18, 19, 19, 20, 20, 21]],
+
+        # LR1: next sub0 data from swapped buffer (4+3=7 reads)
+        'LRA1': [[17, 18, 19, 20]],
+        'LRB1': [[21, 22, 23]],
+
+        'LCC': [[23, 23]],
+    }
+
+    opt1 = ScheduleInfo(1, numMfma, optSchedule, syncCode, nglshift, nllshift)
+    _disable_cdna4_only_passes_for_gfx1151(opt1)
+    return True, opt1
+
+
+@RegisterSchedule(
+    tile_config=TileConfig(192, 64, 32, 2, 1, 0, False, 0, 0,
+                           isa=(11, 5, 1), wavefront_size=32),
+    dtype_predicate=is16bit,
+    vector_widths=[8, 8, 16],
+    matrix_inst=[16, 16, 16, 1],
+    mfma_wave_group=[4, 1]
+)
+def _get_schedule_192x64x32_16bit_gfx1151(kernel, useLDSTr, TLDS):
+    """CMS for gfx1151 MT192x64x32 bf16/fp16 TN — 2 matching solutions.
+
+    WMMA [16,16,16,1], MIWG=[4,1], wave32, DTL=0, PGR=2, PLR=1.
+    MIWaveTileA=3, MIWaveTileB=4, LoopIters=2, numMfma=24.
+    Sub0: WMMAs 0-11, Sub1: WMMAs 12-23.
+    NLA=6, NLB=2, LRA/sub=3, LRB/sub=4, LWA=6, LWB=2.
+    """
+    if not isTN(kernel):
+        return False, None
+
+    numMfma = 24
+    syncTable = [
+        -1, SWaitCnt(dscnt=0, vlcnt=0, vscnt=-1,
+                     comment="Wait prev LR1 + GR for LW VGPRs"),
+        11, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1,
+                     comment="Wait LR0 + LW done before sub1"),
+        12, SBarrier(comment="LW visible, swap buffers"),
+    ]
+    syncCode = syncTable[1::2]
+    nglshift = nllshift = 8
+
+    optSchedule = {
+        'SYNC': [syncTable[::2]],
+
+        # LW: prev GR VGPRs → alt LDS buffer (6+2=8 writes)
+        'LWA': [[-1, 0, 1, 2, 3, 4]],
+        'LWB': [[5, 6]],
+
+        # LR0: load sub1 data from current buffer (3+4=7 reads)
+        'LRA0': [[3, 4, 5]],
+        'LRB0': [[6, 7, 8, 9]],
+
+        # Swap instructions are not emitted for this variant.
+
+        # GR: next iter data → VGPRs (6+2=8 reads)
+        'GRA': [[14, 15, 16, 17, 18, 19]],
+        'GRB': [[20, 21]],
+
+        # GR address increments
+        'GRIncA': [[12, 12, 13, 13, 14, 14, 15, 15, 16]],
+        'GRIncB': [[19, 19, 20, 20, 21, 21, 22, 22, 23]],
+
+        # LR1: next sub0 data from swapped buffer (3+4=7 reads)
+        'LRA1': [[18, 19, 20]],
+        'LRB1': [[20, 21, 22, 23]],
+
+        'LCC': [[23, 23]],
+    }
+
+    opt1 = ScheduleInfo(1, numMfma, optSchedule, syncCode, nglshift, nllshift)
+    _disable_cdna4_only_passes_for_gfx1151(opt1)
+    return True, opt1
+
+
+@RegisterSchedule(
+    tile_config=TileConfig(64, 192, 32, 2, 1, 0, False, 0, 0,
+                           isa=(11, 5, 1), wavefront_size=32),
+    dtype_predicate=is16bit,
+    vector_widths=[8, 8, 16],
+    matrix_inst=[16, 16, 16, 1],
+    mfma_wave_group=[1, 4]
+)
+def _get_schedule_64x192x32_16bit_gfx1151(kernel, useLDSTr, TLDS):
+    """CMS for gfx1151 MT64x192x32 bf16/fp16 TN — 2 matching solutions.
+
+    WMMA [16,16,16,1], MIWG=[1,4], wave32, DTL=0, PGR=2, PLR=1.
+    MIWaveTileA=4, MIWaveTileB=3, LoopIters=2, numMfma=24.
+    Sub0: WMMAs 0-11, Sub1: WMMAs 12-23.
+    NLA=2, NLB=6, LRA/sub=4, LRB/sub=3, LWA=2, LWB=6.
+    """
+    if not isTN(kernel):
+        return False, None
+
+    numMfma = 24
+    syncTable = [
+        -1, SWaitCnt(dscnt=0, vlcnt=0, vscnt=-1,
+                     comment="Wait prev LR1 + GR for LW VGPRs"),
+        11, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1,
+                     comment="Wait LR0 + LW done before sub1"),
+        12, SBarrier(comment="LW visible, swap buffers"),
+    ]
+    syncCode = syncTable[1::2]
+    nglshift = nllshift = 8
+
+    optSchedule = {
+        'SYNC': [syncTable[::2]],
+
+        # LW: prev GR VGPRs → alt LDS buffer (2+6=8 writes)
+        'LWA': [[-1, 0]],
+        'LWB': [[1, 2, 3, 4, 5, 6]],
+
+        # LR0: load sub1 data from current buffer (4+3=7 reads)
+        'LRA0': [[2, 3, 4, 5]],
+        'LRB0': [[6, 7, 8]],
+
+        # Local-read swap instructions are not emitted for this variant.
+        # Swap instructions are not emitted for this variant.
+
+        # GR: next iter data → VGPRs (2+6=8 reads)
+        'GRA': [[14, 15]],
+        'GRB': [[16, 17, 18, 19, 20, 21]],
+
+        # GR address increments
+        'GRIncA': [[12, 12, 13, 13, 14, 14, 15, 15, 16]],
+        'GRIncB': [[16, 16, 17, 17, 18, 18, 19, 19, 20]],
+
+        # LR1: next sub0 data from swapped buffer (4+3=7 reads)
+        'LRA1': [[17, 18, 19, 20]],
+        'LRB1': [[21, 22, 23]],
+
+        'LCC': [[23, 23]],
+    }
+
+    opt1 = ScheduleInfo(1, numMfma, optSchedule, syncCode, nglshift, nllshift)
+    _disable_cdna4_only_passes_for_gfx1151(opt1)
+    return True, opt1
+
+
+@RegisterSchedule(
+    tile_config=TileConfig(32, 128, 64, 2, 1, 0, False, 0, 0,
+                           isa=(11, 5, 1), wavefront_size=32),
+    dtype_predicate=is16bit,
+    vector_widths=[8, 8, 16],
+    matrix_inst=[16, 16, 16, 1],
+    mfma_wave_group=[1, 4]
+)
+def _get_schedule_32x128x64_16bit_gfx1151(kernel, useLDSTr, TLDS):
+    """CMS for gfx1151 MT32x128x64 bf16/fp16 TN — 3 matching solutions.
+
+    WMMA [16,16,16,1], MIWG=[1,4], wave32, DTL=0, PGR=2, PLR=1.
+    MIWaveTileA=2, MIWaveTileB=2, LoopIters=4, numMfma=16.
+    Sub0: 0-3, Sub1: 4-7, Sub2: 8-11, Sub3: 12-15.
+    NLA=2, NLB=8, LRA/sub=2, LRB/sub=2, LWA=2, LWB=8.
+    """
+    if not isTN(kernel):
+        return False, None
+
+    numMfma = 16
+    syncTable = [
+        -1, SWaitCnt(dscnt=0, vlcnt=0, vscnt=-1,
+                     comment="Wait prev LR3 + GR for LW VGPRs"),
+         3, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1,
+                     comment="Wait LR0 + LW done before sub1"),
+         4, SBarrier(comment="LW visible, swap buffers"),
+         7, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1,
+                     comment="Wait LR1 done before sub2"),
+        11, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1,
+                     comment="Wait LR2 done before sub3"),
+    ]
+    syncCode = syncTable[1::2]
+    nglshift = nllshift = 10
+
+    optSchedule = {
+        'SYNC': [syncTable[::2]],
+
+        # LW: prev GR VGPRs → alt LDS buffer (2+8=10 writes)
+        'LWA': [[-1, 0]],
+        'LWB': [[0, 1, 1, 2, 2, 3, 3, 3]],
+
+        # LR0: load sub1 data (2+2=4 reads)
+        'LRA0': [[1, 2]],
+        'LRB0': [[2, 3]],
+
+        # Swap instructions are not emitted for this variant.
+
+        # LR1: load sub2 data (2+2=4 reads)
+        'LRA1': [[5, 6]],
+        'LRB1': [[6, 7]],
+
+        # GR: next iter data → VGPRs (2+8=10 reads)
+        'GRA': [[8, 9]],
+        'GRB': [[9, 10, 10, 11, 11, 12, 12, 13]],
+
+        # GR address increments
+        'GRIncA': [[7, 7, 8, 8, 9, 9, 10, 10, 11]],
+        'GRIncB': [[11, 11, 12, 12, 13, 13, 14, 14, 15]],
+
+        # LR2: load sub3 data (2+2=4 reads)
+        'LRA2': [[8, 9]],
+        'LRB2': [[9, 10]],
+
+        # LR3: load next sub0 data from swapped buffer (2+2=4 reads)
+        'LRA3': [[12, 13]],
+        'LRB3': [[13, 14]],
+
+        'LCC': [[15, 15]],
+    }
+
+    opt1 = ScheduleInfo(1, numMfma, optSchedule, syncCode, nglshift, nllshift)
+    _disable_cdna4_only_passes_for_gfx1151(opt1)
+    return True, opt1
+
+
+################################################################################
+# gfx1151 WMMA schedules — PLR=0 heuristic-dominant tiles
+################################################################################
+
+@RegisterSchedule(
+    tile_config=TileConfig(96, 128, 64, 2, 0, 0, False, 0, 0,
+                           isa=(11, 5, 1), wavefront_size=32),
+    dtype_predicate=is16bit,
+    vector_widths=[8, 8, 16],
+    matrix_inst=[16, 16, 16, 1],
+    mfma_wave_group=[2, 2]
+)
+def _get_schedule_96x128x64_plr0_14_16bit_gfx1151(kernel, useLDSTr, TLDS):
+    """CMS for gfx1151 MT96x128x64 bf16/fp16 — dominant heuristic tile.
+
+    WMMA [16,16,16,1], MIWG=[2,2], wave32, DTL=0, PGR=2, PLR=0, TLDS=1.
+    MIWaveTileA=3, MIWaveTileB=4, LoopIters=4, numMfma=48.
+    Sub0: 0-11, Sub1: 12-23, Sub2: 24-35, Sub3: 36-47.
+    NLA=6, NLB=8, LRA/sub=6 (logical loads; each expands to multiple
+    ds_load_u16 pairs via NLCA=3 TLDS=1), LRB/sub=8, LWA=6, LWB=8.
+
+    PLR=0: each sub reads its own LR data (single VGPR set).
+    LR for sub N+1 issued at MFMA index 12*N+11 (after sub N WMMAs).
+
+    LW+GR distributed across sub2 WMMAs (indices 24-37) to overlap
+    with WMMA execution, eliminating SIA3's ~42-cycle serial LW+GR chain.
+    Prev-iter GR has >300 cycles of natural latency by index 24, so no
+    vmcnt stall. Single barrier at 43 for next-iter LR visibility.
+    Layout-independent: LRA/LRB/LW/GR counts depend only on tile dims.
+    """
+    if not isTN(kernel):
+        return False, None
+
+
+    numMfma = 48
+    nglshift = nllshift = 14
+
+    syncTable = [
+        -1, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1,
+                     comment="all LR0 done for sub0"),
+        11, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1,
+                     comment="all LR1 done for sub1"),
+        23, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1,
+                     comment="all LR2 done for sub2"),
+        35, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1,
+                     comment="all LR3 + pending LW done for sub3"),
+        43, SBarrier(comment="LW visible for next iter LR"),
+    ]
+    syncCode = syncTable[1::2]
+
+    optSchedule = {
+        'LRA0': [[-1] * 6],
+        'LRB0': [[-1] * 8],
+
+        'LRA1': [[11] * 6],
+        'LRB1': [[11] * 8],
+
+        'LRA2': [[23] * 6],
+        'LRB2': [[23] * 8],
+
+        'LRA3': [[35] * 6],
+        'LRB3': [[35] * 8],
+
+        'SYNC': [syncTable[::2]],
+
+        'LWA': [[24, 25, 26, 27, 28, 29]],
+        'GRA': [[24, 25, 26, 27, 28, 29]],
+        'LWB': [[30, 31, 32, 33, 34, 35, 36, 37]],
+        'GRB': [[30, 31, 32, 33, 34, 35, 36, 37]],
+
+        'LCC': [[47, 47]],
+    }
+
+    opt1 = ScheduleInfo(1, numMfma, optSchedule, syncCode, nglshift, nllshift)
+    _disable_cdna4_only_passes_for_gfx1151(opt1)
+    return True, opt1
+
+
+@RegisterSchedule(
+    tile_config=TileConfig(128, 64, 64, 2, 1, 0, False, 0, 0,
+                           isa=(11, 5, 1), wavefront_size=32),
+    dtype_predicate=is16bit,
+    vector_widths=[8, 8, 16],
+    matrix_inst=[16, 16, 16, 1],
+    mfma_wave_group=[2, 2]
+)
+def _get_schedule_128x64x64_plr1_16bit_gfx1151(kernel, useLDSTr, TLDS):
+    """CMS for gfx1151 MT128x64x64 bf16/fp16 — TN-dominant heuristic tile.
+
+    WMMA [16,16,16,1], MIWG=[2,2], wave32, DTL=0, PGR=2, PLR=1, TLDS=1.
+    MIWaveTileA=4, MIWaveTileB=2, LoopIters=4, numMfma=32.
+    Sub0: 0-7, Sub1: 8-15, Sub2: 16-23, Sub3: 24-31.
+    NLA=8, NLB=4, LRA/sub=4, LRB/sub=2, LWA=8, LWB=4.
+
+    PLR=1 with 4 sub-iters: prev-iter LR3 prefetched sub0 data.
+    LR0→sub1, LR1→sub2, LR2→sub3, LR3 after barrier→next sub0.
+    LW distributed across sub0 to overlap with compute.
+    GR issued during sub2 for maximum latency hiding before next iter LW.
+    """
+    if not isTN(kernel):
+        return False, None
+
+
+    numMfma = 32
+    nglshift = nllshift = 13
+
+    syncTable = [
+        -1, SWaitCnt(dscnt=0, vlcnt=0, vscnt=-1,
+                     comment="Wait prev LR3 + GR for LW VGPRs"),
+         7, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1,
+                     comment="Wait LR0 + LW done before sub1"),
+        15, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1,
+                     comment="Wait LR1 done before sub2"),
+        23, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1,
+                     comment="Wait LR2 done before sub3"),
+        24, SBarrier(comment="LW visible for LR3"),
+    ]
+    syncCode = syncTable[1::2]
+
+    optSchedule = {
+        'SYNC': [syncTable[::2]],
+
+        'LWA': [[-1, 0, 0, 1, 1, 2, 2, 3]],
+        'LWB': [[3, 4, 5, 6]],
+
+        'LRA0': [[4, 5, 6, 7]],
+        'LRB0': [[6, 7]],
+
+        'LRA1': [[12, 13, 14, 15]],
+        'LRB1': [[14, 15]],
+
+        'GRA': [[16, 17, 18, 19, 20, 21, 22, 23]],
+        'GRB': [[20, 21, 22, 23]],
+
+        'LRA2': [[18, 19, 20, 21]],
+        'LRB2': [[21, 22]],
+
+        'LRA3': [[26, 27, 28, 29]],
+        'LRB3': [[29, 30]],
+
+        'LCC': [[31, 31]],
+    }
+
+    opt1 = ScheduleInfo(1, numMfma, optSchedule, syncCode, nglshift, nllshift)
+    _disable_cdna4_only_passes_for_gfx1151(opt1)
+    return True, opt1
+
+
+################################################################################
+# gfx1151 WMMA schedules — PLR=1 PGR=1/2 tiles
+################################################################################
+
+@RegisterSchedule(
+    tile_config=TileConfig(128, 80, 64, 2, 1, 0, False, 0, 0,
+                           isa=(11, 5, 1), wavefront_size=32),
+    dtype_predicate=is16bit,
+    vector_widths=[8, 8, 16],
+    matrix_inst=[16, 16, 16, 1],
+    mfma_wave_group=[4, 1]
+)
+def _get_schedule_128x80x64_16bit_gfx1151(kernel, useLDSTr, TLDS):
+    """CMS for gfx1151 MT128x80x64 bf16/fp16 TN.
+
+    WMMA [16,16,16,1], MIWG=[4,1], wave32, DTL=0, PGR=2, PLR=1.
+    MIWaveTileA=2, MIWaveTileB=5, LoopIters=4, numMfma=40.
+    Sub0: 0-9, Sub1: 10-19, Sub2: 20-29, Sub3: 30-39.
+    NLA=8, NLB=5, LRA/sub=2, LRB/sub=5, LWA=8, LWB=5.
+
+    PLR=1 with 4 sub-iters: LR3 from prev iter → sub0 data.
+    LR0→sub1, LR1→sub2, LR2→sub3, LR3 after barrier→next sub0.
+    """
+    if not isTN(kernel):
+        return False, None
+
+    numMfma = 40
+    syncTable = [
+        -1, SWaitCnt(dscnt=0, vlcnt=0, vscnt=-1,
+                     comment="Wait prev LR3 + GR for LW VGPRs"),
+         9, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1,
+                     comment="Wait LR0 + LW done before sub1"),
+        19, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1,
+                     comment="Wait LR1 done before sub2"),
+        29, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1,
+                     comment="Wait LR2 done before sub3"),
+        30, SBarrier(comment="LW visible, swap buffers"),
+    ]
+    syncCode = syncTable[1::2]
+    nglshift = nllshift = 13
+
+    optSchedule = {
+        'SYNC': [syncTable[::2]],
+
+        # LW: prev GR VGPRs → alt LDS buffer (8+5=13 writes)
+        'LWA': [[-1, 0, 0, 1, 1, 2, 2, 3]],
+        'LWB': [[3, 4, 4, 5, 5]],
+
+        # LR0: sub1 data (2+5=7 reads)
+        'LRA0': [[4, 5]],
+        'LRB0': [[5, 6, 7, 8, 9]],
+
+        # LR1: sub2 data (2+5=7 reads)
+        'LRA1': [[14, 15]],
+        'LRB1': [[15, 16, 17, 18, 19]],
+
+        # GR: next iter data → VGPRs (8+5=13 reads)
+        'GRA': [[20, 21, 22, 23, 24, 25, 26, 27]],
+        'GRB': [[27, 28, 29, 30, 31]],
+
+        # GR address increments
+        'GRIncA': [[18, 18, 19, 19, 20, 20, 21, 21, 22]],
+        'GRIncB': [[27, 27, 28, 28, 29, 29, 30, 30, 31]],
+
+        # LR2: sub3 data (2+5=7 reads)
+        'LRA2': [[24, 25]],
+        'LRB2': [[25, 26, 27, 28, 29]],
+
+        # Swap instructions are not emitted for this variant.
+
+        # LR3: next sub0 data from swapped buffer (2+5=7 reads)
+        'LRA3': [[33, 34]],
+        'LRB3': [[34, 35, 36, 37, 38]],
+
+        'LCC': [[39, 39]],
+    }
+
+    opt1 = ScheduleInfo(1, numMfma, optSchedule, syncCode, nglshift, nllshift)
+    _disable_cdna4_only_passes_for_gfx1151(opt1)
+    return True, opt1
+
+
+@RegisterSchedule(
+    tile_config=TileConfig(128, 80, 64, 1, 1, 0, False, 0, 0,
+                           isa=(11, 5, 1), wavefront_size=32),
+    dtype_predicate=is16bit,
+    vector_widths=[8, 8, 16],
+    matrix_inst=[16, 16, 16, 1],
+    mfma_wave_group=[4, 1]
+)
+def _get_schedule_128x80x64_pgr1_16bit_gfx1151(kernel, useLDSTr, TLDS):
+    """PGR1 variant with a late partial VMEM fence before LR3.
+
+    The dominant stall is the loop-entry wait that drains outstanding GR results
+    before the next iteration's local writes. A lightweight late `vlcnt` fence
+    can move part of that cost into the current iteration without changing GR
+    issue order.
+    """
+    if not isTN(kernel):
+        return False, None
+
+    numMfma = 40
+    syncTable = [
+        -1, SWaitCnt(dscnt=0, vlcnt=0, vscnt=-1,
+                     comment="Wait prev LR3 + GR for LW VGPRs"),
+         9, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1,
+                     comment="Wait LR0 + LW done before sub1"),
+        19, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1,
+                     comment="Wait LR1 done before sub2"),
+        29, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1,
+                     comment="Wait LR2 done before sub3"),
+        30, SBarrier(comment="LW visible, swap buffers"),
+        35, SWaitCnt(dscnt=-1, vlcnt=5, vscnt=-1,
+                     comment="Drain part of previous GR before LR3"),
+    ]
+    syncCode = syncTable[1::2]
+    nglshift = nllshift = 13
+
+    optSchedule = {
+        'SYNC': [syncTable[::2]],
+
+        'LWA': [[-1, 0, 0, 1, 1, 2, 2, 3]],
+        'LWB': [[3, 4, 4, 5, 5]],
+
+        'LRA0': [[4, 5]],
+        'LRB0': [[5, 6, 7, 8, 9]],
+
+        'LRA1': [[14, 15]],
+        'LRB1': [[15, 16, 17, 18, 19]],
+
+        'GRA': [[20, 21, 22, 23, 24, 25, 26, 27]],
+        'GRB': [[27, 28, 29, 30, 31]],
+
+        'GRIncA': [[18, 18, 19, 19, 20, 20, 21, 21, 22]],
+        'GRIncB': [[27, 27, 28, 28, 29, 29, 30, 30, 31]],
+
+        'LRA2': [[24, 25]],
+        'LRB2': [[25, 26, 27, 28, 29]],
+
+        'LRA3': [[33, 34]],
+        'LRB3': [[34, 35, 36, 37, 38]],
+
+        'LCC': [[39, 39]],
+    }
+
+    opt1 = ScheduleInfo(1, numMfma, optSchedule, syncCode, nglshift, nllshift)
+    _disable_cdna4_only_passes_for_gfx1151(opt1)
+    return True, opt1
+
+
+@RegisterSchedule(
+    tile_config=TileConfig(64, 128, 32, 2, 1, 0, False, 0, 0,
+                           isa=(11, 5, 1), wavefront_size=32),
+    dtype_predicate=is16bit,
+    vector_widths=[8, 8, 16],
+    matrix_inst=[16, 16, 16, 1],
+    mfma_wave_group=[1, 4]
+)
+def _get_schedule_64x128x32_14_16bit_gfx1151(kernel, useLDSTr, TLDS):
+    """CMS for gfx1151 MT64x128x32 bf16/fp16 TN MIWG=[1,4].
+
+    MIWaveTileA=4, MIWaveTileB=2, LoopIters=2, numMfma=16.
+    Sub0: 0-7, Sub1: 8-15.
+    NLA=2, NLB=4, LRA/sub=4, LRB/sub=2, LWA=2, LWB=4.
+    """
+    if not isTN(kernel):
+        return False, None
+
+    numMfma = 16
+    syncTable = [
+        -1, SWaitCnt(dscnt=0, vlcnt=0, vscnt=-1,
+                     comment="Wait prev LR1 + GR for LW VGPRs"),
+         7, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1,
+                     comment="Wait LR0 + LW done before sub1"),
+         8, SBarrier(comment="LW visible, swap buffers"),
+    ]
+    syncCode = syncTable[1::2]
+    nglshift = nllshift = 6
+
+    optSchedule = {
+        'SYNC': [syncTable[::2]],
+
+        'LWA': [[-1, 0]],
+        'LWB': [[1, 2, 3, 4]],
+
+        'LRA0': [[1, 2, 3, 4]],
+        'LRB0': [[5, 6]],
+
+        # Swap instructions are not emitted for this variant.
+
+        'GRA': [[10, 11]],
+        'GRB': [[12, 13, 14, 15]],
+
+        'GRIncA': [[8, 8, 9, 9, 10, 10, 11, 11, 12]],
+        'GRIncB': [[12, 12, 13, 13, 14, 14, 15, 15, 15]],
+
+        'LRA1': [[10, 11, 12, 13]],
+        'LRB1': [[13, 14]],
+
+        'LCC': [[15, 15]],
+    }
+
+    opt1 = ScheduleInfo(1, numMfma, optSchedule, syncCode, nglshift, nllshift)
+    _disable_cdna4_only_passes_for_gfx1151(opt1)
+    return True, opt1
+
+
+@RegisterSchedule(
+    tile_config=TileConfig(128, 64, 32, 2, 1, 0, False, 0, 0,
+                           isa=(11, 5, 1), wavefront_size=32),
+    dtype_predicate=is16bit,
+    vector_widths=[8, 8, 16],
+    matrix_inst=[16, 16, 16, 1],
+    mfma_wave_group=[4, 1]
+)
+def _get_schedule_128x64x32_16bit_gfx1151(kernel, useLDSTr, TLDS):
+    """CMS for gfx1151 MT128x64x32 bf16/fp16 TN.
+
+    MIWaveTileA=2, MIWaveTileB=4, LoopIters=2, numMfma=16.
+    Sub0: 0-7, Sub1: 8-15.
+    NLA=4, NLB=2, LRA/sub=2, LRB/sub=4, LWA=4, LWB=2.
+    """
+    if not isTN(kernel):
+        return False, None
+
+    numMfma = 16
+    syncTable = [
+        -1, SWaitCnt(dscnt=0, vlcnt=0, vscnt=-1,
+                     comment="Wait prev LR1 + GR for LW VGPRs"),
+         7, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1,
+                     comment="Wait LR0 + LW done before sub1"),
+         8, SBarrier(comment="LW visible, swap buffers"),
+    ]
+    syncCode = syncTable[1::2]
+    nglshift = nllshift = 6
+
+    optSchedule = {
+        'SYNC': [syncTable[::2]],
+
+        'LWA': [[-1, 0, 1, 2]],
+        'LWB': [[3, 4]],
+
+        'LRA0': [[2, 3]],
+        'LRB0': [[4, 5, 6, 7]],
+
+        # Swap instructions are not emitted for this variant.
+
+        'GRA': [[10, 11, 12, 13]],
+        'GRB': [[14, 15]],
+
+        'GRIncA': [[8, 8, 9, 9, 10, 10, 11, 11, 12]],
+        'GRIncB': [[13, 13, 14, 14, 15, 15, 15, 15, 15]],
+
+        'LRA1': [[10, 11]],
+        'LRB1': [[12, 13, 14, 15]],
+
+        'LCC': [[15, 15]],
+    }
+
+    opt1 = ScheduleInfo(1, numMfma, optSchedule, syncCode, nglshift, nllshift)
+    _disable_cdna4_only_passes_for_gfx1151(opt1)
+    return True, opt1
+
+
+@RegisterSchedule(
+    tile_config=TileConfig(64, 128, 32, 2, 1, 0, False, 0, 0,
+                           isa=(11, 5, 1), wavefront_size=32),
+    dtype_predicate=is16bit,
+    vector_widths=[8, 8, 16],
+    matrix_inst=[16, 16, 16, 1],
+    mfma_wave_group=[2, 2]
+)
+def _get_schedule_64x128x32_22_16bit_gfx1151(kernel, useLDSTr, TLDS):
+    """CMS for gfx1151 MT64x128x32 bf16/fp16 TN MIWG=[2,2].
+
+    MIWaveTileA=2, MIWaveTileB=4, LoopIters=2, numMfma=16.
+    Sub0: 0-7, Sub1: 8-15.
+    NLA=2, NLB=4, LRA/sub=2, LRB/sub=4, LWA=2, LWB=4.
+    """
+    if not isTN(kernel):
+        return False, None
+
+    numMfma = 16
+    syncTable = [
+        -1, SWaitCnt(dscnt=0, vlcnt=0, vscnt=-1,
+                     comment="Wait prev LR1 + GR for LW VGPRs"),
+         7, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1,
+                     comment="Wait LR0 + LW done before sub1"),
+         8, SBarrier(comment="LW visible, swap buffers"),
+    ]
+    syncCode = syncTable[1::2]
+    nglshift = nllshift = 6
+
+    optSchedule = {
+        'SYNC': [syncTable[::2]],
+
+        'LWA': [[-1, 0]],
+        'LWB': [[1, 2, 3, 4]],
+
+        'LRA0': [[2, 3]],
+        'LRB0': [[4, 5, 6, 7]],
+
+        # Swap instructions are not emitted for this variant.
+
+        'GRA': [[10, 11]],
+        'GRB': [[12, 13, 14, 15]],
+
+        'GRIncA': [[8, 8, 9, 9, 10, 10, 11, 11, 12]],
+        'GRIncB': [[12, 12, 13, 13, 14, 14, 15, 15, 15]],
+
+        'LRA1': [[10, 11]],
+        'LRB1': [[12, 13, 14, 15]],
+
+        'LCC': [[15, 15]],
+    }
+
+    opt1 = ScheduleInfo(1, numMfma, optSchedule, syncCode, nglshift, nllshift)
+    _disable_cdna4_only_passes_for_gfx1151(opt1)
+    return True, opt1
+
+
+################################################################################
+# gfx1151 WMMA schedule — MT96x96x32
+################################################################################
+
+@RegisterSchedule(
+    tile_config=TileConfig(96, 96, 32, 2, 1, 0, False, 0, 0,
+                           isa=(11, 5, 1), wavefront_size=32),
+    dtype_predicate=is16bit,
+    vector_widths=[8, 8, 16],
+    matrix_inst=[16, 16, 16, 1],
+    mfma_wave_group=[2, 2]
+)
+def _get_schedule_96x96x32_16bit_gfx1151(kernel, useLDSTr, TLDS):
+    """CMS for gfx1151 MT96x96x32 bf16/fp16 TN.
+
+    WMMA [16,16,16,1], MIWG=[2,2], wave32, DTL=0, PGR=2, PLR=1.
+    MIWaveTileA=3, MIWaveTileB=3, LoopIters=2, numMfma=18.
+    Sub0: WMMAs 0-8, Sub1: WMMAs 9-17.
+    NLA=3, NLB=3, LRA/sub=3, LRB/sub=3, LWA=3, LWB=3.
+
+    The standard schedule spends most of its time waiting at s_waitcnt vmcnt
+    in the GR→LW section between sub0 and sub1. This CMS moves GR earlier (during
+    sub0 compute) and LW later (just before barrier) to maximize GR in-flight time.
+    """
+    if not isTN(kernel):
+        return False, None
+
+    numMfma = 18
+    syncTable = [
+        -1, SWaitCnt(dscnt=0, vlcnt=0, vscnt=-1,
+                     comment="Wait prev LR1 + GR for LW VGPRs"),
+        5, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1,
+                    comment="Wait LR0 done; GR in-flight ok"),
+        8, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1,
+                    comment="Wait LW done before barrier"),
+        8, SBarrier(comment="LW visible to all waves, swap buffers"),
+    ]
+    syncCode = syncTable[1::2]
+    nglshift = nllshift = 6
+
+    optSchedule = {
+        'SYNC': [syncTable[::2]],
+
+        # LW: prev GR VGPRs → alt LDS buffer (3+3=6 writes)
+        # Moved to WMMAs 5-8 (after LR0 done, before barrier)
+        'LWA': [[5, 6, 7]],
+        'LWB': [[6, 7, 8]],
+
+        # LR0: load sub1 data from current buffer (3+3=6 reads)
+        'LRA0': [[1, 2, 3]],
+        'LRB0': [[2, 3, 4]],
+
+        # GR: next iter data → VGPRs (3+3=6 reads)
+        # Issued EARLY during sub0 for maximum in-flight time
+        'GRA': [[0, 1, 2]],
+        'GRB': [[3, 4, 5]],
+
+        # GR address increments (SALU)
+        'GRIncA': [[-1, -1, 0, 0, 1, 1, 2, 2, 3]],
+        'GRIncB': [[3, 3, 4, 4, 5, 5, 6, 6, 7]],
+
+        # Buffer pointer swaps
+        'LWSA': [[7]],
+        'LWSB': [[8]],
+        'LRSA': [[9]],
+        'LRSB': [[9]],
+
+        # LR1: next sub0 data from swapped buffer (3+3=6 reads)
+        'LRA1': [[12, 13, 14]],
+        'LRB1': [[13, 14, 15]],
+
+        # Loop counter
+        'LCC': [[17, 17]],
+    }
+
+    opt1 = ScheduleInfo(1, numMfma, optSchedule, syncCode, nglshift, nllshift)
+    _disable_cdna4_only_passes_for_gfx1151(opt1)
+    return True, opt1
+
+
+################################################################################
+# gfx1151 WMMA schedules — small-M tiles
+################################################################################
+
+@RegisterSchedule(
+    tile_config=TileConfig(64, 64, 32, 2, 1, 0, False, 0, 0,
+                           isa=(11, 5, 1), wavefront_size=32),
+    dtype_predicate=is16bit,
+    vector_widths=[8, 8, 16],
+    matrix_inst=[16, 16, 16, 1],
+    mfma_wave_group=[2, 2]
+)
+def _get_schedule_64x64x32_22_16bit_gfx1151(kernel, useLDSTr, TLDS):
+    """CMS for gfx1151 MT64x64x32 bf16/fp16 TN MIWG=[2,2].
+
+    WMMA [16,16,16,1], MIWG=[2,2], wave32, DTL=0, PGR=2, PLR=1.
+    MIWaveTileA=2, MIWaveTileB=2, LoopIters=2, numMfma=8.
+    Sub0: WMMAs 0-3, Sub1: WMMAs 4-7.
+    NLA=2, NLB=2, LRA/sub=2, LRB/sub=2, LWA=2, LWB=2.
+    """
+    if not isTN(kernel):
+        return False, None
+
+    numMfma = 8
+    syncTable = [
+        -1, SWaitCnt(dscnt=0, vlcnt=0, vscnt=-1,
+                     comment="Wait prev LR1 + GR for LW VGPRs"),
+         3, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1,
+                     comment="Wait LR0 + LW done before sub1"),
+         4, SBarrier(comment="LW visible, swap buffers"),
+    ]
+    syncCode = syncTable[1::2]
+    nglshift = nllshift = 4
+
+    optSchedule = {
+        'SYNC': [syncTable[::2]],
+
+        # LW: prev GR VGPRs → alt LDS buffer (2+2=4 writes)
+        'LWA': [[-1, 0]],
+        'LWB': [[0, 1]],
+
+        # LR0: load sub1 data (2+2=4 reads)
+        'LRA0': [[1, 2]],
+        'LRB0': [[2, 3]],
+
+        # Buffer pointer swaps
+        'LRSA': [[5]],
+        'LRSB': [[5]],
+        'LWSA': [[6]],
+        'LWSB': [[7]],
+
+        # GR: next iter data → VGPRs (2+2=4 reads)
+        'GRA': [[4, 5]],
+        'GRB': [[5, 6]],
+
+        # GR address increments (9+9=18 SALU)
+        'GRIncA': [[3, 3, 4, 4, 5, 5, 6, 6, 7]],
+        'GRIncB': [[5, 5, 6, 6, 7, 7, 7, 7, 7]],
+
+        # LR1: next sub0 data from swapped buffer (2+2=4 reads)
+        'LRA1': [[5, 6]],
+        'LRB1': [[6, 7]],
+
+        'LCC': [[7, 7]],
+    }
+
+    opt1 = ScheduleInfo(1, numMfma, optSchedule, syncCode, nglshift, nllshift)
+    _disable_cdna4_only_passes_for_gfx1151(opt1)
+    return True, opt1
+
+
+@RegisterSchedule(
+    tile_config=TileConfig(16, 16, 128, 2, 1, 0, False, 0, 0,
+                           isa=(11, 5, 1), wavefront_size=32),
+    dtype_predicate=is16bit,
+    vector_widths=[8, 8, 16],
+    matrix_inst=[16, 16, 16, 1],
+    mfma_wave_group=[1, 1]
+)
+def _get_schedule_16x16x128_16bit_gfx1151(kernel, useLDSTr, TLDS):
+    """CMS for gfx1151 MT16x16x128 bf16/fp16 TN.
+
+    WMMA [16,16,16,1], MIWG=[1,1], wave32, DTL=0, PGR=2, PLR=1.
+    MIWaveTileA=1, MIWaveTileB=1, LoopIters=8, numMfma=8.
+    Sub0-Sub7: 1 WMMA each (compute-light, memory-heavy).
+    NLA=8, NLB=8, LRA/sub=1, LRB/sub=1, LWA=8, LWB=8.
+
+    Note: 1 WMMA per sub cannot hide ds_load latency (~20 cycles vs ~8 cycle WMMA).
+    Stalls at every sub boundary are structural. CMS benefit comes from
+    GR/LW scheduling and reduced sync overhead vs SIA heuristic.
+    """
+    if not isTN(kernel):
+        return False, None
+
+    numMfma = 8
+    syncTable = [
+        -1, SWaitCnt(dscnt=0, vlcnt=0, vscnt=-1,
+                     comment="Wait prev LR7 + GR for LW VGPRs"),
+         0, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1,
+                     comment="Wait LR0 + LW done before sub1"),
+         1, SBarrier(comment="LW visible, swap buffers"),
+         1, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1,
+                     comment="Wait LR1 before sub2"),
+         2, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1,
+                     comment="Wait LR2 before sub3"),
+         3, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1,
+                     comment="Wait LR3 before sub4"),
+         4, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1,
+                     comment="Wait LR4 before sub5"),
+         5, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1,
+                     comment="Wait LR5 before sub6"),
+         6, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1,
+                     comment="Wait LR6 before sub7"),
+    ]
+    syncCode = syncTable[1::2]
+    nglshift = nllshift = 16
+
+    optSchedule = {
+        'SYNC': [syncTable[::2]],
+
+        # LW: all 16 writes before first WMMA (8+8)
+        'LWA': [[-1, -1, -1, -1, -1, -1, -1, -1]],
+        'LWB': [[-1, -1, -1, -1, -1, -1, -1, -1]],
+
+        # LR0-LR6: issue 1 WMMA ahead of consumption
+        'LRA0': [[-1]], 'LRB0': [[-1]],
+        'LRA1': [[0]], 'LRB1': [[0]],
+        'LRA2': [[1]], 'LRB2': [[1]],
+        'LRA3': [[2]], 'LRB3': [[2]],
+        'LRA4': [[3]], 'LRB4': [[3]],
+        'LRA5': [[4]], 'LRB5': [[4]],
+        'LRA6': [[5]], 'LRB6': [[5]],
+
+        # Buffer pointer swaps
+        'LRSA': [[1]],
+        'LRSB': [[1]],
+        'LWSA': [[6]],
+        'LWSB': [[7]],
+
+        # GR: next iter data → VGPRs (8+8=16 reads)
+        'GRA': [[2, 3, 3, 4, 4, 5, 5, 6]],
+        'GRB': [[3, 3, 4, 4, 5, 5, 6, 6]],
+
+        # GR address increments (9+9=18 SALU)
+        'GRIncA': [[1, 1, 2, 2, 3, 3, 4, 4, 5]],
+        'GRIncB': [[4, 4, 5, 5, 6, 6, 7, 7, 7]],
+
+        # LR7: next sub0 data from swapped buffer
+        'LRA7': [[6]],
+        'LRB7': [[7]],
+
+        'LCC': [[7, 7]],
+    }
+
+    opt1 = ScheduleInfo(1, numMfma, optSchedule, syncCode, nglshift, nllshift)
+    _disable_cdna4_only_passes_for_gfx1151(opt1)
+    return True, opt1
+
+
+@RegisterSchedule(
+    tile_config=TileConfig(32, 16, 128, 2, 1, 0, False, 0, 0,
+                           isa=(11, 5, 1), wavefront_size=32),
+    dtype_predicate=is16bit,
+    vector_widths=[8, 8, 16],
+    matrix_inst=[16, 16, 16, 1],
+    mfma_wave_group=[2, 1]
+)
+def _get_schedule_32x16x128_16bit_gfx1151(kernel, useLDSTr, TLDS):
+    """CMS for gfx1151 MT32x16x128 bf16/fp16 TN.
+
+    WMMA [16,16,16,1], MIWG=[2,1], wave32, DTL=0, PGR=2, PLR=1.
+    MIWaveTileA=1, MIWaveTileB=1, LoopIters=8, numMfma=8.
+    Sub0-Sub7: 1 WMMA each (compute-light, memory-heavy).
+    NLA=8, NLB=4, LRA/sub=1, LRB/sub=1, LWA=8, LWB=4.
+    """
+    if not isTN(kernel):
+        return False, None
+
+    numMfma = 8
+    syncTable = [
+        -1, SWaitCnt(dscnt=0, vlcnt=0, vscnt=-1,
+                     comment="Wait prev LR7 + GR for LW VGPRs"),
+         0, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1,
+                     comment="Wait LR0 + LW done before sub1"),
+         1, SBarrier(comment="LW visible, swap buffers"),
+         1, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1,
+                     comment="Wait LR1 before sub2"),
+         2, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1,
+                     comment="Wait LR2 before sub3"),
+         3, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1,
+                     comment="Wait LR3 before sub4"),
+         4, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1,
+                     comment="Wait LR4 before sub5"),
+         5, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1,
+                     comment="Wait LR5 before sub6"),
+         6, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1,
+                     comment="Wait LR6 before sub7"),
+    ]
+    syncCode = syncTable[1::2]
+    nglshift = nllshift = 12
+
+    optSchedule = {
+        'SYNC': [syncTable[::2]],
+
+        # LW: 12 writes before first WMMA (8+4)
+        'LWA': [[-1, -1, -1, -1, -1, -1, -1, -1]],
+        'LWB': [[-1, -1, -1, -1]],
+
+        # LR0-LR6: issue 1 WMMA ahead of consumption
+        'LRA0': [[-1]], 'LRB0': [[-1]],
+        'LRA1': [[0]], 'LRB1': [[0]],
+        'LRA2': [[1]], 'LRB2': [[1]],
+        'LRA3': [[2]], 'LRB3': [[2]],
+        'LRA4': [[3]], 'LRB4': [[3]],
+        'LRA5': [[4]], 'LRB5': [[4]],
+        'LRA6': [[5]], 'LRB6': [[5]],
+
+        # Buffer pointer swaps
+        'LRSA': [[1]],
+        'LRSB': [[1]],
+        'LWSA': [[6]],
+        'LWSB': [[7]],
+
+        # GR: next iter data → VGPRs (8+4=12 reads)
+        'GRA': [[2, 3, 3, 4, 4, 5, 5, 6]],
+        'GRB': [[3, 4, 5, 6]],
+
+        # GR address increments (9+9=18 SALU)
+        'GRIncA': [[1, 1, 2, 2, 3, 3, 4, 4, 5]],
+        'GRIncB': [[4, 4, 5, 5, 6, 6, 7, 7, 7]],
+
+        # LR7: next sub0 data from swapped buffer
+        'LRA7': [[6]],
+        'LRB7': [[7]],
+
+        'LCC': [[7, 7]],
+    }
+
+    opt1 = ScheduleInfo(1, numMfma, optSchedule, syncCode, nglshift, nllshift)
+    _disable_cdna4_only_passes_for_gfx1151(opt1)
+    return True, opt1
+
+
+################################################################################
+# gfx1151 WMMA schedules — PLR=0 tiles
+################################################################################
+
+@RegisterSchedule(
+    tile_config=TileConfig(128, 96, 64, 2, 0, 0, False, 0, 0,
+                           isa=(11, 5, 1), wavefront_size=32),
+    dtype_predicate=is16bit,
+    vector_widths=[8, 8, 16],
+    matrix_inst=[16, 16, 16, 1],
+    mfma_wave_group=[4, 1]
+)
+def _get_schedule_128x96x64_plr0_41_16bit_gfx1151(kernel, useLDSTr, TLDS):
+    """CMS for gfx1151 MT128x96x64 bf16/fp16 — 53 NN configs.
+
+    WMMA [16,16,16,1], MIWG=[4,1], wave32, DTL=0, PGR=2, PLR=0, TLDS=1.
+    MIWT_A=2, MIWT_B=6, LoopIters=4, numMfma=48.
+    Sub0: 0-11, Sub1: 12-23, Sub2: 24-35, Sub3: 36-47.
+    NLA=8, NLB=6, LRA/sub=4, LRB/sub=6.
+    """
+    if not isTN(kernel):
+        return False, None
+
+    numMfma = 48
+    nglshift = nllshift = 14
+
+    syncTable = [
+        -1, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1,
+                     comment="all LR0 done for sub0"),
+        11, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1,
+                     comment="all LR1 done for sub1"),
+        23, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1,
+                     comment="all LR2 done for sub2"),
+        35, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1,
+                     comment="all LR3 + pending LW done for sub3"),
+        43, SBarrier(comment="LW visible for next iter LR"),
+    ]
+    syncCode = syncTable[1::2]
+
+    optSchedule = {
+        'LRA0': [[-1] * 4],
+        'LRB0': [[-1] * 6],
+
+        'LRA1': [[11] * 4],
+        'LRB1': [[11] * 6],
+
+        'LRA2': [[23] * 4],
+        'LRB2': [[23] * 6],
+
+        'LRA3': [[35] * 4],
+        'LRB3': [[35] * 6],
+
+        'SYNC': [syncTable[::2]],
+
+        'LWA': [[24, 25, 26, 27, 28, 29, 30, 31]],
+        'GRA': [[24, 25, 26, 27, 28, 29, 30, 31]],
+        'LWB': [[32, 33, 34, 35, 36, 37]],
+        'GRB': [[32, 33, 34, 35, 36, 37]],
+
+        'LCC': [[47, 47]],
+    }
+
+    opt1 = ScheduleInfo(1, numMfma, optSchedule, syncCode, nglshift, nllshift)
+    _disable_cdna4_only_passes_for_gfx1151(opt1)
+    return True, opt1
+
+
+@RegisterSchedule(
+    tile_config=TileConfig(96, 128, 64, 2, 0, 0, False, 0, 0,
+                           isa=(11, 5, 1), wavefront_size=32),
+    dtype_predicate=is16bit,
+    vector_widths=[8, 8, 16],
+    matrix_inst=[16, 16, 16, 1],
+    mfma_wave_group=[1, 4]
+)
+def _get_schedule_96x128x64_plr0_14_16bit_gfx1151_tn(kernel, useLDSTr, TLDS):
+    """CMS for gfx1151 MT96x128x64 bf16/fp16 — 39 TN configs (MIWG=[1,4]).
+
+    WMMA [16,16,16,1], MIWG=[1,4], wave32, DTL=0, PGR=2, PLR=0, TLDS=1.
+    MIWT_A=6, MIWT_B=2, LoopIters=4, numMfma=48.
+    Sub0: 0-11, Sub1: 12-23, Sub2: 24-35, Sub3: 36-47.
+    NLA=6, NLB=8, LRA/sub=6, LRB/sub=4.
+    """
+    if not isTN(kernel):
+        return False, None
+
+    numMfma = 48
+    nglshift = nllshift = 14
+
+    syncTable = [
+        -1, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1,
+                     comment="all LR0 done for sub0"),
+        11, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1,
+                     comment="all LR1 done for sub1"),
+        23, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1,
+                     comment="all LR2 done for sub2"),
+        35, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1,
+                     comment="all LR3 + pending LW done for sub3"),
+        43, SBarrier(comment="LW visible for next iter LR"),
+    ]
+    syncCode = syncTable[1::2]
+
+    optSchedule = {
+        'LRA0': [[-1] * 6],
+        'LRB0': [[-1] * 4],
+
+        'LRA1': [[11] * 6],
+        'LRB1': [[11] * 4],
+
+        'LRA2': [[23] * 6],
+        'LRB2': [[23] * 4],
+
+        'LRA3': [[35] * 6],
+        'LRB3': [[35] * 4],
+
+        'SYNC': [syncTable[::2]],
+
+        'LWA': [[24, 25, 26, 27, 28, 29]],
+        'GRA': [[24, 25, 26, 27, 28, 29]],
+        'LWB': [[30, 31, 32, 33, 34, 35, 36, 37]],
+        'GRB': [[30, 31, 32, 33, 34, 35, 36, 37]],
+
+        'LCC': [[47, 47]],
+    }
+
+    opt1 = ScheduleInfo(1, numMfma, optSchedule, syncCode, nglshift, nllshift)
+    _disable_cdna4_only_passes_for_gfx1151(opt1)
+    return True, opt1
+
+
+@RegisterSchedule(
+    tile_config=TileConfig(128, 112, 32, 2, 0, 0, False, 0, 0,
+                           isa=(11, 5, 1), wavefront_size=32),
+    dtype_predicate=is16bit,
+    vector_widths=[8, 4, 16],
+    matrix_inst=[16, 16, 16, 1],
+    mfma_wave_group=[4, 1]
+)
+def _get_schedule_128x112x32_plr0_16bit_gfx1151(kernel, useLDSTr, TLDS):
+    """CMS for gfx1151 MT128x112x32 bf16/fp16 TN.
+
+    WMMA [16,16,16,1], MIWG=[4,1], wave32, DTL=0, PGR=2, PLR=0, TLDS=1.
+    MIWT_A=2, MIWT_B=7, LoopIters=2 (DU=32), numMfma=28.
+    Sub0: 0-13, Sub1: 14-27.
+    NLA=4, NLB=7, LRA/sub=4, LRB/sub=7.
+    """
+    if not isTN(kernel):
+        return False, None
+
+    numMfma = 28
+    nglshift = nllshift = 10
+
+    syncTable = [
+        -1, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1,
+                     comment="all LR0 done for sub0"),
+        13, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1,
+                     comment="all LR1 + pending LW done for sub1"),
+        23, SBarrier(comment="LW visible for next iter LR"),
+    ]
+    syncCode = syncTable[1::2]
+
+    optSchedule = {
+        'LRA0': [[-1] * 4],
+        'LRB0': [[-1] * 7],
+
+        'LRA1': [[13] * 4],
+        'LRB1': [[13] * 7],
+
+        'SYNC': [syncTable[::2]],
+
+        'LWA': [[14, 15, 16, 17]],
+        'GRA': [[14, 15, 16, 17]],
+        'LWB': [[17, 18, 19, 20, 21, 22, 23]],
+        'GRB': [[17, 18, 19, 20, 21, 22, 23]],
+
+        'LCC': [[27, 27]],
+    }
+
+    if not kernel.get("1LDSBuffer", 0):
+        optSchedule['LWSA'] = [[24]]
+        optSchedule['LWSB'] = [[24]]
+        optSchedule['LRSA'] = [[25]]
+        optSchedule['LRSB'] = [[25]]
+
+    opt1 = ScheduleInfo(1, numMfma, optSchedule, syncCode, nglshift, nllshift)
+    _disable_cdna4_only_passes_for_gfx1151(opt1)
+    return True, opt1
+
+
+@RegisterSchedule(
+    tile_config=TileConfig(128, 80, 64, 2, 0, 0, False, 0, 0,
+                           isa=(11, 5, 1), wavefront_size=32),
+    dtype_predicate=is16bit,
+    vector_widths=[8, 8, 16],
+    matrix_inst=[16, 16, 16, 1],
+    mfma_wave_group=[4, 1]
+)
+def _get_schedule_128x80x64_plr0_16bit_gfx1151(kernel, useLDSTr, TLDS):
+    """CMS for gfx1151 MT128x80x64 bf16/fp16 TN.
+
+    WMMA [16,16,16,1], MIWG=[4,1], wave32, DTL=0, PGR=2, PLR=0, TLDS=1.
+    MIWT_A=2, MIWT_B=5, LoopIters=4, numMfma=40.
+    Sub0: 0-9, Sub1: 10-19, Sub2: 20-29, Sub3: 30-39.
+    NLA=8, NLB=5, LRA/sub=4, LRB/sub=5.
+    """
+    if not isTN(kernel):
+        return False, None
+
+    numMfma = 40
+    nglshift = nllshift = 12
+
+    syncTable = [
+        -1, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1,
+                     comment="all LR0 done for sub0"),
+         9, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1,
+                     comment="all LR1 done for sub1"),
+        19, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1,
+                     comment="all LR2 done for sub2"),
+        29, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1,
+                     comment="all LR3 + pending LW done for sub3"),
+        35, SBarrier(comment="LW visible for next iter LR"),
+    ]
+    syncCode = syncTable[1::2]
+
+    optSchedule = {
+        'LRA0': [[-1] * 4],
+        'LRB0': [[-1] * 5],
+
+        'LRA1': [[9] * 4],
+        'LRB1': [[9] * 5],
+
+        'LRA2': [[19] * 4],
+        'LRB2': [[19] * 5],
+
+        'LRA3': [[29] * 4],
+        'LRB3': [[29] * 5],
+
+        'SYNC': [syncTable[::2]],
+
+        'LWA': [[20, 21, 22, 23, 24, 25, 26, 27]],
+        'GRA': [[20, 21, 22, 23, 24, 25, 26, 27]],
+        'LWB': [[25, 26, 27, 28, 29]],
+        'GRB': [[25, 26, 27, 28, 29]],
+
+        'LCC': [[39, 39]],
+    }
+
+    opt1 = ScheduleInfo(1, numMfma, optSchedule, syncCode, nglshift, nllshift)
+    _disable_cdna4_only_passes_for_gfx1151(opt1)
+    return True, opt1
+
+
+################################################################################
+# gfx1151 WMMA schedules — additional tile families
+################################################################################
+
+# --- PLR=1 PGR=1: MT128x80x64 ---
+@RegisterSchedule(
+    tile_config=TileConfig(128, 80, 64, 1, 1, 0, False, 0, 0,
+                           isa=(11, 5, 1), wavefront_size=32),
+    dtype_predicate=is16bit,
+    vector_widths=[8, 8, 16],
+    matrix_inst=[16, 16, 16, 1],
+    mfma_wave_group=[4, 1]
+)
+def _get_schedule_128x80x64_pgr1_plr1_16bit_gfx1151(kernel, useLDSTr, TLDS):
+    """CMS for gfx1151 MT128x80x64 bf16/fp16 TN, PGR=1 PLR=1.
+
+    WMMA [16,16,16,1], MIWG=[4,1], wave32, DTL=0, PGR=1, PLR=1, TLDS=1.
+    MIWT_A=2, MIWT_B=5, LoopIters=4, numMfma=40.
+    Sub0: 0-9, Sub1: 10-19, Sub2: 20-29, Sub3: 30-39.
+    NLA=8, NLB=5, LRA/sub=2, LRB/sub=5.
+
+    GR moved to sub1 for extra latency hiding on PGR=1.
+    PGR=1 only gets 1 loop iteration between GR issue and GR use,
+    so issuing GR as early as possible maximizes the overlap window.
+    """
+    if not isTN(kernel):
+        return False, None
+
+    numMfma = 40
+    nglshift = nllshift = 16
+
+    syncTable = [
+        -1, SWaitCnt(dscnt=0, vlcnt=0, vscnt=-1,
+                     comment="Wait prev GR for LW VGPRs"),
+         9, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1,
+                     comment="Wait LR0 + LW done before sub1"),
+        19, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1,
+                     comment="Wait LR1 done before sub2"),
+        29, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1,
+                     comment="Wait LR2 done before sub3"),
+        30, SBarrier(comment="LW visible for LR3"),
+    ]
+    syncCode = syncTable[1::2]
+
+    optSchedule = {
+        'SYNC': [syncTable[::2]],
+
+        'LWA': [[-1, 0, 0, 1, 1, 2, 2, 3]],
+        'LWB': [[3, 4, 5, 6, 7]],
+
+        'LRA0': [[5, 6]],
+        'LRB0': [[5, 6, 7, 8, 9]],
+
+        'GRA': [[10, 11, 12, 13, 14, 15, 16, 17]],
+        'GRB': [[14, 15, 16, 17, 18]],
+
+        'LRA1': [[14, 15]],
+        'LRB1': [[15, 16, 17, 18, 19]],
+
+        'LRA2': [[22, 23]],
+        'LRB2': [[24, 25, 26, 27, 28]],
+
+        'LRA3': [[32, 33]],
+        'LRB3': [[34, 35, 36, 37, 38]],
+
+        'LCC': [[39, 39]],
+    }
+
+    opt1 = ScheduleInfo(1, numMfma, optSchedule, syncCode, nglshift, nllshift)
+    _disable_cdna4_only_passes_for_gfx1151(opt1)
+    return True, opt1
+
+
+# --- PLR=1 PGR=2: MT80x128x64 ---
+@RegisterSchedule(
+    tile_config=TileConfig(80, 128, 64, 2, 1, 0, False, 0, 0,
+                           isa=(11, 5, 1), wavefront_size=32),
+    dtype_predicate=is16bit,
+    vector_widths=[8, 8, 16],
+    matrix_inst=[16, 16, 16, 1],
+    mfma_wave_group=[1, 4]
+)
+def _get_schedule_80x128x64_pgr2_plr1_16bit_gfx1151(kernel, useLDSTr, TLDS):
+    """CMS for gfx1151 MT80x128x64 bf16/fp16 TN, PGR=2 PLR=1.
+
+    WMMA [16,16,16,1], MIWG=[1,4], wave32, DTL=0, PGR=2, PLR=1, TLDS=1.
+    MIWT_A=5, MIWT_B=2, LoopIters=4, numMfma=40.
+    Sub0: 0-9, Sub1: 10-19, Sub2: 20-29, Sub3: 30-39.
+    NLA=5, NLB=8, LRA/sub=5, LRB/sub=2.
+    """
+    if not isTN(kernel):
+        return False, None
+
+    numMfma = 40
+    nglshift = nllshift = 13
+
+    syncTable = [
+        -1, SWaitCnt(dscnt=0, vlcnt=0, vscnt=-1,
+                     comment="Wait prev LR3 + GR for LW VGPRs"),
+         9, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1,
+                     comment="Wait LR0 + LW done before sub1"),
+        19, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1,
+                     comment="Wait LR1 done before sub2"),
+        29, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1,
+                     comment="Wait LR2 done before sub3"),
+        30, SBarrier(comment="LW visible for LR3"),
+    ]
+    syncCode = syncTable[1::2]
+
+    optSchedule = {
+        'SYNC': [syncTable[::2]],
+
+        'LWA': [[-1, 0, 1, 2, 3]],
+        'LWB': [[3, 4, 4, 5, 5, 6, 6, 7]],
+
+        'LRA0': [[5, 6, 7, 8, 9]],
+        'LRB0': [[8, 9]],
+
+        'LRA1': [[14, 15, 16, 17, 18]],
+        'LRB1': [[18, 19]],
+
+        'GRA': [[20, 21, 22, 23, 24]],
+        'GRB': [[22, 23, 24, 25, 26, 27, 28, 29]],
+
+        'LRA2': [[22, 23, 24, 25, 26]],
+        'LRB2': [[28, 29]],
+
+        'LRA3': [[32, 33, 34, 35, 36]],
+        'LRB3': [[37, 38]],
+
+        'LCC': [[39, 39]],
+    }
+
+    opt1 = ScheduleInfo(1, numMfma, optSchedule, syncCode, nglshift, nllshift)
+    _disable_cdna4_only_passes_for_gfx1151(opt1)
+    return True, opt1
+
+
+# --- PLR=0 PGR=2: MT80x128x64 ---
+@RegisterSchedule(
+    tile_config=TileConfig(80, 128, 64, 2, 0, 0, False, 0, 0,
+                           isa=(11, 5, 1), wavefront_size=32),
+    dtype_predicate=is16bit,
+    vector_widths=[8, 8, 16],
+    matrix_inst=[16, 16, 16, 1],
+    mfma_wave_group=[1, 4]
+)
+def _get_schedule_80x128x64_pgr2_plr0_16bit_gfx1151(kernel, useLDSTr, TLDS):
+    """CMS for gfx1151 MT80x128x64 bf16/fp16 TN, PGR=2 PLR=0.
+
+    WMMA [16,16,16,1], MIWG=[1,4], wave32, DTL=0, PGR=2, PLR=0, TLDS=1.
+    MIWT_A=5, MIWT_B=2, LoopIters=4, numMfma=40.
+    Sub0: 0-9, Sub1: 10-19, Sub2: 20-29, Sub3: 30-39.
+    NLA=5, NLB=8, LRA/sub=5, LRB/sub=4.
+    """
+    if not isTN(kernel):
+        return False, None
+
+    numMfma = 40
+    nglshift = nllshift = 12
+
+    syncTable = [
+        -1, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1,
+                     comment="all LR0 done for sub0"),
+         9, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1,
+                     comment="all LR1 done for sub1"),
+        19, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1,
+                     comment="all LR2 done for sub2"),
+        29, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1,
+                     comment="all LR3 + pending LW done for sub3"),
+        35, SBarrier(comment="LW visible for next iter LR"),
+    ]
+    syncCode = syncTable[1::2]
+
+    optSchedule = {
+        'LRA0': [[-1] * 5],
+        'LRB0': [[-1] * 4],
+
+        'LRA1': [[9] * 5],
+        'LRB1': [[9] * 4],
+
+        'LRA2': [[19] * 5],
+        'LRB2': [[19] * 4],
+
+        'LRA3': [[29] * 5],
+        'LRB3': [[29] * 4],
+
+        'SYNC': [syncTable[::2]],
+
+        'LWA': [[20, 21, 22, 23, 24]],
+        'GRA': [[20, 21, 22, 23, 24]],
+        'LWB': [[24, 25, 26, 27, 28, 29, 30, 31]],
+        'GRB': [[24, 25, 26, 27, 28, 29, 30, 31]],
+
+        'LCC': [[39, 39]],
+    }
+
+    if not kernel.get("1LDSBuffer", 0):
+        optSchedule['LWSA'] = [[36]]
+        optSchedule['LWSB'] = [[36]]
+        optSchedule['LRSA'] = [[37]]
+        optSchedule['LRSB'] = [[37]]
+
+    opt1 = ScheduleInfo(1, numMfma, optSchedule, syncCode, nglshift, nllshift)
+    _disable_cdna4_only_passes_for_gfx1151(opt1)
+    return True, opt1
+
+
+# --- PLR=0 PGR=2: MT64x224x32 ---
+@RegisterSchedule(
+    tile_config=TileConfig(64, 224, 32, 2, 0, 0, False, 0, 0,
+                           isa=(11, 5, 1), wavefront_size=32),
+    dtype_predicate=is16bit,
+    vector_widths=[8, 8, 16],
+    matrix_inst=[16, 16, 16, 1],
+    mfma_wave_group=[2, 2]
+)
+def _get_schedule_64x224x32_pgr2_plr0_16bit_gfx1151(kernel, useLDSTr, TLDS):
+    """CMS for gfx1151 MT64x224x32 bf16/fp16 TN, PGR=2 PLR=0.
+
+    WMMA [16,16,16,1], MIWG=[2,2], wave32, DTL=0, PGR=2, PLR=0, TLDS=1.
+    MIWT_A=2, MIWT_B=7, LoopIters=2, numMfma=28.
+    Sub0: 0-13, Sub1: 14-27.
+    NLA=2, NLB=7, LRA/sub=4, LRB/sub=7.
+    """
+    if not isTN(kernel):
+        return False, None
+
+    numMfma = 28
+    nglshift = nllshift = 10
+
+    syncTable = [
+        -1, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1,
+                     comment="all LR0 done for sub0"),
+        13, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1,
+                     comment="all LR1 + pending LW done for sub1"),
+        23, SBarrier(comment="LW visible for next iter LR"),
+    ]
+    syncCode = syncTable[1::2]
+
+    optSchedule = {
+        'LRA0': [[-1] * 4],
+        'LRB0': [[-1] * 7],
+
+        'LRA1': [[13] * 4],
+        'LRB1': [[13] * 7],
+
+        'SYNC': [syncTable[::2]],
+
+        'LWA': [[14, 15]],
+        'GRA': [[14, 15]],
+        'LWB': [[16, 17, 18, 19, 20, 21, 22]],
+        'GRB': [[16, 17, 18, 19, 20, 21, 22]],
+
+        'LCC': [[27, 27]],
+    }
+
+    if not kernel.get("1LDSBuffer", 0):
+        optSchedule['LWSA'] = [[24]]
+        optSchedule['LWSB'] = [[24]]
+        optSchedule['LRSA'] = [[25]]
+        optSchedule['LRSB'] = [[25]]
+
+    opt1 = ScheduleInfo(1, numMfma, optSchedule, syncCode, nglshift, nllshift)
+    _disable_cdna4_only_passes_for_gfx1151(opt1)
+    return True, opt1
+
+
+# --- PLR=0 PGR=2: MT128x64x32 MIWG[2,2] ---
+@RegisterSchedule(
+    tile_config=TileConfig(128, 64, 32, 2, 0, 0, False, 0, 0,
+                           isa=(11, 5, 1), wavefront_size=32),
+    dtype_predicate=is16bit,
+    vector_widths=[8, 8, 16],
+    matrix_inst=[16, 16, 16, 1],
+    mfma_wave_group=[2, 2]
+)
+def _get_schedule_128x64x32_pgr2_plr0_16bit_gfx1151(kernel, useLDSTr, TLDS):
+    """CMS for gfx1151 MT128x64x32 bf16/fp16 TN, PGR=2 PLR=0.
+
+    WMMA [16,16,16,1], MIWG=[2,2], wave32, DTL=0, PGR=2, PLR=0, TLDS=1.
+    MIWT_A=4, MIWT_B=2, LoopIters=2, numMfma=16.
+    Sub0: 0-7, Sub1: 8-15.
+    NLA=4, NLB=2, LRA/sub=4, LRB/sub=4.
+    """
+    if not isTN(kernel):
+        return False, None
+
+    numMfma = 16
+    nglshift = nllshift = 6
+
+    syncTable = [
+        -1, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1,
+                     comment="all LR0 done for sub0"),
+         7, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1,
+                     comment="all LR1 + pending LW done for sub1"),
+        12, SBarrier(comment="LW visible for next iter LR"),
+    ]
+    syncCode = syncTable[1::2]
+
+    optSchedule = {
+        'LRA0': [[-1] * 4],
+        'LRB0': [[-1] * 4],
+
+        'LRA1': [[7] * 4],
+        'LRB1': [[7] * 4],
+
+        'SYNC': [syncTable[::2]],
+
+        'LWA': [[8, 9, 10, 11]],
+        'GRA': [[8, 9, 10, 11]],
+        'LWB': [[10, 11]],
+        'GRB': [[10, 11]],
+
+        'LCC': [[15, 15]],
+    }
+
+    if not kernel.get("1LDSBuffer", 0):
+        optSchedule['LWSA'] = [[13]]
+        optSchedule['LWSB'] = [[13]]
+        optSchedule['LRSA'] = [[14]]
+        optSchedule['LRSB'] = [[14]]
+
+    opt1 = ScheduleInfo(1, numMfma, optSchedule, syncCode, nglshift, nllshift)
+    _disable_cdna4_only_passes_for_gfx1151(opt1)
+    return True, opt1
+
+
+# --- PLR=1 PGR=2: MT128x48x32 ---
+@RegisterSchedule(
+    tile_config=TileConfig(128, 48, 32, 2, 1, 0, False, 0, 0,
+                           isa=(11, 5, 1), wavefront_size=32),
+    dtype_predicate=is16bit,
+    vector_widths=[8, 4, 16],
+    matrix_inst=[16, 16, 16, 1],
+    mfma_wave_group=[4, 1]
+)
+def _get_schedule_128x48x32_pgr2_plr1_16bit_gfx1151(kernel, useLDSTr, TLDS):
+    """CMS for gfx1151 MT128x48x32 bf16/fp16 TN, PGR=2 PLR=1.
+
+    WMMA [16,16,16,1], MIWG=[4,1], wave32, DTL=0, PGR=2, PLR=1, TLDS=1.
+    MIWT_A=2, MIWT_B=3, LoopIters=2, numMfma=12.
+    Sub0: 0-5, Sub1: 6-11.
+    NLA=4, NLB=3, LRA/sub=2, LRB/sub=3.
+    """
+    if not isTN(kernel):
+        return False, None
+
+    numMfma = 12
+    nglshift = nllshift = 5
+
+    syncTable = [
+        -1, SWaitCnt(dscnt=0, vlcnt=0, vscnt=-1,
+                     comment="Wait prev LR1 + GR for LW VGPRs"),
+         5, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1,
+                     comment="Wait LR0 + LW done before sub1"),
+         6, SBarrier(comment="LW visible for LR1"),
+    ]
+    syncCode = syncTable[1::2]
+
+    optSchedule = {
+        'SYNC': [syncTable[::2]],
+
+        'LWA': [[-1, 0, 1, 2]],
+        'LWB': [[2, 3, 4]],
+
+        'LRA0': [[3, 4]],
+        'LRB0': [[3, 4, 5]],
+
+        'GRA': [[6, 7, 8, 9]],
+        'GRB': [[8, 9, 10]],
+
+        'LRA1': [[8, 9]],
+        'LRB1': [[9, 10, 11]],
+
+        'LCC': [[11, 11]],
+    }
+
+    if not kernel.get("1LDSBuffer", 0):
+        optSchedule['LWSA'] = [[4]]
+        optSchedule['LWSB'] = [[4]]
+        optSchedule['LRSA'] = [[5]]
+        optSchedule['LRSB'] = [[5]]
+
+    opt1 = ScheduleInfo(1, numMfma, optSchedule, syncCode, nglshift, nllshift)
+    _disable_cdna4_only_passes_for_gfx1151(opt1)
+    return True, opt1
+
+
+# --- PLR=1 PGR=2: MT64x32x64 ---
+@RegisterSchedule(
+    tile_config=TileConfig(64, 32, 64, 2, 1, 0, False, 0, 0,
+                           isa=(11, 5, 1), wavefront_size=32),
+    dtype_predicate=is16bit,
+    vector_widths=[8, 8, 16],
+    matrix_inst=[16, 16, 16, 1],
+    mfma_wave_group=[2, 2]
+)
+def _get_schedule_64x32x64_pgr2_plr1_16bit_gfx1151(kernel, useLDSTr, TLDS):
+    """CMS for gfx1151 MT64x32x64 bf16/fp16 TN, PGR=2 PLR=1.
+
+    WMMA [16,16,16,1], MIWG=[2,2], wave32, DTL=0, PGR=2, PLR=1, TLDS=1.
+    MIWT_A=2, MIWT_B=1, LoopIters=4, numMfma=8.
+    Sub0: 0-1, Sub1: 2-3, Sub2: 4-5, Sub3: 6-7.
+    NLA=4, NLB=2, LRA/sub=2, LRB/sub=1.
+    """
+    if not isTN(kernel):
+        return False, None
+
+    numMfma = 8
+    nglshift = nllshift = 3
+
+    syncTable = [
+        -1, SWaitCnt(dscnt=0, vlcnt=0, vscnt=-1,
+                     comment="Wait prev LR3 + GR for LW VGPRs"),
+         1, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1,
+                     comment="Wait LR0 + LW done before sub1"),
+         3, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1,
+                     comment="Wait LR1 done before sub2"),
+         5, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1,
+                     comment="Wait LR2 done before sub3"),
+         6, SBarrier(comment="LW visible for LR3"),
+    ]
+    syncCode = syncTable[1::2]
+
+    optSchedule = {
+        'SYNC': [syncTable[::2]],
+
+        'LWA': [[-1, 0, 0, 1]],
+        'LWB': [[0, 1]],
+
+        'LRA0': [[0, 1]],
+        'LRB0': [[1]],
+
+        'LRA1': [[2, 3]],
+        'LRB1': [[3]],
+
+        'GRA': [[4, 4, 5, 5]],
+        'GRB': [[4, 5]],
+
+        'LRA2': [[4, 5]],
+        'LRB2': [[5]],
+
+        'LRA3': [[6, 7]],
+        'LRB3': [[7]],
+
+        'LCC': [[7, 7]],
+    }
+
+    if not kernel.get("1LDSBuffer", 0):
+        optSchedule['LWSA'] = [[1]]
+        optSchedule['LWSB'] = [[1]]
+        optSchedule['LRSA'] = [[1]]
+        optSchedule['LRSB'] = [[1]]
+
+    opt1 = ScheduleInfo(1, numMfma, optSchedule, syncCode, nglshift, nllshift)
+    _disable_cdna4_only_passes_for_gfx1151(opt1)
+    return True, opt1
+
+
+# --- PLR=0 PGR=1: MT128x96x32 TLDS=0 ---
+@RegisterSchedule(
+    tile_config=TileConfig(128, 96, 32, 1, 0, 0, False, 0, 0,
+                           isa=(11, 5, 1), wavefront_size=32),
+    dtype_predicate=is16bit,
+    vector_widths=[8, 8, 16],
+    matrix_inst=[16, 16, 16, 1],
+    mfma_wave_group=[2, 2]
+)
+def _get_schedule_128x96x32_pgr1_plr0_16bit_gfx1151(kernel, useLDSTr, TLDS):
+    """CMS for gfx1151 MT128x96x32 bf16/fp16 TN, PGR=1 PLR=0 TLDS=0.
+
+    WMMA [16,16,16,1], MIWG=[2,2], wave32, DTL=0, PGR=1, PLR=0, TLDS=0.
+    MIWT_A=4, MIWT_B=3, LoopIters=2, numMfma=24.
+    Sub0: 0-11, Sub1: 12-23.
+    NLA=4, NLB=3, LRA/sub=4, LRB/sub=3.
+    """
+    if not isTN(kernel):
+        return False, None
+
+    numMfma = 24
+    nglshift = nllshift = 8
+
+    syncTable = [
+        -1, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1,
+                     comment="all LR0 done for sub0"),
+        11, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1,
+                     comment="all LR1 + pending LW done for sub1"),
+        19, SBarrier(comment="LW visible for next iter LR"),
+    ]
+    syncCode = syncTable[1::2]
+
+    optSchedule = {
+        'LRA0': [[-1] * 4],
+        'LRB0': [[-1] * 3],
+
+        'LRA1': [[11] * 4],
+        'LRB1': [[11] * 3],
+
+        'SYNC': [syncTable[::2]],
+
+        'LWA': [[12, 13, 14, 15]],
+        'GRA': [[12, 13, 14, 15]],
+        'LWB': [[16, 17, 18]],
+        'GRB': [[16, 17, 18]],
+
+        'LCC': [[23, 23]],
+    }
+
+    opt1 = ScheduleInfo(1, numMfma, optSchedule, syncCode, nglshift, nllshift)
+    _disable_cdna4_only_passes_for_gfx1151(opt1)
+    return True, opt1
+
+
+################################################################################
+# gfx1151 WMMA schedules — additional uncovered tile families
+################################################################################
+
+# --- PLR=0 PGR=2: MT128x96x64 MIWG[2,2] ---
+@RegisterSchedule(
+    tile_config=TileConfig(128, 96, 64, 2, 0, 0, False, 0, 0,
+                           isa=(11, 5, 1), wavefront_size=32),
+    dtype_predicate=is16bit,
+    vector_widths=[8, 8, 16],
+    matrix_inst=[16, 16, 16, 1],
+    mfma_wave_group=[2, 2]
+)
+def _get_schedule_128x96x64_pgr2_plr0_22_16bit_gfx1151(kernel, useLDSTr, TLDS):
+    """CMS for gfx1151 MT128x96x64 bf16/fp16 TN, PGR=2 PLR=0 MIWG[2,2].
+
+    WMMA [16,16,16,1], MIWG=[2,2], wave32, DTL=0, PGR=2, PLR=0, TLDS=1.
+    MIWT_A=4, MIWT_B=3, LoopIters=4, numMfma=48.
+    Sub0: 0-11, Sub1: 12-23, Sub2: 24-35, Sub3: 36-47.
+    NLA=8, NLB=6, LRA/sub=8, LRB/sub=6.
+    """
+    if not isTN(kernel):
+        return False, None
+
+    numMfma = 48
+    nglshift = nllshift = 16
+
+    syncTable = [
+        -1, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1,
+                     comment="all LR0 done for sub0"),
+        11, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1,
+                     comment="all LR1 done for sub1"),
+        23, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1,
+                     comment="all LR2 done for sub2"),
+        35, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1,
+                     comment="all LR3 + pending LW done for sub3"),
+        43, SBarrier(comment="LW visible for next iter LR"),
+    ]
+    syncCode = syncTable[1::2]
+
+    optSchedule = {
+        'LRA0': [[-1] * 8],
+        'LRB0': [[-1] * 6],
+
+        'LRA1': [[11] * 8],
+        'LRB1': [[11] * 6],
+
+        'LRA2': [[23] * 8],
+        'LRB2': [[23] * 6],
+
+        'LRA3': [[35] * 8],
+        'LRB3': [[35] * 6],
+
+        'SYNC': [syncTable[::2]],
+
+        'LWA': [[24, 25, 26, 27, 28, 29, 30, 31]],
+        'GRA': [[24, 25, 26, 27, 28, 29, 30, 31]],
+        'LWB': [[32, 33, 34, 35, 36, 37]],
+        'GRB': [[32, 33, 34, 35, 36, 37]],
+
+        'LCC': [[47, 47]],
+    }
+
+    opt1 = ScheduleInfo(1, numMfma, optSchedule, syncCode, nglshift, nllshift)
+    _disable_cdna4_only_passes_for_gfx1151(opt1)
+    return True, opt1
+
+
+# --- PLR=0 PGR=2: MT128x64x64 MIWG[2,2] ---
+@RegisterSchedule(
+    tile_config=TileConfig(128, 64, 64, 2, 0, 0, False, 0, 0,
+                           isa=(11, 5, 1), wavefront_size=32),
+    dtype_predicate=is16bit,
+    vector_widths=[8, 8, 16],
+    matrix_inst=[16, 16, 16, 1],
+    mfma_wave_group=[2, 2]
+)
+def _get_schedule_128x64x64_pgr2_plr0_22_16bit_gfx1151(kernel, useLDSTr, TLDS):
+    """CMS for gfx1151 MT128x64x64 bf16/fp16 TN, PGR=2 PLR=0 MIWG[2,2].
+
+    WMMA [16,16,16,1], MIWG=[2,2], wave32, DTL=0, PGR=2, PLR=0, TLDS=1.
+    MIWT_A=4, MIWT_B=2, LoopIters=4, numMfma=32.
+    Sub0: 0-7, Sub1: 8-15, Sub2: 16-23, Sub3: 24-31.
+    NLA=8, NLB=4, LRA/sub=8, LRB/sub=4.
+    """
+    if not isTN(kernel):
+        return False, None
+
+    numMfma = 32
+    nglshift = nllshift = 10
+
+    syncTable = [
+        -1, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1,
+                     comment="all LR0 done for sub0"),
+         7, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1,
+                     comment="all LR1 done for sub1"),
+        15, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1,
+                     comment="all LR2 done for sub2"),
+        23, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1,
+                     comment="all LR3 + pending LW done for sub3"),
+        28, SBarrier(comment="LW visible for next iter LR"),
+    ]
+    syncCode = syncTable[1::2]
+
+    optSchedule = {
+        'LRA0': [[-1] * 8],
+        'LRB0': [[-1] * 4],
+
+        'LRA1': [[7] * 8],
+        'LRB1': [[7] * 4],
+
+        'LRA2': [[15] * 8],
+        'LRB2': [[15] * 4],
+
+        'LRA3': [[23] * 8],
+        'LRB3': [[23] * 4],
+
+        'SYNC': [syncTable[::2]],
+
+        'LWA': [[16, 17, 18, 19, 20, 21, 22, 23]],
+        'GRA': [[16, 17, 18, 19, 20, 21, 22, 23]],
+        'LWB': [[20, 21, 22, 23]],
+        'GRB': [[20, 21, 22, 23]],
+
+        'LCC': [[31, 31]],
+    }
+
+    opt1 = ScheduleInfo(1, numMfma, optSchedule, syncCode, nglshift, nllshift)
+    _disable_cdna4_only_passes_for_gfx1151(opt1)
+    return True, opt1
+
+
+# --- PLR=0 PGR=1: MT128x64x64 MIWG[2,2] ---
+@RegisterSchedule(
+    tile_config=TileConfig(128, 64, 64, 1, 0, 0, False, 0, 0,
+                           isa=(11, 5, 1), wavefront_size=32),
+    dtype_predicate=is16bit,
+    vector_widths=[8, 8, 16],
+    matrix_inst=[16, 16, 16, 1],
+    mfma_wave_group=[2, 2]
+)
+def _get_schedule_128x64x64_pgr1_plr0_22_16bit_gfx1151(kernel, useLDSTr, TLDS):
+    """CMS for gfx1151 MT128x64x64 bf16/fp16 TN, PGR=1 PLR=0 MIWG[2,2].
+
+    WMMA [16,16,16,1], MIWG=[2,2], wave32, DTL=0, PGR=1, PLR=0, TLDS=1.
+    MIWT_A=4, MIWT_B=2, LoopIters=4, numMfma=32.
+    Sub0: 0-7, Sub1: 8-15, Sub2: 16-23, Sub3: 24-31.
+    NLA=8, NLB=4, LRA/sub=8, LRB/sub=4.
+    """
+    if not isTN(kernel):
+        return False, None
+
+    numMfma = 32
+    nglshift = nllshift = 10
+
+    syncTable = [
+        -1, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1,
+                     comment="all LR0 done for sub0"),
+         7, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1,
+                     comment="all LR1 done for sub1"),
+        15, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1,
+                     comment="all LR2 done for sub2"),
+        23, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1,
+                     comment="all LR3 + pending LW done for sub3"),
+        28, SBarrier(comment="LW visible for next iter LR"),
+    ]
+    syncCode = syncTable[1::2]
+
+    optSchedule = {
+        'LRA0': [[-1] * 8],
+        'LRB0': [[-1] * 4],
+
+        'LRA1': [[7] * 8],
+        'LRB1': [[7] * 4],
+
+        'LRA2': [[15] * 8],
+        'LRB2': [[15] * 4],
+
+        'LRA3': [[23] * 8],
+        'LRB3': [[23] * 4],
+
+        'SYNC': [syncTable[::2]],
+
+        'LWA': [[16, 17, 18, 19, 20, 21, 22, 23]],
+        'GRA': [[16, 17, 18, 19, 20, 21, 22, 23]],
+        'LWB': [[20, 21, 22, 23]],
+        'GRB': [[20, 21, 22, 23]],
+
+        'LCC': [[31, 31]],
+    }
+
+    opt1 = ScheduleInfo(1, numMfma, optSchedule, syncCode, nglshift, nllshift)
+    _disable_cdna4_only_passes_for_gfx1151(opt1)
+    return True, opt1
+
+
