@@ -2284,6 +2284,56 @@ def set_pack_needed_by_from_mfma_operands(
     return result
 
 
+def verify_swaitcnt_counters(timeline: 'Timeline') -> Optional[str]:
+    """Verify that SWaitCnt counter values match the actual number of outstanding memory operations.
+
+    Counts DSLoad* instructions for dscnt and BufferLoad*/GlobalLoad* for vlcnt,
+    then checks each SWaitCnt's counter value against the actual count.
+
+    Returns an error message if a mismatch is found, None if all counters are correct.
+    Only runs if rocisa_inst is available on instructions (requires idMap).
+    """
+    from rocisa.instruction import DSLoadInstruction, GlobalReadInstruction
+
+    # Check if rocisa_inst is available
+    has_rocisa = False
+    for inst in timeline.combined_timeline:
+        if inst.rocisa_inst is not None:
+            has_rocisa = True
+            break
+    if not has_rocisa:
+        return None
+
+    # Count outstanding memory operations and verify at each SWaitCnt
+    outstanding_ds = 0  # lgkmcnt / dscnt counter
+    outstanding_vm = 0  # vmcnt / vlcnt counter
+
+    for inst in timeline.combined_timeline:
+        if isinstance(inst, LocalRead) and inst.rocisa_inst is not None:
+            if isinstance(inst.rocisa_inst, DSLoadInstruction):
+                outstanding_ds += 1
+        elif isinstance(inst, GlobalRead) and inst.rocisa_inst is not None:
+            if isinstance(inst.rocisa_inst, GlobalReadInstruction):
+                outstanding_vm += 1
+        elif isinstance(inst, SWait):
+            if inst.dscnt >= 0:
+                if inst.dscnt > outstanding_ds:
+                    return (
+                        f"SWaitCnt @ idx={inst.issued_at.vmfma_index} has dscnt={inst.dscnt} "
+                        f"but only {outstanding_ds} DS loads are outstanding."
+                    )
+                outstanding_ds = inst.dscnt
+            if inst.vlcnt >= 0:
+                if inst.vlcnt > outstanding_vm:
+                    return (
+                        f"SWaitCnt @ idx={inst.issued_at.vmfma_index} has vlcnt={inst.vlcnt} "
+                        f"but only {outstanding_vm} VM loads are outstanding."
+                    )
+                outstanding_vm = inst.vlcnt
+
+    return None
+
+
 def precompute_issue_times(instructions: list[ValidatorInstruction]) -> list[int]:
     """
     Returns a list where issue_times[i] represents the quad-cycle when instruction i starts issuing.
