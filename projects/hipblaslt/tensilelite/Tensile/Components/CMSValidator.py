@@ -3067,3 +3067,61 @@ def isValid(scheduleInfo: 'ScheduleInfo', context: dict) -> tuple[bool, str]:
     # All rules passed, considered valid.
     return True, ""
 
+
+def findValidPositions(
+    scheduleInfo: 'ScheduleInfo',
+    context: dict,
+    inst_name: str,
+    inst_issue_idx: int,
+) -> list[tuple[int, int]]:
+    """Find all vmfma indices where an instruction can be moved while keeping the schedule valid.
+
+    For each candidate vmfma index in [-1, numMfma-1], mutates the target
+    instruction's entry in scheduleInfo.optSchedule in-place, calls isValid(),
+    and restores. Collects all positions that pass and merges adjacent indices
+    into ranges.
+
+    Args:
+        scheduleInfo:   The schedule to query.
+        context:        Validation context dict (must contain "kernel", optionally "idMap"/"mfmaCode").
+        inst_name:      The schedule key of the instruction to move (e.g. "LRA0", "GRA", "PackA0").
+        inst_issue_idx: The index within that instruction's schedule list (0-based).
+
+    Returns:
+        A list of (start, end) tuples representing inclusive ranges of valid vmfma indices.
+        E.g. [(-1, 2), (5, 8)] means indices -1, 0, 1, 2, 5, 6, 7, 8 are valid.
+        An empty list means the instruction cannot be moved anywhere.
+    """
+    assert inst_name in scheduleInfo.optSchedule, f"Unknown instruction: {inst_name}"
+
+    num_code_paths = len(scheduleInfo.optSchedule[inst_name])
+
+    # Save original values across all code paths.
+    original_values = []
+    for cp in range(num_code_paths):
+        original_values.append(scheduleInfo.optSchedule[inst_name][cp][inst_issue_idx])
+
+    valid_indices = []
+    for candidate in range(-1, scheduleInfo.numMfma):
+        # Mutate in-place.
+        for cp in range(num_code_paths):
+            scheduleInfo.optSchedule[inst_name][cp][inst_issue_idx] = candidate
+
+        valid, _ = isValid(scheduleInfo, context)
+        if valid:
+            valid_indices.append(candidate)
+
+    # Restore original values.
+    for cp in range(num_code_paths):
+        scheduleInfo.optSchedule[inst_name][cp][inst_issue_idx] = original_values[cp]
+
+    # Merge adjacent indices into ranges.
+    ranges = []
+    for idx in valid_indices:
+        if ranges and idx == ranges[-1][1] + 1:
+            ranges[-1] = (ranges[-1][0], idx)
+        else:
+            ranges.append((idx, idx))
+
+    return ranges
+
