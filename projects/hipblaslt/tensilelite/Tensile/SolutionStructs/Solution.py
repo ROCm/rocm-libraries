@@ -36,7 +36,7 @@ from Tensile.AsmStoreState import VectorDataTypes
 from Tensile.Common import assignParameterWithDefault, IsaInfo, \
                     print2, printExit, printWarning, \
                     roundUp, INDEX_CHARS, IsaVersion, SemanticVersion, \
-                    roundUpToNearestMultiple
+                    roundUpToNearestMultiple, deriveWaveParams
 from Tensile.Common.DataType import DataType
 from Tensile.Common.GlobalParameters import defaultSolution, \
                                             defaultInternalSupportParams
@@ -1178,20 +1178,12 @@ class Solution(collections.abc.Mapping):
 
     if state["EnableMatrixInstruction"]:
       wavefrontSize = state.get("WavefrontSize", 64)
-      numWaves = max(1, state["NumThreads"] // wavefrontSize)
+      macrotile = [state["MacroTile0"], state["MacroTile1"]]
+      waveGroup, waveTile = deriveWaveParams(mi, state["NumThreads"], macrotile, wavefrontSize)
       if "MIWaveTile" not in state:
-        miM, miN = mi[0], mi[1]
-        wgM = int(numWaves ** 0.5)
-        while wgM > 0 and numWaves % wgM != 0:
-          wgM -= 1
-        wgN = numWaves // max(1, wgM)
-        state["MIWaveTile"] = [max(1, state["MacroTile0"] // (miM * wgM)),
-                               max(1, state["MacroTile1"] // (miN * wgN))]
+        state["MIWaveTile"] = waveTile
       if "MIWaveGroup" not in state or state["MIWaveGroup"] == [0, 0]:
-        wgM = int(numWaves ** 0.5)
-        while wgM > 0 and numWaves % wgM != 0:
-          wgM -= 1
-        state["MIWaveGroup"] = [max(1, wgM), numWaves // max(1, wgM)]
+        state["MIWaveGroup"] = waveGroup
     else:
       state.setdefault("MIWaveTile", [0, 0])
       state["MIWaveGroup"] = [0, 0]

@@ -450,7 +450,11 @@ def parseLibraryLogicData(
         return solutionObject
 
     resetTypeMismatchCollector()
-    solutions = [s for s in (solutionStateToSolution(solutionState, assembler, isaInfoMap) for solutionState in data["Solutions"]) if s is not None]
+    allSolutions = [solutionStateToSolution(solutionState, assembler, isaInfoMap) for solutionState in data["Solutions"]]
+    skipped = sum(1 for s in allSolutions if s is None)
+    if skipped:
+        printWarning(f"Skipped {skipped} solution(s) due to missing or invalid custom.config")
+    solutions = [s for s in allSolutions if s is not None]
     typeMismatches = getTypeMismatchCollector()
 
     newLibrary, _ = SolutionLibrary.MasterSolutionLibrary.FromOriginalState(

@@ -56,6 +56,8 @@ import argparse
 import os
 import sys
 
+from Tensile.Common.Utilities import deriveWaveParams
+
 
 FEATURE_FLAGS = [
     "SupportsUserArgs",
@@ -88,6 +90,7 @@ def _parse_tensile_yaml(path, kernel_name=None):
     config = {"ProblemType": problem_type}
 
     fork_params = bench.get("ForkParameters", [])
+    available_kernels = []
     for entry in fork_params:
         if not isinstance(entry, dict):
             continue
@@ -96,6 +99,7 @@ def _parse_tensile_yaml(path, kernel_name=None):
             for ck in entry["CustomKernel"]:
                 if not isinstance(ck, dict) or "name" not in ck:
                     continue
+                available_kernels.append(ck["name"])
                 if kernel_name and ck["name"] != kernel_name:
                     continue
                 config["CustomKernel"] = {
@@ -112,6 +116,10 @@ def _parse_tensile_yaml(path, kernel_name=None):
             wf_list = entry["WavefrontSize"]
             if wf_list:
                 config["WavefrontSize"] = wf_list[0]
+
+    if kernel_name and "CustomKernel" not in config:
+        print(f"WARNING: Kernel '{kernel_name}' not found in {path}. "
+              f"Available: {available_kernels or 'none'}", file=sys.stderr)
 
     return config
 
@@ -204,14 +212,7 @@ def build_custom_config_yaml(origin, config, repository=None, version="1.0.0"):
         if len(mi) >= 4 and macrotile and threads:
             lines.append("  EnableMatrixInstruction: True")
             num_threads = threads[0] * threads[1] * threads[2]
-            num_waves = max(1, num_threads // wavefront_size)
-            wgM = int(num_waves ** 0.5)
-            while wgM > 0 and num_waves % wgM != 0:
-                wgM -= 1
-            wgM = max(1, wgM)
-            wgN = num_waves // wgM
-            mi_wave_tile = [max(1, macrotile[0] // (mi[0] * wgM)),
-                            max(1, macrotile[1] // (mi[1] * wgN))]
+            _, mi_wave_tile = deriveWaveParams(mi, num_threads, macrotile, wavefront_size)
             lines.append(f"  MIWaveTile: {_fmt_yaml_list(mi_wave_tile)}")
 
     wavefront_size = config.get("WavefrontSize", 64) if config else 64
@@ -220,29 +221,32 @@ def build_custom_config_yaml(origin, config, repository=None, version="1.0.0"):
     return "\n".join(lines)
 
 
-def has_custom_config(filepath):
-    """Checks whether the file already has a custom.config in .amdgpu_metadata."""
-    in_metadata = False
-    with open(filepath) as f:
-        for line in f:
-            stripped = line.strip()
-            if stripped == ".amdgpu_metadata":
-                in_metadata = True
-                continue
-            if in_metadata and stripped == "...":
-                break
-            if in_metadata and stripped.startswith("custom.config"):
-                return True
-    return False
+def _read_asm_file(filepath):
+    """Reads an .s file once, returning all info needed by the pipeline.
 
+    Returns a dict with:
+        lines:              list of raw line strings (with newlines)
+        has_custom_config:  bool
+        insert_idx:         line index after '---' in .amdgpu_metadata (or None)
+        origin:             parent directory name
+        detected:           dict with auto-detected threads and wavefront_size
+    """
+    import yaml
 
-def inject_custom_config(filepath, config_yaml, dry_run=False):
-    """Injects the custom.config block after the --- line in .amdgpu_metadata."""
     with open(filepath, "r") as f:
         lines = f.readlines()
 
+    result = {
+        "lines": lines,
+        "has_custom_config": False,
+        "insert_idx": None,
+        "origin": os.path.basename(os.path.dirname(os.path.abspath(filepath))),
+        "detected": {},
+    }
+
     in_metadata = False
-    insert_idx = None
+    in_yaml = False
+    yaml_lines = []
 
     for i, line in enumerate(lines):
         stripped = line.strip()
@@ -250,8 +254,43 @@ def inject_custom_config(filepath, config_yaml, dry_run=False):
             in_metadata = True
             continue
         if in_metadata and stripped == "---":
-            insert_idx = i + 1
+            in_yaml = True
+            result["insert_idx"] = i + 1
+            continue
+        if in_metadata and stripped == "...":
             break
+        if in_metadata and stripped.startswith("custom.config"):
+            result["has_custom_config"] = True
+        if in_yaml:
+            yaml_lines.append(line)
+
+    if not yaml_lines:
+        return result
+
+    try:
+        metadata = yaml.safe_load("\n".join(yaml_lines))
+    except Exception:
+        return result
+
+    if not metadata:
+        return result
+
+    kernels = metadata.get("amdhsa.kernels", [])
+    if kernels:
+        k = kernels[0]
+        wgs = k.get(".reqd_workgroup_size")
+        if wgs and isinstance(wgs, list):
+            result["detected"]["threads"] = wgs
+        wf = k.get(".wavefront_size")
+        if wf:
+            result["detected"]["wavefront_size"] = int(wf)
+
+    return result
+
+
+def inject_custom_config(file_info, filepath, config_yaml, dry_run=False):
+    """Injects the custom.config block using pre-read file data."""
+    insert_idx = file_info["insert_idx"]
 
     if insert_idx is None:
         print("ERROR: No .amdgpu_metadata / --- section found in the file.",
@@ -268,6 +307,7 @@ def inject_custom_config(filepath, config_yaml, dry_run=False):
         print(f"--- at line {insert_idx + 1} of {filepath} ---")
         return True
 
+    lines = file_info["lines"]
     new_lines = lines[:insert_idx] + config_lines + lines[insert_idx:]
 
     with open(filepath, "w") as f:
@@ -275,51 +315,6 @@ def inject_custom_config(filepath, config_yaml, dry_run=False):
 
     print(f"Injected custom.config into {filepath} at line {insert_idx + 1}")
     return True
-
-
-def _detect_from_metadata(filepath):
-    """Auto-detect origin, wavefront_size, and threads from the .s file."""
-    import yaml
-
-    detected = {}
-
-    detected["origin"] = os.path.basename(os.path.dirname(os.path.abspath(filepath)))
-
-    in_metadata = False
-    yaml_lines = []
-    with open(filepath) as f:
-        for line in f:
-            stripped = line.strip()
-            if stripped == "---":
-                in_metadata = True
-                continue
-            if stripped == "...":
-                break
-            if in_metadata:
-                yaml_lines.append(line)
-
-    if not yaml_lines:
-        return detected
-
-    try:
-        metadata = yaml.safe_load("\n".join(yaml_lines))
-    except Exception:
-        return detected
-
-    if not metadata:
-        return detected
-
-    kernels = metadata.get("amdhsa.kernels", [])
-    if kernels:
-        k = kernels[0]
-        wgs = k.get(".reqd_workgroup_size")
-        if wgs and isinstance(wgs, list):
-            detected["threads"] = wgs
-        wf = k.get(".wavefront_size")
-        if wf:
-            detected["wavefront_size"] = int(wf)
-
-    return detected
 
 
 def main():
@@ -352,15 +347,16 @@ def main():
     if not filepath.endswith(".s"):
         print(f"WARNING: {filepath} does not end with .s", file=sys.stderr)
 
-    if has_custom_config(filepath):
+    file_info = _read_asm_file(filepath)
+
+    if file_info["has_custom_config"]:
         print(f"ERROR: {filepath} already has a custom.config block.", file=sys.stderr)
         print("Remove the existing block first if you want to regenerate it.",
               file=sys.stderr)
         sys.exit(1)
 
-    detected = _detect_from_metadata(filepath)
-
-    origin = args.origin or detected.get("origin")
+    detected = file_info["detected"]
+    origin = args.origin or file_info["origin"]
     if not origin:
         print("ERROR: Could not detect origin. Pass --origin explicitly.", file=sys.stderr)
         sys.exit(1)
@@ -379,8 +375,8 @@ def main():
             config["WavefrontSize"] = detected["wavefront_size"]
 
     auto_info = []
-    if not args.origin and "origin" in detected:
-        auto_info.append(f"origin={detected['origin']}")
+    if not args.origin and file_info["origin"]:
+        auto_info.append(f"origin={file_info['origin']}")
     if "wavefront_size" in detected:
         auto_info.append(f"wavefront_size={detected['wavefront_size']}")
     if "threads" in detected:
@@ -395,7 +391,7 @@ def main():
         version=args.version,
     )
 
-    if not inject_custom_config(filepath, config_yaml, dry_run=args.dry_run):
+    if not inject_custom_config(file_info, filepath, config_yaml, dry_run=args.dry_run):
         sys.exit(1)
 
 

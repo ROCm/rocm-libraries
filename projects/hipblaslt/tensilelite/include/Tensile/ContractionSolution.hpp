@@ -201,16 +201,6 @@ namespace TensileLite
     std::ostream& operator<<(std::ostream& stream, const CustomWorkspaceType& t);
     std::istream& operator>>(std::istream& stream, CustomWorkspaceType& t);
 
-    struct CustomKernelMetadata
-    {
-        std::string                        version;
-        std::string                        contentHash;
-        std::string                        sourceOrigin;
-        std::string                        sourceCommit;
-        std::map<std::string, std::string> scheduleParams;
-        std::map<std::string, bool>        features;
-    };
-
     struct CustomKernel
     {
         std::string name;
@@ -221,7 +211,6 @@ namespace TensileLite
         CustomWorkspaceType workspaceType;
         size_t workspaceSizePerElemC;
         size_t workspaceSizePerElemBias;
-        CustomKernelMetadata metadata;
     };
 
     template <typename TAct>

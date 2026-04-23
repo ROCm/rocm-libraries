@@ -395,6 +395,30 @@ def choose_multiplier(d, N, p):
         shPost -=1
     return mhigh, shPost, l
 
+def deriveWaveParams(mi, num_threads, macrotile, wavefront_size=64):
+    """Derives MIWaveGroup and MIWaveTile from matrix-instruction geometry.
+
+    Args:
+        mi: MatrixInstruction list, at least [miM, miN, ...].
+        num_threads: Total thread count (product of workgroup dimensions).
+        macrotile: [MT0, MT1] or [MT0, MT1, depthU].
+        wavefront_size: Wavefront width (default 64).
+
+    Returns:
+        (wave_group, wave_tile) where each is a two-element list [M, N].
+    """
+    num_waves = max(1, num_threads // wavefront_size)
+    wgM = math.isqrt(num_waves)
+    while wgM > 0 and num_waves % wgM != 0:
+        wgM -= 1
+    wgM = max(1, wgM)
+    wgN = num_waves // wgM
+    wave_group = [wgM, wgN]
+    wave_tile = [max(1, macrotile[0] // (mi[0] * wgM)),
+                 max(1, macrotile[1] // (mi[1] * wgN))]
+    return wave_group, wave_tile
+
+
 def wmmaV3InputVgprLayout(wmma: Sequence[int], dtypeBitWidth: Optional[int] = None) -> Tuple[int]:
     # wmmaV3InputVgprLayout: (numReadsUnroll, numVecTile, numVecUnroll, NumElementPerRead)
     wmma = tuple(wmma)

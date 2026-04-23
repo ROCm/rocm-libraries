@@ -136,12 +136,6 @@ namespace TensileLite
         {
         };
 
-        template <typename IO>
-        struct CustomMappingTraits<std::map<std::string, bool>, IO>
-            : public DefaultCustomMappingTraits<std::map<std::string, bool>, IO, false, true>
-        {
-        };
-
         template <typename Seq, typename IO, bool Flow>
         struct DefaultSequenceTraits
         {

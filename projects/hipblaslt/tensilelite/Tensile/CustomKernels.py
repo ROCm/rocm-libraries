@@ -85,7 +85,7 @@ _ACTIVATION_ARG_INDEX = {
     "activationDelta": 3,
 }
 
-_METADATA_ONLY_KEYS = {"Source", "Version", "Features"}
+_PASSTHROUGH_KEYS = {"ProblemType", "InternalSupportParams"}
 
 def isCustomKernelConfig(config):
     if "CustomKernel" in config and config["CustomKernel"]["name"]:
@@ -134,9 +134,12 @@ def getCustomKernelConfigAndAssembly(name, directory=CUSTOM_KERNEL_PATH):
 def readCustomKernelConfig(name, directory=CUSTOM_KERNEL_PATH):
     rawConfig, _ = getCustomKernelConfigAndAssembly(name, directory)
     try:
-        return yaml.safe_load(rawConfig)["custom.config"]
+        parsed = yaml.safe_load(rawConfig)
     except yaml.scanner.ScannerError as e:
-        raise RuntimeError("Failed to read configuration for custom kernel: {0}\nDetails:\n{1}".format(name, e))
+        raise RuntimeError(f"Failed to parse YAML for custom kernel '{name}': {e}")
+    if not isinstance(parsed, dict) or "custom.config" not in parsed:
+        raise RuntimeError(f"Custom kernel '{name}' has no custom.config in its .amdgpu_metadata")
+    return parsed["custom.config"]
 
 def _readFullYaml(name, directory=CUSTOM_KERNEL_PATH):
     """Read and return the full parsed YAML (all sections) from a custom kernel .s file."""
@@ -296,11 +299,14 @@ def getCustomKernelConfig(
     validParameters.update(newMIValidParameters)
 
     for k, v in kernelConfig.items():
-        if k != "ProblemType" and k not in _METADATA_ONLY_KEYS:
+        if k in _PASSTHROUGH_KEYS:
+            continue
+        if k in validParameters:
             checkParametersAreValid((k, [v]), validParameters)
 
-    for k in _METADATA_ONLY_KEYS:
-        kernelConfig.pop(k, None)
+    metadata_keys = [k for k in kernelConfig if k not in validParameters and k not in _PASSTHROUGH_KEYS]
+    for k in metadata_keys:
+        kernelConfig.pop(k)
 
     kernelConfig["KernelLanguage"] = "Assembly"
 
@@ -318,93 +324,8 @@ def getCustomKernelConfig(
 
 
 ################################################################################
-# Embedded metadata read/validate functions
-#
-# All custom kernels carry metadata in a custom.config block inside their
-# .amdgpu_metadata YAML section.  Tensile-generated kernels have always had
-# this; external kernels (aiter, ck, rocroller, wave) were migrated to the
-# same pattern so a single code-path handles both.
+# Embedded metadata validation functions
 ################################################################################
-
-_FEATURE_FLAGS = (
-    "SupportsUserArgs",
-    "SupportsBias",
-    "SupportsActivation",
-    "SupportsScaleAlpha",
-    "SupportsGSU",
-)
-
-def _extractISA(filepath):
-    """Extracts the target ISA from an .s file's .amdgcn_target or -mcpu= flag."""
-    with open(filepath) as f:
-        for line in f:
-            m = re.search(r'\.amdgcn_target\s+"amdgcn-amd-amdhsa--(\w+)"', line)
-            if m:
-                return m.group(1)
-            m = re.search(r'-mcpu=(\w+)', line)
-            if m:
-                return m.group(1)
-            if line.startswith(".text") or line.startswith(".section"):
-                break
-    return None
-
-def _inferFeatures(name, config):
-    """Derives feature flags from kernel name and custom.config fields.
-
-    Used for Tensile-generated kernels whose custom.config carries ProblemType
-    instead of explicit Feature flags.
-    """
-    features = {}
-    features["SupportsUserArgs"] = "UserArgs" in name
-
-    pt = config.get("ProblemType", {}) if config else {}
-    features["SupportsBias"] = bool(pt.get("UseBias", 0)) or "Bias" in name
-    features["SupportsActivation"] = bool(pt.get("Activation", False))
-    features["SupportsScaleAlpha"] = bool(pt.get("UseScaleAlphaVec", 0)) or "SAV" in name
-    features["SupportsGSU"] = (
-        name.startswith("CustomGSUs_") or "GSUM" in name
-        or bool(config.get("GlobalSplitU", 0))
-    )
-    return features
-
-def readCustomKernelMetadata(name, directory=CUSTOM_KERNEL_PATH):
-    """Reads metadata from a kernel's embedded custom.config block.
-
-    For external kernels the config has explicit Source, Version, and Features.
-    For Tensile kernels the Source is inferred from the directory and Features
-    are derived from ProblemType / naming conventions.
-
-    Returns a dict with keys: Source, Version, Features, ISA, and the raw
-    custom.config.  Returns None if no custom.config exists.
-    """
-    try:
-        config = readCustomKernelConfig(name, directory)
-    except (RuntimeError, KeyError, TypeError):
-        return None
-
-    filepath = getCustomKernelFilepath(name, directory)
-    kernelDir = os.path.basename(os.path.dirname(os.path.abspath(filepath)))
-
-    metadata = {}
-
-    if "Source" in config:
-        metadata["Source"] = config["Source"]
-    else:
-        metadata["Source"] = {"Origin": kernelDir}
-
-    metadata["Version"] = config.get("Version", "1.0.0")
-
-    if "Features" in config:
-        metadata["Features"] = config["Features"]
-    else:
-        metadata["Features"] = _inferFeatures(name, config)
-
-    isa = _extractISA(filepath)
-    if isa:
-        metadata["Target"] = {"ISA": isa}
-
-    metadata["_config"] = config
-    return metadata
 
 _ADD_CONFIG_HINT = (
     "To add metadata to an external kernel, run:\n"
