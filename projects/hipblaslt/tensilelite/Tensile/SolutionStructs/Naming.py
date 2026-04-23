@@ -88,7 +88,13 @@ def getKeyNoInternalArgs(state, splitGSU: bool) -> str:
   for k in _INTERNAL_ARGS:
     s[k] = backups[k]
 
-  return key
+  # Include codeObjectFile and DeviceNames in the key to prevent
+  # over-deduplication across different code object files / devices.
+  # The old code returned a Solution object whose __hash__ included these
+  # fields, so kernels targeting different .co files were kept separate.
+  cof = s.get("codeObjectFile", "")
+  dn = str(s.get("DeviceNames", ""))
+  return key + cof + dn
 
 
 @lru_cache(maxsize=None)
