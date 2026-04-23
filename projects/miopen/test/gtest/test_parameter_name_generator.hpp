@@ -164,8 +164,8 @@ template <typename T>
     requires Container<T> && PrintableElement<T> && std::is_move_constructible_v<T> &&
              (!StdString<T>)
 [[maybe_unused]] auto MakeNamedParameterCollectionValues(const std::string& name,
-                                               const std::ranges::range auto& collection,
-                                               const std::string& separator = " ")
+                                                         const std::ranges::range auto& collection,
+                                                         const std::string& separator = " ")
 {
     std::vector<NamedContainer<T>> v;
 
@@ -182,7 +182,7 @@ template <typename T>
 template <typename T>
     requires(NotContainer<T> && Printable<T> && std::is_move_constructible_v<T>) || StdString<T>
 [[maybe_unused]] auto MakeNamedParameterCollectionValues(const std::string& name,
-                                               const std::ranges::range auto& collection)
+                                                         const std::ranges::range auto& collection)
 {
     std::vector<NamedParameter<T>> v;
 
@@ -206,8 +206,8 @@ template <typename T>
 //      GetRangeAsString(std::vector<int>{1, 2, 3, 4}, "x") returns "1x2x3x4"
 //      GetRangeAsString(std::vector<float>{1.1, 2.2, 3.3, 4.4}, ",") returns "1p1_2p2_3p3_4p4"
 //
-[[maybe_unused]] static std::string GetRangeAsString(const std::ranges::range auto& r,
-                                                     std::string_view separator = " ")
+[[maybe_unused]] std::string GetRangeAsString(const std::ranges::range auto& r,
+                                              std::string_view separator = " ")
 {
     std::string str;
 
@@ -234,8 +234,8 @@ template <typename T>
 }
 
 template <typename ParamsInfo, std::size_t... Is>
-static std::string GetParamNamesString(const ParamsInfo& inputParamsInfo,
-                                       std::index_sequence<Is...>)
+[[maybe_unused]] std::string GetParamNamesString(const ParamsInfo& inputParamsInfo,
+                                                 std::index_sequence<Is...>)
 {
     std::stringstream ss;
     std::string str;
@@ -256,7 +256,7 @@ static std::string GetParamNamesString(const ParamsInfo& inputParamsInfo,
 template <typename TestCase>
 struct DefaultTestNameGenerator
 {
-    std::string operator()(const auto& info)
+    [[maybe_unused]] std::string operator()(const auto& info)
     {
         return GetParamNamesString(info, std::make_index_sequence<std::tuple_size_v<TestCase>>{});
     }
