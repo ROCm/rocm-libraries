@@ -177372,8 +177372,7 @@ __hip_cuid_189e97bb64f986de:
 ---
 custom.config:
   Source:
-    Origin: composable_kernel
-    Repository: https://github.com/ROCm/composable_kernel
+    Origin: ck
   Version: 1.0.0
   Features:
     SupportsUserArgs: false
@@ -177393,6 +177392,9 @@ custom.config:
     TransposeB: 0
     UseBeta: True
     Batched: True
+    UseBias: 0
+    Activation: False
+    UseScaleAlphaVec: 0
   CustomKernel:
     args: [ { type: address, semantic: AddressB },
             { type: address, semantic: AddressA },
@@ -177415,7 +177417,9 @@ custom.config:
     macrotile: [256, 256, 64]
     threads: [256, 1, 1]
     grid: [TilesXYBatch, One, One]
-  MatrixInstruction: [16, 16, 16, 1]
+  MatrixInstruction: [32, 32, 8, 1]
+  EnableMatrixInstruction: True
+  MIWaveTile: [4, 4]
   WavefrontSize: 64
 amdhsa.kernels:
   - .agpr_count:     0

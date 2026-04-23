@@ -53,7 +53,6 @@ Examples:
 """
 
 import argparse
-import json
 import os
 import sys
 
@@ -117,6 +116,34 @@ def _parse_tensile_yaml(path, kernel_name=None):
     return config
 
 
+def _fmt_yaml_list(values):
+    """Format a list as a YAML inline sequence without quoting strings."""
+    return "[" + ", ".join(str(v) for v in values) + "]"
+
+
+def _fmt_yaml_args(args, indent=4):
+    """Format an args list as multi-line YAML flow mappings.
+
+    Produces output like:
+        args: [ { type: address, semantic: AddressD, padding: 8 },
+                { type: address, semantic: AddressA, padding: 8 } ]
+    """
+    if not args:
+        return "args: []"
+    prefix = " " * indent + "args: "
+    continuation = " " * len(prefix)
+    formatted = []
+    for arg in args:
+        pairs = ", ".join(f"{k}: {v}" for k, v in arg.items())
+        formatted.append("{ " + pairs + " }")
+    if len(formatted) == 1:
+        return prefix + "[ " + formatted[0] + " ]"
+    first = prefix + "[ " + formatted[0] + ","
+    middle = [continuation + "  " + f + "," for f in formatted[1:-1]]
+    last = continuation + "  " + formatted[-1] + " ]"
+    return "\n".join([first] + middle + [last])
+
+
 def build_custom_config_yaml(origin, config, repository=None, version="1.0.0"):
     """Builds the custom.config YAML block string.
 
@@ -159,17 +186,17 @@ def build_custom_config_yaml(origin, config, repository=None, version="1.0.0"):
         ck = config["CustomKernel"]
         lines.append("  CustomKernel:")
         if "args" in ck:
-            lines.append(f"    args: {json.dumps(ck['args'])}")
+            lines.append(_fmt_yaml_args(ck["args"]))
         if "macrotile" in ck:
-            lines.append(f"    macrotile: {list(ck['macrotile'])}")
+            lines.append(f"    macrotile: {_fmt_yaml_list(ck['macrotile'])}")
         if "threads" in ck:
-            lines.append(f"    threads: {list(ck['threads'])}")
+            lines.append(f"    threads: {_fmt_yaml_list(ck['threads'])}")
         if "grid" in ck:
-            lines.append(f"    grid: {list(ck['grid'])}")
+            lines.append(f"    grid: {_fmt_yaml_list(ck['grid'])}")
 
     if config and "MatrixInstruction" in config:
         mi = config["MatrixInstruction"]
-        lines.append(f"  MatrixInstruction: {list(mi)}")
+        lines.append(f"  MatrixInstruction: {_fmt_yaml_list(mi)}")
 
         macrotile = config.get("CustomKernel", {}).get("macrotile")
         threads = config.get("CustomKernel", {}).get("threads")
@@ -185,7 +212,7 @@ def build_custom_config_yaml(origin, config, repository=None, version="1.0.0"):
             wgN = num_waves // wgM
             mi_wave_tile = [max(1, macrotile[0] // (mi[0] * wgM)),
                             max(1, macrotile[1] // (mi[1] * wgN))]
-            lines.append(f"  MIWaveTile: {mi_wave_tile}")
+            lines.append(f"  MIWaveTile: {_fmt_yaml_list(mi_wave_tile)}")
 
     wavefront_size = config.get("WavefrontSize", 64) if config else 64
     lines.append(f"  WavefrontSize: {wavefront_size}")

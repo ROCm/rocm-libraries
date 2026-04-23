@@ -1959,12 +1959,12 @@ custom.config:
     args: [ { type: address, semantic: AddressB },
             { type: address, semantic: AddressA },
             { type: address, semantic: AddressD },
-            { type: uint32,  semantic: SizeFree1 },
-            { type: uint32,  semantic: Padding },
-            { type: uint32,  semantic: SizeFree0 },
-            { type: uint32,  semantic: Padding },
-            { type: uint32,  semantic: SizeSum },
-            { type: uint32,  semantic: Padding } ]
+            { type: uint32, semantic: SizeFree1 },
+            { type: uint32, semantic: Padding },
+            { type: uint32, semantic: SizeFree0 },
+            { type: uint32, semantic: Padding },
+            { type: uint32, semantic: SizeSum },
+            { type: uint32, semantic: Padding } ]
     macrotile: [256, 256, 64]
     threads: [256, 4, 1]
     grid: [TilesY, TilesX, One]

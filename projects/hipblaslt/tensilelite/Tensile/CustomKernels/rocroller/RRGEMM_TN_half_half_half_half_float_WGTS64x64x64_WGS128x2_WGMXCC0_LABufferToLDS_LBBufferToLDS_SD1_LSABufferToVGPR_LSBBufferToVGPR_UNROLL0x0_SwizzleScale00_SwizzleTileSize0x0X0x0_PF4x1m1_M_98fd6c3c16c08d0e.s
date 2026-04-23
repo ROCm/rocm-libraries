@@ -80511,7 +80511,6 @@ s_endpgm  // End of RRGEMM_TN_half_half_half_half_float_WGTS64x64x64_WGS128x2_WG
 custom.config:
   Source:
     Origin: rocroller
-    Repository: https://github.com/ROCm/rocroller
   Version: 1.0.0
   Features:
     SupportsUserArgs: false

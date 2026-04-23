@@ -58,6 +58,8 @@ BenchmarkProblems:
             macrotile: [256, 256, 64]
             threads: [256, 1, 1]
             grid: [TilesXYBatch, One, One]
+        - MatrixInstruction:
+          - [32, 32, 8, 1, 1, 4, 4, 2, 2]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:

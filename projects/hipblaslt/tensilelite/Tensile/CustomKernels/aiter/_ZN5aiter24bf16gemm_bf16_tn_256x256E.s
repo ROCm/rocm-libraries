@@ -2229,25 +2229,25 @@ custom.config:
     Activation: False
     UseScaleAlphaVec: 0
   CustomKernel:
-    args: [ { type: address, semantic: AddressD,      padding: 8  },
-            { type: address, semantic: AddressC,      padding: 8  },
-            { type: address, semantic: AddressB,      padding: 8  },
-            { type: address, semantic: AddressA,      padding: 8  },
-            { type: float32, semantic: Alpha,         padding: 12 },
-            { type: float32, semantic: Beta,          padding: 12 },
-            { type: uint32,  semantic: StrideD0Bytes, padding: 12 },
-            { type: uint32,  semantic: StrideD1,      padding: 12 },
-            { type: uint32,  semantic: StrideC0Bytes, padding: 12 },
-            { type: uint32,  semantic: StrideC1,      padding: 12 },
-            { type: uint32,  semantic: StrideB0Bytes, padding: 12 },
-            { type: uint32,  semantic: StrideB1,      padding: 12 },
-            { type: uint32,  semantic: StrideA0Bytes, padding: 12 },
-            { type: uint32,  semantic: StrideA1,      padding: 12 },
-            { type: uint32,  semantic: SizeFree1,     padding: 12 },
-            { type: uint32,  semantic: SizeFree0,     padding: 12 },
-            { type: uint32,  semantic: SizeSum,       padding: 12 },
-            { type: uint32,  semantic: SplitK,        padding: 12 },
-            { type: uint32,  semantic: OutputBF16,    padding: 12 } ]
+    args: [ { type: address, semantic: AddressD, padding: 8 },
+            { type: address, semantic: AddressC, padding: 8 },
+            { type: address, semantic: AddressB, padding: 8 },
+            { type: address, semantic: AddressA, padding: 8 },
+            { type: float32, semantic: Alpha, padding: 12 },
+            { type: float32, semantic: Beta, padding: 12 },
+            { type: uint32, semantic: StrideD0Bytes, padding: 12 },
+            { type: uint32, semantic: StrideD1, padding: 12 },
+            { type: uint32, semantic: StrideC0Bytes, padding: 12 },
+            { type: uint32, semantic: StrideC1, padding: 12 },
+            { type: uint32, semantic: StrideB0Bytes, padding: 12 },
+            { type: uint32, semantic: StrideB1, padding: 12 },
+            { type: uint32, semantic: StrideA0Bytes, padding: 12 },
+            { type: uint32, semantic: StrideA1, padding: 12 },
+            { type: uint32, semantic: SizeFree1, padding: 12 },
+            { type: uint32, semantic: SizeFree0, padding: 12 },
+            { type: uint32, semantic: SizeSum, padding: 12 },
+            { type: uint32, semantic: SplitK, padding: 12 },
+            { type: uint32, semantic: OutputBF16, padding: 12 } ]
     macrotile: [256, 256, 64]
     threads: [256, 1, 1]
     grid: [TilesX, TilesY, One]
