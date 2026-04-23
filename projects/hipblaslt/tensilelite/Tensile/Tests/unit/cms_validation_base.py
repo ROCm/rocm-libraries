@@ -28,6 +28,7 @@ from test_CustomSchedule import create_base_kernel, update_kernel, ScheduleInfo
 from Tensile.Components.CMSValidator import (
     create_unified_timeline, ValidatorPassContext, validate_timeline,
 )
+from cms_test_utils import make_mock_id_map, make_mock_mfma_code
 
 
 class CMSValidationTestBase:
@@ -132,10 +133,13 @@ class CMSValidationTestBase:
         
         sched = ScheduleInfo(numCodePaths, self.num_vmfma, optSchedule, syncCode, nglshift, nllshift, nllZeroDscnt, mfmaReorder, snopCode)
 
+        mock_id_map = make_mock_id_map(sched, self.kernel)
+        mock_mfma_code = make_mock_mfma_code(self.num_vmfma)
+
         timeline = None
         if self.needs_timeline:
-            timeline = create_unified_timeline(sched, self.kernel, codePathIdx)
-        status, message = self.validation_function(sched, {"kernel": self.kernel}, codePathIdx, timeline=timeline)
+            timeline = create_unified_timeline(sched, self.kernel, codePathIdx, id_map=mock_id_map, mfma_code=mock_mfma_code)
+        status, message = self.validation_function(sched, {"kernel": self.kernel, "idMap": mock_id_map, "mfmaCode": mock_mfma_code}, codePathIdx, timeline=timeline)
         
         if expected_message is None:
             assert status, f"Schedule should have passed validation but did not. {message}"

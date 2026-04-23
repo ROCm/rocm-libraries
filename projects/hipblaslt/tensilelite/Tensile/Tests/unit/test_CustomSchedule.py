@@ -26,6 +26,16 @@ from unittest.mock import MagicMock
 from Tensile.Components.CustomSchedule import hasCustomSchedule, ScheduleInfo
 from Tensile.Components.CMSValidator import isValid, SchedulePosition, ValidatorPass
 from Tensile.Common import IsaVersion
+from cms_test_utils import make_mock_id_map, make_mock_mfma_code
+
+
+def _make_context(kernel, schedule_info):
+    """Build a validation context dict with mock idMap and mfmaCode."""
+    return {
+        "kernel": kernel,
+        "idMap": make_mock_id_map(schedule_info, kernel),
+        "mfmaCode": make_mock_mfma_code(schedule_info.numMfma),
+    }
 
 # Helper to create a mock data type
 def _mock_dtype(is_16bit=False, is_8bit=False, num_bytes=4):
@@ -139,7 +149,7 @@ class TestCustomScheduleBF16:
         assert isinstance(schedule_info, ScheduleInfo)
         assert schedule_info.numCodePaths == 2
         assert schedule_info.numMfma == 128
-        valid, message = isValid(schedule_info, {"kernel" : kernel})
+        valid, message = isValid(schedule_info, _make_context(kernel, schedule_info))
         assert valid, message
         if TN:
             assert 'PackA0' not in schedule_info.optSchedule
@@ -181,7 +191,7 @@ class TestCustomScheduleBF16:
         assert isinstance(schedule_info, ScheduleInfo)
         assert schedule_info.numCodePaths == 1
         assert schedule_info.numMfma == 64
-        valid, message = isValid(schedule_info, {"kernel" : kernel})
+        valid, message = isValid(schedule_info, _make_context(kernel, schedule_info))
         assert valid, message
 
     @pytest.mark.parametrize(
@@ -216,7 +226,7 @@ class TestCustomScheduleBF16:
         assert isinstance(schedule_info, ScheduleInfo)
         assert schedule_info.numCodePaths == 2
         assert schedule_info.numMfma == 48
-        valid, message = isValid(schedule_info, {"kernel" : kernel})
+        valid, message = isValid(schedule_info, _make_context(kernel, schedule_info))
         assert valid, message
 
     @pytest.mark.parametrize(
@@ -250,7 +260,7 @@ class TestCustomScheduleBF16:
         assert has_schedule
         assert isinstance(schedule_info, ScheduleInfo)
         assert schedule_info.numMfma == 48
-        valid, message = isValid(schedule_info, {"kernel" : kernel})
+        valid, message = isValid(schedule_info, _make_context(kernel, schedule_info))
         assert valid, message
 
     @pytest.mark.parametrize("transA, transB", [(False, False), (False, True), (True, False)])
@@ -279,7 +289,7 @@ class TestCustomScheduleBF16:
         assert schedule_info.numMfma == 96
         if NN:
             assert kernel["SwapGlobalReadOrder"]
-        valid, message = isValid(schedule_info, {"kernel" : kernel})
+        valid, message = isValid(schedule_info, _make_context(kernel, schedule_info))
         assert valid, message
 
     @pytest.mark.parametrize(
@@ -312,7 +322,7 @@ class TestCustomScheduleBF16:
         assert isinstance(schedule_info, ScheduleInfo)
         assert schedule_info.numCodePaths == 2
         assert schedule_info.numMfma == 96
-        valid, message = isValid(schedule_info, {"kernel" : kernel})
+        valid, message = isValid(schedule_info, _make_context(kernel, schedule_info))
         assert valid, message
 
     @pytest.mark.parametrize("transA, transB", [(True, False), (False, False), (False, True)])
@@ -337,7 +347,7 @@ class TestCustomScheduleBF16:
         assert isinstance(schedule_info, ScheduleInfo)
         assert schedule_info.numCodePaths == 2
         assert schedule_info.numMfma == 80
-        valid, message = isValid(schedule_info, {"kernel" : kernel})
+        valid, message = isValid(schedule_info, _make_context(kernel, schedule_info))
         assert valid, message
 
     @pytest.mark.parametrize("transA, transB", [(False, False), (False, True), (True, False)])
@@ -368,7 +378,7 @@ class TestCustomScheduleBF16:
         # SwapGlobalReadOrder is set for NN/NT branches, not required for TN.
         if not (transA and (not transB)):
             assert kernel["SwapGlobalReadOrder"]
-        valid, message = isValid(schedule_info, {"kernel" : kernel})
+        valid, message = isValid(schedule_info, _make_context(kernel, schedule_info))
         assert valid, message
 
     @pytest.mark.parametrize("transA, transB", [(True, False), (False, True), (False, False)])
@@ -393,7 +403,7 @@ class TestCustomScheduleBF16:
         assert isinstance(schedule_info, ScheduleInfo)
         assert schedule_info.numCodePaths == 1
         assert schedule_info.numMfma == 120
-        valid, message = isValid(schedule_info, {"kernel" : kernel})
+        valid, message = isValid(schedule_info, _make_context(kernel, schedule_info))
         assert valid, message
 
     @pytest.mark.parametrize("transA, transB", [(True, False), (False, False)])
@@ -418,7 +428,7 @@ class TestCustomScheduleBF16:
         assert isinstance(schedule_info, ScheduleInfo)
         assert schedule_info.numCodePaths == 1
         assert schedule_info.numMfma == 104
-        valid, message = isValid(schedule_info, {"kernel" : kernel})
+        valid, message = isValid(schedule_info, _make_context(kernel, schedule_info))
         assert valid, message
 
     @pytest.mark.parametrize(
@@ -450,7 +460,7 @@ class TestCustomScheduleBF16:
         assert isinstance(schedule_info, ScheduleInfo)
         assert schedule_info.numCodePaths == 2
         assert schedule_info.numMfma == 112
-        valid, message = isValid(schedule_info, {"kernel" : kernel})
+        valid, message = isValid(schedule_info, _make_context(kernel, schedule_info))
         assert valid, message
 
     @pytest.mark.parametrize(
@@ -482,7 +492,7 @@ class TestCustomScheduleBF16:
         assert isinstance(schedule_info, ScheduleInfo)
         assert schedule_info.numCodePaths == 1
         assert schedule_info.numMfma == 120
-        valid, message = isValid(schedule_info, {"kernel" : kernel})
+        valid, message = isValid(schedule_info, _make_context(kernel, schedule_info))
         assert valid, message
 
     @pytest.mark.parametrize(
@@ -523,7 +533,7 @@ class TestCustomScheduleBF16:
         assert schedule_info.numCodePaths == (2 if NT else 1)
         assert schedule_info.numMfma == 56
         assert bool(kernel.get("SwapGlobalReadOrder", False)) == NT
-        valid, message = isValid(schedule_info, {"kernel" : kernel})
+        valid, message = isValid(schedule_info, _make_context(kernel, schedule_info))
         assert valid, message
 
     @pytest.mark.parametrize(
@@ -555,7 +565,7 @@ class TestCustomScheduleBF16:
         assert isinstance(schedule_info, ScheduleInfo)
         assert schedule_info.numCodePaths == 2
         assert schedule_info.numMfma == 112
-        valid, message = isValid(schedule_info, {"kernel" : kernel})
+        valid, message = isValid(schedule_info, _make_context(kernel, schedule_info))
         assert valid, message
 
     @pytest.mark.parametrize(
@@ -588,7 +598,7 @@ class TestCustomScheduleBF16:
         assert schedule_info.numCodePaths == 2
         assert schedule_info.numMfma == 120
         assert kernel["SwapGlobalReadOrder"]
-        valid, message = isValid(schedule_info, {"kernel" : kernel})
+        valid, message = isValid(schedule_info, _make_context(kernel, schedule_info))
         assert valid, message
 
     @pytest.mark.parametrize(
@@ -624,7 +634,7 @@ class TestCustomScheduleBF16:
         assert isinstance(schedule_info, ScheduleInfo)
         assert schedule_info.numCodePaths == (1 if NT else 2)
         assert schedule_info.numMfma == 120
-        valid, message = isValid(schedule_info, {"kernel" : kernel})
+        valid, message = isValid(schedule_info, _make_context(kernel, schedule_info))
         assert valid, message
 
     @pytest.mark.parametrize(
@@ -656,7 +666,7 @@ class TestCustomScheduleBF16:
         assert isinstance(schedule_info, ScheduleInfo)
         assert schedule_info.numCodePaths == 1
         assert schedule_info.numMfma == 104
-        valid, message = isValid(schedule_info, {"kernel" : kernel})
+        valid, message = isValid(schedule_info, _make_context(kernel, schedule_info))
         assert valid, message
 
     @pytest.mark.parametrize(
@@ -687,7 +697,7 @@ class TestCustomScheduleBF16:
         assert isinstance(schedule_info, ScheduleInfo)
         assert schedule_info.numCodePaths == 2
         assert schedule_info.numMfma == 56
-        valid, message = isValid(schedule_info, {"kernel" : kernel})
+        valid, message = isValid(schedule_info, _make_context(kernel, schedule_info))
         assert valid, message
 
     @pytest.mark.parametrize(
@@ -723,7 +733,7 @@ class TestCustomScheduleBF16:
         assert isinstance(schedule_info, ScheduleInfo)
         assert schedule_info.numCodePaths == code_paths
         assert schedule_info.numMfma == TestCustomScheduleBF16.get_num_mfma(kernel)
-        valid, message = isValid(schedule_info, {"kernel" : kernel})
+        valid, message = isValid(schedule_info, _make_context(kernel, schedule_info))
         assert valid, message
 
     def test_schedule_128x256x64_16bit(self):
@@ -748,7 +758,7 @@ class TestCustomScheduleBF16:
         assert isinstance(schedule_info, ScheduleInfo)
         assert schedule_info.numCodePaths == 2
         assert schedule_info.numMfma == 64
-        valid, message = isValid(schedule_info, {"kernel": kernel})
+        valid, message = isValid(schedule_info, _make_context(kernel, schedule_info))
         assert valid, message
 
     @pytest.mark.parametrize(
@@ -778,7 +788,7 @@ class TestCustomScheduleBF16:
         assert isinstance(schedule_info, ScheduleInfo)
         assert schedule_info.numCodePaths == 2
         assert schedule_info.numMfma == TestCustomScheduleBF16.get_num_mfma(kernel)
-        valid, message = isValid(schedule_info, {"kernel" : kernel})
+        valid, message = isValid(schedule_info, _make_context(kernel, schedule_info))
         assert valid, message
 
     @pytest.mark.parametrize(
@@ -808,7 +818,7 @@ class TestCustomScheduleBF16:
         assert isinstance(schedule_info, ScheduleInfo)
         assert schedule_info.numCodePaths == 2
         assert schedule_info.numMfma == 140
-        valid, message = isValid(schedule_info, {"kernel" : kernel})
+        valid, message = isValid(schedule_info, _make_context(kernel, schedule_info))
         assert valid, message
 
 class TestCustomScheduleTF32:
@@ -849,7 +859,7 @@ class TestCustomScheduleTF32:
         assert schedule_info.numCodePaths == 2
         assert schedule_info.numMfma == 144
         assert kernel["UsePLRPack"]
-        valid, message = isValid(schedule_info, {"kernel": kernel})
+        valid, message = isValid(schedule_info, _make_context(kernel, schedule_info))
         assert valid, message
 
     def test_schedule_128x192x32_TF32(self):
@@ -875,7 +885,7 @@ class TestCustomScheduleTF32:
         assert schedule_info.numCodePaths == 2
         assert schedule_info.numMfma == 72
         assert kernel["UsePLRPack"]
-        valid, message = isValid(schedule_info, {"kernel": kernel})
+        valid, message = isValid(schedule_info, _make_context(kernel, schedule_info))
         assert valid, message
 
     def test_schedule_192x128x32_TF32(self):
@@ -901,7 +911,7 @@ class TestCustomScheduleTF32:
         assert schedule_info.numCodePaths == 2
         assert schedule_info.numMfma == 72
         assert kernel["UsePLRPack"]
-        valid, message = isValid(schedule_info, {"kernel": kernel})
+        valid, message = isValid(schedule_info, _make_context(kernel, schedule_info))
         assert valid, message
 
     @pytest.mark.parametrize(
@@ -939,7 +949,7 @@ class TestCustomScheduleTF32:
         assert schedule_info.numCodePaths == 2
         assert schedule_info.numMfma == 192
         assert kernel["UsePLRPack"]
-        valid, message = isValid(schedule_info, {"kernel": kernel})
+        valid, message = isValid(schedule_info, _make_context(kernel, schedule_info))
         assert valid, message
 
     @pytest.mark.parametrize(
@@ -976,7 +986,7 @@ class TestCustomScheduleTF32:
         assert kernel["UsePLRPack"]
         if transA == False and transB == False:
             assert kernel["UseMFMAF32XEmulation"]
-        valid, message = isValid(schedule_info, {"kernel": kernel})
+        valid, message = isValid(schedule_info, _make_context(kernel, schedule_info))
         assert valid, message
 
     def test_schedule_128x256x32_TF32(self):
@@ -1002,7 +1012,7 @@ class TestCustomScheduleTF32:
         assert schedule_info.numCodePaths == 2
         assert schedule_info.numMfma == 96
         assert kernel["UsePLRPack"]
-        valid, message = isValid(schedule_info, {"kernel": kernel})
+        valid, message = isValid(schedule_info, _make_context(kernel, schedule_info))
         assert valid, message
 
     @pytest.mark.parametrize(
@@ -1048,7 +1058,7 @@ class TestCustomScheduleTF32:
                    (1 if mi[0] == 16 else 2)   # two sub-iterations with mi32
         )
         assert schedule_info.numMfma == numMfma
-        valid, message = isValid(schedule_info, {"kernel" : kernel})
+        valid, message = isValid(schedule_info, _make_context(kernel, schedule_info))
         assert valid, message
 
     @pytest.mark.parametrize(
@@ -1086,7 +1096,7 @@ class TestCustomScheduleTF32:
                     2   # two sub-iterations due to DepthU=64
         )
         assert schedule_info.numMfma == numMfma
-        valid, message = isValid(schedule_info, {"kernel" : kernel})
+        valid, message = isValid(schedule_info, _make_context(kernel, schedule_info))
         assert valid, message
 
     @pytest.mark.parametrize(
@@ -1123,7 +1133,7 @@ class TestCustomScheduleTF32:
         assert isinstance(schedule_info, ScheduleInfo)
         assert schedule_info.numCodePaths == 2
         assert schedule_info.numMfma == TestCustomScheduleTF32.get_num_mfma(kernel)
-        valid, message = isValid(schedule_info, {"kernel" : kernel})
+        valid, message = isValid(schedule_info, _make_context(kernel, schedule_info))
         assert valid, message
 
     @pytest.mark.parametrize(
@@ -1162,7 +1172,7 @@ class TestCustomScheduleTF32:
                     2   # two sub-iterations due to DepthU=64
         )
         assert schedule_info.numMfma == numMfma
-        valid, message = isValid(schedule_info, {"kernel" : kernel})
+        valid, message = isValid(schedule_info, _make_context(kernel, schedule_info))
         assert valid, message
 
 class TestCustomScheduleValidation:
@@ -1173,7 +1183,7 @@ class TestCustomScheduleValidation:
 
         # Without disabling, the non-ascending schedule fails on ascending order.
         si = ScheduleInfo(1, None, invalid_schedule, None, None, None, None)
-        status, message = isValid(si, {"kernel": kernel})
+        status, message = isValid(si, _make_context(kernel, si))
         assert status == False
         assert "Non-descending-order" in message
 
@@ -1184,7 +1194,7 @@ class TestCustomScheduleValidation:
         for p in ValidatorPass:
             if p != ValidatorPass.VERIFY_CORRECT_NUMBER_OF_INSTRUCTIONS:
                 si.disableValidationPass(p, reason="Not relevant to this test")
-        status, message = isValid(si, {"kernel": kernel})
+        status, message = isValid(si, _make_context(kernel, si))
         # The ascending-order error is gone; the schedule passes the remaining enabled check.
         assert "Non-descending-order" not in message
         assert status == True
@@ -1248,7 +1258,7 @@ class TestCustomScheduleValidation:
         kernel = create_base_kernel()
         si = ScheduleInfo(1, 0, {}, None, None, None, None)
         si.disableValidation("not supported yet")
-        status, message = isValid(si, {"kernel": kernel})
+        status, message = isValid(si, _make_context(kernel, si))
         assert status == True
         assert message == ""
 
@@ -1464,7 +1474,7 @@ class TestCustomScheduleGfx1151:
         })
         has, info = hasCustomSchedule(k)
         assert has
-        valid, msg = isValid(info, {"kernel": k})
+        valid, msg = isValid(info, _make_context(k, info))
         assert valid, f"MT{MT0}x{MT1}x{DU}: isValid said: {msg}"
 
     @staticmethod

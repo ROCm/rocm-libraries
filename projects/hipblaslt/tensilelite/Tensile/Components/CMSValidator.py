@@ -249,17 +249,7 @@ NO_LOCAL_LOAD_LOOP = "NLL"
 PACK_GROUP_SIZE_TF32 = 24        # 4 CVT0 + 16 middle + 4 CVT1
 PACK_GROUP_SIZE_TF32_4X4 = 10    # 4 CVT0 + 2 MFMA + 4 CVT1
 
-# --- TF32 Pack Index Ranges (within a group) ---
-# Regular TF32 (groups of 24)
-TF32_CVT0_END = 4                # Indices 0..3 are CVT0
-TF32_MIDDLE_16_START = 4         # Indices 4..19 are middle-16
-TF32_MIDDLE_16_END = 20          # (exclusive)
-# TF32_CVT1 occupies indices 20..23
-
-# 4x4 MFMA TF32 (groups of 10)
-TF32_4X4_MFMA_START = 4          # Indices 4..5 are 4x4 MFMAs
-TF32_4X4_MFMA_END = 6            # (exclusive)
-# CVT0: 0..3, CVT1: 6..9
+    # TF32 Pack Index Range constants removed — type resolution via idMap replaces positional arithmetic
 
 # --- Quad-Cycle Timing (CDNA 4 ISA section 7.6) ---
 QUAD_CYCLES_CVT_BEFORE_MFMA = 2          # CVT packs need 2 quad-cycles before MFMA can use result
@@ -436,9 +426,9 @@ class SwapPack(Pack):
 class MFMAPack(Pack, MFMA):
     """A v_mfma_f32_4x4x4_16b_bf16 instruction used in TF32 4x4 emulation pack groups.
 
-    These appear at indices TF32_4X4_MFMA_START..TF32_4X4_MFMA_END within each group
-    of PACK_GROUP_SIZE_TF32_4X4. They are real MFMA instructions but participate in
-    the pack dependency chain (CVT0 -> MFMAPack -> CVT1).
+    Identified from idMap via resolve_pack_type() (isinstance MFMAInstruction).
+    They are real MFMA instructions but participate in the pack dependency
+    chain (CVT0 -> MFMAPack -> CVT1).
 
     Inherits from both Pack and MFMA:
     - isinstance(x, Pack) is True — works with pack gathering, filtering, type hints
@@ -846,8 +836,8 @@ def create_unified_timeline(
     schedule_info: 'ScheduleInfo',
     kernel: 'Solution',
     code_path: int,
-    id_map: Optional[dict] = None,
-    mfma_code: Optional[list] = None,
+    id_map: dict,
+    mfma_code: list,
 ) -> 'Timeline':
     """Create a single Timeline with all instruction types.
 
@@ -856,10 +846,8 @@ def create_unified_timeline(
         kernel:         Kernel configuration dict.
         code_path:      Which code path to build the timeline for.
         id_map:         Maps schedule keys to lists of rocisa instruction objects.
-                        When provided, each ValidatorInstruction gets a rocisa_inst reference.
         mfma_code:      Flat list of MFMA rocisa instruction objects in execution order
-                        (already reordered by mfmaReorder). When provided, MFMA
-                        ValidatorInstructions get rocisa_inst references.
+                        (already reordered by mfmaReorder).
     """
     available_names = set(schedule_info.optSchedule.keys())
     names_to_add = [n for n in ALL_INSTRUCTION_NAMES if n in available_names]
@@ -868,21 +856,9 @@ def create_unified_timeline(
 
 class Timeline:
     def __init__(self, instruction_names_to_add: list[str], code_path: int, schedule_info: 'ScheduleInfo', kernel: 'Solution',
-                 id_map: Optional[dict] = None, mfma_code: Optional[list] = None):
+                 id_map: dict, mfma_code: list):
         """
         Create a timeline from the provided schedule_info which contains only the instructions inside `instruction_names_to_add`.
-        Organized as a list of lists indexed by vmfma_index + 1.
-
-        The +1 is required in order to handle the special case of idx=-1, which is at timeline[0].
-        idx=-1 is special case that occurs BEFORE the first VMFMA but AFTER the last VMFMA.
-
-        Multiple timelines are created under the hood:
-        1. The previous main loop iteration (iteration N-1).
-        2. The main loop (iteration N).
-        3. The No Global load loop (iteration N+1)
-        4. The No Local load loop (iteration N+2)
-
-        Two main loop iterations are created to properly validate cross-iteration effects within the mainloop, especially GRs which start in one iteration and complete in another.
 
         Args:
             instruction_names_to_add:   The list of instruction names to add to the timeline.
@@ -1030,71 +1006,33 @@ class Timeline:
                     self._insert(idx_vmfma, GRInc, {"name": name, "rocisa_inst": _get_rocisa(name, idx_grinc)}, kernel)
             elif name.startswith("GRA") or name.startswith("GRB"):
                 global_reads = schedule_get(name, code_path, schedule_info)
-
-                if self.id_map and name in self.id_map:
-                    # idMap-driven: inspect each instruction's type to decide if it's a load or pointer op
-                    idmap_items = self.id_map[name]
-                    for idx_GR, idx_vmfma in enumerate(global_reads):
-                        assert idx_vmfma >= -1, f"Code path {code_path}: GlobalRead {name} at index {idx_GR} is not valid. Must be >= -1."
-                        ri = idmap_items[idx_GR] if idx_GR < len(idmap_items) else None
-                        if ri is not None and not is_gr_load(ri):
-                            continue  # pointer setup (SMovB32/SAddU32), not an actual load
-                        self._insert(idx_vmfma, GlobalRead, {"name": name, "swap_global_read_order": swap_global_read_order, "rocisa_inst": ri}, kernel)
-                else:
-                    # Fallback: even/odd hack when idMap is not available
+                idmap_items = self.id_map[name]
+                if kernel["DirectToLds"]:
                     assert len(global_reads) % 2 == 0, f"Code path {code_path}: {name} has an odd number of indices. Must be even if DirectToLds is True."
-                    for idx_GR, idx_vmfma in enumerate(global_reads):
-                        assert idx_vmfma >= -1, f"Code path {code_path}: GlobalRead {name} at index {idx_GR} is not valid. Must be >= -1."
-                        if idx_GR % 2 == 0:
-                            continue
-                        self._insert(idx_vmfma, GlobalRead, {"name": name, "swap_global_read_order": swap_global_read_order}, kernel)
+                for idx_GR, idx_vmfma in enumerate(global_reads):
+                    assert idx_vmfma >= -1, f"Code path {code_path}: GlobalRead {name} at index {idx_GR} is not valid. Must be >= -1."
+                    ri = idmap_items[idx_GR] if idx_GR < len(idmap_items) else None
+                    if ri is not None and not is_gr_load(ri):
+                        continue  # pointer setup (SMovB32/SAddU32), not an actual load
+                    self._insert(idx_vmfma, GlobalRead, {"name": name, "swap_global_read_order": swap_global_read_order, "rocisa_inst": ri}, kernel)
             elif name.startswith("Pack"):
                 packs = schedule_get(name, code_path, schedule_info)
+                idmap_items = self.id_map[name]
+                groups = detect_pack_groups(idmap_items)
+                idx_to_cls: dict[int, tuple[type, Optional[int]]] = {}
+                for group in groups:
+                    gidx = group["group_index"]
+                    for entry_idx, cls, label in group["entries"]:
+                        idx_to_cls[entry_idx] = (cls, gidx)
 
-                if self.id_map and name in self.id_map:
-                    # idMap-driven type resolution: determine pack type from actual rocisa instruction
-                    idmap_items = self.id_map[name]
-                    groups = detect_pack_groups(idmap_items)
-                    # Build a flat index -> (cls, group_idx) map from the group structure
-                    idx_to_cls: dict[int, tuple[type, Optional[int]]] = {}
-                    for group in groups:
-                        gidx = group["group_index"]
-                        for entry_idx, cls, label in group["entries"]:
-                            idx_to_cls[entry_idx] = (cls, gidx)
-
-                    for idx_pack, idx_vmfma in enumerate(packs):
-                        assert idx_vmfma >= -1, f"Code path {code_path}: Pack {name} at index {idx_pack} is not valid. Must be >= -1."
-                        ri = idmap_items[idx_pack] if idx_pack < len(idmap_items) else None
-                        pack_cls, group_idx = idx_to_cls.get(idx_pack, (Pack, None))
-                        pack_kwargs = {"name": name, "issue_index": idx_pack, "rocisa_inst": ri}
-                        if group_idx is not None:
-                            pack_kwargs["group_index"] = group_idx
-                        self._insert(idx_vmfma, pack_cls, pack_kwargs, kernel)
-                else:
-                    # Fallback: positional logic when idMap is not available (unit tests)
-                    n_swaps = _compute_swap_pack_count(kernel, name) if is_4x4mfma_tf32 else 0
-                    for idx_pack, idx_vmfma in enumerate(packs):
-                        assert idx_vmfma >= -1, f"Code path {code_path}: Pack {name} at index {idx_pack} is not valid. Must be >= -1."
-                        if is_4x4mfma_tf32:
-                            if idx_pack < n_swaps:
-                                self._insert(idx_vmfma, SwapPack, {"name": name, "issue_index": idx_pack, "group_index": None}, kernel)
-                            else:
-                                adjusted_idx = idx_pack - n_swaps
-                                idx_in_group = adjusted_idx % PACK_GROUP_SIZE_TF32_4X4
-                                group_idx = adjusted_idx // PACK_GROUP_SIZE_TF32_4X4
-                                if TF32_4X4_MFMA_START <= idx_in_group < TF32_4X4_MFMA_END:
-                                    self._insert(idx_vmfma, MFMAPack, {"name": name, "issue_index": idx_pack, "group_index": group_idx}, kernel)
-                                else:
-                                    self._insert(idx_vmfma, CVTPack, {"name": name, "issue_index": idx_pack, "group_index": group_idx}, kernel)
-                        elif is_tf32_emulation:
-                            idx_in_group = idx_pack % PACK_GROUP_SIZE_TF32
-                            group_idx = idx_pack // PACK_GROUP_SIZE_TF32
-                            if TF32_MIDDLE_16_START <= idx_in_group < TF32_MIDDLE_16_END:
-                                self._insert(idx_vmfma, MiddlePack, {"name": name, "issue_index": idx_pack, "group_index": group_idx}, kernel)
-                            else:
-                                self._insert(idx_vmfma, CVTPack, {"name": name, "issue_index": idx_pack, "group_index": group_idx}, kernel)
-                        else:
-                            self._insert(idx_vmfma, Pack, {"name": name, "issue_index": idx_pack}, kernel)
+                for idx_pack, idx_vmfma in enumerate(packs):
+                    assert idx_vmfma >= -1, f"Code path {code_path}: Pack {name} at index {idx_pack} is not valid. Must be >= -1."
+                    ri = idmap_items[idx_pack] if idx_pack < len(idmap_items) else None
+                    pack_cls, group_idx = idx_to_cls.get(idx_pack, (Pack, None))
+                    pack_kwargs = {"name": name, "issue_index": idx_pack, "rocisa_inst": ri}
+                    if group_idx is not None:
+                        pack_kwargs["group_index"] = group_idx
+                    self._insert(idx_vmfma, pack_cls, pack_kwargs, kernel)
             else:
                 raise NotImplementedError(f"Instruction {name} not implemented")
 
@@ -1785,24 +1723,6 @@ def _handle_min_pack_quad_cycles(packs: list[Pack]) -> None:
             pack.min_quad_cycles_before_result_used = QUAD_CYCLES_CVT_BEFORE_MFMA
         # All other packs have no timing constraints
 
-def _compute_swap_pack_count(kernel: 'Solution', pack_name: str) -> int:
-    """
-    Return number of swap packs for this side. Formula: 4 * (vw - 1).
-
-    SwapPacks (VSwapB32) are only emitted by transposeLRVregs when the
-    operand needs LDS transpose (TLUA for A, TLUB for B). Without
-    transpose, wider local reads don't need register swapping regardless
-    of VectorWidth.
-    """
-    is_a = pack_name.startswith("PackA")
-    tlu_key = "TLUA" if is_a else "TLUB"
-    needs_transpose = kernel["ProblemType"][tlu_key]
-    if not needs_transpose:
-        return 0
-    vw = kernel["VectorWidthA" if is_a else "VectorWidthB"]
-    assert vw in (1, 2, 4), f"Unsupported VectorWidth {vw} for {pack_name}. Must be 1, 2, or 4."
-    return 4 * (vw - 1)
-
 def _compute_swap_register_pairs(vw: int, total_regs: int) -> list[tuple[int, int]]:
     """Compute the (src_reg, dst_reg) pairs for each VSwapB32 instruction, in issue order.
 
@@ -1945,6 +1865,9 @@ def _hook_up_packs_f32(packs: list[Pack], all_middle_16_packs: list['MiddlePack'
     and handles pair constraints for middle-16 packs.
     The needed_by field is set separately by _set_pack_needed_by.
     """
+    if not local_reads or not packs:
+        return
+
     # Sort by index in the list of pack instructions rather than by the mfma_index they are placed at.
     # This is necessary to handle inter-pack dependencies.
     packs = sorted(packs, key=lambda x: x.issue_index)
@@ -2041,6 +1964,9 @@ def _hook_up_packs_f32_mfma(packs: list[Pack], local_reads: list[LocalRead], vw:
     only on the 2 specific LRs that loaded its register pair, and each CVT0 pack depends
     on the specific swaps (or LRs) that produced its input registers.
     """
+    if not local_reads or not packs:
+        return
+
     # Sort by index in the list of pack instructions rather than by the mfma_index they are placed at.
     # This is necessary to handle inter-pack dependencies.
     packs = sorted(packs, key=lambda x: x.issue_index)
@@ -2054,6 +1980,8 @@ def _hook_up_packs_f32_mfma(packs: list[Pack], local_reads: list[LocalRead], vw:
     for pack in regular_packs:
         pack_groups_map[pack.group_index].append(pack)
     n_pack_groups = len(pack_groups_map)
+    if n_pack_groups == 0:
+        return
 
     # Determine the register-to-LR mapping.
     # With VW > 1 (swap packs present), TF32EmuInterleaveTreg is active and registers
@@ -2065,7 +1993,9 @@ def _hook_up_packs_f32_mfma(packs: list[Pack], local_reads: list[LocalRead], vw:
         reg_to_lr_map = _build_reg_to_lr_map(vw, n_lrs)
         reg_to_lr = lambda reg: reg_to_lr_map[reg]
     else:
-        vgprs_per_local_read = VGPRS_PER_CONVERSION_GROUP * n_pack_groups // n_lrs
+        vgprs_per_local_read = VGPRS_PER_CONVERSION_GROUP * n_pack_groups // n_lrs if n_lrs > 0 else 1
+        if vgprs_per_local_read == 0:
+            vgprs_per_local_read = 1
         reg_to_lr = lambda reg: reg // vgprs_per_local_read
 
     # Build fine-grained swap dependencies
@@ -3057,12 +2987,6 @@ def verify_correct_number_of_instructions(schedule_info: 'ScheduleInfo', context
     """
     Verify that the number of instructions in the schedule is correct for a single code path.
     """
-    if "idMap" not in context:
-        # NOTE: Only skipping because the idMap is hard to construct in testing, but will always be present
-        #       when actually generating the CMS kernel.
-        printWarning("idMap not found in context. Skipping CMS validation for correct number of instructions.")
-        return True, ""
-
     for instruction_name in schedule_info.optSchedule.keys():
         schedule = schedule_get(instruction_name, code_path, schedule_info)
 
@@ -3192,8 +3116,8 @@ def isValid(scheduleInfo: 'ScheduleInfo', context: dict) -> tuple[bool, str]:
 
         timeline = create_unified_timeline(
             scheduleInfo, kernel, code_path,
-            id_map=context.get("idMap"),
-            mfma_code=context.get("mfmaCode"),
+            id_map=context["idMap"],
+            mfma_code=context["mfmaCode"],
         )
 
         for pass_id, add_constraints in TIMELINE_PASSES.items():

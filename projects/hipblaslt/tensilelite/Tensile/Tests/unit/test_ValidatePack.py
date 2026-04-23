@@ -32,6 +32,7 @@ from Tensile.Components.CMSValidator import (
 )
 from Tensile.Components.CustomSchedule import ScheduleInfo
 from cms_validation_base import CMSValidationTestBase
+from cms_test_utils import make_mock_id_map, make_mock_mfma_code
 
 class TestValidatePackBF16(CMSValidationTestBase):
     """
@@ -1409,19 +1410,19 @@ class TestValidatePackTF32MFMA4x4x4MultipleTiles(CMSValidationTestBase):
                 92, 93, 94, 95],
         )
 
-        valid, message = isValid(schedule_info, {"kernel": kernel})
+        valid, message = isValid(schedule_info, {"kernel": kernel, "idMap": make_mock_id_map(schedule_info, kernel), "mfmaCode": make_mock_mfma_code(schedule_info.numMfma)})
         assert valid  # Schedule previously failed, now passes.
 
         # Check it fails where it's expected to.
         schedule_info.optSchedule["PackA0"] = [[
-            20, 20, 21, 21, 
-            23, 23, 
+            20, 20, 21, 21,
+            23, 23,
             28, 28, 28, 28,
 
             37, 37, 37, 37,
-            40, 40, 
+            40, 40,
             41, 41, 41, 41]]
-        valid, message = isValid(schedule_info, {"kernel": kernel})
+        valid, message = isValid(schedule_info, {"kernel": kernel, "idMap": make_mock_id_map(schedule_info, kernel), "mfmaCode": make_mock_mfma_code(schedule_info.numMfma)})
         assert not valid
         assert message == "Code path 0: PackA0 @ idx=37 issued too late, must be issued before MFMA @ idx=36."
 
