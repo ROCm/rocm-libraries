@@ -1,6 +1,7 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
+import os
 import sys
 import types
 
@@ -77,36 +78,71 @@ def _import_rocisa():
     return _rocisa
 
 
-_rocisa = _import_rocisa()
+# ---------------------------------------------------------------------------
+# Backend dispatch
+# ---------------------------------------------------------------------------
+# ``ROCISA_BACKEND`` selects which implementation answers ``import rocisa``:
+#   - unset / anything else -> legacy nanobind bindings in ``_rocisa`` (default)
+#   - "logical"              -> logicalIR adaptor shim under
+#                               shared/stinkytofu/python_module/ir_adaptor
+#
+# The adapter path can be overridden with ``ROCISA_LOGICAL_IR_PATH``; if not
+# set we compute a path relative to this file so the common in-tree layout
+# "Just Works".  When loading succeeds we rewire ``sys.modules["rocisa"]``
+# (and every ``rocisa.<submodule>``) to point at the adapter, so existing
+# ``from rocisa.instruction import BufferLoadB128`` etc. transparently pick
+# up the shim.
+#
+# Design note: the switch is decided once at import time.  The eventual
+# runtime trigger (per-ISA dispatch based on ``[12, 5, 0]``) will flip the
+# env var before any KernelWriter is imported; doing it after-the-fact is
+# undefined because many KernelWriter callsites do ``from rocisa import X``
+# which binds the specific symbol at their import time.
 
-# Reorder-safe equivalent of `from ._rocisa import *`: binding the extension's
-# public API here keeps the DLL load confined to _import_rocisa() above.
-_all = getattr(_rocisa, "__all__", None)
-_public = (
-    list(_all)
-    if _all is not None
-    else [_n for _n in dir(_rocisa) if not _n.startswith("_")]
-)
-globals().update({_n: getattr(_rocisa, _n) for _n in _public})
-del _all, _public
+_BACKEND = os.environ.get("ROCISA_BACKEND", "").strip().lower()
 
-# Register nanobind submodules under the rocisa.* namespace so that
-# `from rocisa.enum import X` and `import rocisa.instruction as ri` work.
-for _name, _obj in vars(_rocisa).items():
-    if isinstance(_obj, types.ModuleType) and not _name.startswith("_"):
-        sys.modules.setdefault(f"rocisa.{_name}", _obj)
+def _load_logical_adapter() -> bool:
+    """Try to install the stinkytofu/IR adapter as the ``rocisa`` module.
 
-# Staleness check: only active in source builds.
-# Pre-built packages (wheels, apt) lack _build_info.py — the import is
-# silently skipped. Catching ImportError (not just ModuleNotFoundError)
-# because Python 3.10 raises ImportError for missing relative submodules.
-# The intentional staleness ImportError is raised outside the try/except
-# so it is never swallowed.
-_bi = None
-try:
-    from . import _build_info as _bi
-except ImportError:
-    pass  # Pre-built package — no source tree, skip check
+    Returns True iff we successfully rewired sys.modules; on any failure
+    we fall back to the nanobind bindings silently (the caller decides
+    whether that is acceptable).
+    """
+
+    override = os.environ.get("ROCISA_LOGICAL_IR_PATH")
+    if override:
+        adapter_parent = os.path.abspath(override)
+    else:
+        # this file: .../projects/hipblaslt/tensilelite/rocisa/rocisa/__init__.py
+        # target  : .../shared/stinkytofu/python_module/ir_adaptor
+        here = os.path.dirname(os.path.abspath(__file__))
+        # go up 5 levels: rocisa/ -> rocisa/ -> tensilelite/ -> hipblaslt/ -> projects/ -> repo_root
+        repo_root = os.path.abspath(os.path.join(here, "..", "..", "..", "..", ".."))
+        adapter_parent = os.path.join(repo_root, "shared", "stinkytofu", "python_module")
+
+    if not os.path.isdir(os.path.join(adapter_parent, "ir_adaptor")):
+        return False
+
+    if adapter_parent not in sys.path:
+        sys.path.insert(0, adapter_parent)
+
+    try:
+        import ir_adaptor as _adapter  # noqa: F401  (the adapter package)
+    except Exception:
+        return False
+
+    # Install the adapter as the ``rocisa`` package itself, and each of
+    # its submodules as ``rocisa.<name>``. Note: we replace the *current*
+    # partially-initialised rocisa entry so that any `from rocisa import X`
+    # executed after this call sees the adapter's X, not ``_rocisa``'s.
+    sys.modules["rocisa"] = _adapter
+    for _name, _obj in vars(_adapter).items():
+        if isinstance(_obj, types.ModuleType) and _obj.__name__.startswith("ir_adaptor."):
+            short = _obj.__name__.split(".", 1)[1]
+            sys.modules[f"rocisa.{short}"] = _obj
+
+    return True
+
 
 def _find_stale_sources(so_path, source_roots, build_dir):
     """Return source files newer than so_path, excluding files under build_dir.
@@ -127,37 +163,76 @@ def _find_stale_sources(so_path, source_roots, build_dir):
     return stale
 
 
-if _bi is not None:
-    from pathlib import Path
+if _BACKEND == "logical" and _load_logical_adapter():
+    # Adapter is now installed as ``rocisa``. Nothing more to do in this
+    # file - every subsequent ``from rocisa... import ...`` resolves
+    # through sys.modules["rocisa"] (= the adapter package).
+    pass
+else:
+    # Default path: original nanobind bindings (Windows-safe import).
+    _rocisa = _import_rocisa()
 
-    _so = Path(_rocisa.__file__)
-    # Scan rocisa sources and, while stinkytofu is compiled into _rocisa.so,
-    # stinkytofu sources too. STINKYTOFU_SOURCE_ROOT is removed once rocisa
-    # and stinkytofu are loaded independently.
-    # Both roots are populated by CMake; an empty one signals a malformed
-    # _build_info.py. Warn (rather than scan Path("") == the CWD) and skip it,
-    # so a regression surfaces instead of silently disabling the check.
-    _roots = []
-    for _name, _root in (("rocisa", _bi.SOURCE_ROOT), ("stinkytofu", _bi.STINKYTOFU_SOURCE_ROOT)):
-        if _root:
-            _roots.append(Path(_root))
-        else:
-            import warnings
+    # Reorder-safe equivalent of `from ._rocisa import *`: binding the
+    # extension's public API here keeps the DLL load confined to
+    # _import_rocisa() above.
+    _all = getattr(_rocisa, "__all__", None)
+    _public = (
+        list(_all)
+        if _all is not None
+        else [_n for _n in dir(_rocisa) if not _n.startswith("_")]
+    )
+    globals().update({_n: getattr(_rocisa, _n) for _n in _public})
+    del _all, _public
 
-            warnings.warn(
-                f"rocisa staleness check: {_name} source root is unset in "
-                f"_build_info.py; skipping it. Rebuild with: invoke rocisa",
-                stacklevel=2,
+    # Register nanobind submodules under the rocisa.* namespace so that
+    # `from rocisa.enum import X` and `import rocisa.instruction as ri` work.
+    for _name, _obj in vars(_rocisa).items():
+        if isinstance(_obj, types.ModuleType) and not _name.startswith("_"):
+            sys.modules.setdefault(f"rocisa.{_name}", _obj)
+
+    # Staleness check: only active in source builds.
+    # Pre-built packages (wheels, apt) lack _build_info.py — the import is
+    # silently skipped. Catching ImportError (not just ModuleNotFoundError)
+    # because Python 3.10 raises ImportError for missing relative submodules.
+    # The intentional staleness ImportError is raised outside the try/except
+    # so it is never swallowed.
+    _bi = None
+    try:
+        from . import _build_info as _bi
+    except ImportError:
+        pass  # Pre-built package — no source tree, skip check
+
+    if _bi is not None:
+        from pathlib import Path
+
+        _so = Path(_rocisa.__file__)
+        # Scan rocisa sources and, while stinkytofu is compiled into _rocisa.so,
+        # stinkytofu sources too. STINKYTOFU_SOURCE_ROOT is removed once rocisa
+        # and stinkytofu are loaded independently.
+        # Both roots are populated by CMake; an empty one signals a malformed
+        # _build_info.py. Warn (rather than scan Path("") == the CWD) and skip it,
+        # so a regression surfaces instead of silently disabling the check.
+        _roots = []
+        for _name, _root in (("rocisa", _bi.SOURCE_ROOT), ("stinkytofu", _bi.STINKYTOFU_SOURCE_ROOT)):
+            if _root:
+                _roots.append(Path(_root))
+            else:
+                import warnings
+
+                warnings.warn(
+                    f"rocisa staleness check: {_name} source root is unset in "
+                    f"_build_info.py; skipping it. Rebuild with: invoke rocisa",
+                    stacklevel=2,
+                )
+        _stale = _find_stale_sources(_so, _roots, _bi.BUILD_DIR)
+        if _stale:
+            _preview = _stale[:3] + (["..."] if len(_stale) > 3 else [])
+            raise ImportError(
+                "rocisa C++ sources are newer than the built _rocisa.so — bindings are stale.\n"
+                f"  Modified: {', '.join(_preview)}\n"
+                "  Rebuild:  invoke rocisa"
             )
-    _stale = _find_stale_sources(_so, _roots, _bi.BUILD_DIR)
-    if _stale:
-        _preview = _stale[:3] + (["..."] if len(_stale) > 3 else [])
-        raise ImportError(
-            "rocisa C++ sources are newer than the built _rocisa.so — bindings are stale.\n"
-            f"  Modified: {', '.join(_preview)}\n"
-            "  Rebuild:  invoke rocisa"
-        )
-    del _bi, _so, _stale, _roots, _name, _root, Path
+        del _bi, _so, _stale, _roots, _name, _root, Path
 
 
 def hasStinkyTofuBackend() -> bool:
