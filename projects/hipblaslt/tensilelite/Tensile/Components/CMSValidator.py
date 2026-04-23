@@ -79,6 +79,99 @@ class ValidatorPass(Enum):
     ADD_GR_FINISH_BEFORE_LR_CONSTRAINTS = auto()
 
 
+class ValidationConcern(Enum):
+    """Abstract correctness properties the validator must check.
+
+    Each concern is a unit of coverage tracking — if isValid returns True,
+    every required concern was checked by at least one rule.
+    """
+    # Universal (any ISA)
+    INSTRUCTION_ORDERING = auto()
+    SCHEDULE_COMPLETENESS = auto()
+    # Data readiness
+    LR_DATA_READY = auto()
+    PACK_DATA_READY = auto()
+    # LDS coherence
+    LDS_WRITE_AFTER_READ = auto()
+    LDS_READ_AFTER_WRITE = auto()
+    # DTL=0 specific
+    LW_ORDERING = auto()
+    GR_VGPR_READY = auto()
+    # Scalar safety
+    SCALAR_REGISTER_SAFETY = auto()
+    # Timing
+    QUAD_CYCLE_TIMING = auto()
+
+
+# All concerns that kernels on a given ISA can require.
+ISA_CONCERN_CATALOG: dict[tuple, set[ValidationConcern]] = {
+    (9, 5, 0): {    # CDNA 4 (gfx950)
+        ValidationConcern.INSTRUCTION_ORDERING,
+        ValidationConcern.SCHEDULE_COMPLETENESS,
+        ValidationConcern.LR_DATA_READY,
+        ValidationConcern.PACK_DATA_READY,
+        ValidationConcern.LDS_WRITE_AFTER_READ,
+        ValidationConcern.LDS_READ_AFTER_WRITE,
+        ValidationConcern.SCALAR_REGISTER_SAFETY,
+        ValidationConcern.QUAD_CYCLE_TIMING,
+    },
+    (11, 5, 1): {   # RDNA 3.5 (gfx1151)
+        ValidationConcern.INSTRUCTION_ORDERING,
+        ValidationConcern.SCHEDULE_COMPLETENESS,
+        ValidationConcern.LR_DATA_READY,
+        ValidationConcern.LDS_WRITE_AFTER_READ,
+        ValidationConcern.LDS_READ_AFTER_WRITE,
+        ValidationConcern.LW_ORDERING,
+        ValidationConcern.GR_VGPR_READY,
+    },
+}
+
+
+def active_concerns(kernel: dict, idmap: dict) -> set[ValidationConcern]:
+    """Determine which concerns must be covered for this specific kernel.
+
+    Intersects kernel-derived requirements with the ISA's concern catalog.
+    Returns an empty set if the ISA is not in the catalog (graceful fallback
+    for ISAs that haven't been characterized yet).
+    """
+    isa = tuple(kernel["ISA"])
+    if isa not in ISA_CONCERN_CATALOG:
+        return set()  # Unknown ISA — no concern-based validation
+    isa_concerns = ISA_CONCERN_CATALOG[isa]
+
+    active = {
+        ValidationConcern.INSTRUCTION_ORDERING,
+        ValidationConcern.SCHEDULE_COMPLETENESS,
+    }
+
+    has_local_reads = any(k.startswith("LR") and not k.startswith("LRS") for k in idmap)
+    if has_local_reads:
+        active.add(ValidationConcern.LR_DATA_READY)
+
+    has_packs = any(k.startswith("Pack") for k in idmap)
+    if has_packs:
+        active.add(ValidationConcern.PACK_DATA_READY)
+
+    dtl = kernel.get("DirectToLds", 0)
+    if dtl:
+        active.add(ValidationConcern.LDS_WRITE_AFTER_READ)
+        active.add(ValidationConcern.LDS_READ_AFTER_WRITE)
+    else:
+        active.add(ValidationConcern.LW_ORDERING)
+        active.add(ValidationConcern.GR_VGPR_READY)
+        active.add(ValidationConcern.LDS_WRITE_AFTER_READ)
+        active.add(ValidationConcern.LDS_READ_AFTER_WRITE)
+
+    has_grinc = any(k.startswith("GRInc") for k in idmap)
+    if has_grinc:
+        active.add(ValidationConcern.SCALAR_REGISTER_SAFETY)
+
+    if has_packs and kernel.get("UseF32XEmulation", False):
+        active.add(ValidationConcern.QUAD_CYCLE_TIMING)
+
+    return active & isa_concerns
+
+
 def invert_mfma_reorder(mfma_reorder: list[int]) -> dict[int, int]:
     """
     Compute the inverse mapping of mfmaReorder.
