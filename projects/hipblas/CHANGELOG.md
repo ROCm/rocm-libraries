@@ -8,8 +8,8 @@ Documentation for hipBLAS is available at
 ### Added
 
 * gfx90c support to clients.
-* version and other properties to Windows `hipblas.dll`
-* support for `OpenBLAS` ILP64 based API usage in clients
+* Version and other properties to Windows `hipblas.dll`.
+* Support for `OpenBLAS` ILP64-based API usage in clients.
 
 ### Resolved issue
 
