@@ -2,6 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 #include <gtest/gtest.h>
+#include <memory>
 #include <numeric>
 #include <unordered_set>
 
@@ -11,6 +12,7 @@
 #include <hipdnn_test_sdk/utilities/MockEngineConfig.hpp>
 #include <hipdnn_test_sdk/utilities/MockGraph.hpp>
 #include <hipdnn_test_sdk/utilities/MockNode.hpp>
+#include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "HipdnnMiopenHandle.hpp"
 #include "engines/plans/MiopenBatchnormPlanBuilder.hpp"
@@ -63,8 +65,14 @@ void createBatchnormFusionTensorAttributes(
 class TestMiopenBatchnormPlanBuilder : public ::testing::Test
 {
 protected:
+    void SetUp() override
+    {
+        SKIP_IF_NO_DEVICES();
+        _dummyHandle = std::make_unique<HipdnnMiopenHandle>();
+    }
+
     MiopenBatchnormPlanBuilder _planBuilder;
-    HipdnnMiopenHandle _dummyHandle;
+    std::unique_ptr<HipdnnMiopenHandle> _dummyHandle;
     MockEngineConfig _mockEngineConfig;
 };
 
@@ -76,7 +84,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsFalseForGraphWithUnsup
     std::vector<std::unique_ptr<INodeWrapper>> nodeWrappers;
     EXPECT_CALL(mockGraph, nodeWrappers()).WillRepeatedly(::testing::ReturnRef(nodeWrappers));
 
-    bool applicable = _planBuilder.isApplicable(_dummyHandle, mockGraph);
+    bool applicable = _planBuilder.isApplicable(*_dummyHandle, mockGraph);
 
     EXPECT_FALSE(applicable);
 }
@@ -91,7 +99,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsFalseForUnsupportedAtt
     std::vector<std::unique_ptr<INodeWrapper>> nodeWrappers;
     EXPECT_CALL(mockGraph, nodeWrappers()).WillRepeatedly(::testing::ReturnRef(nodeWrappers));
 
-    bool applicable = _planBuilder.isApplicable(_dummyHandle, mockGraph);
+    bool applicable = _planBuilder.isApplicable(*_dummyHandle, mockGraph);
 
     EXPECT_FALSE(applicable);
 }
@@ -103,7 +111,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsTrueForFusedTwoNodeGra
     hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                                      builder.GetSize());
 
-    bool applicable = _planBuilder.isApplicable(_dummyHandle, graph);
+    bool applicable = _planBuilder.isApplicable(*_dummyHandle, graph);
 
     EXPECT_TRUE(applicable);
 }
@@ -115,7 +123,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsTrueForFusedThreeNodeG
     hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                                      builder.GetSize());
 
-    bool applicable = _planBuilder.isApplicable(_dummyHandle, graph);
+    bool applicable = _planBuilder.isApplicable(*_dummyHandle, graph);
 
     EXPECT_TRUE(applicable);
 }
@@ -158,7 +166,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsFalseForIncorrectTwoNo
     hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                                      builder.GetSize());
 
-    bool applicable = _planBuilder.isApplicable(_dummyHandle, graph);
+    bool applicable = _planBuilder.isApplicable(*_dummyHandle, graph);
 
     EXPECT_FALSE(applicable);
 }
@@ -209,7 +217,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsFalseForIncorrectThree
     hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                                      builder.GetSize());
 
-    bool applicable = _planBuilder.isApplicable(_dummyHandle, graph);
+    bool applicable = _planBuilder.isApplicable(*_dummyHandle, graph);
 
     EXPECT_FALSE(applicable);
 }
@@ -267,7 +275,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsFalseForTwoNodeFusionU
     hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                                      builder.GetSize());
 
-    EXPECT_FALSE(_planBuilder.isApplicable(_dummyHandle, graph));
+    EXPECT_FALSE(_planBuilder.isApplicable(*_dummyHandle, graph));
 }
 
 // ============================================================================
@@ -280,7 +288,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsTrueForValidSingleNode
     hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                                      builder.GetSize());
 
-    bool applicable = _planBuilder.isApplicable(_dummyHandle, graph);
+    bool applicable = _planBuilder.isApplicable(*_dummyHandle, graph);
 
     EXPECT_TRUE(applicable);
 }
@@ -295,7 +303,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder, BackwardIsApplicableReturnsFalseForInvali
     hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                                      builder.GetSize());
 
-    EXPECT_FALSE(_planBuilder.isApplicable(_dummyHandle, graph));
+    EXPECT_FALSE(_planBuilder.isApplicable(*_dummyHandle, graph));
 }
 
 TEST_F(TestMiopenBatchnormPlanBuilder, BackwardIsApplicableReturnsFalseForInvalidScaleBiasDataType)
@@ -309,7 +317,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder, BackwardIsApplicableReturnsFalseForInvali
     hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                                      builder.GetSize());
 
-    EXPECT_FALSE(_planBuilder.isApplicable(_dummyHandle, graph));
+    EXPECT_FALSE(_planBuilder.isApplicable(*_dummyHandle, graph));
 }
 
 TEST_F(TestMiopenBatchnormPlanBuilder, BackwardIsApplicableReturnsFalseForInvalidStatDataType)
@@ -324,7 +332,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder, BackwardIsApplicableReturnsFalseForInvali
     hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                                      builder.GetSize());
 
-    EXPECT_FALSE(_planBuilder.isApplicable(_dummyHandle, graph));
+    EXPECT_FALSE(_planBuilder.isApplicable(*_dummyHandle, graph));
 }
 
 TEST_F(TestMiopenBatchnormPlanBuilder, BackwardIsApplicableReturnsFalseForInvalidLayout)
@@ -417,7 +425,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder, BackwardIsApplicableReturnsFalseForInvali
     hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                                      builder.GetSize());
 
-    EXPECT_FALSE(_planBuilder.isApplicable(_dummyHandle, graph));
+    EXPECT_FALSE(_planBuilder.isApplicable(*_dummyHandle, graph));
 }
 
 TEST_F(TestMiopenBatchnormPlanBuilder, BackwardIsApplicableReturnsFalseForInsufficientSpatialDims)
@@ -427,7 +435,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder, BackwardIsApplicableReturnsFalseForInsuff
     hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                                      builder.GetSize());
 
-    EXPECT_FALSE(_planBuilder.isApplicable(_dummyHandle, graph));
+    EXPECT_FALSE(_planBuilder.isApplicable(*_dummyHandle, graph));
 }
 
 // ============================================================================
@@ -514,7 +522,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsFalseForInvalidLayoutI
     hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                                      builder.GetSize());
 
-    EXPECT_FALSE(_planBuilder.isApplicable(_dummyHandle, graph));
+    EXPECT_FALSE(_planBuilder.isApplicable(*_dummyHandle, graph));
 }
 
 // ============================================================================
@@ -610,7 +618,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsFalseForNonPackedTenso
     hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                                      builder.GetSize());
 
-    EXPECT_FALSE(_planBuilder.isApplicable(_dummyHandle, graph));
+    EXPECT_FALSE(_planBuilder.isApplicable(*_dummyHandle, graph));
 }
 
 TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsFalseForThreeNodeUnsupportedActivation)
@@ -685,7 +693,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsFalseForThreeNodeUnsup
     hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                                      builder.GetSize());
 
-    EXPECT_FALSE(_planBuilder.isApplicable(_dummyHandle, graph));
+    EXPECT_FALSE(_planBuilder.isApplicable(*_dummyHandle, graph));
 }
 
 TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsFalseWhenActivationMissingIn1)
@@ -760,7 +768,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsFalseWhenActivationMis
     hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                                      builder.GetSize());
 
-    EXPECT_FALSE(_planBuilder.isApplicable(_dummyHandle, graph));
+    EXPECT_FALSE(_planBuilder.isApplicable(*_dummyHandle, graph));
 }
 
 TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsFalseForFourNodeGraph)
@@ -771,7 +779,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsFalseForFourNodeGraph)
     std::vector<std::unique_ptr<INodeWrapper>> nodeWrappers;
     EXPECT_CALL(mockGraph, nodeWrappers()).WillRepeatedly(::testing::ReturnRef(nodeWrappers));
 
-    bool applicable = _planBuilder.isApplicable(_dummyHandle, mockGraph);
+    bool applicable = _planBuilder.isApplicable(*_dummyHandle, mockGraph);
 
     EXPECT_FALSE(applicable);
 }
@@ -792,7 +800,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsFalseForUnsupportedCom
     nodeWrappers.emplace_back(std::move(nodeB));
     EXPECT_CALL(mockGraph, nodeWrappers()).WillRepeatedly(::testing::ReturnRef(nodeWrappers));
 
-    bool applicable = _planBuilder.isApplicable(_dummyHandle, mockGraph);
+    bool applicable = _planBuilder.isApplicable(*_dummyHandle, mockGraph);
 
     EXPECT_FALSE(applicable);
 }
@@ -802,7 +810,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder, GetMaxWorkspaceSizeReturnsExpectedValue)
     MockGraph mockGraph;
 
     HipdnnMiopenSettings settings;
-    size_t workspaceSize = _planBuilder.getMaxWorkspaceSize(_dummyHandle, mockGraph, settings);
+    size_t workspaceSize = _planBuilder.getMaxWorkspaceSize(*_dummyHandle, mockGraph, settings);
 
     EXPECT_EQ(workspaceSize, 0u);
 }
@@ -815,7 +823,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder, BuildPlanSetsPlanForSupportedInferenceNod
                                                                      builder.GetSize());
     HipdnnMiopenContext ctx;
 
-    EXPECT_NO_THROW(_planBuilder.buildPlan(_dummyHandle, graph, _mockEngineConfig, ctx));
+    EXPECT_NO_THROW(_planBuilder.buildPlan(*_dummyHandle, graph, _mockEngineConfig, ctx));
     EXPECT_TRUE(ctx.hasValidPlan());
 }
 
@@ -827,7 +835,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder, BuildPlanSetsPlanForSupportedInferenceWit
                                                                      builder.GetSize());
     HipdnnMiopenContext ctx;
 
-    EXPECT_NO_THROW(_planBuilder.buildPlan(_dummyHandle, graph, _mockEngineConfig, ctx));
+    EXPECT_NO_THROW(_planBuilder.buildPlan(*_dummyHandle, graph, _mockEngineConfig, ctx));
     EXPECT_TRUE(ctx.hasValidPlan());
 }
 
@@ -839,7 +847,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder, BuildPlanSetsPlanForSupportedBackwardNode
                                                                      builder.GetSize());
     HipdnnMiopenContext ctx;
 
-    EXPECT_NO_THROW(_planBuilder.buildPlan(_dummyHandle, graph, _mockEngineConfig, ctx));
+    EXPECT_NO_THROW(_planBuilder.buildPlan(*_dummyHandle, graph, _mockEngineConfig, ctx));
     EXPECT_TRUE(ctx.hasValidPlan());
 }
 
@@ -851,7 +859,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder, BuildPlanSetsPlanForFusedTwoNodeGraph)
                                                                      builder.GetSize());
     HipdnnMiopenContext ctx;
 
-    EXPECT_NO_THROW(_planBuilder.buildPlan(_dummyHandle, graph, _mockEngineConfig, ctx));
+    EXPECT_NO_THROW(_planBuilder.buildPlan(*_dummyHandle, graph, _mockEngineConfig, ctx));
     EXPECT_TRUE(ctx.hasValidPlan());
 }
 
@@ -863,7 +871,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder, BuildPlanSetsPlanForFusedThreeNodeGraph)
                                                                      builder.GetSize());
     HipdnnMiopenContext ctx;
 
-    EXPECT_NO_THROW(_planBuilder.buildPlan(_dummyHandle, graph, _mockEngineConfig, ctx));
+    EXPECT_NO_THROW(_planBuilder.buildPlan(*_dummyHandle, graph, _mockEngineConfig, ctx));
     EXPECT_TRUE(ctx.hasValidPlan());
 }
 
@@ -899,7 +907,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder, BuildPlanThrowsForUnsupportedNodeType)
 
     HipdnnMiopenContext ctx;
 
-    EXPECT_THROW(_planBuilder.buildPlan(_dummyHandle, graph, _mockEngineConfig, ctx),
+    EXPECT_THROW(_planBuilder.buildPlan(*_dummyHandle, graph, _mockEngineConfig, ctx),
                  hipdnn_plugin_sdk::HipdnnPluginException);
     EXPECT_FALSE(ctx.hasValidPlan());
 }
@@ -935,7 +943,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder, BuildPlanThrowsForMalformedInferenceAttri
                                                                      builder.GetSize());
     HipdnnMiopenContext ctx;
 
-    EXPECT_THROW(_planBuilder.buildPlan(_dummyHandle, graph, _mockEngineConfig, ctx),
+    EXPECT_THROW(_planBuilder.buildPlan(*_dummyHandle, graph, _mockEngineConfig, ctx),
                  std::invalid_argument);
     EXPECT_FALSE(ctx.hasValidPlan());
 }
@@ -971,7 +979,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder, BuildPlanThrowsForMalformedBackwardAttrib
                                                                      builder.GetSize());
     HipdnnMiopenContext ctx;
 
-    EXPECT_THROW(_planBuilder.buildPlan(_dummyHandle, graph, _mockEngineConfig, ctx),
+    EXPECT_THROW(_planBuilder.buildPlan(*_dummyHandle, graph, _mockEngineConfig, ctx),
                  std::invalid_argument);
     EXPECT_FALSE(ctx.hasValidPlan());
 }
@@ -1026,7 +1034,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder, BuildPlanThrowsForMalformedTwoNodeFusedGr
 
     HipdnnMiopenContext ctx;
 
-    EXPECT_THROW(_planBuilder.buildPlan(_dummyHandle, graph, _mockEngineConfig, ctx),
+    EXPECT_THROW(_planBuilder.buildPlan(*_dummyHandle, graph, _mockEngineConfig, ctx),
                  std::invalid_argument);
     EXPECT_FALSE(ctx.hasValidPlan());
 }
@@ -1073,7 +1081,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder, BuildPlanThrowsForMalformedTwoNodeFusedGr
 
     HipdnnMiopenContext ctx;
 
-    EXPECT_THROW(_planBuilder.buildPlan(_dummyHandle, graph, _mockEngineConfig, ctx),
+    EXPECT_THROW(_planBuilder.buildPlan(*_dummyHandle, graph, _mockEngineConfig, ctx),
                  std::invalid_argument);
     EXPECT_FALSE(ctx.hasValidPlan());
 }
@@ -1150,7 +1158,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder, BuildPlanThrowsForMalformedFusedGraphFirs
                                                                      builder.GetSize());
     HipdnnMiopenContext ctx;
 
-    EXPECT_THROW(_planBuilder.buildPlan(_dummyHandle, graph, _mockEngineConfig, ctx),
+    EXPECT_THROW(_planBuilder.buildPlan(*_dummyHandle, graph, _mockEngineConfig, ctx),
                  std::invalid_argument);
     EXPECT_FALSE(ctx.hasValidPlan());
 }
@@ -1218,7 +1226,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder, BuildPlanThrowsForMalformedFusedGraphSeco
                                                                      builder.GetSize());
     HipdnnMiopenContext ctx;
 
-    EXPECT_THROW(_planBuilder.buildPlan(_dummyHandle, graph, _mockEngineConfig, ctx),
+    EXPECT_THROW(_planBuilder.buildPlan(*_dummyHandle, graph, _mockEngineConfig, ctx),
                  std::invalid_argument);
     EXPECT_FALSE(ctx.hasValidPlan());
 }
@@ -1286,7 +1294,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder, BuildPlanThrowsForMalformedFusedGraphThir
                                                                      builder.GetSize());
     HipdnnMiopenContext ctx;
 
-    EXPECT_THROW(_planBuilder.buildPlan(_dummyHandle, graph, _mockEngineConfig, ctx),
+    EXPECT_THROW(_planBuilder.buildPlan(*_dummyHandle, graph, _mockEngineConfig, ctx),
                  std::invalid_argument);
     EXPECT_FALSE(ctx.hasValidPlan());
 }
@@ -1364,7 +1372,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder,
     hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                                      builder.GetSize());
 
-    EXPECT_FALSE(_planBuilder.isApplicable(_dummyHandle, graph));
+    EXPECT_FALSE(_planBuilder.isApplicable(*_dummyHandle, graph));
 }
 
 TEST_F(TestMiopenBatchnormPlanBuilder,
@@ -1440,7 +1448,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder,
     hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                                      builder.GetSize());
 
-    EXPECT_FALSE(_planBuilder.isApplicable(_dummyHandle, graph));
+    EXPECT_FALSE(_planBuilder.isApplicable(*_dummyHandle, graph));
 }
 
 TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsFalseWhenBnBackwardXDiffersFromInference)
@@ -1515,7 +1523,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsFalseWhenBnBackwardXDi
     hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                                      builder.GetSize());
 
-    EXPECT_FALSE(_planBuilder.isApplicable(_dummyHandle, graph));
+    EXPECT_FALSE(_planBuilder.isApplicable(*_dummyHandle, graph));
 }
 
 TEST_F(TestMiopenBatchnormPlanBuilder,
@@ -1591,7 +1599,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder,
     hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                                      builder.GetSize());
 
-    EXPECT_FALSE(_planBuilder.isApplicable(_dummyHandle, graph));
+    EXPECT_FALSE(_planBuilder.isApplicable(*_dummyHandle, graph));
 }
 
 TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsFalseWhenBnInferenceOutputIsNotVirtual)
@@ -1666,7 +1674,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsFalseWhenBnInferenceOu
     hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                                      builder.GetSize());
 
-    EXPECT_FALSE(_planBuilder.isApplicable(_dummyHandle, graph));
+    EXPECT_FALSE(_planBuilder.isApplicable(*_dummyHandle, graph));
 }
 
 TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsFalseWhenActivationOutputIsNotVirtual)
@@ -1741,7 +1749,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsFalseWhenActivationOut
     hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                                      builder.GetSize());
 
-    EXPECT_FALSE(_planBuilder.isApplicable(_dummyHandle, graph));
+    EXPECT_FALSE(_planBuilder.isApplicable(*_dummyHandle, graph));
 }
 
 TEST_F(TestMiopenBatchnormPlanBuilder,
@@ -1796,7 +1804,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder,
     hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                                      builder.GetSize());
 
-    EXPECT_FALSE(_planBuilder.isApplicable(_dummyHandle, graph));
+    EXPECT_FALSE(_planBuilder.isApplicable(*_dummyHandle, graph));
 }
 
 TEST_F(TestMiopenBatchnormPlanBuilder,
@@ -1851,7 +1859,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder,
     hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                                      builder.GetSize());
 
-    EXPECT_FALSE(_planBuilder.isApplicable(_dummyHandle, graph));
+    EXPECT_FALSE(_planBuilder.isApplicable(*_dummyHandle, graph));
 }
 
 // ============================================================================
@@ -1912,7 +1920,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsTrueForFusedTwoNodeGra
     hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                                      builder.GetSize());
 
-    EXPECT_TRUE(_planBuilder.isApplicable(_dummyHandle, graph));
+    EXPECT_TRUE(_planBuilder.isApplicable(*_dummyHandle, graph));
 }
 
 TEST_F(TestMiopenBatchnormPlanBuilder,
@@ -1970,7 +1978,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder,
     hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                                      builder.GetSize());
 
-    EXPECT_FALSE(_planBuilder.isApplicable(_dummyHandle, graph));
+    EXPECT_FALSE(_planBuilder.isApplicable(*_dummyHandle, graph));
 }
 
 TEST_F(TestMiopenBatchnormPlanBuilder,
@@ -2028,7 +2036,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder,
     hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                                      builder.GetSize());
 
-    EXPECT_FALSE(_planBuilder.isApplicable(_dummyHandle, graph));
+    EXPECT_FALSE(_planBuilder.isApplicable(*_dummyHandle, graph));
 }
 
 TEST_F(TestMiopenBatchnormPlanBuilder,
@@ -2086,7 +2094,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder,
     hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                                      builder.GetSize());
 
-    EXPECT_FALSE(_planBuilder.isApplicable(_dummyHandle, graph));
+    EXPECT_FALSE(_planBuilder.isApplicable(*_dummyHandle, graph));
 }
 
 // ============================================================================
@@ -2103,7 +2111,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsTrueFor3dNclInference)
     hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                                      builder.GetSize());
 
-    EXPECT_TRUE(_planBuilder.isApplicable(_dummyHandle, graph));
+    EXPECT_TRUE(_planBuilder.isApplicable(*_dummyHandle, graph));
 }
 
 TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsTrueFor3dNlcBackward)
@@ -2115,7 +2123,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsTrueFor3dNlcBackward)
     hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                                      builder.GetSize());
 
-    EXPECT_TRUE(_planBuilder.isApplicable(_dummyHandle, graph));
+    EXPECT_TRUE(_planBuilder.isApplicable(*_dummyHandle, graph));
 }
 
 TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsTrueFor3dNclVarianceInference)
@@ -2128,7 +2136,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsTrueFor3dNclVarianceIn
     hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                                      builder.GetSize());
 
-    EXPECT_TRUE(_planBuilder.isApplicable(_dummyHandle, graph));
+    EXPECT_TRUE(_planBuilder.isApplicable(*_dummyHandle, graph));
 }
 
 TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsTrueFor3dNlcFusedTwoNodeGraph)
@@ -2141,7 +2149,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsTrueFor3dNlcFusedTwoNo
     hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                                      builder.GetSize());
 
-    EXPECT_TRUE(_planBuilder.isApplicable(_dummyHandle, graph));
+    EXPECT_TRUE(_planBuilder.isApplicable(*_dummyHandle, graph));
 }
 
 TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsTrueFor3dNclFusedThreeNodeGraph)
@@ -2154,7 +2162,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsTrueFor3dNclFusedThree
     hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                                      builder.GetSize());
 
-    EXPECT_TRUE(_planBuilder.isApplicable(_dummyHandle, graph));
+    EXPECT_TRUE(_planBuilder.isApplicable(*_dummyHandle, graph));
 }
 
 TEST_F(TestMiopenBatchnormPlanBuilder, BuildPlanSetsPlanFor3dNclInference)
@@ -2168,7 +2176,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder, BuildPlanSetsPlanFor3dNclInference)
                                                                      builder.GetSize());
     HipdnnMiopenContext ctx;
 
-    EXPECT_NO_THROW(_planBuilder.buildPlan(_dummyHandle, graph, _mockEngineConfig, ctx));
+    EXPECT_NO_THROW(_planBuilder.buildPlan(*_dummyHandle, graph, _mockEngineConfig, ctx));
     EXPECT_TRUE(ctx.hasValidPlan());
 }
 
@@ -2182,7 +2190,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder, BuildPlanSetsPlanFor3dNlcBackward)
                                                                      builder.GetSize());
     HipdnnMiopenContext ctx;
 
-    EXPECT_NO_THROW(_planBuilder.buildPlan(_dummyHandle, graph, _mockEngineConfig, ctx));
+    EXPECT_NO_THROW(_planBuilder.buildPlan(*_dummyHandle, graph, _mockEngineConfig, ctx));
     EXPECT_TRUE(ctx.hasValidPlan());
 }
 
@@ -2197,7 +2205,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder, BuildPlanSetsPlanFor3dNclVarianceInferenc
                                                                      builder.GetSize());
     HipdnnMiopenContext ctx;
 
-    EXPECT_NO_THROW(_planBuilder.buildPlan(_dummyHandle, graph, _mockEngineConfig, ctx));
+    EXPECT_NO_THROW(_planBuilder.buildPlan(*_dummyHandle, graph, _mockEngineConfig, ctx));
     EXPECT_TRUE(ctx.hasValidPlan());
 }
 
@@ -2212,7 +2220,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder, BuildPlanSetsPlanFor3dNlcFusedTwoNodeGrap
                                                                      builder.GetSize());
     HipdnnMiopenContext ctx;
 
-    EXPECT_NO_THROW(_planBuilder.buildPlan(_dummyHandle, graph, _mockEngineConfig, ctx));
+    EXPECT_NO_THROW(_planBuilder.buildPlan(*_dummyHandle, graph, _mockEngineConfig, ctx));
     EXPECT_TRUE(ctx.hasValidPlan());
 }
 
@@ -2227,6 +2235,6 @@ TEST_F(TestMiopenBatchnormPlanBuilder, BuildPlanSetsPlanFor3dNclFusedThreeNodeGr
                                                                      builder.GetSize());
     HipdnnMiopenContext ctx;
 
-    EXPECT_NO_THROW(_planBuilder.buildPlan(_dummyHandle, graph, _mockEngineConfig, ctx));
+    EXPECT_NO_THROW(_planBuilder.buildPlan(*_dummyHandle, graph, _mockEngineConfig, ctx));
     EXPECT_TRUE(ctx.hasValidPlan());
 }

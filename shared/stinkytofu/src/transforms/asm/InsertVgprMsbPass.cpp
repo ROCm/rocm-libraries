@@ -117,7 +117,7 @@ std::pair<int, bool> computeRequiredMsb(const StinkyInstruction* inst) {
 }
 
 void emitVgprMsbIfNeeded(int requiredSetVal, bool hasVgpr, int& currentMsb, AsmIRBuilder& irBuilder,
-                         GfxArchID archId, IRBase* insertBefore) {
+                         GfxArchID archId, IRBase* insertBefore, bool hasVgprMsb16) {
     if (!hasVgpr || requiredSetVal == currentMsb) {
         if (currentMsb == VgprMsbState::LABEL_BEGIN) currentMsb = VgprMsbState::NOT_REQUIRED;
         return;
@@ -130,8 +130,10 @@ void emitVgprMsbIfNeeded(int requiredSetVal, bool hasVgpr, int& currentMsb, AsmI
     }
 
     int combinedSetVal = requiredSetVal;
-    if (currentMsb != VgprMsbState::NOT_REQUIRED && currentMsb != VgprMsbState::LABEL_BEGIN)
+    if (hasVgprMsb16 && currentMsb != VgprMsbState::NOT_REQUIRED &&
+        currentMsb != VgprMsbState::LABEL_BEGIN) {
         combinedSetVal += (currentMsb << 8);
+    }
 
     const HwInstDesc* desc = getMCIDByUOp(GFX::s_set_vgpr_msb, archId);
     assert(desc != nullptr && "s_set_vgpr_msb is not supported on this architecture");
@@ -162,6 +164,8 @@ class InsertVgprMsbPassImpl : public Pass {
         auto arch = passCtx.getGemmTileConfig().arch;
         GfxArchID archId = getGfxArchID(arch[0], arch[1], arch[2]);
 
+        bool hasVgprMsb16 = passCtx.getAsmCapsConfig().hasVgprMsb16;
+
         for (auto bbIt = func.begin(); bbIt != func.end(); ++bbIt) {
             BasicBlock& bb = *bbIt;
             AsmIRBuilder irBuilder(bb, archId);
@@ -179,7 +183,8 @@ class InsertVgprMsbPassImpl : public Pass {
                 if (isPseudoInst(inst)) continue;
 
                 auto [requiredMsb, hasVgpr] = computeRequiredMsb(inst);
-                emitVgprMsbIfNeeded(requiredMsb, hasVgpr, currentMsb, irBuilder, archId, inst);
+                emitVgprMsbIfNeeded(requiredMsb, hasVgpr, currentMsb, irBuilder, archId, inst,
+                                    hasVgprMsb16);
             }
         }
     }
