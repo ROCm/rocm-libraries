@@ -98,25 +98,107 @@ struct Config
 };
 
 // All instantiated configurations. The first valid config is expected to be the fastest.
+//
+// Layout: 4 variant groups × 10 configs each = 40 configs total.
+// Each group has 5 Dgrad (indices 0-4) + 5 Fprop (indices 5-9) configs:
+//   waves_c64=2,waves_q4=8 / waves_c64=2,waves_q4=4 / waves_c64=2,waves_q4=2 /
+//   waves_c64=2,waves_q4=1 / waves_c64=1,waves_q4=1
+//
+// Group 0 (indices  0- 9): No swizzle, direct DRAM epilogue
+// Group 1 (indices 10-19): No swizzle, LDS-staged epilogue
+// Group 2 (indices 20-29): XOR swizzle, direct DRAM epilogue
+// Group 3 (indices 30-39): XOR swizzle, LDS-staged epilogue
 constexpr Config configs[] = {
-    // Direct DRAM epilogue (RegistersToGlobalMemory, default).
+    // ---- Group 0: No swizzle, direct DRAM epilogue (default) ----
+    // Dgrad (indices 0-4)
     {.waves_c64 = 2, .waves_q4 = 8, .direction = Direction::Dgrad},
+    {.waves_c64 = 2, .waves_q4 = 4, .direction = Direction::Dgrad},
+    {.waves_c64 = 2, .waves_q4 = 2, .direction = Direction::Dgrad},
+    {.waves_c64 = 2, .waves_q4 = 1, .direction = Direction::Dgrad},
+    {.waves_c64 = 1, .waves_q4 = 1, .direction = Direction::Dgrad},
+    // Fprop (indices 5-9)
     {.waves_c64 = 2, .waves_q4 = 8},
-    // LDS-staged epilogue (RegistersToLdsToGlobalMemory).
+    {.waves_c64 = 2, .waves_q4 = 4},
+    {.waves_c64 = 2, .waves_q4 = 2},
+    {.waves_c64 = 2, .waves_q4 = 1},
+    {.waves_c64 = 1, .waves_q4 = 1},
+    // ---- Group 1: No swizzle, LDS-staged epilogue ----
+    // Dgrad (indices 10-14)
     {.waves_c64 = 2, .waves_q4 = 8, .direction = Direction::Dgrad,
      .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},
+    {.waves_c64 = 2, .waves_q4 = 4, .direction = Direction::Dgrad,
+     .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},
+    {.waves_c64 = 2, .waves_q4 = 2, .direction = Direction::Dgrad,
+     .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},
+    {.waves_c64 = 2, .waves_q4 = 1, .direction = Direction::Dgrad,
+     .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},
+    {.waves_c64 = 1, .waves_q4 = 1, .direction = Direction::Dgrad,
+     .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},
+    // Fprop (indices 15-19)
     {.waves_c64 = 2, .waves_q4 = 8,
      .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},
-    // XOR swizzle + direct DRAM epilogue.
+    {.waves_c64 = 2, .waves_q4 = 4,
+     .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},
+    {.waves_c64 = 2, .waves_q4 = 2,
+     .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},
+    {.waves_c64 = 2, .waves_q4 = 1,
+     .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},
+    {.waves_c64 = 1, .waves_q4 = 1,
+     .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},
+    // ---- Group 2: XOR swizzle, direct DRAM epilogue ----
+    // Dgrad (indices 20-24)
     {.waves_c64 = 2, .waves_q4 = 8, .direction = Direction::Dgrad,
      .swizzle_type = SwizzleType::XOR},
+    {.waves_c64 = 2, .waves_q4 = 4, .direction = Direction::Dgrad,
+     .swizzle_type = SwizzleType::XOR},
+    {.waves_c64 = 2, .waves_q4 = 2, .direction = Direction::Dgrad,
+     .swizzle_type = SwizzleType::XOR},
+    {.waves_c64 = 2, .waves_q4 = 1, .direction = Direction::Dgrad,
+     .swizzle_type = SwizzleType::XOR},
+    {.waves_c64 = 1, .waves_q4 = 1, .direction = Direction::Dgrad,
+     .swizzle_type = SwizzleType::XOR},
+    // Fprop (indices 25-29)
     {.waves_c64 = 2, .waves_q4 = 8,
      .swizzle_type = SwizzleType::XOR},
-    // XOR swizzle + LDS-staged epilogue.
+    {.waves_c64 = 2, .waves_q4 = 4,
+     .swizzle_type = SwizzleType::XOR},
+    {.waves_c64 = 2, .waves_q4 = 2,
+     .swizzle_type = SwizzleType::XOR},
+    {.waves_c64 = 2, .waves_q4 = 1,
+     .swizzle_type = SwizzleType::XOR},
+    {.waves_c64 = 1, .waves_q4 = 1,
+     .swizzle_type = SwizzleType::XOR},
+    // ---- Group 3: XOR swizzle, LDS-staged epilogue ----
+    // Dgrad (indices 30-34)
     {.waves_c64 = 2, .waves_q4 = 8, .direction = Direction::Dgrad,
      .swizzle_type = SwizzleType::XOR,
      .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},
+    {.waves_c64 = 2, .waves_q4 = 4, .direction = Direction::Dgrad,
+     .swizzle_type = SwizzleType::XOR,
+     .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},
+    {.waves_c64 = 2, .waves_q4 = 2, .direction = Direction::Dgrad,
+     .swizzle_type = SwizzleType::XOR,
+     .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},
+    {.waves_c64 = 2, .waves_q4 = 1, .direction = Direction::Dgrad,
+     .swizzle_type = SwizzleType::XOR,
+     .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},
+    {.waves_c64 = 1, .waves_q4 = 1, .direction = Direction::Dgrad,
+     .swizzle_type = SwizzleType::XOR,
+     .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},
+    // Fprop (indices 35-39)
     {.waves_c64 = 2, .waves_q4 = 8,
+     .swizzle_type = SwizzleType::XOR,
+     .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},
+    {.waves_c64 = 2, .waves_q4 = 4,
+     .swizzle_type = SwizzleType::XOR,
+     .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},
+    {.waves_c64 = 2, .waves_q4 = 2,
+     .swizzle_type = SwizzleType::XOR,
+     .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},
+    {.waves_c64 = 2, .waves_q4 = 1,
+     .swizzle_type = SwizzleType::XOR,
+     .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},
+    {.waves_c64 = 1, .waves_q4 = 1,
      .swizzle_type = SwizzleType::XOR,
      .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},
 };
@@ -137,6 +219,22 @@ inline bool is_valid_config(const Conv2dParams& par, const Config& cfg)
     if(out_q < cfg.block_q() && cfg.waves_q4 > 1)
     {
         return false;
+    }
+    // XOR swizzle constraint: every block_q offset must be a multiple of
+    // BLOCK_C8 (= block_c/8). The XOR transform operates in global coords on
+    // (x_global, c8), mapping c8 -> c8 ^ (x_global % BLOCK_C8). The LDS read
+    // applies XOR in local coords: c8 -> c8 ^ (x_local % BLOCK_C8). For
+    // consistency we need (block_q + x_local) % BLOCK_C8 == x_local % BLOCK_C8,
+    // i.e. block_q % BLOCK_C8 == 0 for every tile. This is guaranteed when:
+    //   (a) cfg.block_q() is a multiple of BLOCK_C8 (all offsets aligned), OR
+    //   (b) only a single spatial tile is needed (out_q <= block_q, so offset=0).
+    if(cfg.swizzle_type == SwizzleType::XOR)
+    {
+        const int block_c8 = cfg.block_c() / 8;
+        if(cfg.block_q() % block_c8 != 0 && out_q > cfg.block_q())
+        {
+            return false;
+        }
     }
     return true;
 }
@@ -420,11 +518,18 @@ struct TileConstants
     // DRAM descriptor).
     // -----------------------------------------------------------------------
 
-    // Padded weight LDS size: must accommodate the full tile distribution span
-    // (one uint4 per thread, even though some threads are OOB).
-    static constexpr int WEIGHT_LDS_PADDED_UINT4 = cfg.block_size();
+    // Number of async load passes needed to load all weights into LDS.
+    // Each pass loads block_size uint4 values. When block_size >= WEIGHT_LDS_SIZE_UINT4,
+    // a single pass suffices. Otherwise, multiple passes are needed.
+    static constexpr int NUM_WEIGHT_PASSES =
+        (WEIGHT_LDS_SIZE_UINT4 + cfg.block_size() - 1) / cfg.block_size();
 
-    // DRAM descriptor: 2D [WEIGHT_LDS_SIZE_UINT4, 8] padded to [block_size, 8].
+    // Padded weight LDS size: must accommodate all weight data.
+    // Rounded up to a multiple of block_size for uniform multi-pass loading.
+    static constexpr int WEIGHT_LDS_PADDED_UINT4 = NUM_WEIGHT_PASSES * cfg.block_size();
+
+    // DRAM descriptor: 2D [WEIGHT_LDS_SIZE_UINT4, 8] padded to
+    // [WEIGHT_LDS_PADDED_UINT4, 8].
     // Base pointer: wei + block_k * kh * kw * GROUP_SIZE.
     static constexpr auto MakeWeightDramDescriptor()
     {
@@ -434,7 +539,7 @@ struct TileConstants
             ck_tile::number<8>{},
             ck_tile::number<1>{});
 
-        constexpr int right_pad = cfg.block_size() - WEIGHT_LDS_SIZE_UINT4;
+        constexpr int right_pad = WEIGHT_LDS_PADDED_UINT4 - WEIGHT_LDS_SIZE_UINT4;
         constexpr auto desc_padded = ck_tile::transform_tensor_descriptor(
             desc_raw,
             ck_tile::make_tuple(
@@ -446,10 +551,14 @@ struct TileConstants
     }
 
     // LDS store descriptor: 2D [block_size, 8] contiguous row-major in fp16.
+    // Each pass stores block_size rows. Multiple passes write to successive
+    // regions in LDS by advancing the window origin.
     static constexpr auto MakeWeightLdsStoreDescriptor()
     {
+        // LDS descriptor covers the full padded weight buffer so that
+        // multi-pass window advancement stays in-bounds.
         return ck_tile::make_naive_tensor_descriptor(
-            ck_tile::make_tuple(ck_tile::number<cfg.block_size()>{}, ck_tile::number<8>{}),
+            ck_tile::make_tuple(ck_tile::number<WEIGHT_LDS_PADDED_UINT4>{}, ck_tile::number<8>{}),
             ck_tile::make_tuple(ck_tile::number<8>{}, ck_tile::number<1>{}),
             ck_tile::number<8>{},
             ck_tile::number<1>{});
@@ -984,7 +1093,22 @@ struct WeightLoader
             ck_tile::make_tuple(ck_tile::number<cfg.block_size()>{}, ck_tile::number<8>{}),
             {0, 0});
 
-        ck_tile::async_load_tile(weight_lds_window, weight_dram_window);
+        // Multi-pass weight loading: when the weight data is larger than
+        // block_size, we need multiple async loads with advancing offsets.
+        // The pad transform on the DRAM descriptor suppresses OOB reads
+        // in the final pass.
+        static_for<TC::NUM_WEIGHT_PASSES>(
+            [&]<int Pass>()
+            {
+                ck_tile::async_load_tile(weight_lds_window, weight_dram_window);
+                if constexpr(Pass < TC::NUM_WEIGHT_PASSES - 1)
+                {
+                    ck_tile::move_tile_window(weight_dram_window,
+                                              {cfg.block_size(), 0});
+                    ck_tile::move_tile_window(weight_lds_window,
+                                              {cfg.block_size(), 0});
+                }
+            });
     }
 
     // Read weights from LDS into registers after sync.
