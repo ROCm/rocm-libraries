@@ -95,7 +95,7 @@ std::vector<std::string> StubbedDeviceOps::deviceOps = {};
 
 struct StubbedCKArgs
 {
-    StubbedCKArgs(const ProblemDescription& problem) {}
+    StubbedCKArgs(const ProblemDescription& /*problem*/) {}
 
     template <typename ConvPtr>
     bool IsSupportedBy(const ConvPtr&) const
