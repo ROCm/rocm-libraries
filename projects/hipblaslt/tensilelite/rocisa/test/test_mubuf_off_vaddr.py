@@ -41,6 +41,10 @@ pytestmark = pytest.mark.skipif(
 
 @pytest.fixture(scope="module", autouse=True)
 def _isa_context():
+    import os
+
+    rocm_path = os.environ.get("ROCM_PATH", "/opt/rocm")
+    rocisa.rocIsa.getInstance().init(_ISA, rocm_path + "/bin/amdclang++", False)
     rocisa.rocIsa.getInstance().setKernel(_ISA, 32)
 
 
