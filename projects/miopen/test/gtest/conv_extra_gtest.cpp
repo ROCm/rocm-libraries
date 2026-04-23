@@ -36,7 +36,6 @@ auto GenCases(bool smoke_test,
 
 bool IsTestSupportedForDevice()
 {
-    // using namespace miopen::debug;
     using e_mask = enabled<Gpu::gfx94X, Gpu::gfx103X, Gpu::gfx110X, Gpu::gfx115X>;
     using d_mask = disabled<Gpu::Default>;
     return ::IsTestSupportedForDevMask<d_mask, e_mask>();
