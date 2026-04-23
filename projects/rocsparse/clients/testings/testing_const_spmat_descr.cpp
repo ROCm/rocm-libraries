@@ -191,6 +191,48 @@ void testing_const_spmat_descr_bad_arg(const Arguments& arg)
                                                                   data_type),
                                 rocsparse_status_invalid_size);
 
+        void* bsr_row_ptr = (void*)0x4;
+        void* bsr_col_ind = (void*)0x4;
+        void* bsr_val     = (void*)0x4;
+
+#define PARAMS_CREATE_BSR                                                                    \
+    descr, rows, cols, nnz, ell_block_dir, ell_block_dim, bsr_row_ptr, bsr_col_ind, bsr_val, \
+        row_ptr_type, col_ind_type, idx_base, data_type
+        bad_arg_analysis(rocsparse_create_const_bsr_descr, PARAMS_CREATE_BSR);
+#undef PARAMS_CREATE_BSR
+
+        // nnzb > mb * nb
+        EXPECT_ROCSPARSE_STATUS(rocsparse_create_const_bsr_descr(descr,
+                                                                 rows,
+                                                                 cols,
+                                                                 (rows * cols + 1),
+                                                                 ell_block_dir,
+                                                                 ell_block_dim,
+                                                                 bsr_row_ptr,
+                                                                 bsr_col_ind,
+                                                                 bsr_val,
+                                                                 row_ptr_type,
+                                                                 col_ind_type,
+                                                                 idx_base,
+                                                                 data_type),
+                                rocsparse_status_invalid_size);
+
+        // block_dim == 0
+        EXPECT_ROCSPARSE_STATUS(rocsparse_create_const_bsr_descr(descr,
+                                                                 rows,
+                                                                 cols,
+                                                                 nnz,
+                                                                 ell_block_dir,
+                                                                 0,
+                                                                 bsr_row_ptr,
+                                                                 bsr_col_ind,
+                                                                 bsr_val,
+                                                                 row_ptr_type,
+                                                                 col_ind_type,
+                                                                 idx_base,
+                                                                 data_type),
+                                rocsparse_status_invalid_size);
+
         void* ell_col_ind = (void*)0x4;
         void* ell_val     = (void*)0x4;
 
@@ -339,6 +381,55 @@ void testing_const_spmat_descr_bad_arg(const Arguments& arg)
                                                                  cols,
                                                                  0,
                                                                  csc_col_ptr,
+                                                                 nullptr,
+                                                                 nullptr,
+                                                                 row_ptr_type,
+                                                                 col_ind_type,
+                                                                 idx_base,
+                                                                 data_type),
+                                rocsparse_status_success);
+        EXPECT_ROCSPARSE_STATUS(rocsparse_destroy_spmat_descr(local_descr),
+                                rocsparse_status_success);
+
+        EXPECT_ROCSPARSE_STATUS(rocsparse_create_const_bsr_descr(descr,
+                                                                 0,
+                                                                 cols,
+                                                                 0,
+                                                                 ell_block_dir,
+                                                                 ell_block_dim,
+                                                                 nullptr,
+                                                                 nullptr,
+                                                                 nullptr,
+                                                                 row_ptr_type,
+                                                                 col_ind_type,
+                                                                 idx_base,
+                                                                 data_type),
+                                rocsparse_status_success);
+        EXPECT_ROCSPARSE_STATUS(rocsparse_destroy_spmat_descr(local_descr),
+                                rocsparse_status_success);
+        EXPECT_ROCSPARSE_STATUS(rocsparse_create_const_bsr_descr(descr,
+                                                                 rows,
+                                                                 0,
+                                                                 0,
+                                                                 ell_block_dir,
+                                                                 ell_block_dim,
+                                                                 bsr_row_ptr,
+                                                                 nullptr,
+                                                                 nullptr,
+                                                                 row_ptr_type,
+                                                                 col_ind_type,
+                                                                 idx_base,
+                                                                 data_type),
+                                rocsparse_status_success);
+        EXPECT_ROCSPARSE_STATUS(rocsparse_destroy_spmat_descr(local_descr),
+                                rocsparse_status_success);
+        EXPECT_ROCSPARSE_STATUS(rocsparse_create_const_bsr_descr(descr,
+                                                                 rows,
+                                                                 cols,
+                                                                 0,
+                                                                 ell_block_dir,
+                                                                 ell_block_dim,
+                                                                 bsr_row_ptr,
                                                                  nullptr,
                                                                  nullptr,
                                                                  row_ptr_type,
@@ -661,6 +752,58 @@ void testing_const_spmat_descr_bad_arg(const Arguments& arg)
             // Destroy valid descriptors
             EXPECT_ROCSPARSE_STATUS(rocsparse_destroy_spmat_descr(descr), rocsparse_status_success);
         }
+
+        {
+            EXPECT_ROCSPARSE_STATUS(rocsparse_create_const_bsr_descr(&local_descr,
+                                                                     local_rows,
+                                                                     local_cols,
+                                                                     local_nnz,
+                                                                     local_ell_block_dir,
+                                                                     local_ell_block_dim,
+                                                                     (const void*)0x4,
+                                                                     (const void*)0x4,
+                                                                     (const void*)0x4,
+                                                                     local_itype,
+                                                                     local_jtype,
+                                                                     local_base,
+                                                                     local_ttype),
+                                    rocsparse_status_success);
+            rocsparse_const_spmat_descr descr = local_descr;
+
+            const void** bsr_row_ptr = (const void**)0x4;
+            const void** bsr_col_ind = (const void**)0x4;
+            const void** bsr_val     = (const void**)0x4;
+
+#define PARAMS_GET_BSR                                                                       \
+    descr, rows, cols, nnz, ell_block_dir, ell_block_dim, bsr_row_ptr, bsr_col_ind, bsr_val, \
+        row_ptr_type, col_ind_type, idx_base, data_type
+            bad_arg_analysis(rocsparse_const_bsr_get, PARAMS_GET_BSR);
+#undef PARAMS_GET_BSR
+
+#define PARAMS_GET_SIZE descr, rows, cols, nnz
+            bad_arg_analysis(rocsparse_spmat_get_size, PARAMS_GET_SIZE);
+#undef PARAMS_GET_SIZE
+
+#define PARAMS_GET_FORMAT descr, format
+            bad_arg_analysis(rocsparse_spmat_get_format, PARAMS_GET_FORMAT);
+#undef PARAMS_GET_FORMAT
+
+#define PARAMS_GET_INDEX_BASE descr, idx_base
+            bad_arg_analysis(rocsparse_spmat_get_index_base, PARAMS_GET_INDEX_BASE);
+#undef PARAMS_GET_INDEX_BASE
+
+            const void** values = (const void**)0x4;
+#define PARAMS_GET_VALUES descr, values
+            bad_arg_analysis(rocsparse_const_spmat_get_values, PARAMS_GET_VALUES);
+#undef PARAMS_GET_VALUES
+
+#define PARAMS_GET_STRIDED_BATCH descr, batch_count
+            bad_arg_analysis(rocsparse_spmat_get_strided_batch, PARAMS_GET_STRIDED_BATCH);
+#undef PARAMS_GET_STRIDED_BATCH
+
+            // Destroy valid descriptors
+            EXPECT_ROCSPARSE_STATUS(rocsparse_destroy_spmat_descr(descr), rocsparse_status_success);
+        }
     }
 }
 
@@ -689,6 +832,11 @@ void testing_const_spmat_descr(const Arguments& arg)
 
     device_vector<I> bell_col_data(mb * nb);
     device_vector<T> bell_val_data(mb * block_dim * col_width);
+
+    int64_t          bsr_nnzb = std::min<int64_t>(nnz, mb * nb);
+    device_vector<J> bsr_row_ptr_data(mb + 1);
+    device_vector<I> bsr_col_ind_data(bsr_nnzb);
+    device_vector<T> bsr_val_data(bsr_nnzb * block_dim * block_dim);
 
     if(arg.unit_check)
     {
@@ -885,10 +1033,70 @@ void testing_const_spmat_descr(const Arguments& arg)
         ASSERT_EQ(bell_val_data, bell_val);
 
         CHECK_ROCSPARSE_ERROR(rocsparse_destroy_spmat_descr(bell));
-    }
 
-    if(arg.timing)
-    {
+        /*
+        *   BSR
+        */
+        rocsparse_const_spmat_descr bsr;
+        CHECK_ROCSPARSE_ERROR(rocsparse_create_const_bsr_descr(&bsr,
+                                                               mb,
+                                                               nb,
+                                                               bsr_nnzb,
+                                                               block_dir,
+                                                               block_dim,
+                                                               bsr_row_ptr_data,
+                                                               bsr_col_ind_data,
+                                                               bsr_val_data,
+                                                               jtype,
+                                                               itype,
+                                                               base,
+                                                               ttype));
+
+        int64_t              bsr_mb;
+        int64_t              bsr_nb;
+        int64_t              bsr_nnzb_out;
+        int64_t              bsr_block_dim;
+        rocsparse_direction  bsr_block_dir;
+        rocsparse_index_base bsr_base;
+        rocsparse_indextype  bsr_itype;
+        rocsparse_indextype  bsr_jtype;
+        rocsparse_datatype   bsr_ttype;
+        const T*             bsr_val;
+        const J*             bsr_row_ptr;
+        const I*             bsr_col_ind;
+
+        CHECK_ROCSPARSE_ERROR(rocsparse_const_bsr_get(bsr,
+                                                      &bsr_mb,
+                                                      &bsr_nb,
+                                                      &bsr_nnzb_out,
+                                                      &bsr_block_dir,
+                                                      &bsr_block_dim,
+                                                      (const void**)&bsr_row_ptr,
+                                                      (const void**)&bsr_col_ind,
+                                                      (const void**)&bsr_val,
+                                                      &bsr_jtype,
+                                                      &bsr_itype,
+                                                      &bsr_base,
+                                                      &bsr_ttype));
+
+        unit_check_scalar(mb, bsr_mb);
+        unit_check_scalar(nb, bsr_nb);
+        unit_check_scalar(bsr_nnzb, bsr_nnzb_out);
+        unit_check_scalar(block_dim, bsr_block_dim);
+        unit_check_enum(block_dir, bsr_block_dir);
+        unit_check_enum(base, bsr_base);
+        unit_check_enum(itype, bsr_itype);
+        unit_check_enum(jtype, bsr_jtype);
+        unit_check_enum(ttype, bsr_ttype);
+        ASSERT_EQ(bsr_val_data, bsr_val);
+        ASSERT_EQ(bsr_row_ptr_data, bsr_row_ptr);
+        ASSERT_EQ(bsr_col_ind_data, bsr_col_ind);
+
+        bsr_val = nullptr;
+        CHECK_ROCSPARSE_ERROR(rocsparse_const_spmat_get_values(bsr, (const void**)&bsr_val));
+        ASSERT_EQ(bsr_val_data, bsr_val);
+
+        CHECK_ROCSPARSE_ERROR(rocsparse_destroy_spmat_descr(bsr));
     }
 }
 

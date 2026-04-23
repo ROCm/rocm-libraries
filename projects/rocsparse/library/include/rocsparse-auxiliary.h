@@ -979,6 +979,7 @@ rocsparse_status rocsparse_create_coo_aos_descr(rocsparse_spmat_descr* descr,
  *  \retval rocsparse_status_invalid_size if \p mb or \p nb or \p nnzb \p block_dim is invalid.
  *  \retval rocsparse_status_invalid_value if \p row_ptr_type or \p col_ind_type or \p idx_base or \p data_type or \p block_dir is invalid.
  */
+/**@{*/
 ROCSPARSE_EXPORT
 rocsparse_status rocsparse_create_bsr_descr(rocsparse_spmat_descr* descr,
                                             int64_t                mb,
@@ -993,6 +994,22 @@ rocsparse_status rocsparse_create_bsr_descr(rocsparse_spmat_descr* descr,
                                             rocsparse_indextype    col_ind_type,
                                             rocsparse_index_base   idx_base,
                                             rocsparse_datatype     data_type);
+
+ROCSPARSE_EXPORT
+rocsparse_status rocsparse_create_const_bsr_descr(rocsparse_const_spmat_descr* descr,
+                                                  int64_t                      mb,
+                                                  int64_t                      nb,
+                                                  int64_t                      nnzb,
+                                                  rocsparse_direction          block_dir,
+                                                  int64_t                      block_dim,
+                                                  const void*                  bsr_row_ptr,
+                                                  const void*                  bsr_col_ind,
+                                                  const void*                  bsr_val,
+                                                  rocsparse_indextype          row_ptr_type,
+                                                  rocsparse_indextype          col_ind_type,
+                                                  rocsparse_index_base         idx_base,
+                                                  rocsparse_datatype           data_type);
+/**@}*/
 
 /*! \ingroup aux_module
  *  \brief Create a sparse CSR matrix descriptor
