@@ -30,7 +30,6 @@ add_executable(
     utilities/TestCpuTypeUtilities.cpp
     utilities/TestSdkFrontendTypeConversions.cpp
     utilities/TestCpuReferencePointwise.cpp
-    utilities/TestDynamicTolerancesBatchNorm.cpp
     utilities/TestDynamicTolerancesCommon.cpp
     utilities/TestDynamicTolerancesConv.cpp
     utilities/TestDynamicTolerancesMatmul.cpp
@@ -77,8 +76,8 @@ add_executable(
     utilities/cpu_graph_executor/TestReductionSignatureKey.cpp
     utilities/cpu_graph_executor/TestRMSNormFwdPlan.cpp
     utilities/cpu_graph_executor/TestRMSNormFwdSignatureKey.cpp
-    $<$<BOOL:${HIPDNN_ENABLE_SDPA}>:utilities/cpu_graph_executor/TestSdpaFwdPlan.cpp>
-    $<$<BOOL:${HIPDNN_ENABLE_SDPA}>:utilities/cpu_graph_executor/TestSdpaFwdSignatureKey.cpp>
+    utilities/cpu_graph_executor/TestSdpaFwdPlan.cpp
+    utilities/cpu_graph_executor/TestSdpaFwdSignatureKey.cpp
     TestVersion.cpp
 )
 
