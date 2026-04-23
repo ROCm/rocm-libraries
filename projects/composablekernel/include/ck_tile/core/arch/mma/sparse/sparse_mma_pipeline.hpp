@@ -105,6 +105,10 @@ struct SparseMmaPipeline : public MmaPipelineBase<sparse::detail::getPipelineFla
     static constexpr uint32_t TotalCompressedElems =
         TotalUncompressedElems / MmaOp::kCompressionRatio;
 
+    // Variable-length idx type for the whole wave-tile (spans multiple int32_t words if needed)
+    static constexpr index_t IdxNumWords = sparse::detail::idx_words_needed<TotalCompressedElems>;
+    using IdxType                        = sparse::detail::SparseIdxPack<IdxNumWords>;
+
     // Per-fragment compressed vector type (for individual MmaOp::exec calls)
     using FragAVecT = typename MmaOp::AVecType;
 
@@ -148,9 +152,6 @@ struct SparseMmaPipeline : public MmaPipelineBase<sparse::detail::getPipelineFla
 
         // Reinterpret the full compressed vector as per-fragment arrays
         auto* a_frags = ck_tile::bit_cast<FragAVecT(*)[FragsK]>(&a_compressed_whole);
-
-        static_assert(FragsM * FragsK * InternalAFragSize * 2 <= 32,
-                      "Total idx bits exceed int32_t capacity");
 
         // Accumulation loop with per-fragment idx extraction
         if constexpr(AccumPolicy == MmaAccumPolicy::ROW_MAJOR)
@@ -216,8 +217,9 @@ struct SparseMmaPipeline : public MmaPipelineBase<sparse::detail::getPipelineFla
                       "Compressed vector alignment must be >= FragAVecT alignment "
                       "for safe reinterpret_cast to per-fragment array");
 
-        using IdxType = std::tuple_element_t<1, ATransformResult>;
-        static_assert(std::is_same_v<IdxType, int32_t>, "Sparsity index type must be int32_t");
+        using ActualIdxType = std::tuple_element_t<1, ATransformResult>;
+        static_assert(std::is_same_v<ActualIdxType, IdxType>,
+                      "Sparsity index type must match SparseIdxPack<IdxNumWords>");
     }
 };
 
