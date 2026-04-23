@@ -4,7 +4,7 @@
 cmake_minimum_required(VERSION 3.25.2)
 add_compile_definitions(__HIP_PLATFORM_AMD__)
 
-set(CMAKE_TOOLCHAIN_FILE "${CMAKE_CURRENT_SOURCE_DIR}/cmake/ClangToolChain.cmake"
+set(CMAKE_TOOLCHAIN_FILE "${CMAKE_CURRENT_SOURCE_DIR}/../cmake/ClangToolChain.cmake"
     CACHE STRING "Toolchain file"
 )
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
@@ -87,6 +87,7 @@ endif()
 # Setup testing dependencies, tests & clang format
 include(Dependencies)
 if (NOT HIPDNN_SKIP_TESTS)
+    fetch_gtest_dependency()
     include(Tests)
 endif()
 if (ENABLE_CLANG_FORMAT)

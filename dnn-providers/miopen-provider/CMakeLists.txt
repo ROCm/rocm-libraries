@@ -5,7 +5,7 @@ cmake_minimum_required(VERSION 3.25.2)
 message(STATUS "Building miopen provider plugin standalone")
 add_compile_definitions(__HIP_PLATFORM_AMD__)
 
-set(CMAKE_TOOLCHAIN_FILE "${CMAKE_SOURCE_DIR}/cmake/ClangToolChain.cmake"
+set(CMAKE_TOOLCHAIN_FILE "${CMAKE_CURRENT_SOURCE_DIR}/../cmake/ClangToolChain.cmake"
     CACHE STRING "Toolchain file"
 )
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
@@ -121,6 +121,9 @@ include(ClangTidy)
 include(Sanitizers)
 
 include(Dependencies)
+if(NOT MIOPENPROVIDER_SKIP_TESTS)
+    fetch_gtest_dependency()
+endif()
 include(Tests)
 
 if(MIOPENPROVIDER_ENABLE_COVERAGE)

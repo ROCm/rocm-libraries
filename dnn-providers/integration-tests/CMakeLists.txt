@@ -3,7 +3,7 @@
 
 cmake_minimum_required(VERSION 3.25.2)
 
-set(CMAKE_TOOLCHAIN_FILE "${CMAKE_SOURCE_DIR}/cmake/ClangToolChain.cmake"
+set(CMAKE_TOOLCHAIN_FILE "${CMAKE_CURRENT_SOURCE_DIR}/../cmake/ClangToolChain.cmake"
     CACHE STRING "Toolchain file"
 )
 
@@ -103,6 +103,7 @@ endif()
 find_package(Threads REQUIRED)
 
 include(Dependencies)
+fetch_gtest_dependency()
 
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
