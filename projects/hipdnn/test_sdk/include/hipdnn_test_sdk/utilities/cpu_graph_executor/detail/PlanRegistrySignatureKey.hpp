@@ -11,6 +11,7 @@
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/BatchnormFwdInferenceSignatureKey.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/BatchnormFwdInferenceWithVarianceSignatureKey.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/BatchnormTrainSignatureKey.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/BlockScaleDequantizeSignatureKey.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/ConvolutionBwdSignatureKey.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/ConvolutionFwdSignatureKey.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/ConvolutionWrwSignatureKey.hpp>
@@ -18,6 +19,7 @@
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/MatmulSignatureKey.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/PointwiseSignatureKey.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/RMSNormFwdSignatureKey.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/ReductionSignatureKey.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/SdpaFwdSignatureKey.hpp>
 
 namespace hipdnn_test_sdk::detail
@@ -38,6 +40,7 @@ using PlanRegistrySignatureKey = std::variant<BatchnormFwdInferenceSignatureKey,
                                               BatchnormFwdInferenceWithVarianceSignatureKey,
                                               BatchnormBwdSignatureKey,
                                               BatchnormTrainSignatureKey,
+                                              BlockScaleDequantizeSignatureKey,
                                               ConvolutionFwdSignatureKey,
                                               ConvolutionBwdSignatureKey,
                                               ConvolutionWrwSignatureKey,
@@ -45,13 +48,14 @@ using PlanRegistrySignatureKey = std::variant<BatchnormFwdInferenceSignatureKey,
                                               MatmulSignatureKey,
                                               PointwiseSignatureKey,
                                               RMSNormFwdSignatureKey,
-                                              SdpaFwdSignatureKey>;
+                                              SdpaFwdSignatureKey,
+                                              ReductionSignatureKey>;
 
 struct PlanRegistrySignatureKeyHash
 {
     std::size_t operator()(const PlanRegistrySignatureKey& k) const
     {
-        return std::visit([](auto const& x) { return x.hashSelf(); }, k);
+        return std::visit([](const auto& x) { return x.hashSelf(); }, k);
     }
 };
 

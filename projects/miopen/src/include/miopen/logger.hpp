@@ -163,13 +163,12 @@ std::array<T, sizeof...(Ts) + 1> make_array(T x, Ts... xs)
     return {{x, xs...}};
 }
 
-// MSVC's preprocessor and CPPCHECK seem unable
-// to properly handle some complex stuff. We have to disable
-// some debugging features to avoid build errors.
-#define WORKAROUND_ISSUE_PP_TRANSFORM_ARGS 0
-#if defined(_MSC_VER) || defined(CPPCHECK)
-#undef WORKAROUND_ISSUE_PP_TRANSFORM_ARGS
+// In case CPPCHECK we have to disable some
+// debugging features to avoid build errors.
+#if defined(CPPCHECK)
 #define WORKAROUND_ISSUE_PP_TRANSFORM_ARGS 1
+#else
+#define WORKAROUND_ISSUE_PP_TRANSFORM_ARGS 0
 #endif
 
 #define MIOPEN_LOG_ENUM_EACH(x) std::pair<std::string, decltype(x)>(#x, x)
@@ -224,6 +223,8 @@ MIOPEN_INTERNALS_EXPORT std::string LoggingLevelToCustomString(LoggingLevel leve
                                                                const char* custom);
 MIOPEN_INTERNALS_EXPORT const char* LoggingLevelToCString(LoggingLevel level);
 MIOPEN_INTERNALS_EXPORT std::string LoggingPrefix();
+MIOPEN_INTERNALS_EXPORT std::string LoggingPrefixMinimal();
+MIOPEN_INTERNALS_EXPORT std::ostringstream& GetThreadLocalLogStream();
 
 /// \return true if level is enabled.
 /// \param level - one of the values defined in LoggingLevel.
@@ -371,38 +372,29 @@ MIOPEN_INTERNALS_EXPORT bool IsLogBufferOn();
 
 MIOPEN_INTERNALS_EXPORT void ClearLogBuffer();
 
-MIOPEN_INTERNALS_EXPORT void BufferLog(std::string line);
+MIOPEN_INTERNALS_EXPORT void BufferLog(std::string&& line);
 
 MIOPEN_INTERNALS_EXPORT void OutputBufferedLogs();
 
-#define MIOPEN_LOG_XQ_CUSTOM(level, disableQuieting, category, fn_name, ...)                \
-    do                                                                                      \
-    {                                                                                       \
-        std::ostringstream miopen_log_ss;                                                   \
-        const bool is_logging = miopen::IsLogging(level, disableQuieting);                  \
-        const bool is_logging_i2 =                                                          \
-            miopen::IsLogging(miopen::LoggingLevel::Info2, disableQuieting);                \
-        const bool buffer_on = miopen::IsLogBufferOn();                                     \
-        if(is_logging || (buffer_on && !is_logging_i2))                                     \
-        {                                                                                   \
-            miopen_log_ss << miopen::LoggingPrefix() << category << " [" << fn_name << "] " \
-                          << __VA_ARGS__ << std::endl;                                      \
-            if(is_logging)                                                                  \
-            {                                                                               \
-                std::cerr << miopen_log_ss.str();                                           \
-            }                                                                               \
-            if(buffer_on && !is_logging_i2)                                                 \
-            {                                                                               \
-                if(level < miopen::LoggingLevel::Trace)                                     \
-                {                                                                           \
-                    miopen::BufferLog(miopen_log_ss.str());                                 \
-                }                                                                           \
-                if(level == miopen::LoggingLevel::Error)                                    \
-                {                                                                           \
-                    miopen::OutputBufferedLogs();                                           \
-                }                                                                           \
-            }                                                                               \
-        }                                                                                   \
+/// Internal helper that contains all branching logic for MIOPEN_LOG_XQ_CUSTOM.
+/// Keeping the logic here (rather than inline in the macro) prevents the macro
+/// from inflating the cyclomatic complexity of every translation unit that uses it.
+MIOPEN_INTERNALS_EXPORT void LogXQCustomImpl(LoggingLevel level,
+                                             bool disableQuieting,
+                                             std::string_view category,
+                                             std::string_view fn_name,
+                                             std::string message);
+
+#define MIOPEN_LOG_XQ_CUSTOM(level, disableQuieting, category, fn_name, ...)     \
+    do                                                                           \
+    {                                                                            \
+        if(miopen::IsLogging(level, disableQuieting) || miopen::IsLogBufferOn()) \
+        {                                                                        \
+            auto& miopen_log_ss = miopen::GetThreadLocalLogStream();             \
+            miopen_log_ss << __VA_ARGS__;                                        \
+            miopen::LogXQCustomImpl(                                             \
+                level, disableQuieting, category, fn_name, miopen_log_ss.str()); \
+        }                                                                        \
     } while(false)
 
 #define MIOPEN_LOG_XQ_(level, disableQuieting, fn_name, ...) \

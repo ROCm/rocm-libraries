@@ -129,6 +129,7 @@ set( kgen_embed_files
      ${CMAKE_SOURCE_DIR}/library/src/device/generator/rtc_radix_functions/radix_17.h
 
      # extra files for generating standalone test harnesses for kernels
+     ${CMAKE_SOURCE_DIR}/shared/sys_mem.h
      ${CMAKE_SOURCE_DIR}/shared/device_properties.h
      ${CMAKE_SOURCE_DIR}/shared/rocfft_hip.h
      ${CMAKE_SOURCE_DIR}/shared/gpubuf.h
@@ -232,6 +233,7 @@ add_custom_command(
 set( rocfft_source
   auxiliary.cpp
   data_layout.cpp
+  exec_info.cpp
   plan.cpp
   transform.cpp
   repo.cpp
@@ -401,6 +403,11 @@ add_library( rocfft
   ${relative_rocfft_headers_public}
   )
 rocfft_add_coverage_flags( rocfft )
+
+if( WIN32 )
+  configure_file(${CMAKE_CURRENT_SOURCE_DIR}/rocfft.rc.in ${CMAKE_CURRENT_BINARY_DIR}/rocfft.rc)
+  target_sources(rocfft PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/rocfft.rc)
+endif()
 
 # rocFFT contains default implementations of callback functions that
 # need to be built as relocatable device code (causes failure at link

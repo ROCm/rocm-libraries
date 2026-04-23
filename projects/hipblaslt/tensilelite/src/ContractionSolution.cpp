@@ -36,6 +36,7 @@
 #include <Tensile/hip/HipHardware.hpp>
 
 #include <Tensile/UtilsOrigami.hpp>
+#include <iostream>
 #include <origami/streamk.hpp>
 
 #include <algorithm>
@@ -551,7 +552,9 @@ namespace TensileLite
         }
 
         TensorDescriptor const& a          = problem.a();
+        TensorDescriptor const& mxsa       = problem.mxsa();
         TensorDescriptor const& b          = problem.b();
+        TensorDescriptor const& mxsb       = problem.mxsb();
         TensorDescriptor const& c          = problem.c();
         TensorDescriptor const& d          = problem.d();
         TensorDescriptor const& e          = problem.tensor(ContractionProblemGemm::TENSOR::E);
@@ -618,8 +621,12 @@ namespace TensileLite
         {
             args.template append<void const*>(
                 "a", problemType.sparse == 1 ? inputs.compressed : inputs.a);
+            if(problemType.mxBlockA)
+                args.template append<void const*>("mxsa", inputs.mxsa);
             args.template append<void const*>(
                 "b", problemType.sparse == 2 ? inputs.compressed : inputs.b);
+            if(problemType.mxBlockB)
+                args.template append<void const*>("mxsb", inputs.mxsb);
         }
         else
         {
@@ -684,11 +691,19 @@ namespace TensileLite
             args.template append<uint32_t>(concatenate_if<T_Debug>("strideA", i), stride_a);
         }
 
+        if(problemType.mxBlockA)
+            for(size_t i = startStrideAB; i < mxsa.dimensions(); i++)
+                args.template append<uint32_t>(concatenate_if<T_Debug>("strideMXSA", i), mxsa.strides()[i]);
+
         for(size_t i = startStrideAB; i < b.dimensions(); i++)
         {
             auto stride_b = problemType.sparse == 2 ? compressed.strides()[i] : b.strides()[i];
             args.template append<uint32_t>(concatenate_if<T_Debug>("strideB", i), stride_b);
         }
+
+        if(problemType.mxBlockB)
+            for(size_t i = startStrideAB; i < mxsb.dimensions(); i++)
+                args.template append<uint32_t>(concatenate_if<T_Debug>("strideMXSB", i), mxsb.strides()[i]);
 
         if(problemType.sparse)
         {
@@ -724,6 +739,7 @@ namespace TensileLite
             // In this case no actual iterations will be run, but workgroups will be mapped correctly for beta*C
             auto     itersPerTile = max(1, problem.getItersPerTile(sizeMapping));
             auto     totalIters   = tiles * itersPerTile;
+
             uint32_t magicNumberItersPerTile;
             uint32_t magicShiftItersPerTile;
             magicNumberItersPerTile = magicNumber(2, itersPerTile, &magicShiftItersPerTile);
@@ -731,7 +747,12 @@ namespace TensileLite
             args.template append<uint32_t>("itersPerTile", itersPerTile);
             args.template append<uint32_t>("magicNumberItersPerTile", magicNumberItersPerTile);
             args.template append<uint32_t>("magicShiftItersPerTile", magicShiftItersPerTile);
-            args.template append<uint32_t>("totalIters", totalIters);
+
+            // Custom kernels still use totalIters
+            if(!sizeMapping.customKernelName.empty())
+            {
+                args.template append<uint32_t>("totalIters", totalIters);
+            }
 
             if(sizeMapping.streamK == 1) // Basic SK
             {
@@ -1206,7 +1227,13 @@ namespace TensileLite
         {
             uint32_t synchronizerUsage
                 = sizeMapping.synchronizerSizePerWG * problem.getNumTiles(sizeMapping, 1) * B;
-            gsuVal = synchronizerUsage > 409600 ? 1 : gsuVal;
+
+            if (problem.groupedGemm() && (problem.groupedGemmCount() > 1))
+            {
+                gsuVal = synchronizerUsage > (409600 * 16 / problem.groupedGemmCount()) ? 1 : gsuVal;
+            }
+            else
+                gsuVal = synchronizerUsage > (409600 * 16) ? 1 : gsuVal;
         }
 
         // Avoid selecting a gsu value that would make launch grid over the limit
@@ -1389,7 +1416,8 @@ namespace TensileLite
         ContractionSolution::generateSingleCall(ContractionSolution::Problem const& problem,
                                                 ContractionInputs const&            inputs,
                                                 Hardware const&                     hardware,
-                                                StreamKSettings const&              sk) const
+                                                StreamKSettings const&              sk,
+                                                GSUSettings const&                  gsuSettings) const
     {
         KernelInvocation rv;
 
@@ -1417,7 +1445,7 @@ namespace TensileLite
             rv.numWorkGroups.z = 1;
         }
 
-        // Use arch from existing hardware to avoid repeated hipGetDeviceProperties (SWDEV-579719)
+        // Use arch from existing hardware to avoid repeated hipGetDeviceProperties
         auto removePrefix = [](const std::string& s) {
             size_t pos = s.find("gfx");
             if(pos != std::string::npos)
@@ -1471,10 +1499,14 @@ namespace TensileLite
         singleCallArgs<T_Debug, true>(
             problem, inputs, 0, &hardware, problemNumGroupTiles, rv.numWorkGroups, rv.args, sk);
 
-        if(sizeMapping.globalAccumulation == 3)
+        if(gsuSettings.globalAccumulation == 3 || sizeMapping.adaptiveGemmGSUA == 1) // MBSK or MB with AdaptiveGemmGSUA
         {
             rv.args.append<void const*>("dstD", inputs.d);
-            rv.args.append<void const*>("Synchronizer", inputs.Synchronizer);
+            // MBSK: synchronizer address, MB: null address
+            rv.args.append<void const*>("Synchronizer",
+                                        gsuSettings.globalAccumulation == 3 
+                                        ? inputs.Synchronizer 
+                                        : NULL);
             rv.args.append<uint32_t>("GSUSync", 0);
         }
 
@@ -1616,11 +1648,14 @@ namespace TensileLite
                                                h_args,
                                                sk);
 
-                if(sizeMapping.globalAccumulation == 3)
+                if(sizeMapping.globalAccumulation == 3 || sizeMapping.adaptiveGemmGSUA == 1) // MBSK or MB with AdaptiveGemmGSUA
                 {
                     h_args.template append<void const*>("dstD", inputs.grouped[idx].d);
+                    // MBSK: synchronizer address, MB: null address
                     h_args.template append<void const*>("Synchronizer",
-                                                        inputs.grouped[idx].Synchronizer);
+                                                        sizeMapping.globalAccumulation == 3
+                                                        ? inputs.grouped[idx].Synchronizer
+                                                        : NULL);
                     h_args.template append<uint32_t>("GSUSync", 0);
                 }
 
@@ -2518,7 +2553,8 @@ namespace TensileLite
         }
         else
         {
-            mt1 = int(problem.d().sizes()[1] / 2) * 2;
+            // MT1 should be the power of 2 to match setting in tensileLite
+            mt1 = static_cast<int>(pow(2, ceil(log2(mt1))));
             if(mt1 == 0)
                 mt1 = 1;
         }
@@ -2763,12 +2799,15 @@ namespace TensileLite
             }
         }
 
-        if(debug)
-            rv.push_back(generateSingleCall<true>(problem, inputs, hardware, sk));
-        else
-            rv.push_back(generateSingleCall<false>(problem, inputs, hardware, sk));
+        GSUSettings gsuSettings;
+        gsuSettings.globalAccumulation = problem.getAccumulation(hardware, sizeMapping, gsu);
 
-        if(((sizeMapping.globalAccumulation != 3) && gsu > 1 && sizeMapping.globalAccumulation)
+        if(debug)
+            rv.push_back(generateSingleCall<true>(problem, inputs, hardware, sk, gsuSettings));
+        else
+            rv.push_back(generateSingleCall<false>(problem, inputs, hardware, sk, gsuSettings));
+
+        if((gsu > 1 && gsuSettings.globalAccumulation && gsuSettings.globalAccumulation != 3)
            || sk.reduction == origami::reduction_t::parallel)
         {
             if(debug)
@@ -3050,26 +3089,26 @@ namespace TensileLite
         auto cInfo = DataTypeInfo::Get(problemType.cType);
         auto dInfo = DataTypeInfo::Get(problemType.dType);
 
-        spm.memReadBytesA = (NumBatches * M * N * K) / MT1 * aInfo.elementSize;
-        spm.memReadBytesB = (NumBatches * M * N * K) / MT0 * bInfo.elementSize;
-        spm.memReadBytesC = (NumBatches * M * N) * betaReads * cInfo.elementSize;
+        spm.memReadBytesA = multiplyElementSize((NumBatches * M * N * K) / MT1, aInfo.elementSize);
+        spm.memReadBytesB = multiplyElementSize((NumBatches * M * N * K) / MT0, bInfo.elementSize);
+        spm.memReadBytesC = multiplyElementSize((NumBatches * M * N) * betaReads, cInfo.elementSize);
 
         if(GlobalSplitU == 1)
-            spm.memWriteBytesD = (NumBatches * M * N) * (1 + betaWrites) * dInfo.elementSize;
+            spm.memWriteBytesD = multiplyElementSize((NumBatches * M * N) * (1 + betaWrites), dInfo.elementSize);
         else
         {
             bool   hardwareAtomic   = false; // TODO-model
             double atomicOperations = hardwareAtomic ? 2 : 3; // read-mod-write or cas  //TODO-model
             double atomicCollisions = 1.0; // TODO-could be based on K, GSU
-            spm.memWriteBytesD      = (NumBatches * M * N)
+            spm.memWriteBytesD      = multiplyElementSize((NumBatches * M * N)
                                  * (betaWrites + atomicOperations * atomicCollisions)
-                                 * dInfo.elementSize;
+                                 , dInfo.elementSize);
         }
         spm.memReadBytes   = spm.memReadBytesA + spm.memReadBytesB + spm.memReadBytesC;
-        spm.memGlobalReads = spm.memReadBytesA / aInfo.elementSize
-                             + spm.memReadBytesB / bInfo.elementSize
-                             + spm.memReadBytesC / cInfo.elementSize;
-        spm.memGlobalWrites = spm.memWriteBytesD / dInfo.elementSize;
+        spm.memGlobalReads = divideElementSize(spm.memReadBytesA, aInfo.elementSize)
+                             + divideElementSize(spm.memReadBytesB, bInfo.elementSize)
+                             + divideElementSize(spm.memReadBytesC, cInfo.elementSize);
+        spm.memGlobalWrites = divideElementSize(spm.memWriteBytesD, dInfo.elementSize);
 
         return spm;
     }
@@ -3214,7 +3253,7 @@ namespace TensileLite
         if(problemType.outputAmaxD)
         {
             auto numWGS = getNumWorkGroups(problem, sizeMapping);
-            size += problem.amaxd().elementBytes() * numWGS;
+            size += multiplyElementSize(numWGS, problem.amaxd().elementBytes());
         }
 
         return size;
@@ -3325,6 +3364,9 @@ namespace TensileLite
                        static_cast<size_t>(sizeMapping.depthU)},
             };
 
+
+            TENSILE_ASSERT_EXC(hipAMDGPU->analyticalHardware != nullptr);
+
             reductionStrat = origami::streamk::select_reduction(
                 origami_problem,
                 *(hipAMDGPU->analyticalHardware),
@@ -3388,7 +3430,7 @@ namespace TensileLite
                 .batch    = batch,
                 .a_dtype  = datatypeToAnalyticalDatatype(problem.alphaType()),
                 .b_dtype  = datatypeToAnalyticalDatatype(problem.betaType()),
-                .mi_dtype = datatypeToAnalyticalDatatype(problem.computeInputType()),
+                .mi_dtype = datatypeToAnalyticalDatatype(problem.computeInputTypeA()),
             };
             origami::config_t origami_config = {
                 .mt                        = {static_cast<size_t>(sizeMapping.macroTile.x),
@@ -3403,6 +3445,9 @@ namespace TensileLite
                 .workspace_size_per_elem_c = sizeMapping.workspaceSizePerElemC,
                 .reduction_strategy        = reductionStrat,
             };
+
+            TENSILE_ASSERT_EXC(hipAMDGPU->analyticalHardware != nullptr);
+
             skGrid = origami::streamk::select_grid_size(
                 origami_problem,
                 *(hipAMDGPU->analyticalHardware),
@@ -3652,7 +3697,7 @@ namespace TensileLite
 
     origami::data_type_t ContractionSolution::getOrigamiDatatype(Problem const& problem) const
     {
-        return datatypeToAnalyticalDatatype(problem.computeInputType());
+        return datatypeToAnalyticalDatatype(problem.computeInputTypeA());
     }
 
     std::ostream& operator<<(std::ostream&                                      stream,

@@ -153,11 +153,8 @@ void ProblemDescription::HeuristicUpdateLayouts()
     {
         for(const std::string& layout : supported_layouts)
         {
-            bool in_ok  = in.IsPossibleLayout4D5D(layout, mode);
-            bool out_ok = out.IsPossibleLayout4D5D(layout, mode);
-            bool wei_ok = weights.IsPossibleLayout4D5D(layout, mode);
-
-            if(in_ok && out_ok && wei_ok)
+            if(in.IsPossibleLayout4D5D(layout, mode) && out.IsPossibleLayout4D5D(layout, mode) &&
+               weights.IsPossibleLayout4D5D(layout, mode))
             {
                 // Update the cached layout strings to match the detected layout
                 in_layout      = layout;
@@ -176,10 +173,10 @@ void SerializeStrides(
     std::ostringstream& stream, in_desc& in, out_desc& out, wei_desc& wei, const char delim)
 {
 
-    auto join_v = [](std::ostringstream& stream, const auto& vec, const char delim) {
-        stream << *vec.begin();
+    auto join_v = [](std::ostringstream& stream_, const auto& vec, const char delim_) {
+        stream_ << *vec.begin();
         std::for_each(std::next(vec.begin()), vec.end(), [&](const auto& value) {
-            stream << delim << value;
+            stream_ << delim_ << value;
         });
     };
 

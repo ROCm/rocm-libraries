@@ -5,6 +5,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
@@ -12,6 +13,7 @@
 #include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <logging/Logging.hpp>
+#include <mutex>
 #include <regex>
 #include <stdexcept>
 #include <string>
@@ -80,6 +82,7 @@ protected:
 // Test: User callback receives backend logs
 TEST_F(IntegrationBackendUserLoggingApis, UserCallbackReceivesLogs)
 {
+    SKIP_IF_NO_DEVICES();
     auto recorder = IsolatedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
 
     // Register test recording callback
@@ -102,6 +105,7 @@ TEST_F(IntegrationBackendUserLoggingApis, UserCallbackReceivesLogs)
 // Test: Unregister callback with SEV_OFF stops log capture
 TEST_F(IntegrationBackendUserLoggingApis, UnregisterWithSevOffStopsCapture)
 {
+    SKIP_IF_NO_DEVICES();
     auto recorder = IsolatedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
 
     // Register callback
@@ -115,7 +119,7 @@ TEST_F(IntegrationBackendUserLoggingApis, UnregisterWithSevOffStopsCapture)
     // Small delay for async callback
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
 
-    size_t const logsAfterCreate = recorder.getRecordedLogCount();
+    const size_t logsAfterCreate = recorder.getRecordedLogCount();
     EXPECT_GT(logsAfterCreate, 0);
 
     // Unregister callback with SEV_OFF
@@ -128,13 +132,14 @@ TEST_F(IntegrationBackendUserLoggingApis, UnregisterWithSevOffStopsCapture)
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
 
     // Log count should not increase
-    size_t const finalLogs = recorder.getRecordedLogCount();
+    const size_t finalLogs = recorder.getRecordedLogCount();
     EXPECT_EQ(finalLogs, logsAfterCreate);
 }
 
 // Test: Sync callback executes immediately
 TEST_F(IntegrationBackendUserLoggingApis, SyncCallbackImmediate)
 {
+    SKIP_IF_NO_DEVICES();
     auto recorder = IsolatedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
 
     // Register callback in SYNC mode
@@ -185,6 +190,7 @@ TEST_F(IntegrationBackendUserLoggingApis, RejectsInvalidMode)
 // Test: Callback respects log level filtering
 TEST_F(IntegrationBackendUserLoggingApis, CallbackRespectsLogLevel)
 {
+    SKIP_IF_NO_DEVICES();
     auto recorder = IsolatedLogRecorder::withCurrentLevel();
 
     // Set log level to ERROR (filters out INFO and WARN)
@@ -208,6 +214,7 @@ TEST_F(IntegrationBackendUserLoggingApis, CallbackRespectsLogLevel)
 // Test: Update callback level
 TEST_F(IntegrationBackendUserLoggingApis, UpdateCallbackLevel)
 {
+    SKIP_IF_NO_DEVICES();
     auto recorder = IsolatedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
 
     // Register callback at INFO
@@ -219,7 +226,7 @@ TEST_F(IntegrationBackendUserLoggingApis, UpdateCallbackLevel)
     ASSERT_EQ(hipdnnCreate(&handle1), HIPDNN_STATUS_SUCCESS);
 
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
-    size_t const infoLogs = recorder.getRecordedLogCount();
+    const size_t infoLogs = recorder.getRecordedLogCount();
     EXPECT_GT(infoLogs, 0);
 
     // Update callback to WARN level (same callback, same handle, different level)
@@ -230,7 +237,7 @@ TEST_F(IntegrationBackendUserLoggingApis, UpdateCallbackLevel)
     ASSERT_EQ(hipdnnCreate(&handle2), HIPDNN_STATUS_SUCCESS);
 
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
-    size_t const afterUpdate = recorder.getRecordedLogCount();
+    const size_t afterUpdate = recorder.getRecordedLogCount();
 
     // Verify minimal new logs (only WARN+ would be captured now)
     EXPECT_LE(afterUpdate - infoLogs, 1); // May get at most 1 WARN/ERROR log
@@ -242,6 +249,7 @@ TEST_F(IntegrationBackendUserLoggingApis, UpdateCallbackLevel)
 // Test: Async callback queues logs
 TEST_F(IntegrationBackendUserLoggingApis, AsyncCallbackQueued)
 {
+    SKIP_IF_NO_DEVICES();
     auto recorder = IsolatedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
 
     // Register callback in ASYNC mode
@@ -263,6 +271,7 @@ TEST_F(IntegrationBackendUserLoggingApis, AsyncCallbackQueued)
 // Test: Callback that throws exception is handled
 TEST_F(IntegrationBackendUserLoggingApis, CallbackThrowsException)
 {
+    SKIP_IF_NO_DEVICES();
     // Callback that throws exception
     static bool s_shouldThrow = true;
     auto throwingCallback = [](hipdnnUserLogCallbackHandle_t, hipdnnSeverity_t, const char*) {
@@ -300,6 +309,7 @@ TEST_F(IntegrationBackendUserLoggingApis, CallbackThrowsException)
 // Test: Synchronous guarantee on unregister
 TEST_F(IntegrationBackendUserLoggingApis, SyncGuaranteeOnUnregister)
 {
+    SKIP_IF_NO_DEVICES();
     // Track callback invocations
     static std::atomic<int> s_callbackCount{0};
     static std::atomic<bool> s_callbackActive{false};
@@ -338,7 +348,7 @@ TEST_F(IntegrationBackendUserLoggingApis, SyncGuaranteeOnUnregister)
         trackingCallback, HIPDNN_SEV_OFF, HIPDNN_LOG_CALLBACK_ASYNC, &handleToken);
 
     // Take snapshot AFTER unregister to avoid race with async queue processing
-    int const countAfterUnregister = s_callbackCount.load();
+    const int countAfterUnregister = s_callbackCount.load();
 
     // After unregister returns, callback should NOT be active
     EXPECT_FALSE(s_callbackActive.load()) << "Callback should not be active after unregister";
@@ -363,6 +373,7 @@ TEST_F(IntegrationBackendUserLoggingApis, SyncGuaranteeOnUnregister)
 // Test: Switch between sync and async mode
 TEST_F(IntegrationBackendUserLoggingApis, SwitchBetweenSyncAndAsync)
 {
+    SKIP_IF_NO_DEVICES();
     auto recorder = IsolatedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
 
     // Start with SYNC mode
@@ -373,7 +384,7 @@ TEST_F(IntegrationBackendUserLoggingApis, SwitchBetweenSyncAndAsync)
     ASSERT_EQ(hipdnnCreate(&handle), HIPDNN_STATUS_SUCCESS);
 
     // Sync: logs immediately available
-    size_t const syncLogs = recorder.getRecordedLogCount();
+    const size_t syncLogs = recorder.getRecordedLogCount();
     EXPECT_GT(syncLogs, 0);
 
     // Update to ASYNC mode (same callback, same handle, different mode)
@@ -383,13 +394,14 @@ TEST_F(IntegrationBackendUserLoggingApis, SwitchBetweenSyncAndAsync)
 
     // Async: need delay
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
-    size_t const asyncLogs = recorder.getRecordedLogCount();
+    const size_t asyncLogs = recorder.getRecordedLogCount();
     EXPECT_GT(asyncLogs, syncLogs);
 }
 
 // Test: Switch from async to sync mode
 TEST_F(IntegrationBackendUserLoggingApis, SwitchBetweenAsyncAndSync)
 {
+    SKIP_IF_NO_DEVICES();
     auto recorder = IsolatedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
 
     // Start with ASYNC mode
@@ -401,7 +413,7 @@ TEST_F(IntegrationBackendUserLoggingApis, SwitchBetweenAsyncAndSync)
 
     // Async: need delay
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
-    size_t const asyncLogs = recorder.getRecordedLogCount();
+    const size_t asyncLogs = recorder.getRecordedLogCount();
     EXPECT_GT(asyncLogs, 0);
 
     // Update to SYNC mode (same callback, same handle, different mode)
@@ -410,22 +422,25 @@ TEST_F(IntegrationBackendUserLoggingApis, SwitchBetweenAsyncAndSync)
     ASSERT_EQ(hipdnnDestroy(handle), HIPDNN_STATUS_SUCCESS);
 
     // Sync: logs immediately available
-    size_t const afterSwitch = recorder.getRecordedLogCount();
+    const size_t afterSwitch = recorder.getRecordedLogCount();
     EXPECT_GT(afterSwitch, asyncLogs);
 }
 
 // Test: Duplicate registration updates existing
 TEST_F(IntegrationBackendUserLoggingApis, DuplicateUpdatesExisting)
 {
+    SKIP_IF_NO_DEVICES();
     auto recorder = IsolatedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
 
     // Register callback at INFO
-    registerIsolatedCallback(HIPDNN_SEV_INFO, HIPDNN_LOG_CALLBACK_ASYNC);
+    registerIsolatedCallback(HIPDNN_SEV_INFO, HIPDNN_LOG_CALLBACK_SYNC);
     ASSERT_EQ(hipdnnBackendSetGlobalLogLevel_ext(HIPDNN_SEV_INFO), HIPDNN_STATUS_SUCCESS);
 
     // Register again with same callback and handle but different level
     // This should UPDATE, not create second registration
-    registerIsolatedCallback(HIPDNN_SEV_WARN, HIPDNN_LOG_CALLBACK_ASYNC);
+    registerIsolatedCallback(HIPDNN_SEV_WARN, HIPDNN_LOG_CALLBACK_SYNC);
+
+    recorder.clearLogs();
 
     // Trigger INFO level log
     hipdnnHandle_t handle = nullptr;
@@ -436,7 +451,9 @@ TEST_F(IntegrationBackendUserLoggingApis, DuplicateUpdatesExisting)
     // Should NOT receive INFO logs (updated to WARN)
     // If there were 2 registrations, we'd get logs from the first one
     EXPECT_EQ(recorder.countLogsAtLevel(HIPDNN_SEV_INFO), 0)
-        << "Should not receive INFO logs after update to WARN level";
+        << "Should not receive INFO logs after update to WARN level.\n"
+        << "Captured logs:\n"
+        << recorder.getRecordedLogsAsString();
 
     ASSERT_EQ(hipdnnDestroy(handle), HIPDNN_STATUS_SUCCESS);
 }
@@ -444,6 +461,7 @@ TEST_F(IntegrationBackendUserLoggingApis, DuplicateUpdatesExisting)
 // Test: Concurrent logging with user callback toggle between registered and unregistered
 TEST_F(IntegrationBackendUserLoggingApis, ConcurrentLoggingWithCallbackToggle)
 {
+    SKIP_IF_NO_DEVICES();
     // Redirect default logging to file to avoid console spam when callback is disabled
     _logFile = "concurrent_user_callback_toggle_test.log";
     hipdnn_data_sdk::utilities::setEnv("HIPDNN_LOG_FILE", _logFile.c_str());
@@ -451,10 +469,31 @@ TEST_F(IntegrationBackendUserLoggingApis, ConcurrentLoggingWithCallbackToggle)
     auto recorder = IsolatedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
 
     constexpr int NUM_LOGGER_THREADS = 4;
-    std::atomic<bool> startFlag{false};
-    std::atomic<bool> stopFlag{false};
+    std::mutex mutex;
+    std::condition_variable cvStart; // Main -> logger threads: start/stop signals
+    std::condition_variable cvProgress; // Logger threads -> main: iteration progress
+    bool startFlag = false;
+    bool stopFlag = false;
+    uint64_t iterationCount = 0;
+    int threadsReady = 0;
     std::vector<std::thread> threads;
     threads.reserve(NUM_LOGGER_THREADS);
+
+    constexpr auto THREAD_SYNC_TIMEOUT = std::chrono::seconds(10);
+
+    // Helper to wait until at least one log-generating thread has completed a full loop.
+    auto waitForIterations
+        = [&](uint64_t snapshot) {
+              std::unique_lock<std::mutex> lock(mutex);
+              // The iteration count will need to increment by the number of threads plus one
+              // to ensure that at least one thread ran through the log generating section of code.
+              const uint64_t targetCount = snapshot + static_cast<uint64_t>(NUM_LOGGER_THREADS) + 1;
+              const bool completed = cvProgress.wait_for(
+                  lock, THREAD_SYNC_TIMEOUT, [&] { return iterationCount >= targetCount; });
+              EXPECT_TRUE(completed)
+                  << "Timeout waiting for log-generating threads to complete iterations";
+              return iterationCount;
+          };
 
     // Register the user callback and set log level
     registerIsolatedCallback(HIPDNN_SEV_INFO, HIPDNN_LOG_CALLBACK_ASYNC);
@@ -464,29 +503,55 @@ TEST_F(IntegrationBackendUserLoggingApis, ConcurrentLoggingWithCallbackToggle)
     for(int i = 0; i < NUM_LOGGER_THREADS; ++i)
     {
         threads.emplace_back([&]() {
-            while(!startFlag.load())
             {
-                std::this_thread::yield();
+                std::unique_lock<std::mutex> lock(mutex);
+                ++threadsReady;
+                cvProgress.notify_one(); // Notify main thread that this thread is ready
+                cvStart.wait(lock, [&] { return startFlag; }); // Wait for start.
             }
 
-            while(!stopFlag.load())
+            hipdnnHandle_t handle = nullptr;
+
+            while(true)
             {
-                hipdnnHandle_t handle = nullptr;
-                hipdnnCreate(&handle);
-                if(handle != nullptr)
+                if(handle == nullptr)
+                {
+                    hipdnnCreate(&handle);
+                }
+                else
                 {
                     hipdnnDestroy(handle);
+                    handle = nullptr;
                 }
-                std::this_thread::yield();
+
+                {
+                    const std::lock_guard<std::mutex> lock(mutex);
+                    ++iterationCount;
+                    if(stopFlag && handle == nullptr)
+                    {
+                        cvProgress.notify_all();
+                        break;
+                    }
+                }
+                cvProgress.notify_all();
             }
         });
     }
 
-    // Start all logger threads
-    startFlag.store(true);
+    // Wait for all log-generating threads to be ready, then start them
+    {
+        std::unique_lock<std::mutex> lock(mutex);
+        const bool allReady = cvProgress.wait_for(
+            lock, THREAD_SYNC_TIMEOUT, [&] { return threadsReady == NUM_LOGGER_THREADS; });
+        ASSERT_TRUE(allReady) << "Timeout waiting for log-generating threads to become ready";
+        startFlag = true;
+    }
+    cvStart.notify_all();
 
     // Control thread behavior: toggle callback on and off
-    constexpr int NUM_CYCLES = 4;
+    constexpr int NUM_CYCLES = 8;
+    constexpr auto LOG_WAIT_TIMEOUT = std::chrono::milliseconds(500);
+
     for(int cycle = 0; cycle < NUM_CYCLES; ++cycle)
     {
         // Use async mode for even cycles, sync mode for odd cycles
@@ -495,10 +560,25 @@ TEST_F(IntegrationBackendUserLoggingApis, ConcurrentLoggingWithCallbackToggle)
         // With callback registered - logs should be captured
         registerIsolatedCallback(HIPDNN_SEV_INFO, mode);
 
-        size_t const countBefore = recorder.getRecordedLogCount();
-        std::this_thread::sleep_for(std::chrono::milliseconds(50));
-        size_t const countAfterEnabled = recorder.getRecordedLogCount();
+        const size_t countBefore = recorder.getRecordedLogCount();
+        uint64_t iterSnapshot;
+        {
+            const std::lock_guard<std::mutex> lock(mutex);
+            iterSnapshot = iterationCount;
+        }
+        waitForIterations(iterSnapshot);
 
+        // For async mode, wait for logs to be delivered from the queue.
+        // For sync mode, logs are immediate so no wait needed.
+        if(mode == HIPDNN_LOG_CALLBACK_ASYNC)
+        {
+            const bool logReceived = recorder.waitForLogCount(countBefore + 1, LOG_WAIT_TIMEOUT);
+            EXPECT_TRUE(logReceived)
+                << "Timed out waiting for logs (cycle " << cycle
+                << ", mode=" << (mode == HIPDNN_LOG_CALLBACK_ASYNC ? "async" : "sync") << ")";
+        }
+
+        const size_t countAfterEnabled = recorder.getRecordedLogCount();
         EXPECT_GT(countAfterEnabled, countBefore)
             << "Log count should increase when callback is registered (cycle " << cycle
             << ", mode=" << (mode == HIPDNN_LOG_CALLBACK_ASYNC ? "async" : "sync") << ")";
@@ -506,17 +586,31 @@ TEST_F(IntegrationBackendUserLoggingApis, ConcurrentLoggingWithCallbackToggle)
         // With callback unregistered (SEV_OFF) - logs should NOT be captured
         registerIsolatedCallback(HIPDNN_SEV_OFF, mode);
 
-        size_t const countBeforeDisabled = recorder.getRecordedLogCount();
-        std::this_thread::sleep_for(std::chrono::milliseconds(50));
-        size_t const countAfterDisabled = recorder.getRecordedLogCount();
+        const size_t countBeforeDisabled = recorder.getRecordedLogCount();
+        uint64_t iterSnapshotDisabled;
+        {
+            const std::lock_guard<std::mutex> lock(mutex);
+            iterSnapshotDisabled = iterationCount;
+        }
+        waitForIterations(iterSnapshotDisabled);
 
+        // For async mode, a short wait for any potential logs to arrive.
+        if(mode == HIPDNN_LOG_CALLBACK_ASYNC)
+        {
+            recorder.waitForLogCount(countBeforeDisabled + 1, std::chrono::milliseconds(50));
+        }
+
+        const size_t countAfterDisabled = recorder.getRecordedLogCount();
         EXPECT_EQ(countAfterDisabled, countBeforeDisabled)
             << "Log count should NOT increase when callback is unregistered (cycle " << cycle
-            << ")";
+            << ", mode=" << (mode == HIPDNN_LOG_CALLBACK_ASYNC ? "async" : "sync") << ")";
     }
 
-    // Stop all threads
-    stopFlag.store(true);
+    // Stop all threads - logger threads will see stopFlag after destroying their handle
+    {
+        const std::lock_guard<std::mutex> lock(mutex);
+        stopFlag = true;
+    }
     for(auto& t : threads)
     {
         t.join();
@@ -529,6 +623,7 @@ TEST_F(IntegrationBackendUserLoggingApis, ConcurrentLoggingWithCallbackToggle)
 // Test: Reentrant logging from sync callback is prevented (no stack overflow)
 TEST_F(IntegrationBackendUserLoggingApis, ReentrantLoggingPrevented)
 {
+    SKIP_IF_NO_DEVICES();
     // Counter to track recursive attempts
     std::atomic<int> recursiveAttempts{0};
     std::atomic<int> callbackInvocations{0};
@@ -570,11 +665,11 @@ TEST_F(IntegrationBackendUserLoggingApis, ReentrantLoggingPrevented)
     ASSERT_EQ(hipdnnCreate(&handle), HIPDNN_STATUS_SUCCESS);
 
     // Verify the callback was invoked at least once
-    int const invocations = callbackInvocations.load();
+    const int invocations = callbackInvocations.load();
     EXPECT_GT(invocations, 0) << "Callback should be invoked for backend logs";
 
     // Verify recursive attempts were made
-    int const attempts = recursiveAttempts.load();
+    const int attempts = recursiveAttempts.load();
     EXPECT_GT(attempts, 0) << "Should have attempted recursive logging";
 
     // Invocations should equal attempts (if recursion was NOT prevented there would
@@ -590,6 +685,7 @@ TEST_F(IntegrationBackendUserLoggingApis, ReentrantLoggingPrevented)
 // Test: Multiple callbacks (2 async + 2 sync) all receive logs independently
 TEST_F(IntegrationBackendUserLoggingApis, MultipleCallbacksAllReceiveLogs)
 {
+    SKIP_IF_NO_DEVICES();
     auto countingCallback
         = [](hipdnnUserLogCallbackHandle_t userHandle, hipdnnSeverity_t, const char*) {
               static_cast<std::atomic<int>*>(userHandle)->fetch_add(1);
@@ -640,10 +736,10 @@ TEST_F(IntegrationBackendUserLoggingApis, MultipleCallbacksAllReceiveLogs)
         countingCallback, HIPDNN_SEV_OFF, HIPDNN_LOG_CALLBACK_SYNC, &syncCount2);
 
     // Capture counts after unregistering
-    int const async1After = asyncCount1.load();
-    int const async2After = asyncCount2.load();
-    int const sync1After = syncCount1.load();
-    int const sync2After = syncCount2.load();
+    const int async1After = asyncCount1.load();
+    const int async2After = asyncCount2.load();
+    const int sync1After = syncCount1.load();
+    const int sync2After = syncCount2.load();
 
     // Trigger more logging — none of the callbacks should be invoked
     ASSERT_EQ(hipdnnDestroy(handle), HIPDNN_STATUS_SUCCESS);

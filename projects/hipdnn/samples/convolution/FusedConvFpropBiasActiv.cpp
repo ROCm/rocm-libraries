@@ -13,6 +13,7 @@
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_data_sdk/utilities/Workspace.hpp>
+#include <hipdnn_test_sdk/utilities/TensorDiff.hpp>
 #include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
 
 #include "../utils/Helpers.hpp"
@@ -138,7 +139,7 @@ bool SampleRunner::operator()(const TensorLayout& layout)
         // Step 2: Add bias using pointwise ADD with broadcasting
         utilities::Tensor<InputType> biasRefTensor(convOutAttr->get_dim(), layout);
         hipdnn_test_sdk::utilities::CpuReferencePointwiseImpl<InputType>::pointwiseCompute(
-            hipdnn_data_sdk::data_objects::PointwiseMode::ADD,
+            hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::ADD,
             biasRefTensor,
             convRefTensor,
             biasTensor);
@@ -146,17 +147,18 @@ bool SampleRunner::operator()(const TensorLayout& layout)
         // Step 3: Apply ReLU activation
         utilities::Tensor<InputType> yRefTensor(yAttr->get_dim(), layout);
         hipdnn_test_sdk::utilities::CpuReferencePointwiseImpl<InputType>::pointwiseCompute(
-            hipdnn_data_sdk::data_objects::PointwiseMode::RELU_FWD, yRefTensor, biasRefTensor);
+            hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD,
+            yRefTensor,
+            biasRefTensor);
 
         auto tolerance = hipdnn_test_sdk::utilities::conv::getToleranceFwd<InputType>();
 
         auto outValidator
             = hipdnn_test_sdk::utilities::CpuFpReferenceValidation<InputType>(tolerance, tolerance);
 
-        bool outValid = outValidator.allClose(yRefTensor, yTensor);
-
         std::cout << "CPU reference validation:\n";
-        std::cout << "  output: " << (outValid ? "successful" : "failed") << "\n";
+        bool outValid = hipdnn_test_sdk::utilities::validateAndReport<InputType>(
+            std::cout, "output", outValidator, yRefTensor, yTensor, tolerance, tolerance);
 
         validationPassed = outValid;
     }

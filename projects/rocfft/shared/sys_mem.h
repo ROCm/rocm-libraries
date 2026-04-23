@@ -25,8 +25,11 @@
 #include <memory>
 #include <mutex>
 #include <shared_mutex>
-
-#include "device_properties.h"
+#include <sstream>
+#include <stdexcept>
+#include <string>
+#include <utility>
+#include <vector>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -43,19 +46,60 @@ inline size_t bytes_to_GiB(const size_t bytes)
     return bytes == 0 ? 0 : (bytes - 1 + ONE_GiB) / ONE_GiB;
 }
 
-struct host_memory
+// returns a string reporting a byte size in a readable format,
+// rounding it up to the nearest KiB (MiB if `byte_sz` exceeds 1 GiB)
+static std::string byte_size_to_str(size_t byte_sz)
+{
+    if(byte_sz == 0)
+        return "0 B";
+    std::string                          ret;
+    const std::pair<size_t, std::string> mem_units[]
+        = {{ONE_GiB, "GiB"}, {ONE_MiB, "MiB"}, {ONE_KiB, "KiB"}};
+    for(const auto& u : mem_units)
+    {
+        auto tmp = byte_sz / u.first;
+        byte_sz -= tmp * u.first;
+        if(byte_sz > 0 && (u.first == ONE_KiB || !ret.empty()))
+        {
+            // round up to nearest relevant unit and finish
+            tmp++;
+            byte_sz = 0;
+        }
+        if(tmp > 0)
+        {
+            if(!ret.empty())
+                ret += " ";
+            ret += std::to_string(tmp) + " " + u.second;
+        }
+    }
+    return ret;
+}
+
+// return a string reporting a vec of byte sizes in a readable format.
+static std::string byte_sizes_to_str(const std::vector<size_t>& byte_sizes)
+{
+    std::string ret;
+    for(auto i : byte_sizes)
+    {
+        if(!ret.empty())
+            ret.push_back(',');
+        ret += byte_size_to_str(i);
+    }
+    return ret;
+}
+
+struct system_memory
 {
 public:
     // acquire a reference to a singleton of this struct
-    static host_memory& singleton()
+    static system_memory& singleton()
     {
-        static host_memory mem;
+        static system_memory mem;
         return mem;
     }
 
     size_t get_total_bytes() const
     {
-        std::shared_lock lock(host_memory_mutex);
         return total_bytes;
     }
 
@@ -66,11 +110,10 @@ public:
 
     void set_limit_bytes(size_t limit_bytes_)
     {
-        std::unique_lock lock(host_memory_mutex);
+        std::unique_lock lock(sys_memory_mutex);
         // Don't let limit use the total available memory, leave at
         // least a 1GiB buffer, otherwise process may get OOM killed.
-        limit_bytes
-            = limit_bytes_ > (total_bytes - ONE_GiB) ? (total_bytes - ONE_GiB) : limit_bytes_;
+        limit_bytes = std::min(limit_bytes_, total_bytes >= ONE_GiB ? total_bytes - ONE_GiB : 0);
     }
 
     void set_limit_gbytes(size_t limit_gbytes_)
@@ -80,17 +123,20 @@ public:
 
     size_t get_usable_bytes()
     {
-        update();
+        update_free_bytes();
 
         // Limit the amount of usable memory. If we are too aggressive
         // with host memory usage, the host process may get OOM killed
         // on systems with little or no swap space.
-        std::shared_lock lock(host_memory_mutex);
+        std::shared_lock lock(sys_memory_mutex);
+        return std::min(free_bytes < ONE_GiB ? 0 : free_bytes,
+                        used_bytes < limit_bytes ? limit_bytes - used_bytes : 0);
+    }
 
-        auto usable_bytes = free_bytes < ONE_GiB ? 0 : free_bytes;
-        usable_bytes      = usable_bytes > limit_bytes ? limit_bytes : usable_bytes;
-
-        return usable_bytes;
+    size_t get_limit_bytes() const
+    {
+        std::shared_lock lock(sys_memory_mutex);
+        return limit_bytes;
     }
 
     size_t get_usable_gbytes()
@@ -98,39 +144,75 @@ public:
         return bytes_to_GiB(get_usable_bytes());
     }
 
-private:
-    size_t total_bytes = 0;
-    size_t free_bytes  = 0;
-    size_t limit_bytes = 0;
-
-    mutable std::shared_mutex host_memory_mutex;
-
-    host_memory()
+    void record_used_bytes(size_t allocation_size)
     {
-        // Note: passing (reading) a member variable as argument to a member routine that
-        // requires a unique lock. This constructor is only possibly invoked at initialization
-        // of the local static variable in the "singleton" public member function though, and
-        // that initialization is guaranteed to be thread-safe in C++11.
-        update();
-        set_limit_bytes(total_bytes);
+        std::unique_lock lock(sys_memory_mutex);
+        used_bytes += allocation_size;
+    }
+    void release_used_bytes(size_t allocation_size)
+    {
+        std::unique_lock lock(sys_memory_mutex);
+        // prevent underflows
+        used_bytes -= std::min(allocation_size, used_bytes);
     }
 
-    void update()
+    std::string get_details(bool double_tab = false)
     {
-        std::unique_lock lock(host_memory_mutex);
+        const auto        usable_bytes = get_usable_bytes();
+        std::shared_lock  lock(sys_memory_mutex);
+        std::stringstream ss;
+        const auto        incr = (double_tab ? "\t\t" : "\t");
+        ss << incr << "Usable system memory: " << byte_size_to_str(usable_bytes) << "\n"
+           << incr << "Free system memory: " << byte_size_to_str(free_bytes) << "\n"
+           << incr << "Used system memory: " << byte_size_to_str(used_bytes) << "\n"
+           << incr << "Enforced limit on memory usage: " << byte_size_to_str(limit_bytes);
+        return ss.str();
+    }
+
+private:
+    const size_t total_bytes;
+    size_t       free_bytes;
+    size_t       limit_bytes;
+    size_t       used_bytes;
+
+    mutable std::shared_mutex sys_memory_mutex;
+
+    system_memory()
+        : total_bytes(read_sys_mem<sys_mem_label::TOTAL>())
+        , free_bytes(read_sys_mem<sys_mem_label::FREE>())
+        , limit_bytes(total_bytes)
+        , used_bytes(0)
+    {
+    }
+
+    void update_free_bytes()
+    {
+        std::unique_lock lock(sys_memory_mutex);
+        free_bytes = read_sys_mem<sys_mem_label::FREE>();
+    }
+
+    enum class sys_mem_label
+    {
+        TOTAL,
+        FREE
+    };
+
+    template <sys_mem_label mem_label>
+    static size_t read_sys_mem()
+    {
+        static_assert(mem_label == sys_mem_label::TOTAL || mem_label == sys_mem_label::FREE);
+        size_t ret = 0;
 #ifdef _WIN32
         MEMORYSTATUSEX info;
         info.dwLength = sizeof(info);
         if(!GlobalMemoryStatusEx(&info))
-            return;
-        total_bytes = info.ullTotalPhys;
-        free_bytes  = info.ullAvailPhys;
+            return ret;
+        if constexpr(mem_label == sys_mem_label::TOTAL)
+            ret = info.ullTotalPhys;
+        else
+            ret = info.ullAvailPhys;
 #else
-
-        // /proc/meminfo can tell us "available" memory (i.e. free +
-        // buffers + cache)
-        total_bytes = 0;
-        free_bytes  = 0;
+        // Read from /proc/meminfo if possible
         try
         {
             std::ifstream proc_meminfo("/proc/meminfo");
@@ -138,11 +220,17 @@ private:
             while(std::getline(proc_meminfo, proc_line))
             {
                 // meminfo counts in KiB
-                if(proc_line.compare(0, 9, "MemTotal:") == 0)
-                    total_bytes = std::stoull(proc_line.substr(9)) * 1024;
-                else if(proc_line.compare(0, 13, "MemAvailable:") == 0)
-                    free_bytes = std::stoull(proc_line.substr(13)) * 1024;
-                if(total_bytes && free_bytes)
+                if constexpr(mem_label == sys_mem_label::TOTAL)
+                {
+                    if(proc_line.compare(0, 9, "MemTotal:") == 0)
+                        ret = std::stoull(proc_line.substr(9)) * 1024;
+                }
+                else
+                {
+                    if(proc_line.compare(0, 13, "MemAvailable:") == 0)
+                        ret = std::stoull(proc_line.substr(13)) * 1024;
+                }
+                if(ret)
                     break;
             }
         }
@@ -151,67 +239,46 @@ private:
             // If there was a problem, we'll fall back to sysinfo
         }
 
-        if(total_bytes == 0)
+        if(ret == 0)
         {
             // Either something couldn't be parsed or proc is not
             // mounted.  Fall back to sysinfo which can tell total +
             // free, but not "available".
             struct sysinfo info;
             if(sysinfo(&info) != 0)
-                return;
-            total_bytes = info.totalram * info.mem_unit;
-            free_bytes  = (info.freeram + info.bufferram) * info.mem_unit;
-        }
-
-        // Adjust memory numbers for APU
-        try
-        {
-            auto deviceProp = get_curr_device_prop();
-            // on integrated APU, we can't expect to reuse "device" memory
-            // for "host" things.
-            if(deviceProp.integrated)
-            {
-                const auto dedicated_for_device_allocs
-                    = std::min(deviceProp.totalGlobalMem, std::min(free_bytes, total_bytes) / 2);
-                total_bytes -= dedicated_for_device_allocs;
-                free_bytes -= dedicated_for_device_allocs;
-            }
-        }
-        catch(std::runtime_error&)
-        {
-            // assume we're not on APU, can use full host memory
+                return ret;
+            if constexpr(mem_label == sys_mem_label::TOTAL)
+                ret = info.totalram * info.mem_unit;
+            else
+                ret = (info.freeram + info.bufferram) * info.mem_unit;
         }
 
         // top-level memory cgroup may restrict this further
-
-        // check cgroup v1
-        std::ifstream memcg1_limit_file("/sys/fs/cgroup/memory/memory.limit_in_bytes");
-        std::ifstream memcg1_usage_file("/sys/fs/cgroup/memory/memory.usage_in_bytes");
-        size_t        memcg1_limit_bytes;
-        size_t        memcg1_usage_bytes;
-        // use cgroupv1 limit if we can read the cgroup files and it's
-        // smaller
-        if((memcg1_limit_file >> memcg1_limit_bytes) && (memcg1_usage_file >> memcg1_usage_bytes)
-           && memcg1_limit_bytes < total_bytes)
+        const std::pair<std::string, std::string> memcg1_paths
+            = {"/sys/fs/cgroup/memory/memory.limit_in_bytes",
+               "/sys/fs/cgroup/memory/memory.usage_in_bytes"};
+        const std::pair<std::string, std::string> memcg2_paths
+            = {"/sys/fs/cgroup/memory.max", "/sys/fs/cgroup/memory.current"};
+        for(const auto& memcg_paths : {memcg1_paths, memcg2_paths})
         {
-            total_bytes = memcg1_limit_bytes;
-            free_bytes  = total_bytes - memcg1_usage_bytes;
-        }
-
-        // check cgroup v2
-        std::ifstream memcg2_max_file("/sys/fs/cgroup/memory.max");
-        std::ifstream memcg2_current_file("/sys/fs/cgroup/memory.current");
-        size_t        memcg2_max_bytes;
-        size_t        memcg2_current_bytes;
-        // use cgroupv2 limit if we can read the cgroup files and it's
-        // smaller
-        if((memcg2_max_file >> memcg2_max_bytes) && (memcg2_current_file >> memcg2_current_bytes)
-           && memcg2_max_bytes < total_bytes)
-        {
-            total_bytes = memcg2_max_bytes;
-            free_bytes  = total_bytes - memcg2_current_bytes;
+            std::ifstream memcg_limit_file(memcg_paths.first.c_str());
+            std::ifstream memcg_usage_file(memcg_paths.second.c_str());
+            size_t        memcg_limit_bytes;
+            size_t        memcg_usage_bytes;
+            // use cgroup limit if we can read the cgroup files and it's smaller
+            if((memcg_limit_file >> memcg_limit_bytes) && (memcg_usage_file >> memcg_usage_bytes))
+            {
+                if constexpr(mem_label == sys_mem_label::TOTAL)
+                    ret = std::min(ret, memcg_limit_bytes);
+                else
+                    ret = std::min(ret,
+                                   memcg_usage_bytes <= memcg_limit_bytes
+                                       ? memcg_limit_bytes - memcg_usage_bytes
+                                       : 0);
+            }
         }
 #endif
+        return ret;
     }
 };
 

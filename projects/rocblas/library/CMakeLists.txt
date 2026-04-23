@@ -158,7 +158,7 @@ set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
 
 # This is incremented when the ABI to the library changes
-set( rocblas_SOVERSION 5.3 )
+set( rocblas_SOVERSION 5.4 )
 
 list( APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake )
 
@@ -226,6 +226,13 @@ endif()
 # configure a header file to pass the CMake version settings to the source, and package the header files in the output archive
 configure_file( "${CMAKE_CURRENT_SOURCE_DIR}/include/internal/rocblas-version.h.in"
 	"${PROJECT_BINARY_DIR}/include/rocblas/internal/rocblas-version.h" )
+
+# Configure Windows version resource file
+if(WIN32)
+  string(TIMESTAMP ROCBLAS_COPYRIGHT_YEAR "%Y")
+  configure_file( "${CMAKE_CURRENT_SOURCE_DIR}/src/version.rc.in"
+    "${PROJECT_BINARY_DIR}/version.rc" @ONLY )
+endif()
 
 
 set( rocblas_headers_public

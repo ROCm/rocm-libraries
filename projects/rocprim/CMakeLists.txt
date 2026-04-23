@@ -90,10 +90,6 @@ if(BUILD_OFFLOAD_COMPRESS)
   endif()
 endif()
 
-if(WIN32 AND (BUILD_BENCHMARK OR BUILD_NAIVE_BENCHMARK))
-  message(FATAL_ERROR "rocPRIM benchmarks are not currently supported on Windows.")
-endif()
-
 if (CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
   set(ROCPRIM_PROJECT_IS_TOP_LEVEL TRUE)
 else()
@@ -188,7 +184,7 @@ list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH} ${ROCM_PATH}/hip ${ROCM_PATH}/llvm ${
 find_package(hip REQUIRED CONFIG PATHS ${HIP_DIR} ${ROCM_PATH} /opt/rocm)
 
 # Setup VERSION
-set(VERSION_STRING "4.3.0")
+set(VERSION_STRING "4.4.0")
 rocm_setup_version(VERSION ${VERSION_STRING})
 math(EXPR rocprim_VERSION_NUMBER "${rocprim_VERSION_MAJOR} * 100000 + ${rocprim_VERSION_MINOR} * 100 + ${rocprim_VERSION_PATCH}")
 

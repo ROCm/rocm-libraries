@@ -4,7 +4,6 @@
 #pragma once
 
 #include <functional>
-#include <hipdnn_data_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_data_sdk/utilities/MigratableMemory.hpp>
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
@@ -39,17 +38,33 @@ struct TensorLayout
     std::string name; ///< Human-readable layout name (e.g., "NCHW", "NHWC")
     std::vector<int64_t> strideOrder; ///< Stride priority per dimension (lower = tighter packing)
 
+    static const TensorLayout NCL; ///< 3D channel-first layout
+    static const TensorLayout NLC; ///< 3D channel-last layout
     static const TensorLayout NCHW; ///< 4D channel-first layout
     static const TensorLayout NHWC; ///< 4D channel-last layout
     static const TensorLayout NCDHW; ///< 5D channel-first layout
     static const TensorLayout NDHWC; ///< 5D channel-last layout
+
+    /// SDPA row-major layout for dims [batch, heads, seq_len, head_dim].
+    /// Same stride order as NCHW ({3,2,1,0}): head_dim is most contiguous.
+    static const TensorLayout BHSD;
+
+    /// SDPA sequence-major layout for dims [batch, seq_len, heads, head_dim].
+    /// Stride order {3,1,2,0}: head_dim contiguous, then heads, then seq_len, then batch.
+    /// @note This is NOT the same stride order as NHWC. NHWC ({3,0,2,1}) would make
+    /// heads contiguous, which is not the intended BSHD layout.
+    static const TensorLayout BSHD;
 };
 
 // NOLINTBEGIN(bugprone-throwing-static-initialization) fixed-size layout constants
+inline const TensorLayout TensorLayout::NCL{"NCL", {2, 1, 0}};
+inline const TensorLayout TensorLayout::NLC{"NLC", strideOrderNhwc(3)};
 inline const TensorLayout TensorLayout::NCHW{"NCHW", {3, 2, 1, 0}};
 inline const TensorLayout TensorLayout::NHWC{"NHWC", strideOrderNhwc(4)};
 inline const TensorLayout TensorLayout::NCDHW{"NCDHW", {4, 3, 2, 1, 0}};
 inline const TensorLayout TensorLayout::NDHWC{"NDHWC", strideOrderNhwc(5)};
+inline const TensorLayout TensorLayout::BHSD{"BHSD", {3, 2, 1, 0}};
+inline const TensorLayout TensorLayout::BSHD{"BSHD", {3, 1, 2, 0}};
 // NOLINTEND(bugprone-throwing-static-initialization)
 
 inline std::ostream& operator<<(std::ostream& os, const TensorLayout& layout)
@@ -318,6 +333,7 @@ public:
     virtual void
         fillTensorWithRandomValues(float min, float max, unsigned int seed = std::random_device{}())
         = 0;
+    virtual void fillWithSentinelValue() = 0;
     virtual size_t fillWithData(const void* data, size_t bytesCopied) = 0;
 
     template <typename... Args>
@@ -326,7 +342,7 @@ public:
         static_assert(AllOfTypes<std::is_integral, Args...>::value,
                       "Indices must be an integral type!");
 
-        std::vector<int64_t> const indexVector = {static_cast<int64_t>(indices)...};
+        const std::vector<int64_t> indexVector = {static_cast<int64_t>(indices)...};
 
         return getIndex(indexVector);
     }
@@ -406,6 +422,18 @@ public:
         fillWithRandomValues(static_cast<T>(min), static_cast<T>(max), seed);
     }
 
+    void fillWithSentinelValue() override
+    {
+        if constexpr(std::numeric_limits<T>::has_quiet_NaN)
+        {
+            fillWithValue(std::numeric_limits<T>::quiet_NaN());
+        }
+        else
+        {
+            fillWithValue(std::numeric_limits<T>::max());
+        }
+    }
+
     virtual MigratableMemoryBase<T>& memory() = 0;
     virtual const MigratableMemoryBase<T>& memory() const = 0;
 
@@ -434,7 +462,7 @@ public:
     template <typename... Args>
     T& operator()(Args... indices)
     {
-        int64_t const index = getIndex(indices...);
+        const int64_t index = getIndex(indices...);
         auto* data = memory().hostData();
         return data[index];
     }
@@ -442,21 +470,21 @@ public:
     template <typename... Args>
     const T& operator()(Args... indices) const
     {
-        int64_t const index = getIndex(indices...);
+        const int64_t index = getIndex(indices...);
         const auto* data = memory().hostData();
         return data[index];
     }
 
     T& operator()(const std::vector<int64_t>& indices)
     {
-        int64_t const index = getIndex(indices);
+        const int64_t index = getIndex(indices);
         auto* data = memory().hostData();
         return data[index];
     }
 
     const T& operator()(const std::vector<int64_t>& indices) const
     {
-        int64_t const index = getIndex(indices);
+        const int64_t index = getIndex(indices);
         const auto* data = memory().hostData();
         return data[index];
     }
@@ -601,7 +629,7 @@ public:
 
     size_t fillWithData(const void* data, size_t maxBytesCopied) override
     {
-        size_t const bytesCopied = std::min(maxBytesCopied, _memory.count() * sizeof(T));
+        const size_t bytesCopied = std::min(maxBytesCopied, _memory.count() * sizeof(T));
         _memory.markHostModified();
         std::memcpy(_memory.hostData(), data, bytesCopied);
         return bytesCopied;
@@ -669,33 +697,11 @@ private:
 template <typename T>
 using PinnedTensor = Tensor<T, PinnedHostAllocator<T>>;
 
-inline std::unique_ptr<utilities::ITensor> createTensor(data_objects::DataType dataType,
-                                                        const std::vector<int64_t>& dims,
-                                                        const std::vector<int64_t>& strides)
+template <typename T>
+inline std::unique_ptr<ITensor> createTensor(const std::vector<int64_t>& dims,
+                                             const std::vector<int64_t>& strides)
 {
-    switch(dataType)
-    {
-    case data_objects::DataType::FLOAT:
-        return std::make_unique<Tensor<float>>(dims, strides);
-    case data_objects::DataType::HALF:
-        return std::make_unique<Tensor<types::half>>(dims, strides);
-    case data_objects::DataType::BFLOAT16:
-        return std::make_unique<Tensor<types::bfloat16>>(dims, strides);
-    case data_objects::DataType::DOUBLE:
-        return std::make_unique<Tensor<double>>(dims, strides);
-    case data_objects::DataType::UINT8:
-        return std::make_unique<Tensor<uint8_t>>(dims, strides);
-    case data_objects::DataType::INT32:
-        return std::make_unique<Tensor<int32_t>>(dims, strides);
-    case data_objects::DataType::INT8:
-        return std::make_unique<Tensor<int8_t>>(dims, strides);
-    case data_objects::DataType::FP8_E4M3:
-        return std::make_unique<Tensor<types::fp8_e4m3>>(dims, strides);
-    case data_objects::DataType::FP8_E5M2:
-        return std::make_unique<Tensor<types::fp8_e5m2>>(dims, strides);
-    default:
-        throw std::runtime_error("Unsupported data type for tensor");
-    }
+    return std::make_unique<Tensor<T>>(dims, strides);
 }
 
 } // namespace hipdnn_data_sdk::utilities

@@ -105,42 +105,77 @@ struct EngineRegistrar
 {
     EngineRegistrar(std::string_view name)
     {
-        detail::getMutableEngineNames().insert(name);
         auto id = engineNameToId(name);
-        detail::getMutableEngineIdToNameMap()[id] = name;
 
-        // Check for collisions
-        for(const auto& [existingId, existingName] : getEngineIdToNameMap())
+        // Check for duplicate registration or hash collision BEFORE inserting
+        auto& idToNameMap = detail::getMutableEngineIdToNameMap();
+        auto it = idToNameMap.find(id);
+        if(it != idToNameMap.end())
         {
-            if(existingId == id && existingName != name)
+            if(it->second == name)
             {
-                throw std::runtime_error("Engine name collision detected! '"
-                                         + std::string(existingName) + "' and '" + std::string(name)
-                                         + "' both hash to ID: " + formatEngineIdHex(id));
+                throw std::runtime_error("Duplicate engine registration detected! '"
+                                         + std::string(name) + "' is already registered with ID: "
+                                         + formatEngineIdHex(id));
             }
+
+            throw std::runtime_error("Engine name collision detected! '" + std::string(it->second)
+                                     + "' and '" + std::string(name)
+                                     + "' both hash to ID: " + formatEngineIdHex(id));
         }
+
+        detail::getMutableEngineNames().insert(name);
+        idToNameMap[id] = name;
     }
 };
 
-// Macro that defines engine and automatically registers it
-#define HIPDNN_REGISTER_ENGINE(name, value)                 \
-    inline constexpr const char* name##_NAME = value;       \
-    inline const int64_t name##_ID = engineNameToId(value); \
-    inline const EngineRegistrar name##_registrar{value};
+/// @cond INTERNAL
+#define DETAIL_HIPDNN_REGISTER_ENGINE_1(name)                                           \
+    inline constexpr const char* name##_NAME = #name;                                   \
+    inline const int64_t name##_ID = hipdnn_data_sdk::utilities::engineNameToId(#name); \
+    inline const hipdnn_data_sdk::utilities::EngineRegistrar name##_registrar{#name};
 
-//Note: Once an engine is named here, it should never be renamed.  Renaming an engine will
+#define DETAIL_HIPDNN_REGISTER_ENGINE_2(name, value)                                    \
+    inline constexpr const char* name##_NAME = value;                                   \
+    inline const int64_t name##_ID = hipdnn_data_sdk::utilities::engineNameToId(value); \
+    inline const hipdnn_data_sdk::utilities::EngineRegistrar name##_registrar{value};
+
+#define DETAIL_HIPDNN_GET_REGISTER_ENGINE_MACRO(_1, _2, NAME, ...) NAME
+/// @endcond
+
+/**
+ * @def HIPDNN_REGISTER_ENGINE
+ * @brief Macro that defines an engine and automatically registers it.
+ *
+ * Supports 1 or 2 arguments:
+ * - `HIPDNN_REGISTER_ENGINE(MyEngine)` → identifier: `MyEngine`, name: `"MyEngine"`
+ * - `HIPDNN_REGISTER_ENGINE(MyEngine, "MyEngine")` → identifier: `MyEngine`, name: `"MyEngine"`
+ *
+ * The single-parameter form should be used whenever possible for simplicity.
+ *
+ * @param name The identifier used for generated constants (e.g., `name_NAME`, `name_ID`)
+ * @param value (optional) Custom string name for the engine. Defaults to stringified `name`.
+ */
+#define HIPDNN_REGISTER_ENGINE(...)                                                            \
+    DETAIL_HIPDNN_GET_REGISTER_ENGINE_MACRO(                                                   \
+        __VA_ARGS__, DETAIL_HIPDNN_REGISTER_ENGINE_2, DETAIL_HIPDNN_REGISTER_ENGINE_1, unused) \
+    (__VA_ARGS__)
+
+////////////////////////////////////////////////////////////////////////////////////////////
+// Define all engines using the HIPDNN_REGISTER_ENGINE() macro.
+// Note: Once an engine is named here, it should never be renamed.  Renaming an engine will
 // change the generated uint64_t ID.
-
-// Define all engines using the macro
+////////////////////////////////////////////////////////////////////////////////////////////
 // NOLINTBEGIN(bugprone-throwing-static-initialization) collision detection requires throw
-HIPDNN_REGISTER_ENGINE(FUSILLI_ENGINE, "FUSILLI_ENGINE")
 
-HIPDNN_REGISTER_ENGINE(HIPBLASLT_ENGINE, "HIPBLASLT_ENGINE")
+HIPDNN_REGISTER_ENGINE(FUSILLI_ENGINE)
+HIPDNN_REGISTER_ENGINE(HIP_KERNEL_ENGINE)
+HIPDNN_REGISTER_ENGINE(HIPBLASLT_ENGINE)
+HIPDNN_REGISTER_ENGINE(MIOPEN_ENGINE)
+HIPDNN_REGISTER_ENGINE(MIOPEN_ENGINE_DETERMINISTIC)
+HIPDNN_REGISTER_ENGINE(ASM_SDPA_ENGINE)
 
-HIPDNN_REGISTER_ENGINE(MIOPEN_ENGINE, "MIOPEN_ENGINE")
-HIPDNN_REGISTER_ENGINE(MIOPEN_ENGINE_DETERMINISTIC, "MIOPEN_ENGINE_DETERMINISTIC")
 // NOLINTEND(bugprone-throwing-static-initialization)
-
-HIPDNN_REGISTER_ENGINE(HIP_KERNEL_ENGINE, "HIP_KERNEL_ENGINE")
+////////////////////////////////////////////////////////////////////////////////////////////
 
 } // namespace hipdnn_data_sdk::utilities

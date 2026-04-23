@@ -98,6 +98,7 @@ namespace ArgumentTracerTest
 
         auto kgraph = KG::translate(command);
 
+        kgraph = transform<KG::UpdateParameters>(kgraph, commandParameters);
         kgraph = transform<KG::LowerLinear>(kgraph, context.get());
         kgraph = transform<KG::CleanArguments>(kgraph, context.get(), command);
         kgraph = transform<KG::UpdateWavefrontParameters>(kgraph, commandParameters);
@@ -243,6 +244,7 @@ namespace ArgumentTracerTest
 
         auto kgraph = KG::translate(command);
 
+        kgraph = transform<KG::UpdateParameters>(kgraph, commandParameters);
         kgraph = transform<KG::LowerLinear>(kgraph, context.get());
         kgraph = transform<KG::UpdateWavefrontParameters>(kgraph, commandParameters);
         kgraph = transform<KG::CleanArguments>(kgraph, context.get(), command);

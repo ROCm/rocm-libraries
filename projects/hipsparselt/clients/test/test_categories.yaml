@@ -1,0 +1,73 @@
+# hipSPARSELt Test Categories Configuration
+# Aligned with rocJenkins job types (precheckin, extended, weekly) and Test Filter Standardization POC.
+
+test_categories:
+  quick:
+    description: "Smoke - same as Jenkins smoke (timeout: 5 mins)"
+    test_patterns:
+      - "*smoke*"
+    exclude:
+      - "*known_bug*"
+    labels:
+      - "smoke"
+      - "quick"
+
+  standard:
+    description: "Precheckin - same as Jenkins precheckin (timeout: 30 mins)"
+    test_patterns:
+      - "*smoke*"
+      - "*quick*"
+      - "*pre_checkin*"
+    exclude:
+      - "*known_bug*"
+    labels:
+      - "standard"
+      - "pr"
+      - "precheckin"
+
+  comprehensive:
+    description: "Extended - same as Jenkins extended/nightly (timeout: 2 hours)"
+    test_patterns:
+      - "*smoke*"
+      - "*quick*"
+      - "*pre_checkin*"
+      - "*nightly*"
+    exclude:
+      - "*known_bug*"
+    labels:
+      - "comprehensive"
+      - "nightly"
+      - "extended"
+
+  full:
+    description: "Stress / weekly - same as Jenkins weekly (stress + HMM)"
+    test_patterns:
+      - "*smoke*"
+      - "*quick*"
+      - "*pre_checkin*"
+      - "*nightly*"
+      - "*HMM*"
+    exclude:
+      - "*known_bug*"
+    labels:
+      - "stress"
+      - "weekly"
+      - "full"
+
+# GPU-specific exclusions can be added here when needed (see shared/ctest/README.md).
+# exclude_gpu:
+#   exclude_gpu_gfxXXXX:
+#     test_patterns: [...]
+#     labels: ["quick", "standard", "comprehensive", "stress", "ex_gpu_gfxXXXX"]
+
+execution_settings:
+  default_timeout: 300
+  timeout_multiplier: 1
+  environment:
+    OPENBLAS_NUM_THREADS: "48"
+    OMP_NUM_THREADS: "48"
+  category_timeouts:
+    quick: 300    # 5 mins (quick suite can exceed 300s on some systems)
+    standard: 1800    # 30 mins (standard can take over an hour)
+    comprehensive: 7200   # 2 hours
+    full: 86400       # 24 hours

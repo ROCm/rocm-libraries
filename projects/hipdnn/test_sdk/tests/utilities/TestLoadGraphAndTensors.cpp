@@ -11,8 +11,8 @@
 #include <hipdnn_test_sdk/utilities/detail/ScopedExecute.hpp>
 #include <hipdnn_test_sdk/utilities/detail/TensorFileUtils.hpp>
 
-using namespace hipdnn_data_sdk;
 using namespace hipdnn_data_sdk::utilities;
+using namespace hipdnn_flatbuffers_sdk::data_objects;
 using namespace hipdnn_test_sdk::detail;
 
 namespace hipdnn_test_sdk::utilities
@@ -21,7 +21,7 @@ namespace hipdnn_test_sdk::utilities
 TEST(TestFillTensorFromFile, InvalidPath)
 {
     Tensor<float> tensor({1});
-    std::filesystem::path const filepath = "./ea0w399059.txt";
+    const std::filesystem::path filepath = "./ea0w399059.txt";
     EXPECT_FALSE(std::filesystem::exists(filepath));
     EXPECT_THROW(fillTensorFromFile(tensor, filepath), std::runtime_error);
 }
@@ -29,7 +29,7 @@ TEST(TestFillTensorFromFile, InvalidPath)
 TEST(TestFillTensorFromFile, PathToDirectory)
 {
     Tensor<float> tensor({1});
-    ScopedDirectory const dir("oijaweorij33");
+    const ScopedDirectory dir("oijaweorij33");
     EXPECT_THROW(fillTensorFromFile(tensor, dir.path()), std::runtime_error);
 }
 
@@ -48,8 +48,8 @@ void writeVectorToFile(const std::filesystem::path& filename, const std::vector<
 
 TEST(TestFillTensorFromFile, Valid)
 {
-    std::filesystem::path const filename = "SimpleTensor0123.bin";
-    ScopedExecute const fileDeleter([filename]() { std::filesystem::remove(filename); });
+    const std::filesystem::path filename = "SimpleTensor0123.bin";
+    const ScopedExecute fileDeleter([filename]() { std::filesystem::remove(filename); });
 
     std::vector<int> values{0, 1, 2, 3};
     writeVectorToFile(filename, values);
@@ -71,7 +71,7 @@ TEST(TestLoadGraphAndTensors, Valid)
 {
     SKIP_IF_NO_DEVICES();
 
-    std::filesystem::path const filepath
+    const std::filesystem::path filepath
         = getCurrentExecutableDirectory()
           / "../lib/hipdnn_reference_data/BatchnormFwdInference/nchw/fp32/Small.json";
 
@@ -84,9 +84,9 @@ TEST(TestLoadGraphAndTensors, Valid)
 
     auto res = loadGraphAndTensors(filepath);
 
-    EXPECT_EQ(res.graph().compute_data_type(), data_objects::DataType::FLOAT);
-    EXPECT_EQ(res.graph().io_data_type(), data_objects::DataType::FLOAT);
-    EXPECT_EQ(res.graph().intermediate_data_type(), data_objects::DataType::FLOAT);
+    EXPECT_EQ(res.graph().compute_data_type(), DataType::FLOAT);
+    EXPECT_EQ(res.graph().io_data_type(), DataType::FLOAT);
+    EXPECT_EQ(res.graph().intermediate_data_type(), DataType::FLOAT);
     EXPECT_EQ(res.graph().nodes()->size(), 1);
     EXPECT_EQ(res.graph().tensors()->size(), 6);
 
@@ -114,7 +114,7 @@ TEST(TestLoadGraphAndTensors, Valid)
 
 TEST(TestLoadGraphAndTensors, ExtractAndClearOutputTensorData)
 {
-    std::filesystem::path const filepath
+    const std::filesystem::path filepath
         = getCurrentExecutableDirectory()
           / "../lib/hipdnn_reference_data/BatchnormFwdInference/nchw/fp32/Small.json";
 
@@ -133,7 +133,7 @@ TEST(TestLoadGraphAndTensors, ExtractAndClearOutputTensorData)
     for(auto id : res.outputTensorUids)
     {
         const auto& tensor = res.tensorMap.at(id);
-        size_t const bytesInTensor = tensor->elementSpace() * tensor->elementSize();
+        const size_t bytesInTensor = tensor->elementSpace() * tensor->elementSize();
         auto& savedTensor = savedTensorOutputs[id]
             = std::unique_ptr<ITensor>(new Tensor<float>(tensor->dims(), tensor->strides()));
         savedTensor->fillWithData(tensor->rawHostData(), bytesInTensor);
@@ -146,8 +146,8 @@ TEST(TestLoadGraphAndTensors, ExtractAndClearOutputTensorData)
     for(auto id : res.outputTensorUids)
     {
         EXPECT_EQ(outputMap.count(id), 1);
-        TensorView<float> const savedTensorView{*savedTensorOutputs[id]};
-        TensorView<float> const extractedTensorView{*outputMap.at(id)};
+        const TensorView<float> savedTensorView{*savedTensorOutputs[id]};
+        const TensorView<float> extractedTensorView{*outputMap.at(id)};
 
         auto savedIter = savedTensorView.cbegin();
         auto extractedIter = extractedTensorView.cbegin();

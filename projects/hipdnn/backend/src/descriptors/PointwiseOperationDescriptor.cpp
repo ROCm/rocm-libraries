@@ -5,6 +5,7 @@
 #include "DescriptorAttributeUtils.hpp"
 #include "HipdnnBackendDescriptorType.h"
 #include "HipdnnException.hpp"
+#include "HipdnnOperationType.h"
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 
 namespace hipdnn_backend
@@ -18,11 +19,11 @@ void PointwiseOperationDescriptor::finalize()
     THROW_IF_NULL(_out0Desc,
                   HIPDNN_STATUS_BAD_PARAM,
                   "PointwiseOperationDescriptor::finalize() failed: OUT_0 tensor not set");
-    THROW_IF_TRUE(_computeDataType == hipdnn_data_sdk::data_objects::DataType::UNSET,
+    THROW_IF_TRUE(_computeDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET,
                   HIPDNN_STATUS_BAD_PARAM,
                   "PointwiseOperationDescriptor::finalize() failed: compute data type not "
                   "set");
-    THROW_IF_TRUE(_data.operation == hipdnn_data_sdk::data_objects::PointwiseMode::UNSET,
+    THROW_IF_TRUE(_data.operation == hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::UNSET,
                   HIPDNN_STATUS_BAD_PARAM,
                   "PointwiseOperationDescriptor::finalize() failed: operation not set");
 
@@ -144,6 +145,13 @@ void PointwiseOperationDescriptor::setAttribute(hipdnnBackendAttributeName_t att
                     elementCount,
                     arrayOfElements,
                     "PointwiseOperationDescriptor::setAttribute()");
+        break;
+    case HIPDNN_ATTR_OPERATION_NAME_EXT:
+        setString(_name,
+                  attributeType,
+                  elementCount,
+                  arrayOfElements,
+                  "PointwiseOperationDescriptor::setAttribute()");
         break;
     default:
         throw HipdnnException(HIPDNN_STATUS_NOT_SUPPORTED,
@@ -278,6 +286,22 @@ void PointwiseOperationDescriptor::getAttribute(hipdnnBackendAttributeName_t att
                     arrayOfElements,
                     "PointwiseOperationDescriptor::getAttribute()");
         break;
+    case HIPDNN_ATTR_OPERATION_NAME_EXT:
+        getString(_name,
+                  attributeType,
+                  requestedElementCount,
+                  elementCount,
+                  arrayOfElements,
+                  "PointwiseOperationDescriptor::getAttribute()");
+        break;
+    case HIPDNN_ATTR_OPERATION_TYPE_EXT:
+        getOperationType(HIPDNN_OPERATION_TYPE_POINTWISE_EXT,
+                         attributeType,
+                         requestedElementCount,
+                         elementCount,
+                         arrayOfElements,
+                         "PointwiseOperationDescriptor::getAttribute()");
+        break;
     default:
         throw HipdnnException(HIPDNN_STATUS_NOT_SUPPORTED,
                               "PointwiseOperationDescriptor::getAttribute: attributeName not "
@@ -304,12 +328,13 @@ std::vector<std::shared_ptr<TensorDescriptor>>
     return result;
 }
 
-std::unique_ptr<hipdnn_data_sdk::data_objects::NodeT>
+std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::NodeT>
     PointwiseOperationDescriptor::buildNode() const
 {
-    auto node = std::make_unique<hipdnn_data_sdk::data_objects::NodeT>();
+    auto node = std::make_unique<hipdnn_flatbuffers_sdk::data_objects::NodeT>();
+    node->name = _name;
     node->compute_data_type = _computeDataType;
-    node->attributes.Set(hipdnn_data_sdk::data_objects::PointwiseAttributesT(_data));
+    node->attributes.Set(hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributesT(_data));
     return node;
 }
 
@@ -321,7 +346,8 @@ hipdnnBackendDescriptorType_t PointwiseOperationDescriptor::getStaticType()
 std::string PointwiseOperationDescriptor::toString() const
 {
     std::string str = "PointwiseOperationDescriptor: {";
-    str += "in_0_uid=" + std::to_string(_data.in_0_tensor_uid);
+    str += "name=" + _name;
+    str += ", in_0_uid=" + std::to_string(_data.in_0_tensor_uid);
     str += ", out_0_uid=" + std::to_string(_data.out_0_tensor_uid);
     str += ", in_1_uid="
            + (_data.in_1_tensor_uid ? std::to_string(*_data.in_1_tensor_uid) : "nullopt");
@@ -329,7 +355,7 @@ std::string PointwiseOperationDescriptor::toString() const
            + (_data.in_2_tensor_uid ? std::to_string(*_data.in_2_tensor_uid) : "nullopt");
     str += ", axis=" + (_data.axis_tensor_uid ? std::to_string(*_data.axis_tensor_uid) : "nullopt");
     str += ", operation=";
-    str += hipdnn_data_sdk::data_objects::EnumNamePointwiseMode(_data.operation);
+    str += hipdnn_flatbuffers_sdk::data_objects::EnumNamePointwiseMode(_data.operation);
     str += ", relu_lower_clip="
            + (_data.relu_lower_clip ? std::to_string(*_data.relu_lower_clip) : "nullopt");
     str += ", relu_upper_clip="
@@ -342,9 +368,40 @@ std::string PointwiseOperationDescriptor::toString() const
     str += ", softplus_beta="
            + (_data.softplus_beta ? std::to_string(*_data.softplus_beta) : "nullopt");
     str += ", compute_data_type=";
-    str += hipdnn_data_sdk::data_objects::EnumNameDataType(_computeDataType);
+    str += hipdnn_flatbuffers_sdk::data_objects::EnumNameDataType(_computeDataType);
     str += "}";
     return str;
+}
+
+std::shared_ptr<PointwiseOperationDescriptor> PointwiseOperationDescriptor::fromNode(
+    const hipdnn_flatbuffers_sdk::data_objects::NodeT& nodeT,
+    const std::unordered_map<int64_t, std::shared_ptr<TensorDescriptor>>& tensorMap)
+{
+    const auto* attrs = nodeT.attributes.AsPointwiseAttributes();
+    THROW_IF_NULL(attrs,
+                  HIPDNN_STATUS_INTERNAL_ERROR,
+                  "PointwiseOperationDescriptor::fromNode: PointwiseAttributes is null");
+
+    auto desc = std::make_shared<PointwiseOperationDescriptor>();
+    desc->_data = *attrs;
+    desc->_computeDataType = nodeT.compute_data_type;
+    desc->_name = nodeT.name;
+    desc->_in0Desc = findTensorInMap(
+        tensorMap, attrs->in_0_tensor_uid, "PointwiseOperationDescriptor::fromNode: In0");
+    desc->_out0Desc = findTensorInMap(
+        tensorMap, attrs->out_0_tensor_uid, "PointwiseOperationDescriptor::fromNode: Out0");
+    if(attrs->in_1_tensor_uid)
+    {
+        desc->_in1Desc = findTensorInMap(
+            tensorMap, *attrs->in_1_tensor_uid, "PointwiseOperationDescriptor::fromNode: In1");
+    }
+    if(attrs->in_2_tensor_uid)
+    {
+        desc->_in2Desc = findTensorInMap(
+            tensorMap, *attrs->in_2_tensor_uid, "PointwiseOperationDescriptor::fromNode: In2");
+    }
+    desc->finalize();
+    return desc;
 }
 
 } // namespace hipdnn_backend

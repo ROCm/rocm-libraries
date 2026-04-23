@@ -14,15 +14,16 @@ namespace miopen_plugin
 const miopenBatchNormMode_t MIOPEN_BATCHNORM_MODE = miopenBNSpatial;
 
 BatchnormFwdInferenceWithVarianceParams::BatchnormFwdInferenceWithVarianceParams(
-    const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributesVarianceExt& attributes,
-    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+    const hipdnn_flatbuffers_sdk::data_objects::BatchnormInferenceAttributesVarianceExt& attributes,
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
         tensorMap)
-    : _x(miopen_utils::createTensor(tensorMap, attributes.x_tensor_uid()))
-    , _y(miopen_utils::createTensor(tensorMap, attributes.y_tensor_uid()))
-    , _scale(miopen_utils::createTensor(tensorMap, attributes.scale_tensor_uid()))
-    , _bias(miopen_utils::createTensor(tensorMap, attributes.bias_tensor_uid()))
-    , _estMean(miopen_utils::createTensor(tensorMap, attributes.mean_tensor_uid()))
-    , _variance(miopen_utils::createTensor(tensorMap, attributes.variance_tensor_uid()))
+    : _x(miopen_utils::createBatchnormTensor(tensorMap, attributes.x_tensor_uid()))
+    , _y(miopen_utils::createBatchnormTensor(tensorMap, attributes.y_tensor_uid()))
+    , _scale(miopen_utils::createBatchnormTensor(tensorMap, attributes.scale_tensor_uid()))
+    , _bias(miopen_utils::createBatchnormTensor(tensorMap, attributes.bias_tensor_uid()))
+    , _estMean(miopen_utils::createBatchnormTensor(tensorMap, attributes.mean_tensor_uid()))
+    , _variance(miopen_utils::createBatchnormTensor(tensorMap, attributes.variance_tensor_uid()))
 {
     // Extract epsilon value from pass-by-value tensor (cast to double for MIOpen compatibility)
     auto epsilonTensorAttr = tensorMap.at(attributes.epsilon_tensor_uid());
@@ -30,19 +31,23 @@ BatchnormFwdInferenceWithVarianceParams::BatchnormFwdInferenceWithVarianceParams
 }
 
 BatchnormFwdInferenceWithVarianceParams::BatchnormFwdInferenceWithVarianceParams(
-    const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributesVarianceExt&
+    const hipdnn_flatbuffers_sdk::data_objects::BatchnormInferenceAttributesVarianceExt&
         inferenceAttributes,
-    const hipdnn_data_sdk::data_objects::PointwiseAttributes& pointwiseAttributes,
-    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+    const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& pointwiseAttributes,
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
         tensorMap)
-    : _x(miopen_utils::createTensor(tensorMap, inferenceAttributes.x_tensor_uid()))
-    , _y(miopen_utils::createTensor(tensorMap, inferenceAttributes.y_tensor_uid()))
-    , _scale(miopen_utils::createTensor(tensorMap, inferenceAttributes.scale_tensor_uid()))
-    , _bias(miopen_utils::createTensor(tensorMap, inferenceAttributes.bias_tensor_uid()))
-    , _estMean(miopen_utils::createTensor(tensorMap, inferenceAttributes.mean_tensor_uid()))
-    , _variance(miopen_utils::createTensor(tensorMap, inferenceAttributes.variance_tensor_uid()))
+    : _x(miopen_utils::createBatchnormTensor(tensorMap, inferenceAttributes.x_tensor_uid()))
+    , _y(miopen_utils::createBatchnormTensor(tensorMap, inferenceAttributes.y_tensor_uid()))
+    , _scale(miopen_utils::createBatchnormTensor(tensorMap, inferenceAttributes.scale_tensor_uid()))
+    , _bias(miopen_utils::createBatchnormTensor(tensorMap, inferenceAttributes.bias_tensor_uid()))
+    , _estMean(
+          miopen_utils::createBatchnormTensor(tensorMap, inferenceAttributes.mean_tensor_uid()))
+    , _variance(
+          miopen_utils::createBatchnormTensor(tensorMap, inferenceAttributes.variance_tensor_uid()))
     , _optActivation(pointwiseAttributes)
-    , _activationOut(miopen_utils::createTensor(tensorMap, pointwiseAttributes.out_0_tensor_uid()))
+    , _activationOut(
+          miopen_utils::createBatchnormTensor(tensorMap, pointwiseAttributes.out_0_tensor_uid()))
 {
     // Extract epsilon value from pass-by-value tensor (cast to double for MIOpen compatibility)
     auto epsilonTensorAttr = tensorMap.at(inferenceAttributes.epsilon_tensor_uid());
