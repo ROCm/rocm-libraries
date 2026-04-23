@@ -145,7 +145,7 @@ finalize_test_targets("${PROJECT_NAME}")
 
 # For standalone builds we need to install the ctest files
 if(NOT ROCM_LIBS_SUPERBUILD)
-    install_integration_tests_ctest_files()
+    install_provider_ctest_files("hipdnn_integration_tests_ctest")
 endif()
 
 include(CMakePackageConfigHelpers)
