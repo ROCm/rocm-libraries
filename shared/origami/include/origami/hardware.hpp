@@ -59,6 +59,7 @@ class hardware_t {
     gfx1151,
     gfx1152,
     gfx1153,
+    gfx1250,
     Count
   };
 
@@ -78,6 +79,7 @@ class hardware_t {
     if (str == "gfx1151") return architecture_t::gfx1151;
     if (str == "gfx1152") return architecture_t::gfx1152;
     if (str == "gfx1153") return architecture_t::gfx1153;
+    if (str == "gfx1250") return architecture_t::gfx1250;
     return architecture_t::Count;
   }
 
@@ -171,6 +173,9 @@ class hardware_t {
       case architecture_t::gfx1153:
         // AMD Radeon 820M iGPU
         return {0.240, NO_MALL_AVAILABLE, 0.066, 2, std::make_tuple(0, 0.19, 0), 1.5};
+      case architecture_t::gfx1250:
+        // TODO: Update this, but for now using gfx950 values
+        return {17, 1.21875121875121875122 * 7, 6, 4, std::make_tuple(0, 0.008, 0), 1.5};
       default: return {0, 0, 0, 0, std::make_tuple(0, 0, 0), 0};
     }
   }
@@ -556,6 +561,37 @@ class hardware_t {
    * @return hardware_t Configured hardware instance for the device
    */
   static hardware_t get_hardware_for_device(int deviceId);
+
+  /**
+   * @brief Create hardware_t instance for a specific HIP device using
+   *        caller-provided properties.
+   *
+   * Same as @ref get_hardware_for_device(int) but uses the supplied
+   * `hipDeviceProp_t` instead of re-querying via `hipGetDeviceProperties`.
+   * Callers that have already adjusted fields on `prop` (for example,
+   * overriding `multiProcessorCount` with
+   * `hipDeviceAttributePhysicalMultiProcessorCount` on multi-XCC
+   * architectures) should use this overload so those adjustments are
+   * preserved. The runtime XCC query
+   * (`hipDeviceAttributeNumberOfXccs` on HIP 7+) is still performed
+   * against `deviceId`.
+   *
+   * @warning `prop` must describe the same physical device as `deviceId`,
+   *          aside from intentional field-level overrides the caller has
+   *          applied (e.g. swapping `multiProcessorCount` for the
+   *          physical MP count). Passing a `prop` from one device together
+   *          with a `deviceId` for a different device produces an
+   *          internally-inconsistent `hardware_t` — the XCC count will
+   *          come from `deviceId` while CU count, clocks, LDS/L2 capacity,
+   *          and architecture all come from `prop`. This is not checked.
+   *
+   * @param deviceId HIP device ID used to query the XCC count
+   * @param prop     Caller-owned device properties to model from; must
+   *                 correspond to `deviceId`
+   * @return hardware_t Configured hardware instance for the device
+   */
+  static hardware_t get_hardware_for_device(int deviceId,
+                                            hipDeviceProp_t const& prop);
 
   /**
    * @brief Create hardware_t instance for a specific architecture with specified parameters.

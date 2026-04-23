@@ -56,10 +56,10 @@ add_executable(
     IntegrationRMSNormDescriptorLowering.cpp
     IntegrationRMSNormForward.cpp
     IntegrationSetPluginPathsExt.cpp
-    IntegrationSdpaBwdDescriptorLowering.cpp
-    IntegrationSdpaBwdLifting.cpp
-    IntegrationSdpaFwdDescriptorLifting.cpp
-    IntegrationSdpaFwdDescriptorLowering.cpp
+    $<$<BOOL:${HIPDNN_ENABLE_SDPA}>:IntegrationSdpaBwdDescriptorLowering.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_SDPA}>:IntegrationSdpaBwdLifting.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_SDPA}>:IntegrationSdpaFwdDescriptorLifting.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_SDPA}>:IntegrationSdpaFwdDescriptorLowering.cpp>
 )
 
 target_compile_options(hipdnn_public_frontend_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})

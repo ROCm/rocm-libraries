@@ -85,8 +85,10 @@
 #include <hipdnn_frontend/attributes/PointwiseAttributes.hpp>
 #include <hipdnn_frontend/attributes/RMSNormAttributes.hpp>
 #include <hipdnn_frontend/attributes/ReductionAttributes.hpp>
+#ifdef HIPDNN_ENABLE_SDPA
 #include <hipdnn_frontend/attributes/SdpaAttributes.hpp>
 #include <hipdnn_frontend/attributes/SdpaBackwardAttributes.hpp>
+#endif
 #include <hipdnn_frontend/detail/BackendWrapper.hpp>
 #include <hipdnn_frontend/detail/ConvolutionFpropUnpacker.hpp>
 #include <hipdnn_frontend/detail/CreateBackendDescriptor.hpp>
@@ -115,8 +117,10 @@
 #include <hipdnn_frontend/node/PointwiseNode.hpp>
 #include <hipdnn_frontend/node/RMSNormNode.hpp>
 #include <hipdnn_frontend/node/ReductionNode.hpp>
+#ifdef HIPDNN_ENABLE_SDPA
 #include <hipdnn_frontend/node/SdpaBwdNode.hpp>
 #include <hipdnn_frontend/node/SdpaFwdNode.hpp>
+#endif
 #include <hipdnn_frontend/node/detail/TopologicalSortingUtils.hpp>
 
 #ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
@@ -2557,6 +2561,7 @@ public:
         return outputTensors;
     }
 
+#ifdef HIPDNN_ENABLE_SDPA
     /** @brief Scaled dot-product attention forward pass
      *
      * Computes scaled dot-product attention:
@@ -2697,6 +2702,7 @@ public:
 
         return {dq, dk, dv};
     }
+#endif // HIPDNN_ENABLE_SDPA
 
     /** @brief Convolution forward pass
      *

@@ -20,25 +20,49 @@
 
 #pragma once
 
+#ifdef _WIN32
+    // Disables the min() and max() macros from windows.h
+    #define NOMINMAX
+
+    #include <io.h>
+    #include <windows.h>
+#else
+    #include <unistd.h>
+#endif
+
 #ifdef __HIP__
-    #include <amd_smi/amdsmi.h>
     #include <hip/hip_runtime.h>
 #elif defined(__CUDACC__)
     #include <cuda/std/chrono>
-    #include <nvml.h>
 #else
     #error "Unsupported GPU platform"
 #endif
 
-#include <unistd.h>
+#ifdef PRIMBENCH_NO_MONITORING
+    #define PRIMBENCH_HAS_MONITORING 0
+#else
+    #define PRIMBENCH_HAS_MONITORING 1
+#endif
+
+#if PRIMBENCH_HAS_MONITORING
+    #ifdef __HIP__
+        #include <amd_smi/amdsmi.h>
+    #elif defined(__CUDACC__)
+        #include <nvml.h>
+    #endif
+#endif
 
 #include <array>
+#include <cassert>
+#include <chrono>
+#include <cstring>
 #include <fstream>
 #include <functional>
 #include <iomanip>
 #include <iostream>
 #include <map>
 #include <memory>
+#include <numeric>
 #include <random>
 #include <regex>
 #include <thread>
@@ -67,10 +91,11 @@
     }
 
 #ifdef __HIP__
-    /// Exits the program with an error message if the given API call returns a failure status.
-    #define PRIMBENCH_CHECK(status)                                                \
+    /// Exits the program with an error message if the given HIP API call returns a failure status.
+    #define PRIMBENCH_CHECK(condition)                                             \
         do                                                                         \
         {                                                                          \
+            hipError_t status = condition;                                         \
             if(status != hipSuccess)                                               \
             {                                                                      \
                 std::cerr << __FILE__ << ":" << __LINE__                           \
@@ -79,11 +104,28 @@
             }                                                                      \
         }                                                                          \
         while(0)
+#else
+    /// Exits the program with an error message if the given CUDA API call returns a failure status.
+    #define PRIMBENCH_CHECK(condition)                                               \
+        do                                                                           \
+        {                                                                            \
+            cudaError_t status = condition;                                          \
+            if(status != cudaSuccess)                                                \
+            {                                                                        \
+                std::cerr << __FILE__ << ":" << __LINE__                             \
+                          << ": CUDA error: " << cudaGetErrorString(status) << "\n"; \
+                exit(status);                                                        \
+            }                                                                        \
+        }                                                                            \
+        while(0)
+#endif
 
+#if defined(__HIP__) && PRIMBENCH_HAS_MONITORING
     /// Exits the program with an error message if the given AMD SMI API call returns a failure status.
-    #define PRIMBENCH_AMDSMI_CHECK(status)                                                        \
+    #define PRIMBENCH_AMDSMI_CHECK(condition)                                                     \
         do                                                                                        \
         {                                                                                         \
+            amdsmi_status_t status = condition;                                                   \
             if(status != AMDSMI_STATUS_SUCCESS)                                                   \
             {                                                                                     \
                 const char* errstr = "(unknown)";                                                 \
@@ -93,24 +135,12 @@
             }                                                                                     \
         }                                                                                         \
         while(0)
-#elif defined(__CUDACC__)
-    /// Exits the program with an error message if the given API call returns a failure status.
-    #define PRIMBENCH_CHECK(status)                                                  \
-        do                                                                           \
-        {                                                                            \
-            if(status != cudaSuccess)                                                \
-            {                                                                        \
-                std::cerr << __FILE__ << ":" << __LINE__                             \
-                          << ": CUDA error: " << cudaGetErrorString(status) << "\n"; \
-                exit(status);                                                        \
-            }                                                                        \
-        }                                                                            \
-        while(0)
-
+#elif defined(__CUDACC__) && PRIMBENCH_HAS_MONITORING
     /// Exits the program with an error message if the given NVML API call returns a failure status.
-    #define PRIMBENCH_NVML_CHECK(status)                                          \
+    #define PRIMBENCH_NVML_CHECK(condition)                                       \
         do                                                                        \
         {                                                                         \
+            nvmlReturn_t status = condition;                                      \
             if(status != NVML_SUCCESS)                                            \
             {                                                                     \
                 std::cerr << __FILE__ << ":" << __LINE__                          \
@@ -183,28 +213,57 @@ struct type_name
     static inline const char* name = "";
 };
 
+#ifdef _WIN32
+/// Required to print horizontal_bar (u8"─").
+inline const auto init_console_utf8 = []
+{
+    SetConsoleOutputCP(CP_UTF8);
+    return 0;
+}();
+#endif
+
+/// Returns whether the environment variable is set.
+inline bool get_env(std::string_view key)
+{
+#ifdef _WIN32
+    char*  value = nullptr;
+    size_t len   = 0;
+
+    if(_dupenv_s(&value, &len, key.data()) != 0 || value == nullptr)
+        return false;
+
+    free(value);
+    return true;
+#else
+    return std::getenv(key.data());
+#endif
+}
+
 /// Caches whether ANSI color output is enabled.
 /// The standard is described at https://bixense.com/clicolors/
 inline bool use_color()
 {
     static const bool result = []
     {
-        if(std::getenv("NO_COLOR"))
+        if(get_env("NO_COLOR"))
             return false;
-        if(std::getenv("CLICOLOR_FORCE"))
+        if(get_env("CLICOLOR_FORCE"))
             return true;
-        return isatty(fileno(stdout)) == 1;
+
+#ifdef _WIN32
+        return bool(_isatty(_fileno(stdout)));
+#else
+        return bool(isatty(fileno(stdout)));
+#endif
     }();
     return result;
 }
 
-/// Clears the current line if colors are enabled, otherwise prints a newline.
+/// Clears the current line if colors are enabled.
 inline std::ostream& clearline(std::ostream& os)
 {
     if(use_color())
         os << "\r\033[K";
-    else
-        os << "\n";
     return os;
 }
 
@@ -332,6 +391,20 @@ inline error_t memset_async(void* device, int value, size_t count, stream_t stre
     return PRIMBENCH_PREFIX_BACKEND(MemsetAsync)(device, value, count, stream);
 }
 
+template<typename F>
+inline error_t occupancy_max_potential_block_size(int*   min_grid_size,
+                                                  int*   block_size,
+                                                  F      kernel,
+                                                  size_t dynamic_shared_memory_per_block,
+                                                  int    block_size_limit)
+{
+    return PRIMBENCH_PREFIX_BACKEND(OccupancyMaxPotentialBlockSize)(min_grid_size,
+                                                                    block_size,
+                                                                    kernel,
+                                                                    dynamic_shared_memory_per_block,
+                                                                    block_size_limit);
+}
+
 inline error_t stream_create(stream_t* stream)
 {
     return PRIMBENCH_PREFIX_BACKEND(StreamCreate)(stream);
@@ -356,8 +429,62 @@ inline error_t stream_synchronize(stream_t stream)
 using namespace gpu_backend;
 
 #ifdef __HIP__
+/// Serializes information about the used GPU.
+std::string serialize_gpu_info()
+{
+    std::ostringstream ss;
+    ss << "{";
 
-/// Wrapper for HIP and AMD SMI (System Management Interface) GPU monitoring.
+    int hip_device;
+    PRIMBENCH_CHECK(hipGetDevice(&hip_device));
+
+    hipDeviceProp_t dev_prop;
+    PRIMBENCH_CHECK(hipGetDeviceProperties(&dev_prop, hip_device));
+    ss << "\"name\":\"" << dev_prop.name << "\"";
+
+    std::string arch = dev_prop.gcnArchName;
+    size_t      pos  = arch.find(':');
+    if(pos != std::string::npos)
+    {
+        arch = arch.substr(0, pos);
+    }
+    ss << ",\"arch\":\"" << arch << "\"";
+
+    char pci_bus_id_arr[32];
+    PRIMBENCH_CHECK(hipDeviceGetPCIBusId(pci_bus_id_arr, sizeof(pci_bus_id_arr), hip_device));
+    ss << ",\"pci_bus_id\":\"" << pci_bus_id_arr << "\"";
+
+    ss << "}";
+    return ss.str();
+}
+#elif defined(__CUDACC__)
+/// Serializes information about the used GPU.
+std::string serialize_gpu_info()
+{
+    std::ostringstream ss;
+    ss << "{";
+
+    int cuda_device;
+    PRIMBENCH_CHECK(cudaGetDevice(&cuda_device));
+
+    cudaDeviceProp dev_prop;
+    PRIMBENCH_CHECK(cudaGetDeviceProperties(&dev_prop, cuda_device));
+    ss << "\"name\":\"" << dev_prop.name << "\"";
+
+    ss << ",\"arch\":\"" << dev_prop.major << "." << dev_prop.minor << "\"";
+
+    char pci_bus_id_arr[32];
+    PRIMBENCH_CHECK(cudaDeviceGetPCIBusId(pci_bus_id_arr, sizeof(pci_bus_id_arr), cuda_device));
+    ss << ",\"pci_bus_id\":\"" << pci_bus_id_arr << "\"";
+
+    ss << "}";
+    return ss.str();
+}
+#endif
+
+#if defined(__HIP__) && PRIMBENCH_HAS_MONITORING
+
+/// Wrapper for AMD SMI (System Management Interface) GPU monitoring.
 class monitor
 {
 public:
@@ -374,6 +501,20 @@ public:
         return instance;
     }
 
+    /// Saves the current temperature.
+    void save_start_temp()
+    {
+        m_saved_start_temp = get_temp();
+    }
+
+    /// Gets the saved starting temperature.
+    /// Specializations output this to JSON as `gpu_temp_celcius.start`.
+    uint16_t get_saved_start_temp() const
+    {
+        return m_saved_start_temp;
+    }
+
+    /// Returns the current temperature.
     uint16_t get_temp() const
     {
         int64_t t;
@@ -384,77 +525,23 @@ public:
         return t;
     }
 
-    std::string serialize_gpu_info() const
+    /// Serializes information about the monitoring library.
+    std::string serialize_monitoring() const
     {
         std::ostringstream ss;
         ss << "{";
 
-        hipDeviceProp_t dev_prop;
-        PRIMBENCH_CHECK(hipGetDeviceProperties(&dev_prop, m_hip_device));
-        ss << "\"name\":\"" << dev_prop.name << "\"";
-
-        std::string arch = dev_prop.gcnArchName;
-        size_t      pos  = arch.find(':');
-        if(pos != std::string::npos)
-        {
-            arch = arch.substr(0, pos);
-        }
-        ss << ",\"arch\":\"" << arch << "\"";
-
-        char pci_bus_id_arr[32];
-        PRIMBENCH_CHECK(hipDeviceGetPCIBusId(pci_bus_id_arr, sizeof(pci_bus_id_arr), m_hip_device));
-        ss << ",\"pci_bus_id\":\"" << pci_bus_id_arr << "\"";
-
-        ss << "}";
-        return ss.str();
-    }
-
-    std::string serialize_backend_info() const
-    {
-        std::ostringstream ss;
-        ss << "{";
-
-        // Backend name.
-        ss << "\"name\":\"hip\"";
-
-        // HIP version.
-        ss << ",\"hip_version\":\"" << HIP_VERSION_MAJOR << "." << HIP_VERSION_MINOR << "."
-           << HIP_VERSION_PATCH << "-" << HIP_VERSION_GITHASH << "\"";
-
-        // HIP runtime version (integer, e.g., 60443482 -> 6.4.43482).
-        int runtime_ver;
-        PRIMBENCH_CHECK(hipRuntimeGetVersion(&runtime_ver));
-        int major = runtime_ver / 10000000;
-        int minor = (runtime_ver / 100000) % 100;
-        int patch = runtime_ver % 100000;
-        ss << ",\"runtime_version\":\"" << major << "." << minor << "." << patch << "\"";
-
-        // HIP driver version (integer, same format).
-        int driver_ver;
-        PRIMBENCH_CHECK(hipDriverGetVersion(&driver_ver));
-        major = driver_ver / 10000000;
-        minor = (driver_ver / 100000) % 100;
-        patch = driver_ver % 100000;
-        ss << ",\"driver_version\":\"" << major << "." << minor << "." << patch << "\"";
-
-        // Compiler.
-        ss << ",\"compiler\":{";
-        ss << "\"name\":\"clang\"";
-        ss << ",\"version\":\"" << __clang_version__ << "\"";
-        ss << "}";
-
-        // Monitoring.
-        ss << ",\"monitoring\":{";
         ss << "\"name\":\"amdsmi\"";
+
         amdsmi_version_t amdsmi_version;
         PRIMBENCH_AMDSMI_CHECK(amdsmi_get_lib_version(&amdsmi_version));
         ss << ",\"version\":\"" << amdsmi_version.build << "\"";
-        ss << "}";
 
         ss << "}";
         return ss.str();
     }
 
+    /// Returns either "edge" or "hotspot".
     std::string get_used_temperature_type_name() const
     {
         return get_temperature_type_name(get_temperature_type());
@@ -463,8 +550,6 @@ public:
 private:
     monitor()
     {
-        PRIMBENCH_CHECK(hipGetDevice(&m_hip_device));
-
         PRIMBENCH_AMDSMI_CHECK(amdsmi_init(AMDSMI_INIT_AMD_GPUS));
 
         // This can't be run in a member initializer list,
@@ -535,8 +620,11 @@ private:
     /// Finds the AMD SMI processor handle matching the current HIP device.
     amdsmi_processor_handle get_amdsmi_device() const
     {
+        int hip_device;
+        PRIMBENCH_CHECK(hipGetDevice(&hip_device));
+
         hipDeviceProp_t hip_props;
-        PRIMBENCH_CHECK(hipGetDeviceProperties(&hip_props, m_hip_device));
+        PRIMBENCH_CHECK(hipGetDeviceProperties(&hip_props, hip_device));
 
         // Build the AMD SMI BDF struct from HIP device properties.
         amdsmi_bdf_t addr{
@@ -552,14 +640,15 @@ private:
         return amdsmi_device;
     }
 
-    int                     m_hip_device; ///< HIP device.
-    amdsmi_processor_handle m_amdsmi_device; ///< AMD SMI device.
+    /// Saved starting temperature for a specialization in state.run().
+    uint16_t m_saved_start_temp;
 
+    amdsmi_processor_handle m_amdsmi_device; ///< AMD SMI device.
 }; // class monitor
 
-#elif defined(__CUDACC__)
+#elif defined(__CUDACC__) && PRIMBENCH_HAS_MONITORING
 
-/// Wrapper for CUDA and NVML (NVIDIA Management Library) GPU monitoring.
+/// Wrapper for NVML (NVIDIA Management Library) GPU monitoring.
 class monitor
 {
 public:
@@ -576,6 +665,20 @@ public:
         return instance;
     }
 
+    /// Saves the current temperature.
+    void save_start_temp()
+    {
+        m_saved_start_temp = get_temp();
+    }
+
+    /// Gets the saved starting temperature.
+    /// Specializations output this to JSON as `gpu_temp_celcius.start`.
+    uint16_t get_saved_start_temp() const
+    {
+        return m_saved_start_temp;
+    }
+
+    /// Returns the current temperature.
     uint16_t get_temp() const
     {
         unsigned int t;
@@ -583,65 +686,23 @@ public:
         return t;
     }
 
-    std::string serialize_gpu_info() const
+    /// Serializes information about the monitoring library.
+    std::string serialize_monitoring() const
     {
         std::ostringstream ss;
         ss << "{";
 
-        cudaDeviceProp dev_prop;
-        PRIMBENCH_CHECK(cudaGetDeviceProperties(&dev_prop, m_cuda_device));
-        ss << "\"name\":\"" << dev_prop.name << "\"";
-
-        ss << ",\"arch\":\"" << dev_prop.major << "." << dev_prop.minor << "\"";
-
-        char pci_bus_id_arr[32];
-        PRIMBENCH_CHECK(
-            cudaDeviceGetPCIBusId(pci_bus_id_arr, sizeof(pci_bus_id_arr), m_cuda_device));
-        ss << ",\"pci_bus_id\":\"" << pci_bus_id_arr << "\"";
-
-        ss << "}";
-        return ss.str();
-    }
-
-    std::string serialize_backend_info() const
-    {
-        std::ostringstream ss;
-        ss << "{";
-
-        // Backend name.
-        ss << "\"name\":\"cuda\"";
-
-        // CUDA runtime version.
-        int major = CUDART_VERSION / 1000;
-        int minor = (CUDART_VERSION % 1000) / 10;
-        ss << ",\"runtime_version\":\"" << major << "." << minor << "\"";
-
-        // CUDA driver version (integer, e.g., 9020 -> 9.2).
-        int driver_ver;
-        PRIMBENCH_CHECK(cudaDriverGetVersion(&driver_ver));
-        major = driver_ver / 1000;
-        minor = (driver_ver % 1000) / 10;
-        ss << ",\"driver_version\":\"" << major << "." << minor << "\"";
-
-        // Compiler.
-        ss << ",\"compiler\":{";
-        ss << "\"name\":\"nvcc\"";
-        ss << ",\"version\":\"" << __CUDACC_VER_MAJOR__ << "." << __CUDACC_VER_MINOR__ << "."
-           << __CUDACC_VER_BUILD__ << "\"";
-        ss << "}";
-
-        // Monitoring.
-        ss << ",\"monitoring\":{";
         ss << "\"name\":\"nvml\"";
+
         char nvml_ver[NVML_SYSTEM_NVML_VERSION_BUFFER_SIZE];
         PRIMBENCH_NVML_CHECK(nvmlSystemGetNVMLVersion(nvml_ver, sizeof(nvml_ver)));
         ss << ",\"version\":\"" << nvml_ver << "\"";
-        ss << "}";
 
         ss << "}";
         return ss.str();
     }
 
+    /// NVML only exposes a single temperature sensor.
     std::string get_used_temperature_type_name() const
     {
         return "gpu";
@@ -650,8 +711,6 @@ public:
 private:
     monitor()
     {
-        PRIMBENCH_CHECK(cudaGetDevice(&m_cuda_device));
-
         PRIMBENCH_NVML_CHECK(nvmlInit());
 
         PRIMBENCH_NVML_CHECK(nvmlDeviceGetHandleByIndex(0, &m_nvml_device));
@@ -662,7 +721,9 @@ private:
         PRIMBENCH_NVML_CHECK(nvmlShutdown());
     }
 
-    int          m_cuda_device; ///< CUDA device.
+    /// Saved starting temperature for a specialization in state.run().
+    uint16_t m_saved_start_temp;
+
     nvmlDevice_t m_nvml_device; ///< NVML device.
 }; // class monitor
 
@@ -738,8 +799,7 @@ public:
     void init(std::string_view algorithm,
               size_t           specialization_count,
               const settings&  settings,
-              flags::FlagTag   flags,
-              const monitor&   monitor)
+              flags::FlagTag   flags)
     {
         m_output_batches    = settings.output_batches;
         m_spaces_per_indent = settings.spaces_per_indent;
@@ -763,7 +823,7 @@ public:
         }
 
         m_json_out << indent(
-            serialize_json_prologue(algorithm, specialization_count, settings, flags, monitor),
+            serialize_json_prologue(algorithm, specialization_count, settings, flags),
             0);
         m_json_out << "[";
         if(m_spaces_per_indent > 0)
@@ -804,8 +864,6 @@ public:
                                size_t           bytes_per_item,
                                size_t           items,
                                double           noise_percent,
-                               uint16_t         start_temp,
-                               uint16_t         end_temp,
                                double           elapsed_host_secs,
                                double           elapsed_gpu_secs,
                                bool             noise_timeout)
@@ -820,8 +878,6 @@ public:
                                    bytes_per_item,
                                    items,
                                    noise_percent,
-                                   start_temp,
-                                   end_temp,
                                    elapsed_host_secs,
                                    elapsed_gpu_secs,
                                    noise_timeout);
@@ -889,14 +945,12 @@ private:
     std::string serialize_json_prologue(std::string_view algorithm,
                                         size_t           specialization_count,
                                         const settings&  settings,
-                                        flags::FlagTag   flags,
-                                        const monitor&   monitor)
+                                        flags::FlagTag   flags)
     {
         std::ostringstream ss;
         ss << "{";
 
-        ss << "\"context\":"
-           << serialize_context(algorithm, specialization_count, settings, flags, monitor);
+        ss << "\"context\":" << serialize_context(algorithm, specialization_count, settings, flags);
 
         ss << ",";
         if(m_spaces_per_indent > 0)
@@ -911,14 +965,13 @@ private:
     std::string serialize_context(std::string_view algorithm,
                                   size_t           specialization_count,
                                   const settings&  settings,
-                                  flags::FlagTag   flags,
-                                  const monitor&   monitor) const
+                                  flags::FlagTag   flags) const
     {
         std::ostringstream ss;
         ss << "{";
 
-        ss << "\"results_version\":\"3.0.0\"";
-        ss << ",\"general\":" << serialize_general(algorithm, specialization_count, monitor);
+        ss << "\"results_version\":\"4.0.0\"";
+        ss << ",\"general\":" << serialize_general(algorithm, specialization_count);
         ss << ",\"settings\":" << serialize_settings(settings);
 
         std::string custom_cli = serialize_custom_settings(settings);
@@ -934,9 +987,7 @@ private:
     }
 
     /// Serializes general benchmark context info into JSON.
-    std::string serialize_general(std::string_view algorithm,
-                                  size_t           specialization_count,
-                                  const monitor&   monitor) const
+    std::string serialize_general(std::string_view algorithm, size_t specialization_count) const
     {
         std::ostringstream ss;
         ss << "{";
@@ -944,27 +995,25 @@ private:
         ss << "\"algorithm\":\"" << algorithm << "\"";
         ss << ",\"specialization_count\":" << specialization_count;
 
-#if defined(NDEBUG)
+#ifdef NDEBUG
         const char build_type[] = "release";
 #else
         const char build_type[] = "debug";
 #endif
         ss << ",\"library_build_type\":\"" << build_type << "\"";
 
-        ss << ",\"gpu\":" << monitor.serialize_gpu_info();
+        ss << ",\"gpu\":" << serialize_gpu_info();
 
-        ss << ",\"backend\":" << monitor.serialize_backend_info();
+        ss << ",\"backend\":" << serialize_backend();
 
-        ss << ",\"temperature_type\":\"" << monitor.get_used_temperature_type_name() << "\"";
+#if PRIMBENCH_HAS_MONITORING
+        ss << ",\"monitoring\":" << monitor::instance().serialize_monitoring();
 
-        char host_name[HOST_NAME_MAX + 1]; // +1 for null terminator.
-        if(gethostname(host_name, sizeof(host_name)) != 0)
-        {
-            std::cerr << "Error: Failed to get host name\n";
-            exit(EXIT_FAILURE);
-        }
-        host_name[sizeof(host_name) - 1] = '\0'; // Ensure null termination.
-        ss << ",\"host_name\":\"" << host_name << "\"";
+        ss << ",\"temperature_type\":\"" << monitor::instance().get_used_temperature_type_name()
+           << "\"";
+#endif
+
+        ss << ",\"host_name\":\"" << get_host_name() << "\"";
 
         ss << ",\"date\":\"" << date() << "\"";
 
@@ -979,8 +1028,104 @@ private:
         return ss.str();
     }
 
+#ifdef __HIP__
+    /// Serializes information about the HIP backend.
+    std::string serialize_backend() const
+    {
+        std::ostringstream ss;
+        ss << "{";
+
+        // Backend name.
+        ss << "\"name\":\"hip\"";
+
+        // HIP version.
+        ss << ",\"hip_version\":\"" << HIP_VERSION_MAJOR << "." << HIP_VERSION_MINOR << "."
+           << HIP_VERSION_PATCH << "-" << HIP_VERSION_GITHASH << "\"";
+
+        // HIP runtime version (integer, e.g., 60443482 -> 6.4.43482).
+        int runtime_ver;
+        PRIMBENCH_CHECK(hipRuntimeGetVersion(&runtime_ver));
+        int major = runtime_ver / 10000000;
+        int minor = (runtime_ver / 100000) % 100;
+        int patch = runtime_ver % 100000;
+        ss << ",\"runtime_version\":\"" << major << "." << minor << "." << patch << "\"";
+
+        // HIP driver version (integer, same format).
+        int driver_ver;
+        PRIMBENCH_CHECK(hipDriverGetVersion(&driver_ver));
+        major = driver_ver / 10000000;
+        minor = (driver_ver / 100000) % 100;
+        patch = driver_ver % 100000;
+        ss << ",\"driver_version\":\"" << major << "." << minor << "." << patch << "\"";
+
+        // Compiler.
+        ss << ",\"compiler\":{";
+        ss << "\"name\":\"clang\"";
+        ss << ",\"version\":\"" << __clang_version__ << "\"";
+        ss << "}";
+
+        ss << "}";
+        return ss.str();
+    }
+#elif defined(__CUDACC__)
+    /// Serializes information about the CUDA backend.
+    std::string serialize_backend() const
+    {
+        std::ostringstream ss;
+        ss << "{";
+
+        // Backend name.
+        ss << "\"name\":\"cuda\"";
+
+        // CUDA runtime version.
+        int major = CUDART_VERSION / 1000;
+        int minor = (CUDART_VERSION % 1000) / 10;
+        ss << ",\"runtime_version\":\"" << major << "." << minor << "\"";
+
+        // CUDA driver version (integer, e.g., 9020 -> 9.2).
+        int driver_ver;
+        PRIMBENCH_CHECK(cudaDriverGetVersion(&driver_ver));
+        major = driver_ver / 1000;
+        minor = (driver_ver % 1000) / 10;
+        ss << ",\"driver_version\":\"" << major << "." << minor << "\"";
+
+        // Compiler.
+        ss << ",\"compiler\":{";
+        ss << "\"name\":\"nvcc\"";
+        ss << ",\"version\":\"" << __CUDACC_VER_MAJOR__ << "." << __CUDACC_VER_MINOR__ << "."
+           << __CUDACC_VER_BUILD__ << "\"";
+        ss << "}";
+
+        ss << "}";
+        return ss.str();
+    }
+#endif
+
+    static std::string get_host_name()
+    {
+#ifdef _WIN32
+        char  buffer[MAX_COMPUTERNAME_LENGTH + 1] = {0};
+        DWORD size                                = sizeof(buffer);
+        if(!GetComputerNameA(buffer, &size))
+        {
+            std::cerr << "Error: GetComputerNameA failed with Win32 Error Code: " << GetLastError()
+                      << "\n";
+            exit(EXIT_FAILURE);
+        }
+#else
+        char buffer[HOST_NAME_MAX + 1] = {0};
+        // POSIX allows truncation without a null terminator.
+        if(gethostname(buffer, HOST_NAME_MAX) != 0)
+        {
+            std::cerr << "Error: gethostname failed: " << std::strerror(errno) << "\n";
+            exit(EXIT_FAILURE);
+        }
+#endif
+        return std::string(buffer);
+    }
+
     /// Returns the local date and time as an RFC3339 string: `yyyy-mm-ddTHH:MM:SS±HH:MM`.
-    std::string date() const
+    static std::string date()
     {
         using namespace std::chrono;
 
@@ -990,7 +1135,7 @@ private:
 
         // Convert to local time.
         std::tm local_tm{};
-#if defined(_WIN32)
+#ifdef _WIN32
         localtime_s(&local_tm, &now_c);
 #else
         localtime_r(&now_c, &local_tm);
@@ -1002,7 +1147,7 @@ private:
 
         // Compute timezone offset.
         std::tm utc_tm{};
-#if defined(_WIN32)
+#ifdef _WIN32
         gmtime_s(&utc_tm, &now_c);
 #else
         gmtime_r(&now_c, &utc_tm);
@@ -1210,8 +1355,6 @@ private:
                                     size_t           bytes_per_item,
                                     size_t           items,
                                     double           noise_percent,
-                                    uint16_t         start_temp,
-                                    uint16_t         end_temp,
                                     double           elapsed_host_secs,
                                     double           elapsed_gpu_secs,
                                     bool             noise_timeout)
@@ -1236,8 +1379,6 @@ private:
                                                       bytes_per_item,
                                                       items,
                                                       noise_percent,
-                                                      start_temp,
-                                                      end_temp,
                                                       elapsed_host_secs,
                                                       elapsed_gpu_secs,
                                                       noise_timeout),
@@ -1271,8 +1412,6 @@ private:
                                          size_t           bytes_per_item,
                                          size_t           items,
                                          double           noise_percent,
-                                         uint16_t         start_temp,
-                                         uint16_t         end_temp,
                                          double           elapsed_host_secs,
                                          double           elapsed_gpu_secs,
                                          bool             noise_timeout) const
@@ -1299,10 +1438,12 @@ private:
         ss << ",\"gpu\":" << elapsed_gpu_secs;
         ss << "}";
 
+#if PRIMBENCH_HAS_MONITORING
         ss << ",\"gpu_temp_celsius\":{";
-        ss << "\"start\":" << start_temp;
-        ss << ",\"end\":" << end_temp;
+        ss << "\"start\":" << monitor::instance().get_saved_start_temp();
+        ss << ",\"end\":" << monitor::instance().get_temp();
         ss << "}";
+#endif
 
         ss << ",\"calls\":{";
         ss << "\"kernel_calls_per_batch\":" << kernels_per_batch;
@@ -1411,7 +1552,6 @@ inline void print_dry_header(std::string_view algo_name,
     std::cout << "\n";
 
     size_t underline_width = status_column_width + 2 + specialization_column_width;
-
     if(specialization_count > 1)
     {
         underline_width += 2 + index_column_width;
@@ -1435,9 +1575,13 @@ inline void print_header(std::string_view          algo_name,
     size_t status_column_width = std::max(status_header.size(), noisy_status.size());
 
     std::cout << std::setw(status_column_width) << std::left << status_header << "  "
-              << std::setw(noise_column_width) << std::left << "Noise" << "  "
-              << std::setw(gpu_temp_column_width) << std::left << "GPU °C" << "  "
-              << std::setw(bytes_per_sec_column_width) << std::left << "Bytes/sec" << "  "
+              << std::setw(noise_column_width) << std::left << "Noise";
+
+#if PRIMBENCH_HAS_MONITORING
+    std::cout << "  " << std::setw(gpu_temp_column_width) << std::left << "GPU °C";
+#endif
+
+    std::cout << "  " << std::setw(bytes_per_sec_column_width) << std::left << "Bytes/sec" << "  "
               << std::setw(specialization_column_width) << std::left << "Specialization";
 
     if(specialization_count > 1)
@@ -1447,10 +1591,13 @@ inline void print_header(std::string_view          algo_name,
     }
     std::cout << "\n";
 
-    size_t underline_width = status_column_width + 2 + noise_column_width + 2
-                             + gpu_temp_column_width + 2 + bytes_per_sec_column_width + 2
-                             + specialization_column_width;
-
+    size_t underline_width = status_column_width;
+    underline_width += 2 + noise_column_width;
+#if PRIMBENCH_HAS_MONITORING
+    underline_width += 2 + gpu_temp_column_width;
+#endif
+    underline_width += 2 + bytes_per_sec_column_width;
+    underline_width += 2 + specialization_column_width;
     if(specialization_count > 1)
     {
         underline_width += 2 + index_column_width;
@@ -1514,17 +1661,11 @@ inline std::string format_eta(double remaining_secs)
 
     std::ostringstream oss;
     if(h > 0)
-    {
         oss << h << "h " << m << "m " << s << "s";
-    }
     else if(m > 0)
-    {
         oss << std::setw(3) << "" << m << "m " << s << "s";
-    }
     else
-    {
         oss << std::setw(7) << "" << s << "s";
-    }
 
     return oss.str();
 }
@@ -1544,7 +1685,6 @@ inline void print_progress(uint64_t         iteration,
                            double           elapsed_host_secs,
                            double           noise_timeout_secs,
                            double           noise_tolerance_percent,
-                           uint16_t         gpu_temp,
                            double           estimated_remaining_secs)
 {
     std::string status_header = "Status of " + std::string(algo_name);
@@ -1618,8 +1758,11 @@ inline void print_progress(uint64_t         iteration,
     line << "  " << noise_color << std::setw(noise_column_width - sizeof('%')) << std::right
          << percent_stream.str() << "%" << reset;
 
+#if PRIMBENCH_HAS_MONITORING
     // GPU temperature.
-    line << "  " << std::setw(gpu_temp_column_width) << std::right << gpu_temp;
+    line << "  " << std::setw(gpu_temp_column_width) << std::right
+         << monitor::instance().get_temp();
+#endif
 
     // Bytes/sec.
     line << "  " << std::setw(bytes_per_sec_column_width) << std::right << std::scientific
@@ -1828,6 +1971,10 @@ struct json
         {
             // Copy nested JSON.
             m_map[std::string(key)] = std::make_shared<json>(value);
+        }
+        else if constexpr(std::is_convertible_v<T, std::string_view>)
+        {
+            m_map[std::string(key)] = std::string(std::string_view(value));
         }
         else
         {
@@ -2045,6 +2192,8 @@ private:
     const device_storage m_device_storage;
 }; // struct cache_thrasher
 
+#if PRIMBENCH_HAS_MONITORING
+
 /// Warms the GPU, using complex enough dummy kernel code
 /// that the compiler can't optimize it away.
 __global__
@@ -2067,43 +2216,63 @@ void warmup_kernel(float* data, int n)
     }
 }
 
-struct gpu_warmer
+class gpu_warmer
 {
-    static constexpr int threads_per_block = 256;
-    static constexpr int num_items         = 1 << 20; // 1 million items.
+public:
+    // Delete all copy/move constructors and assignment operators.
+    gpu_warmer(const gpu_warmer&)            = delete;
+    gpu_warmer& operator=(const gpu_warmer&) = delete;
+    gpu_warmer(gpu_warmer&&)                 = delete;
+    gpu_warmer& operator=(gpu_warmer&&)      = delete;
 
-    gpu_warmer(settings& settings, monitor& monitor)
-        : m_settings(settings), m_monitor(monitor), m_device_storage(num_items * sizeof(float))
-    {}
-
-    void warm_up(stream_t stream) const
+    /// Singleton accessor.
+    static gpu_warmer& instance()
     {
-        auto ceil_div = [](int a, int b) -> int { return (a + b - 1) / b; };
+        static gpu_warmer instance;
+        return instance;
+    }
 
+    gpu_warmer()
+    {
+        int grid_size;
+        PRIMBENCH_CHECK(occupancy_max_potential_block_size(
+            &grid_size, // Minimum grid size for full occupancy.
+            &m_threads_per_block, // Block size for full occupancy.
+            warmup_kernel,
+            0, // Dynamic shared memory.
+            0 // Block size limit (0 = no limit).
+            ));
+
+        m_num_items = grid_size * m_threads_per_block;
+
+        m_device_storage = std::make_unique<device_storage>(m_num_items * sizeof(float));
+    }
+
+    void warm_up(stream_t stream, uint16_t min_gpu_temp, double max_warming_secs) const
+    {
         auto start = std::chrono::steady_clock::now();
-
-        const auto& s = m_settings;
 
         while(true)
         {
-            uint16_t gpu_temp = m_monitor.get_temp();
-            if(gpu_temp >= s.min_gpu_temp)
+            uint16_t gpu_temp = monitor::instance().get_temp();
+            if(gpu_temp >= min_gpu_temp)
                 break;
 
-            progress::print_warming(gpu_temp, s.min_gpu_temp);
+            if(use_color())
+                progress::print_warming(gpu_temp, min_gpu_temp);
 
-            dim3 threads(threads_per_block);
-            dim3 blocks(ceil_div(num_items, threads.x));
+            dim3 blocks(m_num_items / m_threads_per_block);
+            dim3 threads(m_threads_per_block);
 
-            warmup_kernel<<<blocks, threads, 0, stream>>>(m_device_storage.get_ptr<float>(),
-                                                          num_items);
+            warmup_kernel<<<blocks, threads, 0, stream>>>(m_device_storage->get_ptr<float>(),
+                                                          m_num_items);
 
             PRIMBENCH_CHECK(stream_synchronize(stream));
 
             auto duration = std::chrono::steady_clock::now() - start;
-            if(duration >= std::chrono::duration<double>(s.max_warming_secs))
+            if(duration >= std::chrono::duration<double>(max_warming_secs))
             {
-                std::cerr << "\nError: Failed to warm up after " << s.max_warming_secs
+                std::cerr << "\nError: Failed to warm up after " << max_warming_secs
                           << " seconds\n";
                 exit(EXIT_FAILURE);
             }
@@ -2112,16 +2281,14 @@ struct gpu_warmer
         }
     }
 
-    // This type is not copy assignable.
-    gpu_warmer& operator=(const gpu_warmer&) = delete;
-    // This type is not copy constructible.
-    gpu_warmer(const gpu_warmer&) = delete;
-
 private:
-    const settings&      m_settings;
-    const monitor&       m_monitor;
-    const device_storage m_device_storage;
-}; // struct gpu_warmer
+    int m_threads_per_block;
+    int m_num_items;
+
+    std::unique_ptr<device_storage> m_device_storage;
+}; // class gpu_warmer
+
+#endif // PRIMBENCH_HAS_MONITORING
 
 /// Manages benchmark execution, GPU warm-up/cool-down, timing, and logging.
 class state
@@ -2133,15 +2300,13 @@ public:
           size_t           specialization_count,
           stream_t         stream,
           logger&          logger,
-          monitor&         monitor,
           stream_blocker&  stream_blocker,
           const settings&  settings,
           flags::FlagTag   flags,
           size_t           specialization_column_width,
           size_t           index_column_width,
           bool             print_index,
-          cache_thrasher&  cache,
-          gpu_warmer&      warmer)
+          cache_thrasher&  cache)
         : stream(stream)
         , size(settings.size)
         , seed(settings.seed)
@@ -2150,7 +2315,6 @@ public:
         , m_specialization_index(specialization_index)
         , m_specialization_count(specialization_count)
         , m_logger(logger)
-        , m_monitor(monitor)
         , m_stream_blocker(stream_blocker)
         , m_settings(settings)
         , m_flags(flags)
@@ -2158,7 +2322,6 @@ public:
         , m_index_column_width(index_column_width)
         , m_print_index(print_index)
         , m_cache(cache)
-        , m_warmer(warmer)
     {}
 
     /// Sets the total number of items processed per iteration.
@@ -2252,8 +2415,10 @@ public:
 
         size_t bytes_per_item = m_read_write_bytes / m_items;
 
+#if PRIMBENCH_HAS_MONITORING
         warm_up();
         cool_down();
+#endif
 
         init_kernels_per_batch(kernel);
 
@@ -2265,11 +2430,13 @@ public:
         uint64_t           iterations = 0;
         std::vector<float> iterations_ms(m_kernels_per_batch);
 
-        uint16_t start_temp = m_monitor.get_temp();
-
         double elapsed_gpu_secs = 0.0;
 
         double estimated_remaining_secs = get_estimated_remaining_secs();
+
+#if PRIMBENCH_HAS_MONITORING
+        monitor::instance().save_start_temp();
+#endif
 
         auto start = std::chrono::steady_clock::now();
 
@@ -2280,7 +2447,6 @@ public:
                              iterations,
                              iterations_ms,
                              start,
-                             start_temp,
                              elapsed_gpu_secs,
                              name,
                              serialized_meta,
@@ -2309,7 +2475,6 @@ private:
                        uint64_t&                                    iterations,
                        std::vector<float>&                          iterations_ms,
                        const std::chrono::steady_clock::time_point& start,
-                       uint16_t                                     start_temp,
                        double&                                      elapsed_gpu_secs,
                        const std::string&                           name,
                        const std::string&                           serialized_meta,
@@ -2370,24 +2535,26 @@ private:
         else if(noise_timeout)
             status = "Noisy timed out after " + std::to_string(secs) + "s";
 
-        uint16_t gpu_temp = m_monitor.get_temp();
-
-        progress::print_progress(iterations,
-                                 noise_percent,
-                                 bytes_per_sec,
-                                 status,
-                                 name,
-                                 m_algo,
-                                 s.batch_window_size,
-                                 m_specialization_index,
-                                 m_specialization_column_width,
-                                 m_index_column_width,
-                                 m_print_index,
-                                 elapsed_host_secs,
-                                 s.noise_timeout_secs,
-                                 s.noise_tolerance_percent,
-                                 gpu_temp,
-                                 estimated_remaining_secs);
+        // Only print progress if it's a terminal (real-time updates)
+        // or if the specialization has finished (single final update).
+        if(use_color() || stop_early || noise_timeout)
+        {
+            progress::print_progress(iterations,
+                                     noise_percent,
+                                     bytes_per_sec,
+                                     status,
+                                     name,
+                                     m_algo,
+                                     s.batch_window_size,
+                                     m_specialization_index,
+                                     m_specialization_column_width,
+                                     m_index_column_width,
+                                     m_print_index,
+                                     elapsed_host_secs,
+                                     s.noise_timeout_secs,
+                                     s.noise_tolerance_percent,
+                                     estimated_remaining_secs);
+        }
 
         if(stop_early || noise_timeout)
         {
@@ -2403,8 +2570,6 @@ private:
                                            bytes_per_item,
                                            m_items,
                                            noise_percent,
-                                           start_temp,
-                                           gpu_temp,
                                            elapsed_host_secs,
                                            elapsed_gpu_secs,
                                            noise_timeout);
@@ -2415,10 +2580,13 @@ private:
         return false;
     }
 
+#if PRIMBENCH_HAS_MONITORING
     /// Warms up the GPU until minimum temperature is reached.
     void warm_up() const
     {
-        m_warmer.warm_up(stream);
+        const auto& s = m_settings;
+
+        gpu_warmer::instance().warm_up(stream, s.min_gpu_temp, s.max_warming_secs);
     }
 
     /// Waits for GPU to cool down below maximum temperature.
@@ -2430,11 +2598,12 @@ private:
 
         while(true)
         {
-            uint16_t gpu_temp = m_monitor.get_temp();
+            uint16_t gpu_temp = monitor::instance().get_temp();
             if(gpu_temp <= s.max_gpu_temp)
                 break;
 
-            progress::print_cooling(gpu_temp, s.max_gpu_temp);
+            if(use_color())
+                progress::print_cooling(gpu_temp, s.max_gpu_temp);
 
             auto duration = std::chrono::steady_clock::now() - start;
             if(duration >= std::chrono::duration<double>(s.max_cooling_secs))
@@ -2447,6 +2616,7 @@ private:
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }
     }
+#endif
 
     /// Determines number of kernels per batch based on minimum duration.
     void init_kernels_per_batch(std::function<void()> kernel)
@@ -2586,9 +2756,7 @@ private:
     {
         // We can only estimate once at least one specialization has finished.
         if(m_specialization_index == 0)
-        {
             return 0.0;
-        }
 
         auto now   = std::chrono::steady_clock::now();
         auto start = m_logger.get_program_start_time();
@@ -2638,7 +2806,6 @@ private:
     size_t m_specialization_count;
 
     logger&         m_logger;
-    monitor&        m_monitor;
     stream_blocker& m_stream_blocker;
 
     const settings& m_settings;
@@ -2651,7 +2818,6 @@ private:
     bool   m_print_index;
 
     cache_thrasher& m_cache;
-    gpu_warmer&     m_warmer;
 
     std::function<void()> m_run_before_every_iteration_lambda = nullptr;
     std::vector<double>   m_times;
@@ -3105,6 +3271,9 @@ std::string name()
 template<typename... Args>
 void log(Args&&... args)
 {
+    if(!detail::use_color())
+        return;
+
     std::cout << detail::clearline << detail::gray;
     (std::cout << ... << args);
     std::cout << detail::reset << std::flush;
@@ -3267,7 +3436,7 @@ public:
 
         std::string algorithm = get_common_algorithm();
 
-        get_logger().init(algorithm, specializations.size(), m_settings, m_flags, get_monitor());
+        get_logger().init(algorithm, specializations.size(), m_settings, m_flags);
 
         m_specialization_column_width = compute_max_specialization_width(algorithm);
 
@@ -3605,15 +3774,13 @@ private:
                      specializations.size(),
                      m_stream,
                      get_logger(),
-                     get_monitor(),
                      *m_stream_blocker,
                      m_settings,
                      m_flags,
                      m_specialization_column_width,
                      m_index_column_width,
                      m_print_index,
-                     m_cache,
-                     m_warmer);
+                     m_cache);
     }
 
     /// Outputs a single dry specialization.
@@ -3625,18 +3792,16 @@ private:
         std::string serialized_meta = meta.serialize();
 
         // A dry run doesn't run anything on the GPU, so output placeholder values.
-        size_t   kernels_per_batch = 0;
-        double   ms_per_batch      = 0.0;
-        double   bytes_per_sec     = 0.0;
-        double   items_per_sec     = 0.0;
-        double   bytes_per_item    = 0.0;
-        size_t   items             = 0;
-        double   noise_percent     = 0.0;
-        uint16_t start_temp        = 0;
-        uint16_t end_temp          = 0;
-        double   elapsed_host_secs = 0.0;
-        double   elapsed_gpu_secs  = 0.0;
-        bool     noise_timeout     = false;
+        size_t kernels_per_batch = 0;
+        double ms_per_batch      = 0.0;
+        double bytes_per_sec     = 0.0;
+        double items_per_sec     = 0.0;
+        double bytes_per_item    = 0.0;
+        size_t items             = 0;
+        double noise_percent     = 0.0;
+        double elapsed_host_secs = 0.0;
+        double elapsed_gpu_secs  = 0.0;
+        bool   noise_timeout     = false;
 
         detail::progress::print_dry_progress(name,
                                              algo,
@@ -3655,8 +3820,6 @@ private:
                                            bytes_per_item,
                                            items,
                                            noise_percent,
-                                           start_temp,
-                                           end_temp,
                                            elapsed_host_secs,
                                            elapsed_gpu_secs,
                                            noise_timeout);
@@ -3666,12 +3829,6 @@ private:
     detail::logger& get_logger()
     {
         return detail::logger::instance();
-    }
-
-    /// Returns the monitor singleton.
-    detail::monitor& get_monitor()
-    {
-        return detail::monitor::instance();
     }
 
     using specializations_t = std::vector<std::unique_ptr<benchmark_interface>>;
@@ -3697,9 +3854,6 @@ private:
     bool   m_print_index; ///< Whether to print the index column.
 
     detail::cache_thrasher m_cache; ///< Cache clearing utility.
-
-    /// GPU warm-up utility.
-    detail::gpu_warmer m_warmer = detail::gpu_warmer(m_settings, get_monitor());
 }; // class executor
 
 } // namespace primbench
