@@ -844,7 +844,6 @@ struct InputLoader
     MfmaWindowType      mfma_window_0;
     MfmaWindowType      mfma_window_1;
     uint4* input_lds_ptr;
-    int last_slice;
 
     __device__ InputLoader(const BlockCoords<cfg>& bc,
                            uint4* input_lds,
@@ -852,8 +851,7 @@ struct InputLoader
                            int hi,
                            int wi,
                            int px) 
-                : input_lds_ptr(input_lds),
-                  last_slice(0)
+                : input_lds_ptr(input_lds)
     {
         const auto input_dram_desc = TC::MakeInputDramDescriptor(hi, wi, bc.C, px);
         const auto input_dram_view = ck_tile::make_tensor_view<ck_tile::address_space_enum::global>(
@@ -931,39 +929,24 @@ struct InputLoader
             ck_tile::async_load_tile(lds_window_1, input_dram_window);
     }
 
-    // Read all kw slices for this thread from LDS into registers. 
-    // Assumes the relevant tile is already loaded and synced in LDS.
-    __device__ void read_from_lds(
-        ck_tile::fp16x4_t (&input_regs)[cfg.kw], 
-        int lds_buffer_index) const
-    {
-        auto window = (lds_buffer_index == 0) ? mfma_window_0 : mfma_window_1;
 
-        // Issue all kw DS_READ instructions upfront.
-        static_for<cfg.kw>([&]<int S>() {
-            // Origin {S, 0, 0}: each thread reads at (thread_q + S, thread_c4, thread_c_sub).
-            auto tile  = ck_tile::load_tile(window);
-            __builtin_memcpy(&input_regs[S], &tile.get_thread_buffer()(ck_tile::number<0>{}), sizeof(ck_tile::fp16x4_t));
-            if constexpr(S < cfg.kw - 1)
-            {
-                ck_tile::move_tile_window(window, {1, 0, 0});
-            }
-        });
-    }
-
-    // Read a given kw slice for this thread from LDS into registers. 
+    // Read a given kw slice for this thread from LDS into registers.
+    // Must be called for slice = 0, 1, ..., kw-1 in order.
     // Assumes the relevant tile is already loaded and synced in LDS.
     __device__ void read_from_lds(ck_tile::fp16x4_t &input_reg, int slice, int lds_buffer_index)
     {
-        auto window = (lds_buffer_index == 0) ? mfma_window_0 : mfma_window_1;
+        auto& window = (lds_buffer_index == 0) ? mfma_window_0 : mfma_window_1;
         auto tile  = ck_tile::load_tile(window);
-        
-        const int diff = slice - last_slice;
-        // Move the window down by 'diff' slices in the kw dimension.
-        ck_tile::move_tile_window(window, {diff, 0, 0});
-        last_slice = slice;
-
         __builtin_memcpy(&input_reg, &tile.get_thread_buffer()(ck_tile::number<0>{}), sizeof(ck_tile::fp16x4_t));
+        if (slice < cfg.kw - 1)
+        {
+            ck_tile::move_tile_window(window, {1, 0, 0});
+        }
+        else
+        {
+            // Reset to origin so the next row starts at slice 0.
+            ck_tile::move_tile_window(window, {-(cfg.kw - 1), 0, 0});
+        }
     }
 };
 
@@ -1390,18 +1373,12 @@ __device__ void conv2d_grouped_4c_fp16_cdna4_nhwc_impl(const _Float16* __restric
                     il.fetch_tile_to_lds(tic);
                 }
 
-                // Issue all LDS reads before any are consumed, giving the hardware
-                // maximum opportunity to hide LDS read latency before the MFMA loop.
-                ck_tile::fp16x4_t input_regs[cfg.kw];
-                il.read_from_lds(input_regs, toc);
-
                 // Accumulate MFMA products over filter width.
                 static_for<cfg.kw>(
                     [&]<int S>()
                     {
-                        //ck_tile::fp16x4_t input_reg;
-                        //il.read_from_lds(input_reg, S, toc);
-                        const fp16x4_t input_reg = input_regs[S];
+                        ck_tile::fp16x4_t input_reg;
+                        il.read_from_lds(input_reg, S, toc);
 
                         static_for<cfg.kh>(
                             [&]<int R>()
@@ -1456,17 +1433,11 @@ __device__ void conv2d_grouped_4c_fp16_cdna4_nhwc_impl(const _Float16* __restric
                     il.fetch_tile_to_lds(tic);
                 }
 
-                // Issue all LDS reads before any are consumed, giving the hardware
-                // maximum opportunity to hide LDS read latency before the MFMA loop.
-                ck_tile::fp16x4_t input_regs[cfg.kw];
-                il.read_from_lds(input_regs, toc);
-
                 static_for<cfg.kw>(
                     [&]<int S>()
                     {
-                        //ck_tile::fp16x4_t input_reg;
-                        //il.read_from_lds(input_reg, S, toc);
-                        const fp16x4_t input_reg = input_regs[S];
+                        ck_tile::fp16x4_t input_reg;
+                        il.read_from_lds(input_reg, S, toc);
 
                         static_for<cfg.kh>(
                             [&]<int R>()
