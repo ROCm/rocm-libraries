@@ -617,6 +617,13 @@ int getMsbOffsetFromStinkyVgpr(const StinkyRegister& reg) {
 StinkyRegister toStinkyRegister(const rocisa::Container* container, bool hasVgprMsb) {
     if (const rocisa::RegisterContainer* regCont =
             dynamic_cast<const rocisa::RegisterContainer*>(container)) {
+        // isOff=true signals the MUBUF "off" keyword (no address register).
+        // rocisa emits "off" for this case; produce a literal string so the
+        // emitter writes "off" instead of treating it as a named VGPR.
+        if (regCont->isOff) {
+            return StinkyRegister("off");
+        }
+
         RegType regType = stringToRegType(regCont->regType);
 
         int physicalIdx = regCont->regIdx;
