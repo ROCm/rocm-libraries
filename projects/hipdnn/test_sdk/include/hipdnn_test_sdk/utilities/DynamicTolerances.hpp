@@ -8,6 +8,7 @@
 // New operation-specific tolerance implementations should be added to their own
 // header (e.g., DynamicTolerancesBatchNorm.hpp) and included here.
 
+#include <hipdnn_test_sdk/utilities/DynamicTolerancesBatchNorm.hpp>
 #include <hipdnn_test_sdk/utilities/DynamicTolerancesCommon.hpp>
 #include <hipdnn_test_sdk/utilities/DynamicTolerancesConv.hpp>
 #include <hipdnn_test_sdk/utilities/DynamicTolerancesMatmul.hpp>
