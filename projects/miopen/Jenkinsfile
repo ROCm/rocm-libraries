@@ -344,7 +344,7 @@ pipeline {
         // Builds rocm/miopen:therock-<hash> if the pinned hash changed; sets THEROCK_CANDIDATE_IMAGE.
         stage('Build TheRock Docker: Build') {
             when {
-                expression { params.BUILD_THEROCK_DOCKER && params.TARGET_NOGPU && params.DATATYPE_NA }
+                expression { params.BUILD_THEROCK_DOCKER }
             }
             steps {
                 script {
@@ -355,8 +355,8 @@ pipeline {
         stage('Build Docker'){
             when {
                 expression {
-                    (params.BUILD_DOCKER || params.BUILD_THEROCK_DOCKER) \
-                    && params.TARGET_NOGPU && params.DATATYPE_NA
+                    params.BUILD_THEROCK_DOCKER \
+                    || (params.BUILD_DOCKER && params.TARGET_NOGPU && params.DATATYPE_NA)
                 }
             }
             parallel {
@@ -369,8 +369,8 @@ pipeline {
         stage("Package and Static checks") {
             when {
                 expression {
-                    (params.BUILD_PACKAGE_AND_CHECKS || params.BUILD_THEROCK_DOCKER) \
-                    && params.TARGET_NOGPU && params.DATATYPE_NA
+                    params.BUILD_THEROCK_DOCKER \
+                    || (params.BUILD_PACKAGE_AND_CHECKS && params.TARGET_NOGPU && params.DATATYPE_NA)
                 }
             }
             parallel
@@ -648,9 +648,7 @@ pipeline {
         stage('Build TheRock Docker: Promote') {
             when {
                 expression {
-                    params.BUILD_THEROCK_DOCKER \
-                    && params.TARGET_NOGPU && params.DATATYPE_NA \
-                    && env.THEROCK_SKIP_UPDATE != 'true'
+                    params.BUILD_THEROCK_DOCKER && env.THEROCK_SKIP_UPDATE != 'true'
                 }
             }
             steps {
