@@ -890,62 +890,71 @@ class Timeline:
                     self._insert(idx_vmfma, GRInc, {"name": name, "rocisa_inst": _get_rocisa(name, idx_grinc)}, kernel)
             elif name.startswith("GRA") or name.startswith("GRB"):
                 global_reads = schedule_get(name, code_path, schedule_info)
-                assert len(global_reads) % 2 == 0, f"Code path {code_path}: {name} has an odd number of indices. Must be even if DirectToLds is True."
 
-                for idx_GR, idx_vmfma in enumerate(global_reads):
-                    assert idx_vmfma >= -1, f"Code path {code_path}: GlobalRead {name} at index {idx_GR} is not valid. Must be >= -1."
-
-                    # If using DirectToLds, only every other index (starting at index=1) is an actual GR, the others are increments to a pointer.
-                    if idx_GR % 2 == 0:
-                        continue
-
-                    self._insert(idx_vmfma, GlobalRead, {"name": name, "swap_global_read_order": swap_global_read_order, "rocisa_inst": _get_rocisa(name, idx_GR)}, kernel)
+                if self.id_map and name in self.id_map:
+                    # idMap-driven: inspect each instruction's type to decide if it's a load or pointer op
+                    idmap_items = self.id_map[name]
+                    for idx_GR, idx_vmfma in enumerate(global_reads):
+                        assert idx_vmfma >= -1, f"Code path {code_path}: GlobalRead {name} at index {idx_GR} is not valid. Must be >= -1."
+                        ri = idmap_items[idx_GR] if idx_GR < len(idmap_items) else None
+                        if ri is not None and not is_gr_load(ri):
+                            continue  # pointer setup (SMovB32/SAddU32), not an actual load
+                        self._insert(idx_vmfma, GlobalRead, {"name": name, "swap_global_read_order": swap_global_read_order, "rocisa_inst": ri}, kernel)
+                else:
+                    # Fallback: even/odd hack when idMap is not available
+                    assert len(global_reads) % 2 == 0, f"Code path {code_path}: {name} has an odd number of indices. Must be even if DirectToLds is True."
+                    for idx_GR, idx_vmfma in enumerate(global_reads):
+                        assert idx_vmfma >= -1, f"Code path {code_path}: GlobalRead {name} at index {idx_GR} is not valid. Must be >= -1."
+                        if idx_GR % 2 == 0:
+                            continue
+                        self._insert(idx_vmfma, GlobalRead, {"name": name, "swap_global_read_order": swap_global_read_order}, kernel)
             elif name.startswith("Pack"):
                 packs = schedule_get(name, code_path, schedule_info)
-                n_swaps = _compute_swap_pack_count(kernel, name) if is_4x4mfma_tf32 else 0
 
-                for idx_pack, idx_vmfma in enumerate(packs):
-                    assert idx_vmfma >= -1, f"Code path {code_path}: Pack {name} at index {idx_pack} is not valid. Must be >= -1."
-                    ri = _get_rocisa(name, idx_pack)
+                if self.id_map and name in self.id_map:
+                    # idMap-driven type resolution: determine pack type from actual rocisa instruction
+                    idmap_items = self.id_map[name]
+                    groups = detect_pack_groups(idmap_items)
+                    # Build a flat index -> (cls, group_idx) map from the group structure
+                    idx_to_cls: dict[int, tuple[type, Optional[int]]] = {}
+                    for group in groups:
+                        gidx = group["group_index"]
+                        for entry_idx, cls, label in group["entries"]:
+                            idx_to_cls[entry_idx] = (cls, gidx)
 
-                    # Determine pack type using existing positional logic
-                    if is_4x4mfma_tf32:
-                        if idx_pack < n_swaps:
-                            positional_cls = SwapPack
-                            group_idx = None
-                        else:
-                            adjusted_idx = idx_pack - n_swaps
-                            idx_in_group = adjusted_idx % PACK_GROUP_SIZE_TF32_4X4
-                            group_idx = adjusted_idx // PACK_GROUP_SIZE_TF32_4X4
-                            if TF32_4X4_MFMA_START <= idx_in_group < TF32_4X4_MFMA_END:
-                                positional_cls = MFMAPack
+                    for idx_pack, idx_vmfma in enumerate(packs):
+                        assert idx_vmfma >= -1, f"Code path {code_path}: Pack {name} at index {idx_pack} is not valid. Must be >= -1."
+                        ri = idmap_items[idx_pack] if idx_pack < len(idmap_items) else None
+                        pack_cls, group_idx = idx_to_cls.get(idx_pack, (Pack, None))
+                        pack_kwargs = {"name": name, "issue_index": idx_pack, "rocisa_inst": ri}
+                        if group_idx is not None:
+                            pack_kwargs["group_index"] = group_idx
+                        self._insert(idx_vmfma, pack_cls, pack_kwargs, kernel)
+                else:
+                    # Fallback: positional logic when idMap is not available (unit tests)
+                    n_swaps = _compute_swap_pack_count(kernel, name) if is_4x4mfma_tf32 else 0
+                    for idx_pack, idx_vmfma in enumerate(packs):
+                        assert idx_vmfma >= -1, f"Code path {code_path}: Pack {name} at index {idx_pack} is not valid. Must be >= -1."
+                        if is_4x4mfma_tf32:
+                            if idx_pack < n_swaps:
+                                self._insert(idx_vmfma, SwapPack, {"name": name, "issue_index": idx_pack, "group_index": None}, kernel)
                             else:
-                                positional_cls = CVTPack
-                    elif is_tf32_emulation:
-                        idx_in_group = idx_pack % PACK_GROUP_SIZE_TF32
-                        group_idx = idx_pack // PACK_GROUP_SIZE_TF32
-                        if TF32_MIDDLE_16_START <= idx_in_group < TF32_MIDDLE_16_END:
-                            positional_cls = MiddlePack
+                                adjusted_idx = idx_pack - n_swaps
+                                idx_in_group = adjusted_idx % PACK_GROUP_SIZE_TF32_4X4
+                                group_idx = adjusted_idx // PACK_GROUP_SIZE_TF32_4X4
+                                if TF32_4X4_MFMA_START <= idx_in_group < TF32_4X4_MFMA_END:
+                                    self._insert(idx_vmfma, MFMAPack, {"name": name, "issue_index": idx_pack, "group_index": group_idx}, kernel)
+                                else:
+                                    self._insert(idx_vmfma, CVTPack, {"name": name, "issue_index": idx_pack, "group_index": group_idx}, kernel)
+                        elif is_tf32_emulation:
+                            idx_in_group = idx_pack % PACK_GROUP_SIZE_TF32
+                            group_idx = idx_pack // PACK_GROUP_SIZE_TF32
+                            if TF32_MIDDLE_16_START <= idx_in_group < TF32_MIDDLE_16_END:
+                                self._insert(idx_vmfma, MiddlePack, {"name": name, "issue_index": idx_pack, "group_index": group_idx}, kernel)
+                            else:
+                                self._insert(idx_vmfma, CVTPack, {"name": name, "issue_index": idx_pack, "group_index": group_idx}, kernel)
                         else:
-                            positional_cls = CVTPack
-                    else:
-                        positional_cls = Pack
-                        group_idx = None
-
-                    # Dual-path assertion: when idMap is available, verify type resolution agrees
-                    if ri is not None:
-                        resolved_cls, _ = resolve_pack_type(ri)
-                        assert resolved_cls is positional_cls, (
-                            f"Type resolution mismatch for {name}[{idx_pack}]: "
-                            f"positional logic says {positional_cls.__name__}, "
-                            f"idMap type resolution says {resolved_cls.__name__} "
-                            f"(rocisa type: {type(ri).__name__})"
-                        )
-
-                    pack_kwargs = {"name": name, "issue_index": idx_pack, "rocisa_inst": ri}
-                    if group_idx is not None:
-                        pack_kwargs["group_index"] = group_idx
-                    self._insert(idx_vmfma, positional_cls, pack_kwargs, kernel)
+                            self._insert(idx_vmfma, Pack, {"name": name, "issue_index": idx_pack}, kernel)
             else:
                 raise NotImplementedError(f"Instruction {name} not implemented")
 
@@ -2135,15 +2144,17 @@ def derive_pack_must_start_after(
 
     for pack in sorted_packs:
         # Find which producers wrote to this pack's source registers
-        deps: set[ValidatorInstruction] = set()
+        # Use dict keyed by id() since ValidatorInstruction is unhashable (mutable dataclass)
+        deps: dict[int, ValidatorInstruction] = {}
         src_ranges = get_src_ranges(pack.rocisa_inst)
         for base, start, end in src_ranges:
             for off in range(start, end):
                 key = (base, off)
                 if key in producers and producers[key] is not pack:
-                    deps.add(producers[key])
+                    dep = producers[key]
+                    deps[id(dep)] = dep
 
-        result[pack.issue_index] = list(deps)
+        result[pack.issue_index] = list(deps.values())
 
         # Update producer map with this pack's destination
         dst = get_dst_range(pack.rocisa_inst)
