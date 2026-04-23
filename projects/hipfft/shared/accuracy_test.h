@@ -825,16 +825,16 @@ inline void fft_vs_reference_impl(Tparams& params, bool round_trip)
         compare_output.get();
 
     Tparams              params_inverse;
-    std::vector<hostbuf> rountrip_output_buffers;
+    std::vector<hostbuf> roundtrip_output_buffers;
 
     if(round_trip)
     {
         params_inverse.inverse_from_forward(params);
         params_inverse.compute_osize();
-        rountrip_output_buffers = allocate_host_buffer(params_inverse.obuffer_sizes());
+        roundtrip_output_buffers = allocate_host_buffer(params_inverse.obuffer_sizes());
 
         run_round_trip_inverse<Tparams>(
-            params_inverse, *obuffer, pobuffer, pibuffer, rountrip_output_buffers);
+            params_inverse, *obuffer, pobuffer, pibuffer, roundtrip_output_buffers);
     }
 
     if(fftw_compare)
@@ -906,7 +906,7 @@ inline void fft_vs_reference_impl(Tparams& params, bool round_trip)
         {
             compare_round_trip_inverse<Tparams>(params_inverse,
                                                 reference_results.get_params(),
-                                                rountrip_output_buffers,
+                                                roundtrip_output_buffers,
                                                 reference_results.get_buffers<fft_io::fft_io_in>(),
                                                 cpu_input_norm.get(),
                                                 total_length);
