@@ -29,6 +29,7 @@ struct hipsparse_test_numeric_types_enum
     {
         all,
         real_only,
-        complex_only
+        complex_only,
+        gather
     } value_type;
 };

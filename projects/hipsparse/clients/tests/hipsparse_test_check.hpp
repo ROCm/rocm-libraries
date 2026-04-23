@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
-* Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights Reserved.
+* Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights Reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -46,6 +46,13 @@ public:
         case hipsparse_test_numeric_types_enum::complex_only:
         {
             return std::is_same<T, hipComplex>{} || std::is_same<T, hipDoubleComplex>{};
+        }
+        case hipsparse_test_numeric_types_enum::gather:
+        {
+            return std::is_same<T, int8_t>{} || std::is_same<T, hipsparseFloat16>{}
+                   || std::is_same<T, hipsparseBfloat16>{} || std::is_same<T, float>{}
+                   || std::is_same<T, double>{} || std::is_same<T, hipComplex>{}
+                   || std::is_same<T, hipDoubleComplex>{};
         }
         }
         return false;

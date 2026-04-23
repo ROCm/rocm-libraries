@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2019 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -176,6 +176,40 @@ void unit_check_general(int64_t M, int64_t N, int64_t lda, size_t* hCPU, size_t*
             ASSERT_EQ(hCPU[i + j * lda], hGPU[i + j * lda]);
 #else
             assert(hCPU[i + j * lda] == hGPU[i + j * lda]);
+#endif
+        }
+    }
+}
+
+template <>
+void unit_check_general(
+    int64_t M, int64_t N, int64_t lda, hipsparseFloat16* hCPU, hipsparseFloat16* hGPU)
+{
+    for(int64_t j = 0; j < N; j++)
+    {
+        for(int64_t i = 0; i < M; i++)
+        {
+#ifdef GOOGLE_TEST
+            ASSERT_EQ(hCPU[i + j * lda].data, hGPU[i + j * lda].data);
+#else
+            assert(hCPU[i + j * lda].data == hGPU[i + j * lda].data);
+#endif
+        }
+    }
+}
+
+template <>
+void unit_check_general(
+    int64_t M, int64_t N, int64_t lda, hipsparseBfloat16* hCPU, hipsparseBfloat16* hGPU)
+{
+    for(int64_t j = 0; j < N; j++)
+    {
+        for(int64_t i = 0; i < M; i++)
+        {
+#ifdef GOOGLE_TEST
+            ASSERT_EQ(hCPU[i + j * lda].data, hGPU[i + j * lda].data);
+#else
+            assert(hCPU[i + j * lda].data == hGPU[i + j * lda].data);
 #endif
         }
     }

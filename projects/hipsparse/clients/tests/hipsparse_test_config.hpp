@@ -87,3 +87,9 @@ struct hipsparse_test_config_ijt_complex_only
                                      hipsparse_test_numeric_types_enum::complex_only>
 {
 };
+
+struct hipsparse_test_config_gather
+    : hipsparse_test_config_template<hipsparse_test_dispatch_enum::gather,
+                                     hipsparse_test_numeric_types_enum::gather>
+{
+};
