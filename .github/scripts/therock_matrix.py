@@ -8,6 +8,7 @@ subtree_to_project_map = {
     "dnn-providers/hipblaslt-provider": "hipblaslt-provider",
     "dnn-providers/hip-kernel-provider": "hip-kernel-provider",
     "dnn-providers/miopen-provider": "miopen-provider",
+    "dnn-providers/integration-tests": "dnn-provider-integration-tests",
     "projects/composablekernel": "miopen",
     "projects/hipblas": "blas",
     "projects/hipblas-common": "blas",
@@ -104,6 +105,7 @@ additional_options = {
             "miopenprovider",
             "hipblasltprovider",
             "hipkernelprovider",
+            "hipdnn_integration_tests",
         ],
         "project_to_add": "miopen",
     },
@@ -121,6 +123,12 @@ additional_options = {
         ],
         "projects_to_test": ["hipblasltprovider"],
         "project_to_add": "blas",
+    },
+    "dnn-provider-integration-tests": {
+        "cmake_options": [
+            "-DTHEROCK_ENABLE_HIPDNN_INTEGRATION_TESTS=ON",
+        ],
+        "projects_to_test": ["hipdnn_integration_tests"],
     },
     "rocwmma": {
         "cmake_options": ["-DTHEROCK_ENABLE_ROCWMMA=ON"],
