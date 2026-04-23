@@ -427,7 +427,7 @@ Dependency DAG:
   │   │   └── 14-pgr-generalization  (refactor, stacked on 11)
   │   └── 13-valid-position-query  (feature, stacked on 01)
   ├── 15-split-into-modules      (refactor, after 09 lands)
-  │   └── 16-separate-timeline   (refactor, stacked on 15)
+  └── 16-separate-timeline       (refactor, stacked on 01)
   └── reconstruction             (verification)
 ```
 
@@ -490,8 +490,8 @@ Replace hardcoded 4-loop Timeline (`[ML-1, ML, NGL, NLL]`) with a `PipelineStage
 **15-split-into-modules** (refactor, after 09 lands)
 Split `CMSValidator.py` into a package: `instructions.py`, `timeline.py`, `constants.py`, `context.py`, `passes.py`, `utils/`. Create backward-compatible `CMSValidator.py` that re-exports the public API. (From CMSValidator_Refactoring_Plan.md R1. Deferred until after functional changes stabilize to avoid constant merge conflicts.)
 
-**16-separate-timeline** (refactor, stacked on 15)
-Extract `ScheduleParser` and `LoopManager` from `Timeline`. Timeline becomes an immutable query view over the loop manager. (From CMSValidator_Refactoring_Plan.md R10. Deferred until after file split.)
+**16-separate-timeline** (refactor, stacked on 01)
+Extract `ScheduleParser` and `LoopManager` from `Timeline`. Timeline becomes an immutable query view over the loop manager. (From CMSValidator_Refactoring_Plan.md R10. No dependency on 15-split-into-modules — the separation makes the later file split easier, not the other way around.)
 
 ---
 
