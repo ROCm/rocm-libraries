@@ -3325,7 +3325,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
         if isSwapLroIter: # ResetLroIter
           # Swap, reset, or increment the LRO:
           # force internalPointerSwap = False in NGLL case
-          internalPointerSwap = expand and not isNGLL
+          internalPointerSwap = False
           pointerLRCode.addComment1("local read swap offsets a")
           pointerLRCode.addComment1("isSwapLroIter = %d"%(isSwapLroIter))
           pointerLRCode.add(self.localReadSwapOffsets(kernel, internalPointerSwap, tensorParametersA))
