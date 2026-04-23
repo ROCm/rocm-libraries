@@ -275,16 +275,16 @@ def buildTheRockDockerImage(Map conf=[:])
     def hashedImage = "${env.MIOPEN_DOCKER_IMAGE_URL}:therock-${shortHash}"
 
     // Check whether this hash is already live on :therock via its baked-in label.
+    // Pull and inspect are separated so that docker pull stdout does not contaminate the captured label.
     def lastPromotedHash = ""
     try {
         withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
+            sh "docker pull ${env.MIOPEN_DOCKER_IMAGE_URL}:therock > /dev/null 2>&1 || true"
             lastPromotedHash = sh(
                 script: """
-                    docker pull ${env.MIOPEN_DOCKER_IMAGE_URL}:therock 2>/dev/null \
-                    && docker inspect \
+                    docker inspect \
                         --format '{{ index .Config.Labels "therock.git.hash" }}' \
-                        ${env.MIOPEN_DOCKER_IMAGE_URL}:therock 2>/dev/null \
-                    || true
+                        ${env.MIOPEN_DOCKER_IMAGE_URL}:therock 2>/dev/null || true
                 """.stripIndent(),
                 returnStdout: true
             ).trim()
@@ -301,13 +301,13 @@ def buildTheRockDockerImage(Map conf=[:])
 
     // Reuse the hash-tagged image if a previous nightly already built it.
     def imageAlreadyBuilt = false
-    try {
-        withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
-            sh "docker manifest inspect ${hashedImage} > /dev/null 2>&1"
-            imageAlreadyBuilt = true
-            echo "Hash-tagged image ${hashedImage} already exists - reusing without rebuild."
-        }
-    } catch (Exception e) {
+    withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
+        def rc = sh(script: "docker manifest inspect ${hashedImage} > /dev/null 2>&1", returnStatus: true)
+        imageAlreadyBuilt = (rc == 0)
+    }
+    if (imageAlreadyBuilt) {
+        echo "Hash-tagged image ${hashedImage} already exists - reusing without rebuild."
+    } else {
         echo "Hash-tagged image ${hashedImage} not found - will build now."
     }
 
@@ -361,21 +361,18 @@ def buildTheRockDockerImage(Map conf=[:])
 }
 
 // Retags the CI image as rocm/miopen-dev:multiarch_dev_<date> and :latest.
+// Uses CI_DOCKER_IMAGE set by the Build Docker stage to avoid recomputing the image name.
 def publishDevDockerImage(Map conf=[:])
 {
-    def prefixpath = conf.get("prefixpath", "/opt/rocm")
     def date = new Date().format('yyyyMMdd')
     def devImageUrl = "${env.MIOPEN_DOCKER_IMAGE_URL}-dev"
     def dateTag   = "${devImageUrl}:multiarch_dev_${date}"
     def latestTag = "${devImageUrl}:latest"
+    def ciImage   = env.CI_DOCKER_IMAGE
 
-    // Reconstruct the same dockerArgs used by getDockerImage(gpu_family:"ci") so we
-    // derive the identical image name without rebuilding.
-    def dockerArgs = "--build-arg PREFIX=${prefixpath} --target miopen "
-    if (env.THEROCK_CANDIDATE_IMAGE) {
-        dockerArgs += "--build-arg THEROCK_BASE_IMAGE=${env.THEROCK_CANDIDATE_IMAGE} "
+    if (!ciImage) {
+        error "CI_DOCKER_IMAGE is not set - Build Docker stage must run before Publish Dev Image."
     }
-    def ciImage = getDockerImageName(dockerArgs)
 
     echo "Publishing dev image: ${ciImage} -> ${dateTag}"
     withDockerRegistry([credentialsId: "docker_test_cred", url: ""]) {
