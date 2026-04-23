@@ -28,34 +28,28 @@ External kernels (non-Tensile) need a custom.config section in their
 .amdgpu_metadata YAML to carry source/version/feature metadata AND the
 Tensile interface (args, macrotile, threads, grid, ProblemType, etc.).
 
-Auto-detected from the .s file (override with explicit flags):
+The config is extracted directly from a Tensile test YAML that already
+has the kernel's ForkParameters (CustomKernel, MatrixInstruction, etc.).
+
+Auto-detected from the .s file (override with CLI flags):
     - origin:         parent directory name
     - wavefront-size: .wavefront_size from amdhsa.kernels metadata
     - threads:        .reqd_workgroup_size from amdhsa.kernels metadata
 
 Usage:
-    python -m Tensile.AddCustomConfig <file.s> \\
-        --problem-type-file <problem_type.yaml> \\
-        --args-file <args.yaml> \\
-        --macrotile 256,256,64 \\
-        --grid TilesX,TilesY,One \\
-        --matrix-instruction 16,16,32,1
+    python -m Tensile.AddCustomConfig <file.s> --yaml <test.yaml>
 
 Examples:
-    # Full config (origin, threads, wavefront-size auto-detected)
+    # Extract config from test YAML and inject into .s file
     python -m Tensile.AddCustomConfig CustomKernels/aiter/kernel.s \\
-        --problem-type-file pt.yaml \\
-        --args-file args.yaml \\
-        --macrotile 256,256,64 \\
-        --grid TilesX,TilesY,One \\
-        --matrix-instruction 16,16,32,1
+        --yaml Tests/custom/custom_aiter_bf16.yaml
 
-    # Provenance-only (no build config -- kernel won't be usable
+    # Provenance-only (no --yaml -- kernel won't be usable
     # through CustomKernels: list path until interface is added)
     python -m Tensile.AddCustomConfig CustomKernels/aiter/kernel.s
 
     # Preview without modifying the file
-    python -m Tensile.AddCustomConfig kernel.s --dry-run
+    python -m Tensile.AddCustomConfig kernel.s --yaml test.yaml --dry-run
 """
 
 import argparse
@@ -73,15 +67,69 @@ FEATURE_FLAGS = [
 ]
 
 
-def build_custom_config_yaml(origin, repository=None, version="1.0.0",
-                              features=None, problem_type=None,
-                              kernel_args=None, macrotile=None,
-                              threads=None, grid=None,
-                              matrix_instruction=None, wavefront_size=64,
-                              kern_args_version=0):
-    """Builds the custom.config YAML block string."""
-    if features is None:
-        features = {f: False for f in FEATURE_FLAGS}
+def _parse_tensile_yaml(path, kernel_name=None):
+    """Extract ProblemType, CustomKernel, and MatrixInstruction from a Tensile test YAML.
+
+    Args:
+        path: Path to the Tensile test YAML file.
+        kernel_name: If provided, match this kernel name in the ForkParameters.
+                     If None, use the first CustomKernel found.
+
+    Returns:
+        dict with ProblemType, CustomKernel, MatrixInstruction, WavefrontSize (if found).
+    """
+    import yaml
+    with open(path) as f:
+        data = yaml.safe_load(f)
+
+    bp = data["BenchmarkProblems"][0]
+    problem_type = bp[0]
+    bench = bp[1]
+
+    config = {"ProblemType": problem_type}
+
+    fork_params = bench.get("ForkParameters", [])
+    for entry in fork_params:
+        if not isinstance(entry, dict):
+            continue
+
+        if "CustomKernel" in entry:
+            for ck in entry["CustomKernel"]:
+                if not isinstance(ck, dict) or "name" not in ck:
+                    continue
+                if kernel_name and ck["name"] != kernel_name:
+                    continue
+                config["CustomKernel"] = {
+                    k: v for k, v in ck.items() if k != "name"
+                }
+                break
+
+        if "MatrixInstruction" in entry:
+            mi_list = entry["MatrixInstruction"]
+            if mi_list and isinstance(mi_list[0], list):
+                config["MatrixInstruction"] = mi_list[0][:4]
+
+        if "WavefrontSize" in entry:
+            wf_list = entry["WavefrontSize"]
+            if wf_list:
+                config["WavefrontSize"] = wf_list[0]
+
+    return config
+
+
+def build_custom_config_yaml(origin, config, repository=None, version="1.0.0"):
+    """Builds the custom.config YAML block string.
+
+    Args:
+        origin: Source origin name (e.g. "aiter", "wave").
+        config: Dict with ProblemType, CustomKernel, MatrixInstruction, etc.
+                May be None for provenance-only injection.
+        repository: Optional source repository URL.
+        version: Kernel version string.
+    """
+    features = config.get("Features", {}) if config else {}
+    for flag in FEATURE_FLAGS:
+        features.setdefault(flag, False)
 
     lines = ["custom.config:"]
     lines.append("  Source:")
@@ -94,26 +142,39 @@ def build_custom_config_yaml(origin, repository=None, version="1.0.0",
         val = str(features.get(flag, False)).lower()
         lines.append(f"    {flag}: {val}")
 
+    isp = {}
+    if config:
+        isp = config.get("InternalSupportParams", {})
+    isp.setdefault("KernArgsVersion", 0)
     lines.append("  InternalSupportParams:")
-    lines.append(f"    KernArgsVersion: {kern_args_version}")
+    for k, v in isp.items():
+        lines.append(f"    {k}: {v}")
 
-    if problem_type:
+    if config and "ProblemType" in config:
         lines.append("  ProblemType:")
-        for k, v in problem_type.items():
+        for k, v in config["ProblemType"].items():
             lines.append(f"    {k}: {v}")
 
-    if kernel_args is not None and macrotile is not None:
+    if config and "CustomKernel" in config:
+        ck = config["CustomKernel"]
         lines.append("  CustomKernel:")
-        lines.append(f"    args: {json.dumps(kernel_args)}")
-        lines.append(f"    macrotile: {list(macrotile)}")
-        if threads:
-            lines.append(f"    threads: {list(threads)}")
-        if grid:
-            lines.append(f"    grid: {list(grid)}")
+        if "args" in ck:
+            lines.append(f"    args: {json.dumps(ck['args'])}")
+        if "macrotile" in ck:
+            lines.append(f"    macrotile: {list(ck['macrotile'])}")
+        if "threads" in ck:
+            lines.append(f"    threads: {list(ck['threads'])}")
+        if "grid" in ck:
+            lines.append(f"    grid: {list(ck['grid'])}")
 
-    if matrix_instruction:
-        lines.append(f"  MatrixInstruction: {list(matrix_instruction)}")
-        if len(matrix_instruction) >= 4 and macrotile and threads:
+    if config and "MatrixInstruction" in config:
+        mi = config["MatrixInstruction"]
+        lines.append(f"  MatrixInstruction: {list(mi)}")
+
+        macrotile = config.get("CustomKernel", {}).get("macrotile")
+        threads = config.get("CustomKernel", {}).get("threads")
+        wavefront_size = config.get("WavefrontSize", 64)
+        if len(mi) >= 4 and macrotile and threads:
             lines.append("  EnableMatrixInstruction: True")
             num_threads = threads[0] * threads[1] * threads[2]
             num_waves = max(1, num_threads // wavefront_size)
@@ -122,10 +183,11 @@ def build_custom_config_yaml(origin, repository=None, version="1.0.0",
                 wgM -= 1
             wgM = max(1, wgM)
             wgN = num_waves // wgM
-            mi_wave_tile = [max(1, macrotile[0] // (matrix_instruction[0] * wgM)),
-                            max(1, macrotile[1] // (matrix_instruction[1] * wgN))]
+            mi_wave_tile = [max(1, macrotile[0] // (mi[0] * wgM)),
+                            max(1, macrotile[1] // (mi[1] * wgN))]
             lines.append(f"  MIWaveTile: {mi_wave_tile}")
 
+    wavefront_size = config.get("WavefrontSize", 64) if config else 64
     lines.append(f"  WavefrontSize: {wavefront_size}")
 
     return "\n".join(lines)
@@ -188,23 +250,8 @@ def inject_custom_config(filepath, config_yaml, dry_run=False):
     return True
 
 
-def _parse_int_list(s):
-    return [int(x.strip()) for x in s.split(",")]
-
-
-def _parse_string_list(s):
-    return [x.strip() for x in s.split(",")]
-
-
-def _load_yaml_file(path):
-    import yaml
-    with open(path) as f:
-        return yaml.safe_load(f)
-
-
 def _detect_from_metadata(filepath):
     """Auto-detect origin, wavefront_size, and threads from the .s file."""
-    import re
     import yaml
 
     detected = {}
@@ -253,41 +300,18 @@ def main():
         description="Add custom.config metadata to an external custom kernel .s file",
         epilog="Auto-detected from the .s file: origin (parent directory), "
                "wavefront-size, threads (.reqd_workgroup_size). "
-               "Override any auto-detected value by passing the flag explicitly."
+               "Override any auto-detected value with CLI flags."
     )
     parser.add_argument("file", help="Path to the .s assembly file")
+    parser.add_argument("--yaml", default=None,
+                        help="Tensile test YAML with ForkParameters "
+                             "(ProblemType, CustomKernel, MatrixInstruction extracted automatically)")
     parser.add_argument("--origin", default=None,
                         help="Source origin name (default: auto-detect from parent directory)")
     parser.add_argument("--repository", default=None,
                         help="Source repository URL")
     parser.add_argument("--version", default="1.0.0",
                         help="Kernel version (default: 1.0.0)")
-
-    feat_group = parser.add_argument_group("Feature flags")
-    feat_group.add_argument("--supports-user-args", action="store_true")
-    feat_group.add_argument("--supports-bias", action="store_true")
-    feat_group.add_argument("--supports-activation", action="store_true")
-    feat_group.add_argument("--supports-scale-alpha", action="store_true")
-    feat_group.add_argument("--supports-gsu", action="store_true")
-
-    iface_group = parser.add_argument_group("Tensile interface (for CustomKernels: list path)")
-    iface_group.add_argument("--problem-type-file", default=None,
-                             help="YAML file with ProblemType dict (e.g. {OperationType: GEMM, DataType: b, ...})")
-    iface_group.add_argument("--args-file", default=None,
-                             help="YAML file with kernel args list")
-    iface_group.add_argument("--macrotile", default=None,
-                             help="Macro tile dimensions, comma-separated (e.g. 256,256,64)")
-    iface_group.add_argument("--threads", default=None,
-                             help="Thread dimensions, comma-separated (default: auto-detect from .reqd_workgroup_size)")
-    iface_group.add_argument("--grid", default=None,
-                             help="Grid mapping, comma-separated (e.g. TilesX,TilesY,One)")
-    iface_group.add_argument("--matrix-instruction", default=None,
-                             help="Matrix instruction, comma-separated (e.g. 16,16,32,1)")
-    iface_group.add_argument("--wavefront-size", type=int, default=None,
-                             help="Wavefront size (default: auto-detect from .wavefront_size)")
-    iface_group.add_argument("--kern-args-version", type=int, default=0,
-                             help="KernArgsVersion for InternalSupportParams (default: 0)")
-
     parser.add_argument("--dry-run", action="store_true",
                         help="Show what would be injected without modifying the file")
 
@@ -314,52 +338,34 @@ def main():
         print("ERROR: Could not detect origin. Pass --origin explicitly.", file=sys.stderr)
         sys.exit(1)
 
-    wavefront_size = args.wavefront_size or detected.get("wavefront_size", 64)
-    threads = _parse_int_list(args.threads) if args.threads else detected.get("threads")
+    config = None
+    if args.yaml:
+        kernel_name = os.path.basename(filepath)[:-2]
+        config = _parse_tensile_yaml(args.yaml, kernel_name)
+
+    if config:
+        ck = config.get("CustomKernel", {})
+        if "threads" not in ck and "threads" in detected:
+            ck["threads"] = detected["threads"]
+            config["CustomKernel"] = ck
+        if "WavefrontSize" not in config and "wavefront_size" in detected:
+            config["WavefrontSize"] = detected["wavefront_size"]
 
     auto_info = []
     if not args.origin and "origin" in detected:
         auto_info.append(f"origin={detected['origin']}")
-    if args.wavefront_size is None and "wavefront_size" in detected:
+    if "wavefront_size" in detected:
         auto_info.append(f"wavefront_size={detected['wavefront_size']}")
-    if not args.threads and "threads" in detected:
+    if "threads" in detected:
         auto_info.append(f"threads={detected['threads']}")
     if auto_info:
         print(f"Auto-detected: {', '.join(auto_info)}")
 
-    features = {
-        "SupportsUserArgs": args.supports_user_args,
-        "SupportsBias": args.supports_bias,
-        "SupportsActivation": args.supports_activation,
-        "SupportsScaleAlpha": args.supports_scale_alpha,
-        "SupportsGSU": args.supports_gsu,
-    }
-
-    problem_type = None
-    if args.problem_type_file:
-        problem_type = _load_yaml_file(args.problem_type_file)
-
-    kernel_args = None
-    if args.args_file:
-        kernel_args = _load_yaml_file(args.args_file)
-
-    macrotile = _parse_int_list(args.macrotile) if args.macrotile else None
-    grid = _parse_string_list(args.grid) if args.grid else None
-    matrix_instruction = _parse_int_list(args.matrix_instruction) if args.matrix_instruction else None
-
     config_yaml = build_custom_config_yaml(
         origin=origin,
+        config=config,
         repository=args.repository,
         version=args.version,
-        features=features,
-        problem_type=problem_type,
-        kernel_args=kernel_args,
-        macrotile=macrotile,
-        threads=threads,
-        grid=grid,
-        matrix_instruction=matrix_instruction,
-        wavefront_size=wavefront_size,
-        kern_args_version=args.kern_args_version,
     )
 
     if not inject_custom_config(filepath, config_yaml, dry_run=args.dry_run):

@@ -408,10 +408,7 @@ def readCustomKernelMetadata(name, directory=CUSTOM_KERNEL_PATH):
 
 _ADD_CONFIG_HINT = (
     "To add metadata to an external kernel, run:\n"
-    "  python -m Tensile.AddCustomConfig <file.s> --origin <name> \\\n"
-    "      --problem-type-file <pt.yaml> --args-file <args.yaml> \\\n"
-    "      --macrotile M0,M1,DU --threads T0,T1,T2 --grid G0,G1,G2 \\\n"
-    "      --matrix-instruction MI0,MI1,MI2,MI3\n"
+    "  python -m Tensile.AddCustomConfig <file.s> --yaml <test.yaml>\n"
     "This injects a custom.config block into the .amdgpu_metadata YAML section."
 )
 

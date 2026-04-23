@@ -30,13 +30,34 @@ BenchmarkProblems:
       Activation: False
       UseScaleAlphaVec: 0
 
-    -
+    - # BenchmarkProblemSizeGroup
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
-      CustomKernels:
-        ["c_ck_gemm_basic_hip_amdgcn_amd_amdhsa_gfx942"]
       ForkParameters:
+        - CustomKernel:
+          - name: "c_ck_gemm_basic_hip_amdgcn_amd_amdhsa_gfx942"
+            args: [ { type: address, semantic: AddressB },
+                    { type: address, semantic: AddressA },
+                    { type: address, semantic: AddressD },
+                    { type: address, semantic: AddressD },
+                    { type: uint32, semantic: SizeFree1 },
+                    { type: uint32, semantic: SizeFree0 },
+                    { type: uint32, semantic: SizeSum },
+                    { type: uint32, semantic: StrideB0 },
+                    { type: uint32, semantic: StrideA0 },
+                    { type: uint32, semantic: StrideD0 },
+                    { type: uint32, semantic: StrideD0 },
+                    { type: uint32, semantic: SizeFree2 },
+                    { type: uint32, semantic: Padding },
+                    { type: uint32, semantic: Padding },
+                    { type: uint32, semantic: Padding },
+                    { type: uint32, semantic: Padding },
+                    { type: uint32, semantic: Padding },
+                    { type: uint32, semantic: Padding } ]
+            macrotile: [256, 256, 64]
+            threads: [256, 1, 1]
+            grid: [TilesXYBatch, One, One]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
