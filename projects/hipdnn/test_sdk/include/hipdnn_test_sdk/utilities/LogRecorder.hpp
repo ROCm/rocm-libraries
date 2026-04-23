@@ -126,6 +126,27 @@ public:
             lock, timeout, [&] { return _recordedLogs.size() >= targetCount; });
     }
 
+    /**
+     * @brief Wait until a log containing the given text is recorded, with timeout
+     * @param text The substring to search for in log messages
+     * @param timeout Maximum time to wait
+     * @return true if matching log found, false if timed out
+     */
+    bool waitForLogContaining(const std::string& text, std::chrono::milliseconds timeout)
+    {
+        std::unique_lock<std::mutex> lock(_logsMutex);
+        return _cvLogRecorded.wait_for(lock, timeout, [&] {
+            for(const auto& log : _recordedLogs)
+            {
+                if(log.message.find(text) != std::string::npos)
+                {
+                    return true;
+                }
+            }
+            return false;
+        });
+    }
+
     LogRecording(const LogRecording&) = delete;
     LogRecording& operator=(const LogRecording&) = delete;
 
@@ -386,6 +407,17 @@ public:
     bool waitForLogCount(size_t targetCount, std::chrono::milliseconds timeout)
     {
         return LogRecording::instance(_recordingId).waitForLogCount(targetCount, timeout);
+    }
+
+    /**
+     * @brief Wait until a log containing the given text is recorded, with timeout
+     * @param text The substring to search for in log messages
+     * @param timeout Maximum time to wait
+     * @return true if matching log found, false if timed out
+     */
+    bool waitForLogContaining(const std::string& text, std::chrono::milliseconds timeout)
+    {
+        return LogRecording::instance(_recordingId).waitForLogContaining(text, timeout);
     }
 
 protected:

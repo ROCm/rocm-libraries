@@ -79,6 +79,8 @@ protected:
     }
 };
 
+constexpr auto ASYNC_LOG_TIMEOUT = std::chrono::seconds(3);
+
 // Test: User callback receives backend logs
 TEST_F(IntegrationBackendUserLoggingApis, UserCallbackReceivesLogs)
 {
@@ -93,8 +95,8 @@ TEST_F(IntegrationBackendUserLoggingApis, UserCallbackReceivesLogs)
     hipdnnHandle_t handle = nullptr;
     ASSERT_EQ(hipdnnCreate(&handle), HIPDNN_STATUS_SUCCESS);
 
-    // Small delay for async callback
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    // Wait for async callback to deliver the expected log
+    recorder.waitForLogContaining("API success: [hipdnnCreate]", ASYNC_LOG_TIMEOUT);
 
     // Backend should log handle creation
     EXPECT_TRUE(recorder.hasLogContaining("API success: [hipdnnCreate]"));
@@ -113,11 +115,12 @@ TEST_F(IntegrationBackendUserLoggingApis, UnregisterWithSevOffStopsCapture)
     ASSERT_EQ(hipdnnBackendSetGlobalLogLevel_ext(HIPDNN_SEV_INFO), HIPDNN_STATUS_SUCCESS);
 
     // Trigger some logging
+    const auto countBefore = recorder.getRecordedLogCount();
     hipdnnHandle_t handle = nullptr;
     ASSERT_EQ(hipdnnCreate(&handle), HIPDNN_STATUS_SUCCESS);
 
-    // Small delay for async callback
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    // Wait for async callback to deliver logs
+    recorder.waitForLogCount(countBefore + 1, ASYNC_LOG_TIMEOUT);
 
     const size_t logsAfterCreate = recorder.getRecordedLogCount();
     EXPECT_GT(logsAfterCreate, 0);
@@ -128,8 +131,8 @@ TEST_F(IntegrationBackendUserLoggingApis, UnregisterWithSevOffStopsCapture)
     // Further operations should not be captured
     ASSERT_EQ(hipdnnDestroy(handle), HIPDNN_STATUS_SUCCESS);
 
-    // Small delay to ensure any async logs would have arrived
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    // Wait briefly to confirm no async logs arrive (expected to timeout)
+    recorder.waitForLogCount(logsAfterCreate + 1, std::chrono::milliseconds(50));
 
     // Log count should not increase
     const size_t finalLogs = recorder.getRecordedLogCount();
@@ -204,8 +207,8 @@ TEST_F(IntegrationBackendUserLoggingApis, CallbackRespectsLogLevel)
     ASSERT_EQ(hipdnnCreate(&handle), HIPDNN_STATUS_SUCCESS);
     ASSERT_EQ(hipdnnDestroy(handle), HIPDNN_STATUS_SUCCESS);
 
-    // Small delay for async callback
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    // Wait briefly to confirm no logs arrive (expected to timeout)
+    recorder.waitForLogCount(1, std::chrono::milliseconds(50));
 
     // INFO logs should be filtered out by global level check
     EXPECT_EQ(recorder.countLogsAtLevel(HIPDNN_SEV_INFO), 0);
@@ -222,10 +225,12 @@ TEST_F(IntegrationBackendUserLoggingApis, UpdateCallbackLevel)
     ASSERT_EQ(hipdnnBackendSetGlobalLogLevel_ext(HIPDNN_SEV_INFO), HIPDNN_STATUS_SUCCESS);
 
     // Trigger logging
+    const auto countBeforeCreate = recorder.getRecordedLogCount();
     hipdnnHandle_t handle1 = nullptr;
     ASSERT_EQ(hipdnnCreate(&handle1), HIPDNN_STATUS_SUCCESS);
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    // Wait for async callback to deliver logs
+    recorder.waitForLogCount(countBeforeCreate + 1, ASYNC_LOG_TIMEOUT);
     const size_t infoLogs = recorder.getRecordedLogCount();
     EXPECT_GT(infoLogs, 0);
 
@@ -236,7 +241,8 @@ TEST_F(IntegrationBackendUserLoggingApis, UpdateCallbackLevel)
     hipdnnHandle_t handle2 = nullptr;
     ASSERT_EQ(hipdnnCreate(&handle2), HIPDNN_STATUS_SUCCESS);
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    // Wait briefly to confirm minimal logs arrive (expected to timeout)
+    recorder.waitForLogCount(infoLogs + 1, std::chrono::milliseconds(50));
     const size_t afterUpdate = recorder.getRecordedLogCount();
 
     // Verify minimal new logs (only WARN+ would be captured now)
@@ -261,8 +267,8 @@ TEST_F(IntegrationBackendUserLoggingApis, AsyncCallbackQueued)
     ASSERT_EQ(hipdnnCreate(&handle), HIPDNN_STATUS_SUCCESS);
     ASSERT_EQ(hipdnnDestroy(handle), HIPDNN_STATUS_SUCCESS);
 
-    // Async: logs may not be immediate but should arrive soon
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    // Wait for async callback to deliver the expected log
+    recorder.waitForLogContaining("API success: [hipdnnCreate]", ASYNC_LOG_TIMEOUT);
 
     EXPECT_GT(recorder.getRecordedLogCount(), 0);
     EXPECT_TRUE(recorder.hasLogContaining("API success: [hipdnnCreate]"));
@@ -313,10 +319,13 @@ TEST_F(IntegrationBackendUserLoggingApis, SyncGuaranteeOnUnregister)
     // Track callback invocations
     static std::atomic<int> s_callbackCount{0};
     static std::atomic<bool> s_callbackActive{false};
+    static std::mutex s_callbackMtx;
+    static std::condition_variable s_callbackCv;
 
     auto trackingCallback = [](hipdnnUserLogCallbackHandle_t, hipdnnSeverity_t, const char*) {
         s_callbackActive.store(true);
         s_callbackCount.fetch_add(1);
+        s_callbackCv.notify_all();
         // Simulate some work
         std::this_thread::sleep_for(std::chrono::microseconds(10));
         s_callbackActive.store(false);
@@ -363,7 +372,13 @@ TEST_F(IntegrationBackendUserLoggingApis, SyncGuaranteeOnUnregister)
         }
     }
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    // Wait briefly to confirm no new callbacks arrive (expected to timeout)
+    {
+        std::unique_lock<std::mutex> lock(s_callbackMtx);
+        s_callbackCv.wait_for(lock, std::chrono::milliseconds(50), [&] {
+            return s_callbackCount.load() > countAfterUnregister;
+        });
+    }
 
     // Count should not have increased after unregister
     EXPECT_EQ(s_callbackCount.load(), countAfterUnregister)
@@ -392,8 +407,8 @@ TEST_F(IntegrationBackendUserLoggingApis, SwitchBetweenSyncAndAsync)
 
     ASSERT_EQ(hipdnnDestroy(handle), HIPDNN_STATUS_SUCCESS);
 
-    // Async: need delay
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    // Wait for async callback to deliver logs
+    recorder.waitForLogCount(syncLogs + 1, ASYNC_LOG_TIMEOUT);
     const size_t asyncLogs = recorder.getRecordedLogCount();
     EXPECT_GT(asyncLogs, syncLogs);
 }
@@ -408,11 +423,12 @@ TEST_F(IntegrationBackendUserLoggingApis, SwitchBetweenAsyncAndSync)
     registerIsolatedCallback(HIPDNN_SEV_INFO, HIPDNN_LOG_CALLBACK_ASYNC);
     ASSERT_EQ(hipdnnBackendSetGlobalLogLevel_ext(HIPDNN_SEV_INFO), HIPDNN_STATUS_SUCCESS);
 
+    const auto countBefore = recorder.getRecordedLogCount();
     hipdnnHandle_t handle = nullptr;
     ASSERT_EQ(hipdnnCreate(&handle), HIPDNN_STATUS_SUCCESS);
 
-    // Async: need delay
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    // Wait for async callback to deliver logs
+    recorder.waitForLogCount(countBefore + 1, ASYNC_LOG_TIMEOUT);
     const size_t asyncLogs = recorder.getRecordedLogCount();
     EXPECT_GT(asyncLogs, 0);
 
@@ -446,7 +462,8 @@ TEST_F(IntegrationBackendUserLoggingApis, DuplicateUpdatesExisting)
     hipdnnHandle_t handle = nullptr;
     ASSERT_EQ(hipdnnCreate(&handle), HIPDNN_STATUS_SUCCESS);
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    // Wait briefly to confirm no INFO logs arrive (expected to timeout)
+    recorder.waitForLogCount(1, std::chrono::milliseconds(50));
 
     // Should NOT receive INFO logs (updated to WARN)
     // If there were 2 registrations, we'd get logs from the first one
@@ -686,15 +703,26 @@ TEST_F(IntegrationBackendUserLoggingApis, ReentrantLoggingPrevented)
 TEST_F(IntegrationBackendUserLoggingApis, MultipleCallbacksAllReceiveLogs)
 {
     SKIP_IF_NO_DEVICES();
+
+    // Helper struct for callbacks that need condition variable notification
+    struct CounterWithNotify
+    {
+        std::atomic<int> count{0};
+        std::mutex mtx;
+        std::condition_variable cv;
+    };
+
     auto countingCallback
         = [](hipdnnUserLogCallbackHandle_t userHandle, hipdnnSeverity_t, const char*) {
-              static_cast<std::atomic<int>*>(userHandle)->fetch_add(1);
+              auto* c = static_cast<CounterWithNotify*>(userHandle);
+              c->count.fetch_add(1);
+              c->cv.notify_all();
           };
 
-    std::atomic<int> asyncCount1{0};
-    std::atomic<int> asyncCount2{0};
-    std::atomic<int> syncCount1{0};
-    std::atomic<int> syncCount2{0};
+    CounterWithNotify asyncCount1;
+    CounterWithNotify asyncCount2;
+    CounterWithNotify syncCount1;
+    CounterWithNotify syncCount2;
 
     ASSERT_EQ(hipdnnBackendSetGlobalLogLevel_ext(HIPDNN_SEV_INFO), HIPDNN_STATUS_SUCCESS);
 
@@ -716,14 +744,23 @@ TEST_F(IntegrationBackendUserLoggingApis, MultipleCallbacksAllReceiveLogs)
     hipdnnHandle_t handle = nullptr;
     ASSERT_EQ(hipdnnCreate(&handle), HIPDNN_STATUS_SUCCESS);
 
-    // Wait for async callbacks to process
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    // Wait for async callbacks to deliver logs
+    {
+        std::unique_lock<std::mutex> lock(asyncCount1.mtx);
+        asyncCount1.cv.wait_for(
+            lock, ASYNC_LOG_TIMEOUT, [&] { return asyncCount1.count.load() > 0; });
+    }
+    {
+        std::unique_lock<std::mutex> lock(asyncCount2.mtx);
+        asyncCount2.cv.wait_for(
+            lock, ASYNC_LOG_TIMEOUT, [&] { return asyncCount2.count.load() > 0; });
+    }
 
     // All 4 callbacks should have received logs
-    EXPECT_GT(asyncCount1.load(), 0) << "First async callback should receive logs";
-    EXPECT_GT(asyncCount2.load(), 0) << "Second async callback should receive logs";
-    EXPECT_GT(syncCount1.load(), 0) << "First sync callback should receive logs";
-    EXPECT_GT(syncCount2.load(), 0) << "Second sync callback should receive logs";
+    EXPECT_GT(asyncCount1.count.load(), 0) << "First async callback should receive logs";
+    EXPECT_GT(asyncCount2.count.load(), 0) << "Second async callback should receive logs";
+    EXPECT_GT(syncCount1.count.load(), 0) << "First sync callback should receive logs";
+    EXPECT_GT(syncCount2.count.load(), 0) << "Second sync callback should receive logs";
 
     // Unregister all 4
     hipdnnSetUserLogCallback_ext(
@@ -736,21 +773,28 @@ TEST_F(IntegrationBackendUserLoggingApis, MultipleCallbacksAllReceiveLogs)
         countingCallback, HIPDNN_SEV_OFF, HIPDNN_LOG_CALLBACK_SYNC, &syncCount2);
 
     // Capture counts after unregistering
-    const int async1After = asyncCount1.load();
-    const int async2After = asyncCount2.load();
-    const int sync1After = syncCount1.load();
-    const int sync2After = syncCount2.load();
+    const int async1After = asyncCount1.count.load();
+    const int async2After = asyncCount2.count.load();
+    const int sync1After = syncCount1.count.load();
+    const int sync2After = syncCount2.count.load();
 
     // Trigger more logging — none of the callbacks should be invoked
     ASSERT_EQ(hipdnnDestroy(handle), HIPDNN_STATUS_SUCCESS);
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
 
-    EXPECT_EQ(asyncCount1.load(), async1After)
+    // Wait briefly to confirm no new callbacks arrive (expected to timeout)
+    {
+        std::unique_lock<std::mutex> lock(asyncCount1.mtx);
+        asyncCount1.cv.wait_for(lock, std::chrono::milliseconds(50), [&] {
+            return asyncCount1.count.load() > async1After;
+        });
+    }
+
+    EXPECT_EQ(asyncCount1.count.load(), async1After)
         << "First async callback should not receive logs after unregister";
-    EXPECT_EQ(asyncCount2.load(), async2After)
+    EXPECT_EQ(asyncCount2.count.load(), async2After)
         << "Second async callback should not receive logs after unregister";
-    EXPECT_EQ(syncCount1.load(), sync1After)
+    EXPECT_EQ(syncCount1.count.load(), sync1After)
         << "First sync callback should not receive logs after unregister";
-    EXPECT_EQ(syncCount2.load(), sync2After)
+    EXPECT_EQ(syncCount2.count.load(), sync2After)
         << "Second sync callback should not receive logs after unregister";
 }
