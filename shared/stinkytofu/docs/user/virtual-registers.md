@@ -65,7 +65,7 @@ assert(v10.reg.idx == 10);
 ### Remapping Instructions
 
 '''cpp
-StinkyTofu st({9, 4, 2});  // gfx942
+StinkyTofu st({12, 5, 0});  // gfx1250
 
 // Create instruction with virtual registers
 auto vDst  = StinkyRegister::Virtual(0);
@@ -204,7 +204,7 @@ std::shared_ptr<IRListModule> createAbsTemplate(StinkyTofu& st) {
 }
 
 int main() {
-    StinkyTofu st({9, 4, 2});  // gfx942
+    StinkyTofu st({12, 5, 0});  // gfx1250
     auto kernel = st.createIRList("my_kernel");
 
     // Create template once
@@ -298,7 +298,6 @@ if (baseOffset + requiredVGPRs <= availableVGPRs) {
 
 ## See Also
 
-- [Activation Templates User Guide](activation-templates.md) - Practical examples for activation functions
 - [StinkyAsmEmitter User Guide](asm-emitter.md) - Converting IR to assembly
 - API Reference: 'include/stinkytofu/ir/asm/StinkyRegister.hpp'
 - Unit Tests: 'tests/unit/VirtualisterTest.cpp', 'tests/unit/VirtualisterRemappingTest.cpp'
