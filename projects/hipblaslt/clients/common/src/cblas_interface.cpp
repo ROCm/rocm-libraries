@@ -397,11 +397,14 @@ void cast_mul(customVector<TcCast>& dst,
     // If we are casting Complex -> Real, extract real part.
     // Otherwise return val as-is.
     auto get_cast_val = [&](auto val) {
-        if constexpr(requires_real_extraction)
+        if constexpr(requires_real_extraction)                              // complex→real
             return get_real_if_complex(val);
-        else
+        else if constexpr(is_std_complex_v<TcCast>
+                      && !is_std_complex_v<std::decay_t<decltype(val)>>)    // real→complex
+           return static_cast<scalar_of_t<TcCast>>(val);                    // always valid: complex<float>→float, complex<double>→double
+        else                                                                // same type
             return val;
-    };
+};
 
     if constexpr((std::is_same<TcCast, float>::value)
                  || (!std::is_same<TiA, hipblaslt_bf8_fnuz>::value
@@ -568,7 +571,7 @@ void cast_mul(customVector<TcCast>& dst,
                                 for(int j = 0; j < type::packed_size; j++)
                                 {
                                     dst[type::packed_size * i + j]
-                                        = static_cast<TcCast>(A[i].castElement(j) * scaleA);
+                                        = static_cast<TcCast>(static_cast<TcCast>(A[i].castElement(j)) * scaleA);
                                 }
                             }
                             else
@@ -616,7 +619,7 @@ void cast_mul(customVector<TcCast>& dst,
                                 for(int j = 0; j < type::packed_size; j++)
                                 {
                                     dst[type::packed_size * i + j]
-                                        = static_cast<TcCast>(A[i].castElement(j) * scaleA);
+                                        = static_cast<TcCast>(static_cast<TcCast>(A[i].castElement(j)) * scaleA);
                                 }
                             }
                             else

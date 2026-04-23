@@ -48,6 +48,15 @@ template <typename T>
 constexpr bool is_std_complex_v
     = std::is_same_v<T, std::complex<float>> || std::is_same_v<T, std::complex<double>>;
 
+// Extracts the underlying scalar type: scalar_of_t<float> = float,
+// scalar_of_t<std::complex<double>> = double. Unlike T::value_type,
+// this is safe to use even when T is a non-complex scalar type.
+template <typename T>
+struct scalar_of { using type = T; };
+template <typename T>
+struct scalar_of<std::complex<T>> { using type = T; };
+template <typename T>
+using scalar_of_t = typename scalar_of<T>::type;
 
 // optimized helper
 float hipblaslt_uniform_int_1_10();
