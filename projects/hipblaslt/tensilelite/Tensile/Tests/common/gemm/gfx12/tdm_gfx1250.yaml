@@ -53,7 +53,7 @@ BenchmarkProblems:
           # - [16, 16, 32, 1,  1,  1, 1,  4, 1 ]
           # - [16, 16, 32, 1,  1,  2, 2,  2, 2 ]
           # - [16, 16, 32, 1,  1,  2, 2,  2, 2]
-        - DepthU: [64]
+        - DepthU: [64, 128]
         - TransposeLDS: [-1]
         - LdsPadA: [0]
         - LdsPadB: [0]
@@ -92,7 +92,7 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [64, 64, 1, 256]
+          - Exact: [64, 64, 1, 512]
           - Exact: [64, 64, 1, 127]
           - Exact: [127, 127, 1, 128]
           # - Exact: [512, 512, 1, 256]
@@ -129,7 +129,7 @@ BenchmarkProblems:
           # - [16, 16, 32, 1,  1,  1, 1,  4, 1 ]
           # - [16, 16, 32, 1,  1,  2, 2,  2, 2 ]
           # - [16, 16, 32, 1,  1,  2, 2,  2, 2]
-        - DepthU: [64]
+        - DepthU: [64, 128]
         - TransposeLDS: [-1]
         - LdsPadA: [0]
         - LdsPadB: [0]
@@ -168,7 +168,7 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [64, 64, 1, 256]
+          - Exact: [64, 64, 1, 512]
           - Exact: [64, 64, 1, 127]
           - Exact: [127, 127, 1, 128]
           # - Exact: [512, 512, 1, 256]
@@ -206,7 +206,7 @@ BenchmarkProblems:
           # - [16, 16, 32, 1,  1,  1, 1,  4, 1 ]
           # - [16, 16, 32, 1,  1,  2, 2,  2, 2 ]
           # - [16, 16, 32, 1,  1,  2, 2,  2, 2]
-        - DepthU: [64]
+        - DepthU: [64, 128]
         - TransposeLDS: [-1]
         - LdsPadA: [0]
         - LdsPadB: [0]
@@ -245,7 +245,7 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [64, 64, 1, 256]
+          - Exact: [64, 64, 1, 512]
           - Exact: [64, 64, 1, 127]
           - Exact: [127, 127, 1, 128]
           # - Exact: [512, 512, 1, 256]
@@ -282,7 +282,7 @@ BenchmarkProblems:
           # - [16, 16, 32, 1,  1,  1, 1,  4, 1 ]
           # - [16, 16, 32, 1,  1,  2, 2,  2, 2 ]
           # - [16, 16, 32, 1,  1,  2, 2,  2, 2]
-        - DepthU: [64]
+        - DepthU: [64, 128]
         - TransposeLDS: [-1]
         - LdsPadA: [0]
         - LdsPadB: [0]
@@ -321,7 +321,7 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [64, 64, 1, 256]
+          - Exact: [64, 64, 1, 512]
           - Exact: [64, 64, 1, 127]
           - Exact: [127, 127, 1, 128]
           # - Exact: [512, 512, 1, 256]
