@@ -197,10 +197,11 @@ if(NOT "${HIP_PLATFORM}" STREQUAL "nvidia")
         endif()
 
         include(ExternalProject)
+        # Use OpenBLAS v0.3.33 (commit 62bcfb0)
         ExternalProject_Add(hipsolver-static-lapack
             BUILD_BYPRODUCTS    ${LAPACK_BUILD_BYPRODUCTS}
             GIT_REPOSITORY      https://github.com/OpenMathLib/OpenBLAS
-            GIT_TAG             develop
+            GIT_TAG             62bcfb0dc9f1cfa685fc04135c50e2780c303137
             SOURCE_DIR          ${LAPACK_SOURCE_DIR}
             BINARY_DIR          ${LAPACK_BINARY_DIR}
             CMAKE_ARGS          ${LAPACK_CMAKE_ARGS}
