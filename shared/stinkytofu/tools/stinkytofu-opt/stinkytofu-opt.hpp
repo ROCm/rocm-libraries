@@ -25,6 +25,7 @@
 #include <functional>
 #include <vector>
 
+#include "stinkytofu/analysis/asm/AsmVerifierPass.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/ir/DumpStinkyFunctionPass.hpp"
 #include "stinkytofu/pipeline/ScopeAdaptor.hpp"
@@ -64,7 +65,8 @@ const std::vector<PassInfo> availablePasses = {
      []() { return createDumpStinkyFunctionPass({.stirPath = "dump_function.stir"}); }},
     {"PeepholeOptimizationPass", []() { return createPeepholeOptimizationPass(); }},
     {"DeadCodeEliminationPass", []() { return createDeadCodeEliminationPass(); }},
-    {"RedundantMovEliminationPass", []() { return createRedundantMovEliminationPass(); }}};
+    {"RedundantMovEliminationPass", []() { return createRedundantMovEliminationPass(); }},
+    {"StinkyIRVerifierPass", []() { return createStinkyIRVerifierPass(); }}};
 
 /**
  * Create default DebugPrintInstrumentation for stinkytofu-opt.
