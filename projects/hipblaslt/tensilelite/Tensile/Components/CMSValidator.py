@@ -2230,6 +2230,60 @@ def set_lr_needed_by_from_mfma_operands(
     return result
 
 
+def set_pack_needed_by_from_mfma_operands(
+    timeline: 'Timeline',
+) -> dict[str, dict[int, MFMA]]:
+    """Derive Pack→MFMA needed_by from register operands.
+
+    For each Pack, finds the earliest MFMA whose .a or .b operand
+    overlaps with the pack's destination register.
+
+    For TF32 4x4 packs, MFMAPacks are intermediate consumers:
+      CVT0.dst → MFMAPack.b → MFMAPack.acc → CVT1.src → CVT1.dst → real_MFMA.a/b
+
+    Returns a dict mapping (pack_name, issue_index) → consuming MFMA,
+    or empty dict if rocisa_inst is unavailable.
+    """
+    if not timeline.mfma_code:
+        return {}
+
+    # Build map from register → earliest consuming MFMA (non-MFMAPack)
+    mfma_consumers: dict[tuple[str, int], MFMA] = {}
+    for _, mfma in timeline.get_instructions_combined("MFMA"):
+        if mfma.rocisa_inst is None or isinstance(mfma, MFMAPack):
+            continue
+        for rng in get_src_ranges(mfma.rocisa_inst):
+            base, start, end = rng
+            for off in range(start, end):
+                key = (base, off)
+                if key not in mfma_consumers or mfma.issued_at < mfma_consumers[key].issued_at:
+                    mfma_consumers[key] = mfma
+
+    result: dict[str, dict[int, MFMA]] = {}
+    for pack_name in timeline.get_instruction_names():
+        if not pack_name.startswith("Pack"):
+            continue
+        result[pack_name] = {}
+        for _, pack in timeline.get_instructions_combined(pack_name):
+            if pack.rocisa_inst is None or isinstance(pack, SwapPack):
+                continue
+            dst = get_dst_range(pack.rocisa_inst)
+            if dst is None:
+                continue
+            base, start, end = dst
+            earliest = None
+            for off in range(start, end):
+                key = (base, off)
+                if key in mfma_consumers:
+                    candidate = mfma_consumers[key]
+                    if earliest is None or candidate.issued_at < earliest.issued_at:
+                        earliest = candidate
+            if earliest is not None:
+                result[pack_name][pack.issue_index] = earliest
+
+    return result
+
+
 def precompute_issue_times(instructions: list[ValidatorInstruction]) -> list[int]:
     """
     Returns a list where issue_times[i] represents the quad-cycle when instruction i starts issuing.
