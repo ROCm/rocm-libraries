@@ -209,6 +209,15 @@ class Pack(ValidatorInstruction):
     needed_by: ValidatorInstruction = field(default_factory=lambda: MFMA(name="MFMA", issued_at=POSITION_INF))
     must_start_after: list[ValidatorInstruction] = field(default_factory=list)
 
+    # The minimum number of quad-cycles that must pass before the result of this pack is used.
+    # Measure from the point that this Pack is finished being issued.
+    # See section 7.6 of the CDNA 4 ISA.
+    # Default 0 = no timing constraint. Set by _handle_min_pack_quad_cycles for CVTPack and MFMAPack.
+    min_quad_cycles_before_result_used: int = 0
+    # The estimated number of quad-cycles that passed between the pack being issued and the result being used.
+    # This is a lower bound estimate (does not account for most stalls and such).
+    estimated_quad_cycles_before_result_used: int = 0
+
     def validate(self) -> Optional[str]:
         issued_at = self.issued_at.vmfma_index
 
@@ -218,44 +227,29 @@ class Pack(ValidatorInstruction):
         ) if self.must_start_after else MFMA(name="MFMA", issued_at=POSITION_NEG_INF)
 
         if effective_must_start_after.done_idx() < self.issued_at < self.needed_by.done_idx():
-            return None
-
-        # Issued too early
-        if self.issued_at < effective_must_start_after.done_idx():
+            pass  # Ordering checks passed, fall through to timing check
+        elif self.issued_at < effective_must_start_after.done_idx():
+            # Issued too early
             must_start_after_at = effective_must_start_after.done_idx().vmfma_index
             must_start_after_issued_at = effective_must_start_after.issued_at.vmfma_index
             return f"{self.name} @ idx={issued_at} issued too early, must be issued after idx={must_start_after_at} (because of {effective_must_start_after.name} issued @ idx={must_start_after_issued_at})."
-
-        # Issued too late
-        if self.issued_at >= self.needed_by.issued_at:
+        elif self.issued_at >= self.needed_by.issued_at:
+            # Issued too late
             needed_by_at = self.needed_by.issued_at.vmfma_index
             return f"{self.name} @ idx={issued_at} issued too late, must be issued before {self.needed_by.name} @ idx={needed_by_at}."
+        else:
+            return f"{self.name} at index {issued_at} is not valid."
 
-        return f"{self.name} at index {issued_at} is not valid."
+        # Timing check (only fires when min > 0, i.e. when _handle_min_pack_quad_cycles has set a constraint)
+        if self.min_quad_cycles_before_result_used > 0:
+            if self.estimated_quad_cycles_before_result_used < self.min_quad_cycles_before_result_used:
+                needed_by_at = self.needed_by.issued_at.vmfma_index
+                return f"{self.name} @ idx={issued_at} has too little gap between it and {self.needed_by.name} @ idx={needed_by_at}. Expected at least {self.min_quad_cycles_before_result_used} quad-cycles but only {self.estimated_quad_cycles_before_result_used} passed."
 
-@dataclass
-class TimedPack(Pack):
-    """Pack with quad-cycle timing constraints (TF32 CVT and MFMA packs)."""
-    # The minimum number of quad-cycles that must pass before the result of this pack is used.
-    # Measure from the point that this Pack is finished being issued.
-    # See section 7.6 of the CDNA 4 ISA
-    min_quad_cycles_before_result_used: int = 0
-    # The estimated number of quad-cycles that passed between the pack being issued and the result being used.
-    # This is a lower bound estimate (does not account for most stalls and such).
-    estimated_quad_cycles_before_result_used: int = 0
-
-    def validate(self) -> Optional[str]:
-        error = super().validate()
-        if error:
-            return error
-        if self.estimated_quad_cycles_before_result_used < self.min_quad_cycles_before_result_used:
-            issued_at = self.issued_at.vmfma_index
-            needed_by_at = self.needed_by.issued_at.vmfma_index
-            return f"{self.name} @ idx={issued_at} has too little gap between it and {self.needed_by.name} @ idx={needed_by_at}. Expected at least {self.min_quad_cycles_before_result_used} quad-cycles but only {self.estimated_quad_cycles_before_result_used} passed."
         return None
 
 @dataclass
-class CVTPack(TimedPack):
+class CVTPack(Pack):
     """TF32 CVT0/CVT1 packs (v_cvt_pk_bf16_f32). Type marker for isinstance dispatch."""
     pass
 
@@ -288,27 +282,23 @@ class SwapPack(Pack):
     pass
 
 @dataclass
-class MFMAPack(TimedPack, MFMA):
+class MFMAPack(Pack, MFMA):
     """A v_mfma_f32_4x4x4_16b_bf16 instruction used in TF32 4x4 emulation pack groups.
 
     These appear at indices TF32_4X4_MFMA_START..TF32_4X4_MFMA_END within each group
     of PACK_GROUP_SIZE_TF32_4X4. They are real MFMA instructions but participate in
     the pack dependency chain (CVT0 -> MFMAPack -> CVT1).
 
-    Inherits from both TimedPack and MFMA:
+    Inherits from both Pack and MFMA:
     - isinstance(x, Pack) is True — works with pack gathering, filtering, type hints
-    - isinstance(x, TimedPack) is True — has quad-cycle timing constraints
     - isinstance(x, MFMA) is True — captures "this IS an MFMA" semantics
     """
     # Override MFMA's finish cycles for 4x4 timing
     mfma_finish_cycles: ClassVar[int] = QUAD_CYCLES_MFMA_4X4_FINISH
 
     # NOTE: min_quad_cycles_before_result_used is NOT overridden here.
-    # It keeps TimedPack's default (0) and is set by _handle_min_pack_quad_cycles
+    # It keeps Pack's default (0) and is set by _handle_min_pack_quad_cycles
     # only when the constraint is active (when local reads exist).
-    #
-    # NOTE: validate() is NOT overridden here. The MRO chain
-    # (TimedPack.validate → Pack.validate) handles MFMAPack correctly.
 
 
 @dataclass
@@ -1332,10 +1322,10 @@ def _set_pack_needed_by(packs: list[Pack], pack_name: str, i_loop: int, mfma_reo
 
 def _handle_min_pack_quad_cycles(packs: list[Pack]) -> None:
     """
-    Set the min_quad_cycles_before_result_used field for TimedPack instructions.
+    Set the min_quad_cycles_before_result_used field for Pack instructions that need timing constraints.
     This is used to enforce timing constraints for TF32 emulation modes.
-    Only TimedPack subclasses (CVTPack, MFMAPack) have timing fields;
-    MiddlePack and plain Pack are skipped.
+    Only CVTPack and MFMAPack get non-zero values;
+    MiddlePack, SwapPack, and plain Pack keep the default of 0.
 
     Args:
         packs: List of Pack instructions to set minimum quad-cycles for.
@@ -1888,7 +1878,7 @@ def estimate_quad_cycles(timeline: Timeline, kernel: 'Solution') -> int:
         
     # Estimate number of quad-cycles between being issued and result being used
     for i_instruction, instruction in enumerate(timeline.combined_timeline):
-        if not isinstance(instruction, TimedPack) or instruction.min_quad_cycles_before_result_used == 0:
+        if not isinstance(instruction, Pack) or instruction.min_quad_cycles_before_result_used == 0:
             continue
 
         needed_by = instruction.needed_by
