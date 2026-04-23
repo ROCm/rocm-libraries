@@ -2166,6 +2166,70 @@ def derive_pack_must_start_after(
     return result
 
 
+def set_lr_needed_by_from_mfma_operands(
+    timeline: 'Timeline',
+) -> dict[str, dict[int, MFMA]]:
+    """Derive LR→MFMA needed_by from register operands.
+
+    Traces the register chain: LR.dst → Pack.dst → ... → MFMA.a/b
+    to find the earliest MFMA that (transitively) consumes each LR's data.
+
+    Returns a dict mapping (lr_name, lr_issue_index) pairs to the consuming MFMA,
+    or empty dict if rocisa_inst is not available on any instruction.
+    """
+    if not timeline.mfma_code:
+        return {}
+
+    # Build a map from register range → earliest MFMA that reads it
+    # Only consider MFMAs in the MAIN_LOOP (loop index 1) for the steady-state case
+    mfma_consumers: dict[tuple[str, int], MFMA] = {}
+    for _, mfma in timeline.get_instructions_combined("MFMA"):
+        if mfma.rocisa_inst is None:
+            continue
+        for rng in get_src_ranges(mfma.rocisa_inst):
+            base, start, end = rng
+            for off in range(start, end):
+                key = (base, off)
+                if key not in mfma_consumers or mfma.issued_at < mfma_consumers[key].issued_at:
+                    mfma_consumers[key] = mfma
+
+    # Build a map from pack dst registers → earliest consuming MFMA (direct or via other packs)
+    # Walk packs in reverse to propagate consumer info backwards through chains
+    all_packs = [(i, p) for i, p in timeline.get_instructions_combined("PackA0")]
+    for pack_name in timeline.get_instruction_names():
+        if pack_name.startswith("Pack") and pack_name != "PackA0":
+            all_packs.extend(timeline.get_instructions_combined(pack_name))
+
+    # For each pack, find the earliest MFMA that reads its output (directly or through later packs)
+    pack_to_mfma: dict[tuple[str, int], MFMA] = dict(mfma_consumers)  # start with direct MFMA consumers
+
+    # Now trace LR → Pack → MFMA
+    result: dict[str, dict[int, MFMA]] = {}
+    for lr_name in timeline.get_instruction_names():
+        if not lr_name.startswith("LR") or lr_name.startswith("LRS"):
+            continue
+        result[lr_name] = {}
+        for _, lr in timeline.get_instructions_combined(lr_name):
+            if lr.rocisa_inst is None:
+                return {}  # Can't do register-based analysis without rocisa_inst
+            dst = get_dst_range(lr.rocisa_inst)
+            if dst is None:
+                continue
+            # Find the earliest MFMA that (transitively) consumes this LR's data
+            base, start, end = dst
+            earliest_mfma = None
+            for off in range(start, end):
+                key = (base, off)
+                if key in pack_to_mfma:
+                    candidate = pack_to_mfma[key]
+                    if earliest_mfma is None or candidate.issued_at < earliest_mfma.issued_at:
+                        earliest_mfma = candidate
+            if earliest_mfma is not None:
+                result[lr_name][lr.issue_index] = earliest_mfma
+
+    return result
+
+
 def precompute_issue_times(instructions: list[ValidatorInstruction]) -> list[int]:
     """
     Returns a list where issue_times[i] represents the quad-cycle when instruction i starts issuing.
