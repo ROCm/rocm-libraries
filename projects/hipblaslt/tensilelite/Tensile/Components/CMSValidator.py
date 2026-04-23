@@ -172,6 +172,53 @@ def active_concerns(kernel: dict, idmap: dict) -> set[ValidationConcern]:
     return active & isa_concerns
 
 
+@dataclass(frozen=True)
+class PipelineStage:
+    """Describes one loop stage in the CMS pipeline.
+
+    Replaces the hardcoded [ML-1, ML, NGL, NLL] loop list with a model
+    that generates the correct number of stages based on PGR.
+
+    PGR=1: [ML, NLL] (2 stages)
+    PGR=2: [ML-1, ML, NGL, NLL] (4 stages — same as today)
+    PGR=3: [ML-2, ML-1, ML, NGL-2, NGL-1, NLL] (6 stages)
+    """
+    name: str
+    has_global_reads: bool
+    has_global_read_incs: bool
+    has_local_reads_lr0_only: bool
+    vlcnt_shift: int
+
+
+def build_pipeline_stages(pgr: int, nglshift: int, nllshift: int) -> list[PipelineStage]:
+    """Build the pipeline stage list for a given PGR value.
+
+    Args:
+        pgr:      PrefetchGlobalRead value (1, 2, or higher)
+        nglshift: Total vlcnt shift for no-global-load stages
+        nllshift: vlcnt shift for the no-local-load stage
+    """
+    stages = []
+    # N main loop copies
+    for i in range(pgr - 1, -1, -1):
+        stages.append(PipelineStage(
+            name=f"ML-{i}" if i > 0 else "ML",
+            has_global_reads=True, has_global_read_incs=True,
+            has_local_reads_lr0_only=False, vlcnt_shift=0))
+    # N-1 NGLL drain stages
+    for k in range(pgr - 1, 0, -1):
+        shift = nglshift * (pgr - k) // (pgr - 1) if pgr > 1 else 0
+        stages.append(PipelineStage(
+            name=f"NGL-{k}" if pgr > 2 else "NGL",
+            has_global_reads=False, has_global_read_incs=False,
+            has_local_reads_lr0_only=False, vlcnt_shift=shift))
+    # NLL
+    stages.append(PipelineStage(
+        name="NLL", has_global_reads=False, has_global_read_incs=False,
+        has_local_reads_lr0_only=True, vlcnt_shift=nllshift))
+    return stages
+
+
 def invert_mfma_reorder(mfma_reorder: list[int]) -> dict[int, int]:
     """
     Compute the inverse mapping of mfmaReorder.
