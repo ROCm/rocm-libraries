@@ -31,6 +31,11 @@ void testing_const_spmat_descr_bad_arg(const Arguments& arg)
     int64_t                     local_rows             = safe_size;
     int64_t                     local_cols             = safe_size;
     int64_t                     local_nnz              = safe_size;
+    int64_t                     local_brows            = safe_size;
+    int64_t                     local_bcols            = safe_size;
+    int64_t                     local_bnnz             = safe_size;
+    rocsparse_direction         local_block_dir        = rocsparse_direction_row;
+    int64_t                     local_block_dim        = safe_size;
     rocsparse_direction         local_ell_block_dir    = rocsparse_direction_row;
     int64_t                     local_ell_block_dim    = safe_size;
     int64_t                     local_ell_cols         = safe_size;
@@ -48,6 +53,11 @@ void testing_const_spmat_descr_bad_arg(const Arguments& arg)
         int64_t                      rows             = local_rows;
         int64_t                      cols             = local_cols;
         int64_t                      nnz              = local_nnz;
+        int64_t                      brows            = local_brows;
+        int64_t                      bcols            = local_bcols;
+        int64_t                      bnnz             = local_bnnz;
+        rocsparse_direction          block_dir        = local_block_dir;
+        int64_t                      block_dim        = local_block_dim;
         rocsparse_direction          ell_block_dir    = local_ell_block_dir;
         int64_t                      ell_block_dim    = local_ell_block_dim;
         int64_t                      ell_cols         = local_ell_cols;
@@ -195,19 +205,19 @@ void testing_const_spmat_descr_bad_arg(const Arguments& arg)
         void* bsr_col_ind = (void*)0x4;
         void* bsr_val     = (void*)0x4;
 
-#define PARAMS_CREATE_BSR                                                                    \
-    descr, rows, cols, nnz, ell_block_dir, ell_block_dim, bsr_row_ptr, bsr_col_ind, bsr_val, \
+#define PARAMS_CREATE_BSR                                                                       \
+    descr, brows, bcols, bnnz, block_dir, block_dim, bsr_row_ptr, bsr_col_ind, bsr_val,         \
         row_ptr_type, col_ind_type, idx_base, data_type
         bad_arg_analysis(rocsparse_create_const_bsr_descr, PARAMS_CREATE_BSR);
 #undef PARAMS_CREATE_BSR
 
-        // nnzb > mb * nb
+        // bnnz > brows * bcols
         EXPECT_ROCSPARSE_STATUS(rocsparse_create_const_bsr_descr(descr,
-                                                                 rows,
-                                                                 cols,
-                                                                 (rows * cols + 1),
-                                                                 ell_block_dir,
-                                                                 ell_block_dim,
+                                                                 brows,
+                                                                 bcols,
+                                                                 (brows * bcols + 1),
+                                                                 block_dir,
+                                                                 block_dim,
                                                                  bsr_row_ptr,
                                                                  bsr_col_ind,
                                                                  bsr_val,
@@ -219,10 +229,10 @@ void testing_const_spmat_descr_bad_arg(const Arguments& arg)
 
         // block_dim == 0
         EXPECT_ROCSPARSE_STATUS(rocsparse_create_const_bsr_descr(descr,
-                                                                 rows,
-                                                                 cols,
-                                                                 nnz,
-                                                                 ell_block_dir,
+                                                                 brows,
+                                                                 bcols,
+                                                                 bnnz,
+                                                                 block_dir,
                                                                  0,
                                                                  bsr_row_ptr,
                                                                  bsr_col_ind,
@@ -393,10 +403,10 @@ void testing_const_spmat_descr_bad_arg(const Arguments& arg)
 
         EXPECT_ROCSPARSE_STATUS(rocsparse_create_const_bsr_descr(descr,
                                                                  0,
-                                                                 cols,
+                                                                 bcols,
                                                                  0,
-                                                                 ell_block_dir,
-                                                                 ell_block_dim,
+                                                                 block_dir,
+                                                                 block_dim,
                                                                  nullptr,
                                                                  nullptr,
                                                                  nullptr,
@@ -408,11 +418,11 @@ void testing_const_spmat_descr_bad_arg(const Arguments& arg)
         EXPECT_ROCSPARSE_STATUS(rocsparse_destroy_spmat_descr(local_descr),
                                 rocsparse_status_success);
         EXPECT_ROCSPARSE_STATUS(rocsparse_create_const_bsr_descr(descr,
-                                                                 rows,
+                                                                 brows,
                                                                  0,
                                                                  0,
-                                                                 ell_block_dir,
-                                                                 ell_block_dim,
+                                                                 block_dir,
+                                                                 block_dim,
                                                                  bsr_row_ptr,
                                                                  nullptr,
                                                                  nullptr,
@@ -424,11 +434,11 @@ void testing_const_spmat_descr_bad_arg(const Arguments& arg)
         EXPECT_ROCSPARSE_STATUS(rocsparse_destroy_spmat_descr(local_descr),
                                 rocsparse_status_success);
         EXPECT_ROCSPARSE_STATUS(rocsparse_create_const_bsr_descr(descr,
-                                                                 rows,
-                                                                 cols,
+                                                                 brows,
+                                                                 bcols,
                                                                  0,
-                                                                 ell_block_dir,
-                                                                 ell_block_dim,
+                                                                 block_dir,
+                                                                 block_dim,
                                                                  bsr_row_ptr,
                                                                  nullptr,
                                                                  nullptr,
@@ -489,6 +499,11 @@ void testing_const_spmat_descr_bad_arg(const Arguments& arg)
         int64_t*              rows             = &local_rows;
         int64_t*              cols             = &local_cols;
         int64_t*              nnz              = &local_nnz;
+        int64_t*              brows            = &local_brows;
+        int64_t*              bcols            = &local_bcols;
+        int64_t*              bnnz             = &local_bnnz;
+        rocsparse_direction*  block_dir        = &local_block_dir;
+        int64_t*              block_dim        = &local_block_dim;
         rocsparse_direction*  ell_block_dir    = &local_ell_block_dir;
         int64_t*              ell_block_dim    = &local_ell_block_dim;
         int64_t*              ell_cols         = &local_ell_cols;
@@ -755,11 +770,11 @@ void testing_const_spmat_descr_bad_arg(const Arguments& arg)
 
         {
             EXPECT_ROCSPARSE_STATUS(rocsparse_create_const_bsr_descr(&local_descr,
-                                                                     local_rows,
-                                                                     local_cols,
-                                                                     local_nnz,
-                                                                     local_ell_block_dir,
-                                                                     local_ell_block_dim,
+                                                                     local_brows,
+                                                                     local_bcols,
+                                                                     local_bnnz,
+                                                                     local_block_dir,
+                                                                     local_block_dim,
                                                                      (const void*)0x4,
                                                                      (const void*)0x4,
                                                                      (const void*)0x4,
@@ -774,8 +789,8 @@ void testing_const_spmat_descr_bad_arg(const Arguments& arg)
             const void** bsr_col_ind = (const void**)0x4;
             const void** bsr_val     = (const void**)0x4;
 
-#define PARAMS_GET_BSR                                                                       \
-    descr, rows, cols, nnz, ell_block_dir, ell_block_dim, bsr_row_ptr, bsr_col_ind, bsr_val, \
+#define PARAMS_GET_BSR                                                                          \
+    descr, brows, bcols, bnnz, block_dir, block_dim, bsr_row_ptr, bsr_col_ind, bsr_val,         \
         row_ptr_type, col_ind_type, idx_base, data_type
             bad_arg_analysis(rocsparse_const_bsr_get, PARAMS_GET_BSR);
 #undef PARAMS_GET_BSR
