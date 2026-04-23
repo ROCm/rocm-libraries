@@ -2331,6 +2331,9 @@ class KernelWriterAssembly(KernelWriter):
                              src1=sgpr(sTmp+2), \
                              comment="WorkGroup1 = (cluster_y * nwg_y) + wg_y"))
 
+          moduleRegInit.add(SBfeU32(dst=sgpr("WorkGroup2"), src0=sgpr(sTmp+1), src1=((16 << 16) | 16), \
+                             comment="Etract cluster_z."))
+
           moduleRegInit.add(SAndB32(dst=sgpr(sTmp+1), src0=sgpr(sTmp+0), src1=hex(0xF), \
                              comment="Etract wg_x."))
           moduleRegInit.add(SBfeU32(dst=sgpr(sTmp+3), src0=sgpr(sTmp+0), src1=((4 << 16) | 12), \
@@ -2341,11 +2344,20 @@ class KernelWriterAssembly(KernelWriter):
           moduleRegInit.add(SAddU32(dst=sgpr("WorkGroup0"), src0=sgpr("WorkGroup0"), \
                              src1=sgpr(sTmp+1), \
                              comment="WorkGroup0 = (cluster_x * nwg_x) + wg_x"))
+
           moduleRegInit.add(SBfeU32(dst=sgpr(sTmp+4), src0=sgpr(sTmp+0), src1=((4 << 16) | 8), \
                      comment="Etract wg_z."))
-          moduleRegInit.add(SAddU32(dst=sgpr("WorkGroup2"), src0=0, \
+          moduleRegInit.add(SBfeU32(dst=sgpr(sTmp+0), src0=sgpr(sTmp+0), src1=((4 << 16) | 20), \
+                             comment="Etract nwg_z. Value is nwg_z - 1"))
+          moduleRegInit.add(SAddU32(dst=sgpr(sTmp+0), src0=sgpr(sTmp+0), src1=1, comment=""))
+          moduleRegInit.add(SMulI32(dst=sgpr("WorkGroup2"), src0=sgpr("WorkGroup2"), src1=sgpr(sTmp+0),\
+                             comment="cluster_z * nwg_z"))
+          moduleRegInit.add(SAddU32(dst=sgpr("WorkGroup2"), src0=sgpr("WorkGroup2"), \
                              src1=sgpr(sTmp+4), \
-                             comment="WorkGroup2 = (cluster_z(0) * nwg_z(1)) + wg_z"))
+                             comment="WorkGroup2 = (cluster_z * nwg_z) + wg_z"))
+#          moduleRegInit.add(SAddU32(dst=sgpr("WorkGroup2"), src0=0, \
+#                             src1=sgpr(sTmp+4), \
+#                             comment="WorkGroup2 = (cluster_z(0) * nwg_z(1)) + wg_z"))
           moduleRegInit.add(label_calculate_workgroup_done)
 
           if kernel["Multicast"]:
@@ -2520,8 +2532,8 @@ class KernelWriterAssembly(KernelWriter):
       module.add(ArgType3_Routed_To_ArgType0)      
       module.add(deepcopy(moduleWg))
       if kernel["StreamK"] == 0:
-        module.addComment0("end remap 1")
-        module.add(SBranch(labelName=labelMultiGemmEnd.getLabelName()))  # gfx1250
+        if self.states.version[:2] == (12, 5):
+          module.add(SBranch(labelName=labelMultiGemmEnd.getLabelName(), comment="Already using 3D WorkGroups, skip remap"))
         module.add(self.remapWgSerial(kernel, earlyStop=False))
 
       module.add(SBranch(labelName=labelMultiGemmEnd.getLabelName()))
@@ -2726,8 +2738,8 @@ class KernelWriterAssembly(KernelWriter):
       earlyReturnModule.add(noEarlyReturnLabel)
       module.add(earlyReturnModule)
       if kernel["StreamK"] == 0:
-        module.addComment0("end remap 2")
-        module.add(SBranch(labelName=labelMultiGemmEnd.getLabelName()))
+        if self.states.version[:2] == (12, 5):
+          module.add(SBranch(labelName=labelMultiGemmEnd.getLabelName(), comment="Already using 3D WorkGroups, skip remap"))
         module.add(self.remapWgSerial(kernel))
       module.addSpaceLine()
       module.add(labelMultiGemmEnd)

@@ -453,6 +453,14 @@ namespace TensileLite
             if(startEvent != nullptr)
                 HIP_CHECK_RETURN(hipEventRecord(startEvent, stream));
 
+            if(kernel.clusterDim.x == 0 || kernel.clusterDim.y == 0)
+            {
+                std::cerr << "hipDrvLaunchKernelEx: clusterDim.x and clusterDim.y must be non-zero "
+                          << "(got " << kernel.clusterDim.x << ", " << kernel.clusterDim.y
+                          << ") for kernel: " << kernel.kernelName << std::endl;
+                return hipErrorInvalidValue;
+            }
+
             HIP_LAUNCH_CONFIG config = {0};
             // The grid dimension is not affected by cluster launch, and is still enumerated
             // using number of blocks.
@@ -465,8 +473,8 @@ namespace TensileLite
             config.blockDimZ = kernel.workGroupSize.z;
 
             hipLaunchAttribute attribute[1];
-            attribute[0].id = hipLaunchAttributeClusterDimension;
-            attribute[0].val.clusterDim.x = kernel.clusterDim.x; // Cluster size in X-dimension
+            attribute[0].id                 = hipLaunchAttributeClusterDimension;
+            attribute[0].val.clusterDim.x = kernel.clusterDim.x;
             attribute[0].val.clusterDim.y = kernel.clusterDim.y;
             attribute[0].val.clusterDim.z = 1;
             config.attrs = attribute;
@@ -479,7 +487,7 @@ namespace TensileLite
                                                            nullptr,
                                                            (void**)&hipLaunchParams),
                 [&](hipError_t error) {
-                    std::cerr << "hipExtModuleLaunchKernel failed: " << kernel.kernelName << std::endl
+                    std::cerr << "hipDrvLaunchKernelEx failed: " << kernel.kernelName << std::endl
                               << " with workgroup size: " << kernel.workGroupSize << std::endl
                               << " with numWorkGroups : " << kernel.numWorkGroups << std::endl
                               << " with numWorkItems : " << kernel.numWorkItems << std::endl

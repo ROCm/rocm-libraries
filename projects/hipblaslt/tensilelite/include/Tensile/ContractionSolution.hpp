@@ -119,7 +119,7 @@ namespace TensileLite
     {
         size_t waveNum;
 
-        dim3 clusterDim;
+        dim3 clusterDim{1, 1, 1};
 
         dim3 workGroupSize;
         dim3 threadTile;
