@@ -413,8 +413,8 @@ void SdpaFwdPlanBuilder::buildPlan(
     try
     {
         deviceString = hip_kernel_provider_common::getDeviceString(handle.getStream());
-        multiProcessorCount
-            = hip_kernel_provider_common::getDeviceMultiProcessorCount(handle.getStream());
+        multiProcessorCount = hip_kernel_provider_common::getDeviceProperties(handle.getStream())
+                                  .multiProcessorCount;
     }
     catch(const std::exception& e)
     {

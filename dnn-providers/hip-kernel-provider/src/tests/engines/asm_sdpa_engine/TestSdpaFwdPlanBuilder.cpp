@@ -70,7 +70,8 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableSdpaVariations)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
-    if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
+    std::string deviceString = hip_kernel_provider_common::getDeviceString(_handle.getStream());
+    if(deviceString != "gfx942" && deviceString != "gfx942")
     {
         GTEST_SKIP();
     }

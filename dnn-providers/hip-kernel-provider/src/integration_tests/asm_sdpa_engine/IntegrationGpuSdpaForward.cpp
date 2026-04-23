@@ -82,10 +82,10 @@ protected:
 
     void runGraphTest(float tolerance)
     {
-
-        if(hip_kernel_provider_common::getDeviceString(this->stream()) != "gfx942")
+        auto deviceString = hip_kernel_provider_common::getDeviceString(this->stream());
+        if(deviceString != "gfx942" && deviceString != "gfx950")
         {
-            GTEST_SKIP() << "Skipped: ASM SDPA kernel only supports gfx942.";
+            GTEST_SKIP() << "Skipped: ASM SDPA kernel only supports gfx942 and gfx950.";
         }
 
         const SdpaTestCase& testCase = this->GetParam();

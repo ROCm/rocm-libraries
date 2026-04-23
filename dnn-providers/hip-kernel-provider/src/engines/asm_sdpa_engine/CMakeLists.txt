@@ -12,10 +12,17 @@ set(ASM_CODEGEN_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/asm/asm_kernels/codegen.py")
 set(ASM_CODEGEN_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")
 set(ASM_FMHA_FWD_CONFIG_HEADER "${ASM_CODEGEN_OUTPUT_DIR}/asm_fmha_v3_fwd_configs.hpp")
 
-# CSV files that the codegen script depends on
-file(GLOB_RECURSE ASM_KERNEL_CSV_FILES
-    "${CMAKE_CURRENT_SOURCE_DIR}/asm/asm_kernels/gfx942/**/*.csv"
-)
+# Define supported GPU architectures (used for both glob patterns and AITER_GPU_ARCHS)
+set(ASM_SDPA_GPU_ARCHS gfx942 gfx950)
+
+# CSV files that the codegen script depends on (iterate over all architectures)
+set(ASM_KERNEL_CSV_FILES "")
+foreach(ARCH ${ASM_SDPA_GPU_ARCHS})
+    file(GLOB_RECURSE ARCH_CSV_FILES
+        "${CMAKE_CURRENT_SOURCE_DIR}/asm/asm_kernels/${ARCH}/**/*.csv"
+    )
+    list(APPEND ASM_KERNEL_CSV_FILES ${ARCH_CSV_FILES})
+endforeach()
 
 # Create the output directory
 file(MAKE_DIRECTORY ${ASM_CODEGEN_OUTPUT_DIR})
@@ -23,13 +30,13 @@ file(MAKE_DIRECTORY ${ASM_CODEGEN_OUTPUT_DIR})
 # Custom command to generate ASM kernel config headers
 add_custom_command(
     OUTPUT ${ASM_FMHA_FWD_CONFIG_HEADER}
-    COMMAND ${CMAKE_COMMAND} -E env "AITER_GPU_ARCHS=gfx942" --
+    COMMAND ${CMAKE_COMMAND} -E env "AITER_GPU_ARCHS=${ASM_SDPA_GPU_ARCHS}" --
             ${Python3_EXECUTABLE} ${ASM_CODEGEN_SCRIPT}
             -m fmha_v3_fwd
             -o ${ASM_CODEGEN_OUTPUT_DIR}
     DEPENDS ${ASM_CODEGEN_SCRIPT} ${ASM_KERNEL_CSV_FILES}
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/asm/asm_kernels
-    COMMENT "Generating ASM kernel configuration headers for gfx942"
+    COMMENT "Generating ASM kernel configuration headers for ${ASM_SDPA_GPU_ARCHS}"
     VERBATIM
 )
 
