@@ -28,7 +28,13 @@ from collections import defaultdict
 from enum import Enum, auto
 from typing import ClassVar, Optional
 
-from rocisa.instruction import SWaitCnt, SBarrier
+from rocisa.instruction import (
+    SWaitCnt, SBarrier,
+    MFMAInstruction, SMovB32, SAddU32,
+    VPermB32, VOrB32, VLShiftLeftOrB32, VSwapB32,
+    VCvtPkF32toBF16, PVCvtBF16toFP32, VCvtBF16toFP32, VSubF32, VDot2CF32BF16,
+    BufferLoadB128, BufferLoadB64, BufferLoadB32,
+)
 from Tensile.Common.Utilities import printWarning
 
 
@@ -465,6 +471,135 @@ ALL_INSTRUCTION_NAMES = [
 ]
 
 
+# --- Type Resolution for idMap-driven instruction classification ---
+# Maps rocisa instruction types to (ValidatorInstruction subclass, assembly label).
+# Lookup: exact type match first, then isinstance fallback for subclass chains.
+PACK_TYPE_MAP: dict[type, tuple[type, str]] = {
+    VPermB32:          (Pack,       "v_perm_b32"),
+    VOrB32:            (Pack,       "v_or_b32"),
+    VLShiftLeftOrB32:  (Pack,       "v_lshlrev_or_b32"),
+    VCvtPkF32toBF16:   (CVTPack,    "v_cvt_pk_bf16_f32"),
+    PVCvtBF16toFP32:   (MiddlePack, "p_v_cvt_f32_bf16"),
+    VCvtBF16toFP32:    (MiddlePack, "v_cvt_f32_bf16"),
+    VSubF32:           (MiddlePack, "v_sub_f32"),
+    VDot2CF32BF16:     (MiddlePack, "v_dot2c_f32_bf16"),
+    VSwapB32:          (SwapPack,   "v_swap_b32"),
+    MFMAInstruction:   (MFMAPack,   "v_mfma_*"),
+}
+
+# Maps rocisa instruction types to (is_gr_load: bool).
+# Used to distinguish actual GR loads from m0 pointer writes in DTL sequences.
+GR_TYPE_MAP: dict[type, bool] = {
+    SMovB32:        False,  # m0 pointer setup
+    SAddU32:        False,  # m0 pointer increment
+    BufferLoadB128: True,   # actual GR load
+    BufferLoadB64:  True,
+    BufferLoadB32:  True,
+}
+
+
+def resolve_pack_type(rocisa_inst: object) -> tuple[type, str]:
+    """Resolve a rocisa instruction to its ValidatorInstruction class and assembly label.
+
+    Args:
+        rocisa_inst: A rocisa instruction object from the idMap.
+
+    Returns:
+        Tuple of (ValidatorInstruction subclass, assembly label string).
+
+    Raises:
+        ValueError: If the instruction type is not recognized.
+    """
+    inst_type = type(rocisa_inst)
+    # Exact match first
+    if inst_type in PACK_TYPE_MAP:
+        return PACK_TYPE_MAP[inst_type]
+    # isinstance fallback for subclass chains (e.g. MFMAInstruction subclasses)
+    for base_type, result in PACK_TYPE_MAP.items():
+        if isinstance(rocisa_inst, base_type):
+            return result
+    raise ValueError(f"Unknown pack instruction type: {inst_type.__name__} ({rocisa_inst})")
+
+
+def is_gr_load(rocisa_inst: object) -> bool:
+    """Return True if the rocisa instruction is an actual GR load, False if it's a pointer operation.
+
+    Raises:
+        ValueError: If the instruction type is not recognized.
+    """
+    inst_type = type(rocisa_inst)
+    if inst_type in GR_TYPE_MAP:
+        return GR_TYPE_MAP[inst_type]
+    for base_type, result in GR_TYPE_MAP.items():
+        if isinstance(rocisa_inst, base_type):
+            return result
+    raise ValueError(f"Unknown GR instruction type: {inst_type.__name__} ({rocisa_inst})")
+
+
+def detect_pack_groups(idmap_items: list) -> list[dict]:
+    """Walk the idMap entries for a pack name and identify group boundaries from the type pattern.
+
+    Returns a list of group dicts, each containing:
+      - 'group_index': int (or None for ungrouped SwapPacks)
+      - 'entries': list of (index, validator_cls, asm_label) tuples
+
+    Group detection rules:
+      - SwapPack instructions at the start are ungrouped (group_index=None).
+      - If no CVTPack/MiddlePack/MFMAPack types appear, all entries are plain Pack (BF16, no grouping needed).
+      - Otherwise, determine the group size from the type pattern (presence of MiddlePack → 24, MFMAPack → 10)
+        and split the non-swap entries into fixed-size groups.
+    """
+    if not idmap_items:
+        return []
+
+    entries = []
+    for idx, inst in enumerate(idmap_items):
+        cls, label = resolve_pack_type(inst)
+        entries.append((idx, cls, label))
+
+    # Check if there are any TF32-related types
+    has_middle = any(cls is MiddlePack for _, cls, _ in entries)
+    has_mfma_pack = any(cls is MFMAPack for _, cls, _ in entries)
+    has_cvt = any(cls is CVTPack for _, cls, _ in entries)
+
+    if not (has_middle or has_mfma_pack or has_cvt):
+        # BF16: all plain Pack, single group
+        return [{"group_index": 0, "entries": entries}]
+
+    groups = []
+    # Separate leading SwapPacks
+    n_swaps = 0
+    for idx, cls, label in entries:
+        if cls is SwapPack:
+            n_swaps += 1
+        else:
+            break
+
+    if n_swaps > 0:
+        groups.append({"group_index": None, "entries": entries[:n_swaps]})
+
+    remaining = entries[n_swaps:]
+    if not remaining:
+        return groups
+
+    # Determine group size from the type pattern
+    if has_middle:
+        group_size = PACK_GROUP_SIZE_TF32       # 24: CVT0×4 + Middle×16 + CVT1×4
+    elif has_mfma_pack:
+        group_size = PACK_GROUP_SIZE_TF32_4X4   # 10: CVT0×4 + MFMAPack×2 + CVT1×4
+    else:
+        # CVTPack only (no middle or mfma) — shouldn't happen in practice, but handle gracefully
+        group_size = len(remaining)
+
+    # Split remaining entries into fixed-size groups
+    for i in range(0, len(remaining), group_size):
+        group_entries = remaining[i:i + group_size]
+        group_idx = i // group_size
+        groups.append({"group_index": group_idx, "entries": group_entries})
+
+    return groups
+
+
 def create_unified_timeline(
     schedule_info: 'ScheduleInfo',
     kernel: 'Solution',
@@ -670,28 +805,45 @@ class Timeline:
                 for idx_pack, idx_vmfma in enumerate(packs):
                     assert idx_vmfma >= -1, f"Code path {code_path}: Pack {name} at index {idx_pack} is not valid. Must be >= -1."
                     ri = _get_rocisa(name, idx_pack)
+
+                    # Determine pack type using existing positional logic
                     if is_4x4mfma_tf32:
                         if idx_pack < n_swaps:
-                            self._insert(idx_vmfma, SwapPack, {"name": name, "issue_index": idx_pack, "group_index": None, "rocisa_inst": ri}, kernel)
+                            positional_cls = SwapPack
+                            group_idx = None
                         else:
                             adjusted_idx = idx_pack - n_swaps
-                            # Construction-time constants: PACK_GROUP_SIZE_TF32_4X4, TF32_4X4_MFMA_START/END
                             idx_in_group = adjusted_idx % PACK_GROUP_SIZE_TF32_4X4
                             group_idx = adjusted_idx // PACK_GROUP_SIZE_TF32_4X4
                             if TF32_4X4_MFMA_START <= idx_in_group < TF32_4X4_MFMA_END:
-                                self._insert(idx_vmfma, MFMAPack, {"name": name, "issue_index": idx_pack, "group_index": group_idx, "rocisa_inst": ri}, kernel)
+                                positional_cls = MFMAPack
                             else:
-                                self._insert(idx_vmfma, CVTPack, {"name": name, "issue_index": idx_pack, "group_index": group_idx, "rocisa_inst": ri}, kernel)
+                                positional_cls = CVTPack
                     elif is_tf32_emulation:
-                        # Construction-time constants: PACK_GROUP_SIZE_TF32, TF32_MIDDLE_16_START/END
                         idx_in_group = idx_pack % PACK_GROUP_SIZE_TF32
                         group_idx = idx_pack // PACK_GROUP_SIZE_TF32
                         if TF32_MIDDLE_16_START <= idx_in_group < TF32_MIDDLE_16_END:
-                            self._insert(idx_vmfma, MiddlePack, {"name": name, "issue_index": idx_pack, "group_index": group_idx, "rocisa_inst": ri}, kernel)
+                            positional_cls = MiddlePack
                         else:
-                            self._insert(idx_vmfma, CVTPack, {"name": name, "issue_index": idx_pack, "group_index": group_idx, "rocisa_inst": ri}, kernel)
+                            positional_cls = CVTPack
                     else:
-                        self._insert(idx_vmfma, Pack, {"name": name, "issue_index": idx_pack, "rocisa_inst": ri}, kernel)
+                        positional_cls = Pack
+                        group_idx = None
+
+                    # Dual-path assertion: when idMap is available, verify type resolution agrees
+                    if ri is not None:
+                        resolved_cls, _ = resolve_pack_type(ri)
+                        assert resolved_cls is positional_cls, (
+                            f"Type resolution mismatch for {name}[{idx_pack}]: "
+                            f"positional logic says {positional_cls.__name__}, "
+                            f"idMap type resolution says {resolved_cls.__name__} "
+                            f"(rocisa type: {type(ri).__name__})"
+                        )
+
+                    pack_kwargs = {"name": name, "issue_index": idx_pack, "rocisa_inst": ri}
+                    if group_idx is not None:
+                        pack_kwargs["group_index"] = group_idx
+                    self._insert(idx_vmfma, positional_cls, pack_kwargs, kernel)
             else:
                 raise NotImplementedError(f"Instruction {name} not implemented")
 
