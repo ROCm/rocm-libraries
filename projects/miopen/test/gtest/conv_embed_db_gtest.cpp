@@ -36,11 +36,13 @@ auto GenCases(bool smoke_test,
             "weight_tensor_dims", std::vector<std::vector<size_t>>{std::move(weight_tensor_dims)}));
 }
 
+#if MIOPEN_EMBED_DB
 bool IsTestSupportedForDevice(const miopen::Handle& handle)
 {
     const std::string devName = handle.GetDeviceName();
     return (devName == "gfx900" || devName == "gfx906");
 }
+#endif // MIOPEN_EMBED_DB
 
 } // namespace
 
