@@ -196,7 +196,7 @@ void ormtr_unmtr_hb2st_initData(
 
     if(CPU)
     {
-        // Matrix A is m-by-m on left, or n-by-n on right.
+        // Matrix A and Q are m-by-m on left, or n-by-n on right.
         rocblas_int nq = (side == rocblas_side_left ? m : n);
 
         gerand( m, n, hC[0], ldc );
