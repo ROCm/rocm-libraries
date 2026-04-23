@@ -2105,7 +2105,8 @@ try
                             hipDataType                dtype,
                             const std::vector<size_t>& lower,
                             const std::vector<size_t>& stride) {
-        auto offset_elems = std::inner_product(lower.begin(), lower.end(), stride.begin(), 0);
+        auto offset_elems = std::inner_product(lower.begin(), lower.end(), stride.begin(),
+                                               static_cast<std::remove_reference_t<decltype(lower)>::value_type>(0));
         return static_cast<void*>(static_cast<char*>(buf) + hipDataType_bytes(dtype, offset_elems));
     };
 
