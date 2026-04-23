@@ -81,9 +81,13 @@ TIMING_HIERARCHY = {
             "solution_iterator_setup": {},
             "listener_setup": {},
             "reporter_setup": {},
-            "pre_problem": {},
-            "cpu_data_init": {},
-            "cpu_reference_gemm": {},
+            "pre_problem": {
+                "cpu_data_init": {},
+                "cpu_reference_gemm": {
+                    "solve_cpu_fast": {},
+                    "solve_cpu_slow": {},
+                },
+            },
             "validate_warmups": {
                 "validate_gpu_sync": {},
                 "validate_gpu_readback": {},
@@ -136,13 +140,11 @@ CPP_PHASE_GROUPS = {
     ],
     "Data Preparation": [
         "pre_problem",
-        "cpu_data_init",
         "gpu_input_preparation",
         "gpu_input_reset",
         "rotating_buffer_preparation",
     ],
     "Reference Computation": [
-        "cpu_reference_gemm",
         "validate_warmups",
     ],
     "Kernel Execution": [

@@ -30,6 +30,7 @@ add_executable(
     utilities/TestCpuTypeUtilities.cpp
     utilities/TestSdkFrontendTypeConversions.cpp
     utilities/TestCpuReferencePointwise.cpp
+    utilities/TestDynamicTolerancesBatchNorm.cpp
     utilities/TestDynamicTolerancesCommon.cpp
     utilities/TestDynamicTolerancesConv.cpp
     utilities/TestDynamicTolerancesMatmul.cpp
