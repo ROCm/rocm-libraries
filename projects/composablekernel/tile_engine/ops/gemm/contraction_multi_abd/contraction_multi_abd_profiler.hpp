@@ -16,7 +16,9 @@
 class ContractionMultiABDProfiler
 {
     public:
-    static ContractionMultiABDProfiler& instance(Setting setting)
+    using ContractionInstance = KernelInstance<ContractionMultiABDProblem>;
+
+    static ContractionMultiABDProfiler& instance(Settings setting)
     {
         static ContractionMultiABDProfiler inst{setting};
         return inst;
@@ -107,9 +109,9 @@ class ContractionMultiABDProfiler
         float avg_time =
             kernel_func(host_args,
                         ck_tile::stream_config{
-                            nullptr, true, setting_.log_, setting_.n_warmup_, setting_.n_repeat_});
+                            nullptr, true, setting_.log, setting_.n_warmup, setting_.n_repeat});
 
-        KernelInstance ki{std::string(KERNEL_NAME), problem, {-1.0, -1.0, -1.0}};
+        ContractionInstance ki{std::string(KERNEL_NAME), problem, {-1.0, -1.0, -1.0}};
 
         std::size_t flop     = std::size_t(2) * g_total * m_total * n_total * k_total;
         std::size_t num_byte = sizeof(EDataType) * (NumATensor * total_a + NumBTensor * total_b +
@@ -119,13 +121,13 @@ class ContractionMultiABDProfiler
         ki.perf_result_.tflops_    = static_cast<float>(flop) / 1.E9 / avg_time;
         ki.perf_result_.bandwidth_ = num_byte / 1.E6 / avg_time;
 
-        if(setting_.log_ && !setting_.json_output_)
+        if(setting_.log && !setting_.json_output)
         {
             std::cout << ki << std::endl;
         }
 
         // Verify if requested
-        if(setting_.verify_)
+        if(setting_.verify)
         {
             e_dev.FromDevice(e_host_dev_result.mData.data());
 
@@ -156,7 +158,7 @@ class ContractionMultiABDProfiler
         }
     }
 
-    KernelInstance select_best_instance(Metric metric)
+    ContractionInstance select_best_instance(Metric metric)
     {
         if(kernel_instances_.empty())
             throw std::runtime_error("Empty instances");
@@ -168,7 +170,7 @@ class ContractionMultiABDProfiler
                                             b.perf_result_, a.perf_result_, metric);
                                     });
 
-        if(setting_.json_output_)
+        if(setting_.json_output)
         {
             std::cout << ki << std::endl;
         }
@@ -180,9 +182,9 @@ class ContractionMultiABDProfiler
             std::cout << "**********************************" << std::endl;
         }
 
-        if(!setting_.csv_filename_.empty())
+        if(!setting_.csv_filename.empty())
         {
-            std::ofstream file(setting_.csv_filename_ + ".csv", std::ios::app);
+            std::ofstream file(setting_.csv_filename + ".csv", std::ios::app);
             if(file.is_open())
             {
                 if(file.tellp() == 0)
@@ -210,8 +212,8 @@ class ContractionMultiABDProfiler
 
     private:
     ~ContractionMultiABDProfiler() { kernel_instances_.clear(); }
-    ContractionMultiABDProfiler(Setting setting) : setting_(setting) {}
+    ContractionMultiABDProfiler(Settings setting) : setting_(setting) {}
 
-    Setting setting_;
-    std::vector<KernelInstance> kernel_instances_;
+    Settings setting_;
+    std::vector<ContractionInstance> kernel_instances_;
 };

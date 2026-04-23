@@ -14,6 +14,11 @@
 
 #include "ck_tile/core.hpp"
 #include "ck_tile/host.hpp"
+#include "ck_tile/ops/common/utils.hpp"
+
+// Re-export the canonical ck_tile::DataTypeTraits so consumers can use it
+// unqualified across all tile_engine benchmarks.
+using ck_tile::DataTypeTraits;
 
 // Helper function to determine if a layout is row-major
 template <typename Layout>
@@ -72,8 +77,8 @@ struct KernelInstance
 };
 
 template <typename Problem>
-std::ostream& operator<<([[clang::lifetimebound]] std::ostream& os,
-                         const KernelInstance<Problem>& obj)
+inline std::ostream& operator<<([[clang::lifetimebound]] std::ostream& os,
+                                const KernelInstance<Problem>& obj)
 {
     os << "{\n"
        << " \"name\": \"" << obj.name_ << "\",\n"
@@ -83,7 +88,8 @@ std::ostream& operator<<([[clang::lifetimebound]] std::ostream& os,
     return os;
 }
 
-std::ostream& operator<<([[clang::lifetimebound]] std::ostream& os, const PerformanceResult& result)
+inline std::ostream& operator<<([[clang::lifetimebound]] std::ostream& os,
+                                const PerformanceResult& result)
 {
     os << "{\n"
        << "   \"latency(ms)\": " << std::fixed << std::setprecision(2) << result.latency_ << ",\n"
@@ -105,6 +111,19 @@ struct Settings
     bool flush_cache;
     int rotating_count;
     bool json_output;
+};
+
+// Superset trait carrier: covers GEMM/grouped/streamk (which use `persistent`)
+// and contraction (where `persistent` is just unused).
+struct KernelTraits
+{
+    std::string pipeline  = "compv3";    // compv3, compv4, mem
+    std::string scheduler = "intrawave"; // intrawave, interwave
+    std::string epilogue  = "cshuffle";  // cshuffle, default
+    bool pad_m            = false;
+    bool pad_n            = false;
+    bool pad_k            = false;
+    bool persistent       = false;
 };
 
 inline std::string get_rocm_version()

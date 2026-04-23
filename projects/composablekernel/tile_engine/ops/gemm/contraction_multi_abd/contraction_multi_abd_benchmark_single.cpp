@@ -57,14 +57,16 @@ void benchmark_single(const ck_tile::ArgParser& arg_parser)
     problem.n_total_ = calculate_total(n_dims);
     problem.k_total_ = calculate_total(k_dims);
 
-    Setting setting{arg_parser.get_int("warmup"),
-                    arg_parser.get_int("repeat"),
-                    arg_parser.get_bool("timer"),
-                    arg_parser.get_int("verify"),
-                    arg_parser.get_int("init"),
-                    arg_parser.get_bool("log"),
-                    arg_parser.get_str("csv_filename"),
-                    arg_parser.get_bool("json_output")};
+    Settings setting{arg_parser.get_int("warmup"),
+                     arg_parser.get_int("repeat"),
+                     arg_parser.get_bool("timer"),
+                     arg_parser.get_int("verify"),
+                     arg_parser.get_int("init"),
+                     arg_parser.get_bool("log"),
+                     arg_parser.get_str("csv_filename"),
+                     /*flush_cache=*/false,
+                     /*rotating_count=*/0,
+                     arg_parser.get_bool("json_output")};
 
     auto& profiler = ContractionMultiABDProfiler::instance(setting);
 

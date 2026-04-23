@@ -9,8 +9,8 @@
 #include "ck_tile/core.hpp"
 #include "ck_tile/host.hpp"
 #include "ck_tile/ops/batched_contraction.hpp"
+#include "common/utils.hpp"
 #include "contraction_multi_abd_common.hpp"
-#include "../gemm_benchmark_common.hpp"
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-seggestions"
@@ -57,35 +57,6 @@ struct ContractionMultiABDProblem
            << "}";
         return os;
     }
-};
-
-struct KernelInstance
-{
-    std::string name_;
-    ContractionMultiABDProblem problem_;
-    PerformanceResult perf_result_;
-
-    friend std::ostream& operator<<(std::ostream& os, const KernelInstance& obj)
-    {
-        os << "{\n"
-           << " \"name\": \"" << obj.name_ << "\",\n"
-           << " \"problem\": " << obj.problem_ << ",\n"
-           << " \"perf_result\": " << obj.perf_result_ << "\n"
-           << "}";
-        return os;
-    }
-};
-
-struct Setting
-{
-    int n_warmup_;
-    int n_repeat_;
-    bool is_gpu_timer_;
-    int verify_;
-    int init_method_;
-    bool log_;
-    std::string csv_filename_;
-    bool json_output_;
 };
 
 #pragma clang diagnostic pop

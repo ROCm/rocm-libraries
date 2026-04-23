@@ -9,32 +9,7 @@
 #include "ck_tile/core.hpp"
 #include "ck_tile/host.hpp"
 #include "ck_tile/ops/common/utils.hpp"
-
-template <typename Layout>
-constexpr auto is_row_major(Layout)
-{
-    return ck_tile::bool_constant<std::is_same_v<Layout, ck_tile::tensor_layout::gemm::RowMajor>>{};
-}
-
-struct KernelTraits
-{
-    std::string pipeline;
-    std::string scheduler;
-    std::string epilogue;
-    bool pad_m;
-    bool pad_n;
-    bool pad_k;
-
-    KernelTraits()
-        : pipeline("compv3"),
-          scheduler("intrawave"),
-          epilogue("cshuffle"),
-          pad_m(false),
-          pad_n(false),
-          pad_k(false)
-    {
-    }
-};
+#include "common/utils.hpp"
 
 inline std::vector<ck_tile::index_t> parse_dimensions(const std::string& dims_str)
 {
