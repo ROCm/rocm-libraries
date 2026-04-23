@@ -59,6 +59,15 @@ struct tile_scatter_gather
                   "This kernel should not be instantiated on this architecture.");
 #endif
 
+    // Empty placeholder used by the SRD instantiation so physical_pages_ and
+    // page_stride_elements_ occupy zero bytes there (combined with
+    // [[no_unique_address]] on the member declarations). Access sites are all
+    // inside `if constexpr(kUseGlobalLoad_)` arms, which compile out in SRD
+    // mode, so no caller needs to change.
+    struct gl_field_empty_t
+    {
+    };
+
     using BottomTensorView = remove_reference_t<BottomTensorView_>;
     using WindowLengths    = remove_cvref_t<WindowLengths_>;
     using TileDstr         = remove_cvref_t<StaticTileDistribution_>;
@@ -252,10 +261,14 @@ struct tile_scatter_gather
           tile_dstr_{tile_distribution},
           page_idx_{page_idx},
           physical_pages_{},
-          page_stride_elements_{page_stride_elements},
+          page_stride_elements_{},
           valids_{valids},
           pre_computed_coords_{}
     {
+        if constexpr(kUseGlobalLoad_)
+        {
+            page_stride_elements_ = page_stride_elements;
+        }
 #if 0 // debug
       // TODO: this use more register for FA, but less register for GEMM
       // need investigation
@@ -1229,14 +1242,17 @@ struct tile_scatter_gather
     // Physical page indices for global load mode (kUseGlobalLoad=true only).
     // Maps each gather element to its physical page in a paged memory pool.
     // Updated via update_physical_pages() before each load call.
-    // Unused in SRD mode — SRD rebase handles page addressing externally.
-    PageIdxArray physical_pages_;
+    // SRD mode: collapsed to gl_field_empty_t so the storage disappears.
+    [[no_unique_address]] std::conditional_t<kUseGlobalLoad_, PageIdxArray, gl_field_empty_t>
+        physical_pages_;
 
     // Page stride in elements for global load mode (kUseGlobalLoad=true only).
     // physical_pages_[i] * page_stride_elements_ gives the page base offset in elements.
     // Set at construction time via the make_tile_scatter_gather overload that
     // takes bool_constant<kUseGlobalLoad>; immutable thereafter.
-    index_t page_stride_elements_;
+    // SRD mode: collapsed to gl_field_empty_t so the storage disappears.
+    [[no_unique_address]] std::conditional_t<kUseGlobalLoad_, index_t, gl_field_empty_t>
+        page_stride_elements_;
 
     ValidArray valids_;
 
