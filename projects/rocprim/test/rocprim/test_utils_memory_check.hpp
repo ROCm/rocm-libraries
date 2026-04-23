@@ -38,7 +38,7 @@
 namespace test_utils
 {
 // 32GB
-constexpr static unsigned long long minimum_memory_required_bytes = 34359738368;
+constexpr static size_t minimum_memory_required_bytes = 34359738368;
 
 inline unsigned long long get_total_system_memory(bool is_apu)
 {
