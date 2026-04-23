@@ -26,7 +26,7 @@ from codegen.arch import ArchTrait
 from codegen.utils import update_file
 
 # Architecture trait for kernels requiring global_load_lds (CDNA3+).
-# Only used for kUseGlobalLoad=true variants; all other kernels are arch-agnostic.
+# Only used for GLOBAL_LOAD_LDS variants; all other kernels are arch-agnostic.
 CDNA3_PLUS_ARCH = ArchTrait(
     "cdna3_plus",
     preprocessor_check="defined(__gfx94__) || defined(__gfx950__)",
@@ -43,7 +43,7 @@ DTYPE_BITS = {
 }
 
 # Element size in bytes per dtype, used by the auto-generated dispatcher to
-# decide use_global_load per-arm (total KV cache bytes vs INT32_MAX).
+# decide kv_load_mode per-arm (total KV cache bytes vs INT32_MAX).
 DTYPE_BYTES = {k: v // 8 for k, v in DTYPE_BITS.items()}
 
 K0_MAX_SUBMAX_MAP = {32: 32, 64: 64, 96: 128, 128: 128, 256: 256}
@@ -58,6 +58,10 @@ KV_MEMORY_LAYOUT_ENUM_MAP = {
 KV_LOOKUP_TABLE_ENUM_MAP = {
     "vllm": "ck_tile::BlockAttentionKVCacheLookupTableEnum::VLLM_BLOCK_TABLE_2D",
     "sglang": "ck_tile::BlockAttentionKVCacheLookupTableEnum::SGLANG_PAGE_TABLE_1D",
+}
+KV_LOAD_MODE_ENUM_MAP = {
+    False: "ck_tile::BlockAttentionKVCacheLoadModeEnum::BUFFER_LOAD",
+    True: "ck_tile::BlockAttentionKVCacheLoadModeEnum::GLOBAL_LOAD_LDS",
 }
 
 
@@ -102,7 +106,7 @@ using fmha_trait_{F_idx} = ck_tile::TileFmhaBatchPrefillTraits<{F_spad},
                                                     {F_page_size},
                                                     {F_kv_memory_layout},
                                                     {F_kv_lookup_table},
-                                                    {F_use_global_load}>;
+                                                    {F_kv_load_mode}>;
 
 using fmha_variant_{F_idx} = ck_tile::ComposedAttention<{F_logits} * ck_tile::LOGITS_SOFT_CAP, CK_TILE_FMHA_FWD_FAST_EXP2>;
 
@@ -140,7 +144,7 @@ using fmha_kernel_{F_idx} =
     ck_tile::FmhaBatchPrefillWithPagedKVCacheKernel<fmha_pipeline_{F_idx}, fmha_epilogue_{F_idx}>;
 
 using trait_{F_idx} = fmha_fwd_batch_prefill_traits_<{F_hdim}, {F_dtype}, {F_mode},{F_bm0}, {F_bn0}, {F_bk0}, {F_bn1}, {F_bk1}, {F_bk0max}, {F_vlayout},
-                        {F_pipeline_enum}, {F_logits}, fmha_mask_{F_idx}, {F_bias}, {F_lse}, {F_dropout}, {F_qscale}, {F_spad}, {F_skpad}, {F_dpad}, {F_dvpad}, false, false, {F_sink}, {F_page_size}, {F_kv_memory_layout}, {F_kv_lookup_table}, {F_use_global_load}>;
+                        {F_pipeline_enum}, {F_logits}, fmha_mask_{F_idx}, {F_bias}, {F_lse}, {F_dropout}, {F_qscale}, {F_spad}, {F_skpad}, {F_dpad}, {F_dvpad}, false, false, {F_sink}, {F_page_size}, {F_kv_memory_layout}, {F_kv_lookup_table}, {F_kv_load_mode}>;
 
 #include <iostream>
 
@@ -222,8 +226,8 @@ FMHA_FWD_API_PER_HDIM_CASE = """        {F_if} (t.hdim_q <= {F_hdim} && t.hdim_v
 """
 
 FMHA_FWD_API_INNER_DISPATCH = """            {F_if}((t.is_group_mode == {F_mode}) && (t.is_v_rowmajor == {F_vlayout}) && (t.has_logits_soft_cap == {F_logits}) && ({F_mask_check}) && (t.bias_type == {F_bias_check}) && (t.has_lse == {F_lse})  && (t.has_dropout == {F_dropout}) && (t.qscale_type == {F_qscale_check}) && (t.has_sink == {F_sink}) &&
-                        ({F_scheck}) && ({F_skcheck}) && ({F_dcheck}) && ({F_dvcheck}) && ({F_constraint}) && (t.kv_memory_layout == {F_kv_memory_layout}) && (t.kv_lookup_table == {F_kv_lookup_table}) && (t.page_size == {F_page_size}) && ((a.page_block_size < {F_bn0} && static_cast<ck_tile::long_index_t>(a.num_total_pages) * a.batch_stride_k * kElementBytes > INT32_MAX) == {F_use_global_load})) {{
-                using trait_ = fmha_fwd_batch_prefill_traits_<{F_hdim}, {F_dtype}, {F_mode}, {F_bm0}, {F_bn0}, {F_bk0}, {F_bn1}, {F_bk1}, {F_bk0max}, {F_vlayout}, {F_pipeline_enum}, {F_logits}, {F_mask}, {F_bias}, {F_lse}, {F_dropout}, {F_qscale}, {F_spad}, {F_skpad}, {F_dpad}, {F_dvpad}, false, false, {F_sink}, {F_page_size}, {F_kv_memory_layout}, {F_kv_lookup_table}, {F_use_global_load}>;
+                        ({F_scheck}) && ({F_skcheck}) && ({F_dcheck}) && ({F_dvcheck}) && ({F_constraint}) && (t.kv_memory_layout == {F_kv_memory_layout}) && (t.kv_lookup_table == {F_kv_lookup_table}) && (t.page_size == {F_page_size}) && (fmha_batch_prefill_select_kv_load_mode(a.page_block_size, {F_bn0}, a.num_total_pages, a.batch_stride_k, kElementBytes) == {F_kv_load_mode})) {{
+                using trait_ = fmha_fwd_batch_prefill_traits_<{F_hdim}, {F_dtype}, {F_mode}, {F_bm0}, {F_bn0}, {F_bk0}, {F_bn1}, {F_bk1}, {F_bk0max}, {F_vlayout}, {F_pipeline_enum}, {F_logits}, {F_mask}, {F_bias}, {F_lse}, {F_dropout}, {F_qscale}, {F_spad}, {F_skpad}, {F_dpad}, {F_dvpad}, false, false, {F_sink}, {F_page_size}, {F_kv_memory_layout}, {F_kv_lookup_table}, {F_kv_load_mode}>;
                 return fmha_batch_prefill_<trait_>(s, a);
             }}
 """
@@ -279,7 +283,7 @@ class FmhaFwdApiTrait:
         return (
             f"{self.hdim}-{self.dtype}-{self.mode}-{self.bm0}-{self.bn0}-{self.bk0}-{self.bn0}-{self.bk1}-{self.bk0max}-"
             + f"{self.vlayout}-{self.logits}-{self.mask}-{self.bias}-{self.lse}-{self.dropout}-{self.qscale}-{self.spad}-{self.skpad}-{self.dpad}-{self.dvpad}-{self.kv_memory_layout}-{self.kv_lookup_table}-ps{self.page_size}"
-            + ("-globalload" if self.use_global_load else "")
+            + ("-gload" if self.use_global_load else "-bload")
         )
 
     @property
@@ -502,9 +506,7 @@ class FmhaFwdApiPool:
                         ],
                         F_page_size=trait.page_size,
                         F_sink=BOOL_MAP[trait.sink],
-                        F_use_global_load=BOOL_MAP[
-                            "t" if trait.use_global_load else "f"
-                        ],
+                        F_kv_load_mode=KV_LOAD_MODE_ENUM_MAP[trait.use_global_load],
                     )
                 if_j = "if" if j == 0 else "else if"
                 per_hdim_case = per_hdim_case + FMHA_FWD_API_PER_HDIM_CASE.format(
@@ -616,7 +618,7 @@ class FmhaFwdKernel:
             F_pipeline=FMHA_BATCH_PREFILL_PIPELINE_MAP[self.F_pipeline.tag],
             F_page_size=self.F_page_size,
             F_sink=BOOL_MAP[self.F_pipeline.F_sink],
-            F_use_global_load=BOOL_MAP["t" if self.F_use_global_load else "f"],
+            F_kv_load_mode=KV_LOAD_MODE_ENUM_MAP[self.F_use_global_load],
             F_arch_check=CDNA3_PLUS_ARCH.preprocessor_check
             if self.F_use_global_load
             else "true",
@@ -627,7 +629,7 @@ class FmhaFwdKernel:
         # TODO: we don't encode idx here
         return (
             f"fmha_batch_prefill_d{self.F_hdim}_{self.F_dtype}_{self.F_mode}_ps{self.F_page_size}_"
-            + ("globalload_" if self.F_use_global_load else "")
+            + ("gload_" if self.F_use_global_load else "bload_")
             + self.F_tile.name
             + "_"
             + self.F_pipeline.name
@@ -748,8 +750,11 @@ class CustomFactory(KernelComponentFactory):
 
 
 def get_fwd_blobs(
-    kernel_filter: Optional[str], receipt, optdim_list, mask_impl,
-    targets: Optional[List[str]] = None
+    kernel_filter: Optional[str],
+    receipt,
+    optdim_list,
+    mask_impl,
+    targets: Optional[List[str]] = None,
 ) -> Tuple[FmhaFwdApiPool, List[FmhaFwdKernel]]:
     # batch_prefill pipeline uses gfx9-specific async scatter-gather buffer addressing
     # (amd_buffer_addressing.hpp raw buffer loads) that is not compatible with
@@ -871,9 +876,10 @@ def get_fwd_blobs(
                     api_pool.register_traits(k.api_trait())
                     gen.append(k)
 
-                    # For page_size < kN0 (tile.F_bn0), also generate a kUseGlobalLoad=true
-                    # variant for >2GB KV cache support. The default (false) uses SRD buffer_load
-                    # (fast, <2GB). The global_load variant uses global_load_lds_* (slower, handles >2GB).
+                    # For page_size < kN0 (tile.F_bn0), also generate a GLOBAL_LOAD_LDS
+                    # variant for >2GB KV cache support. The default (BUFFER_LOAD) uses SRD
+                    # buffer_load (fast, <2GB). GLOBAL_LOAD_LDS uses global_load_lds_*
+                    # (slower, handles >2GB).
                     if page_size < tile.F_bn0:
                         k_global_load = FmhaFwdKernel(
                             F_idx=0,
@@ -908,7 +914,9 @@ def write_blobs(
     optdim_list,
     mask_impl,
 ) -> None:
-    api_pool, kernels = get_fwd_blobs(kernel_filter, receipt, optdim_list, mask_impl, targets)
+    api_pool, kernels = get_fwd_blobs(
+        kernel_filter, receipt, optdim_list, mask_impl, targets
+    )
     for kernel in kernels:
         write_single_fwd_kernel(kernel, output_dir)
     write_fwd_api(api_pool, output_dir)
@@ -923,7 +931,9 @@ def list_blobs(
     mask_impl,
 ) -> None:
     with file_path.open("a") as f:
-        _, kernels = get_fwd_blobs(kernel_filter, receipt, optdim_list, mask_impl, targets)
+        _, kernels = get_fwd_blobs(
+            kernel_filter, receipt, optdim_list, mask_impl, targets
+        )
         for kernel in kernels:
             f.write((file_path.parent / GEN_DIR / kernel.filename).as_posix() + "\n")
         f.write((file_path.parent / GEN_DIR / FMHA_FWD_API_FILENAME).as_posix() + "\n")

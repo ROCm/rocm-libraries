@@ -1319,11 +1319,6 @@ CK_TILE_DEVICE void async_buffer_load_fence(index_t cnt = 0)
     asm volatile("s_waitcnt vmcnt(%0)" : : "n"(cnt) : "memory");
 }
 
-namespace impl {
-template <unsigned>
-inline constexpr bool global_load_lds_arch_unreachable_v = false;
-} // namespace impl
-
 // Flat async load from global memory to LDS using 64-bit global addressing.
 // Bypasses the SRD's 32-bit offset limit; required when the KV cache exceeds
 // INT32_MAX (2GB) byte offset on the SRD voffset path.
@@ -1368,9 +1363,9 @@ CK_TILE_DEVICE void
 async_global_load_lds_dwordxn(void* smem, const void* global_addr, bool_constant<pre_nop> = {})
 {
 #if !defined(__gfx94__) && !defined(__gfx950__)
-    static_assert(impl::global_load_lds_arch_unreachable_v<num_dwords>,
+    static_assert(always_false_v<integral_constant<unsigned, num_dwords>>,
                   "global_load_lds requires CDNA3+ (gfx940/gfx950). "
-                  "Ensure kUseGlobalLoad is false on this architecture.");
+                  "Ensure kKVLoadMode is BUFFER_LOAD on this architecture.");
 #endif
 
     static_assert(num_dwords == 1 || num_dwords == 4,

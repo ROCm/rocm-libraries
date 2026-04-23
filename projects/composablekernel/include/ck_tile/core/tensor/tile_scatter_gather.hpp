@@ -244,12 +244,15 @@ struct tile_scatter_gather
                                                  const BottomTensorIndex& window_origin,
                                                  const TileDstr& tile_distribution,
                                                  const PageIdxArray& page_idx,
-                                                 const ValidArray& valids)
+                                                 const ValidArray& valids,
+                                                 index_t page_stride_elements = 0)
         : bottom_tensor_view_{bottom_tensor_view},
           window_lengths_{window_lengths},
           window_origin_{window_origin},
           tile_dstr_{tile_distribution},
           page_idx_{page_idx},
+          physical_pages_{},
+          page_stride_elements_{page_stride_elements},
           valids_{valids},
           pre_computed_coords_{}
     {
@@ -1122,13 +1125,6 @@ struct tile_scatter_gather
         physical_pages_ = pages;
     }
 
-    CK_TILE_DEVICE void set_page_stride_elements(index_t stride)
-    {
-        static_assert(kUseGlobalLoad_,
-                      "global-load mode only; page_stride_elements_ is unused in SRD mode.");
-        page_stride_elements_ = stride;
-    }
-
     CK_TILE_DEVICE void update_valids(const ValidArray& new_valids)
     {
         if constexpr(std::is_same_v<ValidArray, std::nullptr_t> == false)
@@ -1236,9 +1232,11 @@ struct tile_scatter_gather
     // Unused in SRD mode — SRD rebase handles page addressing externally.
     PageIdxArray physical_pages_;
 
-    // Page stride in elements for global load mode.
+    // Page stride in elements for global load mode (kUseGlobalLoad=true only).
     // physical_pages_[i] * page_stride_elements_ gives the page base offset in elements.
-    index_t page_stride_elements_ = 0;
+    // Set at construction time via the make_tile_scatter_gather overload that
+    // takes bool_constant<kUseGlobalLoad>; immutable thereafter.
+    index_t page_stride_elements_;
 
     ValidArray valids_;
 
@@ -1289,7 +1287,8 @@ make_tile_scatter_gather(const TensorView_& tensor_view,
                          number<HsGatherDim>,
                          number<NumCoord>,
                          sequence<YsGatherDims...>,
-                         bool_constant<UseGlobalLoad> = {})
+                         bool_constant<UseGlobalLoad> = {},
+                         index_t page_stride_elements = 0)
 {
     return tile_scatter_gather<remove_cvref_t<TensorView_>,
                                remove_cvref_t<WindowLengths_>,
@@ -1299,8 +1298,13 @@ make_tile_scatter_gather(const TensorView_& tensor_view,
                                HsGatherDim,
                                NumCoord,
                                sequence<YsGatherDims...>,
-                               UseGlobalLoad>{
-        tensor_view, window_lengths, origin, tile_distribution, page_idx, nullptr};
+                               UseGlobalLoad>{tensor_view,
+                                              window_lengths,
+                                              origin,
+                                              tile_distribution,
+                                              page_idx,
+                                              nullptr,
+                                              page_stride_elements};
 }
 
 // Legacy overload (compatible with original API, kUseGlobalLoad=false)
@@ -1330,7 +1334,11 @@ make_tile_scatter_gather(const TensorView_& tensor_view,
         tensor_view, window_lengths, origin, tile_distribution, page_idx, nullptr};
 }
 
-// Overload with kUseGlobalLoad (simple, used by K cache)
+// Overload with kUseGlobalLoad (simple, used by K cache).
+// page_stride_elements is forwarded to the constructor; required (non-zero)
+// when UseGlobalLoad=true so that physical_pages_[i] * page_stride_elements_
+// produces a valid address. Defaulting to 0 keeps SRD-mode call sites unchanged
+// (page_stride_elements_ is unread in SRD mode).
 template <typename TensorView_,
           typename WindowLengths_,
           typename StaticTileDistribution_,
@@ -1342,7 +1350,8 @@ make_tile_scatter_gather(const TensorView_& tensor_view,
                          const multi_index<TensorView_::get_num_of_dimension()>& origin,
                          const StaticTileDistribution_& tile_distribution,
                          const StaticPageIndexArray_& page_idx,
-                         bool_constant<UseGlobalLoad>)
+                         bool_constant<UseGlobalLoad>,
+                         index_t page_stride_elements = 0)
 {
     return tile_scatter_gather<remove_cvref_t<TensorView_>,
                                remove_cvref_t<WindowLengths_>,
@@ -1352,8 +1361,13 @@ make_tile_scatter_gather(const TensorView_& tensor_view,
                                0,
                                1,
                                sequence<0>,
-                               UseGlobalLoad>{
-        tensor_view, window_lengths, origin, tile_distribution, page_idx, nullptr};
+                               UseGlobalLoad>{tensor_view,
+                                              window_lengths,
+                                              origin,
+                                              tile_distribution,
+                                              page_idx,
+                                              nullptr,
+                                              page_stride_elements};
 }
 
 template <typename TensorView,

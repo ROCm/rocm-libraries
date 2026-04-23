@@ -6,6 +6,7 @@
 #include "ck_tile/core.hpp"
 #include "ck_tile/ops/common/tensor_layout.hpp"
 #include "ck_tile/ops/fmha/block/block_attention_bias_enum.hpp"
+#include "ck_tile/ops/fmha/block/block_attention_kv_load_mode_enum.hpp"
 #include "ck_tile/ops/fmha/block/block_attention_kvcache_layout_enum.hpp"
 #include "ck_tile/ops/fmha/block/block_attention_quant_scale_enum.hpp"
 #include "ck_tile/ops/fmha/block/block_dropout.hpp"
@@ -255,13 +256,16 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSAsync
     static constexpr index_t kSubQKHeaddim  = BlockFmhaShape::kSubQKHeaddim;
     static constexpr index_t kPageBlockSize = Problem::kPageBlockSize;
     static constexpr index_t kVectorSize    = Problem::kVectorSize;
-    // Single load-mode flag for the whole pipeline: when true, K/V tiles use
-    // global_load_lds_* (handles >2GB KV cache) instead of SRD buffer_load_*.
-    // Codegen only emits kUseGlobalLoad=true arms when page_size < kN0; the
-    // static_assert is a backstop in case someone instantiates the pipeline manually.
-    static constexpr bool kUseGlobalLoad = Problem::kUseGlobalLoad;
+    // Single load-mode selector for the whole pipeline. GLOBAL_LOAD_LDS routes K/V
+    // tiles through global_load_lds_* (handles >2GB KV cache); BUFFER_LOAD uses SRD
+    // buffer_load_*. The enum is named at the trait/Problem level; internally we
+    // derive a bool helper to keep `if constexpr` sites narrow. Codegen only emits
+    // GLOBAL_LOAD_LDS arms when page_size < kN0; the static_assert is a backstop.
+    static constexpr auto kKVLoadMode = Problem::kKVLoadMode;
+    static constexpr bool kUseGlobalLoad =
+        (kKVLoadMode == BlockAttentionKVCacheLoadModeEnum::GLOBAL_LOAD_LDS);
     static_assert(!kUseGlobalLoad || (kPageBlockSize < kN0),
-                  "kUseGlobalLoad is only valid when kPageBlockSize < kN0; "
+                  "GLOBAL_LOAD_LDS load mode is only valid when kPageBlockSize < kN0; "
                   "codegen should not emit this instantiation otherwise.");
     static constexpr auto I0 = number<0>{};
     static constexpr auto I1 = number<1>{};
@@ -628,10 +632,10 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSAsync
                                                       k_dram_block_window.get_window_origin(),
                                                       k_dist,
                                                       k_offsets,
-                                                      bool_constant<kUseGlobalLoad>{});
+                                                      bool_constant<kUseGlobalLoad>{},
+                                                      page_stride_k);
         if constexpr(kUseGlobalLoad)
         {
-            k_dram_window.set_page_stride_elements(page_stride_k);
             k_dram_window.update_physical_pages(k_physical_pages);
         }
         k_dram_window.init_raw();
@@ -940,10 +944,10 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSAsync
                                      number<1>{}, // HsGatherDim
                                      number<1>{}, // NumCoord
                                      VPageIndexYDims,
-                                     bool_constant<kUseGlobalLoad>{});
+                                     bool_constant<kUseGlobalLoad>{},
+                                     page_stride_v);
         if constexpr(kUseGlobalLoad)
         {
-            v_dram_window.set_page_stride_elements(page_stride_v);
             v_dram_window.update_physical_pages(v_physical_pages);
         }
 
