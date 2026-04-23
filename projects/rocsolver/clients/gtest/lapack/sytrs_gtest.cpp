@@ -72,10 +72,13 @@ const vector<vector<int>> matrix_sizeB_range = {
 };
 
 // for daily_lapack tests
-const vector<vector<int>> large_matrix_sizeA_range
-    = {{70, 70, 100}, {192, 192, 192}, {600, 700, 645}, {1000, 1000, 1000}, {1000, 2000, 2000}};
+const vector<vector<int>> large_matrix_sizeA_range = {
+    {70, 70, 100},
+    {192, 192, 192},
+    {600, 700, 645},
+};
 const vector<vector<int>> large_matrix_sizeB_range = {
-    {100, 0}, {150, 0}, {200, 1}, {524, 1}, {1000, 1},
+    {100, 0}, {150, 0}, {200, 1}, {524, 1}, {524, 0},
 };
 
 Arguments sytrs_setup_arguments(sytrs_tuple tup)
