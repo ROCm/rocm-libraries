@@ -159,7 +159,7 @@ def runTheRockDockerBuild() {
                 // Expose values to subsequent stages via pipeline-scoped env vars.
                 env.THEROCK_CANDIDATE_IMAGE = result.image    ?: ""
                 env.THEROCK_FULL_HASH       = result.fullHash ?: ""
-                env.THEROCK_SHORT_HASH      = result.shortHash?: ""
+                env.THEROCK_SHORT_HASH      = result.shortHash ?: ""
                 // "true" means the hash is already live on :therock - Promote stage is skipped.
                 env.THEROCK_SKIP_UPDATE     = result.skip ? "true" : "false"
             }

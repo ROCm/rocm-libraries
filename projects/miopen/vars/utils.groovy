@@ -398,7 +398,7 @@ def promoteTheRockDockerImage(String hashedImage, String fullHash)
             docker push ${targetImage}
         """.stripIndent()
     }
-    echo "Promotion complete -:therock now points to TheRock hash ${fullHash}"
+    echo "Promotion complete - :therock now points to TheRock hash ${fullHash}"
 }
 
 
