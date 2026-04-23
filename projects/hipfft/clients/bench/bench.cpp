@@ -234,23 +234,19 @@ int main(int argc, char* argv[])
         std::cout << "Token: " << params.token() << std::endl;
     }
 
-    // Check free and total available memory:
-    size_t free  = 0;
-    size_t total = 0;
+    // Check available memory:
+    const auto vram_avail = device_memory_accountant::singleton().get_usable_bytes_all_devices();
 
-    if(hipMemGetInfo(&free, &total) != hipSuccess)
-        throw std::runtime_error("hipMemGetInfo failed");
-
-    const auto raw_vram_footprint
-        = params.fft_params_vram_footprint() + twiddle_table_vram_footprint(params);
-    if(!vram_fits_problem(raw_vram_footprint, free))
+    const auto io_vram_footprint = params.io_vram_footprint();
+    if(!vram_fits_problem(io_vram_footprint, vram_avail))
     {
-        std::cout << "SKIPPED: Problem size (" << raw_vram_footprint
-                  << ") raw data too large for device.\n";
+        std::cout << "SKIPPED: Problem size (" << byte_sizes_to_str(io_vram_footprint)
+                  << ") exceeds usable memory on some device (" << byte_sizes_to_str(vram_avail)
+                  << ")\n";
         return EXIT_SUCCESS;
     }
 
-    size_t vram_footprint = 0;
+    std::vector<size_t> vram_footprint;
 
     try
     {
@@ -261,10 +257,11 @@ int main(int argc, char* argv[])
         std::cout << "SKIPPED: " << e.what() << "\n";
         return EXIT_SUCCESS;
     }
-    if(!vram_fits_problem(vram_footprint, free))
+    if(!vram_fits_problem(vram_footprint, vram_avail))
     {
-        std::cout << "SKIPPED: Problem size (" << vram_footprint
-                  << ") raw data too large for device.\n";
+        std::cout << "SKIPPED: Problem size (" << byte_sizes_to_str(io_vram_footprint)
+                  << ") exceeds usable memory on some device (" << byte_sizes_to_str(vram_avail)
+                  << ")\n";
         return EXIT_SUCCESS;
     }
 
