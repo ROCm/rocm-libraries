@@ -174,17 +174,27 @@ def _generateCustomKernelSolutions(
     solutions = []
     for kernelName in customKernels:
         print1("# Processing custom kernel {}".format(kernelName))
-        solution = _getCustomKernelSolutionObj(kernelName, internalSupportParams, assembler, debugConfig, isaInfoMap)
+        try:
+            solution = _getCustomKernelSolutionObj(kernelName, internalSupportParams, assembler, debugConfig, isaInfoMap)
+        except (RuntimeError, KeyError, TypeError) as e:
+            printWarning(f"Skipping custom kernel '{kernelName}': missing or invalid custom.config ({e})")
+            continue
         # The ActivationType setting in YAML is meaningless in customKernel case.
         # Therefore, we override the customKernel setting with the ActivationType value from ProblemType to avoid false alarms during subsequent problemType checks.
         solution["ProblemType"]["ActivationType"] = problemType["ActivationType"]
         if solution["ProblemType"] != problemType:
             # Raise error if this kernel was specifically requested and problem type doesn't match
             if failOnMismatch:
-                benchmarkSet = set([(k,tuple(v)) if type(v) is list else (k,v) \
-                        for k,v in problemType.items()])
-                customSet = set([(k,tuple(v)) if type(v) is list else (k,v) \
-                        for k,v in solution["ProblemType"].items()])
+                def _hashable(k, v):
+                    if isinstance(v, list):
+                        return (k, tuple(v))
+                    try:
+                        hash(v)
+                        return (k, v)
+                    except TypeError:
+                        return (k, repr(v))
+                benchmarkSet = set([_hashable(k, v) for k, v in problemType.items()])
+                customSet = set([_hashable(k, v) for k, v in solution["ProblemType"].items()])
 
                 msg = "The problem type in the config file does not match " \
                         "that of the custom kernel, {}.".format(kernelName) \

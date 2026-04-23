@@ -177370,6 +177370,53 @@ __hip_cuid_189e97bb64f986de:
 	.addrsig_sym __hip_cuid_189e97bb64f986de
 	.amdgpu_metadata
 ---
+custom.config:
+  Source:
+    Origin: composable_kernel
+    Repository: https://github.com/ROCm/composable_kernel
+  Version: 1.0.0
+  Features:
+    SupportsUserArgs: false
+    SupportsBias: false
+    SupportsActivation: false
+    SupportsScaleAlpha: false
+    SupportsGSU: false
+  InternalSupportParams:
+    KernArgsVersion: 0
+  ProblemType:
+    OperationType: GEMM
+    DataType: h
+    DestDataType: h
+    ComputeDataType: s
+    HighPrecisionAccumulate: True
+    TransposeA: 1
+    TransposeB: 0
+    UseBeta: True
+    Batched: True
+  CustomKernel:
+    args: [ { type: address, semantic: AddressB },
+            { type: address, semantic: AddressA },
+            { type: address, semantic: AddressD },
+            { type: address, semantic: AddressD },
+            { type: uint32, semantic: SizeFree1 },
+            { type: uint32, semantic: SizeFree0 },
+            { type: uint32, semantic: SizeSum },
+            { type: uint32, semantic: StrideB0 },
+            { type: uint32, semantic: StrideA0 },
+            { type: uint32, semantic: StrideD0 },
+            { type: uint32, semantic: StrideD0 },
+            { type: uint32, semantic: SizeFree2 },
+            { type: uint32, semantic: Padding },
+            { type: uint32, semantic: Padding },
+            { type: uint32, semantic: Padding },
+            { type: uint32, semantic: Padding },
+            { type: uint32, semantic: Padding },
+            { type: uint32, semantic: Padding } ]
+    macrotile: [256, 256, 64]
+    threads: [256, 1, 1]
+    grid: [TilesXYBatch, One, One]
+  MatrixInstruction: [16, 16, 16, 1]
+  WavefrontSize: 64
 amdhsa.kernels:
   - .agpr_count:     0
     .args:           []

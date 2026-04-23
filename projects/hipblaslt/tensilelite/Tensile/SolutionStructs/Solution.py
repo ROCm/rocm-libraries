@@ -1173,7 +1173,30 @@ class Solution(collections.abc.Mapping):
     if state["ProblemType"]["UseBias"] and state["ProblemType"]["Gradient"]:
       state["_WorkspaceSizePerElemBias"] = ck.get("workspaceSizePerElemBias", 0)
 
-    state["MIWaveGroup"] = [0, 0]
+    mi = state.get("MatrixInstruction", [])
+    state.setdefault("EnableMatrixInstruction", isinstance(mi, list) and len(mi) >= 4)
+
+    if state["EnableMatrixInstruction"]:
+      wavefrontSize = state.get("WavefrontSize", 64)
+      numWaves = max(1, state["NumThreads"] // wavefrontSize)
+      if "MIWaveTile" not in state:
+        miM, miN = mi[0], mi[1]
+        wgM = int(numWaves ** 0.5)
+        while wgM > 0 and numWaves % wgM != 0:
+          wgM -= 1
+        wgN = numWaves // max(1, wgM)
+        state["MIWaveTile"] = [max(1, state["MacroTile0"] // (miM * wgM)),
+                               max(1, state["MacroTile1"] // (miN * wgN))]
+      if "MIWaveGroup" not in state or state["MIWaveGroup"] == [0, 0]:
+        wgM = int(numWaves ** 0.5)
+        while wgM > 0 and numWaves % wgM != 0:
+          wgM -= 1
+        state["MIWaveGroup"] = [max(1, wgM), numWaves // max(1, wgM)]
+    else:
+      state.setdefault("MIWaveTile", [0, 0])
+      state["MIWaveGroup"] = [0, 0]
+
+    # state["LocalSplitU"] = state["WorkGroup"][2]
     state["LocalSplitU"] = 1
     state["GlobalReadVectorWidthA"] = 1
     state["GlobalReadVectorWidthB"] = 1

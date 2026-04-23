@@ -9,14 +9,10 @@ GlobalParameters:
   DataInitTypeAlpha: 1
   DataInitTypeA: 3
   DataInitTypeB: 3
-  NewClient: 2
   CSVExportWinner: 1
   CSVMergeSameProblemID: 1
   Device: 0
-  PrintSolutionRejectionReason: True
-  ValidateManifests: True
-  DeviceLDS: 163840
-  MaxLDS: 163840
+  ValidateMetadata: True
 
 BenchmarkProblems:
   -
@@ -34,70 +30,13 @@ BenchmarkProblems:
       Activation: False
       UseScaleAlphaVec: 0
 
-    - # BenchmarkProblemSizeGroup - Standard - All problem
+    -
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
+      CustomKernels:
+        ["_ZN5aiter24bf16gemm_bf16_tn_256x256E"]
       ForkParameters:
-        - CustomKernel:
-          - name: "_ZN5aiter24bf16gemm_bf16_tn_256x256E"
-            args: [ { type: address, semantic: AddressD,      padding: 8  },
-                    { type: address, semantic: AddressC,      padding: 8  },
-                    { type: address, semantic: AddressB,      padding: 8  },
-                    { type: address, semantic: AddressA,      padding: 8  },
-                    { type: float32, semantic: Alpha,         padding: 12 },
-                    { type: float32, semantic: Beta,          padding: 12 },
-                    { type: uint32,  semantic: StrideD0Bytes, padding: 12 },
-                    { type: uint32,  semantic: StrideD1,      padding: 12 },
-                    { type: uint32,  semantic: StrideC0Bytes, padding: 12 },
-                    { type: uint32,  semantic: StrideC1,      padding: 12 },
-                    { type: uint32,  semantic: StrideB0Bytes, padding: 12 },
-                    { type: uint32,  semantic: StrideB1,      padding: 12 },
-                    { type: uint32,  semantic: StrideA0Bytes, padding: 12 },
-                    { type: uint32,  semantic: StrideA1,      padding: 12 },
-                    { type: uint32,  semantic: SizeFree1,     padding: 12 },
-                    { type: uint32,  semantic: SizeFree0,     padding: 12 },
-                    { type: uint32,  semantic: SizeSum,       padding: 12 },
-                    { type: uint32,  semantic: SplitK,        padding: 12 },
-                    { type: uint32,  semantic: OutputBF16,    padding: 12 } ]
-            macrotile: [256, 256, 64]
-            padProblemSizeToTile: [true, true] # M, N
-            threads: [256, 1, 1]
-            grid: [TilesX, TilesY, One]
-        - MatrixInstruction:
-          - [16,16,32,1, 1, 8,8, 2,2] # 256 x 256
-        - PreloadKernArgs: [False]
-        - DepthU: [64]
-        - VectorWidthA: [-1]
-        - VectorWidthB: [-1]
-        - GlobalReadVectorWidthA: [-1]
-        - GlobalReadVectorWidthB: [-1]
-        - LocalReadVectorWidth: [-1]
-        - TransposeLDS: [-1]
-        - LdsBlockSizePerPadA: [-1]
-        - LdsBlockSizePerPadB: [-1]
-        - LdsPadA: [-1]
-        - LdsPadB: [-1]
-        - StaggerU: [16]
-        - StaggerUStride: [-1]
-        - WorkGroupMapping: [1]
-        - StaggerUMapping: [0]
-        - 1LDSBuffer: [-1]
-        - WorkGroupMappingXCC: [8]
-        - WorkGroupMappingXCCGroup: [-1]
-        - GlobalSplitU: [1]
-        - GlobalSplitUAlgorithm: ["MultipleBuffer"]
-        - GlobalReadPerMfma: [1]
-        - LocalWritePerMfma: [-1]
-        - StoreRemapVectorWidth: [0]
-        - StoreVectorWidth: [-1]
-        - SourceSwap: [1]
-        - NumElementsPerBatchStore: [16]
-        - ClusterLocalRead: [1]
-        - NonTemporalA: [0]
-        - NonTemporalB: [0]
-        - DirectToVgprA: [1]
-        - DirectToVgprB: [0]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:

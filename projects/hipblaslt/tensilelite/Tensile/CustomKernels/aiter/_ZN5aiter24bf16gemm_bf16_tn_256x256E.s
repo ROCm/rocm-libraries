@@ -2203,6 +2203,58 @@ label_0EFC:
 // ===== AMDGPU Metadata =====
 .amdgpu_metadata
 ---
+custom.config:
+  Source:
+    Origin: aiter
+  Version: 1.0.0
+  Features:
+    SupportsUserArgs: false
+    SupportsBias: false
+    SupportsActivation: false
+    SupportsScaleAlpha: false
+    SupportsGSU: false
+  InternalSupportParams:
+    KernArgsVersion: 0
+  ProblemType:
+    OperationType: GEMM
+    DataType: b
+    DestDataType: b
+    ComputeDataType: s
+    HighPrecisionAccumulate: True
+    TransposeA: 1
+    TransposeB: 0
+    UseBeta: True
+    Batched: True
+    UseBias: 0
+    Activation: False
+    UseScaleAlphaVec: 0
+  CustomKernel:
+    args: [ { type: address, semantic: AddressD,      padding: 8  },
+            { type: address, semantic: AddressC,      padding: 8  },
+            { type: address, semantic: AddressB,      padding: 8  },
+            { type: address, semantic: AddressA,      padding: 8  },
+            { type: float32, semantic: Alpha,         padding: 12 },
+            { type: float32, semantic: Beta,          padding: 12 },
+            { type: uint32,  semantic: StrideD0Bytes, padding: 12 },
+            { type: uint32,  semantic: StrideD1,      padding: 12 },
+            { type: uint32,  semantic: StrideC0Bytes, padding: 12 },
+            { type: uint32,  semantic: StrideC1,      padding: 12 },
+            { type: uint32,  semantic: StrideB0Bytes, padding: 12 },
+            { type: uint32,  semantic: StrideB1,      padding: 12 },
+            { type: uint32,  semantic: StrideA0Bytes, padding: 12 },
+            { type: uint32,  semantic: StrideA1,      padding: 12 },
+            { type: uint32,  semantic: SizeFree1,     padding: 12 },
+            { type: uint32,  semantic: SizeFree0,     padding: 12 },
+            { type: uint32,  semantic: SizeSum,       padding: 12 },
+            { type: uint32,  semantic: SplitK,        padding: 12 },
+            { type: uint32,  semantic: OutputBF16,    padding: 12 } ]
+    macrotile: [256, 256, 64]
+    threads: [256, 1, 1]
+    grid: [TilesX, TilesY, One]
+  MatrixInstruction: [16, 16, 32, 1]
+  EnableMatrixInstruction: True
+  MIWaveTile: [8, 8]
+  WavefrontSize: 64
 amdhsa.kernels:
   - .args:
       - .actual_access:  read_write

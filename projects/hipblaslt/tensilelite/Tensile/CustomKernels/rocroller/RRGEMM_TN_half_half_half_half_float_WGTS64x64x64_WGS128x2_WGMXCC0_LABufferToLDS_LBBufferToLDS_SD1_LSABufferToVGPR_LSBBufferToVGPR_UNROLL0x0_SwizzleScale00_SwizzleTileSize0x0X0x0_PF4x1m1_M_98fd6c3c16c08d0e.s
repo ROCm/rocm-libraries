@@ -80508,6 +80508,55 @@ s_endpgm  // End of RRGEMM_TN_half_half_half_half_float_WGTS64x64x64_WGS128x2_WG
 
 .amdgpu_metadata
 ---
+custom.config:
+  Source:
+    Origin: rocroller
+    Repository: https://github.com/ROCm/rocroller
+  Version: 1.0.0
+  Features:
+    SupportsUserArgs: false
+    SupportsBias: false
+    SupportsActivation: false
+    SupportsScaleAlpha: false
+    SupportsGSU: false
+  InternalSupportParams:
+    KernArgsVersion: 0
+  ProblemType:
+    OperationType: GEMM
+    DataType: h
+    DestDataType: h
+    ComputeDataType: s
+    HighPrecisionAccumulate: True
+    TransposeA: 1
+    TransposeB: 0
+    UseBeta: True
+    Batched: True
+    UseBias: 0
+    Activation: False
+    UseScaleAlphaVec: 0
+  CustomKernel:
+    args: [ { type: int64, semantic: StrideA1 },
+            { type: address, semantic: AddressA },
+            { type: int64, semantic: StrideB1 },
+            { type: address, semantic: AddressB },
+            { type: int64, semantic: StrideC1 },
+            { type: address, semantic: AddressC },
+            { type: float32, semantic: Alpha },
+            { type: float32, semantic: Beta },
+            { type: int64, semantic: StrideA0 },
+            { type: int64, semantic: SizeSum },
+            { type: int64, semantic: StrideB0 },
+            { type: int64, semantic: StrideC0 },
+            { type: int64, semantic: StrideD0 },
+            { type: int64, semantic: StrideD1 },
+            { type: address, semantic: AddressD } ]
+    macrotile: [64, 64, 64]
+    threads: [256, 1, 1]
+    grid: [TilesX, TilesY, Batch]
+  MatrixInstruction: [16, 16, 16, 1]
+  EnableMatrixInstruction: True
+  MIWaveTile: [2, 2]
+  WavefrontSize: 64
 amdhsa.version: [1, 2]
 amdhsa.kernels:
   - .name: RRGEMM_TN_half_half_half_half_float_WGTS64x64x64_WGS128x2_WGMXCC0_LABufferToLDS_LBBufferToLDS_SD1_LSABufferToVGPR_LSBBufferToVGPR_UNROLL0x0_SwizzleScale00_SwizzleTileSize0x0X0x0_PF4x1m1_M_98fd6c3c16c08d0e

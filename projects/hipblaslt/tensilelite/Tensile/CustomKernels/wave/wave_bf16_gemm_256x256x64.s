@@ -1930,6 +1930,48 @@ wave_bf16_gemm_256x256x64:
 	.section	".note.GNU-stack","",@progbits
 	.amdgpu_metadata
 ---
+custom.config:
+  Source:
+    Origin: wave
+  Version: 1.0.0
+  Features:
+    SupportsUserArgs: false
+    SupportsBias: false
+    SupportsActivation: false
+    SupportsScaleAlpha: false
+    SupportsGSU: false
+  InternalSupportParams:
+    KernArgsVersion: 0
+  ProblemType:
+    OperationType: GEMM
+    DataType: b
+    DestDataType: s
+    ComputeDataType: s
+    HighPrecisionAccumulate: True
+    TransposeA: 1
+    TransposeB: 0
+    UseBeta: True
+    Batched: True
+    UseBias: 0
+    Activation: False
+    UseScaleAlphaVec: 0
+  CustomKernel:
+    args: [ { type: address, semantic: AddressB },
+            { type: address, semantic: AddressA },
+            { type: address, semantic: AddressD },
+            { type: uint32,  semantic: SizeFree1 },
+            { type: uint32,  semantic: Padding },
+            { type: uint32,  semantic: SizeFree0 },
+            { type: uint32,  semantic: Padding },
+            { type: uint32,  semantic: SizeSum },
+            { type: uint32,  semantic: Padding } ]
+    macrotile: [256, 256, 64]
+    threads: [256, 4, 1]
+    grid: [TilesY, TilesX, One]
+  MatrixInstruction: [16, 16, 32, 1]
+  EnableMatrixInstruction: True
+  MIWaveTile: [4, 4]
+  WavefrontSize: 64
 amdhsa.kernels:
   - .agpr_count:     0
     .args:

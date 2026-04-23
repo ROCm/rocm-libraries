@@ -27,7 +27,7 @@ from pprint import pformat
 from pathlib import Path
 from typing import Dict, Tuple
 
-from Tensile.Common import print1, IsaVersion, IsaInfo
+from Tensile.Common import print1, printWarning, IsaVersion, IsaInfo
 from Tensile.SolutionStructs.Validators.MatrixInstruction import matrixInstructionToMIParameters
 
 from Tensile.CustomKernels import isCustomKernelConfig, getCustomKernelConfig
@@ -54,7 +54,11 @@ def handleCustomKernel(sol: dict, isaInfoMap: Dict[IsaVersion, IsaInfo]) -> Tupl
     else:
         name = sol.get("CustomKernelName", "")
     dir = CUSTOM_KERNEL_PATH
-    config = getCustomKernelConfig(name, {}, dir)
+    try:
+        config = getCustomKernelConfig(name, {}, dir)
+    except (RuntimeError, KeyError, TypeError) as e:
+        printWarning(f"Skipping custom kernel '{name}': missing or invalid custom.config ({e})")
+        return sol, False
     sol.update(config)
 
     mi = sol["MatrixInstruction"]

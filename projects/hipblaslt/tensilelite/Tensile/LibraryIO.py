@@ -409,7 +409,12 @@ def parseLibraryLogicData(
             isp = {}
             if "InternalSupportParams" in solutionState:
                 isp = solutionState["InternalSupportParams"]
-            customConfig = getCustomKernelConfig(customKernelName, isp)
+            try:
+                customConfig = getCustomKernelConfig(customKernelName, isp)
+            except (RuntimeError, KeyError, TypeError) as e:
+                printWarning(f"Skipping custom kernel '{customKernelName}': "
+                             f"missing or invalid custom.config ({e})")
+                return None
             for key, value in customConfig.items():
                 solutionState[key] = value
 
@@ -445,7 +450,7 @@ def parseLibraryLogicData(
         return solutionObject
 
     resetTypeMismatchCollector()
-    solutions = [solutionStateToSolution(solutionState, assembler, isaInfoMap) for solutionState in data["Solutions"]]
+    solutions = [s for s in (solutionStateToSolution(solutionState, assembler, isaInfoMap) for solutionState in data["Solutions"]) if s is not None]
     typeMismatches = getTypeMismatchCollector()
 
     newLibrary, _ = SolutionLibrary.MasterSolutionLibrary.FromOriginalState(

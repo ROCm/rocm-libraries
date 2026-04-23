@@ -22,102 +22,52 @@
 #
 ################################################################################
 
-"""CI enforcement script for kernel manifest validation.
+"""CI enforcement script for custom kernel metadata validation.
 
-Validates that all custom kernel directories have a manifest.yaml and that
-every kernel's ContentHash matches its .s file on disk.
+Validates that all custom kernel .s files contain a custom.config block
+inside their .amdgpu_metadata YAML section.
 
 Exit codes:
     0 - All kernels pass validation
     1 - One or more validation failures
 
 Usage:
-    python -m Tensile.ValidateManifests [--strict] [--custom-kernels-root DIR]
+    python -m Tensile.ValidateMetadata [--strict] [--custom-kernels-root DIR]
 
-    --strict    Treat missing manifests as errors (Phase 4 enforcement).
-                Without --strict, missing manifests produce warnings only.
+    --strict    Treat missing custom.config as errors.
+                Without --strict, missing metadata produces warnings only.
 """
 
 import argparse
 import os
 import sys
 
-from Tensile.CustomKernels import (
-    readManifest,
-    computeContentHash,
-    MANIFEST_FILENAME,
-)
+from Tensile.CustomKernels import validateCustomKernelMetadata
 
 
 def validate_directory(directory, strict=False):
-    """Validates all kernels in a directory against its manifest.
+    """Validates all kernels in a directory for embedded metadata.
 
     Returns (errors, warnings) as lists of message strings.
     """
     errors = []
     warnings = []
 
-    manifest = None
-    try:
-        manifest = readManifest(directory)
-    except RuntimeError as e:
-        errors.append(f"{directory}: {e}")
-        return errors, warnings
-
     s_files = sorted(f for f in os.listdir(directory) if f.endswith(".s"))
     if not s_files:
         return errors, warnings
 
-    if manifest is None:
-        msg = f"{directory}: no {MANIFEST_FILENAME} found ({len(s_files)} kernel(s))"
-        if strict:
-            errors.append(msg)
-        else:
-            warnings.append(msg)
-        return errors, warnings
-
-    kernels = manifest.get("Kernels", {})
-
     for fname in s_files:
         name = fname[:-2]
-        filepath = os.path.join(directory, fname)
 
-        if name not in kernels:
-            msg = f"{directory}: kernel '{name}' not listed in manifest"
+        valid, msg = validateCustomKernelMetadata(name, directory)
+        if not valid:
             if strict:
-                errors.append(msg)
+                errors.append(f"{directory}: {msg}")
             else:
-                warnings.append(msg)
-            continue
-
-        entry = kernels[name]
-        expected_hash = entry.get("ContentHash")
-        if not expected_hash:
-            errors.append(f"{directory}: kernel '{name}' has no ContentHash in manifest")
-            continue
-
-        actual_hash = _compute_hash_for_file(filepath)
-        if actual_hash != expected_hash:
-            errors.append(
-                f"{directory}: kernel '{name}' content hash mismatch "
-                f"(manifest={expected_hash}, actual={actual_hash})"
-            )
-
-    for name in kernels:
-        s_path = os.path.join(directory, name + ".s")
-        if not os.path.isfile(s_path):
-            warnings.append(f"{directory}: manifest lists '{name}' but no .s file found")
+                warnings.append(f"{directory}: {msg}")
 
     return errors, warnings
-
-
-def _compute_hash_for_file(filepath):
-    import hashlib
-    h = hashlib.sha256()
-    with open(filepath, "rb") as f:
-        for chunk in iter(lambda: f.read(8192), b""):
-            h.update(chunk)
-    return "sha256:" + h.hexdigest()
 
 
 def validate_all(root, strict=False):
@@ -142,12 +92,12 @@ def validate_all(root, strict=False):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Validate custom kernel manifests for CI enforcement"
+        description="Validate custom kernel embedded metadata for CI enforcement"
     )
     parser.add_argument(
         "--strict",
         action="store_true",
-        help="Treat missing manifests as errors (Phase 4 enforcement)",
+        help="Treat missing metadata as errors",
     )
     parser.add_argument(
         "--custom-kernels-root",
