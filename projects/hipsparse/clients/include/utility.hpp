@@ -7314,12 +7314,31 @@ hipsparseIndexType_t getIndexType()
 template <typename T>
 hipDataType getDataType()
 {
-    return (typeid(T) == typeid(int8_t)) ? HIP_R_8I
-           : (typeid(T) == typeid(float))
-               ? HIP_R_32F
-               : ((typeid(T) == typeid(double))
-                      ? HIP_R_64F
-                      : ((typeid(T) == typeid(hipComplex) ? HIP_C_32F : HIP_C_64F)));
+    if(typeid(T) == typeid(int8_t))
+    {
+        return HIP_R_8I;
+    }
+    if(typeid(T) == typeid(hipsparseFloat16))
+    {
+        return HIP_R_16F;
+    }
+    if(typeid(T) == typeid(hipsparseBfloat16))
+    {
+        return HIP_R_16BF;
+    }
+    if(typeid(T) == typeid(float))
+    {
+        return HIP_R_32F;
+    }
+    if(typeid(T) == typeid(double))
+    {
+        return HIP_R_64F;
+    }
+    if(typeid(T) == typeid(hipComplex))
+    {
+        return HIP_C_32F;
+    }
+    return HIP_C_64F;
 }
 
 /* ============================================================================================ */
