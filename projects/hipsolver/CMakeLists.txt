@@ -81,7 +81,7 @@ option(BUILD_HIPSPARSE_TESTS "Build additional tests to cover sparse functionali
 # BUILD_SHARED_LIBS is a cmake built-in; we make it an explicit option such that it shows in cmake-gui
 option(BUILD_WITH_SPARSE "Build hipSOLVER with sparse functionality available at build time (requires installed dependencies)" OFF)
 option(BUILD_VERBOSE "Output additional build information" OFF)
-option(HIPSOLVER_FIND_PACKAGE_LAPACK_CONFIG "Skip module mode search for LAPACK" OFF)
+option(HIPSOLVER_FIND_PACKAGE_LAPACK_CONFIG "Skip module mode search for LAPACK" ON)
 option(BUILD_FORTRAN_BINDINGS "Build the Fortran bindings" "${UNIX}")
 
 if(NOT BUILD_SHARED_LIBS)
