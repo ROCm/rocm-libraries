@@ -124,6 +124,7 @@ class ABMatrixInfo(MatrixInfo):
   useDirect32XEmulationNext: bool = False
   numVgprEmu: int                = -1
   startVgprCvt: int              = -1
+  tmpVgprCvtSub: int             = -1  # per-tensor temp VGPR for XF32 cvt+sub residual
 
   gNLCPermBlock: int             = -1
   gNLCPerpStride: int            = -1
@@ -7987,6 +7988,15 @@ class KernelWriter(metaclass=abc.ABCMeta):
         self.states.startVgprSKConsts = vgprIdx
         self.states.numVgprSKConsts = numSKConsts
         vgprIdx += numSKConsts
+
+      # Per-tensor temp VGPRs for XF32 cvt+sub residual computation.
+      # A and B each get a dedicated temp so that _interleavePackAB can
+      # safely interleave their residual sequences without clobbering.
+      if kernel["UseF32XEmulation"] and not kernel["UseMFMAF32XEmulation"] and not kernel["UseDot2F32XEmulation"]:
+        self.states.a.tmpVgprCvtSub = vgprIdx
+        vgprIdx += 1
+        self.states.b.tmpVgprCvtSub = vgprIdx
+        vgprIdx += 1
 
       # TODO: Serial is always the first/last register in the pool so the store
       # code doesn't have to deal with fragmentation
