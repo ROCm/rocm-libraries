@@ -175,7 +175,7 @@ void testing_axpyi(const Arguments& argus)
         gpu_time_used = (get_time_us() - gpu_time_used) / number_hot_calls;
 
         double gflop_count = axpyi_gflop_count(nnz);
-        double gbyte_count = axpby_gbyte_count<T>(nnz);
+        double gbyte_count = axpyi_gbyte_count<T>(nnz);
 
         double gpu_gbyte  = get_gpu_gbyte(gpu_time_used, gbyte_count);
         double gpu_gflops = get_gpu_gflops(gpu_time_used, gflop_count);

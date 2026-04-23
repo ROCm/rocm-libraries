@@ -42,6 +42,7 @@ Datatypes:
         u8_r:  8
         i32_r: 10
         u32_r: 12
+        bf16_r: 14
   - { single: f32_r, double: f64_r }
   - { single complex: f32_c, double complex: f64_c }
   - hipsparseOperation_t:
@@ -213,6 +214,10 @@ Real precisions: &real_precisions
     { a_type: f64_r, b_type: f64_r, c_type: f64_r, x_type: f64_r, y_type: f64_r, compute_type: f64_r }
   - &float32_float64_float64_float64
     { a_type: f32_r, x_type: f64_r, y_type: f64_r, compute_type: f64_r }
+  - &float16_float32_axpby_precision
+    { x_type: f16_r, y_type: f16_r, compute_type: f32_r }
+  - &bfloat16_float32_axpby_precision
+    { x_type: bf16_r, y_type: bf16_r, compute_type: f32_r }
 
 Complex precisions: &complex_precisions
   - &float32_cmplx32_cmplx32_cmplx32_axyt_precision
@@ -260,6 +265,18 @@ C precisions complex and real: &double_only_precisions_complex_real
   - *double_precision
   - *double_precision_complex
 
+C precisions axpby mixed: &axpby_mixed_precisions
+  - *float16_float32_axpby_precision
+  - *bfloat16_float32_axpby_precision
+
+C precisions axpby all: &axpby_all_precisions
+  - *single_precision
+  - *double_precision
+  - *single_precision_complex
+  - *double_precision_complex
+  - *float16_float32_axpby_precision
+  - *bfloat16_float32_axpby_precision
+
 
 
 # The Arguments struct passed directly to C++. See hipsparse_arguments.hpp.
@@ -283,6 +300,8 @@ Arguments:
   - index_type_I: hipsparseIndexType_t
   - index_type_J: hipsparseIndexType_t
   - compute_type: hipDataType
+  - x_type: hipDataType
+  - y_type: hipDataType
   - alpha: c_double
   - alphai: c_double
   - beta: c_double
@@ -390,6 +409,8 @@ Defaults:
   index_type_I: i32
   index_type_J: i32
   compute_type: f32_r
+  x_type: f32_r
+  y_type: f32_r
   alpha: 1.0
   alphai: 0.0
   beta: 0.0

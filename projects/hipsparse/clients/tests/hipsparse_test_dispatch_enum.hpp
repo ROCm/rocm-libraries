@@ -29,6 +29,7 @@ struct hipsparse_test_dispatch_enum
     {
         t,
         it,
-        ijt
+        ijt,
+        axpby
     } value_type;
 };

@@ -65,6 +65,50 @@ void unit_check_general(int64_t M, int64_t N, int64_t lda, int8_t* hCPU, int8_t*
 }
 
 template <>
+void unit_check_general(
+    int64_t M, int64_t N, int64_t lda, hipsparseFloat16* hCPU, hipsparseFloat16* hGPU)
+{
+    // fp16 has ~1e-3 precision; use a relaxed tolerance driven by the
+    // reference magnitude, plus an absolute floor for near-zero values.
+    for(int64_t j = 0; j < N; j++)
+    {
+        for(int64_t i = 0; i < M; i++)
+        {
+            float cpu         = static_cast<float>(hCPU[i + j * lda]);
+            float gpu         = static_cast<float>(hGPU[i + j * lda]);
+            float compare_val = std::max(std::abs(cpu * 1e-2f), 1e-3f);
+#ifdef GOOGLE_TEST
+            ASSERT_NEAR(cpu, gpu, compare_val);
+#else
+            assert(std::abs(cpu - gpu) < compare_val);
+#endif
+        }
+    }
+}
+
+template <>
+void unit_check_general(
+    int64_t M, int64_t N, int64_t lda, hipsparseBfloat16* hCPU, hipsparseBfloat16* hGPU)
+{
+    // bf16 has only 7 bits of mantissa; use a relaxed tolerance driven by the
+    // reference magnitude, plus an absolute floor for near-zero values.
+    for(int64_t j = 0; j < N; j++)
+    {
+        for(int64_t i = 0; i < M; i++)
+        {
+            float cpu         = static_cast<float>(hCPU[i + j * lda]);
+            float gpu         = static_cast<float>(hGPU[i + j * lda]);
+            float compare_val = std::max(std::abs(cpu * 1e-1f), 1e-2f);
+#ifdef GOOGLE_TEST
+            ASSERT_NEAR(cpu, gpu, compare_val);
+#else
+            assert(std::abs(cpu - gpu) < compare_val);
+#endif
+        }
+    }
+}
+
+template <>
 void unit_check_general(int64_t M, int64_t N, int64_t lda, float* hCPU, float* hGPU)
 {
     for(int64_t j = 0; j < N; j++)

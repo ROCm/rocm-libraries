@@ -45,6 +45,10 @@ constexpr auto hipsparse_datatype2string(hipDataType type)
 {
     switch(type)
     {
+    case HIP_R_16F:
+        return "f16_r";
+    case HIP_R_16BF:
+        return "bf16_r";
     case HIP_R_32F:
         return "f32_r";
     case HIP_R_64F:
