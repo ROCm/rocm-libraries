@@ -80,12 +80,28 @@ const auto& GetTestParams()
     return params;
 }
 
+// FP32 kernels are available on gfx942/gfx950 only
+const auto& GetTestParamsFP32()
+{
+    static const auto params = [] {
+        auto p = miopen::unit_tests::UnitTestConvSolverParams(Gpu::gfx94X | Gpu::gfx950);
+        p.CheckXnackDisabled();
+        return p;
+    }();
+    return params;
+}
+
 } // namespace
 
 using GPU_UnitTestConvSolverWinoRage2x3Fwd_FP16 = GPU_UnitTestConvSolverFwd_FP16;
 using GPU_UnitTestConvSolverWinoRage2x3Bwd_FP16 = GPU_UnitTestConvSolverBwd_FP16;
 using GPU_UnitTestConvSolverWinoRage2x3Wrw_FP16 = GPU_UnitTestConvSolverWrw_FP16;
 using CPU_UnitTestConvSolverWinoRage2x3DevApplicabilityFwd_NONE =
+    CPU_UnitTestConvSolverDevApplicabilityFwd_NONE;
+using GPU_UnitTestConvSolverWinoRage2x3Fwd_FP32 = GPU_UnitTestConvSolverFwd_FP32;
+using GPU_UnitTestConvSolverWinoRage2x3Bwd_FP32 = GPU_UnitTestConvSolverBwd_FP32;
+using GPU_UnitTestConvSolverWinoRage2x3Wrw_FP32 = GPU_UnitTestConvSolverWrw_FP32;
+using CPU_UnitTestConvSolverWinoRage2x3DevApplicabilityFwd_FP32 =
     CPU_UnitTestConvSolverDevApplicabilityFwd_NONE;
 
 TEST_P(GPU_UnitTestConvSolverWinoRage2x3Fwd_FP16, ConvWinoRageRxSf2x3)
@@ -104,6 +120,26 @@ TEST_P(GPU_UnitTestConvSolverWinoRage2x3Wrw_FP16, ConvWinoRageRxSf2x3)
 };
 
 TEST_P(CPU_UnitTestConvSolverWinoRage2x3DevApplicabilityFwd_NONE, ConvWinoRageRxSf2x3)
+{
+    this->RunTest(miopen::solver::conv::ConvWinoRageRxS<2, 3>{});
+};
+
+TEST_P(GPU_UnitTestConvSolverWinoRage2x3Fwd_FP32, ConvWinoRageRxSf2x3)
+{
+    this->RunTest(miopen::solver::conv::ConvWinoRageRxS<2, 3>{});
+};
+
+TEST_P(GPU_UnitTestConvSolverWinoRage2x3Bwd_FP32, ConvWinoRageRxSf2x3)
+{
+    this->RunTest(miopen::solver::conv::ConvWinoRageRxS<2, 3>{});
+};
+
+TEST_P(GPU_UnitTestConvSolverWinoRage2x3Wrw_FP32, ConvWinoRageRxSf2x3)
+{
+    this->RunTest(miopen::solver::conv::ConvWinoRageRxS<2, 3>{});
+};
+
+TEST_P(CPU_UnitTestConvSolverWinoRage2x3DevApplicabilityFwd_FP32, ConvWinoRageRxSf2x3)
 {
     this->RunTest(miopen::solver::conv::ConvWinoRageRxS<2, 3>{});
 };
@@ -127,11 +163,34 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                                           testing::Values(miopenConvolutionAlgoWinograd),
                                           testing::ValuesIn(GetConvTestCasesWrw(miopenHalf))));
 
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_UnitTestConvSolverWinoRage2x3Fwd_FP32,
+                         testing::Combine(testing::Values(GetTestParamsFP32()),
+                                          testing::Values(miopenConvolutionAlgoWinograd),
+                                          testing::ValuesIn(GetConvTestCases(miopenFloat))));
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_UnitTestConvSolverWinoRage2x3Bwd_FP32,
+                         testing::Combine(testing::Values(GetTestParamsFP32()),
+                                          testing::Values(miopenConvolutionAlgoWinograd),
+                                          testing::ValuesIn(GetConvTestCases(miopenFloat))));
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_UnitTestConvSolverWinoRage2x3Wrw_FP32,
+                         testing::Combine(testing::Values(GetTestParamsFP32()),
+                                          testing::Values(miopenConvolutionAlgoWinograd),
+                                          testing::ValuesIn(GetConvTestCasesWrw(miopenFloat))));
+
 // Device applicability test
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          CPU_UnitTestConvSolverWinoRage2x3DevApplicabilityFwd_NONE,
                          testing::Combine(testing::Values(GetTestParams()),
                                           testing::Values(GetConvTestCases(miopenHalf)[0])));
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         CPU_UnitTestConvSolverWinoRage2x3DevApplicabilityFwd_FP32,
+                         testing::Combine(testing::Values(GetTestParamsFP32()),
+                                          testing::Values(GetConvTestCases(miopenFloat)[0])));
 
 // =====================================================================
 // TransposedConvWinoRageRxS (NHWC layout)
