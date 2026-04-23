@@ -600,6 +600,108 @@ def detect_pack_groups(idmap_items: list) -> list[dict]:
     return groups
 
 
+# --- Register Utilities for rocisa-based dependency analysis ---
+
+def _parse_reg_name(reg_name_str: str) -> tuple[str, int]:
+    """Parse a register name string like 'ValuA_X0_I0+12' into (base_name, offset).
+
+    Returns:
+        Tuple of (base_name, offset). If no '+' offset, offset is 0.
+        E.g. 'ValuA_X0_I0+12' → ('ValuA_X0_I0', 12)
+             'ValuA_X0_I0' → ('ValuA_X0_I0', 0)
+    """
+    parts = str(reg_name_str).split('+')
+    base = parts[0]
+    offset = int(parts[1]) if len(parts) > 1 else 0
+    return base, offset
+
+
+def get_reg_range(rc) -> Optional[tuple[str, int, int]]:
+    """Extract the register identity range from a RegisterContainer.
+
+    Returns:
+        Tuple of (base_name, start_offset, end_offset_exclusive), or None if
+        the container is not a VGPR register or cannot be resolved.
+
+        For numeric registers (regIdx >= 0): base_name is the regType string,
+        start/end are the numeric indices.
+
+        For named registers (regName set): base_name is the symbolic name,
+        start/end are the offsets within that name.
+
+    Examples:
+        v[10:13] → ('v', 10, 14)
+        v[vgprValuA_X0_I0+12:+15] → ('ValuA_X0_I0', 12, 16)
+    """
+    if rc is None:
+        return None
+
+    reg_num = int(rc.regNum)
+    if reg_num <= 0:
+        return None
+
+    if rc.regIdx >= 0:
+        # Numeric register
+        return (rc.regType, rc.regIdx, rc.regIdx + reg_num)
+
+    if rc.regName is not None:
+        # Named register with symbolic name
+        base, offset = _parse_reg_name(rc.regName)
+        return (base, offset, offset + reg_num)
+
+    return None
+
+
+def reg_ranges_overlap(a: tuple[str, int, int], b: tuple[str, int, int]) -> bool:
+    """Check if two register ranges overlap.
+
+    Both ranges must have the same base name (register file) to overlap.
+    Ranges are [start, end) — half-open intervals.
+    """
+    if a[0] != b[0]:
+        return False
+    return a[1] < b[2] and b[1] < a[2]
+
+
+def get_dst_range(rocisa_inst) -> Optional[tuple[str, int, int]]:
+    """Extract the destination register range from a rocisa instruction.
+
+    Handles CommonInstruction (.dst), MFMAInstruction (.acc), and
+    CompositeInstruction (.dst) via attribute inspection.
+    """
+    # MFMAInstruction: destination is the accumulator
+    if hasattr(rocisa_inst, 'acc') and rocisa_inst.acc is not None:
+        return get_reg_range(rocisa_inst.acc)
+    # CommonInstruction and others
+    if hasattr(rocisa_inst, 'dst') and rocisa_inst.dst is not None:
+        return get_reg_range(rocisa_inst.dst)
+    return None
+
+
+def get_src_ranges(rocisa_inst) -> list[tuple[str, int, int]]:
+    """Extract all source register ranges from a rocisa instruction.
+
+    Returns a list of register ranges for all source operands that are
+    RegisterContainer objects (skips immediates and string operands).
+    """
+    ranges = []
+    if hasattr(rocisa_inst, 'srcs'):
+        for src in rocisa_inst.srcs:
+            rng = get_reg_range(src)
+            if rng is not None:
+                ranges.append(rng)
+    # MFMAInstruction: .a and .b are sources
+    if hasattr(rocisa_inst, 'a') and rocisa_inst.a is not None:
+        rng = get_reg_range(rocisa_inst.a)
+        if rng:
+            ranges.append(rng)
+    if hasattr(rocisa_inst, 'b') and rocisa_inst.b is not None:
+        rng = get_reg_range(rocisa_inst.b)
+        if rng:
+            ranges.append(rng)
+    return ranges
+
+
 def create_unified_timeline(
     schedule_info: 'ScheduleInfo',
     kernel: 'Solution',
