@@ -163,8 +163,8 @@ rocsparse_status rocsparse_zcheck_matrix_gebsc_buffer_size(rocsparse_handle    h
 *  indices, or whether the row indices are not sorted when they should be. If an issue is found, it is written to the
 *  \p data_status parameter.
 *
-*  Performing the above checks involves two steps. First, call \p rocsparse_Xcheck_matrix_gebsr_buffer_size
-*  to determine the required buffer size. Then allocate this buffer and pass it to \p rocsparse_Xcheck_matrix_gebsr.
+*  Performing the above checks involves two steps. First, call \p rocsparse_Xcheck_matrix_gebsc_buffer_size
+*  to determine the required buffer size. Then allocate this buffer and pass it to \p rocsparse_Xcheck_matrix_gebsc.
 *  Any issues detected will be written to the \p data_status parameter, which is always a host variable regardless of the pointer mode.
 *
 *  \note

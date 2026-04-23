@@ -136,8 +136,8 @@ rocsparse_status rocsparse_sptrsm_buffer_size(rocsparse_handle            handle
 *  The sparse matrix formats currently supported are: \ref rocsparse_format_coo and \ref rocsparse_format_csr.
 *
 *  \note
-*  Only the \ref rocsparse_sptrsm_stage_compute stage are non-blocking
-*  and executed asynchronously with respect to the host. They can return before the actual computation has finished.
+*  Only the \ref rocsparse_sptrsm_stage_compute stage is non-blocking
+*  and executed asynchronously with respect to the host. It can return before the actual computation has finished.
 *  The \ref rocsparse_sptrsm_stage_analysis stage is blocking with respect to the host.
 *
 *  \note
@@ -154,7 +154,7 @@ rocsparse_status rocsparse_sptrsm_buffer_size(rocsparse_handle            handle
 *  @param[in]
 *  handle       handle to the rocSPARSE library context queue.
 *  @param[in]
-*  sptrsm_descr           Sptrsm routine descriptor.
+*  sptrsm_descr           SpTrSM routine descriptor.
 *  @param[in]
 *  A           sparse matrix descriptor.
 *  @param[in]
@@ -162,7 +162,7 @@ rocsparse_status rocsparse_sptrsm_buffer_size(rocsparse_handle            handle
 *  @param[inout]
 *  Y           dense matrix descriptor.
 *  @param[in]
-*  sptrsm_stage Sptrsm stage for the Sptrsm computation.
+*  sptrsm_stage SpTrSM stage for the SpTrSM computation.
 *  @param[out]
 *  buffer_size_in_bytes  number of bytes of the temporary storage buffer.
 *  @param[in]

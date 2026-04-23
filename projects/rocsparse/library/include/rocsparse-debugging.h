@@ -58,7 +58,7 @@ ROCSPARSE_EXPORT int rocsparse_state_debug_kernel_launch();
 /*! \ingroup aux_module
  *  \brief Enable debug arguments.
  * \details If the debug arguments is enabled, then messages are displayed when errors occur during argument checking.
- *          It provides information to the user depending on the the verbosity setup for
+ *          It provides information to the user depending on the verbosity setup for
  * \ref rocsparse_enable_debug_arguments_verbose, \ref rocsparse_disable_debug_arguments_verbose, and \ref rocsparse_state_debug_arguments_verbose.
  * \note This routine ignores the environment variable \p ROCSPARSE_DEBUG_ARGUMENTS.
  * \note This routine enables debug arguments verbose with \ref rocsparse_enable_debug_arguments_verbose.
@@ -69,7 +69,7 @@ void rocsparse_enable_debug_arguments();
 /*! \ingroup aux_module
  *  \brief Disable debug arguments.
  *  \note This routine ignores the environment variable \p ROCSPARSE_DEBUG_ARGUMENTS.
- *  \note This routines disables debug arguments.
+ *  \note This routine disables debug arguments.
  */
 ROCSPARSE_EXPORT
 void rocsparse_disable_debug_arguments();
