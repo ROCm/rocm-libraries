@@ -4280,34 +4280,34 @@ class KernelWriterAssembly(KernelWriter):
         module.add(SAddU32(dst=sgpr("Srd%s+2"%tc), src0=sgpr("Srd%s+2"%tc), src1=prePad, comment="extend limit for pre-pad"))
 
       # Apply any high-order address components to the tileStart and eventually the SRD - batch idx for batched gemm
-      if kernel["ProblemType"]["StridedBatched"]:
-        wg=2 # TODO - refactor since only WG2 is supported and this is always batch
-        for i in range(1, numDim):
-          idx = indices[i]
-          if idx == kernel["ProblemType"]["Index0"] \
-              or idx == kernel["ProblemType"]["Index1"] \
-              or idx in kernel["ProblemType"]["IndicesSummation"] \
-              or isPackedIndex(kernel, idx):
-                continue # these will be captured in GRO not the SRD (or other summations are always 0)
+      #if kernel["ProblemType"]["StridedBatched"]:
+      wg=2 # TODO - refactor since only WG2 is supported and this is always batch
+      for i in range(1, numDim):
+        idx = indices[i]
+        if idx == kernel["ProblemType"]["Index0"] \
+            or idx == kernel["ProblemType"]["Index1"] \
+            or idx in kernel["ProblemType"]["IndicesSummation"] \
+            or isPackedIndex(kernel, idx):
+              continue # these will be captured in GRO not the SRD (or other summations are always 0)
+        else:
+          assert(wg==2) # can only have one wg2 with a batch. Other dimensions should be packed into wg0/wg1
+          stride = "Stride%s%s"%(tc,self.states.indexChars[tP['ia'][i]])
+          stridedBatchedGemmLoad = Label(label="StridedBatchedGemmLoad"+tc, comment="Computing the Batch Matrix's base address for Strided Batched GEMM")
+          stridedBatchedGemmLoad_End = Label(label="StridedBatchedGemmLoad"+tc+"_End", comment="End Computing the Batch Matrix's base address for Strided Batched")
+          if kernel["ProblemType"]["SupportUserArgs"]:
+            module.add(SCmpEQU32(src0=sgpr("ArgType"), src1=3, comment="ArgType == 3 for General Batched GEMM"))
+            module.add(SCBranchSCC0(labelName=stridedBatchedGemmLoad.getLabelName()))
           else:
-            assert(wg==2) # can only have one wg2 with a batch. Other dimensions should be packed into wg0/wg1
-            stride = "Stride%s%s"%(tc,self.states.indexChars[tP['ia'][i]])
-            stridedBatchedGemmLoad = Label(label="StridedBatchedGemmLoad"+tc, comment="Computing the Batch Matrix's base address for Strided Batched GEMM")
-            stridedBatchedGemmLoad_End = Label(label="StridedBatchedGemmLoad"+tc+"_End", comment="End Computing the Batch Matrix's base address for Strided Batched")
-            if kernel["ProblemType"]["SupportUserArgs"]:
-              module.add(SCmpEQU32(src0=sgpr("ArgType"), src1=3, comment="ArgType == 3 for General Batched GEMM"))
-              module.add(SCBranchSCC0(labelName=stridedBatchedGemmLoad.getLabelName()))
-            else:
-              module.add(SBranch(labelName=stridedBatchedGemmLoad.getLabelName()))
-            moduleLoadGeneralBatch.add(SMulI32(dst=sgpr(stmp+0), src0=8, src1=sgpr("WorkGroup2"), comment="Compute Offset into Pointer Array"))             
-            if not wroteTileStart:
-              moduleLoadStridedBatch.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(tileStart+0), sgpr(tileStart+1), sgpr(stride), sgpr("WorkGroup2"), comment="Stride*WG"))
-              wroteTileStart = True
-            else:
-              moduleLoadStridedBatch.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(stmp+0), sgpr(stmp+1), sgpr(stride), sgpr("WorkGroup2"), comment="Stride*WG"))
-              moduleLoadStridedBatch.add(SAddU32(dst=sgpr(tileStart+0), src0=sgpr(tileStart+0), src1=sgpr(stmp+0), comment="accum wg term to tilestart"))
-              moduleLoadStridedBatch.add(SAddCU32(dst=sgpr(tileStart+1), src0=sgpr(tileStart+1), src1=sgpr(stmp+1), comment="accum wg term to tilestart"))
-            wg+=1
+            module.add(SBranch(labelName=stridedBatchedGemmLoad.getLabelName()))
+          moduleLoadGeneralBatch.add(SMulI32(dst=sgpr(stmp+0), src0=8, src1=sgpr("WorkGroup2"), comment="Compute Offset into Pointer Array"))             
+          if not wroteTileStart:
+            moduleLoadStridedBatch.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(tileStart+0), sgpr(tileStart+1), sgpr(stride), sgpr("WorkGroup2"), comment="Stride*WG"))
+            wroteTileStart = True
+          else:
+            moduleLoadStridedBatch.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(stmp+0), sgpr(stmp+1), sgpr(stride), sgpr("WorkGroup2"), comment="Stride*WG"))
+            moduleLoadStridedBatch.add(SAddU32(dst=sgpr(tileStart+0), src0=sgpr(tileStart+0), src1=sgpr(stmp+0), comment="accum wg term to tilestart"))
+            moduleLoadStridedBatch.add(SAddCU32(dst=sgpr(tileStart+1), src0=sgpr(tileStart+1), src1=sgpr(stmp+1), comment="accum wg term to tilestart"))
+          wg+=1
 
     # Add the tile start to the SRD
     if wroteTileStart:
