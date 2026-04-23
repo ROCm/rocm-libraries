@@ -426,6 +426,7 @@ Tests:
   category: smoke
   function:
     matmul: 
+      - { a_type: f4_r, b_type: f4_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r}
       - { a_type: f4_r, b_type: f4_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scaleA: 6, scaleB: 6, scale_type: f32_r}
   matrix_size:
     - { M:  128,  N:  128,  K:  512  }
