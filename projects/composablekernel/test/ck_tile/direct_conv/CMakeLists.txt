@@ -33,4 +33,13 @@ if(GPU_TARGETS MATCHES "gfx950")
         )
     endif()
 
+    add_gtest_executable(test_direct_conv_grouped_16c_fp16 test_grouped_16c_fp16.cpp)
+    if(TARGET test_direct_conv_grouped_16c_fp16)
+        target_compile_options(test_direct_conv_grouped_16c_fp16 PRIVATE
+            -Wno-old-style-cast
+            -Wno-unused-parameter
+            -Wno-shadow
+        )
+    endif()
+
 endif()

@@ -36,3 +36,16 @@ run_alg(run_direct_conv<direct_conv::DirectTileConvForward4CFp16Kernel<36, direc
 run_alg(run_direct_conv<direct_conv::DirectTileConvForward4CFp16Kernel<37, direct_conv::Version::v3>, SIGNATURE>);
 run_alg(run_direct_conv<direct_conv::DirectTileConvForward4CFp16Kernel<38, direct_conv::Version::v3>, SIGNATURE>);
 run_alg(run_direct_conv<direct_conv::DirectTileConvForward4CFp16Kernel<39, direct_conv::Version::v3>, SIGNATURE>);
+
+////////////////////////////////////////////////////////////////////////
+// Direct HIP convolution (streaming) 16c kernels — configs 9-17 are Fprop
+////////////////////////////////////////////////////////////////////////
+run_alg(run_direct_conv<direct_conv::DirectHipConvForward16CFp16Kernel<9>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectHipConvForward16CFp16Kernel<10>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectHipConvForward16CFp16Kernel<11>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectHipConvForward16CFp16Kernel<12>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectHipConvForward16CFp16Kernel<13>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectHipConvForward16CFp16Kernel<14>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectHipConvForward16CFp16Kernel<15>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectHipConvForward16CFp16Kernel<16>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectHipConvForward16CFp16Kernel<17>, SIGNATURE>);
