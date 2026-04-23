@@ -844,6 +844,7 @@ std::optional<std::string> IRParser::parseAttributeValue() {
                     return std::nullopt;
                 }
                 consume();
+                result += ", ";
             }
             first = false;
 
