@@ -182,7 +182,7 @@ int main(int argc, char** argv) {
     if (argc < 2) {
         std::cerr << "Usage: " << argv[0] << " [options] <ir_file> [--pass1] [--pass2] ...\n\n";
         std::cerr << "Options:\n";
-        std::cerr << "  --arch <arch>    Target architecture (gfx942, gfx950, gfx1250)\n";
+        std::cerr << "  --arch <arch>    Target architecture (gfx1250)\n";
         std::cerr << "  --pass-order-snapshot-json=<path>  Before/after instruction order JSON "
                      "(stinkytofu-analysis)\n";
         std::cerr << "  --pass-order-snapshot-after-passes=A,B  Pass::getName() allow-list "
@@ -190,7 +190,7 @@ int main(int argc, char** argv) {
         std::cerr << "  --list-passes    List all available passes\n";
         std::cerr << "  --help           Show this help message\n\n";
         std::cerr << "Example:\n";
-        std::cerr << "  " << argv[0] << " --arch gfx942 input.txt --StinkyDAGSchedulerPass\n";
+        std::cerr << "  " << argv[0] << " --arch gfx1250 input.txt --StinkyDAGSchedulerPass\n";
         return 1;
     }
 
@@ -204,7 +204,7 @@ int main(int argc, char** argv) {
         std::cerr << "stinkytofu-opt - StinkyTofu IR optimizer\n\n";
         std::cerr << "Usage: " << argv[0] << " [options] <ir_file> [--pass1] [--pass2] ...\n\n";
         std::cerr << "Options:\n";
-        std::cerr << "  --arch <arch>    Target architecture (gfx942, gfx950, gfx1250)\n";
+        std::cerr << "  --arch <arch>    Target architecture (gfx1250)\n";
         std::cerr << "  --pass-order-snapshot-json=<path>  Before/after instruction order JSON "
                      "(stinkytofu-analysis)\n";
         std::cerr << "  --pass-order-snapshot-after-passes=A,B  Pass::getName() allow-list "
@@ -216,27 +216,23 @@ int main(int argc, char** argv) {
     }
 
     // Parse architecture option
-    std::array<int, 3> arch = {9, 4, 2};  // default gfx942
+    std::array<int, 3> arch = {12, 5, 0};  // default gfx1250
     int irFileIdx = 1;
     int passStartIdx = 2;
 
     if (firstArg == "--arch") {
         if (argc < 4) {
             std::cerr << "Error: --arch requires an architecture argument\n";
-            std::cerr << "Supported architectures: gfx942, gfx950, gfx1250\n";
+            std::cerr << "Supported architectures: gfx1250\n";
             return 1;
         }
 
         std::string archStr = argv[2];
-        if (archStr == "gfx942") {
-            arch = {9, 4, 2};
-        } else if (archStr == "gfx950") {
-            arch = {9, 5, 0};
-        } else if (archStr == "gfx1250") {
+        if (archStr == "gfx1250") {
             arch = {12, 5, 0};
         } else {
             std::cerr << "Error: Unsupported architecture '" << archStr << "'\n";
-            std::cerr << "Supported architectures: gfx942, gfx950, gfx1250\n";
+            std::cerr << "Supported architectures: gfx1250\n";
             return 1;
         }
 

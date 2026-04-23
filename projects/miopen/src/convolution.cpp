@@ -57,8 +57,7 @@ std::size_t GetWorkSpaceSizeGEMM(const miopen::ExecutionContext& ctx,
                                  const conv::ProblemDescription& problem)
 {
 #if MIOPEN_USE_GEMM
-    if(env::disabled(MIOPEN_DEBUG_CONV_GEMM) ||
-       miopen::any_of(problem.GetConv().GetConvDilations(), [](auto v) { return v > 1; }))
+    if(env::disabled(MIOPEN_DEBUG_CONV_GEMM))
         return 0;
 
     return GetMaxWorkSpaceSize(AllGemmWorkspaceSize(ctx, problem));
@@ -406,16 +405,20 @@ std::size_t ConvolutionDescriptor::GetWorkSpaceSize(ExecutionContext ctx,
         /// the same workspace for Run phase. That is why we shall return
         /// actually required workspace here.
         auto fallback        = FallbackPath();
-        const auto solutions = GetSolutions(ctx, problem, 1, &fallback);
+        const auto n         = GetSolutionCount(ctx, problem);
+        const auto solutions = GetSolutions(ctx, problem, n > 0 ? n : 1, &fallback);
         if(solutions.empty() || ((findMode.IsHybrid(ctx) && fallback != FallbackPath::None) &&
                                  !env::enabled(MIOPEN_DEBUG_FORCE_IMMED_MODE_FALLBACK)))
         {
             ctx.use_dynamic_solutions_only = findMode.IsDynamicHybrid(ctx);
-            break; // Fall down to Normal Find.
+            break;
         }
-        const auto id             = solver::Id{solutions.front().solution_id};
-        const auto& s             = id.GetSolver();
-        const auto workspace_size = s.GetWorkspaceSize(ctx, problem);
+        std::size_t workspace_size = 0;
+        for(const auto& sol : solutions)
+        {
+            const auto& s  = solver::Id{sol.solution_id}.GetSolver();
+            workspace_size = std::max(workspace_size, s.GetWorkspaceSize(ctx, problem));
+        }
 
         MIOPEN_LOG_I(workspace_size);
         return workspace_size;

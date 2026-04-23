@@ -6,7 +6,7 @@ A Python interface for generating GPU assembly code for AMD GPUs using the Stink
 
 - **Instance-based design** - No global state, each builder is independent
 - **Explicit module management** - Create named IR modules and add instructions explicitly
-- **Architecture-specific** - Target different GPU architectures (gfx908, gfx942, etc.)
+- **Architecture-specific** - Target different GPU architectures (e.g., gfx1250)
 - **Thread-safe** - Multiple instances can be used concurrently
 
 ## Building
@@ -43,8 +43,8 @@ export PYTHONPATH=/path/to/build/lib:$PYTHONPATH
 ```python
 from stinkytofu import StinkyAsmIR, vgpr, sgpr
 
-# Create builder for MI300X (gfx942)
-st = StinkyAsmIR([9, 4, 2])
+# Create builder for gfx1250
+st = StinkyAsmIR([12, 5, 0])
 
 # Create a module to hold instructions
 module = st.createIRList("my_kernel")
@@ -63,7 +63,7 @@ print(module.emitAssembly())
 ```python
 from stinkytofu import StinkyAsmIR, vgpr, acc
 
-st = StinkyAsmIR([9, 4, 2])
+st = StinkyAsmIR([12, 5, 0])
 module = st.createIRList("mfma_kernel")
 
 # Use count parameter for register ranges
@@ -91,20 +91,20 @@ Some instructions may not be supported on all architectures. StinkyTofu automati
 ```python
 from stinkytofu import StinkyAsmIR, vgpr
 
-st = StinkyAsmIR([9, 4, 2])  # gfx942 supports v_pk_add_f32
+st = StinkyAsmIR([12, 5, 0])  # gfx1250 supports v_pk_add_f32
 module = st.createIRList("composite_example")
 
 # VAddPKF32 demonstrates the composite instruction pattern:
-# - On gfx942+ with v_pk_add_f32: returns 1 instruction
+# - On architectures with v_pk_add_f32: returns 1 instruction
 # - On older architectures: returns 2 v_add_f32 instructions (lowered)
 insts = st.VAddPKF32(vgpr(0, 2), vgpr(2, 2), vgpr(4, 2), "packed add")
-print(f"Generated {len(insts)} instruction(s)")  # Prints "1" on gfx942
+print(f"Generated {len(insts)} instruction(s)")  # Prints "1" on gfx1250
 
 # module.add() accepts lists of instructions
 module.add(insts)
 
 print(module.emitAssembly())
-# Output on gfx942: v_pk_add_f32 v[0:1], v[2:3], v[4:5] // packed add
+# Output on gfx1250: v_pk_add_f32 v[0:1], v[2:3], v[4:5] // packed add
 ```
 
 **Note:** All instruction creation methods return a list of instructions. Most of the time this list contains a single instruction, but for composite/lowered instructions, it may contain multiple instructions depending on the target architecture. The `module.add()` method accepts these lists directly.
@@ -114,7 +114,7 @@ print(module.emitAssembly())
 ```python
 from stinkytofu import StinkyAsmIR, vgpr
 
-st = StinkyAsmIR([9, 4, 2])
+st = StinkyAsmIR([12, 5, 0])
 
 # Create multiple kernels
 kernel_a = st.createIRList("kernel_a")
@@ -137,7 +137,7 @@ print(kernel_b.emitAssembly())
 ```python
 from stinkytofu import StinkyAsmIR, vgpr
 
-st = StinkyAsmIR([9, 4, 2])
+st = StinkyAsmIR([12, 5, 0])
 module = st.createIRList("conditional_kernel")
 
 # Create instruction but don't add yet
@@ -183,7 +183,7 @@ See **[tests/testing.md](tests/testing.md)** for the complete testing guide.
 ### Main Classes
 
 - **`StinkyAsmIR(arch)`** - Create builder for target architecture
-  - `arch`: List `[major, minor, stepping]`, e.g., `[9, 4, 2]` for gfx942
+  - `arch`: List `[major, minor, stepping]`, e.g., `[12, 5, 0]` for gfx1250
 
 - **`IRListModule`** - Container for instructions
   - `add(inst)` - Add instruction to module (returns inst for chaining)

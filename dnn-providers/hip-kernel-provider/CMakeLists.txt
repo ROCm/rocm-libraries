@@ -9,12 +9,12 @@ set(CMAKE_TOOLCHAIN_FILE "${CMAKE_SOURCE_DIR}/cmake/ClangToolChain.cmake"
 )
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
-include(${CMAKE_CURRENT_LIST_DIR}/cmake/VersionUtils.cmake)
-hip_kernel_provider_setup_version(hip_kernel_provider)
+include(${CMAKE_CURRENT_LIST_DIR}/../cmake/VersionUtils.cmake)
+dnn_provider_setup_version(hip_kernel_provider ${CMAKE_CURRENT_LIST_DIR})
 
 project(hip-kernel-provider VERSION ${HIP_KERNEL_PROVIDER_VERSION} LANGUAGES CXX)
 
-if(NOT WIN32)
+if(NOT WIN32 AND DEFINED ROCM_PATH)
     # Only set if not already specified by user
     if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
         set(CMAKE_INSTALL_PREFIX "${ROCM_PATH}" CACHE PATH "Install path prefix" FORCE)

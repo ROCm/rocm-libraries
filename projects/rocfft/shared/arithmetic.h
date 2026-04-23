@@ -72,6 +72,13 @@ typename Titer::value_type sum(Titer begin, Titer end, typename Titer::value_typ
     return std::accumulate(begin, end, start_sum, std::plus<typename Titer::value_type>());
 }
 
+template <typename Tcontainer>
+typename Tcontainer::value_type sum(const Tcontainer&               cont,
+                                    typename Tcontainer::value_type start_sum = 0)
+{
+    return sum(cont.cbegin(), cont.cend(), start_sum);
+}
+
 // count the number of total iterations for 1-, 2-, and 3-D dimensions
 template <typename T1>
 static inline size_t count_iters(const T1& i)
