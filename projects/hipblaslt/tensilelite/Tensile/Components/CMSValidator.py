@@ -2072,8 +2072,88 @@ def hook_up_packs(timeline: Timeline, kernel: 'Solution', mfma_reorder: list[int
                 _handle_min_pack_quad_cycles(packs)
             else:
                 _hook_up_packs_bf16(packs, local_reads)
-            
+
+            # Dual-path validation: compare register-based must_start_after against positional
+            reg_deps = derive_pack_must_start_after(packs, local_reads)
+            if reg_deps:
+                for pack in packs:
+                    if pack.issue_index not in reg_deps:
+                        continue
+                    positional_deps = set(id(d) for d in pack.must_start_after)
+                    register_deps = set(id(d) for d in reg_deps[pack.issue_index])
+                    if positional_deps != register_deps:
+                        pos_names = sorted(d.name + f"@{d.issued_at.vmfma_index}" for d in pack.must_start_after)
+                        reg_names = sorted(d.name + f"@{d.issued_at.vmfma_index}" for d in reg_deps[pack.issue_index])
+                        printWarning(
+                            f"must_start_after mismatch for {pack_name}[{pack.issue_index}] "
+                            f"({type(pack).__name__}): "
+                            f"positional={pos_names}, register={reg_names}"
+                        )
+
             _set_pack_needed_by(packs, pack_name, i_loop, mfma_reorder, mfma_for_linear_index, timeline.num_vmfma, kernel)
+
+def derive_pack_must_start_after(
+    packs: list[Pack],
+    local_reads: list[LocalRead],
+) -> dict[int, list[ValidatorInstruction]]:
+    """Derive must_start_after constraints for Packs from register operands.
+
+    Traces register def-use chains: for each Pack, inspects its rocisa_inst's
+    source registers and finds which prior instruction (LR or earlier Pack)
+    wrote to those registers. Returns a dict mapping pack.issue_index to the
+    list of producer ValidatorInstructions.
+
+    Args:
+        packs:        Pack instructions (must have rocisa_inst set).
+        local_reads:  LocalRead instructions (must have rocisa_inst set).
+
+    Returns:
+        Dict mapping issue_index -> list of producer ValidatorInstructions.
+        Empty dict if any instruction lacks rocisa_inst.
+    """
+    # Check that all instructions have rocisa_inst
+    if not all(p.rocisa_inst is not None for p in packs):
+        return {}
+    if not all(lr.rocisa_inst is not None for lr in local_reads):
+        return {}
+
+    # Build producer map: reg_range_key -> ValidatorInstruction
+    # Key is (base_name, offset) for each individual register in the range
+    producers: dict[tuple[str, int], ValidatorInstruction] = {}
+
+    # Pre-populate with LR destinations
+    for lr in local_reads:
+        dst = get_dst_range(lr.rocisa_inst)
+        if dst:
+            base, start, end = dst
+            for off in range(start, end):
+                producers[(base, off)] = lr
+
+    # Walk packs in issue_index order
+    sorted_packs = sorted(packs, key=lambda p: p.issue_index)
+    result: dict[int, list[ValidatorInstruction]] = {}
+
+    for pack in sorted_packs:
+        # Find which producers wrote to this pack's source registers
+        deps: set[ValidatorInstruction] = set()
+        src_ranges = get_src_ranges(pack.rocisa_inst)
+        for base, start, end in src_ranges:
+            for off in range(start, end):
+                key = (base, off)
+                if key in producers and producers[key] is not pack:
+                    deps.add(producers[key])
+
+        result[pack.issue_index] = list(deps)
+
+        # Update producer map with this pack's destination
+        dst = get_dst_range(pack.rocisa_inst)
+        if dst:
+            base, start, end = dst
+            for off in range(start, end):
+                producers[(base, off)] = pack
+
+    return result
+
 
 def precompute_issue_times(instructions: list[ValidatorInstruction]) -> list[int]:
     """
