@@ -412,6 +412,9 @@ Tests:
       - { a_type: f4_r, b_type: f4_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 6, scaleB: 6, scale_type: f32_r}
   matrix_size:
     - { M:  128,  N:  128,  K:  512  }
+    - { M:  128,  N:  128,  K:  544  }
+    - { M:  130,  N:  128,  K:  512  }
+    - { M:  128,  N:  130,  K:  512  }
   transA: T
   transB: N
   alpha: 1
@@ -426,6 +429,44 @@ Tests:
       - { a_type: f4_r, b_type: f4_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scaleA: 6, scaleB: 6, scale_type: f32_r}
   matrix_size:
     - { M:  128,  N:  128,  K:  512  }
+    - { M:  128,  N:  128,  K:  544  }
+    - { M:  130,  N:  128,  K:  512  }
+    - { M:  128,  N:  130,  K:  512  }
+  transA: T
+  transB: N
+  alpha: 1
+  beta: [ 0.0, 2.0 ]
+  unit_check: 1
+  gpu_arch: '1250'
+
+- name: matmul_gemm_tn_mxf8_dst_bf16_1250_smoke
+  category: smoke
+  function:
+    matmul: 
+      - { a_type: f8_r, b_type: f8_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r}
+  matrix_size:
+    - { M:  128,  N:  128,  K:  512  }
+    - { M:  128,  N:  128,  K:  544  }
+    - { M:  129,  N:  128,  K:  512  }
+    - { M:  128,  N:  129,  K:  512  }
+
+  transA: T
+  transB: N
+  alpha: 1
+  beta: [ 0.0, 2.0 ]
+  unit_check: 1
+  gpu_arch: '1250'
+
+- name: matmul_gemm_tn_mxf8_dst_s_1250_smoke
+  category: smoke
+  function:
+    matmul: 
+      - { a_type: f8_r, b_type: f8_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r}
+  matrix_size:
+    - { M:  128,  N:  128,  K:  512  }
+    - { M:  128,  N:  128,  K:  544  }
+    - { M:  129,  N:  128,  K:  512  }
+    - { M:  128,  N:  129,  K:  512  }
   transA: T
   transB: N
   alpha: 1
