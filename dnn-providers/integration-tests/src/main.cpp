@@ -21,6 +21,59 @@
 namespace
 {
 
+struct EngineInfo
+{
+    int64_t engineId = 0;
+    std::string engineName;
+    std::string pluginName;
+    std::string version;
+    std::string type;
+};
+
+// Wraps the two-call pattern for hipdnnGetEngineInfo_ext:
+// first call with nullptr buffers to query sizes, second call to fetch data.
+EngineInfo getEngineInfo(hipdnnHandle_t handle, size_t engineIndex)
+{
+    EngineInfo info;
+    size_t engineNameLen = 0, pluginNameLen = 0, versionLen = 0, typeLen = 0;
+
+    hipdnnGetEngineInfo_ext(handle,
+                            engineIndex,
+                            &info.engineId,
+                            nullptr,
+                            &engineNameLen,
+                            nullptr,
+                            &pluginNameLen,
+                            nullptr,
+                            &versionLen,
+                            nullptr,
+                            &typeLen);
+
+    info.engineName.resize(engineNameLen);
+    info.pluginName.resize(pluginNameLen);
+    info.version.resize(versionLen);
+    info.type.resize(typeLen);
+
+    hipdnnGetEngineInfo_ext(handle,
+                            engineIndex,
+                            &info.engineId,
+                            info.engineName.data(),
+                            &engineNameLen,
+                            info.pluginName.data(),
+                            &pluginNameLen,
+                            info.version.data(),
+                            &versionLen,
+                            info.type.data(),
+                            &typeLen);
+
+    if(!info.engineName.empty() && info.engineName.back() == '\0')
+    {
+        info.engineName.pop_back();
+    }
+
+    return info;
+}
+
 bool engineIsLoaded(hipdnnHandle_t handle, std::string_view targetEngineName)
 {
     size_t numEngines = 0;
@@ -31,48 +84,8 @@ bool engineIsLoaded(hipdnnHandle_t handle, std::string_view targetEngineName)
 
     for(size_t i = 0; i < numEngines; ++i)
     {
-        // Two-call pattern: first call queries required buffer sizes
-        size_t engineNameLen = 0;
-        size_t pluginNameLen = 0;
-        size_t versionLen = 0;
-        size_t typeLen = 0;
-        int64_t engineId = 0;
-        hipdnnGetEngineInfo_ext(handle,
-                                i,
-                                &engineId,
-                                nullptr,
-                                &engineNameLen,
-                                nullptr,
-                                &pluginNameLen,
-                                nullptr,
-                                &versionLen,
-                                nullptr,
-                                &typeLen);
-
-        // Second call: ALL four string buffers must be non-null
-        std::string engineName(engineNameLen, '\0');
-        std::string pluginName(pluginNameLen, '\0');
-        std::string version(versionLen, '\0');
-        std::string type(typeLen, '\0');
-        hipdnnGetEngineInfo_ext(handle,
-                                i,
-                                &engineId,
-                                engineName.data(),
-                                &engineNameLen,
-                                pluginName.data(),
-                                &pluginNameLen,
-                                version.data(),
-                                &versionLen,
-                                type.data(),
-                                &typeLen);
-
-        // Trim null terminator
-        if(!engineName.empty() && engineName.back() == '\0')
-        {
-            engineName.pop_back();
-        }
-
-        if(engineName == targetEngineName)
+        auto info = getEngineInfo(handle, i);
+        if(info.engineName == targetEngineName)
         {
             return true;
         }
@@ -260,44 +273,8 @@ int main(int argc, char** argv) noexcept
                 {
                     for(size_t i = 0; i < numEngines; ++i)
                     {
-                        size_t engineNameLen = 0;
-                        size_t pluginNameLen = 0;
-                        size_t versionLen = 0;
-                        size_t typeLen = 0;
-                        int64_t engineId = 0;
-                        hipdnnGetEngineInfo_ext(handle,
-                                                i,
-                                                &engineId,
-                                                nullptr,
-                                                &engineNameLen,
-                                                nullptr,
-                                                &pluginNameLen,
-                                                nullptr,
-                                                &versionLen,
-                                                nullptr,
-                                                &typeLen);
-
-                        std::string eName(engineNameLen, '\0');
-                        std::string pName(pluginNameLen, '\0');
-                        std::string ver(versionLen, '\0');
-                        std::string typ(typeLen, '\0');
-                        hipdnnGetEngineInfo_ext(handle,
-                                                i,
-                                                &engineId,
-                                                eName.data(),
-                                                &engineNameLen,
-                                                pName.data(),
-                                                &pluginNameLen,
-                                                ver.data(),
-                                                &versionLen,
-                                                typ.data(),
-                                                &typeLen);
-
-                        if(!eName.empty() && eName.back() == '\0')
-                        {
-                            eName.pop_back();
-                        }
-                        allEngineNames.push_back(std::move(eName));
+                        auto info = getEngineInfo(handle, i);
+                        allEngineNames.push_back(std::move(info.engineName));
                     }
                 }
             }

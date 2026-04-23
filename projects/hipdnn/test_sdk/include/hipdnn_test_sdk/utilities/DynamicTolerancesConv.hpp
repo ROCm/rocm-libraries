@@ -124,7 +124,7 @@ float calculateConvWrwTolerance(double inputMin,
  * @param dyMax The maximum value in the output gradient tensor (dy).
  * @param wMin The minimum value in the filter weights tensor (w).
  * @param wMax The maximum value in the filter weights tensor (w).
- * @param wDims The dimensions of the filter weights tensor (w): [K, C, S], [K, C, R, S], or [K, C, D, R, S].
+ * @param wDims The dimensions of the filter weights tensor (w): [K, C, R, S] or [K, C, D, R, S].
  * @return The calculated tolerance value as float.
  */
 template <typename OutputType, typename InputType, typename ComputeType = float>
@@ -137,9 +137,10 @@ float calculateConvDgradTolerance(
     // Accumulation for input gradients (dx) happens over K (output channels) and Spatial filter dimensions.
     // dx[n, c, h, w] = sum_{k, r, s} dy[n, k, p, q] * w[k, c, r, s]
 
-    if(wDims.empty() || wDims.size() < 2)
+    if(wDims.empty() || wDims.size() < 4)
     {
-        throw std::invalid_argument("wDims must have at least 2 dimensions (K, C).");
+        throw std::invalid_argument(
+            "wDims must have at least 4 dimensions for 2D convolution [K, C, R, S].");
     }
 
     // Number of accumulations = K * (product of spatial dimensions)

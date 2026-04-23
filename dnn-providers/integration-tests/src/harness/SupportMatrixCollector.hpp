@@ -5,7 +5,6 @@
 
 #include <algorithm>
 #include <fstream>
-#include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <iostream>
 #include <map>
 #include <mutex>
@@ -13,6 +12,8 @@
 #include <string>
 #include <utility>
 #include <vector>
+
+#include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 
 namespace hipdnn_integration_tests
 {
@@ -95,13 +96,27 @@ public:
             {graphName, graphDescription, testName, std::move(engineNames), note, layout});
     }
 
+    // Not thread-safe: call only after parallel test execution completes.
     const std::vector<GraphSupportRecord>& getRecords() const
     {
         return _records;
     }
 
     // Generate the markdown output and write to file.
+    // Not thread-safe: call only after parallel test execution completes.
+    //
     // allEngineNames: the engine columns to include in the table.
+    //
+    // Example output:
+    //
+    //   # Engine Support Matrix
+    //
+    //   ## Convolution
+    //
+    //   | Operations | Notes | EngineA | EngineB |
+    //   |------------|-------|---------|---------|
+    //   | Convolution:FWD fp32 |  | checkmark NHWC | - |
+    //   | Convolution:BWD fp16 | unstable | checkmark NHWC, NCHW | checkmark NHWC |
     void writeMarkdown(const std::vector<std::string>& allEngineNames) const
     {
         // Group records by (graphDescription, note), union the engine support sets.
