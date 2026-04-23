@@ -4280,7 +4280,6 @@ class KernelWriterAssembly(KernelWriter):
         module.add(SAddU32(dst=sgpr("Srd%s+2"%tc), src0=sgpr("Srd%s+2"%tc), src1=prePad, comment="extend limit for pre-pad"))
 
       # Apply any high-order address components to the tileStart and eventually the SRD - batch idx for batched gemm
-      #if kernel["ProblemType"]["StridedBatched"]:
       wg=2 # TODO - refactor since only WG2 is supported and this is always batch
       for i in range(1, numDim):
         idx = indices[i]
@@ -4308,37 +4307,27 @@ class KernelWriterAssembly(KernelWriter):
             moduleLoadStridedBatch.add(SAddU32(dst=sgpr(tileStart+0), src0=sgpr(tileStart+0), src1=sgpr(stmp+0), comment="accum wg term to tilestart"))
             moduleLoadStridedBatch.add(SAddCU32(dst=sgpr(tileStart+1), src0=sgpr(tileStart+1), src1=sgpr(stmp+1), comment="accum wg term to tilestart"))
           wg+=1
+    moduleLoadGeneralBatch.add(SAddU32(dst=sgpr(stmp+0), src0=sgpr(stmp+0), src1=sgpr("Address%s+0"%tc), comment="Offsetting to the location [Lower half of address]"))
+    moduleLoadGeneralBatch.add(SAddCU32(dst=sgpr(stmp+1), src0=sgpr("Address%s+1"%tc), src1=0, comment="Offsetting to the location [Higher half of address]"))
+    moduleLoadGeneralBatch.add(SLoadB64(dst=sgpr("Srd%s"%tc, 2), base=sgpr(stmp, 2), soffset=0, comment="Load the Matrix Address in the Pointer Array"))
+    moduleLoadGeneralBatch.add(SWaitCnt(kmcnt=0, comment="Wait for the Matrix Address Load from the Pointer Array"))
+    if self.states.groOffsetInMacroTile and ((tc == "A" and not kernel["enableTDMA"]) or (tc == "B" and not kernel["enableTDMB"])):
+      prePad1 = int(self.states.srdShiftLeft[tc] * tP["bpeGR"]) # leave room in case we have to pointer shift
+      moduleLoadGeneralBatch.add(SSubU32(dst=sgpr("Srd%s+0"%tc), src0=sgpr("Srd%s+0"%tc), src1=prePad1, comment="pre-pad to make room for possible pointer shift"))
+      moduleLoadGeneralBatch.add(SSubBU32(dst=sgpr("Srd%s+1"%tc), src0=sgpr("Srd%s+1"%tc), src1=0, comment="pre-pad to make room for possible pointer shift"))                     
 
     # Add the tile start to the SRD
     if wroteTileStart:
       moduleLoadStridedBatch.add(scalarMultiply64Bpe(tileStart, tileStart, tP["bpeGR"], stmp, "tileStart"))
       moduleLoadStridedBatch.add(SAddU32(dst=sgpr("Srd%s+0"%tc), src0=sgpr("Address%s+0"%tc), src1=sgpr(tileStart+0), comment="SRD base = Address+ tileStart0"))
       moduleLoadStridedBatch.add(SAddCU32(dst=sgpr("Srd%s+1"%tc), src0=sgpr("Address%s+1"%tc), src1=sgpr(tileStart+1), comment="SRD base = Address+ tileStart1"))
-      moduleLoadGeneralBatch.add(SAddU32(dst=sgpr(stmp+0), src0=sgpr(stmp+0), src1=sgpr("Address%s+0"%tc), comment="Offsetting to the location [Lower half of address]"))
-      moduleLoadGeneralBatch.add(SAddCU32(dst=sgpr(stmp+1), src0=sgpr("Address%s+1"%tc), src1=0, comment="Offsetting to the location [Higher half of address]"))
-      moduleLoadGeneralBatch.add(SLoadB64(dst=sgpr("Srd%s"%tc, 2), base=sgpr(stmp, 2), soffset=0, comment="Load the Matrix Address in the Pointer Array"))
-      moduleLoadGeneralBatch.add(SWaitCnt(kmcnt=0, comment="Wait for the Matrix Address Load from the Pointer Array"))
-      if self.states.groOffsetInMacroTile and ((tc == "A" and not kernel["enableTDMA"]) or (tc == "B" and not kernel["enableTDMB"])):
-        prePad1 = int(self.states.srdShiftLeft[tc] * tP["bpeGR"]) # leave room in case we have to pointer shift
-        moduleLoadGeneralBatch.add(SSubU32(dst=sgpr("Srd%s+0"%tc), src0=sgpr("Srd%s+0"%tc), src1=prePad1, comment="pre-pad to make room for possible pointer shift"))
-        moduleLoadGeneralBatch.add(SSubBU32(dst=sgpr("Srd%s+1"%tc), src0=sgpr("Srd%s+1"%tc), src1=0, comment="pre-pad to make room for possible pointer shift"))                     
       moduleLoadGeneralBatch.add(scalarMultiply64Bpe(tileStart, tileStart, tP["bpeGR"], stmp, "tileStart"))
       moduleLoadGeneralBatch.add(SAddU32(dst=sgpr("Srd%s+0"%tc), src0=sgpr(tileStart+0), src1=sgpr("Srd%s+0"%tc), comment="SRD base = Address+ tileStart0"))
-      moduleLoadGeneralBatch.add(SAddCU32(dst=sgpr("Srd%s+1"%tc), src0=sgpr(tileStart+1), src1=sgpr("Srd%s+1"%tc), comment="SRD base = Address+ tileStart1"))
-      moduleLoadGeneralBatch.add(SBranch(labelName = stridedBatchedGemmLoad_End.getLabelName()))
-      moduleLoadGeneralBatch.add(stridedBatchedGemmLoad)      
+      moduleLoadGeneralBatch.add(SAddCU32(dst=sgpr("Srd%s+1"%tc), src0=sgpr(tileStart+1), src1=sgpr("Srd%s+1"%tc), comment="SRD base = Address+ tileStart1"))      
     else:
-      moduleLoadStridedBatch.add(SMovB64(dst=sgpr("Srd%s"%tc, 2), src=sgpr("Address%s"%tc, 2), comment="init SRD base address"))
-      moduleLoadGeneralBatch.add(SAddU32(dst=sgpr(stmp+0), src0=sgpr(stmp+0), src1=sgpr("Address%s+0"%tc), comment="Offsetting to the location [Lower half of address]"))
-      moduleLoadGeneralBatch.add(SAddCU32(dst=sgpr(stmp+1), src0=sgpr("Address%s+1"%tc), src1=0, comment="Offsetting to the location [Higher half of address]"))
-      moduleLoadGeneralBatch.add(SLoadB64(dst=sgpr("Srd%s"%tc, 2), base=sgpr(stmp, 2), soffset=0, comment="Load the Matrix Address in the Pointer Array"))
-      moduleLoadGeneralBatch.add(SWaitCnt(kmcnt=0, comment="Wait for the Matrix Address Load from the Pointer Array"))    
-      if self.states.groOffsetInMacroTile:
-        prePad1 = int(self.states.srdShiftLeft[tc] * tP["bpeGR"]) # leave room in case we have to pointer shift
-        moduleLoadGeneralBatch.add(SSubU32(dst=sgpr("Srd%s+0"%tc), src0=sgpr("Srd%s+0"%tc), src1=prePad1, comment="pre-pad to make room for possible pointer shift"))
-        moduleLoadGeneralBatch.add(SSubBU32(dst=sgpr("Srd%s+1"%tc), src0=sgpr("Srd%s+1"%tc), src1=0, comment="pre-pad to make room for possible pointer shift"))          
-      moduleLoadGeneralBatch.add(SBranch(labelName = stridedBatchedGemmLoad_End.getLabelName()))
-      moduleLoadGeneralBatch.add(stridedBatchedGemmLoad)                     
+      moduleLoadStridedBatch.add(SMovB64(dst=sgpr("Srd%s"%tc, 2), src=sgpr("Address%s"%tc, 2), comment="init SRD base address"))         
+    moduleLoadGeneralBatch.add(SBranch(labelName = stridedBatchedGemmLoad_End.getLabelName()))
+    moduleLoadGeneralBatch.add(stridedBatchedGemmLoad)                     
 
     module.add(moduleLoadGeneralBatch) # Logic for General Batched GEMM comes first 
     module.add(moduleLoadStridedBatch) # Logic for Strided Batched GEMM comes second
