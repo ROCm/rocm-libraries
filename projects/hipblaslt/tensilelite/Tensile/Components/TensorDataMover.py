@@ -3,7 +3,7 @@ from ..Common.DataType import DataType
 from ..Common import INDEX_CHARS
 from typing import Mapping, Optional
 from rocisa.code import Module
-from rocisa.instruction import SMovB32, SMovB64, SOrB32, SAndB32, SLShiftLeftB32, \
+from rocisa.instruction import SMovB32, SMovB64, SOrB32, SAndB32, SLShiftLeftB32, SLShiftLeftB64, \
     SLShiftRightB32, SAddU32, SAddCU32, SMulI32, TensorLoadToLds, VReadfirstlaneB32, SMulLOU32
 from rocisa.container import sgpr, vgpr, RegisterContainer, MemTokenData
 from math import log2, ceil, prod
@@ -58,7 +58,16 @@ class TensorDataMoverLoad(TensorDataMover):
             mod.add(SAddU32(sgpr(tmpSgprIdx), sgpr(tmpSgprIdx), sgpr(waveOffsetSgprIdx), "+= woffset"))
             mod.add(SAddU32(sgpr(sgprAddr), sgpr(tmpSgprIdx), sgpr(sgprAddr), "+= baseAddr(lo)"))
             mod.add(SAddCU32(sgpr(f"{sgprAddr}+1"), sgpr(tmpSgprIdx+1), sgpr(f"{sgprAddr}+1"), "+= baseAddr(hi)"))
-            #TODO: support strided batch
+            if kernel["ProblemType"]["Batched"]:
+                if kernel["ProblemType"]["StridedBatched"]:
+                    batchStrideName = f"Stride{tc}{writer.states.indexChars[tp['ia'][2]]}"
+                    mod.addModuleAsFlatItems(writer.s_mul_u64_u32(sgpr(tmpSgprIdx), sgpr(tmpSgprIdx+1), sgpr(batchStrideName), sgpr("WorkGroup2"), comment="Batch: Stride*WG"))
+                    mod.add(SLShiftLeftB64(dst=sgpr(tmpSgprIdx, 2), src=sgpr(tmpSgprIdx, 2), shiftHex=int(log2(bpe)), comment="scale by bpe"))
+                    mod.add(SAddU32(sgpr(sgprAddr), sgpr(tmpSgprIdx), sgpr(sgprAddr), "+= baseAddr(lo)"))
+                    mod.add(SAddCU32(sgpr(f"{sgprAddr}+1"), sgpr(tmpSgprIdx+1), sgpr(f"{sgprAddr}+1"), "+= baseAddr(hi)"))
+                else:
+                    #TODO: support general batch
+                    assert False, "Currently, TDM does not support general batch"
             #TODO: support GSU
             #TODO: support stagger U
         return mod
@@ -124,7 +133,17 @@ class TensorDataMoverLoad(TensorDataMover):
             else:
                 mod.add(SAddU32(sgpr(sgprAddr), sgpr(tmpSgprIdx), sgpr(sgprAddr), "+= baseAddr(lo)"))
                 mod.add(SAddCU32(sgpr(f"{sgprAddr}+1"), sgpr(tmpSgprIdx+1), sgpr(f"{sgprAddr}+1"), "+= baseAddr(hi)"))
-            #TODO: support strided batch
+            
+            if kernel["ProblemType"]["Batched"]:
+                if kernel["ProblemType"]["StridedBatched"]:
+                    batchStrideName = f"Stride{tc}{writer.states.indexChars[tp['ia'][2]]}"
+                    mod.addModuleAsFlatItems(writer.s_mul_u64_u32(sgpr(tmpSgprIdx), sgpr(tmpSgprIdx+1), sgpr(batchStrideName), sgpr("WorkGroup2"), comment="Batch: Stride*WG"))
+                    mod.add(SLShiftLeftB64(dst=sgpr(tmpSgprIdx, 2), src=sgpr(tmpSgprIdx, 2), shiftHex=int(log2(bpe)), comment="scale by bpe"))
+                    mod.add(SAddU32(sgpr(sgprAddr), sgpr(tmpSgprIdx), sgpr(sgprAddr), "+= baseAddr(lo)"))
+                    mod.add(SAddCU32(sgpr(f"{sgprAddr}+1"), sgpr(tmpSgprIdx+1), sgpr(f"{sgprAddr}+1"), "+= baseAddr(hi)"))
+                else:
+                    #TODO: support general batch
+                    assert False, "Currently, TDM does not support general batch"
             #TODO: support GSU
             #TODO: support stagger U
         return mod
