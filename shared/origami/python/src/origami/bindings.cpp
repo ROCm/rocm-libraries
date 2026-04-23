@@ -249,7 +249,7 @@ NB_MODULE(origami, m) {
       .def_rw("NUM_XCD", &hardware_t::NUM_XCD);
 
   m.def("get_hardware_for_device",
-        &hardware_t::get_hardware_for_device,
+        static_cast<hardware_t (*)(int)>(&hardware_t::get_hardware_for_device),
         "This gets a hardware object for a device.");
 
   // Needs named arguments
