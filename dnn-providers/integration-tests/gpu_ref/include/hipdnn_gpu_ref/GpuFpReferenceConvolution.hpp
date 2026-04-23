@@ -4,6 +4,7 @@
 #pragma once
 
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
+#include <hipdnn_gpu_ref/ShallowGpuTensor.hpp>
 #include <hipdnn_gpu_ref/detail/GpuRefKernelCompiler.hpp>
 #include <hipdnn_gpu_ref/detail/HipRtcTypeName.hpp>
 #include <hipdnn_test_sdk/utilities/ConvolutionValidation.hpp>
@@ -40,10 +41,8 @@ class GpuFpReferenceConvolution
 {
 public:
     // --- Forward convolution (fprop) ---
-    // x and w are non-const because MigratableMemory::deviceData() triggers
-    // lazy host-to-device synchronization, which mutates internal state.
 
-    // Overload for uniform padding
+    // TensorBase overload — symmetric padding convenience wrapper.
     template <class XDataType,
               class WDataType = XDataType,
               class YDataType = XDataType,
@@ -62,6 +61,8 @@ public:
             x, w, y, convStrides, dilations, padding, padding, alpha, beta, useTf32);
     }
 
+    // TensorBase overload — asymmetric padding.
+    // Takes non-const references because deviceData() may trigger host→device sync.
     template <class XDataType,
               class WDataType = XDataType,
               class YDataType = XDataType,
@@ -77,29 +78,85 @@ public:
                       double beta = 0.0,
                       bool useTf32 = false)
     {
-        validateInput(x, w, y, convStrides, dilations, prePadding, postPadding);
+        fprop<XDataType, WDataType, YDataType, ComputeDataType>(x.memory().deviceData(),
+                                                                w.memory().deviceData(),
+                                                                y.memory().deviceData(),
+                                                                x.dims(),
+                                                                w.dims(),
+                                                                y.dims(),
+                                                                x.strides(),
+                                                                w.strides(),
+                                                                y.strides(),
+                                                                convStrides,
+                                                                dilations,
+                                                                prePadding,
+                                                                postPadding,
+                                                                alpha,
+                                                                beta,
+                                                                useTf32);
+        y.memory().markDeviceModified();
+    }
 
-        const auto nDims = x.dims().size();
+    // --- Backward data gradient (dgrad) ---
+    // gradX and w are non-const because MigratableMemory::deviceData() triggers
+    // lazy host-to-device synchronization, which mutates internal state.
+
+    // Overload for uniform padding
+    template <class DxDataType,
+              class WDataType = DxDataType,
+              class DyDataType = DxDataType,
+              class ComputeDataType = double>
+    static void dgrad(hipdnn_data_sdk::utilities::TensorBase<DxDataType>& gradX,
+                      hipdnn_data_sdk::utilities::TensorBase<WDataType>& w,
+                      hipdnn_data_sdk::utilities::TensorBase<DyDataType>& gradY,
+                      const std::vector<int64_t>& convStrides,
+                      const std::vector<int64_t>& dilations,
+                      const std::vector<int64_t>& padding,
+                      double alpha = 1.0,
+                      double beta = 0.0)
+    {
+        dgrad<DxDataType, WDataType, DyDataType, ComputeDataType>(
+            gradX, w, gradY, convStrides, dilations, padding, padding, alpha, beta);
+    }
+
+    template <class DxDataType,
+              class WDataType = DxDataType,
+              class DyDataType = DxDataType,
+              class ComputeDataType = double>
+    static void dgrad(hipdnn_data_sdk::utilities::TensorBase<DxDataType>& gradX,
+                      hipdnn_data_sdk::utilities::TensorBase<WDataType>& w,
+                      hipdnn_data_sdk::utilities::TensorBase<DyDataType>& gradY,
+                      const std::vector<int64_t>& convStrides,
+                      const std::vector<int64_t>& dilations,
+                      const std::vector<int64_t>& prePadding,
+                      const std::vector<int64_t>& postPadding,
+                      double alpha = 1.0,
+                      double beta = 0.0)
+    {
+        validateInput(
+            gradX.dims(), w.dims(), gradY.dims(), convStrides, dilations, prePadding, postPadding);
+
+        const auto nDims = gradX.dims().size();
         auto defines
-            = detail::buildConvDefines<XDataType, WDataType, YDataType, ComputeDataType>(useTf32);
+            = detail::buildConvDefines<DxDataType, WDataType, DyDataType, ComputeDataType>();
 
-        auto* xPtr = x.memory().deviceData();
+        auto* dxPtr = gradX.memory().deviceData();
         auto* wPtr = w.memory().deviceData();
-        auto* yPtr = y.memory().deviceData();
+        auto* dyPtr = gradY.memory().deviceData();
 
         // Only prePadding is passed to the kernel. Post-padding is implicitly
         // handled by the output tensor dimensions and the kernel's bounds checks.
         if(nDims == 3)
         {
-            launchFprop1d(xPtr,
+            launchDgrad1d(dxPtr,
                           wPtr,
-                          yPtr,
-                          x.dims(),
+                          dyPtr,
+                          gradX.dims(),
                           w.dims(),
-                          y.dims(),
-                          x.strides(),
+                          gradY.dims(),
+                          gradX.strides(),
                           w.strides(),
-                          y.strides(),
+                          gradY.strides(),
                           convStrides,
                           dilations,
                           prePadding,
@@ -109,15 +166,15 @@ public:
         }
         else if(nDims == 4)
         {
-            launchFprop2d(xPtr,
+            launchDgrad2d(dxPtr,
                           wPtr,
-                          yPtr,
-                          x.dims(),
+                          dyPtr,
+                          gradX.dims(),
                           w.dims(),
-                          y.dims(),
-                          x.strides(),
+                          gradY.dims(),
+                          gradX.strides(),
                           w.strides(),
-                          y.strides(),
+                          gradY.strides(),
                           convStrides,
                           dilations,
                           prePadding,
@@ -127,15 +184,15 @@ public:
         }
         else if(nDims == 5)
         {
-            launchFprop3d(xPtr,
+            launchDgrad3d(dxPtr,
                           wPtr,
-                          yPtr,
-                          x.dims(),
+                          dyPtr,
+                          gradX.dims(),
                           w.dims(),
-                          y.dims(),
-                          x.strides(),
+                          gradY.dims(),
+                          gradX.strides(),
                           w.strides(),
-                          y.strides(),
+                          gradY.strides(),
                           convStrides,
                           dilations,
                           prePadding,
@@ -145,11 +202,12 @@ public:
         }
         else
         {
-            throw std::invalid_argument("Unsupported number of dimensions: "
-                                        + std::to_string(nDims));
+            throw std::invalid_argument(
+                "GPU kernels support 1D/2D/3D convolutions (tensor rank 3/4/5), got rank "
+                + std::to_string(nDims));
         }
 
-        y.memory().markDeviceModified();
+        gradX.memory().markDeviceModified();
     }
 
     // --- Backward weight gradient (wgrad) ---
@@ -188,7 +246,8 @@ public:
                       double alpha = 1.0,
                       double beta = 0.0)
     {
-        validateInput(x, gradW, gradY, convStrides, dilations, prePadding, postPadding);
+        validateInput(
+            x.dims(), gradW.dims(), gradY.dims(), convStrides, dilations, prePadding, postPadding);
 
         const auto nDims = x.dims().size();
         auto defines
@@ -256,26 +315,119 @@ public:
         }
         else
         {
-            throw std::invalid_argument("Unsupported number of dimensions: "
-                                        + std::to_string(nDims));
+            throw std::invalid_argument(
+                "GPU kernels support 1D/2D/3D convolutions (tensor rank 3/4/5), got rank "
+                + std::to_string(nDims));
         }
 
         gradW.memory().markDeviceModified();
     }
 
 private:
+    // --- Raw device-pointer fprop (implementation detail) ---
+
+    template <class XDataType,
+              class WDataType = XDataType,
+              class YDataType = XDataType,
+              class ComputeDataType = double>
+    static void fprop(const void* xPtr,
+                      const void* wPtr,
+                      void* yPtr,
+                      const std::vector<int64_t>& xDims,
+                      const std::vector<int64_t>& wDims,
+                      const std::vector<int64_t>& yDims,
+                      const std::vector<int64_t>& xStrides,
+                      const std::vector<int64_t>& wStrides,
+                      const std::vector<int64_t>& yStrides,
+                      const std::vector<int64_t>& convStrides,
+                      const std::vector<int64_t>& dilations,
+                      const std::vector<int64_t>& prePadding,
+                      const std::vector<int64_t>& postPadding,
+                      double alpha = 1.0,
+                      double beta = 0.0,
+                      bool useTf32 = false)
+    {
+        validateInput(xDims, wDims, yDims, convStrides, dilations, prePadding, postPadding);
+
+        const auto nDims = xDims.size();
+        auto defines
+            = detail::buildConvDefines<XDataType, WDataType, YDataType, ComputeDataType>(useTf32);
+
+        // Only prePadding is passed to the kernel. Post-padding is implicitly
+        // handled by the output tensor dimensions and the kernel's bounds checks.
+        if(nDims == 3)
+        {
+            launchFprop1d(xPtr,
+                          wPtr,
+                          yPtr,
+                          xDims,
+                          wDims,
+                          yDims,
+                          xStrides,
+                          wStrides,
+                          yStrides,
+                          convStrides,
+                          dilations,
+                          prePadding,
+                          defines,
+                          alpha,
+                          beta);
+        }
+        else if(nDims == 4)
+        {
+            launchFprop2d(xPtr,
+                          wPtr,
+                          yPtr,
+                          xDims,
+                          wDims,
+                          yDims,
+                          xStrides,
+                          wStrides,
+                          yStrides,
+                          convStrides,
+                          dilations,
+                          prePadding,
+                          defines,
+                          alpha,
+                          beta);
+        }
+        else if(nDims == 5)
+        {
+            launchFprop3d(xPtr,
+                          wPtr,
+                          yPtr,
+                          xDims,
+                          wDims,
+                          yDims,
+                          xStrides,
+                          wStrides,
+                          yStrides,
+                          convStrides,
+                          dilations,
+                          prePadding,
+                          defines,
+                          alpha,
+                          beta);
+        }
+        else
+        {
+            throw std::invalid_argument(
+                "GPU kernels support 1D/2D/3D convolutions (tensor rank 3/4/5), got rank "
+                + std::to_string(nDims));
+        }
+    }
+
     // --- Validation ---
 
-    template <typename T1, typename T2, typename T3>
-    static void validateInput(const hipdnn_data_sdk::utilities::TensorBase<T1>& x,
-                              const hipdnn_data_sdk::utilities::TensorBase<T2>& w,
-                              const hipdnn_data_sdk::utilities::TensorBase<T3>& y,
+    static void validateInput(const std::vector<int64_t>& xDims,
+                              const std::vector<int64_t>& wDims,
+                              const std::vector<int64_t>& yDims,
                               const std::vector<int64_t>& strides,
                               const std::vector<int64_t>& dilations,
                               const std::vector<int64_t>& prePadding,
                               const std::vector<int64_t>& postPadding)
     {
-        const auto nDims = x.dims().size();
+        const auto nDims = xDims.size();
 
         // GPU kernels only support 1D (3), 2D (4), and 3D (5) convolutions
         if(nDims != 3 && nDims != 4 && nDims != 5)
@@ -285,7 +437,7 @@ private:
         }
 
         hipdnn_test_sdk::utilities::validateConvolutionParams(
-            x, w, y, strides, dilations, prePadding, postPadding);
+            xDims, wDims, yDims, strides, dilations, prePadding, postPadding);
     }
 
     // --- Kernel launchers (defined in GpuFpReferenceConvolution.cpp) ---
@@ -331,6 +483,56 @@ private:
                               const std::vector<int64_t>& xTensorStrides,
                               const std::vector<int64_t>& wTensorStrides,
                               const std::vector<int64_t>& yTensorStrides,
+                              const std::vector<int64_t>& convStrides,
+                              const std::vector<int64_t>& dilations,
+                              const std::vector<int64_t>& padding,
+                              const std::vector<std::string>& defines,
+                              double alpha,
+                              double beta);
+
+    // --- Dgrad kernel launchers (defined in GpuFpReferenceConvolution.cpp) ---
+
+    static void launchDgrad1d(void* dxPtr,
+                              const void* wPtr,
+                              const void* dyPtr,
+                              const std::vector<int64_t>& dxDims,
+                              const std::vector<int64_t>& wDims,
+                              const std::vector<int64_t>& dyDims,
+                              const std::vector<int64_t>& dxTensorStrides,
+                              const std::vector<int64_t>& wTensorStrides,
+                              const std::vector<int64_t>& dyTensorStrides,
+                              const std::vector<int64_t>& convStrides,
+                              const std::vector<int64_t>& dilations,
+                              const std::vector<int64_t>& padding,
+                              const std::vector<std::string>& defines,
+                              double alpha,
+                              double beta);
+
+    static void launchDgrad2d(void* dxPtr,
+                              const void* wPtr,
+                              const void* dyPtr,
+                              const std::vector<int64_t>& dxDims,
+                              const std::vector<int64_t>& wDims,
+                              const std::vector<int64_t>& dyDims,
+                              const std::vector<int64_t>& dxTensorStrides,
+                              const std::vector<int64_t>& wTensorStrides,
+                              const std::vector<int64_t>& dyTensorStrides,
+                              const std::vector<int64_t>& convStrides,
+                              const std::vector<int64_t>& dilations,
+                              const std::vector<int64_t>& padding,
+                              const std::vector<std::string>& defines,
+                              double alpha,
+                              double beta);
+
+    static void launchDgrad3d(void* dxPtr,
+                              const void* wPtr,
+                              const void* dyPtr,
+                              const std::vector<int64_t>& dxDims,
+                              const std::vector<int64_t>& wDims,
+                              const std::vector<int64_t>& dyDims,
+                              const std::vector<int64_t>& dxTensorStrides,
+                              const std::vector<int64_t>& wTensorStrides,
+                              const std::vector<int64_t>& dyTensorStrides,
                               const std::vector<int64_t>& convStrides,
                               const std::vector<int64_t>& dilations,
                               const std::vector<int64_t>& padding,

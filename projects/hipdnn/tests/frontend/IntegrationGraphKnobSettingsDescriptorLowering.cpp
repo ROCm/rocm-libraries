@@ -9,18 +9,18 @@
 #include <test_plugins/TestPluginConstants.hpp>
 #include <test_plugins/TestPluginKnobRecorder.hpp>
 
-#include <hipdnn_data_sdk/data_objects/engine_config_generated.h>
-#include <hipdnn_data_sdk/data_objects/knob_value_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/engine_config_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/knob_value_generated.h>
 #include <hipdnn_test_sdk/utilities/IntegrationTestFixture.hpp>
 #include <hipdnn_test_sdk/utilities/TestableGraph.hpp>
 
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
-using hipdnn_data_sdk::data_objects::EngineConfigT;
-using hipdnn_data_sdk::data_objects::FloatValueT;
-using hipdnn_data_sdk::data_objects::IntValueT;
-using hipdnn_data_sdk::data_objects::KnobSettingT;
-using hipdnn_data_sdk::data_objects::StringValueT;
+using hipdnn_flatbuffers_sdk::data_objects::EngineConfigT;
+using hipdnn_flatbuffers_sdk::data_objects::FloatValueT;
+using hipdnn_flatbuffers_sdk::data_objects::IntValueT;
+using hipdnn_flatbuffers_sdk::data_objects::KnobSettingT;
+using hipdnn_flatbuffers_sdk::data_objects::StringValueT;
 using hipdnn_tests::IntegrationTestFixture;
 using hipdnn_tests::TestableGraphKnobLowering;
 
@@ -74,6 +74,12 @@ protected:
     void SetUp() override
     {
         IntegrationTestFixture::SetUp();
+        // GTEST_SKIP() in the base only unwinds the base SetUp() frame; without this
+        // guard, the post-base setup below would dereference a null _handle.
+        if(IsSkipped())
+        {
+            return;
+        }
 
         // Query the exact plugin paths the backend resolved when loading,
         // then find the knobs plugin by name. This ensures we dlopen the same

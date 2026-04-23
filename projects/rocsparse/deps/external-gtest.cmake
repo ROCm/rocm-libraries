@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2018-2021 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -55,7 +55,7 @@ else( )
   else( )
     set( gtest_make "make" )
 
-    # The -j paramter does not work with nmake
+    # The -j parameter does not work with nmake
     if( NOT Cores EQUAL 0 )
       math( EXPR Cores "${Cores} + 1 " )
       list( APPEND gtest_make -j ${Cores} )
