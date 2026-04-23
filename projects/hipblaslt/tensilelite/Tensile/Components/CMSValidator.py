@@ -25,7 +25,6 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from collections import defaultdict
-from copy import deepcopy
 from enum import Enum, auto
 from typing import ClassVar, Optional
 
@@ -576,7 +575,7 @@ class Timeline:
     
     def _populate_instructions(self, instruction_names_to_add: list[str], code_path: int, schedule_info: 'ScheduleInfo', kernel: 'Solution') -> None:
         """
-        Populates all timelines with deep copies of the instructions from schedule_info.
+        Populates all timelines with instructions from schedule_info.
         """
         assert kernel["DirectToLds"], "Only DirectToLds cases are supported by validator."
         assert kernel.get("LocalSplitU", 1) == 1, "Only LocalSplitU=1 cases are supported by validator."
@@ -590,9 +589,8 @@ class Timeline:
         for i_vmfma in range(self.num_vmfma):
             if schedule_info.mfmaReorder:
                 i_vmfma = schedule_info.mfmaReorder[i_vmfma]
-                
-            mfma = MFMA(name="MFMA", issued_at=POSITION_NEG_INF)
-            self._insert(i_vmfma, mfma, kernel)
+
+            self._insert(i_vmfma, MFMA, {"name": "MFMA"}, kernel)
 
         # NOTE: Relative ordering of instructions must be preserved.
         #       Order dictates the order in which instructions are scheduled if they are scheduled at the same vmfmaindex.
@@ -603,39 +601,34 @@ class Timeline:
             if name == "SYNC":
                 for idx_sync, (idx_vmfma, sync) in enumerate(zip(schedule_get(name, code_path, schedule_info), schedule_info.syncCode)):
                     assert idx_vmfma >= -1, f"Code path {code_path}: SWaitCnt at index {idx_sync} is not valid. Must be >= -1."
-                    
+
                     if isinstance(sync, SWaitCnt):
-                        sync_instruction = SWait(name="SWaitCnt", issued_at=POSITION_NEG_INF, dscnt=sync.dscnt, vlcnt=sync.vlcnt, vscnt=sync.vscnt, comment=sync.comment)
+                        self._insert(idx_vmfma, SWait, {"name": "SWaitCnt", "dscnt": sync.dscnt, "vlcnt": sync.vlcnt, "vscnt": sync.vscnt, "comment": sync.comment}, kernel)
                     elif isinstance(sync, SBarrier):
-                        sync_instruction = Barrier(name="SBarrier", issued_at=POSITION_NEG_INF, comment=sync.comment)
+                        self._insert(idx_vmfma, Barrier, {"name": "SBarrier", "comment": sync.comment}, kernel)
                     else:
                         raise ValueError(f"Unexpected sync instruction type: {type(sync)}")
-                    
-                    self._insert(idx_vmfma, sync_instruction, kernel)
             elif name == "SNOP":
                 for idx_snop, (idx_vmfma, snop) in enumerate(zip(schedule_get(name, code_path, schedule_info), schedule_info.snopCode)):
                     assert idx_vmfma >= -1, f"Code path {code_path}: SNop at index {idx_snop} is not valid. Must be >= -1."
                     # The waitState is stored as the first parameter in the rocisa SNop instruction
                     wait_state = snop.getParams()[0]
-                    snop_instruction = SNop(name="SNop", issued_at=POSITION_NEG_INF, wait_state=wait_state)
-                    self._insert(idx_vmfma, snop_instruction, kernel)
+                    self._insert(idx_vmfma, SNop, {"name": "SNop", "wait_state": wait_state}, kernel)
             elif name.startswith("LRA") or name.startswith("LRB"):
                 for idx_LR, idx_vmfma in enumerate(schedule_get(name, code_path, schedule_info)):
                     assert idx_vmfma >= -1, f"Code path {code_path}: LocalRead {name} at index {idx_LR} is not valid. Must be >= -1."
 
                     # TODO: For ForceUnrollSubIter, need to account for register reuse and the fact that the LR0/LR1/LR3s must start after a certain point in the iteration.
-                    local_read = LocalRead(name=name, issued_at=POSITION_NEG_INF, issue_index=idx_LR)
-                    self._insert(idx_vmfma, local_read, kernel)
+                    self._insert(idx_vmfma, LocalRead, {"name": name, "issue_index": idx_LR}, kernel)
             elif name.startswith("GRInc"):
                 grincs = schedule_get(name, code_path, schedule_info)
                 for idx_grinc, idx_vmfma in enumerate(grincs):
                     assert idx_vmfma >= -1, f"Code path {code_path}: GRInc {name} at index {idx_grinc} is not valid. Must be >= -1."
-                    grinc = GRInc(name=name, issued_at=POSITION_NEG_INF)
-                    self._insert(idx_vmfma, grinc, kernel)
+                    self._insert(idx_vmfma, GRInc, {"name": name}, kernel)
             elif name.startswith("GRA") or name.startswith("GRB"):
                 global_reads = schedule_get(name, code_path, schedule_info)
                 assert len(global_reads) % 2 == 0, f"Code path {code_path}: {name} has an odd number of indices. Must be even if DirectToLds is True."
-                
+
                 for idx_GR, idx_vmfma in enumerate(global_reads):
                     assert idx_vmfma >= -1, f"Code path {code_path}: GlobalRead {name} at index {idx_GR} is not valid. Must be >= -1."
 
@@ -643,8 +636,7 @@ class Timeline:
                     if idx_GR % 2 == 0:
                         continue
 
-                    global_read = GlobalRead(name=name, issued_at=POSITION_NEG_INF, swap_global_read_order=swap_global_read_order)
-                    self._insert(idx_vmfma, global_read, kernel)
+                    self._insert(idx_vmfma, GlobalRead, {"name": name, "swap_global_read_order": swap_global_read_order}, kernel)
             elif name.startswith("Pack"):
                 packs = schedule_get(name, code_path, schedule_info)
                 n_swaps = _compute_swap_pack_count(kernel, name) if is_4x4mfma_tf32 else 0
@@ -653,43 +645,49 @@ class Timeline:
                     assert idx_vmfma >= -1, f"Code path {code_path}: Pack {name} at index {idx_pack} is not valid. Must be >= -1."
                     if is_4x4mfma_tf32:
                         if idx_pack < n_swaps:
-                            pack = SwapPack(name=name, issued_at=POSITION_NEG_INF, issue_index=idx_pack, group_index=None)
+                            self._insert(idx_vmfma, SwapPack, {"name": name, "issue_index": idx_pack, "group_index": None}, kernel)
                         else:
                             adjusted_idx = idx_pack - n_swaps
                             # Construction-time constants: PACK_GROUP_SIZE_TF32_4X4, TF32_4X4_MFMA_START/END
                             idx_in_group = adjusted_idx % PACK_GROUP_SIZE_TF32_4X4
                             group_idx = adjusted_idx // PACK_GROUP_SIZE_TF32_4X4
                             if TF32_4X4_MFMA_START <= idx_in_group < TF32_4X4_MFMA_END:
-                                pack = MFMAPack(name=name, issued_at=POSITION_NEG_INF, issue_index=idx_pack, group_index=group_idx)
+                                self._insert(idx_vmfma, MFMAPack, {"name": name, "issue_index": idx_pack, "group_index": group_idx}, kernel)
                             else:
-                                pack = CVTPack(name=name, issued_at=POSITION_NEG_INF, issue_index=idx_pack, group_index=group_idx)
+                                self._insert(idx_vmfma, CVTPack, {"name": name, "issue_index": idx_pack, "group_index": group_idx}, kernel)
                     elif is_tf32_emulation:
                         # Construction-time constants: PACK_GROUP_SIZE_TF32, TF32_MIDDLE_16_START/END
                         idx_in_group = idx_pack % PACK_GROUP_SIZE_TF32
                         group_idx = idx_pack // PACK_GROUP_SIZE_TF32
                         if TF32_MIDDLE_16_START <= idx_in_group < TF32_MIDDLE_16_END:
-                            pack = MiddlePack(name=name, issued_at=POSITION_NEG_INF, issue_index=idx_pack, group_index=group_idx)
+                            self._insert(idx_vmfma, MiddlePack, {"name": name, "issue_index": idx_pack, "group_index": group_idx}, kernel)
                         else:
-                            pack = CVTPack(name=name, issued_at=POSITION_NEG_INF, issue_index=idx_pack, group_index=group_idx)
+                            self._insert(idx_vmfma, CVTPack, {"name": name, "issue_index": idx_pack, "group_index": group_idx}, kernel)
                     else:
-                        pack = Pack(name=name, issued_at=POSITION_NEG_INF, issue_index=idx_pack)
-                    self._insert(idx_vmfma, pack, kernel)
+                        self._insert(idx_vmfma, Pack, {"name": name, "issue_index": idx_pack}, kernel)
             else:
                 raise NotImplementedError(f"Instruction {name} not implemented")
-    
-    def _insert(self, vmfma_index: int, instruction: ValidatorInstruction, kernel: 'Solution') -> None:
+
+    def _insert(self, vmfma_index: int, cls: type[ValidatorInstruction], kwargs: dict, kernel: 'Solution') -> None:
         """
-        Add an instruction to the timeline at a given VMFMA index.
-        Adds it to all relevant loops.
-        Internal method used during initialization - does not re-linearize.
+        Construct and add an instruction to the timeline at a given VMFMA index.
+        A fresh instance is created for each applicable loop directly from
+        *cls* and *kwargs*, so no copying is needed.
+
+        Args:
+            vmfma_index:  The VMFMA slot to place the instruction at.
+            cls:          The instruction class to instantiate (e.g. LocalRead, MFMA).
+            kwargs:       Constructor keyword arguments **excluding** ``issued_at``
+                          (which is set per-loop by this method).
+            kernel:       The kernel configuration dict.
         """
         for loop in self.loops:
-            if self._should_add(instruction, loop, kernel):
-                _instruction = deepcopy(instruction)
-
+            if self._should_add(cls, kwargs.get("name", ""), loop, kernel):
                 loop_index = self.loops.index(loop)
                 sub_index = len(self._instructions_at_index[loop][vmfma_index + 1])
-                _instruction.issued_at = SchedulePosition(loop_index=loop_index, vmfma_index=vmfma_index, sub_index=sub_index)
+                kwargs["issued_at"] = SchedulePosition(loop_index=loop_index, vmfma_index=vmfma_index, sub_index=sub_index)
+
+                _instruction = cls(**kwargs)
 
                 # Adjust for NLL/NGL shifts.
                 if isinstance(_instruction, SWait):
@@ -702,26 +700,26 @@ class Timeline:
 
                 self._instructions_at_index[loop][vmfma_index+1].append(_instruction)
 
-    def _should_add(self, instruction: ValidatorInstruction, loop: str, kernel: 'Solution') -> bool:
+    @staticmethod
+    def _should_add(cls: type[ValidatorInstruction], name: str, loop: str, kernel: 'Solution') -> bool:
         """
         Determine if an instruction should be added to a given loop.
         """
-        assert loop in self.loops, f"Invalid loop: {loop}"
-        if isinstance(instruction, GlobalRead):
+        if issubclass(cls, GlobalRead):
             # No GRs issued in NGL or NLL
             return loop == MAIN_LOOP or loop == MAIN_LOOP_PREV
-        elif isinstance(instruction, GRInc):
+        elif issubclass(cls, GRInc):
             return loop == MAIN_LOOP or loop == MAIN_LOOP_PREV
-        elif isinstance(instruction, LocalRead):
+        elif issubclass(cls, LocalRead):
             # Only LR0s are issued in the NLL
             if loop == NO_LOCAL_LOAD_LOOP:
-                return instruction.name == "LRA0" or instruction.name == "LRB0"
+                return name == "LRA0" or name == "LRB0"
             return True
-        elif isinstance(instruction, Pack):
+        elif issubclass(cls, Pack):
             if kernel.get("UsePLRPack", False):
                 # Packs1/3s correspond to the LR1/3s of this iteration.
                 if loop == NO_LOCAL_LOAD_LOOP:
-                    return instruction.name == "PackA0" or instruction.name == "PackB0"
+                    return name == "PackA0" or name == "PackB0"
             return True
         else:
             return True
