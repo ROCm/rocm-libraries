@@ -315,7 +315,7 @@ bool ConvWinoRageRxSCommon<Winodata, Winofilter>::IsApplicable(const ExecutionCo
     const auto devName = ctx.GetStream().GetDeviceName();
     if(StartsWith(devName, "gfx942") || StartsWith(devName, "gfx950"))
     {
-        if(!(problem.IsFp16() || problem.IsBfp16()))
+        if(!(problem.IsFp16() || problem.IsFp32() || problem.IsBfp16()))
             return false;
     }
     else if(StartsWith(devName, "gfx12"))
@@ -423,6 +423,8 @@ ConvWinoRageRxSCommon<Winodata, Winofilter>::GetSolution(const ExecutionContext&
     const auto dTypeStr = [](const ProblemDescription& p) -> std::string {
         if(p.IsFp16())
             return "_fp16_fp32acc";
+        if(p.IsFp32())
+            return "_fp32_fp32acc";
         if(p.IsBfp16())
             return "_bf16_fp32acc";
         MIOPEN_THROW(miopenStatusInternalError);
