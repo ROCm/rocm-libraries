@@ -19,9 +19,21 @@ else()
     message(STATUS "hipDNN: JSON serialization enabled (requires nlohmann_json)")
 endif()
 
+option(HIPDNN_ENABLE_SDPA "Enable SDPA (Scaled Dot-Product Attention) support" OFF)
+
+if(HIPDNN_ENABLE_SDPA)
+    message(STATUS "hipDNN: SDPA support enabled")
+else()
+    message(STATUS "hipDNN: SDPA support disabled")
+endif()
+
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 add_compile_definitions(__HIP_PLATFORM_AMD__)
+
+if(HIPDNN_ENABLE_SDPA)
+    add_compile_definitions(HIPDNN_ENABLE_SDPA)
+endif()
 
 if(NOT CMAKE_TOOLCHAIN_FILE)
     set(CMAKE_TOOLCHAIN_FILE "${CMAKE_CURRENT_SOURCE_DIR}/cmake/ClangToolChain.cmake"

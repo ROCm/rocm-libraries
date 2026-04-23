@@ -28,6 +28,7 @@
 
 #include <hip/hip_fp16.h>          // __half_raw
 #include <hip/hip_bf16.h>          // bf16
+#include <iostream>
 
 #define HIP_HOST_DEVICE __host__ __device__
 #define HIP_HOST __host__
@@ -61,47 +62,52 @@ HIP_DEVICE static float hipblaslt_cast_to_f32_from_uf8(uint8_t v);
 #endif
 
 struct hipblaslt_e5m3 {
-  uint8_t data;
+    uint8_t data;
 
-  HIP_HOST_DEVICE hipblaslt_e5m3(const hipblaslt_e5m3&) = default;
+    HIP_HOST_DEVICE hipblaslt_e5m3() = default;
 
-  HIP_HOST_DEVICE hipblaslt_e5m3() = default;
+    HIP_HOST_DEVICE hipblaslt_e5m3(const hipblaslt_e5m3&) = default;
 
-  HIP_HOST_DEVICE hipblaslt_e5m3(const float f)
-  {
+    explicit HIP_HOST_DEVICE hipblaslt_e5m3(const float f)
+    {
 #if HIP_E5M3_CVT_FAST_PATH
-    data = hipblaslt_cast_to_uf8_from_f32(f, true);
+        data = hipblaslt_cast_to_uf8_from_f32(f, true);
 #else
-    data = hipblaslt_cast_to_uf8(f, 3, 5, true);
+        data = hipblaslt_cast_to_uf8(f, 3, 5, true);
 #endif
-  }
+    }
 
-  /*! convert fp8 e4m3 to float */
-  HIP_HOST_DEVICE operator float() const {
+    /*! convert fp8 e4m3 to float */
+    HIP_HOST_DEVICE operator float() const {
 // #if HIP_E5M3_CVT_FAST_PATH
-//    return hipblaslt_cast_to_f32_from_uf8(data);
+//        return hipblaslt_cast_to_f32_from_uf8(data);
 //#else
-    return hipblaslt_cast_from_uf8(data, 3, 5);
+        return hipblaslt_cast_from_uf8(data, 3, 5);
 //#endif
-  }
+    }
 
-  // check for zero
-  inline HIP_HOST_DEVICE bool is_zero() const
-  {
-      return data == 0;
-  }
+    // check for zero
+    inline HIP_HOST_DEVICE bool is_zero() const
+    {
+        return data == 0;
+    }
 
-  // check for nan
-  inline HIP_HOST_DEVICE bool is_nan() const
-  {
-      return data == 0xff;
-  }
+    // check for nan
+    inline HIP_HOST_DEVICE bool is_nan() const
+    {
+        return data == 0xff;
+    }
 
-  // check for inf
-  inline HIP_HOST_DEVICE bool is_inf() const
-  {
-      return false;
-  }
+    // check for inf
+    inline HIP_HOST_DEVICE bool is_inf() const
+    {
+        return false;
+    }
+
+    inline HIP_HOST_DEVICE hipblaslt_e5m3 operator-() const
+    {
+        return hipblaslt_e5m3(*this);
+    }
 };
 
 inline float operator*(hipblaslt_e5m3 a, float b)
@@ -121,9 +127,11 @@ namespace std
         return std::to_string(static_cast<float>(a));
     }
 
-    inline ostream& operator<<(ostream& stream, const hipblaslt_e5m3 a)
+    inline std::ostream& operator<<(std::ostream& stream, const hipblaslt_e5m3& a)
     {
-        return stream << static_cast<float>(a);
+        float val = static_cast<float>(a);
+        stream << val;
+        return stream;
     }
 } // namespace std
 

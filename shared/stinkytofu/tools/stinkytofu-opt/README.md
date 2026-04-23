@@ -63,7 +63,7 @@ stinkytofu-opt [options] <ir_file> [--pass1] [--pass2] ...
 - `--passN`: Optional pass names to apply (use `--` prefix)
 
 **Options:**
-- `--arch <arch>`: Target GPU architecture (default: gfx942). Supported: `gfx942`, `gfx950`, `gfx1250`
+- `--arch <arch>`: Target GPU architecture (default: gfx1250). Supported: `gfx1250`
 - `--list-passes`: Display all available optimization passes
 - `--help`: Show usage information
 
@@ -220,7 +220,7 @@ Hardware-specific configuration for the target GPU architecture:
 void setKernelConfig(stinkytofu::PassManager& passManager)
 {
     passManager.setKernelConfig(
-        {9, 4, 2},  // arch: GPU architecture version (e.g., gfx942)
+        {12, 5, 0},  // arch: GPU architecture version (e.g., gfx1250)
         0,          // ta0: TileA0
         0,          // tb0: TileB0
         0,          // tm0: TileM0
