@@ -67,6 +67,12 @@ project_map = {
         ],
         "projects_to_test": ["hipkernelprovider"],
     },
+    "dnn-provider-integration-tests": {
+        "cmake_options": [
+            "-DTHEROCK_ENABLE_HIPDNN_INTEGRATION_TESTS=ON",
+        ],
+        "projects_to_test": ["hipdnn_integration_tests"],
+    },
 }
 
 # For certain math components, they are optional during building and testing.
@@ -97,6 +103,7 @@ additional_options = {
             "-DTHEROCK_ENABLE_MIOPENPROVIDER=ON",
             "-DTHEROCK_ENABLE_HIPDNN_SAMPLES=ON",
             "-DTHEROCK_ENABLE_COMPOSABLE_KERNEL=ON",
+            "-DTHEROCK_ENABLE_HIPDNN_INTEGRATION_TESTS=ON",
         ],
         "projects_to_test": [
             "hipdnn",
@@ -123,13 +130,6 @@ additional_options = {
         ],
         "projects_to_test": ["hipblasltprovider"],
         "project_to_add": "blas",
-    },
-    "dnn-provider-integration-tests": {
-        "cmake_options": [
-            "-DTHEROCK_ENABLE_HIPDNN_INTEGRATION_TESTS=ON",
-        ],
-        "projects_to_test": ["hipdnn_integration_tests"],
-        "project_to_add": "hipdnn",
     },
     "rocwmma": {
         "cmake_options": ["-DTHEROCK_ENABLE_ROCWMMA=ON"],
