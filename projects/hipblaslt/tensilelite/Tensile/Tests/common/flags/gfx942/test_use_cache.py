@@ -165,9 +165,9 @@ def test_use_cache_different_params(tensile_args: list[str], tmp_path: Path) -> 
     _write_config(config1)
     Tensile.Tensile([config1, output_dir, *tensile_args])
 
-    # Run 2: DepthU=16 (different params, same output dir)
+    # Run 2: DepthU=64 (different params, same output dir)
     config2 = str(tmp_path / "config2.yaml")
-    _write_config_with_depth_u(config2, 16)
+    _write_config_with_depth_u(config2, 64)
     Tensile.Tensile([config2, output_dir, *tensile_args])
 
     # Verify: caches/ directory should have 2 entries
