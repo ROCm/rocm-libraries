@@ -76,5 +76,6 @@ After building, run the test suites:
 ```bash
 # Unit tests
 ./bin/{plugin_name}_tests
+```
 
 {Describe any additional testing details, test categories, or GPU requirements.}

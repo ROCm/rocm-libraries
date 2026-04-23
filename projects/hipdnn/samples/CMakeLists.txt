@@ -152,7 +152,7 @@ install(FILES "${INSTALLED_CTEST_FILE}" DESTINATION ${HIPDNN_SAMPLES_CTEST_FILE_
 find_package(hiprtc REQUIRED)
 include(ExternalProject)
 
-find_program(CLANG_TIDY_EXE NAMES clang-tidy-21 clang-tidy-1)
+find_program(CLANG_TIDY_EXE NAMES clang-tidy-20 clang-tidy)
 set(EXAMPLE_ENGINE_PLUGIN_CLANG_TIDY_CACHE_ARGS "")
 set(EXAMPLE_ENGINE_PLUGIN_CLANG_TIDY_CMAKE_ARGS "")
 if(CLANG_TIDY_EXE)
