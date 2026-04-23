@@ -13,7 +13,7 @@ Documentation for hipBLAS is available at
 
 ### Resolved issue
 
-* Restored fallback of using deprecated rocBLAS API `rocblas_set_device_memory_size` if allocations failing
+* Restored fallback of using the deprecated rocBLAS API `rocblas_set_device_memory_size` if allocations are failing.
 
 ## hipBLAS 3.3.0
 
