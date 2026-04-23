@@ -377,7 +377,7 @@ def publishDevDockerImage(Map conf=[:])
     }
     def ciImage = getDockerImageName(dockerArgs)
 
-    echo "Publishing dev image: ${ciImage} → ${dateTag}"
+    echo "Publishing dev image: ${ciImage} -> ${dateTag}"
     withDockerRegistry([credentialsId: "docker_test_cred", url: ""]) {
         sh """
             docker pull ${ciImage}
@@ -393,7 +393,7 @@ def publishDevDockerImage(Map conf=[:])
 def promoteTheRockDockerImage(String hashedImage, String fullHash)
 {
     def targetImage = "${env.MIOPEN_DOCKER_IMAGE_URL}:therock"
-    echo "Promoting ${hashedImage} → ${targetImage} (hash: ${fullHash})"
+    echo "Promoting ${hashedImage} -> ${targetImage} (hash: ${fullHash})"
     withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
         sh """
             docker pull ${hashedImage}
