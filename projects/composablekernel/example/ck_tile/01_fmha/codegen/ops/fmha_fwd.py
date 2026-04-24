@@ -1139,7 +1139,6 @@ class KernelComponentFactoryGfx950(
                     pipelines.append(FmhaFwdPipeline("qr_async_trload", "row", "f", "f", "f", "f", logits, bias, lse, dropout, qscale, mask, skip, "t", sink))  # fmt: skip
                     pipelines.append(FmhaFwdPipeline("qr_async_trload", "row", "f", "f", "t", "t", logits, bias, lse, dropout, qscale, mask, skip, "t", sink))  # fmt: skip
                     pipelines.append(FmhaFwdPipeline("qr_async_trload", "row", "t", "t", "f", "f", logits, bias, lse, dropout, qscale, mask, skip, "t", sink))  # fmt: skip  # group mode spad
-                    pipelines.append(FmhaFwdPipeline("qr_async_trload", "row", "t", "t", "t", "t", logits, bias, lse, dropout, qscale, mask, skip, "t", sink))  # fmt: skip  # group mode spad+dpad
 
             # # qr_async_trload_v3 bf16/fp16 not ready
             # if (hdim, hdim_v) == (128, 128):
