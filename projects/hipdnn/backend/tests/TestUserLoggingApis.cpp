@@ -82,6 +82,7 @@ protected:
 // Test: User callback receives backend logs
 TEST_F(IntegrationBackendUserLoggingApis, UserCallbackReceivesLogs)
 {
+    SKIP_IF_NO_DEVICES();
     auto recorder = IsolatedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
 
     // Register test recording callback
@@ -104,6 +105,7 @@ TEST_F(IntegrationBackendUserLoggingApis, UserCallbackReceivesLogs)
 // Test: Unregister callback with SEV_OFF stops log capture
 TEST_F(IntegrationBackendUserLoggingApis, UnregisterWithSevOffStopsCapture)
 {
+    SKIP_IF_NO_DEVICES();
     auto recorder = IsolatedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
 
     // Register callback
@@ -137,6 +139,7 @@ TEST_F(IntegrationBackendUserLoggingApis, UnregisterWithSevOffStopsCapture)
 // Test: Sync callback executes immediately
 TEST_F(IntegrationBackendUserLoggingApis, SyncCallbackImmediate)
 {
+    SKIP_IF_NO_DEVICES();
     auto recorder = IsolatedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
 
     // Register callback in SYNC mode
@@ -187,6 +190,7 @@ TEST_F(IntegrationBackendUserLoggingApis, RejectsInvalidMode)
 // Test: Callback respects log level filtering
 TEST_F(IntegrationBackendUserLoggingApis, CallbackRespectsLogLevel)
 {
+    SKIP_IF_NO_DEVICES();
     auto recorder = IsolatedLogRecorder::withCurrentLevel();
 
     // Set log level to ERROR (filters out INFO and WARN)
@@ -210,6 +214,7 @@ TEST_F(IntegrationBackendUserLoggingApis, CallbackRespectsLogLevel)
 // Test: Update callback level
 TEST_F(IntegrationBackendUserLoggingApis, UpdateCallbackLevel)
 {
+    SKIP_IF_NO_DEVICES();
     auto recorder = IsolatedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
 
     // Register callback at INFO
@@ -244,6 +249,7 @@ TEST_F(IntegrationBackendUserLoggingApis, UpdateCallbackLevel)
 // Test: Async callback queues logs
 TEST_F(IntegrationBackendUserLoggingApis, AsyncCallbackQueued)
 {
+    SKIP_IF_NO_DEVICES();
     auto recorder = IsolatedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
 
     // Register callback in ASYNC mode
@@ -265,6 +271,7 @@ TEST_F(IntegrationBackendUserLoggingApis, AsyncCallbackQueued)
 // Test: Callback that throws exception is handled
 TEST_F(IntegrationBackendUserLoggingApis, CallbackThrowsException)
 {
+    SKIP_IF_NO_DEVICES();
     // Callback that throws exception
     static bool s_shouldThrow = true;
     auto throwingCallback = [](hipdnnUserLogCallbackHandle_t, hipdnnSeverity_t, const char*) {
@@ -302,6 +309,7 @@ TEST_F(IntegrationBackendUserLoggingApis, CallbackThrowsException)
 // Test: Synchronous guarantee on unregister
 TEST_F(IntegrationBackendUserLoggingApis, SyncGuaranteeOnUnregister)
 {
+    SKIP_IF_NO_DEVICES();
     // Track callback invocations
     static std::atomic<int> s_callbackCount{0};
     static std::atomic<bool> s_callbackActive{false};
@@ -365,6 +373,7 @@ TEST_F(IntegrationBackendUserLoggingApis, SyncGuaranteeOnUnregister)
 // Test: Switch between sync and async mode
 TEST_F(IntegrationBackendUserLoggingApis, SwitchBetweenSyncAndAsync)
 {
+    SKIP_IF_NO_DEVICES();
     auto recorder = IsolatedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
 
     // Start with SYNC mode
@@ -392,6 +401,7 @@ TEST_F(IntegrationBackendUserLoggingApis, SwitchBetweenSyncAndAsync)
 // Test: Switch from async to sync mode
 TEST_F(IntegrationBackendUserLoggingApis, SwitchBetweenAsyncAndSync)
 {
+    SKIP_IF_NO_DEVICES();
     auto recorder = IsolatedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
 
     // Start with ASYNC mode
@@ -419,6 +429,7 @@ TEST_F(IntegrationBackendUserLoggingApis, SwitchBetweenAsyncAndSync)
 // Test: Duplicate registration updates existing
 TEST_F(IntegrationBackendUserLoggingApis, DuplicateUpdatesExisting)
 {
+    SKIP_IF_NO_DEVICES();
     auto recorder = IsolatedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
 
     // Register callback at INFO
@@ -450,6 +461,7 @@ TEST_F(IntegrationBackendUserLoggingApis, DuplicateUpdatesExisting)
 // Test: Concurrent logging with user callback toggle between registered and unregistered
 TEST_F(IntegrationBackendUserLoggingApis, ConcurrentLoggingWithCallbackToggle)
 {
+    SKIP_IF_NO_DEVICES();
     // Redirect default logging to file to avoid console spam when callback is disabled
     _logFile = "concurrent_user_callback_toggle_test.log";
     hipdnn_data_sdk::utilities::setEnv("HIPDNN_LOG_FILE", _logFile.c_str());
@@ -611,6 +623,7 @@ TEST_F(IntegrationBackendUserLoggingApis, ConcurrentLoggingWithCallbackToggle)
 // Test: Reentrant logging from sync callback is prevented (no stack overflow)
 TEST_F(IntegrationBackendUserLoggingApis, ReentrantLoggingPrevented)
 {
+    SKIP_IF_NO_DEVICES();
     // Counter to track recursive attempts
     std::atomic<int> recursiveAttempts{0};
     std::atomic<int> callbackInvocations{0};
@@ -672,6 +685,7 @@ TEST_F(IntegrationBackendUserLoggingApis, ReentrantLoggingPrevented)
 // Test: Multiple callbacks (2 async + 2 sync) all receive logs independently
 TEST_F(IntegrationBackendUserLoggingApis, MultipleCallbacksAllReceiveLogs)
 {
+    SKIP_IF_NO_DEVICES();
     auto countingCallback
         = [](hipdnnUserLogCallbackHandle_t userHandle, hipdnnSeverity_t, const char*) {
               static_cast<std::atomic<int>*>(userHandle)->fetch_add(1);

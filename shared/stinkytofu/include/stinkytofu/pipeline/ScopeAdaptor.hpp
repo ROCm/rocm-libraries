@@ -265,6 +265,7 @@ class ScopeAdaptor : public Pass {
     void run(Function& /*outerFunc*/, PassContext& outerCtx) override {
         // Propagate config from outer PassContext to inner PM
         innerPM.setGemmTileConfig(outerCtx.getGemmTileConfig());
+        innerPM.setAsmCapsConfig(outerCtx.getAsmCapsConfig());
         // innerPM.setPassFeatureConfig(outerCtx.getPassFeatureConfig());
 
         if (groupNames.empty()) {
