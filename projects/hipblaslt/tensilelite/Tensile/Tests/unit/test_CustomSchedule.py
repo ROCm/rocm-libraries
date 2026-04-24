@@ -24,7 +24,7 @@ import pytest
 from unittest.mock import MagicMock
 
 from Tensile.Components.CustomSchedule import hasCustomSchedule, ScheduleInfo
-from Tensile.Components.CMSValidator import isValid, SchedulePosition, ValidatorPass, ValidationContext
+from Tensile.Components.CMSValidator import isValid, SchedulePosition, ValidationContext, ValidationConcern, active_concerns
 from Tensile.Common import IsaVersion
 from cms_test_utils import make_mock_id_map, make_mock_mfma_code
 
@@ -1176,91 +1176,60 @@ class TestCustomScheduleTF32:
         assert valid, message
 
 class TestCustomScheduleValidation:
-    def test_disable_single_pass(self):
-        """Disabling a single pass allows an otherwise-invalid schedule to pass that check."""
+    def test_ascending_order_catches_invalid_schedule(self):
+        """A non-ascending schedule is caught by the ordering concern."""
         kernel = create_base_kernel()
         invalid_schedule = {"P": [[3, 2, 1]]}
 
-        # Without disabling, the non-ascending schedule fails on ascending order.
         si = ScheduleInfo(1, None, invalid_schedule, None, None, None, None)
         status, message = isValid(si, _make_context(kernel, si))
         assert status == False
         assert "Non-descending-order" in message
 
-        # Disabling VERIFY_ASCENDING_ORDER skips that check.
-        # Remaining structural and timeline passes are also disabled because this
-        # minimal schedule lacks the keys/data they require.
-        si = ScheduleInfo(1, 0, invalid_schedule, None, None, None, None)
-        for p in ValidatorPass:
-            if p != ValidatorPass.VERIFY_CORRECT_NUMBER_OF_INSTRUCTIONS:
-                si.disableValidationPass(p, reason="Not relevant to this test")
-        status, message = isValid(si, _make_context(kernel, si))
-        # The ascending-order error is gone; the schedule passes the remaining enabled check.
-        assert "Non-descending-order" not in message
-        assert status == True
-
-    def test_disable_validation_pass_reason_required(self):
-        """disableValidationPass requires a non-empty reason string and a valid ValidatorPass enum member."""
-        si = ScheduleInfo(1, None, {}, None, None, None, None)
-
-        with pytest.raises(ValueError):
-            si.disableValidationPass(ValidatorPass.VERIFY_ASCENDING_ORDER, reason="")
-
-        with pytest.raises(ValueError):
-            si.disableValidationPass(ValidatorPass.VERIFY_ASCENDING_ORDER, reason="   ")
-
-        with pytest.raises(TypeError):
-            si.disableValidationPass("not_an_enum", reason="some reason")
-
-        with pytest.raises(TypeError):
-            si.disableValidationPass(42, reason="some reason")
-
-    def test_disable_multiple_validation_passes(self):
-        """Multiple validation passes can be disabled independently."""
-        invalid_schedule = {"P": [[3, 2, 1]]}
-        si = ScheduleInfo(1, None, invalid_schedule, None, None, None, None)
-        si.disableValidationPass(ValidatorPass.VERIFY_ASCENDING_ORDER, reason="Reason A")
-        si.disableValidationPass(ValidatorPass.VERIFY_CORRECT_NUMBER_OF_INSTRUCTIONS, reason="Reason B")
-
-        assert si.reasonForDisablingValidationPass(ValidatorPass.VERIFY_ASCENDING_ORDER) == "Reason A"
-        assert si.reasonForDisablingValidationPass(ValidatorPass.VERIFY_CORRECT_NUMBER_OF_INSTRUCTIONS) == "Reason B"
-        # Passes not disabled return None.
-        assert si.reasonForDisablingValidationPass(ValidatorPass.VERIFY_SCC_OVERLAP) is None
-
-    def test_reason_for_disabling_validation_pass(self):
-        """reasonForDisablingValidationPass returns the reason for disabled passes, None for enabled ones,
-        and raises TypeError for non-enum arguments."""
-        si = ScheduleInfo(1, None, {}, None, None, None, None)
-
-        # Nothing disabled yet.
-        assert si.reasonForDisablingValidationPass(ValidatorPass.VERIFY_ASCENDING_ORDER) is None
-
-        si.disableValidationPass(ValidatorPass.VERIFY_ASCENDING_ORDER, reason="test reason")
-        assert si.reasonForDisablingValidationPass(ValidatorPass.VERIFY_ASCENDING_ORDER) == "test reason"
-
-        # Non-enum argument raises TypeError.
-        with pytest.raises(TypeError):
-            si.reasonForDisablingValidationPass("not_an_enum")
-
-        with pytest.raises(TypeError):
-            si.reasonForDisablingValidationPass(42)
-
-    def test_disable_validation_all_passes(self):
-        """disableValidation disables all passes with the given reason."""
-        si = ScheduleInfo(1, None, {}, None, None, None, None)
-        si.disableValidation("entire schedule unsupported")
-
-        for p in ValidatorPass:
-            assert si.reasonForDisablingValidationPass(p) == "entire schedule unsupported"
-
-    def test_disable_validation_isvalid_early_return(self):
-        """isValid returns (True, '') with a single warning when all passes are disabled."""
+    def test_active_concerns_gfx950_with_packs(self):
+        """gfx950 kernel with packs includes PACK_DATA_READY."""
         kernel = create_base_kernel()
-        si = ScheduleInfo(1, 0, {}, None, None, None, None)
-        si.disableValidation("not supported yet")
-        status, message = isValid(si, _make_context(kernel, si))
-        assert status == True
-        assert message == ""
+        idmap = {"LRA0": [], "PackA0": [], "GRA": [], "GRIncA": [], "SYNC": []}
+        concerns = active_concerns(kernel, idmap)
+        assert ValidationConcern.PACK_DATA_READY in concerns
+        assert ValidationConcern.LR_DATA_READY in concerns
+        assert ValidationConcern.INSTRUCTION_ORDERING in concerns
+        assert ValidationConcern.SCHEDULE_COMPLETENESS in concerns
+        assert ValidationConcern.SCALAR_REGISTER_SAFETY in concerns
+
+    def test_active_concerns_gfx950_tf32(self):
+        """gfx950 kernel with TF32 includes QUAD_CYCLE_TIMING."""
+        kernel = create_base_kernel()
+        kernel["UseF32XEmulation"] = True
+        idmap = {"LRA0": [], "PackA0": [], "GRA": []}
+        concerns = active_concerns(kernel, idmap)
+        assert ValidationConcern.QUAD_CYCLE_TIMING in concerns
+
+    def test_active_concerns_gfx1151(self):
+        """gfx1151 currently only has INSTRUCTION_ORDERING in its catalog.
+
+        Other concerns (LW_ORDERING, GR_VGPR_READY, LDS coherence, etc.) are
+        declared as future work in the catalog comments but not yet active —
+        they will be added in stage 12 when the corresponding rules are built.
+        """
+        kernel = _gfx1151_base_kernel()
+        kernel["MacroTile0"] = 96
+        kernel["MacroTile1"] = 128
+        idmap = {"LRA0": [], "GRA": [], "SYNC": []}
+        concerns = active_concerns(kernel, idmap)
+        assert ValidationConcern.INSTRUCTION_ORDERING in concerns
+        # No other concerns are active yet for gfx1151
+        assert ValidationConcern.PACK_DATA_READY not in concerns
+        assert ValidationConcern.QUAD_CYCLE_TIMING not in concerns
+        assert ValidationConcern.SCALAR_REGISTER_SAFETY not in concerns
+        assert ValidationConcern.SCHEDULE_COMPLETENESS not in concerns
+
+    def test_active_concerns_unknown_isa(self):
+        """Unknown ISA returns empty set (graceful fallback)."""
+        kernel = create_base_kernel()
+        kernel["ISA"] = (99, 99, 99)
+        concerns = active_concerns(kernel, {})
+        assert concerns == set()
 
 class TestSchedulePositionOrdering:
     """Test that SchedulePosition comparison handles vmfma_index=-1 correctly.
@@ -1329,12 +1298,9 @@ class TestSchedulePositionOrdering:
 #     and does NOT mis-dispatch CDNA 4 kernels to a gfx1151 schedule.
 #   - predicate  : non-TN kernels and non-16bit dtypes are not routed to
 #     TN-only fp16/bf16 gfx1151 schedules.
-#   - validator  : the granular disable helper leaves the ISA-agnostic
-#     structural passes enabled and disables only the CDNA-4-specific ones,
-#     so isValid returns True with real coverage (not a blanket bypass).
-
-from Tensile.Components.CustomSchedule import _disable_cdna4_only_passes_for_gfx1151
-import Tensile.Components.CMSValidator as cmsv
+#   - validator  : active_concerns() auto-skips rules that don't apply to
+#     gfx1151's ISA catalog, so isValid returns True with the correct
+#     subset of validation (ordering checks, not CDNA-4 timing).
 
 
 def _gfx1151_base_kernel():
@@ -1459,12 +1425,12 @@ class TestCustomScheduleGfx1151:
         assert info.numCodePaths >= 1
         assert "SYNC" in info.optSchedule
 
-    # ---- Validator coverage (this is the whole point of the helper) ----
+    # ---- Validator coverage ----
 
     @pytest.mark.parametrize("MT0, MT1, DU, PGR, PLR, MIWG, WTA, WTB, MIK", GFX1151_TILES)
-    def test_validator_passes_with_granular_disables(
+    def test_validator_passes_gfx1151(
             self, MT0, MT1, DU, PGR, PLR, MIWG, WTA, WTB, MIK):
-        """Structural validator passes must still run and succeed on gfx1151."""
+        """Applicable validator rules must run and succeed on gfx1151 schedules."""
         k = _gfx1151_base_kernel()
         update_kernel(k, {
             "MacroTile0": MT0, "MacroTile1": MT1, "DepthU": DU,
@@ -1477,50 +1443,17 @@ class TestCustomScheduleGfx1151:
         valid, msg = isValid(info, _make_context(k, info))
         assert valid, f"MT{MT0}x{MT1}x{DU}: isValid said: {msg}"
 
-    @staticmethod
-    def _empty_schedule_info():
-        return ScheduleInfo(numCodePaths=1, numMfma=1, optSchedule={}, syncCode=[],
-                            nglshift=0, nllshift=0)
-
-    def test_helper_keeps_ascending_order_enabled(self):
-        """_disable_cdna4_only_passes_for_gfx1151 must leave ORDER enabled.
-
-        VERIFY_ASCENDING_ORDER is the only pass that is truly ISA-agnostic
-        (it checks non-decreasing vmfmaIndex sequences, which is a
-        CMS-authoring discipline rule regardless of GPU).
-        """
-        info = self._empty_schedule_info()
-        _disable_cdna4_only_passes_for_gfx1151(info)
-        assert info.reasonForDisablingValidationPass(
-            cmsv.ValidatorPass.VERIFY_ASCENDING_ORDER) is None
-
-    def test_helper_disables_instruction_count_with_reason(self):
-        """COUNT is off until CMS instruction counts are calibrated for wave32."""
-        info = self._empty_schedule_info()
-        _disable_cdna4_only_passes_for_gfx1151(info)
-        reason = info.reasonForDisablingValidationPass(
-            cmsv.ValidatorPass.VERIFY_CORRECT_NUMBER_OF_INSTRUCTIONS)
-        assert reason is not None
-        assert "wave32" in reason
-
-    def test_helper_disables_timeline_passes_with_reasons(self):
-        """All 4 CDNA-4 timeline passes must be disabled with non-empty reasons."""
-        info = self._empty_schedule_info()
-        _disable_cdna4_only_passes_for_gfx1151(info)
-        for pass_id in (
-            cmsv.ValidatorPass.ADD_LOCAL_READ_CONSTRAINTS,
-            cmsv.ValidatorPass.ADD_PACK_CONSTRAINTS,
-            cmsv.ValidatorPass.ADD_GR_NOT_TOO_EARLY_CONSTRAINTS,
-            cmsv.ValidatorPass.ADD_GR_FINISH_BEFORE_LR_CONSTRAINTS,
-        ):
-            reason = info.reasonForDisablingValidationPass(pass_id)
-            assert reason is not None and reason.strip(), pass_id.name
-            assert "CDNA 4" in reason or "CDNA-4" in reason
-
-    def test_helper_disables_scc_overlap_with_reason(self):
-        """SCC-overlap is off until audited against RDNA 3.5 scalar semantics."""
-        info = self._empty_schedule_info()
-        _disable_cdna4_only_passes_for_gfx1151(info)
-        reason = info.reasonForDisablingValidationPass(cmsv.ValidatorPass.VERIFY_SCC_OVERLAP)
-        assert reason is not None
-        assert "RDNA 3.5" in reason or "RDNA3.5" in reason
+    def test_gfx1151_concerns_skip_timeline_rules(self):
+        """gfx1151 catalog only has INSTRUCTION_ORDERING, so all timeline rules auto-skip."""
+        k = _gfx1151_base_kernel()
+        k["MacroTile0"] = 96
+        k["MacroTile1"] = 128
+        idmap = {"LRA0": [], "GRA": [], "SYNC": []}
+        concerns = active_concerns(k, idmap)
+        # No timeline rule concerns match, so timeline construction is skipped entirely.
+        assert ValidationConcern.PACK_DATA_READY not in concerns
+        assert ValidationConcern.LR_DATA_READY not in concerns
+        assert ValidationConcern.LDS_WRITE_AFTER_READ not in concerns
+        assert ValidationConcern.LDS_READ_AFTER_WRITE not in concerns
+        # Ordering is the only active concern
+        assert concerns == {ValidationConcern.INSTRUCTION_ORDERING}

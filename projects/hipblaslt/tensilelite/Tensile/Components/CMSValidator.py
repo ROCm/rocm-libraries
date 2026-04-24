@@ -67,18 +67,6 @@ class SchedulePosition:
 POSITION_INF = SchedulePosition(loop_index=9_999, vmfma_index=9_999, sub_index=9_999)
 POSITION_NEG_INF = SchedulePosition(loop_index=-9_999, vmfma_index=-9_999, sub_index=-9_999)
 
-class ValidatorPass(Enum):
-    # Structural checks
-    VERIFY_CORRECT_NUMBER_OF_INSTRUCTIONS = auto()
-    VERIFY_ASCENDING_ORDER = auto()
-    VERIFY_SCC_OVERLAP = auto()
-    # Timeline passes
-    ADD_LOCAL_READ_CONSTRAINTS = auto()
-    ADD_PACK_CONSTRAINTS = auto()
-    ADD_GR_NOT_TOO_EARLY_CONSTRAINTS = auto()
-    ADD_GR_FINISH_BEFORE_LR_CONSTRAINTS = auto()
-
-
 class ValidationConcern(Enum):
     """Abstract correctness properties the validator must check.
 
@@ -117,12 +105,17 @@ ISA_CONCERN_CATALOG: dict[tuple, set[ValidationConcern]] = {
     },
     (11, 5, 1): {   # RDNA 3.5 (gfx1151)
         ValidationConcern.INSTRUCTION_ORDERING,
-        ValidationConcern.SCHEDULE_COMPLETENESS,
-        ValidationConcern.LR_DATA_READY,
-        ValidationConcern.LDS_WRITE_AFTER_READ,
-        ValidationConcern.LDS_READ_AFTER_WRITE,
-        ValidationConcern.LW_ORDERING,
-        ValidationConcern.GR_VGPR_READY,
+        # Concerns below are declared but have no rules yet — they will be added in stage 12
+        # (gfx1151 rules) when LWAfterLRRule, LWBeforeLRRule, GRVgprReadyRule are implemented.
+        # Until then, only INSTRUCTION_ORDERING is actively validated for gfx1151.
+        #
+        # NOT YET ACTIVE (no rules):
+        #   SCHEDULE_COMPLETENESS — CMS counts authored for CDNA wave64, not calibrated for wave32
+        #   LR_DATA_READY — needs WMMA-specific LR→WMMA tracing
+        #   LDS_WRITE_AFTER_READ — needs DTL=0 LW-based rule
+        #   LDS_READ_AFTER_WRITE — needs DTL=0 LW-based rule
+        #   LW_ORDERING — needs new LWAfterLRRule
+        #   GR_VGPR_READY — needs new GRVgprReadyRule
     },
 }
 
@@ -134,6 +127,8 @@ def active_concerns(kernel: dict, idmap: dict) -> set[ValidationConcern]:
     Returns an empty set if the ISA is not in the catalog (graceful fallback
     for ISAs that haven't been characterized yet).
     """
+    if "ISA" not in kernel:
+        return set()  # No ISA specified — no concern-based validation
     isa = tuple(kernel["ISA"])
     if isa not in ISA_CONCERN_CATALOG:
         return set()  # Unknown ISA — no concern-based validation
@@ -217,6 +212,39 @@ def build_pipeline_stages(pgr: int, nglshift: int, nllshift: int) -> list[Pipeli
         name="NLL", has_global_reads=False, has_global_read_incs=False,
         has_local_reads_lr0_only=True, vlcnt_shift=nllshift))
     return stages
+
+
+class ValidationRule(ABC):
+    """A composable validation rule that operates on a Timeline.
+
+    Each rule declares which ValidationConcern(s) it covers. isValid uses
+    active_concerns() to decide which rules to run for a given kernel.
+    """
+
+    @abstractmethod
+    def concerns(self) -> set[ValidationConcern]:
+        """Which concerns this rule covers."""
+        ...
+
+    @abstractmethod
+    def run(self, timeline: 'Timeline', ctx: 'ValidationContext') -> Optional[str]:
+        """Execute the rule. Return None if valid, error message string if not."""
+        ...
+
+
+class StructuralRule(ABC):
+    """A composable validation rule that operates on raw schedule data (no Timeline)."""
+
+    @abstractmethod
+    def concerns(self) -> set[ValidationConcern]:
+        """Which concerns this rule covers."""
+        ...
+
+    @abstractmethod
+    def run(self, schedule_info: 'ScheduleInfo', context: 'ValidationContext',
+            code_path: int) -> tuple[bool, str]:
+        """Execute the rule. Return (True, '') if valid, (False, message) if not."""
+        ...
 
 
 def invert_mfma_reorder(mfma_reorder: list[int]) -> dict[int, int]:
@@ -2968,14 +2996,6 @@ def add_gr_finish_before_lr_constraints(timeline: Timeline, ctx: 'ValidationCont
     apply_barriers(timeline)
 
 
-TIMELINE_PASSES: dict[ValidatorPass, Callable[['Timeline', 'ValidationContext'], None]] = {
-    ValidatorPass.ADD_LOCAL_READ_CONSTRAINTS: add_local_read_constraints,
-    ValidatorPass.ADD_PACK_CONSTRAINTS: add_pack_constraints,
-    ValidatorPass.ADD_GR_NOT_TOO_EARLY_CONSTRAINTS: add_gr_not_too_early_constraints,
-    ValidatorPass.ADD_GR_FINISH_BEFORE_LR_CONSTRAINTS: add_gr_finish_before_lr_constraints,
-}
-
-
 def index_for_force_unroll_sub_iter(original_idx: int, M: int, N: int) -> int:
     """
     Map original column-major index to index scheme used by force unroll sub-iter:
@@ -3073,11 +3093,82 @@ def verify_ascending_order(scheduleInfo, context: 'ValidationContext', code_path
     return True, ""
 
 
-STRUCTURAL_CHECKS: dict[ValidatorPass, Callable] = {
-    ValidatorPass.VERIFY_CORRECT_NUMBER_OF_INSTRUCTIONS: verify_correct_number_of_instructions,
-    ValidatorPass.VERIFY_ASCENDING_ORDER: verify_ascending_order,
-    ValidatorPass.VERIFY_SCC_OVERLAP: verify_scc_overlap,
-}
+# ---------------------------------------------------------------------------
+# Concern-based rule wrappers (stage 11 → isValid wiring)
+# ---------------------------------------------------------------------------
+
+class AscendingOrderRule(StructuralRule):
+    def concerns(self) -> set[ValidationConcern]:
+        return {ValidationConcern.INSTRUCTION_ORDERING}
+
+    def run(self, schedule_info, context, code_path):
+        return verify_ascending_order(schedule_info, context, code_path)
+
+
+class InstructionCountRule(StructuralRule):
+    def concerns(self) -> set[ValidationConcern]:
+        return {ValidationConcern.SCHEDULE_COMPLETENESS}
+
+    def run(self, schedule_info, context, code_path):
+        return verify_correct_number_of_instructions(schedule_info, context, code_path)
+
+
+class SCCOverlapRule(StructuralRule):
+    def concerns(self) -> set[ValidationConcern]:
+        return {ValidationConcern.SCALAR_REGISTER_SAFETY}
+
+    def run(self, schedule_info, context, code_path):
+        return verify_scc_overlap(schedule_info, context, code_path)
+
+
+class LRDataReadyRule(ValidationRule):
+    def concerns(self) -> set[ValidationConcern]:
+        return {ValidationConcern.LR_DATA_READY}
+
+    def run(self, timeline, ctx):
+        add_local_read_constraints(timeline, ctx)
+        return validate_timeline(timeline)
+
+
+class PackDataReadyRule(ValidationRule):
+    def concerns(self) -> set[ValidationConcern]:
+        return {ValidationConcern.PACK_DATA_READY, ValidationConcern.QUAD_CYCLE_TIMING}
+
+    def run(self, timeline, ctx):
+        add_pack_constraints(timeline, ctx)
+        return validate_timeline(timeline)
+
+
+class GRAfterLRRule(ValidationRule):
+    def concerns(self) -> set[ValidationConcern]:
+        return {ValidationConcern.LDS_WRITE_AFTER_READ}
+
+    def run(self, timeline, ctx):
+        add_gr_not_too_early_constraints(timeline, ctx)
+        return validate_timeline(timeline)
+
+
+class GRBeforeLRRule(ValidationRule):
+    def concerns(self) -> set[ValidationConcern]:
+        return {ValidationConcern.LDS_READ_AFTER_WRITE}
+
+    def run(self, timeline, ctx):
+        add_gr_finish_before_lr_constraints(timeline, ctx)
+        return validate_timeline(timeline)
+
+
+TIMELINE_RULES: list[ValidationRule] = [
+    LRDataReadyRule(),
+    PackDataReadyRule(),
+    GRAfterLRRule(),
+    GRBeforeLRRule(),
+]
+
+STRUCTURAL_RULES: list[StructuralRule] = [
+    AscendingOrderRule(),
+    InstructionCountRule(),
+    SCCOverlapRule(),
+]
 
 
 def format_kernel_string(kernel: 'Solution') -> str:
@@ -3100,67 +3191,53 @@ def isValid(scheduleInfo: 'ScheduleInfo', context: 'ValidationContext') -> tuple
 
     Note 2: if False is returned, this is not proof that the schedule
     is invalid. It may be a false positive.
+
+    Rule dispatch uses the concern-based framework: active_concerns()
+    determines which ValidationConcern values apply to this kernel,
+    and only rules whose concerns intersect are executed.
     """
     kernel = context.kernel
 
     # Set mfma_reorder from schedule info
     context.mfma_reorder = scheduleInfo.mfmaReorder or []
 
-    # Log disabled passes once, before iterating over code paths.
-    kernel_desc = format_kernel_string(kernel)
+    # Determine required concerns from kernel config + ISA catalog.
+    required = active_concerns(kernel, context.id_map)
 
-    # Check if ALL passes are disabled — single warning + early return
-    all_disabled_reasons = {p: scheduleInfo.reasonForDisablingValidationPass(p) for p in ValidatorPass}
-    if all(all_disabled_reasons.values()):
-        reasons = set(all_disabled_reasons.values())
-        reason_str = "; ".join(reasons)
-        printWarning(f"All validation passes disabled on {kernel_desc}: {reason_str}")
-        return True, ""
-
-    disabled_structural = {}
-    for pass_id in STRUCTURAL_CHECKS:
-        if reason := scheduleInfo.reasonForDisablingValidationPass(pass_id):
-            disabled_structural[pass_id] = reason
-            printWarning(f"Skipping {pass_id.name} on {kernel_desc}: {reason}")
-
-    disabled_timeline = {}
-    for pass_id in TIMELINE_PASSES:
-        if reason := scheduleInfo.reasonForDisablingValidationPass(pass_id):
-            disabled_timeline[pass_id] = reason
-            printWarning(f"Skipping {pass_id.name} on {kernel_desc}: {reason}")
-
-    # If every timeline pass is disabled, skip timeline construction entirely.
-    # create_unified_timeline currently asserts CDNA-4 layout invariants (DTL=1,
-    # LR suffix range) which do not hold for schedules that opted out of all
-    # timeline checks (e.g. gfx1151 WMMA schedules). This lets those schedules
-    # still exercise the ISA-agnostic structural passes above.
-    all_timeline_disabled = len(disabled_timeline) == len(TIMELINE_PASSES)
+    # Unknown/missing ISA (not in catalog) → run all rules (legacy behavior).
+    # This ensures tests and kernels without ISA metadata get full validation.
+    if not required:
+        required = set(ValidationConcern)
 
     for code_path in range(scheduleInfo.numCodePaths):
-        # === Structural checks (no Timeline needed) ===
-        for pass_id, check in STRUCTURAL_CHECKS.items():
-            if pass_id in disabled_structural:
+        # === Structural rules (no Timeline needed) ===
+        for rule in STRUCTURAL_RULES:
+            if not (rule.concerns() & required):
                 continue
-            status, message = check(scheduleInfo, context, code_path)
+            status, message = rule.run(scheduleInfo, context, code_path)
             if not status:
                 scheduleInfo.pretty_print()
                 return False, f"Code path {code_path}: {message}"
 
-        if all_timeline_disabled:
+        # === Timeline rules ===
+        # Skip timeline construction entirely when no timeline rule is needed.
+        # This avoids hitting CDNA-4 layout assertions for ISAs (e.g. gfx1151)
+        # whose timeline concerns are not yet covered by any rule.
+        timeline_needed = any(r.concerns() & required for r in TIMELINE_RULES)
+        if not timeline_needed:
             continue
 
-        # === Timeline-based checks ===
         timeline = create_unified_timeline(
             scheduleInfo, kernel, code_path,
             id_map=context.id_map,
             mfma_code=context.mfma_code,
         )
 
-        for pass_id, add_constraints in TIMELINE_PASSES.items():
-            if pass_id in disabled_timeline:
+        for rule in TIMELINE_RULES:
+            if not (rule.concerns() & required):
                 continue
-            add_constraints(timeline, context)
-            if error := validate_timeline(timeline):
+            error = rule.run(timeline, context)
+            if error:
                 scheduleInfo.pretty_print()
                 return False, f"Code path {code_path}: {error}"
 
