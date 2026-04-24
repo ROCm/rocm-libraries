@@ -54,12 +54,12 @@ Meanwhile, the `idMap` — built in `CustomSchedule.py` — already contains the
 | **01**   | Thread idMap/mfmaCode, add `rocisa_inst`           | **Done**        | Bug fixed by review: mfma_code indexing with mfmaReorder                       |
 | **02**   | Type resolution (PACK_TYPE_MAP, resolve_pack_type) | **Done**        | Bug fixed by review: detect_pack_groups CVT1→CVT0 boundary                    |
 | **03**   | Register utilities                                 | **Done**        | `get_reg_range`, `reg_ranges_overlap`, `get_dst_range`, `get_src_ranges`       |
-| **04**   | Register-based pack dependency derivation          | **Done**        | Dual-path with warnings; 4x4 MFMA mismatch noted (see Known Issues)           |
+| **04**   | Register-based pack dependency derivation          | **Done**        | `derive_pack_must_start_after` reduces to latest dep; dual-path validated      |
 | **05**   | Switch `_populate_instructions` to idMap-driven    | **Done**        | Positional fallback kept as else branch (removed fully in 07)                  |
 | **06**   | Register-based LR→MFMA needed_by                   | **Done**        | `set_lr_needed_by_from_mfma_operands` — not yet wired into validation loop     |
 | **07**   | Make idMap/mfmaCode mandatory, delete dead code    | **Done**        | All fallbacks removed, mock test infra built, all 421 tests pass               |
 | **08**   | Register-based Pack→MFMA needed_by                 | **Done**        | `set_pack_needed_by_from_mfma_operands` — not yet wired into validation loop   |
-| **09**   | Tile-math function deletion                        | **Not started** | Blocked: dual-path 4x4 MFMA mismatch must be resolved first                   |
+| **09**   | Tile-math function deletion                        | **Blocked**     | must_start_after dual-path validated; see Known Issues 1, 3, 6 for remaining   |
 | **10**   | SWaitCnt counter verification                      | **Done**        | `verify_swaitcnt_counters` — not yet wired as ValidatorPass                    |
 | **11**   | Multi-ISA framework (ValidationConcern, catalog)   | **Done**        | `ValidationConcern`, `ISA_CONCERN_CATALOG`, `active_concerns()` — not wired    |
 | **12**   | gfx1151 rules                                      | **Not started** | Blocked: needs full ValidationRule conversion in isValid                        |
@@ -70,15 +70,19 @@ Meanwhile, the `idMap` — built in `CustomSchedule.py` — already contains the
 
 ### Known Issues
 
-1. **Dual-path pack dependency mismatch on 4x4 MFMA TF32**: The register-based `derive_pack_must_start_after` finds dependencies through both `.a` and `.b` register paths of `MFMAInstruction` that the positional logic handles differently. The register-based approach sometimes reports the same producer twice (via different source register ranges). Must be resolved before stage 09 (tile-math deletion).
+1. **Dual-path pack dependency mismatch on 4x4 MFMA TF32 — RESOLVED**: `derive_pack_must_start_after` now reduces to the latest dependency via `max(done_idx)`, matching the positional code behavior. Dual-path comparison validated with assertions — all 421 tests pass with no mismatches. The dual-path comparison code has been removed from `hook_up_packs`.
 
 2. **Mock test infrastructure does not scale to multiple ISAs**: The current `cms_test_utils.py` mock builders (`make_mock_id_map`, `make_mock_mfma_code`) use hardcoded CDNA 4 rocisa instruction types (VPermB32, VCvtPkF32toBF16, MFMAInstruction, BufferLoadB128, etc.) and hardcoded register layouts. When gfx1151 WMMA schedules or future ISAs are added, those schedules have different instruction types (WMMA instructions, different pack patterns, DTL=0 with explicit LW instructions, different GR patterns without m0 pointer interleaving) that the mocks don't handle. The mock builders are a parallel reimplementation of kernel writer output logic — they will drift as new ISAs are added. See "Future Work: Mock Infrastructure Scalability" section below.
 
-3. **Register-based functions (06, 08) not yet wired into the validation loop**: `set_lr_needed_by_from_mfma_operands` and `set_pack_needed_by_from_mfma_operands` are implemented but the existing tile-math functions are still the ones actually used by the validator passes. The cutover requires resolving issue #1.
+3. **Mock register layouts don't connect LR.dst → Pack.src**: The mock instructions in `cms_test_utils.py` create LR and Pack objects with register ranges that don't form proper def-use chains. `derive_pack_must_start_after` returns empty dependency lists for 89 of 421 tests because it can't trace the LR→Pack register connection. This prevents replacing the positional `_hook_up_packs_*` functions with the register-based `derive_pack_must_start_after`. Must be fixed before stage 09 can delete the positional must_start_after code.
 
-4. **Multi-ISA framework (11) not yet wired into isValid**: The `ValidationConcern` enum, `ISA_CONCERN_CATALOG`, and `active_concerns()` are implemented but `isValid` still uses the old `ValidatorPass`/`TIMELINE_PASSES`/`STRUCTURAL_CHECKS` system. The conversion to `ValidationRule`/`StructuralRule` objects and the coverage check haven't been done.
+4. **`set_lr_needed_by_from_mfma_operands` doesn't propagate through pack chains**: The function builds `pack_to_mfma` starting from direct MFMA consumers but never propagates backwards through the Pack chain (LR→Pack→MFMA). It only finds LR→MFMA connections when LR.dst directly maps to an MFMA source register, which doesn't happen for BF16/TF32 data paths where packing is involved. The function is effectively a no-op for all current test cases. Must be fixed before stage 09 can delete `set_lr_needed_by_for_VMFMA`.
 
-5. **PipelineStage model (14) not yet wired into Timeline**: `build_pipeline_stages()` and `PipelineStage` are implemented but the Timeline still uses the hardcoded `[ML-1, ML, NGL, NLL]` loop list and string-based `_should_add`.
+5. **`set_pack_needed_by_from_mfma_operands` doesn't trace through intermediate packs**: For TF32 4x4 paths, CVT0→MFMAPack→CVT1→MFMA is a multi-hop chain. The function only matches Pack.dst against direct MFMA.a/b registers. CVT0 packs (whose needed_by should be the MFMAPack) are not found because MFMAPacks are explicitly skipped. Must be fixed before stage 09 can delete `_set_pack_needed_by`.
+
+6. **Multi-ISA framework (11) not yet wired into isValid**: The `ValidationConcern` enum, `ISA_CONCERN_CATALOG`, and `active_concerns()` are implemented but `isValid` still uses the old `ValidatorPass`/`TIMELINE_PASSES`/`STRUCTURAL_CHECKS` system. The conversion to `ValidationRule`/`StructuralRule` objects and the coverage check haven't been done.
+
+7. **PipelineStage model (14) not yet wired into Timeline**: `build_pipeline_stages()` and `PipelineStage` are implemented but the Timeline still uses the hardcoded `[ML-1, ML, NGL, NLL]` loop list and string-based `_should_add`.
 
 ---
 
