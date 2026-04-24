@@ -43,6 +43,45 @@ Meanwhile, the `idMap` — built in `CustomSchedule.py` — already contains the
 
 ---
 
+## Implementation Status
+
+| Stage | Description | Status | Notes |
+|-------|-------------|--------|-------|
+| **00a** | Eliminate TimedPack | **Done** | Moved timing fields into Pack, deleted TimedPack class |
+| **00b** | Unify `needed_by` type | **Already done** | GlobalRead.needed_by was already `ValidatorInstruction` |
+| **00c** | Typed context (`ValidationContext` dataclass) | **Deferred** | Can be done as standalone cleanup anytime |
+| **00d** | Document limitations | **Done** | Created `CMSValidator_LIMITATIONS.md` |
+| **01** | Thread idMap/mfmaCode, add `rocisa_inst` | **Done** | Bug found and fixed by review: mfma_code indexing with mfmaReorder |
+| **02** | Type resolution (PACK_TYPE_MAP, resolve_pack_type) | **Done** | Bug found and fixed by review: detect_pack_groups CVT1→CVT0 boundary |
+| **03** | Register utilities | **Done** | `_parse_reg_name`, `get_reg_range`, `reg_ranges_overlap`, `get_dst_range`, `get_src_ranges` |
+| **04** | Register-based pack dependency derivation | **Done** | Dual-path validation with warnings; 4x4 MFMA mismatch noted (see Known Issues) |
+| **05** | Switch `_populate_instructions` to idMap-driven | **Done** | Removed positional fallback, kept it as else branch (removed fully in 07) |
+| **06** | Register-based LR→MFMA needed_by | **Done** | `set_lr_needed_by_from_mfma_operands` implemented, not yet wired into validation loop |
+| **07** | Make idMap/mfmaCode mandatory, delete dead code | **Done** | All fallbacks removed, mock test infrastructure built, all 421 tests pass |
+| **08** | Register-based Pack→MFMA needed_by | **Done** | `set_pack_needed_by_from_mfma_operands` implemented, not yet wired into validation loop |
+| **09** | Tile-math function deletion | **Not started** | Blocked: dual-path 4x4 MFMA mismatch must be resolved first |
+| **10** | SWaitCnt counter verification | **Done** | `verify_swaitcnt_counters` implemented, not yet wired as ValidatorPass |
+| **11** | Multi-ISA framework (ValidationConcern, ISA catalog) | **Done** | `ValidationConcern` enum, `ISA_CONCERN_CATALOG`, `active_concerns()` — not yet wired into isValid |
+| **12** | gfx1151 rules | **Not started** | Blocked: needs full ValidationRule conversion in isValid |
+| **13** | findValidPositions query | **Done** | Brute-force query wrapping isValid |
+| **14** | PipelineStage model for PGR | **Done** | `PipelineStage` dataclass and `build_pipeline_stages()` — not yet wired into Timeline |
+| **15** | Split into modules | **Not started** | Deferred: do after functional changes stabilize |
+| **16** | Separate Timeline | **Not started** | No dependency on 15 |
+
+### Known Issues
+
+1. **Dual-path pack dependency mismatch on 4x4 MFMA TF32**: The register-based `derive_pack_must_start_after` finds dependencies through both `.a` and `.b` register paths of `MFMAInstruction` that the positional logic handles differently. The register-based approach sometimes reports the same producer twice (via different source register ranges). Must be resolved before stage 09 (tile-math deletion).
+
+2. **Mock test infrastructure does not scale to multiple ISAs**: The current `cms_test_utils.py` mock builders (`make_mock_id_map`, `make_mock_mfma_code`) use hardcoded CDNA 4 rocisa instruction types (VPermB32, VCvtPkF32toBF16, MFMAInstruction, BufferLoadB128, etc.) and hardcoded register layouts. When gfx1151 WMMA schedules or future ISAs are added, those schedules have different instruction types (WMMA instructions, different pack patterns, DTL=0 with explicit LW instructions, different GR patterns without m0 pointer interleaving) that the mocks don't handle. The mock builders are a parallel reimplementation of kernel writer output logic — they will drift as new ISAs are added. See "Future Work: Mock Infrastructure Scalability" section below.
+
+3. **Register-based functions (06, 08) not yet wired into the validation loop**: `set_lr_needed_by_from_mfma_operands` and `set_pack_needed_by_from_mfma_operands` are implemented but the existing tile-math functions are still the ones actually used by the validator passes. The cutover requires resolving issue #1.
+
+4. **Multi-ISA framework (11) not yet wired into isValid**: The `ValidationConcern` enum, `ISA_CONCERN_CATALOG`, and `active_concerns()` are implemented but `isValid` still uses the old `ValidatorPass`/`TIMELINE_PASSES`/`STRUCTURAL_CHECKS` system. The conversion to `ValidationRule`/`StructuralRule` objects and the coverage check haven't been done.
+
+5. **PipelineStage model (14) not yet wired into Timeline**: `build_pipeline_stages()` and `PipelineStage` are implemented but the Timeline still uses the hardcoded `[ML-1, ML, NGL, NLL]` loop list and string-based `_should_add`.
+
+---
+
 ## Design
 
 ### 1. Type Resolution via idMap Inspection
@@ -463,8 +502,8 @@ Switch `_populate_instructions` to use type resolution from `idMap`. Replace GR 
 **06-lr-needed-by-from-registers** (refactor, stacked on 04)
 Implement `set_lr_needed_by_from_mfma_operands` — traces LR.dst → Pack chain → MFMA.a/b to find the consuming MFMA. Dual-path validation against existing `set_lr_needed_by_for_VMFMA` / `lr_needed_by_mfma`.
 
-**07-dead-code-deletion** (cleanup, stacked on 05)
-Delete constants made dead by the type-resolution cutover: `PACK_GROUP_SIZE_TF32`, `PACK_GROUP_SIZE_TF32_4X4`, `TF32_CVT0_END`, `TF32_MIDDLE_16_START/END`, `TF32_4X4_MFMA_START/END`, `VGPRS_PER_CONVERSION_GROUP`, `MFMAS_PER_TILE_*`. Delete `_compute_swap_pack_count`.
+**07-dead-code-deletion** (cleanup, stacked on 05) — **SCOPE EXPANDED**
+As implemented: make `id_map` and `mfma_code` mandatory parameters (no Optional, no fallbacks). Remove all positional fallback else-blocks. Delete dead constants (`TF32_CVT0_END`, `TF32_MIDDLE_16_START/END`, `TF32_4X4_MFMA_START/END`) and `_compute_swap_pack_count`. Keep `PACK_GROUP_SIZE_TF32/4X4` (still used by `detect_pack_groups`). Create `cms_test_utils.py` with `make_mock_id_map()` and `make_mock_mfma_code()`. Update all 36 `isValid()` calls in tests. Add empty-data guards to `_hook_up_packs_f32` and `_hook_up_packs_f32_mfma`.
 
 **08-pack-needed-by-from-registers** (refactor, stacked on 06)
 Implement `set_pack_needed_by_from_mfma_operands` — scans `mfma_code` for the earliest MFMA consuming each pack's output. Dual-path validation against `_set_pack_needed_by` / `find_earliest_mfma_execution`.
@@ -506,6 +545,38 @@ Extract `ScheduleParser` and `LoopManager` from `Timeline`. Timeline becomes an 
 | Symbolic register names fail to resolve to numeric indices | `regName.getTotalIdx()` uses the `rocIsa` singleton's `vgprIdx` map, populated by the kernel writer before CMS runs. If resolution fails, it's a kernel writer bug — fail loud |
 | TF32 emulation's 4x4 MFMAs in pack chains create a non-obvious register dependency path | The 4x4 MFMAs have `.a`, `.b`, `.acc`, `.acc2` just like regular MFMAs. Register tracing through CVT0.dst→4x4MFMA.a→4x4MFMA.acc→CVT1.src works identically. Validated by dual-path in step 7 |
 | mfmaCode contains non-MFMA objects after removeComments | `removeComments` strips TextBlock and SNop. Add assertion: `assert all(isinstance(m, (MFMAInstruction, SMFMAInstruction, MXMFMAInstruction)) for m in mfmaCode)` |
+
+---
+
+## Future Work: Mock Infrastructure Scalability
+
+### Problem
+
+The current mock test infrastructure (`Tensile/Tests/unit/cms_test_utils.py`) creates mock rocisa instruction objects by hardcoding CDNA 4 instruction types and register layouts:
+
+- **Pack mocks**: `VPermB32` for BF16, `VCvtPkF32toBF16` + `VSubF32` for TF32, `VCvtPkF32toBF16` + `MFMAInstruction` for 4x4 TF32
+- **GR mocks**: interleaved `SMovB32`/`SAddU32` + `BufferLoadB128` for DTL=1, all `BufferLoadB128` for DTL=0
+- **LR mocks**: `DSLoadB128` with sequential register indices
+- **SwapPack mocks**: `VSwapB32` for VW > 1
+
+This is a parallel reimplementation of what the kernel writer produces. It works for gfx950 CDNA 4 today but will not scale to:
+
+- **gfx1151 (RDNA 3.5)**: Uses WMMA instructions (not MFMA), no packing (no VPermB32/VCvtPk), DTL=0 with explicit LW instructions, different GR patterns without m0 pointer interleaving
+- **Future ISAs**: May introduce new instruction types, new pack patterns, new data paths
+
+### Approaches to Investigate
+
+1. **Snapshot fixtures**: Capture real `idMap` and `mfmaCode` from kernel generation runs (as done during investigation with `TENSILE_LOG_IDMAP`). Serialize to fixture files. Tests load fixtures. Pros: mocks match reality by construction. Cons: fixtures must be regenerated when kernel writer changes; fixtures are opaque binary blobs.
+
+2. **Kernel writer export function**: Have the kernel writer expose a function that produces just the `idMap` (and `mfmaCode`) for a given kernel config without doing full code generation. Pros: always correct, no parallel implementation. Cons: requires kernel writer changes; may be slow for unit tests.
+
+3. **Minimal type stubs**: The validator only inspects a few properties of idMap entries: `type()` for `resolve_pack_type`/`is_gr_load`, `.dst`/`.srcs`/`.a`/`.b` for register extraction, `.dscnt`/`.vlcnt`/`.vscnt` for SWaitCnt, `.getParams()` for SNop. Create a thin stub protocol that satisfies these checks without importing specific rocisa instruction classes. Pros: ISA-agnostic. Cons: stubs may diverge from real objects.
+
+4. **Per-ISA mock registries**: Each ISA registers its mock builders, similar to how CMS schedules are registered. When a test needs a mock idMap for gfx1151, it calls the gfx1151-specific builder. Pros: cleanly extensible. Cons: still requires maintaining mock builders per ISA.
+
+### Recommendation
+
+Investigate option 2 (kernel writer export function) first — it's the only approach where the mock is guaranteed correct without maintenance. If that's too expensive for unit test speed, fall back to option 1 (snapshot fixtures) for the common cases and option 4 (per-ISA mock registries) for edge-case tests.
 
 ---
 
