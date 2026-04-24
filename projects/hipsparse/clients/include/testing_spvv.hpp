@@ -220,8 +220,8 @@ void testing_spvv(Arguments argus)
         // Warm up
         for(int iter = 0; iter < number_cold_calls; ++iter)
         {
-            CHECK_HIPSPARSE_ERROR(testing::hipsparseSpVV(
-                handle, trans, x, y, &hresult, computeType, externalBuffer));
+            CHECK_HIPSPARSE_ERROR(
+                testing::hipsparseSpVV(handle, trans, x, y, &hresult, computeType, externalBuffer));
             CHECK_HIP_ERROR(hipStreamSynchronize(stream));
         }
 
@@ -230,8 +230,8 @@ void testing_spvv(Arguments argus)
         // Performance run
         for(int iter = 0; iter < number_hot_calls; ++iter)
         {
-            CHECK_HIPSPARSE_ERROR(testing::hipsparseSpVV(
-                handle, trans, x, y, &hresult, computeType, externalBuffer));
+            CHECK_HIPSPARSE_ERROR(
+                testing::hipsparseSpVV(handle, trans, x, y, &hresult, computeType, externalBuffer));
             CHECK_HIP_ERROR(hipStreamSynchronize(stream));
         }
 
