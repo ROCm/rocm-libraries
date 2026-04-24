@@ -196,6 +196,15 @@ if(NOT "${HIP_PLATFORM}" STREQUAL "nvidia")
             list(APPEND LAPACK_CMAKE_ARGS -DCMAKE_POSITION_INDEPENDENT_CODE=ON)
         endif()
 
+        # Force OpenBLAS to use the same compiler as hipSOLVER to avoid
+        # runtime library mismatches (e.g., MinGW vs MSVCRT on Windows)
+        if(CMAKE_C_COMPILER)
+            list(APPEND LAPACK_CMAKE_ARGS -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER})
+        endif()
+        if(CMAKE_CXX_COMPILER)
+            list(APPEND LAPACK_CMAKE_ARGS -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER})
+        endif()
+
         include(ExternalProject)
         # Use OpenBLAS v0.3.33 (commit 62bcfb0)
         ExternalProject_Add(hipsolver-static-lapack
