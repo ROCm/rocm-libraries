@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright (c) 2022 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <miopen/solution.hpp>
 
@@ -30,6 +7,7 @@
 #include <miopen/check_numerics.hpp>
 #include <miopen/conv/data_invoke_params.hpp>
 #include <miopen/conv/wrw_invoke_params.hpp>
+#include <miopen/hof_match.hpp>
 #include <miopen/kernel.hpp>
 
 #include <miopen/mha/invoke_params.hpp>
@@ -41,7 +19,7 @@
 
 #include <nlohmann/json.hpp>
 
-#include <boost/hof/match.hpp>
+#include "miopen/conv/db_getter.hpp"
 #include "miopen/fusion/problem_description.hpp"
 #include "miopen/fusion/context.hpp"
 
@@ -70,10 +48,10 @@ void Solution::Run(const Handle& handle,
                          std::to_string(workspace_size) + " was provided");
     }
 
-    std::visit(boost::hof::match(
+    std::visit(miopen::hof_match(
                    [&](const Problem& problem_) {
                        std::visit(
-                           boost::hof::match(
+                           miopen::hof_match(
                                [&](const ConvolutionDescriptor& op_desc) {
                                    RunImpl(handle, inputs, workspace, workspace_size, op_desc);
                                },
@@ -134,7 +112,7 @@ void Solution::LogDriverCommand(const BatchnormDescriptor& desc) const
 
 void Solution::LogDriverCommand(const Problem& problem_) const
 {
-    std::visit(boost::hof::match(
+    std::visit(miopen::hof_match(
                    [&](const BiasDescriptor&) { /* \todo: think on how to log bias */ },
                    [&](const MhaDescriptor&) { /* \todo: think on how to log mha */ },
                    [&](const SoftmaxDescriptor&) { /* \todo: think on how to log softmax */ },
@@ -166,7 +144,7 @@ void Solution::RunImpl(const Handle& handle,
         auto ret = found->second;
         if(!ret.descriptor.has_value())
             ret.descriptor = problem_casted.GetTensorDescriptorChecked(name, name_str);
-        return ret;
+        return std::move(ret);
     };
 
     auto x       = get_input_checked(miopenTensorConvolutionX, "miopenTensorConvolutionX");
@@ -293,7 +271,7 @@ void Solution::RunImpl(const Handle& handle,
         auto ret = found->second;
         if(!ret.descriptor.has_value())
             ret.descriptor = problem_casted.GetTensorDescriptorChecked(name, name_str);
-        return ret;
+        return std::move(ret);
     };
 
     const mha::ProblemDescription problem_description = problem_casted.AsMha();
@@ -489,7 +467,7 @@ void Solution::RunImpl(const Handle& handle,
         auto ret = found->second;
         if(!ret.descriptor.has_value())
             ret.descriptor = problem_casted.GetTensorDescriptorChecked(name, name_str);
-        return ret;
+        return std::move(ret);
     };
 
     const softmax::ProblemDescription problem_description = problem_casted.AsSoftmax();
@@ -541,11 +519,14 @@ void Solution::RunImpl(const Handle& handle,
 
     if(!kernels.empty())
     {
-        const auto ctx              = ExecutionContext{&handle};
-        const auto softmax_solution = GetSolver() == regularSoftmax.SolverDbId()
-                                          ? regularSoftmax.GetSolution(ctx, problem_description)
-                                          : attnSoftmax.GetSolution(ctx, problem_description);
-        auto kernel_handles         = std::vector<Kernel>{std::begin(kernels), std::end(kernels)};
+        const auto ctx = ExecutionContext{&handle};
+        auto db_getter = MakeConvDbGetter(ctx);
+        const auto softmax_solution =
+            GetSolver() == regularSoftmax.SolverDbId()
+                ? solver::FindSolution(
+                      regularSoftmax, ctx, problem_description, db_getter, invoke_ctx)
+                : attnSoftmax.GetSolution(ctx, problem_description);
+        auto kernel_handles = std::vector<Kernel>{std::begin(kernels), std::end(kernels)};
 
         if(softmax_solution.invoker_factory.has_value())
         {
@@ -569,11 +550,12 @@ void Solution::RunImpl(const Handle& handle,
         return;
     }
 
-    auto ctx = ExecutionContext{&handle};
-
-    const auto softmax_solution = GetSolver() == regularSoftmax.SolverDbId()
-                                      ? regularSoftmax.GetSolution(ctx, problem_description)
-                                      : attnSoftmax.GetSolution(ctx, problem_description);
+    auto ctx       = ExecutionContext{&handle};
+    auto db_getter = MakeConvDbGetter(ctx);
+    const auto softmax_solution =
+        GetSolver() == regularSoftmax.SolverDbId()
+            ? solver::FindSolution(regularSoftmax, ctx, problem_description, db_getter, invoke_ctx)
+            : attnSoftmax.GetSolution(ctx, problem_description);
 
     if(softmax_solution.invoker_factory.has_value())
     {

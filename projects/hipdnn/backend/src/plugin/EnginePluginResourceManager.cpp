@@ -2,7 +2,8 @@
 // SPDX-License-Identifier:  MIT
 
 #include <algorithm>
-#include <hipdnn_data_sdk/data_objects/engine_details_generated.h>
+#include <hipdnn_data_sdk/utilities/EngineNames.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/engine_details_generated.h>
 #include <mutex>
 #include <vector>
 
@@ -26,120 +27,126 @@ namespace plugin
 namespace
 {
 
-struct PluginLoadingConfig
+// Static storage for engine plugin configuration
+std::mutex gEngineMutex;
+PluginLoadingConfig gEngineConfig;
+std::weak_ptr<EnginePluginManager> gEngineWeakPtr;
+std::shared_ptr<EnginePluginManager> gEnginePersistentPtr;
+std::atomic<bool> gEngineShutdownFlag{false};
+
+// Register atexit handler to set shutdown flag
+struct EnginePluginShutdownRegistrar
 {
-    std::set<std::filesystem::path> paths;
-    hipdnnPluginLoadingMode_ext_t mode = HIPDNN_DEFAULT_PLUGIN_LOADING_MODE;
+    EnginePluginShutdownRegistrar()
+    {
+        std::atexit([]() { gEngineShutdownFlag.store(true, std::memory_order_release); });
+    }
 };
 
-std::mutex pluginMutex;
-PluginLoadingConfig pluginConfig;
-std::weak_ptr<EnginePluginManager> pmPtr;
+EnginePluginShutdownRegistrar gEngineShutdownRegistrar;
 
 } // namespace
 
-void EnginePluginResourceManager::setPluginPaths(
-    const std::vector<std::filesystem::path>& pluginPaths,
-    hipdnnPluginLoadingMode_ext_t loadingMode)
+// Static accessor implementations for CRTP base class
+std::mutex& EnginePluginResourceManager::getMutex()
 {
-    std::lock_guard<std::mutex> lock(pluginMutex);
-
-    THROW_IF_FALSE(pmPtr.expired(),
-                   HIPDNN_STATUS_NOT_SUPPORTED,
-                   "hipdnnSetEnginePluginPaths_ext cannot be called with an active handle.");
-
-    pluginConfig.mode = loadingMode;
-
-    if(loadingMode == HIPDNN_PLUGIN_LOADING_ABSOLUTE)
-    {
-        pluginConfig.paths = {pluginPaths.begin(), pluginPaths.end()};
-    }
-    else
-    {
-        pluginConfig.paths.insert(pluginPaths.begin(), pluginPaths.end());
-    }
+    return gEngineMutex;
 }
 
-std::set<std::filesystem::path> EnginePluginResourceManager::getPluginPaths()
+PluginLoadingConfig& EnginePluginResourceManager::getConfig()
 {
-    std::lock_guard<std::mutex> lock(pluginMutex);
-    return pluginConfig.paths;
+    return gEngineConfig;
 }
 
-void EnginePluginResourceManager::getLoadedPluginFiles(size_t* numPlugins,
-                                                       char** pluginPaths,
-                                                       size_t* maxStringLen) const
+std::weak_ptr<EnginePluginManager>& EnginePluginResourceManager::getWeakPtr()
 {
+    return gEngineWeakPtr;
+}
+
+std::shared_ptr<EnginePluginManager>& EnginePluginResourceManager::getPersistentPtr()
+{
+    return gEnginePersistentPtr;
+}
+
+std::atomic<bool>& EnginePluginResourceManager::getShutdownFlag()
+{
+    return gEngineShutdownFlag;
+}
+
+const char* EnginePluginResourceManager::getPluginTypeName()
+{
+    return "engine";
+}
+
+size_t EnginePluginResourceManager::getEngineCount() const
+{
+    return getEngineInfos().size();
+}
+
+std::vector<EngineInfo> EnginePluginResourceManager::getEngineInfos() const
+{
+    if(_cachedEngineInfos.has_value())
+    {
+        return *_cachedEngineInfos;
+    }
+
+    std::vector<EngineInfo> infos;
     if(!_pm)
     {
-        *numPlugins = 0;
-        *maxStringLen = 0;
-        return;
+        _cachedEngineInfos = infos;
+        return infos;
     }
 
-    const auto& pathSet = _pm->getLoadedPluginFiles();
-
-    size_t requiredLen = 0;
-    for(const auto& path : pathSet)
+    const auto& plugins = _pm->getPlugins();
+    for(const auto& plugin : plugins)
     {
-        requiredLen = std::max(requiredLen, path.string().length() + 1);
-    }
+        auto pluginVersion = std::string(plugin->version());
+        auto pluginType = std::string(::toString(plugin->type()));
+        auto pluginName = std::string(plugin->name());
 
-    if(pluginPaths == nullptr)
-    {
-        *numPlugins = pathSet.size();
-        *maxStringLen = requiredLen;
-        return;
-    }
-
-    if(*numPlugins < pathSet.size() || *maxStringLen < requiredLen)
-    {
-        throw HipdnnException(HIPDNN_STATUS_BAD_PARAM, "Insufficient buffer space provided.");
-    }
-
-    std::vector<std::filesystem::path> pathsVec;
-    pathsVec.reserve(pathSet.size());
-    pathsVec.assign(pathSet.begin(), pathSet.end());
-
-    for(size_t i = 0; i < pathsVec.size(); ++i)
-    {
-        if(pluginPaths[i] == nullptr)
+        auto engineIds = plugin->getAllEngineIds();
+        for(const auto id : engineIds)
         {
-            throw HipdnnException(HIPDNN_STATUS_BAD_PARAM, "A plugin path string buffer is null.");
+            EngineInfo info;
+            info.engineId = id;
+            info.version = pluginVersion;
+            info.type = pluginType;
+            info.pluginName = pluginName;
+
+            try
+            {
+                info.engineName = hipdnn_data_sdk::utilities::getEngineNameFromId(id);
+            }
+            catch(const std::out_of_range&)
+            {
+                info.engineName = hipdnn_data_sdk::utilities::formatEngineIdHex(id);
+            }
+
+            infos.push_back(std::move(info));
         }
-        hipdnn_data_sdk::utilities::copyMaxSizeWithNullTerminator(
-            pluginPaths[i], pathsVec[i].string().c_str(), *maxStringLen);
     }
+
+    std::sort(infos.begin(), infos.end(), [](const EngineInfo& a, const EngineInfo& b) {
+        return a.engineName < b.engineName;
+    });
+
+    _cachedEngineInfos = infos;
+    return infos;
 }
 
 std::shared_ptr<EnginePluginResourceManager> EnginePluginResourceManager::create()
 {
-    auto pm = pmPtr.lock();
-
-    if(!pm)
-    {
-        std::lock_guard<std::mutex> lock(pluginMutex);
-
-        pm = pmPtr.lock();
-
-        if(!pm)
-        {
-            pm = std::make_shared<EnginePluginManager>();
-            pm->loadPlugins(pluginConfig.paths, pluginConfig.mode);
-            pmPtr = pm;
-        }
-    }
-
+    auto pm = getOrCreatePluginManager();
     return std::make_shared<EnginePluginResourceManager>(pm);
 }
 
 EnginePluginResourceManager::EnginePluginResourceManager()
-    : _pm(std::make_shared<EnginePluginManager>())
+    : PluginResourceManagerBase(std::make_shared<EnginePluginManager>())
 {
 }
 
 EnginePluginResourceManager::EnginePluginResourceManager(std::shared_ptr<EnginePluginManager> pm)
-    : _pm(std::move(pm))
+    : PluginResourceManagerBase(std::move(pm))
 {
     // Helper to safely destroy a handle during error cleanup, logging any failures
     auto safeDestroyHandle = [](const EnginePlugin* plugin, hipdnnEnginePluginHandle_t handle) {
@@ -220,26 +227,41 @@ EnginePluginResourceManager::EnginePluginResourceManager(std::shared_ptr<EngineP
 
 EnginePluginResourceManager::~EnginePluginResourceManager()
 {
-    // Destroy plugin handles
-    for(const auto& [handle, plugin] : _handleToPlugin)
-    {
+    // Lambda to safely destroy a handle, catching all errors
+    auto safeDestroyHandle = [](const EnginePlugin* plugin, hipdnnEnginePluginHandle_t handle) {
         try
         {
             plugin->destroyHandle(handle);
         }
-        catch(const HipdnnException& e)
+        catch(const std::exception& e)
         {
-            HIPDNN_BACKEND_LOG_ERROR(e.getMessage());
+            HIPDNN_BACKEND_LOG_WARN("Failed to destroy handle for plugin '{}' during cleanup: {}",
+                                    plugin->name(),
+                                    e.what());
         }
+        catch(...)
+        {
+            HIPDNN_BACKEND_LOG_WARN(
+                "Failed to destroy handle for plugin '{}' during cleanup: unknown error",
+                plugin->name());
+        }
+    };
+
+    // Destroy plugin handles
+    for(const auto& [handle, plugin] : _handleToPlugin)
+    {
+        safeDestroyHandle(plugin, handle);
     }
 }
 
 EnginePluginResourceManager::EnginePluginResourceManager(
     EnginePluginResourceManager&& other) noexcept
-    : _pm(std::move(other._pm))
-    , _handleToPlugin(std::move(other._handleToPlugin))
+    : _handleToPlugin(std::move(other._handleToPlugin))
     , _engineIdToHandle(std::move(other._engineIdToHandle))
+    , _cachedEngineInfos(std::move(other._cachedEngineInfos))
 {
+    // Move base class member explicitly
+    _pm = std::move(other._pm);
 }
 
 EnginePluginResourceManager&
@@ -247,9 +269,10 @@ EnginePluginResourceManager&
 {
     if(this != &other)
     {
-        _pm = std::move(other._pm);
         _handleToPlugin = std::move(other._handleToPlugin);
         _engineIdToHandle = std::move(other._engineIdToHandle);
+        _cachedEngineInfos = std::move(other._cachedEngineInfos);
+        _pm = std::move(other._pm);
     }
     return *this;
 }
@@ -263,7 +286,8 @@ void EnginePluginResourceManager::setStream(hipStream_t stream) const
 }
 
 std::vector<int64_t>
-    EnginePluginResourceManager::getApplicableEngineIds(const GraphDescriptor* graphDesc) const
+    EnginePluginResourceManager::getApplicableEngineIds(const GraphDescriptor* graphDesc,
+                                                        bool findFirst) const
 {
     THROW_IF_NULL(graphDesc, HIPDNN_STATUS_INTERNAL_ERROR, "Graph descriptor cannot be null");
 
@@ -290,6 +314,11 @@ std::vector<int64_t>
                                       "Engine ID " + std::to_string(id)
                                           + " is already associated with a different plugin");
             }
+        }
+
+        if(findFirst && !engineIds.empty())
+        {
+            break;
         }
     }
 
@@ -495,7 +524,7 @@ EngineDetailsWrapper::EngineDetailsWrapper(const std::shared_ptr<EnginePluginRes
     _rm->getEngineDetails(engineId, graphDesc, &_engineDetailsData);
     flatbuffers::Verifier verifier(static_cast<const uint8_t*>(_engineDetailsData.ptr),
                                    _engineDetailsData.size);
-    if(!verifier.VerifyBuffer<hipdnn_data_sdk::data_objects::EngineDetails>())
+    if(!verifier.VerifyBuffer<hipdnn_flatbuffers_sdk::data_objects::EngineDetails>())
     {
         throw HipdnnException(HIPDNN_STATUS_BAD_PARAM,
                               "EngineDetailsWrapper: unable to verify the flatbuffer schema.");
@@ -540,7 +569,7 @@ EngineDetailsWrapper& EngineDetailsWrapper::operator=(EngineDetailsWrapper&& oth
     return *this;
 }
 
-const hipdnn_data_sdk::data_objects::EngineDetails* EngineDetailsWrapper::get() const
+const hipdnn_flatbuffers_sdk::data_objects::EngineDetails* EngineDetailsWrapper::get() const
 {
     if(_engineDetailsData.ptr == nullptr)
     {
@@ -549,7 +578,7 @@ const hipdnn_data_sdk::data_objects::EngineDetails* EngineDetailsWrapper::get() 
                               "get() called on an empty object");
     }
 
-    return hipdnn_data_sdk::data_objects::GetEngineDetails(_engineDetailsData.ptr);
+    return hipdnn_flatbuffers_sdk::data_objects::GetEngineDetails(_engineDetailsData.ptr);
 }
 
 // TODO: Use engineId from engineConfig

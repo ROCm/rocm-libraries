@@ -1,11 +1,13 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-#include "HipdnnEnginePluginHandle.hpp"
+#include "HipdnnMiopenHandle.hpp"
+#include "HipdnnMiopenSettings.hpp"
 #include "engines/plans/MiopenBatchnormBwdPlan.hpp"
 #include <gtest/gtest.h>
-#include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
+#include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 using namespace miopen_plugin;
 
@@ -13,8 +15,8 @@ TEST(TestBatchnormBwdParams, InitializesAllTensorsFromValidGraph)
 {
     // Create a valid batchnorm graph
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormBwdGraph();
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                              builder.GetSize());
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                                     builder.GetSize());
 
     // Get the batchnorm node and attributes
     const auto& node = graph.getNode(0);
@@ -45,8 +47,8 @@ TEST(TestBatchnormBwdParams, HandlesMissingOptionalTensors)
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormBwdGraph(
         {1, 1, 1, 1}, {1, 1, 1, 1}, false // Set has_optional_attributes to false
     );
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                              builder.GetSize());
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                                     builder.GetSize());
 
     // Get the batchnorm node and attributes
     const auto& node = graph.getNode(0);
@@ -65,8 +67,8 @@ TEST(TestBatchnormBwdParams, InitializesFusedActivationBiasWithAllTensors)
 {
     // Create a fused batchnorm backward + activation + bias graph
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferActBwdGraph();
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                              builder.GetSize());
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                                     builder.GetSize());
 
     // Get the three required nodes
     const auto& batchnormInfNode = graph.getNode(0);
@@ -107,8 +109,8 @@ TEST(TestBatchnormBwdParams, FusedParamsHandlesMissingOptionalMeanVariance)
     // Create a fused graph without optional mean/variance
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferActBwdGraph(
         {1, 1, 1, 1}, {1, 1, 1, 1}, false);
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                              builder.GetSize());
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                                     builder.GetSize());
 
     const auto& batchnormInfNode = graph.getNode(0);
     const auto& pointwiseNode = graph.getNode(1);
@@ -138,8 +140,8 @@ TEST(TestBatchnormBwdPlan, FusedModeHasActivationAndBias)
 {
     // Create a fused batchnorm backward + activation + bias graph
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferActBwdGraph();
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                              builder.GetSize());
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                                     builder.GetSize());
 
     const auto& batchnormInfNode = graph.getNode(0);
     const auto& pointwiseNode = graph.getNode(1);
@@ -163,9 +165,11 @@ TEST(TestBatchnormBwdPlan, FusedModeHasActivationAndBias)
 
 TEST(TestBatchnormBwdPlan, GetWorkspaceSizeReturnsZeroForFusedMode)
 {
+    SKIP_IF_NO_DEVICES();
+
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferActBwdGraph();
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                              builder.GetSize());
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                                     builder.GetSize());
 
     const auto& batchnormInfNode = graph.getNode(0);
     const auto& pointwiseNode = graph.getNode(1);
@@ -181,34 +185,38 @@ TEST(TestBatchnormBwdPlan, GetWorkspaceSizeReturnsZeroForFusedMode)
 
     BatchnormBwdParams params(
         *batchnormBwdAttrs, *pointwiseAttrs, *batchnormInfAttrs, graph.getTensorMap());
-    BatchnormBwdPlan plan(std::move(params));
+    HipdnnMiopenSettings executionSettings;
+    BatchnormBwdPlan plan(std::move(params), executionSettings);
 
-    HipdnnEnginePluginHandle handle;
+    HipdnnMiopenHandle handle;
     EXPECT_EQ(plan.getWorkspaceSize(handle), 0);
 }
 
 TEST(TestBatchnormBwdPlan, GetWorkspaceSizeReturnsZero)
 {
+    SKIP_IF_NO_DEVICES();
+
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormBwdGraph();
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                              builder.GetSize());
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                                     builder.GetSize());
 
     const auto& node = graph.getNode(0);
     auto* attrs = node.attributes_as_BatchnormBackwardAttributes();
     ASSERT_NE(attrs, nullptr);
 
     BatchnormBwdParams params(*attrs, graph.getTensorMap());
-    BatchnormBwdPlan plan(std::move(params));
+    HipdnnMiopenSettings executionSettings;
+    BatchnormBwdPlan plan(std::move(params), executionSettings);
 
-    HipdnnEnginePluginHandle handle;
+    HipdnnMiopenHandle handle;
     EXPECT_EQ(plan.getWorkspaceSize(handle), 0);
 }
 
 TEST(TestBatchnormBwdPlan, OptionalTensorsAreNotPresentInBasicMode)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormBwdGraph();
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                              builder.GetSize());
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                                     builder.GetSize());
 
     const auto& node = graph.getNode(0);
     auto* attrs = node.attributes_as_BatchnormBackwardAttributes();

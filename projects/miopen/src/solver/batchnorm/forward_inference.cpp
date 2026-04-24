@@ -133,7 +133,7 @@ ConvSolution BnFwdInference::GetSolution(const ExecutionContext& context,
         kernel.kernel_name = "MIOpenBatchNormFwdInfer";
         if(problem.GetMode() == miopenBNSpatial)
         { // SPATIAL kernels
-            kernel.kernel_file += "SpatialHIP.cpp";
+            kernel.kernel_file += "Spatial.cpp";
             kernel.kernel_name += "SpatialEst";
             if(problem.isInverseVariance())
             {
@@ -142,7 +142,7 @@ ConvSolution BnFwdInference::GetSolution(const ExecutionContext& context,
         }
         else
         { // PER ACTIVATION
-            kernel.kernel_file += "PerActHIP.cpp";
+            kernel.kernel_file += "PerAct.cpp";
             kernel.kernel_name += "PerActivationEst";
             if(problem.isInverseVariance())
             {
@@ -160,8 +160,8 @@ ConvSolution BnFwdInference::GetSolution(const ExecutionContext& context,
             {"MIO_BN_GRP2", zlocalsize},
             {"MIO_BN_GFX103X", (StartsWith(handle.GetDeviceName(), "gfx103") ? "1" : "0")},
             {"MIO_BN_GFX110X", (StartsWith(handle.GetDeviceName(), "gfx110") ? "1" : "0")},
-            {"MIO_BN_GFX120X", (StartsWith(handle.GetDeviceName(), "gfx120") ? "1" : "0")},
             {"MIO_BN_GFX115X", (StartsWith(handle.GetDeviceName(), "gfx115") ? "1" : "0")},
+            {"MIO_BN_GFX120X", (StartsWith(handle.GetDeviceName(), "gfx120") ? "1" : "0")},
             {"MIO_LAYOUT_NHWC", static_cast<int>(problem.IsLayoutNHWC())},
             {"MIO_BN_VECTORIZE", static_cast<int>(vectorsize > 1)},
             {"MIO_BN_VEC_SIZE", vectorsize},

@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2020-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -47,7 +47,8 @@ void run_benchmark(benchmark::State&     state,
     const unsigned int         seed = 123;
     std::default_random_engine gen(seed);
 
-    const double avg_segment_length = static_cast<double>(size) / desired_segments;
+    // The minimal average length should at least be 1 to prevent infinite loop.
+    const double avg_segment_length = std::max(1.0, static_cast<double>(size) / desired_segments);
     std::uniform_real_distribution<double> segment_length_dis(0, avg_segment_length * 2);
 
     std::vector<OffsetType> offsets;

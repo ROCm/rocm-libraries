@@ -6,8 +6,11 @@ include(CMakePackageConfigHelpers)
 # Version handling
 hipdnn_setup_version(hipdnn_plugin_sdk)
 
+# Set project with version
+project(hipdnn_plugin_sdk VERSION ${HIPDNN_PLUGIN_SDK_VERSION} LANGUAGES CXX)
+
 # Read data_sdk version for minimum requirement
-hipdnn_get_data_sdk_version(HIPDNN_PLUGIN_SDK_DATA_SDK_MIN_VERSION)
+hipdnn_get_component_version(hipdnn_data_sdk HIPDNN_PLUGIN_SDK_DATA_SDK_MIN_VERSION)
 
 set(HIP_DNN_PLUGIN_SDK_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include")
 
@@ -16,7 +19,7 @@ add_library(hipdnn_plugin_sdk INTERFACE)
 # Generate version header
 hipdnn_generate_version_header(hipdnn_plugin_sdk)
 
-target_link_libraries(hipdnn_plugin_sdk INTERFACE hipdnn_data_sdk)
+target_link_libraries(hipdnn_plugin_sdk INTERFACE hipdnn_flatbuffers_sdk hipdnn_data_sdk)
 
 set(HIP_DNN_PLUGIN_SDK_INSTALL_INCLUDE_DIR "${CMAKE_INSTALL_INCLUDEDIR}/hipdnn/plugin_sdk")
 
@@ -45,6 +48,7 @@ install(
     DESTINATION ${HIP_DNN_PLUGIN_SDK_INSTALL_INCLUDE_DIR}
     COMPONENT Development
     FILES_MATCHING
+    PATTERN "*.inl"
     PATTERN "*.hpp"
     PATTERN "*.h"
     PATTERN "*.h.in" EXCLUDE

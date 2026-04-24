@@ -76,20 +76,16 @@ public:
         const std::string amdgpuVer = GetAmdGpuVersion();
 
         // Format final output
-        std::cout << "Timestamp: " << timestamp << "; "
-                  << "Host Name: " << hostname << "; "
-                  << "Operating System: " << osInfo << "; "
-                  << "ROCm: " << hipVer << "; "
+        std::cout << "Timestamp: " << timestamp << "; " << "Host Name: " << hostname << "; "
+                  << "Operating System: " << osInfo << "; " << "ROCm: " << hipVer << "; "
                   << "MIOpen Driver: " << miopMajor << "." << miopMinor << "." << miopPatch << "; "
-                  << "CPU Vendor: " << cpuVendor << "; "
-                  << "CPU Model: " << cpuModel << "; "
-                  << "RAM Size: " << ramSize << "; "
-                  << "GPU Model: " << gpuInfo << "; "
+                  << "CPU Vendor: " << cpuVendor << "; " << "CPU Model: " << cpuModel << "; "
+                  << "RAM Size: " << ramSize << "; " << "GPU Model: " << gpuInfo << "; "
                   << "AMDGPU Driver: " << amdgpuVer << std::endl;
 #else
-        miopMajor;
-        miopMinor;
-        miopPatch;
+        (void)miopMajor;
+        (void)miopMinor;
+        (void)miopPatch;
 #endif
     }
 

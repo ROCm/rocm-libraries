@@ -20,12 +20,12 @@ namespace origami
 {
     /**
      * @brief Formocast performance prediction simulator for GPU GEMM operations
-     * 
+     *
      * This class provides detailed performance prediction for GPU matrix multiplication
      * operations by simulating cache behavior, memory access patterns, and compute
      * throughput. It models various optimization techniques including Global Split K,
      * Local Split K, and different workgroup mapping strategies.
-     * 
+     *
      * This simulator is specifically designed for kernels generated from TensileLite,
      * capturing the performance characteristics and optimization strategies used in
      * TensileLite-generated GEMM kernels.
@@ -35,7 +35,7 @@ namespace origami
     public:
         /**
          * @brief Configuration parameters for matrix tile sizes and memory access patterns
-         * 
+         *
          * Contains all the tuning parameters that define how a GEMM kernel will execute,
          * including tile dimensions, vector widths, and various optimization flags.
          */
@@ -56,8 +56,8 @@ namespace origami
             int     workGroupMapping   = 0;
             int     globalAccumulation = 0;
 
-            int  workGroupMappingXCC                    = 0;
-            int  workGroupMappingXCCGroup               = 0;
+            int  workGroupMappingXCC                    = 1;
+            int  workGroupMappingXCCGroup               = -1;
             bool globalSplitUCoalesced                  = false;
             bool globalSplitUWorkGroupMappingRoundRobin = false;
 
@@ -100,7 +100,7 @@ namespace origami
 
         /** @brief L1 cache hit rates, inherits structure from L2CacheHitRate */
         struct L1CacheHitRate : public L2CacheHitRate{};
-        
+
         /** @brief L3 cache hit rates, inherits structure from L2CacheHitRate */
         struct L3CacheHitRate : public L2CacheHitRate{};
 
@@ -114,7 +114,7 @@ namespace origami
 
         /**
          * @brief Hardware-specific constants and capabilities
-         * 
+         *
          * Contains architecture-specific parameters for cache sizes, bandwidths,
          * frequencies, and latencies used in performance modeling.
          */
@@ -149,6 +149,12 @@ namespace origami
             uint32_t LocalReadConflictMultiplierB128;
             uint32_t LocalReadConflictMultiplierB64;
             uint32_t LocalReadConflictMultiplierB32;
+            uint32_t LocalWriteBaseLatencyB128;
+            uint32_t LocalWriteBaseLatencyB64;
+            uint32_t LocalWriteBaseLatencyB32;
+            uint32_t LocalWriteConflictMultiplierB128;
+            uint32_t LocalWriteConflictMultiplierB64;
+            uint32_t LocalWriteConflictMultiplierB32;
             hardware_t::architecture_t architecture;
 
             void print() const {
@@ -203,7 +209,7 @@ namespace origami
 
         /**
          * @brief Memory access costs at different cache levels
-         * 
+         *
          * Stores the calculated cost (in cycles) for memory accesses at each level
          * of the memory hierarchy, used for overall performance prediction.
          */
@@ -233,7 +239,7 @@ namespace origami
 
         /**
          * @brief Detailed performance breakdown for tie-breaking between configurations
-         * 
+         *
          * Contains comprehensive performance metrics including memory costs, compute costs,
          * and tile dimensions. Used when multiple configurations have similar predicted
          * performance and need fine-grained comparison.
@@ -264,7 +270,7 @@ namespace origami
 
         /**
          * @brief Minimal tie-breaker information for sorting configurations
-         * 
+         *
          * Immutable version of TieBreakerInfo containing only essential parameters.
          * Used for std::sort operations to avoid issues with mutable member variables.
          */
@@ -283,7 +289,7 @@ namespace origami
 
         /**
          * @brief Problem specification for matrix multiplication
-         * 
+         *
          * Defines the matrix dimensions, data types, and layout properties
          * for the GEMM operation being analyzed.
          */
@@ -309,28 +315,28 @@ namespace origami
         {
             // Cache hit rates (contains operand0/1 hit rates for L1/L2/L3)
             CacheHitRates cache_hits;
-            
+
             // Output write performance
             double output_write_cost;
             double output_write_cost_edge;
-            
+
             // Overall overheads
             double split_accumulation_overhead;
             double compute_cycles;
             double local_split_overhead;
-            
+
             // Memory request counts per cache level for tile 0 (A)
             double tile0_l1_request;
             double tile0_l2_request;
             double tile0_l3_request;
             double tile0_mem_request;
-            
+
             // Memory request counts per cache level for tile 1 (B)
             double tile1_l1_request;
             double tile1_l2_request;
             double tile1_l3_request;
             double tile1_mem_request;
-            
+
             // Prefetch and startup cost
             double prefetch_cost;
             double startup_cost;
@@ -341,26 +347,26 @@ namespace origami
          * @param p Problem information containing matrix dimensions and data types
          */
         void setProblem(ProblemInfo p);
-        
+
         /**
          * @brief Set the solution configuration for simulation
          * @param sm Size mapping containing tile sizes and optimization parameters
          */
         void setSolution(SizeMapping sm);
-        
+
         /**
          * @brief Set the hardware architecture for simulation
          * @param arch GPU architecture identifier (e.g., gfx942, gfx950)
          */
         void setHardware(hardware_t::architecture_t arch);
-        
+
         /**
          * @brief Get hardware constants for a specific architecture
          * @param arch GPU architecture identifier
          * @return HardwareConstants structure with architecture-specific parameters
          */
         HardwareConstants getHardwareConstants(const hardware_t::architecture_t arch) const;
-        
+
         /**
          * @brief Calculate store (write-back) performance for matrix output
          * @param M Matrix dimension M
@@ -388,7 +394,7 @@ namespace origami
                                        uint32_t WGs_per_tile_XCD,
                                        double &store,
                                        double &store_edge) const;
-        
+
         /**
          * @brief Calculate overhead for Global Split U (split along K dimension across workgroups)
          * @param M Matrix dimension M
@@ -415,7 +421,7 @@ namespace origami
                                     uint32_t WGs_per_tile, uint32_t WGs_per_tile_XCD,
                                     double MT0, double MT1, uint32_t numWGs, double vgprCheck,
                                     double storeGSU) const;
-        
+
         /**
          * @brief Calculate overhead for Local Split U (split along K dimension within workgroup)
          * @param MT0 Macro tile dimension 0 (M dimension)
@@ -431,7 +437,7 @@ namespace origami
                                     uint32_t svw, uint32_t numThreads,
                                     ProblemInfo problem,
                                     const HardwareConstants& hw_consts) const;
-        
+
         /**
          * @brief Calculate memory access costs at all cache levels
          * @param MT0 Macro tile dimension 0
@@ -462,7 +468,7 @@ namespace origami
                                    double A_L1_req, double B_L1_req,
                                    double A_L2_req, double A_L3_req, double A_hbm_req,
                                    double B_L2_req, double B_L3_req, double B_hbm_req) const;
-        
+
         /**
          * @brief Calculate overall loop performance combining memory and compute costs
          * @param mem Memory access costs structure
@@ -472,39 +478,14 @@ namespace origami
          * @return Overall loop performance cost in cycles
          */
         double getLoopOverall(const MemoryAccessCosts& mem, double math, uint32_t loopCnt, double pgr) const;
-        
+
         /**
          * @brief Predict overall performance for the configured problem and solution
-         * 
-         * This function combines the functionality of calculateIntermediateMetrics() and
-         * calculateFinalPerformance() into a single call for convenience. It is a legacy
-         * interface that may be deprecated in the future.
-         * 
-         * @note Future development will determine which approach to keep based on developer
-         *       and debugging requirements. The refactored two-step approach (calculate
-         *       intermediate metrics separately, then compute final performance) provides
-         *       better visibility into the prediction process for debugging, while this
-         *       unified function offers simpler usage.
-         * 
+         *
          * @return PredictedPerformance structure with execution time and cache hit rates
-         * @see calculateIntermediateMetrics() for detailed intermediate metrics
-         * @see calculateFinalPerformance() for the refactored final calculation
          */
         PredictedPerformance predictedPerformance() const;
-        
-        /**
-         * @brief Calculate intermediate performance metrics (refactored version)
-         * @return IntermediatePerformanceMetrics with detailed breakdown
-         */
-        IntermediatePerformanceMetrics calculateIntermediateMetrics() const;
-        
-        /**
-         * @brief Calculate final performance from intermediate metrics
-         * @param metrics Intermediate performance metrics
-         * @return PredictedPerformance with final execution time prediction
-         */
-        PredictedPerformance calculateFinalPerformance(const IntermediatePerformanceMetrics& metrics) const;
-        
+
         /**
          * @brief Compute L1 cache hit rates for both matrix operands
          * @param hw Hardware constants
@@ -541,7 +522,7 @@ namespace origami
                             uint32_t VWA, uint32_t VWB, bool transA, bool transB,
                             double lda, double ldb, int NLCA, int NLCB,
                             uint32_t threadnum, uint32_t NumWave0, uint32_t NumWave1) const;
-        
+
         /**
          * @brief Compute L2 cache hit rates considering workgroup distribution
          * @param M Matrix dimension M
@@ -570,7 +551,7 @@ namespace origami
                                              int32_t  NTA,
                                              int32_t  NTB,
                                              bool     isGSUWGMRR) const;
-        
+
         /**
          * @brief Compute L3 cache hit rates based on tile reuse patterns
          * @param M Matrix dimension M
@@ -591,7 +572,7 @@ namespace origami
         computeL3CacheHitRate(double M, double N, double K, const HardwareConstants& hw,
                                           uint32_t bpeA, uint32_t bpeB, int NTA, int NTB,
                                           int N_WGs_total, int M_WGs_total, int N_WGs_per_tile, int M_WGs_per_tile) const;
-        
+
         /**
          * @brief Resolve compute unit occupancy based on performance and resource constraints
          * @param hw Hardware constants
@@ -604,7 +585,7 @@ namespace origami
          * @return Resolved occupancy value
          */
         double resolveOccupancy(const HardwareConstants& hw, double perf, double prefetch, double mathCost, double storeCost, uint32_t num_tiles, uint32_t CUOccupancy) const;
-        
+
         /**
          * @brief Compare if current configuration is better than previous solution
          * @param problem Problem specification
@@ -612,7 +593,7 @@ namespace origami
          * @return true if current is better, false otherwise
          */
         bool isBetter(ProblemInfo problem, TieBreakerInfo previousSolution) const;
-        
+
         /**
          * @brief Compare two configurations using tie-breaker metrics
          * @param previousSolution Previous configuration metrics
@@ -620,7 +601,7 @@ namespace origami
          * @return true if current is better, false otherwise
          */
         bool isBetter(TieBreakerInfo previousSolution, TieBreakerInfo currentSolution) const;
-        
+
         /**
          * @brief Get tie-breaker information for current configuration
          * @return TieBreakerInfo structure with detailed performance metrics
@@ -634,7 +615,7 @@ namespace origami
          * @return true if current is better, false otherwise
          */
         bool isBetter(MinTieBreakerInfo previousSolution, MinTieBreakerInfo currentSolution) const;
-        
+
         /**
          * @brief Get minimal tie-breaker information (immutable version)
          * @return MinTieBreakerInfo structure with essential parameters
@@ -652,7 +633,17 @@ namespace origami
          * @return Stall cycles if FIFO is full, 0 otherwise
          */
         int getLocalReadQueueFullStallCycles(int currentCycle, std::queue<int>& fifo, int bpRead, int numWaves, bool isStall, double bankConflict) const;
-        
+
+        /**
+         * @brief Check if local write FIFO is full
+         * @param currentCycle Current simulation cycle
+         * @param issueCycles Issue cycles for the write operation
+         * @param bpWrite Bytes per write operation
+         * @param numWaves Number of waves
+         * @return The Cycle this instruction can be issued.
+         */
+        int getLocalWriteQueueFullStallCycles(int currentCycle, int previousLW, int issueCycles, int bpWrite, int numWaves) const;
+
         /**
          * @brief Check if local read operations have finished
          * @param currentCycle Current simulation cycle
@@ -661,7 +652,7 @@ namespace origami
          * @return Cycle when operations finish
          */
         int getLocalReadCompletionCycle(int currentCycle, std::queue<int>& fifo, int numLR) const;
-        
+
         /**
          * @brief Check if global read FIFO is full
          * @param currentCycle Current simulation cycle
@@ -669,28 +660,22 @@ namespace origami
          * @param bpRead Bytes per read operation
          * @param numWaves Number of waves
          * @param isStall Whether pipeline is stalled
+         * @param isSgprOffset Whether the SGPR offset is used
          * @return Stall cycles if FIFO is full, 0 otherwise
          */
-        int getGlobalReadQueueFullStallCycles(int currentCycle, std::queue<int>& fifo, int bpRead, int numWaves, bool isStall) const;
-        
+        int getGlobalReadQueueFullStallCycles(int currentCycle, std::deque<int>& fifo, int bpRead, int numWaves, bool isStall, bool isSgprOffset) const;
+
         /**
          * @brief Push a local read-write operation into FIFO
          * @param currentCycle Current simulation cycle
          * @param fifo FIFO queue
          * @param bpr Bytes per read operation
          * @param bankConflict Bank conflict rate
+         * @param isLocalRead Whether this is a local read operation
+         * @param numPreviousLRs Number of previous local reads
          */
-        void pushLocalReadWrite(int currentCycle, std::queue<int>& fifo, int bpr, double bankConflict);
-        
-        /**
-         * @brief Push a local read operation into FIFO
-         * @param currentCycle Current simulation cycle
-         * @param fifo FIFO queue
-         * @param bpr Bytes per read operation
-         * @param isGfx950 Whether hardware is GFX950
-         */
-        void pushLocalRead(int currentCycle, std::queue<int>& fifo, int bpr, bool isGfx950);
-        
+        void pushLocalReadWrite(int currentCycle, std::queue<int>& fifo, int bpr, double bankConflict, bool isLocalRead, int numPreviousLRs);
+
         /**
          * @brief Analyze bank conflicts from VGPR states for both matrix operands
          * @param vgprState Vector of VGPR state maps for threads
@@ -706,12 +691,12 @@ namespace origami
             const std::string& vgprLocalReadAddrB,
             int LocalReadBytesA,
             int LocalReadBytesB);
-            
+
     public:
         SizeMapping sizeMapping;           ///< Current kernel configuration
         ProblemInfo problem;               ///< Current problem specification
         HardwareConstants hw_consts;       ///< Hardware constants for current architecture
-        
+
         /// Performance information for tie-breaking (mutable for caching)
         /// Note: Using MinTieBreakerInfo is preferred for std::sort to avoid segmentation faults
         mutable TieBreakerInfo perfInfo;

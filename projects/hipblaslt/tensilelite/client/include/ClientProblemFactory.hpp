@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -31,7 +31,7 @@
 #include <Tensile/KernelLanguageTypes.hpp>
 #include <Tensile/Tensile.hpp>
 
-#include <boost/program_options.hpp>
+#include "ProgramOptions.hpp"
 
 #include <cstddef>
 
@@ -39,8 +39,6 @@ namespace TensileLite
 {
     namespace Client
     {
-
-        namespace po = boost::program_options;
 
         class ClientProblemFactory
         {
@@ -95,13 +93,17 @@ namespace TensileLite
             bool                             m_activationNoGuard;
             std::vector<ActivationType>      m_activationEnumArg;
             size_t                           m_maxWorkspaceSize = 0;
-            rocisa::DataType                 m_computeInputType;
+            rocisa::DataType                 m_computeInputTypeA;
+            rocisa::DataType                 m_computeInputTypeB;
             rocisa::DataType                 m_f32XdlMathOp;
             rocisa::DataType                 m_activationComputeType;
             std::vector<std::vector<size_t>> m_problemSizes;
             bool                             m_useUserArgs;
             bool                             m_swizzleTensorA;
             bool                             m_swizzleTensorB;
+            int                              m_metadataLayout;
+            int                              m_mxBlockA;
+            int                              m_mxBlockB;
 
             TensorOps m_aOps;
             TensorOps m_bOps;

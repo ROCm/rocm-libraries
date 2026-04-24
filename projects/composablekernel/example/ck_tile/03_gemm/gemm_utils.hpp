@@ -7,6 +7,7 @@
 #include <variant>
 
 #include "ck_tile/core.hpp"
+#include "ck_tile/core/numeric/pk_fp4.hpp"
 #include "ck_tile/host/kernel_launch.hpp"
 #include "ck_tile/ops/epilogue.hpp"
 #include "ck_tile/ops/gemm.hpp"
@@ -33,6 +34,10 @@ struct GemmConfigBase
     static constexpr bool Preshuffle                = false;
     static constexpr bool TiledMMAPermuteN          = false;
 };
+
+// Type trait for tf32 storage type (tf32 uses float for memory layout calculations)
+template <typename T>
+using prec_storage_type = ck_tile::if_select_t<T, ck_tile::tf32_t, float, T>;
 
 template <typename PrecType>
 struct GemmConfigMemoryInterwave : public GemmConfigBase
@@ -80,7 +85,7 @@ struct GemmConfigComputeV3 : public GemmConfigBase
     // Compute V3 only support Intrawave scheduler
     static constexpr ck_tile::index_t M_Tile = 16;
     static constexpr ck_tile::index_t N_Tile = 64;
-    static constexpr ck_tile::index_t K_Tile = 256 / sizeof(PrecType);
+    static constexpr ck_tile::index_t K_Tile = 256 / sizeof(prec_storage_type<PrecType>);
 
     static constexpr ck_tile::index_t M_Warp = 1;
     static constexpr ck_tile::index_t N_Warp = 4;
@@ -120,7 +125,7 @@ struct GemmConfigComputeV3_2 : public GemmConfigBase
 {
     static constexpr ck_tile::index_t M_Tile = 128;
     static constexpr ck_tile::index_t N_Tile = 128;
-    static constexpr ck_tile::index_t K_Tile = 128 / sizeof(PrecType);
+    static constexpr ck_tile::index_t K_Tile = 128 / sizeof(prec_storage_type<PrecType>);
 
     static constexpr ck_tile::index_t M_Warp = 2;
     static constexpr ck_tile::index_t N_Warp = 2;
@@ -242,6 +247,27 @@ struct GemmConfigComputeV6 : public GemmConfigBase
 };
 
 template <typename PrecType>
+struct GemmConfigComputeAsync : public GemmConfigBase
+{
+    static constexpr ck_tile::index_t M_Tile = 64;
+    static constexpr ck_tile::index_t N_Tile = 64;
+    static constexpr ck_tile::index_t K_Tile = 256;
+
+    static constexpr ck_tile::index_t M_Warp = 1;
+    static constexpr ck_tile::index_t N_Warp = 4;
+    static constexpr ck_tile::index_t K_Warp = 1;
+
+    static constexpr ck_tile::index_t M_Warp_Tile = 16;
+    static constexpr ck_tile::index_t N_Warp_Tile = 16;
+    static constexpr ck_tile::index_t K_Warp_Tile = 128;
+
+    static constexpr bool DoubleSmemBuffer          = true;
+    static constexpr ck_tile::GemmPipeline Pipeline = ck_tile::GemmPipeline::COMPUTE_ASYNC;
+    static constexpr ck_tile::index_t NumWaveGroups = 1;
+    static constexpr bool UseStructuredSparsity     = false;
+};
+
+template <typename PrecType>
 struct GemmConfigPreshuffleDecode : public GemmConfigBase
 {
     static constexpr ck_tile::index_t M_Tile = 16;
@@ -271,7 +297,7 @@ struct GemmConfigPreshufflePrefill : public GemmConfigBase
 {
     static constexpr ck_tile::index_t M_Tile = 128;
     static constexpr ck_tile::index_t N_Tile = 128;
-    static constexpr ck_tile::index_t K_Tile = 128 / sizeof(PrecType);
+    static constexpr ck_tile::index_t K_Tile = 128 / sizeof(prec_storage_type<PrecType>);
 
     static constexpr ck_tile::index_t M_Warp = 1;
     static constexpr ck_tile::index_t N_Warp = 4;
@@ -280,7 +306,7 @@ struct GemmConfigPreshufflePrefill : public GemmConfigBase
     static constexpr ck_tile::index_t M_Warp_Tile = 16;
     static constexpr ck_tile::index_t N_Warp_Tile = 16;
     static constexpr ck_tile::index_t K_Warp_Tile =
-        ck_tile::get_k_warp_tile<PrecType, M_Warp_Tile, true>();
+        ck_tile::get_k_warp_tile<prec_storage_type<PrecType>, M_Warp_Tile, true>();
 
     static constexpr int kBlockPerCu                = 2;
     static constexpr auto Scheduler                 = ck_tile::GemmPipelineScheduler::Default;
@@ -301,6 +327,15 @@ struct GemmConfigPreshufflePrefill_Wmma : public GemmConfigPreshufflePrefill<Pre
 
 template <typename ADataType, typename BDataType = ADataType, typename CDataType = ADataType>
 struct GemmTypeConfig;
+
+template <>
+struct GemmTypeConfig<ck_tile::tf32_t, ck_tile::tf32_t, float>
+{
+    using ADataType   = float;
+    using BDataType   = float;
+    using AccDataType = float;
+    using CDataType   = float;
+};
 
 template <>
 struct GemmTypeConfig<ck_tile::half_t>
@@ -375,6 +410,15 @@ struct GemmTypeConfig<ck_tile::int8_t, ck_tile::int8_t, int32_t>
     using CDataType   = int32_t;
 };
 
+template <>
+struct GemmTypeConfig<ck_tile::pk_fp4_t, ck_tile::pk_fp4_t, ck_tile::half_t>
+{
+    using ADataType   = ck_tile::pk_fp4_t;
+    using BDataType   = ck_tile::pk_fp4_t;
+    using AccDataType = float;
+    using CDataType   = ck_tile::half_t;
+};
+
 template <ck_tile::GemmPipeline PipelineId>
 struct PipelineTypeTraits;
 
@@ -424,6 +468,15 @@ struct PipelineTypeTraits<ck_tile::GemmPipeline::COMPUTE_V6>
 };
 
 template <>
+struct PipelineTypeTraits<ck_tile::GemmPipeline::COMPUTE_ASYNC>
+{
+    template <typename PipelineProblem>
+    using GemmPipeline = ck_tile::GemmPipelineAgBgCrCompAsync<PipelineProblem>;
+    template <typename PipelineProblem>
+    using UniversalGemmPipeline = ck_tile::BaseGemmPipelineAgBgCrCompAsync<PipelineProblem>;
+};
+
+template <>
 struct PipelineTypeTraits<ck_tile::GemmPipeline::PRESHUFFLE_V2>
 {
     template <typename PipelineProblem>
@@ -446,7 +499,7 @@ inline auto create_args()
         .insert("stride_b", "0", "Tensor B stride")
         .insert("stride_c", "0", "Tensor C stride")
         .insert("v", "2", "0. No validation, 1. Validation on CPU, 2. Validation on GPU")
-        .insert("prec", "fp16", "data type. fp16/bf16/fp8/bf8/pk_int4_t")
+        .insert("prec", "fp16", "data type. fp16/bf16/fp8/bf8/pk_int4_t/tf32 (tf32 only on gfx950)")
         .insert("warmup", "50", "number of iterations before benchmark the kernel")
         .insert("repeat", "100", "number of iterations to benchmark the kernel")
         .insert("timer", "gpu", "gpu:gpu timer, cpu:cpu timer")

@@ -41,7 +41,7 @@ if (NOT DEFINED ENV{ROCM_PATH})
 #Path to ROCm installation
   set(ENV{ROCM_PATH} "/opt/rocm")
 endif()
-  
+
 # Install prefix
 set(CMAKE_INSTALL_PREFIX "$ENV{ROCM_PATH}" CACHE PATH "Install path prefix, prepended onto install directories")
 
@@ -179,7 +179,7 @@ if(BUILD_ADDRESS_SANITIZER AND BUILD_SHARED_LIBS)
 endif()
 
 # Set version variables
-rocm_setup_version( VERSION "4.2.0" )
+rocm_setup_version( VERSION "4.4.0" )
 set ( rocrand_VERSION ${rocRAND_VERSION} )
 # Old-style version number used within the library's API. rocrand_get_version should be modified.
 math(EXPR rocrand_VERSION_NUMBER "${rocRAND_VERSION_MAJOR} * 100000 + ${rocRAND_VERSION_MINOR} * 100 + ${rocRAND_VERSION_PATCH}")

@@ -15,6 +15,7 @@ from typing import Optional
 from gemm_streamk_validation_utils import (
     is_tile_config_valid,
     is_trait_combination_valid,
+    set_gpu_targets,
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -376,8 +377,8 @@ class GemmKernelBuilder:
 
         reduction_strategy_map = {
             "atomic": "ck_tile::StreamKReductionStrategy::Atomic",
-            "reduction": "ck_tile::StreamKReductionStrategy::Reduction",
-            "tree": "ck_tile::StreamKReductionStrategy::TreeReduction",
+            "linear": "ck_tile::StreamKReductionStrategy::Linear",
+            "tree": "ck_tile::StreamKReductionStrategy::Tree",
         }
 
         # Determine accumulator type based on datatype
@@ -435,21 +436,20 @@ struct SelectedKernel {{
     static constexpr ck_tile::index_t WarpTileK = {tile_config["warp_tile_k"]};
 
     // Traits
-    static constexpr bool kPadM = {"true" if pad_m == "true" else "false"};
-    static constexpr bool kPadN = {"true" if pad_n == "true" else "false"};
-    static constexpr bool kPadK = {"true" if pad_k == "true" else "false"};
+    static constexpr bool kPadM = {"true" if str(pad_m).lower() == "true" else "false"};
+    static constexpr bool kPadN = {"true" if str(pad_n).lower() == "true" else "false"};
+    static constexpr bool kPadK = {"true" if str(pad_k).lower() == "true" else "false"};
     static constexpr bool Preshuffle = false;
 
-    static constexpr bool DoubleSmemBuffer = {"true" if pipeline == "compv4" else "false"};
+    static constexpr bool DoubleSmemBuffer = {"true" if str(pipeline).lower() == "compv4" else "false"};
     static constexpr int kBlockPerCu       = 1;
     static constexpr bool StructuredSparsity = false;
     static constexpr bool NumWaveGroup       = 1;
 
     static constexpr bool TransposeC = false;
     static constexpr bool UsePersistentKernel = {"true" if str(persistent).lower() == "true" else "false"};
-    static constexpr bool UseStructuredSparsity = false;
     static constexpr ck_tile::index_t NumWaveGroups = 1;
-    static constexpr ck_tile::StreamKReductionStrategy reduction_strategy = {reduction_strategy_map.get(reduction_strategy, "ck_tile::StreamKReductionStrategy::Reduction")};
+    static constexpr ck_tile::StreamKReductionStrategy reduction_strategy = {reduction_strategy_map.get(reduction_strategy, "ck_tile::StreamKReductionStrategy::Linear")};
 
     // Tile shape
     using TileShape = ck_tile::TileGemmShape<
@@ -552,12 +552,12 @@ struct SelectedKernel {{
                     hipGetErrorString(hipMemsetAsync(
                         args.e_ptr, 0, args.M * args.N * sizeof(CDataType), stream.stream_id_));
                 }}
-                else if(reduction_strategy == ck_tile::StreamKReductionStrategy::Reduction)
+                else if(reduction_strategy == ck_tile::StreamKReductionStrategy::Linear)
                 {{
                     // Reset sk flags to zero before each repetition of the kernel
                     workspace_data.SetZero();
                 }}
-                else if(reduction_strategy == ck_tile::StreamKReductionStrategy::TreeReduction)
+                else if(reduction_strategy == ck_tile::StreamKReductionStrategy::Tree)
                 {{
                     // Reset sk flags to zero before each repetition of the kernel
                     workspace_data.SetZero();
@@ -696,11 +696,11 @@ struct SelectedKernel {{
                     pipeline,
                     epilogue,
                     scheduler,
+                    reduction_strategy,
                     pad_m,
                     pad_n,
                     pad_k,
                     persistent,
-                    reduction_strategy,
                 ) = trait_combo
 
                 # Create kernel name with proper boolean capitalization
@@ -819,8 +819,18 @@ def main():
         action="store_true",
         help="List kernel configurations without generating files",
     )
+    parser.add_argument(
+        "--gpu_targets",
+        help="Semicolon-separated list of GPU targets from CMake (e.g., 'gfx90a;gfx942;gfx950')",
+    )
 
     args = parser.parse_args()
+
+    # Configure GPU targets for fallback if provided
+    if args.gpu_targets:
+        targets = [t.strip() for t in args.gpu_targets.split(';') if t.strip()]
+        set_gpu_targets(targets)
+        logging.debug(f"Configured GPU targets: {targets}")
 
     # Create builder
     builder = GemmKernelBuilder(
@@ -862,10 +872,10 @@ def main():
             trait_parts[1],  # epilogue
             trait_parts[2],  # scheduler
             trait_parts[3],  # reduction_strategy
-            trait_parts[4] == "false",  # pad_m
-            trait_parts[5] == "false",  # pad_n
-            trait_parts[6] == "false",  # pad_k
-            trait_parts[7],  # persistent
+            str(trait_parts[4]).lower() == "true",  # pad_m
+            str(trait_parts[5]).lower() == "true",  # pad_n
+            str(trait_parts[6]).lower() == "true",  # pad_k
+            str(trait_parts[7]).lower() == "true",  # persistent
         )
 
         # Generate the kernel

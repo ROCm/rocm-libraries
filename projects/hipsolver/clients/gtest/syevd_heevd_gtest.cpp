@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -68,20 +68,18 @@ Arguments syevd_heevd_setup_arguments(syevd_heevd_tuple tup)
     arg.set<char>("jobz", op[0]);
     arg.set<char>("uplo", op[1]);
 
-    // only testing standard use case/defaults for strides
-
     arg.timing = 0;
 
     return arg;
 }
 
-template <testAPI_t API>
+template <testAPI_t API, typename I = int, typename SIZE = int>
 class SYEVD_HEEVD : public ::TestWithParam<syevd_heevd_tuple>
 {
 protected:
     void TearDown() override
     {
-        EXPECT_EQ(hipGetLastError(), hipSuccess);
+        ASSERT_EQ(hipGetLastError(), hipSuccess);
     }
 
     template <bool BATCHED, bool STRIDED, typename T>
@@ -91,10 +89,10 @@ protected:
 
         if(arg.peek<rocblas_int>("n") == -1 && arg.peek<char>("jobz") == 'N'
            && arg.peek<char>("uplo") == 'L')
-            testing_syevd_heevd_bad_arg<API, BATCHED, STRIDED, T>();
+            testing_syevd_heevd_bad_arg<API, BATCHED, STRIDED, T, I, SIZE>();
 
         arg.batch_count = 1;
-        testing_syevd_heevd<API, BATCHED, STRIDED, T>(arg);
+        testing_syevd_heevd<API, BATCHED, STRIDED, T, I, SIZE>(arg);
     }
 };
 
@@ -119,6 +117,14 @@ class SYEVD_COMPAT : public SYEVD_HEEVD<API_COMPAT>
 };
 
 class HEEVD_COMPAT : public SYEVD_HEEVD<API_COMPAT>
+{
+};
+
+class SYEVD_COMPAT_64 : public SYEVD_HEEVD<API_COMPAT, int64_t, size_t>
+{
+};
+
+class HEEVD_COMPAT_64 : public SYEVD_HEEVD<API_COMPAT, int64_t, size_t>
 {
 };
 
@@ -184,6 +190,26 @@ TEST_P(HEEVD_COMPAT, __double_complex)
     run_tests<false, false, rocblas_double_complex>();
 }
 
+TEST_P(SYEVD_COMPAT_64, __float)
+{
+    run_tests<false, false, float>();
+}
+
+TEST_P(SYEVD_COMPAT_64, __double)
+{
+    run_tests<false, false, double>();
+}
+
+TEST_P(HEEVD_COMPAT_64, __float_complex)
+{
+    run_tests<false, false, rocblas_float_complex>();
+}
+
+TEST_P(HEEVD_COMPAT_64, __double_complex)
+{
+    run_tests<false, false, rocblas_double_complex>();
+}
+
 // INSTANTIATE_TEST_SUITE_P(daily_lapack,
 //                          SYEVD,
 //                          Combine(ValuesIn(large_size_range), ValuesIn(op_range)));
@@ -226,4 +252,20 @@ INSTANTIATE_TEST_SUITE_P(checkin_lapack,
 
 INSTANTIATE_TEST_SUITE_P(checkin_lapack,
                          HEEVD_COMPAT,
+                         Combine(ValuesIn(size_range), ValuesIn(op_range)));
+
+// INSTANTIATE_TEST_SUITE_P(daily_lapack,
+//                          SYEVD_COMPAT_64,
+//                          Combine(ValuesIn(large_size_range), ValuesIn(op_range)));
+
+INSTANTIATE_TEST_SUITE_P(checkin_lapack,
+                         SYEVD_COMPAT_64,
+                         Combine(ValuesIn(size_range), ValuesIn(op_range)));
+
+// INSTANTIATE_TEST_SUITE_P(daily_lapack,
+//                          HEEVD_COMPAT_64,
+//                          Combine(ValuesIn(large_size_range), ValuesIn(op_range)));
+
+INSTANTIATE_TEST_SUITE_P(checkin_lapack,
+                         HEEVD_COMPAT_64,
                          Combine(ValuesIn(size_range), ValuesIn(op_range)));

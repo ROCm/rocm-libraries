@@ -3,17 +3,20 @@
 #pragma once
 
 #include <functional>
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
+#include <hipdnn_frontend/detail/ScopedHipdnnBackendDescriptor.hpp>
+#include <hipdnn_frontend/node/NodeType.hpp>
 #include <memory>
+#include <string>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
 namespace hipdnn_frontend::graph
 {
+
 class INode
 {
 public:
@@ -23,6 +26,14 @@ public:
     {
     }
     virtual ~INode() = default;
+
+    // Disable copy operations
+    INode(const INode&) = delete;
+    INode& operator=(const INode&) = delete;
+
+    // Enable move operations
+    INode(INode&&) = default;
+    INode& operator=(INode&&) = default;
 
     virtual Error pre_validate_node() const // NOLINT(readability-identifier-naming)
     {
@@ -36,6 +47,16 @@ public:
     {
         return {};
     }
+    virtual std::string getNodeName() const
+    {
+        return {};
+    }
+
+    virtual NodeType getNodeType() const
+    {
+        return NodeType::UNKNOWN;
+    }
+
     virtual void
         // NOLINTNEXTLINE(readability-identifier-naming)
         gather_hipdnn_tensors(
@@ -44,10 +65,30 @@ public:
     {
     }
 
-    virtual flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>
-        pack_node([[maybe_unused]] flatbuffers::FlatBufferBuilder& builder) const // NOLINT
+    /// Unpacks operation attributes from a backend descriptor into this node.
+    /// Subclasses that support unpacking from the C-API must override this.
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    virtual Error unpack_from_descriptor(
+        [[maybe_unused]] hipdnnBackendDescriptor_t opDesc,
+        [[maybe_unused]] std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>>& tensorMap)
     {
-        return {};
+        auto nodeName = getNodeName();
+        return {ErrorCode::HIPDNN_BACKEND_ERROR,
+                "unpack_from_descriptor not implemented for node"
+                    + (nodeName.empty() ? std::string{} : ": " + nodeName)};
+    }
+
+    // Creates backend operation descriptor(s) for this node using the C-API.
+    // Tensor descriptors are deduplicated by UID in tensorDescs.
+    // Container nodes (e.g. Graph) do not override this — they delegate to child nodes.
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    virtual Error create_operation(
+        [[maybe_unused]] std::unordered_map<int64_t, detail::ScopedHipdnnBackendDescriptor>&
+            tensorDescs,
+        [[maybe_unused]] std::vector<detail::ScopedHipdnnBackendDescriptor>& operations) const
+    {
+        return {ErrorCode::HIPDNN_BACKEND_ERROR,
+                "create_operation not implemented for node: " + getNodeName()};
     }
 
     virtual std::vector<std::shared_ptr<TensorAttributes>> getNodeInputTensorAttributes() const
@@ -122,9 +163,11 @@ protected:
 // Any class extending BaseNode must have an attributes member with an inputs & outputs map.
 // The map needs to have TensorAttributes as the value.
 // BaseNode uses this to gather tensor uids, and populate unset ones.
-template <typename DerivedT>
+template <typename DerivedT, NodeType Type = NodeType::UNKNOWN>
 class BaseNode : public INode
 {
+    friend DerivedT;
+
 private:
     DerivedT& self()
     {
@@ -136,6 +179,16 @@ private:
     }
 
 public:
+    NodeType getNodeType() const override
+    {
+        return Type;
+    }
+
+    std::string getNodeName() const override
+    {
+        return std::string(self().attributes.get_name());
+    }
+
     // NOLINTNEXTLINE(readability-identifier-naming)
     void gather_hipdnn_tensors(
         std::unordered_set<std::shared_ptr<TensorAttributes>>& allTensors) const override
@@ -201,10 +254,13 @@ public:
         return outputAttributes;
     }
 
+private:
+    BaseNode() = default;
+
 protected:
     using INode::INode;
 };
 
-template <typename DerivedT>
-using NodeCRTP = BaseNode<DerivedT>; // NOLINT
+template <typename DerivedT, NodeType Type = NodeType::UNKNOWN>
+using NodeCRTP = BaseNode<DerivedT, Type>; // NOLINT
 } // namespace hipdnn_frontend::graph

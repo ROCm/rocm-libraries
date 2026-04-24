@@ -147,7 +147,7 @@ __forceinline__ __device__ ushort cos(ushort x)
 }
 __forceinline__ __device__ ushort fabs(ushort x)
 {
-    return float_to_bfloat16(__habs(bfloat16_to_float(x)));
+    return float_to_bfloat16(fabsf(bfloat16_to_float(x)));
 }
 __forceinline__ __device__ ushort fmax(ushort x, ushort y)
 {
@@ -216,10 +216,6 @@ __forceinline__ __device__ double fmin(double x, double y) { return ::fmin(x, y)
 __forceinline__ __device__ double fma(double a, double b, double c) { return ::fma(a, b, c); }
 
 } // namespace detail
-
-//=============================================================================
-// 4-element vector overloads
-//=============================================================================
 
 template <typename FpVecType>
 __forceinline__ __device__ FpVecType exp(FpVecType x)

@@ -9,6 +9,7 @@
 #include <hipdnn_data_sdk/utilities/Workspace.hpp>
 #include <hipdnn_frontend.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_test_sdk/utilities/TensorDiff.hpp>
 #include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
 
@@ -118,7 +119,12 @@ bool SampleRunner::operator()(const TensorLayout& layout)
         cpuVariantPack[activatedY->get_uid()] = activatedYRefTensor.memory().hostData();
 
         // Execute on CPU using graph executor
-        auto serializedGraph = graph->buildFlatbufferOperationGraph();
+        auto [serializedGraph, serErr] = graph->to_binary();
+        if(serErr.is_bad())
+        {
+            std::cerr << "Failed to serialize graph: " << serErr.get_message() << std::endl;
+            return false;
+        }
         hipdnn_test_sdk::utilities::CpuReferenceGraphExecutor cpuExecutor;
         cpuExecutor.execute(serializedGraph.data(), serializedGraph.size(), cpuVariantPack);
 
@@ -126,10 +132,14 @@ bool SampleRunner::operator()(const TensorLayout& layout)
         auto yValidator = hipdnn_test_sdk::utilities::CpuFpReferenceValidation<OutputType>(
             tolerance, tolerance);
 
-        bool yValid = yValidator.allClose(activatedYRefTensor, activatedYTensor);
-
         std::cout << "CPU reference validation:\n";
-        std::cout << "  activated_y: " << (yValid ? "successful" : "failed") << "\n";
+        bool yValid = hipdnn_test_sdk::utilities::validateAndReport<OutputType>(std::cout,
+                                                                                "activated_y",
+                                                                                yValidator,
+                                                                                activatedYRefTensor,
+                                                                                activatedYTensor,
+                                                                                tolerance,
+                                                                                tolerance);
 
         validationPassed = yValid;
     }
@@ -149,15 +159,10 @@ int main(int argc, char* argv[])
 {
     auto config = parseCommandLineArgs(argc, argv);
 
-    initializeFrontendLogging();
+    auto [handle, handleError] = createHipdnnHandle();
+    HIPDNN_FE_CHECK(handleError);
 
-    auto backend = hipdnnBackend();
-    hipdnnHandle_t handle;
-    HIPDNN_CHECK(backend->create(&handle));
-
-    bool allPassed = run(SampleRunner{handle, config});
-
-    HIPDNN_CHECK(backend->destroy(handle));
+    bool allPassed = run(SampleRunner{*handle, config});
 
     if(allPassed)
     {

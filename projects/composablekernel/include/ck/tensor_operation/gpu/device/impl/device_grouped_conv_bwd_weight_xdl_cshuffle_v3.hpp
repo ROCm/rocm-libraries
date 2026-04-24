@@ -408,10 +408,21 @@ struct DeviceGroupedConvBwdWeight_Xdl_CShuffleV3
             ? 4 / sizeof(BDataType)
             : BBlockTransferSrcScalarPerVector;
 
+    static constexpr bool ALdsScalarLoadToVgpr =
+        (DirectLoad && BlkGemmPipelineVer == BlockGemmPipelineVersion::v1 ? true : false);
+    static constexpr bool BLdsScalarLoadToVgpr =
+        (DirectLoad && BlkGemmPipelineVer == BlockGemmPipelineVersion::v1 ? true : false);
+
+    // Note: Direct load use layout to create proper block and mmtile descriptor
+    // TODO: Fix and verify RC layout for not direct load (currently it returns wrong results)
     template <index_t NXdlPerWave_>
     using GridwiseGemmBase = GridwiseGemm_xdl_cshuffle_conv_v3<
-        tensor_layout::gemm::RowMajor,
-        tensor_layout::gemm::ColumnMajor,
+        std::conditional_t<DirectLoad,
+                           tensor_layout::gemm::ColumnMajor,
+                           tensor_layout::gemm::RowMajor>,
+        std::conditional_t<DirectLoad,
+                           tensor_layout::gemm::RowMajor,
+                           tensor_layout::gemm::ColumnMajor>,
         tensor_layout::gemm::RowMajor,
         ADataType,
         BDataType,
@@ -456,7 +467,9 @@ struct DeviceGroupedConvBwdWeight_Xdl_CShuffleV3
         BlkGemmPipelineVer,
         ComputeTypeA,
         ComputeTypeB,
-        DirectLoad>;
+        DirectLoad,
+        ALdsScalarLoadToVgpr,
+        BLdsScalarLoadToVgpr>;
     using GridwiseGemm64 = GridwiseGemmBase<math::max(NXdlPerWave64, 1)>;
     using GridwiseGemm32 = GridwiseGemmBase<NXdlPerWave32>;
 
@@ -607,7 +620,7 @@ struct DeviceGroupedConvBwdWeight_Xdl_CShuffleV3
 
                 // Ensure that k_batch_ does not exceed the maximum value
                 // for the GEMM pipeline.
-                const auto k_batch_max = static_cast<index_t>((gemmK - 1) / K0PerBlock);
+                const auto k_batch_max = math::integer_divide_ceil(gemmK, K0PerBlock);
                 k_batch_               = std::max(std::min(k_batch_, k_batch_max), 1);
 
                 // Cap k_batch_ to 128 to avoid accuracy issues
@@ -625,6 +638,7 @@ struct DeviceGroupedConvBwdWeight_Xdl_CShuffleV3
             {
                 k_batch_ = split_k;
             }
+            k_batch_ = clamp_gemm_k_batch(k_batch_);
 
             // Create descriptors first (with hack flags temporarily set to false)
             // so we can check if element space sizes match product of dimensions
@@ -805,29 +819,14 @@ struct DeviceGroupedConvBwdWeight_Xdl_CShuffleV3
             const auto Run = [&](const auto& kernel) {
                 if(stream_config.flush_cache)
                 {
-                    typename GridwiseGemm::Argument gemm_arg_ = gemm_arg;
-                    ck::utility::RotatingMemWrapper<typename GridwiseGemm::Argument> rotating_mem(
-                        gemm_arg_,
-                        stream_config.rotating_count,
-                        gemm_arg_.M * gemm_arg_.K * sizeof(ADataType),
-                        gemm_arg_.K * gemm_arg_.N * sizeof(BDataType));
-                    rotating_mem.Print();
-
-                    auto run_flush_cache = [&]() {
-                        // flush icache
-                        ck::utility::flush_icache();
-                        // rotating mem
-                        rotating_mem.Next();
-                        clear_workspace();
-                    };
-                    ave_time += ck::utility::launch_and_time_kernel_with_preprocess<false>(
+                    ave_time += launch_and_time_kernel_with_preprocess_flush_cache(
                         stream_config,
-                        run_flush_cache,
+                        clear_workspace,
                         kernel,
                         dim3(gdx, gdy, gdz),
                         dim3(BlockSize),
                         0,
-                        gemm_arg_,
+                        gemm_arg,
                         arg.a_grid_desc_k0_m_k1_,
                         arg.b_grid_desc_k0_n_k1_,
                         arg.c_grid_desc_mblock_mperblock_nblock_nperblock_,
@@ -1679,8 +1678,12 @@ struct DeviceGroupedConvBwdWeight_Xdl_CShuffleV3
         if constexpr(DirectLoad) {
             str << "_DirectLoad";
         }
+        
+        if constexpr(NumGroupsToMerge > 1) {
+            str << "_MergedGroups";
+        }
 
-        str    << "<"
+        str << "<"
             << BlockSize << ", "
             << MPerBlock << ", "
             << NPerBlock << ", "
@@ -1695,8 +1698,10 @@ struct DeviceGroupedConvBwdWeight_Xdl_CShuffleV3
             << BBlockTransferDstScalarPerVector_K1 << ", "
             << CShuffleMXdlPerWavePerShuffle << ", "
             << CShuffleNXdlPerWavePerShuffle << ", "
-            << CBlockTransferScalarPerVector_NWaveNPerXdl
-            << ">";
+            << CBlockTransferScalarPerVector_NWaveNPerXdl;
+            if constexpr(NumGroupsToMerge > 1) 
+                str << ", " << NumGroupsToMerge;
+            str << ">";
         // clang-format on
 
         return str.str();

@@ -2,13 +2,13 @@
 // SPDX-License-Identifier:  MIT
 
 #include <gtest/gtest.h>
-#include <hipdnn_test_sdk/utilities/cpu_graph_executor/BatchnormBwdSignatureKey.hpp>
-#include <hipdnn_test_sdk/utilities/cpu_graph_executor/BatchnormFwdInferenceSignatureKey.hpp>
-#include <hipdnn_test_sdk/utilities/cpu_graph_executor/PlanRegistrySignatureKey.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/BatchnormBwdSignatureKey.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/BatchnormFwdInferenceSignatureKey.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/PlanRegistrySignatureKey.hpp>
 #include <unordered_map>
 
-using namespace hipdnn_test_sdk::utilities;
-using hipdnn_data_sdk::data_objects::DataType;
+using namespace hipdnn_test_sdk::detail;
+using hipdnn_flatbuffers_sdk::data_objects::DataType;
 
 TEST(TestPlanRegistrySignatureKey, HashAndEqualityFwdInference)
 {
@@ -19,12 +19,12 @@ TEST(TestPlanRegistrySignatureKey, HashAndEqualityFwdInference)
     BatchnormFwdInferenceSignatureKey key3(
         DataType::HALF, DataType::HALF, DataType::HALF, DataType::HALF, DataType::HALF);
 
-    PlanRegistrySignatureKey v1 = key1;
-    PlanRegistrySignatureKey v2 = key2;
-    PlanRegistrySignatureKey v3 = key3;
+    const PlanRegistrySignatureKey v1 = key1;
+    const PlanRegistrySignatureKey v2 = key2;
+    const PlanRegistrySignatureKey v3 = key3;
 
-    PlanRegistrySignatureKeyHash hasher;
-    PlanRegistrySignatureKeyEqual eq;
+    const PlanRegistrySignatureKeyHash hasher;
+    const PlanRegistrySignatureKeyEqual eq;
 
     EXPECT_EQ(hasher(v1), hasher(v2));
     EXPECT_TRUE(eq(v1, v2));
@@ -53,12 +53,12 @@ TEST(TestPlanRegistrySignatureKey, HashAndEqualityBwd)
                                   DataType::HALF,
                                   DataType::HALF);
 
-    PlanRegistrySignatureKey v1 = key1;
-    PlanRegistrySignatureKey v2 = key2;
-    PlanRegistrySignatureKey v3 = key3;
+    const PlanRegistrySignatureKey v1 = key1;
+    const PlanRegistrySignatureKey v2 = key2;
+    const PlanRegistrySignatureKey v3 = key3;
 
-    PlanRegistrySignatureKeyHash hasher;
-    PlanRegistrySignatureKeyEqual eq;
+    const PlanRegistrySignatureKeyHash hasher;
+    const PlanRegistrySignatureKeyEqual eq;
 
     EXPECT_EQ(hasher(v1), hasher(v2));
     EXPECT_TRUE(eq(v1, v2));
@@ -77,10 +77,10 @@ TEST(TestPlanRegistrySignatureKey, CrossTypeEquality)
                                     DataType::FLOAT,
                                     DataType::FLOAT);
 
-    PlanRegistrySignatureKey vFwd = fwdKey;
-    PlanRegistrySignatureKey vBwd = bwdKey;
+    const PlanRegistrySignatureKey vFwd = fwdKey;
+    const PlanRegistrySignatureKey vBwd = bwdKey;
 
-    PlanRegistrySignatureKeyEqual eq;
+    const PlanRegistrySignatureKeyEqual eq;
     EXPECT_FALSE(eq(vFwd, vBwd));
 }
 
@@ -95,8 +95,8 @@ TEST(TestPlanRegistrySignatureKey, UnorderedMapUsage)
                                   DataType::HALF,
                                   DataType::HALF);
 
-    PlanRegistrySignatureKey v1 = key1;
-    PlanRegistrySignatureKey v2 = key2;
+    const PlanRegistrySignatureKey v1 = key1;
+    const PlanRegistrySignatureKey v2 = key2;
 
     std::unordered_map<PlanRegistrySignatureKey,
                        int,

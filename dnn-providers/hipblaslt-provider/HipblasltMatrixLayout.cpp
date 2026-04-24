@@ -9,7 +9,7 @@ namespace hipblaslt_plugin
 {
 
 HipblasltMatrixLayout::HipblasltMatrixLayout(
-    const hipdnn_data_sdk::flatbuffer_utilities::TensorAttributesWrapper& tensor)
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttributesWrapper& tensor)
     : _uid(tensor.uid())
 {
     const auto& dims = tensor.dims();

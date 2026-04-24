@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -75,7 +75,7 @@ typedef struct _rocsparse_handle* rocsparse_handle;
  *
  *  \details
  *  The rocSPARSE error descriptor is a structure holding the information related to an error
- *  that occured during the execution of a rocSPARSE routine.
+ *  that occurred during the execution of a rocSPARSE routine.
  *  It should be destroyed using rocsparse_destroy_error().
  */
 typedef struct _rocsparse_error* rocsparse_error;
@@ -256,8 +256,8 @@ typedef struct _rocsparse_spmv_descr* rocsparse_spmv_descr;
 /*! \ingroup types_module
  * \brief rocsparse_sptrsv_descr is a structure holding the rocsparse sptrsv
  * descr data. It must be initialized using
- * the rocsparse_create_sptrsv_descr() routine. It should be destroyed at the
- * end using rocsparse_destroy_sptrsv_descr().
+ * the rocsparse_create_sptrsv_descr(), or rocsparse_sptrsv_descr_create() routine. It should be destroyed at the
+ * end using rocsparse_destroy_sptrsv_descr(), or rocsparse_sptrsv_descr_destroy().
  */
 typedef struct _rocsparse_sptrsv_descr* rocsparse_sptrsv_descr;
 
@@ -268,6 +268,22 @@ typedef struct _rocsparse_sptrsv_descr* rocsparse_sptrsv_descr;
  * end using rocsparse_destroy_sptrsm_descr().
  */
 typedef struct _rocsparse_sptrsm_descr* rocsparse_sptrsm_descr;
+
+/*! \ingroup types_module
+ * \brief rocsparse_spic0_descr is a structure holding the rocsparse spic0
+ * descr data. It must be initialized using
+ * the rocsparse_spic0_descr_create() routine. It should be destroyed at the
+ * end using rocsparse_spic0_descr_destroy().
+ */
+typedef struct _rocsparse_spic0_descr* rocsparse_spic0_descr;
+
+/*! \ingroup types_module
+ * \brief rocsparse_spilu0_descr is a structure holding the rocsparse spilu0
+ * descr data. It must be initialized using
+ * the rocsparse_spilu0_descr_create() routine. It should be destroyed at the
+ * end using rocsparse_spilu0_descr_destroy().
+ */
+typedef struct _rocsparse_spilu0_descr* rocsparse_spilu0_descr;
 
 #ifdef __cplusplus
 extern "C" {
@@ -718,17 +734,17 @@ typedef enum rocsparse_check_spmat_stage_
 } rocsparse_check_spmat_stage;
 
 /*! \ingroup types_module
- *  \brief List of inputs to SpMV descriptor.
+ *  \brief List of inputs to the SpMV descriptor.
  *
  *  \details
  *  This is a list of possible inputs to the SpMV descriptor.
  */
 typedef enum rocsparse_spmv_input_
 {
-    rocsparse_spmv_input_alg, /**< Select algorithm for input on SpMV descriptor. */
-    rocsparse_spmv_input_operation, /**< Select matrix transpose operation for input on SpMV descriptor. */
-    rocsparse_spmv_input_scalar_datatype, /**< Select scalar  datatype for input on SpMV descriptor. */
-    rocsparse_spmv_input_compute_datatype, /**< Select compute datatype for input on SpMV descriptor. */
+    rocsparse_spmv_input_alg, /**< Select algorithm for input on a SpMV descriptor. */
+    rocsparse_spmv_input_operation, /**< Select matrix transpose operation for input on a SpMV descriptor. */
+    rocsparse_spmv_input_scalar_datatype, /**< Select scalar  datatype for input on a SpMV descriptor. */
+    rocsparse_spmv_input_compute_datatype, /**< Select compute datatype for input on a SpMV descriptor. */
     rocsparse_spmv_input_nnz_use_starting_block_ids, /**< Configure usage of starting block IDs for non-zero split. */
     rocsparse_spmv_input_enable_extra /**< Enable/disable extra vectors computation for SpMV descriptor. */
 } rocsparse_spmv_input;
@@ -965,6 +981,17 @@ typedef enum rocsparse_spgemm_alg_
 } rocsparse_spgemm_alg;
 
 /*! \ingroup types_module
+ *  \brief List of singularity types encountered in triangular solves and incomplete factorizations. *
+ */
+typedef enum rocsparse_singularity_
+{
+    rocsparse_singularity_none, /**< No singularity detected. */
+    rocsparse_singularity_symbolic, /**< The sparsity pattern inherently prevents a full rank, e.g. missing diagonal element. */
+    rocsparse_singularity_numeric_exact, /**< An exact zero was encountered during numerical calculation. */
+    rocsparse_singularity_numeric_near, /**< A near zero was encountered during numerical calculation, i.e. within a given tolerance. */
+} rocsparse_singularity;
+
+/*! \ingroup types_module
  *  \brief List of SpTRSV algorithms.
  *
  *  \details
@@ -989,19 +1016,19 @@ typedef enum rocsparse_sptrsv_stage_
 } rocsparse_sptrsv_stage;
 
 /*! \ingroup types_module
- *  \brief List of inputs to SpTRSV descriptor.
+ *  \brief List of inputs to the SpTRSV descriptor.
  *
  *  \details
  *  This is a list of possible inputs to the SpTRSV descriptor.
  */
 typedef enum rocsparse_sptrsv_input_
 {
-    rocsparse_sptrsv_input_alg, /**< Select algorithm \ref rocsparse_sptrsv_alg for input on SpTRSV descriptor. */
-    rocsparse_sptrsv_input_operation, /**< Select matrix operation \ref rocsparse_operation for input on SpTRSV descriptor. */
-    rocsparse_sptrsv_input_scalar_datatype, /**< Select scalar datatype \ref rocsparse_datatype for input on SpTRSV descriptor. */
-    rocsparse_sptrsv_input_compute_datatype, /**< Select compute datatype  \ref rocsparse_datatype for input on SpTRSV descriptor. */
-    rocsparse_sptrsv_input_scalar_alpha, /**< Select scalar alpha pointer for input on SpTRSV descriptor. */
-    rocsparse_sptrsv_input_analysis_policy /**< Select the analysis policy  \ref rocsparse_analysis_policy for input on SpTRSV descriptor. */
+    rocsparse_sptrsv_input_alg, /**< Select algorithm \ref rocsparse_sptrsv_alg for input on a SpTRSV descriptor. */
+    rocsparse_sptrsv_input_operation, /**< Select matrix operation \ref rocsparse_operation for input on a SpTRSV descriptor. */
+    rocsparse_sptrsv_input_scalar_datatype, /**< Select scalar datatype \ref rocsparse_datatype for input on a SpTRSV descriptor. */
+    rocsparse_sptrsv_input_compute_datatype, /**< Select compute datatype  \ref rocsparse_datatype for input on a SpTRSV descriptor. */
+    rocsparse_sptrsv_input_scalar_alpha, /**< Select scalar alpha pointer for input on a SpTRSV descriptor. */
+    rocsparse_sptrsv_input_analysis_policy /**< Select the analysis policy  \ref rocsparse_analysis_policy for input on a SpTRSV descriptor. */
 } rocsparse_sptrsv_input;
 
 /*! \ingroup types_module
@@ -1012,7 +1039,9 @@ typedef enum rocsparse_sptrsv_input_
  */
 typedef enum rocsparse_sptrsv_output_
 {
-    rocsparse_sptrsv_output_zero_pivot_position /**< Get zero pivot int64_t based position for output from SpTRSV descriptor. */
+    rocsparse_sptrsv_output_zero_pivot_position, /**< Get zero pivot int64_t based position for output from SpTRSV descriptor. */
+    rocsparse_sptrsv_output_singularity, /**< Get the type of \ref rocsparse_singularity detected during Sptrsv calculation for output from the SpTRSV descriptor. */
+    rocsparse_sptrsv_output_singularity_position /**< Get the singularity int64_t based position for output from the SpTRSV descriptor. */
 } rocsparse_sptrsv_output;
 
 /*! \ingroup types_module
@@ -1040,21 +1069,20 @@ typedef enum rocsparse_sptrsm_stage_
 } rocsparse_sptrsm_stage;
 
 /*! \ingroup types_module
- *  \brief List of inputs to SpTRSM descriptor.
+ *  \brief List of inputs to the SpTRSM descriptor.
  *
  *  \details
  *  This is a list of possible inputs to the SpTRSM descriptor.
  */
 typedef enum rocsparse_sptrsm_input_
 {
-    rocsparse_sptrsm_input_alg, /**< Select algorithm \ref rocsparse_sptrsm_alg for input on SpTRSM descriptor. */
-    rocsparse_sptrsm_input_operation_A, /**< Select matrix A operation \ref rocsparse_operation for input on SpTRSM descriptor. */
-    rocsparse_sptrsm_input_operation_X, /**< Select matrix X operation \ref rocsparse_operation  for input on SpTRSM descriptor. */
-    rocsparse_sptrsm_input_compute_datatype, /**< Select compute datatype \ref rocsparse_datatype for input on SpTRSM descriptor. */
-    rocsparse_sptrsm_input_scalar_datatype, /**< Select scalar datatype \ref rocsparse_datatype for input on SpTRSM descriptor. */
-    rocsparse_sptrsm_input_scalar_alpha, /**< Select scalar alpha pointer for input on SpTRSM descriptor, this datatype is used as the compute type. */
-    rocsparse_sptrsm_input_analysis_policy /**< Select the analysis policy \ref rocsparse_analysis_policy for input on SpTRSM descriptor */
-
+    rocsparse_sptrsm_input_alg, /**< Select algorithm \ref rocsparse_sptrsm_alg for input on a SpTRSM descriptor. */
+    rocsparse_sptrsm_input_operation_A, /**< Select matrix A operation \ref rocsparse_operation for input on a SpTRSM descriptor. */
+    rocsparse_sptrsm_input_operation_X, /**< Select matrix X operation \ref rocsparse_operation  for input on a SpTRSM descriptor. */
+    rocsparse_sptrsm_input_compute_datatype, /**< Select compute datatype \ref rocsparse_datatype for input on a SpTRSM descriptor. */
+    rocsparse_sptrsm_input_scalar_datatype, /**< Select scalar datatype \ref rocsparse_datatype for input on a SpTRSM descriptor. */
+    rocsparse_sptrsm_input_scalar_alpha, /**< Select scalar alpha pointer for input on a SpTRSM descriptor, this datatype is used as the compute type. */
+    rocsparse_sptrsm_input_analysis_policy /**< Select the analysis policy \ref rocsparse_analysis_policy for input on a SpTRSM descriptor */
 } rocsparse_sptrsm_input;
 
 /*! \ingroup types_module
@@ -1065,8 +1093,114 @@ typedef enum rocsparse_sptrsm_input_
  */
 typedef enum rocsparse_sptrsm_output_
 {
-    rocsparse_sptrsm_output_zero_pivot_position /**< Get zero pivot int64_t based position for output from SpTRSM descriptor. */
+    rocsparse_sptrsm_output_zero_pivot_position /**< Get zero pivot int64_t based position for output from SpTRSM descriptor, synchronous and return zero_pivot. */
 } rocsparse_sptrsm_output;
+
+/*! \ingroup types_module
+ *  \brief List of SpIC0 algorithms.
+ *
+ *  \details
+ *  This is a list of supported \ref rocsparse_spic0_alg types that are used to perform the incomplete Cholesky factorization
+ *  of level 0.
+ */
+typedef enum rocsparse_spic0_alg_
+{
+    rocsparse_spic0_alg_default
+} rocsparse_spic0_alg;
+
+/*! \ingroup types_module
+ *  \brief List of SpIC0 stages.
+ *
+ *  \details
+ *  This is a list of possible stages during SpIC0 computation.
+ */
+typedef enum rocsparse_spic0_stage_
+{
+    rocsparse_spic0_stage_analysis, /**< Analysis. */
+    rocsparse_spic0_stage_compute /**< Performs the actual SpIC0 computation. */
+} rocsparse_spic0_stage;
+
+/*! \ingroup types_module
+ *  \brief List of inputs to the SpIC0 descriptor.
+ *
+ *  \details
+ *  This is a list of possible inputs to the SpIC0 descriptor.
+ */
+typedef enum rocsparse_spic0_input_
+{
+    rocsparse_spic0_input_alg, /**< Select algorithm \ref rocsparse_spic0_alg for input on a SpIC0 descriptor. */
+    rocsparse_spic0_input_analysis_policy, /**< Select the analysis policy \ref rocsparse_analysis_policy for input on a SpIC0 descriptor */
+    rocsparse_spic0_input_compute_datatype, /**< Select compute datatype \ref rocsparse_datatype for input on a SpIC0 descriptor. */
+    rocsparse_spic0_input_boost_enable, /**< Enable diagonal boosting for input on a SpIC0 descriptor. */
+    rocsparse_spic0_input_boost_tolerance, /**< Select diagonal boosting tolerance on SpIC0 descriptor. */
+    rocsparse_spic0_input_boost_value, /**< Select diagonal boosting value on SpIC0 descriptor. */
+    rocsparse_spic0_input_singularity_tolerance, /**< Select singularity tolerance for input on a SpIC0 descriptor. */
+} rocsparse_spic0_input;
+
+/*! \ingroup types_module
+ *  \brief List of outputs to SpIC0 descriptor.
+ *
+ *  \details
+ *  This is a list of possible outputs to the SpIC0 descriptor.
+ */
+typedef enum rocsparse_spic0_output_
+{
+    rocsparse_spic0_output_singularity, /**< Get the type of \ref rocsparse_singularity detected during SpIC0 calculation for output from the SpIC0 descriptor. */
+    rocsparse_spic0_output_singularity_position, /**< Get the singularity int64_t based position for output from the SpIC0 descriptor. */
+} rocsparse_spic0_output;
+
+/*! \ingroup types_module
+ *  \brief List of SpILU0 algorithms.
+ *
+ *  \details
+ *  This is a list of supported \ref rocsparse_spilu0_alg types that are used to perform the incomplete LU factorization
+ *  of level 0.
+ */
+typedef enum rocsparse_spilu0_alg_
+{
+    rocsparse_spilu0_alg_default
+} rocsparse_spilu0_alg;
+
+/*! \ingroup types_module
+ *  \brief List of SpILU0 stages.
+ *
+ *  \details
+ *  This is a list of possible stages during SpILU0 computation.
+ */
+typedef enum rocsparse_spilu0_stage_
+{
+    rocsparse_spilu0_stage_analysis, /**< Analysis. */
+    rocsparse_spilu0_stage_compute, /**< Performs the actual SpILU0 computation. */
+} rocsparse_spilu0_stage;
+
+/*! \ingroup types_module
+ *  \brief List of inputs to the SpILU0 descriptor.
+ *
+ *  \details
+ *  This is a list of possible inputs to the SpILU0 descriptor.
+ */
+typedef enum rocsparse_spilu0_input_
+{
+    rocsparse_spilu0_input_alg, /**< Select algorithm \ref rocsparse_spilu0_alg for input on a SpILU0 descriptor. */
+    rocsparse_spilu0_input_analysis_policy, /**< Select the analysis policy \ref rocsparse_analysis_policy for input on a SpILU0 descriptor */
+    rocsparse_spilu0_input_compute_datatype, /**< Select compute datatype \ref rocsparse_datatype for input on a SpILU0 descriptor. */
+    rocsparse_spilu0_input_boost_enable, /**< Enable diagonal boosting for input on a SpILU0 descriptor. */
+    rocsparse_spilu0_input_boost_tolerance, /**< Select diagonal boosting tolerance on SpILU0 descriptor. */
+    rocsparse_spilu0_input_boost_value, /**< Select diagonal boosting value on SpILU0 descriptor. */
+    rocsparse_spilu0_input_singularity_tolerance, /**< Select singularity tolerance for input on a SpILU0 descriptor. */
+} rocsparse_spilu0_input;
+
+/*! \ingroup types_module
+ *  \brief List of outputs to SpILU0 descriptor.
+ *
+ *  \details
+ *  This is a list of possible outputs to the SpILU0 descriptor.
+ */
+typedef enum rocsparse_spilu0_output_
+{
+    rocsparse_spilu0_output_singularity, /**< Get the type of \ref rocsparse_singularity detected during SpILU0 calculation for output from the SpILU0 descriptor. */
+    rocsparse_spilu0_output_singularity_position, /**< Get the singularity int64_t based position for output from the SpILU0 descriptor. */
+} rocsparse_spilu0_output;
 
 /*! \ingroup types_module
  *  \brief List of SpGEAM stages.
@@ -1090,20 +1224,20 @@ typedef enum rocsparse_spgeam_stage_
 } rocsparse_spgeam_stage;
 
 /*! \ingroup types_module
- *  \brief List of inputs to SpGEAM descriptor.
+ *  \brief List of inputs to the SpGEAM descriptor.
  *
  *  \details
  *  This is a list of possible inputs to the SpGEAM descriptor.
  */
 typedef enum rocsparse_spgeam_input_
 {
-    rocsparse_spgeam_input_alg, /**< Select algorithm for input on SpGEAM descriptor. */
-    rocsparse_spgeam_input_scalar_datatype, /**< Select scalar data type for input on SpGEAM descriptor. */
-    rocsparse_spgeam_input_compute_datatype, /**< Select compute data type for input on SpGEAM descriptor. */
-    rocsparse_spgeam_input_operation_A, /**< Select A matrix transpose operation for input on SpGEAM descriptor. */
-    rocsparse_spgeam_input_operation_B, /**< Select B matrix transpose operation for input on SpGEAM descriptor. */
-    rocsparse_spgeam_input_scalar_alpha, /**< Select scalar multiplier alpha for input on SpGEAM descriptor. */
-    rocsparse_spgeam_input_scalar_beta /**< Select scalar multiplier beta for input on SpGEAM descriptor. */
+    rocsparse_spgeam_input_alg, /**< Select algorithm for input on a SpGEAM descriptor. */
+    rocsparse_spgeam_input_scalar_datatype, /**< Select scalar data type for input on a SpGEAM descriptor. */
+    rocsparse_spgeam_input_compute_datatype, /**< Select compute data type for input on a SpGEAM descriptor. */
+    rocsparse_spgeam_input_operation_A, /**< Select A matrix transpose operation for input on a SpGEAM descriptor. */
+    rocsparse_spgeam_input_operation_B, /**< Select B matrix transpose operation for input on a SpGEAM descriptor. */
+    rocsparse_spgeam_input_scalar_alpha, /**< Select scalar multiplier alpha for input on a SpGEAM descriptor. */
+    rocsparse_spgeam_input_scalar_beta /**< Select scalar multiplier beta for input on a SpGEAM descriptor. */
 } rocsparse_spgeam_input;
 
 /*! \ingroup types_module

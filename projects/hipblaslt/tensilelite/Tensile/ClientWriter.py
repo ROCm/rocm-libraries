@@ -23,12 +23,10 @@
 ################################################################################
 
 import inspect
-import logging
 import os
 import subprocess
 import shlex
 import shutil
-import sys
 
 from pathlib import Path
 from enum import Enum
@@ -46,17 +44,11 @@ from Tensile.Common import ensurePath, print1, printExit, printWarning, ClientEx
                            LIBRARY_LOGIC_DIR, LIBRARY_CLIENT_DIR
 from Tensile.Common.Architectures import isaToGfx
 from Tensile.Common.GlobalParameters import globalParameters
-from .TensileCreateLibrary import copyStaticFiles
+from Tensile.Common.TimingInstrumentation import timing_context
+from .TensileCreateLibrary import copyStaticFiles, libraryDir
+from .ParallelExecution import detectAvailableGpus, runClientParallel
 from .Contractions import FreeIndex, BatchIndex
 from .Contractions import ProblemType as ContractionsProblemType
-
-_timing_logger = logging.getLogger("tensile.timing")
-if not _timing_logger.handlers:
-    _h = logging.StreamHandler(sys.stderr)
-    _h.setFormatter(logging.Formatter("%(message)s"))
-    _timing_logger.addHandler(_h)
-    _timing_logger.setLevel(logging.INFO)
-    _timing_logger.propagate = False
 
 class DataInitName(Enum):
   Zero = 0
@@ -123,10 +115,13 @@ def main(config, assembler: Assembler, cCompiler: str, isaInfoMap, outputPath: P
   else:
     env["PYTHONPATH"] = module_path
 
-  createLibraryScript = getBuildClientLibraryScript(clientLibraryPath, libraryLogicPath, str(assembler.path), isaToGfx(list(isaInfoMap.keys())[0]))
+  targetGfx = isaToGfx(list(isaInfoMap.keys())[0])
+  createLibraryScript = getBuildClientLibraryScript(clientLibraryPath, libraryLogicPath, str(assembler.path), targetGfx)
   subprocess.run(shlex.split(createLibraryScript), env=env, cwd=clientLibraryPath)
-  coList = glob(os.path.join(clientLibraryPath, "library/*.co"))
-  yamlList = glob(os.path.join(clientLibraryPath, "library/*.yaml"))
+  archs = [isaToGfx(isa) for isa in isaInfoMap.keys()]
+  libraryGlobBase = libraryDir(clientLibraryPath, archs)
+  coList = glob(os.path.join(libraryGlobBase, "*.co"))
+  yamlList = glob(os.path.join(libraryGlobBase, "*.yaml"))
 
   clientParametersPaths = []
   splitGSU = False
@@ -224,28 +219,41 @@ def runNewClient(scriptPath, clientParametersPath, cxxCompiler: str, cCompiler: 
 
 
 def runClient(libraryLogicPath, forBenchmark, enableTileSelection, cxxCompiler: str, cCompiler: str, outputPath, configPaths=None):
-  import time
-
   buildPath = ensurePath(outputPath / "build")
-
-  runScriptName = writeRunScript(buildPath, forBenchmark, enableTileSelection, cxxCompiler, cCompiler, buildPath, configPaths)
-
   timingEnabled = globalParameters.get("TimingInstrumentation", False)
-  # Using time_ns() for better precision: https://docs.python.org/3/library/time.html#time.time
-  startTime = time.time_ns()
+  parallelGpus = globalParameters.get("ParallelGpuExecution", 1)
 
-  with ClientExecutionLock(globalParameters["ClientExecutionLockPath"]):
-    process = subprocess.Popen(runScriptName, cwd=buildPath)
-    process.communicate()
+  # Compute default configPaths if not provided (same logic as writeRunScript)
+  if configPaths is None:
+    configPaths = []
+    configPaths.append(os.path.join(buildPath, "../source/ClientParameters.ini"))
+    if enableTileSelection:
+      configPaths.append(os.path.join(buildPath, "../source/ClientParameters_Granularity.ini"))
 
-  if timingEnabled:
-    elapsed = (time.time_ns() - startTime) / 1_000_000
-    _timing_logger.info(f"TIMING:python_client_execution:{elapsed:.3f}")
+  # Determine number of GPUs to use
+  if parallelGpus == 0:
+    numGpus = detectAvailableGpus()
+    print1(f"# Auto-detected {numGpus} GPUs for parallel execution")
+  else:
+    numGpus = parallelGpus
+
+  with timing_context("python_client_execution"):
+    # Use parallel execution only for benchmarking with multiple GPUs
+    if numGpus > 1 and forBenchmark:
+      return runClientParallel(buildPath, configPaths, numGpus, timingEnabled, getClientExecutablePath)
+
+    # Original single-GPU path
+    runScriptName = writeRunScript(buildPath, forBenchmark, enableTileSelection, cxxCompiler, cCompiler, buildPath, configPaths)
+
+    with ClientExecutionLock(globalParameters["ClientExecutionLockPath"]):
+      process = subprocess.Popen(runScriptName, cwd=buildPath)
+      process.communicate()
 
   if process.returncode:
     printWarning("ClientWriter Benchmark Process exited with code %u" % process.returncode)
 
   return process.returncode
+
 
 def getBuildClientLibraryScript(buildPath, libraryLogicPath, cxxCompiler, targetGfx):
   import io
@@ -501,6 +509,8 @@ def dataInitParams(problemType):
     initScaleC  = globalParameters['DataInitTypeScaleC']
     initScaleD  = globalParameters['DataInitTypeScaleD']
     initScaleAlphaVec  = globalParameters['DataInitTypeScaleAlphaVec']
+    initMXScaleA = globalParameters["DataInitTypeMXSA"]
+    initMXScaleB = globalParameters["DataInitTypeMXSB"]
 
     if not problemType.useBeta:
         initBeta = 0
@@ -520,7 +530,9 @@ def dataInitParams(problemType):
             ('init-scaleB',        DataInitName(initScaleB).name),
             ('init-scaleC',        DataInitName(initScaleC).name),
             ('init-scaleD',        DataInitName(initScaleD).name),
-            ('init-scaleAlphaVec', DataInitName(initScaleAlphaVec).name)]
+            ('init-scaleAlphaVec', DataInitName(initScaleAlphaVec).name),
+            ('init-mx-a',      DataInitName(initMXScaleA).name),
+            ('init-mx-b',      DataInitName(initMXScaleB).name)]
 
 def boundsCheckName(mode):
     if mode == 0: return 'Disable'
@@ -558,7 +570,8 @@ def writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs
         param('results-file', resultsFileName)
         param('performance-metric', globalParameters["PerformanceMetric"])
         param('problem-identifier', problemType.operationIdentifier)
-        param('compute-input-type', problemType.computeInputType.toName())
+        param('compute-input-type-A', problemType.computeInputTypeA.toName())
+        param('compute-input-type-B', problemType.computeInputTypeB.toName())
         param('a-type',     problemType.aType.toName())
         param('b-type',     problemType.bType.toName())
         param('c-type',     problemType.cType.toName())
@@ -581,6 +594,13 @@ def writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs
         param('use-scaleAlphaVec',   problemType.useScaleAlphaVec)
         param('swizzle-tensor-a', problemType.swizzleTensorA)
         param('swizzle-tensor-b', problemType.swizzleTensorB)
+        if problemType.mxBlockA:
+            param('mx-a-block', problemType.mxBlockA)
+            param('mx-a-type', problemType.mxTypeA.toName())
+        if problemType.mxBlockB:
+            param('mx-b-block', problemType.mxBlockB)
+            param('mx-b-type', problemType.mxTypeB.toName())
+
         if biasTypeArgs:
           for btype in biasTypeArgs.biasTypes:
             param('bias-type-args',  btype.toName())
@@ -594,6 +614,7 @@ def writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs
             param('icache-flush-args', opt)
 
         param('sparse',   problemType.sparse)
+        param('metadata-layout', problemType.metadataLayout)
         param('high-precision-accumulate', problemType.highPrecisionAccumulate)
         param('strided-batched', problemType.stridedBatched)
         param('grouped-gemm', problemType.groupedGemm)
@@ -686,7 +707,9 @@ def writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs
         param("use-user-args",            globalParameters["UseUserArgs"])
         param("rotating-buffer-size",     globalParameters["RotatingBufferSize"])
         param("rotating-buffer-mode",     globalParameters["RotatingMode"])
-
+        if globalParameters["RocProfCounter"]:
+            for counter in globalParameters["RocProfCounter"]:
+                param("rocprof-counter", counter)
 
 def writeClientConfig(
       forBenchmark,
@@ -729,10 +752,10 @@ def writeClientConfig(
 
     return filename
 
-def CreateBenchmarkClientParametersForSizes(libraryRootPath, problemSizes, dataFilePath, configFile, deviceId, gfxName, problemTypeDict=None):
+def CreateBenchmarkClientParametersForSizes(libraryRootPath, problemSizes, dataFilePath, configFile, deviceId, gfxName, problemTypeDict=None, archs=None):
 
-    libraryPath = os.path.join(libraryRootPath, "library")
-    libraryFiles = [os.path.join(libraryPath, f) for f in os.listdir(libraryPath)]
+    libraryPath = libraryDir(libraryRootPath, archs or [])
+    libraryFiles = [os.path.join(str(libraryPath), f) for f in os.listdir(libraryPath)]
     codeObjectFiles = [f for f in libraryFiles if f.endswith("co")]
 
     if problemTypeDict:

@@ -7,6 +7,9 @@
 #include "ck_tile/host/convolution_parameter.hpp"
 #include "ck_tile/ops/elementwise/unary_element_wise_operation.hpp"
 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
+
 namespace ck_tile {
 
 enum class GroupedConvDirection
@@ -108,7 +111,9 @@ struct GroupedConvTraits
     using OutLayout                                               = OutLayout_;
 
     // Forward Gemm Layouts
-    using AsLayoutFwd = ck_tile::tensor_layout::gemm::RowMajor;
+    using AsLayoutFwd = std::conditional_t<NumGroupsToMerge == 1,
+                                           ck_tile::tensor_layout::gemm::RowMajor,
+                                           ck_tile::tensor_layout::gemm::ColumnMajor>;
     using BsLayoutFwd = ck_tile::tensor_layout::gemm::ColumnMajor;
     using CLayoutFwd  = ck_tile::tensor_layout::gemm::RowMajor;
     // Backward Data Gemm Layouts
@@ -259,3 +264,5 @@ CK_TILE_HOST SplitImagePieceInfo calculate_spatial_piece(ck_tile::index_t piece_
 }
 
 } // namespace ck_tile
+
+#pragma clang diagnostic pop

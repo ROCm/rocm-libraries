@@ -44,8 +44,9 @@ void copyWithCheck(const flatbuffers::Vector<int64_t>* src,
 
 MiopenConvDescriptor::MiopenConvDescriptor(
     size_t spatialDimCount,
-    const hipdnn_data_sdk::data_objects::ConvolutionFwdAttributes& attributes,
-    int groupCount)
+    const hipdnn_flatbuffers_sdk::data_objects::ConvolutionFwdAttributes& attributes,
+    int groupCount,
+    bool deterministicEnabled)
 {
     createDescriptorInternal(spatialDimCount,
                              attributes.pre_padding(),
@@ -53,13 +54,15 @@ MiopenConvDescriptor::MiopenConvDescriptor(
                              attributes.stride(),
                              attributes.dilation(),
                              attributes.conv_mode(),
-                             groupCount);
+                             groupCount,
+                             deterministicEnabled);
 }
 
 MiopenConvDescriptor::MiopenConvDescriptor(
     size_t spatialDimCount,
-    const hipdnn_data_sdk::data_objects::ConvolutionBwdAttributes& attributes,
-    int groupCount)
+    const hipdnn_flatbuffers_sdk::data_objects::ConvolutionBwdAttributes& attributes,
+    int groupCount,
+    bool deterministicEnabled)
 {
     createDescriptorInternal(spatialDimCount,
                              attributes.pre_padding(),
@@ -67,13 +70,15 @@ MiopenConvDescriptor::MiopenConvDescriptor(
                              attributes.stride(),
                              attributes.dilation(),
                              attributes.conv_mode(),
-                             groupCount);
+                             groupCount,
+                             deterministicEnabled);
 }
 
 MiopenConvDescriptor::MiopenConvDescriptor(
     size_t spatialDimCount,
-    const hipdnn_data_sdk::data_objects::ConvolutionWrwAttributes& attributes,
-    int groupCount)
+    const hipdnn_flatbuffers_sdk::data_objects::ConvolutionWrwAttributes& attributes,
+    int groupCount,
+    bool deterministicEnabled)
 {
     createDescriptorInternal(spatialDimCount,
                              attributes.pre_padding(),
@@ -81,7 +86,8 @@ MiopenConvDescriptor::MiopenConvDescriptor(
                              attributes.stride(),
                              attributes.dilation(),
                              attributes.conv_mode(),
-                             groupCount);
+                             groupCount,
+                             deterministicEnabled);
 }
 
 MiopenConvDescriptor::MiopenConvDescriptor(MiopenConvDescriptor&& other) noexcept
@@ -124,8 +130,9 @@ void MiopenConvDescriptor::createDescriptorInternal(
     const flatbuffers::Vector<int64_t>* attrPostPadding,
     const flatbuffers::Vector<int64_t>* attrStride,
     const flatbuffers::Vector<int64_t>* attrDilation,
-    hipdnn_data_sdk::data_objects::ConvMode convMode,
-    int groupCount)
+    hipdnn_flatbuffers_sdk::data_objects::ConvMode convMode,
+    int groupCount,
+    bool deterministicEnabled)
 {
     if(spatialDimCount > std::numeric_limits<int>::max())
     {
@@ -134,7 +141,7 @@ void MiopenConvDescriptor::createDescriptorInternal(
             "MiopenConvDescriptor: spatialDimCount must be not greater than INT_MAX");
     }
 
-    if(convMode != hipdnn_data_sdk::data_objects::ConvMode::CROSS_CORRELATION)
+    if(convMode != hipdnn_flatbuffers_sdk::data_objects::ConvMode::CROSS_CORRELATION)
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
@@ -202,5 +209,11 @@ void MiopenConvDescriptor::createDescriptorInternal(
                                                               dilation.data(),
                                                               miopenConvolution));
     THROW_ON_MIOPEN_FAILURE(miopenSetConvolutionGroupCount(_descriptor, groupCount));
+
+    if(deterministicEnabled)
+    {
+        THROW_ON_MIOPEN_FAILURE(
+            miopenSetConvolutionAttribute(_descriptor, MIOPEN_CONVOLUTION_ATTRIB_DETERMINISTIC, 1));
+    }
 }
 }

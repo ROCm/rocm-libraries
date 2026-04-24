@@ -1,0 +1,189 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
+#pragma once
+
+#include <functional>
+#include <variant>
+
+#include <hipdnn_data_sdk/utilities/Constants.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
+#include <hipdnn_test_sdk/utilities/CpuFpReferenceBatchnorm.hpp>
+#include <hipdnn_test_sdk/utilities/FlatbufferDatatypeMapping.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/IGraphNodePlanBuilder.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/IGraphNodePlanExecutor.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/PlanUtils.hpp>
+#include <hipdnn_test_sdk/utilities/detail/FlatbufferTensorAttributesUtils.hpp>
+
+namespace hipdnn_test_sdk::detail
+{
+
+struct BatchnormFwdInferenceWithVarianceParams
+{
+    BatchnormFwdInferenceWithVarianceParams() = default;
+    BatchnormFwdInferenceWithVarianceParams(
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& xAttributes,
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& yAttributes,
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& scaleAttributes,
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& biasAttributes,
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& meanAttributes,
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& varianceAttributes,
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& epsilonAttributes)
+        : xTensor(unpackTensorAttributes(xAttributes))
+        , yTensor(unpackTensorAttributes(yAttributes))
+        , scaleTensor(unpackTensorAttributes(scaleAttributes))
+        , biasTensor(unpackTensorAttributes(biasAttributes))
+        , meanTensor(unpackTensorAttributes(meanAttributes))
+        , varianceTensor(unpackTensorAttributes(varianceAttributes))
+        , epsilonTensor(unpackTensorAttributes(epsilonAttributes))
+    {
+    }
+
+    hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT xTensor;
+    hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT yTensor;
+    hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT scaleTensor;
+    hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT biasTensor;
+    hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT meanTensor;
+    hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT varianceTensor;
+    hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT epsilonTensor;
+};
+
+template <typename XDataType,
+          typename ScaleBiasDataType,
+          typename MeanVarianceDataType,
+          typename OutputDataType,
+          typename ComputeDataType>
+class BatchnormFwdInferenceWithVariancePlan : public IGraphNodePlanExecutor
+{
+public:
+    BatchnormFwdInferenceWithVariancePlan(BatchnormFwdInferenceWithVarianceParams&& params)
+        : _params(std::move(params))
+    {
+    }
+
+    std::vector<int64_t> getOutputTensorIds() const override
+    {
+        return {_params.yTensor.uid};
+    }
+
+    void execute(const std::unordered_map<int64_t, void*>& variantPack) override
+    {
+        auto shallowXTensor
+            = createShallowTensor<XDataType>(_params.xTensor, variantPack.at(_params.xTensor.uid));
+
+        auto shallowYTensor = createShallowTensor<OutputDataType>(
+            _params.yTensor, variantPack.at(_params.yTensor.uid));
+
+        auto shallowScaleTensor = createShallowTensor<ScaleBiasDataType>(
+            _params.scaleTensor, variantPack.at(_params.scaleTensor.uid));
+
+        auto shallowBiasTensor = createShallowTensor<ScaleBiasDataType>(
+            _params.biasTensor, variantPack.at(_params.biasTensor.uid));
+
+        auto shallowMeanTensor = createShallowTensor<MeanVarianceDataType>(
+            _params.meanTensor, variantPack.at(_params.meanTensor.uid));
+
+        auto shallowVarianceTensor = createShallowTensor<MeanVarianceDataType>(
+            _params.varianceTensor, variantPack.at(_params.varianceTensor.uid));
+
+        const double epsilonVal = hipdnn_flatbuffers_sdk::utilities::extractDoubleFromTensorValue(
+            _params.epsilonTensor, "Epsilon");
+
+        utilities::CpuFpReferenceBatchnorm::fwdInferenceWithVariance(*shallowXTensor,
+                                                                     *shallowScaleTensor,
+                                                                     *shallowBiasTensor,
+                                                                     *shallowMeanTensor,
+                                                                     *shallowVarianceTensor,
+                                                                     *shallowYTensor,
+                                                                     epsilonVal);
+    }
+
+private:
+    BatchnormFwdInferenceWithVarianceParams _params;
+};
+
+template <hipdnn_flatbuffers_sdk::data_objects::DataType XDataTypeEnum,
+          hipdnn_flatbuffers_sdk::data_objects::DataType ScaleBiasDataTypeEnum,
+          hipdnn_flatbuffers_sdk::data_objects::DataType MeanVarianceDataTypeEnum,
+          hipdnn_flatbuffers_sdk::data_objects::DataType OutputDataTypeEnum,
+          hipdnn_flatbuffers_sdk::data_objects::DataType ComputeDataTypeEnum>
+class BatchnormFwdInferenceWithVariancePlanBuilder : public IGraphNodePlanBuilder
+{
+public:
+    using XDataType = utilities::DataTypeToNative<XDataTypeEnum>;
+    using ScaleBiasDataType = utilities::DataTypeToNative<ScaleBiasDataTypeEnum>;
+    using MeanVarianceDataType = utilities::DataTypeToNative<MeanVarianceDataTypeEnum>;
+    using OutputDataType = utilities::DataTypeToNative<OutputDataTypeEnum>;
+    using ComputeDataType = utilities::DataTypeToNative<ComputeDataTypeEnum>;
+
+    bool isApplicable(
+        const hipdnn_flatbuffers_sdk::data_objects::Node& node,
+        const std::unordered_map<int64_t,
+                                 const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
+            tensorMap) const override
+    {
+        if(node.compute_data_type() != ComputeDataTypeEnum)
+        {
+            return false;
+        }
+
+        const auto* nodeAttributes = node.attributes_as_BatchnormInferenceAttributesVarianceExt();
+        if(nodeAttributes == nullptr)
+        {
+            return false;
+        }
+
+        CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->x_tensor_uid());
+        CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->y_tensor_uid());
+        CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->scale_tensor_uid());
+        CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->bias_tensor_uid());
+        CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->mean_tensor_uid());
+        CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->variance_tensor_uid());
+        CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->epsilon_tensor_uid());
+
+        CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->x_tensor_uid(), XDataTypeEnum);
+        CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->y_tensor_uid(), OutputDataTypeEnum);
+        CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->scale_tensor_uid(), ScaleBiasDataTypeEnum);
+        CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->bias_tensor_uid(), ScaleBiasDataTypeEnum);
+        CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->mean_tensor_uid(), MeanVarianceDataTypeEnum);
+        CHECK_TENSOR_TYPE(
+            tensorMap, nodeAttributes->variance_tensor_uid(), MeanVarianceDataTypeEnum);
+        CHECK_TENSOR_TYPE(tensorMap,
+                          nodeAttributes->epsilon_tensor_uid(),
+                          hipdnn_flatbuffers_sdk::data_objects::DataType::DOUBLE);
+
+        return true;
+    }
+
+    std::unique_ptr<IGraphNodePlanExecutor>
+        buildNodePlan(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph,
+                      const hipdnn_flatbuffers_sdk::data_objects::Node& node) const override
+    {
+        const auto* nodeAttributes = node.attributes_as_BatchnormInferenceAttributesVarianceExt();
+        if(nodeAttributes == nullptr)
+        {
+            throw std::runtime_error(
+                "Node attributes are not of type BatchnormInferenceAttributesVarianceExt");
+        }
+
+        const auto& tensorMap = graph.getTensorMap();
+        BatchnormFwdInferenceWithVarianceParams params(
+            *tensorMap.at(nodeAttributes->x_tensor_uid()),
+            *tensorMap.at(nodeAttributes->y_tensor_uid()),
+            *tensorMap.at(nodeAttributes->scale_tensor_uid()),
+            *tensorMap.at(nodeAttributes->bias_tensor_uid()),
+            *tensorMap.at(nodeAttributes->mean_tensor_uid()),
+            *tensorMap.at(nodeAttributes->variance_tensor_uid()),
+            *tensorMap.at(nodeAttributes->epsilon_tensor_uid()));
+
+        return std::make_unique<BatchnormFwdInferenceWithVariancePlan<XDataType,
+                                                                      ScaleBiasDataType,
+                                                                      MeanVarianceDataType,
+                                                                      OutputDataType,
+                                                                      ComputeDataType>>(
+            std::move(params));
+    }
+};
+} // namespace hipdnn_test_sdk::detail

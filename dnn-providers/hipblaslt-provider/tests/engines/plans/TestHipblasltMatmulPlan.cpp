@@ -3,7 +3,7 @@
 
 #include <gtest/gtest.h>
 #include <hipblaslt/hipblaslt.h>
-#include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
@@ -13,6 +13,7 @@
 
 using namespace hipblaslt_plugin;
 using namespace hipdnn_plugin_sdk;
+using namespace hipdnn_flatbuffers_sdk::flatbuffer_utilities;
 using namespace hipdnn_test_sdk::utilities;
 
 class TestGpuMatmulPlan : public ::testing::Test
@@ -54,6 +55,113 @@ TEST(TestMatmulParams, InitializesAllTensorsFromValidGraph)
     EXPECT_NO_THROW(params.b());
     EXPECT_NO_THROW(params.c());
     EXPECT_NO_THROW(params.desc());
+    EXPECT_FALSE(params.biasUid().has_value());
+}
+
+TEST(TestMatmulParams, InitializesWithBiasAndActivation)
+{
+    auto builder = createValidMatmulBiasActivGraph(
+        {4, 8},
+        {8, 1},
+        {8, 5},
+        {5, 1},
+        {4, 5},
+        {5, 1},
+        true,
+        hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::GELU_APPROX_TANH_FWD);
+    GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+
+    auto* matmulAttrs = graph.getNode(0).attributes_as_MatmulAttributes();
+    auto* biasAttrs = graph.getNode(1).attributes_as_PointwiseAttributes();
+    auto* activAttrs = graph.getNode(2).attributes_as_PointwiseAttributes();
+    ASSERT_NE(matmulAttrs, nullptr);
+    ASSERT_NE(biasAttrs, nullptr);
+    ASSERT_NE(activAttrs, nullptr);
+
+    MatmulParams params(*matmulAttrs, biasAttrs, activAttrs, graph.getTensorMap());
+
+    EXPECT_NO_THROW(params.a());
+    EXPECT_NO_THROW(params.b());
+    EXPECT_NO_THROW(params.c());
+    EXPECT_NO_THROW(params.desc());
+    EXPECT_TRUE(params.biasUid().has_value());
+}
+
+TEST(TestMatmulParams, InitializesWithActivationOnly)
+{
+    auto builder = createValidMatmulBiasActivGraph(
+        {4, 8},
+        {8, 1},
+        {8, 5},
+        {5, 1},
+        {4, 5},
+        {5, 1},
+        false,
+        hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD,
+        0.0f);
+    GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+
+    auto* matmulAttrs = graph.getNode(0).attributes_as_MatmulAttributes();
+    auto* activAttrs = graph.getNode(1).attributes_as_PointwiseAttributes();
+    ASSERT_NE(matmulAttrs, nullptr);
+    ASSERT_NE(activAttrs, nullptr);
+
+    MatmulParams params(*matmulAttrs, nullptr, activAttrs, graph.getTensorMap());
+
+    EXPECT_NO_THROW(params.a());
+    EXPECT_NO_THROW(params.b());
+    EXPECT_NO_THROW(params.c());
+    EXPECT_FALSE(params.biasUid().has_value());
+}
+
+TEST(TestMatmulParams, InitializesWithBiasOnly)
+{
+    auto builder = createValidMatmulBiasActivGraph(
+        {4, 8},
+        {8, 1},
+        {8, 5},
+        {5, 1},
+        {4, 5},
+        {5, 1},
+        true,
+        hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::UNSET);
+    GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+
+    auto* matmulAttrs = graph.getNode(0).attributes_as_MatmulAttributes();
+    auto* biasAttrs = graph.getNode(1).attributes_as_PointwiseAttributes();
+    ASSERT_NE(matmulAttrs, nullptr);
+    ASSERT_NE(biasAttrs, nullptr);
+
+    MatmulParams params(*matmulAttrs, biasAttrs, nullptr, graph.getTensorMap());
+
+    EXPECT_NO_THROW(params.a());
+    EXPECT_NO_THROW(params.b());
+    EXPECT_NO_THROW(params.c());
+    EXPECT_NO_THROW(params.desc());
+    EXPECT_TRUE(params.biasUid().has_value());
+}
+
+TEST(TestMatmulParams, BiasUidMatchesBiasTensor)
+{
+    auto builder = createValidMatmulBiasActivGraph(
+        {4, 8},
+        {8, 1},
+        {8, 5},
+        {5, 1},
+        {4, 5},
+        {5, 1},
+        true,
+        hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::UNSET);
+    GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+
+    auto* matmulAttrs = graph.getNode(0).attributes_as_MatmulAttributes();
+    auto* biasAttrs = graph.getNode(1).attributes_as_PointwiseAttributes();
+
+    MatmulParams params(*matmulAttrs, biasAttrs, nullptr, graph.getTensorMap());
+
+    ASSERT_TRUE(params.biasUid().has_value());
+    // The bias UID should correspond to a tensor in the graph's tensor map
+    EXPECT_NE(graph.getTensorMap().find(params.biasUid().value()), graph.getTensorMap().end());
 }
 
 TEST(TestMatmulParams, RowMajor)
@@ -406,7 +514,7 @@ TEST_F(TestGpuMatmulPlan, CreatesPlanWithHalfPrecision)
                                           bStrides,
                                           cDims,
                                           cStrides,
-                                          hipdnn_data_sdk::data_objects::DataType::HALF);
+                                          hipdnn_flatbuffers_sdk::data_objects::DataType::HALF);
     GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     const auto& node = graph.getNode(0);
@@ -435,7 +543,7 @@ TEST_F(TestGpuMatmulPlan, CreatesPlanWithBFloat16)
                                           bStrides,
                                           cDims,
                                           cStrides,
-                                          hipdnn_data_sdk::data_objects::DataType::BFLOAT16);
+                                          hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16);
     GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     const auto& node = graph.getNode(0);
@@ -446,4 +554,180 @@ TEST_F(TestGpuMatmulPlan, CreatesPlanWithBFloat16)
 
     // Create plan - should not throw
     EXPECT_NO_THROW(MatmulPlan(_handle, std::move(params)));
+}
+
+TEST_F(TestGpuMatmulPlan, CreatesPlanWithBiasAndGelu)
+{
+    auto builder = createValidMatmulBiasActivGraph(
+        {4, 8},
+        {8, 1},
+        {8, 5},
+        {5, 1},
+        {4, 5},
+        {5, 1},
+        true,
+        hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::GELU_APPROX_TANH_FWD);
+    GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+
+    auto* matmulAttrs = graph.getNode(0).attributes_as_MatmulAttributes();
+    auto* biasAttrs = graph.getNode(1).attributes_as_PointwiseAttributes();
+    auto* activAttrs = graph.getNode(2).attributes_as_PointwiseAttributes();
+    ASSERT_NE(matmulAttrs, nullptr);
+    ASSERT_NE(biasAttrs, nullptr);
+    ASSERT_NE(activAttrs, nullptr);
+
+    MatmulParams params(*matmulAttrs, biasAttrs, activAttrs, graph.getTensorMap());
+
+    EXPECT_NO_THROW(MatmulPlan(_handle, std::move(params)));
+}
+
+TEST_F(TestGpuMatmulPlan, CreatesPlanWithBiasAndRelu)
+{
+    auto builder = createValidMatmulBiasActivGraph(
+        {4, 8},
+        {8, 1},
+        {8, 5},
+        {5, 1},
+        {4, 5},
+        {5, 1},
+        true,
+        hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD,
+        0.0f);
+    GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+
+    auto* matmulAttrs = graph.getNode(0).attributes_as_MatmulAttributes();
+    auto* biasAttrs = graph.getNode(1).attributes_as_PointwiseAttributes();
+    auto* activAttrs = graph.getNode(2).attributes_as_PointwiseAttributes();
+    ASSERT_NE(matmulAttrs, nullptr);
+    ASSERT_NE(biasAttrs, nullptr);
+    ASSERT_NE(activAttrs, nullptr);
+
+    MatmulParams params(*matmulAttrs, biasAttrs, activAttrs, graph.getTensorMap());
+
+    EXPECT_NO_THROW(MatmulPlan(_handle, std::move(params)));
+}
+
+TEST_F(TestGpuMatmulPlan, CreatesPlanWithActivationOnly)
+{
+    auto builder = createValidMatmulBiasActivGraph(
+        {4, 8},
+        {8, 1},
+        {8, 5},
+        {5, 1},
+        {4, 5},
+        {5, 1},
+        false,
+        hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD,
+        0.0f);
+    GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+
+    auto* matmulAttrs = graph.getNode(0).attributes_as_MatmulAttributes();
+    auto* activAttrs = graph.getNode(1).attributes_as_PointwiseAttributes();
+    ASSERT_NE(matmulAttrs, nullptr);
+    ASSERT_NE(activAttrs, nullptr);
+
+    MatmulParams params(*matmulAttrs, nullptr, activAttrs, graph.getTensorMap());
+
+    EXPECT_NO_THROW(MatmulPlan(_handle, std::move(params)));
+}
+
+TEST_F(TestGpuMatmulPlan, CreatesPlanWithBiasAndSwish)
+{
+    auto builder = createValidMatmulBiasActivGraph(
+        {4, 8},
+        {8, 1},
+        {8, 5},
+        {5, 1},
+        {4, 5},
+        {5, 1},
+        true,
+        hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::SWISH_FWD,
+        std::nullopt,
+        std::nullopt,
+        1.0f);
+    GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+
+    auto* matmulAttrs = graph.getNode(0).attributes_as_MatmulAttributes();
+    auto* biasAttrs = graph.getNode(1).attributes_as_PointwiseAttributes();
+    auto* activAttrs = graph.getNode(2).attributes_as_PointwiseAttributes();
+    ASSERT_NE(matmulAttrs, nullptr);
+    ASSERT_NE(biasAttrs, nullptr);
+    ASSERT_NE(activAttrs, nullptr);
+
+    MatmulParams params(*matmulAttrs, biasAttrs, activAttrs, graph.getTensorMap());
+
+    EXPECT_NO_THROW(MatmulPlan(_handle, std::move(params)));
+}
+
+TEST_F(TestGpuMatmulPlan, CreatesPlanWithBiasOnly)
+{
+    auto builder = createValidMatmulBiasActivGraph(
+        {4, 8},
+        {8, 1},
+        {8, 5},
+        {5, 1},
+        {4, 5},
+        {5, 1},
+        true,
+        hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::UNSET);
+    GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+
+    auto* matmulAttrs = graph.getNode(0).attributes_as_MatmulAttributes();
+    auto* biasAttrs = graph.getNode(1).attributes_as_PointwiseAttributes();
+    ASSERT_NE(matmulAttrs, nullptr);
+    ASSERT_NE(biasAttrs, nullptr);
+
+    MatmulParams params(*matmulAttrs, biasAttrs, nullptr, graph.getTensorMap());
+
+    EXPECT_NO_THROW(MatmulPlan(_handle, std::move(params)));
+}
+
+TEST_F(TestGpuMatmulPlan, PlanReturnValidWorkspaceSizeWithBiasOnly)
+{
+    auto builder = createValidMatmulBiasActivGraph(
+        {4, 8},
+        {8, 1},
+        {8, 5},
+        {5, 1},
+        {4, 5},
+        {5, 1},
+        true,
+        hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::UNSET);
+    GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+
+    auto* matmulAttrs = graph.getNode(0).attributes_as_MatmulAttributes();
+    auto* biasAttrs = graph.getNode(1).attributes_as_PointwiseAttributes();
+    ASSERT_NE(matmulAttrs, nullptr);
+    ASSERT_NE(biasAttrs, nullptr);
+
+    MatmulParams params(*matmulAttrs, biasAttrs, nullptr, graph.getTensorMap());
+    MatmulPlan plan(_handle, std::move(params));
+
+    EXPECT_GE(plan.getWorkspaceSize(_handle), 0u);
+}
+
+TEST_F(TestGpuMatmulPlan, PlanReturnValidWorkspaceSizeWithBiasActivation)
+{
+    auto builder = createValidMatmulBiasActivGraph(
+        {4, 8},
+        {8, 1},
+        {8, 5},
+        {5, 1},
+        {4, 5},
+        {5, 1},
+        true,
+        hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::GELU_APPROX_TANH_FWD);
+    GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+
+    auto* matmulAttrs = graph.getNode(0).attributes_as_MatmulAttributes();
+    auto* biasAttrs = graph.getNode(1).attributes_as_PointwiseAttributes();
+    auto* activAttrs = graph.getNode(2).attributes_as_PointwiseAttributes();
+    ASSERT_NE(matmulAttrs, nullptr);
+    ASSERT_NE(biasAttrs, nullptr);
+    ASSERT_NE(activAttrs, nullptr);
+
+    MatmulParams params(*matmulAttrs, biasAttrs, activAttrs, graph.getTensorMap());
+    MatmulPlan plan(_handle, std::move(params));
+
+    EXPECT_GE(plan.getWorkspaceSize(_handle), 0u);
 }

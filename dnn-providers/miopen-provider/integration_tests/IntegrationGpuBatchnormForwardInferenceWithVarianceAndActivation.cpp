@@ -16,6 +16,7 @@
 #include "IntegrationGraphVerificationHarness.hpp"
 
 using namespace hipdnn_frontend;
+using namespace hipdnn_frontend::graph;
 using namespace hipdnn_data_sdk::utilities;
 using namespace hipdnn_test_sdk::utilities;
 using namespace miopen_plugin::test_utilities;
@@ -29,7 +30,33 @@ class BatchnormForwardInferenceWithVarianceAndActivation
     : public IntegrationGraphVerificationHarness<DataType, TestCaseType>
 {
 protected:
-    void runGraphTest(DataType tolerance, const TensorLayout& layout = TensorLayout::NCHW) override
+    void initializeBundle(const hipdnn_frontend::graph::Graph& /*graph*/,
+                          GraphTensorBundle& bundle,
+                          unsigned int seed) override
+    {
+        // Fill output tensors with sentinel values
+        bundle.sentinelFillOutputTensors();
+
+        for(auto& tensorPair : bundle.tensors)
+        {
+            if(bundle.isOutput(tensorPair.first))
+            {
+                continue;
+            }
+
+            if(_varianceTensorAttr && tensorPair.first == _varianceTensorAttr->get_uid())
+            {
+                // Variance must be non-negative; use positive range
+                bundle.randomizeTensor(tensorPair.first, 0.1f, 1.0f, seed);
+            }
+            else
+            {
+                bundle.randomizeTensor(tensorPair.first, -1.0f, 1.0f, seed);
+            }
+        }
+    }
+
+    void runGraphTest(float tolerance, const TensorLayout& layout = TensorLayout::NCHW)
     {
         const auto& [testCase, activeCase] = this->GetParam();
 
@@ -45,25 +72,24 @@ protected:
             .set_compute_data_type(hipdnn_frontend::DataType::FLOAT)
             .set_io_data_type(dataType);
 
-        auto xAttr = graph::makeTensorAttributes(
+        auto xAttr = makeTensorAttributes(
             "X", testCase.dims, generateStrides(testCase.dims, layout.strideOrder));
         auto xTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(xAttr));
 
         // Channel-only tensors are layout-agnostic, specifying stride order is unnecessary
-        auto meanAttr = graph::makeTensorAttributes(
+        auto meanAttr = makeTensorAttributes(
             "mean", intermediateDataType, derivedDims, generateStrides(derivedDims));
         auto meanTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(meanAttr));
 
-        auto varianceAttr = graph::makeTensorAttributes(
+        auto varianceAttr = makeTensorAttributes(
             "variance", intermediateDataType, derivedDims, generateStrides(derivedDims));
-        auto varianceTensorAttr
-            = std::make_shared<graph::TensorAttributes>(std::move(varianceAttr));
+        _varianceTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(varianceAttr));
 
-        auto scaleAttr = graph::makeTensorAttributes(
+        auto scaleAttr = makeTensorAttributes(
             "scale", intermediateDataType, derivedDims, generateStrides(derivedDims));
         auto scaleTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(scaleAttr));
 
-        auto biasAttr = graph::makeTensorAttributes(
+        auto biasAttr = makeTensorAttributes(
             "bias", intermediateDataType, derivedDims, generateStrides(derivedDims));
         auto biasTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(biasAttr));
 
@@ -75,7 +101,7 @@ protected:
 
         auto yTensorAttr = graphObj.batchnorm_inference_variance_ext(xTensorAttr,
                                                                      meanTensorAttr,
-                                                                     varianceTensorAttr,
+                                                                     _varianceTensorAttr,
                                                                      scaleTensorAttr,
                                                                      biasTensorAttr,
                                                                      epsilonTensorAttr,
@@ -117,7 +143,45 @@ protected:
 
         this->verifyGraph(graphObj, testCase.seed);
     }
+
+    std::shared_ptr<graph::TensorAttributes> _varianceTensorAttr;
 };
+
+using IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivationNclFp32
+    = BatchnormForwardInferenceWithVarianceAndActivation<
+        float,
+        float,
+        std::tuple<BatchnormTestCase, test_activation_common::ActivTestCase>>;
+
+using IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivationNclBfp16
+    = BatchnormForwardInferenceWithVarianceAndActivation<
+        bfloat16,
+        float,
+        std::tuple<BatchnormTestCase, test_activation_common::ActivTestCase>>;
+
+using IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivationNclFp16
+    = BatchnormForwardInferenceWithVarianceAndActivation<
+        half,
+        float,
+        std::tuple<BatchnormTestCase, test_activation_common::ActivTestCase>>;
+
+using IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivationNlcFp32
+    = BatchnormForwardInferenceWithVarianceAndActivation<
+        float,
+        float,
+        std::tuple<BatchnormTestCase, test_activation_common::ActivTestCase>>;
+
+using IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivationNlcBfp16
+    = BatchnormForwardInferenceWithVarianceAndActivation<
+        bfloat16,
+        float,
+        std::tuple<BatchnormTestCase, test_activation_common::ActivTestCase>>;
+
+using IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivationNlcFp16
+    = BatchnormForwardInferenceWithVarianceAndActivation<
+        half,
+        float,
+        std::tuple<BatchnormTestCase, test_activation_common::ActivTestCase>>;
 
 using IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivationNchwFp32
     = BatchnormForwardInferenceWithVarianceAndActivation<
@@ -127,7 +191,7 @@ using IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivationNchwFp32
 
 using IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivationNchwBfp16
     = BatchnormForwardInferenceWithVarianceAndActivation<
-        hip_bfloat16,
+        bfloat16,
         float,
         std::tuple<BatchnormTestCase, test_activation_common::ActivTestCase>>;
 
@@ -145,7 +209,7 @@ using IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivationNhwcFp32
 
 using IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivationNhwcBfp16
     = BatchnormForwardInferenceWithVarianceAndActivation<
-        hip_bfloat16,
+        bfloat16,
         float,
         std::tuple<BatchnormTestCase, test_activation_common::ActivTestCase>>;
 
@@ -163,7 +227,7 @@ using IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivationNcdhwFp32
 
 using IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivationNcdhwBfp16
     = BatchnormForwardInferenceWithVarianceAndActivation<
-        hip_bfloat16,
+        bfloat16,
         float,
         std::tuple<BatchnormTestCase, test_activation_common::ActivTestCase>>;
 
@@ -181,7 +245,7 @@ using IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivationNdhwcFp32
 
 using IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivationNdhwcBfp16
     = BatchnormForwardInferenceWithVarianceAndActivation<
-        hip_bfloat16,
+        bfloat16,
         float,
         std::tuple<BatchnormTestCase, test_activation_common::ActivTestCase>>;
 
@@ -193,9 +257,111 @@ using IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivationNdhwcFp16
 
 } // namespace
 
+TEST_P(IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivationNclFp32, Correctness)
+{
+    runGraphTest(batchnorm::getToleranceInferenceWithVariance<float>(), TensorLayout::NCL);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivationNclFp32,
+    testing::Combine(testing::ValuesIn(getBnFwdInference1dTestCases()),
+                     testing::ValuesIn(test_activation_common::createFwdActivationSmokeCases())));
+
+INSTANTIATE_TEST_SUITE_P(
+    Full,
+    IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivationNclFp32,
+    testing::Combine(testing::ValuesIn(getBnFwdInference1dFullTestCases()),
+                     testing::ValuesIn(test_activation_common::createFwdActivationFullCases())));
+
+TEST_P(IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivationNclBfp16, Correctness)
+{
+    runGraphTest(batchnorm::getToleranceInferenceWithVariance<bfloat16>(), TensorLayout::NCL);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivationNclBfp16,
+    testing::Combine(testing::ValuesIn(getBnFwdInference1dTestCases()),
+                     testing::ValuesIn(test_activation_common::createFwdActivationSmokeCases())));
+
+INSTANTIATE_TEST_SUITE_P(
+    Full,
+    IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivationNclBfp16,
+    testing::Combine(testing::ValuesIn(getBnFwdInference1dFullTestCases()),
+                     testing::ValuesIn(test_activation_common::createFwdActivationFullCases())));
+
+TEST_P(IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivationNclFp16, Correctness)
+{
+    runGraphTest(batchnorm::getToleranceInferenceWithVariance<half>(), TensorLayout::NCL);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivationNclFp16,
+    testing::Combine(testing::ValuesIn(getBnFwdInference1dTestCases()),
+                     testing::ValuesIn(test_activation_common::createFwdActivationSmokeCases())));
+
+INSTANTIATE_TEST_SUITE_P(
+    Full,
+    IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivationNclFp16,
+    testing::Combine(testing::ValuesIn(getBnFwdInference1dFullTestCases()),
+                     testing::ValuesIn(test_activation_common::createFwdActivationFullCases())));
+
+TEST_P(IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivationNlcFp32, Correctness)
+{
+    runGraphTest(batchnorm::getToleranceInferenceWithVariance<float>(), TensorLayout::NLC);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivationNlcFp32,
+    testing::Combine(testing::ValuesIn(getBnFwdInference1dTestCases()),
+                     testing::ValuesIn(test_activation_common::createFwdActivationSmokeCases())));
+
+INSTANTIATE_TEST_SUITE_P(
+    Full,
+    IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivationNlcFp32,
+    testing::Combine(testing::ValuesIn(getBnFwdInference1dFullTestCases()),
+                     testing::ValuesIn(test_activation_common::createFwdActivationFullCases())));
+
+TEST_P(IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivationNlcBfp16, Correctness)
+{
+    runGraphTest(batchnorm::getToleranceInferenceWithVariance<bfloat16>(), TensorLayout::NLC);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivationNlcBfp16,
+    testing::Combine(testing::ValuesIn(getBnFwdInference1dTestCases()),
+                     testing::ValuesIn(test_activation_common::createFwdActivationSmokeCases())));
+
+INSTANTIATE_TEST_SUITE_P(
+    Full,
+    IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivationNlcBfp16,
+    testing::Combine(testing::ValuesIn(getBnFwdInference1dFullTestCases()),
+                     testing::ValuesIn(test_activation_common::createFwdActivationFullCases())));
+
+TEST_P(IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivationNlcFp16, Correctness)
+{
+    runGraphTest(batchnorm::getToleranceInferenceWithVariance<half>(), TensorLayout::NLC);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivationNlcFp16,
+    testing::Combine(testing::ValuesIn(getBnFwdInference1dTestCases()),
+                     testing::ValuesIn(test_activation_common::createFwdActivationSmokeCases())));
+
+INSTANTIATE_TEST_SUITE_P(
+    Full,
+    IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivationNlcFp16,
+    testing::Combine(testing::ValuesIn(getBnFwdInference1dFullTestCases()),
+                     testing::ValuesIn(test_activation_common::createFwdActivationFullCases())));
+
 TEST_P(IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivationNchwFp32, Correctness)
 {
-    runGraphTest(batchnorm::getToleranceInference<float>(), TensorLayout::NCHW);
+    runGraphTest(batchnorm::getToleranceInferenceWithVariance<float>(), TensorLayout::NCHW);
 }
 
 INSTANTIATE_TEST_SUITE_P(
@@ -212,7 +378,7 @@ INSTANTIATE_TEST_SUITE_P(
 
 TEST_P(IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivationNchwBfp16, Correctness)
 {
-    runGraphTest(batchnorm::getToleranceInference<hip_bfloat16>(), TensorLayout::NCHW);
+    runGraphTest(batchnorm::getToleranceInferenceWithVariance<bfloat16>(), TensorLayout::NCHW);
 }
 
 INSTANTIATE_TEST_SUITE_P(
@@ -229,7 +395,7 @@ INSTANTIATE_TEST_SUITE_P(
 
 TEST_P(IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivationNchwFp16, Correctness)
 {
-    runGraphTest(batchnorm::getToleranceInference<half>(), TensorLayout::NCHW);
+    runGraphTest(batchnorm::getToleranceInferenceWithVariance<half>(), TensorLayout::NCHW);
 }
 
 INSTANTIATE_TEST_SUITE_P(
@@ -246,7 +412,7 @@ INSTANTIATE_TEST_SUITE_P(
 
 TEST_P(IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivationNhwcFp32, Correctness)
 {
-    runGraphTest(batchnorm::getToleranceInference<float>(), TensorLayout::NHWC);
+    runGraphTest(batchnorm::getToleranceInferenceWithVariance<float>(), TensorLayout::NHWC);
 }
 
 INSTANTIATE_TEST_SUITE_P(
@@ -263,7 +429,7 @@ INSTANTIATE_TEST_SUITE_P(
 
 TEST_P(IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivationNhwcBfp16, Correctness)
 {
-    runGraphTest(batchnorm::getToleranceInference<hip_bfloat16>(), TensorLayout::NHWC);
+    runGraphTest(batchnorm::getToleranceInferenceWithVariance<bfloat16>(), TensorLayout::NHWC);
 }
 
 INSTANTIATE_TEST_SUITE_P(
@@ -280,7 +446,7 @@ INSTANTIATE_TEST_SUITE_P(
 
 TEST_P(IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivationNhwcFp16, Correctness)
 {
-    runGraphTest(batchnorm::getToleranceInference<half>(), TensorLayout::NHWC);
+    runGraphTest(batchnorm::getToleranceInferenceWithVariance<half>(), TensorLayout::NHWC);
 }
 
 INSTANTIATE_TEST_SUITE_P(
@@ -297,7 +463,7 @@ INSTANTIATE_TEST_SUITE_P(
 
 TEST_P(IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivationNcdhwFp32, Correctness)
 {
-    runGraphTest(batchnorm::getToleranceInference<float>(), TensorLayout::NCDHW);
+    runGraphTest(batchnorm::getToleranceInferenceWithVariance<float>(), TensorLayout::NCDHW);
 }
 
 INSTANTIATE_TEST_SUITE_P(
@@ -308,7 +474,7 @@ INSTANTIATE_TEST_SUITE_P(
 
 TEST_P(IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivationNcdhwBfp16, Correctness)
 {
-    runGraphTest(batchnorm::getToleranceInference<hip_bfloat16>(), TensorLayout::NCDHW);
+    runGraphTest(batchnorm::getToleranceInferenceWithVariance<bfloat16>(), TensorLayout::NCDHW);
 }
 
 INSTANTIATE_TEST_SUITE_P(
@@ -319,7 +485,7 @@ INSTANTIATE_TEST_SUITE_P(
 
 TEST_P(IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivationNcdhwFp16, Correctness)
 {
-    runGraphTest(batchnorm::getToleranceInference<half>(), TensorLayout::NCDHW);
+    runGraphTest(batchnorm::getToleranceInferenceWithVariance<half>(), TensorLayout::NCDHW);
 }
 
 INSTANTIATE_TEST_SUITE_P(
@@ -330,7 +496,7 @@ INSTANTIATE_TEST_SUITE_P(
 
 TEST_P(IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivationNdhwcFp32, Correctness)
 {
-    runGraphTest(batchnorm::getToleranceInference<float>(), TensorLayout::NDHWC);
+    runGraphTest(batchnorm::getToleranceInferenceWithVariance<float>(), TensorLayout::NDHWC);
 }
 
 INSTANTIATE_TEST_SUITE_P(
@@ -341,7 +507,7 @@ INSTANTIATE_TEST_SUITE_P(
 
 TEST_P(IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivationNdhwcBfp16, Correctness)
 {
-    runGraphTest(batchnorm::getToleranceInference<hip_bfloat16>(), TensorLayout::NDHWC);
+    runGraphTest(batchnorm::getToleranceInferenceWithVariance<bfloat16>(), TensorLayout::NDHWC);
 }
 
 INSTANTIATE_TEST_SUITE_P(
@@ -352,7 +518,7 @@ INSTANTIATE_TEST_SUITE_P(
 
 TEST_P(IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivationNdhwcFp16, Correctness)
 {
-    runGraphTest(batchnorm::getToleranceInference<half>(), TensorLayout::NDHWC);
+    runGraphTest(batchnorm::getToleranceInferenceWithVariance<half>(), TensorLayout::NDHWC);
 }
 
 INSTANTIATE_TEST_SUITE_P(

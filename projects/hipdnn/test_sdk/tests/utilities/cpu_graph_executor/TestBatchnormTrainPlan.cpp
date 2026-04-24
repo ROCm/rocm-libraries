@@ -5,29 +5,31 @@
 
 #include "BatchnormGraphUtils.hpp"
 #include "BatchnormTensorBundles.hpp"
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
 #include <hipdnn_data_sdk/utilities/Constants.hpp>
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceBatchnorm.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/Seeds.hpp>
 #include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
-#include <hipdnn_test_sdk/utilities/cpu_graph_executor/BatchnormTrainPlan.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/BatchnormTrainPlan.hpp>
 
 using namespace hipdnn_test_sdk::utilities;
-using namespace hipdnn_data_sdk::data_objects;
+using namespace hipdnn_test_sdk::detail;
+using namespace hipdnn_flatbuffers_sdk::data_objects;
 using namespace hipdnn_data_sdk::utilities;
-using namespace hipdnn_data_sdk::flatbuffer_utilities;
+using namespace hipdnn_flatbuffers_sdk::flatbuffer_utilities;
 using namespace ::testing;
 using namespace hipdnn_sdk_test_utils;
 
 class TestBatchnormTrainPlan : public ::testing::Test
 {
 protected:
-    static void initTensorValues(hipdnn_data_sdk::data_objects::TensorAttributesT& tensorAttr,
-                                 DataType dataType,
-                                 const Tensor<float>& tensor,
-                                 int64_t uid)
+    static void
+        initTensorValues(hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT& tensorAttr,
+                         DataType dataType,
+                         const Tensor<float>& tensor,
+                         int64_t uid)
     {
         tensorAttr.data_type = dataType;
         tensorAttr.dims = tensor.dims();
@@ -38,10 +40,10 @@ protected:
 
 TEST_F(TestBatchnormTrainPlan, ExecutePlan)
 {
-    double epsilon = BATCHNORM_DEFAULT_EPSILON;
-    double momentum = 0.1;
-    std::vector<int64_t> dims = {6, 3, 32, 32};
-    unsigned int seed = getGlobalTestSeed();
+    const double epsilon = BATCHNORM_DEFAULT_EPSILON;
+    const double momentum = 0.1;
+    const std::vector<int64_t> dims = {6, 3, 32, 32};
+    const unsigned int seed = getGlobalTestSeed();
     BatchnormTrainTensorBundle<float, float, float> planTensorBundle(
         dims, seed, TensorLayout::NHWC);
     BatchnormTrainTensorBundle<float, float, float> directTensorBundle(
@@ -52,7 +54,7 @@ TEST_F(TestBatchnormTrainPlan, ExecutePlan)
     initTensorValues(params.scaleTensor, DataType::FLOAT, planTensorBundle.scaleTensor, 2);
     initTensorValues(params.biasTensor, DataType::FLOAT, planTensorBundle.biasTensor, 3);
     initTensorValues(params.epsilonTensor, DataType::DOUBLE, planTensorBundle.epsilonTensor, 4);
-    params.epsilonTensor.value.Set(hipdnn_data_sdk::data_objects::Float64Value(epsilon));
+    params.epsilonTensor.value.Set(hipdnn_flatbuffers_sdk::data_objects::Float64Value(epsilon));
     initTensorValues(params.yTensor, DataType::FLOAT, planTensorBundle.yTensor, 5);
 
     // Initialize optional mean and invVariance tensors
@@ -86,7 +88,7 @@ TEST_F(TestBatchnormTrainPlan, ExecutePlan)
     patient.execute(variantPack);
 
     auto tolerance = batchnorm::getToleranceTraining<float>();
-    CpuFpReferenceValidation<float> cpuRefOutputValidation(tolerance, tolerance);
+    const CpuFpReferenceValidation<float> cpuRefOutputValidation(tolerance, tolerance);
 
     EXPECT_TRUE(
         cpuRefOutputValidation.allClose(directTensorBundle.yTensor, planTensorBundle.yTensor));
@@ -98,28 +100,29 @@ TEST_F(TestBatchnormTrainPlan, ExecutePlan)
 
 TEST(TestBatchnormTrainPlanBuilder, PlanConstruction)
 {
-    std::vector<int64_t> dims = {1, 1, 1, 1};
+    const std::vector<int64_t> dims = {2, 1, 1, 1};
     BatchnormTrainTensorBundle<float, float, float> tensorBundle(dims, 1, TensorLayout::NCHW);
 
     auto graphTuple = buildBatchnormTrainGraph(
         tensorBundle, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, false);
 
     auto& graph = std::get<0>(graphTuple);
-    auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
 
-    auto graphWrap = hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper(flatbufferGraph.data(),
-                                                                         flatbufferGraph.size());
+    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        serializedGraph.data(), serializedGraph.size());
 
-    BatchnormTrainPlanBuilder<DataType::FLOAT,
-                              DataType::FLOAT,
-                              DataType::FLOAT,
-                              DataType::FLOAT,
-                              DataType::FLOAT>
+    const BatchnormTrainPlanBuilder<DataType::FLOAT,
+                                    DataType::FLOAT,
+                                    DataType::FLOAT,
+                                    DataType::FLOAT,
+                                    DataType::FLOAT>
         patient;
 
     auto builtPlan = patient.buildNodePlan(graphWrap, graphWrap.getNode(0));
 
-    bool result
+    const bool result
         = dynamic_cast<BatchnormTrainPlan<float, float, float, float, float>*>(builtPlan.get())
           != nullptr;
     EXPECT_TRUE(result);
@@ -127,32 +130,33 @@ TEST(TestBatchnormTrainPlanBuilder, PlanConstruction)
 
 TEST(TestBatchnormTrainPlanBuilder, IsApplicable)
 {
-    std::vector<int64_t> dims = {1, 1, 1, 1};
+    const std::vector<int64_t> dims = {2, 1, 1, 1};
     BatchnormTrainTensorBundle<float, float, float> tensorBundle(dims, 1, TensorLayout::NCHW);
 
     auto graphTuple = buildBatchnormTrainGraph(
         tensorBundle, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, false);
 
     auto& graph = std::get<0>(graphTuple);
-    auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
 
-    auto graphWrap = hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper(flatbufferGraph.data(),
-                                                                         flatbufferGraph.size());
+    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        serializedGraph.data(), serializedGraph.size());
 
-    BatchnormTrainPlanBuilder<DataType::FLOAT,
-                              DataType::FLOAT,
-                              DataType::FLOAT,
-                              DataType::FLOAT,
-                              DataType::FLOAT>
+    const BatchnormTrainPlanBuilder<DataType::FLOAT,
+                                    DataType::FLOAT,
+                                    DataType::FLOAT,
+                                    DataType::FLOAT,
+                                    DataType::FLOAT>
         floatPlanBuilder;
 
     EXPECT_TRUE(floatPlanBuilder.isApplicable(graphWrap.getNode(0), graphWrap.getTensorMap()));
 
-    BatchnormTrainPlanBuilder<DataType::FLOAT,
-                              DataType::HALF,
-                              DataType::FLOAT,
-                              DataType::FLOAT,
-                              DataType::FLOAT>
+    const BatchnormTrainPlanBuilder<DataType::FLOAT,
+                                    DataType::HALF,
+                                    DataType::FLOAT,
+                                    DataType::FLOAT,
+                                    DataType::FLOAT>
         badTypesPlanBuilder;
     EXPECT_FALSE(badTypesPlanBuilder.isApplicable(graphWrap.getNode(0), graphWrap.getTensorMap()));
 

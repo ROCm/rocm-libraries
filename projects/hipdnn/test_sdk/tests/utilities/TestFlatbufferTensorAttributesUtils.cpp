@@ -2,18 +2,18 @@
 // SPDX-License-Identifier:  MIT
 
 #include <gtest/gtest.h>
-#include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_data_sdk/utilities/ShallowTensor.hpp>
-#include <hipdnn_test_sdk/utilities/FlatbufferTensorAttributesUtils.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
+#include <hipdnn_test_sdk/utilities/detail/FlatbufferTensorAttributesUtils.hpp>
 
-using namespace hipdnn_test_sdk::utilities;
-using namespace hipdnn_data_sdk::data_objects;
+using namespace hipdnn_test_sdk::detail;
+using namespace hipdnn_flatbuffers_sdk::data_objects;
 
 TEST(TestFlatbufferTensorAttributesUtils, UnpackTensorAttributes)
 {
     flatbuffers::FlatBufferBuilder builder;
-    std::vector<int64_t> dims = {1, 3, 224, 224};
-    std::vector<int64_t> strides = {150528, 50176, 224, 1};
+    const std::vector<int64_t> dims = {1, 3, 224, 224};
+    const std::vector<int64_t> strides = {150528, 50176, 224, 1};
     auto attributeOffset
         = CreateTensorAttributesDirect(builder, 1, "x", DataType::FLOAT, &strides, &dims);
     builder.Finish(attributeOffset);

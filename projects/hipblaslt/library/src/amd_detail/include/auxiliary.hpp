@@ -135,12 +135,16 @@ constexpr const char* hip_datatype_to_string(hipDataType type)
         return "f8_r";
     case HIP_R_8F_E5M2:
         return "bf8_r";
+    case HIP_R_8F_UE8M0:
+        return "e8_r";
     case HIP_R_6F_E2M3_EXT:
         return "f6_r";
     case HIP_R_6F_E3M2_EXT:
         return "bf6_r";
     case HIP_R_4F_E2M1_EXT:
         return "f4_r";
+    case static_cast<hipDataType>(HIP_R_8F_E5M3_EXT):
+        return "e5m3_r";
     default:
         return "non-supported type";
     }
@@ -184,15 +188,21 @@ constexpr hipDataType string_to_hip_datatype(const std::string& value)
     }
 
     return
-        value == "f32_r" || value == "s" ? HIP_R_32F  :
-        value == "f64_r" || value == "d" ? HIP_R_64F  :
-        value == "f16_r" || value == "h" ? HIP_R_16F  :
-        value == "bf16_r"                ? HIP_R_16BF  :
-        value == "i8_r" || value == "i8" ? HIP_R_8I  :
+        value == "f32_r" || value == "s" ? HIP_R_32F :
+        value == "f64_r" || value == "d" ? HIP_R_64F :
+        value == "f16_r" || value == "h" ? HIP_R_16F :
+        value == "bf16_r"                ? HIP_R_16BF :
+        value == "i8_r" || value == "i8" ? HIP_R_8I :
         value == "f6_r"                  ? static_cast<hipDataType>(HIP_R_6F_E2M3_EXT) :
         value == "bf6_r"                 ? static_cast<hipDataType>(HIP_R_6F_E3M2_EXT) :
         value == "f4_r"                  ? static_cast<hipDataType>(HIP_R_4F_E2M1_EXT) :
-        value == "i32_r" || value == "i" ? HIP_R_32I  :
+        value == "i32_r" || value == "i" ? HIP_R_32I :
+        value == "f8_fnuz_r"             ? HIP_R_8F_E4M3_FNUZ :
+        value == "bf8_fnuz_r"            ? HIP_R_8F_E5M2_FNUZ :
+        value == "f8_r"                  ? HIP_R_8F_E4M3 :
+        value == "bf8_r"                 ? HIP_R_8F_E5M2 :
+        value == "e8_r"                  ? HIP_R_8F_UE8M0 :
+        value == "e5m3_r"                ? static_cast<hipDataType>(HIP_R_8F_E5M3_EXT) :
         HIPBLASLT_DATATYPE_INVALID;
 }
 
@@ -246,8 +256,11 @@ constexpr hipblasLtEpilogue_t string_to_epilogue_type(const std::string& value)
         value == "HIPBLASLT_EPILOGUE_RELU_AUX_BIAS" ? HIPBLASLT_EPILOGUE_RELU_AUX_BIAS:
         value == "HIPBLASLT_EPILOGUE_GELU_AUX" ? HIPBLASLT_EPILOGUE_GELU_AUX :
         value == "HIPBLASLT_EPILOGUE_GELU_AUX_BIAS" ? HIPBLASLT_EPILOGUE_GELU_AUX_BIAS :
+        value == "HIPBLASLT_EPILOGUE_RELU_AUX_BIAS" ? HIPBLASLT_EPILOGUE_RELU_AUX_BIAS :
         value == "HIPBLASLT_EPILOGUE_DGELU" ? HIPBLASLT_EPILOGUE_DGELU :
         value == "HIPBLASLT_EPILOGUE_DGELU_BGRAD" ? HIPBLASLT_EPILOGUE_DGELU_BGRAD :
+        value == "HIPBLASLT_EPILOGUE_DRELU" ? HIPBLASLT_EPILOGUE_DRELU :
+        value == "HIPBLASLT_EPILOGUE_DRELU_BGRAD" ? HIPBLASLT_EPILOGUE_DRELU_BGRAD :
         value == "HIPBLASLT_EPILOGUE_BGRADA" ? HIPBLASLT_EPILOGUE_BGRADA :
         value == "HIPBLASLT_EPILOGUE_BGRADB" ? HIPBLASLT_EPILOGUE_BGRADB :
         value == "HIPBLASLT_EPILOGUE_SWISH_EXT" ? HIPBLASLT_EPILOGUE_SWISH_EXT :

@@ -10,20 +10,22 @@
 #include "PointwiseGraphUtils.hpp"
 #include "PointwiseTensorBundles.hpp"
 
-#include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
-#include <hipdnn_data_sdk/utilities/UtilsBfp16.hpp>
-#include <hipdnn_data_sdk/utilities/UtilsFp16.hpp>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/Seeds.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
 
 using namespace hipdnn_test_sdk::utilities;
-using namespace hipdnn_data_sdk::data_objects;
+using namespace hipdnn_test_sdk::detail;
+using namespace hipdnn_flatbuffers_sdk::data_objects;
 using namespace hipdnn_data_sdk::utilities;
 using namespace ::testing;
 using namespace hipdnn_sdk_test_utils;
-using namespace hipdnn_data_sdk::flatbuffer_utilities;
+using namespace hipdnn_flatbuffers_sdk::flatbuffer_utilities;
+using hipdnn_data_sdk::types::bfloat16;
+using hipdnn_data_sdk::types::half;
 
 struct ReluPointwiseTestParams
 {
@@ -66,8 +68,9 @@ public:
         auto result = graph->validate();
         ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
 
-        auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
-        auto graphWrap = GraphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
+        auto [serializedGraph, serErr] = graph->to_binary();
+        ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+        auto graphWrap = GraphWrapper(serializedGraph.data(), serializedGraph.size());
         const auto& nodeWrap = graphWrap.getNodeWrapper(0);
         const auto& attributes = nodeWrap.attributesAs<PointwiseAttributes>();
 
@@ -75,7 +78,7 @@ public:
             params.in0TensorValue);
 
         CpuReferenceGraphExecutor().execute(
-            flatbufferGraph.data(), flatbufferGraph.size(), variantPack);
+            serializedGraph.data(), serializedGraph.size(), variantPack);
 
         const auto& outTensor = tensorBundle.tensors.at(attributes.out_0_tensor_uid());
 
@@ -104,8 +107,9 @@ public:
         auto result = graph->validate();
         ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
 
-        auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
-        auto graphWrap = GraphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
+        auto [serializedGraph, serErr] = graph->to_binary();
+        ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+        auto graphWrap = GraphWrapper(serializedGraph.data(), serializedGraph.size());
         const auto& nodeWrap = graphWrap.getNodeWrapper(0);
         const auto& attributes = nodeWrap.attributesAs<PointwiseAttributes>();
 
@@ -115,7 +119,7 @@ public:
             params.in1TensorValue);
 
         CpuReferenceGraphExecutor().execute(
-            flatbufferGraph.data(), flatbufferGraph.size(), variantPack);
+            serializedGraph.data(), serializedGraph.size(), variantPack);
 
         const auto& outTensor = tensorBundle.tensors.at(attributes.out_0_tensor_uid());
 
@@ -148,7 +152,7 @@ public:
                 PointwiseMode::RELU_FWD, output, input0);
         }
 
-        CpuFpReferenceValidation<InputType> validator;
+        const CpuFpReferenceValidation<InputType> validator;
         return validator.allClose(output, outTensor);
     }
 
@@ -181,7 +185,7 @@ public:
                 PointwiseMode::RELU_BWD, output, input0, input1);
         }
 
-        CpuFpReferenceValidation<InputType> validator;
+        const CpuFpReferenceValidation<InputType> validator;
         return validator.allClose(output, outTensor);
     }
 };
@@ -193,7 +197,7 @@ protected:
     using DataTypeT = T;
 };
 
-using TestTypes = ::testing::Types<float, half, hip_bfloat16>;
+using TestTypes = ::testing::Types<float, half, bfloat16>;
 TYPED_TEST_SUITE(ReluPointwiseOperationsCpuGraphExecutor, TestTypes, );
 
 // =============================================================================

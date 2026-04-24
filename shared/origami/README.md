@@ -144,9 +144,12 @@ int main() {
 |-------------|------|------------|-----------|
 | gfx942 | MI325X, MI300X, MI300A | ✔️ | ✔️ |
 | gfx950 | MI355X, MI350X | ✔️ | ✔️ |
-| gfx1100 | Radeon RX 7900 XTX, Radeon RX 7900 XT, Radeon RX 7900 GRE, Radeon RX 7900 | ✔️ | |
-| gfx1151 | Radeon RX 8000 series | ✔️ | |
-| gfx1201 | Radeon RX 8900 XTX, Radeon RX 8900 XT, Radeon RX 8800 XT, Radeon RX 8800, Radeon RX 8700 XT, Radeon RX 8700, Radeon RX 8600 XT, Radeon RX 8600 | ✔️ | |
+| gfx1100 | Radeon RX 7900 XTX/XT/GRE, Radeon PRO W7900 (Dual Slot), Radeon PRO W7800 (48GB) | ✔️ | |
+| gfx1150 | Radeon 890M/880M iGPU | ✔️ | |
+| gfx1151 | Radeon 8060S/8050S/8040S iGPU | ✔️ | |
+| gfx1152 | Radeon 860M/840M iGPU | ✔️ | |
+| gfx1153 | TBA | ✔️ | |
+| gfx1201 | Radeon RX 9070 (XT/GRE), Radeon AI PRO R9700 (D/S) | ✔️ | |
 
 For more information on GPU hardware specifications, check out [ROCm documentation](https://rocm.docs.amd.com/en/latest/reference/gpu-arch-specs.html).
 
@@ -250,23 +253,60 @@ cmake --install build/
 
 ## Origami Tests
 
+### Build and Run All Tests
+
+Build with both C++ and Python tests enabled:
+
 ```bash
 cd shared/origami
 
 cmake -S . -B build/ \
   -DCMAKE_PREFIX_PATH=/opt/rocm \
   -DCMAKE_CXX_COMPILER=/opt/rocm/bin/amdclang++ \
-  -DCMAKE_INSTALL_PREFIX=/opt/rocm \
-  -DORIGAMI_BUILD_TESTING=ON
+  -DORIGAMI_BUILD_TESTING=ON \
+  -DORIGAMI_ENABLE_PYTHON=ON
 
 cmake --build build/ --parallel
 
-# Run tests
+cd build/
 ctest --output-on-failure
 ```
 
 > [!NOTE]
 > Python tests are automatically added when `ORIGAMI_BUILD_TESTING=ON` and `ORIGAMI_ENABLE_PYTHON=ON`.
+
+### Running Specific Tests
+
+Run only C++ tests:
+
+```bash
+./build/tests/origami-tests
+```
+
+Run a specific C++ test by name:
+
+```bash
+./build/tests/origami-tests "Origami: select_config_mnk unit test"
+```
+
+Run only Python tests (from `shared/origami/python`):
+
+```bash
+pip install -e .
+python -m pytest tests/ -v
+```
+
+Run Python tests excluding slow tests:
+
+```bash
+python -m pytest tests/ -m "not slow"
+```
+
+Run selector tests (requires torch):
+
+```bash
+python -m pytest tests/test_selector.py -v
+```
 
 ## Contribute
 

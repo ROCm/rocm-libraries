@@ -35,6 +35,7 @@
 // auxiliary
 #include "common/auxiliary/testing_bdsqr.hpp"
 #include "common/auxiliary/testing_bdsvdx.hpp"
+#include "common/auxiliary/testing_gecon.hpp"
 #include "common/auxiliary/testing_labrd.hpp"
 #include "common/auxiliary/testing_lacgv.hpp"
 #include "common/auxiliary/testing_lange.hpp"
@@ -46,6 +47,7 @@
 #include "common/auxiliary/testing_laswp.hpp"
 #include "common/auxiliary/testing_lasyf.hpp"
 #include "common/auxiliary/testing_latrd.hpp"
+#include "common/auxiliary/testing_latrd_forsytrd.hpp"
 #include "common/auxiliary/testing_lauum.hpp"
 #include "common/auxiliary/testing_orgbr_ungbr.hpp"
 #include "common/auxiliary/testing_orglx_unglx.hpp"
@@ -86,6 +88,7 @@
 #include "common/lapack/testing_getri_npvt_outofplace.hpp"
 #include "common/lapack/testing_getri_outofplace.hpp"
 #include "common/lapack/testing_getrs.hpp"
+#include "common/lapack/testing_getrs_npvt.hpp"
 #include "common/lapack/testing_posv.hpp"
 #include "common/lapack/testing_potf2_potrf.hpp"
 #include "common/lapack/testing_potri.hpp"
@@ -141,6 +144,8 @@ class rocsolver_dispatcher
             {"laswp", testing_laswp<T>},
             {"lange", testing_lange<T, rocblas_int>},
             {"lange_64", testing_lange<T, int64_t>},
+            {"gecon", testing_gecon<T, rocblas_int>},
+            {"gecon_64", testing_gecon<T, int64_t>},
             {"larfg", testing_larfg<T, rocblas_int>},
             {"larfg_64", testing_larfg<T, int64_t>},
             {"larf", testing_larf<T, rocblas_int>},
@@ -149,6 +154,7 @@ class rocsolver_dispatcher
             {"larfb", testing_larfb<T>},
             {"lasr", testing_lasr<T>},
             {"latrd", testing_latrd<T>},
+            {"latrd_forsytrd", testing_latrd_forsytrd<T>},
             {"labrd", testing_labrd<T>},
             {"bdsqr", testing_bdsqr<T>},
             {"steqr", testing_steqr<T>},
@@ -249,6 +255,13 @@ class rocsolver_dispatcher
             {"getrs_64", testing_getrs<false, false, T, int64_t>},
             {"getrs_batched_64", testing_getrs<true, true, T, int64_t>},
             {"getrs_strided_batched_64", testing_getrs<false, true, T, int64_t>},
+            // getrs_npvt
+            {"getrs_npvt", testing_getrs_npvt<false, false, T, rocblas_int>},
+            {"getrs_npvt_batched", testing_getrs_npvt<true, true, T, rocblas_int>},
+            {"getrs_npvt_strided_batched", testing_getrs_npvt<false, true, T, rocblas_int>},
+            {"getrs_npvt_64", testing_getrs_npvt<false, false, T, int64_t>},
+            {"getrs_npvt_batched_64", testing_getrs_npvt<true, true, T, int64_t>},
+            {"getrs_npvt_strided_batched_64", testing_getrs_npvt<false, true, T, int64_t>},
             // gesv
             {"gesv", testing_gesv<false, false, T>},
             {"gesv_batched", testing_gesv<true, true, T>},

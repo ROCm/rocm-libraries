@@ -12,6 +12,7 @@
 
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_data_sdk/utilities/Workspace.hpp>
+#include <hipdnn_test_sdk/utilities/TensorDiff.hpp>
 #include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
 
 #include "../utils/Helpers.hpp"
@@ -116,7 +117,7 @@ bool SampleRunner::operator()(const TensorLayout& layout)
             xTensor, wTensor, yRefTensor, {u, v}, {dilH, dilW}, {padH, padW});
 
         hipdnn_test_sdk::utilities::CpuReferencePointwiseImpl<InputType>::pointwiseCompute(
-            hipdnn_data_sdk::data_objects::PointwiseMode::RELU_FWD,
+            hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD,
             pointwiseOutRefTensor,
             yRefTensor,
             pointwiseAttributes.get_relu_lower_clip().value(),
@@ -128,10 +129,15 @@ bool SampleRunner::operator()(const TensorLayout& layout)
         auto outValidator
             = hipdnn_test_sdk::utilities::CpuFpReferenceValidation<InputType>(tolerance, tolerance);
 
-        bool outValid = outValidator.allClose(pointwiseOutRefTensor, pointwiseOutTensor);
-
         std::cout << "CPU reference validation:\n";
-        std::cout << "  pointwise out: " << (outValid ? "successful" : "failed") << "\n";
+        bool outValid
+            = hipdnn_test_sdk::utilities::validateAndReport<InputType>(std::cout,
+                                                                       "pointwise out",
+                                                                       outValidator,
+                                                                       pointwiseOutRefTensor,
+                                                                       pointwiseOutTensor,
+                                                                       tolerance,
+                                                                       tolerance);
 
         validationPassed = outValid;
     }
@@ -145,15 +151,10 @@ int main(int argc, char* argv[])
 {
     auto config = parseCommandLineArgs(argc, argv);
 
-    initializeFrontendLogging();
+    auto [handle, handleError] = createHipdnnHandle();
+    HIPDNN_FE_CHECK(handleError);
 
-    auto backend = hipdnnBackend();
-    hipdnnHandle_t handle;
-    HIPDNN_CHECK(backend->create(&handle));
-
-    bool allPassed = run(SampleRunner{handle, config});
-
-    HIPDNN_CHECK(backend->destroy(handle));
+    bool allPassed = run(SampleRunner{*handle, config});
 
     if(allPassed)
     {

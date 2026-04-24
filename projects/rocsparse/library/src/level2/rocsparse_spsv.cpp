@@ -120,8 +120,8 @@ namespace rocsparse
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsv_analysis_buffer_size(
                     handle, trans, mat, &buffer_size_analysis));
                 size_t buffer_size_solve;
-                RETURN_IF_ROCSPARSE_ERROR(
-                    rocsparse::csrsv_solve_buffer_size(handle, trans, mat, &buffer_size_solve));
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsv_solve_buffer_size(
+                    handle, trans, mat, x, y, &buffer_size_solve));
                 *buffer_size = rocsparse::max(buffer_size_analysis, buffer_size_solve);
                 *buffer_size = rocsparse::max(static_cast<size_t>(4), *buffer_size);
                 return rocsparse_status_success;
@@ -179,8 +179,8 @@ namespace rocsparse
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse::coosv_analysis_buffer_size(
                     handle, trans, mat, &buffer_size_analysis));
                 size_t buffer_size_solve;
-                RETURN_IF_ROCSPARSE_ERROR(
-                    rocsparse::coosv_solve_buffer_size(handle, trans, mat, &buffer_size_solve));
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse::coosv_solve_buffer_size(
+                    handle, trans, mat, x, y, &buffer_size_solve));
                 *buffer_size = rocsparse::max(buffer_size_analysis, buffer_size_solve);
                 *buffer_size = rocsparse::max(static_cast<size_t>(4), *buffer_size);
                 return rocsparse_status_success;
@@ -230,6 +230,7 @@ namespace rocsparse
         case rocsparse_format_bsr:
         case rocsparse_format_ell:
         case rocsparse_format_bell:
+        case rocsparse_format_sell:
         case rocsparse_format_coo_aos:
         {
             // LCOV_EXCL_START

@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <cmath>
 #include <memory>
@@ -332,7 +309,7 @@ namespace HazardObserverTest
                         "v_mul_f32", {v[0]}, {Register::Value::Literal(0x4f7ffffe), v[0]}, {}, ""),
                     Instruction("s_endpgm", {}, {}, {}, "")};
 
-                if(arch.isCDNA3GPU() || arch.isCDNA35GPU())
+                if(arch.isCDNA3GPU() || arch.isCDNA4GPU())
                 {
                     peekAndSchedule(context, insts[0]);
                     peekAndSchedule(context, insts[1], 1);
@@ -424,7 +401,7 @@ namespace HazardObserverTest
                            "v_readlane_b32", {s[1]}, {v[0], Register::Value::Literal(0)}, {}, ""),
                        Instruction("s_endpgm", {}, {}, {}, "")};
 
-                if(arch.isCDNA3GPU() || arch.isCDNA35GPU())
+                if(arch.isCDNA3GPU() || arch.isCDNA4GPU())
                 {
                     peekAndSchedule(context, insts[0]);
                     peekAndSchedule(context, insts[1], 1);
@@ -559,7 +536,7 @@ namespace HazardObserverTest
 
                 std::vector<Instruction> insts
                     = {Instruction("v_cmpx_eq_u32", {}, {s[0], v[0]}, {}, ""),
-                       Instruction("v_xor_b32", {v[1]}, {v[0], context->getExec()}, {}, ""),
+                       Instruction("v_xor_b32", {v[1]}, {v[0], context->getEXEC()}, {}, ""),
                        Instruction("s_endpgm", {}, {}, {}, "")};
 
                 if(arch.isCDNA1GPU() || arch.isCDNA2GPU())
@@ -639,7 +616,7 @@ namespace HazardObserverTest
                    Instruction("v_mov_b32", {v[0]}, {v[1]}, {}, ""),
                    Instruction("s_endpgm", {}, {}, {}, "")};
 
-            if(arch.isCDNA3GPU() || arch.isCDNA35GPU())
+            if(arch.isCDNA3GPU() || arch.isCDNA4GPU())
             {
                 peekAndSchedule(context, insts[0]);
                 peekAndSchedule(context, insts[1], 1);

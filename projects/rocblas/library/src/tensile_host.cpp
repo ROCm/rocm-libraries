@@ -229,14 +229,8 @@ namespace
         }
     }
 
-    Tensile::LazyLoadingInit getLazyLoadingArch(int deviceID)
+    Tensile::LazyLoadingInit getLazyLoadingArch(const std::string& deviceString)
     {
-        hipDeviceProp_t deviceProperties;
-        hipGetDeviceProperties(&deviceProperties, deviceID);
-        // strip out xnack/ecc from name
-        std::string deviceFullString(deviceProperties.gcnArchName);
-        std::string deviceString = deviceFullString.substr(0, deviceFullString.find(":"));
-
         if(deviceString.find("gfx803") != std::string::npos)
         {
             return Tensile::LazyLoadingInit::gfx803;
@@ -244,6 +238,10 @@ namespace
         else if(deviceString.find("gfx900") != std::string::npos)
         {
             return Tensile::LazyLoadingInit::gfx900;
+        }
+        else if(deviceString.find("gfx90c") != std::string::npos)
+        {
+            return Tensile::LazyLoadingInit::gfx90c;
         }
         else if(deviceString.find("gfx906") != std::string::npos)
         {
@@ -623,8 +621,14 @@ namespace
      **************************************************/
     class TensileHost
     {
-        // The library object
-        std::shared_ptr<Tensile::MasterSolutionLibrary<Tensile::ContractionProblem>> m_library;
+        // Map of libraries per GPU architecture (e.g., "gfx1030", "gfx906", "gfx908")
+        // This allows multi-GPU systems with different architectures to each have their own library
+        mutable std::unordered_map<
+            std::string,
+            std::shared_ptr<Tensile::MasterSolutionLibrary<Tensile::ContractionProblem>>>
+                           m_libraryMap;
+        mutable std::mutex m_libraryMapMutex; // Protects m_libraryMap during initialization
+
         std::unordered_map<std::string, std::shared_ptr<hipDeviceProp_t>> m_devicePropMap;
 
         // The adapter object. mutable is used to allow adapters to be modified
@@ -633,6 +637,8 @@ namespace
         {
             mutable std::atomic<Tensile::hip::SolutionAdapter*> adapter{nullptr};
             mutable std::mutex                                  mutex;
+            mutable std::shared_ptr<Tensile::MasterSolutionLibrary<Tensile::ContractionProblem>>
+                library;
         };
 
         // Each device contains an adapter
@@ -672,11 +678,6 @@ namespace
                 delete a.adapter;
         }
 
-        auto& get_library() const
-        {
-            return m_library;
-        }
-
         auto& get_device_property(const std::string& deviceName) const
         {
             return m_devicePropMap.at(deviceName);
@@ -699,115 +700,142 @@ namespace
 #endif
         }
 
+        static int determine_tensile_base_path(std::string& base_path)
+        {
+            // called once from initialize so logging check here to keep clutter down
+            const char* str_layer_mode = getenv("ROCBLAS_LAYER");
+            if(str_layer_mode)
+            {
+                rocblas_layer_mode layer_mode
+                    = static_cast<rocblas_layer_mode>(strtol(str_layer_mode, 0, 0));
+
+                if(layer_mode & (rocblas_layer_mode_log_trace | rocblas_layer_mode_log_internal))
+                {
+                    char buf[256];
+                    rocblas_get_version_string(buf, 256);
+
+                    // logs trace differently to rocblas_cerr as no handle here
+                    rocblas_cerr << "rocBLAS initialize,version," << buf << std::endl;
+                }
+            }
+
+            const char* env = getenv("ROCBLAS_TENSILE_LIBPATH");
+            if(env)
+            {
+                base_path = env;
+            }
+            else
+            {
+                base_path = ROCBLAS_LIB_PATH;
+
+                // Find the location of librocblas.dll/.so
+                // Fall back on hard-coded path if static library or not found
+
+#ifndef ROCBLAS_STATIC_LIB
+
+#ifdef WIN32
+                std::vector<TCHAR> dll_path(MAX_PATH + 1);
+                if(GetModuleFileNameA(
+                       GetModuleHandleA("rocblas.dll"), dll_path.data(), MAX_PATH + 1))
+                {
+                    std::string           tmp(dll_path.begin(), dll_path.end());
+                    std::filesystem::path exepath = tmp;
+                    if(exepath.has_filename())
+                    {
+                        base_path = exepath.remove_filename().string();
+                    }
+                }
+#else
+                dl_iterate_phdr(rocblas_dl_iterate_phdr_callback, NULL);
+                if(rocblas_so_path.size())
+                    base_path = std::string{dirname(&rocblas_so_path[0])};
+#endif
+
+                // Find the location of the Tensile libraries relative to shared library
+                if(TestPath(base_path + "/../../Tensile/library"))
+                    base_path += "/../../Tensile/library";
+                else if(TestPath(base_path + "/library"))
+                    base_path += "/library";
+                else if(TestPath(base_path + "/../rocblas/library"))
+                    // For ASAN packaging, library file directory will be lib/asan
+                    // so need to prefix ../ to set search base_path to lib/rocblas/library
+                    base_path += "/../rocblas/library";
+                else if(TestPath(base_path + "/../Tensile/library"))
+                    // The build tree can lay out its library directory in this way when Tensile
+                    // is added as a subdirectory, but the install tree will never use this form
+                    base_path += "/../Tensile/library";
+                else
+                    base_path += "/rocblas/library";
+
+#else
+                // First location relative to standard static library install, then relative to current executable
+                if(TestPath(base_path + "/rocblas/library"))
+                    base_path += "/rocblas/library";
+                else
+                {
+                    std::string exe_path = rocblas_exepath();
+                    if(TestPath(exe_path + "rocblas/library"))
+                        base_path = exe_path + "rocblas/library";
+                    else if(TestPath(exe_path + "../../Tensile/library"))
+                        base_path = exe_path + "../../Tensile/library";
+                    else
+                        base_path += "/rocblas/library";
+                }
+#endif // ROCBLAS_STATIC_LIB
+            }
+            return 0;
+        }
+
         /*********************************************************************
-         * Initialize adapter and library according to environment variables *
+         * Initialize adapter and return library                             *
          * and default paths based on librocblas.so location and GPU         *
          *********************************************************************/
-        void initialize(Tensile::hip::SolutionAdapter& adapter, rocblas_int deviceId)
+        auto& initialize(Tensile::hip::SolutionAdapter& adapter, rocblas_int deviceId)
         {
             std::string path;
             std::string tensileLibraryPath;
-            bool        tensile_lazy_load_enabled = false;
-            //Function local static-variables are used to gaurantee thread-safe initialization,
-            //avoids static initialization order fiasco
-            static std::future<
-                std::shared_ptr<Tensile::SolutionLibrary<Tensile::ContractionProblem>>>
-                                                                ftr_lib;
-            static std::unordered_set<Tensile::LazyLoadingInit> tensileDeviceSet;
+            bool        tensile_lazy_load_enabled = true;
+
+            // Function local static-variables are used to gaurantee thread-safe initialization
+
+            // Map of futures per architecture to handle multi-GPU systems
+            static std::unordered_map<
+                std::string,
+                std::future<std::shared_ptr<Tensile::SolutionLibrary<Tensile::ContractionProblem>>>>
+                ftr_lib_map;
+
+            static std::mutex ftr_lib_map_mutex;
+            static std::unordered_map<std::string, std::vector<Tensile::LazyLoadingInit>>
+                m_tensileLazyLoadInit;
 
 #ifndef WIN32
             path.reserve(PATH_MAX);
 #endif
 
             // The name of the current GPU platform
-            std::string processor = rocblas_internal_get_arch_name();
-            // Get current xnack mode
-            std::string xnack = rocblas_internal_get_xnack_mode();
-
-            // If xnack mode is set, skip loading kernels for the opposite mode
-            std::string skip_xnack;
-            if(xnack == "xnack+")
-                skip_xnack = "xnack-";
-            else if(xnack == "xnack-")
-                skip_xnack = "xnack+";
+            std::string processor = rocblas_internal_get_arch_name(deviceId);
 
             static std::string base_path;
-            static int         determine_tensile_base_path = [&] {
-                const char* env = getenv("ROCBLAS_TENSILE_LIBPATH");
-                if(env)
-                {
-                    base_path = env;
-                }
-                else
-                {
-                    base_path = ROCBLAS_LIB_PATH;
-
-                    // Find the location of librocblas.dll/.so
-                    // Fall back on hard-coded path if static library or not found
-
-#ifndef ROCBLAS_STATIC_LIB
-
-#ifdef WIN32
-                    // wchar_t wpath[MAX_PATH + 1] = {0};
-                    // if(GetModuleFileNameW(GetModuleHandle("rocblas.dll"), wpath, MAX_PATH + 1))
-                    // {
-                    //     std::wstring          wspath(wpath);
-                    //     std::string           tmp(wspath.begin(), wspath.end());
-
-                    std::vector<TCHAR> dll_path(MAX_PATH + 1);
-                    if(GetModuleFileNameA(
-                           GetModuleHandleA("rocblas.dll"), dll_path.data(), MAX_PATH + 1))
-                    {
-                        std::string           tmp(dll_path.begin(), dll_path.end());
-                        std::filesystem::path exepath = tmp;
-                        if(exepath.has_filename())
-                        {
-                            base_path = exepath.remove_filename().string();
-                        }
-                    }
-#else
-                    dl_iterate_phdr(rocblas_dl_iterate_phdr_callback, NULL);
-                    if(rocblas_so_path.size())
-                        base_path = std::string{dirname(&rocblas_so_path[0])};
-#endif
-
-                    // Find the location of the Tensile libraries relative to shared library
-                    if(TestPath(base_path + "/../../Tensile/library"))
-                        base_path += "/../../Tensile/library";
-                    else if(TestPath(base_path + "/library"))
-                        base_path += "/library";
-                    else if(TestPath(base_path + "/../rocblas/library"))
-                        // For ASAN packaging, library file directory will be lib/asan
-                        // so need to prefix ../ to set search base_path to lib/rocblas/library
-                        base_path += "/../rocblas/library";
-                    else if(TestPath(base_path + "/../Tensile/library"))
-                        // The build tree can lay out its library directory in this way when Tensile
-                        // is added as a subdirectory, but the install tree will never use this form
-                        base_path += "/../Tensile/library";
-                    else
-                        base_path += "/rocblas/library";
-
-#else
-                    // First location relative to standard static library install, then relative to current executable
-                    if(TestPath(base_path + "/rocblas/library"))
-                        base_path += "/rocblas/library";
-                    else
-                    {
-                        std::string exe_path = rocblas_exepath();
-                        if(TestPath(exe_path + "rocblas/library"))
-                            base_path = exe_path + "rocblas/library";
-                        else if(TestPath(exe_path + "../../Tensile/library"))
-                            base_path = exe_path + "../../Tensile/library";
-                        else
-                            base_path += "/rocblas/library";
-                    }
-#endif // ROCBLAS_STATIC_LIB
-                }
-                return 0;
-            }();
+            static int         determined_path{determine_tensile_base_path(base_path)};
 
             path = base_path;
-            if(TestPath(path + "/" + processor))
+            // Probe subdirectories from most-specific to least-specific so that shard
+            // overlays compose correctly regardless of how TheRock splits arch builds:
+            //   1. library/<arch>-<xnack>/  – split single-xnack-variant shard
+            //   2. library/<arch>/          – combined xnack or no-xnack single-arch shard
+            //   3. library/                 – flat multi-arch build (no subdir)
+            bool        found_subdir = false;
+            std::string xnack_mode   = rocblas_internal_get_xnack_mode();
+            if(!xnack_mode.empty())
+            {
+                std::string processor_xnack = processor + "-" + xnack_mode;
+                if(TestPath(path + "/" + processor_xnack))
+                {
+                    path += "/" + processor_xnack;
+                    found_subdir = true;
+                }
+            }
+            if(!found_subdir && TestPath(path + "/" + processor))
                 path += "/" + processor;
 
 #ifdef TENSILE_YAML
@@ -817,6 +845,7 @@ namespace
 #endif
             if(!TestPath(tensileLibraryPath))
             {
+                tensile_lazy_load_enabled = false;
 
 #ifdef TENSILE_YAML
                 tensileLibraryPath = path + "/TensileLibrary_" + processor + ".yaml";
@@ -857,48 +886,62 @@ namespace
                     }
                 }
             }
-            else
-                tensile_lazy_load_enabled = true;
 
-            //Supports multi architecture configuration in lazy library loading mode
+            // Supports multi architecture configuration
             static int initialize_once = [&] {
                 hipDeviceProp_t prop;
                 int             count;
                 HIP_CHECK_EXC(hipGetDeviceCount(&count));
 
+                // iterate over all devices to determine gfx arch for each
+                std::unordered_set<Tensile::LazyLoadingInit> deviceSet;
                 for(int devId = 0; devId < count; devId++)
                 {
-                    auto deviceArch = getLazyLoadingArch(devId);
-                    if(tensileDeviceSet.find(deviceArch) == tensileDeviceSet.end())
+                    // strip out xnack/ecc from name
+                    std::string deviceString = rocblas_internal_get_arch_name(devId);
+
+                    auto deviceLazyArch = getLazyLoadingArch(deviceString);
+                    if(deviceSet.find(deviceLazyArch) == deviceSet.end())
                     {
-                        //future work: populate the arch list for heterogeneous support
-                        tensileDeviceSet.insert(deviceArch);
-                        //populate device property map, used in finding solutions based on arch
+                        deviceSet.insert(deviceLazyArch);
+
+                        // populate device property map, used in finding solutions based on arch
                         HIP_CHECK_EXC(hipGetDeviceProperties(&prop, devId));
-                        // strip out xnack/ecc from name
-                        std::string deviceFullString(prop.gcnArchName);
-                        std::string deviceString
-                            = deviceFullString.substr(0, deviceFullString.find(":"));
                         m_devicePropMap[deviceString] = std::make_shared<hipDeviceProp_t>(prop);
+                        m_tensileLazyLoadInit[deviceString].push_back(
+                            deviceLazyArch); // will have only 1 entry
                     }
                 }
                 return 0;
             }();
 
+            {
+                // Launch async solution library load for gfx specific library
+                std::lock_guard<std::mutex> ftrLock(ftr_lib_map_mutex);
+                if(ftr_lib_map.find(processor) == ftr_lib_map.end())
+                {
+                    ftr_lib_map[processor]
+                        = std::async(std::launch::async,
+                                     Tensile::LoadLibraryFilePreload<Tensile::ContractionProblem>,
+                                     tensileLibraryPath,
+                                     m_tensileLazyLoadInit[processor]);
+                }
+            }
+
             if(!tensile_lazy_load_enabled || rocblas_initialize_called())
             {
-
-                static int once = [&] {
-                    ftr_lib = std::async(
-                        std::launch::async,
-                        Tensile::LoadLibraryFilePreload<Tensile::ContractionProblem>,
-                        tensileLibraryPath,
-                        std::vector<Tensile::LazyLoadingInit>{Tensile::LazyLoadingInit::All});
-                    return 0;
-                }();
-
                 // only load modules for the current architecture
                 auto dir = path + "/*" + processor + "*co";
+
+                // Get current xnack mode
+                std::string xnack = rocblas_internal_get_xnack_mode();
+
+                // If xnack mode is set, skip loading kernels for the opposite mode
+                std::string skip_xnack;
+                if(xnack == "xnack+")
+                    skip_xnack = "xnack-";
+                else if(xnack == "xnack-")
+                    skip_xnack = "xnack+";
 
                 bool no_match = false;
 #ifdef WIN32
@@ -916,7 +959,7 @@ namespace
                         // Skip experimental libraries
                         if(codeObjectFile.find("Experimental") != std::string::npos)
                             continue;
-                        adapter.loadCodeObjectFile(codeObjectFile.c_str());
+                        THROW_IF_HIP_ERROR(adapter.loadCodeObjectFile(codeObjectFile.c_str()));
                     } while(FindNextFileA(hfine, &finddata));
                 }
                 else
@@ -936,7 +979,7 @@ namespace
                             continue;
                         if(cofile.find("Experimental") != std::string::npos)
                             continue;
-                        adapter.loadCodeObjectFile(cofile);
+                        THROW_IF_HIP_ERROR(adapter.loadCodeObjectFile(cofile));
                     }
                 }
                 else if(g == GLOB_NOMATCH)
@@ -965,40 +1008,57 @@ namespace
                           << std::endl;
                 }
             }
-            else // initialize lazy loading
-            {
-                static int once = [&] {
-                    ftr_lib
-                        = std::async(std::launch::async,
-                                     Tensile::LoadLibraryFilePreload<Tensile::ContractionProblem>,
-                                     tensileLibraryPath,
-                                     std::vector<Tensile::LazyLoadingInit>{});
-                    return 0;
-                }();
-            }
 
             {
                 // initialize adapter for lazy loading or experimental code objects
-                adapter.initializeLazyLoading(processor, path);
+                PRINT_IF_HIP_ERROR(adapter.initializeLazyLoading(processor, path));
 
-                static int once = [&] {
-                    auto lib = ftr_lib.get();
-                    if(!lib)
-                        rocblas_cerr << "\nrocBLAS error: Could not load " << tensileLibraryPath
-                                     << std::endl;
-                    else
+                // Load library for this specific architecture if not already loaded
+
+                std::lock_guard<std::mutex> libLock(m_libraryMapMutex);
+                if(m_libraryMap.find(processor) == m_libraryMap.end())
+                {
+                    // Get the future for this architecture
+                    std::future<
+                        std::shared_ptr<Tensile::SolutionLibrary<Tensile::ContractionProblem>>>*
+                        ftr_lib_ptr
+                        = nullptr;
                     {
-                        using MSL = Tensile::MasterSolutionLibrary<Tensile::ContractionProblem>;
-                        m_library = std::dynamic_pointer_cast<MSL>(lib);
+                        std::lock_guard<std::mutex> ftrLock(ftr_lib_map_mutex);
+                        auto                        it = ftr_lib_map.find(processor);
+                        if(it != ftr_lib_map.end())
+                        {
+                            ftr_lib_ptr = &(it->second);
+                        }
                     }
-                    return 0;
-                }();
-            }
-            if(!m_library)
-            {
-                rocblas_cerr << "\nrocBLAS error: Could not initialize Tensile library"
-                             << std::endl;
-                rocblas_abort();
+
+                    if(ftr_lib_ptr)
+                    {
+                        auto lib = ftr_lib_ptr->get();
+                        if(!lib)
+                        {
+                            rocblas_cerr << "\nrocBLAS error: Could not load " << tensileLibraryPath
+                                         << " for architecture: " << processor << std::endl;
+                        }
+                        else
+                        {
+                            auto masterLib = std::dynamic_pointer_cast<
+                                Tensile::MasterSolutionLibrary<Tensile::ContractionProblem>>(lib);
+                            if(masterLib)
+                            {
+                                m_libraryMap[processor] = masterLib;
+                            }
+                        }
+                    }
+                }
+
+                if(m_libraryMap.find(processor) == m_libraryMap.end())
+                {
+                    rocblas_cerr << "\nrocBLAS error: Could not initialize Tensile library for "
+                                    "architecture: "
+                                 << processor << std::endl;
+                    rocblas_abort();
+                }
             }
 
             // Preload problem/solution mappings
@@ -1006,21 +1066,29 @@ namespace
             if(overrideEnv)
             {
                 std::string                        overridePath = overrideEnv;
-                std::shared_ptr<Tensile::Hardware> hardware     = Tensile::hip::GetDevice(
-                    *(get_device_property(rocblas_internal_get_arch_name())));
-                bool success = m_library->setOverridesFromFile(*hardware, overridePath);
+                std::shared_ptr<Tensile::Hardware> hardware
+                    = Tensile::hip::GetDevice(*(get_device_property(processor)));
 
-                if(!success)
+                std::lock_guard<std::mutex> libLock(m_libraryMapMutex);
+                auto                        archLib = m_libraryMap[processor];
+                if(archLib)
                 {
-                    rocblas_cerr
-                        << "\nrocBLAS warning: One or more problem overrides failed to load from: "
-                        << overridePath << std::endl;
+                    bool success = archLib->setOverridesFromFile(*hardware, overridePath);
+                    if(!success)
+                    {
+                        rocblas_cerr << "\nrocBLAS warning: One or more problem overrides failed "
+                                        "to load from: "
+                                     << overridePath << std::endl;
+                    }
                 }
             }
+
+            std::lock_guard<std::mutex> lock(m_libraryMapMutex);
+            return m_libraryMap[processor];
         }
     };
 
-    // Return the library and adapter for the current HIP device
+    // Return the library and adapter for the device index passed or current HIP device if -1
     auto& get_library_and_adapter(
         std::shared_ptr<Tensile::MasterSolutionLibrary<Tensile::ContractionProblem>>* library
         = nullptr,
@@ -1032,7 +1100,9 @@ namespace
         static TensileHost host;
 
         if(device == -1)
-            hipGetDevice(&device);
+        {
+            PRINT_IF_HIP_ERROR(hipGetDevice(&device));
+        }
 
         // Adapter entry for the current HIP device ID
         auto& a       = host.get_adapters().at(device);
@@ -1050,8 +1120,8 @@ namespace
                 // Allocate a new adapter using the current HIP device
                 adapter = new Tensile::hip::SolutionAdapter;
 
-                // Initialize the adapter and possibly the library
-                host.initialize(*adapter, device);
+                // Initialize the adapter and get the library (all of the same gfx use the same library)
+                a.library = host.initialize(*adapter, device);
 
                 // Atomically change the adapter stored for this device ID
                 a.adapter.store(adapter, std::memory_order_release);
@@ -1059,10 +1129,13 @@ namespace
         }
 
         // If an adapter is found, it is assumed that the library is initialized
+        // Get the architecture name for the current device
+        std::string archName = rocblas_internal_get_arch_name(device);
+
         if(library)
-            *library = host.get_library();
+            *library = a.library;
         if(deviceProp)
-            *deviceProp = host.get_device_property(rocblas_internal_get_arch_name());
+            *deviceProp = host.get_device_property(archName);
 
         return *adapter;
     }
@@ -1142,7 +1215,7 @@ bool useHipBLASLt(const RocblasContractionProblem<Ti, To, Tc>& prob)
         }
     }
 
-    bool batched = prob.batch_A != nullptr;
+    bool batched = !prob.strided_batch;
     return prob.handle->tryHipBLASLt(batched);
 #else
     return false;

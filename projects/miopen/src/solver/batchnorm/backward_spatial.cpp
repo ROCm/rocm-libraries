@@ -55,8 +55,8 @@ bool PerformanceConfigBnBwdBackward::IsValid(
 
     // if default config is variant 2, check if it can be applied
     // (based on variant 2 restrictions)
-    size_t vectorsize, xlocalsize, ylocalsize, zlocalsize, nelements;
-    int variant;
+    size_t vectorsize = 1, xlocalsize = 1, ylocalsize = 1, zlocalsize = 1, nelements = 1;
+    int variant = -1;
     GetVariantFromKernelId(
         this->kernel_id, variant, vectorsize, xlocalsize, ylocalsize, zlocalsize, nelements);
     if(variant == 2)
@@ -233,12 +233,12 @@ ConvSolution BnBwdTrainingSpatial::GetSolution(const ExecutionContext& context,
 
     int variant       = -1;
     size_t vectorsize = 1;
-    size_t xlocalsize, xgridsize;
+    size_t xlocalsize = 1, xgridsize = 1;
     size_t ylocalsize = 1, ygridsize = 1;
     size_t zlocalsize = 1, zgridsize = 1;
-    unsigned int ldsgcn, ldsnogcn;
+    unsigned int ldsgcn = 0, ldsnogcn = 0;
     int stash_method = 0;
-    size_t nelements;
+    size_t nelements = 1;
 
     GetVariantFromKernelId(
         config.kernel_id, variant, vectorsize, xlocalsize, ylocalsize, zlocalsize, nelements);
@@ -332,18 +332,17 @@ ConvSolution BnBwdTrainingSpatial::GetSolution(const ExecutionContext& context,
                                   {"MIOPEN_NRN_OP_ID", problem.GetActivationDesc().GetMode()}};
 
         {
-            // OpenCL kernels for variant 0-4
-            kernel.kernel_file      = "MIOpenBatchNormBwdSpatial.cl";
+            kernel.kernel_file      = "MIOpenBatchNormBwdSpatial.cpp";
             std::string kernel_name = "MIOpenBatchNormBwdSpatial";
 
             build_params << KernelBuildParameters{
                 {"MIO_BN_GFX103X", (StartsWith(handle.GetDeviceName(), "gfx103") ? "1" : "0")},
                 {"MIO_BN_GFX110X", (StartsWith(handle.GetDeviceName(), "gfx110") ? "1" : "0")},
-                {"MIO_BN_GFX120X", (StartsWith(handle.GetDeviceName(), "gfx120") ? "1" : "0")},
                 {"MIO_BN_GFX115X", (StartsWith(handle.GetDeviceName(), "gfx115") ? "1" : "0")},
+                {"MIO_BN_GFX120X", (StartsWith(handle.GetDeviceName(), "gfx120") ? "1" : "0")},
             };
 
-            kernel.comp_options = build_params.GenerateFor(kbp::OpenCL{});
+            kernel.comp_options = build_params.GenerateFor(kbp::HIP());
 
             kernel.l_wk.push_back(xlocalsize);
             kernel.l_wk.push_back(ylocalsize);

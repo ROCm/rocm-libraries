@@ -60,6 +60,7 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} --driver-mode=g++ -Xclang -fallow-half-a
 if( CMAKE_PROJECT_NAME STREQUAL "rocwmma" )
   option( ROCWMMA_BUILD_TESTS "Build rocWMMA tests" ON )
   option( ROCWMMA_BUILD_SAMPLES "Build rocWMMA samples" ON )
+  option( ROCWMMA_BUILD_COMMUNITY_SAMPLES "Build community-contributed rocWMMA samples" OFF )
   option( ROCWMMA_BUILD_ASSEMBLY "Output assembly files" OFF )
   option( BUILD_OFFLOAD_COMPRESS "Build rocWMMA with offload compression" ON )
   option( ROCWMMA_CODE_COVERAGE "Build with code coverage flags (clang only)" OFF)
@@ -162,7 +163,21 @@ message(STATUS "GPU_TARGETS=${GPU_TARGETS}")
 
 find_package( hip REQUIRED )
 find_package( hiprtc REQUIRED )
-find_package( OpenMP REQUIRED )
+find_package( OpenMP CONFIG QUIET PATHS "${HIP_CLANG_ROOT}/lib/cmake" )
+if(NOT OpenMP_FOUND OR NOT DEFINED openmp_LIB_DIR)
+   # Fall-back to module mode.
+   find_package(OpenMP MODULE REQUIRED)
+endif()
+
+if(TARGET OpenMP::omp)
+  set(ROCWMMA_OPENMP_LIBRARY OpenMP::omp)
+  set(ROCWMMA_OPENMP_INSTALL_RPATH "\$ORIGIN/../llvm/${openmp_LIB_DIR}")
+  set(ROCWMMA_OPENMP_BUILD_RPATH "${HIP_CLANG_ROOT}/${openmp_LIB_DIR}")
+else()
+  set(ROCWMMA_OPENMP_LIBRARY OpenMP::OpenMP_CXX)
+  set(ROCWMMA_OPENMP_INSTALL_RPATH "\$ORIGIN/../llvm/lib")
+  set(ROCWMMA_OPENMP_BUILD_RPATH "${HIP_CLANG_ROOT}/lib")
+endif()
 
 if (ROCWMMA_BUILD_BENCHMARK_TESTS)
     ## Check for AMD-smi
@@ -177,7 +192,7 @@ if (ROCWMMA_BUILD_BENCHMARK_TESTS)
 endif()
 
 add_library(rocwmma INTERFACE)
-target_link_libraries(rocwmma INTERFACE hip::device hip::host OpenMP::OpenMP_CXX ${AMD_SMI_LIBRARY})
+target_link_libraries(rocwmma INTERFACE hip::device hip::host ${ROCWMMA_OPENMP_LIBRARY} ${AMD_SMI_LIBRARY})
 
 rocm_install_targets(
   TARGETS rocwmma
@@ -192,6 +207,9 @@ endif()
 if(ROCWMMA_BUILD_SAMPLES)
   rocm_package_setup_component(samples PARENT clients)
   add_subdirectory(samples)
+elseif(ROCWMMA_BUILD_COMMUNITY_SAMPLES)
+  rocm_package_setup_component(community_samples PARENT clients)
+  add_subdirectory(samples/community)
 endif()
 
 

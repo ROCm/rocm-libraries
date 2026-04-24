@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -101,13 +101,7 @@ hipError_t radix_sort_onesweep_global_offsets(KeysInputIterator keys_input,
 
     using Selector = radix_sort_onesweep_config_selector<key_type, value_type>;
 
-    target_arch target_arch;
-    ROCPRIM_RETURN_ON_ERROR(host_target_arch(stream, target_arch));
-
-    gpu target_gpu;
-    ROCPRIM_RETURN_ON_ERROR(host_target_gpu(stream, target_gpu));
-
-    const target current_target(target_arch, target_gpu);
+    const target current_target(stream);
 
     const radix_sort_onesweep_config_params params = get_config<Selector>(Config{}, current_target);
 
@@ -136,9 +130,9 @@ hipError_t radix_sort_onesweep_global_offsets(KeysInputIterator keys_input,
     }
 
     // Compute a histogram for each digit.
-    auto onesweep_histograms_kernel = [=](auto arch_config)
+    auto onesweep_histograms_kernel = [=](auto target_config)
     {
-        static constexpr radix_sort_onesweep_config_params params = decltype(arch_config)::params;
+        static constexpr radix_sort_onesweep_config_params params = decltype(target_config)::params;
         onesweep_histograms<params.histogram.block_size,
                             params.histogram.items_per_thread,
                             params.radix_bits_per_place,
@@ -167,11 +161,13 @@ hipError_t radix_sort_onesweep_global_offsets(KeysInputIterator keys_input,
         start = std::chrono::steady_clock::now();
     }
 
-    auto onesweep_scan_histograms_kernel = [=](auto arch_config)
+    auto onesweep_scan_histograms_kernel = [=](auto target_config)
     {
-        static constexpr radix_sort_onesweep_config_params params = decltype(arch_config)::params;
-        onesweep_scan_histograms<params.histogram.block_size, params.radix_bits_per_place>(
-            global_digit_offsets);
+        using TargetConfig                                        = decltype(target_config);
+        static constexpr radix_sort_onesweep_config_params params = TargetConfig::params;
+        onesweep_scan_histograms<params.histogram.block_size,
+                                 params.radix_bits_per_place,
+                                 TargetConfig::wavefront>(global_digit_offsets);
     };
 
     ROCPRIM_RETURN_ON_ERROR(
@@ -221,13 +217,7 @@ hipError_t radix_sort_onesweep_iteration(
 
     using Selector = radix_sort_onesweep_config_selector<key_type, value_type>;
 
-    target_arch target_arch;
-    ROCPRIM_RETURN_ON_ERROR(host_target_arch(stream, target_arch));
-
-    gpu target_gpu;
-    ROCPRIM_RETURN_ON_ERROR(host_target_gpu(stream, target_gpu));
-
-    const target current_target(target_arch, target_gpu);
+    const target current_target(stream);
 
     const radix_sort_onesweep_config_params params = get_config<Selector>(Config{}, current_target);
 
@@ -286,28 +276,30 @@ hipError_t radix_sort_onesweep_iteration(
         auto launch_onesweep_iteration
             = [&](auto keys_in, auto keys_out, auto values_in, auto values_out)
         {
-            auto onesweep_iteration_kernel = [=](auto arch_config)
+            auto onesweep_iteration_kernel = [=](auto target_config)
             {
-                static constexpr radix_sort_onesweep_config_params params
-                    = decltype(arch_config)::params;
+                using TargetConfig                                        = decltype(target_config);
+                static constexpr radix_sort_onesweep_config_params params = TargetConfig::params;
+                static constexpr auto wavefront                           = TargetConfig::wavefront;
 
                 onesweep_iteration<params.sort.block_size,
                                    params.sort.items_per_thread,
                                    params.radix_bits_per_place,
                                    Descending,
-                                   params.radix_rank_algorithm>(keys_in,
-                                                                keys_out,
-                                                                values_in,
-                                                                values_out,
-                                                                current_batch_size,
-                                                                global_digit_offsets_in,
-                                                                global_digit_offsets_out,
-                                                                lookback_states,
-                                                                decomposer,
-                                                                bit,
-                                                                current_radix_bits,
-                                                                full_blocks,
-                                                                ordered_bid);
+                                   params.radix_rank_algorithm,
+                                   wavefront>(keys_in,
+                                              keys_out,
+                                              values_in,
+                                              values_out,
+                                              current_batch_size,
+                                              global_digit_offsets_in,
+                                              global_digit_offsets_out,
+                                              lookback_states,
+                                              decomposer,
+                                              bit,
+                                              current_radix_bits,
+                                              full_blocks,
+                                              ordered_bid);
             };
             return execute_launch_plan<Config,
                                        Selector,
@@ -397,13 +389,7 @@ hipError_t radix_sort_onesweep_impl(
         {
             using ordered_bid_type = block_id_wrapper<unsigned int, use_atomic_block_id>;
 
-            target_arch target_arch;
-            ROCPRIM_RETURN_ON_ERROR(host_target_arch(stream, target_arch));
-
-            gpu target_gpu;
-            ROCPRIM_RETURN_ON_ERROR(host_target_gpu(stream, target_gpu));
-
-            const target current_target(target_arch, target_gpu);
+            const target current_target(stream);
 
             const radix_sort_onesweep_config_params params
                 = get_config<Selector>(Config{}, current_target);
@@ -879,6 +865,8 @@ hipError_t radix_sort_keys(void*              temporary_storage,
 /// \parblock
 /// In this example a device-level ascending radix sort is performed on an array of
 /// \p float values.
+///
+/// The full example is [on GitHub](https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocprim/example/rocprim/device/example_device_radix_sort.cpp).
 ///
 /// \code{.cpp}
 /// #include <rocprim/rocprim.hpp>

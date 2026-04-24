@@ -2,11 +2,14 @@
 A plugin wrapping MIOpen in order to provide engines to solve some hipDNN graphs.
 
 ## Building
-This plugin can be built as part of the MIOpen project or as a standalone plugin.
 
-### Building as part of hipDNN
-1. Follow the build instructions for hipDNN defined in [Building hipDNN](../../projects/hipdnn/docs/Building.md).
-1. Currently the plugin build is defaulted to on.  Eventually it won't be a hipdnn build option.
+### Building with the superbuild
+Build hipDNN and miopen-provider together from the rocm-libraries root using the superbuild. See [Superbuild](../../projects/hipdnn/docs/Superbuild.md) for details.
+
+```bash
+cmake --preset hipdnn
+cmake --build --preset default
+```
 
 ### Building as a standalone plugin
 In order to build the plugin standalone, you will need to have installed hipDNN and MIOpen on the system first.

@@ -39,44 +39,99 @@ RUN apt-get update && apt-get install -y \
     texinfo \
     bison \
     flex \
+    gh \
     && rm -rf /var/lib/apt/lists/*
 
 # ============================================================================
 # Prebuilt stage - downloads and extracts dev env prebuilt binaries tarball
 #
-# Example build command for default tarball build (gfx94X, 7.0.0rc20250909):
-# docker build -f Dockerfile.ubuntu24 -t hipdnn:prebuilt .
-# This will download and install prebuilt binaries using therock-dist-linux-gfx94X-dcgpu-7.0.0rc20250909.tar.gz
+# New path: uses install_rocm_from_artifacts.py for downloading ROCm artifacts.
+# Legacy path: uses wget/tar when deprecated args are set (backward compat).
 #
-# Example build command to select tarball for asic family gfx950-dcgpu, build tag 7.0.0rc20250908:
-# docker build -f Dockerfile.ubuntu24 --build-arg THEROCK_ASIC=gfx950 --build-arg THEROCK_GIT_TAG=7.0.0rc20250908 -t hipdnn:fullbuild .
-# This will download and install prebuilt binaries using therock-dist-linux-gfx950-dcgpu-7.0.0rc20250908.tar.gz
+# Example: Default build (latest nightly for gfx94X-dcgpu):
+#   docker build -f Dockerfile.ubuntu24 -t hipdnn:prebuilt .
 #
-# Example build command to select tarball for asic family gfx950-all, build tag 7.9.0rc20251005:
-# docker build -f Dockerfile.ubuntu24 --build-arg THEROCK_PREBUILT_ID=gfx120X-all-7.9.0rc20251005 .
-# This will download and install prebuilt binaries using therock-dist-linux-gfx120X-all-7.9.0rc20251005.tar.gz
+# Example: Specific release version:
+#   docker build -f Dockerfile.ubuntu24 \
+#       --build-arg THEROCK_RELEASE=7.12.0a20260202 \
+#       -t hipdnn:prebuilt .
 #
-# Example build command to select tarball for asic family gfx950-all, build tag 7.9.0rc20251005:
-# docker build -f Dockerfile.ubuntu24 --build-arg THEROCK_TARBALL=therock-dist-linux-gfx120X-all-7.9.0rc20251005.tar.gz .
-# This will download and install prebuilt binaries using therock-dist-linux-gfx120X-all-7.9.0rc20251005.tar.gz
+# Example: Different ASIC family:
+#   docker build -f Dockerfile.ubuntu24 \
+#       --build-arg THEROCK_ASIC=gfx90X \
+#       --build-arg THEROCK_ASIC_VARIANT=dcgpu \
+#       -t hipdnn:prebuilt .
+#
+# Example: Full artifact group override:
+#   docker build -f Dockerfile.ubuntu24 \
+#       --build-arg THEROCK_ARTIFACT_GROUP=gfx110X-all \
+#       -t hipdnn:prebuilt .
 # ============================================================================
 FROM base AS install_therock_prebuilt
 
+# Build args for release selection
 ARG THEROCK_ASIC=gfx94X
-ARG THEROCK_GIT_TAG=7.0.0rc20250909
-ARG THEROCK_PREBUILT_ID=$THEROCK_ASIC-dcgpu-$THEROCK_GIT_TAG
-ARG THEROCK_TARBALL=therock-dist-linux-$THEROCK_PREBUILT_ID.tar.gz
+ARG THEROCK_ASIC_VARIANT=dcgpu
+ARG THEROCK_RELEASE=latest
+# Full artifact group (combines ASIC and variant)
+ARG THEROCK_ARTIFACT_GROUP=$THEROCK_ASIC-$THEROCK_ASIC_VARIANT
 
-RUN mkdir -p /opt/rocm
-WORKDIR /tmp
+# Deprecated build args (kept for backward compatibility)
+ARG THEROCK_GIT_TAG=
+ARG THEROCK_PREBUILT_ID=
+ARG THEROCK_TARBALL=
 
-RUN wget --progress=dot:giga https://therock-nightly-tarball.s3.us-east-2.amazonaws.com/$THEROCK_TARBALL
-RUN tar -xf $THEROCK_TARBALL -C /opt/rocm --strip-components=1
+# Clone TheRock for build tools (shallow clone, only need scripts)
+RUN git clone --depth 1 https://github.com/ROCm/TheRock.git /TheRock
+
+WORKDIR /TheRock
+
+RUN python3 -m venv /venv && /venv/bin/pip install -r requirements.txt
+
+# Install ROCm - two paths:
+# 1. Legacy: any deprecated arg set → wget/tar (old method, no translation needed)
+# 2. New: install_rocm_from_artifacts.py
+# Priority: THEROCK_TARBALL > THEROCK_PREBUILT_ID > THEROCK_GIT_TAG
+RUN if [ -n "$THEROCK_TARBALL" ] || [ -n "$THEROCK_PREBUILT_ID" ] || [ -n "$THEROCK_GIT_TAG" ]; then \
+        echo "WARNING: Using deprecated build args. Migrate to THEROCK_RELEASE + THEROCK_ARTIFACT_GROUP." >&2; \
+        tarball="${THEROCK_TARBALL:-therock-dist-linux-${THEROCK_PREBUILT_ID:-$THEROCK_ARTIFACT_GROUP-$THEROCK_GIT_TAG}.tar.gz}"; \
+        echo "Downloading: $tarball"; \
+        mkdir -p /opt/rocm && \
+        wget --progress=dot:giga \
+            "https://therock-nightly-tarball.s3.us-east-2.amazonaws.com/$tarball" \
+            -O "/tmp/$tarball" && \
+        tar -xf "/tmp/$tarball" -C /opt/rocm --strip-components=1 && \
+        rm "/tmp/$tarball"; \
+        version=$(echo "$tarball" | sed 's/^therock-dist-linux-//; s/\.tar\.gz$//' | rev | cut -d- -f1 | rev); \
+        echo "$version" > /opt/rocm/THEROCK_VERSION; \
+    elif [ "$THEROCK_RELEASE" = "latest" ]; then \
+        echo "Installing latest nightly for $THEROCK_ARTIFACT_GROUP"; \
+        /venv/bin/python build_tools/install_rocm_from_artifacts.py \
+            --latest-release \
+            --artifact-group "$THEROCK_ARTIFACT_GROUP" \
+            --output-dir /opt/rocm \
+            2>&1 | tee /tmp/install.log; \
+        # Fragile: depends on install_rocm_from_artifacts.py printing
+        # "Found latest release: <version>". Falls back if format changes. \
+        version=$(grep -oP 'Found latest release: \K\S+' /tmp/install.log) && \
+            echo "$version" > /opt/rocm/THEROCK_VERSION || \
+            echo "latest (version details unavailable)" > /opt/rocm/THEROCK_VERSION; \
+    else \
+        echo "Installing release $THEROCK_RELEASE for $THEROCK_ARTIFACT_GROUP"; \
+        /venv/bin/python build_tools/install_rocm_from_artifacts.py \
+            --release "$THEROCK_RELEASE" \
+            --artifact-group "$THEROCK_ARTIFACT_GROUP" \
+            --output-dir /opt/rocm \
+            2>&1 | tee /tmp/install.log; \
+        echo "$THEROCK_RELEASE" > /opt/rocm/THEROCK_VERSION; \
+    fi
+
+RUN rm -rf /TheRock /venv /tmp/install.log
 
 # ============================================================================
 # Build from source stage - clones and builds TheRock
 #
-# Example build command for default source build (default branch, gfx90a):
+# Example build command for default source build (default branch, gfx94X):
 # docker build -f Dockerfile.ubuntu24 --build-arg BUILD_TYPE=fullbuild -t hipdnn:fullbuild .
 #
 # Example build command for overriding ASIC and git hash:
@@ -102,7 +157,7 @@ RUN tar -xf $THEROCK_TARBALL -C /opt/rocm --strip-components=1
 # ============================================================================
 FROM base AS install_therock_fullbuild
 
-ARG THEROCK_ASIC=gfx90a
+ARG THEROCK_ASIC=gfx94X
 ARG THEROCK_GIT_HASH=default
 ARG THEROCK_BUILD_MODE=Release
 ARG THEROCK_BUILD_PRESET=linux-release-package
@@ -213,8 +268,19 @@ RUN apt-get update && apt-get install -y \
     clang-format-18 \
     clang-tidy-20 \
     clang-tools-20 \
+    doxygen \
     llvm-20 \
     && rm -rf /var/lib/apt/lists/*
+
+
+# Install DVC
+RUN mkdir -p /etc/apt/keyrings && \
+    wget -qO - https://dvc.org/deb/iterative.asc | gpg --dearmor -o /etc/apt/keyrings/packages.iterative.gpg && \
+    echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/packages.iterative.gpg] https://dvc.org/deb/ stable main" | tee /etc/apt/sources.list.d/dvc.list && \
+    chmod 644 /etc/apt/keyrings/packages.iterative.gpg /etc/apt/sources.list.d/dvc.list && \
+    apt-get update && apt-get install -y dvc && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
 
 # Install flatc version 25.9.23
 RUN wget -q https://github.com/google/flatbuffers/releases/download/v25.9.23/Linux.flatc.binary.g++-13.zip -O /tmp/flatc.zip \

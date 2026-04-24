@@ -1,5 +1,41 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
-// SPDX-License-Identifier:  MIT
+// SPDX-License-Identifier: MIT
+
+/**
+ * @file hipdnn_backend.h
+ * @brief hipDNN Backend C API
+ *
+ * This file defines the public C API for hipDNN backend operations.
+ * The backend provides handle management, descriptor operations, and
+ * execution of computational graphs.
+ *
+ * @section backend_usage Basic Usage
+ *
+ * 1. Create a handle:
+ *    @code{.c}
+ *    hipdnnHandle_t handle;
+ *    hipdnnCreate(&handle);
+ *    @endcode
+ *
+ * 2. Create and configure descriptors:
+ *    @code{.c}
+ *    hipdnnBackendDescriptor_t graphDesc;
+ *    hipdnnBackendCreateAndDeserializeGraph_ext(&graphDesc, serializedGraph, size);
+ *    @endcode
+ *
+ * 3. Execute operations:
+ *    @code{.c}
+ *    hipdnnBackendExecute(handle, executionPlan, variantPack);
+ *    @endcode
+ *
+ * 4. Clean up:
+ *    @code{.c}
+ *    hipdnnBackendDestroyDescriptor(graphDesc);
+ *    hipdnnDestroy(handle);
+ *    @endcode
+ *
+ * @see hipdnn_frontend.hpp for the C++ frontend API
+ */
 
 #pragma once
 
@@ -15,6 +51,10 @@
 #include "HipdnnBackendHeuristicType.h"
 #include "HipdnnBackendLimits.h"
 #include "HipdnnBackendPluginLoadingMode.h"
+#include "HipdnnBackendPluginUnloadingMode.h"
+#include "HipdnnConvolutionMode.h"
+#include "HipdnnDataType.h"
+#include "HipdnnReduceTensorOp.h"
 #include "HipdnnStatus.h"
 
 // NOLINTBEGIN
@@ -291,16 +331,103 @@ HIPDNN_BACKEND_EXPORT void hipdnnPeekLastErrorString_ext(char* message, size_t m
  * @param [in]  serializedGraph   Pointer to the serialized graph data in a byte array.
  * @param [in]  graphByteSize     Size of the serialized graph in bytes.
  *
- * @retval HIPDNN_STATUS_SUCCESS           The graph was successfully deserialized and stored in the descriptor.
- * @retval HIPDNN_STATUS_BAD_PARAM         Invalid or inconsistent parameter values were encountered, such as:
- *                                         - descriptor is null.
- *                                         - serializedGraph is null.
- *                                         - graphByteSize is zero.
- * @retval HIPDNN_STATUS_ALLOC_FAILED      Memory allocation for the descriptor or graph failed.
- * @retval HIPDNN_STATUS_INTERNAL_ERROR    An internal error occurred during deserialization.
+ * @retval HIPDNN_STATUS_SUCCESS                The graph was successfully deserialized and stored in the descriptor.
+ * @retval HIPDNN_STATUS_BAD_PARAM_NULL_POINTER  descriptor or serializedGraph is null.
+ * @retval HIPDNN_STATUS_BAD_PARAM               graphByteSize is zero.
+ * @retval HIPDNN_STATUS_ALLOC_FAILED            Memory allocation for the descriptor or graph failed.
+ * @retval HIPDNN_STATUS_INTERNAL_ERROR          An internal error occurred during deserialization.
  */
 HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendCreateAndDeserializeGraph_ext(
     hipdnnBackendDescriptor_t* descriptor, const uint8_t* serializedGraph, size_t graphByteSize);
+
+/*!
+ * @brief Retrieves the binary-serialized graph from an operation graph descriptor.
+ *
+ * Uses the standard two-call pattern: call first with @p serializedGraph set to @c nullptr to query
+ * the required buffer size, then call again with a caller-allocated buffer to receive the data.
+ * The descriptor must be of type HIPDNN_BACKEND_OPERATIONGRAPH_DESCRIPTOR. Finalization is not
+ * required — if operations are set but the graph is not finalized, serialization builds from
+ * operations directly. An empty operations list produces a valid (but empty) serialized graph.
+ *
+ * @param [in]  descriptor        An operation graph descriptor.
+ * @param [in]  requestedByteSize Size of the caller-allocated buffer in bytes.
+ *                                Ignored when @p serializedGraph is @c nullptr.
+ * @param [out] graphByteSize     Pointer to receive the size of the serialized graph in bytes.
+ *                                Always written on success.
+ * @param [out] serializedGraph   Caller-allocated buffer to receive the serialized graph data,
+ *                                or @c nullptr to query the required size only.
+ *
+ * @retval HIPDNN_STATUS_SUCCESS              The serialized graph was successfully retrieved,
+ *                                            or the size query completed successfully.
+ * @retval HIPDNN_STATUS_BAD_PARAM_NULL_POINTER  descriptor or graphByteSize is null.
+ * @retval HIPDNN_STATUS_BAD_PARAM            The descriptor is not an operation graph descriptor.
+ * @retval HIPDNN_STATUS_BAD_PARAM_SIZE_INSUFFICIENT  The requestedByteSize is smaller than the
+ *                                                     serialized graph size.
+ * @retval HIPDNN_STATUS_INTERNAL_ERROR       An internal error occurred during serialization.
+ */
+HIPDNN_BACKEND_EXPORT hipdnnStatus_t
+    hipdnnBackendGetSerializedBinaryGraph_ext(hipdnnBackendDescriptor_t descriptor,
+                                              size_t requestedByteSize,
+                                              size_t* graphByteSize,
+                                              uint8_t* serializedGraph);
+
+/*!
+ * @brief Retrieves the JSON-serialized graph from an operation graph descriptor.
+ *
+ * Uses the standard two-call pattern: call first with @p serializedJsonGraph set to @c nullptr to
+ * query the required buffer size, then call again with a caller-allocated buffer to receive the
+ * data. The descriptor must be of type HIPDNN_BACKEND_OPERATIONGRAPH_DESCRIPTOR. An empty
+ * operations list produces a valid (but empty) serialized JSON graph.
+ *
+ * @param [in]  descriptor          An operation graph descriptor.
+ * @param [in]  requestedByteSize   Size of the caller-allocated buffer in bytes.
+ *                                  Ignored when @p serializedJsonGraph is @c nullptr.
+ * @param [out] graphByteSize       Pointer to receive the size of the JSON graph in bytes.
+ *                                  The reported size includes the null terminator.
+ *                                  Always written on success.
+ * @param [out] serializedJsonGraph Caller-allocated buffer to receive the JSON graph data,
+ *                                  or @c nullptr to query the required size only.
+ *
+ * @retval HIPDNN_STATUS_SUCCESS                   The JSON graph was successfully retrieved,
+ *                                                 or the size query completed successfully.
+ * @retval HIPDNN_STATUS_BAD_PARAM_NULL_POINTER    descriptor or graphByteSize is null.
+ * @retval HIPDNN_STATUS_BAD_PARAM                 The descriptor is not an operation graph
+ *                                                 descriptor.
+ * @retval HIPDNN_STATUS_BAD_PARAM_SIZE_INSUFFICIENT  The requestedByteSize is smaller than the
+ *                                                     JSON graph size.
+ * @retval HIPDNN_STATUS_INTERNAL_ERROR            An internal error occurred during serialization.
+ */
+HIPDNN_BACKEND_EXPORT hipdnnStatus_t
+    hipdnnBackendGetSerializedJsonGraph_ext(hipdnnBackendDescriptor_t descriptor,
+                                            size_t requestedByteSize,
+                                            size_t* graphByteSize,
+                                            char* serializedJsonGraph);
+
+/*!
+ * @brief Creates and deserializes a graph from a JSON string into a backend descriptor.
+ *
+ * This function creates a backend descriptor and deserializes a graph from a JSON string
+ * into the descriptor. The JSON is internally converted to binary and processed using the
+ * standard deserialization path.
+ *
+ * @param [out] descriptor    Pointer to a backend descriptor where the deserialized graph will
+ *                            be stored.
+ * @param [in]  jsonGraph     Pointer to the JSON graph data as a character array. Does not need
+ *                            to be null-terminated; the jsonByteSize parameter controls the
+ *                            parsing length.
+ * @param [in]  jsonByteSize  Size of the JSON graph in bytes.
+ *                            May include or exclude the null terminator; the parser
+ *                            handles both cases.
+ *
+ * @retval HIPDNN_STATUS_SUCCESS                The graph was successfully deserialized and stored in
+ *                                              the descriptor.
+ * @retval HIPDNN_STATUS_BAD_PARAM_NULL_POINTER  descriptor or jsonGraph is null.
+ * @retval HIPDNN_STATUS_BAD_PARAM               jsonByteSize is zero.
+ * @retval HIPDNN_STATUS_ALLOC_FAILED            Memory allocation for the descriptor or graph failed.
+ * @retval HIPDNN_STATUS_INTERNAL_ERROR          An internal error occurred during deserialization.
+ */
+HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendCreateAndDeserializeJsonGraph_ext(
+    hipdnnBackendDescriptor_t* descriptor, const char* jsonGraph, size_t jsonByteSize);
 
 /*!
  * @brief Callback function for logging messages.
@@ -337,6 +464,25 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnSetEnginePluginPaths_ext(
     size_t numPaths, const char* const* pluginPaths, hipdnnPluginLoadingMode_ext_t loadingMode);
 
 /**
+ * @brief Sets the plugin unloading mode for hipDNN.
+ *
+ * This function controls when plugins are unloaded from memory. By default, lazy unloading (HIPDNN_PLUGIN_UNLOAD_LAZY)
+ * is used, which keeps plugins loaded until the application exits or until
+ * hipdnnSetEnginePluginPaths_ext is called. This avoids expensive plugin reloading when
+ * handles are frequently created and destroyed.
+ *
+ * This function can be called at any time. When switching from lazy to eager mode (HIPDNN_PLUGIN_UNLOAD_EAGER) while
+ * no handles exist, plugins will be unloaded immediately.
+ *
+ * @param[in] unloadingMode  Specifies when plugins should be unloaded from memory.
+ *
+ * @retval HIPDNN_STATUS_SUCCESS    The operation was successful.
+ * @retval HIPDNN_STATUS_BAD_PARAM  An invalid unloading mode was specified.
+ */
+HIPDNN_BACKEND_EXPORT hipdnnStatus_t
+    hipdnnSetPluginUnloadMode_ext(hipdnnPluginUnloadingMode_ext_t unloadingMode);
+
+/**
  * @brief Gets file paths of loaded engine plugins for a given handle.
  *
  * This function must be called twice:
@@ -362,6 +508,153 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetLoadedEnginePluginPaths_ext(hipdnn
                                                                           size_t* numPluginPaths,
                                                                           char** pluginPaths,
                                                                           size_t* maxStringLen);
+
+/**
+ * @brief Callback mode (sync vs async).
+ */
+typedef enum
+{
+    HIPDNN_LOG_CALLBACK_SYNC = 0, ///< Callback invoked on logging thread (synchronous)
+    HIPDNN_LOG_CALLBACK_ASYNC = 1 ///< Callback invoked on worker thread (asynchronous)
+} hipdnnLogCallbackMode_t;
+
+/**
+ * @brief Set or update a user log callback.
+ *
+ * This API allows registering multiple user callbacks with individual log levels and sync/async modes.
+ * Each callback is uniquely identified by the composite key (callback, userHandle).
+ *
+ * @note When a synchronous callback is registered, the synchronous callbacks will delay hipDNN
+ *       until the callback returns, regardless of any async log callbacks also being registered.
+ *       Synchronous callbacks are recommended only for debugging or testing purposes due to
+ *       their blocking nature. Use async callbacks for production workloads.
+ *
+ * Behavior:
+ * - If (callback, userHandle) already registered: UPDATES settings (level and/or sync/async mode)
+ * - If (callback, userHandle) new: ADDS new registration
+ * - If minLevel == SEV_OFF: REMOVES registration
+ * - userHandle must be non-null
+ *
+ * Callback Removal (minLevel == SEV_OFF):
+ * - No further logs will be received on the callback.
+ * - Any pending async logs for this callback will be abandoned
+ * - After this function returns, user can safely destroy data referenced by userHandle
+ *
+ * @param[in] callback   The callback function to invoke
+ * @param[in] minLevel   Minimum severity level (SEV_OFF removes the callback). Note that
+ *                        the logs produced on this callback will be limited by the global log
+ *                        level set either by the HIPDNN_LOG_LEVEL environment variable or
+ *                        the setGlobalLogLevel() API function.
+ * @param[in] mode       Sync or async invocation mode
+ * @param[in] userHandle Non-null user data (also serves as unique callback ID)
+ *
+ * @retval HIPDNN_STATUS_SUCCESS           The callback was set/updated/removed successfully
+ * @retval HIPDNN_STATUS_BAD_PARAM         callback is NULL, userHandle is NULL, invalid mode,
+ *                                         or attempting to remove non-existent callback
+ * @retval HIPDNN_STATUS_NOT_INITIALIZED   Logging system not initialized
+ */
+HIPDNN_BACKEND_EXPORT hipdnnStatus_t
+    hipdnnSetUserLogCallback_ext(hipdnnUserLogCallback_t callback,
+                                 hipdnnSeverity_t minLevel,
+                                 hipdnnLogCallbackMode_t mode,
+                                 hipdnnUserLogCallbackHandle_t userHandle);
+
+/**
+ * @brief Set the global log level for the backend.
+ *
+ * This controls which log messages are output to console/file AND to the global backend log output callback.
+ * Valid levels: HIPDNN_SEV_INFO, HIPDNN_SEV_WARN, HIPDNN_SEV_ERROR, HIPDNN_SEV_FATAL, HIPDNN_SEV_OFF.
+ *
+ * @param[in] level   The severity level to set
+ *
+ * @retval HIPDNN_STATUS_SUCCESS      The log level was set successfully
+ * @retval HIPDNN_STATUS_BAD_PARAM    Invalid log level
+ */
+HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendSetGlobalLogLevel_ext(hipdnnSeverity_t level);
+
+/**
+ * @brief Get the global log level for the backend.
+ *
+ * @param[out] level   Pointer to store the current log level
+ *
+ * @retval HIPDNN_STATUS_SUCCESS      The log level was retrieved successfully
+ * @retval HIPDNN_STATUS_BAD_PARAM    level pointer is NULL
+ */
+HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendGetGlobalLogLevel_ext(hipdnnSeverity_t* level);
+
+/**
+ * @brief Gets the number of loaded engines for a given handle.
+ *
+ * @param[in]  handle       A valid hipDNN handle.
+ * @param[out] numEngines   Pointer where the engine count will be stored.
+ *
+ * @retval HIPDNN_STATUS_SUCCESS           Success.
+ * @retval HIPDNN_STATUS_BAD_PARAM         Invalid handle or null pointer.
+ * @retval HIPDNN_STATUS_INTERNAL_ERROR    Internal error.
+ */
+HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetEngineCount_ext(hipdnnHandle_t handle,
+                                                              size_t* numEngines);
+
+/**
+ * @brief Gets information about a loaded engine by index.
+ *
+ * Retrieves the id, name, version, type, and plugin name of the engine at the given index.
+ * Valid indices are 0 to numEngines-1 as returned by hipdnnGetEngineCount_ext.
+ * Engines are sorted alphabetically by name.
+ *
+ * This function uses a two-call pattern for string fields:
+ * 1. First call: Pass all string buffers as `nullptr` to query required sizes.
+ *    - Sets `nameLen`, `versionLen`, `typeLen`, and `pluginNameLen` to the required buffer sizes
+ *      (including null terminator). Note: if any string buffer is null, all sizes are updated.
+ *
+ * 2. Second call: Pass allocated buffers with sizes set from the first call.
+ *
+ * @param[in]     handle           A valid hipDNN handle.
+ * @param[in]     engineIndex      Zero-based index of the engine to query.
+ * @param[out]    engineId         Pointer where the engine ID will be stored, or `nullptr` to skip.
+ * @param[out]    engineName       Buffer for the engine name, or `nullptr` to query size.
+ * @param[in,out] engineNameLen    Pointer to buffer size; updated with required size.
+ * @param[out]    pluginName       Buffer for the plugin name, or `nullptr` to query size.
+ * @param[in,out] pluginNameLen    Pointer to buffer size; updated with required size.
+ * @param[out]    version          Buffer for the engine version, or `nullptr` to query size.
+ * @param[in,out] versionLen       Pointer to buffer size; updated with required size.
+ * @param[out]    type             Buffer for the engine type string, or `nullptr` to query size.
+ * @param[in,out] typeLen          Pointer to buffer size; updated with required size.
+ *
+ * @retval HIPDNN_STATUS_SUCCESS           Success.
+ * @retval HIPDNN_STATUS_BAD_PARAM         Invalid handle, null pointers, or out-of-range index.
+ * @retval HIPDNN_STATUS_INTERNAL_ERROR    Internal error.
+ */
+HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetEngineInfo_ext(hipdnnHandle_t handle,
+                                                             size_t engineIndex,
+                                                             int64_t* engineId,
+                                                             char* engineName,
+                                                             size_t* engineNameLen,
+                                                             char* pluginName,
+                                                             size_t* pluginNameLen,
+                                                             char* version,
+                                                             size_t* versionLen,
+                                                             char* type,
+                                                             size_t* typeLen);
+
+/**
+ * @brief Returns hipdnn backend version string. Returns an error if nullptr is passed
+ *
+ * @deprecated Use hipdnnVersionString_ext instead
+ *
+ * @param[out] version pointer to where version string will be written
+ *
+ * @retval HIPDNN_STATUS_SUCCESS                  Success
+ * @retval HIPDNN_STATUS_BAD_PARAM_NULL_POINTER   If version parameter is nullptr
+ */
+HIPDNN_BACKEND_DEPRECATED_EXPORT hipdnnStatus_t hipdnnGetVersion_ext(const char** version);
+
+/**
+ * @brief Returns hipdnn backend version string
+ *
+ * @return A string in the format "MAJOR.MINOR.PATCH.TWEAK". The returned value has a static lifetime
+ */
+HIPDNN_BACKEND_EXPORT const char* hipdnnVersionString_ext();
 
 #ifdef __cplusplus
 }

@@ -8,6 +8,7 @@ using namespace hipdnn_backend::plugin;
 
 hipdnnHandle::hipdnnHandle()
     : _pluginResourceManager(EnginePluginResourceManager::create())
+    , _heuristicPluginResourceManager(HeuristicPluginResourceManager::create())
 {
 }
 
@@ -25,6 +26,22 @@ hipStream_t hipdnnHandle::getStream() const
 std::shared_ptr<EnginePluginResourceManager> hipdnnHandle::getPluginResourceManager() const
 {
     return _pluginResourceManager;
+}
+
+std::shared_ptr<HeuristicPluginResourceManager>
+    hipdnnHandle::getHeuristicPluginResourceManager() const
+{
+    return _heuristicPluginResourceManager;
+}
+
+size_t hipdnnHandle::getEngineCount() const
+{
+    return _pluginResourceManager->getEngineCount();
+}
+
+std::vector<EngineInfo> hipdnnHandle::getEngineInfos() const
+{
+    return _pluginResourceManager->getEngineInfos();
 }
 
 std::string hipdnnHandle::toString() const

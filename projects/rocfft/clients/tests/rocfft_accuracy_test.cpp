@@ -129,6 +129,10 @@ TEST_P(accuracy_test, vs_fftw)
             last_cpu_fft_data = last_cpu_fft_cache();
             GTEST_SKIP() << e.what();
         }
+        catch(const DEVICEBUF_MEM_USAGE& e)
+        {
+            GTEST_SKIP() << e.what();
+        }
         catch(const ROCFFT_SKIP& e)
         {
             GTEST_SKIP() << e.what();

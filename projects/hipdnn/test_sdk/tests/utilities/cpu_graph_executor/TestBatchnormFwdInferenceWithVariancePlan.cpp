@@ -5,21 +5,23 @@
 
 #include "BatchnormGraphUtils.hpp"
 #include "BatchnormTensorBundles.hpp"
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
 #include <hipdnn_data_sdk/utilities/Constants.hpp>
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceBatchnorm.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/Seeds.hpp>
 #include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
-#include <hipdnn_test_sdk/utilities/cpu_graph_executor/BatchnormFwdInferenceWithVariancePlan.hpp>
-#include <hipdnn_test_sdk/utilities/cpu_graph_executor/BatchnormFwdInferenceWithVarianceSignatureKey.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/BatchnormFwdInferenceWithVariancePlan.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/BatchnormFwdInferenceWithVarianceSignatureKey.hpp>
 
 using namespace hipdnn_test_sdk::utilities;
-using namespace hipdnn_data_sdk::data_objects;
+using namespace hipdnn_test_sdk::detail;
+using namespace hipdnn_flatbuffers_sdk::data_objects;
 using namespace hipdnn_data_sdk::utilities;
-using namespace hipdnn_data_sdk::flatbuffer_utilities;
+using namespace hipdnn_flatbuffers_sdk::flatbuffer_utilities;
 using namespace ::testing;
 using namespace hipdnn_sdk_test_utils;
 
@@ -30,23 +32,24 @@ class TestBatchnormFwdWithVariancePlan : public ::testing::Test
 TEST_F(TestBatchnormFwdWithVariancePlan, ExecutePlan)
 {
     auto tolerance = batchnorm::getToleranceInference<float>();
-    std::vector<int64_t> dims = {6, 3, 32, 32};
-    unsigned int seed = getGlobalTestSeed();
+    const std::vector<int64_t> dims = {6, 3, 32, 32};
+    const unsigned int seed = getGlobalTestSeed();
     auto graph = buildBatchnormFwdInferenceWithVarianceGraph(DataType::FLOAT,
                                                              DataType::FLOAT,
                                                              DataType::FLOAT,
                                                              DataType::FLOAT,
                                                              dims,
                                                              TensorLayout::NHWC);
-    auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
-    GraphWrapper graphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+    const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());
     const INodeWrapper& node = graphWrapper.getNodeWrapper(0);
     BatchnormFwdWithVarianceTensorBundle planTensorBundle(node, graphWrapper.getTensorMap(), seed);
     BatchnormFwdWithVarianceTensorBundle directTensorBundle(
         node, graphWrapper.getTensorMap(), seed);
 
     const auto& attributes = node.attributesAs<
-        hipdnn_data_sdk::data_objects::BatchnormInferenceAttributesVarianceExt>();
+        hipdnn_flatbuffers_sdk::data_objects::BatchnormInferenceAttributesVarianceExt>();
     const auto& tensorMap = graphWrapper.getTensorMap();
     BatchnormFwdInferenceWithVarianceParams params(*tensorMap.at(attributes.x_tensor_uid()),
                                                    *tensorMap.at(attributes.y_tensor_uid()),
@@ -56,7 +59,7 @@ TEST_F(TestBatchnormFwdWithVariancePlan, ExecutePlan)
                                                    *tensorMap.at(attributes.variance_tensor_uid()),
                                                    *tensorMap.at(attributes.epsilon_tensor_uid()));
 
-    std::unordered_map<int64_t, void*> variantPack = planTensorBundle.toHostVariantPack();
+    const std::unordered_map<int64_t, void*> variantPack = planTensorBundle.toHostVariantPack();
 
     auto shallowXTensor = createShallowTensor<float>(
         params.xTensor, directTensorBundle.tensors[attributes.x_tensor_uid()]->rawHostData());
@@ -73,8 +76,8 @@ TEST_F(TestBatchnormFwdWithVariancePlan, ExecutePlan)
     auto shallowYTensor = createShallowTensor<float>(
         params.yTensor, directTensorBundle.tensors[attributes.y_tensor_uid()]->rawHostData());
 
-    double epsilon
-        = hipdnn_data_sdk::utilities::extractDoubleFromTensorValue(params.epsilonTensor, "Epsilon");
+    const double epsilon = hipdnn_flatbuffers_sdk::utilities::extractDoubleFromTensorValue(
+        params.epsilonTensor, "Epsilon");
 
     CpuFpReferenceBatchnorm::fwdInferenceWithVariance(*shallowXTensor,
                                                       *shallowScaleTensor,
@@ -88,7 +91,7 @@ TEST_F(TestBatchnormFwdWithVariancePlan, ExecutePlan)
         std::move(params));
     fwdPlan.execute(variantPack);
 
-    CpuFpReferenceValidation<float> cpuRefOutputValidation(tolerance, tolerance);
+    const CpuFpReferenceValidation<float> cpuRefOutputValidation(tolerance, tolerance);
     EXPECT_TRUE(cpuRefOutputValidation.allClose(
         *directTensorBundle.tensors[attributes.y_tensor_uid()].get(),
         *planTensorBundle.tensors[attributes.y_tensor_uid()].get()));
@@ -96,26 +99,27 @@ TEST_F(TestBatchnormFwdWithVariancePlan, ExecutePlan)
 
 TEST(TestBatchnormFwdWithVariancePlanBuilder, PlanConstruction)
 {
-    std::vector<int64_t> dims = {1, 1, 1, 1};
+    const std::vector<int64_t> dims = {1, 1, 1, 1};
     auto graph = buildBatchnormFwdInferenceWithVarianceGraph(DataType::FLOAT,
                                                              DataType::FLOAT,
                                                              DataType::FLOAT,
                                                              DataType::FLOAT,
                                                              dims,
                                                              TensorLayout::NHWC);
-    auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
-    GraphWrapper graphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+    const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());
 
-    BatchnormFwdInferenceWithVariancePlanBuilder<DataType::FLOAT,
-                                                 DataType::FLOAT,
-                                                 DataType::FLOAT,
-                                                 DataType::FLOAT,
-                                                 DataType::FLOAT>
+    const BatchnormFwdInferenceWithVariancePlanBuilder<DataType::FLOAT,
+                                                       DataType::FLOAT,
+                                                       DataType::FLOAT,
+                                                       DataType::FLOAT,
+                                                       DataType::FLOAT>
         patient;
 
     auto builtPlan = patient.buildNodePlan(graphWrapper, graphWrapper.getNode(0));
 
-    bool result
+    const bool result
         = dynamic_cast<BatchnormFwdInferenceWithVariancePlan<float, float, float, float, float>*>(
               builtPlan.get())
           != nullptr;
@@ -124,31 +128,32 @@ TEST(TestBatchnormFwdWithVariancePlanBuilder, PlanConstruction)
 
 TEST(TestBatchnormFwdWithVariancePlanBuilder, IsApplicable)
 {
-    std::vector<int64_t> dims = {1, 1, 1, 1};
+    const std::vector<int64_t> dims = {1, 1, 1, 1};
     auto graph = buildBatchnormFwdInferenceWithVarianceGraph(DataType::FLOAT,
                                                              DataType::FLOAT,
                                                              DataType::FLOAT,
                                                              DataType::FLOAT,
                                                              dims,
                                                              TensorLayout::NHWC);
-    auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
-    GraphWrapper graphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+    const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());
 
-    BatchnormFwdInferenceWithVariancePlanBuilder<DataType::FLOAT,
-                                                 DataType::FLOAT,
-                                                 DataType::FLOAT,
-                                                 DataType::FLOAT,
-                                                 DataType::FLOAT>
+    const BatchnormFwdInferenceWithVariancePlanBuilder<DataType::FLOAT,
+                                                       DataType::FLOAT,
+                                                       DataType::FLOAT,
+                                                       DataType::FLOAT,
+                                                       DataType::FLOAT>
         floatPlanBuilder;
 
     EXPECT_TRUE(
         floatPlanBuilder.isApplicable(graphWrapper.getNode(0), graphWrapper.getTensorMap()));
 
-    BatchnormFwdInferenceWithVariancePlanBuilder<DataType::FLOAT,
-                                                 DataType::HALF,
-                                                 DataType::FLOAT,
-                                                 DataType::FLOAT,
-                                                 DataType::FLOAT>
+    const BatchnormFwdInferenceWithVariancePlanBuilder<DataType::FLOAT,
+                                                       DataType::HALF,
+                                                       DataType::FLOAT,
+                                                       DataType::FLOAT,
+                                                       DataType::FLOAT>
         badTypesPlanBuilder;
     EXPECT_FALSE(
         badTypesPlanBuilder.isApplicable(graphWrapper.getNode(0), graphWrapper.getTensorMap()));
@@ -168,30 +173,30 @@ TEST(TestBatchnormFwdInferenceWithVariancePlan, PlanBuilderMapContainsExpectedKe
     EXPECT_GT(planBuilders.size(), 0);
 
     // FP32 case
-    BatchnormFwdInferenceWithVarianceSignatureKey fp32Key(
+    const BatchnormFwdInferenceWithVarianceSignatureKey fp32Key(
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT);
     EXPECT_TRUE(planBuilders.find(fp32Key) != planBuilders.end());
 
     // FP16 case with FP32 params
-    BatchnormFwdInferenceWithVarianceSignatureKey fp16Key(
+    const BatchnormFwdInferenceWithVarianceSignatureKey fp16Key(
         DataType::HALF, DataType::FLOAT, DataType::FLOAT, DataType::HALF, DataType::FLOAT);
     EXPECT_TRUE(planBuilders.find(fp16Key) != planBuilders.end());
 
     // BFP16 case with FP32 params
-    BatchnormFwdInferenceWithVarianceSignatureKey bfp16Key(
+    const BatchnormFwdInferenceWithVarianceSignatureKey bfp16Key(
         DataType::BFLOAT16, DataType::FLOAT, DataType::FLOAT, DataType::BFLOAT16, DataType::FLOAT);
     EXPECT_TRUE(planBuilders.find(bfp16Key) != planBuilders.end());
 }
 
 TEST(TestBatchnormFwdInferenceWithVariancePlan, SignatureKeyHashingWorks)
 {
-    BatchnormFwdInferenceWithVarianceSignatureKey key1(
+    const BatchnormFwdInferenceWithVarianceSignatureKey key1(
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT);
 
-    BatchnormFwdInferenceWithVarianceSignatureKey key2(
+    const BatchnormFwdInferenceWithVarianceSignatureKey key2(
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT);
 
-    BatchnormFwdInferenceWithVarianceSignatureKey key3(
+    const BatchnormFwdInferenceWithVarianceSignatureKey key3(
         DataType::HALF, DataType::FLOAT, DataType::FLOAT, DataType::HALF, DataType::FLOAT);
 
     // Same keys should be equal
@@ -206,6 +211,6 @@ TEST(TestBatchnormFwdInferenceWithVariancePlan, SignatureKeyHashingWorks)
 
 TEST(TestBatchnormFwdInferenceWithVariancePlan, NodeTypeIsCorrect)
 {
-    BatchnormFwdInferenceWithVarianceSignatureKey key;
+    BatchnormFwdInferenceWithVarianceSignatureKey key; // NOLINT(misc-const-correctness)
     EXPECT_EQ(key.nodeType, NodeAttributes::BatchnormInferenceAttributesVarianceExt);
 }

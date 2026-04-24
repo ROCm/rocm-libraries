@@ -15,6 +15,9 @@
 #include "amd_transpose_load.hpp"
 #include "generic_memory_space_atomic.hpp"
 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
+
 namespace ck {
 
 // T may be scalar or vector
@@ -46,7 +49,8 @@ struct DynamicBuffer
             return 1;
     }();
 
-    __host__ __device__ constexpr DynamicBuffer(T* p_data, ElementSpaceSize element_space_size)
+    __host__ __device__ constexpr DynamicBuffer([[clang::lifetimebound]] T* p_data,
+                                                ElementSpaceSize element_space_size)
         : p_data_{p_data}, element_space_size_{element_space_size}
     {
     }
@@ -260,7 +264,10 @@ struct DynamicBuffer
                 x, p_data_, i, is_valid_element, element_space_size_ / PackedSize);
         }
         else if constexpr(GetAddressSpace() == AddressSpaceEnum::Lds &&
-                          is_same<typename scalar_type<remove_cvref_t<T>>::type, int8_t>::value &&
+                          is_same_v<typename scalar_type<remove_cvref_t<T>>::type, int8_t> &&
+                          !is_same_v<remove_cvref_t<T>,
+                                     pk_i4_t> && // TODO: This needs to be fixed for pk_i4_t which
+                                                 // cannot be handled below, but is stored as int8_t
                           workaround_int8_ds_write_issue)
         {
             if(is_valid_element)
@@ -358,14 +365,8 @@ struct DynamicBuffer
         {
             if(is_valid_element)
             {
-#if 0
-                X tmp = x;
-
-                __builtin_memcpy(&(p_data_[i]), &tmp, sizeof(X));
-#else
                 // if(i >= 2169041600)
                 *c_style_pointer_cast<X*>(&p_data_[i]) = x;
-#endif
             }
         }
     }
@@ -501,3 +502,5 @@ make_dynamic_buffer(T* p, ElementSpaceSize element_space_size, X invalid_element
 }
 
 } // namespace ck
+
+#pragma clang diagnostic pop

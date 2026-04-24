@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2025-2026 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <rocRoller/KernelGraph/Transforms/SwizzleScale.hpp>
 #include <rocRoller/KernelGraph/Transforms/SwizzleScale_detail.hpp>
@@ -302,7 +279,7 @@ namespace rocRoller
 
                 int nMac0, nMac1;
                 std::tie(nMac0, iMac0, nMac1, iMac1)
-                    = addLoadMacroTileCT(graph, connections, macTileTag, sDims);
+                    = addLoadMacroTileCT(graph, connections, macTileTag, sDims, false);
 
                 auto existingMacTileNum0 = graph.mapper.get<MacroTileNumber>(tag, 0);
                 AssertFatal(existingMacTileNum0 != -1,
@@ -367,20 +344,29 @@ namespace rocRoller
             connections.push_back(DC<WaveTileNumber>(nWave0, 0));
             connections.push_back(DC<WaveTileNumber>(nWave1, 1));
 
-            uint const nLaneInSIMD   = 16;
-            uint const nSIMDsPerWave = wavefrontSize / nLaneInSIMD;
-            uint const nSIMDIndex    = macTile.subTileSizes.at(0) / nLaneInSIMD;
+            uint const nLanesInSIMD      = 16;
+            uint const numElements       = waveTile.elements();
+            uint const activeLanesInWave = static_cast<uint>(wavefrontSize);
+            uint const numVgpr           = numElements / activeLanesInWave;
+
+            uint const nLanesInSIMDIndex = macTile.subTileSizes.at(2) / numVgpr; // k dimension
+            uint const nLanesInSIMDBlock = nLanesInSIMD / nLanesInSIMDIndex;
+            auto       laneInSIMD
+                = graph.coordinates.addElement(Lane(literal(nLanesInSIMD), literal(1u)));
+            auto laneInSIMDIndex
+                = graph.coordinates.addElement(Lane(literal(nLanesInSIMDIndex), literal(1u)));
+            auto laneInSIMDBlock
+                = graph.coordinates.addElement(Lane(literal(nLanesInSIMDBlock), literal(1u)));
+
+            uint const nSIMDsPerWave = wavefrontSize / nLanesInSIMD;
+            uint const nSIMDIndex    = macTile.subTileSizes.at(0) / nLanesInSIMD;
             auto       SIMDIndex
                 = graph.coordinates.addElement(Adhoc("SIMDIndex", literal(nSIMDIndex), nullptr));
-            auto laneInSIMD = graph.coordinates.addElement(Lane(literal(nLaneInSIMD), nullptr));
 
             uint const nSIMDBlock = nSIMDsPerWave / nSIMDIndex;
             auto       SIMDBlock
                 = graph.coordinates.addElement(Adhoc("SIMDBlock", literal(nSIMDBlock), nullptr));
 
-            uint const numElements       = waveTile.elements();
-            uint const activeLanesInWave = static_cast<uint>(wavefrontSize);
-            uint const numVgpr           = numElements / activeLanesInWave;
             uint const nVgprIndex
                 = std::min(nSIMDIndex, static_cast<uint>(macTile.miTileSizes.at(2)));
             // Minimal swizzle tile size 64x4 or 32x8 = 256
@@ -411,6 +397,8 @@ namespace rocRoller
             auto lane = graph.coordinates.addElement(Lane(activeLanesInWaveLiteral, literal(1u)));
             graph.coordinates.addElement(Flatten(), {wave, lane}, {workitem});
             graph.coordinates.addElement(Flatten(), {SIMDBlock, SIMDIndex, laneInSIMD}, {lane});
+            graph.coordinates.addElement(
+                Flatten(), {laneInSIMDBlock, laneInSIMDIndex}, {laneInSIMD});
 
             std::map<int, int> unrolls;
 
@@ -420,9 +408,21 @@ namespace rocRoller
 
             if(arg == NaryArgument::LHS_SCALE)
             {
-                graph.coordinates.addElement(Tile(), {iWave0}, {SIMDIndex, laneInSIMD});
-                graph.coordinates.addElement(
-                    Tile(), {iWave1}, {block, SIMDBlock, vgprBlock, vgprIndex});
+
+                if(context->kernelOptions()->scaleSkipPermlane
+                   == ScaleSkipPermlaneMode::PreSwizzleScaleGFX950)
+                {
+                    graph.coordinates.addElement(
+                        Tile(), {iWave0}, {SIMDBlock, SIMDIndex, laneInSIMDBlock});
+                    graph.coordinates.addElement(
+                        Tile(), {iWave1}, {laneInSIMDIndex, vgprBlock, vgprIndex});
+                }
+                else
+                {
+                    graph.coordinates.addElement(Tile(), {iWave0}, {SIMDIndex, laneInSIMD});
+                    graph.coordinates.addElement(
+                        Tile(), {iWave1}, {block, SIMDBlock, vgprBlock, vgprIndex});
+                }
 
                 if(existingUnroll0 != -1)
                 {
@@ -455,9 +455,20 @@ namespace rocRoller
 
             if(arg == NaryArgument::RHS_SCALE)
             {
-                graph.coordinates.addElement(Tile(), {iWave1}, {SIMDIndex, laneInSIMD});
-                graph.coordinates.addElement(
-                    Tile(), {iWave0}, {block, SIMDBlock, vgprBlock, vgprIndex});
+                if(context->kernelOptions()->scaleSkipPermlane
+                   == ScaleSkipPermlaneMode::PreSwizzleScaleGFX950)
+                {
+                    graph.coordinates.addElement(
+                        Tile(), {iWave1}, {SIMDBlock, SIMDIndex, laneInSIMDBlock});
+                    graph.coordinates.addElement(
+                        Tile(), {iWave0}, {laneInSIMDIndex, vgprBlock, vgprIndex});
+                }
+                else
+                {
+                    graph.coordinates.addElement(Tile(), {iWave1}, {SIMDIndex, laneInSIMD});
+                    graph.coordinates.addElement(
+                        Tile(), {iWave0}, {block, SIMDBlock, vgprBlock, vgprIndex});
+                }
 
                 if(existingUnroll1 != -1)
                 {
@@ -508,8 +519,8 @@ namespace rocRoller
             auto waveSwizzleN = macTile.swizzleTileSizes.at(1);
             auto waveSwizzleK = macTile.swizzleTileSizes.at(2);
 
-            AssertFatal(waveSwizzleM == waveSwizzleN,
-                        "waveSwizzleM is not equal to waveSwizzleN",
+            AssertFatal(waveSwizzleM == waveSwizzleN && waveSwizzleM > 0,
+                        "waveSwizzleM is not equal to waveSwizzleN or is zero",
                         ShowValue(waveSwizzleM),
                         ShowValue(waveSwizzleN));
 
@@ -529,7 +540,7 @@ namespace rocRoller
 
             auto const waveSwizzleM = macTile.swizzleTileSizes.at(0);
             auto const waveSwizzleN = macTile.swizzleTileSizes.at(1);
-            AssertFatal(waveSwizzleM == waveSwizzleN,
+            AssertFatal(waveSwizzleM == waveSwizzleN && waveSwizzleM > 0,
                         "waveSwizzleM is not equal to waveSwizzleN",
                         ShowValue(waveSwizzleM),
                         ShowValue(waveSwizzleN));
@@ -839,15 +850,16 @@ namespace rocRoller
                 graph.coordinates.addElement(Index(0), {exchangeTileTag}, {tileTag});
                 graph.mapper.connect<MacroTile>(exchange, exchangeTileTag);
 
-                auto destMacTileTag = context->kernelOptions()->scaleSkipPermlane
-                                          ? exchangeTileTag
-                                          : graph.coordinates.addElement(MacroTile());
+                auto destMacTileTag
+                    = context->kernelOptions()->scaleSkipPermlane != ScaleSkipPermlaneMode::None
+                          ? exchangeTileTag
+                          : graph.coordinates.addElement(MacroTile());
 
                 graph.mapper.connect(exchange, destMacTileTag, NaryArgument::DEST);
 
                 auto createNode
                     = [&context](int idx) -> rocRoller::KernelGraph::CoordinateGraph::Edge {
-                    if(context->kernelOptions()->scaleSkipPermlane)
+                    if(context->kernelOptions()->scaleSkipPermlane != ScaleSkipPermlaneMode::None)
                         return Segment(idx);
 
                     return Index(idx);
@@ -889,6 +901,7 @@ namespace rocRoller
                         graph.mapper.connect<MacroTile>(exchange, exchangeTileTag);
 
                         destMacTileTag = context->kernelOptions()->scaleSkipPermlane
+                                                 != ScaleSkipPermlaneMode::None
                                              ? exchangeTileTag
                                              : graph.coordinates.addElement(MacroTile());
                         graph.mapper.connect(exchange, destMacTileTag, NaryArgument::DEST);

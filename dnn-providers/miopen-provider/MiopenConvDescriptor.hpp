@@ -3,9 +3,9 @@
 
 #pragma once
 
-#include <hipdnn_data_sdk/data_objects/convolution_bwd_attributes_generated.h>
-#include <hipdnn_data_sdk/data_objects/convolution_fwd_attributes_generated.h>
-#include <hipdnn_data_sdk/data_objects/convolution_wrw_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/convolution_bwd_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/convolution_fwd_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/convolution_wrw_attributes_generated.h>
 #include <miopen/miopen.h>
 
 namespace miopen_plugin
@@ -15,15 +15,21 @@ class MiopenConvDescriptor
 {
 public:
     MiopenConvDescriptor() = default;
-    MiopenConvDescriptor(size_t spatialDimCount,
-                         const hipdnn_data_sdk::data_objects::ConvolutionFwdAttributes& attributes,
-                         int groupCount);
-    MiopenConvDescriptor(size_t spatialDimCount,
-                         const hipdnn_data_sdk::data_objects::ConvolutionBwdAttributes& attributes,
-                         int groupCount);
-    MiopenConvDescriptor(size_t spatialDimCount,
-                         const hipdnn_data_sdk::data_objects::ConvolutionWrwAttributes& attributes,
-                         int groupCount);
+    MiopenConvDescriptor(
+        size_t spatialDimCount,
+        const hipdnn_flatbuffers_sdk::data_objects::ConvolutionFwdAttributes& attributes,
+        int groupCount,
+        bool deterministicEnabled = false);
+    MiopenConvDescriptor(
+        size_t spatialDimCount,
+        const hipdnn_flatbuffers_sdk::data_objects::ConvolutionBwdAttributes& attributes,
+        int groupCount,
+        bool deterministicEnabled = false);
+    MiopenConvDescriptor(
+        size_t spatialDimCount,
+        const hipdnn_flatbuffers_sdk::data_objects::ConvolutionWrwAttributes& attributes,
+        int groupCount,
+        bool deterministicEnabled = false);
 
     MiopenConvDescriptor(const MiopenConvDescriptor&) = delete;
     MiopenConvDescriptor& operator=(const MiopenConvDescriptor&) = delete;
@@ -43,8 +49,9 @@ private:
                                   const flatbuffers::Vector<int64_t>* attrPostPadding,
                                   const flatbuffers::Vector<int64_t>* attrStride,
                                   const flatbuffers::Vector<int64_t>* attrDilation,
-                                  hipdnn_data_sdk::data_objects::ConvMode convMode,
-                                  int groupCount);
+                                  hipdnn_flatbuffers_sdk::data_objects::ConvMode convMode,
+                                  int groupCount,
+                                  bool deterministicEnabled);
 };
 
 }
