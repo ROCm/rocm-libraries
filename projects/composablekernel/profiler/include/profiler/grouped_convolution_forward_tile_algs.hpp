@@ -61,8 +61,9 @@ void run_cpu_validation(const ckt::Args<SIGNATURE>& args,
 ///
 /// @see run_grouped_conv_forward_tile_algs()
 template <auto SIGNATURE>
-std::tuple<bool, float, float, float, std::string>
+std::tuple<bool, float, float, float, std::string, int>
 run_grouped_conv_forward_tile_algs(const ckt::Args<SIGNATURE>& args,
+                                   const index_t instance_index,
                                    const ckt::Inputs<SIGNATURE>& inputs,
                                    const ckt::Outputs<SIGNATURE>& outputs,
                                    const ck_tile::stream_config& s_conf,
@@ -72,10 +73,11 @@ run_grouped_conv_forward_tile_algs(const ckt::Args<SIGNATURE>& args,
 
     // Run first instance as dummy to get proper time from the first instance
     bool dummy_run_executed = false;
-    float best_avg_time     = std::numeric_limits<float>::max();
-    float best_tflops       = std::numeric_limits<float>::min();
-    float best_gbs          = std::numeric_limits<float>::min();
+    float best_avg_time             = std::numeric_limits<float>::max();
+    float best_tflops               = std::numeric_limits<float>::min();
+    float best_gbs                  = std::numeric_limits<float>::min();
     std::string best_op_name, op_name;
+    ck::index_t best_instance_index = -1;
     bool is_supported;
     float avg_time;
     bool valid = true;
@@ -95,7 +97,17 @@ run_grouped_conv_forward_tile_algs(const ckt::Args<SIGNATURE>& args,
         auto ref_conv                    = ReferenceInstance{};
         [[maybe_unused]] auto ref_result = ckt::run(ref_conv, args, inputs, reference.get());
     }
-    auto run_alg = [&](auto&& run_alg_func) {
+    index_t num_kernel = 0;
+    auto run_alg    = [&](auto&& run_alg_func) {
+        num_kernel++;
+        // Skip if a specific instance was requested and this isn't it
+        const bool running_specific_instance = (instance_index != -1);
+        const bool current_is_target         = (num_kernel - 1 == instance_index);
+        if(running_specific_instance && !current_is_target)
+        {
+            return;
+        }
+
         std::tie(is_supported, avg_time, op_name) = run_alg_func(args, inputs, outputs, s_conf);
         if(is_supported)
         {
@@ -123,20 +135,13 @@ run_grouped_conv_forward_tile_algs(const ckt::Args<SIGNATURE>& args,
                                                          ck::profiler::get_atol<DataType>());
                                                  });
 
-
-                for(const auto& error : report.get_errors())
-                {
-                    valid = false;
-                    std::cout << "Number of incorrect values: " << error.wrong_elements
-                              << " Is all zero:" << error.is_all_zero()
-                              << " max err: " << error.max_error << std::endl;
-                    run_cpu_validation<SIGNATURE, ConvBuffer::Output>(
-                        args, outputs, reference.get());
-                }
-            }
-
-            if (valid)
+            const bool instance_valid = report.get_errors().empty();
+            if(instance_valid)
             {
+                if(avg_time < best_avg_time)
+                {
+                    best_instance_index = num_kernel - 1;
+                }
                 best_avg_time = std::min(best_avg_time, avg_time);
                 best_op_name  = best_avg_time < avg_time ? best_op_name : op_name;
                 const auto conv_param  = args.to_ck_tile_conv_param();
@@ -146,13 +151,26 @@ run_grouped_conv_forward_tile_algs(const ckt::Args<SIGNATURE>& args,
                 best_tflops = std::max(best_tflops, tflops);
                 best_gbs    = std::max(best_gbs, gb_per_sec);
                 std::cout << "[Valid] Perf: " << std::setw(10) << avg_time << " ms, " << tflops
-                        << " TFlops, " << gb_per_sec << " GB/s, " << op_name << std::endl;
+                        << " TFlops, " << gb_per_sec << " GB/s, " << op_name
+                        << " (instance " << num_kernel - 1 << ")" << std::endl;
             }
-
+            else
+            {
+                std::cout << "[Error] " << op_name << std::endl;
+                for(const auto& error : report.get_errors())
+                {
+                    valid = false;
+                    std::cout << "\tNumber of incorrect values: " << error.wrong_elements
+                              << " Is all zero:" << error.is_all_zero()
+                              << " max err: " << error.max_error << std::endl;
+                    // Check with cpu verification to get a values
+                    run_cpu_validation<SIGNATURE>(args, outputs, reference.get());
+                }
+            }
         }
         else
         {
-            std::cout << " " << op_name << std::endl;
+            std::cout << "[Not supported] " << op_name << std::endl;
         }
     };
 
@@ -196,9 +214,9 @@ run_grouped_conv_forward_tile_algs(const ckt::Args<SIGNATURE>& args,
     else
     {
         std::cout << "Signature not supported" << std::endl;
-        return std::make_tuple(false, best_avg_time, best_tflops, best_gbs, best_op_name);
+        return std::make_tuple(false, best_avg_time, best_tflops, best_gbs, best_op_name, best_instance_index);
     }
-    return std::make_tuple(valid, best_avg_time, best_tflops, best_gbs, best_op_name);
+    return std::make_tuple(valid, best_avg_time, best_tflops, best_gbs, best_op_name, best_instance_index);
 }
 
 } // namespace ck_tile::builder::profiling
