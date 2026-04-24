@@ -308,6 +308,44 @@ globalParameters["DisableAsmComments"] = False  # Set to True to disable assembl
 
 globalParameters["RocProfCounter"] = None # No rocprof counter
 
+# StinkyTofu optimization level
+# None: Disable StinkyTofu feature (set null in yaml file)
+# 0: No optimization
+# 1: Basic optimization
+# 2: Full optimization
+globalParameters["StinkyTofuOptLevel"] = 0
+
+# StinkyTofu debug level (applies per-PM: outer PM + each ScopeAdaptor inner PM)
+# 0: Silent (default)
+# 1: Pass names + AnalysisManager cache activity to stdout
+# 2: Initial IR + IR after each pass to per-PM files:
+#    kernel-OuterPM-{before,after}_passes.txt     (outer PM)
+#    <groupName>-{before,after}_passes.txt        (single-region adapter)
+#    <group1>+<group2>-{before,after}_passes.txt  (multi-region adapter)
+#    wholeKernel-{before,after}_passes.txt        (whole-kernel adapter)
+globalParameters["StinkyTofuDebugLevel"] = 0
+
+# StinkyTofu selective pass IR dump (applies per-PM, same file naming as DebugLevel 2)
+# Comma-separated pass names to print IR before/after (case-sensitive)
+# e.g. "CFG Builder" or "RedundantMovEliminationPass, StinkyDAGSchedulerPass"
+# Unmatched pass names are silently ignored
+globalParameters["StinkyTofuPrintBeforePass"] = ""
+globalParameters["StinkyTofuPrintAfterPass"] = ""
+
+# StinkyTofu internal pass debug logging & instruction-order snapshot (global — applies to all PMs)
+# Comma-separated pass names (case-sensitive) to:
+#   1. Enable PASS_DEBUG output for the listed passes
+#   2. Record before/after instruction order JSON when StinkyTofuPassOrderSnapshotJson is set
+# e.g. "StinkyDAGSchedulerPass"
+# Unmatched pass names are silently ignored
+globalParameters["StinkyTofuDebugPass"] = ""
+
+# Before/after instruction-order JSON for tools/stinkytofu-analysis (empty = disabled).
+# When set, PassManager records snapshots for passes listed in StinkyTofuDebugPass
+# (defaults to StinkyDAGSchedulerPass only when StinkyTofuDebugPass is empty).
+# Note: multiple kernels may overwrite the same file unless you use a unique path per build.
+globalParameters["StinkyTofuPassOrderSnapshotJson"] = ""
+
 # Save a copy - since pytest doesn't re-run this initialization code and YAML files can override global settings - odd things can happen
 # we should do this here...
 defaultGlobalParameters = deepcopy(globalParameters)
@@ -464,6 +502,7 @@ defaultBenchmarkCommonParameters = [
     {"SpaceFillingAlgo": [[]]},
     {"SFCWGM": [[[1,1],[1,1]]]},
     {"AdaptiveGemm": [0]},
+    {"AdaptiveGemmGSUA": [0]},
     {"ExtraMiLatencyLeft": [-1]},
     {"ExtraLatencyForLR": [0]},
     {"TailloopInNll": [False]},

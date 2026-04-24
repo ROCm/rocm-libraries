@@ -1,4 +1,4 @@
-// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
 #include "HipCompiledProgram.hpp"
@@ -9,6 +9,7 @@
 #include "kernel_sources.hpp"
 
 #include <hip/hiprtc.h>
+#include <hipdnn_data_sdk/utilities/ScopedResource.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
 #include <vector>
@@ -21,8 +22,9 @@ HipCompiledProgram::HipCompiledProgram(const std::string& kernelFileName,
 {
     HIPDNN_PLUGIN_LOG_INFO("Compiling kernel: " << kernelFileName);
 
-    // Load embedded kernel source and include headers
-    auto kernelSrc = getKernelSrc(kernelFileName.c_str());
+    // Load embedded kernel source and include headers (convert to std::string
+    // to guarantee null-termination required by hiprtcCreateProgram)
+    std::string kernelSrc(getKernelSrc(kernelFileName.c_str()));
 
     std::vector<std::string_view> includeTexts;
     std::vector<const char*> includeNames;
@@ -45,6 +47,9 @@ HipCompiledProgram::HipCompiledProgram(const std::string& kernelFileName,
                                      includeTextPtrs.data(),
                                      includeNames.data()));
 
+    const hipdnn_data_sdk::utilities::ScopedResource programGuard(
+        program, [](hiprtcProgram p) { hiprtcDestroyProgram(&p); });
+
     // Convert compiler options to C-strings
     std::vector<const char*> optionPtrs;
     optionPtrs.reserve(compilerOptions.size());
@@ -54,7 +59,7 @@ HipCompiledProgram::HipCompiledProgram(const std::string& kernelFileName,
     }
 
     // Compile the program
-    hiprtcResult compileResult
+    const hiprtcResult compileResult
         = hiprtcCompileProgram(program, static_cast<int>(optionPtrs.size()), optionPtrs.data());
 
     if(compileResult != HIPRTC_SUCCESS)
@@ -64,8 +69,6 @@ HipCompiledProgram::HipCompiledProgram(const std::string& kernelFileName,
         hiprtcGetProgramLogSize(program, &logSize);
         std::string compileLog(logSize, '\0');
         hiprtcGetProgramLog(program, compileLog.data());
-
-        hiprtcDestroyProgram(&program);
 
         throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
                                                        "HIPRTC compilation failed for "
@@ -77,7 +80,6 @@ HipCompiledProgram::HipCompiledProgram(const std::string& kernelFileName,
     HIPRTC_CHECK(hiprtcGetCodeSize(program, &codeSize));
     std::vector<char> code(codeSize);
     HIPRTC_CHECK(hiprtcGetCode(program, code.data()));
-    HIPRTC_CHECK(hiprtcDestroyProgram(&program));
 
     // Load the compiled binary as a HIP module
     HIP_CHECK(hipModuleLoadData(&_module, code.data()));

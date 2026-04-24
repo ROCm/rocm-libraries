@@ -3,7 +3,7 @@
 
 #include "MiopenTensor.hpp"
 #include <gtest/gtest.h>
-#include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 
@@ -13,8 +13,8 @@ TEST(TestMiopenTensor, CanCreateAndDestroy)
 {
     // Use a real tensor attributes from a valid batchnorm graph
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                              builder.GetSize());
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                                     builder.GetSize());
 
     // Get the first tensor attributes from the tensor map
     const auto& tensorMap = graph.getTensorMap();
@@ -33,8 +33,8 @@ TEST(TestMiopenTensor, CanCreateAndDestroy)
 TEST(TestMiopenTensor, TensorDescriptorIsValid)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                              builder.GetSize());
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                                     builder.GetSize());
 
     const auto& tensorMap = graph.getTensorMap();
     ASSERT_FALSE(tensorMap.empty());
@@ -52,7 +52,8 @@ TEST(TestMiopenTensor, ConstructorWithDimsAndStridesSucceeds)
     const std::vector<int64_t> strides = {static_cast<int64_t>(16) * 224, 224, 1};
 
     EXPECT_NO_THROW({
-        MiopenTensor tensor(UID, hipdnn_data_sdk::data_objects::DataType::FLOAT, dims, strides);
+        MiopenTensor tensor(
+            UID, hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT, dims, strides);
         EXPECT_NE(tensor.tensorDescriptor(), nullptr);
     });
 }
@@ -63,8 +64,9 @@ TEST(TestMiopenTensor, ConstructorThrowsOnDimsStridesSizeMismatch)
     const std::vector<int64_t> dims = {2, 16, 224};
     const std::vector<int64_t> strides = {224, 1}; // Wrong size
 
-    EXPECT_THROW(MiopenTensor(UID, hipdnn_data_sdk::data_objects::DataType::FLOAT, dims, strides),
-                 hipdnn_plugin_sdk::HipdnnPluginException);
+    EXPECT_THROW(
+        MiopenTensor(UID, hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT, dims, strides),
+        hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 TEST(TestMiopenTensor, ConstructorThrowsOnNegativeDimension)
@@ -73,8 +75,9 @@ TEST(TestMiopenTensor, ConstructorThrowsOnNegativeDimension)
     const std::vector<int64_t> dims = {2, -16, 224}; // Negative dimension
     const std::vector<int64_t> strides = {static_cast<int64_t>(16) * 224, 224, 1};
 
-    EXPECT_THROW(MiopenTensor(UID, hipdnn_data_sdk::data_objects::DataType::FLOAT, dims, strides),
-                 hipdnn_plugin_sdk::HipdnnPluginException);
+    EXPECT_THROW(
+        MiopenTensor(UID, hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT, dims, strides),
+        hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 TEST(TestMiopenTensor, ConstructorThrowsOnNegativeStride)
@@ -84,8 +87,9 @@ TEST(TestMiopenTensor, ConstructorThrowsOnNegativeStride)
     const std::vector<int64_t> strides
         = {static_cast<int64_t>(16) * 224, -224, 1}; // Negative stride
 
-    EXPECT_THROW(MiopenTensor(UID, hipdnn_data_sdk::data_objects::DataType::FLOAT, dims, strides),
-                 hipdnn_plugin_sdk::HipdnnPluginException);
+    EXPECT_THROW(
+        MiopenTensor(UID, hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT, dims, strides),
+        hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 TEST(TestMiopenTensor, ConstructorSetsCorrectUid)
@@ -95,7 +99,7 @@ TEST(TestMiopenTensor, ConstructorSetsCorrectUid)
     const std::vector<int64_t> strides = {16, 1};
 
     MiopenTensor tensor(
-        EXPECTED_UID, hipdnn_data_sdk::data_objects::DataType::FLOAT, dims, strides);
+        EXPECTED_UID, hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT, dims, strides);
 
     EXPECT_EQ(tensor.uid(), EXPECTED_UID);
 }

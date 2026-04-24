@@ -1,0 +1,38 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyDAGSchedulerPass --print-output
+#
+# DS reads + WMMAs with tensor_loads + distributeGlobalRead throttle.
+#
+# globalReadPerWMMA = 1 means the scheduler issues at most one tensor_load
+# before the throttle suppresses globalReadQueue while otherQueue has work.
+# The v_add_f32 lands in otherQueue, so after the first tensor_load the
+# throttle fires and v_add is interleaved before the second tensor_load.
+#
+# tensor_loads use tokens 1/2 (independent of ds_loads on token 0).
+# Extends dag_dsread_wmma_no_consecutive with tensor_load_to_lds.
+#
+# Throttle interleaves v_add between the two tensor_loads
+# CHECK: tensor_load_to_lds
+# CHECK: v_add_f32
+# CHECK: tensor_load_to_lds
+# ds_loads scheduled before WMMAs due to latency
+# CHECK: ds_load_b128
+# WMMAs come last
+# CHECK: v_wmma_f32_16x16x16_bf16
+# CHECK: v_wmma_f32_16x16x16_bf16
+# No tensor_load after WMMAs
+# CHECK-NOT: tensor_load_to_lds
+
+st.func @test() {
+^entry:
+  "st.tensor_load_to_lds"(s[0:3], s[4:11]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [1] } }
+  "st.tensor_load_to_lds"(s[12:15], s[16:23]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [2] } }
+  v33 = "st.v_add_f32"(v34, v35) { issueCycles = 1, latencyCycles = 5 }
+  v[8:11] = "st.ds_load_b128"(v32) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+  v[12:15] = "st.ds_load_b128"(v32) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 32, gds = false }, mod.memtoken = { tokens = [0] } }
+  v[16:19] = "st.ds_load_b128"(v32) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 64, gds = false }, mod.memtoken = { tokens = [0] } }
+  v[20:23] = "st.ds_load_b128"(v32) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 96, gds = false }, mod.memtoken = { tokens = [0] } }
+  v[24:27] = "st.ds_load_b128"(v32) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 128, gds = false }, mod.memtoken = { tokens = [0] } }
+  v[28:31] = "st.ds_load_b128"(v32) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 160, gds = false }, mod.memtoken = { tokens = [0] } }
+  v[0:7] = "st.v_wmma_f32_16x16x16_bf16"(v[8:15], v[24:31], v[0:7]) { issueCycles = 4, latencyCycles = 8, mod.mfma = { inputPermute = "", scaleStr = "", negStr = "", reuseA = false, reuseB = false, neg_lo = false, neg_hi = false } }
+  v[0:7] = "st.v_wmma_f32_16x16x16_bf16"(v[16:23], v[24:31], v[0:7]) { issueCycles = 4, latencyCycles = 8, mod.mfma = { inputPermute = "", scaleStr = "", negStr = "", reuseA = false, reuseB = false, neg_lo = false, neg_hi = false } }
+}

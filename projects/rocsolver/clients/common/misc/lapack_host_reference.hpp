@@ -236,6 +236,15 @@ void cpu_sytrs(rocblas_fill uplo,
                rocblas_int ldb);
 
 template <typename T>
+void cpu_getrs_npvt(rocblas_operation trans,
+                    rocblas_int n,
+                    rocblas_int nrhs,
+                    T* A,
+                    rocblas_int lda,
+                    T* B,
+                    rocblas_int ldb);
+
+template <typename T>
 void cpu_gesv(rocblas_int n,
               rocblas_int nrhs,
               T* A,

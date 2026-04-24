@@ -8,8 +8,8 @@
 #include <unordered_map>
 #include <vector>
 
-#include <hipdnn_data_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
-#include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/interfaces/IEngine.hpp>
@@ -40,8 +40,8 @@ class EngineManager
 {
 public:
     using Engine = IEngine<THandle, TSettings, TContext>;
-    using IGraph = hipdnn_data_sdk::flatbuffer_utilities::IGraph;
-    using IEngineConfig = hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig;
+    using IGraph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph;
+    using IEngineConfig = hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig;
 
     EngineManager() = default;
     virtual ~EngineManager() = default;

@@ -3,12 +3,18 @@ import re
 from rocm_docs import ROCmDocs
 
 with open('../CMakeLists.txt', encoding='utf-8') as f:
-    match = re.search(r'.*\bset \( VERSION_STRING\s+\"?([0-9.]+)[^0-9.]+',
-                      f.read())
-    if not match:
+    content = f.read()
+    major = re.search(r'set\s*\(\s*ROCFFT_VERSION_MAJOR\s+"(\d+)"\s*\)', content)
+    minor = re.search(r'set\s*\(\s*ROCFFT_VERSION_MINOR\s+"(\d+)"\s*\)', content)
+    patch = re.search(r'set\s*\(\s*ROCFFT_VERSION_PATCH\s+"(\d+)"\s*\)', content)
+    
+    if not (major and minor and patch):
         raise ValueError("VERSION not found!")
-    version_number = match[1]
+    
+    version_number = f"{major[1]}.{minor[1]}.{patch[1]}"
+
 left_nav_title = f"rocFFT {version_number} Documentation"
+
 
 # for PDF output on Read the Docs
 project = "rocFFT Documentation"

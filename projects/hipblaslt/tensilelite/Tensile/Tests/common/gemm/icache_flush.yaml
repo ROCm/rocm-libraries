@@ -8,6 +8,8 @@ GlobalParameters:
   CSVExportWinner: 1
   CSVMergeSameProblemID: 1
   Device: 0
+  # SyncsPerBenchmark must be >= 1: flush_icache kernel is only launched
+  # inside the benchmark sync loop (client/main.cpp), not during warmups.
   SyncsPerBenchmark: 1
   NumBenchmarks : 1
   NumWarmups: 1000
