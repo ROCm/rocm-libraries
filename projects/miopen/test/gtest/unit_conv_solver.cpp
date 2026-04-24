@@ -348,8 +348,8 @@ miopen::solver::ConvSolution FindSolution(const miopen::solver::conv::ConvSolver
 }
 
 template <typename T>
-double GetThreshold(miopenConvAlgorithm_t algo,
-                    miopen::conv::Direction direction,
+double GetThreshold(miopenConvAlgorithm_t /*algo*/,
+                    miopen::conv::Direction /*direction*/,
                     const Tolerances& tolerances,
                     const bool use_tf32_compute)
 {

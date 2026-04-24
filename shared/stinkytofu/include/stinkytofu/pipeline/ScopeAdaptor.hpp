@@ -119,6 +119,8 @@ inline void configureDebugOutput(PassManager& pm, const StinkyAsmModule::ModuleO
                     [&](const std::string& n) { debugConfig->addOnlyPrintAfter(n); });
     }
 
+    if (opts.DebugLevel == 1) pm.getAnalysisManager().setDebugLogging(true);
+
     pm.addInstrumentation(std::make_shared<DebugPrintInstrumentation>(std::move(debugConfig)));
 
     if (!opts.DebugPass.empty()) {
@@ -262,14 +264,16 @@ class ScopeAdaptor : public Pass {
           innerPM(std::move(pm)),
           displayName("ScopeAdaptor(" + makeDebugLabel(this->groupNames) + ")") {}
 
-    void run(Function& /*outerFunc*/, PassContext& outerCtx) override {
+    PreservedAnalyses run(Function& /*outerFunc*/, PassContext& outerCtx,
+                          AnalysisManager& /*AM*/) override {
         // Propagate config from outer PassContext to inner PM
         innerPM.setGemmTileConfig(outerCtx.getGemmTileConfig());
+        innerPM.setAsmCapsConfig(outerCtx.getAsmCapsConfig());
         // innerPM.setPassFeatureConfig(outerCtx.getPassFeatureConfig());
 
         if (groupNames.empty()) {
             runWholeKernel();
-            return;
+            return PreservedAnalyses::none();
         }
 
         if (groupNames.size() == 1) {
@@ -277,6 +281,7 @@ class ScopeAdaptor : public Pass {
         } else {
             runMultiRegion();
         }
+        return PreservedAnalyses::none();
     }
 
    private:

@@ -33,7 +33,7 @@
 namespace stinkytofu {
 char StinkyIRVerifierPass::ID = 0;
 
-void StinkyIRVerifierPass::run(Function& func, PassContext&) {
+PreservedAnalyses StinkyIRVerifierPass::run(Function& func, PassContext&, AnalysisManager& /*AM*/) {
     std::string error = validateStinkyIR(func, config_);
     if (!error.empty()) {
         if (config_.abortOnError) {
@@ -42,6 +42,7 @@ void StinkyIRVerifierPass::run(Function& func, PassContext&) {
         }
         std::cerr << "[StinkyIRVerifier] " << error;
     }
+    return PreservedAnalyses::all();
 }
 
 // ===========================================================================
@@ -91,7 +92,6 @@ static std::string checkRegisterWidths(const StinkyInstruction* inst,
         if (field.fieldSizeBits == 0) continue;
 
         unsigned expectedWidth = field.fieldSizeBits / 32;
-        if (expectedWidth <= 1) continue;
 
         if (operandIndex >= regs.size() && !canUseLessOperand(inst)) {
             errors << "Instruction '" << hwDesc->mnemonic << "' missing operand "
@@ -104,20 +104,27 @@ static std::string checkRegisterWidths(const StinkyInstruction* inst,
         }
 
         const StinkyRegister& reg = regs[operandIndex];
+        // Non-register operands (e.g. the "off" keyword used as MUBUF vaddr,
+        // or integer/double literals) carry no register-level constraints.
         if (reg.dataType != StinkyRegister::Type::Register) continue;
 
-        // M64 operands are 64-bit lane masks that may be truncated to
-        // 32 bits in wave32 mode, so width 1 is valid when expected is 2.
-        bool m64Truncated = field.isM64 && expectedWidth == 2 && reg.reg.num == 1;
+        // Width check: only meaningful for operands wider than one DWORD.
+        if (expectedWidth > 1) {
+            // M64 operands are 64-bit lane masks that may be truncated to
+            // 32 bits in wave32 mode, so width 1 is valid when expected is 2.
+            bool m64Truncated = field.isM64 && expectedWidth == 2 && reg.reg.num == 1;
 
-        if (reg.reg.num != expectedWidth && !m64Truncated) {
-            errors << "Instruction '";
-            inst->dump(errors);
-            errors << "' operand " << (isDest ? "dest[" : "src[") << operandIndex << "] "
-                   << "has register width " << reg.reg.num << ", expected " << expectedWidth
-                   << "\n";
+            if (reg.reg.num != expectedWidth && !m64Truncated) {
+                errors << "Instruction '";
+                inst->dump(errors);
+                errors << "' operand " << (isDest ? "dest[" : "src[") << operandIndex << "] "
+                       << "has register width " << reg.reg.num << ", expected " << expectedWidth
+                       << "\n";
+            }
         }
 
+        // Type check: applies to all fields — a 32-bit VGPR field must still
+        // receive a VGPR, not a SGPR (and vice versa).
         RegType expectedType = fieldTypeToRegType(field.fieldType);
         if (expectedType != RegType::UNKNOWN && reg.reg.type != expectedType) {
             errors << "Instruction '";

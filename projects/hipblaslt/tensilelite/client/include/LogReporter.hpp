@@ -28,6 +28,7 @@
 
 #include "CSVStackFile.hpp"
 #include "ResultReporter.hpp"
+#include "TimingInstrumentation.hpp"
 
 #ifndef TENSILELITE_CLIENT_ENABLE_ROCPROFSDK
 #define TENSILELITE_CLIENT_ENABLE_ROCPROFSDK 0
@@ -396,6 +397,7 @@ namespace TensileLite
 
             virtual void postSolution() override
             {
+                ScopedTimer timer("post_solution_log");
                 std::unordered_map<std::string, std::string> curRow;
                 m_csvOutput.readCurrentRow(curRow);
                 bool  validation    = !(curRow[ResultKey::Validation] == "FAILED"

@@ -10031,6 +10031,8 @@ class KernelWriterAssembly(KernelWriter):
       comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)
       if "TensorLoadToLds" in self.states.setMemTokenInsts:
         comp.setMemToken(self.states.setMemTokenInsts["TensorLoadToLds"])
+      else:
+        assert False, "TensorLoadToLds A memToken not set"
       if self.states.inTailLoop and not kernel["1LDSBuffer"]:
         ldsAddrSgprName = comp.getLdsAddrSgprName("tdmAGroup0")
         clearMask = ~kernel["LdsOffsetA_Blk"] & 0xFFFFFFFF
@@ -10043,6 +10045,8 @@ class KernelWriterAssembly(KernelWriter):
       comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)
       if "TensorLoadToLds" in self.states.setMemTokenInsts:
         comp.setMemToken(self.states.setMemTokenInsts["TensorLoadToLds"])
+      else:
+        assert False, "TensorLoadToLds MXSA memToken not set"
       if kernel["ProblemType"]["MXBlockA"]:
         if self.states.inTailLoop and not kernel["1LDSBuffer"]:
           ldsAddrSgprName = comp.getLdsAddrSgprName("tdmMXSAGroup0")
@@ -10058,6 +10062,8 @@ class KernelWriterAssembly(KernelWriter):
         comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)
         if "TensorLoadToLds" in self.states.setMemTokenInsts:
           comp.setMemToken(self.states.setMemTokenInsts["TensorLoadToLds"])
+        else:
+          assert False, "TensorLoadToLds B memToken not set"
         if self.states.inTailLoop and not kernel["1LDSBuffer"]:
           ldsAddrSgprName = comp.getLdsAddrSgprName("tdmBGroup0")
           clearMask = ~kernel["LdsOffsetA_Blk"] & 0xFFFFFFFF
@@ -10072,6 +10078,8 @@ class KernelWriterAssembly(KernelWriter):
         comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)
         if "TensorLoadToLds" in self.states.setMemTokenInsts:
           comp.setMemToken(self.states.setMemTokenInsts["TensorLoadToLds"])
+        else:
+          assert False, "TensorLoadToLds MXSB memToken not set"
         if self.states.inTailLoop and not kernel["1LDSBuffer"]:
           ldsAddrSgprName = comp.getLdsAddrSgprName("tdmMXSBGroup0")
           clearMask = ~kernel["LdsOffsetA_Blk"] & 0xFFFFFFFF

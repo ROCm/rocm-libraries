@@ -540,8 +540,9 @@ private:
       scaleValue = scaleTensor->value_as_Float32Value()->value();
     }
 
-    // GQA: enable when Q has more heads than K/V.
-    bool enableGqa = q->getDim()[1] != k->getDim()[1];
+    // GQA: enable when Q has more heads than K or V.
+    bool enableGqa =
+        q->getDim()[1] != k->getDim()[1] || q->getDim()[1] != v->getDim()[1];
 
     // #TODO(iree/issues/21858) GQA with f32 triggers an IREE distribution
     // failure. SdpaNode does not check this, so we must reject here.
