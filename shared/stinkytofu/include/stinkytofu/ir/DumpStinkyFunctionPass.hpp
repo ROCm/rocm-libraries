@@ -62,7 +62,7 @@ class DumpStinkyFunctionPass : public Pass {
         return "DumpStinkyFunctionPass";
     }
 
-    void run(Function& func, PassContext& passCtx) override;
+    PreservedAnalyses run(Function& func, PassContext& passCtx, AnalysisManager& /*AM*/) override;
 
     const DumpStinkyFunctionPassConfig& getConfig() const {
         return config_;

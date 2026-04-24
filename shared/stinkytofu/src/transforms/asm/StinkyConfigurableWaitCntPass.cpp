@@ -12,6 +12,8 @@
 #include <map>
 #include <vector>
 
+#include "stinkytofu/analysis/AnalysisRegistration.hpp"
+#include "stinkytofu/analysis/BBIndexAnalysis.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/support/CFGTraversal.hpp"
@@ -1087,21 +1089,23 @@ class StinkyConfigurableWaitCntPass : public StinkyInstPass {
         return &StinkyConfigurableWaitCntPass::ID;
     }
 
-    void run(Function& func, PassContext& passCtx) override {
+    PreservedAnalyses run(Function& func, PassContext& passCtx, AnalysisManager& AM) override {
         GfxArchID arch =
             getGfxArchID(passCtx.getGemmTileConfig().arch[0], passCtx.getGemmTileConfig().arch[1],
                          passCtx.getGemmTileConfig().arch[2]);
+
+        const auto& rpo = AM.getResult<BBIndexAnalysis>(func).rpo;
 
         // Map to store wait states for each basic block
         std::map<BasicBlock*, BasicBlockWaitState> blockStates;
 
         // Detect if we have any loops (blocks with back-edges)
         bool hasLoops = false;
-        traverseCFGInRPO(func, [&](BasicBlock* bb) {
+        for (auto* bb : rpo) {
             if (hasLoopBackEdge(bb)) {
                 hasLoops = true;
             }
-        });
+        }
 
         // Iterative dataflow analysis for convergence (needed for loops)
         const int MAX_ITERATIONS = 10;
@@ -1113,8 +1117,8 @@ class StinkyConfigurableWaitCntPass : public StinkyInstPass {
             iteration++;
 
             // Process each BasicBlock in RPO
-            traverseCFGInRPO(func, [&](BasicBlock* bb) {
-                if (bb->empty()) return;
+            for (auto* bb : rpo) {
+                if (bb->empty()) continue;
 
                 // Compute entry state from predecessors
                 MemoryOperationState entryState;
@@ -1232,11 +1236,12 @@ class StinkyConfigurableWaitCntPass : public StinkyInstPass {
                     bbState.exitStates = newExitStates;
                     bbState.processed = true;
                 }
-            });
+            }
 
             // If no loops, one iteration is sufficient
             if (!hasLoops && iteration >= 1) break;
         }
+        return preserveCFGAnalyses();
     }
 
     // Allow configuration to be changed

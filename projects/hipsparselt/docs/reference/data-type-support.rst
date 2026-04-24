@@ -88,7 +88,7 @@ List of supported input and output types:
   *
     - float32
     - HIP_R_32F
-    - ❌
+    - ✅
     - ✅
   *
     - float64

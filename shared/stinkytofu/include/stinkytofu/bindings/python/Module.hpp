@@ -59,7 +59,8 @@
     X(PrintAfterPass, std::string)        \
     X(DebugPass, std::string)             \
     X(PassOrderSnapshotJson, std::string) \
-    X(EnableWaitCntInsertion, bool)
+    X(EnableWaitCntInsertion, bool)       \
+    X(HasVgprMSB16, bool)
 
 namespace stinkytofu {
 /**
@@ -97,7 +98,7 @@ class StinkyAsmModule {
      * @note This struct is used to store the information for the StinkyAsmModule
      */
     struct ModuleOptions {
-#define GEN_MEMBER_OPTION(name, type) type name;
+#define GEN_MEMBER_OPTION(name, type) type name{};
         MODULE_OPTIONS_LIST(GEN_MEMBER_OPTION)
 #undef GEN_MEMBER_OPTION
     };
