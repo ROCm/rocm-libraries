@@ -69,12 +69,6 @@ StinkyInstruction* AsmIRBuilder::createLabel(const std::string& label, uint16_t 
     return labelInst;
 }
 
-StinkyInstruction* AsmIRBuilder::createFence() {
-    static const HwInstDesc fenceMCID{
-        GFX::FENCE, GFX::FENCE, 0, 0, "FENCE", makeFlagSet({InstFlag::IF_HasSideEffect})};
-    return create(&fenceMCID);
-}
-
 StinkyInstruction* AsmIRBuilder::createPhi(RegType type, unsigned regIdx, IRBase* insertPt) {
     static const HwInstDesc phiMCID{GFX::PHI, GFX::PHI, 0,
                                     0,        "PHI",    makeFlagSet({InstFlag::IF_HasSideEffect})};
