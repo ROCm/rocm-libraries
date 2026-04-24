@@ -151,18 +151,14 @@ if(NOT "${HIP_PLATFORM}" STREQUAL "nvidia")
         set(LAPACK_SOURCE_DIR ${CMAKE_CURRENT_BINARY_DIR}/lapack-src)
         set(LAPACK_BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR}/lapack-bin)
 
-        # The Windows CI is building OpenBLAS with its Unix-style library naming (libopenblas.a)
-        # so we hardcode the name
-        set(OPENBLAS_LIBRARY_NAME "libopenblas.a")
-
-        # Detect if we're using a multi-config generator (Ninja Multi-Config or Visual Studio)
+        # Detect if we're using a multi-config generator (focus on Ninja Multi-Config and Visual Studio)
         get_property(IS_MULTI_CONFIG GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
 
         # Set BYPRODUCTS based on generator type
-        # Note: On Linux, OpenBLAS creates config-specific subdirectories for multi-config generators
-        # (e.g., lib/DEBUG/, lib/RELEASE/). On Windows, it appears to use lib/ directly.
-        if(IS_MULTI_CONFIG AND NOT WIN32)
-            # Multi-config on Linux/Unix: OpenBLAS creates uppercased config subdirectories
+        if(IS_MULTI_CONFIG)
+            # NOTE: OpenBLAS converts the usual config-specific subdirectories
+            # to upper-case (e.g., lib/DEBUG/ instead of lib/Debug) in its
+            # CMakeLists.txt file.
             if(NOT CMAKE_CONFIGURATION_TYPES)
                 set(CMAKE_CONFIGURATION_TYPES "Debug;Release;RelWithDebInfo;MinSizeRel")
             endif()
@@ -171,12 +167,11 @@ if(NOT "${HIP_PLATFORM}" STREQUAL "nvidia")
             foreach(config ${CMAKE_CONFIGURATION_TYPES})
                 string(TOUPPER ${config} config_upper)
                 list(APPEND LAPACK_BUILD_BYPRODUCTS
-                    ${LAPACK_BINARY_DIR}/lib/${config_upper}/${OPENBLAS_LIBRARY_NAME})
+                    ${LAPACK_BINARY_DIR}/lib/${config_upper}/${CMAKE_STATIC_LIBRARY_PREFIX}openblas${CMAKE_STATIC_LIBRARY_SUFFIX})
             endforeach()
         else()
-            # Single-config or Windows: library goes directly in lib/
             set(LAPACK_BUILD_BYPRODUCTS
-                ${LAPACK_BINARY_DIR}/lib/${OPENBLAS_LIBRARY_NAME})
+                ${LAPACK_BINARY_DIR}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}openblas${CMAKE_STATIC_LIBRARY_SUFFIX})
         endif()
 
         set(LAPACK_CMAKE_ARGS
@@ -214,19 +209,17 @@ if(NOT "${HIP_PLATFORM}" STREQUAL "nvidia")
         )
         add_library(lapack_libraries STATIC IMPORTED)
 
-        if(IS_MULTI_CONFIG AND NOT WIN32)
-            # Multi-config on Linux/Unix: set per-config locations
+        if(IS_MULTI_CONFIG)
             foreach(config ${CMAKE_CONFIGURATION_TYPES})
                 string(TOUPPER ${config} config_upper)
                 set_property(TARGET lapack_libraries PROPERTY
                     IMPORTED_LOCATION_${config_upper}
-                    ${LAPACK_BINARY_DIR}/lib/${config_upper}/${OPENBLAS_LIBRARY_NAME}
+                    ${LAPACK_BINARY_DIR}/lib/${config_upper}/${CMAKE_STATIC_LIBRARY_PREFIX}openblas${CMAKE_STATIC_LIBRARY_SUFFIX}
                 )
             endforeach()
         else()
-            # Single-config or Windows: single location
             set_target_properties(lapack_libraries PROPERTIES
-                IMPORTED_LOCATION ${LAPACK_BINARY_DIR}/lib/${OPENBLAS_LIBRARY_NAME}
+                IMPORTED_LOCATION ${LAPACK_BINARY_DIR}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}openblas${CMAKE_STATIC_LIBRARY_SUFFIX}
             )
         endif()
 
