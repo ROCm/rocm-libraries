@@ -468,16 +468,14 @@ void geev_initData(const hipsolverHandle_t   handle,
         {
             for(int j = 0; j < n; ++j)
             {
-                if(i == j + 1)
-                {
-                    hA[0][i + j * lda] = T(n - i);
-                    hA[0][j + i * lda] = T(i);
-                }
-                else
-                {
-                    hA[0][i + j * lda] = T(0);
-                }
+                hA[0][i + j * lda] = T(0);
             }
+        }
+
+        for(int i = 1; i < n; ++i)
+        {
+            hA[0][i + (i - 1) * lda] = T(n - i);
+            hA[0][(i - 1) + i * lda] = T(i);
         }
 
         /* // Temporary: Create a symmetric Clement matrix to simplify testing. */

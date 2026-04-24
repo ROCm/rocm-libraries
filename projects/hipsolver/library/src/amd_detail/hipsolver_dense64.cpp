@@ -193,7 +193,7 @@ catch(...)
 }
 
 /******************** GEEV ********************/
-#define MIN_CHUNK_SIZE 64
+static constexpr size_t MIN_CHUNK_SIZE = 64;
 
 hipsolverStatus_t hipsolverDnXgeev_bufferSize(hipsolverDnHandle_t handle,
                                               hipsolverDnParams_t params,
@@ -241,39 +241,44 @@ try
     *lworkOnDevice = 0;
     *lworkOnHost   = 0;
 
-    size_t size_type = 0;
+    size_t size_type  = 0;
+    size_t size_rtype = 0;
     size_t size_hA, size_hW, size_hVL, size_hVR, size_work, size_rwork;
     if(dataTypeA == HIP_R_32F && dataTypeW == HIP_R_32F && dataTypeVL == HIP_R_32F
        && dataTypeVR == HIP_R_32F && computeType == HIP_R_32F)
     {
         size_type  = sizeof(float);
+        size_rtype = sizeof(float);
         size_hW    = size_type * 2 * n;
-        size_work  = (n == 0 ? 1 : size_type * 4 * n);
         size_rwork = 0;
+        size_work  = (n == 0 ? 1 : size_type * 4 * n);
     }
     else if(dataTypeA == HIP_R_64F && dataTypeW == HIP_R_64F && dataTypeVL == HIP_R_64F
             && dataTypeVR == HIP_R_64F && computeType == HIP_R_64F)
     {
         size_type  = sizeof(double);
+        size_rtype = sizeof(double);
         size_hW    = size_type * 2 * n;
-        size_work  = (n == 0 ? 1 : size_type * 4 * n);
         size_rwork = 0;
+        size_work  = (n == 0 ? 1 : size_type * 4 * n);
     }
     else if(dataTypeA == HIP_C_32F && dataTypeW == HIP_C_32F && dataTypeVL == HIP_C_32F
             && dataTypeVR == HIP_C_32F && computeType == HIP_C_32F)
     {
         size_type  = sizeof(hipFloatComplex);
+        size_rtype = sizeof(float);
         size_hW    = size_type * n;
+        size_rwork = (n == 0 ? 1 : size_rtype * 2 * n);
         size_work  = (n == 0 ? 1 : size_type * 2 * n);
-        size_rwork = (n == 0 ? 1 : size_type * 2 * n);
     }
     else if(dataTypeA == HIP_C_64F && dataTypeW == HIP_C_64F && dataTypeVL == HIP_C_64F
             && dataTypeVR == HIP_C_64F && computeType == HIP_C_64F)
     {
         size_type  = sizeof(hipDoubleComplex);
+        size_rtype = sizeof(double);
         size_hW    = size_type * n;
+        size_rwork = (n == 0 ? 1 : size_rtype * 2 * n);
         size_work  = (n == 0 ? 1 : size_type * 2 * n);
-        size_rwork = (n == 0 ? 1 : size_type * 2 * n);
     }
     else
         return HIPSOLVER_STATUS_INVALID_ENUM;
@@ -356,35 +361,45 @@ try
         return HIPSOLVER_STATUS_INTERNAL_ERROR;
 
     // ----- GET HOST ARRAY SIZES -----
-    size_t size_type = 0;
+    size_t size_type  = 0;
+    size_t size_rtype = 0;
     size_t size_hA, size_hW, size_hVL, size_hVR, size_rwork;
+    size_t required_bytes_work;
     if(dataTypeA == HIP_R_32F && dataTypeW == HIP_R_32F && dataTypeVL == HIP_R_32F
        && dataTypeVR == HIP_R_32F && computeType == HIP_R_32F)
     {
-        size_type  = sizeof(float);
-        size_hW    = size_type * 2 * n;
-        size_rwork = 0;
+        size_type           = sizeof(float);
+        size_rtype          = sizeof(float);
+        size_hW             = size_type * 2 * n;
+        size_rwork          = 0;
+        required_bytes_work = (n == 0 ? 1 : size_type * 4 * n);
     }
     else if(dataTypeA == HIP_R_64F && dataTypeW == HIP_R_64F && dataTypeVL == HIP_R_64F
             && dataTypeVR == HIP_R_64F && computeType == HIP_R_64F)
     {
-        size_type  = sizeof(double);
-        size_hW    = size_type * 2 * n;
-        size_rwork = 0;
+        size_type           = sizeof(double);
+        size_rtype          = sizeof(double);
+        size_hW             = size_type * 2 * n;
+        size_rwork          = 0;
+        required_bytes_work = (n == 0 ? 1 : size_type * 4 * n);
     }
     else if(dataTypeA == HIP_C_32F && dataTypeW == HIP_C_32F && dataTypeVL == HIP_C_32F
             && dataTypeVR == HIP_C_32F && computeType == HIP_C_32F)
     {
-        size_type  = sizeof(hipFloatComplex);
-        size_hW    = size_type * n;
-        size_rwork = (n == 0 ? 1 : size_type * 2 * n);
+        size_type           = sizeof(hipFloatComplex);
+        size_rtype          = sizeof(float);
+        size_hW             = size_type * n;
+        size_rwork          = (n == 0 ? 1 : size_rtype * 2 * n);
+        required_bytes_work = (n == 0 ? 1 : size_type * 2 * n);
     }
     else if(dataTypeA == HIP_C_64F && dataTypeW == HIP_C_64F && dataTypeVL == HIP_C_64F
             && dataTypeVR == HIP_C_64F && computeType == HIP_C_64F)
     {
-        size_type  = sizeof(hipDoubleComplex);
-        size_hW    = size_type * n;
-        size_rwork = (n == 0 ? 1 : size_type * 2 * n);
+        size_type           = sizeof(hipDoubleComplex);
+        size_rtype          = sizeof(double);
+        size_hW             = size_type * n;
+        size_rwork          = (n == 0 ? 1 : size_rtype * 2 * n);
+        required_bytes_work = (n == 0 ? 1 : size_type * 2 * n);
     }
     else
         return HIPSOLVER_STATUS_INVALID_ENUM;
@@ -403,7 +418,7 @@ try
     size_t required_bytes = rounded_size_hA + rounded_size_hW + rounded_size_hVL + rounded_size_hVR
                             + rounded_size_rwork;
 
-    if(lworkOnHost < required_bytes)
+    if(lworkOnHost < required_bytes + required_bytes_work)
         return HIPSOLVER_STATUS_INVALID_VALUE;
     size_t lwork_computed = (lworkOnHost - required_bytes) / size_type;
     if(lwork_computed > INT_MAX)

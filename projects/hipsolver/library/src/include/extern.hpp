@@ -96,48 +96,51 @@ void zgeev_(char*             jobvl,
 }
 #endif
 
-inline void cpu_geev(char   jobvl,
-                     char   jobvr,
-                     int    n,
-                     float* A,
-                     int    lda,
-                     float* w,
-                     float* vl,
-                     int    ldvl,
-                     float* vr,
-                     int    ldvr,
-                     float* work,
-                     int    lwork,
-                     float* rwork,
-                     int*   info)
+inline void cpu_geev(char                    jobvl,
+                     char                    jobvr,
+                     int                     n,
+                     float*                  A,
+                     int                     lda,
+                     float*                  w,
+                     float*                  vl,
+                     int                     ldvl,
+                     float*                  vr,
+                     int                     ldvr,
+                     float*                  work,
+                     int                     lwork,
+                     [[maybe_unused]] float* rwork,
+                     int*                    info)
 {
     // check for Infs and NaNs
-    for(int i = 0; i < n; i++)
-        for(int j = 0; j < n; j++)
+    for(int j = 0; j < n; j++)
+        for(int i = 0; i < n; i++)
             if(std::isinf(A[i + j * lda]) || std::isnan(A[i + j * lda]))
                 throw HIPSOLVER_STATUS_INTERNAL_ERROR;
+
+    // void cast unused variable
+    (void)rwork;
 
     sgeev_(&jobvl, &jobvr, &n, A, &lda, w, w + n, vl, &ldvl, vr, &ldvr, work, &lwork, info);
 }
 
-inline void cpu_geev(char    jobvl,
-                     char    jobvr,
-                     int     n,
-                     double* A,
-                     int     lda,
-                     double* w,
-                     double* vl,
-                     int     ldvl,
-                     double* vr,
-                     int     ldvr,
-                     double* work,
-                     int     lwork,
-                     double* rwork,
-                     int*    info)
+inline void cpu_geev(char                     jobvl,
+                     char                     jobvr,
+                     int                      n,
+                     double*                  A,
+                     int                      lda,
+                     double*                  w,
+                     double*                  vl,
+                     int                      ldvl,
+                     double*                  vr,
+                     int                      ldvr,
+                     double*                  work,
+                     int                      lwork,
+                     [[maybe_unused]] double* rwork,
+                     int*                     info)
 {
     // check for Infs and NaNs
-    for(int i = 0; i < n; i++)
-        for(int j = 0; j < n; j++)
+    for(int j = 0; j < n; j++)
+        for(int i = 0; i < n; i++)
             if(std::isinf(A[i + j * lda]) || std::isnan(A[i + j * lda]))
                 throw HIPSOLVER_STATUS_INTERNAL_ERROR;
 
@@ -160,9 +163,9 @@ inline void cpu_geev(char             jobvl,
                      int*             info)
 {
     // check for Infs and NaNs
-    for(int i = 0; i < n; i++)
+    for(int j = 0; j < n; j++)
     {
-        for(int j = 0; j < n; j++)
+        for(int i = 0; i < n; i++)
         {
             float re = hipCrealf(A[i + j * lda]);
             float im = hipCimagf(A[i + j * lda]);
@@ -192,9 +195,9 @@ inline void cpu_geev(char              jobvl,
                      int*              info)
 {
     // check for Infs and NaNs
-    for(int i = 0; i < n; i++)
+    for(int j = 0; j < n; j++)
     {
-        for(int j = 0; j < n; j++)
+        for(int i = 0; i < n; i++)
         {
             double re = hipCreal(A[i + j * lda]);
             double im = hipCimag(A[i + j * lda]);

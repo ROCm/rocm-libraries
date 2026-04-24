@@ -126,12 +126,12 @@ Performance implications of the hipsolverDn API
       a workspace to use rocSOLVER. This workspace is automatically managed, but it might result in device memory reallocations with a corresponding overhead.
 
 *  An eigensolver for general matrices has not yet been implemented in rocSOLVER. These components rely on LAPACK to provide this functionality.
-   The :ref:`hipsolverDnXgeev <dense_geev>` functions allocate space for dense matrices on the host, copy the data to the host, use LAPACK to perform the
+   The :ref:`hipsolverDnXgeev <dense_geev>` functions take the user-provided host workspace, copy the data to the host, use LAPACK to perform the
    eigenvalue decomposition, and then copy the resulting data back to the device.
 
    .. note::
 
-      :ref:`hipsolverDnXgeev <dense_geev>` operates on the CPU.
+      :ref:`hipsolverDnXgeev <dense_geev>` operates on the CPU and performs memory transfers to and from the device.
 
 .. _sparse_api_differences:
 
