@@ -348,7 +348,7 @@ bool PerformanceConfigConvAsm1x1U::IsValidImpl(const ProblemDescription& problem
     }
     if(sequence_length > 6)
     {
-        if(!(waves_c_in_group <= problem.GetInChannels()))
+        if(!(static_cast<size_t>(waves_c_in_group) <= problem.GetInChannels()))
             return false;
         const int c_per_wave = (problem.GetInChannels() + waves_c_in_group - 1) / waves_c_in_group;
         const int c_per_last_wave =
@@ -578,7 +578,7 @@ bool ConvAsm1x1U::IsApplicable(const ExecutionContext& ctx, const ProblemDescrip
         && problem.GetOutChannels() % elements_in_dword == 0
         && problem.GetInLayout() == "NCHW"
         && problem.GetGroupCount() == 1
-        && img_hw >= elements_in_dword
+        && static_cast<size_t>(img_hw) >= elements_in_dword
         && (elements_in_dword == 1 || problem.GetOutChannels() >= 4));
     if(problem.IsDirectionBackwardData() && elements_in_dword != 1)
         ok = ok && (problem.GetOutChannels() % 4 == 0);

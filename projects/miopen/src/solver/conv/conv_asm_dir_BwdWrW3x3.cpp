@@ -188,10 +188,11 @@ bool PerformanceConfigAsmDirect3x3WrW::IsValid(const ExecutionContext& ctx,
         return false;
     if((reverse_inout != 0 ? problem.GetOutChannels() : problem.GetInChannels()) % k_per_wave != 0)
         return false;
-    if(!(n_per_group <= problem.GetBatchSize()))
+    if(!(static_cast<size_t>(n_per_group) <= problem.GetBatchSize()))
         return false;
     if(!(1 <= pipe_lines_depth &&
-         pipe_lines_depth <= std::min(problem.GetOutHeight(), static_cast<std::size_t>(16))))
+         static_cast<size_t>(pipe_lines_depth) <=
+             std::min(problem.GetOutHeight(), static_cast<std::size_t>(16))))
         return false;
     if((reverse_inout != 0) && !IsReverseInOutAllowed(problem))
         return false;
@@ -323,7 +324,7 @@ void PerformanceConfigAsmDirect3x3WrW::HeuristicInit(const ExecutionContext& ctx
     {
         n_per_group = 1;
     }
-    if(n_per_group > problem.GetBatchSize())
+    if(static_cast<size_t>(n_per_group) > problem.GetBatchSize())
         n_per_group = problem.GetBatchSize(); // n_per_group should never be > batch size.
     if(problem.GetOutWidth() >= 256 &&
        n_per_group > 4) // when width >= 256, n_per_group should not be > 4.

@@ -93,18 +93,18 @@ void RNNModularMultiStreamBWWeights::Compute(const Handle& handle,
         }(ms_controller);
 
     ms_controller.ChangeActiveStream(bias_stream);
-    for(int layer_i = 0; layer_i < rnnDesc.nLayers; layer_i++)
+    for(auto layer_i = 0U; layer_i < rnnDesc.nLayers; layer_i++)
         rnnAlgoModules.BiasUpdate(handle, dw, back_data_space, free_ws, layer_i, free_ws_size);
 
     auto sequence_directions =
         rnnDesc.dirMode == miopenRNNDirectionMode_t::miopenRNNbidirection ? 2 : 1;
 
-    for(int layer_i = 0; layer_i < rnnDesc.nLayers; layer_i++)
+    for(auto layer_i = 0U; layer_i < rnnDesc.nLayers; layer_i++)
     {
         const auto dispatch_stream_id = first_stream + (layer_i % stream_round);
         ms_controller.ChangeActiveStream(dispatch_stream_id);
 
-        if(layer_i == 0)
+        if(layer_i == 0U)
             rnnAlgoModules.PhisXInputWeights(handle, dw, back_data_space, x);
         else
             rnnAlgoModules.HiddenXInputWeights(handle, dw, back_data_space, reserveSpace, layer_i);

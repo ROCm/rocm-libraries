@@ -337,7 +337,7 @@ bool PerformanceConfigConvAsm1x1UV2::IsValid(const ProblemDescription& problem) 
         return false;
     if(!(waves_c_in_group * waves_k_in_group <= 16))
         return false;
-    if(!(waves_c_in_group <= problem.GetInChannels()))
+    if(!(static_cast<size_t>(waves_c_in_group) <= problem.GetInChannels()))
         return false;
     if(!(h_per_chunk <= chunk_size))
         return false;
@@ -383,7 +383,7 @@ bool PerformanceConfigConvAsm1x1UV2::IsValid(const ProblemDescription& problem) 
     if(!(sgprs < 102))
         return false;
     const auto total_n_blocks = (problem.GetBatchSize() + GetNPerGpr() - 1) / GetNPerGpr();
-    if(!(n_mult <= total_n_blocks))
+    if(!(static_cast<size_t>(n_mult) <= total_n_blocks))
         return false;
 
     const auto c_per_wave = (problem.GetInChannels() + waves_c_in_group - 1) / waves_c_in_group;

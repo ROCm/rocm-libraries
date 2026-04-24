@@ -147,7 +147,7 @@ protected:
         auto idx          = miopen::mismatch_idx(ref_out, output, miopen::float_equal);
         EXPECT_FALSE(miopen::find_idx(ref_out, miopen::not_finite) >= 0)
             << "Non finite number found in the CPU data";
-        EXPECT_FALSE(idx < miopen::range_distance(ref_out));
+        EXPECT_FALSE(idx < static_cast<size_t>(miopen::range_distance(ref_out)));
         miopenDestroyConvolutionDescriptor(conv_desc);
         miopenDestroyActivationDescriptor(activ_desc);
     }

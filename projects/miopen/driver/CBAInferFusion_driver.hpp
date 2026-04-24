@@ -723,7 +723,7 @@ int CBAInferFusionDriver<Tgpu, Tref>::createRunningBuffers()
         runningVariance = std::vector<float>(sb_sz, 0.0f);
 
         // Populate
-        for(int i = 0; i < sb_sz; i++)
+        for(auto i = 0ULL; i < sb_sz; i++)
         {
 #if(CBA_DEBUG_VALUES == 1)
             runningMean[i]     = 0.;
@@ -788,7 +788,7 @@ int CBAInferFusionDriver<Tgpu, Tref>::AllocateBuffersAndCopy()
         b_dev       = std::make_unique<GPUMem>(ctx, b_sz, sizeof(Tgpu));
         b           = std::vector<Tgpu>(b_sz, static_cast<Tgpu>(0));
         bias_host   = std::vector<Tref>(b_sz, static_cast<Tref>(0));
-        for(int i = 0; i < b_sz; i++)
+        for(auto i = 0ULL; i < b_sz; i++)
         {
             b[i]         = prng::gen_canonical<Tgpu>();
             bias_host[i] = static_cast<Tref>(b[i]);
@@ -813,7 +813,7 @@ int CBAInferFusionDriver<Tgpu, Tref>::AllocateBuffersAndCopy()
         scale_dev  = std::make_unique<GPUMem>(ctx, sb_sz, sizeof(float));
         bias_dev   = std::make_unique<GPUMem>(ctx, sb_sz, sizeof(float));
         // Using random beta and gamma
-        for(int i = 0; i < sb_sz; i++)
+        for(auto i = 0ULL; i < sb_sz; i++)
         {
 #if(CBA_DEBUG_VALUES == 1)
             scale[i] = 1.; // prng::gen_canonical<float>(); // 1.0;
@@ -839,7 +839,7 @@ int CBAInferFusionDriver<Tgpu, Tref>::AllocateBuffersAndCopy()
     out_host      = std::vector<Tref>(out_sz, static_cast<Tref>(0));
 
     // Data initialization
-    for(int i = 0; i < in_sz; i++)
+    for(auto i = 0ULL; i < in_sz; i++)
     {
 #if(CBA_DEBUG_VALUES == 1)
         auto rval  = 1.; // prng::gen_canonical<Tgpu>(); // 1.0;
@@ -855,7 +855,7 @@ int CBAInferFusionDriver<Tgpu, Tref>::AllocateBuffersAndCopy()
     if(fusion_mode != miopen_fusion_na)
     {
         wei = std::vector<Tgpu>(wei_sz, static_cast<Tgpu>(0));
-        for(int i = 0; i < wei_sz; i++)
+        for(auto i = 0ULL; i < wei_sz; i++)
         {
 #if(CBA_DEBUG_VALUES == 1)
             auto rval   = 1.; // prng::gen_canonical<Tgpu>(); // 1.;

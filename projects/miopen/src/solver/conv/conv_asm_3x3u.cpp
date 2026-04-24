@@ -96,7 +96,8 @@ bool PerformanceConfigConvAsm3x3U::IsValid(const ProblemDescription& problem) co
     const auto img_height = problem.GetInHeight();
     int n                 = 0;
 
-    const bool enable_zero_line_padding_on_read = (img_height != output_lines_per_wave);
+    const bool enable_zero_line_padding_on_read =
+        (img_height != static_cast<size_t>(output_lines_per_wave));
     if(enable_zero_line_padding_on_read)
         ++n;
 
@@ -115,8 +116,9 @@ bool PerformanceConfigConvAsm3x3U::IsValid(const ProblemDescription& problem) co
 
     const int block_size_x        = 1;
     const int gprs_per_input_line = (img_x_blocks * block_size_x + active_lanes - 1) / active_lanes;
-    const int input_lines_per_wave =
-        (img_height == output_lines_per_wave) ? output_lines_per_wave : (output_lines_per_wave + 2);
+    const int input_lines_per_wave = (img_height == static_cast<size_t>(output_lines_per_wave))
+                                         ? output_lines_per_wave
+                                         : (output_lines_per_wave + 2);
 
     const int k_group_size                  = problem.GetOutChannels() / problem.GetGroupCount();
     const bool k_group_size_is_power_of_two = ((k_group_size & (k_group_size - 1)) == 0);

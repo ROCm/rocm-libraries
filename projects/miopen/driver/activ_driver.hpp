@@ -223,7 +223,7 @@ int ActivationDriver<Tgpu, Tref>::AllocateBuffersAndCopy()
 
     miopenGetActivationDescriptor(activDesc, &activation_mode, &alpha, &beta, &gamma);
 
-    for(int i = 0; i < in_sz; i++)
+    for(auto i = 0ULL; i < in_sz; i++)
     {
         switch(activation_mode)
         {
@@ -279,7 +279,7 @@ int ActivationDriver<Tgpu, Tref>::AllocateBuffersAndCopy()
         }
     }
 
-    for(int i = 0; i < out_sz; i++)
+    for(auto i = 0ULL; i < out_sz; i++)
     {
         dout[i] = prng::gen_A_to_B(static_cast<Tgpu>(-0.5), static_cast<Tgpu>(0.5));
     }

@@ -74,7 +74,7 @@ int32_t mloAddLayerNormForwardRunHost(miopenTensorDescriptor_t inputDesc,
     miopen::par_for(outer_size, min_grain, [&](int32_t o) {
         Tcheck pmean = 0.0f;
         Tcheck pvar  = 0.0f;
-        for(int32_t i = 0; i < inner_size; i++)
+        for(size_t i = 0U; i < inner_size; i++)
         {
             Tcheck tmp = static_cast<Tcheck>(input[o * inner_size + i]) +
                          static_cast<Tcheck>(input2[o * inner_size + i]);
@@ -89,7 +89,7 @@ int32_t mloAddLayerNormForwardRunHost(miopenTensorDescriptor_t inputDesc,
         meanhost[o] = pmean;
         rstdhost[o] = prstd;
 
-        for(int32_t i = 0; i < inner_size; i++)
+        for(size_t i = 0U; i < inner_size; i++)
         {
             Tcheck pweight =
                 (mode == MIOPEN_ELEMENTWISE_AFFINE_FUSED_ADD) ? 1 : static_cast<Tcheck>(weight[i]);
@@ -218,7 +218,7 @@ int AddLayerNormDriver<Tgpu, Tref>::GetandSetData()
                     "normalized_dim out of range");
 
     std::vector<int> inner_len;
-    if(dim == in_len.size())
+    if(static_cast<size_t>(dim) == in_len.size())
         inner_len = {1};
     else
         inner_len = {in_len.begin() + dim, in_len.end()};
@@ -312,12 +312,12 @@ int AddLayerNormDriver<Tgpu, Tref>::AllocateBuffersAndCopy()
     meanhost = std::vector<Tref>(mean_sz, Tref0val);
     rstdhost = std::vector<Tref>(rstd_sz, Tref0val);
 
-    for(int i = 0; i < in_sz; i++)
+    for(auto i = 0U; i < in_sz; i++)
     {
         in[i] = prng::gen_A_to_B<Tgpu>(Tgpu0val, Tgpu1val);
     }
 
-    for(int i = 0; i < in2_sz; i++)
+    for(auto i = 0U; i < in2_sz; i++)
     {
         in2[i] = prng::gen_A_to_B<Tgpu>(Tgpu0val, Tgpu1val);
     }
@@ -327,7 +327,7 @@ int AddLayerNormDriver<Tgpu, Tref>::AllocateBuffersAndCopy()
     if(in2_dev->ToGPU(GetStream(), in2.data()) != 0)
         std::cerr << "Error copying (in2) to GPU, size: " << in2_dev->GetSize() << std::endl;
 
-    for(int i = 0; i < weight_sz; i++)
+    for(auto i = 0U; i < weight_sz; i++)
     {
         if(mode == MIOPEN_ELEMENTWISE_AFFINE)
             weight[i] = Tgpu1val;
@@ -338,7 +338,7 @@ int AddLayerNormDriver<Tgpu, Tref>::AllocateBuffersAndCopy()
     if(weight_dev->ToGPU(GetStream(), weight.data()) != 0)
         std::cerr << "Error copying (weight) to GPU, size: " << weight_dev->GetSize() << std::endl;
 
-    for(int i = 0; i < bias_sz; i++)
+    for(auto i = 0U; i < bias_sz; i++)
     {
         if(mode == MIOPEN_ELEMENTWISE_AFFINE)
             bias[i] = Tgpu0val;

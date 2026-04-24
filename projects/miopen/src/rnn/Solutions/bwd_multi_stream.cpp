@@ -45,10 +45,10 @@ class SpiralDispatch
     {
         std::vector<std::vector<miopen::HipEventPtr>> chunk_end_events;
         chunk_end_events.resize(layers_cnt);
-        for(int layer_id = 0; layer_id < layers_cnt; ++layer_id)
+        for(auto layer_id = 0U; layer_id < layers_cnt; ++layer_id)
         {
             chunk_end_events[layer_id].resize(chunks_cnt);
-            for(int chunk_id = 0; chunk_id < chunks_cnt; ++chunk_id)
+            for(auto chunk_id = 0U; chunk_id < chunks_cnt; ++chunk_id)
                 chunk_end_events[layer_id][chunk_id] = make_hip_fast_event();
         }
         return chunk_end_events;

@@ -248,7 +248,7 @@ int CatDriver<Tgpu, Tref>::AllocateBuffersAndCopy()
         auto& in    = ins.back();
         auto in_dev = in_devs.back().get();
 
-        for(int i = 0; i < in_sz; i++)
+        for(auto i = 0U; i < in_sz; i++)
         {
             in[i] = prng::gen_A_to_B<Tgpu>(static_cast<Tgpu>(0.0), static_cast<Tgpu>(1.0));
         }

@@ -207,7 +207,7 @@ protected:
                          step_count,
                          multi_threaded);
 
-        for(uint32_t i = 1; i <= step_count; i++)
+        for(int32_t i = 1; i <= step_count; i++)
         {
             auto status = miopen::Adam(handle,
                                        param.desc,

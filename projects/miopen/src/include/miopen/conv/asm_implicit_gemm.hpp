@@ -258,11 +258,11 @@ static inline int igemm_split_batch_size(const int hi,
     // Round up splits: we must find the largest multiple of n, max_n, s.t.
     // max_n * image_size <= max_tensor_size
     size_t max_n = max_tensor_size / image_size;
-    if(max_n > n)
+    if((n < 0) || (max_n > static_cast<size_t>(n)))
     {
         max_n = n % max_n;
     }
-    else if(max_n < n)
+    else if(max_n < static_cast<size_t>(n))
     {
         // find the smallest multiple m of n such that (n / m) * image_size <= max_tensor_size.
         // once m is known, max_n := (n / m)

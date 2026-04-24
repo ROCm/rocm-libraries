@@ -49,7 +49,7 @@ void cpu_addlayernorm_forward(tensor<T> input,
     size_t outer_size = 1;
     size_t inner_size = 1;
     size_t i          = 0;
-    for(; i < dim; i++)
+    for(; i < static_cast<size_t>(dim); i++)
     {
         outer_size *= dims[i];
     }

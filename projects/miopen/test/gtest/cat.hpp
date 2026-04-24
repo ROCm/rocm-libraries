@@ -19,13 +19,13 @@ struct CatTestCase
     friend std::ostream& operator<<(std::ostream& os, const CatTestCase& tc)
     {
         os << " inputs:";
-        for(int i = 0; i < tc.inputs.size(); i++)
+        for(auto i = 0ULL; i < tc.inputs.size(); i++)
         {
             auto input = tc.inputs[i];
             if(i != 0)
                 os << ",";
             os << input[0];
-            for(int j = 1; j < input.size(); j++)
+            for(auto j = 1ULL; j < input.size(); j++)
             {
                 os << "x" << input[j];
             }

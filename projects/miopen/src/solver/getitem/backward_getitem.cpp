@@ -170,7 +170,7 @@ ConvSolution GetitemBackward::GetSolution(const ExecutionContext& /*context*/,
             const auto& dimCount = params.dimCount;
 
             std::vector<int32_t> output_dims(dimCount);
-            for(int32_t i = 0; i < dimCount; i++)
+            for(auto i = 0ULL; i < dimCount; i++)
             {
                 output_dims[i] = static_cast<int32_t>(dx_dims[dims[i]]);
             }
@@ -192,7 +192,7 @@ ConvSolution GetitemBackward::GetSolution(const ExecutionContext& /*context*/,
             HipEventPtr stop;
             bool reset_profiling_state = false;
 
-            for(int32_t i = 0; i < index_count; i++)
+            for(auto i = 0ULL; i < index_count; i++)
             {
                 decltype(auto) build_index_kernel = handle_.Run(kernels[i]);
 
