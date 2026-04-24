@@ -260,7 +260,7 @@ int main(int argc, char* argv[])
     assert(scalarType == *hiptensor::convertToHipTensorDataType(typeCompute));
 
     floatTypeCompute alpha = 1.1f;
-    floatTypeCompute beta  = 0.0f;
+    floatTypeCompute beta  = 2.3f;
 
     /**************************
      * Set the algorithm to use

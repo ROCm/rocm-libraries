@@ -161,8 +161,14 @@ ${CMAKE_CURRENT_SOURCE_DIR}/plan_cache_contraction_test.cpp)
 set (PlanCacheTestConfig  ${CMAKE_CURRENT_SOURCE_DIR}/configs/plan_cache_test_params.yaml)
 add_hiptensor_test(plan_cache_test ${PlanCacheTestConfig}  ${PlanCacheTestSources})
 
-# Contraction with unary ops tests
-set (ConractionUnaryOpsTestSources ${ContractionCommonSources}
-${CMAKE_CURRENT_SOURCE_DIR}/contraction_with_unary_ops_test.cpp)
-set (ConractionUnaryOpsTestConfig  ${CMAKE_CURRENT_SOURCE_DIR}/configs/contraction_unary_ops_params.yaml)
-add_hiptensor_test(contraction_with_unary_ops_test ${ConractionUnaryOpsTestConfig}  ${ConractionUnaryOpsTestSources})
+# Bilinear contraction with unary ops tests
+set (BilinearContractionUnaryOpsTestSources ${ContractionCommonSources}
+${CMAKE_CURRENT_SOURCE_DIR}/bilinear_contraction_with_unary_ops_test.cpp)
+set (BilinearContractionUnaryOpsTestConfig  ${CMAKE_CURRENT_SOURCE_DIR}/configs/bilinear_contraction_unary_ops_params.yaml)
+add_hiptensor_test(bilinear_contraction_with_unary_ops_test ${BilinearContractionUnaryOpsTestConfig}  ${BilinearContractionUnaryOpsTestSources})
+
+# Scale contraction with unary ops tests
+set (ScaleContractionUnaryOpsTestSources ${ContractionCommonSources}
+${CMAKE_CURRENT_SOURCE_DIR}/scale_contraction_with_unary_ops_test.cpp)
+set (ScaleContractionUnaryOpsTestConfig  ${CMAKE_CURRENT_SOURCE_DIR}/configs/scale_contraction_unary_ops_params.yaml)
+add_hiptensor_test(scale_contraction_with_unary_ops_test ${ScaleContractionUnaryOpsTestConfig}  ${ScaleContractionUnaryOpsTestSources})

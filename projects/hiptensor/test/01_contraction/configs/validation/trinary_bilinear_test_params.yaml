@@ -17,9 +17,9 @@ Operators:
 Worksize Prefs:
   - HIPTENSOR_WORKSPACE_DEFAULT
 Alphas:
-  - [1]
+  - [1.2]
 Betas:
-  - [1]
+  - [2.3]
 Lengths:
   # Rank 1: A{m,k} B{k,n} C{n,j} DE{m,j}
   - [[4, 3], [3, 5], [5, 2], [4, 2]]

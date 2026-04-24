@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -30,11 +30,11 @@
 #include "contraction_test.hpp"
 #include "contraction_test_helpers.hpp"
 
-class ContractionWithUnaryOpsTest : public hiptensor::ContractionTest
+class ScaleContractionWithUnaryOpsTest : public hiptensor::ContractionTest
 {
 };
 
-TEST_P(ContractionWithUnaryOpsTest, RunKernel)
+TEST_P(ScaleContractionWithUnaryOpsTest, RunKernel)
 {
     static bool ranWarmup = false;
     if(!ranWarmup)
@@ -45,6 +45,6 @@ TEST_P(ContractionWithUnaryOpsTest, RunKernel)
     this->RunKernel();
 }
 
-INSTANTIATE_TEST_SUITE_P(ContractionWithUnaryOpsTests,
-                         ContractionWithUnaryOpsTest,
+INSTANTIATE_TEST_SUITE_P(ScaleContractionWithUnaryOpsTests,
+                         ScaleContractionWithUnaryOpsTest,
                          load_combined_config_params());

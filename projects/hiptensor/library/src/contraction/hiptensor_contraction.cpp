@@ -119,7 +119,7 @@ hiptensorStatus_t contractionGetWorkspaceSize(const hiptensorHandle_t           
                               desc->mModeB,
                               hiptensor::getTensorLengths(desc->mDescC),
                               hiptensor::getTensorStrides(desc->mDescC),
-                              desc->mModeD,
+                              desc->mModeC,
                               hiptensor::getTensorLengths(desc->mDescD),
                               hiptensor::getTensorStrides(desc->mDescD),
                               desc->mModeD,
@@ -1013,6 +1013,7 @@ hiptensorStatus_t hiptensorCreateContractionTrinary(
 hiptensorStatus_t contractionTrinaryGetWorkspaceSize(
     const hiptensorHandle_t              handle,
     const hiptensorOperationDescriptor_t desc,
+    const hiptensorPlanPreference_t      planPref,
     const hiptensorWorksizePreference_t  workspacePref,
     uint64_t*                            workspaceSizeEstimate)
 {
@@ -1021,12 +1022,59 @@ hiptensorStatus_t contractionTrinaryGetWorkspaceSize(
     auto modeT = computeIntermediateModes(desc->mModeA, desc->mModeB,
                                           desc->mModeC, desc->mModeE);
 
+    auto tDataType = desc->mDescE->mType;
     auto intermediateDesc = buildIntermediateDescriptor(
         modeT, desc->mDescA, desc->mModeA, desc->mDescB, desc->mModeB,
-        desc->mDescE->mType);
+        tDataType);
 
     auto tBytes = intermediateByteSize(intermediateDesc);
-    *workspaceSizeEstimate = alignUp256(tBytes);
+    auto tBytesAligned = alignUp256(tBytes);
+
+    uint64_t kernelWs = 0u;
+
+    for(auto* candidate : planPref->mCandidates)
+    {
+        auto* solution = (hiptensor::ContractionSolution*)candidate;
+        if(solution->initArgs(nullptr,
+                              nullptr,
+                              nullptr,
+                              nullptr,
+                              nullptr,
+                              nullptr,
+                              intermediateDesc.mLengths,
+                              intermediateDesc.mStrides,
+                              modeT,
+                              hiptensor::getTensorLengths(desc->mDescC),
+                              hiptensor::getTensorStrides(desc->mDescC),
+                              desc->mModeC,
+                              hiptensor::getTensorLengths(desc->mDescD),
+                              hiptensor::getTensorStrides(desc->mDescD),
+                              desc->mModeD,
+                              hiptensor::getTensorLengths(desc->mDescE),
+                              hiptensor::getTensorStrides(desc->mDescE),
+                              desc->mModeE,
+                              {},
+                              nullptr))
+        {
+            if(kernelWs == 0)
+            {
+                kernelWs = solution->workspaceSize();
+            }
+            else
+            {
+                if(workspacePref == HIPTENSOR_WORKSPACE_MIN)
+                {
+                    kernelWs = std::min(kernelWs, solution->workspaceSize());
+                }
+                else
+                {
+                    kernelWs = std::max(kernelWs, solution->workspaceSize());
+                }
+            }
+        }
+    }
+
+    *workspaceSizeEstimate = tBytesAligned + kernelWs;
 
     return HIPTENSOR_STATUS_SUCCESS;
 }
@@ -1261,7 +1309,7 @@ hiptensorStatus_t contractionTrinaryInitPlan(
     logger->logPerformanceTrace("contractionTrinaryInitPlan", msg);
 
     pref->mSolution          = winner;
-    plan->mRequiredWorkspace = tBytesAligned + kernelWsLimit;
+    plan->mRequiredWorkspace = workspaceSizeLimit;
     plan->mOpDesc            = desc;
     plan->mPref              = pref;
 

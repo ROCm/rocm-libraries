@@ -639,6 +639,7 @@ hiptensorStatus_t contractionGetWorkspaceSize(const hiptensorHandle_t           
                                               uint64_t* workspaceSizeEstimate);
 hiptensorStatus_t contractionTrinaryGetWorkspaceSize(const hiptensorHandle_t              handle,
                                                      const hiptensorOperationDescriptor_t desc,
+                                                     const hiptensorPlanPreference_t      planPref,
                                                      const hiptensorWorksizePreference_t  workspacePref,
                                                      uint64_t* workspaceSizeEstimate);
 hiptensorStatus_t hiptensorEstimateWorkspaceSize(const hiptensorHandle_t              handle,
@@ -655,7 +656,7 @@ hiptensorStatus_t hiptensorEstimateWorkspaceSize(const hiptensorHandle_t        
     if(desc->mOperationType == HIPTENSOR_CONTRACTION_TRINARY)
     {
         return contractionTrinaryGetWorkspaceSize(
-            handle, desc, workspacePref, workspaceSizeEstimate);
+            handle, desc, planPref, workspacePref, workspaceSizeEstimate);
     }
     *workspaceSizeEstimate = 0u;
     return HIPTENSOR_STATUS_SUCCESS;

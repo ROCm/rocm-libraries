@@ -332,14 +332,12 @@ HIPTENSOR_EXPORT hiptensorStatus_t hiptensorContract(const hiptensorHandle_t han
                                                      uint64_t                workspaceSize,
                                                      hipStream_t             stream);
 
-//! @brief Creates an operation descriptor for a trinary tensor contraction.
-//!
-//! @details Encodes the operation:
-//! \f$\mathcal{E}_{{modes}_\mathcal{E}} \gets \alpha\; op_\mathcal{A}(\mathcal{A}_{{modes}_\mathcal{A}})
+//! @brief Allocates and initializes a `hiptensorOperationDescriptor` object for a trinary tensor contraction of the form:
+//!   \f$\mathcal{E}_{{modes}_\mathcal{E}} \gets \alpha\; op_\mathcal{A}(\mathcal{A}_{{modes}_\mathcal{A}})
 //!   \; op_\mathcal{B}(\mathcal{B}_{{modes}_\mathcal{B}})
 //!   \; op_\mathcal{C}(\mathcal{C}_{{modes}_\mathcal{C}})
 //!   + \beta\; op_\mathcal{D}(\mathcal{D}_{{modes}_\mathcal{D}})\f$.
-//! Internally decomposed into two binary contractions: T = A*B followed by E = alpha*T*C + beta*D.
+//!
 //! Free this object by calling `hiptensorDestroyOperationDescriptor()`.
 //! @param[in] handle Opaque handle representing the hipTensor library context.
 //! @param[out] desc Pointer to the `hiptensorOperationDescriptor_t` that will be populated.
