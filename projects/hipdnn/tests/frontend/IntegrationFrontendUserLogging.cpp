@@ -144,22 +144,22 @@ TEST_F(IntegrationFrontendUserLogging, UnregisterWithSevOffStopsCallbacks)
 
     // Wait for at least 1 log to arrive via async callback
     recorder.waitForLogCount(countBefore + 1, ASYNC_LOG_TIMEOUT);
-
-    const size_t logsWithCallback = recorder.getRecordedLogCount();
-    EXPECT_GT(logsWithCallback, 0);
+    EXPECT_GT(recorder.getRecordedLogCount(), 0);
 
     // Unregister callback with SEV_OFF
     registerUserCallback(HIPDNN_SEV_OFF, LogCallbackMode::ASYNC);
 
+    // Capture count after unregister — the only point where it's guaranteed
+    // that no more logs will be delivered via the callback
+    const size_t logsAfterUnregister = recorder.getRecordedLogCount();
+
     HIPDNN_FE_LOG_INFO("Log after unregistering callback");
 
     // Negative assertion: no new logs expected after unregister, bounded wait
-    recorder.waitForLogCount(logsWithCallback + 1, std::chrono::milliseconds(50));
-
-    const size_t logsAfterUnregister = recorder.getRecordedLogCount();
+    recorder.waitForLogCount(logsAfterUnregister + 1, std::chrono::milliseconds(50));
 
     // No new logs should be provided via callback
-    EXPECT_EQ(logsAfterUnregister, logsWithCallback);
+    EXPECT_EQ(recorder.getRecordedLogCount(), logsAfterUnregister);
 }
 
 // Test: Callback level filtering works independently of global level

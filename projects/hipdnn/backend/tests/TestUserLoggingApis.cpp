@@ -127,16 +127,17 @@ TEST_F(IntegrationBackendUserLoggingApis, UnregisterWithSevOffStopsCapture)
 
     // Unregister callback with SEV_OFF
     registerIsolatedCallback(HIPDNN_SEV_OFF, HIPDNN_LOG_CALLBACK_ASYNC);
+    const size_t logsAfterRemovingCallback = recorder.getRecordedLogCount();
 
     // Further operations should not be captured
     ASSERT_EQ(hipdnnDestroy(handle), HIPDNN_STATUS_SUCCESS);
 
     // Wait briefly to confirm no async logs arrive (expected to timeout)
-    recorder.waitForLogCount(logsAfterCreate + 1, std::chrono::milliseconds(50));
+    recorder.waitForLogCount(logsAfterRemovingCallback + 1, std::chrono::milliseconds(50));
 
     // Log count should not increase
     const size_t finalLogs = recorder.getRecordedLogCount();
-    EXPECT_EQ(finalLogs, logsAfterCreate);
+    EXPECT_EQ(finalLogs, logsAfterRemovingCallback);
 }
 
 // Test: Sync callback executes immediately
@@ -231,22 +232,25 @@ TEST_F(IntegrationBackendUserLoggingApis, UpdateCallbackLevel)
 
     // Wait for async callback to deliver logs
     recorder.waitForLogCount(countBeforeCreate + 1, ASYNC_LOG_TIMEOUT);
-    const size_t infoLogs = recorder.getRecordedLogCount();
-    EXPECT_GT(infoLogs, 0);
+    EXPECT_GT(recorder.getRecordedLogCount(), 0);
 
     // Update callback to WARN level (same callback, same handle, different level)
     registerIsolatedCallback(HIPDNN_SEV_WARN, HIPDNN_LOG_CALLBACK_ASYNC);
+
+    // Capture count after level change — the only point where it's guaranteed
+    // that no more INFO-level logs will be delivered via the callback
+    const size_t logsAfterLevelChange = recorder.getRecordedLogCount();
 
     // Trigger more logging - INFO logs should now be filtered at sink level
     hipdnnHandle_t handle2 = nullptr;
     ASSERT_EQ(hipdnnCreate(&handle2), HIPDNN_STATUS_SUCCESS);
 
     // Wait briefly to confirm minimal logs arrive (expected to timeout)
-    recorder.waitForLogCount(infoLogs + 1, std::chrono::milliseconds(50));
+    recorder.waitForLogCount(logsAfterLevelChange + 1, std::chrono::milliseconds(50));
     const size_t afterUpdate = recorder.getRecordedLogCount();
 
     // Verify minimal new logs (only WARN+ would be captured now)
-    EXPECT_LE(afterUpdate - infoLogs, 1); // May get at most 1 WARN/ERROR log
+    EXPECT_LE(afterUpdate - logsAfterLevelChange, 1); // May get at most 1 WARN/ERROR log
 
     ASSERT_EQ(hipdnnDestroy(handle1), HIPDNN_STATUS_SUCCESS);
     ASSERT_EQ(hipdnnDestroy(handle2), HIPDNN_STATUS_SUCCESS);
