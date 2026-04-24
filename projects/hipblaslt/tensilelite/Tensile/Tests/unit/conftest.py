@@ -1,6 +1,10 @@
 """pytest configuration and CLI options for store-D unit tests."""
 
+import shutil
+
 import pytest
+
+from Tensile.Common import IsaVersion
 
 
 @pytest.fixture(autouse=True)
@@ -9,6 +13,32 @@ def skip_parametrized_if_cli(request):
     if (request.config.getoption("--mn", default=None) is not None
             and request.function.__name__ != "test_storeD_cli"):
         pytest.skip("--mn specified: only test_storeD_cli runs")
+
+
+@pytest.fixture(scope="session")
+def isa_infrastructure():
+    """Initialize ISA capabilities once per test session.
+
+    Probes the compiler for ISA info (~3.8s) and creates an Assembler.
+    Only tests that need real kernel-writer-produced idMaps use this fixture;
+    mock-based tests are unaffected.
+    """
+    from Tensile.Common.Capabilities import makeIsaInfoMap
+    from Tensile.Toolchain.Component import Assembler
+
+    isa = IsaVersion(9, 5, 0)
+    compiler = shutil.which('amdclang++') or shutil.which('clang++')
+    assembler_bin = shutil.which('amdclang') or shutil.which('clang')
+    assert compiler, "No C++ compiler found for ISA capability probing"
+    assert assembler_bin, "No assembler binary found"
+
+    isaInfoMap = makeIsaInfoMap([isa], compiler)
+    # Note: do NOT call assignGlobalParameters here — it mutates global state
+    # and breaks test_validateParameterTypes. The Solution and KernelWriter
+    # work without it as long as isaInfoMap is passed explicitly.
+    asm = Assembler(assembler_bin, 'V5')
+
+    return isa, isaInfoMap, asm
 
 
 def pytest_addoption(parser):

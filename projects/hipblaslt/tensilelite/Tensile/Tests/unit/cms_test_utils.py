@@ -455,3 +455,96 @@ def make_mock_id_map(schedule_info, kernel=None) -> dict:
             id_map[key] = [None] * count
 
     return id_map
+
+
+# --- Real idMap generation from kernel writer ---
+
+def _make_solution(kernel_config, asm, isaInfoMap):
+    """Create a valid Solution object from a kernel configuration dict.
+
+    Args:
+        kernel_config: Dict with keys like 'ProblemType' (with OperationType,
+                       DataType, TransposeA/B, etc.), 'MatrixInstruction',
+                       'DepthU', 'PrefetchGlobalRead', etc.
+        asm: Assembler instance from Tensile.Toolchain.Component.
+        isaInfoMap: ISA info map from makeIsaInfoMap.
+
+    Returns:
+        A valid Solution object, or raises if the config is rejected.
+    """
+    from copy import deepcopy
+    from Tensile.SolutionStructs.Solution import Solution
+    from Tensile.SolutionStructs.Problem import ProblemType
+    from Tensile.TensileLogic.HandleCustomKernel import matrixInstructionToMIParameters
+
+    isa = next(iter(isaInfoMap.keys()))
+
+    # Build ProblemType if given as a dict
+    pt_config = kernel_config.get('ProblemType', {})
+    if isinstance(pt_config, dict):
+        pt = ProblemType(pt_config, False)
+        config = dict(kernel_config)
+        config['ProblemType'] = deepcopy(pt.state)
+    else:
+        config = dict(kernel_config)
+
+    config.setdefault('ISA', isa)
+    config.setdefault('KernelLanguage', 'Assembly')
+    config.setdefault('WavefrontSize', 64)
+    config.setdefault('WorkGroup', [32, 8, 1])
+
+    # Derive MI parameters if MatrixInstruction has 9 elements
+    mi = config.get('MatrixInstruction', [])
+    if len(mi) == 9:
+        mi_params = matrixInstructionToMIParameters(
+            mi, isa, config['WavefrontSize'],
+            config['ProblemType'], config['WorkGroup'], isaInfoMap)
+        config.update(mi_params)
+
+    sol = Solution(config, splitGSU=False, printSolutionRejectionReason=False,
+                   printIndexAssignmentInfo=False, assembler=asm,
+                   isaInfoMap=isaInfoMap)
+    assert sol["Valid"], f"Solution is not valid for config: {kernel_config}"
+    return sol
+
+
+def generate_real_idmap(kernel_config, asm, isaInfoMap):
+    """Generate a real idMap by running the kernel writer.
+
+    Creates a Solution from kernel_config, runs _getKernelSource to trigger
+    the full kernel generation pipeline (including customMainLoopSchedule
+    which stashes the idMap on the writer), then returns the stashed values.
+
+    Args:
+        kernel_config: Dict with kernel configuration (see _make_solution).
+        asm: Assembler instance.
+        isaInfoMap: ISA info map.
+
+    Returns:
+        Tuple of (id_map, mfma_code, solution) where id_map and mfma_code
+        contain real rocisa instruction objects with correct register
+        assignments.
+    """
+    from Tensile.KernelWriterAssembly import KernelWriterAssembly, DebugConfig
+
+    solution = _make_solution(kernel_config, asm, isaInfoMap)
+    writer = KernelWriterAssembly(asm, DebugConfig())
+    try:
+        writer._getKernelSource(solution)
+    except Exception as e:
+        raise RuntimeError(
+            f"Kernel generation failed. This can happen if earlier tests modified "
+            f"global state (e.g. via hasCustomSchedule). Try running this test in "
+            f"isolation: pytest <file>::<class>::<test> -v\n"
+            f"Original error: {e}"
+        ) from e
+
+    if not hasattr(writer, '_last_id_map'):
+        raise RuntimeError(
+            "Kernel writer did not produce an idMap. This means "
+            "customMainLoopSchedule was not called — either UseCustomMainLoopSchedule "
+            "is not enabled for this config, or global state from earlier tests "
+            "caused the schedule to not match. Try running in isolation."
+        )
+
+    return writer._last_id_map, writer._last_mfma_code, solution

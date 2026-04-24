@@ -371,6 +371,12 @@ def customMainLoopSchedule(writer, kernel, tensorParametersA, tensorParametersB,
     idMap['SYNC'] = opt1.syncCode
     idMap['SNOP'] = opt1.snopCode
 
+    # Expose the real idMap and mfmaCode for test infrastructure.
+    # Tests call _getKernelSource() then read writer._last_id_map to get
+    # real rocisa instruction objects with correct register assignments.
+    writer._last_id_map = idMap
+    writer._last_mfma_code = mfmaCode
+
     status, message = cmsv.isValid(opt1, cmsv.ValidationContext(kernel=kernel, id_map=idMap, mfma_code=mfmaCode))
     # create the case str (TN, NT, TT, or NN)
     if isTN(kernel):

@@ -47,11 +47,17 @@ from Tensile.Components.CMSValidator import (
     VGPRS_PER_CONVERSION_GROUP,
     get_dst_range, get_src_ranges, get_reg_range,
     SchedulePosition,
+    create_unified_timeline,
+    add_pack_constraints, add_local_read_constraints,
+    validate_timeline, ValidationContext, isValid,
+    _get_lrs_for_pack,
 )
+from Tensile.Components.CustomSchedule import ScheduleInfo, hasCustomSchedule
 from cms_test_utils import (
-    make_mock_mfma_code,
+    make_mock_mfma_code, make_mock_id_map,
     _make_mock_lr, _make_mock_packs_bf16, _make_mock_packs_tf32_4x4,
     _make_mock_swap_packs,
+    generate_real_idmap,
     LRA_BASE, LRB_BASE, PACK_A_DST_BASE, PACK_B_DST_BASE,
     CVT0_BASE, TF32_INTERMEDIATE_BASE, MFMA_PACK_A_BASE,
 )
@@ -503,3 +509,80 @@ class TestTF32_4x4_SwapPackDeps:
                 f"Pack[{pack.issue_index}] ({type(pack).__name__}): " \
                 f"positional dep={pos_latest.name}@{pos_latest.done_idx()}, " \
                 f"register dep={reg_latest.name}@{reg_latest.done_idx()}"
+
+
+# =============================================================================
+# Test: Real idMap from kernel writer — validates full pipeline
+# =============================================================================
+
+@pytest.mark.real_idmap
+class TestRealIdMapValidation:
+    """Verify that using real kernel-writer-produced idMaps eliminates all
+    dual-path mismatches between positional and register-based must_start_after.
+
+    These tests use the isa_infrastructure fixture (session-scoped, ~3.8s init)
+    and generate_real_idmap (~0.14s per kernel) to produce real rocisa instruction
+    objects with correct register assignments.
+
+    NOTE: These tests require ISA infrastructure and a clean global state.
+    They may fail when run in the full test suite due to global state pollution
+    from earlier tests. Run in isolation with:
+        pytest test_register_tracing.py::TestRealIdMapValidation -v
+    Or with the marker:
+        pytest -m real_idmap -v
+    """
+
+    def test_tf32_4x4_tn_real_idmap_validates(self, isa_infrastructure):
+        """TF32 4x4 TN schedule validates with real idMap (no mismatch warnings)."""
+        isa, isaInfoMap, asm = isa_infrastructure
+        config = {
+            'ProblemType': {
+                'OperationType': 'GEMM', 'DataType': 'S', 'DestDataType': 'S',
+                'F32XdlMathOp': 'X', 'TransposeA': True, 'TransposeB': False,
+                'UseBeta': True, 'Batched': True,
+            },
+            'MatrixInstruction': [16, 16, 32, 1, 1, 4, 4, 2, 2],
+            'DepthU': 32, 'PrefetchGlobalRead': 2, 'PrefetchLocalRead': 1,
+            'DirectToLds': 1, 'TransposeLDS': 1, 'LocalReadVectorWidth': 4,
+            'GlobalReadVectorWidthA': 4, 'GlobalReadVectorWidthB': 4,
+            'UseCustomMainLoopSchedule': 1, 'ExpandPointerSwap': 0,
+            'SourceSwap': 1, 'StreamK': 0,
+        }
+        id_map, mfma_code, solution = generate_real_idmap(config, asm, isaInfoMap)
+
+        # Get the ScheduleInfo for this kernel
+        has_schedule, schedule_info = hasCustomSchedule(solution)
+        assert has_schedule, "Kernel should have a CMS schedule"
+
+        # Validate with real idMap
+        ctx = ValidationContext(kernel=solution, id_map=id_map, mfma_code=mfma_code)
+        valid, message = isValid(schedule_info, ctx)
+        assert valid, f"Schedule should pass validation: {message}"
+
+    def test_tf32_4x4_tn_real_idmap_has_packs(self, isa_infrastructure):
+        """Real idMap should contain pack instructions with named registers."""
+        isa, isaInfoMap, asm = isa_infrastructure
+        config = {
+            'ProblemType': {
+                'OperationType': 'GEMM', 'DataType': 'S', 'DestDataType': 'S',
+                'F32XdlMathOp': 'X', 'TransposeA': True, 'TransposeB': False,
+                'UseBeta': True, 'Batched': True,
+            },
+            'MatrixInstruction': [16, 16, 32, 1, 1, 4, 4, 2, 2],
+            'DepthU': 32, 'PrefetchGlobalRead': 2, 'PrefetchLocalRead': 1,
+            'DirectToLds': 1, 'TransposeLDS': 1, 'LocalReadVectorWidth': 4,
+            'GlobalReadVectorWidthA': 4, 'GlobalReadVectorWidthB': 4,
+            'UseCustomMainLoopSchedule': 1, 'ExpandPointerSwap': 0,
+            'SourceSwap': 1, 'StreamK': 0,
+        }
+        id_map, mfma_code, solution = generate_real_idmap(config, asm, isaInfoMap)
+
+        assert 'PackA0' in id_map, "idMap should contain PackA0"
+        packs = id_map['PackA0']
+        assert len(packs) > 0, "PackA0 should have instructions"
+
+        # Verify instructions have named registers (not numeric mocks)
+        dst = get_dst_range(packs[0])
+        assert dst is not None, "Pack should have a dst range"
+        assert dst[0] != 'v' or dst[1] > 100, \
+            f"Real pack should use named registers, got numeric {dst}"
