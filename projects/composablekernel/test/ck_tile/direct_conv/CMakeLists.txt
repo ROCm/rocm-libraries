@@ -60,4 +60,34 @@ if(GPU_TARGETS MATCHES "gfx950")
         )
     endif()
 
+    add_gtest_executable(test_direct_conv_lds_bank_conflicts test_lds_bank_conflicts.cpp)
+    if(TARGET test_direct_conv_lds_bank_conflicts)
+        target_compile_options(test_direct_conv_lds_bank_conflicts PRIVATE
+            -Wno-old-style-cast
+            -Wno-unused-parameter
+            -Wno-shadow
+        )
+    endif()
+
+    # Umbrella target: build and run all gfx950 integration tests
+    set(CK_TILE_DIRECT_CONV_INTEGRATION_TEST_TARGETS
+        test_direct_conv_grouped_4c_fp16_tile_conv
+        test_direct_conv_grouped_16c_fp16_tile_conv
+        test_direct_conv_mfma
+        #test_direct_conv_lds_bank_conflicts
+    )
+
+    foreach(test_target ${CK_TILE_DIRECT_CONV_INTEGRATION_TEST_TARGETS})
+        if(TARGET ${test_target})
+            set_tests_properties(${test_target} PROPERTIES LABELS "CK_TILE_DIRECT_CONV_TESTS")
+        endif()
+    endforeach()
+
+    add_custom_target(ck_tile_direct_conv_tests
+        COMMAND ${CMAKE_CTEST_COMMAND} --output-on-failure -C ${CMAKE_CFG_INTDIR} -L "CK_TILE_DIRECT_CONV_TESTS"
+        DEPENDS ${CK_TILE_DIRECT_CONV_INTEGRATION_TEST_TARGETS}
+        USES_TERMINAL
+        COMMENT "Running all ck_tile direct conv integration tests..."
+    )
+
 endif()
