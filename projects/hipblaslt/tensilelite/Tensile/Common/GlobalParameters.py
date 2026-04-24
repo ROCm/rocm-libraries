@@ -317,7 +317,7 @@ globalParameters["StinkyTofuOptLevel"] = 0
 
 # StinkyTofu debug level (applies per-PM: outer PM + each ScopeAdaptor inner PM)
 # 0: Silent (default)
-# 1: Pass names to stdout (continuous list in execution order)
+# 1: Pass names + AnalysisManager cache activity to stdout
 # 2: Initial IR + IR after each pass to per-PM files:
 #    kernel-OuterPM-{before,after}_passes.txt     (outer PM)
 #    <groupName>-{before,after}_passes.txt        (single-region adapter)

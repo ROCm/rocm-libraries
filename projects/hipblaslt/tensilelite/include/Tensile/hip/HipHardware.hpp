@@ -39,9 +39,18 @@ namespace TensileLite
         struct HipAMDGPU : public AMDGPU
         {
             HipAMDGPU() = default;
-            HipAMDGPU(hipDeviceProp_t const& prop, std::optional<int> pciChipId = std::nullopt);
+            HipAMDGPU(hipDeviceProp_t const& prop,
+                      int                    deviceId,
+                      std::optional<int>     pciChipId = std::nullopt);
 
             hipDeviceProp_t properties;
+
+            // HIP device ID this instance was constructed from. Retained so
+            // multi-handle apps can recover which physical device an
+            // AMDGPU/HipAMDGPU entry corresponds to without re-querying
+            // hipGetDevice (which only returns the current device for the
+            // calling thread). -1 means "unknown" (default-constructed).
+            int deviceId = -1;
 
             std::shared_ptr<origami::hardware_t> analyticalHardware;
 
@@ -50,6 +59,6 @@ namespace TensileLite
 
         std::shared_ptr<Hardware> GetCurrentDevice();
         std::shared_ptr<Hardware> GetDevice(int deviceId);
-        std::shared_ptr<Hardware> GetDevice(hipDeviceProp_t const& prop);
+        std::shared_ptr<Hardware> GetDevice(hipDeviceProp_t const& prop, int deviceId);
     } // namespace hip
 } // namespace TensileLite

@@ -26,6 +26,7 @@
 #include <memory>
 #include <sstream>
 
+#include "stinkytofu/analysis/AnalysisRegistration.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
@@ -43,6 +44,7 @@ class PeepholeOptimizationPassTest : public ::testing::Test {
     std::unique_ptr<Function> func;
     BasicBlock* bb;
     std::unique_ptr<Pass> peepholePass;
+    AnalysisManager am;
 
     void SetUp() override {
         arch = getGfxArchID(12, 5, 0);  // GFX1250
@@ -57,6 +59,7 @@ class PeepholeOptimizationPassTest : public ::testing::Test {
 
         // Create the peephole optimization pass
         peepholePass = createPeepholeOptimizationPass();
+        registerAllAnalyses(am);
     }
 
     void TearDown() override {
@@ -267,7 +270,7 @@ class PeepholeOptimizationPassTest : public ::testing::Test {
         // In production, OptimizationPipeline builds this once at the start
         buildUseDefChain(*func, true);
 
-        peepholePass->run(*func, ctx);
+        peepholePass->run(*func, ctx, am);
     }
 };
 
@@ -698,6 +701,7 @@ class PeepholePassManagerTest : public ::testing::Test, public stinkytofu::PassM
         bb = func.createBasicBlock("entry");
 
         setGemmTileConfig(gemmConfig);
+        registerAllAnalyses(getAnalysisManager());
     }
 
     void TearDown() override {

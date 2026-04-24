@@ -33,6 +33,8 @@
 #include <miopen/conv/data_invoke_params.hpp>
 #if MIOPEN_ENABLE_AI_KERNEL_TUNING
 #include <miopen/conv/heuristics/ai_heuristics.hpp>
+#include <miopen/conv/heuristics/ai_candidate_selection.hpp>
+#include <miopen/conv/heuristics/ai_conv_nd_kernel_tuning_utils.hpp>
 #endif
 #include <miopen/solver/implicitgemm_ck_util_common.hpp>
 #include <miopen/solver/ck_impl_lib_loader.hpp>
@@ -46,8 +48,30 @@ namespace conv {
 
 using ProblemDescription = miopen::conv::ProblemDescription;
 
+namespace {
+
+// ============================================================================
+// Solver Configuration for FWD 2D Grouped Convolution
+// ============================================================================
+
+// clang-format off
+constexpr SolverHeuristicConfig k2DFwdSolverConfig = {
+    /* solver_name                 */ "ConvHipImplicitGemmGroupFwdXdlops",
+    /* solver_name_ktn             */ "ConvHipIgemmGroupFwdXdlops",
+    /* spatial_dims                */ 2,
+    /* uses_split_k                */ false,
+    /* split_k_min                 */ 0,
+    /* split_k_max                 */ 0,
+    /* supports_split_k_autodeduce */ false,
+    /* supports_ktn                */ true,
+};
+// clang-format on
+
+} // namespace
+
 #if MIOPEN_ENABLE_AI_KERNEL_TUNING
-void PerformanceConfigHipImplicitGemmGroupFwdXdlops::InitHeuristicKernelIDs(const std::string& type)
+void PerformanceConfigHipImplicitGemmGroupFwdXdlops::InitHeuristicKernelIDsKTN(
+    const std::string& type)
 {
     for(int i = 0; i < valid_kernels.size(); i++)
     {
@@ -59,9 +83,9 @@ void PerformanceConfigHipImplicitGemmGroupFwdXdlops::InitHeuristicKernelIDs(cons
     }
 }
 
-bool PerformanceConfigHipImplicitGemmGroupFwdXdlops::ModelApplyToken(int idx,
-                                                                     std::string value,
-                                                                     const std::string& arch)
+bool PerformanceConfigHipImplicitGemmGroupFwdXdlops::ModelApplyTokenKTN(int idx,
+                                                                        std::string value,
+                                                                        const std::string& arch)
 {
     if(arch == "gfx90a")
     {
@@ -72,7 +96,7 @@ bool PerformanceConfigHipImplicitGemmGroupFwdXdlops::ModelApplyToken(int idx,
     }
     if(idx == 0 && (arch == "gfx942" || arch == "gfx950"))
     {
-        InitHeuristicKernelIDs(value);
+        InitHeuristicKernelIDsKTN(value);
         if(!heuristic_indexes.empty())
             return true;
         return false;
@@ -93,7 +117,7 @@ bool PerformanceConfigHipImplicitGemmGroupFwdXdlops::ModelApplyToken(int idx,
 }
 
 static std::vector<float>
-GetFeatures(const ProblemDescription& problem, std::size_t num_cu, const std::string& arch)
+GetFeaturesKTN(const ProblemDescription& problem, std::size_t num_cu, const std::string& arch)
 {
     if(arch == "gfx90a")
     {
@@ -150,7 +174,7 @@ GetFeatures(const ProblemDescription& problem, std::size_t num_cu, const std::st
 }
 
 template <typename DataType>
-bool PerformanceConfigHipImplicitGemmGroupFwdXdlops::RunParameterPredictionModel(
+bool PerformanceConfigHipImplicitGemmGroupFwdXdlops::RunParameterPredictionModelKTN(
     const ExecutionContext& ctx, const ProblemDescription& problem)
 {
     const auto& loader = CkImplLibLoader::Get(ctx.GetStream().GetDeviceName());
@@ -165,22 +189,23 @@ bool PerformanceConfigHipImplicitGemmGroupFwdXdlops::RunParameterPredictionModel
 
     const auto arch = ctx.GetStream().GetDeviceName();
     if(arch == "gfx90a")
-        InitHeuristicKernelIDs("DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle");
-    const std::string solver    = "ConvHipIgemmGroupFwdXdlops";
-    std::vector<float> features = GetFeatures(problem, ctx.GetStream().GetMaxComputeUnits(), arch);
-    bool transform              = (arch == "gfx90a") ? false : true;
+        InitHeuristicKernelIDsKTN("DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle");
+    const std::string solver = k2DFwdSolverConfig.GetSolverNameForArch(arch);
+    std::vector<float> features =
+        GetFeaturesKTN(problem, ctx.GetStream().GetMaxComputeUnits(), arch);
+    bool transform = (arch == "gfx90a") ? false : true;
     if(ai::tuning::ModelSetParams(arch,
                                   solver,
                                   problem.GetDirection(),
                                   features,
                                   transform,
                                   [&](int idx, const std::string& value) {
-                                      return this->ModelApplyToken(idx, value, arch);
+                                      return this->ModelApplyTokenKTN(idx, value, arch);
                                   }))
     {
         index     = heuristic_indexes[0];
         kernel_id = valid_kernels[index];
-        MIOPEN_LOG_I("Params set by AI: " << ToString());
+        MIOPEN_LOG_I("Params set by KTN: " << ToString());
         return true;
     }
     return false;
@@ -249,6 +274,26 @@ static const std::vector<std::string> ranked_gemm_grp_fwd_navi = {
 };
 // clang-format on
 
+void PerformanceConfigHipImplicitGemmGroupFwdXdlops::InitValidKernels(
+    const ProblemDescription& problem)
+{
+    const auto& loader = CkImplLibLoader::Get(GetCurrentDeviceName());
+    if(!loader.IsLoaded())
+        return;
+
+    auto data_type = problem.GetInDataType();
+    use_tf32       = (data_type == miopenFloat) && problem.UseTF32();
+
+    valid_kernels = loader.FillValidKernelsWithTf32Fallback(
+        CKSolverType::GrpConvFwd, problem, data_type, use_tf32);
+
+    if(!valid_kernels.empty())
+    {
+        index     = 0;
+        kernel_id = valid_kernels[index];
+    }
+}
+
 void PerformanceConfigHipImplicitGemmGroupFwdXdlops::DefaultKernelFromList(
     const ExecutionContext& ctx)
 {
@@ -277,37 +322,55 @@ void PerformanceConfigHipImplicitGemmGroupFwdXdlops::DefaultKernelFromList(
 void PerformanceConfigHipImplicitGemmGroupFwdXdlops::HeuristicInit(
     const ExecutionContext& ctx, const ProblemDescription& problem)
 {
-    index     = 0;
-    kernel_id = "";
+    HeuristicInitState state(valid_kernels, index, split_k, kernel_id);
+    state.Reset(k2DFwdSolverConfig.uses_split_k);
 
     const auto& loader = CkImplLibLoader::Get(ctx.GetStream().GetDeviceName());
     if(!loader.IsLoaded())
         return;
 
+        // AI heuristics (if enabled)
 #if MIOPEN_ENABLE_AI_KERNEL_TUNING
-    if(IsModelApplicable(ctx, problem))
+    if(&ctx != &GetDummyCtx() &&
+       !env::disabled(MIOPEN_DEBUG_GROUP_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS_AI_HEUR))
     {
-        // Template parameter is unused in the body — the loader uses
-        // miopenDataType_t from the problem directly.
-        if(RunParameterPredictionModel<float>(ctx, problem))
+        bool mode_use_tf32 = (problem.GetInDataType() == miopenFloat) && problem.UseTF32();
+
+        auto fill_valid_kernels = [&loader](const ProblemDescription& p, bool try_tf32) {
+            return loader.FillValidKernels(
+                CKSolverType::GrpConvFwd, p, p.GetInDataType(), try_tf32);
+        };
+
+        auto ktn_runner = [this](const ExecutionContext& c, const ProblemDescription& p) {
+            return RunKTNGeneric(*this, c, p);
+        };
+
+        auto ck_val_creator = MakeCKValidatorCreator(
+            loader, CKSolverType::GrpConvFwd, problem.GetInDataType(), mode_use_tf32);
+
+        if(RunAIHeuristics(k2DFwdSolverConfig,
+                           state,
+                           ctx,
+                           problem,
+                           false,
+                           fill_valid_kernels,
+                           ktn_runner,
+                           ck_val_creator,
+                           mode_use_tf32))
+        {
             return;
+        }
     }
 #endif
 
-    auto data_type = problem.GetInDataType();
-    use_tf32       = (data_type == miopenFloat) && problem.UseTF32();
-
-    valid_kernels = loader.FillValidKernelsWithTf32Fallback(
-        CKSolverType::GrpConvFwd, problem, data_type, use_tf32);
-
+    // Fallback to default initialization
+    InitValidKernels(problem);
     if(!valid_kernels.empty())
     {
-        index     = 0;
-        kernel_id = valid_kernels[index];
+        if(!env::disabled(MIOPEN_DEBUG_CK_DEFAULT_KERNELS))
+            DefaultKernelFromList(ctx);
+        state.SetResult(index, split_k, k2DFwdSolverConfig.uses_split_k);
     }
-
-    if(!env::disabled(MIOPEN_DEBUG_CK_DEFAULT_KERNELS))
-        DefaultKernelFromList(ctx);
 }
 
 bool PerformanceConfigHipImplicitGemmGroupFwdXdlops::SetNextValue(const ProblemDescription& problem)

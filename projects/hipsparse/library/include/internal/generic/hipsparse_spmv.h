@@ -35,7 +35,7 @@ extern "C" {
 *  \f[
 *    y := \alpha \cdot op(A) \cdot x + \beta \cdot y,
 *  \f]
-*  where \f$op(A)\f$ is a sparse \f$m \times n\f$ matrix in CSR, CSC, COO, or COO (AoS) format, \f$x\f$ is
+*  where \f$op(A)\f$ is a sparse \f$m \times n\f$ matrix in CSR, CSC, COO, COO (AoS), or SELL format, \f$x\f$ is
 *  a dense vector of length \f$n\f$, and \f$y\f$ is a dense vector of length \f$m\f$.
 *
 *  \p hipsparseSpMV_bufferSize supports multiple combinations of data types and compute types. See \ref hipsparseSpMV for a complete
@@ -102,7 +102,7 @@ hipsparseStatus_t hipsparseSpMV_bufferSize(hipsparseHandle_t           handle,
 *  \f[
 *    y := \alpha \cdot op(A) \cdot x + \beta \cdot y,
 *  \f]
-*  where \f$op(A)\f$ is a sparse \f$m \times n\f$ matrix in CSR, CSC, COO, or COO (AoS) format, \f$x\f$
+*  where \f$op(A)\f$ is a sparse \f$m \times n\f$ matrix in CSR, CSC, COO, COO (AoS), or SELL format, \f$x\f$
 *  is a dense vector of length \f$n\f$, and \f$y\f$ is a dense vector of length \f$m\f$. This step is
 *  optional but it might result in better performance.
 *
@@ -167,7 +167,7 @@ hipsparseStatus_t hipsparseSpMV_preprocess(hipsparseHandle_t           handle,
 *
 *  \details
 *  \p hipsparseSpMV multiplies the scalar \f$\alpha\f$ with a sparse \f$m \times n\f$ matrix \f$op(A)\f$, defined in CSR,
-*  CSC, COO, or COO (AoS) format, with the dense vector \f$x\f$ and adds the result to the dense vector \f$y\f$
+*  CSC, COO, COO (AoS), or SELL format, with the dense vector \f$x\f$ and adds the result to the dense vector \f$y\f$
 *  that is multiplied by the scalar \f$\beta\f$, such that
 *  \f[
 *    y := \alpha \cdot op(A) \cdot x + \beta \cdot y,
@@ -206,6 +206,12 @@ hipsparseStatus_t hipsparseSpMV_preprocess(hipsparseHandle_t           handle,
 *  <tr><th>COO Algorithms
 *  <tr><td>HIPSPARSE_SPMV_COO_ALG1</td>
 *  <tr><td>HIPSPARSE_SPMV_COO_ALG2</td>
+*  </table>
+*
+*  <table>
+*  <caption id="spmv_sell_algorithms">SELL Algorithms</caption>
+*  <tr><th>SELL Algorithms
+*  <tr><td>HIPSPARSE_SPMV_SELL_ALG1</td>
 *  </table>
 *
 *  \p hipsparseSpMV supports multiple combinations of data types and compute types. The tables below indicate the currently
@@ -259,7 +265,7 @@ hipsparseStatus_t hipsparseSpMV_preprocess(hipsparseHandle_t           handle,
 *
 *  \note
 *  The sparse matrix formats currently supported are: \ref HIPSPARSE_FORMAT_COO, \ref HIPSPARSE_FORMAT_COO_AOS,
-*  \ref HIPSPARSE_FORMAT_CSR, and \ref HIPSPARSE_FORMAT_CSC.
+*  \ref HIPSPARSE_FORMAT_CSR, \ref HIPSPARSE_FORMAT_CSC, and \ref HIPSPARSE_FORMAT_SLICED_ELL.
 *
 *  \note
 *  Only the \ref hipsparseSpMV_bufferSize and \ref hipsparseSpMV routines are non-blocking and executed asynchronously
