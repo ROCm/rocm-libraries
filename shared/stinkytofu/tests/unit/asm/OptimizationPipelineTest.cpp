@@ -25,6 +25,7 @@
 #include <sstream>
 #include <string>
 
+#include "stinkytofu/analysis/AnalysisRegistration.hpp"
 #include "stinkytofu/analysis/asm/AsmVerifierPass.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
@@ -86,6 +87,7 @@ v[0] = "st.v_add_f32"(v[1], v[2])
     int instCountBefore = countInstructions(*func);
 
     PassManager pm;
+    registerAllAnalyses(pm.getAnalysisManager());
     pm.setGemmTileConfig(gemmConfig);
     addPeepholeOptPasses(pm, OptLevel::O0);
     pm.run(*func);
@@ -109,6 +111,7 @@ v[0] = "st.v_add_f32"(v[1], v[2])
     ASSERT_NE(func, nullptr);
 
     PassManager pm;
+    registerAllAnalyses(pm.getAnalysisManager());
     pm.setGemmTileConfig(gemmConfig);
     addPeepholeOptPasses(pm, OptLevel::O1);
 
@@ -130,6 +133,7 @@ v[0] = "st.v_add_f32"(v[1], v[2])
     ASSERT_NE(func, nullptr);
 
     PassManager pm;
+    registerAllAnalyses(pm.getAnalysisManager());
     pm.setGemmTileConfig(gemmConfig);
     addPeepholeOptPasses(pm, OptLevel::O2);
 
@@ -151,6 +155,7 @@ v[0] = "st.v_add_f32"(v[1], v[2])
     ASSERT_NE(func, nullptr);
 
     PassManager pm;
+    registerAllAnalyses(pm.getAnalysisManager());
     pm.setGemmTileConfig(gemmConfig);
     addPeepholeOptPasses(pm, OptLevel::O3);
 

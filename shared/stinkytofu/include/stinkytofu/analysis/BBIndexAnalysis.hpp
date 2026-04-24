@@ -20,51 +20,45 @@
  * THE SOFTWARE.
  *
  * ************************************************************************ */
-
 #pragma once
 
-#include <memory>
-#include <string>
+#include <unordered_map>
+#include <vector>
 
+#include "stinkytofu/core/AnalysisManager.hpp"
 #include "stinkytofu/core/Function.hpp"
-#include "stinkytofu/core/PassManager.hpp"
+#include "stinkytofu/support/CFGTraversal.hpp"
 
 namespace stinkytofu {
-/// Configuration for StinkyTofu Assembly IR verification only.
-/// Used by the ASM pipeline; not shared with Logical IR.
-struct AsmVerifierConfig {
-    bool abortOnError = true;
-    bool verbose = false;
-    bool checkRegisterWidths = true;
-    bool checkRegisterRanges = false;
-    bool checkReadWriteOperands = true;
+/// RPO-indexed map from BasicBlock* to unsigned index and vice versa.
+struct BBIndexMap {
+    std::vector<BasicBlock*> rpo;
+    std::unordered_map<const BasicBlock*, unsigned> index;
 };
 
-/// Validate StinkyTofu Assembly IR (structure, HwInstDesc, register widths).
-/// Returns error message if invalid, empty string if valid.
-/// Only for ASM; do not use for Logical IR.
-std::string validateStinkyIR(Function& func, const AsmVerifierConfig& config = {});
+/// Analysis pass that computes an RPO-indexed BasicBlock map.
+struct BBIndexAnalysis {
+    static inline AnalysisKey Key;
 
-/// Pass that verifies StinkyTofu Assembly IR. Used only in the ASM pass pipeline.
-class StinkyIRVerifierPass : public Pass {
-   public:
-    static char ID;
-
-    explicit StinkyIRVerifierPass(AsmVerifierConfig config = {}) : config_(std::move(config)) {}
-
-    PassID getPassID() const override {
-        return &ID;
+    static AnalysisKey* ID() {
+        return &Key;
     }
-    const char* getName() const override {
-        return "StinkyIRVerifier";
-    }
-    PreservedAnalyses run(Function& func, PassContext& ctx, AnalysisManager& /*AM*/) override;
 
-   private:
-    AsmVerifierConfig config_;
+    static const char* name() {
+        return "BBIndexAnalysis";
+    }
+
+    using Result = BBIndexMap;
+
+    static Result run(Function& F, AnalysisManager& /*AM*/) {
+        BBIndexMap result;
+        unsigned idx = 0;
+        traverseCFGInRPO(F, [&](BasicBlock* bb) {
+            result.rpo.push_back(bb);
+            result.index[bb] = idx++;
+        });
+        return result;
+    }
 };
 
-inline std::unique_ptr<Pass> createStinkyIRVerifierPass(AsmVerifierConfig config = {}) {
-    return std::make_unique<StinkyIRVerifierPass>(std::move(config));
-}
 }  // namespace stinkytofu

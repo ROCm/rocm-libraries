@@ -33,7 +33,7 @@
 namespace stinkytofu {
 char StinkyIRVerifierPass::ID = 0;
 
-void StinkyIRVerifierPass::run(Function& func, PassContext&) {
+PreservedAnalyses StinkyIRVerifierPass::run(Function& func, PassContext&, AnalysisManager& /*AM*/) {
     std::string error = validateStinkyIR(func, config_);
     if (!error.empty()) {
         if (config_.abortOnError) {
@@ -42,6 +42,7 @@ void StinkyIRVerifierPass::run(Function& func, PassContext&) {
         }
         std::cerr << "[StinkyIRVerifier] " << error;
     }
+    return PreservedAnalyses::all();
 }
 
 // ===========================================================================
