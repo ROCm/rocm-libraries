@@ -53,18 +53,18 @@ void cpu_kthvalue(tensor<TIO> input,
 
     std::vector<float> elements;
     std::vector<size_t> ids(dimSize);
-    for(int i = 0; i < dimSize; ++i)
+    for(size_t i = 0U; i < dimSize; ++i)
     {
         ids[i] = i;
     }
 
-    for(int slideID = 0; slideID < numSlice; ++slideID)
+    for(size_t slideID = 0U; slideID < numSlice; ++slideID)
     {
         elements.clear();
         tensor_layout_t<4> layout(inputTvWithoutDim, slideID);
         auto idx = inputTvWithoutDim.get_tensor_view_idx(layout);
 
-        for(int j = 0; j < dimSize; ++j)
+        for(size_t j = 0U; j < dimSize; ++j)
         {
             elements.push_back(static_cast<float>(input[idx + j * dimStride]));
         }

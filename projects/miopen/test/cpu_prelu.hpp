@@ -76,7 +76,7 @@ void cpu_prelu_backward(const tensor<T> input,
         if(weight.desc.GetElementSize() == 1)
         {
             double sum = 0;
-            for(int i = 0; i < N; ++i)
+            for(auto i = 0ULL; i < N; ++i)
                 sum += static_cast<double>(weight_grad_collector[i]);
             ref_weight_grad[0] = static_cast<T>(sum);
         }

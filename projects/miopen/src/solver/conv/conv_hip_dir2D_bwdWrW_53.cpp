@@ -87,12 +87,10 @@ bool ConvHipBwdWrW53::IsApplicable(const ExecutionContext& ctx,
            // right padding, when reading an input row into LDS. Also need to rewrite the vertical
            // loop.
            // Remind that input is output, output is input.
-           (problem.GetInHeight() == static_cast<int>(problem.GetOutHeight()) +
-                                         2 * problem.GetPadH() -
-                                         static_cast<int>(problem.GetWeightsHeight()) + 1) &&
-           (problem.GetInWidth() == static_cast<int>(problem.GetOutWidth()) +
-                                        2 * problem.GetPadW() -
-                                        static_cast<int>(problem.GetWeightsWidth()) + 1) &&
+           (problem.GetInHeight() ==
+            problem.GetOutHeight() + 2U * problem.GetPadH() - problem.GetWeightsHeight() + 1) &&
+           (problem.GetInWidth() ==
+            problem.GetOutWidth() + 2U * problem.GetPadW() - problem.GetWeightsWidth() + 1) &&
 
            // Avoid LDS over-allocation
            GetSolution(ctx, problem).Succeeded();
@@ -132,7 +130,8 @@ static inline miopenStatus_t ComputeInputParams(
     const auto max_lds_elements =
         lds_size / (2 * static_cast<int>(GetTypeSize(problem.GetInDataType())));
 
-    while(num_out_channels * out_n_vert_reads * (out_n_horizon_reads + filter_adjustment) >
+    while(num_out_channels * out_n_vert_reads *
+              (out_n_horizon_reads + static_cast<int>(filter_adjustment)) >
           max_lds_elements)
     {
         if(out_n_vert_reads < 2 && num_out_channels >= 2)
@@ -140,11 +139,12 @@ static inline miopenStatus_t ComputeInputParams(
             out_n_vert_reads = problem.GetInHeight();
             num_out_channels = std::ceil(static_cast<float>(num_out_channels) / 2);
         }
-        else if(out_n_vert_reads >= problem.GetWeightsHeight() * 2)
+        else if(static_cast<size_t>(out_n_vert_reads) >= problem.GetWeightsHeight() * 2)
         {
             out_n_vert_reads = std::ceil(static_cast<float>(out_n_vert_reads) / 2);
         }
-        else if(out_n_vert_reads >= problem.GetWeightsHeight() && out_n_horizon_reads > 2)
+        else if(static_cast<size_t>(out_n_vert_reads) >= problem.GetWeightsHeight() &&
+                out_n_horizon_reads > 2)
         {
             out_n_horizon_reads = std::ceil(static_cast<float>(out_n_horizon_reads) / 2);
         }
@@ -158,7 +158,7 @@ static inline miopenStatus_t ComputeInputParams(
 
     // LDS check based on weight blob
     // Kernel uses LDS for storing input data and weight accumulation
-    if(workgroup_size * problem.GetWeightsWidth() > max_lds_elements)
+    if(workgroup_size * problem.GetWeightsWidth() > static_cast<size_t>(max_lds_elements))
     {
         MIOPEN_LOG_I2("For large filter size " << problem.GetWeightsWidth()
                                                << ", running out of LDS size (bytes) " << lds_size);
@@ -441,7 +441,7 @@ ConvSolution ConvHipBwdWrW53::GetSolution(const ExecutionContext& ctx,
             : result.in_tile0;
 
     // select output mapping
-    int total_out_maps = result.n_out_pix_tiles * n_out_stacks;
+    size_t total_out_maps = result.n_out_pix_tiles * n_out_stacks;
     total_out_maps =
         (total_out_maps > problem.GetInChannels()) ? problem.GetInChannels() : total_out_maps;
 

@@ -134,7 +134,7 @@ std::vector<miopenConvSolution_t> GetSolutions(const ExecutionContext& ctx,
         if(!conv::IsEnoughWorkspace("GetSolutions", solver_id, s.workspace_size, invokeParams))
             continue;
         out.push_back(s);
-        if(++n_copied >= maxSolutionCount)
+        if(static_cast<size_t>(++n_copied) >= maxSolutionCount)
             break;
     }
 
@@ -1016,7 +1016,7 @@ ConvolutionDescriptor::GetSolutionsFallback(const ExecutionContext& ctx,
                "GetSolutionsFallback", solver_id, s.workspace_size, invokeParams, false))
             continue;
         out.push_back(s);
-        if(++n_copied >= maxSolutionCount)
+        if(static_cast<size_t>(++n_copied) >= maxSolutionCount)
             break;
     }
 

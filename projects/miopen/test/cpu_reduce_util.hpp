@@ -300,7 +300,7 @@ template <typename T>
 std::vector<std::vector<T>> get_all_indexes(const std::vector<T>& lens)
 {
     const std::size_t D = lens.size();
-    assert(D > 0);
+    assert(D > 0ULL);
 
     std::size_t N = 1;
     for(const auto L : lens)
@@ -312,12 +312,12 @@ std::vector<std::vector<T>> get_all_indexes(const std::vector<T>& lens)
         row.resize(D);
 
     std::vector<std::size_t> stride(D, 1);
-    for(std::size_t d = D; d-- > 1;)
+    for(std::size_t d = D; d-- > 1ULL;)
         stride[d - 1] = stride[d] * static_cast<std::size_t>(lens[d]);
 
-    for(std::size_t r = 0; r < N; ++r)
+    for(std::size_t r = 0ULL; r < N; ++r)
     {
-        for(std::size_t d = 0; d < D; ++d)
+        for(std::size_t d = 0ULL; d < D; ++d)
             out[r][d] = static_cast<T>((r / stride[d]) % static_cast<std::size_t>(lens[d]));
     }
 
@@ -345,7 +345,7 @@ T get_offset_from_index(const std::vector<T>& strides, const std::vector<T>& ind
 
     assert(strides.size() == index.size());
 
-    for(int i = 0; i < index.size(); i++)
+    for(auto i = 0ULL; i < index.size(); i++)
         offset += strides[i] * index[i];
 
     return (offset);
@@ -491,8 +491,8 @@ std::tuple<tensor<Tref>, tensor<int>> reduce_cpu_common(const miopenReduceTensor
         for(std::size_t p = 0; p < P; ++p)
             partial.emplace_back(nanOpt, reduceOp, zeroV, withIdx);
 
-        auto worker = [&](int p) {
-            const std::size_t begin = std::size_t(p) * chunk;
+        auto worker = [&](size_t p) {
+            const std::size_t begin = p * chunk;
             const std::size_t end   = std::min(begin + chunk, N);
 
             auto& r = partial[p];
@@ -508,11 +508,11 @@ std::tuple<tensor<Tref>, tensor<int>> reduce_cpu_common(const miopenReduceTensor
 
         if(parallel)
         {
-            miopen::par_for(static_cast<int>(P), worker);
+            miopen::par_for(P, worker);
         }
         else
         {
-            for(int p = 0; p < P; ++p)
+            for(auto p = 0ULL; p < P; ++p)
             {
                 worker(p);
             }
@@ -550,8 +550,8 @@ std::tuple<tensor<Tref>, tensor<int>> reduce_cpu_common(const miopenReduceTensor
         const std::size_t Te    = std::min(hw * 4ul, std::max<std::size_t>(1, INV));
         const std::size_t chunk = (INV + Te - 1) / Te;
 
-        auto worker = [&](int t) {
-            const std::size_t row0 = std::size_t(t) * chunk;
+        auto worker = [&](size_t t) {
+            const std::size_t row0 = t * chunk;
             const std::size_t row1 = std::min(row0 + chunk, INV);
 
             for(std::size_t r = row0; r < row1; ++r)
@@ -600,11 +600,11 @@ std::tuple<tensor<Tref>, tensor<int>> reduce_cpu_common(const miopenReduceTensor
 
         if(parallel)
         {
-            miopen::par_for(static_cast<int>(Te), worker);
+            miopen::par_for(Te, worker);
         }
         else
         {
-            for(int te = 0; te < Te; ++te)
+            for(auto te = 0ULL; te < Te; ++te)
             {
                 worker(te);
             }

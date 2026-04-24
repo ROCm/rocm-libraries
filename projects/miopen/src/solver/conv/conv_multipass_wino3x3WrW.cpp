@@ -119,10 +119,10 @@ struct InTransform
 
         return (problem.IsFp32() || problem.IsFp16() || problem.IsBfp16())
                 && problem.Is2d()
-                && H < u16limit
-                && W < u16limit
+                && static_cast<size_t>(H) < u16limit
+                && static_cast<size_t>(W) < u16limit
                 && wino_info.buff_info.size.c < (1<<30)
-                && N < u16limit
+                && static_cast<size_t>(N) < u16limit
                 && chw_step < u16limit
                 && problem.GetPadH() <= 3
                 && problem.GetPadW() <= 3;
@@ -225,10 +225,10 @@ struct FilterTransform
         }
         return (problem.IsFp32() || problem.IsFp16() || problem.IsBfp16())
                 && problem.Is2d()
-                && H < u16limit
-                && W < u16limit
+                && static_cast<size_t>(H) < u16limit
+                && static_cast<size_t>(W) < u16limit
                 && wino_info.buff_info.size.c < (1<<30)
-                && K < u16limit
+                && static_cast<size_t>(K) < u16limit
                 && chw_step < u16limit
                 && problem.GetPadH() <= 3
                 && problem.GetPadW() <= 3;

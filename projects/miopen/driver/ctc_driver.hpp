@@ -258,7 +258,7 @@ int CTCDriver<Tgpu, Tref>::AllocateBuffersAndCopy()
     // initialize labels
     labels = std::vector<int>(labels_sz);
 
-    for(int i = 0; i < labels_sz; i++)
+    for(auto i = 0ULL; i < labels_sz; i++)
     {
         labels[i] = prng::gen_off_range(1, num_class);
         if(blank_lb > num_class)
@@ -307,7 +307,7 @@ int CTCDriver<Tgpu, Tref>::AllocateBuffersAndCopy()
 
     double scale = 0.01;
 
-    for(int i = 0; i < probs_sz; i++)
+    for(auto i = 0ULL; i < probs_sz; i++)
     {
         probs[i] = static_cast<Tgpu>(prng::gen_0_to_B(scale));
     }

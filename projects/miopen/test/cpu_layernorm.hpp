@@ -30,7 +30,7 @@ void cpu_layernorm_forward(tensor<T> input,
     size_t inner_size = 1;
     for(size_t i = 0; i < dims.size(); ++i)
     {
-        if(i < dim)
+        if(i < static_cast<size_t>(dim))
         {
             if(!(stride > 1 && i == 1))
             {
@@ -101,7 +101,7 @@ void cpu_layernorm_backward(tensor<T> dy,
     size_t inner_size = 1;
     for(size_t i = 0; i < dims.size(); ++i)
     {
-        if(i < dim)
+        if(i < static_cast<size_t>(dim))
         {
             if(!(stride > 1 && i == 1))
             {
@@ -176,7 +176,7 @@ void cpu_layernorm_backward_weight_bias(tensor<T> dy,
     size_t inner_size = 1;
     for(size_t i = 0; i < dims.size(); ++i)
     {
-        if(i < dim)
+        if(i < static_cast<size_t>(dim))
         {
             if(!(stride > 1 && i == 1))
             {

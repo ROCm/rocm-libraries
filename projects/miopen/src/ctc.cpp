@@ -38,17 +38,17 @@ void CTCLossDescriptor::CTCLoss(const Handle& handle,
         MIOPEN_THROW("probs tensor's dimension does not match gradients tensor's dimension");
     }
 
-    int class_sz      = probsDesc.GetLengths()[2];
-    int batch_size    = probsDesc.GetLengths()[1];
-    int max_time_step = probsDesc.GetLengths()[0];
+    size_t class_sz      = probsDesc.GetLengths()[2];
+    size_t batch_size    = probsDesc.GetLengths()[1];
+    size_t max_time_step = probsDesc.GetLengths()[0];
     std::vector<int> repeat(batch_size, 0);
     std::vector<int> labels_offset(batch_size, 0);
     int max_label_len   = 0;
     int total_label_len = 0;
 
-    for(int i = 0; i < batch_size; i++)
+    for(size_t i = 0; i < batch_size; i++)
     {
-        if(inputLengths[i] > max_time_step)
+        if(static_cast<size_t>(inputLengths[i]) > max_time_step)
         {
             MIOPEN_THROW("Wrong input time step");
         }
@@ -58,7 +58,7 @@ void CTCLossDescriptor::CTCLoss(const Handle& handle,
 
         for(int j = 0; j < labelLengths[i]; j++)
         {
-            if(labels[labels_offset[i] + j] >= class_sz)
+            if(static_cast<size_t>(labels[labels_offset[i] + j]) >= class_sz)
             {
                 MIOPEN_THROW("Wrong label id");
             }
@@ -178,7 +178,7 @@ void CTCLossDescriptor::CTCLoss(const Handle& handle,
         {
             blank_label = 0;
         }
-        else if(blank_label_id >= class_sz)
+        else if(static_cast<size_t>(blank_label_id) >= class_sz)
         {
             blank_label = class_sz - 1;
         }

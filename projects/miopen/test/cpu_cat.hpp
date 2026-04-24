@@ -18,7 +18,7 @@ void cpu_cat_forward(const std::vector<tensor<T>>& inputs,
     size_t inner_size            = 1;
     size_t k                     = 0;
 
-    for(; k < dim; ++k)
+    for(; k < static_cast<size_t>(dim); ++k)
     {
         outer_size *= dims[k];
     }

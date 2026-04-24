@@ -412,7 +412,7 @@ bool PerformanceConfigConvBinWinogradRxS::IsValidValue() const
 
 bool PerformanceConfigConvBinWinogradRxS::IsValid(const ExecutionContext& ctx) const
 {
-    if(ctx.GetStream().GetMaxHardwareComputeUnits() < n_groups)
+    if(ctx.GetStream().GetMaxHardwareComputeUnits() < static_cast<size_t>(n_groups))
         return false;
 
     if(!IsValidValue())

@@ -150,7 +150,8 @@ void cpu_convolution_forward_impl(const tensor<Tin>& in,
                 for(std::size_t i = 0; i < ConvDim; ++i)
                 {
                     out_of_bound = out_of_bound or
-                                   (in_spatial_id[i] < 0 or in_spatial_id[i] >= in_spatial_len[i]);
+                                   (in_spatial_id[i] < 0 or
+                                    static_cast<size_t>(in_spatial_id[i]) >= in_spatial_len[i]);
                 }
                 if(!out_of_bound)
                 {
@@ -263,7 +264,7 @@ void cpu_convolution_backward_data_impl(tensor<Tin>& in,
                     for(std::size_t i = 0; i < ConvDim; ++i)
                     {
                         use &= out_spatial_id_[i] % strides[i] == 0 and out_spatial_id[i] >= 0 and
-                               out_spatial_id[i] < out_spatial_len[i];
+                               static_cast<size_t>(out_spatial_id[i]) < out_spatial_len[i];
                     }
 
                     if(use)
@@ -354,8 +355,9 @@ void cpu_convolution_backward_weight_impl(const tensor<Tin>& in,
                     bool out_of_bound = false;
                     for(std::size_t i = 0; i < ConvDim; ++i)
                     {
-                        out_of_bound = out_of_bound or (in_spatial_id[i] < 0 or
-                                                        in_spatial_id[i] >= in_spatial_len[i]);
+                        out_of_bound = out_of_bound or
+                                       (in_spatial_id[i] < 0 or
+                                        static_cast<size_t>(in_spatial_id[i]) >= in_spatial_len[i]);
                     }
 
                     if(!out_of_bound)

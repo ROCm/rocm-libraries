@@ -53,7 +53,7 @@ template <typename T>
 T logsumexp_gpu(T* in_vec, size_t length)
 {
     auto sum = in_vec[0];
-    for(int i = 1; i < length; i++)
+    for(auto i = 1U; i < length; i++)
         sum = logaddexp_gpu(&(in_vec[i]), &sum);
 
     return sum;
@@ -65,14 +65,14 @@ void subvec_logsoftmax_gpu(Tgpu* in, Tref* out, size_t in_offset, size_t out_off
     auto itr_in  = in + in_offset;
     auto itr_out = out + out_offset;
     Tgpu max_val = *itr_in;
-    for(int i = 1; i < length; i++)
+    for(auto i = 1U; i < length; i++)
         max_val = std::max(*(itr_in + i), max_val);
 
-    for(int i = 0; i < length; i++)
+    for(auto i = 0U; i < length; i++)
         *(itr_out + i) = Tref(*(itr_in + i) - max_val);
 
     Tref sum = logsumexp_gpu(itr_out, length);
-    for(int i = 0; i < length; i++)
+    for(auto i = 0U; i < length; i++)
         *(itr_out + i) = std::max(*(itr_out + i) - sum, Tref(NEGATIVE_CUTOFF_VAL));
 }
 
@@ -447,7 +447,7 @@ void RunCTCLossGPUEmulator(std::vector<int>& probsDesc,
         }
     }
 
-    if(probs.size() != (max_time_step * batch_size * class_sz))
+    if(probs.size() != static_cast<size_t>(max_time_step * batch_size * class_sz))
     {
         printf("Wrong probability tensor size\n");
         return;

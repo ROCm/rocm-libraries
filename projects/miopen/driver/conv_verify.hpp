@@ -110,7 +110,7 @@ void RunBackwardWeightsCPUVerify(std::vector<Tcheck_>& dwei_host,
             }
         }
     }
-    for(size_t i = 0; i < wei_n * wei_c * wei_h * wei_w; ++i)
+    for(size_t i = 0; i < static_cast<size_t>(wei_n * wei_c * wei_h * wei_w); ++i)
     {
         dwei_host[i] = t_wei[i];
     }

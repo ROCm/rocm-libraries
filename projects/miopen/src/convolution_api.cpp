@@ -336,7 +336,7 @@ extern "C" miopenStatus_t miopenSetTransposeConvNdOutputPadding(
         MIOPEN_LOG_FUNCTION(convDesc, spatialDim, adj.values);
     }
     return miopen::try_([&] {
-        if(spatialDim != miopen::deref(convDesc).GetSpatialDimension())
+        if(static_cast<size_t>(spatialDim) != miopen::deref(convDesc).GetSpatialDimension())
         {
             MIOPEN_THROW("spatialDim not consistent with convolution descriptor");
         }
@@ -757,7 +757,7 @@ static inline void ReturnSolutions(const std::vector<miopenConvSolution_t>& solu
         *solution_count_ret = solutions.size();
     if(solutions_ret != nullptr)
     {
-        for(auto i = 0; i < solutions.size(); ++i)
+        for(auto i = 0U; i < solutions.size(); ++i)
             solutions_ret[i] = solutions[i];
     }
 }
