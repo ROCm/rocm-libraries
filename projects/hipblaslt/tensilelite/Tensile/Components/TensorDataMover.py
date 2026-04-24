@@ -105,12 +105,18 @@ class TensorDataMoverLoad(TensorDataMover):
 
     def issueLoad(self, group0: int | str, group1: int | str, group2: Optional[int | str], group3: Optional[int | str]) -> Module:
         mod = Module("tensor load")
+        if len(self.mem_token) > 1:
+            comment = f"sync LDS {self.mem_token}"
+        elif len(self.mem_token) == 1:
+            comment = f"sync LDS%u"%(self.mem_token[0])
+        else:
+            comment = "No MemToken for TDM load"
         if all(g is not None for g in [group2, group3]):
             tensorLoadToLds = TensorLoadToLds(sgpr(group0, self.GROUP0_NUM_SGPR), sgpr(group1, self.GROUP1_NUM_SGPR),\
-                                              sgpr(group2, self.GROUP2_NUM_SGPR), sgpr(group3, self.GROUP3_NUM_SGPR))
+                                              sgpr(group2, self.GROUP2_NUM_SGPR), sgpr(group3, self.GROUP3_NUM_SGPR), comment=comment)
         else:
             tensorLoadToLds = TensorLoadToLds(sgpr(group0, self.GROUP0_NUM_SGPR), sgpr(group1, self.GROUP1_NUM_SGPR),\
-                                              None, None)
+                                              None, None, comment=comment)
 
         if self.mem_token is not None:
             tensorLoadToLds.setMemToken(MemTokenData(self.mem_token))
