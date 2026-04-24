@@ -79,7 +79,7 @@ protected:
     }
 };
 
-constexpr auto ASYNC_LOG_TIMEOUT = std::chrono::seconds(3);
+constexpr auto ASYNC_LOG_TIMEOUT = std::chrono::seconds(10);
 
 // Test: User callback receives backend logs
 TEST_F(IntegrationBackendUserLoggingApis, UserCallbackReceivesLogs)

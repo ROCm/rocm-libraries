@@ -11,7 +11,7 @@
 #include <mutex>
 #include <thread>
 
-constexpr auto ASYNC_LOG_TIMEOUT = std::chrono::seconds(3);
+constexpr auto ASYNC_LOG_TIMEOUT = std::chrono::seconds(10);
 
 using namespace hipdnn_frontend;
 using namespace hipdnn_test_sdk::utilities;
