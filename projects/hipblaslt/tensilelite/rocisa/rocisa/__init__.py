@@ -86,10 +86,10 @@ def _import_rocisa():
 #   - "logical"              -> logicalIR adaptor shim under
 #                               shared/stinkytofu/python_module/ir_adaptor
 #
-# The adapter path can be overridden with ``ROCISA_LOGICAL_IR_PATH``; if not
-# set we compute a path relative to this file so the common in-tree layout
-# "Just Works".  When loading succeeds we rewire ``sys.modules["rocisa"]``
-# (and every ``rocisa.<submodule>``) to point at the adapter, so existing
+# The adapter path is computed relative to this file (by walking up to the
+# monorepo root) so the common in-tree layout "Just Works".  When loading
+# succeeds we rewire ``sys.modules["rocisa"]`` (and every
+# ``rocisa.<submodule>``) to point at the adapter, so existing
 # ``from rocisa.instruction import BufferLoadB128`` etc. transparently pick
 # up the shim.
 #
@@ -109,16 +109,33 @@ def _load_logical_adapter() -> bool:
     whether that is acceptable).
     """
 
-    override = os.environ.get("ROCISA_LOGICAL_IR_PATH")
-    if override:
-        adapter_parent = os.path.abspath(override)
-    else:
-        # this file: .../projects/hipblaslt/tensilelite/rocisa/rocisa/__init__.py
-        # target  : .../shared/stinkytofu/python_module/ir_adaptor
-        here = os.path.dirname(os.path.abspath(__file__))
-        # go up 5 levels: rocisa/ -> rocisa/ -> tensilelite/ -> hipblaslt/ -> projects/ -> repo_root
-        repo_root = os.path.abspath(os.path.join(here, "..", "..", "..", "..", ".."))
-        adapter_parent = os.path.join(repo_root, "shared", "stinkytofu", "python_module")
+    # Walk upward from this file until we find an ancestor named
+    # ``projects``. Its parent is (by repo convention) the monorepo
+    # root, which must also contain the sibling layout:
+    #
+    #     <repo_root>/
+    #     ├── projects/   ← we live somewhere under here
+    #     └── shared/stinkytofu/   ← adapter lives here
+    #
+    # Works regardless of repo directory name (e.g. clones renamed to
+    # ``my-rocm-fork``) and regardless of extra build-tree nesting.
+    repo_root = None
+    cur = os.path.dirname(os.path.abspath(__file__))
+    while True:
+        parent = os.path.dirname(cur)
+        if parent == cur:  # reached filesystem root
+            break
+        if os.path.basename(cur) == "projects":
+            # ``cur`` is the ``projects`` directory itself; the repo
+            # root is its parent, and must contain ``shared/stinkytofu``.
+            candidate = parent
+            if os.path.isdir(os.path.join(candidate, "shared", "stinkytofu")):
+                repo_root = candidate
+                break
+        cur = parent
+    if repo_root is None:
+        return False
+    adapter_parent = os.path.join(repo_root, "shared", "stinkytofu", "python_module")
 
     if not os.path.isdir(os.path.join(adapter_parent, "ir_adaptor")):
         return False
