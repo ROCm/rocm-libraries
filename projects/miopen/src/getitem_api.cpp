@@ -59,7 +59,7 @@ static void LogCmdGetitem(const miopenTensorDescriptor_t dyDesc,
 
         std::string dy_s;
         auto dy_dims = miopen::deref(dyDesc).GetLengths();
-        for(int i = 0; i < dy_dims.size(); i++)
+        for(size_t i = 0U; i < dy_dims.size(); i++)
         {
             dy_s += std::to_string(dy_dims[i]);
             if(i != dy_dims.size() - 2)
@@ -67,11 +67,11 @@ static void LogCmdGetitem(const miopenTensorDescriptor_t dyDesc,
         }
         ss << " -doutput " << dy_s;
 
-        for(int i = 0; i < indexCount; i++)
+        for(size_t i = 0U; i < indexCount; i++)
         {
             std::string index_s;
             auto index_dims = miopen::deref(indexDescs[i]).GetLengths();
-            for(int j = 0; j < index_dims.size(); j++)
+            for(size_t j = 0U; j < index_dims.size(); j++)
             {
                 index_s += std::to_string(index_dims[j]);
                 if(j != index_dims.size() - 2)
@@ -83,7 +83,7 @@ static void LogCmdGetitem(const miopenTensorDescriptor_t dyDesc,
         std::string dx_s;
         auto dx_dims = miopen::deref(dxDesc).GetLengths();
 
-        for(int i = 0; i < dx_dims.size(); i++)
+        for(size_t i = 0U; i < dx_dims.size(); i++)
         {
             dx_s += std::to_string(dx_dims[i]);
             if(i != dx_dims.size() - 2)
@@ -93,7 +93,7 @@ static void LogCmdGetitem(const miopenTensorDescriptor_t dyDesc,
         ss << " -dx " << dx_s;
 
         std::string dims_s;
-        for(int i = 0; i < dimCount; i++)
+        for(size_t i = 0U; i < dimCount; i++)
         {
             dims_s += std::to_string(dims[i]);
             if(i != dimCount - 2)
@@ -102,7 +102,7 @@ static void LogCmdGetitem(const miopenTensorDescriptor_t dyDesc,
         ss << " -dims" << dims_s;
 
         std::string slices_s;
-        for(int i = 0; i < sliceCount; i++)
+        for(size_t i = 0U; i < sliceCount; i++)
         {
             slices_s += std::to_string(slices[i]);
             if(i != sliceCount - 2)

@@ -67,7 +67,7 @@ public:
 
     value_type operator*()
     {
-        if(buf_idx >= buf.size())
+        if(static_cast<size_t>(buf_idx) >= buf.size())
         {
             for(auto idx = 0; idx < max_buf_sz; idx++)
                 buf[idx] = dis(gen);

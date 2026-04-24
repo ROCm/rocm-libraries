@@ -477,7 +477,7 @@ miopenStatus_t FusionPlanDescriptor::GetOp(int op_idx, std::shared_ptr<FusionOpD
 {
     auto err = miopenStatusSuccess;
 
-    if(op_idx >= op_map.size())
+    if(static_cast<size_t>(op_idx) >= op_map.size())
     {
         MIOPEN_THROW(miopenStatusBadParm, "Operator index out of bounds");
     }
@@ -997,7 +997,7 @@ std::vector<miopenConvSolution_t> GetSolutions(const FusionContext& ctx,
     std::sort(begin(interim), end(interim), SolutionTimeComparator{});
     auto out = std::vector<miopenConvSolution_t>{};
     out.reserve(maxSolutionCount);
-    auto n_copied = 0;
+    auto n_copied = 0U;
     for(const auto& s : interim)
     {
         const auto solver_id = solver::Id{s.solution_id};

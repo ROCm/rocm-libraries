@@ -55,7 +55,7 @@ void cpu_getitem_backward(tensor<T> dy,
     auto element_index = std::vector<int32_t>(indexCount * index_numel + indexCount);
 
     std::vector<int32_t> output_dims;
-    for(int32_t i = 0; i < dimCount; i++)
+    for(auto i = 0ULL; i < dimCount; i++)
     {
         output_dims.push_back(dx_dims[dims[i]]);
     }
@@ -68,7 +68,7 @@ void cpu_getitem_backward(tensor<T> dy,
     miopen::slice_tv<5>(ref_dx_tv, sliceCount, slices);
 
     // Get element index form indexs
-    for(int j = 0; j < indexCount; j++)
+    for(auto j = 0ULL; j < indexCount; j++)
     {
         auto index_dim = dims[j];
         auto dim_size  = output_dims[j];
@@ -142,19 +142,19 @@ struct GetitemTestCase
         os << " dy:";
         auto dy_s = tc.dy;
         os << dy_s[0];
-        for(int32_t i = 1; i < dy_s.size(); i++)
+        for(auto i = 1ULL; i < dy_s.size(); i++)
         {
             os << "x" << dy_s[i];
         }
 
         os << " indexs:";
-        for(int32_t i = 0; i < tc.indexs.size(); i++)
+        for(auto i = 0ULL; i < tc.indexs.size(); i++)
         {
             auto index_s = tc.indexs[i];
             if(i != 0)
                 os << ",";
             os << index_s[0];
-            for(int32_t j = 1; j < index_s.size(); j++)
+            for(auto j = 1ULL; j < index_s.size(); j++)
             {
                 os << "index" << index_s[j];
             }
@@ -163,7 +163,7 @@ struct GetitemTestCase
         os << " dx:";
         auto dx_s = tc.dx;
         os << dx_s[0];
-        for(int32_t i = 1; i < dx_s.size(); i++)
+        for(auto i = 1ULL; i < dx_s.size(); i++)
         {
             os << "x" << dx_s[i];
         }
@@ -171,19 +171,19 @@ struct GetitemTestCase
         os << " dims:";
         auto dims_s = tc.dims;
         os << dims_s[0];
-        for(int32_t i = 1; i < dims_s.size(); i++)
+        for(auto i = 1ULL; i < dims_s.size(); i++)
         {
             os << "," << dims_s[i];
         }
 
         os << " slices:";
-        for(int32_t i = 0; i < tc.slices.size(); i++)
+        for(auto i = 0ULL; i < tc.slices.size(); i++)
         {
             auto slice_s = tc.slices[i];
             if(i != 0)
                 os << ",";
             os << slice_s[0];
-            for(int32_t j = 1; j < slice_s.size(); j++)
+            for(auto j = 1ULL; j < slice_s.size(); j++)
             {
                 os << "slice" << slice_s[j];
             }
@@ -255,7 +255,7 @@ protected:
             output_dims.push_back(static_cast<int32_t>(dx_dim[dim]));
         }
 
-        for(int32_t i = 0; i < indexs_dim.size(); i++)
+        for(auto i = 0ULL; i < indexs_dim.size(); i++)
         {
             auto index       = tensor<int32_t>{indexs_dim[i]};
             auto index_dims  = index.desc.GetLengths();

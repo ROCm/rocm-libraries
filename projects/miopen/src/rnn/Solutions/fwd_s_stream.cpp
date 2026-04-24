@@ -47,7 +47,7 @@ void RNNModularSingleStreamFWD::ComputeFWD(const Handle& handle,
 
     rnnAlgoModules.AddBias(handle, runtimeArgs);
 
-    for(auto layer_i = 0; layer_i < rnnDesc.nLayers; ++layer_i)
+    for(auto layer_i = 0U; layer_i < rnnDesc.nLayers; ++layer_i)
     {
 
         for(int dir = 0; dir < sequence_directions; dir++)
@@ -58,7 +58,7 @@ void RNNModularSingleStreamFWD::ComputeFWD(const Handle& handle,
             if(layer_i != 0)
                 rnnAlgoModules.PropHiddenY(handle, runtimeArgs, layer_i, seq_dir);
 
-            for(int ti = 0; ti < max_seq_len; ti++)
+            for(auto ti = 0U; ti < max_seq_len; ti++)
             {
                 const rnn_base::SequenceIterator cur_seq(ti, seq_dir, max_seq_len, true);
 
@@ -108,7 +108,7 @@ void RNNDynamicModularSingleStreamFWD::ComputeFWD(const Handle& handle,
 
     rnnAlgoModules.AddBias(handle, runtimeArgs);
 
-    for(auto layer_i = 0; layer_i < rnnDesc.nLayers; ++layer_i)
+    for(auto layer_i = 0ULL; layer_i < rnnDesc.nLayers; ++layer_i)
     {
 
         for(int dir = 0; dir < sequence_directions; dir++)
@@ -119,7 +119,7 @@ void RNNDynamicModularSingleStreamFWD::ComputeFWD(const Handle& handle,
             if(layer_i != 0)
                 rnnAlgoModules.PropHiddenY(handle, runtimeArgs, layer_i, seq_dir);
 
-            for(int ti = 0; ti < real_seq_iterations; ti++)
+            for(auto ti = 0ULL; ti < real_seq_iterations; ti++)
             {
                 const rnn_base::SequenceIterator cur_seq(ti, seq_dir, real_seq_iterations, true);
 

@@ -198,7 +198,7 @@ int GLUDriver<Tgpu, Tref>::GetandSetData()
 
     std::vector<int> out_len;
 
-    for(int i = 0; i < in_len.size(); i++)
+    for(auto i = 0U; i < in_len.size(); i++)
     {
         if(i != dim)
         {
@@ -268,7 +268,7 @@ int GLUDriver<Tgpu, Tref>::AllocateBuffersAndCopy()
         // CPU allocation
         outhost = std::vector<Tref>(out_sz, static_cast<Tref>(0));
 
-        for(int i = 0; i < in_sz; i++)
+        for(auto i = 0ULL; i < in_sz; i++)
         {
             in[i] = prng::gen_A_to_B(static_cast<Tgpu>(0.0), static_cast<Tgpu>(1.0));
         }
@@ -302,11 +302,11 @@ int GLUDriver<Tgpu, Tref>::AllocateBuffersAndCopy()
         outhost    = std::vector<Tref>(out_sz, static_cast<Tref>(0));
         inGradhost = std::vector<Tref>(inGrad_sz, static_cast<Tref>(0));
 
-        for(int i = 0; i < in_sz; i++)
+        for(auto i = 0ULL; i < in_sz; i++)
         {
             in[i] = prng::gen_A_to_B(static_cast<Tgpu>(0.0), static_cast<Tgpu>(1.0));
         }
-        for(int i = 0; i < outGrad_sz; i++)
+        for(auto i = 0ULL; i < outGrad_sz; i++)
         {
             outGrad[i] = prng::gen_A_to_B(static_cast<Tgpu>(0.0), static_cast<Tgpu>(1.0));
         }

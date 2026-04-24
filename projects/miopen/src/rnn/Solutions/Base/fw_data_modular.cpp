@@ -217,7 +217,7 @@ void RNNForwardDataModularAlgo::AddBias(const Handle& handle,
                             reservLayout.getGateBlockStride()[1],
                             reservLayout.getGateBlockStride()[3]});
 
-    for(int layer = 0; layer < rnnDesc.nLayers; layer++)
+    for(auto layer = 0U; layer < rnnDesc.nLayers; layer++)
     {
         for(int dir = 0; dir < sequence_directions; dir++)
         {

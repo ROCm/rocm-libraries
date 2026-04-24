@@ -272,7 +272,7 @@ miopenStatus_t miopenFindSolutions(miopenHandle_t handle,
             },
             problem_deref);
 
-        for(auto i = 0; i < solutions_deref.size(); ++i)
+        for(auto i = 0U; i < solutions_deref.size(); ++i)
         {
             auto& theSolution = miopen::deref(solutions + i);
             theSolution       = new miopen::Solution{std::move(solutions_deref[i])};

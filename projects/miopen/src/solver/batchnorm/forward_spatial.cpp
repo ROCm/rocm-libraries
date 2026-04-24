@@ -109,7 +109,7 @@ bool PerformanceConfigBnFwdTraining::SetNextValue(
         return true;
     }
     // Get next valid configuration
-    if((this->index + 1) < valid_kernels.size())
+    if(static_cast<size_t>(this->index + 1) < valid_kernels.size())
     {
         ++this->index;
         this->kernel_id = this->valid_kernels[index];
@@ -128,7 +128,7 @@ bool PerformanceConfigBnFwdTraining::operator==(const PerformanceConfigBnFwdTrai
 
 bool PerformanceConfigBnFwdTraining::IsValidValue() const
 {
-    return this->index >= 0 && this->index < valid_kernels.size();
+    return this->index >= 0 && static_cast<size_t>(this->index) < valid_kernels.size();
 }
 
 bool BnFwdTrainingSpatial::IsApplicable(

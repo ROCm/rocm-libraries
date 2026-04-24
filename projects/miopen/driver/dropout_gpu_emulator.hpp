@@ -167,11 +167,11 @@ void RunDropoutForwardEmulator(miopenHandle_t handle,
         256;
 
     const bool bound_dropout_rate = miopen::float_equal(dropout_rate, 1.0);
-    for(int i0 = 0; i0 < in_len[0]; i0++)
-        for(int i1 = 0; i1 < in_len[1]; i1++)
-            for(int i2 = 0; i2 < in_len[2]; i2++)
-                for(int i3 = 0; i3 < in_len[3]; i3++)
-                    for(int i4 = 0; i4 < in_len[4]; i4++)
+    for(size_t i0 = 0ULL; i0 < in_len[0]; i0++)
+        for(size_t i1 = 0ULL; i1 < in_len[1]; i1++)
+            for(size_t i2 = 0ULL; i2 < in_len[2]; i2++)
+                for(size_t i3 = 0ULL; i3 < in_len[3]; i3++)
+                    for(size_t i4 = 0ULL; i4 < in_len[4]; i4++)
                     {
                         size_t oi = out_offset + i0 * out_str[0] + i1 * out_str[1] +
                                     i2 * out_str[2] + i3 * out_str[3] + i4;
@@ -299,11 +299,11 @@ void RunDropoutBackwardEmulator(const miopenDropoutDescriptor_t dropoutDesc,
                     out_len,
                     out_str);
 
-    for(int i0 = 0; i0 < in_len[0]; i0++)
-        for(int i1 = 0; i1 < in_len[1]; i1++)
-            for(int i2 = 0; i2 < in_len[2]; i2++)
-                for(int i3 = 0; i3 < in_len[3]; i3++)
-                    for(int i4 = 0; i4 < in_len[4]; i4++)
+    for(size_t i0 = 0ULL; i0 < in_len[0]; i0++)
+        for(size_t i1 = 0ULL; i1 < in_len[1]; i1++)
+            for(size_t i2 = 0ULL; i2 < in_len[2]; i2++)
+                for(size_t i3 = 0ULL; i3 < in_len[3]; i3++)
+                    for(size_t i4 = 0ULL; i4 < in_len[4]; i4++)
                     {
                         size_t oi = out_offset + i0 * out_str[0] + i1 * out_str[1] +
                                     i2 * out_str[2] + i3 * out_str[3] + i4;
@@ -395,7 +395,7 @@ void RunDropoutBackwardEmulatorMT(const miopenDropoutDescriptor_t dropoutDesc,
     };
 
     const size_t chunk_size = full_size / std::thread::hardware_concurrency();
-    if(chunk_size > 1024)
+    if(chunk_size > 1024ULL)
     {
         miopen::par_for(std::thread::hardware_concurrency(),
                         [&](size_t i) { calc(i * chunk_size, (i + 1) * chunk_size); });

@@ -99,7 +99,7 @@ protected:
 
         std::vector<size_t> out_dims;
 
-        for(int i = 0; i < in_dims.size(); i++)
+        for(auto i = 0ULL; i < in_dims.size(); i++)
         {
             if(i != dim)
             {
@@ -188,7 +188,7 @@ protected:
 
         std::vector<size_t> out_dims;
 
-        for(int i = 0; i < in_dims.size(); i++)
+        for(auto i = 0ULL; i < in_dims.size(); i++)
         {
             if(i != dim)
             {

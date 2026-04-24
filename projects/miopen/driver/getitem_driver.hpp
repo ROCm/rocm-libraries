@@ -68,7 +68,7 @@ int32_t mloGetitemBackwardRunHost(miopenTensorDescriptor_t dyDesc,
     auto element_index = std::vector<int32_t>(indexCount * index_numel + indexCount);
 
     std::vector<size_t> output_dims;
-    for(int32_t i = 0; i < dimCount; i++)
+    for(size_t i = 0; i < dimCount; i++)
     {
         output_dims.push_back(dx_dims[dims[i]]);
     }
@@ -88,15 +88,15 @@ int32_t mloGetitemBackwardRunHost(miopenTensorDescriptor_t dyDesc,
         const auto& index_dim = dims[j];
         const auto& dim_size  = output_dims[j];
 
-        for(size_t o = 0; o < index_numel; o++)
+        for(decltype(index_numel) o = 0; o < index_numel; o++)
         {
             int32_t getitem_index = indexs[j][o];
 
-            if(getitem_index >= 0 && getitem_index < dim_size)
+            if(getitem_index >= 0 && static_cast<decltype(dim_size)>(getitem_index) < dim_size)
             {
                 element_index[(o * indexCount) + j] = getitem_index;
             }
-            else if(getitem_index >= -dim_size && getitem_index < 0)
+            else if(getitem_index >= -static_cast<int32_t>(dim_size) && getitem_index < 0)
             {
                 element_index[(o * indexCount) + j] = getitem_index + dim_size;
             }
@@ -113,7 +113,7 @@ int32_t mloGetitemBackwardRunHost(miopenTensorDescriptor_t dyDesc,
     }
 
     // GetItem
-    for(size_t o = 0; o < dy_numel; o++)
+    for(decltype(dy_numel) o = 0; o < dy_numel; o++)
     {
         tensor_layout_t<5> ncdhw(dy_tv, o);
         tensor_layout_t<5> idx(ncdhw);
@@ -252,11 +252,11 @@ int GetitemDriver<Tgpu, Tref>::GetandSetData()
     offset               = inflags.GetValueInt("offset");
 
     auto indexTensorLengths = inflags.GetValue2dVectorInt("indexs");
-    if(indexTensorLengths.size() != indexCountParam)
+    if(indexTensorLengths.size() != static_cast<size_t>(indexCountParam))
         MIOPEN_THROW("Error parsing indexs tensor: " + inflags.GetValueStr("indexs") + ".");
 
     dims = inflags.GetValueVectorInt("dims");
-    if(dims.size() != dimCountParam)
+    if(dims.size() != static_cast<size_t>(dimCountParam))
         MIOPEN_THROW("Error parsing dims tensor: " + inflags.GetValueStr("dims") + ".");
 
     for(auto dim : dims)
@@ -265,7 +265,7 @@ int GetitemDriver<Tgpu, Tref>::GetandSetData()
     }
 
     slices = inflags.GetValue2dVectorInt("slices");
-    if(slices.size() != sliceCountParam)
+    if(slices.size() != static_cast<size_t>(sliceCountParam))
         MIOPEN_THROW("Error parsing slices: " + inflags.GetValueStr("slices") + ".");
 
     for(auto slice : slices)
@@ -352,12 +352,12 @@ int GetitemDriver<Tgpu, Tref>::AllocateBuffersAndCopy()
     dxhost    = std::vector<Tref>(dx_sz, static_cast<Tref>(0));
     errorhost = std::vector<int32_t>(error_sz, static_cast<int32_t>(0));
 
-    for(int32_t i = 0; i < dy_sz; i++)
+    for(size_t i = 0ULL; i < dy_sz; i++)
     {
         dy[i] = prng::gen_A_to_B<Tgpu>(static_cast<Tgpu>(-1), static_cast<Tgpu>(1));
     }
 
-    for(int32_t i = 0; i < indexDescs.size(); i++)
+    for(size_t i = 0; i < indexDescs.size(); i++)
     {
         size_t index_sz = GetTensorSize(indexDescs[i]);
         index_devs.push_back(std::unique_ptr<GPUMem>(new GPUMem(ctx, index_sz, sizeof(int32_t))));
@@ -365,7 +365,7 @@ int GetitemDriver<Tgpu, Tref>::AllocateBuffersAndCopy()
         auto& index    = indexs.back();
         auto index_dev = index_devs.back().get();
 
-        for(int j = 0; j < index_sz; j++)
+        for(auto j = 0ULL; j < index_sz; j++)
         {
             index[j] = prng::gen_A_to_B<int32_t>(static_cast<int32_t>(0),
                                                  static_cast<int32_t>(output_dims[i]));

@@ -268,7 +268,7 @@ ConvSolution MultiMarginLossForward::GetSolution(
                 auto reduce_out = static_cast<Data_t>(static_cast<std::byte*>(params.workspace) +
                                                       wt.GetOffset(1));
 
-                int kernelCnt = 1;
+                size_t kernelCnt = 1;
                 for(; kernelCnt < kernels.size() - 1; kernelCnt++)
                 {
                     decltype(auto) kernel = handle_.Run(kernels[kernelCnt]);

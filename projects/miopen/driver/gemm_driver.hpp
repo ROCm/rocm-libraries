@@ -288,7 +288,7 @@ int GemmDriver<T>::AllocateBuffersAndCopy()
 #endif
     chost = c;
 
-    for(int i = 0; i < a_sz; i++)
+    for(size_t i = 0ULL; i < a_sz; i++)
     {
 #if GEMM_DRIVER_DEBUG
         a[i] = static_cast<T>(i);
@@ -297,7 +297,7 @@ int GemmDriver<T>::AllocateBuffersAndCopy()
 #endif
     }
 
-    for(int i = 0; i < b_sz; i++)
+    for(size_t i = 0ULL; i < b_sz; i++)
     {
 #if GEMM_DRIVER_DEBUG
         b[i] = static_cast<T>(i);
