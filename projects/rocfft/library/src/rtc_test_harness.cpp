@@ -306,6 +306,7 @@ void write_standalone_test_harness(const Function& f, const std::string& src)
     main_file << "#include <functional>\n";
     main_file << "#include <future>\n";
     main_file << "#include <memory>\n";
+    main_file << "#include <optional>\n";
     main_file << "#include <mutex>\n";
     main_file << "#include <random>\n";
     main_file << "#include <shared_mutex>\n";
