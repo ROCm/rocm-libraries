@@ -86,7 +86,10 @@ TEST_P(GPU_ConvImplicitGemm_BFP16, TestBFloat16)
                                       "MIOPEN_DEBUG_CONV_FFT=0"};
 
     SetEnvVars(env_vars);
+    testing::internal::CaptureStderr();
     run();
+    const auto capture = testing::internal::GetCapturedStderr();
+    EXPECT_EQ(capture.find("No suitable algorithm was found"), std::string::npos);
 };
 
 TEST_P(GPU_ConvImplicitGemm_FP16, TestFloat16)
@@ -110,7 +113,10 @@ TEST_P(GPU_ConvImplicitGemm_FP16, TestFloat16)
                                       "MIOPEN_DEBUG_CONV_FFT=0"};
 
     SetEnvVars(env_vars);
+    testing::internal::CaptureStderr();
     run();
+    const auto capture = testing::internal::GetCapturedStderr();
+    EXPECT_EQ(capture.find("No suitable algorithm was found"), std::string::npos);
 };
 
 #define INSTANTIATE_ALL_TEST_SUITES(id, ...)                                        \
