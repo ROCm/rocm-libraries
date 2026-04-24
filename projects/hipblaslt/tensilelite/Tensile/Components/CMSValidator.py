@@ -1917,6 +1917,9 @@ def _hook_up_packs_f32(packs: list[Pack], all_middle_16_packs: list['MiddlePack'
     # Empty list means it depends on local reads only (CVT0 packs).
     # NOTE: This is only a partial graph. It does not account for use of the temporary register by the middle 16 packs.
     #       That interaction is handled separately at the end of this function.
+    # CVT1 deps (indices 20-23) reflect WAR hazards from the reverse-write
+    # pattern, same as TF32 4x4. Pack 23 has WAR on pack 21 (CVT1[1] reads
+    # the register that CVT1[3] overwrites), not on pack 22.
     pack_dependencies: dict[int, list[int]] = {
         # First 4 packs (v_cvt_pk_bf16_f32) depend on local reads only, and are not included
         0: [], 1: [], 2: [], 3: [],
@@ -1926,10 +1929,11 @@ def _hook_up_packs_f32(packs: list[Pack], all_middle_16_packs: list['MiddlePack'
         12: [2], 13: [12], 14: [2], 15: [14],
         16: [3], 17: [16], 18: [3], 19: [18],
         # Final 4 packs (v_cvt_pk_bf16_f32) - pack error terms
+        # WAR hazard chain from reverse-write pattern.
         20: [17, 19],
         21: [13, 15, 20],
         22: [ 9, 11, 21],
-        23: [ 5,  7, 22],
+        23: [ 5,  7, 21],
     }
 
     for group_idx in sorted(pack_groups.keys()):
@@ -2049,17 +2053,26 @@ def _hook_up_packs_f32_mfma(packs: list[Pack], local_reads: list[LocalRead], vw:
     # Key: pack index (0-9), Value: list of pack indices it depends on.
     # Empty list means it depends on local reads only (CVT0 packs).
     # NOTE: Does not handle the quad-cycle spacing dependencies between packs and MFMAs.
+    #
+    # CVT1 deps (indices 6-9) reflect WAR (write-after-read) hazards from
+    # the reverse-write pattern: CVT1 writes dst registers in descending
+    # order (7d, 6d, 5d, 4d) and each overwrites a register that a prior
+    # CVT1 read. Specifically:
+    #   CVT1[0] reads v6d (which CVT1[1] will overwrite) → 7 depends on 6
+    #   CVT1[1] reads v4d,v5d (which CVT1[2],CVT1[3] overwrite) → 8,9 depend on 7
+    # Pack 9 has no WAR on pack 8 because pack 9 writes v4d which only
+    # pack 7 (CVT1[1]) previously read, not pack 8.
     pack_dependencies: dict[int, list[int]] = {
         # First 4 packs only depend on local reads.
         0: [], 1: [], 2: [], 3: [],
         # Middle 2 Packs are vmfma and depend on the previous 4 packs.
         4: [0, 1],
         5: [2, 3],
-        # Last 2 packs are vmfma and depend on the previous 2 packs.
+        # CVT1 packs: WAR hazard chain from reverse-write pattern.
         6: [5],
         7: [5, 6],
         8: [4, 7],
-        9: [4, 8],
+        9: [4, 7],
     }
 
     for group_idx in sorted(pack_groups_map.keys()):
@@ -2180,6 +2193,32 @@ def hook_up_packs(timeline: Timeline, kernel: 'Solution', mfma_reorder: list[int
             else:
                 _hook_up_packs_bf16(packs, local_reads)
 
+            # Dual-path validation: compare register-based (RAW+WAR) must_start_after
+            # against positional. Only assert when register path found a dependency.
+            # Compare by done_idx position rather than object identity, since the
+            # positional code accumulates deps across all loops while register-based
+            # only finds deps within the current loop's LRs.
+            reg_deps = derive_pack_must_start_after(packs, local_reads)
+            if reg_deps:
+                for pack in packs:
+                    if pack.issue_index not in reg_deps:
+                        continue
+                    reg_list = reg_deps[pack.issue_index]
+                    if not reg_list:
+                        continue
+                    pos_latest = max(pack.must_start_after, key=lambda d: d.done_idx()) if pack.must_start_after else None
+                    reg_latest = reg_list[0]
+                    if pos_latest is None or reg_latest is None:
+                        continue
+                    if pos_latest.done_idx() != reg_latest.done_idx():
+                        pos_desc = f"{pos_latest.name}@{pos_latest.issued_at.vmfma_index}"
+                        reg_desc = f"{reg_latest.name}@{reg_latest.issued_at.vmfma_index}"
+                        printWarning(
+                            f"must_start_after mismatch for {pack_name}[{pack.issue_index}] "
+                            f"({type(pack).__name__}): "
+                            f"positional={pos_desc}, register={reg_desc}"
+                        )
+
             _set_pack_needed_by(packs, pack_name, i_loop, mfma_reorder, mfma_for_linear_index, timeline.num_vmfma, kernel)
 
 def derive_pack_must_start_after(
@@ -2188,17 +2227,23 @@ def derive_pack_must_start_after(
 ) -> dict[int, list[ValidatorInstruction]]:
     """Derive must_start_after constraints for Packs from register operands.
 
-    Traces register def-use chains: for each Pack, inspects its rocisa_inst's
-    source registers and finds which prior instruction (LR or earlier Pack)
-    wrote to those registers. Returns a dict mapping pack.issue_index to the
-    list of producer ValidatorInstructions.
+    Traces register dependencies: for each Pack, finds which prior instruction
+    must complete before this pack can start. Captures two types of hazards:
+
+    - RAW (read-after-write): this pack reads a register that a prior instruction
+      wrote. The prior instruction must finish writing before this pack reads.
+    - WAR (write-after-read): this pack writes a register that a prior instruction
+      read. The prior instruction must finish reading before this pack overwrites.
+      WAR tracking is skipped for MiddlePack — those ordering constraints are
+      handled separately by the pair_consumer/next_scheduled_middle_16 mechanism.
 
     Args:
         packs:        Pack instructions (must have rocisa_inst set).
         local_reads:  LocalRead instructions (must have rocisa_inst set).
 
     Returns:
-        Dict mapping issue_index -> list of producer ValidatorInstructions.
+        Dict mapping issue_index -> list of producer ValidatorInstructions
+        (reduced to the single latest dependency).
         Empty dict if any instruction lacks rocisa_inst.
     """
     # Check that all instructions have rocisa_inst
@@ -2207,11 +2252,12 @@ def derive_pack_must_start_after(
     if not all(lr.rocisa_inst is not None for lr in local_reads):
         return {}
 
-    # Build producer map: reg_range_key -> ValidatorInstruction
-    # Key is (base_name, offset) for each individual register in the range
+    # Producer map: register -> instruction that last WROTE this register
     producers: dict[tuple[str, int], ValidatorInstruction] = {}
+    # Consumer map: register -> instruction that last READ this register
+    consumers: dict[tuple[str, int], ValidatorInstruction] = {}
 
-    # Pre-populate with LR destinations
+    # Pre-populate producers with LR destinations
     for lr in local_reads:
         dst = get_dst_range(lr.rocisa_inst)
         if dst:
@@ -2224,9 +2270,10 @@ def derive_pack_must_start_after(
     result: dict[int, list[ValidatorInstruction]] = {}
 
     for pack in sorted_packs:
-        # Find which producers wrote to this pack's source registers
         # Use dict keyed by id() since ValidatorInstruction is unhashable (mutable dataclass)
         deps: dict[int, ValidatorInstruction] = {}
+
+        # RAW: find which producers wrote to this pack's source registers
         src_ranges = get_src_ranges(pack.rocisa_inst)
         for base, start, end in src_ranges:
             for off in range(start, end):
@@ -2235,14 +2282,38 @@ def derive_pack_must_start_after(
                     dep = producers[key]
                     deps[id(dep)] = dep
 
-        # Reduce to only the latest dependency — only the latest producer
+        # WAR: find which consumers read from this pack's destination registers.
+        # This pack will overwrite those registers, so it must wait for the
+        # reader to finish. This captures the TF32 CVT1 reverse-write pattern
+        # where CVT1 packs write dst registers in descending order (7d,6d,5d,4d)
+        # and each overwrites a register a prior CVT1 read. The last CVT1 in
+        # a group depends on CVT1[1] (which read the register), not on CVT1[2]
+        # (no shared register). See pack_dependencies comments in
+        # _hook_up_packs_f32_mfma and _hook_up_packs_f32.
+        # Skip for MiddlePack — pair ordering is handled by
+        # pair_consumer/next_scheduled_middle_16.
+        if not isinstance(pack, MiddlePack):
+            dst = get_dst_range(pack.rocisa_inst)
+            if dst:
+                base, start, end = dst
+                for off in range(start, end):
+                    key = (base, off)
+                    if key in consumers and consumers[key] is not pack:
+                        dep = consumers[key]
+                        deps[id(dep)] = dep
+
+        # Reduce to only the latest dependency — only the latest constraint
         # matters for scheduling (Pack.validate() already takes max anyway).
-        # This matches the positional code which uses max(..., key=done_idx).
         if deps:
             latest = max(deps.values(), key=lambda d: d.done_idx())
             result[pack.issue_index] = [latest]
         else:
             result[pack.issue_index] = []
+
+        # Update consumer map with this pack's source registers
+        for base, start, end in src_ranges:
+            for off in range(start, end):
+                consumers[(base, off)] = pack
 
         # Update producer map with this pack's destination
         dst = get_dst_range(pack.rocisa_inst)

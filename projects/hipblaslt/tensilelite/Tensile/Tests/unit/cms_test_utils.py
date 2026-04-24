@@ -25,6 +25,17 @@
 
 These create minimal rocisa instruction objects that satisfy the validator's
 type inspection and register extraction without requiring a full kernel writer.
+
+Register spaces are widely separated to avoid collisions:
+    LRA:              v[1000..]   (LR[i].dst = v[1000 + i*4 : +4])
+    LRB:              v[2000..]
+    CVT0 intermediate: v[3000..]  (CVT0 dst -> MFMAPack .b / Middle-16 src)
+    TF32 intermediate: v[4000..]  (MFMAPack .acc / Middle-16 tmp+dst -> CVT1 src)
+    PackA output:      v[5000..]  (Pack dst -> MFMA .a)
+    PackB output:      v[6000..]  (Pack dst -> MFMA .b)
+    MFMA acc:          v[7000..]
+    Swap packs:        v[8000..]
+    MFMAPack .a:       v[9000..]  (identity matrix operand -- outside all spaces)
 """
 
 from rocisa.instruction import (
@@ -35,20 +46,31 @@ from rocisa.instruction import (
 from rocisa.container import vgpr, sgpr
 from rocisa.enum import InstType
 
+# --- Register space constants ---
+LRA_BASE = 1000
+LRB_BASE = 2000
+CVT0_BASE = 3000
+TF32_INTERMEDIATE_BASE = 4000
+PACK_A_DST_BASE = 5000
+PACK_B_DST_BASE = 6000
+MFMA_ACC_BASE = 7000
+SWAP_BASE = 8000
+MFMA_PACK_A_BASE = 9000
+
 
 def make_mock_mfma_code(num_mfma) -> list:
     """Build a list of mock MFMAInstruction objects.
 
-    Each MFMA gets unique accumulator and source register ranges so that
-    register-based dependency tracing can distinguish them.
+    Each MFMA reads from PackA output space (.a) and PackB output space (.b),
+    matching the register chains set up by _make_mock_packs_*.
     """
     if not num_mfma:
         return []
     mfmas = []
     for i in range(int(num_mfma)):
-        acc_start = i * 4
-        a_start = 1000 + i * 4
-        b_start = 2000 + i * 4
+        acc_start = MFMA_ACC_BASE + i * 4
+        a_start = PACK_A_DST_BASE + i * 4
+        b_start = PACK_B_DST_BASE + i * 4
         mfmas.append(MFMAInstruction(
             instType=InstType.INST_BF16, accType=InstType.INST_F32,
             variant=[16, 16, 32, 1], mfma1k=False,
@@ -58,19 +80,43 @@ def make_mock_mfma_code(num_mfma) -> list:
     return mfmas
 
 
-def _make_mock_lr(count: int, base_reg: int = 100) -> list:
-    """Create mock DSLoadB128 instructions for local reads."""
+def _make_mock_lr(count: int, base_reg: int = LRA_BASE) -> list:
+    """Create mock DSLoadB128 instructions for local reads.
+
+    LR[i] writes 4 VGPRs: v[base_reg + i*4 : base_reg + i*4 + 4].
+    """
     return [DSLoadB128(dst=vgpr(base_reg + i * 4, 4), src=vgpr(0, 1))
             for i in range(count)]
 
 
-def _make_mock_packs_bf16(count: int, base_reg: int = 500) -> list:
-    """Create mock VPermB32 instructions for BF16 packs."""
-    return [VPermB32(dst=vgpr(base_reg + i, 1),
-                     src0=vgpr(base_reg + 100 + i, 1),
-                     src1=vgpr(base_reg + 200 + i, 1),
-                     src2=sgpr(0, 1))
-            for i in range(count)]
+def _make_mock_packs_bf16(count: int, pack_dst_base: int = PACK_A_DST_BASE,
+                          lr_base: int = LRA_BASE, num_lrs: int = 8) -> list:
+    """Create mock VPermB32 instructions for BF16 packs.
+
+    Each pack reads from TWO different LRs (D0 and D1 dimensions), matching
+    the positional code's element_idx mapping:
+      element_idx = i % num_element_pairs
+      LR indices: element_idx*2 (D0) and element_idx*2+1 (D1)
+
+    Pack[i]: src0 = one VGPR from LR[element_idx*2 + 1]
+             src1 = one VGPR from LR[element_idx*2]
+             dst  = v[pack_dst_base + i]
+    """
+    num_element_pairs = max(num_lrs // 2, 1)
+    items = []
+    for i in range(count):
+        element_idx = i % num_element_pairs
+        # src0 from LR[element_idx*2 + 1], src1 from LR[element_idx*2]
+        # Each LR occupies 4 VGPRs at lr_base + lr_idx*4
+        lr_idx_0 = element_idx * 2      # D0 LR
+        lr_idx_1 = element_idx * 2 + 1  # D1 LR
+        items.append(VPermB32(
+            dst=vgpr(pack_dst_base + i, 1),
+            src0=vgpr(lr_base + lr_idx_1 * 4, 1),  # one reg from D1 LR
+            src1=vgpr(lr_base + lr_idx_0 * 4, 1),  # one reg from D0 LR
+            src2=sgpr(0, 1),
+        ))
+    return items
 
 
 def _make_mock_gr(count: int, dtl: bool = True) -> list:
@@ -110,7 +156,8 @@ def _make_mock_grinc(count: int) -> list:
 def _make_mock_swap_packs(count: int) -> list:
     """Create mock VSwapB32 instructions for swap packs at the start of TF32 pack sequences."""
     from rocisa.instruction import VSwapB32
-    return [VSwapB32(dst=vgpr(i, 1), src=vgpr(i + 1, 1)) for i in range(count)]
+    return [VSwapB32(dst=vgpr(SWAP_BASE + i, 1), src=vgpr(SWAP_BASE + i + 1, 1))
+            for i in range(count)]
 
 
 def _make_mock_swap(count: int) -> list:
@@ -136,59 +183,140 @@ def _make_mock_lcc() -> list:
     ]
 
 
-def _make_mock_packs_tf32_4x4(count: int, base_reg: int = 500) -> list:
+def _make_mock_packs_tf32_4x4(count: int, pack_dst_base: int = PACK_A_DST_BASE,
+                               lr_base: int = LRA_BASE) -> list:
     """Create mock instructions for TF32 4x4 MFMA pack groups.
 
-    Group structure: [CVT×4, MFMA×2, CVT×4] = 10 per group.
-    Uses VCvtPkF32toBF16 for CVT and MFMAInstruction for MFMA packs.
+    Group structure per 10 instructions:
+      CVT0[0..3]:     v_cvt_pk_bf16_f32, reads from LR space, writes to CVT0 intermediate
+      MFMAPack[0]:    v_mfma_f32_4x4x4, reads CVT0 output (.b), writes back to LR space (.acc)
+      MFMAPack[1]:    v_mfma_f32_4x4x4, reads CVT0 output (.b), writes to pack output space (.acc)
+      CVT1[0..3]:     v_cvt_pk_bf16_f32, reads from MFMA acc outputs, writes to pack output (reverse order)
+
+    The CVT1 reverse-write pattern creates WAR hazards that derive_pack_must_start_after
+    captures: CVT1[j] overwrites a register that CVT1[j-1] previously read.
     """
     from rocisa.instruction import VCvtPkF32toBF16
     items = []
     group_size = 10
     for i in range(count):
+        group = i // group_size
         idx_in_group = i % group_size
-        if 4 <= idx_in_group < 6:
-            # MFMA pack
+        if idx_in_group < 4:
+            # CVT0[j]: reads from LR space, writes to CVT0 intermediate
+            j = idx_in_group
+            items.append(VCvtPkF32toBF16(
+                dst=vgpr(CVT0_BASE + group * 4 + j, 1),
+                src0=vgpr(lr_base + group * 8 + j * 2, 1),
+                src1=vgpr(lr_base + group * 8 + j * 2 + 1, 1),
+            ))
+        elif idx_in_group == 4:
+            # MFMAPack[0]: .b reads CVT0[0..1], .acc writes back to LR T-space
             items.append(MFMAInstruction(
                 instType=InstType.INST_BF16, accType=InstType.INST_F32,
                 variant=[4, 4, 4, 1], mfma1k=False,
-                acc=vgpr(base_reg + i * 4, 4), a=vgpr(base_reg + 1000, 2),
-                b=vgpr(base_reg + i * 2, 2), acc2=vgpr(base_reg + i * 4, 4),
+                acc=vgpr(lr_base + group * 8, 4),
+                a=vgpr(MFMA_PACK_A_BASE, 2),
+                b=vgpr(CVT0_BASE + group * 4, 2),
+                acc2=vgpr(lr_base + group * 8, 4),
+            ))
+        elif idx_in_group == 5:
+            # MFMAPack[1]: .b reads CVT0[2..3], .acc writes to pack output space
+            items.append(MFMAInstruction(
+                instType=InstType.INST_BF16, accType=InstType.INST_F32,
+                variant=[4, 4, 4, 1], mfma1k=False,
+                acc=vgpr(pack_dst_base + group * 4, 4),
+                a=vgpr(MFMA_PACK_A_BASE, 2),
+                b=vgpr(CVT0_BASE + group * 4 + 2, 2),
+                acc2=vgpr(pack_dst_base + group * 4, 4),
             ))
         else:
-            # CVT pack
+            # CVT1[j]: reverse order writes into pack output space
+            # CVT1[0] (idx 6): reads from MFMAPack[1] acc (pack output), writes highest dst
+            # CVT1[1] (idx 7): reads from MFMAPack[1] acc, writes next dst (WAR on CVT1[0])
+            # CVT1[2] (idx 8): reads from MFMAPack[0] acc (LR space), writes next dst (WAR on CVT1[1])
+            # CVT1[3] (idx 9): reads from MFMAPack[0] acc (LR space), writes lowest dst (WAR on CVT1[1])
+            j = idx_in_group - 6  # 0, 1, 2, 3
+            dst_offset = 3 - j  # reverse: 3, 2, 1, 0
+            if j < 2:
+                # CVT1[0,1]: source from MFMAPack[1] acc (pack output space)
+                src0_reg = pack_dst_base + group * 4 + (1 - j) * 2
+                src1_reg = pack_dst_base + group * 4 + (1 - j) * 2 + 1
+            else:
+                # CVT1[2,3]: source from MFMAPack[0] acc (LR T-space)
+                src0_reg = lr_base + group * 8 + (3 - j) * 2
+                src1_reg = lr_base + group * 8 + (3 - j) * 2 + 1
             items.append(VCvtPkF32toBF16(
-                dst=vgpr(base_reg + i, 1),
-                src0=vgpr(base_reg + 200 + i, 1),
-                src1=vgpr(base_reg + 300 + i, 1),
+                dst=vgpr(pack_dst_base + group * 4 + dst_offset, 1),
+                src0=vgpr(src0_reg, 1),
+                src1=vgpr(src1_reg, 1),
             ))
     return items
 
 
-def _make_mock_packs_tf32(count: int, base_reg: int = 500) -> list:
+def _make_mock_packs_tf32(count: int, pack_dst_base: int = PACK_A_DST_BASE,
+                          lr_base: int = LRA_BASE) -> list:
     """Create mock instructions for TF32 (non-4x4) pack groups.
 
-    Group structure: [CVT×4, Middle×16, CVT×4] = 24 per group.
-    Uses VCvtPkF32toBF16 for CVT and VSubF32 for middle-16.
+    Group structure per 24 instructions:
+      CVT0[0..3]:      v_cvt_pk_bf16_f32, reads from LR space, writes to CVT0 intermediate
+      Middle-16[0..15]: v_sub_f32 pairs sharing a tmp register per group
+      CVT1[0..3]:      v_cvt_pk_bf16_f32, reads from middle output, writes to pack output (reverse)
+
+    Middle-16 pairs share a "tmp" register (TF32_INTERMEDIATE_BASE + group):
+      Even k: writes to tmp (v_cvt_f32_bf16 equivalent)
+      Odd k:  reads from tmp (v_sub_f32 equivalent), writes to middle output space
+    This creates within-pair RAW deps matching positional {5:[4], 7:[6], ...}.
+
+    CVT1 uses reverse-write pattern (same as TF32 4x4) for WAR hazard chain.
     """
     from rocisa.instruction import VCvtPkF32toBF16, VSubF32 as _VSubF32
     items = []
     group_size = 24
     for i in range(count):
+        group = i // group_size
         idx_in_group = i % group_size
-        if 4 <= idx_in_group < 20:
-            # Middle-16 pack
-            items.append(_VSubF32(
-                dst=vgpr(base_reg + i, 1),
-                src0=vgpr(base_reg + 200 + i, 1),
-                src1=vgpr(base_reg + 300 + i, 1),
-            ))
-        else:
-            # CVT pack
+        if idx_in_group < 4:
+            # CVT0[j]: reads from LR space, writes to CVT0 intermediate
+            j = idx_in_group
             items.append(VCvtPkF32toBF16(
-                dst=vgpr(base_reg + i, 1),
-                src0=vgpr(base_reg + 200 + i, 1),
-                src1=vgpr(base_reg + 300 + i, 1),
+                dst=vgpr(CVT0_BASE + group * 4 + j, 1),
+                src0=vgpr(lr_base + group * 8 + j * 2, 1),
+                src1=vgpr(lr_base + group * 8 + j * 2 + 1, 1),
+            ))
+        elif idx_in_group < 20:
+            # Middle-16[k]: pairs sharing tmp register
+            k = idx_in_group - 4  # 0..15
+            tmp_reg = TF32_INTERMEDIATE_BASE + group
+            mid_out_base = TF32_INTERMEDIATE_BASE + 100 + group * 16
+            if k % 2 == 0:
+                # Even: writes to tmp, reads from CVT0 output
+                cvt0_idx = k // 4  # which CVT0 this pair depends on
+                items.append(_VSubF32(
+                    dst=vgpr(tmp_reg, 1),
+                    src0=vgpr(CVT0_BASE + group * 4 + cvt0_idx, 1),
+                    src1=vgpr(lr_base + group * 8 + k % 8, 1),
+                ))
+            else:
+                # Odd: reads from tmp, writes to middle output space
+                items.append(_VSubF32(
+                    dst=vgpr(mid_out_base + k, 1),
+                    src0=vgpr(lr_base + group * 8 + k % 8, 1),
+                    src1=vgpr(tmp_reg, 1),
+                ))
+        else:
+            # CVT1[j]: reverse order writes into pack output space
+            j = idx_in_group - 20  # 0, 1, 2, 3
+            dst_offset = 3 - j  # reverse: 3, 2, 1, 0
+            mid_out_base = TF32_INTERMEDIATE_BASE + 100 + group * 16
+            # CVT1 sources from middle-16 output space
+            # Use the odd-indexed middle outputs (those are the v_sub results)
+            src0_reg = mid_out_base + (3 - j) * 4 + 3  # odd middle output
+            src1_reg = mid_out_base + (3 - j) * 4 + 1  # odd middle output
+            items.append(VCvtPkF32toBF16(
+                dst=vgpr(pack_dst_base + group * 4 + dst_offset, 1),
+                src0=vgpr(src0_reg, 1),
+                src1=vgpr(src1_reg, 1),
             ))
     return items
 
@@ -225,9 +353,9 @@ def make_mock_id_map(schedule_info, kernel=None) -> dict:
         elif key == "SNOP":
             id_map[key] = list(schedule_info.snopCode) if schedule_info.snopCode else []
         elif key.startswith("LRA") and not key.startswith("LRS"):
-            id_map[key] = _make_mock_lr(count, base_reg=100)
+            id_map[key] = _make_mock_lr(count, base_reg=LRA_BASE)
         elif key.startswith("LRB") and not key.startswith("LRS"):
-            id_map[key] = _make_mock_lr(count, base_reg=200)
+            id_map[key] = _make_mock_lr(count, base_reg=LRB_BASE)
         elif key == "GRA":
             id_map[key] = _make_mock_gr(count, dtl=kernel.get("DirectToLds", True) if kernel else True)
         elif key == "GRB":
@@ -237,11 +365,13 @@ def make_mock_id_map(schedule_info, kernel=None) -> dict:
         elif key == "GRIncB":
             id_map[key] = _make_mock_grinc(count)
         elif key.startswith("Pack"):
+            is_a = key.startswith("PackA")
+            lr_base = LRA_BASE if is_a else LRB_BASE
+            pack_dst_base = PACK_A_DST_BASE if is_a else PACK_B_DST_BASE
             if is_4x4_tf32 or is_tf32:
                 # Compute number of leading SwapPacks based on VW and TLUA/TLUB
                 n_swaps = 0
                 if kernel:
-                    is_a = key.startswith("PackA")
                     tlu_key = "TLUA" if is_a else "TLUB"
                     needs_transpose = kernel.get("ProblemType", {}).get(tlu_key, False)
                     if needs_transpose:
@@ -251,12 +381,28 @@ def make_mock_id_map(schedule_info, kernel=None) -> dict:
                 swap_items = _make_mock_swap_packs(n_swaps)
                 remaining = count - n_swaps
                 if is_4x4_tf32:
-                    pack_items = _make_mock_packs_tf32_4x4(remaining)
+                    pack_items = _make_mock_packs_tf32_4x4(remaining,
+                                                           pack_dst_base=pack_dst_base,
+                                                           lr_base=lr_base)
                 else:
-                    pack_items = _make_mock_packs_tf32(remaining)
+                    pack_items = _make_mock_packs_tf32(remaining,
+                                                       pack_dst_base=pack_dst_base,
+                                                       lr_base=lr_base)
                 id_map[key] = swap_items + pack_items
             else:
-                id_map[key] = _make_mock_packs_bf16(count)
+                # Find corresponding LR count for element_idx mapping
+                lr_name = key.replace("Pack", "LR")
+                lr_val = opt.get(lr_name, [])
+                if lr_val and isinstance(lr_val[0], list):
+                    num_lrs = len(lr_val[0])
+                elif lr_val:
+                    num_lrs = len(lr_val)
+                else:
+                    num_lrs = 8  # default
+                id_map[key] = _make_mock_packs_bf16(count,
+                                                     pack_dst_base=pack_dst_base,
+                                                     lr_base=lr_base,
+                                                     num_lrs=num_lrs)
         elif key == "LRSA" or key == "LRSB":
             id_map[key] = _make_mock_swap(count)
         elif key == "LWSA" or key == "LWSB":
