@@ -420,12 +420,19 @@ void run_pipeline_matrix_test(uint32_t M,
     auto currentArchId = hip_device_prop_gcn_arch_name_to_amdgcn_target_id(devProp.gcnArchName);
     if(devCount <= 0 || shouldSkip(currentArchId))
     {
-        GTEST_SKIP() << "No HIP device found or arch not supported. Skipping test.";
+        GTEST_SKIP() << "No HIP device found or arch (0x" << std::hex
+                     << static_cast<int>(currentArchId) << ") not supported. Skipping test.";
     }
 
     if(getCMakeGpuTargetIds().count(currentArchId) == 0)
     {
-        FAIL() << "The HIP device found does not match the compiler target(s).";
+        std::cout << "The GPU targets exposed by CMake are:";
+        for(const auto& target : getCMakeGpuTargetIds())
+        {
+            std::cout << "(0x" << std::hex << static_cast<int>(target) << ")\n";
+        }
+        FAIL() << "The HIP device (0x" << std::hex << static_cast<int>(currentArchId)
+               << ") does not match the compiler target(s).";
     }
 
     const uint32_t waveSize = static_cast<uint32_t>(devProp.warpSize);
