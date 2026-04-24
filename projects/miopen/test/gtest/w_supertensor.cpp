@@ -85,7 +85,7 @@ std::vector<float> generate_w_tensor(miopenRNNDescriptor_t rnnDesc,
 
                 if((inMode == miopenRNNskip) && (layer < 2) && (layerId < num_HiddenLayer))
                 {
-                    EXPECT_EQUAL(paramSize, 0);
+                    EXPECT_EQUAL(paramSize, 0ULL);
                     continue;
                 }
 
@@ -141,7 +141,7 @@ std::vector<float> generate_w_tensor(miopenRNNDescriptor_t rnnDesc,
 
                 if((inMode == miopenRNNskip) && (layer < 1) && (layerID < num_HiddenLayer))
                 {
-                    EXPECT_EQUAL(paramSize, 0);
+                    EXPECT_EQUAL(paramSize, 0ULL);
                     continue;
                 }
 

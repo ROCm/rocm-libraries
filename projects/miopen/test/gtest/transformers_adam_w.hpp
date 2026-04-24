@@ -46,7 +46,7 @@ struct TransformersAdamWTestCase
     {
         os << "transformers_adam_w ";
         os << "input:" << tc.input[0];
-        for(int i = 1; i < tc.input.size(); i++)
+        for(auto i = 1ULL; i < tc.input.size(); i++)
         {
             os << "x" << tc.input[i];
         }
@@ -174,7 +174,7 @@ protected:
                                         found_inf[0],
                                         step_count);
 
-        for(uint32_t i = 1; i <= step_count; i++)
+        for(int32_t i = 1; i <= step_count; i++)
         {
             float step_size = -1.0;
             if(use_step_size)

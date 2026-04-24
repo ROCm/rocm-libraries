@@ -226,7 +226,7 @@ std::size_t mismatch_diff(R1&& r1, R2&& r2, T diff)
 template <class R1, class R2>
 double rms_range(R1&& r1, R2&& r2)
 {
-    std::size_t n = range_distance(r1);
+    auto n = range_distance(r1);
     if(n == range_distance(r2))
     {
         if(n == 0)

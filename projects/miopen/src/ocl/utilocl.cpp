@@ -1221,8 +1221,9 @@ float transpose_NCHW2Vec(const Handle& handle,
         int HW_RD     = (static_cast<int>(hw) + RD_BLCK - 1) / RD_BLCK;
         size_t MAP_RD = HW_RD * (trans ? c : (c_vec / vec_size));
 
-        std::string READ_TYPE =
-            (RD_BLCK == vec_size) ? "uint" : "uint" + std::to_string(RD_BLCK / vec_size);
+        std::string READ_TYPE  = (static_cast<size_t>(RD_BLCK) == vec_size)
+                                     ? "uint"
+                                     : "uint" + std::to_string(RD_BLCK / vec_size);
         int WR_BLCK            = RD_BLCK * static_cast<int>(vec_size);
         std::string WRITE_TYPE = "uint" + std::to_string(WR_BLCK / vec_size);
 

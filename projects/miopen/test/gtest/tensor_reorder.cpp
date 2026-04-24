@@ -347,7 +347,7 @@ private:
         ASSERT_EQ(t_gpu.data.size(), t_cpu.data.size());
 
         const auto idx          = miopen::mismatch_idx(t_gpu.data, t_cpu.data, compare_equal<T>);
-        const bool valid_result = idx >= miopen::range_distance(t_cpu);
+        const bool valid_result = idx >= static_cast<size_t>(miopen::range_distance(t_cpu));
 
         std::cout << "[" << reorder_str::get(order[0], order[1], order[2], order[3]) << ", b"
                   << (sizeof(T) * 8) << " ] " << "dim0:" << dim0 << ", dim1:" << dim1

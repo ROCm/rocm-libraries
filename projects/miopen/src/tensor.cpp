@@ -202,7 +202,7 @@ void CalculateStrides(std::size_t vector_length,
     strides.back() = vector_length;
     std::partial_sum(
         lens.rbegin(), lens.rend() - 1, strides.rbegin() + 1, std::multiplies<std::size_t>());
-    for(int i = 0; i < strides.size() - 1; i++)
+    for(auto i = 0ULL; i < strides.size() - 1; i++)
         strides[i] *= vector_length;
 }
 
@@ -1026,7 +1026,7 @@ static std::vector<std::size_t> get_worker_sizes(const std::vector<std::size_t>&
         std::size_t n = wgd / 65536;
 
         int i = 0;
-        while(n > 1 && i < dim)
+        while(n > 1ULL && static_cast<size_t>(i) < dim)
         {
             std::size_t size_old = worker_sizes[i];
             worker_sizes[i]      = (size_old - 1) / n + 1;
@@ -1099,7 +1099,7 @@ void SetTensor(const Handle& handle,
         ss << GetDataTypeKernelParams(dataType);
         ss << " -DLOCAL_SIZE=" << std::to_string(wld);
 
-        for(int i = 0; i < yDim_flat; ++i)
+        for(auto i = 0ULL; i < yDim_flat; ++i)
         {
             ss << " -DWORK_LENGTH_" << std::to_string(i) << "=" << std::to_string(worker_sizes[i]);
         }
@@ -1264,7 +1264,7 @@ void ScaleTensor(const Handle& handle,
         std::string parms = "-DSUBTENSOR_OP_WITH_SCALAR=1" + GetDataTypeKernelParams(dataType);
         parms += " -DLOCAL_SIZE=" + std::to_string(wld);
 
-        for(int i = 0; i < yDim_flat; ++i)
+        for(auto i = 0ULL; i < yDim_flat; ++i)
         {
             parms += " -DWORK_LENGTH_" + std::to_string(i) + "=" + std::to_string(worker_sizes[i]);
         }
@@ -1975,7 +1975,7 @@ void TransformTensor(const Handle& handle,
                 " -DMIOPEN_ALPHA_IS_ONE=" + std::to_string(static_cast<int>(is_alpha_one));
             parms += " -DLOCAL_SIZE=" + std::to_string(wld);
 
-            for(int i = 0; i < yDim_flat; ++i)
+            for(auto i = 0ULL; i < yDim_flat; ++i)
             {
                 parms +=
                     " -DWORK_LENGTH_" + std::to_string(i) + "=" + std::to_string(worker_sizes[i]);

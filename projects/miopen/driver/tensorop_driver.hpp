@@ -217,7 +217,7 @@ int TensorOpDriver<Tgpu, Tref>::AllocateBuffersAndCopy()
         c_verif = std::vector<Tgpu>(sz, static_cast<Tgpu>(0));
     }
 
-    for(int i = 0; i < sz; ++i)
+    for(auto i = 0ULL; i < sz; ++i)
     {
         a[i]       = prng::gen_A_to_B(static_cast<Tgpu>(-2), static_cast<Tgpu>(2));
         a_verif[i] = a[i];
@@ -385,7 +385,7 @@ int TensorOpDriver<Tgpu, Tref>::CheckTensor(std::vector<Tgpu>& cpu_res,
 {
     int match = 1;
 
-    for(auto idx = 0; idx < cpu_res.size() && match; ++idx)
+    for(auto idx = 0ULL; idx < cpu_res.size() && match; ++idx)
     {
         Tref cpu_val   = cpu_res[idx];
         Tref gpu_val   = static_cast<Tref>(gpu_res[idx]);

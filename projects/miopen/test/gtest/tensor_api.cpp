@@ -94,7 +94,7 @@ struct TensorParams
             }
             else
             {
-                for(unsigned i = 0; i < tp.nbDims; i++)
+                for(auto i = 0; i < tp.nbDims; i++)
                 {
                     if(i != 0)
                         os << "x";
@@ -108,7 +108,7 @@ struct TensorParams
             }
             else
             {
-                for(unsigned i = 0; i < tp.nbDims; i++)
+                for(auto i = 0; i < tp.nbDims; i++)
                 {
                     if(i != 0)
                         os << "x";
@@ -424,7 +424,7 @@ protected:
             for(int i = 0; i < 2; i++)
             {
                 const bool use_strides = (i == 1);
-                for(int ndims = 1; ndims <= max_ndims; ndims++)
+                for(auto ndims = 1u; ndims <= max_ndims; ndims++)
                 {
                     const TestConfig config = {
                         false,

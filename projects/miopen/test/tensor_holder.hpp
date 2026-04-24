@@ -277,7 +277,7 @@ struct tensor
         auto assign       = [&](T x) {
             assert(iterator < data.end());
             // for debugging
-            for(auto i = 0; i < vectorLength; i++)
+            for(auto i = 0U; i < vectorLength; i++)
             {
                 *(iterator + i) = x;
             }

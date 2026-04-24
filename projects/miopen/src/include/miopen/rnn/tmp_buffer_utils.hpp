@@ -824,13 +824,13 @@ public:
 
     size_t getBiasXinOff(size_t layer_id, int dir_id, int param_id) const
     {
-        assert(param_id < gatesCnt);
+        assert(static_cast<size_t>(param_id) < gatesCnt);
         return getBiasOff(layer_id, dir_id, param_id);
     }
 
     size_t getBiasHidOff(size_t layer_id, int dir_id, int param_id) const
     {
-        assert(param_id < gatesCnt);
+        assert(static_cast<size_t>(param_id) < gatesCnt);
         return getBiasOff(layer_id, dir_id, param_id + gatesCnt);
     }
 
