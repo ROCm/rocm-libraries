@@ -55,7 +55,7 @@ static void LogCmdReduceCalculation(const miopenTensorDescriptor_t xDesc,
 
         std::string input_sz;
         auto input = miopen::deref(xDesc).GetLengths();
-        for(int32_t i = 0; i < input.size(); ++i)
+        for(auto i = 0U; i < input.size(); ++i)
         {
             input_sz += std::to_string(input[i]);
             if(i != input.size() - 1)

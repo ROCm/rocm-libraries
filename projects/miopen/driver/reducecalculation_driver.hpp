@@ -59,11 +59,11 @@ int32_t mloReduceCalculationForwardRunHost(miopenTensorDescriptor_t inputDesc,
     auto output_dims = miopen::deref(outputDesc).GetLengths();
 
     auto reduce_size = input_dims[dim];
-    auto output_numel =
+    size_t output_numel =
         std::accumulate(output_dims.begin(), output_dims.end(), 1LL, std::multiplies<int64_t>());
 
     auto inner_size = 1ULL;
-    for(int32_t i = dim + 1; i < input_dims.size(); ++i)
+    for(size_t i = dim + 1u; i < input_dims.size(); ++i)
     {
         inner_size *= input_dims[i];
     }
@@ -171,9 +171,9 @@ int ReduceCalculationDriver<Tgpu, Tref>::GetandSetData()
 
     std::vector<int> out_len;
 
-    for(int i = 0; i < in_len.size(); ++i)
+    for(auto i = 0ULL; i < in_len.size(); ++i)
     {
-        if(i != dim)
+        if(i != static_cast<size_t>(dim))
         {
             out_len.push_back(in_len[i]);
         }
@@ -245,7 +245,7 @@ int ReduceCalculationDriver<Tgpu, Tref>::AllocateBuffersAndCopy()
     out     = std::vector<Tgpu>(out_sz, static_cast<Tgpu>(0));
     outhost = std::vector<Tref>(out_sz, static_cast<Tref>(0));
 
-    for(int i = 0; i < in_sz; ++i)
+    for(auto i = 0ULL; i < in_sz; ++i)
     {
         in[i] = prng::gen_A_to_B<Tgpu>(static_cast<Tgpu>(0.0), static_cast<Tgpu>(1.0));
     }

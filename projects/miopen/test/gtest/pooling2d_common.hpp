@@ -234,7 +234,7 @@ inline bool ShouldIncludeTestCase(const PoolingTestCase& test_case,
     miopen::TensorDescriptor input_desc(miopenFloat, test_case.in_shape);
     for(int i = 0; i < spt_dim; i++)
     {
-        if(test_case.lens[i] >
+        if(static_cast<size_t>(test_case.lens[i]) >
            (input_desc.GetLengths()[i + 2] + static_cast<uint64_t>(2) * test_case.pads[i]))
         {
             return false;

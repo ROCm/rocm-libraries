@@ -208,10 +208,10 @@ int PReLUDriver<Tgpu, Tref>::AllocateBuffersAndCopy()
     dinput_host  = std::vector<Tref>(input_sz, std::numeric_limits<Tref>::quiet_NaN());
     dweight_host = std::vector<Tref>(weight_sz, std::numeric_limits<Tref>::quiet_NaN());
 
-    for(int i = 0; i < input_sz; i++)
+    for(auto i = 0ULL; i < input_sz; i++)
         input[i] = prng::gen_A_to_B<Tgpu>(static_cast<Tgpu>(-1e-5), static_cast<Tgpu>(1e-6));
 
-    for(int i = 0; i < weight_sz; i++)
+    for(auto i = 0ULL; i < weight_sz; i++)
         weight[i] = prng::gen_A_to_B<Tgpu>(static_cast<Tgpu>(-1e-5), static_cast<Tgpu>(1e-6));
 
     if(input_dev->ToGPU(GetStream(), input.data()) != 0)

@@ -289,17 +289,17 @@ int MultiMarginLossDriver<Tgpu, Tref>::AllocateBuffersAndCopy()
     I           = std::vector<Tgpu>(i_sz);
     T           = std::vector<uint64_t>(t_sz);
     W           = std::vector<Tgpu>(w_sz);
-    for(int i = 0; i < i_sz; i++)
+    for(auto i = 0ULL; i < i_sz; i++)
     {
         I[i] = prng::gen_A_to_B<Tgpu>(static_cast<Tgpu>(-1), static_cast<Tgpu>(1));
     }
     int C = miopen::deref(iDesc).GetLengths()[1];
     // 0 to C - 1
-    for(int i = 0; i < t_sz; i++)
+    for(auto i = 0ULL; i < t_sz; i++)
     {
         T[i] = prng::gen_A_to_B<uint64_t>(static_cast<uint64_t>(0), static_cast<uint64_t>(C));
     }
-    for(int i = 0; i < w_sz; i++)
+    for(auto i = 0ULL; i < w_sz; i++)
     {
         W[i] = prng::gen_A_to_B<Tgpu>(static_cast<Tgpu>(-1), static_cast<Tgpu>(1));
     }

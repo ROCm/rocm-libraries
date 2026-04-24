@@ -44,7 +44,7 @@ bool checkSameLength(const TensorDescriptor& x, const TensorDescriptor& y)
 {
     if(x.GetNumDims() != y.GetNumDims())
         return false;
-    for(int32_t i = 0; i < x.GetNumDims(); ++i)
+    for(auto i = 0U; i < x.GetNumDims(); ++i)
     {
         if(x.GetLengths()[i] != y.GetLengths()[i])
             return false;

@@ -204,7 +204,7 @@ struct verify_reduce_with_indices
         std::vector<int> invariantDims;
         std::vector<int> toReduceDims;
 
-        for(int i = 0; i < inLengths.size(); i++)
+        for(auto i = 0ULL; i < inLengths.size(); i++)
         {
             if(inLengths[i] == outLengths[i])
                 invariantDims.push_back(i);
@@ -285,13 +285,13 @@ struct verify_reduce_with_indices
 
             std::fill(dst_index.begin(), dst_index.end(), 0);
 
-            for(int k = 0; k < invariantDims.size(); k++)
+            for(auto k = 0ULL; k < invariantDims.size(); k++)
                 dst_index[invariantDims[k]] = index_1[k];
 
             auto dst_offset = get_offset_from_index(outStrides, dst_index);
 
             // generate the part of the index belonging to the invariant dims
-            for(int k = 0; k < invariantDims.size(); k++)
+            for(auto k = 0ULL; k < invariantDims.size(); k++)
                 src_index[invariantDims[k]] = index_1[k];
 
             compType accuVal = reduce::ReduceOpZeroVal<compType>(reduceOp);
@@ -301,7 +301,7 @@ struct verify_reduce_with_indices
             for(const auto& index_2 : indexes_2)
             {
                 // generate the part of the index belonging to the toReduce dims
-                for(int k = 0; k < toReduceDims.size(); k++)
+                for(auto k = 0ULL; k < toReduceDims.size(); k++)
                     src_index[toReduceDims[k]] = index_2[k];
 
                 auto src_offset = get_offset_from_index(inStrides, src_index);
@@ -512,7 +512,7 @@ struct verify_reduce_no_indices
         std::vector<int> invariantDims;
         std::vector<int> toReduceDims;
 
-        for(int i = 0; i < inLengths.size(); i++)
+        for(auto i = 0ULL; i < inLengths.size(); i++)
         {
             if(inLengths[i] == outLengths[i])
                 invariantDims.push_back(i);
@@ -521,11 +521,11 @@ struct verify_reduce_no_indices
         }
 
         invariantLengths.resize(invariantDims.size());
-        for(int i = 0; i < invariantDims.size(); i++)
+        for(auto i = 0ULL; i < invariantDims.size(); i++)
             invariantLengths[i] = inLengths[invariantDims[i]];
 
         toReduceLengths.resize(toReduceDims.size());
-        for(int i = 0; i < toReduceDims.size(); i++)
+        for(auto i = 0ULL; i < toReduceDims.size(); i++)
             toReduceLengths[i] = inLengths[toReduceDims[i]];
 
         bool reduceAllDims = invariantDims.empty();
@@ -590,13 +590,13 @@ struct verify_reduce_no_indices
 
             std::fill(dst_index.begin(), dst_index.end(), 0);
 
-            for(int k = 0; k < invariantDims.size(); k++)
+            for(auto k = 0ULL; k < invariantDims.size(); k++)
                 dst_index[invariantDims[k]] = index_1[k];
 
             auto dst_offset = get_offset_from_index(outStrides, dst_index);
 
             // generate the part of the index belonging to the invariant dims
-            for(int k = 0; k < invariantDims.size(); k++)
+            for(auto k = 0ULL; k < invariantDims.size(); k++)
                 src_index[invariantDims[k]] = index_1[k];
 
             compType accuVal = reduce::ReduceOpZeroVal<compType>(reduceOp);
@@ -605,7 +605,7 @@ struct verify_reduce_no_indices
             for(const auto& index_2 : indexes_2)
             {
                 // generate the part of the index belonging to the toReduce dims
-                for(int k = 0; k < toReduceDims.size(); k++)
+                for(auto k = 0ULL; k < toReduceDims.size(); k++)
                     src_index[toReduceDims[k]] = index_2[k];
 
                 auto src_offset = get_offset_from_index(inStrides, src_index);
@@ -922,7 +922,7 @@ struct ReduceCommon : public testing::TestWithParam<TestCase>
         // set the lengths of the dimensions to be reduced to 1 to represent the output Tensor
         for(const int& toReduceDim : toReduceDims)
         {
-            assert(toReduceDim < inLengths.size());
+            assert(static_cast<size_t>(toReduceDim) < inLengths.size());
             outLengths[toReduceDim] = static_cast<std::size_t>(1);
         }
 
@@ -1127,7 +1127,7 @@ private:
         {
             auto idx   = miopen::mismatch_idx(cpu, gpu, miopen::float_equal);
             auto range = miopen::range_distance(cpu);
-            if(idx < range)
+            if(idx < static_cast<size_t>(range))
             {
                 verifier.fail();
             }

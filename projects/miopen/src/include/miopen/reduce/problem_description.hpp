@@ -71,9 +71,9 @@ struct ProblemDescriptionExtreme : ProblemDescriptionBase
             return true;
 
         int32_t posy = 0;
-        for(int32_t i = 0; i < xDesc.GetLengths().size(); ++i)
+        for(auto i = 0U; i < xDesc.GetLengths().size(); ++i)
         {
-            if(i == dim)
+            if(i == static_cast<size_t>(dim))
                 continue;
 
             if(xDesc.GetLengths()[i] != yDesc.GetLengths()[posy])
@@ -92,9 +92,9 @@ struct ProblemDescriptionExtreme : ProblemDescriptionBase
             return true;
 
         int32_t posy = 0;
-        for(int32_t i = 0; i < xDesc.GetLengths().size(); ++i)
+        for(auto i = 0U; i < xDesc.GetLengths().size(); ++i)
         {
-            if(i == dim)
+            if(i == static_cast<size_t>(dim))
                 continue;
 
             if(xDesc.GetLengths()[i] != indiceDesc.GetLengths()[posy])
@@ -109,7 +109,7 @@ struct ProblemDescriptionExtreme : ProblemDescriptionBase
 
     bool IsValidDim() const
     {
-        if((dim < 0) || (dim > xDesc.GetLengths().size()))
+        if((dim < 0) || (static_cast<size_t>(dim) > xDesc.GetLengths().size()))
         {
             MIOPEN_THROW(
                 miopenStatusBadParm,
@@ -170,7 +170,7 @@ struct ProblemDescriptionExtreme : ProblemDescriptionBase
 
     bool IsNotLastDim() const
     {
-        if(dim == xDesc.GetLengths().size() - 1)
+        if(static_cast<size_t>(dim) == xDesc.GetLengths().size() - 1)
             return false;
         return true;
     }
@@ -222,9 +222,9 @@ struct ProblemDescriptionCalculation : ProblemDescriptionBase
             return true;
 
         int32_t posy = 0;
-        for(int32_t i = 0; i < xDesc.GetLengths().size(); ++i)
+        for(auto i = 0U; i < xDesc.GetLengths().size(); ++i)
         {
-            if(i == dim)
+            if(i == static_cast<size_t>(dim))
                 continue;
 
             if(xDesc.GetLengths()[i] != yDesc.GetLengths()[posy])
@@ -239,7 +239,7 @@ struct ProblemDescriptionCalculation : ProblemDescriptionBase
 
     bool IsValidDim() const
     {
-        if((dim < 0) || (dim >= xDesc.GetLengths().size()))
+        if((dim < 0) || (static_cast<size_t>(dim) >= xDesc.GetLengths().size()))
         {
             MIOPEN_THROW(
                 miopenStatusBadParm,
@@ -280,7 +280,7 @@ struct ProblemDescriptionCalculation : ProblemDescriptionBase
 
     bool IsNotLastDim() const
     {
-        if(dim == xDesc.GetLengths().size() - 1)
+        if(static_cast<size_t>(dim) == xDesc.GetLengths().size() - 1)
             return false;
         return true;
     }

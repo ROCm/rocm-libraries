@@ -506,7 +506,7 @@ int PoolDriver_impl<Tgpu, Tref, Index>::AllocateBuffersAndCopy()
 
     if(in_filename.empty() || !readBufferFromFile<Tgpu>(in.data(), in_sz, in_filename.c_str()))
     {
-        for(int i = 0; i < in_sz; i++)
+        for(auto i = 0ULL; i < in_sz; i++)
         {
             in[i] = detail::RanGenInput<Tgpu>();
         }
@@ -518,7 +518,7 @@ int PoolDriver_impl<Tgpu, Tref, Index>::AllocateBuffersAndCopy()
     if(out_filename.empty() || !readBufferFromFile<Tgpu>(dout.data(), out_sz, out_filename.c_str()))
     {
         Tgpu Data_scale = static_cast<Tgpu>(0.001);
-        for(int i = 0; i < out_sz; i++)
+        for(auto i = 0ULL; i < out_sz; i++)
         {
             dout[i] =
                 Data_scale * prng::gen_A_to_B(static_cast<Tgpu>(-0.5), static_cast<Tgpu>(0.5));

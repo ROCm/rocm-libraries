@@ -196,7 +196,7 @@ struct verify_forward_pooling
                 for(int i = 0; i < SptDim; ++i)
                 {
                     idx[i + 2] = start_idx[i] + in_spatial_id[i];
-                    in_cmp_idx &= (in_dim[i] > idx[i + 2]);
+                    in_cmp_idx &= (static_cast<size_t>(in_dim[i]) > idx[i + 2]);
                 }
 
                 if(in_cmp_idx)
@@ -808,7 +808,8 @@ struct pooling_driver : test_driver
 
         for(int i = 0; i < spt_dim; i++)
         {
-            if(lens[i] > (input_desc.GetLengths()[i + 2] + static_cast<uint64_t>(2) * pads[i]))
+            if(static_cast<size_t>(lens[i]) >
+               (input_desc.GetLengths()[i + 2] + static_cast<uint64_t>(2) * pads[i]))
             {
                 show_command();
                 std::cout << "Warning: Config skipped becuse it is invalid "

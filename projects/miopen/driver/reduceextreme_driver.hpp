@@ -66,7 +66,7 @@ int32_t mloReduceExtremeForwardRunHost(miopenTensorDescriptor_t xDesc,
         indice_dims = miopen::deref(indiceDesc).GetLengths();
 
     int32_t reduce_size = static_cast<int32_t>(x_dims[dim]);
-    auto indice_numel =
+    size_t indice_numel =
         std::accumulate(indice_dims.begin(), indice_dims.end(), 1LL, std::multiplies<int64_t>());
 
     auto inner_size =
@@ -176,7 +176,7 @@ int ReduceExtremeDriver<Tgpu, Tref>::ParseCmdLineArgs(int argc, char* argv[])
     auto inTensorParam = inflags.GetValueTensor("input");
 
     if((inflags.GetValueInt("DimToReduce") < 0) ||
-       (inflags.GetValueInt("DimToReduce") > inTensorParam.lengths.size() - 1))
+       (static_cast<size_t>(inflags.GetValueInt("DimToReduce")) > inTensorParam.lengths.size() - 1))
     {
         std::cerr << "Error DimToReduce(0-" << inTensorParam.lengths.size() - 1 << ")" << std::endl;
         return miopenStatusBadParm;
@@ -196,9 +196,9 @@ int ReduceExtremeDriver<Tgpu, Tref>::GetandSetData()
 
     std::vector<int> out_len;
 
-    for(int i = 0; i < in_len.size(); ++i)
+    for(auto i = 0ULL; i < in_len.size(); ++i)
     {
-        if(i != dim)
+        if(i != static_cast<size_t>(dim))
         {
             out_len.push_back(in_len[i]);
         }
@@ -256,7 +256,7 @@ int ReduceExtremeDriver<Tgpu, Tref>::AllocateBuffersAndCopy()
     indice     = std::vector<int32_t>(out_sz, static_cast<int32_t>(0));
     indicehost = std::vector<int32_t>(out_sz, static_cast<int32_t>(0));
 
-    for(int32_t i = 0; i < in_sz; ++i)
+    for(auto i = 0ULL; i < in_sz; ++i)
     {
         x[i] = prng::gen_A_to_B<Tgpu>(static_cast<Tgpu>(-1.0), static_cast<Tgpu>(1.0));
     }
@@ -436,7 +436,7 @@ int ReduceExtremeDriver<Tgpu, Tref>::VerifyForward()
     }
     auto error_idx = miopen::mismatch_idx(indicehost, indice, compare_equal<int32_t>);
 
-    if(error_idx < miopen::range_distance(indicehost))
+    if(error_idx < static_cast<size_t>(miopen::range_distance(indicehost)))
     {
         std::cout << "Forward ReduceExtreme FAILED: Indice does not equal at " << error_idx
                   << std::endl;

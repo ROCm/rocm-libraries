@@ -942,7 +942,7 @@ miopenTensorArgumentId_t Problem::GetOutputId() const
 
 void FusedProblem::PropagateDescriptors()
 {
-    for(auto i = 0; i < problems.size(); ++i)
+    for(auto i = 0ULL; i < problems.size(); ++i)
     {
         auto& cur = problems[i];
 

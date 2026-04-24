@@ -43,7 +43,7 @@ struct MultiMarginLossTestCase
     {
         os << "dims:";
         os << tc.dims[0];
-        for(int i = 1; i < tc.dims.size(); i++)
+        for(auto i = 1ULL; i < tc.dims.size(); i++)
             os << "x" << tc.dims[i];
         os << " cont:" << tc.cont << " reduction_mode:" << tc.reduction_mode << " p:" << tc.p;
         return os;

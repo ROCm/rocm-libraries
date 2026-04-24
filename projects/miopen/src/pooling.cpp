@@ -145,8 +145,8 @@ PoolingDescriptor::GetForwardOutputDim(const TensorDescriptor& xDesc) const
 
     assert(stride_h > 0);
     assert(stride_w > 0);
-    assert(window_h < (input_h + static_cast<std::size_t>(2) * pad_h));
-    assert(window_w < (input_w + static_cast<std::size_t>(2) * pad_w));
+    assert(static_cast<size_t>(window_h) < (input_h + static_cast<std::size_t>(2) * pad_h));
+    assert(static_cast<size_t>(window_w) < (input_w + static_cast<std::size_t>(2) * pad_w));
 
     auto output_h = std::max<std::ptrdiff_t>(
         1, ((input_h + 2 * static_cast<std::ptrdiff_t>(pad_h) - window_h) / stride_h + 1));
@@ -173,8 +173,9 @@ void PoolingDescriptor::GetForwardOutputDimNd(const TensorDescriptor& xDesc,
                                               int dims,
                                               int* tensorDimArr) const
 {
-    assert(xDesc.GetLengths().size() == dims && xDesc.GetLengths().size() <= 5 &&
-           xDesc.GetLengths().size() >= 4); // currently only support 2D/3D pooling
+    assert(xDesc.GetLengths().size() == static_cast<size_t>(dims) &&
+           xDesc.GetLengths().size() <= 5ULL &&
+           xDesc.GetLengths().size() >= 4ULL); // currently only support 2D/3D pooling
     std::vector<int> out_dim;
     auto input_dim             = xDesc.GetLengths();
     auto strs                  = GetStrides();
@@ -339,14 +340,15 @@ miopenStatus_t PoolingDescriptor::Forward(const Handle& handle,
     /// "index_max" means ghost, and thus should not be reached.
     if(mode == miopenPoolingMax && save_index)
     {
-        if((workspaceIndexMode == miopenPoolingWorkspaceIndexMask                                 //
-            && index_max <= std::accumulate(lens.begin(), lens.end(), 1, std::multiplies<int>())) //
-           ||                                                                                     //
-           (workspaceIndexMode == miopenPoolingWorkspaceIndexImage                                //
-            && index_max <= std::accumulate(xDesc.GetLengths().begin() + 2,
-                                            xDesc.GetLengths().end(),
-                                            1,
-                                            std::multiplies<int>())))
+        if((workspaceIndexMode == miopenPoolingWorkspaceIndexMask //
+            && index_max <= static_cast<size_t>(std::accumulate(
+                                lens.begin(), lens.end(), 1, std::multiplies<int>()))) //
+           ||                                                                          //
+           (workspaceIndexMode == miopenPoolingWorkspaceIndexImage                     //
+            && index_max <= static_cast<size_t>(std::accumulate(xDesc.GetLengths().begin() + 2,
+                                                                xDesc.GetLengths().end(),
+                                                                1,
+                                                                std::multiplies<int>()))))
         {
             MIOPEN_THROW("Index range not enough for max pooling bwd");
         }
