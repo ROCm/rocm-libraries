@@ -71,7 +71,7 @@ project_map = {
         "cmake_options": [
             "-DTHEROCK_ENABLE_HIPDNN_INTEGRATION_TESTS=ON",
         ],
-        "projects_to_test": ["hipdnn_integration_tests"],
+        "projects_to_test": ["hipdnn-integration-tests"],
     },
 }
 
@@ -112,7 +112,7 @@ additional_options = {
             "miopenprovider",
             "hipblasltprovider",
             "hipkernelprovider",
-            "hipdnn_integration_tests",
+            "hipdnn-integration-tests",
         ],
         "project_to_add": "miopen",
     },
