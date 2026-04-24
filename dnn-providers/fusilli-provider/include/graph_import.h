@@ -29,11 +29,11 @@
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 
+#include <cstdint>
 #include <format>
-#include <functional>
 #include <memory>
 #include <optional>
-#include <string_view>
+#include <random>
 #include <unordered_map>
 
 #include "hipdnn_engine_plugin_execution_context.h"
@@ -147,16 +147,20 @@ private:
   // Helper class for reading from flatbuffer.
   hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper opGraphWrapper;
 
-  // Deterministic hash of the serialized graph FlatBuffer bytes. Mixed into
-  // the fusilli graph name (see importGraph below) so that structurally
-  // distinct graphs sharing a user-supplied name still land in unique
-  // compile-cache directories.
-  size_t graphBytesHash;
+  // Per-instance random nonce mixed into the fusilli graph name (see
+  // importGraph below).
+  uint64_t graphInstanceNonce;
 
   GraphImport(const hipdnnPluginConstData_t *opGraph)
       : opGraphWrapper(opGraph->ptr, opGraph->size),
-        graphBytesHash(std::hash<std::string_view>{}(std::string_view(
-            static_cast<const char *>(opGraph->ptr), opGraph->size))) {}
+        graphInstanceNonce(makeGraphInstanceNonce()) {}
+
+  static uint64_t makeGraphInstanceNonce() {
+    std::random_device rd;
+    std::seed_seq seq{rd(), rd()};
+    std::mt19937_64 rng(seq);
+    return rng();
+  }
 
   fusilli::ErrorObject importGraph() {
     const hipdnn_flatbuffers_sdk::data_objects::Graph &hipDnnGraph =
@@ -174,14 +178,14 @@ private:
     FUSILLI_ASSIGN_OR_RETURN(
         computeDataType,
         hipDnnDataTypeToFusilliDataType(hipDnnGraph.compute_data_type()));
-    // Always incorporate the FlatBuffer hash so two structurally-distinct
-    // graphs sharing a user-supplied name don't collide on the compile-cache
-    // directory.
+    // Mix the per-instance nonce into the fusilli graph name so each Graph
+    // gets a unique compile-cache directory. Also covers the null-name case
+    // that would otherwise segfault on name()->str().
     std::string graphName =
         hipDnnGraph.name()
             ? std::format("{}_{:016x}", hipDnnGraph.name()->str(),
-                          graphBytesHash)
-            : std::format("hipdnn_{:016x}", graphBytesHash);
+                          graphInstanceNonce)
+            : std::format("hipdnn_{:016x}", graphInstanceNonce);
     fusilliGraph.setName(graphName)
         .setIODataType(ioDataType)
         .setIntermediateDataType(intermediateDataType)
