@@ -233,7 +233,7 @@ if(NOT HIPBLASLT_ENABLE_YAML)
         message(STATUS "Found msgpack-cxx (>=6.x)")
         set(hipblaslt_msgpack_target "msgpack-cxx")
     else()
-        # TODO: set minimum version requied for *-cxx library
+        # TODO: set minimum version required for *-cxx library
         find_package(msgpackc-cxx CONFIG REQUIRED NAMES msgpackc-cxx msgpack)
         set(hipblaslt_msgpack_target "msgpackc-cxx")
         message(STATUS "Found msgpack (<=5.x)")
