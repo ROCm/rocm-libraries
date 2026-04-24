@@ -25,6 +25,7 @@
 #include <cassert>
 #include <iostream>
 
+#include "stinkytofu/analysis/AnalysisRegistration.hpp"
 #include "stinkytofu/core/BasicBlock.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
@@ -134,7 +135,7 @@ void setPseudoRegistersInBlock(BasicBlock& bb, PassContext& passCtx) {
             processLdsReader(*inst, *mt, bb.getLabel());
         else
             assert(false &&
-                   "instruction has MemTokenData but is not a barrier, "
+                   "instruction has MemTokenData but is not a barrier, fence, "
                    "tensor_load, ds_write, or ds_read");
     }
 }
@@ -151,10 +152,11 @@ class StinkyBuildImplicitDependencyPass : public StinkyInstPass {
         return &StinkyBuildImplicitDependencyPass::ID;
     }
 
-    void run(Function& func, PassContext& passCtx) override {
+    PreservedAnalyses run(Function& func, PassContext& passCtx, AnalysisManager& /*AM*/) override {
         for (BasicBlock& bb : func) {
             if (passCtx.shouldProcessBasicBlock(bb)) setPseudoRegistersInBlock(bb, passCtx);
         }
+        return preserveCFGAnalyses();
     }
 };
 

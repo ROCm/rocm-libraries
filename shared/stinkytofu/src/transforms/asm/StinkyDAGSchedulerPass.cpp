@@ -22,6 +22,10 @@
  * ************************************************************************ */
 #include "stinkytofu/transforms/asm/StinkyDAGSchedulerPass.hpp"
 
+#include "stinkytofu/analysis/AnalysisRegistration.hpp"
+#include "stinkytofu/analysis/BBIndexAnalysis.hpp"
+#include "stinkytofu/analysis/LoopAnalysis.hpp"
+#include "stinkytofu/analysis/controlflow/DominanceAnalysis.hpp"
 #include "stinkytofu/core/BasicBlock.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/support/CFGTraversal.hpp"
@@ -36,10 +40,11 @@
 namespace {
 using namespace stinkytofu;
 
-// Check if instruction is a movable side effect (like s_barrier)
+// Check if instruction is a movable side effect (like s_barrier or a scheduling fence)
 static bool isMovableSideEffect(const StinkyInstruction& inst) {
-    // This is a barrier and has manually defined dependencies.
-    return isBarrier(inst) && !inst.getDestRegs().empty();
+    // Barriers with LDS pseudo-reg deps are movable — ordering enforced by the DAG.
+    if (isBarrier(inst) && !inst.getDestRegs().empty()) return true;
+    return false;
 }
 
 // --- Region scheduler (does NOT move fences) ---
@@ -399,25 +404,29 @@ class StinkyDAGSchedulerPass : public StinkyInstPass {
         return &StinkyDAGSchedulerPass::ID;
     }
 
-    void run(Function& func, PassContext& passCtx) override {
+    PreservedAnalyses run(Function& func, PassContext& passCtx, AnalysisManager& AM) override {
         // Build def-use chains so we can look up cross-BB WMMA consumers
         // of ds_reads for wmmaAffinity annotation.
-        buildUseDefChain(func, true);
+        const auto& domInfo = AM.getResult<DominanceAnalysis>(func);
+        buildUseDefChain(func, domInfo, true);
+
+        const auto& rpo = AM.getResult<BBIndexAnalysis>(func).rpo;
 
         // Pre-assign a function-wide index to each WMMA/SWMMA so wmmaAffinity
         // values are comparable across scheduling regions.
         std::unordered_map<StinkyInstruction*, unsigned> wmmaIndex;
         {
             unsigned idx = 0;
-            traverseCFGInRPO(func, [&](BasicBlock* bb) {
+            for (auto* bb : rpo) {
                 for (auto it = bb->begin(); it != bb->end(); ++it) {
-                    StinkyInstruction& inst = getStinkyInst(it);
-                    if (isWMMA(inst) || isSWMMA(inst)) wmmaIndex[&inst] = idx++;
+                    auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
+                    if (!inst) continue;
+                    if (isWMMA(*inst) || isSWMMA(*inst)) wmmaIndex[inst] = idx++;
                 }
-            });
+            }
         }
 
-        auto loops = detectLoops(func);
+        const auto& loops = AM.getResult<LoopAnalysis>(func);
 
         PASS_DEBUG(for (const Loop& loop
                         : loops) {
@@ -445,8 +454,8 @@ class StinkyDAGSchedulerPass : public StinkyInstPass {
             for (BasicBlock* bb : loop.bodyBBs) bbToLoop[bb] = &loop;
         }
 
-        traverseCFGInRPO(func, [&](BasicBlock* bb) {
-            if (!passCtx.shouldProcessBasicBlock(*bb)) return;
+        for (auto* bb : rpo) {
+            if (!passCtx.shouldProcessBasicBlock(*bb)) continue;
 
             auto it = bbToLoop.find(bb);
             if (it != bbToLoop.end()) {
@@ -463,7 +472,8 @@ class StinkyDAGSchedulerPass : public StinkyInstPass {
                 rq->setAnalysisCache(&analysisCache);
                 scheduleInDAG(*bb, *rq, wmmaIndex);
             }
-        });
+        }
+        return preserveCFGAnalyses();
     }
 };
 

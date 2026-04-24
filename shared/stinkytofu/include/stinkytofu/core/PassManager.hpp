@@ -31,6 +31,7 @@
 #include <vector>
 
 #include "stinkytofu/Export.hpp"
+#include "stinkytofu/core/AnalysisManager.hpp"
 #include "stinkytofu/core/BasicBlock.hpp"
 #include "stinkytofu/core/Function.hpp"
 #include "stinkytofu/core/PassInstrumentation.hpp"
@@ -99,7 +100,7 @@ class Pass {
     virtual ID getPassID() const = 0;
     virtual const char* getName() const = 0;
 
-    virtual void run(Function& func, PassContext& passCtx) = 0;
+    virtual PreservedAnalyses run(Function& func, PassContext& passCtx, AnalysisManager& AM) = 0;
 };
 
 // The PassContext serves as the central state and resource manager for
@@ -282,8 +283,13 @@ class STINKYTOFU_EXPORT PassManager {
         return passCtx;
     }
 
+    AnalysisManager& getAnalysisManager() {
+        return analysisManager;
+    }
+
    protected:
     PassContext passCtx;
+    AnalysisManager analysisManager;
 
     // List of passes to run.
     //

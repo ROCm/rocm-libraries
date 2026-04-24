@@ -26,6 +26,7 @@
 #include <vector>
 
 #include "stinkytofu/analysis/controlflow/Dominance.hpp"
+#include "stinkytofu/analysis/controlflow/DominanceAnalysis.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/ir/asm/DefUseChainUpdater.hpp"
 #include "stinkytofu/ir/asm/RegisterKey.hpp"
@@ -195,8 +196,10 @@ class BuildUseDefChainPass : public Pass {
         return &BuildUseDefChainPass::ID;
     }
 
-    void run(Function& func, PassContext&) override {
-        buildUseDefChain(func, clearExisting_);
+    PreservedAnalyses run(Function& func, PassContext&, AnalysisManager& AM) override {
+        const auto& domInfo = AM.getResult<DominanceAnalysis>(func);
+        buildUseDefChain(func, domInfo, clearExisting_);
+        return PreservedAnalyses::none();
     }
 };
 
@@ -207,25 +210,28 @@ char BuildUseDefChainPass::ID = 0;
 namespace stinkytofu {
 // Time: O(N*E + R*(N + F) + I), dominated by PHI insertion.
 //       N = blocks, E = edges, R = register keys, F = Sigma|DF[i]|, I = instructions.
-void buildUseDefChain(Function& func, bool clearExisting) {
+void buildUseDefChain(Function& func, const DominanceInfo& domInfo, bool clearExisting) {
     if (func.empty()) return;
 
     // Phase 1: Insert PHIs at correct CFG join points (dominance-frontier based).
-    insertPhiInstructions(func, clearExisting);
+    insertPhiInstructions(func, domInfo, clearExisting);
 
     // Phase 2: Clear all existing chains when rebuilding, so buildChains
     // starts from a clean slate via DefUseChainBuilder.
     if (clearExisting) clearAllChains(func);
 
-    // Phase 3: Compute dominance info for chain construction.
-    DominanceInfo domInfo = computeDominanceInfo(func);
-
-    // Phase 4: Build all def-use chains (PHI and non-PHI) in a single
+    // Phase 3: Build all def-use chains (PHI and non-PHI) in a single
     //          RPO traversal with dominator-inherited reaching definitions.
     buildChains(func, domInfo);
 
-    // Phase 5: Remove PHIs that ended up with no users.
+    // Phase 4: Remove PHIs that ended up with no users.
     for (BasicBlock& bb : func) removeUnusedPhis(bb);
+}
+
+void buildUseDefChain(Function& func, bool clearExisting) {
+    if (func.empty()) return;
+    DominanceInfo domInfo = computeDominanceInfo(func);
+    buildUseDefChain(func, domInfo, clearExisting);
 }
 
 std::unique_ptr<Pass> createBuildUseDefChainPass(bool clearExisting) {
