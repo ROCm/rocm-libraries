@@ -3,9 +3,9 @@
 
 """Suite result data model with JSON serialization.
 
-Implements the D-11 graph-first nesting structure, D-12 environment metadata,
-D-13 full timing statistics, D-15 correctness with tolerances, and D-07 error
-entries with message only.
+Top-level structure is graph-first: SuiteResult contains metadata plus a
+list of GraphResult, each holding ProviderEngineResult entries with timing
+statistics and correctness data. Error entries carry status + message only.
 """
 
 import json
@@ -19,14 +19,14 @@ from .statistics import BenchmarkStats
 
 @dataclass
 class CorrectnessResult:
-    """Per D-15 and CORR-01/02/03: correctness tracking.
+    """Correctness tracking for a single provider/engine run.
 
     Attributes:
-        execution_success: CORR-01: did it execute without error?
-        tolerance_match: CORR-02: within rtol/atol? None if execution failed
-            or reference provider unavailable.
-        rtol: D-15: relative tolerance used.
-        atol: D-15: absolute tolerance used.
+        execution_success: Did the run complete without error?
+        tolerance_match: Within rtol/atol? None if execution failed or
+            reference provider unavailable.
+        rtol: Relative tolerance used.
+        atol: Absolute tolerance used.
         max_abs_diff: Maximum absolute difference (if comparison was performed).
         max_rel_diff: Maximum relative difference (if comparison was performed).
         error_message: Explanation when tolerance_match is None.
@@ -42,7 +42,7 @@ class CorrectnessResult:
 
     @property
     def passed(self) -> bool:
-        """CORR-03: overall pass = executed successfully AND tolerance matched."""
+        """Overall pass = executed successfully AND tolerance matched."""
         return self.execution_success and (self.tolerance_match is True)
 
     @classmethod
@@ -97,12 +97,12 @@ class ProviderEngineResult:
         provider: Provider name.
         engine_id: Engine ID used.
         status: One of 'success', 'error', 'skipped'.
-        cpu_build_time_ms: TIME-01: CPU graph-build time.
-        gpu_kernel_stats: TIME-02: GPU kernel timing statistics.
-        e2e_stats: TIME-03: End-to-end wall-clock timing statistics.
-        correctness: CORR-01/02/03: correctness comparison result.
-        error_message: D-07: error message only (no partial timing).
-        skip_reason: D-02: reason for skip.
+        cpu_build_time_ms: CPU graph-build time.
+        gpu_kernel_stats: GPU kernel timing statistics.
+        e2e_stats: End-to-end wall-clock timing statistics.
+        correctness: Correctness comparison result.
+        error_message: Error message only (no partial timing on error).
+        skip_reason: Reason this combination was skipped.
     """
 
     _VALID_STATUSES = {"success", "error", "skipped"}
@@ -128,7 +128,7 @@ class ProviderEngineResult:
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON serialization.
 
-        Per D-07: error entries have status + error_message only, no timing.
+        Error entries serialize status + error_message only, no timing.
         Correctness, when present, is always serialized regardless of status
         so that error/skip entries can carry their failure context.
         """
@@ -218,7 +218,7 @@ class GraphResult:
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON serialization.
 
-        Per D-11: graph entry with 'results' array of provider/engine entries.
+        Graph entry with 'results' array of provider/engine entries.
         """
         return {
             "graph_name": self.graph_name,
@@ -229,7 +229,7 @@ class GraphResult:
 
 @dataclass
 class SuiteMetadata:
-    """Per D-12: essential + environment info.
+    """Suite-level summary plus environment info.
 
     Attributes:
         timestamp: UTC timestamp when suite was run.
@@ -279,7 +279,7 @@ class SuiteMetadata:
 
 @dataclass
 class SuiteResult:
-    """Per D-11: top-level suite result with graph-first nesting.
+    """Top-level suite result with graph-first nesting.
 
     Attributes:
         metadata: Suite-level metadata.
@@ -292,7 +292,7 @@ class SuiteResult:
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON serialization.
 
-        Returns dict with "metadata" and "graphs" keys (per D-11).
+        Returns dict with "metadata" and "graphs" keys.
         """
         return {
             "metadata": self.metadata.to_dict(),
@@ -323,8 +323,6 @@ class SuiteResult:
 
 def collect_environment_info() -> Dict[str, Optional[str]]:
     """Collect ROCm version, GPU model, Python version, hipDNN version.
-
-    Per D-12 metadata requirements.
 
     Returns:
         Dictionary with environment info fields.

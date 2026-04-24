@@ -4,35 +4,32 @@
 """Suite runner for per-graph engine iteration with granular timing.
 
 Iterates the engine IDs discovered for a graph via
-``Graph.get_ranked_engine_ids`` (per D-01: real runtime discovery, no
-hardcoded engine lists). For each engine, captures separated CPU build time
-(TIME-01), GPU kernel time (TIME-02), and E2E wall-clock time (TIME-03).
-Performs correctness validation by comparing GPU output against a reference
-provider via ArrayComparator (CORR-02).
+``Graph.get_ranked_engine_ids`` (real runtime discovery, no hardcoded engine
+lists). For each engine, captures separated CPU build time, GPU kernel time,
+and E2E wall-clock time. Performs correctness validation by comparing GPU
+output against a reference provider via ArrayComparator.
 """
 
 import json
-import logging
+import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from ..common.exceptions import ExecutionError
 from ..config.benchmark_config import BenchmarkConfig, SuiteConfig
 from ..execution.buffer_manager import BufferManager
-from ..execution.executor import Executor, _resolve_data_type
+from ..execution.executor import Executor
 from ..reporting.statistics import BenchmarkStats
 from ..reporting.suite_results import (
     CorrectnessResult,
     GraphResult,
     ProviderEngineResult,
 )
-from ..validation.comparison import ArrayComparator
 from ..validation.reference_provider import (
     ReferenceProvider,
     ReferenceProviderRegistry,
 )
-
-logger = logging.getLogger(__name__)
+from ..validation.validator import Validator
 
 # Keywords in error messages that indicate an unsupported combination
 # rather than a hard error.
@@ -42,90 +39,6 @@ _SUPPORT_CHECK_KEYWORDS = (
     "unsupported",
     "no engine",
 )
-
-
-def _build_discovery_graph(
-    handle: Any, graph_json_str: str, graph_json: Dict[str, Any]
-) -> Any:
-    """Build a hipdnn Graph far enough to call ``get_ranked_engine_ids``.
-
-    Mirrors the data-type setup + ``from_json`` + ``validate`` +
-    ``build_operation_graph`` flow used by ``Executor.prepare``. We don't
-    reuse ``Executor`` here because discovery should not allocate a
-    workspace or set a preferred engine; it's just used to enumerate the
-    engine IDs the backend reports for this graph.
-
-    Args:
-        handle: hipdnn.Handle instance.
-        graph_json_str: Graph as JSON string.
-        graph_json: Parsed graph JSON dictionary.
-
-    Returns:
-        A hipdnn.Graph with the operation graph built (ready for
-        ``get_ranked_engine_ids``).
-
-    Raises:
-        ExecutionError: If any hipdnn step fails.
-    """
-    import hipdnn_frontend as hipdnn
-
-    graph = hipdnn.Graph()
-
-    io_dt = _resolve_data_type(hipdnn, graph_json.get("io_data_type", "FLOAT"))
-    intermediate_dt = _resolve_data_type(
-        hipdnn, graph_json.get("intermediate_data_type", "FLOAT")
-    )
-    compute_dt = _resolve_data_type(
-        hipdnn, graph_json.get("compute_data_type", "FLOAT")
-    )
-    graph.set_io_data_type(io_dt)
-    graph.set_intermediate_data_type(intermediate_dt)
-    graph.set_compute_data_type(compute_dt)
-
-    result = graph.from_json(graph_json_str)
-    if result.is_bad():
-        raise ExecutionError(
-            f"Discovery: failed to deserialize graph: {result.get_message()}"
-        )
-
-    result = graph.validate()
-    if result.is_bad():
-        raise ExecutionError(
-            f"Discovery: graph validation failed: {result.get_message()}"
-        )
-
-    result = graph.build_operation_graph(handle)
-    if result.is_bad():
-        raise ExecutionError(
-            f"Discovery: failed to build operation graph: {result.get_message()}"
-        )
-
-    return graph
-
-
-def discover_engine_ids(
-    handle: Any, graph_json_str: str, graph_json: Dict[str, Any]
-) -> List[int]:
-    """Discover engine IDs ranked by hipDNN heuristics for this graph.
-
-    Per D-01: runtime discovery via ``Graph.get_ranked_engine_ids`` --
-    no hardcoded engine lists. Builds a throwaway operation graph just
-    far enough to query the backend for ranked engines.
-
-    Args:
-        handle: hipdnn.Handle instance.
-        graph_json_str: Graph as JSON string.
-        graph_json: Parsed graph JSON dictionary.
-
-    Returns:
-        List of int engine IDs ranked by the backend's heuristics.
-
-    Raises:
-        ExecutionError: If discovery graph construction fails or the
-            backend's discovery API errors.
-    """
-    discovery_graph = _build_discovery_graph(handle, graph_json_str, graph_json)
-    return [int(eid) for eid in discovery_graph.get_ranked_engine_ids()]
 
 
 def _resolve_engine_name(engine_id: int) -> str:
@@ -182,17 +95,24 @@ def _get_reference_provider(
     try:
         provider = ReferenceProviderRegistry.get_provider(config.reference_provider)
     except ValueError:
-        logger.info("Reference provider '%s' not registered", config.reference_provider)
+        print(
+            f"Reference provider '{config.reference_provider}' not registered",
+            file=sys.stderr,
+        )
         return None
 
     if not provider.is_available():
-        logger.info("Reference provider '%s' not available", config.reference_provider)
+        print(
+            f"Reference provider '{config.reference_provider}' not available",
+            file=sys.stderr,
+        )
         return None
 
     if not provider.supports_graph(graph_json):
-        logger.info(
-            "Reference provider '%s' does not support this graph",
-            config.reference_provider,
+        print(
+            f"Reference provider '{config.reference_provider}' "
+            "does not support this graph",
+            file=sys.stderr,
         )
         return None
 
@@ -208,11 +128,11 @@ def _check_correctness(
 ) -> CorrectnessResult:
     """Perform correctness comparison between GPU output and reference.
 
-    Per CORR-02: compares GPU output against reference provider output
-    using ArrayComparator. Validation was requested by caller (we are
-    inside the ``ref_provider is not None`` branch), so when no outputs
-    are comparable we report ``tolerance_match=False`` rather than
-    silently passing.
+    Compares GPU output against reference provider output using
+    ArrayComparator. Validation was requested by caller (we are inside
+    the ``ref_provider is not None`` branch), so when no outputs are
+    comparable we report ``tolerance_match=False`` rather than silently
+    passing.
 
     Args:
         buffer_manager: Buffer manager with output data from GPU execution.
@@ -236,8 +156,8 @@ def _check_correctness(
         # Compute reference output
         ref_outputs = ref_provider.compute_reference(graph_json, input_data)
 
-        # Compare each output tensor
-        comparator = ArrayComparator(rtol=config.rtol, atol=config.atol)
+        # Delegate per-output comparison to Validator and aggregate results.
+        validator = Validator(rtol=config.rtol, atol=config.atol)
         all_passed = True
         worst_abs_diff = 0.0
         worst_rel_diff = 0.0
@@ -255,7 +175,7 @@ def _check_correctness(
                 continue
 
             expected = ref_outputs[ti.uid].data
-            result = comparator.compare(actual, expected, "hipDNN", ref_provider.name)
+            result = validator.validate(actual, ti, reference_data=expected)
             output_count += 1
 
             if not result.passed:
@@ -269,7 +189,7 @@ def _check_correctness(
         if output_count == 0:
             # Validation was requested but nothing comparable surfaced
             # (e.g. reference omitted every output). Treat as failure
-            # so --validate stays a hard gate (per W3).
+            # so --validate stays a hard gate.
             return CorrectnessResult(
                 execution_success=True,
                 tolerance_match=False,
@@ -306,12 +226,11 @@ def run_graph_all_providers(
 ) -> GraphResult:
     """Run a single graph against every engine the backend ranks for it.
 
-    Discovers engine IDs via ``Graph.get_ranked_engine_ids`` (per D-01),
-    applies any user engine filter (D-03), and runs the benchmark for
-    each remaining ID. Captures separated CPU build time, GPU kernel
-    time, and E2E wall-clock time per engine. Performs correctness
-    checking against a reference provider when ``--validate`` was
-    requested.
+    Discovers engine IDs via ``Graph.get_ranked_engine_ids``, applies any
+    user engine filter, and runs the benchmark for each remaining ID.
+    Captures separated CPU build time, GPU kernel time, and E2E wall-clock
+    time per engine. Performs correctness checking against a reference
+    provider when ``--validate`` was requested.
 
     Args:
         graph_path: Path to the graph JSON file.
@@ -333,8 +252,18 @@ def run_graph_all_providers(
     # "no engine configurations available" / "not supported" messages are
     # really an unsupported-graph signal -- record as skipped so the
     # suite exit code stays 0 when nothing is wrong, just nothing to run.
+    discovery_config = BenchmarkConfig(
+        graph_path=graph_path,
+        warmup_iters=config.warmup_iters,
+        benchmark_iters=config.benchmark_iters,
+    )
     try:
-        engine_ids = discover_engine_ids(handle, graph_json_str, graph_json)
+        discovery_executor = Executor(
+            graph_json_str=graph_json_str,
+            config=discovery_config,
+            gpu_backend=config.gpu_backend,
+        )
+        engine_ids = discovery_executor.discover_engines(handle)
     except (ExecutionError, RuntimeError) as e:
         msg = str(e)
         status = "skipped" if _is_support_error(msg) else "error"
@@ -417,7 +346,15 @@ def _run_single_provider_engine(
     validation_requested: bool,
     graph_json: Dict[str, Any],
 ) -> ProviderEngineResult:
-    """Execute a single engine for a graph (single attempt, per D-10)."""
+    """Execute a single engine for a graph (single attempt)."""
+    # Initialise the result conservatively as an error and mutate fields as
+    # the run progresses; on success, status flips to "success" at the end.
+    result = ProviderEngineResult(
+        provider=provider,
+        engine_id=engine_id,
+        status="error",
+    )
+
     try:
         bench_config = BenchmarkConfig(
             graph_path=graph_path,
@@ -432,7 +369,7 @@ def _run_single_provider_engine(
             gpu_backend=config.gpu_backend,
         )
         executor.prepare(handle, engine_id=engine_id)
-        cpu_build_time_ms = executor.init_time_ms
+        result.cpu_build_time_ms = executor.init_time_ms
 
         with BufferManager(tensor_infos) as bm:
             bm.allocate_all()
@@ -446,22 +383,21 @@ def _run_single_provider_engine(
                 handle, variant_pack, graph_name=graph_name
             )
 
-            e2e_stats = BenchmarkStats.from_timings(bench_result.e2e_timings)
-            gpu_kernel_stats = None
+            result.e2e_stats = BenchmarkStats.from_timings(bench_result.e2e_timings)
             if bench_result.has_kernel_timings:
-                gpu_kernel_stats = BenchmarkStats.from_timings(
+                result.gpu_kernel_stats = BenchmarkStats.from_timings(
                     bench_result.kernel_timings
                 )
 
             if ref_provider is not None:
-                correctness = _check_correctness(
+                result.correctness = _check_correctness(
                     bm, tensor_infos, graph_json, ref_provider, config
                 )
             elif validation_requested:
                 # User asked for validation but the reference provider
                 # didn't support this graph. Treat as a correctness
-                # failure (per W3) so --validate stays a hard gate.
-                correctness = CorrectnessResult(
+                # failure so --validate stays a hard gate.
+                result.correctness = CorrectnessResult(
                     execution_success=True,
                     tolerance_match=False,
                     rtol=config.rtol,
@@ -472,7 +408,7 @@ def _run_single_provider_engine(
                     ),
                 )
             else:
-                correctness = CorrectnessResult(
+                result.correctness = CorrectnessResult(
                     execution_success=True,
                     tolerance_match=None,
                     rtol=config.rtol,
@@ -480,46 +416,35 @@ def _run_single_provider_engine(
                     error_message="No reference provider requested",
                 )
 
-        return ProviderEngineResult(
-            provider=provider,
-            engine_id=engine_id,
-            status="success",
-            cpu_build_time_ms=cpu_build_time_ms,
-            gpu_kernel_stats=gpu_kernel_stats,
-            e2e_stats=e2e_stats,
-            correctness=correctness,
-        )
+        result.status = "success"
+        return result
 
     except ExecutionError as e:
         error_msg = str(e)
-        if _is_support_error(error_msg):
-            return ProviderEngineResult(
-                provider=provider,
-                engine_id=engine_id,
-                status="skipped",
-                skip_reason=error_msg,
-                correctness=CorrectnessResult.failed(
-                    rtol=config.rtol, atol=config.atol, error_message=error_msg
-                ),
-            )
-        return ProviderEngineResult(
-            provider=provider,
-            engine_id=engine_id,
-            status="error",
-            error_message=error_msg,
-            correctness=CorrectnessResult.failed(
-                rtol=config.rtol, atol=config.atol, error_message=error_msg
-            ),
+        # Drop any partial timing collected before the failure so the JSON
+        # output never carries half-populated stats on an error/skip entry.
+        result.cpu_build_time_ms = None
+        result.gpu_kernel_stats = None
+        result.e2e_stats = None
+        result.correctness = CorrectnessResult.failed(
+            rtol=config.rtol, atol=config.atol, error_message=error_msg
         )
+        if _is_support_error(error_msg):
+            result.status = "skipped"
+            result.skip_reason = error_msg
+        else:
+            result.status = "error"
+            result.error_message = error_msg
+        return result
 
     except Exception as e:
         error_msg = str(e)
-        return ProviderEngineResult(
-            provider=provider,
-            engine_id=engine_id,
-            status="error",
-            error_message=error_msg,
-            correctness=CorrectnessResult.failed(
-                rtol=config.rtol, atol=config.atol, error_message=error_msg
-            ),
+        result.cpu_build_time_ms = None
+        result.gpu_kernel_stats = None
+        result.e2e_stats = None
+        result.status = "error"
+        result.error_message = error_msg
+        result.correctness = CorrectnessResult.failed(
+            rtol=config.rtol, atol=config.atol, error_message=error_msg
         )
+        return result

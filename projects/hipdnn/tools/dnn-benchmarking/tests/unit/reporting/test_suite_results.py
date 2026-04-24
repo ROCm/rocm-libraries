@@ -46,7 +46,7 @@ class TestCorrectnessResult:
     """Tests for CorrectnessResult dataclass."""
 
     def test_serializes_with_passed_rtol_atol(self):
-        """Test 5: CorrectnessResult serializes with passed (bool), rtol, atol fields."""
+        """CorrectnessResult serializes with passed (bool), rtol, atol fields."""
         cr = CorrectnessResult(
             execution_success=True,
             tolerance_match=True,
@@ -91,8 +91,8 @@ class TestCorrectnessResult:
         assert cr.passed is False
 
     def test_execution_success_separate_from_tolerance_match(self):
-        """Test 11: CorrectnessResult includes execution_success (bool) separate
-        from tolerance_match (bool) (per CORR-01 vs CORR-02)."""
+        """CorrectnessResult includes execution_success (bool) separate
+        from tolerance_match (bool)."""
         cr = CorrectnessResult(
             execution_success=True,
             tolerance_match=False,
@@ -122,7 +122,7 @@ class TestProviderEngineResult:
     """Tests for ProviderEngineResult dataclass."""
 
     def test_success_serializes_with_timing_and_correctness(self):
-        """Test 2: ProviderEngineResult with status='success' serializes with
+        """ProviderEngineResult with status='success' serializes with
         cpu_build_time_ms, gpu_kernel_stats, e2e_stats, correctness."""
         stats = BenchmarkStats(
             mean_ms=1.0, std_ms=0.1, min_ms=0.5, max_ms=1.5, p95_ms=1.4, p99_ms=1.49
@@ -148,8 +148,8 @@ class TestProviderEngineResult:
         assert d["gpu_kernel_stats"]["mean_ms"] == 1.0
 
     def test_error_serializes_without_timing(self):
-        """Test 3: ProviderEngineResult with status='error' serializes with
-        status, error_message, no timing data (per D-07)."""
+        """ProviderEngineResult with status='error' serializes with
+        status, error_message, no timing data."""
         pe = ProviderEngineResult(
             provider="miopen",
             engine_id=1,
@@ -164,7 +164,7 @@ class TestProviderEngineResult:
         assert "e2e_stats" not in d
 
     def test_skipped_serializes_with_reason(self):
-        """Test 4: ProviderEngineResult with status='skipped' serializes with
+        """ProviderEngineResult with status='skipped' serializes with
         status, skip_reason."""
         pe = ProviderEngineResult(
             provider="miopen",
@@ -234,7 +234,7 @@ class TestGraphResult:
     """Tests for GraphResult dataclass."""
 
     def test_contains_graph_name_path_results(self):
-        """Test 6: GraphResult contains graph_name, graph_path, list of
+        """GraphResult contains graph_name, graph_path, list of
         ProviderEngineResult."""
         pe = ProviderEngineResult(
             provider="miopen", engine_id=0, status="success", cpu_build_time_ms=5.0
@@ -259,7 +259,7 @@ class TestGraphResult:
         assert d["results"][0]["status"] == "error"
 
     def test_count_by_status_buckets_all_outcomes(self):
-        """W-02: count_by_status returns the correct bucket counts."""
+        """count_by_status returns the correct bucket counts."""
         pass_corr = CorrectnessResult(
             execution_success=True, tolerance_match=True, rtol=1e-5, atol=1e-8
         )
@@ -358,9 +358,9 @@ class TestSuiteResult:
         return SuiteResult(metadata=meta, graphs=[gr1, gr2])
 
     def test_metadata_includes_environment_fields(self):
-        """Test 7: SuiteResult contains metadata with timestamp, hostname,
+        """SuiteResult contains metadata with timestamp, hostname,
         total_graphs, pass_count, fail_count, rocm_version, gpu_model,
-        python_version, hipdnn_version per D-12."""
+        python_version, hipdnn_version."""
         sr = self._make_suite_result()
         meta_d = sr.metadata.to_dict()
         assert meta_d["timestamp"] == "2026-01-01T00:00:00Z"
@@ -377,8 +377,8 @@ class TestSuiteResult:
         assert meta_d["hipdnn_version"] == "0.1.0"
 
     def test_to_dict_graph_first_nesting(self):
-        """Test 8: SuiteResult.to_dict() produces graph-first nesting: top-level
-        'graphs' array, each with 'results' array (per D-11)."""
+        """SuiteResult.to_dict() produces graph-first nesting: top-level
+        'graphs' array, each with 'results' array."""
         sr = self._make_suite_result()
         d = sr.to_dict()
         assert "metadata" in d
@@ -391,7 +391,7 @@ class TestSuiteResult:
             assert isinstance(g["results"], list)
 
     def test_save_json_writes_valid_file(self):
-        """Test 9: SuiteResult.save_json(path) writes valid JSON to file."""
+        """SuiteResult.save_json(path) writes valid JSON to file."""
         sr = self._make_suite_result()
         with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as f:
             path = f.name
@@ -407,8 +407,7 @@ class TestSuiteResult:
         Path(path).unlink()
 
     def test_timing_stats_include_all_fields(self):
-        """Test 10: SuiteResult.to_dict() timing stats include mean, std, min,
-        max, p95, p99 (per D-13)."""
+        """SuiteResult.to_dict() timing stats include mean, std, min, max, p95, p99."""
         sr = self._make_suite_result()
         d = sr.to_dict()
         # Get the first successful result

@@ -131,11 +131,11 @@ class SuiteConfig:
         warmup_iters: Number of warmup iterations per provider/engine.
         benchmark_iters: Number of benchmark iterations for timing.
         seed: Optional random seed for reproducible inputs.
-        engine_filter: If set, only iterate engine IDs in this list (per D-03).
-        rtol: Relative tolerance for correctness comparison (per D-15).
-        atol: Absolute tolerance for correctness comparison (per D-15).
+        engine_filter: If set, only iterate engine IDs in this list.
+        rtol: Relative tolerance for correctness comparison.
+        atol: Absolute tolerance for correctness comparison.
         gpu_backend: GPU timer backend to use.
-        reference_provider: Reference provider name for CORR-02.
+        reference_provider: Reference provider name for correctness checking.
         verbose: If True, print rich per-engine block per graph instead of summary.
     """
 

@@ -8,7 +8,7 @@ import socket
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import List, Literal, Optional
+from typing import Any, List, Literal, Optional
 
 from ..common.exceptions import ExecutionError, GraphLoadError
 from ..config.benchmark_config import (
@@ -230,31 +230,132 @@ def run_ab_test(
         return 1
 
 
+def _error_graph_result(graph_path: Path, error_message: str) -> GraphResult:
+    """Build a GraphResult representing a graph-level setup failure."""
+    return GraphResult(
+        graph_name=graph_path.stem,
+        graph_path=str(graph_path),
+        results=[
+            ProviderEngineResult(
+                provider="unknown",
+                engine_id=0,
+                status="error",
+                error_message=error_message,
+            )
+        ],
+    )
+
+
+def _run_one_graph(
+    graph_path: Path, config: SuiteConfig, handle: Any
+) -> GraphResult:
+    """Load and run a single graph. Returns a GraphResult (errors included).
+
+    Per-graph load/validate/execution failures are captured as error entries
+    in the returned GraphResult so the suite continues to the next graph.
+    """
+    try:
+        loader = GraphLoader()
+        graph_json = loader.load_json(graph_path)
+        loader.validate(graph_json)
+        tensor_infos = loader.extract_tensor_info(graph_json)
+        result = run_graph_all_providers(
+            graph_path, graph_json, tensor_infos, config, handle
+        )
+        if len(result.results) == 0:
+            return _error_graph_result(
+                graph_path, "No provider/engine combinations matched filters"
+            )
+        return result
+    except (GraphLoadError, ExecutionError) as e:
+        return _error_graph_result(graph_path, str(e))
+
+
+def _build_suite_metadata(
+    graph_results: List[GraphResult], total_graphs: int
+) -> SuiteMetadata:
+    """Aggregate per-graph counts and environment info into SuiteMetadata."""
+    env_info = collect_environment_info()
+    total_pass = total_fail = total_skip = total_error = 0
+    for gr in graph_results:
+        c = gr.count_by_status()
+        total_pass += c.passed
+        total_fail += c.failed
+        total_skip += c.skipped
+        total_error += c.errored
+    total_combinations = total_pass + total_fail + total_skip + total_error
+    return SuiteMetadata(
+        timestamp=datetime.now(timezone.utc).isoformat(),
+        hostname=socket.gethostname(),
+        total_graphs=total_graphs,
+        total_combinations=total_combinations,
+        pass_combinations=total_pass,
+        fail_combinations=total_fail,
+        skip_combinations=total_skip,
+        error_combinations=total_error,
+        rocm_version=env_info.get("rocm_version"),
+        gpu_model=env_info.get("gpu_model"),
+        python_version=env_info.get("python_version"),
+        hipdnn_version=env_info.get("hipdnn_version"),
+    )
+
+
 def run_suite(
     graph_paths: List[Path],
     config: SuiteConfig,
-    output_path: Optional[Path] = None,
-    plugin_path: Optional[Path] = None,
-) -> int:
-    """Run suite benchmark workflow (per D-04/D-05).
+    handle: Any,
+) -> SuiteResult:
+    """Run benchmark suite and return aggregated results.
 
-    Iterates all graph files sequentially. Per each graph, iterates all
-    providers/engines via run_graph_all_providers(). Per D-06, warmup
-    and benchmark iterations apply per graph independently.
+    Pure runner: does not print, write files, or check the validation
+    startup gate (the caller is responsible for that). Per-graph errors
+    are captured in the returned SuiteResult; the function does not raise
+    for per-graph load or execution failures.
 
     Args:
         graph_paths: List of resolved graph file paths.
         config: Suite configuration.
-        output_path: Optional JSON output path (per D-16).
-        plugin_path: Optional path to hipDNN engine plugin directory.
+        handle: hipdnn.Handle instance, ready to use.
 
     Returns:
-        Exit code: 0=all pass, 1=errors, 2=correctness failures (per D-09).
+        Aggregated SuiteResult covering every graph in ``graph_paths``.
+    """
+    graph_results: List[GraphResult] = [
+        _run_one_graph(graph_path, config, handle) for graph_path in graph_paths
+    ]
+    metadata = _build_suite_metadata(graph_results, total_graphs=len(graph_paths))
+    return SuiteResult(metadata=metadata, graphs=graph_results)
+
+
+def _suite_exit_code(suite_result: SuiteResult) -> int:
+    """Derive a CLI exit code from a SuiteResult.
+
+    Returns:
+        0 if all passed, 2 if any correctness failures, otherwise 1 if any
+        execution errors.
+    """
+    if suite_result.metadata.fail_combinations > 0:
+        return 2
+    if suite_result.metadata.error_combinations > 0:
+        return 1
+    return 0
+
+
+def _orchestrate_suite_cli(
+    graph_paths: List[Path],
+    config: SuiteConfig,
+    output_path: Optional[Path],
+    plugin_path: Optional[Path],
+) -> int:
+    """CLI orchestration wrapper around run_suite().
+
+    Owns all side effects: validation startup gate, hipdnn import, console
+    output via Reporter, and JSON export. Returns the CLI exit code.
     """
     reporter = Reporter()
     total = len(graph_paths)
 
-    # Validation startup gate (W3): if --validate was requested, fail before
+    # Validation startup gate: if --validate was requested, fail before
     # iterating any graphs when the reference provider isn't registered or
     # isn't available. Otherwise --validate silently degrades to a no-op.
     if config.reference_provider != "none":
@@ -274,140 +375,51 @@ def run_suite(
 
     reporter.print_suite_header(total)
 
-    # Import hipdnn and create handle once for entire suite
     try:
         import hipdnn_frontend as hipdnn
 
         if plugin_path is not None:
             hipdnn.set_engine_plugin_paths([str(plugin_path)])
-
         handle = hipdnn.Handle()
     except ImportError:
         reporter.print_error(
-            "hipdnn_frontend not available. " "Install hipDNN Python bindings first."
+            "hipdnn_frontend not available. Install hipDNN Python bindings first."
         )
         return 1
 
-    graph_results: List[GraphResult] = []
-    has_errors = False
-    has_correctness_failures = False
+    suite_result = run_suite(graph_paths, config, handle)
 
-    for i, graph_path in enumerate(graph_paths, start=1):
-        graph_name = graph_path.stem
-        reporter.print_suite_graph_start(i, total, graph_name)
+    for i, gr in enumerate(suite_result.graphs, start=1):
+        reporter.print_suite_graph_start(i, total, gr.graph_name)
+        # Pre-execution graph errors come back as a single "unknown" provider
+        # entry with an error message and no timing data; surface those via
+        # the dedicated graph-error printer so they read like load failures.
+        is_setup_error = (
+            len(gr.results) == 1
+            and gr.results[0].status == "error"
+            and gr.results[0].provider == "unknown"
+        )
+        if is_setup_error:
+            reporter.print_suite_graph_error(
+                gr.graph_name, gr.results[0].error_message or "unknown error"
+            )
+            continue
 
-        try:
-            loader = GraphLoader()
-            graph_json = loader.load_json(graph_path)
-            loader.validate(graph_json)
-            tensor_infos = loader.extract_tensor_info(graph_json)
-
-            result = run_graph_all_providers(
-                graph_path, graph_json, tensor_infos, config, handle
+        if config.verbose:
+            reporter.print_verbose_graph_result(gr, config)
+        else:
+            counts = gr.count_by_status()
+            reporter.print_suite_graph_result(
+                counts.passed, counts.failed, counts.skipped, counts.errored
             )
 
-            # Check for zero combinations (bad filter)
-            if len(result.results) == 0:
-                reporter.print_suite_graph_error(
-                    graph_name,
-                    "No provider/engine combinations matched filters",
-                )
-                error_result = GraphResult(
-                    graph_name=graph_name,
-                    graph_path=str(graph_path),
-                    results=[
-                        ProviderEngineResult(
-                            provider="unknown",
-                            engine_id=0,
-                            status="error",
-                            error_message="No provider/engine combinations matched filters",
-                        )
-                    ],
-                )
-                graph_results.append(error_result)
-                has_errors = True
-                continue
-
-            graph_results.append(result)
-
-            counts = result.count_by_status()
-
-            if config.verbose:
-                reporter.print_verbose_graph_result(result, config)
-            else:
-                reporter.print_suite_graph_result(
-                    counts.passed, counts.failed, counts.skipped, counts.errored
-                )
-
-            if counts.errored > 0:
-                has_errors = True
-            if counts.failed > 0:
-                has_correctness_failures = True
-
-        except (GraphLoadError, ExecutionError) as e:
-            reporter.print_suite_graph_error(graph_name, str(e))
-            error_result = GraphResult(
-                graph_name=graph_name,
-                graph_path=str(graph_path),
-                results=[
-                    ProviderEngineResult(
-                        provider="unknown",
-                        engine_id=0,
-                        status="error",
-                        error_message=str(e),
-                    )
-                ],
-            )
-            graph_results.append(error_result)
-            has_errors = True
-
-    # Collect environment info and build metadata
-    env_info = collect_environment_info()
-
-    # Aggregate per-graph counts (uses the same classification as per-graph
-    # printing above to keep totals consistent).
-    total_pass = 0
-    total_fail = 0
-    total_skip = 0
-    total_error = 0
-    for gr in graph_results:
-        c = gr.count_by_status()
-        total_pass += c.passed
-        total_fail += c.failed
-        total_skip += c.skipped
-        total_error += c.errored
-    total_combinations = total_pass + total_fail + total_skip + total_error
-
-    metadata = SuiteMetadata(
-        timestamp=datetime.now(timezone.utc).isoformat(),
-        hostname=socket.gethostname(),
-        total_graphs=total,
-        total_combinations=total_combinations,
-        pass_combinations=total_pass,
-        fail_combinations=total_fail,
-        skip_combinations=total_skip,
-        error_combinations=total_error,
-        rocm_version=env_info.get("rocm_version"),
-        gpu_model=env_info.get("gpu_model"),
-        python_version=env_info.get("python_version"),
-        hipdnn_version=env_info.get("hipdnn_version"),
-    )
-
-    suite_result = SuiteResult(metadata=metadata, graphs=graph_results)
-
-    # Write JSON output if requested (per D-16)
     if output_path is not None:
         suite_result.save_json(str(output_path))
 
-    reporter.print_suite_summary(metadata)
+    reporter.print_suite_summary(suite_result.metadata)
     reporter.print_suite_footer()
 
-    # Exit code per D-09
-    if has_correctness_failures:
-        return 2
-    if has_errors:
-        return 1
-    return 0
+    return _suite_exit_code(suite_result)
 
 
 def main() -> int:
@@ -421,7 +433,7 @@ def main() -> int:
 
     gpu_backend = "none" if args.no_kernel_timing else "auto"
 
-    # Resolve --graph: glob expansion for suite mode (per D-05)
+    # Resolve --graph: glob expansion for suite mode.
     # recursive=True so '**' patterns match nested directories.
     resolved_files = sorted(glob.glob(args.graph, recursive=True))
 
@@ -454,7 +466,7 @@ def main() -> int:
             )
             return 1
 
-        # W4: --engine is meaningless in A/B mode (configurations come from
+        # --engine is meaningless in A/B mode (configurations come from
         # --AId / --BId). Reject rather than silently using args.engine[0].
         if args.engine:
             print(
@@ -518,7 +530,7 @@ def main() -> int:
                 file=sys.stderr,
             )
             return 1
-        # W4: PyTorch backend executes one engine; a multi-ID list is ambiguous.
+        # PyTorch backend executes one engine; a multi-ID list is ambiguous.
         if args.engine and len(args.engine) > 1:
             print(
                 "--engine accepts only a single ID with --backend pytorch "
@@ -561,7 +573,7 @@ def main() -> int:
         print(f"Suite configuration error: {e}", file=sys.stderr)
         return 1
 
-    return run_suite(
+    return _orchestrate_suite_cli(
         graph_paths=[Path(p) for p in resolved_files],
         config=suite_config,
         output_path=args.output,

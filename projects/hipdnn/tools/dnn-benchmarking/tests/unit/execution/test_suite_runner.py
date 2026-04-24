@@ -10,7 +10,6 @@ import pytest
 
 from dnn_benchmarking.execution.suite_runner import (
     run_graph_all_providers,
-    discover_engine_ids,
     _resolve_engine_name,
     _get_reference_provider,
     _check_correctness,
@@ -61,23 +60,44 @@ def _make_bm_mock():
     return mock_bm
 
 
-def _make_exec_mock(init_time_ms: float = 1.0, has_kernel_timings: bool = False):
-    """Create an Executor mock with a working benchmark() return value."""
-    mock_exec = MagicMock()
-    mock_exec.init_time_ms = init_time_ms
-    mock_result = MagicMock()
-    mock_result.e2e_timings = [1.0]
-    mock_result.kernel_timings = [0.5] if has_kernel_timings else None
-    mock_result.has_kernel_timings = has_kernel_timings
-    mock_exec.benchmark.return_value = mock_result
-    return mock_exec
+def _make_exec_factory(
+    engine_ids=None,
+    init_time_ms: float = 1.0,
+    has_kernel_timings: bool = False,
+    prepare_side_effect=None,
+    discover_side_effect=None,
+):
+    """Build a factory for Executor() that handles both discovery and execution.
+
+    The first Executor() call (in run_graph_all_providers) is for discovery
+    and only uses .discover_engines(); subsequent calls are per-engine and
+    use .prepare(), .warmup(), .benchmark(). All instances share the same
+    mock by default; override with side_effects when behaviour must differ.
+    """
+
+    def make_instance(*args, **kwargs):
+        m = MagicMock()
+        m.init_time_ms = init_time_ms
+        if discover_side_effect is not None:
+            m.discover_engines.side_effect = discover_side_effect
+        else:
+            m.discover_engines.return_value = engine_ids or []
+        if prepare_side_effect is not None:
+            m.prepare.side_effect = prepare_side_effect
+        bench_result = MagicMock()
+        bench_result.e2e_timings = [1.0]
+        bench_result.kernel_timings = [0.5] if has_kernel_timings else None
+        bench_result.has_kernel_timings = has_kernel_timings
+        m.benchmark.return_value = bench_result
+        return m
+
+    return make_instance
 
 
 class TestRunGraphAllProviders:
     """Tests for run_graph_all_providers function."""
 
     @patch("dnn_benchmarking.execution.suite_runner._resolve_engine_name")
-    @patch("dnn_benchmarking.execution.suite_runner.discover_engine_ids")
     @patch("dnn_benchmarking.execution.suite_runner._get_reference_provider")
     @patch("dnn_benchmarking.execution.suite_runner.Executor")
     @patch("dnn_benchmarking.execution.suite_runner.BufferManager")
@@ -86,15 +106,15 @@ class TestRunGraphAllProviders:
         mock_bm_cls,
         mock_exec_cls,
         mock_get_ref,
-        mock_disc,
         mock_resolve_name,
     ):
         """run_graph_all_providers returns one ProviderEngineResult per discovered engine ID."""
-        mock_disc.return_value = [0, 1, 2]
         mock_resolve_name.side_effect = lambda eid: f"engine_{eid}"
         mock_get_ref.return_value = None
 
-        mock_exec_cls.return_value = _make_exec_mock(has_kernel_timings=True)
+        mock_exec_cls.side_effect = _make_exec_factory(
+            engine_ids=[0, 1, 2], has_kernel_timings=True
+        )
         mock_bm_cls.return_value = _make_bm_mock()
 
         config = _make_config()
@@ -116,7 +136,6 @@ class TestRunGraphAllProviders:
         ]
 
     @patch("dnn_benchmarking.execution.suite_runner._resolve_engine_name")
-    @patch("dnn_benchmarking.execution.suite_runner.discover_engine_ids")
     @patch("dnn_benchmarking.execution.suite_runner._get_reference_provider")
     @patch("dnn_benchmarking.execution.suite_runner.Executor")
     @patch("dnn_benchmarking.execution.suite_runner.BufferManager")
@@ -125,17 +144,16 @@ class TestRunGraphAllProviders:
         mock_bm_cls,
         mock_exec_cls,
         mock_get_ref,
-        mock_disc,
         mock_resolve_name,
     ):
         """When Executor.prepare() fails, the result is status='error' with no timing."""
-        mock_disc.return_value = [0]
         mock_resolve_name.return_value = "engine_0"
         mock_get_ref.return_value = None
 
-        mock_exec = MagicMock()
-        mock_exec.prepare.side_effect = ExecutionError("build failed")
-        mock_exec_cls.return_value = mock_exec
+        mock_exec_cls.side_effect = _make_exec_factory(
+            engine_ids=[0],
+            prepare_side_effect=ExecutionError("build failed"),
+        )
 
         result = run_graph_all_providers(
             graph_path=Path("test.json"),
@@ -154,7 +172,6 @@ class TestRunGraphAllProviders:
         assert r.e2e_stats is None
 
     @patch("dnn_benchmarking.execution.suite_runner._resolve_engine_name")
-    @patch("dnn_benchmarking.execution.suite_runner.discover_engine_ids")
     @patch("dnn_benchmarking.execution.suite_runner._get_reference_provider")
     @patch("dnn_benchmarking.execution.suite_runner.Executor")
     @patch("dnn_benchmarking.execution.suite_runner.BufferManager")
@@ -163,19 +180,18 @@ class TestRunGraphAllProviders:
         mock_bm_cls,
         mock_exec_cls,
         mock_get_ref,
-        mock_disc,
         mock_resolve_name,
     ):
         """An ExecutionError that looks like a support-check failure is recorded as skipped."""
-        mock_disc.return_value = [0]
         mock_resolve_name.return_value = "engine_0"
         mock_get_ref.return_value = None
 
-        mock_exec = MagicMock()
-        mock_exec.prepare.side_effect = ExecutionError(
-            "Backend support check failed: not supported"
+        mock_exec_cls.side_effect = _make_exec_factory(
+            engine_ids=[0],
+            prepare_side_effect=ExecutionError(
+                "Backend support check failed: not supported"
+            ),
         )
-        mock_exec_cls.return_value = mock_exec
 
         result = run_graph_all_providers(
             graph_path=Path("test.json"),
@@ -191,7 +207,6 @@ class TestRunGraphAllProviders:
         assert r.skip_reason is not None
 
     @patch("dnn_benchmarking.execution.suite_runner._resolve_engine_name")
-    @patch("dnn_benchmarking.execution.suite_runner.discover_engine_ids")
     @patch("dnn_benchmarking.execution.suite_runner._get_reference_provider")
     @patch("dnn_benchmarking.execution.suite_runner.Executor")
     @patch("dnn_benchmarking.execution.suite_runner.BufferManager")
@@ -200,16 +215,14 @@ class TestRunGraphAllProviders:
         mock_bm_cls,
         mock_exec_cls,
         mock_get_ref,
-        mock_disc,
         mock_resolve_name,
     ):
         """Success: status='success' with separate cpu_build_time_ms / gpu_kernel_stats / e2e_stats."""
-        mock_disc.return_value = [0]
         mock_resolve_name.return_value = "engine_0"
         mock_get_ref.return_value = None
 
-        mock_exec_cls.return_value = _make_exec_mock(
-            init_time_ms=12.5, has_kernel_timings=True
+        mock_exec_cls.side_effect = _make_exec_factory(
+            engine_ids=[0], init_time_ms=12.5, has_kernel_timings=True
         )
         mock_bm_cls.return_value = _make_bm_mock()
 
@@ -228,7 +241,6 @@ class TestRunGraphAllProviders:
         assert isinstance(r.e2e_stats, BenchmarkStats)
 
     @patch("dnn_benchmarking.execution.suite_runner._resolve_engine_name")
-    @patch("dnn_benchmarking.execution.suite_runner.discover_engine_ids")
     @patch("dnn_benchmarking.execution.suite_runner._get_reference_provider")
     @patch("dnn_benchmarking.execution.suite_runner.Executor")
     @patch("dnn_benchmarking.execution.suite_runner.BufferManager")
@@ -237,15 +249,15 @@ class TestRunGraphAllProviders:
         mock_bm_cls,
         mock_exec_cls,
         mock_get_ref,
-        mock_disc,
         mock_resolve_name,
     ):
         """cpu_build_time_ms comes from Executor.init_time_ms."""
-        mock_disc.return_value = [0]
         mock_resolve_name.return_value = "engine_0"
         mock_get_ref.return_value = None
 
-        mock_exec_cls.return_value = _make_exec_mock(init_time_ms=42.0)
+        mock_exec_cls.side_effect = _make_exec_factory(
+            engine_ids=[0], init_time_ms=42.0
+        )
         mock_bm_cls.return_value = _make_bm_mock()
 
         result = run_graph_all_providers(
@@ -260,12 +272,14 @@ class TestRunGraphAllProviders:
 
 
 class TestDiscoveryFailure:
-    """Discovery-level failures (W2) are surfaced as graph-level errors."""
+    """Discovery-level failures are surfaced as graph-level errors."""
 
-    @patch("dnn_benchmarking.execution.suite_runner.discover_engine_ids")
-    def test_discovery_exception_is_recorded_as_graph_error(self, mock_disc):
-        """When discover_engine_ids raises, the graph gets a single error entry."""
-        mock_disc.side_effect = ExecutionError("backend rejected graph")
+    @patch("dnn_benchmarking.execution.suite_runner.Executor")
+    def test_discovery_exception_is_recorded_as_graph_error(self, mock_exec_cls):
+        """When discover_engines raises, the graph gets a single error entry."""
+        mock_exec_cls.side_effect = _make_exec_factory(
+            discover_side_effect=ExecutionError("backend rejected graph")
+        )
 
         result = run_graph_all_providers(
             graph_path=Path("test.json"),
@@ -281,10 +295,10 @@ class TestDiscoveryFailure:
         assert "Engine discovery failed" in r.error_message
         assert "backend rejected graph" in r.error_message
 
-    @patch("dnn_benchmarking.execution.suite_runner.discover_engine_ids")
-    def test_empty_discovery_recorded_as_graph_error(self, mock_disc):
+    @patch("dnn_benchmarking.execution.suite_runner.Executor")
+    def test_empty_discovery_recorded_as_graph_error(self, mock_exec_cls):
         """When discovery returns no engines, surface as a graph-level error."""
-        mock_disc.return_value = []
+        mock_exec_cls.side_effect = _make_exec_factory(engine_ids=[])
 
         result = run_graph_all_providers(
             graph_path=Path("test.json"),
@@ -298,12 +312,14 @@ class TestDiscoveryFailure:
         assert result.results[0].status == "error"
         assert "No engines discovered" in result.results[0].error_message
 
-    @patch("dnn_benchmarking.execution.suite_runner.discover_engine_ids")
-    def test_no_engines_runtime_error_recorded_as_skipped(self, mock_disc):
+    @patch("dnn_benchmarking.execution.suite_runner.Executor")
+    def test_no_engines_runtime_error_recorded_as_skipped(self, mock_exec_cls):
         """C++ binding throws RuntimeError when no engines support the graph;
         we classify that as 'skipped' (unsupported) rather than 'error'."""
-        mock_disc.side_effect = RuntimeError(
-            "Failed to get ranked engine ids: No engine configurations available for the graph."
+        mock_exec_cls.side_effect = _make_exec_factory(
+            discover_side_effect=RuntimeError(
+                "Failed to get ranked engine ids: No engine configurations available for the graph."
+            )
         )
 
         result = run_graph_all_providers(
@@ -319,10 +335,10 @@ class TestDiscoveryFailure:
         assert r.status == "skipped"
         assert "No engine configurations" in (r.skip_reason or "")
 
-    @patch("dnn_benchmarking.execution.suite_runner.discover_engine_ids")
-    def test_engine_filter_excludes_everything(self, mock_disc):
+    @patch("dnn_benchmarking.execution.suite_runner.Executor")
+    def test_engine_filter_excludes_everything(self, mock_exec_cls):
         """When engine_filter excludes every discovered engine, surface as error."""
-        mock_disc.return_value = [0, 1]
+        mock_exec_cls.side_effect = _make_exec_factory(engine_ids=[0, 1])
 
         result = run_graph_all_providers(
             graph_path=Path("test.json"),
@@ -398,7 +414,7 @@ class TestSuiteConfigValidation:
 
 
 class TestIsSupportError:
-    """Tests for _is_support_error keyword classification (W-08)."""
+    """Tests for _is_support_error keyword classification."""
 
     def test_support_check_failed_is_support_error(self):
         assert _is_support_error("Backend support check failed: bad config") is True
@@ -427,7 +443,6 @@ class TestEngineFilter:
     """Tests for engine filter behavior."""
 
     @patch("dnn_benchmarking.execution.suite_runner._resolve_engine_name")
-    @patch("dnn_benchmarking.execution.suite_runner.discover_engine_ids")
     @patch("dnn_benchmarking.execution.suite_runner._get_reference_provider")
     @patch("dnn_benchmarking.execution.suite_runner.Executor")
     @patch("dnn_benchmarking.execution.suite_runner.BufferManager")
@@ -436,15 +451,13 @@ class TestEngineFilter:
         mock_bm_cls,
         mock_exec_cls,
         mock_get_ref,
-        mock_disc,
         mock_resolve_name,
     ):
         """When --engine filter is set, only that engine ID is iterated."""
-        mock_disc.return_value = [0, 1, 2]
         mock_resolve_name.side_effect = lambda eid: f"engine_{eid}"
         mock_get_ref.return_value = None
 
-        mock_exec_cls.return_value = _make_exec_mock()
+        mock_exec_cls.side_effect = _make_exec_factory(engine_ids=[0, 1, 2])
         mock_bm_cls.return_value = _make_bm_mock()
 
         result = run_graph_all_providers(
@@ -459,7 +472,6 @@ class TestEngineFilter:
         assert result.results[0].engine_id == 2
 
     @patch("dnn_benchmarking.execution.suite_runner._resolve_engine_name")
-    @patch("dnn_benchmarking.execution.suite_runner.discover_engine_ids")
     @patch("dnn_benchmarking.execution.suite_runner._get_reference_provider")
     @patch("dnn_benchmarking.execution.suite_runner.Executor")
     @patch("dnn_benchmarking.execution.suite_runner.BufferManager")
@@ -468,15 +480,13 @@ class TestEngineFilter:
         mock_bm_cls,
         mock_exec_cls,
         mock_get_ref,
-        mock_disc,
         mock_resolve_name,
     ):
         """engine_filter=[1, 3, 99]: engines 1 and 3 run; 99 (not discovered) is dropped."""
-        mock_disc.return_value = [0, 1, 2, 3]
         mock_resolve_name.side_effect = lambda eid: f"engine_{eid}"
         mock_get_ref.return_value = None
 
-        mock_exec_cls.return_value = _make_exec_mock()
+        mock_exec_cls.side_effect = _make_exec_factory(engine_ids=[0, 1, 2, 3])
         mock_bm_cls.return_value = _make_bm_mock()
 
         result = run_graph_all_providers(
@@ -492,10 +502,9 @@ class TestEngineFilter:
 
 
 class TestNoRetryOnFailure:
-    """Tests for no-retry failure behavior (D-10)."""
+    """Single attempt per engine -- no automatic retry."""
 
     @patch("dnn_benchmarking.execution.suite_runner._resolve_engine_name")
-    @patch("dnn_benchmarking.execution.suite_runner.discover_engine_ids")
     @patch("dnn_benchmarking.execution.suite_runner._get_reference_provider")
     @patch("dnn_benchmarking.execution.suite_runner.Executor")
     @patch("dnn_benchmarking.execution.suite_runner.BufferManager")
@@ -504,17 +513,16 @@ class TestNoRetryOnFailure:
         mock_bm_cls,
         mock_exec_cls,
         mock_get_ref,
-        mock_disc,
         mock_resolve_name,
     ):
         """No retry on failure -- single attempt per engine."""
-        mock_disc.return_value = [0]
         mock_resolve_name.return_value = "engine_0"
         mock_get_ref.return_value = None
 
-        mock_exec = MagicMock()
-        mock_exec.prepare.side_effect = ExecutionError("fail")
-        mock_exec_cls.return_value = mock_exec
+        mock_exec_cls.side_effect = _make_exec_factory(
+            engine_ids=[0],
+            prepare_side_effect=ExecutionError("fail"),
+        )
 
         result = run_graph_all_providers(
             graph_path=Path("test.json"),
@@ -524,15 +532,15 @@ class TestNoRetryOnFailure:
             handle=MagicMock(),
         )
 
-        assert mock_exec_cls.call_count == 1
+        # One Executor for discovery + one for the single failed engine.
+        assert mock_exec_cls.call_count == 2
         assert result.results[0].status == "error"
 
 
 class TestCorrectnessChecking:
-    """Tests for correctness checking via ArrayComparator (CORR-01/02) and W3."""
+    """Tests for correctness checking via the reference provider path."""
 
     @patch("dnn_benchmarking.execution.suite_runner._resolve_engine_name")
-    @patch("dnn_benchmarking.execution.suite_runner.discover_engine_ids")
     @patch("dnn_benchmarking.execution.suite_runner._get_reference_provider")
     @patch("dnn_benchmarking.execution.suite_runner._check_correctness")
     @patch("dnn_benchmarking.execution.suite_runner.Executor")
@@ -543,11 +551,9 @@ class TestCorrectnessChecking:
         mock_exec_cls,
         mock_check_corr,
         mock_get_ref,
-        mock_disc,
         mock_resolve_name,
     ):
-        """Successful execution populates correctness.tolerance_match from ArrayComparator (CORR-02)."""
-        mock_disc.return_value = [0]
+        """Successful execution populates correctness.tolerance_match from the validator."""
         mock_resolve_name.return_value = "engine_0"
 
         mock_get_ref.return_value = MagicMock()
@@ -560,7 +566,7 @@ class TestCorrectnessChecking:
             max_rel_diff=1e-6,
         )
 
-        mock_exec_cls.return_value = _make_exec_mock()
+        mock_exec_cls.side_effect = _make_exec_factory(engine_ids=[0])
         mock_bm_cls.return_value = _make_bm_mock()
 
         result = run_graph_all_providers(
@@ -577,7 +583,6 @@ class TestCorrectnessChecking:
         assert r.correctness.execution_success is True
 
     @patch("dnn_benchmarking.execution.suite_runner._resolve_engine_name")
-    @patch("dnn_benchmarking.execution.suite_runner.discover_engine_ids")
     @patch("dnn_benchmarking.execution.suite_runner._get_reference_provider")
     @patch("dnn_benchmarking.execution.suite_runner.Executor")
     @patch("dnn_benchmarking.execution.suite_runner.BufferManager")
@@ -586,15 +591,13 @@ class TestCorrectnessChecking:
         mock_bm_cls,
         mock_exec_cls,
         mock_get_ref,
-        mock_disc,
         mock_resolve_name,
     ):
         """When --validate is not requested, tolerance_match is None (no correctness performed)."""
-        mock_disc.return_value = [0]
         mock_resolve_name.return_value = "engine_0"
         mock_get_ref.return_value = None
 
-        mock_exec_cls.return_value = _make_exec_mock()
+        mock_exec_cls.side_effect = _make_exec_factory(engine_ids=[0])
         mock_bm_cls.return_value = _make_bm_mock()
 
         result = run_graph_all_providers(
@@ -611,7 +614,6 @@ class TestCorrectnessChecking:
         assert r.correctness.execution_success is True
 
     @patch("dnn_benchmarking.execution.suite_runner._resolve_engine_name")
-    @patch("dnn_benchmarking.execution.suite_runner.discover_engine_ids")
     @patch("dnn_benchmarking.execution.suite_runner._get_reference_provider")
     @patch("dnn_benchmarking.execution.suite_runner.Executor")
     @patch("dnn_benchmarking.execution.suite_runner.BufferManager")
@@ -620,15 +622,13 @@ class TestCorrectnessChecking:
         mock_bm_cls,
         mock_exec_cls,
         mock_get_ref,
-        mock_disc,
         mock_resolve_name,
     ):
-        """W3: --validate requested but provider doesn't support graph -> tolerance_match=False."""
-        mock_disc.return_value = [0]
+        """--validate requested but provider doesn't support graph -> tolerance_match=False."""
         mock_resolve_name.return_value = "engine_0"
         mock_get_ref.return_value = None  # provider unavailable for this graph
 
-        mock_exec_cls.return_value = _make_exec_mock()
+        mock_exec_cls.side_effect = _make_exec_factory(engine_ids=[0])
         mock_bm_cls.return_value = _make_bm_mock()
 
         result = run_graph_all_providers(
@@ -646,7 +646,6 @@ class TestCorrectnessChecking:
         assert "does not support" in (r.correctness.error_message or "")
 
     @patch("dnn_benchmarking.execution.suite_runner._resolve_engine_name")
-    @patch("dnn_benchmarking.execution.suite_runner.discover_engine_ids")
     @patch("dnn_benchmarking.execution.suite_runner._get_reference_provider")
     @patch("dnn_benchmarking.execution.suite_runner.Executor")
     @patch("dnn_benchmarking.execution.suite_runner.BufferManager")
@@ -655,17 +654,16 @@ class TestCorrectnessChecking:
         mock_bm_cls,
         mock_exec_cls,
         mock_get_ref,
-        mock_disc,
         mock_resolve_name,
     ):
-        """correctness.execution_success is False when benchmark errors (CORR-01)."""
-        mock_disc.return_value = [0]
+        """correctness.execution_success is False when benchmark errors."""
         mock_resolve_name.return_value = "engine_0"
         mock_get_ref.return_value = None
 
-        mock_exec = MagicMock()
-        mock_exec.prepare.side_effect = ExecutionError("boom")
-        mock_exec_cls.return_value = mock_exec
+        mock_exec_cls.side_effect = _make_exec_factory(
+            engine_ids=[0],
+            prepare_side_effect=ExecutionError("boom"),
+        )
 
         result = run_graph_all_providers(
             graph_path=Path("test.json"),
@@ -682,7 +680,7 @@ class TestCorrectnessChecking:
 
 
 class TestCheckCorrectnessOutputCount:
-    """W3: _check_correctness returns tolerance_match=False when no outputs are comparable."""
+    """_check_correctness returns tolerance_match=False when no outputs are comparable."""
 
     def test_no_outputs_returns_false(self):
         bm = MagicMock()

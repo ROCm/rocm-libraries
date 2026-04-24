@@ -53,7 +53,7 @@ class TestSuiteReporter:
     """Tests for Reporter suite progress and summary methods."""
 
     def test_print_suite_header(self) -> None:
-        """Test 1: print_suite_header prints banner with total graph count."""
+        """print_suite_header prints banner with total graph count."""
         output = io.StringIO()
         reporter = Reporter(output=output)
 
@@ -64,7 +64,7 @@ class TestSuiteReporter:
         assert "hipDNN Benchmark Suite: 5 graph(s)" in result
 
     def test_print_suite_graph_start(self) -> None:
-        """Test 2: print_suite_graph_start prints '[1/3] graph_name...' format."""
+        """print_suite_graph_start prints '[1/3] graph_name...' format."""
         output = io.StringIO()
         reporter = Reporter(output=output)
 
@@ -74,7 +74,7 @@ class TestSuiteReporter:
         assert "[1/3] conv_fwd_nchw..." in result
 
     def test_print_suite_graph_start_last_graph(self) -> None:
-        """Test 2b: print_suite_graph_start with last graph in sequence."""
+        """print_suite_graph_start with last graph in sequence."""
         output = io.StringIO()
         reporter = Reporter(output=output)
 
@@ -84,7 +84,7 @@ class TestSuiteReporter:
         assert "[3/3] matmul_fp16..." in result
 
     def test_print_suite_graph_result(self) -> None:
-        """Test 3: print_suite_graph_result prints '-> N passed, ...' format."""
+        """print_suite_graph_result prints '-> N passed, ...' format."""
         output = io.StringIO()
         reporter = Reporter(output=output)
 
@@ -94,7 +94,7 @@ class TestSuiteReporter:
         assert "  -> 2 passed, 1 failed, 0 skipped, 0 errored" in result
 
     def test_print_suite_graph_result_all_zeros(self) -> None:
-        """Test 3b: print_suite_graph_result with all zeros."""
+        """print_suite_graph_result with all zeros."""
         output = io.StringIO()
         reporter = Reporter(output=output)
 
@@ -104,7 +104,7 @@ class TestSuiteReporter:
         assert "  -> 0 passed, 0 failed, 0 skipped, 0 errored" in result
 
     def test_print_suite_graph_error(self) -> None:
-        """Test 4: print_suite_graph_error prints inline error for a failed graph."""
+        """print_suite_graph_error prints inline error for a failed graph."""
         output = io.StringIO()
         reporter = Reporter(output=output)
 
@@ -116,7 +116,7 @@ class TestSuiteReporter:
         assert "  ERROR: Graph file not found: /path/to/missing.json" in result
 
     def test_print_suite_summary(self) -> None:
-        """Test 5: print_suite_summary prints totals from SuiteMetadata."""
+        """print_suite_summary prints totals from SuiteMetadata."""
         output = io.StringIO()
         reporter = Reporter(output=output)
 
@@ -142,7 +142,7 @@ class TestSuiteReporter:
         assert "Errors:       0" in result
 
     def test_print_suite_footer(self) -> None:
-        """Test 6: print_suite_footer prints closing banner."""
+        """print_suite_footer prints closing banner."""
         output = io.StringIO()
         reporter = Reporter(output=output)
 
@@ -152,7 +152,7 @@ class TestSuiteReporter:
         assert "=" * Reporter.WIDTH in result
 
     def test_all_output_goes_to_output_stream(self) -> None:
-        """Test 7: All output goes to self._output stream (consistent with Reporter pattern)."""
+        """All output goes to self._output stream (consistent with Reporter pattern)."""
         output = io.StringIO()
         reporter = Reporter(output=output)
 
@@ -365,7 +365,7 @@ class TestVerboseReporter:
         assert "not supported" in out
 
     def test_verbose_header_uses_per_engine_provider_name(self) -> None:
-        """W6: Verbose header must render the engine's actual provider, not '(MIOpen)'."""
+        """Verbose header must render the engine's actual provider, not '(MIOpen)'."""
         output = io.StringIO()
         reporter = Reporter(output=output)
         gr = GraphResult(
@@ -385,7 +385,7 @@ class TestVerboseReporter:
 
 
 class TestPrintHeader:
-    """Tests for print_header provider override (W6)."""
+    """Tests for print_header provider override."""
 
     def test_print_header_default_is_miopen(self) -> None:
         """When no provider is supplied, the legacy '(MIOpen)' literal is preserved."""

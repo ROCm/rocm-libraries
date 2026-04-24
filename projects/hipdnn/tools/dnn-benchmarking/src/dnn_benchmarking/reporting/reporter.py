@@ -413,14 +413,14 @@ class Reporter:
     # Suite Methods
 
     def print_suite_header(self, total_graphs: int) -> None:
-        """Print suite execution header (per D-17)."""
+        """Print suite execution header."""
         self._print_line("=")
         self._print(f"hipDNN Benchmark Suite: {total_graphs} graph(s)")
         self._print_line("=")
         self._print("")
 
     def print_suite_graph_start(self, index: int, total: int, graph_name: str) -> None:
-        """Print per-graph progress line at start (per D-17).
+        """Print per-graph progress line at start.
 
         Format: [1/3] graph_name...
         """
@@ -429,7 +429,7 @@ class Reporter:
     def print_suite_graph_result(
         self, passed: int, failed: int, skipped: int, errored: int
     ) -> None:
-        """Print per-graph result summary line (per D-17).
+        """Print per-graph result summary line.
 
         Format:   -> 2 passed, 1 failed, 0 skipped, 0 errored
         """
@@ -439,7 +439,7 @@ class Reporter:
         )
 
     def print_suite_graph_error(self, graph_name: str, error: str) -> None:
-        """Print inline error when a graph fails to load/execute (per D-08).
+        """Print inline error when a graph fails to load/execute.
 
         Prints error then continues (caller must not abort).
         """
