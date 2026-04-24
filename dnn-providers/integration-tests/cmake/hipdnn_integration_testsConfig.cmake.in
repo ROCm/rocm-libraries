@@ -4,9 +4,7 @@
 @PACKAGE_INIT@
 
 # Skip targets import if already defined (superbuild via add_subdirectory)
-if(NOT TARGET hipdnn_integration_tests)
-    include("${CMAKE_CURRENT_LIST_DIR}/hipdnn_integration_testsTargets.cmake")
-endif()
+include("${CMAKE_CURRENT_LIST_DIR}/hipdnn_integration_testsTargets.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/HipdnnIntegrationTestHelpers.cmake")
 
 check_required_components(hipdnn_integration_tests)

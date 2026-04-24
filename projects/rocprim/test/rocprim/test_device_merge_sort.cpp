@@ -387,6 +387,10 @@ TYPED_TEST(RocprimDeviceSortTests, SortKeyValue)
                              [compare_op](const key_value& a, const key_value& b)
                              { return compare_op(a.first, b.first); });
 
+            // These buffers are not needed anymore and can be freed
+            keys_input = std::vector<key_type>();
+            values_input = std::vector<value_type>();
+
             auto input_keys_it
                 = test_utils::wrap_in_indirect_iterator<TestFixture::use_indirect_iterator>(
                     d_keys_input.get());
@@ -403,7 +407,7 @@ TYPED_TEST(RocprimDeviceSortTests, SortKeyValue)
                                                   d_keys_output.get(),
                                                   d_values_input.get(),
                                                   input_values_it,
-                                                  keys_input.size(),
+                                                  size,
                                                   compare_op,
                                                   stream,
                                                   debug_synchronous));
@@ -433,7 +437,7 @@ TYPED_TEST(RocprimDeviceSortTests, SortKeyValue)
                                                   d_keys_output.get(),
                                                   input_values_it,
                                                   d_values_output.get(),
-                                                  keys_input.size(),
+                                                  size,
                                                   compare_op,
                                                   stream,
                                                   debug_synchronous));
@@ -446,10 +450,6 @@ TYPED_TEST(RocprimDeviceSortTests, SortKeyValue)
             HIP_CHECK(hipGetLastError());
             HIP_CHECK(hipDeviceSynchronize());
 
-            // Copy output to host
-            const auto keys_output   = d_keys_output.load();
-            const auto values_output = d_values_output.load();
-
             // Check if output values are as expected
             std::vector<key_type> expected_key(expected.size());
             std::vector<value_type> expected_value(expected.size());
@@ -458,9 +458,19 @@ TYPED_TEST(RocprimDeviceSortTests, SortKeyValue)
                 expected_key[i] = expected[i].first;
                 expected_value[i] = expected[i].second;
             }
+            // This buffer is not needed anymore and can be freed
+            expected = std::vector<key_value>();
 
-            ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(keys_output, expected_key));
-            ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(values_output, expected_value));
+            {
+                // Copy output to host.  This is scoped so keys_output is freed immediately.
+                const auto keys_output   = d_keys_output.load();
+                ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(keys_output, expected_key));
+            }
+            {
+                // Copy output to host.  This is scoped so values_output is freed immediately.
+                const auto values_output = d_values_output.load();
+                ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(values_output, expected_value));
+            }
         }
     }
 

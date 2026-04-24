@@ -4,13 +4,19 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 
 ## rocPRIM 4.4.0 for ROCm 7.13
 
-### Changed
+### Added
 
-* Building benchmarks on Windows is not currently possible because of the dependency on AMD SMI. 
-  * A CMake-level check has been added to prevent them from being built on Windows.
-  * The rmake.py build script no longer builds benchmarks by default on Windows when passed the `--clients` option.
+* Added type trait definitions for `__hip_bfloat16`. This should resolve issues where this type did not work with radix-based algorithms.
+
+### Resolved issues
+
+* Fixed a silent overflow in `rocprim::device_segmented_reduce` where it could exceed the maximum number of HIP threads, resulting in missing output.
 
 ## rocPRIM 4.3.0 for ROCm 7.12
+
+### Added
+
+* Added tested examples for all algorithms.
 
 ### Optimizations
 

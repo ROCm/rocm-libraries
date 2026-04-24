@@ -27,6 +27,8 @@
 #include <vector>
 
 #include <llvm/ObjectYAML/YAML.h>
+#include <llvm/Support/ManagedStatic.h>
+#include <llvm/Support/raw_ostream.h>
 
 #include <hiptensor/hiptensor.h>
 
@@ -543,4 +545,11 @@ namespace hiptensor
     template struct YamlConfigLoader<ContractionTestParams>;
     template struct YamlConfigLoader<PermutationTestParams>;
     template struct YamlConfigLoader<ReductionTestParams>;
+
+    void llvmShutdown()
+    {
+        llvm::outs().flush();
+        llvm::errs().flush();
+        llvm::llvm_shutdown();
+    }
 }

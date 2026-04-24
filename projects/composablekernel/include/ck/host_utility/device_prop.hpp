@@ -52,6 +52,8 @@ inline std::string get_device_name()
     }
 }
 
+inline bool is_gfx90a() { return ck::get_device_name() == "gfx90a"; }
+
 inline bool is_gfx12_supported()
 {
     return ck::get_device_name() == "gfx1200" || ck::get_device_name() == "gfx1201";
@@ -125,8 +127,9 @@ inline bool is_gfx101_supported()
 inline bool is_gfx103_supported()
 {
     return ck::get_device_name() == "gfx1030" || ck::get_device_name() == "gfx1031" ||
-           ck::get_device_name() == "gfx1032" || ck::get_device_name() == "gfx1034" ||
-           ck::get_device_name() == "gfx1035" || ck::get_device_name() == "gfx1036";
+           ck::get_device_name() == "gfx1032" || ck::get_device_name() == "gfx1033" ||
+           ck::get_device_name() == "gfx1034" || ck::get_device_name() == "gfx1035" ||
+           ck::get_device_name() == "gfx1036";
 }
 
 inline bool is_wmma_supported()

@@ -89,11 +89,22 @@ int main(int argc, char** argv) noexcept
         argparse::ArgumentParser parser(
             "hipdnn_integration_tests", "", argparse::default_arguments::help);
         parser.add_argument("--ta", "--test-article")
-            .required()
-            .help("Full path to the hipdnn engine plugin .so to test");
+            .help("Full path to the hipdnn engine plugin .so to test. "
+                  "Omit to use hipDNN's default plugin discovery.");
         parser.add_argument("--te", "--test-engine")
-            .required()
-            .help("Engine name to test against (e.g., MIOPEN_ENGINE)");
+            .help("Engine name to test against (e.g., MIOPEN_ENGINE). "
+                  "Omit to let hipDNN select the engine.");
+        parser.add_argument("--fail-on-unsupported")
+            .default_value(false)
+            .implicit_value(true)
+            .help("FAIL instead of SKIP when no engine supports a graph");
+        parser.add_argument("--skip-graph-validation")
+            .default_value(false)
+            .implicit_value(true)
+            .help("PASS immediately after confirming engine support, "
+                  "without executing or validating the graph");
+        parser.add_argument("--tc", "--test-config")
+            .help("Path to a TOML configuration file for per-test tolerance overrides.");
 
         std::vector<std::string> remainingArgs;
         try
@@ -107,44 +118,74 @@ int main(int argc, char** argv) noexcept
             return 1;
         }
 
-        auto articlePathArg = parser.get<std::string>("--test-article");
-        auto engineNameArg = parser.get<std::string>("--test-engine");
-
-        // Validate and canonicalize article path (resolves relative paths)
-        std::filesystem::path articlePathObj;
-        try
+        // Parse --test-engine, --fail-on-unsupported, and --test-config arguments
+        std::optional<std::string> engineName;
+        if(parser.is_used("--test-engine"))
         {
-            articlePathObj = std::filesystem::canonical(articlePathArg);
+            engineName = parser.get<std::string>("--test-engine");
         }
-        catch(const std::filesystem::filesystem_error&)
+        auto failOnUnsupported = parser.get<bool>("--fail-on-unsupported");
+        auto skipGraphValidation = parser.get<bool>("--skip-graph-validation");
+
+        std::optional<std::filesystem::path> configPath;
+        if(parser.is_used("--test-config"))
         {
-            std::cerr << "Error: Article path does not exist: " << articlePathArg << '\n';
-            return 1;
+            auto configPathArg = parser.get<std::string>("--test-config");
+            try
+            {
+                configPath = std::filesystem::canonical(configPathArg);
+            }
+            catch(const std::filesystem::filesystem_error&)
+            {
+                std::cerr << "Error: Config path does not exist: " << configPathArg << '\n';
+                return 1;
+            }
         }
 
-        // Set engine plugin path to the plugin file (not the directory)
-        const std::string articlePathStr = articlePathObj.string();
-        const char* pluginPath = articlePathStr.c_str();
-        if(hipdnnSetEnginePluginPaths_ext(1, &pluginPath, HIPDNN_PLUGIN_LOADING_ABSOLUTE)
-           != HIPDNN_STATUS_SUCCESS)
+        // Parse --test-article argument and load explicit plugin if provided
+        std::optional<std::filesystem::path> articlePath;
+        if(parser.is_used("--test-article"))
         {
-            std::cerr << "Error: Failed to set engine plugin path\n";
-            return 1;
+            // Validate and canonicalize article path (resolves relative paths)
+            auto articlePathArg = parser.get<std::string>("--test-article");
+            try
+            {
+                articlePath = std::filesystem::canonical(articlePathArg);
+            }
+            catch(const std::filesystem::filesystem_error&)
+            {
+                std::cerr << "Error: Article path does not exist: " << articlePathArg << '\n';
+                return 1;
+            }
+
+            // Set engine plugin path to the plugin file (not the directory)
+            const std::string articlePathStr = articlePath->string();
+            const char* pluginPath = articlePathStr.c_str();
+            if(hipdnnSetEnginePluginPaths_ext(1, &pluginPath, HIPDNN_PLUGIN_LOADING_ABSOLUTE)
+               != HIPDNN_STATUS_SUCCESS)
+            {
+                std::cerr << "Error: Failed to set engine plugin path\n";
+                return 1;
+            }
         }
 
-        // Initialize TestConfig with CLI arguments
-        hipdnn_integration_tests::TestConfig::initialize(std::move(articlePathObj),
-                                                         std::move(engineNameArg));
+        hipdnn_integration_tests::TestConfig::initialize(std::move(articlePath),
+                                                         std::move(engineName),
+                                                         failOnUnsupported,
+                                                         skipGraphValidation,
+                                                         std::move(configPath));
 
-        // Reconstruct argc/argv for GTest from remaining (unknown) args
+        // Reconstruct argc/argv for GTest from remaining (unknown) args.
+        // argv[0] (program name) must be first — GTest requires it.
         std::vector<char*> gtestArgv;
-        gtestArgv.reserve(remainingArgs.size() + 1);
+        gtestArgv.reserve(remainingArgs.size() + 2);
+        gtestArgv.push_back(argv[0]);
         for(auto& arg : remainingArgs)
         {
             gtestArgv.push_back(arg.data());
         }
         gtestArgv.push_back(nullptr);
-        auto gtestArgc = static_cast<int>(remainingArgs.size());
+        auto gtestArgc = static_cast<int>(remainingArgs.size()) + 1;
         ::testing::InitGoogleTest(&gtestArgc, gtestArgv.data());
 
         // Initialize test logging infrastructure to forward logs to std::cerr based
@@ -176,8 +217,9 @@ int main(int argc, char** argv) noexcept
             return 1;
         }
 
-        // Verify target engine is loaded
-        if(!engineIsLoaded(handle, hipdnn_integration_tests::TestConfig::get().getEngineName()))
+        // Verify target engine is loaded (only when --test-engine was provided)
+        if(hipdnn_integration_tests::TestConfig::get().hasEngineName()
+           && !engineIsLoaded(handle, hipdnn_integration_tests::TestConfig::get().getEngineName()))
         {
             std::cerr << "Error: Engine '"
                       << hipdnn_integration_tests::TestConfig::get().getEngineName()

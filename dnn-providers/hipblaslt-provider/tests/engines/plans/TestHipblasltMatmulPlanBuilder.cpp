@@ -12,6 +12,7 @@
 
 using namespace hipblaslt_plugin;
 using namespace hipdnn_plugin_sdk;
+using namespace hipdnn_flatbuffers_sdk::flatbuffer_utilities;
 using namespace hipdnn_test_sdk::utilities;
 
 class TestHipblasltMatmulPlanBuilder : public ::testing::Test
@@ -106,13 +107,14 @@ TEST_F(TestHipblasltMatmulPlanBuilder, IsApplicable)
         std::vector<int64_t> cDims = {2, 4, 5};
         std::vector<int64_t> cStrides = {20, 5, 1};
 
-        auto builder = createValidMatmulGraph(aDims,
-                                              aStrides,
-                                              bDims,
-                                              bStrides,
-                                              cDims,
-                                              cStrides,
-                                              hipdnn_data_sdk::data_objects::DataType::INT32);
+        auto builder
+            = createValidMatmulGraph(aDims,
+                                     aStrides,
+                                     bDims,
+                                     bStrides,
+                                     cDims,
+                                     cStrides,
+                                     hipdnn_flatbuffers_sdk::data_objects::DataType::INT32);
 
         GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
@@ -124,9 +126,9 @@ TEST_F(TestHipblasltMatmulPlanBuilder, IsApplicable)
         flatbuffers::FlatBufferBuilder builder = createValidMatmulGraph();
 
         auto mutableGraph
-            = hipdnn_data_sdk::data_objects::GetMutableGraph(builder.GetBufferPointer());
+            = hipdnn_flatbuffers_sdk::data_objects::GetMutableGraph(builder.GetBufferPointer());
         mutableGraph->mutable_nodes()->GetMutableObject(0)->mutate_compute_data_type(
-            hipdnn_data_sdk::data_objects::DataType::HALF);
+            hipdnn_flatbuffers_sdk::data_objects::DataType::HALF);
 
         GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
         EXPECT_FALSE(_planBuilder.isApplicable(_handle, graph));
@@ -142,15 +144,15 @@ TEST_F(TestHipblasltMatmulPlanBuilder, IsApplicable)
 
     // Supported graph with matmul + bias only (no activation)
     {
-        auto builder
-            = createValidMatmulBiasActivGraph({4, 8},
-                                              {8, 1},
-                                              {8, 5},
-                                              {5, 1},
-                                              {4, 5},
-                                              {5, 1},
-                                              true,
-                                              hipdnn_data_sdk::data_objects::PointwiseMode::UNSET);
+        auto builder = createValidMatmulBiasActivGraph(
+            {4, 8},
+            {8, 1},
+            {8, 5},
+            {5, 1},
+            {4, 5},
+            {5, 1},
+            true,
+            hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::UNSET);
         GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
         EXPECT_TRUE(_planBuilder.isApplicable(_handle, graph));
@@ -166,7 +168,7 @@ TEST_F(TestHipblasltMatmulPlanBuilder, IsApplicable)
             {4, 5},
             {5, 1},
             true,
-            hipdnn_data_sdk::data_objects::PointwiseMode::GELU_APPROX_TANH_FWD);
+            hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::GELU_APPROX_TANH_FWD);
         GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
         EXPECT_TRUE(_planBuilder.isApplicable(_handle, graph));
@@ -182,7 +184,7 @@ TEST_F(TestHipblasltMatmulPlanBuilder, IsApplicable)
             {4, 5},
             {5, 1},
             false,
-            hipdnn_data_sdk::data_objects::PointwiseMode::RELU_FWD,
+            hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD,
             0.0f);
         GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
@@ -199,7 +201,7 @@ TEST_F(TestHipblasltMatmulPlanBuilder, IsApplicable)
             {4, 5},
             {5, 1},
             true,
-            hipdnn_data_sdk::data_objects::PointwiseMode::SWISH_FWD,
+            hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::SWISH_FWD,
             std::nullopt,
             std::nullopt,
             1.0f);
@@ -218,7 +220,7 @@ TEST_F(TestHipblasltMatmulPlanBuilder, IsApplicable)
             {4, 5},
             {5, 1},
             true,
-            hipdnn_data_sdk::data_objects::PointwiseMode::RELU_FWD,
+            hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD,
             0.f,
             6.f);
         GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
@@ -236,12 +238,12 @@ TEST_F(TestHipblasltMatmulPlanBuilder, IsApplicable)
             {4, 5},
             {5, 1},
             true,
-            hipdnn_data_sdk::data_objects::PointwiseMode::GELU_APPROX_TANH_FWD);
+            hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::GELU_APPROX_TANH_FWD);
 
         auto mutableGraph
-            = hipdnn_data_sdk::data_objects::GetMutableGraph(builder.GetBufferPointer());
+            = hipdnn_flatbuffers_sdk::data_objects::GetMutableGraph(builder.GetBufferPointer());
         mutableGraph->mutable_nodes()->GetMutableObject(2)->mutate_compute_data_type(
-            hipdnn_data_sdk::data_objects::DataType::HALF);
+            hipdnn_flatbuffers_sdk::data_objects::DataType::HALF);
 
         GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
         EXPECT_FALSE(_planBuilder.isApplicable(_handle, graph));
@@ -276,15 +278,15 @@ TEST_F(TestHipblasltMatmulPlanBuilder, GetWorkspaceSize)
 
     // Supported Graph with matmul + bias only (no activation)
     {
-        auto builder
-            = createValidMatmulBiasActivGraph({4, 8},
-                                              {8, 1},
-                                              {8, 5},
-                                              {5, 1},
-                                              {4, 5},
-                                              {5, 1},
-                                              true,
-                                              hipdnn_data_sdk::data_objects::PointwiseMode::UNSET);
+        auto builder = createValidMatmulBiasActivGraph(
+            {4, 8},
+            {8, 1},
+            {8, 5},
+            {5, 1},
+            {4, 5},
+            {5, 1},
+            true,
+            hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::UNSET);
         GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
         EXPECT_NO_THROW(_planBuilder.getWorkspaceSize(_handle, graph));
@@ -300,7 +302,7 @@ TEST_F(TestHipblasltMatmulPlanBuilder, GetWorkspaceSize)
             {4, 5},
             {5, 1},
             true,
-            hipdnn_data_sdk::data_objects::PointwiseMode::GELU_APPROX_TANH_FWD);
+            hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::GELU_APPROX_TANH_FWD);
         GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
         EXPECT_NO_THROW(_planBuilder.getWorkspaceSize(_handle, graph));
@@ -316,7 +318,7 @@ TEST_F(TestHipblasltMatmulPlanBuilder, GetWorkspaceSize)
             {4, 5},
             {5, 1},
             false,
-            hipdnn_data_sdk::data_objects::PointwiseMode::RELU_FWD,
+            hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD,
             0.0f);
         GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
@@ -358,15 +360,15 @@ TEST_F(TestHipblasltMatmulPlanBuilder, BuildPlan)
 
     // Supported Graph with matmul + bias only (no activation)
     {
-        auto builder
-            = createValidMatmulBiasActivGraph({4, 8},
-                                              {8, 1},
-                                              {8, 5},
-                                              {5, 1},
-                                              {4, 5},
-                                              {5, 1},
-                                              true,
-                                              hipdnn_data_sdk::data_objects::PointwiseMode::UNSET);
+        auto builder = createValidMatmulBiasActivGraph(
+            {4, 8},
+            {8, 1},
+            {8, 5},
+            {5, 1},
+            {4, 5},
+            {5, 1},
+            true,
+            hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::UNSET);
         GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
         HipdnnEnginePluginExecutionContext ctx;
 
@@ -384,7 +386,7 @@ TEST_F(TestHipblasltMatmulPlanBuilder, BuildPlan)
             {4, 5},
             {5, 1},
             true,
-            hipdnn_data_sdk::data_objects::PointwiseMode::GELU_APPROX_TANH_FWD);
+            hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::GELU_APPROX_TANH_FWD);
         GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
         HipdnnEnginePluginExecutionContext ctx;
 
@@ -402,7 +404,7 @@ TEST_F(TestHipblasltMatmulPlanBuilder, BuildPlan)
             {4, 5},
             {5, 1},
             false,
-            hipdnn_data_sdk::data_objects::PointwiseMode::RELU_FWD,
+            hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD,
             0.0f);
         GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
         HipdnnEnginePluginExecutionContext ctx;

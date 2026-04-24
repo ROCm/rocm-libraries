@@ -8,13 +8,6 @@
 /.azuredevops/                                      @ROCm/external-ci
 /.github/                                           @ROCm/rocm-libraries-reviewers
 
-# Global documentation ownership
-/**/*.md                                            @ROCm/rocm-documentation
-/**/*.rst                                           @ROCm/rocm-documentation
-**/.readthedocs.yaml                                @ROCm/rocm-documentation
-**/docs/                                            @ROCm/rocm-documentation
-**/library/include/                                 @ROCm/rocm-documentation
-
 # Project-specific ownership
 /dnn-providers/miopen-provider/                     @ROCm/hipdnn-reviewers
 /dnn-providers/hipblaslt-provider/                  @ROCm/hipdnn-reviewers
@@ -46,6 +39,7 @@
 /shared/mxdatagenerator/                            @ROCm/rocroller-developers
 /shared/rocroller/                                  @ROCm/rocroller-developers
 /shared/tensile/                                    @ROCm/tensile-reviewers
+/shared/stinkytofu/                                 @ROCm/stinkytofu-reviewers
 
 # Next CMake-specific ownership
 /projects/hipblas-common/**/*.cmake                 @ROCm/rocm-math-lib-build-infra

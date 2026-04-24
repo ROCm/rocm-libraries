@@ -10,10 +10,10 @@
 #include "hipdnn_backend.h"
 
 #include <gtest/gtest.h>
-#include <hipdnn_data_sdk/data_objects/batchnorm_attributes_generated.h>
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
-#include <hipdnn_data_sdk/data_objects/pointwise_attributes_generated.h>
-#include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/batchnorm_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/pointwise_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_test_sdk/constants/BatchnormConstants.hpp>
 
 #include <array>
@@ -23,7 +23,7 @@
 #include <vector>
 
 using namespace hipdnn_backend;
-using namespace hipdnn_data_sdk::data_objects;
+using namespace hipdnn_flatbuffers_sdk::data_objects;
 using namespace hipdnn_tests::constants;
 
 // =============================================================================
@@ -168,9 +168,9 @@ protected:
             = TensorDescriptor::fromFlatBuffer(peerStatsAttrs1);
     }
 
-    static hipdnn_data_sdk::data_objects::BatchnormAttributesT createStandardBatchnormAttrs()
+    static hipdnn_flatbuffers_sdk::data_objects::BatchnormAttributesT createStandardBatchnormAttrs()
     {
-        hipdnn_data_sdk::data_objects::BatchnormAttributesT attrs;
+        hipdnn_flatbuffers_sdk::data_objects::BatchnormAttributesT attrs;
         attrs.x_tensor_uid = K_BATCHNORM_TENSOR_X_UID;
         attrs.scale_tensor_uid = K_BATCHNORM_TENSOR_SCALE_UID;
         attrs.bias_tensor_uid = K_BATCHNORM_TENSOR_BIAS_UID;
@@ -621,17 +621,17 @@ TEST_F(TestBatchnormOperationFromNode, GetAttributeWorksAfterFromNode)
     hipdnnDataType_t computeType = {};
     int64_t dtCount = 0;
     desc->getAttribute(
-        HIPDNN_ATTR_BATCHNORM_MATH_PREC_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &dtCount, &computeType);
+        HIPDNN_ATTR_BATCHNORM_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &dtCount, &computeType);
     ASSERT_EQ(dtCount, 1);
     EXPECT_EQ(computeType, HIPDNN_DATA_FLOAT);
 
     // Verify operation type
-    hipdnnOperationType_t opType = HIPDNN_OPERATION_TYPE_NOT_SET;
+    hipdnnOperationType_ext_t opType = HIPDNN_OPERATION_TYPE_NOT_SET_EXT;
     int64_t opTypeCount = 0;
     desc->getAttribute(
         HIPDNN_ATTR_OPERATION_TYPE_EXT, HIPDNN_TYPE_OPERATION_TYPE_EXT, 1, &opTypeCount, &opType);
     ASSERT_EQ(opTypeCount, 1);
-    EXPECT_EQ(opType, HIPDNN_OPERATION_TYPE_BATCHNORM);
+    EXPECT_EQ(opType, HIPDNN_OPERATION_TYPE_BATCHNORM_EXT);
 
     // Verify name (empty default from fixture, count==1 for null terminator)
     int64_t nameCount = 0;
@@ -898,12 +898,12 @@ TEST_F(TestBatchnormOperationFromNode, OperationTypeAttributeReturnsCorrectValue
     auto node = createStandardNode();
     auto desc = BatchnormOperationDescriptor::fromNode(node, _tensorMap);
 
-    hipdnnOperationType_t opType = HIPDNN_OPERATION_TYPE_NOT_SET;
+    hipdnnOperationType_ext_t opType = HIPDNN_OPERATION_TYPE_NOT_SET_EXT;
     int64_t opTypeCount = 0;
     desc->getAttribute(
         HIPDNN_ATTR_OPERATION_TYPE_EXT, HIPDNN_TYPE_OPERATION_TYPE_EXT, 1, &opTypeCount, &opType);
     ASSERT_EQ(opTypeCount, 1);
-    EXPECT_EQ(opType, HIPDNN_OPERATION_TYPE_BATCHNORM);
+    EXPECT_EQ(opType, HIPDNN_OPERATION_TYPE_BATCHNORM_EXT);
 }
 
 TEST_F(TestBatchnormOperationFromNode, OptionalTensorReferencesMatchTensorMap)

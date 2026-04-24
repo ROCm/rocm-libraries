@@ -11,9 +11,9 @@
 #include "hipdnn_backend.h"
 
 #include <gtest/gtest.h>
-#include <hipdnn_data_sdk/data_objects/block_scale_dequantize_attributes_generated.h>
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
-#include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/block_scale_dequantize_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_test_sdk/constants/BlockScaleDequantizeConstants.hpp>
 #include <hipdnn_test_sdk/utilities/ToVec.hpp>
 
@@ -22,7 +22,7 @@
 #include <vector>
 
 using namespace hipdnn_backend;
-using namespace hipdnn_data_sdk::data_objects;
+using namespace hipdnn_flatbuffers_sdk::data_objects;
 using namespace hipdnn_tests::constants;
 using hipdnn_tests::toVec;
 
@@ -86,7 +86,7 @@ TEST_F(TestBlockScaleDequantizeOperationFromNode, CreatesValidFinalizedDescripto
 
     ASSERT_NE(desc, nullptr);
     ASSERT_TRUE(desc->isFinalized());
-    ASSERT_EQ(desc->getType(), HIPDNN_BACKEND_OPERATION_BLOCK_SCALE_DEQUANTIZE_DESCRIPTOR_EXT);
+    ASSERT_EQ(desc->getType(), HIPDNN_BACKEND_OPERATION_BLOCK_SCALE_DEQUANTIZE_DESCRIPTOR);
     EXPECT_EQ(desc->getData().x_tensor_uid, K_BSD_TENSOR_X_UID);
 }
 
@@ -258,7 +258,7 @@ TEST_F(TestBlockScaleDequantizeOperationFromNode, GetAttributeWorksAfterFromNode
     // Verify compute type
     hipdnnDataType_t computeType = {};
     int64_t dtCount = 0;
-    desc->getAttribute(HIPDNN_ATTR_BLOCK_SCALE_DEQUANTIZE_MATH_PREC_EXT,
+    desc->getAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_MATH_PREC,
                        HIPDNN_TYPE_DATA_TYPE,
                        1,
                        &dtCount,
@@ -268,7 +268,7 @@ TEST_F(TestBlockScaleDequantizeOperationFromNode, GetAttributeWorksAfterFromNode
     // Verify x tensor
     hipdnn_backend::ScopedDescriptor xScoped;
     int64_t xCount = 0;
-    desc->getAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_X_EXT,
+    desc->getAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_XDESC,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        &xCount,
@@ -284,7 +284,7 @@ TEST_F(TestBlockScaleDequantizeOperationFromNode, GetAttributeWorksAfterFromNode
     // Verify scale tensor
     hipdnn_backend::ScopedDescriptor scaleScoped;
     int64_t scaleCount = 0;
-    desc->getAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_SCALE_EXT,
+    desc->getAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_SCALE_DESC,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        &scaleCount,
@@ -300,7 +300,7 @@ TEST_F(TestBlockScaleDequantizeOperationFromNode, GetAttributeWorksAfterFromNode
     // Verify y tensor
     hipdnn_backend::ScopedDescriptor yScoped;
     int64_t yCount = 0;
-    desc->getAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_Y_EXT,
+    desc->getAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_YDESC,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        &yCount,
@@ -314,16 +314,16 @@ TEST_F(TestBlockScaleDequantizeOperationFromNode, GetAttributeWorksAfterFromNode
                                                            toVec(K_BSD_TENSOR_Y_STRIDES));
 
     // Verify operation type
-    hipdnnOperationType_t opType = HIPDNN_OPERATION_TYPE_NOT_SET;
+    hipdnnOperationType_ext_t opType = HIPDNN_OPERATION_TYPE_NOT_SET_EXT;
     int64_t opTypeCount = 0;
     desc->getAttribute(
         HIPDNN_ATTR_OPERATION_TYPE_EXT, HIPDNN_TYPE_OPERATION_TYPE_EXT, 1, &opTypeCount, &opType);
     ASSERT_EQ(opTypeCount, 1);
-    EXPECT_EQ(opType, HIPDNN_OPERATION_TYPE_BLOCK_SCALE_DEQUANTIZE);
+    EXPECT_EQ(opType, HIPDNN_OPERATION_TYPE_BLOCK_SCALE_DEQUANTIZE_EXT);
 
     // Verify block_size
     int64_t blockSizeCount = 0;
-    desc->getAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_BLOCK_SIZE_EXT,
+    desc->getAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_BLOCK_SIZE,
                        HIPDNN_TYPE_INT32,
                        0,
                        &blockSizeCount,
@@ -331,7 +331,7 @@ TEST_F(TestBlockScaleDequantizeOperationFromNode, GetAttributeWorksAfterFromNode
     ASSERT_EQ(blockSizeCount, 1);
     int32_t blockSizeVal = 0;
     int64_t actualBlockSizeCount = 0;
-    desc->getAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_BLOCK_SIZE_EXT,
+    desc->getAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_BLOCK_SIZE,
                        HIPDNN_TYPE_INT32,
                        1,
                        &actualBlockSizeCount,
@@ -341,7 +341,7 @@ TEST_F(TestBlockScaleDequantizeOperationFromNode, GetAttributeWorksAfterFromNode
     // Verify is_negative_scale
     bool isNegativeScale = true;
     int64_t isNegCount = 0;
-    desc->getAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_IS_NEGATIVE_SCALE_EXT,
+    desc->getAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_NEG_SCALE,
                        HIPDNN_TYPE_BOOLEAN,
                        1,
                        &isNegCount,

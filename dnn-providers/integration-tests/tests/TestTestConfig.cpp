@@ -42,8 +42,28 @@ TEST(TestConfigUninitialized, GetToleranceModeThrowsWhenUninitialized)
     EXPECT_THROW(TestConfig::get().getToleranceMode(), std::runtime_error);
 }
 
+TEST(TestConfigUninitialized, HasEngineNameThrowsWhenUninitialized)
+{
+    EXPECT_THROW(TestConfig::get().hasEngineName(), std::runtime_error);
+}
+
+TEST(TestConfigUninitialized, HasArticlePathThrowsWhenUninitialized)
+{
+    EXPECT_THROW(TestConfig::get().hasArticlePath(), std::runtime_error);
+}
+
+TEST(TestConfigUninitialized, FailOnUnsupportedThrowsWhenUninitialized)
+{
+    EXPECT_THROW(TestConfig::get().failOnUnsupported(), std::runtime_error);
+}
+
+TEST(TestConfigUninitialized, SkipGraphValidationThrowsWhenUninitialized)
+{
+    EXPECT_THROW(TestConfig::get().skipGraphValidation(), std::runtime_error);
+}
+
 // ---------------------------------------------------------------------------
-// Suite 2 – initialized singleton
+// Suite 2 – initialized singleton (all args provided)
 // ---------------------------------------------------------------------------
 
 namespace
@@ -58,9 +78,29 @@ class TestConfigInitialized : public ::testing::Test
 protected:
     static void SetUpTestSuite()
     {
-        TestConfig::initialize(TEST_ARTICLE_PATH, TEST_ENGINE_NAME);
+        TestConfig::initialize(TEST_ARTICLE_PATH, TEST_ENGINE_NAME, true);
     }
 };
+
+TEST_F(TestConfigInitialized, HasArticlePathReturnsTrue)
+{
+    EXPECT_TRUE(TestConfig::get().hasArticlePath());
+}
+
+TEST_F(TestConfigInitialized, HasEngineNameReturnsTrue)
+{
+    EXPECT_TRUE(TestConfig::get().hasEngineName());
+}
+
+TEST_F(TestConfigInitialized, FailOnUnsupportedReturnsTrue)
+{
+    EXPECT_TRUE(TestConfig::get().failOnUnsupported());
+}
+
+TEST_F(TestConfigInitialized, SkipGraphValidationReturnsFalse)
+{
+    EXPECT_FALSE(TestConfig::get().skipGraphValidation());
+}
 
 TEST_F(TestConfigInitialized, InitializeSetsArticlePath)
 {
@@ -80,7 +120,7 @@ TEST_F(TestConfigInitialized, GetEngineIdReturnsConsistentHash)
 
 TEST_F(TestConfigInitialized, DoubleInitializeThrows)
 {
-    EXPECT_THROW(TestConfig::initialize("/other/path", "OTHER_ENGINE"), std::runtime_error);
+    EXPECT_THROW(TestConfig::initialize(std::nullopt, std::nullopt), std::runtime_error);
 }
 
 // NOLINTEND(readability-identifier-naming)
