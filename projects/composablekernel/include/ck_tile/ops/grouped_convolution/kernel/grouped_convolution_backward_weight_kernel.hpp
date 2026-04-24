@@ -1172,9 +1172,8 @@ struct GroupedConvolutionBackwardWeightKernel
             // Offset workspace per group so groups don't interfere.
             // Safe to mutate kargs: on GPU each workgroup operates on its own
             // register-local copy of the kernel arguments.
-            const auto per_group_ws_size =
-                kargs.tile_partitioner.get_workspace_size(sizeof(AccDataType));
-            kargs.workspace_ptr = static_cast<char*>(kargs.workspace_ptr) + i_g * per_group_ws_size;
+            kargs.workspace_ptr = static_cast<char*>(kargs.workspace_ptr) +
+                                  i_g * kargs.c_grid_desc_m_n.get_element_space_size();
 
             // K offset = local_iter_start * KPerBlock
             const index_t i_k =
