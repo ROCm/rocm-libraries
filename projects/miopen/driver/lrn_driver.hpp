@@ -237,7 +237,7 @@ int LRNDriver<Tgpu, Tref>::AllocateBuffersAndCopy()
         scalehost = std::vector<Tref>(workSpaceNbVal, static_cast<Tref>(0));
         if(inflags.GetValueInt("forw") == 2)
         {
-            for(int i = 0; i < scale.size(); i++)
+            for(auto i = 0U; i < scale.size(); i++)
             {
                 scale[i]     = prng::gen_canonical<Tgpu>();
                 scalehost[i] = Tref(scale[i]);
@@ -248,13 +248,13 @@ int LRNDriver<Tgpu, Tref>::AllocateBuffersAndCopy()
     dout    = std::vector<Tgpu>(out_sz, static_cast<Tgpu>(0));
     dinhost = std::vector<Tref>(in_sz, static_cast<Tref>(0));
 
-    for(int i = 0; i < in_sz; i++)
+    for(auto i = 0U; i < in_sz; i++)
     {
         in[i] = prng::gen_A_to_B(static_cast<Tgpu>(-1), static_cast<Tgpu>(1));
     }
 
     Tgpu Data_scale = static_cast<Tgpu>(0.001);
-    for(int i = 0; i < out_sz; i++)
+    for(auto i = 0U; i < out_sz; i++)
     {
         dout[i] = Data_scale * prng::gen_A_to_B(static_cast<Tgpu>(-0.5), static_cast<Tgpu>(0.5));
     }

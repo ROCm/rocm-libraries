@@ -398,7 +398,7 @@ protected:
                 .generate(gen_value);
 
         std::vector<size_t> inner_dim;
-        if(normalized_dim == in_dim.size())
+        if(static_cast<size_t>(normalized_dim) == in_dim.size())
             inner_dim = {1};
         else
             inner_dim = {in_dim.begin() + normalized_dim, in_dim.end()};

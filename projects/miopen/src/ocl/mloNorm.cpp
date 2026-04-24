@@ -99,9 +99,9 @@ void mlo_construct_norm::mloConstructFwd()
                                                              : "MIOpenLRNWithinChannel_PS";
     if(_norm_region == MLO_LRN_ACROSS_CHANNELS)
     {
-        _grp_tile0  = 8 * 8;
-        _grp_tile1  = 1;
-        int n_waves = (_problem.GetBatchSize() * map_size_4 + _hw_wave_sz - 1) / _hw_wave_sz;
+        _grp_tile0     = 8 * 8;
+        _grp_tile1     = 1;
+        size_t n_waves = (_problem.GetBatchSize() * map_size_4 + _hw_wave_sz - 1) / _hw_wave_sz;
         if(n_waves <= maxComputeUnits * 8)
         {
             map_size_4 = _problem.GetInWidth() * (is_in_packed ? _problem.GetInHeight() : 1);

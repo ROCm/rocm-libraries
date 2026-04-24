@@ -477,7 +477,7 @@ Invoker Handle::PrepareInvoker(const InvokerFactory& factory,
     if(programs_out != nullptr)
         programs_out->resize(kernels.size());
 
-    for(auto i = 0; i < kernels.size(); ++i)
+    for(auto i = 0ULL; i < kernels.size(); ++i)
     {
         const auto& k        = kernels[i];
         Program* program_out = programs_out != nullptr ? &(*programs_out)[i] : nullptr;

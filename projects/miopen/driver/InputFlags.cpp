@@ -159,7 +159,7 @@ void InputFlags::Parse(int argc, char* argv[])
     //	if(args.size() == 0) // No Input Flag
     //		Print();
 
-    for(int i = 0; i < args.size(); i++)
+    for(auto i = 0ULL; i < args.size(); i++)
     {
         std::string temp = args[i];
         if(temp[0] != '-')
@@ -189,7 +189,7 @@ void InputFlags::Parse(int argc, char* argv[])
             if(short_name == 'h')
                 Print();
 
-            if(i + 1 >= args.size()) // Check whether last arg has a value
+            if((i + 1ULL) >= args.size()) // Check whether last arg has a value
                 Print();
             else
             {

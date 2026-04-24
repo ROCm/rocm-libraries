@@ -77,7 +77,7 @@ int32_t mloPReLUBackwardRunHost(const miopenTensorDescriptor_t inputDesc,
         if(weight_sz == 1)
         {
             double sum = 0;
-            for(int i = 0; i < input_sz; ++i)
+            for(auto i = 0ULL; i < input_sz; ++i)
                 sum += static_cast<double>(weight_grad_collector[i]);
             dweight_host[0] = static_cast<Tcheck>(sum);
         }

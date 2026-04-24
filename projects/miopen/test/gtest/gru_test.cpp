@@ -2941,7 +2941,7 @@ public:
             }
         }
 
-        if(param.batchSeq.size() != param.seqLength)
+        if(param.batchSeq.size() != static_cast<size_t>(param.seqLength))
         {
             std::cerr << "FAILED: Batch sequence vector length, does not match sequence length."
                       << std::endl;

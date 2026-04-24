@@ -111,7 +111,7 @@ protected:
         {
             config.dim += inDims.size();
         }
-        EXPECT_TRUE(config.dim >= 0 and config.dim < inDims.size());
+        EXPECT_TRUE(config.dim >= 0 and static_cast<size_t>(config.dim) < inDims.size());
         auto outDims = config.GetDims();
         if(!config.keepDim)
         {

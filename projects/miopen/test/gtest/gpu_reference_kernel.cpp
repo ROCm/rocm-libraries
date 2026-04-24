@@ -255,7 +255,7 @@ bool verify_tensor(tensor<T>& t_gpu,
     EXPECT_EQ(t_gpu.data.size(), t_cpu.data.size()) << "size not equal, should not happen\n";
     auto idx          = miopen::mismatch_idx(t_gpu.data, t_cpu.data, miopen::float_equal);
     bool valid_result = true;
-    if(idx < miopen::range_distance(t_cpu))
+    if(idx < static_cast<size_t>(miopen::range_distance(t_cpu)))
     {
         // give a re-try chance for half_float
         // max gemm_k is wrw, max_n=2, max_ho/wo=14, max integer=4, max value=2*14*14*4*4 = 6272.

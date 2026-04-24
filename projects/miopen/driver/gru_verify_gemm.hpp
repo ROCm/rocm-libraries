@@ -1611,7 +1611,7 @@ void RunGRUBackwardWeightGEMMCPUVerify(std::vector<Tgpu>& in,
     }
     size_t rsvsp_sz      = use_dropout ? rsvspace_host.size() : numlayer * batch_n * hy_stride;
     Tref* rsvspace_state = new Tref[rsvsp_sz];
-    for(int h = 0; h < rsvsp_sz; h++)
+    for(auto h = 0ULL; h < rsvsp_sz; h++)
     {
         rsvspace_state[h] = rsvspace_host[h];
     }

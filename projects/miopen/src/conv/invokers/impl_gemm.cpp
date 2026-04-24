@@ -53,10 +53,10 @@ InvokerFactory MakeImplGemmDataInvokerFactory(const ProblemDescription& problem)
                     bool need_atomic_add        = false;
                     bool every_pixel_is_written = true;
 
-                    for(int i = 0; i < conv.GetSpatialDimension(); ++i)
+                    for(size_t i = 0U; i < conv.GetSpatialDimension(); ++i)
                     {
-                        const auto conv_stride   = conv.GetConvStrides()[i];
-                        const auto conv_dilation = conv.GetConvDilations()[i];
+                        const auto conv_stride   = static_cast<size_t>(conv.GetConvStrides()[i]);
+                        const auto conv_dilation = static_cast<size_t>(conv.GetConvDilations()[i]);
                         const auto filter_size   = tensors.wDesc.GetLengths()[2 + i];
 
                         if(conv_stride < conv_dilation * (filter_size - 1) + 1)
@@ -170,10 +170,10 @@ InvokerFactory MakeImplGemmDataInvokerFactory(const ProblemDescription& problem)
                 {
                     bool every_pixel_is_written = true;
 
-                    for(int i = 0; i < conv.GetSpatialDimension(); ++i)
+                    for(size_t i = 0U; i < conv.GetSpatialDimension(); ++i)
                     {
-                        const auto conv_stride   = conv.GetConvStrides()[i];
-                        const auto conv_dilation = conv.GetConvDilations()[i];
+                        const auto conv_stride   = static_cast<size_t>(conv.GetConvStrides()[i]);
+                        const auto conv_dilation = static_cast<size_t>(conv.GetConvDilations()[i]);
                         const auto filter_size   = tensors.wDesc.GetLengths()[2 + i];
 
                         // todo: can be relaxed

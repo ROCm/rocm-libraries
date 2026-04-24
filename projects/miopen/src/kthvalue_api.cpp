@@ -31,7 +31,7 @@
 inline std::ostream& operator<<(std::ostream& os, const std::vector<size_t>& v)
 {
     os << '{';
-    for(int i = 0; i < v.size(); ++i)
+    for(auto i = 0U; i < v.size(); ++i)
     {
         if(i != 0)
             os << ',';

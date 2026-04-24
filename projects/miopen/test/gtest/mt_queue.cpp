@@ -59,7 +59,7 @@ TEST(CPU_UtilMultiThreadQueue_NONE, Basic)
         common_data.emplace_back(idx);
 
     std::vector<std::thread> producers;
-    for(int idx = 0; idx < total_producers; idx++)
+    for(auto idx = 0ULL; idx < total_producers; idx++)
     {
         producers.emplace_back(producer<int>, idx, std::ref(common_data), std::ref(comp_queue));
     }

@@ -83,7 +83,7 @@ void RunLSTMForwardGEMMCPUVerify(miopenHandle_t handle,
 
     // initial input
     std::vector<Tref> in_state(batch_n * in_h, static_cast<Tref>(0));
-    for(int h = 0; h < batch_n; h++)
+    for(auto h = 0ULL; h < batch_n; h++)
     {
         for(int w = 0; w < in_h; w++)
         {
@@ -175,7 +175,7 @@ void RunLSTMForwardGEMMCPUVerify(miopenHandle_t handle,
         {
             if(inputMode == 1)
             {
-                for(int bs = 0; bs < batch_n; bs++)
+                for(auto bs = 0ULL; bs < batch_n; bs++)
                 {
                     for(int h = 0; h < hy_h; h++)
                     {
@@ -195,7 +195,7 @@ void RunLSTMForwardGEMMCPUVerify(miopenHandle_t handle,
                 // from bias
                 if(biased)
                 {
-                    for(int bs = 0; bs < batch_n; bs++)
+                    for(auto bs = 0ULL; bs < batch_n; bs++)
                     {
                         for(int h = 0; h < wei_stride; h++)
                         {
@@ -227,7 +227,7 @@ void RunLSTMForwardGEMMCPUVerify(miopenHandle_t handle,
                 // from bias
                 if(biased)
                 {
-                    for(int bs = 0; bs < batch_n; bs++)
+                    for(auto bs = 0ULL; bs < batch_n; bs++)
                     {
                         for(int h = 0; h < wei_stride; h++)
                         {
@@ -287,7 +287,7 @@ void RunLSTMForwardGEMMCPUVerify(miopenHandle_t handle,
             {
                 size_t wei_shift_bias_temp = wei_shift_bias + li * 2 * wei_stride;
 
-                for(int bs = 0; bs < batch_n; bs++)
+                for(auto bs = 0ULL; bs < batch_n; bs++)
                 {
                     for(int h = 0; h < wei_stride; h++)
                     {
@@ -663,20 +663,20 @@ void RunLSTMForwardGEMMCPUVerify(miopenHandle_t handle,
     // output
     size_t prelayer_shift = (numlayer - 1) * batch_n * hy_stride + bi * 5 * hy_h;
 
-    for(int i = 0; i < numlayer * batch_n * hy_stride * 2; i++)
+    for(auto i = 0ULL; i < numlayer * batch_n * hy_stride * 2; i++)
     {
         rsvspace_host.at(i) = hid_state.at(i);
     }
     if(use_dropout)
     {
-        for(int i = 0; i < (numlayer - 1) * batch_n * hy_h * bi; i++)
+        for(auto i = 0ULL; i < (numlayer - 1) * batch_n * hy_h * bi; i++)
         {
             rsvspace_host.at(numlayer * batch_n * hy_stride * 2 + i) = dropout_hid_state.at(i);
         }
         auto p_drop_rsv =
             reinterpret_cast<unsigned char*>(&rsvspace_host[numlayer * batch_n * hy_stride * 2 +
                                                             (numlayer - 1) * batch_n * hy_h * bi]);
-        for(int i = 0; i < (numlayer - 1) * batch_n * hy_h * bi; i++)
+        for(auto i = 0ULL; i < (numlayer - 1) * batch_n * hy_h * bi; i++)
         {
             *(p_drop_rsv + i) = dropout_reservespace_host.at(i);
         }
@@ -688,7 +688,7 @@ void RunLSTMForwardGEMMCPUVerify(miopenHandle_t handle,
         cy_host.at(i) = cy_state.at(i);
     }
 
-    for(int bs = 0; bs < batch_n; bs++)
+    for(auto bs = 0ULL; bs < batch_n; bs++)
     {
         for(int h = 0; h < out_h; h++)
         {
@@ -750,7 +750,7 @@ void RunLSTMBackwardDataGEMMCPUVerify(
 
     // initial dout
     std::vector<Tref> dout_state(batch_n * out_h, static_cast<Tref>(0));
-    for(int h = 0; h < batch_n; h++)
+    for(auto h = 0ULL; h < batch_n; h++)
     {
         for(int w = 0; w < out_h; w++)
         {
@@ -827,7 +827,7 @@ void RunLSTMBackwardDataGEMMCPUVerify(
         auto p_drop_rsv =
             reinterpret_cast<unsigned char*>(&rsvspace_host[numlayer * batch_n * hy_stride * 2 +
                                                             (numlayer - 1) * batch_n * hy_h * bi]);
-        for(int i = 0; i < (numlayer - 1) * batch_n * hy_h * bi; i++)
+        for(auto i = 0ULL; i < (numlayer - 1) * batch_n * hy_h * bi; i++)
         {
             dropout_reservespace_host.at(i) = *(p_drop_rsv + i);
         }
@@ -842,7 +842,7 @@ void RunLSTMBackwardDataGEMMCPUVerify(
 
         if(li == numlayer - 1)
         {
-            for(int bs = 0; bs < batch_n; bs++)
+            for(auto bs = 0ULL; bs < batch_n; bs++)
             {
                 for(int h = 0; h < out_h; h++)
                 {
@@ -1266,7 +1266,7 @@ void RunLSTMBackwardDataGEMMCPUVerify(
     // dinput
     if(inputMode == 1)
     {
-        for(int bs = 0; bs < batch_n; bs++)
+        for(auto bs = 0ULL; bs < batch_n; bs++)
         {
             for(int h = 0; h < hy_h; h++)
             {
@@ -1302,18 +1302,18 @@ void RunLSTMBackwardDataGEMMCPUVerify(
                        1);
     }
 
-    for(int i = 0; i < numlayer * batch_n * hy_stride; i++)
+    for(auto i = 0ULL; i < numlayer * batch_n * hy_stride; i++)
     {
         wkspace_host[i] = dh_state[i];
     }
 
-    for(int i = 0; i < hy_d * hy_n * hy_h; i++)
+    for(auto i = 0; i < hy_d * hy_n * hy_h; i++)
     {
         dhx_host[i] = dhx_state[i];
         dcx_host[i] = dcx_state[i];
     }
 
-    for(int bs = 0; bs < batch_n; bs++)
+    for(auto bs = 0ULL; bs < batch_n; bs++)
     {
         for(int h = 0; h < in_stride; h++)
         {
@@ -1363,7 +1363,7 @@ void RunLSTMBackwardWeightGEMMCPUVerify(std::vector<Tgpu>& in,
 
     // initial input
     std::vector<Tref> in_state(batch_n * in_h, static_cast<Tref>(0));
-    for(int h = 0; h < batch_n; h++)
+    for(auto h = 0ULL; h < batch_n; h++)
     {
         for(int w = 0; w < in_h; w++)
         {
@@ -1373,7 +1373,7 @@ void RunLSTMBackwardWeightGEMMCPUVerify(std::vector<Tgpu>& in,
 
     // initial output difference
     std::vector<Tref> dout_state(batch_n * out_h, static_cast<Tref>(0));
-    for(int h = 0; h < batch_n; h++)
+    for(auto h = 0ULL; h < batch_n; h++)
     {
         for(int w = 0; w < out_h; w++)
         {
@@ -1383,13 +1383,13 @@ void RunLSTMBackwardWeightGEMMCPUVerify(std::vector<Tgpu>& in,
 
     // initial saved data
     std::vector<Tref> wkspace_state(numlayer * batch_n * hy_stride, static_cast<Tref>(0));
-    for(int h = 0; h < numlayer * batch_n * hy_stride; h++)
+    for(auto h = 0ULL; h < numlayer * batch_n * hy_stride; h++)
     {
         wkspace_state[h] = wkspace_host[h];
     }
     std::vector<Tref> rsvspace_state(
         use_dropout ? rsvspace_host.size() : numlayer * batch_n * hy_stride, static_cast<Tref>(0));
-    for(int h = 0; h < rsvspace_state.size(); h++)
+    for(auto h = 0ULL; h < rsvspace_state.size(); h++)
     {
         rsvspace_state[h] = rsvspace_host[h];
     }
@@ -1453,7 +1453,7 @@ void RunLSTMBackwardWeightGEMMCPUVerify(std::vector<Tgpu>& in,
             {
                 for(int h = 0; h < wei_stride; h++)
                 {
-                    for(int w = 0; w < batch_n; w++)
+                    for(auto w = 0ULL; w < batch_n; w++)
                     {
                         dwei_state[wei_shift_bias + h] += wkspace_host[w * hy_stride + h];
                     }
@@ -1492,7 +1492,7 @@ void RunLSTMBackwardWeightGEMMCPUVerify(std::vector<Tgpu>& in,
 
                 for(int h = 0; h < wei_stride; h++)
                 {
-                    for(int w = 0; w < batch_n; w++)
+                    for(auto w = 0ULL; w < batch_n; w++)
                     {
                         dwei_state[wei_shift + h] += wkspace_host[hid_shift + w * hy_stride + h];
                     }

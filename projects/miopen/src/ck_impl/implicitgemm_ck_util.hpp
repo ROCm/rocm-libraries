@@ -575,7 +575,7 @@ template <typename DeviceOpType,
 size_t GetCKSplitkMaxWorkspaceSize(const ProblemDescriptionType& problem)
 {
     const auto args         = CKArgsType{problem};
-    auto max_workspace_size = 0;
+    auto max_workspace_size = 0U;
 
     const auto ptrs = DeviceOpType::GetInstances();
     for(auto& ptr : ptrs)
