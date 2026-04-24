@@ -17870,6 +17870,20 @@ class KernelWriterAssembly(KernelWriter):
     if tdmDescIdx == 2 and not isMXS:
       sizeShifter = 0
 
+    # Reset TDM LDS write address (tdmGroup0+1) to the first buffer 0.
+    #   After an odd number of main loop iterations the address lands in the second
+    #   buffer (buffer 1). However, when numReadsIterCoalesced{A,B} > 1 ("wider local read").
+    #   recalcLocalReadAddressesAB() performs this switch by recomputing the local-read
+    #   pointer to buffer 0; (e.g. ds_load_b128 covering 2 MI-K to ds_load_b64 per MI_K).
+    needLdsReset = (self.states.numReadsIterCoalescedA > 1 or
+                    self.states.numReadsIterCoalescedB > 1)
+    if not kernel["1LDSBuffer"] and needLdsReset:
+      swapMask: int = kernel["LdsOffsetA_Blk"]
+      ldsAddrSgprName: str = comp.getLdsAddrSgprName(descSgprName(0))
+      mod.addComment("TDM tail: reset LDS write addr to buffer 0 (matches recalculated local-read ptr)")
+      mod.add(SAndB32(sgpr(ldsAddrSgprName), sgpr(ldsAddrSgprName), hex(~swapMask & 0xFFFFFFFF),
+                      "clear swap bit so TDM writes to buffer 0, same half as tail local reads"))
+
     with self.allocTmpSgpr(1) as tmpSgpr:
       mod.add(SAndB32(sgpr(tmpSgpr.idx), sgpr("SizeL"), (du - 1)))
       if (not unrolledMajor or mxKSplitting) and tmpSgprWaveOffset != None:
