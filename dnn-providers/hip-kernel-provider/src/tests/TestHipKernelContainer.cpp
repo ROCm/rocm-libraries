@@ -61,7 +61,7 @@ TEST(TestHipKernelContainer, GetApplicableEngineIdsSdpaGraph)
 
     HipKernelHandle handle;
     auto deviceString = hip_kernel_provider_common::getDeviceString(handle.getStream());
-    if(deviceString != "gfx942" && deviceString != "gfx942")
+    if(deviceString != "gfx942" && deviceString != "gfx950")
     {
         GTEST_SKIP();
     }

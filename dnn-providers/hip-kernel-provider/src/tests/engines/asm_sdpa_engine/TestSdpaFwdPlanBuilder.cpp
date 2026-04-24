@@ -36,7 +36,7 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableReturnsFalseForNonSdpaGraph)
     EXPECT_FALSE(_planBuilder.isApplicable(_handle, graphWrapper));
 }
 
-auto createSdpaFwdGraph(const std::vector<int64_t>& qkDims = {4, 8, 256, 128},
+auto createSdpaFwdGraph(const std::vector<int64_t>& qDims = {4, 8, 256, 128},
                         const std::vector<int64_t>& vDims = {4, 8, 256, 128},
                         hipdnn_flatbuffers_sdk::data_objects::DataType dataType
                         = hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
@@ -47,23 +47,29 @@ auto createSdpaFwdGraph(const std::vector<int64_t>& qkDims = {4, 8, 256, 128},
                         bool paddingMask = false,
                         bool causalMask = false)
 {
-    auto qkStrides = hipdnn_data_sdk::utilities::generateStrides(qkDims);
-    auto vStrides = hipdnn_data_sdk::utilities::generateStrides(vDims);
-    return hipdnn_test_sdk::utilities::createValidSdpaFwdGraph(qkDims,
-                                                               qkStrides,
-                                                               qkDims,
-                                                               qkStrides,
-                                                               vDims,
-                                                               vStrides,
-                                                               qkDims,
-                                                               qkStrides,
-                                                               dataType,
-                                                               withAttnMask,
-                                                               withScale,
-                                                               withStats,
-                                                               alibiMask,
-                                                               paddingMask,
-                                                               causalMask);
+    if(qDims.size() != 4 || vDims.size() != 4)
+    {
+        throw std::runtime_error("Q, K and V tensors must have a dimension of 4");
+    }
+    std::vector<int64_t> kDims = {qDims[0], vDims[1], vDims[2], qDims[3]};
+    std::vector<int64_t> oDims = {qDims[0], qDims[1], qDims[2], vDims[3]};
+
+    return hipdnn_test_sdk::utilities::createValidSdpaFwdGraph(
+        qDims,
+        hipdnn_data_sdk::utilities::generateStrides(qDims),
+        kDims,
+        hipdnn_data_sdk::utilities::generateStrides(kDims),
+        vDims,
+        hipdnn_data_sdk::utilities::generateStrides(vDims),
+        oDims,
+        hipdnn_data_sdk::utilities::generateStrides(oDims),
+        dataType,
+        withAttnMask,
+        withScale,
+        withStats,
+        alibiMask,
+        paddingMask,
+        causalMask);
 }
 
 TEST_F(TestSdpaFwdPlanBuilder, IsApplicableSdpaVariations)
@@ -71,7 +77,7 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableSdpaVariations)
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
     std::string deviceString = hip_kernel_provider_common::getDeviceString(_handle.getStream());
-    if(deviceString != "gfx942" && deviceString != "gfx942")
+    if(deviceString != "gfx942" && deviceString != "gfx950")
     {
         GTEST_SKIP();
     }

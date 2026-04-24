@@ -49,8 +49,8 @@ bool SdpaBwdPlanBuilder::isApplicable(
     {
         auto deviceString = hip_kernel_provider_common::getDeviceString(handle.getStream());
         HIP_KERNEL_RETURN_FALSE_IF(
-            deviceString != "gfx942" && deviceString != "gfx950",
-            "Device string does not match gfx942 or gfx950 (Actual value: " + deviceString + ")");
+            deviceString != "gfx942",
+            "Device string does not match gfx942 (Actual value: " + deviceString + ")");
     }
     catch(const std::exception& e)
     {

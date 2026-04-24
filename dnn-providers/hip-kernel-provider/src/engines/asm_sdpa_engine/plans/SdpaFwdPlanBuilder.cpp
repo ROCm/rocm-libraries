@@ -134,19 +134,24 @@ std::string getDataTypeIdentifier(hipdnn_flatbuffers_sdk::data_objects::DataType
     return "";
 }
 
-std::string getKernelCoPath(std::string coName, const std::string& archId, int processorCount)
+bool isMi308Device(hipStream_t stream)
+{
+    int chipId = hip_kernel_provider_common::getDeviceProperties(stream).pciDeviceID;
+    return chipId == 0x74a2 || chipId == 0x74a8 || chipId == 0x74b6 || chipId == 0x74bc;
+}
+
+std::string getKernelCoPath(std::string coName, const std::string& archId, bool isMi308)
 {
     if(archId == "gfx942")
     {
-
         auto pos = coName.rfind('/');
-        if(processorCount == 304)
-        {
-            coName = coName.substr(0, pos + 1) + "MI300/" + coName.substr(pos + 1);
-        }
-        else if(processorCount == 80 || processorCount == 64)
+        if(isMi308)
         {
             coName = coName.substr(0, pos + 1) + "MI308/" + coName.substr(pos + 1);
+        }
+        else
+        {
+            coName = coName.substr(0, pos + 1) + "MI300/" + coName.substr(pos + 1);
         }
     }
     return asm_kernels::getAsmKernelPath(coName);
@@ -224,12 +229,12 @@ bool SdpaFwdPlanBuilder::isApplicable(
         oTensor->dims()->size() != 4,
         "o tensor must be rank 4 (Actual rank: " + std::to_string(oTensor->dims()->size()) + ")");
 
-    HIP_KERNEL_RETURN_FALSE_IF(
-        qTensor->data_type() != kTensor->data_type() || qTensor->data_type() != vTensor->data_type()
-            || qTensor->data_type() != kTensor->data_type(),
-        "Input tensors must all share a type (q tensor: " + EnumNameDataType(qTensor->data_type())
-            + ", k tensor: " + EnumNameDataType(kTensor->data_type())
-            + ", v tensor: " + EnumNameDataType(vTensor->data_type()) + ")");
+    HIP_KERNEL_RETURN_FALSE_IF(qTensor->data_type() != kTensor->data_type()
+                                   || qTensor->data_type() != vTensor->data_type(),
+                               "Input tensors must all share a type (q tensor: "
+                                   + EnumNameDataType(qTensor->data_type())
+                                   + ", k tensor: " + EnumNameDataType(kTensor->data_type())
+                                   + ", v tensor: " + EnumNameDataType(vTensor->data_type()) + ")");
 
     HIP_KERNEL_RETURN_FALSE_IF(
         kTensor->dims()->Get(1) != vTensor->dims()->Get(1),
@@ -409,20 +414,20 @@ void SdpaFwdPlanBuilder::buildPlan(
     params.tileSizeQo = static_cast<unsigned int>(config.ts_qo);
 
     std::string deviceString;
-    int multiProcessorCount;
+    bool isMi308;
     try
     {
         deviceString = hip_kernel_provider_common::getDeviceString(handle.getStream());
-        multiProcessorCount = hip_kernel_provider_common::getDeviceProperties(handle.getStream())
-                                  .multiProcessorCount;
+        isMi308 = isMi308Device(handle.getStream());
     }
     catch(const std::exception& e)
     {
         HIPDNN_PLUGIN_LOG_ERROR("Failed to query device properties with error: " << e.what());
+        return;
     }
 
     // Load kernel module
-    auto coPath = getKernelCoPath(config.co_name, deviceString, multiProcessorCount);
+    auto coPath = getKernelCoPath(config.co_name, deviceString, isMi308);
 
     HIPDNN_PLUGIN_LOG_INFO("Using kernel with path: " << coPath);
 

@@ -31,7 +31,7 @@ inline hipDeviceProp_t getDeviceProperties(hipStream_t stream)
     status = hipGetDeviceProperties(&props, deviceId);
     if(status != hipSuccess)
     {
-        throw std::runtime_error("hipStreamGetDevice failed with error code: "
+        throw std::runtime_error("hipGetDeviceProperties failed with error code: "
                                  + std::to_string(status));
     }
 
