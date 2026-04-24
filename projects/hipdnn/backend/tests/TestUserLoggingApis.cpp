@@ -80,6 +80,7 @@ protected:
 };
 
 constexpr auto ASYNC_LOG_TIMEOUT = std::chrono::seconds(10);
+constexpr auto NEGATIVE_ASSERT_TIMEOUT = std::chrono::milliseconds(100);
 
 // Test: User callback receives backend logs
 TEST_F(IntegrationBackendUserLoggingApis, UserCallbackReceivesLogs)
@@ -96,7 +97,9 @@ TEST_F(IntegrationBackendUserLoggingApis, UserCallbackReceivesLogs)
     ASSERT_EQ(hipdnnCreate(&handle), HIPDNN_STATUS_SUCCESS);
 
     // Wait for async callback to deliver the expected log
-    recorder.waitForLogContaining("API success: [hipdnnCreate]", ASYNC_LOG_TIMEOUT);
+    EXPECT_TRUE(recorder.waitForLogsContaining({"API success: [hipdnnCreate]"}, ASYNC_LOG_TIMEOUT))
+        << "Timed out waiting for log containing 'API success: [hipdnnCreate]'\nRecorded logs:\n"
+        << recorder.getRecordedLogsAsString();
 
     // Backend should log handle creation
     EXPECT_TRUE(recorder.hasLogContaining("API success: [hipdnnCreate]"));
@@ -120,7 +123,9 @@ TEST_F(IntegrationBackendUserLoggingApis, UnregisterWithSevOffStopsCapture)
     ASSERT_EQ(hipdnnCreate(&handle), HIPDNN_STATUS_SUCCESS);
 
     // Wait for async callback to deliver logs
-    recorder.waitForLogCount(countBefore + 1, ASYNC_LOG_TIMEOUT);
+    EXPECT_TRUE(recorder.waitForLogCount(countBefore + 1, ASYNC_LOG_TIMEOUT))
+        << "Timed out waiting for log count to reach " << (countBefore + 1) << "\nRecorded logs:\n"
+        << recorder.getRecordedLogsAsString();
 
     const size_t logsAfterCreate = recorder.getRecordedLogCount();
     EXPECT_GT(logsAfterCreate, 0);
@@ -133,7 +138,9 @@ TEST_F(IntegrationBackendUserLoggingApis, UnregisterWithSevOffStopsCapture)
     ASSERT_EQ(hipdnnDestroy(handle), HIPDNN_STATUS_SUCCESS);
 
     // Wait briefly to confirm no async logs arrive (expected to timeout)
-    recorder.waitForLogCount(logsAfterRemovingCallback + 1, std::chrono::milliseconds(50));
+    EXPECT_FALSE(recorder.waitForLogCount(logsAfterRemovingCallback + 1, NEGATIVE_ASSERT_TIMEOUT))
+        << "Unexpected log received after unregistering callback\nRecorded logs:\n"
+        << recorder.getRecordedLogsAsString();
 
     // Log count should not increase
     const size_t finalLogs = recorder.getRecordedLogCount();
@@ -209,7 +216,9 @@ TEST_F(IntegrationBackendUserLoggingApis, CallbackRespectsLogLevel)
     ASSERT_EQ(hipdnnDestroy(handle), HIPDNN_STATUS_SUCCESS);
 
     // Wait briefly to confirm no logs arrive (expected to timeout)
-    recorder.waitForLogCount(1, std::chrono::milliseconds(50));
+    EXPECT_FALSE(recorder.waitForLogCount(1, NEGATIVE_ASSERT_TIMEOUT))
+        << "Unexpected log received despite global level filtering\nRecorded logs:\n"
+        << recorder.getRecordedLogsAsString();
 
     // INFO logs should be filtered out by global level check
     EXPECT_EQ(recorder.countLogsAtLevel(HIPDNN_SEV_INFO), 0);
@@ -231,7 +240,10 @@ TEST_F(IntegrationBackendUserLoggingApis, UpdateCallbackLevel)
     ASSERT_EQ(hipdnnCreate(&handle1), HIPDNN_STATUS_SUCCESS);
 
     // Wait for async callback to deliver logs
-    recorder.waitForLogCount(countBeforeCreate + 1, ASYNC_LOG_TIMEOUT);
+    EXPECT_TRUE(recorder.waitForLogCount(countBeforeCreate + 1, ASYNC_LOG_TIMEOUT))
+        << "Timed out waiting for log count to reach " << (countBeforeCreate + 1)
+        << "\nRecorded logs:\n"
+        << recorder.getRecordedLogsAsString();
     EXPECT_GT(recorder.getRecordedLogCount(), 0);
 
     // Update callback to WARN level (same callback, same handle, different level)
@@ -245,11 +257,12 @@ TEST_F(IntegrationBackendUserLoggingApis, UpdateCallbackLevel)
     hipdnnHandle_t handle2 = nullptr;
     ASSERT_EQ(hipdnnCreate(&handle2), HIPDNN_STATUS_SUCCESS);
 
-    // Wait briefly to confirm minimal logs arrive (expected to timeout)
-    recorder.waitForLogCount(logsAfterLevelChange + 1, std::chrono::milliseconds(50));
+    // Wait briefly for any potential WARN+ logs to arrive before checking count
+    // (not a strict negative assertion — WARN/ERROR logs from hipdnnCreate may arrive)
+    (void)recorder.waitForLogCount(logsAfterLevelChange + 1, NEGATIVE_ASSERT_TIMEOUT);
     const size_t afterUpdate = recorder.getRecordedLogCount();
 
-    // Verify minimal new logs (only WARN+ would be captured now)
+    // Only WARN+ logs should be captured now — INFO should be filtered
     EXPECT_LE(afterUpdate - logsAfterLevelChange, 1); // May get at most 1 WARN/ERROR log
 
     ASSERT_EQ(hipdnnDestroy(handle1), HIPDNN_STATUS_SUCCESS);
@@ -272,7 +285,9 @@ TEST_F(IntegrationBackendUserLoggingApis, AsyncCallbackQueued)
     ASSERT_EQ(hipdnnDestroy(handle), HIPDNN_STATUS_SUCCESS);
 
     // Wait for async callback to deliver the expected log
-    recorder.waitForLogContaining("API success: [hipdnnCreate]", ASYNC_LOG_TIMEOUT);
+    EXPECT_TRUE(recorder.waitForLogsContaining({"API success: [hipdnnCreate]"}, ASYNC_LOG_TIMEOUT))
+        << "Timed out waiting for log containing 'API success: [hipdnnCreate]'\nRecorded logs:\n"
+        << recorder.getRecordedLogsAsString();
 
     EXPECT_GT(recorder.getRecordedLogCount(), 0);
     EXPECT_TRUE(recorder.hasLogContaining("API success: [hipdnnCreate]"));
@@ -379,7 +394,7 @@ TEST_F(IntegrationBackendUserLoggingApis, SyncGuaranteeOnUnregister)
     // Wait briefly to confirm no new callbacks arrive (expected to timeout)
     {
         std::unique_lock<std::mutex> lock(s_callbackMtx);
-        s_callbackCv.wait_for(lock, std::chrono::milliseconds(50), [&] {
+        s_callbackCv.wait_for(lock, NEGATIVE_ASSERT_TIMEOUT, [&] {
             return s_callbackCount.load() > countAfterUnregister;
         });
     }
@@ -412,7 +427,9 @@ TEST_F(IntegrationBackendUserLoggingApis, SwitchBetweenSyncAndAsync)
     ASSERT_EQ(hipdnnDestroy(handle), HIPDNN_STATUS_SUCCESS);
 
     // Wait for async callback to deliver logs
-    recorder.waitForLogCount(syncLogs + 1, ASYNC_LOG_TIMEOUT);
+    EXPECT_TRUE(recorder.waitForLogCount(syncLogs + 1, ASYNC_LOG_TIMEOUT))
+        << "Timed out waiting for async log delivery\nRecorded logs:\n"
+        << recorder.getRecordedLogsAsString();
     const size_t asyncLogs = recorder.getRecordedLogCount();
     EXPECT_GT(asyncLogs, syncLogs);
 }
@@ -432,7 +449,9 @@ TEST_F(IntegrationBackendUserLoggingApis, SwitchBetweenAsyncAndSync)
     ASSERT_EQ(hipdnnCreate(&handle), HIPDNN_STATUS_SUCCESS);
 
     // Wait for async callback to deliver logs
-    recorder.waitForLogCount(countBefore + 1, ASYNC_LOG_TIMEOUT);
+    EXPECT_TRUE(recorder.waitForLogCount(countBefore + 1, ASYNC_LOG_TIMEOUT))
+        << "Timed out waiting for async log delivery\nRecorded logs:\n"
+        << recorder.getRecordedLogsAsString();
     const size_t asyncLogs = recorder.getRecordedLogCount();
     EXPECT_GT(asyncLogs, 0);
 
@@ -467,7 +486,9 @@ TEST_F(IntegrationBackendUserLoggingApis, DuplicateUpdatesExisting)
     ASSERT_EQ(hipdnnCreate(&handle), HIPDNN_STATUS_SUCCESS);
 
     // Wait briefly to confirm no INFO logs arrive (expected to timeout)
-    recorder.waitForLogCount(1, std::chrono::milliseconds(50));
+    EXPECT_FALSE(recorder.waitForLogCount(1, NEGATIVE_ASSERT_TIMEOUT))
+        << "Unexpected log received after updating callback level\nRecorded logs:\n"
+        << recorder.getRecordedLogsAsString();
 
     // Should NOT receive INFO logs (updated to WARN)
     // If there were 2 registrations, we'd get logs from the first one
@@ -618,7 +639,9 @@ TEST_F(IntegrationBackendUserLoggingApis, ConcurrentLoggingWithCallbackToggle)
         // For async mode, a short wait for any potential logs to arrive.
         if(mode == HIPDNN_LOG_CALLBACK_ASYNC)
         {
-            recorder.waitForLogCount(countBeforeDisabled + 1, std::chrono::milliseconds(50));
+            EXPECT_FALSE(recorder.waitForLogCount(countBeforeDisabled + 1, NEGATIVE_ASSERT_TIMEOUT))
+                << "Unexpected log received after disabling callback\nRecorded logs:\n"
+                << recorder.getRecordedLogsAsString();
         }
 
         const size_t countAfterDisabled = recorder.getRecordedLogCount();
@@ -788,9 +811,8 @@ TEST_F(IntegrationBackendUserLoggingApis, MultipleCallbacksAllReceiveLogs)
     // Wait briefly to confirm no new callbacks arrive (expected to timeout)
     {
         std::unique_lock<std::mutex> lock(asyncCount1.mtx);
-        asyncCount1.cv.wait_for(lock, std::chrono::milliseconds(50), [&] {
-            return asyncCount1.count.load() > async1After;
-        });
+        asyncCount1.cv.wait_for(
+            lock, NEGATIVE_ASSERT_TIMEOUT, [&] { return asyncCount1.count.load() > async1After; });
     }
 
     EXPECT_EQ(asyncCount1.count.load(), async1After)
