@@ -27,6 +27,7 @@
 namespace stinkytofu {
 class Function;
 class Pass;
+struct DominanceInfo;
 
 /// Insert PHI instructions at CFG join points where a physical register
 /// has definitions reaching from multiple control flow paths.
@@ -53,6 +54,9 @@ class Pass;
 ///
 /// Assumes: non-SSA form (physical registers), CFG already built.
 void insertPhiInstructions(Function& func, bool clearExisting);
+
+/// Overload that accepts pre-computed dominance info.
+void insertPhiInstructions(Function& func, const DominanceInfo& domInfo, bool clearExisting);
 
 /// Creates a Pass that inserts PHI instructions via insertPhiInstructions().
 std::unique_ptr<Pass> createInsertPhiPass();
