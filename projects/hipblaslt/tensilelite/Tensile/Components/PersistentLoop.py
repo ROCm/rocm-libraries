@@ -22,7 +22,7 @@
 
 from rocisa.code import Module, Label
 from rocisa.container import vgpr, sgpr
-from rocisa.instruction import VMovB32, SCmpGeU32
+from rocisa.instruction import VMovB32, SCmpGeU32, SMulI32
 from ..Component import Component
 import abc
 
@@ -128,8 +128,13 @@ class PersistentLoopOn(PersistentLoop):
         module = Module("PersistentLoop On closePersistentLoop")
         skCloseLoopLabel = Label("SK_CloseLoop", "")
         module.add(skCloseLoopLabel)
-        # endIter = "StreamKIterEnd" if kernel["StreamK"] == 1 else "TotalIters"
-        endIter = "TotalIters" if kernel["StreamK"] == 2 else "StreamKIterEnd"
-        module.add(SCmpGeU32(src0=sgpr("StreamKIter"), src1=sgpr(endIter), comment="Check if done all StreamK iterations"))
+        if kernel["StreamK"] == 2:
+            streamk = Component.StreamK.find(writer)
+            sTmp = writer.sgprPool.checkOut(1, "TotalIters")
+            module.add(streamk.computeTotalIters(writer, kernel, sTmp))
+            module.add(SCmpGeU32(src0=sgpr("StreamKIter"), src1=sgpr(sTmp), comment="Check if done all StreamK iterations"))
+            writer.sgprPool.checkIn(sTmp)
+        else:
+            module.add(SCmpGeU32(src0=sgpr("StreamKIter"), src1=sgpr("StreamKIterEnd"), comment="Check if done all StreamK iterations"))
         module.add(writer.longBranchScc0(Label("PersistentLoopStart", ""), posNeg=-1))
         return module

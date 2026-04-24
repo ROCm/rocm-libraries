@@ -1,7 +1,7 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-cmake_minimum_required(VERSION 3.20)
+cmake_minimum_required(VERSION 3.25)
 
 # =============================================================================
 # Versioning
@@ -27,6 +27,26 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 # =============================================================================
 option(EXAMPLEPROVIDER_BUILD_UNIT_TESTS "Build unit tests" ON)
 option(EXAMPLEPROVIDER_BUILD_SAMPLE "Build sample application (requires hipdnn_frontend)" ON)
+
+# To enable clang-tidy checks during compilation, place a .clang-tidy
+# configuration file in this directory (or a parent directory) with your
+# desired checks, ensure clang-tidy is in your system PATH (or CMAKE_PREFIX_PATH),
+# then configure with -DEXAMPLEPROVIDER_ENABLE_CLANG_TIDY=ON.
+option(EXAMPLEPROVIDER_ENABLE_CLANG_TIDY "Enable clang-tidy checks during compilation" OFF)
+if(EXAMPLEPROVIDER_ENABLE_CLANG_TIDY AND NOT DEFINED CMAKE_CXX_CLANG_TIDY)
+    find_program(CLANG_TIDY_EXE NAMES clang-tidy-20 clang-tidy)
+    if(CLANG_TIDY_EXE)
+        set(CMAKE_CXX_CLANG_TIDY "${CLANG_TIDY_EXE}")
+    else()
+        message(FATAL_ERROR "EXAMPLEPROVIDER_ENABLE_CLANG_TIDY is ON but clang-tidy was not found")
+    endif()
+endif()
+
+if(CMAKE_CXX_CLANG_TIDY)
+    message(STATUS "clang-tidy enabled: ${CMAKE_CXX_CLANG_TIDY}")
+else()
+    message(STATUS "clang-tidy disabled.")
+endif()
 
 # =============================================================================
 # Compiler flags

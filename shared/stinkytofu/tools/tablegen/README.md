@@ -37,7 +37,7 @@ tablegen <outdir> <hardwareDir>
 
 ### Per-Architecture Files
 
-For each architecture (e.g., `gfx942`, `gfx950`):
+For each architecture (e.g., `gfx1250`):
 
 **`hardware/<arch>Isa.inc`**
 - Instruction descriptor table with ISA opcode, unified opcode, flags, latency, and issue cycles
@@ -68,15 +68,7 @@ hardware/
 +-- src/gfx/
     +-- GpuArchManager.cpp  # Architecture registration and management
     +-- InstDefDSL.cpp      # DSL implementation
-    +-- Gfx942/             # per-arch folder
-    |   +-- Gfx942.cpp
-    |   +-- Gfx942Formats.def
-    |   +-- Gfx942Instructions.def
-    +-- Gfx950/
-    |   +-- Gfx950.cpp
-    |   +-- Gfx950Formats.def
-    |   +-- Gfx950Instructions.def
-    +-- Gfx1250/
+    +-- Gfx1250/            # per-arch folder
         +-- Gfx1250.cpp
         +-- Gfx1250Formats.def
         +-- Gfx1250Instructions.def
