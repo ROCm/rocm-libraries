@@ -642,8 +642,8 @@ class LocalReadMFMA(LocalRead):
             needPack = blockWidth == 0.25
         needPack |= (kernel["ConvertAfterDS"] and (tP["bpe"] != tP["bpeDS"]))
         needPack |= kernel["UseF32XEmulation"]
-        if tc in ("MXSA", "MXSB"):
-            # TODO: fix hard code
+        if isgfx950mx:
+            # Keep the gfx950 workaround, but allow normal MX packing on gfx1250.
             needPack = False
 
         pack     = Module("pack%s_I%s"%(tc,iui))

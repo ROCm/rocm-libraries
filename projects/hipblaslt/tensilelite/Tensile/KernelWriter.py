@@ -5923,7 +5923,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # use 64-bit buffer limit shadow register
     # but not implemented or tested
     self.states.use64bShadowLimit = kernel["Use64bShadowLimit"] and kernel["BufferLoad"]
-    self.states.use64bShadowLimitMX = kernel["Use64bShadowLimitMX"] and kernel["BufferLoad"]
+    # Keep gfx950's dedicated MX shadow-limit switch, but match legacy gfx1250
+    # behavior where MX tensors share the same shadow-limit mode as A/B.
+    if kernel["ISA"][:2] == (9, 5):
+      self.states.use64bShadowLimitMX = kernel["Use64bShadowLimitMX"] and kernel["BufferLoad"]
+    else:
+      self.states.use64bShadowLimitMX = self.states.use64bShadowLimit
 
     # Check if the address setup code for LWA and GRO causes register growth.
     # This is not an error condition but bears further investigation.
@@ -6233,6 +6238,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
           self.states.mxsa.numVgprValuPerBlock = kernel["MIWaveTileMXSA"]
         if kernel["DirectToVgprMXSA"] and not (self.states.packDTVA or self.states.convDTVA):
           self.states.mxsa.numVgprValuPerBlock = 0
+        # MX scale registers are consumed by local-read and wmma paths; avoid
+        # emitting unresolved vgprValuMXSA symbols when integer division rounds to 0.
+        if self.states.mxsa.numVgprValuPerBlock == 0 and not (kernel["DirectToVgprMXSA"] and not (self.states.packDTVA or self.states.convDTVA)):
+          self.states.mxsa.numVgprValuPerBlock = kernel["MIWaveTileMXSA"]
         self.states.mxsa.numVgprValu = self.states.mxsa.numVgprValuPerBlock * valuBlocksA
         if self.states.lrvwTileMXSA > 1:
           self.states.mxsa.numVgprValu = self.states.mxsa.numVgprValuPerBlock * kernel["InnerUnroll"]
@@ -6245,6 +6254,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
           self.states.mxsb.numVgprValuPerBlock = kernel["MIWaveTileMXSB"]
         if kernel["DirectToVgprMXSB"] and not (self.states.packDTVB or self.states.convDTVB):
           self.states.mxsb.numVgprValuPerBlock = 0
+        # MX scale registers are consumed by local-read and wmma paths; avoid
+        # emitting unresolved vgprValuMXSB symbols when integer division rounds to 0.
+        if self.states.mxsb.numVgprValuPerBlock == 0 and not (kernel["DirectToVgprMXSB"] and not (self.states.packDTVB or self.states.convDTVB)):
+          self.states.mxsb.numVgprValuPerBlock = kernel["MIWaveTileMXSB"]
         self.states.mxsb.numVgprValu = self.states.mxsb.numVgprValuPerBlock * valuBlocksB
         if self.states.lrvwTileMXSB > 1:
           self.states.mxsb.numVgprValu = self.states.mxsb.numVgprValuPerBlock * kernel["InnerUnroll"]

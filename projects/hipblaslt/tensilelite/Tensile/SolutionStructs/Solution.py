@@ -478,10 +478,6 @@ class Solution(collections.abc.Mapping):
       if not "MIInputPerThreadA" in state:
         state["MIInputPerThreadA"] = state["MIInputPerThread"]
         state["MIInputPerThreadB"] = state["MIInputPerThread"]
-      if state["ProblemType"]["MXBlockA"]:
-        state['MIInputPerThreadMXSA'] = 1 # TODO: state['MIInputPerThread'] // state["ProblemType"]["MXBlock"]
-      if state["ProblemType"]["MXBlockB"]:
-        state['MIInputPerThreadMXSB'] = 1 # TODO: state['MIInputPerThread'] // state["ProblemType"]["MXBlock"]
 
     elif EnableMatrixInstruction == False:
       state["ThreadTile0"] = state["ThreadTile"][0]
