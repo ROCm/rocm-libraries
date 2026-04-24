@@ -33,6 +33,7 @@ add_executable(
     utilities/TestDynamicTolerancesBatchNorm.cpp
     utilities/TestDynamicTolerancesCommon.cpp
     utilities/TestDynamicTolerancesConv.cpp
+    utilities/TestDynamicTolerancesLayerNorm.cpp
     utilities/TestDynamicTolerancesMatmul.cpp
     utilities/TestDynamicTolerancesPointwise.cpp
     utilities/TestDynamicTolerancesRMSNorm.cpp

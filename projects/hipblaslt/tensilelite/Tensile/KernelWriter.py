@@ -345,6 +345,7 @@ class StateValues:
   doPackPreSchedulingThisLoop: bool      = False
   doPackPreSchedulingNextLoop: bool      = False
   doFullPackCodePrefetch: bool           = False
+  lockLdsReadTokenSwap: bool             = False
 
   # Epilogue states
   preloadScaleA = False
@@ -3050,9 +3051,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
       doReadB = doReadB or (hasLiveLdsData and doNext)
       doReadM = doReadM or (hasLiveLdsData and doNext)
       doReadM = doReadM and (kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"])
-      if (hasLiveLdsData and doNext) or (self.states.numItersPLR == 0 and isSwapLroIter):
+      if ((hasLiveLdsData and doNext) or (self.states.numItersPLR == 0 and uIdx == 0)) and not self.states.lockLdsReadTokenSwap:
         # swap LR buffer token only when the LR buffer actually changes
         self.states.ldsReadTokenIdx = self.states.memTokenLdsBuffer1 if self.states.ldsReadTokenIdx == self.states.memTokenLdsBuffer0 else self.states.memTokenLdsBuffer0
+      if isOptNLL and not self.states.lockLdsReadTokenSwap:
+        # After entering OptNLL body, keep the read token fixed.
+        self.states.lockLdsReadTokenSwap = True
       for iui in range(0,kernel["InnerUnroll"]):
         # use full prefetch only for next loop
         usePLRPackA = self.states.doFullPackCodePrefetch and (doNext or u == 0)
@@ -3763,7 +3767,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       doReadM = doReadM or (hasLiveLdsData and doNext)
       doReadM = doReadM and (kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"])
       # Prefetch reads for next loop target LDS1; current iteration reads target LDS0
-      if hasLiveLdsData and doNext:
+      if hasLiveLdsData and doNext and not self.states.lockLdsReadTokenSwap:
         # swap LR buffer
         self.states.ldsReadTokenIdx = self.states.memTokenLdsBuffer1 if self.states.ldsReadTokenIdx == self.states.memTokenLdsBuffer0 else self.states.memTokenLdsBuffer0
       for iui in range(0,kernel["InnerUnroll"]):
@@ -5738,6 +5742,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     self.states.ldsReadTokenIdx = self.states.memTokenLdsBuffer0
     self.states.ldsWriteTokenIdx = self.states.memTokenLdsBuffer0
     self.states.ldsBarrierTokenIdx = self.states.memTokenLdsBuffer0
+    self.states.lockLdsReadTokenSwap = False
 
     # NamedTuple is immutable
     class intermediateTPValues(NamedTuple):

@@ -55,6 +55,8 @@ add_library(
     FlatbufferUtilities.cpp
     plugin/EnginePlugin.cpp
     plugin/EnginePluginResourceManager.cpp
+    plugin/HeuristicPlugin.cpp
+    plugin/HeuristicPluginResourceManager.cpp
     plugin/PluginCore.cpp
     plugin/SharedLibrary.cpp
     utilities/EngineOrdering.cpp
