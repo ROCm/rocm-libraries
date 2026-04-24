@@ -9,6 +9,7 @@
 #include "ck_tile/core.hpp"
 #include "ck_tile/host/host_tensor.hpp"
 #include "ck_tile/host/device_prop.hpp"
+#include "ck_tile/ops/common/tensor_layout.hpp"
 
 namespace ck_tile {
 
