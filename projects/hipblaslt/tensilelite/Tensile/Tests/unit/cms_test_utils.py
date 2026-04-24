@@ -153,16 +153,31 @@ def _make_mock_grinc(count: int) -> list:
     return items
 
 
-def _make_mock_swap_packs(count: int, lr_base: int = LRA_BASE) -> list:
+def _make_mock_swap_packs(count: int, lr_base: int = LRA_BASE, vw: int = 1) -> list:
     """Create mock VSwapB32 instructions for swap packs.
 
-    In real code, v_swap_b32 transposes register pairs within the LR
-    destination space. Each swap reads and writes two different VGPRs
-    in the LR space.
+    When vw > 1, uses the real interleaving pattern from
+    _compute_swap_register_pairs to determine which register pairs get
+    swapped. Each swap reads and writes two VGPRs within the LR space,
+    offset by lr_base.
+
+    When vw <= 1 (no swaps needed), returns empty list.
     """
     from rocisa.instruction import VSwapB32
-    return [VSwapB32(dst=vgpr(lr_base + i * 2, 1), src=vgpr(lr_base + i * 2 + 1, 1))
-            for i in range(count)]
+    if vw <= 1:
+        return []
+    from Tensile.Components.CMSValidator import _compute_swap_register_pairs, VGPRS_PER_CONVERSION_GROUP
+    total_regs = VGPRS_PER_CONVERSION_GROUP * vw
+    swap_pairs = _compute_swap_register_pairs(vw, total_regs)
+    items = []
+    for i in range(min(count, len(swap_pairs))):
+        reg_src, reg_dst = swap_pairs[i]
+        items.append(VSwapB32(dst=vgpr(lr_base + reg_dst, 1),
+                              src=vgpr(lr_base + reg_src, 1)))
+    # If count > len(swap_pairs), pad with identity swaps (shouldn't happen in practice)
+    while len(items) < count:
+        items.append(VSwapB32(dst=vgpr(lr_base, 1), src=vgpr(lr_base + 1, 1)))
+    return items
 
 
 def _make_mock_swap(count: int) -> list:
@@ -399,7 +414,8 @@ def make_mock_id_map(schedule_info, kernel=None) -> dict:
                         vw = kernel.get("VectorWidthA" if is_a else "VectorWidthB", 1)
                         if vw > 1:
                             n_swaps = 4 * (vw - 1)
-                swap_items = _make_mock_swap_packs(n_swaps, lr_base=lr_base)
+                vw_for_swap = kernel.get("VectorWidthA" if is_a else "VectorWidthB", 1) if kernel else 1
+                swap_items = _make_mock_swap_packs(n_swaps, lr_base=lr_base, vw=vw_for_swap)
                 remaining = count - n_swaps
                 if is_4x4_tf32:
                     pack_items = _make_mock_packs_tf32_4x4(remaining,

@@ -31,7 +31,7 @@ _hook_up_packs_bf16, _hook_up_packs_f32, and _hook_up_packs_f32_mfma.
 
 import pytest
 from rocisa.instruction import (
-    VPermB32, DSLoadB128, MFMAInstruction, VCvtPkF32toBF16,
+    VPermB32, VSwapB32, DSLoadB128, MFMAInstruction, VCvtPkF32toBF16,
     SWaitCnt, SBarrier,
 )
 from rocisa.container import vgpr, sgpr
@@ -42,12 +42,16 @@ from Tensile.Components.CMSValidator import (
     LocalRead, MFMA,
     derive_pack_must_start_after,
     resolve_pack_type, PACK_TYPE_MAP,
+    _compute_swap_register_pairs, _build_reg_to_lr_map,
+    _hook_up_packs_f32_mfma,
+    VGPRS_PER_CONVERSION_GROUP,
     get_dst_range, get_src_ranges, get_reg_range,
     SchedulePosition,
 )
 from cms_test_utils import (
     make_mock_mfma_code,
     _make_mock_lr, _make_mock_packs_bf16, _make_mock_packs_tf32_4x4,
+    _make_mock_swap_packs,
     LRA_BASE, LRB_BASE, PACK_A_DST_BASE, PACK_B_DST_BASE,
     CVT0_BASE, TF32_INTERMEDIATE_BASE, MFMA_PACK_A_BASE,
 )
@@ -369,3 +373,133 @@ class TestRegisterChainIntegrity:
         b_range = get_reg_range(mfmas[0].b)
         assert b_range[0] == 'v' and PACK_B_DST_BASE <= b_range[1] < PACK_B_DST_BASE + 100, \
             f"MFMA[0] .b {b_range} should read from PackB output space v[{PACK_B_DST_BASE}+]"
+
+
+# =============================================================================
+# Test: TF32 4x4 with VW>1 swap packs — positional vs register-based
+# =============================================================================
+
+class TestTF32_4x4_SwapPackDeps:
+    """Verify derive_pack_must_start_after matches _hook_up_packs_f32_mfma
+    for TF32 4x4 with VW>1 swap packs.
+
+    With VW=2, there are 4 swap packs before 10 regular packs per group.
+    Each swap transposes a register pair in the LR space. CVT0 packs then
+    depend on swaps (for transposed regs) or LRs (for non-transposed regs).
+
+    The test creates instructions using the real interleaving pattern from
+    _compute_swap_register_pairs, then verifies both code paths agree.
+    """
+
+    def _build_vw2_instructions(self, lr_base=LRA_BASE, pack_dst_base=PACK_A_DST_BASE):
+        """Build a complete set of VW=2 swap + 10 regular packs with matching LRs.
+
+        Uses the real interleaving pattern from _compute_swap_register_pairs.
+        Returns (lrs, all_packs) where all_packs includes swap packs + regular packs.
+        """
+        vw = 2
+        n_lrs = 8  # DS_READ_CONV_TABLE for VW=2 has 8 entries
+        total_regs = VGPRS_PER_CONVERSION_GROUP * vw  # 16
+        n_swaps = 4 * (vw - 1)  # 4 swaps for VW=2
+
+        # Get the real swap register pairs
+        swap_pairs = _compute_swap_register_pairs(vw, total_regs)
+        assert len(swap_pairs) == n_swaps
+
+        # Create LR mock instructions: 8 LRs, each loading 4 VGPRs
+        mock_lrs_raw = _make_mock_lr(n_lrs, base_reg=lr_base)
+        lrs = [_make_lr("LRA0", i, i, mock_lrs_raw[i]) for i in range(n_lrs)]
+
+        # Create swap mock instructions using real register pairs
+        swap_raw = _make_mock_swap_packs(n_swaps, lr_base=lr_base, vw=vw)
+        swap_packs = [_make_pack("PackA0", 2, i, swap_raw[i], cls=SwapPack)
+                      for i in range(n_swaps)]
+
+        # Create regular pack mock instructions (10 per group)
+        regular_raw = _make_mock_packs_tf32_4x4(10, pack_dst_base=pack_dst_base,
+                                                  lr_base=lr_base)
+        regular_packs = []
+        for i in range(10):
+            cls, _ = resolve_pack_type(regular_raw[i])
+            regular_packs.append(_make_pack("PackA0", 3 + i, n_swaps + i,
+                                            regular_raw[i], cls=cls, group_index=0))
+
+        all_packs = swap_packs + regular_packs
+        return lrs, all_packs, vw
+
+    def test_swap_packs_read_from_lr_space(self):
+        """Swap pack src and dst registers should be in the LR register space."""
+        vw = 2
+        swap_raw = _make_mock_swap_packs(4, lr_base=LRA_BASE, vw=vw)
+        for i, sp in enumerate(swap_raw):
+            dst = get_dst_range(sp)
+            src = get_src_ranges(sp)
+            assert dst is not None, f"SwapPack[{i}] should have a dst"
+            assert dst[0] == 'v', f"SwapPack[{i}] dst should be a VGPR"
+            assert LRA_BASE <= dst[1] < LRA_BASE + 100, \
+                f"SwapPack[{i}] dst v[{dst[1]}] should be in LR space v[{LRA_BASE}+]"
+            vgpr_srcs = [r for r in src if r[0] == 'v']
+            assert len(vgpr_srcs) >= 1, f"SwapPack[{i}] should have at least 1 VGPR src"
+            for _, s, _ in vgpr_srcs:
+                assert LRA_BASE <= s < LRA_BASE + 100, \
+                    f"SwapPack[{i}] src v[{s}] should be in LR space v[{LRA_BASE}+]"
+
+    def test_swap_deps_on_lrs_via_register_tracing(self):
+        """Each swap pack should depend on LRs via register tracing."""
+        lrs, all_packs, vw = self._build_vw2_instructions()
+        result = derive_pack_must_start_after(all_packs, lrs)
+
+        # First 4 packs are swaps — each should depend on an LR
+        for i in range(4):
+            assert i in result, f"SwapPack[{i}] should have a result entry"
+            assert len(result[i]) == 1, f"SwapPack[{i}] should have exactly 1 dep"
+            dep = result[i][0]
+            assert isinstance(dep, LocalRead), \
+                f"SwapPack[{i}] should depend on an LR, got {type(dep).__name__}"
+
+    def test_cvt0_deps_on_swap_or_lr_via_register_tracing(self):
+        """CVT0 packs after swaps should depend on SwapPack (for swapped regs) or LR."""
+        lrs, all_packs, vw = self._build_vw2_instructions()
+        result = derive_pack_must_start_after(all_packs, lrs)
+
+        # CVT0 packs are at indices 4..7 (after 4 swap packs)
+        for i in range(4, 8):
+            assert i in result, f"CVT0[{i-4}] should have a result entry"
+            assert len(result[i]) == 1, f"CVT0[{i-4}] should have exactly 1 dep"
+            dep = result[i][0]
+            # Should depend on either a SwapPack or an LR
+            assert isinstance(dep, (SwapPack, LocalRead)), \
+                f"CVT0[{i-4}] should depend on SwapPack or LR, got {type(dep).__name__}"
+
+    def test_positional_and_register_agree_for_swap_packs(self):
+        """The positional code and register-based code should produce the same
+        effective max dependency for every pack in a VW=2 TF32 4x4 group.
+
+        This is the key equivalence test. It calls _hook_up_packs_f32_mfma
+        (positional) and derive_pack_must_start_after (register-based) on the
+        same pack set and asserts the max dep (by done_idx) matches for each pack.
+        """
+        lrs, all_packs, vw = self._build_vw2_instructions()
+
+        # Run positional code
+        _hook_up_packs_f32_mfma(all_packs, lrs, vw)
+
+        # Run register-based code
+        reg_deps = derive_pack_must_start_after(all_packs, lrs)
+
+        # Compare for each pack
+        for pack in all_packs:
+            if pack.issue_index not in reg_deps:
+                continue
+            reg_list = reg_deps[pack.issue_index]
+            if not reg_list:
+                continue
+            pos_latest = max(pack.must_start_after, key=lambda d: d.done_idx()) \
+                if pack.must_start_after else None
+            reg_latest = reg_list[0]
+            if pos_latest is None:
+                continue
+            assert pos_latest.done_idx() == reg_latest.done_idx(), \
+                f"Pack[{pack.issue_index}] ({type(pack).__name__}): " \
+                f"positional dep={pos_latest.name}@{pos_latest.done_idx()}, " \
+                f"register dep={reg_latest.name}@{reg_latest.done_idx()}"

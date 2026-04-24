@@ -2323,6 +2323,16 @@ def derive_pack_must_start_after(
             for off in range(start, end):
                 producers[(base, off)] = pack
 
+        # SwapPack special case: v_swap_b32 writes to BOTH src and dst registers
+        # (it swaps their contents). The rocisa binding only tracks .dst as the
+        # write destination. We must also mark the .src registers as written by
+        # this swap so that later packs reading from those registers find the
+        # swap as the producer.
+        if isinstance(pack, SwapPack):
+            for base, start, end in src_ranges:
+                for off in range(start, end):
+                    producers[(base, off)] = pack
+
     return result
 
 
