@@ -30,25 +30,37 @@ MaskType getMaskType(const hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes&
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
     bool leftAndRightBoundsSet = attrs.left_bound().has_value() && attrs.right_bound().has_value();
-
-    if(leftAndRightBoundsSet && (attrs.left_bound() >= 0 || attrs.right_bound() >= 0))
+    // No bounds set at all → check deprecated bools, otherwise no mask
+    if(!leftAndRightBoundsSet)
     {
-        return MaskType::WINDOW_GENERIC;
+        if(attrs.causal_mask()) // Deprecated
+        {
+            return MaskType::TOP_LEFT_CAUSAL;
+        }
+        if(attrs.causal_mask_bottom_right()) // Deprecated
+        {
+            return MaskType::BOTTOM_RIGHT_CAUSAL;
+        }
+        return MaskType::NO_MASK;
     }
 
-    if(attrs.causal_mask() // Deprecated
-       || (leftAndRightBoundsSet && attrs.diagonal_alignment() == DiagonalAlignment::TOP_LEFT))
+    // -1 == unbound
+    auto left = attrs.left_bound().has_value() ? attrs.left_bound().value() : -1;
+    auto right = attrs.right_bound().has_value() ? attrs.right_bound().value() : -1;
+    // Both unbounded: no mask
+    if(left == -1 && right == -1)
     {
-        return MaskType::TOP_LEFT_CAUSAL;
+        return MaskType::NO_MASK;
     }
-
-    if(attrs.causal_mask_bottom_right() // Deprecated
-       || (leftAndRightBoundsSet && attrs.diagonal_alignment() == DiagonalAlignment::BOTTOM_RIGHT))
+    // Causal: left unbounded, right = 0 (don't attend past diagonal)
+    if(left == -1 && right == 0)
     {
-        return MaskType::BOTTOM_RIGHT_CAUSAL;
+        return attrs.diagonal_alignment() == DiagonalAlignment::BOTTOM_RIGHT
+                   ? MaskType::BOTTOM_RIGHT_CAUSAL
+                   : MaskType::TOP_LEFT_CAUSAL;
     }
-
-    return MaskType::NO_MASK;
+    // Anything else is sliding window
+    return MaskType::WINDOW_GENERIC;
 }
 
 enum RoundingMode : int
