@@ -6,8 +6,8 @@
 
 cmake_minimum_required(VERSION 3.24)
 
-include(${CMAKE_CURRENT_LIST_DIR}/cmake/VersionUtils.cmake)
-fusilli_provider_setup_version(fusilli_provider)
+include(${CMAKE_CURRENT_LIST_DIR}/../cmake/VersionUtils.cmake)
+dnn_provider_setup_version(fusilli_provider ${CMAKE_CURRENT_LIST_DIR})
 
 project(fusilli-plugin
   VERSION ${FUSILLI_PROVIDER_VERSION}
@@ -112,7 +112,7 @@ add_library(${FUSILLI_PLUGIN_TARGET} SHARED
 )
 target_compile_options(${FUSILLI_PLUGIN_TARGET} PRIVATE ${FUSILLI_PLUGIN_WARNING_COMPILE_OPTIONS})
 target_link_libraries(${FUSILLI_PLUGIN_TARGET} PRIVATE hipdnn_plugin_sdk hipdnn_flatbuffers_sdk hipdnn_data_sdk hip::host fusilli::fusilli)
-fusilli_provider_generate_version_header(fusilli_provider ${FUSILLI_PLUGIN_TARGET})
+dnn_provider_generate_version_header(fusilli_provider ${FUSILLI_PLUGIN_TARGET} ${CMAKE_CURRENT_LIST_DIR})
 set_target_properties(${FUSILLI_PLUGIN_TARGET} PROPERTIES
   C_VISIBILITY_PRESET hidden
   CXX_VISIBILITY_PRESET hidden

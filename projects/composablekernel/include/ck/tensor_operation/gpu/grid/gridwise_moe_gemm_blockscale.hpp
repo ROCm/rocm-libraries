@@ -15,6 +15,9 @@
 #include "ck/tensor_operation/gpu/grid/gridwise_gemm_xdl_cshuffle_common.hpp"
 #define DEBUG_LOG 0
 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
+
 namespace ck {
 
 // Currently we do not have a elegant way to put single lds buffer & double lds buffer pipe in same
@@ -1592,6 +1595,25 @@ struct GridwiseMoeGemmBlockScale
                                 tensor_operation::element_wise::Silu{}(gate, gate);
                                 c_thread_buf(cidx) = gate * up;
                             }
+                            else if constexpr(ActivationOperation == Activation::swiglustep_and_mul)
+                            {
+                                float gate = c_thread_buf[cidx];
+                                float up   = c_thread_buf_up[cidx];
+                                if constexpr(MulRoutedWeight)
+                                {
+                                    gate = gate * topk_weight;
+                                    up   = up * topk_weight;
+                                }
+                                if constexpr(is_same_v<remove_cvref_t<BDataType>, pk_i4_t>)
+                                {
+                                    gate *= 16;
+                                    up *= 16;
+                                }
+                                tensor_operation::element_wise::Silu{}(gate, gate);
+                                gate               = gate < 7.0f ? gate : 7.0f;
+                                up                 = up < 7.0f ? (up > -7.0f ? up : -7.0f) : 7.0f;
+                                c_thread_buf(cidx) = gate * up;
+                            }
                             else if(ActivationOperation == Activation::gelu_and_mul)
                             {
                                 float gate = c_thread_buf[cidx];
@@ -2118,6 +2140,25 @@ struct GridwiseMoeGemmBlockScale
                                 tensor_operation::element_wise::Silu{}(gate, gate);
                                 c_thread_buf(cidx) = gate * up;
                             }
+                            else if constexpr(ActivationOperation == Activation::swiglustep_and_mul)
+                            {
+                                float gate = c_thread_buf[cidx];
+                                float up   = c_thread_buf_up[cidx];
+                                if constexpr(MulRoutedWeight)
+                                {
+                                    gate = gate * topk_weight;
+                                    up   = up * topk_weight;
+                                }
+                                if constexpr(is_same_v<remove_cvref_t<BDataType>, pk_i4_t>)
+                                {
+                                    gate *= 16;
+                                    up *= 16;
+                                }
+                                tensor_operation::element_wise::Silu{}(gate, gate);
+                                gate               = gate < 7.0f ? gate : 7.0f;
+                                up                 = up < 7.0f ? (up > -7.0f ? up : -7.0f) : 7.0f;
+                                c_thread_buf(cidx) = gate * up;
+                            }
                             else if(ActivationOperation == Activation::gelu_and_mul)
                             {
                                 float gate = c_thread_buf[cidx];
@@ -2175,3 +2216,4 @@ struct GridwiseMoeGemmBlockScale
 };
 
 } // namespace ck
+#pragma clang diagnostic pop
