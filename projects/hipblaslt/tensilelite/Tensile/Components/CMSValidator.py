@@ -2194,31 +2194,37 @@ def hook_up_packs(timeline: Timeline, kernel: 'Solution', mfma_reorder: list[int
                 _hook_up_packs_bf16(packs, local_reads)
 
             # Dual-path validation: compare register-based (RAW+WAR) must_start_after
-            # against positional. Only assert when register path found a dependency.
-            # Compare by done_idx position rather than object identity, since the
-            # positional code accumulates deps across all loops while register-based
-            # only finds deps within the current loop's LRs.
-            reg_deps = derive_pack_must_start_after(packs, local_reads)
-            if reg_deps:
-                for pack in packs:
-                    if pack.issue_index not in reg_deps:
-                        continue
-                    reg_list = reg_deps[pack.issue_index]
-                    if not reg_list:
-                        continue
-                    pos_latest = max(pack.must_start_after, key=lambda d: d.done_idx()) if pack.must_start_after else None
-                    reg_latest = reg_list[0]
-                    if pos_latest is None or reg_latest is None:
-                        continue
-                    if pos_latest.done_idx() != reg_latest.done_idx():
-                        pos_done = pos_latest.done_idx()
-                        reg_done = reg_latest.done_idx()
-                        printWarning(
-                            f"must_start_after mismatch for {pack_name}[{pack.issue_index}] "
-                            f"({type(pack).__name__}): "
-                            f"positional={pos_latest.name} done=({pos_done.loop_index},{pos_done.vmfma_index},{pos_done.sub_index}), "
-                            f"register={reg_latest.name} done=({reg_done.loop_index},{reg_done.vmfma_index},{reg_done.sub_index})"
-                        )
+            # against positional. Only run when the idMap contains real (named) registers
+            # from the kernel writer — mock registers (base name 'v') can't model VW>1
+            # swap pack interleaving, so mismatches are expected with mocks.
+            has_named_regs = any(
+                lr.rocisa_inst is not None and
+                get_dst_range(lr.rocisa_inst) is not None and
+                get_dst_range(lr.rocisa_inst)[0] != 'v'
+                for lr in local_reads
+            )
+            if has_named_regs:
+                reg_deps = derive_pack_must_start_after(packs, local_reads)
+                if reg_deps:
+                    for pack in packs:
+                        if pack.issue_index not in reg_deps:
+                            continue
+                        reg_list = reg_deps[pack.issue_index]
+                        if not reg_list:
+                            continue
+                        pos_latest = max(pack.must_start_after, key=lambda d: d.done_idx()) if pack.must_start_after else None
+                        reg_latest = reg_list[0]
+                        if pos_latest is None or reg_latest is None:
+                            continue
+                        if pos_latest.done_idx() != reg_latest.done_idx():
+                            pos_done = pos_latest.done_idx()
+                            reg_done = reg_latest.done_idx()
+                            printWarning(
+                                f"must_start_after mismatch for {pack_name}[{pack.issue_index}] "
+                                f"({type(pack).__name__}): "
+                                f"positional={pos_latest.name} done=({pos_done.loop_index},{pos_done.vmfma_index},{pos_done.sub_index}), "
+                                f"register={reg_latest.name} done=({reg_done.loop_index},{reg_done.vmfma_index},{reg_done.sub_index})"
+                            )
 
             _set_pack_needed_by(packs, pack_name, i_loop, mfma_reorder, mfma_for_linear_index, timeline.num_vmfma, kernel)
 
