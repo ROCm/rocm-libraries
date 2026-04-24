@@ -587,7 +587,6 @@ namespace TensileLite
            && ((singleWSD || sizeMapping.globalAccumulation == 2)
                || (sizeMapping.globalAccumulation == 3)))
         {
-            //std::cout << "Appending ws_d as kernel argument GSU > 1: "<<std::hex<<inputs.ws<<"\n";
             args.template append<void const*>("ws_d", (uint8_t*)inputs.ws + workspaceOffsetInByte);
             if(sizeMapping.globalAccumulation == 3)
             {
@@ -595,7 +594,6 @@ namespace TensileLite
             }
             else
             {
-                //std::cout << "Appending ws_c as kernel argument GGSU > 1: "<<std::hex<<inputs.ws<<"\n";
                 args.template append<void const*>("ws_c",
                                                   (uint8_t*)inputs.ws + workspaceOffsetInByte);
             }
@@ -604,7 +602,6 @@ namespace TensileLite
         {
             if(sizeMapping.streamK > 0 && sk.reduction == origami::reduction_t::parallel)
             {
-                //std::cout << "StreamK Reduction is parallel: Appending ws_d and ws_c as kernel argument "<<std::hex<<inputs.ws<<","<<std::hex<<inputs.ws<<"\n";
                 args.template append<void const*>("ws_d",
                                                   (uint8_t*)inputs.ws + workspaceOffsetInByte);
                 args.template append<void const*>("ws_c",
@@ -669,13 +666,11 @@ namespace TensileLite
         // in General Batched GEMM
         if(gsuWSStride || skWSStride)
         {
-            //std::cout << "Inside gsuStride block\n";
             size_t wsStride = startStrideCD ? d.sizes()[0] : 1;
             for(size_t i = startStrideCD; i < d.dimensions(); i++)
             {
                 args.template append<uint32_t>(concatenate_if<T_Debug>("strideW_D", i), wsStride);
                 wsStride *= d.sizes()[i];
-                //std::cout << "strideW_D " << i << ": " << wsStride << "\n";
             }
 
             wsStride = startStrideCD ? d.sizes()[0] : 1;
@@ -683,7 +678,6 @@ namespace TensileLite
             {
                 args.template append<uint32_t>(concatenate_if<T_Debug>("strideW_C", i), wsStride);
                 wsStride *= d.sizes()[i];
-                //std::cout << "strideW_C " << i << ": " << wsStride << "\n";
             }
         }
         else
@@ -1284,7 +1278,6 @@ namespace TensileLite
                                          size_t   autoStaggerUStrideShift,
                                          uint32_t autoGsuVal) const
     {
-        //std::cout << "AutoGSU value inside KernArgs : " << autoGsuVal << std::endl;
         if constexpr(!Legacy)
         {
             gemmCount = gemmCount & 0x3FFFFFFF;
@@ -1358,7 +1351,6 @@ namespace TensileLite
             gsuwgmrr = param.gsuwgmrr() > 0 ? param.gsuwgmrr()
                                             : sizeMapping.globalSplitUWorkGroupMappingRoundRobin;
         }
-        //std::cout << "GSU value inside KernArgs : " << gsu << std::endl;
 
         internalArg0
             = internalArg0 | ((uint32_t)gsuc << 15) | ((uint32_t)gsuwgmrr << 14) | (mask14 & gsu);
@@ -1498,7 +1490,7 @@ namespace TensileLite
                           << ", StaggerU: " << autoStaggerU
                           << ", StaggerUStrideShift: " << autoStaggerUStrideShift << std::endl;
             }
-            if(problem.batchMode() == 1)
+            if(problem.batchMode() == ContractionProblemGemm::BATCHMODE::POINTER_ARRAY)
             {           
                 kernelArgs<T_Debug, false>( 1,
                                             3,
@@ -1964,7 +1956,7 @@ namespace TensileLite
                                                        KA&                    args,
                                                        StreamKSettings const& sk,
                                                        uint32_t               autoGsuVal,
-                                                       uint32_t               additional_padding_per_batch_general_batch) const                                                       
+                                                       uint32_t               additionalPaddingPerBatchGeneralBatch) const                                                       
     {
         TensorDescriptor const& c = problem.c();
         TensorDescriptor const& d = problem.d();
@@ -2137,9 +2129,9 @@ namespace TensileLite
         // how to index the batch dimension in Strided Batch versus General Batched.
         if(problemType.groupedGemm == false)
         {
-            uint32_t batch_mode = problem.batchMode();
-            args.template append<uint32_t>("batchMode", batch_mode);
-            args.template append<uint32_t>("additionalPaddingPerBatch", additional_padding_per_batch_general_batch);        
+            ContractionProblemGemm::BATCHMODE batchMode = problem.batchMode();
+            args.template append<uint32_t>("batchMode", static_cast<uint32_t>(batchMode));
+            args.template append<uint32_t>("additionalPaddingPerBatch", additionalPaddingPerBatchGeneralBatch);        
         }
     }
 
@@ -2197,14 +2189,14 @@ namespace TensileLite
             gsu        = sk.grid / tiles;
         }
         rv.kernelName = outputConversionKernelName(problem, inputs, vw, gsu);
-        int additional_padding_per_batch_general_batch = 0;
-        if(problem.batchMode() == 0)
+        int additionalPaddingPerBatchGeneralBatch = 0;
+        if(problem.batchMode() == ContractionProblemGemm::BATCHMODE::STRIDED)
             rv.numWorkGroups.x = CeilDivide(wiX * wiY * wiZ, rv.workGroupSize.x * vw);
         else
         {
             rv.numWorkGroups.x = CeilDivide(wiX * wiY, rv.workGroupSize.x * vw) * wiZ;
             int extra_work_items = (wiX * wiY) % (rv.workGroupSize.x * vw);
-            additional_padding_per_batch_general_batch = extra_work_items > 0 ? (rv.workGroupSize.x * vw) - extra_work_items : 0;
+            additionalPaddingPerBatchGeneralBatch = extra_work_items > 0 ? (rv.workGroupSize.x * vw) - extra_work_items : 0;
         }
         rv.numWorkGroups.y = 1;
         rv.numWorkGroups.z = 1;
@@ -2213,7 +2205,7 @@ namespace TensileLite
         rv.numWorkItems.y = rv.workGroupSize.y * rv.numWorkGroups.y;
         rv.numWorkItems.z = rv.workGroupSize.z * rv.numWorkGroups.z;
 
-        outputConversionCallArgs<T_Debug>(problem, inputs, 0, rv.args, sk, autoGsuVal, additional_padding_per_batch_general_batch);
+        outputConversionCallArgs<T_Debug>(problem, inputs, 0, rv.args, sk, autoGsuVal, additionalPaddingPerBatchGeneralBatch);
 
         //@TODO determine if this is needed, may not end up in the same code object file
         rv.codeObjectFile = codeObjectFilename.load();
@@ -2822,7 +2814,6 @@ namespace TensileLite
         }
 
         StreamKSettings sk;
-        //std::cout<< "sizeMapping.streamK: "<< sizeMapping.streamK << std::endl;
         if(sizeMapping.streamK > 0)
         {
             sk.reduction         = getSKReduction(problem, hardware);

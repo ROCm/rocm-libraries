@@ -331,6 +331,12 @@ namespace TensileLite
             CONST_COUNT
         };
 
+        enum BATCHMODE : int
+        {
+            STRIDED = 0,
+            POINTER_ARRAY = 1,
+            BATCHMODE_COUNT
+        };
         using Solution = ContractionSolution;
         using Inputs   = ContractionInputs;
 
@@ -899,14 +905,14 @@ namespace TensileLite
             return m_stridedBatched;
         }
 
-        void setBatchMode(int32_t value)
+        void setBatchMode(ContractionProblemGemm::BATCHMODE value)
         {
-            batch_mode = value;
+            batch_Mode = value;
         }
 
-        bool batchMode() const
+        ContractionProblemGemm::BATCHMODE batchMode() const
         {
-            return batch_mode;
+            return batch_Mode;
         }
 
         void setGroupedGemm(bool value)
@@ -1422,7 +1428,7 @@ namespace TensileLite
 
         std::string getOperationIdentifier() const;
         std::string getOperationDescription() const;
-        int batch_mode = 0;        
+        ContractionProblemGemm::BATCHMODE batch_Mode = ContractionProblemGemm::BATCHMODE::STRIDED;        
     };
 
     class ContractionProblemGroupedGemm : public ContractionProblem

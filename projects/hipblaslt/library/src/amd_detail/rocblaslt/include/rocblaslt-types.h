@@ -566,7 +566,7 @@ struct RocblasltContractionProblem
     void*       Synchronizer;
     bool        swizzleA;
     bool        swizzleB;
-    int32_t     batch_mode;    
+    hipblasLtBatchMode_t batchMode;    
 
     // gemm_ex
     // gemm_strided_batched_ex
@@ -628,7 +628,7 @@ struct RocblasltContractionProblem
                                 void*                  Synchronizer,
                                 bool                   swizzleA,
                                 bool                   swizzleB,
-                                int32_t                batch_mode = 0);
+                                hipblasLtBatchMode_t   batchMode);
 };
 
 namespace rocblaslt

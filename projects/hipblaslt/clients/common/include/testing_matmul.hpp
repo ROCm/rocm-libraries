@@ -1033,14 +1033,14 @@ void check(hipStream_t                   stream,
            hipDataType                   Tbias,
            hipDataType                   Taux,
            hipDataType                   Tc,
-           int32_t                       batchMode = 0)
+           hipblasLtBatchMode_t          batchMode = HIPBLASLT_BATCH_MODE_STRIDED)
 {
     // fetch GPU
     CHECK_HIP_ERROR(hipStreamSynchronize(stream));
 
     for(int gemmIdx = 0; gemmIdx < gemm_count; gemmIdx++)
     {
-        if(batchMode != 1)
+        if(batchMode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
         {
             if(!arg.gradient && arg.use_e)
             {
@@ -1061,7 +1061,7 @@ void check(hipStream_t                   stream,
         }
         if(arg.unit_check)
         {
-            if(batchMode != 1)
+            if(batchMode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
             {
                 if(tol[gemmIdx] != 0)
                 {
@@ -1087,7 +1087,7 @@ void check(hipStream_t                   stream,
                                        To);
                 }
             }
-            else if(batchMode == 1)
+            else if(batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
             {
                 for(int batch = 0; batch < num_batches[gemmIdx]; batch++)
                 {
@@ -1116,7 +1116,7 @@ void check(hipStream_t                   stream,
                     }
                 }
             }
-            if(batchMode != 1)
+            if(batchMode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
             {
                 if(arg.amaxD)
                 {
@@ -1202,7 +1202,7 @@ void check(hipStream_t                   stream,
         if(arg.norm_check)
         {
             double norm_error = 0.0;
-            if(batchMode != 1)
+            if(batchMode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
             {
                 norm_error = std::abs(norm_check_general('F',
                                                          M[gemmIdx],
@@ -1235,7 +1235,7 @@ void check(hipStream_t                   stream,
             {
                 CHECK_SUCCESS(norm_check(norm_error, To, arg.compute_type));
             }
-            if(batchMode != 1)
+            if(batchMode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
             {
                 if(arg.amaxD)
                 {
@@ -1293,7 +1293,7 @@ void check(hipStream_t                   stream,
 
         if(arg.allclose_check)
         {
-            if(batchMode != 1)
+            if(batchMode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
             {
                 bool is_allclose = allclose_check_general('F',
                                                           M[gemmIdx],
@@ -1675,7 +1675,8 @@ void testing_matmul_with_bias(const Arguments& arg,
     bool    do_grouped_gemm = arg.grouped_gemm > 0;
     int32_t gemm_count      = std::max(1, arg.grouped_gemm);
     // (batch_mode value : 0 for Strided Batched Gemm, 1 for General Batched Gemm)
-    int32_t batchMode = arg.batch_mode;
+    hipblasLtBatchMode_t batchMode = static_cast<hipblasLtBatchMode_t>(arg.batch_mode);
+    
     int64_t rotating  = arg.rotating * 1024 * 1024;
 
     std::vector<int64_t> M(gemm_count), N(gemm_count), K(gemm_count), lda(gemm_count),
@@ -1741,7 +1742,7 @@ void testing_matmul_with_bias(const Arguments& arg,
         do_batched[i]  = (arg.batch_count > 1);
         num_batches[i] = (do_batched[i] ? arg.batch_count : 1);
 
-        if(batchMode == 0)
+        if(batchMode == HIPBLASLT_BATCH_MODE_STRIDED)
         {
             stride_a[i] = do_batched[i] ? arg.stride_a[i] : lda[i] * A_col[i];
             stride_b[i] = do_batched[i] ? arg.stride_b[i] : ldb[i] * B_col[i];
@@ -1759,7 +1760,7 @@ void testing_matmul_with_bias(const Arguments& arg,
             stride_e[i] = lde[i] * N[i];
         }
 
-        if(batchMode == 0)
+        if(batchMode == HIPBLASLT_BATCH_MODE_STRIDED)
         {
             size_A[i] = stride_a[i] == 0        ? lda[i] * A_col[i] * num_batches[i]
                         : lda[i] <= stride_a[i] ? stride_a[i] * num_batches[i]
@@ -1788,10 +1789,10 @@ void testing_matmul_with_bias(const Arguments& arg,
                     hipblaslt_cerr << "Warning: swizzle_a does not yet support arbitrary stride_a!"
                                    << std::endl;
             }
-            size_dA[i] = batchMode == 1 ? stride_swizzle : (num_batches[i] * stride_swizzle);
+            size_dA[i] = (batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY) ? stride_swizzle : (num_batches[i] * stride_swizzle);
         }
 
-        if(batchMode == 0)
+        if(batchMode == HIPBLASLT_BATCH_MODE_STRIDED)
         {
             size_B[i] = stride_b[i] == 0        ? ldb[i] * B_col[i] * num_batches[i]
                         : ldb[i] <= stride_b[i] ? stride_b[i] * num_batches[i]
@@ -1820,9 +1821,9 @@ void testing_matmul_with_bias(const Arguments& arg,
                     hipblaslt_cerr << "Warning: swizzle_b does not yet support arbitrary stride_b!"
                                    << std::endl;
             }
-            size_dB[i] = batchMode == 1 ? stride_swizzle : (num_batches[i] * stride_swizzle);
+            size_dB[i] = (batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY) ? stride_swizzle : (num_batches[i] * stride_swizzle);
         }
-        if(batchMode == 0)
+        if(batchMode == HIPBLASLT_BATCH_MODE_STRIDED)
         {
             size_C[i] = stride_c[i] == 0        ? ldc[i] * N[i] * num_batches[i]
                         : ldc[i] <= stride_c[i] ? stride_c[i] * num_batches[i]
@@ -1850,7 +1851,7 @@ void testing_matmul_with_bias(const Arguments& arg,
 
         size_D_copy[i] = (arg.unit_check || arg.norm_check || arg.allclose_check) ? size_D[i] : 0;
         size_scaleAlphaVec[i] = arg.scaleAlpha_vector ? M[i] : 0;
-        if(batchMode == 0)
+        if(batchMode == HIPBLASLT_BATCH_MODE_STRIDED)
         {
             if(arg.scaleA == hipblaslt_scaling_format::Scalar)
                 size_scaleAVec[i] = 1;
@@ -1892,7 +1893,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                 return;
             }
         }
-        if(batchMode == 0)
+        if(batchMode == HIPBLASLT_BATCH_MODE_STRIDED)
         {
             if(arg.bias_vector)
             {
@@ -1913,7 +1914,7 @@ void testing_matmul_with_bias(const Arguments& arg,
         }
         auto    biasSize = size_bias[i] * realDataTypeSize(Tbias);
         int64_t sizeC    = get_computeInterface(h_beta[i], Tc) == 0 ? 0 : size_C[i] * sizeof(To);
-        if(batchMode == 0)
+        if(batchMode == HIPBLASLT_BATCH_MODE_STRIDED)
         {
             totalRotatingSizeNeeded
                 += size_dA[i] * realDataTypeSize(TiA) + size_dB[i] * realDataTypeSize(TiB) + sizeC
@@ -1976,7 +1977,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                 matB[i], HIPBLASLT_MATRIX_LAYOUT_ORDER, &orderB, sizeof(orderB)));
         }
 
-        if(do_batched[i] || batchMode == 1)
+        if(do_batched[i] || batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
         {
             EXPECT_HIPBLAS_STATUS(
                 hipblasLtMatrixLayoutSetAttribute(
@@ -2023,7 +2024,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                 HIPBLAS_STATUS_SUCCESS);
         }
 
-        if(batchMode == 1)
+        if(batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
         {
             EXPECT_HIPBLAS_STATUS(
                 hipblasLtMatrixLayoutSetAttribute(
@@ -2063,7 +2064,7 @@ void testing_matmul_with_bias(const Arguments& arg,
         CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescSetAttribute(
             matmul[0][i], HIPBLASLT_MATMUL_DESC_TRANSB, &transB, sizeof(int32_t)));
 
-        if(batchMode == 0)
+        if(batchMode == HIPBLASLT_BATCH_MODE_STRIDED)
         {
             if(arg.bias_vector)
             {
@@ -2551,7 +2552,7 @@ void testing_matmul_with_bias(const Arguments& arg,
         }
         else
         {
-            if(batchMode == 0)
+            if(batchMode == HIPBLASLT_BATCH_MODE_STRIDED)
             {
                 hipblaslt_init_device(ABC_dims::A,
                                       arg.initialization,
@@ -2653,7 +2654,7 @@ void testing_matmul_with_bias(const Arguments& arg,
         }
         else
         {
-            if(batchMode == 0)
+            if(batchMode == HIPBLASLT_BATCH_MODE_STRIDED)
             {
                 hipblaslt_init_device(ABC_dims::B,
                                       arg.initialization,
@@ -2686,7 +2687,7 @@ void testing_matmul_with_bias(const Arguments& arg,
             }
         }
 
-        if(batchMode == 0)
+        if(batchMode == HIPBLASLT_BATCH_MODE_STRIDED)
         {
             hipblaslt_init_device(ABC_dims::C,
                                   arg.initialization,
@@ -3390,7 +3391,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                                                 &TciB,
                                                 sizeof(void*)),
                 HIPBLAS_STATUS_SUCCESS);
-            if(batchMode != 1)
+            if(batchMode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
             {
                 // Update bias, E
                 if(arg.bias_vector)
@@ -3468,7 +3469,7 @@ void testing_matmul_with_bias(const Arguments& arg,
 
     //Updating the gemm_count for the below section of the code
     // as batch_count for reusing existing GroupedGEMM code for General Batched GEMM
-    batchMode == 1 ? gemm_count = arg.batch_count : gemm_count;
+    batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY ? gemm_count = arg.batch_count : gemm_count;
     // C to Cpp API for GG
     std::vector<std::vector<void*>> da(block_count, std::vector<void*>(gemm_count));
     std::vector<std::vector<void*>> db(block_count, std::vector<void*>(gemm_count));
@@ -3535,7 +3536,7 @@ void testing_matmul_with_bias(const Arguments& arg,
 
     std::vector<hipblaslt_ext::GemmEpilogue> extepilogue;
     hipblaslt_ext::GemmProblemType           extproblemtype;
-    if(arg.use_ext_setproblem && batchMode != 1)
+    if(arg.use_ext_setproblem && batchMode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
     {
         extinputs.resize(block_count, std::vector<hipblaslt_ext::GemmInputs>(gemm_count));
         extepilogue.resize(gemm_count);
@@ -3662,7 +3663,7 @@ void testing_matmul_with_bias(const Arguments& arg,
         }
     }
 
-    if(batchMode == 1)
+    if(batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
     {
         //Copy The pointer arrays to Device [General Batched GEMM]
         for(int32_t b = 0; b < block_count; b++)
@@ -3677,28 +3678,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                 ddd[b], dd1[b].data(), gemm_count * sizeof(uint64_t*), hipMemcpyHostToDevice));
         }
     }
-    // Meant just for debuging pointer values
-    /*   if(batchMode == 1)
-    {
-        for(int32_t b = 0; b < block_count; b++)
-        {
-            for(int gemmIdx = 0; gemmIdx < gemm_count; gemmIdx++)
-            {
-                hipblaslt_cout<<"Device Pointer value of da1["<<b<<"]["<<gemmIdx<<"] is : "<<da1[b][gemmIdx]<<std::endl;
-                hipblaslt_cout<<"Device Pointer value of db1["<<b<<"]["<<gemmIdx<<"] is : "<<db1[b][gemmIdx]<<std::endl;
-                hipblaslt_cout<<"Device Pointer value of dc1["<<b<<"]["<<gemmIdx<<"] is : "<<dc1[b][gemmIdx]<<std::endl;
-                hipblaslt_cout<<"Device Pointer value of dd1["<<b<<"]["<<gemmIdx<<"] is : "<<dd1[b][gemmIdx]<<std::endl;   
-            }
-        }
-    }
 
-    if(batchMode == 0)
-    {
-        hipblaslt_cout<<"Pointer dA is >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>"<<std::hex<<dA[0].buf()<<std::endl;
-        hipblaslt_cout<<"Pointer dB is >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>"<<std::hex<<dB[0].buf()<<std::endl;
-        hipblaslt_cout<<"Pointer dC is >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>"<<std::hex<<dC[0].buf()<<std::endl;
-        hipblaslt_cout<<"Pointer dD is >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>"<<std::hex<<(*dDp)[0].buf()<<std::endl;
-    } */
     hipblaslt_ext::GemmType gemmType = do_grouped_gemm
                                            ? hipblaslt_ext::GemmType::HIPBLASLT_GROUPED_GEMM
                                            : hipblaslt_ext::GemmType::HIPBLASLT_GEMM;
@@ -3780,7 +3760,7 @@ void testing_matmul_with_bias(const Arguments& arg,
 
             if(!do_grouped_gemm)
             {
-                if(arg.use_ext && batchMode != 1)
+                if(arg.use_ext && batchMode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
                 {
                     if(arg.use_ext_setproblem)
                     {
@@ -3973,7 +3953,7 @@ void testing_matmul_with_bias(const Arguments& arg,
         int requestCount = 0;
         if(!do_grouped_gemm)
         {
-            if(arg.use_ext && batchMode != 1)
+            if(arg.use_ext && batchMode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
             {
                 if(arg.use_ext_setproblem)
                 {
@@ -4155,7 +4135,7 @@ void testing_matmul_with_bias(const Arguments& arg,
 
         if(!do_grouped_gemm)
         {
-            if(arg.use_ext && batchMode != 1)
+            if(arg.use_ext && batchMode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
             {
                 if(arg.use_ext_setproblem)
                 {
@@ -4592,7 +4572,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                         }
                     }
                 }
-                else if(batchMode == 1) //For General Batch GEMM
+                else if(batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY) //For General Batch GEMM
                 {
                     // Note: for MX types, pass the reference float instead so there is
                     //       no need to convert them to float in cblas_gemm
@@ -4683,7 +4663,7 @@ void testing_matmul_with_bias(const Arguments& arg,
         {
             if((arg.unit_check || arg.norm_check || arg.allclose_check) && arg.c_equal_d)
             {
-                if(batchMode == 1) // Iterate for batch_count for General Batched GEMM
+                if(batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY) // Iterate for batch_count for General Batched GEMM
                 {
                     for(int i = 0; i < arg.batch_count; i++)
                     {
@@ -4700,7 +4680,7 @@ void testing_matmul_with_bias(const Arguments& arg,
             }
             if(!do_grouped_gemm)
             {
-                if(arg.use_ext && batchMode != 1)
+                if(arg.use_ext && batchMode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
                 {
                     gemmVec[0].setMaxWorkspaceBytes(workspace_size);
                     CHECK_HIPBLASLT_ERROR(
@@ -4709,7 +4689,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                                               *dWorkspace));
                     CHECK_HIPBLASLT_ERROR(gemmVec[0].run(stream));
                 }
-                else if(batchMode == 1) //For General Batch GEMM
+                else if(batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY) //For General Batch GEMM
                 {
                     CHECK_HIP_ERROR(hipStreamSynchronize(stream));
                     EXPECT_HIPBLAS_STATUS(hipblasLtMatmul(handle,
@@ -4810,7 +4790,7 @@ void testing_matmul_with_bias(const Arguments& arg,
 
             if(arg.unit_check || arg.norm_check || arg.allclose_check)
             {
-                if(batchMode == 1) //For General Batch GEMM
+                if(batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY) //For General Batch GEMM
                 {
                     copy_gemm_to_host(stream, arg.batch_count, hD_1, (*dDp));
                 }
@@ -4908,7 +4888,7 @@ void testing_matmul_with_bias(const Arguments& arg,
         {
             if((arg.unit_check || arg.norm_check || arg.allclose_check) && arg.c_equal_d)
             {
-                if(batchMode == 1) //For General Batch GEMM
+                if(batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY) //For General Batch GEMM
                 {
                     for(int i = 0; i < arg.batch_count; i++)
                     {
@@ -4926,7 +4906,7 @@ void testing_matmul_with_bias(const Arguments& arg,
             if(!do_grouped_gemm)
             {
                 auto perf_monitor = EfficiencyMonitor::create();
-                if(arg.use_ext && batchMode != 1)
+                if(arg.use_ext && batchMode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
                 {
                     for(int32_t b = 0; b < block_count; b++)
                     {
@@ -4975,7 +4955,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                             hipLaunchKernelGGL(flush_icache, dim3(gpu_block3), dim3(64), 0, stream);
                     }
                 }
-                else if(batchMode == 1) //For General Batch GEMM
+                else if(batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY) //For General Batch GEMM
                 {
                     if(arg.skip_slow_solution_ratio)
                         pre_gpu_time(
@@ -5415,7 +5395,7 @@ void testing_matmul_with_bias(const Arguments& arg,
             {
                 if(arg.print_kernel_info)
                 {
-                    if(arg.use_ext && batchMode != 1)
+                    if(arg.use_ext && batchMode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
                     {
                         if(!do_grouped_gemm)
                         {

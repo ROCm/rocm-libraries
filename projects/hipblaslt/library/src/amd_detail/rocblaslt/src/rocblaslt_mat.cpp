@@ -113,7 +113,7 @@ rocblaslt_status rocblaslt_matmul_impl(const rocblaslt_handle       handle,
     hipblasOperation_t opA           = matmul_descr->op_A;
     hipblasOperation_t opB           = matmul_descr->op_B;
     int                num_batches_a = matA->batch_count;
-    int                batch_mode    = matA->batch_mode;    
+    hipblasLtBatchMode_t batch_mode  = matA->batch_mode;    
     rocblaslt_epilogue epilogue      = matmul_descr->epilogue;
     void*              scaleA        = matmul_descr->scaleA;
     void*              scaleB        = matmul_descr->scaleB;
@@ -296,7 +296,7 @@ rocblaslt_status rocblaslt_gemm_create_cpp_impl(const rocblaslt_handle          
     hipblasOperation_t opA           = matmul_descr->op_A;
     hipblasOperation_t opB           = matmul_descr->op_B;
     int                num_batches_a = matA->batch_count;
-    int                batch_mode    = matA->batch_mode;    
+    hipblasLtBatchMode_t batch_mode  = matA->batch_mode;    
     rocblaslt_epilogue epilogue      = matmul_descr->epilogue;
     void*              scaleA        = matmul_descr->scaleA;
     void*              scaleB        = matmul_descr->scaleB;
@@ -671,7 +671,8 @@ rocblaslt_status
                                         0,
                                         (char*)handle->Synchronizer + (409600 * i * sizeof(int)),
                                         swizzleA,
-                                        swizzleB});
+                                        swizzleB,
+                                        hipblasLtBatchMode_t::HIPBLASLT_BATCH_MODE_STRIDED});
     }
     return groupedGemmCreate(problems, gemmData, gemmCount);
 }
@@ -999,7 +1000,8 @@ rocblaslt_status rocblaslt_gemm_create_cpp_impl_2(const rocblaslt_handle handle,
         0,
         handle->Synchronizer,
         swizzleA,
-        swizzleB};
+        swizzleB,
+        HIPBLASLT_BATCH_MODE_STRIDED};
     return gemmCreate(problem, gemmData, gemmCount);
 }
 
@@ -1318,7 +1320,8 @@ rocblaslt_status rocblaslt_groupedgemm_create_cpp_impl_2(const rocblaslt_handle 
                                         0,
                                         (char*)handle->Synchronizer + (409600 * i * sizeof(int)),
                                         swizzleA,
-                                        swizzleB});
+                                        swizzleB,
+                                        hipblasLtBatchMode_t::HIPBLASLT_BATCH_MODE_STRIDED});
     }
     return groupedGemmCreate(problems, gemmData, gemmCount);
 }

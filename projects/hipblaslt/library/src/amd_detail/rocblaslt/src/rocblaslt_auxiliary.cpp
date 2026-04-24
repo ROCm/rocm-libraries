@@ -337,7 +337,7 @@ RocblasltContractionProblem construct_rocblaslt_problem(rocblaslt_handle        
     bool                   gradient = false;
     bool swizzleA = matA->order != HIPBLASLT_ORDER_COL && matA->order != HIPBLASLT_ORDER_ROW;
     bool swizzleB = matB->order != HIPBLASLT_ORDER_COL && matB->order != HIPBLASLT_ORDER_ROW;
-    int32_t batchMode = matA->batch_mode;
+    hipblasLtBatchMode_t batchMode = matA->batch_mode;
     rocblaslt_status isValid = rocblaslt_matmul_valid_args(matmul_descr,
                                                            dummy_ptr,
                                                            dummy_ptr,
@@ -381,7 +381,7 @@ RocblasltContractionProblem construct_rocblaslt_problem(rocblaslt_handle        
         n = 0;
         k = 0;
     }
-    if(batchMode == 1 && isValid == rocblaslt_status_continue)
+    if(batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY && isValid == rocblaslt_status_continue)
     {
         // Additional constraints for General Batched GEMM Support
         isValid = validateMatmulArgsForGeneralBatchedGemm(
@@ -465,7 +465,8 @@ RocblasltContractionProblem construct_rocblaslt_problem(rocblaslt_handle        
                                         nullptr,
                                         handle->Synchronizer,
                                         swizzleA,
-                                        swizzleB};
+                                        swizzleB,
+                                        batchMode};
 
     if(scaleAlphaVec)
     {
