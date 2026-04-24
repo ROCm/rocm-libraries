@@ -1169,12 +1169,6 @@ struct GroupedConvolutionBackwardWeightKernel
                 amd_wave_read_first_lane(c_macro_tile_idx[I1] * TilePartitioner::NPerBlock);
             const index_t i_g = amd_wave_read_first_lane(c_macro_tile_idx[I0] % kargs.GemmBatch);
 
-            // Offset workspace per group so groups don't interfere.
-            // Safe to mutate kargs: on GPU each workgroup operates on its own
-            // register-local copy of the kernel arguments.
-            kargs.workspace_ptr = static_cast<char*>(kargs.workspace_ptr) +
-                                  i_g * kargs.c_grid_desc_m_n.get_element_space_size();
-
             // K offset = local_iter_start * KPerBlock
             const index_t i_k =
                 amd_wave_read_first_lane(local_iter_start * TilePartitioner::KPerBlock);
