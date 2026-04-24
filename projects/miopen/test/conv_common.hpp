@@ -283,7 +283,7 @@ protected:
                     handle, problem, options.get(), solutions.data(), &found, solutions.size()));
         }
 
-        EXPECT_OP(found, >=, 0);
+        EXPECT_OP(found, >=, 0ULL);
 
         solutions.resize(found);
 
@@ -1934,9 +1934,9 @@ struct conv_driver : test_driver
 
     int get_spatial_dim() const
     {
-        for(int i = 2; i < 4; i++)
+        for(auto i = 2ULL; i < 4ULL; i++)
         {
-            if(input_dims.size() == i + 2 and weight_tensor_dims.size() == i + 2 and
+            if(input_dims.size() == i + 2ULL and weight_tensor_dims.size() == i + 2ULL and
                pads_strides_dilations.size() == i * 3ULL and trans_output_pads.size() == i)
                 return i;
         }

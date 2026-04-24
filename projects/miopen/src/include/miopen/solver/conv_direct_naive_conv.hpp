@@ -87,7 +87,7 @@ int GetGroupStrideIndex(const miopen::conv::ProblemDescription& problem);
 template <typename V>
 V SplitStrideCtoGC(int num_groups, const V& orig_strides, int G_stride_idx)
 {
-    assert(G_stride_idx > 0 && G_stride_idx <= orig_strides.size());
+    assert(G_stride_idx > 0 && static_cast<size_t>(G_stride_idx) <= orig_strides.size());
     // (G_stride_idx - 1) is the stride index of whatever lies to the left and
     // contains C or K as a multiplying factor. We divide this value by num_groups
     // to get G_stride_val

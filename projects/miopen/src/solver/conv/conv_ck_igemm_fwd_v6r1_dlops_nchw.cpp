@@ -57,7 +57,7 @@ auto get_ck_tunable_conv_igemm_fwd_v6r1_dlops_nchw_kcyx_nkhw(
 
 bool PerformanceConvCkIgemmFwdV6r1DlopsNchw::SetNextValue(const ProblemDescription&)
 {
-    if(ck_tunable_list_id <
+    if(static_cast<size_t>(ck_tunable_list_id) <
        ck::driver::ConvIgemmFwdV6r1DlopsNchwKcyxNkhw::GetTunableList().size() - 1)
     {
         ck_tunable_list_id++;
@@ -133,7 +133,9 @@ PerformanceConvCkIgemmFwdV6r1DlopsNchw
 ConvCkIgemmFwdV6r1DlopsNchw::GetDefaultPerformanceConfig(const ExecutionContext& ctx,
                                                          const ProblemDescription& problem) const
 {
-    for(int i = 0; i < ck::driver::ConvIgemmFwdV6r1DlopsNchwKcyxNkhw::GetTunableList().size(); ++i)
+    for(int i = 0; static_cast<size_t>(i) <
+                   ck::driver::ConvIgemmFwdV6r1DlopsNchwKcyxNkhw::GetTunableList().size();
+        ++i)
     {
         if(IsValidPerformanceConfig(ctx, problem, i))
         {

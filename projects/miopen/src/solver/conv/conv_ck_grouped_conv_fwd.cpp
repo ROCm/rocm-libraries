@@ -51,7 +51,7 @@ bool PerformanceConfigConvDepthwiseFwd2D::SetNextValue(const ProblemDescription&
         HeuristicInit({}, problem);
         return true;
     }
-    if(index + 1 < valid_kernels.size())
+    if(static_cast<size_t>(index + 1) < valid_kernels.size())
     {
         index++;
         kernel_id = valid_kernels[index];
@@ -65,7 +65,7 @@ bool PerformanceConfigConvDepthwiseFwd2D::SetNextValue(const ProblemDescription&
 
 bool PerformanceConfigConvDepthwiseFwd2D::IsValidValue() const
 {
-    return index < valid_kernels.size();
+    return static_cast<size_t>(index) < valid_kernels.size();
 }
 
 bool PerformanceConfigConvDepthwiseFwd2D::IsValid(
@@ -115,8 +115,8 @@ bool ConvDepthwiseFwd2D::IsApplicable(const ExecutionContext& ctx,
         return false;
 
     // Only depthwise convolution is supported
-    if((problem.GetGroupCount() != problem.GetOutChannels()) ||
-       (problem.GetGroupCount() != problem.GetInChannels()))
+    if((static_cast<size_t>(problem.GetGroupCount()) != problem.GetOutChannels()) ||
+       (static_cast<size_t>(problem.GetGroupCount()) != problem.GetInChannels()))
         return false;
 
     const std::string arch = ctx.GetStream().GetDeviceName();

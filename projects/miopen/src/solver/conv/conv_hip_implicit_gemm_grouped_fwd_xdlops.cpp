@@ -73,7 +73,7 @@ constexpr SolverHeuristicConfig k2DFwdSolverConfig = {
 void PerformanceConfigHipImplicitGemmGroupFwdXdlops::InitHeuristicKernelIDsKTN(
     const std::string& type)
 {
-    for(int i = 0; i < valid_kernels.size(); i++)
+    for(auto i = 0ULL; i < valid_kernels.size(); i++)
     {
         if(valid_kernels[i].find(type) != std::string::npos)
         {
@@ -393,7 +393,7 @@ bool PerformanceConfigHipImplicitGemmGroupFwdXdlops::SetNextValue(const ProblemD
         assert(!valid_kernels.empty());
         return true;
     }
-    if((index + 1) < valid_kernels.size())
+    if(static_cast<size_t>(index + 1) < valid_kernels.size())
     {
         ++index;
         kernel_id = valid_kernels[index];
@@ -405,7 +405,7 @@ bool PerformanceConfigHipImplicitGemmGroupFwdXdlops::SetNextValue(const ProblemD
 
 bool PerformanceConfigHipImplicitGemmGroupFwdXdlops::IsValidValue() const
 {
-    return index < valid_kernels.size();
+    return static_cast<size_t>(index) < valid_kernels.size();
 }
 
 bool PerformanceConfigHipImplicitGemmGroupFwdXdlops::IsValid(

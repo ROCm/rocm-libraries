@@ -275,7 +275,7 @@ bool PerformanceConfigHipImplicitGemm3DGroupWrwXdlops::SetNextValue(
 
 bool PerformanceConfigHipImplicitGemm3DGroupWrwXdlops::IsValidValue() const
 {
-    return index < valid_kernels.size();
+    return static_cast<size_t>(index) < valid_kernels.size();
 }
 
 bool PerformanceConfigHipImplicitGemm3DGroupWrwXdlops::IsValid(

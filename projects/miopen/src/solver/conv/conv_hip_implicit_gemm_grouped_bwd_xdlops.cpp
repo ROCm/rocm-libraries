@@ -73,7 +73,7 @@ constexpr SolverHeuristicConfig k2DBwdSolverConfig = {
 #if MIOPEN_ENABLE_AI_KERNEL_TUNING
 void PerformanceConfigHipImplicitGemmGroupBwdXdlops::InitHeuristicKernelIDsKTN()
 {
-    for(int i = 0; i < valid_kernels.size(); i++)
+    for(auto i = 0ULL; i < valid_kernels.size(); i++)
     {
         if(valid_kernels[i].find("DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1") !=
            std::string::npos)
@@ -420,7 +420,7 @@ bool PerformanceConfigHipImplicitGemmGroupBwdXdlops::SetNextValue(const ProblemD
 
 bool PerformanceConfigHipImplicitGemmGroupBwdXdlops::IsValidValue() const
 {
-    return index < valid_kernels.size();
+    return static_cast<size_t>(index) < valid_kernels.size();
 }
 
 bool PerformanceConfigHipImplicitGemmGroupBwdXdlops::IsValid(

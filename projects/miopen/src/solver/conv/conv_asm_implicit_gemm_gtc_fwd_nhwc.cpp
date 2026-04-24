@@ -655,7 +655,7 @@ bool PerformanceConfigAsmImplicitGemmGTCFwdXdlopsNHWC::SetNextValue(const Proble
             {
                 index++;
             }
-            if(index >= config_list.size())
+            if(static_cast<size_t>(index) >= config_list.size())
                 return false;
             CopyParameters(config_list[index]);
         }
@@ -673,7 +673,7 @@ bool PerformanceConfigAsmImplicitGemmGTCFwdXdlopsNHWC::IsValidValue() const
     if(IsDefaultConstructed())
         return true;
     const auto& config_list = GetFwdXdlopsNHWCConfigList();
-    if(index < config_list.size() && *this == config_list[index])
+    if(static_cast<size_t>(index) < config_list.size() && *this == config_list[index])
         return true;
     return miopen::any_of(config_list, [&](auto v) { return (*this == v); });
 }

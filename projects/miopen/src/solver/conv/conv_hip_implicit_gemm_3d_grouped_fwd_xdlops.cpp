@@ -418,7 +418,7 @@ bool PerformanceConfigHipImplicitGemm3DGroupFwdXdlops::SetNextValue(
         assert(!valid_kernels.empty());
         return true;
     }
-    if((index + 1) < valid_kernels.size())
+    if(static_cast<size_t>(index + 1) < valid_kernels.size())
     {
         ++index;
         kernel_id = valid_kernels[index];
@@ -430,7 +430,7 @@ bool PerformanceConfigHipImplicitGemm3DGroupFwdXdlops::SetNextValue(
 
 bool PerformanceConfigHipImplicitGemm3DGroupFwdXdlops::IsValidValue() const
 {
-    return index < valid_kernels.size();
+    return static_cast<size_t>(index) < valid_kernels.size();
 }
 
 bool PerformanceConfigHipImplicitGemm3DGroupFwdXdlops::IsValid(

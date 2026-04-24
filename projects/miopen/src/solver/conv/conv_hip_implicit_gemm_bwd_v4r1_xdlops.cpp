@@ -941,7 +941,8 @@ ConvSolution ConvHipImplicitGemmBwdDataV4R1Xdlops::GetSolution(
     }
 
     // a series of kernels
-    for(std::size_t gemm_id = 0; gemm_id < CalculateNumberOfGemm(problem); ++gemm_id)
+    for(std::size_t gemm_id = 0; gemm_id < static_cast<size_t>(CalculateNumberOfGemm(problem));
+        ++gemm_id)
     {
         KernelInfo construction_parameters;
 

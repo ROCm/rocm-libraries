@@ -71,7 +71,7 @@ bool PerformanceConfigConvCKIgemmGrpFwdBiasActivFused::SetNextValue(
             return false;
         return true;
     }
-    if((index + 1) < valid_kernels.size())
+    if(static_cast<size_t>(index + 1) < valid_kernels.size())
     {
         ++index;
         kernel_id = valid_kernels[index];
@@ -83,7 +83,7 @@ bool PerformanceConfigConvCKIgemmGrpFwdBiasActivFused::SetNextValue(
 
 bool PerformanceConfigConvCKIgemmGrpFwdBiasActivFused::IsValidValue() const
 {
-    return index < valid_kernels.size();
+    return static_cast<size_t>(index) < valid_kernels.size();
 }
 
 bool PerformanceConfigConvCKIgemmGrpFwdBiasActivFused::IsValid(

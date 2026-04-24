@@ -402,7 +402,7 @@ static inline int find_tunable(const std::vector<TunableImplicitGemmGTCDynamic_t
                                const miopenDataType_t precision)
 {
     int i;
-    for(i = 0; i < tunables.size(); i++)
+    for(i = 0; static_cast<size_t>(i) < tunables.size(); i++)
     {
         if((tunables[i].gemm_m_per_block == gemm_m_per_block) &&
            (tunables[i].gemm_n_per_block == gemm_n_per_block) &&
@@ -654,7 +654,8 @@ FindImplicitGemmWrwGTCDynamicXdlopsKernel(const ProblemDescription& problem)
                                                                  nxb,
                                                                  nxe,
                                                                  precision);
-                                if(tunable_index < 0 || tunable_index >= tunables.size())
+                                if(tunable_index < 0 ||
+                                   static_cast<size_t>(tunable_index) >= tunables.size())
                                     continue;
 
                                 int log2_gemm_k_global_splits = 0;
@@ -709,12 +710,12 @@ FindImplicitGemmWrwGTCDynamicXdlopsKernel(const ProblemDescription& problem)
                 break;
         }
     }
-    bool is_valid = !(sel_index < 0 || sel_index >= tunables.size());
+    bool is_valid = !(sel_index < 0 || static_cast<size_t>(sel_index) >= tunables.size());
 
     // gemm_m and gemm_n padding cases
     if(!is_valid)
     {
-        for(int cfg_index = 0; cfg_index < tunables.size(); cfg_index++)
+        for(int cfg_index = 0; static_cast<size_t>(cfg_index) < tunables.size(); cfg_index++)
         {
             const auto& cfg = tunables[cfg_index];
             // fp32 cases do not have padding function
