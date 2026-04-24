@@ -80,8 +80,7 @@ public:
 
     void execute(const std::unordered_map<int64_t, void*>& variantPack) override
     {
-        if(_params.reluLowerClip.has_value()
-           || _params.reluUpperClip.has_value()
+        if(_params.reluLowerClip.has_value() || _params.reluUpperClip.has_value()
            || _params.reluLowerClipSlope.has_value() || _params.swishBeta.has_value())
         {
             executeParameterized(variantPack);

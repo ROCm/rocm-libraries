@@ -134,8 +134,7 @@ public:
         input0.fillTensorWithValue(params.in0TensorValue);
         Tensor<InputType> output(params.outputDims);
 
-        if(params.reluLowerClip.has_value()
-           || params.reluUpperClip.has_value()
+        if(params.reluLowerClip.has_value() || params.reluUpperClip.has_value()
            || params.reluLowerClipSlope.has_value())
         {
             CpuReferencePointwiseImpl<InputType, InputType, InputType>::pointwiseCompute(
@@ -167,8 +166,7 @@ public:
 
         Tensor<InputType> output(params.outputDims);
 
-        if(params.reluLowerClip.has_value()
-           || params.reluUpperClip.has_value()
+        if(params.reluLowerClip.has_value() || params.reluUpperClip.has_value()
            || params.reluLowerClipSlope.has_value())
         {
             CpuReferencePointwiseImpl<InputType, InputType, InputType>::pointwiseCompute(
