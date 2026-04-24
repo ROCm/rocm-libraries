@@ -31,6 +31,7 @@
 #include <string>
 #include <vector>
 
+#include "stinkytofu/analysis/AnalysisRegistration.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/serialization/asm/IRConverter.hpp"
@@ -59,7 +60,7 @@ class DeserializeStinkytofuIRPass : public StinkyInstPass {
         return &DeserializeStinkytofuIRPass::ID;
     }
 
-    void run(Function& func, PassContext& passCtx) override {
+    PreservedAnalyses run(Function& func, PassContext& passCtx, AnalysisManager& /*AM*/) override {
         GfxArchID arch =
             getGfxArchID(passCtx.getGemmTileConfig().arch[0], passCtx.getGemmTileConfig().arch[1],
                          passCtx.getGemmTileConfig().arch[2]);
@@ -76,7 +77,9 @@ class DeserializeStinkytofuIRPass : public StinkyInstPass {
                 std::cerr << "Error: Failed to populate IRList from string. Error code: "
                           << static_cast<int>(result) << "\n";
             }
+            return PreservedAnalyses::none();
         }
+        return PreservedAnalyses::none();
     }
 
    private:
@@ -316,6 +319,7 @@ int main(int argc, char** argv) {
     // Process each function independently
     for (auto& parsedFunc : parsed.functions) {
         stinkytofu::PassManager passManager;
+        stinkytofu::registerAllAnalyses(passManager.getAnalysisManager());
 
         passManager.addInstrumentation(createDebugPrintInstrumentation());
         if (!passFeatureConfig.passOrderSnapshot.jsonPath.empty()) {
