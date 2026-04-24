@@ -36,6 +36,10 @@
 
 #include "../../common/utils_device_ptr.hpp"
 
+// including Windows.h from test_utils_memory_check.hpp includes
+// macro definitions max and min which conflict with rocPRIM code.
+#define NOMINMAX
+
 // required test headers
 #include "test_seed.hpp"
 #include "test_utils.hpp"
@@ -46,6 +50,7 @@
 #include "test_utils_hipgraphs.hpp"
 #include "test_utils_sort_checker.hpp"
 #include "test_utils_sort_comparator.hpp"
+#include "test_utils_memory_check.hpp"
 
 #include <algorithm>
 #include <cstddef>
@@ -1297,10 +1302,25 @@ inline void sort_keys_large_sizes()
 #else
     const size_t max_pow2 = 35;
 #endif
+    rocprim::detail::target_arch arch;
+    HIP_CHECK(rocprim::detail::host_target_arch(stream, arch));
+
     const std::vector<size_t> sizes = test_utils::get_large_sizes<max_pow2>(seeds[0]);
     for(const size_t size : sizes)
     {
         SCOPED_TRACE(testing::Message() << "with size = " << size);
+
+        // QA is also testing on APU platforms with only 32GB of system memory
+        // shared amongst the host and device.  Trim maximum size under these
+        // conditions.  This is a temporary coding workaround until we come up
+        // with a properly-engineered memory management system for the unit tests.
+        bool is_apu = test_utils::is_apu(arch);
+        if (is_apu && test_utils::get_total_system_memory(true) <= test_utils::minimum_memory_required_bytes
+            && size >= (size_t{1} << 33))
+        {
+            std::cout << "Insufficient APU sytstem memory. Skipping test for size = " << size << std::endl;
+            break;
+        }
 
         common::device_ptr<key_type> d_keys;
         if(!d_keys.resize_with_memory_check(size))
