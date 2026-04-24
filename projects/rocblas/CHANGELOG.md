@@ -7,7 +7,7 @@ rocBLAS documentation is available at
 
 ### Added
 
-* gfx1250, gfx90c enabled.
+* gfx1250 and gfx90c enabled.
 * Trace logging `ROCBLAS_LAYER=1` for `rocblas_gemm_ex_get_solutions`, `rocblas_gemm_batched_ex_get_solutions`, `rocblas_gemm_ex_get_solutions_by_type`, and `rocblas_gemm_batched_ex_get_solutions_by_type`.
 * Version and other properties to Windows `rocblas.dll`.
 * Support for `OpenBLAS` ILP64 API for host reference in clients.
