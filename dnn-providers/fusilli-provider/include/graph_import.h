@@ -30,8 +30,10 @@
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 
 #include <format>
+#include <functional>
 #include <memory>
 #include <optional>
+#include <string_view>
 #include <unordered_map>
 
 #include "hipdnn_engine_plugin_execution_context.h"
@@ -145,8 +147,16 @@ private:
   // Helper class for reading from flatbuffer.
   hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper opGraphWrapper;
 
+  // Deterministic hash of the serialized graph FlatBuffer bytes. Mixed into
+  // the fusilli graph name (see importGraph below) so that structurally
+  // distinct graphs sharing a user-supplied name still land in unique
+  // compile-cache directories.
+  size_t graphBytesHash;
+
   GraphImport(const hipdnnPluginConstData_t *opGraph)
-      : opGraphWrapper(opGraph->ptr, opGraph->size) {}
+      : opGraphWrapper(opGraph->ptr, opGraph->size),
+        graphBytesHash(std::hash<std::string_view>{}(std::string_view(
+            static_cast<const char *>(opGraph->ptr), opGraph->size))) {}
 
   fusilli::ErrorObject importGraph() {
     const hipdnn_flatbuffers_sdk::data_objects::Graph &hipDnnGraph =
@@ -164,7 +174,15 @@ private:
     FUSILLI_ASSIGN_OR_RETURN(
         computeDataType,
         hipDnnDataTypeToFusilliDataType(hipDnnGraph.compute_data_type()));
-    fusilliGraph.setName(hipDnnGraph.name()->str())
+    // Always incorporate the FlatBuffer hash so two structurally-distinct
+    // graphs sharing a user-supplied name don't collide on the compile-cache
+    // directory.
+    std::string graphName =
+        hipDnnGraph.name()
+            ? std::format("{}_{:016x}", hipDnnGraph.name()->str(),
+                          graphBytesHash)
+            : std::format("hipdnn_{:016x}", graphBytesHash);
+    fusilliGraph.setName(graphName)
         .setIODataType(ioDataType)
         .setIntermediateDataType(intermediateDataType)
         .setComputeDataType(computeDataType);

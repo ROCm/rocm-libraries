@@ -9,10 +9,16 @@
 
 #include <fusilli.h>
 #include <gtest/gtest.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/convolution_fwd_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_frontend/Graph.hpp>
 #include <hipdnn_frontend/attributes/CustomOpAttributes.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
+
+#include <optional>
+#include <string>
+#include <vector>
 
 TEST(TestGraphImport, ConvertHipDnnToFusilli) {
   FUSILLI_PLUGIN_EXPECT_OR_ASSIGN(
@@ -183,4 +189,103 @@ TEST(TestGraphImport, RejectCustomOpWithoutFusilliPrefix) {
 
   auto result = importGraph(&opGraph);
   EXPECT_TRUE(isError(result));
+}
+
+// Build a minimal valid ConvFProp graph FlatBuffer directly via the
+// hipdnn_flatbuffers_sdk builders. Needed (rather than the hipdnn_frontend
+// wrapper) so the graph-name field can be explicitly null — that path
+// exercises the hash-only fallback branch of importGraph().
+//   name:  nullopt leaves the FlatBuffer name field unset (null pointer on
+//          the reader side); a string sets it.
+//   xDim:  lets callers vary graph structure so the FlatBuffer hash changes
+//          between two otherwise-identical graphs.
+static flatbuffers::FlatBufferBuilder
+buildMinimalConvGraph(std::optional<std::string> name = std::nullopt,
+                      const std::vector<int64_t> &xDim = {1, 1, 2, 2}) {
+  namespace sdk = hipdnn_flatbuffers_sdk::data_objects;
+
+  flatbuffers::FlatBufferBuilder builder;
+
+  std::vector<int64_t> xStride(xDim.size(), 1);
+  for (int i = static_cast<int>(xDim.size()) - 2; i >= 0; --i)
+    xStride[i] = xStride[i + 1] * xDim[i + 1];
+
+  std::vector<int64_t> wDim(xDim.size(), 1);
+  std::vector<int64_t> wStride(xDim.size(), 1);
+  std::vector<int64_t> yDim = xDim;
+  std::vector<int64_t> yStride = xStride;
+
+  std::vector<flatbuffers::Offset<sdk::TensorAttributes>> tensors;
+  tensors.push_back(sdk::CreateTensorAttributesDirect(
+      builder, /*uid=*/1, "x", sdk::DataType::FLOAT, &xStride, &xDim));
+  tensors.push_back(sdk::CreateTensorAttributesDirect(
+      builder, /*uid=*/2, "w", sdk::DataType::FLOAT, &wStride, &wDim));
+  tensors.push_back(sdk::CreateTensorAttributesDirect(
+      builder, /*uid=*/3, "y", sdk::DataType::FLOAT, &yStride, &yDim));
+
+  std::vector<int64_t> padding = {0, 0};
+  std::vector<int64_t> stride = {1, 1};
+  std::vector<int64_t> dilation = {1, 1};
+  auto convAttr = sdk::CreateConvolutionFwdAttributesDirect(
+      builder, /*x_uid=*/1, /*w_uid=*/2, /*y_uid=*/3, &padding, &padding,
+      &stride, &dilation, sdk::ConvMode::CROSS_CORRELATION);
+
+  std::vector<flatbuffers::Offset<sdk::Node>> nodes;
+  nodes.push_back(sdk::CreateNodeDirect(
+      builder, "conv", sdk::DataType::FLOAT,
+      sdk::NodeAttributes::ConvolutionFwdAttributes, convAttr.Union()));
+
+  auto graph = sdk::CreateGraphDirect(
+      builder, name.has_value() ? name->c_str() : nullptr, sdk::DataType::FLOAT,
+      sdk::DataType::FLOAT, sdk::DataType::FLOAT, &tensors, &nodes);
+  builder.Finish(graph);
+  return builder;
+}
+
+TEST(TestGraphImport, UnnamedGraphGetsHashBasedName) {
+  auto builder = buildMinimalConvGraph(/*name=*/std::nullopt);
+
+  hipdnnPluginConstData_t opGraph;
+  opGraph.ptr = builder.GetBufferPointer();
+  opGraph.size = builder.GetSize();
+
+  FUSILLI_PLUGIN_EXPECT_OR_ASSIGN(auto ctx, importGraph(&opGraph));
+  const std::string &name = ctx.graph.getName();
+  EXPECT_TRUE(name.starts_with("hipdnn_"));
+  EXPECT_EQ(name.size(), 7u + 16u); // "hipdnn_" + 16 hex digits
+}
+
+TEST(TestGraphImport, NamedGraphAppendsHash) {
+  auto builder = buildMinimalConvGraph(/*name=*/std::string("my_graph"));
+
+  hipdnnPluginConstData_t opGraph;
+  opGraph.ptr = builder.GetBufferPointer();
+  opGraph.size = builder.GetSize();
+
+  FUSILLI_PLUGIN_EXPECT_OR_ASSIGN(auto ctx, importGraph(&opGraph));
+  const std::string &name = ctx.graph.getName();
+  EXPECT_TRUE(name.starts_with("my_graph_"));
+  EXPECT_EQ(name.size(), 9u + 16u); // "my_graph_" + 16 hex digits
+}
+
+TEST(TestGraphImport, DuplicateNamesWithDifferentStructuresGetDifferentKeys) {
+  // Two graphs sharing a user-supplied name but differing in input shape must
+  // produce distinct fusilli graph names — this is the regression guard for
+  // the parallel-test cache-dir race.
+  auto builderA =
+      buildMinimalConvGraph(std::string("shared"), /*xDim=*/{1, 1, 2, 2});
+  auto builderB =
+      buildMinimalConvGraph(std::string("shared"), /*xDim=*/{1, 1, 4, 4});
+
+  hipdnnPluginConstData_t opGraphA = {builderA.GetBufferPointer(),
+                                      builderA.GetSize()};
+  hipdnnPluginConstData_t opGraphB = {builderB.GetBufferPointer(),
+                                      builderB.GetSize()};
+
+  FUSILLI_PLUGIN_EXPECT_OR_ASSIGN(auto ctxA, importGraph(&opGraphA));
+  FUSILLI_PLUGIN_EXPECT_OR_ASSIGN(auto ctxB, importGraph(&opGraphB));
+
+  EXPECT_TRUE(ctxA.graph.getName().starts_with("shared_"));
+  EXPECT_TRUE(ctxB.graph.getName().starts_with("shared_"));
+  EXPECT_NE(ctxA.graph.getName(), ctxB.graph.getName());
 }
