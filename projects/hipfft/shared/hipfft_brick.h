@@ -62,14 +62,18 @@ struct hipfft_brick
             field_idx.push_back(brick_idx[i] + field_lower[i]);
 
         // Based on the field's strides, return offset
-        return std::inner_product(field_idx.begin(), field_idx.end(), field_stride.begin(), 0);
+        return std::inner_product(
+            field_idx.begin(), field_idx.end(), field_stride.begin(),
+            static_cast<std::remove_reference_t<decltype(field_idx)>::value_type>(0));
     }
 
     // Given abrick index, return the offset in this brick
     size_t brick_offset(const std::vector<size_t>& brick_idx) const
     {
         // Based on the brick's strides, return offset
-        return std::inner_product(brick_idx.begin(), brick_idx.end(), brick_stride.begin(), 0);
+        return std::inner_product(
+            brick_idx.begin(), brick_idx.end(), brick_stride.begin(),
+            static_cast<std::remove_reference_t<decltype(brick_idx)>::value_type>(0));
     }
 };
 
