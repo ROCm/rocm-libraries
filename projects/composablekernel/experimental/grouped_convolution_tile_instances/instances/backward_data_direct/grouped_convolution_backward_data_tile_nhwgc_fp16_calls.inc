@@ -5,13 +5,6 @@ run_alg(run_direct_conv<direct_conv::DirectHipConvBwdData4CFp16Kernel<2>, SIGNAT
 run_alg(run_direct_conv<direct_conv::DirectHipConvBwdData4CFp16Kernel<3>, SIGNATURE>);
 run_alg(run_direct_conv<direct_conv::DirectHipConvBwdData4CFp16Kernel<4>, SIGNATURE>);
 
-// Direct CK Tile convolution (streaming) kernels — configs 0-4 are Dgrad
-run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData4CFp16Kernel<0>, SIGNATURE>);
-run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData4CFp16Kernel<1>, SIGNATURE>);
-run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData4CFp16Kernel<2>, SIGNATURE>);
-run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData4CFp16Kernel<3>, SIGNATURE>);
-run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData4CFp16Kernel<4>, SIGNATURE>);
-
 /////////////////////////////////////////////////////////////////////////////
 // Direct CK Tile convolution (streaming) kernels — Dgrad v3 configs
 /////////////////////////////////////////////////////////////////////////////
@@ -54,19 +47,6 @@ run_alg(run_direct_conv<direct_conv::DirectHipConvBwdData16CFp16Kernel<5>, SIGNA
 run_alg(run_direct_conv<direct_conv::DirectHipConvBwdData16CFp16Kernel<6>, SIGNATURE>);
 run_alg(run_direct_conv<direct_conv::DirectHipConvBwdData16CFp16Kernel<7>, SIGNATURE>);
 run_alg(run_direct_conv<direct_conv::DirectHipConvBwdData16CFp16Kernel<8>, SIGNATURE>);
-
-////////////////////////////////////////////////////////////////////////
-// Direct CK Tile convolution (streaming) 16c kernels — Dgrad configs 0-8
-////////////////////////////////////////////////////////////////////////
-run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData16CFp16Kernel<0>, SIGNATURE>);
-run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData16CFp16Kernel<1>, SIGNATURE>);
-run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData16CFp16Kernel<2>, SIGNATURE>);
-run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData16CFp16Kernel<3>, SIGNATURE>);
-run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData16CFp16Kernel<4>, SIGNATURE>);
-run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData16CFp16Kernel<5>, SIGNATURE>);
-run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData16CFp16Kernel<6>, SIGNATURE>);
-run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData16CFp16Kernel<7>, SIGNATURE>);
-run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData16CFp16Kernel<8>, SIGNATURE>);
 
 ////////////////////////////////////////////////////////////////////////
 // Direct CK Tile convolution (streaming) 16c v2 kernels — Dgrad configs 0-8

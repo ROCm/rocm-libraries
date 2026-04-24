@@ -6,7 +6,6 @@
 #include <string>
 #include <tuple>
 
-#include "ck_tile/ops/direct_convolution/kernel/grouped_16c_fp16_tile_conv_impl.hpp"
 #include "ck_tile/ops/direct_convolution/kernel/grouped_16c_fp16_tile_conv_impl_v2.hpp"
 #include "ck_tile/ops/direct_convolution/utils/common.hpp"
 #include "ck_tile/ops/grouped_convolution/utils/grouped_conv_host_args.hpp"
@@ -16,15 +15,6 @@ namespace ck_tile::direct_conv {
 
 template <Version V>
 struct VersionTraits16c;
-
-template <>
-struct VersionTraits16c<Version::v1>
-{
-    static constexpr auto& configs = grouped_16c_tile::configs;
-    static constexpr auto get_launch_params = &grouped_16c_tile::get_launch_params;
-    static constexpr auto launch = &grouped_16c_tile::launch;
-    static constexpr auto make_variant = &grouped_16c_tile::make_variant;
-};
 
 template <>
 struct VersionTraits16c<Version::v2>
@@ -40,7 +30,7 @@ struct VersionTraits16c<Version::v2>
 ///
 /// This enables integration into the CK profiler and builder testing infrastructure
 /// which expects kernels to provide GetName(), IsSupportedArgument(), MakeKernelArgs(), etc.
-template <int ConfigIdx, Version Ver = Version::v1>
+template <int ConfigIdx, Version Ver = Version::v2>
 struct DirectTileConvForward16CFp16Kernel
 {
 

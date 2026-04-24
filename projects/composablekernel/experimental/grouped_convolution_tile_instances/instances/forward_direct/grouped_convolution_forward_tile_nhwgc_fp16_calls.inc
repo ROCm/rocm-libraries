@@ -51,19 +51,6 @@ run_alg(run_direct_conv<direct_conv::DirectHipConvForward16CFp16Kernel<16>, SIGN
 run_alg(run_direct_conv<direct_conv::DirectHipConvForward16CFp16Kernel<17>, SIGNATURE>);
 
 ////////////////////////////////////////////////////////////////////////
-// Direct CK Tile convolution (streaming) 16c kernels — Fprop configs 9-17
-////////////////////////////////////////////////////////////////////////
-run_alg(run_direct_conv<direct_conv::DirectTileConvForward16CFp16Kernel<9>, SIGNATURE>);
-run_alg(run_direct_conv<direct_conv::DirectTileConvForward16CFp16Kernel<10>, SIGNATURE>);
-run_alg(run_direct_conv<direct_conv::DirectTileConvForward16CFp16Kernel<11>, SIGNATURE>);
-run_alg(run_direct_conv<direct_conv::DirectTileConvForward16CFp16Kernel<12>, SIGNATURE>);
-run_alg(run_direct_conv<direct_conv::DirectTileConvForward16CFp16Kernel<13>, SIGNATURE>);
-run_alg(run_direct_conv<direct_conv::DirectTileConvForward16CFp16Kernel<14>, SIGNATURE>);
-run_alg(run_direct_conv<direct_conv::DirectTileConvForward16CFp16Kernel<15>, SIGNATURE>);
-run_alg(run_direct_conv<direct_conv::DirectTileConvForward16CFp16Kernel<16>, SIGNATURE>);
-run_alg(run_direct_conv<direct_conv::DirectTileConvForward16CFp16Kernel<17>, SIGNATURE>);
-
-////////////////////////////////////////////////////////////////////////
 // Direct CK Tile convolution (streaming) 16c v2 kernels — Fprop configs 9-17
 ////////////////////////////////////////////////////////////////////////
 // Group 0: no swizzle, direct DRAM epilogue — Fprop indices 9-17

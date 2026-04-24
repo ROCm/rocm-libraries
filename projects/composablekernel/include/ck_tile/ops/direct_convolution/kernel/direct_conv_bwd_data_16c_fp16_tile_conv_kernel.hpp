@@ -6,7 +6,6 @@
 #include <string>
 #include <tuple>
 
-#include "ck_tile/ops/direct_convolution/kernel/direct_conv_fwd_16c_fp16_tile_conv_kernel.hpp"
 #include "ck_tile/ops/grouped_convolution/utils/grouped_conv_host_args.hpp"
 #include "ck_tile/host/kernel_launch.hpp"
 
@@ -24,7 +23,7 @@ namespace ck_tile::direct_conv {
 ///   - in_ptr  = input gradient (output of backward, void*)
 ///   - wei_ptr = weights (const void*)
 ///   - out_ptr = output gradient (input to backward, const void*)
-template <int ConfigIdx, Version Ver = Version::v1>
+template <int ConfigIdx, Version Ver = Version::v2>
 struct DirectTileConvBwdData16CFp16Kernel
 {
     using V = VersionTraits16c<Ver>;
