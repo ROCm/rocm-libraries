@@ -7,6 +7,8 @@ include(CMakeFindDependencyMacro)
 find_dependency(hipdnn_data_sdk @HIPDNN_FRONTEND_DATA_SDK_MIN_VERSION@ CONFIG REQUIRED)
 find_dependency(hipdnn_backend @HIPDNN_FRONTEND_BACKEND_MIN_VERSION@ CONFIG REQUIRED)
 
+set(HIPDNN_ENABLE_SDPA @HIPDNN_ENABLE_SDPA@)
+
 include("${CMAKE_CURRENT_LIST_DIR}/hipdnn_frontendTargets.cmake")
 
 check_required_components(hipdnn_frontend)

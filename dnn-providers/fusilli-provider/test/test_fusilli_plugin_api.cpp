@@ -819,9 +819,9 @@ TEST(TestFusilliPluginApi, GetApplicableEngineIdsSdpa) {
     const std::vector<int64_t> vStrides = {4 * 1024 * 128, 1024 * 128, 128, 1};
     const std::vector<int64_t> oDims = {4, 32, 512, 128};
     const std::vector<int64_t> oStrides = {32 * 512 * 128, 512 * 128, 128, 1};
-    builder = hipdnn_test_sdk::utilities::createValidSdpaFpropGraph(
+    builder = hipdnn_test_sdk::utilities::createValidSdpaFwdGraph(
         qDims, qStrides, kDims, kStrides, vDims, vStrides, oDims, oStrides,
-        hipdnn_data_sdk::data_objects::DataType::BFLOAT16);
+        hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16);
     opGraph.ptr = builder.GetBufferPointer();
     opGraph.size = builder.GetSize();
 
