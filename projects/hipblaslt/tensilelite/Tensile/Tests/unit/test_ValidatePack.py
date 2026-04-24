@@ -1449,8 +1449,13 @@ class TestValidatePackTF32MFMA4x4x4SwapPacks(CMSValidationTestBase):
     ])
     def _config(self, request):
         self.DEPTH_U, self.SUB_ITER_SUFFIX, self.FORCE_UNROLL_SUB_ITER = request.param
+        # Run setup_method here (after fixture sets config params)
+        self.setup_method()
 
-    def setUp(self, kernel_updates: Optional[dict[str, Any]] = None) -> None:
+    def setup_method(self, method=None, *, kernel_updates: Optional[dict[str, Any]] = None) -> None:
+        if not hasattr(self, 'DEPTH_U'):
+            # Called before _config fixture — skip, _config will call us after setting params
+            return
         kernel_updates = kernel_updates.copy() if kernel_updates else {}
         kernel_updates["UsePLRPack"] = True
         kernel_updates["UseF32XEmulation"] = True
@@ -1462,7 +1467,7 @@ class TestValidatePackTF32MFMA4x4x4SwapPacks(CMSValidationTestBase):
         kernel_updates.setdefault("MIWaveTileB", 4)
         kernel_updates.setdefault("VectorWidthA", 1)
         kernel_updates.setdefault("VectorWidthB", 1)
-        super().setup_method(kernel_updates=kernel_updates)
+        super().setup_method(method, kernel_updates=kernel_updates)
 
         self.q1s = 0
         self.q1e = self.num_vmfma // 4 - 1
@@ -1540,7 +1545,7 @@ class TestValidatePackTF32MFMA4x4x4SwapPacks(CMSValidationTestBase):
         """Valid schedules with various VectorWidth combinations."""
         kernel = {"VectorWidthA": vw_a, "VectorWidthB": vw_b}
         kernel.update(extra_kernel)
-        self.setUp(kernel)
+        self.setup_method(kernel_updates=kernel)
 
         packA0 = self._build_swap_schedule(vw_a, 2)
         packB0 = self._build_swap_schedule(vw_b, 2)
@@ -1557,7 +1562,7 @@ class TestValidatePackTF32MFMA4x4x4SwapPacks(CMSValidationTestBase):
 
     def test_passing_multiple_groups_with_swaps(self):
         """VW_A=2, MIWaveTileA=4, MIWaveTileB=2. 2 groups of 10 regular packs + 4 swap packs on A, 2 groups on B."""
-        self.setUp({"VectorWidthA": 2, "VectorWidthB": 1, "MIWaveTileA": 4, "MIWaveTileB": 2})
+        self.setup_method(kernel_updates={"VectorWidthA": 2, "VectorWidthB": 1, "MIWaveTileA": 4, "MIWaveTileB": 2})
 
         # Both LRA0 and LRB0 at idx 0, guaranteed by SYNC at idx 1
         # 4 swap packs + 2 groups of 10 regular packs = 24 total PackA0
@@ -1586,7 +1591,7 @@ class TestValidatePackTF32MFMA4x4x4SwapPacks(CMSValidationTestBase):
 
     def test_fail_swap_before_lr_done(self):
         """SwapPacks issued before LR SWaitCnt. Expected: 'issued too early' error."""
-        self.setUp({"VectorWidthA": 2, "VectorWidthB": 1})
+        self.setup_method(kernel_updates={"VectorWidthA": 2, "VectorWidthB": 1})
 
         # Swap packs at idx 0, but SYNC is at idx 1, so they're before LR is guaranteed
         packA0 = [0] * 4 + self._make_valid_pack_group(2) * 2
@@ -1598,7 +1603,7 @@ class TestValidatePackTF32MFMA4x4x4SwapPacks(CMSValidationTestBase):
 
     def test_fail_regular_pack_before_swap_done(self):
         """First CVT0 pack issued before its swap dependency is done."""
-        self.setUp({"VectorWidthA": 2, "VectorWidthB": 1})
+        self.setup_method(kernel_updates={"VectorWidthA": 2, "VectorWidthB": 1})
 
         # Swap packs at idx 2, group 0's CVT0 at idx 1 (before swaps!)
         # Group 0's CVT0 pack 0 reads reg 1 which was swapped by swap 0, so it depends on swap 0.
@@ -1618,7 +1623,7 @@ class TestValidatePackTF32MFMA4x4x4SwapPacks(CMSValidationTestBase):
     def test_swap_depends_on_specific_lrs_vw4(self):
         """VW=4: T0 swaps (0,1,2) depend only on T0 LRs (LR0-LR3). Placing them
         after a partial guarantee (dscnt=4, guaranteeing LR0-LR3) should pass."""
-        self.setUp({"VectorWidthA": 4, "VectorWidthB": 1})
+        self.setup_method(kernel_updates={"VectorWidthA": 4, "VectorWidthB": 1})
         s = self.SUB_ITER_SUFFIX
 
         # 8 A-side LRs all at idx 0, 2 B-side LRs at idx 0.
@@ -1674,7 +1679,7 @@ class TestValidatePackTF32MFMA4x4x4SwapPacks(CMSValidationTestBase):
         """VW=4: group 2's CVT0 packs depend on swaps that touch regs 16-23,
         not on all swaps. Placing group 2's CVT0 before swaps that only affect
         other groups should pass."""
-        self.setUp({"VectorWidthA": 4, "VectorWidthB": 1})
+        self.setup_method(kernel_updates={"VectorWidthA": 4, "VectorWidthB": 1})
 
         # With VW=4, 4 groups, the swap register pairs are:
         #   swap 0: 1↔8    (groups 0,1)
