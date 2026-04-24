@@ -18,7 +18,7 @@ rocBLAS documentation is available at
 * Improved the performance of Level 2 `tpsv`.
 
 ### Resolved issues
-* Fix for querying solutions in `hipBLASLt` backend using `rocblas_gemm_batched_ex_get_solutions` when using null data pointers.
+* Fix for querying solutions when using `hipBLASLt` backend with `rocblas_gemm_batched_ex_get_solutions` if using null data pointers.
 
 ## rocBLAS 5.3.0
 
