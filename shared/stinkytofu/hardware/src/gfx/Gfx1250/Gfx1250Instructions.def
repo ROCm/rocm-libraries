@@ -687,8 +687,11 @@ DEF_BATCH(.format = VOP2,
     VSubF16Inst, "v_sub_f16",
         .operand_fields = { {D0, .size=16}, {S0, .size=16}, {S1, .size=16} },
     VSubF32Inst, "v_sub_f32", .logical = "VSubF32",
+    // Dual VOP2/VOP3 encoding: allow src1 to be generic src in promoted VOP3 form.
     VSubNcU32Inst, "v_sub_nc_u32", .logical = "VSubU32",
+        .operand_fields = { {S1, .type=src} },
     VSubU32Inst, "v_sub_u32", .logical = "VSubU32",
+        .operand_fields = { {S1, .type=src} },
 )
 
 // Vector ALU — VOP3 only (with carry output)
