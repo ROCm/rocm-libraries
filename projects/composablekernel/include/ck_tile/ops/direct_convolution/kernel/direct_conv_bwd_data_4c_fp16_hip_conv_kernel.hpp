@@ -40,7 +40,7 @@ struct DirectHipConvBwdData4CFp16Kernel
 
     static std::string GetName()
     {
-        return "direct_hip_conv_grouped_4c_fp16_bwd_data_" + std::to_string(ConfigIdx);
+        return "direct_hip_conv_fp16_bwd_data_" + grouped_4c_hip::configs[ConfigIdx].GetName();
     }
 
     static std::string GetTypeString() { return GetName(); }

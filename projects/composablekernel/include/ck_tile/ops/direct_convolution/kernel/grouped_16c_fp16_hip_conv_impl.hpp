@@ -14,6 +14,7 @@
 #include "ck_tile/ops/direct_convolution/utils/detail.hpp"
 #include <hip/hip_fp16.h>
 #include <hip/hip_runtime.h>
+#include <string>
 
 namespace ck_tile::direct_hip_conv::grouped_16c
 {
@@ -48,6 +49,11 @@ struct Config
     constexpr int block_c() const { return group_size * waves_per_wg; }
 
     constexpr int block_size() const { return waves_per_wg * WAVE_SIZE; }
+
+    std::string GetName() const
+    {
+        return "grouped_16c_waves_per_wg_" + std::to_string(waves_per_wg);
+    }
 };
 
 // All instantiated configurations.

@@ -33,7 +33,7 @@ struct DirectHipConvForward16CFp16Kernel
 
     static std::string GetName()
     {
-        return "direct_hip_conv_grouped_16c_fp16_fwd_" + std::to_string(ConfigIdx);
+        return "direct_hip_conv_fp16_fwd_" + grouped_16c_hip::configs[ConfigIdx].GetName();
     }
 
     static std::string GetTypeString() { return GetName(); }

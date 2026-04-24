@@ -14,6 +14,7 @@
 #include "ck_tile/ops/direct_convolution/utils/detail.hpp"
 #include <hip/hip_fp16.h>
 #include <hip/hip_runtime.h>
+#include <string>
 
 namespace ck_tile::direct_hip_conv::grouped_4c
 {
@@ -58,6 +59,12 @@ struct Config
     constexpr int block_groups() const { return waves_c64 * 16; }
 
     constexpr int block_size() const { return num_waves() * WAVE_SIZE; }
+
+    std::string GetName() const
+    {
+        return "grouped_4c_waves_c64_" + std::to_string(waves_c64) +
+               "_waves_q4_" + std::to_string(waves_q4);
+    }
 };
 
 // All instantiated configurations. The first valid config is expected to be the fastest.
