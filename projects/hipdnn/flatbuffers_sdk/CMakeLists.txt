@@ -92,6 +92,7 @@ if(HIPDNN_GENERATE_SDK_HEADERS)
             schemas/convolution_wrw_attributes.fbs
             schemas/custom_op_attributes.fbs
             schemas/data_types.fbs
+            schemas/device_properties.fbs
             schemas/engine_config.fbs
             schemas/engine_details.fbs
             schemas/graph.fbs

@@ -844,6 +844,7 @@ std::optional<std::string> IRParser::parseAttributeValue() {
                     return std::nullopt;
                 }
                 consume();
+                result += ", ";
             }
             first = false;
 
@@ -926,6 +927,9 @@ std::optional<StinkyRegister> IRParser::parseRegister() {
         return StinkyRegister(regTypeStr);
     } else if (regTypeStr == "BufferLimit") {
         return StinkyRegister(regTypeStr);
+    } else if (regTypeStr == "off") {
+        // MUBUF "off" keyword: vaddr field with no address register.
+        return StinkyRegister("off");
     }
 
     // Handle "v10" / "s5" / "acc12" etc.: identifier = regType + digits (no space)

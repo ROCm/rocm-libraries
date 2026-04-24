@@ -56,7 +56,7 @@ directory. Ask if either is missing.
 
 5. Grep the target directory for remaining occurrences of
    `example_provider`, `ExampleProvider`, `EXAMPLE_PROVIDER`,
-   `hipdnn_example`, and `hipdnn-example` to verify nothing was missed. Engine registration
+   `EXAMPLEPROVIDER_`, `hipdnn_example`, and `hipdnn-example` to verify nothing was missed. Engine registration
    identifiers (`EXAMPLE_PROVIDER_RELU_ENGINE`,
    `EXAMPLE_PROVIDER_CONV_FWD_ENGINE`) are expected to remain.
 

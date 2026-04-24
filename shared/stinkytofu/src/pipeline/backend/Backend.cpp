@@ -58,6 +58,10 @@ void Backend::configurePassManager(PassManager& pm) {
     gemmTileConfig.NumGRM = opts.NumGRM;
     gemmTileConfig.NumWaves = opts.WaveGroup0 * opts.WaveGroup1;
     pm.setGemmTileConfig(gemmTileConfig);
+
+    AsmCapsConfig asmCapsConfig;
+    asmCapsConfig.hasVgprMsb16 = opts.HasVgprMSB16;
+    pm.setAsmCapsConfig(asmCapsConfig);
 }
 
 }  // namespace stinkytofu

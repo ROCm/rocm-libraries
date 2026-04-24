@@ -617,6 +617,13 @@ int getMsbOffsetFromStinkyVgpr(const StinkyRegister& reg) {
 StinkyRegister toStinkyRegister(const rocisa::Container* container, bool hasVgprMsb) {
     if (const rocisa::RegisterContainer* regCont =
             dynamic_cast<const rocisa::RegisterContainer*>(container)) {
+        // isOff=true signals the MUBUF "off" keyword (no address register).
+        // rocisa emits "off" for this case; produce a literal string so the
+        // emitter writes "off" instead of treating it as a named VGPR.
+        if (regCont->isOff) {
+            return StinkyRegister("off");
+        }
+
         RegType regType = stringToRegType(regCont->regType);
 
         int physicalIdx = regCont->regIdx;
@@ -785,7 +792,18 @@ std::shared_ptr<StinkyAsmModule> toStinkyTofuModule(
     // Get GfxArchID from architecture array
     GfxArchID archId = getGfxArchID(arch[0], arch[1], arch[2]);
 
-    StinkyAsmModule stinkyAsmModule(moduleName, arch, moduleOptions);
+    // Populate assembler-capability-derived module options from rocisa asmCaps.
+    // This is done here (in the rocisa conversion layer, which is the only
+    // stinkytofu TU allowed to depend on rocisa headers) so that the
+    // stinkytofu library itself stays decoupled from rocisa.
+    StinkyAsmModule::ModuleOptions finalModuleOptions = moduleOptions;
+    {
+        auto probedCaps = rocisa::rocIsa::getInstance().getAsmCaps();
+        finalModuleOptions.HasVgprMSB16 =
+            probedCaps.count("HasVgprMSB16") && probedCaps.at("HasVgprMSB16");
+    }
+
+    StinkyAsmModule stinkyAsmModule(moduleName, arch, finalModuleOptions);
 
     // Add instruction groups registered by the target backend.
     if (auto* pipeline = BackendRegistry::getArchPipeline(arch)) {

@@ -97,7 +97,9 @@ void cpu_getitem_backward(tensor<T> dy,
     }
 
     // GetItem
-    miopen::par_ford(dy_numel)([&](int32_t o) {
+    // Use serial ford (not par_ford) to avoid a data race: multiple threads can scatter
+    // into the same dx index, and the non-atomic += would produce incorrect reference values.
+    miopen::ford(dy_numel)([&](int32_t o) {
         tensor_layout_t<5> ncdhw(dy_tv, o);
         tensor_layout_t<5> idx(ncdhw);
 
