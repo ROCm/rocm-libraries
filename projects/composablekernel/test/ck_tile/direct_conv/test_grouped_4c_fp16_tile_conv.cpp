@@ -598,3 +598,30 @@ TEST_F(DirectConvGrouped4cFp16TileConvTestV3, Dgrad_V3_XOR_LdsEpilogue_Config30_
 {
     ASSERT_TRUE((RunDgrad<30>(2, 64, 64, 32, 4, 4, 3, 3, 0, 0)));
 }
+
+// Cyclic-shift swizzle tests (instances 40-43)
+class DirectConvGrouped4cFp16TileConvV3CyclicShiftSwizzleTest
+    : public DirectConvGrouped4cFp16TestHarness<TileConvKernelTraits>
+{
+};
+
+TEST_F(DirectConvGrouped4cFp16TileConvV3CyclicShiftSwizzleTest, FProp_V3_CyclicShift_LdsEpilogue_Groups32_NoPad)
+{
+    ASSERT_TRUE((RunFprop<40>(2, 64, 64, 32, 4, 4, 3, 3, 0, 0)));
+}
+
+TEST_F(DirectConvGrouped4cFp16TileConvV3CyclicShiftSwizzleTest, FProp_V3_CyclicShift_SkipdLds_Groups32_NoPad)
+{
+    ASSERT_TRUE((RunFprop<41>(2, 64, 64, 32, 4, 4, 3, 3, 0, 0)));
+}
+
+TEST_F(DirectConvGrouped4cFp16TileConvV3CyclicShiftSwizzleTest, Dgrad_V3_CyclicShift_LdsEpilogue_Groups32_NoPad)
+{
+    ASSERT_TRUE((RunDgrad<42>(2, 64, 64, 32, 4, 4, 3, 3, 0, 0)));
+}
+
+TEST_F(DirectConvGrouped4cFp16TileConvV3CyclicShiftSwizzleTest, Dgrad_V3_CyclicShift_SkipdLds_Groups32_NoPad)
+{
+    ASSERT_TRUE((RunDgrad<43>(2, 64, 64, 32, 4, 4, 3, 3, 0, 0)));
+}
+

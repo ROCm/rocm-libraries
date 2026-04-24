@@ -277,3 +277,31 @@ TEST_F(DirectConvGrouped16cFp16TileConvV2XorLdsTest, Dgrad_Config59_Groups16_Lar
 {
     ASSERT_TRUE((RunDgrad<59>(4, 16, 16, 16, 16, 16, 3, 3, 1, 1)));
 }
+
+// --- Test cyclic-shift swizzle instances (indices 72-75)
+
+class DirectConvGrouped16cFp16TileConvV2CyclicShiftSwizzleTest
+    : public DirectConvGrouped4cFp16TestHarness<TileConv16cKernelTraits>
+{
+};
+
+TEST_F(DirectConvGrouped16cFp16TileConvV2CyclicShiftSwizzleTest, Fprop_Config72_Groups16_LargerSpatial_CyclicShift)
+{
+    ASSERT_TRUE((RunFprop<72>(4, 16, 16, 16, 16, 16, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvGrouped16cFp16TileConvV2CyclicShiftSwizzleTest, Fprop_Config73_Groups16_LargerSpatial_CyclicShift)
+{
+    ASSERT_TRUE((RunFprop<73>(4, 16, 16, 16, 16, 16, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvGrouped16cFp16TileConvV2CyclicShiftSwizzleTest, Dgrad_Config74_Groups16_LargerSpatial_CyclicShift)
+{
+    ASSERT_TRUE((RunDgrad<74>(4, 16, 16, 16, 16, 16, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvGrouped16cFp16TileConvV2CyclicShiftSwizzleTest, Dgrad_Config75_Groups16_LargerSpatial_CyclicShift)
+{
+    ASSERT_TRUE((RunDgrad<75>(4, 16, 16, 16, 16, 16, 3, 3, 1, 1)));
+}
+

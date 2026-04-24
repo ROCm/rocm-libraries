@@ -213,6 +213,19 @@ constexpr Config configs[] = {
     {.waves_c64 = 1, .waves_q4 = 1,
      .swizzle_type = SwizzleType::XOR,
      .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},
+     // Cyclic-shift swizzle
+     {.waves_c64 = 2, .waves_q4 = 8,
+     .swizzle_type = SwizzleType::CyclicShift,
+     .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},
+     {.waves_c64 = 2, .waves_q4 = 8,
+     .swizzle_type = SwizzleType::CyclicShift,
+     .epilogue = EpilogueType::RegistersToGlobalMemory},
+     {.waves_c64 = 2, .waves_q4 = 8, .direction = Direction::Dgrad,
+     .swizzle_type = SwizzleType::CyclicShift,
+     .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},
+     {.waves_c64 = 2, .waves_q4 = 8, .direction = Direction::Dgrad,
+     .swizzle_type = SwizzleType::CyclicShift,
+     .epilogue = EpilogueType::RegistersToGlobalMemory},
 };
 
 constexpr int NUM_CONFIGS = sizeof(configs) / sizeof(configs[0]);

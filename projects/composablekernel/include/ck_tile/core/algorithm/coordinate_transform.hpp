@@ -1523,7 +1523,7 @@ struct cyclic_shift_t : public base_transform<2, 2>
     }
 };
 
-// 2D cyclic shift: idx_low(1) = (idx_up(1) - idx_up(0)) % up_lengths_(1)
+// 2D inverse cyclic shift
 // This implements the SwizzleT pattern used for LDS bank conflict avoidance.
 template <typename LowLengths>
 struct inverse_cyclic_shift_t : public base_transform<2, 2>
@@ -1560,7 +1560,9 @@ struct inverse_cyclic_shift_t : public base_transform<2, 2>
 
         idx_low(number<0>{}) = idx_up[number<0>{}];
         idx_low(number<1>{}) =
-            (idx_up[number<1>{}] - idx_up[number<0>{}]) % up_lengths_[number<1>{}];
+            (idx_up[number<1>{}] + up_lengths_[number<1>{}] -
+             idx_up[number<0>{}] % up_lengths_[number<1>{}]) %
+            up_lengths_[number<1>{}];
     }
 
     template <typename LowIdxDiff, typename UpIdxDiff, typename LowIdx, typename UpIdx>

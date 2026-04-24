@@ -248,6 +248,19 @@ constexpr Config configs[] = {
     {.waves_per_wg = 1,
      .swizzle_type = SwizzleType::XOR,
      .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},
+     // Cyclic shift instances
+     {.waves_per_wg = 8,
+     .swizzle_type = SwizzleType::CyclicShift,
+     .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},
+     {.waves_per_wg = 8,
+     .swizzle_type = SwizzleType::CyclicShift,
+     .epilogue = EpilogueType::RegistersToGlobalMemory},
+     {.waves_per_wg = 8, .direction=Direction::Dgrad,
+     .swizzle_type = SwizzleType::CyclicShift,
+     .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},
+     {.waves_per_wg = 8, .direction=Direction::Dgrad,
+     .swizzle_type = SwizzleType::CyclicShift,
+     .epilogue = EpilogueType::RegistersToGlobalMemory},
 };
 
 constexpr int NUM_CONFIGS = sizeof(configs) / sizeof(configs[0]);
