@@ -87,7 +87,7 @@
             "description": "Build hipdnn, all providers including some unsupported providers, and integration tests",
             "inherits": ["default:release"],
             "cacheVariables": {
-                "ROCM_LIBS_ENABLE_COMPONENTS": "hipdnn;hipdnn-integration-tests;miopen-provider;hipblaslt-provider;hip-kernel-provider"
+                "ROCM_LIBS_ENABLE_COMPONENTS": "hipdnn;hipdnn-integration-tests;miopen-provider;hip-kernel-provider"
             }
         },
         {
