@@ -15,7 +15,7 @@ namespace direct_conv {
 //   cfg — Config value providing kw and other kernel parameters.
 //
 // TC must provide:
-//   TC::Input::MakeDramDescriptor(hi, wi, C_total, px)
+//   TC::Input::MakeDramDescriptor(hi, wi, C_total, px)  — px = left padding
 //   TC::Input::MakeDramDistribution()
 //   TC::Input::MakeLdsStoreDescriptor()
 //   TC::Input::MakeLdsReadDescriptor()
@@ -75,6 +75,7 @@ struct InputLoader
                            int px)
                 : input_lds_ptr(input_lds)
     {
+        // x_start = block_q - px  (global start column of this tile's halo)
         const auto input_dram_desc = TC::Input::MakeDramDescriptor(hi, wi, bc.C, px);
         const auto input_dram_view = ck_tile::make_tensor_view<ck_tile::address_space_enum::global>(
             in + static_cast<size_t>(bc.block_n) * hi * wi * bc.C + bc.block_k,
