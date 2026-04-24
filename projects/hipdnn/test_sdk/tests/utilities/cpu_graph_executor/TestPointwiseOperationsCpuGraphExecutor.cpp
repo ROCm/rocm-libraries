@@ -135,7 +135,7 @@ public:
         Tensor<InputType> output(params.outputDims);
 
         if(params.reluLowerClip.has_value()
-           || params.reluUpperClip.has_value() // NOLINT(bugprone-branch-clone)
+           || params.reluUpperClip.has_value()
            || params.reluLowerClipSlope.has_value())
         {
             CpuReferencePointwiseImpl<InputType, InputType, InputType>::pointwiseCompute(
@@ -168,7 +168,7 @@ public:
         Tensor<InputType> output(params.outputDims);
 
         if(params.reluLowerClip.has_value()
-           || params.reluUpperClip.has_value() // NOLINT(bugprone-branch-clone)
+           || params.reluUpperClip.has_value()
            || params.reluLowerClipSlope.has_value())
         {
             CpuReferencePointwiseImpl<InputType, InputType, InputType>::pointwiseCompute(
