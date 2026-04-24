@@ -49,7 +49,7 @@ Meanwhile, the `idMap` — built in `CustomSchedule.py` — already contains the
 |----------|----------------------------------------------------|-----------------|--------------------------------------------------------------------------------|
 | **00a**  | Eliminate TimedPack                                | **Done**        | Moved timing fields into Pack, deleted TimedPack class                         |
 | **00b**  | Unify `needed_by` type                             | **Already done** | GlobalRead.needed_by was already `ValidatorInstruction`                        |
-| **00c**  | Typed context (`ValidationContext` dataclass)      | **Deferred**    | Can be done as standalone cleanup anytime                                      |
+| **00c**  | Typed context (`ValidationContext` dataclass)      | **Done**        | Replaced `context: dict` and absorbed `ValidatorPassContext`                   |
 | **00d**  | Document limitations                               | **Done**        | Created `CMSValidator_LIMITATIONS.md`                                          |
 | **01**   | Thread idMap/mfmaCode, add `rocisa_inst`           | **Done**        | Bug fixed by review: mfma_code indexing with mfmaReorder                       |
 | **02**   | Type resolution (PACK_TYPE_MAP, resolve_pack_type) | **Done**        | Bug fixed by review: detect_pack_groups CVT1→CVT0 boundary                    |
