@@ -5,7 +5,9 @@
 
 #include "ck_tile/core.hpp"
 #include "ck_tile/ops/direct_convolution/utils/common.hpp"
+#include "ck_tile/ops/direct_convolution/utils/conv_params.hpp"
 #include "ck_tile/ops/direct_convolution/utils/detail.hpp"
+#include "ck_tile/ops/direct_convolution/utils/memory.hpp"
 
 namespace ck_tile {
 namespace direct_conv {

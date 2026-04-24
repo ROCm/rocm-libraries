@@ -51,4 +51,13 @@ if(GPU_TARGETS MATCHES "gfx950")
         )
     endif()
 
+    add_gtest_executable(test_direct_conv_mfma test_mfma.cpp)
+    if(TARGET test_direct_conv_mfma)
+        target_compile_options(test_direct_conv_mfma PRIVATE
+            -Wno-old-style-cast
+            -Wno-unused-parameter
+            -Wno-shadow
+        )
+    endif()
+
 endif()

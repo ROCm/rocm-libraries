@@ -11,6 +11,7 @@
 #include "ck_tile/ops/direct_convolution/utils/transpose_lds_layout.hpp"
 #include "ck_tile/ops/direct_convolution/utils/detail.hpp"
 #include "ck_tile/ops/direct_convolution/utils/common.hpp"
+#include "ck_tile/ops/direct_convolution/utils/mfma.hpp"
 #include "ck_tile/ops/direct_convolution/utils/launch_params.hpp"
 #include "ck_tile/ops/direct_convolution/utils/kernel_variant.hpp"
 #include "ck_tile/ops/direct_convolution/utils/memory.hpp"
@@ -624,15 +625,6 @@ using OutputWriter = direct_conv::OutputWriter<TileConstants<cfg>>;
 // ===================================================================
 template <Config cfg>
 using OutputWriterLds = direct_conv::OutputWriterLds<TileConstants<cfg>>;
-
-// MFMA functor for 16-channel kernel (mfma_f32_16x16x16f16).
-struct Mfma16x16x16
-{
-    __device__ fp32x4_t operator()(fp16x4_t weight, fp16x4_t input, fp32x4_t acc) const
-    {
-        return __builtin_amdgcn_mfma_f32_16x16x16f16(weight, input, acc, 0, 0, 0);
-    }
-};
 
 // ===================================================================
 // Main device function.
