@@ -1807,7 +1807,6 @@ namespace TensileLite
                 case rocisa::DataType::E5M3:
                     return static_cast<hipDataType>(HIP_R_8F_E5M3_EXT);
                 case rocisa::DataType::E8:
-                case rocisa::DataType::MXScale:
                 case rocisa::DataType::None:
                     return HIP_R_8F_UE8M0;
                 default:
@@ -1870,13 +1869,13 @@ namespace TensileLite
 
                 auto& pristineA
                     = m_vdata[ContractionProblemGemm::TENSOR::A].pristine[rocisa::DataType::Float4];
-                auto& pristineMXScaleA
+                auto& pristineE8A
                     = m_vdata[ContractionProblemGemm::TENSOR::MXSA].pristine[problem.mxsa().dataType()];
 
                 generateMXInput((hipDataType)HIP_R_4F_E2M1,
                                 hipMxScaleTypeForDataGenerator(problem.mxTypeA()),
                                 pristineA.cpuInput.valid.get(),
-                                pristineMXScaleA.cpuInput.valid.get(),
+                                pristineE8A.cpuInput.valid.get(),
                                 rows,
                                 cols,
                                 stride,
@@ -1900,13 +1899,13 @@ namespace TensileLite
 
                 auto& pristineB
                     = m_vdata[ContractionProblemGemm::TENSOR::B].pristine[rocisa::DataType::Float4];
-                auto& pristineMXScaleB
+                auto& pristineE8B
                     = m_vdata[ContractionProblemGemm::TENSOR::MXSB].pristine[problem.mxsb().dataType()];
 
                 generateMXInput((hipDataType)HIP_R_4F_E2M1,
                                 hipMxScaleTypeForDataGenerator(problem.mxTypeB()),
                                 pristineB.cpuInput.valid.get(),
-                                pristineMXScaleB.cpuInput.valid.get(),
+                                pristineE8B.cpuInput.valid.get(),
                                 rows,
                                 cols,
                                 stride,
@@ -1989,10 +1988,9 @@ namespace TensileLite
                         break;
 #endif // #ifdef TENSILE_USE_FP4
 #endif // !_WIN32
-                    case rocisa::DataType::MXScale:
-                        prop.value = getValue<MXScale>(prop.init, prop.freeValue);
-                        break;
                     case rocisa::DataType::E8:
+                        prop.value = getValue<E8>(prop.init, prop.freeValue);
+                        break;
                     case rocisa::DataType::E5M3:
                     case rocisa::DataType::Int64:
                     case rocisa::DataType::XFloat32:
@@ -2710,11 +2708,11 @@ namespace TensileLite
                 auto    castInputs   = static_pointer_cast<ContractionInputs>(inputs);
                 size_t  rotatingSize = getRotatingSize(*gemmProblem, *castInputs);
                 int32_t rotatingNum
-                    = min(maxRotatingBufferNum, ceil((float)m_rotatingBuffer / rotatingSize))
+                    = std::min(maxRotatingBufferNum, static_cast<int32_t>(ceil((float)m_rotatingBuffer / rotatingSize)))
                       - 1; // Minus the original buffer.
 
                 // <= 0 means don't rotating
-                rotatingNum = max(0, rotatingNum);
+                rotatingNum = std::max(0, rotatingNum);
 
                 int32_t totalRotatingSizeNeeded = rotatingNum * rotatingSize;
                 std::cout << "Rotating buffer set to: " << m_rotatingBuffer
@@ -2772,11 +2770,11 @@ namespace TensileLite
                         += getRotatingSize(groupedProblem->gemms[i], castInputs->grouped[i]);
                 }
                 int32_t rotatingNum
-                    = min(maxRotatingBufferNum, ceil((float)m_rotatingBuffer / rotatingSize))
+                    = std::min(maxRotatingBufferNum, static_cast<int32_t>(ceil((float)m_rotatingBuffer / rotatingSize)))
                       - 1; // Minus the original buffer.
 
                 // <= 0 means don't rotating
-                rotatingNum = max(0, rotatingNum);
+                rotatingNum = std::max(0, rotatingNum);
 
                 int32_t totalRotatingSizeNeeded = rotatingNum * rotatingSize;
                 std::cout << "Rotating buffer set to: " << m_rotatingBuffer

@@ -357,8 +357,10 @@ class GSUOn(GSU):
         module = Module("GSU On computeLoadSrd")
 
         tc = tP["tensorChar"]
+        isgfx950 = kernel["ISA"][:2] == (9, 5)
+        isgfx950mx = isgfx950 and ("MXS" in tc)
         depthU = kernel["DepthU"]
-        depthUDiv = kernel["DepthU"]
+        depthUDiv = kernel["_DepthU%s"%tc] if isgfx950mx else kernel["_DepthU"]
         # swizzle
         if (tP["isSwizzled"] and tc == 'A'):
             depthUDiv = kernel["DepthU"] * kernel["MatrixInstM"]

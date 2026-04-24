@@ -35,6 +35,7 @@
 #include <Tensile/AMDGPU.hpp>
 #include <Tensile/hip/HipHardware.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstddef>
@@ -1593,10 +1594,10 @@ namespace TensileLite
                 virtual bool operator()(ContractionProblemGemm const& problem) const override
                 {
                     const uint64_t TWO_POW_32 = 4294967296;
-                    return multiplyElementSize((problem.a().strides()[1] * min(value.depthUorMT0, problem.a().sizes()[1]) + value.shiftPtrElemA),
+                    return multiplyElementSize((problem.a().strides()[1] * std::min(value.depthUorMT0, problem.a().sizes()[1]) + value.shiftPtrElemA),
                                    problem.a().elementBytes())
                                < TWO_POW_32
-                           && multiplyElementSize((problem.b().strides()[1] * min(value.depthUorMT1, problem.b().sizes()[1]) + value.shiftPtrElemB)
+                           && multiplyElementSize((problem.b().strides()[1] * std::min(value.depthUorMT1, problem.b().sizes()[1]) + value.shiftPtrElemB)
                                       ,problem.b().elementBytes())
                                   < TWO_POW_32;
                 }
@@ -1661,7 +1662,7 @@ namespace TensileLite
                     else
                     {
                         const uint64_t TWO_POW_32 = 4294967296;
-                        return multiplyElementSize(problem.c().strides()[1] * min(value, problem.c().sizes()[1]), problem.c().elementBytes())
+                        return multiplyElementSize(problem.c().strides()[1] * std::min(value, problem.c().sizes()[1]), problem.c().elementBytes())
                                < TWO_POW_32;
                     }
                 }
@@ -1708,7 +1709,7 @@ namespace TensileLite
                 virtual bool operator()(ContractionProblemGemm const& problem) const override
                 {
                     const uint64_t TWO_POW_32 = 4294967296;
-                    return multiplyElementSize(problem.d().strides()[1] * min(value, problem.d().sizes()[1]), problem.d().elementBytes())
+                    return multiplyElementSize(problem.d().strides()[1] * std::min(value, problem.d().sizes()[1]), problem.d().elementBytes())
                            < TWO_POW_32;
                 }
 

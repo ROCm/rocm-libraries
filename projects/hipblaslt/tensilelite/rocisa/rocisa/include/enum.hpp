@@ -59,7 +59,6 @@ namespace rocisa
         Float4,
         E8,
         E5M3,
-        MXScale,
         Count,
         None = Count
     };
@@ -169,8 +168,6 @@ namespace rocisa
             return "E8";
         case DataType::E5M3:
             return "E5M3";
-        case DataType::MXScale:
-            return "MXScale";
         default:
             return "Invalid";
         }

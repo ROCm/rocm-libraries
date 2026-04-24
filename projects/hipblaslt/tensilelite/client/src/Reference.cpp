@@ -67,6 +67,23 @@ namespace TensileLite
             }
         }
 
+        /** One MX scale tensor element as float (E8 / E5M3 / Float8 E4M3). */
+        inline float mxScaleElementAsFloat(rocisa::DataType mxType, void const* base, size_t index)
+        {
+            switch(mxType)
+            {
+            case rocisa::DataType::E8:
+                return static_cast<float>(static_cast<E8 const*>(base)[index]);
+            case rocisa::DataType::E5M3:
+                return static_cast<float>(static_cast<E5M3 const*>(base)[index]);
+            case rocisa::DataType::Float8:
+                return static_cast<float>(static_cast<Float8 const*>(base)[index]);
+            default:
+                throw std::runtime_error(concatenate(
+                    "Reference MX scale: unsupported element type ", static_cast<int>(mxType)));
+            }
+        }
+
         // Helper class that wraps a shadow copy of input buffers in float format.
         // It quietly manages the indirection between directly using the input pointer
         // (for float) and a shadow copy (for half / bfloat16).
@@ -396,7 +413,7 @@ namespace TensileLite
 #ifdef TENSILE_USE_FP4
             case rocisa::DataType::Float4:
 #endif // #ifdef TENSILE_USE_FP4
-            case rocisa::DataType::MXScale:;
+            ;
             }
             return DataInitialization::getValue<Accumulator, InitMode::Zero>();
         }
@@ -516,7 +533,6 @@ namespace TensileLite
 #ifdef TENSILE_USE_FP4
             case rocisa::DataType::Float4:
 #endif // #ifdef TENSILE_USE_FP4
-            case rocisa::DataType::MXScale:
             case rocisa::DataType::E8:
             case rocisa::DataType::E5M3:
                 ;
@@ -576,7 +592,6 @@ namespace TensileLite
 #ifdef TENSILE_USE_FP4
             case rocisa::DataType::Float4:
 #endif // #ifdef TENSILE_USE_FP4
-            case rocisa::DataType::MXScale:
             case rocisa::DataType::E8:
             case rocisa::DataType::E5M3:
                 ;
@@ -1422,8 +1437,8 @@ namespace TensileLite
             typename Inputs::BType const* bPtr    = (typename Inputs::BType const*)inputs.b;
             typename Inputs::CType const* cPtr    = (typename Inputs::CType const*)inputs.c;
             typename Inputs::DType*       dPtr    = (typename Inputs::DType*)inputs.d;
-            MXScale const*                mxsaPtr = (MXScale const*)inputs.mxsa;
-            MXScale const*                mxsbPtr = (MXScale const*)inputs.mxsb;
+            void const*                   mxsaBase = inputs.mxsa;
+            void const*                   mxsbBase = inputs.mxsb;
 
             auto const& freeIndicesA = problem.freeIndicesA();
             auto const& freeIndicesB = problem.freeIndicesB();
@@ -1626,7 +1641,9 @@ namespace TensileLite
                                     = (boundIndices[0].aMirror ? (boundSize[0] - i - 1) : i)
                                       / problem.mxBlockA();
                                 size_t mxsaIdx = mxsaIndex + (mxsaI * mxsaStride);
-                                mxScale        = multiply<float>(mxScale, mxsaPtr[mxsaIdx]);
+                                mxScale        = multiply<float>(
+                                    mxScale,
+                                    mxScaleElementAsFloat(problem.mxTypeA(), mxsaBase, mxsaIdx));
                             }
 
                             if(problem.mxBlockB())
@@ -1635,7 +1652,9 @@ namespace TensileLite
                                     = (boundIndices[0].bMirror ? (boundSize[0] - i - 1) : i)
                                       / problem.mxBlockB();
                                 size_t mxsbIdx = mxsbIndex + (mxsbI * mxsbStride);
-                                mxScale        = multiply<float>(mxScale, mxsbPtr[mxsbIdx]);
+                                mxScale        = multiply<float>(
+                                    mxScale,
+                                    mxScaleElementAsFloat(problem.mxTypeB(), mxsbBase, mxsbIdx));
                             }
                             value += multiply<Accumulator>(val, mxScale);
                         }

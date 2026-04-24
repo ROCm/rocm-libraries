@@ -5625,52 +5625,6 @@ class KernelWriterAssembly(KernelWriter):
   # User must call tailLoopFreeVgpr(vgprBase, imod) to release the resources.
   ##############################################################################
   def tailLoopAllocValuVgpr(self, kernel, tensorParametersA, tensorParametersB, tensorParametersM):
-    imodMXSA            = Module("tailLoopAllocValuMXSAVgpr")
-    vgprBaseMXSA        = -1
-    numValuMXSA         = 0
-    numVgprValuPackMXSA = 0
-    if kernel["ProblemType"]["MXBlockA"]:
-      valuVgprAlignment = 32 // kernel["ProblemType"]["MXBlockA"]
-      if self.states.mxsa.numVgprValu > 0 and not kernel["DirectToVgprMXSA"]:
-        numValuMXSA = self.states.mxsa.numVgprValu
-        if not kernel["UnrollMajorLDSA"]:
-          if self.states.lrvwTileMXSA > 1:
-            numVgprValuPackMXSA = ceil(kernel["VectorWidthMXSA"] / self.states.bpr) * kernel["MIWaveTileMXSA"] // kernel["VectorWidthMXSA"] * kernel["InnerUnroll"] * self.states.numVgprBuffer * kernel["MIInputPerThreadMXSA"]
-            if self.states.packDTVA:
-              # pack DTV case, double the number
-              numVgprValuPackMXSA *= 2
-          else:
-            numVgprValuPackMXSA = self.states.mxsa.numVgprValuPerBlock * kernel["InnerUnroll"] * self.states.numVgprBufferPackMXSA * (4 - 1)
-        vgprBaseMXSA = self.vgprPool.checkOutAligned(numValuMXSA + numVgprValuPackMXSA, valuVgprAlignment)
-        imodMXSA.add(RegSet("v", "vgprValuMXSA_X0_I0_BASE", vgprBaseMXSA))
-        imodMXSA.add(self.moduleVgprMacroValuMXSA)
-        if numVgprValuPackMXSA > 0:
-          imodMXSA.add(RegSet("v", "vgprValuMXSA_X0_I0_D0_PACK", vgprBaseMXSA + numValuMXSA))
-          imodMXSA.add(self.moduleVgprMacroValuMXSAPack)
-
-    imodMXSB            = Module("tailLoopAllocValuMXSBVgpr")
-    vgprBaseMXSB        = -1
-    numValuMXSB         = 0
-    numVgprValuPackMXSB = 0
-    if kernel["ProblemType"]["MXBlockB"]:
-      valuVgprAlignment = 32 // kernel["ProblemType"]["MXBlockB"]
-      if self.states.mxsb.numVgprValu > 0 and not kernel["DirectToVgprMXSB"]:
-        numValuMXSB = self.states.mxsb.numVgprValu
-        if not kernel["UnrollMajorLDSMXSB"]:
-          if self.states.lrvwTileMXSB > 1:
-            numVgprValuPackMXSB = ceil(kernel["VectorWidthMXSB"] / self.states.bpr) * kernel["MIWaveTileMXSB"] // kernel["VectorWidthMXSB"] * kernel["InnerUnroll"] * self.states.numVgprBuffer * kernel["MIInputPerThreadMXSB"]
-            if self.states.packDTVB:
-              # pack DTV case, double the number
-              numVgprValuPackMXSB *= 2
-          else:
-            numVgprValuPackMXSB = self.states.b.numVgprValuPerBlock * kernel["InnerUnroll"] * self.states.numVgprBufferPackMXSB * (4 - 1)
-        vgprBaseMXSB = self.vgprPool.checkOutAligned(numValuMXSB + numVgprValuPackMXSB, valuVgprAlignment)
-        imodMXSB.add(RegSet("v", "vgprValuMXSB_X0_I0_BASE", vgprBaseMXSB))
-        imodMXSB.add(self.moduleVgprMacroValuMXSB)
-        if numVgprValuPackMXSB > 0:
-          imodMXSB.add(RegSet("v", "vgprValuMXSB_X0_I0_D0_PACK", vgprBaseMXSB + numValuMXSB))
-          imodMXSB.add(self.moduleVgprMacroValuMXSBPack)
-
     imodA            = Module("tailLoopAllocValuAVgpr")
     vgprBaseA        = -1
     numValuA         = 0
@@ -5763,7 +5717,7 @@ class KernelWriterAssembly(KernelWriter):
       if numVgprCvtTemp > 0:
         imodMisc.add(RegSet("v", "vgprCvtTemp", vgprBaseMisc + numVgprPackTemp))
 
-    return ([vgprBaseMXSA, imodMXSA],[vgprBaseMXSB, imodMXSB],[vgprBaseA, imodA],[vgprBaseB, imodB],[vgprBaseM, imodM],[vgprBaseMisc, imodMisc])
+    return ([vgprBaseA, imodA],[vgprBaseB, imodB],[vgprBaseM, imodM],[vgprBaseMisc, imodMisc])
 
   def tailLoopAllocG2LVgpr(self, kernel):
     imod           = Module("tailLoopAllocG2LVgpr")
@@ -5814,7 +5768,7 @@ class KernelWriterAssembly(KernelWriter):
         imod.add(self.moduleVgprMacroG2LA)
 
     if numG2LB > 0:
-      imod.add(RegSet("v", "vgprG2LB_BASE", vgprBase + numG2LA + numG2LMXSA))
+      imod.add(RegSet("v", "vgprG2LB_BASE", vgprBase + numG2LA))
       if kernel["DirectToLdsB"] and kernel["NonDTLTailLoopB"]:
         imod.add(RegSet("v", "vgprG2LB", "vgprG2LB_BASE", 0))
       else:
@@ -7778,6 +7732,7 @@ class KernelWriterAssembly(KernelWriter):
           assert("Unsupported data type.")
       return InstType.INST_NOTYPE
 
+    isgfx950 = kernel["ISA"][:2] == (9, 5)
     miInputTypeA     = kernel["ProblemType"]["F32XdlMathOp"] if kernel["EnableF32XdlMathOp"] else kernel["ProblemType"]["MacDataTypeA"]
     miInputTypeB     = kernel["ProblemType"]["F32XdlMathOp"] if kernel["EnableF32XdlMathOp"] else kernel["ProblemType"]["MacDataTypeB"]
     # calculate constant
@@ -8002,6 +7957,14 @@ class KernelWriterAssembly(KernelWriter):
                       bk = se + group * vgprPerSet0Group + ti * vgprPerInUnrollA
                       aStr = vgpr(self.generateSrcStrForMFMAshiftK(kernel, tPA, innerUnroll, vregSetIdx, vgprPerInputA, m, u, iui, a, bk=bk), 1)
                       shiftK.add(VCndMaskB32(dst=aStr, src0=aStr, src1=0, src2=sgpr(tmpSgprX2, self.states.laneSGPRCount), comment="set 0 if K_idx >= sizeL"))
+              # separate code for gfx950 mx
+              if group == 0 and kernel["ProblemType"]["MXBlockA"] and isgfx950:
+                for mxsa in range(0, kernel["MIWaveTileMXSA"]):
+                  for iui in range(0, innerUnroll):
+                    for bk in range(0, vgprPerInputMXSA):
+                      mxsaStr_base = self.generateSrcStrForMFMAshiftK(kernel, tPA["MX"], innerUnroll, vregSetIdx, vgprPerInputMXSA, m, u, iui, mxsa, bk=bk)
+                      mxsaStr = vgpr(mxsaStr_base, 1)
+                      shiftK.add(VCndMaskB32(dst=mxsaStr, src0=mxsaStr, src1=0, src2=sgpr(tmpSgprX2, self.states.laneSGPRCount), comment=""))
 
           if kernel["ProblemType"]["Sparse"] == 2 and numMIInUnroll//8 >= 1:
             shiftK.add(vectorStaticRemainder(dummy, kReg_first, "Serial", kernel["WavefrontSize"], tmpVgpr, tmpSgprInfo))
@@ -8090,6 +8053,14 @@ class KernelWriterAssembly(KernelWriter):
                     bk = se + group * vgprPerSet0Group + ti * vgprPerInUnrollB
                     bStr = vgpr(self.generateSrcStrForMFMAshiftK(kernel, tPB, innerUnroll, vregSetIdx, vgprPerInputB, m, u, iui, b, bk=bk), 1)
                     shiftK.add(VCndMaskB32(dst=bStr, src0=bStr, src1=0, src2=sgpr(tmpSgprX2, self.states.laneSGPRCount), comment="set 0 if K_idx >= sizeL"))
+            # separate code for gfx950 mx
+            if group == 0 and kernel["ProblemType"]["MXBlockB"]:
+              for mxsb in range(0, kernel["MIWaveTileMXSB"]):
+                for iui in range(0, innerUnroll):
+                  for bk in range(0, vgprPerInputMXSB):
+                    mxsbStr_base = self.generateSrcStrForMFMAshiftK(kernel, tPB["MX"], innerUnroll, vregSetIdx, vgprPerInputMXSB, m, u, iui, mxsb, bk=bk)
+                    mxsbStr = vgpr(mxsbStr_base, 1)
+                    shiftK.add(VCndMaskB32(dst=mxsbStr, src0=mxsbStr, src1=0, src2=sgpr(tmpSgprX2, self.states.laneSGPRCount), comment=""))
 
           # replace elements with 0 for same thread, this conducting shift and mask between numElementsPerRead
           # Skip when numRegistersIn >= 1 on wmma_v3 with XF32 emulation: each element fills a full register,
@@ -8326,7 +8297,7 @@ class KernelWriterAssembly(KernelWriter):
             if vgprPerInUnrollB == 4 and is_wmma_v2:
               if tmpVgpr2 is not None: self.vgprPool.checkIn(tmpVgpr2)
 
-          if kernel["ProblemType"]["MXBlockA"] or kernel["ProblemType"]["MXBlockB"]:
+          if (kernel["ProblemType"]["MXBlockA"] or kernel["ProblemType"]["MXBlockB"]) and not isgfx950:
             mxK = kernel["MatrixInstK"]
             mxBlock = max(kernel["ProblemType"]["MXBlockA"], kernel["ProblemType"]["MXBlockB"])
             vgprPerInUnroll = max(vgprPerInputMXSA, vgprPerInputMXSB)
@@ -8345,39 +8316,27 @@ class KernelWriterAssembly(KernelWriter):
             else:
               raise Exception(f"unsupport vgprPerInUnroll {vgprPerInUnroll}")
 
-          if kernel["ProblemType"]["MXBlockA"]:
+          if kernel["ProblemType"]["MXBlockA"] and not isgfx950:
             for mxsa in range(0, kernel["MIWaveTileMXSA"]):
               for iui in range(0, innerUnroll):
                 mxsaStr_base = self.generateSrcStrForMFMA(kernel, tPA["MX"], innerUnroll, vregSetIdx, vgprPerInputMXSA, m, u, iui, mxsa)
                 mxsaStr = vgpr(mxsaStr_base, vgprPerInputMXSA)
                 shiftK.add(VShiftLeft(dst=vgpr(mxReg, vgprPerInUnroll), shiftHex=sgpr(tmpSgprX1), src=mxsaStr, comment=""))
                 shiftK.add(VShiftRight(dst=vgpr(mxReg, vgprPerInUnroll), shiftHex=sgpr(tmpSgprX1), src=vgpr(mxReg, vgprPerInUnroll), comment=""))
-                # workaround for gfx950
-                if kernel["ISA"][:2] == (9, 5):
-                  # use kreg for src0
-                  src0 = vgpr(kReg)
-                else:
-                  src0 = mxK
-                shiftK.add(VCmpGTI32(dst=sgpr(tmpSgprX2, self.states.laneSGPRCount), src0=src0, src1=sgpr(loopCntSgpr), comment="check K index >= Size L"))
+                shiftK.add(VCmpGTI32(dst=sgpr(tmpSgprX2, self.states.laneSGPRCount), src0=mxK, src1=sgpr(loopCntSgpr), comment="check K index >= Size L"))
                 for bk in range(0, vgprPerInUnroll):
                   mxsaStr_base = self.generateSrcStrForMFMA(kernel, tPA["MX"], innerUnroll, vregSetIdx, vgprPerInputMXSA, m, u, iui, mxsa, bk=bk)
                   mxsaStr = vgpr(mxsaStr_base, 1)
                   shiftK.add(VCndMaskB32(dst=mxsaStr, src0=mxsaStr, src1=vgpr(mxReg+bk), src2=sgpr(tmpSgprX2, self.states.laneSGPRCount), comment=""))
 
-          if kernel["ProblemType"]["MXBlockB"]:
+          if kernel["ProblemType"]["MXBlockB"] and not isgfx950:
             for mxsb in range(0, kernel["MIWaveTileMXSB"]):
               for iui in range(0, innerUnroll):
                 mxsbStr_base = self.generateSrcStrForMFMA(kernel, tPB["MX"], innerUnroll, vregSetIdx, vgprPerInputMXSB, m, u, iui, mxsb)
                 mxsbStr = vgpr(mxsbStr_base, vgprPerInputMXSB)
                 shiftK.add(VShiftLeft(dst=vgpr(mxReg, vgprPerInUnroll), shiftHex=sgpr(tmpSgprX1), src=mxsbStr, comment=""))
                 shiftK.add(VShiftRight(dst=vgpr(mxReg, vgprPerInUnroll), shiftHex=sgpr(tmpSgprX1), src=vgpr(mxReg, vgprPerInUnroll), comment=""))
-                # workaround for gfx950
-                if kernel["ISA"][:2] == (9, 5):
-                  # use kreg for src0
-                  src0 = vgpr(kReg)
-                else:
-                  src0 = mxK
-                shiftK.add(VCmpGTI32(dst=sgpr(tmpSgprX2, self.states.laneSGPRCount), src0=src0, src1=sgpr(loopCntSgpr), comment="check K index >= Size L"))
+                shiftK.add(VCmpGTI32(dst=sgpr(tmpSgprX2, self.states.laneSGPRCount), src0=mxK, src1=sgpr(loopCntSgpr), comment="check K index >= Size L"))
                 for bk in range(0, vgprPerInUnroll):
                   mxsbStr_base = self.generateSrcStrForMFMA(kernel, tPB["MX"], innerUnroll, vregSetIdx, vgprPerInputMXSB, m, u, iui, mxsb, bk=bk)
                   mxsbStr = vgpr(mxsbStr_base, 1)
@@ -11715,8 +11674,7 @@ class KernelWriterAssembly(KernelWriter):
 
     # Enable local write if not DTL or using nonDTL loads in tail loop
     if (not kernel["DirectToLds%s"%tc]) or \
-       (((tP["isA"] and kernel["NonDTLTailLoopA"]) or \
-        (tP["isB"] and kernel["NonDTLTailLoopB"])) and self.states.inTailLoop):
+       ((tc in ("A","B","MXSA","MXSB") and kernel["NonDTLTailLoop%s"%tc]) and self.states.inTailLoop):
       # Skip local write if DTVA or DTVB
       if not ((tP["isA"] or tP["isB"]) and kernel["DirectToVgpr%s"%tc]):
         localWriteBody(tP)

@@ -26,6 +26,8 @@
 
 #pragma once
 
+#include <hipblaslt/hipblaslt.h>
+#include <stdint.h>
 #include <hip/hip_runtime.h>
 
 #include <string_view>

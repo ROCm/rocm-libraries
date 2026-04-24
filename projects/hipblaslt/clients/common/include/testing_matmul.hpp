@@ -2191,6 +2191,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                                   scaleDataType(arg.scaleA),
                                   stride_a[i] / scaleA_row / scaleA_col,
                                   num_batches[i]);
+#endif
         }
         else
         {
@@ -2269,6 +2270,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                                   scaleDataType(arg.scaleB),
                                   stride_b[i] / scaleB_row / scaleB_col,
                                   num_batches[i]);
+#endif
         }
         else
         {

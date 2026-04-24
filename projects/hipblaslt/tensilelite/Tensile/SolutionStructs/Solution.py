@@ -3529,6 +3529,8 @@ class Solution(collections.abc.Mapping):
     if state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"]:
       if state["DirectToLdsA"] != state["DirectToLdsMXSA"] or state["DirectToLdsB"] != state["DirectToLdsMXSB"]:
           reject(state, printRejectionReason, "DirectToLdsA/B and DirectToLdsMXSA/B should match")
+      if state["DirectToLdsA"] != state["DirectToLdsB"]:
+          reject(state, printRejectionReason, "DirectToLdsA and DirectToLdsB should match")
 
     # does not work with UnrollLoopSwapGlobalReadOrder
     if (state["DirectToLds"] == 2 or state["DirectToLds"] == 3) and state["UnrollLoopSwapGlobalReadOrder"]:

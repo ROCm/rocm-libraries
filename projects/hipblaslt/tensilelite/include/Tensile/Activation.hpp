@@ -27,6 +27,7 @@
 #pragma once
 
 #include <complex>
+#include <cstdint>
 #include <cstdlib>
 #include <iostream>
 #include <map>

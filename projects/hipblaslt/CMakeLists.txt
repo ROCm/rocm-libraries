@@ -261,6 +261,42 @@ endif()
 
 add_subdirectory(tensilelite)
 
+if(TENSILELITE_ENABLE_CLIENT AND NOT HIPBLASLT_ENABLE_HOST)
+    set(_hipblaslt_gen_include_dir "${CMAKE_CURRENT_BINARY_DIR}/library/include")
+
+    configure_file(
+        "${CMAKE_CURRENT_SOURCE_DIR}/library/include/hipblaslt-version.h.in"
+        "${_hipblaslt_gen_include_dir}/hipblaslt/hipblaslt-version.h"
+    )
+
+    file(WRITE "${_hipblaslt_gen_include_dir}/hipblaslt/hipblaslt-export.h" [=[
+#ifndef HIPBLASLT_EXPORT_H
+#define HIPBLASLT_EXPORT_H
+
+#ifndef HIPBLASLT_EXPORT
+#  define HIPBLASLT_EXPORT __attribute__((visibility("default")))
+#endif
+
+#ifndef HIPBLASLT_NO_EXPORT
+#  define HIPBLASLT_NO_EXPORT __attribute__((visibility("hidden")))
+#endif
+
+#ifndef HIPBLASLT_DEPRECATED
+#  define HIPBLASLT_DEPRECATED __attribute__((__deprecated__))
+#endif
+
+#ifndef HIPBLASLT_DEPRECATED_EXPORT
+#  define HIPBLASLT_DEPRECATED_EXPORT HIPBLASLT_EXPORT HIPBLASLT_DEPRECATED
+#endif
+
+#ifndef HIPBLASLT_DEPRECATED_NO_EXPORT
+#  define HIPBLASLT_DEPRECATED_NO_EXPORT HIPBLASLT_NO_EXPORT HIPBLASLT_DEPRECATED
+#endif
+
+#endif /* HIPBLASLT_EXPORT_H */
+]=])
+endif()
+
 if(HIPBLASLT_ENABLE_HOST)
     if(HIPBLASLT_BUILD_SHARED_LIBS)
         add_library(hipblaslt SHARED)

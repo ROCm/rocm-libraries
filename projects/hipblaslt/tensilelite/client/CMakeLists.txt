@@ -33,7 +33,11 @@ endif()
 foreach(target tensilelite-client cpu-gemm-driver)
     target_link_libraries(${target} PRIVATE ${COMMON_CLIENT_LIBS})
 
-    target_include_directories(${target} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
+    target_include_directories(${target} BEFORE PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../library/include"
+        "${PROJECT_BINARY_DIR}/library/include"
+        "${CMAKE_CURRENT_SOURCE_DIR}/include"
+    )
     target_compile_definitions(${target} PRIVATE TENSILE_DEFAULT_SERIALIZATION)
 
     set_target_properties(${target} PROPERTIES

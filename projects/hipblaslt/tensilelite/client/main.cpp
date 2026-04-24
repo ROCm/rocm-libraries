@@ -61,6 +61,7 @@
 #include "Profiler.hpp"
 #endif
 
+#include <algorithm>
 #include <chrono>
 #include <cstddef>
 #include <fstream>
@@ -1080,7 +1081,7 @@ int main(int argc, const char* argv[])
                 size_t warmupInvocations    = listeners.numWarmupRuns();
                 size_t syncs                = listeners.numSyncs();
                 size_t enq                  = listeners.numEnqueuesPerSync();
-                size_t maxRotatingBufferNum = max(warmupInvocations, syncs * enq);
+                size_t maxRotatingBufferNum = std::max(warmupInvocations, syncs * enq);
 
                 std::vector<std::shared_ptr<ProblemInputs>> inputArr;
                 {

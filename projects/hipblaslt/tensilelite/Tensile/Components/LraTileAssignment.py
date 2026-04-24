@@ -763,19 +763,25 @@ class LraTileAssignmentMFMA(LraTileAssignment):
         if enableLDSTr:
            sReg = writer.vgprPool.checkOut(1,"sReg") # remainder
 
-        noUnrollOffset = writer.states.asmCaps["HasWMMA_V1"] or ("MXS" in tP["tensorChar"])
-        # workaround for gfx950
-        # force noUnrollOffset=False for MX
-        if kernel["ISA"][:2] == (9, 5):
-            noUnrollOffset = False
-
         # get constant parameter
         tc        = tP["tensorChar"]
         tile01    = tP["tile01Idx"]
         waveWidth = writer.states.kernel["WavefrontSize"]
 
+        noUnrollOffset = writer.states.asmCaps["HasWMMA_V1"] or ("MXS" in tc)
+        isgfx950 = kernel["ISA"][:2] == (9, 5)
+        isgfx950mx = isgfx950 and ("MXS" in tc)
+        # workaround for gfx950
+        # force noUnrollOffset=False for MX
+        if isgfx950:
+            noUnrollOffset = False
+
         lrvw             = kernel["LocalReadVectorWidthMXS"] if ("MXS" in tc) else kernel[f"LocalReadVectorWidth{tc}"]
         inputPerThread   = lrvw if not writer.states.inTailLoop else kernel["MIInputPerThread%s"%tc]
+        # workaround for gfx950 + fp4
+        # use MIInputPerThread if lrvw < MIInputPerThread
+        if isgfx950 and tP["bpeDS"] == 0.5 and lrvw < kernel["MIInputPerThread%s"%tc]:
+            inputPerThread = kernel["MIInputPerThread%s"%tc]
         if kernel["ProblemType"]["Sparse"]:
           if (kernel["ProblemType"]["Sparse"] == 2 and tP["isB"]) or (kernel["ProblemType"]["Sparse"] == 1 and tP["isA"]):
             inputPerThread = inputPerThread // 2
@@ -842,7 +848,7 @@ class LraTileAssignmentMFMA(LraTileAssignment):
             if writer.states.asmCaps["HasSWMMAC"] and writer.states.asmCaps["HasSWMMAC_gfx1250"] and (not isSparseTrack or tP["isM"]):
                 strideK *= 2
         # special case for new F8 MFMA, need to exclude wmma_v3
-        elif kernel["ProblemType"]["DataType"].is8bitFloat() and kernel["MatrixInstK"] > 32 and (not writer.states.asmCaps["HasWMMA_V3"]):
+        elif kernel["ProblemType"]["DataType"].is8bitFloat() and kernel["MatrixInstK"] > 32 and (not writer.states.asmCaps["HasWMMA_V3"]) and (not isgfx950mx):
             if umlds:
                 strideK = 16
             else:

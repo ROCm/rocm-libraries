@@ -131,8 +131,13 @@ namespace TensileLite
                 }
             }
 
-            m_tensorTypes[ContractionProblemGemm::TENSOR::MXSA] = rocisa::DataType::MXScale;
-            m_tensorTypes[ContractionProblemGemm::TENSOR::MXSB] = rocisa::DataType::MXScale;
+            // MX scale element types: use dedicated options (see main.cpp mx-a-type / mx-b-type).
+            // Do not rely on the generic tensor loop alone — args.count("mx-a-type") is often false
+            // when the value only comes from program_options default_value or from the INI merge.
+            m_tensorTypes[ContractionProblemGemm::TENSOR::MXSA]
+                = args["mx-a-type"].as<rocisa::DataType>();
+            m_tensorTypes[ContractionProblemGemm::TENSOR::MXSB]
+                = args["mx-b-type"].as<rocisa::DataType>();
 
             // Get constant types
             for(size_t i = 0; i < constants.size(); i++)

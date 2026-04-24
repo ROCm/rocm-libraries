@@ -391,7 +391,7 @@ namespace TensileLite
 
                 // and nearest K
                 double K = p1.size() > 3 ? p1[3] : p1[2];
-                distance = abs(K - gridK);
+                distance = std::abs(K - gridK);
 
                 return distance;
             }
